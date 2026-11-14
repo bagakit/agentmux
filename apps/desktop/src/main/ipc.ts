@@ -276,7 +276,8 @@ import { executeSettingsResourcesControl } from './settings-resources-control.js
 import { executeSettingsBrowserControl, forgetBrowserAppLink } from './settings-browser-control.js'
 import { executeBrowserProfileControl, isBrowserProfileControlRequest } from './browser-profile-control.js'
 import { createBrowserProfileNetworkControl } from './browser-profile-network-control.js'
-import { APP_LINK_SCHEME_CHOICES, BROWSER_FIND_MAX_LENGTH, CONFIG_CHANGED_CHANNEL, type AppLinkSchemeChoice } from '../shared/contracts.js'
+import { APP_LINK_SCHEME_CHOICES, BROWSER_FIND_MAX_LENGTH, CONFIG_CHANGED_CHANNEL, type AppLinkSchemeChoice, type BrowserZoomStep } from '../shared/contracts.js'
+import { stepInterfaceZoom, type ZoomCommands } from './zoom-commands.js'
 import { DesktopControlIpcBridge } from './control-ipc-bridge.js'
 import { normalizeExternalUrl } from './external-url.js'
 import { assertAppDocumentSender, isAppDocumentSender } from './ipc-sender-trust.js'
@@ -337,6 +338,7 @@ export async function registerIpc(args: {
   webLinks?: WebUrlIngress
   webFiles?: WebFileIngress
   spatialLinks?: SpatialLinkIngress
+  zoomCommands?: ZoomCommands
   performanceScene?: PerformanceSceneOwner
   appMemory?: import('./app-memory-evidence.js').AppMemoryEvidenceOwner
   performanceHeap?: RendererHeapSnapshotOwner
@@ -1640,6 +1642,10 @@ export async function registerIpc(args: {
     app.dock.setBadge(count === 0 ? '' : String(count))
     return true
   })
+  handle('ui:zoomInterface', (step: unknown, scope?: import('../shared/workbench-windows.js').WorkbenchWindowDocument) => {
+    if (step !== 'in' && step !== 'out' && step !== 'reset') throw new TypeError('Interface zoom needs a step: in, out or reset.')
+    stepInterfaceZoom(args.workbenchWindows.windowForDocument(scope).webContents, step)
+  })
   handle('providers:list', async (options?: { observation: true }) => {
     if (options === undefined) return await args.runtime.providerCatalog()
     if (!options || options.observation !== true || Object.keys(options).some(key => key !== 'observation')) {
@@ -2098,6 +2104,19 @@ export async function registerIpc(args: {
     const capsuleId = browsers.capsuleId(id)
     return capsuleId ? await browsers.reloadCapsule(id, await capsuleClient.call('capsule.inspect', { capsuleId }))
       : await browsers.reload(id)
+  })
+  handle('browser:zoom', (id: unknown, step: unknown) => {
+    if (typeof id !== 'string' || !id) throw new TypeError('Browser zoom needs one Browser id.')
+    return browsers.zoom(id, step as BrowserZoomStep)
+  })
+  const detachZoomCommands = args.zoomCommands?.attach({
+    browserIdFor: page => browsers.browserIdForContents(page),
+    zoomBrowser: (browserId, step) => { browsers.zoom(browserId, step) },
+    isWorkbench: page => {
+      const window = BrowserWindow.fromWebContents(page)
+      return window?.webContents === page && args.workbenchWindows.documentForWindow(window) !== null
+    },
+    workbench: contents
   })
   handle('browser:findInPage', async (id: unknown, text: unknown, request: unknown) => {
     const forward = request && typeof request === 'object' ? Reflect.get(request, 'forward') : undefined
@@ -2649,6 +2668,7 @@ export async function registerIpc(args: {
     acceptingControl = false
     clearInterval(profileTrashTimer)
     await runOwnerDisposals([
+      { owner: 'zoom-commands', dispose: () => detachZoomCommands?.() },
       { owner: 'app-recordings', dispose: () => appRecordings.dispose() },
       { owner: 'screenshot-shortcut', dispose: () => screenshotShortcut.dispose() },
       { owner: 'browser-profile-contents', dispose: () => { app.off('web-contents-created', observeProfileContents); app.off('login', answerProfileProxy); disposeProfileProxyAuthSync() } },

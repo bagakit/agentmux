@@ -54,6 +54,7 @@ import type {
   BrowserPresentationViewportPoint, BrowserPresentationMouseModifier, BrowserPageKeyEvent
 } from '../shared/contracts.js'
 import { browserPageShortcut } from '../shared/browser-page-shortcuts.js'
+import { DEFAULT_BROWSER_ZOOM_FACTOR, steppedBrowserZoom } from '../shared/browser-zoom.js'
 import type { AgentMuxControlErrorCode } from '@agentmux/core/control'
 import type { BrowserOperation, BrowserOperationStep, BrowserReplayPlan, BrowserReplayStep } from '@agentmux/browser/model/browser-operation'
 import { normalizeBrowserBounds } from '../shared/browser-bounds.js'
@@ -424,16 +425,6 @@ export interface AppLinkHost {
   openExternal(target: string): void | Promise<void>
 }
 
-export const DEFAULT_BROWSER_ZOOM_FACTOR = 0.9
-/** Chromium's preset page zoom factors, which a common browser's Zoom In and Zoom Out step through. */
-const BROWSER_ZOOM_PRESETS = [0.25, 1 / 3, 0.5, 2 / 3, 0.75, 0.8, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2, 2.5, 3, 4, 5]
-
-/** The next preset beyond the applied zoom, or the product default on reset; either end of the presets stays put. */
-export function steppedBrowserZoom(current: number, step: BrowserZoomStep): number {
-  if (step === 'reset') return DEFAULT_BROWSER_ZOOM_FACTOR
-  const levels = step === 'in' ? BROWSER_ZOOM_PRESETS : [...BROWSER_ZOOM_PRESETS].reverse()
-  return levels.find(level => step === 'in' ? level > current + 0.001 : level < current - 0.001) ?? current
-}
 export interface NativeBrowserOwner { browserId: string; bounds: BrowserBounds; view: WebContentsView; inputShield?: WebContentsView }
 export interface NativeBrowserInputBarrier { ready: Promise<void>; release(): Promise<void> }
 type NativeBrowserInputSurface = {
@@ -725,6 +716,7 @@ export class BrowserViewManager {
   private readonly inputSurfaceCleanup = new Map<string, Set<NativeBrowserInputSurface>>()
   /** Native-handle index only; entries and its exact current view remain the sole owner facts. */
   private readonly entriesByContents = new WeakMap<WebContents, BrowserEntry>()
+  private readonly inputSurfacesByContents = new WeakMap<WebContents, NativeBrowserInputSurface>()
   /** Actual native handles awaiting destruction, grouped by their original Browser identity. */
   private readonly closingViews = new Map<string, Map<WebContentsView, ClosingBrowserView>>()
 
@@ -2578,10 +2570,20 @@ export class BrowserViewManager {
    */
   zoom(id: string, step: BrowserZoomStep): BrowserSnapshot {
     if (step !== 'in' && step !== 'out' && step !== 'reset') throw new Error('Unknown Browser zoom step')
-    const entry = this.require(id), contents = entry.view.webContents
+    const entry = this.entries.get(id)
+    if (!entry) throw new Error('This page is not open, so its zoom is unchanged.')
+    const contents = entry.view.webContents
     contents.setZoomFactor(steppedBrowserZoom(contents.getZoomFactor(), step))
     for (const page of this.entries.values()) if (page.zoomFactor !== undefined) this.observeZoom(page)
     return this.snapshot(entry)
+  }
+
+  /** The Browser showing this page now; a page being replaced or already released belongs to none. */
+  browserIdForContents(contents: WebContents): string | null {
+    const surface = this.inputSurfacesByContents.get(contents)
+    if (surface) return this.owns(surface.entry, surface.page) && this.inputSurfaces.get(surface.page) === surface ? surface.entry.id : null
+    const entry = this.entriesByContents.get(contents)
+    return entry && this.owns(entry, entry.view) && entry.view.webContents === contents ? entry.id : null
   }
 
   /** Publishes a changed zoom of this page's site and refits its fixed viewport; called once Chromium has applied it. */
@@ -5588,8 +5590,10 @@ export class BrowserViewManager {
       })
     surface.shield = shield
     this.inputSurfaces.set(page, surface)
+    this.inputSurfacesByContents.set(shield.contents, surface)
     const pageDestroyed = (): void => this.inputSurfaceFailed(surface)
     shield.contents.once('destroyed', () => queueMicrotask(() => {
+      this.inputSurfacesByContents.delete(shield.contents)
       if (!source.isDestroyed()) source.off('destroyed', pageDestroyed)
       const retained = this.forgetInputSurfaceCleanup(surface)
       const retired = this.releasedEntries.get(entry.id)

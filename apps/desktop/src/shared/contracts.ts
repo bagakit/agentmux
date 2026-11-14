@@ -1524,6 +1524,9 @@ export const BROWSER_PRESENTATION_EVENT_CHANNEL = 'agentmux:browser-presentation
  */
 export type BrowserPageKeyEvent = { browserId: string; leaseId: string | null; action: BrowserPageShortcutAction }
 export const BROWSER_PAGE_KEY_CHANNEL = 'agentmux:browser-page-key'
+/** Main -> the workbench renderer: a View menu zoom step while one of its windows had focus. */
+export const ZOOM_COMMAND_CHANNEL = 'agentmux:zoom-command'
+export type ZoomCommand = { kind: 'step'; step: BrowserZoomStep } | { kind: 'failed'; message: string }
 
 export const WINDOW_RESIZE_EVENT_CHANNEL = 'agentmux:window-resize'
 /** Main -> renderer: the user clicked a notification about this Agent Session. */
@@ -1899,6 +1902,10 @@ export type AgentMuxDesktopApi = {
      */
     onAgentAttentionActivate(listener: (sessionId: string) => void): () => void
     getZoomFactor(): number
+    /** View menu zoom for a focused workbench window: the Browser whose surface holds focus, or else the interface. */
+    onZoomCommand(listener: (command: ZoomCommand) => void): () => void
+    /** Zoom this workbench window's interface the way Electron's View menu roles did. */
+    zoomInterface(step: BrowserZoomStep, document?: WorkbenchWindowDocument): Promise<void>
     onWindowResize(listener: (event: WindowResizeEvent) => void): () => void
   }
   providers: {
@@ -2054,6 +2061,8 @@ export type AgentMuxDesktopApi = {
     back(id: string): Promise<BrowserSnapshot>
     forward(id: string): Promise<BrowserSnapshot>
     reload(id: string): Promise<BrowserSnapshot>
+    /** A person's reading zoom; Chromium keeps it for the page's site in the Browser's Profile. */
+    zoom(id: string, step: BrowserZoomStep): Promise<BrowserSnapshot>
     findInPage(id: string, text: string, request: BrowserFindInPageRequest): Promise<BrowserFindInPageResult>
     stopFindInPage(id: string, request: { focusPage: boolean }): Promise<void>
     switchProfile(id: string, profileId: string): Promise<BrowserSnapshot>

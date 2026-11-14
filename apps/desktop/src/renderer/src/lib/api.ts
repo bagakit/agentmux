@@ -38,6 +38,7 @@ import type {
 } from '../../../shared/contracts'
 import { CONFIG_VERSION } from '../../../shared/contracts'
 import { cloneBrowserViewport, isBrowserViewport } from '../../../shared/browser-viewport'
+import { DEFAULT_BROWSER_ZOOM_FACTOR, steppedBrowserZoom } from '../../../shared/browser-zoom'
 import { applyConfigEdit } from '../../../shared/config-edit'
 import type { AgentCatalogEntry, AgentSessionHistoryDescriptor } from '@agentmux/core'
 import type { DesktopControlRequest, DesktopControlResult } from '../../../shared/contracts'
@@ -980,6 +981,9 @@ const mockApi: AgentMuxDesktopApi = {
     // Nothing can raise one here, so nothing can be clicked; the unsubscribe is still real.
     onAgentAttentionActivate: () => () => {},
     getZoomFactor: () => 1,
+    // A web preview has no View menu, so no zoom command arrives; the hosting browser zooms the preview itself.
+    onZoomCommand: () => () => {},
+    zoomInterface: async () => { throw new Error('Interface zoom requires the Desktop host; the hosting browser zooms this preview.') },
     onWindowResize(listener) {
       windowResizeListeners.add(listener)
       return () => windowResizeListeners.delete(listener)
@@ -1432,6 +1436,13 @@ const mockApi: AgentMuxDesktopApi = {
     reload: async (id) => {
       const browser = { ...requireMockBrowser(id), navigationId: mintObjectId() }
       mockBrowsers.set(id, browser)
+      return structuredClone(browser)
+    },
+    zoom: async (id, step) => {
+      const current = requireMockBrowser(id)
+      const browser = { ...current, zoomFactor: steppedBrowserZoom(current.zoomFactor ?? DEFAULT_BROWSER_ZOOM_FACTOR, step) }
+      mockBrowsers.set(id, browser)
+      browserListeners.forEach((listener) => listener({ type: 'updated', browser: structuredClone(browser) }))
       return structuredClone(browser)
     },
     findInPage: async (id) => ({ status: 'found', navigationId: requireMockBrowser(id).navigationId, activeMatchOrdinal: 0, matches: 0 }),

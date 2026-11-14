@@ -1,4 +1,12 @@
 import type { MenuItemConstructorOptions } from 'electron'
+import type { BrowserZoomStep } from '../shared/contracts.js'
+
+export interface ApplicationMenuActions {
+  /** View 菜单的缩放；作用于哪个页面或界面，由调用方按当前焦点决定。 */
+  zoom(step: BrowserZoomStep): void
+  rollbackFrontend?: () => void
+  recoverInterface?: () => void
+}
 
 /**
  * 应用菜单模板——纯函数，不碰 Electron 运行时（测试环境跑不起 app/Menu）。index.ts 只做
@@ -23,7 +31,7 @@ import type { MenuItemConstructorOptions } from 'electron'
  * TerminalView 的粘贴注释——渲染层故意不接管 Cmd/Ctrl+V，靠原生 Paste 落到 xterm 的 textarea）。删掉
  * Edit 菜单，终端就粘贴不了。所以只保留 appMenu / editMenu 这两段不含危险加速键的整段 role，其余手搭。
  */
-export function applicationMenuTemplate(isMac: boolean, rollbackFrontend?: () => void, recoverInterface?: () => void): MenuItemConstructorOptions[] {
+export function applicationMenuTemplate(isMac: boolean, { zoom, rollbackFrontend, recoverInterface }: ApplicationMenuActions): MenuItemConstructorOptions[] {
   const template: MenuItemConstructorOptions[] = []
   // appMenu 自带 Quit（Cmd+Q），不含 Cmd+W；mac 上有了它就不需要单独的 File 菜单——默认 File 菜单在
   // mac 上几乎只剩「Close Window」这一个 Cmd+W 项，正是要避开的东西，干脆整段不要。
@@ -39,9 +47,12 @@ export function applicationMenuTemplate(isMac: boolean, rollbackFrontend?: () =>
   template.push({
     label: 'View',
     submenu: [
-      { role: 'resetZoom' },
-      { role: 'zoomIn' },
-      { role: 'zoomOut' },
+      // 缩放不用 role：role 直接按半级缩放聚焦的 webContents，Browser 页面会绕开产品的预设档位，
+      // Actual Size 也会回到 100% 而不是页面默认的 90%。Cmd+= 是 Zoom In 的隐藏别名——Plus 要按 Shift。
+      { label: 'Actual Size', accelerator: 'CommandOrControl+0', click: () => zoom('reset') },
+      { label: 'Zoom In', accelerator: 'CommandOrControl+Plus', click: () => zoom('in') },
+      { label: 'Zoom In', accelerator: 'CommandOrControl+=', visible: false, acceleratorWorksWhenHidden: true, click: () => zoom('in') },
+      { label: 'Zoom Out', accelerator: 'CommandOrControl+-', click: () => zoom('out') },
       { type: 'separator' },
       { role: 'togglefullscreen' },
       { role: 'toggleDevTools' },

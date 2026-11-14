@@ -12,12 +12,13 @@ import { RendererUpdates } from './renderer-updates.js'
 import { readFile, rename, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { homedir } from 'node:os'
-import { app, BrowserWindow, crashReporter, dialog, Menu, nativeTheme, shell } from 'electron'
+import { app, BrowserWindow, crashReporter, dialog, Menu, nativeTheme, shell, webContents } from 'electron'
 import { resolveTheme } from '@agentmux/client-ui/theme'
 import { AgentMuxFileAgentSessionStore, prepareProcessEnvironmentFromLoginShell, loginShellEnvironmentWarning } from '@agentmux/core'
 import { AgentMuxSpatialStateStore } from '@agentmux/core/spatial-state'
 import { WorkbenchUserStateStore } from './workbench-user-state.js'
 import { applicationMenuTemplate } from './application-menu.js'
+import { ZoomCommands } from './zoom-commands.js'
 import { installTextEditContextMenu } from './text-edit-context-menu.js'
 import { isScratchWorkspaceId } from '../shared/contracts.js'
 import { desktopAgentSessionStorePath } from './agent-session-store-path.js'
@@ -132,6 +133,7 @@ function startPrimaryInstance(): void {
   let workbenchWindow: BrowserWindow | null = null
   let workbenchWindows: WorkbenchWindows | null = null
   let recoverInterface: (() => Promise<void>) | null = null
+  const zoomCommands = new ZoomCommands()
   // Every window entry point shares this read, including a second launch during startup.
   let environmentWarning: string | undefined = 'Shell environment is loading. New Agents and terminals wait for complete exports; existing sessions remain available.'
   const environmentReady = prepareProcessEnvironmentFromLoginShell().then((result) => {
@@ -283,7 +285,7 @@ function startPrimaryInstance(): void {
     })
     window.once('closed', () => startupCapture.dispose())
     reportStartupStage('before-ipc')
-    disposeIpc = await registerIpc({ window, appDocumentSources: () => appDocuments.read(), workbenchWindows: windows, configStore, initialConfig, runtime, applicationAccess, workbenchUserState, scratchTopics, workspaceFiles, spatialLinks, webLinks, webFiles,
+    disposeIpc = await registerIpc({ window, appDocumentSources: () => appDocuments.read(), workbenchWindows: windows, configStore, initialConfig, runtime, applicationAccess, workbenchUserState, scratchTopics, workspaceFiles, spatialLinks, webLinks, webFiles, zoomCommands,
       performanceScene, appMemory, performanceHeap, clientIncidents, loadedPackage: packageIdentity, loadedRenderer: () => rendererUpdates?.loadedRenderer() ?? null,
       onRendererStartupFailure: failure => startupCapture.recordRenderer(failure),
       onRendererUpdateReady: (token) => { if (updateReady?.token === token) { startupCapture.ready(token); updateReady.resolve() } }, environmentWarning: () => environmentWarning })
@@ -520,7 +522,11 @@ function startPrimaryInstance(): void {
     // 主键位（原生加速键在按键进渲染进程前就被 AppKit 处理，渲染层 preventDefault 拦不住）。这份模板
     // 不含任何绑 Cmd+W 的 role，同时保留 Edit 菜单——终端粘贴走的是原生 Paste role。菜单是应用级、
     // 全窗口共享的，建窗前设一次即可。
-    Menu.setApplicationMenu(Menu.buildFromTemplate(applicationMenuTemplate(process.platform === 'darwin', () => { void rendererUpdates?.rollback().catch((error) => dialog.showErrorBox('Frontend rollback', String(error))) }, () => { void recoverInterface?.() })))
+    Menu.setApplicationMenu(Menu.buildFromTemplate(applicationMenuTemplate(process.platform === 'darwin', {
+      zoom: step => zoomCommands.run(step, webContents.getFocusedWebContents()),
+      rollbackFrontend: () => { void rendererUpdates?.rollback().catch((error) => dialog.showErrorBox('Frontend rollback', String(error))) },
+      recoverInterface: () => { void recoverInterface?.() }
+    })))
     await createWindow(appReadyAtMs)
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) void createWindow()

@@ -36,7 +36,8 @@ import {
   SESSION_EVENT_CHANNEL,
   SESSION_HISTORY_OBSERVATION_CHANNEL,
   WINDOW_RESIZE_EVENT_CHANNEL,
-  WORKSPACE_FILE_INVALIDATED_CHANNEL
+  WORKSPACE_FILE_INVALIDATED_CHANNEL,
+  ZOOM_COMMAND_CHANNEL
 } from '../shared/contracts.js'
 import { withStopTimeout, sessionRestartTimeoutError } from '../shared/session-stop-timeout.js'
 import type {
@@ -61,6 +62,7 @@ import type {
   BrowserInputHistoryTarget,
   BrowserInputHistoryScope,
   BrowserViewport,
+  ZoomCommand,
   CreateWorkspacePathInput,
   CreateWorktreeForBranchInput,
   RunFanOutInput,
@@ -533,6 +535,12 @@ const api: AgentMuxPreloadApi = {
       return () => ipcRenderer.off(AGENT_ATTENTION_ACTIVATE_CHANNEL, wrapped)
     },
     getZoomFactor: () => webFrame.getZoomFactor(),
+    onZoomCommand(listener: (command: ZoomCommand) => void) {
+      const wrapped = (_event: Electron.IpcRendererEvent, command: ZoomCommand): void => listener(command)
+      ipcRenderer.on(ZOOM_COMMAND_CHANNEL, wrapped)
+      return () => ipcRenderer.off(ZOOM_COMMAND_CHANNEL, wrapped)
+    },
+    zoomInterface: (step, document) => ipcRenderer.invoke('ui:zoomInterface', step, document),
     onWindowResize(listener: (event: WindowResizeEvent) => void) {
       const wrapped = (_event: Electron.IpcRendererEvent, value: WindowResizeEvent): void => listener(value)
       ipcRenderer.on(WINDOW_RESIZE_EVENT_CHANNEL, wrapped)
@@ -788,6 +796,7 @@ const api: AgentMuxPreloadApi = {
     back: (id: string) => ipcRenderer.invoke('browser:back', id),
     forward: (id: string) => ipcRenderer.invoke('browser:forward', id),
     reload: (id: string) => ipcRenderer.invoke('browser:reload', id),
+    zoom: (id, step) => ipcRenderer.invoke('browser:zoom', id, step),
     findInPage: (id, text, request) => ipcRenderer.invoke('browser:findInPage', id, text, request),
     stopFindInPage: (id, request) => ipcRenderer.invoke('browser:stopFindInPage', id, request),
     switchProfile: (id: string, profileId: string) => ipcRenderer.invoke('browser:switchProfile', id, profileId),

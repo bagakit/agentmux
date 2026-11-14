@@ -8,6 +8,7 @@ import { prepareRendererUpdate, useAppStore } from './store'
 import { agentBookmarks } from './lib/agent-bookmarks'
 import { installScreenshotAttachmentReceiver } from './lib/screenshot-attachment'
 import { api } from './lib/api'
+import { runZoomCommand } from './lib/zoom-command'
 import './styles/index.css'
 
 // Installed before the first render so a failure during startup is reported too. This is the last
@@ -23,6 +24,10 @@ installFileDropGuard(window)
 agentBookmarks.startLifecycle(window)
 installScreenshotAttachmentReceiver(window)
 api.ui.onScreenshotIssue(message => useAppStore.getState().reportError(new Error(message)))
+api.ui.onZoomCommand(command => {
+  if (command.kind === 'failed') useAppStore.getState().reportError(command.message)
+  else void runZoomCommand(command.step).catch(error => useAppStore.getState().reportError(error))
+})
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

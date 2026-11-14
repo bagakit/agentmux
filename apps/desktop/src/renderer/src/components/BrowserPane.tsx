@@ -1408,7 +1408,7 @@ function BrowserPaneContent({
         ) : null}
     </>
     return (
-    <section className={`browser-surface${inSurvey ? ' browser-surface--survey' : ''}`} ref={node => { if (node) traceAnchors.current.set(key, node); else traceAnchors.current.delete(key) }}
+    <section className={`browser-surface${inSurvey ? ' browser-surface--survey' : ''}`} data-browser-surface={tab.browserId} ref={node => { if (node) traceAnchors.current.set(key, node); else traceAnchors.current.delete(key) }}
       onKeyDown={event => {
         const nested = event.defaultPrevented || event.target instanceof Element && surfaceOwnsChord(event.target, event.nativeEvent)
         const action = nested ? null : browserShortcutAction(event.nativeEvent, isMacPlatform())
