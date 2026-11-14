@@ -101,7 +101,7 @@ describe('Cursor provider', () => {
       expect(canonicalHookLifecycleEvent('beforeMCPExecution')).toBeUndefined()
       // 一段回复的收尾不是一轮的收尾——一轮里可以有多段回复，turn-end 由 stop 独占。
       expect(canonicalHookLifecycleEvent('afterAgentResponse')).toBeUndefined()
-      // 装的事件是方言的超集（门与 afterAgentResponse 有 rules 无 canonical 映射）。
+      // 装的事件是方言的超集；afterAgentResponse 只交正文，不授予轮次活动。
       for (const mapped of Object.keys(CURSOR_HOOK_DIALECT)) {
         expect(CURSOR_HOOK_EVENTS).toContain(mapped)
       }
@@ -210,9 +210,9 @@ describe('Cursor provider', () => {
       expect(hook('beforeMCPExecution', { tool_name: 'linear__create_issue' }).semanticState).toBe('working')
     })
 
-    it('afterAgentResponse 把助手正文落进时间轴，但不收尾这一轮', () => {
+    it('afterAgentResponse only contributes its original body, without granting activity or ending the turn', () => {
       const event = hook('afterAgentResponse', { text: 'Done — tests pass.', input_tokens: 10, output_tokens: 4 })
-      expect(event.semanticState).toBe('working')
+      expect(event.semanticState).toBe('unknown')
       expect(event.lifecycleEvent).toBeUndefined()
       const assistant = event.timeline.find(
         (candidate) => candidate.type !== 'update' && candidate.item.kind === 'assistant_message'
