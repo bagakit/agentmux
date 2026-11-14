@@ -3,7 +3,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import { link, lstat, mkdir, readFile, realpath, rm } from 'node:fs/promises'
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path'
 import { isDeepStrictEqual, promisify } from 'node:util'
-import { AgentMuxError, connectAgentMuxRpc, defaultAgentMuxMessageQueuePath, defaultAgentMuxRuntimeDirectory, defaultAgentMuxSpatialStatePath, defaultAgentMuxStateDirectory, durableWriteFile, inspectCompatibleAgentMuxRuntime, probeSocketLiveness, type AgentMuxRuntimeOwnerIdentity } from '@agentmux/core'
+import { AgentMuxError, connectAgentMuxRpc, defaultAgentMuxMessageQueuePath, defaultAgentMuxRuntimeDirectory, defaultAgentMuxSpatialStatePath, defaultAgentMuxStateDirectory, durableWriteFile, inspectCompatibleAgentMuxRuntime, inspectSemanticRuntimeIdentity, probeSocketLiveness, type AgentMuxRuntimeOwnerIdentity } from '@agentmux/core'
 
 const exec = promisify(execFile)
 const wait = (ms: number) => new Promise<void>(yes => setTimeout(yes, ms))
@@ -197,6 +197,8 @@ export async function reloadReplacedMacosHost(service: MacosHostService): Promis
     const native = await inspectCompatibleAgentMuxRuntime(signal)
     if (owner.ctxmux && (!native || owner.ctxmux.instanceId !== native.daemonInstanceId || owner.ctxmux.buildIdentity !== native.buildId))
       throw failure('The original CtxMux Runtime could not be confirmed for the installed App.')
+    if (await inspectSemanticRuntimeIdentity({ stateDirectory: dirname(service.storePath), storePath: service.storePath }) !== runtimeId)
+      throw failure('The replacement cannot yet read the original Runtime identity. The working Host was retained.', 'IDENTITY_SOURCE_MISSING')
     if ((await inspectMacosHostProcess(pid))?.birth !== before.birth || !sameImage(installed, await imageAtPath()))
       throw failure('The original Host or installed App changed while preparing the reload.')
 
