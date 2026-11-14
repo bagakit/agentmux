@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { readFileSync, readdirSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { AGENTMUX_PROTOCOL_CATALOG, AMUX_PROTOCOL_DEFINITIONS, parseAgentMuxMessagePrefix, renderAgentMuxMessageEnvelope } from '../src/agent-message-render.js'
-import { composeOutboundMessage } from '../src/agent-outbound-message.js'
+import { composeAgentPrompt, composeOutboundMessage, formatAmuxTriggerNote } from '../src/agent-outbound-message.js'
 import { DEFAULT_AGENT_CONTINUITY_CONTINUATION } from '../src/agent-session-recovery/continuity-contract.js'
 import { promptReactionMessage, PROMPT_REACTION_STARTERS } from '../src/prompt-reaction.js'
 import { parseAmuxObjectLink } from '../src/sharing.js'
@@ -27,6 +27,25 @@ describe('source-owned amux reading catalog', () => {
     expect(realWire).toContain('&lt;amux:reaction ok /&gt;')
     expect(parseAgentMuxMessagePrefix(realWire)?.protocol).toBeUndefined()
     expect(parseAgentMuxMessagePrefix(realWire)?.body).toBe('\n\n' + original.prompt)
+  })
+
+  it.each(['heartbeat', 'calendar', 'automation'] as const)('keeps a %s declaration apart from the original instruction and any sender it quotes', kind => {
+    const body = renderAgentMuxMessageEnvelope({ messageId: 'example', sender: { kind: 'agent-session', agentSessionId: 'author' }, senderSessionId: 'author', body: '  body\r\n' })
+    const system = formatAmuxTriggerNote(kind, 'Original <source> & receipt.\r\n')
+    const { text, systemContext } = composeAgentPrompt(body, system)
+    expect(systemContext).toBe(system)
+    const raw = `<amux>\n<trigger kind="${kind}"/>\nOriginal &lt;source&gt; &amp; receipt.&#13;\n\n</amux>`
+    expect(text).toBe(raw + '\n\n' + body)
+    expect(parseAgentMuxMessagePrefix(text)).toEqual({ kind: 'content', sourceLabel: '', declaredAgentSessionId: null,
+      declaredTrigger: kind, declaredContexts: [{ raw }], body: '\n\n' + body })
+  })
+
+  it('classifies only the complete registered platform declaration', () => {
+    const human = 'Mote main heartbeat. Continue the calendar automation.'
+    expect(parseAgentMuxMessagePrefix(composeAgentPrompt(human, 'Read the original instructions.').text)?.declaredTrigger).toBeUndefined()
+    for (const header of ['<trigger kind="invented"/>', '<trigger kind="heartbeat" actor="agent"/>', '<trigger kind="calendar"/><trigger kind="automation"/>']) {
+      expect(parseAgentMuxMessagePrefix(`<amux>\n${header}\nOriginal source.\n</amux>\n\n${human}`)).toBeNull()
+    }
   })
 
   it('checks nonempty real source literals for unregistered named formats', () => {
