@@ -6,6 +6,7 @@ import { semanticIconHref, workIconHref, SEMANTIC_ICON_PEN, type SemanticIconPre
 /** CSS and native widgets consume these semantic masks while retaining their original DOM state. */
 const NATIVE_ICON_PROJECTIONS = {
   '--native-checkbox-mask': 'control.checkbox-checked',
+  '--native-checkbox-mixed-mask': 'control.checkbox-mixed',
   '--native-radio-mask': 'control.radio-checked',
   '--native-disclosure-mask': 'navigation.disclosure',
   '--native-select-open-mask': 'control.select-open',

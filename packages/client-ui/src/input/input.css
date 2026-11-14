@@ -7,7 +7,7 @@
 :where(.ui-input-group) { display: flex; align-items: flex-end; gap: 6px; }
 :where(.ui-input)::placeholder { color: var(--text-3); }
 .ui-input:disabled { opacity: .55; cursor: not-allowed; }
-.ui-input:read-only { cursor: default; }
+:is(input, textarea).ui-input[readonly]:enabled { cursor: text; }
 
 /* The same text focus language also applies to native fields not yet using the primitives. */
 input:where(:not([type='checkbox'], [type='radio'], [type='range'], [type='color'], [type='file'], [type='button'], [type='submit'], [type='reset'])):focus-visible,
@@ -22,6 +22,8 @@ select[aria-invalid='true']:focus-visible { outline-color: var(--red-line); }
 .ui-input-group:has(> .ui-input[aria-invalid='true']) { border-color: var(--red-line); }
 .ui-input-group > .ui-input { border: 0; background: transparent; }
 .ui-input-group > .ui-input:focus-visible { outline: none; }
+.ui-input-group:has(> .ui-input:disabled) { opacity: .55; }
+.ui-input-group > .ui-input:disabled { opacity: 1; }
 
 .ui-input--compact-editor {
   display: block; width: 100%; min-height: calc(2lh + 2 * var(--sp-4) + 2px);
@@ -70,6 +72,8 @@ select[aria-invalid='true']:focus-visible { outline-color: var(--red-line); }
   .ui-input--compact-editor:focus { outline-color: Highlight; }
   .ui-input:focus-visible, .ui-input-group:focus-within { border-color: Highlight; }
   .ui-input-group > .ui-input:focus-visible { border: 0; outline: none; }
+  .ui-input-group:has(> .ui-input:disabled) { border-color: GrayText; opacity: 1; }
+  .ui-input:disabled { color: GrayText; opacity: 1; }
   .ui-input-group--prompt:focus-within { border-color: Highlight; }
   .ui-input-group--prompt > button:disabled { color: GrayText; }
 }
