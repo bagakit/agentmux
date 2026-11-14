@@ -1,4 +1,4 @@
-import { AgentMuxError } from '@agentmux/core'
+import { AgentMuxError } from '@agentmux/core/control'
 import { isAbsolute } from 'node:path'
 import { isMoteAvatarSeriesChoice } from '@agentmux/core/mote-avatar-series'
 import { parseMoteAvatarTarget, type MoteAvatarTarget, type MoteAvatarRead } from '@agentmux/core/mote-avatar-write'

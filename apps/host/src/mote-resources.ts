@@ -8,7 +8,8 @@ import { createHash } from 'node:crypto'
 import { basename, dirname, isAbsolute, join, sep } from 'node:path'
 import { ensureScratchStorageRoot, resolveScratchTopicDirectory, scratchDirectoryAddress, scratchDirectoryIdentity, scratchStorageTopicIds, scratchIdentityContext, scratchConfirmedDirectoryPaths, type ScratchStorageIds } from './mote-directories.js'
 import { DirectoryIdentityUpgradeRequiredError, normalizeDirectoryIdentity, retainDirectoryIdentity, inspectDirectoryIdentity, moteDirectoryName, type DirectoryIdentityWriteOptions } from './mote-directory-identity.mjs'
-import { AgentMuxError, type AgentProviderId, type AgentExecutorConfig } from '@agentmux/core'
+import { AgentMuxError } from '@agentmux/core/control'
+import type { AgentProviderId, AgentExecutorConfig } from '@agentmux/core'
 import { OrdinaryWorkspaceFiles, revisionFor } from './ordinary-files.js'
 export type ScratchWorkspace = { id: string; hostId: string; path: string }
 type WorkspaceRecord = ScratchWorkspace
