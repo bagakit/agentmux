@@ -11,8 +11,11 @@ const require = createRequire(import.meta.url)
 const only = process.argv.find(arg => arg.startsWith('--only='))?.slice(7)
 const annotationEditor = only === 'annotation-editor'
 const brokenField = process.argv.includes('--break-annotation-field-description')
+const forcedBlankLine = process.argv.includes('--force-queued-editor-blank-line')
 assert.ok(!brokenField || annotationEditor)
+assert.ok(!forcedBlankLine || only === 'queued-editor')
 const annotationSource = 'apps/desktop/src/renderer/src/components/ConversationAnnotationNote.tsx'
+const queueStyles = 'packages/client-ui/src/styles/composer.css'
 let appliedMutation = false
 const fixture = join(desktop, 'scripts/fixtures', annotationEditor ? 'conversation-annotation-note' : 'message-delivery-diagnostics')
 const requestedEvidence = process.argv.find(arg => arg.startsWith('--evidence='))?.slice(11)
@@ -24,6 +27,19 @@ try {
   await mkdir(directory, { recursive: true })
   await build({ configFile: false, root: fixture, base: './', logLevel: 'error', worker: { format: 'es' }, resolve: { alias: aliases },
     define: { __AGENTMUX_WEB_PREVIEW__: 'true', 'process.env.NODE_ENV': '"production"' }, esbuild: { jsx: 'automatic' },
+    ...(forcedBlankLine ? { css: { postcss: { plugins: [{
+      postcssPlugin: 'force-original-queued-editor-blank-line',
+      Once(styles) {
+        styles.walkRules('.composer-queued-editor > .ui-input--compact-editor', rule => {
+          assert.equal(rule.source.input.file, join(root, queueStyles))
+          rule.walkDecls('min-height', declaration => {
+            assert.equal(declaration.value, 'calc(1lh + 2 * var(--sp-2) + 2px)')
+            declaration.value = 'calc(2lh + 2 * var(--sp-2) + 2px)'
+            appliedMutation = true
+          })
+        })
+      }
+    }] } } } : {}),
     plugins: [{ name: 'actual-source-identities', enforce: 'pre', transform(source, id) {
       if (brokenField && id === join(root, annotationSource)) {
         const before = '<ComposerTextarea {...field} variant="compact"'
@@ -47,10 +63,14 @@ try {
   await writeFile(join(directory, 'process.log'), lines.join('\n'))
   const receipt = JSON.parse(await readFile(join(directory, 'render.json'), 'utf8'))
   assert.equal(outcome.exitConfirmed, true)
-  if (brokenField) {
+  if (brokenField || forcedBlankLine) {
     assert.equal(appliedMutation, true)
     assert.equal(outcome.exitCode, 1)
-    assert.match(receipt.failure?.message, /Original annotation field must describe its help/)
+    assert.equal(receipt.failure?.name, 'AssertionError')
+    assert.match(receipt.failure.message, forcedBlankLine ? /The short queued draft must not reserve a blank text line/ : /Original annotation field must describe its help/)
+    if (forcedBlankLine) await writeFile(join(directory, 'mutation.json'), JSON.stringify({
+      source: queueStyles, sourceSha256: inputs[queueStyles], changed: 'The original queued field minimum was changed from one to two lines.', assertion: receipt.failure.message
+    }, null, 2))
     console.log(directory)
   } else {
     assert.equal(outcome.exitCode, 0, JSON.stringify(receipt.failure)); assert.equal(receipt.passed, true)

@@ -48,12 +48,15 @@ async function queuedEditorScene(width, appearance) {
   await painted()
   const geometry = await evaluate(`(()=>{const c=${card},e=${editor},f=${field},s=${save};
     const rect=node=>node.getBoundingClientRect().toJSON()
+    const ink=getComputedStyle(f)
     const parts=[${copy},${cancel},s]
     return {card:rect(c),owner:rect(${surface}),field:rect(f),footer:rect(e.querySelector('.composer-edit-footer')),
       title:e.querySelector('label').textContent, focus:f===document.activeElement, scrolls:f.scrollHeight>f.clientHeight,
       fullButtons:parts.every(button=>{const r=rect(button);return button.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2))}),
       copy:rect(parts[0]),cancel:rect(parts[1]),save:rect(s),terminal:rect(${terminal}),sameTerminal:window.queuedEditorFixtureTerminal===${terminal},
-      cardBorder:getComputedStyle(c).borderTopColor,fieldOutline:getComputedStyle(f).outlineColor}})()`)
+      cardBorder:getComputedStyle(c).borderTopColor,fieldOutline:ink.outlineColor,
+      textLine:parseFloat(ink.lineHeight), fieldPadding:parseFloat(ink.paddingBlockStart),
+      spareSpace:f.clientHeight-Math.ceil(parseFloat(ink.lineHeight)+parseFloat(ink.paddingBlockStart)+parseFloat(ink.paddingBlockEnd))}})()`)
   assert.equal(geometry.title, '编辑待发消息')
   assert.ok(geometry.focus && geometry.fullButtons && geometry.sameTerminal)
   assert.ok(geometry.field.width >= Math.min(geometry.owner.width, 360) - 56, 'The real editor gives the message a full-width field')
@@ -61,6 +64,8 @@ async function queuedEditorScene(width, appearance) {
   assert.ok(geometry.field.bottom < geometry.footer.top && geometry.copy.right < geometry.cancel.x && geometry.cancel.right <= geometry.save.x)
   assert.ok(Math.abs(geometry.footer.right - geometry.save.right) < 2, 'The shared footer aligns the primary action on its right edge')
   assert.notEqual(geometry.cardBorder, geometry.fieldOutline, 'The card does not repeat the focused field outline')
+  if (!long) assert.ok(geometry.spareSpace <= 2, 'The short queued draft must not reserve a blank text line')
+  assert.ok(geometry.fieldPadding <= 4, 'The queued editor keeps a compact text inset')
   assert.equal(geometry.scrolls, long)
   assert.deepEqual(geometry.terminal, before.terminal)
   await capture(width, `queued-editor-${appearance}`)
@@ -85,12 +90,13 @@ async function queuedEditorScene(width, appearance) {
     await click(save)
     await waitFor(`${editor}.querySelector('[role=alert]')`)
     assert.equal(await evaluate(`${field}.value`), edited, 'A stale save preserves the edited text')
+    await painted()
     assert.ok(await evaluate(`(()=>{
-      const overlay=${floating}, list=overlay.querySelector('.composer-pending__cards')
-      const notice=list.querySelector('.composer-pending__notice'), viewport=list.getBoundingClientRect()
-      const rect=notice?.getBoundingClientRect()
-      return rect && rect.top>=viewport.top-1 && ${save}.getBoundingClientRect().bottom<=viewport.bottom+1
-    })()`), 'The existing notice and Save are fully in view when the Region has room for both')
+      const list=${floating}.querySelector('.composer-pending__cards'), viewport=list.getBoundingClientRect()
+      const feedback=${editor}.querySelector('[role=alert]').parentElement, rect=feedback.getBoundingClientRect()
+      return rect.top>=viewport.top-1 && ${save}.getBoundingClientRect().bottom<=viewport.bottom+1 &&
+        feedback.scrollHeight<=feedback.clientHeight+1
+    })()`), 'The original conflict and Save remain fully readable and visible at the narrow width')
     await capture(width, 'queued-editor-conflict')
     await key('Escape', 'Escape', 27)
     await waitFor(`!${card}.querySelector('textarea')`)
