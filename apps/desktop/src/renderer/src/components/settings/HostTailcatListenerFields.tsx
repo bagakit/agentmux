@@ -7,6 +7,7 @@ import { configValuesEqual } from '../../../../shared/config-edit'
 import { api } from '../../lib/api'
 import { copyTextToClipboard } from '../../lib/clipboard-copy'
 import { TailcatKeyPreparation } from './TailcatKeyPreparation'
+import { TailcatSetupFlow } from './TailcatSetupFlow'
 
 type Listener = HostRuntimeObservation['tailcat']
 
@@ -48,25 +49,27 @@ export function HostTailcatListenerFields({ host, committed, active, onChange, s
   const listener = current?.value
   const address = listener?.state === 'listening' ? listener.address : undefined
   return <div className="host-tailcat-listener" data-tailcat-listener>
-    <div className="settings-local-host"><strong>Your local host</strong><p>Uses this computer’s installed agents and registered projects.</p></div>
-    <TailcatKeyPreparation host={host} role="server" keyFile={configuration.keyFile} onPrepared={(result, mayFocus) => {
+    <TailcatSetupFlow role="server" peerName="The other Mac" />
+    <TailcatKeyPreparation host={host} role="server" keyFile={configuration.keyFile} saveLabel={saveLabel} onPrepared={(result, mayFocus) => {
       if (!configValuesEqual(latest.current, configuration)) return false
       onChange({ ...latest.current, keyFile: latest.current.keyFile || result.key, enabled: true })
       if (visible.current && mayFocus) allowedInput.current?.focus()
       return true
     }} />
-    <label className="host-tailcat-toggle"><input type="checkbox" role="switch" aria-label="Allow Tailcat connections" checked={configuration.enabled}
-      onChange={event => onChange({ ...configuration, enabled: event.target.checked })} /><span><strong>Allow Tailcat connections</strong><small>Let your authorized client reach this running AgentMux service.</small></span></label>
-    <div className="host-edit-grid">
+    <details className="host-tailcat-advanced"><summary>Receiving key</summary><div className="host-edit-grid">
       <label className="host-edit-grid__wide"><span>Server key file or name</span><TextInput aria-label="Tailcat server key" value={configuration.keyFile}
         onChange={event => onChange({ ...configuration, keyFile: event.target.value })} placeholder="agentmux-server" /></label>
+    </div></details>
+    <div className="host-edit-grid">
       <label className="host-edit-grid__wide"><span>Allowed client public keys <small>one per line</small></span><textarea ref={allowedInput} aria-label="Tailcat allowed clients" value={allowedText} rows={3} spellCheck={false}
         onChange={event => {
           const text = event.target.value, keys = text.split('\n').map(key => key.trim()).filter(Boolean)
           setClientText({ text, keys }); onChange({ ...configuration, allowedClients: keys })
         }} placeholder="nodekey:…" /></label>
     </div>
-    <p className="settings-group-note">Install the official Tailcat CLI on both Macs. Preparation creates only a missing key and keeps existing keys. Add the other Mac’s connection code to allow it. {saveLabel} applies the switch; turning it off stops only this listener.</p>
+    <label className="host-tailcat-toggle"><input type="checkbox" role="switch" aria-label="Allow Tailcat connections" checked={configuration.enabled}
+      onChange={event => onChange({ ...configuration, enabled: event.target.checked })} /><span><strong>Allow Tailcat connections</strong><small>Applies when you save incoming connections.</small></span></label>
+    <p className="settings-group-note">{saveLabel} applies the access choice and allowed clients. The listener’s confirmed private address appears here when it is ready.</p>
     <div className="host-tailcat-status"><span role="status">{!saved ? `${saveLabel} to apply these changes.` : current?.error ?? (listener ? `Tailcat listener · ${listener.state}` : current?.busy ? 'Reading listener status…' : 'Tailcat listener status unknown')}</span>
       <button type="button" className="small-button" disabled={!saved || current?.busy === true} onClick={() => setRevision(value => value + 1)}>Refresh status</button></div>
     {saved && listener?.detail ? <p className="host-check-detail">{listener.detail}</p> : null}

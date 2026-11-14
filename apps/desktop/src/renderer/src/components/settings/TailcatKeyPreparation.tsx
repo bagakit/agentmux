@@ -8,11 +8,12 @@ import { TailcatSetupHelp } from './TailcatSetupHelp'
 import { tailcatPreparationFailure } from '../../lib/tailcat-preparation-failure'
 
 /** The original Host owns preparation. This component owns only its explicit action and receipt. */
-export function TailcatKeyPreparation({ host, role, keyFile, onPrepared }: {
+export function TailcatKeyPreparation({ host, role, keyFile, onPrepared, saveLabel = 'Save hosts' }: {
   host: HostConfig
   role: TailcatKeyRole
   keyFile: string
   onPrepared: (result: PreparedKey, mayFocus: boolean) => boolean
+  saveLabel?: string
 }) {
   const [state, setState] = useState<{ busy?: boolean; result?: PreparedKey; error?: ReturnType<typeof tailcatPreparationFailure>; keptDraft?: boolean }>({})
   const [copied, setCopied] = useState(false), [copyError, setCopyError] = useState<string>()
@@ -35,13 +36,13 @@ export function TailcatKeyPreparation({ host, role, keyFile, onPrepared }: {
   return <div className="host-tailcat-preparation" data-tailcat-prepare={role}>
     <div className="host-tailcat-preparation__action">
       <button type="button" className="small-button" disabled={state.busy === true} onClick={() => void prepare()}>
-        {state.busy ? 'Preparing key…' : role === 'server' ? 'Prepare this Mac to receive' : 'Use this Mac’s key'}
+        {state.busy ? 'Preparing key…' : role === 'server' ? 'Prepare this Mac to receive' : 'Get this Mac’s code'}
       </button>
-      <span>{role === 'server' ? 'Then paste the other Mac’s connection code and save.' : 'Share your public connection code with the receiving Mac.'}</span>
+      <span>Uses your saved key when available.</span>
     </div>
-    {state.error ? <div role="alert" className="host-check-detail"><strong>{state.error.title}</strong><p>{state.error.next}</p>
-      <p>Your connection draft is kept.{state.error.code ? <> <code>{state.error.code}</code></> : null}</p></div> : result ? <p role="status" className="host-tailcat-preparation__receipt">
-      {result.created ? 'Created' : 'Reusing'} key <code>{result.key}</code>.{state.keptDraft ? ' Your later draft edits were kept.' : role === 'server' ? ' Add the connection code below, then Save hosts.' : ' Copy this code to the other Mac’s allowed clients.'}
+    {state.error ? <div role="alert" className="host-tailcat-preparation__issue"><strong>{state.error.title}</strong><p>{state.error.next}</p>
+      <p>Your connection draft is kept.</p>{state.error.code ? <details><summary>Error details</summary><code>{state.error.code}</code></details> : null}</div> : result ? <p role="status" className="host-tailcat-preparation__receipt">
+      {result.created ? 'Created' : 'Reusing'} key <code>{result.key}</code>.{state.keptDraft ? ' Your later draft edits were kept.' : role === 'server' ? ` Add the connection code below, then ${saveLabel}.` : ' Copy this code to the other Mac’s allowed clients.'}
     </p> : null}
     {code ? <div className="host-tailcat-address"><label><span>This Mac’s connection code <small>public key</small></span>
       <TextInput aria-label="This Mac’s connection code" value={code} readOnly spellCheck={false} /></label>
