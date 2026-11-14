@@ -7,13 +7,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createWorkspaceLayout } from '@agentmux/layout'
 vi.mock('../src/renderer/src/components/TerminalView', () => ({ TerminalView: ({ session }: any) => <div data-warm-session={session.id} /> }))
 import { NewTabSurface } from '../src/renderer/src/components/NewTabSurface'
-import { documentDraft, draftDocument } from '../src/renderer/src/components/InlineComposer'
+import { documentDraft, draftDocument } from '@agentmux/client-ui/components/InlineComposer'
 import { useAppStore, warmTerminalKey } from '../src/renderer/src/store'
 import { useLauncherState } from '../src/renderer/src/lib/launcher-state'
 import { warmLauncherId } from '../src/renderer/src/lib/warm-terminal-preview'
 import { api } from '../src/renderer/src/lib/api'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
-import { encodeSemanticReference, expandSemanticReferences } from '../src/renderer/src/lib/composer-semantic-reference'
+import { encodeSemanticReference, expandSemanticReferences } from '@agentmux/client-ui/composer-semantic-reference'
 import type { NoteCreationReceipt } from '../src/renderer/src/lib/note-creation'
 import { agentCreationFixture } from './helpers/agent-creation-fixture'
 import { composerConfig, composerDOM, composerSession } from './helpers/composer-dom-fixture'
@@ -62,7 +62,7 @@ afterEach(() => { useLauncherState.persist.setOptions(persistence); useLauncherS
 function GroupOwner() {
   const activeId = useAppStore(state => state.layouts.workspace?.groups.find(group => group.id === groupId)?.activeTabId)
   const tab = useAppStore(state => activeId ? state.tabs[activeId] : undefined)
-  if (!tab) return <NewTabSurface tabGroupId={groupId} />
+  if (!tab) return <NewTabSurface tabGroupId={groupId} emptyGroupWorkspaceId="workspace" />
   const surface = tab.regions[tab.layout.activeRegionId]!
   return surface.kind === 'launcher' ? <NewTabSurface key={surface.regionId} tabGroupId={groupId} tabId={tab.id} regionId={surface.regionId} />
     : <div data-agent-owner={surface.regionId} data-phase={surface.kind === 'agent' ? surface.phase : surface.kind}
@@ -77,8 +77,11 @@ async function options() { if (!document.querySelector('.launch-refine__panel'))
 async function closeOptions() { if (document.querySelector('.launch-refine__panel')) await act(async () => document.querySelector<HTMLButtonElement>('[aria-label="Close launch options"]')!.click()) }
 async function mode(value: string) {
   await options()
-  const input = document.querySelector<HTMLSelectElement>('[aria-label="Mode"]')!
-  await act(async () => { input.value = value; input.dispatchEvent(new Event('change', { bubbles: true })) })
+  const trigger = document.querySelector<HTMLButtonElement>('button[aria-label="Mode"]')!
+  await act(async () => trigger.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0, ctrlKey: false })))
+  const choice = document.querySelector<HTMLElement>(`[role="menuitemradio"][data-value="${value}"]`)!
+  expect(choice).not.toBeNull()
+  await act(async () => choice.click())
 }
 async function name(field: 'Agent' | 'Tab', value: string) {
   await options()
@@ -128,7 +131,7 @@ describe('first Launcher input ownership', () => {
     await options()
     expect(document.querySelector<HTMLInputElement>('[aria-label="Agent name"]')!.value).toBe(rawNames.agentName)
     expect(document.querySelector<HTMLInputElement>('[aria-label="Tab name"]')!.value).toBe(rawNames.tabName)
-    expect(document.querySelector<HTMLSelectElement>('[aria-label="Mode"]')!.value).toBe('review')
+    expect(document.querySelector<HTMLButtonElement>('button[aria-label="Mode"]')!.dataset.value).toBe('review')
     expect(useLauncherState.getState().drafts[groupOwner]?.optionsByProvider).toEqual(allOptions)
     paints.mockClear()
     await act(async () => { useLauncherState.getState().setDraft('unrelated-group', 'prompt', 'Other text')
@@ -164,7 +167,7 @@ describe('first Launcher input ownership', () => {
     await options()
     expect(document.querySelector<HTMLInputElement>('[aria-label="Agent name"]')!.value).toBe(rawNames.agentName)
     expect(document.querySelector<HTMLInputElement>('[aria-label="Tab name"]')!.value).toBe(rawNames.tabName)
-    expect(document.querySelector<HTMLSelectElement>('[aria-label="Mode"]')!.value).toBe('review')
+    expect(document.querySelector<HTMLButtonElement>('button[aria-label="Mode"]')!.dataset.value).toBe('review')
     expect(bound().state.launcherOptionDrafts[pending.regionId]).toEqual(allOptions)
     expect(document.querySelector<HTMLInputElement>('[aria-label="Browser address or search"]')!.value).toBe('https://example.test/unfinished?q=original')
     expect(documentDraft(editor('.launcher-note-composer .tiptap').getJSON())).toBe('Unsent original thought')
@@ -219,7 +222,7 @@ describe('first Launcher input ownership', () => {
     await options()
     expect(document.querySelector<HTMLInputElement>('[aria-label="Agent name"]')!.value).toBe('')
     expect(document.querySelector<HTMLInputElement>('[aria-label="Tab name"]')!.value).toBe('')
-    expect(document.querySelector<HTMLSelectElement>('[aria-label="Mode"]')!.value).toBe('')
+    expect(document.querySelector<HTMLButtonElement>('button[aria-label="Mode"]')!.dataset.value).toBe('')
     expect(useLauncherState.getState().drafts[groupOwner]).toMatchObject({ browser: 'https://example.test/unfinished?q=original', note: 'Unsent original thought', noteCreation: receipt })
     preservedWorkfaces()
   })

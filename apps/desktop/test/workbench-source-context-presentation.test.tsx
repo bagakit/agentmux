@@ -27,7 +27,64 @@ import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { openSourceFolderInput } from '../src/renderer/src/lib/space-mount-view'
 import { originalSourceEntryForSelection } from '../src/renderer/src/lib/original-space-navigation'
 import { useWorkbenchBrowserPresentation } from '../src/renderer/src/lib/workbench-presentation'
+import { api } from '../src/renderer/src/lib/api'
+import { NewTabSurface } from '../src/renderer/src/components/NewTabSurface'
 const initial = useAppStore.getState(), initialLauncher = useLauncherState.getState()
+
+it.each([false, true])('actual empty Group keeps its own project and draft under another workface Source: other project=%s', async otherProject => {
+  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
+  const restorePopover = installNativePopover()
+  const owner = composerConfig.workspaces[0]!
+  const other = { ...owner, id: 'other-project', name: 'Other project', path: owner.path + '/other' }
+  const config = { ...composerConfig, workspaces: [owner, other] }
+  const f = spaceNewTabFixture(config, composerSession(), 'original-runtime')
+  const source = otherProject ? spaceNewTabFixture({ ...config, workspaces: [other] }, composerSession('other-agent'), 'other-runtime') : f
+  const first = createWorkspaceLayout('original-group', [f.tab.id]), emptyId = 'retained-empty-group'
+  const focusedEmptyId = 'another-empty-group'
+  const layout: WorkspaceLayout = { ...first, activeGroupId: focusedEmptyId,
+    root: { type: 'split', direction: 'vertical', ratio: .5, first: first.root,
+      second: { type: 'split', direction: 'vertical', ratio: .5, first: { type: 'leaf', groupId: emptyId }, second: { type: 'leaf', groupId: focusedEmptyId } } },
+    groups: [...first.groups, { id: emptyId, tabOrder: [], recentTabIds: [], activeTabId: null },
+      { id: focusedEmptyId, tabOrder: [], recentTabIds: [], activeTabId: null }] }
+  useAppStore.setState({ ...initial, ...f.state, config, loading: false, tabs: { [f.tab.id]: f.tab },
+    layouts: { [owner.id]: layout }, activeWorkspaceId: other.id,
+    workbenchSpaceSelection: { ...source.state.workbenchSpaceSelection, workspaceId: otherProject ? other.id : owner.id,
+      groupId: 'original-group', tabId: f.tab.id, regionId: f.tab.layout.activeRegionId },
+    mountedSpaceInputs: openSourceFolderInput({}, source.target), mountedSpaceObservations: {},
+    scratchTopicSnapshots: {}, prewarmTerminal: async () => {}, detectExecutors: vi.fn().mockResolvedValue(undefined) }, true)
+  useLauncherState.setState({ ...initialLauncher, drafts: { [`group:${emptyId}`]: { prompt: 'Original empty Group draft' } }, sections: {}, executors: {} }, true)
+  const stop = vi.spyOn(api.sessions, 'stop'), launch = vi.spyOn(api.sessions, 'launchAgent')
+  const { WorkspaceWorkbench } = await import('../src/renderer/src/components/WorkspaceWorkbench')
+  const container = document.createElement('div'); document.body.append(container)
+  const root = createRoot(container)
+  const focus = document.createElement('input'); document.body.append(focus); focus.focus()
+  const before = useAppStore.getState()
+  try {
+    expect(originalSourceEntryForSelection(before)).toBeDefined()
+    await act(async () => root.render(otherProject
+      ? <WorkspaceWorkbench workspaceId={owner.id} />
+      : <section data-pane-group-id={emptyId}><NewTabSurface tabGroupId={emptyId} emptyGroupWorkspaceId={owner.id} /></section>))
+    const group = container.querySelector<HTMLElement>(`[data-pane-group-id="${emptyId}"]`)
+    expect(group, 'The retained empty Group must remain in the actual split tree').not.toBeNull()
+    expect(group?.querySelector('.launcher-environment h2')?.textContent).toBe(owner.name)
+    expect(group?.querySelector('.launcher-environment__path')?.textContent).toBe(owner.path)
+    expect(group?.querySelector('[data-executor-id="codex"]')).not.toBeNull()
+    expect(group?.textContent).not.toContain('The original project is unconfirmed')
+    expect(group?.textContent).not.toContain('No Agent is configured')
+    expect(group?.querySelector('.launcher-composer .tiptap')?.textContent).toBe('Original empty Group draft')
+    expect(group?.contains(document.activeElement)).toBe(false)
+    expect(useLauncherState.getState().drafts[`group:${emptyId}`]?.prompt).toBe('Original empty Group draft')
+    expect(useAppStore.getState().tabs).toBe(before.tabs)
+    expect(useAppStore.getState().layouts).toBe(before.layouts)
+    expect(useAppStore.getState().sessions).toBe(before.sessions)
+    expect(useAppStore.getState().workbenchSpaceSelection).toBe(before.workbenchSpaceSelection)
+    expect(stop).not.toHaveBeenCalled(); expect(launch).not.toHaveBeenCalled()
+  } finally {
+    await act(async () => root.unmount()); container.remove(); focus.remove(); restorePopover()
+    useAppStore.setState(initial, true); useLauncherState.setState(initialLauncher, true)
+    window.localStorage.clear(); vi.restoreAllMocks(); vi.unstubAllGlobals()
+  }
+})
 
 it.each([
   { registered: false, repeated: false }, { registered: true, repeated: false },
