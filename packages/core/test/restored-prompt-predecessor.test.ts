@@ -3,7 +3,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { mkdtemp, rename, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { AgentMuxClient } from '../src/client.js'
-import { AgentMuxFileAgentSessionStore, normalizeAgentSession } from '../src/agent-session-store.js'
+import { AgentMuxFileAgentSessionStore } from '../src/agent-session-store.js';
+import { normalizeAgentSession } from "../src/agent-session-codec.js";
 import { AgentProviderRegistry, type AgentProviderPromptExecutionContext } from '../src/agent-provider.js'
 import { readCodexPromptExecutionEvidence } from '../src/providers/codex-prompt-execution-evidence.js'
 import type { AgentMuxAgentSession, AgentMuxStoredAgentSession, AgentPromptExecutionEvidence } from '../src/types.js'

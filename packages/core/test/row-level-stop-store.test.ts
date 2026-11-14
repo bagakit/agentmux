@@ -3,13 +3,8 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { DatabaseSync } from 'node:sqlite'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import {
-  AgentMuxFileAgentSessionStore,
-  AgentMuxMemoryAgentSessionStore,
-  agentLifecycleOperationIdentity,
-  type AgentMuxAgentSessionStore,
-  type AgentMuxLifecycleReservation
-} from '../src/agent-session-store.js'
+import { AgentMuxFileAgentSessionStore, AgentMuxMemoryAgentSessionStore, type AgentMuxAgentSessionStore, type AgentMuxLifecycleReservation } from '../src/agent-session-store.js';
+import { agentLifecycleOperationIdentity } from "../src/agent-session-identity.js";
 import type { AgentMuxStoredAgentSession } from '../src/types.js'
 
 const roots: string[] = []

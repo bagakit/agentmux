@@ -8,7 +8,8 @@ import { build, transform } from 'esbuild'
 import ts from 'typescript'
 import { afterEach, expect, it, vi } from 'vitest'
 import { AgentMuxClient as DefaultClient, hostAgentCreationIntent } from '../src/client.js'
-import { AgentMuxFileAgentSessionStore, AgentMuxMemoryAgentSessionStore, agentLifecycleOperationIdentity, type AgentMuxLifecycleReservation } from '../src/agent-session-store.js'
+import { AgentMuxFileAgentSessionStore, AgentMuxMemoryAgentSessionStore, type AgentMuxLifecycleReservation } from '../src/agent-session-store.js';
+import { agentLifecycleOperationIdentity } from "../src/agent-session-identity.js";
 import { DurableAgentMuxMessageQueue } from '../src/agent-global-message-queue.js'
 import { issueAgentCapability, hashAgentCapability } from '../src/agent-capability.js'
 import { deriveAgentSessionId } from '../src/agent-session-id.js'

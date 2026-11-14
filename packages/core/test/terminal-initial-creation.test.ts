@@ -450,7 +450,7 @@ it('the actual private Native resume resolution hands the first and successor ke
   const original=(await f.correlation())!
   const result=await f.client.ensureAgentContinuity({agentSessionId:f.previous.agentSessionId,expectedRun:f.previous.run,operationId:'native-key-resolution',trigger:'manual',args:f.request.args,env:f.request.env,policy:{reminderMode:'default',continuationEnabled:true}})
   expect(result.kind).toBe('resumed')
-  const {agentLifecycleOperationIdentity}=await import('../src/agent-session-store.js'),next=agentLifecycleOperationIdentity('resume',f.previous.agentSessionId,'native-key-resolution')
+  const { agentLifecycleOperationIdentity } = await import('../src/agent-session-identity.js'),next=agentLifecycleOperationIdentity('resume',f.previous.agentSessionId,'native-key-resolution')
   const current=await f.store.readMetadata(f.previous.agentSessionId)
   expect(current?.nativeCreationKeys).toEqual({keys:[original.operationId,next],coverage:'partial'})
   expect(await f.store.agentCreationKeyRole(original.operationId)).toBe('agent')
@@ -565,7 +565,7 @@ it('a cold retained initial retirement ACK cannot be turned into a fresh retirem
 })
 it('a real reopen request with a new conflicting retirement key is refused before its original lifecycle writer and Start',async()=>{
   const {retiredReopenFixture}=await import('./fixtures/retired-reopen.js'),f=await retiredReopenFixture();cleanup.push(f.close)
-  const {agentLifecycleOperationIdentity}=await import('../src/agent-session-store.js'),{NativeCreationAdmission}=await import('../src/native-creation-admission.js'),{dirname}=await import('node:path'),{writeFile}=await import('node:fs/promises')
+  const { agentLifecycleOperationIdentity } = await import('../src/agent-session-identity.js'),{NativeCreationAdmission}=await import('../src/native-creation-admission.js'),{dirname}=await import('node:path'),{writeFile}=await import('node:fs/promises')
   const key=agentLifecycleOperationIdentity('reopen',f.input.agentSessionId,f.input.operationId)
   await writeFile(new NativeCreationAdmission(dirname(f.storePath)).retirementPath(key),'original-existing-claim')
   await expect(f.client.reopenAgent(f.input)).rejects.toMatchObject({code:'NATIVE_CREATION_KEY_RETIRED'})

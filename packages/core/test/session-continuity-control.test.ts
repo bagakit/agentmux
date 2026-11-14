@@ -6,7 +6,7 @@ import { join, resolve } from 'node:path'
 import { afterEach, expect, it, vi } from 'vitest'
 import * as Source from '../src/index.js'
 import { objectCliEnvironment, runCompiledObjectCli } from './helpers/object-cli-rpc.js'
-import { agentLifecycleOperationIdentity } from '../src/agent-session-store.js'
+import { agentLifecycleOperationIdentity } from "../src/agent-session-identity.js";
 import type { AgentMuxAgentResumeInput } from '../src/agent-session-recovery.js'
 import type { AgentMuxAgentSession, AgentMuxStoredAgentSession } from '../src/types.js'
 import { fixtureEpoch as _historyFixtureEpoch } from '../../../test/fixture-values.mjs'

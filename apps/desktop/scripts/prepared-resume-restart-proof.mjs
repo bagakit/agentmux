@@ -33,7 +33,7 @@ const namespace = { AGENTMUX_DESKTOP_USER_DATA: userData, AGENTMUX_RUNTIME_DIREC
 Object.assign(process.env, namespace); delete process.env.ELECTRON_RUN_AS_NODE
 for (const path of [userData, runtime, join(runtime, 'state/ctxmux'), workspace, codexHome]) await mkdir(path, { recursive: true, mode: 0o700 })
 const { AgentMuxClient, AgentMuxFileAgentSessionStore, AgentMuxSpatialStateStore, connectAgentMuxRpc, connectHostedAgentMux } = await import('../../../packages/core/dist/index.js')
-const { agentLifecycleOperationIdentity } = await import('../../../packages/core/dist/agent-session-store.js')
+const { agentLifecycleOperationIdentity } = await import('../../../packages/core/dist/agent-session-identity.js')
 const { macosHostServiceAddress, macosHostServiceRegistration } = await import('../../host/dist/macos-service.js')
 const privateService = macosHostServiceAddress(join(runtime, 'control.sock'))
 assert.equal(await macosHostServiceRegistration(privateService), null, 'This fresh private namespace must have no existing platform owner')

@@ -5,7 +5,7 @@ import * as core from '../dist/index.js'
 import { connectAgentMuxRpc } from '../src/public-rpc-client.js'
 import { headlessFixture, until } from './helpers/headless-runtime-fixture.js'
 import { runCompiledObjectCli } from './helpers/object-cli-rpc.js'
-import { parseRpcAgentSession } from '../src/rpc-native-codec.js'
+import { parseRpcAgentSession } from "../src/agent-session-codec.js";
 
 const fault = vi.hoisted(() => ({ directory: '', active: false, calls: 0 }))
 vi.mock('node:fs/promises', async original => {

@@ -4,7 +4,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, expect, it, vi } from 'vitest'
 import { AgentMuxClient } from '../src/client.js'
-import { AgentMuxFileAgentSessionStore, normalizeAgentSession } from '../src/agent-session-store.js'
+import { AgentMuxFileAgentSessionStore } from '../src/agent-session-store.js';
+import { normalizeAgentSession } from "../src/agent-session-codec.js";
 import { AgentMuxControlServer } from '../src/public-rpc-server.js'
 import { connectAgentMuxRpc } from '../src/public-rpc-client.js'
 import { parseRpcNativeResult } from '../src/rpc-native-codec.js'

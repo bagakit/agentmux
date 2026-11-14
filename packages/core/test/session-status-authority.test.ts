@@ -13,7 +13,7 @@ import { AgentMuxMemoryAgentSessionStore, normalizeStoredAgentSession } from '..
 import { AgentHookServer } from '../src/hook-server.js'
 import { AgentMuxError } from '../src/errors.js'
 import { agentTurnCompletionIdentity, agentTurnEndEvidence } from '../src/agent-session-identity.js'
-import { parseRpcAgentSession } from '../src/rpc-native-codec.js'
+import { parseRpcAgentSession } from "../src/agent-session-codec.js";
 import { agentPromptCondition } from '../src/agent-prompt-condition.js'
 import { currentAgentSemanticStatus, observeAgent } from '../src/agent-status-freshness.js'
 import { retiredReopenFixture } from './fixtures/retired-reopen.js'

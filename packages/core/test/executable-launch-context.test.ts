@@ -3,7 +3,7 @@ import { dirname, join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { terminalEnvironment } from '../src/client.js'
 import { composeAgentResumePrompt } from '../src/agent-outbound-message.js'
-import { agentLifecycleOperationIdentity } from '../src/agent-session-store.js'
+import { agentLifecycleOperationIdentity } from "../src/agent-session-identity.js";
 import { classifyExecutable } from '../src/executable-probe.js'
 import { cleanupExecutableNativeFixtures, executableNativeFixture, until } from './helpers/executable-native-fixture.js'
 

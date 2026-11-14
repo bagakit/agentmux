@@ -6,7 +6,8 @@ import { join } from 'node:path'
 import { AgentProviderRegistry } from '../../src/agent-provider.js'
 import { cloneSession } from '../../src/agent-session-identity.js'
 import { AgentMuxFileAgentSessionStore, loadAgentSessions, normalizeStoredAgentSession } from '../../src/agent-session-store.js'
-import { parseRpcAgentSession, parseRpcNativeResult } from '../../src/rpc-native-codec.js'
+import { parseRpcNativeResult } from '../../src/rpc-native-codec.js';
+import { parseRpcAgentSession } from "../../src/agent-session-codec.js";
 import type { AgentMuxStoredAgentSession, AgentRecoveryActivity } from '../../src/types.js'
 import { fixturePath } from '../helpers/fixture-values.js'
 

@@ -2,12 +2,12 @@ import { spawn } from 'node:child_process'
 import { once } from 'node:events'
 import { writeFile } from 'node:fs/promises'
 import { DatabaseSync } from 'node:sqlite'
-import { parseRpcAgentSession } from '../src/rpc-native-codec.js'
+import { parseRpcAgentSession } from "../src/agent-session-codec.js";
 import { parseRpcControlResult } from '../src/rpc-business-codec.js'
 import { join } from 'node:path'
 import { objectCliEnvironment, runCompiledObjectCli } from './helpers/object-cli-rpc.js'
 import { expect, it, vi } from 'vitest'
-import { agentLifecycleOperationIdentity } from '../src/agent-session-store.js'
+import { agentLifecycleOperationIdentity } from "../src/agent-session-identity.js";
 import { core, cleanups, fixture, otherRuntime } from './helpers/prepared-resume-fixture.js'
 
 it.each([['file', 'positional-argv'], ['memory', 'positional-argv'], ['file', 'post-launch-only']] as const)('explicit resolution fences the exact missing prepared Start and resumes once without old input: %s %s', async (owner, delivery) => {

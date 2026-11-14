@@ -4,7 +4,8 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { AgentMuxClient } from '../src/client.js'
-import { AgentMuxFileAgentSessionStore, AgentMuxMemoryAgentSessionStore, agentLifecycleOperationIdentity, type AgentMuxAgentSessionStore } from '../src/agent-session-store.js'
+import { AgentMuxFileAgentSessionStore, AgentMuxMemoryAgentSessionStore, type AgentMuxAgentSessionStore } from '../src/agent-session-store.js';
+import { agentLifecycleOperationIdentity } from "../src/agent-session-identity.js";
 import { CtxmuxRunAdapter } from '../src/ctxmux-run-adapter.js'
 import { AgentMuxControlServer } from '../src/public-rpc-server.js'
 import { connectAgentMuxRpc } from '../src/public-rpc-client.js'

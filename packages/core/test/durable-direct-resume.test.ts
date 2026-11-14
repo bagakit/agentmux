@@ -1,7 +1,7 @@
 import { DatabaseSync } from 'node:sqlite'
 import { join } from 'node:path'
 import { expect, it, vi } from 'vitest'
-import { agentLifecycleOperationIdentity } from '../src/agent-session-store.js'
+import { agentLifecycleOperationIdentity } from "../src/agent-session-identity.js";
 import { objectCliEnvironment, runCompiledObjectCli } from './helpers/object-cli-rpc.js'
 import { runSourceObjectCli } from './helpers/source-object-cli.js'
 import type { AgentMuxAgentSession } from '../src/types.js'

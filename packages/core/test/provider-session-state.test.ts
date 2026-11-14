@@ -3,7 +3,7 @@ import { activityCertaintyClient } from './fixtures/activity-certainty-client.js
 import { AgentMuxRpcService } from '../src/public-rpc-service.js'
 import { parseRpcNativeResult } from '../src/rpc-native-codec.js'
 import { agentTurnCompletionIdentity } from '../src/agent-session-identity.js'
-import { normalizeAgentSession } from '../src/agent-session-store.js'
+import { normalizeAgentSession } from "../src/agent-session-codec.js";
 import { observeAgent } from '../src/agent-status-freshness.js'
 
 const closes: Array<() => Promise<void>> = []

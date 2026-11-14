@@ -1,7 +1,8 @@
 import { appendFile, readFile, writeFile, rm } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { afterEach, expect, it, vi } from 'vitest'
-import { AgentMuxFileAgentSessionStore, agentLifecycleOperationIdentity } from '../src/agent-session-store.js'
+import { AgentMuxFileAgentSessionStore } from '../src/agent-session-store.js';
+import { agentLifecycleOperationIdentity } from "../src/agent-session-identity.js";
 import { normalizeAgentContinuityPolicy } from '../src/agent-session-recovery/continuity-contract.js'
 import { headlessFixture, until } from './helpers/headless-runtime-fixture.js'
 import { rpcOwnerFixture } from './helpers/public-rpc-owner.js'

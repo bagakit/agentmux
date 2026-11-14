@@ -11,7 +11,8 @@ import { AgentMuxRpcService as SourceRpcService } from '../src/public-rpc-servic
 const AgentMuxRpcService: typeof SourceRpcService = process.env.AGENTMUX_TEST_RPC_CORE_ENTRY
   ? (await import(new URL('../dist/public-rpc-service.js', import.meta.url).href)).AgentMuxRpcService : SourceRpcService
 import { agentTurnCompletionIdentity, cloneSession } from '../src/agent-session-identity.js'
-import { parseRpcAgentSession, parseRpcNativeResult } from '../src/rpc-native-codec.js'
+import { parseRpcNativeResult } from '../src/rpc-native-codec.js';
+import { parseRpcAgentSession } from "../src/agent-session-codec.js";
 import { parsePromptSubmissionRecord } from '../src/prompt-submission-record.js'
 import { agentPromptCondition, validateAgentPromptAdmissionIntent, validateAgentPromptInputBinding, type AgentPromptInputKey } from '../src/agent-prompt-condition.js'
 import { parseAgentInputMailboxPage } from '../src/agent-input-mailbox-codec.js'

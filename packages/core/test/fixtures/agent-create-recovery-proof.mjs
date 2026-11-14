@@ -13,7 +13,8 @@ import { AgentMuxError } from '../../src/errors.ts'
 import { issueAgentCapability, hashAgentCapability, hookBindingIdentity } from '../../src/agent-capability.ts'
 import { AgentMuxClient } from '../../src/index.ts'
 import { defineAgentProvider } from '../../src/agent-provider.ts'
-import { AgentMuxMemoryAgentSessionStore, AgentMuxFileAgentSessionStore, agentLifecycleOperationIdentity } from '../../src/agent-session-store.ts'
+import { AgentMuxMemoryAgentSessionStore, AgentMuxFileAgentSessionStore } from '../../src/agent-session-store.ts';
+import { agentLifecycleOperationIdentity } from "../../src/agent-session-identity.ts";
 import { decodePreparedRun } from '../../src/prepared-run.ts'
 import { parseCreationInspection, parseCreationInspectionResult } from '../../src/agent-creation-inspection.ts'
 import { parseRpcNativeResult } from '../../src/rpc-native-codec.ts'

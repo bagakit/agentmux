@@ -4,7 +4,8 @@ import { fork } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { AgentMuxError } from '../src/errors.js'
 import { AgentHookServer } from '../src/hook-server.js'
-import { AgentMuxFileAgentSessionStore, AgentMuxMemoryAgentSessionStore, loadAgentSessions, loadSessionHistorySources, agentLifecycleOperationIdentity } from '../src/agent-session-store.js'
+import { AgentMuxFileAgentSessionStore, AgentMuxMemoryAgentSessionStore, loadAgentSessions, loadSessionHistorySources } from '../src/agent-session-store.js';
+import { agentLifecycleOperationIdentity } from "../src/agent-session-identity.js";
 import { retiredReopenFixture } from './fixtures/retired-reopen.js'
 import { readStoreRows, rewriteStoreRow, storeSnapshot } from './helpers/session-store-rows.js'
 const fixtures: Awaited<ReturnType<typeof retiredReopenFixture>>[] = []

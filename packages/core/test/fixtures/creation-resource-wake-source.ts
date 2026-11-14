@@ -1,6 +1,7 @@
 // One selected source surface for the wake proof; the formal entry compiles these same owners.
 export { AgentMuxClient } from '../../src/client.js'
-export { AgentMuxFileAgentSessionStore, agentLifecycleOperationIdentity } from '../../src/agent-session-store.js'
+export { AgentMuxFileAgentSessionStore } from '../../src/agent-session-store.js'
+export { agentLifecycleOperationIdentity } from '../../src/agent-session-identity.js'
 export { defineAgentProvider } from '../../src/agent-provider.js'
 export { AgentMuxError } from '../../src/errors.js'
 export { AgentMuxCreationAuthority } from '../../src/agent-creation-authority.js'

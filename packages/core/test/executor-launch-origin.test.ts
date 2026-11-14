@@ -8,7 +8,7 @@ import { createWorkspaceLayout,createWorkbenchViewLayout } from '../src/spatial-
 import { captureExecutorInvocation,readExecutorInvocation } from '../src/agent-executor-invocation.js'
 import { cloneSession } from '../src/agent-session-identity.js'
 import { nativeHistoryFixture,jsonl } from './fixtures/native-history-session.js'
-import { parseRpcAgentSession } from '../src/rpc-native-codec.js'
+import { parseRpcAgentSession } from "../src/agent-session-codec.js";
 import { headlessFixture,until } from './helpers/headless-runtime-fixture.js'
 import { ScratchTopics } from '../../../apps/host/src/mote-resources.js'
 import { directoryIdentity,homeZoneId,SCRATCH_WORKSPACE_ID } from '../../../apps/host/src/mote-model.js'

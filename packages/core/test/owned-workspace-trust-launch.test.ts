@@ -9,7 +9,7 @@ import { AgentMuxFileAgentSessionStore } from '../src/agent-session-store.js'
 import { AgentProviderRegistry, type AgentProvider, type AgentWorkspaceTrustContext, type AgentWorkspaceTrustReceipt } from '../src/agent-provider.js'
 import type { AgentMuxClientEvent, AgentMuxStoredAgentSession } from '../src/types.js'
 import type { CtxmuxAdapterRun } from '../src/ctxmux-run-adapter.js'
-import { parseRpcAgentSession } from '../src/rpc-native-codec.js'
+import { parseRpcAgentSession } from "../src/agent-session-codec.js";
 
 /**
  * A Mote's first question used to land in Claude's "trust this folder?" prompt and exit the Run.

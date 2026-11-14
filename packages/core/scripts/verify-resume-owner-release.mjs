@@ -51,7 +51,8 @@ if (process.argv.includes('--probe') || process.argv.includes('--custody-child')
   process.env.AGENTMUX_STATE_DIRECTORY = join(root, 'state')
   process.env.AGENTMUX_RUNTIME_DIRECTORY = join(root, 'runtime')
   const { AgentMuxClient } = await import('../src/client.ts')
-  const { AgentMuxMemoryAgentSessionStore, AgentMuxFileAgentSessionStore, agentLifecycleOperationIdentity, normalizeStoredAgentSession } = await import('../src/agent-session-store.ts')
+  const {AgentMuxMemoryAgentSessionStore, AgentMuxFileAgentSessionStore, normalizeStoredAgentSession} = await import('../src/agent-session-store.ts');
+const { agentLifecycleOperationIdentity } = await import('../src/agent-session-identity.ts')
   const { hashAgentCapability, hookBindingIdentity } = await import('../src/agent-capability.ts')
   const { normalizeAgentContinuityPolicy } = await import('../src/agent-session-recovery/continuity-contract.ts')
 

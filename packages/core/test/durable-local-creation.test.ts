@@ -8,7 +8,7 @@ import { build } from 'esbuild'
 import * as Source from '../src/index.js'
 import type { AgentMuxAgentCreateInput } from "../src/client-contract.js";
 import type { AgentMuxAgentSession } from '../src/types.js'
-import { agentLifecycleOperationIdentity } from '../src/agent-session-store.js'
+import { agentLifecycleOperationIdentity } from "../src/agent-session-identity.js";
 
 const core: typeof Source = process.env.AGENTMUX_TEST_DURABLE_CREATE_ENTRY
   ? await import(/* @vite-ignore */ process.env.AGENTMUX_TEST_DURABLE_CREATE_ENTRY) : Source

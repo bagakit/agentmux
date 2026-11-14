@@ -9,7 +9,7 @@ import { AgentMuxClient } from '../src/client.js'
 import { AgentMuxFileAgentSessionStore } from '../src/agent-session-store.js'
 import { AgentHookServer } from '../src/hook-server.js'
 import { AgentMuxControlServer } from '../src/public-rpc-server.js'
-import { parseRpcAgentSession } from '../src/rpc-native-codec.js'
+import { parseRpcAgentSession } from "../src/agent-session-codec.js";
 import { activityCertaintyClient } from './fixtures/activity-certainty-client.js'
 import { objectCliEnvironment, runCompiledObjectCli } from './helpers/object-cli-rpc.js'
 import { RuntimeController } from '../../../apps/desktop/src/main/runtime-controller.js'

@@ -8,7 +8,8 @@ import { AgentMuxClient, hostAgentCreationIntent } from '../src/client.js';
 import type { AgentMuxHostAgentCreateInput } from "../src/client-contract.js";
 import { AgentMuxCreationAuthority, agentCreationIntentDigest } from '../src/agent-creation-authority.js'
 import { AgentMuxHostExecutorOwner } from '../src/executor-owner.js'
-import { AgentMuxFileAgentSessionStore, AgentMuxMemoryAgentSessionStore, agentLifecycleOperationIdentity, type AgentMuxAgentSessionStore } from '../src/agent-session-store.js'
+import { AgentMuxFileAgentSessionStore, AgentMuxMemoryAgentSessionStore, type AgentMuxAgentSessionStore } from '../src/agent-session-store.js';
+import { agentLifecycleOperationIdentity } from "../src/agent-session-identity.js";
 import { readCurrentSessionDatabase } from '../src/agent-session-database.js'
 import type { AgentMuxStoredAgentSession } from '../src/types.js'
 import { hostedTestClient } from './helpers/hosted-runtime-port.js'

@@ -1,7 +1,8 @@
 import { afterEach, expect, it, vi } from 'vitest'
 import { setTimeout as delay } from 'node:timers/promises'
 import type { DatabaseSync } from 'node:sqlite'
-import { AgentMuxFileAgentSessionStore, agentLifecycleOperationIdentity, type AgentMuxLifecycleReservation } from '../src/agent-session-store.js'
+import { AgentMuxFileAgentSessionStore, type AgentMuxLifecycleReservation } from '../src/agent-session-store.js';
+import { agentLifecycleOperationIdentity } from "../src/agent-session-identity.js";
 import type { AgentMuxAgentSession, AgentMuxStoredAgentSession, AgentNativePromptInputPlan, AgentPromptSubmissionRecord } from '../src/types.js'
 import { rpcOwnerFixture } from './helpers/public-rpc-owner.js'
 

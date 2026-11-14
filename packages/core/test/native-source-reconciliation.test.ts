@@ -7,7 +7,7 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { AgentMuxClient } from '../src/client.js'
 import { AgentProviderRegistry, type AgentProvider } from '../src/agent-provider.js'
 import { AgentMuxFileAgentSessionStore, loadAgentSessions } from '../src/agent-session-store.js'
-import { parseRpcAgentSession } from '../src/rpc-native-codec.js'
+import { parseRpcAgentSession } from "../src/agent-session-codec.js";
 import { nativeProcessFiles } from '../src/agent-native-process.js'
 import { AgentMuxHostedRuntimeService } from '../src/hosted-runtime-service.js'
 import { connectHostedAgentMux } from '../src/hosted-client.js'

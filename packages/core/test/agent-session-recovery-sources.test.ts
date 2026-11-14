@@ -5,7 +5,7 @@ import { agentContinuityAdmission, normalizeAgentContinuityPolicy, parseAgentCon
 import { AgentMuxClient } from '../src/client.js'
 import { AgentMuxFileAgentSessionStore } from '../src/agent-session-store.js'
 import { AgentSessionContinuitySupervisor } from '../src/agent-session-recovery/supervisor.js'
-import { parseRpcAgentSession } from '../src/rpc-native-codec.js'
+import { parseRpcAgentSession } from "../src/agent-session-codec.js";
 import type { AgentMuxStoredAgentSession } from '../src/types.js'
 import { rpcOwnerFixture } from './helpers/public-rpc-owner.js'
 import { hostedTestClient } from './helpers/hosted-runtime-port.js'

@@ -8,7 +8,8 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { build } from 'esbuild'
 import { extractTurnUsage, parseTurnUsage } from '../src/agent-usage-transcript.js'
 import { decodeClaudeUsage } from '../src/providers/claude-usage.js'
-import { AgentMuxFileAgentSessionStore, loadAgentSessions, normalizeAgentSession } from '../src/agent-session-store.js'
+import { AgentMuxFileAgentSessionStore, loadAgentSessions } from '../src/agent-session-store.js';
+import { normalizeAgentSession } from "../src/agent-session-codec.js";
 import { AgentMuxControlServer } from '../src/public-rpc-server.js'
 import { connectAgentMuxRpc } from '../src/public-rpc-client.js'
 import { runAgentHookCommand } from '../src/agent-hook-command.js'

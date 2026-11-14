@@ -4,8 +4,8 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { DatabaseSync } from 'node:sqlite'
 import { AgentMuxError } from '../src/errors.js'
-import { AgentMuxFileAgentSessionStore, AgentMuxMemoryAgentSessionStore, AgentMuxSessionDurabilityError,
-  agentLifecycleOperationIdentity, type AgentMuxAgentSessionStore } from '../src/agent-session-store.js'
+import { AgentMuxFileAgentSessionStore, AgentMuxMemoryAgentSessionStore, AgentMuxSessionDurabilityError, type AgentMuxAgentSessionStore } from '../src/agent-session-store.js';
+import { agentLifecycleOperationIdentity } from "../src/agent-session-identity.js";
 import { trigger, syncFault } from './fixtures/hook-transaction/faults.js'
 import { AgentMuxAgentSessionRegistry } from '../src/agent-session-registry.js'
 import type { AgentMuxStoredAgentSession, AgentTimelineMutation } from '../src/types.js'

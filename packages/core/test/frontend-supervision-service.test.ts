@@ -2,7 +2,7 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { rpcOwnerFixture } from './helpers/public-rpc-owner.js'
 import { AgentMuxClient } from '../src/client.js'
 import { AgentMuxError } from '../src/errors.js'
-import { agentLifecycleOperationIdentity } from '../src/agent-session-store.js'
+import { agentLifecycleOperationIdentity } from "../src/agent-session-identity.js";
 import type { AgentMuxStoredAgentSession } from '../src/types.js'
 import type { AgentTerminalFrontend, AgentTerminalFrontendRecoveryRequest } from '../src/agent-terminal-frontend.js'
 

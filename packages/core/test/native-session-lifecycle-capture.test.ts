@@ -14,7 +14,7 @@ import { DurableWriteError } from '../src/durable-write.js'
 import type { CtxmuxRunAdapter, CtxmuxAdapterRun } from '../src/ctxmux-run-adapter.js'
 import type { AgentMuxClientEvent, AgentMuxStoredAgentSession } from '../src/types.js'
 import { AgentMuxControlServer } from '../src/public-rpc-server.js'
-import { parseRpcAgentSession } from '../src/rpc-native-codec.js'
+import { parseRpcAgentSession } from "../src/agent-session-codec.js";
 import { captureAgentNativeSessionIdentity } from '../src/agent-native-session-capture.js'
 import type { AgentMuxAgentSessionRegistry } from '../src/agent-session-registry.js'
 
