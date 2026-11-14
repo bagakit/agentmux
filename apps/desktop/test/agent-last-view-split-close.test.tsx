@@ -193,6 +193,36 @@ it('a dirty file split keeps its discard confirmation; the Agent split beside it
   expect(api.sessions.stop).not.toHaveBeenCalled()
 })
 
+it.each(['mouse', 'keyboard'] as const)('tab dirty file close uses the shared confirmation and Cancel preserves it (%s)', async input => {
+  const original = createWorkbenchTab('split', file)
+  useAppStore.setState({ tabs: { [original.id]: original, [elsewhere.id]: elsewhere },
+    dirtyDocuments: { [documentKey('workspace', 'changed.txt')]: true } })
+  await mount()
+  if (input === 'keyboard') await act(async () => useAppStore.getState().requestCloseTab('workspace', 'group', original.id))
+  else {
+    const close = element.querySelector<HTMLButtonElement>('[data-workbench-tab-id="split"] .workbench-tab__close')!
+    await act(async () => close.click())
+  }
+  expect(dialog()?.textContent).toContain('Discard unsaved changes?')
+  await click('Cancel')
+  expect(useAppStore.getState().tabs[original.id]).toBe(original)
+  expect(useAppStore.getState().dirtyDocuments[documentKey('workspace', 'changed.txt')]).toBe(true)
+  expect(api.sessions.stop).not.toHaveBeenCalled()
+})
+
+it('tab discard confirms only the requested file Tab and keeps its neighbor', async () => {
+  const original = createWorkbenchTab('split', file)
+  useAppStore.setState({ tabs: { [original.id]: original, [elsewhere.id]: elsewhere },
+    dirtyDocuments: { [documentKey('workspace', 'changed.txt')]: true } })
+  await mount()
+  await act(async () => element.querySelector<HTMLButtonElement>('[data-workbench-tab-id="split"] .workbench-tab__close')!.click())
+  expect(dialog()?.textContent).toContain('Discard unsaved changes?')
+  await click('Discard & Close')
+  expect(useAppStore.getState().tabs[original.id]).toBeUndefined()
+  expect(useAppStore.getState().tabs[elsewhere.id]).toBe(elsewhere)
+  expect(api.sessions.stop).not.toHaveBeenCalled()
+})
+
 it('another View of the same Agent closes the split silently without Stop', async () => {
   const twin = addWorkbenchRegion(
     createWorkbenchTab('split', { kind: 'agent', regionId: 'shared-split-region', phase: 'attached', workspaceId: 'workspace', sessionId: shared.id }),
