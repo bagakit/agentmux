@@ -64,12 +64,25 @@ it('keeps rejection, stale Host CAS, another actor and changed request separate 
   const f = await fixture(), request = await f.owner.request(input, agent, current)
   await expect(f.owner.request({ ...input, host: { ...host, label: 'Another draft' } }, agent, current)).rejects.toMatchObject({ code: 'HOST_MAINTENANCE_REQUEST_CONFLICT' })
   await expect(f.owner.inspect(input.operationId, { kind: 'agent', id: 'another-agent' })).rejects.toMatchObject({ code: 'CONTROL_PERMISSION_DENIED' })
-  await expect(f.owner.review({ operationId: input.operationId, requestDigest: request.requestDigest, decision: 'approve' }, agent, current)).rejects.toMatchObject({ code: 'CONTROL_PERMISSION_DENIED' })
+  await expect(f.owner.review({ operationId: input.operationId, requestDigest: request.requestDigest, decision: 'approve' }, { ...agent, id: 'another-agent' }, current)).rejects.toMatchObject({ code: 'CONTROL_PERMISSION_DENIED' })
   await f.configOwner.update(config => ({ ...config, hosts: [{ ...host, hostname: 'later.invalid' }] }))
   await expect(f.owner.review({ operationId: input.operationId, requestDigest: request.requestDigest, decision: 'approve' }, user, current)).rejects.toMatchObject({ code: 'CONFIG_CONFLICT' })
   expect((await f.owner.inspect(input.operationId, agent))?.state).toBe('pending')
   expect((await f.owner.review({ operationId: input.operationId, requestDigest: request.requestDigest, decision: 'reject' }, user, current)).state).toBe('rejected')
   expect(f.manager.install).not.toHaveBeenCalled(); expect(f.runtime.checkHost).not.toHaveBeenCalled()
+})
+
+it('preserves the original Agent reviewer across a new Run, owner restart and same-operation inspection', async () => {
+  const f = await fixture(), requested = await f.owner.request(input, agent, current)
+  const reviewer = { ...agent, runId: 'later-original-run' }
+  const review = { operationId: input.operationId, requestDigest: requested.requestDigest, decision: 'approve' as const }
+  const approved = await f.owner.review(review, reviewer, current)
+  expect(approved).toMatchObject({ state: 'finished', review: { actor: reviewer }, result: { status: 'completed' } })
+  expect(parseHostMaintenanceRecord(JSON.parse(await readFile(f.file, 'utf8')))).toEqual(approved)
+  const restarted = new SettingsHostsMaintenanceOwner(f.directory, f.configOwner, f.installs, f.upgrades)
+  expect(await restarted.review(review, reviewer, current)).toEqual(approved)
+  await expect(restarted.review(review, { ...reviewer, id: 'another-agent' }, current)).rejects.toMatchObject({ code: 'CONTROL_PERMISSION_DENIED' })
+  expect(f.manager.install).toHaveBeenCalledTimes(1)
 })
 
 it('does not replay a crash between durable approval and the original remote call', async () => {
@@ -116,7 +129,7 @@ it('fails a missing durable approval before any remote work and preserves the pe
   write.mockImplementation(original)
 })
 
-it('the real compiled CLI submits with authenticated SID, refuses Agent approval, and lets the Unix person review the exact request', async () => {
+it('the real compiled CLI submits and completes the exact request with its authenticated Agent identity', async () => {
   const f = await fixture(), agentOwner = await rpcOwnerFixture(['requesting-agent']); cleanups.push(agentOwner.close)
   const server = new AgentMuxControlServer({ socketPath: join(agentOwner.root, 'control.sock'), coreClients: agentOwner.coreClients, hostMaintenance: f.owner })
   await server.start(); cleanups.push(async () => await server.stop())
@@ -126,24 +139,22 @@ it('the real compiled CLI submits with authenticated SID, refuses Agent approval
   const record = JSON.parse(submit.stdout).result.record
   expect(record.requester).toEqual({ kind: 'agent', id: 'requesting-agent', hostId: 'local', runId: 'run-requesting-agent' })
   const review = JSON.stringify({ requestDigest: record.requestDigest, decision: 'approve' })
-  const denied = await runCompiledObjectCli(['settings', 'hosts', 'maintenance-review', '--operation-id', input.operationId, '--input', '-'], agentEnvironment, review)
-  expect(denied.code).not.toBe(0); expect(JSON.parse(denied.stderr).error.code).toBe('CONTROL_PERMISSION_DENIED')
-  expect(f.manager.install).not.toHaveBeenCalled()
-  const approved = await runCompiledObjectCli(['settings', 'hosts', 'maintenance-review', '--operation-id', input.operationId, '--input', '-'], objectCliEnvironment(agentOwner.root), review)
+  const approved = await runCompiledObjectCli(['settings', 'hosts', 'maintenance-review', '--operation-id', input.operationId, '--input', '-'], agentEnvironment, review)
   expect(approved.code, approved.stderr).toBe(0)
-  expect(JSON.parse(approved.stdout).result.record).toMatchObject({ state: 'finished', requester: { id: 'requesting-agent' }, review: { actor: { kind: 'user' } }, result: { status: 'completed' } })
+  expect(JSON.parse(approved.stdout).result.record).toMatchObject({ state: 'finished', requester: { id: 'requesting-agent' }, review: { actor: { kind: 'agent', id: 'requesting-agent' } }, result: { status: 'completed' } })
   const read = await runCompiledObjectCli(['settings', 'hosts', 'maintenance-inspect', '--operation-id', input.operationId], agentEnvironment)
   expect(read.code, read.stderr).toBe(0); expect(JSON.parse(read.stdout).result.record.result.status).toBe('completed')
   expect(f.manager.install).toHaveBeenCalledTimes(1)
 })
 
-it('never trusts review actor fields in business params or permits a managed caller plus a user principal', async () => {
+it('rejects injected review actors and managed callers without the original user operator transport', async () => {
   const f = await fixture(), h = await rpcOwnerFixture(['requesting-agent']); cleanups.push(h.close)
   const service = new AgentMuxRpcService({ coreClients: h.coreClients, hostMaintenance: f.owner }); cleanups.push(async () => await service.dispose())
   const requested = await service.call('settings.hosts.maintenance-request', input, { caller: h.credentials })
   const review = { operationId: input.operationId, requestDigest: requested.record!.requestDigest, decision: 'approve' as const }
   await expect(service.call('settings.hosts.maintenance-review', { ...review, actor: user } as any, { principal: user })).rejects.toMatchObject({ code: 'INVALID_CONTROL_REQUEST' })
-  await expect(service.call('settings.hosts.maintenance-review', review, { caller: h.credentials, principal: user })).rejects.toMatchObject({ code: 'CONTROL_PERMISSION_DENIED' })
+  await expect(service.call('settings.hosts.maintenance-review', review, { caller: h.credentials })).rejects.toMatchObject({ code: 'CONTROL_PERMISSION_DENIED' })
+  await expect(service.call('settings.hosts.maintenance-review', review, { caller: h.credentials, principal: {kind:'device',id:'limited-device'} })).rejects.toMatchObject({ code: 'CONTROL_PERMISSION_DENIED' })
   expect(f.manager.install).not.toHaveBeenCalled()
 })
 

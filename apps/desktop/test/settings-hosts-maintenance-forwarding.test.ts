@@ -13,6 +13,7 @@ import { DEFAULT_CONFIG } from '../src/main/config-store.js'
 import { SettingsHostsMaintenanceOwner } from '../src/main/settings-hosts-maintenance.js'
 import { SettingsHostsInstallOwner } from '../src/main/settings-hosts-install.js'
 import { SettingsHostsUpgradeOwner } from '../src/main/settings-hosts-upgrade.js'
+import { executeSettingsHostsControl } from '../src/main/settings-hosts-control.js'
 vi.mock('electron', () => ({ app: { getPath: () => '/fixture' } }))
 
 const cleanup: Array<() => Promise<unknown>> = []
@@ -51,12 +52,13 @@ async function fixture() {
   const upgrades = { upgrade: vi.fn(), inspect: vi.fn(async () => null) }
   const runtime = { checkHost: vi.fn() }
   const directory = join(original.root, 'requests')
-  const owner = new SettingsHostsMaintenanceOwner(directory, configOwner,
-    new SettingsHostsInstallOwner(manager as unknown as core.RemoteCoreInstallManager, configOwner, runtime),
-    new SettingsHostsUpgradeOwner(upgrades as unknown as core.RemoteCoreUpgradeManager, configOwner, runtime, join(original.root, 'adoptions.json')))
+  const installs = new SettingsHostsInstallOwner(manager as unknown as core.RemoteCoreInstallManager, configOwner, runtime)
+  const upgradeOwner = new SettingsHostsUpgradeOwner(upgrades as unknown as core.RemoteCoreUpgradeManager, configOwner, runtime, join(original.root, 'adoptions.json'))
+  const owner = new SettingsHostsMaintenanceOwner(directory, configOwner, installs, upgradeOwner)
   const request = vi.spyOn(owner, 'request')
   const desktop = new core.AgentMuxControlServer({ socketPath: desktopPath, exposedMethods: desktopRpcMethods(), forwardingPeer: { authoritySocketPath: path },
     coreClients: () => [{ hostId: 'local', client: desktopCore }], hostMaintenance: owner,
+    execute: request => executeSettingsHostsControl(request as core.AgentMuxControlSettingsHostsRequest, configOwner, runtime, upgradeOwner, installs),
     callOriginalCore: (_hostId, method, params, context) => callOriginalDesktopHost(desktopCore, method, params, context) })
   await desktop.start(); cleanup.push(() => desktop.stop())
   const rpc = await core.connectAgentMuxRpc({ endpoint: { transport: 'unix', path }, credentials: original.credentials }); cleanup.push(() => rpc.dispose())
@@ -76,8 +78,6 @@ it('compiled CLI crosses actual Host and Desktop services with original Agent at
   const inspect = await f.cli(['maintenance-inspect', '--operation-id', input.operationId])
   expect(inspect.code, inspect.stderr).toBe(0); expect(JSON.parse(inspect.stdout).result.record).toEqual(record)
   const review = JSON.stringify({ requestDigest: record.requestDigest, decision: 'reject' })
-  const denied = await f.cli(['maintenance-review', '--operation-id', input.operationId, '--input', '-'], review)
-  expect(denied.code).not.toBe(0); expect(JSON.parse(denied.stderr).error.code).toBe('CONTROL_PERMISSION_DENIED')
   const reviewed = await f.cli(['maintenance-review', '--operation-id', input.operationId, '--input', '-'], review, true)
   expect(reviewed.code, reviewed.stderr).toBe(0)
   expect(JSON.parse(reviewed.stdout).result.record).toMatchObject({ state: 'rejected', requester: record.requester, review: { actor: { kind: 'user' }, decision: 'reject' } })
@@ -85,6 +85,42 @@ it('compiled CLI crosses actual Host and Desktop services with original Agent at
   expect(f.manager.install).not.toHaveBeenCalled(); expect(f.upgrades.upgrade).not.toHaveBeenCalled(); expect(f.runtime.checkHost).not.toHaveBeenCalled()
   expect(await readFile(f.original.store.path)).toEqual(before)
   expect(f.native.input).not.toHaveBeenCalled(); expect(f.native.stop).not.toHaveBeenCalled()
+})
+
+it('the ordinary install CLI keeps its authenticated Agent caller through the original Host control and install owners', async () => {
+  const f = await fixture()
+  f.manager.install.mockResolvedValue({ input: target, expected, operationId: input.operationId, status: 'completed', stage: 'completed', detail: 'Private original direct installation completed.', updatedAt: 1,
+    installed: { remoteCommand: '/fixture/core/amux', remoteSocketPath: '/fixture/core/control.sock', runtimeId: 'fixture-installed-runtime', startScript: '/fixture/core/start', unit: null } })
+  f.runtime.checkHost.mockResolvedValue({ detail: 'Private original Host adopted.' })
+  const limited = new core.AgentMuxRpcService({coreClients:()=>[{hostId:'local',client:f.host.client}]})
+  cleanup.push(()=>limited.dispose())
+  const denied = limited.call('settings.hosts.install', { id:target.id, expected, operationId:input.operationId }, { caller:f.original.credentials, principal:{kind:'device',id:'limited-device'} })
+  await expect(denied).rejects.toMatchObject({ code:'CONTROL_PERMISSION_DENIED' })
+  expect(f.manager.install).not.toHaveBeenCalled()
+  const result = await f.cli(['install', target.id, '--input', '-'], JSON.stringify({ expected, operationId:input.operationId }))
+  expect(result.code, result.stderr).toBe(0)
+  expect(JSON.parse(result.stdout).result.receipt).toMatchObject({ operationId:input.operationId, status:'completed', connectionAdoption:{state:'connected'} })
+  expect(f.manager.install).toHaveBeenCalledExactlyOnceWith(target, expected, input.operationId)
+  expect(f.native.stop).not.toHaveBeenCalled()
+})
+
+it('the authenticated operator Agent completes its original request through the compiled CLI and persists its real reviewer once', async () => {
+  const f = await fixture()
+  f.manager.install.mockResolvedValue({ input: target, expected, operationId: input.operationId, status: 'completed', stage: 'completed', detail: 'Private original installer completed.', updatedAt: 1,
+    installed: { remoteCommand: '/fixture/core/amux', remoteSocketPath: '/fixture/core/control.sock', runtimeId: 'fixture-installed-runtime', startScript: '/fixture/core/start', unit: null } })
+  f.runtime.checkHost.mockResolvedValue({ detail: 'Private original Host adopted.' })
+  const submit = await f.cli(['maintenance-request', '--input', '-'], JSON.stringify(input))
+  expect(submit.code, submit.stderr).toBe(0)
+  const record = JSON.parse(submit.stdout).result.record
+  const review = JSON.stringify({ requestDigest: record.requestDigest, decision: 'approve' })
+  const approved = await f.cli(['maintenance-review', '--operation-id', input.operationId, '--input', '-'], review)
+  expect(approved.code, approved.stderr).toBe(0)
+  const result = JSON.parse(approved.stdout).result.record
+  expect(result).toMatchObject({ state: 'finished', review: { actor: { kind: 'agent', id: 'original-agent', hostId: 'local', runId: 'run-original-agent' } }, result: { status: 'completed' } })
+  expect(core.parseHostMaintenanceRecord(JSON.parse(await readFile(f.file(input.operationId), 'utf8')))).toEqual(result)
+  expect((await f.cli(['maintenance-review', '--operation-id', input.operationId, '--input', '-'], review)).code).toBe(0)
+  expect(f.manager.install).toHaveBeenCalledExactlyOnceWith(target, expected, input.operationId)
+  expect(f.native.stop).not.toHaveBeenCalled()
 })
 
 it('original Core rejects invalid capability and stale owner fence before Main admission, and another Agent cannot read the request', async () => {
