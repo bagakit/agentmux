@@ -1,7 +1,7 @@
 import { createContext, useContext, useMemo, useRef, useState, type ReactNode } from 'react'
 import { ComposerHost, ComposerSource, ComposerSurface } from '@agentmux/client-ui/components/ComposerHost'
 import { AgentComposer, type AgentComposerProps } from '@agentmux/client-ui/components/AgentComposer'
-import { ClientUiProvider } from '@agentmux/client-ui'
+import { ClientUiProvider } from '@agentmux/client-ui/platform'
 import type { ClientUiPlatform } from '@agentmux/client-ui/platform'
 import type { MobileConversationClient } from './mobile-conversation-client'
 import type { MotePreferencesTarget } from '@agentmux/core/mote-preferences'

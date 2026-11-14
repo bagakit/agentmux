@@ -1,4 +1,5 @@
-import { ClientUiProvider, type ClientUiPlatform, type ConversationSenderDetails } from '@agentmux/client-ui'
+import { ClientUiProvider, type ClientUiPlatform } from '@agentmux/client-ui/platform'
+import type { ConversationSenderDetails } from '@agentmux/client-ui/conversation-speaker'
 import { resolveConversationDetailLevel } from '@agentmux/client-ui/conversation-detail-level'
 import { resolveConversationShowSendReceipts, resolveConversationConfirmedSendReceipt } from '@agentmux/client-ui/conversation-send-receipts'
 import { lazy, Suspense, useMemo, type ReactNode } from 'react'

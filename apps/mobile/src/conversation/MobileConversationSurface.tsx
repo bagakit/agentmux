@@ -17,11 +17,12 @@ import { mintObjectId } from '@agentmux/core/object-id'
 import type { AgentInputMoteSource, AgentSessionUserMessage } from '@agentmux/core'
 import type { InputHistoryRead } from '@agentmux/client-ui/use-agent-input-history'
 import { inputHistoryText } from '@agentmux/client-ui/input-history-text'
-import {
-  AgentInteractionCard, ClientUiProvider, NativeProcessObservation, ConversationView,
-  createSpeakerResolver,
-  type ClientUiPlatform, type ConversationMessageProps
-} from '@agentmux/client-ui'
+import { ClientUiProvider, type ClientUiPlatform } from '@agentmux/client-ui/platform'
+import { AgentInteractionCard } from '@agentmux/client-ui/components/AgentInteractionCard'
+import { NativeProcessObservation } from '@agentmux/client-ui/components/NativeProcessObservation'
+import { ConversationView } from '@agentmux/client-ui/components/ConversationView'
+import type { ConversationMessageProps } from '@agentmux/client-ui/components/ConversationMessage'
+import { createSpeakerResolver, type DescribeSpeaker } from '@agentmux/client-ui/conversation-speaker'
 import { errorMessage } from './delivery'
 import type { PromptAttempt, ResponseAttempt } from './local-drafts'
 import { useMobileLocalDrafts } from './local-drafts-owner'
@@ -44,7 +45,6 @@ import { mobileMoteMainInputIssue, retainMobileMoteMain, type MobileMoteMainInpu
 import { MobileMoteSpeakerAvatar } from './MobileMoteSpeakerAvatar'
 import { agentProviderLabel } from '@agentmux/client-ui/components/AgentProviderIcon'
 import type { AgentMuxSpaceAppearance } from '@agentmux/core/control'
-import type { DescribeSpeaker } from '@agentmux/client-ui/conversation-speaker'
 import './conversation.css'
 import { DELIVERY_DISMISSAL_STORAGE, MobileNotice, MobileNoticeScope, useMobileNotices } from '../notices/MobileNotice'
 import { useMobileWebAttachmentOwner, useMobileWebUpdateSafetyOwner } from '../mobile-web/update-safety'
