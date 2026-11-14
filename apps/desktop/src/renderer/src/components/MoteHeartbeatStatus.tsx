@@ -28,6 +28,7 @@ export function MoteHeartbeatStatus({ scope, reading, reports, onOpenPath, loadi
   const schedule = reading?.schedule
   const input = reading?.input, ref = schedule?.lastInputRef
   const report = originalMoteHeartbeatReport(ref, schedule?.loopId, reports)
+  const guidance = reading?.guidance
   const native = input?.nativeResult.state
   const resultLabel = native === 'completed' ? 'This input finished' : native === 'failed' ? 'This input failed' : native === 'interrupted' ? 'This input was interrupted' : 'Execution result unconfirmed'
   const deliveryLabel = input?.delivery === 'native-admitted' ? 'Input accepted' : input?.delivery === 'terminal-confirmed' ? 'Sent · acceptance unconfirmed' : input?.delivery === 'not-applied' ? 'Confirmed not sent' : 'Delivery unconfirmed'
@@ -40,6 +41,9 @@ export function MoteHeartbeatStatus({ scope, reading, reports, onOpenPath, loadi
       <div><h3>{scope.topic.title}</h3><span className="mote-heartbeat__eyebrow">{title}</span></div>
     </header>
     <p className="mote-heartbeat__purpose">Keeps an eye on your goals, work and unfinished commitments.</p>
+    {report ? <p className="mote-heartbeat__report-summary"><span>Agent report</span>{report.report.summary}</p> : null}
+    {guidance ? <p className="mote-heartbeat__guidance-status">{!unavailable && guidance.adoptedRevision === guidance.availableRevision ? 'Current work cycle adopted' : 'Work cycle adoption not confirmed'}</p> : null}
+    <div className="mote-heartbeat__actions">{actions}<button type="button" className="small-button" disabled={loading} onClick={onRefresh}>{loading ? 'Reading…' : 'Refresh actual schedule'}</button></div>
     {controls && !controlsAfterStatus ? <div className="mote-heartbeat__controls">{controls}</div> : null}
     <div className="mote-heartbeat__reading" role="status">
       {schedule?.status === 'paused' ? <p>{moteHeartbeatPresentation(reading, false).detail}</p> : null}
@@ -52,7 +56,6 @@ export function MoteHeartbeatStatus({ scope, reading, reports, onOpenPath, loadi
         {status === 'active' ? <><dt>Next opportunity</dt><dd><Stamp value={schedule.nextCheckAt} /></dd></> : null}
       </dl> : <p>{status === 'unbound' ? 'Start or choose this Mote’s main Agent to arrange automatic checks.' : status === 'disabled' ? 'Turn on heartbeat below to arrange automatic checks.' : 'Saved settings alone do not confirm that heartbeat is running.'}</p>}
     </div>
-    {report ? <p className="mote-heartbeat__report-summary"><span>Agent report</span>{report.report.summary}</p> : null}
     {ref ? <details className="mote-heartbeat__report"><summary>{report ? 'Report and saved Ideas' : 'Work report not confirmed'}</summary>
       {report ? <><p className="mote-heartbeat__attribution">Reported by this Mote’s Agent · separate from input completion</p>
         {report.report.actions.map((action, index) => action.kind === 'idea' ? <div className="mote-heartbeat__idea" key={index}><span>{action.path}</span><small>{report.ideaEvidence.find(item => item.actionIndex === index)?.status === 'committed-note' ? 'Note commit confirmed' : report.ideaEvidence.find(item => item.actionIndex === index)?.status === 'observed-file' ? 'File revision observed' : 'Saved revision unconfirmed'}</small>
@@ -62,7 +65,6 @@ export function MoteHeartbeatStatus({ scope, reading, reports, onOpenPath, loadi
       {native === 'unsupported' ? <p>Your Agent can keep working in the original conversation. This Provider does not link terminal input to its exact execution result.</p> : input?.returnedIdle && native === 'unknown' ? <p>The original input returned idle. That alone does not confirm that it was processed or that work is complete.</p> : null}
     </details> : null}
     {issue || !schedule && reading?.issue ? <p className="mote-heartbeat__issue" role="status">{issue ?? reading?.issue}</p> : null}
-    <div className="mote-heartbeat__actions">{actions}<button type="button" className="small-button" disabled={loading} onClick={onRefresh}>{loading ? 'Reading…' : 'Refresh actual schedule'}</button></div>
     {controls && controlsAfterStatus ? <div className="mote-heartbeat__controls">{controls}</div> : null}
     {schedule ? <details className="mote-heartbeat__details"><summary>Original schedule details</summary>
       {schedule.lastDecision ? <p>{schedule.lastDecision}</p> : null}
