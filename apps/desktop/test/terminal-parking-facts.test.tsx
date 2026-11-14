@@ -24,7 +24,8 @@ vi.mock('react', async (original) => {
     return ref
   } }
 })
-import { useTerminalColdParking, createTerminalParkingSessionSelector } from '../src/renderer/src/lib/terminal-cold-parking-coordinator'
+import { useTerminalColdParking, createTerminalParkingSessionSelector, TerminalParkingProvider, useTerminalRegionParked } from '../src/renderer/src/lib/terminal-cold-parking-coordinator'
+import { TERMINAL_HOT_RETAIN_MS } from '../src/renderer/src/lib/terminal-cold-parking-policy'
 
 declare const __AGENTMUX_TERMINAL_VIEW_SOURCE__: string | undefined
 const source = typeof __AGENTMUX_TERMINAL_VIEW_SOURCE__ === 'string' ? __AGENTMUX_TERMINAL_VIEW_SOURCE__ : readFileSync(resolve('apps/desktop/src/renderer/src/components/TerminalView.tsx'), 'utf8')
@@ -41,7 +42,7 @@ function declaration(name: string): string {
 const roots: Root[] = []
 afterEach(async () => {
   for (const root of roots.splice(0)) await act(() => root.unmount())
-  mocks.maps.length = 0; vi.restoreAllMocks()
+  mocks.maps.length = 0; vi.useRealTimers(); vi.restoreAllMocks()
 })
 function mount(component: ReturnType<typeof createElement>) {
   const host = document.createElement('div'), root = createRoot(host); roots.push(root)
@@ -63,13 +64,13 @@ describe('production Terminal related parking facts', () => {
     const config = { workspaces } as unknown as AppConfig
     const store = create(() => ({ config, other: 0 })); mocks.store = store as never
     const rootPath = vi.fn((c: AppConfig, s: SessionSnapshot) => { walks++; return workspaceRootForPath(c, s) })
-    const renderDeclarations = new Function('useAppStore', 'useMemo', 'workspaceRootForPath', 'session', 'linkOrigin',
+    const renderDeclarations = new Function('useAppStore', 'useMemo', 'workspaceRootForPath', 'session', 'linkOrigin', 'sessionSource', 'fileContext',
       declaration('terminalConfig') + declaration('workspaceIsLocal') + declaration('activeWorkspaceRoot') + 'return { workspaceIsLocal, activeWorkspaceRoot };')
     let value: { workspaceIsLocal: boolean; activeWorkspaceRoot: string } | undefined
     function Probe({ own }: { own: SessionSnapshot }) {
       // Force parent renders as well as notifications; local memo must protect both boundaries.
       store(state => state.other)
-      value = renderDeclarations(store, useMemo, rootPath, own, { workspaceId: 'repo' })
+      value = renderDeclarations(store, useMemo, rootPath, own, { workspaceId: 'repo' }, undefined, { pathPrefix: null, workspaceRoot: null })
       return createElement('output', null, value!.activeWorkspaceRoot)
     }
     const own = session('s'); await mount(createElement(Probe, { own }))
@@ -144,5 +145,45 @@ describe('production Terminal related parking facts', () => {
       await act(() => store.setState({ tabs: {} }))
     }
     expect(mocks.maps.map(map => map.size)).toEqual([0, 0, 0])
+  })
+
+  it('parks the original Region on time after the window had no pending deadline', async () => {
+    vi.useFakeTimers()
+    const original = tab('original'), other = tab('other')
+    const originalSession = session('original')
+    const store = create(() => ({
+      tabs: { original } as Record<string, WorkbenchTab>,
+      layouts: { repo: createWorkspaceLayout('group', [original.id]) },
+      sessions: [originalSession], activeWorkspaceId: 'repo'
+    }))
+    mocks.store = store as never
+    const host = document.createElement('div')
+    const root = createRoot(host)
+    roots.push(root)
+    function Region() {
+      const parked = useTerminalRegionParked('region:original')
+      return createElement('output', null, parked ? 'parked' : 'warm')
+    }
+    function Probe() {
+      const parkedRegionIds = useTerminalColdParking({ workbenchVisible: true })
+      return createElement(TerminalParkingProvider, { parkedRegionIds, children: createElement(Region) })
+    }
+    await act(() => root.render(createElement(Probe)))
+    const surface = host.firstElementChild
+    expect(vi.getTimerCount()).toBe(0)
+    await act(() => vi.advanceTimersByTimeAsync(60 * 60_000))
+    await act(() => store.setState({
+      tabs: { original, other }, sessions: [originalSession, session('other')],
+      layouts: { repo: createWorkspaceLayout('group', [other.id, original.id]) }
+    }))
+    await act(() => vi.advanceTimersByTimeAsync(TERMINAL_HOT_RETAIN_MS - 1))
+    expect(host.textContent).toBe('warm')
+    await act(() => vi.advanceTimersByTimeAsync(1))
+    expect(host.textContent).toBe('parked')
+    await act(() => store.setState({ layouts: { repo: createWorkspaceLayout('group', [original.id, other.id]) } }))
+    expect(host.textContent).toBe('warm')
+    expect(host.firstElementChild).toBe(surface)
+    expect(store.getState().tabs.original).toBe(original)
+    expect(store.getState().sessions[0]).toBe(originalSession)
   })
 })
