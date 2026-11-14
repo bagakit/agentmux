@@ -31,6 +31,7 @@ import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { agentNewTabDestinations } from '../src/renderer/src/lib/agent-new-tab-destination'
 import { spatialCatalog } from '../src/renderer/src/lib/space-agent-control'
 import { AgentOperationFeedback } from '../src/renderer/src/components/AgentOperationFeedback'
+import { RetainedTakeoverRecords } from '../src/renderer/src/components/RetainedTakeoverRecords'
 import { agentOperationKey, beginAgentOperation, inspectAgentOperation, settleAgentCreation } from '../src/renderer/src/lib/agent-operation-feedback'
 import { persistedAgentOperations, restoredAgentOperations, type AgentOperationFeedback as Operation } from '../src/renderer/src/lib/agent-operation'
 import { cancelTakeoverOperation } from '../src/renderer/src/lib/session-takeover-cancellation'
@@ -67,6 +68,16 @@ async function openDetails() {
   await act(async () => trigger.click())
   await vi.waitFor(() => expect(document.querySelector('.agent-operation-feedback__popover')).not.toBeNull())
   return document.querySelector<HTMLElement>('.agent-operation-feedback__popover')!
+}
+async function openHistory() {
+  await dom.render(<><AgentOperationFeedback subject={operation.subject} />
+    <section className="agent-information-takeovers"><RetainedTakeoverRecords subject={operation.subject} /></section></>)
+  expect(dom.container.querySelector('.agent-operation-feedback')).toBeNull()
+  const history = dom.container.querySelector<HTMLDetailsElement>('.agent-information-takeovers > details')!
+  expect(history.querySelector('summary')?.textContent).toBe('旧接手记录')
+  expect(history.open).toBe(false)
+  await act(async () => { history.open = true })
+  return history
 }
 function preserved(before: ReturnType<typeof useAppStore.getState>) {
   const state = useAppStore.getState()
@@ -584,28 +595,33 @@ it('a waiting original Check leaves direct cancellation usable and cannot overwr
   expect(vi.mocked(api.spatial.inspectOperation)).not.toHaveBeenCalled()
 })
 
-it('a legacy record opens and folds its exact read-only reference without a business Cancel action', async () => {
+it('legacy unsaved Takeover reads in Agent history with exact diagnostics and no invented placement', async () => {
   operation = { ...operation, takeoverSource: { ...operation.takeoverSource, coreRequest: undefined } }
-  useAppStore.setState({ agentOperations: { [agentOperationKey(operation)]: operation } })
+  const originalFailure = { step: 'target', code: 'SPACE_INTENT_SAVE_FAILED', message: 'Original request association was not saved.', recovery: 'Inspect the original operation.' }
+  useAppStore.setState({ agentOperations: { [agentOperationKey(operation)]: operation }, spatialRequests: {
+    [operation.operationId]: { requestId: operation.operationId, inputDigest: 'legacy-intent', operation: 'agent.open',
+      tabId: 'unplaced-tab', regionId: 'unplaced-region', agentSessionId: 'never-created-agent', createAgent: true,
+      executionHostId: 'local', target: { tabId: 'unplaced-tab', regionId: 'unplaced-region' }, originalFailure }
+  } })
   const before = useAppStore.getState()
   const inspect = vi.spyOn(before, 'executeControl')
   await render()
-  expect(buttons('查看原接手记录')).toHaveLength(1)
+  expect(dom.container.querySelector('.agent-operation-feedback')).toBeNull()
   expect(buttons('检查结果')).toHaveLength(0)
-  expect(buttons('取消接手')).toHaveLength(0)
-  const popup = await openDetails()
-  expect(popup.textContent).toContain('旧记录缺少完整请求')
-  expect(popup.querySelector('code')?.textContent).toBe(operation.operationId)
-  expect(buttons('检查结果')).toHaveLength(1)
+  const history = await openHistory()
+  expect(history.querySelector('[role="status"]')?.textContent).toBe('接手未提交')
+  const technical = history.querySelector<HTMLDetailsElement>('.agent-operation-feedback__technical')!
+  expect(technical.open).toBe(false)
+  expect(technical.querySelector('code')?.textContent).toBe(operation.operationId)
   expect(buttons('取消接手')).toHaveLength(0)
   await press('检查结果')
   await vi.waitFor(() => expect(buttons('检查结果')[0]!.disabled).toBe(false))
   expect(inspect).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ operation: 'space.inspect', target: { requestId: operation.operationId } }))
-  await press('关闭操作详情')
-  expect(document.querySelector('.agent-operation-feedback__popover')).toBeNull()
-  expect(buttons('查看原接手记录')).toHaveLength(1)
-  const reopened = await openDetails()
-  expect(reopened.querySelector('code')?.textContent).toBe(operation.operationId)
+  expect(current().report?.issues.map(issue => issue.code)).toContain('SPACE_INTENT_SAVE_FAILED')
+  expect(current().report?.issues.map(issue => issue.code)).not.toContain('SPACE_PLACEMENT_UNKNOWN')
+  expect(history.textContent).toContain('本次检查未能确认创建结果')
+  expect(technical.textContent).toContain(originalFailure.message)
+  expect(technical.open).toBe(false)
   expect(current().takeoverSource).toEqual(operation.takeoverSource)
   expect(current().cancellation).toBeUndefined()
   expect(inputCalls).toEqual([])
@@ -629,11 +645,11 @@ it('an exact creation returned by Check replaces the missing-request explanation
     return { operation: 'space.inspect', catalog: response.catalog, request: { requestId: operationId, known: true,
       report: { ...report, requestId: operationId } } }
   })
-  await render()
-  const popup = await openDetails()
+  const history = await openHistory()
   await press('检查结果')
-  await vi.waitFor(() => expect(popup.textContent).toContain('接手 Agent 已创建'))
-  expect(popup.textContent).not.toContain('旧记录缺少完整请求')
+  await vi.waitFor(() => expect(history.textContent).toContain('接手 Agent 已创建'))
+  const retained = restoredAgentOperations(persistedAgentOperations(useAppStore.getState().agentOperations))
+  expect(retained[agentOperationKey(operation)]?.report?.agent?.agentSessionId).toBe(result.agent?.agentSessionId)
   expect(inspect).toHaveBeenCalledTimes(1)
   expect(f.started).toHaveLength(starts)
   expect(inputCalls).toEqual([])

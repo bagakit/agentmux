@@ -6,6 +6,9 @@ import assert from 'node:assert/strict'
 import source from './vitest.mote-context.config.mts'
 
 const mutations: Record<string, [string, string, string]> = {
+  'legacy-remains-on-card': ['AgentOperationFeedback.tsx', '!isRetainedTakeoverRecord(operation) &&', ''],
+  'legacy-invents-placement': ['space-agent-control.ts', '!atTarget && !agent?.retirement && !unsavedBeforeDispatch', '!atTarget && !agent?.retirement'],
+  'legacy-result-forgotten': ['agent-operation.ts', ' || isRetainedTakeoverRecord(operation) ||', ' ||'],
   'settle-unknown-save': ['agent-operation.ts', "result?.outcome === 'cancelled' && result.diskDurability === 'confirmed'", "result?.outcome === 'cancelled'"],
   'settle-keeps-row': ['AgentOperationFeedback.tsx', "operation.kind !== 'takeover' || !isDurableTakeoverCancellation(operation.cancellation?.result) || operation.cancellation?.settlingFeedback", 'Boolean(operation)'],
   'offscreen-consumes-settlement': ['AgentOperationFeedback.tsx', "if (operation.kind === 'takeover' && operation.cancellation?.settlingFeedback && visibleFeedback.has(agentOperationKey(operation))) return", ''],

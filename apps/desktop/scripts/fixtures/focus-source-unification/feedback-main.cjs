@@ -6,7 +6,8 @@ module.exports=async({win,read,until,pause,settle,click,capture,captureIntermedi
  const facts=()=>read('window.takeoverFeedbackProof.facts()')
  const card='.focus-context[data-session-id="working"]'
  const area='.focus-context-card:has('+card+') > .agent-operation-feedback:not(.agent-operation-feedback--compact)'
- const legacyArea='.focus-context-card:has(.focus-context[data-session-id="reading"]) > .agent-operation-feedback:not(.agent-operation-feedback--compact)'
+ const legacyCard='.focus-context[data-session-id="reading"]'
+ const legacyArea='.focus-context-card:has('+legacyCard+') > .agent-operation-feedback'
  const popup='.agent-operation-feedback__popover'
  const press=async(text,scope=area)=>{
   await read(`(()=>{const e=[...document.querySelectorAll(${JSON.stringify(scope+' button')})].find(e=>e.textContent.trim()===${JSON.stringify(text)}||e.getAttribute('aria-label')===${JSON.stringify(text)});if(!e)throw Error('Missing actual button '+${JSON.stringify(text)});document.querySelector('[data-feedback-click]')?.removeAttribute('data-feedback-click');e.dataset.feedbackClick='true'})()`)
@@ -38,18 +39,37 @@ module.exports=async({win,read,until,pause,settle,click,capture,captureIntermedi
   win.setContentSize(w,h);await read(`window.unifiedFocusProof.theme(${JSON.stringify(theme)})`);await settle()
   assert.equal(await read('!!document.querySelector(".agent-operation-feedback__popover")'),false)
   const before=await cardHeights()
-  await frame('unconfirmed-'+w+'-'+theme,'Actionable takeover and compact read-only neighbor on their original Focus cards')
+  assert.equal(await read('!!document.querySelector('+JSON.stringify(legacyArea)+')'),false)
+  await frame('unconfirmed-'+w+'-'+theme,'The active Takeover stays on its original Focus card and the legacy neighbor has no permanent controls')
   await details();await settle()
   const after=await cardHeights();assert.deepEqual(after,before,'Opening the operation popover cannot expand either adjacent card')
   result.cardDensity??=[];result.cardDensity.push({width:w,theme,before,after,unchanged:true})
   if(w===1440&&theme==='dark'||w===420&&theme==='light')await frame('details-'+w+'-'+theme,'Positioned operation details preserve the height and density of both adjacent cards')
   await closeDetails()
  }
+ const legacyHistory='.agent-information-reader .agent-information-takeovers > details:first-child'
+ for(const[w,h,theme]of samples){
+  win.setContentSize(w,h);await read(`window.unifiedFocusProof.theme(${JSON.stringify(theme)})`);await settle()
+  await read(`document.querySelector(${JSON.stringify(legacyCard)}).focus()`)
+  for(const type of ['keyDown','keyUp'])await win.webContents.debugger.sendCommand('Input.dispatchKeyEvent',{type,key:'ArrowDown',code:'ArrowDown',windowsVirtualKeyCode:40})
+  await until('original Agent information reader',()=>read('!!document.querySelector(".agent-information-reader__status")'))
+  await click('.agent-information-reader__status')
+  await until('legacy record in original source information',()=>read('document.querySelector('+JSON.stringify(legacyHistory+' > summary')+')?.textContent==="旧接手记录"'))
+  if(theme==='dark')await frame('legacy-entry-'+w+'-'+theme,'The collapsed legacy history belongs to the original Agent Source page')
+  await click(legacyHistory+' > summary')
+  assert.equal(await read('document.querySelector('+JSON.stringify(legacyHistory+' [role="status"]')+')?.textContent'),'接手未提交')
+  assert.equal(await read('document.querySelector('+JSON.stringify(legacyHistory+' .agent-operation-feedback__technical')+')?.open'),false)
+  await frame('legacy-record-'+w+'-'+theme,'Original Agent source details show a short submission result and explicit read-only check')
+  await press('检查结果',legacyHistory)
+  await until('original legacy check settled',()=>read('!document.querySelector('+JSON.stringify(legacyHistory+' button')+').disabled'))
+  await click(legacyHistory+' .agent-operation-feedback__technical > summary')
+  assert.equal(await read('document.querySelector('+JSON.stringify(legacyHistory+' code')+')?.textContent'),'takeover:adjacent-original')
+  await read('document.querySelector('+JSON.stringify(legacyHistory+' .agent-operation-feedback__reference')+').scrollIntoView({block:"nearest"})')
+  assert.equal(await read(`(()=>{const e=document.querySelector(${JSON.stringify(legacyHistory+' .agent-operation-feedback__reference')}),a=e.getBoundingClientRect(),p=e.closest('.agent-information-reader__metadata').getBoundingClientRect();return a.top>=p.top-1&&a.bottom<=p.bottom+1})()`),true)
+  await frame('legacy-technical-'+w+'-'+theme,'The original issue, separate check result and copyable operation are accessible inside technical details')
+  await click('[aria-label="Close Agent reading"]')
+ }
  win.setContentSize(1440,900);await read('window.unifiedFocusProof.theme("dark")');await settle()
- await press('查看原接手记录',legacyArea)
- await until('actual read-only operation details',()=>read('document.querySelector(".agent-operation-feedback__popover")?.textContent.includes("旧记录缺少完整请求")'))
- await frame('legacy-record-normal-dark','Original legacy record remains readable and can be folded again')
- await closeDetails()
  await read('window.takeoverFeedbackProof.failOwnerRead(true)')
  await press('取消接手')
  await until('first-level cancellation preparation failure',()=>read('document.querySelector('+JSON.stringify(area)+')?.textContent.includes("未能确认原工作区。")'))
