@@ -17,9 +17,10 @@ afterEach(async () => { for (const close of closes.splice(0).reverse()) await cl
 const target = { hostId: 'local', agentSessionId: 'original' }
 const source = { hostId: 'local', sessionId: 'original', displayWorkspaceId: 'project', groupId: 'source-group', tabId: 'source-tab', regionId: 'source-region' }
 const conversation = { ...source, displayWorkspaceId: 'scratch', groupId: 'scratch-group', tabId: 'mote-tab', regionId: 'mote-region' }
-const input: AgentPromotionApply = { target, source, title: 'A lasting collaborator', operationId: 'promotion-original' }
+const input: AgentPromotionApply = { target, source, title: 'A lasting collaborator', operationId: 'promotion-original', destination: { kind: 'new-club' } }
 const receipt = (): AgentPromotionReceipt => ({ ...input, topicId: 'promoted-topic', moteSpaceId: 'mote', zoneId: 'mote-home',
   directoryPath: '/data/motes/collaborator', conversation, state: 'complete', stage: 'complete', diskDurability: 'confirmed', unavailable: [] })
+const discovery = { pending: [], clubs: [], memberships: [], nextCursor: null, issue: null }
 const association: PromotedAgentAssociation = { source, conversation, spaceId: 'mote', zoneId: 'mote-home', workspaceId: 'scratch', hostId: 'local',
   directoryPath: '/data/motes/collaborator', title: input.title, topicId: 'promoted-topic', session: { agentSessionId: 'original', runId: 'healthy-run', hostId: 'local', runtimeId: 'original-runtime', cwd: '/project' } }
 function graph(): AgentMuxSpatialGraph {
@@ -91,10 +92,30 @@ it('binds codecs to the same exact source, operation, principal target and compl
   expect(() => parseAgentPromotionParams('agent.promote.inspect', { target, actor: { kind: 'user' } })).toThrow()
   expect(parseAgentPromotionResult('agent.promote.apply', { promotion: receipt() }, input)).toEqual({ promotion: receipt() })
   const foreign = receipt(); foreign.target = { ...target, hostId: 'foreign' }; foreign.source = { ...source, hostId: 'foreign' }; foreign.conversation = { ...conversation, hostId: 'foreign' }
-  expect(() => parseAgentPromotionResult('agent.promote.inspect', { promotion: foreign }, { target })).toThrow()
+  expect(() => parseAgentPromotionResult('agent.promote.inspect', { promotion: foreign, discovery: null }, { target, operationId: input.operationId })).toThrow()
   expect(() => parseAgentPromotionResult('agent.promote.apply', { promotion: { ...receipt(), diskDurability: 'unconfirmed' } }, input)).toThrow()
   expect(() => parseAgentPromotionResult('agent.promote.apply', { promotion: null }, input)).toThrow()
-  expect(parseAgentPromotionResult('agent.promote.inspect', { promotion: null }, { target })).toEqual({ promotion: null })
+  expect(parseAgentPromotionResult('agent.promote.inspect', { promotion: null, discovery }, { target })).toEqual({ promotion: null, discovery })
+})
+
+it('requires an explicit typed destination and separates exact history from bounded discovery', () => {
+  const home = { spaceId: 'mote', zoneId: 'mote-home', expectedResource: { hostId: 'local', workspaceId: 'scratch', workspacePath: '/data' } }
+  const joined = { ...input, destination: { kind: 'existing-club' as const, target: home } }
+  expect(parseAgentPromotionParams('agent.promote.apply', joined)).toEqual(joined)
+  const { destination: _destination, ...missing } = input
+  for (const invalid of [missing, { ...input, destination: { kind: 'new-club', target: home } }, { ...input, destination: { kind: 'existing-club' } }])
+    expect(() => parseAgentPromotionParams('agent.promote.apply', invalid)).toThrow()
+  expect(() => parseAgentPromotionParams('agent.promote.inspect', { target, operationId: input.operationId, cursor: 'cursor' })).toThrow()
+  expect(() => parseAgentPromotionResult('agent.promote.inspect', { promotion: receipt(), discovery: null }, { target })).toThrow()
+  expect(() => parseAgentPromotionResult('agent.promote.inspect', { promotion: null, discovery }, { target, operationId: input.operationId })).toThrow()
+  const choice = { title: 'Same title', directoryPath: '/data/club', target: home }
+  const partial = { ...receipt(), state: 'partial', stage: 'spatial' }
+  const found = { pending: [partial], clubs: [choice], memberships: [{ ...choice, main: null }], nextCursor: 'cursor', issue: 'Original Main unavailable.\nMembership remains readable.' }
+  expect(parseAgentPromotionResult('agent.promote.inspect', { promotion: null, discovery: found }, { target })).toEqual({ promotion: null, discovery: found })
+  expect(() => parseAgentPromotionResult('agent.promote.inspect', { promotion: null, discovery: { ...found, pending: [receipt()] } }, { target })).toThrow()
+  expect(() => parseAgentPromotionResult('agent.promote.inspect', { promotion: null, discovery: { ...found, memberships: [{ ...choice, main: 'unknown' }] } }, { target })).toThrow()
+  expect(() => parseAgentPromotionResult('agent.promote.apply', { promotion: { ...receipt(), destination: joined.destination } }, input)).toThrow()
+  expect(() => parseAgentPromotionResult('agent.promote.apply', { promotion: { ...receipt(), destination: joined.destination, stage: 'main' } }, joined)).toThrow()
 })
 
 it('the actual Unix SDK and CLI parser use the narrow promotion owner and retain the original trusted actor', async () => {
@@ -115,12 +136,12 @@ it('the actual Unix SDK and CLI parser use the narrow promotion owner and retain
 
 it('only the person/device can establish a Mote role; authenticated Agents can inspect only their own retained operation', async () => {
   const fixture = await rpcOwnerFixture(['original', 'neighbor']); closes.push(() => fixture.close())
-  const calls = vi.fn(async (..._args: unknown[]) => ({ promotion: receipt() }))
+  const calls = vi.fn(async (..._args: unknown[]) => ({ promotion: receipt(), discovery: null }))
   const owner = new AgentMuxRpcService({ coreClients: fixture.coreClients, agentPromotions: { call: calls } as AgentPromotionPort })
   await expect(owner.call('agent.promote.apply', input, {})).rejects.toMatchObject({ code: 'CONTROL_PERMISSION_DENIED' })
   const context = { caller: fixture.credentials, principal: { kind: 'user' as const, id: 'claimed-user' } }
   await expect(owner.call('agent.promote.apply', input, context)).rejects.toMatchObject({ code: 'CONTROL_PERMISSION_DENIED' })
-  expect(await owner.call('agent.promote.inspect', { target }, context)).toEqual({ promotion: receipt() })
+  expect(await owner.call('agent.promote.inspect', { target, operationId: input.operationId }, context)).toEqual({ promotion: receipt(), discovery: null })
   await expect(owner.call('agent.promote.inspect', { target: { ...target, agentSessionId: 'neighbor' } }, context)).rejects.toMatchObject({ code: 'CONTROL_PERMISSION_DENIED' })
   expect(calls).toHaveBeenCalledTimes(1)
 })
