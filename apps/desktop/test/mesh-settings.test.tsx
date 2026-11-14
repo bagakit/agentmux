@@ -411,13 +411,11 @@ it('an acknowledgement after switching away settles only the selected gateway dr
   const config = useAppStore.getState().config!
   const remote = { ...settings, owner: { runtimeId: 'gateway-runtime', ownerInstanceId: 'gateway-instance' }, configuration: { ...configuration, role: 'gateway' as const } }
   let acknowledge!: () => void
-  const bridge = vi.spyOn(api.mesh, 'call').mockImplementation(async (method, params, options) => {
+  const bridge = vi.spyOn(api.mesh, 'call').mockImplementation(async (method, params) => {
     const selected = params.target ? remote : settings
     if (method === 'mesh.inspect') return observation(selected) as never
     if (method === 'settings.mesh.inspect') return structuredClone(selected) as never
     if (method !== 'settings.mesh.configure' || !('operationId' in params)) throw Error('Unexpected request')
-    expect(params.target).toEqual({ hostId: 'gateway', expectedRuntimeId: remote.owner.runtimeId })
-    expect(options?.expectedOwner).toEqual(remote.owner)
     return await new Promise(done => {
       acknowledge = () => done({ diskDurability: 'confirmed', settings: { ...remote, revision: 'next' } } as never)
     })
@@ -433,6 +431,9 @@ it('an acknowledgement after switching away settles only the selected gateway dr
     await select([...field.options].find(option => option.textContent?.includes('Saved gateway'))!.value); await ready()
     await input('Mesh network', 'gateway-edit'); await dom.click('[data-settings-save-bar] button')
     await settled(() => typeof acknowledge === 'function')
+    const save = bridge.mock.calls.find(([method]) => method === 'settings.mesh.configure')!
+    expect(save[1].target).toEqual({ hostId: 'gateway', expectedRuntimeId: remote.owner.runtimeId })
+    expect(save[2]?.expectedOwner).toEqual(remote.owner)
     await select(''); await ready()
     await input('Mesh network', 'local-work')
     await act(async () => acknowledge())
