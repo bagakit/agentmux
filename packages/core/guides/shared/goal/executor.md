@@ -5,6 +5,11 @@ Read the original finite Start or delegation and its frozen criteria before acti
 Report progress, questions, waiting conditions or blockers against that execution.
 Keep responsibility until verified handoff. A discussion or patrol does not start work.
 
+To pick up open work, read `goal plan --goal ID`. When a ready node has `claimOpen: true`
+and your Session has work authorization on that Goal, use `goal plan claim --goal ID
+--node NODE --revision N --operation-id OP`. Check the saved executor and operation.
+Read the original delegation for the task input and frozen criteria when work is dispatched.
+
 For a remote delegation, keep the Goal at its original owner. Read the received MID
 with `message read --message-id SOURCE`.
 Use the verified `envelope.application` (`agentmux.goal-delegation.v1`) to identify the
