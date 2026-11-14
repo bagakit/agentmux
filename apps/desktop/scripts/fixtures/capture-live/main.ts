@@ -302,7 +302,8 @@ async function run(): Promise<void> {
   const changedExcludedDuringAlternate = colorPixels(excludedFrame.png, hostRegion(excludedFrame, hostContent), 'host-changed')
   check('deferred excluded SCK pixels omit both host colors', initialExcluded.area > 100 && negligibleColorNoise(initialExcluded) && negligibleColorNoise(changedExcludedDuringAlternate), { initialExcluded, changedExcludedDuringAlternate })
   for (const frame of initial.exposures[1]!.result.displays) {
-    const marker = colorPixels(frame.png, { x: 0, y: 0, width: frame.width, height: frame.height }, 'overlay-marker')
+    const scaleX = frame.width / frame.frame.width, scaleY = frame.height / frame.frame.height
+    const marker = colorPixels(frame.png, { x: 20 * scaleX, y: 20 * scaleY, width: 96 * scaleX, height: 96 * scaleY }, 'overlay-marker')
     check('the deferred included-first alternate was captured after overlay show without recursion', negligibleColorNoise(marker), { displayId: frame.displayId, matches: marker.matches, area: marker.area })
   }
   process.stdout.write('capture-live stage: probe included after overlay paint\n')
