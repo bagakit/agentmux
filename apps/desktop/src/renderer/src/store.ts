@@ -204,6 +204,7 @@ import { createVisibleSessionIdsSelector } from './lib/session-visibility'
 import { currentExecutorDetection, executorDetectionMatches, executorDetectionKey } from './lib/executor-detection'
 export { executorDetectionKey } from './lib/executor-detection'
 import { executorsForHost, hostExecutorInventoryMatches } from './lib/executors'
+import { sameHostConnectionConfiguration } from '@agentmux/host/host-configuration'
 import { lifecycleFeedbackOwnerKey, type AgentLifecycleFailure, type AgentLifecycleFeedbackOwner } from './lib/agent-lifecycle-feedback'
 import { compactNotificationIdentity, ownedNotificationIdentity, normalizeNotificationReadReceipts } from './lib/notification-read-identity'
 import { notificationDeliveryNotice } from './lib/notification-delivery-notice'
@@ -9476,16 +9477,16 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     if (!host) return
     const prior = get().hostExecutorInventories[hostId]
     const pending = pendingHostExecutorDiscoveries.get(hostId)
-    if (pending && configValuesEqual(pending.input, host)) { await pending.promise; return }
+    if (pending && sameHostConnectionConfiguration(pending.input, host)) { await pending.promise; return }
     const request = Symbol(), input = structuredClone(host)
     hostExecutorRequests.set(hostId, request)
-    const retained = prior && configValuesEqual(prior.input, input) ? prior.result : undefined
+    const retained = prior && sameHostConnectionConfiguration(prior.input, input) ? prior.result : undefined
     set(state => ({ hostExecutorInventories: { ...state.hostExecutorInventories, [hostId]: {
       input, state: 'checking', ...(retained ? { result: retained } : {}),
-      ...(prior && configValuesEqual(prior.input, input) && prior.detail ? { detail: prior.detail } : {})
+      ...(prior && sameHostConnectionConfiguration(prior.input, input) && prior.detail ? { detail: prior.detail } : {})
     } } }))
     const current = () => hostExecutorRequests.get(hostId) === request &&
-      configValuesEqual(get().config?.hosts.find(item => item.id === hostId), input)
+      sameHostConnectionConfiguration(get().config?.hosts.find(item => item.id === hostId), input)
     const promise = (async () => {
       try {
         const result = await api.executors.discover(hostId)

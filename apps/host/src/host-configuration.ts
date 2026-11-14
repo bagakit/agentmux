@@ -14,6 +14,18 @@ export type SshHostConfig = {
   runtimeId?: string
 }
 export type HostConfig = LocalHostConfig | SshHostConfig
+
+/** Compare saved connection inputs for one operation; this does not authenticate a Runtime. */
+export function sameHostConnectionConfiguration(left: HostConfig | undefined, right: HostConfig | undefined): boolean {
+  if (!left || !right || left.id !== right.id || left.kind !== right.kind) return false
+  // The local listener is an incoming connection setting, not this local execution route.
+  if (left.kind === 'local' && right.kind === 'local') return true
+  if (left.kind !== 'ssh' || right.kind !== 'ssh') return false
+  return left.hostname === right.hostname && left.user === right.user && left.port === right.port &&
+    left.identityFile === right.identityFile && left.remoteCommand === right.remoteCommand &&
+    left.remoteSocketPath === right.remoteSocketPath && left.transport === right.transport && left.runtimeId === right.runtimeId &&
+    left.tailcat?.address === right.tailcat?.address && left.tailcat?.keyFile === right.tailcat?.keyFile
+}
 type FieldPath = (string | number)[]
 /** Structural issues preserve field diagnostics without depending on a validation library. */
 export type HostConfigurationIssue = { path: FieldPath; message: string } & (

@@ -2,7 +2,7 @@ import { split } from 'shlex'
 import type { AppConfig } from '../../../shared/contracts'
 import type { ExecutorDetectionState, HostExecutorInventoryState } from '../store'
 import { currentExecutorDetection, executorDetectionKey, type ExecutorDetectionPresentation } from './executor-detection'
-import { configValuesEqual } from '../../../shared/config-edit'
+import { sameHostConnectionConfiguration } from '@agentmux/host/host-configuration'
 
 export type ConfiguredExecutor = AppConfig['executors'][string] & { id: string }
 export type ExecutorChoice = Pick<ConfiguredExecutor, 'id' | 'label' | 'providerId' | 'command'> & {
@@ -11,7 +11,7 @@ export type ExecutorChoice = Pick<ConfiguredExecutor, 'id' | 'label' | 'provider
   detection?: ExecutorDetectionPresentation | undefined
 }
 export function hostExecutorInventoryMatches(inventory: HostExecutorInventoryState | undefined, host: AppConfig['hosts'][number] | undefined): inventory is HostExecutorInventoryState {
-  return Boolean(host && inventory && configValuesEqual(inventory.input, host))
+  return Boolean(inventory && sameHostConnectionConfiguration(inventory.input, host))
 }
 
 /** One choice projection. Remote launch metadata always belongs to that target Host. */

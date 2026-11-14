@@ -6,7 +6,7 @@ import type { AppConfig } from '../../../../shared/contracts'
 import { usePathDisplay } from '../../hooks/usePathDisplay'
 import { api } from '../../lib/api'
 import { executorsForHost, hostExecutorInventoryMatches } from '../../lib/executors'
-import { configValuesEqual } from '../../../../shared/config-edit'
+import { sameHostConnectionConfiguration } from '@agentmux/host/host-configuration'
 import { projectRailNavigation } from '../../lib/workspace-projects'
 import { useAppStore } from '../../store'
 import type { WorkspaceRecord } from '../../../../shared/contracts'
@@ -60,7 +60,7 @@ export const HostProjectsPane = memo(function HostProjectsPane({ config, hostId,
     ...project.workspaces.flatMap(workspace => [workspace.name, workspace.path, workspace.branch ?? ''])]
     .some(value => value.toLocaleLowerCase().includes(filter)))
   const executors = executorsForHost(config, hostId, detections, inventory).filter(item => item.detection?.state !== 'missing')
-  const selectionCurrent = !executorId || (configValuesEqual(selectionHost, host) && executors.some(item => item.id === executorId))
+  const selectionCurrent = !executorId || (sameHostConnectionConfiguration(selectionHost, host) && executors.some(item => item.id === executorId))
   const pickerExecutors = selectionCurrent ? executors : executors.filter(item => item.id !== executorId)
 
   async function open(workspace: WorkspaceRecord, startExecutor = '', selectedHost = selectionHost): Promise<void> {
@@ -80,7 +80,7 @@ export const HostProjectsPane = memo(function HostProjectsPane({ config, hostId,
         }
         const currentHost = state.config?.hosts.find(item => item.id === workspace.hostId)
         const currentExecutors = executorsForHost(state.config, workspace.hostId, state.executorDetections, state.hostExecutorInventories[workspace.hostId])
-        if (!configValuesEqual(selectedHost, currentHost) || !currentExecutors.some(item => item.id === startExecutor && item.detection?.state !== 'missing')) {
+        if (!sameHostConnectionConfiguration(selectedHost, currentHost) || !currentExecutors.some(item => item.id === startExecutor && item.detection?.state !== 'missing')) {
           setProgress({ workspace, stage: 'opened', message: 'Folder opened. Agent Launcher was not prepared.',
             error: 'The selected Agent configuration or connection changed. Choose an Agent on the saved connection again, or open without an Agent.' })
           return
