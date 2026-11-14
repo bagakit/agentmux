@@ -134,7 +134,6 @@ import { useAppStore } from '../store'
 import type { SessionStopOutcome } from '../lib/session-stop-intent'
 import { useSessionStopElapsed } from '../lib/use-session-stop-elapsed'
 import { useSessionStop } from './SessionStop'
-import { useTerminalRegionParked } from '../lib/terminal-cold-parking-coordinator'
 import {
   useBrowserSurfaceReleased,
   useMonacoSurfaceReleased
@@ -510,7 +509,6 @@ type SurfaceContentProps = {
 }
 
 function SurfaceContent({ surface, ...props }: SurfaceContentProps) {
-  const parked = useTerminalRegionParked(surface.regionId)
   const monacoReleased = useMonacoSurfaceReleased(surface.regionId)
   const browserReleased = useBrowserSurfaceReleased(surface.regionId)
   const browserPresentation = useWorkbenchBrowserPresentation()
@@ -520,7 +518,7 @@ function SurfaceContent({ surface, ...props }: SurfaceContentProps) {
   const windows = useContext(WorkbenchWindowTargetsContext)
   const nativeWindowTarget = windows.find(window => (!independentDocument || window.windowId === windowDocument?.windowId) &&
     window.target?.tabId === props.tabId && (window.target.kind === 'tab' || window.target.regionId === surface.regionId))?.target ?? undefined
-  return <SurfaceContentBody {...props} surface={surface} parked={parked} monacoReleased={monacoReleased}
+  return <SurfaceContentBody {...props} surface={surface} monacoReleased={monacoReleased}
     browserReleased={browserReleased} browserPresentation={browserPresentation} browserTargets={browserTargets}
     independentDocument={independentDocument} nativeWindowTarget={nativeWindowTarget} />
 }
@@ -542,7 +540,6 @@ const SurfaceContentBody = memo(function SurfaceContentBody({
   onBrowserRegionSplit,
   onBrowserRegionClose,
   primaryPresentationHostId,
-  parked,
   monacoReleased,
   browserReleased,
   browserPresentation,
@@ -550,7 +547,6 @@ const SurfaceContentBody = memo(function SurfaceContentBody({
   independentDocument,
   nativeWindowTarget
 }: SurfaceContentProps & {
-  parked: boolean
   monacoReleased: boolean
   browserReleased: boolean
   browserPresentation: ReturnType<typeof useWorkbenchBrowserPresentation>
@@ -567,7 +563,6 @@ const SurfaceContentBody = memo(function SurfaceContentBody({
         surfaceKind={surface.kind}
         interactiveResize={interactiveResize}
         visible={surfaceVisible}
-        parked={parked}
         headerPortalTargetId={headerPortalTargetId}
         presentations={surface.kind === 'agent' ? browserTargets.filter(target => target.reference?.tabId === tabId &&
           target.hostId !== primaryPresentationHostId && (!target.projection || target.projection.entity.kind !== 'region' || target.projection.entity.regionId === surface.regionId)) : []}
@@ -583,7 +578,7 @@ const SurfaceContentBody = memo(function SurfaceContentBody({
       />
     )
     return surface.kind === 'agent' ? <OrdinarySpaceMemberViewport tabId={tabId} regionId={surface.regionId} sessionId={surface.sessionId}
-      visible={surfaceVisible && !parked} active={surfaceVisible && !parked} interactiveResize={interactiveResize}>{original}</OrdinarySpaceMemberViewport> : original
+      visible={surfaceVisible} active={surfaceVisible} interactiveResize={interactiveResize}>{original}</OrdinarySpaceMemberViewport> : original
   }
   if (surface.kind === 'git') {
     return <Suspense fallback={<FullPageLoadingSurface scope="region" phase="loading" eyebrow="Git" title="Opening Git" detail="Restoring the saved Git reading target." />}>

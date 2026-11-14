@@ -29,7 +29,7 @@ export const conversationConsumerObservationSchema = z.object({
     runId: id.nullable(), matchesExpectedRun: z.boolean().nullable(), readingIdentity: z.string(),
     location: z.object({ regionId: id.nullable(), presentationId: id.nullable(),
       document: z.object({ windowId: id, documentGeneration: id }).strict().nullable() }).strict(),
-    gates: z.object({ enabled: z.boolean(), visible: z.boolean().nullable(), parked: z.boolean().nullable(),
+    gates: z.object({ enabled: z.boolean(), visible: z.boolean().nullable(),
       activityShown: z.boolean().nullable(), viewMode: z.string().nullable() }).strict(),
     viewport: z.object({ connected: z.boolean(), hidden: z.boolean(), width: z.number().nonnegative(), height: z.number().nonnegative() }).strict(),
     loading: z.boolean(), held: z.boolean(), historical: z.boolean(), newerAvailable: z.boolean(),

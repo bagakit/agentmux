@@ -224,7 +224,6 @@ export function SessionPane({
   surfaceKind,
   interactiveResize,
   visible,
-  parked = false,
   readOnly = false,
   headerPortalTargetId = null,
   presentations = NO_PRESENTATIONS,
@@ -235,10 +234,8 @@ export function SessionPane({
   sessionId: string
   surfaceKind: 'agent' | 'terminal'
   interactiveResize: boolean
-  // 这一格看不看得见。隐藏的 Tab 留在 DOM 里保住终端实例，但里面的终端一律停工。
+  // 隐藏只停止布局/绘制，原实例与 attachment 继续接收有序输出。
   visible: boolean
-  /** Long-hidden, replayable terminal views may release xterm/addons while keeping this Region alive. */
-  parked?: boolean
   /** Observation projection: no PTY input, Agent composer, interaction response or recovery. */
   readOnly?: boolean
   headerPortalTargetId?: string | null
@@ -264,7 +261,7 @@ export function SessionPane({
   const observedSession = useObservedAppStore('sessionPane', observationVisible, consumerScope, (state) => sessionPresentationById(state.sessions).get(sessionId))
   const pendingLaunch = useObservedAppStore('sessionPane', observationVisible, consumerScope, (state) => state.pendingAgentLaunches[sessionId])
   const historyHostId = useObservedAppStore('sessionPane', observationVisible, consumerScope, state => state.config?.workspaces.find(workspace => workspace.id === linkOrigin.workspaceId)?.hostId)
-  const historyCatalogue = useFocusHistorySources(!observedSession && !pendingLaunch && surfaceKind === 'agent' && visible && !parked)
+  const historyCatalogue = useFocusHistorySources(!observedSession && !pendingLaunch && surfaceKind === 'agent' && visible)
   const originalHostId = observedSession?.kind === 'agent' ? observedSession.control.hostId : historyHostId
   const retainedHistory = historyCatalogue.sources.find(source => source.agentSessionId === sessionId && source.hostId === originalHostId)
   // One exact Core terminal fact outranks a stale presentation. The original
@@ -277,7 +274,7 @@ export function SessionPane({
   const currentConversationActions = useAgentCurrentForkControls({ session: session?.kind === 'agent' ? session : null, linkOrigin: mailboxOrigin, readOnly })
   const legacyExecution = useLegacyExecutionRecovery(mailboxOrigin.tabId && mailboxOrigin.regionId
     ? { tabId: mailboxOrigin.tabId, regionId: mailboxOrigin.regionId, agentSessionId: sessionId } : undefined,
-    pendingLaunch, !session && surfaceKind === 'agent' && visible && !parked)
+    pendingLaunch, !session && surfaceKind === 'agent' && visible)
   const storageDiagnostic = !session ? pendingAgentLaunchResourceDiagnostic(pendingLaunch, sessionId) : undefined
   const storageWait = storageDiagnostic?.code === 'AGENT_CREATION_WAITING_FOR_STORAGE'
   const retainedStorageCause = storageDiagnostic && !storageWait ? pendingLaunch?.events.slice().reverse().find(value =>
@@ -292,7 +289,7 @@ export function SessionPane({
     linkOrigin.tabId && linkOrigin.regionId ? agentRegionExecution({tabId: linkOrigin.tabId, regionId: linkOrigin.regionId, agentSessionId: sessionId})?.hostId : undefined,
     session?.hostId, pendingLaunch?.request?.hostId, recoveryCandidate?.hostId
   ]))
-  const unobservedIdentity = !session && retainedHistory?.state !== 'retired' && retainedHistory?.state !== 'deleted' && surfaceKind === 'agent' && visible && !parked && linkOrigin.tabId && linkOrigin.regionId
+  const unobservedIdentity = !session && retainedHistory?.state !== 'retired' && retainedHistory?.state !== 'deleted' && surfaceKind === 'agent' && visible && linkOrigin.tabId && linkOrigin.regionId
     ? { agentSessionId: sessionId, tabId: linkOrigin.tabId, regionId: linkOrigin.regionId, displayWorkspaceId: linkOrigin.workspaceId,
         ...(linkOrigin.tabGroupId ? { groupId: linkOrigin.tabGroupId } : {}) } : null
   const unobservedReference = unobservedIdentity ? unobservedRecoveryReference(unobservedIdentity) : null
@@ -432,7 +429,7 @@ export function SessionPane({
   const inlineHistory = pendingAgentRestore && startupDecision?.reason === 'idle-window-expired'
   const pendingLayout = usePendingDeliveryLayout({ boundaryRef: surfaceRef, bodyRef, interactionSourceRef, interactionRef,
     interactionId: session?.kind === 'agent' ? session.pendingInteraction?.id : undefined,
-    terminal: visible && !parked && !historyOpen && !inlineHistory && viewMode === 'terminal' && session && linkOrigin.regionId
+    terminal: visible && !historyOpen && !inlineHistory && viewMode === 'terminal' && session && linkOrigin.regionId
       ? { regionId: linkOrigin.regionId, sessionId: session.id, runId: session.control.run.runId } : undefined,
     active: visible })
   const incomingReveal = useAppStore(state => {
@@ -637,7 +634,7 @@ export function SessionPane({
   const [unobservedReadError, setUnobservedReadError] = useState<string | null>(null)
   const observationScope = JSON.stringify([sessionId, linkOrigin.tabId, linkOrigin.regionId, linkOrigin.workspaceId, linkOrigin.tabGroupId])
   const observationScopeRef = useRef<string | null>(observationScope)
-  observationScopeRef.current = visible && !readOnly && !parked ? observationScope : null
+  observationScopeRef.current = visible && !readOnly ? observationScope : null
   const observationActive = useRef(true)
   useEffect(() => { observationActive.current = true; return observationCleanup(observationActive) }, [])
   useEffect(() => { setUnobservedReadError(null) }, [observationScope])
@@ -1048,7 +1045,7 @@ export function SessionPane({
     } }} /> : null
     const retainedConversation = <ActivityView sessionId={sessionId} executionHostId={reference.hostId} capability="complete-events"
           conversationReading={{ reference, identity: JSON.stringify([reference.hostId, reference.agentSessionId]),
-            enabled: visible && !parked, opened: true, readCaptured: true }}
+            enabled: visible, opened: true, readCaptured: true }}
           renderRecordActions={renderConversationLandmarkAction}
           renderReadingTools={(active, revealLoaded) => <ConversationLandmarkList reference={reference} active={active} reveal={revealLoaded}/>}
           readingAction={resumeActionAt()} readingNotice={reopenNotice ?? <div className="activity-feed__read-notice" role="status">
@@ -1058,7 +1055,7 @@ export function SessionPane({
           readPastedImage={readPastedImage} readHistoryResource={readHistoryResource} openWorkspaceFile={openWorkspaceFile}
           openHttpLink={onProseLinkClick} describeSpeaker={describeSpeaker} onReadingSpeakers={onReadingSpeakers} />
     return retainPresentations(target => cloneElement(retainedConversation, { readingAction: resumeActionAt(presentationOrigin(target), workbenchSessionStageHostId(target, linkOrigin.regionId!)), conversationReading: {
-      ...retainedConversation.props.conversationReading, enabled: target.visible !== false && !parked
+      ...retainedConversation.props.conversationReading, enabled: target.visible !== false
     } }), <section ref={surfaceRef} className="agent-surface" data-agent-surface-mode="retained-history">
       {sessionHeader({ name: label, executorLabel: executorLabel ?? providerLabel ?? 'Executor unknown' })}
       {takeoverSurface}
@@ -1090,13 +1087,13 @@ export function SessionPane({
           appearance={connectingAppearance}
           session={{ hostId: executionHostId ?? '', agentSessionId: sessionId }}
           actions={unobservedActions}
-          visible={visible && !parked}
+          visible={visible}
         />
     return retainPresentations(target => cloneElement(connectingSurface, { visible: false, actions: unobservedActionsAt(presentationOrigin(target), workbenchSessionStageHostId(target, linkOrigin.regionId!)) }),
       <section ref={surfaceRef} className="agent-surface" data-agent-surface-mode="connecting">
           {sessionHeader()}
           {takeoverSurface}
-          {mailboxOrigin.tabId && mailboxOrigin.regionId ? <SourceCoordinatorRequests active={visible && !parked} coordinatorControls={!pendingLaunch} origin={{ tabId: mailboxOrigin.tabId, regionId: mailboxOrigin.regionId }} /> : null}
+          {mailboxOrigin.tabId && mailboxOrigin.regionId ? <SourceCoordinatorRequests active={visible} coordinatorControls={!pendingLaunch} origin={{ tabId: mailboxOrigin.tabId, regionId: mailboxOrigin.regionId }} /> : null}
           {connectingSurface}
         {surfaceKind === 'agent' && !pendingLaunch && historyCatalogue.error ? <ServiceWindowNotice notice={{
           kind: 'indeterminate', notice: { step: `Retained history metadata could not be read: ${historyCatalogue.error}`,
@@ -1226,9 +1223,9 @@ export function SessionPane({
   const activityShown = historyOpen || inlineHistory || viewMode !== 'terminal' && canReadConversation
   const activityRevealPending = revealRequest?.displayId === null
   const conversationReading = session.kind === 'agent' ? {
-    reference: session.control, identity: activitySourceKey, nativeSourceFacts, enabled: visible && !parked && (activityShown || activityRevealPending),
+    reference: session.control, identity: activitySourceKey, nativeSourceFacts, enabled: visible && (activityShown || activityRevealPending),
     consumer: { runId: session.control.run.runId, ...(linkOrigin.regionId ? { regionId: linkOrigin.regionId } : {}),
-      visible, parked, activityShown, viewMode },
+      visible, activityShown, viewMode },
     opened: historyOpen || inlineHistory,
     ...(!inlineHistory && historyOpen ? { onClose: closeHistory, returnLabel: pendingAgentRestore ? 'Session' : viewMode === 'terminal' ? 'Terminal' : 'Activity' } : {})
   } : undefined
@@ -1304,12 +1301,12 @@ export function SessionPane({
 
   const restoreSurface = <FullPageLoadingSurface scope="region" phase={pendingResume ? restorePresentation!.phase : frontendSurface ? frontendNotice.phase ?? 'parked' : restorePresentation?.phase ?? 'parked'} eyebrow="Session retained"
                 {...(frontendSurface && frontendNotice.kind === 'detached' && frontendNotice.phase === 'failed' ? { className: 'session-frontend-exit' } : {})}
-                visible={visible && !parked && !historyOpen}
+                visible={visible && !historyOpen}
                 title={pendingResume ? restorePresentation!.title : frontendSurface ? frontendNotice.title : restorePresentation?.title ?? 'Session state unconfirmed'}
                 description={startNew ? continuityNotice!.reason : !pendingResume && frontendSurface ? frontendNotice.description : undefined}
                 detail={startNew ? '' : pendingResume ? restorePresentation!.detail : frontendSurface ? frontendNotice.surfaceDetail ?? frontendNotice.detail : restorePresentation?.detail ?? 'The saved Session is retained. Its process state is not yet confirmed.'}
                 actions={!historyOpen ? agentRecoveryAction : null}
-                supplement={<>{frontendDiagnostic}{identityNotice}{originalReadNotice}{session.kind === 'agent' && !frontendSurface ? <SessionRecap session={session.control} visible={visible && !parked && !historyOpen} context /> : null}</>}
+                supplement={<>{frontendDiagnostic}{identityNotice}{originalReadNotice}{session.kind === 'agent' && !frontendSurface ? <SessionRecap session={session.control} visible={visible && !historyOpen} context /> : null}</>}
                 details={{ summary: frontendSurface ? frontendNotice.kind === 'initialization' ? 'Session and startup details' : 'Session and failure details' : 'Retained session', content: retainedDetailsAt() }} />
 
   return (
@@ -1325,7 +1322,7 @@ export function SessionPane({
       sessionId={session.id} name={agentInputIdentity!} executorLabel={agentInputExecutor!}
       executionHost={regionExecutionHost(session, configuredExecutionHost)}
       activity={{ ...activityProps, onQuestionReply: input => sendConversationQuestionReply(session.control, input, moteInputSource(session.id, presentationOrigin(target))), renderReadingTools: active => <ConversationLandmarkList reference={session.control} active={active} reveal={reference => revealConversationItem(reference, target)}/>, revealRequest: revealRequest?.displayId === workbenchSessionStageHostId(target, linkOrigin.regionId!) ? revealRequest : null }} eligible={presentationHistory?.displayId === workbenchSessionStageHostId(target, linkOrigin.regionId!) || viewMode !== 'terminal' && canReadConversation}
-      recovery={pendingAgentRestore && !moteHistoryReading ? cloneElement(restoreSurface, { visible: target.visible !== false && !parked, supplement: null, actions: agentRecoveryActionAt(presentationOrigin(target), workbenchSessionStageHostId(target, linkOrigin.regionId!)), details: { ...restoreSurface.props.details, content: retainedDetailsAt(presentationOrigin(target), workbenchSessionStageHostId(target, linkOrigin.regionId!)) } }) : undefined}
+      recovery={pendingAgentRestore && !moteHistoryReading ? cloneElement(restoreSurface, { visible: target.visible !== false, supplement: null, actions: agentRecoveryActionAt(presentationOrigin(target), workbenchSessionStageHostId(target, linkOrigin.regionId!)), details: { ...restoreSurface.props.details, content: retainedDetailsAt(presentationOrigin(target), workbenchSessionStageHostId(target, linkOrigin.regionId!)) } }) : undefined}
       readOnly={readOnly} resourceOrigin={linkOrigin}
       {...(hasAgentComposer ? { onAnnotate: annotateMessage } : {})}
       renderFrame={renderPresentationFrame} selectRegion={() => onPresentationSelected?.(target)}
@@ -1349,20 +1346,16 @@ export function SessionPane({
         {...(observationMounted ? { refreshObservation: () => void refresh(true) } : {})} /> : null}
       {frontendObservationNotice}
       {session.kind === 'agent' && session.toolExecution ? <AgentToolExecutionNotice session={session} visible={visible} /> : null}
-      {session.kind === 'agent' && mailboxOrigin.tabId && mailboxOrigin.regionId ? <SourceCoordinatorRequests active={visible && !parked} coordinatorControls={!pendingLaunch} origin={{ tabId: mailboxOrigin.tabId, regionId: mailboxOrigin.regionId }} /> : null}
+      {session.kind === 'agent' && mailboxOrigin.tabId && mailboxOrigin.regionId ? <SourceCoordinatorRequests active={visible} coordinatorControls={!pendingLaunch} origin={{ tabId: mailboxOrigin.tabId, regionId: mailboxOrigin.regionId }} /> : null}
       <div ref={bodyRef} className="agent-body" data-pending-interaction={session.kind === 'agent' && session.pendingInteraction ? '' : undefined} style={{ anchorName: resultSurfaceAnchor }} data-observation-surface={session.kind === 'agent' && activityShown ? 'workflow' : undefined}>
         <div className="agent-terminal-stage">
           {session.kind === 'terminal' || viewMode === 'terminal' || needsSessionSurface || terminalLifetime.current.opened ? (
             <div hidden={session.kind === 'agent' && (historyOpen || inlineHistory || viewMode !== 'terminal' && canReadConversation)}
-              ref={element => { if (element && !pendingAgentRestore && (!frontendSurface || readingRetainedOutput) && !parked && (session.kind === 'terminal' || viewMode === 'terminal')) terminalLifetime.current.opened = true }}
+              ref={element => { if (element && !pendingAgentRestore && (!frontendSurface || readingRetainedOutput) && (session.kind === 'terminal' || viewMode === 'terminal')) terminalLifetime.current.opened = true }}
               inert={historyOpen || session.kind === 'agent' && viewMode !== 'terminal' && canReadConversation} style={{ height: '100%' }}>
             {frontendSurface && !readingRetainedOutput ? restoreSurface : null}
             {pendingAgentRestore && !readingRetainedOutput ? (inlineHistory ? null :
               restoreSurface
-            ) : parked ? (
-              <FullPageLoadingSurface scope="region" phase="parked" eyebrow="View retained"
-                title="Terminal parked"
-                detail="Switch back to this tab to restore its terminal view." />
             ) : (
               <div hidden={frontendSurface && !readingRetainedOutput} style={{ height: '100%' }}>
               {!frontendSurface || readingRetainedOutput || terminalLifetime.current.opened ? <TerminalView

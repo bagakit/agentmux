@@ -349,7 +349,7 @@ export function ActivityView({
         readingIdentity: reading.identity,
         location: { regionId: context?.regionId ?? null, presentationId: context?.presentationId ?? null,
           document: feedEl ? workbenchDocumentIdentity(feedEl.ownerDocument) : null },
-        gates: { enabled: reading.enabled, visible: context?.visible ?? null, parked: context?.parked ?? null,
+        gates: { enabled: reading.enabled, visible: context?.visible ?? null,
           activityShown: context?.activityShown ?? null, viewMode: context?.viewMode ?? null },
         viewport: { connected: Boolean(feedEl?.isConnected), hidden: Boolean(feedEl?.closest('[hidden], [inert]')),
           width: Math.max(0, rect?.width ?? 0), height: Math.max(0, rect?.height ?? 0) },

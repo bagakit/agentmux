@@ -22,7 +22,7 @@ export type ConversationReading = {
   /** Core-confirmed sources; a new binding does not replace an open reading window. */
   nativeSourceFacts?: AgentNativeSourceFacts
   /** Presentation facts supplied by the existing host; absent facts remain unknown. */
-  consumer?: { runId?: string; regionId?: string; presentationId?: string; visible: boolean; parked?: boolean; activityShown: boolean; viewMode: string }
+  consumer?: { runId?: string; regionId?: string; presentationId?: string; visible: boolean; activityShown: boolean; viewMode: string }
 }
 export type ConversationReadingIntent = 'current' | 'record' | 'seed' | 'earlier' | 'newer' | 'coverage' | 'live'
 export { conversationReadingAnchor, restoreConversationAnchor } from '@agentmux/client-ui/conversation-reading-anchor'

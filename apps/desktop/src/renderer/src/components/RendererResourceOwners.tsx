@@ -2,7 +2,6 @@ import { WorkbenchRegionOwners } from './WorkbenchRegionOwners'
 import { rendererPerformance } from '../lib/renderer-performance'
 import { useEffect, type ReactNode } from 'react'
 import { useAgentStatusDecay } from '../lib/agent-status-decay'
-import { TerminalParkingProvider, useTerminalColdParking } from '../lib/terminal-cold-parking-coordinator'
 import { SurfaceMemoryBudgetProvider, useSurfaceMemoryBudget } from '../lib/surface-memory-budget-coordinator'
 
 function PerformanceRecorderOwner() {
@@ -13,17 +12,6 @@ function PerformanceRecorderOwner() {
 function AgentStatusDecayOwner() {
   useAgentStatusDecay()
   return null
-}
-
-function TerminalParkingOwner({ children, workbenchVisible, projectedVisibleTabIds, projectedVisibleRegionIds, measurementActive }: {
-  children: ReactNode
-  workbenchVisible: boolean
-  projectedVisibleTabIds?: ReadonlySet<string> | undefined
-  projectedVisibleRegionIds?: ReadonlySet<string> | undefined
-  measurementActive: boolean
-}) {
-  const parkedRegionIds = useTerminalColdParking({ workbenchVisible, projectedVisibleTabIds, projectedVisibleRegionIds, measurementActive })
-  return <TerminalParkingProvider parkedRegionIds={parkedRegionIds}>{children}</TerminalParkingProvider>
 }
 
 function SurfaceMemoryOwner({ children, workbenchVisible, projectedVisibleTabIds, projectedVisibleRegionIds, measurementActive }: {
@@ -48,10 +36,8 @@ export function RendererResourceOwners({ children, workbenchVisible, projectedVi
   return <>
     <PerformanceRecorderOwner />
     <AgentStatusDecayOwner />
-    <TerminalParkingOwner workbenchVisible={workbenchVisible} projectedVisibleTabIds={projectedVisibleTabIds} projectedVisibleRegionIds={projectedVisibleRegionIds} measurementActive={measurementActive}>
-      <SurfaceMemoryOwner workbenchVisible={workbenchVisible} projectedVisibleTabIds={projectedVisibleTabIds} projectedVisibleRegionIds={projectedVisibleRegionIds} measurementActive={measurementActive}>
-        <WorkbenchRegionOwners>{children}</WorkbenchRegionOwners>
-      </SurfaceMemoryOwner>
-    </TerminalParkingOwner>
+    <SurfaceMemoryOwner workbenchVisible={workbenchVisible} projectedVisibleTabIds={projectedVisibleTabIds} projectedVisibleRegionIds={projectedVisibleRegionIds} measurementActive={measurementActive}>
+      <WorkbenchRegionOwners>{children}</WorkbenchRegionOwners>
+    </SurfaceMemoryOwner>
   </>
 }
