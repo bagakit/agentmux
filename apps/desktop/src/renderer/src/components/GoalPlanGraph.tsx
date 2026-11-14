@@ -1,12 +1,13 @@
 import { Fragment, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
+import { AgentMarkdown } from '@agentmux/client-ui/components/AgentMarkdown'
 import { mintObjectId } from '@agentmux/core/object-id'
 import { AGENTMUX_CONTROL_SCHEMA_VERSION } from '@agentmux/core/control'
 import type { GoalPlanNodeProjection, GoalPlanNodeState, GoalPlanUnknownReason } from '@agentmux/demand/goal-plan'
 import { Button } from '@agentmux/client-ui/components/Button'
 import { AgentWorkModeBadge } from './AgentWorkModeBadge'
 import { useAppStore } from '../store'
-import type { DemandProjection } from '../lib/global-demand-board'
+import type { DemandProjection, DemandRecord } from '../lib/global-demand-board'
 import { useGoalAgentPresentation } from '../lib/goal-discussion-recipient'
 import { GoalPlanThread } from './GoalPlanThread'
 import { delegationWorkerHostId } from '@agentmux/demand/delegations'
@@ -14,6 +15,7 @@ import { GoalPlanRequest } from './GoalPlanRequest'
 import { GoalExecutionTimeline } from './GoalExecutionTimeline'
 import { GoalPlanDelivery, type GoalPlanReviewDraft } from './GoalPlanDelivery'
 import { clearGoalPlanReviewDraft, editGoalPlanReviewDraft, goalPlanReviewDraftKey } from '../lib/goal-edit-drafts'
+import { goalNextStepFact, type GoalNextStepFact } from '../lib/goal-presentation'
 
 /** One distinct glyph per node state, so a node still reads without its color. */
 const STATE_ICON_NAMES = {
@@ -28,13 +30,14 @@ export const GOAL_PLAN_STATE_LABELS: Record<Exclude<GoalPlanNodeState, 'unknown'
 }
 const UNKNOWN_LABELS: Record<GoalPlanUnknownReason, string> = { criteria: 'Criteria need review', 'dispatch-link': 'Delivery unconfirmed' }
 /** A node as its Goal owner derived it; `state` is null when the owner returned no derivation. */
-export type GoalPlanReadingTarget = { nodeId: string; attemptId?: string }
+export type GoalPlanReadingTarget = { nodeId: string; attemptId?: string; wholeGoal?: true }
 export type GoalPlanReveal = { target: GoalPlanReadingTarget; trigger: HTMLButtonElement; restore?: () => void }
-export type GoalPlanNodeView = Omit<GoalPlanNodeProjection, 'state'> & { state: GoalPlanNodeState | null }
-/** `progress` is null when the owner returned its plan without the derivation. */
-export type GoalPlanView = { revision: number; nodes: GoalPlanNodeView[]; next: string[]; progress: { done: number; total: number } | null }
+export type GoalPlanNodeView = Omit<GoalPlanNodeProjection, 'state'> & { state: GoalPlanNodeState | null; wholeGoal?: { conclusion: string; assignees: number } }
+/** A revision belongs to the saved breakdown. The whole Goal is revision-free. */
+export type GoalPlanView = { revision: number | null; nodes: GoalPlanNodeView[]; next: string[]; progress: { done: number; total: number } | null }
 /** An unknown node names every reason it needs reconciliation; other states read as themselves. */
-export function goalPlanStateLabel(item: Pick<GoalPlanNodeView, 'state' | 'unknown'>): string {
+export function goalPlanStateLabel(item: Pick<GoalPlanNodeView, 'state' | 'unknown' | 'wholeGoal'>): string {
+  if (item.wholeGoal) return item.wholeGoal.conclusion
   return item.state === null ? 'State unavailable' : item.state === 'unknown' ? item.unknown.map(reason => UNKNOWN_LABELS[reason]).join(' · ') : GOAL_PLAN_STATE_LABELS[item.state]
 }
 const ThemeObjectWorkflowIcon = semanticIconComponent('object.workflow')
@@ -59,9 +62,20 @@ export function goalPlanHighlight(projection: GoalPlanView): string | null {
  * that attempt's review by the owner's identities. Without the owner's derivation no node state
  * is shown, and the nodes keep plan order in one column.
  */
-export function goalPlanProjection(demand: Pick<DemandProjection, 'plan' | 'planState' | 'delegations'>): GoalPlanView | null {
+export function goalPlanProjection(demand: DemandRecord, nextStep?: GoalNextStepFact): GoalPlanView {
   const { plan, planState } = demand
-  if (!plan) return null
+  if (!plan?.nodes.length) {
+    const fact = nextStep ?? goalNextStepFact(demand)
+    const source = fact.source
+    const executor = (source.kind === 'start' || source.kind === 'delegation') && source.agentSessionId && source.hostId
+      ? { agentSessionId: source.agentSessionId, hostId: source.hostId } : null
+    return { revision: null, next: [], progress: null, nodes: [{
+      node: { id: demand.id, title: demand.title, outcome: demand.alignment?.summary || demand.description,
+        dependsOn: [], criterionIds: [], check: '', executor },
+      wholeGoal: { conclusion: demand.status === 'cancelled' ? 'Cancelled' : fact.text, assignees: demand.assigneeSessionIds?.length ?? 0 },
+      state: null, column: 0, delegation: null, attempts: 0, review: null, staleCriteria: [], unknown: []
+    }] }
+  }
   if (!planState) return { revision: plan.revision, next: [], progress: null,
     nodes: plan.nodes.map(node => ({ node, state: null, column: 0, delegation: null, attempts: 0, review: null, staleCriteria: [], unknown: [] })) }
   const delegations = new Map((demand.delegations ?? []).map(item => [item.operationId, item]))
@@ -125,7 +139,9 @@ function NodeExecutor({ item, compact = false }: { item: GoalPlanNodeView; compa
   const executor = item.delegation ? { hostId: delegationWorkerHostId(item.delegation), agentSessionId: item.delegation.workerAgentSessionId } : item.node.executor
   const presentation = useGoalAgentPresentation(executor?.agentSessionId, executor?.hostId)
   const hosts = useAppStore(state => state.config?.hosts)
-  if (!executor) return <span className="goal-plan-node__who goal-plan-node__who--open">Unassigned</span>
+  if (!executor) return item.wholeGoal?.assignees
+    ? <span className="goal-plan-node__who"><ThemeObjectAgentIcon size={11} aria-hidden="true" />{item.wholeGoal.assignees} assigned</span>
+    : <span className="goal-plan-node__who goal-plan-node__who--open">Unassigned</span>
   if (compact) return <span className="goal-plan-node__who" title={`${executor.agentSessionId} · ${executor.hostId}`}><ThemeObjectAgentIcon size={11} aria-hidden="true" />{presentation.name ?? executor.agentSessionId}</span>
   const host = hosts?.find(host => host.id === executor.hostId)
   const toolsHost = presentation.toolExecution && hosts?.find(host => host.id === presentation.workPlacement?.resourceHostId)
@@ -141,7 +157,8 @@ function DependencyNames({ names }: { names: string[] }) {
   return <>{names.map((name, index) => <Fragment key={index}>{index ? ', ' : ''}<span className="goal-plan-dependency">{name}</span></Fragment>)}</>
 }
 
-function NodeDetail({ demand, item, historical, dependencyNames, onIssue, draft, onDraft, previousDrafts, onReadGoal, onConfirmed }: { demand: DemandProjection; item: GoalPlanNodeView; historical: boolean; dependencyNames: string[];
+function NodeDetail({ demand, item, historical, dependencyNames, onIssue, draft, onDraft, previousDrafts, onReadGoal, onConfirmed, onOpenGoalWork }: { demand: DemandProjection; item: GoalPlanNodeView; historical: boolean; dependencyNames: string[];
+  onOpenGoalWork?: (() => void) | undefined;
   onIssue(message: string | null): void; draft?: GoalPlanReviewDraft | undefined; onDraft(value: GoalPlanReviewDraft): void; previousDrafts: Readonly<Record<string, GoalPlanReviewDraft>>; onReadGoal(): void; onConfirmed(request: NonNullable<GoalPlanReviewDraft['request']>): void }) {
   const open = async (agentSessionId: string, hostId: string) => {
     try {
@@ -153,15 +170,21 @@ function NodeDetail({ demand, item, historical, dependencyNames, onIssue, draft,
     catch (error) { onIssue(error instanceof Error ? error.message : String(error)) }
   }
   return <div className="goal-plan-node__detail" data-goal-plan-detail={item.node.id}>
-    <p className="goal-plan-node__outcome">{item.node.outcome}</p>
+    {item.node.outcome ? item.wholeGoal && !demand.alignment?.summary
+      ? <div className="goals-intent__reading"><AgentMarkdown content={item.node.outcome} className="goals-intent__prose" readOnly /></div>
+      : <p className="goal-plan-node__outcome">{item.node.outcome}</p> : null}
     <dl className="goal-plan-node__facts">
-      <div><dt>Check</dt><dd><code>{item.node.check}</code></dd></div>
+      {item.wholeGoal ? <>
+        <div><dt>Status</dt><dd>{item.wholeGoal.conclusion}</dd></div>
+        {demand.alignment?.criteria.length ? <div><dt>Success criteria</dt><dd><ul>{demand.alignment.criteria.map(criterion => <li key={criterion.id}>{criterion.text}</li>)}</ul></dd></div> : null}
+      </> : <div><dt>Check</dt><dd><code>{item.node.check}</code></dd></div>}
       {dependencyNames.length ? <div><dt>Depends on</dt><dd title={item.node.dependsOn.join(', ')}><DependencyNames names={dependencyNames} /></dd></div> : null}
       {item.delegation ? <div><dt>Thread</dt><dd><code>{item.delegation.threadId}</code>{item.attempts > 1 ? ` · attempt ${item.attempts}` : ''}</dd></div> : null}
       {item.unknown.includes('criteria') ? <div><dt>Criteria</dt><dd className="goal-plan-node__stale">{item.staleCriteria.length
         ? `Changed or unavailable in the current goal: ${item.staleCriteria.join(', ')}` : 'Covers no success criterion of the current goal. Revise the plan to name what this node delivers.'}</dd></div> : null}
       {item.unknown.includes('dispatch-link') ? <div><dt>Delivery</dt><dd className="goal-plan-node__stale">The original delegation link is unconfirmed. Read its receipt before acting; it is never resent automatically.</dd></div> : null}
     </dl>
+    {item.wholeGoal && onOpenGoalWork ? <div className="goal-plan-node__actions"><Button type="button" onClick={onOpenGoalWork}>View current work</Button></div> : null}
     {item.delegation?.report ? <GoalPlanDelivery key={item.delegation.operationId} demand={demand} item={item} historical={historical} author={<NodeExecutor item={item} />} draft={draft} onDraft={onDraft} previousDrafts={previousDrafts} onReadGoal={onReadGoal} onConfirmed={onConfirmed} /> : null}
     {item.delegation ? <div className="goal-plan-node__actions">
       <Button type="button" data-goal-plan-open="executor" onClick={() => void open(item.delegation!.workerAgentSessionId, delegationWorkerHostId(item.delegation!))}>Open executor</Button>
@@ -176,15 +199,15 @@ function NodeDetail({ demand, item, historical, dependencyNames, onIssue, draft,
  * dependency, joined to what it depends on by a smooth connector. State comes only from the
  * Goal owner's derivation; this view never decides it.
  */
-const EMPTY_PLAN: GoalPlanView = { revision: 0, nodes: [], next: [], progress: null }
-
-export function GoalPlanGraph({ demand, onRequestPlan, pending = false, busy = false, compact = false, reveal }: {
+export function GoalPlanGraph({ demand, nextStep, onOpenGoalWork, onRequestPlan, pending = false, busy = false, reveal }: {
   demand: DemandProjection
-  onRequestPlan?: () => void; pending?: boolean; busy?: boolean; compact?: boolean; reveal?: GoalPlanReveal | null
+  nextStep?: GoalNextStepFact; onOpenGoalWork?: (() => void) | undefined
+  onRequestPlan?: () => void; pending?: boolean; busy?: boolean; reveal?: GoalPlanReveal | null
 }) {
-  const projection = useMemo(() => goalPlanProjection(demand), [demand.plan, demand.planState, demand.delegations])
+  const projection = useMemo(() => goalPlanProjection(demand, nextStep), [demand, nextStep])
+  const wholeGoal = projection.revision === null
   const [selection, setSelection] = useState<GoalPlanReveal | null>(null)
-  const open = selection?.target.nodeId
+  const open = Boolean(selection?.target.wholeGoal) === wholeGoal ? selection?.target.nodeId : undefined
   const [issue, setIssue] = useState<string | null>(null)
   const [readingState, setReadingState] = useState(false)
   const retainedReviews = useAppStore(state => state.goalEditDrafts[demand.id]?.planReviews)
@@ -192,7 +215,7 @@ export function GoalPlanGraph({ demand, onRequestPlan, pending = false, busy = f
   const canvas = useRef<HTMLDivElement>(null)
   const reading = useRef<HTMLDivElement>(null), readingId = useId()
   const readingHeading = useRef<HTMLHeadingElement>(null)
-  const { edges, width, height, scrollable } = useEdges(canvas, projection ?? EMPTY_PLAN, open ?? '')
+  const { edges, width, height, scrollable } = useEdges(canvas, projection, open ?? '')
   useLayoutEffect(() => { if (reveal) setSelection(reveal) }, [reveal])
   useLayoutEffect(() => {
     if (!selection) return
@@ -202,8 +225,8 @@ export function GoalPlanGraph({ demand, onRequestPlan, pending = false, busy = f
   function select(target: GoalPlanReadingTarget, trigger: HTMLButtonElement) { setSelection({ target, trigger }) }
   function toggleNode(item: GoalPlanNodeView, trigger: HTMLButtonElement) {
     const attemptId = item.delegation?.operationId
-    if (selection?.target.nodeId === item.node.id && selection.target.attemptId === attemptId) closeNode(item.node.id)
-    else select({ nodeId: item.node.id, ...(attemptId ? { attemptId } : {}) }, trigger)
+    if (open === item.node.id && selection?.target.attemptId === attemptId) closeNode(item.node.id)
+    else select({ nodeId: item.node.id, ...(attemptId ? { attemptId } : {}), ...(item.wholeGoal ? { wholeGoal: true } : {}) }, trigger)
   }
   function closeNode(id: string) {
     const target = selection?.trigger.isConnected ? selection.trigger
@@ -221,27 +244,11 @@ export function GoalPlanGraph({ demand, onRequestPlan, pending = false, busy = f
     catch (error) { setIssue(error instanceof Error ? error.message : String(error)) }
     finally { setReadingState(false) }
   }
-  const stateIssue = demand.planStateIssue ?? (projection && !projection.progress
+  const stateIssue = demand.planStateIssue ?? (!wholeGoal && !projection.progress
     ? "Node states are unavailable: this Goal's Host returned the plan without them. Read this Goal again; update that Host if the state remains unavailable. The plan itself is unchanged." : undefined)
   const stateService = stateIssue ? <p className="goals-service" role="status" data-goal-plan-states-unavailable>{stateIssue}{' '}
     <Button type="button" disabled={readingState} onClick={() => void readState()}>{readingState ? 'Reading Goal…' : 'Read Goal again'}</Button>
   </p> : null
-  if (!projection) return <section className={`goal-plan goal-plan--empty${compact ? ' goal-plan--compact' : ''}`} aria-label="Goal plan" data-goal-plan-empty>
-    <div className="goals-section-heading"><h2><ThemeObjectWorkflowIcon size={14} aria-hidden="true" /> Execution plan</h2><span className="goals-caption">Not saved yet</span></div>
-    {stateService}{issue ? <p className="goals-service" role="status">{issue}</p> : null}
-    <div className="goal-plan__origin">
-      <article className="goal-plan__goal" data-goal-plan-origin={demand.id} aria-label="Goal starting point">
-        <span className="goal-plan__goal-icon" aria-hidden="true"><ThemeObjectGoalIcon size={24} /></span>
-        <div className="goal-plan__goal-body"><p className="goal-plan__goal-label">Goal <span>Starting point</span></p><h3 title={demand.title}>{demand.title}</h3></div>
-      </article>
-      <div className="goal-plan__empty-body">
-      <p className="goals-muted">{compact ? 'A saved plan will connect this goal to its tasks, dependencies and checks.' : demand.alignment ? 'Turn the agreed outcome into tasks, dependencies and checks.' : 'Shape the outcome and success criteria, then build the plan with your Supervisor.'}</p>
-      <div className="goals-inline-actions">{requestAction}
-      </div>
-      </div>
-    </div>
-    <GoalExecutionTimeline demand={demand} selected={null} onSelect={select} />
-  </section>
   const columns = goalPlanColumns(projection), highlight = goalPlanHighlight(projection)
   const byId = new Map(projection.nodes.map(item => [item.node.id, item]))
   const selectedNode = open ? byId.get(open) : undefined
@@ -257,10 +264,10 @@ export function GoalPlanGraph({ demand, onRequestPlan, pending = false, busy = f
   const reviewKey = selected?.delegation && goalPlanReviewDraftKey(selected.node.id, selected.delegation.operationId)
   const reviewNoticeKey = JSON.stringify([demand.id, reviewKey])
   const { progress } = projection, ratio = progress?.total ? progress.done / progress.total : 0
-  return <section className={`goal-plan${progress ? '' : ' goal-plan--unavailable'}`} aria-label="Goal plan" data-goal-plan-revision={projection.revision}>
+  return <section className={`goal-plan${wholeGoal || progress ? '' : ' goal-plan--unavailable'}`} aria-label="Goal plan" data-goal-plan-revision={projection.revision ?? undefined}>
     <div className="goals-section-heading">
       <h2><ThemeObjectWorkflowIcon size={14} aria-hidden="true" /> Execution plan</h2>
-      <span className="goals-caption" data-goal-plan-progress>{progress ? `${progress.done} of ${progress.total} done · ` : ''}revision {projection.revision}</span>
+      {wholeGoal ? <span className="goals-caption">1 node</span> : <span className="goals-caption" data-goal-plan-progress>{progress ? `${progress.done} of ${progress.total} done · ` : ''}revision {projection.revision}</span>}
     </div>
     {requestAction ? <div className="goals-inline-actions goal-plan__revise">{requestAction}</div> : null}
     {progress ? <div className="goal-plan__progress" aria-hidden="true"><span style={{ transform: `scaleX(${ratio})` }} /></div> : stateService}
@@ -281,9 +288,10 @@ export function GoalPlanGraph({ demand, onRequestPlan, pending = false, busy = f
         {columns.map((column, index) => <li key={index} className="goal-plan__column" data-goal-plan-column={index}>
           <ol className="goal-plan__nodes">
             {column.map(item => {
-              const Icon = STATE_ICONS[item.state ?? 'unknown'], state = item.state ?? 'unavailable', expanded = open === item.node.id
+              const Icon = item.wholeGoal ? ThemeObjectGoalIcon : STATE_ICONS[item.state ?? 'unknown']
+              const state = item.wholeGoal ? 'goal' : item.state ?? 'unavailable', expanded = open === item.node.id
               return <li key={item.node.id} className={`goal-plan-node${item.node.id === highlight ? ' goal-plan-node--next' : ''}`}
-                data-goal-plan-node={item.node.id} data-goal-plan-state={state} {...(item.node.dependsOn.length ? { 'data-goal-plan-depends': item.node.dependsOn.join(' ') } : {})}>
+                data-goal-plan-node={item.node.id} data-goal-plan-origin={item.wholeGoal ? item.node.id : undefined} data-goal-plan-state={state} {...(item.node.dependsOn.length ? { 'data-goal-plan-depends': item.node.dependsOn.join(' ') } : {})}>
                 <button type="button" className="goal-plan-node__head" aria-expanded={expanded} aria-controls={expanded ? readingId : undefined} onClick={event => toggleNode(item, event.currentTarget)}>
                   <span className="goal-plan-node__mark" data-goal-plan-state={state} aria-hidden="true"><Icon size={12} strokeWidth={1.8} animation="none" /></span>
                   <span className="goal-plan-node__title">{item.node.title}</span>
@@ -318,7 +326,7 @@ export function GoalPlanGraph({ demand, onRequestPlan, pending = false, busy = f
     {selected ? <div className="goal-plan__reading" ref={reading} id={readingId}>
       <div className="goals-section-heading"><h3 ref={readingHeading} tabIndex={-1}>{selected.node.title}</h3><Button type="button" onClick={() => closeNode(selected.node.id)}>Back to node</Button></div>
       {historical ? <p className="goals-caption" role={!exact ? 'status' : undefined}>{exact ? 'Previous attempt' : 'The selected original attempt is unavailable.'}</p> : null}
-      {(!historical || exact) ? <NodeDetail key={JSON.stringify([demand.id, selected.node.id, attemptId])} demand={demand} item={selected} historical={historical} dependencyNames={selected.node.dependsOn.map(id => byId.get(id)!.node.title)} onIssue={setIssue}
+      {(!historical || exact) ? <NodeDetail key={JSON.stringify([demand.id, selected.node.id, attemptId])} demand={demand} item={selected} historical={historical} dependencyNames={selected.node.dependsOn.map(id => byId.get(id)!.node.title)} onIssue={setIssue} onOpenGoalWork={onOpenGoalWork}
         draft={reviewKey && retainedReviews?.[reviewKey] ? { ...retainedReviews[reviewKey], ...reviewNotices[reviewNoticeKey] } : undefined} onDraft={value => {
           editGoalPlanReviewDraft(demand.id, selected.node.id, selected.delegation!.operationId, value)
           const { pending, issue, reread } = value

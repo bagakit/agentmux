@@ -18,6 +18,7 @@ const labels = { prepared: 'Planning request saved', delivered: 'Delivered · wa
 
 /** The original Host request is delivery truth; the native user document keeps only the person's action reference. */
 export function GoalPlanRequest({ demand, onRequest, pending, busy }: { demand: Goal; onRequest(): void; pending: boolean; busy: boolean }) {
+  const split = !demand.plan?.nodes.length
   const retained = useAppStore(state => state.goalDiscussionRequests?.[goalDiscussionRequestKey(demand.id, 'plan')])
   const [choose, setChoose] = useState(false), [issue, setIssue] = useState<string | null>(null), [working, setWorking] = useState(false)
   // Only this picker can know its freshly minted reference has never reached the Host.
@@ -81,14 +82,13 @@ export function GoalPlanRequest({ demand, onRequest, pending, busy }: { demand: 
   }
   return <div className="goal-plan__request" data-goal-plan-request-feedback>
     {!demand.supervisorSessionId ? <>
-      <p className="goals-muted">Choose a Supervisor to make this plan.</p>
-      <Button type="button" data-goal-plan-request={original ? undefined : true} disabled={working} onClick={chooseSupervisor}>Choose Supervisor to plan</Button>
+      <Button type="button" data-goal-plan-request={original ? undefined : true} disabled={working} onClick={chooseSupervisor}>{split ? 'Choose Supervisor to split work' : 'Choose Supervisor to revise plan'}</Button>
     </> : null}
     {demand.supervisorSessionId && typeof demand.supervisorSessionId !== 'string' && !original ? <p className="goals-service" role="status">Supervisor {currentPresentation.name} is retained. Planning requires its original current execution access.</p> : null}
     {typeof demand.supervisorSessionId === 'string' || original ? <div className="goals-inline-actions">
       <Button type="button" data-goal-plan-request disabled={pending || busy || working} onClick={() => { setUnsentSelection(null); onRequest() }}>
         {pending ? `Preparing request to ${presentation.name ?? 'Supervisor'}…` : original ? `Check request to ${presentation.name ?? 'original Supervisor'}`
-          : retained && retained.requestId !== unsentSelection ? `Check request to ${currentPresentation.name ?? 'Supervisor'}` : `Ask ${currentPresentation.name ?? 'Supervisor'} to plan`}
+          : retained && retained.requestId !== unsentSelection ? `Check request to ${currentPresentation.name ?? 'Supervisor'}` : `Ask ${currentPresentation.name ?? 'Supervisor'} to ${split ? 'split work' : 'revise plan'}`}
       </Button>
       {newRequest && typeof demand.supervisorSessionId === 'string' ? <Button type="button" disabled={working || pending} onClick={() => void run(async () => {
         await useAppStore.getState().requestDemandPmoTask(demand.id, 'plan', { newRequest: true })

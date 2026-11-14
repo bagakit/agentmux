@@ -33,20 +33,7 @@
 .goal-delivery__history > article { padding-block: var(--sp-4); border-top: 1px solid var(--line-soft); }
 .goal-delivery__receipt { color: var(--green); outline-offset: 4px; }
 .goal-plan { container: goal-plan / inline-size; display: grid; min-width: 0; gap: var(--sp-4); padding: var(--sp-5); margin-bottom: var(--sp-6); border: 1px solid transparent; border-radius: var(--radius-lg); background: var(--surface-1); }
-.goal-plan--empty { box-sizing: border-box; gap: var(--sp-3); padding: var(--sp-4) 0; border: 0; border-top: 1px solid var(--line-soft); border-radius: 0; background: transparent; }
 .goal-plan .goals-section-heading h2 { display: flex; align-items: center; gap: var(--sp-4); }
-.goal-plan__origin { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-4) var(--sp-6); min-width: 0; }
-.goal-plan__goal { display: flex; align-items: center; gap: var(--sp-3); flex: 1 1 220px; min-width: 0; margin: 0; }
-.goal-plan__goal-icon { display: grid; place-items: center; flex: none; width: 24px; height: 24px; border-radius: var(--radius-sm); color: var(--text-2); background: var(--surface-2); }
-.goal-plan__goal-icon > svg { width: 16px; height: 16px; }
-.goal-plan__goal-body { min-width: 0; }
-.goal-plan__goal-label { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-3); margin: 0; color: var(--text-3); font-size: var(--fs-meta); }
-.goal-plan__goal-label > span { color: var(--text-3); }
-.goal-plan__goal h3 { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; margin: 0; color: var(--text-2); font-size: var(--fs-body); line-height: 1.5; font-weight: 550; overflow-wrap: anywhere; }
-.goal-plan__empty-body { display: flex; flex-wrap: wrap; align-items: center; flex: 1 1 260px; gap: var(--sp-3) var(--sp-5); min-width: 0; }
-.goal-plan__empty-body > p { flex: 1 1 180px; margin: 0; font-size: var(--fs-meta); }
-.goal-plan__empty-body .goals-inline-actions { align-items: center; flex-wrap: wrap; margin: 0; }
-/* The repeated starting point stays light; the complete editable Goal remains above. */
 .goal-plan__revise { justify-content: flex-start; margin-top: calc(-1 * var(--sp-2)); }
 .goal-plan__progress { position: relative; height: 3px; border-radius: 3px; background: var(--surface-2); overflow: hidden; }
 .goal-plan__progress > span { position: absolute; inset: 0; border-radius: inherit; background: linear-gradient(90deg, color-mix(in srgb, var(--green) 70%, transparent), var(--green)); transform-origin: left center; transition: transform .42s cubic-bezier(.2, .8, .2, 1); }

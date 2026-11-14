@@ -2,7 +2,7 @@ import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { Button } from '@agentmux/client-ui/components/Button'
 import { SelectionIndicator } from '@agentmux/client-ui/components/SelectionIndicator'
 import * as Menu from './DropdownMenu'
-import { useLayoutEffect, useRef, useState } from 'react'
+import { useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { useAppStore } from '../store'
 import type { DemandProjection } from '../lib/global-demand-board'
@@ -21,7 +21,7 @@ import { useGoalDiscussionRecipient } from '../lib/goal-discussion-recipient'
 import { editGoalDraft, saveGoalDrafts } from '../lib/goal-edit-drafts'
 import { GoalActivity } from './GoalActivity'
 import { GoalAlignment, type GoalAcknowledgementFeedback } from './GoalAlignment'
-import { goalHasOriginalWork, goalNextStepFact, type GoalNextStepSource } from '../lib/goal-presentation'
+import { goalNextStepFact, type GoalNextStepSource } from '../lib/goal-presentation'
 import { GOAL_GROUP_LABELS, GoalStageMark } from '../lib/goal-groups'
 import type { GoalQueuePosition } from '../lib/goal-navigation'
 import type { GoalStage } from '../lib/goal-presentation'
@@ -174,15 +174,14 @@ export function GoalDetail({ demand, onClose, onOpenMote, onGrill, onGrounding, 
   }
   const continueInBody = Boolean(demand.alignment?.confirmedAt && !demand.grounding)
   const finished = demand.status === 'done' || demand.status === 'cancelled'
-  const fact = goalNextStepFact(demand, retainedStart)
-  const hasOriginalWork = goalHasOriginalWork(demand, retainedStart)
+  const fact = useMemo(() => goalNextStepFact(demand, retainedStart), [demand, retainedStart])
+  const currentWork = !acknowledgementFeedback.failure && (fact.source.kind === 'start' || fact.source.kind === 'delegation') ? fact.source : null
   const plan = <div ref={planRef} tabIndex={-1} className="goals-detail__plan" data-goal-reading-section="plan" data-goal-reading-id={demand.id} data-goal-reading-runtime={demand.address?.runtimeId} data-goal-reading-namespace={demand.address?.namespace}>
     {demand.address ? <div className="goals-detail__plan-tools"><Button type="button" onClick={() => void copyLink('plan')}>{copied === 'plan' ? 'Plan link copied' : 'Copy plan link'}</Button></div> : null}
-    <GoalPlanGraph demand={demand} reveal={planReveal} compact={hasOriginalWork || Boolean(demand.alignment || demand.grounding || acknowledgementFeedback.failure)} {...(finished ? {} : { onRequestPlan: onPlan })} pending={motePending === 'plan'} busy={Boolean(motePending)} />
+    <GoalPlanGraph demand={demand} nextStep={fact} reveal={planReveal} onOpenGoalWork={currentWork ? () => revealOriginalWork(currentWork) : undefined} {...(finished ? {} : { onRequestPlan: onPlan })} pending={motePending === 'plan'} busy={Boolean(motePending)} />
   </div>
   const stage = acknowledgementFeedback.failure ? 'you' : fact.stage
   const next = acknowledgementFeedback.failure ? 'Acknowledgement unconfirmed' : fact.text
-  const currentWork = !acknowledgementFeedback.failure && (fact.source.kind === 'start' || fact.source.kind === 'delegation') ? fact.source : null
   const reviewFirst = Boolean(acknowledgementFeedback.failure) || !demand.plan && (fact.source.kind === 'definition' || fact.source.kind === 'results')
   const review = <div key="goal-review" ref={resultsRef} tabIndex={-1} className="goals-detail__definition"><GoalAlignment key={demand.id} emphasis={fact.source.kind === 'definition' || fact.source.kind === 'results' ? fact.source.kind : null} feedback={acknowledgementFeedback} onFeedbackChange={onAcknowledgementFeedbackChange} demand={demand} onGrill={onGrill} onGrounding={onGrounding} onOpenMote={onOpenMote} motePending={motePending} /></div>
   const brief = <section ref={overviewRef} tabIndex={-1} className="goals-intent-body goals-detail__brief" aria-label="Goal brief" data-goal-reading-section="overview" data-goal-reading-id={demand.id} data-goal-reading-runtime={demand.address?.runtimeId} data-goal-reading-namespace={demand.address?.namespace}>
