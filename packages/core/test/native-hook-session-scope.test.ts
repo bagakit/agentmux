@@ -173,6 +173,8 @@ describe('Provider Native Hook Session Scope & Subject Contract', () => {
 
     it('foreign tool trace uses receipt-based append-only identity and does not upsert or overwrite with toolCallId', () => {
       const spec: AgentNativeHookSpecification = {
+        toolFields: (_event, p) => ({ toolName: p.tool_name as string, toolInput: p.tool_input,
+          reportedToolCallId: p.tool_use_id as string }),
         matchesNativeSession: () => false,
         rules: [
           { events: ['PostToolUse'], state: 'working', lifecycleEvent: 'tool-use-end' }
@@ -216,6 +218,8 @@ describe('Provider Native Hook Session Scope & Subject Contract', () => {
 
     it('positive control: legitimate main scope and child scope retain toolCallId correlation and proper subject identity', () => {
       const spec: AgentNativeHookSpecification = {
+        toolFields: (_event, p) => ({ toolName: p.tool_name as string, toolInput: p.tool_input,
+          reportedToolCallId: p.tool_use_id as string }),
         matchesNativeSession: (_event, payload) => payload.session_id === 'legit-main' ||
           (payload.is_child === true && payload.session_id === 'legit-child'),
         subagentSubject: payload => payload.is_child === true,
@@ -228,7 +232,8 @@ describe('Provider Native Hook Session Scope & Subject Contract', () => {
         subagentTracking: {
           startEvents: ['ChildStart'],
           stopEvents: ['ChildStop'],
-          mainStopEvents: ['Stop']
+          mainStopEvents: ['Stop'],
+          idKeys: ['agent_id']
         },
         nativeHandle: { sessionIdKeys: ['session_id'] }
       }
@@ -355,6 +360,8 @@ describe('Provider Native Hook Session Scope & Subject Contract', () => {
       await store.compareAndSwap(null, initialSession)
 
       const hookSpec: AgentNativeHookSpecification = {
+        toolFields: (_event, p) => ({ toolName: p.tool_name as string, toolInput: p.tool_input,
+          reportedToolCallId: p.tool_use_id as string }),
         matchesNativeSession: (_event, payload, context) => {
           const expected = context.nativeHandle?.sessionId
           return expected !== undefined && payload.session_id === expected

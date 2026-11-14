@@ -55,14 +55,17 @@ const profiles: Profile[] = [
     waiting: { extra: { category: 'input', reason: 'choose' } },
     ordinary: { extra: { category: 'background', reason: 'update' } },
     child: { extra: { scope: 'child' } },
-    cancelled: p => p.category === 'turn' && p.reason === 'halt',
-    awaits: p => p.category === 'input' && p.reason === 'choose', isChild: p => p.scope === 'child'
+    cancelled: p => (p.extra as Payload | undefined)?.category === 'turn' && (p.extra as Payload | undefined)?.reason === 'halt',
+    awaits: p => (p.extra as Payload | undefined)?.category === 'input' && (p.extra as Payload | undefined)?.reason === 'choose',
+    isChild: p => (p.extra as Payload | undefined)?.scope === 'child'
   }
 ]
 const agentSessionId = 'payload-session', runId = 'payload-run', token = 't'.repeat(43)
 const exec = promisify(execFile)
 function specification(profile: Profile): AgentNativeHookSpecification {
   return {
+    toolFields: (_event, p) => ({ toolName: p.tool_name as string, toolInput: p.tool_input,
+      reportedToolCallId: p.tool_use_id as string }),
     rules: [
       { events: [profile.eventName], state: 'unknown', matches: profile.cancelled, lifecycleEvent: 'turn-end' },
       { events: [profile.eventName], state: 'waiting', matches: profile.awaits },
@@ -201,8 +204,8 @@ describe('payload-dependent Hook contributions', () => {
   })
 
   it('event, tool and payload predicates all constrain the same first matching rule, evaluated once', () => {
-    const matches = vi.fn(p => p.reason === 'halt')
-    const spec: AgentNativeHookSpecification = { rules: [
+    const matches = vi.fn(p => (p.extra as Payload | undefined)?.reason === 'halt' && p.reason === undefined)
+    const spec: AgentNativeHookSpecification = { toolFields: (_event, p) => ({ toolName: p.tool_name as string }), rules: [
       { events: ['signal'], toolNames: ['shell'], state: 'unknown', matches, lifecycleEvent: 'turn-end' },
       { events: ['signal'], state: 'waiting' }
     ] }

@@ -29,7 +29,8 @@ function normalize(eventName: string) {
     providerId: 'codex',
     eventName,
     payload: { tool_name: 'Edit', tool_input: { path: 'src/index.ts' } }
-  }, 100, protocol, undefined, PERMISSION_RAW_NAMES.includes(eventName) ? 'permission-request' : undefined)
+  }, 100, protocol, { toolName: 'Edit', toolInput: { path: 'src/index.ts' } }, undefined,
+  PERMISSION_RAW_NAMES.includes(eventName) ? 'permission-request' : undefined)
 }
 
 describe('permission-request 的每一种原始拼法都要弹出授权框', () => {

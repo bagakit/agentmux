@@ -192,11 +192,11 @@ describe('Provider Hook native handle belongs to the main subject', () => {
       sessionId: 'pi-native-id', transcriptPath: mainPath })
   })
 
-  it.each(['agent_id', 'agentId', 'subagent_id'])('omitted optional idKeys uses the same %s child subject as the roster', async (idKey) => {
+  it.each(['agent_id', 'agentId', 'subagent_id'])('declared %s child identity is shared by the subject and roster', async (idKey) => {
     const base = new AgentProviderRegistry().get('codex')
     const specification = {
       ...base.hook,
-      subagentTracking: { startEvents: ['ChildBorn'], stopEvents: ['ChildFinished'], mainStopEvents: ['Stop'] }
+      subagentTracking: { startEvents: ['ChildBorn'], stopEvents: ['ChildFinished'], mainStopEvents: ['Stop'], idKeys: [idKey] }
     }
     const provider: AgentProvider = { ...base, hook: specification,
       normalizeHook: (envelope) => normalizeNativeHook(specification, envelope, {}) }

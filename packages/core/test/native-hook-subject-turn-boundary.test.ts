@@ -92,24 +92,26 @@ async function harness(mode: Mode, shape: Shape, tracking = false) {
         payload: prompt, renderedText: prompt, submit: '\r' })
     } : {}),
     hook: {
+      toolFields: (_event, p) => ({ toolName: p.tool_name as string, toolInput: p.tool_input,
+        reportedToolCallId: p.tool_use_id as string }),
       // This synthetic protocol owns this selected result field. It does not
       // borrow a built-in Provider's result aliases or failure rules.
       toolOutcome: (_eventName, payload) => ({ failed: false,
         ...(typeof payload.tool_response === 'string' ? { output: payload.tool_response } : {}) }),
-      subagentSubject: p => typeof p.agent_name === 'string' || p.scope === 'child',
+      subagentSubject: p => typeof p.agent_name === 'string' || (p.extra as Payload | undefined)?.scope === 'child',
       nativeHandle: { sessionIdKeys: ['session_id'], transcriptPathKeys: ['transcript_path'] },
       ...(tracking ? { subagentTracking: { startEvents: ['child_open'], stopEvents: ['child_close'],
         mainStopEvents: ['finish'], idKeys: ['agent_name'] } } : {}),
       rules: [
       { events: ['notice'], state: 'unknown', matches: p => p.reason === 'cancelled', lifecycleEvent: 'turn-end' },
-      { events: ['signal'], state: 'unknown', matches: p => p.category === 'turn' && p.reason === 'halt', lifecycleEvent: 'turn-end' },
+      { events: ['signal'], state: 'unknown', matches: p => (p.extra as Payload | undefined)?.category === 'turn' && (p.extra as Payload | undefined)?.reason === 'halt', lifecycleEvent: 'turn-end' },
       { events: ['turn_open'], state: 'working', lifecycleEvent: 'turn-start' },
       { events: ['UserPromptSubmit'], state: 'working' },
       { events: ['prompt_open'], state: 'unknown', lifecycleEvent: 'user-prompt-submit' },
       { events: ['PostToolUse'], state: 'working' },
       { events: ['finish'], state: 'unknown', matches: p => p.phase === 'provisional', lifecycleEvent: null },
       { events: ['finish'], state: 'done', lifecycleEvent: 'turn-end' },
-      { events: ['Stop'], state: 'unknown', matches: p => p.phase === 'step' || p.category === 'provisional', lifecycleEvent: null },
+      { events: ['Stop'], state: 'unknown', matches: p => p.phase === 'step' || (p.extra as Payload | undefined)?.category === 'provisional', lifecycleEvent: null },
       { events: ['Stop'], state: 'done' },
       { events: ['StopFailure'], state: 'unknown' },
       { events: ['ask'], state: 'waiting', toolNames: ['select'] }

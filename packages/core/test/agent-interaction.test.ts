@@ -49,21 +49,20 @@ describe('Agent terminal interaction protocol', () => {
       agentSessionId: 'agent-1',
       runId: 'run-1',
       providerId: 'codex',
-      eventName: 'PreToolUse',
-      payload: {
-        tool_name: 'request_user_input',
-        tool_input: {
-          questions: [{
-            header: 'Scope',
-            question: 'Which scope?',
-            options: [
-              { label: 'Focused', description: 'Only affected tests' },
-              { label: 'Full', description: 'All tests' }
-            ]
-          }]
-        }
+      eventName: 'PreToolUse'
+    }, 100, codexProtocol, {
+      toolName: 'request_user_input',
+      toolInput: {
+        questions: [{
+          header: 'Scope',
+          question: 'Which scope?',
+          options: [
+            { label: 'Focused', description: 'Only affected tests' },
+            { label: 'Full', description: 'All tests' }
+          ]
+        }]
       }
-    }, 100, codexProtocol)
+    })
 
     expect(request).toMatchObject({
       kind: 'question',
@@ -100,9 +99,8 @@ describe('Agent terminal interaction protocol', () => {
         agentSessionId: 'agent-1',
         runId: 'run-1',
         providerId: 'codex',
-        eventName: 'PreToolUse',
-        payload: { tool_name: 'request_user_input', tool_input: toolInput }
-      }, 100, codexProtocol)
+        eventName: 'PreToolUse'
+      }, 100, codexProtocol, { toolName: 'request_user_input', toolInput: toolInput })
       expect(request).toMatchObject({ kind: 'question', id: 'receipt-unsupported', questions: [], responseUnavailableReason: expect.stringContaining('single-choice') })
       expect(() => codexProtocol.planResponse(request!, { kind: 'question', requestId: request!.id, outcome: 'cancelled' })).toThrow('single-choice')
     }
@@ -114,15 +112,13 @@ describe('Agent terminal interaction protocol', () => {
       agentSessionId: 'agent-1',
       runId: 'run-1',
       providerId: 'codex',
-      eventName: 'PostToolUse',
-      payload: {
-        tool_name: 'request_user_input',
-        tool_input: { question: 'Already answered?', options: ['Yes', 'No'] }
-      }
-    }, 100, codexProtocol)).toBeUndefined()
+      eventName: 'PostToolUse'
+    }, 100, codexProtocol, { toolName: 'request_user_input', toolInput: { question: 'Already answered?', options: ['Yes', 'No'] } })).toBeUndefined()
   })
 
   it('opens a question only at its declared event; the same call\'s ask stage is neither a question nor a permission', () => {
+    const fields = { toolName: 'AskUserQuestion', reportedToolCallId: 'toolu_question',
+      toolInput: { question: 'Choose scope?', options: ['Focused', 'Full'] } }
     const envelope = (eventName: string) => ({
       receiptId: `claude-${eventName}`,
       agentSessionId: 'agent-1',
@@ -135,13 +131,13 @@ describe('Agent terminal interaction protocol', () => {
         tool_input: { question: 'Choose scope?', options: ['Focused', 'Full'] }
       }
     })
-    expect(normalizeTerminalInteraction(envelope('PreToolUse'), 100, claudeProtocol)).toMatchObject({
+    expect(normalizeTerminalInteraction(envelope('PreToolUse'), 100, claudeProtocol, fields)).toMatchObject({
       kind: 'question',
       nativeToolCallId: 'toolu_question',
       questions: [{ prompt: 'Choose scope?', options: [{ label: 'Focused' }, { label: 'Full' }] }]
     })
     // Claude reports its ask stage as a permission lifecycle event; it is the same question call.
-    expect(normalizeTerminalInteraction(envelope('PermissionRequest'), 100, claudeProtocol, undefined, 'permission-request')).toBeUndefined()
+    expect(normalizeTerminalInteraction(envelope('PermissionRequest'), 100, claudeProtocol, fields, undefined, 'permission-request')).toBeUndefined()
   })
 
   it('projects every declared scoped option and maps each to its own declared keystroke', () => {
@@ -150,9 +146,8 @@ describe('Agent terminal interaction protocol', () => {
       agentSessionId: 'agent-1',
       runId: 'run-1',
       providerId: 'claude',
-      eventName: 'PermissionRequest',
-      payload: { tool_name: 'Edit', tool_input: { path: 'src/index.ts' } }
-    }, 100, claudeProtocol, undefined, 'permission-request')!
+      eventName: 'PermissionRequest'
+    }, 100, claudeProtocol, { toolName: 'Edit', toolInput: { path: 'src/index.ts' } }, undefined, 'permission-request')!
 
     // Every declared option — including allow-always — is projected with its DESCRIBE half; the
     // keystroke (`input`) is deliberately withheld from the request that crosses IPC.
@@ -194,9 +189,8 @@ describe('Agent terminal interaction protocol', () => {
       agentSessionId: 'agent-1',
       runId: 'run-1',
       providerId: 'codex',
-      eventName: 'PermissionRequest',
-      payload: { tool_name: 'Bash', tool_input: { command: 'pnpm test' } }
-    }, 100, codexProtocol, undefined, 'permission-request')!
+      eventName: 'PermissionRequest'
+    }, 100, codexProtocol, { toolName: 'Bash', toolInput: { command: 'pnpm test' } }, undefined, 'permission-request')!
 
     const response = {
       kind: 'permission' as const,
@@ -241,9 +235,8 @@ describe('Agent terminal interaction protocol', () => {
       agentSessionId: 'agent-1',
       runId: 'run-1',
       providerId: 'codex',
-      eventName: 'PermissionRequest',
-      payload: { tool_name: 'Bash' }
-    }, 100, codexProtocol, undefined, 'permission-request')!
+      eventName: 'PermissionRequest'
+    }, 100, codexProtocol, { toolName: 'Bash' }, undefined, 'permission-request')!
     permission.kind === 'permission' && permission.options.push({ ...permission.options[0]! })
     expect(() => normalizeAgentInteractionResponse(permission, {
       kind: 'permission',
@@ -256,12 +249,8 @@ describe('Agent terminal interaction protocol', () => {
       agentSessionId: 'agent-1',
       runId: 'run-1',
       providerId: 'codex',
-      eventName: 'PreToolUse',
-      payload: {
-        tool_name: 'request_user_input',
-        tool_input: { question: 'Choose?', options: ['A', 'B'] }
-      }
-    }, 100, codexProtocol)!
+      eventName: 'PreToolUse'
+    }, 100, codexProtocol, { toolName: 'request_user_input', toolInput: { question: 'Choose?', options: ['A', 'B'] } })!
     if (question.kind === 'question') {
       question.questions[0]!.options.push({ ...question.questions[0]!.options[0]! })
     }
