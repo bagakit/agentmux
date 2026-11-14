@@ -68,10 +68,14 @@ describe('production Profile Cookie file consumer', () => {
     } finally { await m.close() }
   })
   it('discovers pending and recent owner receipts, paginates safe source indexes and reveals the original export', async () => {
-    const pending = receipt('durable-original', 'export', { status: 'pending', fileOutcome: 'unknown' }); ports.inspectProfileCookieFiles.mockResolvedValue(inspection({ pending: [pending], recent: [receipt('older-done')] }))
+    const pending = receipt('durable-original', 'export', { status: 'pending', fileOutcome: 'unknown', counts: { total: 3, applied: 0, skipped: 0, rejected: 0, unknown: 3, notAttempted: 0 } }); ports.inspectProfileCookieFiles.mockResolvedValue(inspection({ pending: [pending], recent: [receipt('older-done')] }))
     const m = await mount()
     try { await m.open(); expect(m.host.textContent).toContain('durable-original'); expect(m.host.textContent).toContain('older-done'); ports.inspectProfileCookieFiles.mockResolvedValueOnce(inspection({ receipt: pending, items: [{ index: 0, status: 'unknown', reason: 'native-unconfirmed' }], nextOffset: 1 })); await act(async () => m.host.querySelector<HTMLButtonElement>('[data-cookie-check="durable-original"]')!.click()); expect(m.host.textContent).toContain('Entry 1: unknown'); ports.inspectProfileCookieFiles.mockResolvedValueOnce(inspection({ receipt: pending, offset: 1, items: [{ index: 1, status: 'skipped', reason: 'expired' }], nextOffset: null })); await m.click('Read more entry outcomes'); expect(ports.inspectProfileCookieFiles).toHaveBeenLastCalledWith(profile.id, 'durable-original', 1, 24); expect(m.host.textContent).toContain('Entry 1: unknown'); expect(m.host.textContent).toContain('Entry 2: skipped'); await m.click('Reveal original export location'); expect(ports.revealProfileCookieFile).toHaveBeenCalledWith(profile.id, 'durable-original'); expect(ports.exportProfileCookies).not.toHaveBeenCalled()
     } finally { await m.close() }
+  })
+  it('a general owner refresh replaces an earlier refusal when that same original ID later has an authoritative receipt', async () => {
+    const m=await mount()
+    try{await m.open();await m.click('Export…');await m.select('profile');await m.click('Choose destination folder…');ports.exportProfileCookies.mockRejectedValueOnce(Object.assign(new Error('safe refusal'),{code:'BROWSER_PROFILE_COOKIE_FILE_REFUSED'}));await m.click('Continue to native confirmation…');const id=ports.exportProfileCookies.mock.calls[0]![1];expect(m.host.textContent).toContain('Operation not submitted');await m.click('Cancel');ports.inspectProfileCookieFiles.mockResolvedValueOnce(inspection({recent:[receipt(id,'export')]}));await m.click('Read receipts');expect(m.host.textContent).not.toContain('Operation not submitted');expect(m.host.textContent).toContain('Partially completed');expect(m.host.textContent).toContain('Export file written.');expect(ports.exportProfileCookies).toHaveBeenCalledTimes(1)}finally{await m.close()}
   })
   it('retains full Profile capability when site discovery fails and discards only a prepared import on Escape', async () => {
     ports.listProfileSites.mockRejectedValue(new Error('observation unavailable')); const m = await mount()
@@ -92,6 +96,7 @@ describe('production Profile Cookie file consumer', () => {
     { status: 'completed', fileOutcome: 'unknown' },
     { status: 'completed', fileOutcome: 'written' },
     { status: 'partial', fileOutcome: 'not-written' },
+    { status: 'partial', fileOutcome: 'written', counts: {total:3,applied:1,skipped:1,rejected:0,unknown:1,notAttempted:0} },
     { status: 'cancelled', fileOutcome: 'not-written' }
   ] as const)('keeps contradictory export DTO %j unconfirmed without presenting completion', async extra => {
     ports.exportProfileCookies.mockImplementationOnce(async (_p, id) => receipt(id, 'export', extra)); const m = await mount()
