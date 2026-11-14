@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'node:async_hooks'
 import { expect, it, vi } from 'vitest'
 import { AgentMuxError, type AgentMuxStoredAgentSession, type AgentProviderInputInitialization } from '@agentmux/core'
 import { DEFAULT_AGENT_CONTINUITY_POLICY } from '../../core/src/agent-session-recovery/continuity-contract.js'
@@ -61,25 +62,35 @@ it('relates each frozen input only through its exact Session snapshot and canoni
     continuity: { operationId: 'diagnosis-resume', agentSessionId: sid, trigger: 'manual' as const, policy: { ...DEFAULT_AGENT_CONTINUITY_POLICY },
       reason: 'original-native-context', admittedAt: at, observedAt: at, rechecks: 0, kind: 'resumed' as const, previousRun: initial.run,
       newRun: nextRun, nativeTarget, evidence: { kind: 'run-running' as const, observedAt: at } } }
-  const rejoin = vi.spyOn(f.client, 'rejoinAgentInputWaiting'), runtime = vi.spyOn(f.services.ingress!, 'inspectInputRuntime')
-  const originalRead = f.client.readAgentSession.bind(f.client)
+  const rejoin = vi.spyOn(f.client, 'rejoinAgentInputWaiting'), inspection = new AsyncLocalStorage<boolean>()
+  const originalInspect = f.services.ingress!.inspectInputRuntime.bind(f.services.ingress!)
+  const runtime = vi.spyOn(f.services.ingress!, 'inspectInputRuntime').mockImplementation(id => inspection.run(true, () => originalInspect(id)))
+  const originalRead = f.client.readAgentSession.bind(f.client), originalSubject = f.client.runtimeSubject.bind(f.client)
+  const diagnosisReads: string[] = [], diagnosisSubjects: unknown[] = []
   let readMode: 'normal' | 'missing' | 'unavailable' = 'normal'
-  const read = vi.spyOn(f.client, 'readAgentSession').mockImplementation(async id => {
-    if (id === sid && readMode === 'missing') return null
-    if (id === sid && readMode === 'unavailable') throw new AgentMuxError('PRIVATE_SESSION_OBSERVATION', 'AGENT_SESSION_STORE_READ_UNCONFIRMED')
-    return await originalRead(id)
-  }), currentRuntime = vi.spyOn(f.client, 'runtimeSubject')
+  const read = vi.spyOn(f.client, 'readAgentSession').mockImplementation(async (...args) => {
+    if (inspection.getStore()) {
+      diagnosisReads.push(args[0])
+      if (args[0] === sid && readMode === 'missing') return null
+      if (args[0] === sid && readMode === 'unavailable') throw new AgentMuxError('PRIVATE_SESSION_OBSERVATION', 'AGENT_SESSION_STORE_READ_UNCONFIRMED')
+    }
+    return await originalRead(...args)
+  })
+  vi.spyOn(f.client, 'runtimeSubject').mockImplementation((...args) => {
+    if (inspection.getStore()) diagnosisSubjects.push(args[0])
+    return originalSubject(...args)
+  })
   const store = new MoteChatStore(f.services.database!), configuration = store.configuration(f.target.spaceId)
   const admissions = records.map(row => store.admissionByIngress(row.ingressId))
   async function report(continuity: 'confirmed' | 'unconfirmed' | 'unavailable', target: 'original' | 'changed' | 'missing' | 'unavailable') {
-    runtime.mockClear(); read.mockClear(); currentRuntime.mockClear()
+    runtime.mockClear(); diagnosisReads.length = 0; diagnosisSubjects.length = 0
     const value = await f.sdk.call('space.mote.chat.diagnose', { target: f.target })
     expect(value.incoming!.rows).toHaveLength(2)
     for (const row of value.incoming!.rows) expect(row.input.runtime, 'canonical original-target relationship must not borrow unrelated Run history')
       .toMatchObject({ target, continuity })
     expect(runtime).toHaveBeenCalledOnce()
-    expect(read.mock.calls.filter(call => call[0] === sid)).toHaveLength(1)
-    expect(currentRuntime).toHaveBeenCalledExactlyOnceWith({ kind: 'terminal-run', runId: frozen.expectedRun.runId })
+    expect(diagnosisReads).toEqual([sid])
+    expect(diagnosisSubjects).toEqual([{ kind: 'terminal-run', runId: frozen.expectedRun.runId }])
     return value
   }
   await report('confirmed', 'original')
