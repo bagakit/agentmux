@@ -10,4 +10,4 @@ CDP pointer actions open Profile and its actual Quick mode. Capture actual unkno
 
 Independent visual reviewer opens complete PNGs, checks hierarchy, branding, density, state honesty, actions/scroll/focus and draft retention, then records required corrections and final delivery verdict.
 
-For changes to the heartbeat badge, add `MOTE_HEARTBEAT_ICON=1` to capture just the original launcher and Discussion surfaces in one process. Check the 12 px waveform at wide and narrow widths in both themes, plus distinct paused and attention marks. The adjacent Agent status dot remains visible.
+For changes to the heartbeat badge, add `MOTE_HEARTBEAT_ICON=1` to capture the original launcher and Discussion in one process. Check the authored 12 px waveform in both themes, plus the paused and attention marks and the separate Agent status dot. A new original input receipt produces one finite animation per mark. Inspect its rest, crest and settled frames and the static reduced-motion appearance.
