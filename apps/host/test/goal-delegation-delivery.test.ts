@@ -83,6 +83,26 @@ it('retries only an explicit original delegation after missing trust and lost ta
   expect(f.a.native.stop).not.toHaveBeenCalled(); expect(f.b.native.stop).not.toHaveBeenCalled()
 })
 
+it('the public plan reader names why a node needs reconciliation: an unconfirmed link, then criteria changed after the attempt was sent', async () => {
+  const f = await fixture(), read = () => f.a.call('same-session', ['goal', 'plan', '--goal', f.goalId]), plan = async () => (await read()).planState
+  const saved = (await read()).plan
+  await f.a.call('same-session', ['goal', 'plan', 'revise', '--input', '-'], { goalId: f.goalId, revision: { operationId: 'delivery-plan-dependent',
+    expectedRevision: saved.revision, alignmentRevision: saved.alignmentRevision, nodes: [...saved.nodes, { id: 'second', title: 'Dependent work',
+      outcome: 'Builds on the received source', dependsOn: ['first'], criterionIds: ['delivery-criterion'], check: 'node --test checks/second.test.mjs', executor: null }] } })
+  const attempt = { delegationOperationId: f.intent.operationId, sourceMessageId: f.intent.sourceMessageId, threadId: f.intent.threadId,
+    workerHostId: 'worker-host', workerAgentSessionId: 'same-session', reported: false }
+  const second = { id: 'second', state: 'waiting', column: 1, unknown: [], attempt: null }
+  expect(await plan()).toMatchObject({ revision: 2, done: 0, total: 2, next: ['first'], nodes: [{ id: 'first', state: 'ready', column: 0, unknown: [], attempt: null }, second] })
+  expect((await f.a.cli('same-session', ['goal', 'delegate', '--input', '-'], f.input)).code).toBe(1)
+  expect(await plan()).toMatchObject({ next: [], nodes: [{ id: 'first', state: 'unknown', unknown: ['dispatch-link'], attempts: 1, attempt }, second] })
+  await pin(f.a, f.b)
+  await f.a.call('same-session', ['goal', 'delegate', '--input', '-'], f.input)
+  expect((await plan()).nodes).toMatchObject([{ id: 'first', state: 'working', unknown: [], attempts: 1, attempt }, second])
+  const criteria = [{ ...f.criteria[0]!, text: 'Retain original work and verify the signed target receipt.' }]
+  await f.a.call(null, ['goal', 'update', '--goal', f.goalId, '--alignment', JSON.stringify({ summary: 'Original delivery target', criteria, openQuestions: [] })])
+  expect((await plan()).nodes).toMatchObject([{ id: 'first', state: 'unknown', unknown: ['criteria'], staleCriteria: ['delivery-criterion'], attempt }, second])
+})
+
 it('binds an existing cross-Host source only after the worker exact read proves receipt and never sends from bind', async () => {
   const f = await fixture(), application = { schema: 'agentmux.goal-delegation.v1', data: { goalId: f.goalId,
     delegationOperationId: f.intent.operationId, alignmentRevision: f.intent.alignmentRevision, criteria: f.criteria, planNodeId: 'first' } }

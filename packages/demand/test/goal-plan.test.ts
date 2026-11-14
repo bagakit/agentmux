@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { openDemandStore } from '../src/demand-store.js'
 import type { DemandDelegationIntent } from '../src/delegations.js'
-import { projectGoalPlan, type GoalPlanNodeInput } from '../src/goal-plan.js'
+import { goalPlanDelegationIssue, goalPlanState, projectGoalPlan, type GoalPlanNodeInput } from '../src/goal-plan.js'
 
 /**
  * A Goal plan is a dependency graph inside one Goal. Node state comes only from the plan, this
@@ -210,6 +210,37 @@ describe('node delegation and review', () => {
     await store.revisePlan('goal', { operationId: 'plan-2', expectedRevision: 1, alignmentRevision: 1, nodes: [node('a', [], { criterionIds: ['api', 'gone'] })] }, supervisor)
     const goal = (await store.get('goal'))!
     expect(projectGoalPlan(goal.plan!, [], goal.alignment!.criteria).nodes[0]!.staleCriteria).toEqual(['gone'])
+  })
+
+  it('names every reason a node needs reconciliation, and an unknown node cannot be delegated', async () => {
+    await store.prepareDelegation('goal', delegation('a'), 'mote')
+    await store.proposeAlignment('goal', { summary: 'Changed API requirement', criteria: [{ ...criteria[0]!, text: 'The API authenticates callers' }, criteria[1]!], openQuestions: [] })
+    const goal = (await store.get('goal'))!
+    expect(projectGoalPlan(goal.plan!, goal.delegations!, goal.alignment!.criteria).nodes[0])
+      .toMatchObject({ state: 'unknown', unknown: ['criteria', 'dispatch-link'], staleCriteria: ['api'] })
+    expect(goalPlanDelegationIssue(goal.plan!, goal.delegations!, goal.alignment!.criteria, 'a', { hostId: 'local', agentSessionId: 'worker-a' }))
+      .toBe('Plan node a is unknown (criteria, dispatch-link); only a ready node or one whose review requested changes can be delegated.')
+  })
+
+  it('never offers a node that covers no success criterion, while a cancelled node needs no reconciliation', async () => {
+    await store.revisePlan('goal', { operationId: 'plan-2', expectedRevision: 1, alignmentRevision: 1,
+      nodes: [node('a', [], { criterionIds: [] }), node('b', [], { criterionIds: ['gone'], cancelled: true })] }, supervisor)
+    const goal = (await store.get('goal'))!
+    const projection = projectGoalPlan(goal.plan!, [], goal.alignment!.criteria)
+    expect(projection.nodes.map(item => [item.node.id, item.state, item.unknown])).toEqual([['a', 'unknown', ['criteria']], ['b', 'cancelled', []]])
+    expect(projection).toMatchObject({ done: 0, total: 1, next: [] })
+  })
+
+  it('returns the derivation with each current attempt by its original identities', async () => {
+    await deliver(delegation('a'))
+    await store.prepareDelegation('goal', delegation('b', 'worker-b'), 'mote')
+    const goal = (await store.get('goal'))!
+    const attempt = (id: string, worker: string, reported: boolean) =>
+      ({ delegationOperationId: `delegate-${id}-1`, sourceMessageId: `source-${id}-1`, threadId: `thread-${id}`, workerHostId: 'local', workerAgentSessionId: worker, reported })
+    expect(goalPlanState(projectGoalPlan(goal.plan!, goal.delegations!, goal.alignment!.criteria))).toEqual({ revision: 1, done: 0, total: 3, next: [], nodes: [
+      { id: 'a', state: 'review', column: 0, attempts: 1, staleCriteria: [], unknown: [], attempt: attempt('a', 'worker-a', true) },
+      { id: 'b', state: 'unknown', column: 0, attempts: 1, staleCriteria: [], unknown: ['dispatch-link'], attempt: attempt('b', 'worker-b', false) },
+      { id: 'c', state: 'waiting', column: 1, attempts: 0, staleCriteria: [], unknown: [], attempt: null }] })
   })
 
   it('does not carry an old pass to changed or missing standards, while preserving work on unchanged standards', async () => {

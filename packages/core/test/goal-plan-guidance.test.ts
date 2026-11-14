@@ -9,10 +9,14 @@ import { agentMuxCommandHelp } from '../src/agentmux-cli-help.js'
  */
 describe('Goal plan guidance reaches its readers', () => {
   it('the Goal module skill explains plan read, revision, node delegation, review and monitoring', () => {
-    const skill = agentMuxModuleSkill('goal')!
+    const skill = agentMuxModuleSkill('goal')!.replace(/\s+/gu, ' ')
     for (const fact of ['goal plan --goal ID', 'goal plan revise', 'intent.planNodeId', 'goal plan review', 'someone other than its executor',
-      'record the command, its actual result and evidence', 'same executor on the same', 'Read the original delegation receipt', 'never accepts the Goal',
-      'complete node criterion set', 'cancel it and add a', 'unchanged criteria keep their accepted work'])
+      'record the command, its actual result and evidence', 'same executor on the same', 'never accepts the Goal',
+      'complete node criterion set', 'cancel it and add a', 'unchanged criteria keep their accepted work',
+      'planState carries that derivation', 'instead of deriving state yourself', 'Goal records carry the same planState with their plan',
+      'Without planState the owner gave no derivation: node states are unknown to you',
+      'dispatch-link: read the original delegation receipt before acting and never resend that delivery',
+      'criteria: the node names no criterion, names one the current proposal no longer has, or one whose text changed since its attempt was sent'])
       expect(skill, fact).toContain(fact)
   })
 
@@ -35,7 +39,9 @@ describe('Goal plan guidance reaches its readers', () => {
   })
 
   it('every plan command has help that names its owner rules', () => {
-    for (const [method, fact] of [['goal.plan', 'Node state is derived'], ['goal.plan.revise', 'expectedRevision'], ['goal.plan.review', 'cannot review its own work']] as const) {
+    for (const [method, fact] of [['goal.plan', 'Node state is derived'], ['goal.plan', 'planState is the owner\'s derivation'], ['goal.plan', 'criteria (the node names no criterion'],
+      ['goal.plan', 'dispatch-link (the attempt was prepared'], ['goal.plan', 'Without planState the owner gave no derivation: node states are unknown to this reader'],
+      ['goal.plan.revise', 'expectedRevision'], ['goal.plan.review', 'cannot review its own work']] as const) {
       const help = agentMuxCommandHelp(method)
       expect(help, method).toBeTruthy()
       expect(help, method).toContain(fact)
