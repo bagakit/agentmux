@@ -1,3 +1,5 @@
+import { HostAgentPromotions, type PromotionAgentInspection } from './agent-promotion.js'
+import { assertPromotionEnabled } from './promotion-policy.js'
 import { FileMutationObservations } from './file-mutation-observations.js'
 import { dirname, join } from 'node:path'
 import { AgentMuxError, spatialCatalog, type AgentMuxClient, type AgentMuxSpatialStateStore, type AgentMuxRpcServiceOptions, type AgentMuxRpcFilesOwner, type NotebookObservationPort } from '@agentmux/core'
@@ -26,7 +28,7 @@ import { TopicKnowledgeOwner } from './topic-knowledge.js'
 import { TopicSpatialOwner } from './topic-spatial-owner.js'
 import { TopicSearchHistoryOwner } from './topic-search-history.js'
 
-type ContentPorts = Pick<AgentMuxRpcServiceOptions, 'files' | 'topics' | 'notebookStore' | 'notebookObservation'>
+type ContentPorts = Pick<AgentMuxRpcServiceOptions, 'files' | 'topics' | 'notebookStore' | 'notebookObservation' | 'agentPromotions'>
 /** Borrows the original configuration, spatial graph and Notes storage. No Desktop connection. */
 export function createHostContent(options: {
   configurationPath: string
@@ -34,6 +36,7 @@ export function createHostContent(options: {
   storage?: AgentMuxNotesStorage
   files?: OrdinaryWorkspaceFiles
   resources?: HostWorkspaceResources
+  inspectPromotionAgent?(target: import('@agentmux/core/agent-promotion').AgentPromotionTarget, context?: import('@agentmux/core').AgentMuxRpcCallContext): Promise<PromotionAgentInspection>
   directoryScope?: (isRelated: (cwd: string) => Promise<boolean>) => ReturnType<AgentMuxClient['retainExecutionDirectoryMutation']>
 }): ContentPorts {
   const storage = options.storage ?? new AgentMuxNotesStorage()
@@ -167,7 +170,14 @@ export function createHostContent(options: {
     resolve: async (...args) => (await owners()).observation.resolve(...args),
     scan: async (...args) => (await owners()).observation.scan(...args)
   }
-  return { files: publicFiles, notebookStore, notebookObservation, topics: {
+  const agentPromotions = new HostAgentPromotions({ configurationPath: options.configurationPath, spatial: options.spatial, scratch,
+    ...(options.inspectPromotionAgent ? { inspectAgent: options.inspectPromotionAgent } : {}),
+    workspace: async () => {
+      const current = await configuration(), matches = current.workspaces.filter(value => value.id === SCRATCH_WORKSPACE_ID)
+      if (matches.length !== 1) throw new AgentMuxError('The original Mote content Workspace is unconfirmed. Existing Agents and promotions are retained.', 'AGENT_PROMOTION_RESOURCE_UNAVAILABLE')
+      return matches[0]!
+    } })
+  return { files: publicFiles, notebookStore, notebookObservation, agentPromotions, topics: {
     call: async (method, params, context) => {
       const content = await owners()
       const workspace = () => {
@@ -175,7 +185,7 @@ export function createHostContent(options: {
         if (!original) throw new AgentMuxError('The original Topics Workspace is unconfirmed. Content, spatial references and Agents are retained.', 'TOPIC_WORKSPACE_UNAVAILABLE')
         return original
       }
-      const topics = new TopicKnowledgeOwner(scratch, files, workspace, history)
+      const topics = new TopicKnowledgeOwner(scratch, files, workspace, history, () => assertPromotionEnabled(options.configurationPath))
       topics.setFileReadPort(content.files)
       topics.setSpatialPort(new TopicSpatialOwner({ state: options.spatial, workspace, topics: () => topics.listTopicSnapshots(), categories: () => topics.listCategories(), ensureDefaultCategory: () => topics.ensureDefaultCategoryContent() }))
       return topics.call(method, params, context)

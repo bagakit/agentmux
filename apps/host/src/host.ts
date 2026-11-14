@@ -1,3 +1,4 @@
+import { inspectPromotionAgent } from './promotion-agent-inspection.js'
 import { createHostWorkspaceResources } from './workspace-resources.js'
 import { createHostFolderDirectoryOwner } from './folder-directory-owner.js'
 import { createHostFolderSpaceResource } from './folder-space-resource.js'
@@ -158,6 +159,18 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
   const spatialState = connectionOwner?.spatial ?? new AgentMuxSpatialStateStore()
   const workspaceResources = configurationPath ? createHostWorkspaceResources(configurationPath,spatialState,()=>originalRuntime().ownerIdentity().runtimeId) : undefined
   const content = configurationPath ? createHostContent({ configurationPath, spatial: spatialState,
+    inspectPromotionAgent: (target, context) => inspectPromotionAgent(async (hostId, params, originalContext) => {
+      if (hostId === 'local') return { runtimeId: originalRuntime().ownerIdentity().runtimeId, inspection: await originalRuntime().server.callRpc('agent.inspect', params, originalContext ?? { transport: 'unix' }) }
+      const matches = options.connections?.clients?.().filter(value => value.hostId === hostId) ?? []
+      const client = matches.length === 1 ? matches[0]!.client : undefined
+      if (!client || !('forwardRpc' in client) || !client.forwardRpc) throw new AgentMuxError('The original Agent Host is unavailable. The Session and promotion request are retained.', 'AGENT_PROMOTION_SOURCE_UNCONFIRMED')
+      const before = 'runtimeOwnerIdentity' in client ? client.runtimeOwnerIdentity() : undefined
+      if (before?.availability !== 'connected') throw new AgentMuxError('The selected Agent Runtime is unconfirmed. Keep its original Session and occurrence.', 'AGENT_PROMOTION_SOURCE_UNCONFIRMED')
+      const inspection = await client.forwardRpc('agent.inspect', params, originalContext ?? { transport: 'unix' })
+      const after = client.runtimeOwnerIdentity()
+      if (after?.availability !== 'connected' || after.runtimeId !== before.runtimeId) throw new AgentMuxError('The selected Agent Runtime changed during inspection. Original work is retained.', 'AGENT_PROMOTION_SOURCE_UNCONFIRMED')
+      return { runtimeId: before.runtimeId, inspection }
+    }, target, context),
     ...(workspaceResources ? { resources: workspaceResources } : {}),
     directoryScope: isRelated => {
       if (!runtime) throw new AgentMuxError('The original Core directory admission is not yet available. Original files and Agents are retained.', 'CONTROL_UNAVAILABLE')

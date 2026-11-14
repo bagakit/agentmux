@@ -32,7 +32,7 @@ async function syncDirectory(path: string): Promise<void> {
 
 /** One Host content operation, composing original file and Core spatial owners. Never controls a Run. */
 export class TopicPromotionOwner {
-  constructor(private readonly resources: Resources, private readonly workspace: () => WorkspaceRecord, private readonly spatial: TopicSpatialPort) {}
+  constructor(private readonly resources: Resources, private readonly workspace: () => WorkspaceRecord, private readonly spatial: TopicSpatialPort, private readonly admit?: () => Promise<void>) {}
   private async directory(topicId: string): Promise<string | null> {
     return resolveScratchTopicDirectory(this.workspace().path, topicId)
   }
@@ -78,6 +78,7 @@ export class TopicPromotionOwner {
     await durableWriteFile(join(directory, RECORD), JSON.stringify(record) + '\n', { requireDirectorySync: true })
   }
   private async begin(topicId: string, operationId: string): Promise<PromotionRecord> {
+    await this.admit?.()
     const workspace = this.workspace(), topic = await this.resources.read(workspace, topicId)
     if (!topic) throw failure('Choose the exact existing Topic to promote.', 'TOPIC_NOT_FOUND')
     const original = await this.spatial.inspect(topic)

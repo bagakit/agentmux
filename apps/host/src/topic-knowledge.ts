@@ -100,8 +100,8 @@ export class TopicKnowledgeOwner implements AgentMuxRpcTopicsOwner {
   private originalFiles?: Pick<FileReadOwner, 'list' | 'read'>
   constructor(private readonly scratch: Pick<ScratchTopics, 'list' | 'read' | 'ensure' | 'topicAppearanceIdentity' | 'prepareMotePromotion' | 'promoteMoteDirectory'>,
     private readonly files: Pick<WorkspaceFiles, 'write'>, private readonly workspace: () => WorkspaceRecord,
-    private readonly history?: TopicSearchHistoryOwner) {}
-  setSpatialPort(port: TopicSpatialPort): void { this.spatial = port; this.promotion = new TopicPromotionOwner(this.scratch, () => this.scope(), port) }
+    private readonly history?: TopicSearchHistoryOwner, private readonly promotionAdmission?: () => Promise<void>) {}
+  setSpatialPort(port: TopicSpatialPort): void { this.spatial = port; this.promotion = new TopicPromotionOwner(this.scratch, () => this.scope(), port, this.promotionAdmission) }
   setFileReadPort(port: Pick<FileReadOwner, 'list' | 'read'>): void { this.originalFiles = port }
   private scope(): WorkspaceRecord {
     const workspace = this.workspace()
