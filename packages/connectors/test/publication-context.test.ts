@@ -56,6 +56,7 @@ it('quote selection indexed candidate work does not scan unrelated Session outbo
   const f = fixture()
   f.database.exec('BEGIN')
   for (let index = 0; index < 2000; index++) f.clone('unrelated-' + index, op => { op.target.externalConversationId = 'unrelated-room-' + index; op.reference.agentSessionId = 'unrelated-session-' + index })
+  for (let index = 0; index < 5000; index++) f.clone('foreign-issuer-' + index, op => { op.target.application.issuer = 'https://foreign-' + index + '.example'; op.mapping = { messageId: 'known-native-message' } })
   f.database.exec('COMMIT')
   const prepare = f.database.prepare.bind(f.database), plans: string[] = [], batches: number[] = []
   f.database.prepare = ((sql: string) => {
@@ -71,7 +72,10 @@ it('quote selection indexed candidate work does not scan unrelated Session outbo
   }) as typeof f.database.prepare
   expect([...f.owner.knownContextMessages(f.recipient, ['known-native-message', ...Array.from({ length: 204 }, (_, index) => 'external-' + index)])]).toEqual(['known-native-message'])
   expect(batches).toEqual([100, 100, 5])
-  expect(plans.some(plan => /SEARCH original(?: EXISTS)? USING (?:COVERING )?INDEX connector_publication_context_message/u.test(plan)), JSON.stringify(plans)).toBe(true)
+  expect([...f.owner.knownContextMessages({ ...f.recipient, application: { ...f.recipient.application, issuer: 'https://missing.example' } }, ['known-native-message'])]).toEqual([])
+  const lookups = plans.filter(plan => /SEARCH original(?: EXISTS)? USING (?:COVERING )?INDEX connector_publication_context_message_scoped/u.test(plan))
+  expect(lookups.length, JSON.stringify(plans)).toBeGreaterThan(0)
+  for (const plan of lookups) expect(plan.match(/<expr>=\?/g)).toHaveLength(9)
   expect(plans.some(plan => /SCAN original/u.test(plan))).toBe(false)
   expect(f.owner.inspect(f.original.operationId)).toEqual(f.original)
 })

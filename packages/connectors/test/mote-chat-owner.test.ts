@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
+import type { SQLInputValue } from 'node:sqlite'
 import { afterEach, expect, it, vi } from 'vitest'
 import { parseMoteChatParams, parseMoteChatResult, type MoteChatConfigure, type MoteChatGeneration } from '@agentmux/core/mote-chat'
 import { ConnectionHost } from '../src/connection-host.js'
@@ -238,6 +239,54 @@ it('keeps a known private audience from borrowing a manual binding while paused 
   expect(combined.findActiveAudience({ application: other, externalConversationId: binding.externalConversationId })?.bindingId).toBe(manual.bindingId)
   expect(find).toHaveBeenCalledTimes(2)
   expect(f.restart().knowsAudience(audience)).toBe(true)
+})
+
+it('uses exact issuer audience indexes after reopening old storage without scanning foreign generations', async () => {
+  const f = await fixture(), binding = (await f.host.prepareIncoming(f.incoming('original')))!
+  const db = f.connections.database
+  const original = db.prepare('SELECT * FROM mote_chat_generation LIMIT 1').get()!
+  const insert = db.prepare('INSERT INTO mote_chat_generation(generation_id,lane_key,space_id,session_id,binding_id,grant_id,snapshot_json) VALUES(?,?,?,?,?,?,?)')
+  db.exec('BEGIN')
+  try {
+    for (let i = 0; i < 5000; i++) {
+      const row = JSON.parse(String(original.snapshot_json))
+      row.generation.application.issuer = 'https://foreign-' + i + '.example'
+      insert.run('foreign-' + i, 'foreign-' + i, original.space_id, 'foreign-session-' + i, 'foreign-binding-' + i, 'foreign-grant-' + i, JSON.stringify(row))
+    }
+    db.exec('COMMIT')
+  } catch (error) { db.exec('ROLLBACK'); throw error }
+  // Reopen an existing database whose original audience indexes predate issuer support.
+  db.exec(`DROP INDEX IF EXISTS mote_chat_generation_scoped_audience;
+    DROP INDEX IF EXISTS mote_chat_generation_scoped_native_audience;
+    CREATE INDEX IF NOT EXISTS mote_chat_generation_audience ON mote_chat_generation(space_id,json_extract(snapshot_json,'$.generation.application.domain'),json_extract(snapshot_json,'$.generation.application.appId'),json_extract(snapshot_json,'$.generation.externalConversationId'),sequence DESC);
+    CREATE INDEX IF NOT EXISTS mote_chat_generation_native_audience ON mote_chat_generation(json_extract(snapshot_json,'$.generation.application.domain'),json_extract(snapshot_json,'$.generation.application.appId'),json_extract(snapshot_json,'$.generation.externalConversationId'));`)
+  const host = f.restart(), queries: Array<{ sql: string; args: SQLInputValue[] }> = []
+  const prepare = db.prepare.bind(db)
+  const spy = vi.spyOn(db, 'prepare').mockImplementation(sql => {
+    const statement = prepare(sql)
+    if (!sql.includes("json_extract(snapshot_json,'$.generation.application.issuer') IS ?")) return statement
+    const get = statement.get.bind(statement)
+    vi.spyOn(statement, 'get').mockImplementation((...args) => { queries.push({ sql, args }); return get(...args) })
+    return statement
+  })
+  try {
+    const audience = { application, externalConversationId: binding.externalConversationId }
+    const manual = { ...binding, bindingId: 'manual-group' }
+    const groups = { readExact: () => manual, readCurrent: () => manual, findActiveAudience: vi.fn(() => manual), listActive: () => [manual],
+      publicationAuthority: () => ({ binding: manual, authorized: true }), readGrant: () => null, findGrant: () => null, effectiveGrant: () => null, effectiveGrants: () => ({ grants: [], issue: null }) }
+    const combined = composeMoteChatBindings(groups, host)
+    expect(combined.findActiveAudience(audience)?.bindingId).toBe(binding.bindingId)
+    expect(combined.findActiveAudience({ ...audience, application: { ...application, issuer: 'https://missing.example' } })).toBe(manual)
+    expect(groups.findActiveAudience).toHaveBeenCalledOnce()
+  } finally { spy.mockRestore() }
+  expect(queries).toHaveLength(3)
+  for (const { sql, args } of queries) {
+    const detail = prepare('EXPLAIN QUERY PLAN ' + sql).all(...args).map(row => String(row.detail)).join(' ')
+    // Domain, app ID, issuer and room all constrain the real index lookup, including absent issuers.
+    expect(detail).toMatch(/USING (?:COVERING )?INDEX mote_chat_generation_scoped_/)
+    expect(detail.match(/<expr>=\?/g)).toHaveLength(4)
+  }
+  expect(db.prepare('SELECT count(*) AS n FROM mote_chat_generation').get()?.n).toBe(5001)
 })
 
 it('preserves the original binding when another local alias selects the same native application', async () => {

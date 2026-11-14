@@ -252,3 +252,24 @@ it('fresh configuration and a foreign Host at the same physical path cannot borr
   expect((await rpc.call('system.endpoint', {})).protocol).toBe('jsonrpc-2.0')
   facts.push({ case: 'fresh-config-foreign-host', localReads: read.mock.calls.length, localWrites: f.writes, parentEffects: f.counts.begin, coreAvailable: true })
 })
+
+it('the original Host preference rejects another service issuer and retains the verified issuer in MOTE.md', async () => {
+  const f = await fixture(), rpc = await f.rpc()
+  const owner = (await rpc.call('runtime.owner.identity', {})).owner
+  const secret = await rpc.call('connection.credential.store', { operationId: 'issuer-mote-secret', secret: 'fixture-credential' },
+    { runtimeFence: { runtimeId: owner.runtimeId, ownerInstanceId: owner.ownerInstanceId } })
+  const application = { domain: 'node.example', appId: '@same:example.org', issuer: 'https://one.example:8443' }
+  const connection = { connectionId: 'issuer-mote-connection', adapterId: 'node-prepared', application, label: 'Native original', enabled: false, credentialRef: secret.credentialRef }
+  await rpc.call('connection.configure', { operationId: 'issuer-mote-configure', expectedRevision: null, connection })
+  const baseline = moteConnectionBaseline(await f.read(rpc))!
+  const rejected = await rpc.call('space.mote.preferences.save', { kind: 'connection', target: f.target, operationId: 'issuer-mote-forged', baseline,
+    values: { connection: { connectionId: connection.connectionId, application: { ...application, issuer: 'https://two.example:9443' } } } })
+  expect(rejected.status).toBe('refused-before-write'); expect(f.writes).toBe(0)
+  const accepted = await rpc.call('space.mote.preferences.save', { kind: 'connection', target: f.target, operationId: 'issuer-mote-original', baseline,
+    values: { connection: { connectionId: connection.connectionId, application } } })
+  expect(accepted.status).toBe('saved')
+  expect((await f.read(rpc)).values?.connection?.application).toEqual(application)
+  const cli = await f.cli('read', { kind: 'connection', target: f.target }) as MoteConnectionPreferencesReadResult
+  expect(cli.values?.connection?.application).toEqual(application)
+  expect(parseMoteConnectionMode(await readFile(f.moteFile, 'utf8'))).toMatchObject({ status: 'valid', values: { connection: { application } } })
+}, 30000)
