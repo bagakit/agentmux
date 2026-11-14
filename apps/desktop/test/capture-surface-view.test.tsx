@@ -46,7 +46,7 @@ async function paint() {
   await act(async () => { const pending = [...paints.values()]; paints.clear(); for (const callback of pending) callback(16) })
 }
 
-async function mount(owned: boolean, background: CaptureBackground = 'included', loaded = true, notice?: string, issue = false, initialCrop: typeof remembered | null = remembered) {
+async function mount(owned: boolean, background: CaptureBackground = 'included', loaded = true, notice?: string, issue = false, initialCrop: typeof remembered | null = remembered, deferred = false) {
   const stopAutomaticLoad = (event: Event) => event.stopImmediatePropagation()
   if (!loaded) node.addEventListener('load', stopAutomaticLoad, true)
   let listener: ((event: CaptureSurfaceEvent) => void) | undefined
@@ -54,12 +54,12 @@ async function mount(owned: boolean, background: CaptureBackground = 'included',
     finish: vi.fn(async () => ({ status: 'completed' as const })), pin: vi.fn(), savePng: vi.fn(async () => ({ status: 'cancelled' as const })), copyText: vi.fn(),
     expand: vi.fn(async () => {}), cancel: vi.fn(async () => {}) } satisfies CaptureSurfaceApi
   const initialImage = loaded ? image : { ...image, dataUrl: 'data:image/png;base64,' }
-  const input: CaptureSurfaceInput = { requestId: 'original-request', displayId: 1, frame: { x: 0, y: 0, width: 800, height: 500 }, scale: 2, safeTop: 0,
+  const input: CaptureSurfaceInput = { requestId: 'original-request', revision: 1, displayId: 1, frame: { x: 0, y: 0, width: 800, height: 500 }, scale: 2, safeTop: 0,
     attachToDraft: false, expandable: true, theme: { status: 'unavailable', message: 'Private fixture appearance' }, background, backgrounds: {
-      included: { image: initialImage, windows: [{ x: 0, y: 0, width: 800, height: 500 }], capturedAt: 1, engine: 'included-engine' },
-      excluded: { image: excludedImage, windows: [], capturedAt: 2, engine: 'excluded-engine' }
+      included: { status: 'ready', image: initialImage, windows: [{ x: 0, y: 0, width: 800, height: 500 }], capturedAt: 1, engine: 'included-engine' },
+      excluded: deferred ? { status: 'pending', capturedAt: 0 } : { status: 'ready', image: excludedImage, windows: [], capturedAt: 2, engine: 'excluded-engine' }
     }, ...(initialCrop ? { initialCrop } : {}), ...(notice ? { notice } : {}) }
-  if (issue) input.backgrounds[background] = { capturedAt: 1, issue: 'The requested background was not captured.' }
+  if (issue) input.backgrounds[background] = { status: 'failed', capturedAt: 1, issue: 'The requested background was not captured.' }
   await act(async () => root.render(<CaptureSurfaceView key={Math.random()} input={input} api={api} />))
   await act(async () => { await Promise.resolve() })
   if (loaded && !issue) { await act(async () => node.querySelector('img')!.dispatchEvent(new Event('load'))); await paint() }
@@ -131,7 +131,7 @@ it('reports the frame only after the shared editor loads and paints it, once for
   allowLoad()
   await act(async () => node.querySelector('img')!.dispatchEvent(new Event('load')))
   await paint()
-  expect(api.presented).toHaveBeenCalledExactlyOnceWith('original-request', 'included')
+  expect(api.presented).toHaveBeenCalledExactlyOnceWith('original-request', 'included', { loadMs: expect.any(Number), decodeMs: expect.any(Number), paintMs: expect.any(Number), presentedMs: expect.any(Number) })
   await paint()
   expect(api.presented, 'ordinary editor paints do not duplicate the frame receipt').toHaveBeenCalledOnce()
 })
@@ -220,12 +220,14 @@ it('modified Tab and text-editing Tab keep their original focus navigation', asy
 
 it('a missing target and a locked peer keep their current frame when Tab is pressed', async () => {
   const { api, key, input, send } = await mount(true)
-  input.backgrounds.excluded = { capturedAt: 2, issue: 'The hidden background is unavailable.' }
+  await send({ kind: 'snapshot', requestId: 'original-request', revision: 2, background: 'excluded',
+    frame: { status: 'failed', capturedAt: 2, issue: 'The hidden background is unavailable.' } })
   await key('Tab')
   expect(api.switchBackground, 'an unavailable target is never recaptured or substituted').not.toHaveBeenCalled()
   expect(node.querySelector('img')!.getAttribute('src')).toBe(input.backgrounds.included.image!.dataUrl)
   expect(node.textContent).toContain('The hidden background is unavailable.')
-  input.backgrounds.excluded = { image: excludedImage, windows: [], capturedAt: 2, engine: 'excluded-engine' }
+  await send({ kind: 'snapshot', requestId: 'original-request', revision: 3, background: 'excluded',
+    frame: { status: 'ready', image: excludedImage, windows: [], capturedAt: 2, engine: 'excluded-engine' } })
   await send({ kind: 'locked' })
   await key('Tab')
   expect(api.switchBackground, 'a peer cannot change the owning display background').not.toHaveBeenCalled()
@@ -290,4 +292,44 @@ it('a switch reply does not unlock old-frame output while the announced backgrou
   await paint()
   await key('Enter')
   expect(api.finish).toHaveBeenCalledExactlyOnceWith('original-request', 'excluded', image, remembered)
+})
+
+it('a deferred ready snapshot preserves the current editor and selection until an explicit switch', async () => {
+  const { api, key, send, input } = await mount(true, 'included', true, undefined, false, remembered, true)
+  const canvas = node.querySelector('canvas')!
+  await key('ArrowRight')
+  await send({ kind: 'snapshot', requestId: 'original-request', revision: 2, background: 'excluded',
+    frame: { status: 'ready', image: excludedImage, windows: [], capturedAt: 2, engine: 'excluded-engine' } })
+  expect(node.querySelector('img')!.getAttribute('src'), 'ready never auto-switches the visible source').toBe(input.backgrounds.included.image!.dataUrl)
+  expect(node.querySelector('canvas'), 'a snapshot cannot rebuild or clear the current editor').toBe(canvas)
+  await key('Tab')
+  expect(api.switchBackground, 'the explicit gesture consumes the newly ready snapshot without another capture').toHaveBeenCalledExactlyOnceWith('original-request', 'excluded')
+  await send({ kind: 'background', background: 'excluded' })
+  await act(async () => node.querySelector('img')!.dispatchEvent(new Event('load')))
+  await paint()
+  await key('Enter')
+  expect(api.finish).toHaveBeenLastCalledWith('original-request', 'excluded', image, { ...remembered, x: remembered.x + input.scale })
+})
+
+it('a pending background announcement cannot replace the current document or produce pending output', async () => {
+  const { api, key, send, input } = await mount(true, 'included', true, undefined, false, remembered, true)
+  await send({ kind: 'background', background: 'excluded' })
+  expect(node.querySelector('img')?.getAttribute('src'), 'pending is not a switch receipt').toBe(input.backgrounds.included.image!.dataUrl)
+  expect(node.textContent).toContain('still preparing')
+  await key('Enter')
+  expect(api.finish, 'the current ready document remains usable').toHaveBeenCalledExactlyOnceWith('original-request', 'included', image, remembered)
+})
+
+it('a failed deferred snapshot keeps the current document and explains an explicit switch attempt', async () => {
+  const { api, key, send, input } = await mount(true, 'included', true, undefined, false, remembered, true)
+  const canvas = node.querySelector('canvas')!
+  await send({ kind: 'snapshot', requestId: 'original-request', revision: 2, background: 'excluded',
+    frame: { status: 'failed', capturedAt: 0, issue: 'alternate exposure failed' } })
+  expect(node.querySelector('img')!.getAttribute('src')).toBe(input.backgrounds.included.image!.dataUrl)
+  expect(node.querySelector('canvas')).toBe(canvas)
+  await key('Tab')
+  expect(api.switchBackground).not.toHaveBeenCalled()
+  expect(node.textContent).toContain('alternate exposure failed')
+  await key('Enter')
+  expect(api.finish).toHaveBeenCalledExactlyOnceWith('original-request', 'included', image, remembered)
 })

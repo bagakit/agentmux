@@ -15,7 +15,7 @@ function fixture() {
 it('captures with no Renderer or workbench and treats attachment as optional', async () => {
   const f = fixture(); f.contents.isDestroyed.mockReturnValue(true)
   await f.action.run()
-  expect(f.capture).toHaveBeenCalledExactlyOnceWith(false, 'included')
+  expect(f.capture).toHaveBeenCalledExactlyOnceWith(false, 'included', expect.objectContaining({ requestId: expect.any(String) }))
   expect(f.frame.executeJavaScript).not.toHaveBeenCalled()
 })
 
@@ -23,7 +23,7 @@ it('uses a focused exact window and original frame, then sends one original oper
   const f = fixture()
   await f.action.run()
   expect(f.windowForDocument).toHaveBeenCalledExactlyOnceWith(identity)
-  expect(f.capture).toHaveBeenCalledExactlyOnceWith(true, 'included')
+  expect(f.capture).toHaveBeenCalledExactlyOnceWith(true, 'included', expect.objectContaining({ requestId: expect.any(String) }))
   expect(f.frame.executeJavaScript).toHaveBeenCalledTimes(2)
   const prepared = f.frame.executeJavaScript.mock.calls[0]![0].match(/prepare\("([^"]+)"\)/)![1]
   expect(f.frame.executeJavaScript.mock.calls[1]![0]).toContain(`complete("${prepared}", "original.png")`)
@@ -34,7 +34,7 @@ it('rejects a stale native focus candidate while continuing clipboard capture', 
   const f = fixture()
   f.windowForDocument.mockReturnValue({ ...f.nativeWindow } as never)
   await f.action.run()
-  expect(f.capture).toHaveBeenCalledExactlyOnceWith(false, 'included')
+  expect(f.capture).toHaveBeenCalledExactlyOnceWith(false, 'included', expect.objectContaining({ requestId: expect.any(String) }))
   expect(f.frame.executeJavaScript.mock.calls[1]![0]).toContain(', null)')
 })
 
@@ -42,7 +42,7 @@ it('a failed focus observation never closes the independent screen capture path'
   const f = fixture()
   f.frame.executeJavaScript.mockRejectedValueOnce(new Error('Original workbench observation unavailable'))
   await f.action.run()
-  expect(f.capture).toHaveBeenCalledExactlyOnceWith(false, 'included')
+  expect(f.capture).toHaveBeenCalledExactlyOnceWith(false, 'included', expect.objectContaining({ requestId: expect.any(String) }))
   expect(f.reportIssue).toHaveBeenCalledOnce()
 })
 
@@ -50,7 +50,7 @@ it('a synchronous detached-frame observation cannot block the healthy screenshot
   const f = fixture()
   f.frame.executeJavaScript.mockImplementationOnce(() => { throw new Error('Original frame detached') })
   await f.action.run()
-  expect(f.capture).toHaveBeenCalledExactlyOnceWith(false, 'included')
+  expect(f.capture).toHaveBeenCalledExactlyOnceWith(false, 'included', expect.objectContaining({ requestId: expect.any(String) }))
 })
 
 it('an unavailable attachment receipt cannot hold later clipboard captures', async () => {
@@ -72,7 +72,7 @@ it('a preparation timeout captures now and only releases a late draft preparatio
   f.frame.executeJavaScript.mockImplementationOnce(() => new Promise(resolve => { respond = resolve }))
   const pending = f.action.run()
   await vi.advanceTimersByTimeAsync(251); await pending
-  expect(f.capture).toHaveBeenCalledExactlyOnceWith(false, 'included')
+  expect(f.capture).toHaveBeenCalledExactlyOnceWith(false, 'included', expect.objectContaining({ requestId: expect.any(String) }))
   respond(identity); await Promise.resolve(); await Promise.resolve()
   expect(f.frame.executeJavaScript.mock.calls[1]![0]).toContain(', null)')
   expect(f.capture).toHaveBeenCalledOnce()
@@ -117,5 +117,5 @@ it('native unknown releases only the original attachment and preserves the failu
 it('the alternate gesture keeps the excluded background through the original capture', async () => {
   const f = fixture(); f.contents.isDestroyed.mockReturnValue(true)
   await f.action.run('excluded')
-  expect(f.capture).toHaveBeenCalledExactlyOnceWith(false, 'excluded')
+  expect(f.capture).toHaveBeenCalledExactlyOnceWith(false, 'excluded', expect.objectContaining({ requestId: expect.any(String) }))
 })

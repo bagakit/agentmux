@@ -14,7 +14,7 @@ it('uses the shared declarations for both macOS registrations and releases only 
   expect(owner.status).toMatchObject({ state: 'registered', accelerator: included, alternate: { state: 'registered', accelerator: excluded } })
   expect(request).not.toHaveBeenCalled()
   register.mock.calls[0]![1](); register.mock.calls[1]![1]()
-  expect(request.mock.calls).toEqual([['included'], ['excluded']])
+  expect(request.mock.calls).toEqual([['included', expect.objectContaining({ requestId: expect.any(String) })], ['excluded', expect.objectContaining({ requestId: expect.any(String) })]])
   owner.dispose(); owner.dispose()
   expect(unregister.mock.calls).toEqual([[included], [excluded]])
 })
@@ -28,7 +28,7 @@ it.each(['declined', 'threw'] as const)('keeps a %s alternate registration local
   const owner = registerScreenshotShortcut({ platform: 'darwin', shortcuts: { register, unregister }, request })
   expect(owner.status).toMatchObject({ state: 'registered', accelerator: included, alternate: { state: 'unavailable', accelerator: excluded } })
   expect(owner.status.alternate.message).toContain('Capture button remains available')
-  register.mock.calls[0]![1](); expect(request).toHaveBeenCalledExactlyOnceWith('included')
+  register.mock.calls[0]![1](); expect(request).toHaveBeenCalledExactlyOnceWith('included', expect.objectContaining({ requestId: expect.any(String) }))
   owner.dispose(); expect(unregister.mock.calls).toEqual([[included]])
 })
 
@@ -41,7 +41,7 @@ it.each(['declined', 'threw'] as const)('keeps a %s default registration local w
   const owner = registerScreenshotShortcut({ platform: 'darwin', shortcuts: { register, unregister }, request })
   expect(owner.status).toMatchObject({ state: 'unavailable', accelerator: included, alternate: { state: 'registered', accelerator: excluded } })
   expect(owner.status.message).toContain('Capture button remains available')
-  register.mock.calls[1]![1](); expect(request).toHaveBeenCalledExactlyOnceWith('excluded')
+  register.mock.calls[1]![1](); expect(request).toHaveBeenCalledExactlyOnceWith('excluded', expect.objectContaining({ requestId: expect.any(String) }))
   owner.dispose(); expect(unregister.mock.calls).toEqual([[excluded]])
 })
 

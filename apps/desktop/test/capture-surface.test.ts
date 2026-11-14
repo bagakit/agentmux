@@ -3,7 +3,7 @@ import { crc32, deflateSync } from 'node:zlib'
 import { join } from 'node:path'
 import ipc from '../src/main/ipc.ts?raw'
 import { CaptureSurface, type CaptureSurfaceSession, type CaptureSurfaceTiming } from '../src/main/capture-surface'
-import { CAPTURE_SURFACE_CHANNEL, CAPTURE_SURFACE_EVENT } from '../src/shared/capture-surface'
+import { CAPTURE_SURFACE_CHANNEL, CAPTURE_SURFACE_EVENT, type CaptureSurfaceInput } from '../src/shared/capture-surface'
 import { pngFromBytes } from '@agentmux/native-desktop/image'
 
 const electron = vi.hoisted(() => ({ handlers: new Map<string, (...args: any[]) => Promise<any>>(), windows: [] as any[], workbench: [] as any[],
@@ -137,40 +137,99 @@ function pending<T>() {
 }
 const loadEvent = (window: any) => ({ sender: window.webContents, senderFrame: window.webContents.mainFrame })
 
-it('boots hidden overlay renderers while both current exposures are pending and releases only their new inputs', async () => {
+it('shows the selected first frame before the deferred exposure settles, then delivers its final snapshot and diagnostic', async () => {
   const included = pending<ReturnType<typeof frames>>(), excluded = pending<ReturnType<typeof frames>>()
   electron.workbench = [{ isDestroyed: () => false, isVisible: () => true, isMinimized: () => false, getOpacity: () => 1, setOpacity: vi.fn() }]
-  const captureDisplays = vi.fn().mockImplementationOnce(() => included.promise).mockImplementationOnce(() => excluded.promise)
+  const captureDisplays = vi.fn().mockImplementationOnce(() => excluded.promise).mockImplementationOnce(() => included.promise)
   ports.native.mockReturnValue({ captureDisplays })
   const outcome = surface.present(session({ background: 'excluded' }))
   await vi.advanceTimersByTimeAsync(0)
   expect(electron.windows, 'Renderer preparation does not wait for native pixels').toHaveLength(2)
-  expect(electron.windows.every(window => window.loadFile.mock.calls.length === 1 && !window.visible), 'both hidden renderers load during the first exposure').toBe(true)
+  expect(electron.windows.every(window => window.loadFile.mock.calls.length === 1 && !window.visible), 'both hidden renderers load during the selected exposure').toBe(true)
+  expect(captureDisplays.mock.calls).toEqual([[{ includeHostWindows: false }]])
   const window = electron.windows[0]!, handler = electron.handlers.get(CAPTURE_SURFACE_CHANNEL)!
   let received = false
-  const input = handler(loadEvent(window), 'load').then(value => { received = true; return value }, error => { received = true; return { loadFailed: error.message } })
+  const earlyLoad = handler(loadEvent(window), 'load').then(value => { received = true; return value }, error => { received = true; return { loadFailed: error.message } })
   await vi.advanceTimersByTimeAsync(1600)
-  expect(received, 'an early load waits for this capture, not a previous frame').toBe(false)
-  expect(electron.windows.every(window => !window.visible), 'fallback cannot expose shells before the new data exists').toBe(true)
-  included.resolve(frames())
+  expect(received, 'an early load waits for the selected current frame').toBe(false)
+  expect(electron.windows.every(window => !window.visible), 'fallback cannot expose shells before the selected data exists').toBe(true)
+  const first = frames(); first.capturedAt += 50
+  excluded.resolve(first)
   await vi.advanceTimersByTimeAsync(0)
-  expect(captureDisplays).toHaveBeenCalledTimes(2)
-  expect(received, 'the excluded background is part of the same original input').toBe(false)
-  expect(electron.windows.every(window => !window.visible), 'prepared overlays never enter either grab').toBe(true)
-  const second = frames(); second.capturedAt += 100
-  excluded.resolve(second)
-  await vi.advanceTimersByTimeAsync(0)
-  const loaded = await input
-  expect(loaded.background).toBe('excluded')
-  expect(loaded.backgrounds.excluded.capturedAt).toBe(second.capturedAt)
+  expect(captureDisplays.mock.calls).toEqual([[{ includeHostWindows: false }], [{ includeHostWindows: true }]])
+  const loaded = await earlyLoad
+  expect(received, 'the selected frame releases load while its alternate is pending').toBe(true)
+  expect(loaded).toMatchObject({ background: 'excluded', revision: 1,
+    backgrounds: { excluded: { status: 'ready', capturedAt: first.capturedAt }, included: { status: 'pending' } } })
   for (const overlay of electron.windows) {
     const value = await handler(loadEvent(overlay), 'load')
     await handler(loadEvent(overlay), 'presented', { requestId: value.requestId, background: value.background })
   }
-  expect(electron.windows.every(window => window.showInactive.mock.calls.length === 1)).toBe(true)
-  expect(ports.recordTiming).toHaveBeenCalledWith(expect.objectContaining({ includedMs: expect.any(Number), excludedMs: expect.any(Number), dataReadyMs: expect.any(Number) }))
+  expect(electron.windows.every(window => window.showInactive.mock.calls.length === 1), 'show overlaps the pending alternate exposure').toBe(true)
+  expect(ports.recordTiming).toHaveBeenCalledOnce()
+  expect(ports.recordTiming).toHaveBeenLastCalledWith(expect.objectContaining({ requestId: loaded.requestId, final: false, includedMs: null, excludedMs: expect.any(Number) }))
+  const second = frames(); second.capturedAt += 100
+  included.resolve(second)
+  await vi.advanceTimersByTimeAsync(0)
+  for (const overlay of electron.windows) {
+    const latest = await handler(loadEvent(overlay), 'load')
+    expect(latest).toMatchObject({ background: 'excluded', revision: 2,
+      backgrounds: { included: { status: 'ready', capturedAt: second.capturedAt }, excluded: { status: 'ready', capturedAt: first.capturedAt } } })
+    expect(overlay.webContents.send).toHaveBeenCalledWith(CAPTURE_SURFACE_EVENT, expect.objectContaining({ kind: 'snapshot', requestId: loaded.requestId, revision: 2, background: 'included' }))
+  }
+  expect(ports.recordTiming, 'the deferred exposure adds exactly one final record for the same request').toHaveBeenCalledTimes(2)
+  expect(ports.recordTiming).toHaveBeenLastCalledWith(expect.objectContaining({ requestId: loaded.requestId, final: true, includedMs: expect.any(Number), excludedMs: expect.any(Number),
+    nativeIncluded: expect.objectContaining({ response: expect.objectContaining({ lazyConnectionMs: 1, requestMs: 4 }), displays: expect.arrayContaining([expect.objectContaining({ displayId: 1, timing: displayTiming })]) }),
+    nativeExcluded: expect.objectContaining({ response: expect.objectContaining({ socketReadMs: 1, validationMs: 1 }) }) }))
   await handler(loadEvent(window), 'cancel', { requestId: loaded.requestId })
   expect(await outcome).toEqual({ state: 'cancelled' })
+})
+
+it('a late deferred snapshot cannot revise a replacement capture or write its old final diagnostic', async () => {
+  const late = pending<ReturnType<typeof frames>>()
+  electron.workbench = [{ isDestroyed: () => false, isVisible: () => true, isMinimized: () => false, getOpacity: () => 1, setOpacity: vi.fn() }]
+  const captureDisplays = vi.fn().mockResolvedValueOnce(frames()).mockImplementationOnce(() => late.promise).mockResolvedValue(frames())
+  ports.native.mockReturnValue({ captureDisplays })
+  const old = await opened()
+  for (const overlay of old.overlays) await overlay.call('presented')
+  const oldRequest = old.overlays[0]!.input.requestId
+  expect(ports.recordTiming).toHaveBeenCalledWith(expect.objectContaining({ requestId: oldRequest, final: false }))
+  await old.overlays[0]!.call('cancel'); await old.outcome
+  const replacement = await opened()
+  const replacementIds = replacement.overlays.map(overlay => overlay.input.requestId)
+  expect(replacementIds.every(id => id !== oldRequest)).toBe(true)
+  const oldFinalWrites = () => ports.recordTiming.mock.calls.filter(([timing]) => timing.requestId === oldRequest && timing.final).length
+  late.resolve({ ...frames(), capturedAt: 0 })
+  await vi.advanceTimersByTimeAsync(0)
+  expect(oldFinalWrites(), 'a cancelled request has no late final write').toBe(0)
+  for (const overlay of replacement.overlays) {
+    const latest = await electron.handlers.get(CAPTURE_SURFACE_CHANNEL)!(loadEvent(overlay.window), 'load')
+    expect(latest.requestId).not.toBe(oldRequest)
+    expect(latest.backgrounds.included.capturedAt).not.toBe(0)
+    expect(latest.backgrounds.excluded.capturedAt).not.toBe(0)
+  }
+  await replacement.overlays[0]!.call('cancel'); await replacement.outcome
+})
+
+it('a deferred exposure with one bad display updates no ready geometry and atomically publishes failed instead', async () => {
+  const deferred = pending<ReturnType<typeof frames>>()
+  electron.workbench = [{ isDestroyed: () => false, isVisible: () => true, isMinimized: () => false, getOpacity: () => 1, setOpacity: vi.fn() }]
+  ports.native.mockReturnValue({ captureDisplays: vi.fn().mockResolvedValueOnce(frames()).mockImplementationOnce(() => deferred.promise) })
+  const { overlays } = await opened()
+  const original = await Promise.all(overlays.map(overlay => electron.handlers.get(CAPTURE_SURFACE_CHANNEL)!(loadEvent(overlay.window), 'load') as Promise<CaptureSurfaceInput>))
+  const malformed = frames(); malformed.displays[1]!.frame = { ...side, x: side.x + 1 }
+  deferred.resolve(malformed)
+  await vi.advanceTimersByTimeAsync(0)
+  for (const [index, overlay] of overlays.entries()) {
+    const latest = await electron.handlers.get(CAPTURE_SURFACE_CHANNEL)!(loadEvent(overlay.window), 'load') as CaptureSurfaceInput
+    expect(latest.revision).toBe(2)
+    expect(latest.backgrounds.included).toEqual(original[index]!.backgrounds.included)
+    expect(latest.backgrounds.excluded).toMatchObject({ status: 'failed', issue: expect.stringContaining('display layout changed') })
+    expect(overlay.window.webContents.send).toHaveBeenCalledWith(CAPTURE_SURFACE_EVENT, expect.objectContaining({ kind: 'snapshot', revision: 2, background: 'excluded',
+      frame: expect.objectContaining({ status: 'failed' }) }))
+    expect(overlay.window.webContents.send).not.toHaveBeenCalledWith(CAPTURE_SURFACE_EVENT, expect.objectContaining({ kind: 'snapshot', background: 'excluded',
+      frame: expect.objectContaining({ status: 'ready' }) }))
+  }
 })
 
 it('cancel releases an early load and a late result cannot grab, revive or replace the next capture', async () => {
@@ -346,7 +405,7 @@ it('Esc on any display cancels and closes every overlay', async () => {
 
 it('a display without pixels shows its issue, cannot select, and the others stay selectable', async () => {
   const issued = frames()
-  issued.displays[1] = { displayId: 7, frame: side, scale: 1, issue: 'macOS did not confirm this display' } as never
+  issued.displays[1] = { displayId: 7, frame: side, scale: 1, safeTop: 0, windows: [], timing: displayTiming, issue: 'macOS did not confirm this display' } as never
   ports.native.mockReturnValue({ captureDisplays: vi.fn(async () => issued) })
   const { overlays } = await opened()
   expect(overlays[1]!.input).toMatchObject({ backgrounds: { included: { issue: 'macOS did not confirm this display' } } })
@@ -439,7 +498,7 @@ it('logs one timing line from present() to frames, each display painted and show
     expect(timing).toMatchObject({ displays: 2 })
     expect([timing.framesMs, ...timing.presentedMs, timing.shownMs].every((value: unknown) => typeof value === 'number' && value >= 0), JSON.stringify(timing)).toBe(true)
     expect(timing.presentedMs).toHaveLength(2)
-    expect(timing).toMatchObject({ schema: 'agentmux.capture-timing.v1', includedMs: expect.any(Number), excludedMs: null,
+    expect(timing).toMatchObject({ schema: 'agentmux.capture-timing.v2', final: false, includedMs: expect.any(Number), excludedMs: null,
       windowsStartedMs: expect.any(Number), windowsLoadedMs: [expect.any(Number), expect.any(Number)], dataReadyMs: expect.any(Number) })
     expect(ports.recordTiming).toHaveBeenCalledExactlyOnceWith(timing)
     expect(ports.recordTiming.mock.invocationCallOrder[0]!).toBeGreaterThan(Math.max(...overlays.map(overlay => overlay.window.showInactive.mock.invocationCallOrder[0])))
@@ -465,7 +524,7 @@ it.each(['throw', 'reject'] as const)('a timing writer that will %s only warns a
   } finally { warning.mockRestore() }
 })
 
-it('the production IPC timing port writes only the latest small diagnostic after earlier writes settle, and recovers from write failure', async () => {
+it('the production IPC timing port never lets an old request final overwrite a newer request, and recovers from write failure', async () => {
   const from = '  let captureTimingWrite = Promise.resolve()', until = '  // The editor returns focus only'
   expect(ipc.split(from), 'the production registration is unambiguous').toHaveLength(2)
   const registration = ipc.slice(ipc.indexOf(from), ipc.indexOf(until, ipc.indexOf(from)))
@@ -475,15 +534,19 @@ it('the production IPC timing port writes only the latest small diagnostic after
   const bind = new Function('CaptureSurface', 'getNativeDesktopOwner', 'config', 'pinScreenshot', 'copyScreenshotText', 'returnScreenshotFocus', 'writeFile', 'join', 'app', registration)
   bind(class { constructor(ports: typeof actual) { actual = ports } }, ports.native, { appearance: {} }, ports.pin, ports.copyText, ports.returnFocus, writeFile, join, { getPath: () => '/private-fixture-data' })
   expect(actual, 'the actual Main registration supplies the production timing port').toBeDefined()
-  const old = actual!.recordTiming({ schema: 'first' }).catch(error => error.message)
-  const latest = actual!.recordTiming({ schema: 'latest' })
+  const oldInitial = actual!.recordTiming({ requestId: 'old-request', final: false }).catch(error => error.message)
+  await Promise.resolve(); await Promise.resolve()
+  expect(paths, 'the old request started its real write before the newer request existed').toEqual(['/private-fixture-data/capture-timing.json'])
+  const newInitial = actual!.recordTiming({ requestId: 'new-request', final: false })
+  const oldFinal = actual!.recordTiming({ requestId: 'old-request', final: true })
+  const newFinal = actual!.recordTiming({ requestId: 'new-request', final: true })
   await Promise.resolve(); await Promise.resolve()
   expect(paths).toEqual(['/private-fixture-data/capture-timing.json'])
   first.reject(new Error('disk busy'))
-  expect(await old).toBe('disk busy')
-  await latest
-  expect(paths).toEqual(['/private-fixture-data/capture-timing.json', '/private-fixture-data/capture-timing.json'])
-  expect(contents.map(content => JSON.parse(content))).toEqual([{ schema: 'first' }, { schema: 'latest' }])
+  expect(await oldInitial).toBe('disk busy')
+  await Promise.all([newInitial, oldFinal, newFinal])
+  expect(paths).toEqual(['/private-fixture-data/capture-timing.json', '/private-fixture-data/capture-timing.json', '/private-fixture-data/capture-timing.json'])
+  expect(contents.map(content => JSON.parse(content))).toEqual([{ requestId: 'old-request', final: false }, { requestId: 'new-request', final: false }, { requestId: 'new-request', final: true }])
 })
 
 it('returns focus to the previous app once when the capture started elsewhere', async () => {
@@ -499,7 +562,7 @@ it('refuses another window, an embedded frame and a stale request', async () => 
   const handler = electron.handlers.get(CAPTURE_SURFACE_CHANNEL)!
   await expect(handler({ sender: {}, senderFrame: {} }, 'select', { requestId: overlays[0]!.input.requestId })).rejects.toThrow('does not belong')
   await expect(handler({ sender: overlays[0]!.window.webContents, senderFrame: {} }, 'select', { requestId: overlays[0]!.input.requestId })).rejects.toThrow('does not belong')
-  await expect(overlays[0]!.call('select', { requestId: overlays[1]!.input.requestId })).rejects.toThrow('no longer current')
+  await expect(overlays[0]!.call('select', { requestId: 'retired-request' })).rejects.toThrow('no longer current')
 })
 
 it('a second capture while one is open is refused and the notice brings the selection display forward', async () => {
@@ -556,8 +619,8 @@ it('a public selection refuses an included background switch and still delivers 
 it('a public selection whose excluded exposure is unavailable fails instead of offering included pixels', async () => {
   electron.workbench = [{ isDestroyed: () => false, isVisible: () => true, isMinimized: () => false, getOpacity: () => 1, setOpacity: vi.fn() }]
   ports.native.mockReturnValue({ captureDisplays: vi.fn()
-    .mockResolvedValueOnce(frames())
-    .mockRejectedValueOnce(Object.assign(new Error('CoreGraphics cannot exclude the visible host'), { code: 'host_window_exclusion_unavailable' })) })
+    .mockRejectedValueOnce(Object.assign(new Error('CoreGraphics cannot exclude the visible host'), { code: 'host_window_exclusion_unavailable' }))
+    .mockResolvedValueOnce(frames()) })
   const pending = surface.captureSelection(false)
   await vi.advanceTimersByTimeAsync(0)
   const observed = await Promise.race([pending, Promise.resolve('surface still open' as const)])
@@ -629,7 +692,7 @@ it.each([
   const { outcome } = await expandedDelivery(), continuation = outcome.delivered()
   electron.displays = [{ ...display, scaleFactor: scale }, { id: 7, bounds: side, scaleFactor: 1 }]
   ports.native.mockReturnValue({ captureDisplays: vi.fn(async () => ({ ...frames(), displays: [
-    { displayId: display.id, frame, scale, windows: [], png: png(frame.width * scale, frame.height * scale).toString('base64'), width: frame.width * scale, height: frame.height * scale, engine: 'fixture-engine' },
+    { displayId: display.id, frame, scale, safeTop: 0, windows: [], timing: displayTiming, png: png(frame.width * scale, frame.height * scale).toString('base64'), width: frame.width * scale, height: frame.height * scale, engine: 'fixture-engine' },
     frames().displays[1]!] })) })
   const { overlays } = await opened(session({ continuation }))
   expect(overlays.map(row => row.input.initialCrop)).toEqual([undefined, undefined])
@@ -660,7 +723,7 @@ it('the chosen initial background delivers its own pixels, timestamp and engine'
   second.displays[0] = { ...second.displays[0]!, png: png(8, 6).toString('base64'), engine: 'excluded-engine', windows: [] }
   // Make a visible host so both physical exposures are needed.
   electron.workbench = [{ isDestroyed: () => false, isVisible: () => true, isMinimized: () => false, getOpacity: () => 0.7, setOpacity: vi.fn() }]
-  const captureDisplays = vi.fn().mockResolvedValueOnce(first).mockResolvedValueOnce(second)
+  const captureDisplays = vi.fn().mockResolvedValueOnce(second).mockResolvedValueOnce(first)
   ports.native.mockReturnValue({ captureDisplays })
   const value = session({ background: 'excluded' }), outcome = surface.present(value)
   await vi.advanceTimersByTimeAsync(0)
@@ -701,7 +764,7 @@ it('a failed requested exposure preserves the original mode and offers the other
 
 it('an unavailable requested excluded background never silently substitutes included pixels', async () => {
   electron.workbench = [{ isDestroyed: () => false, isVisible: () => true, isMinimized: () => false, getOpacity: () => 1, setOpacity: vi.fn() }]
-  ports.native.mockReturnValue({ captureDisplays: vi.fn().mockResolvedValueOnce(frames()).mockRejectedValueOnce(new Error('native excluded background unavailable')) })
+  ports.native.mockReturnValue({ captureDisplays: vi.fn().mockRejectedValueOnce(new Error('native excluded background unavailable')).mockResolvedValueOnce(frames()) })
   const { overlays } = await opened(session({ background: 'excluded' }))
   const input = overlays[0]!.input
   expect(input.background).toBe('excluded')

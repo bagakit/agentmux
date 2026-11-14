@@ -96,6 +96,17 @@ it('the actual Main callback captures and copies with no Composer, without a Ren
   expect(f.unregister.mock.calls).toEqual([[SCREENSHOT_SHORTCUT_ACCELERATOR], [screenshotShortcutAccelerator(SCREENSHOT_SHORTCUT_ALTERNATE.chord)]])
 })
 
+it('the registered shortcut callback threads one timing request through prepare capture and present', async () => {
+  const f = await mainFixture()
+  const run = vi.spyOn(f.globalScreenshot, 'run')
+  f.register.mock.calls[0]![1]()
+  await run.mock.results[0]!.value
+  const timing = (f.presented[0] as CaptureSurfaceSession & { timing?: unknown }).timing
+  expect(timing).toMatchObject({ requestId: expect.any(String), callbackToPrepareMs: expect.any(Number), prepareMs: expect.any(Number), screenCaptureMs: expect.any(Number), presentMs: expect.any(Number) })
+  expect(run.mock.calls[0]![1]).toBe(timing)
+  f.screenshotShortcut.dispose()
+})
+
 it('the Main native composition and actual preload retain the explicit Capture button destination', async () => {
   const f = await mainFixture(), path = await bridge.api!.ui.captureScreenshot()
   expect(await readFile(path!)).toEqual(f.bytes)
