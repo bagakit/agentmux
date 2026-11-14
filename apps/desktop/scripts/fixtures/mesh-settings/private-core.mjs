@@ -4,8 +4,8 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { once } from 'node:events'
 import { fileURLToPath } from 'node:url'
-import { parseConnectionOfferUrl } from '@agentmux/relay/offer'
-import { generateKeyPair, exportPublicKey } from '@agentmux/relay/e2ee'
+import { parseConnectionOfferUrl } from '../../../../../packages/relay/dist/connection-offer.js'
+import { generateKeyPair, exportPublicKey } from '../../../../../packages/relay/dist/e2ee.js'
 import { connectAgentMuxRpc } from '../../../../../packages/core/dist/public-rpc-client.js'
 const root = fileURLToPath(new URL('../../../../../', import.meta.url))
 export async function privateCore(options = {}) {

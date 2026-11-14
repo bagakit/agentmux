@@ -7,6 +7,10 @@ const evidence = process.env.AGENTMUX_MESH_UI_EVIDENCE ?? resolve(root, '.local/
 mkdirSync(evidence, { recursive: true })
 const mutant = process.env.AGENTMUX_MESH_UI_MUTANT
 const edits: Record<string, [string, string, string]> = {
+  'foreign-observation': ['renderer/src/components/settings/MeshNetworkSettings.tsx', 'const snapshot = networkSnapshot && (!settings || networkSnapshot.owner.runtimeId === settings.owner.runtimeId && networkSnapshot.owner.ownerInstanceId === settings.owner.ownerInstanceId) ? networkSnapshot : undefined', 'const snapshot = networkSnapshot'],
+  'overwrite-listener': ['renderer/src/components/settings/MeshNetworkSettings.tsx', "onClick={() => change({ role: 'gateway' })}", "onClick={() => change({ role: 'gateway', listen: true })}"],
+  'lost-independent-read': ['renderer/src/components/settings/MeshNetworkSettings.tsx', '    // Network observation and editable settings are independent capabilities.\n    void inspectNetwork(controller.signal)', ''],
+  'invented-empty-network': ['renderer/src/components/settings/MeshNetworkSettings.tsx', '{hasTopology ? <MeshNetworkMap', '{true ? <MeshNetworkMap'],
   'lost-fence': ['main/mesh-network-ipc.ts', '...(original ? { runtimeFence: original } : {})', ''],
   'lost-draft': ['renderer/src/components/settings/MeshNetworkSettings.tsx', 'form: later ? value.form : meshForm(result.settings.configuration, result.settings.identity?.peerId)', 'form: meshForm(result.settings.configuration, result.settings.identity?.peerId)'],
   'lost-unknown': ['renderer/src/components/settings/MeshNetworkSettings.tsx', "if (!notApplied) return { ...value, pending: { ...value.pending, phase: 'unknown' } }", 'if (false) return value'],

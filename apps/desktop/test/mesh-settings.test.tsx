@@ -96,8 +96,8 @@ it('production Mesh editors exchange codes and save through Renderer/Main into t
     const initialA=await a.client.call('settings.mesh.inspect',{}), initialB=await b.client.call('settings.mesh.inspect',{})
     // First use the production editor for the original gateway, then publish its actual port.
     let bridge=connect(a); await dom.render(<Editor active key="real-a"/>);await ready()
-    const setSelect=async(label:string,value:string)=>{await act(async()=>{const el=dom.container.querySelector<HTMLSelectElement>(`[aria-label="${label}"]`)!;el.value=value;el.dispatchEvent(new Event('change',{bubbles:true}))})}
-    await setSelect('Mesh role','gateway');await input('Mesh network','gui-original-network');await input('Mesh listen port','0');await dom.click('[data-settings-save-bar] button')
+    const chooseRole=async(value:'gateway'|'participant')=>{await dom.click(`.mesh-task-options > button:nth-child(${value==='gateway'?2:1})`)}
+    await chooseRole('gateway');await dom.click('[aria-label="Own Mesh listener"]');await input('Mesh network','gui-original-network');await input('Mesh listen port','0');await dom.click('[data-settings-save-bar] button')
     await act(async()=>{await wait(()=>a.client.call('mesh.inspect',{}),v=>v.gateway.state==='listening')})
     await dom.click('.mesh-network-heading button')
     const firstA=await a.client.call('settings.mesh.inspect',{}), observedA=await a.client.call('mesh.inspect',{})
@@ -109,7 +109,7 @@ it('production Mesh editors exchange codes and save through Renderer/Main into t
     expect(savedA.configuration.peers).toEqual([{peerId:initialB.identity.peerId,endpoints:[]}])
     const aCode=meshPeerCode(savedA)!
     bridge.mockRestore();bridge=connect(b);await dom.render(<Editor active key="real-b"/>);await ready()
-    await setSelect('Mesh role','participant');await input('Mesh network','gui-original-network');await input('Mesh peer codes',aCode);await input('Mesh device public keys',b.devicePublicKey);await dom.click('[data-settings-save-bar] button')
+    await chooseRole('participant');await input('Mesh network','gui-original-network');await input('Mesh peer codes',aCode);await input('Mesh device public keys',b.devicePublicKey);await dom.click('[data-settings-save-bar] button')
     const joined=await wait(()=>a.client.call('mesh.inspect',{}),v=>v.network?.peers.some((p:any)=>p.peerId===initialB.identity.peerId&&p.state==='connected'))
     expect(joined.network.peers[0].state).toBe('connected')
     expect((await b.client.call('settings.mesh.inspect',{})).configuration.listen).toBeUndefined()
@@ -176,4 +176,85 @@ it('hiding a pending route read releases its observer and allows an explicit fre
  await act(async()=>finish({url:'old-request-link',offer:{serverId:'original-A'},observation:{route:{hops:2}}}))
  expect(dom.container.querySelector('[aria-label="Mesh access link"]')).toBeNull()
  expect(dom.container.querySelector<HTMLTextAreaElement>('[aria-label="Original Mesh endpoint offer"]')!.value).toBe('{"serverId":"original-A"}')
+})
+
+it('unavailable setup offers recovery and the original saved connections without an invented empty network or dead link form', async () => {
+  const call = vi.spyOn(api.mesh, 'call').mockRejectedValue(Object.assign(Error('Original owner did not answer'), { code: 'MESH_OWNER_UNAVAILABLE' }))
+  await dom.render(<hostsSettingsModule.Pane config={useAppStore.getState().config!} active onClose={vi.fn()} onNavigate={vi.fn()} />)
+  await settled(() => Boolean(dom.container.querySelector('.mesh-availability details')))
+  expect(dom.container.textContent).toContain('Couldn’t read Mesh settings.')
+  expect(dom.container.textContent).not.toContain('Reading your network settings…')
+  expect(dom.container.querySelector('.mesh-network-map')).toBeNull()
+  expect(dom.container.querySelector('[data-settings-field="mesh-link"]')).toBeNull()
+  expect(dom.container.querySelector('[data-mesh-view="connections"]')?.hasAttribute('hidden')).toBe(true)
+  await dom.click('.mesh-recovery-actions button:last-child')
+  expect(dom.container.querySelector('[data-mesh-view="connections"]')?.hasAttribute('hidden')).toBe(false)
+  expect(dom.container.querySelector('[aria-current="page"]')?.textContent).toBe('Saved connections')
+  expect(call.mock.calls.some(row => row[0] === 'settings.mesh.configure')).toBe(false)
+})
+
+it('independent authenticated network observations survive an unavailable settings reader', async () => {
+  const live = observation()
+  live.network = { protocol: 1, state: 'active', networkId: 'original-network', identity: { peerId: 'original-peer', publicKey: 'public', epoch: 1 }, peers: [{ peerId: 'other-peer', state: 'connected', rttMs: 13, connectionId: 'original-link' }], records: [], routes: [], circuits: [] }
+  vi.spyOn(api.mesh, 'call').mockImplementation(async method => {
+    if (method === 'settings.mesh.inspect') throw Error('Settings reader unavailable')
+    return structuredClone(live) as never
+  })
+  await dom.render(<Editor active />)
+  await settled(() => Boolean(dom.container.querySelector('.mesh-availability details')))
+  await settled(() => Boolean(dom.container.querySelector('.mesh-peer-list')))
+  expect(dom.container.textContent).toContain('Couldn’t read Mesh settings.')
+  expect(dom.container.textContent).toContain('other-peer')
+  expect(dom.container.textContent).toContain('Authenticated')
+  expect(dom.container.textContent).not.toContain('No direct peers configured.')
+})
+
+it('connection tasks edit a retained draft before a deliberate save; failed observation keeps the original authored fields', async () => {
+  const call = inspectOnly()
+  await dom.render(<Editor active />); await ready()
+  await dom.click('.mesh-task-options > button:nth-child(2)')
+  expect(meshDraftForRuntime(useAppStore.getState().meshSettingsDrafts, settings.owner.runtimeId)?.form.role).toBe('gateway')
+  expect(call.mock.calls.filter(row => row[0] === 'settings.mesh.configure')).toHaveLength(0)
+  await input('Mesh network', 'authored-network  ')
+  call.mockImplementation(async () => { throw Error('Temporary read failure') })
+  await dom.click('.mesh-network-heading button')
+  expect(dom.container.querySelector<HTMLInputElement>('[aria-label="Mesh network"]')!.value).toBe('authored-network  ')
+  expect(dom.container.querySelector('.mesh-task-options > button:nth-child(2)')?.getAttribute('aria-pressed')).toBe('true')
+  expect(dom.container.textContent).toContain('Network observation unavailable.')
+  expect(call.mock.calls.filter(row => row[0] === 'settings.mesh.configure')).toHaveLength(0)
+})
+
+it('a newly confirmed owner never adopts an earlier network snapshot as its current listener', async () => {
+  let finishSettings!: (value: unknown) => void, finishNetwork!: (value: unknown) => void, reads = 0
+  const oldView = { ...observation(), gateway: { state: 'listening', listener: { host: '127.0.0.1', port: 9301, protocol: 'http' } } }
+  vi.spyOn(api.mesh, 'call').mockImplementation(async method => {
+    if (method === 'settings.mesh.inspect') return await new Promise(done => { finishSettings = done }) as never
+    if (++reads === 1) return structuredClone(oldView) as never
+    return await new Promise(done => { finishNetwork = done }) as never
+  })
+  await dom.render(<Editor active />)
+  await settled(() => dom.container.textContent?.includes('Listening on 127.0.0.1:9301') ?? false)
+  const restarted = { ...settings, owner: { ...settings.owner, ownerInstanceId: 'new-original-process' } }
+  await act(async () => finishSettings(restarted)); await ready()
+  expect(dom.container.textContent).not.toContain('Listening on 127.0.0.1:9301')
+  expect(dom.container.querySelector('.mesh-network-status')).toBeNull()
+  await act(async () => finishNetwork(observation(restarted)))
+  expect(dom.container.querySelector('.mesh-network-status')?.textContent).toContain('Mesh active')
+})
+
+it('choosing gateway again preserves its authored listener mode and explicitly copies only saved connection details', async () => {
+  const savedIdentity = { ...settings, identity: { peerId: 'saved-peer', publicKey: 'saved-public-key', epoch: 1 } }
+  vi.spyOn(api.mesh, 'call').mockImplementation(async method => structuredClone(method === 'mesh.inspect' ? observation(savedIdentity) : savedIdentity) as never)
+  const clipboard = vi.spyOn(api.ui, 'writeClipboardText').mockResolvedValue(undefined)
+  await dom.render(<Editor active />); await ready()
+  await dom.click('.mesh-task-options > button:nth-child(2)')
+  expect(dom.container.querySelector<HTMLInputElement>('[aria-label="Own Mesh listener"]')!.checked).toBe(false)
+  await input('Mesh published origins', 'http://new-unshared-gateway:8444')
+  await dom.click('.mesh-task-options > button:nth-child(2)')
+  expect(dom.container.querySelector<HTMLInputElement>('[aria-label="Own Mesh listener"]')!.checked).toBe(false)
+  expect(meshDraftForRuntime(useAppStore.getState().meshSettingsDrafts, settings.owner.runtimeId)?.form.ingress).toBe('http://new-unshared-gateway:8444')
+  expect(dom.container.querySelector('.mesh-code-action button')?.textContent).toBe('Copy saved connection code')
+  expect(dom.container.querySelector('.mesh-code-action')?.textContent).toContain('Save changes before sharing')
+  await dom.click('.mesh-code-action button')
+  expect(clipboard).toHaveBeenCalledWith(meshPeerCode(savedIdentity))
 })
