@@ -14,6 +14,7 @@ import { SpaceObjectContextMenu } from './SpaceObjectContextMenu'
 import { useMoteWorkfaceScope } from '../lib/mote-workface'
 import { useMoteHeartbeatReading } from '../lib/mote-heartbeat-reading'
 import { moteHeartbeatReadingPresentation } from '../lib/mote-heartbeat-presentation'
+import { MoteHeartbeatGlyph } from './MoteHeartbeatGlyph'
 
 export function PmoTeamsTopicEntry({ style, placement = 'compact' }: {
   placement?: 'compact' | 'floating'; style?: CSSProperties
@@ -55,7 +56,7 @@ export function PmoTeamsTopicEntry({ style, placement = 'compact' }: {
           moteAvailability={topic && (!target.tabId || target.region?.kind === 'launcher') ? 'no-agent' : target.region && target.region.kind !== 'agent' ? 'static' : 'restoring'}
           avatarObjectKey={iconTarget?.key} avatarWorkspaceId={iconTarget?.avatarTarget?.workspaceId} avatarTopicId={iconTarget?.avatarTarget?.topicId ?? (identityConfirmed ? target.topicId : undefined)} />
         {target.session ? <span className={className + '__status'} aria-hidden="true"><StatusDot status={target.session.status} /></span> : null}
-        <span className="mote-heartbeat-entry" data-mote-care={care.state} aria-hidden="true">{care.marker}</span>
+        <span className="mote-heartbeat-entry" data-mote-care={care.state} aria-hidden="true"><MoteHeartbeatGlyph state={care.state} /></span>
       </span>
       <span hidden id="mote-shortcut-status">{target.label} · {target.statusText} · {care.label}</span>
     </button>

@@ -241,6 +241,8 @@ export const SEMANTIC_ICON_CATALOG = {
   'action.restore': { label: 'Restore', glyph: 'archive-restore' },
   'action.archive': { label: 'Archive', glyph: 'archive' },
   'object.schedule': { label: 'Schedule', glyph: 'clock-3' },
+  'object.heartbeat': { label: 'Mote heartbeat', glyph: 'activity' },
+  'status.heartbeat-off': { label: 'Heartbeat off', glyph: 'minus' },
   'action.create-agent': { label: 'Create Agent', glyph: 'plus' },
   'action.add-to-draft': { label: 'Add To Draft', glyph: 'plus' },
   'object.source-code': { label: 'Source Code', glyph: 'code' },
