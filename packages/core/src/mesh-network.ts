@@ -38,7 +38,7 @@ export type MeshNetworkParams = {
   'settings.mesh.inspect': { target?: MeshOwnerTarget; operationId?: string }
   'settings.mesh.configure': { target?: MeshOwnerTarget; expectedRevision: string; operationId: string; configuration: MeshNetworkConfiguration }
   'mesh.inspect': { target?: MeshOwnerTarget }
-  'mesh.link': { target?: MeshOwnerTarget; offer: ConnectionOffer }
+  'mesh.link': { target?: MeshOwnerTarget; offer: ConnectionOffer; ingress?: ConnectionOffer['relay'] }
 }
 export type MeshNetworkResults = {
   'settings.mesh.inspect': MeshNetworkSettings
@@ -89,7 +89,7 @@ export function parseMeshNetworkConfiguration(value: unknown): MeshNetworkConfig
   return { role: p.role as MeshNetworkConfiguration['role'], endpointAccess: { allowedClientKeys }, networkId: rpcString(p.networkId, 'Mesh network'), members, peers, advertisedIngress, publishers, ...(listen ? { listen } : {}) }
 }
 export function parseMeshNetworkParams<M extends MeshNetworkMethod>(method: M, value: unknown): MeshNetworkParams[M] {
-  const p = rpcRecord(value, ['target', ...(method === 'settings.mesh.configure' ? ['expectedRevision', 'operationId', 'configuration'] : method === 'settings.mesh.inspect' ? ['operationId'] : method === 'mesh.link' ? ['offer'] : [])])
+  const p = rpcRecord(value, ['target', ...(method === 'settings.mesh.configure' ? ['expectedRevision', 'operationId', 'configuration'] : method === 'settings.mesh.inspect' ? ['operationId'] : method === 'mesh.link' ? ['offer', 'ingress'] : [])])
   let target: MeshOwnerTarget | undefined
   if (p.target !== undefined) {
     const route = rpcRecord(p.target, ['hostId', 'expectedRuntimeId'])
@@ -98,7 +98,7 @@ export function parseMeshNetworkParams<M extends MeshNetworkMethod>(method: M, v
   const selected = target ? { target } : {}
   if (method === 'settings.mesh.configure') return { ...selected, expectedRevision: rpcString(p.expectedRevision, 'Original Mesh revision'), operationId: rpcString(p.operationId, 'Original Mesh save'), configuration: parseMeshNetworkConfiguration(p.configuration) } as MeshNetworkParams[M]
   if (method === 'settings.mesh.inspect') return { ...selected, ...(p.operationId === undefined ? {} : { operationId: rpcString(p.operationId, 'Original Mesh save') }) } as MeshNetworkParams[M]
-  if (method === 'mesh.link') return { ...selected, offer: parseConnectionOffer(p.offer) } as MeshNetworkParams[M]
+  if (method === 'mesh.link') return { ...selected, offer: parseConnectionOffer(p.offer), ...(p.ingress === undefined ? {} : { ingress: parseRelayMeshEndpoint(p.ingress) }) } as MeshNetworkParams[M]
   return selected as MeshNetworkParams[M]
 }
 function settings(value: unknown): MeshNetworkSettings {
@@ -140,6 +140,8 @@ export function parseMeshNetworkResult<M extends MeshNetworkMethod>(method: M, v
     const p = rpcRecord(value, ['offer', 'url', 'observation']), o = rpcRecord(p.observation, ['owner', 'identity', 'activeRevision', 'observedAt', 'route', 'ingress'])
     const offer = parseConnectionOffer(p.offer), original = (input as MeshNetworkParams['mesh.link']).offer, publicIdentity = identity(o.identity)
     const ingress = parseRelayMeshEndpoint(o.ingress)
+    const requested = (input as MeshNetworkParams['mesh.link']).ingress
+    if (requested && !isDeepStrictEqual(ingress, requested)) invalid()
     const route = parseRelayMeshRoute(o.route)
     if (route.path.at(-1) !== route.originPeerId || !publicIdentity || offer.serverId !== original.serverId || offer.daemonPublicKeyB64 !== original.daemonPublicKeyB64 || route.serverId !== original.serverId || route.path[0] !== publicIdentity.peerId || !isDeepStrictEqual(offer.relay, ingress)) invalid()
     const url = rpcString(p.url, 'Complete Mesh offer URL'), parsed = new URL(url)

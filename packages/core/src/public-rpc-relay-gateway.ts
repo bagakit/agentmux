@@ -319,8 +319,11 @@ export class CoreRelayGateway implements MeshNetworkPort {
       if (saved.operation?.status === 'unknown') { this.desiredRevision = saved.revision; this.applyState = { state: 'unavailable', issue: { code: 'MESH_SAVE_UNCONFIRMED', message: 'The original Mesh save has an unknown disk acknowledgement. Inspect its operation; no new network configuration was applied.' } } }
     } else if (method === 'mesh.inspect') result = this.inspection()
     else {
-      const original = (input as MeshNetworkParams['mesh.link']).offer, route = this.runtime?.resolvePublisher(original.serverId)
-      const ingress = this.activeConfiguration?.advertisedIngress?.[0], identity = this.settings.publicIdentity()
+      const { offer: original, ingress: requested } = input as MeshNetworkParams['mesh.link']
+      const route = this.runtime?.resolvePublisher(original.serverId)
+      const advertised = this.activeConfiguration?.advertisedIngress
+      const ingress = requested ? advertised?.find(item => item.endpoint === requested.endpoint && item.useTls === requested.useTls) : advertised?.[0]
+      const identity = this.settings.publicIdentity()
       if (this.shutdown.signal.aborted || !route || !ingress || !identity || !this.activeRevision || this.state.state !== 'listening') throw new AgentMuxError('This original publisher has no confirmed Mesh path and explicitly advertised local ingress. Keep the original offer; other paths and Sessions remain available.', 'MESH_LINK_UNAVAILABLE')
       const offer = parseConnectionOffer({ ...original, relay: ingress }), url = connectionOfferUrl(`${ingress.useTls ? 'https' : 'http'}://${ingress.endpoint}/`, offer)
       result = { offer, url, observation: { owner: this.meshState!.owner, identity, activeRevision: this.activeRevision, observedAt: Date.now(), route, ingress } }
