@@ -134,9 +134,6 @@ importers:
       '@xterm/addon-unicode11':
         specifier: 0.10.0-beta.300
         version: 0.10.0-beta.300(@xterm/xterm@6.1.0-beta.303(patch_hash=2b0ffdd9e09bbed36c6be44d4d62a3ccabceb79a63cf3713b54eb6d563934d04))
-      '@xterm/addon-web-links':
-        specifier: 0.13.0-beta.300
-        version: 0.13.0-beta.300(@xterm/xterm@6.1.0-beta.303(patch_hash=2b0ffdd9e09bbed36c6be44d4d62a3ccabceb79a63cf3713b54eb6d563934d04))
       '@xterm/addon-webgl':
         specifier: 0.20.0-beta.299
         version: 0.20.0-beta.299(@xterm/xterm@6.1.0-beta.303(patch_hash=2b0ffdd9e09bbed36c6be44d4d62a3ccabceb79a63cf3713b54eb6d563934d04))
@@ -3265,11 +3262,6 @@ packages:
 
   '@xterm/addon-unicode11@0.10.0-beta.300':
     resolution: {integrity: sha512-Q678teiannkxiDQtMrr/MtuYAZXc+pou7BWVlL68DTvWdYZqYVrLNjwb1E4PCzO1arEZzO9zaTOhsXfDoiz+gw==}
-    peerDependencies:
-      '@xterm/xterm': ^6.1.0-beta.303
-
-  '@xterm/addon-web-links@0.13.0-beta.300':
-    resolution: {integrity: sha512-9RsQJadgK6cRBIC+k3P9MSTbzRB+/mF229K/shxI9vAV6DYmxRSgmxSGtoOY4MHw7nHuPUC0FxH82eK+GKQPEA==}
     peerDependencies:
       '@xterm/xterm': ^6.1.0-beta.303
 
@@ -7658,10 +7650,6 @@ snapshots:
       '@xterm/xterm': 6.1.0-beta.303(patch_hash=2b0ffdd9e09bbed36c6be44d4d62a3ccabceb79a63cf3713b54eb6d563934d04)
 
   '@xterm/addon-unicode11@0.10.0-beta.300(@xterm/xterm@6.1.0-beta.303(patch_hash=2b0ffdd9e09bbed36c6be44d4d62a3ccabceb79a63cf3713b54eb6d563934d04))':
-    dependencies:
-      '@xterm/xterm': 6.1.0-beta.303(patch_hash=2b0ffdd9e09bbed36c6be44d4d62a3ccabceb79a63cf3713b54eb6d563934d04)
-
-  '@xterm/addon-web-links@0.13.0-beta.300(@xterm/xterm@6.1.0-beta.303(patch_hash=2b0ffdd9e09bbed36c6be44d4d62a3ccabceb79a63cf3713b54eb6d563934d04))':
     dependencies:
       '@xterm/xterm': 6.1.0-beta.303(patch_hash=2b0ffdd9e09bbed36c6be44d4d62a3ccabceb79a63cf3713b54eb6d563934d04)
 
