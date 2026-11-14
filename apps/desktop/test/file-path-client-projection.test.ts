@@ -252,7 +252,9 @@ it.runIf(business)('a lost directory registration reply keeps the original packe
     await f.store.getState().openFile('original.txt', 'file-group', undefined, f.workspace.id)
     const scene = await visualScene(f, 'folder-registration-unconfirmed', 'Source Files · folder found, original registration reply unconfirmed')
     const check = [...scene!.element.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Check original registration')!
-    expect(check).toBeTruthy(); await act(async () => check.click()); expect(registrations).toBe(1)
+    expect(check).toBeTruthy(); await act(async () => check.click())
+    await vi.waitFor(() => expect(check.disabled).toBe(false))
+    expect(registrations).toBe(1)
     await scene?.capture('folder-registration-unconfirmed')
   }
 }, 60000)
