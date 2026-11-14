@@ -89,6 +89,11 @@ function OperationFeedbackItem({ operation, compact, active, visible }: { operat
       {operation.kind === 'stop' && operation.canContinue && operation.phase !== 'succeeded' ? <button type="button" onClick={() => {
         void stopSessionInBackground({ control: operation.control, operationId: operation.operationId }, { continueOriginal: true })
       }}><StopIcon size={12} />继续同次停止</button> : null}
+      {operation.kind === 'takeover' && operation.takeoverSource.coreRequest && ['partial', 'unconfirmed', 'failed'].includes(operation.phase) ? <button type="button" disabled={checking} onClick={() => {
+        setChecking(true)
+        void import('../lib/session-takeover').then(({ continueTakeoverOperation }) => continueTakeoverOperation(operation))
+          .catch(cause => useAppStore.getState().reportError(cause)).finally(() => setChecking(false))
+      }}>继续原接手</button> : null}
       {operation.phase === 'succeeded' ? <button type="button" onClick={() => changeOpen(false)}>收起</button> : null}
     </div>
   </div>

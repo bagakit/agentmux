@@ -6,12 +6,20 @@
 .session-takeover[data-state='closing'] .session-takeover__content { animation: takeover-leave 140ms ease-in both; }
 .session-takeover__content { width: min(560px, 100%); min-width: 0; margin-inline: auto; animation: takeover-enter 220ms var(--ease-enter); }
 .session-takeover__origin { display: flex; align-items: center; gap: 10px; min-width: 0; margin-bottom: 24px; color: var(--text-3); font-size: var(--fs-meta); }
-.session-takeover__origin > span:not(.agent-avatar) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.session-takeover__origin > span:not(.agent-avatar) { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .session-takeover__origin > svg { flex: none; opacity: .6; }
 .session-takeover__destination { flex: none; display: inline-flex; align-items: center; gap: 6px; color: var(--text-2); }
+.session-takeover__destination > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .session-takeover__heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 24px; }
 .session-takeover__heading h2 { margin: 0; color: var(--text); font-size: clamp(20px, 2.5vw, 25px); font-weight: 600; line-height: 1.25; letter-spacing: -.035em; }
 .session-takeover__heading p { margin: 8px 0 0; color: var(--text-2); font-size: var(--fs-body); line-height: 1.5; }
+.session-takeover__club-create { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin: 10px 0 18px; }
+.session-takeover__club-create small { color: var(--text-3); font-size: var(--fs-meta); line-height: 1.5; }
+.session-takeover__notice { color: var(--text-2); font-size: var(--fs-meta); line-height: 1.6; }
+.session-takeover__retained { margin-bottom: 18px; color: var(--text-3); font-size: var(--fs-meta); }
+.session-takeover__retained > summary { padding-block: 8px; cursor: pointer; }
+.session-takeover__retained > button { display: flex; flex-wrap: wrap; gap: 8px; max-width: 100%; margin-block: 6px; }
+.session-takeover__retained code { overflow: hidden; text-overflow: ellipsis; max-width: 22ch; }
 /* The exact instruction the new Agent receives: a labelled card, collapsible when long. */
 .session-takeover__instruction { margin: -8px 0 24px; border-radius: var(--radius); background: var(--surface-1); box-shadow: var(--hl); }
 .session-takeover__instruction > summary { display: flex; align-items: baseline; gap: 10px; padding: 10px 14px; cursor: pointer; list-style: none; color: var(--text-2); font-size: var(--fs-meta); font-weight: 550; }

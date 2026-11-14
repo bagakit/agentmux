@@ -3,6 +3,7 @@ import { presentError } from '@agentmux/client-ui/error-presentation'
 import { useAppStore } from '../store'
 import { api } from './api'
 import { mintObjectId } from '@agentmux/core/object-id'
+import type { TakeoverSource } from './session-takeover'
 import type { AgentMuxAgentStopReceipt } from '@agentmux/core'
 
 import { agentOperationKey, type AgentOperationFeedback } from './agent-operation'
@@ -15,6 +16,21 @@ export function beginAgentOperation(operation: AgentOperationFeedback): AgentOpe
   if (held) return held
   useAppStore.setState(state => ({ agentOperations: { ...state.agentOperations, [key]: operation } }))
   return operation
+}
+
+/** A Club preparation becomes its one frozen Core request in this same original client reference. */
+export function retainTakeoverRequest(operation: Extract<AgentOperationFeedback, { kind: 'takeover' }>, source: TakeoverSource) {
+  const key = agentOperationKey(operation)
+  let retained = operation
+  useAppStore.setState(state => {
+    const held = state.agentOperations[key]
+    if (!held || held.kind !== 'takeover') throw new Error('The original Takeover reference is unavailable. Its request was not replaced.')
+    if (held.takeoverSource.coreRequest && JSON.stringify(held.takeoverSource.coreRequest) !== JSON.stringify(source.coreRequest))
+      throw new Error('The original Takeover request is already frozen. Keep its exact source, destination and Agent.')
+    retained = { ...held, takeoverSource: source }
+    return { agentOperations: { ...state.agentOperations, [key]: retained } }
+  })
+  return retained
 }
 
 export function updateAgentOperation(operation: AgentOperationFeedback, patch: Partial<Pick<AgentOperationFeedback, 'phase' | 'message' | 'canContinue' | 'report'>>) {
@@ -89,6 +105,13 @@ export async function inspectAgentOperation(operation: AgentOperationFeedback) {
       return
     }
     if (operation.kind === 'takeover') {
+      if (operation.takeoverSource.clubPreparation && !operation.takeoverSource.coreRequest) {
+        const { inspectTakeoverClub } = await import('./session-takeover')
+        const topic = await inspectTakeoverClub(operation.takeoverSource)
+        if (stillCurrent()) updateAgentOperation(operation, { phase: topic ? 'partial' : 'unconfirmed',
+          message: topic ? 'Club 已建立，尚未选择接手 Agent。回到 Promotion 继续同次准备。' : '原 Club 准备尚未确认；保留这次身份，继续原准备。' })
+        return
+      }
       const { inspectTakeoverOperation } = await import('./session-takeover')
       const report = await inspectTakeoverOperation(operation.takeoverSource, operation.operationId)
       if (stillCurrent()) settleAgentCreation(operation, report)
