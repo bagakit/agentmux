@@ -8,6 +8,7 @@ import { editGoalDraft } from '../src/renderer/src/lib/goal-edit-drafts'
 import type { DemandRecord } from '../src/renderer/src/lib/global-demand-board'
 import { useAppStore } from '../src/renderer/src/store'
 import { composerDOM } from './helpers/composer-dom-fixture'
+import { chooseGoalSection, copyOriginalGoalLink, goalOutlineTrigger, openGoalMenu, pressGoalMenuKey } from './helpers/goal-reading-menu'
 import { chooseField } from './helpers/selection-field'
 
 const dom = composerDOM()
@@ -21,7 +22,7 @@ async function mount() {
   return goal
 }
 const button = (text: string) => [...dom.container.querySelectorAll<HTMLButtonElement>('button')].find(node => node.textContent === text)!
-const selected = () => dom.container.querySelector('[aria-label="Goal reading sections"] [aria-current="location"]')?.textContent
+const selected = () => goalOutlineTrigger(dom.container).getAttribute('aria-label')
 
 /** These measured positions stand in for layout only; the original scroll consumer and editors are mounted. */
 function measure(positions = { overview: 900, plan: 200, activity: 1800 }, total = 2400) {
@@ -44,36 +45,64 @@ it('the mounted workspace tracks explicit reading and manual scroll without repl
   const goal = await mount()
   await act(async () => editGoalDraft(goal.id, 'description', 'Keep the unsaved original draft.  '))
   const editor = dom.container.querySelector('[aria-label="Goal description"]')!
+  expect(editor).not.toBeNull()
   const plan = dom.container.querySelector('[data-goal-reading-section="plan"]')!
   const detail = measure()
-  const indicator = detail.querySelector('.goals-detail__reading-nav > .selection-indicator')
-  expect(indicator?.getAttribute('aria-hidden')).toBe('true')
-  expect(selected()).toBe('Plan')
-  await act(async () => button('Plan').click())
-  expect(selected()).toBe('Plan'); expect(detail.scrollTop).toBe(148); expect(document.activeElement).toBe(plan)
-  expect(detail.querySelector('.goals-detail__reading-nav > .selection-indicator')).toBe(indicator)
+  const trigger = goalOutlineTrigger(detail)
+  expect(trigger.closest('.goals-detail__toolbar')).not.toBeNull()
+  expect(selected()).toBe('Jump to section: Execution plan')
+  expect(detail.querySelectorAll('[data-goal-outline-trigger]')).toHaveLength(1)
+  const menu = await openGoalMenu(trigger)
+  expect([...menu.querySelectorAll('[data-goal-destination]')].map(item => item.textContent?.trim()))
+    .toEqual(['Execution plan', 'Goal brief', 'Activity'])
+  expect(menu.querySelector('[aria-current="location"]')?.getAttribute('data-goal-destination')).toBe('plan')
+  await pressGoalMenuKey(menu, 'Escape')
+  await vi.waitFor(() => expect(document.activeElement).toBe(trigger))
+  expect(detail.scrollTop).toBe(0)
+  await chooseGoalSection(detail, 'plan')
+  expect(detail.scrollTop).toBe(148)
+  expect(document.activeElement).toBe(plan)
+  await chooseGoalSection(detail, 'overview')
+  expect(document.activeElement, 'choosing Goal brief focuses the original brief').toBe(detail.querySelector('[data-goal-reading-section="overview"]'))
+  expect(detail.scrollTop).toBe(848)
+  expect(goalOutlineTrigger(detail)).toBe(trigger)
   await scroll(detail, 1800)
-  expect(selected()).toBe('Activity')
+  expect(selected()).toBe('Jump to section: Activity')
   await scroll(detail, 1000)
-  expect(selected()).toBe('Overview')
+  expect(selected()).toBe('Jump to section: Goal brief')
   await scroll(detail, 0)
-  expect(selected()).toBe('Plan')
+  expect(selected()).toBe('Jump to section: Execution plan')
   expect(dom.container.querySelector('[aria-label="Goal description"]')).toBe(editor)
   expect(dom.container.querySelector('[data-goal-reading-section="plan"]')).toBe(plan)
   expect(useAppStore.getState().goalEditDrafts[goal.id]?.description?.value).toBe('Keep the unsaved original draft.  ')
   expect(dom.container.querySelectorAll('[data-goal-reading-section]')).toHaveLength(3)
 })
 
+it('uses the keyboard to move among document sections and read the chosen destination', async () => {
+  await mount()
+  const detail = measure()
+  const menu = await openGoalMenu(goalOutlineTrigger(detail))
+  const first = menu.querySelector<HTMLElement>('[data-goal-destination="plan"]')!
+  const next = menu.querySelector<HTMLElement>('[data-goal-destination="overview"]')!
+  await vi.waitFor(() => expect(document.activeElement).toBe(first))
+  await pressGoalMenuKey(first, 'ArrowDown')
+  await vi.waitFor(() => expect(document.activeElement).toBe(next))
+  await pressGoalMenuKey(next, 'Enter')
+  await vi.waitFor(() => expect(menu.isConnected).toBe(false))
+  expect(document.activeElement).toBe(detail.querySelector('[data-goal-reading-section="overview"]'))
+  expect(selected()).toBe('Jump to section: Goal brief')
+})
+
 it('keeps a chosen plan current when brief and plan share a row and marks a visible Activity at the document end', async () => {
   await mount()
   const detail = measure({ overview: 200, plan: 200, activity: 1050 }, 1400)
-  await act(async () => button('Plan').click())
+  await chooseGoalSection(detail, 'plan')
   await scroll(detail, 200)
-  expect(selected()).toBe('Plan')
+  expect(selected()).toBe('Jump to section: Execution plan')
   await scroll(detail, 800)
-  expect(selected()).toBe('Activity')
+  expect(selected()).toBe('Jump to section: Activity')
   await scroll(detail, 0)
-  expect(selected()).toBe('Plan')
+  expect(selected()).toBe('Jump to section: Execution plan')
 })
 
 it('the exact original plan entry sets the reading signal without moving focus, and copying keeps owner addresses', async () => {
@@ -83,8 +112,8 @@ it('the exact original plan entry sets the reading signal without moving focus, 
   const title = dom.container.querySelector<HTMLElement>('[aria-label="Goal title"]')!
   title.focus()
   await act(async () => useAppStore.setState({ goalReadingEntry: { goalId: goal.id, runtimeId: goal.address!.runtimeId, namespace: goal.address!.namespace, section: 'plan', phase: 'ready', token: 'original-plan-reading' } }))
-  expect(selected()).toBe('Plan'); expect(document.activeElement).toBe(title)
-  await act(async () => button('Copy goal link').click())
+  expect(selected()).toBe('Jump to section: Execution plan'); expect(document.activeElement).toBe(title)
+  await copyOriginalGoalLink(dom.container)
   expect(write).toHaveBeenLastCalledWith(goal.address!.goalUrl)
   await act(async () => button('Copy plan link').click())
   expect(write).toHaveBeenLastCalledWith(goal.address!.planUrl)

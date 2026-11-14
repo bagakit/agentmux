@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 import { act } from 'react'
+import { chooseGoalSection, copyOriginalGoalLink, goalOutlineTrigger, openGoalMenu, pressGoalMenuKey } from './helpers/goal-reading-menu'
 import { formatGoalAddress } from '@agentmux/core/sharing'
 import { editGoalDraft } from '../src/renderer/src/lib/goal-edit-drafts'
 import { describe, expect, it, vi } from 'vitest'
@@ -62,10 +63,12 @@ describe('Goal plan graph', () => {
     expect(side.lastElementChild).toBe(side.querySelector('[aria-label="Goal properties"]'))
     const head = detail.querySelector('.goals-detail__head')!
     expect(head.querySelector('[aria-label="Goal title"]')).not.toBeNull()
-    expect(detail.querySelector('.goals-detail__reading-nav [aria-current]')?.textContent).toBe('Plan')
+    expect(goalOutlineTrigger(detail).getAttribute('aria-label')).toBe('Jump to section: Execution plan')
     expect(head.querySelector('[data-goal-detail-stage]')?.textContent).toBeTruthy()
     expect(detail.querySelector('[data-goal-reading-section="activity"]')).toBeNull()
-    expect([...detail.querySelectorAll('.goals-detail__reading-nav button')].some(button => button.textContent === 'Activity')).toBe(false)
+    const outline = await openGoalMenu(goalOutlineTrigger(detail))
+    expect(outline.querySelector('[data-goal-destination="activity"]')).toBeNull()
+    await pressGoalMenuKey(outline, 'Escape')
     expect(main.querySelector('.goal-collaboration')).toBeNull()
     const overview = main.querySelector('.goal-work-area__overview')!
     expect(overview.firstElementChild).toBe(main.querySelector('[aria-label="Goal brief"]'))
@@ -94,6 +97,11 @@ describe('Goal plan graph', () => {
     expect(graph()!.querySelector('[data-goal-time-row="d-api"][data-selected]')).not.toBeNull()
     expect(graph()!.querySelector('[data-goal-observed-activity]')).toBeNull()
     expect(graph()!.querySelectorAll('[data-goal-time-event="Original dispatch linked"]')).toHaveLength(2)
+    const delivery = reading().querySelector('[data-goal-delivery="d-api"]')!
+    await chooseGoalSection(dom.container, 'overview')
+    await chooseGoalSection(dom.container, 'plan')
+    expect(reading().querySelector('[data-goal-delivery="d-api"]')).toBe(delivery)
+    expect(graph()!.querySelector('[data-goal-time-row="d-api"][data-selected]')).not.toBeNull()
     await act(async () => graph()!.querySelector<HTMLButtonElement>('[data-goal-time-row="d-api-current"] button')!.click())
     expect(reading().querySelector('[data-goal-delivery="d-api-current"]')).not.toBeNull()
     expect(reading().querySelector('[aria-label="Independent node review"]')).not.toBeNull()
@@ -110,13 +118,19 @@ describe('Goal plan graph', () => {
     detail.scrollTop = 100
     dom.container.scrollTop = 18
     const team = dom.container.querySelector<HTMLButtonElement>('.goals-detail__team-link')!
-    expect(team.textContent).toBe('Supervisor')
+    const originalReading = goalOutlineTrigger(detail).getAttribute('aria-label')
+    expect(team.hasAttribute('data-goal-supervisor-toggle')).toBe(true)
     await act(async () => team.click())
     expect(scroll).not.toHaveBeenCalled()
-    expect(team.closest('nav')?.querySelector('[aria-current="location"]')).toBe(team)
+    expect(team.getAttribute('aria-pressed')).toBe('true')
+    expect(goalOutlineTrigger(detail).getAttribute('aria-label')).toBe('Jump to section: Supervisor')
     expect(detail.scrollTop).toBe(0)
     expect(dom.container.scrollTop).toBe(18)
     expect(document.activeElement).toBe(side)
+    await act(async () => team.click())
+    await vi.waitFor(() => expect(detail.scrollTop).toBe(100))
+    expect(team.getAttribute('aria-pressed')).toBe('false')
+    expect(goalOutlineTrigger(detail).getAttribute('aria-label')).toBe(originalReading)
     expect(dom.container.querySelectorAll('[aria-label="Open discussion for Ship the plan"]')).toHaveLength(1)
     expect(graph()!.textContent).not.toContain('Open goal discussion')
   })
@@ -497,11 +511,11 @@ describe('Goal continuous reading', () => {
     vi.spyOn(planSection, 'getBoundingClientRect').mockReturnValue({ top: 780 } as DOMRect)
     vi.spyOn(detail, 'getBoundingClientRect').mockReturnValue({ top: 20 } as DOMRect)
     detail.scrollTop = 83; dom.container.scrollTop = 12
-    await act(async () => button('Plan').click())
+    await chooseGoalSection(detail, 'plan')
     expect(detail.scrollTop).toBe(791)
     expect(document.activeElement).toBe(planSection)
-    await act(async () => button('Activity').click())
-    await act(async () => button('Overview').click())
+    await chooseGoalSection(detail, 'activity')
+    await chooseGoalSection(detail, 'overview')
     expect(dom.container.querySelector('[aria-label="Goal description"]')).toBe(editor)
     expect(useAppStore.getState().goalEditDrafts.goal?.description?.value).toBe('Keep this unsaved original Brief.  ')
     expect(dom.container.scrollTop).toBe(12)
@@ -535,14 +549,17 @@ describe('Goal continuous reading', () => {
     const record = addressed(); seed(record)
     const write = vi.spyOn(api.ui, 'writeClipboardText').mockResolvedValue(undefined)
     await dom.render(<GlobalBoardSurface />)
-    await act(async () => button('Copy goal link').click())
+    await copyOriginalGoalLink(dom.container)
     expect(write).toHaveBeenLastCalledWith(record.address!.goalUrl)
-    expect(button('Goal link copied')).toBeDefined()
+    const actions = await openGoalMenu(dom.container.querySelector<HTMLButtonElement>('button[aria-label="Goal actions"]')!)
+    expect(actions.textContent).toContain('Goal link copied')
+    await pressGoalMenuKey(actions, 'Escape')
+    await vi.waitFor(() => expect(actions.isConnected).toBe(false))
     await act(async () => button('Copy plan link').click())
     expect(write).toHaveBeenLastCalledWith(record.address!.planUrl)
     expect(button('Plan link copied')).toBeDefined()
     write.mockRejectedValueOnce(Error('The original clipboard write was not confirmed.'))
-    await act(async () => button('Copy goal link').click())
+    await copyOriginalGoalLink(dom.container)
     expect(dom.container.textContent).toContain('Link could not be copied. The original clipboard write was not confirmed.')
     expect(useAppStore.getState().selectedDemandId).toBe(record.id)
   })
@@ -558,7 +575,7 @@ describe('Goal continuous reading', () => {
     const entry = { goalId: record.id, runtimeId: record.address!.runtimeId, namespace: record.address!.namespace, section: 'plan' as const, phase: 'pending' as const, token: 'pending-original-source' }
     await act(async () => useAppStore.setState({ goalReadingEntry: entry }))
     expect(detail.scrollTop).toBe(83)
-    await act(async () => button('Activity').click())
+    await chooseGoalSection(detail, 'activity')
     expect(useAppStore.getState().goalReadingEntry).toBeNull()
     expect(dom.container.querySelector('[data-goal-reading-section="plan"]')).toBe(section)
     expect(document.activeElement).toBe(dom.container.querySelector('[data-goal-reading-section="activity"]'))

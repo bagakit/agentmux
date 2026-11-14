@@ -144,7 +144,7 @@ describe('Goals whole-page current facts, reading and return through mounted own
     await act(async () => original.focus())
     await select('blocked')
     expect(dom.container.querySelector('.goals-index .goals-board')).toBe(board)
-    expect(dom.container.querySelector('[aria-label="Goal reading sections"] [aria-current]')?.textContent).toBe('Plan')
+    expect(dom.container.querySelector('[data-goal-outline-trigger]')?.getAttribute('aria-label')).toBe('Jump to section: Execution plan')
     await click('Back to goals')
     expect(dom.container.querySelector('.goals-board')).toBe(board)
     expect(document.activeElement).toBe(original)
@@ -168,7 +168,7 @@ describe('Goals whole-page current facts, reading and return through mounted own
     expect(document.activeElement).toBe(actions)
     await act(async () => actions.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })))
     await act(async () => { await new Promise(resolve => setTimeout(resolve, 35)) })
-    const remove = document.querySelector<HTMLElement>('[role="menuitem"]')!
+    const remove = document.querySelector<HTMLElement>('[role="menuitem"].goals-delete-action')!
     expect(remove.textContent).toBe('Delete goal')
     await act(async () => remove.click())
     const dialog = document.querySelector<HTMLElement>('[role="dialog"]')!

@@ -4,12 +4,15 @@ import { relative } from 'node:path'
 import original from './vitest.goal-current-work.config.mts'
 
 const owner = 'apps/desktop/src/renderer/src/components/GoalDetail.tsx'
+const outline = 'apps/desktop/src/renderer/src/components/GoalReadingOutline.tsx'
 const mutation = process.env.GOAL_DETAIL_READING_MUTATION || null
 const mutations = {
   'manual-reading': ["detail.addEventListener('scroll', scheduleReadingSection, { passive: true })", "detail.addEventListener('unused-scroll', scheduleReadingSection, { passive: true })"],
-  'selected-reading': ["aria-current={visibleSection === 'plan' ? 'location' : undefined}", 'aria-current={undefined}'],
+  'selected-reading': ["aria-current={here ? 'location' : undefined}", 'aria-current={undefined}'],
+  'wrong-destination': ["id === 'overview' ? overviewRef.current : activityRef.current", "id === 'overview' ? planRef.current : activityRef.current"],
   'properties-disclosure': ['<details className="goals-detail__properties"', '<details open className="goals-detail__properties"']
 } as const
+const mutationOwner = mutation === 'selected-reading' ? outline : owner
 if (mutation && !(mutation in mutations)) throw Error('Unknown detail reading mutation')
 const sha = (source: string) => createHash('sha256').update(source).digest('hex')
 // Bind only the bridge segments relevant to this reading change; unrelated Store/peer work is outside this proof.
@@ -18,7 +21,7 @@ const segments: Record<string, [string, string]> = {
   'apps/desktop/src/renderer/src/components/GoalWorkArea.tsx': ['    <GoalDelegationWork', 'onRevealResults={onRevealResults} />'],
   'apps/desktop/src/renderer/src/components/GoalDelegationWork.tsx': ['const recordNodes = embedded ?', 'className="goal-work-area__overview">{overview}</div>']
 }
-const full = [owner, 'apps/desktop/src/renderer/src/components/GoalProperties.tsx', 'apps/desktop/src/renderer/src/lib/goal-edit-drafts.ts', 'apps/desktop/src/renderer/src/styles/goal-reading.css']
+const full = [owner, outline, 'apps/desktop/src/renderer/src/components/GoalProperties.tsx', 'apps/desktop/src/renderer/src/lib/goal-edit-drafts.ts', 'apps/desktop/src/renderer/src/styles/goal-reading.css']
 export default { ...original, plugins: [...original.plugins ?? [], {
   name: 'actual-goal-detail-reading', enforce: 'pre' as const,
   transform(source: string, id: string) {
@@ -31,14 +34,14 @@ export default { ...original, plugins: [...original.plugins ?? [], {
       if (source.split(start).length !== 2 || source.split(end).length !== 2) throw Error('Detail source bridge must be unique: ' + file)
       boundSource = source.slice(source.indexOf(start), source.indexOf(end) + end.length)
     }
-    if (file === owner && mutation) {
+    if (file === mutationOwner && mutation) {
       const [anchor, replacement] = mutations[mutation as keyof typeof mutations]
       if (source.split(anchor).length !== 2) throw Error('Detail reading mutation needs one exact production anchor')
       source = source.replace(anchor, replacement)
     }
     const output = process.env.GOAL_DETAIL_READING_LOADED
     if (!output) return source
-    const row = { file, originalSHA256, loadedSHA256: sha(source), mutation: file === owner ? mutation ?? null : null, ...(boundSource ? { boundSource, boundSHA256: sha(boundSource) } : {}) }
+    const row = { file, originalSHA256, loadedSHA256: sha(source), mutation: file === mutationOwner ? mutation ?? null : null, ...(boundSource ? { boundSource, boundSHA256: sha(boundSource) } : {}) }
     if (file.endsWith('.css')) { appendFileSync(output, JSON.stringify({ ...row, phase: 'style-transform' }) + '\n'); return }
     return `import {appendFileSync as __detailReadingLoaded} from 'node:fs';__detailReadingLoaded(${JSON.stringify(output)},${JSON.stringify(JSON.stringify(row) + '\n')});\n` + source
   }

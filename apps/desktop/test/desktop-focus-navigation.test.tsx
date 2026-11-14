@@ -3,6 +3,7 @@ import { fixturePath as _hygiene_fixturePath } from "../../../test/fixture-value
 // @vitest-environment happy-dom
 import { act, createElement, type ReactNode } from 'react'
 import { type Root } from 'react-dom/client'
+import { chooseGoalSection } from './helpers/goal-reading-menu'
 import { createClientUiRoot as createRoot } from './helpers/client-ui-render'
 import { webcrypto } from 'node:crypto'
 import { appendFile, mkdir, mkdtemp, readFile, rm, symlink } from 'node:fs/promises'
@@ -1614,9 +1615,8 @@ it('copied Goal plan links and the real CLI reveal the original graph without cr
     expect(container.querySelector('[aria-label="Goal title"]')).toBe(editor)
     expect(editor.value).toBe('A retained local edit')
     const invoke = vi.mocked(api.goals.execute).getMockImplementation()!
-    const anchorButton = (label: string) => [...container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === label)!
-    for (const choice of ['Activity', 'Overview']) {
-      await act(async () => anchorButton('Overview').click())
+    for (const choice of ['activity', 'overview'] as const) {
+      await chooseGoalSection(container, 'overview')
       const detail = container.querySelector<HTMLElement>('.goals-detail')!, originalScroll = detail.scrollTop
       let release!: () => void, reached!: () => void
       const held = new Promise<void>(resolve => { release = resolve }), reachedSource = new Promise<void>(resolve => { reached = resolve })
@@ -1625,7 +1625,7 @@ it('copied Goal plan links and the real CLI reveal the original graph without cr
       await reachedSource; await settle()
       expect(useAppStore.getState().goalReadingEntry?.phase).toBe('pending')
       expect(detail.scrollTop, 'A pending source read cannot reveal the plan before confirmation').toBe(originalScroll)
-      await act(async () => anchorButton(choice).click())
+      await chooseGoalSection(container, choice)
       expect(useAppStore.getState().goalReadingEntry).toBeNull()
       const selectedScroll = detail.scrollTop, draft = useAppStore.getState().goalEditDrafts.exact
       try { release(); expect(await pending).toContain('NAVIGATION_CHANGED') } finally { release() }
