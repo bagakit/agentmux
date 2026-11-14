@@ -3600,21 +3600,38 @@ export class AgentMuxRpcService {
         if(policy?.kind==='idle') {
           rollover={status:'unconfirmed',decision:null,issue:'The original Main dialogue idle source is unconfirmed. Its existing input remains available.'}
           const latest=await journal.latestMoteMainInputRoute(main.identity,main.roleRevision)
-          if(latest&&!latest.recoveryOperationId) {
+          if(latest) {
             const scopes=(await this.clients()).filter(scope=>scope.hostId===latest.reference.hostId),scope=scopes.length===1?scopes[0]:undefined
-            if(scope&&!this.endpointUnverified(scope.client)) {
-              const observed=await this.inspectMainInputAt(scope,latest.key,context,true),idle=observed.record?.semanticIdle
-              const session=await scope.client.readAgentSession(latest.key.agentSessionId)
+            if(scope&&!this.endpointUnverified(scope.client)&&isDeepStrictEqual(latest.reference,main.current)&&
+              (latest.runtimeId===null||scope.client.runtimeOwnerIdentity?.()?.runtimeId===latest.runtimeId)) {
+              let inputKey=latest.key
+              if(latest.recoveryOperationId) {
+                const source=await scope.client.readAgentSession(latest.key.agentSessionId)
+                const recovery=source?.continuityOperations?.[latest.recoveryOperationId],launch=recovery?.launchInput,recoveredKey=launch?.key
+                // The route keeps its pre-recovery Run. Only its original continuity
+                // receipt can bind that same human Query to the resumed Run.
+                if(!recovery||recovery.operationId!==latest.recoveryOperationId||recovery.agentSessionId!==latest.key.agentSessionId||
+                  recovery.trigger!=='input'||recovery.kind!=='resumed'||recovery.previousRun.runId!==latest.key.expectedRun.runId||
+                  !recoveredKey||recoveredKey.agentSessionId!==latest.key.agentSessionId||recoveredKey.submissionId!==latest.operationId||
+                  launch?.input.submissionId!==latest.operationId||launch.input.authorHuman!==true||
+                  !['launch-carried','terminal-confirmed','native-admitted'].includes(launch.state)||
+                  recoveredKey.expectedRun.runId!==recovery.newRun?.runId||recovery.newRun.runId!==source?.run.runId)return rollover
+                inputKey=recoveredKey
+              }
+              const observed=await this.inspectMainInputAt(scope,inputKey,context,true),idle=observed.record?.semanticIdle
+              const session=await scope.client.readAgentSession(inputKey.agentSessionId)
               const sourceNow=observed.sourceNow
-              if(idle&&session&&idle.run.runId===session.run.runId&&idle.promptSubmissionId===latest.operationId&&
+              if(idle&&session&&inputKey.expectedRun.runId===session.run.runId&&idle.run.runId===session.run.runId&&
+                idle.promptSubmissionId===latest.operationId&&session.nativeHandle?.kind==='provider'&&idle.nativeSessionId===session.nativeHandle.sessionId&&
                 !session.pendingInteraction&&observed.activity?.state==='idle'&&
                 typeof sourceNow==='number'&&sourceNow>=idle.observedAt) {
                 const elapsed=sourceNow-idle.observedAt
                 if(elapsed>=policy.idleMs) {
                   const policyRevision=createHash('sha256').update(JSON.stringify([main.identity,policy])).digest('hex')
                   const creationOperationId='mote-rollover:'+createHash('sha256').update(JSON.stringify([main.identity,main.roleRevision,policyRevision,operationId])).digest('hex')
+                  await this.ports.moteDialogue?.mainInput?.assertCurrent(main,context.signal)
                   const decision={target:main.target,expectedRoleRevision:main.roleRevision,reference:main.current,policyRevision,policy,
-                    activity:{inputKey:latest.key,run:idle.run,sourceId:idle.sourceId,sequence:idle.sequence,idleSince:idle.observedAt},evaluatedAt:sourceNow,queryOperationId:operationId,creationOperationId}
+                    activity:{inputKey,run:idle.run,sourceId:idle.sourceId,sequence:idle.sequence,idleSince:idle.observedAt},evaluatedAt:sourceNow,queryOperationId:operationId,creationOperationId}
                   return {status:'due',decision,issue:null}
                 }
                 rollover={status:'not-due',decision:null,issue:null}
