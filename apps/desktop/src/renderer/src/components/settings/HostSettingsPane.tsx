@@ -1,12 +1,11 @@
 import { mintObjectId } from '@agentmux/core/object-id'
 import { parseHostConfigurations } from '@agentmux/host/host-configuration'
-import { HostTailcatListenerFields } from './HostTailcatListenerFields'
 import { HostTailcatClientFields } from './HostTailcatClientFields'
 import { hostConnectionSummary } from '../../lib/host-transport'
 import { TextInput } from '@agentmux/client-ui/input'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { HostIcon } from '../HostBadge'
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useContext, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useResourceDrafts } from './use-resource-drafts'
 import { HostConnectionLibrary, HOST_PANELS, type HostConnectionPanel } from './HostConnectionLibrary'
 import { HostProjectsPane } from './HostProjectsPane'
@@ -16,11 +15,13 @@ import { currentHostCheck, hostCheckLabel } from '../../lib/host-check'
 import { projectRailNavigation } from '../../lib/workspace-projects'
 import { SettingsSaveBar, useSettingsSave } from './SettingsSaveBar'
 import { ConfirmationDialog } from '../ConfirmationDialog'
+import { SettingsNavigation } from '../SettingsNavigation'
 import type { SettingsNavigationRequest } from '../SettingsNavigation'
 import { HostCorePanel } from './HostCorePanel'
 import { HostCreationTrustPanel } from './HostCreationTrustPanel'
 import { HostMessageTrustPanel } from './HostMessageTrustPanel'
 import { HostTopology } from './HostTopology'
+import { HostPublishedResources } from './HostPublishedResources'
 import { HostRuntimePanel } from './HostRuntimePanel'
 import { HostNetworkPanel } from './HostNetworkPanel'
 import { hostNetworkSummary } from './host-network-view'
@@ -55,6 +56,7 @@ export function HostSettingsPane({ config, onSave, active, onClose, navigationRe
   navigationRequest?: SettingsNavigationRequest | undefined
   onSave: (hosts: HostConfig[], workspaces: WorkspaceRecord[], expected: Pick<AppConfig, 'hosts' | 'workspaces'>) => Promise<void>
 }) {
+  const settingsNavigation = useContext(SettingsNavigation)
   const resource = useResourceDrafts(Object.fromEntries(config.hosts.map((host) => [host.id, host])))
   // Host order belongs to the existing config array; a record's integer-like keys must not reorder it.
   function orderedHosts(records: Record<string, HostConfig>): HostConfig[] {
@@ -314,6 +316,10 @@ export function HostSettingsPane({ config, onSave, active, onClose, navigationRe
                   <summary>Service status<span>Runtime identity and resources</span></summary>
                   <HostRuntimePanel host={host} committed={config.hosts.find(item => item.id === host.id)} active={active && Boolean(sectionsOpen[sectionKey(host.id, 'service')]) && !pendingHostNavigation && (measuredWide === true || view === 'editor')} />
                 </details>
+                <details className="remote-host-section" open={sectionsOpen[sectionKey(host.id, 'shared')] ?? false} onToggle={event => toggleSection(host.id, 'shared', event.currentTarget.open)}>
+                  <summary>Shared folders<span>Published by this node</span></summary>
+                  <HostPublishedResources host={host} committed={config.hosts.find(item => item.id === host.id)} active={active && Boolean(sectionsOpen[sectionKey(host.id, 'shared')]) && !pendingHostNavigation && (measuredWide === true || view === 'editor')} />
+                </details>
                 <details className="remote-host-section" open={sectionsOpen[sectionKey(host.id, 'network')] ?? false} onToggle={event => toggleSection(host.id, 'network', event.currentTarget.open)}>
                   <summary>Network details<span>Configuration, interfaces and source facts</span></summary>
                   <HostNetworkPanel host={host} committed={config.hosts.find(item => item.id === host.id)} state={network.reads[host.id]} onRead={network.read}
@@ -338,7 +344,7 @@ export function HostSettingsPane({ config, onSave, active, onClose, navigationRe
                   onChange={(patch) => update(host.id, patch)}
                   onClear={(field) => clear(host.id, field)}
                 />
-              ) : <HostTailcatListenerFields host={host} committed={config.hosts.find(item => item.id === host.id)} active={active && !pendingHostNavigation && (wide || view === 'editor')} onChange={tailcat => setHosts(current => current.map(item => item.id === host.id && item.kind === 'local' ? { ...item, tailcat } : item))} /> : null}
+              ) : <div className="settings-local-host"><strong>This device’s network node</strong><p>Incoming connections, publishing and shared folders are managed in Network node.</p><button type="button" className="small-button" onClick={() => settingsNavigation?.open('network-node')}>Open Network node</button></div> : null}
               {panel === 'connection' && sessionCount > 0 ? <p className="field-hint">{sessionCount} Session reference{sessionCount === 1 ? '' : 's'}. Removal is protected while this connection is referenced.</p> : null}
             </section>
           )

@@ -1,3 +1,6 @@
+import type { NodeResources } from '@agentmux/core/node-publishing'
+import { appendNodeSample, type NodeSampleFrame } from './node-resource-view'
+import { HostNodeResources } from './HostNodeResources'
 import { useEffect, useState } from 'react'
 import type { HostRuntimeObservation, HostRuntimeSource } from '@agentmux/core'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
@@ -9,7 +12,7 @@ import './host-runtime-panel.css'
 const RefreshIcon = semanticIconComponent('action.refresh')
 const InfoIcon = semanticIconComponent('status.info')
 const NATIVE_CAPABILITIES = [['orderedOutputBytes', 'Ordered output'], ['boundedReplay', 'Bounded replay'], ['recoverableInput', 'Recoverable input'], ['resize', 'Resize'], ['interrupt', 'Interrupt'], ['completeStop', 'Complete stop']] as const
-type State = { target: string; current?: HostRuntimeObservation; confirmed?: HostRuntimeObservation; error?: string | undefined; busy?: boolean | undefined }
+type State = { target: string; nodeReply?: NodeResources; nodeError?: string | undefined; frames?: NodeSampleFrame[]; current?: HostRuntimeObservation; confirmed?: HostRuntimeObservation; error?: string | undefined; busy?: boolean | undefined }
 function route({ label: _label, ...host }: HostConfig) { return host }
 function keep<T>(current: HostRuntimeSource<T>, previous?: HostRuntimeSource<T>): HostRuntimeSource<T> {
   return current.state === 'available' || previous?.state !== 'available' ? current : previous
@@ -52,15 +55,32 @@ export function HostRuntimePanel({ host, committed, active }: { host: HostConfig
     const observe = async () => {
       setState(previous => ({ ...(previous.target === target ? previous : { target }), busy: true, error: undefined }))
       try {
-        const observation = await api.hosts.inspect(committed!, { signal: controller.signal })
+        const [runtimeRead, nodeRead] = await Promise.allSettled([
+          api.hosts.inspect(committed!, { signal: controller.signal }),
+          host.kind === 'local' ? api.nodePublishing.call('settings.node.resources', {}, controller.signal)
+            : api.nodePublishing.call('node.resources', { hostId: host.id, ...(host.runtimeId ? { expectedRuntimeId: host.runtimeId } : {}) }, controller.signal)
+        ])
         if (controller.signal.aborted) return
-        if (observation.routeHostId !== host.id || !configValuesEqual(observation.configuration, committed)) throw new Error('The observation belongs to another Host. Refresh this connection.')
-        setState(previous => ({ target, current: observation,
-          confirmed: confirmed(observation, previous.target === target ? previous.confirmed : undefined), busy: false }))
-      } catch (error) {
-        if (controller.signal.aborted) return
-        setState(previous => ({ ...(previous.target === target ? previous : { target }), busy: false,
-          error: error instanceof Error ? error.message : String(error) }))
+        setState(previous => {
+          const next: State = { ...(previous.target === target ? previous : { target }), busy: false }
+          if (runtimeRead.status === 'fulfilled') {
+            const observation = runtimeRead.value
+            if (observation.routeHostId === host.id && configValuesEqual(observation.configuration, committed)) {
+              next.current = observation; next.confirmed = confirmed(observation, next.confirmed); next.error = undefined
+            } else next.error = 'The observation belongs to another Host. Refresh this connection.'
+          } else next.error = runtimeRead.reason instanceof Error ? runtimeRead.reason.message : String(runtimeRead.reason)
+          if (nodeRead.status === 'fulfilled') {
+            const reply = nodeRead.value
+            if (host.kind === 'ssh' && host.runtimeId && reply.node.runtimeId !== host.runtimeId) next.nodeError = 'Resource identity differs from this saved Runtime. The original connection is kept.'
+            else {
+              next.nodeReply = reply; next.nodeError = undefined
+              if (reply.status === 'withheld') next.frames = []
+              else if (reply.status === 'available') next.frames = appendNodeSample(next.frames ?? [], reply.sample)
+              else next.frames = [...(next.frames ?? []), { at: Date.now(), sample: null }].slice(-120)
+            }
+          } else { next.nodeError = nodeRead.reason instanceof Error ? nodeRead.reason.message : String(nodeRead.reason); next.frames = [...(next.frames ?? []), { at: Date.now(), sample: null }].slice(-120) }
+          return next
+        })
       } finally { if (!controller.signal.aborted) timer = setTimeout(() => void observe(), 5000) }
     }
     void observe()
@@ -74,13 +94,14 @@ export function HostRuntimePanel({ host, committed, active }: { host: HostConfig
   const partial = current && [current.owner, current.nativeIdentity, current.diagnostics, current.resources].some(source => source.state === 'unavailable')
   const diagnosticEvidence = diagnostic ? !busy && !failed && current?.diagnostics.state === 'available' ? 'current' : 'retained' : 'unconfirmed'
   return <section className="host-runtime" aria-label="Runtime observation" data-host-runtime={host.id}>
-    <header className="host-runtime__header"><div><strong>Service status</strong><span>{!saved ? 'Save this connection to read its service status.' :
+    <header className="host-runtime__header"><div><strong>Service status <span className="host-runtime__target">{host.label}</span></strong><span>{!saved ? 'Save this connection to read its service status.' :
       !current ? busy ? 'Reading this environment…' : 'No confirmed observation yet' :
       `${partial || failed ? 'Some observations unavailable' : 'Observed'} · ${time(current.completedAt)}`}</span></div>
       <button type="button" className="small-button" disabled={!saved || !active || busy || !visible} onClick={() => setRevision(previous => previous + 1)} aria-label="Refresh Runtime observation"><RefreshIcon size={13} />{busy ? 'Reading…' : 'Refresh'}</button>
     </header>
     {failed ? <p className="host-runtime__issue" role="status" data-diagnostics><InfoIcon size={13} /><span>{failed} {retained ? 'Last confirmed values are kept below.' : 'Refresh to read this original connection again.'}</span></p> : null}
     {saved ? <>
+      <HostNodeResources reply={state.target === target ? state.nodeReply : undefined} frames={state.target === target ? state.frames ?? [] : []} error={state.target === target ? state.nodeError : undefined} busy={busy} active={active && visible} privateOwner={host.kind === 'local'} />
       <div className="host-runtime__resources" aria-label="Retained Runtime resources">
         <div><span>Running Runs</span><strong>{resources?.runningRuns ?? '—'}</strong><small>{resources ? `${resources.runCount} retained in total` : 'Not observed'}</small></div>
         <div><span>Attachments</span><strong>{resources?.attachments ?? '—'}</strong><small>Service readers</small></div>

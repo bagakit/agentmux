@@ -123,6 +123,7 @@ import { inspectNotifications, clientNotificationsPort } from './notification-ob
 import { inspectMoteContext, moteContextEvidencePort } from './mote-context-observation.js'
 import { observeClientRpcSnapshot } from '@agentmux/host/snapshot-observation'
 import { SessionHistoryObservationOwners } from './session-history-observation.js'
+import { registerNodePublishingIpc } from './node-publishing-ipc.js'
 import { registerHostRuntimeObservationIpc } from './host-runtime-observation-ipc.js'
 import { registerSearchIpc } from './search-ipc.js'
 import { SessionHistoryReadOwners } from './session-history-read.js'
@@ -968,6 +969,7 @@ export async function registerIpc(args: {
   handle('config:get', () => config)
   // A conflict crosses IPC with its code; the Renderer offers recovery from that fact, never from wording.
   handle('config:save', (next: AppConfig, expected: AppConfig) => sessionInputOperationResult(() => configOwner.edit(expected, next)))
+  const nodePublishingReads = registerNodePublishingIpc({ handle: handleWithEvent, call: callUserRpc })
   const hostRuntimeReads = registerHostRuntimeObservationIpc({ handle: handleWithEvent,
     call: callUserRpc })
   handleWithEvent('hosts:prepareTailcatKey', (_event, input: import('@agentmux/core').AgentMuxRpcParams<'settings.hosts.tailcat-key'>) =>
@@ -2649,9 +2651,9 @@ export async function registerIpc(args: {
     applicationAccess: args.applicationAccess,
     hostMaintenance,
     hostConfiguration: hostId => structuredClone(configOwner.current.hosts.find(host => host.id === hostId) ?? null),
+    nodeLocatorHosts: () => configOwner.current.hosts.map(host => host.id),
     hostTailcatKey: (input, signal) => args.runtime.callOriginalCore('local', 'settings.hosts.tailcat-key', input, { transport: 'unix', ...(signal ? { signal } : {}) }),
     hostTailcat: async (hostId, signal) => (await args.runtime.callOriginalCore(hostId, 'settings.hosts.inspect', { hostId: 'local' }, { transport: 'unix', ...(signal ? { signal } : {}) })).tailcat,
-    nodeLocatorHosts: () => configOwner.current.hosts.map(host => host.id),
     coreClients: () => args.runtime.rpcClients(),
     callOriginalCore: (hostId, method, params, context) => args.runtime.callOriginalCore(hostId, method, params, context),
     snapshot: params => observeClientRpcSnapshot(config, args.scratchTopics, params),
@@ -2738,7 +2740,7 @@ export async function registerIpc(args: {
       { owner: 'channel-metadata', dispose: () => channelMetadata?.dispose() },
       { owner: 'runtime-attachment', dispose: () => detach() },
       { owner: 'history-observations', dispose: () => historyObservations.dispose() },
-      { owner: 'host-runtime-reads', dispose: () => hostRuntimeReads.dispose() },
+      { owner: 'host-runtime-reads', dispose: () => { hostRuntimeReads.dispose(); nodePublishingReads.dispose() } },
       { owner: 'search-reads', dispose: () => searchReads.dispose() },
       { owner: 'history-reads', dispose: () => historyReads.dispose() },
       { owner: 'conversation-reads', dispose: () => conversationReads.dispose() },

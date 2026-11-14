@@ -194,6 +194,11 @@ const api: AgentMuxPreloadApi = {
       return () => ipcRenderer.removeListener(CONFIG_CHANGED_CHANNEL, receive)
     }
   },
+  nodePublishing: { call: async (method, params, context) => {
+    const token = mintObjectId(), pending = ipcRenderer.invoke('nodePublishing:call', token, method, params)
+    const release = context?.onAbort?.(() => { void ipcRenderer.invoke('nodePublishing:cancel', token).catch(() => {}) })
+    try { return await pending } finally { release?.() }
+  } },
   hosts: {
     prepareTailcatKey: async input => unwrapSessionInputOperationResult(await ipcRenderer.invoke('hosts:prepareTailcatKey', input)),
     home: async (host, context) => {

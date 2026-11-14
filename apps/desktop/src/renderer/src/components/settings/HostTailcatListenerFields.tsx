@@ -11,10 +11,11 @@ import { TailcatKeyPreparation } from './TailcatKeyPreparation'
 type Listener = HostRuntimeObservation['tailcat']
 
 /** Draft editing never starts a listener; the original Host applies saved configuration. */
-export function HostTailcatListenerFields({ host, committed, active, onChange }: {
+export function HostTailcatListenerFields({ host, committed, active, onChange, saveLabel = 'Save hosts' }: {
   host: LocalHostConfig
   committed?: HostConfig | undefined
   active: boolean
+  saveLabel?: string
   onChange: (config: TailcatListenerConfig) => void
 }) {
   const configuration = host.tailcat ?? { enabled: false, keyFile: '', allowedClients: [] }
@@ -65,8 +66,8 @@ export function HostTailcatListenerFields({ host, committed, active, onChange }:
           setClientText({ text, keys }); onChange({ ...configuration, allowedClients: keys })
         }} placeholder="nodekey:…" /></label>
     </div>
-    <p className="settings-group-note">Install the official Tailcat CLI on both Macs. Preparation creates only a missing key and keeps existing keys. Add the other Mac’s connection code to allow it. Save hosts applies the switch; turning it off stops only this listener.</p>
-    <div className="host-tailcat-status"><span role="status">{!saved ? 'Save hosts to apply these changes.' : current?.error ?? (listener ? `Tailcat listener · ${listener.state}` : current?.busy ? 'Reading listener status…' : 'Tailcat listener status unknown')}</span>
+    <p className="settings-group-note">Install the official Tailcat CLI on both Macs. Preparation creates only a missing key and keeps existing keys. Add the other Mac’s connection code to allow it. {saveLabel} applies the switch; turning it off stops only this listener.</p>
+    <div className="host-tailcat-status"><span role="status">{!saved ? `${saveLabel} to apply these changes.` : current?.error ?? (listener ? `Tailcat listener · ${listener.state}` : current?.busy ? 'Reading listener status…' : 'Tailcat listener status unknown')}</span>
       <button type="button" className="small-button" disabled={!saved || current?.busy === true} onClick={() => setRevision(value => value + 1)}>Refresh status</button></div>
     {saved && listener?.detail ? <p className="host-check-detail">{listener.detail}</p> : null}
     {saved && address ? <div className="host-tailcat-address"><label><span>Private Tailcat address</span><TextInput aria-label="Private Tailcat address" type="password" autoComplete="off" value={address} readOnly /></label>

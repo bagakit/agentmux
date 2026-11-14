@@ -17,6 +17,7 @@ import { a2aSettingsModule } from './modules/a2a'
 import { automationSettingsModule } from './modules/automation'
 import { profileSettingsModule } from './modules/profile'
 import { focusSettingsModule } from './modules/focus'
+import { networkNodeSettingsModule } from './modules/network-node'
 import { hostsSettingsModule } from './modules/hosts'
 import { remoteExecutionSettingsModule } from './modules/remote-execution'
 import { mobileSettingsModule } from './modules/mobile'
@@ -58,6 +59,7 @@ export const settingsModules = [
   surveySettingsModule,
   notesSettingsModule,
   toolkitSettingsModule,
+  networkNodeSettingsModule,
   hostsSettingsModule,
   remoteExecutionSettingsModule,
   mobileSettingsModule,

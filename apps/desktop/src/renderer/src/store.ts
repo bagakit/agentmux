@@ -70,6 +70,7 @@ import { goalPmoOperation, type GoalPmoIntent, type GoalPmoReceipt } from '@agen
 import { executeGlobalGoalPatrol } from './lib/goal-global-patrol'
 import { initializeGoalResponsibilityObservation, refreshKnownGoalResponsibilities } from './lib/goal-delegation-work'
 import { goalCreationDraftKey, restoredGoalAgentCreationDrafts, restoredGoalAgentSelectionDrafts, type GoalAgentSelectionDraft, type GoalAgentCreationDraft } from './lib/goal-agent-selection'
+import { nodePublicationDraftRecord, nodePublicationDraftForRuntime, restoredNodePublicationDrafts, type NodePublicationDraft } from './lib/node-publication-draft'
 import type { DemandContentReference } from '@agentmux/demand'
 import { confirmedGoalContentReference, goalContentSource } from '../../shared/goal-content-references'
 import { describeError } from '@agentmux/client-ui/error-presentation'
@@ -1123,6 +1124,8 @@ export type AppState = GitReadingActions & {
   moteChatIntents: Record<string, MoteChatIntent>
   agentComposerDrafts: Record<string, string>
   agentLearningReviewDrafts: Record<string, AgentLearningReviewDraft>
+  /** Opaque unrelated/invalid records stay in the original user document until explicitly resolved. */
+  nodePublicationDrafts: unknown
   capsuleQuestionEditors: Record<string, CapsuleQuestionEditor>
   browserOpinionDrafts: Record<string, BrowserOpinionDraft>
   agentComposerHistory: Record<string, readonly string[]>
@@ -3995,6 +3998,7 @@ type PersistedAppState = {
   moteChatIntents?: Record<string, MoteChatIntent>
   agentComposerDrafts?: Record<string, string>
   agentLearningReviewDrafts?: Record<string, AgentLearningReviewDraft>
+  nodePublicationDrafts?: unknown
   capsuleQuestionEditors?: Record<string, CapsuleQuestionEditor>
   browserOpinionDrafts?: Record<string, BrowserOpinionDraft>
   agentComposerHistory?: Record<string, readonly string[]>
@@ -4292,6 +4296,7 @@ function selectPersistedInputs(state: AppState, coreSpatialReady: boolean) {
     moteChatIntents: state.moteChatIntents,
     agentComposerDrafts: state.agentComposerDrafts,
     agentLearningReviewDrafts: state.agentLearningReviewDrafts,
+    nodePublicationDrafts: state.nodePublicationDrafts,
     capsuleQuestionEditors: state.capsuleQuestionEditors,
     browserOpinionDrafts: state.browserOpinionDrafts,
     agentComposerHistory: state.agentComposerHistory,
@@ -5015,6 +5020,27 @@ export async function retainGoalAgentCreationDraft(draft: GoalAgentCreationDraft
   useAppStore.setState(state => ({ goalAgentCreationDrafts: { ...state.goalAgentCreationDrafts, [key]: draft } }))
   return await saveWorkbenchSelection(false)
 }
+
+/** Only authored publication input is retained here; ordinary Node observations never write it. */
+export async function updateNodePublicationDraft(runtimeId: string,
+  update: (current: NodePublicationDraft | undefined) => NodePublicationDraft | undefined, flush = false): Promise<void> {
+  const raw = useAppStore.getState().nodePublicationDrafts
+  const entries = nodePublicationDraftRecord(raw), current = nodePublicationDraftForRuntime(raw, runtimeId), next = update(current)
+  if (next && next.baseline.node.runtimeId !== runtimeId) throw new Error('The original Node publication edit belongs to another Runtime. Its input is kept.')
+  if (!configValuesEqual(entries[runtimeId], next)) {
+    const values = { ...entries }
+    if (next) values[runtimeId] = next
+    else delete values[runtimeId]
+    useAppStore.setState({ nodePublicationDrafts: values })
+  }
+  if (!flush) return
+  try {
+    if (!workbenchWriteFence.isOpen()) throw new Error('The original Desktop user document is still being restored. The Node edit is kept in memory.')
+    // This exact input admission uses the existing native document writer/ACK.
+    // Unrelated bookmark, Launcher or Core-spatial checkpoints are not prerequisites.
+    await persistentWorkbenchStorage.checkpoint(WORKBENCH_USER_STATE_KEY, { state: partializeAppState(useAppStore.getState()), version: 1 })
+  } catch (cause) { useAppStore.getState().reportWorkbenchSaveFailure(cause, 'local-storage'); throw cause }
+}
 export async function clearGoalAgentCreationDraft(goalId: string, role: 'assignees' | 'related', operationId: string): Promise<void> {
   const key = goalCreationDraftKey(goalId, role)
   useAppStore.setState(state => {
@@ -5551,6 +5577,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   browserAnnotationsByBrowserId: {},
   agentComposerDrafts: {},
   agentLearningReviewDrafts: {},
+  nodePublicationDrafts: {},
   capsuleQuestionEditors: {},
   browserOpinionDrafts: {},
   agentComposerHistory: {},
@@ -7018,6 +7045,11 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       const before = captureDesktopInput(get().tabs)
       const beforeSelection = desktopSelection(get(), catalog)
       const settingsBefore = request.target.kind === 'settings' ? readDesktopOverlays() : undefined
+      const expectedAgentMatches = (regionId: string | null): boolean => {
+        const original = spatialCatalog(get(), topics).regions.find(region => region.regionId === regionId)
+        return original?.kind === 'agent' && original.agentSessionId === request.expectedAgentSessionId &&
+          (request.expectedAgentHostId === undefined || original.execution?.hostId === request.expectedAgentHostId)
+      }
       let navigationState: AgentMuxDesktopFocusResult['navigation']['state'] = 'applied'
       let moteEntryToken: string | undefined
       try {
@@ -7044,11 +7076,6 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
             workbenchSpaceSelection: resolved, regionCaretFocus: null, workbenchNavigationInputPolicy: request.inputPolicy,
             moteDiscussionEntry: { workspaceId: resolved.workspaceId, topicId: resolved.topicId!, token: moteEntryToken,
               ...(request.target.eventId === undefined ? {} : { eventId: request.target.eventId }) } })
-      const expectedAgentMatches = (regionId: string | null): boolean => {
-        const original = spatialCatalog(get(), topics).regions.find(region => region.regionId === regionId)
-        return original?.kind === 'agent' && original.agentSessionId === request.expectedAgentSessionId &&
-          (request.expectedAgentHostId === undefined || original.execution?.hostId === request.expectedAgentHostId)
-      }
         } else if (request.target.kind === 'focus-agent') {
           get().revealFocusAgent(request.target)
         } else if (request.target.kind === 'surface') {
@@ -13464,6 +13491,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     const local = (persisted ?? {}) as Partial<PersistedAppState>
     if (!Object.hasOwn(current.config?.appearance ?? {}, 'spaceObjectIcons') && Object.hasOwn(local, 'spaceObjectIcons')) retainedSpaceIconHandoff = local.spaceObjectIcons
     const state = { ...current, ...persisted as Partial<AppState> }
+    state.nodePublicationDrafts = restoredNodePublicationDrafts(state.nodePublicationDrafts)
     if (state.agentSteerQueues) {
       let changed = false
       const queues = Object.entries(state.agentSteerQueues).map(([sessionId, entries]) => {

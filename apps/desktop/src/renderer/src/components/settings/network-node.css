@@ -1,0 +1,28 @@
+.network-node-settings { max-width: 1000px; }
+.network-node-intro { display: grid; justify-items: start; gap: 8px; }
+.network-node-intro h3,.network-node-section h3 { margin: 0; font-size: 15px; font-weight: 600; }
+.network-node-intro p,.network-node-section header p { margin: 0; color: var(--text-2); font-size: 12px; line-height: 1.6; }
+.network-node-section { display: grid; gap: 18px; padding: 22px 0; border-top: 1px solid var(--line-soft); min-width: 0; }
+.network-node-section > header { display: flex; justify-content: space-between; align-items: start; gap: 18px; }
+.network-node-section > header > div { display: grid; gap: 6px; }
+.network-node-section header button { flex-shrink: 0; }
+.network-node-field { display: grid; gap: 6px; font-size: 12px; min-width: 0; }
+.network-node-field > span { font-weight: 550; }
+.network-node-field small,.network-node-switch small { color: var(--text-2); font-size: 11px; line-height: 1.6; }
+.network-node-field textarea { min-width: 0; resize: vertical; padding: 9px 10px; border: 1px solid var(--line-soft); border-radius: 7px; background: var(--surface-1); color: var(--text); font: 12px/1.6 var(--font-mono); }
+.network-node-paths { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+.network-node-switch { display: flex; align-items: start; gap: 10px; font-size: 12px; }
+.network-node-switch input { margin-top: 3px; accent-color: var(--focus-line); }
+.network-node-switch > span { display: grid; gap: 5px; }
+.network-node-save { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding-top: 16px; border-top: 1px solid var(--line-soft); }
+.network-node-save > span { font-size: 11px; color: var(--text-2); }
+.network-node-feedback { margin: 0; padding: 10px 12px; border: 1px solid var(--line-soft); border-radius: 8px; color: var(--text-2); background: var(--surface-1); overflow-wrap: anywhere; font-size: 12px; line-height: 1.6; }
+.network-node-identities { font-size: 11px; color: var(--text-2); }
+.network-node-identities summary,.network-node-section > summary { cursor: pointer; }
+.network-node-identities dl { display: grid; grid-template-columns: 110px minmax(0,1fr); gap: 8px; }
+.network-node-identities dd { margin: 0; overflow-wrap: anywhere; }
+.network-node-path-review { white-space: pre-wrap; font-family: var(--font-mono); }
+.network-node-section > summary { font-size: 13px; font-weight: 550; }
+.network-node-section > summary span { margin-left: 8px; color: var(--text-2); font-size: 11px; font-weight: 400; }
+.network-node-section > .settings-pane-actions { position: static; margin: 0; }
+@media(max-width:740px) { .network-node-paths { grid-template-columns: minmax(0,1fr); } }

@@ -1,0 +1,5 @@
+.node-share-address { display: flex; align-items: center; justify-content: space-between; gap: 14px; min-width: 0; font-size: 11px; }
+.node-share-address > div { display: grid; gap: 5px; min-width: 0; }
+.node-share-address > div > span { color: var(--text-2); }
+.node-share-address code { color: var(--text); overflow-wrap: anywhere; font: 11px/1.6 var(--font-mono); user-select: text; }
+.node-share-address > button { flex-shrink: 0; }

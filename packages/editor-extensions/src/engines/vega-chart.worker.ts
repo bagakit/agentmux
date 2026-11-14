@@ -17,6 +17,7 @@ let responsiveWidth = false, responsiveHeight = false
 // Vega-Lite's responsive specs use this official expression function. The real
 // ResizeObserver supplies the measured preview surface across the Worker boundary.
 Vega.expressionFunction('containerSize', () => [containerWidth, containerHeight])
+let inlineDataNames: string[] = []
 const resources = new Map<number, { resolve(value: any): void; reject(error: Error): void }>()
 const canvas = new OffscreenCanvas(1, 1), context = canvas.getContext('2d')!
 ;(context as any).pixelRatio = 1
@@ -113,7 +114,7 @@ async function handle(request: Exclude<ChartRequest, { action: 'resource' }>) {
   if (disposed) return
   if (request.action === 'start') {
     const compiled = compileVegaRuntime(request.content, request.mode), runtime = compiled.runtime
-    responsiveWidth = compiled.responsiveWidth; responsiveHeight = compiled.responsiveHeight
+    inlineDataNames = compiled.inlineDataNames; responsiveWidth = compiled.responsiveWidth; responsiveHeight = compiled.responsiveHeight
     bindings = (runtime.bindings ?? []).map((binding: any) => {
       if (binding.element || !['range', 'select', 'radio', 'checkbox', 'number', 'text', 'color', 'date'].includes(binding.input)) throw new Error('This chart binding is unavailable in an isolated preview. Source was kept.')
       return { ...binding, value: null }
@@ -142,6 +143,10 @@ async function handle(request: Exclude<ChartRequest, { action: 'resource' }>) {
     view.signal(request.name, request.value)
     await view.runAsync()
     await render()
+  } else if (request.action === 'data' && view) {
+    if (!inlineDataNames.includes(request.name) || !Array.isArray(request.values)) throw new Error('Unknown inline chart dataset.')
+    view.change(request.name, Vega.changeset().remove(() => true).insert(request.values))
+    await view.runAsync(); await render()
   } else if (request.action === 'resize' && view) {
     containerWidth = Math.max(1, request.width); containerHeight = Math.max(1, request.height ?? containerHeight)
     if (responsiveWidth) view.width(containerWidth)

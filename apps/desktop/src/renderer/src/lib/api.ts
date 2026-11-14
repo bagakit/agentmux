@@ -1,3 +1,4 @@
+import { createRendererNodePublishing } from './node-publishing-client'
 import { createRendererSessionRecovery } from './session-recovery-api'
 import { SCREENSHOT_SHORTCUT, SCREENSHOT_SHORTCUT_ALTERNATE, screenshotShortcutAccelerator } from '../../../shared/screenshot-shortcut'
 import { createConversationReadApi } from './conversation-read-api'
@@ -508,6 +509,7 @@ const mockApi: AgentMuxDesktopApi = {
       return () => configListeners.delete(listener)
     }
   },
+  nodePublishing: { call: async () => { throw new Error('Node publishing requires the original authenticated Desktop Host. Saved publication and existing work are retained.') } },
   hosts: { prepareTailcatKey: async () => { throw new Error('Tailcat key preparation requires the original Desktop Host and an authenticated local user. Your connection draft is retained.') }, home: async () => { throw new Error('Device home requires its original authenticated Host. This preview does not invent home paths.') }, network: async () => { throw new Error('Network observation requires the original desktop Host. No network facts are simulated in this preview.') }, inspect: async () => { throw new Error('Runtime observation requires the original desktop Host. This preview does not simulate live Runtime facts.') }, check: async (host) => ({ input: structuredClone(host), outcome: host.kind === 'ssh' ? 'unsupported' : 'ready',
     detail: host.kind === 'ssh' ? 'Remote Runs are not yet supported.' : 'CtxMux 0.1.0 · protocol 17' }),
     creationTrust: async () => { throw new Error('Source trust requires the original desktop and target Host. This preview cannot read authorization.') },
@@ -1723,6 +1725,7 @@ function requireDesktopApi(): AgentMuxDesktopApi {
     toolkit: createToolkitConfigurationApi(preload.toolkit),
     applications: { call: async (method, params) => unwrapSessionInputOperationResult(await preload.applications.call(method, params)) },
     conversation: createConversationReadApi(preload.conversation),
+    nodePublishing: createRendererNodePublishing(preload.nodePublishing),
     hosts: { ...preload.hosts, home: createRendererHostObservation(preload.hosts.home), inspect: createRendererHostObservation(preload.hosts.inspect), network: createRendererHostObservation(preload.hosts.network) },
     landmarks: createConversationLandmarksApi({
       list: (...args) => preload.landmarks.list(...args).then(unwrapSessionObservationResult),

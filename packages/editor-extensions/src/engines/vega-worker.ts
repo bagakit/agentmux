@@ -13,9 +13,9 @@ export function createVegaPreview(content: string, mode: VegaMode, loader: Loade
     if (busy) {
       // Replace only consecutive continuous input. Discrete events are ordering barriers;
       // wheel deltas must all be retained rather than replaced by their last sample.
-      const continuous = request.action === 'resize' || request.action === 'signal' || request.action === 'event' && /move$|resize$/.test(request.event.type)
+      const continuous = request.action === 'resize' || request.action === 'signal' || request.action === 'data' || request.action === 'event' && /move$|resize$/.test(request.event.type)
       const previous = queue.at(-1)
-      const replace = continuous && previous?.action === request.action && (request.action !== 'signal' || previous.action === 'signal' && previous.name === request.name) && (request.action !== 'event' || previous.action === 'event' && previous.event.type === request.event.type && previous.event.source === request.event.source)
+      const replace = continuous && previous?.action === request.action && (request.action !== 'signal' && request.action !== 'data' || (previous.action === 'signal' || previous.action === 'data') && previous.name === request.name) && (request.action !== 'event' || previous.action === 'event' && previous.event.type === request.event.type && previous.event.source === request.event.source)
       if (replace) queue[queue.length - 1] = request
       else queue.push(request)
     } else { busy = true; send({ ...request, serial: ++serial }) }
@@ -52,5 +52,5 @@ export function createVegaPreview(content: string, mode: VegaMode, loader: Loade
   signal.addEventListener('abort', dispose, { once: true })
   if (signal.aborted) dispose()
   else enqueue({ action: 'start', content, mode })
-  return { dispose, event: (event: ChartEvent) => enqueue({ action: 'event', event }), setSignal: (name: string, value: unknown) => enqueue({ action: 'signal', name, value }), resize: (width: number, height?: number) => enqueue({ action: 'resize', width, ...(height === undefined ? {} : { height }) }) }
+  return { dispose, event: (event: ChartEvent) => enqueue({ action: 'event', event }), setSignal: (name: string, value: unknown) => enqueue({ action: 'signal', name, value }), replaceData: (name: string, values: Record<string, unknown>[]) => enqueue({ action: 'data', name, values }), resize: (width: number, height?: number) => enqueue({ action: 'resize', width, ...(height === undefined ? {} : { height }) }) }
 }
