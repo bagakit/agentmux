@@ -322,7 +322,7 @@ it('a dirty file split keeps its discard confirmation; the Agent split beside it
     'lonely-region', 'right', file)
   useAppStore.setState({ tabs: { [both.id]: both, [elsewhere.id]: elsewhere } })
   await mount(); await closeSplit('file-region')
-  expect(dialog()?.textContent).toContain('Discard unsaved changes?')
+  expect(dialog()?.textContent).toContain('Discard editor contents?')
   await click('Cancel')
   await closeSplit('lonely-region')
   expect(dialog()?.textContent).toContain('Stop Agent Session?')
@@ -341,7 +341,7 @@ it.each(['mouse', 'keyboard'] as const)('tab dirty file close uses the shared co
     const close = element.querySelector<HTMLButtonElement>('[data-workbench-tab-id="split"] .workbench-tab__close')!
     await act(async () => { close.click(); await closeOwner.settle() })
   }
-  expect(dialog()?.textContent).toContain('Discard unsaved changes?')
+  expect(dialog()?.textContent).toContain('Discard editor contents?')
   await click('Cancel')
   expect(useAppStore.getState().tabs[original.id]).toBe(original)
   expect(useAppStore.getState().dirtyDocuments[documentKey('workspace', 'changed.txt')]).toBe(true)
@@ -354,7 +354,7 @@ it('tab discard confirms only the requested file Tab and keeps its neighbor', as
     dirtyDocuments: { [documentKey('workspace', 'changed.txt')]: true } })
   await mount()
   await act(async () => { element.querySelector<HTMLButtonElement>('[data-workbench-tab-id="split"] .workbench-tab__close')!.click(); await closeOwner.settle() })
-  expect(dialog()?.textContent).toContain('Discard unsaved changes?')
+  expect(dialog()?.textContent).toContain('Discard editor contents?')
   await click('Discard & Close')
   expect(useAppStore.getState().tabs[original.id]).toBeUndefined()
   expect(useAppStore.getState().tabs[elsewhere.id]).toBe(elsewhere)

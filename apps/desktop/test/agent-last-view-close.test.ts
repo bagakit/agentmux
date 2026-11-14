@@ -203,7 +203,7 @@ describe('closing an Agent’s last View, from every entry', () => {
     const copy = lastViewCloseCopy(confirmation, 'split')
     expect(copy.title).toBe('Stop Agent Session?')
     expect(copy.description).toContain('Reviewer')
-    expect(copy.description).toContain('Unsaved editor changes in this split will be discarded.')
+    expect(copy.description).toContain('Unsaved or retained editor contents in this split will be discarded.')
     expect(copy).toMatchObject({ confirmLabel: 'Stop & Close', secondaryLabel: 'Keep Session & Close' })
   })
 })

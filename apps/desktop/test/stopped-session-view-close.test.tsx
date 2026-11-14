@@ -169,7 +169,7 @@ it('dirty editor changes still require the existing discard confirmation even al
   const mixed = addWorkbenchRegion(view, 'stopped-region', 'right', file)
   useAppStore.setState({ tabs: { ...useAppStore.getState().tabs, [view.id]: mixed }, dirtyDocuments: { [documentKey('workspace', 'changed.txt')]: true } })
   await mount(); await closeX()
-  expect(document.querySelector('[role="dialog"]')?.textContent).toContain('Discard unsaved changes?')
+  expect(document.querySelector('[role="dialog"]')?.textContent).toContain('Discard editor contents?')
   expect(useAppStore.getState().tabs[view.id]).toBe(mixed)
   expect(api.sessions.stop).not.toHaveBeenCalled()
   await click('Cancel'); expect(useAppStore.getState().tabs[view.id]).toBe(mixed)
