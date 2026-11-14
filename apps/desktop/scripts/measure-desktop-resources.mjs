@@ -242,7 +242,7 @@ async function runStage(stage, identity, run) {
   const { root, runtimeRoot, userData, reportPath, workspaces } = stage
   const fixturePath = stage.representative ? join(root, 'workface.json') : undefined
   const { bootstrap, environment, configurationPath, hostPaths } = await prepareStage(stage)
-  await stage.initializeResourceWorkbench(userData)
+  await stage.initializeResourceWorkbench(userData, stage.representative ? undefined : workspaces[0].id)
   const storePath = environment.AGENTMUX_AGENT_SESSION_STORE
   const hostEntry = join(desktopRoot, 'out', 'main', 'agentmux-host.js')
   const host = spawn(electron, [hostEntry, '--store', storePath], {
