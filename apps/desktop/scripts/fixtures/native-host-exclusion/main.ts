@@ -129,6 +129,10 @@ async function run() {
     && window.y < content.y + content.height && window.y + window.height > content.y)
   receipt.frontmost = { finderWindowCount: finderWindows.length, obscuringFinderWindowCount: obscuringFinderWindows.length }
   check('no Finder window obscures the visible host', host.isVisible() && obscuringFinderWindows.length === 0)
+  // A third-party window may still cover the host after Finder is frontmost. Bring the actual target forward before the pixel proof.
+  app.focus({ steal: true }); host.focus(); host.moveTop()
+  await host.webContents.executeJavaScript('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))'); await wait(150)
+  check('the host is frontmost immediately before excluded capture', app.isActive() && host.isFocused())
   const excluded = await native.captureDisplays({ includeHostWindows: false })
   const excludedFrame = frameFor(excluded, display.id), excludedRegion = markerRegion(excludedFrame, content)
   const excludedPixels = colorPixels(excludedFrame.png, excludedRegion)
