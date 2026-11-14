@@ -97,6 +97,8 @@ PMO 请求必须使用所关联的真实 Project 与具体 Workspace 的身份�
 
 默认 Goals 扫描和详情的工作量随当前可见目标、实际关联 Session 和相关新事实增长；不为每张目标挂载完整终端/拓扑，不因无关 Run 输出重算全部目标或重挂载原工作面。相关消费者成本与连续阅读的 P0 边界继续归[《Terminal 连续向上阅读历史》](terminal-reading.md#terminal-连续向上阅读历史)；Goals 的验收只需证明自身新增表面不放大这些成本。
 
+跨 Source 的 Agent 关系沿原 Goal 关系字段保留准确 Source Space／Region 与 creation 或 association 准入引用，以及原执行 Runtime／Session；旧裸 Session 值不推断升级。新增关系的当次访问只用于核对原 Source 的业务成员事实，不作为保存的权限。association 关系保存不要求另一个 Coordinator 的私有或活跃资格，creation 也不依赖 Native 健康；未修改的已存关系与普通字段编辑不增加联网门。实际 Start、输入或改名分别沿原 owner 的当前目标与权限核验，关系保存不授予这些能力。
+
 桌面退出不改变 Goal 的领域 owner：原 Host 组合同一 Demand Store、Core 输入与空间能力，持有后台讨论、执行、持续跟进和安排的业务责任；客户端只保草稿、导航和呈现。Host 的局部观察或某次讨论缺少前提时只说明该操作未知，不能关闭健康 Agent、阻断无关 Goal 编辑或把调度责任转回某个窗口。
 
 新 Goal 的专属讨论先在同一领域记录保存唯一创建操作引用，首次实际讨论冻结准确主 Mote、已确认 Executor、初始请求与平台 Goal 上下文。Tab／Region／Session 关联仍只有 Core 空间 owner 一份事实，Goal 不另存展示映射或创建日志；跨进程恢复沿原操作继续，Goal 后续修改不改写原首句。旧记录缺少创建来源时不补造创建或输入事实，原绑定的无损交接沿[专属 PMO Tab](#demand-的专属-pmo-tab)；原来源未知不能新建替代讨论。已知 bot 的选择继续遵循上文的准确来源与未确认服务窗。

@@ -38,6 +38,37 @@ read of the saved plan and its owner-derived states; it does not open the GUI.
 
 [activity](../shared/goal/activity.md "amux:include")
 
+## Source-qualified relations
+
+The original related, assignee and Supervisor fields accept their existing Session
+strings or a complete business reference:
+
+```json
+{"kind":"space-member","source":{"runtimeId":"B","spaceId":"SPACE","regionId":"REGION","admission":{"kind":"creation","operationId":"ORIGINAL_C"}},"execution":{"runtimeId":"D","agentSessionId":"SID"}}
+```
+
+For an independently coordinated Agent, retain Source association `kind:"association"`
+and its original L operation instead. Obtain these fields from the Source's confirmed
+`space inspect` or snapshot member and original admission, never a selected Executor,
+Host label, alias or a same-named local Session. The execution Runtime remains distinct
+from the Source Runtime. Do not infer a Run or permission from this reference.
+
+`goal create` and `goal update` accept `--related JSON`; relation-writing leaves accept
+`--assignees JSON` and `--supervisor-ref JSON`. For each newly added qualified relation,
+pass `--relation-access JSON`, an array of `{reference:REFERENCE,access:{source:{hostId:HOST}}}`.
+The configured Source carrier may include `via:{routeId,adoptedRoute}` from its saved
+prefix. Access belongs to this invocation and is never saved in the Goal. It neither
+grants receiver permission nor changes the relation's identity. Use the exact full
+reference as the access entry key; do not choose the first matching bare Session ID.
+
+Save verifies the original Source C/member or L/reference/resource business tuple.
+It does not require the execution Agent to be live or an association's independent
+Coordinator to be reachable. Edits that retain existing references do not requalify
+them remotely. Read the same Goal after an unknown save and retain its original
+request; never automatically repeat the write. An assignment does not submit work,
+enable automatic supervision or authorize input. Source-qualified Start requires its
+own current execution access; a qualified reference is never converted to a legacy SID.
+
 ## File evidence
 
 Grounding checks accept original reference strings and exact file evidence. A string

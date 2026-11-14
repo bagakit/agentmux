@@ -66,6 +66,35 @@ A locatable evidence reference does not claim that the owner verified its conten
 Browser clients consume the pure types, parsers and readiness helpers from
 `@agentmux/demand/goals`; this subpath has no filesystem or UI dependency.
 
+The existing `sessionIds`, `assigneeSessionIds` and `supervisorSessionId` relation
+fields also accept a Source-qualified reference from `@agentmux/demand/relations`:
+
+```ts
+const member = {
+  kind: 'space-member',
+  source: {
+    runtimeId: 'source-runtime', spaceId: 'space-id', regionId: 'region-id',
+    admission: { kind: 'creation', operationId: 'original-creation-id' },
+  },
+  execution: { runtimeId: 'execution-runtime', agentSessionId: 'session-id' },
+} as const
+await store.update(goalId, { assigneeSessionIds: [member] })
+```
+
+An association uses `admission.kind: 'association'` and its original Source
+association operation. Existing string references keep their exact values. The
+parser and `demandAgentReferenceKey` distinguish the complete Source occurrence,
+admission and execution Runtime, including equal Session IDs on different Runtimes.
+The same original role/subset and revision checks apply to both forms. A relation
+does not contain a Host route, credentials, Run, input authority or observed health.
+The filesystem store preserves these business facts without contacting an Agent.
+
+`agentmux-demand` accepts repeatable `--agent-ref JSON`, `--assignees JSON` and
+`--supervisor-ref JSON` on its relation-writing commands. Core's separate `amux goal`
+public owner accepts `--related JSON`, `--assignees JSON` and `--supervisor-ref JSON`;
+new qualified references there require current Source access for that operation.
+Ordinary edits of unchanged saved references require no remote qualification.
+
 ## Goal execution records
 
 The same store also keeps the records behind Supervisor execution, Goal plans
