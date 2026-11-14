@@ -15,6 +15,17 @@ space inspect --operation-id reads the original creation even after its Agent is
 reports its original Session/Run and retirement fact, not a missing creation or a live Agent.
 Inspection never creates or reopens. A newly authorized takeover after retirement needs a new
 operation ID; keep the previous receipt. Unknown results always keep their original operation.
+For a split Source creation, the same exact-operation read includes
+`report.execution.diagnostics`: a safe projection of the Source's own admission and
+original journal. An authenticated managed Agent can read this metadata without full
+binding permission. `state: matched` confirms identity, not helper health or Agent readiness.
+Helper Start receipts, Native instance and byte cursors stay separate from current frame
+failure provenance (role, stage, byte range, length and SHA-256). Missing failure is unknown;
+a restarted reader cannot manufacture a historical cause. Frozen prompt, notes, environment,
+grant and raw Native bytes are excluded. Full binding/control and raw terminal reads retain
+their original user/device boundary. Use `--source-host HOST` to select the already authorized
+original Source; do not replace it with the execution Host or an unpinned same-SID lookup.
+
 A Project is a repository or directory resource, not a Space. A Zone may hold a Git worktree,
 a plain directory or a Topic/Mote workface. One Session may have several display positions;
 use IDs verbatim and never infer identity from a name, cwd or the first display position.
