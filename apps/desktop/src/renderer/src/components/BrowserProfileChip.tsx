@@ -15,6 +15,7 @@ import { ServiceWindowNotice } from './ServiceWindowNotice'
 
 const ThemeStatusSelectedIcon = semanticIconComponent('status.selected')
 const ThemeStatusLoadingIcon = semanticIconComponent('status.loading')
+const ThemeStatusUnknownIcon = semanticIconComponent('status.unknown')
 const ThemeNavigationDisclosureIcon = semanticIconComponent('navigation.disclosure')
 
 /**
@@ -56,12 +57,12 @@ export function BrowserProfileChip({ browserId, regionId, profileId, control, no
     if (profileId === null) return null
     // Directory visibility only controls this identity picker, never a retained
     // operation's service notice or its metadata-only recovery action.
-    if (!list.profiles) return list.error ? <span className="browser-profile-chip browser-profile-chip--unknown" role="status"
-      title={`Profile unknown: ${list.error}`} aria-label="Profile unknown">Profile unknown</span> : null
-    if (profiles.length < 2) return null
+    if (list.profiles ? profiles.length < 2 : !list.error) return null
     const shown = profiles.find(profile => profile.id === (pending ?? profileId))
     if (!shown) return <span className="browser-profile-chip browser-profile-chip--unknown" role="status" aria-label="Profile unknown"
-      title="This Browser's Profile is not in the current list.">Profile unknown</span>
+      title={list.error ? `Profile unknown: ${list.error}` : "This Browser's Profile is not in the current list."}>
+      <ThemeStatusUnknownIcon size={14} aria-hidden="true" /><span>Profile unknown</span>
+    </span>
     return (
       <Menu.Root>
         <Menu.Trigger asChild>

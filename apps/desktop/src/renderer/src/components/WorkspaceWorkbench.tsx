@@ -506,7 +506,7 @@ type SurfaceContentProps = {
   browserFrame?: ((content: ReactNode, target: WorkbenchViewTarget) => ReactNode) | undefined
   onBrowserInputSelected?: ((target: WorkbenchViewTarget) => void) | undefined
   onBrowserRegionSplit?: ((direction: SplitDirection) => void) | undefined
-  onBrowserRegionClose?: (() => void) | undefined
+  onBrowserRegionClose?: ((target?: WorkbenchViewTarget) => void) | undefined
 }
 
 function SurfaceContent({ surface, ...props }: SurfaceContentProps) {
@@ -630,6 +630,7 @@ const SurfaceContentBody = memo(function SurfaceContentBody({
         onRegionClose={onBrowserRegionClose}
         presentations={presentedTargets.flatMap(target => target.reference?.tabId === tabId && (!target.projection || target.projection.entity.kind !== 'region' || target.projection.entity.regionId === surface.regionId)
           ? [{ occurrence: { presentationId: workbenchBrowserStageHostId(target, surface.regionId), location: { ...target.reference, regionId: surface.regionId },
+              ...(target.surface === 'mote' ? { layoutHost: 'sole' as const } : {}),
               returnContext: workbenchReturnContext(independentDocument && Object.hasOwn(browserPresentation, 'returnContext')
                 ? { ...target, returnContext: browserPresentation.returnContext } : target, { ...target.reference, regionId: surface.regionId }) ?? undefined },
             stageHostId: workbenchBrowserStageHostId(target, surface.regionId), visible: target.visible !== false,
@@ -817,18 +818,21 @@ function WorkbenchRegionContent({
   const canClose = regionCount > 1
 
   // Every close surface reviews the same Main-owned frozen plan as the CLI.
-  async function requestRegionClose(): Promise<void> {
-    const pinned = browserPresentation.surface === 'mote' ? actualDefaults.conversation : browserPresentation.surface ? undefined : mote?.defaultConversation
-    if (pinned && pinned.tabId === tab.id && pinned.regionId === node.regionId && groupId &&
-      motePinnedTab(pinned, browserPresentation.reference?.displayWorkspaceId ?? tab.workspaceId, groupId, tab.id)) {
+  async function requestRegionClose(target?: WorkbenchViewTarget): Promise<void> {
+    const presentation = target ?? browserPresentation
+    const reference = presentation.reference
+    const displayGroupId = reference?.groupId ?? groupId
+    const pinned = presentation.surface === 'mote' ? actualDefaults.conversation : presentation.surface ? undefined : mote?.defaultConversation
+    if (pinned && pinned.tabId === tab.id && pinned.regionId === node.regionId && displayGroupId &&
+      motePinnedTab(pinned, reference?.displayWorkspaceId ?? tab.workspaceId, displayGroupId, tab.id)) {
       reportError(new Error('The main Agent conversation stays open here. Unset it in this Mote’s Profile → Quick mode before closing its Region.'), { kind: 'indeterminate' }); return
     }
     if (closingRegion) return
     setClosingRegion(true)
     try {
-      const state = useAppStore.getState(), reference = browserPresentation.reference
+      const state = useAppStore.getState()
       const occurrences = Object.entries(state.layouts).flatMap(([displayWorkspaceId, layout]) => layout.groups.flatMap(group => group.tabOrder.includes(tab.id) ? [{ displayWorkspaceId, groupId: group.id }] : []))
-      const matches = occurrences.filter(o => (!groupId || o.groupId === groupId) && (!reference || o.displayWorkspaceId === reference.displayWorkspaceId && o.groupId === reference.groupId))
+      const matches = occurrences.filter(o => (!displayGroupId || o.groupId === displayGroupId) && (!reference || o.displayWorkspaceId === reference.displayWorkspaceId))
       if (matches.length !== 1) throw new Error('Choose this Region’s exact original display occurrence before closing it. Its content and resources are retained.')
       if (requiresSourceWorkbenchClose(state, tab.id, node.regionId)) {
         await sourceClose.request({ ...matches[0]!, tabId: tab.id, regionId: node.regionId }, 'region', 'Original workface')

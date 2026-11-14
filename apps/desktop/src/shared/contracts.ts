@@ -1563,10 +1563,10 @@ export type BrowserPresentationOccurrence = {
     'displayWorkspaceId' | 'groupId' | 'tabId' | 'regionId'> | { kind: 'inline' }
   /**
    * This presentation's page area is the page's own layout: while the page is not shown natively, its visible
-   * geometry sets the original page's size, so the page relays out to fill it. Only the presentation that owns
-   * its page declares it (a conversation card); every other presentation only watches and never changes the size.
+   * geometry sets the original page's size. A page-owning card declares true. A workbench occurrence can
+   * follow its own Responsive geometry only while it is the sole visible presentation.
    */
-  layoutHost?: true
+  layoutHost?: true | 'sole'
 }
 export type BrowserPresentationGeometry = { visible: false } | { visible: true; bounds: BrowserBounds; inputVisible?: boolean }
 export type BrowserPresentationViewportPoint = { x: number; y: number }

@@ -241,7 +241,7 @@ import type { AgentCapabilities, AgentCatalogEntry, AgentMuxInteractionResponse 
 import { EMPTY_LAUNCHER_OPTIONS, updateLauncherOption, type LauncherOptionDrafts, type LauncherProviderOptions } from './lib/launcher-option-draft'
 import { expandSemanticReferences } from '@agentmux/client-ui/composer-semantic-reference'
 import { primaryMoteExecutorChoice } from './lib/primary-mote-executor'
-import { requestPmoTeamsTopicFloatingOpen, readPmoTeamsTopicFloatingState, subscribePmoTeamsTopicFloatingState, initializeMoteFloatingPreferences, moteFloatingUnreadEditsPending } from './lib/pmo-teams-topic-floating'
+import { requestPmoTeamsTopicFloatingOpen, readPmoTeamsTopicFloatingState, subscribePmoTeamsTopicFloatingState, initializeMoteFloatingPreferences, moteFloatingUnreadEditsPending, reconcileMoteRegionClose } from './lib/pmo-teams-topic-floating'
 import { validateAgentPromptCondition, type AgentPromptCondition } from '@agentmux/core/prompt-condition'
 import type {
   AgentLaunchInput,
@@ -9073,6 +9073,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     })
     if (removedTab && !get().tabs[removedTab.id]) publishWorkbenchTabRemoved(removedTab,
       { displayWorkspaceId: target.displayWorkspaceId, groupId: target.groupId, tabOrder: removedTabOrder }, error => get().reportError(error))
+    if (target.kind === 'region' && projection.applied) reconcileMoteRegionClose(target)
     pruneEditorRegionState(get().tabs)
     await disposeClosedFileOwners(previousTabs, get().tabs).catch(error => get().reportError(error))
     if (collectionChanged) void saveSurveyPreferences()
@@ -12660,6 +12661,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       }
     })
     if (surveyChanged) void saveSurveyPreferences()
+    const mote = retiredRegions.length ? readPmoTeamsTopicFloatingState()?.reference : null
+    if (mote && retiredRegions.some(({ tabId, regionId }) => tabId === mote.tabId && regionId === mote.regionId)) reconcileMoteRegionClose(mote)
     if (retiredRegions.length) void import('./lib/workbench-windows')
       .then(({ returnClosedWorkbenchWindows }) => returnClosedWorkbenchWindows(retiredRegions)).catch(error => get().reportError(error))
   },

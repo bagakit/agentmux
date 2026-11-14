@@ -292,7 +292,7 @@ function BrowserPaneOwner(props: BrowserPaneProps) {
     value: pageAddress === 'about:blank' ? '' : pageAddress, edited: false }
   else if (!addressDraft.current.edited) addressDraft.current.value = pageAddress === 'about:blank' ? '' : pageAddress
   return <BrowserWorkfaceBoundary key={props.tab.browserId} tab={props.tab} addressDraft={addressDraft}
-    presentations={props.presentations} presentationTargetId={props.presentationTargetId} onRegionClose={props.onRegionClose}>
+    presentations={props.presentations} presentationTargetId={props.presentationTargetId} primaryStage={props.primaryStage} onRegionClose={props.onRegionClose}>
     <BrowserPaneContent {...props} released={connection.nativeReleased} addressDraft={addressDraft} connection={connection} />
   </BrowserWorkfaceBoundary>
 }
@@ -322,7 +322,7 @@ function BrowserPaneContent({
   onRegionSplit?: ((direction: SplitDirection) => void) | undefined
   regionSplitSurface?: WorkbenchViewTarget['surface'] | undefined
   startPage?: BrowserStartPageConfig | undefined
-  onRegionClose?: (() => void) | undefined
+  onRegionClose?: ((target?: WorkbenchViewTarget) => void) | undefined
   presentations?: readonly WorkbenchBrowserPresentation[] | undefined
   /** Actual primary stage; external projections keep their own presentation trees. */
   primaryStage?: WorkbenchBrowserPresentation | undefined
@@ -1213,12 +1213,8 @@ function BrowserPaneContent({
   const viewportOptions = (presentationId: string) => <BrowserViewportOptions value={tab.viewport} disabled={busy}
     onSelect={viewport => void run(() => api.browser.setViewport(tab.browserId, viewport))}
     onCustom={() => setCustomViewport(presentationId)} />
-
-  const regionCloseButton = onRegionClose ? <button
-    type="button" className="browser-toolbar__close" title="Close split" aria-label="Close split"
-    onPointerDown={event => event.stopPropagation()}
-    onClick={event => { event.stopPropagation(); onRegionClose() }}
-  ><ThemeActionCloseIcon size={12} /></button> : null
+  const openExternally = () => void runCommand(() => api.ui.openExternal(tab.url))
+  const moreOpeningPointer = useRef<number | null>(null)
 
   const defaultPresentationVisible = visible
   const renderPane = (presentation?: WorkbenchBrowserPresentation): ReactNode => {
@@ -1389,7 +1385,7 @@ function BrowserPaneContent({
           aria-label="Open in external browser"
           title="Open in external browser"
           disabled={tab.url === 'about:blank' || busy}
-          onClick={() => void runCommand(async () => await api.ui.openExternal(tab.url))}
+          onClick={openExternally}
         >
           <ThemeActionOpenExternalIcon size={14} />
         </button>
@@ -1526,12 +1522,25 @@ function BrowserPaneContent({
         {tab.capsuleId ? <span className="capsule-toolbar" ref={setCapsuleToolbarHost} /> : null}
           <DropdownMenu.Root modal={false} onOpenChange={setMenuOpen}>
             <DropdownMenu.Trigger asChild>
-              <button type="button" className={toolbar?.more || regionSplitItems ? undefined : 'browser-toolbar__more--optional'} aria-label="More browser tools" title="More browser tools"><ThemeActionMoreIcon size={14} /></button>
+              <button type="button" className={toolbar?.more || regionSplitItems ? undefined : 'browser-toolbar__more--optional'} aria-label="More browser tools" title="More browser tools"
+                onPointerDown={event => { moreOpeningPointer.current = event.pointerId; event.stopPropagation() }}><ThemeActionMoreIcon size={14} /></button>
             </DropdownMenu.Trigger>
             <DropdownMenu.Portal>
-              <DropdownMenu.Content className="browser-menu" align="end" sideOffset={5} collisionPadding={8}>
+              <DropdownMenu.Content className="browser-menu" align="end" sideOffset={5} collisionPadding={8}
+                onPointerDownCapture={() => { moreOpeningPointer.current = null }}
+                onPointerUpCapture={event => {
+                  // An overlay can enter beneath the pointer during the trigger's press.
+                  // That release opens More and must not choose the newly covered item.
+                  if (moreOpeningPointer.current === event.pointerId) {
+                    moreOpeningPointer.current = null
+                    event.stopPropagation()
+                  }
+                }}>
                 {regionSplitItems ? <>{regionSplitItems}<DropdownMenu.Separator className="browser-menu__separator" /></> : null}
                 <DropdownMenu.Label className="browser-menu__label">Page</DropdownMenu.Label>
+                <DropdownMenu.Item className="browser-menu__item" aria-label="Open in external browser" disabled={tab.url === 'about:blank' || busy} onSelect={openExternally}>
+                  <ThemeActionOpenExternalIcon size={12} /><span>Open in external browser</span>
+                </DropdownMenu.Item>
                 <DropdownMenu.Item className="browser-menu__item" aria-label="New private page" disabled={busy} onSelect={() => void startPrivatePage(presentation?.target)}>
                   <ThemeObjectBrowserIcon size={12} /><span>New private page</span>
                 </DropdownMenu.Item>
@@ -1590,7 +1599,9 @@ function BrowserPaneContent({
               </DropdownMenu.Content>
             </DropdownMenu.Portal>
           </DropdownMenu.Root>
-        {regionCloseButton}
+        {onRegionClose ? <button type="button" className="browser-toolbar__close" title="Close split" aria-label="Close split"
+          onPointerDown={event => event.stopPropagation()} onClick={event => { event.stopPropagation(); onRegionClose(stagePresentation?.target) }}
+        ><ThemeActionCloseIcon size={12} /></button> : null}
       </form>
       <div className="browser-profile-service" ref={setProfileNoticeHost} />
       {find?.key === key ? <BrowserFindBar key={tab.browserId} browserId={tab.browserId} navigationId={tab.navigationId} loading={tab.loading}

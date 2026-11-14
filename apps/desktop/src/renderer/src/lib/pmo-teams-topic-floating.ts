@@ -9,6 +9,7 @@ import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, scratchTopicLogicalPath } fro
 import { useAppStore } from '../store'
 import type { WorkbenchTab } from './workbench-tabs'
 import { projectWorkbenchProjection, sameWorkbenchProjectionSelection, type WorkbenchProjection, type WorkbenchProjectionSelection, workbenchProjectionSlotId } from './workbench-projection'
+import { workbenchDisplayReferenceMatches } from './workbench-resource-display'
 import { type WorkbenchViewTarget, type WorkbenchViewTargets } from './workbench-presentation'
 import { subscribeWorkbenchTabRemoved } from './workbench-tab-removal'
 import { scratchTopicKind, scratchTopicsForWorkspace } from './scratch-topic-snapshots'
@@ -441,6 +442,16 @@ export function requestPmoTeamsTopicFloatingClose(options?: { restoreFocus?: boo
     else if (target?.onReturnFocus) target.onReturnFocus()
     else document.querySelector<HTMLButtonElement>('[data-pmo-teams-topic-launcher] button')?.focus({ preventScroll: true })
   })
+}
+
+export function reconcileMoteRegionClose(target: WorkbenchProjectionSelection): void {
+  const current = state
+  if (!current?.reference || current.agentTarget || !sameWorkbenchProjectionSelection(current.reference, target)) return
+  const { tabs, layouts } = useAppStore.getState()
+  const tab = tabs[target.tabId]
+  if (!tab || tab.regions[target.regionId] || !tab.regions[tab.layout.activeRegionId] ||
+    !workbenchDisplayReferenceMatches(layouts[target.displayWorkspaceId], target)) return
+  update({ reference: { ...current.reference, regionId: tab.layout.activeRegionId } })
 }
 
 export function subscribePmoTeamsTopicFloatingState(listener: () => void): () => void {

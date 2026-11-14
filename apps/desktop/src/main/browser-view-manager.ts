@@ -1115,11 +1115,12 @@ export class BrowserViewManager {
     }
     const id = mintObjectId()
     const lease: PresentationLease = { id, entry, document, window: nativeWindow, windowDocument: input.window,
-      occurrence: { presentationId: occurrence.presentationId, location: { ...occurrence.location }, ...(occurrence.surface ? { surface: occurrence.surface } : {}), ...(occurrence.layoutHost === true ? { layoutHost: true } : {}),
+      occurrence: { presentationId: occurrence.presentationId, location: { ...occurrence.location }, ...(occurrence.surface ? { surface: occurrence.surface } : {}),
+        ...(occurrence.layoutHost === true || occurrence.layoutHost === 'sole' ? { layoutHost: occurrence.layoutHost } : {}),
         ...(spatial ? { returnContext: readWorkbenchReturnContext(occurrence.returnContext, { kind: 'region', ...occurrence.location as Exclude<typeof occurrence.location, { kind: 'inline' }> }) ?? undefined } : {}) }, geometry }
     this.presentationLeases.set(id, lease)
     entry.presentationLeaseIds.add(id)
-    this.followLayoutHost(lease)
+    this.followLayoutHost(entry, lease)
     if (geometry.visible) void entry.controlFeedback?.synchronize()
     return { leaseId: id }
   }
@@ -1136,7 +1137,8 @@ export class BrowserViewManager {
     if (lease.entry.inputLeaseId === leaseId) {
       if (lease.geometry.visible && lease.geometry.inputVisible !== false) this.setBounds(lease.entry.id, lease.geometry.bounds)
       else this.clearPresentationInput(lease.entry)
-    } else this.followLayoutHost(lease)
+    }
+    this.followLayoutHost(lease.entry, lease)
     if (!this.hasVisiblePresentation(lease.entry)) this.revokePresentationCapture(lease.entry, 'no-visible-presentations')
     if (wasVisible !== lease.geometry.visible) void lease.entry.controlFeedback?.synchronize()
   }
@@ -1466,10 +1468,21 @@ export class BrowserViewManager {
    * already unattached and visible in its hidden shell, so it takes the size in place. The
    * recorded bounds move with the page, so a press on its preview maps through the size it has.
    */
-  private followLayoutHost(lease: PresentationLease): void {
-    const entry = lease.entry, geometry = lease.geometry
+  private followLayoutHost(entry: BrowserEntry, changed?: PresentationLease): void {
+    if (entry.visible || entry.inputLeaseId) return
+    let lease = changed?.occurrence.layoutHost === true ? changed : undefined
+    if (!lease) {
+      if (entry.viewport !== 'responsive' || this.agentOwnsInput(entry)) return
+      for (const id of entry.presentationLeaseIds) {
+        const visible = this.presentationLeases.get(id)
+        if (!visible?.geometry.visible) continue
+        if (lease || visible.occurrence.layoutHost !== 'sole') return
+        lease = visible
+      }
+    }
+    const geometry = lease?.geometry
     // A clipped rectangle is the reading window's cut, not the page area: keep the page's size until it is whole again.
-    if (!lease.occurrence.layoutHost || !geometry.visible || geometry.inputVisible === false || entry.visible || entry.inputLeaseId) return
+    if (!geometry?.visible || geometry.inputVisible === false) return
     const { width, height } = geometry.bounds, view = entry.view
     if (entry.bounds?.width === width && entry.bounds.height === height) return
     const capture = entry.captureId ? this.presentationCaptures.get(entry.captureId) : undefined
@@ -1496,6 +1509,7 @@ export class BrowserViewManager {
     if (!entry.inputLeaseId) return
     entry.inputLeaseId = null
     this.setBounds(entry.id, null)
+    this.followLayoutHost(entry)
     this.sendPresentation({ type: 'input-owner-changed', browserId: entry.id, leaseId: null })
   }
 
@@ -1503,6 +1517,7 @@ export class BrowserViewManager {
     this.presentationLeases.delete(lease.id)
     lease.entry.presentationLeaseIds.delete(lease.id)
     if (lease.entry.inputLeaseId === lease.id) this.clearPresentationInput(lease.entry)
+    else this.followLayoutHost(lease.entry)
     if (!this.hasVisiblePresentation(lease.entry)) this.revokePresentationCapture(lease.entry, 'no-visible-presentations')
     void lease.entry.controlFeedback?.synchronize()
     this.publishNativeCoverage(lease.entry)
@@ -2643,7 +2658,10 @@ export class BrowserViewManager {
     entry.viewport = ownedViewport
     // Emulation is already applied. Keep its dimensions observable even if native
     // drawing synchronization fails; the original failure still reaches the caller.
-    try { this.synchronizeVisiblePage(entry, entry.view) }
+    try {
+      this.followLayoutHost(entry)
+      this.synchronizeVisiblePage(entry, entry.view)
+    }
     catch (error) {
       try { this.emit(entry) }
       catch (publicationError) { throw new AggregateError([error, publicationError], 'Viewport applied; drawing synchronization and publication failed') }

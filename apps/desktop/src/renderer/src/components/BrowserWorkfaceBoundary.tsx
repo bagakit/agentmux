@@ -8,6 +8,7 @@ import type { BrowserWorkbenchSurface } from '../lib/workbench-tabs'
 import { useAppStore } from '../store'
 import { StableWorkbenchView } from './StableWorkbenchView'
 import type { WorkbenchBrowserPresentation } from './BrowserPresentationStage'
+import type { WorkbenchViewTarget } from '../lib/workbench-presentation'
 
 const ThemeActionCloseIcon = semanticIconComponent('action.close')
 
@@ -17,8 +18,9 @@ type Props = {
   tab: BrowserWorkbenchSurface
   addressDraft: RefObject<BrowserWorkfaceAddressDraft>
   presentationTargetId?: string | undefined
+  primaryStage?: WorkbenchBrowserPresentation | undefined
   presentations?: readonly WorkbenchBrowserPresentation[] | undefined
-  onRegionClose?: (() => void) | undefined
+  onRegionClose?: ((target?: WorkbenchViewTarget) => void) | undefined
   children: ReactNode
 }
 
@@ -31,10 +33,11 @@ export class BrowserWorkfaceBoundary extends Component<Props, { failure: string 
   private retry = () => this.setState(state => ({ failure: null, revision: state.revision + 1 }))
   render(): ReactNode {
     if (this.state.failure === null) return <Fragment key={this.state.revision}>{this.props.children}</Fragment>
-    const { tab, addressDraft, presentationTargetId, presentations = [], onRegionClose } = this.props
-    const primary = presentations.find(presentation => presentation.target.hostId === presentationTargetId) ?? presentations[0]
+    const { tab, addressDraft, presentationTargetId, primaryStage, presentations = [], onRegionClose } = this.props
+    const primary = presentations.find(presentation => presentation.target.hostId === presentationTargetId) ?? primaryStage ?? presentations[0]
     const content = (presentation?: WorkbenchBrowserPresentation) => <BrowserRenderingFailure
-      tab={tab} addressDraft={addressDraft} failure={this.state.failure!} retry={this.retry} onRegionClose={onRegionClose}
+      tab={tab} addressDraft={addressDraft} failure={this.state.failure!} retry={this.retry}
+      onRegionClose={onRegionClose ? () => onRegionClose(presentation?.target) : undefined}
       survey={presentation?.target.surface === 'survey'} />
     return <>
       {content(primary)}
@@ -63,7 +66,8 @@ function BrowserRenderingFailure({ tab, addressDraft, failure, retry, onRegionCl
         const value = event.target.value
         addressDraft.current.value = value; addressDraft.current.edited = true; setAddress(value)
       }} /></label>
-      {onRegionClose ? <button type="button" aria-label="Close split" title="Close split" onClick={onRegionClose}><ThemeActionCloseIcon size={14} /></button> : null}
+      {onRegionClose ? <button type="button" aria-label="Close split" title="Close split"
+        onPointerDown={event => event.stopPropagation()} onClick={event => { event.stopPropagation(); onRegionClose() }}><ThemeActionCloseIcon size={14} /></button> : null}
     </form>
     <div className="pane-state pane-state--error" role="status">
       <strong>Browser view could not display</strong>

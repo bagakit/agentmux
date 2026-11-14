@@ -201,12 +201,33 @@ function MoteWorkfaceBody({ scope, workspaceId, topicId, floating = false, visib
     // An explicit selection of another occurrence, a section change or closing does: the entry key or visibility changes.
   }, [visible, owner, section, main?.roleRevision, currentMain, mainOccurrence, entryToken, currentLocal.original, selectReference, selected, onReferenceSelect])
   // A later role observation does not move the original reading or active draft.
-  const retainedReadingMain = useRef<{ owner: string; reference: NonNullable<typeof currentMain> } | null>(null)
-  const matchesSelection = (candidate: NonNullable<typeof currentMain> | null | undefined) => Boolean(candidate && selected &&
-    ('displayWorkspaceId' in selected ? selected.displayWorkspaceId : selected.workspaceId) === candidate.displayWorkspaceId &&
-    selected.groupId === candidate.groupId && selected.tabId === candidate.tabId && selected.regionId === candidate.regionId)
-  if (currentMain && matchesSelection(currentMain)) retainedReadingMain.current = { owner, reference: currentMain }
-  const retainedMain = retainedReadingMain.current?.owner === owner ? retainedReadingMain.current.reference : null
+  const retainedReadingMain = useRef<{ owner: string; reference: NonNullable<typeof currentMain>; presentationSessionId?: string | undefined } | null>(null)
+  const retained = retainedReadingMain.current?.owner === owner ? retainedReadingMain.current : null
+  const inSelectedTab = (candidate: NonNullable<typeof currentMain>) => Boolean(selected && selected.groupId === candidate.groupId && selected.tabId === candidate.tabId &&
+    ('displayWorkspaceId' in selected ? selected.displayWorkspaceId : selected.workspaceId) === candidate.displayWorkspaceId)
+  const anchor = retained && inSelectedTab(retained.reference) ? retained.reference : currentMain
+  const selectedRegionId = selected?.regionId
+  const companion = useAppStore(useShallow(state => {
+    if (!selectedRegionId || !anchor || !inSelectedTab(anchor)) return null
+    const tab = state.tabs[anchor.tabId], region = tab?.regions[selectedRegionId], agent = tab?.regions[anchor.regionId]
+    if (agent?.kind !== 'agent' || region?.kind !== 'browser' && region?.kind !== 'file') return null
+    const session = sessionPresentationById(state.sessions).get(agent.sessionId)
+    return { presentationSessionId: agent.sessionId, observed: Boolean(session),
+      matches: session?.control.kind === 'agent' && session.control.hostId === anchor.hostId && session.control.agentSessionId === anchor.sessionId }
+  }))
+  const matchesSelection = (candidate: NonNullable<typeof currentMain> | null | undefined) => {
+    if (!candidate || !inSelectedTab(candidate)) return false
+    if (selectedRegionId === candidate.regionId) return true
+    return Boolean(companion && anchor?.regionId === candidate.regionId && anchor.hostId === candidate.hostId && anchor.sessionId === candidate.sessionId &&
+      (companion.matches || !companion.observed && retained?.presentationSessionId === companion.presentationSessionId))
+  }
+  if (currentMain && matchesSelection(currentMain)) {
+    const session = mainOccurrence?.session
+    const presentationSessionId = session?.control.kind === 'agent' && session.control.hostId === currentMain.hostId && session.control.agentSessionId === currentMain.sessionId
+      ? session.id : anchor === retained?.reference ? retained.presentationSessionId : undefined
+    retainedReadingMain.current = { owner, reference: currentMain, presentationSessionId }
+  }
+  const retainedMain = retained?.reference
   const readingMain = matchesSelection(currentMain) ? currentMain : matchesSelection(retainedMain) ? retainedMain :
     main?.identity?.hostId === scope?.workspace.hostId && main?.identity?.moteId === scope?.topic.id ? main?.current : null
   const selectedMain = matchesSelection(readingMain)
