@@ -1,11 +1,13 @@
 #!/usr/bin/env node
-import { appendFileSync, existsSync, readFileSync } from 'node:fs'
+import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs'
 import { createInterface } from 'node:readline'
+import { join } from 'node:path'
+import { homedir } from 'node:os'
 import { setTimeout } from 'node:timers/promises'
 
 if (process.argv.length !== 3 || process.argv[2] !== 'acp' || !process.env.ACP_RUN_TRACE || !process.env.ACP_RUN_RELEASE) process.exit(2)
 if (process.env.AGENTMUX_ACP_ACTOR_TOKEN || process.env.AGENTMUX_HOOK_TOKEN) process.exit(3)
-const sessionId = 'fixture-original-acp-session'
+const sessionId = process.env.ACP_RUN_NATIVE_HISTORY_ID ?? 'fixture-original-acp-session'
 const options = [
   { optionId: 'native-allow-exact', name: 'Allow once', kind: 'allow_once' },
   { optionId: 'native-deny-exact', name: 'Reject once', kind: 'reject_once' }
@@ -50,6 +52,15 @@ for await (const line of createInterface({ input: process.stdin })) {
   } else if (method === 'session/prompt' && params.sessionId === sessionId && typeof id === 'string' && !pendingPrompt) {
     const draft = params.prompt?.[0]?.text
     if (draft?.endsWith('Original creation draft') || draft?.endsWith('Original resumed draft') || draft?.startsWith('Read the original ')) {
+      if (process.env.ACP_RUN_NATIVE_HISTORY_ID) {
+        const directory = join(homedir(), '.gemini', 'antigravity-cli', 'brain', sessionId, '.system_generated', 'logs')
+        mkdirSync(directory, { recursive: true })
+        const lines = [
+          { source: 'USER_EXPLICIT', type: 'USER_INPUT', step_index: 0, content: '<USER_REQUEST>' + draft + '</USER_REQUEST>' },
+          { source: 'MODEL', type: 'PLANNER_RESPONSE', step_index: 1, content: 'Original native history reply' }
+        ].map(row => JSON.stringify(row)).join('\n') + '\n'
+        for (const name of ['transcript.jsonl', 'transcript_full.jsonl']) appendFileSync(join(directory, name), lines)
+      }
       reply({ stopReason: 'end_turn' })
     } else {
       pendingPrompt = id

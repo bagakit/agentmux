@@ -292,9 +292,10 @@ it.each([true, false])('delivers an exact Host upload only when the original ACP
     const trace = join(scope.root, 'acp-image.ndjson'), release = join(scope.root, 'release-original-session')
     await writeFile(release, 'ready')
     const executorId = 'native-acp-image-test'
+    const nativeSessionId = '829bc99d-fcb4-4ce3-8c7c-679b38b9c207'
     await core.configureHostExecutor({ executorId, config: {
       providerId: 'antigravity', label: 'Original ACP image fixture', command: entry('./fixtures/acp-run-cli.mjs'),
-      args: [], env: { ACP_RUN_TRACE: trace, ACP_RUN_RELEASE: release, ACP_RUN_IMAGES: imageSupported ? 'enabled' : 'absent' },
+      args: [], env: { ACP_RUN_TRACE: trace, ACP_RUN_RELEASE: release, ACP_RUN_IMAGES: imageSupported ? 'enabled' : 'absent', ACP_RUN_NATIVE_HISTORY_ID: nativeSessionId },
       injectAgentMuxGuide: false
     } })
     const spatial = new AgentMuxSpatialStateStore(join(scope.env.AGENTMUX_STATE_DIRECTORY!, 'spatial-state.json'))
@@ -307,7 +308,6 @@ it.each([true, false])('delivers an exact Host upload only when the original ACP
     const { agent } = JSON.parse(opened.stdout).result
     original = { agentSessionId: agent.agentSessionId, run: { runId: agent.runId } }
     const { agentSessionId, run } = original
-    const nativeSessionId = 'fixture-original-acp-session'
     await until(() => core.readAgentSession(agentSessionId), state => state?.nativeHandle?.sessionId === nativeSessionId, 'the exact native image-session endpoint')
     const calls = async (): Promise<RecordedRequest[]> => (await readFile(trace, 'utf8')).trim().split('\n').map(line => JSON.parse(line))
     const nativePid = (await calls())[0]!.pid
@@ -338,6 +338,15 @@ it.each([true, false])('delivers an exact Host upload only when the original ACP
         'the original native image input acknowledgement')
       expect(admitted?.admission).toMatchObject({ native: { requestId: nativePrompt.id }, intent: { message: { inputImages: [{ upload }] } } })
       expect(JSON.stringify(admitted)).not.toContain(dataBase64)
+      const items = await until(() => core.sessionHistoryPage(agentSessionId, { limit: 5 }), value =>
+        value.items.some(item => item.kind === 'assistant-message'), 'the original on-disk history through the public Core reader')
+      expect(items).toMatchObject({ source: { providerId: 'antigravity', nativeSessionId }, items: [
+        { kind: 'user-message', contentParts: [{ kind: 'text', text: prompt }] },
+        { kind: 'assistant-message', contentParts: [{ kind: 'text', text: 'Original native history reply' }] }
+      ] })
+      await expect(core.sessionHistoryPage(agentSessionId, { limit: 5, refreshNativeSource: true, requireCurrentSource: true }))
+        .resolves.toMatchObject({ source: items.source, items: items.items })
+
     } else {
       const waiting = await until(inspect, value => JSON.stringify(value).includes('AGENT_ACP_PROMPT_CONTENT_UNSUPPORTED'),
         'confirmed negotiation refusal for this exact original image input')
