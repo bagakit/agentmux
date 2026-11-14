@@ -1,3 +1,4 @@
+import { BROWSER_PROFILE_STORAGE_OPERATIONS, isBrowserProfileStorageOperation, parseBrowserProfileStoragePayload, parseBrowserProfileStorageResult, assertBrowserProfileStorageTarget, type BrowserProfileStorageOperation, type BrowserProfileStoragePayload, type BrowserProfileStorageResult } from './browser-profile-storage.js'
 import { isBrowserProfileCreationOperation, browserProfileCreationOperationId, parseBrowserProfileCreationInspection, type BrowserProfileCreationOperation, type BrowserProfileCreationInspection } from './browser-profile-creation.js'
 import { BROWSER_PROFILE_COOKIE_FILE_OPERATIONS, isBrowserProfileCookieFileOperation, parseBrowserProfileCookieFilePayload, parseBrowserProfileCookieFileResult, assertBrowserProfileCookieFileTarget, type BrowserProfileCookieFileOperation, type BrowserProfileCookieFilePayload, type BrowserProfileCookieFileResult } from './browser-profile-cookie-files.js'
 import { BROWSER_PROFILE_BOOKMARK_OPERATIONS, isBrowserProfileBookmarkOperation, parseBrowserProfileBookmarkPayload, parseBrowserProfileBookmarkResult, assertBrowserProfileBookmarkTarget, type BrowserProfileBookmarkOperation, type BrowserProfileBookmarkPayload, type BrowserProfileBookmarkResult } from './browser-profile-bookmarks.js'
@@ -13,7 +14,7 @@ import { parseBrowserProfileQuery, parseBrowserProfileView, parseBrowserProfileS
  * typed requests and checks the shape of the owner's answers. No partition, cookie path or
  * credential is returned by this contract. A proxy sign-in write carries a password only to Main.
  */
-export const BROWSER_PROFILE_CONTROL_OPERATIONS = [...BROWSER_PROFILE_COOKIE_FILE_OPERATIONS, ...BROWSER_PROFILE_BOOKMARK_OPERATIONS, ...BROWSER_PROFILE_EXTENSION_OPERATIONS, 'browser.profile.creation.inspect', 'browser.profile.proxy.ls', 'browser.profile.proxy.create', 'browser.profile.proxy.update', 'browser.profile.proxy.delete', 'browser.profile.proxy.assign', 'browser.profile.ls', 'browser.profile.inspect', 'browser.profile.create',
+export const BROWSER_PROFILE_CONTROL_OPERATIONS = [...BROWSER_PROFILE_STORAGE_OPERATIONS, ...BROWSER_PROFILE_COOKIE_FILE_OPERATIONS, ...BROWSER_PROFILE_BOOKMARK_OPERATIONS, ...BROWSER_PROFILE_EXTENSION_OPERATIONS, 'browser.profile.creation.inspect', 'browser.profile.proxy.ls', 'browser.profile.proxy.create', 'browser.profile.proxy.update', 'browser.profile.proxy.delete', 'browser.profile.proxy.assign', 'browser.profile.ls', 'browser.profile.inspect', 'browser.profile.create',
   'browser.profile.folder.create', 'browser.profile.folder.rename', 'browser.profile.folder.delete',
   'browser.profile.view.create', 'browser.profile.view.update', 'browser.profile.view.delete', 'browser.profile.bulk-update',
   'browser.profile.trash.ls', 'browser.profile.trash.restore', 'browser.profile.trash.retention', 'browser.profile.trash.purge', 'browser.profile.trash.inspect',
@@ -31,7 +32,7 @@ export type BrowserProfileControlEdit = { label?: string; hue?: number | null; n
   /** Replaces the environment bundle; null restores native defaults. */
   environment?: BrowserProfileEnvironment | null; tags?: string[]; folderId?: string | null; pinned?: boolean }
 
-export type BrowserProfileControlPayload = BrowserProfileCookieFilePayload | BrowserProfileBookmarkPayload | BrowserProfileExtensionPayload
+export type BrowserProfileControlPayload = BrowserProfileStoragePayload | BrowserProfileCookieFilePayload | BrowserProfileBookmarkPayload | BrowserProfileExtensionPayload
   | { operation: 'browser.profile.creation.inspect'; operationId: string }
   | { operation: 'browser.profile.proxy.ls' }
   | { operation: 'browser.profile.proxy.create'; operationId: string; edit: BrowserProxyEdit }
@@ -389,7 +390,7 @@ export type BrowserProfileControlUse = { browserId: string; workspaceId?: string
 /** complete is false when saved Tabs could not be read; browsers then names only open Browsers. */
 export type BrowserProfileControlUsage = { browsers: BrowserProfileControlUse[]; complete: boolean; native?: BrowserProfileNativeUse }
 
-export type BrowserProfileControlResult = BrowserProfileCookieFileResult | BrowserProfileBookmarkResult | BrowserProfileExtensionResult
+export type BrowserProfileControlResult = BrowserProfileStorageResult | BrowserProfileCookieFileResult | BrowserProfileBookmarkResult | BrowserProfileExtensionResult
   | { operation: BrowserProfileCreationOperation | 'browser.profile.creation.inspect'; revision: number; creation: BrowserProfileCreationInspection }
   | { operation: 'browser.profile.proxy.ls'; revision: number; proxies: BrowserProxyAsset[] }
   | { operation: 'browser.profile.proxy.update'; revision: number; proxy: BrowserProxyAsset }
@@ -472,13 +473,14 @@ export function parseBrowserProfileProxySignIn(value: unknown): BrowserProfilePr
 
 /** Request payload after the Control envelope fields; one owner for both the CLI params and the wire request. */
 export function parseBrowserProfileControlPayload(source: Record<string, unknown>, envelope: readonly string[]): BrowserProfileControlPayload {
+  if (isBrowserProfileStorageOperation(source.operation)) return parseBrowserProfileStoragePayload(source)
   if (isBrowserProfileCookieFileOperation(source.operation)) return parseBrowserProfileCookieFilePayload(source)
   if (isBrowserProfileBookmarkOperation(source.operation)) return parseBrowserProfileBookmarkPayload(source)
   if (isBrowserProfileExtensionOperation(source.operation)) return parseBrowserProfileExtensionPayload(source)
   const code = 'INVALID_CONTROL_REQUEST'
   if (!isBrowserProfileControlOperation(source.operation)) fail(code, 'Browser Profile operation is invalid.')
-  const operation = source.operation as Exclude<BrowserProfileControlOperation, BrowserProfileExtensionOperation | BrowserProfileBookmarkOperation | BrowserProfileCookieFileOperation>
-  const fields: Record<Exclude<BrowserProfileControlOperation, BrowserProfileExtensionOperation | BrowserProfileBookmarkOperation | BrowserProfileCookieFileOperation>, readonly string[]> = {
+  const operation = source.operation as Exclude<BrowserProfileControlOperation, BrowserProfileExtensionOperation | BrowserProfileBookmarkOperation | BrowserProfileCookieFileOperation | BrowserProfileStorageOperation>
+  const fields: Record<Exclude<BrowserProfileControlOperation, BrowserProfileExtensionOperation | BrowserProfileBookmarkOperation | BrowserProfileCookieFileOperation | BrowserProfileStorageOperation>, readonly string[]> = {
     'browser.profile.creation.inspect': ['operationId'], 'browser.profile.proxy.ls': [], 'browser.profile.proxy.create': ['operationId', 'edit'], 'browser.profile.proxy.update': ['proxyId', 'expectedRevision', 'edit'],
     'browser.profile.proxy.delete': ['proxyId', 'expectedRevision'], 'browser.profile.proxy.assign': ['proxyId', 'expectedRevision', 'items'],
     'browser.profile.ls': ['query', 'viewId'],
@@ -677,6 +679,7 @@ function folder(value: unknown, code: string): BrowserProfileFolder {
 type OmitEach<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never
 export type BrowserProfileControlResultBody = OmitEach<BrowserProfileControlResult, 'operation'>
 export function parseBrowserProfileControlResult(operation: BrowserProfileControlOperation, value: unknown): BrowserProfileControlResultBody {
+  if (isBrowserProfileStorageOperation(operation)) { const { operation: _operation, ...body } = parseBrowserProfileStorageResult(operation, value); return body }
   if (isBrowserProfileCookieFileOperation(operation)) { const { operation: _operation, ...body } = parseBrowserProfileCookieFileResult(operation, value); return body }
   if (isBrowserProfileBookmarkOperation(operation)) { const { operation: _operation, ...body } = parseBrowserProfileBookmarkResult(operation, value); return body }
   if (isBrowserProfileExtensionOperation(operation)) { const { operation: _operation, ...body } = parseBrowserProfileExtensionResult(operation, value); return body }
@@ -685,7 +688,7 @@ export function parseBrowserProfileControlResult(operation: BrowserProfileContro
     const p = record(value, ['revision','creation'], code, 'Profile creation result')
     return { revision: count(p.revision, code, 'Profile collection revision'), creation: parseBrowserProfileCreationInspection(p.creation, code) }
   }
-  const keys: Record<Exclude<BrowserProfileControlOperation, BrowserProfileExtensionOperation | BrowserProfileBookmarkOperation | BrowserProfileCookieFileOperation>, readonly string[]> = {
+  const keys: Record<Exclude<BrowserProfileControlOperation, BrowserProfileExtensionOperation | BrowserProfileBookmarkOperation | BrowserProfileCookieFileOperation | BrowserProfileStorageOperation>, readonly string[]> = {
     'browser.profile.creation.inspect': ['revision','creation'], 'browser.profile.proxy.ls': ['revision', 'proxies'], 'browser.profile.proxy.create': ['revision', 'proxy'], 'browser.profile.proxy.update': ['revision', 'proxy'],
     'browser.profile.proxy.delete': ['revision', 'proxyId', 'deleted'], 'browser.profile.proxy.assign': ['revision', 'proxyId', 'proxyRevision', 'results'],
     'browser.profile.ls': ['revision', 'sequence', 'profiles', 'folders', 'views', 'filter'],
@@ -842,6 +845,7 @@ export function assertBrowserProfileControlTarget(request: BrowserProfileControl
     if (result.operation !== request.operation || result.profileId !== request.profileId || result.diagnostics.length > 1 || result.diagnostics.some(item => item.id !== request.operationId)) fail('CONTROL_PROTOCOL_ERROR', 'Diagnostic history does not name the original requested operation.')
     return
   }
+  if (isBrowserProfileStorageOperation(request.operation)) { assertBrowserProfileStorageTarget(request as BrowserProfileStoragePayload, result as BrowserProfileStorageResult); return }
   if (isBrowserProfileCookieFileOperation(request.operation)) { assertBrowserProfileCookieFileTarget(request as BrowserProfileCookieFilePayload, result as BrowserProfileCookieFileResult); return }
   if (isBrowserProfileBookmarkOperation(request.operation)) { assertBrowserProfileBookmarkTarget(request as BrowserProfileBookmarkPayload, result as BrowserProfileBookmarkResult); return }
   if (isBrowserProfileExtensionOperation(request.operation)) { assertBrowserProfileExtensionTarget(request as BrowserProfileExtensionPayload, result as BrowserProfileExtensionResult); return }

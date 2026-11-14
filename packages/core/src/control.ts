@@ -149,6 +149,7 @@ export const AGENTMUX_CONTROL_ERROR_CODES = [
   'BROWSER_PROFILE_COOKIE_FILE_REFUSED',
   'BROWSER_PROFILE_COOKIE_FILE_ALREADY_ADMITTED',
   'BROWSER_PROFILE_COOKIE_APPROVAL_UNAVAILABLE',
+  'BROWSER_PROFILE_STORAGE_REFUSED',
   'BROWSER_PROFILE_BOOKMARK_REFUSED',
   'BROWSER_PROFILE_BOOKMARK_ALREADY_ADMITTED',
   'BROWSER_TASK_REVISION_CONFLICT',
@@ -1271,6 +1272,7 @@ const OPERATION_BUDGET: Record<AgentMuxControlRequest['operation'], 'long' | 'sh
   'browser.profile.network.check': 'long',
   'browser.profile.network.probe': 'long',
   'browser.profile.network.history': 'short',
+  'browser.profile.storage.inspect': 'long', 'browser.profile.storage.clear': 'long',
   'browser.profile.cookie-file.prepare-import': 'long', 'browser.profile.cookie-file.import': 'long', 'browser.profile.cookie-file.export': 'long', 'browser.profile.cookie-file.inspect': 'short', 'browser.profile.cookie-file.discard': 'long', 'browser.profile.cookie-file.reveal': 'short',
   'browser.profile.bookmark.ls': 'short', 'browser.profile.bookmark.edit': 'long', 'browser.profile.bookmark.import': 'long', 'browser.profile.bookmark.export': 'long', 'browser.profile.bookmark.open': 'long',
   'browser.profile.extension.ls': 'short', 'browser.profile.extension.prepare': 'long', 'browser.profile.extension.apply': 'long', 'browser.profile.extension.remove': 'long', 'browser.profile.extension.load': 'long',
@@ -1374,6 +1376,7 @@ export * from './app-capture.js'
 export * from './browser-proxy-library.js'
 
 export * from './browser-profile-cookie-files.js'
+export * from './browser-profile-storage.js'
 export * from './browser-profile-bookmarks.js'
 export * from './browser-profile-extensions.js'
 
