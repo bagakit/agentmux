@@ -82,8 +82,9 @@ it('content updates retain continuation while source or member changes explicitl
   expect(changed.issues).toContainEqual(expect.objectContaining({ code: 'FOCUS_CONTINUATION_CHANGED' }))
 })
 
-it('an unrelated unavailable mounted source does not withdraw a confirmed project read', () => {
-  useAppStore.setState({ mountedSpaceObservations: { unrelated: { reading: false, error: 'Unrelated source unavailable' } } })
+it('unrelated unavailable sources do not withdraw a confirmed project read', () => {
+  useAppStore.setState({ mountedSpaceObservations: { unrelated: { reading: false, error: 'Unrelated source unavailable' } },
+    scratchTopicSnapshots: { [scratchWorkspace.id]: { scope: scratchTopicsScope(scratchWorkspace), revision: 1, reading: true, error: 'Directory update unconfirmed', topics: [] } } })
   const page = read(all)
   expect(page.status).toBe('observed'); expect(page.coverage.complete).toBe(true)
   expect(page.coverage.sourceStatuses.some(item => item.source === 'mounted-space:unrelated')).toBe(false)
@@ -91,6 +92,10 @@ it('an unrelated unavailable mounted source does not withdraw a confirmed projec
   expect(directory.coverage.complete).toBe(false)
   const unknown = readFocusGroups(useAppStore.getState(), { method: 'focus.read', params: all }, source)
   expect(unknown.coverage.complete).toBe(false)
+  useAppStore.setState({ scratchTopicSnapshots: { [scratchWorkspace.id]: { scope: scratchTopicsScope(scratchWorkspace), revision: 1, reading: false, error: null, topics: null } } })
+  expect(readFocusGroups(useAppStore.getState(), { method: 'focus.ls', params: {} }, source, locations()).coverage.sourceStatuses)
+    .toContainEqual({ source: 'topic-directory:' + scratchWorkspace.id, status: 'unconfirmed' })
+  expect(read(all).status).toBe('observed')
 })
 
 it('Collection scope is the complete original Category set, including an explicit unconfirmed bucket', async () => {
@@ -110,8 +115,31 @@ it('Collection scope is the complete original Category set, including an explici
   const collection = { kind: 'collection' as const, hostId: 'local', categorySpaceIds: categories.map(category => category.spaceId).sort() }
   expect(read({ scope: collection, selection: { kind: 'all' } }).items.map(item => item.reference)).toEqual([ref(session.id)])
   expect(read({ scope: { ...collection, categorySpaceIds: [categories[0]!.spaceId] }, selection: { kind: 'all' } }).items).toEqual([])
+  useAppStore.setState({ scratchTopicSnapshots: { [scratchWorkspace.id]: { ...useAppStore.getState().scratchTopicSnapshots[scratchWorkspace.id]!, reading: true, error: 'Metadata update unconfirmed' } } })
+  const cached = read({ scope: collection, selection: { kind: 'all' } })
+  expect(cached.items.map(item => item.reference)).toEqual([ref(session.id)])
+  expect(cached.coverage.complete).toBe(false); expect(cached.status).toBe('unconfirmed')
+  expect(cached.coverage.sourceStatuses).toContainEqual({ source: 'topic-directory:' + scratchWorkspace.id, status: 'unconfirmed' })
+  expect(cached.issues).toContainEqual(expect.objectContaining({ code: 'FOCUS_METADATA_UNCONFIRMED' }))
   useAppStore.setState({ topicCategories: [] })
   const unknown = read({ scope: { ...collection, categorySpaceIds: [] }, selection: { kind: 'all' } })
   expect(unknown.items.map(item => item.reference)).toEqual([ref(session.id)])
   expect(unknown.status).toBe('unconfirmed'); expect(unknown.coverage.complete).toBe(false)
+})
+
+it('a member moved to another project keeps its exact known facts while original membership is changed', async () => {
+  const before = useAppStore.getState(), other = { ...project, id: 'other-project', name: 'Other project', path: project.path + '/other' }
+  const originalTab = before.tabs.b!, regionId = originalTab.layout.activeRegionId
+  useAppStore.setState({ config: { ...before.config!, workspaces: [project, other] },
+    tabs: { ...before.tabs, b: { ...originalTab, workspaceId: other.id, regions: { ...originalTab.regions, [regionId]: { ...originalTab.regions[regionId]!, workspaceId: other.id } } } },
+    layouts: { [project.id]: createWorkspaceLayout('original-group', ['a', 'c']), [other.id]: createWorkspaceLayout('other-group', ['b']) } })
+  vi.mocked(api.spatial.read).mockResolvedValue({ schemaVersion: 1, revision: 3, graph: desktopSpatialGraph(useAppStore.getState(), []) })
+  await initializeSpatialControlFixture()
+  const page = read({ scope, selection: { kind: 'members', references: [ref('b')] } })
+  expect(page).toMatchObject({ status: 'changed', coverage: { complete: false } })
+  expect(page.items).toHaveLength(1)
+  expect(page.items[0]).toMatchObject({ reference: ref('b'), availability: 'changed', name: 'Original B', kind: 'agent',
+    agent: { hostId: 'local', agentSessionId: 'b', run: { runId: 'run-b' } }, locations: { status: 'confirmed', occurrences: [{ hostId: 'local', workspaceId: other.id, groupId: 'other-group', tabId: 'b', regionId }] } })
+  expect(page.items[0]!.state).not.toBeNull(); expect(page.items[0]!.excerpt).not.toBeNull()
+  expect(useAppStore.getState().sessions).toBe(before.sessions)
 })
