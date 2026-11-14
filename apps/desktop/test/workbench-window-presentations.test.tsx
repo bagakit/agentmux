@@ -7,7 +7,43 @@ vi.mock('react-resizable-panels', () => createRequire(import.meta.url)('../node_
 import { createClientUiRoot } from './helpers/client-ui-render'
 import { StableWorkbenchView, WorkbenchSurfaceHost } from '../src/renderer/src/components/StableWorkbenchView'
 import { useWorkbenchDocument, useWorkbenchWindowDocument, WorkbenchDocumentContext } from '../src/renderer/src/lib/workbench-document'
-import { isWorkbenchSurfaceDetached, placeWorkbenchWindow, registerWorkbenchDocument, useWorkbenchSurfaceDetached } from '../src/renderer/src/lib/workbench-window-registry'
+import { isWorkbenchSurfaceDetached, placeWorkbenchWindow, registerWorkbenchDocument, registerWorkbenchHost, subscribeWorkbenchSurfaceDocument, useWorkbenchSurfaceDetached } from '../src/renderer/src/lib/workbench-window-registry'
+
+it('notifies only document consumers of the surface that physically moved', async () => {
+  const frame = document.createElement('iframe')
+  document.body.append(frame)
+  const child = frame.contentDocument!, target = { kind: 'surface', surface: 'survey' } as const
+  const original = document.createElement('section')
+  const survey = vi.fn(), recall = vi.fn()
+  const unsubscribeSurvey = subscribeWorkbenchSurfaceDocument('survey', survey)
+  const unsubscribeRecall = subscribeWorkbenchSurfaceDocument('recall', recall)
+  const unregister = registerWorkbenchHost({
+    target, host: original, async place(placement) {
+      const destination = placement?.destination ?? document.body
+      // happy-dom lacks cross-document adoption for previously adopted nodes.
+      Object.defineProperty(original, 'ownerDocument', { configurable: true, value: destination.ownerDocument })
+    }
+  })
+  try {
+    for (let i = 0; i < 1000; i++) {
+      const release = registerWorkbenchHost({ target: { kind: 'tab', tabId: String(i), groupId: 'group', displayWorkspaceId: 'space' },
+        host: document.createElement('div'), async place() {} })
+      release()
+    }
+    expect(survey).not.toHaveBeenCalled()
+    expect(recall).not.toHaveBeenCalled()
+    const placement = { destination: child.body, window: { windowId: 'survey', documentGeneration: 'original' } }
+    await placeWorkbenchWindow(target, placement)
+    expect(survey).toHaveBeenCalledTimes(1)
+    await placeWorkbenchWindow(target, placement)
+    expect(survey).toHaveBeenCalledTimes(1)
+    await placeWorkbenchWindow(target, null)
+    expect(survey).toHaveBeenCalledTimes(2)
+    expect(recall).not.toHaveBeenCalled()
+  } finally {
+    unregister(); unsubscribeSurvey(); unsubscribeRecall(); frame.remove()
+  }
+})
 
 it('rebinds a nested original workface document when its parent Tab crosses native documents', async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
