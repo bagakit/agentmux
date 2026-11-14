@@ -7,6 +7,17 @@ when: "Discover or explicitly modify current user configuration"
 # settings
 
 <!-- amux:content -->
+settings hosts tailcat inspect reads the answering App's local incoming configuration and
+the original Host listener separately. settings hosts tailcat configure --input FILE|-
+accepts {expected,candidate}; null is absent, explicit enabled:false remains saved data.
+Only a transport-approved user without a managed Agent caller may save this sensitive
+ingress. Agents may read and prepare the exact draft, not claim a user principal in JSON.
+The generic Host configure local guard remains; key preparation remains tailcat-key.
+No private key is read or exported by these methods. A saved config does not prove listener
+adoption, a client connection or Agent/source trust. Listener failure/unknown preserves the
+saved configuration and healthy Runs; inspect after unknown reports current facts, not the
+lost original save ACK. Do not automatically replay a save.
+
 The original configuration owner holds settings, Host routes, saved Executors and
 resource revisions. Inspect the exact current owner and supported fields before changing
 them. A saved route/template is not a connected Host, running Agent or human approval.
