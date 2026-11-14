@@ -1,5 +1,7 @@
 import { sha256 } from '@noble/hashes/sha2.js'
 import type { AgentInputSubmissionReceipt } from '../agent-input-wait.js'
+import type { AgentProviderInputInitialization } from '../agent-provider.js'
+import { parseProviderInputInitialization } from '../agent-initialization.js'
 import { agentPromptInputId } from '../agent-prompt-condition.js'
 import { connectionDiagnosisIntakeCodes, connectionDiagnosisSourceCodes, type ConnectionDiagnosisIntake } from '../connection-diagnosis-contract.js'
 import { parseConnectionDiagnosisWaiting } from '../connection-diagnosis-codec.js'
@@ -36,7 +38,7 @@ export const moteChatInputFailureCodes = [
   'UNKNOWN_AGENT_SESSION', 'AGENT_SESSION_STORE_READ_UNCONFIRMED', 'STALE_AGENT_SESSION',
   'AGENT_SESSION_IDENTITY_CONFLICT', 'AGENT_SESSION_RUN_MISMATCH', 'STALE_AGENT_SESSION_BINDING',
   'AGENT_RUN_NOT_RUNNING', 'CTXMUX_INPUT_CURSOR_MISSING', 'CTXMUX_DISCONNECTED',
-  'AGENT_INTERACTION_PENDING', 'AGENT_PROMPT_SUBMISSION_BUSY', 'AGENT_PROMPT_INPUT_UNCONFIRMED',
+  'AGENT_INTERACTION_PENDING', 'AGENT_PROMPT_SUBMISSION_BUSY', 'AGENT_PROMPT_INPUT_UNCONFIRMED', 'AGENT_INITIAL_INPUT_UNCONFIRMED',
   'AGENT_PROMPT_OPERATION_CONFLICT', 'AGENT_PROMPT_SOURCE_CHANGED', 'INVALID_AGENT_PROMPT',
   'INVALID_SESSION_ID', 'INVALID_AGENT_PROVIDER', 'UNKNOWN_PROVIDER', 'AGENT_PROMPT_CANCELLED',
   'EXTERNAL_INPUT_AUTHORITY_UNCONFIRMED', 'INGRESS_SERVICE_DISABLED', 'INGRESS_SERVICE_UNCONFIRMED',
@@ -45,6 +47,11 @@ export const moteChatInputFailureCodes = [
 ] as const
 export type MoteChatInputFailureCode = typeof moteChatInputFailureCodes[number]
 export type MoteChatDiagnosisInput = { target: MoteChatTarget }
+const inputObservationPhases = ['current-run', 'input-coordination', 'current-target', 'native-initialization'] as const
+export type MoteChatInputWaitObservation = {
+  phase: typeof inputObservationPhases[number] | null
+  initialization: AgentProviderInputInitialization | null
+}
 export type MoteChatDiagnosisIntake = {
   key: string
   state: 'received' | 'refused' | 'claimed'
@@ -58,6 +65,7 @@ export type MoteChatDiagnosisIntake = {
     receiptObservation: AgentInputSubmissionReceipt['observation'] | null
     /** Last retained reason, not proof of an active await or permission to retry. */
     waiting: ConnectionDiagnosisIntake['waiting']
+    waitObservation: MoteChatInputWaitObservation | null
     preparationReason: AgentPromptPreparationWaitReason | null
     failureCode: MoteChatInputFailureCode | null
     runtime: ConnectionIngressRuntimeObservation | null }
@@ -70,6 +78,18 @@ function originalInputFailure(receipt: AgentInputSubmissionReceipt) {
 export function moteChatInputFailureCode(receipt: AgentInputSubmissionReceipt): MoteChatInputFailureCode | null {
   const failure = originalInputFailure(receipt)
   return moteChatInputFailureCodes.find(code => code === failure?.code) ?? null
+}
+/** Project only retained typed detail. It neither qualifies a successor Run nor grants input. */
+export function moteChatInputWaitObservation(receipt: AgentInputSubmissionReceipt): MoteChatInputWaitObservation | null {
+  const waiting = receipt.control.waiting
+  if (!waiting) return null
+  const phase = 'observation' in waiting ? inputObservationPhases.find(phase => phase === waiting.observation?.phase) ?? null : null
+  let initialization: AgentProviderInputInitialization | null = null
+  if ('initialization' in waiting && waiting.initialization) {
+    const { state, reason, source, scope } = waiting.initialization
+    try { initialization = parseProviderInputInitialization({ state, reason, source, scope }) } catch { /* Optional detail stays unknown. */ }
+  }
+  return phase === null && initialization === null ? null : { phase, initialization }
 }
 /** Read a typed original preparation observation, then discard every private identity and retry fence. */
 export function moteChatPreparationReason(receipt: AgentInputSubmissionReceipt): AgentPromptPreparationWaitReason | null {
@@ -173,7 +193,7 @@ export function parseMoteChatDiagnosis(value: unknown, input?: MoteChatDiagnosis
       const row = rpcRecord(value, ['key', 'state', 'code', 'codeRecorded', 'noticeCode', 'preparation', 'input'], 'CONTROL_PROTOCOL_ERROR');
       if (['key', 'state', 'code', 'codeRecorded', 'preparation', 'input'].some(name => !Object.hasOwn(row, name))) fail()
       const noticeCode = row.noticeCode === undefined ? undefined : member(row.noticeCode, ['MOTE_CHAT_MAIN_EXTERNAL_AUDIENCE', 'MOTE_CHAT_MAIN_UNCONFIRMED', 'MOTE_CHAT_REPLY_ROUTE_UNCONFIRMED'] as const)
-      const i = fields(row.input, ['status', 'observation', 'controlState', 'receiptObservation', 'waiting', 'preparationReason', 'failureCode', 'runtime'])
+      const i = fields(row.input, ['status', 'observation', 'controlState', 'receiptObservation', 'waiting', 'waitObservation', 'preparationReason', 'failureCode', 'runtime'])
       const code = nullable(row.code, value => member(value, moteChatDiagnosisCodes)), codeRecorded = bool(row.codeRecorded)
       const preparation = member(row.preparation, ['not-admitted', 'reserved', 'prepared', 'creation-dispatched', 'ready', 'other-route'] as const)
       const observation = member(i.observation, ['not-started', 'observed', 'unavailable'] as const)
@@ -182,12 +202,24 @@ export function parseMoteChatDiagnosis(value: unknown, input?: MoteChatDiagnosis
       const receiptObservation = nullable(i.receiptObservation, value => member(value, ['owned', 'rejoin-needed', 'closed'] as const))
       const preparationReason = nullable(i.preparationReason, value => member(value, ['context-compaction', 'native-busy'] as const))
       const failureCode = nullable(i.failureCode, value => member(value, moteChatInputFailureCodes))
+      const waitObservation = nullable(i.waitObservation, value => {
+        const w = fields(value, ['phase', 'initialization'])
+        const phase = nullable(w.phase, value => member(value, inputObservationPhases))
+        const initialization = nullable(w.initialization, value => {
+          try { return parseProviderInputInitialization(value) } catch { return fail() }
+        })
+        if (phase === null && initialization === null) fail()
+        return { phase, initialization }
+      })
       const runtime = nullable(i.runtime, value => {
-        const r = fields(value, ['target', 'state', 'exitCode'])
+        const r = fields(value, ['target', 'state', 'exitCode', 'continuity'])
         const target = member(r.target, ['original', 'changed', 'missing', 'unavailable'] as const)
         const state = member(r.state, ['running', 'exited', 'interrupted', 'unavailable'] as const)
+        const continuity = member(r.continuity, ['confirmed', 'unconfirmed', 'unavailable'] as const)
+        if ((target === 'missing' || target === 'unavailable') && continuity !== 'unavailable') fail()
+        if (target === 'original' && continuity !== 'confirmed') fail()
         if (r.exitCode !== null && (!Number.isSafeInteger(r.exitCode) || state !== 'exited')) fail()
-        return { target, state, exitCode: r.exitCode as number | null }
+        return { target, state, exitCode: r.exitCode as number | null, continuity }
       })
       if (runtime !== null && status !== 'waiting' && status !== 'terminal-confirmed' && status !== 'admitted' && status !== 'launch-carried') fail()
       let waiting: ConnectionDiagnosisIntake['waiting']
@@ -199,10 +231,10 @@ export function parseMoteChatDiagnosis(value: unknown, input?: MoteChatDiagnosis
           status === 'stopped' && controlState !== 'stopped-before-dispatch' ||
           (status === 'admitted' || status === 'launch-carried' || status === 'not-applied' || status === 'terminal-confirmed') && controlState !== 'dispatch-authorized' ||
           status !== null && status !== 'waiting' && receiptObservation !== 'closed') fail()
-      if ((preparationReason !== null || failureCode !== null) && waiting === null) fail()
+      if ((preparationReason !== null || failureCode !== null || waitObservation !== null) && waiting === null) fail()
       if (preparationReason !== null && failureCode !== null) fail()
       return { key: key(row.key), state: member(row.state, ['received', 'refused', 'claimed'] as const), code, codeRecorded, ...(noticeCode === undefined ? {} : { noticeCode }),
-        preparation, input: { status, observation, controlState, receiptObservation, waiting, preparationReason, failureCode, runtime } }
+        preparation, input: { status, observation, controlState, receiptObservation, waiting, waitObservation, preparationReason, failureCode, runtime } }
     }, moteChatDiagnosisWindowLimit)
     if (new Set(rows.map(row => row.key)).size !== rows.length) fail()
     return { rows, more: bool(page.more) }

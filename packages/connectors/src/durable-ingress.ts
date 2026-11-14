@@ -5,7 +5,7 @@ import { isDeepStrictEqual } from 'node:util'
 import { createHash } from 'node:crypto'
 import { ConversationActions, externalActionIntentDigest } from './conversation-actions.js'
 import { readRoomPublicationBinding, sameRoomPublication, parseConnectionQuestionAnswerSubmissions } from '@agentmux/core/connections'
-import { mintObjectId, AgentMuxError, observeRead, parseAgentExternalMessageAuthor, agentInteractionIntentDigest, type AgentInputCallContext, type AgentMuxClient, type AgentMuxMessageEnvelope } from '@agentmux/core'
+import { mintObjectId, AgentMuxError, observeRead, parseAgentExternalMessageAuthor, agentInteractionIntentDigest, sessionSemanticResumeSourceRuns, type AgentInputCallContext, type AgentMuxClient, type AgentMuxMessageEnvelope } from '@agentmux/core'
 import { AgentMuxRpcError } from '@agentmux/core/public-rpc-http'
 import { CONNECTION_INGRESS_AUTHORITY_CODES, connectionDiagnosisIntakeCodes, parseConnectionActor, parseConnectionIngressRecord, parseIngressParams, parseIngressResult, type ConnectionConfig, type ConnectionIngressAuthority, type ConnectionIngressAuthorityCode, type ConnectionIngressInspection, type ConnectionIngressListInput, type ConnectionIngressMessage, type ConnectionIngressAction, type ConnectionIngressPort, type ConnectionIngressRecord, type RoomBinding, type RoomBindingReadPort } from '@agentmux/core/connections'
 import type { ConnectionHost } from './connection-host.js'
@@ -948,17 +948,19 @@ export class DurableIngressHost implements ConnectionIngressPort {
       return { ingress, authority: code === 'INGRESS_STORAGE_UNCONFIRMED' || code === 'INGRESS_SERVICE_UNCONFIRMED' || code === 'INGRESS_ADDRESSING_UNCONFIRMED' ? 'unavailable' : 'refused', code }
     }
   }
-  /** Owner-private observation of the frozen target; never follows a newer Run or reads output. */
+  /** Frozen Runtime plus its current Session relationship; never follows a newer Runtime or reads output. */
   async inspectInputRuntime(ingressId: string): Promise<ConnectionIngressRuntimeObservation | null> {
     const original = this.read(ingressId)
     if (!original?.input || original.kind === 'action') return null
-    const input = original.input, result: ConnectionIngressRuntimeObservation = { target: 'unavailable', state: 'unavailable', exitCode: null }
+    const input = original.input, result: ConnectionIngressRuntimeObservation = { target: 'unavailable', state: 'unavailable', exitCode: null, continuity: 'unavailable' }
     const client = this.options.core(input.hostId, input.author.authoritySource?.executionRuntimeId)
     if (!client) return result
     try {
       const session = await client.readAgentSession(input.agentSessionId, input.author.authoritySource?.executionRuntimeId)
       result.target = !session ? 'missing' : session.agentSessionId === input.agentSessionId && session.hostId === input.hostId &&
         session.run.runId === input.expectedRun.runId ? 'original' : 'changed'
+      if (session) result.continuity = session.agentSessionId === input.agentSessionId && session.hostId === input.hostId &&
+        sessionSemanticResumeSourceRuns(session).includes(input.expectedRun.runId) ? 'confirmed' : 'unconfirmed'
     } catch { /* A failed metadata observation does not prove the original target changed. */ }
     try {
       const subject = await client.runtimeSubject?.({ kind: 'terminal-run', runId: input.expectedRun.runId })

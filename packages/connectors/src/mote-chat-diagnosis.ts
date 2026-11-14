@@ -1,6 +1,6 @@
 import { AgentMuxError } from '@agentmux/core'
 import { sameMotePreferencesTarget } from '@agentmux/core/mote-preferences'
-import { moteChatDiagnosisCode, moteChatDiagnosisKey, moteChatDiagnosisGenerationKey, moteChatDiagnosisWindowLimit, moteChatInputFailureCode, moteChatPreparationReason,
+import { moteChatDiagnosisCode, moteChatDiagnosisKey, moteChatDiagnosisGenerationKey, moteChatDiagnosisWindowLimit, moteChatInputFailureCode, moteChatInputWaitObservation, moteChatPreparationReason,
   type MoteChatDiagnosis, type MoteChatDiagnosisPublication, type MoteChatTarget } from '@agentmux/core/mote-chat'
 import { connectionDiagnosisSourceCode, parseConnectionDeliveryResult } from '@agentmux/core/connections'
 import { isDeepStrictEqual } from 'node:util'
@@ -104,7 +104,7 @@ export async function readMoteChatDiagnosis(target: MoteChatTarget, owner: MoteC
       }
       let input: NonNullable<MoteChatDiagnosis['incoming']>['rows'][number]['input'] = {
         status: null, observation: record.input ? 'unavailable' : 'not-started',
-        controlState: null, receiptObservation: null, waiting: null, preparationReason: null, failureCode: null, runtime: null
+        controlState: null, receiptObservation: null, waiting: null, waitObservation: null, preparationReason: null, failureCode: null, runtime: null
       }
       if (record.input && preparation !== 'other-route') {
         try {
@@ -114,6 +114,7 @@ export async function readMoteChatDiagnosis(target: MoteChatTarget, owner: MoteC
             input = { status: receipt?.status ?? null, observation: observed.observation,
               controlState: receipt?.control.state ?? null, receiptObservation: receipt?.observation ?? null,
               waiting: waiting ? { phase: waiting.phase, reason: waiting.reason, wake: waiting.wake } : null,
+              waitObservation: receipt ? moteChatInputWaitObservation(receipt) : null,
               preparationReason: receipt ? moteChatPreparationReason(receipt) : null,
               failureCode: receipt ? moteChatInputFailureCode(receipt) : null, runtime: null }
             if (receipt?.status === 'waiting' || receipt?.status === 'terminal-confirmed' || receipt?.status === 'admitted') {

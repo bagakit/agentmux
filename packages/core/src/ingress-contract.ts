@@ -18,6 +18,8 @@ export type ConnectionIngressRejoinResult = { action: ConnectionIngressRejoinAct
 /** A current observation of the frozen input target, never a retry or lifecycle decision. */
 export type ConnectionIngressRuntimeObservation = {
   target: 'original' | 'changed' | 'missing' | 'unavailable'
+  /** Frozen Run belongs to the exact current Session; never input or retry authority. */
+  continuity: 'confirmed' | 'unconfirmed' | 'unavailable'
   state: import('./types.js').AgentMuxRunState | 'unavailable'
   exitCode: number | null
 }
