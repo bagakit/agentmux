@@ -65,7 +65,7 @@ function verifyVisualRecord(record) {
   const folded = record.phase?.endsWith('fold')
   assert.equal(record.rule?.selector, folded ? '.collaboration-area__overview-label' : '.collaboration-canvas .react-flow__node-agent:has(> .collaboration-agent > .collaboration-agent__focus-proxy)')
   assert.equal(record.rule.property, folded ? 'display' : 'z-index')
-  assert.equal(record.rule.counterfactualValue, folded ? 'block' : '1')
+  assert.equal(record.rule.counterfactualValue, folded ? 'block' : '-1')
   assert.ok(record.rule.originalValue && record.rule.originalValue !== record.rule.counterfactualValue)
   assert.equal(record.before?.effectiveValue, record.rule.originalValue, 'The real original rule controls the sampled element')
   assert.equal(record.mutant?.effectiveValue, record.rule.counterfactualValue, 'The actual CSS withdrawal reaches the sampled element')
@@ -77,7 +77,7 @@ function verifyVisualRecord(record) {
   for (const field of ['count', 'text', 'fontSize']) assert.equal(record.mutant?.[field], record.before[field], 'The CSS withdrawal cannot substitute a missing or different text subject')
   assert.equal(record.mutant.characters?.length, record.before.characters.length, 'The CSS withdrawal still measures every original character')
   if (folded) assert.ok(record.areaId && record.before.areaId === record.areaId && record.mutant.areaId === record.areaId && record.restored.areaId === record.areaId, 'Both fold directions measure the same exact original terrain')
-  assert.throws(() => verifyVisualSample(record.mutant, record.phase), assert.AssertionError, 'Withdrawing the actual original CSS must fail the same real visual guard')
+  assert.throws(() => verifyVisualSample(record.mutant, record.phase), assert.AssertionError, 'An incorrect underlay in the actual original CSS must fail the same real visual guard')
   if (folded) assert.ok(record.mutant.lineCount > 2, 'The actual display withdrawal reproduces the character-column defect')
   else {
     const geometry = ({ effectiveValue, ...sample }) => ({ ...sample, characters: sample.characters.map(({ proxyFirst, paintStack, ...character }) => character) })
@@ -99,7 +99,7 @@ function verifyVisualGuards(evidence, frames, originalAreaId) {
 // is synthesized, and finally restores both before another browser task can run.
 function visualCounterfactual({ phase, areaId }) {
   const folded = phase.endsWith('fold'), selector = folded ? '.collaboration-area__overview-label' : '.collaboration-canvas .react-flow__node-agent:has(> .collaboration-agent > .collaboration-agent__focus-proxy)'
-  const property = folded ? 'display' : 'z-index', counterfactualValue = folded ? 'block' : '1'
+  const property = folded ? 'display' : 'z-index', counterfactualValue = folded ? 'block' : '-1'
   const candidates = [...document.querySelectorAll(folded ? '.collaboration-area__overview-label' : '.collaboration-agent__focus-proxy')].filter(element => folded ? element.dataset.areaId === areaId : element.closest('[data-collaboration-agent]')?.dataset.collaborationAgent === JSON.stringify(['local', 'fixture-terrain-a']))
   if (candidates.length !== 1) throw Error('Expected one exact original visual subject: ' + phase)
   const target = candidates[0], agent = target.closest('[data-collaboration-agent]'), anchor = window.__terrainAnchor ?? null, reader = document.querySelector('.agent-information-reader'), active = document.activeElement
@@ -175,7 +175,15 @@ module.exports = async function terrain({ win, result, read, click, key, move, f
   const nodeId = (area, agent) => JSON.stringify([area, JSON.stringify(['local', agent])])
   const boxes = () => read('window.graphCapture.deliveredLayout().boxes')
   const settleLayout = () => until('the actual delivered terrain layout settles', () => read(`(()=>{const layout=window.graphCapture.deliveredLayout();return layout?.busy===false&&!layout.transitioning})()`))
-  const foldedState = (id, folded) => until('original delivered ancestor reaches its requested folded state', () => read(`(()=>{const layout=window.graphCapture.deliveredLayout();return layout?.busy===false&&!layout.transitioning&&layout.boxes.some(box=>box.id===${JSON.stringify(id)}&&box.folded===${folded})})()`))
+  const foldedState = async (id, folded) => {
+    let previous = '', since = 0
+    await until('original delivered ancestor and its measured screen heading reach the requested folded state', async () => {
+      const sample = await read(`(()=>{const layout=window.graphCapture.deliveredLayout(),label=[...document.querySelectorAll('.collaboration-area__overview-label')].find(label=>label.dataset.areaId===${JSON.stringify(id)}),row=label?.querySelector('.collaboration-area__summary')?.getBoundingClientRect();return{ready:layout?.busy===false&&!layout.transitioning&&layout.boxes.some(box=>box.id===${JSON.stringify(id)}&&box.folded===${folded}),row:row?{x:row.x,y:row.y,width:row.width,height:row.height}:null}})()`)
+      const signature = JSON.stringify(sample)
+      if (!sample.ready || !sample.row || signature !== previous) { previous = signature; since = Date.now(); return false }
+      return Date.now() - since >= 100
+    })
+  }
   const zoom = () => read(`new DOMMatrix(getComputedStyle(document.querySelector('.react-flow__viewport')).transform).a`)
   const visualGuard = async phase => {
     const record = await read(`(${visualCounterfactual.toString()})(${JSON.stringify({ phase, areaId: areaId(original.areas[0].id) })})`)
@@ -329,8 +337,8 @@ module.exports = async function terrain({ win, result, read, click, key, move, f
     await wheelTo(.34)
     const held = await read(`(()=>{const anchor=window.__terrainAnchor,layer=anchor.closest('[data-map-layer]');return{sameReader:window.__terrainReader===document.querySelector('.agent-information-reader'),readers:document.querySelectorAll('.agent-information-reader').length,sameAnchor:anchor.isConnected,opacity:getComputedStyle(layer).opacity,inert:layer.inert,proxy:anchor.closest('[data-collaboration-agent]').querySelector('.collaboration-agent__focus-proxy')?.textContent}})()`)
     assert.equal(held.sameReader,true);assert.equal(held.readers,1);assert.equal(held.sameAnchor,true);assert.equal(held.opacity,'1');assert.equal(held.inert,false);assert.ok(held.proxy?.includes('LOD 绘制'))
-    await frame('terrain-held-reader-overview')
     await visualGuard('held-reader')
+    await frame('terrain-held-reader-overview')
     await key('Escape'); await until('Reader returns to its exact original anchor', () => read(`!document.querySelector('.agent-information-reader')&&document.activeElement===window.__terrainAnchor`))
     const focusVisibility = `(()=>{const proxy=window.__terrainAnchor.closest('[data-collaboration-agent]').querySelector('.collaboration-agent__focus-proxy'),r=proxy?.getBoundingClientRect(),canvas=document.querySelector('.collaboration-canvas').getBoundingClientRect();if(!r)return null;const overlapping=[...document.querySelectorAll('.collaboration-area__overview-label')].filter(label=>{const b=label.getBoundingClientRect();return b.left<r.right&&b.right>r.left&&b.top<r.bottom&&b.bottom>r.top}).map(label=>label.dataset.regionId);return{name:proxy.textContent,fontSize:parseFloat(getComputedStyle(proxy).fontSize),bounds:{x:r.x,y:r.y,width:r.width,height:r.height},inside:r.left>=canvas.left&&r.right<=canvas.right&&r.top>=canvas.top&&r.bottom<=canvas.bottom,overlapping}})()`
     await until('the original held focus name clears every actual region heading', async () => {
@@ -339,8 +347,8 @@ module.exports = async function terrain({ win, result, read, click, key, move, f
     })
     const visibleFocus = await read(focusVisibility)
     assert.ok(visibleFocus.name.includes('LOD 绘制'))
-    await frame('terrain-held-focus-overview')
     await visualGuard('held-focus')
+    await frame('terrain-held-focus-overview')
     verifyVisualGuards(result.terrainVisualGuards, result.frames, areaId(original.areas[0].id))
     await click('[aria-label="Find Agent in map"]'); await wheelTo(.72)
     const toggle='[aria-label="Map animations"]'

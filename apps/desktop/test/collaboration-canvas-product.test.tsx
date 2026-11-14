@@ -84,6 +84,18 @@ function graph(scene: Scene, selection: CollaborationSelection = null, relations
 async function viewport(x: number, y: number, width = 600, height = 400, zoom = 1) {
   await act(async () => captured.store!.setState({ width, height, transform: [x, y, zoom] }))
 }
+/** A Worker completion precedes natural label measurement and camera adoption.
+ * Observe the actual settled screen before starting another test-owned intent. */
+async function settledViewport() {
+  let previous = '', since = Date.now()
+  await settleCollaborationCanvas(() => {
+    expect(dom.container.querySelector('.collaboration-canvas__progress')).toBeNull()
+    const current = JSON.stringify([captured.store!.getState().transform,
+      [...dom.container.querySelectorAll<HTMLElement>('.collaboration-area__overview-label')].map(label => label.getAttribute('style'))])
+    if (current !== previous) { previous = current; since = Date.now() }
+    expect(Date.now() - since).toBeGreaterThanOrEqual(80)
+  })
+}
 async function revealWorld() {
   const extent = [...boxes.values()]
   await viewport(-Math.min(...extent.map(box => box.x)) + 20, -Math.min(...extent.map(box => box.y)) + 20, 20000, 20000)
@@ -976,6 +988,7 @@ it('locates a member inside a folded area once and preserves a later user fold t
       expect(captured.nodes.some(node => node.id === agentId)).toBe(false)
       expect(dom.container.querySelector('.collaboration-canvas__progress')).toBeNull()
     })
+    await settledViewport()
   }
   await fold()
   const locate = { token: {}, agentId: subject('canvas-0') }
@@ -1209,9 +1222,10 @@ it.each(['motion-off', 'gesture', 'new-structure'] as const)('lets a later %s su
       await viewport(gestureCamera[0], gestureCamera[1], 20000, 20000, gestureCamera[2])
       expect(renderedBox(farthest.id)).toEqual(after)
     } else {
-      const changed = new Map(added.agents), id = [...changed.keys()].find(id => id !== subject('canvas-0') && id !== subject('canvas-12'))!
-      changed.set(id, { ...changed.get(id)!, tier: 'active' })
-      holdResponses = true; await dom.render(graph(added, null, added.relations, [], changed))
+      const id = [...added.agents.keys()].find(id => id !== subject('canvas-0') && id !== subject('canvas-12'))!
+      const nextAreas: CollaborationArea[] = [...added.areas.map(area => ({ ...area, members: area.members.filter(member => member !== id) })),
+        { id: 'new-membership', name: 'New original membership', kind: 'project', members: [id] }]
+      holdResponses = true; await dom.render(graph({ ...added, areas: nextAreas }))
       expect(renderedBox(farthest.id)).toBe(middle)
       await settleCollaborationCanvas(() => expect(heldResponses.some(item => item.response.type === 'complete')).toBe(true))
       const next = requests.at(-1)!, accepted = requests[1]!
@@ -1233,12 +1247,14 @@ it.each(['motion-off', 'gesture', 'new-structure'] as const)('lets a later %s su
 it('keeps the last accepted structure after a cancelled placement and a failed successor, then retries that exact newer world', async () => {
   const { added, previous, reading, mark, camera } = await adaptiveScene()
   const cancelled = heldResponses; heldResponses = []
-  const changed = new Map(added.agents), id = subject('canvas-2')
-  changed.set(id, { ...changed.get(id)!, tier: 'active' })
+  const context = agentContextForSession(composerSession('replacement-new'), undefined, 'Replacement new original member', undefined, null)
+  const agent = [...collaborationAgents([context]).values()][0]!
+  const nextAreas = added.areas.map(area => area.id === 'work' ? { ...area, members: [...area.members, agent.id] } : area)
+  const nextAgents = new Map([...added.agents, [agent.id, { ...agent, tier: 'active' as const }]])
   // Fail the actual replacement Worker transport before any boxes are accepted.
   // Its original dispatcher is still used by the cancelled job and the retry.
   vi.mocked(engine.handleCollaborationLayoutRequest).mockImplementationOnce(async () => { throw Error('Original placement transport interrupted') })
-  await dom.render(graph(added, null, added.relations, [], changed))
+  await dom.render(graph({ ...added, areas: nextAreas, agents: nextAgents }))
   await settleCollaborationCanvas(() => expect(dom.container.querySelector('.collaboration-canvas__issue')?.textContent).toContain('Map layout stopped'))
   await act(async () => { for (const item of cancelled) item.deliver() })
   expect(captured.nodes.map(node => node.data.box)).toEqual([...previous.values()])
@@ -1268,10 +1284,10 @@ it('preserves the exact reading center when explicit Arrange shares a batch with
   const body = nodeElement(reading)!.querySelector<HTMLButtonElement>('.focus-context')!
   await act(async () => { body.focus(); body.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true })) })
   const before = renderedBox(reading), camera = captured.store!.getState().transform
+  const changed = new Map(scene.agents); changed.set(shared, { ...changed.get(shared)!, tier: 'idle', lastActivityAt: Date.now() })
+  await dom.render(graph(scene, null, scene.relations, [], changed))
   holdResponses = true
   await dom.click('[aria-label="Arrange map"]')
-  const changed = new Map(scene.agents); changed.set(shared, { ...changed.get(shared)!, tier: 'idle' })
-  await dom.render(graph(scene, null, scene.relations, [], changed))
   await settleCollaborationCanvas(() => expect(heldResponses.some(item => item.response.type === 'complete')).toBe(true))
   const request = requests.at(-1)!
   expect(request.type).toBe('arrange'); if (request.type !== 'arrange') throw Error('Explicit original arrange required')
@@ -1284,55 +1300,27 @@ it('preserves the exact reading center when explicit Arrange shares a batch with
   expect(captured.store!.getState().transform).toBe(camera); expect(requests).toHaveLength(2)
 })
 
-it('keeps unrelated occurrences and paths stable through an actual activity size transition', async () => {
+it('keeps every occurrence and route stable through an actual activity change until explicit arrangement', async () => {
   const original = scenario(24), shared = subject('canvas-0')
-  const controlContext = agentContextForSession(composerSession('size-control'), undefined, 'Unrelated control', undefined, null)
-  const controlAgent = [...collaborationAgents([controlContext]).values()][0]!
-  const scene: Scene = { ...original, contexts: [...original.contexts, controlContext], agents: new Map([...original.agents, [controlAgent.id, { ...controlAgent, tier: 'idle' }]]),
-    areas: [...original.areas.map((area, index) => index === 3 ? { ...area, members: [...area.members, shared] } : area), { id: 'size-control', name: 'Unrelated control', kind: 'project', members: [controlAgent.id] }] }
+  const scene: Scene = { ...original, areas: original.areas.map((area, index) => index === 3 ? { ...area, members: [...area.members, shared] } : area) }
   await loaded(scene)
   const reading = collaborationAgentNode('area-3', shared)
   await focusNode(reading)
   const body = nodeElement(reading)!.querySelector<HTMLButtonElement>('.focus-context')!
-  expect(body).not.toBeNull(); await act(async () => body.click())
-  expect(select).toHaveBeenLastCalledWith({ kind: 'agent', id: shared })
+  await act(async () => body.click())
   const previous = new Map(captured.nodes.map(node => [node.id, node.data.box as engine.CollaborationLayoutBox])), camera = captured.store!.getState().transform
+  const originalPaths = new Map(paths)
   const changed = new Map(scene.agents); changed.set(subject('canvas-7'), { ...changed.get(subject('canvas-7'))!, tier: 'idle' })
-  holdResponses = true
   await dom.render(graph(scene, null, scene.relations, [], changed))
-  await settleCollaborationCanvas(() => expect(heldResponses.some(item => item.response.type === 'complete')).toBe(true))
-  expect(renderedBox(reading)).toBe(previous.get(reading)); expect(nodeElement(reading)!.querySelector('.focus-context')).toBe(body)
-  const raw = heldResponses.find(item => item.response.type === 'boxes')!.response
-  expect(raw.type).toBe('boxes'); if (raw.type !== 'boxes') throw Error('Actual Worker boxes required')
-  const placed = new Map(raw.boxes.map(box => [box.id, box])), offset = { x: previous.get(reading)!.x - placed.get(reading)!.x, y: previous.get(reading)!.y - placed.get(reading)!.y }
-  expect(offset).toEqual({ x: 0, y: 0 })
-  expect(requests.map(request => request.type)).toEqual(['arrange', 'reconcile'])
-  for (const id of [JSON.stringify(['area', 'size-control']), collaborationAgentNode('size-control', controlAgent.id)]) expect(placed.get(id)).toEqual(previous.get(id))
-  const shrunken = previous.get(collaborationAgentNode('area-3', subject('canvas-7')))!
-  const surrounding = scene.areas[3]!.members.filter(id => id !== subject('canvas-7')).map(id => collaborationAgentNode('area-3', id)).filter(id => id !== reading)
-    .sort((a, b) => centerDistance(previous.get(a)!, shrunken) - centerDistance(previous.get(b)!, shrunken) || a.localeCompare(b)).slice(0, 2)
-  const hole = (values: ReadonlyMap<string, engine.CollaborationLayoutBox>) => surrounding.reduce((sum, id) => sum + centerDistance(values.get(id)!, shrunken), 0)
-  expect(Math.max(...surrounding.map(id => centerDistance(placed.get(id)!, previous.get(id)!)))).toBeGreaterThan(1)
-  expect(hole(placed)).toBeLessThan(hole(previous) * .95)
-  await releasePlacement()
-  expect(renderedBox(reading).x).toBeCloseTo(previous.get(reading)!.x, 8); expect(renderedBox(reading).y).toBeCloseTo(previous.get(reading)!.y, 8)
-  expect(nodeElement(reading)!.querySelector('.focus-context')).toBe(body); expect(captured.store!.getState().transform).toBe(camera)
-  expect(requests).toHaveLength(2)
-  for (const node of captured.nodes) {
-    const actual = renderedBox(node.id), input = placed.get(node.id)!
-    expect(actual.x).toBeCloseTo(input.x + offset.x, 8); expect(actual.y).toBeCloseTo(input.y + offset.y, 8)
-  }
-  const world = [...captured.nodes].map(node => renderedBox(node.id)), left = Math.min(...world.map(box => box.x)), top = Math.min(...world.map(box => box.y))
-  await viewport(-left * .1 + 20, -top * .1 + 20, 2000, 2000, .1)
-  const overviewEdges = [...dom.container.querySelectorAll<SVGGElement>('.collaboration-connections .react-flow__edge')]
-  expect(overviewEdges.length).toBeGreaterThan(0)
-  await viewport(-left + 20, -top + 20, 20000, 20000, 1)
-  const edges = [...new Map([...overviewEdges, ...dom.container.querySelectorAll<SVGGElement>('.collaboration-connections .react-flow__edge')].map(edge => [edge.dataset.id, edge])).values()]
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 180)) })
+  for (const node of captured.nodes) expect(renderedBox(node.id)).toBe(previous.get(node.id))
+  expect(nodeElement(reading)!.querySelector('.focus-context')).toBe(body)
+  expect(captured.store!.getState().transform).toBe(camera); expect(requests).toHaveLength(1)
+  expect(paths).toEqual(originalPaths)
+  await revealWorld()
+  const edges = [...dom.container.querySelectorAll<SVGGElement>('.collaboration-connections .react-flow__edge')]
   expect(edges).toHaveLength(paths.size)
-  for (const edge of edges) {
-    const rawPath = paths.get(edge.dataset.id!)!, curve = curvePoints(edge.querySelector('.react-flow__edge-path')!.getAttribute('d')!)
-    expectAnchoredVisibleCurve(rawPath, curve, offset)
-  }
+  for (const edge of edges) expectAnchoredVisibleCurve(paths.get(edge.dataset.id!)!, curvePoints(edge.querySelector('.react-flow__edge-path')!.getAttribute('d')!), { x: 0, y: 0 })
 })
 
 it('keeps keyboard reading anchored then honors the last actual pointer during a later size job without another request', async () => {
@@ -1349,6 +1337,7 @@ it('keeps keyboard reading anchored then honors the last actual pointer during a
   expect(preview).toHaveBeenLastCalledWith(null)
   const changed = new Map(scene.agents); changed.set(subject('canvas-4'), { ...changed.get(subject('canvas-4'))!, tier: 'idle' })
   holdResponses = true; await dom.render(graph(scene, null, scene.relations, [], changed))
+  await dom.click('[aria-label="Arrange map"]')
   await settleCollaborationCanvas(() => expect(heldResponses.some(item => item.response.type === 'complete')).toBe(true))
   await releasePlacement()
   expect([renderedBox(earlier).x, renderedBox(earlier).y]).toEqual([firstBox.x, firstBox.y])
@@ -1356,12 +1345,13 @@ it('keeps keyboard reading anchored then honors the last actual pointer during a
   const previous = new Map(captured.nodes.map(node => [node.id, node.data.box as engine.CollaborationLayoutBox]))
   const next = new Map(scene.agents)
   holdResponses = true; await dom.render(graph(scene, null, scene.relations, [], next))
+  await dom.click('[aria-label="Arrange map"]')
   await settleCollaborationCanvas(() => expect(heldResponses.some(item => item.response.type === 'complete')).toBe(true))
   await pointAt(reading)
   const camera = captured.store!.getState().transform
   await releasePlacement()
   expect(renderedBox(reading).x).toBeCloseTo(previous.get(reading)!.x, 8); expect(renderedBox(reading).y).toBeCloseTo(previous.get(reading)!.y, 8)
-  expect(captured.store!.getState().transform).toBe(camera); expect(requests.map(request => request.type)).toEqual(['arrange', 'reconcile', 'reconcile'])
+  expect(captured.store!.getState().transform).toBe(camera); expect(requests.map(request => request.type)).toEqual(['arrange', 'arrange', 'arrange'])
 })
 
 it('preserves the clicked area heading through folding and unfolding without resurrecting the prior Agent anchor', async () => {
@@ -1376,7 +1366,7 @@ it('preserves the clicked area heading through folding and unfolding without res
   const previous = renderedBox(reading), changed = new Map(scene.agents)
   changed.set(subject('canvas-4'), { ...changed.get(subject('canvas-4'))!, tier: 'idle' })
   await dom.render(graph(scene, null, scene.relations, [], changed, { ready: true, locate }))
-  await settleCollaborationCanvas(() => { expect(requests).toHaveLength(2); expect(dom.container.querySelector('.collaboration-canvas__progress')).toBeNull() })
+  await settleCollaborationCanvas(() => { expect(requests).toHaveLength(1); expect(dom.container.querySelector('.collaboration-canvas__progress')).toBeNull() })
   expect([renderedBox(reading).x, renderedBox(reading).y]).toEqual([previous.x, previous.y])
   const headingAt = () => { const box = renderedBox(areaId) as Extract<engine.CollaborationLayoutBox, { kind: 'area' }>; return { x: box.x + box.heading.x, y: box.y + box.heading.y } }
   const heading = headingAt(); await viewport(-heading.x + 12, -heading.y + 12)
@@ -1395,10 +1385,11 @@ it('preserves the clicked area heading through folding and unfolding without res
   expect(dom.container.querySelector(`[data-area-id='${areaId}'] .collaboration-area__fold`)).not.toBeNull()
   await act(async () => dom.container.querySelector<HTMLButtonElement>(`[data-area-id='${areaId}'] .collaboration-area__fold`)!.click())
   await settleCollaborationCanvas(() => { expect(captured.nodes.some(node => node.id === reading)).toBe(true); expect(dom.container.querySelector('.collaboration-canvas__progress')).toBeNull() })
+  await settledViewport()
   const expandedCamera = captured.store!.getState().transform
   const resized = new Map(changed); resized.set(subject('canvas-8'), { ...resized.get(subject('canvas-8'))!, tier: 'closed' })
   await dom.render(graph(scene, null, scene.relations, [], resized, { ready: true, locate }))
-  await settleCollaborationCanvas(() => { expect(requests).toHaveLength(5); expect(dom.container.querySelector('.collaboration-canvas__progress')).toBeNull() })
+  await settleCollaborationCanvas(() => { expect(requests).toHaveLength(3); expect(dom.container.querySelector('.collaboration-canvas__progress')).toBeNull() })
   // The explicitly read heading remains the anchor; a reappearing Agent is not a new reading intent.
   expect(headingAt().x).toBeCloseTo(heading.x, 8); expect(headingAt().y).toBeCloseTo(heading.y, 8)
   expect(captured.store!.getState().transform).toBe(expandedCamera)
@@ -1543,6 +1534,7 @@ it('keeps a natural nested heading and its Expand action at the actual clicked s
   expect(captured.store!.getState().transform[2]).toBe(zoom)
   await act(async () => expand.click())
   await settleCollaborationCanvas(() => { expect(renderedBox(id).folded).toBe(false); expect(captured.nodes.filter(node => node.type === 'agent')).toHaveLength(12) })
+  await settledViewport()
   const restored = regionLabelBounds('nested')
   expect(restored.element.querySelector('[aria-label="Collapse Collaboration terrain"]')).not.toBeNull()
   expect(restored.x).toBeCloseTo(before.x, 5)
@@ -1699,6 +1691,7 @@ it('reads a real folded descendant summary through its large parent heading with
     await viewport(80 - (box.x + box.heading.x) * .85, 100 - (box.y + box.heading.y) * .85, 600, 400, .85)
     await dom.click(`[aria-label="Collapse ${area.name}"]`)
     await settleCollaborationCanvas(() => expect(renderedBox(id).folded).toBe(true))
+    await settledViewport()
   }
   expect(captured.nodes.some(node => node.type === 'agent')).toBe(false)
   const parent = renderedBox(JSON.stringify(['area', 'root']))
@@ -2081,6 +2074,7 @@ it('keeps every selected original relation emphasized when an explicitly folded 
     await focusNode(JSON.stringify(['area', area.id]))
     await act(async () => dom.container.querySelector<HTMLButtonElement>(`[data-region-id='${area.id}'] .collaboration-area__fold`)!.click())
     await settleCollaborationCanvas(() => expect(dom.container.querySelector('.collaboration-canvas__progress')).toBeNull())
+    await settledViewport()
   }
   const extent = [...boxes.values()], left = Math.min(...extent.map(box => box.x)), top = Math.min(...extent.map(box => box.y))
   await viewport(-left * .25 + 20, -top * .25 + 20, 1600, 1200, .25)
@@ -2094,6 +2088,7 @@ it('keeps every selected original relation emphasized when an explicitly folded 
     await focusNode(JSON.stringify(['area', area.id]))
     await act(async () => dom.container.querySelector<HTMLButtonElement>(`[data-region-id='${area.id}'] .collaboration-area__fold`)!.click())
     await settleCollaborationCanvas(() => expect(dom.container.querySelector('.collaboration-canvas__progress')).toBeNull())
+    await settledViewport()
   }
   const operations = requests.length
   await viewport(10000, 10000, 40000, 40000, 1)
@@ -2116,6 +2111,7 @@ it('adopts parent-relative positions when a local resize expands the original ar
   await pointAt(reading.id)
   const changed = new Map(agents); changed.set(agent.id, { ...agent, tier: 'active' })
   await dom.render(graph(scene, null, scene.relations, [], changed))
+  await dom.click('[aria-label="Arrange map"]')
   await settleCollaborationCanvas(() => {
     expect(requests).toHaveLength(2); expect(dom.container.querySelector('.collaboration-canvas__progress')).toBeNull()
     expect(renderedBox(areaId).x).toBeLessThan(area.x)

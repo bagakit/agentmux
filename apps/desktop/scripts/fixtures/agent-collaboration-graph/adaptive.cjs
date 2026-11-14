@@ -103,9 +103,17 @@ function verify(data, actualFrames) {
   const hole = values => data.surrounding.reduce((sum, id) => sum + distance(values.get(id), old.get(removed.fact.oldNodeId)), 0)
   assert.equal(data.surrounding.length, 2); assert.ok(hole(surviving) < hole(old) * .95, 'Two preselected old neighbors reclaim the internal vacancy by at least five percent')
   assert.ok(data.surrounding.some(id => distance(old.get(id), surviving.get(id)) > 1))
-  assert.ok(data.phases[2].fact.active && !data.phases[3].fact.active)
-  assert.deepEqual([map(data.phases[2].after).get(data.phases[2].fact.nodeId).width, map(data.phases[2].after).get(data.phases[2].fact.nodeId).height], [250, 94], 'The exact original non-reader receives its active footprint')
-  assert.deepEqual([map(data.phases[3].after).get(data.phases[3].fact.nodeId).width, map(data.phases[3].after).get(data.phases[3].fact.nodeId).height], [154, 38], 'The same original non-reader returns to its compact footprint')
+  assert.equal(data.stableSlots.length, 2, 'Both live directions have actual native observations')
+  for (const phase of data.stableSlots) {
+    assert.equal(phase.after.camera, phase.before.camera, 'Live status cannot move the camera')
+    assert.deepEqual([...map(phase.after)].sort(), [...map(phase.before)].sort(), 'Live status retains every exact occurrence slot')
+    assert.deepEqual(phase.workers, [], 'A live tier change never sends a geometry job')
+    assert.ok(phase.after.held.sameReader && phase.after.held.sameAnchor && phase.after.held.sameSubject && phase.after.held.sameFocus, 'The original held Reader survives ordinary state updates')
+    assert.equal(phase.visible.active, phase.fact.active, 'The current native status reaches the actual compact node')
+    assert.equal(phase.visible.fullCard, false, 'A newly active compact slot never mounts an overflowing full card')
+  }
+  assert.ok(data.stableSlots[0].fact.active && !data.stableSlots[1].fact.active)
+  for (const phase of data.phases.slice(2)) assert.ok(map(phase.before).has(phase.fact.oldNodeId) && !map(phase.after).has(phase.fact.oldNodeId) && map(phase.after).has(phase.fact.nodeId), 'Motion checks use a real membership change, not a live tier resize')
   assert.ok(data.intact, 'Original durable workface, draft, spatial selection and no-Run-control checks completed')
 }
 
@@ -211,10 +219,21 @@ module.exports = async function adaptive({ win, result, read, click, key, move, 
     await phase('remove-membership', `window.graphCapture.adaptiveRemoveMember(${JSON.stringify(internal.id)})`, { after: 'adaptive-deleted-narrow-light' })
     await click('[aria-label="Map animations"]'); await until('the original effective motion choice is off', () => read(`document.querySelector('[aria-label="Map animations"]').getAttribute('aria-pressed')==='false'&&document.querySelector('[aria-label="Map animations"]').getAttribute('aria-busy')!=='true'`)); await holdReader()
     const resize = scope.members.find(member => member.id !== scope.reader && member.id !== internal.id && member.id !== farthest.id)
-    await phase('redraw-motion-off', `window.graphCapture.adaptiveTier(${JSON.stringify(resize.id)},true)`, { after: 'adaptive-redraw-motion-off-narrow-light' })
+    data.stableSlots = []
+    for (const active of [true, false]) {
+      const before = await sample(), first = await read('window.graphCapture.workerSamples().length')
+      const fact = await read(`window.graphCapture.adaptiveTier(${JSON.stringify(resize.id)},${active})`)
+      await settled(); await pause(180)
+      const after = await sample(), workers = (await read('window.graphCapture.workerSamples()')).slice(first)
+      const visible = await read(`(()=>{const root=[...document.querySelectorAll('[data-collaboration-agent]')].find(node=>node.getAttribute('data-collaboration-agent')===${JSON.stringify(JSON.stringify(['local', resize.id]))});if(!root)throw Error('The original compact state subject must be visible');return{active:root.classList.contains('collaboration-agent--active'),fullCard:Boolean(root.querySelector('.focus-context'))}})()`)
+      data.stableSlots.push({ before, after, workers, fact, visible })
+      await frame(active ? 'adaptive-stable-active-narrow-light' : 'adaptive-stable-idle-narrow-light')
+    }
+    await phase('redraw-motion-off', `window.graphCapture.adaptiveRemoveMember(${JSON.stringify(resize.id)})`, { after: 'adaptive-redraw-motion-off-narrow-light' })
     await click('[aria-label="Map animations"]'); await until('the original effective motion choice is on', () => read(`document.querySelector('[aria-label="Map animations"]').getAttribute('aria-pressed')==='true'&&document.querySelector('[aria-label="Map animations"]').getAttribute('aria-busy')!=='true'`))
     await closeDetails(); win.setContentSize(1440, 900); await read('window.graphCapture.appearance("dark")'); await pause(180); await fitWork(.55); await holdReader(); await frame('adaptive-gesture-before-dark')
-    await phase('redraw-gesture', `window.graphCapture.adaptiveTier(${JSON.stringify(resize.id)},false)`, { after: 'adaptive-gesture-after-dark', gesture: true })
+    const gestureMember = scope.members.find(member => ![scope.reader, internal.id, farthest.id, resize.id].includes(member.id))
+    await phase('redraw-gesture', `window.graphCapture.adaptiveRemoveMember(${JSON.stringify(gestureMember.id)})`, { after: 'adaptive-gesture-after-dark', gesture: true })
     await intact(); data.intact = true; verify(data, result.frames)
   })
 }
