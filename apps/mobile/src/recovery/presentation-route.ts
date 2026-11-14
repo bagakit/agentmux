@@ -1,7 +1,7 @@
 import type { AgentMuxMotePresentation, AgentMuxSpaceAddress, TopicKnowledgeSource } from '@agentmux/core/control'
 import type { MobileObjectIdentity } from '../navigation/MobileIdentity'
 import type { MobilePrimaryWorkface } from '../navigation/home-preference'
-import type { MobileTopicsContext } from '../topics/MobileTopicsSurface'
+import type { MobileTopicsContext } from '../topics/topics-navigation'
 import type { MobileSurveyContext } from '../survey/MobileSurveySurface'
 import type { MobileSpatialContext } from '../navigation/MobileSpatialNavigation'
 import { parseMobileKnowledgeDraftKey } from './knowledge-drafts'

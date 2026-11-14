@@ -5,7 +5,7 @@ import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
 import type { AgentMuxSpaceCatalog, TopicKnowledgeSource } from '@agentmux/core/control'
 
-import type { MobileTopicsContext } from './topics/MobileTopicsSurface'
+import { useTopicsNavigation } from './topics/use-topics-navigation'
 import type { MobileSurveyContext } from './survey/MobileSurveySurface'
 
 import type { ClientUiPlatform } from '@agentmux/client-ui/platform'
@@ -55,7 +55,7 @@ import { readMobileHome, saveMobileHome, type MobileHome, type MobilePrimaryWork
 
 import { mobileChatStart, mobileMoteOwner } from './navigation/chat-start'
 import { useMobileBack } from './navigation/useMobileBack'
-import { retainObjectReference, type MobilePresentationRoute, type MobileTopicsRoute, type MobileGoalsContext, type MobileKnowledgeReference } from './recovery/presentation-route'
+import { retainObjectReference, type MobilePresentationRoute, type MobileGoalsContext } from './recovery/presentation-route'
 import type { MobileTopicSourceContentReference } from './topics/source-reference'
 import { MobileAvatarNoticeOutlet, MobileNotice, MobileNoticeProvider, MobileNoticeRestore, MobileNoticeScope, useMobileNotices } from './notices/MobileNotice'
 import { MobileGoalOperationRecovery, MobileGoalOperationSafety } from './goals/goal-operation-recovery'
@@ -143,8 +143,8 @@ function MobileAppContent({ client, connection, platform: basePlatform, native =
   const [defaultHome, setDefaultHome] = useState<MobilePrimaryWorkface>(initialHome.current.home)
   const [homeIssue, setHomeIssue] = useState(initialHome.current.issue)
   const [secondary, setSecondary] = useState<'topics' | 'survey' | 'goals' | null>(initialPrimary === 'goals' || initialPrimary === 'topics' || initialPrimary === 'survey' ? initialPrimary : null)
-  const [topicsRoute, setTopicsRoute] = useState<MobileTopicsRoute>(initial.current.presentation?.topics
-    ?? { context: { categoryId: null, topicId: null, mode: 'discussion' }, sources: [] })
+  const topicsNavigation = useTopicsNavigation(initial.current.presentation?.topics, client)
+  const topicsRoute = topicsNavigation.route
   const [surveyContext, setSurveyContext] = useState<MobileSurveyContext>(initial.current.presentation?.survey
     ?? { zoneId: null, tabId: null, regionId: null })
   const [spatialContext, setSpatialContext] = useState<MobileSpatialContext>(initial.current.presentation?.spatial
@@ -157,27 +157,13 @@ function MobileAppContent({ client, connection, platform: basePlatform, native =
     value.zoneId === context.zoneId && value.tabId === context.tabId && value.regionId === context.regionId ? value : context), [])
   const updateSpatialContext = useCallback((context: MobileSpatialContext) => setSpatialContext(value =>
     value.spaceId === context.spaceId && value.tabId === context.tabId && value.regionId === context.regionId ? value : context), [])
-  const topicId = topicsRoute.context.topicId, source = topicsRoute.sources.at(-1)?.source ?? null
+  const source = topicsRoute.sources.at(-1)?.source ?? null
   const sourceReference = topicsRoute.sources.at(-1)?.content
-  const navigateTopics = useCallback(() => setTopicsRoute(value => value.sources.length ? { ...value, sources: [] } : value), [])
-  const sourceBytes = JSON.stringify(source)
-  const updateSourceReference = useCallback((content: MobileTopicSourceContentReference) => setTopicsRoute(value => {
-    const frame = value.sources.at(-1)
-    if (!frame || JSON.stringify(frame.source) !== sourceBytes || JSON.stringify(frame.content) === JSON.stringify(content)) return value
-    return { ...value, sources: [...value.sources.slice(0, -1), { ...frame, content }] }
-  }), [sourceBytes])
-  const updateTopicsContext = useCallback((context: MobileTopicsContext) => setTopicsRoute(value =>
-    value.context.categoryId === context.categoryId && value.context.topicId === context.topicId && value.context.mode === context.mode
-      ? value : { ...value, context }), [])
-  const updateKnowledgeReference = useCallback((knowledge: MobileKnowledgeReference) => setTopicsRoute(value =>
-    JSON.stringify(value.knowledge) === JSON.stringify(knowledge) ? value : { ...value, knowledge }), [])
-  const leaveSource = useCallback(() => setTopicsRoute(value => {
-    const frame = value.sources.at(-1)
-    if (!frame) return value
-    const { knowledge: _knowledge, ...rest } = value
-    return { ...rest, context: frame.origin, sources: value.sources.slice(0, -1),
-      ...(frame.originKnowledge ? { knowledge: frame.originKnowledge } : {}) }
-  }), [])
+  const sourceFrame = topicsNavigation.state.sources.at(-1)
+  const updateSourceReference = useCallback((content: MobileTopicSourceContentReference) => {
+    if (sourceFrame) topicsNavigation.observe({ type: 'source-content', frameToken: sourceFrame.token, source: sourceFrame.value.source, content })
+  }, [topicsNavigation.observe, sourceFrame?.token])
+  const leaveSource = useCallback(() => topicsNavigation.send({ type: 'source-leave' }), [topicsNavigation.send])
   const pageName = secondary === 'topics' ? 'Topics' : secondary === 'survey' ? 'Survey' : secondary === 'goals' ? 'Goals' : home === 'mote' ? 'Mote' : home === 'space' ? 'Space' : 'Focus'
   const rpc = useCallback<NonNullable<AgentMuxHostedClient['forwardRpc']>>((method, params) => {
     if (!client?.forwardRpc) return Promise.reject(new Error('连接暂不可用，连上 Mac 后可继续。'))
@@ -248,10 +234,7 @@ function MobileAppContent({ client, connection, platform: basePlatform, native =
   const openSource = (value: TopicKnowledgeSource) => {
     navigationRevision.current += 1
     if (value.kind === 'url') { openBrowserHttpLink(value.url); return }
-    setTopicsRoute(current => ({ ...current, context: value.kind === 'topic'
-      ? { categoryId: null, topicId: value.topicId, mode: 'discussion' } : current.context,
-      sources: [...current.sources, { source: value, origin: current.context,
-        ...(current.knowledge ? { originKnowledge: current.knowledge } : {}) }] }))
+    topicsNavigation.send({ type: 'source-open', source: value })
     setSecondary('topics')
   }
   const openPrimaryWorkface = (value: MobilePrimaryWorkface) => {
@@ -266,7 +249,7 @@ function MobileAppContent({ client, connection, platform: basePlatform, native =
     void rpc('space.inspect', { target: { spaceId } }).then(value => {
       if (revision !== navigationRevision.current) return
       const topic = value.catalog.spaces.find(item => item.spaceId === spaceId)?.topicId
-      if (topic) { setTopicsRoute({ context: { categoryId: null, topicId: topic, mode: 'discussion' }, sources: [] }); setSecondary('topics') }
+      if (topic) { topicsNavigation.send({ type: 'topic', topicId: topic, categoryId: null }); setSecondary('topics') }
       else setNotice('这项研究对应的 Topic 还没确认，请刷新后重试。')
     }).catch(error => setNotice(error instanceof Error ? error.message : String(error)))
   }
@@ -472,7 +455,7 @@ function MobileAppContent({ client, connection, platform: basePlatform, native =
     })
     return () => { void binding.dispose().catch(reportError) }
   }, [client, native])
-  const retainTopics = initial.current.presentation?.topics !== undefined || topicsRoute.context.categoryId !== null || topicId !== null
+  const retainTopics = initial.current.presentation?.topics !== undefined || topicsRoute.context.categoryId !== null || topicsRoute.context.topicId !== null
     || topicsRoute.context.mode !== 'discussion' || topicsRoute.sources.length > 0
   const presentation: MobilePresentationRoute = { primary: secondary ?? home, showSession, showGoalWork, ...(retainTopics ? { topics: topicsRoute } : {}),
     ...(recentMoteSpaceId ? { recentMoteSpaceId } : {}),
@@ -689,11 +672,8 @@ function MobileAppContent({ client, connection, platform: basePlatform, native =
         <div className="mobile-spatial-host" hidden={showSession || secondary !== null}><MobileSpatialNavigation wide={wideShell} loadingLabel={focusShown ? 'Focus' : home === 'mote' ? 'Mote' : home === 'focus' ? 'Focus' : 'Space'} loadWhen={!showSession && secondary === null || focusVisible} focusTarget={focusTarget} fallbackTarget={focusShown ? focusTarget : null} focusVisible={focusVisible} focusSelected={focusSelected} openFocusSession={openFocusSession} onLoadReturn={returnToConversation} onCreateAgent={createAgent} visible={exposed && !showSession && secondary === null} home={home} client={client} connected={connected} openSession={openSession} onPresentation={attention.publish} needsYou={needsYou} openMainAgent={openMainAgent} openProfile={openProfile} onBackChange={registerSpatialBack}
           recentMoteSpaceId={recentMoteSpaceId} onSelectMote={selectMote}
           initialContext={spatialContext} onContextChange={updateSpatialContext} openHttpLink={openBrowserHttpLink} /></div>
-        <div className="mobile-topics-host" data-wide={wideShell || undefined} data-source-active={topicSourceActive || undefined} hidden={showSession || secondary !== 'topics'}><div className="mobile-topics-directory-host" hidden={topicSourceActive && !wideShell}><MobileTopicsSurface wide={wideShell} sourceActive={topicSourceActive} onNavigate={navigateTopics} loadWhen={!showSession && secondary === 'topics' && (wideShell || !topicSourceActive)} onLoadReturn={returnToConversation} rpc={rpc} visible={exposed && !showSession && secondary === 'topics' && (wideShell || !topicSourceActive)} topicId={topicId}
-          client={client} connected={connected} {...(topicsRoute.knowledge ? { initialKnowledge: topicsRoute.knowledge } : {})} onKnowledgeChange={updateKnowledgeReference}
-          initialContext={topicsRoute.context} onContextChange={updateTopicsContext}
-          {...(source?.kind === 'topic' ? { onLeaveTopic: leaveSource, topicBackLabel: '返回知识' } : {})}
-          onOpenTopic={topic => updateTopicsContext({ ...topicsRoute.context, topicId: topic.topicId, mode: 'discussion' })} openSource={openSource} openHttpLink={openBrowserHttpLink} onBackChange={registerTopicsBack}
+        <div className="mobile-topics-host" data-wide={wideShell || undefined} data-source-active={topicSourceActive || undefined} hidden={showSession || secondary !== 'topics'}><div className="mobile-topics-directory-host" hidden={topicSourceActive && !wideShell}><MobileTopicsSurface wide={wideShell} navigation={topicsNavigation} loadWhen={!showSession && secondary === 'topics' && (wideShell || !topicSourceActive)} onLoadReturn={returnToConversation} rpc={rpc} visible={exposed && !showSession && secondary === 'topics' && (wideShell || !topicSourceActive)}
+          client={client} connected={connected} openSource={openSource} openHttpLink={openBrowserHttpLink} onBackChange={registerTopicsBack}
           renderWorkface={(topic, visible) => <MobileZoneWorkface loadWhen={visible} onLoadReturn={returnToConversation} key={topic.topicId} client={client} zoneId={topic.zoneId} name={topic.title} visible={visible} onCreateAgent={createAgent}
             {...(source?.kind === 'topic' && source.topicId === topic.topicId ? { tabId: source.chatId, regionId: source.threadId } : {})} openSession={openSession} />} /></div><div className="mobile-source-host" hidden={!topicSourceActive}>{topicsSourceContent}</div></div>
         <div hidden={showSession || secondary !== 'survey'}><MobileSurveySurface loadWhen={!showSession && secondary === 'survey'} onLoadReturn={returnToConversation} client={client} connected={connected} visible={exposed && !showSession && secondary === 'survey'} openSession={openSession}

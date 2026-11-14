@@ -1,84 +1,59 @@
 import { MobileNotice } from '../notices/MobileNotice'
 import { mintObjectId } from '@agentmux/core/object-id'
 import { ComposerTextarea, TextInput } from '@agentmux/client-ui/input'
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
 import type { TopicKnowledge, TopicKnowledgeItem, TopicKnowledgeSource } from '@agentmux/core/control'
 import { AgentMarkdown, type OpenHttpLink } from '@agentmux/client-ui/components/AgentMarkdown'
 import { getDeviceWorkface } from '../recovery/device-workface'
 import { mobileKnowledgeDraftKey, type MobileKnowledgeDraftScope } from '../recovery/knowledge-drafts'
-import type { MobileKnowledgeReference } from '../recovery/presentation-route'
+import { knowledgePosition, type TopicsNavigationController } from './topics-navigation'
 import { mobileKnowledgeDraftSource, useKnowledgeDraft, type MobileKnowledgeEditTarget } from './useKnowledgeDraft'
 
 export type TopicsRpc = NonNullable<AgentMuxHostedClient['forwardRpc']>
-export type MobileTopicKnowledgeProps = { rpc: TopicsRpc; topicId?: string; title: string; visible?: boolean;
-  wide?: boolean; sourceActive?: boolean; onNavigate?(): void;
-  client?: AgentMuxHostedClient | null; connected?: boolean;
-  initialReference?: MobileKnowledgeReference; onReferenceChange?(reference: MobileKnowledgeReference): void;
-  openSource(source: TopicKnowledgeSource): void | Promise<void>; openHttpLink?: OpenHttpLink; onBackChange?(back: (() => void) | null): void }
+export type MobileTopicKnowledgeProps = { rpc: TopicsRpc; navigation: TopicsNavigationController; scopeTopicId: string | null; title: string; visible?: boolean;
+  wide?: boolean; client?: AgentMuxHostedClient | null; connected?: boolean;
+  openSource(source: TopicKnowledgeSource): void | Promise<void>; openHttpLink?: OpenHttpLink }
 const errorText = (error: unknown) => error instanceof Error ? error.message : String(error)
 const certaintyLabels = { fact: '事实', inference: '推断', proposal: '提案', decision: '决定' }
 function sourceLabel(source: TopicKnowledgeSource): string {
   return source.kind === 'url' ? source.url : source.kind === 'file' ? source.path
     : ({ topic: '讨论', note: '笔记 / 块', notebook: '笔记本', survey: '研究', space: '工作面' } as const)[source.kind]
 }
-const referenceKey = (value: MobileKnowledgeReference) => JSON.stringify({ topicId: value.topicId, entryId: value.entryId,
-  view: value.view, ...(value.query ? { query: value.query } : {}), ...(value.draftKey ? { draftKey: value.draftKey } : {}) })
-const targetReference = (value: MobileKnowledgeReference | undefined) => value?.topicId && value.entryId && value.view !== 'list'
-  ? { topicId: value.topicId, entryId: value.entryId, ...(value.draftKey ? { draftKey: value.draftKey } : {}) } : null
-const editReference = (value: MobileKnowledgeReference | undefined): MobileKnowledgeEditTarget | null => value && (value.view === 'edit' || value.view === 'read' && value.draftKey) && value.topicId && value.entryId
-  ? { topicId: value.topicId, entryId: value.entryId, ...(value.draftKey ? { draftKey: value.draftKey } : {}) } : null
-
-/** Mount per Topic, preserving visited editors while only the visible scope reads. */
-export function MobileTopicKnowledge(props: MobileTopicKnowledgeProps) {
-  return <KnowledgeScope key={props.topicId ?? 'all-topics'} {...props} />
-}
-function KnowledgeScope({ rpc, topicId, title, openSource, openHttpLink, onBackChange, client = null, connected,
-  initialReference, onReferenceChange, visible = true, wide = false, sourceActive = false, onNavigate }: MobileTopicKnowledgeProps) {
-  const [query, setQuery] = useState(initialReference?.query ?? ''), [search, setSearch] = useState(initialReference?.query ?? '')
-  const [entries, setEntries] = useState<TopicKnowledgeItem[]>([]), [selected, setSelected] = useState<TopicKnowledge | null>(null)
-  const [selection, setSelection] = useState(targetReference(initialReference)), [selectedScope, setSelectedScope] = useState<MobileKnowledgeDraftScope | null>(null)
+/** Retained data/editor owners consume one canonical navigation position. */
+export function MobileTopicKnowledge({ rpc, navigation, scopeTopicId, title, openSource, openHttpLink, client = null, connected,
+  visible = true, wide = false }: MobileTopicKnowledgeProps) {
+  const { state, send, observe } = navigation
+  const position = knowledgePosition(state, scopeTopicId)
+  const currentPosition = useRef(position); currentPosition.current = position
+  const topicId = scopeTopicId ?? undefined
+  const { query, search, reading: selection, editor } = position
+  const editorVisible = position.view === 'edit'
+  const source = state.sources.at(-1)?.value.source
+  const sourceActive = Boolean(source && source.kind !== 'topic')
+  const [entries, setEntries] = useState<TopicKnowledgeItem[]>([])
+  const [body, setBody] = useState<{ entry: TopicKnowledge; scope: MobileKnowledgeDraftScope | null } | null>(null)
+  const selected = selection && body?.entry.topicId === selection.topicId && body.entry.entryId === selection.entryId ? body.entry : null
+  const selectedScope = selected ? body!.scope : null
   const [issue, setIssue] = useState(''), [loading, setLoading] = useState(false), [refresh, setRefresh] = useState(0)
-  const [edit, setEdit] = useState<MobileKnowledgeEditTarget | null>(editReference(initialReference))
-  const [editorKey, setEditorKey] = useState(initialReference?.draftKey ?? `${initialReference?.topicId ?? ''}:${initialReference?.entryId ?? ''}`)
-  const [editorVisible, setEditorVisible] = useState(initialReference?.view === 'edit')
+  // These are original business data, not another navigation position. The same editor
+  // retains its entry/CAS baseline while a different knowledge entry is being read.
+  const editorData = useRef<{ token: number; entry?: TopicKnowledge; scope: MobileKnowledgeDraftScope | null } | null>(null)
+  if (editor && editorData.current?.token !== editor.token) editorData.current = { token: editor.token,
+    ...(selected?.topicId === editor.topicId && selected.entryId === editor.entryId ? { entry: selected } : {}),
+    scope: editor.isNew ? mobileKnowledgeDraftSource(client, getDeviceWorkface())?.scope ?? null : selectedScope }
+  if (editor && selected?.topicId === editor.topicId && selected.entryId === editor.entryId)
+    editorData.current = { token: editor.token, entry: selected, scope: selectedScope }
+  const edit: MobileKnowledgeEditTarget | null = editor ? { topicId: editor.topicId, entryId: editor.entryId,
+    ...(editor.draftKey ? { draftKey: editor.draftKey } : {}), ...(editor.isNew ? { isNew: true } : {}),
+    ...(editorData.current?.entry ? { entry: editorData.current.entry } : {}), scope: editorData.current?.scope ?? null } : null
+  const editorKey = editor?.mountKey
   const directoryVisible = visible && (wide || !selection && !editorVisible) && (wide || !sourceActive)
   const readingVisible = visible && !sourceActive
   const readIntent = useRef(0), latestClient = useRef(client), latestConnection = useRef(connected)
   latestClient.current = client; latestConnection.current = connected
-  const receivedReference = useRef(initialReference ? referenceKey(initialReference) : null), pendingReference = useRef<string | null>(null)
-  const backToReading = useCallback(() => setEditorVisible(false), [])
-  const backToList = useCallback(() => { readIntent.current += 1; setSelected(null); setSelection(null) }, [])
-  const activeBack = editorVisible ? backToReading : selection ? backToList : null
-  useLayoutEffect(() => {
-    if (!readingVisible || !onBackChange) return
-    onBackChange(activeBack)
-    return () => onBackChange(null)
-  }, [readingVisible, onBackChange, activeBack])
-  useLayoutEffect(() => {
-    if (!initialReference) return
-    const key = referenceKey(initialReference)
-    if (key === receivedReference.current) return
-    receivedReference.current = key; pendingReference.current = key; readIntent.current += 1
-    const target = targetReference(initialReference)
-    setQuery(initialReference.query ?? ''); setSearch(initialReference.query ?? ''); setSelection(target)
-    setSelected(previous => previous?.topicId === target?.topicId && previous?.entryId === target?.entryId ? previous : null)
-    setEditorVisible(initialReference.view === 'edit')
-    if (initialReference.view === 'edit' || initialReference.view === 'read' && initialReference.draftKey) {
-      setEdit(editReference(initialReference)); setEditorKey(initialReference.draftKey ?? `${initialReference.topicId}:${initialReference.entryId}`)
-    }
-  }, [initialReference])
-  const reference: MobileKnowledgeReference = editorVisible && edit ? { topicId: edit.topicId, entryId: edit.entryId, view: 'edit',
-    ...(edit.draftKey ? { draftKey: edit.draftKey } : {}), ...(query ? { query } : {}) }
-    : selection ? { ...selection, view: 'read', ...(edit?.topicId === selection.topicId && edit.entryId === selection.entryId && edit.draftKey ? { draftKey: edit.draftKey } : {}), ...(query ? { query } : {}) }
-      : { topicId: topicId ?? null, entryId: null, view: 'list', ...(query ? { query } : {}) }
-  const referenceSignature = referenceKey(reference)
-  useEffect(() => {
-    if (!visible || !onReferenceChange || pendingReference.current && pendingReference.current !== referenceSignature) return
-    pendingReference.current = null
-    if (receivedReference.current === referenceSignature) return
-    receivedReference.current = referenceSignature; onReferenceChange(reference)
-  }, [visible, referenceSignature, onReferenceChange])
+  const backToReading = useCallback(() => send({ type: 'knowledge-back', scope: scopeTopicId, to: 'read' }), [send, scopeTopicId])
+  const backToList = useCallback(() => { readIntent.current += 1; send({ type: 'knowledge-back', scope: scopeTopicId, to: 'list' }) }, [send, scopeTopicId])
   useEffect(() => {
     if (!directoryVisible || connected === false || !topicId && !search) return
     let live = true; setLoading(true)
@@ -106,35 +81,34 @@ function KnowledgeScope({ rpc, topicId, title, openSource, openHttpLink, onBackC
       if (!result.entry || result.entry.topicId !== selection.topicId || result.entry.entryId !== selection.entryId) {
         setIssue('没有读到这条知识，可以重试。'); return
       }
-      setSelected(result.entry); setSelectedScope(source?.scope ?? null); setIssue('')
-      setEdit(previous => previous?.topicId === result.entry!.topicId && previous.entryId === result.entry!.entryId
-        ? { ...previous, entry: result.entry!, scope: source?.scope ?? null } : previous)
+      setBody({ entry: result.entry, scope: source?.scope ?? null }); setIssue('')
     }).catch(error => { if (valid()) setIssue(`正文读取失败：${errorText(error)}。可以重试。`) })
     return () => { live = false; readIntent.current += 1 }
   }, [readingVisible, rpc, selection, selected, client, refresh, connected])
   useEffect(() => () => { readIntent.current += 1 }, [])
   function read(entry: TopicKnowledgeItem) {
-    onNavigate?.()
-    readIntent.current += 1; setSelected(null); setSelectedScope(null); setEditorVisible(false); setSelection({ topicId: entry.topicId, entryId: entry.entryId })
+    readIntent.current += 1; setBody(null)
+    send({ type: 'knowledge-read', scope: scopeTopicId, target: { topicId: entry.topicId, entryId: entry.entryId } })
   }
   function startEdit(entry?: TopicKnowledge) {
-    onNavigate?.()
-    if (edit && (!entry || edit.topicId === entry.topicId && edit.entryId === entry.entryId)) { setEditorVisible(true); return }
+    if (editor && (!entry || editor.topicId === entry.topicId && editor.entryId === entry.entryId)) {
+      send({ type: 'knowledge-edit', scope: scopeTopicId, target: editor, mountKey: editor.mountKey }); return
+    }
     const id = entry?.topicId ?? topicId
     if (!id) return
     const source = mobileKnowledgeDraftSource(client, getDeviceWorkface())
     const entryId = entry?.entryId ?? mintObjectId(), originalScope = entry ? selectedScope : source?.scope ?? null
-    setEditorKey(selection?.draftKey ?? (originalScope ? mobileKnowledgeDraftKey(id, entryId, originalScope) : `${id}:${entryId}`))
-    setEdit({ topicId: id, entryId, ...(entry ? { entry, scope: selectedScope,
-      ...(selection?.draftKey ? { draftKey: selection.draftKey } : {}) } : { isNew: true, scope: source?.scope ?? null }) })
-    setEditorVisible(true)
+    const mountKey = originalScope ? mobileKnowledgeDraftKey(id, entryId, originalScope) : `${id}:${entryId}`
+    send({ type: 'knowledge-edit', scope: scopeTopicId, target: { topicId: id, entryId }, mountKey, ...(!entry ? { isNew: true } : {}) })
   }
-  const draftKeyChanged = useCallback((draftKey: string) => setEdit(previous => previous && previous.draftKey !== draftKey ? { ...previous, draftKey } : previous), [])
+  const draftKeyChanged = useCallback((draftKey: string) => {
+    if (editor) observe({ type: 'draft-key', scope: scopeTopicId, editorToken: editor.token, target: editor, draftKey })
+  }, [observe, scopeTopicId, editor?.token, editor?.topicId, editor?.entryId])
   const readIssue = connected === false ? '连接中断，知识还没重新读取。' : issue
   return <section className="mobile-topic-knowledge" data-wide={wide || undefined} aria-label={`${title}知识`}>
     <div className="mobile-knowledge-directory" aria-label="知识导航" hidden={!directoryVisible}>
-    <form className="mobile-topics-search" onSubmit={event => { event.preventDefault(); setSearch(query.trim()) }}>
-      <TextInput aria-label="搜索知识" placeholder={topicId ? '搜索此 Topic 的知识' : '搜索 All Topics'} value={query} onChange={event => setQuery(event.target.value)} />
+    <form className="mobile-topics-search" onSubmit={event => { event.preventDefault(); send({ type: 'knowledge-search', scope: scopeTopicId }) }}>
+      <TextInput aria-label="搜索知识" placeholder={topicId ? '搜索此 Topic 的知识' : '搜索 All Topics'} value={query} onChange={event => send({ type: 'knowledge-query', scope: scopeTopicId, query: event.target.value })} />
       <button type="submit">搜索</button>
     </form>
     <div className="mobile-topics-actions"><small>{topicId ? '已保存知识' : 'All Topics'}{loading ? ' · 读取中' : ''}</small>
@@ -152,7 +126,7 @@ function KnowledgeScope({ rpc, topicId, title, openSource, openHttpLink, onBackC
     {readIssue && !directoryVisible && <MobileNotice identity={[readIssue]} className="mobile-topics-issue" role="status">{readIssue}</MobileNotice>}
     {selection && <article className="mobile-topic-reading" hidden={editorVisible}>
       <div className="mobile-topics-actions"><button onClick={backToList}>返回知识列表</button>
-        <button onClick={() => selected ? startEdit(selected) : setEditorVisible(Boolean(edit))}>{edit ? '继续编辑草稿' : '编辑知识'}</button></div>
+        <button onClick={() => selected ? startEdit(selected) : editor ? startEdit() : undefined}>{edit ? '继续编辑草稿' : '编辑知识'}</button></div>
       {selected ? <><h2>{selected.title}</h2><small>{certaintyLabels[selected.certainty]} · {selected.form === 'reference' ? '来源引用' : '整理成果'}</small>
         {selected.scope && <p>{selected.scope}</p>}
         <AgentMarkdown content={selected.content} documentMode {...(openHttpLink ? { openHttpLink } : {})} />
@@ -162,8 +136,11 @@ function KnowledgeScope({ rpc, topicId, title, openSource, openHttpLink, onBackC
     </article>}
     {edit && <div hidden={!editorVisible}><MobileTopicKnowledgeEditor key={editorKey} target={edit} client={client} connected={connected ?? false}
       rpc={rpc} onDraftKeyChange={draftKeyChanged} onClose={backToReading} onSaved={(entry, keepEditing) => {
-        setSelected(entry); setSelection({ topicId: entry.topicId, entryId: entry.entryId }); setRefresh(value => value + 1)
-        if (!keepEditing) setEditorVisible(false)
+        const current = currentPosition.current
+        const target = current.view === 'edit' ? current.editor : current.reading
+        if (target?.topicId === entry.topicId && target.entryId === entry.entryId) setBody({ entry, scope: editorData.current?.scope ?? null })
+        setRefresh(value => value + 1)
+        if (editor) send({ type: 'knowledge-saved', scope: scopeTopicId, editorToken: editor.token, keepEditing: Boolean(keepEditing) })
     }} /></div>}
     </div>
   </section>
