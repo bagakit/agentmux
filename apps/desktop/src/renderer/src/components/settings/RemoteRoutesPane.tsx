@@ -46,13 +46,15 @@ function RoutePolicyEditor({ host, identity, active }: { host: HostConfig; ident
   const target = { hostId: host.id, expectedRuntimeId: identity.runtimeId }
   const policy = useHostRoutePolicy(target, active), { edit, observed } = policy
   const [tab, setTab] = useState<'paths' | 'access'>('paths'), [selected, setSelected] = useState<number | null>(null)
-  const [edges, setEdges] = useState<{ key: string; value: HostRouteEdges }>(), [edgeId, setEdgeId] = useState(''), [edgeIssue, setEdgeIssue] = useState(''), [readingEdge, setReadingEdge] = useState(false)
+  const [edges, setEdges] = useState<{ key: string; value: HostRouteEdges }>(), [edgeSelection, setEdgeSelection] = useState<{ key: string; id: string }>(), [edgeIssue, setEdgeIssue] = useState(''), [readingEdge, setReadingEdge] = useState(false)
   const [actor, setActor] = useState<HostRouteActor>(), [scope, setScope] = useState<'discover' | 'work'>('work'), [actionIssue, setActionIssue] = useState('')
   const edgeReader = useRef<AbortController | undefined>(undefined), edgeEpoch = useRef(0)
   const row = selected === null ? undefined : edit?.configuration.routes[selected], pathKey = JSON.stringify([selected, row?.route ?? null]), currentPath = useRef(pathKey)
   currentPath.current = pathKey
   const savedPrefix = row && observed?.routes.find(saved => equal(saved.route, row.route))
   const options = edges?.key === pathKey ? edges.value.edges : []
+  const edgeId = edgeSelection?.key === pathKey ? edgeSelection.id : ''
+  const selectedEdge = options.find(edge => edge.edgeId === edgeId)
   const scopes = scope === 'discover' ? ROUTE_DISCOVERY_SCOPES : ROUTE_WORK_SCOPES
   const request = row && actor ? { kind: 'host-route-access' as const, route: row.route, actor, scopes } : undefined
   function report(operation: () => void) { try { operation(); setActionIssue('') } catch (cause) { setActionIssue(presentError(cause)) } }
@@ -74,13 +76,13 @@ function RoutePolicyEditor({ host, identity, active }: { host: HostConfig; ident
     const token = ++edgeEpoch.current, key = pathKey; setEdgeIssue(''); setReadingEdge(true)
     try {
       const reply = await api.hostRoutes.call(prefixTarget(), 'route.edges', {}, controller.signal)
-      if (!controller.signal.aborted && currentPath.current === key && edgeEpoch.current === token) { setEdges({ key, value: reply }); setActor(reply.actor); setEdgeId('') }
+      if (!controller.signal.aborted && currentPath.current === key && edgeEpoch.current === token) { setEdges({ key, value: reply }); setActor(reply.actor); setEdgeSelection(undefined) }
     } catch (cause) { if (!controller.signal.aborted && currentPath.current === key) setEdgeIssue(presentError(cause)) }
     finally { if (edgeEpoch.current === token) setReadingEdge(false) }
   }
   useEffect(() => { if (active && selected === null) void readEdges(); return () => edgeReader.current?.abort() }, [active, pathKey])
   async function appendEdge() {
-    if (!edit || !edgeId) return
+    if (!edit || !selectedEdge) { setEdgeIssue('The route path or its connection list changed. Choose a connection from the current path.'); return }
     edgeReader.current?.abort(); const controller = new AbortController(); edgeReader.current = controller
     const token = ++edgeEpoch.current, key = pathKey; setEdgeIssue(''); setReadingEdge(true)
     try {
@@ -94,7 +96,7 @@ function RoutePolicyEditor({ host, identity, active }: { host: HostConfig; ident
         policy.change(current => { index = current.configuration.routes.length; return { ...current, configuration: { ...current.configuration, routes: [...current.configuration.routes, { id: '', route }] } } })
         setSelected(index)
       }
-      setEdgeId('')
+      setEdgeSelection(undefined)
     } catch (cause) { if (!controller.signal.aborted && currentPath.current === key) setEdgeIssue(presentError(cause)) }
     finally { if (edgeEpoch.current === token) setReadingEdge(false) }
   }
@@ -125,7 +127,7 @@ function RoutePolicyEditor({ host, identity, active }: { host: HostConfig; ident
               <button type="button" className="small-button" onClick={() => void readEdges()}>Explore next node</button></div>
             {!savedPrefix ? <p className="settings-group-note">Save this path before exploring further. Browsing never saves or grants access.</p> : null}
           </> : <div className="host-route-new"><HostIcon size={28} aria-hidden="true" /><h4>Choose the first connection</h4><p>Start from a saved Host on {host.label}. Inspecting its identity does not trust it or start an Agent.</p></div>}
-          <div className="host-route-edge-picker"><label className="host-route-field"><span>{row ? 'Next saved connection' : 'Saved connection'}</span><SelectionField label="Next saved route connection" value={edgeId} options={[{ value: '', label: readingEdge ? 'Reading this node…' : options.length ? 'Choose a connection' : 'Read this node’s connections' }, ...options.map(edge => ({ value: edge.edgeId, label: `${edge.label} · ${edge.edgeId}` }))]} onValueChange={setEdgeId} /></label><button type="button" className="small-button" disabled={!edgeId || readingEdge} onClick={() => void appendEdge()}>Inspect &amp; add</button>
+          <div className="host-route-edge-picker"><label className="host-route-field"><span>{row ? 'Next saved connection' : 'Saved connection'}</span><SelectionField label="Next saved route connection" value={edgeId} options={[{ value: '', label: readingEdge ? 'Reading this node…' : options.length ? 'Choose a connection' : 'Read this node’s connections' }, ...options.map(edge => ({ value: edge.edgeId, label: `${edge.label} · ${edge.edgeId}` }))]} onValueChange={id => setEdgeSelection({ key: pathKey, id })} /></label><button type="button" className="small-button" disabled={!selectedEdge || readingEdge} onClick={() => void appendEdge()}>Inspect &amp; add</button>
             {!row ? <button type="button" className="small-button" onClick={() => void readEdges()}>Read connections</button> : null}</div>
           {edgeIssue ? <p className="settings-inline-error" role="status">{edgeIssue} Your path is retained.</p> : null}
           {request ? <details className="host-route-access-request"><summary>Request access along this route</summary><p>Each receiving device approves the original actor and purpose. Send this public request to its owner; copying it changes no policy.</p>
