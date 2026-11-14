@@ -1,3 +1,4 @@
+import { motePresenceSourceId } from '@agentmux/core/mote-preferences'
 import { fixtureEpoch as _batchFixtureEpoch } from "../../../../../test/fixture-values.mjs"
 import { createRoot } from 'react-dom/client'
 import { useState } from 'react'
@@ -76,7 +77,7 @@ function sceneRecords(): ContinuousProgressLoop[] {
     return [make('group-watch', 1, '盯群：检查原群的新消息，重要的内容回原会话。', anchor,
       { calendar: undefined, everyMs: 60_000, lastOccurrenceAt: anchor - 60_000, lastOutcome: 'sent' }),
     make('maintenance', 0, 'Mote main heartbeat.\n\n检查主对话、未完成事项和原安排，继续已授权的工作。', anchor,
-      { calendar: undefined, everyMs: 120_000, lastOccurrenceAt: anchor - 120_000, lastOutcome: 'sent', managedSource: { sourceId: 'mote-main:fixture', revision: 'fixture' } }),
+      { calendar: undefined, everyMs: 120_000, lastOccurrenceAt: anchor - 120_000, lastOutcome: 'sent', managedSource: { sourceId: motePresenceSourceId({ hostId: workspace.hostId, moteId: topic.id }), revision: 'fixture' } }),
     make('completed-timer', 1, 'Research reminder: review the original decision.', nine(now - 2 * day),
       { calendar: undefined, afterMs: 1_200_000, status: 'stopped', lastOccurrenceAt: nine(now - 2 * day), lastOutcome: 'sent' })]
   }

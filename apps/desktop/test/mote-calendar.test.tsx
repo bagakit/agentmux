@@ -2,6 +2,7 @@ import { fixtureEpoch as _batchFixtureEpoch } from "../../../test/fixture-values
 // @vitest-environment happy-dom
 import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { createHash } from 'node:crypto'
 import type { ContinuousProgressLoop } from '@agentmux/core'
 import type { ScheduleHistoryEntry } from '@agentmux/core/schedule-rpc'
 import type { FutureProgressInputOwner } from '@agentmux/host/continuous-progress-loop-manager'
@@ -68,6 +69,31 @@ async function openForm() {
 }
 
 describe('Mote calendar original schedule consumer', () => {
+  it('compresses only the heartbeat issued for this Mote and keeps its original delivery description', async () => {
+    // Persisted source IDs were issued with the original Host SHA-256 encoding.
+    const source = (moteId: string) => ({ sourceId: 'mote-main:' + createHash('sha256')
+      .update(JSON.stringify({ hostId: scope.workspace.hostId, moteId })).digest('hex'), revision: 'prior-role' })
+    await owner([
+      saved('care', { prompt: 'Edited reminder', managedSource: source(topic.id) }),
+      saved('other', { prompt: 'Other automation', managedSource: source('another-mote') }),
+      saved('manual', { prompt: 'Mote heartbeat' })
+    ])
+    await dom.render(<MoteCalendar scope={scope} reference={reference} active />)
+    const point = (id: string) => dom.container.querySelector<HTMLElement>(`[data-calendar-schedule-id="${id}"]`)
+    await vi.waitFor(() => expect(point('care')?.querySelector('[data-semantic-icon="object.heartbeat"]')).toBeTruthy())
+    expect(point('care')!.getAttribute('aria-label')).toContain('Mote heartbeat')
+    expect(point('care')!.textContent).not.toContain('Mote heartbeat')
+    expect(point('other')?.textContent).toContain('Other automation')
+    expect(point('manual')?.textContent).toContain('Mote heartbeat')
+    expect(point('other')?.hasAttribute('data-heartbeat')).toBe(false)
+    expect(point('manual')?.hasAttribute('data-heartbeat')).toBe(false)
+    await button('Day')
+    await vi.waitFor(() => expect(dom.container.querySelector('.mote-calendar__rate[data-heartbeat] svg')).toBeTruthy())
+    await button('Upcoming')
+    await vi.waitFor(() => expect(dom.container.querySelector('[data-schedule-id="care"] .schedule-arrangement__mark svg')?.getAttribute('data-semantic-icon')).toBe('object.heartbeat'))
+    expect(dom.container.querySelector('[data-schedule-id="other"] .schedule-arrangement__message')?.textContent).toBe('Other automation')
+  })
+
   it('keeps an earlier completed event with its frozen recap after the latest input moves', async () => {
     const selectedDate = DateTime.fromMillis(now, { zone: 'UTC' }).minus({ days: 1 })
     const range = calendarDayWindow(selectedDate)
