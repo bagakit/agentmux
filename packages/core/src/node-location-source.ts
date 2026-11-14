@@ -52,8 +52,9 @@ function estimate(value: unknown): NodeMapLocation | null {
   const point = readMapCoordinates(result.latitude + ',' + result.longitude)
   if (!point) return null
   const label = [...new Set([result.city, result.region, result.country].filter((item): item is string => typeof item === 'string' && !!item))].join(', ').slice(0, 128)
-  const radius = typeof result.accuracy === 'number' && Number.isFinite(result.accuracy) && result.accuracy > 0 ? result.accuracy : 0
-  return parseNodeMapLocation({ source: 'public-egress', label, latitude: Math.round(point.latitude), longitude: Math.round(point.longitude), accuracyKm: Math.max(80, radius) })
+  // Rounding moves the centre by at most 80 km. Include the service’s original radius when known.
+  const radius = typeof result.accuracy === 'number' && Number.isSafeInteger(result.accuracy) && result.accuracy >= 0 ? result.accuracy + 80 : undefined
+  return parseNodeMapLocation({ source: 'public-egress', label, latitude: Math.round(point.latitude), longitude: Math.round(point.longitude), accuracyKm: radius })
 }
 
 /** Independent of routing. Network I/O runs only when an enabled Node is asked for a map observation. */
