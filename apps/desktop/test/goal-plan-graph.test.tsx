@@ -1,5 +1,7 @@
 // @vitest-environment happy-dom
 import { act } from 'react'
+import { formatGoalAddress } from '@agentmux/core/sharing'
+import { editGoalDraft } from '../src/renderer/src/lib/goal-edit-drafts'
 import { describe, expect, it, vi } from 'vitest'
 import type { DemandAlignment } from '@agentmux/demand/goals'
 import type { DemandDelegation } from '@agentmux/demand/delegations'
@@ -45,7 +47,7 @@ const graph = () => dom.container.querySelector<HTMLElement>('.goals-detail [ari
 const nodes = [node('api'), node('docs'), node('ui', ['api'], { criterionIds: ['ui'] }), node('release', ['ui', 'docs'])]
 
 describe('Goal plan graph', () => {
-  it('the mounted Goal detail leads with its actual plan and owner progress before intent, work and editable facts', async () => {
+  it('the mounted Goal detail keeps its brief and actual plan together with owner progress and the original editor', async () => {
     const record = goal({ plan: plan(nodes, [pass('api')]), delegations: [reported('api')], description: '# Original intent\n\nKeep the exact original work.' })
     seed(record)
     await dom.render(<GlobalBoardSurface />)
@@ -61,10 +63,13 @@ describe('Goal plan graph', () => {
     expect(head.firstElementChild?.getAttribute('aria-label')).toBe('Goal title')
     expect(head.querySelector('[data-goal-detail-stage] strong')?.textContent).toBeTruthy()
     expect(main.querySelector('.goal-collaboration')).toBeNull()
-    const intent = main.querySelector('.goals-original-intent .goals-intent__reading')!
+    const overview = main.querySelector('.goal-work-area__overview')!
+    expect(overview.firstElementChild).toBe(main.querySelector('[aria-label="Goal brief"]'))
+    expect(overview.lastElementChild?.contains(graph())).toBe(true)
+    const intent = main.querySelector('.goals-detail__brief .goals-intent__reading')!
     expect(intent.textContent).toContain('Original intent')
     expect(intent.textContent).not.toContain('# Original intent')
-    expect(main.querySelector('.goals-original-intent textarea')).toBeNull()
+    expect(main.querySelector('.goals-detail__brief textarea')).toBeNull()
     const edit = main.querySelector<HTMLButtonElement>('[aria-label="Edit goal description"]')!
     await act(async () => edit.click())
     expect(main.querySelector<HTMLTextAreaElement>('[aria-label="Goal description"]')?.value).toBe(record.description)
@@ -357,5 +362,90 @@ describe('plan graph navigation and list progress', () => {
   it('draws a dependency as a smooth left-to-right curve between its anchors', () => {
     expect(goalPlanEdgePath({ x: 10, y: 20 }, { x: 110, y: 60 })).toBe('M 10 20 C 60 20, 60 60, 110 60')
     expect(goalPlanEdgePath({ x: 0, y: 0 }, { x: 20, y: 0 })).toBe('M 0 0 C 24 0, -4 0, 20 0')
+  })
+})
+
+
+describe('Goal continuous reading', () => {
+  const addressed = () => goal({ description: 'Original outcome with precise spacing.  ', address: formatGoalAddress('goal', 'original-runtime', 'original-namespace') })
+  const button = (text: string) => [...dom.container.querySelectorAll<HTMLButtonElement>('button')].find(item => item.textContent === text)!
+
+  it('keeps the original Brief editor and draft mounted while moving between reading anchors', async () => {
+    const record = addressed(); seed(record)
+    await dom.render(<GlobalBoardSurface />)
+    await act(async () => editGoalDraft(record.id, 'description', 'Keep this unsaved original Brief.  '))
+    const editor = dom.container.querySelector('[aria-label="Goal description"]')!
+    expect(editor).not.toBeNull()
+    const detail = dom.container.querySelector<HTMLElement>('.goals-detail')!
+    const planSection = dom.container.querySelector<HTMLElement>('[data-goal-reading-section="plan"]')!
+    planSection.style.scrollMarginTop = '52px'
+    vi.spyOn(planSection, 'getBoundingClientRect').mockReturnValue({ top: 780 } as DOMRect)
+    vi.spyOn(detail, 'getBoundingClientRect').mockReturnValue({ top: 20 } as DOMRect)
+    detail.scrollTop = 83; dom.container.scrollTop = 12
+    await act(async () => button('Plan').click())
+    expect(detail.scrollTop).toBe(791)
+    expect(document.activeElement).toBe(planSection)
+    await act(async () => button('Activity').click())
+    await act(async () => button('Overview').click())
+    expect(dom.container.querySelector('[aria-label="Goal description"]')).toBe(editor)
+    expect(useAppStore.getState().goalEditDrafts.goal?.description?.value).toBe('Keep this unsaved original Brief.  ')
+    expect(dom.container.scrollTop).toBe(12)
+    expect(dom.container.querySelectorAll('[aria-label="Goal plan"]')).toHaveLength(1)
+  })
+
+  it('reveals an exact Plan entry once without moving input or replaying scroll after a later observation', async () => {
+    const record = addressed(); seed(record)
+    await dom.render(<GlobalBoardSurface />)
+    const detail = dom.container.querySelector<HTMLElement>('.goals-detail')!
+    const section = dom.container.querySelector<HTMLElement>('[data-goal-reading-section="plan"]')!
+    const input = dom.container.querySelector<HTMLTextAreaElement>('[aria-label="Goal title"]')!
+    section.style.scrollMarginTop = '52px'
+    vi.spyOn(section, 'getBoundingClientRect').mockReturnValue({ top: 780 } as DOMRect)
+    vi.spyOn(detail, 'getBoundingClientRect').mockReturnValue({ top: 20 } as DOMRect)
+    detail.scrollTop = 83; input.focus()
+    const entry = { goalId: record.id, runtimeId: record.address!.runtimeId, namespace: record.address!.namespace, section: 'plan' as const, phase: 'ready' as const, token: 'original-plan-entry' }
+    await act(async () => useAppStore.setState({ goalReadingEntry: entry }))
+    expect(detail.scrollTop).toBe(791)
+    expect(document.activeElement).toBe(input)
+    detail.scrollTop = 300
+    await act(async () => useAppStore.setState({ demands: { goal: { ...record, updatedAt: record.updatedAt + 1 } } }))
+    expect(detail.scrollTop).toBe(300)
+    expect(dom.container.querySelector('[data-goal-reading-section="plan"]')).toBe(section)
+    await act(async () => useAppStore.setState({ goalReadingEntry: { ...entry, namespace: 'different-original-store', token: 'foreign-plan-entry' } }))
+    expect(detail.scrollTop).toBe(300)
+    expect(document.activeElement).toBe(input)
+  })
+
+  it('copies the owner-provided Goal and Plan addresses through the shared clipboard and keeps failure visible', async () => {
+    const record = addressed(); seed(record)
+    const write = vi.spyOn(api.ui, 'writeClipboardText').mockResolvedValue(undefined)
+    await dom.render(<GlobalBoardSurface />)
+    await act(async () => button('Copy goal link').click())
+    expect(write).toHaveBeenLastCalledWith(record.address!.goalUrl)
+    expect(button('Goal link copied')).toBeDefined()
+    await act(async () => button('Copy plan link').click())
+    expect(write).toHaveBeenLastCalledWith(record.address!.planUrl)
+    expect(button('Plan link copied')).toBeDefined()
+    write.mockRejectedValueOnce(Error('The original clipboard write was not confirmed.'))
+    await act(async () => button('Copy goal link').click())
+    expect(dom.container.textContent).toContain('Link could not be copied. The original clipboard write was not confirmed.')
+    expect(useAppStore.getState().selectedDemandId).toBe(record.id)
+  })
+
+  it('keeps a pending source read from scrolling and cancels it on a later explicit reading anchor', async () => {
+    const record = addressed(); seed(record)
+    await dom.render(<GlobalBoardSurface />)
+    const detail = dom.container.querySelector<HTMLElement>('.goals-detail')!
+    const section = dom.container.querySelector<HTMLElement>('[data-goal-reading-section="plan"]')!
+    vi.spyOn(section, 'getBoundingClientRect').mockReturnValue({ top: 780 } as DOMRect)
+    vi.spyOn(detail, 'getBoundingClientRect').mockReturnValue({ top: 20 } as DOMRect)
+    detail.scrollTop = 83
+    const entry = { goalId: record.id, runtimeId: record.address!.runtimeId, namespace: record.address!.namespace, section: 'plan' as const, phase: 'pending' as const, token: 'pending-original-source' }
+    await act(async () => useAppStore.setState({ goalReadingEntry: entry }))
+    expect(detail.scrollTop).toBe(83)
+    await act(async () => button('Activity').click())
+    expect(useAppStore.getState().goalReadingEntry).toBeNull()
+    expect(dom.container.querySelector('[data-goal-reading-section="plan"]')).toBe(section)
+    expect(document.activeElement).toBe(dom.container.querySelector('[data-goal-reading-section="activity"]'))
   })
 })

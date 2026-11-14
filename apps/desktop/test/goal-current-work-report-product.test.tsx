@@ -19,6 +19,7 @@ it('the actual Goal work area collects the exact Core report through its Host ow
   expect(work).not.toBeNull()
   const record = work!.querySelector('[data-goal-work-operation="delegate-worker-a"]')
   expect(record).not.toBeNull()
+  expect(record!.closest('details')).toBeNull()
   const collect = [...record!.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Collect report')
   expect(collect).toBeDefined(); expect(collect!.classList.contains('primary-button')).toBe(true)
   const before = [...f.nativeInputs]
@@ -39,7 +40,7 @@ it('the actual Goal work area collects the exact Core report through its Host ow
   expect(useAppStore.getState().agentComposerDrafts['worker-a']).toBe('Keep the human draft')
 })
 
-it('the screenshot combination keeps ended original work and its frozen missing inspection ahead of the actual origin with one check action', async () => {
+it('the screenshot combination keeps its frozen inspection and origin above expandable original ended work', async () => {
   const f = await fixture({ patrol: true, alignment: false })
   await f.finite()
   f.runStates.set('finite-worker-run', 'exited')
@@ -60,7 +61,14 @@ it('the screenshot combination keeps ended original work and its frozen missing 
   expect(choose).toBeDefined(); expect(choose!.classList.contains('primary-button')).toBe(true)
   const record = work.querySelector('[data-goal-work-operation="finite-start"][data-goal-work-kind="start"]'), origin = work.querySelector('[data-goal-plan-origin]')
   expect(record).not.toBeNull(); expect(origin).not.toBeNull()
-  expect(Boolean(record!.compareDocumentPosition(origin!) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true)
+  expect(Boolean(origin!.compareDocumentPosition(record!) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true)
+  const records = record!.closest('details')!
+  expect(records.open).toBe(false)
+  expect(records.querySelector('summary')?.textContent).toBe('1 original execution · 1 need checking')
+  const inputsBeforeReading = [...f.nativeInputs]
+  await act(async () => records.querySelector('summary')!.click())
+  expect(records.open).toBe(true)
+  expect(f.nativeInputs).toEqual(inputsBeforeReading)
   expect(work.querySelectorAll('[data-goal-work-operation="finite-start"]')).toHaveLength(1)
   const manager = useAppStore.getState().demands.goal!.responsibility!.supervisor
   expect(work.querySelector('.goal-patrol__source')?.textContent, 'The original Supervisor reason remains readable without an extra warning paragraph').toContain(manager.reason)
