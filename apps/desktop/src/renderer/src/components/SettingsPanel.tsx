@@ -80,7 +80,12 @@ function SettingsPanelView({ onClose, visible = true, initialSection = 'overview
   preserveInputRef.current = preserveInput
   useLayoutEffect(() => {
     if (!observationRef) return
-    observationRef.current = { sectionId: active, visible: Boolean(config) && visible && !showResults,
+    observationRef.current = { sectionId: active,
+      get visible() {
+        const pane = originalScroll(active)
+        return Boolean(config) && visible && !showResults && (active === 'overview'
+          || Boolean(pane && !pane.querySelector('[data-settings-editor-state]')))
+      },
       // Presentation only: the original Host pane supplies its actual selection,
       // independently of a requested route. This never grants resource access.
       get hostId() { return active === 'hosts' || active === 'network-node' ? originalScroll(active)?.querySelector<HTMLElement>('[data-settings-host]')?.dataset.settingsHost ?? null : null } }
@@ -151,27 +156,46 @@ function SettingsPanelView({ onClose, visible = true, initialSection = 'overview
     if (preserveInput || !visible || showResults || !destination?.target || destination.route !== route || destination.section !== active) return
     const pane = originalScroll(active)
     if (!pane) return // The visited editor mounts on the following render.
-    const target = Array.from(pane.querySelectorAll<HTMLElement>('[data-settings-field]')).find(node => node.dataset.settingsField === destination.target)
-    if (!target || !target.isConnected || target.closest('[hidden], [inert]')) {
-      setTargetIssue('This setting is not shown in the current view. Your edits are kept.')
-      return
+    const fieldId = destination.target
+    let cleanupTarget: (() => void) | undefined
+    let observer: MutationObserver | undefined, disposed = false, laterFocus = false
+    const changedFocus = () => { laterFocus = true }
+    const reveal = () => {
+      if (pane.querySelector('[data-settings-editor-state="loading"]')) return
+      observer?.disconnect()
+      observer = undefined
+      document.removeEventListener('focusin', changedFocus)
+      if (laterFocus || pane.querySelector('[data-settings-editor-state="failed"]')) return
+      const target = Array.from(pane.querySelectorAll<HTMLElement>('[data-settings-field]')).find(node => node.dataset.settingsField === fieldId)
+      if (!target || !target.isConnected || target.closest('[hidden], [inert]')) {
+        setTargetIssue('This setting is not shown in the current view. Your edits are kept.')
+        return
+      }
+      setTargetIssue('')
+      // Native disclosure changes presentation only; the original field and draft stay mounted.
+      for (let parent: HTMLElement | null = target; parent && parent !== pane; parent = parent.parentElement) {
+        if (parent instanceof HTMLDetailsElement) parent.open = true
+      }
+      const previousTabIndex = target.getAttribute('tabindex')
+      target.tabIndex = -1
+      target.focus({ preventScroll: true })
+      pane.scrollTop += target.getBoundingClientRect().top - pane.getBoundingClientRect().top - 16
+      target.dataset.settingsSearchHighlight = ''
+      const timer = window.setTimeout(() => { delete target.dataset.settingsSearchHighlight }, 1400)
+      cleanupTarget = () => {
+        window.clearTimeout(timer)
+        delete target.dataset.settingsSearchHighlight
+        if (previousTabIndex === null) target.removeAttribute('tabindex')
+        else target.setAttribute('tabindex', previousTabIndex)
+      }
     }
-    // Native disclosure changes presentation only; the original field and draft stay mounted.
-    for (let parent: HTMLElement | null = target; parent && parent !== pane; parent = parent.parentElement) {
-      if (parent instanceof HTMLDetailsElement) parent.open = true
-    }
-    const previousTabIndex = target.getAttribute('tabindex')
-    target.tabIndex = -1
-    target.focus({ preventScroll: true })
-    pane.scrollTop += target.getBoundingClientRect().top - pane.getBoundingClientRect().top - 16
-    target.dataset.settingsSearchHighlight = ''
-    const timer = window.setTimeout(() => { delete target.dataset.settingsSearchHighlight }, 1400)
-    return () => {
-      window.clearTimeout(timer)
-      delete target.dataset.settingsSearchHighlight
-      if (previousTabIndex === null) target.removeAttribute('tabindex')
-      else target.setAttribute('tabindex', previousTabIndex)
-    }
+    if (pane.querySelector('[data-settings-editor-state="loading"]')) {
+      observer = new MutationObserver(reveal)
+      observer.observe(pane, { childList: true, subtree: true, attributes: true, attributeFilter: ['data-settings-editor-state'] })
+      // The shell's initial search focus commits first; subsequent input wins over a late editor.
+      queueMicrotask(() => { if (!disposed && observer) document.addEventListener('focusin', changedFocus) })
+    } else reveal()
+    return () => { disposed = true; observer?.disconnect(); document.removeEventListener('focusin', changedFocus); cleanupTarget?.() }
   }, [active, destination, preserveInput, route, searching, showResults, visible, visited])
 
   useLayoutEffect(() => {
