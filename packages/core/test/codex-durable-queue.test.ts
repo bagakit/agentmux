@@ -72,11 +72,12 @@ it('uses the exact OS native binary and shared storage for a wrapper-owned Run w
   expect(calls.filter(row => row.method === 'thread/queue/add')).toEqual([expect.objectContaining({ params: {
     threadId: source.nativeSessionId, input: [{ type: 'text', text: 'Frozen inbox reference only', text_elements: [] }], clientUserMessageId: correlation
   } })])
-  expect(calls.every(row => ['initialize', 'initialized', 'thread/read', 'thread/queue/add'].includes(row.method))).toBe(true)
+  expect(calls.some(row => row.method === 'thread/queue/list' && row.params.threadId === source.nativeSessionId && row.params.limit === 1)).toBe(true)
+  expect(calls.every(row => ['initialize', 'initialized', 'thread/read', 'thread/queue/list', 'thread/queue/add'].includes(row.method))).toBe(true)
   expect(prepared.plan.actorId).not.toContain(f.root)
 })
 
-it.each(['0.163.0', '0.165.0', '0.166.0', '0.167.0'])('qualifies only the verified %s executable with the original frozen protocol', async version => {
+it.each(['0.163.0', '0.165.0', '0.166.0', '0.167.0', '0.169.0', 'future-version'])('qualifies the original native queue wire independently of the %s version label', async version => {
   const f = await fixture(); await f.update({ version: 'codex-cli ' + version })
   const result = await f.prepare().then(prepared => ({ prepared }), error => ({ error }))
   expect(result, 'The qualified original executable must retain its queue capability').toHaveProperty('prepared')
@@ -87,16 +88,77 @@ it.each(['0.163.0', '0.165.0', '0.166.0', '0.167.0'])('qualifies only the verifi
   expect((await f.readTrace()).filter(row => row.method === 'thread/queue/add')).toHaveLength(1)
 })
 
-it.each(['codex-cli 0.168.0', 'codex-cli 0.167.1', 'other-cli 0.167.0', ''])('refuses the unqualified exact executable version %j before opening a helper', async version => {
-  const f = await fixture(); await f.update({ version })
+it.each([null, {}, { items: [] }, { data: 'wrong' }, { data: [], nextCursor: 1 },
+  { data: [null] }, { data: [{ id: '', clientUserMessageId: 'original', input: [] }] },
+  { data: [{ id: 'original', clientUserMessageId: false, input: [] }] },
+  { data: [{ id: 'original', clientUserMessageId: 'original', input: {} }] }])('refuses a changed native queue read contract before admission: %j', async queueReadResult => {
+  const f = await fixture(); await f.update({ queueReadResult })
   await expect(f.prepare()).rejects.toMatchObject({ code: 'AGENT_NATIVE_INPUT_UNAVAILABLE' })
-  await expect(f.readTrace()).rejects.toMatchObject({ code: 'ENOENT' })
+  expect((await f.readTrace()).filter(row => row.method === 'thread/queue/add')).toHaveLength(0)
 })
 
-it.each(['lost-ack', 'partial-ack', 'wire', 'correlation', 'reject', 'unqualified'] as const)(
+it('qualifies a nonempty queue without changing its existing native input', async () => {
+  const f = await fixture()
+  const queueReadResult = { data: [{ id: 'existing-native-item', clientUserMessageId: 'existing-correlation',
+    input: [{ type: 'text', text: 'Existing native input' }] }], nextCursor: 'original-opaque-cursor' }
+  await f.update({ queueReadResult })
+  const prepared = await f.prepare()
+  expect(prepared.plan.operation).toBe('queue-idle')
+  expect((await f.readTrace()).filter(row => row.method === 'thread/queue/add')).toHaveLength(0)
+})
+
+it.each([null, undefined])('does not require platform correlation on an existing native queue entry: %j', async clientUserMessageId => {
+  const f = await fixture()
+  await f.update({ queueReadResult: { data: [{ id: 'existing-native-item', clientUserMessageId,
+    input: [{ type: 'text', text: 'Ordinary native input' }] }], nextCursor: null } })
+  const result = await f.prepare().then(prepared => ({ prepared }), error => ({ error }))
+  expect(result, 'Existing native input need not carry a platform correlation').toHaveProperty('prepared')
+  if (!('prepared' in result)) throw new Error('Original native queue preparation is missing')
+  const prepared = result.prepared
+  expect(prepared.plan.operation).toBe('queue-idle')
+  await expect(prepared.send('Original frozen platform input', { ...prepared.plan, clientCorrelation: correlation })).resolves.toMatchObject({ outcome: 'admitted' })
+  expect((await f.readTrace()).filter(row => row.method === 'thread/queue/add')).toEqual([
+    expect.objectContaining({ params: expect.objectContaining({ clientUserMessageId: correlation,
+      input: [{ type: 'text', text: 'Original frozen platform input', text_elements: [] }] }) })
+  ])
+})
+
+it('cancels only its read-only preparation and never submits a native input', async () => {
+  const f = await fixture(), controller = new AbortController(), marker = join(f.root, 'queue-read-started')
+  await f.update({ queueReadWait: true, queueReadMarker: marker })
+  const preparing = prepareCodexNativeInput({ ...f.context, signal: controller.signal }, { ...source, idleOnly: true }).then(
+    prepared => ({ prepared }), error => ({ error }))
+  try {
+    await expect.poll(() => readFile(marker, 'utf8').catch(() => ''), { timeout: 10_000 }).toBe('original queue read requested')
+    controller.abort(new Error('Original reader cancelled'))
+    expect(await preparing).toHaveProperty('error')
+    expect((await f.readTrace()).filter(row => row.method === 'thread/queue/add')).toHaveLength(0)
+  } finally {
+    controller.abort()
+    const result = await preparing
+    if ('prepared' in result) await result.prepared.dispose()
+  }
+})
+
+it('keeps a cancelled unacknowledged native submission unconfirmed without sending it again', async () => {
+  const f = await fixture(), controller = new AbortController(), marker = join(f.root, 'queue-add-started')
+  f.context.signal = controller.signal
+  const prepared = await f.prepare()
+  await f.update({ failure: 'wait-ack', queueAddMarker: marker })
+  const sending = prepared.send('Original immutable reference', { ...prepared.plan, clientCorrelation: correlation }).then(
+    value => ({ value }), error => ({ error }))
+  try {
+    await expect.poll(() => readFile(marker, 'utf8').catch(() => ''), { timeout: 10_000 }).toBe('original queue input received')
+    controller.abort(new Error('Original native observation cancelled'))
+    expect(await sending).toHaveProperty('error')
+    expect((await f.readTrace()).filter(row => row.method === 'thread/queue/add')).toHaveLength(1)
+  } finally { controller.abort(); await sending }
+})
+
+it.each(['lost-ack', 'partial-ack', 'wire', 'correlation', 'reject', 'unsupported'] as const)(
   'Core future input and public inspection preserve the original %s queue result and healthy terminal without replay', async failure => {
     const h = await rpcOwnerFixture(['recipient']); closes.push(h.close)
-    const f = await fixture(); await f.update({ version: failure === 'unqualified' ? 'codex-cli 0.168.0' : 'codex-cli 0.167.0', failure })
+    const f = await fixture(); await f.update({ failure })
     const original = (await h.store.readMetadata('recipient'))!
     await h.store.compareAndSwapMetadata(original, { ...original, workspacePath: f.root, nativeHandle: f.context.nativeHandle,
       semanticStatus: { state: 'done', source: 'native-hook', observedAt: Date.now() }, updatedAt: Date.now() })
@@ -110,11 +172,11 @@ it.each(['lost-ack', 'partial-ack', 'wire', 'correlation', 'reject', 'unqualifie
     const failureReceipt = await h.client.submitAgentPrompt(packet).then(() => undefined, error => error)
     const key = { kind: 'prompt' as const, agentSessionId: 'recipient', expectedRun: original.run, submissionId: operationId }
     const status = failure === 'reject' ? 'not-applied' : 'unknown'
-    if (failure === 'unqualified') {
+    if (failure === 'unsupported') {
       expect(failureReceipt).toMatchObject({ code: 'AGENT_NATIVE_INPUT_UNAVAILABLE', controlFailure: { disposition: 'not_applied', confirmedInputBytes: 0 } })
       expect(await h.client.inspectAgentPromptSubmission(key)).toBeNull()
       expect(await h.client.readAgentFuturePromptIntent('recipient', 'original-future')).not.toHaveProperty('lastOccurrenceAt')
-      await expect(f.readTrace()).rejects.toMatchObject({ code: 'ENOENT' })
+      expect((await f.readTrace()).filter(row => row.method === 'thread/queue/add')).toHaveLength(0)
     } else {
       await expect.poll(async () => (await h.client.inspectAgentPromptSubmission(key))?.admission?.native?.outcome).toBe(status)
       const saved = await h.client.inspectAgentPromptSubmission(key)
@@ -126,7 +188,7 @@ it.each(['lost-ack', 'partial-ack', 'wire', 'correlation', 'reject', 'unqualifie
       expect((await f.readTrace()).filter(row => row.method === 'thread/queue/add')).toHaveLength(1)
     }
     const inspected: any = await rpc.call('agent.input.inspect', { key }, principal)
-    if (failure === 'unqualified') expect(inspected.record).toBeNull()
+    if (failure === 'unsupported') expect(inspected.record).toBeNull()
     else expect(inspected.record).toEqual(await h.client.inspectAgentPromptSubmission(key))
     expect(h.inner.kernel.input).not.toHaveBeenCalled()
     expect(h.inner.kernel.stop).not.toHaveBeenCalled()
@@ -245,7 +307,7 @@ it.each([{ sourcePath: 'foreign-source' }, { source: 'unknown' }, { denied: true
   expect((await f.readTrace()).filter(row => row.method === 'thread/queue/add')).toHaveLength(0)
 })
 
-it.each(['lost-ack', 'wire', 'correlation'])('keeps %s admission unknown and never retries an original queue request', async failure => {
+it.each(['lost-ack', 'wire', 'correlation', 'uncorrelated-null', 'uncorrelated-missing'])('keeps %s admission unknown and never retries an original queue request', async failure => {
   const f = await fixture(), prepared = await f.prepare(); await f.update({ failure })
   await expect(prepared.send('Original immutable reference', { ...prepared.plan, clientCorrelation: correlation })).rejects.toBeDefined()
   expect((await f.readTrace()).filter(row => row.method === 'thread/queue/add')).toHaveLength(1)

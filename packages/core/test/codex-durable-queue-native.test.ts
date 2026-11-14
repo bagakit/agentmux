@@ -37,7 +37,7 @@ it.runIf(process.platform === 'darwin').each(['wrapper', 'direct'] as const)('pu
   const command = process.env.AGENTMUX_TEST_CODEX_BINARY ?? 'codex'
   const nativeVersion = await runner.runProcess(command, ['--version'], { timeoutMs: 3000 })
   expect(nativeVersion).toMatchObject({ exitCode: 0, stderr: '' })
-  expect(nativeVersion.stdout.trim()).toBe('codex-cli 0.167.0')
+  expect(nativeVersion.stdout.trim()).toBe('codex-cli ' + (process.env.AGENTMUX_TEST_CODEX_VERSION ?? '0.169.0'))
   const compiled = await runner.runProcess('cc', ['-Wall', '-Wextra', '-Werror', fileURLToPath(new URL('../native/native-socket-peer.c', import.meta.url)), '-lproc', '-o', helper], { timeoutMs: 10_000 })
   expect(compiled).toMatchObject({ exitCode: 0, stderr: '' })
   const originalRunProcess = runner.runProcess
@@ -126,8 +126,7 @@ it.runIf(process.platform === 'darwin').each(['wrapper', 'direct'] as const)('pu
     expect(h.inner.kernel.input).not.toHaveBeenCalled(); expect(h.inner.kernel.stop).not.toHaveBeenCalled()
     expect(calls.filter(method => method === 'turn/start')).toHaveLength(1)
     expect(calls).not.toContain('thread/resume')
-    expect(queueVersions.length).toBeGreaterThan(0)
-    expect([...new Set(queueVersions)]).toEqual(['codex-cli 0.167.0'])
+    expect(queueVersions).toEqual([])
   } finally {
     await recipient?.dispose(); await sender?.dispose(); await server?.stop(); await h.client.dispose()
     child.stdin.end()
@@ -254,8 +253,7 @@ it.runIf(process.platform === 'darwin')('actual ctxmux Run and source Core survi
     expect(JSON.parse(events.stdout).result.events.some((event: any) => event.kind === 'a2a-notification-result')).toBe(true)
     expect((await client.statusAgent('recipient')).run.acceptedInputBytes).toBe(original.run.acceptedInputBytes)
     expect((await new AgentMuxFileAgentSessionStore(storePath).readMetadata('recipient'))?.nativeActor).toBeUndefined()
-    expect(queueVersions.length).toBeGreaterThan(0)
-    expect([...new Set(queueVersions)]).toEqual(['codex-cli 0.167.0'])
+    expect(queueVersions).toEqual([])
   } catch (error) { errors.push(error) }
   finally {
     await sender?.dispose(); await server?.stop()
