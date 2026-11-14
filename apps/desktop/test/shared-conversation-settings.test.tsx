@@ -29,7 +29,7 @@ it('the exact reply-only Binding stays partial until explicit original save, wit
   expect(second.state).toBe('applied')
   const before = (await f.forward('connection.binding.inspect', { bindingId: original.binding.bindingId })).grants
   const target = { executionHostId: 'local', agentSessionId: original.binding.agentSessionId, regionAnchor: { regionId: 'original-region' } }
-  await f.dom.render(<SettingsNavigation.Provider value={{ open() {}, openToolkit() {}, openHost() {}, openChannel() {}, openMoteLark() {}, chooseAgent() {}, channelEntries: settingsCatalog.channelEntries, channelPresentation: settingsCatalog.channelPresentation }}>
+  await f.dom.render(<SettingsNavigation.Provider value={{ open() {}, openToolkit() {}, openHost() {}, openChannel() {}, openMoteConnection() {}, chooseAgent() {}, channelEntries: settingsCatalog.channelEntries, channelPresentation: settingsCatalog.channelPresentation }}>
     <AgentConnectorDialog mode="details" original={{ channel: 'sample', target, hostingTarget: f.hostingTarget, session: { ...composerSession(original.binding.agentSessionId, 'claude'), nativeHandle: f.original.session.nativeHandle! }, name: 'Original Agent', connectionId: original.binding.connectionId, bindingId: original.binding.bindingId }} onClose={() => {}} returnFocus={() => null} />
   </SettingsNavigation.Provider>)
   await wait(() => expect(document.querySelector('[role="tab"][id$="-sharing-tab"]')).not.toBeNull())

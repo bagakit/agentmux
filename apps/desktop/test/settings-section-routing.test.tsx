@@ -31,7 +31,7 @@ const choose = async (id: string) => { await act(async () => dom.container.query
 async function settle() { for (let n = 0; n < 20; n++) await act(async () => { await new Promise(done => setTimeout(done, 5)) }) }
 
 it('delivers a Mote Lark request to Lark only, so Discord keeps its own Host', async () => {
-  const request: SettingsNavigationRequest = { section: 'lark', moteLarkOrigin: origin }
+  const request: SettingsNavigationRequest = { section: 'lark', moteConnectionOrigin: origin }
   await dom.render(<SettingsPanel onClose={() => {}} initialSection="lark" navigationRequest={request} />)
   await settle()
   expect(hostChoice('lark')!.selectedOptions[0]!.textContent).not.toBe('Background Host on this device')

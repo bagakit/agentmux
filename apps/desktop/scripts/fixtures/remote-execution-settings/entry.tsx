@@ -95,7 +95,7 @@ function Scene() {
   return <SettingsNavigation.Provider value={{
     open: (section, executorId, field) => setRequest({ section, ...(executorId ? { executorId } : {}), ...(field ? { field } : {}) }),
     openHost: hostId => setRequest({ section: 'hosts', hostId }), openToolkit: unavailable, openChannel: unavailable,
-    channelEntries: [], channelPresentation: () => null, openMoteLark: unavailable, chooseAgent: unavailable,
+    channelEntries: [], channelPresentation: () => null, openMoteConnection: unavailable, chooseAgent: unavailable,
   }}>{request ? <SettingsPanel initialSection={request.section} navigationRequest={request} onClose={() => setRequest(null)} />
     : <div id="remote-settings-workbench"><WorkspaceWorkbench workspaceId={workspaceId ?? project.id} visible /></div>}
   </SettingsNavigation.Provider>

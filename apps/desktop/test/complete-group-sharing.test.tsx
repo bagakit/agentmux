@@ -16,7 +16,7 @@ const f = connectorJourneyFixture()
 const wait = async (check: () => void) => vi.waitFor(async () => { await act(async () => {}); check() }, { timeout: 6000 })
 async function form(binding?: RoomBinding) {
   const target = { executionHostId: 'local', agentSessionId: f.original.session.agentSessionId, regionAnchor: { regionId: 'original-region' } }
-  await f.dom.render(<SettingsNavigation.Provider value={{ open() {}, openToolkit() {}, openHost() {}, openChannel() {}, openMoteLark() {}, chooseAgent() {}, channelEntries: settingsCatalog.channelEntries, channelPresentation: settingsCatalog.channelPresentation }}>
+  await f.dom.render(<SettingsNavigation.Provider value={{ open() {}, openToolkit() {}, openHost() {}, openChannel() {}, openMoteConnection() {}, chooseAgent() {}, channelEntries: settingsCatalog.channelEntries, channelPresentation: settingsCatalog.channelPresentation }}>
     <AgentConnectorDialog mode={binding ? 'details' : 'existing'} original={{ target, hostingTarget: f.hostingTarget, session: f.session,
       name: 'Original Agent', connectionId: f.config.connectionId, ...(binding ? { bindingId: binding.bindingId } : {}) }} onClose={() => {}} returnFocus={() => null} />
   </SettingsNavigation.Provider>)

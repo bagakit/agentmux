@@ -50,7 +50,7 @@ beforeEach(async () => {
 })
 function GoalsWithSettings() {
   const [route, setRoute] = useState<SettingsNavigationRequest | null>(null), [visible, setVisible] = useState(false)
-  return <SettingsNavigation.Provider value={{ open: (section, executorId, field) => { setRoute({ section, executorId, field }); setVisible(true) }, openToolkit: () => {}, openHost: () => {}, openChannel: () => {}, channelEntries: [], channelPresentation: () => null, openMoteLark: () => {}, chooseAgent: () => {} }}>
+  return <SettingsNavigation.Provider value={{ open: (section, executorId, field) => { setRoute({ section, executorId, field }); setVisible(true) }, openToolkit: () => {}, openHost: () => {}, openChannel: () => {}, channelEntries: [], channelPresentation: () => null, openMoteConnection: () => {}, chooseAgent: () => {} }}>
     <GlobalBoardSurface />{route ? <SettingsPanel visible={visible} initialSection={route.section} navigationRequest={route} onClose={() => setVisible(false)} /> : null}
   </SettingsNavigation.Provider>
 }

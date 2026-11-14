@@ -11,7 +11,7 @@ const { proof, workspace } = channelFixture
 function Fixture() {
   const [route, setRoute] = useState<SettingsNavigationRequest | null>(null)
   return <DesktopClientUiProvider><SettingsNavigation.Provider value={{
-    open: section => { proof.routes.push(section); setRoute({ section }) }, openToolkit() {}, openHost() {}, chooseAgent() {}, openMoteLark() {},
+    open: section => { proof.routes.push(section); setRoute({ section }) }, openToolkit() {}, openHost() {}, chooseAgent() {}, openMoteConnection() {},
     channelPresentation: settingsCatalog.channelPresentation,
     channelEntries: settingsCatalog.channelEntries,
     openChannel: channelOrigin => setRoute({ section: settingsCatalog.channelPresentation(channelOrigin.connection.application, channelOrigin.connection.adapterId)?.section ?? 'overview', channelOrigin })

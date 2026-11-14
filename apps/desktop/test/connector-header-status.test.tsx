@@ -48,7 +48,7 @@ async function bind() {
 const row = (id: string, type: 'user' | 'assistant') => JSON.stringify({ sessionId: 'original-native', uuid: id, type, message: { role: type, content: [{ type: 'text', text: 'PRIVATE original ' + id }] } }) + '\n'
 const speech = (binding: RoomBinding) => f.services.publication!.store.list(binding).filter(value => value.reference.source.kind !== 'binding-operation')
 async function renderHeader(bindings: RoomBinding[], visible = true, version = 0) {
-  await f.dom.render(<SettingsNavigation.Provider value={{ open() {}, openToolkit() {}, openHost() {}, openChannel() {}, chooseAgent() {}, openMoteLark() {}, channelPresentation: settingsCatalog.channelPresentation, channelEntries: settingsCatalog.channelEntries }}>
+  await f.dom.render(<SettingsNavigation.Provider value={{ open() {}, openToolkit() {}, openHost() {}, openChannel() {}, chooseAgent() {}, openMoteConnection() {}, channelPresentation: settingsCatalog.channelPresentation, channelEntries: settingsCatalog.channelEntries }}>
     <ConnectorHeaderLinks bindings={bindings} visible={visible} nameVersion={version} syncEnabled={true} issue="" checking={false} retainedSetup={false} onOpen={() => {}} onConnect={() => {}} onMenuOpen={() => {}} onSettings={() => {}} />
   </SettingsNavigation.Provider>)
 }

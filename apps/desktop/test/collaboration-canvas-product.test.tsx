@@ -345,7 +345,7 @@ it('uses custom boundary and LOD for actual bodies, ports and summary leases wit
 
 it('opens the original Focus Map settings field from the actual Map HUD', async () => {
   const scene = scenario(4), openSettings = vi.fn()
-  const navigation = { open: openSettings, openToolkit() {}, openHost() {}, openChannel() {}, channelEntries: [], channelPresentation: () => null, openMoteLark() {}, chooseAgent() {} }
+  const navigation = { open: openSettings, openToolkit() {}, openHost() {}, openChannel() {}, channelEntries: [], channelPresentation: () => null, openMoteConnection() {}, chooseAgent() {} }
   await dom.render(<SettingsNavigation.Provider value={navigation}>{graph(scene)}</SettingsNavigation.Provider>)
   await dom.click('[aria-label="Map settings"]')
   expect(openSettings).toHaveBeenCalledExactlyOnceWith('focus', undefined, 'map')

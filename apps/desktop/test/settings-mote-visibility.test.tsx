@@ -17,7 +17,7 @@ const polling = (url: unknown) => new URL(String(url)).pathname === '/accounts/q
 const creates = () => f.parentCalls.mock.calls.filter(([method]) => method === 'space.mote.connection.create')
 const advances = () => f.parentCalls.mock.calls.filter(([method]) => method === 'space.mote.connection.advance')
 const qr = () => document.querySelector('[data-mote-bot-code] svg, [data-mote-profile-code] svg')
-const origin = () => ({ section: 'lark' as const, moteLarkOrigin: { target: f.target(), topicId: f.motes[0]!.id, moteName: f.scopes[0]!.topic.title, hostingTarget: f.hostingTarget } })
+const origin = () => ({ section: 'lark' as const, moteConnectionOrigin: { target: f.target(), topicId: f.motes[0]!.id, moteName: f.scopes[0]!.topic.title, hostingTarget: f.hostingTarget } })
 async function pause(milliseconds = 1250) { await act(async () => { await new Promise(resolve => setTimeout(resolve, milliseconds)) }) }
 async function ready(selector: string) { await vi.waitFor(async () => { await f.settle(); expect(document.querySelector(selector), selector).not.toBeNull() }, { timeout: 6000 }) }
 async function selectSection(id: string) { await act(async () => (document.querySelector(`.settings-sidebar [data-settings-target="${id}"]`) as HTMLElement).click()); await f.settle() }

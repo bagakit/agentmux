@@ -72,13 +72,13 @@ it('continues an original creation without publication intent into the same setu
   await text('Original save confirmed')
   expect(parent.enrollment?.configured).not.toBeNull()
   await f.click('Continue bot setup')
-  expect(f.navigation.openMoteLark).toHaveBeenCalledWith({
+  expect(f.navigation.openMoteConnection).toHaveBeenCalledWith({
     target: f.target(), topicId: f.motes[0]!.id, moteName: f.scopes[0]!.topic.title, hostingTarget: f.hostingTarget,
     setup: { connectionId: parent.enrollment!.configured!.connection.config.connectionId,
       source: { kind: 'enrollment', operationId: parent.enrollment!.operationId, expectedRevision: parent.enrollment!.revision } }
   })
-  const origin = f.navigation.openMoteLark.mock.calls[0]![0]
-  await f.render(0, true, { section: 'lark', moteLarkOrigin: origin })
+  const origin = f.navigation.openMoteConnection.mock.calls[0]![0]
+  await f.render(0, true, { section: 'lark', moteConnectionOrigin: origin })
   await vi.waitFor(async () => { await f.settle(); expect(document.querySelector('[data-management-confirm]')).not.toBeNull() }, { timeout: 8000 })
   const handoff = f.connectionCalls.mock.calls.find(([method]) => method === 'connection.setup.begin')!
   expect(handoff[1]).toMatchObject({ connectionId: parent.enrollment!.configured!.connection.config.connectionId,
@@ -259,7 +259,7 @@ it('keeps the original Mote Profile caller and source preview while leaving the 
   expect(useAppStore.getState().agentComposerDrafts).toBe(before.agentComposerDrafts)
   expect(f.beginCount).toBe(0)
   await f.click('Manage bots')
-  expect(f.navigation.openMoteLark).toHaveBeenCalledWith({ target: f.target(), topicId: f.scopes[0]!.topic.id, moteName: f.scopes[0]!.topic.title, hostingTarget: f.hostingTarget })
+  expect(f.navigation.openMoteConnection).toHaveBeenCalledWith({ target: f.target(), topicId: f.scopes[0]!.topic.id, moteName: f.scopes[0]!.topic.title, hostingTarget: f.hostingTarget })
 })
 
 it('retains a known not-dispatched request when local persistence is unavailable and explicitly continues that same request after recovery', async () => {

@@ -139,7 +139,7 @@ const root = createRoot(document.getElementById('root')!)
 const sceneKey = () => [channel, scenario, epoch].join(':')
 const render = () => root.render(<div data-channel-settings-scene={sceneKey()}><DesktopClientUiProvider><SettingsNavigation.Provider value={{
   channelEntries: settingsCatalog.channelEntries, channelPresentation: settingsCatalog.channelPresentation,
-  open(section) { note('settings-navigation', { section }) }, openToolkit() {}, openHost() {}, openChannel() {}, openMoteLark() {}, chooseAgent() {},
+  open(section) { note('settings-navigation', { section }) }, openToolkit() {}, openHost() {}, openChannel() {}, openMoteConnection() {}, chooseAgent() {},
 }}><SettingsPanel key={epoch} initialSection={channel} visible onClose={() => { note('close-settings') }} /></SettingsNavigation.Provider></DesktopClientUiProvider></div>)
 const proof = {
   ready: false, calls, errors, owner, topics: topics.map(topic => ({ id: topic.id, title: topic.title })),

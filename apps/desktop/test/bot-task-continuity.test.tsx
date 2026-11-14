@@ -15,7 +15,7 @@ import { appIconUrl } from '@agentmux/client-ui/app-icon-url'
 let f: Awaited<ReturnType<typeof moteBotUi>>
 beforeEach(async () => { f = await moteBotUi() })
 afterEach(async () => { await f?.close() })
-const route = (index = 0) => ({ section: 'lark' as const, moteLarkOrigin: { target: f.target(index), topicId: f.motes[index]!.id, moteName: f.scopes[index]!.topic.title } })
+const route = (index = 0) => ({ section: 'lark' as const, moteConnectionOrigin: { target: f.target(index), topicId: f.motes[index]!.id, moteName: f.scopes[index]!.topic.title } })
 async function ready(check: () => void) { await vi.waitFor(async () => { await f.settle(); check() }, { timeout: 10_000 }) }
 async function click(selector: string) {
   let button!: HTMLButtonElement

@@ -51,7 +51,7 @@ beforeEach(async () => {
 function CommonActionSurface({ onNavigate }: { onNavigate: ReturnType<typeof vi.fn> }) {
   const [route, setRoute] = useState<SettingsNavigationRequest | null>(null), [visible, setVisible] = useState(false)
   return <SettingsNavigation.Provider value={{ open: (section, executorId, field) => { onNavigate(section, executorId, field); setRoute({ section, executorId, field }); setVisible(true) },
-    openToolkit: () => {}, openHost: () => {}, openChannel: () => {}, channelEntries: [], channelPresentation: () => null, openMoteLark: () => {}, chooseAgent: () => {} }}>
+    openToolkit: () => {}, openHost: () => {}, openChannel: () => {}, channelEntries: [], channelPresentation: () => null, openMoteConnection: () => {}, chooseAgent: () => {} }}>
     <GlobalBoardSurface />
     {route ? <SettingsPanel visible={visible} initialSection={route.section} navigationRequest={route} onClose={() => setVisible(false)} /> : null}
   </SettingsNavigation.Provider>

@@ -61,7 +61,7 @@ it('[profile-picker] management is an action, search is local, and hiding ends o
   const read=vi.spyOn(api.browser,'listTargets').mockResolvedValue({coverage:'complete',targets:[]}),release=vi.fn()
   vi.spyOn(api.browser,'onTargetsChanged').mockImplementation(()=>release)
   const changed=vi.fn(),manage=vi.fn()
-  const render=(active:boolean)=>root.render(<SettingsNavigation.Provider value={{open:manage,openToolkit:()=>{},openHost:()=>{},openChannel:()=>{},channelEntries:[],channelPresentation:()=>null,openMoteLark:()=>{},chooseAgent:()=>{}}}><SurveyProfilePicker value={{kind:'default'}} profiles={profiles} collapsed={false} active={active} onExpand={()=>{}} onChange={changed} onRefresh={()=>{}}/></SettingsNavigation.Provider>)
+  const render=(active:boolean)=>root.render(<SettingsNavigation.Provider value={{open:manage,openToolkit:()=>{},openHost:()=>{},openChannel:()=>{},channelEntries:[],channelPresentation:()=>null,openMoteConnection:()=>{},chooseAgent:()=>{}}}><SurveyProfilePicker value={{kind:'default'}} profiles={profiles} collapsed={false} active={active} onExpand={()=>{}} onChange={changed} onRefresh={()=>{}}/></SettingsNavigation.Provider>)
   await act(async()=>render(true));await open()
   const search=document.querySelector<HTMLInputElement>('[aria-label="Find survey environment"]')!
   await act(async()=>{Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(search,'Shanghai');search.dispatchEvent(new Event('input',{bubbles:true}))})

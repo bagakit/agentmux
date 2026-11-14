@@ -52,7 +52,7 @@ async function edit(value: string) {
 }
 async function mount(consumer: Consumer) {
   await act(async () => root.render(consumer === 'settings' ? <CapsuleSettingsPane /> :
-    <SettingsNavigation.Provider value={{ open() {}, openToolkit() {}, openHost() {}, openChannel() {}, channelEntries: [], channelPresentation: () => null, openMoteLark() {}, chooseAgent() {} }}>
+    <SettingsNavigation.Provider value={{ open() {}, openToolkit() {}, openHost() {}, openChannel() {}, channelEntries: [], channelPresentation: () => null, openMoteConnection() {}, chooseAgent() {} }}>
       <UserToolkitResult definition={snapshot.definition} active close={() => {}} />
     </SettingsNavigation.Provider>))
   await settle()

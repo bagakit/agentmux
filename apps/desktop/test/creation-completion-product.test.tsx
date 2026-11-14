@@ -31,7 +31,7 @@ async function create(options: Parameters<typeof enrollmentInitialWeb>[0] = {}, 
   web = enrollmentInitialWeb({ name: 'Saved public name', description: 'Saved public summary.', ...(options.versionStatus === undefined ? {} : { versionStatus: options.versionStatus }), ...(options.unknownEffect === undefined ? {} : { unknownEffect: options.unknownEffect }) })
   const image = await readFile(resolve('packages/client-ui/src/assets/app-icons/qingzhuan.png'))
   vi.stubGlobal('fetch', vi.fn(async (input, init) => String(input) === appIconUrl() ? new Response(new Uint8Array(image)) : web.fetch(input, init)))
-  const route = { section: 'lark' as const, moteLarkOrigin: { target: f.target(), topicId: f.motes[0]!.id, moteName: f.scopes[0]!.topic.title } }
+  const route = { section: 'lark' as const, moteConnectionOrigin: { target: f.target(), topicId: f.motes[0]!.id, moteName: f.scopes[0]!.topic.title } }
   let operationId: string
   if (throughCreationUi) {
     await f.renderSettings(route)

@@ -122,7 +122,7 @@ export function connectorJourneyFixture(options: { platform?: (request: RoomRead
     }
     await dom.render(null); await rpc?.dispose(); await server?.stop(); services?.close(); await original?.close(); vi.unstubAllEnvs()
   })
-  async function mount() { await dom.render(<SettingsNavigation.Provider value={{ open: settings, openToolkit: () => {}, openHost: () => {}, openChannel: settings, channelPresentation: settingsCatalog.channelPresentation, channelEntries: settingsCatalog.channelEntries, openMoteLark: settings, chooseAgent: () => {} }}><WorkspaceWorkbench workspaceId="workspace" /></SettingsNavigation.Provider>) }
+  async function mount() { await dom.render(<SettingsNavigation.Provider value={{ open: settings, openToolkit: () => {}, openHost: () => {}, openChannel: settings, channelPresentation: settingsCatalog.channelPresentation, channelEntries: settingsCatalog.channelEntries, openMoteConnection: settings, chooseAgent: () => {} }}><WorkspaceWorkbench workspaceId="workspace" /></SettingsNavigation.Provider>) }
   async function journey(mode: 'create' | 'existing' | 'details', regionId = 'original-region', context = false) {
     const trigger = document.querySelector<HTMLElement>('[data-workbench-region-id="' + regionId + '"] .agent-region-header__more')
     expect(trigger, 'original Agent More trigger').not.toBeNull()

@@ -222,7 +222,7 @@ it('uses the saved first-view count without hiding the rest of the original hist
 
 it('opens the original Survey settings and honors the decorative effect switch', async () => {
   const open = vi.fn()
-  const navigation = { open, openToolkit: vi.fn(), openHost: vi.fn(), openChannel: vi.fn(), channelEntries: [], channelPresentation: () => null, openMoteLark: vi.fn(), chooseAgent: vi.fn() }
+  const navigation = { open, openToolkit: vi.fn(), openHost: vi.fn(), openChannel: vi.fn(), channelEntries: [], channelPresentation: () => null, openMoteConnection: vi.fn(), chooseAgent: vi.fn() }
   const navigate = vi.spyOn(api.browser, 'navigate')
   await render(<SettingsNavigation.Provider value={navigation}>{page()}</SettingsNavigation.Provider>)
   expect(host.querySelector('[data-start-atmosphere]')).not.toBeNull()

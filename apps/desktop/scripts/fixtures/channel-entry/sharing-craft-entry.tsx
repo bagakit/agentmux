@@ -13,7 +13,7 @@ function SharingDialogFixture() {
   const [open, setOpen] = useState(false), trigger = useRef<HTMLButtonElement>(null)
   useEffect(() => { Object.assign(proof, { dialogReady: true }) }, [])
   return <DesktopClientUiProvider><SettingsNavigation.Provider value={{
-    open: section => { proof.routes.push(section) }, openToolkit() {}, openHost() {}, chooseAgent() {}, openMoteLark() {},
+    open: section => { proof.routes.push(section) }, openToolkit() {}, openHost() {}, chooseAgent() {}, openMoteConnection() {},
     channelPresentation: settingsCatalog.channelPresentation, channelEntries: settingsCatalog.channelEntries,
     openChannel: origin => { proof.routes.push(origin.connection.adapterId) }
   }}><MoteWorkfaceContext.Provider value={null}>

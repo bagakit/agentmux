@@ -73,7 +73,7 @@ Object.assign(window, { terminalChrome: {
     connectorMode = 'unbound'
     routeReady = pending ? new Promise<void>(resolve => { releaseRoute = resolve }) : null
     flushSync(() => workbenchRoot.render(<SettingsNavigation.Provider value={{
-      open() {}, openToolkit() {}, openHost() {}, openChannel() {}, chooseAgent() {}, openMoteLark() {},
+      open() {}, openToolkit() {}, openHost() {}, openChannel() {}, chooseAgent() {}, openMoteConnection() {},
       channelPresentation: settingsCatalog.channelPresentation, channelEntries: settingsCatalog.channelEntries
     }}><WorkspaceWorkbench workspaceId={original.workspaceId} /></SettingsNavigation.Provider>))
   },

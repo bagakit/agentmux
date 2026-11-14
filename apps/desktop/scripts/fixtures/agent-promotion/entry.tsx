@@ -32,7 +32,7 @@ api.config.save = async (requested, expected) => { const saved = applyConfigEdit
 mountThemeRuntime(window, config.appearance)
 function Scene() {
   const [settings, setSettings] = useState(true)
-  return <SettingsNavigation.Provider value={{ open: () => setSettings(true), openToolkit: () => {}, openHost: () => {}, openChannel: () => {}, channelEntries: [], channelPresentation: () => null, openMoteLark: () => {}, chooseAgent: () => {} }}><div style={{ height: '100vh', padding: 32, background: 'var(--surface-0)', color: 'var(--text)' }}>
+  return <SettingsNavigation.Provider value={{ open: () => setSettings(true), openToolkit: () => {}, openHost: () => {}, openChannel: () => {}, channelEntries: [], channelPresentation: () => null, openMoteConnection: () => {}, chooseAgent: () => {} }}><div style={{ height: '100vh', padding: 32, background: 'var(--surface-0)', color: 'var(--text)' }}>
     <div style={{ maxWidth: 900, margin: '0 auto', paddingTop: 40 }}>
       <p style={{ fontSize: 12, color: 'var(--text-3)' }}>A familiar project</p>
       <div style={{ border: '1px solid var(--line)', borderRadius: 12, overflow: 'hidden', background: 'var(--surface-1)' }}>

@@ -415,7 +415,7 @@ it('shows an unread Host inventory as unconfirmed until an authoritative empty r
 it.each([false, true])('configures an authoritatively empty ordinary SSH runtime at its own Host, specialized=%s', async specialized => {
   const openHost = vi.fn(), openHostExecutors = vi.fn(), open = vi.fn()
   const settings = { open, openHost, ...(specialized ? { openHostExecutors } : {}), openToolkit: vi.fn(), openChannel: vi.fn(), channelEntries: [],
-    channelPresentation: vi.fn(), openMoteLark: vi.fn(), chooseAgent: vi.fn() }
+    channelPresentation: vi.fn(), openMoteConnection: vi.fn(), chooseAgent: vi.fn() }
   await mount(true, settings)
   vi.mocked(api.executors.discover).mockResolvedValue({ routeHostId: remote.id, runtimeId: 'runtime-' + remote.id, executors: [] })
   await act(async () => { await useAppStore.getState().detectExecutors(remote.id) })
