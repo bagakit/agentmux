@@ -16,7 +16,7 @@ import { MOTE_INPUT_GUIDANCE } from '../../../packages/core/src/mote/input-sourc
 import { MOTE_COORDINATION_ROLE } from '../src/mote-topic-model.js'
 import { createHostContent } from '../src/content-owner.js'
 import { createHostMoteMainReader, createHostMoteDialogue } from '../src/mote-dialogue.js'
-import { motePresenceSourceId } from '../src/mote-presence.js'
+import { motePresenceSourceId } from '@agentmux/core/mote-preferences'
 import { serializeMoteQuickMode } from '../src/mote-model.js'
 import { createGoalRuntime } from '../src/goal-runtime.js'
 import { ContinuousProgressLoopManager } from '../src/continuous-progress-loop-manager.js'

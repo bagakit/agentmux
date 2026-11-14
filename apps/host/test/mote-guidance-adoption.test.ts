@@ -59,7 +59,7 @@ async function fixture(publicCli = false) {
   closes.push(() => presence.dispose())
   // Existing historical custom message: creation uses the real Core immutable writer.
   const snapshot = await main.readCurrentMoteMain(target)
-  const { motePresenceSourceId } = await import('../src/mote-presence.js')
+  const { motePresenceSourceId } = await import('@agentmux/core/mote-preferences')
   const original = (await manager.call('schedule.create', { target: { hostId: 'local', agentSessionId: 'main', providerId: 'codex', workspacePath: f.root }, everyMs: 60000, prompt: 'Original custom heartbeat user content.', managedSource: { sourceId: motePresenceSourceId(snapshot.identity!), revision: 'role-a' }, operationId: 'original-create' })).schedule
   const quick = new HostMoteQuickPreferences({ files, main, catalog: async () => core.spatialCatalog((await spatial.read())!.graph), executors: async () => [], maintenance: presence.read, adoptGuidance: presence.adoptGuidance })
   const server = new core.AgentMuxControlServer({ socketPath: join(f.root, 'adopt.sock'), coreClients: f.coreClients, moteQuickPreferences: quick, schedules: manager })
