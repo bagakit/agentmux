@@ -60,6 +60,8 @@ if (receiptOnly) {
   assert.ok(checks.previewPositions.every(position => position.requests.length > 0 && position.presented), 'Every pointed position has its own reads and a frame callback record')
   assert.ok(checks.frameCallbacks.length > 0, 'Frame callback records were taken')
   assert.ok(checks.sweepMain.longTaskControl.some(ms => ms >= 50), 'The long-task watch recorded its deliberate task')
+  assert.equal(checks.previewEdge.disc?.opacity, 0, 'The start disc gave way to a frame lying over it')
+  assert.ok(checks.previewTooShort.unclampedRight > checks.previewTooShort.stage.right - checks.previewTooShort.inset, 'The time alone was stopped at the picture\'s side')
   assert.deepEqual(checks.drag.pauseAnnounced, ['Paused'], 'Since the drag began, the announcement watch heard only a pause outside it')
   for (const name of ['preview-first-dark', 'preview-mid-dark', 'preview-edge-dark', 'preview-narrow-dark', 'preview-short-dark', 'preview-too-short-dark', 'drag-held-dark', 'preview-reduced-dark'])
     assert.ok(receipt.frames.some(frame => frame.name === name), 'The capture includes frame ' + name)

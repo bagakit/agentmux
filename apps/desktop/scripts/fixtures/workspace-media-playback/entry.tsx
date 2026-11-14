@@ -182,7 +182,9 @@ const probe = {
   preview(path: string) {
     const region = regionOf(path), unit = region?.querySelector<HTMLElement>('.media-player__preview'), decoder = decoderOf(region)
     const box = unit?.getBoundingClientRect(), frame = unit?.hasAttribute('data-frame') ? unit.querySelector('.media-player__preview-frame')!.getBoundingClientRect() : null
+    const start = region?.querySelector<HTMLElement>('.media-player__start'), disc = start?.getBoundingClientRect()
     return { unit: Boolean(unit), idle: unit?.hasAttribute('data-idle') ?? false, frame: Boolean(frame), bubble: unit?.querySelector('.media-player__bubble')?.textContent ?? null,
+      disc: start && disc ? { opacity: Number(getComputedStyle(start).opacity), left: disc.left, right: disc.right, top: disc.top, bottom: disc.bottom } : null,
       box: box ? { left: box.left, right: box.right, top: box.top, bottom: box.bottom, centre: box.left + box.width / 2 } : null,
       frameBox: frame ? { left: frame.left, right: frame.right, top: frame.top, width: frame.width, height: frame.height } : null,
       decoder: decoder ? { index: watched.decoder === decoder ? watched.decoders : -1, src: decoder.getAttribute('src'), muted: decoder.muted, preload: decoder.getAttribute('preload'),

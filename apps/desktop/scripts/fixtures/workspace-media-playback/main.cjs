@@ -85,6 +85,9 @@ async function until(read, test, timeout) {
   for (;;) { const value = await read(); if (test(value)) return { value, ms: Date.now() - started }; if (Date.now() - started > timeout) return { value, ms: null }; await sleep(25) }
 }
 const previewOf = file => evaluate(`mediaPlaybackProbe.preview(${JSON.stringify(file)})`)
+const overlaps = (a, b) => a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom
+// A shown frame never covers the start disc: the disc is absent, has given way, or sits clear of the pointed unit.
+const discClear = state => !state.disc || state.disc.opacity === 0 || !overlaps(state.disc, state.box)
 const mainOf = file => evaluate(`mediaPlaybackProbe.main(${JSON.stringify(file)})`)
 const timelineOf = file => evaluate(`mediaPlaybackProbe.timeline(${JSON.stringify(file)})`)
 const watchState = () => evaluate('mediaPlaybackProbe.watchState()')
@@ -417,8 +420,8 @@ async function previewPhase(size) {
     return await timelineOf(file)
   }
   try {
-    const short = await roomFor(98, 2)
-    assert.ok(short.room >= 96 && short.room <= 100, 'A short Region leaves 96 to 100 px above the timeline, just above the least room for a frame: ' + short.room)
+    const short = await roomFor(122, 2)
+    assert.ok(short.room >= 120 && short.room <= 124, 'A short Region leaves 120 to 124 px above the timeline, just above the least room for a frame: ' + short.room)
     await evaluate(`mediaPlaybackProbe.showControls(${q})`)
     const shortX = pixelAt(short, 0.45), shortTime = timeAt(short, shortX)
     pointer.move(shortX, short.y)
@@ -426,15 +429,24 @@ async function previewPhase(size) {
     checks.previewShort = { room: short.room, frameMs: shrunk.ms, frame: shrunk.value.frameBox, box: shrunk.value.box, stage: short.stage }
     assert.ok(shrunk.ms !== null && shrunk.value.frameBox.height > 0 && shrunk.value.frameBox.height < 112, 'A short Region shows a shrunken frame: ' + JSON.stringify(checks.previewShort))
     assert.ok(shrunk.value.box.top >= short.stage.top - 0.5, 'The shrunken frame stays inside the picture: ' + JSON.stringify(checks.previewShort))
+    const shortDisc = await until(() => previewOf(file), discClear, 1000)
+    checks.previewShort.disc = shortDisc.value.disc
+    assert.ok(shortDisc.ms !== null, 'The shrunken frame leaves the start disc uncovered: ' + JSON.stringify(shortDisc.value))
     await frame('preview-short-dark')
     await releasePreview(file, short)
     const tiny = await roomFor(70, 8)
-    assert.ok(tiny.room < 96, 'A Region too short for a readable frame: ' + tiny.room)
+    assert.ok(tiny.room < 120, 'A Region too short for a readable frame: ' + tiny.room)
     await evaluate(`mediaPlaybackProbe.showControls(${q})`)
-    pointer.move(pixelAt(tiny, 0.45), tiny.y); await sleep(1000)
+    // Pointed at the last visible part of the timeline, the time alone would cross the picture's side unless it stops there too.
+    // So small a picture lets the control bar overflow it, so the timeline's own end may lie past the side, clipped.
+    const tinyX = pixelAt(tiny, 0, Math.min(tiny.left + tiny.width, tiny.stage.right) - 6), tinyCentre = Math.min(tinyX, tiny.left + tiny.width - tiny.thumb / 2)
+    pointer.move(tinyX, tiny.y); await sleep(1000)
     const timeOnly = await previewOf(file)
-    checks.previewTooShort = { room: tiny.room, decoder: timeOnly.decoder !== null, frame: timeOnly.frame, bubble: timeOnly.bubble, idle: timeOnly.idle }
+    checks.previewTooShort = { room: tiny.room, decoder: timeOnly.decoder !== null, frame: timeOnly.frame, bubble: timeOnly.bubble, idle: timeOnly.idle, box: timeOnly.box, stage: tiny.stage, inset: tiny.inset,
+      unclampedRight: timeOnly.box ? tinyCentre + (timeOnly.box.right - timeOnly.box.left) / 2 : null, pointer: tinyX, timeline: { left: tiny.left, width: tiny.width } }
     assert.ok(!timeOnly.decoder && !timeOnly.frame && timeOnly.bubble && !timeOnly.idle, 'Too short a Region points at the time only: ' + JSON.stringify(checks.previewTooShort))
+    assert.ok(checks.previewTooShort.unclampedRight > tiny.stage.right - tiny.inset, 'Centred on the pointer the time would cross the side, so its stop is exercised: ' + JSON.stringify(checks.previewTooShort))
+    assert.ok(timeOnly.box.left >= tiny.stage.left + tiny.inset - 0.5 && timeOnly.box.right <= tiny.stage.right - tiny.inset + 0.5, 'The time alone stays inside the picture with the inset: ' + JSON.stringify(checks.previewTooShort))
     await frame('preview-too-short-dark')
     pointer.move(tiny.left + tiny.width / 2, tiny.stage.top + 10)
   } finally { win.setContentSize(width, height); await sleep(600) }
@@ -509,6 +521,9 @@ async function capture() {
   report.checks.previewNarrow = { frameMs: narrowFrame.ms, frame: narrowFrame.value.frameBox, box: narrowFrame.value.box, stage: ng.stage }
   assert.ok(narrowFrame.ms !== null, 'The narrow Region shows the pointed frame: ' + JSON.stringify(narrowFrame.value))
   assert.ok(narrowFrame.value.box.left >= ng.stage.left - 0.5 && narrowFrame.value.box.right <= ng.stage.right + 0.5, 'The narrow frame stays inside the picture: ' + JSON.stringify(report.checks.previewNarrow))
+  const narrowDisc = await until(() => previewOf('promo.mp4'), discClear, 1000)
+  report.checks.previewNarrow.disc = narrowDisc.value.disc
+  assert.ok(narrowDisc.ms !== null, 'The narrow frame leaves the start disc uncovered: ' + JSON.stringify(narrowDisc.value))
   await frame('preview-narrow-dark')
   // Near the timeline's end a frame centred on the pointer would cross the picture's side; it stays inside with the inset.
   const edgeX = pixelAt(ng, 0, ng.left + ng.width - 14), edgeTime = timeAt(ng, edgeX)
@@ -520,6 +535,11 @@ async function capture() {
   report.checks.previewEdge = { pointer: edgeX, unclampedRight: edgeCentre + edgeHalf, box: edgeBox, stage: { left: ng.stage.left, right: ng.stage.right }, inset: ng.inset }
   assert.ok(edgeCentre + edgeHalf > ng.stage.right - ng.inset, 'Centred on the pointer the frame would cross the side, so the clamp is exercised: ' + JSON.stringify(report.checks.previewEdge))
   assert.ok(ng.inset > 0 && edgeBox.left >= ng.stage.left + ng.inset - 0.5 && edgeBox.right <= ng.stage.right - ng.inset + 0.5, 'At an edge the frame stays inside the player with the inset: ' + JSON.stringify(report.checks.previewEdge))
+  // Here the frame sits over the paused player's start disc, so the disc giving way is what keeps it uncovered.
+  assert.ok(edge.value.disc && overlaps(edge.value.disc, edgeBox), 'The edge frame lies over the start disc: ' + JSON.stringify({ disc: edge.value.disc, box: edgeBox }))
+  const edgeDisc = await until(() => previewOf('promo.mp4'), state => state.frame && state.disc?.opacity === 0, 1000)
+  report.checks.previewEdge.disc = edgeDisc.value.disc
+  assert.ok(edgeDisc.ms !== null, 'The start disc gives way to the edge frame: ' + JSON.stringify(edgeDisc.value.disc))
   await frame('preview-edge-dark')
   await releasePreview('promo.mp4', ng)
 
