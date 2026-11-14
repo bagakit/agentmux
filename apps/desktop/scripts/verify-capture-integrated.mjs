@@ -40,6 +40,7 @@ function jsonReceipt(log) {
 try {
   const real = await stage('real-startup', 'apps/desktop/scripts/verify-capture-real-startup.mjs', [], jsonReceipt)
   assert.equal(real.candidate.head, head); assert.equal(real.samples.length, 24); assert.equal(real.comparisons.length, 4)
+  assert.equal(real.cleanup.baselineWorktreeRemoved, true); assert.equal(real.cleanup.generatedArtifactsRemoved, true)
   assert.ok(Object.keys(real.productionInputs?.baseline?.files ?? {}).length && Object.keys(real.productionInputs?.candidate?.files ?? {}).length)
   receipt.productionInputs = real.productionInputs; receipt.baseline = real.baseline; receipt.machine.displayTopology = real.samples[0].topology
   receipt.samples = real.samples; receipt.performance = real.comparisons; receipt.cleanup.realStartup = real.cleanup
