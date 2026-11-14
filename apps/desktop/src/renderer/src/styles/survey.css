@@ -380,8 +380,6 @@
 .survey-composition-details dd { margin: 2px 0 8px; overflow-wrap: anywhere; }
 .survey-composition-details dt { margin-top: 6px; color: var(--text-3); }
 
-/* The left Survey navigator already names these same Tabs; keep the original Group actions. */
-.global-survey-surface .workbench-zone .pane-tabbar .workbench-tab-strip { display: none; }
 .survey-pin-mark { display: grid; flex: none; place-items: center; width: 12px; color: var(--text-3); }
 .survey-tab-cell .survey-tab-close { width: 20px; height: 20px; }
 .survey-tab-cell[data-selectable="true"] > .survey-tab-column { padding-left: 4px; padding-top: 30px; }

@@ -23,6 +23,7 @@ import { BrowserToolsPanel } from './BrowserToolsPanel'
 import { SurveyZoneItem, type SurveyItemNameDraft } from './SurveyZoneItem'
 import { SurveyTabColumn } from './SurveyTabColumn'
 import { SurveyPageItem } from './SurveyPageItem'
+import { SurveyPageTabHeader } from './SurveyPageTabHeader'
 import { surveyPinnedReferences, surveyPinKey } from '../lib/survey-pins'
 import type { AgentMuxSurveyPinReference } from '@agentmux/core/control'
 import { surveyCompositionDestinations, type SurveyCompositionDestinationIntent } from '../lib/survey-composition-destinations'
@@ -694,6 +695,7 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
     [profileView, pageReferences, collected, tabs, defaultProfileId, catalog])
   const currentPageOwner = pageSelection && !pageReferences.some(page => page.regionId === pageSelection.regionId && page.browserId === pageSelection.browserId)
     ? surveyPageOwner(tabs, pageSelection, catalog) : null
+  const pageHeaderOwner = pageSelection ? currentPageOwner ?? surveyPageOwner(tabs, pageSelection, catalog) : null
   const currentPageZoneId = currentPageOwner ? catalog?.tabs.find(tab => tab.tabId === currentPageOwner.tab.id)?.zoneId : null
   const itemTitles = new Map([...Object.keys(collected).filter(zoneId => !catalog?.zones.some(zone => zone.zoneId === zoneId)).map(zoneId => [zoneId, 'Retained exploration'] as const), ...[...displayedItems.values()].map(zone => [zone.zoneId, itemTitle(zone)] as const)].filter(([zoneId]) => profileReferences.zoneIds.has(zoneId)))
   const pinnedZoneIds = pinReferences.flatMap(reference => reference.kind === 'zone' && itemTitles.has(reference.zoneId) ? [reference.zoneId] : [])
@@ -815,6 +817,9 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
         </div>)}
         {pageSelection ? <>{projection ? <WorkspaceWorkbench workspaceId={projection.displayWorkspaceId}
           projection={projection} viewOwnership="projection" viewTargets={viewTargets} visible={visible && !controlsCoverPage}
+          projectionHeader={pageHeaderOwner?.surface.kind === 'browser' ? <SurveyPageTabHeader tabId={pageHeaderOwner.tab.id} browser={pageHeaderOwner.surface}
+            visible={visible && !controlsCoverPage} leadingChrome={windowControlsInset} creating={opening}
+            onClose={() => closePage(pageSelection)} onCreate={() => void openBrowser('about:blank', true)} /> : null}
           leadingChrome={windowControlsInset} onCreateTab={groupId => void newBrowserTab(projection.displayWorkspaceId, groupId)} />
           : <div role="status" className="survey-relation-notice">
             The original Browser Region is not confirmed. Its page reference is kept; inspect the same Region and Browser before choosing its original location.

@@ -1741,7 +1741,8 @@ export function WorkspaceWorkbench({
   onCreateTab,
   projection,
   leadingChrome,
-  presentationAction
+  presentationAction,
+  projectionHeader
 }: {
   workspaceId: string
   interactiveResize?: boolean
@@ -1773,6 +1774,8 @@ export function WorkspaceWorkbench({
   leadingChrome?: ReactNode
   /** One host action in the active Pane header; original content and controls stay shared. */
   presentationAction?: ReactNode
+  /** Optional chrome for an exact Region; its original content slot remains unchanged. */
+  projectionHeader?: ReactNode
 }) {
   useWorkbenchWindowRevision()
   const moteContext = useContext(MoteWorkfaceContext)
@@ -2098,6 +2101,7 @@ export function WorkspaceWorkbench({
       !projectionContext?.unsupportedTabIds.has(reference.tabId)
     return <WorkbenchProjectionContext.Provider value={projectionContext}>
       <div ref={workbenchRef} className="workspace-workbench">
+        {projectionHeader}
         <div className="pane-body">{confirmed ? projectionNotice : projectionState}
         {confirmed ? <div key={workbenchRegionProjectionSlotId(effectiveViewHostPrefix, reference)} id={workbenchRegionProjectionSlotId(effectiveViewHostPrefix, reference)}
           data-workbench-tab-id={reference.tabId} data-workbench-group-id={reference.groupId} className="workbench-region-slot" />
