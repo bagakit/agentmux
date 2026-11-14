@@ -32,6 +32,7 @@ import { agentInformationPreview } from '../lib/agent-information-preview'
 import { createPointerRestGate, PointerRestGateContext, type PointerRestGate } from '../lib/pointer-rest-gate'
 import '@xyflow/react/dist/base.css'
 import { CollaborationBoundsIndex } from '../lib/collaboration-spatial-index'
+import { CollaborationDispatchSignal, COLLABORATION_TRANSFER_MS } from './CollaborationDispatchSignal'
 
 export type CollaborationSelection = { kind: 'agent' | 'relation'; id: string; relatedIds?: readonly string[] } | null
 type NodeActivity = { pulse: CollaborationPulse; direction: 'sent' | 'received' }
@@ -83,7 +84,7 @@ const AgentNodeView = memo(function AgentNodeView({ data }: NodeProps<AgentNode>
       </div> : null}
     </div>
     {focusProxy ? <span ref={registerReadingProxy} className="collaboration-agent__focus-proxy" aria-hidden="true" style={{ left: data.box.width / 2, top: hull.y - data.box.y - 8 / zoom, transform: `scale(${1 / zoom}) translate(-50%, -100%)` }}><strong>{label}</strong><kbd>↓ Read</kbd></span> : null}
-    {data.activity ? <ActivityMark activity={data.activity} /> : null}
+    {data.activity ? <ActivityMark activity={data.activity} style={{ left: hull.x - data.box.x + hull.width / 2, top: hull.y - data.box.y + hull.height / 2, width: hull.width, height: hull.height, borderRadius: hull.radius }} /> : null}
   </div>
 })
 /** The local route or layout failure, as a compact corner service window. It collapses to a
@@ -103,12 +104,12 @@ function CollaborationLayoutNotice({ issues, onRetry }: { issues: ReadonlyMap<st
     </>}
   </div>
 }
-function ActivityMark({ activity }: { activity: NodeActivity }) {
+function ActivityMark({ activity, style }: { activity: NodeActivity; style: CSSProperties }) {
   const { pulse, direction } = activity, motion = useContext(MapMotionContext)
-  const label = pulse.kind === 'communication' ? `Message ${direction}` : 'Dispatch updated'
+  const label = pulse.kind === 'communication' ? `Observed message activity · ${direction === 'sent' ? 'source' : 'destination'}` : 'Dispatch updated'
   const delay = useMemo(() => Math.min(0, pulse.startedAt - Date.now()), [pulse.id, pulse.startedAt, motion])
-  return <span key={pulse.id} className="collaboration-activity" data-kind={pulse.kind} aria-label={label} title={label}
-    style={{ animationDelay: `${delay}ms` }}><span>{pulse.kind === 'communication' ? direction === 'sent' ? 'Sent ↗' : 'Received ↙' : 'Updated'}</span></span>
+  return <span key={pulse.id} className="collaboration-activity" data-kind={pulse.kind} data-direction={pulse.kind === 'communication' ? direction : 'updated'} aria-label={label} title={label}
+    style={{ ...style, '--collaboration-transfer-delay': `${delay}ms`, '--collaboration-transfer-duration': `${COLLABORATION_TRANSFER_MS}ms` } as CSSProperties}><span /></span>
 }
 /** One identity mark across scales: old distant points reveal the original Executor face.
  * Runnable members sit on a disc; confirmed-closed members drop it and recede. */
@@ -488,16 +489,14 @@ const RelationView = memo(function RelationView({ record, markerId, zoom, active
   const dx = end && before ? end.x - before.x : 0, dy = end && before ? end.y - before.y : 0, length = Math.hypot(dx, dy)
   const horizontal = Math.abs(dx) >= Math.abs(dy)
   const caption = end && length > 0 && (record.unconfirmed || zoom >= .7 || record.emphasis === 'related')
-  const delay = useMemo(() => Math.min(0, record.startedAt - Date.now()), [record.active, record.startedAt, motion])
+  const routeLength = useMemo(() => points.reduce((total, point, index) => index ? total + Math.hypot(point.x - points[index - 1]!.x, point.y - points[index - 1]!.y) : 0, 0), [points])
   return <><g className={`react-flow__edge selectable collaboration-edge-group--${kind}`} data-id={record.id} data-emphasis={record.emphasis} data-recent={record.active ? true : undefined} tabIndex={0} role="button" aria-label={record.label} aria-pressed={record.selected} {...tooltip.props}
     style={{ pointerEvents: 'stroke', '--edge-weight': record.weight } as CSSProperties} onMouseEnter={event => { const group = event.currentTarget; gate.enter(group, () => latestShow.current({ currentTarget: group })) }} onMouseLeave={event => { gate.leave(event.currentTarget); if (!event.currentTarget.contains(event.currentTarget.ownerDocument.activeElement)) tooltip.hide() }} onFocus={show} onClick={event => { event.stopPropagation(); onSelect(record) }} onKeyDown={event => {
       if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); event.stopPropagation(); onSelect(record) }
       if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); onClear(); tooltip.hide() }
     }}>
     <BaseEdge id={record.id} path={path} {...merged < 0 ? {} : { markerEnd: `url(#${markerId}-${kind})` }} interactionWidth={22} className={`collaboration-edge collaboration-edge--${kind}${record.selected ? ' is-selected' : ''}`} />
-    {record.active && motion ? <path key={record.active} d={path} pathLength={1} style={{ animationDelay: `${delay}ms` }} className="collaboration-edge__pulse" data-kind={kind} /> : null}
-    {record.active && motion && kind === 'communication' ? <circle key={`packet-${record.active}`} r={4 / zoom} className="collaboration-edge__packet" data-kind={kind} aria-hidden="true"
-      style={{ offsetPath: `path("${path}")`, animationDelay: `${delay}ms` }} /> : null}
+    {record.active && motion && kind !== 'creation' ? <CollaborationDispatchSignal key={record.active} pulseId={record.active} startedAt={record.startedAt} path={path} length={routeLength} zoom={zoom} kind={kind} /> : null}
     {caption ? <EdgeLabelRenderer><span className="collaboration-edge__caption" data-creation-unconfirmed={record.unconfirmed} data-relation-id={record.id} aria-hidden="true"
       style={{ transform: `translate(${end.x - dx / length * 24 / zoom}px, ${end.y - dy / length * 24 / zoom}px) scale(${1 / zoom}) translate(${horizontal ? dx > 0 ? '-100%' : '0' : '-50%'}, ${horizontal ? 'calc(-100% - 5px)' : dy > 0 ? '-100%' : '0'})` }}>{record.title}</span></EdgeLabelRenderer> : null}
     {record.emphasis === 'related' && record.count > 1 && !record.selected && !tooltip.props['aria-describedby'] ? <EdgeLabelRenderer><span className="collaboration-edge__count" style={{ transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)` }}>{record.count}</span></EdgeLabelRenderer> : null}

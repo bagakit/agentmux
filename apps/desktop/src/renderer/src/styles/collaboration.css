@@ -110,11 +110,11 @@
 .collaboration-edge--supervision { stroke: var(--amber); }
 .collaboration-edge.is-selected { opacity: 1; stroke-width: 2.75; }
 .collaboration-edge__count { position: absolute; pointer-events: none; background: var(--surface-1); border: 1px solid var(--line); color: var(--text-2); border-radius: 8px; padding: 0 5px; font-size: 10px; line-height: 16px; font-variant-numeric: tabular-nums; }
-.collaboration-edge__pulse { fill: none; stroke: var(--green); stroke-width: 3.5; vector-effect: non-scaling-stroke; stroke-linecap: round; animation: collaboration-message linear 1 both; pointer-events: none; }
-.collaboration-edge__pulse[data-kind=supervision] { stroke: var(--amber); stroke-dasharray: none; animation-name: collaboration-supervision; animation-timing-function: ease-out; }
-.collaboration-edge__packet { fill: var(--green); stroke: var(--surface-1); stroke-width: 1.5; vector-effect: non-scaling-stroke; offset-rotate: 0deg; pointer-events: none; filter: drop-shadow(0 0 4px color-mix(in srgb, var(--green) 60%, transparent)); animation: collaboration-packet linear 1 both; }
-@keyframes collaboration-message { 0% { opacity: 0; } 12%, 85% { opacity: .38; } 100% { opacity: 0; } }
-@keyframes collaboration-packet { 0% { offset-distance: 0%; opacity: 0; } 8%, 92% { opacity: 1; } 100% { offset-distance: 100%; opacity: 0; } }
+.collaboration-edge__pulse, .collaboration-edge__packet { fill: none; vector-effect: non-scaling-stroke; stroke-linecap: round; pointer-events: none; animation: collaboration-transfer var(--collaboration-transfer-duration) linear 1 both; stroke-dasharray: var(--collaboration-transfer-span) 2; stroke-dashoffset: var(--collaboration-transfer-span); }
+.collaboration-edge__pulse { stroke: color-mix(in srgb, var(--green) 26%, transparent); stroke-width: 4; }
+.collaboration-edge__packet { stroke: color-mix(in srgb, var(--green) 72%, var(--text)); stroke-width: 2; }
+.collaboration-edge__update { stroke: var(--amber); stroke-width: 2; stroke-dasharray: none; animation-name: collaboration-supervision; animation-timing-function: ease-out; }
+@keyframes collaboration-transfer { 0% { stroke-dashoffset: var(--collaboration-transfer-span); opacity: 0; } 9%, 78% { opacity: 1; } 100% { stroke-dashoffset: calc(var(--collaboration-transfer-span) - 1); opacity: 0; } }
 @keyframes collaboration-supervision { 0% { opacity: 0; } 25% { opacity: .9; } 100% { opacity: 0; } }
 .collaboration-canvas__controls { z-index: 6; position: relative; display: flex; align-items: center; padding: 5px; gap: 2px; margin-left: auto; background: var(--surface-1); border: 1px solid var(--line); border-radius: 9px; box-shadow: var(--elev-1); pointer-events: auto; }
 .collaboration-canvas__controls .collaboration-canvas__arrange { display: inline-flex; gap: 5px; width: auto; padding-inline: 7px; font-size: 11px; }
@@ -227,11 +227,14 @@
 .collaboration-connections .react-flow__edge:focus-visible .collaboration-edge, :where(.collaboration-canvas:not([data-camera-moving])) .collaboration-connections .react-flow__edge:hover .collaboration-edge { opacity: 1; stroke-width: 2.5; }
 .collaboration-edge { vector-effect: non-scaling-stroke; }
 
-.collaboration-activity { position: absolute; top: -9px; right: 6px; z-index: 1; display: inline-flex; align-items: center; gap: 4px; min-width: 18px; height: 18px; padding: 0 5px; border: 1px solid var(--green); border-radius: var(--radius-sm); background: var(--surface-1); color: var(--green); font-size: 10px; font-weight: 600; line-height: 16px; white-space: nowrap; pointer-events: none; animation: collaboration-activity linear 1 both; }
-.collaboration-agent:not([data-overview=true]):has(> .collaboration-activity[data-kind=communication]) { border-radius: var(--radius-sm); box-shadow: 0 0 0 2px color-mix(in srgb, var(--green) 70%, transparent), 0 0 16px color-mix(in srgb, var(--green) 12%, transparent); }
-.collaboration-activity[data-kind=supervision] { color: var(--amber); border-color: color-mix(in srgb, var(--amber) 60%, var(--line)); }
-.collaboration-agent[data-overview=true] .collaboration-activity { top: 50%; left: 50%; right: auto; width: 26px; height: 26px; padding: 0; border-radius: 50%; transform: translate(-50%, -50%) scale(var(--collaboration-mark-scale, 1)); box-shadow: 0 0 0 4px color-mix(in srgb, var(--green) 12%, transparent); background: transparent; }
-.collaboration-agent[data-overview=true] .collaboration-activity > span { display: none; }
+.collaboration-activity { --collaboration-signal: var(--green); position: absolute; z-index: 1; transform: translate(-50%, -50%); border: 1px solid color-mix(in srgb, var(--collaboration-signal) 28%, transparent); pointer-events: none; animation: collaboration-activity var(--collaboration-activity-duration) linear 1 both; animation-delay: var(--collaboration-transfer-delay); }
+.collaboration-activity[data-kind=supervision] { --collaboration-signal: var(--amber); }
+.collaboration-activity > span { position: absolute; inset: -4px; border-radius: inherit; }
+.collaboration-activity > span::before, .collaboration-activity > span::after { content: ''; position: absolute; inset: 0; border-radius: inherit; border: 1.5px solid var(--collaboration-signal); opacity: 0; animation: collaboration-source-response var(--collaboration-transfer-duration) ease-out 1 both; animation-delay: var(--collaboration-transfer-delay); }
+.collaboration-activity > span::after { inset: 3px; border-width: 3px; border-color: color-mix(in srgb, var(--collaboration-signal) 12%, transparent); }
+.collaboration-activity[data-direction=received] > span::before, .collaboration-activity[data-direction=received] > span::after { animation-name: collaboration-target-response; }
+@keyframes collaboration-source-response { 0% { opacity: 0; transform: scale(.98); } 9% { opacity: .7; transform: scale(1); } 34%, 100% { opacity: 0; transform: scale(1.05); } }
+@keyframes collaboration-target-response { 0%, 58% { opacity: 0; transform: scale(.98); } 78% { opacity: .8; transform: scale(1); } 100% { opacity: 0; transform: scale(1.05); } }
 .collaboration-area__activity { visibility: hidden; flex: 0 0 6px; width: 6px; height: 6px; border-radius: 50%; background: var(--green); }
 .collaboration-area__activity[data-kind] { visibility: visible; }
 .collaboration-area__activity[data-kind=supervision] { background: var(--amber); }
@@ -304,8 +307,10 @@
 .collaboration-node-key[data-tier=closed] .agent-avatar { filter: grayscale(1); opacity: var(--collaboration-closed-ink); }
 .collaboration-recency-key { display: inline-flex; align-items: center; gap: 4px; color: var(--text-2); }
 /* The effective preference overrides reduction only within this Map's presentation. */
-.collaboration-canvas[data-motion=on] :is(.collaboration-activity, .collaboration-edge__pulse, .collaboration-edge__packet) { animation-duration: var(--collaboration-activity-duration) !important; }
+.collaboration-canvas[data-motion=on] .collaboration-activity { animation-duration: var(--collaboration-activity-duration) !important; }
+.collaboration-canvas[data-motion=on] :is(.collaboration-edge__pulse, .collaboration-edge__packet), .collaboration-canvas[data-motion=on] .collaboration-activity > span::before, .collaboration-canvas[data-motion=on] .collaboration-activity > span::after { animation-duration: var(--collaboration-transfer-duration) !important; }
 .collaboration-canvas[data-motion=off] .collaboration-activity { animation: none; }
+.collaboration-canvas[data-motion=off] .collaboration-activity > span::before, .collaboration-canvas[data-motion=off] .collaboration-activity > span::after { animation: none; }
 /* One transition contract for every Map presentation change: on keeps 150ms even under reduced
  * motion, off removes it. Recede and the closed face's return ride the same switch. */
 .collaboration-canvas[data-motion=on] :is(.collaboration-agent__body, .collaboration-agent .focus-context, .collaboration-agent--closed .agent-avatar, .collaboration-edge, .collaboration-area__overview-label, .collaboration-area__envelope path, .collaboration-area__identity, .collaboration-area__name > strong, .collaboration-area__meta, .collaboration-area__meta em, .collaboration-canvas__motion-switch::after) { transition: border-color 150ms ease-out, background-color 150ms ease-out, box-shadow 150ms ease-out, opacity 150ms ease-out, color 150ms ease-out, filter 150ms ease-out; transition-duration: 150ms !important; }
