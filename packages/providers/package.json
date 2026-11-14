@@ -263,6 +263,14 @@
     "./codex/turn-outcome": {
       "types": "./dist/codex/turn-outcome.d.ts",
       "import": "./dist/codex/turn-outcome.js"
+    },
+    "./codex/turn-evidence": {
+      "types": "./dist/codex/turn-evidence.d.ts",
+      "import": "./dist/codex/turn-evidence.js"
+    },
+    "./codex/session-status": {
+      "types": "./dist/codex/session-status.d.ts",
+      "import": "./dist/codex/session-status.js"
     }
   },
   "files": [
