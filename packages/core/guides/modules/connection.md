@@ -334,6 +334,14 @@ The result omits private paths, content, people, quotas, Agent/Session reference
 An empty window means no observed intake in this window; unavailable is not absence. Readiness,
 terminal confirmation and admission are separate observations, not proof of a reply or completion.
 Diagnosis never starts an Agent, changes policy, fetches platform messages or retries an input.
+Input waitObservation retains only finite original observation phases and the initialization
+state/reason/source/scope, without Session, Run, native identity or arbitrary error detail.
+AGENT_INITIAL_INPUT_UNCONFIRMED identifies an original native-start observation failure;
+an absent failureCode is not proof that no failure occurred. Runtime continuity is confirmed
+only for the exact original Run or its canonical semantic-resume relationship within the same
+original Session/Host; absent proof is unconfirmed and an unreadable/missing original is unavailable.
+This relationship is not native input acceptance, an answer, current authority or permission to retry.
+Unknown dispatch remains unknown; diagnose never reads a denied mailbox or replays its input.
 The saved Mote Executor starts lazily on authorized direct messages. Inactivity creates a new Agent
 without removing prior conversations. Quota counts unique admitted native messages, including the
 last allowed message; replies do not consume quota. An unknown mutation keeps its entire input and
