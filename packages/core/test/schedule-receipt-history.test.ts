@@ -1,5 +1,6 @@
 import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
+import { DatabaseSync } from 'node:sqlite'
 import { join } from 'node:path'
 import { afterEach, expect, it, vi } from 'vitest'
 import { AgentMuxClient } from '../src/client.js'
@@ -31,7 +32,15 @@ function frozen(definition: typeof base): AgentFuturePromptIntent {
     message: { userContent: prompt, systemContext: 'private definition ' + definition.operationId } }
 }
 
-async function fixture(kind: 'memory' | 'file') {
+async function fixture(kind: 'memory' | 'file', initialPrompt?: string) {
+  const definitionFor = (definition: typeof base) => {
+    const original = frozen(definition)
+    if (initialPrompt !== undefined && definition.intentId === base.intentId) {
+      original.prompt = initialPrompt
+      original.message.userContent = initialPrompt
+    }
+    return original
+  }
   const root = await mkdtemp(join(tmpdir(), 'sh-')), path = join(root, 'sessions.json')
   releases.push(() => rm(root, { recursive: true, force: true }))
   const store: AgentMuxAgentSessionStore = kind === 'file' ? new AgentMuxFileAgentSessionStore(path) : new AgentMuxMemoryAgentSessionStore()
@@ -39,12 +48,12 @@ async function fixture(kind: 'memory' | 'file') {
     kind: 'agent', agentSessionId, providerId: 'codex', executorId: 'codex', hostId: 'local', workspacePath: root,
     run: { runId: agentSessionId + '-run' }, retiredRuns: [], hookBindingId: agentSessionId + '-binding',
     hookToken: 'test bound secret', createdAt: 1, updatedAt: 1,
-    futurePromptIntents: Object.fromEntries([base, updated, unpublished].map(definition => [definition.intentId, frozen(definition)]))
+    futurePromptIntents: Object.fromEntries([base, updated, unpublished].map(definition => [definition.intentId, definitionFor(definition)]))
   })
-  const input = async (session: AgentMuxStoredAgentSession, operationId: string, definition: typeof base, occurrenceAt: number, content = frozen(definition).message) => {
+  const input = async (session: AgentMuxStoredAgentSession, operationId: string, definition: typeof base, occurrenceAt: number, content = definitionFor(definition).message, acknowledged = true) => {
     const next: AgentMuxStoredAgentSession = { ...session, updatedAt: session.updatedAt + 1,
       promptCompletionAdmission: {
-        submissionId: operationId, operationId, transport: 'pty', startByte: 0, endByte: 16, acknowledged: true,
+        submissionId: operationId, operationId, transport: 'pty', startByte: 0, endByte: 16, acknowledged,
         inputKey: { kind: 'prompt', agentSessionId: session.agentSessionId, expectedRun: session.run, submissionId: operationId },
         futureIntent: { intentId: definition.intentId, occurrenceAt },
         intent: { run: session.run, ownerInstanceId: 'private input owner', prompt: 'private input prompt',
@@ -85,7 +94,10 @@ async function fixture(kind: 'memory' | 'file') {
   const manager = new ContinuousProgressLoopManager(sessions as never, tick, () => 180_000,
     async () => { throw Error('History never probes Runtime activity.') }, runtime)
   releases.push(() => manager.stop())
-  return { manager, source: sessions, tick, future, ownRead, loop, root, path, client, async corruptMessage() {
+  return { manager, source: sessions, tick, future, ownRead, loop, root, path, client, async addSummaryInputs() {
+    current = await input(current, 'second-confirmed', updated, 140_000)
+    current = await input(current, 'unconfirmed-delivery', updated, 141_000, frozen(updated).message, false)
+  }, async corruptMessage() {
     await input(current, 'mismatched-frozen-input', updated, 190_000, { userContent: 'a different producer', systemContext: 'private context' })
   } }
 }
@@ -130,10 +142,113 @@ it.each(['memory', 'file'] as const)('%s Host schedule history reads earlier inp
   }
 })
 
+it.each(['memory', 'file'] as const)('%s public history summarizes only the same recorded inputs shown in a period', async kind => {
+  const f = await fixture(kind)
+  await f.manager.start()
+  await f.addSummaryInputs()
+  const endpoint = { transport: 'unix' as const, path: join(f.root, 'summary.sock') }
+  const server = new AgentMuxControlServer({ socketPath: endpoint.path, schedules: f.manager })
+  await server.start()
+  releases.push(() => server.stop())
+  const rpc = await connectAgentMuxRpc({ endpoint })
+  releases.push(() => rpc.dispose())
+  const query = { scheduleId: scope.scheduleId, from: scope.from, to: scope.to, bucketStarts: [scope.from, 120_000, 160_000] }
+  const summary = await rpc.call('schedule.history', query)
+  const sent = { delivery: 'terminal-confirmed', nativeState: 'unsupported' }
+  expect(summary).toEqual({ executionScope: 'connected-host', scheduleId: query.scheduleId, from: query.from, to: query.to,
+    coverage: 'recorded-inputs', entries: [], nextCursor: null, buckets: [
+      { from: scope.from, to: 120_000, groups: [{ ...sent, firstAt: scope.from, lastAt: scope.from, count: 1, originalLabel: 'Original daily review' }] },
+      { from: 120_000, to: 160_000, groups: [
+        { delivery: 'unconfirmed', nativeState: 'unsupported', firstAt: 141_000, lastAt: 141_000, count: 1, originalLabel: 'Updated daily review' },
+        { ...sent, firstAt: 120_000, lastAt: 140_000, count: 2, originalLabel: 'Updated daily review' }
+      ] }
+    ] })
+  const acrossRevisions = await rpc.call('schedule.history', { ...query, bucketStarts: [scope.from] })
+  expect(acrossRevisions.buckets![0]!.groups.find(group => group.delivery === 'terminal-confirmed')).toMatchObject({ count: 3, originalLabel: null })
+  expect(JSON.stringify(acrossRevisions)).not.toContain(f.loop.prompt)
+  const original = await rpc.call('schedule.history', { scheduleId: query.scheduleId, from: 120_000, to: 160_000 })
+  expect(original.entries.map(row => row.occurrenceAt)).toEqual([141_000, 140_000, 120_000])
+  const first = await rpc.call('schedule.history', { ...query, limit: 2 })
+  expect(first.buckets!.map(bucket => bucket.from)).toEqual([120_000])
+  expect(first.nextCursor).toEqual(expect.any(String))
+  const second = await rpc.call('schedule.history', { ...query, cursor: first.nextCursor!, limit: 2 })
+  expect(second.nextCursor).toBeNull()
+  expect(second.buckets!.map(bucket => bucket.groups.map(group => group.firstAt))).toEqual([[scope.from], [120_000]])
+  for (const other of [undefined, [scope.from, 130_000]]) {
+    const different: ScheduleHistoryQuery = { scheduleId: query.scheduleId, from: query.from, to: query.to, cursor: first.nextCursor! }
+    if (other) different.bucketStarts = other
+    await expect(rpc.call('schedule.history', different)).rejects.toMatchObject({ code: 'INVALID_CONTROL_REQUEST' })
+  }
+  await f.corruptMessage()
+  const partial = await rpc.call('schedule.history', query)
+  expect(partial).toEqual({ ...summary, coverage: 'unconfirmed' })
+  if (process.env.AGENTMUX_TEST_OBJECT_CLI) {
+    const cli = await runCompiledObjectCli(['--endpoint', `unix:${endpoint.path}`, 'schedule', 'history', '--data', '-'],
+      objectCliEnvironment(f.root, { AGENTMUX_TEST_OBJECT_CLI: process.env.AGENTMUX_TEST_OBJECT_CLI }), JSON.stringify(query))
+    expect(cli.code, cli.stderr).toBe(0)
+    expect(JSON.parse(cli.stdout).result).toEqual(partial)
+  }
+})
+
+it('bucket labels preserve just a bounded first line of the original input across later edits', async () => {
+  const expected = 'a'.repeat(79)
+  const f = await fixture('memory', '\n  ' + expected + '🪴 original instruction\nAdditional details')
+  const page = await readOriginalScheduledHistory(f.loop, { ...scope, to: 120_000, bucketStarts: [scope.from] }, f.client)
+  expect(page.buckets?.[0]?.groups[0]?.originalLabel).toBe(expected)
+  expect(page.entries).toEqual([])
+  const serialized = JSON.stringify(page)
+  for (const privateText of ['Additional details', 'original instruction', 'private definition', f.loop.prompt])
+    expect(serialized).not.toContain(privateText)
+})
+
+it('each SQLite summary page seeks the original definition range and loads bodies only after selecting positions', async () => {
+  const f = await fixture('file')
+  const prepare = vi.spyOn(DatabaseSync.prototype, 'prepare')
+  let sql: string | undefined
+  try {
+    const query = { ...scope, bucketStarts: [scope.from] }
+    const page = await readOriginalScheduledHistory(f.loop, query, f.client)
+    await readOriginalScheduledHistory(f.loop, { ...query, cursor: page.nextCursor! }, f.client)
+    sql = prepare.mock.calls.map(([statement]) => statement).find(statement => statement.includes('AS occurrence') && statement.includes('<(?,?,?)'))
+  } finally { prepare.mockRestore() }
+  expect(sql).toBeDefined()
+  const db = new DatabaseSync(f.path, { readOnly: true })
+  try {
+    const plans = db.prepare('EXPLAIN QUERY PLAN ' + sql).all(f.loop.agentSessionId, base.intentId, scope.from, scope.to, 120_000, 'original', 'key', 2)
+    expect(plans.map(row => row.detail)).toEqual([expect.stringMatching(/SEARCH prompt_admissions USING (?:COVERING )?INDEX scheduled_input_occurrence/)])
+  } finally { db.close() }
+})
+
+it('a failed optional index upgrade preserves the actual write and recovers on the next write', async () => {
+  const f = await fixture('file')
+  const previous = new DatabaseSync(f.path)
+  previous.exec('DROP INDEX scheduled_input_occurrence')
+  previous.close()
+  const exec = DatabaseSync.prototype.exec
+  const warning = vi.spyOn(process, 'emitWarning').mockImplementation(() => {})
+  const fault = vi.spyOn(DatabaseSync.prototype, 'exec').mockImplementation(function(this: DatabaseSync, sql: string) {
+    if (sql.startsWith('CREATE INDEX IF NOT EXISTS scheduled_input_occurrence')) throw Error('SQLITE_FULL')
+    return exec.call(this, sql)
+  })
+  const query = { ...scope, limit: 16, bucketStarts: [scope.from] }
+  try {
+    await f.addSummaryInputs()
+    expect(warning).toHaveBeenCalledWith(expect.stringContaining('SQLITE_FULL'), { code: 'SCHEDULE_HISTORY_INDEX_UNAVAILABLE' })
+    const after = await readOriginalScheduledHistory(f.loop, query, f.client)
+    expect(after.coverage).toBe('recorded-inputs')
+    expect(after.buckets![0]!.groups.reduce((total, group) => total + group.count, 0)).toBe(4)
+  } finally { fault.mockRestore(); warning.mockRestore() }
+  await f.corruptMessage()
+  const db = new DatabaseSync(f.path, { readOnly: true })
+  try { expect(db.prepare("SELECT name FROM sqlite_schema WHERE name='scheduled_input_occurrence'").get()).toBeTruthy() }
+  finally { db.close() }
+})
+
 it('declines Agent and unknown principal before opening the original owner and keeps unavailable reads unknown', async () => {
   const f = await fixture('memory')
   for (const context of [undefined, { ...person, caller: { agentSessionId: f.loop.agentSessionId, capability: 'agent-only' } }]) {
-    await expect(f.manager.call('schedule.history', scope, context)).rejects.toMatchObject({ code: 'CONTROL_PERMISSION_DENIED' })
+    for (const query of [scope, { ...scope, bucketStarts: [scope.from] }])
+      await expect(f.manager.call('schedule.history', query, context)).rejects.toMatchObject({ code: 'CONTROL_PERMISSION_DENIED' })
   }
   expect(f.ownRead).not.toHaveBeenCalled()
   expect(f.source.load).not.toHaveBeenCalled()
@@ -155,11 +270,22 @@ it('history CLI discovery and the strict result codec preserve the exact selecta
   const command = AGENTMUX_SCHEDULE_CLI_COMMANDS['schedule history']!
   expect(command.method).toBe('schedule.history')
   expect(command.details).toContain('original nextCursor')
+  expect(command.details).toContain('bucketStarts')
   await expect(command.parse([])).rejects.toMatchObject({ code: 'INVALID_CLI_ARGUMENT' })
   expect(() => parseScheduleRpcParams('schedule.history', { ...scope, to: scope.from + 172_800_001 })).toThrow()
   expect(() => parseScheduleRpcParams('schedule.history', { ...scope, agentSessionId: 'foreign' })).toThrow()
   const page = { ...scope, executionScope: 'connected-host', coverage: 'recorded-inputs', entries: [], nextCursor: null }
   delete (page as Partial<typeof page>).limit
+  const query = { ...scope, bucketStarts: [scope.from] }
+  for (const starts of [[], [0], [scope.from, scope.to], [scope.from, scope.from], [scope.from, NaN]])
+    expect(() => parseScheduleRpcParams('schedule.history', { ...scope, bucketStarts: starts })).toThrow()
+  expect(() => parseScheduleRpcParams('schedule.history', { ...query, to: scope.from + 44 * 86_400_000 })).toThrow()
+  expect(() => validateScheduleRpcResult('schedule.history', page, query)).toThrow()
+  expect(() => validateScheduleRpcResult('schedule.history', { ...page, buckets: [] }, scope)).toThrow()
+  const group = { delivery: 'terminal-confirmed', nativeState: 'unsupported', count: 1, originalLabel: 'Original daily review', firstAt: scope.from, lastAt: scope.from }
+  const bucket = { from: scope.from, to: scope.to, groups: [group] }
+  for (const bad of [{ ...bucket, from: scope.from + 1 }, { ...bucket, groups: [group, group] }, { ...bucket, groups: [{ ...group, nativeState: 'completed' }] }])
+    expect(() => validateScheduleRpcResult('schedule.history', { ...page, buckets: [bad] }, query)).toThrow()
   expect(() => validateScheduleRpcResult('schedule.history', { ...page, scheduleId: 'different' }, scope)).toThrow()
   expect(() => validateScheduleRpcResult('schedule.history', { ...page, entries: [{ operationId: 'exact', occurrenceAt: scope.to, delivery: 'terminal-confirmed', nativeResult: { state: 'unknown' } }] }, scope)).toThrow()
 })
