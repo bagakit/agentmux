@@ -7,7 +7,7 @@ import { MobileApp } from '../src/MobileApp'
 import { createBrowserPlatform } from '../src/platform/browser'
 import { emptyDeviceWorkface, getDeviceWorkface } from '../src/recovery/device-workface'
 import { activityStatus } from './activity-status-fixture'
-import { button, click, editor, fixture, mount, mounted, paste, waitForElement } from './conversation-fixture'
+import { button, click, editor, fixture, mount, mounted, openAppMenu, paste, waitForElement } from './conversation-fixture'
 import { openPrimary } from './mobile-root-navigation'
 
 // Canvas painting has separate renderer coverage; routing and the original Session stay real.
@@ -312,5 +312,78 @@ describe('actual phone chrome around work', () => {
       .flatMap(rule => rule.selectorText.split(',').map(selector => selector.trim())).filter(selector => /^\[data-(mobile|browser)-keyboard='shown'\] /.test(selector))
     document.documentElement.dataset.browserKeyboard = 'shown'
     expect(keyboard.filter(selector => bar().matches(selector)), 'the shipped soft-keyboard rule still folds this bar away').toEqual(["[data-browser-keyboard='shown'] .mobile-navigation-bar"])
+  })
+
+  it('leads the drawer with the Mac connection card, one tap from connection and devices, keeping Survey, the default directory and diagnostics', async () => {
+    const f = originalClient(), view = await mount(<MobileApp client={f.client} connection={connected} platform={createBrowserPlatform()} />)
+    await openPrimary(view.element, 'Focus')
+    await openAppMenu(view.element)
+    const drawer = await find('the drawer', () => document.querySelector<HTMLElement>('.mobile-drawer'))
+    const groups = [...drawer.children].filter(node => !node.matches('.mobile-sheet-handle, .mobile-sheet-title, #mobile-sheet-description'))
+    const card = groups[0] as HTMLElement | undefined
+    expect(card?.matches('button.mobile-drawer-connection'), 'the connection card is the first group').toBe(true)
+    expect(card!.getAttribute('data-connection')).toBe('connected')
+    expect(card!.querySelector('.mobile-status-dot'), 'the card carries the status dot').not.toBeNull()
+    expect(card!.querySelector('img.brand-icon'), 'the card carries the brand').not.toBeNull()
+    expect(card!.querySelector('.mobile-drawer-connection__address')?.textContent).toBe(location.host || 'Mac 地址未记录')
+    expect(card!.querySelector('.mobile-drawer-connection__state')?.textContent).toBe('已连接')
+    expect(drawer.querySelectorAll('.mobile-drawer-connection, .mobile-menu-row[aria-label^="连接与设备"]'), 'the connection fact has one entry in the drawer').toHaveLength(1)
+    expect(button(drawer, 'Survey研究与笔记')).toBeDefined()
+    expect(drawer.querySelector('select[aria-label="退出对话后的默认目录"]')).not.toBeNull()
+    expect(button(drawer, '提醒与诊断')).toBeDefined()
+    await click(card!)
+    const sheet = await find('connection and devices', () => document.querySelector<HTMLElement>('.mobile-sheet'))
+    expect(sheet.querySelector('h2')?.textContent).toBe('连接与设备')
+    expect(sheet.textContent).toContain('Agent 与会话由 Mac 管理')
+    expect(f.submit).not.toHaveBeenCalled()
+  })
+
+  it('keeps the terminal under its one header without the Mote context strip, for the Mote main and a member alike', async () => {
+    const f = originalClient(), view = await mount(<MobileApp client={f.client} connection={connected} platform={createBrowserPlatform()} />)
+    // Everything above the work area, other than the work area itself and the bounded notices.
+    const chromeRows = () => [...view.element.querySelector('.mobile-app')!.children].filter(node => !node.matches('.mobile-main, .mobile-notice-stack') && !node.closest('[hidden]'))
+    for (const variant of ['main', 'member'] as const) {
+      if (variant === 'member') {
+        await click(button(header(view.element), '返回 Mote'))
+        await openRow(view.element, '.mobile-mote-agents', 'Member Agent')
+      }
+      await waitForElement(view.element, `.mobile-mote-context[data-variant="${variant}"]`)
+      await click(button(header(view.element), '查看终端'))
+      const terminal = await find(`${variant} terminal`, () => shown(view.element, '.mobile-terminal-panel [data-terminal-session]')[0])
+      expect(terminal.dataset.terminalSession).toBe(variant === 'main' ? 'session-original' : 'other')
+      expectWork(view.element, `${variant} terminal`, '返回对话')
+      expect(view.element.querySelector('.mobile-mote-context'), `${variant} terminal has no context strip`).toBeNull()
+      expect(chromeRows().map(node => node.className), `${variant} terminal has only its header above the output`).toEqual([expect.stringContaining('mobile-header--session')])
+      await click(button(header(view.element), '查看对话'))
+      await waitForElement(view.element, `.mobile-mote-context[data-variant="${variant}"]`)
+    }
+    expect(f.submit).not.toHaveBeenCalled()
+  })
+
+  it('shows connecting, disconnected and unpaired progress from the typed connection state, with the details entry in each', async () => {
+    const overlay = document.createElement('div'); document.body.append(overlay)
+    const platform = createBrowserPlatform({ overlayContainer: () => overlay })
+    // Each message claims a different progress than its typed state; only the state and pairing fact may decide.
+    const cases = [
+      [{ state: 'connecting', message: '已连接 Mac', paired: true }, 'connecting', '正在连接 Mac', ['done', 'done', 'current']],
+      [{ state: 'disconnected', message: '正在连接 Mac', paired: true }, 'disconnected', '连接中断', ['done', 'done', 'attention']],
+      [{ state: 'unavailable', message: '连接中断，正在自动重连。', paired: false }, 'unpaired', '连接你的 Mac', ['current', 'pending', 'pending']],
+      [{ state: 'unavailable', message: '请在 Mac 的手机连接中复制链接，在这台设备打开。' }, 'unavailable', '连接需要处理', ['unknown', 'unknown', 'attention']]
+    ] as const
+    const view = await mount(<MobileApp client={null} connection={cases[0][0]} platform={platform} />)
+    for (const [connection, state, title, steps] of cases) {
+      await view.render(<MobileApp client={null} connection={connection} platform={platform} />)
+      const page = view.element.querySelector<HTMLElement>('.mobile-connect-page')!
+      expect(page.dataset.connectState, connection.message).toBe(state)
+      expect(page.querySelector('h1')?.textContent).toBe(title)
+      const items = [...page.querySelectorAll<HTMLElement>('.mobile-connect-steps > li')]
+      expect(items.map(item => item.dataset.stepState), `${state} progress`).toEqual(steps)
+      expect(items.filter(item => item.getAttribute('aria-current') === 'step')).toHaveLength(1)
+      expect(page.querySelector('img.brand-icon')).not.toBeNull()
+      expect(button(page, '连接详情')).toBeDefined()
+    }
+    await click(button(view.element, '连接详情'))
+    expect(overlay.querySelector('[role="dialog"] h2')?.textContent).toBe('连接你的 Mac')
+    expect(view.element.querySelector('.mobile-navigation-bar')).toBeNull()
   })
 })

@@ -113,6 +113,31 @@ it('keeps one toolbar mode switch and exposes PTY size and keys only during expl
   expect(p.write).not.toHaveBeenCalled(); expect(p.resize).not.toHaveBeenCalled()
 })
 
+it('keeps one toolbar row naming watch or control, and folds the keypad without touching the original grid or reader', async () => {
+  const p = port(), view = await mount(p.client)
+  const section = view.node.querySelector<HTMLElement>('.mobile-terminal')!
+  const above = () => { const rows = [...section.children]; return rows.slice(0, rows.indexOf(section.querySelector('.mobile-terminal-canvas')!)).map(node => node.className) }
+  const state = () => view.node.querySelector<HTMLElement>('.mobile-terminal-mode-state')!
+  const keys = () => view.node.querySelector<HTMLButtonElement>('[aria-label="终端按键"]')
+  expect(above()).toEqual(['mobile-terminal-toolbar'])
+  expect(state().dataset.mode).toBe('watch'); expect(state().textContent).toContain('只读查看')
+  expect(keys(), 'keys belong to control').toBeNull()
+  await act(async () => view.node.querySelector<HTMLButtonElement>('.mobile-terminal-mode')!.click())
+  expect(state().dataset.mode).toBe('control'); expect(state().textContent).toBe('正在控制')
+  expect(keys()?.getAttribute('aria-expanded')).toBe('true')
+  expect(above()).toEqual(['mobile-terminal-toolbar', 'mobile-terminal-keys'])
+  await act(async () => keys()!.click())
+  expect(keys()?.getAttribute('aria-expanded')).toBe('false')
+  expect(above()).toEqual(['mobile-terminal-toolbar'])
+  await act(async () => { window.dispatchEvent(new Event('resize')); window.dispatchEvent(new Event('orientationchange')) })
+  await act(async () => keys()!.click())
+  expect(view.node.querySelector('.mobile-terminal-keys')).not.toBeNull()
+  // Local layout height changes keep the one canvas, its reader and the Run's grid; nothing asks the Mac to resize.
+  expect(canvases).toHaveLength(1); expect(readings).toHaveLength(1)
+  expect(canvases[0]!.options).toMatchObject({ cols: 80, rows: 24 })
+  expect(p.resize).not.toHaveBeenCalled(); expect(p.write).not.toHaveBeenCalled()
+})
+
 it('uses explicit service facts rather than display wording and keeps full boundaries on demand', async () => {
   const p = port(), view = await mount(p.client)
   const report = readings.at(-1)!, message = '完全正常；也可能只是展示文案。'

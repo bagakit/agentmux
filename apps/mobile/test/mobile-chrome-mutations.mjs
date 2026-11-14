@@ -20,5 +20,11 @@ export const mobileChromeMutations = {
     target: 'names a Mote member once' },
   'conversation-remount': { file: 'apps/mobile/src/MobileApp.tsx',
     before: '{workface.selectedSessionId && <MobileConversationSurface', after: '{workface.selectedSessionId && showSession && <MobileConversationSurface',
-    target: 'returns between Focus and the open conversation three times' }
+    target: 'returns between Focus and the open conversation three times' },
+  'drawer-connection-missing': { file: 'apps/mobile/src/MobileApp.tsx',
+    before: "<MobileDrawerConnection connection={connection} label={label} appIcon={hostAppearance.appIcon} address={location.host} onOpen={() => setSheet('connection')} />", after: '{null}',
+    target: 'leads the drawer with the Mac connection card' },
+  'terminal-second-row': { file: 'apps/mobile/src/MobileApp.tsx',
+    before: 'const moteContext = workspaceVisible && showSession && teamSpaceId && !workPanel ?', after: 'const moteContext = workspaceVisible && showSession && teamSpaceId ?',
+    target: 'keeps the terminal under its one header without the Mote context strip' }
 }

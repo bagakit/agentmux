@@ -21,6 +21,21 @@ afterEach(async () => { for (const item of mounted.splice(0)) { await act(async 
 const linkFor = (serverId: string) => ({ v: 2 as const, serverId, daemonPublicKeyB64: exportPublicKey(generateKeyPair().publicKey), relay: { endpoint: '127.0.0.1:9999', useTls: false } })
 
 describe('the saved connection link', () => {
+  it('marks a confirmed missing link as unpaired without offering a connection retry', async () => {
+    const view = await mount(<MobileConnectionRoot platform={createBrowserPlatform()} native={false} />)
+    expect(ports.observation).toMatchObject({ state: 'unavailable', paired: false })
+    expect(view.element.querySelector('button')).toBeNull()
+    expect(ports.connect).not.toHaveBeenCalled()
+  })
+  it('keeps pairing unknown and a retry available when the saved link cannot be read', async () => {
+    localStorage.setItem('agentmux.connection-offer.v2', '{unreadable')
+    const view = await mount(<MobileConnectionRoot platform={createBrowserPlatform()} native={false} />)
+    expect(ports.observation).toMatchObject({ state: 'unavailable', message: expect.stringContaining('Mac 连接记录无法完整读取') })
+    expect(ports.observation?.paired).toBeUndefined()
+    expect(view.element.querySelector('button')?.textContent).toBe('重新检查连接')
+    expect(localStorage.getItem('agentmux.connection-offer.v2')).toBe('{unreadable')
+    expect(ports.connect).not.toHaveBeenCalled()
+  })
   it('connects through a verified link even when this device cannot save it, and says it was not saved', async () => {
     ports.connect.mockResolvedValue({ onEvent: () => () => {}, connect: async () => {}, dispose: async () => {} })
     const original = localStorage.setItem.bind(localStorage)
@@ -33,7 +48,7 @@ describe('the saved connection link', () => {
     expect(save).toHaveBeenCalledWith('agentmux.connection-offer.v2', JSON.stringify(offer))
     await vi.waitFor(() => expect(ports.connect).toHaveBeenCalledTimes(1))
     expect(ports.connect.mock.calls[0]![0]).toMatchObject({ offer })
-    await vi.waitFor(() => expect(ports.observation).toMatchObject({ state: 'connected', issue: expect.stringContaining('连接链接没有保存到这台设备') }))
+    await vi.waitFor(() => expect(ports.observation).toMatchObject({ state: 'connected', paired: true, issue: expect.stringContaining('连接链接没有保存到这台设备') }))
     expect(localStorage.getItem('agentmux.connection-offer.v2')).toBeNull()
   })
   it('still refuses a link for another Mac without connecting', async () => {
