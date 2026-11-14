@@ -9626,13 +9626,30 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     const layout = displayId ? navigation.layouts[displayId] : undefined
     if (!workspaceId || !layout || placement && (!tabGroupId || !groupIds(layout.root).includes(tabGroupId) || !layout.groups.some(group => group.id === tabGroupId))) return false
     const originalResource = navigation.config?.workspaces.find(workspace => workspace.id === workspaceId)
+    // Adjacent File placement follows the original resource, not its changing display snapshot.
+    const splitOwnerCurrent = (state: AppState) => {
+      if (!placement?.split) return true
+      const surface = state.tabs[placement.split.tabId]?.regions[placement.split.regionId]
+      if (!splitAnchor || !surface || surface.workspaceId !== splitAnchor.workspaceId) return false
+      if (splitAnchor.kind === 'agent' || splitAnchor.kind === 'terminal') return surface.kind === splitAnchor.kind &&
+        surface.regionId === splitAnchor.regionId && surface.sessionId === splitAnchor.sessionId
+      return sameWorkbenchSurfaceOwner(surface, splitAnchor)
+    }
     let resourceRebound = false, observedConfig = navigation.config
+    let observedTab = originalTab, observedLayout = displayId ? navigation.layouts[displayId] : undefined
     if (originalResource) releaseResource = useAppStore.subscribe(state => {
-      if (state.config === observedConfig) return
+      const split = placement?.split, tab = split ? state.tabs[split.tabId] : undefined
+      const layout = displayId ? state.layouts[displayId] : undefined
+      if (state.config === observedConfig && (!split || tab === observedTab && layout === observedLayout)) return
+      const resource = state.config === observedConfig ? originalResource : state.config?.workspaces.find(workspace => workspace.id === workspaceId)
       observedConfig = state.config
-      const current = state.config?.workspaces.find(workspace => workspace.id === workspaceId)
-      if (current?.hostId !== originalResource.hostId || current.path !== originalResource.path) {
+      observedTab = tab; observedLayout = layout
+      const occurrence = split ? layout?.groups.find(group => group.id === tabGroupId) : undefined
+      const bindingChanged = placement?.split && (!splitOwnerCurrent(state) || !occurrence?.tabOrder.includes(placement.split.tabId) ||
+        tab?.space && (tab.space.zoneId !== placement.space.zoneId || tab.space.spaceId !== placement.space.spaceId))
+      if (resource?.hostId !== originalResource.hostId || resource.path !== originalResource.path || bindingChanged) {
         resourceRebound = true
+        result.data = { kind: 'unconfirmed', reason: 'The original File resource or adjacent Region binding changed. Original work is retained; choose the current target explicitly.' }
         releaseResource()
       }
     })
@@ -9645,7 +9662,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         currentLayout && tabGroupId && groupIds(currentLayout.root).includes(tabGroupId) && currentLayout.groups.some(group => group.id === tabGroupId) &&
         fileOpenReferenceMatches(get(), workspaceId, path, tabGroupId, placement) &&
         fileOpenSplitMatches(get(), workspaceId, tabGroupId, placement, confirmedExistingSpace(get())) &&
-        (!placement.split || currentTab?.regions[placement.split.regionId] === splitAnchor) &&
+        splitOwnerCurrent(get()) &&
         (bookmarkOpened || fileOpenLauncherMatches(get(), workspaceId, path, tabGroupId, placement))) &&
         (!placement?.onResult || !expectedSurface || exactRegionId && currentTab?.regions[exactRegionId] === expectedSurface)
     }
