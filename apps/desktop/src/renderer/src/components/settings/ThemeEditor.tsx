@@ -1,8 +1,8 @@
 import { mintObjectId } from '@agentmux/core/object-id'
 import { Button } from '@agentmux/client-ui/components/Button'
 import { ThemeIconEditor } from './ThemeIconEditor'
-import { useEffect, useRef, useState } from 'react'
-import { TextInput, Textarea } from '@agentmux/client-ui/input'
+import { useEffect, useId, useRef, useState } from 'react'
+import { ComposerTextarea, NativeSelect, Switch, TextInput } from '@agentmux/client-ui/input'
 import { SemanticIcon } from '@agentmux/client-ui/icons'
 import { THEME_COLOR_ROLES, THEME_FONT_IDS, THEME_ELEVATION_IDS, themeDocumentSchema, themeValue, previewTheme, readResolvedTheme,
   type ThemeCatalogItem, type ThemeDocument, type ThemeMode, type ThemeColorRole } from '@agentmux/client-ui/theme'
@@ -26,7 +26,12 @@ export function ThemeEditor({ item, appearance, active, onSave, onClose }: {
   const [iconError, setIconError] = useState('')
   const [reset, setReset] = useState(0)
   const save = useSettingsSave()
+  const errorId = useId()
   const parsed = themeDocumentSchema.safeParse(draft)
+  const invalid = (...path: PropertyKey[]) => !parsed.success && parsed.error.issues.some(issue =>
+    issue.path.length === path.length && issue.path.every((part, index) => part === path[index]))
+  const errorAttributes = (...path: PropertyKey[]) => invalid(...path)
+    ? { 'aria-invalid': true, 'aria-describedby': errorId } as const : undefined
   const dirty = Boolean(iconError) || JSON.stringify(draft) !== JSON.stringify(saved)
   const latest = useRef(draft); latest.current = draft
   const mounted = useRef(true)
@@ -66,30 +71,30 @@ export function ThemeEditor({ item, appearance, active, onSave, onClose }: {
   return <section className="settings-group theme-editor" aria-label="Theme editor">
     <header><span>Customize {saved.name}</span><small>{readonly ? 'Save as a custom copy' : saved.id}</small></header>
     <div className="theme-editor__identity">
-      <label><span>Name</span><TextInput aria-label="Theme name" value={draft.name} onChange={event => setDraft(current => ({ ...current, name: event.target.value }))} /></label>
-      <label><span>Description</span><Textarea aria-label="Theme description" rows={2} value={draft.description} onChange={event => setDraft(current => ({ ...current, description: event.target.value }))} /></label>
+      <label><span>Name</span><TextInput {...errorAttributes('name')} aria-label="Theme name" value={draft.name} onChange={event => setDraft(current => ({ ...current, name: event.target.value }))} /></label>
+      <label><span>Description</span><ComposerTextarea {...errorAttributes('description')} aria-label="Theme description" rows={2} value={draft.description} onValueChange={description => setDraft(current => ({ ...current, description }))} /></label>
     </div>
     <div className="theme-editor__toolbar">
       <div role="group" aria-label="Edit theme brightness">
         {(['dark', 'light'] as const).map(value => <button type="button" key={value} className={`small-button${mode === value ? ' small-button--active' : ''}`} aria-pressed={mode === value} onClick={() => setMode(value)}>{label(value)}</button>)}
       </div>
-      <label><input type="checkbox" checked={live} onChange={event => setLive(event.target.checked)} /><span>Preview in this window</span></label>
+      <label><Switch checked={live} onChange={event => setLive(event.target.checked)} /><span>Preview in this window</span></label>
     </div>
     <p className="settings-hint">Editing {mode} colors. Preview uses this brightness while it is active; closing it restores your current application appearance. Both versions are saved together.</p>
     <div className="theme-editor__colors">
       {THEME_COLOR_ROLES.map(role => <label key={role} className="theme-editor__color"><span>{label(role)}</span>
         <span className="theme-editor__color-input"><input type="color" aria-label={`${label(role)} color`} value={/^#[0-9a-f]{6}$/i.test(variant.colors[role]) ? variant.colors[role] : saved.variants[mode].colors[role]} onChange={event => color(role, event.target.value)} />
-          <TextInput aria-label={`${label(role)} hexadecimal color`} spellCheck={false} value={variant.colors[role]} onChange={event => color(role, event.target.value)} /></span>
+          <TextInput {...errorAttributes('variants', mode, 'colors', role)} aria-label={`${label(role)} hexadecimal color`} spellCheck={false} value={variant.colors[role]} onChange={event => color(role, event.target.value)} /></span>
       </label>)}
     </div>
     <div className="theme-editor__parameters">
-      <label><span>App font</span><select aria-label="Theme App font" value={variant.font} onChange={event => setDraft(current => ({ ...current, variants: { ...current.variants, [mode]: { ...current.variants[mode], font: event.target.value as typeof variant.font } } }))}>{THEME_FONT_IDS.map(id => <option key={id} value={id}>{fonts[id]}</option>)}</select></label>
-      <label><span>Surface depth</span><select aria-label="Theme surface depth" value={variant.elevation} onChange={event => setDraft(current => ({ ...current, variants: { ...current.variants, [mode]: { ...current.variants[mode], elevation: event.target.value as typeof variant.elevation } } }))}>{THEME_ELEVATION_IDS.map(id => <option key={id} value={id}>{label(id)}</option>)}</select></label>
+      <label><span>App font</span><NativeSelect aria-label="Theme App font" value={variant.font} onChange={event => setDraft(current => ({ ...current, variants: { ...current.variants, [mode]: { ...current.variants[mode], font: event.target.value as typeof variant.font } } }))}>{THEME_FONT_IDS.map(id => <option key={id} value={id}>{fonts[id]}</option>)}</NativeSelect></label>
+      <label><span>Surface depth</span><NativeSelect aria-label="Theme surface depth" value={variant.elevation} onChange={event => setDraft(current => ({ ...current, variants: { ...current.variants, [mode]: { ...current.variants[mode], elevation: event.target.value as typeof variant.elevation } } }))}>{THEME_ELEVATION_IDS.map(id => <option key={id} value={id}>{label(id)}</option>)}</NativeSelect></label>
       <label><span>Corner radius</span><input type="range" aria-label="Theme corner radius" min={0} max={16} step={1} value={variant.radius} onChange={event => setDraft(current => ({ ...current, variants: { ...current.variants, [mode]: { ...current.variants[mode], radius: Number(event.target.value) } } }))} /><small>{variant.radius}px</small></label>
     </div>
     <ThemeIconEditor key={reset} draft={draft} onValidation={setIconError} onChange={(icons, iconStyle) => setDraft(current => ({ ...current, icons, iconStyle }))} />
     {iconError ? <p className="settings-error" role="alert">{iconError}</p> : null}
-    {!parsed.success ? <p className="settings-error" role="alert">{parsed.error.issues.map(issue => `${issue.path.join('.')}: ${issue.message}`).join('; ')}</p> : null}
+    {!parsed.success ? <p id={errorId} className="settings-error" role="alert">{parsed.error.issues.map(issue => `${issue.path.join('.')}: ${issue.message}`).join('; ')}</p> : null}
     <p className="settings-hint" role="status">{feedback || (readonly ? 'The built-in theme is read-only. Save creates and applies your own theme.' : 'Your draft is kept until you save or explicitly close this editor.')}</p>
     <div className="theme-editor__secondary">
       <Button type="button" onClick={() => { setDraft(structuredClone(saved)); setReset(value => value + 1); setIconError(''); setLive(false); previewTheme(undefined); setFeedback(save.saving ? 'Editor draft restored. The earlier save is still awaiting confirmation.' : save.state === 'error' ? 'Editor draft restored. The earlier save remains unconfirmed.' : 'Editor draft restored to the last confirmed theme.') }}><SemanticIcon name="action.refresh" size={13} /> Restore saved version</Button>

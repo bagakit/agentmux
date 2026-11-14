@@ -1,6 +1,6 @@
 import { Button } from '@agentmux/client-ui/components/Button'
-import { createElement, useEffect, useState } from 'react'
-import { TextInput, Textarea } from '@agentmux/client-ui/input'
+import { createElement, useEffect, useId, useState } from 'react'
+import { ComposerTextarea, NativeSelect, SearchInput } from '@agentmux/client-ui/input'
 import { getSemanticIconCatalog, iconShapes, ICON_GLYPHS, type IconGlyphId, type IconShape, type SemanticIconId } from '@agentmux/client-ui/icons'
 import { iconAssetSchema, type ThemeDocument, type ThemeIconAsset } from '@agentmux/client-ui/theme'
 
@@ -21,6 +21,8 @@ export function ThemeIconEditor({ draft, onChange, onValidation }: {
   const [library, setLibrary] = useState(false)
   const [selected, setSelected] = useState<SemanticIconId>('action.close')
   const [raw, setRaw] = useState<Record<string, { text: string; error: string }>>({})
+  const pathId = useId()
+  const pathError = raw[selected]?.error
   const asset = draft.icons[selected]
   const meaning = catalog.icons.find(icon => icon.id === selected)!
   const matches = catalog.icons.filter(icon => (!group || icon.groupId === group) && (!modified || Boolean(draft.icons[icon.id])) && `${icon.id} ${icon.label} ${icon.description} ${icon.defaultGlyph}`.toLowerCase().includes(query.trim().toLowerCase()))
@@ -44,8 +46,8 @@ export function ThemeIconEditor({ draft, onChange, onValidation }: {
     <div className="theme-icon-editor__heading"><h3>Semantic icons</h3><span>{catalog.icons.length} meanings · {Object.keys(draft.icons).length} modified</span></div>
     <p className="settings-hint">Choose a meaning, then change its drawing across Desktop and Mobile. Meanings sharing a default drawing can be edited separately. Brand and provider identities keep their own marks.</p>
     <div className="theme-icon-editor__filters">
-      <label><span>Find a meaning</span><TextInput aria-label="Find semantic icon" value={query} onChange={event => setQuery(event.target.value)} placeholder="Close, file, status, activity…" /></label>
-      <label><span>Function</span><select aria-label="Semantic icon group" value={group} onChange={event => setGroup(event.target.value)}><option value="">All functions</option>{catalog.groups.map(item => <option key={item.id} value={item.id}>{item.label}</option>)}</select></label>
+      <div className="theme-icon-editor__search"><span>Find a meaning</span><SearchInput aria-label="Find semantic icon" clearLabel="Clear semantic icon search" value={query} onValueChange={setQuery} placeholder="Close, file, status, activity…" /></div>
+      <label><span>Function</span><NativeSelect aria-label="Semantic icon group" value={group} onChange={event => setGroup(event.target.value)}><option value="">All functions</option>{catalog.groups.map(item => <option key={item.id} value={item.id}>{item.label}</option>)}</NativeSelect></label>
       <label className="theme-icon-editor__modified"><input type="checkbox" checked={modified} onChange={event => setModified(event.target.checked)} /><span>Modified only</span></label>
     </div>
     <div className="theme-icon-editor__workspace">
@@ -71,22 +73,22 @@ export function ThemeIconEditor({ draft, onChange, onValidation }: {
           <Button type="button" disabled={!asset && !raw[selected]} onClick={() => replace(undefined)}>Restore default drawing</Button>
         </div>
         {library ? <div className="theme-icon-editor__library">
-          <label><span>Drawing library · {glyphs.length}</span><TextInput aria-label="Find icon drawing" value={glyphQuery} onChange={event => setGlyphQuery(event.target.value)} placeholder="Search drawings, e.g. circle-play" /></label>
+          <div className="theme-icon-editor__search"><span>Drawing library · {glyphs.length}</span><SearchInput aria-label="Find icon drawing" clearLabel="Clear icon drawing search" value={glyphQuery} onValueChange={setGlyphQuery} placeholder="Search drawings, e.g. circle-play" /></div>
           <div className="theme-icon-editor__glyphs" role="group" aria-label="Icon drawing library">{glyphs.map(id => <button type="button" key={id} title={id} aria-label={`Use ${id}`} aria-pressed={asset?.kind === 'glyph' && asset.glyph === id} onClick={() => replace({ kind: 'glyph', glyph: id as IconGlyphId })}><Drawing shapes={ICON_GLYPHS[id]} style={draft.iconStyle} /><span>{id}</span></button>)}</div>
           {!glyphs.length ? <p className="settings-hint">No drawings match this search.</p> : null}
         </div> : null}
         <details className="theme-icon-editor__advanced" open={asset?.kind === 'paths' || Boolean(raw[selected]) ? true : undefined}>
           <summary>Custom path asset</summary>
           {asset?.kind !== 'paths' ? <Button type="button" onClick={() => { setLibrary(false); replace({ kind: 'paths', paths: [{ d: 'M6 6 L18 18 M18 6 L6 18' }] }) }}>Use custom paths</Button> : null}
-          {asset?.kind === 'paths' ? <label className="theme-icon-editor__paths"><span>Path asset · fixed 24 × 24 viewBox</span><Textarea aria-label="Semantic icon paths" rows={5} spellCheck={false} value={raw[selected]?.text ?? JSON.stringify(asset.paths, null, 2)} onChange={event => paths(event.target.value)} /><small>JSON path objects with d and optional fill (none or currentColor). Assets are included in the theme file.</small></label> : <p className="settings-hint">For drawings outside the library, use a bounded path asset.</p>}
+          {asset?.kind === 'paths' ? <label className="theme-icon-editor__paths"><span>Path asset · fixed 24 × 24 viewBox</span><ComposerTextarea aria-label="Semantic icon paths" aria-invalid={Boolean(pathError) || undefined} aria-describedby={pathError ? `${pathId}-hint ${pathId}-error` : `${pathId}-hint`} rows={5} spellCheck={false} value={raw[selected]?.text ?? JSON.stringify(asset.paths, null, 2)} onValueChange={paths} /><small id={`${pathId}-hint`}>JSON path objects with d and optional fill (none or currentColor). Assets are included in the theme file.</small></label> : <p className="settings-hint">For drawings outside the library, use a bounded path asset.</p>}
         </details>
-        {raw[selected]?.error ? <p role="alert" className="settings-error">{raw[selected].error} The last valid drawing is retained.</p> : null}
+        {pathError ? <p id={`${pathId}-error`} role="alert" className="settings-error">{pathError} The last valid drawing is retained.</p> : null}
       </div>
     </div>
     <div className="theme-editor__parameters">
       <label><span>Icon stroke</span><input type="range" aria-label="Theme icon stroke width" min="1" max="2.5" step="0.25" value={draft.iconStyle.strokeWidth} onChange={event => onChange(draft.icons, { ...draft.iconStyle, strokeWidth: Number(event.target.value) })} /><small>{draft.iconStyle.strokeWidth}</small></label>
-      <label><span>Line ends</span><select aria-label="Theme icon line ends" value={draft.iconStyle.linecap} onChange={event => onChange(draft.icons, { ...draft.iconStyle, linecap: event.target.value as ThemeDocument['iconStyle']['linecap'] })}>{(['round', 'square', 'butt'] as const).map(id => <option key={id}>{id}</option>)}</select></label>
-      <label><span>Line joins</span><select aria-label="Theme icon line joins" value={draft.iconStyle.linejoin} onChange={event => onChange(draft.icons, { ...draft.iconStyle, linejoin: event.target.value as ThemeDocument['iconStyle']['linejoin'] })}>{(['round', 'miter', 'bevel'] as const).map(id => <option key={id}>{id}</option>)}</select></label>
+      <label><span>Line ends</span><NativeSelect aria-label="Theme icon line ends" value={draft.iconStyle.linecap} onChange={event => onChange(draft.icons, { ...draft.iconStyle, linecap: event.target.value as ThemeDocument['iconStyle']['linecap'] })}>{(['round', 'square', 'butt'] as const).map(id => <option key={id}>{id}</option>)}</NativeSelect></label>
+      <label><span>Line joins</span><NativeSelect aria-label="Theme icon line joins" value={draft.iconStyle.linejoin} onChange={event => onChange(draft.icons, { ...draft.iconStyle, linejoin: event.target.value as ThemeDocument['iconStyle']['linejoin'] })}>{(['round', 'miter', 'bevel'] as const).map(id => <option key={id}>{id}</option>)}</NativeSelect></label>
     </div>
     <p className="settings-hint">Drawings keep each control’s action, accessible name and click target. Enable “Preview in this window” above to try your draft on actual controls; save to apply it to connected clients.</p>
   </section>

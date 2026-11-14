@@ -11,19 +11,17 @@
 .settings-profile__identity-text { display: grid; min-width: 0; gap: 8px; flex: 1; }
 .settings-profile__identity-hint { margin: 0; font-size: var(--fs-body); color: var(--text-3); line-height: 1.5; }
 .settings-profile__identity-text label { font-size: var(--fs-meta); color: var(--text-2); }
-.settings-profile__identity-text input:not([type=file]) { width: 100%; min-height: 42px; padding: 8px 12px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--background); color: var(--text); font: 500 var(--fs-title)/1.5 var(--font-sans); }
-.settings-profile__identity-text input:not([type=file]):hover { border-color: var(--line); }
+.settings-profile__identity-text .ui-input { width: 100%; font-weight: 500; }
 .settings-profile__image-actions { display: grid; justify-items: center; gap: var(--sp-2); }
 .settings-profile__details { display: grid; grid-template-columns: minmax(0, 1.8fr) minmax(200px, 1fr); align-items: start; gap: var(--sp-7); }
 .settings-profile__context { display: grid; min-width: 0; gap: 12px; }
 .settings-profile__context header h3 { margin: 0; font-size: var(--fs-body); font-weight: 550; }
 .settings-profile__context header p { margin: 6px 0 4px; font-size: var(--fs-body); color: var(--text-3); }
 .settings-profile__context > label { font-size: var(--fs-meta); color: var(--text-2); }
-.settings-profile__context textarea { width: 100%; min-height: 190px; padding: 12px 14px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface-1); color: var(--text); font: var(--fs-prose)/1.65 var(--font-sans); resize: vertical; }
+.settings-profile__context textarea { width: 100%; min-height: 144px; max-height: 42vh; padding: var(--sp-4); field-sizing: content; font: var(--fs-prose)/1.6 var(--font-sans); resize: vertical; }
 .settings-profile__context-footer { display: flex; justify-content: space-between; gap: 16px; font-size: var(--fs-body); color: var(--text-3); line-height: 1.55; }
 .settings-profile__context-footer small { flex: none; font-size: var(--fs-micro); font-variant-numeric: tabular-nums; }
 .settings-profile__sharing { display: flex; align-items: flex-start; gap: 12px; padding: 0; }
-.settings-profile__sharing input { flex: none; margin-top: 3px; accent-color: var(--green); width: 15px; height: 15px; }
 .settings-profile__sharing span { display: grid; gap: 5px; }
 .settings-profile__sharing strong { font-weight: 600; font-size: var(--fs-body); color: var(--text); }
 .settings-profile__sharing small { color: var(--text-3); font-size: var(--fs-body); line-height: 1.65; }

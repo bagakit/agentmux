@@ -1,5 +1,4 @@
-import { TextInput } from '@agentmux/client-ui/input'
-import { semanticIconComponent } from '@agentmux/client-ui/icons'
+import { SearchInput } from '@agentmux/client-ui/input'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Button } from '@agentmux/client-ui/components/Button'
 import { buildCheatSheet, type CheatSheetRow, type CheatSheetGroupId } from '../../lib/shortcut-cheat-sheet'
@@ -8,10 +7,6 @@ import { isMacPlatform } from '../../lib/host-platform'
 import { api } from '../../lib/api'
 import { SCREENSHOT_SHORTCUTS, type ScreenshotShortcutStatuses } from '../../../../shared/screenshot-shortcut'
 import '../../styles/settings-keyboard-shortcuts.css'
-
-const ThemeActionSearchIcon = semanticIconComponent('action.search')
-const ThemeActionClearIcon = semanticIconComponent('action.clear')
-
 
 function scopeDescription(binding: ShortcutBinding): string {
   switch (binding.scope) {
@@ -61,7 +56,8 @@ export function KeyboardShortcutsPane({ group: groupId }: { group?: CheatSheetGr
   return <div className="keyboard-shortcuts" data-keyboard-shortcuts>
     <div className="keyboard-shortcuts__intro"><p>Shortcuts for {isMac ? 'macOS' : 'this platform'}. These bindings are read-only.</p></div>
     <div className="keyboard-shortcuts__tools">
-      <label className="keyboard-shortcuts__search"><ThemeActionSearchIcon size={14} aria-hidden="true" /><TextInput ref={search} aria-label="Find a command or shortcut" value={query} onChange={event => setQuery(event.target.value)} placeholder="Find a command or shortcut" />{query ? <button type="button" aria-label="Clear shortcut search" onClick={clearSearch}><ThemeActionClearIcon size={13} /></button> : null}</label>
+      <SearchInput className="keyboard-shortcuts__search" ref={search} aria-label="Find a command or shortcut" clearLabel="Clear shortcut search"
+        placeholder="Find a command or shortcut" value={query} onValueChange={setQuery} />
       <span className="keyboard-shortcuts__count" role="status">{count} {count === 1 ? 'binding' : 'bindings'}</span>
     </div>
     {!groupId ? <div className="keyboard-shortcuts__contexts" aria-label="Shortcut context">

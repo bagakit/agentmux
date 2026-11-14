@@ -1,4 +1,4 @@
-import { Textarea } from '@agentmux/client-ui/input'
+import { Switch, Textarea } from '@agentmux/client-ui/input'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useContext, useId, useState } from 'react'
 import { Button } from '@agentmux/client-ui/components/Button'
@@ -38,7 +38,7 @@ export function BuiltinMobileConnectionSettings({ preferences, active, onSave }:
         <Button type="button" variant="primary" className="toolkit-settings__phone-settings" data-phone-settings onClick={() => navigation?.open('mobile')}><ThemeObjectPhoneIcon size={15} /> Open phone settings</Button>
       </div>
       <div className="toolkit-settings__preview" aria-label="Phone connection status bar preview"><span>Workspace · Settings</span><span className="toolkit-settings__preview-tool" data-enabled={draft.value.enabled}><ThemeObjectPhoneIcon size={15} />{draft.value.statusBar === 'label' && <span>Phone connection</span>}</span></div>
-      <label className="toolkit-settings__toggle"><span><strong>Show Phone connection in the status bar</strong><small>Quickly connect and check devices. Hiding the tool keeps existing device access.</small></span><input type="checkbox" checked={draft.value.enabled} onChange={event => draft.setField('enabled', event.target.checked)} /></label>
+      <label className="toolkit-settings__toggle"><span><strong>Show Phone connection in the status bar</strong><small>Quickly connect and check devices. Hiding the tool keeps existing device access.</small></span><Switch checked={draft.value.enabled} onChange={event => draft.setField('enabled', event.target.checked)} /></label>
       <fieldset className="toolkit-settings__layout"><legend>Status bar appearance</legend><div className="toolkit-settings__choices">
         <LiquidSelectionSurface selected={draft.value.statusBar} active={active} targetAttribute="data-settings-target" />
         {MOBILE_CONNECTION_STATUS_BAR_IDS.map(value => <label key={value} data-settings-target={value} data-selected={draft.value.statusBar === value}><input type="radio" name={`${id}-layout`} value={value} checked={draft.value.statusBar === value} onChange={() => draft.setField('statusBar', value)} /><ThemeObjectPhoneIcon size={16} />{value === 'icon' ? 'Icon' : 'Icon and label'}</label>)}

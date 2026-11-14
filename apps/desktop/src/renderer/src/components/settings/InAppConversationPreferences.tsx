@@ -1,3 +1,4 @@
+import { Switch } from '@agentmux/client-ui/input'
 import { useId } from 'react'
 import { CONVERSATION_DETAIL_LEVELS, CONVERSATION_DETAIL_LABELS, isConversationDetailLevel, resolveConversationDetailLevel } from '@agentmux/client-ui/conversation-detail-level'
 import { CONVERSATION_CONFIRMED_SEND_RECEIPTS, resolveConversationConfirmedSendReceipt, resolveConversationShowSendReceipts } from '@agentmux/client-ui/conversation-send-receipts'
@@ -27,7 +28,7 @@ export function InAppConversationPreferences({ value, onChange, active }: { valu
     </section>
     <section className="inapp-conversation__receipts" data-settings-field="send-receipts">
       <h3>Send receipts</h3>
-      <label className="inapp-receipt-toggle"><input type="checkbox" checked={showReceipts} onChange={event => onChange('showReceipts', event.target.checked)} /><span>Show a lightweight receipt for messages I send</span></label>
+      <label className="inapp-receipt-toggle"><Switch checked={showReceipts} onChange={event => onChange('showReceipts', event.target.checked)} /><span>Show a lightweight receipt for messages I send</span></label>
       <fieldset className="inapp-receipt-options" disabled={!showReceipts}><legend>After the Agent confirms receipt</legend>
         <div className="inapp-reading-choices inapp-reading-choices--receipts">
         <LiquidSelectionSurface selected={confirmedReceipt} active={active && showReceipts} targetAttribute="data-receipt-choice" />

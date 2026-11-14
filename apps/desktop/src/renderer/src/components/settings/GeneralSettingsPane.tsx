@@ -1,3 +1,4 @@
+import { Switch } from '@agentmux/client-ui/input'
 import { useState } from 'react'
 import { FormRow } from '@agentmux/client-ui/components/FormRow'
 import { SemanticIcon } from '@agentmux/client-ui/icons'
@@ -50,7 +51,7 @@ export function GeneralSettingsPane({ active = false, copyPathsAsAbsolute, onSav
         <header><span>Project path display and copying</span><small>Saved: {saved ? 'Absolute' : 'Abbreviated'}</small></header>
         <div className="general-settings__path-choice"><FormRow className="browser-automation-toggle" label="Show and copy full project paths"
           description={<>Include your complete home folder instead of <code>~</code>.</>}>
-          {attributes => <input {...attributes} type="checkbox" name="copyPathsAsAbsolute" checked={draft.value.copyPathsAsAbsolute} onChange={(event) => draft.setField('copyPathsAsAbsolute', event.target.checked)} />}
+          {attributes => <Switch {...attributes} name="copyPathsAsAbsolute" checked={draft.value.copyPathsAsAbsolute} onChange={(event) => draft.setField('copyPathsAsAbsolute', event.target.checked)} />}
         </FormRow>
         <figure className="general-settings__path-preview" aria-label="Project path draft preview" data-path-format={draft.value.copyPathsAsAbsolute ? 'absolute' : 'abbreviated'}>
           <figcaption>{draft.value.copyPathsAsAbsolute ? 'Full path' : 'Abbreviated path'}<small>Example</small></figcaption>

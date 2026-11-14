@@ -1,3 +1,4 @@
+import { Switch } from '@agentmux/client-ui/input'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useId } from 'react'
 import { PERFORMANCE_STATUS_BAR_IDS, type PerformancePreferences } from '../../../../shared/toolkit-preferences'
@@ -35,7 +36,7 @@ export function BuiltinPerformanceSettings({ performance, active, onSave }: {
       </div>
       <label className="toolkit-settings__toggle">
         <span><strong>Show Performance</strong><small>Available in the status bar. Observes only while you view it or explicitly run it.</small></span>
-        <input type="checkbox" checked={draft.value.enabled} onChange={event => draft.setField('enabled', event.target.checked)} />
+        <Switch checked={draft.value.enabled} onChange={event => draft.setField('enabled', event.target.checked)} />
       </label>
       <fieldset className="toolkit-settings__layout"><legend>Status bar appearance</legend>
         <div className="toolkit-settings__choices">

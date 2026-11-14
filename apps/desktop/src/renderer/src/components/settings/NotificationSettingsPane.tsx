@@ -1,3 +1,4 @@
+import { Switch } from '@agentmux/client-ui/input'
 import './notification-settings.css'
 import { FormRow } from '@agentmux/client-ui/components/FormRow'
 import { SettingsSaveBar, useSettingsSave } from './SettingsSaveBar'
@@ -104,8 +105,8 @@ export function NotificationSettingsPane({ notifications, onSave }: {
         <header><span>Sound</span><small>{sound ? 'On' : 'Off'}</small></header>
         <FormRow className="notification-sound-toggle" label="Play the system notification sound"
           description="Applies to Agent status banners and enabled A2A message alerts. Silent by default.">
-          {attributes => <input
-            {...attributes} type="checkbox" name="sound"
+          {attributes => <Switch
+            {...attributes} name="sound"
             checked={sound}
             onChange={(event) => setSound(event.target.checked)}
           />}

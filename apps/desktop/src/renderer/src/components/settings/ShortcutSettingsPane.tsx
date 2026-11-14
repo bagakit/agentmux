@@ -10,7 +10,7 @@ import type { AppConfig, ComposerShortcut } from '../../../../shared/contracts'
 import { COMPOSER_PROMPT_STATES } from '../../../../shared/composer-shortcut-library'
 import { configValuesEqual } from '../../../../shared/config-edit'
 import { SettingsSaveBar } from './SettingsSaveBar'
-import { ComposerTextarea, TextInput } from '@agentmux/client-ui/input'
+import { ComposerTextarea, NativeSelect, SearchInput, TextInput } from '@agentmux/client-ui/input'
 import { agentProviderLabel } from '@agentmux/client-ui/components/AgentProviderIcon'
 import { promptProblems, useGoalsPrompts } from './GoalsPromptDrafts'
 import { LiquidSelectionSurface } from '../LiquidSelectionSurface'
@@ -22,8 +22,6 @@ import './settings-starting-points.css'
 const ThemeActionCreatePromptIcon = semanticIconComponent('action.create-prompt')
 const ThemeActionAddQuickRepliesIcon = semanticIconComponent('action.add-quick-replies')
 const ThemeStatusSelectedIcon = semanticIconComponent('status.selected')
-const ThemeActionSearchIcon = semanticIconComponent('action.search')
-const ThemeActionClearIcon = semanticIconComponent('action.clear')
 const ThemeNavigationBackIcon = semanticIconComponent('navigation.back')
 const ThemeActionCancelIcon = semanticIconComponent('action.cancel')
 const ThemeActionRemoveIcon = semanticIconComponent('action.remove')
@@ -205,7 +203,8 @@ export function ShortcutSettingsPane({ config, active, onOpenGoals }: {
       </div>
       <div className="prompt-workbench__body">
         <section className="prompt-library" aria-label="Prompt library">
-          <label className="prompt-library__search"><ThemeActionSearchIcon size={14} aria-hidden="true" /><TextInput ref={searchInput} aria-label="Search prompts" placeholder="Find an instruction…" value={query} onChange={(event) => setQuery(event.target.value)} />{query ? <button type="button" aria-label="Clear prompt search" onClick={() => { setQuery(''); searchInput.current?.focus() }}><ThemeActionClearIcon size={12} /></button> : null}</label>
+          <SearchInput className="prompt-library__search" ref={searchInput} aria-label="Search prompts" clearLabel="Clear prompt search"
+            placeholder="Find an instruction…" value={query} onValueChange={setQuery} />
           <div ref={library} className="prompt-library__items">
             <LiquidSelectionSurface selected={selectedId} active={active} targetAttribute="data-prompt-id" />
             {visible.map((candidate) => {
@@ -228,12 +227,12 @@ export function ShortcutSettingsPane({ config, active, onOpenGoals }: {
           <div className="prompt-editor__heading"><Button type="button" className="prompt-editor__back" onClick={back}><ThemeNavigationBackIcon size={13} /> Back to prompts</Button><span>{providerName(prompt)}</span><span className="prompt-editor__status" data-prompt-status={promptStatus}><SemanticIcon name={`status.prompt-${promptStatus}`} size={4} />{promptStatus === 'invalid' ? 'Needs attention' : promptStatus === 'unsaved' ? 'Unsaved' : 'Saved'}</span></div>
           {selectedChanged && Object.hasOwn(resource.expected, prompt.id) ? <Button type="button" className="prompt-editor__revert" disabled={saveState.saving} onClick={() => resource.setValue(current => ({ ...current, [prompt.id]: resource.expected[prompt.id]! }))}>Cancel edit</Button> : null}
           {!visible.some((candidate) => candidate.id === prompt.id) ? <p className="prompt-editor__filtered" role="status">This prompt is outside your search or scope. <Button type="button" onClick={showInLibrary}>Show in library</Button></p> : null}
-          <div className="agent-settings-fields prompt-editor__fields">
+          <div className="prompt-editor__fields">
             <label className="prompt-editor__name"><span>Name</span><TextInput ref={nameInput} value={prompt.label} onChange={(event) => update(prompt.id, { label: event.target.value })} placeholder="Explain simply" /></label>
             <label className="prompt-editor__instruction"><span>Prompt</span><ComposerTextarea aria-invalid={errors.some((error) => error.field === 'Prompt')} aria-describedby={`${descriptionId}-body`} value={prompt.body} onValueChange={(value) => update(prompt.id, { body: value })} placeholder="Explain what changed in plain words, then name the next useful step." rows={7} /><small id={`${descriptionId}-body`} className={errors.some((error) => error.field === 'Prompt') ? 'settings-inline-error' : ''}>{errors.find((error) => error.field === 'Prompt')?.message ?? 'Your instruction, exactly as it will be used.'}</small></label>
             <div className="prompt-editor__reach">
-              <label><span>Keyword</span><TextInput aria-invalid={errors.some((error) => error.field === 'Keyword')} value={prompt.keyword} onChange={(event) => update(prompt.id, { keyword: event.target.value })} placeholder="eli5" /><small className={errors.some((error) => error.field === 'Keyword') ? 'settings-inline-error' : ''}>{errors.find((error) => error.field === 'Keyword')?.message ?? usageDescription}</small></label>
-              <label><span>Provider scope</span><select aria-label="Prompt Provider scope" value={prompt.providerId ?? ''} onChange={(event) => bindProvider(prompt.id, event.target.value)}><option value="">Every Agent</option>{BUILT_IN_AGENT_PROVIDER_IDS.map((id) => <option key={id} value={id}>{agentProviderLabel(id)}</option>)}{prompt.providerId && !BUILT_IN_AGENT_PROVIDER_IDS.some((id) => id === prompt.providerId) ? <option value={prompt.providerId}>{agentProviderLabel(prompt.providerId)}</option> : null}</select><small>Shared, or available to one Provider.</small></label>
+              <label><span>Keyword</span><TextInput aria-describedby={`${descriptionId}-keyword`} aria-invalid={errors.some((error) => error.field === 'Keyword')} value={prompt.keyword} onChange={(event) => update(prompt.id, { keyword: event.target.value })} placeholder="eli5" /><small id={`${descriptionId}-keyword`} className={errors.some((error) => error.field === 'Keyword') ? 'settings-inline-error' : ''}>{errors.find((error) => error.field === 'Keyword')?.message ?? usageDescription}</small></label>
+              <label><span>Provider scope</span><NativeSelect aria-label="Prompt Provider scope" aria-describedby={`${descriptionId}-provider`} value={prompt.providerId ?? ''} onChange={(event) => bindProvider(prompt.id, event.target.value)}><option value="">Every Agent</option>{BUILT_IN_AGENT_PROVIDER_IDS.map((id) => <option key={id} value={id}>{agentProviderLabel(id)}</option>)}{prompt.providerId && !BUILT_IN_AGENT_PROVIDER_IDS.some((id) => id === prompt.providerId) ? <option value={prompt.providerId}>{agentProviderLabel(prompt.providerId)}</option> : null}</NativeSelect><small id={`${descriptionId}-provider`}>Shared, or available to one Provider.</small></label>
             </div>
             <details className="prompt-editor__usage" open={Object.hasOwn(usageOpen, prompt.id) ? usageOpen[prompt.id] : false} onToggle={event => {
               const open = event.currentTarget.open

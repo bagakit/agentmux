@@ -1,5 +1,4 @@
-import { TextInput } from '@agentmux/client-ui/input'
-import { ComposerTextarea } from '@agentmux/client-ui/input'
+import { ComposerTextarea, Switch, TextInput } from '@agentmux/client-ui/input'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useEffect, useRef, useState } from 'react'
 import { resolveUserProfile, USER_PROFILE_NAME_LIMIT, USER_PROFILE_ABOUT_LIMIT, validProfileAvatar, type UserProfile } from '@agentmux/host/mote-model'
@@ -76,9 +75,9 @@ export function ProfileSettingsPane({ profile, onSave }: {
       <div className="settings-profile__identity-text">
         <div className="settings-profile__identity-heading"><h3>Your identity</h3><small>On this Mac</small></div>
         <label htmlFor="profile-display-name" data-settings-field="display-name">Display name</label>
-        <TextInput id="profile-display-name" aria-label="Display name" value={value.displayName} maxLength={USER_PROFILE_NAME_LIMIT}
+        <TextInput id="profile-display-name" aria-label="Display name" aria-describedby="profile-display-name-hint" value={value.displayName} maxLength={USER_PROFILE_NAME_LIMIT}
           placeholder="Your name" autoComplete="nickname" onChange={event => draft.setField('displayName', event.currentTarget.value)} />
-        <p className="settings-profile__identity-hint">Shown with your messages and shared context.</p>
+        <p id="profile-display-name-hint" className="settings-profile__identity-hint">Shown with your messages and shared context.</p>
         <input ref={upload} hidden type="file" accept="image/png,image/jpeg" aria-label="Choose profile photo"
           onChange={event => { void chooseImage(event.currentTarget.files?.[0]); event.currentTarget.value = '' }} />
       </div>
@@ -91,16 +90,16 @@ export function ProfileSettingsPane({ profile, onSave }: {
     {imageError && <p className="settings-inline-error" role="alert">{imageError}</p>}
     <div className="settings-profile__details">
     <section className="settings-profile__context" data-settings-field="profile-about">
-      <header><h3><label htmlFor="profile-about">About you &amp; how you work</label></h3><p>Your work, experience and communication preferences.</p></header>
-      <ComposerTextarea id="profile-about" aria-label="About you and how you work" value={value.about} maxLength={USER_PROFILE_ABOUT_LIMIT}
+      <header><h3><label htmlFor="profile-about">About you &amp; how you work</label></h3><p id="profile-about-hint">Your work, experience and communication preferences.</p></header>
+      <ComposerTextarea id="profile-about" aria-label="About you and how you work" aria-describedby="profile-about-hint" value={value.about} maxLength={USER_PROFILE_ABOUT_LIMIT}
         rows={6} placeholder="For example: I build desktop apps. Prefer concise answers, concrete examples and clear tradeoffs."
         onValueChange={value => draft.setField('about', value)} />
       <div className="settings-profile__context-footer"><span>This is your context. Each Mote keeps its own role and instructions.</span><small>{value.about.length} / {USER_PROFILE_ABOUT_LIMIT}</small></div>
     </section>
     <section className="settings-profile__distribution">
       <label className="settings-profile__sharing" data-settings-field="profile-sharing">
-        <input type="checkbox" checked={value.shareWithAgents} onChange={event => draft.setField('shareWithAgents', event.currentTarget.checked)} />
-        <span><strong>Share with new agents</strong><small>Your saved name and About are included when a new agent starts on this Mac. Existing conversations keep their context.</small></span>
+        <Switch aria-label="Share with new agents" aria-describedby="profile-sharing-hint" checked={value.shareWithAgents} onChange={event => draft.setField('shareWithAgents', event.currentTarget.checked)} />
+        <span><strong>Share with new agents</strong><small id="profile-sharing-hint">Your saved name and About are included when a new agent starts on this Mac. Existing conversations keep their context.</small></span>
       </label>
       <p className="settings-profile__note">Saved on this Mac. Your photo stays in conversations; only text is shared. Authorized agents can also read your saved profile through the settings CLI.</p>
     </section>

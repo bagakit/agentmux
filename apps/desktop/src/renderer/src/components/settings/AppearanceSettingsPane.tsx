@@ -5,7 +5,7 @@ import { BrandIcon } from '@agentmux/client-ui/components/BrandIcon'
 import { APP_ICON_CATALOG, APP_ICON_IDS, DEFAULT_APP_ICON, type AppIconId } from '@agentmux/client-ui/app-icon-catalog'
 import { ThemeEditor } from './ThemeEditor'
 import { DEFAULT_THEME_ID, getThemeCatalog, type ThemeCatalogItem } from '@agentmux/client-ui/theme'
-import { TextInput } from '@agentmux/client-ui/input'
+import { Switch, TextInput } from '@agentmux/client-ui/input'
 import { SettingsSaveBar, useSettingsSave } from './SettingsSaveBar'
 import { SemanticIcon, type SemanticIconId } from '@agentmux/client-ui/icons'
 import { useId, useState } from 'react'
@@ -154,18 +154,19 @@ export function AppearanceSettingsPane({ appearance, onSave, active = true }: {
       <section className="settings-group" data-settings-field="editor-font-size">
         <header><span>Editor font size</span><small>{inheritsEditorFont ? 'App size' : validEditorFontSize ? `${parsedEditorFontSize}px` : 'Unsaved'}</small></header>
         <label className="browser-automation-toggle">
-          <input type="checkbox" aria-label="Use App font size" checked={inheritsEditorFont}
+          <Switch aria-label="Use App font size" checked={inheritsEditorFont}
             onChange={event => editorFont.setValue(event.target.checked ? 'inherit' : String(Math.round(readAppEditorFontSize())))} />
           <span><strong>Use App font size</strong></span>
         </label>
         <div className="terminal-font-size-control">
           <TextInput type="number" aria-label="Editor font size in pixels" min={EDITOR_FONT_SIZE_MIN} max={EDITOR_FONT_SIZE_MAX} step={1}
+            aria-invalid={!validEditorFontSize || undefined} aria-describedby={`${choiceId}-editor-size-hint`}
             placeholder="App" disabled={inheritsEditorFont} value={inheritsEditorFont ? '' : editorFont.value}
             onChange={event => editorFont.setValue(event.target.value)} />
           <span className="terminal-font-size-control__unit">px</span>
           <Button type="button" disabled={inheritsEditorFont} onClick={() => editorFont.setValue('inherit')}>Reset editor size</Button>
         </div>
-        <p className="settings-hint">Applies to source and diff editors. Inherit the App size or choose {EDITOR_FONT_SIZE_MIN} to {EDITOR_FONT_SIZE_MAX} pixels.</p>
+        <p id={`${choiceId}-editor-size-hint`} className="settings-hint">Applies to source and diff editors. Inherit the App size or choose {EDITOR_FONT_SIZE_MIN} to {EDITOR_FONT_SIZE_MAX} pixels.</p>
       </section>
       <section className="settings-group" data-settings-field="terminal-font-size">
         <header><span>Terminal font size</span><small>{fontSize}px</small></header>
@@ -184,6 +185,7 @@ export function AppearanceSettingsPane({ appearance, onSave, active = true }: {
           <TextInput
             type="number"
             aria-label="Terminal font size in pixels"
+            aria-invalid={!validFontSize || undefined} aria-describedby={`${choiceId}-terminal-size-hint`}
             min={TERMINAL_FONT_SIZE_MIN}
             max={TERMINAL_FONT_SIZE_MAX}
             step={1}
@@ -192,7 +194,7 @@ export function AppearanceSettingsPane({ appearance, onSave, active = true }: {
           />
           <span className="terminal-font-size-control__unit">px</span>
         </div>
-        <p className="settings-hint">Applies to every open terminal, from {TERMINAL_FONT_SIZE_MIN} to {TERMINAL_FONT_SIZE_MAX} pixels.</p>
+        <p id={`${choiceId}-terminal-size-hint`} className="settings-hint">Applies to every open terminal, from {TERMINAL_FONT_SIZE_MIN} to {TERMINAL_FONT_SIZE_MAX} pixels.</p>
       </section>
       <section className="settings-group" data-settings-field="terminal-palette">
         <header><span>Terminal palette</span><small>{TERMINAL_THEME_CATALOG.length}</small></header>
