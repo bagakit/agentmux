@@ -1,3 +1,4 @@
+import { Tabs } from '@agentmux/client-ui/components/Tabs'
 import { PerformanceSourceNote } from './PerformanceSourceNote'
 import { useContext, useId, useLayoutEffect, useRef, useState } from 'react'
 import { SemanticIcon, semanticIconComponent } from '@agentmux/client-ui/icons'
@@ -62,18 +63,13 @@ export function PerformanceOverview({ snapshot, close, paused = false, pending =
       <button type="button" className="performance-icon-button" aria-label="Close Performance" data-toolkit-close onClick={close}><ThemeActionCloseIcon size={14} /></button></header>
 
     <div className="performance-workbench" data-expanded={expanded}>
-      <nav className="performance-navigation" role="tablist" aria-label="Performance sections" aria-orientation={expanded ? 'vertical' : 'horizontal'}>
-        {sections.map(([id, label, hint], index) => <button key={id} id={navigationId + '-' + id} type="button" role="tab" aria-selected={section === id}
-          aria-controls={navigationId + '-panel-' + id} tabIndex={section === id ? 0 : -1} data-performance-section-tab={id} onClick={() => setSection(id)}
-          onKeyDown={event => {
-            if (event.nativeEvent.isComposing || event.altKey || event.ctrlKey || event.metaKey) return
-            const step = ['ArrowRight', 'ArrowDown'].includes(event.key) ? 1 : ['ArrowLeft', 'ArrowUp'].includes(event.key) ? -1 : 0
-            if (!step && event.key !== 'Home' && event.key !== 'End') return
-            event.preventDefault()
-            const next = event.key === 'Home' ? 0 : event.key === 'End' ? sections.length - 1 : (index + step + sections.length) % sections.length
-            setSection(sections[next]![0]); event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>('[role="tab"]')[next]?.focus()
-          }}><strong>{label}</strong><small>{hint}</small></button>)}
-      </nav>
+      <Tabs as="nav" className="performance-navigation" aria-label="Performance sections" orientation={expanded ? 'vertical' : 'horizontal'} keyboardOrientation="both"
+        value={section} onValueChange={setSection} options={sections.map(([id, label, hint]) => ({
+          value: id,
+          panelId: navigationId + '-panel-' + id,
+          button: { id: navigationId + '-' + id, 'data-performance-section-tab': id },
+          label: <><strong>{label}</strong><small>{hint}</small></>
+        }))} />
     <div ref={body} className="performance-body" onScroll={event => { scroll.current[section] = event.currentTarget.scrollTop }}>
       <span className="performance-reading-time">{readingTime(source?.lastSuccessAt, snapshot?.observedAt)}</span>
       {error || snapshot?.reason ? <p className="performance-state" data-tone="warning">{error ?? snapshot?.reason}</p> : null}

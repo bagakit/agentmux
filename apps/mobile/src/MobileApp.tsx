@@ -2,7 +2,7 @@ import { mobileMemberDraftScope, mobileMemberSelection } from './navigation/mobi
 import { hasMobileTerminal } from './conversation/mobile-conversation-client'
 import { useMobileMember } from './conversation/mobile-member'
 import { IconButton } from '@agentmux/client-ui/components/IconButton'
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react'
 import * as Dialog from '@agentmux/client-ui/components/Modal'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
@@ -662,6 +662,7 @@ function MobileAppContent({ client, connection, platform: basePlatform, native =
             {...(sourceReference ? { initialReference: sourceReference } : {})} onReferenceChange={updateSourceReference}
             openScope={scope => { openSource({ kind: 'space', zoneId: scope.zoneId }) }} /> : null}
   </div> : null
+  const moteTabsId = useId()
   const moteContext = workspaceVisible && current.session && teamSpaceId && !workPanel ? moteRoot ? 'main' as const : 'member' as const : null
   return <MobileLocalDraftsOwner><MobileHeaderMenuContext.Provider value={menuButton}><MobileAgentMenuContext.Provider value={openAgentMenu}><MobileNoticeScope owner={client} identity={[ getDeviceWorkface().recordIdentity()]}><MobileGoalOperationSafety /><div className="mobile-app" data-wide-shell={wideShell || undefined} data-wide-workface={wideWorkface || undefined} data-short={layout.short || undefined} data-sidebar-collapsed={sidebarCollapsed || undefined} data-focus-root={focusRoot || undefined} data-connection={connection.state} data-mobile-workface={moteConversation ? 'mote' : 'workspace'} data-page-header={primaryHeader ? 'inline' : 'shell'}>
     <aside ref={setFocusTarget} className="mobile-focus-pane" role={focusRoot ? 'main' : undefined} aria-label="Focus 会话列表" hidden={!focusShown} />
@@ -682,7 +683,7 @@ function MobileAppContent({ client, connection, platform: basePlatform, native =
         {workspaceVisible && current.session ? <div className="mobile-session-header-actions"><div ref={setConversationToolsTarget} className="mobile-session-tool-slot" hidden={!conversationVisible || welcomeVisible || historyVisible} />{terminalToggle}<IconButton className="mobile-icon-button mobile-session-actions" aria-label="当前对话操作" aria-description={conversationStatusLabel ?? undefined} data-conversation-status={conversationStatusMark} ref={sessionActionsButton} onClick={() => setSheet('actions')}><ThemeActionMoreIcon size={20} /></IconButton></div> : <span className="mobile-header-spacer" />}
       </>}
     </header>}
-    {moteContext && teamSpaceId ? <MobileMoteContext variant={moteContext} team={team} issue={teamReading.issue} noticeRef={setMoteNoticeTarget}
+    {moteContext && teamSpaceId ? <MobileMoteContext tabsId={moteTabsId} variant={moteContext} team={team} issue={teamReading.issue} noticeRef={setMoteNoticeTarget}
       section={moteSection} onDiscussion={() => { setMoteStart(null); setMoteHistory(null); if (workface.selectedSessionId) returnToMoteMain() }}
       onThreads={() => { navigationRevision.current++; setMoteView({ spaceId: teamSpaceId, section: 'threads', detail: false }) }}
       role={moteTarget ? !moteDialogue.unavailable && moteDialogue.page?.main.status === 'ready' && moteDialogue.page.main.current && selected?.hostId
@@ -708,13 +709,15 @@ function MobileAppContent({ client, connection, platform: basePlatform, native =
       <section className="mobile-goal-panel" hidden={!workspaceVisible || !current.goal}>
         {memberSelection && current.goal && <p role="status">原成员的目标安排能力尚未确认，原对话和草稿保持不变。</p>}<MobileGoalWork loadWhen={!memberSelection && workspaceVisible && current.goal} onLoadReturn={returnToConversation} client={memberSelection ? null : client} agentSessionId={workface.selectedSessionId} connected={connected} visible={exposed && workspaceVisible && current.goal} />
       </section>
-      <section className="mobile-mote-threads-panel" hidden={!threadsVisible}>
+      <section className="mobile-mote-threads-panel" hidden={!threadsVisible}
+        {...(moteContext === 'main' ? { id: `${moteTabsId}-threads`, role: 'tabpanel', 'aria-labelledby': `${moteTabsId}-threads-tab` } : {})}>
         <MobileMoteThreads client={client} dialogue={moteDialogue} team={team} issue={teamReading.issue} visible={exposed && threadsVisible}
           currentSessionId={workface.selectedSessionId} currentHostId={selected?.hostId} onOpen={openTeamMember} onWork={openMoteWork}
           onMain={() => returnToMoteMain()} onConfigure={() => { if (objectIdentity) openProfile(objectIdentity) }}
           onRefresh={() => { teamReading.refresh(); moteDialogue.refresh() }} />
       </section>
-      <section className="mobile-conversation-panel" hidden={!conversationVisible}>
+      <section className="mobile-conversation-panel" hidden={!conversationVisible}
+        {...(moteContext === 'main' ? { id: `${moteTabsId}-discussion`, role: 'tabpanel', 'aria-labelledby': `${moteTabsId}-discussion-tab` } : {})}>
         <MobileMoteComposer client={client} target={moteTarget} platform={platform} enabled={Boolean(moteConversation && !moteDirectAgent && moteTarget)}
           active={exposed && conversationVisible && !historyVisible}
           sourceKey={welcomeVisible ? mobileWelcomeComposerSource(moteStart?.mode ?? 'start')

@@ -1,4 +1,5 @@
 import * as Dialog from './Modal.js'
+import { SegmentedControl } from './SegmentedControl.js'
 import { useState } from 'react'
 import { SemanticIcon } from '../theme/icons.js'
 
@@ -18,26 +19,16 @@ export type MarkdownReadingLayout = {
   onChange(change: MarkdownReadingLayoutChange): void
 }
 
-const WIDTHS: { id: MarkdownReadingWidth; label: string }[] = [{ id: 'standard', label: 'Standard' }, { id: 'wide', label: 'Wide' }, { id: 'full', label: 'Full' }]
-const TYPEFACES: { id: MarkdownReadingTypeface; label: string }[] = [{ id: 'sans', label: 'Sans' }, { id: 'serif', label: 'Serif' }]
+const WIDTHS = [
+  { value: 'standard', label: 'Standard' },
+  { value: 'wide', label: 'Wide' },
+  { value: 'full', label: 'Full' },
+] as const
 
-function Segmented<T extends string>({ label, options, value, onChange, sample }: {
-  label: string; options: { id: T; label: string }[]; value: T; onChange(next: T): void; sample?: boolean
-}) {
-  return <div className="md-reading__group" role="radiogroup" aria-label={label}>
-    <span className="md-reading__label">{label}</span>
-    <div className="md-reading__segments">{options.map(option => <button key={option.id} type="button" role="radio" aria-checked={value === option.id}
-      className="md-reading__segment" data-option={option.id} data-sample={sample ? option.id : undefined} onClick={() => onChange(option.id)}
-      onKeyDown={event => {
-        if (event.key !== 'ArrowRight' && event.key !== 'ArrowLeft') return
-        event.preventDefault()
-        const index = options.findIndex(entry => entry.id === value), step = event.key === 'ArrowRight' ? 1 : -1
-        const next = options[(index + step + options.length) % options.length]!
-        onChange(next.id)
-        ;(event.currentTarget.parentElement?.querySelector(`[data-option="${next.id}"]`) as HTMLElement | null)?.focus()
-      }}>{sample ? <span className="md-reading__sample" aria-hidden="true">Aa</span> : null}{option.label}</button>)}</div>
-  </div>
-}
+const TYPEFACES = [
+  { value: 'sans', label: <><span className="md-reading__sample" aria-hidden="true">Aa</span>Sans</> },
+  { value: 'serif', label: <><span className="md-reading__sample" aria-hidden="true">Aa</span>Serif</> },
+] as const
 
 /** Width, typeface and size for the document; each change applies in place. */
 export function MarkdownReadingLayoutControl({ layout }: { layout: MarkdownReadingLayout }) {
@@ -55,8 +46,14 @@ export function MarkdownReadingLayoutControl({ layout }: { layout: MarkdownReadi
         <Dialog.Close asChild><button type="button" className="md-outline__close" aria-label="Close reading layout"><SemanticIcon name="action.close" size={13} aria-hidden="true" /></button></Dialog.Close>
       </div>
       <div className="md-reading__body">
-        <Segmented label="Width" options={WIDTHS} value={value.width} onChange={width => layout.onChange({ kind: 'width', width })} />
-        <Segmented label="Typeface" options={TYPEFACES} value={value.typeface} onChange={typeface => layout.onChange({ kind: 'typeface', typeface })} sample />
+        <div className="md-reading__group">
+          <span className="md-reading__label">Width</span>
+          <SegmentedControl aria-label="Width" options={WIDTHS} value={value.width} onValueChange={width => layout.onChange({ kind: 'width', width })} />
+        </div>
+        <div className="md-reading__group">
+          <span className="md-reading__label">Typeface</span>
+          <SegmentedControl aria-label="Typeface" options={TYPEFACES} value={value.typeface} onValueChange={typeface => layout.onChange({ kind: 'typeface', typeface })} />
+        </div>
         <div className="md-reading__group" role="group" aria-label="Text size">
           <span className="md-reading__label">Size</span>
           <div className="md-reading__stepper">

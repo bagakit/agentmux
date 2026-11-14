@@ -1,3 +1,4 @@
+import { SegmentedControl } from '@agentmux/client-ui/components/SegmentedControl'
 import { TextInput } from '@agentmux/client-ui/input'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { presentError } from '@agentmux/client-ui/error-presentation'
@@ -10,7 +11,11 @@ import { SettingsNavigation } from '../SettingsNavigation'
 const ThemeStatusLoadingIcon = semanticIconComponent('status.loading')
 
 type RouteMode = BrowserProfileNetwork['mode']
-const ROUTE_LABELS: Readonly<Record<RouteMode, string>> = { system: 'System', direct: 'Direct', proxy: 'Proxy' }
+const ROUTE_OPTIONS = [
+  { value: 'system', label: 'System' },
+  { value: 'direct', label: 'Direct' },
+  { value: 'proxy', label: 'Proxy' }
+] as const
 
 /**
  * How this Profile's pages reach the network. One segmented choice, one Server field that takes a whole
@@ -47,11 +52,8 @@ export function ProfileNetworkRoute({ profile, proxy, openBrowsers, run, baselin
       <h4>Network</h4>
       {profile.proxyBinding ? <p className="browser-profile-editor__quiet">Proxy library · {proxy?.label ?? 'Original asset unavailable'}{proxy && proxy.revision !== profile.proxyBinding.revision ? ' · A different asset version is available' : ''}. Editing this route removes that binding.</p> : null}
       <p className="browser-profile-editor__quiet" role="status">{profile.networkApplication?.status === 'applied' ? 'Native route configuration confirmed.' : profile.networkApplication?.status === 'pending' ? 'Native route configuration is pending.' : 'Native route configuration is unconfirmed.'} Exit and protocol checks are separate.</p>
-      <div className="browser-profile-editor__route-modes" role="radiogroup" aria-label="Network route">
-        {(Object.keys(ROUTE_LABELS) as RouteMode[]).map(option => (
-          <button key={option} type="button" role="radio" aria-checked={mode === option} onClick={() => { beginEdit(); setMode(option) }}>{ROUTE_LABELS[option]}</button>
-        ))}
-      </div>
+      <SegmentedControl className="browser-profile-editor__route-modes" aria-label="Network route" options={ROUTE_OPTIONS}
+        value={mode} onValueChange={next => { beginEdit(); setMode(next) }} />
       {mode === 'proxy' ? <div className="browser-profile-editor__route-fields">
         <TextInput aria-label="Proxy server" placeholder="host:port or socks5://host:port" value={server} spellCheck={false}
           aria-invalid={problem !== null && server.trim() !== ''} onChange={event => { beginEdit(); setServer(event.target.value) }} />

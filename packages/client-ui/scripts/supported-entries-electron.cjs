@@ -60,6 +60,21 @@ app.whenReady().then(async () => {
       await until('!document.querySelector("[role=alert]")')
       return { associated, fieldStyle }
     },
+    async selection() {
+      await key('Tab', 'Tab', 9)
+      await until('document.activeElement.matches("[role=tab][aria-selected=true]")')
+      await key('ArrowRight', 'ArrowRight', 39)
+      assert.equal(await read('document.getElementById(document.activeElement.getAttribute("aria-controls"))?.getAttribute("aria-labelledby")===document.activeElement.id'), true)
+      await until('document.querySelector("[role=tabpanel]:not([hidden])").textContent==="Review board decisions."')
+      await read('document.querySelector("[role=radio][aria-checked=true]").focus()')
+      await key('ArrowDown', 'ArrowDown', 40)
+      await until('document.activeElement.matches("[role=radio][aria-checked=true][data-option=roomy]")')
+      const indicator = 'document.querySelector(".segmented-control__indicator")'
+      await until(indicator + '.getAnimations().length===0')
+      const aligned = `Math.abs(${indicator}.getBoundingClientRect().left-document.activeElement.getBoundingClientRect().left)<1`
+      assert.equal(await read(aligned), true, 'The indicator settles at the selected radio')
+      return { activePanel: 'decisions', focusedRadio: 'roomy', indicatorAligned: true }
+    },
     async overlays() {
       await read('document.querySelector("[aria-haspopup=dialog]").focus()')
       await key(' ', 'Space', 32)

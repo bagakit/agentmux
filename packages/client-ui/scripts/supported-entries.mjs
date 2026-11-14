@@ -25,6 +25,13 @@ export const supportedExamples = {
     },
     styles: [fieldStyles]
   },
+  selection: {
+    entries: {
+      './components/Tabs': 'components/Tabs.tsx',
+      './components/SegmentedControl': 'components/SegmentedControl.tsx'
+    },
+    styles: ['./styles/segmented-control.css']
+  },
   overlays: {
     entries: {
       './components/Modal': 'components/Modal.tsx',

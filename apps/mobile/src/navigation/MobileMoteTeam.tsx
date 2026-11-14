@@ -1,3 +1,4 @@
+import { Tabs } from '@agentmux/client-ui/components/Tabs'
 import { SemanticIcon } from '@agentmux/client-ui/icons'
 import { AgentAvatarFace } from '@agentmux/client-ui/components/AgentAvatarFace'
 import { FocusStateMark } from '@agentmux/client-ui/components/FocusStateMark'
@@ -15,8 +16,8 @@ export function mobileMoteRecipient(team: MobileMoteTeam | null, sessionId: stri
 }
 
 /** The strip under a Mote conversation header. The header already names the conversation; this row never repeats it. */
-export function MobileMoteContext({ variant, team, issue, role, section, noticeRef, showMain, onDiscussion, onThreads, onTeam, onMain }: {
-  variant: 'main' | 'member'; team: MobileMoteTeam | null; issue: string | null; role: string
+export function MobileMoteContext({ tabsId, variant, team, issue, role, section, noticeRef, showMain, onDiscussion, onThreads, onTeam, onMain }: {
+  tabsId: string; variant: 'main' | 'member'; team: MobileMoteTeam | null; issue: string | null; role: string
   section: 'discussion' | 'threads'; noticeRef(node: HTMLSpanElement | null): void; showMain: boolean
   onDiscussion(): void; onThreads(): void; onTeam(): void; onMain(): void
 }) {
@@ -24,10 +25,11 @@ export function MobileMoteContext({ variant, team, issue, role, section, noticeR
   const known = team?.members.filter(member => member.hostId).length ?? 0, unknown = (team?.members.length ?? 0) - known
   const facts = [waiting ? `${waiting} 个需要你` : '', unknown ? `${unknown} 位执行端待确认` : '', issue ?? ''].filter(Boolean).join('；')
   return <div className="mobile-mote-context" data-variant={variant}>
-    {variant === 'main' ? <div className="mobile-mote-sections" role="tablist" aria-label="Mote 导航">
-      <button type="button" role="tab" aria-selected={section === 'discussion'} onClick={onDiscussion}>Discussion</button>
-      <button type="button" role="tab" aria-selected={section === 'threads'} onClick={onThreads}>Threads</button>
-    </div> : <span className="mobile-mote-context__role">{role}</span>}
+    {variant === 'main' ? <Tabs className="mobile-mote-sections" aria-label="Mote 导航" value={section}
+      onValueChange={next => next === 'discussion' ? onDiscussion() : onThreads()} options={[
+        { value: 'discussion', panelId: `${tabsId}-discussion`, button: { id: `${tabsId}-discussion-tab` }, label: 'Discussion' },
+        { value: 'threads', panelId: `${tabsId}-threads`, button: { id: `${tabsId}-threads-tab` }, label: 'Threads' },
+      ]} /> : <span className="mobile-mote-context__role">{role}</span>}
     <span ref={noticeRef} className="mobile-mote-context__notice" />
     <button type="button" className="mobile-mote-team-button" aria-label="查看本 Mote 团队" {...(facts ? { 'aria-description': facts } : {})} onClick={onTeam}>
       <SemanticIcon name="object.collaboration" size={16} /><span className="mobile-mote-team-button__label">团队{team ? ` ${known}` : ''}</span>

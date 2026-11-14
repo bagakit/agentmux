@@ -43,6 +43,7 @@
   color: var(--text-2); font-size: var(--fs-body); font-weight: 550; transition: color var(--dur-fast) ease; }
 .mobile-app .mobile-mote-sections > button::before { content: ''; position: absolute; inset: 7px 0; z-index: -1; border-radius: 999px; background: transparent;
   transition: background-color var(--dur-fast) ease; }
+.mobile-app .mobile-mote-sections > button:focus-visible { outline-offset: -6px; border-radius: 999px; }
 .mobile-app .mobile-mote-sections > button[aria-selected='true'] { color: var(--text); font-weight: 650; }
 .mobile-app .mobile-mote-sections > button[aria-selected='true']::before { background: var(--mobile-group); }
 .mobile-app .mobile-mote-context__role { flex: none; padding: 3px 8px; border-radius: 999px; background: var(--mobile-group); color: var(--text-2); font-size: var(--fs-micro); font-weight: 600; }

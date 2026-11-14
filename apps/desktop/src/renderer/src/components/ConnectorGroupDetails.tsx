@@ -1,4 +1,5 @@
-import { useRef, type ReactNode } from 'react'
+import type { ReactNode } from 'react'
+import { Tabs } from '@agentmux/client-ui/components/Tabs'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 
 export type ConnectorGroupSection = 'overview' | 'members' | 'sharing' | 'joining' | 'diagnostics'
@@ -16,20 +17,22 @@ export function ConnectorGroupDetailsHeader({ id, identity, relationship, config
   section: ConnectorGroupSection; onSection(section: ConnectorGroupSection): void
   attention?: Partial<Record<ConnectorGroupSection, 'check' | 'action'>> | undefined
 }) {
-  const tabs = useRef<Array<HTMLButtonElement | null>>([])
   return <div className="connector-group-details__header">
     <div className="connector-group-details__identity">{identity}</div>
     <div className="connector-group-details__relationship" aria-label="Current conversation and group relationship">{relationship}</div>
     {section !== 'sharing' && section !== 'overview' ? <div className="connector-group-details__configuration">{configuration}</div> : null}
-    <div className="connector-group-details__tabs" role="tablist" aria-label="Group connection sections">
-      {sections.map(({ id: name, label, icon: Icon }, index) => <button key={name} ref={node => { tabs.current[index] = node }} type="button" role="tab" id={`${id}-${name}-tab`}
-        aria-controls={`${id}-${name}-panel`} aria-selected={section === name} tabIndex={section === name ? 0 : -1}
-        onClick={() => onSection(name)} onKeyDown={event => {
-          const next = event.key === 'ArrowRight' ? (index + 1) % sections.length : event.key === 'ArrowLeft' ? (index + sections.length - 1) % sections.length : event.key === 'Home' ? 0 : event.key === 'End' ? sections.length - 1 : null
-          if (next === null) return
-          event.preventDefault(); onSection(sections[next]!.id); tabs.current[next]?.focus({ preventScroll: true })
-        }}><Icon size={14} /><span>{label}</span>{attention?.[name] ? <span className="connector-group-details__attention" aria-label={attention[name] === 'action' ? 'Action needed' : 'Needs checking'} title={attention[name] === 'action' ? 'Action needed' : 'Needs checking'}>{attention[name] === 'action' ? '!' : '?'}</span> : null}</button>)}
-    </div>
+    <Tabs className="connector-group-details__tabs" aria-label="Group connection sections" value={section}
+      onValueChange={onSection} options={sections.map(({ id: name, label, icon: Icon }) => {
+        const status = attention?.[name]
+        const description = status === 'action' ? 'Action needed' : 'Needs checking'
+        return {
+          value: name,
+          panelId: `${id}-${name}-panel`,
+          button: { id: `${id}-${name}-tab` },
+          label: <><Icon size={14} /><span>{label}</span>
+            {status ? <span className="connector-group-details__attention" aria-label={description} title={description}>{status === 'action' ? '!' : '?'}</span> : null}</>
+        }
+      })} />
   </div>
 }
 

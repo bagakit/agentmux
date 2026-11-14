@@ -28,6 +28,17 @@
       "import": "./dist/components/FormRow.js"
     },
     "./input/styles.css": "./src/input/input.css",
+    "./components/Tabs": {
+      "types": "./src/components/Tabs.tsx",
+      "browser": "./src/components/Tabs.tsx",
+      "import": "./dist/components/Tabs.js"
+    },
+    "./components/SegmentedControl": {
+      "types": "./src/components/SegmentedControl.tsx",
+      "browser": "./src/components/SegmentedControl.tsx",
+      "import": "./dist/components/SegmentedControl.js"
+    },
+    "./styles/segmented-control.css": "./src/styles/segmented-control.css",
     "./components/Modal": {
       "types": "./src/components/Modal.tsx",
       "browser": "./src/components/Modal.tsx",

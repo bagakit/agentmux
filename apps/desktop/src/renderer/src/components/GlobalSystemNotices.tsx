@@ -1,4 +1,4 @@
-import { isImeOwnedKeyboardEvent } from '@agentmux/client-ui/ime-keyboard-event'
+import { Tabs } from '@agentmux/client-ui/components/Tabs'
 import { getModalOverlayContainer, ModalAttachmentDismissal } from '@agentmux/client-ui/components/Modal'
 import { useWorkbenchDocument } from '../lib/workbench-document'
 import { useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type RefObject } from 'react'
@@ -494,20 +494,13 @@ export function GlobalSystemNotices({ nativeOverlayWarning }: { nativeOverlayWar
       {open ? <>
         <div className="global-system-notices__heading">
           <strong>Notifications</strong>
-          <div className="global-system-notices__tabs" role="tablist" aria-label="Notification view">
-            {([['current', 'Current', currentCount], ['history', 'Activity', projection.history.length]] as const).map(([value, label, total]) =>
-              <button type="button" key={value} role="tab" id={`${id}-${value}`} aria-selected={section === value}
-                aria-controls={`${id}-content`} tabIndex={section === value ? 0 : -1} data-section={value}
-                onClick={() => setSection(value)} onKeyDown={event => {
-                  if (isImeOwnedKeyboardEvent(event)) return
-                  const next = event.key === 'Home' ? 'current' : event.key === 'End' ? 'history'
-                    : event.key === 'ArrowLeft' || event.key === 'ArrowRight' ? value === 'current' ? 'history' : 'current' : undefined
-                  if (!next) return
-                  event.preventDefault()
-                  setSection(next)
-                  document.getElementById(`${id}-${next}`)?.focus()
-                }}>{label}<span>{total}</span></button>)}
-          </div>
+          <Tabs className="global-system-notices__tabs" aria-label="Notification view" value={section} onValueChange={setSection}
+            options={([['current', 'Current', currentCount], ['history', 'Activity', projection.history.length]] as const).map(([value, label, total]) => ({
+              value,
+              panelId: `${id}-content`,
+              button: { id: `${id}-${value}`, 'data-section': value },
+              label: <>{label}<span>{total}</span></>
+            }))} />
           <button type="button" className="icon-button" aria-label="Collapse system notifications" title="Close notifications"
             popoverTarget={id} popoverTargetAction="hide"><ThemeNavigationCollapseIcon size={16} /></button>
         </div>

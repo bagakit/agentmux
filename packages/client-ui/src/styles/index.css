@@ -3,6 +3,7 @@
 @import './overlays.css';
 @import '../input/input.css';
 @import './buttons.css';
+@import './segmented-control.css';
 @import './theme-transition.css';
 @import './native-controls.css';
 @import './semantic-icons.css';
