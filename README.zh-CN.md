@@ -76,7 +76,7 @@ Agent 之间的消息沿用同一套模型：每封消息有独立身份，每�
 
 ### 布局与执行分开
 
-Agent 显示在哪里（Space › Zone › Tab › Region）和正在执行什么（AgentSession / Run）是两套身份。把 Agent 拖到另一个 Tab、放进独立窗口，或把一个 Tab 排成 `grid-4`，改变的只是布局；Session、Run、Host 和工作目录都不变，Agent 也不会停。空间图由 Core 持有，脚本和 Agent 不开 GUI 也能读写：
+Agent 放在哪里（Space › Zone › Tab › Region）和正在执行什么（AgentSession / Run）是两套身份。把 Agent 拖到另一个 Tab、放进独立窗口，或把一个 Tab 排成 `grid-4`，改变的只是布局；Session、Run、Host 和工作目录都不变，Agent 也不会停。空间图由 Core 持有，脚本和 Agent 不开 GUI 也能读写：
 
 ```sh
 amux space mv --from-region '<region-id>' --expect-session '<session-id>' --zone '<zone-id>' --new-tab
@@ -121,7 +121,7 @@ Desktop 把视图分成三组：Work（Space、Focus、Goals）、Know（Survey�
 <td width="33%" valign="top">
 <img src="docs/assets/readme/art-space-workchamber.webp" alt="Space" width="100%"><br>
 <b>Space</b><br>
-<sub>Zone 可以绑定目录、Git worktree 或 Topic。一个 Tab 是一张完整工作面，按分割树拆成多个 Region，放 Agent、终端、文件、浏览器，或用来开始新工作的 Launcher。布局在重启后保留。<br><a href="docs/design/behavior/spaces-and-layout.md#空间模型">空间模型</a></sub>
+<sub>Zone 可以绑定目录或 Git worktree；知识库里的每个 Topic 本身就是一个 Zone。一个 Tab 是一张完整工作面，按分割树拆成多个 Region，放 Agent、终端、文件、浏览器，或用来开始新工作的 Launcher。布局在重启后保留。<br><a href="docs/design/behavior/spaces-and-layout.md#空间模型">空间模型</a></sub>
 </td>
 <td width="33%" valign="top">
 <img src="docs/assets/readme/art-focus-workframe.webp" alt="Focus" width="100%"><br>
@@ -181,13 +181,15 @@ Desktop 把视图分成三组：Work（Space、Focus、Goals）、Know（Survey�
 
 **Mote** 是有人格的团队。Agent 承担具体任务，Mote 承担长期职责，它的身份独立于任何一次 Session；在里面实际干活的 Agent 各自保留自己的身份。Mote 的人格、行为偏好和记忆索引写在可读可改的 `SOUL.md`、`BEHAVIOR.md`、`MEMORY.md` 里，每次新 Session 启动时载入。
 
+Mote 主动做事，不是一问一答。它的主 Agent 默认每 30 分钟心跳一次：检查主对话、成员工作、目标、待定的决定和没兑现的承诺，在已授权的范围内接着推进，没有变化就不出声。耗时或并行的活交给成员 Agent，成员的结果和你在 Mote 里直接发给成员的指令都会回到主 Agent；需要盯一件事时，它给自己安排有期限的回看，值得长期推进的事整理成 Goal 交你确认。正在实现的下一步：让它感知所在私聊、群和本地环境里发生的事，把不同来源串起来转成任务，有结果或需要你决定时经机器人私聊找你；合入、发布这类有外部后果的动作，仍先取得你的确认。
+
 Mote 可以从画像开始，比如内置的 PMO，或者新建一个 Mote 再自己写它的 `SOUL.md`；也可以从已有工作中来：某个 Topic 变得重要、持续或高频时，把它晋升为 Mote。晋升会带上 Topic 的知识、讨论、产出、成员 Agent 和工作面，不重启任何 Agent；晋升中断时，用同一个 operation ID 显式接续。
 
 </td>
 </tr>
 </table>
 
-> 见 [伙伴从哪里来](docs/design/behavior/companions-from-work.md) · [Mote 合同](docs/design/behavior/motes-and-coordination.md)
+> 见 [伙伴从哪里来](docs/design/behavior/companions-from-work.md) · [Mote 合同](docs/design/behavior/motes-and-coordination.md) · [主动感知与外部沟通](docs/design/behavior/motes-and-coordination.md#主动感知与外部沟通)
 
 ### 工具
 
@@ -201,8 +203,8 @@ Mote 可以从画像开始，比如内置的 PMO，或者新建一个 Mote 再�
 | **定时任务** | 在指定日历时间（单次、每天、每周、每月、每年）、倒计时结束后或每隔 N 分钟，给 Agent 发一条 Prompt。属于某个 Mote 范围的安排会显示在它的日历里。App 关闭或 Mac 休眠期间不保证送达。 | [`schedule` 指南](packages/core/guides/modules/schedule.md) |
 | **Capsule** | Agent 做出的页面会成为持久成果，固定在一个本地地址上；重启之后，你和 Agent 仍能打开同一个页面。 | [Capsule PRD](docs/design/behavior/local-page-hosting.md) · [`@agentmux/capsule`](packages/capsule/README.md) |
 | **Toolkit** | 在状态栏放自己的脚本、动作按钮和结果视图。保存或查看工具不会执行脚本。官方 Performance 面板本身也是一个 Toolkit，所有数据都经公开 CLI 读取。 | [Toolkit](docs/design/behavior/settings-and-observation.md#toolkit-与官方-performance-工具) |
-| **连接器** | 把 Agent 对话接入飞书和 Discord（当前内置的两个适配器），收发消息、文件、问题和权限确认。Core 不依赖这个可选包。 | [`@agentmux/connectors`](packages/connectors/README.md) |
-| **应用授权同步** | 通过你配置的命令连接器，比较某个应用在两台机器上的账户授权，单向复制过去，再确认目标机能用。手动执行，一次一个应用。 | [应用授权同步](docs/design/behavior/remote-application-access.md) |
+| **连接器** | 把 Agent 对话接入飞书 / Lark 和 Discord 群（当前内置的两个适配器）。回复、文件、问题和权限确认可以发到群里，群消息也能作为输入回到 Agent；入站图片和附件还没有完整支持。Core 不依赖这个可选包。 | [`@agentmux/connectors`](packages/connectors/README.md) |
+| **应用授权同步** | 通过你配置的命令连接器，比较某个应用在两台机器上的账户授权，单向复制过去，再确认目标机能用。手动执行，一次一个应用；目前只有桌面应用提供，headless Host 不提供。 | [应用授权同步](docs/design/behavior/remote-application-access.md) |
 | **文件与 Git** | 浏览、编辑、预览工作目录里的文件，查看差异，管理工作区与 worktree。 | [文件与 Git](docs/design/behavior/files-and-git.md) |
 | **Mobile** | 手机和 Mac 在同一 Wi-Fi 下扫码接入，经 Mac 自带的端到端加密局域网 Relay 继续已有 Agent 的对话、观看终端。Agent 和历史仍留在 Mac 上。 | [AgentMux Mobile](apps/mobile/README.md) |
 
@@ -225,7 +227,7 @@ Mote 可以从画像开始，比如内置的 PMO，或者新建一个 Mote 再�
 | **AgentMux Core** | Provider、AgentSession、Hook、Permission、readiness、语义恢复，以及与前端无关的空间身份、拓扑和绑定 |
 | **Desktop / client** | 屏幕呈现、焦点、宿主编辑、文件、Git 与 Browser 能力；通过 Core 操作 Agent |
 
-Core 不依赖 Electron、React 或任何编辑器实现。三类身份严格区分：Space / Zone / Tab / Region 是**展示位置**，Project / Workspace 是**资源与工作目录**，AgentSession / Run 是**执行身份**。完整定义见 [概念词典](docs/design/behavior/spaces-and-layout.md#统一概念与空间寻址)，源码机制见 [系统职责地图](docs/architecture/system-ownership.md)。
+Core 不依赖 Electron、React 或任何编辑器实现。三类身份严格区分：Space / Zone / Tab / Region 是**空间身份**，Project / Workspace 是**资源与工作目录**，AgentSession / Run 是**执行身份**。完整定义见 [概念词典](docs/design/behavior/spaces-and-layout.md#统一概念与空间寻址)，源码机制见 [系统职责地图](docs/architecture/system-ownership.md)。
 
 CLI、手机端和你自己的程序调用 Core 的公开 JSON-RPC 服务；Desktop 经可信 IPC 复用同一批业务 owner，所以 GUI 和 CLI 读到的是同一份事实。把所有能力都收到这一个公共服务上，是架构目标。
 
@@ -360,7 +362,7 @@ amux agent send --to-session '<session-id>' --text '继续验证这项修改'
 amux agent broadcast --to-sessions '<sid-a>,<sid-b>' --text '同步一下进度'
 ```
 
-后续操作使用创建回执返回的 Session 与空间地址，不要从名称或焦点猜测目标。回执丢失时，先用原 `operation-id` 查询这次操作，不要重建 Agent 或重发首任务。完整命令见 [对象操作指南](docs/guides/agentmux-cli-object-control.md)，准确参数以所执行版本的 `--help` / `--skill` 为准。
+后续操作使用创建回执返回的 Session 与空间地址，不要从名称或焦点猜测目标。回执丢失时，先用原 `operation-id` 查询这次操作，不要重建 Agent 或重发首任务。命令和准确参数以所执行版本的 `--help` / `--skill` 为准，它们提供的就是 [Core 指南](packages/core/guides/README.md)。委派方式和 Agent 打开位置怎么选，见 [Delegation and opening playbook](packages/core/guides/shared/spatial.md#delegation-and-opening-playbook-advisory)。
 
 ## 仓库结构
 
@@ -431,4 +433,4 @@ CI 的定义见 [`.github/workflows`](.github/workflows)：Verify 在 ubuntu-24.
 
 仓库根目前没有统一的开源许可证，各包的许可以其 `package.json` 为准：9 个可发布包为 `UNLICENSED`，`packages/relay` 为 Apache-2.0，`apps/*` 与 `packages/client-ui` 为未声明许可的私有包。
 
-部分实现改编自或参考了 Orca（MIT）、Shotback（MIT）与 [Paseo](https://github.com/getpaseo/paseo)（Apache-2.0），并使用了 fs-native-extensions（Apache-2.0）与 resvg-js（MPL-2.0）。上游版本与改动见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) 与 `packages/relay/NOTICE`；Desktop 随附的 draw.io viewer 许可见 [`apps/desktop/vendor/drawio`](apps/desktop/vendor/drawio/v32.4.1/LICENSE)。
+部分实现改编自或参考了 Orca（MIT）、Shotback（MIT）与 [Paseo](https://github.com/getpaseo/paseo)（Apache-2.0），并使用了 fs-native-extensions（Apache-2.0）与 resvg-js（MPL-2.0）。上游版本与改动见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) 与 `packages/relay/NOTICE`；Desktop 随附的 draw.io viewer 许可见 [`packages/editor-extensions/vendor/drawio`](packages/editor-extensions/vendor/drawio/v32.4.1/LICENSE)。

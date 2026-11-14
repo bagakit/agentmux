@@ -26,7 +26,7 @@ and they can operate the workbench themselves through the `amux` CLI.**
 ---
 
 > [!NOTE]
-> AgentMux is in active development and has no published release yet. The desktop app currently has to be [built from source](#quick-start) on an Apple Silicon Mac. The design and engineering docs are written in Chinese.
+> AgentMux is in active development and has no published release yet. The desktop app currently has to be [built from source](#quick-start) on an Apple Silicon Mac. Most design and engineering docs under `docs/` are written in Chinese. The agent guides are in English, and package READMEs use either language; the Core README is in Chinese.
 
 ## What AgentMux is
 
@@ -76,7 +76,7 @@ Agent-to-agent messages use the same model. Each message has its own identity an
 
 ### Layout is separate from execution
 
-Where an agent is shown (Space › Zone › Tab › Region) and what is executing (AgentSession / Run) are separate identities. Dragging an agent into another tab, popping it into its own window or arranging a tab as `grid-4` changes only the layout. The Session, Run, host and working directory stay the same, and the agent keeps running. Core owns the spatial graph, so scripts and agents can read and change it without a GUI:
+Where an agent is placed (Space › Zone › Tab › Region) and what is executing (AgentSession / Run) are separate identities. Dragging an agent into another tab, popping it into its own window or arranging a tab as `grid-4` changes only the layout. The Session, Run, host and working directory stay the same, and the agent keeps running. Core owns the spatial graph, so scripts and agents can read and change it without a GUI:
 
 ```sh
 amux space mv --from-region '<region-id>' --expect-session '<session-id>' --zone '<zone-id>' --new-tab
@@ -121,7 +121,7 @@ The desktop app groups its views into Work (Space, Focus, Goals), Know (Survey, 
 <td width="33%" valign="top">
 <img src="docs/assets/readme/art-space-workchamber.webp" alt="Space" width="100%"><br>
 <b>Space</b><br>
-<sub>A Zone binds a folder, a Git worktree or a Topic. Each Tab is one workface, split into Regions that hold agents, terminals, files, browsers or a Launcher for starting new work. The layout survives restarts.<br><a href="docs/design/behavior/spaces-and-layout.md#空间模型">Spatial model</a></sub>
+<sub>A Zone binds a folder or a Git worktree; in the knowledge base, each Topic is itself a Zone. Each Tab is one workface, split into Regions that hold agents, terminals, files, browsers or a Launcher for starting new work. The layout survives restarts.<br><a href="docs/design/behavior/spaces-and-layout.md#空间模型">Spatial model</a></sub>
 </td>
 <td width="33%" valign="top">
 <img src="docs/assets/readme/art-focus-workframe.webp" alt="Focus" width="100%"><br>
@@ -181,13 +181,15 @@ You can also distill a reusable practice from a real agent session, revise it an
 
 A **Mote** is a team with a persona. Agents take on individual tasks; a Mote takes on a standing responsibility, and its identity outlives any single session. The agents doing the work inside it keep their own identities. The Mote's persona, behavior preferences and memory index are readable, editable files (`SOUL.md`, `BEHAVIOR.md`, `MEMORY.md`) loaded whenever a new session starts.
 
+A Mote acts on its own instead of waiting to be asked. Its main agent runs a heartbeat, every 30 minutes by default: it checks the main conversation, member work, goals, pending decisions and open commitments, continues work it is already authorized to do, and stays quiet when nothing has changed. Long or parallel work goes to member agents; their results, and instructions you send a member from the Mote, flow back to the main agent. To keep an eye on something, it schedules itself a bounded check-back, and work worth sustained effort becomes a Goal for you to confirm. In progress: sensing what happens in the chats, groups and local environment it can reach, connecting those sources into tasks, and messaging you through its bot when there is a result or a decision for you. Actions with outside consequences, such as merging or publishing, still wait for your confirmation.
+
 A Mote can start from a profile, such as the built-in PMO or a new Mote whose `SOUL.md` you write yourself. It can also grow out of existing work: when a Topic becomes important, ongoing or frequent, promote it. Promotion carries over the Topic's knowledge, discussions, outputs, member agents and workface without restarting any agent. If a promotion is interrupted, continue it explicitly with the same operation ID.
 
 </td>
 </tr>
 </table>
 
-> See [Where partners come from](docs/design/behavior/companions-from-work.md) · [Mote contract](docs/design/behavior/motes-and-coordination.md)
+> See [Where partners come from](docs/design/behavior/companions-from-work.md) · [Mote contract](docs/design/behavior/motes-and-coordination.md) · [Proactive sensing and outreach](docs/design/behavior/motes-and-coordination.md#主动感知与外部沟通)
 
 ### Tools
 
@@ -201,8 +203,8 @@ A Mote can start from a profile, such as the built-in PMO or a new Mote whose `S
 | **Schedules** | Send an agent a prompt at a calendar time (once, daily, weekly, monthly or yearly), after a countdown, or every N minutes. Arrangements within a Mote's scope show up in its calendar. Delivery while the app is closed or the Mac is asleep isn't guaranteed. | [`schedule` guide](packages/core/guides/modules/schedule.md) |
 | **Capsule** | A page an agent builds becomes a durable artifact on a fixed local address, so you and the agent can still open the same page after a restart. | [Capsule PRD](docs/design/behavior/local-page-hosting.md) · [`@agentmux/capsule`](packages/capsule/README.md) |
 | **Toolkit** | Put your own scripts, action buttons and result views in the status bar. Saving or viewing a tool doesn't run its script. The built-in Performance panel is itself a Toolkit that reads everything through the public CLI. | [Toolkit](docs/design/behavior/settings-and-observation.md#toolkit-与官方-performance-工具) |
-| **Connectors** | Bring agent conversations into Feishu and Discord (the two built-in adapters): messages, files, questions and permission prompts. Core doesn't depend on this optional package. | [`@agentmux/connectors`](packages/connectors/README.md) |
-| **Application access sync** | With a command connector you configure, compare one application's account authorization between two machines and copy it one way, then check that the target can use it. It runs manually, one application at a time. | [Application access sync](docs/design/behavior/remote-application-access.md) |
+| **Connectors** | Connect agent conversations to Lark/Feishu and Discord groups (the two built-in adapters). Replies, files, questions and permission prompts go out; group messages come back in as input, though inbound images and attachments are not fully supported yet. Core doesn't depend on this optional package. | [`@agentmux/connectors`](packages/connectors/README.md) |
+| **Application access sync** | With a command connector you configure, compare one application's account authorization between two machines and copy it one way, then check that the target can use it. It runs manually, one application at a time, and is currently available only in the desktop app, not the headless Host. | [Application access sync](docs/design/behavior/remote-application-access.md) |
 | **Files and Git** | Browse, edit and preview files in the working directory, review diffs, and manage workspaces and worktrees. | [Files and Git](docs/design/behavior/files-and-git.md) |
 | **Mobile** | On the same Wi-Fi as the Mac, scan a code on your phone to continue existing agents' conversations or watch their terminals over the Mac's end-to-end encrypted local Relay. Agents and history stay on the Mac. | [AgentMux Mobile](apps/mobile/README.md) |
 
@@ -225,7 +227,7 @@ A Mote can start from a profile, such as the built-in PMO or a new Mote whose `S
 | **AgentMux Core** | Providers, AgentSession, Hooks, Permission, readiness, semantic recovery, and frontend-independent spatial identity, topology and bindings |
 | **Desktop / client** | Screen presentation, focus, host editing, files, Git and browser capabilities; operates agents through Core |
 
-Core doesn't depend on Electron, React or any editor. Three kinds of identity stay separate: Space / Zone / Tab / Region is **presentation**, Project / Workspace is **resources and working directory**, and AgentSession / Run is **execution**. Full definitions live in the [concept glossary](docs/design/behavior/spaces-and-layout.md#统一概念与空间寻址); the source-level map is [system ownership](docs/architecture/system-ownership.md).
+Core doesn't depend on Electron, React or any editor. Three kinds of identity stay separate: Space / Zone / Tab / Region is **spatial identity**, Project / Workspace is **resources and working directory**, and AgentSession / Run is **execution**. Full definitions live in the [concept glossary](docs/design/behavior/spaces-and-layout.md#统一概念与空间寻址); the source-level map is [system ownership](docs/architecture/system-ownership.md).
 
 The CLI, mobile client and your own programs call Core's public JSON-RPC service. The desktop app reuses the same business owners over trusted IPC, so the GUI and the CLI read the same facts. Moving every capability onto that one public service is the architectural target.
 
@@ -360,7 +362,7 @@ amux agent send --to-session '<session-id>' --text 'Keep verifying this change'
 amux agent broadcast --to-sessions '<sid-a>,<sid-b>' --text 'Sync your progress'
 ```
 
-Follow-up operations use the Session and spatial address from the creation receipt, not a name or the current focus. If a receipt is lost, query the original `operation-id` first; don't recreate the agent or resend the first task. The full command guide is [object operations](docs/guides/agentmux-cli-object-control.md). Exact arguments come from `--help` / `--skill` of the version you run.
+Follow-up operations use the Session and spatial address from the creation receipt, not a name or the current focus. If a receipt is lost, query the original `operation-id` first; don't recreate the agent or resend the first task. Commands and exact arguments come from `--help` / `--skill` of the version you run, which serve the [Core guides](packages/core/guides/README.md). For choosing how to delegate and where to open an agent, see the [delegation and opening playbook](packages/core/guides/shared/spatial.md#delegation-and-opening-playbook-advisory).
 
 ## Repository layout
 
@@ -431,4 +433,4 @@ Feature descriptions in this README are based on confirmed product design and so
 
 There is no repository-wide open-source license yet; each package's license is the one in its `package.json`: the 9 publishable packages are `UNLICENSED`, `packages/relay` is Apache-2.0, and `apps/*` and `packages/client-ui` are private packages without a declared license.
 
-Parts of the implementation are adapted from or informed by Orca (MIT), Shotback (MIT) and [Paseo](https://github.com/getpaseo/paseo) (Apache-2.0), and use fs-native-extensions (Apache-2.0) and resvg-js (MPL-2.0). Upstream versions and changes are listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and `packages/relay/NOTICE`; the draw.io viewer bundled with the desktop app is licensed as described in [`apps/desktop/vendor/drawio`](apps/desktop/vendor/drawio/v32.4.1/LICENSE).
+Parts of the implementation are adapted from or informed by Orca (MIT), Shotback (MIT) and [Paseo](https://github.com/getpaseo/paseo) (Apache-2.0), and use fs-native-extensions (Apache-2.0) and resvg-js (MPL-2.0). Upstream versions and changes are listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and `packages/relay/NOTICE`; the draw.io viewer bundled with the desktop app is licensed as described in [`packages/editor-extensions/vendor/drawio`](packages/editor-extensions/vendor/drawio/v32.4.1/LICENSE).

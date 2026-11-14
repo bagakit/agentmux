@@ -78,7 +78,7 @@ The source in `packages/relay` includes code from Paseo, copyright (c) 2025-pres
 
 ## draw.io viewer
 
-The desktop app bundles the official draw.io 32.4.1 viewer distribution, unmodified, to preview `.drawio` files. The viewer is licensed under Apache License 2.0; its full text is retained in [`apps/desktop/vendor/drawio/v32.4.1/LICENSE`](apps/desktop/vendor/drawio/v32.4.1/LICENSE). Its icon sets and stencil libraries carry additional upstream use restrictions, retained in the `img`, `shapes` and `stencils` LICENSE files of the same directory.
+The desktop app bundles the official draw.io 32.4.1 viewer distribution, unmodified, to preview `.drawio` files. The viewer is licensed under Apache License 2.0; its full text is retained in [`packages/editor-extensions/vendor/drawio/v32.4.1/LICENSE`](packages/editor-extensions/vendor/drawio/v32.4.1/LICENSE). Its icon sets and stencil libraries carry additional upstream use restrictions, retained in the `img`, `shapes` and `stencils` LICENSE files of the same directory.
 
 
 ## Editor reading engines
