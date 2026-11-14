@@ -1,3 +1,4 @@
+import { requestDesktopSettingsNavigation } from '../../../src/renderer/src/lib/desktop-presentation'
 import '../focus-composable-filters/entry.mjs'
 import { folderSpaceFacts } from '@agentmux/core/space-folder'
 import { formatSpaceAddress } from '@agentmux/core/sharing'
@@ -106,6 +107,8 @@ api.sessions.snapshot = snapshot
 useAppStore.setState(arranged, true)
 let preserved
 window.appearanceProof = {
+  settings: requestDesktopSettingsNavigation,
+  selectionPreferences() { return useAppStore.getState().config.focus },
   remember() { preserved = useAppStore.getState() },
   copiedInputs, collectionKey,
   projectAddress(id) { const matches=arranged.config.workspaces.filter(p=>p.id===id);if(matches.length!==1)throw Error('Exact original fixture Project required');return formatSpaceAddress({spaceId:folderSpaceFacts(matches[0]).space.spaceId}) },
