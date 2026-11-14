@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
+import { fileURLToPath } from 'node:url'
 
 const exec = promisify(execFile)
 
@@ -172,58 +173,14 @@ export function snapshotApplicationProcesses(psStdout, bundle, { nodeModes = [],
     processes: rows.map(({ pid, ppid, birth }) => ({ pid, ppid, birth })) }
 }
 
-// KERN_PROCARGS2 separates argc/argv from the actual environment. The selected
-// key is the only environment value returned; neither argv nor full env leaves
-// this bounded child. ps birth/UID observations fence each kernel read.
-const NODE_MODE_SOURCE = String.raw`
-import ctypes,json,os,re,struct,subprocess,sys
-lib=ctypes.CDLL('/usr/lib/libSystem.B.dylib',use_errno=True)
-pids=[int(p) for p in sys.argv[1:]]
-def identities():
- result=subprocess.run(['/bin/ps','-p',','.join(map(str,pids)),'-o','uid=,pid=,ppid=,lstart='],capture_output=True,text=True,env={**os.environ,'LC_ALL':'C'})
- if result.returncode not in (0,1):raise RuntimeError('identity unavailable')
- rows={}
- for line in result.stdout.splitlines():
-  m=re.fullmatch(r'\s*(\d+)\s+(\d+)\s+(\d+)\s+(.+?)\s*',line)
-  if not m:raise RuntimeError('invalid identity')
-  rows[int(m[2])]={'pid':int(m[2]),'ppid':int(m[3]),'uid':int(m[1]),'birth':' '.join(m[4].split())}
- return rows
-def read_mode(pid):
- size=ctypes.c_size_t(); maximum=ctypes.c_int(); size.value=ctypes.sizeof(maximum)
- if lib.sysctl((ctypes.c_int*2)(1,8),2,ctypes.byref(maximum),ctypes.byref(size),None,0)!=0:raise RuntimeError('argmax unavailable')
- if not 0<maximum.value<=2*1024*1024:raise RuntimeError('argmax out of bound')
- buf=ctypes.create_string_buffer(maximum.value);size.value=maximum.value
- if lib.sysctl((ctypes.c_int*3)(1,49,pid),3,buf,ctypes.byref(size),None,0)!=0:raise RuntimeError('process mode unavailable')
- raw=buf.raw[:size.value];argc=struct.unpack_from('i',raw)[0]; offset=4
- if not 0<=argc<=65536:raise RuntimeError('argc unavailable')
- def string():
-  nonlocal offset
-  end=raw.index(b'\0',offset);value=raw[offset:end];offset=end+1;return value
- executable=os.path.realpath(string().decode('utf-8'))
- while offset<len(raw) and raw[offset]==0:offset+=1
- for _ in range(argc):string()
- selected=[]
- while offset<len(raw):
-  entry=string()
-  if entry.startswith(b'ELECTRON_RUN_AS_NODE='):selected.append(entry.split(b'=',1)[1])
- return {'mode':'node' if selected==[b'1'] else 'gui' if not selected else 'unknown','executable':executable}
-before=identities(); observations={}
-for pid in pids:
- try:observations[pid]=read_mode(pid)
- except Exception:observations[pid]={'mode':'unknown'}
-after=identities();result=[]
-for pid in pids:
- identity=after.get(pid)
- if identity is not None:result.append({**identity,**(observations[pid] if before.get(pid)==identity and identity['uid']==os.getuid() else {'mode':'unknown'})})
-print(json.dumps(result))
-`
 
 async function electronNodeModes(pids) {
   if (!pids.length) return []
   try {
     // A slow OS observation is not an unknown owner; wait for its fenced result.
-    const result = await exec('/usr/bin/python3', ['-c', NODE_MODE_SOURCE, ...pids.map(String)],
-      { maxBuffer: 256 * 1024 })
+    const result = await exec(process.execPath,
+      [fileURLToPath(new URL('./package-native-observation.mjs', import.meta.url)), '--node-modes', ...pids.map(String)],
+      { maxBuffer: 256 * 1024, env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' } })
     return JSON.parse(result.stdout)
   } catch { return [] } // Unknown stays protected. It is not proof of process exit.
 }

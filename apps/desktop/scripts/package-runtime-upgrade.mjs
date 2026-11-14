@@ -11,6 +11,7 @@ import { probeSocketLiveness } from '../../../packages/core/src/socket-liveness.
 
 const exec = promisify(execFile)
 const script = fileURLToPath(import.meta.url)
+const nativeObservation = fileURLToPath(new URL('./package-native-observation.mjs', import.meta.url))
 const coreRelative = 'Contents/Resources/app/node_modules/@agentmux/core'
 const capability = 'services.planned_exec_upgrade_continuity'
 const hash = (bytes) => createHash('sha256').update(bytes).digest('hex')
@@ -39,74 +40,10 @@ async function artifact(app) {
   return runtimeArtifact(join(app, coreRelative))
 }
 
-// Security.framework supplies the selected architecture's CodeDirectory hash.
-// CF Create/Copy owners are released independently; dictionary values are borrowed.
-const STATIC_CODE_IDENTITY_SOURCE = String.raw`
-import ctypes,json,sys
-cf=ctypes.CDLL('/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation')
-sec=ctypes.CDLL('/System/Library/Frameworks/Security.framework/Security')
-ptr=ctypes.c_void_p; index=ctypes.c_long
-def function(lib,name,result,arguments):
- value=getattr(lib,name); value.restype=result; value.argtypes=arguments; return value
-url_create=function(cf,'CFURLCreateFromFileSystemRepresentation',ptr,[ptr,ctypes.POINTER(ctypes.c_uint8),index,ctypes.c_ubyte])
-string_create=function(cf,'CFStringCreateWithCString',ptr,[ptr,ctypes.c_char_p,ctypes.c_uint32])
-dictionary_create=function(cf,'CFDictionaryCreate',ptr,[ptr,ctypes.POINTER(ptr),ctypes.POINTER(ptr),index,ptr,ptr])
-dictionary_value=function(cf,'CFDictionaryGetValue',ptr,[ptr,ptr])
-type_id=function(cf,'CFGetTypeID',ctypes.c_ulong,[ptr])
-dictionary_type=function(cf,'CFDictionaryGetTypeID',ctypes.c_ulong,[])
-data_type=function(cf,'CFDataGetTypeID',ctypes.c_ulong,[])
-data_length=function(cf,'CFDataGetLength',index,[ptr])
-data_bytes=function(cf,'CFDataGetBytePtr',ctypes.POINTER(ctypes.c_uint8),[ptr])
-release=function(cf,'CFRelease',None,[ptr])
-create_code=function(sec,'SecStaticCodeCreateWithPathAndAttributes',ctypes.c_int32,[ptr,ctypes.c_uint32,ptr,ctypes.POINTER(ptr)])
-check_code=function(sec,'SecStaticCodeCheckValidity',ctypes.c_int32,[ptr,ctypes.c_uint32,ptr])
-copy_info=function(sec,'SecCodeCopySigningInformation',ctypes.c_int32,[ptr,ctypes.c_uint32,ctypes.POINTER(ptr)])
-arch_key=ptr.in_dll(sec,'kSecCodeAttributeArchitecture').value
-unique_key=ptr.in_dll(sec,'kSecCodeInfoUnique').value
-owners=[]; cleanup=[]; calls=[]; result=None; primary=None
-def own(name,value):
- if not value:raise RuntimeError(name+' returned no object')
- owners.append((name,value)); return value
-def status(name,value):
- calls.append({'api':name,'status':value})
- if value!=0:raise RuntimeError(name+' OSStatus='+str(value))
-try:
- architecture=sys.argv[1]; encoded=b'/dev/fd/3'
- buffer=(ctypes.c_uint8*len(encoded)).from_buffer_copy(encoded)
- url=own('file-url',url_create(None,buffer,len(encoded),False))
- arch=own('architecture-string',string_create(None,architecture.encode('ascii'),0x08000100))
- keys,values=(ptr*1)(arch_key),(ptr*1)(arch)
- attributes=own('architecture-attributes',dictionary_create(None,keys,values,1,None,None))
- static=ptr()
- status('SecStaticCodeCreateWithPathAndAttributes',create_code(url,0,attributes,ctypes.byref(static)))
- own('static-code',static.value)
- status('SecStaticCodeCheckValidity',check_code(static,0,None))
- info=ptr()
- status('SecCodeCopySigningInformation',copy_info(static,0,ctypes.byref(info)))
- own('signing-information',info.value)
- if type_id(info)!=dictionary_type():raise RuntimeError('Signing information is not a CFDictionary')
- digest=dictionary_value(info,unique_key)
- if not digest or type_id(digest)!=data_type():raise RuntimeError('kSecCodeInfoUnique is not CFData')
- size=data_length(digest)
- if size!=20:raise RuntimeError('Code identity length is not the current kernel CDHASH width: '+str(size))
- raw=data_bytes(digest)
- if not raw:raise RuntimeError('CFData returned no bytes')
- result={'kind':'security-static-code','architecture':architecture,'dictionaryKey':'kSecCodeInfoUnique',
-  'dataType':'CFData','byteLength':size,'cdHash':ctypes.string_at(raw,size).hex(),'valid':True}
-except Exception as error:
- primary={'name':type(error).__name__,'message':str(error)}
-finally:
- for name,value in reversed(owners):
-  try:
-   release(value); cleanup.append({'owner':name,'released':True})
-  except Exception as error:
-   cleanup.append({'owner':name,'released':False,'error':{'name':type(error).__name__,'message':str(error)}})
-print(json.dumps({'result':result,'primary':primary,'calls':calls,'cleanup':cleanup}))
-`
 
 async function staticCodeRead(image, architecture) {
-  const child = spawn('/usr/bin/python3', ['-I', '-c', STATIC_CODE_IDENTITY_SOURCE, architecture],
-    { stdio: ['ignore', 'pipe', 'pipe', image.fd] })
+  const child = spawn(process.execPath, [nativeObservation, '--static-code', architecture],
+    { stdio: ['ignore', 'pipe', 'pipe', image.fd], env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' } })
   const receipt = { originalPid: child.pid ?? null, exitConfirmed: false, code: null, signal: null,
     interruption: null, signals: [], errors: [], observerCleanup: [] }
   let stdout = '', stderr = '', timer, grace, unknown, settled = false
@@ -220,44 +157,9 @@ async function artifactCodeIdentity(path, expectedSHA) {
   return cdHash
 }
 
-// Reuse the installer's bounded Python/libSystem bridge. csops STATUS and
-// CDHASH and libproc BSD starttime are read-only kernel queries; no process
-// memory, argv or env leaves. proc_bsdinfo follows Darwin SDK sys/proc_info.h;
-// pid/uid/starttime fence csops in this same observation, without display dates.
-const CODE_IDENTITY_SOURCE = String.raw`
-import ctypes,json,sys
-lib=ctypes.CDLL('/usr/lib/libSystem.B.dylib',use_errno=True)
-lib.csops.argtypes=[ctypes.c_int,ctypes.c_uint,ctypes.c_void_p,ctypes.c_size_t]
-lib.csops.restype=ctypes.c_int
-class ProcBSDInfo(ctypes.Structure):
- _fields_=[(name,ctypes.c_uint32) for name in ('pbi_flags','pbi_status','pbi_xstatus','pbi_pid','pbi_ppid','pbi_uid','pbi_gid','pbi_ruid','pbi_rgid','pbi_svuid','pbi_svgid','rfu_1')]+[
-  ('pbi_comm',ctypes.c_char*16),('pbi_name',ctypes.c_char*32)]+[
-  (name,ctypes.c_uint32) for name in ('pbi_nfiles','pbi_pgid','pbi_pjobc','e_tdev','e_tpgid')]+[
-  ('pbi_nice',ctypes.c_int32),('pbi_start_tvsec',ctypes.c_uint64),('pbi_start_tvusec',ctypes.c_uint64)]
-proc=ctypes.CDLL('/usr/lib/libproc.dylib',use_errno=True)
-proc.proc_pidinfo.argtypes=[ctypes.c_int,ctypes.c_int,ctypes.c_uint64,ctypes.c_void_p,ctypes.c_int]
-proc.proc_pidinfo.restype=ctypes.c_int
-pid=int(sys.argv[1]); status=ctypes.c_uint32(); digest=ctypes.create_string_buffer(20)
-def process_identity():
- value=ProcBSDInfo()
- if proc.proc_pidinfo(pid,3,0,ctypes.byref(value),ctypes.sizeof(value))!=ctypes.sizeof(value):raise OSError(ctypes.get_errno(),'kernel process identity unavailable')
- if value.pbi_pid!=pid or not value.pbi_start_tvsec or value.pbi_start_tvusec>=1000000:raise RuntimeError('kernel process identity is invalid')
- return (value.pbi_pid,value.pbi_uid,value.pbi_start_tvsec,value.pbi_start_tvusec)
-def read(op,value):
- if lib.csops(pid,op,ctypes.byref(value),ctypes.sizeof(value))!=0:raise OSError(ctypes.get_errno(),'kernel code identity unavailable')
-before=process_identity()
-read(0,status)
-if not status.value&1:raise RuntimeError('Runtime code signature is invalid')
-read(5,digest)
-read(0,status)
-if not status.value&1:raise RuntimeError('Runtime code signature became invalid')
-after=process_identity()
-if before!=after:raise RuntimeError('Runtime process changed during kernel code observation')
-print(json.dumps({'pid':after[0],'uid':after[1],'startSeconds':str(after[2]),'startMicroseconds':after[3],'cdHash':digest.raw.hex(),'valid':True}))
-`
 async function kernelOwnerIdentity(pid, selected) {
-  const result = await exec('/usr/bin/python3', ['-c', CODE_IDENTITY_SOURCE, String(pid)],
-    { timeout: 5_000, maxBuffer: 4096 })
+  const result = await exec(process.execPath, [nativeObservation, '--kernel-code', String(pid)],
+    { timeout: 5_000, maxBuffer: 4096, env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' } })
   const identity = JSON.parse(result.stdout)
   fail(identity.valid === true && /^[a-f0-9]{40}$/.test(identity.cdHash) && identity.cdHash === selected.daemonCdHash,
     'The socket owner executing code is not the selected Runtime artifact.')
