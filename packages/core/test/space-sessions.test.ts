@@ -20,9 +20,13 @@ it('the actual two-Core public Space reader retains same-SID authorities and con
   expect(states).toEqual(expect.arrayContaining([expect.objectContaining({ member: { hostId: 'local', runtimeId: 'runtime-b', agentSessionId: sid }, state: expect.objectContaining({ authority: expect.objectContaining({ runtimeId: 'runtime-b' }), session: expect.objectContaining({ workspacePath: '/runtime-b/home' }) }) }),
     expect.objectContaining({ member: { hostId: 'D-in-B', runtimeId: 'runtime-d', agentSessionId: sid }, state: expect.objectContaining({ authority: expect.objectContaining({ runtimeId: 'runtime-d' }), session: expect.objectContaining({ workspacePath: '/runtime-d/home' }) }) })]))
   expect(JSON.stringify(observed)).not.toContain('private-token')
+  // Directory metadata can precede its independent initial Native projection.
+  // Establish both related projections before measuring an unrelated update.
+  await vi.waitFor(() => expect(new Set(observed.flatMap(value => value.type === 'runtime' && value.event.type === 'process-state' &&
+    value.event.agentSessionId === sid ? [value.runtimeId] : [])).size, JSON.stringify(observed)).toBe(2))
   observed.length = 0
   await f.d.put('unrelated-d', 2); await new Promise(resolve => setTimeout(resolve, 30))
-  expect(observed).toEqual([])
+  expect(observed, JSON.stringify(observed)).toEqual([])
   await f.d.put(sid, 3)
   await vi.waitFor(() => expect(observed.some(value => value.type === 'member' && value.member.hostId === 'D-in-B' && value.state.status === 'observed' && value.state.session.updatedAt === 3)).toBe(true))
   const state = (await f.b.spatial.read())!
