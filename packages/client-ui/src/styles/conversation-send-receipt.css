@@ -28,7 +28,7 @@
 .conversation-send-receipt[data-receipt-attention='true'] .conversation-send-receipt__summary { flex-shrink: 1; flex-wrap: wrap; }
 .conversation-send-receipt[data-receipt-mode='compact'] > .message-disclosure > summary > .message-disclosure__preview {
   display: block;
-  flex: 1 1 auto;
+  flex: 1 1 0;
   order: 0;
   min-width: 0;
   white-space: nowrap;

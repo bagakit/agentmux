@@ -38,7 +38,7 @@
 .log-turn[data-message-continuation='true'] { padding-block: var(--sp-1); }
 .log-turn[data-message-continuation='true'] > .log-turn__node { visibility: hidden; height: 20px; }
 
-/* Both speakers use a quiet bubble; identity and direction remain separate facts. */
+/* Shared message shells retain their identity and direction. */
 .log-turn[data-message-bubble='true'] {
   width: min(calc(100% - var(--sp-4)), 760px);
   margin: var(--sp-2) var(--sp-2);
@@ -68,6 +68,11 @@
   width: 32px;
   height: 32px;
   background: transparent;
+}
+/* Ordinary replies from the executing Agent continue on the reading surface. */
+.log-turn[data-message-bubble='true'][data-speaker-role='agent']:not([data-speaker-relation='other-agent'], [data-recorded-identity], [data-process-content], [data-native-collaboration]) {
+  background: transparent;
+  box-shadow: none;
 }
 .log-turn:not([data-compact='true']):is([data-speaker-role='human'], [data-speaker-role='external'], [data-speaker-relation='other-agent']) {
   grid-template-columns: minmax(0, 1fr) 20px;
