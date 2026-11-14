@@ -6,7 +6,8 @@ import { access, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import type { GoalPlanRevisionInput } from '@agentmux/demand/goal-plan'
+import type { GoalPlanRevisionInput, GoalPlanState } from '@agentmux/demand/goal-plan'
+import { parseGoalDelegationParams } from '@agentmux/core/goal-delegation'
 import type { AppConfig } from '../src/shared/contracts'
 vi.hoisted(() => vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true))
 import { WorkbenchUserStateStore } from '../src/main/workbench-user-state'
@@ -35,7 +36,10 @@ beforeEach(async context => {
   vi.resetModules(); window.localStorage.clear()
   userRoot = await mkdtemp(join(tmpdir(), 'amux-goal-plan-user-')); user = new WorkbenchUserStateStore(join(userRoot, 'workbench-user-state.json')); userWrites = []
   await user.write(JSON.stringify({ state: {}, version: 1 }))
-  api = (await import('../src/renderer/src/lib/api')).api
+  // The controlled IPC loads as the Web preview; the store is the shipping Desktop
+  // one, whose user state lives in the original native document.
+  vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true); api = (await import('../src/renderer/src/lib/api')).api
+  vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', false)
   vi.spyOn(api.ui, 'readWorkbenchState').mockImplementation(() => user.read())
   vi.spyOn(api.ui, 'importWorkbenchState').mockImplementation(value => user.importIfAbsent(value))
   vi.spyOn(api.ui, 'writeWorkbenchState').mockImplementation(async payload => { const receipt = await user.write(payload); userWrites.push({ payload, receipt }); return receipt })
@@ -44,6 +48,9 @@ beforeEach(async context => {
   ;({ GlobalBoardSurface } = await import('../src/renderer/src/components/GlobalBoardSurface'))
   useAppStore.setState({ config, demands: {}, selectedDemandId: null, sessions: [], tabs: {}, layouts: {}, mainSurface: 'board', demandPmoTabIds: {} })
   fixture = await (await import('./helpers/host-goal-discussion-fixture')).openHostGoalDiscussionFixture(config)
+  // Main forwards Goal delegation reads to the Host's public RPC as the user; so does this controlled IPC.
+  vi.spyOn(api.demands, 'delegation').mockImplementation(async (method, input) =>
+    await fixture.host.rpc.call(method, parseGoalDelegationParams(method, input) as never) as never)
   container = document.createElement('div'); document.body.append(container); root = createRoot(container)
   // DOM geometry is the only graph layout input missing in happy-dom. Positions
   // follow actual rendered columns; neither nodes nor dependency facts are seeded.
@@ -116,6 +123,7 @@ async function cli(args: string[], input?: unknown, caller?: { id: string; capab
   evidence.push({ phase: 'original-public-cli', args, input, actor: caller?.id ?? 'transport-user', ...result })
   return result
 }
+const renderedStates = () => [...container.querySelectorAll<HTMLElement>('[data-goal-plan-node]')].map(node => [node.dataset.goalPlanNode, node.dataset.goalPlanState])
 async function expectSavedGraph() {
   // Original product refresh reads the same Host owner; the mounted component is
   // retained. No test writes any Renderer plan or Domain plan field.
@@ -123,12 +131,15 @@ async function expectSavedGraph() {
   await vi.waitFor(() => {
     expect([...container.querySelectorAll<HTMLElement>('[data-goal-plan-node]')].map(node => node.dataset.goalPlanNode)).toEqual(['inspect', 'preserve'])
     expect([...container.querySelectorAll<HTMLElement>('[data-goal-plan-edge]')].map(edge => edge.dataset.goalPlanEdge)).toEqual(['inspect>preserve'])
+    // States and progress are the Host owner's derivation returned with the record.
+    expect(renderedStates()).toEqual([['inspect', 'ready'], ['preserve', 'waiting']])
+    expect(container.querySelector('[data-goal-plan-progress]')?.textContent).toBe('0 of 2 done · revision 1')
   })
   const goal = (await fixture.host.demands.get('discovery'))!
   expect(goal.plan?.nodes.map(node => [node.id, node.dependsOn])).toEqual([['inspect', []], ['preserve', ['inspect']]])
   expect(goal.alignment?.confirmedAt).toBeNull(); expect(goal.description).toBe(originalDescription)
   expect(goal.delegations ?? []).toEqual([]); expect(goal.dispatches ?? []).toEqual([])
-  evidence.push({ phase: 'real-owner-to-mounted-graph', goal, nodes: ['inspect', 'preserve'], edge: 'inspect>preserve' })
+  evidence.push({ phase: 'real-owner-to-mounted-graph', goal, nodes: ['inspect', 'preserve'], edge: 'inspect>preserve', states: renderedStates() })
 }
 
 it('first planning input ACK leaves the real empty Goal empty until a person uses the public plan producer', async () => {
@@ -146,6 +157,45 @@ it('first planning input ACK leaves the real empty Goal empty until a person use
   expect((await fixture.host.demands.get('discovery'))!.supervisorSessionId).toBe(before.supervisorSessionId)
   expect((await cli(['goal', 'plan', 'revise', '--input', '-'], { goalId: 'discovery', revision: revision() })).code).toBe(0)
   await expectSavedGraph()
+  // The public CLI reads the same Goal record and derivation the mounted graph shows.
+  const listed = await cli(['goal', 'ls', '--goal', 'discovery'])
+  expect(listed.code, listed.stderr).toBe(0)
+  const [record] = JSON.parse(listed.stdout).result.goals as Array<{ id: string; planState?: GoalPlanState }>
+  expect(record?.planState?.nodes.map(node => [node.id, node.state])).toEqual(renderedStates())
+})
+
+it('a node delegation read returns the Host owner derivation to the mounted graph', async () => {
+  const owner = fixture.primary.agentSessionId
+  const worker = await fixture.core.core.createAgent({ agentSessionId: 'worker', providerId: 'codex', executorId: 'private',
+    workspacePath: fixture.topic.physicalDirectoryPath!, createOperationId: 'fixture-worker', injectAgentMuxGuide: false })
+  await fixture.host.demands.create({ id: 'discovery', title: 'Preserve the same work', description: originalDescription, status: 'in_progress',
+    supervisorSessionId: owner, assigneeSessionIds: [owner, worker.agentSessionId], sessionIds: [owner, worker.agentSessionId] })
+  await useAppStore.getState().refreshDemand('discovery')
+  await useAppStore.getState().updateDemand('discovery', { alignment: proposal })
+  await fixture.host.rpc.call('goal.plan.revise', { goalId: 'discovery', revision: revision('delegated-plan') })
+  const supervisor = fixture.core.core.agentSession(owner)
+  const capability = fixture.core.start.mock.calls.map(([spec]) => (spec as { env?: Record<string, string | undefined> }).env)
+    .find(env => env?.AGENTMUX_AGENT_SESSION_ID === owner)?.AGENTMUX_AGENT_CAPABILITY
+  expect(capability, 'The real Core issued the Supervisor Run its capability').toEqual(expect.any(String))
+  const { connectAgentMuxRpc } = await import('@agentmux/core')
+  const client = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: join(fixture.host.directory, 'rpc.sock') }, credentials: { agentSessionId: owner, capability: capability! } })
+  try {
+    await client.call('goal.delegation.prepare', { goalId: 'discovery', intent: { operationId: 'delegate-inspect', sourceMessageId: 'source-inspect', hostId: 'local',
+      ownerAgentSessionId: owner, workerAgentSessionId: worker.agentSessionId, ownerRunId: supervisor.run.runId, workerRunId: worker.run.runId,
+      threadId: 'thread-inspect', text: 'Inspect the original work.', alignmentRevision: 1, criterionIds: ['original'], planNodeId: 'inspect' } })
+  } finally { await client.dispose() }
+  useAppStore.setState({ selectedDemandId: 'discovery' }); await mount()
+  await act(async () => useAppStore.getState().refreshDemand('discovery'))
+  // The mounted delegation work reads goal.delegations; that result replaces the plan and its derivation together.
+  await vi.waitFor(async () => { await act(async () => {}); expect(useAppStore.getState().demands.discovery?.delegationObservations).toBeDefined() }, { timeout: 15_000 })
+  const goal = useAppStore.getState().demands.discovery!
+  expect(goal.delegationObservationIssue).toBeUndefined()
+  expect(goal.delegations?.map(item => item.planNodeId)).toEqual(['inspect'])
+  const owned = await fixture.host.rpc.call('goal.plan', { goalId: 'discovery' })
+  expect(owned.planState, 'The Host returns its derivation with the plan').toBeDefined()
+  expect(renderedStates()).toEqual(owned.planState!.nodes.map(node => [node.id, node.state]))
+  expect(renderedStates().map(([, state]) => state)).not.toContain('unavailable')
+  evidence.push({ phase: 'delegation-read-to-mounted-graph', goal, owned, rendered: renderedStates() })
 })
 
 it('reused discussion receives canonical planning input without implicit management or execution', async () => {

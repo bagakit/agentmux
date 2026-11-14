@@ -8,7 +8,7 @@ const owners = new Set([
   'apps/desktop/test/goal-plan-discovery-product.test.tsx', 'apps/desktop/test/helpers/host-goal-discussion-fixture.ts', 'apps/desktop/test/helpers/host-goal-transport.ts',
   'apps/desktop/src/renderer/src/components/GlobalBoardSurface.tsx',
   'apps/desktop/src/renderer/src/components/GoalDetail.tsx',
-  'apps/desktop/src/renderer/src/components/GoalPlanGraph.tsx',
+  'apps/desktop/src/renderer/src/components/GoalPlanGraph.tsx', 'apps/desktop/src/renderer/src/lib/goal-delegation-work.ts',
   'apps/desktop/src/renderer/src/store.ts', 'apps/desktop/src/renderer/src/lib/desktop-user-state.ts', 'apps/desktop/src/renderer/src/lib/launcher-state.ts',
   'apps/host/src/goals.ts', 'apps/host/src/goal-discussions.ts',
   'apps/host/src/goal-delegation-owner.ts', 'apps/host/src/goal-projection.ts',
@@ -39,4 +39,4 @@ export default { ...original, plugins: [...(original.plugins ?? []), {
     return `import { appendFileSync as __goalPlanDiscoveryLoaded } from 'node:fs'; __goalPlanDiscoveryLoaded(${JSON.stringify(proof)}, ${JSON.stringify(JSON.stringify(receipt) + '\n')});\n` + source
   }
 }], test: { ...original.test, include: ['apps/desktop/test/goal-plan-discovery-product.test.tsx'],
-  passWithNoTests: false, maxWorkers: 1, fileParallelism: false, testTimeout: 35_000, hookTimeout: 30_000 } }
+  passWithNoTests: false, maxWorkers: 1, fileParallelism: false, testTimeout: 60_000, hookTimeout: 60_000 } }

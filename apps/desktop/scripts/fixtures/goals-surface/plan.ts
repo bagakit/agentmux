@@ -3,6 +3,7 @@ import { parseDemandDelegations, type DemandDelegation } from '@agentmux/demand/
 import { parseGoalPlan, type GoalPlan, type GoalPlanNodeInput } from '@agentmux/demand/goal-plan'
 import { demandExecutionReferences, demandResponsibilityScope } from '../../../../../packages/demand/src/responsibility'
 import type { GoalResponsibilityObservation } from '@agentmux/core/goal-responsibility'
+import { hostGoalPlan } from '@agentmux/host/goal-projection'
 import { api } from '../../../src/renderer/src/lib/api'
 import { useAppStore } from '../../../src/renderer/src/store'
 
@@ -10,7 +11,8 @@ import { useAppStore } from '../../../src/renderer/src/store'
 export function goalPlanPreview(seed: (mode: string) => void, render: () => void) {
   const originalDelegation = api.demands.delegation
   return {
-    seed() {
+    /** `withoutDerivation` previews a Host that returns the plan without node states, as an older version does. */
+    seed(withoutDerivation = false) {
       seed('confirmed')
       const state = useAppStore.getState(), goal = state.demands[state.selectedDemandId!]!
       const agents = state.sessions.filter(session => session.kind === 'agent')
@@ -72,10 +74,10 @@ export function goalPlanPreview(seed: (mode: string) => void, render: () => void
             alert: delegation.report ? 'manager-review' : delegation.linkedAt ? null : 'unknown',
             basis: { stateEnteredAt: null, activityRevision: null, inputSubmissionId: null } }
         }) }
-      const observed = { ...next, responsibility }
+      const owned = withoutDerivation ? { plan } : hostGoalPlan(next), observed = { ...next, ...owned, responsibility }
       // Actual observation hooks read these original preview facts instead of clearing the fixture.
       api.demands.delegation = async (operation, input) => input.goalId === next.id && operation === 'goal.delegations'
-        ? { goalId: next.id, goalUpdatedAt: next.updatedAt, diskDurability: 'confirmed' as const, delegations: next.delegations, observations: [], plan, responsibility }
+        ? { goalId: next.id, goalUpdatedAt: next.updatedAt, diskDurability: 'confirmed' as const, delegations: next.delegations, observations: [], ...owned, responsibility }
         : originalDelegation(operation, input)
       flushSync(() => {
         useAppStore.setState({ demands: { [next.id]: observed },

@@ -1,11 +1,21 @@
 const assert = require('node:assert/strict')
 
 /** Screenshots are evidence for independent review, not an aesthetic approval. */
-module.exports = async ({ evaluate, size, click, capture, waitFor, paint, result }) => {
+module.exports = async ({ evaluate, size, click, pointer, capture, waitFor, paint, result }) => {
   const { parseGoalResponsibility } = await import('@agentmux/core/goal-responsibility')
   const { demandExecutionReferences } = await import('@agentmux/demand')
   const states = ['done', 'ready', 'working', 'review', 'changes', 'unknown', 'waiting']
   const canvasGeometry = () => evaluate(`(()=>{const canvas=document.querySelector('.goal-plan__canvas'),columns=canvas.querySelector('.goal-plan__columns'),svg=canvas.querySelector('.goal-plan__edges');return {clientHeight:canvas.clientHeight,scrollHeight:canvas.scrollHeight,contentHeight:columns.getBoundingClientRect().height,svgHeight:Number(svg.getAttribute('height'))}})()`)
+  // The real pointer rests on a section heading, so no card carries a hover state into a frame.
+  const restOn = async heading => {
+    await pointer(`[...document.querySelectorAll('.goals-section-heading h2')].find(node=>node.textContent.trim()===${JSON.stringify(heading)})`)
+    assert.equal(await evaluate(`document.querySelectorAll('.goal-plan-node:hover').length`), 0, 'No plan card is hovered in the frame')
+  }
+  // Every written dependency name fits one line here, so none may be split across lines.
+  const wholeDependencyNames = async () => {
+    const names = await evaluate(`[...document.querySelectorAll('.goal-plan-node .goal-plan-dependency')].filter(name=>name.offsetParent).map(name=>name.getBoundingClientRect().height<parseFloat(getComputedStyle(name).fontSize)*2)`)
+    assert.ok(names.length > 0 && names.every(Boolean), 'Written dependency names wrap only between names')
+  }
   for (const [width, theme] of [[1280, 'dark'], [1280, 'light'], [620, 'light'], [620, 'dark']]) {
     await evaluate(`goalsPlan.seed();goalsVisual.appearance(${JSON.stringify(theme)})`)
     await size(width)
@@ -28,6 +38,7 @@ module.exports = async ({ evaluate, size, click, capture, waitFor, paint, result
     assert.ok(await evaluate(`[...document.querySelectorAll('.goal-plan-node__place')].every(node=>node.textContent==='Remote · Recovery worker')`),
       'Node locations name the configured remote Host, not only its route id')
     result.observations.push({ scene: 'plan', width, theme, facts })
+    await restOn('Goal definition')
     await capture(`${width}-${theme}-plan-context`, width)
     await evaluate(`(()=>{const graph=document.querySelector('.goal-plan'),detail=graph.closest('.goals-detail');graph.scrollIntoView({block:'start'});detail.scrollTop-=detail.querySelector('.goals-detail__toolbar').getBoundingClientRect().height+12})()`)
     await paint()
@@ -43,10 +54,13 @@ module.exports = async ({ evaluate, size, click, capture, waitFor, paint, result
       assert.ok(geometry.paths > 0, 'Wide graph has real dependency curves')
     }
     result.observations.push({ scene: 'plan-geometry', width, theme, geometry })
+    await wholeDependencyNames()
     const closed = await canvasGeometry()
+    await restOn('Execution plan')
     await capture(`${width}-${theme}-plan-graph`, width)
     if (width === 620) {
       await evaluate('document.querySelector("[data-goal-plan-node=verify]").scrollIntoView({block:"center"})')
+      await restOn('Results review')
       await capture(`${width}-${theme}-plan-dependency-tail`, width)
     }
     await click('document.querySelector("[data-goal-plan-node=history] .goal-plan-node__head")')
@@ -66,5 +80,27 @@ module.exports = async ({ evaluate, size, click, capture, waitFor, paint, result
     assert.ok(closedAgain.scrollHeight <= closed.scrollHeight + 1 && closedAgain.svgHeight <= closed.svgHeight + 1,
       'Closing the original node restores the original canvas extent instead of retaining the expanded SVG height')
   }
-  assert.equal(result.frames.length, 14, 'Four viewports/themes have context, graph and expanded-review frames, plus both narrow dependency tails')
+  for (const [width, theme] of [[1280, 'dark'], [620, 'light']]) {
+    await evaluate(`goalsPlan.seed(true);goalsVisual.appearance(${JSON.stringify(theme)})`)
+    await size(width)
+    await waitFor('document.querySelectorAll("[data-goal-plan-node]").length === 7 && Boolean(document.querySelector("[data-goal-plan-states-unavailable]"))')
+    const facts = await evaluate(`({states:[...new Set([...document.querySelectorAll('[data-goal-plan-node]')].map(node=>node.dataset.goalPlanState))],
+      caption:document.querySelector('[data-goal-plan-progress]').textContent, columns:document.querySelectorAll('[data-goal-plan-column]').length,
+      highlight:document.querySelectorAll('.goal-plan-node--next').length, progressBar:Boolean(document.querySelector('.goal-plan__progress')),
+      dependenciesWritten:[...document.querySelectorAll('[data-goal-plan-depends] .goal-plan-node__depends')].every(text=>getComputedStyle(text).display!=='none'),
+      fullWidth:document.querySelector('[data-goal-plan-column]').getBoundingClientRect().width>=document.querySelector('.goal-plan__canvas').clientWidth-1,
+      theme:document.documentElement.dataset.appearance})`)
+    assert.deepEqual(facts, { states: ['unavailable'], caption: 'revision 2', columns: 1, highlight: 0, progressBar: false, dependenciesWritten: true, fullWidth: true, theme },
+      'A plan without its owner derivation reads as a plan-order list with written dependencies, never as guessed states')
+    result.observations.push({ scene: 'plan-unavailable', width, theme, facts })
+    await wholeDependencyNames()
+    await evaluate(`(()=>{const graph=document.querySelector('.goal-plan'),detail=graph.closest('.goals-detail');graph.scrollIntoView({block:'start'});detail.scrollTop-=detail.querySelector('.goals-detail__toolbar').getBoundingClientRect().height+12})()`)
+    await restOn('Execution plan')
+    await capture(`${width}-${theme}-plan-unavailable`, width)
+    // The last card has the longest dependency list; the tail shows it whole and the gap to the next section.
+    await evaluate('document.querySelector("[data-goal-plan-node=verify]").scrollIntoView({block:"center"})')
+    await restOn('Results review')
+    await capture(`${width}-${theme}-plan-unavailable-tail`, width)
+  }
+  assert.equal(result.frames.length, 18, 'Four viewports/themes have context, graph and expanded-review frames, both narrow dependency tails, and a wide and a narrow plan without owner states with their tails')
 }

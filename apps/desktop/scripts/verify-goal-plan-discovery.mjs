@@ -36,7 +36,7 @@ const mutations = [
   { id: 'planning-input-is-an-open-request', path: 'apps/host/src/goal-discussions.ts',
     anchor: 'Make a plan for this existing Goal: ${goal.id}.', replacement: 'Open this existing Goal only: ${goal.id}.' },
   { id: 'saved-plan-dropped-before-renderer', path: 'apps/host/src/goal-projection.ts',
-    anchor: '...(goal.plan ? { plan: goal.plan } : {}),', replacement: '...{},' },
+    anchor: '...hostGoalPlan(goal),', replacement: '...{},' },
   { id: 'unknown-planning-reference-is-replaced', path: 'apps/desktop/src/renderer/src/store.ts',
     anchor: 'const held = key === null ? undefined : useAppStore.getState().goalDiscussionRequests[key]', replacement: 'const held = undefined' }
 ]

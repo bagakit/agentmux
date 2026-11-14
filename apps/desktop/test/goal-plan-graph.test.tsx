@@ -4,9 +4,9 @@ import { describe, expect, it, vi } from 'vitest'
 import type { DemandAlignment } from '@agentmux/demand/goals'
 import type { DemandDelegation } from '@agentmux/demand/delegations'
 import type { GoalPlan, GoalPlanNodeInput } from '@agentmux/demand/goal-plan'
-import { projectGoalPlan } from '@agentmux/demand/goal-plan'
+import { goalPlanState, projectGoalPlan } from '@agentmux/demand/goal-plan'
 import { GlobalBoardSurface } from '../src/renderer/src/components/GlobalBoardSurface'
-import { goalPlanColumns, goalPlanEdgePath, goalPlanHighlight } from '../src/renderer/src/components/GoalPlanGraph'
+import { goalPlanColumns, goalPlanEdgePath, goalPlanHighlight, goalPlanProjection } from '../src/renderer/src/components/GoalPlanGraph'
 import { api } from '../src/renderer/src/lib/api'
 import type { DemandRecord } from '../src/renderer/src/lib/global-demand-board'
 import { useAppStore } from '../src/renderer/src/store'
@@ -15,7 +15,7 @@ import { composerDOM } from './helpers/composer-dom-fixture'
 /**
  * A person sees the whole plan at a glance: dependency columns left to right, each node's
  * derived state, one highlighted next step, and the node's thread, report and review on demand.
- * The view reads the shared plan projection only.
+ * The view reads the Goal owner's derivation only.
  */
 const dom = composerDOM()
 const criteria = [{ id: 'api', text: 'API' }, { id: 'ui', text: 'UI' }]
@@ -32,7 +32,10 @@ const pass = (nodeId: string) => ({ operationId: `rv-${nodeId}`, nodeId, delegat
   check: { command: `pnpm test ${nodeId}`, result: '12 passed', evidence: ['ci:1'] }, note: '', reviewer: { kind: 'agent' as const, id: 'reviewer' }, reviewedAt: 4 })
 const plan = (nodes: GoalPlanNodeInput[], reviews: GoalPlan['reviews'] = []): GoalPlan =>
   ({ revision: 2, alignmentRevision: 1, nodes, reviews, history: [1, 2].map(revision => ({ operationId: `p${revision}`, revision, author: { kind: 'agent' as const, id: 'mote' }, revisedAt: revision })) })
-const goal = (patch: Partial<DemandRecord>): DemandRecord => ({ id: 'goal', title: 'Ship the plan', description: '', status: 'in_progress', priority: 'normal', projectId: null,
+/** A record as its Goal owner returns it: every plan carries the owner's derivation. */
+const owned = (record: DemandRecord): DemandRecord => record.plan
+  ? { ...record, planState: goalPlanState(projectGoalPlan(record.plan, record.delegations ?? [], record.alignment?.criteria ?? [])) } : record
+const goal = (patch: Partial<DemandRecord>): DemandRecord => owned({ id: 'goal', title: 'Ship the plan', description: '', status: 'in_progress', priority: 'normal', projectId: null,
   projectName: null, source: 'session', sessionIds: [], createdAt: 1, updatedAt: 1, alignment, ...patch })
 const seed = (record: DemandRecord) => useAppStore.setState({ demands: { [record.id]: record }, selectedDemandId: record.id, mainSurface: 'board' })
 const graph = () => dom.container.querySelector<HTMLElement>('.goals-detail [aria-label="Goal plan"]')
@@ -61,7 +64,7 @@ describe('Goal plan graph', () => {
     expect(graph()!.querySelector('[data-goal-plan-progress]')!.textContent).toBe('1 of 4 done · revision 2')
     // ui is reworked after review; docs is still ready and earlier in order, yet the rework wins.
     const changes = { ...pass('ui'), verdict: 'changes' as const, note: 'The graph misses cancelled nodes' }
-    await act(async () => useAppStore.setState(state => ({ demands: { goal: { ...state.demands.goal!, delegations: [reported('api'), reported('ui')], plan: plan(nodes, [pass('api'), changes]) } } })))
+    await act(async () => useAppStore.setState(state => ({ demands: { goal: owned({ ...state.demands.goal!, delegations: [reported('api'), reported('ui')], plan: plan(nodes, [pass('api'), changes]) }) } })))
     expect(graph()!.querySelector<HTMLElement>('[data-goal-plan-node="docs"]')!.dataset.goalPlanState).toBe('ready')
     expect(graph()!.querySelector<HTMLElement>('[data-goal-plan-node="ui"]')!.dataset.goalPlanState).toBe('changes')
     expect(highlighted()).toEqual(['ui'])
@@ -94,6 +97,56 @@ describe('Goal plan graph', () => {
     expect(graph()!.querySelector<HTMLElement>('[data-goal-plan-node="gone"]')!.dataset.goalPlanState).toBe('cancelled')
   })
 
+  it('names every reconciliation reason, and a cancelled node reads as cancelled even when its criteria changed', async () => {
+    const { linkedAt: _linked, ...prepared } = attempt('api', { capturedCriteria: [{ id: 'api', text: 'An earlier API' }] })
+    seed(goal({ plan: plan([node('api'), node('empty', [], { criterionIds: [] }), node('gone', [], { criterionIds: ['removed'], cancelled: true })]), delegations: [prepared as DemandDelegation] }))
+    await dom.render(<GlobalBoardSurface />)
+    const state = (id: string) => {
+      const label = graph()!.querySelector<HTMLElement>(`[data-goal-plan-node="${id}"] .goal-plan-node__state`)!
+      return [label.textContent, label.dataset.goalPlanUnknown]
+    }
+    const detail = async (id: string) => {
+      await act(async () => graph()!.querySelector<HTMLButtonElement>(`[data-goal-plan-node="${id}"] .goal-plan-node__head`)!.click())
+      return graph()!.querySelector<HTMLElement>(`[data-goal-plan-detail="${id}"]`)!.textContent
+    }
+    expect([state('api'), state('empty'), state('gone')]).toEqual([['Criteria need review · Delivery unconfirmed', 'criteria dispatch-link'], ['Criteria need review', 'criteria'], ['Cancelled', undefined]])
+    const api = await detail('api')
+    expect(api).toContain('Changed or unavailable in the current goal: api')
+    expect(api).toContain('The original delegation link is unconfirmed. Read its receipt before acting; it is never resent automatically.')
+    expect(await detail('empty')).toContain('Covers no success criterion of the current goal. Revise the plan to name what this node delivers.')
+    expect(await detail('gone')).not.toContain('Criteria')
+  })
+
+  it('shows the owner derivation as returned, even where this reader would derive another state', async () => {
+    const record = goal({ plan: plan(nodes), delegations: [reported('api')] }), planState = record.planState!
+    seed({ ...record, planState: { ...planState, done: 1, nodes: planState.nodes.map(item => item.id === 'api' ? { ...item, state: 'done' as const } : item) } })
+    await dom.render(<GlobalBoardSurface />)
+    expect(graph()!.querySelector<HTMLElement>('[data-goal-plan-node="api"]')!.dataset.goalPlanState).toBe('done')
+    expect(graph()!.querySelector('[data-goal-plan-node="api"] .goal-plan-node__state')!.textContent).toBe('Done')
+    expect(graph()!.querySelector('[data-goal-plan-progress]')!.textContent).toBe('1 of 4 done · revision 2')
+  })
+
+  it('reads every node state as unavailable when the owner returned no derivation, and never guesses one', async () => {
+    const { planState: _absent, ...older } = goal({ plan: plan(nodes, [pass('api')]), delegations: [reported('api')] })
+    useAppStore.setState({ demands: { goal: older }, selectedDemandId: 'goal', mainSurface: 'board' })
+    await dom.render(<GlobalBoardSurface />)
+    const states = [...graph()!.querySelectorAll<HTMLElement>('[data-goal-plan-node]')].map(item =>
+      [item.dataset.goalPlanNode, item.dataset.goalPlanState, item.querySelector('.goal-plan-node__state')!.textContent])
+    expect(states).toEqual(['api', 'docs', 'ui', 'release'].map(id => [id, 'unavailable', 'State unavailable']))
+    expect(graph()!.querySelectorAll('[data-goal-plan-column]')).toHaveLength(1)
+    expect(graph()!.querySelector('.goal-plan-node--next')).toBeNull()
+    expect(graph()!.querySelector('[data-goal-plan-progress]')!.textContent).toBe('revision 2')
+    expect(graph()!.querySelector('.goal-plan__progress')).toBeNull()
+    expect(graph()!.classList.contains('goal-plan--unavailable')).toBe(true)
+    expect(graph()!.querySelector('[data-goal-plan-node="release"] .goal-plan-node__depends')!.textContent).toBe('Depends on · Node ui, Node docs')
+    const note = graph()!.querySelector('[data-goal-plan-states-unavailable]')!.textContent
+    expect(note).toContain('The plan itself is unchanged')
+    expect(note).toContain("update that Host to see each node's state")
+    await act(async () => useAppStore.setState({ selectedDemandId: null }))
+    expect(dom.container.querySelector('[data-demand-id="goal"]')).not.toBeNull()
+    expect(dom.container.querySelector('[data-demand-id="goal"] [data-goal-plan-ring]')).toBeNull()
+  })
+
   it('makes the missing execution plan discoverable without inventing task nodes', async () => {
     seed(goal({}))
     await dom.render(<GlobalBoardSurface />)
@@ -108,8 +161,8 @@ describe('Goal plan graph', () => {
 })
 
 describe('plan graph projection helpers', () => {
-  it('derive columns and the highlight from the shared projection only', () => {
-    const projection = projectGoalPlan(plan(nodes), [], criteria)
+  it('derive columns and the highlight from the owner derivation only', () => {
+    const projection = goalPlanProjection(goal({ plan: plan(nodes) }))!
     expect(goalPlanColumns(projection).map(column => column.map(item => item.node.id))).toEqual([['api', 'docs'], ['ui'], ['release']])
     expect(goalPlanHighlight(projection)).toBe('api')
   })
@@ -122,6 +175,8 @@ describe('plan graph navigation and list progress', () => {
     expect(graph()!.querySelector('[data-goal-plan-node="ui"]')!.getAttribute('data-goal-plan-state')).toBe('ready')
     expect(graph()!.querySelector('[data-goal-plan-node="ui"] .goal-plan-node__depends')!.textContent).toBe('Depends on · Node api')
     expect(graph()!.querySelector('[data-goal-plan-node="release"] .goal-plan-node__depends')!.textContent).toBe('Depends on · Node ui, Node docs')
+    // Each name is its own wrapping unit, so a line never splits a dependency's name.
+    expect([...graph()!.querySelectorAll('[data-goal-plan-node="release"] .goal-plan-dependency')].map(name => name.textContent)).toEqual(['Node ui', 'Node docs'])
   })
   it('names the exact configured remote Host while retaining its machine route in the title', async () => {
     const prior = useAppStore.getState(), original = prior.sessions.find(session => session.kind === 'agent')!
