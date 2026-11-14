@@ -400,6 +400,21 @@ export async function writeNotebookHistory(path: string, candidate: NoteHistoryR
   return value
 }
 export type NotebookFileRelocation = { noteId: string; from: NoteResource; to: NoteResource }
+export type NotebookFileResourceIdentity = { noteId: string; resource: NoteResource }
+/** The original metadata root and catalog share one exact-pair resource projection. */
+async function originalResources(path: string, root: Root) {
+  const state = await catalog(path, root), originals = new Map<string, NotebookFileResourceIdentity>()
+  for (const original of [...Object.values(root.originals), ...Object.values(state.pages)]) originals.set(originalKey(original.noteId, original.resource), original)
+  return { state, originals }
+}
+/** Cold composition only; physical scope data is not a Note-ID or Note-path input. */
+export async function notebookFileResourceIdentities(path: string, scope: NoteResource): Promise<NotebookFileResourceIdentity[]> {
+  const root = await readRoot(path)
+  if (!root) return []
+  const { originals } = await originalResources(path, root)
+  return [...originals.values()].filter(({ resource }) => resource.hostId === scope.hostId && resource.workspaceId === scope.workspaceId && resource.workspacePath === scope.workspacePath &&
+    (resource.path === scope.path || resource.path.startsWith(scope.path + '/'))).map(({ noteId, resource }) => ({ noteId, resource: structuredClone(resource) }))
+}
 type Relocation = NotebookFileRelocation
 export type NotebookFileRelocationPlan = {
   root: string | null; from: NoteResource; to: NoteResource
@@ -430,8 +445,7 @@ export function notebookFileRelocationRows(value: NotebookFileRelocationPlan): N
 export async function planNotebookFileRelocation(path: string, from: NoteResource, to: NoteResource): Promise<NotebookFileRelocationPlan> {
   const root = await readRoot(path)
   if (!root) return { root: null, from, to, entries: [] }
-  const state = await catalog(path, root), originals = new Map<string, { noteId: string; resource: NoteResource }>()
-  for (const original of [...Object.values(root.originals), ...Object.values(state.pages)]) originals.set(originalKey(original.noteId, original.resource), original)
+  const { state, originals } = await originalResources(path, root)
   const entries: NotebookFileRelocationPlan['entries'] = [], pageKeys = new Set(Object.values(state.pages).map(page => originalKey(page.noteId, page.resource)))
   for (const original of originals.values()) {
     const resource = original.resource

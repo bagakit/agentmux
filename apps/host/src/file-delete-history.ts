@@ -13,13 +13,13 @@ import type { WorkspaceRecord } from './content-types.js'
 export class FileDeleteHistory {
   private catalog?: Promise<Map<string, string[]>>
   private readonly events = new Map<string, string>()
-  constructor(private readonly notes: Pick<AgentMuxNotebookStore, 'read' | 'readHistory' | 'readHistoryOperation' | 'recordHistory'>,
+  constructor(private readonly notes: Pick<AgentMuxNotebookStore, 'fileResourceIdentities' | 'readHistory' | 'readHistoryOperation' | 'recordHistory'>,
     private readonly files: Pick<OrdinaryWorkspaceFiles, 'readByteRange'>, private readonly workspace: WorkspaceRecord,
     private readonly input: FileDeleteParams, private readonly digest: string, private readonly actor: NotebookActor) {}
   private registered(): Promise<Map<string, string[]>> {
-    return this.catalog ??= this.notes.read().then(state => {
+    return this.catalog ??= this.notes.fileResourceIdentities(this.input.expectedResource).then(originals => {
       const result = new Map<string, string[]>(), resource = this.input.expectedResource
-      for (const page of Object.values(state.pages)) {
+      for (const page of originals) {
         const r = page.resource
         if (r.hostId !== resource.hostId || r.workspaceId !== resource.workspaceId || r.workspacePath !== resource.workspacePath || r.path !== resource.path && !r.path.startsWith(resource.path + '/')) continue
         const key = noteProvenanceResourceKey(r), ids = result.get(key) ?? []; ids.push(page.noteId); result.set(key, ids)
