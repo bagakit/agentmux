@@ -24,15 +24,16 @@ export function AgentWorkModeSetup(props: AgentWorkModeSetupProps) {
     previousSourceSelection.current = sourceSelection
     if (!changed || !props.active) return
     const ownerDocument = setupRef.current?.ownerDocument
+    const ownerWindow = ownerDocument?.defaultView ?? window
     const focusAtSchedule = ownerDocument?.activeElement
-    const frame = requestAnimationFrame(() => {
+    const frame = ownerWindow.requestAnimationFrame(() => {
       if (ownerDocument?.activeElement !== focusAtSchedule) return
       const target = setupRef.current?.querySelector<HTMLButtonElement>('[aria-label="Agent runs on"]:not([disabled])')
         ?? setupRef.current?.querySelector<HTMLButtonElement>('.agent-work-setup__actions button:not([disabled])')
         ?? setupRef.current
       target?.focus({ preventScroll: true })
     })
-    return () => cancelAnimationFrame(frame)
+    return () => ownerWindow.cancelAnimationFrame(frame)
   }, [sourceSelection, props.active])
   if (props.sourceTargets && sourceSelection) return <>
     <SourceAgentTargetSetup {...props} setupRef={setupRef} onChooseCustom={anchored ? () => setSourceSelection(false) : undefined} onOpenHost={props.onOpenHost ?? (settings ? id => settings.openHost(id) : undefined)} />
