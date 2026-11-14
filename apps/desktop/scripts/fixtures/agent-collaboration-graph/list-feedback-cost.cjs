@@ -126,6 +126,18 @@ function verify(data, captured) {
   verifyCosts(data)
   assert.deepEqual(captured.map(frame => frame.label), data.baseline ? [] : visualLabels)
   if (data.baseline) return
+  for (const cost of data.costs) {
+    let previous
+    for (const sample of [cost.before, cost.recent, cost.after]) {
+      assert.equal(sample.hidden, false); assert.equal(sample.reduced, false)
+      const operation = sample.cards.sender?.operations.find(item => item.operationId === data.pending.operationId)
+      const clock = operation?.animations.find(animation => animation.name === 'agent-operation-shine')
+      assert.ok(operation?.phase === 'pending' && clock?.state === 'running' && clock.iterations === 'infinite' && Number.isFinite(clock.startTime) && Number.isFinite(clock.currentTime))
+      assert.ok(sample.operationReading.some(label => label.phase === 'pending' && label.hostId === data.pending.control.hostId && label.agentSessionId === data.pending.control.agentSessionId && label.nativeCheckVisibility && label.centerHit))
+      if (previous) { assert.equal(clock.startTime, previous.startTime); assert.ok(clock.currentTime > previous.currentTime) }
+      previous = clock
+    }
+  }
   assert.equal(data.pendingVisuals?.length, visualLabels.length)
   for (const [index, visual] of data.pendingVisuals.entries()) {
     assert.equal(visual.label, visualLabels[index]); assert.equal(captured[index].file, visual.label + '.png')
