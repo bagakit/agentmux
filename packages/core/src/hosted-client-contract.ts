@@ -6,6 +6,7 @@ import type { AgentCatalogEntry, AgentMuxAgentSession, AgentMuxClientEvent, Agen
 import type { AgentMuxRpcStreamParams } from './public-rpc.js'
 import type { AgentMuxRpcSubscriptionOptions } from './public-rpc-client.js'
 import type { AgentMuxHostedSession, AgentMuxHostedSessionProjection } from './hosted-session-summary.js'
+import type { AgentMuxHostEnvironmentSelector } from './host-environment.js'
 
 /** The finite SDK surface delegated by a Client to the single semantic Host. */
 export const AGENTMUX_HOSTED_METHODS = [
@@ -181,7 +182,9 @@ export const AGENTMUX_HOSTED_PREPARATION = {
   listDispatches: 'owner',
 } as const satisfies Record<AgentMuxHostedMethod, AgentMuxHostedPreparation>
 
-type HostedArguments<M extends AgentMuxHostedMethod> = M extends 'trustCreationSource' | 'trustMessageSource'
+type HostedArguments<M extends AgentMuxHostedMethod> = M extends 'hostEnvironment'
+  ? [selector?: AgentMuxHostEnvironmentSelector]
+  : M extends 'trustCreationSource' | 'trustMessageSource'
   ? [input: Parameters<AgentMuxClient[M]>[0]]
   : M extends 'writeTerminal' | 'writeTerminalBytes' ? [ref: Parameters<AgentMuxClient[M]>[0], input: Parameters<AgentMuxClient[M]>[1], observation?: Parameters<AgentMuxClient[M]>[2]]
   : M extends 'controlTerminal' | 'setAgentPosture' | 'writeAgent' | 'pasteAgent' | 'recordExternalConversationMessage' | 'ensureAgentContinuity' | 'readAgentInputMailbox' | 'readAgentInputChanges' | 'controlAgentContinuity' | 'submitAgentPrompt' | 'submitAgentMessage' | 'broadcastMessages' | 'notifyMessages' | 'rejoinAgentInputWaiting' | 'respondAgentInteraction' | 'replySessionQuestion'
@@ -190,7 +193,7 @@ export type AgentMuxHostedInvocation = { [M in AgentMuxHostedMethod]: {
   method: M; args: HostedArguments<M>
 } }[AgentMuxHostedMethod]
 type DelegatedMethods = { [M in AgentMuxHostedMethod]:
-  M extends 'readMessage' ? AgentMuxClient[M] :
+  M extends 'readMessage' | 'hostEnvironment' ? AgentMuxClient[M] :
   (...args: HostedArguments<M>) => Promise<Awaited<ReturnType<AgentMuxClient[M]>>> }
 
 /** The original Core observation contract; all opening facts belong to its one output lease. */

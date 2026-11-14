@@ -17,7 +17,9 @@ import { parseAgentSessionRecordInput, deletedAgentSessionRecord,
   type AgentSessionRecordInput, type AgentSessionRecordDeleteInput, type AgentSessionRecordInspection, type AgentSessionRecordDeletionReceipt } from './agent-session-record.js'
 import { setImmediate as yieldRecordWriter } from 'node:timers/promises'
 import { bindAgentInputClaimStore, withAgentInputClaimLease } from './agent-input-claim-lease.js'
-import { parseHostEnvironment, type AgentMuxHostEnvironment } from './host-environment.js'
+import { parseHostEnvironment, parseHostEnvironmentSelector, parseSelectedHostEnvironment,
+  type AgentMuxHostEnvironment, type AgentMuxHostEnvironmentSelector, type AgentMuxSelectedHostEnvironment } from './host-environment.js'
+import { locateAgentWorkspaceDirectory } from './agent-workspace-directory.js'
 import { homedir } from 'node:os'
 import { existsSync } from 'node:fs'
 import { realpath } from 'node:fs/promises'
@@ -659,9 +661,23 @@ export class AgentMuxClient {
   remoteTransportObservation(): import('./remote-transport-observation.js').RemoteTransportObservation | null { return null }
 
   /** Read this Core process's OS user home without preparing Native or Sessions. */
-  async hostEnvironment(): Promise<AgentMuxHostEnvironment> {
-    try { return parseHostEnvironment({ homeDirectory: homedir() }) }
+  async hostEnvironment(): Promise<AgentMuxHostEnvironment>
+  async hostEnvironment(selector: AgentMuxHostEnvironmentSelector): Promise<AgentMuxSelectedHostEnvironment>
+  async hostEnvironment(selector?: AgentMuxHostEnvironmentSelector): Promise<AgentMuxHostEnvironment | AgentMuxSelectedHostEnvironment> {
+    if (selector === undefined) {
+      try { return parseHostEnvironment({ homeDirectory: homedir() }) }
+      catch { throw new AgentMuxError('The original Host could not read its home directory. Existing work is retained; retry this Host read.', 'HOST_ENVIRONMENT_UNAVAILABLE') }
+    }
+    const selected = parseHostEnvironmentSelector(selector)
+    if (!(this.store instanceof AgentMuxFileAgentSessionStore) || !this.creationAuthority) {
+      throw new AgentMuxError('This Core cannot prove its file-backed Agent workspace namespace and semantic Runtime.', 'CONTROL_UNAVAILABLE')
+    }
+    let home: AgentMuxHostEnvironment
+    try { home = parseHostEnvironment({ homeDirectory: homedir() }) }
     catch { throw new AgentMuxError('The original Host could not read its home directory. Existing work is retained; retry this Host read.', 'HOST_ENVIRONMENT_UNAVAILABLE') }
+    const location = locateAgentWorkspaceDirectory({ storePath: this.store.path,
+      runtimeId: this.creationAuthority.runtimeId, agentSessionId: selected.agentSessionId })
+    return parseSelectedHostEnvironment({ ...home, agentWorkspace: location.agentWorkspace }, selected, this.creationAuthority.runtimeId)
   }
 
   /** The original target Executor owns its Provider and environment; no secrets leave this owner. */

@@ -28,7 +28,7 @@ import { AGENTMUX_HOSTED_METHODS, type AgentMuxRuntimeOwnerIdentity, type AgentM
   type AgentMuxHostedSubscription, type AgentMuxRuntimeFence, type AgentMuxHostedForwardRpc, type AgentMuxHostedSubscribeRpc,
   type AgentMuxHostedAttachmentTarget, type AgentMuxHostedStreamValue } from './hosted-client-contract.js'
 import { decodeHostedValue, encodeHostedValue, AgentMuxHostedTransferReader, parseHostedBootstrap, parseHostedMessageQueuePath, parseHostedAgentSessionRead, parseHostedRuntimeOwnerIdentity, parseHostedNativeConnection, parseHostedMessageEvent } from './hosted-value.js'
-import { parseHostEnvironment } from './host-environment.js'
+import { parseHostEnvironment, parseHostEnvironmentSelector, parseSelectedHostEnvironment, type AgentMuxHostEnvironmentSelector } from './host-environment.js'
 import { parseRemoteTransportObservation } from './remote-transport-observation.js'
 import { parseSessionHistoryResourceOptions, parseSessionHistoryResourceReadResult } from './session-history-resource.js'
 import { parseOutputGapEvidence } from './output-gap-evidence.js'
@@ -243,6 +243,14 @@ export async function connectHostedAgentMux<P extends AgentMuxHostedSessionProje
       bootstrap ??= { ...structuredClone(observed), owner: structuredClone(controlOwner) }
     }
     let signal: AbortSignal | undefined, wireArgs = args
+    let hostEnvironmentSelector: AgentMuxHostEnvironmentSelector | undefined
+    if (method === 'hostEnvironment') {
+      if (args.length > 1) throw new AgentMuxError('Host environment reads accept zero arguments or one exact Agent Session selector.', 'INVALID_CONTROL_REQUEST')
+      if (args.length === 1) {
+        hostEnvironmentSelector = parseHostEnvironmentSelector(args[0])
+        wireArgs = [hostEnvironmentSelector]
+      }
+    }
     if (method === 'sessionHistorySources' && args[0]) {
       const { signal: cancellation, ...scope } = args[0] as NonNullable<Parameters<AgentMuxHostedClient['sessionHistorySources']>[0]>
       if (isAbortSignal(cancellation)) signal = cancellation
@@ -283,7 +291,9 @@ export async function connectHostedAgentMux<P extends AgentMuxHostedSessionProje
     })
     if (method === 'connectRuntime') await connectControl(true)
     const decoded = decodeHostedValue(response.value)
-    if (method === 'hostEnvironment') return parseHostEnvironment(decoded)
+    if (method === 'hostEnvironment') return hostEnvironmentSelector
+      ? parseSelectedHostEnvironment(decoded, hostEnvironmentSelector, invocationOwner!.runtimeId)
+      : parseHostEnvironment(decoded)
     if (method === 'readAgentMessageQueuePath') return parseHostedMessageQueuePath(decoded)
     if (method === 'continueAgentCreation') return parseCreationContinueReceipt(decoded, parseCreationContinueInput(wireArgs[0]))
     if (method === 'retireTerminalCreation') return parseTerminalCreationInspection(decoded,parseTerminalCreationRetire(wireArgs[0]))

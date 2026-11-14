@@ -13,6 +13,7 @@ import type { AgentExecutionOpenInput } from './agent-execution-coordinator.js'
 import type { HostRouteCall, HostRouteExecutionScope, HostRouteOperation, HostRouteExecutionAuthorization, HostRouteStatement, HostRouteMemberOperation, HostRouteMemberNameOperation } from './host-route.js'
 import { hostRouteExecutorOperation } from './host-route.js'
 import { parseAgentOpenLaunchFields } from './agent-open-contract.js'
+import { parseHostEnvironmentSelector } from './host-environment.js'
 
 function deny(): never { throw new AgentMuxError('This child does not belong to the original authorized creation and exact target.', 'HOST_ROUTE_DERIVATION_MISMATCH') }
 export const executionCreationId = (bindingId: string, role: string) => createHash('sha256').update(JSON.stringify([bindingId, role])).digest('hex')
@@ -174,7 +175,14 @@ export function assertExecutionChild(statement: HostRouteStatement, call: HostRo
   }
   if (method === 'runtimeIdentity' || method === 'agentCreationAuthority') return
   if (scope.kind === 'execution' && ['hostEnvironment','listHostExecutors','resolveAgentCreationSessionId','createHostAgentWithDelivery','runtimeSubject'].some(value => value === method) && destination !== scope.agentRuntimeId) deny()
-  if (method === 'hostEnvironment') return
+  if (method === 'hostEnvironment') {
+    if (invocation.args.length === 0) return
+    if (invocation.args.length !== 1) throw new AgentMuxError('Host environment reads accept zero arguments or one exact Agent Session selector.', 'INVALID_CONTROL_REQUEST')
+    const selector = parseHostEnvironmentSelector(value)
+    const expected = scope.kind === 'preparation' ? statement.preparationSessionId : scope.agentSessionId
+    if (!expected || selector.agentSessionId !== expected) deny()
+    return
+  }
   if (method === 'listHostExecutors') { if (rpcRecord(value).executorId !== scope.executorId) deny(); return }
   if (method === 'resolveAgentCreationSessionId') { if (value !== scope.createOperationId) deny(); return }
   if (method === 'readAgentSession' || method === 'inspectAgentCreation') {

@@ -1824,8 +1824,11 @@ export class AgentMuxRpcService {
           : isDeepStrictEqual(query.expected, configuration))) throw new AgentMuxError(
           'The original Host configuration changed or could not be confirmed. Reload this connection before observing it.', 'HOST_CONFIGURATION_CHANGED')
         if (method === 'settings.hosts.home') {
-          const result = { routeHostId: input.hostId,
-            ...await observeRead(Promise.resolve().then(() => client.hostEnvironment()), context.signal) }
+          const homeInput = input as import('./public-rpc-host-settings.js').HostSettingsParameterMap['settings.hosts.home']
+          const environment = await observeRead(Promise.resolve().then(() => homeInput.agentSessionId === undefined
+            ? client.hostEnvironment()
+            : client.hostEnvironment({ agentSessionId: homeInput.agentSessionId })), context.signal)
+          const result = { routeHostId: input.hostId, ...environment }
           const current = (await this.clients()).filter(entry => entry.hostId === input.hostId)
           if (current.length !== 1 || current[0]!.client !== client || !isDeepStrictEqual(homeHostRoute(configuration), homeHostRoute(this.ports.hostConfiguration?.(input.hostId) ?? null))) throw new AgentMuxError(
             'The original Host route changed during its home read. Read the current saved Host again.', 'HOST_CONFIGURATION_CHANGED')

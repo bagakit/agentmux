@@ -1,6 +1,7 @@
 import type { AgentMuxMessageTrust, AgentMuxMessageTrustInput } from './agent-message-federation.js'
 import { isDeepStrictEqual } from 'node:util'
-import { parseHostEnvironment, type AgentMuxHostEnvironment } from './host-environment.js'
+import { parseHostEnvironment, parseSelectedHostEnvironment,
+  type AgentMuxHostEnvironment, type AgentMuxSelectedHostEnvironment } from './host-environment.js'
 import { parseHostRuntimeObservation, type HostRuntimeObservation } from './host-runtime-observation.js'
 import { parseHostNetworkObservation, type HostNetworkObservation } from './host-network-observation.js'
 import { parseHostAgentResourceObservation, type HostAgentResourceObservation } from './host-agent-resources.js'
@@ -27,7 +28,7 @@ export const AGENTMUX_RPC_HOST_SETTINGS_METHODS = {
 } as const
 export type HostSettingsMethod = keyof typeof AGENTMUX_RPC_HOST_SETTINGS_METHODS
 export type HostSettingsParameterMap = {
-  'settings.hosts.home': { hostId: string; expected?: AgentMuxControlSettingsResourceFields }
+  'settings.hosts.home': { hostId: string; expected?: AgentMuxControlSettingsResourceFields; agentSessionId?: string }
   'settings.hosts.inspect': { hostId: string; expected?: AgentMuxControlSettingsResourceFields }
   'settings.hosts.agent-resources': { hostId: string; kind: 'records' | 'running'; expected?: AgentMuxControlSettingsResourceFields; expectedRuntimeId?: string }
   'settings.hosts.network': { hostId: string; expected?: AgentMuxControlSettingsResourceFields }
@@ -40,7 +41,7 @@ export type HostSettingsParameterMap = {
   'settings.hosts.trust-message-source': { hostId: string; input: AgentMuxMessageTrustInput }
 }
 export type HostSettingsResultMap = {
-  'settings.hosts.home': AgentMuxHostEnvironment & { routeHostId: string }
+  'settings.hosts.home': (AgentMuxHostEnvironment | AgentMuxSelectedHostEnvironment) & { routeHostId: string }
   'settings.hosts.inspect': HostRuntimeObservation
   'settings.hosts.agent-resources': HostAgentResourceObservation
   'settings.hosts.network': HostNetworkObservation
@@ -63,7 +64,13 @@ export function parseHostSettingsParams<M extends HostSettingsMethod>(method: M,
       ...(p.expected === undefined ? {} : { expected: settingsResourceRecord(p.expected, 'INVALID_CONTROL_REQUEST') }),
       ...(p.expectedRuntimeId === undefined ? {} : { expectedRuntimeId: rpcString(p.expectedRuntimeId, 'Original Runtime ID') }) } as HostSettingsParameterMap[M]
   }
-  if (method === 'settings.hosts.inspect' || method === 'settings.hosts.network' || method === 'settings.hosts.home') {
+  if (method === 'settings.hosts.home') {
+    const p = rpcRecord(value, ['hostId', 'expected', 'agentSessionId'])
+    return { hostId: rpcString(p.hostId, 'Route Host ID'),
+      ...(p.expected === undefined ? {} : { expected: settingsResourceRecord(p.expected, 'INVALID_CONTROL_REQUEST') }),
+      ...(p.agentSessionId === undefined ? {} : { agentSessionId: rpcString(p.agentSessionId, 'Original Agent Session ID') }) } as HostSettingsParameterMap[M]
+  }
+  if (method === 'settings.hosts.inspect' || method === 'settings.hosts.network') {
     const p = rpcRecord(value, ['hostId', 'expected'])
     return { hostId: rpcString(p.hostId, 'Route Host ID'), ...(p.expected === undefined ? {} : { expected: settingsResourceRecord(p.expected, 'INVALID_CONTROL_REQUEST') }) } as HostSettingsParameterMap[M]
   }
@@ -96,9 +103,15 @@ export function parseHostSettingsResult<M extends HostSettingsMethod>(method: M,
   if (method === 'settings.hosts.agent-resources') return parseHostAgentResourceObservation(value,
     input as HostSettingsParameterMap['settings.hosts.agent-resources']) as HostSettingsResultMap[M]
   if (method === 'settings.hosts.home') {
-    const p = rpcRecord(value, ['routeHostId', 'homeDirectory'], 'CONTROL_PROTOCOL_ERROR')
+    const query = input as HostSettingsParameterMap['settings.hosts.home']
+    const selected = query.agentSessionId !== undefined
+    const p = rpcRecord(value, selected ? ['routeHostId', 'homeDirectory', 'agentWorkspace'] : ['routeHostId', 'homeDirectory'], 'CONTROL_PROTOCOL_ERROR')
     if (p.routeHostId !== input.hostId) throw new AgentMuxError('The home directory belongs to another Host route.', 'CONTROL_PROTOCOL_ERROR')
-    return { routeHostId: input.hostId, ...parseHostEnvironment({ homeDirectory: p.homeDirectory }) } as HostSettingsResultMap[M]
+    if (!selected) return { routeHostId: input.hostId, ...parseHostEnvironment({ homeDirectory: p.homeDirectory }) } as HostSettingsResultMap[M]
+    const expectedRuntimeId = typeof query.expected?.runtimeId === 'string' ? query.expected.runtimeId : undefined
+    const environment = parseSelectedHostEnvironment({ homeDirectory: p.homeDirectory, agentWorkspace: p.agentWorkspace },
+      { agentSessionId: query.agentSessionId! }, expectedRuntimeId)
+    return { routeHostId: input.hostId, ...environment } as HostSettingsResultMap[M]
   }
   if (method === 'settings.hosts.network') {
     const result = parseHostNetworkObservation(value, input.hostId)

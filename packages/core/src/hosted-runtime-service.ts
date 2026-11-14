@@ -25,6 +25,7 @@ import { AGENTMUX_HOSTED_METHODS, AGENTMUX_HOSTED_PREPARATION, AGENTMUX_HOSTED_R
   type AgentMuxHostedStreamEvent, type AgentMuxHostedTransferChunk,
   type AgentMuxRuntimeOwnerIdentity, type AgentMuxRuntimeFence, type AgentMuxHostedAttachmentTarget } from './hosted-client-contract.js'
 import { decodeHostedValue, encodeHostedValue, hostedTransfer, parseHostedMessageQueuePath, parseHostedAgentSessionRead, AGENTMUX_HOSTED_TRANSFER_MAX_BYTES } from './hosted-value.js'
+import { parseHostEnvironmentSelector } from './host-environment.js'
 
 type Emit = (event: AgentMuxHostedStreamEvent) => void | Promise<void>
 type Context = { principal?: import('./public-rpc.js').AgentMuxRpcPrincipal; caller?: unknown; sourceDevice?: undefined | import('./types.js').AgentOperationDevice;
@@ -278,8 +279,10 @@ export class AgentMuxHostedRuntimeService {
     }
     const invocation = input as unknown as AgentMuxHostedInvocation
     if ((invocation.method === 'prepareFederatedRead' || invocation.method === 'readFederatedOutbox') && !invocation.args[0]?.caller && (context.caller || !context.principal || !['user', 'device'].includes(context.principal.kind))) throw new AgentMuxError('Host thread reading requires its trusted original Host reader. Managed Agents retain their own participant authority.', 'CONTROL_PERMISSION_DENIED')
-    if (invocation.method === 'hostEnvironment' && invocation.args.length !== 0)
-      throw new AgentMuxError('Host environment reads take no arguments.', 'INVALID_CONTROL_REQUEST')
+    if (invocation.method === 'hostEnvironment') {
+      if (invocation.args.length > 1) throw new AgentMuxError('Host environment reads accept zero arguments or one exact Agent Session selector.', 'INVALID_CONTROL_REQUEST')
+      if (invocation.args.length === 1) invocation.args[0] = parseHostEnvironmentSelector(invocation.args[0])
+    }
     if (invocation.method === 'continueAgentCreation') {
       if (invocation.args.length !== 1) throw new AgentMuxError('Creation continuation accepts one original target.', 'INVALID_CONTROL_REQUEST')
       invocation.args[0] = parseCreationContinueInput(invocation.args[0])

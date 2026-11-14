@@ -1,6 +1,7 @@
 import { parseSettingsHostMaintenanceCommand } from './settings-host-maintenance-cli.js'
 import { AgentMuxError } from './errors.js'
 import { readControlJsonInput } from './cli-json-input.js'
+import { expandCliOptionAssignments } from './cli-option-assignments.js'
 
 const invalid = (message: string): never => { throw new AgentMuxError(message, 'INVALID_CLI_ARGUMENT') }
 const input = (path: string) => readControlJsonInput(path, 'Settings')
@@ -92,8 +93,18 @@ export async function parseSettingsCommand(args: readonly string[]): Promise<Rec
       if (typeof result.hostId !== 'string' || result.kind !== 'records' && result.kind !== 'running') invalid('Choose one exact --host and --kind records|running.')
       return result
     }
-    if ((action === 'inspect' || action === 'network' || action === 'home') && args.length === 4 && id === '--host' && args[3]?.length) {
+    if ((action === 'inspect' || action === 'network') && args.length === 4 && id === '--host' && args[3]?.length) {
       return { hostId: args[3] }
+    }
+    if (action === 'home') {
+      const options = new Map<string, string>(), homeArgs = expandCliOptionAssignments(args.slice(2))
+      for (let index = 0; index < homeArgs.length; index += 2) {
+        const flag = homeArgs[index]!, value = homeArgs[index + 1]
+        if (!['--host', '--session'].includes(flag) || !value?.length || options.has(flag)) return invalid('Use home --host ID [--session SID].')
+        options.set(flag, value)
+      }
+      if (!options.has('--host')) return invalid('Use home --host ID [--session SID].')
+      return { hostId: options.get('--host')!, ...(options.has('--session') ? { agentSessionId: options.get('--session')! } : {}) }
     }
     if ((action === 'trusted-sources' || action === 'message-trusted-sources') && args.length === 4 && id === '--host' && args[3]?.length) {
       return { hostId: args[3] }
