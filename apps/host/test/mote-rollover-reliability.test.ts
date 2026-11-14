@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { afterEach, expect, it, vi } from 'vitest'
-import { defineRun } from '@ctxmux/sdk'
+import { preparedFixtureRun as defineRun } from '../../../packages/core/test/helpers/prepared-fixture-run.js'
 import { createMoteConversationStartFixture } from './helpers/mote-conversation-start-fixture.js'
 import { agentPromptSubmissionOutcome } from '../../../packages/core/src/mote-dialogue.js'
 import { moteQuickBaseline } from '../../../packages/core/src/mote-preferences.js'

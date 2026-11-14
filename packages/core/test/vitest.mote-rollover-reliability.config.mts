@@ -3,11 +3,8 @@ import original from './a2a-resumed-inbox.config.mts'
 import { appendFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { relative } from 'node:path'
-import { fileURLToPath } from 'node:url'
 const mutation = process.env.MOTE_ROLLOVER_MUTATION
-export default defineConfig({ ...original, plugins: [{ name: 'mote-rollover-reliability-source', enforce: 'pre', resolveId(id) {
-  if (id === '@ctxmux/sdk') return fileURLToPath(import.meta.resolve(id))
-}, transform(source, id) {
+export default defineConfig({ ...original, plugins: [{ name: 'mote-rollover-reliability-source', enforce: 'pre', transform(source, id) {
   const path = relative(original.root!, id.split('?')[0]!)
   if (!path.startsWith('packages/core/src/') && !path.startsWith('apps/host/src/')) return
   let loaded = source
