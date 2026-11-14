@@ -50,8 +50,8 @@ api.scratch.ensureMote = async (_workspace, id) => { if (id !== topicId) throw E
 api.scratch.readTopic = async (_workspace, id) => id === topicId ? topic() : null
 api.motePreferences.read = async input => {
   const source = readPublic({ ...input.target, path: 'MOTE.md' })
-  return { ...input, status: 'ready', source, defaults: defaults(), main: true, issue: null,
-    choices: { executors: [{ id: 'cck3', name: 'cck3', providerId: 'codex' }], conversations: [], destinations: [] },
+  return { kind: 'quick', target: input.target, status: 'ready', source, defaults: defaults(), main: true, issue: null,
+    choices: input.includeChoices === false ? null : { executors: input.includeChoices === 'locations' ? null : [{ id: 'cck3', name: 'cck3', providerId: 'codex' }], conversations: input.includeChoices === 'executors' ? null : [], destinations: input.includeChoices === 'executors' ? null : [] },
     maintenance: { status: 'unbound', schedule: null, issue: null } }
 }
 api.motePreferences.save = async input => {
