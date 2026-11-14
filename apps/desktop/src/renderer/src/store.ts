@@ -1881,7 +1881,7 @@ function isGoalBusinessRequest(request: AgentMuxControlRequest): request is Extr
 }
 
 function demandRecordFromFilesystem(demand: FilesystemDemand & Pick<DemandRecord, 'planState' | 'planStateIssue'>, retained?: DemandRecord): DemandRecord {
-  if (retained?.delegationReadCut && demand.updatedAt < retained.delegationReadCut.goalUpdatedAt) return retained
+  if (retained && demand.updatedAt < Math.max(retained.updatedAt, retained.delegationReadCut?.goalUpdatedAt ?? 0)) return retained
   return {
     id: demand.id,
     title: demand.title,
