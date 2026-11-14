@@ -3,7 +3,8 @@ import { appendFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { agentPromptSubmissionOutcome } from '../../../packages/core/src/agent-input-wait.js'
 import { objectCliEnvironment, runCompiledObjectCli } from '../../../packages/core/test/helpers/object-cli-rpc.js'
-import { focusGroupTaskPrompt } from '../../desktop/src/renderer/src/lib/focus-group-task'
+import { focusTaskHandoffNote } from '../../../packages/core/src/focus-task-guidance.js'
+import { focusGroupTask } from '../../desktop/src/renderer/src/lib/focus-group-task'
 import type { FocusScanLane } from '../../desktop/src/renderer/src/lib/focus-collection-lanes'
 import { createMoteConversationStartFixture } from './helpers/mote-conversation-start-fixture.js'
 
@@ -21,11 +22,16 @@ it('production group prompt reaches the exact original Main public queue and sta
   const lane = { id: 'focus-group-original', name: 'Original project', hostId: 'local', projectId: 'original-project',
     workspaceId: 'original-project', topicId: null, path: session.workspacePath, recovery: null,
     contextRefs: [{ hostId: reference.hostId, id: reference.sessionId }] } as FocusScanLane
-  const prompt = focusGroupTaskPrompt('analyze', lane, [], new Map(), { kind: 'mote', topicId: 'launcher:start-fixture' })
-  expect(prompt).toContain('从旁分析这个组'); expect(prompt).toContain('Group reference data (JSON):')
-  expect(prompt).toContain('用户未确认时不得执行这些动作'); expect(prompt).toContain(reference.sessionId)
+  const task = focusGroupTask('analyze', lane,
+    [{ id: 'original-project', hostId: 'local', name: 'Original project', path: session.workspacePath }],
+    { kind: 'mote', topicId: 'launcher:start-fixture' })
+  const { prompt, focusTask } = task, fixedNote = focusTaskHandoffNote(focusTask!)
+  expect(prompt).toContain('从旁分析这个组'); expect(prompt).not.toContain('Group reference data (JSON):')
+  expect(prompt).toContain('用户未确认时不得执行这些动作'); expect(prompt).not.toContain(reference.sessionId)
+  expect(focusTask?.selection).toEqual({ kind: 'members', references: [{ hostId: reference.hostId, contextId: reference.sessionId }] })
+  expect(fixedNote).toContain('focus --skill'); expect(fixedNote).toContain('focus read --input -')
   const before = f.h.inner.kernel.input.mock.calls.length
-  const input = { agentSessionId: reference.sessionId, expectedRun: session.run, operationId: 'focus-group-analysis', prompt,
+  const input = { agentSessionId: reference.sessionId, expectedRun: session.run, operationId: 'focus-group-analysis', prompt, focusTask,
     admissionIntent: { kind: 'manual-actor' as const }, execution: 'immediate' as const }
   const submitted = await f.rpc.call('space.mote.dialogue.input.submit', { target: f.target, expectedRoleRevision: page.main.roleRevision!, input })
   let inspected = await f.rpc.call('space.mote.dialogue.input.inspect', { target: f.target, operationId: input.operationId })
@@ -34,7 +40,10 @@ it('production group prompt reaches the exact original Main public queue and sta
     expect(agentPromptSubmissionOutcome(inspected.record)).toBe('terminal-confirmed')
   })
   expect(submitted.route?.reference).toEqual(reference); expect(inspected.route?.reference).toEqual(reference)
-  expect(JSON.stringify(inspected.record)).toContain(JSON.stringify(prompt).slice(1, -1))
+  const message = inspected.record?.admission?.intent.message
+  expect(message?.userContent).toBe(prompt)
+  expect(message?.systemContext).toContain(fixedNote)
+  expect(message?.userContent).not.toContain('Group reference data (JSON):')
   expect(f.h.inner.kernel.input.mock.calls.length).toBeGreaterThan(before)
   const after = f.h.inner.kernel.input.mock.calls.length
   const rejected = await f.rpc.call('space.mote.dialogue.input.submit', { target: f.target, expectedRoleRevision: page.main.roleRevision! + ':stale',
@@ -43,7 +52,8 @@ it('production group prompt reaches the exact original Main public queue and sta
   expect(f.h.inner.kernel.input).toHaveBeenCalledTimes(after)
   expect((await f.main.readCurrentMoteMain(f.target)).current).toEqual(reference)
   expect(f.h.started).toHaveLength(1); expect(f.h.inner.kernel.stop).not.toHaveBeenCalled()
-  record({ kind: 'original-public-queue', promptSHA256: createHash('sha256').update(prompt).digest('hex'), prompt, target: f.target,
+  record({ kind: 'original-public-queue', promptSHA256: createHash('sha256').update(prompt).digest('hex'), prompt, focusTask, fixedNote,
+    systemContextSHA256: createHash('sha256').update(message!.systemContext!).digest('hex'), target: f.target,
     reference, run: session.run, operationId: input.operationId, submitted, inspected, rejected: { code: rejected.code, detail: rejected.detail ?? null }, writes: { before, after, afterRejected: f.h.inner.kernel.input.mock.calls.length }, controls: { starts: f.h.started.length, stops: f.h.inner.kernel.stop.mock.calls.length } })
   if (compiledCli) {
     for (const [action, value] of [['read', { target: f.target, kind: 'main' }], ['input', { target: f.target, operationId: input.operationId }]] as const) {
