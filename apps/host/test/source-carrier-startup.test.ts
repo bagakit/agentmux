@@ -99,7 +99,10 @@ it("actual Host cold source assembly joins early original member reads across pr
     expect(phase.configurationReleaseCount).toBe(1);
     expect(phase.cancellation).toMatchObject({
       cancelledMemberServerSettlement: { status: "rejected", code: "CONTROL_CANCELLED" },
-      cancelledSummaryServerSettlement: { status: "rejected" },
+      cancelledSummaryServerSettlement: { status: "rejected", code: 20 },
+      secondarySummaryPendingBeforeDispose: true,
+      secondarySummarySettlementBeforeDispose: null,
+      secondarySummaryTerminalBeforeDispose: [],
       uncancelledMemberServerSettlements: [],
       primarySummaryServerSettlement: null,
       primarySummaryPending: true,
@@ -132,6 +135,33 @@ it("actual Host cold source assembly joins early original member reads across pr
       ).toBe(true);
     }
   }
+  expect(result.receipt.cleanup).toMatchObject({
+    remainingOwnedNativeRunPids: [],
+    privateRootRemoved: true,
+    remainingOwnedChildren: 0,
+  });
+}, 190000);
+it("an early secondary summary rejection cannot masquerade as disposal cancellation", async () => {
+  const result = await verify("early-summary-rejection", "early-summary-rejection");
+  expect(result.exitCode).not.toBe(0);
+  expect(result.receipt.failure).toMatchObject({ name: "AssertionError" });
+  expect(result.receipt.failure.message).toContain(
+    "Secondary summary must remain unsettled until disposal",
+  );
+  expect(result.receipt.failure.message).toContain("UNKNOWN_HOST");
+  expect(
+    result.loaded.some(
+      (entry: {
+        file: string;
+        mutation: string;
+        controlledSha256: string;
+        servedSha256: string;
+      }) =>
+        entry.file === "packages/core/src/space-session-client.ts" &&
+        entry.mutation === "early-summary-rejection" &&
+        entry.controlledSha256 !== entry.servedSha256,
+    ),
+  ).toBe(true);
   expect(result.receipt.cleanup).toMatchObject({
     remainingOwnedNativeRunPids: [],
     privateRootRemoved: true,

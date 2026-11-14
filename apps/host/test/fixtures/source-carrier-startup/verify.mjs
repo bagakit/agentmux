@@ -808,6 +808,39 @@ try {
       cancel.abort();
       const cancelledOutcome = await cancelled;
       assert.equal(cancelledOutcome.error?.code, "CONTROL_CANCELLED");
+      const secondarySummarySettlementBeforeDispose = sourceHost.summarySettled().find(
+          (entry) => entry.readId === secondarySummaryEntry.readId,
+        ) ?? null,
+        secondarySummaryPendingBeforeDispose = secondarySummaryUpdates.filter((value) =>
+          value.type === "member" &&
+          value.member?.agentSessionId === receipt.original.sid &&
+          value.state?.status === "pending",
+        ),
+        secondarySummaryTerminalBeforeDispose = secondarySummaryUpdates.filter((value) =>
+          value.type === "member" &&
+          value.member?.agentSessionId === receipt.original.sid &&
+          ["observed", "unavailable"].includes(value.state?.status),
+        );
+      assert(
+        secondarySummaryPendingBeforeDispose.length > 0,
+        "Secondary summary must publish its exact pending member before disposal: " + JSON.stringify(secondarySummaryUpdates),
+      );
+      assert.equal(
+        secondarySummarySettlementBeforeDispose,
+        null,
+        "Secondary summary must remain unsettled until disposal: " + JSON.stringify({
+          secondarySummarySettlementBeforeDispose,
+          secondarySummaryTerminalBeforeDispose,
+          secondarySummaryUpdates,
+          secondarySummaryIssues,
+        }),
+      );
+      assert.equal(
+        secondarySummaryTerminalBeforeDispose.length,
+        0,
+        "Secondary summary must not have a terminal observation before disposal: " + JSON.stringify(secondarySummaryUpdates),
+      );
+      const secondarySummarySettlementBaseline = sourceHost.summarySettled().length;
       await secondarySummary.dispose();
       readers.delete(secondarySummary);
       const boundedSettlement = async (read, key, requestId, label) => {
@@ -831,7 +864,7 @@ try {
           "cancelled member server settlement before configuration release",
         ),
         boundedSettlement(
-          () => sourceHost.summarySettled(),
+          () => sourceHost.summarySettled().slice(secondarySummarySettlementBaseline),
           "readId",
           secondarySummaryEntry.readId,
           "disposed secondary summary server settlement before configuration release",
@@ -850,6 +883,10 @@ try {
         cancelledSummaryId: secondarySummaryEntry.readId,
         cancelledMemberServerSettlement: memberServerSettlement,
         cancelledSummaryServerSettlement: summaryServerSettlement,
+        secondarySummaryPendingBeforeDispose: secondarySummaryPendingBeforeDispose.length > 0,
+        secondarySummarySettlementBeforeDispose,
+        secondarySummaryTerminalBeforeDispose,
+        secondarySummarySettlementBaseline,
         uncancelledMemberIds: earlyMemberIds,
         uncancelledMemberServerSettlements: earlyMemberSettlementsAfterCancel,
         primarySummaryId: primarySummaryEntry.readId,
@@ -867,6 +904,7 @@ try {
       assert.equal(memberServerSettlement.status, "rejected");
       assert.equal(memberServerSettlement.code, "CONTROL_CANCELLED");
       assert.equal(summaryServerSettlement.status, "rejected");
+      assert.equal(summaryServerSettlement.code, 20);
       assert.deepEqual(earlyMemberSettlementsAfterCancel, []);
       assert.equal(primarySummarySettlement, null);
       assert.equal(terminalSummaryAfterCancel.length, 0);

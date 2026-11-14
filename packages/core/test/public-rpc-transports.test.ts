@@ -13,6 +13,8 @@ import { AgentMuxRpcLines, AgentMuxRpcDispatcher, type AgentMuxRpcConnection } f
 import { AgentMuxRpcService } from '../src/public-rpc-service.js'
 import { AGENTMUX_RPC_MAX_MESSAGE_BYTES, parseRpcOpeningCancel } from '../src/public-rpc-frame.js'
 import { AgentMuxError } from '../src/errors.js'
+import { AgentMuxRpcRemoteTransport } from '../src/rpc-remote-transport.js'
+import { AgentMuxRpcStreamTransport } from '../src/rpc-stream-transport.js'
 import { rpcOwnerFixture } from './helpers/public-rpc-owner.js'
 import type { AgentMuxControlRequest } from '../src/control.js'
 import { focusFacts } from './fixtures/desktop-focus-facts.js'
@@ -380,6 +382,77 @@ fs.writeFileSync(${JSON.stringify(ready)}, String(process.pid))
       await expect(pending).resolves.toEqual({ catalog })
     } finally { await client.dispose(); vi.useRealTimers() }
   })
+  it.each([
+    { handoff: 'control', expectedCancels: 1 },
+    { handoff: 'drop-client-handoff-option', expectedCancels: 0 },
+    { handoff: 'drop-remote-handoff-option', expectedCancels: 0 },
+  ])('real SSH finite dispatched cancellation observes the outbound opening-cancel: $handoff', async ({ handoff, expectedCancels }) => {
+    let release = () => {}, entered = () => {}, businessCalls = 0
+    const businessEntered = new Promise<void>(resolve => { entered = resolve }), businessGate = new Promise<void>(resolve => { release = resolve })
+    const h = await endpoint({ execute: async request => {
+      if (request.operation !== 'space.ls') throw new Error('Unexpected SSH business operation')
+      businessCalls++
+      if (businessCalls === 1) { entered(); await businessGate }
+      return { operation: 'space.ls', catalog }
+    } }), bin = join(h.root, 'bin'), trace = join(h.root, 'ssh-stdin.ndjson')
+    await mkdir(bin)
+    // The private child is a real stdio bridge to the remote Unix Host. Its
+    // passive stdin witness distinguishes wire cancellation from local rejection.
+    await writeFile(join(bin, 'ssh'), `#!/usr/bin/env node
+const net = require('node:net'), fs = require('node:fs')
+const socket = net.createConnection(${JSON.stringify(h.path)})
+let pending = ''
+process.stdin.on('data', chunk => {
+  pending += String(chunk)
+  let end
+  while ((end = pending.indexOf('\\n')) !== -1) {
+    const line = pending.slice(0, end); pending = pending.slice(end + 1)
+    if (line) fs.appendFileSync(${JSON.stringify(trace)}, JSON.stringify(JSON.parse(line)) + '\\n')
+  }
+})
+process.stdin.pipe(socket)
+socket.pipe(process.stdout)
+socket.once('error', () => { process.exitCode = 1 })
+`, { mode: 0o700 })
+    vi.stubEnv('PATH', `${bin}:${process.env.PATH}`)
+    if (handoff === 'drop-client-handoff-option') {
+      const original = AgentMuxRpcRemoteTransport.prototype.open
+      vi.spyOn(AgentMuxRpcRemoteTransport.prototype, 'open').mockImplementation(function (this: AgentMuxRpcRemoteTransport,
+        ...args: Parameters<AgentMuxRpcRemoteTransport['open']>) {
+        return original.call(this, args[0], args[1], args[2], args[3], args[4])
+      })
+    } else if (handoff === 'drop-remote-handoff-option') {
+      const original = AgentMuxRpcStreamTransport.prototype.open
+      vi.spyOn(AgentMuxRpcStreamTransport.prototype, 'open').mockImplementation(function (this: AgentMuxRpcStreamTransport,
+        ...args: Parameters<AgentMuxRpcStreamTransport['open']>) {
+        return original.call(this, args[0], args[1], args[2], args[3], args[4])
+      })
+    }
+    const readFrames = async () => {
+      try { return (await readFile(trace, 'utf8')).trim().split('\n').filter(Boolean).map(line => JSON.parse(line)) }
+      catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return []; throw error }
+    }
+    const client = await connectAgentMuxRpc({ endpoint: { transport: 'ssh', host: 'private-opening-cancel' } }), controller = new AbortController()
+    try {
+      const outcome = client.call('space.ls', { target: {} }, { signal: controller.signal }).then(
+        value => ({ value, error: null }), error => ({ value: null, error }))
+      await businessEntered
+      const business = (await readFrames()).find(frame => frame.method === 'space.ls')
+      expect(business, 'The finite request must really cross SSH before cancellation').toBeTruthy()
+      controller.abort()
+      expect((await outcome).error).toMatchObject({ code: 'CONTROL_CANCELLED', controlFailure: { disposition: 'unknown' } })
+      if (expectedCancels) await vi.waitFor(async () => expect((await readFrames()).filter(frame =>
+        frame.method === 'system.opening.cancel' && frame.params?.requestId === business.id)).toHaveLength(expectedCancels))
+      else await delay(300)
+      const cancellations = (await readFrames()).filter(frame => frame.method === 'system.opening.cancel')
+      expect(cancellations, `The ${handoff} mutant must be distinguished by the real SSH wire witness`).toHaveLength(expectedCancels)
+      if (expectedCancels) expect(cancellations[0]).toEqual({ jsonrpc: '2.0', method: 'system.opening.cancel', params: { requestId: business.id } })
+      expect(businessCalls).toBe(1)
+      release()
+      await expect(client.call('space.ls', { target: {} })).resolves.toEqual({ catalog })
+      expect(businessCalls, 'The admitted operation finishes once and is never replayed').toBe(2)
+    } finally { release(); await client.dispose() }
+  }, 15000)
   it('snapshot supplies the original catalog target and keeps independent Workspace metadata', async () => {
     const workspace = { workspaceId: 'w', projectId: 'project', hostId: 'local', path: fixturePath("fixture"), name: 'Work', kind: 'root', repoPath: null, branch: null }
     const seen: AgentMuxControlRequest[] = []

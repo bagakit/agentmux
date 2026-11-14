@@ -150,6 +150,18 @@ registerHooks({
     }
     served = controlled;
     if (
+      process.env.CARRIER_MUTATION === "early-summary-rejection" &&
+      path === "packages/core/src/space-session-client.ts"
+    ) {
+      const anchor = "      const matches = (await ports.clients(group.hostId, signal)).filter";
+      if (served.split(anchor).length !== 2)
+        throw Error("Early summary mutant must match the direct foreign lookup");
+      served = served.replace(
+        anchor,
+        "      if (summaryReadId === 2) throw new AgentMuxError('Controlled early secondary summary rejection.', 'UNKNOWN_HOST')\n" + anchor,
+      );
+    }
+    if (
       process.env.CARRIER_MUTATION === "omit-readiness" &&
       path === "apps/host/src/host.ts"
     ) {
