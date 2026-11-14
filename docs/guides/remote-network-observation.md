@@ -11,7 +11,7 @@ amux settings hosts ls
 amux settings hosts network --host HOST_ID
 ```
 
-`HOST_ID` 要替换成原清单中的 ID。查询使用已保存配置，不能用未提交表单代替；它不会修改路由、保活策略或 Session。GUI 入口为 Settings → Remote → Environments，选中环境后进入 Overview → Network，点击 Read link；后续用 Refresh 重新读取。网络区手动读取，不自动轮询，与命令消费相同事实。
+`HOST_ID` 要替换成原清单中的 ID。查询使用已保存配置，不能用未提交表单代替；它不会修改路由、保活策略或 Session。GUI 入口为 Settings → Remote → Hosts：选中准确的 Host，在 Overview 的网络观察区点击 Read link，之后用 Refresh 重新读取。网络区手动读取，不自动轮询，与命令消费相同事实。
 
 ## 理解来源与缺口
 

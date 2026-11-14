@@ -4,9 +4,11 @@
 
 ## 准备连接器
 
+当前只有 Desktop 组装应用授权 owner：Desktop Main 的 `createDesktopApplicationAccessOwner`（[application-access-owner.ts](../../apps/desktop/src/main/application-access-owner.ts)）创建 Core 的 `AgentMuxApplicationAccessOwner`，记录保存在 Desktop userData 下的 `application-access.sqlite`。独立 headless Host（`apps/host`）不提供该 owner，手机客户端也没有这项入口；公共服务本地没有该 owner 时转接已连接的业务 owner，没有可转接的 owner 时返回 `CONTROL_UNAVAILABLE`（[public-rpc-service.ts](../../packages/core/src/public-rpc-service.ts)）。`configure`、`delete` 与 `apply` 要求经传输层认证的用户，且不能由托管 Agent 发起；清单、计划与原操作查询要求经认证的调用者。
+
 双方需要 POSIX 执行环境、已登记的准确 Host，以及用户安装或编写的应用连接器可执行程序。连接器实现自己的应用官方授权协议，不能用任意目录复制或一个“已授权”布尔值代替。Core 提供通用命令承载，不内置某个外部应用已经支持迁移的承诺。
 
-在 Settings → Remote → Environments → Apps & access 配置来源、目标、双方 Runtime ID 和实际执行的 OS 账户，再配置固定 executable / argv、期望应用账户 ID 和最小 scope。使用绝对可执行文件路径；每个参数是独立字符串。argv 与普通配置不用于存 token 或密码，也不接受操作调用临时指定另一条 shell 命令。Host / Runtime 绑定沿原配置和身份核验，OS 账户由准确执行环境的 `/usr/bin/id -un` 读取；应用账户由连接器核验。
+在 Settings → Remote → Hosts 中选中准确的 Host，进入 Apps & access 配置来源、目标、双方 Runtime ID 和实际执行的 OS 账户，再配置固定 executable / argv、期望应用账户 ID 和最小 scope。使用绝对可执行文件路径；每个参数是独立字符串。argv 与普通配置不用于存 token 或密码，也不接受操作调用临时指定另一条 shell 命令。Host / Runtime 绑定沿原配置和身份核验，OS 账户由准确执行环境的 `/usr/bin/id -un` 读取；应用账户由连接器核验。
 
 ## 公共命令
 

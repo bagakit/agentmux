@@ -1,14 +1,22 @@
-# AgentMux Daemon Cutover Benchmark（历史 Revision 5 协议）
+# AgentMux Daemon Cutover Benchmark（Revision 5 协议）
 
-本文保留原 Revision 5 的实验方法、当时 artifact 与冻结预算，供理解和复核历史实验；不描述当前 Main 或本批恢复候选的性能与验收状态，也不新增当前发布门。下述历史结果与实现期评审仅是原协议记载，本次恢复未附原始 Result／receipt，不能据此认定历史或当前候选通过。当前 artifact 以 manifest 与公开 diagnostics 为准，当前验证职责见[测试策略](../testing/strategy.md)。
+本文定义 AgentMux + CtxMux 与切换前 tmux Runtime 的对比测量协议 Revision 5，并保留各 Revision 的历史结论供复核。仓库中的 Runner [run-daemon-cutover-benchmark.mjs](../../packages/core/scripts/run-daemon-cutover-benchmark.mjs)（`PROTOCOL_REVISION = 5`）实现本协议。本文不描述当前 Main 或任何候选的性能与验收状态，也不新增发布门；当前 artifact 以 manifest 与公开 diagnostics 为准，当前验证职责见[测试策略](../testing/strategy.md)。
 
-原协议状态记载（仅限当时候选）：Protocol Revision 5 observer candidate 已通过实现期双 Runtime smoke、完整 Repository Gate 与独立静态方法 Review；正式 Result 仍等待 CtxMux owner-layer 资源修复、最终 tracked-clean SHA 和 pre-formal provenance 复核。Revision 4 因 CPU counter 与 wall denominator 的窗口错位、无证据的 `1 ns` resolution 声明被 Review 拒绝，且从未产生正式 Result。Revision 3 Round 1 已于 clean candidate `9a92bd14c3f68314354dc406da16f6766fa4c1d5` 运行并得到 `fail`；原协议要求保留 Raw Result，但本次恢复未附该文件。Revision 1 只适用于已经删除的自建 `agentmuxd`，Revision 2 的首轮 Raw Result 保留为 characterization。历史 Revision 都不覆盖、不改写。
-
-Revision 3 Round 1 的所有 workload correctness 与 cleanup oracle 均通过，tmux 仅按冻结规则暴露完整进程树 Stop 限制；主性能维度中 AgentMux 已胜出 input、throughput、attach、reconnect、32 Run scale、steady/peak/released RSS 与完整 Stop。最终 Verdict 仍然失败：Idle RSS `5120 KiB >= 3536 KiB` 是真实 candidate gap；Per-session RSS 的 `142.5 KiB >= 32 KiB` 方向有独立证据支持，但正式样本把 AgentMux 的一个 historical Run 混入 32 live Run，而 tmux 只有 32 live Session，状态不等价；Idle CPU 两端都由百分之一秒精度的 `ps time` 观测成零，证据不可判定。不能把 `0 == 0` 改成通过、放宽严格 `<`、增加容差或从 RSS 事后扣数。原协议记录的结果文件带有 `revision-3-round-1-9a92bd14` 标识，历史输出位置为 `docs/benchmarks/results/`；本次 Git 候选不包含这些 Raw Result，不能用本段替代实际证据。
-
-Revision 5 只修正证据合同，不调整门槛：每个 CPU counter endpoint 在同一个 C probe 内由 `CLOCK_MONOTONIC_RAW` 调用前后包围；受控的独立 CPU-burn 子进程形成全部正 counter step 和最小观测 quantum；CPU 比较使用保守区间，只有 AgentMux 上界严格小于 tmux 下界才通过，1% 预算也使用 AgentMux 上界。Released census 现在要求 AgentMux 精确为 `0 live + 33 historical`、tmux 为 `0/0/0`，FD/Run 使用已验证的实际 historical 分母。Revision 4 已修正的 fresh `1 → 32 live + 0 historical` 状态继续保留。数值阈值、样本量、统计、outlier policy、strict comparison 和 workload correctness 不变。原协议将当时 Idle/Per-Run RSS 缺口列为新正式 Round 的待解决问题；这项历史判断不外推到当前 owner 或 artifact。
+各 Revision 的 Raw Result 只写入当时运行机器的 `docs/benchmarks/results/`。该目录是[本机过程资料](../process-directories.md)，仓库不含这些文件；下文的历史结论只是原协议记载，不能据此认定历史或当前候选通过。
 
 ## 0. Protocol 修正历史
+
+### 各 Revision 的历史结论
+
+以下只适用于当时的候选：
+
+- Revision 5：observer candidate 已通过实现期双 Runtime smoke、完整 Repository Gate 与独立静态方法 Review；正式 Result 仍等待 CtxMux owner-layer 资源修复、最终 tracked-clean SHA 和 pre-formal provenance 复核。原协议把当时的 Idle／Per-Run RSS 缺口列为新正式 Round 的待解决问题；这项历史判断不外推到当前 owner 或 artifact。
+- Revision 4：因 CPU counter 与 wall denominator 的窗口错位、无证据的 `1 ns` resolution 声明被 Review 拒绝，从未产生正式 Result。
+- Revision 3 Round 1：在 clean candidate `9a92bd14c3f68314354dc406da16f6766fa4c1d5` 运行并得到 `fail`，结果文件带 `revision-3-round-1-9a92bd14` 标识。该提交不在 main 历史上，只由本机 tag `salvage/owner-release-ztetimme` 保留。所有 workload correctness 与 cleanup oracle 均通过，tmux 仅按冻结规则暴露完整进程树 Stop 限制；主性能维度中 AgentMux 已胜出 input、throughput、attach、reconnect、32 Run scale、steady/peak/released RSS 与完整 Stop。最终 Verdict 仍然失败：Idle RSS `5120 KiB >= 3536 KiB` 是真实 candidate gap；Per-session RSS 的 `142.5 KiB >= 32 KiB` 方向有独立证据支持，但正式样本把 AgentMux 的一个 historical Run 混入 32 live Run，而 tmux 只有 32 live Session，状态不等价；Idle CPU 两端都由百分之一秒精度的 `ps time` 观测成零，证据不可判定。不能把 `0 == 0` 改成通过、放宽严格 `<`、增加容差或从 RSS 事后扣数。
+- Revision 2：首轮 Raw Result 保留为 characterization（见下文 Revision 3 一节）。
+- Revision 1：只适用于已经删除的自建 `agentmuxd`。
+
+历史 Revision 都不覆盖、不改写。Revision 5 只修正证据合同，不调整门槛：每个 CPU counter endpoint 在同一个 C probe 内由 `CLOCK_MONOTONIC_RAW` 调用前后包围；受控的独立 CPU-burn 子进程形成全部正 counter step 和最小观测 quantum；CPU 比较使用保守区间，只有 AgentMux 上界严格小于 tmux 下界才通过，1% 预算也使用 AgentMux 上界。Released census 要求 AgentMux 精确为 `0 live + 33 historical`、tmux 为 `0/0/0`，FD/Run 使用已验证的实际 historical 分母。Revision 4 已修正的 fresh `1 → 32 live + 0 historical` 状态继续保留。数值阈值、样本量、统计、outlier policy、strict comparison 和 workload correctness 不变。
 
 ### Revision 5：可证明的 CPU 区间与 Released census
 
@@ -27,7 +35,7 @@ Revision 5 只修正证据合同，不调整门槛：每个 CPU counter endpoint
 
 ### Revision 3：Baseline 与执行顺序
 
-原协议记载 Revision 2 的 `round-1-308dd27c` 结果文件曾输出至 `docs/benchmarks/results/`；本次恢复未附这些原始文件。它暴露了四个 Runner／Protocol 方法错误，因此只能作为 characterization，不能据此判定产品回退：
+原协议记载 Revision 2 的 `round-1-308dd27c` 结果文件曾输出至当时本机的 `docs/benchmarks/results/`，仓库不含该文件。它暴露了四个 Runner／Protocol 方法错误，因此只能作为 characterization，不能据此判定产品回退：
 
 - tmux Reconnect 收到完整 Run object，却把它当 session string 拼成 `=[object Object]`；Revision 3 统一让两个 Runtime 消费同一个 Run object，并核对 exact session 与 PID。
 - tmux 在首个 pane 已经按默认较小 history 创建后才设置 per-window `history-limit 50000`，4 MiB capture 已经丢失 ready／payload prefix；Revision 3 在任何 `new-session` 之前先设置 global window history limit，同时继续保留历史 per-window command。
@@ -54,7 +62,7 @@ Revision 5 只修正证据合同，不调整门槛：每个 CPU counter endpoint
 ### 强制 tmux Baseline
 
 - 系统 `tmux 3.6b`，使用独立 `-L agentmux-benchmark-*` Server，不读取或修改用户现有 tmux Server／Session。
-- 行为冻结自切换前提交 `2b02df4` 的 `packages/core/src/tmux-client.ts` 与 Runtime：
+- 行为冻结自切换前的 `packages/core/src/tmux-client.ts` 与 Runtime。原协议记录的提交 `2b02df452824db971c56bd003632b01a4c19cd28` 不在 main 历史上，只由本机 tag `salvage/owner-release-ztetimme` 保留；main 上切换提交 `aea6a39fdbcd1cdaa7668bfad3fcab7df0bd69e4` 的父提交 `f90ee88988ed71e04e6c3da2043960c5a8596c87` 中该文件内容与之相同，复核时用这个提交：
   - Create：任何 `new-session` 前先执行 `set-option -gw history-limit 50000`；每个 Session 仍执行 `new-session -d`，随后设置 `remain-on-exit on` 与 per-window `history-limit 50000`；
   - Input：每次 `load-buffer` + `paste-buffer -d`；
   - Visible Output：每 750 ms 执行 `capture-pane -p -e -J -S -50000`，与旧 Runtime 默认 Poll Interval 相同；
@@ -169,8 +177,8 @@ Revision 5 只修正证据合同，不调整门槛：每个 CPU counter endpoint
 
 - AgentMux CtxMux daemon：Idle RSS 不超过 96 MiB；32 Run Peak RSS 不超过 160 MiB；Idle CPU 区间上界不超过 1%。Live child、Attachment 与 transient thread 在 Stop 后必须归零。固定 CtxMux candidate 尚无 global Run GC，historical Run 可保留的 FD 成本不得超过 `packages/core/test/fixtures/reliability-budgets.json` 冻结的每 Run `2.25`；这项资源证据必须与最终 SHA 一起复核，不能误写成“历史 Run 已删除”或“FD 零保留”。
 - 该历史协议引用当时 `docs/testing/strategy.md` 的 Runtime Client Queue、Replay、Frame、Session 与 Client 上限，Benchmark 不提供放宽开关；本页的历史引用不替当前 owner 定义容量或发布预算。
-- Desktop：Terminal 增量 256 MiB、Editor 增量 512 MiB、释放后进程组 1 GiB、Warm Cache
-  漂移 128 MiB。Desktop 数字不与 Headless tmux Server 混合。
+- Desktop（协议冻结时的数值）：Terminal 增量 256 MiB、Editor 增量 512 MiB、释放后进程组 1 GiB、Warm Cache
+  漂移 128 MiB。Desktop 数字不与 Headless tmux Server 混合。当前 Desktop 资源预算由 [resource-probe.ts](../../apps/desktop/src/main/resource-probe.ts) 持有，释放后增量已改为 576 MiB，见[测试策略](../testing/strategy.md#资源与故障证据)。
 
 ### Release Primary Dimensions
 
