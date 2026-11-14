@@ -41,7 +41,7 @@
 .agent-work-setup__actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; border-top: 1px solid var(--line-soft); padding-top: 12px; }
 .agent-work-setup__actions > span { font-size: 11px; line-height: 1.5; color: var(--text-2); }
 .agent-work-setup__actions > div { display: flex; gap: 8px; flex-shrink: 0; }
-.agent-work-mode-badge { display: inline-flex; align-items: center; flex: none; padding: 2px 4px; border-radius: 5px; color: var(--text-2); font-size: var(--fs-meta); line-height: 1.4; vertical-align: middle; white-space: nowrap; pointer-events: auto; }
+.agent-work-mode-badge { display: inline-flex; align-items: center; flex: none; padding: 2px 2px; border-radius: 5px; color: var(--text-2); font-size: var(--fs-meta); line-height: 1.4; vertical-align: middle; white-space: nowrap; pointer-events: auto; }
 .agent-work-mode-badge:focus-visible { outline: 2px solid var(--focus-line); outline-offset: 2px; }
 .agent-execution-relation, .agent-execution-relation__part { display: inline-flex; align-items: center; }
 .agent-execution-relation { gap: 2px; }

@@ -13,10 +13,10 @@ export function ExecutionRouteLink({ relation }: { relation: ExecutionRouteRelat
   const kind = relation.kind === 'cascade' && hops === null ? 'unconfirmed' : relation.kind
   const label = kind === 'same-device' ? 'Same device' : kind === 'direct' ? 'Direct execution path'
     : kind === 'cascade' ? `${hops} execution hops` : 'Execution path unconfirmed'
-  const width = hops === null ? 28 : Math.max(28, 18 + String(hops).length * 6)
+  const width = hops === null ? 16 : Math.max(22, 12 + String(hops).length * 6)
   return <svg className="execution-route-link" data-path-state={kind} width={width} height={18} viewBox={`0 0 ${width} 18`}
     role="img" aria-label={label} fill="none" stroke="currentColor" strokeWidth={1.2} strokeLinecap="round" strokeLinejoin="round">
-    {kind === 'same-device' ? <path d="M2 9h4m16 0h4M12 6h-2a3 3 0 0 0 0 6h2m4-6h2a3 3 0 0 1 0 6h-2m-5-3h6" />
+    {kind === 'same-device' ? <path d="M1 9h2m10 0h2M7 6H6a3 3 0 0 0 0 6h1m2-6h1a3 3 0 0 1 0 6H9M6 9h4" />
       : <path d={`M2 9h${width - 4}`} strokeDasharray={kind === 'unconfirmed' ? '2 3' : undefined} />}
     {hops !== null ? <><rect x={width / 2 - (String(hops).length * 6 + 4) / 2} y={2} width={String(hops).length * 6 + 4} height={14} rx={4} className="execution-route-link__count-surface" stroke="none" />
       <text x={width / 2} y={12.5} textAnchor="middle" fill="currentColor" stroke="none" fontSize={10}>{hops}</text></> : null}
