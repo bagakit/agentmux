@@ -47,7 +47,21 @@ export type FileDocumentIssue =
   | { kind: 'deleted' }
   | { kind: 'read-error'; code: string; message: string }
   | { kind: 'write-error'; code: string; message: string }
-  | { kind: 'write-unknown'; code: string; message: string; attempted: { content: string; expectedRevision: string | null; generation: number; resource: { hostId: string; path: string } }; checkMessage?: string }
+  | { kind: 'write-unknown'; code: string; message: string; attempted: { content: string; expectedRevision: string | null; generation: number; resource: { hostId: string; path: string }; source?: FileDocument['readSource'] }; checkMessage?: string }
+
+/** The current buffer cannot be reconstructed from a confirmed current disk body.
+ * This is retention/discard input, never dirty state or permission to write. */
+export function hasRecoverableFileBuffer(document: FileDocument | undefined, issue: FileDocumentIssue | undefined): boolean {
+  // Overwrite of a formerly clean deleted file can end in write-unknown/error;
+  // replacing that diagnostic cannot revoke custody of its existing body.
+  return Boolean(document && issue)
+}
+
+/** A write receipt has no same-opened-FD read source for the replacement inode. */
+export function withoutFileReadIdentity(document: FileDocument): FileDocument {
+  const { readIdentity: _previousRead, ...kept } = document
+  return kept
+}
 
 export type FileRenameProjectionCollision = {
   owner: 'tab' | 'document' | 'region'
@@ -416,7 +430,7 @@ export function reduceDocumentWritten(
     (issue?.kind === 'deleted' && !clearsIssue)
   return {
     ...state,
-    documents: { ...state.documents, [key]: { ...document, revision, noteWriteAttribution: noteWriteAttribution ?? document.noteWriteAttribution,
+    documents: { ...state.documents, [key]: { ...withoutFileReadIdentity(document), revision, noteWriteAttribution: noteWriteAttribution ?? document.noteWriteAttribution,
       ...(noteProvenance ? { noteProvenance } : {}),
       ...(savedContent !== undefined && (state.documentGenerations[key] ?? 0) === savedGeneration && !hasNewerDiskConflict ? { content: savedContent } : {}) } },
     dirtyDocuments: {
@@ -450,8 +464,9 @@ export function reduceDocumentRead(
       documentIssues: { ...state.documentIssues, [key]: { ...unknown,
         checkMessage: result.status === 'error' ? result.message : 'The current file was observed. This original Note operation still needs its durable history receipt; matching bytes do not prove it committed.' } } }
     if (result.status === 'read' && result.document.content === unknown.attempted.content) {
-      return reduceDocumentWritten({ ...state, documentObservationGenerations }, workspaceId, path,
+      const settled = reduceDocumentWritten({ ...state, documentObservationGenerations }, workspaceId, path,
         unknown.attempted.generation, result.document.revision, unknown.attempted.expectedRevision, 0, undefined, undefined, result.document.noteProvenance)
+      return settled.documentIssues[key]?.kind === 'write-unknown' ? settled : reduceDocumentRead(settled, workspaceId, path, result)
     }
     if (result.status === 'read' && result.document.revision === unknown.attempted.expectedRevision) {
       return { ...state, documentObservationGenerations, documentIssues: withoutIssue(state.documentIssues, key) }
@@ -498,6 +513,12 @@ export function reduceDocumentRead(
       message: 'The file on disk is binary. The existing text buffer is preserved; open it externally to inspect the new file.'
     } }
   }
+  // A recovered observation is not approval to discard a buffer whose prior
+  // saved body was unavailable. Reload explicitly adopts this observed body.
+  if (hasRecoverableFileBuffer(current, unknown) && result.document.content !== current.content) return {
+    ...state, documentObservationGenerations,
+    documentIssues: { ...state.documentIssues, [key]: { kind: 'changed', observed: result.document } }
+  }
   if (result.document.revision === current.revision) {
     const issue = state.documentIssues[key]
     const clearsIssue = issue?.kind === 'changed' || issue?.kind === 'deleted' || issue?.kind === 'read-error'
@@ -507,11 +528,14 @@ export function reduceDocumentRead(
       documentObservationGenerations,
       ...(matchesCurrentContent
         ? { dirtyDocuments: { ...state.dirtyDocuments, [key]: false },
-          ...(result.document.noteProvenance ? { documents: { ...state.documents, [key]: { ...current,
-            noteProvenance: result.document.noteProvenance,
+          documents: { ...state.documents, [key]: { ...withoutFileReadIdentity(current),
+            ...(result.document.readSource ? { readSource: result.document.readSource } : {}),
+            ...(result.document.legacyMainNote ? { legacyMainNote: result.document.legacyMainNote } : {}),
+            ...(result.document.readIdentity ? { readIdentity: result.document.readIdentity } : {}),
+            ...(result.document.noteProvenance ? { noteProvenance: result.document.noteProvenance,
             // A read may reconcile an existing write receipt, but cannot invent one.
             ...(current.noteWriteAttribution?.status === 'unconfirmed' && result.document.noteProvenance.status === 'recorded'
-              ? { noteWriteAttribution: { status: 'recorded' as const } } : {}) } } } : {}) }
+              ? { noteWriteAttribution: { status: 'recorded' as const } } : {}) } : {}) } } }
         : {}),
       ...(clearsIssue ? { documentIssues: withoutIssue(state.documentIssues, key) } : {})
     }
@@ -524,7 +548,7 @@ export function reduceDocumentRead(
   return {
     ...state,
     documentObservationGenerations,
-    documents: { ...state.documents, [key]: { ...result.document, ...(current.noteConversion ? { noteConversion: current.noteConversion } : {}),
+    documents: { ...state.documents, [key]: { ...result.document, ...(result.document.legacyMainNote ?? current.legacyMainNote ? { legacyMainNote: result.document.legacyMainNote ?? current.legacyMainNote } : {}), ...(current.noteConversion ? { noteConversion: current.noteConversion } : {}),
       ...(current.noteEditing?.receipt ? { noteEditing: { receipt: current.noteEditing.receipt } } : {}) } },
     dirtyDocuments: { ...state.dirtyDocuments, [key]: false },
     documentGenerations: { ...state.documentGenerations, [key]: (state.documentGenerations[key] ?? 0) + 1 },
@@ -601,8 +625,8 @@ export function reconcileWorkbenchFileProjection(
       if (!openDocumentKeys.has(key)) removedDocumentKeys.add(key)
     }
   }
-  for (const key of Object.keys(dirtyDocuments)) {
-    if (!dirtyDocuments[key] || !documents[key]) continue
+  for (const key of Object.keys(documents)) {
+    if (!dirtyDocuments[key] && !hasRecoverableFileBuffer(documents[key], documentIssues[key])) continue
     if (!removedDocumentKeys.has(key)) { openDocumentKeys.add(key); continue }
     // A hidden/removed include cannot discard an unsaved shared-file draft.
     const header = readNoteMarkdownHeader(documents[key]!.content)

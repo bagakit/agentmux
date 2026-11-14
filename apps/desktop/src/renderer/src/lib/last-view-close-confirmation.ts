@@ -57,8 +57,8 @@ export function lastViewCloseCopy(confirmation: LastViewCloseConfirmation, scope
   const { agents, unconfirmed, dirtyCount } = confirmation
   const unsaved = dirtyCount > 0
     ? scope === 'split'
-      ? ' Unsaved editor changes in this split will be discarded.'
-      : ' Unsaved editor changes will be discarded.'
+      ? ' Unsaved or retained editor contents in this split will be discarded.'
+      : ' Unsaved or retained editor contents will be discarded.'
     : ''
   const unconfirmedSentence = unconfirmed.length > 0
     ? ` Whether ${list(unconfirmed)} still ${unconfirmed.length > 1 ? 'have' : 'has'} another View could not be confirmed; closing does not stop ${unconfirmed.length > 1 ? 'them' : 'it'}.`
@@ -80,12 +80,12 @@ export function lastViewCloseCopy(confirmation: LastViewCloseConfirmation, scope
     }
   }
   return {
-    title: 'Discard unsaved changes?',
+    title: 'Discard editor contents?',
     description: scope === 'split'
-      ? 'Closing this split will discard changes that have not been saved.'
+      ? 'Closing this split will discard its unsaved or retained editor contents.'
       : scope === 'tabs'
-        ? 'Closing these tabs will discard changes that have not been saved.'
-        : 'Closing this editor tab will discard changes that have not been saved.',
+        ? 'Closing these tabs will discard their unsaved or retained editor contents.'
+        : 'Closing this editor tab will discard its unsaved or retained contents.',
     confirmLabel: 'Discard & Close'
   }
 }

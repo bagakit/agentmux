@@ -8,9 +8,10 @@ import { documentLifetime, fileSaveTails } from './file-document-bookkeeping'
 import { hasFileDocumentConsumer } from './file-document-consumers'
 import { hasNoteComposition } from './note-live-merge'
 import { readNoteMarkdownHeader } from '@agentmux/core/note-format'
+import { hasRecoverableFileBuffer } from './file-workbench-state'
 
 type State = Pick<AppState, 'tabs' | 'layouts' | 'sessions' | 'documents' | 'dirtyDocuments' | 'documentGenerations' |
-  'documentObservationGenerations' | 'savingDocuments' | 'closingWorkbenchViews' | 'config'>
+  'documentObservationGenerations' | 'savingDocuments' | 'closingWorkbenchViews' | 'config'> & Partial<Pick<AppState, 'documentIssues'>>
 const stale = () => new AgentMuxError('The original close target, Run, last View or draft changed. Its current content and healthy work are retained; prepare its current plan.', 'WORKBENCH_CLOSE_STALE')
 function originalPlan(state: State, input: SpaceClosePrepare): WorkbenchViewClosePlan {
   const t = input.target, tab = state.tabs[t.tabId], layout = state.layouts[t.displayWorkspaceId]
@@ -37,7 +38,7 @@ function fileWitness(state: State, workspaceId: string, path: string, cache?: Ma
   const held = cache?.get(key); if (held !== undefined) return held
   const witness = spaceCloseDigest({ workspace: workspace ? { id: workspace.id, hostId: workspace.hostId, path: workspace.path } : null,
     document: document ?? null, generation: state.documentGenerations[key] ?? null, observation: state.documentObservationGenerations[key] ?? null,
-    lifetime: documentLifetime(key), dirty: state.dirtyDocuments[key] === true, saving: state.savingDocuments[key] === true,
+    lifetime: documentLifetime(key), dirty: state.dirtyDocuments[key] === true, issue: state.documentIssues?.[key] ?? null, saving: state.savingDocuments[key] === true,
     consumer: hasFileDocumentConsumer(key), composition: hasNoteComposition(key) })
   cache?.set(key, witness); return witness
 }
@@ -87,7 +88,7 @@ export function captureWorkbenchClose(state: State, input: SpaceClosePrepare): S
     const workspaces = new Map(state.config?.workspaces.map(w => [w.id, w]) ?? [])
     for (const [key, { owner, regionIds }] of documents) {
       const document = state.documents[key]
-      if (!document || !state.dirtyDocuments[key] || outside.has(key) || hasFileDocumentConsumer(key) || document.noteEditing?.share || document.noteEditing?.shareUndo) continue
+      if (!document || !state.dirtyDocuments[key] && !hasRecoverableFileBuffer(document, state.documentIssues?.[key]) || outside.has(key) || hasFileDocumentConsumer(key) || document.noteEditing?.share || document.noteEditing?.shareUndo) continue
       const header = readNoteMarkdownHeader(document.content)
       if (header.status === 'valid' && header.kind === 'shared-block') continue
       const workspace = workspaces.get(owner.workspaceId)

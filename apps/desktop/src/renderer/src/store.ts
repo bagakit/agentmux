@@ -1,4 +1,10 @@
 import type { GoalRelationAccess } from '@agentmux/core/control'
+import { noteHistoryCoreTarget, readNoteFileHistory } from './lib/note-history-source'
+import { createSourceFilesWorkbench, emptySourceFilesInputs, sourceFilesQuery, sourceFilesMappingMatches, sourceFilesWorkspaceMatches, type SourceFilesInputs } from './lib/source-files-workbench'
+import { captureFileEffect, applyFileEffect } from './lib/file-mutation-projection'
+import type { SourceFilesLocator, SourceFilesResolution } from '../../shared/source-files'
+import type { FolderDirectoryRegistration } from '@agentmux/core/space-folder'
+import type { FileMutationEffect, FileReadIdentity } from '@agentmux/core/files'
 import { openSourceFolderInput } from './lib/space-mount-view'
 import { observeMountedSpaceWindow } from './lib/mounted-space-observation'
 import { editMountedAgentOpen, editMountedLauncherSelection, type MountedAgentOpenInput, type MountedLauncherSelection, type MountedLauncherSlot } from './lib/space-mount-launch'
@@ -162,7 +168,7 @@ import type { WorkbenchPresentation } from './lib/workbench-presentation'
 import { mainRegionReference, desktopMainSurface, desktopSelection, desktopSpaceSelectionAfterClose, resolveDesktopSpaceSelection, resolveDesktopMoteSelection, resolveWorkbenchOccurrenceSelection, reconcileWorkbenchSpaceSelection, workbenchSelectionCatalog, sessionWorkbenchReferences, type SessionLocationReference, projectWorkbenchSpaceSelection, workbenchObjectLayout, restoreWorkbenchSpaceSelection, DesktopFocusFailure } from './lib/desktop-focus-navigation'
 import type { FocusAgentReveal, FocusAgentTarget } from './lib/focus-agent-navigation'
 import { captureDesktopInput, readDesktopPresentation, readDesktopOverlays, requestDesktopSettingsNavigation, readGoalReadingPresentation, readFocusAgentPresentation, readMoteLinkPresentation, awaitDesktopPresentation, desktopInputPreserved } from './lib/desktop-presentation'
-import { notebookRelocations, refreshNotebookLibrary, recordNotebookChanges, restoreNotebookRecoveries, useNotebookLibrary, type NotebookRecovery } from './lib/notebook-library'
+import { refreshNotebookLibrary, restoreNotebookRecoveries, useNotebookLibrary, type NotebookRecovery } from './lib/notebook-library'
 import type { AgentMuxDesktopSpaceSelection, AgentMuxDesktopFocusResult, AgentMuxSpatialSave, AgentMuxSpatialIssue } from '@agentmux/core/control'
 import type { SpaceZoneBindings, SpatialRequestBinding } from '../../shared/space-addresses'
 import { directoryIdentity, originalTopicAddress, topicSpatialAddress, workspaceZoneId, homeZoneId } from '../../shared/space-addresses'
@@ -344,6 +350,8 @@ import { createBrowserProjectionEventQueue, reduceBrowserEvent } from './lib/bro
 import { nativeBrowserContainerChanged, projectNativeBrowserOpening } from './lib/browser-child-projection'
 import {
   bumpWorkspaceFileRevision,
+  hasRecoverableFileBuffer,
+  withoutFileReadIdentity,
   reduceDocumentAttached,
   reduceDocumentContent,
   reduceFileDocumentContent,
@@ -360,8 +368,6 @@ import {
   fileOpenReferenceMatches,
   fileOpenSplitMatches,
   fileOpenLauncherMatches,
-  reduceFileRename,
-  findFileRenameProjectionCollision,
   findFileWorkbenchSurface,
   reconcileWorkbenchFileProjection,
   type FileDocumentIssue
@@ -1043,6 +1049,16 @@ export type AppState = GitReadingActions & {
   workbenchSpaceSelection: AgentMuxDesktopSpaceSelection | null
   /** Original user-document input; foreign business snapshots are never persisted here. */
   mountedSpaceInputs: unknown
+  sourceFilesInputs: SourceFilesInputs
+  legacyMainNoteReferences: Record<string, NonNullable<FileDocument['legacyMainNote']>>
+  resolveFilesSource(workspaceId: string): Promise<SourceFilesResolution>
+  selectCurrentFilesSource(workspaceId: string): Promise<SourceFilesResolution>
+  selectFilesRegistration(workspaceId: string, registration: SpaceMountRecord): Promise<SourceFilesResolution>
+  inspectFilesFolderRequest(key: string): Promise<void>
+  useFilesSourceFolder(workspaceId: string, packet: FolderDirectoryRegistration): Promise<SourceFilesResolution>
+  inspectFilesMutation(operationId: string): Promise<void>
+  inspectFileCreation(key: string): Promise<void>
+  observeFilesSource(workspaceId: string): Promise<() => void>
   selectedSpaceMount: unknown
   mountedSpaceObservations: Record<string, MountedSpaceObservation>
   mountedSpaceSessions: Record<string, MountedSessionObservation>
@@ -2292,6 +2308,15 @@ async function readNoteHistoryTarget(tabId: string, regionId: string, noteId: st
   const state = useAppStore.getState(), tab = state.tabs[tabId], surface = tab?.regions[regionId]
   if (surface?.kind !== 'file') throw Error('The original Note file occurrence is unavailable.')
   const key = documentKey(surface.workspaceId, surface.path), lifetime = documentLifetime(key)
+  const binding = state.documents[key]?.readSource
+  if (binding) {
+    const original = structuredClone(binding), observed = (await api.sourceFiles.call(original.target, 'file.read', original.query)).result
+    if (documentLifetime(key) !== lifetime || JSON.stringify(useAppStore.getState().documents[key]?.readSource) !== JSON.stringify(original)) throw Error('The original Source history binding changed. Its selection and draft are retained.')
+    if (!observed.resource || ['hostId', 'workspaceId', 'workspacePath', 'zoneId', 'zonePath', 'path', 'logicalDirectory'].some(field => observed.resource![field as keyof typeof original.resource] !== original.resource[field as keyof typeof original.resource])) throw Error('The original Source history mapping changed. Its saved packet is retained.')
+    if (allowDeleted && observed.result.status === 'deleted') return { target: { ...original.query, expectedResource: observed.resource, noteId, source: original }, deleted: true }
+    const confirmed = confirmNoteHistoryTarget(original.query, noteId, observed, original.resource.path)
+    return { ...confirmed, target: { ...confirmed.target, source: original } }
+  }
   const params = noteHistoryReadParams(state, scratchTopicsForConfig(state.config, state.scratchTopicSnapshots) ?? [], tabId, regionId)
   let changed = false
   const current = () => {
@@ -2316,7 +2341,7 @@ async function readNoteHistoryTarget(tabId: string, regionId: string, noteId: st
 
 function noteAttemptResourceCurrent(workspaceId: string, path: string, attempt: NoteFileAttempt): boolean {
   const current = useAppStore.getState().config?.workspaces.find(workspace => workspace.id === workspaceId)
-  return attempt.resource.workspaceId === workspaceId && attempt.resource.path === path && current?.hostId === attempt.resource.hostId && current.path === attempt.resource.workspacePath
+  return attempt.resource.workspaceId === workspaceId && attempt.resource.path === path && current?.hostId === attempt.resource.hostId && current.path === attempt.resource.workspacePath && (!attempt.source || JSON.stringify(useAppStore.getState().documents[documentKey(workspaceId, path)]?.readSource) === JSON.stringify(attempt.source))
 }
 /** Observe the exact original resource for one in-flight Note operation, including away-and-back changes. */
 function watchNoteResource(workspaceId: string, original: { hostId: string; path: string } | undefined) {
@@ -2369,7 +2394,7 @@ async function settleNoteWritten(workspaceId: string, path: string, lifetime: nu
       else if (issue?.kind !== 'changed' || issue.observed.revision === result.revision) delete issues[key]
       const content = merged.status === 'merged' ? merged.content : current.content
       const { noteProvenance: _oldProvenance, noteWriteAttribution: _oldAttribution, ...kept } = current
-      return { documents: { ...state.documents, [key]: { ...kept, content, revision: result.revision,
+      return { documents: { ...state.documents, [key]: { ...withoutFileReadIdentity(kept), content, revision: result.revision,
         ...(result.noteProvenance ? { noteProvenance: result.noteProvenance } : {}), ...(result.noteAttribution ? { noteWriteAttribution: result.noteAttribution } : {}),
         noteEditing: { baseline: { content: canonical, revision: result.revision }, receipt, ...(current.noteEditing?.shares ? { shares: current.noteEditing.shares } : {}), ...(current.noteEditing?.share ? { share: current.noteEditing.share } : {}), ...(current.noteEditing?.shareUndo ? { shareUndo: current.noteEditing.shareUndo } : {}), ...(current.noteEditing?.shareUndoReceipt ? { shareUndoReceipt: current.noteEditing.shareUndoReceipt } : {}) } } },
         dirtyDocuments: { ...state.dirtyDocuments, [key]: content !== canonical },
@@ -2404,7 +2429,7 @@ async function reconcileNoteRead(workspaceId: string, path: string, lifetime: nu
     const eventId = pending.written?.noteHistory?.eventId ?? (pending.enhanced || pending.action ? pending.operationId : undefined)
     if (pending.target && eventId) {
       try {
-        const response = await api.files.historyPublic({ ...pending.target, eventId, includeContent: true })
+        const response = await readNoteFileHistory(pending.target, { eventId, includeContent: true })
         if (!owns() || useAppStore.getState().documents[key]?.noteEditing?.attempt?.operationId !== pending.operationId) return true
         if (response.result.status === 'read') {
           const event = response.result.entries.find(entry => entry.eventId === eventId)
@@ -2456,7 +2481,7 @@ async function reconcileNoteRead(workspaceId: string, path: string, lifetime: nu
         noteMerge: { baseContent: baseline.content, proposedContent: document.content, reason: merged.status === 'unavailable' ? merged.message : 'The current file overlaps this local draft or changes a block identity.' } } },
         documentObservationGenerations: { ...state.documentObservationGenerations, [key]: (state.documentObservationGenerations[key] ?? 0) + 1 } }
       const issues = { ...state.documentIssues }; delete issues[key]
-      return { documents: { ...state.documents, [key]: { ...document, ...result.document, content: merged.content,
+      return { documents: { ...state.documents, [key]: { ...withoutFileReadIdentity(document), ...result.document, content: merged.content,
         noteEditing: { ...document.noteEditing, baseline: { content: result.document.content, revision: result.document.revision } } } },
         dirtyDocuments: { ...state.dirtyDocuments, [key]: merged.content !== result.document.content },
         documentGenerations: { ...state.documentGenerations, [key]: generation + 1 },
@@ -2465,6 +2490,61 @@ async function reconcileNoteRead(workspaceId: string, path: string, lifetime: nu
     if (applied) return true
   }
   return true
+}
+
+/** Prefer an actual complete Source read when mapped; legacy unbudgeted reading remains usable. */
+async function readWorkspaceFileDocument(workspaceId: string, path: string, originalSource?: FileDocument['readSource']): Promise<import('../../shared/contracts').WorkspaceFileReadResult> {
+  if (originalSource) {
+    const observed = await api.sourceFiles.call(originalSource.target, 'file.read', originalSource.query)
+    if (!observed.result.resource || ['hostId', 'workspaceId', 'workspacePath', 'zoneId', 'zonePath', 'path', 'logicalDirectory'].some(key => observed.result.resource![key as keyof typeof originalSource.resource] !== originalSource.resource[key as keyof typeof originalSource.resource])) return {
+      status: 'error', code: 'FILE_SOURCE_MAPPING_CHANGED', message: 'The captured original Source file mapping changed. Its request and buffer remain retained.'
+    }
+    if (observed.result.result.status === 'unknown') return { status: 'error', code: observed.result.result.code, message: observed.result.result.message }
+    return observed.result.result.status === 'read' ? { status: 'read', document: { ...observed.result.result.document, path, readSource: originalSource } } : observed.result.result
+  }
+  const input = useAppStore.getState().sourceFilesInputs.selections[workspaceId]
+  const existing = useAppStore.getState().documents[documentKey(workspaceId, path)]?.readSource
+  if (existing && input && fileSaveTails.has(documentKey(workspaceId, path)) && JSON.stringify(existing.target) !== JSON.stringify(input.target)) return {
+    status: 'error', code: 'FILE_SOURCE_SELECTION_CHANGED', message: 'The original Source save is still settling. Its binding, request and body are retained; the later Source was not attached.'
+  }
+  if (existing && (!input || !sourceFilesWorkspaceMatches(input.workspace, useAppStore.getState().config?.workspaces.find(workspace => workspace.id === workspaceId)))) return {
+    status: 'error', code: 'FILE_SOURCE_SELECTION_CHANGED', message: 'The original Source directory is no longer selected. Its body and original binding are retained.'
+  }
+  if (input?.locator && sourceFilesWorkspaceMatches(input.workspace, useAppStore.getState().config?.workspaces.find(workspace => workspace.id === workspaceId))) {
+    try {
+      const read = await api.sourceFiles.call(input.target, 'file.read', sourceFilesQuery(input.locator, path))
+      const current = useAppStore.getState().sourceFilesInputs.selections[workspaceId]
+      if (current !== input || !read.carrierCurrent || read.result.resource && !sourceFilesMappingMatches(input.locator, read.result.resource, path)) throw new Error('The original Source selection or mapping changed while reading.')
+      if (read.result.result.status === 'read' && read.result.resource) {
+        const prior = useAppStore.getState().documents[documentKey(workspaceId, path)], header = readNoteMarkdownHeader(read.result.result.document.content)
+        let legacy = prior?.legacyMainNote ?? useAppStore.getState().legacyMainNoteReferences[documentKey(workspaceId, path)]
+        if (!legacy && !prior?.readSource && prior?.noteProvenance?.status === 'recorded') legacy = { noteId: prior.noteProvenance.noteId, resource: prior.noteProvenance.resource,
+          provenance: prior.noteProvenance, ...(prior.noteEditing?.attempt?.target && !prior.noteEditing.attempt.target.source ? { target: prior.noteEditing.attempt.target } : {}) }
+        if (!legacy && header.status === 'valid') {
+          const page = useNotebookLibrary.getState().state?.pages[header.noteId], expected = input.workspace
+          if (page && page.resource.hostId === expected.hostId && page.resource.workspaceId === expected.id && page.resource.workspacePath === expected.path && page.resource.path === path) legacy = { noteId: header.noteId, resource: structuredClone(page.resource) }
+        }
+        return { status: 'read', document: { ...read.result.result.document, path,
+          readSource: { target: input.target, resource: read.result.resource, query: sourceFilesQuery(input.locator, path) }, ...(legacy ? { legacyMainNote: legacy } : {}) } }
+      }
+      if (read.result.result.status !== 'unknown' && read.result.result.status !== 'error') return read.result.result
+    } catch { /* This optional provenance observation cannot remove the existing reader. */ }
+    const legacy = await api.files.read(workspaceId, path)
+    return legacy.status === 'read' ? { ...legacy, document: withoutFileReadIdentity(legacy.document) } : legacy
+  }
+  return await api.files.read(workspaceId, path)
+}
+
+async function writeWorkspaceFileDocument(workspaceId: string, input: import('../../shared/contracts').WorkspaceFileWriteInput, source?: FileDocument['readSource']): Promise<import('../../shared/contracts').WorkspaceFileWriteResult> {
+  if (!source) return await api.files.write(workspaceId, input)
+  const original = structuredClone(source)
+  if (input.expectedRevision === null) return (await api.sourceFiles.call(original.target, 'file.create', {
+    ...original.query, expectedResource: original.resource, content: input.content, expectedRevision: null
+  })).result.result
+  return (await api.sourceFiles.call(original.target, 'file.write', {
+    ...original.query, expectedResource: original.resource, content: input.content, expectedRevision: input.expectedRevision,
+    ...(input.baseContent === undefined ? {} : { baseContent: input.baseContent }), ...(input.operationId === undefined ? {} : { operationId: input.operationId })
+  })).result.result
 }
 
 async function refreshFileDocument(
@@ -2476,6 +2556,7 @@ async function refreshFileDocument(
   if (documentLifetime(key) !== expectedLifetime || !useAppStore.getState().documents[key]) return
   const requestId = (fileReadRequestIds.get(key) ?? 0) + 1
   fileReadRequestIds.set(key, requestId)
+  const beforeReadGeneration = useAppStore.getState().documentGenerations[key] ?? 0
   const beforeReadIssue = useAppStore.getState().documentIssues[key]
   const checkedWrite = beforeReadIssue?.kind === 'write-unknown' ? beforeReadIssue : undefined
   const noteResource = path.endsWith(NOTE_FILE_EXTENSION) ? watchNoteResource(workspaceId, useAppStore.getState().config?.workspaces.find(workspace => workspace.id === workspaceId)) : null
@@ -2501,7 +2582,7 @@ async function refreshFileDocument(
           return
         }
       }
-      result = await api.files.read(workspaceId, path)
+      result = await readWorkspaceFileDocument(workspaceId, path, checkedWrite?.attempted.source ?? useAppStore.getState().documents[key]?.noteEditing?.attempt?.source)
       if (checkedWrite) {
         const resource = useAppStore.getState().config?.workspaces.find(workspace => workspace.id === workspaceId)
         const original = checkedWrite.attempted.resource
@@ -2522,7 +2603,13 @@ async function refreshFileDocument(
     if (noteResource && !noteResource.current()) return
     if (result.status === 'read' && result.document.path !== path) result = { status: 'error', code: 'WORKSPACE_FILE_READ_TARGET_CHANGED', message: 'The read returned another file path. The original document and draft are retained.' }
     if (await reconcileNoteRead(workspaceId, path, expectedLifetime, requestId, result, noteResource?.current)) return
-    useAppStore.setState((state) => reduceDocumentRead(state, workspaceId, path, result, checkedWrite))
+    useAppStore.setState((state) => {
+      // A full read may refresh an unchanged body, but new local input cannot borrow
+      // that read's physical provenance after an await.
+      const observed = result.status === 'read' && (state.documentGenerations[key] ?? 0) !== beforeReadGeneration
+        ? { ...result, document: withoutFileReadIdentity(result.document) } : result
+      return reduceDocumentRead(state, workspaceId, path, observed, checkedWrite)
+    })
   } finally {
     stopObservingResource()
     noteResource?.release()
@@ -2574,7 +2661,7 @@ async function loadPersistedFileDocument(workspaceId: string, path: string, reso
       observationRequested = true
       await api.files.observe(workspaceId, path)
       if (!admitted()) { await releaseObservation(); return false }
-      const result = await api.files.read(workspaceId, path)
+      const result = await readWorkspaceFileDocument(workspaceId, path)
       if (!admitted()) { await releaseObservation(); return false }
       if (result.status === 'binary') {
         await releaseObservation()
@@ -2982,6 +3069,8 @@ async function enqueueFileSave(
   const initialSurface = target ?? fileSurface(initialTab, regionId)
   if (!initialSurface) return
   const key = documentKey(initialSurface.workspaceId, initialSurface.path)
+  const queuedSource = useAppStore.getState().documents[key]?.readSource
+  const originalSource = queuedSource ? structuredClone(queuedSource) : undefined
   if (useAppStore.getState().documents[key]?.noteEditing?.shareUndo) { await useAppStore.getState().inspectNoteShareUndo(initialSurface.workspaceId, initialSurface.path); return }
   if (pendingNoteShares(key).size || originalNoteShareAttempt(key)) {
     if (await enqueueNoteShareSave(tabId, regionId, target, overwrite)) return
@@ -3017,6 +3106,10 @@ async function enqueueFileSave(
     if (document?.noteEditing?.attempt) { await refreshFileDocument(surface.workspaceId, surface.path, queuedLifetime); return }
     if (issue?.kind === 'write-unknown') return
     if (!document) return
+    if (JSON.stringify(document.readSource) !== JSON.stringify(originalSource)) {
+      state.reportError(new Error('The queued save belongs to another original Source. Its draft is retained; save from that original Source when ready.'))
+      return
+    }
     const hasOverwriteConflict = overwrite && (issue?.kind === 'changed' || issue?.kind === 'deleted')
     if (!state.dirtyDocuments[currentKey] && !hasOverwriteConflict) return
     if (!overwrite && (issue?.kind === 'changed' || issue?.kind === 'deleted' || issue?.kind === 'read-error')) return
@@ -3041,7 +3134,7 @@ async function enqueueFileSave(
       const baseContent = baseline?.revision === expectedRevision && noteHistoryRevision(baseline.content) === expectedRevision ? baseline.content : undefined
       const enhanced = baseContent !== undefined && readNoteDocument(baseContent).status === 'valid' && readNoteDocument(document.content).status === 'valid'
       noteAttempt = { operationId: mintObjectId(), noteId: header?.status === 'valid' ? header.noteId : null, content: document.content, expectedRevision, generation,
-        resource: { hostId: savedResource.hostId, workspaceId: savedResource.id, workspacePath: savedResource.path, path: surface.path }, phase: 'sending',
+        resource: { hostId: savedResource.hostId, workspaceId: savedResource.id, workspacePath: savedResource.path, path: surface.path }, phase: 'sending', ...(originalSource ? { source: originalSource } : {}),
         ...(baseContent === undefined ? {} : { baseContent }), ...(enhanced ? { enhanced: true } : {}) }
       const originalRegion = target ? undefined : fileSurface(tab, regionId)?.regionId
       try {
@@ -3062,12 +3155,12 @@ async function enqueueFileSave(
     const undoMappingUnavailable = !overwrite && noteAttempt?.enhanced && Boolean(noteAttempt.baseContent) && !noteAttempt.target && removedSavedNoteIncludes(noteAttempt.baseContent!, noteAttempt.content).length > 0
     let result
     try {
-      result = await api.files.write(surface.workspaceId, {
+      result = await writeWorkspaceFileDocument(surface.workspaceId, {
         path: surface.path,
         content: document.content,
         expectedRevision,
         ...(noteAttempt?.enhanced ? { baseContent: noteAttempt.baseContent!, operationId: noteAttempt.operationId } : {})
-      })
+      }, originalSource)
     } catch (error) {
       result = {
         status: 'unknown' as const,
@@ -3090,7 +3183,7 @@ async function enqueueFileSave(
         return
       }
       const receiptState = useAppStore.getState()
-      const needsReconciliation =
+      const needsReconciliation = Boolean(originalSource) ||
         (fileReadInFlightCounts.get(currentKey) ?? 0) > 0 ||
         (receiptState.documentObservationGenerations[currentKey] ?? 0) !== observationGeneration
       fileReadRequestIds.set(currentKey, (fileReadRequestIds.get(currentKey) ?? 0) + 1)
@@ -3127,7 +3220,7 @@ async function enqueueFileSave(
           noteEditing: { ...current.documents[currentKey]!.noteEditing, attempt: { ...noteAttempt, phase: 'unknown' as const } } } } } : {}),
         documentIssues: { ...current.documentIssues, [currentKey]: preserveNoteInputConflict(current.documents[currentKey], current.documentIssues[currentKey], { kind: 'write-unknown', code: result.code, message: result.message,
           attempted: { content: document.content, expectedRevision, generation,
-            resource: { hostId: savedResource.hostId, path: savedResource.path } } }) } }))
+            resource: { hostId: savedResource.hostId, path: savedResource.path }, ...(originalSource ? { source: originalSource } : {}) } }) } }))
       return
     }
     if (noteAttempt) useAppStore.setState(current => ({ documents: { ...current.documents, [currentKey]: { ...current.documents[currentKey]!,
@@ -3160,14 +3253,17 @@ async function enqueueNoteHistoryAction(tabId: string, regionId: string, selecti
     const state = useAppStore.getState(), surface = fileSurface(state.tabs[tabId], regionId)
     if (!surface || documentKey(surface.workspaceId, surface.path) !== key || documentLifetime(key) !== lifetime) throw Error('The original history target changed. No action was sent.')
     if (state.documents[key]?.noteEditing?.attempt || state.documents[key]?.noteEditing?.share || state.documents[key]?.noteEditing?.shareUndo) throw Error('The original Note request still needs reconciliation. Its operation and draft are retained; check that same request first.')
+    if (state.documents[key]?.readSource && !selected.target.source) throw Error('Original Main history is read-only in this Source workface. Its original owner and packet are retained; no Source action was sent.')
     const observed = await readNoteHistoryTarget(tabId, regionId, selected.target.noteId)
     if (JSON.stringify(observed.target) !== JSON.stringify(selected.target) || documentLifetime(key) !== lifetime) throw Error('The original history resource changed. Read that same Note before choosing another action.')
     const current = useAppStore.getState(), document = current.documents[key]
     if (!document || current.documents[key]?.noteEditing?.attempt) throw Error('The original Note document is unavailable or has an unresolved request.')
-    const resourceWatch = watchNoteResource(initial.workspaceId, { hostId: observed.target.expectedResource.hostId, path: observed.target.expectedResource.workspacePath })
+    const originalDisplay = state.config?.workspaces.find(workspace => workspace.id === initial.workspaceId)
+    if (!originalDisplay) throw Error('The original history display directory is unavailable. Its request and draft are retained.')
+    const resourceWatch = watchNoteResource(initial.workspaceId, originalDisplay)
     try {
     const generation = current.documentGenerations[key] ?? 0, operationId = mintObjectId()
-    const params = { ...observed.target, operationId, expectedRevision: observed.document.revision }
+    const params = { ...noteHistoryCoreTarget(observed.target), operationId, expectedRevision: observed.document.revision }
     const action: NonNullable<NoteFileAttempt['action']> = 'eventId' in selected
       ? { kind: 'restore', params: { ...params, eventId: selected.eventId } }
       : { kind: 'undo', params: { ...params, batchId: selected.batchId, batchLastEventId: selected.batchLastEventId } }
@@ -3177,13 +3273,15 @@ async function enqueueNoteHistoryAction(tabId: string, regionId: string, selecti
       content: current.dirtyDocuments[key] && knownDraftBase ? baseline.content : document.content,
       baseContent: observed.document.content, expectedRevision: observed.document.revision, action, target: observed.target, phase: 'sending',
       ...(current.dirtyDocuments[key] && !knownDraftBase ? { retainDraft: true } : {}),
-      resource: { hostId: observed.target.expectedResource.hostId, workspaceId: observed.target.expectedResource.workspaceId,
-        workspacePath: observed.target.expectedResource.workspacePath, path: observed.target.expectedResource.path } }
+      ...(observed.target.source ? { source: observed.target.source } : {}),
+      resource: { hostId: current.config!.workspaces.find(workspace => workspace.id === initial.workspaceId)!.hostId, workspaceId: initial.workspaceId,
+        workspacePath: current.config!.workspaces.find(workspace => workspace.id === initial.workspaceId)!.path, path: initial.path } }
     useAppStore.setState(value => ({ documents: { ...value.documents, [key]: { ...value.documents[key]!, noteEditing: { ...value.documents[key]!.noteEditing, attempt } } },
       ...(value.dirtyDocuments[key] ? { retainedDocumentDrafts: { ...value.retainedDocumentDrafts, [key]: [...value.retainedDocumentDrafts[key] ?? [], value.documents[key]!] } } : {}),
       savingDocuments: { ...value.savingDocuments, [key]: true } }))
     let response: import('@agentmux/core/files').FileRestoreResult | import('@agentmux/core/files').FileUndoResult
-    try { response = action.kind === 'restore' ? await api.files.restorePublic(action.params) : await api.files.undoPublic(action.params) }
+    try { response = attempt.source ? action.kind === 'restore' ? (await api.sourceFiles.call(attempt.source.target, 'file.restore', action.params)).result : (await api.sourceFiles.call(attempt.source.target, 'file.undo', action.params)).result
+      : action.kind === 'restore' ? await api.files.restorePublic(action.params) : await api.files.undoPublic(action.params) }
     catch (error) { response = { resource: null, result: { status: 'unknown', code: 'NOTE_HISTORY_ACTION_UNCONFIRMED', message: presentError(error) } } }
     if (documentLifetime(key) !== lifetime || !useAppStore.getState().documents[key]) return
     const result = response.result
@@ -3197,7 +3295,7 @@ async function enqueueNoteHistoryAction(tabId: string, regionId: string, selecti
       attempt: result.status === 'unknown' ? { ...attempt, phase: 'unknown' as const } : undefined } } }, savingDocuments: { ...value.savingDocuments, [key]: false },
       documentIssues: { ...value.documentIssues, [key]: preserveNoteInputConflict(value.documents[key], value.documentIssues[key], result.status === 'unknown'
         ? { kind: 'write-unknown', code: result.code, message: result.message, attempted: { content: attempt.content, expectedRevision: attempt.expectedRevision, generation,
-          resource: { hostId: attempt.resource.hostId, path: attempt.resource.workspacePath } } }
+          resource: { hostId: attempt.resource.hostId, path: attempt.resource.workspacePath }, ...(attempt.source ? { source: attempt.source } : {}) } }
         : { kind: 'write-error', code: result.status === 'error' ? result.code : 'NOTE_HISTORY_CONFLICT', message: result.status === 'error' ? result.message : 'The historical action conflicted with the current Note. Its original versions and local draft are retained.' }) } }))
     if (result.status === 'conflict') await refreshFileDocument(initial.workspaceId, initial.path, lifetime)
     throw Error(result.status === 'error' || result.status === 'unknown' ? result.message : 'The historical action conflicted. The current file and draft are retained.')
@@ -3953,6 +4051,8 @@ function retainLayoutSelection(layout: WorkspaceLayout, next: WorkspaceLayout): 
 
 type PersistedAppState = {
   mountedSpaceInputs?: unknown
+  sourceFilesInputs?: SourceFilesInputs
+  legacyMainNoteReferences?: Record<string, NonNullable<FileDocument['legacyMainNote']>>
   selectedSpaceMount?: unknown
   pendingAgentLaunches?: RetainedPendingAgentLaunches
   workbenchSpaceSelection: AgentMuxDesktopSpaceSelection | null
@@ -3996,6 +4096,7 @@ type PersistedAppState = {
   questionReplies?: DesktopQuestionReplies
   agentSteerQueues?: Record<string, AgentSteerQueueEntry[]>
   documents?: Record<string, FileDocument>
+  documentIssues?: Record<string, FileDocumentIssue | undefined>
   retainedDocumentDrafts?: Record<string, FileDocument[]>
   dirtyDocuments?: Record<string, boolean>
   restoredWorkbench?: PersistedWorkbench
@@ -4267,6 +4368,8 @@ export function restorePersistedUiState(
 // references, so they can reuse the projection without visiting unrelated workbench / file content.
 function selectPersistedInputs(state: AppState, coreSpatialReady: boolean) {
   return {
+    sourceFilesInputs: state.sourceFilesInputs,
+    legacyMainNoteReferences: state.legacyMainNoteReferences,
     mountedSpaceInputs: state.mountedSpaceInputs,
     selectedSpaceMount: state.selectedSpaceMount,
     pendingAgentLaunches: retainedPendingAgentLaunches(state.pendingAgentLaunches),
@@ -4314,6 +4417,7 @@ function selectPersistedInputs(state: AppState, coreSpatialReady: boolean) {
     questionReplies: state.questionReplies,
     questionReplyDrafts: state.questionReplyDrafts,
     documents: state.documents,
+    documentIssues: state.documentIssues,
     retainedDocumentDrafts: state.retainedDocumentDrafts,
     noteBlockSelections: state.noteBlockSelections,
     noteCanvasLayouts: state.noteCanvasLayouts,
@@ -4390,13 +4494,22 @@ function partializeAppState(state: AppState): PersistedAppState {
   if (previousPersistedInputs && previousPersistedProjection && previousCoreSpatialReady===coreSpatialReady && shallow(previousPersistedInputs, inputs)) {
     return previousPersistedProjection
   }
-  const { tabs, layouts, projectGroups, spaceZoneBindings, documents, dirtyDocuments, ...presentation } = inputs
+  const { tabs, layouts, projectGroups, spaceZoneBindings, documents, dirtyDocuments, documentIssues, ...presentation } = inputs
+  const legacyMainNoteReferences = { ...state.legacyMainNoteReferences }
+  const referenceKeys = new Set(Object.values(state.tabs).flatMap(tab => workbenchSurfaces(tab).flatMap(surface => surface.kind === 'file' ? [documentKey(surface.workspaceId, surface.path)] : [])))
+  for (const [key, document] of Object.entries(documents)) {
+    if (document.legacyMainNote) legacyMainNoteReferences[key] = document.legacyMainNote
+    if (dirtyDocuments[key] || hasRecoverableFileBuffer(document, documentIssues[key])) referenceKeys.add(key)
+  }
   const projection: PersistedAppState = {
     ...presentation,
+    // Only original metadata pointers for retained workfaces; no reconstructible clean body copies.
+    legacyMainNoteReferences: Object.fromEntries(Object.entries(legacyMainNoteReferences).filter(([key]) => referenceKeys.has(key))),
     recallNotebookId: presentation.recallNotebookId, recallNoteId: presentation.recallNoteId,
     recallZoneSelection: persistedSurveyZoneSelection(presentation.recallZoneSelection),
     surveyZoneSelection: persistedSurveySelection(presentation.surveyZoneSelection),
-    documents: Object.fromEntries(Object.entries(documents).filter(([key, document]) => dirtyDocuments[key] || document.noteConversion || document.noteEditing?.attempt || document.noteEditing?.input || document.noteEditing?.share || document.noteEditing?.shareUndo)),
+    documents: Object.fromEntries(Object.entries(documents).filter(([key, document]) => dirtyDocuments[key] || hasRecoverableFileBuffer(document, documentIssues[key]) || document.noteConversion || document.noteEditing?.attempt || document.noteEditing?.input || document.noteEditing?.share || document.noteEditing?.shareUndo)),
+    documentIssues: Object.fromEntries(Object.entries(documentIssues).filter(([key, issue]) => hasRecoverableFileBuffer(documents[key], issue))),
     dirtyDocuments: Object.fromEntries(Object.entries(dirtyDocuments).filter(([, dirty]) => dirty)),
     ...(!coreSpatialReady ? { projectGroups: projectGroups!, spaceZoneBindings: spaceZoneBindings!,
       restoredWorkbench: projectPersistedWorkbench({ tabs: tabs!, layouts: layouts! }) } : {})
@@ -5544,6 +5657,82 @@ function settleNativeBrowserProjectionNotice(state: AppState, browserId: string)
 // Only the latest device-home navigation may reveal its asynchronous result.
 let hostHomeNavigation: object | undefined
 
+let sourceFilesWorkbench: ReturnType<typeof createSourceFilesWorkbench> | undefined
+function sourceFilesWorkbenchOwner(): ReturnType<typeof createSourceFilesWorkbench> {
+  return sourceFilesWorkbench ??= createSourceFilesWorkbench({
+    api: api.sourceFiles,
+    get: () => useAppStore.getState().sourceFilesInputs,
+    set: update => useAppStore.setState(state => ({ sourceFilesInputs: update(state.sourceFilesInputs) })),
+    workspace: id => useAppStore.getState().config?.workspaces.find(workspace => workspace.id === id),
+    checkpoint: checkpointMountedSpaceInputs,
+    runtime: async hostId => (await api.spaceMounts.call('resources', { hostId })).runtimeId,
+    register: (hostId, registration) => api.spaceMounts.call('register', { hostId, registration }),
+    prepareEffect: prepareSourceFileEffect
+  })
+}
+
+/** Only a related file consumer borrows a live Source observer; no global watcher or poll. */
+async function observeSourceFilesWorkspace(workspaceId: string): Promise<() => void> {
+  const input = useAppStore.getState().sourceFilesInputs.selections[workspaceId]
+  if (!input?.locator || !sourceFilesWorkspaceMatches(input.workspace, useAppStore.getState().config?.workspaces.find(workspace => workspace.id === workspaceId))) return () => {}
+  const observer = await api.sourceFiles.watch(input.target, sourceFilesQuery(input.locator, ''), async event => {
+    if (event.type === 'effect') await prepareSourceFileEffect(workspaceId, input.locator!)(event.data)
+    else if (event.type === 'error' || event.type === 'end') useAppStore.setState(state => {
+      const selected = state.sourceFilesInputs.selections[workspaceId]
+      if (selected !== input) return state
+      return { sourceFilesInputs: { ...state.sourceFilesInputs, selections: { ...state.sourceFilesInputs.selections,
+        [workspaceId]: { ...input, issue: event.type === 'error' ? event.error.message : 'Live Files observations ended. Original buffers and requests are retained; check the original folder to reconnect.' } } } }
+    })
+  })
+  try { await observer.start(); return () => observer.dispose() } catch (cause) { observer.dispose(); throw cause }
+}
+
+const projectedFileEffects = new WeakMap<object, Set<string>>()
+function prepareSourceFileEffect(workspaceId: string, locator: SourceFilesLocator): (effect: FileMutationEffect) => Promise<void> {
+  const before = useAppStore.getState(), selection = before.sourceFilesInputs.selections[workspaceId]
+  const lifetimes = new Map(Object.keys(before.documents).filter(key => key.startsWith(workspaceId + '\0')).map(key => [key, documentLifetime(key)]))
+  return async (effect: FileMutationEffect) => {
+    const owns = () => {
+      const state = useAppStore.getState(), selected = state.sourceFilesInputs.selections[workspaceId]
+      return selected === selection && selected?.locator === locator && sourceFilesWorkspaceMatches(selected.workspace, state.config?.workspaces.find(workspace => workspace.id === workspaceId))
+    }
+    if (!owns()) return // The original receipt still settles its request; later Source selection is never rewritten.
+    const held = captureFileEffect(before, workspaceId, locator, effect)
+    if (effect.type === 'path-mutation') held.candidates = held.candidates.filter(candidate => !projectedFileEffects.get(candidate.document)?.has(effect.request.operationId))
+    const destinations = new Map<string, { identity: FileReadIdentity; resource: SourceFilesLocator['resource']; query: NonNullable<FileDocument['readSource']>['query'] }>()
+    if (effect.type === 'path-mutation' && effect.action === 'move' && held.sourcePath !== undefined && held.destinationPath !== undefined) for (const candidate of held.candidates) {
+      const nextPath = remapPathWithinSubtree(candidate.path, held.sourcePath, held.destinationPath)
+      const observed = await api.sourceFiles.call(selection!.target, 'file.read', sourceFilesQuery(locator, nextPath))
+      if (observed.carrierCurrent && observed.result.resource && observed.result.result.status === 'read' && observed.result.result.document.readIdentity) destinations.set(candidate.path, { identity: observed.result.result.document.readIdentity, resource: observed.result.resource, query: sourceFilesQuery(locator, nextPath) })
+    }
+    if (!owns()) return
+    const moved: Array<{ from: string; to: string }> = []
+    useAppStore.setState(state => {
+      held.candidates = held.candidates.filter(candidate => documentLifetime(documentKey(workspaceId, candidate.path)) === lifetimes.get(documentKey(workspaceId, candidate.path)))
+      held.unconfirmed = held.unconfirmed.filter(candidate => documentLifetime(documentKey(workspaceId, candidate.path)) === lifetimes.get(documentKey(workspaceId, candidate.path)))
+      const applied = applyFileEffect(state, workspaceId, held, destinations)
+      if (effect.type === 'path-mutation') for (const candidate of held.candidates) {
+        const key = documentKey(workspaceId, candidate.path)
+        const to = effect.action === 'move' && held.sourcePath !== undefined && held.destinationPath !== undefined
+          ? remapPathWithinSubtree(candidate.path, held.sourcePath, held.destinationPath) : null
+        const changed = effect.action === 'delete' ? applied.documentIssues[key] !== state.documentIssues[key] && applied.documentIssues[key]?.kind === 'deleted'
+          : to !== null && !applied.documents[key] && Boolean(applied.documents[documentKey(workspaceId, to)])
+        if (changed) {
+          const seen = projectedFileEffects.get(candidate.document) ?? new Set<string>()
+          seen.add(effect.request.operationId); projectedFileEffects.set(candidate.document, seen)
+          if (to !== null) { advanceDocumentLifetime(key); transferFileSaveTail(workspaceId, candidate.path, to); moved.push({ from: candidate.path, to }) }
+        }
+      }
+      return { ...applied, workspaceFileRevisions: bumpWorkspaceFileRevision(state.workspaceFileRevisions, workspaceId) }
+    })
+    for (const path of moved) {
+      try { await api.files.unobserve(workspaceId, path.from) } catch (cause) { useAppStore.getState().reportError(cause) }
+      try { await api.files.observe(workspaceId, path.to) } catch (cause) { useAppStore.getState().reportError(cause) }
+    }
+    await checkpointMountedSpaceInputs()
+  }
+}
+
 export const useAppStore = create<AppState>()(persist<AppState, [], [], PersistedAppState>((set, get) => ({
   restoredWorkbench: null,
   mountedSpaceInputs: {},
@@ -5602,6 +5791,27 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         ...(snapshot?.scope.space ? { lastPresentSnapshot: snapshot } : {}) } } }
     })
   },
+  sourceFilesInputs: emptySourceFilesInputs(),
+  legacyMainNoteReferences: {},
+  resolveFilesSource: workspaceId => sourceFilesWorkbenchOwner().resolve(workspaceId),
+  selectCurrentFilesSource: async workspaceId => {
+    const before = get().sourceFilesInputs.selections[workspaceId]
+    const result = await sourceFilesWorkbenchOwner().selectCurrentSource(workspaceId)
+    if (get().sourceFilesInputs.selections[workspaceId] !== before) set(state => {
+      const issues = { ...state.documentIssues }
+      for (const [key, document] of Object.entries(state.documents)) if (key.startsWith(workspaceId + '\0') && document.readSource && !issues[key]) issues[key] = {
+        kind: 'read-error', code: 'FILE_SOURCE_SELECTION_CHANGED', message: 'The selected file Source changed. The original buffer is retained until its current body is read or explicitly adopted.'
+      }
+      return { documentIssues: issues }
+    })
+    return result
+  },
+  selectFilesRegistration: (workspaceId, registration) => sourceFilesWorkbenchOwner().selectRegistration(workspaceId, registration),
+  inspectFilesFolderRequest: async key => { await sourceFilesWorkbenchOwner().inspectFolderRequest(key) },
+  useFilesSourceFolder: (workspaceId, packet) => sourceFilesWorkbenchOwner().useFolder(workspaceId, packet),
+  inspectFilesMutation: async operationId => { await sourceFilesWorkbenchOwner().inspect(operationId) },
+  inspectFileCreation: async key => { await sourceFilesWorkbenchOwner().inspectCreation(key) },
+  observeFilesSource: observeSourceFilesWorkspace,
   workbenchSpaceSelection: null,
   moteDiscussionEntry: null,
   workbenchNavigationInputPolicy: null,
@@ -9467,7 +9677,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
               const invalidationSequence = fileInvalidationSequences.get(key) ?? 0
               await api.files.observe(workspaceId, path)
               if (!ownsRead() || !resourceCurrent()) return false
-              const result = await api.files.read(workspaceId, path)
+              const result = await readWorkspaceFileDocument(workspaceId, path)
               if (!ownsRead() || !resourceCurrent()) return false
               if (result.status === 'directory') {
                 // The shared producer owns the verdict, not any caller's navigation.
@@ -10273,7 +10483,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     const workspaceId = requestedWorkspaceId ?? get().activeWorkspaceId
     if (!workspaceId) throw new Error('Select a workspace first')
     try {
-      await api.files.create(workspaceId, input)
+      if (input.kind === 'directory') await sourceFilesWorkbenchOwner().mkdir(workspaceId, input.path)
+      else await sourceFilesWorkbenchOwner().createFile(workspaceId, input.path)
     } catch (error) {
       get().reportError(error)
       throw error
@@ -10457,117 +10668,14 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   async renamePath(path, nextPath, requestedWorkspaceId) {
     const workspaceId = requestedWorkspaceId ?? get().activeWorkspaceId
     if (!workspaceId) throw new Error('Select a workspace first')
-    return await withWorkspaceFileMutation(workspaceId, path, async () => {
-      const stateBeforeMove = get()
-      const collision = findFileRenameProjectionCollision(stateBeforeMove, workspaceId, path, nextPath)
-      if (collision) {
-        const error = Object.assign(
-          new Error(`The destination is already open in the workbench: ${collision.path}`),
-          { code: 'WORKSPACE_MOVE_RENDERER_DESTINATION_OWNED' }
-        )
-        get().reportError(error)
-        throw error
-      }
-      const observedPaths = Object.keys(stateBeforeMove.documents).flatMap((key) => {
-        const prefix = `${workspaceId}\0`
-        if (!key.startsWith(prefix)) return []
-        const documentPath = key.slice(prefix.length)
-        return isPathWithinSubtree(documentPath, path) ? [documentPath] : []
-      })
-      let originalLibrary = useNotebookLibrary.getState().state
-      try { originalLibrary = await refreshNotebookLibrary() }
-      catch (error) { get().reportError(error, { kind: 'process-degraded' }) }
-      const resource = stateBeforeMove.config?.workspaces.find(item => item.id === workspaceId)
-      const relocations = originalLibrary && resource ? notebookRelocations(originalLibrary, resource, path, nextPath) : []
-      let result
-      try {
-        result = await api.files.move({
-          source: { workspaceId, path },
-          destination: { workspaceId, path: nextPath }
-        })
-      } catch (error) {
-        get().reportError(error)
-        throw error
-      }
-      if (result.status === 'error') {
-        const error = Object.assign(new Error(result.message), {
-          code: result.code,
-          finalLocation: result.finalLocation
-        })
-        get().reportError(error)
-        throw error
-      }
-      await get().invalidateScratchTopicPaths(workspaceId, [path, nextPath], true)
-      for (const observedPath of observedPaths) {
-        advanceDocumentLifetime(documentKey(workspaceId, observedPath))
-      }
-      set((state) => ({
-        ...reduceFileRename(state, workspaceId, path, nextPath),
-        // Same reason as `createPath`: the Topics panel and the Board read this counter and nothing
-        // else. Moving a Topic's `topic.md` out breaks the Topic's identity, and only the file tree
-        // would notice. Folded into the projection's own `set` so it is one render, not two.
-        workspaceFileRevisions: bumpWorkspaceFileRevision(state.workspaceFileRevisions, workspaceId)
-      }))
-      for (const observedPath of observedPaths) {
-        const renamedPath = remapPathWithinSubtree(observedPath, path, nextPath)
-        transferFileSaveTail(workspaceId, observedPath, renamedPath)
-        try {
-          await api.files.unobserve(workspaceId, observedPath)
-        } catch (error) {
-          get().reportError(error)
-        }
-        try {
-          await api.files.observe(workspaceId, renamedPath)
-        } catch (error) {
-          get().reportError(error)
-        }
-        try {
-          await get().refreshDocument(workspaceId, renamedPath)
-        } catch (error) {
-          get().reportError(error)
-        }
-      }
-      // The original File owner has confirmed success. A catalog failure never undoes or
-      // blocks this healthy file; exact metadata intents survive in the original UI receipt.
-      if (relocations.length) {
-        try { await recordNotebookChanges(relocations, 'note-file-move:' + mintObjectId()) }
-        catch (error) { get().reportError(error, { kind: 'process-degraded' }) }
-      }
-    })
+    await withWorkspaceFileMutation(workspaceId, path, () => sourceFilesWorkbenchOwner().move(workspaceId, path, nextPath))
+    await get().invalidateScratchTopicPaths(workspaceId, [path, nextPath], true)
   },
   async deletePath(path, requestedWorkspaceId) {
     const workspaceId = requestedWorkspaceId ?? get().activeWorkspaceId
     if (!workspaceId) throw new Error('Select a workspace first')
-    return await withWorkspaceFileMutation(workspaceId, path, async () => {
-      const observedPaths = Object.keys(get().documents).flatMap((key) => {
-        const prefix = `${workspaceId}\0`
-        if (!key.startsWith(prefix)) return []
-        const documentPath = key.slice(prefix.length)
-        return isPathWithinSubtree(documentPath, path) ? [documentPath] : []
-      })
-      try {
-        await api.files.delete(workspaceId, path)
-        for (const observedPath of observedPaths) {
-          advanceDocumentLifetime(documentKey(workspaceId, observedPath))
-        }
-        set((state) => ({
-          ...reduceFileDelete(state, workspaceId, path),
-          // Deleting a Topic's directory is the only way to delete a Topic (there is no
-          // `scratch.deleteTopic`, and the delete affordance is deliberately ungated for Topic
-          // directories where rename and move are not). Without this the tree row vanishes —
-          // `confirmDelete` refreshes it directly — while the Topics panel and the Board keep
-          // showing the deleted Topic until an unrelated write happens to bump.
-          workspaceFileRevisions: bumpWorkspaceFileRevision(state.workspaceFileRevisions, workspaceId)
-        }))
-        await get().invalidateScratchTopicPaths(workspaceId, [path], true)
-        await Promise.all(observedPaths.map(async (observedPath) => {
-          await api.files.unobserve(workspaceId, observedPath)
-        }))
-      } catch (error) {
-        get().reportError(error)
-        throw error
-      }
-    })
+    await withWorkspaceFileMutation(workspaceId, path, () => sourceFilesWorkbenchOwner().delete(workspaceId, path))
+    await get().invalidateScratchTopicPaths(workspaceId, [path], true)
   },
   async adoptNoteCurrentDocument(tabId, regionId) {
     const state = get(), surface = fileSurface(state.tabs[tabId], regionId)
@@ -10628,7 +10736,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       // A retained dirty draft remains in the original document projection, but a
       // hidden draft does not need a live filesystem observer or its child process.
       void api.files.unobserve(target.workspaceId, target.path)
-      if (state.dirtyDocuments[key] || state.documents[key]?.noteEditing?.share || state.documents[key]?.noteEditing?.shareUndo) return
+      if (state.dirtyDocuments[key] || hasRecoverableFileBuffer(state.documents[key], state.documentIssues[key]) || state.documents[key]?.noteEditing?.share || state.documents[key]?.noteEditing?.shareUndo) return
       advanceDocumentLifetime(key)
       set(current => reconcileWorkbenchFileProjection(current, { tabs: current.tabs, layouts: current.layouts }))
     }
@@ -10657,7 +10765,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   async saveNoteFile(target) {
     await enqueueFileSave('', false, undefined, target)
     const key = documentKey(target.workspaceId, target.path), state = get()
-    if (!hasFileDocumentConsumer(key) && !state.dirtyDocuments[key] && !state.documents[key]?.noteEditing?.share && !state.documents[key]?.noteEditing?.shareUndo && !Object.values(state.tabs).some(tab => workbenchSurfaces(tab).some(surface => surface.kind === 'file' && documentKey(surface.workspaceId, surface.path) === key))) {
+    if (!hasFileDocumentConsumer(key) && !state.dirtyDocuments[key] && !hasRecoverableFileBuffer(state.documents[key], state.documentIssues[key]) && !state.documents[key]?.noteEditing?.share && !state.documents[key]?.noteEditing?.shareUndo && !Object.values(state.tabs).some(tab => workbenchSurfaces(tab).some(surface => surface.kind === 'file' && documentKey(surface.workspaceId, surface.path) === key))) {
       advanceDocumentLifetime(key)
       set(current => reconcileWorkbenchFileProjection(current, { tabs: current.tabs, layouts: current.layouts }))
     }
@@ -10795,6 +10903,9 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       return
     }
     if (issue?.kind === 'deleted') {
+      // The user's acceptance is captured in this synchronous transaction;
+      // an active composition has input that is not yet in its buffer witness.
+      if (hasNoteComposition(key) || get().savingDocuments[key]) return
       advanceDocumentLifetime(key)
       set((state) => reduceFileDelete(state, surface.workspaceId, surface.path))
       await api.files.unobserve(surface.workspaceId, surface.path)

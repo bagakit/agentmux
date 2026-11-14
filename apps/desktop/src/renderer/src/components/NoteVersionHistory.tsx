@@ -1,3 +1,4 @@
+import { noteHistoryCoreTarget, readNoteFileHistory, originalMainNoteHistory } from '../lib/note-history-source'
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import { parseFileHistoryResult } from '@agentmux/core/files'
 import type { NoteHistoryEntry, NoteHistorySnapshot } from '@agentmux/core/note-history'
@@ -17,7 +18,7 @@ const RefreshIcon = semanticIconComponent('action.refresh')
 type Timeline = { target: NoteHistoryTarget; entries: NoteHistoryEntry[]; hasMore: boolean; reason?: string; readOnly?: true }
 type Preview = { target: NoteHistoryTarget; entry: NoteHistoryEntry & { content: string | null; beforeContent: string | null }; readOnly?: true }
 const statusLabel = { committed: 'Saved', prepared: 'Awaiting confirmation', unconfirmed: 'Unconfirmed', 'not-applied': 'Not applied' }
-const operationLabel = { edit: 'Edit', restore: 'Full restore', undo: 'Activity undo', delete: 'Shared file collected' }
+const operationLabel = { edit: 'Edit', restore: 'Full restore', undo: 'Activity undo', delete: 'File deleted' }
 function EventTime({ at, timeOnly = false }: { at: number; timeOnly?: boolean }) {
   const date = new Date(at)
   return Number.isFinite(date.getTime()) ? <time dateTime={date.toISOString()}>{timeOnly ? date.toLocaleTimeString() : date.toLocaleString()}</time>
@@ -27,12 +28,17 @@ function EventTime({ at, timeOnly = false }: { at: number; timeOnly?: boolean })
 function positionKey(state: ReturnType<typeof useAppStore.getState>, tabId: string, regionId: string): string {
   const tab = state.tabs[tabId], file = tab?.regions[regionId]
   const workspace = file?.kind === 'file' ? state.config?.workspaces.find(item => item.id === file.workspaceId) : undefined
-  return JSON.stringify([tab?.space, file?.kind, file?.kind === 'file' ? [file.workspaceId, file.path] : null, workspace?.hostId, workspace?.path])
+  return JSON.stringify([tab?.space, file?.kind, file?.kind === 'file' ? [file.workspaceId, file.path] : null, workspace?.hostId, workspace?.path, file?.kind === 'file' ? state.documents[file.workspaceId + '\0' + file.path]?.readSource : null])
 }
 
 /** A readonly history window. All writes remain in the original document/save owner. */
 export function NoteVersionHistory({ tabId, regionId, noteId, active }: { tabId: string; regionId: string; noteId: string; active: boolean }) {
   const position = useAppStore(state => positionKey(state, tabId, regionId)), agentNames = useAppStore(state => state.agentNames)
+  const file = useAppStore(state => state.tabs[tabId]?.regions[regionId])
+  const document = useAppStore(state => file?.kind === 'file' ? state.documents[file.workspaceId + '\0' + file.path] : undefined)
+  const legacy = useAppStore(state => file?.kind === 'file' ? document?.legacyMainNote ?? state.legacyMainNoteReferences[file.workspaceId + '\0' + file.path] : undefined)
+  const [origin, setOrigin] = useState<'source' | 'main'>('source')
+  const originalMain = Boolean(document?.readSource && origin === 'main')
   const [refresh, setRefresh] = useState(0)
   const [timeline, setTimeline] = useState<Timeline | null>(null), [preview, setPreview] = useState<Preview | null>(null)
   const [selected, setSelected] = useState<NoteHistoryEntry | null>(null)
@@ -45,7 +51,7 @@ export function NoteVersionHistory({ tabId, regionId, noteId, active }: { tabId:
   const shown = useRef(false); shown.current = active
   const current = (ticket: number) => epoch.current === ticket && shown.current && positionKey(useAppStore.getState(), tabId, regionId) === position
   function checkedHistory(target: NoteHistoryTarget, value: Awaited<ReturnType<typeof api.files.historyPublic>>, params: { before?: number; eventId?: string; includeContent?: boolean } = {}): NoteHistorySnapshot {
-    const read = parseFileHistoryResult(value, { ...target, ...params, limit: 50 }).result
+    const read = parseFileHistoryResult(value, { ...noteHistoryCoreTarget(target), ...params, limit: 50 }).result
     if (read.status === 'unknown') throw Error(read.message)
     return read
   }
@@ -59,18 +65,21 @@ export function NoteVersionHistory({ tabId, regionId, noteId, active }: { tabId:
       setLoading(true)
       void (async () => {
         try {
-          const original = await useAppStore.getState().inspectNoteHistory(tabId, regionId, noteId)
+          if (originalMain && !legacy) throw Error('No original Main reference is available for this Source document.')
+          const original = originalMain
+            ? { target: await originalMainNoteHistory(useAppStore.getState(), legacy!), readOnly: true as const }
+            : await useAppStore.getState().inspectNoteHistory(tabId, regionId, noteId)
           if (!current(ticket)) return
-          const value = await api.files.historyPublic({ ...original.target, limit: 50 })
+          const value = await readNoteFileHistory(original.target, { limit: 50 })
           if (!current(ticket)) return
           const result = checkedHistory(original.target, value)
-          setTimeline({ target: original.target, entries: result.entries, hasMore: result.hasMore, ...('deleted' in original ? { readOnly: true } : {}), ...(result.status === 'unconfirmed' ? { reason: result.reason } : {}) })
+          setTimeline({ target: original.target, entries: result.entries, hasMore: result.hasMore, ...('deleted' in original || 'readOnly' in original ? { readOnly: true } : {}), ...(result.status === 'unconfirmed' ? { reason: result.reason } : {}) })
         } catch (error) { if (current(ticket)) setIssue(presentError(error)) }
         finally { if (current(ticket)) setLoading(false) }
       })()
     }
     return () => { ++epoch.current; ++previewRequest.current }
-  }, [tabId, regionId, noteId, position, active, refresh])
+  }, [tabId, regionId, noteId, position, active, refresh, originalMain, legacy])
   useEffect(() => {
     if (!active) { restoreActivityFocus.current = false; return }
     if (selected) backButton.current?.focus()
@@ -98,7 +107,7 @@ export function NoteVersionHistory({ tabId, regionId, noteId, active }: { tabId:
     if (before === undefined) return
     setLoading(true); setIssue(null)
     try {
-      const value = await api.files.historyPublic({ ...held.target, before, limit: 50 })
+      const value = await readNoteFileHistory(held.target, { before, limit: 50 })
       if (!current(ticket) || readRequest.current !== request) return
       const result = checkedHistory(held.target, value, { before })
       const existing = new Set(held.entries.map(entry => entry.eventId))
@@ -115,7 +124,7 @@ export function NoteVersionHistory({ tabId, regionId, noteId, active }: { tabId:
     setSelected(entry); setPreview(null); setPreviewIssue(null); setPreviewing(entry.eventId); setAction(null)
     try {
       const params = { eventId: entry.eventId, includeContent: true }
-      const value = await api.files.historyPublic({ ...target, ...params, limit: 50 })
+      const value = await readNoteFileHistory(target, { ...params, limit: 50 })
       if (!current(ticket) || previewRequest.current !== request) return
       const result = checkedHistory(target, value, params), original = result.entries.find(item => item.eventId === entry.eventId)
       if (result.status !== 'read' || !original || original.content === undefined || original.beforeContent === undefined) throw Error(result.status === 'unconfirmed' ? result.reason : 'This original saved version is unavailable. Its history and your current draft are kept.')
@@ -148,6 +157,15 @@ export function NoteVersionHistory({ tabId, regionId, noteId, active }: { tabId:
   </section> : null
   return <section className="note-version-history" aria-label="Saved versions">
     <div className="note-version-history__body">
+      {document?.readSource ? <div className="note-version-history__tools" aria-label="History owner">
+        <button className="note-text-button" aria-pressed={!originalMain} onClick={() => { ++epoch.current; setOrigin('source') }}>Source history</button>
+        {legacy ? <button className="note-text-button" aria-pressed={originalMain} onClick={() => { ++epoch.current; setOrigin('main') }}>Original Main history</button> : null}
+      </div> : null}
+      {legacy && document?.readSource ? <details className="note-version-history__scope"><summary>Original Main reference</summary>
+        <p>The original Main metadata is kept at its recorded resource. This history is read-only in the Source workface.</p>
+        <code>{JSON.stringify({ noteId: legacy.noteId, resource: legacy.resource, ...(legacy.target ? { target: noteHistoryCoreTarget(legacy.target) } : {}) })}</code>
+        {legacy.provenance ? <p>Original saved authorship: {[...new Set(Object.values(legacy.provenance.blocks).flatMap(block => block.created ? [block.created.actor.kind + ' · ' + block.created.actor.id] : []))].join(', ') || 'Unconfirmed'}</p> : null}
+      </details> : null}
       {issue ? <p className="note-version-history__issue" role="status">{issue}</p> : null}
       <div hidden={selected !== null} inert={selected !== null}>
       <div className="note-version-history__tools"><span>Editing activities</span>
@@ -187,8 +205,8 @@ export function NoteVersionHistory({ tabId, regionId, noteId, active }: { tabId:
         {previewIssue ? <p className="note-version-history__issue" role="status">{previewIssue}</p> : null}
         {preview ? <>
           {preview.entry.status === 'committed' && preview.entry.content !== null && !preview.readOnly ? <button type="button" className="note-text-button" disabled={!active || working} onClick={() => setAction({ target: preview.target, eventId: preview.entry.eventId })}>Restore this entire version…</button> : null}
-          <p>{preview.entry.beforeContent === null ? 'Before: file did not exist' : 'Before this change'} → {preview.entry.content === null ? 'Shared file collected' : 'After this change'}</p>
-          {preview.entry.content === null ? <p role="status">This event records removal of the shared file. It has no saved document after the change.</p> : <div className="note-version-history__diff"><Suspense fallback={<p role="status">Opening version comparison…</p>}><ReadonlyDiffEditor original={preview.entry.beforeContent ?? ''} modified={preview.entry.content} wordWrap language="markdown" theme={MONACO_THEME_ID} /></Suspense></div>}
+          <p>{preview.entry.beforeContent === null ? 'Before: file did not exist' : 'Before this change'} → {preview.entry.content === null ? 'File deleted' : 'After this change'}</p>
+          {preview.entry.content === null ? <p role="status">This event records removal of the file. It has no saved document after the change.</p> : <div className="note-version-history__diff"><Suspense fallback={<p role="status">Opening version comparison…</p>}><ReadonlyDiffEditor original={preview.entry.beforeContent ?? ''} modified={preview.entry.content} wordWrap language="markdown" theme={MONACO_THEME_ID} /></Suspense></div>}
         </> : null}
       </section> : null}
       {action && 'eventId' in action ? confirmation : null}

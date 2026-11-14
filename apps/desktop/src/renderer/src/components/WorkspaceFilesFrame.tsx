@@ -6,6 +6,7 @@ import { usePathDisplay } from '../hooks/usePathDisplay'
 import { resolveExplorerCollapsed, type ContentSlotPresentation } from '../lib/surface-tool-dock'
 import { useAppStore } from '../store'
 import { FileExplorer } from './FileExplorer'
+import { SourceFilesAccess } from './SourceFilesAccess'
 
 const ThemeNavigationDisclosureIcon = semanticIconComponent('navigation.disclosure')
 const ThemeNavigationDownIcon = semanticIconComponent('navigation.down')
@@ -54,6 +55,7 @@ export function WorkspaceFilesFrame({ workspace, visible, presentation, title, s
     {directoryFirst ? <div className="workspace-topic-files__content">{fileContent}</div> : fileContent}
   </Panel>
   return <div className={`workspace-tool-explorer${directoryFirst ? ' workspace-tool-explorer--directory-first' : ''}${!showExplorer ? ' workspace-tool-explorer--content-only' : ''}`}>
+    <SourceFilesAccess key={JSON.stringify([workspace.id, workspace.hostId, workspace.path])} workspace={workspace} visible={visible && showExplorer} />
     {!directoryFirst ? context : null}
     <PanelGroup direction="vertical" className={collapsed ? 'workspace-tools-collapsed' : 'workspace-tools-split'}
       key={presentation.showTopics ? 'content-slot-topics' : 'content-slot-branches'}>

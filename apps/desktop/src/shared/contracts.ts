@@ -531,6 +531,11 @@ export type AppConfig = {
 }
 
 export type FileDocument = {
+  /** Original Source binding acquired by a complete read; physical provenance is readIdentity. */
+  readSource?: { target: import('./space-mount').SpaceMountSourceTarget; resource: import('@agentmux/core/files').FileReadResource; query: Omit<import('@agentmux/core/files').FileReadParams, 'maxBytes'> }
+  /** Previously observed Main metadata, never merged into another Source's attribution. */
+  legacyMainNote?: { noteId: string; resource: import('@agentmux/core/notebook-catalog').NoteResource;
+    provenance?: import('@agentmux/core/note-provenance').NoteProvenanceSnapshot; target?: import('./note-file-editing').NoteFileHistoryTarget }
   readIdentity?: import('@agentmux/core/files').FileReadIdentity
   path: string
   content: string

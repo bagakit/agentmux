@@ -30,7 +30,10 @@ export type NoteFileInput = {
   queued?: { baseContent: string; proposedContent: string }[]
 }
 export type NoteWrittenReceipt = Omit<Extract<FileWriteReceipt, { status: 'written' }>, 'content'>
-export type NoteFileHistoryTarget = Omit<FileHistoryParams, 'limit' | 'before' | 'eventId' | 'includeContent'>
+export type NoteFileHistoryTarget = Omit<FileHistoryParams, 'limit' | 'before' | 'eventId' | 'includeContent'> & {
+  /** Client routing only; never serialized into a Core history/action payload. */
+  source?: NonNullable<import('./contracts').FileDocument['readSource']>
+}
 export type NoteHistorySelection = { target: NoteFileHistoryTarget } & ({ eventId: string } | { batchId: string; batchLastEventId: string })
 export type NoteFileAttempt = {
   operationId: string
@@ -42,6 +45,7 @@ export type NoteFileAttempt = {
   expectedRevision: string | null
   generation: number
   resource: NoteResource
+  source?: NonNullable<import('./contracts').FileDocument['readSource']>
   phase: 'sending' | 'unknown' | 'written'
   /** Fixed original public mapping, when it was confirmed for this intent. */
   target?: NoteFileHistoryTarget

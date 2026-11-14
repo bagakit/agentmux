@@ -147,6 +147,7 @@ export function EditorPane({
   const save = useAppStore((state) => state.saveDocument)
   const reload = useAppStore((state) => state.reloadDocument)
   const refresh = useAppStore((state) => state.refreshDocument)
+  const sourceFilesLocator = useAppStore(state => state.sourceFilesInputs.selections[surface.workspaceId]?.locator)
   const overwrite = useAppStore((state) => state.overwriteDocument)
   const isLocalWorkspace = useWorkspaceResource(surface.workspaceId)?.hostId === 'local'
   const reportError = useAppStore((state) => state.reportError)
@@ -201,6 +202,10 @@ export function EditorPane({
     if (document || issue || released || !visible) return
     void attachPersistedDocument(surface.workspaceId, surface.path)
   }, [document, issue, released, visible, attachPersistedDocument, surface.workspaceId, surface.path])
+  useEffect(() => {
+    if (!visible || released || !sourceFilesLocator) return
+    void refresh(surface.workspaceId, surface.path)
+  }, [visible, released, sourceFilesLocator, refresh, surface.workspaceId, surface.path])
 
   if (released) return <EditorReleasedState />
 

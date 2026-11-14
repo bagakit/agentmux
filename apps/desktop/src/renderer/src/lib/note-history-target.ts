@@ -5,7 +5,7 @@ import { zoneFileResource } from '@agentmux/host/file-resource-model'
 import { directoryIdentity, workspaceZoneId } from '../../../shared/space-addresses'
 import { spatialCatalog, type SpatialWorkbench } from './space-agent-control'
 
-export type NoteHistoryTarget = Omit<FileHistoryParams, 'limit' | 'before' | 'eventId' | 'includeContent'>
+export type NoteHistoryTarget = import('../../../shared/note-file-editing').NoteFileHistoryTarget
 export type NoteHistoryRead = { target: NoteHistoryTarget; document: Extract<FileReadResult['result'], { status: 'read' }>['document'] }
 export type NoteHistoryInspection = NoteHistoryRead | { target: NoteHistoryTarget; deleted: true }
 

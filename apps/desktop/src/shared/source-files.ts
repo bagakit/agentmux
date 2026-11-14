@@ -4,7 +4,7 @@ import type { FolderDirectoryInspection, FolderDirectoryRegistration, FolderDire
 import type { SpaceMountRecord } from './space-mount.js'
 
 /** A carrier selection is separate from every original Source namespace below. */
-export const SOURCE_FILES_METHODS = ['file.stat', 'file.read', 'file.create', 'file.mkdir', 'file.move', 'file.delete',
+export const SOURCE_FILES_METHODS = ['file.stat', 'file.read', 'file.write', 'file.restore', 'file.undo', 'file.create', 'file.mkdir', 'file.move', 'file.delete',
   'file.mutation.inspect', 'file.history', 'file.delete.snapshots'] as const
 export type SourceFilesMethod = typeof SOURCE_FILES_METHODS[number]
 export type SourceFilesCall<M extends SourceFilesMethod> = { method: M; params: AgentMuxRpcParams<M> }
