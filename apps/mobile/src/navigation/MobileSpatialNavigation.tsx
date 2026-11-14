@@ -1,3 +1,4 @@
+import { createPortal } from 'react-dom'
 import { IconButton } from '@agentmux/client-ui/components/IconButton'
 import type { MobileAgentCreateTarget } from './MobileAgentCreate'
 import { MobileAvatarNoticeOutlet, MobileNotice, MobileNoticeScope } from '../notices/MobileNotice'
@@ -33,6 +34,10 @@ import './navigation.css'
 type Catalog = AgentMuxRpcResult<'space.ls'>['catalog']
 export type MobileSpatialContext = { spaceId: string | null; tabId: string | null; regionId: string | null }
 export type MobileSpatialNavigationProps = { home: MobileHome; client: AgentMuxHostedClient | null; connected: boolean;
+  /** A view of this same directory, without retargeting its Space/Mote context. */
+  focusTarget?: HTMLElement | null; focusVisible?: boolean;
+  focusSelected?: { hostId: string; agentSessionId: string } | null;
+  openFocusSession?(id: string, identity: MobileObjectIdentity): void;
   recentMoteSpaceId?: string | null; onSelectMote?(spaceId: string): void;
   openMainAgent?(id: string, identity: MobileObjectIdentity, hostId: string): void;
   visible?: boolean; sessions?: AgentMuxAgentSession[]; openSession(id: string, identity: MobileObjectIdentity): void; openProfile?(identity: MobileObjectIdentity): void;
@@ -46,12 +51,19 @@ type SessionReference = Pick<AgentMuxAgentSession, 'agentSessionId'> & Partial<P
 type ContentTarget = { key: string; spaceId: string; spaceName: string; tabName: string; tabId: string; zoneId: string | null; region: Region; zone?: Catalog['zones'][number] }
 const EMPTY_CONTEXT: MobileSpatialContext = { spaceId: null, tabId: null, regionId: null }
 const contentKey = (spaceId: string, zoneId: string | null, region: Region) => JSON.stringify([spaceId, zoneId, region.tabId, region.regionId, region.kind, region.browserId ?? null, region.file ?? null])
-export const MobileSpatialNavigation = memo(function MobileSpatialNavigation({ home, client, connected, sessions, openSession, openMainAgent, openProfile, openHttpLink, initialContext, onContextChange, onBackChange, onCreateAgent, recentMoteSpaceId, onSelectMote, needsYou = [], onPresentation, visible = true }: MobileSpatialNavigationProps) {
+export const MobileSpatialNavigation = memo(function MobileSpatialNavigation({ home, client, connected, sessions, openSession, openMainAgent, openProfile, openHttpLink, initialContext, onContextChange, onBackChange, onCreateAgent, recentMoteSpaceId, onSelectMote, needsYou = [], onPresentation, visible = true, focusTarget, focusVisible, focusSelected, openFocusSession }: MobileSpatialNavigationProps) {
   const observeCatalog = useMobileWebCatalogObservation()
   const [catalog, setCatalog] = useState<Catalog | null>(null)
   const [issue, setIssue] = useState('')
   const [pending, setPending] = useState(false)
   const [query, setQuery] = useState('')
+  const [focusQuery, setFocusQuery] = useState('')
+  const focusActive = focusVisible ?? (visible && home === 'focus')
+  const contentVisible = visible && home !== 'focus'
+  const catalogActive = contentVisible || focusActive
+  const focusVisited = useRef(focusActive), contentVisited = useRef(contentVisible)
+  if (focusActive) focusVisited.current = true
+  if (contentVisible) contentVisited.current = true
   const [spaceContext, setSpaceContext] = useState<MobileSpatialContext>(initialContext ?? EMPTY_CONTEXT)
   const [moteContext, setMoteContext] = useState<MobileSpatialContext>({ ...EMPTY_CONTEXT, spaceId: recentMoteSpaceId ?? null })
   useEffect(() => { if (recentMoteSpaceId) setMoteContext(value => value.spaceId === recentMoteSpaceId ? value : { ...EMPTY_CONTEXT, spaceId: recentMoteSpaceId }) }, [recentMoteSpaceId])
@@ -74,7 +86,7 @@ export const MobileSpatialNavigation = memo(function MobileSpatialNavigation({ h
   const directoryMounted = useRef(true)
   useEffect(() => { directoryMounted.current = true; return () => { directoryMounted.current = false } }, [])
   useEffect(() => {
-    if (!client || !connected || !visible) return
+    if (!client || !connected || !catalogActive) return
     let disposed = false, inFlight = false
     const read = async () => {
       if (inFlight || document.visibilityState === 'hidden') return
@@ -96,7 +108,7 @@ export const MobileSpatialNavigation = memo(function MobileSpatialNavigation({ h
     const foreground = () => { if (document.visibilityState === 'visible') void read() }
     document.addEventListener('visibilitychange', foreground)
     return () => { disposed = true; setPending(false); clearInterval(timer); document.removeEventListener('visibilitychange', foreground) }
-  }, [client, connected, visible, revision, observeCatalog, onPresentation])
+  }, [client, connected, catalogActive, revision, observeCatalog, onPresentation])
   const answered = useCallback(() => refresh(value => value + 1), [])
   const previousHome = useRef(home), incoming = JSON.stringify(initialContext ?? null), previousIncoming = useRef(incoming)
   useEffect(() => {
@@ -113,15 +125,15 @@ export const MobileSpatialNavigation = memo(function MobileSpatialNavigation({ h
   const backToSpace = useCallback(() => { setContext(value => ({ spaceId: value.spaceId, tabId: null, regionId: null })); setSelectedKey(null) }, [setContext, setSelectedKey])
   const activeBack = spaceId && context.regionId ? backToSpace : home === 'space' && spaceId ? backToDirectory : null
   useLayoutEffect(() => {
-    if (!visible || !onBackChange) return
+    if (!contentVisible || !onBackChange) return
     onBackChange(activeBack)
     return () => onBackChange(null)
-  }, [visible, onBackChange, activeBack])
+  }, [contentVisible, onBackChange, activeBack])
   const [metadataRevision, refreshMetadata] = useState(0)
   const missingMetadata = useMemo(() => catalog?.agentPresentation === undefined ? null : new Set(catalog.agentPresentation.filter(row => !row.providerId).map(row => row.agentSessionId)), [catalog])
   const memberReferences = useMemo(() => new Map<string, SessionReference>(), [client, catalog])
   const metadataScope = missingMetadata === null ? '*' : JSON.stringify([...missingMetadata])
-  const needsMetadataDirectory = visible && home === 'focus' && (missingMetadata === null || missingMetadata.size > 0) && sessions === undefined
+  const needsMetadataDirectory = focusActive && (missingMetadata === null || missingMetadata.size > 0) && sessions === undefined
   const metadataEpoch = useRef(0)
   useEffect(() => {
     if (sessions !== undefined) return
@@ -133,10 +145,10 @@ export const MobileSpatialNavigation = memo(function MobileSpatialNavigation({ h
           : event.type === 'run-removed' && event.agentSessionId ? memberReferences.delete(event.agentSessionId)
             : memberReferences.size > 0
         if (event.type === 'connection-state' || event.type === 'run-removed' && !event.agentSessionId) memberReferences.clear()
-        if (needsMetadataDirectory || visible && home !== 'focus' && memberChanged) refreshMetadata(value => value + 1)
+        if (needsMetadataDirectory || contentVisible && memberChanged) refreshMetadata(value => value + 1)
       }
     })
-  }, [client, sessions, missingMetadata, needsMetadataDirectory, memberReferences, visible, home])
+  }, [client, sessions, missingMetadata, needsMetadataDirectory, memberReferences, contentVisible])
   const retainedMetadata = useRef<{ client: typeof client; epoch: number; scope: string; revision: number; value: { sessions: AgentMuxAgentSession[]; issue: string } } | null>(null)
   const metadata = useMemo(() => {
     if (sessions !== undefined) return { sessions, issue: '' }
@@ -190,14 +202,14 @@ export const MobileSpatialNavigation = memo(function MobileSpatialNavigation({ h
     })
     return { rows, owners, motes, appearances, zonesByOwner, tabsByOwner, tabsById, regionsByTab, locationIndex, occurrences, issues }
   }, [catalog])
-  const reference = (id: string): SessionReference => {
+  const reference = (id: string, focus = false): SessionReference => {
     const known = sessionById.get(id), row = directory.rows.get(id)
     if (sessions !== undefined && known) return known
     if (row?.providerId) return { agentSessionId: id, providerId: row.providerId }
-    if (home !== 'focus') {
+    if (!focus && home !== 'focus') {
       const previous = memberReferences.get(id)
       if (previous) return previous
-      if (visible && client) {
+      if (contentVisible && client) {
         let value: SessionReference = { agentSessionId: id, ...(known?.providerId ? { providerId: known.providerId } : {}) }
         try {
           const member = client.agentSession(id)
@@ -212,7 +224,7 @@ export const MobileSpatialNavigation = memo(function MobileSpatialNavigation({ h
   }
   const matchingSpaces = spaces.filter(item => item.spaceId === spaceId)
   const space = matchingSpaces.length === 1 ? matchingSpaces[0] : undefined
-  const matching = (value: string) => value.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase())
+  const matching = (value: string) => value.toLocaleLowerCase().includes(focusQuery.trim().toLocaleLowerCase())
   const locationGroup = (id: string, hostId?: string | null) => {
     const groups = directory.locationIndex.bySession.get(id) ?? []
     return hostId ? directory.locationIndex.byAgent.get(agentLocationKey(hostId, id)) ??
@@ -237,9 +249,12 @@ export const MobileSpatialNavigation = memo(function MobileSpatialNavigation({ h
       ...(context ? { context } : {}), ...(owner?.kind === 'mote' ? { mote: moteIdentity(owner) } : {}) }
   }
   const name = (session: SessionReference) => identity(session).name
-  const sessionRow = (session: SessionReference, key = session.agentSessionId, context?: AgentMuxSpaceAddress | null, tabName?: string | null, places?: AgentMuxSpaceAddress[], hostId?: string | null) => {
+  const sessionRow = (session: SessionReference, key = session.agentSessionId, context?: AgentMuxSpaceAddress | null, tabName?: string | null, places?: AgentMuxSpaceAddress[], hostId?: string | null, focus = false) => {
     const object = identity(session, context), row = directory.rows.get(session.agentSessionId), status = row?.state ?? 'unknown'
     const group = locationGroup(session.agentSessionId, hostId ?? row?.projectGroup?.hostId ?? sessionById.get(session.agentSessionId)?.hostId)
+    const execution = directory.locationIndex.bySession.get(session.agentSessionId)
+    const executionHost = execution?.length === 1 ? execution[0]!.hostId : execution ? null : sessionById.get(session.agentSessionId)?.hostId
+    const isCurrent = focus && focusSelected?.agentSessionId === session.agentSessionId && focusSelected.hostId === executionHost
     const providerId = row?.providerId || session.providerId
     const stateLabel = row ? mobileAgentStateLabel(row) : '状态未确认'
     const refreshStatus = () => {
@@ -255,8 +270,8 @@ export const MobileSpatialNavigation = memo(function MobileSpatialNavigation({ h
     const clock = formatMobileClock(row?.lastActivityAt)
     const title = object.name !== '名称未确认' ? object.name : tabName || object.name
     const showProject = !row?.projectGroup && object.project !== '项目未确认'
-    return <li key={key} className="mobile-agent-row" {...(attention ? { 'data-needs-you': attention === 'error' ? 'error' : 'waiting' } : {})}
-      {...(row?.group === 'results' ? { 'data-unread': '' } : {})}><MobileAgentRow agentSessionId={session.agentSessionId} identity={object} presentation={row} refreshStatus={refreshStatus} onOpen={() => openSession(session.agentSessionId, object)}>
+    return <li key={key} className="mobile-agent-row" data-current={isCurrent || undefined} {...(attention ? { 'data-needs-you': attention === 'error' ? 'error' : 'waiting' } : {})}
+      {...(row?.group === 'results' ? { 'data-unread': '' } : {})}><MobileAgentRow agentSessionId={session.agentSessionId} identity={object} presentation={row} refreshStatus={refreshStatus} selected={isCurrent} onOpen={() => (focus ? openFocusSession ?? openSession : openSession)(session.agentSessionId, object)}>
       <span className="mobile-row-avatar mobile-executor-avatar"><AgentAvatarFace providerId={providerId} appearance={row?.avatar} size={24} /><span className="mobile-row-dot" data-mark={shownMark} aria-hidden="true" /></span>
       <span className="mobile-row-copy mobile-session-copy">
         <span className="mobile-row-title"><strong>{title}</strong>{clock && <time dateTime={new Date(row!.lastActivityAt!).toISOString()}>{clock}</time>}</span>
@@ -266,13 +281,14 @@ export const MobileSpatialNavigation = memo(function MobileSpatialNavigation({ h
           {showProject && <span className="mobile-row-project mobile-session-project">{object.project}</span>}
           <span className="mobile-session-recap" title={row?.recap ? row.recap.text : row?.detail}>{row?.recap?.text ?? (tabName && tabName !== title ? tabName : providerId ? agentProviderLabel(providerId) : '')}</span></span>
       </span>
-    </MobileAgentRow><MobileAgentLocations client={client} catalog={catalog} locations={group} agentSessionId={session.agentSessionId} name={title} visible={visible}
-      onChoose={place => openSession(session.agentSessionId, identity(session, place))} /></li>
+    </MobileAgentRow><MobileAgentLocations client={client} catalog={catalog} locations={group} agentSessionId={session.agentSessionId} name={title} visible={focus ? focusActive : visible}
+      onChoose={place => (focus ? openFocusSession ?? openSession : openSession)(session.agentSessionId, identity(session, place))} /></li>
   }
   const rows = catalog?.agentPresentation ?? []
+  const focusReady = focusVisited.current
   const projectRows = useMemo(() => {
     const groups = new Map<string, { project: NonNullable<Catalog['agentPresentation']>[number]['projectGroup']; values: SessionReference[] }>()
-    if (home !== 'focus') return groups
+    if (!focusReady) return groups
     for (const row of catalog?.agentPresentation ?? []) {
       const key = row.projectGroup?.key ?? 'unconfirmed-projects'
       let entry = groups.get(key)
@@ -280,7 +296,7 @@ export const MobileSpatialNavigation = memo(function MobileSpatialNavigation({ h
       entry.values.push(sessionById.get(row.agentSessionId) ?? { agentSessionId: row.agentSessionId, providerId: row.providerId })
     }
     return groups
-  }, [home, catalog, sessionById])
+  }, [focusReady, catalog, sessionById])
   const presentationIssues = directory.issues.filter(owner => home === 'mote' ? owner.kind === 'mote' : home === 'space' ? owner.kind !== 'mote' : true)
   const tabs = directory.tabsByOwner.get(spaceId ?? '') ?? []
   const openContent = (owner: Catalog['spaces'][number], tab: Catalog['tabs'][number], region: Region) => {
@@ -291,11 +307,11 @@ export const MobileSpatialNavigation = memo(function MobileSpatialNavigation({ h
     setSelectedKey(key); setContext({ spaceId: owner.spaceId, tabId: tab.tabId, regionId: region.regionId })
   }
   useEffect(() => {
-    if (!visible || home === 'focus' || selectedKey || !space || !context.tabId || !context.regionId) return
+    if (!contentVisible || selectedKey || !space || !context.tabId || !context.regionId) return
     const matchingTabs = tabs.filter(tab => tab.tabId === context.tabId && tab.regionIds.includes(context.regionId!))
     const regions = catalog?.regions.filter(region => region.tabId === context.tabId && region.regionId === context.regionId) ?? []
     if (matchingTabs.length === 1 && regions.length === 1 && ['file', 'browser'].includes(regions[0]!.kind)) openContent(space, matchingTabs[0]!, regions[0]!)
-  }, [catalog, context.spaceId, context.tabId, context.regionId, selectedKey, visible, home])
+  }, [catalog, context.spaceId, context.tabId, context.regionId, selectedKey, contentVisible, home])
   const selected = visited.find(value => value.key === selectedKey)
   const current = catalog?.regions.find(value => value.tabId === context.tabId && value.regionId === context.regionId)
   const currentZone = catalog?.zones.find(value => value.zoneId === selected?.zoneId)
@@ -363,34 +379,42 @@ export const MobileSpatialNavigation = memo(function MobileSpatialNavigation({ h
     </>
   }
   const filteredSessions = (values: SessionReference[]) => values.filter(session => matching(name(session) + ' ' + identity(session).project + ' ' + session.providerId))
-  return <MobileNoticeScope owner={client} identity={[home,spaceId,context.tabId,context.regionId]}><section className="mobile-spatial-panel">
-    <div className="mobile-section-heading mobile-page-header"><MobileHeaderMenu hidden={Boolean(context.regionId && activeBack)} /><div><h1>{home === 'mote' ? 'Mote' : home === 'focus' ? 'Focus' : 'Space'}</h1>
-      <p>{home === 'mote' ? '与你的协调 Agent 继续讨论' : home === 'focus' ? '需要你处理的事项与最近执行' : '按 Mac 上的工作空间继续'}</p></div>
-      <div className="mobile-section-actions">{visible && <MobileAvatarNoticeOutlet header />}<MobileDirectoryNotice issues={[...(issue ? [{ source: '空间目录', message: issue }] : []), ...(metadata.issue ? [{ source: '会话目录', message: metadata.issue }] : []), ...presentationIssues]} retry={() => refresh(count => count + 1)} />{onCreateAgent && <IconButton className="mobile-icon-button" aria-label="新建 Agent" onClick={() => onCreateAgent(spaceId ? { spaceId } : {})}><SemanticIcon name="action.create-agent" size={18} /></IconButton>}<IconButton className="mobile-icon-button" aria-label="刷新空间目录" onClick={() => refresh(value => value + 1)}><SemanticIcon name="action.refresh" size={18} animation={pending ? 'spin' : 'none'} /></IconButton></div></div>
+  const focusView = focusVisited.current ? <MobileNoticeScope owner={client} identity={['focus']}><section className="mobile-spatial-panel mobile-focus-facet">
+    <div className="mobile-section-heading mobile-page-header"><MobileHeaderMenu /><div><h1>Focus</h1>
+      <p>需要你处理的事项与最近执行</p></div>
+      <div className="mobile-section-actions">{focusActive && <MobileAvatarNoticeOutlet header />}<MobileDirectoryNotice issues={[...(issue ? [{ source: '空间目录', message: issue }] : []), ...(metadata.issue ? [{ source: '会话目录', message: metadata.issue }] : []), ...directory.issues]} retry={() => refresh(count => count + 1)} />{onCreateAgent && <IconButton className="mobile-icon-button" aria-label="新建 Agent" onClick={() => onCreateAgent({})}><SemanticIcon name="action.create-agent" size={18} /></IconButton>}<IconButton className="mobile-icon-button" aria-label="刷新空间目录" onClick={() => refresh(value => value + 1)}><SemanticIcon name="action.refresh" size={18} animation={pending ? 'spin' : 'none'} /></IconButton></div></div>
     {!connected && <MobileNotice owner={client} identity={[connected]} className="mobile-spatial-notice" role="status">连接暂不可用，显示的是最近一次读取的目录。</MobileNotice>}
-    <label className="mobile-spatial-search"><SemanticIcon name="action.search" size={16} /><TextInput value={query} onChange={event => setQuery(event.target.value)} placeholder={home === 'focus' ? '查找 Agent 或工作空间' : '查找工作空间'} aria-label="查找" /></label>
-    {home === 'focus' ? <>
-      {needsYou.length > 0 && !query.trim() && <section className="mobile-needs-you" aria-label={`需要你 · ${needsYou.length}`}>
+    <label className="mobile-spatial-search"><SemanticIcon name="action.search" size={16} /><TextInput value={focusQuery} onChange={event => setFocusQuery(event.target.value)} placeholder="查找 Agent 或工作空间" aria-label="查找" /></label>
+
+      {needsYou.length > 0 && !focusQuery.trim() && <section className="mobile-needs-you" aria-label={`需要你 · ${needsYou.length}`}>
         <header><span>需要你</span><span className="mobile-tab-badge" aria-hidden="true">{needsYou.length}</span></header>
         <ul>{needsYou.map(item => {
-          const session = reference(item.agentSessionId), object = identity(session), row = directory.rows.get(item.agentSessionId)
+          const session = reference(item.agentSessionId, true), object = identity(session), row = directory.rows.get(item.agentSessionId)
           return <li key={item.agentSessionId} className="mobile-needs-you-card" data-reason={item.reason}><button type="button" className="mobile-needs-you-ticket" data-reason={item.reason}
-            aria-label={`${object.name} · ${item.reason === 'error' ? '出错' : '需要你'} · 打开对话`} onClick={() => openSession(item.agentSessionId, object)}>
+            aria-label={`${object.name} · ${item.reason === 'error' ? '出错' : '需要你'} · 打开对话`} onClick={() => (openFocusSession ?? openSession)(item.agentSessionId, object)}>
             <span className="mobile-row-avatar"><AgentAvatarFace providerId={row?.providerId || session.providerId} appearance={row?.avatar} size={20} /><span className="mobile-row-dot" data-mark={item.reason === 'error' ? 'error' : 'attention'} aria-hidden="true" /></span>
             <span><strong>{object.name}</strong><small>{item.reason === 'error' ? '出错 · 需要处理' : row?.projectGroup?.name ?? object.project}</small></span>
           </button>
           {item.reason === 'waiting' && <MobileNeedsYouAnswer client={client} connected={connected} agentSessionId={item.agentSessionId} identity={object}
-            onOpen={() => openSession(item.agentSessionId, object)} onAnswered={answered} />}</li>
+            onOpen={() => (openFocusSession ?? openSession)(item.agentSessionId, object)} onAnswered={answered} />}</li>
         })}</ul>
       </section>}
       {[...projectRows].map(([key, { project, values }]) => {
         const matchingValues = filteredSessions(values)
         if (!matchingValues.length) return null
-        return <section className="mobile-focus-project" key={key} data-project-key={key} data-project-confirmed={Boolean(project)}><h2 className="mobile-spatial-subheading">{project?.spaceId && <MobileIdentity appearanceRevision={revision} objectSpaceId={project.spaceId} appearance={directory.appearances.get(project.spaceId)} identity={{ name: project.name, project: project.name, ...(directory.owners.get(project.spaceId)?.kind === 'mote' ? { mote: moteIdentity(directory.owners.get(project.spaceId)!) } : {}) }} client={client} connected={connected} visible={visible} size={20} />}<strong>{project?.name ?? '其他'}</strong>{project?.hostId && project.hostId !== 'local' && <small>{project.hostId}</small>}<span>{matchingValues.length}</span></h2><ul className="mobile-session-list">{matchingValues.map(session => sessionRow(session))}</ul></section>
+        return <section className="mobile-focus-project" key={key} data-project-key={key} data-project-confirmed={Boolean(project)}><h2 className="mobile-spatial-subheading">{project?.spaceId && <MobileIdentity appearanceRevision={revision} objectSpaceId={project.spaceId} appearance={directory.appearances.get(project.spaceId)} identity={{ name: project.name, project: project.name, ...(directory.owners.get(project.spaceId)?.kind === 'mote' ? { mote: moteIdentity(directory.owners.get(project.spaceId)!) } : {}) }} client={client} connected={connected} visible={focusActive} size={20} />}<strong>{project?.name ?? '其他'}</strong>{project?.hostId && project.hostId !== 'local' && <small>{project.hostId}</small>}<span>{matchingValues.length}</span></h2><ul className="mobile-session-list">{matchingValues.map(session => sessionRow(session, session.agentSessionId, undefined, undefined, undefined, undefined, true))}</ul></section>
       })}
       {!rows.length && <p className="mobile-spatial-empty">Focus 列表还没确认，可以刷新重试。</p>}
-      {catalog?.agentPresentation === undefined && metadata.sessions.length > 0 && <details><summary>其他已有会话</summary><ul className="mobile-session-list">{filteredSessions(metadata.sessions.filter(session => !directory.rows.has(session.agentSessionId))).map(session => sessionRow(session))}</ul></details>}
-    </> : context.regionId ? <>
+      {catalog?.agentPresentation === undefined && metadata.sessions.length > 0 && <details><summary>其他已有会话</summary><ul className="mobile-session-list">{filteredSessions(metadata.sessions.filter(session => !directory.rows.has(session.agentSessionId))).map(session => sessionRow(session, session.agentSessionId, undefined, undefined, undefined, undefined, true))}</ul></details>}
+
+  </section></MobileNoticeScope> : null
+  return <>{contentVisited.current && <MobileNoticeScope owner={client} identity={[home,spaceId,context.tabId,context.regionId]}><section className="mobile-spatial-panel" hidden={home === 'focus'}>
+    <div className="mobile-section-heading mobile-page-header"><MobileHeaderMenu hidden={Boolean(context.regionId && activeBack)} /><div><h1>{home === 'mote' ? 'Mote' : home === 'focus' ? 'Focus' : 'Space'}</h1>
+      <p>{home === 'mote' ? '与你的协调 Agent 继续讨论' : home === 'focus' ? '需要你处理的事项与最近执行' : '按 Mac 上的工作空间继续'}</p></div>
+      <div className="mobile-section-actions">{contentVisible && <MobileAvatarNoticeOutlet header />}<MobileDirectoryNotice issues={[...(issue ? [{ source: '空间目录', message: issue }] : []), ...(metadata.issue ? [{ source: '会话目录', message: metadata.issue }] : []), ...presentationIssues]} retry={() => refresh(count => count + 1)} />{onCreateAgent && <IconButton className="mobile-icon-button" aria-label="新建 Agent" onClick={() => onCreateAgent(spaceId ? { spaceId } : {})}><SemanticIcon name="action.create-agent" size={18} /></IconButton>}<IconButton className="mobile-icon-button" aria-label="刷新空间目录" onClick={() => refresh(value => value + 1)}><SemanticIcon name="action.refresh" size={18} animation={pending ? 'spin' : 'none'} /></IconButton></div></div>
+    {!connected && <MobileNotice owner={client} identity={[connected]} className="mobile-spatial-notice" role="status">连接暂不可用，显示的是最近一次读取的目录。</MobileNotice>}
+    <label className="mobile-spatial-search"><SemanticIcon name="action.search" size={16} /><TextInput value={query} onChange={event => setQuery(event.target.value)} placeholder={home === 'focus' ? '查找 Agent 或工作空间' : '查找工作空间'} aria-label="查找" /></label>
+    {context.regionId ? <>
       <button className="mobile-text-button" type="button" onClick={backToSpace}><SemanticIcon name="navigation.back" size={16} />返回空间内容</button>
       <h2 className="mobile-spatial-subheading">{selected?.region.kind === 'file' ? selected.region.file?.path.split('/').at(-1) ?? '文件' : selected?.region.kind === 'browser' ? '网页' : '内容'}</h2>
       <p>{selected?.spaceName ?? space?.name ?? '空间'} · {selected?.tabName ?? '标签'}</p>
@@ -400,14 +424,14 @@ export const MobileSpatialNavigation = memo(function MobileSpatialNavigation({ h
       {spaceId && !space && <MobileNotice identity={[spaceId]} className="mobile-spatial-notice" role="status">空间绑定还没重新确认，可以刷新目录。</MobileNotice>}
       {catalog ? <MobileSpaceDirectory key={home} catalog={catalog} home={home === 'mote' ? 'mote' : 'space'} query={query} selectedSpaceId={spaceId}
         onSelect={owner => { setContext(owner ? { spaceId: owner.spaceId, tabId: null, regionId: null } : EMPTY_CONTEXT); setSelectedKey(null); if (owner?.kind === 'mote') onSelectMote?.(owner.spaceId) }}
-        renderIdentity={owner => <MobileIdentity appearanceRevision={revision} objectSpaceId={owner.spaceId} appearance={directory.appearances.get(owner.spaceId)} identity={spaceIdentity(owner)} client={client} connected={connected} visible={visible} size={28} />}
+        renderIdentity={owner => <MobileIdentity appearanceRevision={revision} objectSpaceId={owner.spaceId} appearance={directory.appearances.get(owner.spaceId)} identity={spaceIdentity(owner)} client={client} connected={connected} visible={contentVisible} size={28} />}
         {...(home === 'mote' ? { renderPrimary: mainAction, renderProfile: owner => openProfile && <button type="button" className="mobile-mote-profile-action"
           aria-label={`查看 Mote 资料 · ${owner.name}`} onClick={() => openProfile(spaceIdentity(owner))}><SemanticIcon name="status.info" size={16} /><span>Profile</span></button> } : {})} renderContents={renderSpaceContents} /> : <p className="mobile-spatial-empty">{pending ? '正在读取 Mac 上的空间…' : '空间目录还没确认，可以在 Focus 中继续对话。'}</p>}
     </>}
     {visited.map(target => <div key={target.key} hidden={home === 'focus' || target.key !== selectedKey || !context.regionId}>
       {(target.region.kind === 'file' || target.region.kind === 'browser') && <MobileRegionContent client={client} connected={connected} showTitle={false}
-        visible={visible && home !== 'focus' && target.key === selectedKey && Boolean(context.regionId)} tabId={target.tabId} regionId={target.region.regionId} zoneId={target.zoneId}
+        visible={contentVisible && target.key === selectedKey && Boolean(context.regionId)} tabId={target.tabId} regionId={target.region.regionId} zoneId={target.zoneId}
         kind={target.region.kind} browserId={target.region.browserId} {...(target.region.file ? { file: target.region.file } : {})} {...(openHttpLink ? { openHttpLink } : {})} />}
     </div>)}
-  </section></MobileNoticeScope>
+  </section></MobileNoticeScope>}{focusTarget ? createPortal(focusView, focusTarget) : home === 'focus' ? focusView : null}</>
 })

@@ -9,8 +9,8 @@ export type MobileAgentMenuTarget = { agentSessionId: string; identity: MobileOb
 /** Presentation only. The App owns disclosure; a row never selects or inspects an Agent. */
 export const MobileAgentMenuContext = createContext<((target: MobileAgentMenuTarget) => void) | null>(null)
 
-export function MobileAgentRow({ agentSessionId, identity, presentation, refreshStatus, onOpen, beforeMenu, children, className = '' }: MobileAgentMenuTarget & {
-  onOpen(): void; beforeMenu?(): boolean; children: ReactNode; className?: string
+export function MobileAgentRow({ agentSessionId, identity, presentation, refreshStatus, onOpen, beforeMenu, children, selected = false, className = '' }: MobileAgentMenuTarget & {
+  onOpen(): void; beforeMenu?(): boolean; children: ReactNode; selected?: boolean; className?: string
 }) {
   const showMenu = useContext(MobileAgentMenuContext)
   const current = useRef({ agentSessionId, identity, presentation, refreshStatus, showMenu, beforeMenu })
@@ -26,7 +26,7 @@ export function MobileAgentRow({ agentSessionId, identity, presentation, refresh
     return cancel
   }, [agentSessionId, showMenu])
   return <>
-    <button type="button" className={`mobile-agent-row__open ${className}`}
+    <button type="button" className={`mobile-agent-row__open ${className}`} aria-current={selected ? 'true' : undefined}
       onPointerDown={event => {
         cancel(); suppressClick.current = false
         if (!showMenu || !event.isPrimary || event.button !== 0) return

@@ -537,3 +537,23 @@ button:disabled { opacity: .5; cursor: default; }
 .mobile-mote-source-status__actions { display: flex; flex-wrap: wrap; gap: 6px; }
 .mobile-mote-source-status button { min-height: 44px; padding: 8px 14px; border: 0; border-radius: var(--mobile-radius-sm); background: var(--surface-2); box-shadow: var(--hl); color: var(--text); font: inherit; font-size: var(--fs-body); cursor: pointer; }
 @media (prefers-reduced-motion: reduce) { .mobile-mote-source-status[open] .mobile-mote-source-status__panel { animation: none; } .mobile-mote-source-status__chevron { transition: none; } }
+
+/* The same Focus facet and primary workface keep their DOM positions at every width. */
+.mobile-primary-pane { display: contents; }
+.mobile-primary-pane > :is(.mobile-header, .mobile-main, .mobile-mote-context, .mobile-notice-stack, .mobile-navigation-bar) { grid-column: 1; }
+.mobile-focus-pane { grid-column: 1; grid-row: 3; min-width: 0; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+.mobile-app[data-focus-root] > .mobile-primary-pane > .mobile-main { visibility: hidden; pointer-events: none; }
+.mobile-sidebar-toggle { display: none; }
+.mobile-app[data-wide-workface] { max-width: none; grid-template-columns: 272px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); }
+.mobile-app[data-wide-workface] > .mobile-focus-pane { grid-row: 1; border-right: 1px solid var(--line-soft); background: var(--mobile-page); padding-top: env(safe-area-inset-top, 0px); }
+.mobile-app[data-wide-workface] > .mobile-primary-pane { grid-column: 2; min-width: 0; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto minmax(0, 1fr) auto auto; position: relative; }
+.mobile-app[data-wide-workface][data-sidebar-collapsed] { grid-template-columns: minmax(0, 1fr); }
+.mobile-app[data-wide-workface][data-sidebar-collapsed] > .mobile-primary-pane { grid-column: 1; }
+.mobile-app[data-wide-workface] .mobile-sidebar-toggle { display: inline-flex; position: absolute; z-index: 4; top: env(safe-area-inset-top, 0px); left: 0; width: 44px; height: 52px; justify-content: center; align-items: center; }
+.mobile-app[data-wide-workface] .mobile-primary-pane > .mobile-header { padding-left: 44px; }
+.mobile-app[data-wide-workface] .mobile-focus-facet > .mobile-page-header { display: flex; min-height: 52px; align-items: center; padding: 4px 0; gap: 4px; }
+.mobile-app[data-wide-workface] .mobile-focus-facet > .mobile-page-header h1 { font-size: var(--fs-title); font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mobile-app[data-wide-workface] .mobile-focus-facet > .mobile-page-header p { display: none; }
+.mobile-app[data-wide-workface] .mobile-focus-facet .mobile-row-detail { gap: 2px; }
+.mobile-focus-facet .mobile-agent-row[data-current] { background: var(--mobile-group-press); border-radius: var(--mobile-radius-sm); }
+.mobile-focus-facet .mobile-agent-row__open[aria-current="true"] .mobile-row-title strong { font-weight: 700; }

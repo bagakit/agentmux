@@ -1,10 +1,11 @@
+import { createPortal } from 'react-dom'
 import { MobileHeaderMenu } from './MobileHeaderMenu'
 import { Component, Suspense, lazy, useState, type ComponentType, type ReactNode } from 'react'
 
 import { MobileNotice } from '../notices/MobileNotice'
 import { useMobileWebReloadAction } from '../mobile-web/use-mobile-web-reload-action'
 
-type LoadBoundaryProps = { active: boolean; label: string; onReturn(): void; children: ReactNode }
+type LoadBoundaryProps = { target?: HTMLElement | null; active: boolean; label: string; onReturn(): void; children: ReactNode }
 class LoadBoundary extends Component<LoadBoundaryProps, { failure: string | null }> {
   state = { failure: null as string | null }
   static getDerivedStateFromError(error: unknown) {
@@ -12,7 +13,8 @@ class LoadBoundary extends Component<LoadBoundaryProps, { failure: string | null
   }
   render() {
     if (this.state.failure === null) return this.props.children
-    return <LoadFailure active={this.props.active} label={this.props.label} failure={this.state.failure} onReturn={this.props.onReturn} />
+    const failure = <LoadFailure active={this.props.active} label={this.props.label} failure={this.state.failure} onReturn={this.props.onReturn} />
+    return this.props.target ? createPortal(failure, this.props.target) : failure
   }
 }
 
@@ -31,17 +33,18 @@ function LoadFailure({ active, label, failure, onReturn }: { active: boolean; la
 /** `menu`: a top-level directory keeps the shell's menu in its header while its chunk loads. */
 export function deferMobileSurface<P extends object>(label: string, load: () => Promise<{ default: ComponentType<P> }>, { menu = false }: { menu?: boolean } = {}) {
   const Surface = lazy(load)
-  return function DeferredMobileSurface({ loadWhen, onLoadReturn, loadingReturn = true, loadingLabel = label, ...props }: P & { loadWhen: boolean; onLoadReturn(): void; loadingReturn?: boolean; loadingLabel?: string }) {
+  return function DeferredMobileSurface({ loadWhen, onLoadReturn, loadingReturn = true, loadingLabel = label, fallbackTarget, ...props }: P & { loadWhen: boolean; onLoadReturn(): void; loadingReturn?: boolean; loadingLabel?: string; fallbackTarget?: HTMLElement | null }) {
     const [visited, setVisited] = useState(loadWhen)
     if (loadWhen && !visited) setVisited(true)
     if (!visited && !loadWhen) return null
-    return <LoadBoundary active={loadWhen} label={label} onReturn={onLoadReturn}>
-      <Suspense fallback={<section className="mobile-deferred-surface" role="status" aria-busy="true" aria-label={`正在加载 ${loadingLabel}`}>
+    const loading = <section className="mobile-deferred-surface" role="status" aria-busy="true" aria-label={`正在加载 ${loadingLabel}`}>
         {menu && <header className="mobile-page-header mobile-deferred-header"><MobileHeaderMenu /><h1>{loadingLabel}</h1></header>}
         <span className="mobile-loading-label">正在加载 {loadingLabel}…</span>
         <div className="mobile-loading-skeleton" aria-hidden="true"><span /><span /><span /></div>
         {loadingReturn && <button type="button" className="mobile-text-button" onClick={onLoadReturn}>返回</button>}
-      </section>}><Surface {...props as P} /></Suspense>
+      </section>
+    return <LoadBoundary target={fallbackTarget ?? null} active={loadWhen} label={label} onReturn={onLoadReturn}>
+      <Suspense fallback={fallbackTarget ? createPortal(loading, fallbackTarget) : loading}><Surface {...props as P} /></Suspense>
     </LoadBoundary>
   }
 }
