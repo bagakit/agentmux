@@ -147,9 +147,9 @@ export class AgentWorkspaceDirectory {
     if (process.platform === 'win32' || typeof process.getuid !== 'function' || typeof constants.O_NOFOLLOW !== 'number') {
       throw refuse('This platform cannot prove same-UID no-follow directory ownership.')
     }
-    // Prove both bigint identity and directory-fsync support before the first namespace mkdir.
+    // Prove bigint identity support before touching the namespace. Directory-fsync
+    // support is exercised by the actual allocation/parent acknowledgement below.
     await lstat(this.stateDirectory, { bigint: true })
-    await this.syncDirectory(this.stateDirectory)
   }
 
   private async syncDirectory(path: string): Promise<void> {
@@ -233,6 +233,8 @@ export class AgentWorkspaceDirectory {
 
   private async reserve(location: AgentWorkspaceDirectoryLocation): Promise<string> {
     const stateRealpath = await realpath(this.stateDirectory)
+    // Only a genuinely absent reservation pays the allocation preflight barrier.
+    await this.syncDirectory(this.stateDirectory)
     const rootPath = dirname(location.agentWorkspace.workspacePath)
     const root = await this.ensureNamespace(rootPath, join(stateRealpath, 'agent-workspaces'))
     await this.ensureNamespace(dirname(location.markerPath), join(stateRealpath, 'agent-workspace-identities'))
