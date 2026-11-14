@@ -1,4 +1,5 @@
-import { spawn } from 'node:child_process'
+import { spawn, fork } from 'node:child_process'
+import { once } from 'node:events'
 import { createHash } from 'node:crypto'
 import { mkdtemp, readFile, readdir, realpath, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
@@ -160,6 +161,62 @@ process.stdout.write(createHash('sha256').update(result.prepared.launch).digest(
   expect(JSON.parse(marker)).toMatchObject({ phase: 'provisioned', runtimeId: 'writer-runtime', agentSessionId: 'original-agent',
     workspacePath: location.agentWorkspace.workspacePath,
     root: { dev: String(root.dev), ino: String(root.ino) }, leaf: { dev: String(leaf.dev), ino: String(leaf.ino) } })
+})
+
+it('re-acknowledges shared namespace parents for a different-binding EEXIST survivor', async () => {
+  const f = await fixture(), worker = join(f.root, 'namespace-race.mjs')
+  await symlink(resolve('packages/core/node_modules'), join(f.root, 'node_modules'), 'dir')
+  const source = `import fs from 'node:fs/promises'; import {syncBuiltinESMExports} from 'node:module';
+const root=process.argv[2], role=process.argv[3], state=root;
+const originalOpen=fs.open.bind(fs), originalMkdir=fs.mkdir.bind(fs); let stateSyncs=0, releaseA, releaseB;
+const gateA=new Promise(r=>releaseA=r), gateB=new Promise(r=>releaseB=r);
+process.on('message',message=>{if(message.type==='release-a')releaseA(); if(message.type==='a-held')releaseB()});
+fs.open=async(path,flags,mode)=>{const handle=await originalOpen(path,flags,mode); if(String(path)===state&&flags==='r'){
+  stateSyncs++; if(role==='A'&&stateSyncs===4){process.send({type:'a-held'});await gateA;await handle.close();throw new Error('simulated crash before identity parent ACK')}
+} return handle};
+fs.mkdir=async(path,options)=>{if(role==='B'&&String(path)===root+'/agent-workspaces'){process.send({type:'b-preflight'});await gateB} return await originalMkdir(path,options)};
+syncBuiltinESMExports();
+const {AgentExecutionHelperStore}=await import(${JSON.stringify(resolve('packages/core/src/agent-execution-helper-store.ts'))});
+const {AgentWorkspaceDirectory}=await import(${JSON.stringify(resolve('packages/core/src/agent-workspace-directory.ts'))});
+const owner=new AgentWorkspaceDirectory(root+'/sessions.json','race-runtime'), location=owner.locate('agent-'+role);
+const bindingId='binding-'+role, input={bindingId,agentSessionId:'agent-'+role,role:'frontend',providerId:'codex',workspacePath:location.agentWorkspace.workspacePath,createOperationId:'create-'+role,
+  toolExecution:{bindingId,resourceHostId:'resource',resourceRuntimeId:'resource-runtime',workspacePath:root}};
+try {
+  const preparation=await new AgentExecutionHelperStore(root).prepare(input,async()=>({bindingId,role:'frontend',providerId:'codex',prepared:{createOperationId:input.createOperationId,workspacePath:input.workspacePath,
+    launch:JSON.stringify({createOperationId:input.createOperationId,request:{program:process.execPath,args:[role],cwd:input.workspacePath,env:{AGENTMUX_LIFECYCLE_OPERATION_ID:input.createOperationId},initial_size:{cols:80,rows:24},declared_inputs:[]}})}}),
+    async(write,admission)=>{await owner.admit(input.agentSessionId,input.workspacePath,admission.phase);return await write()});
+  process.send({type:role==='B'?'b-done':'a-done',syncs:stateSyncs,preparation},()=>process.exit(0));
+} catch(error) { process.send({type:'worker-error',role,message:String(error),syncs:stateSyncs},()=>process.exit(role==='A'?2:1)) }
+`
+  const identityRequire = createRequire(join(await realpath('packages/core/node_modules/@agentmux/identity'), 'package.json'))
+  await bundle({ stdin: { contents: source, resolveDir: process.cwd() }, outfile: worker, bundle: true, platform: 'node', format: 'esm', alias: {
+    '@agentmux/identity': resolve('packages/identity/src/index.ts'), '@noble/hashes/sha2.js': identityRequire.resolve('@noble/hashes/sha2.js'), '@scure/base': identityRequire.resolve('@scure/base'),
+  }, logLevel: 'silent' })
+  type Message = { type: string; syncs?: number; role?: string; message?: string }
+  const children: ReturnType<typeof fork>[] = []
+  const start = (role: 'A' | 'B') => {
+    const child = fork(worker, [f.root, role], { stdio: ['ignore', 'pipe', 'pipe', 'ipc'] }); children.push(child)
+    let diagnostics = ''; child.stderr!.on('data', bytes => { diagnostics += bytes })
+    const exit = once(child, 'exit').then(([code, signal]) => ({ code, signal, diagnostics }))
+    return { child, exit }
+  }
+  const message = (child: ReturnType<typeof fork>, type: string) => new Promise<Message>((resolveMessage, reject) => {
+    const listener = (value: Message) => { if (value.type === type) { child.off('message', listener); resolveMessage(value) } }
+    child.on('message', listener); child.once('error', reject); child.once('exit', () => reject(new Error(`Worker exited before ${type}`)))
+  })
+  const b = start('B')
+  await message(b.child, 'b-preflight')
+  const a = start('A')
+  await message(a.child, 'a-held')
+  b.child.send({ type: 'a-held' })
+  const bDone = await message(b.child, 'b-done')
+  a.child.send({ type: 'release-a' })
+  const [aExit, bExit] = await Promise.all([a.exit, b.exit])
+  expect(bExit.code, bExit.diagnostics).toBe(0)
+  expect(aExit.code, aExit.diagnostics).toBe(2)
+  expect(bDone.syncs).toBeGreaterThanOrEqual(4)
+  expect((await readdir(join(f.root, 'execution-helpers'))).filter(name => name.endsWith('.json'))).toHaveLength(1)
+  for (const child of children) if (child.connected) child.disconnect()
 })
 
 it('requires an explicit state root and rejects foreign grants', async () => {
