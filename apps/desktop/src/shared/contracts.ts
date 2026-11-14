@@ -2088,6 +2088,8 @@ export type AgentMuxDesktopApi = {
     setProfileProxySignIn(profileId: string, signIn: { username: string; password: string } | null): Promise<{ reconnected: boolean }>
     /** One request through this Profile's own session to the saved check address. */
     checkProfileExit(profileId: string): Promise<BrowserProfileExitCheck>
+    probeProfileNetwork(profileId: string, operationId: string): Promise<import('@agentmux/core/control').BrowserProxyProbeReceipt>
+    profileNetworkHistory(profileId: string, operationId?: string, before?: string): Promise<import('@agentmux/core/control').BrowserProxyProbeHistory>
     detectProfileImportSources(): Promise<BrowserProfileImportSourceSummary[]>
     importProfile(sourceToken: string, label: string): Promise<BrowserProfileSummary>
     /** Explicit human address/search submissions only; page navigation never records here. */

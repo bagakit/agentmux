@@ -1,4 +1,6 @@
 import { parseBrowserProxyEdit, parseBrowserProxyAsset, type BrowserProxyAsset, type BrowserProxyEdit, type BrowserProxyBinding, parseBrowserProfileQuery, parseBrowserProfileView, type BrowserProfileView, type BrowserProfileQuery, parseBrowserProfileEnvironment, normalizeBrowserProfileTags, type BrowserProfileEnvironment } from '@agentmux/core/control'
+import { parseBrowserProxyProbe, type BrowserProxyProbe, type BrowserProxyProbeHistory } from '@agentmux/core/control'
+import { isDeepStrictEqual } from 'node:util'
 import { mintObjectId, isObjectId } from '@agentmux/core/object-id'
 import { createHash } from 'node:crypto'
 import { mkdir, readFile } from 'node:fs/promises'
@@ -139,6 +141,10 @@ const metadataSchema = z
     folders: z.array(folderSchema).optional(),
     views: z.array(viewSchema).optional(),
     proxyAssets: z.array(proxyAssetSchema).optional(),
+    networkDiagnostics: z.array(z.unknown().transform((value, context): BrowserProxyProbe => {
+      try { return parseBrowserProxyProbe(value) }
+      catch { context.addIssue({ code: 'custom', message: 'Stored network diagnostic is invalid' }); return z.NEVER }
+    })).optional(),
     trash: z.array(trashRecordSchema).optional(),
     pendingImports: z.array(pendingImportSchema),
     /** Profiles already removed from the list whose site data is not confirmed cleared yet. */
@@ -321,6 +327,39 @@ export class BrowserProfileStore {
 
   /** Read the original file after initialization; missing is unknown, never a new empty catalog. */
   read(): Promise<BrowserProfileSnapshot> { return this.enqueue(async () => snapshotOf(await this.readMetadata())) }
+
+  /** Bounded views over original records. An absent id never certifies that a request did not run. */
+  networkHistory(profileId: string, operationId?: string, before?: string): Promise<BrowserProxyProbeHistory> {
+    return this.enqueue(async () => {
+      const records = (await this.readMetadata()).networkDiagnostics ?? []
+      if (operationId) {
+        const original = records.find(item => item.id === operationId)
+        if (original && original.profileId !== profileId) throw new Error('This diagnostic belongs to another Profile.')
+        return { diagnostics: original ? [structuredClone(original)] : [], nextCursor: null }
+      }
+      const matching = records.filter(item => item.profileId === profileId)
+      const end = before === undefined ? matching.length : matching.findIndex(item => item.id === before)
+      if (end < 0) throw new Error('The original diagnostic cursor is unavailable; read the current history before continuing.')
+      const start = Math.max(0, end - 20), page = matching.slice(start, end).reverse()
+      return { diagnostics: structuredClone(page), nextCursor: start > 0 ? page.at(-1)!.id : null }
+    })
+  }
+
+  recordNetworkDiagnostic(input: BrowserProxyProbe): Promise<BrowserProfileSnapshot> {
+    const diagnostic = parseBrowserProxyProbe(input)
+    return this.enqueue(async () => {
+      const metadata = await this.readMetadata(), records = metadata.networkDiagnostics ?? []
+      const original = records.find(item => item.id === diagnostic.id)
+      if (original) {
+        const binding = (value: BrowserProxyProbe) => ({ id: value.id, profileId: value.profileId, configurationRevision: value.configurationRevision, route: value.route, exitOrigin: value.exitOrigin, startedAt: value.startedAt })
+        if (!isDeepStrictEqual(binding(original), binding(diagnostic)) || original.phase === 'observed') throw new Error('The original diagnostic binding is immutable; inspect its original operation id.')
+      } else {
+        const profile = metadata.profiles.find(item => item.id === diagnostic.profileId)
+        if (!profile || profileConfigurationRevision(profile) !== diagnostic.configurationRevision || diagnostic.phase !== 'pending') throw new Error('The original Profile configuration changed before this diagnostic was registered.')
+      }
+      return await this.commit({ ...metadata, networkDiagnostics: original ? records.map(item => item.id === original.id ? diagnostic : item) : [...records, diagnostic] }, false)
+    })
+  }
 
   inspectProfile(profileId: string): Promise<{ snapshot: BrowserProfileSnapshot; profile: BrowserProfileSummary }> {
     return this.enqueue(async () => {

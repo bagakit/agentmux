@@ -25,6 +25,8 @@ export type BrowserProfileProxyAuthPorts = {
   profileOfSession(session: Session): string | null
   /** That Profile's proxy server, if its route is a proxy. */
   proxyOf(profileId: string): { host: string; port: number } | null
+  /** Configuration identity for Main-private protocol probes; absence never changes page login. */
+  configurationRevision?(profileId: string): string | null
   /** A short, password-free reason for the Profile's network line. */
   report(profileId: string, reason: string | null): void
 }
@@ -100,6 +102,21 @@ export function createBrowserProfileProxyAuth(ports: BrowserProfileProxyAuthPort
   }
 
   return {
+    /** Plaintext stays inside Main and is used only for this exact, still-current proxy endpoint. */
+    async withProbeCredentials<T>(profileId: string, expected: { host: string; port: number; configurationRevision: string },
+      use: (credential: BrowserProfileProxyCredential) => Promise<T>): Promise<T> {
+      const current = () => sameProxy(ports.proxyOf(profileId), expected) && ports.configurationRevision?.(profileId) === expected.configurationRevision
+      if (!current()) throw new BrowserProfileProxyAuthUnavailable('The original proxy configuration is no longer current.')
+      const entry = (await read(profileId)).profiles[profileId]
+      if (!entry || !entry.proxy || !sameProxy(entry.proxy, expected) || !current()) {
+        throw new BrowserProfileProxyAuthUnavailable('A sign-in for this exact proxy configuration is unavailable.')
+      }
+      let password: string
+      try { password = ports.crypto.decrypt(Buffer.from(entry.password, 'base64')) }
+      catch { throw new BrowserProfileProxyAuthUnavailable('The original proxy sign-in could not be read.') }
+      if (!current()) throw new BrowserProfileProxyAuthUnavailable('The original proxy configuration changed before the protocol request.')
+      return await use({ username: entry.username, password })
+    },
     /** The last recorded issue for this exact current proxy; absence is not proof of authentication. */
     issue(profileId: string): string | null {
       const issue = issues.get(profileId)

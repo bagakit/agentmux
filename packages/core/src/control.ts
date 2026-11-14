@@ -21,6 +21,7 @@ export * from './browser-default.js'
 export * from './browser-profile-control.js'
 export * from './browser-profile-library.js'
 export * from './browser-profile-trash.js'
+export * from './browser-proxy-probe.js'
 import type { AgentMuxSpaceControlRequest, AgentMuxSpaceControlResult } from './space-control.js'
 import type { AgentMuxDesktopFocusTarget, AgentMuxDesktopInputPolicy, AgentMuxDesktopFocusResult } from './desktop-focus-control.js'
 import type { BrowserTaskControlPayload, BrowserTaskControlResult } from './browser-task-control.js'
@@ -1219,6 +1220,8 @@ const OPERATION_BUDGET: Record<AgentMuxControlRequest['operation'], 'long' | 'sh
   'browser.profile.proxy-sign-in.set': 'long',
   'browser.profile.proxy-sign-in.clear': 'long',
   'browser.profile.network.check': 'long',
+  'browser.profile.network.probe': 'long',
+  'browser.profile.network.history': 'short',
   'browser.task.export': 'short', 'browser.task.import': 'long', 'browser.task.import-inspect': 'short',
   'browser.task.source': 'short',
   'browser.task.draft': 'short',

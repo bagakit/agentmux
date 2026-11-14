@@ -1520,6 +1520,8 @@ const mockApi: AgentMuxDesktopApi = {
       if (!mockBrowserProfiles.some((profile) => profile.id === profileId)) throw new Error(`Unknown Browser Profile: ${profileId}`)
       return { status: 'reachable' as const, httpStatus: 200, latencyMs: 184, ip: '203.0.113.7' }
     },
+    probeProfileNetwork: async () => { throw new Error('Protocol diagnostics require the original Desktop Profile owner.') },
+    profileNetworkHistory: async () => ({ diagnostics: [], nextCursor: null }),
     clearProfileSite: async (profileId, site, approval: BrowserProfileClearSiteApproval) => {
       if (approval.kind !== 'user-confirmed' || approval.operation !== 'clear-site-data' || approval.scope !== 'profile-site' || approval.profileId !== profileId || approval.site !== site) {
         throw Object.assign(new Error('Clearing a site’s data requires your confirmation for this Profile and site.'), { code: 'BROWSER_DESTRUCTIVE_APPROVAL_REQUIRED' })

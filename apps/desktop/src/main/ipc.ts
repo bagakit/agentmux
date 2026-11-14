@@ -483,6 +483,7 @@ export async function registerIpc(args: {
     path: join(app.getPath('userData'), 'browser-profile-proxy-auth.json'),
     profileOfSession: target => browserProfiles.profileOfSession(target),
     proxyOf: profileId => browserProfiles.proxyOf(profileId),
+    configurationRevision: profileId => browserProfiles.configurationRevision(profileId),
     // The original owner retains the issue; Browser snapshots publish it without changing page health.
     report: profileId => browsers.refreshProfileProxySignIn(profileId)
   })
@@ -2206,6 +2207,12 @@ export async function registerIpc(args: {
   }))
   handleWithEvent('browser:setProfileProxySignIn', (event, profileId: string, signIn: { username: string; password: string } | null) => ipcResult(async () => {
     return await profileNetworkControl.setProxySignIn(profileId, signIn)
+  }))
+  handleWithEvent('browser:probeProfileNetwork', (event, profileId: string, operationId: string) => ipcResult(async () => {
+    return await profileNetworkControl.probe(profileId, operationId)
+  }))
+  handleWithEvent('browser:profileNetworkHistory', (event, profileId: string, operationId?: string, before?: string) => ipcResult(async () => {
+    return await browserProfiles.networkHistory(profileId, operationId, before)
   }))
   handleWithEvent('browser:checkProfileExit', (event, profileId: string) => ipcResult(async () => {
     return await profileNetworkControl.checkExit(profileId)

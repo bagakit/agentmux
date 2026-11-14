@@ -170,6 +170,19 @@ export class BrowserProfileManager implements BrowserProfileResolver {
     return network?.mode === 'proxy' ? { host: network.server.host, port: network.server.port } : null
   }
 
+  configurationRevision(profileId: string): string | null { return this.profiles.get(profileId)?.revision ?? null }
+
+  async networkHistory(profileId: string, operationId?: string, before?: string): Promise<import('@agentmux/core/control').BrowserProxyProbeHistory> {
+    await this.initialize()
+    return await this.store.networkHistory(profileId, operationId, before)
+  }
+
+  async recordNetworkDiagnostic(diagnostic: import('@agentmux/core/control').BrowserProxyProbe): Promise<void> {
+    await this.initialize()
+    const snapshot = await this.store.recordNetworkDiagnostic(diagnostic)
+    this.adopt(snapshot)
+  }
+
   /** Explicit reads repair a previously unknown write/read without replaying it or creating a catalog. */
   async refresh(): Promise<void> {
     this.assertInitialized()

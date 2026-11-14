@@ -67,6 +67,8 @@ export const AGENTMUX_RPC_CONTROL_METHODS = {
   'browser.profile.set-default': 'browser.profile.set-default', 'browser.profile.delete': 'browser.profile.delete',
   'browser.profile.proxy-sign-in.set': 'browser.profile.proxy-sign-in.set', 'browser.profile.proxy-sign-in.clear': 'browser.profile.proxy-sign-in.clear',
   'browser.profile.network.check': 'browser.profile.network.check',
+  'browser.profile.network.probe': 'browser.profile.network.probe',
+  'browser.profile.network.history': 'browser.profile.network.history',
   // Stopping an active external-tab operation also ends only its original sharing
   // grant. Finished operations return their retained state without revoking sharing.
   // Other targets and the original tab remain. Cancelling a reader does neither.

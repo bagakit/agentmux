@@ -14,7 +14,7 @@ export function isBrowserProfileControlRequest(request: AgentMuxControlRequest):
 }
 
 export type BrowserProfileControlPorts = {
-  profiles: Pick<BrowserProfileManager, 'listProxies' | 'saveProxy' | 'deleteProxy' | 'assignProxy' | 'initialize' | 'listProfiles' | 'listRevision' | 'listSequence' | 'createProfile' | 'copyProfile' | 'updateProfile' | 'listViews' | 'saveView' | 'deleteView' | 'bulkUpdate' | 'listFolders' | 'createFolder' | 'renameFolder' | 'deleteFolder' | 'setDefaultProfile' | 'refresh' | 'listTrash' | 'listLegacyPendingDeletes' | 'restoreProfile'>
+  profiles: Pick<BrowserProfileManager, 'networkHistory' | 'listProxies' | 'saveProxy' | 'deleteProxy' | 'assignProxy' | 'initialize' | 'listProfiles' | 'listRevision' | 'listSequence' | 'createProfile' | 'copyProfile' | 'updateProfile' | 'listViews' | 'saveView' | 'deleteView' | 'bulkUpdate' | 'listFolders' | 'createFolder' | 'renameFolder' | 'deleteFolder' | 'setDefaultProfile' | 'refresh' | 'listTrash' | 'listLegacyPendingDeletes' | 'restoreProfile'>
   usage: Pick<BrowserProfileUsageOwner, 'usage' | 'deleteProfile'>
   network: BrowserProfileNetworkControl
 }
@@ -64,6 +64,11 @@ export async function executeBrowserProfileControl(request: ProfileRequest, port
         ? { operation: request.operation, profileId: request.profileId, saved: true, reconnected }
         : { operation: request.operation, profileId: request.profileId, cleared: true, reconnected }
     }
+    case 'browser.profile.network.probe':
+      existing(ports, request.profileId)
+      return { operation: request.operation, profileId: request.profileId, ...await ports.network.probe(request.profileId, request.operationId) }
+    case 'browser.profile.network.history':
+      return { operation: request.operation, profileId: request.profileId, ...await ports.profiles.networkHistory(request.profileId, request.operationId, request.before) }
     case 'browser.profile.network.check':
       existing(ports, request.profileId)
       return { operation: request.operation, profileId: request.profileId, check: await ports.network.checkExit(request.profileId) }

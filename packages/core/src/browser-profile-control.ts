@@ -1,3 +1,4 @@
+import { parseBrowserProxyProbe, type BrowserProxyProbeReceipt, type BrowserProxyProbeHistory } from './browser-proxy-probe.js'
 import { parseBrowserProxyEdit, parseBrowserProxyAsset, parseBrowserProxyBinding, parseBrowserProfileNetworkApplication, type BrowserProxyEdit, type BrowserProxyAsset, type BrowserProxyBinding, type BrowserProfileNetworkApplication } from './browser-proxy-library.js'
 import type { BrowserProfileTrashEntry, BrowserProfileNativeUse, BrowserProfileRecycleReceipt, BrowserProfileRestoreReceipt } from './browser-profile-trash.js'
 import { AgentMuxError } from './errors.js'
@@ -13,7 +14,7 @@ export const BROWSER_PROFILE_CONTROL_OPERATIONS = ['browser.profile.proxy.ls', '
   'browser.profile.view.create', 'browser.profile.view.update', 'browser.profile.view.delete', 'browser.profile.bulk-update',
   'browser.profile.trash.ls', 'browser.profile.trash.restore',
   'browser.profile.copy', 'browser.profile.update', 'browser.profile.set-default', 'browser.profile.delete',
-  'browser.profile.proxy-sign-in.set', 'browser.profile.proxy-sign-in.clear', 'browser.profile.network.check'] as const
+  'browser.profile.proxy-sign-in.set', 'browser.profile.proxy-sign-in.clear', 'browser.profile.network.check', 'browser.profile.network.probe', 'browser.profile.network.history'] as const
 export type BrowserProfileControlOperation = typeof BROWSER_PROFILE_CONTROL_OPERATIONS[number]
 
 /**
@@ -51,6 +52,8 @@ export type BrowserProfileControlPayload =
   | { operation: 'browser.profile.proxy-sign-in.set'; profileId: string; signIn: BrowserProfileProxySignIn }
   | { operation: 'browser.profile.proxy-sign-in.clear'; profileId: string }
   | { operation: 'browser.profile.network.check'; profileId: string }
+  | { operation: 'browser.profile.network.probe'; profileId: string; operationId: string }
+  | { operation: 'browser.profile.network.history'; profileId: string; operationId?: string; before?: string }
 
 /** Canonical tag names, shared by input parsing and Main persistence validation. */
 export function normalizeBrowserProfileTags(value: unknown): string[] { return tags(value, 'INVALID_CONTROL_REQUEST') }
@@ -401,6 +404,8 @@ export type BrowserProfileControlResult =
   | { operation: 'browser.profile.proxy-sign-in.set'; profileId: string; saved: true; reconnected: boolean }
   | { operation: 'browser.profile.proxy-sign-in.clear'; profileId: string; cleared: true; reconnected: boolean }
   | { operation: 'browser.profile.network.check'; profileId: string; check: BrowserProfileNetworkCheck }
+  | ({ operation: 'browser.profile.network.probe'; profileId: string } & BrowserProxyProbeReceipt)
+  | ({ operation: 'browser.profile.network.history'; profileId: string } & BrowserProxyProbeHistory)
 
 /** A hue a person can pick: an integer degree on the color wheel. Main also keeps it clear of status colors. */
 export const BROWSER_PROFILE_HUE_MAX = 359
@@ -468,11 +473,15 @@ export function parseBrowserProfileControlPayload(source: Record<string, unknown
     'browser.profile.view.create': ['label', 'query', 'expectedRevision'], 'browser.profile.view.update': ['viewId', 'label', 'query', 'expectedRevision'], 'browser.profile.view.delete': ['viewId', 'expectedRevision'], 'browser.profile.bulk-update': ['items', 'action'], 'browser.profile.folder.create': ['label', 'expectedRevision'],
     'browser.profile.folder.rename': ['folderId', 'label', 'expectedRevision'], 'browser.profile.folder.delete': ['folderId', 'expectedRevision'], 'browser.profile.inspect': ['profileId'], 'browser.profile.create': ['label'], 'browser.profile.copy': ['profileId', 'expectedRevision', 'label'],
     'browser.profile.update': ['profileId', 'expectedRevision', 'edit'], 'browser.profile.set-default': ['profileId'], 'browser.profile.delete': ['profileId', 'expectedRevision'], 'browser.profile.trash.ls': [], 'browser.profile.trash.restore': ['archiveId', 'expectedRevision', 'folderId'],
-    'browser.profile.proxy-sign-in.set': ['profileId', 'signIn'], 'browser.profile.proxy-sign-in.clear': ['profileId'], 'browser.profile.network.check': ['profileId']
+    'browser.profile.proxy-sign-in.set': ['profileId', 'signIn'], 'browser.profile.proxy-sign-in.clear': ['profileId'], 'browser.profile.network.check': ['profileId'], 'browser.profile.network.probe': ['profileId', 'operationId'], 'browser.profile.network.history': ['profileId', 'operationId', 'before']
   }
   record(source, [...envelope, ...fields[operation]], code, 'Browser Profile request')
-  for (const key of fields[operation]) if (operation !== 'browser.profile.ls' && !(operation === 'browser.profile.trash.restore' && key === 'folderId') && !Object.hasOwn(source, key)) fail(code, `Browser Profile ${key} is required.`)
+  for (const key of fields[operation]) if (operation !== 'browser.profile.ls' && !(operation === 'browser.profile.trash.restore' && key === 'folderId') && !(operation === 'browser.profile.network.history' && key !== 'profileId') && !Object.hasOwn(source, key)) fail(code, `Browser Profile ${key} is required.`)
   switch (operation) {
+    case 'browser.profile.network.probe': return { operation, profileId: identity(source.profileId, code, 'Profile ID'), operationId: identity(source.operationId, code, 'Diagnostic operation ID') }
+    case 'browser.profile.network.history':
+      if (source.operationId !== undefined && source.before !== undefined) fail(code, 'Read an exact diagnostic or a history cursor, not both.')
+      return { operation, profileId: identity(source.profileId, code, 'Profile ID'), ...(source.operationId === undefined ? {} : { operationId: identity(source.operationId, code, 'Diagnostic operation ID') }), ...(source.before === undefined ? {} : { before: identity(source.before, code, 'Diagnostic history cursor') }) }
     case 'browser.profile.proxy.ls': return { operation }
     case 'browser.profile.proxy.create': return { operation, edit: parseBrowserProxyEdit(source.edit) }
     case 'browser.profile.proxy.update': return { operation, proxyId: identity(source.proxyId, code, 'Proxy ID'), expectedRevision: identity(source.expectedRevision, code, 'Proxy configuration token'), edit: parseBrowserProxyEdit(source.edit) }
@@ -641,7 +650,7 @@ export function parseBrowserProfileControlResult(operation: BrowserProfileContro
     'browser.profile.create': ['revision', 'profile'], 'browser.profile.copy': ['revision', 'sourceProfileId', 'profile'], 'browser.profile.update': ['revision', 'profile'],
     'browser.profile.set-default': ['revision', 'profileId'], 'browser.profile.delete': ['revision', 'archive'], 'browser.profile.trash.ls': ['revision', 'sequence', 'entries', 'legacyPendingDeletes'], 'browser.profile.trash.restore': ['revision', 'archiveId', 'profile'],
     'browser.profile.proxy-sign-in.set': ['profileId', 'saved', 'reconnected'], 'browser.profile.proxy-sign-in.clear': ['profileId', 'cleared', 'reconnected'],
-    'browser.profile.network.check': ['profileId', 'check']
+    'browser.profile.network.check': ['profileId', 'check'], 'browser.profile.network.probe': ['profileId', 'diagnostic', 'historySaved'], 'browser.profile.network.history': ['profileId', 'diagnostics', 'nextCursor']
   }
   const row = record(value, keys[operation], code, 'Browser Profile result')
   for (const key of keys[operation]) if (key !== 'filter' && !Object.hasOwn(row, key)) fail(code, `Browser Profile result ${key} is required.`)
@@ -652,6 +661,20 @@ export function parseBrowserProfileControlResult(operation: BrowserProfileContro
   if (operation === 'browser.profile.proxy-sign-in.clear') {
     if (row.cleared !== true || typeof row.reconnected !== 'boolean') fail(code, 'Proxy sign-in clear receipt is invalid.')
     return { profileId: identity(row.profileId, code, 'Browser Profile ID'), cleared: true, reconnected: row.reconnected }
+  }
+  if (operation === 'browser.profile.network.probe') {
+    const profileId = identity(row.profileId, code, 'Profile ID'), diagnostic = parseBrowserProxyProbe(row.diagnostic, code)
+    if (typeof row.historySaved !== 'boolean' || diagnostic.profileId !== profileId) fail(code, 'Diagnostic Profile binding is invalid.')
+    return { profileId, diagnostic, historySaved: row.historySaved }
+  }
+  if (operation === 'browser.profile.network.history') {
+    const profileId = identity(row.profileId, code, 'Profile ID')
+    if (!Array.isArray(row.diagnostics) || row.diagnostics.length > 20) fail(code, 'Diagnostic history page is invalid.')
+    const diagnostics = row.diagnostics.map(item => parseBrowserProxyProbe(item, code))
+    if (diagnostics.some(item => item.profileId !== profileId) || new Set(diagnostics.map(item => item.id)).size !== diagnostics.length) fail(code, 'Diagnostic history bindings are invalid.')
+    const nextCursor = row.nextCursor === null ? null : identity(row.nextCursor, code, 'Diagnostic history cursor')
+    if (nextCursor !== null && nextCursor !== diagnostics.at(-1)?.id) fail(code, 'Diagnostic cursor must name the last original item in this page.')
+    return { profileId, diagnostics, nextCursor }
   }
   if (operation === 'browser.profile.network.check') {
     const check = record(row.check, ['status', 'httpStatus', 'latencyMs', 'ip', 'reason'], code, 'Profile network check')
@@ -751,6 +774,14 @@ export function parseBrowserProfileControlResult(operation: BrowserProfileContro
 
 /** The answer must be about the Profile this request named. */
 export function assertBrowserProfileControlTarget(request: BrowserProfileControlPayload, result: BrowserProfileControlResult): void {
+  if (request.operation === 'browser.profile.network.probe') {
+    if (result.operation !== request.operation || result.profileId !== request.profileId || result.diagnostic.id !== request.operationId || result.diagnostic.profileId !== request.profileId) fail('CONTROL_PROTOCOL_ERROR', 'Diagnostic receipt belongs to another original operation or Profile.')
+    return
+  }
+  if (request.operation === 'browser.profile.network.history' && request.operationId !== undefined) {
+    if (result.operation !== request.operation || result.profileId !== request.profileId || result.diagnostics.length > 1 || result.diagnostics.some(item => item.id !== request.operationId)) fail('CONTROL_PROTOCOL_ERROR', 'Diagnostic history does not name the original requested operation.')
+    return
+  }
   if (request.operation === 'browser.profile.proxy.ls') return
   if (request.operation === 'browser.profile.proxy.create' || request.operation === 'browser.profile.proxy.update') {
     if (result.operation !== request.operation || !('proxy' in result) || result.proxy.label !== request.edit.label || (request.operation === 'browser.profile.proxy.update' && result.proxy.id !== request.proxyId)) fail('CONTROL_PROTOCOL_ERROR', 'Proxy receipt belongs to another asset.')
