@@ -26,7 +26,9 @@ const mutations = [
       to: "    ;(this as any).recall = this.continuation(frameInput, source.rect)\n    active.end({ state: 'completed' })\n    return { status: 'completed' } satisfies SystemScreenshotEditorFinish" }
   ], expected: 'every fresh public capture starts without initialCrop', reached: native => native.grabs.length >= 4 && native.cases.length >= 2 },
   { id: 'public-included-fallback', edits: [{ from: 'active.session.allowBackgroundFallback === false && !usable(active.background)', to: 'false && !usable(active.background)' }],
-    expected: 'public excluded unavailable must return typed failed instead of offering included pixels', reached: native => native.grabs.length === 8 && native.cases.length >= 3 }
+    expected: 'public excluded unavailable must return typed failed instead of offering included pixels', reached: native => native.grabs.length === 10 && native.cases.length >= 4 },
+  { id: 'public-background-switch', edits: [{ from: 'active.session.allowBackgroundFallback === false && next !== active.background', to: 'false && next !== active.background' }],
+    expected: 'public selection must not switch from excluded to included', reached: native => native.grabs.length >= 6 && native.cases.length >= 3 }
 ]
 const mutated = (source, mutation) => mutation.edits.reduce((text, edit) => text.replace(edit.from, edit.to), source)
 for (const mutation of mutations) for (const edit of mutation.edits) assert.equal(originalSurface.split(edit.from).length, 2, 'Unique production mutation anchor: ' + mutation.id)
@@ -100,8 +102,8 @@ try {
       receipt.native = native
       assert.equal(processResult.code, 0, JSON.stringify(native.failure) + processResult.log)
       assert.equal(native.passed, true)
-      assert.equal(native.cases.length, 5)
-      assert.equal(native.grabs.length, 8)
+      assert.equal(native.cases.length, 6)
+      assert.equal(native.grabs.length, 10)
     } else {
       assert.notEqual(processResult.code, 0, label + ': production mutant survived')
       assert.equal(native.passed, false)

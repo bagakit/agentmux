@@ -173,6 +173,23 @@ async function run() {
   assert.equal(secondResult.body.result.result.state, 'captured')
   assert.equal(secondResult.body.result.result.engine, 'controlled-excluded')
 
+  const switchPending = capture('public-background-switch-rejected')
+  const switching = await waitPublicSurface('public-background-switch-rejected')
+  current = switching.overlays[0]!; current.webContents.debugger.attach('1.3')
+  await drag(120, 140, 280, 180)
+  await evaluate(`window.originalPublicCanvas=document.querySelector('canvas');window.publicEvents=[];window.captureSurface.onEvent(event=>window.publicEvents.push(event));void 0`)
+  const switchReply = await evaluate(`window.captureSurface.load().then(input=>window.captureSurface.switchBackground(input.requestId,'included')).then(()=>'resolved',error=>'rejected: '+String(error))`)
+  process.stdout.write('public switch reply: ' + switchReply + '\n')
+  const switchState = await waitFor('public background refusal or forbidden included event', async () => await evaluate(`(()=>{if(window.publicEvents.some(event=>event.kind==='notice'&&event.message.includes('original excluded screenshot background')))return 'refused';if(window.publicEvents.some(event=>event.kind==='background'&&event.background==='included'))return 'included';return null})()`))
+  assert.equal(switchState, 'refused', 'public selection must not switch from excluded to included')
+  assert.equal(await evaluate(`window.originalPublicCanvas===document.querySelector('canvas')`), true, 'the refused switch preserves the original editor document')
+  assert.equal(await evaluate(`document.querySelector('[aria-label="Selection size"]')?.textContent`), '280 × 180 px', 'the refused switch preserves the current crop')
+  await clickDone()
+  const switchResult = await switchPending
+  assert.equal(switchResult.code, 0, switchResult.stdout + switchResult.stderr)
+  assert.equal(switchResult.body.result.result.state, 'captured')
+  assert.equal(switchResult.body.result.result.engine, 'controlled-excluded')
+
   const grabsBeforeDuplicate = grabs.length
   const duplicate = await capture('public-captured-first')
   assert.equal(duplicate.code, 1)
@@ -207,8 +224,8 @@ async function run() {
   assert.equal(failed.code, 1)
   assert.deepEqual(failed.body.result.result, { state: 'failed', error: { code: 'host_window_exclusion_unavailable', message: 'CoreGraphics cannot exclude the visible host from this display' } })
   cases.push({ label: 'excluded-unavailable-is-typed-failed' })
-  assert.equal(grabs.length, 8)
-  assert.equal(cases.length, 5)
+  assert.equal(grabs.length, 10)
+  assert.equal(cases.length, 6)
   receipt.focusCalls = focusCalls
   receipt.passed = true
 }
