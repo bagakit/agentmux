@@ -28,6 +28,24 @@ export function goalRealWorkSynthetic(render: () => void) {
         throw new Error('Private synthetic save receipt is unavailable. The original draft and operation are kept.')
       }
     },
+    /** Explicit private product-fixture input; original user Goal replay uses its separate source port. */
+    restoreProductSnapshot(input: Pick<ReturnType<typeof useAppStore.getState>, 'config' | 'sessions' | 'tabs' | 'layouts'> & { goal: DemandRecord }) {
+      const current = useAppStore.getState()
+      useAppStore.setState({ config: { ...current.config!, ...input.config, appearance: { ...current.config!.appearance, ...input.config?.appearance } },
+        sessions: structuredClone(input.sessions), tabs: structuredClone(input.tabs), layouts: structuredClone(input.layouts),
+        demands: { [input.goal.id]: structuredClone(input.goal) }, selectedDemandId: input.goal.id, mainSurface: 'board', loading: false,
+        activeWorkspaceId: null, goalFiniteStartIntents: {}, goalDiscussionRequests: {}, agentNames: {}, timelines: {}, error: null })
+      api.demands.delegation = async (method, reference) => {
+        const goal = useAppStore.getState().demands[input.goal.id]
+        if (!goal || reference.goalId !== goal.id || !['goal.delegations', 'goal.plan'].includes(method))
+          throw new Error('This private snapshot provides only its exact Goal observation; it never sends input.')
+        return { goalId: goal.id, goalUpdatedAt: goal.updatedAt, diskDurability: 'confirmed' as const,
+          delegations: goal.delegations ?? [], observations: goal.delegationObservations ?? [], dispatches: goal.dispatches ?? [],
+          startObservations: goal.startObservations ?? [], patrols: goal.patrols ?? [], patrolObservations: goal.patrolObservations ?? [],
+          ...(goal.responsibility ? { responsibility: goal.responsibility } : {}) }
+      }
+      render()
+    },
     patch(patch: Partial<DemandRecord>) {
       const state = useAppStore.getState(), goal = state.demands[state.selectedDemandId!]!
       useAppStore.setState({ demands: { ...state.demands, [goal.id]: { ...goal, ...patch } } })
