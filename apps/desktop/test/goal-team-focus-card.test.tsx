@@ -19,7 +19,9 @@ import { openHostGoalTransport } from './helpers/host-goal-transport'
 const dom = composerDOM({ agentInformation: true }), actorId = 'original-team-agent', viewId = 'original-team-view'
 const goal = (): DemandProjection => ({ id: 'team-goal', title: 'Keep original responsibility', description: 'The original Goal text',
   status: 'in_progress', priority: 'normal', projectId: null, projectName: null, workspacePath: null, sessions: [], source: 'default-topic',
-  sessionIds: [actorId], assigneeSessionIds: [actorId], supervisorSessionId: actorId, createdAt: 1, updatedAt: 1 })
+  sessionIds: [actorId], assigneeSessionIds: [actorId], supervisorSessionId: actorId,
+  creationOrigin: { operationId: 'original-goal-creation', requesterAsSupervisor: true, requesterParticipationId: 'original-requester', supervisorDefaultPending: false },
+  participations: [{ id: 'original-requester', operationId: 'original-goal-creation', kind: 'create', agentSessionId: actorId, hostId: 'local', entryPoint: 'goal.create', recordedAt: 1 }], createdAt: 1, updatedAt: 1 })
 const agent = (id = viewId, canonical = actorId, hostId = 'local', runId = 'original-team-run') => ({ ...composerSession(id), label: 'Atlas', hostId,
   control: { kind: 'agent' as const, hostId, agentSessionId: canonical, run: { runId } } })
 function seed(record = goal(), sessions = [agent()]) {
@@ -29,6 +31,11 @@ function seed(record = goal(), sessions = [agent()]) {
 }
 const team = () => dom.container.querySelector<HTMLElement>('.goal-team')!
 const cards = () => [...team().querySelectorAll<HTMLButtonElement>('button.focus-context')]
+async function editSupervisor() {
+  const editor = team().querySelector<HTMLDetailsElement>('.goal-team__edit')!
+  await act(async () => { editor.open = true; editor.dispatchEvent(new Event('toggle')) })
+  await act(async () => team().querySelector<HTMLButtonElement>('[aria-label="Choose Goal Supervisor"]')!.click())
+}
 beforeEach(() => {
   vi.spyOn(api.demands, 'onChanged').mockReturnValue(() => {})
   seed()
@@ -59,25 +66,29 @@ it('the real Goal detail merges three roles into one full Focus card with its or
 })
 
 it('same Actor and Run presentation aliases are one confirmed card rather than a false Host ambiguity', async () => {
-  seed({ ...goal(), assigneeSessionIds: ['alias-two'], sessionIds: ['alias-one'] }, [agent('alias-one'), agent('alias-two')])
-  await dom.render(<GlobalBoardSurface />)
+  seed(goal(), [agent('alias-one'), agent('alias-two')])
+  vi.spyOn(useAppStore.getState(), 'executeControl').mockResolvedValue({ operation: 'demand.show', goalContinuations: [] } as never)
+  await dom.render(<GoalExecution demand={goal()} onUpdate={async () => true} />)
   expect(cards()).toHaveLength(1)
   expect(team().querySelector('[data-goal-team-unconfirmed]')).toBeNull()
   expect(cards()[0]!.dataset.sessionId).toBe('alias-one')
   expect(team().querySelectorAll('[data-goal-team-role]')).toHaveLength(3)
   const supervisor = team().querySelector<HTMLElement>('.goals-supervisor-identity')!
+  expect(supervisor).not.toBeNull()
   expect(supervisor.textContent).toContain('Atlas')
   expect(supervisor.querySelector('strong')?.title).not.toContain('ambiguous')
 })
 
 it('different Hosts or Runs keep the exact bare reference unknown without a first-Host menu while healthy Actors remain usable', async () => {
-  const record = { ...goal(), sessionIds: [actorId, 'unobserved-original', 'healthy-agent'], assigneeSessionIds: [actorId, 'healthy-agent'] }
+  const record = { ...goal(), participations: [{ id: 'healthy-source', operationId: 'healthy-source', kind: 'discussion' as const,
+    agentSessionId: 'healthy-agent', hostId: 'local', entryPoint: 'goal.discuss', recordedAt: 1 }], sessionIds: [actorId, 'unobserved-original', 'healthy-agent'], assigneeSessionIds: [actorId, 'healthy-agent'] }
+  delete record.creationOrigin
   seed(record, [agent('host-a-view', actorId, 'host-a'), agent('host-b-view', actorId, 'host-b'), agent('healthy-view', 'healthy-agent')])
   const select = vi.spyOn(useAppStore.getState(), 'selectSession')
   await dom.render(<GlobalBoardSurface />)
   expect(cards()).toHaveLength(1); expect(cards()[0]!.dataset.sessionId).toBe('healthy-view')
   const unknown = team().querySelector<HTMLElement>(`[data-goal-team-unconfirmed="${actorId}"]`)!
-  expect(unknown.textContent).toContain(actorId); expect(unknown.textContent).toContain('host-a'); expect(unknown.textContent).toContain('host-b')
+  expect(unknown.textContent).toContain(actorId); expect(unknown.textContent).toContain('Host is not confirmed')
   expect(unknown.querySelector('.focus-context')).toBeNull(); expect(unknown.querySelector('[data-session-id]')).toBeNull()
   expect(team().querySelector('[data-goal-team-unconfirmed="unobserved-original"]')!.textContent).toContain('reference')
   await act(async () => cards()[0]!.click())
@@ -103,11 +114,12 @@ it('the confirmed card navigates through the original durable workface owner wit
 it('the original role picker saves its exact relationship through the public Host owner and retains all other input', async () => {
   const host = await openHostGoalTransport({ config: composerConfig })
   try {
-    const saved = (await host.demands.create({ ...goal(), assigneeSessionIds: [actorId, 'next-supervisor'], sessionIds: [actorId, 'next-supervisor'] })).demand
+    const { creationOrigin: _origin, participations: _participants, ...input } = goal()
+    const saved = (await host.demands.create({ ...input, assigneeSessionIds: [actorId, 'next-supervisor'], sessionIds: [actorId, 'next-supervisor'] })).demand
     seed({ ...saved, source: 'default-topic' }, [agent(), agent('next-view', 'next-supervisor')])
     const before = useAppStore.getState().agentComposerDrafts
     await dom.render(<GlobalBoardSurface />)
-    await act(async () => team().querySelector<HTMLButtonElement>('[aria-label="Choose Goal Supervisor"]')!.click())
+    await editSupervisor()
     await act(async () => document.querySelector<HTMLInputElement>('[data-session-id="next-supervisor"] input')!.click())
     const save = [...document.querySelectorAll<HTMLButtonElement>('.goal-agent-picker button')].find(button => button.textContent === 'Save relationships')!
     await act(async () => { save.click(); await host.settle() })
@@ -116,18 +128,20 @@ it('the original role picker saves its exact relationship through the public Hos
     expect(await host.demands.get(saved.id)).toMatchObject({ supervisorSessionId: 'next-supervisor', assigneeSessionIds: saved.assigneeSessionIds, sessionIds: saved.sessionIds })
     expect(useAppStore.getState().agentComposerDrafts).toBe(before)
     expect(team().querySelectorAll('[data-goal-team-role="supervisor"]')).toHaveLength(1)
-    expect([...team().querySelectorAll('.goal-team__actor')].find(actor => actor.querySelector('[data-goal-team-role="supervisor"]'))?.querySelector<HTMLButtonElement>('.focus-context')?.dataset.sessionId).toBe('next-view')
+    const retained = team().querySelector('[data-goal-team-reference="next-supervisor"]')!
+    expect(retained.textContent).toContain('Host not confirmed'); expect(retained.querySelector('.focus-context')).toBeNull()
   } finally { await host.dispose() }
 })
 
 it('a refused relationship write retains the original role and picker selection for the same Host retry', async () => {
   const host = await openHostGoalTransport({ config: composerConfig })
   try {
-    const saved = (await host.demands.create({ ...goal(), assigneeSessionIds: [actorId, 'next-supervisor'], sessionIds: [actorId, 'next-supervisor'] })).demand
+    const { creationOrigin: _origin, participations: _participants, ...input } = goal()
+    const saved = (await host.demands.create({ ...input, assigneeSessionIds: [actorId, 'next-supervisor'], sessionIds: [actorId, 'next-supervisor'] })).demand
     seed({ ...saved, source: 'default-topic' }, [agent(), agent('next-view', 'next-supervisor')])
     host.once('demand.update', { kind: 'reject', error: new Error('Original relationship owner unavailable') })
     await dom.render(<GlobalBoardSurface />)
-    await act(async () => team().querySelector<HTMLButtonElement>('[aria-label="Choose Goal Supervisor"]')!.click())
+    await editSupervisor()
     await act(async () => document.querySelector<HTMLInputElement>('[data-session-id="next-supervisor"] input')!.click())
     const save = [...document.querySelectorAll<HTMLButtonElement>('.goal-agent-picker button')].find(button => button.textContent === 'Save relationships')!
     await act(async () => { save.click(); await host.settle() })

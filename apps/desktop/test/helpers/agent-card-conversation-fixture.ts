@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises'
+import { appendFile, mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { onTestFinished, vi } from 'vitest'
@@ -20,6 +20,7 @@ export const waitForAgentCardReading = (check: () => void) => vi.waitFor(async (
  * travels through real Core, public transport, IPC, preload and strict Renderer API. */
 export async function agentCardConversationFixture(sourceFor: (control: AgentSessionControl) => AgentSessionHistoryPage['source']) {
   const root = await mkdtemp(join(tmpdir(), 'agent-card-reading-'))
+  if (process.env.AGENTMUX_TEST_PRIVATE_ROOTS) await appendFile(process.env.AGENTMUX_TEST_PRIVATE_ROOTS, JSON.stringify({ path: root }) + '\n')
   const hosts = new Map<string, { client: AgentMuxClient; store: AgentMuxFileAgentSessionStore }>()
   const controls = new Map<string, AgentSessionControl>(), captured = new Map<string, string>(), seeded = new Set<string>()
   const key = (hostId: string, sessionId: string) => JSON.stringify([hostId, sessionId])

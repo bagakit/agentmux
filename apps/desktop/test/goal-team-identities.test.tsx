@@ -15,7 +15,8 @@ const source: AgentSessionHistoryDescriptor = { ...reference, state: 'retired', 
   history: { executorId: 'original-configuration', providerId: 'claude', workspacePath: '/original/work', createdAt: 1 } }
 const goal = (): DemandProjection => ({ id: 'retained-goal', title: 'Keep this exact original work', description: 'Original intent', status: 'in_progress', priority: 'normal',
   projectId: null, projectName: null, workspacePath: null, sessions: [], source: 'default-topic', sessionIds: [sid, 'bare-without-host', 'healthy'], assigneeSessionIds: [sid], supervisorSessionId: null,
-  participations: [{ id: 'original-discussion', operationId: 'original-discussion', kind: 'discussion', agentSessionId: sid, hostId, entryPoint: 'goal.discuss', recordedAt: 1 }], createdAt: 1, updatedAt: 1 })
+  participations: [{ id: 'original-discussion', operationId: 'original-discussion', kind: 'discussion', agentSessionId: sid, hostId, entryPoint: 'goal.discuss', recordedAt: 1 },
+    { id: 'healthy-discussion', operationId: 'healthy-discussion', kind: 'discussion', agentSessionId: 'healthy', hostId: 'local', entryPoint: 'goal.discuss', recordedAt: 1 }], createdAt: 1, updatedAt: 1 })
 const row = () => [...dom.container.querySelectorAll<HTMLElement>('[data-goal-team-identity]')].find(node => node.dataset.goalTeamIdentity === key)!
 let listeners: Set<(event: RuntimeEvent) => void>
 const event = (type: 'run-removed' | 'agent-session-record-deleted', agentSessionId = sid, route = hostId): RuntimeEvent => ({ type: 'core', hostId: route,
@@ -38,21 +39,21 @@ it('the actual Team uses the shared worker Host instead of its delegation owner 
   const read = vi.spyOn(api.sessions, 'historySource').mockImplementation(async reference => ({ reference,
     source: { ...source, hostId: 'hostId' in reference ? reference.hostId : '', agentSessionId: reference.agentSessionId }, issue: null }))
   await mount(record)
-  expect(row()?.textContent).toContain('delegation-worker')
+  expect(row()?.textContent).toContain('Delegated work')
   expect(read.mock.calls.map(([reference]) => reference)).toEqual([
     { hostId: 'owner-host', agentSessionId: 'original-owner' }, { hostId, agentSessionId: sid }
   ])
-  expect(dom.container.querySelector('[data-goal-team-unconfirmed="original-retained-worker"]')).not.toBeNull()
+  expect(dom.container.querySelector('[data-goal-team-reference="original-retained-worker"] [data-role-host="unconfirmed"]')).not.toBeNull()
 })
 
 it('the Team shares only original Supervisor witnesses with the Host and does not promote an old discussion', async () => {
   const read = vi.spyOn(api.sessions, 'historySource').mockResolvedValue({ reference, source, issue: null })
   const original = { ...goal(), supervisorSessionId: sid }
   await mount(original)
-  expect(row()?.textContent).toContain('discussion'); expect(row()?.textContent).not.toContain('supervisor')
+  expect(row()?.textContent).toContain('discussion'); expect(row()?.querySelector('[data-goal-team-role="supervisor"]')).toBeNull()
   await mount({ ...original, creationOrigin: { operationId: 'original-goal-create', requesterAsSupervisor: true,
     requesterParticipationId: original.participations![0]!.id, supervisorDefaultPending: false } })
-  expect(row()?.textContent).toContain('supervisor')
+  expect(row()?.querySelector('[data-goal-team-role="supervisor"]')).not.toBeNull()
   expect(read).toHaveBeenCalledExactlyOnceWith(reference)
 })
 
@@ -62,8 +63,8 @@ it('the mounted Team reads only its exact retained source without assigning a Ho
   const before = useAppStore.getState().agentComposerDrafts
   await mount()
   expect(read).toHaveBeenCalledExactlyOnceWith(reference)
-  expect(row()?.textContent).toContain('Retired original Session'); expect(row()?.textContent).toContain('original-configuration')
-  expect(row()?.textContent).toContain('Current Run is not observed')
+  expect(row()?.textContent).toContain('Retired'); expect(row()?.textContent).toContain('original-configuration')
+  expect(row()?.textContent).toContain('Current Run is unconfirmed')
   expect(row()?.querySelector('.focus-context')).toBeNull(); expect(row()?.querySelector('[data-session-id]')).toBeNull()
   expect(dom.container.querySelector('[data-goal-team-unconfirmed="bare-without-host"]')).not.toBeNull()
   expect(dom.container.querySelectorAll('button.focus-context')).toHaveLength(1)
@@ -74,11 +75,11 @@ it('the mounted Team reads only its exact retained source without assigning a Ho
 it('a failed precise refresh preserves confirmed metadata and the same original relationship for retry', async () => {
   const read = vi.spyOn(api.sessions, 'historySource').mockResolvedValueOnce({ reference, source, issue: null })
     .mockRejectedValueOnce(new Error('Original metadata read unavailable')).mockResolvedValue({ reference, source, issue: null })
-  await mount(); expect(row()?.textContent).toContain('Retired original Session')
+  await mount(); expect(row()?.textContent).toContain('Retired')
   await publish(event('run-removed'))
   expect(read).toHaveBeenCalledTimes(2); expect(row()?.textContent).toContain('Original metadata read unavailable')
   expect(row()?.textContent).toContain('original-configuration')
-  await act(async () => row()!.querySelector<HTMLButtonElement>('button')!.click())
+  await act(async () => [...row()!.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Read original identity again')!.click())
   expect(read.mock.calls).toEqual([[reference], [reference], [reference]])
   expect(row()?.textContent).not.toContain('unavailable'); expect(useAppStore.getState().agentComposerDrafts[sid]).toBe('Original unsent draft')
 })
@@ -88,11 +89,11 @@ it('an exact record-deleted fact fences a late active metadata response without 
   const read = vi.spyOn(api.sessions, 'historySource').mockImplementation(() => new Promise(resolve => { finish = resolve }))
   await mount(); expect(read).toHaveBeenCalledExactlyOnceWith(reference)
   await publish(event('agent-session-record-deleted', sid, 'other-host'))
-  expect(row()?.textContent).not.toContain('Original record deleted')
+  expect(row()?.textContent).not.toContain('Record deleted')
   await publish(event('agent-session-record-deleted'))
-  expect(row()?.textContent).toContain('Original record deleted')
+  expect(row()?.textContent).toContain('Record deleted')
   await act(async () => finish({ reference, source: { ...source, state: 'active' }, issue: null }))
-  expect(row()?.textContent).toContain('Original record deleted'); expect(row()?.textContent).not.toContain('Retained original Session')
+  expect(row()?.textContent).toContain('Record deleted'); expect(row()?.textContent).not.toContain('Retained Session')
   expect(read).toHaveBeenCalledTimes(1)
 })
 
@@ -101,10 +102,10 @@ it('a changed Goal cannot accept the previous original identity response', async
   const read = vi.spyOn(api.sessions, 'historySource').mockImplementation(() => new Promise(resolve => finishes.push(resolve)))
   await mount(); await mount({ ...goal(), id: 'next-goal' })
   await act(async () => finishes[0]!({ reference, source, issue: null }))
-  expect(row()?.textContent).not.toContain('Retired original Session')
+  expect(row()?.textContent).not.toContain('Retired Session')
   expect(read).toHaveBeenCalledTimes(2)
   await act(async () => finishes[1]!({ reference, source: { ...source, state: 'active' }, issue: null }))
-  expect(row()?.textContent).toContain('Retained original Session')
+  expect(row()?.textContent).toContain('Retained Session')
 })
 
 it.each([1, 1000])('the mounted exact Team reader with %i Sessions ignores unrelated output and identity lifecycle events', async count => {

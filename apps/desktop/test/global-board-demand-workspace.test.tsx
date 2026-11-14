@@ -35,7 +35,7 @@ describe('Goal reading workspace', () => {
     useAppStore.setState({ sessions: [], selectedDemandId: 'demand:one' }); await act(async () => root.render(createElement(GlobalBoardSurface)))
     // The missing Session stays readable by its identity, with recovery.
     const missing = relationships().querySelector<HTMLElement>('[data-goal-team-unconfirmed="session-1"]')!
-    expect(missing.textContent).toContain('session-1'); expect(missing.textContent).toContain('identity is not currently confirmed'); expect(missing.querySelector('.focus-context')).toBeNull()
+    expect(missing.textContent).toContain('session-1'); expect(missing.textContent).toContain('Host is not confirmed'); expect(missing.querySelector('.focus-context')).toBeNull()
     expect(container.querySelector<HTMLButtonElement>('[aria-label="Choose related Goal sessions"]')?.disabled).toBe(false)
     expect(useAppStore.getState().demands['demand:one'].sessionIds).toEqual(['session-1'])
   })
@@ -81,7 +81,8 @@ describe('Goal reading workspace', () => {
       capabilities: { terminal: true, timeline: 'streaming', permission: 'observe', providerResume: true, replyCorrelation: 'none' },
       control: { kind: 'agent', hostId: 'local', agentSessionId: id, run: { runId: id + '-run' } } }) as SessionSnapshot
     const selectSession = vi.fn(); const sessions = [agent('session-1'), agent('session-2')]
-    useAppStore.setState({ config: { ...config, executors: { codex: { label: 'Codex', providerId: 'codex', command: 'codex', args: [], env: {}, injectAgentMuxGuide: true } }, appearance: { terminalTheme: 'graphite' } } as AppConfig, selectedDemandId: 'demand:one', selectSession, sessions, demands: { 'demand:one': { ...useAppStore.getState().demands['demand:one'], sessionIds: ['session-1', 'session-2'] } } }); await act(async () => root.render(createElement(GlobalBoardSurface)))
+    useAppStore.setState({ config: { ...config, executors: { codex: { label: 'Codex', providerId: 'codex', command: 'codex', args: [], env: {}, injectAgentMuxGuide: true } }, appearance: { terminalTheme: 'graphite' } } as AppConfig, selectedDemandId: 'demand:one', selectSession, sessions, demands: { 'demand:one': { ...useAppStore.getState().demands['demand:one'], sessionIds: ['session-1', 'session-2'],
+      participations: sessions.map(session => ({ id: 'source-' + session.id, operationId: 'source-' + session.id, kind: 'discussion' as const, hostId: 'local', agentSessionId: session.id, entryPoint: 'goal.discuss', recordedAt: 1 })) } } }); await act(async () => root.render(createElement(GlobalBoardSurface)))
     const rows = [...relationships().querySelectorAll<HTMLButtonElement>('button.focus-context')]; expect(rows).toHaveLength(2)
     expect(rows.every(row => !row.disabled)).toBe(true)
     for (const row of rows) await act(async () => row.click())

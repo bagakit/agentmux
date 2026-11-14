@@ -208,7 +208,8 @@ it.each(['active', 'retired'] as const)('the real Goal Team reads its %s origina
     vi.spyOn(useAppStore.getState(), 'executeControl').mockResolvedValue({ operation: 'demand.show', goalContinuations: [] } as never)
     const goal: DemandProjection = { id: 'original-metadata-goal', title: 'Keep this original work', description: 'Original intent', status: 'in_progress', priority: 'normal',
       projectId: null, projectName: null, workspacePath: null, sessions: [], source: 'default-topic', sessionIds: [sid, 'bare-reference', 'healthy'], assigneeSessionIds: [sid], supervisorSessionId: null,
-      participations: [{ id: 'original-participation', operationId: 'original-participation', kind: 'discussion', hostId, agentSessionId: sid, entryPoint: 'goal.discuss', recordedAt: 1 }], createdAt: 1, updatedAt: 1 }
+      participations: [{ id: 'original-participation', operationId: 'original-participation', kind: 'discussion', hostId, agentSessionId: sid, entryPoint: 'goal.discuss', recordedAt: 1 },
+        { id: 'healthy-source', operationId: 'healthy-source', kind: 'discussion', hostId: 'local', agentSessionId: 'healthy', entryPoint: 'goal.discuss', recordedAt: 1 }], createdAt: 1, updatedAt: 1 }
     const drafts = { [sid]: 'Keep the original unsent draft' }
     useAppStore.setState({ config, sessions: [composerSession('healthy')], timelines: {}, agentNames: {}, scratchTopicSnapshots: {},
       goalAgentCreationDrafts: {}, goalAgentSelectionDrafts: {}, agentComposerDrafts: drafts })
@@ -216,7 +217,7 @@ it.each(['active', 'retired'] as const)('the real Goal Team reads its %s origina
     const renderer = createAgentInformationRoot(container); unmount = () => renderer.unmount()
     await act(async () => renderer.render(<GoalExecution demand={goal} onUpdate={async () => false} />))
     const identity = () => container!.querySelector<HTMLElement>('[data-goal-team-identity]')
-    await vi.waitFor(() => expect(identity()?.textContent).toContain(state === 'retired' ? 'Retired original Session' : 'Retained original Session'))
+    await vi.waitFor(() => expect(identity()?.textContent).toContain(state === 'retired' ? 'Retired Session' : 'Retained Session'))
     expect(identity()?.textContent).toContain('claude'); expect(identity()?.textContent).not.toContain('codex')
     expect(identity()?.textContent).toContain(hostId); expect(identity()?.querySelector('[data-session-id]')).toBeNull()
     expect(container.querySelectorAll('button.focus-context')).toHaveLength(1)
