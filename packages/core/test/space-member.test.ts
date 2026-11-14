@@ -135,6 +135,32 @@ it('member input control codecs reject another target, arbitrary signals and inj
   expect(() => parseSpaceMemberParams('space.member.call', input('submitAgentPrompt', [{ agentSessionId: 'sid', expectedRun: { runId: 'run' }, operationId: 'input', prompt: 'body' }, { caller: 'fabricated' }]))).toThrow()
 })
 
+it.each(['stopAgentInputWaiting', 'rejoinAgentInputWaiting', 'signalAgent'] as const)('retained %s reaches the original Core after its Session Run changes without a read-ahead STALE', async method => {
+  const f = await createSpaceSessionsFixture(cleanup), sid = 'retained-after-run-change-' + method
+  const session = await f.d.put(sid), admission = await f.admit('D-in-B', f.d.owner.runtimeId, sid, 'original-retained-C-' + method)
+  const target = { reference: f.reference, regionId: admission.address.regionId, runtimeId: f.d.owner.runtimeId,
+    agentSessionId: sid, expectedRun: session.run, expectedAdmission: { kind: 'creation' as const, operationId: 'original-retained-C-' + method } }
+  const client = await connectSpaceMember(f.b.rpc, target); cleanup.push(() => client.dispose())
+  await f.d.put(sid, 2, 'runtime-d-successor-run-' + method)
+  const read = vi.spyOn(f.d.core, 'readAgentSession'), key = { kind: 'prompt' as const, agentSessionId: sid, expectedRun: session.run, submissionId: 'retained-original-input' }
+  const ref = { key, waitGeneration: 1 }
+  if (method === 'stopAgentInputWaiting') {
+    const effect = vi.spyOn(f.d.core, 'stopAgentInputWaiting').mockResolvedValue({ ref, cancelOperationId: 'retained-cancel', outcome: 'observation-stopped', at: 2 })
+    await expect(client.stopAgentInputWaiting({ ref, cancelOperationId: 'retained-cancel' })).resolves.toMatchObject({ ref, outcome: 'observation-stopped' })
+    expect(effect).toHaveBeenCalledExactlyOnceWith({ ref, cancelOperationId: 'retained-cancel' })
+  } else if (method === 'rejoinAgentInputWaiting') {
+    const effect = vi.spyOn(f.d.core, 'rejoinAgentInputWaiting').mockResolvedValue({ key, ref, persistence: 'confirmed', status: 'waiting', observation: 'owned', admission: null,
+      control: { ref, state: 'enabled', at: 2, waiting: { phase: 'session', reason: 'session-resume-needed', wake: 'session-restored' } } })
+    await expect(client.rejoinAgentInputWaiting({ ref })).resolves.toMatchObject({ key, ref })
+    expect(effect).toHaveBeenCalledOnce(); expect(effect.mock.calls[0]?.[0]).toEqual({ ref })
+  } else {
+    const effect = vi.spyOn(f.d.core, 'signalAgent').mockResolvedValue()
+    await client.signalAgent(sid, session.run, 'SIGINT')
+    expect(effect).toHaveBeenCalledExactlyOnceWith(sid, session.run, 'SIGINT')
+  }
+  expect(read, 'the exact retained control must reach Core instead of being rejected by a redundant current-Run read').not.toHaveBeenCalled()
+})
+
 it('stable member input reuses the original opened-file index instead of parsing the whole graph for every key', async () => {
   const f = await createSpaceSessionsFixture(cleanup), sid = 'indexed-member'
   const session = await f.d.put(sid), admission = await f.admit('D-in-B', f.d.owner.runtimeId, sid, 'indexed-member-op')
