@@ -5,10 +5,10 @@ export const CONVERSATION_DETAIL_LEVELS = ['simple', 'snapshots', 'collaboration
 export type ConversationDetailLevel = typeof CONVERSATION_DETAIL_LEVELS[number]
 export const CONVERSATION_DETAIL_LEVEL_DEFAULT: ConversationDetailLevel = 'simple'
 export const CONVERSATION_DETAIL_LABELS: Record<ConversationDetailLevel, { title: string; description: string }> = {
-  simple: { title: '简洁', description: '对话与本轮用量，工具过程按需展开' },
-  snapshots: { title: '回复快照', description: '增加事件回报附带的回复快照' },
-  collaboration: { title: '协作', description: '再显示 Subagent 回报' },
-  system: { title: '全部详情', description: '再显示系统事件原记录' }
+  simple: { title: 'Conversation', description: 'Messages, tool steps and turn usage.' },
+  snapshots: { title: 'Reply snapshots', description: 'Also show reply copies attached to events.' },
+  collaboration: { title: 'Agent collaboration', description: 'Also show messages between subagents.' },
+  system: { title: 'System events', description: 'Also show raw lifecycle and usage records.' }
 }
 export function isConversationDetailLevel(value: unknown): value is ConversationDetailLevel {
   return CONVERSATION_DETAIL_LEVELS.some(level => level === value)
