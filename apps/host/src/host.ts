@@ -118,6 +118,7 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
       'The original device forwarding authority is unavailable. Keep this operation and reconnect to its original Host.', 'CONTROL_UNAVAILABLE')
     return await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: desktopPath },
       ...(context.caller ? { credentials: context.caller } : {}),
+      ...(context.runtimeFence ? { runtimeFence: context.runtimeFence } : {}),
       ...(context.principal?.kind === 'device' ? { forwarding: context.forwarding! } : {}) })
   }
   const configurationPath = options.configurationPath ?? options.connections?.moteConfigurationPath

@@ -4506,6 +4506,7 @@ export class AgentMuxRpcService {
   async subscribe<M extends AgentMuxRpcStreamMethod>(method: M, params: Record<string, unknown>,
     onEvent: (event: AgentMuxRpcStreamEvent<M>) => void | Promise<void>, context: AgentMuxRpcCallContext = {}): Promise<AgentMuxRpcServiceSubscription<M>> {
     this.assertExposed(method)
+    if (method === 'file.mutation.watch') params = structuredClone(parseFileMutationWatchParams(params)) as unknown as Record<string, unknown>
     await assertHostRouteDispatch(context, method, params, true)
     if (method === 'route.watch' || method === 'route.receive-watch') {
       if (!this.ports.hostRoutes) throw new AgentMuxError('The original route reader owner is unavailable.', 'CONTROL_UNAVAILABLE')
@@ -4534,6 +4535,52 @@ export class AgentMuxRpcService {
         if (id === 'self' || !(error instanceof AgentMuxError) || error.code !== 'UNKNOWN_AGENT_SESSION' || !this.ports.forwardSubscription) throw error
         forwardOutput = true
       }
+    }
+    if (method === 'file.mutation.watch' && !this.ports.files?.watchMutations && this.ports.forwardSubscription) {
+      const input = parseFileMutationWatchParams(params)
+      let initial: import('./public-rpc-file-mutations.js').FileMutationWatchOpening | undefined
+      let started = false, closed = false, busy = false, earlyFailure: Error | undefined
+      let subscription: { dispose(): Promise<void> } | undefined
+      const send = (event: AgentMuxRpcStreamEvent<'file.mutation.watch'>) => onEvent(event as AgentMuxRpcStreamEvent<M>)
+      const fail = (cause: unknown) => {
+        if (closed) return
+        const failure = cause instanceof Error ? cause : new Error(String(cause))
+        closed = true
+        if (!started) earlyFailure = failure
+        else { try { void Promise.resolve(send({ type: 'error', error: readerError(failure) })).catch(() => {}) } catch { /* This reader is detached below. */ } }
+        void subscription?.dispose().catch(() => {})
+      }
+      subscription = await this.ports.forwardSubscription('file.mutation.watch', input, {
+        onInitial: value => { initial = parseFileMutationWatchOpening(value, input) },
+        onEvent: raw => {
+          if (closed || !started) return // Delivery begins after this owner's opening response.
+          if (busy) { fail(new AgentMuxError('The forwarded Files observer overflowed. Keep original requests and inspect their operations.', 'FILE_MUTATION_OBSERVATION_GAP')); return }
+          busy = true
+          const event = structuredClone(raw)
+          void Promise.resolve().then(async () => {
+            context.signal?.throwIfAborted(); await context.assertCurrent?.(); await this.assertRuntimeFence(context)
+            if (closed) return
+            if (event.type === 'effect') parseFileMutationEffect(event.data, initial!.resource)
+            await send(event)
+          }).catch(fail).finally(() => { busy = false })
+        },
+        onEnd: error => fail(error ?? new AgentMuxError('The original forwarded Files observer ended. Reconnect without replaying mutations.', 'FILE_MUTATION_OBSERVATION_ENDED')),
+        ...(context.signal ? { signal: context.signal } : {}), ...(context.runtimeFence ? { runtimeFence: context.runtimeFence } : {})
+      }, context)
+      try {
+        if (!initial) throw new AgentMuxError('Forwarded Files observation returned without its original opening.', 'CONTROL_PROTOCOL_ERROR')
+        if (earlyFailure) throw earlyFailure
+        context.signal?.throwIfAborted(); await context.assertCurrent?.(); await this.assertRuntimeFence(context)
+        if (earlyFailure) throw earlyFailure
+      } catch (cause) { closed = true; await subscription.dispose(); throw cause }
+      return { initial: initial as AgentMuxRpcStreamInitial<M>, start: async () => {
+        started = true
+        // A source can close while the outer opening is being written. Report
+        // that one gap after opening, rather than silently retaining an idle reader.
+        if (earlyFailure) { await send({ type: 'error', error: readerError(earlyFailure) }); return }
+        try { context.signal?.throwIfAborted(); await context.assertCurrent?.(); await this.assertRuntimeFence(context) }
+        catch (cause) { fail(cause) }
+      }, dispose: async () => { closed = true; await subscription!.dispose() } }
     }
     if (this.ports.forwardSubscription && (forwardOutput || method === 'browser.follow' || method === 'toolkit.watch' || method === 'system.metrics.watch' || method === 'settings.appearance.watch' && !this.ports.appearance || method === 'goal.watch' && !this.ports.goalChanges)) {
       let initial: AgentMuxRpcStreamInitial<M> | undefined
