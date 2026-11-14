@@ -12,7 +12,7 @@ export type TailcatKeyResultMap = { 'settings.hosts.tailcat-key': TailcatKeyPrep
 
 /** A name the official CLI resolves inside its own key directory; paths and its magic `new` are excluded. */
 export const isTailcatKeyName = (value: unknown): value is string =>
-  typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u.test(value) && value !== 'new'
+  typeof value === 'string' && value.length > 0 && value !== 'new' && !/[/\\\0\r\n]/u.test(value)
 export const isTailcatNodePublicKey = (value: unknown): value is string =>
   typeof value === 'string' && /^nodekey:[0-9a-f]{64}$/u.test(value) && !value.endsWith('0'.repeat(64))
 
@@ -23,7 +23,7 @@ export function parseTailcatKeyParams(value: unknown): TailcatKeyParamsMap['sett
   const p = rpcRecord(value, ['role', 'key'])
   if (p.role !== 'server' && p.role !== 'client') throw new AgentMuxError('Choose the Tailcat server or client key role.', 'INVALID_CONTROL_REQUEST')
   if (p.key !== undefined && !isTailcatKeyName(p.key)) {
-    throw new AgentMuxError('Name a saved Tailcat key with letters, digits, dot, dash or underscore; paths are not accepted.', 'INVALID_CONTROL_REQUEST')
+    throw new AgentMuxError('Use a nonempty saved Tailcat key name; paths, "new", NUL and line breaks are not accepted.', 'INVALID_CONTROL_REQUEST')
   }
   return { role: p.role, ...(p.key === undefined ? {} : { key: p.key }) }
 }
