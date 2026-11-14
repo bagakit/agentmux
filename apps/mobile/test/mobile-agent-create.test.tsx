@@ -1,3 +1,4 @@
+import { deriveAgentSessionId } from '@agentmux/core/agent-session-id'
 import { parseMobileAgentCreateIntent } from '../src/recovery/agent-create-intents'
 import './mobile-lan-crypto.setup'
 import { act } from 'react'
@@ -40,7 +41,7 @@ function setup(options: { launcher?: boolean; requireRetainedIntent?: boolean } 
     return { created, session, creation: created.creation, timeline: { agentSessionId: session.id, revision: 0, items: [] }, projectionFailures: [] }
   })
   const ports = { get: () => state, patch: (patch: any) => { state = { ...state, ...patch } }, topics: async () => [],
-    launch, creation: async (_host: string, id: string) => creations.get(id) ?? null,
+    launch, creationSessionId: async (_host: string, operationId: string) => await deriveAgentSessionId(operationId), creation: async (_host: string, id: string) => creations.get(id) ?? null,
     createResource: async () => { throw new Error('No new resource requested') }, attach: async () => {},
     save: async (layoutApplied: boolean) => ({ layoutApplied, clientStateWritten: true, storageFlushRequested: true, diskDurability: 'confirmed', reason: null }),
     focus: vi.fn(), isFocused: () => false, notice: vi.fn(), closing: () => false }
@@ -83,7 +84,7 @@ it('executes the original public codec and spatial creation owner only after exa
   await click(button(document.body, '创建 Agent')); expect(f.launch).not.toHaveBeenCalled()
   await choose(f)
   await click(button(document.body, '创建 Agent'))
-  await act(async () => { await vi.waitFor(() => expect(getDeviceWorkface().snapshot().record.agentCreates?.at(-1)?.phase).toBe('confirmed')) })
+  await act(async () => { await vi.waitFor(() => expect(getDeviceWorkface().snapshot().record.agentCreates?.at(-1)?.phase, document.body.textContent ?? '').toBe('confirmed')) })
   expect(f.launch, document.body.textContent ?? undefined).toHaveBeenCalledTimes(1)
   const intent = getDeviceWorkface().snapshot().record.agentCreates!.at(-1)!
   expect(intent.phase).toBe('confirmed')
@@ -148,7 +149,7 @@ it('keeps another healthy Host creation independent of a pending original reques
   await view.render(<MobileAgentCreate {...next.props} />); await choose(next)
   expect(button(document.body, '创建 Agent').disabled).toBe(false)
   await click(button(document.body, '创建 Agent'))
-  await act(async () => { await vi.waitFor(() => expect(getDeviceWorkface().snapshot().record.agentCreates?.at(-1)?.phase).toBe('confirmed')) })
+  await act(async () => { await vi.waitFor(() => expect(getDeviceWorkface().snapshot().record.agentCreates?.at(-1)?.phase, document.body.textContent ?? '').toBe('confirmed')) })
   const second = getDeviceWorkface().snapshot().record.agentCreates!.at(-1)!
   expect(second.input.operationId).not.toBe(first.input.operationId)
   expect(second.runtimeId).toBe('next-runtime'); expect(next.launch).toHaveBeenCalledTimes(1)
@@ -175,7 +176,7 @@ it('creates only at the selected original Launcher through the public codec and 
   expect(document.querySelector('[aria-label="新 Agent Zone"]')?.textContent).not.toContain(fixturePath('original'))
   await select('新 Agent 执行器', 'original')
   await click(button(document.body, '创建 Agent'))
-  await act(async () => { await vi.waitFor(() => expect(getDeviceWorkface().snapshot().record.agentCreates?.at(-1)?.phase).toBe('confirmed')) })
+  await act(async () => { await vi.waitFor(() => expect(getDeviceWorkface().snapshot().record.agentCreates?.at(-1)?.phase, document.body.textContent ?? '').toBe('confirmed')) })
   const intent = getDeviceWorkface().snapshot().record.agentCreates!.at(-1)!
   expect(intent.input.destination).toEqual(f.target)
   expect(f.rpc).toHaveBeenCalledWith('agent.open', intent.input)
@@ -216,7 +217,7 @@ it('isolates old target receipts while another explicit target on the same healt
   await view.render(<MobileAgentCreate {...f.props} target={{ spaceId: f.target.spaceId, zoneId: f.target.zoneId }} />)
   expect(button(document.body, '另建 Agent（保留待核对项）').disabled).toBe(false)
   await click(button(document.body, '另建 Agent（保留待核对项）'))
-  await act(async () => { await vi.waitFor(() => expect(getDeviceWorkface().snapshot().record.agentCreates?.at(-1)?.phase).toBe('confirmed')) })
+  await act(async () => { await vi.waitFor(() => expect(getDeviceWorkface().snapshot().record.agentCreates?.at(-1)?.phase, document.body.textContent ?? '').toBe('confirmed')) })
   expect(f.launch).toHaveBeenCalledTimes(2)
   const second = getDeviceWorkface().snapshot().record.agentCreates!.at(-1)!
   expect(second.input.destination).toEqual({ spaceId: f.target.spaceId, zoneId: f.target.zoneId, newTab: true })
@@ -295,7 +296,7 @@ describe('Mobile recovery usability', () => {
       input.dispatchEvent(new Event('input', { bubbles: true }))
     })
   }
-  const settled = () => act(async () => { await vi.waitFor(() => expect(getDeviceWorkface().snapshot().record.agentCreates?.at(-1)?.phase).toBe('confirmed')) })
+  const settled = () => act(async () => { await vi.waitFor(() => expect(getDeviceWorkface().snapshot().record.agentCreates?.at(-1)?.phase, document.body.textContent ?? '').toBe('confirmed')) })
   beforeEach(() => {
     vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, url: location.origin + '/mobile/next/' + 'a'.repeat(64) + '/index.html' })))
     vi.spyOn(location, 'assign').mockImplementation(() => {})
@@ -351,7 +352,7 @@ describe('Mobile recovery usability', () => {
     const view = await mount(tree(f.props)); await choose(f); await instruction('Retained instruction')
     await click(button(document.body, '创建 Agent')); await vi.waitFor(() => expect(f.launch).toHaveBeenCalledTimes(1))
     await view.render(tree({ ...f.props, visible: false }))
-    expect(await applyUpdate!()).toMatchObject({ status: 'blocked', message: expect.stringContaining('进行') })
+    expect(await applyUpdate!()).toMatchObject({ status: 'blocked', message: '新建 Agent 还没确认，请先核对，再更新网页。' })
     await act(async () => { held.resolve(); await held.promise }); await settled()
     expect(await applyUpdate!()).toEqual({ status: 'navigating' })
   })
