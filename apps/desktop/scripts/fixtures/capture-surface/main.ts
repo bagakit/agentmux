@@ -150,7 +150,7 @@ async function waitOpen(background: CaptureBackground, before: Set<BrowserWindow
   assert.deepEqual(overlays.map(window => protectionAtShow.get(window)), [[true], [true]], 'every real overlay is protected before showInactive')
   assert.equal(host.getOpacity(), 0.65, 'the visible host keeps its exact prior opacity while editing')
   assert.equal(receipt.opacityChanges.length, 0, 'CaptureSurface never writes host opacity')
-  assert.deepEqual(grabs.map((row: any) => row.includeHostWindows), [true, false], 'one included and one excluded exposure only')
+  assert.deepEqual(grabs.map((row: any) => row.includeHostWindows), [background === 'included', background === 'excluded'], 'the selected background leads and the alternate follows once')
   assert.deepEqual(grabs.map((row: any) => row.opacity), [0.65, 0.65], 'both native exposures observe the unchanged host')
   for (const [index, overlay] of overlays.entries()) {
     assert.equal(infos[index].background, background)

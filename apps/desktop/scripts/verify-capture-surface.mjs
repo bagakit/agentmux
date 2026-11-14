@@ -15,11 +15,11 @@ const sha = bytes => createHash('sha256').update(bytes).digest('hex')
 const surface = 'apps/desktop/src/main/capture-surface.ts'
 const originalSurface = await readFile(surface, 'utf8')
 const mutations = [
-  { id: 'host-opacity-write', from: '    const excluded = active.visibleHosts > 0 ? await freeze(false) : included',
-    to: '    for (const window of BrowserWindow.getAllWindows()) if (!window.isDestroyed() && window.isVisible() && !window.isMinimized() && window.getOpacity() > 0) window.setOpacity(0)\n    const excluded = active.visibleHosts > 0 ? await freeze(false) : included',
+  { id: 'host-opacity-write', from: '    const needsSecond = active.visibleHosts > 0',
+    to: '    for (const window of BrowserWindow.getAllWindows()) if (!window.isDestroyed() && window.isVisible() && !window.isMinimized() && window.getOpacity() > 0) window.setOpacity(0)\n    const needsSecond = active.visibleHosts > 0',
     expected: 'the visible host keeps its exact prior opacity while editing', reached: native => native.grabs.length === 2 && native.cases.length === 1 },
-  { id: 'swapped-background-sources', from: '        backgrounds: { included: includedFrame, excluded: included === excluded ? includedFrame : background(excluded) },',
-    to: '        backgrounds: { included: background(excluded), excluded: background(included) },',
+  { id: 'swapped-background-sources', from: "for (const update of updates) send(update.overlay, { kind: 'snapshot', requestId: active.requestId, revision, background: mode, frame: update.frame })",
+    to: "for (const update of updates) send(update.overlay, { kind: 'snapshot', requestId: active.requestId, revision, background: mode === 'included' ? 'excluded' : 'included', frame: update.frame })",
     expected: 'the actual editor image is the requested frozen source', reached: native => native.grabs.length === 2 && native.cases.length === 1 },
   { id: 'cross-request-recall', edits: [
     { from: '      const initialCrop = this.continued(frame, active.session.continuation)',
