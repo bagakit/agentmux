@@ -94,7 +94,7 @@ app.whenReady().then(async () => {
     await require('./question-receipts.cjs')({ win, read, until, resize, tap, button, capture, result }); result.passed = true; return
   }
   if (mode === 'mote-settings-placement') {
-    await require('./mote-settings.cjs')({ win, read, until, button, capture, result, phase }); result.passed = true; return
+    await require('./mote-settings.cjs')({ win, read, until, resize, button, capture, result, phase }); result.passed = true; return
   }
   if (mode === 'exact-first-read') {
     await require('./exact-first-read.cjs')({ win, read, until, resize, tap, button, capture, result, evidence, phase }); result.passed = true; return

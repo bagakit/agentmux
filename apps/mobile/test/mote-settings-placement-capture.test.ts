@@ -16,7 +16,8 @@ afterEach(async () => { for (const close of closes.splice(0).reverse()) await cl
 const sha = (bytes: string | Buffer) => createHash('sha256').update(bytes).digest('hex')
 async function body(request: IncomingMessage) { const chunks: Buffer[] = []; for await (const chunk of request) chunks.push(Buffer.from(chunk)); return JSON.parse(Buffer.concat(chunks).toString()) }
 
-it.runIf(process.env.MOBILE_SETTINGS_CAPTURE === '1')('captures original Mobile settings through the live private Host and preserves unknown input across two OS processes', async () => {
+it.runIf(process.env.MOBILE_SETTINGS_CAPTURE === '1').each(['original', 'remove-composing-enter-guard'])(
+  'captures actual Mobile settings through the private Host (%s)', async variant => {
   const directory = resolve(root, '.local/mote-settings-robustness/mobile-capture-' + randomUUID()), compiled = join(directory, 'compiled')
   await mkdir(compiled, { recursive: true })
   const host = await createMotePreferencesPlacementFixture(); closes.push(host.close)
@@ -31,8 +32,8 @@ it.runIf(process.env.MOBILE_SETTINGS_CAPTURE === '1')('captures original Mobile 
   closes.push(async () => { mode = 'ready'; release() })
   const calls: Array<{ method: string; params: unknown; result?: unknown; failure?: string }> = []
   const source = new Map<string, string>(), logs: string[] = []
-  const receipt: Record<string, any> = { passed: false, images: {}, source: {}, processes: [],
-    boundary: 'Actual MobileMoteProfile/QuickEditor and original Modal, Sheet, CSS and DeviceWorkface in private Electron Chromium; original public Core RPC socket and Host Files CAS remain alive across both browser OS processes. Only discovery source latency/failure and one lost HTTP response are controlled. This is not the user App, a physical phone, live model/native Agent recovery, an installation or proof that the original Main recovered.' }
+  const receipt: Record<string, any> = { variant, passed: false, images: {}, source: {}, processes: [],
+    boundary: 'Actual MobileMoteProfile/QuickEditor and original Modal, Sheet, CSS and DeviceWorkface in private Electron Chromium; original public Core RPC socket and Host Files CAS remain alive across both browser OS processes. The private source changes once outside Mobile. Discovery latency/failure and one lost HTTP response are controlled. This is not the user App, a physical phone, live model/native Agent recovery, an installation or proof that the original Main recovered.' }
   const sourceRead = async () => {
     const result = await host.rpc.call('space.mote.preferences.read', { kind: 'quick', target: host.target, includeChoices: false })
     if (result.kind !== 'quick' || result.status !== 'ready' || !result.defaults) throw Error('The original private Mote source must remain readable')
@@ -61,6 +62,9 @@ it.runIf(process.env.MOBILE_SETTINGS_CAPTURE === '1')('captures original Mobile 
           if (mode !== 'pending') release()
         }
         if (change.loseNextReceipt === true) loseNextReceipt = true
+        if (change.changeOriginalSource === true) {
+          await writeFile(host.motePath, await readFile(host.motePath, 'utf8') + '\nExternal source note kept by the original Host.\n')
+        }
         response.setHeader('Content-Type', 'application/json'); response.end(JSON.stringify({ mode, loseNextReceipt })); return
       }
       if (url.pathname === '/rpc') {
@@ -114,7 +118,15 @@ it.runIf(process.env.MOBILE_SETTINGS_CAPTURE === '1')('captures original Mobile 
           const file = relative(root, args.path)
           if (!file.startsWith('apps/mobile/') && !file.startsWith('packages/client-ui/') && !file.startsWith('packages/core/')) return
           const bytes = await readFile(args.path); source.set(file, sha(bytes))
-          return { contents: bytes.toString(), loader: args.path.endsWith('.tsx') ? 'tsx' : args.path.endsWith('.css') ? 'css' : 'ts', resolveDir: resolve(args.path, '..') }
+          let contents = bytes.toString()
+          if (variant === 'remove-composing-enter-guard' && file === 'apps/mobile/src/navigation/MobileMoteQuickEditor.tsx') {
+            const guard = "if (event.key === 'Enter' && isImeOwnedKeyboardEvent(event.nativeEvent)) event.preventDefault()"
+            expect(contents.split(guard)).toHaveLength(2)
+            contents = contents.replace(guard, '')
+            receipt.loadedMutation = { file, original: sha(bytes), changed: sha(contents) }
+            expect(receipt.loadedMutation.changed).not.toBe(receipt.loadedMutation.original)
+          }
+          return { contents, loader: args.path.endsWith('.tsx') ? 'tsx' : args.path.endsWith('.css') ? 'css' : 'ts', resolveDir: resolve(args.path, '..') }
         })
       } }], loader: { '.png': 'file', '.gif': 'file', '.svg': 'file', '.woff': 'file', '.woff2': 'file', '.ttf': 'file' },
       define: { __AGENTMUX_WEB_PREVIEW__: 'true', 'process.env.NODE_ENV': '"production"' } })
@@ -123,14 +135,24 @@ it.runIf(process.env.MOBILE_SETTINGS_CAPTURE === '1')('captures original Mobile 
     }
     await writeFile(join(compiled, 'index.html'), '<!doctype html><html><head><meta charset="UTF-8"><link rel="stylesheet" href="mote-settings-entry.css"></head><body><div id="root"></div><script type="module" src="mote-settings-entry.js"></script></body></html>')
     const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE
-    for (const phase of ['initial', 'restore']) {
+    for (const phase of variant === 'original' ? ['initial', 'restore'] : ['initial']) {
       const processReceipt = await runProbeProcess(require('electron'), [join(fixture, 'product-main.cjs'), url, directory, 'mote-settings-placement', phase],
         { cwd: root, env, timeoutMs: 60000, onLine: line => logs.push(line) })
       receipt.processes.push(processReceipt)
       await stopProbeProcesses(processReceipt.originalPid, directory)
-      expect(processReceipt.exitCode).toBe(0); expect(processReceipt.exitConfirmed).toBe(true)
       const result = JSON.parse(await readFile(join(directory, phase === 'restore' ? 'renderer-result-restored.json' : 'renderer-result.json'), 'utf8'))
       receipt[phase] = result
+      expect(processReceipt.exitConfirmed).toBe(true)
+      if (variant === 'remove-composing-enter-guard') {
+        expect(receipt.loadedMutation).toBeDefined()
+        expect(processReceipt.exitCode).toBe(1)
+        expect(result.passed).toBe(false)
+        expect(result.error?.message).toContain('The actual Quick settings form owns the composing Enter guard')
+        expect(calls.some(call => call.method === 'space.mote.preferences.save')).toBe(false)
+        receipt.passed = true
+        return
+      }
+      expect(processReceipt.exitCode, result.error?.message).toBe(0)
       expect(result.passed, result.error?.message).toBe(true)
       for (const image of result.images) receipt.images[relative(root, join(directory, image))] = sha(await readFile(join(directory, image)))
     }
@@ -140,8 +162,11 @@ it.runIf(process.env.MOBILE_SETTINGS_CAPTURE === '1')('captures original Mobile 
     expect(before).toBeDefined(); expect(after).toBeDefined()
     for (const key of ['record', 'recordId', 'host']) expect(after[key]).toEqual(before[key])
     const saves = calls.filter(call => call.method === 'space.mote.preferences.save')
-    expect(saves).toHaveLength(2)
-    expect(saves[0]!.params).not.toHaveProperty('destination'); expect(saves[1]!.params).not.toHaveProperty('destination')
+    expect(saves).toHaveLength(3)
+    for (const save of saves) expect(save.params).not.toHaveProperty('destination')
+    expect(saves[1]!.result).toMatchObject({ status: 'refused-before-write', source: null })
+    expect(saves[2]!.failure).toBe('HTTP response lost after the original Host receipt')
+    expect(await readFile(host.motePath, 'utf8')).toContain('External source note kept by the original Host.')
     const final = await sourceRead()
     expect(final.defaults!.presence?.intervalMs).toBe(1020000)
     expect(final.defaults!.conversation).toEqual(host.defaults.conversation)
@@ -161,7 +186,8 @@ it.runIf(process.env.MOBILE_SETTINGS_CAPTURE === '1')('captures original Mobile 
     receipt.compiled = Object.fromEntries(await Promise.all((await readdir(compiled)).map(async file => [file, sha(await readFile(join(compiled, file)))])))
     await writeFile(join(directory, 'renderer.log'), logs.join('\n'))
     await writeFile(join(directory, 'receipt.json'), JSON.stringify(receipt, null, 2) + '\n')
-    await writeFile(resolve(root, '.local/mote-settings-robustness/mobile-capture-latest.json'), JSON.stringify({ path: relative(root, directory), passed: receipt.passed }) + '\n')
+    const latest = variant === 'original' ? 'mobile-capture-latest.json' : 'mobile-capture-mutation-latest.json'
+    await writeFile(resolve(root, '.local/mote-settings-robustness', latest), JSON.stringify({ path: relative(root, directory), passed: receipt.passed }) + '\n')
     await rm(compiled, { recursive: true, force: true })
     if (receipt.processes.length && receipt.processes.every((value: any) => value.exitConfirmed)) {
       await rm(join(directory, 'userData'), { recursive: true, force: true })

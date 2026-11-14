@@ -1,14 +1,17 @@
 const assert = require('node:assert/strict')
 
-module.exports = async ({ win, read, until, button, capture, result, phase }) => {
-  const field = '[aria-label="心跳间隔（分钟）"]'
+module.exports = async ({ win, read, until, resize, button, capture, result, phase }) => {
+  const field = 'input[name="heartbeatMinutes"]'
   const facts = () => read('mobileProductScene.facts()')
-  const minutes = async text => {
+  const typeMinutes = async text => {
     await read(`(()=>{const n=document.querySelector(${JSON.stringify(field)});n.scrollIntoView({block:'center'});n.focus()})()`)
     await win.webContents.debugger.sendCommand('Input.dispatchKeyEvent', { type: 'keyDown', key: 'a', code: 'KeyA', modifiers: 4, commands: ['selectAll'] })
     await win.webContents.debugger.sendCommand('Input.dispatchKeyEvent', { type: 'keyUp', key: 'a', code: 'KeyA', modifiers: 4 })
     await win.webContents.insertText(text)
     await until(`document.querySelector(${JSON.stringify(field)})?.value===${JSON.stringify(text)}`)
+  }
+  const minutes = async text => {
+    await typeMinutes(text)
     await until(`mobileProductScene.facts().record.moteQuickDrafts?.[0]?.values.presence?.intervalMs===${Number(text) * 60000}`)
     result.operations.push({ action: 'original-field-input', text, value: await read(`document.querySelector(${JSON.stringify(field)}).value`) })
   }
@@ -43,7 +46,49 @@ module.exports = async ({ win, read, until, button, capture, result, phase }) =>
   await read("(()=>{const n=document.querySelector('[aria-label=\"新对话使用的 Agent\"]');n.value='next';n.dispatchEvent(new Event('input',{bubbles:true}));n.dispatchEvent(new Event('change',{bubbles:true}))})()")
   await until("document.querySelector('[aria-label=\"新对话使用的 Agent\"]').value==='next'")
   result.operations.push({ action: 'original-select-option', input: 'Actual select input/change events; OS popup selection not observed', value: await read("document.querySelector('[aria-label=\"新对话使用的 Agent\"]').value") })
-  await minutes('7'); await top(); await capture('mote-settings-pending-display-editable-390-light')
+  await resize(320, 740)
+  await read("mobileSettingsTheme('dark')")
+  await until("mobileProductScene.facts().appearance==='dark'")
+  await read(`(()=>{window.originalHeartbeatField=document.querySelector(${JSON.stringify(field)})})()`)
+  const stableField = () => read(`(() => {
+    const input=document.querySelector(${JSON.stringify(field)})
+    const linked=name=>input.getAttribute(name)?.split(' ').map(id=>document.getElementById(id))
+    return {label:linked('aria-labelledby')?.map(node=>node?.textContent),
+      descriptions:linked('aria-describedby')?.map(node=>({text:node?.textContent,role:node?.getAttribute('role')})),
+      invalid:input.getAttribute('aria-invalid'),nativeLabel:input.closest('label').control===input,same:input===originalHeartbeatField,focus:document.activeElement===input,
+      overflow:mobileProductScene.facts().settingsOverflow}
+  })()`)
+  await typeMinutes('0')
+  const validation = await stableField()
+  assert.deepEqual(validation.label,['心跳间隔（分钟）'])
+  assert.ok(validation.descriptions?.some(item=>item.text?.includes('默认每 30 分钟')), 'Original field points to the visible guidance: ' + JSON.stringify(validation))
+  assert.deepEqual(validation.descriptions?.find(item=>item.role==='alert'),
+    {text:'心跳间隔请填至少 1 分钟的整数。',role:'alert'}, 'Original field points to its live validation error')
+  assert.equal(validation.invalid,'true')
+  assert.equal(validation.nativeLabel,true)
+  assert.equal(validation.focus,true)
+  assert.equal(validation.same,true)
+  assert.equal(validation.overflow,false)
+  const writesBefore = (await facts()).calls.filter(call=>call.method==='space.mote.preferences.save').length
+  await button('保存快捷配置')
+  assert.equal((await facts()).calls.filter(call=>call.method==='space.mote.preferences.save').length,writesBefore)
+  assert.equal((await stableField()).focus,true,'Invalid submit returns to its original field')
+  await read("originalHeartbeatField.scrollIntoView({block:'center'})")
+  await capture('mote-settings-heartbeat-validation-320-dark')
+  await minutes('7')
+  const repaired = await stableField()
+  assert.equal(repaired.same,true)
+  assert.equal(repaired.focus,true)
+  assert.equal(repaired.invalid,null)
+  assert.ok(repaired.descriptions.every(item=>item.role!=='alert'))
+  const composingEnter = await read("!originalHeartbeatField.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',isComposing:true,bubbles:true,cancelable:true}))")
+  assert.equal(composingEnter,true,'The actual Quick settings form owns the composing Enter guard')
+  assert.equal((await facts()).calls.filter(call=>call.method==='space.mote.preferences.save').length,writesBefore)
+  result.fieldSemantics = { validation, repaired, composingEnter }
+  await resize(390, 844)
+  await read("mobileSettingsTheme('light')")
+  await until("mobileProductScene.facts().appearance==='light'")
+  await top(); await capture('mote-settings-pending-display-editable-390-light')
   const pending = await facts()
   assert.ok(pending.calls.some(call => call.method === 'space.mote.preferences.read' && call.params.includeChoices === 'executors'))
   assert.ok(pending.calls.some(call => call.method === 'space.mote.preferences.read' && call.params.includeChoices === 'locations'))
@@ -58,10 +103,34 @@ module.exports = async ({ win, read, until, button, capture, result, phase }) =>
   await read("mobileSettingsScenario({catalog:'failed'})")
   await until("document.querySelector('.mobile-mote-quick-editor')?.textContent.includes('展示候选暂时不可用')")
   await top(); await capture('mote-settings-display-failure-recovery-390-light')
-  await read("mobileSettingsScenario({catalog:'ready',loseNextReceipt:true})")
+  await read("mobileSettingsScenario({catalog:'ready',changeOriginalSource:true})")
   await button('重新核对候选')
   await until("!document.querySelector('.mobile-mote-quick-editor').textContent.includes('展示候选暂时不可用')")
-  await minutes('17'); await button('保存快捷配置')
+  await minutes('17')
+  await read("originalHeartbeatField.focus()")
+  const composingEscape = await read("!originalHeartbeatField.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',isComposing:true,bubbles:true,cancelable:true}))")
+  assert.equal(composingEscape,true,'The original modal consumes the composing Escape without closing')
+  assert.equal((await stableField()).same,true)
+  await button('保存快捷配置')
+  await until("document.querySelector('.mobile-mote-quick-editor')?.textContent.includes('保存未写入')")
+  const refused = (await facts()).record.moteQuickDrafts[0]
+  assert.equal(refused.attempts.at(-1).result.status,'refused-before-write')
+  assert.match(refused.attempts.at(-1).issue,/MOTE.md changed/)
+  assert.equal(refused.values.presence.intervalMs,1020000)
+  assert.equal(refused.blockedAttemptId,null)
+  assert.equal((await stableField()).same,true)
+  result.operations.push({ action:'original-revision-guard-retains-field',attempt:refused.attempts.at(-1),composingEscape })
+  await top(); await capture('mote-settings-original-revision-refused-390-light')
+  await button('返回 Profile')
+  await until("!document.querySelector('.mobile-mote-quick-editor')")
+  await button('编辑快捷配置')
+  await until("document.querySelector('input[name=heartbeatMinutes]')?.value==='17'")
+  await until("document.querySelector('.mobile-mote-quick-editor')?.textContent.includes('已核对当前配置')")
+  await read("[...document.querySelectorAll('.mobile-mote-quick-editor button')].find(node=>node.textContent==='采用当前修订，保留我的选择').scrollIntoView({block:'center'})")
+  await button('采用当前修订，保留我的选择')
+  await until("document.querySelector('.mobile-mote-quick-editor')?.textContent.includes('已采用当前版本')")
+  await read("mobileSettingsScenario({loseNextReceipt:true})")
+  await button('保存快捷配置')
   await until("mobileProductScene.facts().record.moteQuickDrafts?.[0]?.attempts.at(-1)?.phase==='unknown'")
   await minutes('47'); await values(); await capture('mote-settings-unknown-keeps-later-draft-390-light')
   const retained = await facts(), original = retained.record.moteQuickDrafts[0]

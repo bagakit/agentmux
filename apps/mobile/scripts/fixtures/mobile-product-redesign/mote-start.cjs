@@ -67,7 +67,7 @@ module.exports = async ({ win, read, until, resize, tap, button, capture, result
   await read('mobileProductScene.setAppearance("light");document.querySelector(".mobile-sheet").scrollTop=0')
   await capture('mote-start-policy-manual-390-light')
   await read('(()=>{const input=document.querySelector("[aria-label=自动流转策略]");input.value="idle";input.dispatchEvent(new Event("change",{bubbles:true}))})()')
-  await tap('[aria-label="对话空闲时长（分钟）"]', 'Edit original rollover idle duration')
+  await tap('input[name="rolloverMinutes"]', 'Edit original rollover idle duration')
   await win.webContents.insertText('12')
   await resize(320,760); await read('mobileProductScene.setAppearance("dark");document.querySelector("[aria-label=自动流转策略]").scrollIntoView({block:"start"})')
   await capture('mote-start-policy-idle-320-dark')

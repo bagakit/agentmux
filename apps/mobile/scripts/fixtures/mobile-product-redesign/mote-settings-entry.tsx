@@ -2,7 +2,7 @@ import { createRoot } from 'react-dom/client'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
 import { ClientUiProvider } from '@agentmux/client-ui'
 import * as Dialog from '@agentmux/client-ui/components/Modal'
-import { GRAPHITE_THEME, mountThemeRuntime } from '@agentmux/client-ui/theme'
+import { GRAPHITE_THEME, mountThemeRuntime, updateObservedTheme } from '@agentmux/client-ui/theme'
 import { MobileMoteProfile } from '../../../src/navigation/MobileMoteProfile'
 import { MobileSheetHandle } from '../../../src/navigation/MobileSheetHandle'
 import { createBrowserPlatform } from '../../../src/platform/browser'
@@ -28,6 +28,7 @@ const client = { runtimeOwnerIdentity: () => bootstrap.runtime, onEvent: () => (
 const identity = { name: '协作搭档', project: '原工作', mote: { name: '协作搭档', spaceId: bootstrap.target.spaceId, facts: bootstrap.fact } }
 Object.assign(window, { mobileProductScene: { facts: () => ({ record: owner.snapshot().record, recordIssue: owner.snapshot().issue, calls, appearance: document.documentElement.dataset.appearance, settingsText: document.querySelector('.mobile-mote-quick-editor')?.textContent,
   settingsOverflow: (() => { const sheet = document.querySelector<HTMLElement>('.mobile-sheet'); return !!sheet && sheet.scrollWidth > sheet.clientWidth })() }) },
+  mobileSettingsTheme: (appearance: 'dark' | 'light') => updateObservedTheme(GRAPHITE_THEME, appearance),
   mobileSettingsScenario: async (change: unknown) => {
     const response = await fetch('/scenario', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(change) })
     if (!response.ok) throw Error('Private source control failed')

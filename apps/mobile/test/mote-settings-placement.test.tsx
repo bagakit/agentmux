@@ -25,8 +25,11 @@ async function wait(check: () => void) {
   throw last
 }
 async function change(element: HTMLElement, label: string, value: string) {
-  const input = element.querySelector<HTMLInputElement | HTMLSelectElement>(`[aria-label="${label}"]`)!
-  expect(input).not.toBeNull()
+  const explicit = element.querySelector<HTMLInputElement | HTMLSelectElement>(`[aria-label="${label}"]`)
+  const linked = [...element.querySelectorAll('label')].find(node => node.querySelector('strong')?.textContent === label)?.control
+  const input = explicit ?? linked
+  expect(input instanceof HTMLInputElement || input instanceof HTMLSelectElement).toBe(true)
+  if (!(input instanceof HTMLInputElement || input instanceof HTMLSelectElement)) throw Error('Missing actual field: ' + label)
   if (input instanceof HTMLSelectElement && value) await wait(() => expect([...input.options].some(option => option.value === value)).toBe(true))
   await act(async () => {
     const prototype = input instanceof HTMLSelectElement ? HTMLSelectElement.prototype : HTMLInputElement.prototype
@@ -161,7 +164,7 @@ it('a lost original Host save response preserves its exact operation and later e
   expect(reloaded.attempts[0]!.input).toEqual(packet); expect(reloaded.attempts[0]!.phase).toBe('unknown')
   expect(reloaded.blockedAttemptId).toBe(packet.operationId)
   await x.view.render(null); await x.view.render(x.render()); await click(button(x.view.element, '编辑快捷配置'))
-  await wait(() => expect(x.view.element.querySelector<HTMLInputElement>('[aria-label="心跳间隔（分钟）"]')?.value).toBe('47'))
+  await wait(() => expect(x.view.element.querySelector<HTMLInputElement>('input[name="heartbeatMinutes"]')?.value).toBe('47'))
   await submit(x.view.element)
   expect(x.writes).toHaveLength(1)
   expect(getDeviceWorkface().snapshot().record.moteQuickDrafts![0]!.attempts[0]!.input).toEqual(packet)
@@ -176,7 +179,7 @@ it('a late original save acknowledgement cannot replace a later Mobile preferenc
   await wait(() => expect(getDeviceWorkface().snapshot().record.moteQuickDrafts?.[0]?.values.presence?.intervalMs).toBe(2820000))
   x.receipt.resolve(null)
   await wait(() => expect(x.view.element.textContent).toContain('快捷配置已保存'))
-  expect(x.view.element.querySelector<HTMLInputElement>('[aria-label="心跳间隔（分钟）"]')!.value).toBe('47')
+  expect(x.view.element.querySelector<HTMLInputElement>('input[name="heartbeatMinutes"]')!.value).toBe('47')
   const saved = getDeviceWorkface().snapshot().record.moteQuickDrafts![0]!
   expect(saved.values.presence?.intervalMs).toBe(2820000); expect(saved.attempts[0]!.input.values.presence?.intervalMs).toBe(420000)
   expect(saved.attempts[0]!.phase).toBe('saved'); expect((await x.read()).defaults!.presence?.intervalMs).toBe(420000)
@@ -185,7 +188,7 @@ it('a late original save acknowledgement cannot replace a later Mobile preferenc
 
 it('fresh original file settings remain editable and saveable while display discovery is unresolved', async () => {
   const x = await original({ holdDiscovery: true })
-  expect(x.view.element.querySelector<HTMLInputElement>('[aria-label="心跳间隔（分钟）"]')!.value).toBe('30')
+  expect(x.view.element.querySelector<HTMLInputElement>('input[name="heartbeatMinutes"]')!.value).toBe('30')
   expect(x.rpc.mock.calls.some(([method, input]) => method === 'space.mote.preferences.read' && (input as { includeChoices?: boolean }).includeChoices === false)).toBe(true)
   await change(x.view.element, '心跳间隔（分钟）', '47'); await submit(x.view.element)
   await wait(() => expect(x.view.element.textContent).toContain('快捷配置已保存'))
@@ -206,7 +209,7 @@ it('late original candidate discovery adds choices without replacing the later p
   const before = structuredClone(getDeviceWorkface().snapshot().record.moteQuickDrafts![0]!)
   await x.releaseDiscovery()
   await wait(() => expect(x.view.element.textContent).not.toContain('正在读取其余候选'))
-  expect(x.view.element.querySelector<HTMLInputElement>('[aria-label="心跳间隔（分钟）"]')!.value).toBe('47')
+  expect(x.view.element.querySelector<HTMLInputElement>('input[name="heartbeatMinutes"]')!.value).toBe('47')
   expect(getDeviceWorkface().snapshot().record.moteQuickDrafts![0]!.baseline).toEqual(before.baseline)
   expect(getDeviceWorkface().snapshot().record.moteQuickDrafts![0]!.values).toEqual(before.values)
   expect(x.writes).toEqual([])

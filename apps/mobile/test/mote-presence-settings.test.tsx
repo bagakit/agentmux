@@ -15,7 +15,7 @@ afterEach(async () => {
 })
 async function wait(check: () => void) { await vi.waitFor(async () => { await act(async () => {}); check() }, { timeout: 10000 }) }
 async function minutes(element: HTMLElement, text: string) {
-  const input = element.querySelector<HTMLInputElement>('[aria-label="心跳间隔（分钟）"]')!
+  const input = element.querySelector<HTMLInputElement>('input[name="heartbeatMinutes"]')!
   await act(async () => {
     Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, text)
     input.dispatchEvent(new Event('input', { bubbles: true })); input.dispatchEvent(new Event('change', { bubbles: true }))
@@ -78,7 +78,7 @@ function original(defaults: MoteQuickDefaults = {}) {
 }
 
 it('actual Mobile Profile settings save default30min presence through the original public CAS without resuming a paused schedule', async () => {
-  const f = original(), view = await f.open(), input = view.element.querySelector<HTMLInputElement>('[aria-label="心跳间隔（分钟）"]')!
+  const f = original(), view = await f.open(), input = view.element.querySelector<HTMLInputElement>('input[name="heartbeatMinutes"]')!
   expect(input.value).toBe('30')
   expect(view.element.querySelector<HTMLInputElement>('[aria-label="启用 Mote 自动维持"]')!.checked).toBe(true)
   expect(view.element.textContent).toContain('心跳安排已暂停')
@@ -94,11 +94,11 @@ it('actual Mobile Profile settings save default30min presence through the origin
 
 it('keeps an invalid interval visible without sending the former valid configuration or changing the frozen baseline', async () => {
   const f = original({ presence: { enabled: false, intervalMs: 900000 } }), view = await f.open()
-  expect(view.element.querySelector<HTMLInputElement>('[aria-label="心跳间隔（分钟）"]')!.value).toBe('15')
+  expect(view.element.querySelector<HTMLInputElement>('input[name="heartbeatMinutes"]')!.value).toBe('15')
   expect(view.element.querySelector<HTMLInputElement>('[aria-label="启用 Mote 自动维持"]')!.checked).toBe(false)
   await minutes(view.element, '0'); await submit(view.element)
   expect(view.element.textContent).toContain('至少 1 分钟的整数')
-  expect(view.element.querySelector<HTMLInputElement>('[aria-label="心跳间隔（分钟）"]')!.value).toBe('0')
+  expect(view.element.querySelector<HTMLInputElement>('input[name="heartbeatMinutes"]')!.value).toBe('0')
   expect(f.rpc.mock.calls.filter(([method]) => method === 'space.mote.preferences.save')).toHaveLength(0)
   await minutes(view.element, '60'); await submit(view.element)
   await wait(() => expect(f.rpc.mock.calls.filter(([method]) => method === 'space.mote.preferences.save')).toHaveLength(1))
@@ -118,7 +118,7 @@ it('retains an unknown presence save and later interval under its original opera
   const originalDraft = getDeviceWorkface().snapshot().record.moteQuickDrafts![0]!
   expect(originalDraft.attempts[0]!.input).toEqual(packet)
   await view.render(null); await view.render(f.render()); await click(button(view.element, '编辑快捷配置'))
-  await wait(() => expect(view.element.querySelector<HTMLInputElement>('[aria-label="心跳间隔（分钟）"]')!.value).toBe('47'))
+  await wait(() => expect(view.element.querySelector<HTMLInputElement>('input[name="heartbeatMinutes"]')!.value).toBe('47'))
   await submit(view.element)
   expect(f.rpc.mock.calls.filter(([method]) => method === 'space.mote.preferences.save')).toHaveLength(1)
   expect(getDeviceWorkface().snapshot().record.moteQuickDrafts![0]!.attempts[0]!.input).toEqual(packet)
