@@ -1,5 +1,6 @@
 import { AgentMuxError, spatialCatalog, type AgentMuxHeadlessRuntime, type AgentMuxSpatialStateStore } from '@agentmux/core'
 import { createMoteChatAgents } from './mote-chat-agents.js'
+import { createHostMoteMembership } from './mote-membership.js'
 import { createMoteChatResources, readConfiguredExecutor, readMoteResourceConfiguration } from './mote-resources.js'
 
 /** Read the saved Mote's original configuration; no configuration or environment goes on RPC. */
@@ -33,5 +34,5 @@ export function createHostMoteChat(options: {
       }
     }
   })
-  return { agents, assertTarget: agents.assertTarget, assertReady: agents.assertReady }
+  return { agents, assertTarget: agents.assertTarget, assertReady: agents.assertReady, member: createHostMoteMembership(options.spatial) }
 }

@@ -62,6 +62,10 @@
       "types": "./dist/mote-chat-agents.d.ts",
       "import": "./dist/mote-chat-agents.js"
     },
+    "./mote-membership": {
+      "types": "./dist/mote-membership.d.ts",
+      "import": "./dist/mote-membership.js"
+    },
     "./mote-model": {
       "types": "./dist/mote-model.d.ts",
       "import": "./dist/mote-model.js"
