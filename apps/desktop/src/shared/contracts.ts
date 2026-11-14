@@ -2173,8 +2173,8 @@ export type AgentMuxDesktopApi = {
     stop(session: SessionControl, operationId?: string): Promise<import('@agentmux/core').AgentMuxAgentStopReceipt | import('@agentmux/core').TerminalControlReceipt | undefined>
     /** Read the original Stop receipt without reconnecting or repeating its side effect. */
     inspectStop(session: AgentSessionControl, operationId: string): Promise<import('@agentmux/core').AgentMuxAgentStopInspection>
-    /** With control: this exact host/Run's terminal bytes and resize. Without: semantic/membership. */
-    onEvent(listener: (event: RuntimeEvent) => void, control?: SessionControl): () => void
+    /** Run control: exact terminal bytes/resize. Host observation: only that Host's connection/catalog events. Without: semantic/membership. */
+    onEvent(listener: (event: RuntimeEvent) => void, control?: SessionControl | { kind: 'host-observation'; hostId: string }): () => void
   }
   toolkit: ToolkitDesktopApi
   browser: {

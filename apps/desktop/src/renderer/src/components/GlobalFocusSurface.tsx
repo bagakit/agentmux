@@ -604,7 +604,17 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
     <div ref={focusLayoutRef} className="global-focus-layout">
       <div className="global-board-main global-focus-main" data-agent-reveal={agentReveal ? true : undefined}>
       {sourceFacts.readers}
-      {sourceFacts.issues.map(issue => <div key={issue.key}><ServiceWindowNotice notice={{ kind: 'process-degraded', notice: { step: 'Project source could not be checked.', mode: issue.message, restore: 'Original tasks and workfaces are retained.' } }} /><button type="button" className="small-button" onClick={issue.refresh}>Refresh source</button></div>)}
+      {sourceFacts.issues.map(issue => <section key={issue.key} className="focus-source-issue" aria-label={'Source status · ' + issue.label + ' · ' + issue.host}>
+        <ServiceWindowNotice notice={{ kind: 'process-degraded', notice: {
+          step: 'Project updates unavailable · ' + issue.label + ' · ' + issue.host,
+          mode: 'Some updates from this project are unavailable. Original tasks and workfaces are retained.',
+          restore: issue.reading ? 'Checking the original source…' : 'Refresh this source to check its current status.'
+        } }} />
+        <button type="button" className="small-button" aria-busy={issue.reading} onClick={issue.refresh}>Refresh source</button>
+        <details className="focus-source-status__cause"><summary>Connection details</summary>
+          <p>{issue.message}</p><p>Runtime: {issue.reference.runtimeId}<br />Space: {issue.reference.spaceId}</p>
+        </details>
+      </section>)}
       {agentReveal ? <div className="focus-agent-reveal" role="status" aria-label="Focus Agent reveal">
         <span>{revealedContext ? revealOutsideFilters ? 'Showing ' + revealedContext.context.name + ' outside current filters.' : 'Located ' + revealedContext.context.name + '.'
           : 'Original Context is unconfirmed · ' + agentReveal.hostId + ' · ' + agentReveal.agentSessionId + '. The current filters and work are kept.'}</span>{' '}

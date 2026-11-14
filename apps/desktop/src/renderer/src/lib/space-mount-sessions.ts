@@ -16,7 +16,7 @@ const empty = (): MountedSessionObservation => ({ members: {}, lastConfirmed: {}
 /** A display projection of original Core receipts, never an Agent lifecycle reducer. */
 export function observeMountedSessions(target: SpaceMountRecord, previous: MountedSessionObservation | undefined, update: MountedSessionUpdate): MountedSessionObservation {
   const before = previous ?? empty()
-  if (update.begin) return { ...before, members: {}, reading: true, error: undefined }
+  if (update.begin) return { ...before, members: {}, reading: true }
   if (update.error !== undefined) return { ...before, reading: false, error: update.error }
   const event = update.observation, opening = event ?? update.opening
   if (!opening || event?.type === 'runtime') return before // No PTY/output/history or unrelated Runtime payload is stored.

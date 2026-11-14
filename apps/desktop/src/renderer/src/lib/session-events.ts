@@ -9,6 +9,7 @@ export function createRendererSessionEvents(
 ): AgentMuxDesktopApi['sessions']['onEvent'] {
   const semantic = new Set<Registration>()
   const hosts = new Map<string, Map<string, Set<Registration>>>()
+  const observations = new Map<string, Set<Registration>>()
   let count = 0
   let unsubscribe: (() => void) | null = null
 
@@ -17,7 +18,9 @@ export function createRendererSessionEvents(
     const registrations = core.type === 'terminal-output' || core.type === 'terminal-resized' || core.type === 'terminal-snapshot' || core.type === 'attachment-state'
       ? hosts.get(event.hostId)?.get(core.run.runId)
       : core.type === 'connection-state'
-        ? [...semantic, ...[...(hosts.get(event.hostId)?.values() ?? [])].flatMap(readers => [...readers])]
+        ? [...semantic, ...(observations.get(event.hostId) ?? []), ...[...(hosts.get(event.hostId)?.values() ?? [])].flatMap(readers => [...readers])]
+      : core.type === 'session-observation-state'
+        ? [...semantic, ...(observations.get(event.hostId) ?? [])]
       : semantic
     if (!registrations) return
     // A callback can subscribe or dispose synchronously. This event belongs to its original snapshot.
@@ -36,9 +39,14 @@ export function createRendererSessionEvents(
   return (listener, control) => {
     const registration = { listener }
     const hostId = control?.hostId
-    const runId = control?.run.runId
+    const hostObservation = control?.kind === 'host-observation'
+    const runId = control && !hostObservation ? control.run.runId : undefined
     let registrations = semantic
-    if (hostId !== undefined && runId !== undefined) {
+    if (hostObservation) {
+      const current = observations.get(control.hostId)
+      if (current) registrations = current
+      else { registrations = new Set(); observations.set(control.hostId, registrations) }
+    } else if (hostId !== undefined && runId !== undefined) {
       let runs = hosts.get(hostId)
       if (!runs) { runs = new Map(); hosts.set(hostId, runs) }
       const current = runs.get(runId)
@@ -53,6 +61,7 @@ export function createRendererSessionEvents(
       active = false
       registrations.delete(registration)
       count--
+      if (hostObservation && registrations.size === 0) observations.delete(control.hostId)
       if (hostId !== undefined && runId !== undefined && registrations.size === 0) {
         const runs = hosts.get(hostId)!
         runs.delete(runId)

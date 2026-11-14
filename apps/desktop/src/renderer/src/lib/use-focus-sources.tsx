@@ -308,11 +308,13 @@ export function useFocusSources({ visible, contexts, onSelectLocation, onChooseL
   const result = useMemo(() => {
     const rows: FocusContext[] = [], identities = new Map<string, FocusContextIdentity>()
     const aliases = new Map<string, FocusContextAccess>()
-    const issues: Array<{ key: string; message: string; refresh(): void }> = [], readers: ReactNode[] = []
+    const issues: Array<{ key: string; label: string; host: string; reference: SpaceMountRecord['reference']; message: string; reading: boolean; refresh(): void }> = [], readers: ReactNode[] = []
     for (const [key, source] of sources) {
       readers.push(<SourceReader key={'source:' + key} target={source} visible={visible} revision={refreshes.get(key) ?? 0} />)
       const issue = observations[key]?.error ?? metadata[key]?.error
-      if (issue) issues.push({ key, message: issue, refresh: () => refresh(key) })
+      if (issue) issues.push({ key, label: observations[key]?.snapshot?.scope.space?.name ?? observations[key]?.lastPresentSnapshot?.scope.space?.name ?? 'Project source',
+        host: config?.hosts.find(host => host.id === source.hostId)?.label ?? source.hostId, reference: source.reference,
+        message: issue, reading: Boolean(observations[key]?.reading || metadata[key]?.reading), refresh: () => refresh(key) })
     }
     for (const candidate of candidates.values()) {
       const first = candidate.locations[0]!, workspace = focusSourceWorkspace(first.source, first.member, first.snapshot, config, runtimes)
