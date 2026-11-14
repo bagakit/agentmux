@@ -95,6 +95,41 @@ it('actual preferences CLI adopts one new immutable definition in the same arran
   expect(f.sent).not.toHaveBeenCalled(); expect(f.rawInput).not.toHaveBeenCalled(); expect(f.inner.kernel.stop).not.toHaveBeenCalled()
 })
 
+it.each([
+  { shape: 'future', due: 160000, expected: 160000, paused: false },
+  { shape: 'equal-now', due: 100000, expected: 160000, paused: true },
+  { shape: 'overdue', due: 50000, expected: 110000, paused: true }
+])('guidance adoption keeps original cadence for $shape deadline', async ({ shape, due, expected, paused }) => {
+  const f = await fixture(true)
+  const original = paused
+    ? (await f.manager.call('schedule.pause', { scheduleId: f.original.loopId, expectedRevision: f.original.revision!, operationId: 'retain-pause' })).schedule
+    : f.original
+  const lastInputRef: NonNullable<core.ContinuousProgressLoop['lastInputRef']> = {
+    inputKey: { kind: 'prompt', agentSessionId: 'main', expectedRun: f.client.agentSession('main').run, submissionId: 'original-retained-input', attemptId: 'original-attempt' },
+    futureIntent: { intentId: original.futureIntentId!, occurrenceAt: 40000 },
+    definitionOperationId: original.creationOperationId!, managedSource: original.managedSource!, preparedAt: 40001
+  }
+  const retained = { ...original, nextCheckAt: due, lastInputRef, lastTickId: 'original-retained-tick', lastOutcome: 'sent' as const, lastTickAt: 40001 }
+  Reflect.get(f.manager, 'scheduler').replace(original.loopId, retained)
+  await f.store.save([retained])
+  const oldIntent = await f.client.readAgentFuturePromptIntent('main', original.futureIntentId!)
+  const input = await f.request('adopt-cadence-' + shape), beforeFile = await readFile(f.motePath, 'utf8')
+  const result = await f.cli(['space', 'mote', 'preferences', 'save'], input)
+  expect(result.maintenanceAdoption).toMatchObject({ state: 'adopted', operationId: input.operationId, publishedAt: 100000 })
+  const inspected = await f.cli(['schedule', 'inspect'], { operationId: input.operationId }), current = inspected.schedule
+  await preserveEvidence('deadline-' + shape, { root: f.root, before: retained, result, inspected })
+  expect(current.nextCheckAt).toBe(expected)
+  expect(current.pause).toEqual(original.pause)
+  expect(current).toMatchObject({ status: original.status, everyMs: original.everyMs,
+    lastInputRef, lastTickId: retained.lastTickId, lastTickAt: retained.lastTickAt, lastOutcome: retained.lastOutcome,
+    hostId: original.hostId, agentSessionId: original.agentSessionId, providerId: original.providerId, workspacePath: original.workspacePath })
+  expect(current.nextCheckAt).toBeGreaterThan(100000)
+  expect(inspected.input).toMatchObject({ reference: lastInputRef, status: 'unconfirmed', nativeResult: { state: 'unknown' } })
+  expect(await f.client.readAgentFuturePromptIntent('main', original.futureIntentId!)).toEqual(oldIntent)
+  expect(await readFile(f.motePath, 'utf8')).toBe(beforeFile)
+  expect(f.sent).not.toHaveBeenCalled(); expect(f.rawInput).not.toHaveBeenCalled(); expect(f.inner.kernel.stop).not.toHaveBeenCalled()
+})
+
 it('person/device adoption cannot be borrowed by an Agent, missing direct actor, settings edits, stale source or complete Main tuple drift', async () => {
   const f = await fixture(true), input = await f.request()
   await expect(f.cli(['space', 'mote', 'preferences', 'save'], input, true)).rejects.toThrow(/permission|person|device|authenticated/i)

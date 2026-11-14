@@ -1,6 +1,7 @@
 const manager = 'apps/host/src/continuous-progress-loop-manager.ts'
 const runtime = 'apps/host/src/goal-runtime.ts'
 export const guidanceMutants = [
+  { id: 'future-deadline-advanced', file: manager, from: 'loop.nextCheckAt > publishedAt ? loop.nextCheckAt : nextIntervalOccurrence(loop.nextCheckAt, publishedAt, loop.everyMs!)', to: 'nextIntervalOccurrence(loop.nextCheckAt, publishedAt, loop.everyMs!)', test: 'guidance adoption keeps original cadence' },
   { id: 'pending-input-overwritten', file: manager, from: 'if (loop.pendingCompletion) {\n            await save', to: 'if (false) {\n            await save', test: 'paused state, its original episode' },
   { id: 'paused-intent-activated', file: manager, from: "const activating = loop.status === 'active', revision = loop.revision", to: 'const activating = true, revision = loop.revision', test: 'legacy unknown without a pending input' },
   { id: 'old-due-reused', file: manager, from: 'nextIntervalOccurrence(loop.nextCheckAt, publishedAt, loop.everyMs!)', to: 'loop.nextCheckAt', also: ['nextCheckAt === null || nextCheckAt <= publishedAt', 'nextCheckAt === null'], test: 'legacy unknown without a pending input' },
