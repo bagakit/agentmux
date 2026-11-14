@@ -18,6 +18,12 @@ const expectedSelectionConsumers = [
 ].map(name => `apps/desktop/src/renderer/src/components/${name}.tsx`)
 let inventory
 
+function expectSelectionConsumers(report, files) {
+  const selection = report.consumers.filter(item => item.component === 'SelectionField')
+  for (const file of files) for (const kind of ['import', 'jsx'])
+    expect(selection.some(item => item.kind === kind && item.file === file), `Missing known SelectionField ${kind} consumer: ${file}`).toBe(true)
+}
+
 beforeAll(() => {
   execFileSync(process.execPath, [script, '--verify'], { cwd: root, stdio: 'pipe' })
   inventory = JSON.parse(readFileSync(output, 'utf8'))
@@ -32,7 +38,7 @@ describe('production UI component inventory', () => {
     for (const kind of ['import', 'jsx', 'literal-path', 'dynamic-path']) expect(selection.some(item => item.kind === kind)).toBe(true)
     for (const file of ['apps/desktop/src/renderer/src/components/AgentWorkModeSetup.tsx', 'apps/desktop/src/renderer/src/components/SurveyProfilePicker.tsx', 'apps/desktop/scripts/capture-space-launcher.mjs'])
       expect(selection.some(item => item.file === file)).toBe(true)
-    for (const file of expectedSelectionConsumers) expect(selection.some(item => item.kind === 'import' && item.file === file), `Missing known SelectionField consumer: ${file}`).toBe(true)
+    expectSelectionConsumers(inventory, expectedSelectionConsumers)
   })
 
   it('covers native select surfaces and names independently verifiable follow-up work', () => {
@@ -71,5 +77,24 @@ describe('inventory counterexamples', () => {
     const report = JSON.parse(execFileSync(process.execPath, [script, '--root', fixture], { cwd: root, encoding: 'utf8' }))
     expect(report.styleIssues.some(item => item.property === '--missing-token')).toBe(true)
     rmSync(fixture, { recursive: true, force: true })
+  })
+
+  it('rejects a missing known JSX consumer while its import and another consumer remain', () => {
+    seed()
+    const component = 'apps/desktop/src/renderer/src/components/'
+    const example = component + 'Example.tsx'
+    const other = component + 'Other.tsx'
+    writeFileSync(join(fixture, other), 'import { SelectionField } from "./SelectionField"\nexport const Other = () => <SelectionField />\n')
+    const readReport = () => JSON.parse(execFileSync(process.execPath, [script, '--root', fixture, '--verify'], { cwd: root, encoding: 'utf8' }))
+    try {
+      expectSelectionConsumers(readReport(), [example, other])
+      writeFileSync(join(fixture, example), 'import { SelectionField } from "./SelectionField"\nexport const Example = () => <div />\n')
+      const changed = readReport()
+      expectSelectionConsumers(changed, [other])
+      expect(changed.consumers.some(item => item.file === example && item.kind === 'import')).toBe(true)
+      expect(() => expectSelectionConsumers(changed, [example, other])).toThrow(`Missing known SelectionField jsx consumer: ${example}`)
+    } finally {
+      rmSync(fixture, { recursive: true, force: true })
+    }
   })
 })
