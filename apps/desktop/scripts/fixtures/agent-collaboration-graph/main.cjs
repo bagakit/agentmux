@@ -245,7 +245,9 @@ app.whenReady().then(async () => {
     phase = 'load-original-app'; await checkpoint(); await win.loadURL(url); win.webContents.debugger.attach('1.3'); await win.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled', { enabled: true })
     await until('original App initialize', () => read(`window.graphCapture?.ready&&!window.graphCapture.facts().loading&&window.graphCapture.facts().ids.includes('fixture-ui')`))
     await read('window.graphCapture.prepare();window.graphCapture.clearFocusForEntry()'); await until('original mounted workface', () => read(`Boolean(document.querySelector('[data-fixture-session="fixture-ui"] textarea'))`)); await read('window.graphCapture.remember()'); result.before = await facts(); result.entryBefore=result.before; result.distribution=await read('window.graphCapture.distribution()'); assert.deepEqual(result.before.controls, [], 'Initialization does not launch or operate a Run'); assert.equal(result.before.selectedSession,null); assert.equal(result.before.mapTarget,null); assert.ok(result.before.chrome.rail.length&&result.before.chrome.dock.length,'Original Space sidebar preferences are actually visible'); await frame('workbench-entry')
-    if (scenario === 'endpoints') {
+    if (scenario === 'dispatch-motion') {
+      await require('./dispatch-motion.cjs')({ win, result, read, click, key, move, frame, check, facts, intact, matrix, mapReady, closeReader, closeDetails, locate, pause, until, settle, fillSearch, waitCamera, rect, evidence })
+    } else if (scenario === 'endpoints') {
       await require('./endpoints.cjs')({ win, result, read, click, key, move, frame, check, facts, intact, matrix, mapReady, closeReader, closeDetails, locate, pause, until, settle, fillSearch, waitCamera, rect })
     } else {
     await check('initial-gui-entry-keeps-accurate-context-and-full-width', async () => {

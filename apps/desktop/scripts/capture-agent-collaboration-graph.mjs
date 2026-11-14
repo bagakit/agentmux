@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
+import { execFileSync } from 'node:child_process'
 import { createRequire } from 'node:module'
 import { createServer } from 'node:http'
 import { mkdtemp, mkdir, readFile, writeFile, readdir, rm, rename } from 'node:fs/promises'
@@ -13,9 +14,10 @@ const fixture = join(desktop, 'scripts/fixtures/agent-collaboration-graph')
 const scriptPath = fileURLToPath(import.meta.url)
 const compiling = process.argv[2] === '--compile'
 const verifying = process.argv[2] === '--verify'
-const scenario = process.argv[4] === '--scenario' ? process.argv[5] : 'readability'
-assert.ok(['readability', 'perception', 'perception-scale', 'endpoints'].includes(scenario), 'Use a declared capture scenario')
-assert.ok(compiling ? process.argv.length === 5 : ['--evidence', '--verify'].includes(process.argv[2]) && process.argv[3] && (process.argv.length === 4 || process.argv.length === 6 && process.argv[4] === '--scenario'), 'Use --evidence <new private evidence directory> or --verify <completed evidence directory> [--scenario perception|perception-scale|endpoints]')
+const scenarioIndex = compiling ? 5 : 4
+const scenario = process.argv[scenarioIndex] === '--scenario' ? process.argv[scenarioIndex + 1] : 'readability'
+assert.ok(['readability', 'perception', 'perception-scale', 'endpoints', 'dispatch-motion'].includes(scenario), 'Use a declared capture scenario')
+assert.ok(compiling ? process.argv.length === 5 || process.argv.length === 7 && process.argv[5] === '--scenario' : ['--evidence', '--verify'].includes(process.argv[2]) && process.argv[3] && (process.argv.length === 4 || process.argv.length === 6 && process.argv[4] === '--scenario'), 'Use --evidence <new private evidence directory> or --verify <completed evidence directory> [--scenario perception|perception-scale|endpoints|dispatch-motion]')
 if (verifying) {
   // Join the exact completed native observation once; never recapture or turn a
   // failed observation green. A changed source, harness or PNG requires new evidence.
@@ -28,6 +30,7 @@ if (verifying) {
   assert.deepEqual(receipt.changedInputs, []); assert.deepEqual(receipt.changedHarness, [])
   assert.deepEqual(receipt.actual.failures, []); assert.deepEqual(receipt.actual.rendererErrors, [])
   assert.ok(receipt.actual.checks?.length && receipt.actual.checks.every(check => check.passed === true))
+  if (scenario === 'dispatch-motion') createRequire(import.meta.url)(join(fixture, 'dispatch-motion.cjs')).verify(receipt.actual.dispatchMotion, receipt.frames)
   const cameraWaits = receipt.actual.cameraWaits
   assert.ok(cameraWaits?.length && cameraWaits.some(wait => wait.kind === 'locate'), 'Original camera completion must be observed for actual locates')
   for (const wait of cameraWaits) {
@@ -41,10 +44,10 @@ if (verifying) {
       assert.equal(wait.final.agentId, JSON.stringify(['local', wait.id]))
     }
   }
-  for (const name of scenario === 'endpoints' ? ['endpoints-original-phases-parallel-and-input', 'endpoints-original-theme-point-and-static', 'endpoints-original-mixed-group-and-keyboard'] : ['initial-gui-entry-keeps-accurate-context-and-full-width', 'source-cli-original-app-admission-and-dom-inspect', 'focus-list-map-and-original-return', ...(scenario === 'perception-scale' ? ['perception-original-large-world-and-consumer-cost', 'terrain-original-nesting-fold-and-exact-reveal', 'terrain-native-continuous-lod-and-selection-cost', 'terrain-held-reader-keyboard-and-motion-choice'] : [])]) assert.ok(receipt.actual.checks.some(check => check.name === name && check.passed === true), 'Missing actual native check: ' + name)
+  for (const name of scenario === 'dispatch-motion' ? ['dispatch-native-stages', ...(receipt.actual.dispatchMotion.refresh ? [] : ['dispatch-native-motion-policies']), 'dispatch-native-cost'] : scenario === 'endpoints' ? ['endpoints-original-phases-parallel-and-input', 'endpoints-original-theme-point-and-static', 'endpoints-original-mixed-group-and-keyboard'] : ['initial-gui-entry-keeps-accurate-context-and-full-width', 'source-cli-original-app-admission-and-dom-inspect', 'focus-list-map-and-original-return', ...(scenario === 'perception-scale' ? ['perception-original-large-world-and-consumer-cost', 'terrain-original-nesting-fold-and-exact-reveal', 'terrain-native-continuous-lod-and-selection-cost', 'terrain-held-reader-keyboard-and-motion-choice'] : [])]) assert.ok(receipt.actual.checks.some(check => check.name === name && check.passed === true), 'Missing actual native check: ' + name)
   for (const key of ['inputs', 'harness']) {
     const entries = Object.entries(receipt[key] ?? {}); assert.ok(entries.length, 'Nonempty exact ' + key)
-    for (const [file, sha] of entries) { const target = resolve(root, file); assert.ok(target.startsWith(root + sep)); assert.equal(digest(await readFile(target)), sha, 'Changed candidate ' + key + ': ' + file) }
+    for (const [file, sha] of entries) { const target = resolve(root, file); assert.ok(target.startsWith(root + sep)); const overlay = key === 'inputs' && receipt.compilation.sourceOverlay?.files[file]; assert.equal(digest(await readFile(overlay ? join(directory, overlay.file) : target)), sha, 'Changed candidate ' + key + ': ' + file) }
   }
   assert.ok(receipt.frames?.length)
   assert.deepEqual(receipt.frames.map(({ sha256, ...frame }) => frame), receipt.actual.frames)
@@ -71,6 +74,22 @@ const privateRoot = compiling ? resolve(process.argv[3]) : await mkdtemp(join(tm
 assert.ok(privateRoot.startsWith(join(tmpdir(), 'amux-collaboration-capture-')) && !relative(tmpdir(), privateRoot).includes(sep), 'Compilation stays in its own private capture root')
 const require = createRequire(join(desktop, 'package.json')), hash = bytes => createHash('sha256').update(bytes).digest('hex')
 const sources = {}, foreignWorkspaceSources = {}, isolated = [], instrumented = [], logs = []
+const sourceRef = process.env.COLLABORATION_CAPTURE_SOURCE_REF
+const sourceOverlay = { revision: sourceRef ? execFileSync('git', ['rev-parse', '--verify', sourceRef + '^{commit}'], { cwd: root, encoding: 'utf8' }).trim() : null, files: {} }
+const overlayBytes = new Map()
+if (sourceRef) {
+  assert.equal(scenario, 'dispatch-motion', 'Git byte overlays are bounded to the declared dispatch capture')
+  const changed = execFileSync('git', ['diff', '--name-only', '--diff-filter=M', sourceOverlay.revision, '--', 'apps/desktop/src', 'packages'], { cwd: root, encoding: 'utf8' }).trim().split('\n').filter(file => /\/src\/.+\.(?:tsx?|jsx?|css|mjs)$/.test(file))
+  for (const file of changed) {
+    const bytes = execFileSync('git', ['show', sourceOverlay.revision + ':' + file], { cwd: root, maxBuffer: 16 * 1024 * 1024 })
+    const stored = join('source-overlay', file)
+    await mkdir(join(evidence, 'source-overlay', file, '..'), { recursive: true })
+    await writeFile(join(evidence, stored), bytes)
+    overlayBytes.set(join(root, file), bytes)
+    sourceOverlay.files[file] = { file: stored, sha256: hash(bytes), gitObject: execFileSync('git', ['rev-parse', sourceOverlay.revision + ':' + file], { cwd: root, encoding: 'utf8' }).trim() }
+  }
+}
+const sourceBytes = file => overlayBytes.has(file) ? Promise.resolve(overlayBytes.get(file)) : readFile(file)
 const receipt = { schema: 'agentmux.collaboration-graph-capture.v1', scenario: 'focus-map-' + scenario, capturedPass: false, captureOnly: true, aestheticReview: 'not-performed',
   boundary: 'Current source App, actual initialization/Store, Focus List/Map and original Space workfaces, original area owners, Graph, shared Focus cards and sole AgentInformationPreviewHost/Reader. The distribution includes permanent empty areas, uneven populated groups, isolated members and observed dense cross-area relations. Only platform API facts and unrelated PTY/Monaco painting are controlled. Private synthetic identities, events and content; no live Core lifecycle, Provider, Runtime, real messages, restart or installed-product claim.' }
 let compilationWrites = Promise.resolve()
@@ -101,11 +120,11 @@ async function compileRenderer() {
     }
   }
   const { build } = await import(pathToFileURL(require.resolve('vite')).href)
-  const sourcePlugin = { name: 'collaboration-source-and-unrelated-paint', enforce: 'pre', async transform(source, id) {
+  const sourcePlugin = { name: 'collaboration-source-and-unrelated-paint', enforce: 'pre', load(id) { const bytes = overlayBytes.get(id.split('?')[0]); if (bytes && !id.includes('?')) return bytes.toString('utf8') }, async transform(source, id) {
       const file = id.split('?')[0]
       if (!file.startsWith(root + sep) && !file.includes('/node_modules/') && /\/(?:packages|apps)\/[^/]+\/src\/.+\.(?:tsx?|jsx?|css)$/.test(file)) foreignWorkspaceSources[relative(root, file)] = hash(await readFile(file))
       if (!file.startsWith(root + sep) || file.includes('/node_modules/') || !/\.(tsx?|css|mjs)$/.test(file)) return
-      if (id.includes('?')) { sources[relative(root, file)] = hash(await readFile(file)); return }
+      if (id.includes('?')) { sources[relative(root, file)] = hash(await sourceBytes(file)); return }
       sources[relative(root, id)] = hash(source)
       if (++transformed % 200 === 0) {
         const progress = { phase: 'transforming', transformed }
@@ -146,7 +165,7 @@ async function compileRenderer() {
         return `export function ${component.slice(0, -4)}(){return null}`
       }
     }, async generateBundle() {
-      for (const file of this.getWatchFiles()) if (file.startsWith(root + sep) && !file.includes('/node_modules/') && file.endsWith('.css')) sources[relative(root, file)] = hash(await readFile(file))
+      for (const file of this.getWatchFiles()) if (file.startsWith(root + sep) && !file.includes('/node_modules/') && file.endsWith('.css')) sources[relative(root, file)] = hash(await sourceBytes(file))
     } }
   await build({ configFile: false, logLevel: 'error', root: fixture, worker: { format: 'es', plugins: () => [sourcePlugin] },
     define: { __AGENTMUX_WEB_PREVIEW__: 'true' }, esbuild: { jsx: 'automatic' },
@@ -158,7 +177,7 @@ if (compiling) {
   await publishCompilation({ phase: 'starting', transformed: 0 })
   try {
     await compileRenderer()
-    await publishCompilation({ phase: 'complete', inputs: sources, foreignWorkspaceSources, isolated, instrumented })
+    await publishCompilation({ phase: 'complete', inputs: sources, foreignWorkspaceSources, isolated, instrumented, sourceOverlay })
     process.exit(0)
   } catch (error) {
     await publishCompilation({ phase: 'failed', failure: error.message })
@@ -169,11 +188,11 @@ const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => key
 Object.assign(env, { AGENTMUX_DESKTOP_USER_DATA: join(privateRoot, 'user-data'), AGENTMUX_RUNTIME_DIRECTORY: join(privateRoot, 'runtime'), AGENTMUX_STATE_DIRECTORY: join(privateRoot, 'state'), COLLABORATION_CAPTURE_NODE: process.execPath })
 let server
 try {
-  const harnessFiles = ['index.html', 'entry.tsx', 'main.cjs', 'perception.cjs', 'terrain.cjs', 'adaptive.cjs', 'adaptive-observer.ts', 'settings.cjs', 'server-host.mjs', 'scenario.md', ...(scenario === 'endpoints' ? ['endpoints.cjs'] : [])].map(name => join(fixture, name)).concat([scriptPath, join(desktop, 'scripts/probe-process.mjs'), join(desktop, 'scripts/fixtures/desktop-map/source-loader.mjs'), join(desktop, 'scripts/fixtures/performance-failure-evidence/source-loader.mjs'), join(desktop, 'test/helpers/desktop-map-source-mutations.mjs'), join(root, 'packages/core/dist/control-endpoint-listener-worker.js'), join(root, 'packages/core/src/control-endpoint-listener-worker.ts')])
+  const harnessFiles = ['index.html', 'entry.tsx', 'main.cjs', 'perception.cjs', 'terrain.cjs', 'adaptive.cjs', 'adaptive-observer.ts', 'settings.cjs', 'server-host.mjs', 'scenario.md', ...(scenario === 'endpoints' ? ['endpoints.cjs'] : []), ...(scenario === 'dispatch-motion' ? ['dispatch-motion.cjs', 'dispatch-motion.md'] : [])].map(name => join(fixture, name)).concat([scriptPath, join(desktop, 'scripts/probe-process.mjs'), join(desktop, 'scripts/fixtures/desktop-map/source-loader.mjs'), join(desktop, 'scripts/fixtures/performance-failure-evidence/source-loader.mjs'), join(desktop, 'test/helpers/desktop-map-source-mutations.mjs'), join(root, 'packages/core/dist/control-endpoint-listener-worker.js'), join(root, 'packages/core/src/control-endpoint-listener-worker.ts')])
   receipt.harness = Object.fromEntries(await Promise.all(harnessFiles.map(async file => [relative(root, file), hash(await readFile(file))])))
-  receipt.publicTransport = scenario === 'endpoints' ? { boundary: 'No public transport or lifecycle operation is exercised by the isolated endpoint presentation increment.' } : { boundary: 'Original Core source publication spawns its existing compiled listener asset; only listener transport uses dist. Its bytes and corresponding source are bound in harness; CLI, Core business and Renderer remain original source.', file: 'packages/core/dist/control-endpoint-listener-worker.js' }
+  receipt.publicTransport = ['endpoints', 'dispatch-motion'].includes(scenario) ? { boundary: 'No public transport or lifecycle operation is exercised by the isolated presentation increment. CLI navigation is separately owned evidence, not claimed by these frames.' } : { boundary: 'Original Core source publication spawns its existing compiled listener asset; only listener transport uses dist. Its bytes and corresponding source are bound in harness; CLI, Core business and Renderer remain original source.', file: 'packages/core/dist/control-endpoint-listener-worker.js' }
   receipt.phase = 'compiling'; await writeFile(join(evidence, 'receipt.json'), JSON.stringify(receipt, null, 2) + '\n')
-  receipt.compilationProcess = await runProbeProcess(process.execPath, [scriptPath, '--compile', privateRoot, evidence],
+  receipt.compilationProcess = await runProbeProcess(process.execPath, [scriptPath, '--compile', privateRoot, evidence, '--scenario', scenario],
     { temporaryRoot: privateRoot, cwd: root, env, timeoutMs: 120000, onLine: line => logs.push(line) })
   const compilationText = await readFile(join(evidence, 'compilation.json'), 'utf8').catch(error => error.code === 'ENOENT' ? '' : Promise.reject(error))
   if (compilationText.trim()) receipt.compilation = JSON.parse(compilationText)
@@ -207,7 +226,7 @@ try {
   await new Promise(done => server.listen(0, '127.0.0.1', done))
   receipt.phase = 'capturing'; await writeFile(join(evidence, 'receipt.json'), JSON.stringify(receipt, null, 2) + '\n')
   receipt.process = await runProbeProcess(require('electron'), [join(fixture, 'main.cjs'), `http://127.0.0.1:${server.address().port}/?scenario=${scenario}`, privateRoot, evidence, scenario],
-    { temporaryRoot: privateRoot, cwd: root, env, timeoutMs: scenario === 'perception-scale' ? 360000 : 210000, onLine: line => logs.push(line) })
+    { temporaryRoot: privateRoot, cwd: root, env, timeoutMs: ['perception-scale', 'dispatch-motion'].includes(scenario) ? 360000 : 210000, onLine: line => logs.push(line) })
   const actualText = await readFile(join(evidence, 'actual.json'), 'utf8').catch(error => error.code === 'ENOENT' ? '' : Promise.reject(error))
   if (actualText.trim()) receipt.actual = JSON.parse(actualText)
   assert.equal(receipt.process.timedOut, false, 'The original source capture timed out; retain its partial scene evidence')
@@ -215,10 +234,10 @@ try {
   assert.ok(receipt.actual, 'The original source capture did not publish scene evidence')
   const controlLoaded = await readFile(join(evidence, 'control-loaded.jsonl'), 'utf8').catch(error => error.code === 'ENOENT' ? '' : Promise.reject(error))
   receipt.controlInputs = controlLoaded.trim() ? controlLoaded.trim().split('\n').map(line => JSON.parse(line)) : []
-  if (scenario !== 'endpoints') assert.ok(receipt.controlInputs.some(input => input.path === 'packages/core/src/public-rpc-server.ts') && receipt.controlInputs.some(input => input.path === 'packages/core/src/agentmux-cli-commands.ts'), 'Original Core server and source CLI must load in the public App join')
+  if (!['endpoints', 'dispatch-motion'].includes(scenario)) assert.ok(receipt.controlInputs.some(input => input.path === 'packages/core/src/public-rpc-server.ts') && receipt.controlInputs.some(input => input.path === 'packages/core/src/agentmux-cli-commands.ts'), 'Original Core server and source CLI must load in the public App join')
   for (const input of receipt.controlInputs) { assert.equal(input.originalSHA256, input.effectiveSHA256, 'Public join uses unmodified source'); if (sources[input.path]) assert.equal(sources[input.path], input.originalSHA256); sources[input.path] = input.originalSHA256 }
   receipt.frames = await Promise.all(receipt.actual.frames.map(async frame => ({ ...frame, sha256: hash(await readFile(join(evidence, frame.file))) })))
-  receipt.sourceAfter = Object.fromEntries(await Promise.all(Object.keys(sources).map(async file => [file, hash(await readFile(join(root, file)))])))
+  receipt.sourceAfter = Object.fromEntries(await Promise.all(Object.keys(sources).map(async file => [file, hash(await readFile(receipt.compilation.sourceOverlay.files[file] ? join(evidence, receipt.compilation.sourceOverlay.files[file].file) : join(root, file)))])))
   receipt.harnessAfter = Object.fromEntries(await Promise.all(harnessFiles.map(async file => [relative(root, file), hash(await readFile(file))])))
   receipt.changedInputs = Object.keys(sources).filter(file => sources[file] !== receipt.sourceAfter[file])
   receipt.changedHarness = Object.keys(receipt.harness).filter(file => receipt.harness[file] !== receipt.harnessAfter[file])
@@ -226,6 +245,7 @@ try {
   assert.equal(receipt.changedInputs.length, 0, 'Candidate changed during capture: ' + receipt.changedInputs.join(', '))
   assert.equal(receipt.changedHarness.length, 0, 'Capture harness changed during execution: ' + receipt.changedHarness.join(', '))
   if (scenario === 'endpoints') require(join(fixture, 'endpoints.cjs')).verify(receipt.actual.endpoints, receipt.frames, receipt.actual.nativeWorkers)
+  if (scenario === 'dispatch-motion') require(join(fixture, 'dispatch-motion.cjs')).verify(receipt.actual.dispatchMotion, receipt.frames)
   receipt.capturedPass = true
 } catch (error) { receipt.failure = { name: error.name, message: error.message, stack: error.stack }; process.exitCode = 1 }
 finally {

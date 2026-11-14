@@ -143,6 +143,7 @@ const originalConfig = await api.config.get(), originalSnapshot = await api.sess
 const base = originalSnapshot.sessions.find((session): session is Extract<SessionSnapshot, { kind: 'agent' }> => session.kind === 'agent')
 if (!base || !originalConfig.workspaces[0]) throw Error('Nonempty typed platform samples required')
 const scenario = new URLSearchParams(location.search).get('scenario')
+const compact = scenario === 'endpoints' || scenario === 'dispatch-motion'
 const perception = scenario === 'perception' || scenario === 'perception-scale'
 const now = Date.now(), hostId = 'local', incarnation = 'fixture-collaboration-journal'
 const projects: WorkspaceRecord[] = [
@@ -152,8 +153,8 @@ const projects: WorkspaceRecord[] = [
 ]
 const scratch = projects[2]!
 const background = Array.from({ length: 8 }, (_, index): WorkspaceRecord => ({ id: 'fixture-background-' + index, hostId, name: perception ? ['Sample Project 数据工作台', 'Sample Pages', '工作流与工具', 'Cloudflare 域名与邮件', '个人知识库', 'Farm', '设计素材', '研究记录'][index]! : 'Independent work ' + (index + 1), path: fixturePath('private/graph/independent/' + index), kind: 'folder' }))
-const emptyProjects = Array.from({ length: scenario === 'endpoints' ? 0 : scenario === 'perception' ? 6 : 60 }, (_, index): WorkspaceRecord => ({ id: 'fixture-empty-' + index, hostId, name: index % 3 ? 'Unassigned project ' + (index + 1) : '归档与材料 ' + (index + 1), path: fixturePath('private/graph/empty/' + index), kind: 'folder' }))
-const singletonProjects = Array.from({ length: scenario === 'endpoints' ? 0 : 12 }, (_, index): WorkspaceRecord => ({ id: 'fixture-singleton-' + index, hostId, name: 'Independent contributor ' + (index + 1), path: fixturePath('private/graph/singleton/' + index), kind: 'folder' }))
+const emptyProjects = Array.from({ length: compact ? 0 : scenario === 'perception' ? 6 : 60 }, (_, index): WorkspaceRecord => ({ id: 'fixture-empty-' + index, hostId, name: index % 3 ? 'Unassigned project ' + (index + 1) : '归档与材料 ' + (index + 1), path: fixturePath('private/graph/empty/' + index), kind: 'folder' }))
+const singletonProjects = Array.from({ length: compact ? 0 : 12 }, (_, index): WorkspaceRecord => ({ id: 'fixture-singleton-' + index, hostId, name: 'Independent contributor ' + (index + 1), path: fixturePath('private/graph/singleton/' + index), kind: 'folder' }))
 if (perception) Object.assign(emptyProjects[0]!, { hostId: 'fixture-remote', name: 'Remote · 模型评测服务' })
 const terrainProjects: WorkspaceRecord[] = scenario === 'perception-scale' ? [
   { id: 'fixture-terrain-root', hostId, name: '协作地形', path: projects[0]!.path + '/terrain', kind: 'folder' },
@@ -213,9 +214,9 @@ const terrainSessions = terrainProjects.length ? ['fixture-terrain-tool', 'fixtu
     nativeHandle: { kind: 'provider' as const, providerId: original.providerId, sessionId: nativeSessionId },
     currentActivity: { ...original.currentActivity!, run, nativeSessionId, nativeTurnId: 'turn-' + id, sourceId: 'source-' + id, hookReceiptId: 'receipt-' + id } }
 }) : []
-const initialSessions = [...originalSessions, ...terrainSessions, ...extraSessions.slice(0, scenario === 'endpoints' ? 4 : 88)]
+const initialSessions = [...originalSessions, ...terrainSessions, ...extraSessions.slice(0, compact ? 4 : 88)]
 sessions = initialSessions
-const retired: AgentSessionHistoryDescriptor[] = Array.from({ length: scenario === 'endpoints' ? 0 : 4 }, (_, index) => ({ agentSessionId: 'fixture-retired-' + index, hostId, state: 'retired', retiredAt: now - (index + 1) * 86400000, history: { providerId: 'codex', executorId: 'codex', workspacePath: projects[0]!.path, createdAt: now - (index + 3) * 86400000 } }))
+const retired: AgentSessionHistoryDescriptor[] = Array.from({ length: compact ? 0 : 4 }, (_, index) => ({ agentSessionId: 'fixture-retired-' + index, hostId, state: 'retired', retiredAt: now - (index + 1) * 86400000, history: { providerId: 'codex', executorId: 'codex', workspacePath: projects[0]!.path, createdAt: now - (index + 3) * 86400000 } }))
 if (scenario === 'endpoints') retired.push({ agentSessionId: 'fixture-endpoint-retired', hostId, state: 'retired', retiredAt: now - 10000 })
 const timelines: Record<string, AgentTimelineSnapshot> = Object.fromEntries(identities.map(([id, label]) => {
   const items: AgentTimelineSnapshot['items'] = [
@@ -315,7 +316,7 @@ const denseSenders = extraSessions.slice(0, 88).filter(session => session.worksp
 const densePeers = extraSessions.slice(singletonProjects.length, 88).filter(session => session.workspacePath !== projects[0]!.path && session.processState === 'running').slice(0, 12)
 if (denseSenders.length !== 12 || densePeers.length !== 12) throw Error('The declared cross-area collaboration input must be nonempty and complete')
 const denseRefs: ReturnType<typeof reference>[] = []
-for (let sender = 0; sender < (scenario === 'endpoints' ? 0 : denseSenders.length); sender++) for (let offset = 0; offset < 3; offset++) {
+for (let sender = 0; sender < (compact ? 0 : denseSenders.length); sender++) for (let offset = 0; offset < 3; offset++) {
   const ref = reference(`fixture-dense-${sender}-${offset}`, denseSenders[sender]!.id, densePeers[(sender + offset) % densePeers.length]!.id)
   denseRefs.push(ref); refs.push(ref)
   events.push({ sequence: events.at(-1)!.sequence + 1, kind: 'message', at: now - 3000, messages: [ref] })
@@ -345,7 +346,7 @@ api.sessions.messageEvents = async (subject, options = {}) => {
 const creation: AgentMuxSpawnRecord = { agentSessionId: 'fixture-core', phase: 'active', currentRun: { runId: 'fixture-run-fixture-core' }, createdAt: now - 50000,
   creation: { createOperationId: 'fixture-creation', initialPrompt: 'not-requested', createdRun: { runId: 'fixture-run-fixture-core' },
     createdBy: { agentSessionId: 'fixture-ui', run: { runId: 'fixture-run-fixture-ui' }, owner: { kind: 'local' } } } }
-const creations: AgentMuxSpawnRecord[] = [creation, ...(scenario === 'endpoints' ? [] : densePeers.slice(0, 4)).map((session, index): AgentMuxSpawnRecord => ({ agentSessionId: session.id, phase: 'active', currentRun: session.control.run, createdAt: now - 10000,
+const creations: AgentMuxSpawnRecord[] = [creation, ...(compact ? [] : densePeers.slice(0, 4)).map((session, index): AgentMuxSpawnRecord => ({ agentSessionId: session.id, phase: 'active', currentRun: session.control.run, createdAt: now - 10000,
   creation: { createOperationId: 'fixture-dense-creation-' + index, initialPrompt: 'not-requested', createdRun: session.control.run,
     createdBy: { agentSessionId: denseSenders[index]!.id, run: denseSenders[index]!.control.run, owner: { kind: 'local' } } } }))]
 // Prepared is only a recorded target reference: deliberately absent from both
@@ -586,6 +587,24 @@ Object.assign(window, { graphCapture: {
     originalDraft = document.querySelector('[data-fixture-session="fixture-ui"] textarea'); originalDraft?.setSelectionRange(4, 12)
   },
   async appearance(appAppearance: 'dark' | 'light') { const before = await api.config.get(); await api.config.save({ ...before, appearance: { ...before.appearance, appAppearance } }, before) },
+  async dispatchPreference(mapMotion: 'system' | 'on' | 'off') {
+    if (scenario !== 'dispatch-motion') throw Error('Dispatch fixture only')
+    const before = await api.config.get()
+    await api.config.save({ ...before, focus: { ...before.focus, mapMotion } }, before)
+  },
+  dispatchRetain(total: 8 | 128 | 384) {
+    if (scenario !== 'dispatch-motion' || ![8, 128, 384].includes(total)) throw Error('Use a bounded dispatch retention size')
+    const before = useAppStore.getState(), nextTabs = { ...before.tabs }, workspace = background[7]!
+    const added = extraSessions.slice(4, total - originalSessions.length).map(session => ({ ...session, workspacePath: workspace.path }))
+    const present = new Set(before.sessions.map(session => session.id))
+    sessions = [...before.sessions, ...added.filter(session => !present.has(session.id))]
+    for (const session of added) {
+      const tab = createWorkbenchTab('tab-' + session.id, { regionId: 'region-' + session.id, workspaceId: workspace.id, kind: 'agent', phase: 'attached', sessionId: session.id }, session.label)
+      if (!nextTabs[tab.id]) nextTabs[tab.id] = tab
+    }
+    useAppStore.setState({ sessions, tabs: nextTabs, layouts: { ...before.layouts, [workspace.id]: createWorkspaceLayout('dispatch-retained', added.map(session => 'tab-' + session.id)) } })
+    return { sessions: sessions.length, retainedTabs: Object.keys(nextTabs).length, originalTabsSame: originalSessions.every(session => nextTabs['tab-' + session.id] === before.tabs['tab-' + session.id]), boundary: 'Bounded typed private Session/retained-workface setup in the original Store, preserving original members and workfaces. Original Graph/Worker and input consumers remain intact. Catalog transport/admission is not measured; unrelated PTY paint stays isolated. These are not mounted live Terminal or user Run claims.' }
+  },
   preferences() { return structuredClone(useAppStore.getState().config?.focus) },
   fail(value: boolean) { failEvents = value },
   live(live = true, sender = 'fixture-core', recipient = 'fixture-ui', kind: 'message' | 'dispatch-open' = 'message') {
