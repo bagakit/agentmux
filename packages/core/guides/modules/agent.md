@@ -226,12 +226,13 @@ Use `amux agent history usage --host ID --session ID [--limit N] [--cursor CURSO
 <!-- amux:generated command:agent.name.inspect -->
 <!-- amux:generated command:agent.name.change -->
 
-These finite APIs address the actual local label owner with exact runtimeId,
-agentSessionId and createOperationId. They do not aggregate other Hosts or need
-a current Run, Native connection, readiness probe or full history. The local
-Core verifies its original durable Session creation and current actor. Read
-never initializes a document. A confirmed local Session with an absent name
-file may explicitly create its label in the same original spatial store; parse
+These finite APIs address the actual local label owner with exact runtimeId
+and agentSessionId. Inspect reads its saved label without requiring a current
+Session, creation observation, Run, Native connection or history. Change and
+explicit write confirmation also require createOperationId; the local Core
+verifies that original creation and the current actor. Read never initializes
+a document or grants write/control authority. A confirmed local Session with an
+absent name file may explicitly create its label in the same original spatial store; parse
 or I/O uncertainty is not absence and never overwrites original bytes.
 
 Change uses the same rename/confirm union as Source member naming. For example:
@@ -240,9 +241,10 @@ Change uses the same rename/confirm union as Source member naming. For example:
 {"runtimeId":"A","agentSessionId":"SID","createOperationId":"C","change":{"kind":"rename","operationId":"Agent-name-OP","name":"Original Agent","expectedNameRevision":0,"source":"manual"}}
 ```
 
-Use `amux agent name change --input request.json`. Inspect accepts the same exact
-identity and optional operationId, and returns current override/source/revision
-and the original record with diskAcknowledgement:not-observed. Only the actual
+Use `amux agent name change --input request.json`. Inspect accepts
+`{runtimeId,agentSessionId,operationId?}`. It returns current override/source/revision
+and the original record with diskAcknowledgement:not-observed, without asserting
+Session existence or creation. Only the actual
 rename or explicit confirm returns a producer durability ACK. Keep partial or
 unknown operations; do not mint or automatically replay a replacement. A Source
 association L is not this local creation C or a grant to the Agent.
