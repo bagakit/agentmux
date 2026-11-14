@@ -1,6 +1,6 @@
 import { RISK_TIERS } from './risk-tier.js'
 import { AgentMuxError } from './errors.js'
-import { rpcRecord, rpcString } from './rpc-business-codec.js'
+import { rpcRecord, rpcString } from './rpc-data.js'
 import type { AgentCatalogEntry } from './types.js'
 
 export const PROVIDER_CATALOG_METHODS = { 'agent.provider.ls': 'long' } as const
