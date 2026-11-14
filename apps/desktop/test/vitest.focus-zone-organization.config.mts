@@ -6,7 +6,7 @@ import source from './vitest.focus-project-appearance.config.mts'
 
 const root = resolve(import.meta.dirname, '../../..')
 export const zoneOrganizationMutations = {
-  'project-default': ['shared/focus-zone-presentation.ts', "?? (kind === 'project' ? 'sections' : authoredTopicPresentation ?? 'cards')", "?? (authoredTopicPresentation ?? 'cards')"],
+  'project-default': ['shared/focus-zone-presentation.ts', "kind === 'project' ? 'cards'", "kind === 'project' ? 'sections'"],
   'container-override': ['shared/focus-zone-presentation.ts', 'preferences?.find(item => item.key === key)?.presentation', 'preferences?.find(item => item.key !== key)?.presentation'],
   'mode-consumer': ['renderer/src/components/FocusScanLaneContent.tsx', 'const organization = lane.zonePresentation ?? topicPresentation', 'const organization = topicPresentation'],
   'container-delta': ['shared/config-edit.ts', 'live = index(actual), result = new Map(live)', 'live = index(actual), result = new Map(old)'],
