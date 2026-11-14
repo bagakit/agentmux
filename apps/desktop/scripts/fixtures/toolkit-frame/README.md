@@ -62,6 +62,7 @@ clipboard result and does not rerun unrelated Toolkit frame mutants.
 ```sh
 node apps/desktop/scripts/capture-toolkit-pending-launch.mjs --evidence "$PWD/.local/toolkit-pending-launch/gui"
 node apps/desktop/scripts/capture-toolkit-pending-launch.mjs --evidence "$PWD/.local/toolkit-pending-launch/gui-mutation" --mutation stop-options
+node apps/desktop/scripts/capture-toolkit-pending-launch.mjs --evidence "$PWD/.local/toolkit-pending-launch/gui-release-mutation" --mutation release-options
 ```
 
 The [TUI Toolkit recovery contract](../../../../../docs/design/behavior/settings-and-observation.md#tui-toolkit)
@@ -76,8 +77,16 @@ reopening the popover never call run, action, or evaluate. The saved command
 becomes available after confirmed retirement and the original draft is checked
 on reopening.
 
-The six whole-window PNGs include wide dark and narrow light pending and ended
-states, plus both unconfirmed retirement states. The fixture issues no command
-and starts no Runtime. The negative case compiles a preload that omits the stop
-options and requires the exact IPC argument assertion to fail. Core retirement
-and durable recovery require separate verification.
+The legacy scenario starts from a launch whose terminal and exact retirement
+cannot be confirmed, with an older successful result. Its original launch stays
+unknown after allowing a new one. Only a separate trusted click calls run, and
+the call uses the released launch as its baseline rather than the older result.
+
+The ten whole-window PNGs include wide dark and narrow light pending and ended
+states, both unconfirmed retirement states, the original failure details
+expanded by a trusted click, the legacy fallback, and the result after allowing
+a new launch. The fixture starts no Runtime and the port only
+projects a pending DTO for the single explicit run. Each negative case compiles
+a preload that omits either all stop options or the legacy release option and
+requires the corresponding exact IPC argument assertion to fail. Core
+retirement and durable recovery require separate verification.
