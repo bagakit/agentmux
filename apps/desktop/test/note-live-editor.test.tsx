@@ -255,3 +255,34 @@ it('forwards the exact current Markdown source through NoteFileView rather than 
   expect(kept).toHaveBeenCalledWith(retained.mock.calls[0]![0], incoming)
   expect(editor()).toBe(original)
 })
+
+it('acknowledges a pending Note focus in its actual child editor document after reveal', async () => {
+  const frame = document.createElement('iframe')
+  document.body.append(frame)
+  const child = frame.contentDocument!, section = child.createElement('section')
+  section.hidden = true
+  child.body.append(section)
+  const file = { path: 'window.note.md', content: serializeNoteDocument(note(paragraph('A draft', 'a'))), revision: 'saved' }
+  const canFocus = vi.fn(() => true), onFocused = vi.fn(() => canFocus.mockReturnValue(false))
+  const view = (request?: number) => <NoteFileView document={file} knowledge={knowledge} onChange={changed}
+    onSave={() => {}} onOpen={() => {}} {...(request ? { focusRequest: request, canFocus, onFocused } : {})} />
+  try {
+    await act(async () => root.render(view()))
+    const original = editor().view, element = original.dom, originalParent = element.parentElement!
+    section.append(child.adoptNode(element))
+    vi.spyOn(element, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 400, 160))
+    // happy-dom's adoptNode retains its original focus implementation. Model the
+    // child browser's focus receipt on the real editor view and physical document.
+    const active = vi.spyOn(child, 'activeElement', 'get')
+    const focus = vi.spyOn(original, 'focus').mockImplementation(() => { active.mockReturnValue(element) })
+    await act(async () => root.render(view(23)))
+    expect(onFocused).not.toHaveBeenCalled()
+    await act(async () => { section.hidden = false })
+    expect(canFocus).toHaveBeenCalled()
+    await vi.waitFor(() => expect(focus).toHaveBeenCalled())
+    expect(onFocused).toHaveBeenCalledExactlyOnceWith(23)
+    expect(child.activeElement).toBe(element)
+    active.mockRestore(); focus.mockRestore()
+    originalParent.append(element)
+  } finally { frame.remove() }
+})

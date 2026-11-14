@@ -11,7 +11,7 @@ import { useNotebookLibrary } from '../src/renderer/src/lib/notebook-library'
 import { saveSurveyToRecall, type SurveyRecallCapture as CaptureTarget } from '../src/renderer/src/lib/survey-recall-capture'
 import { SurveyRecallCapture } from '../src/renderer/src/components/SurveyRecallCapture'
 import { NOTES_WORKSPACE_ID } from '@agentmux/host/notes-library'
-import { newNoteDocument } from '@agentmux/client-ui/note/note-document'
+import { newNoteDocument, readNoteDocument, serializeNoteDocument } from '@agentmux/client-ui/note/note-document'
 
 const dom = composerDOM()
 const notes = { id: NOTES_WORKSPACE_ID, name: 'Recall', hostId: 'local', path: _hygiene_fixturePath("home/notes"), kind: 'folder' as const }
@@ -55,7 +55,7 @@ it('saves a finding to the exact Notebook and preserves its original URL without
   expect(saved.status).toBe('written'); expect(saved.notebookRegistered).toBe(true)
   expect(useAppStore.getState().layouts[notes.id]).toBeDefined()
   expect(useAppStore.getState().layouts[notes.id]?.activeGroupId).toBe(saved.target.groupId)
-  expect(api.files.createPublic).toHaveBeenCalledExactlyOnceWith({ zoneId: 'notes-zone', expectedResource: { hostId: 'local', workspaceId: notes.id, workspacePath: notes.path, zoneId: 'notes-zone', zonePath: notes.path, path: saved.path }, path: saved.path, content: JSON.stringify(newNoteDocument(saved.draft, saved.noteId, saved.blockIds[0]!), null, 2), expectedRevision: null })
+  expect(api.files.createPublic).toHaveBeenCalledExactlyOnceWith({ zoneId: 'notes-zone', expectedResource: { hostId: 'local', workspaceId: notes.id, workspacePath: notes.path, zoneId: 'notes-zone', zonePath: notes.path, path: saved.path }, path: saved.path, content: serializeNoteDocument({ ...newNoteDocument(saved.draft, saved.noteId, saved.blockIds[0]!), title: saved.draft }), expectedRevision: null })
   expect(catalog.pages[saved.noteId]!.notebookId).toBe('chosen-notebook')
   expect(catalog.pages[saved.noteId]!.sources).toEqual([target.source])
   expect(catalog.pages[saved.noteId]!.resource.workspacePath).toBe(notes.path)
@@ -68,11 +68,26 @@ it('the mounted Save finding action saves through production owners and offers a
   await act(async () => useLauncherState.getState().setDraft(target.draftId, 'note', 'A mounted finding'))
   await act(async () => (document.querySelector('.survey-recall-capture .primary-button') as HTMLButtonElement).click())
   expect(api.files.createPublic).toHaveBeenCalledOnce()
-  expect(JSON.parse([...body.values()][0]!.content).content.content[0].content[0].text).toBe('A mounted finding')
+  const saved = readNoteDocument([...body.values()][0]!.content)
+  expect(saved.status === 'valid' && saved.note.content.content?.[0]?.content?.[0]?.text).toBe('A mounted finding')
   expect(Object.values(catalog.pages)[0]!.sources).toEqual([target.source])
   expect(document.body.textContent).toContain('Saved to 随手记.')
   expect(document.body.textContent).toContain('Open in Recall')
   expect(useAppStore.getState().mainSurface).toBe('survey'); expect(useAppStore.getState().surveyZoneSelection).toBe(navigation)
+  expect(close).not.toHaveBeenCalled()
+})
+
+it('keeps a later destination Note when an explicit Open in Recall is awaiting the catalog', async () => {
+  await saveSurveyToRecall(target, 'quick-notes', 'Remember this finding')
+  const close = vi.fn()
+  await dom.render(<SurveyRecallCapture target={target} onClose={close} />)
+  let finish!: (value: NotebookState) => void
+  vi.mocked(api.notebooks.read).mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+  await act(() => document.querySelector<HTMLButtonElement>('.survey-recall-capture .primary-button')!.click())
+  await act(() => useAppStore.setState({ recallNoteId: 'later-note' }))
+  await act(async () => finish(catalog))
+  expect(useAppStore.getState().mainSurface).toBe('survey')
+  expect(useAppStore.getState().recallNoteId).toBe('later-note')
   expect(close).not.toHaveBeenCalled()
 })
 

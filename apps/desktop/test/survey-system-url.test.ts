@@ -67,3 +67,18 @@ it('keeps the exact known Survey Zone when creation fails before a Tab reference
   expect(await openSystemUrlInSurvey(f.host, request, new AbortController().signal)).toMatchObject({ state: 'unconfirmed', reference: null, message: expect.stringContaining('amux://zone/new-survey-zone') })
   expect(f.ports.prepareZone).toHaveBeenCalledTimes(1); expect(f.state.openLauncher).toHaveBeenCalledOnce(); expect(f.state.createBrowser).not.toHaveBeenCalled()
 })
+
+it('preserves a later Survey choice even when the main navigation stamp stays unchanged', async () => {
+  const f = fixture()
+  let finish!: () => void
+  const attach = f.state.createBrowser.getMockImplementation()!
+  f.state.createBrowser.mockImplementationOnce(async (...args: unknown[]) => { await new Promise<void>(resolve => { finish = resolve }); await attach(...args) })
+  const result = openSystemUrlInSurvey(f.host, request, new AbortController().signal)
+  await vi.waitFor(() => expect(finish).toBeTypeOf('function'))
+  const later = { kind: 'page', browserId: 'later-page', regionId: 'later-region' }
+  f.state.setSurveyZoneSelection(later)
+  for (const listener of f.listeners) listener()
+  finish()
+  expect((await result).state).toBe('opened')
+  expect(f.state.surveyZoneSelection).toBe(later)
+})

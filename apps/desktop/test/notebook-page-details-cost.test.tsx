@@ -164,3 +164,25 @@ it.each(['Move page', 'Page activity'])('pauses %s derivation in a retained hidd
   }
   expect(api.notebooks.apply).not.toHaveBeenCalled()
 })
+
+it('retains a later Survey selection when an open Note source finishes creating its page', async () => {
+  const before = useAppStore.getState()
+  const source = { sourceId: 'research-link', url: 'https://example.test/research', title: 'Research', recordedAt: 1 }
+  change({ kind: 'source', noteId: 'original', source }); await publish()
+  const reference = { displayWorkspaceId: workspace.id, groupId: 'group', tabId: 'new-tab', regionId: 'new-region' }
+  const created = { zone: { zoneId: 'new-zone', workspaceId: workspace.id, hostId: workspace.hostId, directoryPath: workspace.path, kind: 'directory' as const, branch: null },
+    mode: 'normal' as const, url: source.url, entry: 'page' as const, membership: [], reference, surface: null }
+  let finish!: () => void
+  const createSurveyBrowser = vi.fn(async () => { await new Promise<void>(resolve => { finish = resolve }); return created })
+  try {
+    useAppStore.setState({ mainSurface: 'agents', recallNoteId: 'original', surveyZoneSelection: null, createSurveyBrowser })
+    await dom.render(<Page />); await choose('Page sources')
+    await act(() => dom.container.querySelector<HTMLButtonElement>('[aria-label="Open source Research"]')!.click())
+    expect(createSurveyBrowser).toHaveBeenCalledOnce()
+    const later = { kind: 'page' as const, browserId: 'later-page', regionId: 'later-region' }
+    await act(() => useAppStore.setState({ surveyZoneSelection: later }))
+    await act(async () => finish())
+    expect(useAppStore.getState().surveyZoneSelection).toBe(later)
+    expect(useAppStore.getState().mainSurface).toBe('agents')
+  } finally { useAppStore.setState(before, true) }
+})

@@ -5,6 +5,7 @@ import { act, createElement, Fragment, useLayoutEffect, useState } from 'react'
 import { expect, it, vi } from 'vitest'
 vi.mock('react-resizable-panels', () => createRequire(import.meta.url)('../node_modules/react-resizable-panels/dist/react-resizable-panels.browser.development.cjs.js'))
 import { createClientUiRoot } from './helpers/client-ui-render'
+import { presentKnowledgeSurface } from '../src/renderer/src/lib/knowledge-surface-navigation'
 import { StableWorkbenchView, WorkbenchSurfaceHost } from '../src/renderer/src/components/StableWorkbenchView'
 import { useWorkbenchDocument, useWorkbenchWindowDocument, WorkbenchDocumentContext } from '../src/renderer/src/lib/workbench-document'
 import { isWorkbenchSurfaceDetached, placeWorkbenchWindow, registerWorkbenchDocument, registerWorkbenchHost, subscribeWorkbenchSurfaceDocument, useWorkbenchSurfaceDetached } from '../src/renderer/src/lib/workbench-window-registry'
@@ -113,6 +114,8 @@ it.each(['survey', 'recall'] as const)('keeps the complete %s surface and its or
   }))
   destination.id = 'native-surface-window'
   child.body.append(destination)
+  const focus = vi.spyOn(api.ui.workbenchWindows, 'call').mockResolvedValue({ windows: [], recordedOperation: null })
+  const selectInMain = vi.fn()
   const target = { kind: 'surface' as const, surface }
   const identity = { windowId: 'native-surface', documentGeneration: 'original-document' }
   const release = registerWorkbenchDocument(child, identity)
@@ -146,6 +149,12 @@ it.each(['survey', 'recall'] as const)('keeps the complete %s surface and its or
     let placed!: Promise<void>
     await act(() => { placed = placeWorkbenchWindow(target, { destination, window: identity }) })
     await placed
+    expect(await presentKnowledgeSurface(surface, selectInMain, { inputPolicy: 'target', sourceDocument: child })).toBe(true)
+    expect(await presentKnowledgeSurface(surface, selectInMain, { inputPolicy: 'preserve', sourceDocument: document })).toBe(true)
+    expect(focus).not.toHaveBeenCalled()
+    expect(await presentKnowledgeSurface(surface, selectInMain, { inputPolicy: 'target', sourceDocument: document })).toBe(false)
+    expect(focus).toHaveBeenCalledWith('app.window.focus', { ...identity, operationId: expect.any(String) })
+    expect(selectInMain).not.toHaveBeenCalled()
     expect(isWorkbenchSurfaceDetached(surface)).toBe(true)
     expect(container.querySelector('output')?.textContent).toBe('Detached')
     expect(child.querySelector('#page-slot-1 textarea') === editor).toBe(true)
@@ -157,11 +166,13 @@ it.each(['survey', 'recall'] as const)('keeps the complete %s surface and its or
     await act(() => { placed = placeWorkbenchWindow(target, null) })
     await placed
     expect(isWorkbenchSurfaceDetached(surface)).toBe(false)
+    expect(await presentKnowledgeSurface(surface, selectInMain)).toBe(true)
+    expect(selectInMain).toHaveBeenCalledWith(surface)
     expect(container.querySelector('#surface-home #page-slot-2 textarea') === editor).toBe(true)
     expect(editor.value).toBe('unsaved content')
   } finally {
     await act(async () => root.unmount())
-    adoption.forEach(spy => spy.mockRestore())
+    focus.mockRestore(); adoption.forEach(spy => spy.mockRestore())
     release(); container.remove(); frame.remove(); vi.unstubAllGlobals()
   }
 })

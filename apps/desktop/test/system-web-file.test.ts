@@ -18,6 +18,7 @@ import { openSystemUrlInSurvey } from '../src/renderer/src/lib/survey-system-url
 import { createSurveyBrowser } from '../src/renderer/src/lib/survey-browser-creation'
 import { SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 import { isSystemWebFilePath } from '../src/shared/system-web-file'
+import { isWorkbenchCloseRendererRequest } from '../src/shared/workbench-close-control'
 import type { DesktopControlRequest } from '../src/shared/contracts'
 
 // Execute exact production call sites without booting Runtime/Config or a user App.
@@ -75,7 +76,7 @@ function fixture() {
   const store = source('apps/desktop/src/renderer/src/store.ts')
   const nav = (store.statements.filter(ts.isFunctionDeclaration).find(node => node.name?.text === 'fileNavigationSelection'))!
   const dispatch = evaluate(`const fileNavigationSelection = ${nav.getText(store).replace(/^export /u, '') .replace(/^function fileNavigationSelection/u, 'function')}; return ${callArgument(store, 'api.control.onRequest', 0)}`, {
-    get, openSystemFileInSurvey, openSystemUrlInSurvey, useAppStore: { subscribe: (listener: () => void) => { listeners.add(listener); return () => listeners.delete(listener) } }
+    get, isWorkbenchCloseRendererRequest, openSystemFileInSurvey, openSystemUrlInSurvey, useAppStore: { subscribe: (listener: () => void) => { listeners.add(listener); return () => listeners.delete(listener) } }
   }) as (request: DesktopControlRequest, signal: AbortSignal) => Promise<any>
   const app = Object.assign(new EventEmitter(), { whenReady: () => new Promise(() => {}), isPackaged: false })
   const main = source('apps/desktop/src/main/index.ts')
