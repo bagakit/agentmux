@@ -7,6 +7,13 @@ when: "Inspect, open, communicate with or recover an Agent"
 # agent
 
 <!-- amux:content -->
+`agent stop --session SID --run RUN --operation-id OP` freezes that exact original
+Session/Run. It uses the discriminated `agent-run` target; an older owner rejects it
+before Stop, and a newer owner refuses a replaced Run without selecting its successor.
+Without `--run`, the original current-Run Stop intent remains available. Interrupt and
+Resume do not accept the exact-Stop target. After unknown, read `agent stop inspect
+--session SID --run RUN --operation-id OP`; inspection never continues Stop by itself.
+
 Core owns Session identity, Provider semantics, input permission and recovery; ctxmux
 owns Run/process/bytes. Executor, durable Session, current Run and display Region are distinct.
 Begin with agent ls/inspect for the exact Session and routeHostId; preserve original identities

@@ -137,6 +137,43 @@ Presentation operations do not take input by default; if the original input lose
 eligibility, the receipt is partial with that input issue and keeps the applied result.
 Only save.diskDurability: confirmed is a durable save.
 
+Close uses the connected Desktop's original Main owner, independently of raw spatial graph
+editing. First read exact display Workspace, Group, Tab and Region IDs from space ls.
+`space close prepare --input FILE|-` accepts an exact target and caller-owned operation ID:
+`{"operationId":"original-close","target":{"kind":"tab-occurrence","displayWorkspaceId":"WORKSPACE","groupId":"GROUP","tabId":"TAB"},"keepAgentSessions":false}`.
+For one Region, use `kind:"region"` plus its `regionId`; it never expands to a whole Tab.
+Preparation durably freezes references, draft witnesses and the exact proposed resources,
+without stopping anything or copying document bodies. `keepAgentSessions:true` sends no
+new Agent Stop; it does not cancel or refute an earlier Stop. Raw terminals and Browser
+resources retain their own original close semantics. Managed Agents may prepare and read
+their own Host-scoped plans but cannot approve discard, Stop or Browser close.
+
+`space close inspect --operation-id ID` returns the original plan, preparedBy and separately
+approvedBy, every real child result and independent client-projection/spatial save facts.
+Apply with `space close apply --input FILE|-` using the original `operationId`,
+`expectedPlanDigest` and complete `decisions`. Each original dirty document needs its exact
+`{"action":"discard","document":...,"expectedDraft":...}`; each Stop needs
+`{"action":"stop","control":...}`; a Browser needs `{"action":"close-browser","browserId":...}`.
+An explicitly unconfirmed Agent binding can instead close only its exact View with
+`{"action":"close-view-only","regionId":...,"expectedWitness":...}`. Copy these complete
+objects from the frozen plan; the SDK `spaceCloseDecisions(plan)` returns this finite set.
+Only a transport-approved person/device may apply it. Agent text is not an approval.
+Every child rechecks its original Run and last View before effect; dirty witnesses are
+checked again in the final client state transaction after external waits. New input,
+pending save/composition, changed bindings and unknown Stop results retain the affected
+Regions. Independent confirmed content can close, yielding a partial result.
+
+Keep the original operation after partial/unknown, including a disk-confirmation failure.
+Inspect never reapplies children or guesses a historical ACK from current Run status.
+`space close ls [--input FILE|-]` discovers original IDs after reopening: `{}` reads a
+bounded page; optionally supply `limit` (1–100) and the exact returned `nextCursor`.
+This is an explicit cold live-page read of thin original journal members, not a snapshot;
+new members behind the cursor require a new scan. Its cursor fixes the original owner
+and authenticated actor scope. Empty actor-filtered pages can still have a next cursor;
+source failures are partial/unconfirmed, never a confirmed empty namespace. These reads
+do not query Native, start recovery or replay any operation. A readable cold record
+preserves obtained child ACKs but does not certify its previous writer's disk-sync ACK.
+
 For a new Agent, `amux agent open --executor ID --execution-workspace AGENT_WORKSPACE
 --tool-workspace RESOURCE_WORKSPACE --zone ZONE --new-tab` keeps the Agent Run location
 separate from the project/tool resource and display destination. Both Workspace references must
