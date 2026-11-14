@@ -53,7 +53,7 @@ async function fixture(providerId = 'codex') {
   return { ...h, write, accepted, display, input, key, read, settled }
 }
 
-it.each(['codex', 'claude', 'kimi'])('submits on the original %s terminal without Native metadata, socket, or display qualification', async providerId => {
+it.each(['codex', 'claude', 'kimi', 'cursor'])('submits on the original %s terminal without Native metadata, socket, or display qualification', async providerId => {
   const h = await fixture(providerId)
   try {
     expect(h.client.providers.get(providerId).catalog.capabilities.promptExecution?.immediate).toBe('terminal-submit')
@@ -65,6 +65,13 @@ it.each(['codex', 'claude', 'kimi'])('submits on the original %s terminal withou
     expect(result.admission?.admission?.transport).not.toBe('native')
     expect(h.write).toHaveBeenCalled()
     expect([...h.accepted.values()].map(op => op.data).join('')).toContain('Original body\n原文')
+    if (providerId === 'cursor') {
+      expect([...h.accepted.values()].map(op => op.data)).toEqual(['\u001b[200~Original body\n原文\u001b[201~\u001b[13u'])
+      const before = h.write.mock.calls.length
+      await h.client.submitAgentPrompt(h.input('manual'))
+      expect((await h.read('manual'))?.status).toBe('terminal-confirmed')
+      expect(h.write).toHaveBeenCalledTimes(before)
+    }
     expect(h.display).not.toHaveBeenCalled()
     expect(h.inner.kernel.stop).not.toHaveBeenCalled()
     expect(await h.client.stopAgentInputWaiting({ ref: saved.ref, cancelOperationId: 'stop-after-byte-confirmation' }))
@@ -171,8 +178,8 @@ it('reports a new original claim refused before the first Runtime call as not-ap
   } finally { await h.close() }
 })
 
-it('serializes distinct idle and working manual inputs without a caller predecessor or consumed readiness gate', async () => {
-  const h = await fixture()
+it.each(['codex', 'cursor'])('serializes distinct idle and working %s manual inputs without a caller predecessor or consumed readiness gate', async providerId => {
+  const h = await fixture(providerId)
   try {
     await h.client.submitAgentPrompt(h.input('idle'))
     await h.settled('idle')
@@ -185,14 +192,14 @@ it('serializes distinct idle and working manual inputs without a caller predeces
     const a = await h.settled('working-A'), b = await h.settled('working-B')
     expect(a.admission?.admission?.intent?.admissionIntent).toEqual({ kind: 'manual-actor', expectedRun: { runId: 'run-recipient' } })
     expect(b.admission?.admission?.intent?.admissionIntent).toEqual(a.admission?.admission?.intent?.admissionIntent)
-    expect(h.write).toHaveBeenCalledTimes(6)
+    expect(h.write).toHaveBeenCalledTimes(providerId === 'cursor' ? 3 : 6)
     expect(h.display).not.toHaveBeenCalled()
     expect((await h.read('idle'))?.status).toBe('terminal-confirmed')
   } finally { await h.close() }
 })
 
-it('uses actual Unix, HTTP, Hosted SDK and compiled CLI for current-terminal input and exact byte receipts', async () => {
-  const h = await fixture(), path = join(h.root, 'terminal-control.sock')
+it.each(['codex', 'cursor'])('uses actual Unix, HTTP, Hosted SDK and compiled CLI for %s current-terminal input and exact byte receipts', async providerId => {
+  const h = await fixture(providerId), path = join(h.root, 'terminal-control.sock')
   const owner = new AgentMuxHostedRuntimeService(h.client, h.store.path, () => hostedTestOwner(h.client))
   const server = new AgentMuxControlServer({ socketPath: path, coreClients: h.coreClients, hostedRuntime: () => owner,
     http: { host: '127.0.0.1', port: 0, token: 'private-current-terminal' } })
@@ -218,6 +225,10 @@ it('uses actual Unix, HTTP, Hosted SDK and compiled CLI for current-terminal inp
       '--text', 'CLI current terminal body', '--execution', 'immediate', '--operation-id', 'op-cli', '--message-id', 'cli'], objectCliEnvironment(h.root))
     expect(cli.code, cli.stderr).toBe(0)
     await expect.poll(async () => (await unix.call('agent.input.inspect', inspect('cli'))).input?.status).toBe('terminal-confirmed')
+    if (providerId === 'cursor') {
+      expect([...h.accepted.values()]).toHaveLength(4)
+      expect([...h.accepted.values()].every(op => op.data.endsWith('\u001b[201~\u001b[13u'))).toBe(true)
+    }
     expect(h.display).not.toHaveBeenCalled()
     expect(h.inner.kernel.stop).not.toHaveBeenCalled()
   } finally { await hosted.dispose(); await unix.dispose(); await http.dispose(); await server.stop(); await owner.dispose(); await h.close() }

@@ -30,11 +30,18 @@ import type { AgentSemanticState } from '../../src/types.js'
  * `.workspace-trusted` marker。见 docs/reviews/agentmux-provider-cli-evidence.md 的 Cursor 小节。
  *
  * 这些断言证明「声明与 bundle 里读出的合同相符」，**不**证明「跑过一次真实的 Cursor 会话」——
- * `cursor-agent ls`/`resume` 都是交互式 TUI，本机脚本化跑不了，不冒充。
+ * 真实原生接纳另需隔离 PTY 与第一方 hook 回执，不能用这些声明断言代替。
  */
 describe('Cursor provider', () => {
   const providers = new AgentProviderRegistry()
   const cursor = providers.get('cursor')
+
+  it.each(['Original message', 'First line\n第二行🙂'])('encodes the complete body as paste followed by a CSI-u Enter key: %s', prompt => {
+    expect(cursor.planPromptInput(prompt)).toEqual({
+      kind: 'single-phase', data: `\u001b[200~${prompt}\u001b[201~\u001b[13u`
+    })
+    expect(cursor.planPromptInput(prompt, { execution: 'immediate' })).toEqual(cursor.planPromptInput(prompt))
+  })
 
   /** 造一条 Cursor 形状的信封：事件名 camelCase 走 `--event`（负载里没有事件名键），负载键 snake_case。 */
   function hook(eventName: string, payload: Record<string, unknown> = {}) {
@@ -170,7 +177,7 @@ describe('Cursor provider', () => {
     })
   })
 
-  describe('stop 是唯一的收尾；两个门是「在等用户」而不是「在干活」', () => {
+  describe('stop 是唯一的收尾；两个门只是执行起点，不是授权提示', () => {
     it('stop 按 status 区分成败：仅 completed 判 done，error 诚实判 error，取消判 unknown；未知 status 不猜 turn-end', () => {
       const completed = hook('stop', { status: 'completed', loop_count: 3, input_tokens: 120, output_tokens: 45 })
       expect<AgentSemanticState>(completed.semanticState).toBe('done')
@@ -197,10 +204,9 @@ describe('Cursor provider', () => {
       expect(missingStatus.lifecycleEvent).toBeNull()
     })
 
-    it('shell/MCP 门判 waiting：Cursor 正把这次执行按住等一个决定', () => {
-      // 判 working 会让「等我点一下」和「正在干活」在界面上长得一模一样。
-      expect(hook('beforeShellExecution', { command: 'rm -rf build' }).semanticState).toBe('waiting')
-      expect(hook('beforeMCPExecution', { tool_name: 'linear__create_issue' }).semanticState).toBe('waiting')
+    it('shell/MCP 门判 working：门事件对自动放行的执行同样触发，不是授权提示事实', () => {
+      expect(hook('beforeShellExecution', { command: 'rm -rf build' }).semanticState).toBe('working')
+      expect(hook('beforeMCPExecution', { tool_name: 'linear__create_issue' }).semanticState).toBe('working')
     })
 
     it('afterAgentResponse 把助手正文落进时间轴，但不收尾这一轮', () => {
