@@ -1,0 +1,9 @@
+# Profile extension editor visual fixture
+
+Run `node apps/desktop/scripts/capture-browser-profile-extensions.mjs` from the repository root. The command captures; an independent reviewer must open every complete PNG and record an aesthetic conclusion separately.
+
+The original SettingsPanel → Browser Profiles → original Profile editor mounts the production BrowserProfileExtensions component. The scene contains an approved loaded extension, a load failure, an original unconfirmed removal, and a prepared update with added API scope. Actual native pointer input opens the section, selects Update package, and cancels the host confirmation callback. Capture both appearances at normal and narrow widths; inspect source/permission readability, pending operation details, wrapped actions and the review action. The capture asserts the actual theme appearance, overflow and main-action visibility, but does not substitute those checks for visual judgment.
+
+Package facts, file selection and confirmation results are private fixture inputs. This page cannot execute extensions or approve a package. The separate `verify-browser-profile-extensions-native.mjs` command proves the real CLI and production component/Renderer API/preload/Profile IPC/native Session consumers, durable original Profile metadata and actual second-process restoration. Native confirmation in that fixture is an explicit host input, not a claim that a person clicked an OS dialog. Full Desktop Tab/Region/focus or healthy Agent Run recovery is outside these extension fixtures.
+
+Contracts: [Profile behavior](../../../../../docs/design/behavior/browser-workface.md#profile-管理环境与指纹编辑), [Profile presentation](../../../../../docs/design/presentation/settings-and-observation.md), [independent visual review](../../../../../docs/guides/agent-visual-e2e-review.md).
