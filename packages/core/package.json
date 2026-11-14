@@ -70,6 +70,10 @@
       "types": "./dist/browser-sdk.d.ts",
       "import": "./dist/browser-sdk.js"
     },
+    "./browser-viewport": {
+      "types": "./dist/browser-viewport.d.ts",
+      "import": "./dist/browser-viewport.js"
+    },
     "./browser-page-capability": {
       "types": "./dist/browser-page-capability.d.ts",
       "import": "./dist/browser-page-capability.js"

@@ -237,7 +237,7 @@ export class StandaloneBrowserHost {
   private publicTarget(binding: Binding): AgentMuxBrowserTarget {
     return { id: binding.id, workspaceId: null, source: 'standalone', status: binding.status, ...(binding.navigationId ? { navigationId: binding.navigationId } : {}),
       dialogTypes: ['alert', 'confirm', 'prompt', 'beforeunload'],
-      url: binding.url, title: binding.title, capabilities: binding.status === 'ready' ? BROWSER_PAGE_CAPABILITY_NAMES.filter(name => !['download','readDownload','uploadFiles','readResult'].includes(name)) : [],
+      url: binding.url, title: binding.title, capabilities: binding.status === 'ready' ? BROWSER_PAGE_CAPABILITY_NAMES.filter(name => !['setViewport','download','readDownload','uploadFiles','readResult'].includes(name)) : [],
       control: { owner: 'unknown', activeOperationId: null, revision: 0, inputIsolation: 'unsupported', agent: null }, ...(binding.warning ? { warning: binding.warning } : {}) }
   }
   private async startLifecycle(operationId: string, browserId: string, intent: AgentMuxBrowserLifecycleIntent): Promise<void> {

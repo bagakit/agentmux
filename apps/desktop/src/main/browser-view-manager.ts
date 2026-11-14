@@ -2631,6 +2631,10 @@ export class BrowserViewManager {
   setViewport(id: string, viewport: BrowserViewport): BrowserSnapshot {
     const entry = this.require(id)
     this.requireHumanInput(entry)
+    return this.updateViewport(entry, viewport)
+  }
+
+  private updateViewport(entry: BrowserEntry, viewport: BrowserViewport): BrowserSnapshot {
     if (!isBrowserViewport(viewport)) throw new Error('Unknown browser viewport or invalid dimensions')
     const ownedViewport = cloneBrowserViewport(viewport)
     this.applyViewport(entry, entry.view, ownedViewport)
@@ -4115,6 +4119,7 @@ export class BrowserViewManager {
           title: view.webContents.getTitle(),
           navigationId: entry.navigationId,
           navigation: this.navigationObservation(entry),
+          viewport: cloneBrowserViewport(entry.viewport),
           ...(entry.faviconDataUrl ? { faviconDataUrl: entry.faviconDataUrl } : {})
         }
       },
@@ -4123,6 +4128,11 @@ export class BrowserViewManager {
         await runBrowserTaskNavigation(() => this.startNavigation(entry, url))
       },
       captureScreenshot: async (options) => await this.captureScreenshot(entry.id, { view: observingView, sendCommand: session.sendCommand, get frames() { return session.frames }, remainingMillis: () => Math.max(0, deadlineMillis - performance.now()) }, options),
+      setViewport: viewport => {
+        beforeAction()
+        const applied = this.updateViewport(entry, viewport)
+        return { browserId: applied.id, navigationId: applied.navigationId, viewport: applied.viewport }
+      },
       readLedger: async () => await this.refLedgers.read(entry.id),
       writeLedger: async (ledger) => {
         // Controlled parameterized task scripts return no refs. Do not retain page-derived echoes of their private values.

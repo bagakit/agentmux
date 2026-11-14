@@ -328,7 +328,7 @@ export class ExternalBrowserBridge {
       control: { owner: 'unknown', activeOperationId: null, revision: 0, inputIsolation: 'unsupported' },
       url: row.url, title: row.title, navigationId: row.navigationId,
       // Preserve the advertised method subset; native dialog-kind support is not projected here.
-      capabilities: BROWSER_PAGE_CAPABILITY_NAMES.filter(name => !['download', 'readDownload', 'acceptDialog', 'dismissDialog', 'routeRequests', 'unrouteRequests', 'setNetworkConditions', 'clearNetworkConditions'].includes(name)),
+      capabilities: BROWSER_PAGE_CAPABILITY_NAMES.filter(name => !['setViewport', 'download', 'readDownload', 'acceptDialog', 'dismissDialog', 'routeRequests', 'unrouteRequests', 'setNetworkConditions', 'clearNetworkConditions'].includes(name)),
       cdpMethods: EXTERNAL_CDP_METHODS,
       ...(row.warning || this.persistenceWarning ? { warning: row.warning ?? this.persistenceWarning! } : {}) }))
   }

@@ -82,6 +82,7 @@ export const BROWSER_PAGE_CAPABILITIES: readonly BrowserPageCapability[] = [
   { name: 'readDownload', effect: 'observe', summary: 'read a completed Workspace binary download reference with {offset?, maxBytes?}; bounded base64 bytes and revision, without retriggering its download' },
   { name: 'readResult', effect: 'observe', summary: 'read a retained result reference with {offset, maxBytes} (at most 65536 bytes); base64 bytes, totals and nextOffset, without rerunning its actions' },
   { name: 'captureScreenshot', effect: 'observe', summary: 'capture original page PNG, optionally a visible CSS region and output pixel density' },
+  { name: 'setViewport', effect: 'act', summary: 'setViewport(preset|{width,height,screenPosition}): apply the original host execution Viewport without replacing the page; advertised only by supporting hosts' },
   { name: 'elementContext', effect: 'observe', summary: 'read one element in full: selector, role, accessible name, attributes, sanitized html' },
   { name: 'download', effect: 'act', summary: 'register a native download before clicking a current ref with {path, timeoutMs?, maxBytes?}; only completed Workspace publication yields a file reference' },
   { name: 'uploadFiles', effect: 'act', summary: 'select 1-4 Workspace files in an actual file input from this run’s latest snapshot; verified FileList, pinned bytes retained until navigation or close' },
