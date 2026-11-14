@@ -187,7 +187,7 @@ export async function saveMoteBehaviorPreferences(scope: MoteWorkfaceScope, pref
     if (!stillCurrent()) throw new Error('Your later input is kept. Retry saving when ready.')
     const resource = useAppStore.getState().config?.workspaces.find(item => item.id === scope.workspace.id)
     if (resource?.hostId !== scope.workspace.hostId || resource.path !== scope.workspace.path) throw new Error('The original Mote resource changed. Your form is kept; return to its original folder before saving.')
-    await useAppStore.getState().createPath({ path, kind: 'file' }, scope.workspace.id)
+    await useAppStore.getState().createPath({ path, kind: 'file' }, scope.workspace.id, scope.rootPath)
     const created = await readMoteMaterial(scope, path)
     if (created.result.status !== 'read' || created.result.document.content !== '')
       throw new Error('Behavior file creation is unconfirmed. Your choices are kept; inspect the original file before retrying.')

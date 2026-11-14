@@ -1745,12 +1745,12 @@ export type AppState = GitReadingActions & {
    * 症状是**开错文件**而不是报错——名字撞上另一个项目里的同名文件时界面上一切正常。
    * 所以解析必须只发生一次，然后把结果交给下游，而不是让下游自己再问一遍。
    */
-  createPath(input: CreateWorkspacePathInput, workspaceId?: string): Promise<string>
+  createPath(input: CreateWorkspacePathInput, workspaceId?: string, objectDirectory?: string | null): Promise<string>
   createNote(tabGroupId?: string, launcher?: { tabId: string; regionId: string }, initialContent?: string, projection?: WorkbenchProjection, retryIntentId?: string, notebook?: NoteNotebookContext): Promise<NoteCreationReceipt>
   revealCreatedNote(launcherId: string, projection?: WorkbenchProjection): Promise<NoteCreationReceipt | undefined>
   retryCreatedNote(launcherId: string, projection?: WorkbenchProjection): Promise<NoteCreationReceipt | undefined>
-  renamePath(path: string, nextPath: string, workspaceId?: string): Promise<void>
-  deletePath(path: string, workspaceId?: string): Promise<void>
+  renamePath(path: string, nextPath: string, workspaceId?: string, objectDirectory?: string | null): Promise<void>
+  deletePath(path: string, workspaceId?: string, objectDirectory?: string | null): Promise<void>
   updateDocument(tabId: string, content: string, regionId?: string): void
   updateNoteDocument(tabId: string, content: string, editorBeforeContent: string, regionId?: string): void
   observeNoteFile(target: NoteFileTarget, occurrence: string, load?: boolean): () => void
@@ -3144,7 +3144,7 @@ async function enqueueNoteShareSave(tabId: string, regionId?: string, explicit?:
   const waits = keys.map(id => fileSaveTails.get(id) ?? Promise.resolve())
   const mutations = keys.map(key => {
     const separator = key.indexOf('\0')
-    return fileMutationTail(key.slice(0, separator), key.slice(separator + 1))
+    return documentMutationTail(key.slice(0, separator), key.slice(separator + 1))
   })
   const operation = (async () => {
     await Promise.all([...waits, ...mutations].map(wait => wait.catch(() => {})))
@@ -3279,7 +3279,7 @@ async function enqueueFileSave(
   }
   const queuedLifetime = documentLifetime(key)
   const previous = fileSaveTails.get(key) ?? Promise.resolve()
-  const mutation = fileMutationTail(initialSurface.workspaceId, initialSurface.path)
+  const mutation = documentMutationTail(initialSurface.workspaceId, initialSurface.path)
   const operation = Promise.all([previous.catch(() => {}), mutation.catch(() => {})]).then(async () => withAdmittedFileSaves([key], async () => {
     await drainNoteInput(initialSurface.workspaceId, initialSurface.path)
     const state = useAppStore.getState()
@@ -3450,7 +3450,7 @@ async function enqueueNoteHistoryAction(tabId: string, regionId: string, selecti
   const selected = structuredClone(selection), initial = fileSurface(useAppStore.getState().tabs[tabId], regionId)
   if (!initial) throw Error('The original Note file occurrence is unavailable.')
   const key = documentKey(initial.workspaceId, initial.path), lifetime = documentLifetime(key)
-  const previous = fileSaveTails.get(key) ?? Promise.resolve(), mutation = fileMutationTail(initial.workspaceId, initial.path)
+  const previous = fileSaveTails.get(key) ?? Promise.resolve(), mutation = documentMutationTail(initial.workspaceId, initial.path)
   const operation = Promise.all([previous.catch(() => {}), mutation.catch(() => {})]).then(async () => withAdmittedFileSaves([key], async () => {
     await drainNoteInput(initial.workspaceId, initial.path)
     const state = useAppStore.getState(), surface = fileSurface(state.tabs[tabId], regionId)
@@ -6152,6 +6152,36 @@ function settleNativeBrowserProjectionNotice(state: AppState, browserId: string)
 // Only the latest device-home navigation may reveal its asynchronous result.
 let hostHomeNavigation: object | undefined
 
+function originalTopicFilesAddress(workspaceId: string, directory: string) {
+  const state = useAppStore.getState(), workspace = state.config?.workspaces.find(item => item.id === workspaceId)
+  if (!workspace) return undefined
+  const topic = scratchTopicsForWorkspace(state.scratchTopicSnapshots, workspace)?.find(item => scratchTopicLogicalPath(workspace, item) === directory)
+  return topic ? { workspace, zoneId: topicFilesTarget(workspace, topic).zoneId } : undefined
+}
+
+function withOriginalFileMutation(workspaceId: string, path: string, objectDirectory: string | null | undefined, mutate: () => Promise<void>) {
+  const before = useAppStore.getState(), selection = before.sourceFilesInputs.selections[workspaceId]
+  const workspace = before.config?.workspaces.find(item => item.id === workspaceId)
+  return withWorkspaceFileMutation(workspaceId, path, async () => {
+    const after = useAppStore.getState()
+    if (objectDirectory
+      ? !workspace || !sourceFilesWorkspaceMatches(workspace, after.config?.workspaces.find(item => item.id === workspaceId))
+      : selection !== after.sourceFilesInputs.selections[workspaceId]) throw new Error('The original Files location changed while this action was queued. Check its original directory before retrying.')
+    await mutate()
+  }, objectDirectory)
+}
+
+function documentMutationTail(workspaceId: string, path: string) {
+  const state = useAppStore.getState(), source = state.documents[documentKey(workspaceId, path)]?.readSource
+  const directory = topicFileDirectory(workspaceId, path)
+  if (!source) return fileMutationTail(workspaceId, directory)
+  const sourceTail = fileMutationTail(workspaceId)
+  if (!directory || source.resource.path !== path || source.resource.workspaceId !== workspaceId) return sourceTail
+  const address = originalTopicFilesAddress(workspaceId, directory)
+  return address && source.target.hostId === address.workspace.hostId && source.resource.workspacePath === address.workspace.path &&
+    source.resource.zoneId === address.zoneId ? Promise.all([sourceTail, fileMutationTail(workspaceId, directory)]) : sourceTail
+}
+
 let sourceFilesWorkbench: ReturnType<typeof createSourceFilesWorkbench> | undefined
 function sourceFilesWorkbenchOwner(): ReturnType<typeof createSourceFilesWorkbench> {
   return sourceFilesWorkbench ??= createSourceFilesWorkbench({
@@ -6178,12 +6208,7 @@ function sourceFilesWorkbenchOwner(): ReturnType<typeof createSourceFilesWorkben
         zoneId: choice.zoneId, workspaceId }
     },
     register: (hostId, registration) => api.spaceMounts.call('register', { hostId, registration }),
-    topicAddress: (workspaceId, directory) => {
-      const state = useAppStore.getState(), workspace = state.config?.workspaces.find(item => item.id === workspaceId)
-      if (!workspace) return undefined
-      const topic = scratchTopicsForWorkspace(state.scratchTopicSnapshots, workspace)?.find(item => scratchTopicLogicalPath(workspace, item) === directory)
-      return topic ? { workspace, zoneId: topicFilesTarget(workspace, topic).zoneId } : undefined
-    },
+    topicAddress: originalTopicFilesAddress,
     prepareEffect: prepareSourceFileEffect
   })
 }
@@ -6208,12 +6233,28 @@ async function observeSourceFilesWorkspace(workspaceId: string): Promise<() => v
   try { await observer.start(); return () => observer.dispose() } catch (cause) { observer.dispose(); throw cause }
 }
 
+async function invalidateFileEffectTopics(location: FileMutationLocation, effect: FileMutationEffect) {
+  const state = useAppStore.getState()
+  const resource = effect.type === 'path-mutation' ? effect.receipt.resource : effect.resource
+  if (!resource || !isScratchWorkspaceId(resource.workspaceId)) return
+  const scratch = state.config?.workspaces.find(item => item.id === resource.workspaceId)
+  if (!scratch || location.target.hostId !== scratch.hostId || resource.hostId !== scratch.hostId || resource.workspacePath !== scratch.path) return
+  const paths = [resource.path]
+  if (effect.type === 'path-mutation') {
+    if (!['created', 'moved', 'deleted'].includes(effect.receipt.result.filesystem)) return
+    if (effect.action === 'move' && effect.receipt.destination) paths.push(effect.receipt.destination.path)
+  }
+  try { await state.invalidateScratchTopicPaths(scratch.id, paths, true) }
+  catch (cause) { state.reportError(cause) }
+}
+
 const projectedFileEffects = new WeakMap<object, Set<string>>()
 function prepareSourceFileEffect(location: FileMutationLocation): (effect: FileMutationEffect) => Promise<void> {
   const workspaceId = location.workspace.id, before = useAppStore.getState()
   const prefix = workspaceId + '\0' + (location.displayRoot ? location.displayRoot + '/' : '')
   const lifetimes = new Map(Object.keys(before.documents).filter(key => key.startsWith(prefix)).map(key => [key, documentLifetime(key)]))
   return async (effect: FileMutationEffect) => {
+    await invalidateFileEffectTopics(location, effect)
     if (!location.current()) return // The original receipt still settles its request; later Source selection is never rewritten.
     const held = captureFileEffect(before, workspaceId, location, effect)
     if (effect.type === 'path-mutation') held.candidates = held.candidates.filter(candidate => !projectedFileEffects.get(candidate.document)?.has(effect.request.operationId))
@@ -11263,23 +11304,16 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       throw error
     }
   },
-  async createPath(input, requestedWorkspaceId) {
+  async createPath(input, requestedWorkspaceId, objectDirectory) {
     const workspaceId = requestedWorkspaceId ?? get().activeWorkspaceId
     if (!workspaceId) throw new Error('Select a workspace first')
     try {
-      if (input.kind === 'directory') await sourceFilesWorkbenchOwner().mkdir(workspaceId, input.path)
-      else await sourceFilesWorkbenchOwner().createFile(workspaceId, input.path)
+      if (input.kind === 'directory') await sourceFilesWorkbenchOwner().mkdir(workspaceId, input.path, objectDirectory)
+      else await sourceFilesWorkbenchOwner().createFile(workspaceId, input.path, objectDirectory)
     } catch (error) {
       get().reportError(error)
       throw error
     }
-    // FileExplorer refreshes its own tree after this resolves, but it is not the only reader: the
-    // Topics panel and the Board invalidate on this counter alone. Bumping here rather than relying
-    // on "FileExplorer is the sole caller" — that reason expires the moment something else calls it.
-    set((current) => ({
-      workspaceFileRevisions: bumpWorkspaceFileRevision(current.workspaceFileRevisions, workspaceId)
-    }))
-    await get().invalidateScratchTopicPaths(workspaceId, [input.path], true)
     return workspaceId
   },
   async refreshNoteDirectorySources(tabId, regionId) {
@@ -11451,17 +11485,15 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     if (receipt?.status !== 'error') return receipt
     return await get().createNote(receipt.target.groupId, receipt.launcher, receipt.draft, projection, receipt.intentId, receipt.notebook)
   },
-  async renamePath(path, nextPath, requestedWorkspaceId) {
+  async renamePath(path, nextPath, requestedWorkspaceId, objectDirectory) {
     const workspaceId = requestedWorkspaceId ?? get().activeWorkspaceId
     if (!workspaceId) throw new Error('Select a workspace first')
-    await withWorkspaceFileMutation(workspaceId, path, () => sourceFilesWorkbenchOwner().move(workspaceId, path, nextPath))
-    await get().invalidateScratchTopicPaths(workspaceId, [path, nextPath], true)
+    await withOriginalFileMutation(workspaceId, path, objectDirectory, () => sourceFilesWorkbenchOwner().move(workspaceId, path, nextPath, objectDirectory))
   },
-  async deletePath(path, requestedWorkspaceId) {
+  async deletePath(path, requestedWorkspaceId, objectDirectory) {
     const workspaceId = requestedWorkspaceId ?? get().activeWorkspaceId
     if (!workspaceId) throw new Error('Select a workspace first')
-    await withWorkspaceFileMutation(workspaceId, path, () => sourceFilesWorkbenchOwner().delete(workspaceId, path))
-    await get().invalidateScratchTopicPaths(workspaceId, [path], true)
+    await withOriginalFileMutation(workspaceId, path, objectDirectory, () => sourceFilesWorkbenchOwner().delete(workspaceId, path, objectDirectory))
   },
   async adoptNoteCurrentDocument(tabId, regionId) {
     const state = get(), surface = fileSurface(state.tabs[tabId], regionId)

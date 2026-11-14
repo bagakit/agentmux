@@ -2,7 +2,6 @@ import { hasFileDocumentConsumer } from './file-document-consumers'
 import { api } from './api'
 import { isScratchWorkspaceId, type AppConfig } from '../../../shared/contracts'
 import { scratchTopicIdFromDirectoryName } from '@agentmux/host/mote-model'
-import { topicFileDirectory } from './topic-files-address'
 import { isPathWithinSubtree } from './workspace-paths'
 import {
   documentKey,
@@ -48,12 +47,11 @@ export async function withAdmittedFileSaves<T>(keys: readonly string[], work: ()
   finally { keys.forEach(key => admittedFileSaves.delete(key)) }
 }
 const workspaceFileMutationTails = new Map<string, Promise<void>>()
-function mutationQueueKey(workspaceId: string, path: string): string {
-  const topic = topicFileDirectory(workspaceId, path)
-  return topic ? documentKey(workspaceId, topic) : workspaceId
+function mutationQueueKey(workspaceId: string, directory?: string | null): string {
+  return directory ? documentKey(workspaceId, directory) : workspaceId
 }
-export function fileMutationTail(workspaceId: string, path: string): Promise<void> {
-  return workspaceFileMutationTails.get(mutationQueueKey(workspaceId, path)) ?? Promise.resolve()
+export function fileMutationTail(workspaceId: string, directory?: string | null): Promise<void> {
+  return workspaceFileMutationTails.get(mutationQueueKey(workspaceId, directory)) ?? Promise.resolve()
 }
 // Shared data verdicts: a document, a directory, or a failed read; no UI activation permission.
 export const fileOpenRequests = new Map<string, Promise<boolean | 'directory'>>()
@@ -122,9 +120,10 @@ export function disposeObserversForRemovedWorkspaces(
 export async function withWorkspaceFileMutation<T>(
   workspaceId: string,
   path: string,
-  operation: () => Promise<T>
+  operation: () => Promise<T>,
+  objectDirectory?: string | null
 ): Promise<T> {
-  const ownerKey = mutationQueueKey(workspaceId, path)
+  const ownerKey = mutationQueueKey(workspaceId, objectDirectory)
   const previousMutation = workspaceFileMutationTails.get(ownerKey) ?? Promise.resolve()
   let releaseMutation!: () => void
   const mutation = new Promise<void>((resolve) => { releaseMutation = resolve })

@@ -686,7 +686,7 @@ export function FileExplorer({
     await runFileExplorerMove({
       sourcePath,
       destinationPath,
-      move: (source, destination) => renamePath(source, destination, workspaceId ?? undefined),
+      move: (source, destination) => renamePath(source, destination, workspaceId ?? undefined, objectDirectory),
       refreshDirectory: tree.refreshDir
     })
   }
@@ -931,7 +931,7 @@ export function FileExplorer({
         const createdIn = await createPath({
           path,
           kind: edit.kind === 'create-file' ? 'file' : 'directory'
-        }, edit.workspaceId)
+        }, edit.workspaceId, objectDirectory)
         await tree.refreshDir(edit.parentPath)
         if (editSubmissionRef.current === edit && editContextRef.current.workspaceId === edit.workspaceId && editContextRef.current.workspacePath === edit.workspacePath && editContextRef.current.rootPath === edit.rootPath) {
           setSelection(createSingleFileExplorerSelection(path), false)
@@ -959,7 +959,7 @@ export function FileExplorer({
     try {
       tree.assertCurrent()
       if (request.sourceNamespace !== tree.namespace) throw new Error('The original Files Source changed. No replacement file was deleted.')
-      await deletePath(node.path, request.workspaceId)
+      await deletePath(node.path, request.workspaceId, objectDirectory)
       await tree.refreshDir(workspacePathParent(node.path))
       setDeleteRequest(current => current === request ? null : current)
     } finally {

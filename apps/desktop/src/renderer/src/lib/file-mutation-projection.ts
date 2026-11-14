@@ -1,4 +1,5 @@
 import { sameFileEntryIdentity, type FileMutationEffect, type FileReadIdentity, type FileEntryWitness } from '@agentmux/core/files'
+import { topicFileDirectory } from './topic-files-address'
 import { sameFilesRuntime, type FileMutationLocation } from './source-files-workbench'
 import { documentKey, workbenchSurfaces } from './workbench-tabs'
 import { findFileRenameProjectionCollision, reduceFileRename, type FileWorkbenchState } from './file-workbench-state'
@@ -43,6 +44,10 @@ export function captureFileEffect(state: FileWorkbenchState, workspaceId: string
     const path = key.slice(prefix.length)
     const origin = document.readSource
     if (!isPathWithinSubtree(path, sourcePath)) return []
+    // A Main Topic draft is not an unconfirmed buffer in a different selected Source.
+    if (!origin && !location.displayRoot && topicFileDirectory(workspaceId, path) &&
+        (location.resource.workspaceId !== workspaceId || location.resource.workspacePath !== location.workspace.path ||
+         location.resource.hostId !== location.workspace.hostId || location.target.hostId !== location.workspace.hostId || location.resource.path !== '.')) return []
     if (origin && (!sameFilesRuntime(origin.target, location.target) || relative(location, origin.resource) !== path)) return []
     const frozen = { path, document, generation: state.documentGenerations[key] ?? 0, views: views.get(path) ?? '[]' }
     if ((!origin && !location.displayRoot) || !document.readIdentity || state.savingDocuments[key] || hasAdmittedFileSave(key) || hasNoteComposition(key)) {

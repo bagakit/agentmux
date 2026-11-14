@@ -21,8 +21,8 @@ export type SourceFilesInput = {
   locator?: SourceFilesLocator | undefined
   issue?: string | undefined
 }
-export type SourceFilesPending = Mutation & { target: SpaceMountSourceTarget; workspace: SourceFilesInput['workspace']; observed?: FileMutationEffect; issue?: string | undefined }
-export type SourceFileCreation = { workspace: SourceFilesInput['workspace']; target: SpaceMountSourceTarget; request: import('@agentmux/core/files').FileCreateParams; issue?: string }
+export type SourceFilesPending = Mutation & { target: SpaceMountSourceTarget; workspace: SourceFilesInput['workspace']; objectDirectory?: string; observed?: FileMutationEffect; issue?: string | undefined }
+export type SourceFileCreation = { workspace: SourceFilesInput['workspace']; target: SpaceMountSourceTarget; request: import('@agentmux/core/files').FileCreateParams; objectDirectory?: string; issue?: string }
 export type SourceFolderRequest = { workspace: SourceFilesInput['workspace']; target: SpaceMountSourceTarget; packet: FolderDirectoryRegistration; issue?: string }
 export type SourceFileReadPointer = { workspaceId: string; path: string; source: NonNullable<import('../../../shared/contracts').FileDocument['readSource']> }
 export type SourceFilesInputs = { selections: Record<string, SourceFilesInput>; pending: Record<string, SourceFilesPending>; creations: Record<string, SourceFileCreation>; folderRequests: Record<string, SourceFolderRequest>; readSources?: Record<string, SourceFileReadPointer> }
@@ -170,13 +170,13 @@ export function createSourceFilesWorkbench(ports: {
     const current = ports.topicAddress(workspace.id, directory)
     return current?.zoneId === zoneId && sourceFilesWorkspaceMatches(workspace, current.workspace)
   }
-  const location = async (workspaceId: string, path: string): Promise<FileMutationLocation> => {
-    const directory = topicFileDirectory(workspaceId, path)
+  const location = async (workspaceId: string, path: string, directory?: string | null): Promise<FileMutationLocation> => {
     if (!directory) {
       const selected = selectedLocation(workspaceId)
       if (!selected) throw new Error('Use the original Source folder in Files before changing this directory. Existing editors remain available.')
       return selected
     }
+    if (topicFileDirectory(workspaceId, path) !== directory) throw new Error('Choose an entry inside the original Topic directory.')
     const address = ports.topicAddress(workspaceId, directory)
     if (!address) throw new Error('The original Topic directory is unconfirmed. Refresh its files before retrying.')
     const { workspace, zoneId } = address
@@ -205,7 +205,8 @@ export function createSourceFilesWorkbench(ports: {
     const operationId = mutation.request.operationId
     if (Object.values(ports.get().pending).some(item => sameOwner(item, input) && item.action === mutation.action &&
         item.request.expectedResource.path === mutation.request.expectedResource.path)) throw new Error('Check the retained original request before repeating this action.')
-    const pending: SourceFilesPending = structuredClone({ ...mutation, workspace: input.workspace, target: input.target })
+    const pending: SourceFilesPending = structuredClone({ ...mutation, workspace: input.workspace, target: input.target,
+      ...(input.displayRoot ? { objectDirectory: input.displayRoot } : {}) })
     ports.set(state => ({ ...state, pending: { ...state.pending, [operationId]: pending } }))
     const consumeEffect = ports.prepareEffect(input)
     await ports.checkpoint()
@@ -292,11 +293,12 @@ export function createSourceFilesWorkbench(ports: {
       await ports.checkpoint()
       return result
     },
-    async createFile(workspaceId: string, path: string) {
-      const input = await location(workspaceId, path), observed = await stat(input, path)
+    async createFile(workspaceId: string, path: string, objectDirectory?: string | null) {
+      const input = await location(workspaceId, path, objectDirectory), observed = await stat(input, path)
       const request: import('@agentmux/core/files').FileCreateParams = { ...observed.query, expectedResource: observed.resource, content: '', expectedRevision: null }
       if (Object.values(ports.get().creations).some(item => sameOwner(item, input) && item.request.path === request.path)) throw new Error('The original file creation is retained. Check that exact file without creating it again.')
-      const key = mintObjectId(), retained = structuredClone({ workspace: input.workspace, target: input.target, request })
+      const key = mintObjectId(), retained = structuredClone({ workspace: input.workspace, target: input.target, request,
+        ...(input.displayRoot ? { objectDirectory: input.displayRoot } : {}) })
       ports.set(state => ({ ...state, creations: { ...state.creations, [key]: retained } }))
       const consume = ports.prepareEffect(input)
       await ports.checkpoint()
@@ -318,20 +320,20 @@ export function createSourceFilesWorkbench(ports: {
       await ports.checkpoint()
       return observed
     },
-    async mkdir(workspaceId: string, path: string) {
-      const input = await location(workspaceId, path), observed = await stat(input, path)
+    async mkdir(workspaceId: string, path: string, objectDirectory?: string | null) {
+      const input = await location(workspaceId, path, objectDirectory), observed = await stat(input, path)
       await dispatch(input, { action: 'mkdir', request: parseFileMkdirParams({ ...observed.query, operationId: mintObjectId(), expectedResource: observed.resource,
         expectedAbsent: true, expected: { root: observed.observation.root, parent: observed.observation.parent } }) })
     },
-    async move(workspaceId: string, path: string, nextPath: string) {
-      if (topicFileDirectory(workspaceId, path) !== topicFileDirectory(workspaceId, nextPath)) throw new Error('Move entries within their original Topic directory.')
-      const input = await location(workspaceId, path), source = await stat(input, path), destination = await stat(input, nextPath)
+    async move(workspaceId: string, path: string, nextPath: string, objectDirectory?: string | null) {
+      if (objectDirectory && topicFileDirectory(workspaceId, nextPath) !== objectDirectory) throw new Error('Move entries within their original Topic directory.')
+      const input = await location(workspaceId, path, objectDirectory), source = await stat(input, path), destination = await stat(input, nextPath)
       await dispatch(input, { action: 'move', request: parseFileMoveParams({ ...source.query, operationId: mintObjectId(), expectedResource: source.resource,
         expected: { root: source.observation.root, parent: source.observation.parent, entry: source.observation.entry }, destination: { ...destination.query, expectedResource: destination.resource,
           expectedAbsent: true, expected: { root: destination.observation.root, parent: destination.observation.parent } } }) })
     },
-    async delete(workspaceId: string, path: string) {
-      const input = await location(workspaceId, path), observed = await stat(input, path, true)
+    async delete(workspaceId: string, path: string, objectDirectory?: string | null) {
+      const input = await location(workspaceId, path, objectDirectory), observed = await stat(input, path, true)
       await dispatch(input, { action: 'delete', request: parseFileDeleteParams({ ...observed.query, operationId: mintObjectId(), expectedResource: observed.resource,
         expected: { root: observed.observation.root, parent: observed.observation.parent, entry: observed.observation.entry },
         ...(observed.observation.entry.kind === 'directory' ? { recursive: true } : {}),
@@ -345,7 +347,7 @@ export function createSourceFilesWorkbench(ports: {
       // Never redispatch. Original request bytes remain until a confirmed original result.
       if (observed.result.action !== 'unknown' && mutationConfirmed(observed.result)) {
         const retained = pending.request.expectedResource
-        const directory = topicFileDirectory(pending.workspace.id, retained.path)
+        const directory = pending.objectDirectory
         // Inspect settles the original request. Apply its effect only to the same live file namespace.
         const selected = selectedLocation(pending.workspace.id)
         const topicCurrent = () => !!directory && ownsTopic(pending.workspace, directory, retained.zoneId)
