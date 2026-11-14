@@ -80,6 +80,90 @@ it('compiled input preserves exact binary bytes, cursor and Native ACK while emp
   expect(await readFile(f.store.path)).toEqual(before)
 })
 
+it('compiled raw input uses exact ownership facts without loading unrelated Session or retirement catalogs', async () => {
+  const f = await fixture()
+  const catalogs = [vi.spyOn(f.store, 'loadMetadata'), vi.spyOn(f.store, 'loadRetiredAgentSessions'), vi.spyOn(f.store, 'loadRetiredRuns')]
+  for (const catalog of catalogs) catalog.mockImplementation(async () => { throw new Error('Unrelated Session catalog is unavailable; exact raw input must remain usable.') })
+  const input = { ...f.wire('point-owned-input'), expectedByte: 0, dataBase64: Buffer.from('original').toString('base64') }
+  expect(receipt(await f.cli('input', input))).toMatchObject({ outcome: 'applied', acknowledgement: { kind: 'input', acceptedThroughByte: 8 } })
+  expect(f.calls.input).toHaveBeenCalledTimes(1)
+  // This original Store fact was added after Registry load. The exact query must
+  // protect it too; skipping Store ownership and relying on Registry is unsafe.
+  await f.store.retireRuns([f.target.run])
+  const rejected = await f.cli('interrupt', f.wire('point-owned-retired'))
+  expect(rejected.code, rejected.stdout + rejected.stderr).toBe(1)
+  expect(JSON.parse(rejected.stderr).error.code).toBe('RUN_KIND_MISMATCH')
+  expect(f.calls.interrupt).not.toHaveBeenCalled()
+  expect((await f.native.client.status(f.run.runId)).state.type).toBe('running')
+  for (const catalog of catalogs) catalog.mockRestore()
+})
+
+it('an admitted same-Run binding waits for its own queued writer while another raw Run remains usable', async () => {
+  const f = await fixture()
+  const independent = await f.host.client.createTerminal({ command: process.execPath,
+    args: ['-e', "process.stdin.resume();process.on('SIGINT',()=>process.stdout.write('INDEPENDENT'));process.stdout.write('READY')"],
+    workspacePath: f.root, createOperationId: 'independent-raw-point' })
+  const independentTarget = { ...f.target, run: { runId: independent.runId } }
+  await vi.waitFor(async () => expect((await f.host.client.inspectTerminal(independentTarget)).run.latestOutputBytes).toBeGreaterThanOrEqual(5))
+  let entered!: () => void, release!: () => void
+  const ready = new Promise<void>(yes => { entered = yes }), held = new Promise<void>(yes => { release = yes })
+  const owner = f.store as unknown as { enqueue(work: () => Promise<void>, signal?: AbortSignal, sessionId?: string): Promise<void> }
+  const blocker = owner.enqueue(async () => { entered(); await held }, undefined, 'unrelated-writer')
+  await ready
+  const next = { ...structuredClone(f.agent), agentSessionId: 'new-original-agent', hookBindingId: 'new-original-hook', run: { ...f.target.run } }
+  const writing = f.store.compareAndSwapMetadata(null, next)
+  const pointRead = vi.spyOn(f.store, 'hasAgentRun')
+  const original = f.cli('interrupt', f.wire('waiting-original-binding'))
+  // Later caller mutation cannot move the queued binding or its admission witness.
+  next.run.runId = independent.runId
+  try {
+    await vi.waitFor(() => expect(pointRead).toHaveBeenCalledWith(f.target.run))
+    expect(f.calls.interrupt).not.toHaveBeenCalled()
+    const other = { ...f.wire('unrelated-original-control'), target: { ...f.target, run: { runId: independent.runId } } }
+    expect(receipt(await f.cli('interrupt', other))).toMatchObject({ outcome: 'applied', target: other.target })
+    expect(f.calls.interrupt).toHaveBeenCalledExactlyOnceWith(independent.runId)
+  } finally { release(); await Promise.allSettled([blocker, writing]) }
+  const refused = await original
+  expect(refused.code, refused.stdout + refused.stderr).toBe(1)
+  expect(JSON.parse(refused.stderr).error.code).toBe('RUN_KIND_MISMATCH')
+  expect((await f.store.readMetadata(next.agentSessionId))?.run).toEqual(f.target.run)
+  expect(f.calls.interrupt).toHaveBeenCalledTimes(1)
+  expect((await f.native.client.status(f.run.runId)).state.type).toBe('running')
+  expect((await f.native.client.status(independent.runId)).state.type).toBe('running')
+})
+
+it('a failed pending ownership write remains an exact unknown read instead of permitting Native control', async () => {
+  const f = await fixture()
+  let entered!: () => void, release!: () => void
+  const ready = new Promise<void>(yes => { entered = yes }), held = new Promise<void>(yes => { release = yes })
+  const owner = f.store as unknown as { enqueue(work: () => Promise<void>, signal?: AbortSignal, sessionId?: string): Promise<void> }
+  const blocker = owner.enqueue(async () => { entered(); await held }, undefined, 'unrelated-writer')
+  await ready
+  const writing = f.store.compareAndSwapMetadata(null, { ...structuredClone(f.agent), run: { ...f.target.run } })
+  const observed = f.store.hasAgentRun(f.target.run)
+  const observation = expect(observed).rejects.toMatchObject({ code: 'STALE_AGENT_SESSION' })
+  release()
+  const results = await Promise.allSettled([blocker, writing, observation])
+  expect(results[1]?.status).toBe('rejected'); expect(results[2]?.status).toBe('fulfilled')
+  expect(f.calls.input).not.toHaveBeenCalled(); expect(f.calls.interrupt).not.toHaveBeenCalled()
+  // A settled failed write does not permanently latch healthy raw work off.
+  expect(await f.store.hasAgentRun(f.target.run)).toBe(false)
+  expect((await f.native.client.status(f.run.runId)).state.type).toBe('running')
+})
+
+it('an unavailable exact ownership read refuses only that operation and leaves the original healthy Run usable', async () => {
+  const f = await fixture(), ownership = vi.spyOn(f.store, 'hasAgentRun')
+  ownership.mockRejectedValueOnce(new core.AgentMuxError('Original Run ownership is unconfirmed.', 'AGENT_SESSION_STORE_READ_UNCONFIRMED'))
+  const refused = await f.cli('interrupt', f.wire('ownership-unconfirmed'))
+  expect(refused.code).toBe(1)
+  expect(JSON.parse(refused.stderr).error.code).toBe('AGENT_SESSION_STORE_READ_UNCONFIRMED')
+  expect(f.calls.input).not.toHaveBeenCalled(); expect(f.calls.interrupt).not.toHaveBeenCalled(); expect(f.calls.stop).not.toHaveBeenCalled()
+  expect(receipt(await f.cli('interrupt', f.wire('ownership-observed-again')))).toMatchObject({ outcome: 'applied', target: f.target })
+  expect(f.calls.interrupt).toHaveBeenCalledExactlyOnceWith(f.run.runId)
+  expect((await f.native.client.status(f.run.runId)).state.type).toBe('running')
+  expect((await f.native.client.status(f.other.runId)).state.type).toBe('running')
+})
+
 it('native SIGINT is distinct from a Ctrl-C byte and one original Interrupt is never resubmitted by inspect or same-ID calls', async () => {
   const f = await fixture(), out = await observe(f)
   receipt(await f.cli('input', { ...f.wire('literal-control-c'), expectedByte: 0, dataBase64: Buffer.from([3]).toString('base64') }))

@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from 'node:util'
 import { DatabaseSync } from 'node:sqlite'
 import { expect, it, vi } from 'vitest'
 import { core, fixture } from './helpers/prepared-resume-fixture.js'
@@ -64,6 +65,64 @@ it('stops the one Run a prepared resume left under its key, then retires both Ru
   expect((await f.client.listRuns()).map(run => run.runId)).not.toContain(orphan.runId)
   await expect(f.client.removeTerminal({ runId: orphan.runId })).rejects.toMatchObject({ code: 'RUN_KIND_MISMATCH' })
   expect(f.start).toHaveBeenCalledTimes(1)
+  expect(f.inputCount()).toBe(0)
+}, REAL_RUNTIME_MS)
+
+it('an original queued takeover retirement protects its retained Run without waiting for an unrelated Run', async () => {
+  const f = await fixture(), held = await heldByUnknownStart(f, true)
+  const [orphan] = (await f.nativeList()).filter((run: any) => run.lifecycleOperationId === held.operationId)
+  const other = await f.client.createTerminal({ command: process.execPath, args: ['-e', 'process.stdin.resume()'], workspacePath: f.root, createOperationId: 'independent-takeover-terminal' })
+  const originalCommit = f.store.commitLifecycle.bind(f.store)
+  const observations: Array<{ unrelated: boolean; before?: boolean; after?: boolean }> = []
+  vi.spyOn(f.store, 'commitLifecycle').mockImplementationOnce(async (reservation: any, next: any, record: any) => {
+    let entered!: () => void, release!: () => void
+    const ready = new Promise<void>(yes => { entered = yes }), hold = new Promise<void>(yes => { release = yes })
+    const blocker = (f.store as any).enqueue(async () => { entered(); await hold }, undefined, 'unrelated-writer')
+    await ready
+    const writing = originalCommit(reservation, next, record)
+    let observed: boolean | undefined
+    const exact = f.store.hasAgentRun({ runId: orphan.runId }).then((value: boolean) => { observed = value; return value })
+    try {
+      observations.push({ unrelated: await f.store.hasAgentRun({ runId: other.runId }), before: observed })
+    } finally { release(); await blocker }
+    const result = await writing
+    observations[0]!.after = await exact
+    return result
+  })
+  const receipt = await f.client.stopAgent(f.previous.agentSessionId, f.previous.run, { operationId: 'queued-original-takeover' })
+  expect(receipt.supersededResume?.retainedRun).toEqual({ runId: orphan.runId })
+  expect(observations).toEqual([{ unrelated: false, before: undefined, after: true }])
+  expect((await f.inner.kernel.status(other.runId)).state.type).toBe('running')
+  expect(f.inputCount()).toBe(0)
+}, REAL_RUNTIME_MS)
+
+it.each([
+  { owner: 'memory' as const, edit: 'omit' }, { owner: 'memory' as const, edit: 'forge' },
+  { owner: 'file' as const, edit: 'omit' }, { owner: 'file' as const, edit: 'forge' }
+])('refuses an edited takeover commit and continues from the same original row ($owner/$edit)', async ({ owner, edit }) => {
+  const f = await fixture('positional-argv', false, owner), held = await heldByUnknownStart(f, true)
+  const [orphan] = (await f.nativeList()).filter((run: any) => run.lifecycleOperationId === held.operationId)
+  const originalCommit = f.store.commitLifecycle.bind(f.store)
+  const observations: any[] = []
+  vi.spyOn(f.store, 'commitLifecycle').mockImplementationOnce(async (reservation: any, next: any, record: any) => {
+    const original = await f.store.readLifecycleReservation(f.previous.agentSessionId)
+    const session = await f.store.readMetadata(f.previous.agentSessionId)
+    const edited = structuredClone(reservation)
+    if (edit === 'omit') delete edited.supersededResume
+    else edited.supersededResume.retainedRun = { runId: 'another-unowned-run' }
+    const attempt = await originalCommit(edited, next, record).then((value: unknown) => ({ kind: 'accepted', value }), (error: any) => ({ kind: 'rejected', code: error.code }))
+    observations.push({ attempt, originalRetained: isDeepStrictEqual(await f.store.readLifecycleReservation(f.previous.agentSessionId), original),
+      sessionRetained: isDeepStrictEqual(await f.store.readMetadata(f.previous.agentSessionId), session),
+      retirement: await f.store.readRetiredAgentSession(f.previous.agentSessionId), forgedOwned: await f.store.hasAgentRun({ runId: 'another-unowned-run' }) })
+    if (attempt.kind === 'accepted') return attempt.value
+    return await originalCommit((await f.store.readLifecycleReservation(f.previous.agentSessionId))!, next, record)
+  })
+  const receipt = await f.client.stopAgent(f.previous.agentSessionId, f.previous.run, { operationId: 'same-original-takeover' })
+  expect(receipt.operationId).toBe('same-original-takeover')
+  expect(observations).toEqual([{ attempt: { kind: 'rejected', code: 'STALE_AGENT_SESSION' }, originalRetained: true, sessionRetained: true, retirement: null, forgedOwned: false }])
+  expect(receipt.supersededResume?.retainedRun).toEqual({ runId: orphan.runId })
+  expect(await f.store.hasAgentRun({ runId: orphan.runId })).toBe(true)
+  expect(f.stop).toHaveBeenCalledTimes(1)
   expect(f.inputCount()).toBe(0)
 }, REAL_RUNTIME_MS)
 

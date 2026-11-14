@@ -241,6 +241,42 @@ describe('semantic session persistence boundary', () => {
     }
   })
 
+  it.each(['memory', 'file'] as const)('reads exact Run ownership across original metadata and retirement transitions (%s)', async kind => {
+    const root = await mkdtemp(join(tmpdir(), 'agentmux-run-owner-')), path = join(root, 'sessions.json')
+    try {
+      const store = kind === 'memory' ? new AgentMuxMemoryAgentSessionStore() : new AgentMuxFileAgentSessionStore(path)
+      const current = { ...storedSession(), retiredRuns: [{ runId: 'original-prior-run' }] }
+      await store.compareAndSwap(null, current)
+      for (const run of [current.run, ...current.retiredRuns]) expect(await store.hasAgentRun(run)).toBe(true)
+      expect(await store.hasAgentRun({ runId: 'unowned-native-run' })).toBe(false)
+      const next = { ...sessionNamed(current.agentSessionId, 'new-original-run'), retiredRuns: [...current.retiredRuns, current.run] }
+      await store.compareAndSwapMetadata(current, next)
+      for (const run of [next.run, ...next.retiredRuns]) expect(await store.hasAgentRun(run)).toBe(true)
+      await store.compareAndSwapMetadata(next, null)
+      for (const run of [next.run, ...next.retiredRuns]) expect(await store.hasAgentRun(run)).toBe(false)
+      await store.compareAndSwapMetadata(null, next)
+      const reservation = stopReservation(next, 'exact-point-owner')
+      await store.reserveLifecycle(reservation); await store.commitLifecycle(reservation, null)
+      // Check this exact transition before another retirement can refresh a
+      // derived lookup and hide a lost ownership update.
+      for (const run of [next.run, ...next.retiredRuns]) expect(await store.hasAgentRun(run)).toBe(true)
+      await store.retireRuns([{ runId: 'original-unbound-retired' }])
+      await releaseRetiredRuns(store, ['original-released-retired'])
+      const known = [next.run, ...next.retiredRuns, { runId: 'original-unbound-retired' }, { runId: 'original-released-retired' }]
+      for (const run of known) expect(await store.hasAgentRun(run)).toBe(true)
+      expect(await store.hasAgentRun({ runId: 'unowned-native-run' })).toBe(false)
+      if (kind === 'file') {
+        const reopened = new AgentMuxFileAgentSessionStore(path)
+        for (const run of known) expect(await reopened.hasAgentRun(run)).toBe(true)
+        expect(await reopened.hasAgentRun({ runId: 'unowned-native-run' })).toBe(false)
+        const original = Buffer.from('Original unavailable Store bytes remain untouched')
+        await writeFile(path, original)
+        await expect(reopened.hasAgentRun(next.run)).rejects.toMatchObject({ code: expect.any(String) })
+        expect(await readFile(path)).toEqual(original)
+      }
+    } finally { await rm(root, { recursive: true, force: true }) }
+  })
+
   it('binds a user Stop retirement to the exact Agent Session and all of its Runs', async () => {
     const store = new AgentMuxMemoryAgentSessionStore()
     const current = {
