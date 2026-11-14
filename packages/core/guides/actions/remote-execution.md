@@ -51,11 +51,12 @@ configuration alone does not prove a working end-to-end connection.
 ## Start work
 
 Open New Tab or New Agent for the project, then use the work-mode entry beside Agent
-to edit its arrangement. Settings → Cluster → Remote first shows existing work;
+to choose where the Agent runs. A project Launcher keeps its working folder: local
+projects offer Local and Outpost; remote projects offer Reach and Orbit. Settings → Cluster → Remote first shows existing work;
 choose Set up new work when you want to prepare an Agent. Connecting to or browsing
 a Host does not require a project.
 
-Choose a mode, the working folder and the Agent device. The working folder is where
+In the global setup, choose a mode, the working folder and the Agent device. The working folder is where
 this task's files and commands live. Use an exact saved folder, or choose The device
 home and its device; preparation reads that device's confirmed home and registers
 the original folder. A generic Agent does not need a business project first. For separate execution,

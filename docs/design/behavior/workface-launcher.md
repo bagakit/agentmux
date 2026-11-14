@@ -17,9 +17,9 @@
 
 Launcher 沿原两个地址表达项目端与 Agent 运行端：项目取原 resource Workspace，Agent 取原 agent Workspace，未显式分端时跟随项目。模式及参照定义唯一见[Remote 工作模式](remote-management.md#独立-remote-execution-工作台)，不新增持久模式字段、创建协议或配置副本。
 
-普通项目、初始页、空 Zone／Group 与 New Agent 共用同一工作起点。默认沿当前项目设备普通启动；紧凑模式／两端入口可展开与 Settings 相同的准备面，直接选择 Remote Project、Remote Agent、Remote Workspace 及 Local，而非只允许本机项目切远端 Agent。项目身份头部保持只读，改变安排在具名编辑面明确完成。Apply arrangement 一次提交准确原字段，Cancel 保留原安排；用户正在编辑未提交安排时不把旧地址冒充新选择发起启动。Launcher 的准备不创建 Agent，最终仍由原 Launch 动作确认。已有独立创建与关系事务的普通入口（如 Goal 新建 Agent）复用同一两端准备，再选择目标 Host 的配置，沿原 Create Agent 确认；原创建回执、未知结果与关系草稿仍由原事务持有，不因复用界面而转交或丢弃。
+普通项目、初始页、空 Zone／Group 与 New Agent 共用同一工作起点。项目 Launcher 固定原 resource Workspace，只选择 Agent 运行端：本地项目提供 Local／Outpost，远端项目提供 Reach／Orbit；模式不搬动项目，也不在这个入口选择另一目录。项目身份头部与准备面保持原项目只读，切换模式立即反馈本次选择，读取 Agent 端资料只作用于所选设备，等待或失败不阻断独立初始页。Settings 等尚未选定项目的全局准备入口可选择项目位置，再进入该项目自己的 Launcher；两类入口复用同一两端模型，不各造模式字段。Apply arrangement 一次提交准确原字段，Cancel 保留原安排；用户正在编辑未提交安排时不把旧地址冒充新选择发起启动。Launcher 的准备不创建 Agent，最终仍由原 Launch 动作确认。已有独立创建与关系事务的普通入口（如 Goal 新建 Agent）复用同一两端准备，再选择目标 Host 的配置，沿原 Create Agent 确认；原创建回执、未知结果与关系草稿仍由原事务持有，不因复用界面而转交或丢弃。
 
-分端时 Agent 启动目录默认用目标 Host 已确认 home，经原查询与普通目录登记，不猜路径、不要求项目副本。Settings 的 Open in Launcher 仅携带同样两端进入原起点；来自 Settings 的安排在 Launcher 可原位修改，不需返回高级页面才能反向选择。登记缺失或读取失败就地说明准确对象、原原因和恢复入口；异步结果只作用于原项目／Launcher 与 Host 配置，后选对象或后续输入不被覆盖。
+分端时 Agent 启动目录默认用目标 Host 已确认 home，经原查询与普通目录登记，不猜路径、不要求项目副本。Settings 的 Open in Launcher 仅携带同样两端进入原起点；来自 Settings 的安排在 Launcher 可原位修改 Agent 端，项目仍归原 Workspace。登记缺失或读取失败就地说明准确对象、原原因和恢复入口；异步结果只作用于原项目／Launcher 与 Host 配置，后选对象或后续输入不被覆盖。
 
 Agent 启动目录持有原生配置、登录与 Skills 来源；项目端持有文件、命令与工作区工具。Executor 从准确 Agent Host 的原配置及 revision 选择，不能按名字继承另一 Host 配置。同项目切运行端保留原 Region、完整 Prompt、名字、Provider 选项、辅助工具草稿与原操作回执；明确换到另一项目时打开该项目自己的 Launcher，原项目输入与相对文件／Note／Browser 回执仍留原 owner，不跨文件系统根复制或吞掉。准确两端由原 Store 一次提交，不先改项目再异步补运行端。空 Zone 建立原 Region 仍沿原输入认领链保全。
 
