@@ -107,7 +107,8 @@ Provider 启动项的当前声明唯一见 [launch-options.ts](../../../packages
 - **启动项以数据声明，标签与 argv 写在同一处。** Provider 以数据形式声明可供选择的启动项（例如 model、权限或沙箱模式）；每个 choice 把界面标签与兑现它的 argv 放在一起，两者不会漂移。
 - **describe 与 argv 分开。** describe 半边是纯数据，跨 IPC 供 Renderer 渲染；argv 半边只留在 Core。Renderer 看不到命令行，Launcher 也不知道 Provider 的名字，任何调用点都不按 `providerId` 分支决定启动项。
 - **未声明即不渲染。** 没有声明的启动项在界面上完全不出现，而不是显示一个禁用控件；给某个 Provider 后补一项能力，不需要改动 Renderer。
-- **作用域是启动时。** 选择编码进 spawn 时的 argv；当前没有 Provider 声明 ACP 等可在运行中改换启动项的通道（各 Provider 的 `acpStrategy` 均为 `none`），类型系统据实表达这一点，不用暗示“运行中可切换”的控件掩盖。将来 Provider 提供经核实的运行中通道时，实时能力作为并列的另一项能力加入，启动时这一项不拆除。
+- **作用域是启动时。** 选择确定实际 spawn 参数和终端或结构化执行通道，并随原执行身份保留。运行中配置是独立能力，必须读取原会话公开的选项与采用回执，不能从启动选项推断已经改变。
+- **结构化会话持有原执行身份。** 用户显式选择结构化通道后，原 Runtime Run 托管协议进程；客户端或 Core 观察断开只影响观察。同 Run 重接校验原进程和原生 Session，替换 Run 的 Level B 续接还须等待准确原生请求的确认。保留原启动通道和执行目录，不能把终端会话或未确认的结构化目标当成恢复成功。
 - **只声明对着真实二进制核实过的 flag。** 核实的对象是 Provider 真正启动的可执行文件（例如 cursor 是 `cursor-agent` 而非 `cursor`），核实不了的一律不声明；这也是部分 Provider 不提供任何启动项的原因。
 - **名册行显示启动时固定的授权范围。** 来源是 Core Session 记录中已持久化的 launch-option 选择：Desktop 只取得 choice id，标签由 Renderer 用该 Provider 的 catalog 声明解析，argv 不离开 Core。创建时未收窄任何一项则不显示，不写「默认」（那是无人记录过的事实）；选择对应的 option 或 choice 若 Provider 已不再声明，该项丢弃而不渲染裸 id（裸 id 会像已核实的授权）。每行最多一枚风险标记，取该行各范围中最宽的一档；Provider 未声明 tier 的选项不被补成 `safe`。
 - **只把枚举落成选项。** 收任意字符串的 `--model` 不声明：手写模型名清单会在厂商调整阵容时过期，也不为界面对称编造一张清单。CLI 自身 `--help` 给出取值时据实区分两种方式：严格 possible-values 枚举可完整声明；只以“例如”举出的取值（例如 claude 的 `--model`）只声明其中指向最新模型的稳定别名，按“稳定别名”表述，不写成穷举清单，也不声明会过期的模型全名。布尔开关落成两档 choice：保守档贡献空 argv，激进档贡献 flag。
