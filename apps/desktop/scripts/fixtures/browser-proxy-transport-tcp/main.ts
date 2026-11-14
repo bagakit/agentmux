@@ -8,7 +8,7 @@ import { app, BrowserWindow, safeStorage, type Session } from 'electron'
 import { AgentMuxControlServer } from '@agentmux/core'
 import { BrowserProfileStore } from '../../../src/main/browser-profile-store.js'
 import { BrowserProfileManager } from '../../../src/main/browser-profile-manager.js'
-import { createBrowserProfileProxyAuth } from '../../../src/main/browser-profile-proxy-auth.js'
+import { createBrowserProfileProxyAuth, createBrowserProfileProxyLoginHandler } from '../../../src/main/browser-profile-proxy-auth.js'
 import { createBrowserProfileNetworkControl } from '../../../src/main/browser-profile-network-control.js'
 import { createBrowserProfileExitCheck } from '../../../src/main/browser-profile-exit-check.js'
 import { executeBrowserProfileControl, isBrowserProfileControlRequest } from '../../../src/main/browser-profile-control.js'
@@ -17,6 +17,7 @@ const config = JSON.parse(process.env.TCP_NATIVE_CONFIG!), descriptor = join(hom
 const user = 'synthetic-native-user', password = 'synthetic-native-password', refusedPassword = 'synthetic-refused-password'
 const hash = (bytes: Buffer) => createHash('sha256').update(bytes).digest('hex')
 const report: any = { schema: 'agentmux.proxy-transport.tcp.process.v1', phase, pid: process.pid, passed: false, cases: [], cli: [], certificateFingerprint: config.fingerprint, pins: { accepted: 0, rejected: 0 }, stage: 'initializing',
+ sharedLoginEntry: { owner: 'browser-profile-proxy-auth.ts', export: 'createBrowserProfileProxyLoginHandler', profileQueries: 0, transportQueries: 0, transportAnswers: 0 },
  boundary: 'Private original Profile Store/Manager/Session/credential/network owners and compiled public CLI. Exact private-session certificate pin, local HTTP/HTTPS and RFC1928/1929 TCP only. No UDP/QUIC, installed App, full workbench or Agent Run recovery claim.' }
 let profiles: BrowserProfileManager | undefined, control: AgentMuxControlServer | undefined
 const pages: BrowserWindow[] = []
@@ -58,11 +59,12 @@ async function main() {
   let address = config.httpsOrigin + '/exit'
   const checkExit = createBrowserProfileExitCheck({ session: id => profiles!.sessions.nativeSession(id), prepare: id => profiles!.prepareSession(id), fetch: (id, url, signal) => profiles!.sessions.fetch(id, url, signal), now: () => performance.now() })
   const network = createBrowserProfileNetworkControl({ profiles, proxyAuth: credential, checkExit, checkAddress: () => address, reconnect: id => profiles!.sessions.nativeSession(id).closeAllConnections() })
-  app.on('login', (event, contents, details, auth, callback) => {
-   if (!auth.isProxy || !contents || !profiles!.profileOfSession(contents.session)) return
-   event.preventDefault(); if (profiles!.sessions.answerProxyTransport(contents.session, auth, callback)) return
-   void credential.answer(contents, auth, callback, details.firstAuthAttempt === true).then(used => { if (!used) callback() }, () => callback())
-  })
+  app.on('login', createBrowserProfileProxyLoginHandler({
+   profileOfSession: target => { report.sharedLoginEntry.profileQueries++; return profiles!.profileOfSession(target) },
+   proxyOf: id => profiles!.proxyOf(id),
+   answerProxyTransport: (target, auth, callback) => { report.sharedLoginEntry.transportQueries++; const answered = profiles!.sessions.answerProxyTransport(target, auth, callback); if (answered) report.sharedLoginEntry.transportAnswers++; return answered },
+   proxyAuth: credential
+  }))
   control = new AgentMuxControlServer({ socketPath: join(home, 'control.sock'), coreClients: () => [], execute: async (request_, context) => {
    if (!isBrowserProfileControlRequest(request_)) throw new Error('Only original Profile network operations belong to this private endpoint')
    return await executeBrowserProfileControl(request_, { profiles: profiles!, network, usage: {} as never }, context?.actor)
@@ -130,6 +132,7 @@ async function main() {
   if (!prior) await writeFile(descriptor, JSON.stringify(actual))
   else assert.deepEqual(actual, prior)
   assert.ok(report.pins.accepted > 0)
+  assert.ok(report.sharedLoginEntry.transportAnswers > 0, 'Native app login must invoke the shared production entrypoint and the original Session capability owner')
   report.original = actual; report.passed = true; report.stage = 'complete'
  } catch (cause) { report.failure = { message: cause instanceof Error ? cause.message : String(cause), stack: cause instanceof Error ? cause.stack : undefined } }
  finally { await control?.stop(); for (const page of pages) page.destroy(); await profiles?.dispose(); await writeFile(join(out, phase + '.json'), JSON.stringify(report, null, 2)); app.exit(report.passed ? 0 : 1) }
