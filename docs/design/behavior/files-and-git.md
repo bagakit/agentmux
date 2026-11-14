@@ -80,6 +80,7 @@ Git、配置与空间持久化结果分别成立。失败保原事实和可接�
 
 ### Revision-aware 保存与外部冲突
 
+- 同 FD `readIdentity` 绑定准确原 Source 上的 saved baseline，不要求后来尚未保存的 draft 正文与之相同。written 清旧身份；后续完整读取仅在同来源、同 lifetime／read request 和读取前后未变的 baseline revision 下更新物理身份，不替换 draft／dirty／输入代次。move 的忙碌判定区分已入场 save 与仍等该 mutation 的后排 save；尾链顺序和最终 body／View／IME／lifetime CAS 均保留，不能因队列存在永久阻止正常改址，也不能把旧 queued Save 重定向到新目标。
 
 - 正文读取可携 `readIdentity`：entry 来自读取该正文的同一 Native FD，ancestorWitnesses 按 pinned parent 到原 Workspace root 排序并包含 root，均复用完整 FileEntryWitness 与原 birth/statx 算法。前后复核原 FD／scope；不得读取后另 stat 路径贴给旧正文。无预算读取不新增正文上限，byte-range 保原 hash／offset／cost／取消合同。来源元数据有界，超限、缺代次或 scope 失观仅令来源未知，保原 body／read／edit；正常受支持读取须真实给出来源。来源不是 mutation ACK、权限或当前路径存在证明，NoteFileWitness 原五字段历史不变。
 - 原 FileDocument 可以持有读取来源，written 回执不承诺或夹带它。Renderer 唯一采用 written revision 的原 reducer 清旧 readIdentity，包括同正文 hash 的 atomic replacement；只有原完整 body read 和最终 document lifetime／generation CAS 可以装新来源。Core/Main 不以 write 回执或后 stat 补签，旧 spread 不得将旧 inode 来源随新 revision 续回。CLI 复用原 file.read typed 结果与权限，不新增读操作 ID、来源 Store 或 Native Runtime。
