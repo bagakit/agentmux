@@ -2056,6 +2056,7 @@ export type AgentMuxDesktopApi = {
   providers: {
     list(options: { observation: true }): Promise<ProviderCatalogObservation>
     list(): Promise<AgentCatalogEntry[]>
+    forHost(hostId: string): Promise<AgentMuxRpcResult<'agent.provider.ls'>>
   }
   executors: {
     detect(executorId: AgentExecutorId, hostId: string): Promise<ExecutorDetection>

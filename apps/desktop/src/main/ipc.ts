@@ -1857,6 +1857,7 @@ export async function registerIpc(args: {
     }
     return await args.runtime.providerCatalog(options)
   })
+  handleWithEvent('providers:forHost', (_event, hostId: string) => callUserRpc('agent.provider.ls', { hostId }))
   handle('executors:detect', async (executorId: AgentExecutorId, hostId: string) => await refreshSettingsExecutor(executorId, hostId, configOwner, runtimeIncidents ?? args.runtime))
   handle('executors:discover', async (hostId: string) => {
     if (typeof hostId !== 'string' || !hostId.length) throw new TypeError('An exact execution Host ID is required.')

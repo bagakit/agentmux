@@ -5,7 +5,7 @@ import { mintObjectId } from '@agentmux/core/object-id'
 import { AGENT_AVATAR_BADGE_IDS, AGENT_AVATAR_BADGE_LABELS } from '../../../../shared/contracts'
 import { AgentAvatar } from '../AgentAvatar'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { quote } from 'shlex'
 import type { AgentExecutorConfig, AppConfig, AgentAvatarAppearance, AgentAvatarBadge } from '../../../../shared/contracts'
 import { executorDetectionKey, useAppStore } from '../../store'
@@ -21,6 +21,7 @@ import { useResourceDrafts } from './use-resource-drafts'
 import { SettingsResourceLibrary } from './SettingsResourceLibrary'
 import { SelectionField } from '../SelectionField'
 import { ProviderCatalogPane } from './ProviderCatalogPane'
+import { ProviderComparisonPane } from './ProviderComparisonPane'
 import { api } from '../../lib/api'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import type { SettingsNavigationRequest } from '../SettingsNavigation'
@@ -97,9 +98,10 @@ export function assertExecutorProviderIdentity(
 // Quote and split are one reversible codec. This is argv editing, with no shell execution
 // or environment expansion; adding a flag must preserve every other literal argument.
 
-export function AgentSettingsPane({ config, onSave, executorId, navigationRequest, active = true }: {
+export function AgentSettingsPane({ config, onSave, executorId, navigationRequest, onSubpageChange, active = true }: {
   active?: boolean
   navigationRequest?: SettingsNavigationRequest | undefined
+  onSubpageChange?: ((field: string | undefined) => void) | undefined
   config: AppConfig
   executorId?: string | undefined
   onSave: (executors: Record<string, AgentExecutorConfig>, expected: Record<string, AgentExecutorConfig>) => Promise<void>
@@ -120,9 +122,21 @@ export function AgentSettingsPane({ config, onSave, executorId, navigationReques
   const editor = useRef<HTMLDivElement>(null)
   const consumedNavigation = useRef<SettingsNavigationRequest | string | undefined>(undefined)
   const [hostId] = useState(initialHost)
-  const [scope, setScope] = useState<'templates' | 'host'>(navigationRequest?.field === 'host-executors' ? 'host' : 'templates')
+  const [scope, setScope] = useState<'providers' | 'templates' | 'host'>(() =>
+    navigationRequest?.field === 'providers' ? 'providers' : navigationRequest?.field === 'host-executors' ? 'host' : 'templates')
   const [hookNavigation, setHookNavigation] = useState<{ executorId: string }>()
-  useEffect(() => { if (navigationRequest?.field === 'host-executors') setScope('host') }, [navigationRequest])
+  const [hostDestination, setHostDestination] = useState<{ hostId: string; providerId: string }>()
+  useEffect(() => {
+    if (navigationRequest?.field === 'providers') setScope('providers')
+    if (navigationRequest?.field === 'executors') setScope(current => current === 'providers' ? 'templates' : current)
+    if (navigationRequest?.field === 'host-executors') {
+      setHostDestination(undefined)
+      setScope('host')
+    }
+  }, [navigationRequest])
+  useLayoutEffect(() => {
+    onSubpageChange?.(scope === 'providers' ? 'providers' : 'executors')
+  }, [onSubpageChange, scope])
   const resource = useResourceDrafts(Object.fromEntries(Object.entries(config.executors).map(([id, executor]) =>
     [id, toDraft(executor)])))
   const drafts = resource.value, setDrafts = resource.setValue
@@ -364,18 +378,24 @@ export function AgentSettingsPane({ config, onSave, executorId, navigationReques
     setPendingEdit({ id, select: true })
   }
 
-  const scopeControl = <label className="settings-compact-field"><span>Configure</span><SelectionField label="Executor configuration scope" value={scope} options={[{ value: 'templates', label: 'Global templates' }, { value: 'host', label: 'On a Host' }]} searchable={false} onValueChange={value => setScope(value as 'templates' | 'host')} /></label>
+  const scopeControl = <label className="settings-compact-field"><span>Configure</span><SelectionField label="Executor configuration scope" value={scope === 'host' ? 'host' : 'templates'} options={[{ value: 'templates', label: 'Global templates' }, { value: 'host', label: 'On a Host' }]} searchable={false} onValueChange={value => setScope(value as 'templates' | 'host')} /></label>
   const executorCounts = Object.values(drafts).reduce<Record<string, number>>((counts, draft) => {
     counts[draft.providerId] = (counts[draft.providerId] ?? 0) + 1
     return counts
   }, {})
   return (
-    <div className="settings-agent-pane" data-editor-view={scope === 'templates' ? view : 'host'}>
-      <div className="settings-pane-toolbar settings-agent-toolbar">
+    <div className="settings-agent-pane" data-editor-view={scope === 'templates' ? view : scope}>
+      <ProviderComparisonPane hosts={config.hosts} active={active && scope === 'providers'} requestedHostId={navigationRequest?.field === 'providers' ? navigationRequest.hostId : undefined}
+        onExecutors={(hostId, providerId) => {
+          setHostDestination({ hostId, providerId })
+          setHookNavigation(undefined)
+          setScope('host')
+        }} />
+      <div className="settings-pane-toolbar settings-agent-toolbar" data-settings-field="executors" hidden={scope === 'providers'}>
         {scopeControl}
         <span className="settings-resource-count">{scope === 'templates' ? `${executors.length} global templates` : null}</span>
       </div>
-      <div className="settings-agent-body" data-settings-field="host-executors" hidden={scope !== 'host'}><HostExecutorSettings config={config} active={active && scope === 'host'} requestedHostId={navigationRequest?.field === 'host-executors' ? navigationRequest.hostId : undefined} hookNavigation={hookNavigation} /></div>
+      <div className="settings-agent-body" data-settings-field="host-executors" hidden={scope !== 'host'}><HostExecutorSettings config={config} active={active && scope === 'host'} requestedHostId={hostDestination?.hostId ?? (navigationRequest?.field === 'host-executors' ? navigationRequest.hostId : undefined)} requestedProviderId={hostDestination?.providerId} hookNavigation={hookNavigation} /></div>
       <div hidden={scope !== 'templates'} className="settings-agent-templates">
         <ProviderCatalogPane entries={providerCatalog} read={catalogRead} executorCounts={executorCounts}
           selectedId={providerId} onSelect={selectProvider} onRefresh={() => void refreshProviders()} />

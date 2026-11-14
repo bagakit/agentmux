@@ -123,8 +123,8 @@ function SettingsPanelView({ onClose, visible = true, initialSection = 'overview
     setActive(section)
     setShowResults(false)
     setTargetIssue('')
-    const field = target ?? (section === 'hosts' ? 'mesh-paths' : undefined)
-    setDestination(searching || fromSidebar && target || section === 'hosts' ? { section, ...(target && !fromSidebar ? { target } : {}), route,
+    const field = target ?? (section === 'hosts' ? 'mesh-paths' : section === 'agents' ? 'executors' : undefined)
+    setDestination(searching || fromSidebar && target || section === 'hosts' || section === 'agents' ? { section, ...(target && !fromSidebar ? { target } : {}), route,
       request: normalizeSettingsNavigationRequest({ section, field }, config?.hosts ?? []) } : null)
   }
 
@@ -242,14 +242,15 @@ function SettingsPanelView({ onClose, visible = true, initialSection = 'overview
   const overviewGroups = settingsNavGroups('')
 
   const renderPane = (pane: SettingsSectionId) => {
-    const Pane = settingsModules.find((module) => module.id === pane)!.Pane
+    const module = settingsModules.find((module) => module.id === pane)! as SettingsModule
+    const Pane = module.Pane
     const paneVisible = visible && active === pane && !(searching && showResults)
     const paneNavigationRequest = destination?.route === route && destination.section === pane ? destination.request
       : normalizedNavigationRequest?.section === pane ? normalizedNavigationRequest : undefined
     return <div key={pane} className="settings-content__scroll" data-settings-pane={pane} hidden={!paneVisible} inert={!paneVisible}>
       {paneVisible && searching ? <div className="settings-search-return"><Button type="button" onClick={() => { setShowResults(true); setDestination(null); setTargetIssue('') }}>Search results</Button><span>“{query}”</span>{targetIssue ? <span role="status">{targetIssue}</span> : null}</div>
         : paneVisible && targetIssue ? <p className="settings-target-issue" role="status" data-settings-target-issue>{targetIssue}</p> : null}
-      <Pane config={config} onClose={onClose} onNavigate={chooseSection} active={paneVisible} executorId={executorId} toolId={toolId} navigationRequest={paneNavigationRequest} onSubpageChange={pane === 'hosts' ? setActiveSubpage : undefined} />
+      <Pane config={config} onClose={onClose} onNavigate={chooseSection} active={paneVisible} executorId={executorId} toolId={toolId} navigationRequest={paneNavigationRequest} onSubpageChange={paneVisible && module.subpages ? setActiveSubpage : undefined} />
     </div>
   }
 
@@ -305,7 +306,7 @@ function SettingsPanelView({ onClose, visible = true, initialSection = 'overview
         <header className="settings-content__header">
           <div className="settings-content__title">
             <div>
-              <div className="settings-content__breadcrumb">{groupTitle}{subpage && !showResults ? ' / Mesh' : ''}</div>
+              <div className="settings-content__breadcrumb">{groupTitle}{subpage && !showResults ? ` / ${currentSection?.title}` : ''}</div>
               <h2>{searching && showResults ? section.title : subpage?.title ?? section.title}</h2>
               {section.description ? <p>{section.description}</p> : null}
             </div>

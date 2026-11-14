@@ -603,7 +603,8 @@ const api: AgentMuxPreloadApi = {
   },
   providers: {
     list: (options?: { observation: true }) => options === undefined
-      ? ipcRenderer.invoke('providers:list') : ipcRenderer.invoke('providers:list', options)
+      ? ipcRenderer.invoke('providers:list') : ipcRenderer.invoke('providers:list', options),
+    forHost: hostId => ipcRenderer.invoke('providers:forHost', hostId)
   },
   executors: {
     detect: (executorId: AgentExecutorId, hostId: string) => ipcRenderer.invoke('executors:detect', executorId, hostId),

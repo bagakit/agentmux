@@ -21,13 +21,18 @@ export const agentsSettingsModule = {
   title: 'Agent CLIs',
   overviewShortcut: 2,
   description: 'Providers, CLI availability and launch configurations.',
+  subpages: [{ field: 'providers', title: 'Providers' }, { field: 'executors', title: 'Executors' }],
+  searchTargets: [
+    { id: 'providers', title: 'Provider capabilities', keywords: 'compare history streaming permissions resume adapter', kind: 'info' },
+    { id: 'host-executors', title: 'Host Executors and managed Hooks', keywords: 'check hook update configuration workspace scope', kind: 'info' }
+  ],
   icon: ThemeObjectAgentIcon,
   keywords: `${AGENT_PROVIDER_KEYWORDS} agent agents cli clis executor launch startup command args env installed provider`,
   savedSummary(config) {
     const count = Object.keys(config.executors).length
     return `${count} ${count === 1 ? 'executor' : 'executors'}`
   },
-  Pane({ config, active, executorId, navigationRequest }) {
-    return <AgentSettingsPane config={config} onSave={saveExecutors} active={active} executorId={executorId} navigationRequest={navigationRequest} />
+  Pane({ config, active, executorId, navigationRequest, onSubpageChange }) {
+    return <AgentSettingsPane config={config} onSave={saveExecutors} active={active} executorId={executorId} navigationRequest={navigationRequest} onSubpageChange={onSubpageChange} />
   }
 } as const satisfies SettingsModule

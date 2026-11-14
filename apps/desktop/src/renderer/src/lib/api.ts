@@ -966,7 +966,11 @@ const mockApi: AgentMuxDesktopApi = {
     }
   },
   providers: {
-    list: mockProviderCatalog
+    list: mockProviderCatalog,
+    forHost: async hostId => {
+      if (!mockConfig.hosts.some(host => host.id === hostId)) throw new Error('The selected Preview Host is unavailable.')
+      return { routeHostId: hostId, runtimeId: null, observedAt: Date.now(), catalog: await mockProviderCatalog() }
+    }
   },
   executors: {
     unregister: async () => { throw new Error('Registration removal requires its original executing Host. The registration and existing work are retained.') },
