@@ -5,6 +5,7 @@ module.exports = async ({ win, read, until, resize, tap, button, capture, openGo
   const trigger = '.mobile-conversation .mobile-posture-picker button'
   const menu = '.mobile-posture-menu[role=menu]'
   const menuItems = menu + ' [role=menuitem]'
+  const headerDestination = '.mobile-header .mobile-session-view-toggle'
   const find = selector => `document.querySelector(${JSON.stringify(selector)})`
   const key = async (key, code, windowsVirtualKeyCode) => {
     for (const type of ['rawKeyDown', 'keyUp']) {
@@ -114,9 +115,13 @@ module.exports = async ({ win, read, until, resize, tap, button, capture, openGo
       for(const control of geometry.buttons) { assert.ok(control.rect.width>=44 && control.rect.height>=44,'Small visuals retain complete touch geometry');assert.ok(control.hit,'Every actual floating/top control remains touchable');assert.ok(control.rect.left>=0 && control.rect.right<=width) }
       result.controls.push({context,width,appearance,geometry})
       await capture(`controls-${context}-${width}-${appearance}`)
-      await tap('.mobile-header .mobile-session-view-toggle','Top Terminal'); await flush()
+      assert.equal(await read(`${find(headerDestination)}.getAttribute('aria-label')`), '查看终端')
+      assert.equal(await read(`${find(headerDestination)}.hasAttribute('aria-pressed')`), false)
+      await tap(headerDestination,'Top Terminal'); await flush()
       assert.equal(await visiblePanel('terminal'),true,'Actual top action switches the original panel to Terminal')
-      await tap('.mobile-header .mobile-session-view-toggle','Top Conversation'); await flush()
+      assert.equal(await read(`${find(headerDestination)}.getAttribute('aria-label')`), '查看对话')
+      assert.equal(await read(`${find(headerDestination)}.hasAttribute('aria-pressed')`), false)
+      await tap(headerDestination,'Top Conversation'); await flush()
       assert.equal(await visiblePanel('conversation'),true)
       await openGoal(); await flush()
       assert.equal(await visiblePanel('goal'),true,'Actual floating Goal action opens the original Goal owner')
