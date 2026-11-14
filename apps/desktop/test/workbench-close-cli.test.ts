@@ -146,6 +146,151 @@ async function fixture() {
     apply: (record: Core.SpaceCloseReceipt) => cli('apply', { operationId: record.operationId, expectedPlanDigest: record.planDigest, decisions: core.spaceCloseDecisions(record.plan) }) }
 }
 
+async function sourceCloseFixture(split = false, file = false) {
+  const f = await fixture()
+  const { createSpaceSessionsFixture } = await import('../../../packages/core/test/helpers/space-session-fixture.js')
+  const { spaceMountTransport } = await import('./helpers/space-mount-fixture.js')
+  const { originalSourceWorkspaceId, originalSourceTabProjectionId, originalSourceRegionProjectionId, originalSourceInputOwnerKey } = await import('../src/renderer/src/lib/original-space-navigation.js')
+  const { splitWorkbenchRegion } = await import('@agentmux/layout')
+  const source = await createSpaceSessionsFixture(cleanup)
+  const agent = await source.d.put(f.agent.agentSessionId, 1, 'original-source-run')
+  const admitted = await source.admit('D-in-B', source.d.owner.runtimeId, agent.agentSessionId, 'source-close-creation')
+  if (split || file) {
+    const before = (await source.b.spatial.read())!, tab = before.graph.tabs.find(tab => tab.tabId === admitted.address.tabId)!
+    const regionId = 'retained-source-launcher', graph = structuredClone(before.graph)
+    if (file) graph.regions = graph.regions.map(region => region.regionId === admitted.address.regionId ? {
+      regionId: region.regionId, tabId: region.tabId, kind: 'file', agentSessionId: null, runId: null, execution: null,
+      file: { workspaceId: admitted.address.workspaceId!, path: 'retained-source.txt' } } : region)
+    graph.tabs = graph.tabs.map(current => current.tabId === tab.tabId ? { ...current, regionIds: [...current.regionIds, regionId] } : current)
+    graph.regions.push({ regionId, tabId: tab.tabId, kind: 'launcher', agentSessionId: null, runId: null, execution: null })
+    graph.tabLayouts[tab.tabId] = splitWorkbenchRegion(graph.tabLayouts[tab.tabId]!, admitted.address.regionId, 'right', regionId)
+    await source.b.spatial.commit({ expectedRevision: before.revision, graph })
+  }
+  const sourceNative = vi.spyOn(source.d.core, 'runtimeSubject').mockRejectedValue(Error('Original Native observation unavailable'))
+  const bridge = spaceMountTransport(cleanup, [{ id: 'source-close-route', carrier: {
+    forwardRpc: source.b.rpc.call.bind(source.b.rpc), subscribeRpc: source.b.rpc.subscribe.bind(source.b.rpc) } }])
+  const call = vi.spyOn(f.api.spaceMounts, 'call').mockImplementation(bridge.api.call)
+  vi.spyOn(f.api.workbenchClose, 'call').mockImplementation((method, input) => f.rpc.call(method, input))
+  const target = { hostId: 'source-close-route', reference: source.reference, zoneId: admitted.address.zoneId!, workspaceId: admitted.address.workspaceId! }
+  const snapshot = await bridge.api.call('snapshot', { hostId: target.hostId, reference: target.reference })
+  f.store.getState().mountSpace(target, false)
+  f.store.getState().observeSpaceMount(target, { snapshot, reading: false })
+  const workspaceId = originalSourceWorkspaceId(target), tabId = originalSourceTabProjectionId(target, admitted.address.tabId)
+  const regionId = originalSourceRegionProjectionId(target, admitted.address.regionId)
+  const groupId = f.store.getState().layouts[workspaceId]!.groups.find(group => group.tabOrder.includes(tabId))!.id
+  const ownerKey = originalSourceInputOwnerKey(source.d.owner.runtimeId, agent.agentSessionId)
+  f.store.getState().setAgentComposerDraft(ownerKey, 'Original unsent Source input')
+  const close = { kind: split ? 'region' as const : 'tab-occurrence' as const, displayWorkspaceId: workspaceId, groupId, tabId, ...(split ? { regionId } : {}) }
+  return { ...f, source, bridge, target, call, sourceNative, tabId, regionId, ownerKey, close, admitted }
+}
+
+it.runIf(business).each([false, true])('the shared close owner retires an unobserved Source workface (split %s) without borrowing a same-SID local Run', async split => {
+  const f = await sourceCloseFixture(split), original = await f.source.d.core.readAgentSession(f.agent.agentSessionId)
+  const record = await f.store.getState().prepareWorkbenchClose({ target: f.close, keepAgentSessions: false })
+  expect(record.plan.projection.source).toMatchObject({ hostId: f.target.hostId, edit: { reference: f.source.reference } })
+  expect(record.plan.projection.resources).toEqual([])
+  const { preparedCloseConfirmation, lastViewCloseCopy } = await import("../src/renderer/src/lib/last-view-close-confirmation.js")
+  const confirmation = preparedCloseConfirmation(record, f.store.getState())!
+  expect(confirmation.unconfirmed).toEqual(["Agent " + f.agent.agentSessionId])
+  const copy = lastViewCloseCopy(confirmation, split ? "split" : "tab")
+  expect(copy.description).toContain("original shared Space"); expect(copy.description).toContain("No Stop is sent")
+  expect(copy.description).not.toContain("original-source-member")
+  expect(core.spaceCloseDecisions(record.plan)).toMatchObject([{ action: 'close-view-only', regionId: f.regionId }])
+  expect(await f.store.getState().applyWorkbenchClose(record)).toBe(true)
+  expect(f.sourceNative).not.toHaveBeenCalled(); expect(f.stops).not.toHaveBeenCalled()
+  expect(await f.source.d.core.readAgentSession(f.agent.agentSessionId)).toEqual(original)
+  expect((await f.native.client.status(f.other.runId)).state.type).toBe('running')
+  expect(f.store.getState().agentComposerDrafts[f.ownerKey]).toBe('Original unsent Source input')
+  expect(f.store.getState().agentComposerDrafts['healthy-region']).toBe('Original unsent Agent draft')
+  const saved = (await f.source.b.spatial.read())!
+  expect(saved.graph.regions.some(region => region.regionId === f.admitted.address.regionId)).toBe(false)
+  const snapshot = await f.bridge.api.call('snapshot', { hostId: f.target.hostId, reference: f.target.reference })
+  f.store.getState().observeSpaceMount(f.target, { snapshot, reading: false })
+  expect(f.store.getState().tabs[f.tabId]?.regions[f.regionId]).toBeUndefined()
+  if (split) expect(Object.values(f.store.getState().tabs[f.tabId]!.regions)).toHaveLength(1)
+  else expect(f.store.getState().tabs[f.tabId]).toBeUndefined()
+  expect(JSON.parse((await f.user.read())!).state.agentComposerDrafts[f.ownerKey]).toBe('Original unsent Source input')
+})
+
+it.runIf(business)('a lost Source spatial ACK keeps the same close unknown and never repeats the write or stops either same-SID Agent', async () => {
+  const f = await sourceCloseFixture(), apply = f.bridge.api.call
+  f.call.mockImplementation(async (method, input, signal) => {
+    const result = await apply(method, input, signal)
+    if (method === 'apply') throw Error('Original Source close ACK unavailable')
+    return result
+  })
+  const record = await f.store.getState().prepareWorkbenchClose({ target: f.close, keepAgentSessions: false })
+  expect(await f.store.getState().applyWorkbenchClose(record)).toBe(false)
+  expect(f.store.getState().tabs[f.tabId]?.regions[f.regionId]).toBeDefined()
+  expect(await f.store.getState().applyWorkbenchClose(record)).toBe(false)
+  expect(f.call.mock.calls.filter(([method]) => method === 'apply')).toHaveLength(1)
+  expect((await f.rpc.call('space.close.inspect', { operationId: record.operationId })).operation).toMatchObject({ outcome: 'unknown' })
+  expect(f.store.getState().agentComposerDrafts[f.ownerKey]).toBe('Original unsent Source input')
+  expect(f.sourceNative).not.toHaveBeenCalled(); expect(f.stops).not.toHaveBeenCalled()
+  const snapshot = await f.bridge.api.call('snapshot', { hostId: f.target.hostId, reference: f.target.reference })
+  f.store.getState().observeSpaceMount(f.target, { snapshot, reading: false })
+  expect(f.store.getState().tabs[f.tabId]).toBeUndefined()
+})
+
+it.runIf(business)('late Source File input retains its original View after the spatial ACK and can then close locally without a second Source write', async () => {
+  const f = await sourceCloseFixture(true, true)
+  const surface = f.store.getState().tabs[f.tabId]!.regions[f.regionId]!
+  expect(surface.kind).toBe('file'); if (surface.kind !== 'file') throw Error('Expected original Source File')
+  const { documentKey } = await import('../src/renderer/src/lib/workbench-tabs.js')
+  const key = documentKey(surface.workspaceId, surface.path)
+  f.store.setState(current => ({ documents: { ...current.documents, [key]: { path: surface.path, content: 'Original Source buffer', revision: 'original-source-file-revision' } }, dirtyDocuments: { ...current.dirtyDocuments, [key]: true } }))
+  const record = await f.store.getState().prepareWorkbenchClose({ target: f.close, keepAgentSessions: true })
+  expect(record.plan.projection.drafts).toMatchObject([{ document: { hostId: f.target.hostId, workspaceId: surface.workspaceId } }])
+  let enter!: () => void, release!: () => void
+  const entered = new Promise<void>(resolve => { enter = resolve }), waiting = new Promise<void>(resolve => { release = resolve })
+  cleanup.push(async () => release?.())
+  const actual = f.bridge.api.call
+  f.call.mockImplementation(async (method, input, signal) => {
+    if (method === 'apply') { enter(); await waiting }
+    return await actual(method, input, signal)
+  })
+  const pending = f.store.getState().applyWorkbenchClose(record); await entered
+  f.store.getState().updateDocument(f.tabId, 'Late Source buffer must survive', f.regionId)
+  release()
+  expect(await pending).toBe(false)
+  expect(f.store.getState().tabs[f.tabId]?.regions[f.regionId]).toMatchObject({ kind: 'file', path: surface.path })
+  expect(f.store.getState().documents[key]?.content).toBe('Late Source buffer must survive')
+  const inspected = (await f.rpc.call('space.close.inspect', { operationId: record.operationId })).operation!
+  expect(inspected, inspected.issue).toMatchObject({ outcome: 'partial', clientProjection: { retainedRegions: [f.regionId] } })
+  const snapshot = await f.bridge.api.call('snapshot', { hostId: f.target.hostId, reference: f.target.reference })
+  f.store.getState().observeSpaceMount(f.target, { snapshot, reading: false })
+  expect(f.store.getState().tabs[f.tabId]?.regions[f.regionId]).toBeDefined()
+  expect(JSON.parse((await f.user.read())!).state.documents[key].content).toBe('Late Source buffer must survive')
+  const reviewed = await f.store.getState().prepareWorkbenchClose({ target: f.close, keepAgentSessions: true })
+  expect(reviewed.plan.projection.source).toBeUndefined()
+  expect(await f.store.getState().applyWorkbenchClose(reviewed)).toBe(true)
+  expect(f.call.mock.calls.filter(([method]) => method === 'apply')).toHaveLength(1)
+  expect(f.store.getState().tabs[f.tabId]?.regions[f.regionId]).toBeUndefined()
+})
+
+it.runIf(business)('a Source successor binding received after the spatial write survives the older exact close', async () => {
+  const f = await sourceCloseFixture(true)
+  const record = await f.store.getState().prepareWorkbenchClose({ target: f.close, keepAgentSessions: false }), actual = f.bridge.api.call
+  f.call.mockImplementation(async (method, input, signal) => {
+    const receipt = await actual(method, input, signal)
+    if (method === 'apply') {
+      const current = (await f.source.b.spatial.read())!, graph = structuredClone(current.graph), tabId = f.admitted.address.tabId
+      graph.tabs = graph.tabs.map(tab => tab.tabId === tabId ? { ...tab, regionIds: [...tab.regionIds, f.admitted.address.regionId] } : tab)
+      graph.regions.push({ regionId: f.admitted.address.regionId, tabId, kind: 'agent', agentSessionId: 'successor-source-agent', runId: null, execution: null })
+      const { splitWorkbenchRegion } = await import('@agentmux/layout')
+      graph.tabLayouts[tabId] = splitWorkbenchRegion(graph.tabLayouts[tabId]!, graph.tabLayouts[tabId]!.activeRegionId, 'right', f.admitted.address.regionId)
+      await f.source.b.spatial.commit({ expectedRevision: current.revision, graph })
+      const snapshot = await actual('snapshot', { hostId: f.target.hostId, reference: f.target.reference })
+      f.store.getState().observeSpaceMount(f.target, { snapshot, reading: false })
+    }
+    return receipt
+  })
+  expect(await f.store.getState().applyWorkbenchClose(record)).toBe(false)
+  expect(f.store.getState().tabs[f.tabId]?.regions[f.regionId]?.source).toMatchObject({ agentSessionId: 'successor-source-agent' })
+  expect(f.stops).not.toHaveBeenCalled(); expect(f.sourceNative).not.toHaveBeenCalled()
+  expect((await f.source.b.spatial.read())!.graph.regions.find(region => region.regionId === f.admitted.address.regionId)?.agentSessionId).toBe('successor-source-agent')
+})
+
 it.runIf(business)('compiled CLI closes the exact frozen raw Run and reviewed dirty file through the original Main and Renderer owners', async () => {
   const f = await fixture(), before = await readFile(join(f.root, 'sessions.json'))
   const prepared = f.prepared(await f.prepare('reviewed-close'))
