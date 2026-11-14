@@ -225,8 +225,9 @@ async function launch(label, seed) {
   const manifest = JSON.parse(await readFile(join(desktopRoot, 'package.json'), 'utf8'))
   assert.equal(resolve(desktopRoot, manifest.main), join(desktopRoot, 'out/main/index.js'), 'Use the existing official package Main')
   const child = spawn(require('electron'), ['--inspect-brk=0', desktopRoot, '--remote-debugging-port=0'], {
-    cwd: desktopRoot, detached: true, stdio: ['ignore', 'ignore', 'pipe'], env: { ...process.env, ...environment, AGENTMUX_DESKTOP_READY_FILE: readyFile,
-      ...(seed ? { AGENTMUX_DESKTOP_RECOVERY_SEED: JSON.stringify(seed), AGENTMUX_DESKTOP_RECOVERY_REPORT: reportFile } : {}) }
+    cwd: desktopRoot, detached: true, stdio: ['ignore', 'ignore', 'pipe'], env: { ...process.env, ...environment,
+      ...(!focusReadJoin ? { AGENTMUX_DESKTOP_READY_FILE: readyFile } : {}),
+      ...(seed && !focusReadJoin ? { AGENTMUX_DESKTOP_RECOVERY_SEED: JSON.stringify(seed), AGENTMUX_DESKTOP_RECOVERY_REPORT: reportFile } : {}) }
   })
   assert.ok(child.pid > 1); children.add(child)
   let diagnostics = '', mainUrl, rendererUrl, spawnError
@@ -262,13 +263,38 @@ async function launch(label, seed) {
   assert.equal(originalBridge.exceptionDetails, undefined); assert.ok(originalBridge.result.objectId)
   const controlBridgeId = originalBridge.result.objectId, controlBridgeOwner = { pid: child.pid,
     source: 'apps/desktop/out/main/index.js', sha256: digest(mainBytes), symbol: 'DesktopControlIpcBridge', contract: 'Main-to-original-Renderer inspect.region' }
+  let seedPromise, ownerSeedReport
+  if (focusReadJoin && seed) {
+    // Admit the one initial private seed through the original compiled Main owner.
+    // Its synchronous queue admission precedes Renderer reads of the same tail.
+    await assert.rejects(readFile(join(userData, 'workbench-user-state.json')), { code: 'ENOENT' })
+    const admitted = await main.call('Debugger.evaluateOnCallFrame', { callFrameId: paused.callFrames[0].callFrameId,
+      expression: `args.workbenchUserState.write(${JSON.stringify(JSON.stringify(seed))})`, returnByValue: false })
+    assert.equal(admitted.exceptionDetails, undefined); assert.ok(admitted.result.objectId)
+    seedPromise = admitted.result.objectId
+    ownerSeedReport = { owner: 'Original compiled Main WorkbenchUserStateStore.write', pid: child.pid, seedWrites: 1, seedSha256: digest(JSON.stringify(seed)) }
+  }
   await main.call('Debugger.resume')
+  if (seedPromise) {
+    const saved = await main.call('Runtime.awaitPromise', { promiseObjectId: seedPromise, returnByValue: true })
+    assert.equal(saved.exceptionDetails, undefined); assert.equal(saved.result.value.diskDurability, 'confirmed')
+    assert.equal(saved.result.value.contentDigest, ownerSeedReport.seedSha256)
+    ownerSeedReport.receipt = saved.result.value
+    await writeFile(join(output, label + '-seed-report.json'), JSON.stringify(ownerSeedReport, null, 2) + '\n')
+  }
   const endpoint = new URL(await waitFor(`${label} Renderer debugger`, () => { alive(); return rendererUrl }))
   const target = await waitFor(`${label} Renderer target`, async () => (await (await fetch(`http://${endpoint.host}/json/list`, { signal: AbortSignal.timeout(5000) })).json()).find(value => value.type === 'page' && value.url.startsWith('file:')))
   const cdp = await connectCdp(target.webSocketDebuggerUrl, connections); await cdp.call('Runtime.enable'); await cdp.call('Emulation.setFocusEmulationEnabled', { enabled: true })
   const rendererDiagnostics = await collectDiagnostics(target.webSocketDebuggerUrl, label + '-renderer')
-  await waitFor(`${label} ready`, async () => { alive(); try { return JSON.parse(await readFile(readyFile, 'utf8')) } catch (error) { if (error.code !== 'ENOENT') throw error; return null } })
-  if (seed) await copyFile(reportFile, join(output, label + '-seed-report.json'))
+  if (focusReadJoin) {
+    const loaded = await waitFor(`${label} ordinary loaded Renderer identity`, async () => {
+      alive(); const value = await cdp.evaluate('window.agentmux?.ui.readLoadedIdentity()'); return value?.renderer ? value : null
+    })
+    receipt.ordinaryStartup ??= []; receipt.ordinaryStartup.push({ pid: child.pid, readyVia: 'Read-only original loaded identity after RendererUpdates.initialize', loaded })
+  } else {
+    await waitFor(`${label} ready`, async () => { alive(); try { return JSON.parse(await readFile(readyFile, 'utf8')) } catch (error) { if (error.code !== 'ENOENT') throw error; return null } })
+    if (seed) await copyFile(reportFile, join(output, label + '-seed-report.json'))
+  }
   try {
   await waitFor(`${label} original workface and ${workfaceJoin ? 'Focus workface presentation' : 'visible name handle'}`, () => cdp.evaluate(
     workfaceJoin
@@ -279,7 +305,7 @@ async function launch(label, seed) {
     throw error
   }
   assert.equal(await cdp.evaluate('(async()=>(await window.agentmux.sessions.snapshot()).localHome)()'), privateHome)
-  return { child, main, cdp, controlBridgeId, controlBridgeOwner, diagnostics: [mainDiagnostics, rendererDiagnostics], seedReport: seed ? JSON.parse(await readFile(reportFile, 'utf8')) : null }
+  return { child, main, cdp, controlBridgeId, controlBridgeOwner, diagnostics: [mainDiagnostics, rendererDiagnostics], seedReport: ownerSeedReport ?? (seed ? JSON.parse(await readFile(reportFile, 'utf8')) : null) }
 }
 async function surface(probe) {
   if (workfaceJoin) {

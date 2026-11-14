@@ -63,10 +63,14 @@ export function createNativeFocusReadProof({ command, session, spaceId, regionId
       const unknown = pages.items.find(value => JSON.stringify(value.reference) === JSON.stringify(foreign))
       assert.ok(unknown); assert.equal(unknown.availability, 'unconfirmed'); assert.equal(unknown.agent, null)
       assert.equal(unknown.state, null); assert.equal(unknown.name, null); assert.deepEqual(unknown.locations.occurrences, [])
-      const wrong = observed('wrong Host Project scope', await read({ scope: { ...scope, hostId: foreign.hostId }, selection: { kind: 'members', references: [item.reference] } }))
+      const wrong = observed('wrong Host Project and member', await read({ scope: { ...scope, hostId: foreign.hostId }, selection: { kind: 'members', references: [foreign] } }))
       assert.equal(wrong.status, 'unconfirmed'); assert.equal(wrong.coverage.complete, false)
       assert.ok(wrong.issues.some(issue => issue.code === 'FOCUS_GROUP_UNCONFIRMED'))
       assert.ok(wrong.items.every(value => value.agent === null && value.availability !== 'observed'))
+      const outside = observed('known original member outside the requested group', await read({ scope: { ...scope, hostId: foreign.hostId }, selection: { kind: 'members', references: [item.reference] } }))
+      assert.equal(outside.status, 'changed'); assert.equal(outside.coverage.complete, false)
+      assert.equal(outside.items.length, 1); assert.equal(outside.items[0].availability, 'changed')
+      assert.deepEqual(outside.items[0].reference, item.reference); assert.deepEqual(outside.items[0].agent, item.agent)
       proof.originalMain = probe.controlBridgeOwner; proof.loadedRenderer = loaded.renderer
       await retainedRun('original Run retained through public reads', before)
     },
