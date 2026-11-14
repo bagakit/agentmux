@@ -372,3 +372,44 @@ Use `connectSpaceMember(rpc, target)` from `@agentmux/core/space-member-client` 
 `space member call --input FILE|-` and `space member watch --input FILE|-` expose the same finite protocol. The JSON envelope is `{target, call:{method,params}}`; inner parameters retain the existing Hosted owner fence, consumer, exact Session/Run and original input operation. Calls allow exact metadata, terminal attachment/replay/resize, raw Agent input, prompt submission, original input/interaction inspection, and explicit `rejoinAgentInputWaiting({ref})`. Rejoin accepts exactly one original prompt waiting reference: `ref.key` must match the selected SID and expected Run, and `waitGeneration` is validated by the existing input owner. Do not supply a caller, scope, extra authority or a second argument; do not reconstruct a waiting generation or mint another input OP. Rejoin acknowledgement is not input completion; inspect the original canonical receipt. This does not add automatic retries or Session recovery. Watch allows only the selected Session events or terminal/replay stream. No inventory, new Agent, stop/recovery, history, A2A or native human approval is included. Use the original execution device’s human entry for a pending native permission or question; an intermediate transport account cannot answer as that person.
 
 A failed observer keeps the original Space, Agent and pending input. A changed member or Run refuses only that exact action. Composer submissions retain their original submission ID and exact input key for receipt inspection. Raw write/paste has a Native acknowledgement but no caller-owned business operation ID; an unknown raw acknowledgement is not automatically resent or presented as an inspectable operation. The client does not change either input’s target. Closing a mounted reader releases its observation, never its Run.
+
+## Names at their original Source and execution owners
+
+<!-- amux:generated command:space.member.name.inspect -->
+<!-- amux:generated command:space.member.name.change -->
+
+A qualified name target reuses the original member identity and requires
+expectedAdmission:{kind:creation|association,operationId:C|L}. Names require no
+expectedRun. The Source resolves its exact occurrence: object:tab writes its own
+original Tab, while object:agent reaches the actual execution Core's local label
+owner through the frozen execution route and the current viewer's finite name
+grant. A membership reference, creator certificate or Terminal grant is not a
+name grant. Same SID at another Runtime, Region or C/L is another target.
+
+Inspect returns the current override/source/nameRevision and optionally one exact
+original operation record. Its diskAcknowledgement is always not-observed: a read
+of an applied record cannot acknowledge the original disk write. Change accepts
+one rename with operationId/name/expectedNameRevision/source(manual|launch|derived),
+or explicit confirm with the original operationId. Rename uses the original label
+CAS, priority and audit owner. Confirm only flushes that original document; it
+never replays a name or replaces a later manual edit. Preserve unknown results
+and their original input. The two names have independent operations and ACKs.
+
+For example, the original Source CLI input is:
+
+```json
+{"target":{"reference":{"runtimeId":"B","spaceId":"Space"},"regionId":"Region","runtimeId":"D","agentSessionId":"SID","expectedAdmission":{"kind":"creation","operationId":"C"}},"object":"agent","change":{"kind":"rename","operationId":"name-OP","name":"Agent name","expectedNameRevision":0,"source":"launch"}}
+```
+
+Use `amux space member name change --input request.json`; use the same target and
+object with operationId for inspect. The public SDK createNameControlClient uses
+the same strict DTO and original public transport, without retry or caller fields.
+Replies contain only the exact label and operation, never the whole spatial graph.
+
+For an external association L, the Source may name its original Tab. The Agent is
+still owned by its independent Coordinator: use that separately authenticated
+original witness and local name API with its real creation C, not L. The Source
+never creates a reverse transport or borrows a same-SID local Agent. Old receiving
+client agent.rename overrides stay in their original files and are not migrated
+or presented as execution-owner confirmation. These saves concern AgentMux display
+names; Provider native-name synchronization is separate and is not claimed here.

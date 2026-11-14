@@ -187,3 +187,33 @@ For cross-Host execution, `amux agent execution create --input FILE|-` consumes 
 Use `amux agent history record inspect --host ID --session ID [--operation-id ID]` before an explicit **Delete AgentMux record** action. Only the original transport-approved person/device may use `agent history record delete`; use its exact retirement timestamp/revision and keep the same operation ID. After an unknown reply, inspect first; absence is not a deletion receipt. A user may explicitly retry the same original operation and witness, never mint a replacement. A confirmed `pending` phase may be completed only with explicit `--continue` on that same operation. Core terminal identity and known creation correlations remain, while Session-bound records become unreadable and cannot continue. Shared input journal originals, Provider originals, ctxmux Runtime and independent client drafts/queues have their own owners and are not physically deleted. Indexed Session-row cleanup is logical work, not physical disk reclamation. These calls require a serving Core that supports the capability; unsupported calls do not stop a healthy old Core or grant a fallback deletion path.
 
 Use `amux agent history usage --host ID --session ID [--limit N] [--cursor CURSOR]` for a bounded read of existing captured JSON body bytes. Select the original Host/Session from `agent ls` (including retired entries), then keep its exact cursor/epoch/sequence range. Each page reports logical bytes and records only for that page, with explicit measured coverage. Other Core records, Provider originals, ctxmux Runtime and shared database physical pages remain unmeasured. This is not total Session occupancy, reclaimable space or deletion authority. The reader never imports native history, operates a Run or sends input. Use command help for the current machine fields.
+
+## Exact local display-name ownership
+
+<!-- amux:generated command:agent.name.inspect -->
+<!-- amux:generated command:agent.name.change -->
+
+These finite APIs address the actual local label owner with exact runtimeId,
+agentSessionId and createOperationId. They do not aggregate other Hosts or need
+a current Run, Native connection, readiness probe or full history. The local
+Core verifies its original durable Session creation and current actor. Read
+never initializes a document. A confirmed local Session with an absent name
+file may explicitly create its label in the same original spatial store; parse
+or I/O uncertainty is not absence and never overwrites original bytes.
+
+Change uses the same rename/confirm union as Source member naming. For example:
+
+```json
+{"runtimeId":"A","agentSessionId":"SID","createOperationId":"C","change":{"kind":"rename","operationId":"Agent-name-OP","name":"Original Agent","expectedNameRevision":0,"source":"manual"}}
+```
+
+Use `amux agent name change --input request.json`. Inspect accepts the same exact
+identity and optional operationId, and returns current override/source/revision
+and the original record with diskAcknowledgement:not-observed. Only the actual
+rename or explicit confirm returns a producer durability ACK. Keep partial or
+unknown operations; do not mint or automatically replay a replacement. A Source
+association L is not this local creation C or a grant to the Agent.
+
+The older `agent rename` retains its receiving-client display-override semantics
+and original records. It is not silently redirected to another Core. Local label
+saves do not claim Provider-native title synchronization or Agent health.
