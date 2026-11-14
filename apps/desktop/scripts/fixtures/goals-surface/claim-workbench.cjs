@@ -60,7 +60,7 @@ module.exports = async ({ evaluate, size, click, capture, waitFor, paint, result
           node: report.querySelector('[data-goal-work-node]').dataset.goalWorkNode,
           selectedTitle: document.querySelector('.goal-plan__reading h3').textContent }
       })()`)
-      assert.equal(scope.heading, 'Goal work')
+      assert.equal(scope.heading, 'Execution records')
       assert.equal(scope.selectedTitle, 'Write the recovery guide')
       assert.equal(scope.operation, 'attempt:' + scope.node)
       assert.notEqual(scope.node, 'guide', 'The visible original report belongs to its own recorded task')

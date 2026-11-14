@@ -81,10 +81,16 @@ if(goalBoardReading) ownedSources.push('scripts/verify-goal-board-reading.mjs', 
 if(goalTaskWorkbench)ownedSources.push('scripts/fixtures/goals-surface/task-workbench.cjs','scripts/fixtures/goals-surface/edge-geometry.cjs','src/renderer/src/components/useGoalPlanPath.ts',
   'src/renderer/src/components/GoalPlanAssignment.tsx','src/renderer/src/components/GoalPlanReadingPlacement.tsx',
   'src/renderer/src/lib/goal-plan-routing.ts','src/renderer/src/lib/move-reading-host.ts')
-if(goalReadingOutline)ownedSources.push('src/renderer/src/components/GoalReadingOutline.tsx','src/renderer/src/components/useGoalPlanPath.ts','scripts/fixtures/goals-surface/workflow-restart.cjs','src/renderer/src/styles/goal-reading.css','scripts/fixtures/goals-surface/reading-outline.cjs')
+if(goalReadingOutline)ownedSources.push('src/renderer/src/components/GoalWorkArea.tsx','src/renderer/src/components/GoalSupervisorRail.tsx','src/renderer/src/components/GoalAgentPicker.tsx','src/renderer/src/styles/goal-supervisor-rail.css','src/renderer/src/components/GoalReadingOutline.tsx','src/renderer/src/components/useGoalPlanPath.ts','scripts/fixtures/goals-surface/workflow-restart.cjs','src/renderer/src/styles/goal-reading.css','scripts/fixtures/goals-surface/reading-outline.cjs')
 if(goalClaimWorkbench)ownedSources.push('src/renderer/src/components/GoalWorkArea.tsx','scripts/fixtures/goals-surface/claim-workbench.cjs','src/renderer/src/components/GoalSupervisorRail.tsx','src/renderer/src/components/GoalPatrolControl.tsx','src/renderer/src/components/GoalExecutionTimeline.tsx','src/renderer/src/styles/goal-reading.css','src/renderer/src/styles/goal-supervisor-rail.css')
 if(goalHierarchy)ownedSources.push('scripts/fixtures/goals-surface/hierarchy.ts','scripts/fixtures/goals-surface/hierarchy.cjs','src/renderer/src/lib/goal-team.ts','src/renderer/src/lib/goal-agent-selection.ts','src/renderer/src/components/GoalContinuationControl.tsx','src/renderer/src/styles/goal-team.css','src/renderer/src/components/FocusContextCardBody.tsx','src/renderer/src/components/settings/GoalsPromptDrafts.tsx','src/renderer/src/components/settings/SettingsSaveBar.tsx','src/renderer/src/components/settings/modules/goals.tsx','src/renderer/src/components/settings/modules/prompts.tsx','src/renderer/src/components/settings/use-resource-drafts.ts','src/renderer/src/components/settings/use-setting-draft.ts','src/renderer/src/lib/focus-context.ts','src/renderer/src/lib/focus-context-identity.ts','src/renderer/src/styles/focus-context.css','src/renderer/src/components/FocusContextRow.tsx','src/renderer/src/components/AgentContextContent.tsx','src/renderer/src/components/FocusContextMenu.tsx','src/renderer/src/components/AgentInformationPreview.tsx','src/renderer/src/styles/focus.css')
 if(goalRealWork)ownedSources.push('scripts/fixtures/goals-surface/index.html','scripts/fixtures/goals-surface/real-work.ts','scripts/fixtures/goals-surface/real-work.cjs','scripts/fixtures/goals-surface/real-work-native.cjs','src/renderer/src/components/GoalWorkArea.tsx','src/renderer/src/lib/goal-start-presentation.ts','src/renderer/src/lib/goal-delegation-work.ts','src/renderer/src/components/GoalFiniteStartControl.tsx','src/renderer/src/lib/goal-team.ts','src/renderer/src/styles/goal-team.css')
+if (goalReadingOutline) {
+  for (const path of ['agent-outbound-message', 'agentmux-cli-help', 'goal-responsibility']) {
+    const built = ownedSources.indexOf('../../packages/core/dist/' + path + '.js')
+    if (built !== -1) ownedSources.splice(built, 1)
+  }
+}
 const sourceHashes = async () => Object.fromEntries(await Promise.all(ownedSources.map(async file => [file, hash(await readFile(join(desktop, file)))])))
 // Default proof follows the current Goals entry acceptance; the broader detail workflow remains explicit.
 const mode=goalRealWork?'goal-real-work':planOnly?'plan':mainMote?'goal-main-mote':links?'project-links':direct?'direct-goal':density?'density':captureArgs.includes('--maturity')?'maturity':captureArgs.includes('--common-actions')?'common-actions':captureArgs.includes('--full-workflow')?'full-workflow':'entry-controls'
@@ -95,7 +101,7 @@ try{
   if(density&&!captureArgs.includes('--density-before-only')){const bytes=await readFile(densityBaseline),baseline=JSON.parse(bytes);result.densityBaseline={path:densityBaseline,sha256:hash(bytes),sourceCommit:baseline.sourceCommit,sourceBefore:baseline.sourceBefore};assert.ok(Object.keys(baseline.sourceBefore).length>0,'Measured prior layout has nonempty Source identity')}
   const outDir=join(privateRoot,'renderer')
   const loadedCoreSources={}, loadedCandidateSources={}
-  const coreAliases = goalBoardReading
+  const coreAliases = goalBoardReading || goalReadingOutline
     ? Object.entries(JSON.parse(await readFile(join(repository, 'packages/core/package.json'), 'utf8')).exports)
       .filter(([key]) => key !== '.')
       .map(([key, entry]) => ({ find: '@agentmux/core/' + key.slice(2), replacement: join(repository, 'packages/core', entry.import.replace('./dist/', './src/').replace(/\.js$/u, '.ts')) }))
