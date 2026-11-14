@@ -37,6 +37,12 @@ it('the actual Main settings consumer uses the target registry without opening S
   } })
   expect(saved).toMatchObject({ routeHostId: 'remote', runtimeId: 'target-runtime', executor: { executorId: 'wrapper', command } })
   expect(JSON.stringify(saved)).not.toMatch(/local-secret|remote-secret|"env"/)
+  expect(await controller.discoverExecutors('remote', { refresh: false })).toEqual({
+    routeHostId: 'remote', runtimeId: 'target-runtime', executors: [
+      expect.objectContaining({ executorId: 'claude', source: 'provider-default', availability: 'unknown' }),
+      expect.objectContaining({ executorId: 'wrapper', source: 'registered', availability: 'unknown' })
+    ]
+  })
   expect(connect).not.toHaveBeenCalled()
   await expect(controller.discoverExecutors('unconfigured')).rejects.toMatchObject({ code: 'UNKNOWN_HOST' })
   const failure = new AgentMuxError('The original authenticated control transport is unavailable', 'CONTROL_UNAVAILABLE')
