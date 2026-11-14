@@ -50,6 +50,8 @@ describe('File format integration keeps original current draft', () => {
     await act(async () => useAppStore.getState().updateDocument(id, draft, file.regionId)); await click('Preview')
     await check(() => { expect(container.textContent).toContain(expected); expect(container.textContent).toContain(detail) })
     expect(workers).toHaveLength(1); expect(workers[0]?.url.pathname).toContain(path.endsWith('.ipynb') ? 'data-notebook.worker.ts' : 'data-structured.worker.ts')
+    const archive = process.env.EDITOR_EXTENSION_ARCHIVE
+    if (archive && path.endsWith('.ipynb')) expect(workers[0]?.url.pathname).toContain(archive + '/src/engines/')
     expect(useAppStore.getState().tabs[id]?.regions[file.regionId]).toBe(file); expect(useAppStore.getState().documents[key]).toMatchObject({ content: draft, revision: 'native-original' }); expect(useAppStore.getState().dirtyDocuments[key]).toBe(true)
     await click('Source'); expect(container.querySelector('textarea')?.value).toBe(draft); expect(container.querySelector('textarea')?.dataset.monacoPath).toBe(modelPath); expect(workers[0]?.terminate).toHaveBeenCalled()
     await click('Preview'); await check(() => expect(workers).toHaveLength(2)); await act(async () => root.render(<FileSurfaceView tabId={id} surface={file} visible={false} />)); await settle()
