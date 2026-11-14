@@ -1,4 +1,5 @@
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
+import type { ReactNode } from 'react'
 import type { HostConfig, WorkspaceRecord } from '../../../shared/contracts'
 import type { HostCheckState } from '../store'
 import { hostCheckLabel } from '../lib/host-check'
@@ -11,11 +12,12 @@ const ThemeObjectFolderIcon = semanticIconComponent('object.folder')
 
 
 /** The project and its device come from the Space entry; the start page only reads them. */
-export function LauncherEnvironment({ workspace, host, check, displayPath }: {
+export function LauncherEnvironment({ workspace, host, check, displayPath, executionControl }: {
   workspace: WorkspaceRecord | undefined
   host: HostConfig | undefined
   check: HostCheckState | undefined
   displayPath: string
+  executionControl?: ReactNode
 }) {
   const identity = hostIdentityProjection(workspace?.hostId, host)
   const connection = useHostConnectionHint(identity.id, identity.label)
@@ -37,6 +39,10 @@ export function LauncherEnvironment({ workspace, host, check, displayPath }: {
       </div>
       <span className="launcher-environment__path" title={displayPath || undefined}>{displayPath || 'No working directory selected'}</span>
     </div>
+    {executionControl ? <div className="launcher-environment__execution">
+      <span className="launcher-environment__execution-label">Run mode</span>
+      {executionControl}
+    </div> : null}
     {tooltip.content}
   </header>
 }

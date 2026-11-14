@@ -2,8 +2,10 @@
 .launch-surface { --surface-state-width: 720px; --launcher-brand-cover: 62%; padding: clamp(var(--sp-6), 4%, var(--sp-8)); background: linear-gradient(90deg, var(--surface-0) 0, var(--surface-0) min(68%, calc(50% + 300px)), transparent min(92%, calc(50% + 520px))), linear-gradient(180deg, color-mix(in srgb, var(--surface-0) var(--launcher-brand-cover), transparent), var(--surface-0) 320px), var(--launcher-hero, none) top right / max(100%, 880px) auto no-repeat, var(--surface-0); container-name: launcher; container-type: inline-size; }
 [data-appearance='light'] .launch-surface { --launcher-brand-cover: 86%; }
 .launch-surface > .surface-state__content > .surface-state__body { display: flex; flex-direction: column; }
-.launcher-environment { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--sp-6); padding-bottom: var(--sp-6); margin-bottom: var(--sp-5); border-bottom: 1px solid var(--line-soft); }
-.launcher-environment__project { flex: 1; min-width: 0; display: grid; gap: var(--sp-2); }
+.launcher-environment { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: var(--sp-3) var(--sp-6); padding-bottom: var(--sp-6); margin-bottom: var(--sp-5); border-bottom: 1px solid var(--line-soft); }
+.launcher-environment__project { flex: 1 1 200px; min-width: 0; display: grid; gap: var(--sp-2); }
+.launcher-environment__execution { flex: none; display: grid; justify-items: end; gap: var(--sp-1); }
+.launcher-environment__execution-label { color: var(--text-3); font-size: var(--fs-micro); line-height: 1.4; }
 .launcher-environment__title { min-width: 0; display: flex; align-items: center; gap: var(--sp-4); }
 .launcher-environment__title > svg { flex: none; color: var(--text-2); }
 .launcher-environment h2 { margin: 0; overflow: hidden; color: var(--text); font-size: var(--fs-title); font-weight: 650; letter-spacing: -.025em; text-overflow: ellipsis; white-space: nowrap; }
@@ -25,26 +27,10 @@
 .launcher-environment__device > span { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .launcher-environment__device:hover, .launcher-environment__device:focus-visible { color: var(--text-2); }
 .launcher-environment__device:focus-visible { outline: 2px solid var(--focus-line); outline-offset: 2px; }
-/* Runs on sits with the Agents it chooses between. */
-.launcher-agents-head__identity { flex: none; }
-.launcher-agent-device { flex: 1; min-width: 0; display: flex; align-items: center; justify-content: flex-end; gap: var(--sp-2) var(--sp-3); flex-wrap: wrap; margin-inline-end: var(--sp-4); padding-inline-end: var(--sp-4); border-inline-end: 1px solid var(--line-soft); color: var(--text-3); font-size: var(--fs-meta); }
-.launcher-agent-device > .launcher-agent-device__label { white-space: nowrap; }
-.launcher-agent-device__label { flex: none; color: var(--text-3); }
-.launcher-agent-device > .selection-field { flex: 0 1 auto; width: auto; min-width: 128px; max-width: 220px; min-height: 28px; }
-.launcher-agent-device[data-pending] .selection-field { opacity: .72; }
-.launcher-agent-device__status { min-width: 0; display: inline-flex; align-items: center; gap: var(--sp-2); color: var(--text-3); animation: launcher-device-status-in var(--dur-enter) var(--ease-enter); }
-.launcher-agent-device__status[data-state='failed'] { color: var(--text-2); }
-.launcher-agent-device__read { min-width: 0; display: inline-flex; align-items: baseline; gap: var(--sp-2); }
-.launcher-agent-device__read strong { color: var(--text-2); font-weight: 550; }
-.launcher-agent-device__read code { min-width: 0; overflow: hidden; color: var(--text-3); font: var(--fs-micro)/1.4 var(--font-mono); text-overflow: ellipsis; white-space: nowrap; }
-.launcher-agent-device__action { padding: 0; border: 0; color: var(--text-2); background: transparent; font: inherit; text-decoration: underline; text-decoration-color: var(--line); text-underline-offset: 3px; cursor: pointer; }
-.launcher-agent-device__action:hover { color: var(--text); text-decoration-color: currentColor; }
-.launcher-agent-device__action:focus-visible { outline: 2px solid var(--focus-line); outline-offset: 2px; border-radius: 2px; }
-.launcher-agent-device__action:disabled { color: var(--text-3); cursor: default; }
 @keyframes launcher-device-status-in { from { opacity: 0; } to { opacity: 1; } }
 /* A device switch replaces the Agent list in place; the list keeps its height and fades in. */
 .launch-surface[data-motion-active='true'] .launcher-agent-catalog[data-host-id] { animation: launcher-device-status-in var(--dur-enter) var(--ease-enter); }
-@media (prefers-reduced-motion: reduce) { .launcher-agent-device__status, .launch-surface[data-motion-active='true'] .launcher-agent-catalog[data-host-id] { animation: none; } .launcher-environment__device { transition: none; } }
+@media (prefers-reduced-motion: reduce) { .launch-surface[data-motion-active='true'] .launcher-agent-catalog[data-host-id] { animation: none; } .launcher-environment__device { transition: none; } }
 .launcher-agents-head { min-height: 32px; display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); margin-bottom: var(--sp-2); }
 .launcher-agents-head__identity { min-width: 0; display: inline-flex; align-items: center; gap: var(--sp-3); }
 .launcher-agents-head strong { color: var(--text-2); font-size: var(--fs-meta); font-weight: 600; }

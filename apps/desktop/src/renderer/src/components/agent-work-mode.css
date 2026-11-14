@@ -60,8 +60,8 @@
 .agent-work-detail__route { border-top: 1px solid var(--line-soft); padding-top: 10px; }
 .agent-work-detail__access { gap: 8px; }
 .launcher-work-arrangement { display: inline-flex; align-items: center; gap: 5px; min-width: 0; }
-.launcher-work-arrangement__trigger { display: inline-flex; align-items: center; gap: 5px; border: 1px solid var(--line-soft); border-radius: 6px; padding: 4px 7px; background: var(--surface-1); color: var(--text-2); font-size: 11px; cursor: pointer; }
-.launcher-work-arrangement__trigger:hover, .launcher-work-arrangement__trigger[aria-expanded=true] { color: var(--text); border-color: var(--focus-line); }
+.launcher-work-arrangement__trigger { display: inline-flex; align-items: center; gap: 5px; border: 1px solid transparent; border-radius: 6px; padding: 4px 7px; background: transparent; color: var(--text-2); font-size: 11px; cursor: pointer; }
+.launcher-work-arrangement__trigger:hover, .launcher-work-arrangement__trigger[aria-expanded=true] { color: var(--text); border-color: var(--line-soft); background: var(--surface-1); }
 .launcher-work-arrangement__trigger:focus-visible { outline: 2px solid var(--focus-line); outline-offset: 2px; }
 .launcher-work-arrangement__dialog { position: fixed; z-index: 1; width: min(420px, calc(100vw - 24px)); padding: 18px; border-radius: 12px; border: 1px solid var(--line-soft); background: var(--surface-0); color: var(--text); box-shadow: 0 18px 60px #0003; overflow-y: auto; }
 .launcher-work-arrangement__dialog h2 { margin: 0 0 6px; font-size: 16px; font-weight: 600; }

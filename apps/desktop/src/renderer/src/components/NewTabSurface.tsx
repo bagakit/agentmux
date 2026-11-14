@@ -437,7 +437,11 @@ export function NewTabSurface({
     <SurfaceState ref={surfaceRef} className="launch-surface" data-agent-section={sections.agents} data-motion-active={motionActive}
       data-density={regionHeight !== null && regionHeight < 520 ? 'compact' : 'normal'}
       style={{ '--launcher-hero': `url("${launcherHero}")`, ...(regionHeight === null ? {} : { '--launcher-region-height': `${regionHeight}px` }) } as CSSProperties} body={<>
-      <LauncherEnvironment workspace={workspace} host={host} check={hostCheck} displayPath={displayPath} />
+      <LauncherEnvironment workspace={workspace} host={host} check={hostCheck} displayPath={displayPath}
+        executionControl={workspace && sections.agents === 'expanded' ? <LauncherAgentDevice key={launcherId} hosts={config?.hosts ?? []} workspace={workspace} agentWorkspace={agentWorkspace}
+          explicitAgentWorkspaceId={agentTarget?.agentWorkspaceId} disabled={busy !== null} active={motionActive}
+          onSelect={chooseArrangement} onPreparingChange={setExecutionPreparing}
+          onEditArrangement={settings ? () => settings.open('remote-execution') : undefined} /> : undefined} />
       {regionId ? operationHosts.map(hostId => <AgentOperationFeedback key={hostId} compact subject={{ hostId, regionId }} />) : null}
 
 
@@ -468,11 +472,7 @@ export function NewTabSurface({
       {sections.agents !== 'hidden' ? <div className="launcher-agents-head">
         {sections.agents === 'collapsed' ? <button type="button" className="launcher-agent-entry" aria-label="Expand Agents" onClick={() => setSection('agents', 'expanded')}>
           <AgentAvatar executorId={displayedExecutorId} providerId={selectedProviderId} label={selectedExecutor?.label ?? 'Choose Agent'} size={17} /><span><strong>{selectedExecutor?.label ?? 'Choose Agent'}</strong><small title={promptDisplayText}>{prompt ? promptDisplayText.split('\n')[0] : 'Start a task'}</small></span><ThemeNavigationDisclosureIcon size={14} />
-        </button> : <span className="launcher-agents-head__identity"><strong>Agent</strong>
-        <LauncherAgentDevice key={launcherId} hosts={config?.hosts ?? []} workspace={workspace} agentWorkspace={agentWorkspace}
-          explicitAgentWorkspaceId={agentTarget?.agentWorkspaceId} disabled={busy !== null} active={motionActive}
-          onSelect={chooseArrangement} onPreparingChange={setExecutionPreparing}
-          onEditArrangement={settings ? () => settings.open('remote-execution') : undefined} /></span>}
+        </button> : <span className="launcher-agents-head__identity"><strong>Agent</strong></span>}
         <span className="launcher-section-actions">
           {sections.agents === 'collapsed' ? <LauncherResumePicker getTakeoverOrigin={getTakeoverOrigin} workspace={workspace} originalTarget={splitExecution} disabled={busy !== null} /> : null}
           <button type="button" className="icon-button" aria-label="Refresh agents on this device" title="Refresh agents on this device" disabled={!agentWorkspace || detecting} onClick={() => agentWorkspace && void checkAgents(agentWorkspace.hostId)}>{detecting ? <ThemeStatusLoadingIcon size={13} animation="spin" /> : <ThemeActionRefreshIcon size={13} />}</button>
