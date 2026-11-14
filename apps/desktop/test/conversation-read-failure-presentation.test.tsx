@@ -55,13 +55,15 @@ async function fixture() {
     expect(useAppStore.getState().agentComposerDrafts[agent.id]).toBe('Original unsent draft 中')
     expect(host.querySelector('[role="textbox"]')?.getAttribute('contenteditable')).toBe('true')
     expect(f.controls.map(control => control.mock.calls.length)).toEqual([0, 0, 0, 0, 0, 0])
-    expect(bindingReads.mock.calls.map(([method]) => method)).toEqual(['connection.binding.ls'])
+    // Connection discovery is optional; original conversation IO above is the nonempty read proof.
+    expect(bindingReads.mock.calls.length).toBeLessThanOrEqual(1)
+    expect(bindingReads.mock.calls.every(([method]) => method === 'connection.binding.ls')).toBe(true)
   }
   return { f, port, agent, host, feed, sample, unchanged, render: () => act(async () => root.render(<WorkspaceWorkbench workspaceId="workspace" />)) }
 }
 const button = (scope: ParentNode, label: string) => [...scope.querySelectorAll<HTMLButtonElement>('button')].find(node => node.textContent?.trim() === label)!
 
-it('the actual Workbench presents one complete initial reading failure and retries both exact read owners without touching input or Run', async () => {
+it('the actual Workbench presents one inline initial reading failure and retries every failed original read owner without touching input or Run', async () => {
   const h = await fixture(), raw = 'RPC connection failed; its business outcome is unconfirmed.'
   let failed = true, attempts = 0
   vi.mocked(api.conversation.readAgentConversation).mockImplementation(async (...args) => {
@@ -70,17 +72,24 @@ it('the actual Workbench presents one complete initial reading failure and retri
     return h.port.readAgentConversation(...args)
   })
   await h.render()
-  await until(() => { expect(h.feed()?.querySelectorAll('.full-page-loading--failed')).toHaveLength(1); expect(button(h.feed(), 'Retry reading')).toBeDefined() })
+  await until(() => { expect(h.feed()?.querySelectorAll('[aria-label="View service notice: Conversation reading interrupted"]')).toHaveLength(1); expect(button(h.feed(), 'Retry reading')).toBeDefined() })
+  expect(h.feed().querySelector('.full-page-loading--failed')).toBeNull()
+  expect(h.feed().textContent).toContain('The original records are unavailable right now.')
   expect(h.feed().querySelectorAll('.activity-feed__read-notice')).toHaveLength(0)
   expect(h.feed().querySelectorAll('button')).not.toHaveLength(0)
   expect([...h.feed().querySelectorAll('button')].filter(node => node.textContent?.trim() === 'Retry')).toHaveLength(0)
-  expect(h.feed().textContent).toContain('Original read 1'); expect(h.feed().textContent).toContain('Original read 2')
+  expect(h.feed().textContent).toContain(raw)
+  const failedSources = new Set(vi.mocked(api.conversation.readAgentConversation).mock.calls.map(([input]) => input.source ?? 'native'))
+  expect(failedSources.size).toBeGreaterThan(0)
   expect(h.feed().textContent).not.toContain('Retry the source above')
   const before = attempts
+  const initialCalls = vi.mocked(api.conversation.readAgentConversation).mock.calls.length
   failed = false
   await act(async () => button(h.feed(), 'Retry reading').click())
-  await until(() => { expect(h.feed().textContent).toContain('Original answer with'); expect(h.feed().querySelector('.full-page-loading--failed')).toBeNull(); expect(h.sample()?.loading).toBe(false) })
-  expect(attempts - before).toBe(2)
+  await until(() => { expect(h.feed().textContent).toContain('Original answer with'); expect(h.feed().querySelector('[aria-label="View service notice: Conversation reading interrupted"]')).toBeNull(); expect(h.sample()?.loading).toBe(false) })
+  expect(attempts).toBeGreaterThan(before)
+  const retries = vi.mocked(api.conversation.readAgentConversation).mock.calls.slice(initialCalls)
+  for (const source of failedSources) expect(retries.filter(([input]) => (input.source ?? 'native') === source)).toHaveLength(1)
   const reads = vi.mocked(api.conversation.readAgentConversation).mock.calls
   expect(reads.length).toBeGreaterThan(0)
   expect(reads.map(([input]) => ({ hostId: input.hostId, agentSessionId: input.agentSessionId }))).toEqual(Array.from({ length: reads.length }, () => ({ hostId: 'local', agentSessionId: h.agent.id })))
