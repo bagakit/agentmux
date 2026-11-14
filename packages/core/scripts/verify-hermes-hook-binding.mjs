@@ -58,7 +58,8 @@ try {
   native.pythonVersion = (await exec(python, ['--version'], { env })).stdout.trim()
   native.sourceSHA256 = Object.fromEntries(await Promise.all(native.sources.map(async path => [path, await hash(path)])))
   await buildHookWorker(join(root, 'packages/core'))
-  const inputs = await snapshot(), results = []
+  const candidateInputs = await snapshot(), results = []
+  const inputs = { ...candidateInputs, [python]: native.pythonSHA256, ...native.sourceSHA256 }
   const workerInput = join(privateRoot, 'original-built-worker.mjs')
   await copyFile(join(root, 'packages/core/dist/agentmux-hook.mjs'), workerInput)
   assert.equal(await hash(workerInput), inputs['packages/core/dist/agentmux-hook.mjs'])
@@ -98,7 +99,8 @@ try {
       semanticRed: !!mutation, loaded, reportSHA256: await hash(reportPath) })
     process.stdout.write(label + ': passed\n')
   }
-  assert.deepEqual(await snapshot(), inputs, 'Hermes production or proof inputs changed during qualification')
+  assert.deepEqual(await snapshot(), candidateInputs, 'Hermes production or proof inputs changed during qualification')
+  assert.equal(await hash(python), native.pythonSHA256, 'Native Python changed during qualification')
   for (const [path, value] of Object.entries(native.sourceSHA256)) assert.equal(await hash(path), value, 'Native source changed during qualification')
   await writeFile(join(evidence, mutations ? 'mutations.json' : 'positive.json'), JSON.stringify({ schema: 'agentmux.hermes-native-hook-proof.v1', passed: true,
     inputs, native, assertions: results.reduce((sum, value) => sum + value.assertions, 0), results,

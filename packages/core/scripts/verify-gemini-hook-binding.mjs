@@ -95,7 +95,8 @@ try {
     }
     await writeFile(join(evidence, 'positive.json'), JSON.stringify({ schema: 'agentmux.gemini-installed-hook-proof.v1', native,
       nativeBinaryPath: cli, nativeBinarySHA256: native.cliSHA256, inputs, compiled, fixtureHashes,
-      assertions: { total: report.numTotalTests, passed: report.numPassedTests, failed: report.numFailedTests },
+      assertions: report.numPassedTests,
+      assertionDetails: { total: report.numTotalTests, passed: report.numPassedTests, failed: report.numFailedTests },
       passed: true, receipt: env.AGENTMUX_GEMINI_NATIVE_RECEIPT,
       scope: 'Installed native Config/Storage/HookSystem; real shell/worker and compiled HookServer bindings; no inference or full CLI Session lifecycle claim' }, null, 2) + '\n')
     process.stdout.write(JSON.stringify({ passed: true, evidence }) + '\n')

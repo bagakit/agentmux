@@ -83,9 +83,8 @@ async function native(name, red = false, compiled = false) {
   }
   const path = '.local/state/' + name + '-hook-binding-proof/' + (red ? 'mutations' : 'positive') + '.json'
   const proof = await json(path)
-  const assertions = typeof proof.assertions === 'number' ? proof.assertions : proof.assertions?.passed
-  assert(proof.passed && assertions > 0 && Object.keys(proof.inputs).length > 0, 'Native proof must contain actual assertions and input identity')
-  if (typeof proof.assertions === 'object') assert.equal(proof.assertions.failed, 0)
+  const assertions = proof.assertions
+  assert(proof.passed && typeof assertions === 'number' && assertions > 0 && Object.keys(proof.inputs).length > 0, 'Native proof must contain actual assertions and input identity')
   assert.deepEqual(await snapshot(Object.keys(proof.inputs)), Object.fromEntries(Object.entries(proof.inputs).sort()))
   await artifact(path); checks.push({ label: name + '/' + (red ? 'mutations' : 'positive'), assertions, qualified: true })
 }
@@ -93,7 +92,14 @@ async function gate(name, kind) {
   const path = join(directory, name, kind, 'gate.json'), value = await json(path)
   assert(value.passed && value.checks.length > 0 && value.checks.every(check => check.qualified && check.assertions > 0))
   assert.deepEqual(await snapshot(Object.keys(value.inputs)), value.inputs, 'Stale ' + name + '/' + kind + ' gate')
-  for (const item of value.artifacts) assert.equal(sha(await readFile(file(item.path))), item.sha256)
+  for (const item of value.artifacts) {
+    assert.equal(sha(await readFile(file(item.path))), item.sha256)
+    if (item.path.endsWith('.json')) {
+      const proof = await json(item.path)
+      if (proof.inputs) assert.deepEqual(await snapshot(Object.keys(proof.inputs)), Object.fromEntries(Object.entries(proof.inputs).sort()),
+        'Stale referenced proof inputs: ' + item.path)
+    }
+  }
   await artifact(path); checks.push({ label: name + '/' + kind, assertions: value.checks.reduce((sum, check) => sum + check.assertions, 0), qualified: true })
 }
 try {
