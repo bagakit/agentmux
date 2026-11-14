@@ -216,7 +216,7 @@ it('mounts the actual Review owner only after explicit Review and releases it on
   try {
     useAppStore.setState({ sessions: [{ ...composerSession(), status: { state: 'done', source: 'native-hook', observedAt: Date.now() } }] })
     const render = (visible = true) => dom.render(<AgentSessionComposer sessionId={sessionId} visible={visible}
-      resultReview={onNavigate => <SessionResultReviewContent sessionId={sessionId} items={[]} origin={{ workspaceId: 'workspace', tabGroupId: 'status-prompt-group' }} onNavigate={onNavigate} />} />)
+      resultReview={onNavigate => <SessionResultReviewContent sessionId={sessionId} origin={{ workspaceId: 'workspace', tabGroupId: 'status-prompt-group' }} onNavigate={onNavigate} />} />)
     await render()
     expect(git).not.toHaveBeenCalled()
     await dom.hover('.composer-agent-identity .agent-avatar')

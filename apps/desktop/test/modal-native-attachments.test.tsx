@@ -23,7 +23,7 @@ const cases: { name: string; selector: string; content(): ReactNode }[] = [
   { name: 'System notifications', selector: '.global-system-notices__details', content: () => <GlobalSystemNotices /> },
   { name: 'Mailbox', selector: '.composer-mailbox', content: () => <SessionMailbox system={{ notices: [], unread: [], acknowledge() {}, available: true } as never} queued={[]} /> },
   { name: 'Service details', selector: '.service-disclosure__details', content: () => <ServiceNoticeDisclosure scope="modal-service" notices={[{ id: 'original', notice: { kind: 'indeterminate', notice: { step: 'Original read', mode: 'Observation unavailable', restore: 'Read again' } } }]}><p>Original service facts</p></ServiceNoticeDisclosure> },
-  { name: 'Result review', selector: '.session-result-review__popover', content: () => <SessionResultReview sessionId={session.id} items={[]} origin={{ workspaceId: 'workspace' }} visible surfaceAnchor="--original-surface" /> },
+  { name: 'Result review', selector: '.session-result-review__popover', content: () => <SessionResultReview sessionId={session.id} origin={{ workspaceId: 'workspace' }} visible surfaceAnchor="--original-surface" /> },
   { name: 'Timeline guide', selector: '.activity-ruler__guide', content: () => <Ruler items={[]} scale={createRulerScale([], 100)} band={null} selectedIndex={null} onSelect={() => {}} /> }
 ]
 let restorePopover: () => void
