@@ -63,7 +63,7 @@ export function HostSettingsPane({ config, onSave, active, onClose, navigationRe
     const ids = new Set([...config.hosts.map((host) => host.id), ...Object.keys(records)])
     return [...ids].flatMap((id) => Object.hasOwn(records, id) ? [records[id]!] : [])
   }
-  const hosts = orderedHosts(resource.value)
+  const hosts = useMemo(() => orderedHosts(resource.value), [resource.value, config.hosts])
   const setHosts = (update: (current: HostConfig[]) => HostConfig[]) => resource.setValue((current) =>
     Object.fromEntries(update(orderedHosts(current)).map((host) => [host.id, host])))
   const requestedHostId = navigationRequest?.section === 'hosts' ? navigationRequest.hostId : undefined
@@ -106,8 +106,9 @@ export function HostSettingsPane({ config, onSave, active, onClose, navigationRe
     ? hosts.find(host => host.id === selectedId) ?? null : null,
     active ? config.hosts.find(host => host.kind === 'local') ?? null : null)
   // Local connection drafts do not change the saved Owner's observed interfaces.
-  const addressForLocalHost = (host: HostConfig) => localHostAddress(currentHostNetwork(network.reads[host.id],
-    config.hosts.find(saved => saved.id === host.id && saved.kind === 'local') ?? host))
+  const localAddresses = useMemo(() => new Map<string, ReturnType<typeof localHostAddress>>(hosts.filter(host => host.kind === 'local').map(host => [host.id, localHostAddress(currentHostNetwork(network.reads[host.id],
+    config.hosts.find(saved => saved.id === host.id && saved.kind === 'local') ?? host))])), [hosts, config.hosts, network.reads])
+  const addressForLocalHost = (host: HostConfig) => localAddresses.get(host.id)
   const editor = useRef<HTMLDivElement>(null)
   const [removeRequest, setRemoveRequest] = useState<SshHostConfig | null>(null)
   useEffect(() => { if (!active) setRemoveRequest(null) }, [active])
@@ -255,7 +256,7 @@ export function HostSettingsPane({ config, onSave, active, onClose, navigationRe
   return (
     <div ref={container} className="settings-pane-stack settings-resource-workbench remote-management" data-resource-view={view} data-remote-mode={showTopology ? 'topology' : 'list'} data-remote-wide={wide}
       data-settings-host={active && view === 'editor' && !pendingHostNavigation && hosts.some(host => host.id === selectedId) ? selectedId ?? undefined : undefined}>
-      <div className="remote-foundation"><div><strong>Connection foundation</strong><p>Connect and check your environments here. Use saved Hosts in Remote work.</p></div>{onRemoteWork ? <button type="button" className="small-button" onClick={onRemoteWork}>Remote work</button> : null}</div>
+      <div className="remote-foundation"><div><strong>Your connected machines</strong><p>Select a Host to see its service, resources and access. Use Remote to choose where work runs.</p></div>{onRemoteWork ? <button type="button" className="small-button" onClick={onRemoteWork}>Remote work</button> : null}</div>
       <div className="settings-pane-toolbar remote-management__toolbar">
         {view === 'editor' && <button type="button" className="settings-resource-back small-button" onClick={backToLibrary}><ThemeNavigationBackIcon size={14} /> All hosts</button>}
         <div className="remote-management__scope"><strong>{hosts.length}</strong><span>hosts</span><small>{hosts.filter(host => host.kind === 'ssh').length} remote</small></div>
@@ -268,21 +269,21 @@ export function HostSettingsPane({ config, onSave, active, onClose, navigationRe
       </div>
       {filter.query.trim() ? <p className="remote-management__filter" role="status">{hosts.filter(host => matches(host.id)).length} of {hosts.length} configured hosts match “{filter.query}”{selectedId && !matches(selectedId) ? ' · Selected host remains open' : ''}</p> : null}
       <div className="settings-resource-split remote-management__body">
-        {showTopology ? active ? <HostTopology selectedId={selectedId} onSelect={selectTopologyHost}
+        <div hidden={!showTopology} className="remote-management__map"><HostTopology active={active && showTopology} selectedId={selectedId} onSelect={selectTopologyHost}
           onOpenLink={() => { if (selectedNetworkHost) selectTopologyHost(selectedNetworkHost.id) }}
-          linkView={selectedNetworkHost ? <HostNetworkMap key={selectedNetworkHost.id} host={selectedNetworkHost} committed={config.hosts.find(host => host.id === selectedNetworkHost.id)} state={network.reads[selectedNetworkHost.id]} onRead={network.read} active={active && !pendingHostNavigation && panel === 'overview'} visible={network.visible} /> : null}
-          items={hosts.filter(host => matches(host.id)).map(host => ({ host, localAddress: host.kind === 'local' ? addressForLocalHost(host) : undefined, network: hostNetworkSummary(currentHostNetwork(network.reads[host.id], host)), check: currentHostCheck(checks[host.id], host), projectCount: projectFacts.get(host.id)?.count ?? 0, sessionCount: sessionsByHost.get(host.id)?.length ?? 0 }))} /> : <div /> : <HostConnectionLibrary selectedId={selectedId} panel={panel} query={filter.query} onQuery={filterHosts} onSelect={selectHostPanel} focusRequest={returnFocus}
+          linkView={selectedNetworkHost ? <HostNetworkMap key={selectedNetworkHost.id} host={selectedNetworkHost} committed={config.hosts.find(host => host.id === selectedNetworkHost.id)} state={network.reads[selectedNetworkHost.id]} onRead={network.read} active={active && showTopology && !pendingHostNavigation && panel === 'overview'} visible={network.visible} /> : null}
+          items={hosts.filter(host => matches(host.id)).map(host => ({ host, localAddress: host.kind === 'local' ? addressForLocalHost(host) : undefined, network: hostNetworkSummary(currentHostNetwork(network.reads[host.id], host)), check: currentHostCheck(checks[host.id], host), projectCount: projectFacts.get(host.id)?.count ?? 0, sessionCount: sessionsByHost.get(host.id)?.length ?? 0 }))} /></div><div hidden={showTopology} className="remote-management__list"><HostConnectionLibrary selectedId={selectedId} panel={panel} query={filter.query} onQuery={filterHosts} onSelect={selectHostPanel} focusRequest={returnFocus}
           items={hosts.filter((host) => matches(host.id)).map((host) => {
             const check = currentHostCheck(checks[host.id], host)
             const projects = projectFacts.get(host.id)?.count ?? 0
             return {
               id: host.id, name: host.label,
               projectCount: projects,
-              detail: `${host.kind === 'local' ? addressForLocalHost(host).label : hostConnectionSummary(host)}${projects ? ` · ${projects} ${projects === 1 ? 'project' : 'projects'}` : ''}`,
+              detail: `${host.kind === 'local' ? addressForLocalHost(host)?.label ?? 'Local address unknown' : hostConnectionSummary(host)}${projects ? ` · ${projects} ${projects === 1 ? 'project' : 'projects'}` : ''}`,
               mark: <HostIcon kind={host.kind} size={18} />,
               status: <span className={`settings-resource-row__check check-pill--${check?.state === 'error' ? check.result?.outcome ?? 'check-failed' : check?.state ?? 'idle'}`} role="img" aria-label={hostCheckLabel(check ?? { state: 'idle' })} title={hostCheckLabel(check ?? { state: 'idle' })}>{check?.state === 'checking' ? <ThemeStatusLoadingIcon animation="spin" size={13} /> : check?.state === 'ready' ? <ThemeStatusCompletedIcon size={13} /> : <ThemeStatusInfoIcon size={13} />}<span>{hostCheckLabel(check ?? { state: 'idle' })}</span></span>
             }
-          })} />}
+          })} /></div>
         <div ref={editor} className="settings-resource-editor">
         {hosts.filter((host) => host.id === selectedId).map((host) => {
           const check = currentHostCheck(checks[host.id], host)
@@ -292,7 +293,7 @@ export function HostSettingsPane({ config, onSave, active, onClose, navigationRe
             <section className="host-settings-card" key={host.id} data-resource-editor={host.id} data-host-view={panel} tabIndex={-1}>
               <header className="settings-resource-editor__header">
                 <span className="host-card__icon"><HostIcon kind={host.kind} size={16} /></span>
-                <div><strong>{host.label}</strong><small>{hostConnectionSummary(host)}</small></div>
+                <div><strong>{host.label}</strong><small>{hostConnectionSummary(host)}</small>
                 {check ? (
                   <span role="status" className={`check-pill check-pill--${check.state === 'error' ? check.result?.outcome ?? 'check-failed' : check.state}`}>
                     {check.state === 'checking' ? <ThemeStatusLoadingIcon animation="spin" size={13} /> :
@@ -300,8 +301,9 @@ export function HostSettingsPane({ config, onSave, active, onClose, navigationRe
                     {hostCheckLabel(check)}
                   </span>
                 ) : null}
-                {panel === 'connection' ? <button className="small-button" disabled={check?.state === 'checking' || (host.kind === 'ssh' && host.transport !== 'tailcat' && !host.hostname.trim())} onClick={() => void checkHost(host)}>Test</button> : null}
+                </div><span className="host-card__actions">{panel === 'connection' ? <button className="small-button" disabled={check?.state === 'checking' || (host.kind === 'ssh' && host.transport !== 'tailcat' && !host.hostname.trim())} onClick={() => void checkHost(host)}>Test</button> : null}
                 {host.kind === 'ssh' ? <button className="icon-button icon-button--danger" aria-label={`Remove ${host.label}`} title={`Remove ${host.label}`} disabled={sessionCount > 0} onClick={() => setRemoveRequest(host)}><ThemeActionRemoveIcon size={14} /></button> : null}
+                </span>
               </header>
               <nav className="remote-detail-tabs" aria-label={`Sections for ${host.label}`}>
                 {HOST_PANELS.map(({ id: page, title }) => <button type="button" key={page} data-host-panel={page}
@@ -316,7 +318,7 @@ export function HostSettingsPane({ config, onSave, active, onClose, navigationRe
                   {check?.state === 'error' ? <button type="button" className="small-button remote-overview__connection-action" onClick={() => selectHostPanel(host.id, 'connection')}>Review connection</button> : null}
                   {check?.detail && check.state === 'error' ? <details className="remote-overview__check-details"><summary>Connection test details</summary><p>{check.detail}</p></details> : null}</div>
                 <details className="remote-host-section" open={sectionsOpen[sectionKey(host.id, 'service')] ?? true} onToggle={event => toggleSection(host.id, 'service', event.currentTarget.open)}>
-                  <summary>Service status<span>Runtime identity and resources</span></summary>
+                  <summary>Service<span>Live metrics and runtime</span></summary>
                   <HostRuntimePanel host={host} committed={config.hosts.find(item => item.id === host.id)} active={active && (sectionsOpen[sectionKey(host.id, 'service')] ?? true) && !pendingHostNavigation && (measuredWide === true || view === 'editor')} />
                 </details>
                 <details className="remote-host-section" open={sectionsOpen[sectionKey(host.id, 'shared')] ?? false} onToggle={event => toggleSection(host.id, 'shared', event.currentTarget.open)}>

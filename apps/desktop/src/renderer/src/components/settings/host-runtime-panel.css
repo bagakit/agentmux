@@ -42,8 +42,8 @@
 .host-node-resources__values span { color:var(--text-2); font-size:11px; }
 .host-node-resources__values strong { color:var(--text); font-size:20px; font-weight:550; font-variant-numeric:tabular-nums; overflow-wrap:anywhere; }
 .host-node-resources__values small { color:var(--text-3); font-size:10px; line-height:1.5; }
-.host-resource-trends { min-width:0; min-height:480px; border:1px solid var(--line-soft); border-radius:8px; padding:8px; background:var(--surface-1); }
-.host-resource-trends img { display:block; width:100%; height:480px; }
+.host-resource-trends { min-width:0; min-height:290px; border:1px solid var(--line-soft); border-radius:8px; padding:8px; background:var(--surface-1); }
+.host-resource-trends img { display:block; width:100%; height:290px; }
 .host-node-resources__table { overflow-x:auto; margin-top:12px; }
 .host-node-resources__table table { border-collapse:collapse; width:100%; font-size:10px; font-variant-numeric:tabular-nums; }
 .host-node-resources__table th,.host-node-resources__table td { padding:6px 8px; border-bottom:1px solid var(--line-soft); text-align:right; white-space:nowrap; }

@@ -31,6 +31,7 @@ export function HostNodeResources({ reply, frames, error, busy, active, privateO
       </div>
       {sample?.process.state === 'unavailable' ? <p className="host-runtime__issue">{sample.process.message}</p> : null}
     </>}
+    {!withheld && sample ? <HostResourceTrends points={points} active={active} /> : null}
     {agents}
     {workload}
     {!withheld && sample ? <>
@@ -43,7 +44,6 @@ export function HostNodeResources({ reply, frames, error, busy, active, privateO
           {!io ? <p className="host-runtime__sample">I/O counters not observed.</p> : null}
           {sample.filesystemIo?.state === 'unavailable' ? <p className="host-runtime__issue">{sample.filesystemIo.message}</p> : null}
         </div>
-        <HostResourceTrends points={points} active={active} />
         <details className="host-runtime__details"><summary>Service samples &amp; process details</summary>
           <p className="host-runtime__sample">{io ? `${ioCurrent ? 'Sample' : 'Last confirmed'} ${when(ioSample!.observedAt)}. ${io.scope === 'process-io' ? 'Windows process I/O operation counters; not disk-only activity.' : 'Serving Core filesystem operation counters.'} Excludes Agent child processes and Native stream throughput.` : 'This Core has not provided I/O counters. No rate is inferred from retained output.'}</p>
           <p className="host-runtime__sample">{process ? `Core uptime ${Math.floor(process.uptimeSeconds / 60)} min · heap ${mib(process.heapUsedBytes)} / ${mib(process.heapTotalBytes)} · external ${mib(process.externalBytes)}.` : 'Process details not observed.'} This is the serving Core process, not its Agents or the Native daemon.</p>

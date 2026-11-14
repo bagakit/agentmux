@@ -1,15 +1,43 @@
-.remote-management .remote-entry-node, .remote-management .remote-host-node { border-radius: var(--radius-lg); box-shadow: var(--hl); }
-.remote-management .remote-entry-node { background: var(--surface-1); gap: 9px; }
-.remote-management .remote-entry-node > svg { padding: 10px; border-radius: var(--radius); background: var(--surface-0); }
-.remote-management .remote-entry-node > strong { font-size: 20px; letter-spacing: -.025em; }
-.remote-management .remote-host-node { min-height: 210px; gap: 8px; background: var(--surface-0); }
-.remote-management .remote-host-node[data-current-host='true'] { border-color: var(--green); background: color-mix(in srgb, var(--green) 4%, var(--surface-0)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--green) 12%, transparent); }
-.remote-management .remote-host-node__kind { border-radius: calc(var(--radius-lg) - 1px) calc(var(--radius-lg) - 1px) 0 0; background: var(--surface-1); }
-.remote-management .remote-host-node[data-current-host='true'] .remote-host-node__kind { background: color-mix(in srgb, var(--green) 8%, var(--surface-1)); }
-.remote-management .remote-host-node__network { border-radius: var(--radius); box-shadow: none; background: var(--surface-1); border-color: var(--line-soft); }
-.remote-management .remote-host-node__link { padding-inline: 0; border: 0; background: transparent; }
-.remote-management .remote-topology__scope { border-radius: var(--radius); }
-.remote-management .remote-topology__scope button { border-radius: var(--radius-sm); }
+/* Canvas geometry is private to this view; checks and resources keep their existing owners. */
+.remote-topology { position: relative; min-width: 0; min-height: 0; height: 100%; background: var(--surface-0); isolation: isolate; }
+.remote-topology__viewport { position: absolute; inset: 72px 0 76px; }
+.remote-topology__header { position: absolute; z-index: 2; inset: 18px 18px auto; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; }
+.remote-topology__caption { display: grid; gap: 5px; pointer-events: none; }
+.remote-topology__caption > span { color: var(--text-2); font: 10px var(--font-mono); letter-spacing: .1em; font-weight: 600; }
+.remote-topology__caption > small { color: var(--text-3); font-size: var(--fs-micro); }
+.remote-topology__scope { display: flex; flex: none; gap: 2px; padding: 3px; border: 1px solid var(--line-soft); border-radius: var(--radius); background: var(--surface-1); }
+.remote-topology__scope button { border: 0; border-radius: var(--radius-sm); padding: 5px 8px; background: transparent; color: var(--text-3); cursor: pointer; font: var(--fs-micro) var(--font-sans); }
+.remote-topology__scope button[aria-pressed='true'] { background: var(--surface-3); color: var(--text); box-shadow: var(--hl); }
+.remote-topology__link { position: absolute; inset: 72px 0 0; }
+.remote-topology .react-flow { --xy-edge-stroke: var(--line); --xy-edge-stroke-default: var(--line); }
+.remote-topology .react-flow__edge-path { stroke: color-mix(in srgb, var(--text-3) 50%, var(--surface-0)); }
+.remote-topology .remote-route--selected .react-flow__edge-path { stroke: var(--green); stroke-width: 1.8; }
+.remote-topology .react-flow__handle { width: 4px; height: 4px; min-width: 4px; min-height: 4px; border: 0; opacity: 0; pointer-events: none; }
+.remote-topology .react-flow__node { cursor: grab; }
+.remote-topology .react-flow__node.dragging { cursor: grabbing; }
+.remote-entry-node { box-sizing: border-box; width: 128px; height: 80px; display: grid; justify-items: center; align-content: center; gap: 5px; border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--surface-1); color: var(--text); }
+.remote-entry-node > svg { color: var(--green); }
+.remote-entry-node > strong { font-size: 13px; font-weight: 600; }
+.remote-entry-node > span { color: var(--text-3); font-size: 9px; }
+.remote-host-node { box-sizing: border-box; width: 192px; height: 106px; padding: 12px 14px; display: grid; gap: 6px; text-align: left; border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--surface-1); color: var(--text); box-shadow: 0 2px 7px #00000008; font-family: var(--font-sans); cursor: inherit; }
+.remote-host-node:hover { border-color: var(--text-3); background: var(--surface-2); }
+.remote-host-node[data-current-host='true'] { border-color: var(--green); background: color-mix(in srgb, var(--green) 5%, var(--surface-1)); box-shadow: 0 0 0 3px color-mix(in srgb, var(--green) 9%, transparent); }
+.remote-host-node__kind { display: flex; align-items: center; gap: 6px; color: var(--text-3); font: 10px var(--font-sans); }
+.remote-host-node__kind .remote-check-dot { margin-left: auto; width: 6px; height: 6px; border-radius: 50%; }
+.remote-host-node > strong { font-size: 14px; line-height: 1.25; font-weight: 550; letter-spacing: -.02em; }
+.remote-host-node__address { color: var(--text-3); font: 10px var(--font-mono); }
+.remote-host-node > strong, .remote-host-node__address { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.remote-host-node__footer { display: flex; gap: 6px; align-items: center; justify-content: space-between; color: var(--text-3); font-size: 9px; white-space: nowrap; }
+.remote-host-node__footer > span { overflow: hidden; text-overflow: ellipsis; }
+.remote-host-node__footer time { flex: none; font: 9px var(--font-mono); }
+.remote-topology__controls { position: absolute; z-index: 2; bottom: 20px; left: 18px; display: flex; align-items: center; gap: 2px; padding: 3px; border: 1px solid var(--line-soft); border-radius: var(--radius); background: var(--surface-1); }
+.remote-topology__controls .icon-button { width: 26px; height: 26px; }
+.remote-topology__arrange { display: flex; align-items: center; gap: 5px; padding: 5px 8px; border: 0; border-left: 1px solid var(--line-soft); background: transparent; color: var(--text-2); font: 10px var(--font-sans); cursor: pointer; }
+.remote-topology__hint { position: absolute; z-index: 1; right: 18px; bottom: 58px; left: 18px; margin: 0; color: var(--text-3); font-size: 10px; line-height: 1.5; text-align: center; pointer-events: none; }
+.remote-topology__empty { position: absolute; top: 45%; left: 15%; right: 15%; color: var(--text-3); text-align: center; font-size: var(--fs-body); pointer-events: none; }
+.remote-topology :is(button):focus-visible { outline: 2px solid var(--focus-line); outline-offset: 3px; }
+@media (prefers-reduced-motion: no-preference) { .remote-host-node { transition: background-color 120ms, border-color 120ms; } }
+
 .remote-management .remote-detail-tabs { gap: var(--sp-4); margin-bottom: var(--sp-5); }
 .remote-management .remote-overview { gap: var(--sp-5); }
 .remote-management .remote-overview__facts dd { font-size: 22px; }
@@ -59,3 +87,10 @@
 .mote-task-action .launcher-mote__target { max-width: 180px; }
 .mote-task-action details { color: var(--text-3); font-size: var(--fs-meta); }
 .mote-task-action pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 220px; overflow: auto; font: var(--fs-meta)/1.5 var(--font-mono); user-select: text; }
+
+.remote-management__map, .remote-management__list { min-height: 0; height: 100%; overflow: hidden; }
+.remote-management__list > .settings-host-library { height: 100%; }
+.remote-management .settings-resource-editor__header { grid-template-columns: 20px minmax(0, 1fr) auto; align-items: start; }
+.remote-management .settings-resource-editor__header > div > strong { font-size: 16px; }
+.remote-management .settings-resource-editor__header .check-pill { display: inline-flex; margin-top: 6px; }
+.host-card__actions { display: flex; gap: 5px; align-items: center; }
