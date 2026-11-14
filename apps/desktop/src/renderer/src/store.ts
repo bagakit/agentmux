@@ -106,6 +106,7 @@ import { acknowledgedNameProjection, projectedNameRevision } from './lib/name-au
 import type { AgentMuxDisplayLabel, AgentMuxNameTarget, AgentMuxDisplayLabelResult } from '@agentmux/core/spatial-graph'
 import { displayLabel, nameTargetKey } from '@agentmux/core/spatial-graph'
 import { createSurveyBrowser } from './lib/survey-browser-creation'
+import { planSurveyTabComposition, reconcileResearchCompositionSelection, type SurveyCompositionRequest, type SurveyCompositionReport } from './lib/survey-tab-composition'
 import { readSurveyProfileView, surveySelectionProfileMatch, type SurveyProfileView, type SurveyProfileViewRecovery } from './lib/survey-profile-view'
 import { switchBrowserProfileForSurvey, repairSurveyProfileAdmission, type SurveyProfileBindingReceipt } from './lib/survey-profile-binding'
 import { openSystemUrlInSurvey } from './lib/survey-system-url'
@@ -1210,6 +1211,7 @@ export type AppState = GitReadingActions & {
   setSurveyZoneSelection(selection: SurveySelection | null): void
   setSurveyToolsOpen(open: boolean): void
   createSurveyBrowser(input: Parameters<typeof createSurveyBrowser>[1]): ReturnType<typeof createSurveyBrowser>
+  composeSurveyTabs(request: SurveyCompositionRequest): Promise<SurveyCompositionReport>
   /** Open an http(s) URL as a new Survey Browser through the same owner as system links; the current workface is kept. */
   openUrlInSurvey(url: string): Promise<SystemPageOutcome>
   /** Durable global Board Demand records. Session links remain explicit and are derived only for the selected Demand. */
@@ -4460,13 +4462,14 @@ function connectSpatialWorkbench(spatial: DesktopSpatialPersistence): () => void
     if(unavailable.size) current.reportWorkbenchSaveFailure(new Error('Host resources are unavailable for '+unavailable.size+' saved tab(s). Original identities and current content are retained. Restore their Host connection.'))
     const restored=restorePersistedWorkbench({config:current.config,sessions:current.sessions,persisted,createTabGroupId:newTabGroupId,retiredSessionIds:new Set(),preserveEntityIds:new Set(saved.graph.tabs.map(tab=>tab.tabId))})
     const old=projectPersistedWorkbench({tabs:current.tabs,layouts:current.layouts})
+    const liveRegions=new Map(Object.values(current.tabs).flatMap(tab=>Object.values(tab.regions).map(surface=>[surface.regionId,surface] as const)))
+    const savedRegions=new Map(Object.values(old.tabs).flatMap(tab=>Object.values(tab.regions).map(surface=>[surface.regionId,surface] as const)))
     const originalLaunchers=new Map(baseline?.regions.filter(region=>region.kind==='launcher').map(region=>[region.regionId,region]))
     const tabs={...Object.fromEntries([...unavailable].flatMap(id=>current.tabs[id]?[[id,current.tabs[id]]]:[])),...Object.fromEntries(Object.entries(restored.tabs).map(([id,tab])=>{
       const live=current.tabs[id]
       if(live && sameSpatialValue(old.tabs[id],persisted.tabs[id])) return [id,live]
-      if(!live) return [id,tab]
       const regions=Object.fromEntries(Object.entries(tab.regions).map(([regionId,region])=>{
-        const surface=live.regions[regionId],original=originalLaunchers.get(regionId)
+        const surface=live?.regions[regionId]??liveRegions.get(regionId),original=originalLaunchers.get(regionId)
         // A pending creation is encoded as its original Launcher until Core
         // confirms it. That unchanged ACK cannot cancel the live creation.
         // Compare the submitted baseline, never borrow a replacement's data.
@@ -4474,12 +4477,15 @@ function connectSpatialWorkbench(spatial: DesktopSpatialPersistence): () => void
           current.pendingAgentLaunches[surface.sessionId]?.request?.createOperationId &&
           region.kind==='launcher' && original?.tabId===id &&
           sameSpatialValue(baseline?.resources['region:'+regionId],saved.graph.resources['region:'+regionId])
-        return [regionId,surface && (pendingLauncher || sameSpatialValue(old.tabs[id]?.regions[regionId],persisted.tabs[id]?.regions[regionId])) ? surface : region]
+        return [regionId,surface && (pendingLauncher || sameWorkbenchSurfaceOwner(surface,region) &&
+          sameSpatialValue(old.tabs[id]?.regions[regionId]??savedRegions.get(regionId),persisted.tabs[id]?.regions[regionId])) ? surface : region]
       }))
       return [id,{...tab,regions}]
     }))}
     const workbenchSpaceSelection=reconcileWorkbenchSpaceSelection(current.workbenchSpaceSelection,baseline,saved.graph)
-    useAppStore.setState({tabs,layouts:saved.graph.layouts,topicCategories:categoriesFromSpatial(saved.graph),projectGroups:saved.graph.projectGroups ?? [],spaceZoneBindings:desktopBindingsFromSpatial(saved.graph,current.config),workbenchSpaceSelection})
+    useAppStore.setState({tabs,layouts:saved.graph.layouts,topicCategories:categoriesFromSpatial(saved.graph),projectGroups:saved.graph.projectGroups ?? [],spaceZoneBindings:desktopBindingsFromSpatial(saved.graph,current.config),workbenchSpaceSelection,
+      surveyZoneSelection:isSurveyPage(current.surveyZoneSelection)?current.surveyZoneSelection:reconcileResearchCompositionSelection(current.surveyZoneSelection,saved.graph),
+      recallZoneSelection:reconcileResearchCompositionSelection(current.recallZoneSelection,saved.graph)})
     applyNameAcknowledgement(saved)
   }
   const offRemote = spatial.connect(apply, applyNameAcknowledgement)
@@ -5723,6 +5729,46 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   },
   setSurveyToolsOpen(surveyToolsOpen) { set({ surveyToolsOpen, workbenchNavigationInputPolicy: null, regionCaretFocus: null }) },
   createSurveyBrowser(input) { return createSurveyBrowser(get, input) },
+  async composeSurveyTabs(request) {
+    let committed: import('@agentmux/core/spatial-graph').AgentMuxSpatialState | null = null
+    let tabIds: string[] = []
+    try {
+      // Finish prior user edits first. This complete multi-source intent must not be split by per-key rebase.
+      await checkpointSpatialWorkbench()
+      const owner = coreSpatialPersistence
+      if (!owner) throw new Error('The original spatial owner is unavailable. Existing work is kept; reconnect its storage and retry this move.')
+      await owner.refresh()
+      const original = owner.current
+      if (owner !== coreSpatialPersistence || !original) throw new Error('The original spatial owner changed. Existing work is kept; reconnect its storage and retry this move.')
+      const state = get(), topics = scratchTopicsForConfig(state.config, state.scratchTopicSnapshots) ?? []
+      const plan = planSurveyTabComposition(state, topics, original.graph, request)
+      tabIds = plan.tabIds
+      // Exactly one CAS; failure or an unknown ACK never retries the move against another source graph.
+      committed = await api.spatial.commit({ expectedRevision: original.revision, graph: plan.graph })
+      await owner.refresh()
+      const current = get(), catalog = spatialCatalog(current, scratchTopicsForConfig(current.config, current.scratchTopicSnapshots) ?? [])
+      const movedPages = new Set(request.sources.flatMap(source => Object.values(source.tab.regions)
+        .filter(region => region.kind === 'browser' && (source.kind === 'tab' || region.regionId === source.regionId))
+        .map(region => JSON.stringify([region.regionId, (region as Extract<WorkbenchSurface, { kind: 'browser' }>).browserId]))))
+      const zoneIds = [...new Set([...surveyCollectedZoneIds(current.surveyCollectedZones).filter(zoneId =>
+        !plan.sourceZoneIds.includes(zoneId) || zoneId === request.target.zoneId || catalog.tabs.some(tab => tab.zoneId === zoneId) ||
+        committed!.graph.tabs.some(tab => tab.zoneId === zoneId)), request.target.zoneId])]
+      const pages = current.surveyPageReferences.filter(page => !movedPages.has(JSON.stringify([page.regionId, page.browserId])))
+      const saved = await executeSurveyList({ get, set, hasZone: confirmedSurveyZones(current), hasPage: page => Boolean(surveyPageOwner(get().tabs, page)),
+        save: () => saveWorkbenchSelection(false, false) }, { schemaVersion: 5, requestId: request.requestId, operation: 'space.survey-list',
+        collection: { zoneIds, expectedZoneIds: surveyCollectedZoneIds(current.surveyCollectedZones), pageReferences: pages, expectedPageReferences: current.surveyPageReferences } })
+      return { requestId: request.requestId, outcome: saved.issues.length ? 'partial' : 'moved', tabIds,
+        ...(saved.issues.length ? { issue: 'The original composition is committed. Repair only its Survey references: ' + saved.issues.map(issue => issue.message + ' ' + issue.recovery).join(' ') } : {}),
+        ...(saved.save ? { save: saved.save } : {}) }
+    } catch (error) {
+      const code = (error as { code?: string } | null)?.code
+      const refused = !committed && (code === 'SPACE_COMPOSITION_CHANGED' || code?.startsWith('SPACE_COMPOSITION_') || code === 'SPATIAL_STATE_CONFLICT')
+      const issue = `[${request.requestId}] ${committed ? 'The original composition is committed, but its display or Survey reference save is unconfirmed. Inspect these original Tabs and repair only their references; do not move them again. '
+        : refused ? 'This move was not applied. ' : 'This original move has no confirmed result. Inspect its same source and target in space state before another request; do not replay it automatically. '}${presentError(error)}`
+      get().reportError(new Error(issue), { kind: 'indeterminate' })
+      return { requestId: request.requestId, outcome: committed ? 'partial' : refused ? 'refused' : 'unknown', tabIds, issue }
+    }
+  },
   openUrlInSurvey(url): Promise<SystemPageOutcome> {
     if (!isSystemWebUrl(url)) return Promise.reject(new Error('Only web links (http or https) open in Survey.'))
     const host: SystemPageHost = { get, navigation: () => fileNavigationSelection(get()), subscribe: (listener: () => void) => useAppStore.subscribe(listener) }

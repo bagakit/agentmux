@@ -46,6 +46,9 @@ export type SurveyItemOptionsProps = {
   onNewAgent?: () => void
   onNewBrowser?: () => void
   onNewTab?: () => void
+  onMoveTab?: () => void
+  onMovePage?: () => void
+  onRemovePageReference?: () => void
   onClose?: () => void
   grouping?: SurveyItemGrouping | undefined
 }
@@ -95,7 +98,7 @@ export function SurveyItemContextMenu({ children, returnFocus, ...props }: Surve
   </ContextMenu.Root>
 }
 
-function SurveyItemMenuItems({ primitives: M, run = action => action(), title, zone, workspace, collected, relatedSpaces, relatedSpacesUnconfirmed = false, activityDetails, onRename, onCollectedChange, onManageBrowsers, onOpenWorkspace, onSaveToTopic, currentPanelAvailable = false, onDeleteNotebook, onNewNote, onNewAgent, onNewBrowser, onNewTab, onClose, grouping }: SurveyItemOptionsProps & { primitives: typeof Menu | typeof ContextMenu; run?: (action: () => void) => void }) {
+function SurveyItemMenuItems({ primitives: M, run = action => action(), title, zone, workspace, collected, relatedSpaces, relatedSpacesUnconfirmed = false, activityDetails, onRename, onCollectedChange, onManageBrowsers, onOpenWorkspace, onSaveToTopic, currentPanelAvailable = false, onDeleteNotebook, onNewNote, onNewAgent, onNewBrowser, onNewTab, onMoveTab, onMovePage, onRemovePageReference, onClose, grouping }: SurveyItemOptionsProps & { primitives: typeof Menu | typeof ContextMenu; run?: (action: () => void) => void }) {
   const displayPath = usePathDisplay()
   return <>
       <M.Label className="survey-topic-menu__label">{title}</M.Label>
@@ -105,6 +108,9 @@ function SurveyItemMenuItems({ primitives: M, run = action => action(), title, z
       {onNewTab ? <M.Item className="tab-context-menu__item" onSelect={() => run(onNewTab)}><ThemeObjectLauncherIcon size={14} /><span>New tab…</span></M.Item> : null}
       {onNewBrowser || onNewNote || onNewAgent || onNewTab ? <M.Separator className="tab-context-menu__separator" /> : null}
       {zone && onRename ? <M.Item className="tab-context-menu__item" onSelect={() => run(onRename)}><ThemeActionEditIcon size={14} /><span>Rename exploration</span></M.Item> : null}
+      {onMoveTab ? <M.Item className="tab-context-menu__item" onSelect={() => run(onMoveTab)}><ThemeNavigationSpaceIcon size={14} /><span>Move Tab to research…</span></M.Item> : null}
+      {onMovePage ? <M.Item className="tab-context-menu__item" onSelect={() => run(onMovePage)}><ThemeNavigationSpaceIcon size={14} /><span>Move page to research…</span></M.Item> : null}
+      {onRemovePageReference ? <M.Item className="tab-context-menu__item" onSelect={() => run(onRemovePageReference)}><ThemeActionRemoveIcon size={14} /><span>Remove page from Survey</span></M.Item> : null}
       {zone && onClose ? <M.Item className="tab-context-menu__item" onSelect={() => run(onClose)}><ThemeActionCloseIcon size={14} /><span>Close in Survey</span></M.Item> : null}
       {grouping ? <M.Sub><M.SubTrigger className="tab-context-menu__item"><span className="survey-topic-menu__indicator" /><span>Move to group</span><ThemeNavigationDisclosureIcon size={12} /></M.SubTrigger>
         <DocumentOverlayPortal component={M.Portal}><M.SubContent className="tab-context-menu survey-item-menu" sideOffset={4} collisionPadding={8}>
@@ -134,7 +140,7 @@ function SurveyItemMenuItems({ primitives: M, run = action => action(), title, z
             <span>{workspace ? `${workspace.name}\n${workspace.hostId}\n${displayPath(workspace.path, workspace.hostId)}${workspace.branch ? `\nBranch: ${workspace.branch}` : ''}` : 'Resource Workspace is not confirmed. The original item is retained.'}</span>
             {zone ? <><span>{relatedSpaces === null ? 'Linked locations unknown' : relatedSpaces.length ? `${relatedSpaces.length} linked location${relatedSpaces.length === 1 ? '' : 's'}` : 'No linked locations'}</span>
               {relatedSpaces?.map(space => <span key={space.spaceId}>{space.name} · {space.hostId} · {displayPath(space.directoryPath, space.hostId)}</span>)}
-              {relatedSpacesUnconfirmed ? <span role="status">Some linked locations are not confirmed. Original bindings are retained.</span> : null}{activityDetails}</> : null}
+              {relatedSpacesUnconfirmed ? <span role="status">Some linked locations are not confirmed. Original bindings are retained.</span> : null}</> : null}{activityDetails}
           </div>
         </M.SubContent></DocumentOverlayPortal>
       </M.Sub>

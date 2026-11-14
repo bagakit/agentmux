@@ -1,3 +1,4 @@
+import { WorkbenchRegionOwner } from './WorkbenchRegionOwners'
 import { useWorkbenchTabsClose } from '../hooks/useWorkbenchTabsClose'
 import { AgentWorkModeBadge } from './AgentWorkModeBadge'
 import { agentWorkPlacement, workReferenceHostId } from '../lib/agent-work-mode'
@@ -650,8 +651,8 @@ const WorkbenchRegionTree = memo(function WorkbenchRegionTree(props: {
   return <>
     <WorkbenchRegionNode tab={tab} node={tab.layout.root} nodePath="" surfaceVisible={props.surfaceVisible && documentVisible} onDragging={setDragging} />
     {regionIds(tab.layout.root).filter(regionId => tab.regions[regionId]).map(regionId =>
-      <WorkbenchRegionLeaf key={regionId} {...props} node={{ type: 'leaf', regionId }} swapTargets={swapTargets}
-        interactiveResize={props.interactiveResize || dragging} />)}
+      <WorkbenchRegionOwner key={regionId} regionId={regionId}><WorkbenchRegionLeaf {...props} node={{ type: 'leaf', regionId }} swapTargets={swapTargets}
+        interactiveResize={props.interactiveResize || dragging} /></WorkbenchRegionOwner>)}
   </>
 })
 

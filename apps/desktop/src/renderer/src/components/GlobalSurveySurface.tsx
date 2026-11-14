@@ -47,6 +47,8 @@ import { useWorkbenchTabsClose } from '../hooks/useWorkbenchTabsClose'
 import { useBrowserProfiles, browserProfiles } from '../lib/browser-profiles'
 import { surveyProfileReferences } from '../lib/survey-profile-view'
 import { SurveyProfilePicker } from './SurveyProfilePicker'
+import { SurveyMoveTabsDialog } from './SurveyMoveTabsDialog'
+import { captureSurveyCompositionSource, type SurveyCompositionSource } from '../lib/survey-tab-composition'
 
 const ThemeStatusUnknownIcon = semanticIconComponent('status.unknown')
 const ThemeObjectAgentIcon = semanticIconComponent('object.agent')
@@ -156,6 +158,7 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
   const [capture, setCapture] = useState<{ title: string; sources: TopicKnowledgeSource[]; noteIds: string[] } | null>(null)
   const [recallCapture, setRecallCapture] = useState<RecallCaptureTarget | null>(null)
   const [locationChoice, setLocationChoice] = useState<{ kind: 'note' | 'agent' | 'browser' | 'tab'; zoneId: string; choices: WorkbenchProjectionSelection[] } | { kind: 'close'; zoneId: string; subject: string; choices: WorkbenchProjectionSelection[] } | null>(null)
+  const [movingSources, setMovingSources] = useState<SurveyCompositionSource[] | null>(null)
   const tabClose = useWorkbenchTabsClose()
   const [toolsVisited, setToolsVisited] = useState(toolsOpen)
   const surfaceRef = useRef<HTMLElement>(null)
@@ -510,6 +513,8 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
 
   function itemOptionsFor(zone: AgentMuxZoneFact | undefined, activityDetails = zone ? activity(zone).details : null): SurveyItemOptionsProps {
     const bindings = zone ? catalog?.bindings.filter(binding => binding.zoneId === zone.zoneId) ?? [] : []
+    const members = zone ? catalog?.tabs.filter(tab => tab.zoneId === zone.zoneId) ?? [] : []
+    const moveTabId = zone?.zoneId === selection?.zoneId ? selection?.active?.tabId : members.length === 1 ? members[0]!.tabId : undefined
     return {
       visible: visible && !controlsCoverPage, title: zone ? itemTitle(zone) : selection ? 'Retained exploration' : 'New exploration',
       zone: zone ?? null, workspace: zone ? resourceWorkspaces.get(zone.workspaceId) ?? null : null,
@@ -519,6 +524,11 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
       relatedSpacesUnconfirmed: bindings.some(binding => !catalog?.spaces.some(space => space.spaceId === binding.spaceId && !space.issue)),
       activityDetails,
       currentPanelAvailable: zone?.zoneId === selection?.zoneId && Boolean(currentPanel),
+      ...(moveTabId && catalog ? { onMoveTab: () => {
+        const source = captureSurveyCompositionSource(useAppStore.getState(), catalog, { kind: 'tab', tabId: moveTabId })
+        if (source) setMovingSources([source])
+        else setError('This original Tab changed. Its content is kept; choose the current Tab before moving it.')
+      } } : {}),
       onSaveToTopic: scope => saveToTopic(zone, scope),
       onCollectedChange: value => { if (zone && !setCollected(zone.zoneId, value)) setError('The original Zone resource is unconfirmed. Its content and selection are kept.') },
       onOpenWorkspace: workspaceId => { intent.current += 1; void selectWorkspace(workspaceId) },
@@ -567,10 +577,13 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
                 <span className="survey-item-glyph" aria-hidden="true"><span className="survey-page-favicon"><ThemeObjectBrowserIcon size={16} />{browser?.faviconDataUrl ? <img key={browser.faviconDataUrl} src={browser.faviconDataUrl} alt="" onError={event => { event.currentTarget.hidden = true }} /> : null}</span></span><strong>{browser?.title || 'Retained page'}</strong>
               </button>
               <div className="survey-item-shortcuts">
-                <button type="button" className="survey-icon-button" aria-label="Remove page from Survey"
-                  title="Remove from Survey; keep the original page" onClick={() => void removePageReference(page)}>
-                  <ThemeActionCloseIcon size={13} />
-                </button>
+                <SurveyItemOptions {...itemOptionsFor(undefined, browser ? <span>{browser.url}</span> : <span>Original Browser unconfirmed; its exact reference is retained.</span>)}
+                  rowAction compact title={browser?.title || 'Retained page'} workspace={browser ? resourceWorkspaces.get(browser.workspaceId) ?? null : null}
+                  onMovePage={() => {
+                    const source = catalog && captureSurveyCompositionSource(useAppStore.getState(), catalog, { kind: 'page', ...page })
+                    if (source) setMovingSources([source])
+                    else setError('The original page changed. Its reference is kept; inspect that same Browser before moving it.')
+                  }} onRemovePageReference={() => void removePageReference(page)} />
               </div>
               {!owner ? <span role="status" className="survey-relation-notice">
                 The original Browser is unconfirmed. Its exact reference is kept.
@@ -601,6 +614,7 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
       {locationChoice ? <SurveyPanelChoices mode="button" open visible={visible && !controlsCoverPage} choices={locationChoice.choices} facts={useAppStore.getState()}
         onOpenChange={open => { if (!open) setLocationChoice(null) }} onSelect={reference => locationChoice.kind === 'close' ? closeItemTab(locationChoice.zoneId, reference.tabId, locationChoice.subject, reference) : locationChoice.kind === 'note' ? newItemNote(locationChoice.zoneId, reference) : void newItemTab(locationChoice.zoneId, locationChoice.kind, reference)} /> : null}
       {tabClose.dialog}
+      {movingSources ? <SurveyMoveTabsDialog sources={movingSources} catalog={catalog} visible={visible && !controlsCoverPage} onClose={() => setMovingSources(null)} /> : null}
       <div className="survey-sidebar-actions"><button type="button" className="survey-new-page" aria-label="New webpage" title="New browser" disabled={opening} onClick={() => void openBrowser('about:blank', true)}><ThemeActionCreateBrowserIcon size={16} /><span>New browser</span></button>
         <Menu.Root modal={false} open={visible && !controlsCoverPage && createMenuOpen} onOpenChange={setCreateMenuOpen}>
           <Menu.Trigger asChild><button type="button" className="survey-icon-button" aria-label="New browser options" title="New browser options" disabled={opening}><ThemeNavigationDisclosureIcon size={12} /></button></Menu.Trigger>

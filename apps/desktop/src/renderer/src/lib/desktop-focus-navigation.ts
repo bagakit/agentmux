@@ -37,6 +37,21 @@ export function mainRegionReference(choice: AgentMuxDesktopSpaceSelection | null
 /** A confirmed classification change keeps the same selected Zone and exact occurrence. */
 export function reconcileWorkbenchSpaceSelection(choice: AgentMuxDesktopSpaceSelection | null,
   before: AgentMuxSpatialGraph | null, after: AgentMuxSpatialGraph): AgentMuxDesktopSpaceSelection | null {
+  if (choice?.tabId && choice.regionId && choice.groupId && before) {
+    const original = before.regions.find(region => region.regionId === choice.regionId && region.tabId === choice.tabId)
+    const region = after.regions.find(region => region.regionId === choice.regionId)
+    const tab = region && after.tabs.find(tab => tab.tabId === region.tabId)
+    const placed = tab && after.layouts[choice.workspaceId]?.groups.some(group => group.id === choice.groupId && group.tabOrder.includes(tab.tabId))
+    if (original && region && original.kind === region.kind && original.browserId === region.browserId &&
+      original.agentSessionId === region.agentSessionId && original.file?.workspaceId === region.file?.workspaceId && original.file?.path === region.file?.path &&
+      before.layouts[choice.workspaceId]?.groups.some(group => group.id === choice.groupId && group.tabOrder.includes(choice.tabId!)) &&
+      placed && tab && (tab.tabId !== choice.tabId || tab.zoneId !== choice.zoneId)) {
+      const bindings = after.bindings.filter(binding => binding.zoneId === tab.zoneId)
+      const spaceId = bindings.some(binding => binding.spaceId === choice.spaceId) ? choice.spaceId : bindings.length === 1 ? bindings[0]!.spaceId : null
+      return { ...choice, spaceId, zoneId: tab.zoneId, tabId: tab.tabId,
+        topicId: after.spaces.find(space => space.spaceId === spaceId)?.topicId ?? null }
+    }
+  }
   if (!choice?.spaceId || !choice.zoneId || !before || after.bindings.some(binding =>
     binding.spaceId === choice.spaceId && binding.zoneId === choice.zoneId)) return choice
   const source = categoriesFromSpatial(before).find(category => category.spaceId === choice.spaceId)

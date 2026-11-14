@@ -1,3 +1,4 @@
+import { WorkbenchRegionOwners } from './WorkbenchRegionOwners'
 import { rendererPerformance } from '../lib/renderer-performance'
 import { useEffect, type ReactNode } from 'react'
 import { useAgentStatusDecay } from '../lib/agent-status-decay'
@@ -49,7 +50,7 @@ export function RendererResourceOwners({ children, workbenchVisible, projectedVi
     <AgentStatusDecayOwner />
     <TerminalParkingOwner workbenchVisible={workbenchVisible} projectedVisibleTabIds={projectedVisibleTabIds} projectedVisibleRegionIds={projectedVisibleRegionIds} measurementActive={measurementActive}>
       <SurfaceMemoryOwner workbenchVisible={workbenchVisible} projectedVisibleTabIds={projectedVisibleTabIds} projectedVisibleRegionIds={projectedVisibleRegionIds} measurementActive={measurementActive}>
-        {children}
+        <WorkbenchRegionOwners>{children}</WorkbenchRegionOwners>
       </SurfaceMemoryOwner>
     </TerminalParkingOwner>
   </>

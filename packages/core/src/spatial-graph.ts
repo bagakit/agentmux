@@ -1,6 +1,7 @@
 import { AgentMuxError } from './errors.js';
 import { displayLabelDocument, nameTargetKey } from './display-label.js';
 export * from './display-label.js';
+export * from './spatial-tab-composition.js';
 import type { AgentMuxSpaceCatalog, AgentMuxSpaceSelector } from './space-control.js';
 export type { AgentMuxProjectGroupFact } from './space-control.js';
 import { regionIds, groupIds, regionInDirection, workbenchRegionBounds, leafIdsMatchRecords, type WorkspaceLayout, type WorkbenchViewLayout, type SplitDirection } from './spatial-layout.js';

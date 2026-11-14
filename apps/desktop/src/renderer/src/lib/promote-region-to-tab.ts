@@ -1,4 +1,4 @@
-import { insertTabAfter, type WorkspaceLayout } from '@agentmux/layout'
+import { addTabPlacement, groupIds, insertTabAfter, type WorkspaceLayout } from '@agentmux/layout'
 import {
   assertRegionInvariant,
   createWorkbenchTab,
@@ -41,6 +41,8 @@ export type PromoteRegionToTabInput = {
   // created (unlike move-session-view, which may reuse an existing target View), so there is always
   // exactly one id to mint. The new Tab reuses the promoted surface's regionId, so no region id is minted.
   mint: { tabId: string }
+  /** An explicitly chosen real display Group, independent of the source resource Workspace. */
+  destination?: { displayWorkspaceId: string; groupId: string }
 }
 
 export type PromoteRegionToTabResult =
@@ -66,8 +68,10 @@ export function promoteRegionToTab(input: PromoteRegionToTabInput): PromoteRegio
   const surface = sourceTab.regions[input.regionId]
   if (!surface) return { kind: 'unchanged' }
   // The new Tab lands inside the source Tab's own group, so that group must exist in the layout.
-  const layout = input.layouts[input.workspaceId]
+  const displayWorkspaceId = input.destination?.displayWorkspaceId ?? input.workspaceId
+  const layout = input.layouts[displayWorkspaceId]
   if (!layout) return { kind: 'unchanged' }
+  if (input.destination && !groupIds(layout.root).includes(input.destination.groupId)) return { kind: 'unchanged' }
 
   // Detach the Region from the source Tab. removeWorkbenchRegion returns null exactly when this is the
   // Tab's only Region (invariant #2's no-op case): there is nothing to promote — it already IS its own
@@ -90,12 +94,13 @@ export function promoteRegionToTab(input: PromoteRegionToTabInput): PromoteRegio
   // active — the user asked for this Region to become its own Tab, so they want to see it. Adjacency reads
   // better than the far end: the new Tab sits next to the split it came from. insertTabAfter finds the
   // source Tab's group, inserts after the anchor, sets the new Tab active, and focuses that group.
-  const nextLayout = insertTabAfter(layout, input.tabId, input.mint.tabId)
+  const nextLayout = input.destination ? addTabPlacement(layout, input.destination.groupId, input.mint.tabId)
+    : insertTabAfter(layout, input.tabId, input.mint.tabId)
   // insertTabAfter is a no-op (returns the SAME layout reference) exactly when the source Tab is in no
   // group — a Tab that lives in `tabs` but no layout group. Promoting from it would append the new Tab to
   // `tabs` while leaving it out of every group: an orphan that never renders and can never be closed (the
   // shape addTabPlacement's JSDoc describes). Refuse rather than strand it.
-  if (nextLayout === layout) return { kind: 'unchanged' }
+  if (!nextLayout || nextLayout === layout) return { kind: 'unchanged' }
 
   // 促升原子地改两张 Tab：源 Tab 少一格、新 Tab 恰一格。对两张各断言一次不变量——这正是把
   // assertRegionInvariant 做成「只读一张 Tab」的原因（见其注释）：能被同时改多张 Tab 的 reducer 逐张复用。
@@ -105,7 +110,7 @@ export function promoteRegionToTab(input: PromoteRegionToTabInput): PromoteRegio
   return {
     kind: 'promoted',
     tabs: { ...input.tabs, [input.tabId]: detachedTab, [input.mint.tabId]: newTab },
-    layouts: { ...input.layouts, [input.workspaceId]: nextLayout },
+    layouts: { ...input.layouts, [displayWorkspaceId]: nextLayout },
     target: { workspaceId: input.workspaceId, tabId: input.mint.tabId, regionId: input.regionId }
   }
 }

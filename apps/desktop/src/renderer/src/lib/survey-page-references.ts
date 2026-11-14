@@ -108,8 +108,12 @@ export function surveyPageProjection(page: Page, catalog: AgentMuxSpaceCatalog |
   if (facts.length !== 1) return null
   const choices = (scope.occurrencesByRegion.get(page.regionId) ?? []).filter(reference => reference.tabId === owner.tab.id)
   const original = choices.filter(reference => reference.displayWorkspaceId === owner.tab.workspaceId)
+  // Composition changes the Tab, not this confirmed display Group. Prefer the same original
+  // Region occurrence before the existing unique-placement resolution.
+  const retained = preferred?.regionId === page.regionId ? choices.filter(choice =>
+    choice.displayWorkspaceId === preferred.displayWorkspaceId && choice.groupId === preferred.groupId && choice.regionId === preferred.regionId) : []
   const chosen = preferred && choices.find(choice => sameWorkbenchProjectionSelection(preferred, choice)) ||
-    original.length === 1 && original[0] || choices.length === 1 && choices[0]
+    retained.length === 1 && retained[0] || original.length === 1 && original[0] || choices.length === 1 && choices[0]
   if (!chosen) return null
   const reference = { ...chosen }
   const key = JSON.stringify([reference.displayWorkspaceId, reference.groupId, reference.tabId])
