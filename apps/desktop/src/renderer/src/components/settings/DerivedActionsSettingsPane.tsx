@@ -1,5 +1,5 @@
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
-import { ComposerTextarea, TextInput } from '@agentmux/client-ui/input'
+import { ComposerTextarea, Switch, TextInput } from '@agentmux/client-ui/input'
 import {
   AGENT_BUILT_IN_DERIVED_ACTIONS, AGENT_DERIVED_ACTION_LIMITS, parseAgentDerivedActionFields,
   type AgentBuiltInDerivedActionId, type AgentDerivedAction, type AgentDerivedActionsConfig
@@ -171,7 +171,7 @@ export function DerivedActionsSettingsPane({ config, active, onSave }: {
         <div className="prompt-editor__heading">{back}</div>
         {identity(OFFICIAL_ICONS[official.id], 'Official', <h3 className="derived-actions__title">{official.label}</h3>)}
         <p className="derived-actions__lead">{official.description}</p>
-        <label className="derived-actions__toggle"><input type="checkbox" checked={!hidden.value.includes(official.id)} onChange={() => toggle(official.id)} />
+        <label className="derived-actions__toggle"><Switch checked={!hidden.value.includes(official.id)} onChange={() => toggle(official.id)} />
           <span><strong>Show in the Agent menu</strong><small>Hiding only affects the menu. Recovery options, such as Take over after a Session cannot resume, stay available.</small></span></label>
         <dl className="derived-actions__facts">{OFFICIAL_FACTS[official.id].map(([term, detail]) => <div key={term}><dt>{term}</dt><dd>{detail}</dd></div>)}</dl>
         <section className="derived-actions__block" aria-label="Menu placement"><h4>In the Agent menu</h4>{preview(official.id)}</section>
@@ -180,7 +180,7 @@ export function DerivedActionsSettingsPane({ config, active, onSave }: {
       </section> : custom ? <section className="prompt-settings-card prompt-editor derived-actions__editor" aria-label={`Edit ${nameOf(custom)}`} data-derived-editor={custom.id}>
         <div className="prompt-editor__heading">{back}
           {problems.has(custom.id) ? <span className="prompt-editor__status" data-prompt-status="invalid">Needs attention</span> : null}</div>
-        <div className="agent-settings-fields prompt-editor__fields">
+        <div className="prompt-editor__fields">
           {identity(DerivedIcon, 'Yours', <label className="prompt-editor__name derived-actions__name"><span>Name in the menu</span><TextInput ref={nameInput} value={custom.label} maxLength={AGENT_DERIVED_ACTION_LIMITS.label} placeholder="Review this work" onChange={event => update(custom.id, { label: event.target.value })} /></label>)}
           <fieldset className="derived-actions__base"><legend>Starts from</legend><div className="derived-actions__bases" role="radiogroup" aria-label="Starts from">{BASES.map(base => {
             const BaseIcon = base.value === 'fork' ? ForkIcon : TakeOverIcon

@@ -1,3 +1,4 @@
+import { Switch } from '@agentmux/client-ui/input'
 import { useLayoutEffect, useRef, useState, type RefObject } from 'react'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { DndContext, KeyboardSensor, PointerSensor, closestCenter, useSensor, useSensors } from '@dnd-kit/core'
@@ -61,7 +62,7 @@ export function GoalsCommonActionsSettings({ config, prompts, directory, saving,
   return <details ref={region} className="settings-group settings-goals-actions" open data-settings-field="goals-common-actions">
     <summary><strong>Goals common actions</strong><span>{directory.items.length} {directory.items.length === 1 ? 'shortcut' : 'shortcuts'}</span></summary>
     <p>Choose the requests shown in Goals. Edit instructions in Prompts by their original identity. Removing a shortcut here keeps its prompt in the library.</p>
-    <label className="settings-goals-actions__visibility"><input type="checkbox" aria-label="Collapse common actions" checked={directory.collapsed} onChange={event => onCollapsedChange(event.target.checked)} /><span>Start with common actions collapsed</span></label>
+    <label className="settings-goals-actions__visibility"><Switch aria-label="Collapse common actions" checked={directory.collapsed} onChange={event => onCollapsedChange(event.target.checked)} /><span>Start with common actions collapsed</span></label>
     <div className="settings-goals-actions__toolbar"><Button type="button" data-common-create disabled={saving} onClick={onAdd}><Add size={13} /> Add common action</Button><Button type="button" disabled={saving} aria-expanded={referencesOpen} onClick={() => setReferencesOpen(!referencesOpen)}>Reference a prompt</Button></div>
     <div role="region" aria-label="Goals common action order" className="settings-goals-actions__directory" tabIndex={0}>
       <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={event => { if (event.over) move(String(event.active.id), directory.items.findIndex(ref => commonActionKey(ref) === String(event.over!.id))) }}>

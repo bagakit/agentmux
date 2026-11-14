@@ -1,3 +1,4 @@
+import { TextInput } from '@agentmux/client-ui/input'
 import { useState, type CSSProperties } from 'react'
 import { FOCUS_MAP_FORMS, FOCUS_MAP_INFORMATION, FOCUS_MAP_LEVEL_COUNTS, focusMapInformationChoices, focusMapPreset, type FocusMapLodLevel, type FocusMapPreferences } from '../../../../shared/focus-map-preferences'
 import { collaborationEnvelope, collaborationVisiblePath } from '../../lib/collaboration-map-geometry'
@@ -40,7 +41,7 @@ export function FocusMapSettings({ value, onChange }: { value: FocusMapPreferenc
         changeLevel(index, { form, information: choices.includes(level.information) ? level.information : choices.at(-1)! })
       }} /></label>
       <label className="focus-map-settings__field"><span>Information</span><SelectionField label={`Level ${index + 1} information`} value={level.information} options={FOCUS_MAP_INFORMATION.filter(info => focusMapInformationChoices(level.form).includes(info)).map(info => ({ value: info, label: information[info] }))} searchable={false} onValueChange={info => changeLevel(index, { information: info as FocusMapLodLevel['information'] })} /></label>
-      {index === 0 ? <p className="focus-settings-description">Fixed starting view at 5%. Requests for attention and unknown states remain visible.</p> : <div className="focus-map-settings__range">{(['from', 'to'] as const).map(key => <label key={key}><span>{key === 'from' ? 'Starts at' : 'Complete at'}</span><span><input type="number" aria-label={`Level ${index + 1} ${key === 'from' ? 'start' : 'complete'} zoom`} min="5" max="140" step="1" value={Number.isFinite(level[key]) ? Math.round(level[key] * 10000) / 100 : ''} onChange={event => changeLevel(index, { [key]: event.target.value === '' ? NaN : Number(event.target.value) / 100 })} /><small>%</small></span></label>)}</div>}
+      {index === 0 ? <p className="focus-settings-description">Fixed starting view at 5%. Requests for attention and unknown states remain visible.</p> : <div className="focus-map-settings__range">{(['from', 'to'] as const).map(key => <label key={key}><span>{key === 'from' ? 'Starts at' : 'Complete at'}</span><span><TextInput type="number" aria-label={`Level ${index + 1} ${key === 'from' ? 'start' : 'complete'} zoom`} min="5" max="140" step="1" value={Number.isFinite(level[key]) ? Math.round(level[key] * 10000) / 100 : ''} onChange={event => changeLevel(index, { [key]: event.target.value === '' ? NaN : Number(event.target.value) / 100 })} /><small>%</small></span></label>)}</div>}
     </details>)}</div>
   </div>
 }

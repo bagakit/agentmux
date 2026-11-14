@@ -32,10 +32,11 @@ export function NotesSettingsPane({ preferences, onSave, onOpenNotes }: {
   const saveState = useSettingsSave(), widthGroup = useId(), fontId = useId()
   const fontSize = Number(draft.value.fontSize)
   const valid = /^\d+$/.test(draft.value.fontSize) && validNoteFontSize(fontSize)
+  const fontSizeHint = `Choose a whole-number font size from ${NOTE_FONT_SIZE_MIN} to ${NOTE_FONT_SIZE_MAX} px.`
   async function save(): Promise<void> {
     const submitted = draft.beginSave()
     submitted.finish(await saveState.run(async () => {
-      if (!valid) throw new Error(`Choose a whole-number font size from ${NOTE_FONT_SIZE_MIN} to ${NOTE_FONT_SIZE_MAX} px.`)
+      if (!valid) throw new Error(fontSizeHint)
       await onSave({ fontSize, contentWidth: submitted.value.contentWidth },
         { fontSize: Number(submitted.expected.fontSize), contentWidth: submitted.expected.contentWidth })
     }))
@@ -46,8 +47,8 @@ export function NotesSettingsPane({ preferences, onSave, onOpenNotes }: {
       <header><span>Reading</span><small>Saved: {saved.fontSize} px · {saved.contentWidth === 'wide' ? 'Wide' : 'Standard'}</small></header>
       <div className="settings-recall__reading"><div className="settings-recall__controls">
       <div className="settings-reading-size" data-settings-field="notes-font-size">
-        <label htmlFor={fontId}><strong>Body text size</strong><small>Applies to Notes and embedded note text.</small></label>
-        <div><TextInput id={fontId} type="text" inputMode="numeric" aria-label="Notes body text size" value={draft.value.fontSize}
+        <label htmlFor={fontId}><strong>Body text size</strong><small id={`${fontId}-hint`} className={valid ? undefined : 'settings-inline-error'}>{valid ? 'Applies to Notes and embedded note text.' : fontSizeHint}</small></label>
+        <div><TextInput id={fontId} type="text" inputMode="numeric" aria-label="Notes body text size" aria-describedby={`${fontId}-hint`} value={draft.value.fontSize}
           onChange={event => draft.setField('fontSize', event.target.value)} aria-invalid={!valid} /><span>px</span></div>
       </div>
       <input className="settings-reading-slider" type="range" min={NOTE_FONT_SIZE_MIN} max={NOTE_FONT_SIZE_MAX} step={1}

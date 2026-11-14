@@ -2,7 +2,6 @@
 .settings-workflows__density legend { color: var(--text-3); font-size: var(--fs-meta); margin-bottom: var(--sp-2); }
 .settings-workflows__density label { display: flex; flex-direction: column; gap: var(--sp-3); padding: var(--sp-3); border-radius: var(--radius); background: var(--surface-1); cursor: pointer; }
 .settings-workflows__density label[data-selected='true'] { background: var(--surface-3); box-shadow: inset 0 1px 0 var(--line); }
-.settings-workflows__density label:has(input:focus-visible) { outline: 2px solid var(--green); outline-offset: 2px; }
 .settings-workflows__choice { display: flex; align-items: center; gap: var(--sp-2); color: var(--text-2); font-size: var(--fs-meta); }
 .settings-workflows__choice input { accent-color: var(--green); margin: 0; }
 .settings-workflows__rail-preview { display: flex; flex-direction: column; gap: 7px; height: 68px; padding: var(--sp-2); background: var(--surface-0); border-radius: var(--radius-sm); }
@@ -30,13 +29,12 @@
 .settings-reading-size strong { font-size: var(--fs-body); font-weight: 500; }
 .settings-reading-size small { color: var(--text-3); font-size: var(--fs-meta); }
 .settings-reading-size > div { display: flex; align-items: center; gap: var(--sp-2); flex: none; color: var(--text-3); font-size: var(--fs-meta); }
-.settings-reading-size input { width: 56px; height: 30px; padding: var(--sp-1) var(--sp-2); border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-1); color: var(--text); font: inherit; text-align: center; font-variant-numeric: tabular-nums; }
+.settings-reading-size input { width: 56px; font-variant-numeric: tabular-nums; text-align: center; }
 .settings-reading-slider { display: block; width: 100%; margin: var(--sp-4) 0 var(--sp-5); accent-color: var(--green); }
 .settings-reading-width, .settings-goals-view { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-2); padding: 0; margin: var(--sp-4) 0; border: 0; }
 .settings-reading-width legend, .settings-goals-view legend { margin-bottom: var(--sp-2); color: var(--text-3); font-size: var(--fs-meta); }
 .settings-reading-width label, .settings-goals-view label { display: flex; gap: var(--sp-2); align-items: center; min-width: 0; padding: var(--sp-3); border-radius: var(--radius); background: var(--surface-1); cursor: pointer; }
 .settings-reading-width label[data-selected='true'], .settings-goals-view label[data-selected='true'] { background: var(--surface-3); box-shadow: inset 0 0 0 1px var(--line); }
-.settings-reading-width label:has(input:focus-visible), .settings-goals-view label:has(input:focus-visible) { outline: 2px solid var(--green); outline-offset: 2px; }
 .settings-reading-width input, .settings-goals-view input { flex: none; accent-color: var(--green); margin: 0; }
 .settings-reading-width label > span { display: grid; gap: var(--sp-1); }
 .settings-reading-width strong { color: var(--text); font-weight: 500; font-size: var(--fs-body); }

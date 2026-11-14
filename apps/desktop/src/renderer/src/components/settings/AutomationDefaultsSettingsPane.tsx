@@ -44,8 +44,8 @@ export function AutomationDefaultsSettingsPane({ preferences, onSave }: {
   let issue = '', parsed: AutomationDefaults | undefined
   try { parsed = policyValue(draft.value) } catch (error) { issue = error instanceof Error ? error.message : 'Review your automation defaults.' }
   const number = (key: keyof typeof units | 'checkInDailyBudget', label: string, unit: string, hint: string) => <div className="continuity-setting-row" data-settings-field={key}>
-    <label htmlFor={`${id}-${key}`}><strong>{label}</strong><small>{hint}</small></label>
-    <div className="continuity-number"><TextInput id={`${id}-${key}`} aria-label={label} inputMode={key === 'checkInDailyBudget' ? 'numeric' : 'decimal'}
+    <label htmlFor={`${id}-${key}`}><strong>{label}</strong><small id={`${id}-${key}-hint`}>{hint}</small></label>
+    <div className="continuity-number"><TextInput id={`${id}-${key}`} aria-label={label} aria-describedby={`${id}-${key}-hint`} inputMode={key === 'checkInDailyBudget' ? 'numeric' : 'decimal'}
       value={draft.value[key]} onChange={event => draft.setField(key, event.target.value)} /><span>{unit}</span></div>
   </div>
   async function commit() {
@@ -59,21 +59,21 @@ export function AutomationDefaultsSettingsPane({ preferences, onSave }: {
       <details className="continuity-disclosure automation-prompt-disclosure" data-settings-field="progressPrompt">
         <summary><span>Default progress prompt<small>{draft.value.progressPrompt.trim() ? 'Custom instruction for new progress tasks' : 'Optional · starts blank'}</small></span></summary>
         <div className="automation-defaults-prompt">
-          <label htmlFor={`${id}-prompt`}><small>Review this instruction when creating each task.</small></label>
-          <ComposerTextarea id={`${id}-prompt`} aria-label="Default progress prompt" rows={3} value={draft.value.progressPrompt} onValueChange={value => draft.setField('progressPrompt', value)} />
+          <p id={`${id}-prompt-hint`} className="continuity-hint">Review this instruction when creating each task.</p>
+          <ComposerTextarea id={`${id}-prompt`} aria-label="Default progress prompt" aria-describedby={`${id}-prompt-hint`} rows={3} value={draft.value.progressPrompt} onValueChange={value => draft.setField('progressPrompt', value)} />
         </div>
       </details>
     </section>
     <section className="settings-group"><header><span>Calendar arrangements</span><small>Saved: {saved.calendarTimezone || 'System timezone'}</small></header>
-      <div className="continuity-setting-row" data-settings-field="calendarTimezone"><label htmlFor={`${id}-timezone`}><strong>Default arrangement timezone</strong><small>Blank uses the system timezone when a new form opens. Or enter an IANA name, such as Asia/Shanghai.</small></label>
-        <TextInput id={`${id}-timezone`} aria-label="Default arrangement timezone" placeholder="System timezone" value={draft.value.calendarTimezone} onChange={event => draft.setField('calendarTimezone', event.target.value)} /></div>
+      <div className="continuity-setting-row" data-settings-field="calendarTimezone"><label htmlFor={`${id}-timezone`}><strong>Default arrangement timezone</strong><small id={`${id}-timezone-hint`}>Blank uses the system timezone when a new form opens. Or enter an IANA name, such as Asia/Shanghai.</small></label>
+        <TextInput id={`${id}-timezone`} aria-label="Default arrangement timezone" aria-describedby={`${id}-timezone-hint`} placeholder="System timezone" value={draft.value.calendarTimezone} onChange={event => draft.setField('calendarTimezone', event.target.value)} /></div>
     </section>
     <details className="continuity-disclosure" data-automation-quiet-defaults>
       <summary><span>Quiet follow-up<small>Only used when you enable it for a new arrangement</small></span><span className="continuity-disclosure-value">Saved: {saved.checkInDailyBudget} per day</span></summary>
       <div className="continuity-disclosure-body">
       <p className="continuity-hint">Used only when you enable quiet follow-up on a new arrangement. Quiet hours use that arrangement’s timezone.</p>
-      {(['checkInQuietStart', 'checkInQuietEnd'] as const).map(key => <div className="continuity-setting-row" data-settings-field={key} key={key}><label htmlFor={`${id}-${key}`}><strong>{key === 'checkInQuietStart' ? 'Quiet period starts' : 'Quiet period ends'}</strong><small>Built-in default: {_batchAutomationDefaults[key]}.</small></label>
-        <TextInput id={`${id}-${key}`} aria-label={key === 'checkInQuietStart' ? 'Quiet period starts' : 'Quiet period ends'} type="time" value={draft.value[key]} onChange={event => draft.setField(key, event.target.value)} /></div>)}
+      {(['checkInQuietStart', 'checkInQuietEnd'] as const).map(key => <div className="continuity-setting-row" data-settings-field={key} key={key}><label htmlFor={`${id}-${key}`}><strong>{key === 'checkInQuietStart' ? 'Quiet period starts' : 'Quiet period ends'}</strong><small id={`${id}-${key}-hint`}>Built-in default: {_batchAutomationDefaults[key]}.</small></label>
+        <TextInput id={`${id}-${key}`} aria-label={key === 'checkInQuietStart' ? 'Quiet period starts' : 'Quiet period ends'} type="time" aria-describedby={`${id}-${key}-hint`} value={draft.value[key]} onChange={event => draft.setField(key, event.target.value)} /></div>)}
       {number('checkInSilenceMs', 'Minimum silence before follow-up', 'hours', 'Built-in default: 18 hours. Choose a duration from 5 minutes to 30 days.')}
       {number('checkInMinIntervalMs', 'Minimum follow-up interval', 'hours', 'Built-in default: 20 hours. Choose a duration from 5 minutes to 30 days.')}
       {number('checkInDailyBudget', 'Daily follow-up budget', 'attempts', 'Built-in default: 1 attempt per local day. Choose 1 to 3.')}

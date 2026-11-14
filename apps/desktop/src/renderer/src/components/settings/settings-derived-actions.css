@@ -28,7 +28,7 @@
 .derived-actions__tile { display: grid; place-items: center; flex: none; width: 40px; height: 40px; border-radius: 12px; color: var(--green); background: color-mix(in srgb, var(--green) 9%, var(--surface-1)); box-shadow: var(--hl); }
 .derived-actions__tag { flex: none; padding: 0 var(--sp-3); border-radius: 999px; background: var(--wash-1); color: var(--text-3); font-size: var(--fs-micro); line-height: 20px; }
 .derived-actions__title { margin: 0; color: var(--text); font-size: var(--fs-title); font-weight: 600; letter-spacing: -.01em; }
-.derived-actions__name { flex: 1; min-width: 0; }
+.derived-actions__name { flex: 1; min-width: 0; display: grid; gap: var(--sp-2); color: var(--text-2); font-size: var(--fs-meta); }
 .derived-actions__lead { margin: 0 0 var(--sp-5); color: var(--text-2); font-size: var(--fs-body); line-height: 1.55; }
 .derived-actions__facts { display: grid; gap: 0; margin: var(--sp-5) 0 0; border-radius: var(--radius); background: var(--surface-1); }
 .derived-actions__facts > div { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: var(--sp-4); padding: var(--sp-3) var(--sp-4); }
@@ -36,22 +36,21 @@
 .derived-actions__facts dt { color: var(--text-3); font-size: var(--fs-meta); }
 .derived-actions__facts dd { margin: 0; color: var(--text); font-size: var(--fs-meta); line-height: 1.5; }
 
-/* Option rows: a mark, then a name over its explanation. Wins over the shared field-label grid. */
+/* Option rows place the control beside its name and explanation. */
 .derived-actions .derived-actions__toggle { display: flex; align-items: flex-start; gap: var(--sp-4); padding: var(--sp-4); border-radius: var(--radius); background: var(--surface-1); cursor: pointer; color: var(--text); font-size: var(--fs-body); }
 .derived-actions .derived-actions__toggle:hover { background: var(--surface-2); }
-.derived-actions .derived-actions__toggle input { flex: none; width: 14px; height: 14px; min-height: 0; margin: 3px 0 0; padding: 0; accent-color: var(--green); }
 .derived-actions .derived-actions__toggle > span { display: grid; justify-content: start; gap: var(--sp-1); min-width: 0; }
 .derived-actions__toggle small, .derived-actions__agent small, .derived-actions__actions small, .derived-actions__block > small { color: var(--text-3); font-size: var(--fs-meta); line-height: 1.5; }
 .derived-actions__base { margin: 0; padding: 0; border: 0; min-width: 0; }
 .derived-actions__base legend { margin-bottom: var(--sp-3); color: var(--text-2); font-size: var(--fs-meta); }
 .derived-actions__bases { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-3); }
-.derived-actions .agent-settings-fields .derived-actions__base-choice { position: relative; display: flex; align-items: flex-start; gap: var(--sp-4); min-width: 0; padding: var(--sp-4); border-radius: var(--radius); color: var(--text-2); background: var(--surface-1); cursor: pointer; font-size: var(--fs-body); }
-.derived-actions .agent-settings-fields .derived-actions__base-choice:hover { background: var(--surface-2); }
-.derived-actions .agent-settings-fields .derived-actions__base-choice[data-selected] { color: var(--text); background: color-mix(in srgb, var(--green) 8%, var(--surface-2)); box-shadow: var(--hl); }
-.derived-actions .agent-settings-fields .derived-actions__base-choice:has(.settings-choice-radio:focus-visible) { outline: 2px solid var(--focus-line); outline-offset: 2px; }
+.derived-actions__base-choice { position: relative; display: flex; align-items: flex-start; gap: var(--sp-4); min-width: 0; padding: var(--sp-4); border-radius: var(--radius); color: var(--text-2); background: var(--surface-1); cursor: pointer; font-size: var(--fs-body); }
+.derived-actions__base-choice:hover { background: var(--surface-2); }
+.derived-actions__base-choice[data-selected] { color: var(--text); background: color-mix(in srgb, var(--green) 8%, var(--surface-2)); box-shadow: var(--hl); }
+.derived-actions__base-choice:has(.settings-choice-radio:focus-visible) { outline: 2px solid var(--focus-line); outline-offset: 2px; }
 .derived-actions__base-choice > svg:first-of-type { flex: none; margin-top: 2px; color: var(--text-3); }
 .derived-actions__base-choice[data-selected] > svg:first-of-type { color: var(--green); }
-.derived-actions .agent-settings-fields .derived-actions__base-choice > span { display: grid; justify-content: start; gap: var(--sp-1); min-width: 0; padding-right: var(--sp-5); }
+.derived-actions__base-choice > span { display: grid; justify-content: start; gap: var(--sp-1); min-width: 0; padding-right: var(--sp-5); }
 .derived-actions__base-choice small { color: var(--text-3); font-size: var(--fs-meta); line-height: 1.45; }
 .derived-actions__base-check { position: absolute; top: var(--sp-3); right: var(--sp-3); color: var(--green); }
 .derived-actions__agent { display: grid; gap: var(--sp-2); }

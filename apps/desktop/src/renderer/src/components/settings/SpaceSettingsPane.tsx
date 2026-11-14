@@ -1,3 +1,4 @@
+import { Switch } from '@agentmux/client-ui/input'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { PROJECT_RAIL_DENSITY_DEFAULT, PROJECT_RAIL_DENSITY_IDS, type ProjectRailDensity } from '../../../../shared/contracts'
 import { SettingsSaveBar, useSettingsSave } from './SettingsSaveBar'
@@ -46,7 +47,7 @@ export function SpaceSettingsPane({ density, showHistoryTime, onSave, onTopics, 
     <section className="settings-group" data-settings-field="git-history-time">
       <header><span>Git History</span><small>Saved: {showHistoryTime !== false ? 'Time shown' : 'Time hidden'}</small></header>
       <label className="browser-automation-toggle">
-        <input type="checkbox" aria-label="Show commit time" checked={draft.value.gitHistoryShowTime} onChange={event => draft.setField('gitHistoryShowTime', event.target.checked)} />
+        <Switch aria-label="Show commit time" checked={draft.value.gitHistoryShowTime} onChange={event => draft.setField('gitHistoryShowTime', event.target.checked)} />
         <span><strong>Show commit time</strong><small>Show recorded author time beside each commit in the history tree.</small></span>
       </label>
       <div className="settings-space__commit" aria-label="Git History display preview"><span>Example commit</span><div><code>a1b2c3d</code><strong>Refine project navigation</strong>{draft.value.gitHistoryShowTime && <time>{[10, 42].map(value => String(value).padStart(2, '0')).join(':')}</time>}</div></div>

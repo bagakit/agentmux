@@ -1,5 +1,5 @@
 import { useId } from 'react'
-import { TextInput } from '@agentmux/client-ui/input'
+import { Switch, TextInput } from '@agentmux/client-ui/input'
 import { resolveComposerInputConfig, validateComposerInputConfig, type ComposerInputConfig } from '@agentmux/client-ui/composer-input-config'
 import './message-tool-settings.css'
 import { MESSAGE_TOOL_INITIAL_LAYOUT_DEFAULT, MESSAGE_TOOL_INITIAL_LAYOUT_IDS, type MessageToolInitialLayout } from '../../../../shared/contracts'
@@ -86,7 +86,7 @@ export function MessageToolSettingsPane({ initialLayout, completion, onSave, onS
           <small>{field.detail}</small>
         </label>)}
       </div>
-      <label className="message-tool-keywords" data-settings-field="completion-keywords"><input type="checkbox" checked={inputDraft.value.keywords}
+      <label className="message-tool-keywords" data-settings-field="completion-keywords"><Switch checked={inputDraft.value.keywords}
         onChange={event => inputDraft.setField('keywords', event.target.checked)} />Suggest saved prompts by keyword</label>
       {inputError && <p id={errorId} className="settings-inline-error" role="alert">{inputError}</p>}
       <SettingsSaveBar save={completionSave} dirty={inputDraft.dirty} resolution={inputDraft} blocked={inputError || undefined} label="Save shortcut input" onSave={() => void saveCompletion()} />

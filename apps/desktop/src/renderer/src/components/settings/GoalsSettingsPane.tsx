@@ -1,3 +1,4 @@
+import { Switch } from '@agentmux/client-ui/input'
 import { useId, useRef } from 'react'
 import { GOALS_VIEW_IDS, resolveGoalsPreferences, type GoalsPreferences } from '@agentmux/host/goals-preferences'
 import { SettingsSaveBar, useSettingsSave } from './SettingsSaveBar'
@@ -52,13 +53,13 @@ export function GoalsSettingsPane({ config, preferences, onSave, onOpenPrompts }
           <span>{choice === 'list' ? 'List' : 'Board'}</span>
         </label>)}
       </fieldset>
-      <label className="browser-automation-toggle" data-settings-field="finished-goals"><input type="checkbox" checked={finished.value} onChange={event => finished.setValue(event.target.checked)} aria-label="Show finished goals by default" />
+      <label className="browser-automation-toggle" data-settings-field="finished-goals"><Switch checked={finished.value} onChange={event => finished.setValue(event.target.checked)} aria-label="Show finished goals by default" />
         <span><strong>Show finished goals by default</strong><small>Include Done and Cancelled goals when you open a new view.</small></span>
       </label>
     </section>
     <section className="settings-group" data-settings-field="goal-supervisor">
       <header><span>Supervisor for new goals</span><small>Saved: {savedView.requesterAsSupervisor ? 'Requester' : 'Choose manually'}</small></header>
-      <label className="browser-automation-toggle"><input type="checkbox" checked={supervisor.value} onChange={event => supervisor.setValue(event.target.checked)} aria-label="Use the requesting Agent as Supervisor" />
+      <label className="browser-automation-toggle"><Switch checked={supervisor.value} onChange={event => supervisor.setValue(event.target.checked)} aria-label="Use the requesting Agent as Supervisor" />
         <span><strong>Use the requesting Agent as Supervisor</strong><small>The original Agent or PMO becomes Supervisor, assignee and related Session for a new goal. Continue starts separately.</small></span>
       </label>
       <p className="settings-workflows__note">Existing goals and your manual choices stay as saved. Without a confirmed source, choose a Supervisor in the goal.</p>

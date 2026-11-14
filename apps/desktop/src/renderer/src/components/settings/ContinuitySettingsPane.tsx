@@ -1,5 +1,5 @@
 import { agentContinuityRetryBaseDelay, DEFAULT_AGENT_CONTINUITY_POLICY, normalizeAgentContinuityPolicy, type AgentMuxContinuityPolicy } from '@agentmux/core/agent-session-recovery'
-import { TextInput } from '@agentmux/client-ui/input'
+import { NativeSelect, Switch, TextInput } from '@agentmux/client-ui/input'
 import { useId, useState, type ReactNode } from 'react'
 import { SettingsSaveBar, useSettingsSave } from './SettingsSaveBar'
 import { useSettingDraftRecord } from './use-setting-draft'
@@ -57,11 +57,11 @@ function DurationSettingInput({ id, label, value, onChange }: { id: string; labe
           setEntry({ canonical: next, text: event.target.value, unit })
           onChange(next)
         }} />
-      <select aria-label={`${label} unit`} value={unit} onChange={event => {
+      <NativeSelect aria-label={`${label} unit`} value={unit} onChange={event => {
         const next = event.target.value as DurationUnit
         setUnit(next)
         setEntry(valid ? null : { canonical: value, text, unit: next })
-      }}>{Object.keys(durationUnits).map(value => <option key={value} value={value}>{value}</option>)}</select>
+      }}>{Object.keys(durationUnits).map(value => <option key={value} value={value}>{value}</option>)}</NativeSelect>
     </div>
     <output id={`${id}-value`} className="continuity-duration-summary" htmlFor={id}>
       {valid ? approximate ? `≈ ${text} ${unit} · Exact: ${value} seconds` : readableDuration(canonical) : 'Use a duration with whole millisecond precision'}
@@ -141,7 +141,7 @@ export function ContinuitySettingsPane({ preferences, onSave }: {
         {duration('activeRecoveryDelayMs', 'Recovery wait', 'Wait after the recovery decision. Zero starts immediately.')}
         {duration('confirmedIdleWindowMs', 'Automatic recovery window', 'Recover recent sessions automatically; older or unknown activity stays on demand.')}
       </div>
-      <label className="browser-automation-toggle" data-settings-field="resumeAfterExit"><input type="checkbox" aria-label="Resume after confirmed exit" checked={draft.value.resumeAfterExit} onChange={event => draft.setField('resumeAfterExit', event.target.checked)} />
+      <label className="browser-automation-toggle" data-settings-field="resumeAfterExit"><Switch aria-label="Resume after confirmed exit" checked={draft.value.resumeAfterExit} onChange={event => draft.setField('resumeAfterExit', event.target.checked)} />
         <span><strong>Resume after confirmed exit</strong><small>Allow automatic recovery after a confirmed exit or missing process. Manual Resume stays available.</small></span></label>
     </section>
     <details className="continuity-disclosure" data-continuity-retry-settings>
