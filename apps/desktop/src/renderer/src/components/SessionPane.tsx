@@ -78,7 +78,7 @@ import { useWorkbenchBrowserPresentation, workbenchSessionStageHostId, type Work
 import { agentDisplayName } from '../lib/workbench-tabs'
 import { agentProviderLabel } from '@agentmux/client-ui/components/AgentProviderIcon'
 import { moteConversationIdentity, useMoteConversationOwner, type MoteConversationOwner } from '../lib/mote-conversation-identity'
-import { agentContinuityPresentation, currentRunRecoveryOperation, currentUnconfirmedResumeOperation } from '../lib/continuity-presentation'
+import { agentContinuityDetail, agentContinuityPresentation, currentRunRecoveryOperation, currentUnconfirmedResumeOperation } from '../lib/continuity-presentation'
 import { type ConversationItemRef } from '@agentmux/core/conversation'
 import { sameWorkbenchProjectionSelection } from '../lib/workbench-projection'
 import { conversationMessageSourceKey } from '@agentmux/client-ui/conversation-message-location'
@@ -675,9 +675,11 @@ export function SessionPane({
   const continuity = session?.status.continuity
   // Which of Core's reasons this is decides the title, the body and whether retry can work.
   // The conflict class comes along too: its two values ask for opposite actions.
-  const pendingResume = session && currentUnconfirmedResumeOperation(session)
+  const pendingResume = session && session.processState !== 'running' ? currentUnconfirmedResumeOperation(session) : undefined
   const continuityNotice = pendingResume ? {
-    title: 'Recovery is not confirmed', reason: 'Your conversation and unsent draft are kept. Continue to check and resume this conversation.',
+    title: 'Recovery is not confirmed', reason: pendingResume.error || pendingResume.errorCode
+      ? agentContinuityDetail(pendingResume)
+      : 'Your conversation and unsent draft are kept. Continue to check and resume this conversation.',
     remedy: { kind: 'retry' as const }, actionLabel: 'Continue original'
   } : classifyContinuityFailure(
     continuity,

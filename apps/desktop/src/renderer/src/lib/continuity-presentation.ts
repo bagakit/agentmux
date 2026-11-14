@@ -60,7 +60,8 @@ export function agentContinuityDetail(decision?: AgentMuxContinuityOperation): s
     case 'not-active': return 'No interrupted work or recent idle completion is confirmed. Use Resume or send your next request.'
     case 'resume-disabled': return 'Automatic resume after an ended Run is disabled. Use Resume or send your next request.'
     case 'provider-unverified': return 'The Provider recovery check is unconfirmed. The original Session is kept; check it again or restore manually.'
-    case 'operation-unconfirmed': return 'The original recovery result is unconfirmed. Check the same Session again; no new start or unknown input is replayed.'
+    case 'operation-unconfirmed': return [decision.errorCode, decision.error].filter(Boolean).join(': ') ||
+      'The original recovery result is unconfirmed. Check the same Session again; no new start or unknown input is replayed.'
     default: return decision.error ?? 'The original Session is kept. Use Resume or send your next request.'
   }
 }
