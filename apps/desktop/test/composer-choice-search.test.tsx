@@ -50,7 +50,7 @@ it('queries real skill descriptions and sources, then inserts the exact original
   await search('architecture'); await key(query(), 'ArrowDown'); expect(document.activeElement).toBe(items()[0])
   await key(items()[0]!, 'Enter')
   await vi.waitFor(() => expect(document.querySelector('.composer-menu--search[role="dialog"]')).toBeNull())
-  expect(discover).toHaveBeenCalledExactlyOnceWith('agent-1')
+  expect(discover).toHaveBeenCalledExactlyOnceWith('local', 'agent-1')
   expect(dom.draft()).toContain(original); expect(expandSemanticReferences(dom.draft()!)).toContain('@' + skills[1]!.path); expect(dom.draft()).not.toContain(skills[0]!.path)
   await vi.waitFor(() => expect(document.activeElement).toBe(originalEditor))
   expect(dom.container.querySelector('.tiptap')).toBe(originalEditor)
@@ -139,7 +139,7 @@ it('switching exact Session invalidates its old query and discovery through orig
   expect(document.querySelector('.composer-menu--search[role="dialog"]')).toBeNull()
   await dom.click('.composer-tool--mode'); await open(); expect(query().value).toBe('')
   await act(async () => resolve([skills[0]!]))
-  expect(items()[0]!.textContent).toContain('Explain'); expect(discover.mock.calls).toEqual([['agent-1'], ['agent-2']])
+  expect(items()[0]!.textContent).toContain('Explain'); expect(discover.mock.calls).toEqual([['local', 'agent-1'], ['local', 'agent-2']])
   expect(dom.draft()).toBe('First draft'); expect(dom.draft('agent-2')).toBe('Second draft')
 })
 
