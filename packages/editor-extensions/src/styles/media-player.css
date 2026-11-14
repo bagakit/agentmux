@@ -32,7 +32,7 @@
 .media-player__start { position: absolute; width: 52px; height: 52px; display: grid; place-items: center; border: 0; border-radius: 50%; padding: 0;
   color: var(--bg); background: linear-gradient(180deg, var(--green), var(--green-2)); cursor: pointer;
   box-shadow: 0 6px 18px color-mix(in oklab, var(--green) 35%, transparent), var(--hl-strong);
-  transition: transform var(--dur-fast) var(--ease-enter), box-shadow var(--dur-fast) ease; }
+  transition: transform var(--dur-fast) var(--ease-enter), box-shadow var(--dur-fast) ease, opacity var(--dur-fast) ease; }
 .media-player__start svg { translate: 2px 0; }
 .media-player__start:hover { transform: scale(1.05); box-shadow: 0 8px 24px color-mix(in oklab, var(--green) 45%, transparent), var(--hl-strong); }
 .media-player__start:focus-visible { outline: 2px solid var(--media-ink); outline-offset: 3px; }
@@ -104,6 +104,8 @@
 .media-player__preview[data-idle] { visibility: hidden; }
 .media-player__preview[data-frame] { left: clamp(calc(var(--media-preview-lo) + var(--media-preview-width) / 2 + var(--sp-2)), var(--media-preview-x),
   calc(var(--media-preview-hi) - var(--media-preview-width) / 2 - var(--sp-2))); }
+/* A frame over a small picture would cover the start disc; the disc gives way while a frame shows. */
+.media-player:has(.media-player__preview[data-frame]) .media-player__start { opacity: 0; pointer-events: none; }
 .media-player__preview-frame { width: var(--media-preview-width); aspect-ratio: var(--media-preview-ratio); overflow: hidden; border-radius: var(--radius-md);
   background: #000000; box-shadow: var(--elev-2), 0 0 0 1px color-mix(in oklab, #ffffff 18%, transparent); transition: opacity var(--dur-fast) ease; }
 .media-player__preview:not([data-frame]) > .media-player__preview-frame { position: absolute; bottom: 0; visibility: hidden; opacity: 0; }
