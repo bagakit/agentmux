@@ -25,7 +25,7 @@ export const FocusCommunicationFeedback = memo(function FocusCommunicationFeedba
   return <div ref={ref} className="focus-communication-feedback" role="status" data-activity-id={activity.pulse.id}
     data-kind={activity.pulse.kind} data-direction={activity.direction} data-motion-active={visible}
     style={{ '--activity-delay': `${delay}ms` } as CSSProperties}>
-    <span key={activity.pulse.id} className="focus-communication-feedback__mark" aria-hidden="true">
+    <span key={`${activity.pulse.id}:${visible}`} className="focus-communication-feedback__mark" aria-hidden="true">
       <SemanticIcon name={activity.direction === 'updated' ? 'action.refresh' : activity.direction === 'received' ? 'navigation.back' : 'action.send'} size={12} />
     </span><span>{activityLabels[activity.direction]}</span>
   </div>
