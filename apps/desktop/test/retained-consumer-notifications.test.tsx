@@ -454,7 +454,7 @@ it('a retained Pane preserves the original first recovery observation and refres
   expect(controls.map(control => control.mock.calls.length)).toEqual([0, 0, 0, 0])
 })
 
-it('a retained Pane ignores unused timeline snapshot metadata while its Composer keeps live input facts', async () => {
+it('a retained Composer skips hidden timeline metadata while its Pane keeps live input facts', async () => {
   const session = composerSession('snapshot-metadata-own')
   const item = { id: 'original-input', agentSessionId: session.id, kind: 'user_message' as const,
     source: 'user' as const, status: 'complete' as const, title: 'Original input', content: 'Original recorded prompt',
@@ -478,8 +478,8 @@ it('a retained Pane ignores unused timeline snapshot metadata while its Composer
   expect(useAppStore.getState().timelines[session.id]!.items).toBe(timeline.items)
   expect(useAppStore.getState().sessions[0]).toBe(session)
   expect(after.sessionPane.hidden.commits).toBe(before.sessionPane.hidden.commits)
-  // Composer owns its real timeline/history/receipt consumer independently of the Pane.
-  expect(after.composer.hidden.commits).toBeGreaterThan(before.composer.hidden.commits)
+  expect(after.composer.hidden.commits, JSON.stringify({ before: before.composer.hidden, after: after.composer.hidden }))
+    .toBe(before.composer.hidden.commits)
   expect(dom.container.querySelector('.ProseMirror')).toBe(editor)
   expect(dom.container.querySelector('[data-pty-paint]')).toBe(terminal)
   expect(useAppStore.getState().agentSteerQueues[session.id]).toBe(queue)
@@ -494,5 +494,59 @@ it('a retained Pane ignores unused timeline snapshot metadata while its Composer
   await dom.render(pane(true))
   expect(dom.container.querySelector('.ProseMirror')).toBe(editor)
   expect(dom.container.querySelector('[data-pty-paint]')).toBe(terminal)
+  expect(useAppStore.getState().sessions[0]?.control).toBe(session.control)
+})
+
+it('a retained Composer ignores non-input timeline appends while hidden and keeps the original delivery owner live', async () => {
+  const originalSession = 'composer-retained-input-history'
+  const native = await nativeHistoryFixture('codex', '', { agentSessionId: originalSession })
+  speakerFixtureCleanup.push(async () => { expect(native.controls.every(control => control.mock.calls.length === 0)).toBe(true); await native.close() })
+  const originalProjection = composerSession(originalSession)
+  const session = { ...originalProjection, workspacePath: native.root,
+    control: { ...originalProjection.control, run: native.session.run } }
+  const makeInput = (id: string, content: string) => ({
+    id, content, agentSessionId: session.id, kind: 'user_message' as const, source: 'user' as const,
+    status: 'complete' as const, title: 'Prompt', createdAt: 1, updatedAt: 1
+  })
+  const original = makeInput('original-record', 'Already recorded input')
+  const queued = { operationId: 'delivered-while-hidden', runId: session.control.run.runId,
+    text: 'Arrived while hidden', status: 'queued' as const }
+  const retained = { ...queued, operationId: 'still-pending', text: 'Unsent intent remains', awaitingExplicitSend: true as const }
+  await native.store.applyTimelineMutation({ type: 'append', agentSessionId: session.id, item: original })
+  const timeline = await native.client.sessionTimeline(session.id)
+  expect(timeline.sourceHostId).toBe(session.hostId)
+  useAppStore.setState({ sessions: [session], timelines: { [session.id]: timeline },
+    agentComposerDrafts: { [session.id]: 'Keep my original editor and draft' }, agentSteerQueues: { [session.id]: [queued, retained] } })
+  const composer = (visible: boolean) => <AgentSessionComposer sessionId={session.id} session={session} visible={visible} />
+  await dom.render(composer(true))
+  const editor = dom.container.querySelector<HTMLElement>('.ProseMirror')!
+  const panel = dom.container.querySelector<HTMLElement>('.composer-mailbox')!
+  expect(editor.textContent).toBe('Keep my original editor and draft')
+  expect(panel).not.toBeNull()
+  await dom.render(composer(false))
+  const before = rendererPerformance.snapshot().consumers.composer.hidden
+  const append = async (item: import('../src/shared/contracts').AgentTimelineItem) => {
+    const { agentSessionId, mutation, revision, stream, position } =
+      await native.store.applyTimelineMutation({ type: 'append', agentSessionId: session.id, item })
+    await act(async () => useAppStore.getState().applyEvent({ type: 'core', hostId: session.hostId, event: {
+      type: 'agent-timeline', agentSessionId, revision, mutation, stream, position, sourceHostId: session.hostId,
+      evidence: { source: 'user', observedAt: revision, run: session.control.run }
+    } }))
+    expect(useAppStore.getState().timelines[session.id]?.revision).toBe(revision)
+  }
+  for (let revision = 2; revision <= 9; revision++) {
+    await append({ ...original, id: `assistant-${revision}`, kind: 'assistant_message', content: 'Unrelated response content' })
+  }
+  expect(useAppStore.getState().timelines[session.id]?.items).toHaveLength(9)
+  const after = rendererPerformance.snapshot().consumers.composer.hidden
+  expect(after.commits - before.commits, JSON.stringify({ before, after })).toBe(0)
+  const submit = vi.spyOn(api.sessions, 'submitPrompt')
+  await append(makeInput(`prompt:${queued.operationId}`, queued.text))
+  expect(useAppStore.getState().agentSteerQueues[session.id]).toEqual([retained])
+  expect(submit).not.toHaveBeenCalled()
+  await dom.render(composer(true))
+  expect(dom.container.querySelector('.ProseMirror')).toBe(editor)
+  expect(dom.container.querySelector('.composer-mailbox')).toBe(panel)
+  expect(dom.draft(session.id)).toBe('Keep my original editor and draft')
   expect(useAppStore.getState().sessions[0]?.control).toBe(session.control)
 })

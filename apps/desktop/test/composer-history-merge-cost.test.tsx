@@ -12,7 +12,7 @@ import { conversationRevision } from '@agentmux/core/conversation'
 import { applyAgentTimelineMutation } from '@agentmux/core/timeline'
 import type { AgentTimelineMutation } from '@agentmux/core'
 import { appendFileSync } from 'node:fs'
-import { createCapturedInputSelector } from '../src/renderer/src/lib/session-captured-inputs'
+import * as capturedInput from '../src/renderer/src/lib/session-captured-inputs'
 import { createMailboxMessagesSelector } from '../src/renderer/src/lib/session-mailbox-messages'
 
 
@@ -102,7 +102,7 @@ beforeEach(() => {
     agentComposerDrafts: { [sid]: draft, 'history-neighbor': 'Neighbor unfinished draft' }, agentSteerQueues: {} })
 })
 
-it('reuses a nonempty original history merge through hidden parent, draft and status renders before any native reader opens', async () => {
+it('defers original history merging through hidden parent, draft, status and captured input updates', async () => {
   const originalSort = Array.prototype.sort
   let historySorts = 0
   vi.spyOn(Array.prototype, 'sort').mockImplementation(function (this: unknown[], compare) {
@@ -113,7 +113,7 @@ it('reuses a nonempty original history merge through hidden parent, draft and st
     return originalSort.call(this, compare)
   })
   await render(0)
-  expect(historySorts, 'The nonempty real history path must have executed').toBeGreaterThan(0)
+  expect(historySorts, 'The hidden Composer does not merge original history').toBe(0)
   const initial = historySorts
   await render(1)
   expect(historySorts, 'Unchanged parent render must reuse the original merged history').toBe(initial)
@@ -132,12 +132,12 @@ it('reuses a nonempty original history merge through hidden parent, draft and st
     ...state.timelines[sid]!, revision: 2, items: [...state.timelines[sid]!.items, captured(_historyFixtureEpoch(0, 0, 2))]
   } } })))
   await settle()
-  expect(historySorts, 'A new original captured fact must execute the real merge').toBeGreaterThan(initial)
-  const appended = historySorts
+  expect(historySorts, 'A captured input does not start hidden history work').toBe(0)
   await render(2)
-  expect(historySorts).toBe(appended)
+  expect(historySorts).toBe(0)
   await render(3, true)
   await openInputs()
+  expect(historySorts, 'The nonempty original history is merged when the reader is shown').toBeGreaterThan(0)
   expect(panel().textContent).toContain(`${tagged}2`)
   const controls = ['send', 'enqueueAgentSteer', 'interrupt', 'respondInteraction'].map(name => vi.spyOn(useAppStore.getState(), name as 'send'))
   await act(async () => { editor().focus(); editor().editor.commands.setTextSelection(1) })
@@ -158,6 +158,55 @@ it('keeps captured records readable without a current control and never grants t
   expect(api.sessions.readHistory).not.toHaveBeenCalled()
   expect(editor().getAttribute('contenteditable')).toBe('false')
   expect(dom.draft(sid)).toBe(draft)
+})
+
+it('preserves the selected captured record, Range and scroll when its Composer leaves and returns', async () => {
+  useAppStore.setState({ timelines: { [sid]: originalStream([captured(0), captured(1)]) } })
+  await render(0, true)
+  const mailbox = panel(), originalEditor = editor()
+  let nativeOpen = false
+  const matches = mailbox.matches.bind(mailbox)
+  vi.spyOn(mailbox, 'matches').mockImplementation(selector => selector === ':popover-open' ? nativeOpen : matches(selector))
+  Object.defineProperties(mailbox, {
+    showPopover: { configurable: true, value: vi.fn(() => { nativeOpen = true }) },
+    hidePopover: { configurable: true, value: vi.fn(() => { nativeOpen = false }) }
+  })
+  nativeOpen = true
+  await openInputs()
+  await dom.click('[data-record-key="timeline:cost-input-0"]')
+  const detail = mailbox.querySelector<HTMLElement>('.log-turn__body')!
+  const viewport = mailbox.querySelector<HTMLElement>('.composer-mailbox__content')!
+  expect(detail.textContent).toContain(`${tagged}0`)
+  const range = document.createRange()
+  range.selectNodeContents(detail)
+  const selection = document.getSelection()!
+  selection.removeAllRanges(); selection.addRange(range)
+  viewport.scrollTop = 31
+  const outside = document.createElement('button')
+  document.body.append(outside); outside.focus()
+  try {
+    await render(1, false)
+    expect(nativeOpen).toBe(false)
+    await commitInput({ type: 'append', agentSessionId: sid, item: captured(2) })
+    expect(mailbox.querySelector('.log-turn__body')).toBe(detail)
+    expect(selection.getRangeAt(0)).toBe(range)
+    expect(viewport.scrollTop).toBe(31)
+    await render(2, true)
+    expect(nativeOpen).toBe(true)
+    expect(panel()).toBe(mailbox)
+    expect(mailbox.querySelector('.log-turn__body')).toBe(detail)
+    expect(selection.getRangeAt(0)).toBe(range)
+    expect(range.startContainer).toBe(detail)
+    expect(viewport.scrollTop).toBe(31)
+    expect(document.activeElement).toBe(outside)
+    expect(editor()).toBe(originalEditor)
+    expect(dom.draft(sid)).toBe(draft)
+    await dom.click('[aria-label="Back to Inputs"]')
+    expect(mailbox.textContent).toContain(`${tagged}2`)
+  } finally {
+    selection.removeAllRanges()
+    outside.remove()
+  }
 })
 
 it('keeps query snapshots separate from the original live seed and reads current captured facts again after clearing the query', async () => {
@@ -208,8 +257,17 @@ it('rejects a late query from an old Host reader and an old Session without chan
 
 it.each([2, 64, 200])('keeps %s original inputs stable through process-only publications in the mounted Composer and Mailbox', async count => {
   const items = Array.from({ length: count }, (_, index) => captured(index))
-  useAppStore.setState({ timelines: { [sid]: { agentSessionId: sid, revision: 1, items } } })
+  useAppStore.setState({ timelines: { [sid]: originalStream(items) } })
   const project = vi.spyOn(inputProjection, 'projectSessionUserMessages')
+  const createSelector = capturedInput.createCapturedInputSelector
+  const timelineReads = vi.fn<(items: number) => void>()
+  vi.spyOn(capturedInput, 'createCapturedInputSelector').mockImplementation(() => {
+    const selectCaptured = createSelector()
+    return (...args) => {
+      if (args[0] === sid && args[1]?.items.length) timelineReads(args[1].items.length)
+      return selectCaptured(...args)
+    }
+  })
   const originalSort = Array.prototype.sort
   let sorts = 0
   vi.spyOn(Array.prototype, 'sort').mockImplementation(function (this: unknown[], compare) {
@@ -224,21 +282,20 @@ it.each([2, 64, 200])('keeps %s original inputs stable through process-only publ
   await render(1, false)
   expect(project).toHaveBeenCalled()
   const queryReads = vi.mocked(api.sessions.readHistory).mock.calls.length
-  project.mockClear(); sorts = 0
+  project.mockClear(); timelineReads.mockClear(); sorts = 0
   const started = performance.now()
   for (let index = 0; index < 20; index++) {
-    await act(async () => useAppStore.setState(state => ({ timelines: { ...state.timelines, [sid]: {
-      ...state.timelines[sid]!, revision: index + 2, items: [...items, {
+    await commitInput({ type: 'upsert', agentSessionId: sid, item: {
         id: 'current-process', agentSessionId: sid, kind: 'assistant_message', source: 'native-hook', status: 'streaming',
         title: 'Current process', content: `Process observation ${index}`, createdAt: 1, updatedAt: index + 2
-      }]
-    } } })))
-    await settle()
+    } })
   }
   const sample = { inputs: count, updates: 20, projections: project.mock.calls.length,
     materializedInputs: project.mock.results.reduce((sum, result) => sum + (result.type === 'return' ? result.value.length : 0), 0), sorts,
+    timelineReads: timelineReads.mock.calls.length, itemVisits: timelineReads.mock.calls.reduce((sum, [items]) => sum + items, 0),
     elapsedMs: performance.now() - started, queryReads: vi.mocked(api.sessions.readHistory).mock.calls.length - queryReads }
   if (process.env.AGENTMUX_CAPTURED_INPUT_SAMPLE) appendFileSync(process.env.AGENTMUX_CAPTURED_INPUT_SAMPLE, JSON.stringify(sample) + '\n')
+  expect(sample.timelineReads, JSON.stringify(sample)).toBe(0)
   expect(sample.projections, 'Process-only output must not materialize unchanged inputs in either original consumer').toBe(0)
   expect(sample.materializedInputs).toBe(0)
   expect(sample.sorts, 'Process-only output must not repeat the original input merge').toBe(0)
@@ -336,7 +393,7 @@ it('releases cleared captured facts without retaining their original timeline or
   const { setImmediate: nextJob } = await import('node:timers/promises')
   setFlagsFromString('--expose_gc')
   const collect: () => void = runInNewContext('gc')
-  const selectCaptured = createCapturedInputSelector(), selectMailbox = createMailboxMessagesSelector()
+  const selectCaptured = capturedInput.createCapturedInputSelector(), selectMailbox = createMailboxMessagesSelector()
   const install = () => {
     const input = captured(0), processRecord: AgentTimelineItem = { ...captured(1), kind: 'assistant_message' }
     const original = originalStream([input, processRecord])
