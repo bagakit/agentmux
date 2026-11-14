@@ -1,4 +1,5 @@
-import { lstat, mkdir, readFile, rename, rm, symlink, writeFile } from 'node:fs/promises'
+import { lstat, mkdir, mkdtemp, readFile, rename, rm, symlink, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
 import { createRequire, syncBuiltinESMExports } from 'node:module'
 import { dirname, join } from 'node:path'
 import { afterEach, expect, it, vi } from 'vitest'
@@ -74,6 +75,15 @@ it('public first preparation provisions the exact locator with durable root and 
 })
 
 type OwnedFixture = Awaited<ReturnType<typeof ownedFixture>>
+
+async function escapeMarkerNamespace(h: OwnedFixture) {
+  const externalRoot = await mkdtemp(join(tmpdir(), 'amx-escaped-identities-'))
+  cleanup.push(async () => { await rm(externalRoot, { recursive: true, force: true }) })
+  const externalDirectory = join(externalRoot, 'identities')
+  await rename(dirname(h.markerPath), externalDirectory)
+  await symlink(externalDirectory, dirname(h.markerPath))
+  return { externalRoot, externalMarker: join(externalDirectory, h.markerPath.split('/').at(-1)!) }
+}
 
 async function seedPending(h: OwnedFixture, occupant?: 'empty' | 'file' | 'symlink' | 'nonempty') {
   const root = dirname(h.locator.workspacePath)
@@ -152,6 +162,30 @@ it('retained preparation rejects a pending marker and never completes first allo
   await expect(h.client.prepareAgentExecutionHelper(h.input)).rejects.toMatchObject({ code: 'AGENT_WORKSPACE_OWNERSHIP_UNCONFIRMED' })
   expect(prepareTerminal).not.toHaveBeenCalled()
   expect(await readFile(h.markerPath, 'utf8')).toBe(pending)
+})
+
+it('first pending reentry refuses an escaped identity namespace without writing outside the state root', async () => {
+  const h = await ownedFixture()
+  await seedPending(h)
+  const escaped = await escapeMarkerNamespace(h)
+  const before = await readFile(escaped.externalMarker)
+  const prepareTerminal = vi.spyOn(h.client, 'prepareTerminal')
+  await expect(h.client.prepareAgentExecutionHelper(h.input)).rejects.toMatchObject({ code: 'AGENT_WORKSPACE_OWNERSHIP_UNCONFIRMED' })
+  expect(prepareTerminal).not.toHaveBeenCalled()
+  expect(await readFile(escaped.externalMarker)).toEqual(before)
+  expect(JSON.parse(before.toString()).phase).toBe('pending')
+  expect((await lstat(dirname(h.markerPath))).isSymbolicLink()).toBe(true)
+})
+
+it('retained validation refuses an escaped provisioned identity namespace', async () => {
+  const h = await ownedFixture()
+  await h.client.prepareAgentExecutionHelper(h.input)
+  const escaped = await escapeMarkerNamespace(h)
+  const before = await readFile(escaped.externalMarker)
+  const prepareTerminal = vi.spyOn(h.client, 'prepareTerminal')
+  await expect(h.client.prepareAgentExecutionHelper(h.input)).rejects.toMatchObject({ code: 'AGENT_WORKSPACE_OWNERSHIP_UNCONFIRMED' })
+  expect(prepareTerminal).not.toHaveBeenCalled()
+  expect(await readFile(escaped.externalMarker)).toEqual(before)
 })
 
 it.each([
