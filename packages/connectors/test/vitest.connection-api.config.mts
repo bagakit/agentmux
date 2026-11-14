@@ -1,7 +1,17 @@
-import { appendFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+import { appendFileSync, readFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { defineConfig } from 'vitest/config'
 import { relative, resolve } from 'node:path'
+
+const coreSourceRoot = new URL('../../../packages/core/', import.meta.url)
+const coreSourceAliases = Object.entries(JSON.parse(readFileSync(new URL('package.json', coreSourceRoot), 'utf8')).exports as Record<string, { import: string }>)
+  .filter(([key]) => key !== '.')
+  .map(([key, entry]) => ({
+    find: '@agentmux/core/' + key.slice(2),
+    replacement: fileURLToPath(new URL(entry.import.replace('./dist/', './src/').replace(/\.js$/u, '.ts'), coreSourceRoot))
+  })).sort((a, b) => b.find.length - a.find.length)
+
 const root = resolve(import.meta.dirname, '../../..'), mutation = process.env.CONNECTION_API_HOST_MUTANT
 const mutations = {
   'foreign-binding': { path: 'packages/connectors/src/connection-api.ts', before: "return context.actor.kind !== 'agent' || context.session?.agentSessionId === binding.agentSessionId && context.session.hostId === binding.executionHostId", after: 'return true' },
@@ -10,7 +20,7 @@ const mutations = {
 if (mutation && !Object.hasOwn(mutations, mutation)) throw Error('Unknown native API Host mutation')
 export default defineConfig({ root, cacheDir: resolve(root, '.cache/connection-api'), resolve: { alias: [
   { find: /^@agentmux\/core$/, replacement: resolve(root, 'packages/core/src/index.ts') },
-  { find: /^@agentmux\/core\/(.+)$/, replacement: resolve(root, 'packages/core/src/$1.ts') }
+  ...coreSourceAliases
 ] }, plugins: [{ name: 'original-native-api-owners', enforce: 'pre', transform(source, id) {
   const path = relative(root, id.split('?')[0]!)
   if (!/^packages\/connectors\/(?:src|test)\//u.test(path) && !/^packages\/core\/src\/(?:public-rpc|connection-api|connections|room-binding)/u.test(path)) return

@@ -1,11 +1,20 @@
+import { readFileSync } from 'node:fs'
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { createRequire, isBuiltin } from 'node:module'
 import { mkdir, mkdtemp, readFile, writeFile, rm } from 'node:fs/promises'
 import { dirname, isAbsolute, join, resolve } from 'node:path'
-import { pathToFileURL } from 'node:url'
+import { pathToFileURL, fileURLToPath } from 'node:url'
 import { tmpdir } from 'node:os'
 import { listProbeProcesses, runProbeProcess, stopProbeProcesses } from './probe-process.mjs'
+
+const coreSourceRoot = new URL('../../../packages/core/', import.meta.url)
+const coreSourceAliases = Object.entries(JSON.parse(readFileSync(new URL('package.json', coreSourceRoot), 'utf8')).exports)
+  .filter(([key]) => key !== '.')
+  .map(([key, entry]) => ({
+    find: '@agentmux/core/' + key.slice(2),
+    replacement: fileURLToPath(new URL(entry.import.replace('./dist/', './src/').replace(/\.js$/u, '.ts'), coreSourceRoot))
+  })).sort((a, b) => b.find.length - a.find.length)
 
 const root = resolve(import.meta.dirname, '../../..'), require = createRequire(join(root, 'apps/desktop/package.json'))
 const { build } = await import(pathToFileURL(require.resolve('vite')))
@@ -21,7 +30,7 @@ const sourceBytes = await readFile(owner)
 async function bundle(label, mutation) {
   let changed = false
   await build({ configFile: false, root, logLevel: 'error', ssr: { noExternal: true },
-    resolve: { alias: [{ find: /^@agentmux\/core$/, replacement: join(root, 'packages/core/src/index.ts') }, { find: /^@agentmux\/core\/(.+)$/, replacement: join(root, 'packages/core/src/$1.ts') }] },
+    resolve: { alias: [{ find: /^@agentmux\/core$/, replacement: join(root, 'packages/core/src/index.ts') }, ...coreSourceAliases] },
     plugins: [{ name: 'exact-pointer-inputs', enforce: 'pre', async resolveId(id, importer) {
       if (!importer || id.startsWith('.') || id.startsWith('\0') || isAbsolute(id) || isBuiltin(id) || id === 'electron' || id.startsWith('@agentmux/')) return
       const result = await this.resolve(id, importer, { skipSelf: true })

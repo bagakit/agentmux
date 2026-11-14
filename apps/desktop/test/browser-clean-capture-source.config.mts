@@ -1,8 +1,18 @@
+import { fileURLToPath } from 'node:url'
 import assert from 'node:assert/strict'
-import { appendFileSync } from 'node:fs'
+import { appendFileSync, readFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { resolve, relative } from 'node:path'
 import { defineConfig } from 'vitest/config'
+
+const coreSourceRoot = new URL('../../../packages/core/', import.meta.url)
+const coreSourceAliases = Object.entries(JSON.parse(readFileSync(new URL('package.json', coreSourceRoot), 'utf8')).exports as Record<string, { import: string }>)
+  .filter(([key]) => key !== '.')
+  .map(([key, entry]) => ({
+    find: '@agentmux/core/' + key.slice(2),
+    replacement: fileURLToPath(new URL(entry.import.replace('./dist/', './src/').replace(/\.js$/u, '.ts'), coreSourceRoot))
+  })).sort((a, b) => b.find.length - a.find.length)
+
 const root = resolve(import.meta.dirname, '../../..')
 const mutations: Record<string, { file: string; before: string; after: string }> = {
   'discard-options': { file: 'packages/core/src/browser-capture-cli.ts', before: '${JSON.stringify(options)}', after: '{}' },
@@ -16,7 +26,7 @@ const mutations: Record<string, { file: string; before: string; after: string }>
 export default defineConfig({
   resolve: { alias: [
     { find: '@agentmux/native-desktop/image', replacement: resolve(root, 'packages/native-desktop/src/image.ts') },
-    { find: /^@agentmux\/core\/(.*)$/, replacement: resolve(root, 'packages/core/src/$1.ts') },
+    ...coreSourceAliases,
     { find: '@agentmux/core', replacement: resolve(root, 'packages/core/src/index.ts') },
     { find: /^@agentmux\/identity(?:\/.*)?$/, replacement: resolve(root, 'packages/identity/src/index.ts') },
     { find: /^@agentmux\/browser\/(.*)$/, replacement: resolve(root, 'packages/browser/src/$1.ts') }

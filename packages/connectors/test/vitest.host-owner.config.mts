@@ -1,7 +1,16 @@
+import { fileURLToPath } from 'node:url'
 import { defineConfig } from 'vitest/config'
 import { appendFileSync, readFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { relative, resolve } from 'node:path'
+
+const coreSourceRoot = new URL('../../../packages/core/', import.meta.url)
+const coreSourceAliases = Object.entries(JSON.parse(readFileSync(new URL('package.json', coreSourceRoot), 'utf8')).exports as Record<string, { import: string }>)
+  .filter(([key]) => key !== '.')
+  .map(([key, entry]) => ({
+    find: '@agentmux/core/' + key.slice(2),
+    replacement: fileURLToPath(new URL(entry.import.replace('./dist/', './src/').replace(/\.js$/u, '.ts'), coreSourceRoot))
+  })).sort((a, b) => b.find.length - a.find.length)
 
 const root = resolve(import.meta.dirname, '../../..')
 const mutation = process.env.CHANNEL_OWNER_MUTANT
@@ -14,7 +23,7 @@ const variants: Record<string, { path: string; before: string; after: string }> 
 if (mutation && !variants[mutation]) throw Error('Unknown Host owner mutation')
 export default defineConfig({ root, resolve: { alias: [
   { find: /^@agentmux\/core$/u, replacement: resolve(root, 'packages/core/src/index.ts') },
-  { find: /^@agentmux\/core\/(.+)$/u, replacement: resolve(root, 'packages/core/src/$1.ts') },
+  ...coreSourceAliases,
   { find: /^@agentmux\/connectors$/u, replacement: resolve(root, 'packages/connectors/src/index.ts') }
 ] }, plugins: [{ name: 'loaded-connection-owner', enforce: 'pre', transform(input, id) {
   const path = relative(root, id.split('?')[0]!), selected = mutation ? variants[mutation] : undefined
