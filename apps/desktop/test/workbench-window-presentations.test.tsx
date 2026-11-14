@@ -143,7 +143,8 @@ it.each(['tab', 'region', 'tab-sibling'] as const)('actual WorkspaceWorkbench ma
   const root = createClientUiRoot(container)
   try {
     await act(async () => root.render(createElement(WorkspaceWorkbench, { workspaceId: workspace.id, viewTargets: { [tab.id]: [target] } })))
-    await vi.waitFor(async () => { await act(async () => {}); expect(register).toHaveBeenCalled(); expect([...held.values()].every(value => value.geometry.visible === false)).toBe(true) })
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 30)) })
+    expect(register, 'Hidden Browser stages wait for a real consumption before preparing a native page').not.toHaveBeenCalled()
     expect(activate).not.toHaveBeenCalled()
     const originalStage = container.querySelector('[data-native-browser-stage]')!
     expect(originalStage).not.toBeNull()

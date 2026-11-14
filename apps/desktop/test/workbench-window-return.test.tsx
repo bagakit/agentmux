@@ -11,7 +11,7 @@ import { createWorkspaceLayout } from '@agentmux/layout'
 import { WorkspaceWorkbench } from '../src/renderer/src/components/WorkspaceWorkbench'
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
-import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
+import { addWorkbenchRegion, createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import type { BrowserPresentationGeometry, BrowserPresentationOccurrence } from '../src/shared/contracts'
 import type { WorkbenchWindowDocument } from '../src/shared/workbench-windows'
 
@@ -21,7 +21,9 @@ it.each(['tab', 'region', 'cross-display-tab', 'cross-display-region'] as const)
   const workspace = { id: 'window-workspace', hostId: 'local', path: fixturePath('window-workspace'), name: 'Window', kind: 'folder' as const }
   const page = await api.browser.create('window-background-page', 'https://example.invalid/window', workspace.id)
   const surface = { ...page, kind: 'browser' as const, browserId: page.id, regionId: 'window-browser-region', workspaceId: workspace.id }
-  const tab = createWorkbenchTab('window-browser-tab', surface)
+  const siblingPage = await api.browser.create('window-background-sibling-page', 'https://example.invalid/sibling', workspace.id)
+  const sibling = { ...siblingPage, kind: 'browser' as const, browserId: siblingPage.id, regionId: 'window-sibling-region', workspaceId: workspace.id }
+  const tab = addWorkbenchRegion(createWorkbenchTab('window-browser-tab', surface), surface.regionId, 'right', sibling)
   const launcher = createWorkbenchTab('window-background-launcher', { kind: 'launcher', regionId: 'window-launcher-region', workspaceId: workspace.id })
   const layout = createWorkspaceLayout('window-original-group', [tab.id, launcher.id]); layout.groups[0]!.activeTabId = launcher.id
   const crossDisplay = kind.startsWith('cross-display')
@@ -37,11 +39,12 @@ it.each(['tab', 'region', 'cross-display-tab', 'cross-display-region'] as const)
   const arm = vi.spyOn(api.browser, 'armPresentationCapture').mockResolvedValue({ captureId: 'window-capture', browserId: page.id })
   const ack = vi.spyOn(api.browser, 'ackPresentationCapture').mockResolvedValue(undefined)
   const events = vi.spyOn(api.browser, 'onPresentationEvent').mockImplementation(() => () => {})
+  const unscopedBounds = vi.spyOn(api.browser, 'setBounds')
   const rect = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue(new DOMRect(20, 60, 640, 320))
   const mediaDescriptor = Object.getOwnPropertyDescriptor(navigator, 'mediaDevices')
   Object.defineProperty(navigator, 'mediaDevices', { configurable: true, value: { getDisplayMedia: vi.fn().mockRejectedValue(new Error('Capture is unavailable in this bounded consumer')) } })
   const container = document.createElement('div'), frame = document.createElement('iframe'); document.body.append(container, frame)
-  const child = frame.contentDocument!, destination = child.createElement('div'); child.body.append(destination)
+  const child = frame.contentDocument!, destination = child.createElement('div'); destination.id = 'original-native-window-root'; child.body.append(destination)
   // happy-dom pins ownerDocument as non-configurable on first adoption. Chromium
   // supports repeated adoption; keep that platform property mutable in this IO fixture.
   const adoption = [document, child].map(owner => {
@@ -57,30 +60,60 @@ it.each(['tab', 'region', 'cross-display-tab', 'cross-display-region'] as const)
   const root = createClientUiRoot(container)
   try {
     await act(async () => root.render(createElement(WorkspaceWorkbench, { workspaceId: workspace.id, visible: false, viewTargets: {}, windowTargets: [{ windowId: childScope.windowId, target }] })))
-    await act(async () => {})
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 30)) })
     expect(activate).not.toHaveBeenCalled()
-    const originalStage = container.querySelector('[data-native-browser-stage]')!
+    expect(register, 'Hidden primary stages must not wake cold Browser resources').not.toHaveBeenCalled()
+    const originalStage = container.querySelector(`[data-native-browser-stage="${page.id}"]`)!
+    const address = originalStage.closest('.browser-surface')!.querySelector<HTMLInputElement>('[aria-label="Browser address"]')!
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(address, 'https://unsubmitted.invalid/original')
+      address.dispatchEvent(new Event('input', { bubbles: true })); address.setSelectionRange(3, 8)
+    })
     expect(originalStage).not.toBeNull()
     let moving!: Promise<void>
     await act(() => { moving = placeWorkbenchWindow(target, { destination, window: childScope }) })
     await act(async () => { await moving })
-    expect(child.querySelector('[data-native-browser-stage]')).toBe(originalStage)
+    expect(child.querySelector(`[data-native-browser-stage="${page.id}"]`)).toBe(originalStage)
+    expect(child.querySelector('[aria-label="Browser address"]')).toBe(address)
+    expect(address.value).toBe('https://unsubmitted.invalid/original')
+    await vi.waitFor(() => expect(register.mock.calls.some(([request]) => request.browserId === page.id &&
+      request.window?.windowId === childScope.windowId && request.window.documentGeneration === childScope.documentGeneration && request.geometry.visible &&
+      !('kind' in request.occurrence.location) && request.occurrence.location.displayWorkspaceId === reference.displayWorkspaceId &&
+      request.occurrence.location.groupId === reference.groupId && request.occurrence.location.tabId === tab.id && request.occurrence.location.regionId === surface.regionId)).toBe(true))
+    await vi.waitFor(() => expect(activate.mock.calls.some(([leaseId]) => held.get(leaseId)?.window?.windowId === childScope.windowId)).toBe(true))
+    const childRegions = register.mock.calls.filter(([request]) => request.window?.windowId === childScope.windowId && request.geometry.visible)
+      .map(([request]) => 'kind' in request.occurrence.location ? null : request.occurrence.location.regionId)
+    expect(new Set(childRegions)).toEqual(new Set(windowKind === 'tab' ? [surface.regionId, sibling.regionId] : [surface.regionId]))
     let returned = false, returning!: Promise<void>
     await act(() => { returning = placeWorkbenchWindow(target, null); void returning.then(() => { returned = true }, () => {}) })
     await act(async () => {})
     expect(returned, 'the exact original host physically returns before its ACK').toBe(true)
     await returning
-    expect(container.querySelector('[data-native-browser-stage]')).toBe(originalStage)
-    expect(child.querySelector('[data-native-browser-stage]')).toBeNull()
+    expect(container.querySelector(`[data-native-browser-stage="${page.id}"]`)).toBe(originalStage)
+    expect(container.querySelector('[aria-label="Browser address"]')).toBe(address)
+    expect(address.value).toBe('https://unsubmitted.invalid/original')
+    expect(child.querySelector(`[data-native-browser-stage="${page.id}"]`)).toBeNull()
     expect(useAppStore.getState().tabs[tab.id]).toBe(tab)
     expect(useAppStore.getState().layouts[workspace.id]).toBe(layout)
     expect(layout.groups[0]!.activeTabId).toBe(launcher.id)
+    expect(unscopedBounds, 'The Renderer must use the exact stage lease, never naked Browser geometry').not.toHaveBeenCalled()
+    register.mockClear()
+    const shownLayout = { ...layout, groups: layout.groups.map(group => ({ ...group, activeTabId: tab.id })) }
+    await act(async () => {
+      useAppStore.setState({ layouts: { ...useAppStore.getState().layouts, [workspace.id]: shownLayout } })
+      root.render(createElement(WorkspaceWorkbench, { workspaceId: workspace.id, visible: true, viewTargets: {}, windowTargets: [{ windowId: childScope.windowId, target }] }))
+    })
+    await vi.waitFor(() => expect(register.mock.calls.some(([request]) => request.browserId === page.id && request.window?.windowId === mainScope.windowId && request.geometry.visible &&
+      !('kind' in request.occurrence.location) && request.occurrence.location.displayWorkspaceId === workspace.id)).toBe(true))
+    expect(register.mock.calls.filter(([request]) => request.browserId === page.id && request.window?.windowId === mainScope.windowId && request.geometry.visible)
+      .every(([request]) => !('kind' in request.occurrence.location) && request.occurrence.location.displayWorkspaceId === workspace.id),
+    'A detached occurrence never replaces Main’s already confirmed display address').toBe(true)
   } finally {
     adoption.forEach(spy => spy.mockRestore())
     await act(async () => root.unmount()); releaseChild(); releaseMain(); container.remove(); frame.remove(); useAppStore.setState(before, true)
     if (mediaDescriptor) Object.defineProperty(navigator, 'mediaDevices', mediaDescriptor)
     else delete (navigator as unknown as Record<string, unknown>).mediaDevices
-    for (const spy of [register, update, remove, activate, arm, ack, events, rect]) spy.mockRestore()
+    for (const spy of [register, update, remove, activate, arm, ack, events, rect, unscopedBounds]) spy.mockRestore()
     vi.unstubAllGlobals()
   }
 })
