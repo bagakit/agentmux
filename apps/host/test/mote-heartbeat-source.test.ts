@@ -3,6 +3,9 @@ import { mkdir, writeFile, readFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { spawn } from 'node:child_process'
 import * as core from '@agentmux/core'
+import { connectHostedAgentMux, type AgentMuxHostedRpcPort } from '@agentmux/core/hosted'
+import { hostedTestOwner } from '../../../packages/core/test/helpers/hosted-runtime-port.js'
+import { AgentMuxHostedRuntimeService } from '../../../packages/core/src/hosted-runtime-service.js'
 import { AgentMuxNotesStorage } from '@agentmux/core/notebook-store'
 import { rpcOwnerFixture } from '../../../packages/core/test/helpers/public-rpc-owner.js'
 import { ObjectCliProbe } from '../../../packages/core/test/helpers/object-cli-rpc.js'
@@ -21,7 +24,7 @@ import { deliverContinuousProgress } from '../src/continuous-progress-delivery.j
 const closes: Array<() => Promise<unknown> | void> = []
 async function evidence(name: string, value: unknown) { if (process.env.MOTE_SOURCE_EVIDENCE) { await mkdir(process.env.MOTE_SOURCE_EVIDENCE, { recursive: true }); await writeFile(join(process.env.MOTE_SOURCE_EVIDENCE, name + '.json'), JSON.stringify(value, null, 2) + '\n') } }
 afterEach(async () => { for (const close of closes.splice(0).reverse()) await close(); vi.restoreAllMocks() })
-async function fixture(options: { loseDeliveryReceipt?: boolean } = {}) {
+async function fixture(options: { loseDeliveryReceipt?: boolean; interruptBeforeCore?: boolean } = {}) {
   const h = await rpcOwnerFixture(['main', 'stranger'], core)
   closes.push(h.close)
   for (const id of ['main', 'stranger']) {
@@ -53,7 +56,9 @@ async function fixture(options: { loseDeliveryReceipt?: boolean } = {}) {
   const files = createHostContent({ configurationPath, spatial, storage }).files!, main = createHostMoteMainReader({ configurationPath, spatial, files })
   const runtime = createGoalRuntime({ clients: h.coreClients, checkIn: async () => ({ known: false, reason: 'Unused' }) })
   const store = new ContinuousProgressLoopStore(join(h.root, 'loops.json'))
+  let interruptBeforeCore = options.interruptBeforeCore
   const manager = new ContinuousProgressLoopManager(store, async (loop, op, current, signal) => {
+    if (interruptBeforeCore) { interruptBeforeCore = false; return 'unknown' }
     const outcome = await deliverContinuousProgress(runtime, loop, op, current, signal)
     return outcome === 'sent' && options.loseDeliveryReceipt ? 'unknown' : outcome
   }, () => now, (loop, id, at, signal) => runtime.observeContinuousProgress(loop, id, at, signal), runtime)
@@ -66,7 +71,7 @@ async function fixture(options: { loseDeliveryReceipt?: boolean } = {}) {
   await evidence('fixture-' + loop.loopId, { root: h.root })
   await presence.start()
   await manager.check(now)
-  return { ...h, target, main, runtime, store, storage, manager, presence, loop, at(value: number) { now = value }, busy(value: boolean) { busy = value; for (const observer of observers) observer.onStatus({ recordId: 'activity-' + now, sequence: sequence++, nativeTurnId: 'activity-' + now, state: value ? 'working' : 'done', nativeObservedAt: Date.now() }) }, async due() { now = loop.nextCheckAt; await manager.check(now); await manager.check(now + 1); return manager.inspectLoop(loop.loopId)! } }
+  return { ...h, target, main, runtime, coreStore: h.store, store, storage, manager, presence, loop, at(value: number) { now = value }, busy(value: boolean) { busy = value; for (const observer of observers) observer.onStatus({ recordId: 'activity-' + now, sequence: sequence++, nativeTurnId: 'activity-' + now, state: value ? 'working' : 'done', nativeObservedAt: Date.now() }) }, async due() { now = loop.nextCheckAt; await manager.check(now); await manager.check(now + 1); return manager.inspectLoop(loop.loopId)! } }
 }
 
 it('real due delivery freezes the original input reference, survives busy checks and is consumed through schedule CLI without private input disclosure', async () => {
@@ -193,6 +198,71 @@ it('the original Mote schedule recovers a lost Host acknowledgement from Core an
   expect(readback.schedule.pendingCompletion).toBeUndefined()
   expect((await h.store.load()).find(loop => loop.loopId === h.loop.loopId)).toEqual(readback.schedule)
   expect((await h.client.statusAgent('main')).run.acceptedInputBytes).toBe(before)
+  expect(h.inner.kernel.stop).not.toHaveBeenCalled()
+})
+
+it('reopens the due occurrence only after Core confirms the superseded Run never claimed it', async () => {
+  const h = await fixture({ interruptBeforeCore: true }), due = h.loop.nextCheckAt
+  h.at(due)
+  await h.manager.check(due)
+  const held = h.manager.inspectLoop(h.loop.loopId)!
+  const reference = held.lastInputRef!
+  expect(held).toMatchObject({ status: 'paused', pendingCompletion: { operationId: reference.inputKey.submissionId } })
+  const source = { reference, providerId: held.providerId, workspacePath: held.workspacePath }
+  expect(await h.client.supersededScheduledInputWasUnclaimed(source)).toBe(false)
+  expect(await h.client.inspectAgentPromptSubmission(reference.inputKey)).toBeNull()
+
+  const original = (await h.coreStore.readMetadata('main'))!
+  await h.coreStore.compareAndSwapMetadata(original, { ...original, run: { runId: 'recovered-main' }, retiredRuns: [...original.retiredRuns, original.run] })
+  await h.inner.registry.load('local')
+  expect(await h.client.supersededScheduledInputWasUnclaimed(source)).toBe(false)
+  const status = h.inner.kernel.status as ReturnType<typeof vi.fn>
+  status.mockRejectedValueOnce(new core.AgentMuxError('The connected owner cannot find the original Run.', 'CTXMUX_run_not_found'))
+  expect(await h.client.supersededScheduledInputWasUnclaimed(source)).toBe(false)
+  status.mockImplementation(async (runId: string) => runId === original.run.runId
+    ? { ...h.run(runId), state: { type: 'exited', code: 1, signal: null } } : h.run(runId))
+  expect(await h.client.supersededScheduledInputWasUnclaimed({ ...source, inputEpoch: 'another-cut' })).toBe(false)
+  expect(await h.client.supersededScheduledInputWasUnclaimed({ ...source, reference: { ...reference, definitionOperationId: 'another-definition' } })).toBe(false)
+  expect(await h.client.supersededScheduledInputWasUnclaimed(source)).toBe(true)
+  const service = new AgentMuxHostedRuntimeService(h.client, null, () => hostedTestOwner(h.client))
+  closes.push(() => service.dispose())
+  const requests: number[] = []
+  let asAgent = false
+  const port: AgentMuxHostedRpcPort = {
+    call: async (method, params, options) => {
+      const payload = JSON.parse(JSON.stringify(params))
+      if (payload.invocation?.method === 'supersededScheduledInputWasUnclaimed') requests.push(payload.invocation.args.length)
+      return await service.call(method, payload, { ...options, principal: { kind: 'user', id: 'original-person' }, ...(asAgent ? { caller: h.credentials } : {}) }) as never
+    },
+    subscribe: async (method, params, handlers) => {
+      const stream = await service.subscribe(method, params, handlers.onEvent, handlers.signal ? { signal: handlers.signal } : {})
+      handlers.onInitial(stream.initial as never); await stream.start?.()
+      return { dispose: async () => await stream.dispose() }
+    },
+  }
+  const borrowed = await connectHostedAgentMux({ rpc: port })
+  closes.push(() => borrowed.dispose())
+  expect(await borrowed.supersededScheduledInputWasUnclaimed(source, { signal: new AbortController().signal })).toBe(true)
+  const cancelled = AbortSignal.abort(new Error('Only this receipt read was cancelled'))
+  await expect(borrowed.supersededScheduledInputWasUnclaimed(source, { signal: cancelled })).rejects.toBe(cancelled.reason)
+  asAgent = true
+  await expect(borrowed.supersededScheduledInputWasUnclaimed(source)).rejects.toMatchObject({ code: 'CONTROL_PERMISSION_DENIED' })
+  expect(requests).toEqual([1, 1])
+  await h.manager.check(due)
+  expect(h.manager.inspectLoop(h.loop.loopId)).toMatchObject({ status: 'active', lastInputRef: reference, lastOutcome: 'skipped', nextCheckAt: due })
+  expect(h.manager.inspectLoop(h.loop.loopId)!.pendingCompletion).toBeUndefined()
+  expect((await h.coreStore.readMetadata('main'))!.nativeHandle).toEqual(original.nativeHandle)
+  expect(h.inner.kernel.input).not.toHaveBeenCalled()
+  h.busy(false)
+  await vi.waitFor(async () => expect((await h.client.statusAgent('main')).observation.semantic).toBe('idle'))
+  h.at(due + 1); await h.manager.check()
+  const delivered = h.manager.inspectLoop(h.loop.loopId)!
+  expect(delivered).toMatchObject({ status: 'active', lastOutcome: 'sent', lastOccurrenceAt: due,
+    lastInputRef: { inputKey: { expectedRun: { runId: 'recovered-main' } }, futureIntent: reference.futureIntent } })
+  expect(delivered.lastInputRef!.inputKey.submissionId).not.toBe(reference.inputKey.submissionId)
+  expect(await h.client.inspectAgentPromptSubmission(reference.inputKey)).toBeNull()
+  expect((await h.manager.call('schedule.inspect', { scheduleId: h.loop.loopId })).input?.delivery).toBe('terminal-confirmed')
+  expect(await h.client.supersededScheduledInputWasUnclaimed(source)).toBe(false)
   expect(h.inner.kernel.stop).not.toHaveBeenCalled()
 })
 
