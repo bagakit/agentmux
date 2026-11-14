@@ -208,6 +208,8 @@ export type AgentProviderManagedAcp = {
   attach(context: AgentProviderNativeInputContext & { waitForReady?: true }): Promise<import('./acp-adapter.js').AgentMuxAcpBinding>
   prepareInput?(context: AgentProviderNativeInputContext, plan: AgentNativePromptInputPlan): Promise<AgentProviderPreparedNativeInput>
   interrupt?(context: AgentProviderNativeInputContext, nativeSessionId: string, expectedRequestId?: string): Promise<void>
+  readConfiguration?(context: AgentProviderNativeInputContext, nativeSessionId: string): Promise<import('./agent-configuration.js').AgentConfigurationSnapshot | null>
+  setConfiguration?(context: AgentProviderNativeInputContext, nativeSessionId: string, request: Pick<import('./agent-configuration.js').AgentConfigurationSet, 'configId' | 'value' | 'expectedRevision'> & { requestId: string }): Promise<import('./agent-configuration.js').AgentConfigurationSnapshot>
 }
 
 export type AgentProvider = {

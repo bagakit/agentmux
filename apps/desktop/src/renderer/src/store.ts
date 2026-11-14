@@ -811,6 +811,7 @@ export const MAX_AGENT_STEER_QUEUE_ENTRIES = 100
 const agentSteerDrains = new Map<string, { promise: Promise<void>; wake: boolean; explicitSteers: Set<string>; submitted: Set<string>; failures: Map<string, unknown>; waitingForInteraction: Set<string> }>()
 type SteerDeliveryAttempt = { seed: DeliveryAttemptSeed; stage: string; diagnostic?: { logId: string; notice: string } }
 // A click's diagnostic follows its one ordered consumer; it never grants input.
+const configurationAttempts = new Map<string, { operationId: string; pending: Promise<void> | null }>()
 const postureAttempts = new Map<string, { operationId: string; pending: Promise<void> | null }>()
 const preparationRetryCalls = new Map<string, AbortController>()
 const manualSteerAttempts = new Map<string, SteerDeliveryAttempt>()
@@ -946,6 +947,8 @@ function manualComposerBinding(sessionId: string, origin?: 'manual', options?: A
   // immediately. They must not answer native trust/login or question screens.
   if (recipient) return { expectedRun: { ...recipient.run }, ...(session.inputEpoch === undefined ? {} : { inputEpoch: session.inputEpoch }), admissionIntent: { kind: 'session-conversation' } }
   if (session.pendingInteraction) return interactionNativeComposerBinding(session)
+  if (session.structuredPromptInput) return { expectedRun: { ...session.control.run },
+    ...(session.inputEpoch === undefined ? {} : { inputEpoch: session.inputEpoch }), admissionIntent: { kind: 'session-conversation' } }
   return initialNativeComposerBinding(session) ??
     // Main role routing is frozen separately; this new human Send still uses the current terminal.
     { expectedRun: { ...session.control.run }, ...(session.inputEpoch === undefined ? {} : { inputEpoch: session.inputEpoch }), admissionIntent: { kind: 'manual-actor' } }
@@ -954,6 +957,8 @@ function manualComposerBinding(sessionId: string, origin?: 'manual', options?: A
 function originalMemberComposerBinding(session: SessionSnapshot | undefined, origin?: 'manual'): AgentSteerQueueEntry['directInputBinding'] {
   if (origin !== 'manual' || session?.kind !== 'agent' || session.processState !== 'running') return
   if (session.pendingInteraction) return interactionNativeComposerBinding(session)
+  if (session.structuredPromptInput) return { expectedRun: { ...session.control.run },
+    ...(session.inputEpoch === undefined ? {} : { inputEpoch: session.inputEpoch }), admissionIntent: { kind: 'session-conversation' } }
   return initialNativeComposerBinding(session) ?? { expectedRun: { ...session.control.run }, ...(session.inputEpoch === undefined ? {} : { inputEpoch: session.inputEpoch }), admissionIntent: { kind: 'manual-actor' as const } }
 }
 
@@ -1857,6 +1862,7 @@ export type AppState = GitReadingActions & {
   send(sessionId: string, text: string, onRejected?: (error: unknown) => void, origin?: 'manual', agentMuxNote?: string, options?: AgentSteerOptions): boolean
   inspectInteraction(sessionId: string, operationId: string): Promise<import('@agentmux/core').AgentMuxInteractionOperationReceipt | null>
   respondInteraction(sessionId: string, response: AgentMuxInteractionResponse, intent: import('@agentmux/core').AgentMuxInteractionOperationIntent & { moteSource?: import('@agentmux/core').AgentInputMoteSource }): Promise<import('@agentmux/core').AgentMuxInteractionOperationReceipt>
+  setConfiguration(sessionId: string, expectedRevision: string, configId: string, value: string | boolean): Promise<void>
   setPosture(sessionId: string, modeId: string): Promise<void>
   interrupt(sessionId: string, originalMember?: SpaceMountMemberTarget): Promise<void>
   controlSessionContinuity(sessionId: string, intentOperationId: string, action: 'continue' | 'cancel', additionalAttempts?: number): Promise<import('@agentmux/core/agent-session-recovery').AgentMuxContinuityControlResult>
@@ -13820,6 +13826,27 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     }
     await get().flushAgentSteerQueue(sessionId)
     return receipt
+  },
+  async setConfiguration(sessionId, expectedRevision, configId, value) {
+    const session = get().sessions.find(item => item.id === sessionId)
+    if (!session || session.kind !== 'agent') return
+    const key = JSON.stringify([session.control, configId, value, expectedRevision])
+    const prior = configurationAttempts.get(key)
+    if (prior?.pending) return await prior.pending
+    const attempt = prior ?? { operationId: mintObjectId(), pending: null }
+    configurationAttempts.set(key, attempt)
+    attempt.pending = (async () => {
+      try {
+        const receipt = await api.sessions.setConfiguration(session.control, { configId, value, expectedRevision, operationId: attempt.operationId })
+        if (receipt.outcome !== 'applied' || receipt.diskDurability !== 'confirmed') {
+          get().reportError(new Error(`Session settings operation ${attempt.operationId} is ${receipt.outcome}. ${receipt.issue ?? ''}`))
+        }
+        if (receipt.outcome === 'applied' && receipt.diskDurability === 'confirmed' || receipt.outcome === 'not-applied') configurationAttempts.delete(key)
+      } catch (error) {
+        get().reportError(new Error(`Original session settings operation ${attempt.operationId}. ${presentError(error)}`))
+      } finally { attempt.pending = null }
+    })()
+    await attempt.pending
   },
   async setPosture(sessionId, modeId) {
     const session = get().sessions.find((item) => item.id === sessionId)

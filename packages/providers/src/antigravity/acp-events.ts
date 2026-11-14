@@ -64,3 +64,48 @@ export function readAntigravityUpdate(params: unknown, sessionId: string) {
   }
   return null
 }
+
+type NativeConfigurationChoice = {
+  value: string; name: string; description?: string; group?: { id: string; name: string }
+}
+type NativeConfigurationOption = { id: string; name: string; description?: string; category?: string } & (
+  { type: 'select'; currentValue: string; choices: NativeConfigurationChoice[] } |
+  { type: 'boolean'; currentValue: boolean }
+)
+
+export function readAntigravityConfiguration(value: unknown): NativeConfigurationOption[] | undefined {
+  if (!Array.isArray(value) || value.length > 256) return undefined
+  const options: NativeConfigurationOption[] = []
+  const ids = new Set<string>()
+  for (const item of value) {
+    const o = acpRecord(item)
+    if (!o || o.type !== 'select' && o.type !== 'boolean') continue
+    if (!nonempty(o.id) || !nonempty(o.name) || ids.has(o.id)) return undefined
+    ids.add(o.id)
+    const fields = { id: o.id, name: o.name, ...(nonempty(o.description) ? { description: o.description } : {}),
+      ...(nonempty(o.category) ? { category: o.category } : {}) }
+    if (o.type === 'boolean') {
+      if (typeof o.currentValue !== 'boolean' || o.options !== undefined) return undefined
+      options.push({ ...fields, type: 'boolean', currentValue: o.currentValue })
+      continue
+    }
+    if (!Array.isArray(o.options) || !nonempty(o.currentValue)) return undefined
+    const groups = o.options.length && acpRecord(o.options[0])?.group !== undefined
+    const choices: NativeConfigurationChoice[] = []
+    const choiceIds = new Set<string>()
+    for (const item of groups ? o.options : [{ options: o.options }]) {
+      const group = acpRecord(item)
+      if (!group || !Array.isArray(group.options) || groups && (!nonempty(group.group) || !nonempty(group.name))) return undefined
+      for (const item of group.options) {
+        const c = acpRecord(item)
+        if (!nonempty(c?.value) || !nonempty(c.name) || c.group !== undefined || choiceIds.has(c.value) || choices.length >= 256) return undefined
+        choiceIds.add(c.value)
+        choices.push({ value: c.value, name: c.name, ...(nonempty(c.description) ? { description: c.description } : {}),
+          ...(groups ? { group: { id: group.group as string, name: group.name as string } } : {}) })
+      }
+    }
+    if (!choiceIds.has(o.currentValue)) return undefined
+    options.push({ ...fields, type: 'select', currentValue: o.currentValue, choices })
+  }
+  return options
+}

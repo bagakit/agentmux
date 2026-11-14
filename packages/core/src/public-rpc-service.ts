@@ -206,6 +206,7 @@ import { AGENTMUX_RPC_CONTROL_METHODS, AGENTMUX_RPC_NATIVE_METHODS, type AgentMu
   type AgentMuxRpcStreamInitial, type AgentMuxRpcStreamEvent, type AgentMuxRpcUnavailable, type AgentMuxRpcPrincipal } from './public-rpc.js'
 
 /** A structural slice of the original public SDK; hosted clients need no private fields. */
+import { parseAgentConfigurationInspect, parseAgentConfigurationInspection, parseAgentConfigurationReceipt, parseAgentConfigurationSet } from './agent-configuration.js'
 import { parsePostureSet, parsePostureInspect, parsePostureSetResult, parsePostureInspection } from './agent-posture.js'
 import { parseTerminalTarget, parseTerminalOutputParams, parseTerminalInspection, parseTerminalListParams, parseTerminalListResult } from './terminal-observation.js'
 
@@ -225,6 +226,8 @@ export type AgentMuxRpcCorePort = import('./agent-execution-coordinator.js').Age
     inspectTerminalControl?: AgentMuxClient['inspectTerminalControl']
     retireTerminalCreation?: AgentMuxClient['retireTerminalCreation']
     inspectTerminalCreation?: AgentMuxClient['inspectTerminalCreation']
+    inspectAgentConfiguration?: AgentMuxClient['inspectAgentConfiguration']
+    setAgentConfiguration?: AgentMuxClient['setAgentConfiguration']
     inspectAgentPosture?: AgentMuxClient['inspectAgentPosture']
     setAgentPosture?: AgentMuxClient['setAgentPosture']
     listTerminals?: AgentMuxClient['listTerminals']
@@ -499,6 +502,8 @@ const NATIVE_FIELDS = {
   'agent.execution.watch': ['bindingId'],
   'agent.execution.rejoin': ['bindingId'],
   'terminal.input': ['target', 'operationId', 'ownerInstanceId', 'expectedByte', 'dataBase64'], 'terminal.interrupt': ['target', 'operationId', 'ownerInstanceId'], 'terminal.stop': ['target', 'operationId', 'ownerInstanceId'], 'terminal.operation.inspect': ['hostId', 'run', 'operationId', 'runtimeId'],
+  'agent.configuration.inspect': ['hostId', 'agentSessionId', 'expectedRun', 'operationId'],
+  'agent.configuration.set': ['target', 'operationId', 'configId', 'value', 'expectedRevision'],
   'agent.posture.set': ['target', 'operationId', 'controlId', 'modeId', 'expectedControlDigest'], 'agent.posture.inspect': ['hostId', 'agentSessionId', 'expectedRun', 'operationId'],
   'terminal.creation.retire': ['hostId', 'operationId', 'runtimeId'],
   'terminal.creation.inspect': ['hostId', 'operationId', 'runtimeId', 'includeRetirementBlocker'],
@@ -3586,6 +3591,37 @@ export class AgentMuxRpcService {
         if ((verified.state === 'active' ? verified.session.hostId : verified.retirement.hostId) !== 'local') throw new AgentMuxError(
           'The recovery control returned another original Host.', 'CONTROL_PROTOCOL_ERROR')
         return verified as AgentMuxRpcResult<M>
+      }
+      case 'agent.configuration.inspect': {
+        const input = parseAgentConfigurationInspect(p), scopes = (await this.clients()).filter(scope => scope.hostId === input.hostId)
+        if (scopes.length !== 1) throw new AgentMuxError('The original configuration Host is unconfirmed.', 'CONTROL_UNAVAILABLE')
+        const scope = scopes[0]!, original = { ...input, hostId: 'local' }
+        const routed = this.ports.callOriginalCore || scope.client.forwardRpc
+        if (!routed && !scope.client.inspectAgentConfiguration) throw new AgentMuxError('The original configuration owner is unavailable.', 'CONTROL_UNAVAILABLE')
+        const reply = this.ports.callOriginalCore ? await this.ports.callOriginalCore(input.hostId, 'agent.configuration.inspect', original, await this.inputForwardContext(context))
+          : scope.client.forwardRpc ? await scope.client.forwardRpc('agent.configuration.inspect', original, await this.inputForwardContext(context))
+          : await scope.client.inspectAgentConfiguration!(original)
+        const value = parseAgentConfigurationInspection(reply, original)
+        result = parseAgentConfigurationInspection(value.kind === 'configuration' ? { ...value, target: { ...value.target, hostId: input.hostId } }
+          : { ...value, operation: value.operation ? { ...value.operation, target: { ...value.operation.target, hostId: input.hostId } } : null }, input)
+        break
+      }
+      case 'agent.configuration.set': {
+        if (caller || !context.principal || !['user', 'device'].includes(context.principal.kind)) throw new AgentMuxError(
+          'Native configuration requires an authorized person or device.', 'CONTROL_PERMISSION_DENIED')
+        const input = parseAgentConfigurationSet(p), scopes = (await this.clients()).filter(scope => scope.hostId === input.target.hostId)
+        if (scopes.length !== 1) throw new AgentMuxError('The original configuration Host is unconfirmed.', 'CONTROL_UNAVAILABLE')
+        const scope = scopes[0]!, original = { ...input, target: { ...input.target, hostId: 'local' } }
+        const restriction = this.inputCallContext(context)
+        const routed = this.ports.callOriginalCore || scope.client.forwardRpc
+        if (!routed && !scope.client.setAgentConfiguration) throw new AgentMuxError('The original configuration owner is unavailable.', 'CONTROL_UNAVAILABLE')
+        const reply = this.ports.callOriginalCore ? await this.ports.callOriginalCore(input.target.hostId, 'agent.configuration.set', original, await this.inputForwardContext(context))
+          : scope.client.forwardRpc ? await scope.client.forwardRpc('agent.configuration.set', original, await this.inputForwardContext(context))
+          : await scope.client.setAgentConfiguration!(original, { actor: context.principal,
+            ...(restriction.requestSignal ? { requestSignal: restriction.requestSignal } : {}), ...(restriction.assertCurrent ? { assertCurrent: restriction.assertCurrent } : {}) })
+        const value = parseAgentConfigurationReceipt(reply, original)
+        result = parseAgentConfigurationReceipt({ ...value, target: { ...value.target, hostId: input.target.hostId } }, input)
+        break
       }
       case 'agent.posture.inspect': {
         const input = parsePostureInspect(p), scopes = (await this.clients()).filter(scope => scope.hostId === input.hostId)

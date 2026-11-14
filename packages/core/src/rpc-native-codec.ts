@@ -23,6 +23,7 @@ import { parseTerminalControl, parseTerminalControlResult, parseTerminalControlI
 import { parseFileStatParams, parseFileStatResult, parseFileMkdirParams, parseFileMkdirResult, parseFileMutationInspectParams, parseFileMutationInspectResult, parseFileMoveParams, parseFileMoveResult, parseFileDeleteParams, parseFileDeleteResult, parseFileDeleteSnapshotsParams, parseFileDeleteSnapshotsResult } from './public-rpc-file-path.js'
 import { parseGoalActivityHistoryParams, parseGoalActivityHistoryResult } from './goal-activity-history.js'
 import { parseNotesStorageParams, parseNotesStorageInspection, parseNotesStorageOperationInspection } from './public-rpc-notes-storage.js'
+import { parseAgentConfigurationInspect, parseAgentConfigurationInspection, parseAgentConfigurationReceipt, parseAgentConfigurationSet } from './agent-configuration.js'
 import { parsePostureInspect, parsePostureSet, parsePostureInspection, parsePostureSetResult } from './agent-posture.js'
 import { parseTerminalInspection, parseTerminalTarget, parseTerminalListParams, parseTerminalListResult } from './terminal-observation.js'
 import { parseProviderCatalogQuery, parseProviderCatalogObservation, parseProviderProbeQuery, parseProviderProbeObservation } from './public-rpc-provider-catalog.js'
@@ -525,6 +526,8 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
     if (Object.hasOwn(SPACE_CLOSE_METHODS, method)) { const selected = method as SpaceCloseMethod; return parseSpaceCloseResult(selected, value, parseSpaceCloseParams(selected, params)) as unknown as Record<string, unknown> }
     if (method === 'terminal.operation.inspect') return parseTerminalControlInspection(value, parseTerminalControlInspect(params)) as unknown as Record<string, unknown>
     if (method === 'terminal.input' || method === 'terminal.interrupt' || method === 'terminal.stop') return parseTerminalControlResult(value, parseTerminalControl(params, method === 'terminal.input' ? 'terminal-input' : method === 'terminal.interrupt' ? 'terminal-interrupt' : 'terminal-stop')) as unknown as Record<string, unknown>
+    if (method === 'agent.configuration.inspect') return parseAgentConfigurationInspection(value, parseAgentConfigurationInspect(params)) as unknown as Record<string, unknown>
+    if (method === 'agent.configuration.set') return parseAgentConfigurationReceipt(value, parseAgentConfigurationSet(params)) as unknown as Record<string, unknown>
     if (method === 'agent.posture.inspect') return parsePostureInspection(value, parsePostureInspect(params)) as unknown as Record<string, unknown>
     if (method === 'agent.posture.set') return parsePostureSetResult(value, parsePostureSet(params)) as unknown as Record<string, unknown>
     const p = record(value), input = record(params)

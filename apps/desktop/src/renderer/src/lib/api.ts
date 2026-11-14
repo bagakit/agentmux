@@ -1258,6 +1258,7 @@ const mockApi: AgentMuxDesktopApi = {
       session.updatedAt = Date.now()
       return { ...intent, agentSessionId: control.agentSessionId, run: control.run, response, delivery: 'bytes-accepted', nativeAdoption: 'unknown' }
     },
+    setConfiguration: async () => { throw new Error('Session configuration requires the original native Host.') },
     setPosture: async () => { throw new Error('Provider posture intent needs the original Host; this preview has no Native input receipt.') },
     reconcileReopen: async () => { throw new Error('Confirming native continuation requires the original Host. This browser preview does not change Sessions.') },
     reopen: async () => { throw new Error('Continuing retired history requires the original native Host. This browser preview does not start a Run.') },

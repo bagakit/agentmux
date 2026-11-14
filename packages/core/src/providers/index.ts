@@ -103,6 +103,14 @@ function createAntigravityProvider(defineAgentProvider: ProviderFactory): AgentP
           }
         }
       },
+      async readConfiguration({ nativeActor, processId, signal }, nativeSessionId) {
+        const { actorId, lifecycleOperationId, token } = nativeActor
+        return await antigravityAcpActor.readConfiguration({ actorId, lifecycleOperationId, processId }, token, nativeSessionId, signal)
+      },
+      async setConfiguration({ nativeActor, processId, signal }, nativeSessionId, request) {
+        const { actorId, lifecycleOperationId, token } = nativeActor
+        return await antigravityAcpActor.setConfiguration({ actorId, lifecycleOperationId, processId }, token, nativeSessionId, request, signal)
+      },
       async interrupt({ nativeActor, processId, signal }, nativeSessionId, expectedRequestId) {
         const { actorId, lifecycleOperationId, token } = nativeActor
         const identity = { actorId, lifecycleOperationId, processId }

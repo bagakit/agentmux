@@ -66,7 +66,7 @@ function partial(method: AgentMuxRpcMethod, result: unknown): boolean {
   if (method === 'space.close.apply' && ((body.operation as { outcome?: string; diskDurability?: string } | null)?.outcome !== 'applied' || (body.operation as { diskDurability?: string } | null)?.diskDurability !== 'confirmed')) return true
   if (method === 'space.close.prepare' && (body.operation as { diskDurability?: string } | null)?.diskDurability !== 'confirmed') return true
   if (method === 'space.close.ls' && body.availability !== 'complete') return true
-  if (method === 'agent.posture.set' && (body.outcome !== 'applied' || body.diskDurability !== 'confirmed')) return true
+  if ((method === 'agent.posture.set' || method === 'agent.configuration.set') && (body.outcome !== 'applied' || body.diskDurability !== 'confirmed')) return true
   if (method === 'node.locate' && body.status === 'unconfirmed') return true
   if (method === 'settings.mesh.configure' && body.diskDurability !== 'confirmed') return true
   if (method === 'settings.node.configure' && (body.operation as { status?: string } | undefined)?.status !== 'confirmed') return true

@@ -5,14 +5,22 @@ import { createConnection, createServer } from 'node:net'
 import { JSONRPCErrorException } from 'json-rpc-2.0'
 import { acpRecord, initializeAntigravityAcp, launchAntigravityAcp, type AcpWireServices } from './acp-process.js'
 import { readAntigravityAcpHandshake } from './acp-probe.js'
-import { readAntigravityPermission, readAntigravityUpdate } from './acp-events.js'
+import { readAntigravityConfiguration, readAntigravityPermission, readAntigravityUpdate } from './acp-events.js'
 
 export const ANTIGRAVITY_ACP_ACTOR_PROTOCOL = 'antigravity-acp.v1'
 export const ACP_ACTOR_TOKEN = 'AGENTMUX_ACP_ACTOR_TOKEN'
 export const ACP_ACTOR_ID = 'AGENTMUX_ACP_ACTOR_ID'
 export const ACP_ACTOR_LIFECYCLE = 'AGENTMUX_ACP_ACTOR_LIFECYCLE'
 
+type ConfigurationCommand = { configId: string; value: string | boolean; expectedRevision: string; requestId: string }
+type AgentConfigurationSnapshot = {
+  revision: string
+  options: NonNullable<ReturnType<typeof readAntigravityConfiguration>>
+}
+
 type ActorRequest = { method: 'session.inspect' } |
+  { method: 'configuration.inspect'; sessionId: string } |
+  ({ method: 'configuration.set'; sessionId: string } & ConfigurationCommand) |
   { method: 'session.watch'; sessionId: string } |
   { method: 'permission.respond'; sessionId: string; requestId: string; decision: PermissionOutcome } |
   { method: 'prompt.start'; sessionId: string; requestId: string; prompt: string } |
@@ -24,6 +32,7 @@ type ActorActivity = {
   status: 'streaming' | 'complete' | 'failed'; title: string; content?: string
 }
 type ActorEvent = ActorActivity | NonNullable<ReturnType<typeof readAntigravityPermission>> |
+  { type: 'configuration'; snapshot: AgentConfigurationSnapshot } |
   { type: 'permission-settled'; requestId: string } | { type: 'observation-gap' } |
   { type: 'status'; state: 'working' | 'done' | 'waiting' | 'error'; detail?: string }
 type EventEnvelope = { event: ActorEvent; observedAt: number }
@@ -57,7 +66,8 @@ type ActorTurn = {
 }
 
 export function createAntigravityAcpActor(services: AcpWireServices & {
-  AgentMuxError: new (message: string, code: string) => Error
+  AgentMuxError: new (message: string, code: string, detail?: string,
+    controlFailure?: { disposition: 'not_applied'; confirmedInputBytes: 0 }) => Error
 }) {
   const { AgentMuxError, AgentMuxRpcLines, rpcEncode, observeRead } = services
   const unavailable = () => new AgentMuxError('The original ACP actor could not be observed.', 'AGENT_ACP_ACTOR_UNCONFIRMED')
@@ -112,6 +122,20 @@ export function createAntigravityAcpActor(services: AcpWireServices & {
     const result = await acpActorCall(identity, token, { method: 'permission.respond', sessionId, requestId, decision }, signal)
     if (result.state !== 'permission-settled' || result.requestId !== requestId) throw new AgentMuxError(
       'The original ACP permission and its offered decision could not be confirmed.', 'UNKNOWN_AGENT_INTERACTION')
+  }
+
+  async function readAntigravityAcpConfiguration(identity: ActorIdentity, token: string, sessionId: string, signal: AbortSignal) {
+    const result = await acpActorCall(identity, token, { method: 'configuration.inspect', sessionId }, signal)
+    if (result.state !== 'configuration') throw unavailable()
+    return result.snapshot as AgentConfigurationSnapshot | null
+  }
+
+  async function setAntigravityAcpConfiguration(identity: ActorIdentity, token: string, sessionId: string, request: ConfigurationCommand, signal: AbortSignal) {
+    const result = await acpActorCall(identity, token, { method: 'configuration.set', sessionId, ...request }, signal)
+    if (result.state === 'not-applied') throw new AgentMuxError('The original ACP choice or configuration revision changed.',
+      'AGENT_CONFIGURATION_CHANGED', undefined, { disposition: 'not_applied', confirmedInputBytes: 0 })
+    if (result.state !== 'configuration' || result.requestId !== request.requestId || !result.snapshot) throw unavailable()
+    return result.snapshot as AgentConfigurationSnapshot
   }
 
   async function inspectAntigravityAcpActor(identity: ActorIdentity, token: string, signal: AbortSignal): Promise<AcpActorSnapshot> {
@@ -194,8 +218,25 @@ export function createAntigravityAcpActor(services: AcpWireServices & {
       }
       return await item.dispatch
     }
+    let configuration: AgentConfigurationSnapshot | null = null
+    let configurationEvent: EventEnvelope | undefined
+    let settingConfiguration = false
+    const observeConfiguration = (next: AgentConfigurationSnapshot): void => {
+      configuration = next
+      configurationEvent = { event: { type: 'configuration', snapshot: next }, observedAt: Date.now() }
+      for (const watch of watches) watch(configurationEvent)
+    }
     const onNativeFrame = ({ method, params, id }: { method: string; params: unknown; id?: string | number | null }): boolean => {
-      if (snapshot.state !== 'ready' || !turn || turn.result) return false
+      if (snapshot.state !== 'ready') return false
+      if (method === 'session/update' && id === undefined) {
+        const session = acpRecord(params), update = acpRecord(session?.update)
+        if (session?.sessionId === snapshot.sessionId && update?.sessionUpdate === 'config_option_update') {
+          const options = readAntigravityConfiguration(update.configOptions)
+          if (options) observeConfiguration({ revision: randomUUID(), options })
+          return true
+        }
+      }
+      if (!turn || turn.result) return false
       if (method === 'session/request_permission' && id !== undefined && id !== null) {
         if ([...pending.values()].some(item => item.nativeId === id)) return true
         const event = readAntigravityPermission(params, snapshot.sessionId, randomUUID())
@@ -235,9 +276,29 @@ export function createAntigravityAcpActor(services: AcpWireServices & {
     const apply = async (command: Record<string, unknown>): Promise<unknown> => {
       if (command.method === 'session.inspect') return snapshot.state === 'ready' && turn && !turn.result
         ? { ...snapshot, activePromptId: turn.requestId } : snapshot
-      if (snapshot.state !== 'ready' || !native || command.sessionId !== snapshot.sessionId ||
-          typeof command.requestId !== 'string') return { state: 'not-applied' }
+      if (snapshot.state !== 'ready' || !native || command.sessionId !== snapshot.sessionId) return { state: 'not-applied' }
+      if (command.method === 'configuration.inspect') return { state: 'configuration', snapshot: configuration }
+      if (typeof command.requestId !== 'string') return { state: 'not-applied' }
       const { requestId, sessionId } = { requestId: command.requestId, sessionId: snapshot.sessionId }
+      if (command.method === 'configuration.set') {
+        const original = configuration
+        const option = original?.options.find(option => option.id === command.configId)
+        if (settingConfiguration || !original || original.revision !== command.expectedRevision || !option ||
+            !(option.type === 'select' ? option.choices.some(choice => choice.value === command.value) : typeof command.value === 'boolean')) return { state: 'not-applied' }
+        settingConfiguration = true
+        try {
+          const response = await native.requestWithId(requestId, 'session/set_config_option', { sessionId, configId: option.id, value: command.value,
+            ...(option.type === 'boolean' ? { type: 'boolean' } : {}) })
+          const result = acpRecord(response.result)
+          const options = result && readAntigravityConfiguration(result.configOptions)
+          if (!options || options.find(current => current.id === option.id)?.currentValue !== command.value ||
+              result.sessionId !== undefined && result.sessionId !== sessionId) return { state: 'unconfirmed' }
+          const confirmed = { revision: randomUUID(), options }
+          // Another original complete notification may arrive while this response is pending.
+          if (configuration === original) observeConfiguration(confirmed)
+          return { state: 'configuration', snapshot: confirmed, requestId }
+        } finally { settingConfiguration = false }
+      }
       if (command.method === 'permission.respond') {
         const permission = pending.get(requestId)
         const decision = acpRecord(command.decision)
@@ -264,7 +325,7 @@ export function createAntigravityAcpActor(services: AcpWireServices & {
       if (command.method !== 'prompt.start' || typeof command.prompt !== 'string' || !command.prompt.trim()) return { state: 'not-applied' }
       if (turn?.requestId === requestId) return { state: 'accepted', requestId }
       if (turn && (!turn.result || turn.result.state === 'unconfirmed') || pending.size) return { state: 'busy' }
-      const completion = native.prompt(requestId, { sessionId, prompt: [{ type: 'text', text: command.prompt }] }).then((response): TurnResult => {
+      const completion = native.requestWithId(requestId, 'session/prompt', { sessionId, prompt: [{ type: 'text', text: command.prompt }] }).then((response): TurnResult => {
         if (response.error) return { state: 'refused' }
         const reason = acpRecord(response.result)?.stopReason
         return stopReasons.has(reason) ? { state: 'stopped', stopReason: reason as StopReason } : { state: 'unconfirmed' }
@@ -321,6 +382,7 @@ export function createAntigravityAcpActor(services: AcpWireServices & {
               for (const item of pending.values()) send(item.record)
               if (observationGap) send(observationGap)
               if (status) send(status)
+              if (configurationEvent) send(configurationEvent)
               return
             }
             void apply(command).then(result => {
@@ -350,7 +412,7 @@ export function createAntigravityAcpActor(services: AcpWireServices & {
         try {
           await child.ready
           stage = 'initialize'
-          const handshake = readAntigravityAcpHandshake(await initializeAntigravityAcp(child))
+          const handshake = readAntigravityAcpHandshake(await initializeAntigravityAcp(child, undefined, { session: { configOptions: { boolean: {} } } }))
           const params = { cwd: plan.cwd, mcpServers: [] }
           if (plan.resumeSessionId !== undefined) {
             stage = handshake.sessions.resume ? 'session/resume' : 'session/load'
@@ -358,11 +420,15 @@ export function createAntigravityAcpActor(services: AcpWireServices & {
             const result = acpRecord(await child.request(stage, { ...params, sessionId: plan.resumeSessionId }))
             if (!result || result.sessionId !== undefined && result.sessionId !== plan.resumeSessionId) throw unavailable()
             snapshot = { state: 'ready', sessionId: plan.resumeSessionId }
+            const options = readAntigravityConfiguration(result.configOptions)
+            if (options) observeConfiguration({ revision: randomUUID(), options })
           } else {
             stage = 'session/new'
             const result = acpRecord(await child.request(stage, params))
             if (typeof result?.sessionId !== 'string' || result.sessionId.trim().length === 0) throw unavailable()
             snapshot = { state: 'ready', sessionId: result.sessionId }
+            const options = readAntigravityConfiguration(result.configOptions)
+            if (options) observeConfiguration({ revision: randomUUID(), options })
           }
         } catch (error) {
           snapshot = { state: error instanceof JSONRPCErrorException && error.code === -32000 ? 'authentication-required' : 'initialization-unconfirmed', stage }
@@ -381,5 +447,5 @@ export function createAntigravityAcpActor(services: AcpWireServices & {
       await new Promise<void>(resolve => server.close(() => resolve()))
     }
   }
-  return { inspect: inspectAntigravityAcpActor, submitPrompt: submitAntigravityAcpPrompt, cancelPrompt: cancelAntigravityAcpPrompt, observe: observeAntigravityAcpActor, respondPermission: respondAntigravityAcpPermission, run: runAcpActor }
+  return { inspect: inspectAntigravityAcpActor, submitPrompt: submitAntigravityAcpPrompt, cancelPrompt: cancelAntigravityAcpPrompt, observe: observeAntigravityAcpActor, respondPermission: respondAntigravityAcpPermission, readConfiguration: readAntigravityAcpConfiguration, setConfiguration: setAntigravityAcpConfiguration, run: runAcpActor }
 }

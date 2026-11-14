@@ -50,6 +50,7 @@ export { parsePreparedTerminal, parsePreparedTerminalStop, type AgentMuxPrepared
 export * from './terminal-observation.js'
 export * from './terminal-creation.js'
 export * from './agent-posture.js'
+export * from './agent-configuration.js'
 export { parseTerminalRecoveryInput, parseTerminalRecoveryResult, type AgentMuxTerminalRecoveryInput, type AgentMuxTerminalRecoveryResult } from './terminal-recovery.js'
 export { type AgentMuxCreationRuntime, type AgentMuxTerminalCreationRetirement, type AgentMuxTerminalCreationRetirementObservation } from './terminal-creation-retirement.js'
 export * from './session-history-content.js'

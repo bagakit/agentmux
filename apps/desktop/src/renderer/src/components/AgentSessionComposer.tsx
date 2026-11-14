@@ -7,7 +7,7 @@ import { useWorkbenchWindowDocument } from '../lib/workbench-document'
 import { useObservedAppStore, useObservedConsumerCommit } from '../lib/use-observed-app-store'
 import { reportMessageDeliveryDiagnostics } from '../lib/message-delivery-diagnostics'
 import { scratchTopicsForConfig } from '../lib/scratch-topic-snapshots'
-import { PosturePicker } from './PosturePicker'
+import { NativeConfigurationPicker, PosturePicker } from './PosturePicker'
 import { createFirstPromptSelector, createSessionViewModeSelector, sessionPresentationById } from '../lib/session-presentation'
 import { useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react'
 import type { ComposerInsertionHandle } from '@agentmux/client-ui/composer-insertion'
@@ -270,6 +270,9 @@ export function AgentSessionComposer({
     { ...options, ...(session ? { originalSession: session } : {}), ...(source ? { originalMember: source.target } : {}) })
   const interrupt = useAppStore.getState().interrupt
   const setPosture = useAppStore.getState().setPosture
+  const setConfiguration = useAppStore.getState().setConfiguration
+  const nativeConfiguration = !source && session?.kind === 'agent' && session.processState === 'running' &&
+    session.status.state !== 'disconnected' ? session.nativeConfiguration : undefined
   const reportError = useAppStore.getState().reportError
   // One decision answers three questions the old `availability + isWorking` pair conflated: can the user
   // type, does the surface permit a submit (true while working — that IS steer), and is the primary button
@@ -543,7 +546,10 @@ export function AgentSessionComposer({
       // buffered or replayed through that restoration boundary. Core writes it like any terminal input, so
       // while a request is pending it would land in the open native dialog and be recorded as native input
       // on that request, retiring the card's answer. It is offered only when no request owns the input.
-      {...(postureControl && submitMode.canSubmit && session?.kind === 'agent' && !session.pendingInteraction &&
+      {...(nativeConfiguration?.options.length ? {
+        postureTool: <NativeConfigurationPicker snapshot={nativeConfiguration} disabled={!submitMode.canType}
+          onSet={(configId, value) => void setConfiguration(sessionId, nativeConfiguration.revision, configId, value)} />
+      } : postureControl && submitMode.canSubmit && session?.kind === 'agent' && !session.pendingInteraction &&
         session.processState === 'running' && session.status.state !== 'disconnected'
         ? { postureTool: <PosturePicker control={postureControl} disabled={!submitMode.canType} onSet={(modeId: string) => void setPosture(sessionId, modeId)} /> } : {})}
       {...(session?.kind === 'agent' && (moteDraftKey || text.trim()) && (session.pendingInteraction || submitMode.primaryAction === 'stop') ? {

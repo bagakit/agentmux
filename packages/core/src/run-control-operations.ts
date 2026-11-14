@@ -6,18 +6,25 @@ import { durableWriteFile } from './durable-write.js'
 import { AgentMuxError } from './errors.js'
 import { rpcRecord } from './rpc-data.js'
 import { mintObjectId } from './object-id.js'
+import { parseAgentConfigurationSet, parseAgentConfigurationReceipt, type AgentConfigurationSet, type AgentConfigurationReceipt } from './agent-configuration.js'
 import { parsePostureSet, parsePostureSetResult, type PostureSet, type PostureReceipt } from './agent-posture.js'
 import { parseTerminalControl, parseTerminalControlResult, terminalInputDescriptor, type TerminalControlRequest, type TerminalControlReceipt } from './terminal-control.js'
 import type { RunControlActor } from './run-control-context.js'
 import type { AgentMuxCreationRuntime } from './terminal-creation-retirement.js'
 
-type ControlRequest = PostureSet | TerminalControlRequest
-type ControlReceipt = PostureReceipt | TerminalControlReceipt
-type ReceiptFor<R extends ControlRequest> = R extends PostureSet ? PostureReceipt : TerminalControlReceipt
+type ControlRequest = PostureSet | TerminalControlRequest | AgentConfigurationSet
+type ControlReceipt = PostureReceipt | TerminalControlReceipt | AgentConfigurationReceipt
+type ReceiptFor<R extends ControlRequest> = R extends AgentConfigurationSet ? AgentConfigurationReceipt
+  : R extends PostureSet ? PostureReceipt : TerminalControlReceipt
 type Record = { schemaVersion: 1; request: ControlRequest; requestDigest: string; receipt: ControlReceipt }
 const native = createRequire(import.meta.url)('fs-native-extensions') as { tryLock(fd: number): boolean }
 const digest = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex')
 const conflict = () => new AgentMuxError('The original native control operation belongs to another actor or request. Keep its original ID.', 'RUN_CONTROL_OPERATION_CONFLICT')
+
+function parseControlReceipt(receipt: unknown, request: ControlRequest): ControlReceipt {
+  if ('configId' in request) return parseAgentConfigurationReceipt(receipt, request)
+  return 'action' in request ? parseTerminalControlResult(receipt, request) : parsePostureSetResult(receipt, request)
+}
 
 /** Only explicit native control intents live here, never Runtime state or per-keystroke history. */
 export class RunControlOperations {
@@ -45,8 +52,9 @@ export class RunControlOperations {
     }
     const p = rpcRecord(JSON.parse(raw), ['schemaVersion', 'request', 'requestDigest', 'receipt'])
     const action = rpcRecord(p.receipt).action
-    const request = action === 'agent-posture' ? parsePostureSet(p.request) : parseTerminalControl(p.request)
-    const receipt = 'action' in request ? parseTerminalControlResult(p.receipt, request) : parsePostureSetResult(p.receipt, request)
+    const request = action === 'agent-configuration' ? parseAgentConfigurationSet(p.request)
+      : action === 'agent-posture' ? parsePostureSet(p.request) : parseTerminalControl(p.request)
+    const receipt = parseControlReceipt(p.receipt, request)
     if (p.schemaVersion !== 1 || request.operationId !== id || receipt.operationId !== id || typeof p.requestDigest !== 'string')
       throw new AgentMuxError('The original native control record is unconfirmed; no replacement was created.', 'RUN_CONTROL_RECORD_UNCONFIRMED')
     if (digest({ request, actor: receipt.actor }) !== p.requestDigest) throw conflict()
@@ -88,7 +96,9 @@ export class RunControlOperations {
       if (prior) { this.same(prior, request, actor); return prior.receipt as ReceiptFor<R> }
       const common = { operationId: request.operationId, target: request.target, actor, runtime,
         phase: 'prepared' as const, outcome: 'not-dispatched' as const, acknowledgement: null, diskDurability: 'confirmed' as const }
-      const receipt: ControlReceipt = 'action' in request
+      const receipt: ControlReceipt = 'configId' in request
+        ? { ...common, target: request.target, action: 'agent-configuration', configId: request.configId, value: request.value, nativeOperationId: mintObjectId() }
+        : 'action' in request
         ? { ...common, target: request.target, action: request.action, ownerInstanceId: request.ownerInstanceId,
           ...(request.action === 'terminal-input' ? { input: terminalInputDescriptor(request) } : {}),
           nativeOperationId: request.action === 'terminal-interrupt' || request.action === 'terminal-input' && terminalInputDescriptor(request).bytes === 0 ? null : mintObjectId() }
@@ -110,7 +120,7 @@ export class RunControlOperations {
   async settle<R extends ControlRequest>(request: R, actor: RunControlActor, dispatched: ReceiptFor<R>, update: Pick<ReceiptFor<R>, 'outcome' | 'acknowledgement'> & { issue?: string }): Promise<ReceiptFor<R>> {
     // The caller already holds this acknowledged dispatch claim. Reading its
     // file again must not be a prerequisite for retaining a later native ACK.
-    const receipt = 'action' in request ? parseTerminalControlResult(dispatched, request) : parsePostureSetResult(dispatched, request)
+    const receipt = parseControlReceipt(dispatched, request)
     if (receipt.phase !== 'dispatching' || digest(receipt.actor) !== digest(actor)) throw conflict()
     const record: Record = { schemaVersion: 1, request, requestDigest: digest({ request, actor }), receipt }
     record.receipt = { ...record.receipt, ...update, phase: 'settled', diskDurability: 'unconfirmed' } as ControlReceipt

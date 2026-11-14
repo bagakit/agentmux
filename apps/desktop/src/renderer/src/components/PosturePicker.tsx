@@ -71,3 +71,60 @@ export function PosturePicker({
     </DropdownMenu.Root>
   )
 }
+
+export function NativeConfigurationPicker({
+  snapshot,
+  disabled,
+  onSet
+}: {
+  snapshot: import('@agentmux/core').AgentConfigurationSnapshot
+  disabled?: boolean
+  onSet(configId: string, value: string | boolean): void
+}) {
+  if (!snapshot.options.length) return null
+  return (
+    <DropdownMenu.Root>
+      <DropdownMenu.Trigger asChild>
+        <button type="button" className="composer-tool" disabled={disabled} aria-label="Session settings">
+          <ThemeStatusAuthorizedIcon size={14} /> <span className="composer-tool__label">Session settings</span>
+        </button>
+      </DropdownMenu.Trigger>
+      <DropdownMenu.Portal>
+        <DropdownMenu.Content className="tab-context-menu posture-menu" aria-label="Session settings"
+          align="start" side="top" sideOffset={6} collisionPadding={8}>
+          {snapshot.options.map(option => (
+            <DropdownMenu.Sub key={option.id}>
+              <DropdownMenu.SubTrigger className="tab-context-menu__item" title={option.description}>
+                {option.name}
+              </DropdownMenu.SubTrigger>
+              <DropdownMenu.Portal>
+                <DropdownMenu.SubContent className="tab-context-menu posture-menu" aria-label={option.name} collisionPadding={8}>
+                  {option.type === 'boolean'
+                    ? <DropdownMenu.CheckboxItem checked={option.currentValue} className="tab-context-menu__item"
+                        onCheckedChange={() => onSet(option.id, !option.currentValue)}>
+                        <DropdownMenu.ItemIndicator>✓ </DropdownMenu.ItemIndicator>
+                        {option.name}
+                      </DropdownMenu.CheckboxItem>
+                    : <DropdownMenu.RadioGroup value={option.currentValue} onValueChange={value => {
+                        if (value !== option.currentValue) onSet(option.id, value)
+                      }}>
+                        {option.choices.map((choice, index) => (
+                          <div key={choice.value}>
+                            {choice.group && choice.group.id !== option.choices[index - 1]?.group?.id &&
+                              <DropdownMenu.Label>{choice.group.name}</DropdownMenu.Label>}
+                            <DropdownMenu.RadioItem value={choice.value} className="tab-context-menu__item" title={choice.description}>
+                              <DropdownMenu.ItemIndicator>✓ </DropdownMenu.ItemIndicator>
+                              {choice.name}
+                            </DropdownMenu.RadioItem>
+                          </div>
+                        ))}
+                      </DropdownMenu.RadioGroup>}
+                </DropdownMenu.SubContent>
+              </DropdownMenu.Portal>
+            </DropdownMenu.Sub>
+          ))}
+        </DropdownMenu.Content>
+      </DropdownMenu.Portal>
+    </DropdownMenu.Root>
+  )
+}

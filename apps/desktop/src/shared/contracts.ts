@@ -1094,6 +1094,8 @@ export type SessionSnapshot = SessionSnapshotBase & (
       promptInputNotApplied?: import('@agentmux/core/prompt-condition').AgentPromptNotApplied | undefined
       /** Core-owned fact that this Run's live output channel could not be re-established; absent means healthy. */
       terminalOutputChannel?: AgentTerminalOutputChannelState
+      structuredPromptInput?: true
+      nativeConfiguration?: AgentMuxAgentSession['nativeConfiguration']
       pendingInteraction?: AgentMuxInteractionRequest
       /** Completed native request whose original typed answer receipt still belongs to Core. */
       completedInteractionResponse?: { requestId: string; operationId: string; acknowledged: boolean }
@@ -2163,6 +2165,7 @@ export type AgentMuxDesktopApi = {
     inspectInteraction(session: AgentSessionControl, operationId: string): Promise<import('@agentmux/core').AgentMuxInteractionOperationReceipt | null>
     // Set the Agent's live security posture in-band. The renderer sends the picked mode id; Core resolves
     // the Provider's declared keystroke and writes it over the PTY-input transport (bytes never cross IPC).
+    setConfiguration(session: AgentSessionControl, request: Omit<import('@agentmux/core').AgentConfigurationSet, 'target'>): Promise<import('@agentmux/core').AgentConfigurationReceipt>
     setPosture(session: AgentSessionControl, modeId: string, operationId: string): Promise<import('@agentmux/core').PostureReceipt>
     reopen(reference: SessionHistoryReference, expectedRetiredAt: number, operationId: string): Promise<SessionSnapshot>
     reconcileReopen(reference: SessionHistoryReference, expectedRetiredAt: number, operationId: string): Promise<SessionSnapshot>

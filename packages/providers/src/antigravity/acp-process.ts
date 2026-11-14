@@ -89,9 +89,9 @@ export function launchAntigravityAcp({ observeRead, AgentMuxRpcLines, isRpcId, r
     lifetime.throwIfAborted()
     return await observeRead(Promise.resolve(client.request(method, params, undefined)), lifetime)
   }
-  const prompt = (id: string, params: Record<string, unknown>) => {
+  const requestWithId = (id: string, method: string, params: Record<string, unknown>) => {
     transport.signal.throwIfAborted()
-    return observeRead(Promise.resolve(client.requestAdvanced({ jsonrpc: '2.0', id, method: 'session/prompt', params }, undefined)), transport.signal)
+    return observeRead(Promise.resolve(client.requestAdvanced({ jsonrpc: '2.0', id, method, params }, undefined)), transport.signal)
   }
   const cancel = async (sessionId: string): Promise<void> => {
     transport.signal.throwIfAborted()
@@ -102,7 +102,7 @@ export function launchAntigravityAcp({ observeRead, AgentMuxRpcLines, isRpcId, r
     await write({ jsonrpc: '2.0', id, result })
   }
   let shutdown: Promise<void> | undefined
-  return { ready, closed, request, prompt, cancel, respond, close: () => shutdown ??= (async () => {
+  return { ready, closed, request, requestWithId, cancel, respond, close: () => shutdown ??= (async () => {
     unavailable()
     client.rejectAllPendingRequests('The scoped ACP client has closed.')
     child.stdin.end()
@@ -113,6 +113,7 @@ export function launchAntigravityAcp({ observeRead, AgentMuxRpcLines, isRpcId, r
   })() }
 }
 
-export async function initializeAntigravityAcp(process: Pick<ReturnType<typeof launchAntigravityAcp>, 'request'>, signal?: AbortSignal): Promise<unknown> {
-  return await process.request('initialize', { protocolVersion: 1, clientCapabilities: {}, clientInfo: { name: 'agentmux', version: '1' } }, signal)
+export async function initializeAntigravityAcp(process: Pick<ReturnType<typeof launchAntigravityAcp>, 'request'>, signal?: AbortSignal,
+  clientCapabilities: Record<string, unknown> = {}): Promise<unknown> {
+  return await process.request('initialize', { protocolVersion: 1, clientCapabilities, clientInfo: { name: 'agentmux', version: '1' } }, signal)
 }

@@ -1374,6 +1374,9 @@ export type AgentMuxAgentSession = {
   /** Original durable main observation, without restoring live input qualification. */
   mainSessionActivity?: AgentCurrentActivity
   pendingInteraction?: AgentMuxPendingInteraction
+  /** This original Run accepts typed conversation prompts through a managed protocol. */
+  structuredPromptInput?: true
+  nativeConfiguration?: import('./agent-configuration.js').AgentConfigurationSnapshot
   nativeHandle?: AgentNativeSessionHandle
   /** Live Core save acknowledgement for this locator; readable post-replacement bytes are unconfirmed. Never stored. */
   nativeHandlePersistence?: 'confirmed' | 'unconfirmed'
@@ -1963,6 +1966,7 @@ export type AgentMuxAcpEvent =
     }
   | { type: 'permission-settled'; requestId: string }
   | { type: 'observation-gap' }
+  | { type: 'configuration'; snapshot: import('./agent-configuration.js').AgentConfigurationSnapshot }
   | {
       type: 'permission'
       requestId: string

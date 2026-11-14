@@ -337,6 +337,8 @@ function projectSession(
       processState: run.state,
       ...runInterruptionFact(run),
       status,
+      ...(subject.agentSession.structuredPromptInput ? { structuredPromptInput: true as const } : {}),
+      ...(subject.agentSession.nativeConfiguration ? { nativeConfiguration: structuredClone(subject.agentSession.nativeConfiguration) } : {}),
       ...(activeRequest ? { pendingInteraction: structuredClone(activeRequest) } : {}),
       ...(pending?.response && activeRequest?.id !== pending.request.id ? { completedInteractionResponse: {
         requestId: pending.request.id, operationId: pending.response.operationId, acknowledged: pending.response.acknowledged
@@ -2224,6 +2226,26 @@ export class RuntimeController {
 
   async inspectInteraction(control: Extract<SessionControl, { kind: 'agent' }>, operationId: string): Promise<import('@agentmux/core').AgentMuxInteractionOperationReceipt | null> {
     return await this.configuredClient(control.hostId).inspectAgentInteractionOperation({ agentSessionId: control.agentSessionId, operationId })
+  }
+
+  async setConfiguration(control: Extract<SessionControl, { kind: 'agent' }>,
+    request: Omit<import('@agentmux/core').AgentConfigurationSet, 'target'>): Promise<import('@agentmux/core').AgentConfigurationReceipt> {
+    return await this.trackHostOperation(control.hostId, async () => {
+      const client = await this.connectedClient(control.hostId)
+      const original = await callOriginalDesktopHost(client, 'agent.configuration.inspect', { hostId: 'local',
+        agentSessionId: control.agentSessionId, operationId: request.operationId }, { transport: 'unix' })
+      if (original.kind === 'operation' && original.operation) {
+        const receipt = original.operation
+        if (receipt.configId !== request.configId || receipt.value !== request.value || receipt.target.expectedRun.runId !== control.run.runId) throw new AgentMuxError(
+          'Keep the original configuration intent and operation.', 'RUN_CONTROL_OPERATION_CONFLICT')
+        return receipt
+      }
+      const observed = await callOriginalDesktopHost(client, 'agent.configuration.inspect', { hostId: 'local', agentSessionId: control.agentSessionId,
+        expectedRun: control.run }, { transport: 'unix' })
+      if (observed.kind !== 'configuration' || observed.snapshot?.revision !== request.expectedRevision) throw new AgentMuxError(
+        'The original native configuration changed. Select from the current choices.', 'AGENT_CONFIGURATION_CHANGED')
+      return await callOriginalDesktopHost(client, 'agent.configuration.set', { target: observed.target, ...request }, { transport: 'unix' })
+    })
   }
 
   async setPosture(
