@@ -34,7 +34,7 @@ import {
 import { preflightMacosSigning, signAndVerifyMacosApplication } from './macos-signing.mjs'
 import { verifyNativeDesktopCopy, verifyNativeDesktopSigning } from './native-desktop-package.mjs'
 
-import { PRODUCT_NAME, BUNDLE_ID, applicationBranding } from './macos-application-brand.mjs'
+import { PRODUCT_NAME, BUNDLE_ID, MAP_LOCATION_USAGE, applicationBranding } from './macos-application-brand.mjs'
 import { inspectElectronApplication } from './electron-application.mjs'
 const desktopRoot = resolve(import.meta.dirname, '..')
 // Waiting for a packaged GUI to answer is a hang guard, not a speed requirement. On a loaded machine a
@@ -199,6 +199,9 @@ async function verifyIdentity(appPath) {
     assert(await plistValue(plist, `CFBundleDocumentTypes.${index}.CFBundleTypeRole`) === 'Viewer' && await plistValue(plist, `CFBundleDocumentTypes.${index}.LSItemContentTypes.0`) === type, 'Packaged local webpage Viewer declarations are wrong.')
   }
   assert(await plistValue(plist, 'CFBundleIconFile') === 'agentmux.icns', 'Packaged icon is wrong.')
+  for (const key of ['NSLocationUsageDescription', 'NSLocationWhenInUseUsageDescription']) {
+    assert.equal(await plistValue(plist, key), MAP_LOCATION_USAGE, 'Packaged location usage text is wrong.')
+  }
   assert((await plistValue(plist, 'NSScreenCaptureUsageDescription')).length > 0, 'Packaged screen capture purpose is missing.')
   assert(!await pathExists(join(contents, 'Resources', 'default_app.asar')), 'Electron default app entered the package.')
   for (const suffix of ['', ' (Renderer)', ' (GPU)', ' (Plugin)']) {
@@ -1092,6 +1095,9 @@ async function main({ selectAfterBuild, install = installRequested, onlyApp = ap
     const stagedWorkspaceMoveHelper = join(stagedApp, 'Contents', 'Resources', 'app', 'resources', 'bin', 'agentmux-workspace-move')
     await verifyWorkspaceMoveHelper(stagedWorkspaceMoveHelper,
       await sha256(join(desktopRoot, 'resources', 'bin', 'agentmux-workspace-move')))
+    const locationAddOn = 'agentmux-mac-location.node'
+    assert.equal(await sha256(join(dirname(stagedWorkspaceMoveHelper), locationAddOn)),
+      await sha256(join(desktopRoot, 'resources', 'bin', locationAddOn)), 'Packaged location add-on differs from the built candidate.')
     await verifyNativeDesktopCopy(stagedApp, repositoryRoot)
     process.stdout.write('Signing and verifying macOS candidate...\n')
     const signature = await signAndVerifyMacosApplication(stagedApp, signingPlan)

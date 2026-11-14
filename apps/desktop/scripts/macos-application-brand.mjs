@@ -1,5 +1,6 @@
 export const PRODUCT_NAME = 'AgentMux'
 export const BUNDLE_ID = 'dev.agentmux.desktop'
+export const MAP_LOCATION_USAGE = 'AgentMux uses your current location when you ask to place this Mac on your map.'
 
 /** The existing macOS brand output, shared by the actual writer and compatibility identity. */
 export function applicationBranding(version) {
@@ -13,7 +14,9 @@ export function applicationBranding(version) {
       CFBundleExecutable: PRODUCT_NAME, CFBundleIconFile: 'agentmux.icns',
       CFBundleShortVersionString: version, CFBundleVersion: version,
       LSApplicationCategoryType: 'public.app-category.developer-tools',
-      NSScreenCaptureUsageDescription: 'AgentMux captures the screen area you select to attach it to your message.'
+      NSScreenCaptureUsageDescription: 'AgentMux captures the screen area you select to attach it to your message.',
+      NSLocationUsageDescription: MAP_LOCATION_USAGE,
+      NSLocationWhenInUseUsageDescription: MAP_LOCATION_USAGE
     },
     removedPlistKeys: ['NSAppTransportSecurity', 'NSAudioCaptureUsageDescription', 'NSBluetoothAlwaysUsageDescription',
       'NSBluetoothPeripheralUsageDescription', 'NSCameraUsageDescription', 'NSMicrophoneUsageDescription'],

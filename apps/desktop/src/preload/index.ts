@@ -468,6 +468,7 @@ const api: AgentMuxPreloadApi = {
     reconcilePmoInput: (intent, session, operationId) => ipcRenderer.invoke('demands:reconcilePmoInput', intent, session, operationId)
   },
   ui: {
+    ...(process.platform === 'darwin' ? { requestMacMapLocation: () => ipcRenderer.invoke('ui:requestMacMapLocation') } : {}),
     readLoadedIdentity: () => ipcRenderer.invoke('ui:readLoadedIdentity'),
     initialTheme,
     workbenchWindows: {

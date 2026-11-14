@@ -162,6 +162,7 @@ import { executeBrowserTaskControl } from './browser-task-control.js'
 import { createBrowserAutomationGate } from './browser-automation-gate.js'
 import { discoverAgentSkills, mintAgentSessionId, runProcess } from '@agentmux/core'
 import { registerNativeDesktopIpc } from './native-desktop-ipc.js'
+import { registerMacMapLocationIpc } from './mac-map-location.js'
 import { registerScreenshotShortcut } from './screenshot-shortcut.js'
 import { ScreenCapture } from './screen-capture.js'
 import { saveScreenshotPng } from './screenshot-files.js'
@@ -1821,6 +1822,7 @@ export async function registerIpc(args: {
     remindPending: () => { if (!captureSurface.notice('Finish or cancel this screenshot first')) screenshotEditor.notice('Finish or cancel this screenshot first') } })
   registerNativeDesktopIpc({ capture: (mode, options) => screenCapture.capture(true, mode, options), native: getDesktopNativeUiOwner,
     handle: handleWithEvent,})
+  registerMacMapLocationIpc(handleWithEvent)
   handleWithEvent('ui:openExternal', async (event, rawUrl: string) => {
     await openExternalFromRenderer(event, contents, rawUrl)
   })

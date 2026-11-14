@@ -1948,6 +1948,7 @@ export type AgentMuxDesktopApi = {
     reconcilePmoInput(intent: import('@agentmux/host/goal-pmo-origin').GoalPmoIntent, session: AgentSessionControl, operationId: string): Promise<Pick<import('@agentmux/demand').DemandReceipt, 'demand'>>
   }
   ui: {
+    requestMacMapLocation?(): Promise<import('./mesh-map-locations').MacMapLocationResult>
     readLoadedIdentity(): Promise<import('./client-observation').DesktopLoadedIdentity>
     /** Original Main appearance captured once before this document's first paint. */
     initialTheme: import('./theme-bootstrap').ThemeBootstrap | null

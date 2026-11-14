@@ -59,7 +59,7 @@ export function MeshPathsPane({ active, hosts, locations, onGateway, onDevice }:
   const networkId = snapshot?.network?.networkId
   const targets = useMemo((): MapAnnotationTarget[] => [
     ...devices.map(device => ({ field: 'meshNetworkMapLocations' as const, key: device.id, label: device.serverId })),
-    ...hosts.map(host => ({ field: 'meshMapLocations' as const, key: host.id, label: host.label })),
+    ...hosts.map(host => ({ field: 'meshMapLocations' as const, key: host.id, label: host.label, local: host.kind === 'local' })),
     ...(networkId ? meshTopologyModel(snapshot).peers.filter(peer => !peer.own).map(peer => ({
       field: 'meshNetworkMapLocations' as const, key: meshPeerLocationKey(networkId, peer.id), label: meshPeerLabel(peer),
     })) : []),
@@ -71,7 +71,7 @@ export function MeshPathsPane({ active, hosts, locations, onGateway, onDevice }:
   return <section className="mesh-paths-pane" aria-label="Mesh network overview" data-settings-field="mesh-paths">
     {issue ? <div className="mesh-paths-issue" role="status"><strong>Network observation unavailable.</strong><p>{snapshot ? 'Showing the last confirmed network.' : 'Current network state is unknown.'}</p><details><summary>Read details</summary><p>{issue}</p></details></div> : null}
     <div ref={locationEditor} hidden={editingLocation === undefined}>
-      <MeshLocationsPanel targets={targets} peerLocations={peerLocations} locations={locations} editing={editingLocation} onEdit={editLocation} />
+      <MeshLocationsPanel targets={targets} peerLocations={peerLocations} locations={locations} active={active} editing={editingLocation} onEdit={editLocation} />
     </div>
     <MeshNetworkMap devices={devices} onEndpointLocation={id => editLocation(targets.find(t => t.field === 'meshNetworkMapLocations' && t.key === id))}
       onGeographicViewChange={setGeographicVisible} observedLocations={observedLocations} snapshot={snapshot} active={active && visible} actions={actions} localClient

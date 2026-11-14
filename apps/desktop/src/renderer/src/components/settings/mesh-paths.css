@@ -14,9 +14,13 @@
 .mesh-locations-panel > header { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
 .mesh-locations-panel h3 { margin: 0; }
 .mesh-locations-panel p { margin: 8px 0 0; color: var(--text-3); }
-.mesh-locations-panel__fields { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.mesh-locations-panel__fields { display: flex; flex-wrap: wrap; align-items: start; gap: 8px; margin-top: 10px; }
 .mesh-locations-panel__fields label { display: grid; flex: 1 1 215px; gap: 4px; min-width: 0; }
+.mesh-locations-panel__coordinates { flex: 1 1 215px; min-width: 0; }
+.mesh-locations-panel__position { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; margin-top: 6px; }
+.mesh-locations-panel__position > [role=status] { color: var(--text-2); font-size: var(--fs-meta); }
 .mesh-locations-panel .settings-pane-actions { position: static; margin-top: 10px; }
+.mesh-locations-panel .settings-pane-actions > button { white-space: nowrap; }
 @media (min-width: 850px) {
   .mesh-locations-panel:not([hidden]) {
     display: grid;
