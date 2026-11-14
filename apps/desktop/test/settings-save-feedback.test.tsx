@@ -5,6 +5,7 @@ vi.hoisted(() => vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true))
 import { BrowserSettingsPane } from '../src/renderer/src/components/settings/BrowserSettingsPane'
 import { NotificationSettingsPane } from '../src/renderer/src/components/settings/NotificationSettingsPane'
 import { HostSettingsPane } from '../src/renderer/src/components/settings/HostSettingsPane'
+import { GoalsPromptDraftProvider } from '../src/renderer/src/components/settings/GoalsPromptDrafts'
 import { ShortcutSettingsPane } from '../src/renderer/src/components/settings/ShortcutSettingsPane'
 import { composerConfig, composerDOM } from './helpers/composer-dom-fixture'
 
@@ -67,9 +68,9 @@ it('keeps an unsaved SSH host across cloned configuration and saves the original
 
 it('keeps prompt edits across cloned saved arrays', async () => {
   const config = { ...composerConfig, composerShortcuts: [{ id: 'p', keyword: 'explain', label: 'Explain', body: 'Explain clearly' }] }
-  await dom.render(<ShortcutSettingsPane active={true} config={config} onSave={async () => {}} />)
+  await dom.render(<GoalsPromptDraftProvider enabled config={config}><ShortcutSettingsPane active config={config} onOpenGoals={() => {}} /></GoalsPromptDraftProvider>)
   await input('[placeholder="eli5"]', 'review')
-  await dom.render(<ShortcutSettingsPane active={true} config={structuredClone(config)} onSave={async () => {}} />)
+  await dom.render(<GoalsPromptDraftProvider enabled config={structuredClone(config)}><ShortcutSettingsPane active config={structuredClone(config)} onOpenGoals={() => {}} /></GoalsPromptDraftProvider>)
   expect(dom.container.querySelector<HTMLInputElement>('[placeholder="eli5"]')!.value).toBe('review')
   expect(dom.container.querySelector('.prompt-save-summary')!.textContent).toBe('Saves the whole prompt library. 1 changed.')
   expect(dom.container.querySelector<HTMLButtonElement>('.primary-button')!.disabled).toBe(false)

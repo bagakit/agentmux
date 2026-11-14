@@ -7,6 +7,8 @@ import { semanticIconHref } from '@agentmux/client-ui/icons'
 import type { AppConfig } from '../src/shared/contracts'
 import { useAppStore } from '../src/renderer/src/store'
 import { GlobalSystemNotices } from '../src/renderer/src/components/GlobalSystemNotices'
+import { GoalsPromptDraftProvider } from '../src/renderer/src/components/settings/GoalsPromptDrafts'
+import { api } from '../src/renderer/src/lib/api'
 import { ShortcutSettingsPane } from '../src/renderer/src/components/settings/ShortcutSettingsPane'
 import { composerDOM } from './helpers/composer-dom-fixture'
 import { currentNotificationRows, toggleNotificationCenter, toggleNotificationDetails } from './helpers/notification-center'
@@ -19,8 +21,9 @@ async function fill(node: HTMLInputElement | HTMLTextAreaElement, value: string)
 }
 const saved = { id: 'original', keyword: 'original', label: 'Original', body: 'Original authored bytes.\n  Last line.' }, config = { composerShortcuts: [saved] } as AppConfig
 it('the Prompt editor uses separate saved/unsaved/invalid glyphs while retaining status labels, authored data and save payloads', async () => {
-  const save = vi.fn(async () => {})
-  await dom.render(<ShortcutSettingsPane config={config} active onSave={save}/>)
+  const save = vi.spyOn(api.config, 'save').mockImplementation(async next => next)
+  useAppStore.setState({ config })
+  await dom.render(<GoalsPromptDraftProvider enabled config={config}><ShortcutSettingsPane config={config} active onOpenGoals={() => {}} /></GoalsPromptDraftProvider>)
   const status = dom.container.querySelector<HTMLElement>('[data-prompt-status]')!, icon = status.querySelector('svg')!
   expect(status, 'nonempty actual status consumer').not.toBeNull(); expect(status.textContent).toBe('Saved')
   expect(status.querySelector('use')?.getAttribute('href')).toBe(semanticIconHref('status.prompt-saved')); expect(document.getElementById(semanticIconHref('status.prompt-saved').slice(1))?.querySelector('circle')?.getAttribute('fill')).toBe('currentColor'); expect(icon.getAttribute('width')).toBe('4')
@@ -34,7 +37,7 @@ it('the Prompt editor uses separate saved/unsaved/invalid glyphs while retaining
   expect(status.textContent).toBe('Needs attention'); expect(status.querySelector('use')?.getAttribute('href')).toBe(semanticIconHref('status.prompt-invalid'))
   expect(dom.container.querySelector<HTMLButtonElement>('[data-settings-save-bar] button')?.disabled).toBe(true)
   await fill(body, saved.body); await dom.click('[data-settings-save-bar] button')
-  expect(save).toHaveBeenCalledWith([{ ...saved, label: 'Changed name' }], [saved]); expect(config.composerShortcuts).toEqual([saved])
+  expect(save).toHaveBeenCalledWith(expect.objectContaining({composerShortcuts:[{ ...saved, label: 'Changed name' }]}), expect.objectContaining({composerShortcuts:[saved]})); expect(config.composerShortcuts).toEqual([saved])
 })
 it('the real notification inbox themes its icon and single unread badge without marking its notice read or changing health facts', async () => {
   const sessions = useAppStore.getState().sessions

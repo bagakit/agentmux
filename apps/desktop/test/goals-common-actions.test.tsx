@@ -7,7 +7,6 @@ vi.mock('electron', () => ({ app: { getPath: () => _hygiene_fixturePath("tmp") }
 import { GlobalBoardSurface } from '../src/renderer/src/components/GlobalBoardSurface'
 import { SettingsNavigation, type SettingsNavigationRequest } from '../src/renderer/src/components/SettingsNavigation'
 import { SettingsPanel } from '../src/renderer/src/components/SettingsPanel'
-import { ShortcutSettingsPane } from '../src/renderer/src/components/settings/ShortcutSettingsPane'
 import { api } from '../src/renderer/src/lib/api'
 import { EMPTY_AGENT_FOCUS } from '../src/renderer/src/lib/agent-focus'
 import { useAppStore } from '../src/renderer/src/store'
@@ -72,16 +71,18 @@ async function fill(value: string) {
 async function settled() {
   for (let attempt = 0; attempt < 100; attempt++) {
     await act(async () => { await new Promise(resolve => setTimeout(resolve, 10)) })
-    if (dom.container.querySelector('.goals-common')?.getAttribute('aria-busy') !== 'true' && !dom.container.querySelector('[data-settings-pane="prompts"] [data-settings-save-bar] [aria-busy="true"]')) return
+    if (dom.container.querySelector('.goals-common')?.getAttribute('aria-busy') !== 'true' && !dom.container.querySelector('[data-settings-save-bar] [aria-busy="true"]')) return
   }
   throw new Error('Common action save did not settle')
 }
 async function manage() {
   await dom.click('[aria-label="Configure common actions"]')
+  expect(dom.container.querySelector('[data-settings-page]')!.getAttribute('data-settings-page')).toBe('goals')
   expect(dom.container.querySelector<HTMLDetailsElement>('[data-settings-field="goals-common-actions"]')!.open).toBe(true)
   expect(dom.container.querySelector('[aria-label="管理常用操作"]')).toBeNull()
 }
 async function openDirectory() {
+  if (dom.container.querySelector('[data-settings-page]')?.getAttribute('data-settings-page') === 'prompts') await click('Goals common actions')
   const directory = dom.container.querySelector<HTMLDetailsElement>('[data-settings-field="goals-common-actions"]')!
   if (!directory.open) await act(async () => directory.querySelector('summary')!.click())
   expect(directory.open).toBe(true)
@@ -97,7 +98,7 @@ async function reference(label = '检查改动') {
   })
   await save()
 }
-async function save() { await dom.click('[data-settings-pane="prompts"] [data-settings-save-bar] button'); await settled() }
+async function save() { const page = dom.container.querySelector('[data-settings-page]')!.getAttribute('data-settings-page'); await click(page === 'goals' ? 'Save common actions' : 'Save prompts'); await settled() }
 async function external(patch: Partial<typeof f.owner.current>) {
   const current = f.owner.current
   await act(async () => { await f.owner.edit(current, { ...current, ...patch }) })
@@ -177,7 +178,7 @@ describe('Goals common actions through the mounted product and durable config ow
 
   it('creates one authored body and its reference atomically, generating helper fields and preserving foreign config', async () => {
     await mount(); await manage(); await click('Add common action')
-    expect(dom.container.querySelector<HTMLDetailsElement>('[data-settings-field="goals-common-actions"]')!.open).toBe(false)
+    expect(dom.container.querySelector<HTMLElement>('[data-settings-pane="goals"]')!.hidden).toBe(true)
     const text = '  帮我检查今天的笔记。\n指出一个值得尝试的方向。  '
     await fill(text)
     await external({ appearance: { terminalTheme: 'graphite', appAppearance: 'light' } })
@@ -204,26 +205,27 @@ describe('Goals common actions through the mounted product and durable config ow
     await save()
     expect((await f.disk()).composerShortcuts, 'Shared library edit updates the original authored body').toEqual([{ ...prompts[0], label: '外部名称', body: text }, prompts[1]])
     expect(resolveComposerShortcuts(useAppStore.getState().config).find(prompt => prompt.id === 'review')!.body).toBe(text)
-    await dom.render(<ShortcutSettingsPane config={f.owner.current} active={true} onSave={vi.fn()} />)
+    await closeSettings(); await manage(); await dom.click('[data-common-select="prompt:review"]')
     expect(dom.container.querySelector<HTMLTextAreaElement>('[data-prompt-editor="review"] textarea')!.value).toBe(text)
     expect(createTopic).not.toHaveBeenCalled(); expect(openTopic).not.toHaveBeenCalled()
   })
 
-  it('returns reading space to every explicit prompt editor entry while keeping directory references and body drafts', async () => {
+  it('opens exact original instructions in Prompts while Goals keeps the directory and both pages retain drafts', async () => {
     await mount(); await manage(); await reference()
     const directory = await openDirectory()
-    await dom.click('[data-prompt-id="review"]')
-    expect(directory.open).toBe(false)
+    await dom.click('[data-common-select="prompt:review"]')
+    const editor = body()
+    expect(dom.container.querySelector('[data-settings-page]')!.getAttribute('data-settings-page')).toBe('prompts')
+    expect(directory.closest<HTMLElement>('[data-settings-pane]')!.hidden).toBe(true)
+    expect(editor.closest('[data-prompt-editor]')!.getAttribute('data-prompt-editor')).toBe('review')
     await fill('One retained original body draft')
     await openDirectory(); await dom.click('[data-common-select="prompt:review"]')
-    expect(directory.open).toBe(false); expect(body().value).toBe('One retained original body draft')
+    expect(body()).toBe(editor); expect(body().value).toBe('One retained original body draft')
     await openDirectory(); await click('Add common action')
-    expect(directory.open).toBe(false)
     const added = dom.container.querySelector<HTMLElement>('[data-prompt-editor]')!.dataset.promptEditor!
     expect(directory.querySelector(`[data-common-ref="prompt:${added}"]`)).not.toBeNull()
     await dom.click('[data-prompt-id="review"]')
     expect(body().value).toBe('One retained original body draft')
-    expect(directory.querySelector('[data-common-ref="prompt:review"]')).not.toBeNull()
     expect(api.config.save).toHaveBeenCalledTimes(1)
     expect(openTopic).not.toHaveBeenCalled(); expect(createTopic).not.toHaveBeenCalled()
   })
@@ -294,7 +296,7 @@ describe('Goals common actions through the mounted product and durable config ow
     await dom.click('[data-settings-target="goals"]')
     await dom.click('[data-settings-target="prompts"]')
     expect(body()).toBe(editor); expect(editor.value).toBe('尚未保存的点子')
-    expect(navigate).toHaveBeenCalledWith('prompts', undefined, 'goals-common-actions')
+    expect(navigate).toHaveBeenCalledWith('goals', undefined, 'goals-common-actions')
     await dom.click('.prompt-editor__remove button')
     expect(dom.container.querySelector(`[data-prompt-id="${draftId}"]`)).toBeNull()
     expect(dom.container.querySelector(`[data-common-ref="prompt:${draftId}"]`)).toBeNull()
@@ -308,6 +310,7 @@ describe('Goals common actions through the mounted product and durable config ow
     await dom.click('[aria-label="Remove from Goals 检查改动"]'); await save()
     expect((await f.disk()).composerShortcuts).toEqual(prompts)
     expect((await f.disk()).goalsCommonActions!.items.some(ref => ref.kind === 'prompt' && ref.id === 'review')).toBe(false)
+    await dom.click('nav [data-settings-target="prompts"]')
     expect(dom.container.querySelector('[data-prompt-id="review"]')).not.toBeNull()
     await closeSettings(); expect(action('prompt:review')).toBeNull()
     expect(openTopic).not.toHaveBeenCalled(); expect(createTopic).not.toHaveBeenCalled()
@@ -416,4 +419,97 @@ describe('Goals common actions through the mounted product and durable config ow
     expect((await f.disk()).composerShortcuts!.filter(prompt => prompt.id === id)).toHaveLength(1)
     expect(createTopic).not.toHaveBeenCalled(); expect(openTopic).not.toHaveBeenCalled()
   })
+  it('saves only referenced live bodies from Goals while unrelated drafts and all pending deletions keep their original expectations', async () => {
+    await external({ composerShortcuts: [...prompts, { id: 'extra', keyword: 'extra', label: 'Extra', body: 'Original extra' }],
+      goalsCommonActions: { items: [{ kind: 'prompt', id: 'review' }, { kind: 'prompt', id: 'extra' }], collapsed: false } })
+    await mount(); await manage(); await dom.click('[data-common-select="prompt:review"]'); await fill('Related original body edit')
+    await dom.click('[data-prompt-id="notes"]'); await fill('Unrelated dirty body')
+    await dom.click('[data-prompt-id="extra"]'); await dom.click('.prompt-editor__remove button')
+    // This concurrent same-field change must still conflict when the unrelated draft is later saved.
+    await external({ composerShortcuts: f.owner.current.composerShortcuts!.map(prompt => prompt.id === 'notes' ? { ...prompt, body: 'External notes' } : prompt) })
+    await openDirectory()
+    expect(dom.container.querySelector('.settings-goals-actions__save')!.textContent).toContain('all library deletions stay in Prompts')
+    await save()
+    expect((await f.disk()).composerShortcuts!.find(prompt => prompt.id === 'review')!.body).toBe('Related original body edit')
+    expect((await f.disk()).composerShortcuts!.find(prompt => prompt.id === 'notes')!.body).toBe('External notes')
+    expect((await f.disk()).composerShortcuts!.some(prompt => prompt.id === 'extra')).toBe(true)
+    await dom.click('nav [data-settings-target="prompts"]')
+    expect(dom.container.querySelector('[data-prompt-id="extra"]')).toBeNull()
+    await dom.click('[data-prompt-id="notes"]'); expect(body().value).toBe('Unrelated dirty body')
+    await save()
+    expect(dom.container.querySelector('[data-settings-pane="prompts"] [role="alert"]')?.textContent).toContain('composerShortcuts.notes.body')
+    expect((await f.disk()).composerShortcuts!.some(prompt => prompt.id === 'extra')).toBe(true)
+    expect(createTopic).not.toHaveBeenCalled(); expect(openTopic).not.toHaveBeenCalled()
+  })
+
+  it('atomically saves a new referenced prompt from Goals after cross-page editing while a later body survives its ACK', async () => {
+    await mount(); await manage(); await click('Add common action')
+    const id = dom.container.querySelector<HTMLElement>('[data-prompt-editor]')!.dataset.promptEditor!, editor = body()
+    await fill('First scoped body'); await openDirectory()
+    expect(dom.container.querySelector('[data-settings-pane="goals"]')!.textContent).toContain('Goals preferences saved')
+    expect(dom.container.querySelector('[data-settings-pane="goals"]')!.textContent).not.toContain('All changes saved')
+    const pending = deferred<void>(), published = deferred<void>(), original = vi.mocked(api.config.save).getMockImplementation()!
+    vi.mocked(api.config.save).mockImplementationOnce(async (next, expected) => { const result = await original(next, expected); published.resolve(); await pending.promise; return result })
+    await click('Save common actions'); await act(async () => published.promise)
+    expect((await f.disk()).goalsCommonActions?.items.at(-1)).toEqual({ kind: 'prompt', id })
+    expect((await f.disk()).composerShortcuts!.find(prompt => prompt.id === id)!.body).toBe('First scoped body')
+    await dom.click('nav [data-settings-target="prompts"]'); expect(body()).toBe(editor)
+    await fill('Later scoped body'); await closeSettings(); await manage()
+    await act(async () => pending.resolve()); await settled()
+    await dom.click('[data-common-select="prompt:' + id + '"]')
+    expect(body()).toBe(editor); expect(body().value).toBe('Later scoped body')
+    await openDirectory(); await save()
+    expect((await f.disk()).composerShortcuts!.filter(prompt => prompt.id === id)).toHaveLength(1)
+    expect((await f.disk()).composerShortcuts!.find(prompt => prompt.id === id)!.body).toBe('Later scoped body')
+    expect(createTopic).not.toHaveBeenCalled(); expect(openTopic).not.toHaveBeenCalled()
+  })
+
+  it('activates the shared owner lazily without remounting another visited Settings draft', async () => {
+    await dom.render(<SettingsPanel initialSection="space" onClose={() => {}} />)
+    const dense = dom.container.querySelector<HTMLInputElement>('input[name="space-rail-density"][value="dense"]')!
+    expect(dom.container.querySelector('[data-prompt-editor]')).toBeNull()
+    await act(async () => dense.click())
+    const space = dense.closest<HTMLElement>('[data-settings-pane]')!
+    await dom.click('nav [data-settings-target="goals"]')
+    await dom.click('[data-common-create]'); await fill('Kept across shared owner navigation')
+    const editor = body()
+    await dom.click('nav [data-settings-target="space"]')
+    expect(dom.container.querySelector('input[name="space-rail-density"][value="dense"]')).toBe(dense)
+    expect(dense.checked).toBe(true); expect(space.textContent).toContain('Unsaved changes')
+    await dom.click('nav [data-settings-target="prompts"]')
+    expect(body()).toBe(editor); expect(editor.value).toBe('Kept across shared owner navigation')
+    expect(api.config.save).not.toHaveBeenCalled()
+  })
+
+  it('discovers common-action search only in its Goals owner and navigates to the actual directory', async () => {
+    await dom.render(<SettingsPanel onClose={() => {}} />)
+    const search = dom.container.querySelector<HTMLInputElement>('[aria-label="Search settings"]')!
+    await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(search, 'common actions'); search.dispatchEvent(new Event('input', { bubbles: true })) })
+    const target = dom.container.querySelector<HTMLButtonElement>('[data-settings-search-target="goals:goals-common-actions"]')
+    const matches = [...dom.container.querySelectorAll<HTMLButtonElement>('.settings-search-results button')].filter(button => button.textContent?.includes('Goals common actions'))
+    expect(matches).toHaveLength(1)
+    await act(async () => (target ?? matches[0])!.click())
+    expect(dom.container.querySelector('[data-settings-page]')!.getAttribute('data-settings-page')).toBe('goals')
+    expect(dom.container.querySelector<HTMLDetailsElement>('[data-settings-field="goals-common-actions"]')!.open).toBe(true)
+    expect(api.config.save).not.toHaveBeenCalled(); expect(openTopic).not.toHaveBeenCalled()
+  })
+
+  it.each(['use-saved', 'keep-mine'] as const)('resolves only the Goals save scope with %s while unrelated authored expectations still conflict', async choice => {
+    await external({ goalsCommonActions: { items: [{ kind: 'prompt', id: 'review' }], collapsed: false } })
+    await mount(); await manage(); await dom.click('[data-common-select="prompt:review"]'); await fill('My related body')
+    await dom.click('[data-prompt-id="notes"]'); await fill('My unrelated body')
+    await external({ composerShortcuts: prompts.map(prompt => ({ ...prompt, body: prompt.id === 'review' ? 'External related body' : 'External unrelated body' })) })
+    await openDirectory(); await save()
+    expect(dom.container.querySelector('[data-settings-pane="goals"] [role="alert"]')?.textContent).toContain('composerShortcuts.review.body')
+    await dom.click('[data-settings-pane="goals"] [data-settings-conflict-action="' + choice + '"]')
+    if (choice === 'keep-mine') await save()
+    await dom.click('[data-common-select="prompt:review"]')
+    expect(body().value).toBe(choice === 'use-saved' ? 'External related body' : 'My related body')
+    await dom.click('[data-prompt-id="notes"]'); expect(body().value).toBe('My unrelated body')
+    await save()
+    expect(dom.container.querySelector('[data-settings-pane="prompts"] [role="alert"]')?.textContent).toContain('composerShortcuts.notes.body')
+    expect((await f.disk()).composerShortcuts!.find(prompt => prompt.id === 'notes')!.body).toBe('External unrelated body')
+    expect(createTopic).not.toHaveBeenCalled(); expect(openTopic).not.toHaveBeenCalled()
+  })
+
 })

@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto'
 import { relative, resolve } from 'node:path'
 import original from './vitest.goals-workflow.config.mts'
 const root = resolve(import.meta.dirname, '../../..')
-const ownerPaths = ['components/GoalsCommonActions.tsx', 'components/settings/ShortcutSettingsPane.tsx', 'components/settings/GoalsCommonActionsSettings.tsx',
+const ownerPaths = ['components/SettingsPanel.tsx', 'components/settings/GoalsPromptDrafts.tsx', 'components/settings/SettingsSaveBar.tsx', 'components/GoalsCommonActions.tsx', 'components/settings/ShortcutSettingsPane.tsx', 'components/settings/GoalsCommonActionsSettings.tsx',
   'components/settings/modules/prompts.tsx', 'components/settings/modules/goals.tsx', 'components/settings/GoalsSettingsPane.tsx',
   'lib/goals-common-actions.ts', 'lib/goals-common-actions-config.ts', 'components/settings/use-resource-drafts.ts',
   'components/settings/use-setting-draft.ts', 'components/settings/save-config-slice.ts'].map(path => 'apps/desktop/src/renderer/src/' + path)
@@ -26,5 +26,6 @@ export default { ...original, plugins: [...original.plugins ?? [], { name: 'Goal
 }], test: { ...original.test, include: [
   'apps/desktop/test/goals-common-actions.test.tsx', 'apps/desktop/test/goals-page-maturity.test.tsx',
   'apps/desktop/test/settings-prompts-save.test.tsx', 'apps/desktop/test/settings-resources-draft.test.tsx',
-  'apps/desktop/test/settings-workflows.test.tsx', 'apps/desktop/test/settings-save-feedback.test.tsx'
+  'apps/desktop/test/settings-workflows.test.tsx', 'apps/desktop/test/settings-save-feedback.test.tsx',
+  'apps/desktop/test/settings-parent-cost.test.tsx', 'apps/desktop/test/shortcut-themed-actions.test.tsx', 'apps/desktop/test/small-state-themed-glyphs.test.tsx'
 ], passWithNoTests: false } }

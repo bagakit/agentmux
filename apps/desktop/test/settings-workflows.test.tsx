@@ -128,7 +128,7 @@ it('pending Save keeps later input dirty and uses the original expected value', 
   await dom.click('[aria-label="Collapse common actions"]')
   const [submitted, expected] = write.mock.calls[0]!
   expect(submitted.goalsCommonActions?.collapsed).toBe(true)
-  expect(expected?.goalsCommonActions?.collapsed).toBe(false)
+  expect(expected?.goalsCommonActions).toBeUndefined()
   await act(async () => { useAppStore.setState({ config: submitted }); finish(submitted) })
   expect(checkbox().checked).toBe(false)
   expect(pane('goals').textContent).toContain('Unsaved changes')

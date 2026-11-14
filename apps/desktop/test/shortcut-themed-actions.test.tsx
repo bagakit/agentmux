@@ -5,7 +5,10 @@ import { GRAPHITE_THEME, mountThemeRuntime, previewTheme } from '@agentmux/clien
 import { semanticIconHref } from '@agentmux/client-ui/icons'
 import { PROMPT_REACTION_STARTERS } from '@agentmux/core/prompt-reaction'
 import type { AppConfig } from '../src/shared/contracts'
+import { GoalsPromptDraftProvider } from '../src/renderer/src/components/settings/GoalsPromptDrafts'
+import { api } from '../src/renderer/src/lib/api'
 import { ShortcutSettingsPane } from '../src/renderer/src/components/settings/ShortcutSettingsPane'
+import { useAppStore } from '../src/renderer/src/store'
 import { composerDOM } from './helpers/composer-dom-fixture'
 const dom = composerDOM(); let cleanup: () => void
 beforeEach(() => { cleanup = mountThemeRuntime(window) })
@@ -17,8 +20,9 @@ const button = (label: string) => {
   expect(result, `Nonempty production action: ${label}`).toBeDefined(); return result!
 }
 it('cancels only an unsaved prompt with the cancel role while retaining the saved removal affordance and original data', async () => {
-  const save = vi.fn(async () => {})
-  await dom.render(<ShortcutSettingsPane config={config} active onSave={save}/>)
+  const save = vi.spyOn(api.config, 'save').mockImplementation(async next => next)
+  useAppStore.setState({ config })
+  await dom.render(<GoalsPromptDraftProvider enabled config={config}><ShortcutSettingsPane config={config} active onOpenGoals={() => {}} /></GoalsPromptDraftProvider>)
   expect(button('Delete prompt').querySelector('use')?.getAttribute('href')).toBe(semanticIconHref('action.remove'))
   await act(async () => button('Add prompt').click())
   const cancel = button('Cancel new prompt')
@@ -34,8 +38,9 @@ it('cancels only an unsaved prompt with the cancel role while retaining the save
   expect(config.composerShortcuts).toEqual([saved]); expect(save).not.toHaveBeenCalled()
 })
 it('adds quick reply drafts through a distinct action role, preserving selected-state semantics and the actual save payload', async () => {
-  const save = vi.fn(async () => {})
-  await dom.render(<ShortcutSettingsPane config={config} active onSave={save}/>)
+  const save = vi.spyOn(api.config, 'save').mockImplementation(async next => next)
+  useAppStore.setState({ config })
+  await dom.render(<GoalsPromptDraftProvider enabled config={config}><ShortcutSettingsPane config={config} active onOpenGoals={() => {}} /></GoalsPromptDraftProvider>)
   const add = button('Add quick replies')
   expect(add.querySelector('use')?.getAttribute('href')).toBe(semanticIconHref('action.add-quick-replies'))
   const custom = structuredClone(GRAPHITE_THEME); custom.id = 'custom.prompt-add'; custom.name = 'Prompt add'
@@ -48,5 +53,5 @@ it('adds quick reply drafts through a distinct action role, preserving selected-
   expect(save).not.toHaveBeenCalled(); expect(config.composerShortcuts).toEqual([saved])
   await dom.click('[data-settings-save-bar] button')
   expect(save).toHaveBeenCalledOnce()
-  expect(save).toHaveBeenCalledWith([saved, ...PROMPT_REACTION_STARTERS], [saved])
+  expect(save).toHaveBeenCalledWith(expect.objectContaining({composerShortcuts:[saved, ...PROMPT_REACTION_STARTERS]}), expect.objectContaining({composerShortcuts:[saved]}))
 })

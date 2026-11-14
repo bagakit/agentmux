@@ -10,6 +10,7 @@ import { composeAgentPrompt } from '@agentmux/core/agent-outbound-message'
 import { ConversationMessage } from '@agentmux/client-ui/components/ConversationMessage'
 import { ConversationReactionActions } from '@agentmux/client-ui/components/ConversationReactionActions'
 import { StaticConversationView as ConversationView } from './helpers/conversation-static-fixture'
+import { GoalsPromptDraftProvider } from '../src/renderer/src/components/settings/GoalsPromptDrafts'
 import { ShortcutSettingsPane } from '../src/renderer/src/components/settings/ShortcutSettingsPane'
 import { executeSettingsResourcesControl } from '../src/main/settings-resources-control'
 import { reactionPublicClientFixture } from './helpers/reaction-public-client-fixture'
@@ -49,7 +50,8 @@ async function external(changes: Record<string, string | null>){return await exe
 
 describe('Saved Prompt → explicit lookup → exact reply card → original user queue', () => {
  it('edits the existing Settings definition durably and the built public CLI queries only its keyword namespace', async () => {
-  await dom.render(<ShortcutSettingsPane config={fixture.owner.current} active onSave={async (prompts, expected) => {await fixture.owner.edit({...fixture.owner.current,composerShortcuts:expected},{...fixture.owner.current,composerShortcuts:prompts})}} />)
+  vi.spyOn(api.config, 'save').mockImplementation(async (next, expected) => fixture.owner.edit(expected!, next))
+  await dom.render(<GoalsPromptDraftProvider enabled config={fixture.owner.current}><ShortcutSettingsPane config={fixture.owner.current} active onOpenGoals={() => {}} /></GoalsPromptDraftProvider>)
   await dom.click('[aria-label="Quick reply icon message-circle"]')
   await dom.click('[data-settings-save-bar] button')
   await vi.waitFor(async () => expect((await fixture.disk()).composerShortcuts![0]!.reactionIcon).toBe('message-circle'))
