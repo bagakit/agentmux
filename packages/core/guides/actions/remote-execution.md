@@ -130,6 +130,13 @@ run `amux agent execution continue --input FILE`, with only:
 {"bindingId":"ORIGINAL_BINDING","agentSessionId":"ORIGINAL_SESSION","createOperationId":"ORIGINAL_CREATE"}
 ```
 
+For a live read of this same binding, use `amux agent execution watch --input FILE`
+with `{bindingId}`. The original Core owns execution state; Desktop only forwards
+operations and retains its readers. The stream supplies its initial and latest snapshots,
+coalescing slow reads. Cancelling it closes only the reader and does not stop helpers,
+continue creation or send input. Inspection and watching require the original approved
+user/device; an unknown observation does not revoke healthy Agent capabilities.
+
 An older Desktop failure may retain its typed request without this formal reference.
 Its visible original workface and Check original read the same Coordinator's stored
 intent using only the frozen Session/create/Host and tool location. A matching existing
