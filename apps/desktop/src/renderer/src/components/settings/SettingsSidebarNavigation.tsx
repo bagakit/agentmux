@@ -1,5 +1,5 @@
 import { SemanticIcon, semanticIconComponent } from '@agentmux/client-ui/icons'
-import { useLayoutEffect, useRef, useState } from 'react'
+import { Fragment, useLayoutEffect, useRef, useState } from 'react'
 import { LiquidSelectionSurface } from '../LiquidSelectionSurface'
 import type { SettingsNavGroup, SettingsModule } from './settings-catalog'
 
@@ -15,7 +15,7 @@ export function SettingsSidebarNavigation({ groups, selected, activeGroup, navig
   searching: boolean
   visible: boolean
   navigationKey: object
-  onOpen: (id: string) => void
+  onOpen: (id: string, field?: string) => void
 }) {
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set(groups.map(group => group.id)))
   const previousNavigation = useRef({ activeGroup, navigationKey, searching })
@@ -44,9 +44,18 @@ export function SettingsSidebarNavigation({ groups, selected, activeGroup, navig
         <div id={`settings-nav-${group.id}`} className="settings-nav-items" hidden={!open}>
           {group.items.map(item => {
             const Icon = item.icon
-            return <button key={item.id} type="button" className={selected === item.id ? 'selected' : ''} aria-current={selected === item.id ? 'page' : undefined} title={`${item.title}: ${item.description}`} data-settings-target={item.id} onClick={() => onOpen(item.id)}>
+            return <Fragment key={item.id}><button type="button" className={selected === item.id ? 'selected' : ''} aria-current={selected === item.id ? 'page' : undefined} title={`${item.title}: ${item.description}`} data-settings-target={item.id} onClick={() => onOpen(item.id)}>
               <Icon size={15} animation={item.selectionAnimation && selected === item.id ? 'selection' : 'none'} /><span><strong>{item.title}</strong></span>
             </button>
+            {!searching && item.subpages ? <div className="settings-nav-children" role="group" aria-label={item.title}>
+              {item.subpages.map(child => {
+                const target = `${item.id}:${child.field}`
+                return <button key={child.field} type="button" data-settings-target={target} className={selected === target ? 'selected' : ''} aria-current={selected === target ? 'page' : undefined} onClick={() => onOpen(item.id, child.field)}>
+                  <span><strong>{child.title}</strong></span>
+                </button>
+              })}
+            </div> : null}
+            </Fragment>
           })}
         </div>
       </div>

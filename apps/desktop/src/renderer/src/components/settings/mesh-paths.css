@@ -1,26 +1,6 @@
-.mesh-paths-pane { display: grid; min-width: 0; gap: var(--sp-4); padding: 0 2px var(--sp-4) 0; }
-.mesh-overview-actions { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; justify-content: flex-end; flex: none; }
-.mesh-paths-issue { background: var(--surface-1); padding: 12px 16px; border-radius: var(--radius); }
-.mesh-paths-issue p { color: var(--text-2); line-height: 1.6; overflow-wrap: anywhere; max-width: 72ch; margin: 5px 0; }
+.mesh-paths-pane { display: grid; min-width: 0; gap: 8px; margin-bottom: var(--sp-5); }
+.mesh-paths-issue { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; background: var(--surface-1); padding: 8px 12px; border-radius: var(--radius); }
+.mesh-paths-issue p { color: var(--text-2); line-height: 1.5; overflow-wrap: anywhere; margin: 0; }
 .mesh-paths-issue details { color: var(--text-3); font-size: var(--fs-meta); }
 .mesh-settings-pane > [data-mesh-view=paths], .mesh-settings-pane > [data-mesh-view=machines] { overflow: auto; overscroll-behavior: contain; }
-.mesh-view-tabs { flex-wrap: wrap; }
-.mesh-editor-navigation { flex: none; display: flex; align-items: center; gap: 12px; padding-bottom: var(--sp-4); margin-bottom: var(--sp-4); border-bottom: 1px solid var(--line-soft); }
-.mesh-editor-navigation > span { color: var(--text-3); font-size: var(--fs-body); }
-.mesh-saved-devices { min-width: 0; padding: 14px 0 0; border-top: 1px solid var(--line-soft); }
-.mesh-saved-devices > header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-bottom: 9px; }
-.mesh-saved-devices-filter { flex: 0 1 310px; min-width: 180px; }
-.mesh-saved-devices-filter input { width: 100%; }
-.mesh-saved-devices h3 { font-size: var(--fs-title); margin: 0 0 5px; letter-spacing: -.01em; }
-.mesh-saved-devices h3 > span { color: var(--text-3); font-size: var(--fs-meta); font-weight: 450; margin-left: 5px; }
-.mesh-saved-devices p { margin: 0; color: var(--text-3); font-size: var(--fs-body); line-height: 1.6; }
-.mesh-saved-devices ul { list-style: none; display: grid; padding: 0; margin: 0; }
-.mesh-saved-devices li { display: flex; gap: 12px; align-items: center; padding: 12px 10px; border-bottom: 1px solid var(--line-soft); min-width: 0; }
-.mesh-saved-device-icon { flex: none; width: 28px; height: 30px; display: grid; place-items: center; color: var(--text-3); }
-.mesh-saved-device-name { flex: 1; min-width: 0; display: grid; gap: 4px; }
-.mesh-saved-device-name strong { font-size: var(--fs-body); font-weight: 550; overflow-wrap: anywhere; color: var(--text); }
-.mesh-saved-device-name small { color: var(--text-3); font: var(--fs-meta) var(--font-mono); overflow-wrap: anywhere; }
-.mesh-saved-device-transport { color: var(--text-3); font-size: var(--fs-meta); flex: 0 1 160px; }
-.mesh-saved-devices .mesh-saved-devices-empty { padding: 14px 10px; }
-@container(max-width: 780px) { .mesh-overview-actions { justify-content: flex-start; } }
-@media(max-width: 600px) { .mesh-overview-actions { justify-content: flex-start; } .mesh-saved-devices li { gap: 8px; padding: 10px 2px; } .mesh-saved-device-transport { flex-basis: 70px; } }
+.mesh-editor-navigation { flex: none; display: flex; align-items: center; padding-bottom: var(--sp-3); }

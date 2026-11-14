@@ -26,6 +26,7 @@ export type SettingsPaneProps = {
   onClose: () => void
   active: boolean
   onNavigate(section: SettingsPageId): void
+  onSubpageChange?: ((field: string | undefined) => void) | undefined
   executorId?: string | undefined
   toolId?: string | undefined
   navigationRequest?: SettingsNavigationRequest | undefined
@@ -49,6 +50,7 @@ export type SettingsModule = {
   description: string
   keywords: string
   searchTargets?: readonly SettingsSearchTarget[]
+  subpages?: readonly { field: string; title: string }[]
   icon: ComponentType<{ size?: number | undefined; animation?: IconAnimation | undefined }>
   /** Presentation of this leaf's applications. Never implementation support or native authorization. */
   channel?: { adapterId: string; domains: readonly { domain: string; title: string }[]; icon: ComponentType<{ size?: number | undefined }> }

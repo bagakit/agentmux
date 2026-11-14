@@ -1,8 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
+import { SemanticIcon } from '@agentmux/client-ui/icons'
 import { TextInput } from '@agentmux/client-ui/input'
 import type { NodeResourceSample } from '@agentmux/core/node-publishing'
 import type { HostConfig } from '../../../../shared/contracts'
 import { api } from '../../lib/api'
+import { hostConnectionSummary, hostTransportLabel } from '../../lib/host-transport'
+import { HostIcon } from '../HostBadge'
 import { appendNodeSample, nodeTrendPoints, type NodeSampleFrame } from './node-resource-view'
 import { clusterHostKey, observeClusterResources, type ClusterResourceRead } from './cluster-resource-observation'
 import './cluster-machines.css'
@@ -17,7 +20,10 @@ function Measurement({ label, value, ratio, note }: { label: string; value: stri
 }
 
 /** Saved Host routes are compared here; their names/IPs are not physical-device IDs. */
-export function ClusterMachinesPane({ hosts, active, onConnections }: { hosts: HostConfig[]; active: boolean; onConnections?: (hostId: string) => void }) {
+export function ClusterMachinesPane({ hosts, active, compact = false, onAddDevice, onConnections }: {
+  hosts: HostConfig[]; active: boolean; compact?: boolean
+  onAddDevice?: () => void; onConnections?: (hostId: string) => void
+}) {
   const [rows, setRows] = useState<Record<string, Row>>({}), latest = useRef(rows); latest.current = rows
   const request = useRef<(hostId?: string) => void>(() => {})
   const [query, setQuery] = useState(''), [filter, setFilter] = useState<'all' | 'observed' | 'attention'>('all')
@@ -75,14 +81,26 @@ export function ClusterMachinesPane({ hosts, active, onConnections }: { hosts: H
   const observed = originals.filter(({ row }) => row?.phase === 'observed' && row.read?.reply.status === 'available').length
   const attention = ({ row }: { row?: Row | undefined }) => row?.phase === 'unavailable' || row?.read?.reply.status === 'withheld' || row?.read?.reply.status === 'unavailable' || row?.read?.reply.status === 'available' && partialSample(row.read.reply.sample)
   const inFilter = (item: typeof originals[number]) => filter === 'all' || (filter === 'attention' ? attention(item) : item.row?.read?.reply.status === 'available')
-  const shown = originals.filter(item => (!query.trim() || `${item.host.label} ${item.host.id} ${item.host.kind === 'ssh' ? item.host.hostname : 'this device'} ${item.row?.read?.reply.node.runtimeId ?? ''}`.toLowerCase().includes(query.trim().toLowerCase())) && inFilter(item))
+  const needle = query.trim().toLocaleLowerCase()
+  const shown = originals.filter(item => {
+    const { host, row } = item
+    const fields = [host.label, host.id, hostConnectionSummary(host), row?.read?.reply.node.runtimeId ?? '']
+    if (host.kind === 'ssh') fields.push(host.runtimeId ?? '', ...(host.transport === 'tailcat' ? [] : [host.hostname, host.port?.toString() ?? '']))
+    return fields.some(field => field.toLocaleLowerCase().includes(needle)) && (compact || inFilter(item))
+  })
   return <section className="cluster-machines" aria-label="Cluster machine resources" data-settings-field="mesh-machines">
-    <header className="cluster-machines-heading"><div><span className="cluster-machines-kicker">Cluster resources</span><h3>Your machines at a glance.</h3><p>Compare device resources across saved Host connections.</p></div><button className="small-button" disabled={reading} onClick={() => request.current()}>{reading ? 'Reading resources…' : 'Refresh all'}</button></header>
-    <div className="cluster-machines-coverage" role="status"><strong>{observed} / {hosts.length} sampled</strong><span>Saved Host routes · partial sources stay visible · no background polling</span></div>
-    <div className="cluster-machines-toolbar"><TextInput aria-label="Find a machine" value={query} onChange={event => setQuery(event.target.value)} placeholder="Find by name, address or Runtime" /><div role="group" aria-label="Machine status filter">{(['all', 'observed', 'attention'] as const).map(value => <button className="small-button" key={value} aria-pressed={filter === value} onClick={() => setFilter(value)}>{value === 'all' ? 'All hosts' : value === 'observed' ? 'With samples' : 'Needs attention'}</button>)}</div></div>
+    <header className="cluster-machines-heading">
+      <div>{compact ? <h3>Machines</h3> : null}<div className="cluster-machines-coverage" role="status">{observed} / {hosts.length} sampled <span>· Saved connections</span></div></div>
+      <div className="cluster-machines-actions">
+        <TextInput type="search" aria-label="Filter saved devices" value={query} onChange={event => setQuery(event.target.value)} placeholder="Find a machine" />
+        <button type="button" className="small-button" disabled={reading} onClick={() => request.current()}>{reading ? 'Reading resources…' : 'Refresh resources'}</button>
+        {onAddDevice ? <button type="button" className="small-button cluster-add-device" onClick={onAddDevice}>Add device</button> : null}
+      </div>
+    </header>
+    {!compact ? <div className="cluster-machines-toolbar" role="group" aria-label="Machine status filter">{(['all', 'observed', 'attention'] as const).map(value => <button type="button" className="small-button" key={value} aria-pressed={filter === value} onClick={() => setFilter(value)}>{value === 'all' ? 'All hosts' : value === 'observed' ? 'With samples' : 'Needs attention'}</button>)}</div> : null}
+    {shown.length ? <div className="cluster-machines-column-headings" aria-hidden="true"><span>Device / saved connection</span><span>CPU</span><span>Memory</span><span>Storage</span><span>Sample</span><span /></div> : null}
     <div className="cluster-machines-grid">{shown.map(({ host, row }) => <MachineCard key={host.id} host={host} row={row} onRefresh={() => request.current(host.id)} onConnections={onConnections} />)}</div>
-    {!shown.length ? <p className="cluster-machines-empty">{hosts.length ? 'No saved Host matches this search and filter.' : 'No saved Hosts yet. Add a connection to include it here.'}</p> : null}
-    <p className="cluster-machines-footnote">Each card follows its saved Host route. Multiple routes may reach the same Runtime; values are not added into a physical cluster total. Storage measures the reported volume. Memory includes cache.</p>
+    {!shown.length ? <p className="cluster-machines-empty">{hosts.length ? `No saved devices match this filter. ${hosts.length} saved connections remain available.` : 'No saved connections yet.'}{needle ? <> <button type="button" className="small-button" onClick={() => setQuery('')}>Clear filter</button></> : null}</p> : null}
   </section>
 }
 function MachineCard({ host, row, onRefresh, onConnections }: { host: HostConfig; row?: Row | undefined; onRefresh: () => void; onConnections?: ((hostId: string) => void) | undefined }) {
@@ -96,15 +114,26 @@ function MachineCard({ host, row, onRefresh, onConnections }: { host: HostConfig
   const cpu = point?.hostCpu
   const details = sample ? [sample.cpu, sample.memory, sample.filesystem, sample.system, sample.process].filter(value => value.state === 'unavailable') : []
   return <article className="cluster-machine" data-cluster-host={host.id}>
-    <header><div className="cluster-machine-identity"><span className="cluster-machine-glyph" aria-hidden="true">▤</span><div><h4>{host.label}</h4><span>{host.kind === 'local' ? 'This device' : host.hostname || 'SSH configuration'} · {row?.read?.access === 'private' ? 'Private owner view' : row?.read?.access === 'published' ? 'Published resources' : 'Saved Host'}</span></div></div><span className="cluster-machine-state" data-state={row?.phase ?? 'unknown'}>{state}</span></header>
-    <div className="cluster-machine-readout">
+    <div className="cluster-machine-row">
+      <div className="cluster-machine-identity"><HostIcon kind={host.kind} size={17} /><div><h4>{host.label}</h4><span>{host.kind === 'local' ? 'Local' : host.transport === 'tailcat' ? 'Tailcat · private address' : `${hostTransportLabel(host)} · ${host.hostname || 'Hostname required'}`}</span></div></div>
       <Measurement label="Host CPU" value={cpu == null ? '—' : `${cpu.toFixed(1)}%`} ratio={cpu ?? undefined} note={sample?.cpu.state === 'unavailable' ? 'CPU source unavailable' : sample && cpu == null ? 'Waiting for a compatible CPU interval' : undefined} />
       <Measurement label="Memory" value={memory ? `${Math.round(100 * (1 - memory.freeBytes / memory.totalBytes))}%` : '—'} ratio={memory ? 100 * (1 - memory.freeBytes / memory.totalBytes) : undefined} note={memory ? `${bytes(memory.totalBytes - memory.freeBytes)} / ${bytes(memory.totalBytes)}` : sample?.memory.state === 'unavailable' ? 'Memory source unavailable' : undefined} />
       <Measurement label="Storage volume" value={volume && volume.totalBytes > 0 ? `${Math.round(100 * (1 - volume.availableBytes / volume.totalBytes))}%` : '—'} ratio={volume && volume.totalBytes > 0 ? 100 * (1 - volume.availableBytes / volume.totalBytes) : undefined} note={volume ? `${bytes(volume.availableBytes)} available / ${bytes(volume.totalBytes)}` : sample?.filesystem.state === 'unavailable' ? 'Volume source unavailable' : undefined} />
+      <div className="cluster-machine-sample"><strong className="cluster-machine-state" data-state={row?.phase ?? 'unknown'}>{state}</strong>
+        {sample ? <small>{stale ? 'Last confirmed ' : ''}{when(sample.observedAt)}{sample.system.state === 'available' ? ` · Up ${uptime(sample.system.value.uptimeSeconds)}` : ''}</small> : null}
+      </div>
+      {onConnections ? <button type="button" className="small-button cluster-machine-manage" aria-label={`Manage ${host.label}`} onClick={() => onConnections(host.id)}>Manage</button> : <span />}
     </div>
-    {sample ? <div className="cluster-machine-system"><span>{sample.system.state === 'available' ? `${sample.system.value.platform} · ${sample.system.value.architecture}` : 'System not observed'}</span><span>{sample.system.state === 'available' ? `Uptime ${uptime(sample.system.value.uptimeSeconds)}` : ''}</span><span>{sample.cpu.state === 'available' ? `Load ${sample.cpu.value.loadAverage.map(v => v.toFixed(2)).join(' / ')} · ${sample.cpu.value.logicalCpus} CPUs` : ''}</span></div> : <p className="cluster-machine-issue" role="status">{reply?.status === 'withheld' ? 'This node does not publish system resources. Existing work stays available.' : row?.issue ?? (reply?.status === 'unavailable' ? reply.message : 'Measurements have not been confirmed.')}</p>}
-    {sample && (row?.issue || reply?.status === 'unavailable') ? <p className="cluster-machine-issue" role="status">{row?.issue ?? (reply?.status === 'unavailable' ? reply.message : '')}</p> : null}
-    <div className="cluster-machine-footer"><span>{sample ? `${stale ? 'Last confirmed' : 'Sample'} ${when(sample.observedAt)}` : row?.completedAt ? `Checked ${when(row.completedAt)}` : 'No sample time'}</span><button className="small-button" disabled={row?.phase === 'reading' || row?.phase === 'queued'} onClick={onRefresh} aria-label={`Refresh ${host.label}`}>Refresh</button></div>
-    <details className="cluster-machine-details"><summary>Service &amp; source details</summary><dl><dt>Saved Host</dt><dd>{host.id}</dd><dt>Runtime</dt><dd>{reply?.node.runtimeId ?? 'Not confirmed'}</dd><dt>Owner instance</dt><dd>{reply?.node.ownerInstanceId ?? 'Not confirmed'}</dd><dt>Core process</dt><dd>{sample?.processId ?? 'Not observed'}</dd><dt>Core memory</dt><dd>{sample?.process.state === 'available' ? `${(sample.process.value.rssBytes / 1024 ** 2).toFixed(1)} MiB RSS` : 'Not observed'}</dd></dl>{row?.read?.privateIssue ? <p>Private read: {row.read.privateIssue}</p> : null}{details.map((value, index) => <p key={index}>{value.state === 'unavailable' ? value.message : ''}</p>)}{onConnections ? <button className="small-button" onClick={() => onConnections(host.id)}>Open saved connection</button> : null}</details>
+    <details className="cluster-machine-details"><summary title="Sample details" aria-label={`Sample details for ${host.label}`}><SemanticIcon name="navigation.disclosure" size={13} aria-hidden="true" /></summary>
+      {reply?.status === 'withheld' ? <p>This node does not publish system resources.</p> : null}
+      {row?.issue || reply?.status === 'unavailable' ? <p>{row?.issue ?? (reply?.status === 'unavailable' ? reply.message : '')}</p> : null}
+      <dl><dt>Saved Host</dt><dd>{host.id}</dd><dt>Runtime</dt><dd>{reply?.node.runtimeId ?? 'Not confirmed'}</dd><dt>Owner instance</dt><dd>{reply?.node.ownerInstanceId ?? 'Not confirmed'}</dd><dt>Source</dt><dd>{row?.read?.access === 'private' ? 'Private owner view' : row?.read?.access === 'published' ? 'Published resources' : 'Not observed'}</dd>
+        <dt>Core process</dt><dd>{sample?.processId ?? 'Not observed'}</dd><dt>Core memory</dt><dd>{sample?.process.state === 'available' ? `${(sample.process.value.rssBytes / 1024 ** 2).toFixed(1)} MiB RSS` : 'Not observed'}</dd>
+        <dt>System</dt><dd>{sample?.system.state === 'available' ? `${sample.system.value.platform} · ${sample.system.value.architecture}` : 'Not observed'}</dd>
+        <dt>Checked</dt><dd>{row?.completedAt ? when(row.completedAt) : 'Not observed'}</dd></dl>
+      {row?.read?.privateIssue ? <p>Private read: {row.read.privateIssue}</p> : null}
+      {details.map((value, index) => <p key={index}>{value.state === 'unavailable' ? value.message : ''}</p>)}
+      <div className="cluster-machine-footer"><button type="button" className="small-button" disabled={row?.phase === 'reading' || row?.phase === 'queued'} onClick={onRefresh} aria-label={`Refresh ${host.label}`}>Refresh this machine</button></div>
+    </details>
   </article>
 }

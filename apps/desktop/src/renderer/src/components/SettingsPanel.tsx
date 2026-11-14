@@ -60,6 +60,7 @@ function SettingsPanelView({ onClose, visible = true, initialSection = 'overview
   const normalizedNavigationRequest = normalizedCache.current.result
   const normalizedInitialSection = normalizedNavigationRequest?.section ?? initialSection
   const [active, setActive] = useState<SettingsPageId>(normalizedInitialSection)
+  const [activeSubpage, setActiveSubpage] = useState<string>()
   const [query, setQuery] = useState('')
   const searchInput = useRef<HTMLInputElement>(null)
   const opener = useRef(typeof document === 'undefined' ? null : document.activeElement)
@@ -111,12 +112,13 @@ function SettingsPanelView({ onClose, visible = true, initialSection = 'overview
     setTargetIssue('')
   }
 
-  function chooseSection(section: SettingsPageId, target?: string): void {
+  function chooseSection(section: SettingsPageId, target?: string, fromSidebar = false): void {
     setActive(section)
     setShowResults(false)
     setTargetIssue('')
-    setDestination(searching ? { section, ...(target ? { target } : {}), route,
-      request: normalizeSettingsNavigationRequest({ section, ...(target ? { field: target } : {}) }, config?.hosts ?? []) } : null)
+    const field = target ?? (section === 'hosts' ? 'mesh-paths' : undefined)
+    setDestination(searching || fromSidebar && target || section === 'hosts' ? { section, ...(target && !fromSidebar ? { target } : {}), route,
+      request: normalizeSettingsNavigationRequest({ section, field }, config?.hosts ?? []) } : null)
   }
 
   useLayoutEffect(() => {
@@ -217,7 +219,7 @@ function SettingsPanelView({ onClose, visible = true, initialSection = 'overview
     return <div key={pane} className="settings-content__scroll" data-settings-pane={pane} hidden={!paneVisible} inert={!paneVisible}>
       {paneVisible && searching ? <div className="settings-search-return"><button type="button" className="small-button" onClick={() => { setShowResults(true); setDestination(null); setTargetIssue('') }}>Search results</button><span>“{query}”</span>{targetIssue ? <span role="status">{targetIssue}</span> : null}</div>
         : paneVisible && targetIssue ? <p className="settings-target-issue" role="status" data-settings-target-issue>{targetIssue}</p> : null}
-      <Pane config={config} onClose={onClose} onNavigate={chooseSection} active={paneVisible} executorId={executorId} toolId={toolId} navigationRequest={paneNavigationRequest} />
+      <Pane config={config} onClose={onClose} onNavigate={chooseSection} active={paneVisible} executorId={executorId} toolId={toolId} navigationRequest={paneNavigationRequest} onSubpageChange={pane === 'hosts' ? setActiveSubpage : undefined} />
     </div>
   }
 
@@ -228,11 +230,15 @@ function SettingsPanelView({ onClose, visible = true, initialSection = 'overview
       <aside className="settings-sidebar">
         <header>
           <div className="settings-sidebar__identity"><BrandIcon size={22} /><strong>Settings</strong></div>
+  const subpages = (currentSection as SettingsModule | undefined)?.subpages
+  const subpage = subpages?.find(item => item.field === activeSubpage)
+  const navigationSelection = subpage ? `${active}:${subpage.field}` : active
+  const openNavigation = (id: string, field?: string) => chooseSection(id as SettingsPageId, field, true)
         </header>
         <label className="settings-search"><ThemeActionSearchIcon size={14} /><TextInput ref={searchInput} aria-label="Search settings" autoFocus={!preserveInput} value={query} onChange={(event) => updateQuery(event.target.value)} placeholder="Search settings" />{query ? <button type="button" aria-label="Clear settings search" onClick={clearSearch}><ThemeActionClearIcon size={12} /></button> : null}</label>
         <DropdownMenu.Root modal={false} open={visible && sectionMenuOpen} onOpenChange={setSectionMenuOpen}>
           <DropdownMenu.Trigger asChild>
-            <button type="button" className="settings-section-picker" aria-label="Settings section" disabled={!visibleSections.length}>{visibleSections.length ? section.title : 'No matches'}<ThemeNavigationDownIcon size={13} /></button>
+            <button type="button" className="settings-section-picker" aria-label="Settings section" disabled={!visibleSections.length}>{visibleSections.length ? subpage?.title ?? section.title : 'No matches'}<ThemeNavigationDownIcon size={13} /></button>
           </DropdownMenu.Trigger>
           <DropdownMenu.Portal>
             <DropdownMenu.Content className="settings-section-menu" align="end" sideOffset={6} collisionPadding={{ top: 34, right: 8, bottom: 40, left: 8 }} onEscapeKeyDown={(event) => event.stopPropagation()} onCloseAutoFocus={(event) => {
@@ -242,13 +248,16 @@ function SettingsPanelView({ onClose, visible = true, initialSection = 'overview
                 && !focused.closest('[hidden], [inert]')
                 && event.target instanceof HTMLElement && !event.target.contains(focused)) event.preventDefault()
             }}>
-              <DropdownMenu.RadioGroup value={showResults ? '' : active} onValueChange={(value) => chooseSection(value as SettingsPageId)}>
+              <DropdownMenu.RadioGroup value={showResults ? '' : navigationSelection} onValueChange={value => {
+                const [id, field] = value.split(':')
+                if (id) openNavigation(id, field)
+              }}>
                 {!query.trim() ? <DropdownMenu.RadioItem value="overview" className="settings-section-menu__item" data-settings-target="overview"><span><DropdownMenu.ItemIndicator><ThemeStatusSelectedIcon size={13} /></DropdownMenu.ItemIndicator></span><OverviewIcon size={15} aria-hidden="true" />Overview</DropdownMenu.RadioItem> : null}
                 {navGroups.map((group) => <Fragment key={group.id}>
                   <DropdownMenu.Label className="settings-section-menu__label"><span className="settings-group-heading"><SemanticIcon name={group.icon} size={12} aria-hidden="true" />{group.title}</span></DropdownMenu.Label>
                   {group.items.map((item) => {
                     const Icon = item.icon
-                    return <DropdownMenu.RadioItem key={item.id} value={item.id} className="settings-section-menu__item" data-settings-target={item.id}>
+                    return <Fragment key={item.id}><DropdownMenu.RadioItem value={item.id} className="settings-section-menu__item" data-settings-target={item.id}>
                       <span><DropdownMenu.ItemIndicator><ThemeStatusSelectedIcon size={13} /></DropdownMenu.ItemIndicator></span><Icon size={15} animation={!showResults && (item as SettingsModule).selectionAnimation && active === item.id ? 'selection' : 'none'} aria-hidden="true" />{item.title}
                     </DropdownMenu.RadioItem>
                   })}
@@ -257,17 +266,17 @@ function SettingsPanelView({ onClose, visible = true, initialSection = 'overview
             </DropdownMenu.Content>
           </DropdownMenu.Portal>
         </DropdownMenu.Root>
-        <SettingsSidebarNavigation groups={navGroups} selected={showResults ? null : active} activeGroup={currentSection?.group}
+        <SettingsSidebarNavigation groups={navGroups} selected={showResults ? null : navigationSelection} activeGroup={currentSection?.group}
           navigationGroup={settingsModules.find(candidate => candidate.id === normalizedInitialSection)?.group}
-          searching={searching} visible={visible} navigationKey={route} onOpen={section => chooseSection(section as SettingsPageId)} />
+          searching={searching} visible={visible} navigationKey={route} onOpen={openNavigation} />
       </aside>
       {/* The open pane names itself, so a wide resource pane can bring the page header out to its own gutter. */}
       <main className="settings-content" data-settings-active={showResults ? undefined : active}>
         <header className="settings-content__header">
           <div className="settings-content__title">
             <div>
-              <div className="settings-content__breadcrumb">{groupTitle}</div>
-              <h2>{section.title}</h2>
+              <div className="settings-content__breadcrumb">{groupTitle}{subpage && !showResults ? ' / Mesh' : ''}</div>
+              <h2>{searching && showResults ? section.title : subpage?.title ?? section.title}</h2>
               {section.description ? <p>{section.description}</p> : null}
             </div>
           </div>
@@ -275,6 +284,10 @@ function SettingsPanelView({ onClose, visible = true, initialSection = 'overview
             <span className="settings-content__hint"><kbd>Esc</kbd><span>{query ? 'Clear search' : 'Close'}</span></span>
             <button className="settings-content__close icon-button" type="button" onClick={onClose} aria-label="Close settings" title="Close settings"><ThemeActionCloseIcon size={15} /></button>
           </div>
+                    {!searching ? (item as SettingsModule).subpages?.map(child => <DropdownMenu.RadioItem key={child.field} value={`${item.id}:${child.field}`} className="settings-section-menu__item settings-section-menu__child" data-settings-target={`${item.id}:${child.field}`}>
+                      <span><DropdownMenu.ItemIndicator><ThemeStatusSelectedIcon size={13} /></DropdownMenu.ItemIndicator></span>{child.title}
+                    </DropdownMenu.RadioItem>) : null}
+                    </Fragment>
         </header>
         {searching && showResults ? <SettingsSearchResults results={searchResults} query={query} onChoose={chooseSection} /> : null}
         {active === 'overview' && !(searching && showResults) ? <SettingsOverviewPane config={config} groups={overviewGroups} onOpen={chooseSection} active={visible} notice={unmatchedChannel(navigationRequest)} /> : null}

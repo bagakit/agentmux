@@ -4,9 +4,6 @@
 .mesh-network-settings > .settings-pane-actions { position: static; margin-top: 0; }
 .mesh-settings-pane > [data-mesh-view="connections"] { overflow: hidden; }
 .mesh-settings-pane > [hidden] { display: none; }
-.mesh-view-tabs { flex: none; display: flex; gap: 4px; padding-bottom: var(--sp-4); margin-bottom: var(--sp-4); border-bottom: 1px solid var(--line-soft); }
-.mesh-view-tabs button { color: var(--text-3); background: transparent; border: 1px solid transparent; border-radius: 6px; padding: 6px 12px; font: inherit; cursor: pointer; }
-.mesh-view-tabs button[aria-current] { color: var(--text); background: var(--surface-2); border-color: var(--line-soft); font-weight: 600; }
 .mesh-network-settings { display: grid; gap: var(--sp-4); min-width: 0; max-width: 1060px; padding-right: 2px; container-type: inline-size; }
 .mesh-network-heading, .mesh-network-section > header, .mesh-network-map > header { display: flex; justify-content: space-between; align-items: start; gap: var(--sp-3); }
 .mesh-network-settings h3, .mesh-network-settings h4, .mesh-network-settings h5 { margin: 0; font-weight: 600; }
