@@ -4,18 +4,11 @@ This document describes the current source mechanisms that update the Desktop ap
 
 The commands, their order, signing setup steps, resource discipline and failure continuation belong to the [macOS packaging guide](../guides/macos-packaging.md); this page names scripts only as mechanism owners and does not add another installer or acceptance gate.
 
-| Candidate change | Route | Running work |
-| --- | --- | --- |
-| Renderer only; host and ctxmux fingerprints match | Activate versioned frontend resources | Main and Runs stay alive; the renderer checkpoints drafts, dirty buffers and layout, then reattaches |
-| Main, preload, IPC, Core or dependencies changed; ctxmux unchanged | Package, install and gracefully restart AgentMux | Existing ctxmux Runs remain available; Core owns attachment and semantic resume |
-| ctxmux fingerprint changed or fingerprint identity is unknown; ordinary update | Require runtime compatibility/resume review before installation | Review rejection leaves the current application and Agents running |
-| Explicit UI-only install intent | Install the application while retaining the existing compatible Runtime | UI and Native outcomes are reported separately; Native upgrade is deferred |
-
 ## Build and route selection
 
 Renderer value imports use Core's portable public subpaths. Capsule settings and Toolkit results consume the unchanged object-link formatter through `@agentmux/core/sharing`; the Core root entry also exports Node Runtime owners and is not a browser entry. [The component bundle check](../../apps/desktop/scripts/verify-capsule-browser-imports.mjs) compiles both actual consumers for the browser and reintroduces each root import to verify that this dependency regression fails.
 
-The frontend loader arrives only with a full application installation; until one has been installed, no Renderer-only route exists. The general route ([update-local.mjs](../../apps/desktop/scripts/update-local.mjs)) and the Renderer-only route ([update-renderer.mjs](../../apps/desktop/scripts/update-renderer.mjs)) both build before selecting or activating a release, and the Renderer-only route rejects a candidate whose host or runtime identity changed. [package-macos.mjs](../../apps/desktop/scripts/package-macos.mjs) refuses a dirty source tree before building and rejects the candidate if the commit, tree or status changed while it was packaging. LaunchServices smoke and the installed GUI relaunch remove the caller's `ELECTRON_RUN_AS_NODE` from a copied environment; intentional Node-mode CLI, SDK and semantic Host launches keep their own mode.
+The general updater compares the candidate's release to the installed bundle through [installedUpdateRoute](../../apps/desktop/scripts/local-update-route.mjs) and the shared fingerprint policy. A missing installed release selects application installation. An explicit frontend update uses the same comparison immediately before staging. For a local application update, the packager qualifies and signs the output of the same Desktop build that supplied the fingerprints. It captures source identity before compilation and checks the commit, tree and clean status again before publishing. LaunchServices smoke and the installed GUI relaunch remove the caller's `ELECTRON_RUN_AS_NODE` from a copied environment; intentional Node-mode CLI, SDK and semantic Host launches keep their own mode.
 
 Release compatibility describes the actual candidate payload selected by the packaging owner. Main, Host, preload, mobile, runtime dependencies, resources, the prepared Electron artifact and branding belong to the application identity; Renderer resources have their own release identity. Copying and fingerprinting consume the same package facts. A normal successful build prepares the original Electron artifact and finishes mobile copying before publishing its release; missing or mismatched candidate artifacts reject that release without changing the installed application or its Runs. Source commit/tree fields report provenance and do not turn a Renderer-only change into an application update.
 
@@ -31,7 +24,7 @@ The App and standalone runtime Core reuse the dependency graph owner in `scripts
 
 ## Signing identity
 
-[preflightMacosSigning](../../apps/desktop/scripts/macos-signing.mjs) qualifies signing at the start of [package-macos.mjs](../../apps/desktop/scripts/package-macos.mjs), before any build, candidate copy, signing or installation work. Environment certificate、本机 `identity.json` 建立／信任步骤与 `--ad-hoc` 边界以 [macOS 打包《签名身份》](../guides/macos-packaging.md#签名身份) 为准，本文不重复命令。
+[preflightMacosSigning](../../apps/desktop/scripts/macos-signing.mjs) qualifies a known App delivery before compilation. Automatic updates need the built fingerprints to choose a route, so they qualify signing when an App is selected, before assembling the candidate. Certificate setup and local trust are documented in the [packaging guide](../guides/macos-packaging.md#签名身份).
 
 A missing or mismatched identity rejects the candidate cheaply and keeps the installed App and healthy Runs. The signing module owns exact configuration parsing and signed-output checks. Authorization continuity, the first identity transition and actual OS confirmation belong to the [screenshot capture contract](../design/behavior/capture-and-recording.md#资源权限与验收); signing Source alone is not an OS authorization receipt. Branding includes `NSScreenCaptureUsageDescription`, and packaged identity verification checks the actual plist.
 

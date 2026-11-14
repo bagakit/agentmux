@@ -289,22 +289,14 @@ Development mode uses its own user data and doesn't touch the sessions or settin
 
 ### Build and install the macOS app
 
-Packaging needs a clean source tree and a signing identity: set `AGENTMUX_MACOS_SIGN_IDENTITY` (a Developer ID Application certificate), or create a local signing identity once with `node apps/desktop/scripts/macos-local-signing.mjs --setup`, then run it again with `--trust` to approve macOS code-signing trust. See [Signing identity](docs/architecture/desktop-updates.md#signing-identity).
+Build from a clean checkout with a [signing identity](docs/guides/macos-packaging.md#签名身份).
 
 ```sh
-pnpm package:mac           # build AgentMux.app and a DMG (not notarized)
-pnpm package:mac:install   # build and install to ~/Applications/AgentMux.app
+pnpm package:mac:install --app-only   # install the complete App locally
+pnpm update:local                    # update the local App, allowing a GUI relaunch
 ```
 
-Updating an existing install picks a route by what changed, and doesn't kill healthy Runs:
-
-```sh
-pnpm update:local               # picks the route: UI-only changes hot-update; a changed shell reinstalls; a changed ctxmux stops for a compatibility review
-pnpm update:renderer            # hot-update the UI only: Main and agent Runs keep running
-pnpm update:renderer:rollback   # go back to the previous UI build
-```
-
-Install prerequisites, runtime handoff and workface preservation are covered in [desktop update architecture](docs/architecture/desktop-updates.md); packaging during parallel development is in the [macOS packaging guide](docs/guides/macos-packaging.md).
+For frontend-only updates, rollback, Runtime upgrades or a distributable DMG, see the [macOS packaging guide](docs/guides/macos-packaging.md#入口产物与安装位置).
 
 ### Pick an icon
 

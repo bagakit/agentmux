@@ -13,20 +13,23 @@
 
 ## 入口、产物与安装位置
 
-打包需要干净的已提交 checkout；开发树里有未完成的工作时，在独立 worktree 打包。 Desktop 的依赖准备按自己声明的工作区依赖闭包拓扑构建，不再手列部分包；排除 Desktop 自身，Native App 与其它原构建阶段仍沿原入口执行。
+先按[打包协作约定](../../AGENTS.md#打包)确认本次允许的操作。整包从开包时锁定的干净提交构建，Desktop 自己的 prebuild 负责工作区依赖、原生组件与资源。
 
-| 入口 | 做什么 | 边界 |
+| 本次要交付什么 | 入口 | 结果与后续动作 |
 | --- | --- | --- |
-| `pnpm package:mac` | 只产生 `apps/desktop/release/mac/AgentMux.app` 与同批 DMG | 不安装 |
-| `pnpm package:mac:install` | 再把这份候选原子替换到 `~/Applications/AgentMux.app`；旧副本移入 `~/.Trash`，可恢复 | 默认是完整安装。随包 CtxMux Runtime 与已安装 App 内的 Runtime 产物不同（按实际 runtime 树比较）时，必须先完成同 Runtime 的 Run／resume 评审，并以 `--runtime-reviewed=<评审记录路径>` 传入非空记录，否则在改动任何运行中应用之前拒绝。`--ui-only`（须与 `--install` 同用）只替换 App／Renderer，保留兼容的现有 Runtime 服务 |
-| `pnpm update:local [--ui-only]` | 先构建，再按实际差异选择更新路线 | 只用于已经由 `package:mac:install` 装好前端 loader 之后的兼容改动；ctxmux 变化且未加 `--ui-only` 时拒绝，不停止任何应用或 Agent |
-| `pnpm update:renderer` | 先构建，再只更新前端 | Host 或 Runtime 有变化时拒绝，改用应用安装 |
-| `pnpm update:renderer:rollback` | 撤回上一次前端更新 | 同一动作也在应用菜单 View > Revert frontend update |
-| `pnpm package:mac:report` | 读取本次真实构建输出，列出 canonical App、`/Applications`、开发缓存 App 与当前运行实例中发现的同名副本及其身份，并标出与候选身份不符的副本 | 候选缺失或输出不完整时只给一条诊断，说明缺少的路径；只告警，不删除任何副本或用户数据 |
+| 更新本机，允许按需重启 GUI | `pnpm update:local` | 构建一次。候选与已装 App 的 `shell`、`ctxmux` 指纹都匹配时热更 Renderer；`ctxmux` 匹配而 `shell` 不匹配或缺失时，用同一次构建签出并安装完整 App。已装 App 缺少前端 release 清单也走 App 安装，由安装器核对实际 Runtime。 |
+| 仅允许热更 | `pnpm update:renderer` | 匹配时只切换 Renderer，Main 与 Run 继续运行。需要安装 App 或评审 Runtime 时，命令返回原因与后续入口，负责人按本次委派范围处理。 |
+| 本机直接安装完整 App | `pnpm package:mac:install --app-only` | 签名、核验并安装到 `~/Applications/AgentMux.app`。原 GUI 正在运行时先确认保存并正常退出，再启动候选；已有旧 App 移入 Trash。 |
+| 暂缓 Native 升级，明确要安装 App | `pnpm update:local --ui-only` | 直接选择 App 安装并启动候选 GUI，已有 Runtime 服务时核对候选能否接入，无 listener 时由正常启动创建 Runtime。安装器按需重载 semantic Host，分别报告 UI 与 Native 的结果。 |
+| 构建分发件 | `pnpm package:mac` | 生成 `apps/desktop/release/mac/AgentMux.app` 与包含该已签 App 的同批 DMG（未公证）。选择 `pnpm package:mac:install` 会同时安装该候选。 |
 
-只需要本地完整 App 时，可在原打包入口加 `--app-only`，例如 `pnpm package:mac:install --app-only --ui-only`。[原打包器](../../apps/desktop/scripts/package-macos.mjs)仍执行完整依赖构建、资源组装、签名、Runtime 校验和原安装事务；该选项只省去 DMG 的创建、挂载验证与发布，回执将 DMG 标为 `not-requested`。临时空间按实际请求的产物估算。
+已有清单的 `ctxmux` 指纹变化或缺失时，普通更新返回 `runtime-review` 并保留原工作面。要升级 Native，先按[分层更新与回切](../design/behavior/session-recovery.md#分层更新与回切)评审原 Run 兼容性及 Provider resume，然后运行 `pnpm package:mac:install --app-only --runtime-reviewed=<评审记录路径>`。安装器读取非空记录，核对实际 Runtime，并验证交接结果。保存被拒或资格未知时沿[失败续做](#失败后从准确阶段续做)处理。
 
-`apps/desktop/out`、DMG 挂载目录和任意临时或旧的 `.app` 都不能安装；只有同一次 clean build 产生的 `release/mac/AgentMux.app` 能进入安装动作。远端机器安装可以传输这份同批已签候选及准确安装源码／运行依赖闭包，保持 `release/mac/AgentMux.app` 的构建来源、签名与传输完整性，再调用原 `installApplication`；传输不产生第二候选或第二安装器，也不能把任意 DMG 提取副本当作已核候选。候选在签名、身份核对或安装前启动验证的任一步失败时，入口保留现有 canonical 安装并报告失败阶段，不能把旧包或半成品报告为新版本。已安装的旧副本只移入 Trash 或经用户确认清理；可再生的私有暂存沿下文 owner 自动收尾，不删除 Application Support、Session、Run 或工作区数据。两条安装路线的机制见 [Desktop 更新架构](../architecture/desktop-updates.md)。
+`--app-only` 选择产物，本机 App 路线省去 DMG 的创建、挂载核验与发布，保留 App 的签名、Runtime 核验和启动验证，回执为 `dmg=not-requested`。`--ui-only` 选择安装意图，在直接安装入口也可与 `--app-only` 合用。两者可以独立选择。
+
+回切前端用 `pnpm update:renderer:rollback` 或应用菜单 View > Revert frontend update。排查同名 App 用 `pnpm package:mac:report` 核对候选、canonical 安装、系统 Applications、开发缓存与运行实例。报告在候选缺失或输出不完整时给出缺少的路径，仅作诊断。
+
+`apps/desktop/out`、DMG 挂载目录和任意临时或旧的 `.app` 都不能安装；只有同一次 clean build 产生的 `release/mac/AgentMux.app` 能进入安装动作。远端机器安装可以传输这份同批已签候选及准确安装源码／运行依赖闭包，保持 `release/mac/AgentMux.app` 的构建来源、签名与传输完整性，再调用原 `installApplication`；传输不产生第二候选或第二安装器，也不能把任意 DMG 提取副本当作已核候选。候选在签名、身份核对或安装前启动验证的任一步失败时，入口保留现有 canonical 安装并报告失败阶段，不能把旧包或半成品报告为新版本。已安装的旧副本只移入 Trash 或经用户确认清理；可再生的私有暂存沿下文 owner 自动收尾，不删除 Application Support、Session、Run 或工作区数据。
 
 ### 产物的自动收尾
 

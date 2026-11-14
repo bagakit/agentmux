@@ -289,22 +289,14 @@ pnpm dev                         # predev 自动构建依赖链、Swift 原生�
 
 ### 构建并安装 macOS 应用
 
-打包要求源码树干净，并需要一个签名身份：设置 `AGENTMUX_MACOS_SIGN_IDENTITY`（Developer ID Application 证书），或先运行一次 `node apps/desktop/scripts/macos-local-signing.mjs --setup` 建立本机签名身份，再用 `--trust` 完成 macOS 代码签名信任认证。详见 [Signing identity](docs/architecture/desktop-updates.md#signing-identity)。
+从干净的已提交源码构建，首次打包先[配置签名身份](docs/guides/macos-packaging.md#签名身份)。
 
 ```sh
-pnpm package:mac           # 构建 AgentMux.app 与 DMG（未公证）
-pnpm package:mac:install   # 构建并安装到 ~/Applications/AgentMux.app
+pnpm package:mac:install --app-only   # 本机安装完整 App
+pnpm update:local                    # 更新本机 App，允许按需重启 GUI
 ```
 
-更新已有安装时，AgentMux 按变化的范围选择路线，不会杀掉健康的 Run：
-
-```sh
-pnpm update:local               # 自动选路：只改了界面就热更新，壳变了就完整重装，ctxmux 变了先停下做兼容审查
-pnpm update:renderer            # 只热更新界面：Main 与 Agent Run 都不重启
-pnpm update:renderer:rollback   # 回到上一个界面版本
-```
-
-安装前提、Runtime 交接与原工作面保全见 [Desktop 更新架构](docs/architecture/desktop-updates.md)，并行开发中的打包流程见 [macOS 打包指南](docs/guides/macos-packaging.md)。
+仅热更、回切、升级 Runtime 或交付 DMG 时，按目标查看 [macOS 打包指南](docs/guides/macos-packaging.md#入口产物与安装位置)。
 
 ### 换一个图标
 
