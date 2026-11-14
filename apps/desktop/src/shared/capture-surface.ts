@@ -63,6 +63,7 @@ export type CaptureSurfaceInput = {
 }
 
 export type ScrollingProgress = {
+  preview?: string
   requestId: string
   state: import('./capture-sequence').SequenceSnapshot['state']
   frameCount: number

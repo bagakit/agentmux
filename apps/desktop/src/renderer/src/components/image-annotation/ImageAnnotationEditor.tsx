@@ -10,7 +10,7 @@ import { claimSurfaceChords } from '../../lib/surface-chord-owners'
 import type { ShortcutEvent } from '../../lib/shortcut-registry'
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from 'react'
 import { AnnotationToolbar, ANNOTATION_TOOLS, type AnnotationTool } from './AnnotationToolbar'
-import { CaptureHint, CaptureToolbar, CAPTURE_TOOLS } from './CaptureToolbar'
+import { CaptureHint, CaptureToolbar, CaptureTooltip, CAPTURE_TOOLS } from './CaptureToolbar'
 import { captureLoupePlacement, captureSizeChipPlacement, captureToolbarPlacement, cropGestureRect, CROP_CURSORS, hitCropHandle, rectContains, shownSelection, type CropGesture } from './capture-geometry'
 import { AnnotationOriginalMenu } from './AnnotationOriginalMenu'
 import { AnnotationNotes } from './AnnotationNotes'
@@ -1065,10 +1065,10 @@ export function ImageAnnotationEditor({ image, textTools, captureControls, busy,
     left: Math.max(0, Math.min(size.width - width, view.x + at.x * scale)), top: Math.max(0, Math.min(size.height - height, view.y + at.y * scale)) })
   // Color, size and pixelation controls; the window shows them in its property row, a capture in a popover on its toolbar.
   const propertyControls = <>
-      {showColor ? <div className="image-annotation-toolbar__colors" aria-label="Markup color">{SCREENSHOT_COLORS.map(option => <button key={option} type="button" aria-label={'Color ' + option} title={option}
+      {showColor ? <div className="image-annotation-toolbar__colors" aria-label="Markup color">{SCREENSHOT_COLORS.map(option => <button key={option} type="button" aria-label={'Color ' + option} title={capture ? undefined : option} data-capture-hint={capture ? option : undefined}
         aria-pressed={propertyColor === option} className={propertyColor === option ? 'selected' : ''} style={{ backgroundColor: option }} disabled={busy}
         onClick={() => setProperty('color', option)}>{propertyColor === option ? <CheckIcon size={10} /> : null}</button>)}</div> : null}
-      {showColor ? <label className="image-annotation-editor__custom-color" title="Choose an opaque annotation color"><input type="color" aria-label="Custom color" value={customColor} disabled={busy} onChange={event => setProperty('color', event.target.value)} /><span>Custom</span></label> : null}
+      {showColor ? <label className="image-annotation-editor__custom-color" title={capture ? undefined : 'Choose an opaque annotation color'} data-capture-hint={capture ? 'Choose an opaque annotation color' : undefined}><input type="color" aria-label="Custom color" value={customColor} disabled={busy} onChange={event => setProperty('color', event.target.value)} /><span>Custom</span></label> : null}
       {showWidth ? <label>Width<select aria-label="Stroke width" value={displayedWidth} disabled={busy} onChange={event => setProperty('width', Number(event.target.value))}>{widthOptions.map(option => <option key={option} value={option}>{option}px</option>)}</select></label> : null}
       {showFont ? <label>Size<select aria-label="Text size" value={displayedFont} disabled={busy} onChange={event => setProperty('fontSize', Number(event.target.value))}>{fontOptions.map(option => <option key={option} value={option}>{option}px</option>)}</select></label> : null}
       {strength ? <label>{strength.label}<input type="range" aria-label={strength.name} min={strength.range.min} max={strength.range.max} step={strength.step}
@@ -1133,7 +1133,7 @@ export function ImageAnnotationEditor({ image, textTools, captureControls, busy,
               // A double-click inside a capture selection while adjusting it is the primary delivery.
               else if (capture && !shape && tool === 'select' && crop && rectContains(crop, at)) complete()
             }} />
-          {lockBadge ? <button ref={lockBadgeRef} type="button" className="image-annotation-editor__lock" aria-label="Unlock annotation" title="Locked · Click to unlock"
+          {lockBadge ? <button ref={lockBadgeRef} type="button" className="image-annotation-editor__lock" aria-label="Unlock annotation" title={capture ? undefined : 'Locked · Click to unlock'} data-capture-hint={capture ? 'Locked · Click to unlock' : undefined}
             style={lockBadge.style} disabled={busy} onPointerLeave={event => { if (event.relatedTarget !== canvasRef.current) setLockHover(null) }}
             onClick={() => { unlockShapes(new Set([lockBadge.id])); setLockHover(null) }}><LockIcon size={11} /></button> : null}
           {pendingText ? <Textarea key={pendingText.shape.id} ref={textInputRef} className="image-annotation-editor__text" aria-label="Screenshot text" defaultValue={pendingText.shape.text} wrap="off"
@@ -1173,6 +1173,7 @@ export function ImageAnnotationEditor({ image, textTools, captureControls, busy,
         {hasProperties ? <div className="image-annotation-editor__capture-properties" role="group" aria-label="Markup properties" data-side={bar.side === 'below' ? 'below' : 'above'}>{propertyControls}</div> : null}
       </div> : null}
       {captureControls}
+      <CaptureTooltip />
       {hint ? <CaptureHint text={hint} onCancel={requestClose} /> : null}
       {loupe && loupeBox ? <div className="image-annotation-editor__loupe" aria-label="Pixel loupe" style={loupeBox}>
         <canvas ref={loupeRef} width={LOUPE_GRID} height={LOUPE_GRID} aria-hidden="true" />

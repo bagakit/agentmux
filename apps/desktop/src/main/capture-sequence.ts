@@ -9,6 +9,7 @@ import type { CaptureSequenceContext, CaptureSequenceMethod, CaptureSequencePara
 import type { AppearanceConfig, BrowserPng } from '../shared/contracts'
 import { CAPTURE_SEQUENCE_CHANNEL, CAPTURE_SEQUENCE_CLOSE_REQUESTED, type CaptureSequenceInput, type CaptureSequenceMode } from '../shared/capture-sequence'
 import type { ScreenshotCaptureSource } from '../shared/system-screenshot-editor'
+import { appendScrollPreview } from './scroll-preview'
 import { matchScroll, ScrollOverlapError } from '../shared/scroll-stitch'
 import { inspectGif } from '../shared/gif-metadata'
 import { themeBootstrap } from './theme-bootstrap'
@@ -17,7 +18,7 @@ import { screenshotFileName, writeScreenshotFile } from './screenshot-files'
 import type { ScrollingCaptureSurface } from './capture-surface'
 
 type Selection = { image: BrowserPng; source: ScreenshotCaptureSource; background?: import('../shared/capture-surface').CaptureBackground; startImmediately?: boolean; surface?: ScrollingCaptureSurface }
-type Record = { receipt: CaptureSequenceResult; actor: CaptureSequenceContext['actor']; window?: BrowserWindow; frame?: BrowserWindow; input?: CaptureSequenceInput; baselinePending?: boolean; surface?: ScrollingCaptureSurface; reviewSurface?: ScrollingCaptureSurface;
+type Record = { receipt: CaptureSequenceResult; actor: CaptureSequenceContext['actor']; window?: BrowserWindow; frame?: BrowserWindow; input?: CaptureSequenceInput; baselinePending?: boolean; preview?: ReturnType<typeof appendScrollPreview>; previewIssue?: string; surface?: ScrollingCaptureSurface; reviewSurface?: ScrollingCaptureSurface;
   timer?: ReturnType<typeof setTimeout>; inflight?: Promise<void>; fps: number; artifact?: { sha256: string; bytes: number }; journal?: { frames: unknown[]; source: ScreenshotCaptureSource }; size?: { width: number; height: number }; files?: string[]; persisting?: Promise<void>; resolve?(value: BrowserPng | string | null): void; attached?: string; ending?: boolean; retaking?: boolean; provisional?: boolean }
 const MAX_FRAME_BYTES = 64 * 1024 * 1024
 const message = (error: unknown) => error instanceof Error ? error.message : String(error)
@@ -33,7 +34,7 @@ export class CaptureSequenceOwner {
   private directory(id: string) { return join(this.ports.directory, createHash('sha256').update(id).digest('hex')) }
   private liveProgress(record: Record) {
     const { requestId, state, issue, frames } = record.input!
-    return { requestId, state, issue, frameCount: frames.length }
+    return { requestId, state, issue: issue ?? record.previewIssue ?? null, frameCount: frames.length, ...(record.preview && { preview: record.preview.dataUrl }) }
   }
   private persist(record: Record): Promise<void> {
     // A replacement selection may write its own frames, but the reviewed receipt stays authoritative until handoff.
@@ -185,7 +186,17 @@ export class CaptureSequenceOwner {
       const result = await this.ports.native().captureScreenshot({ mode: 'rect', rect: input.source.rect, excludeWindowIds })
       if (result.state !== 'captured' || !result.screenshot) throw new Error(result.error?.message ?? 'The original frame capture is unconfirmed.')
       const shot = result.screenshot, image: BrowserPng = { mimeType: 'image/png', dataUrl: 'data:image/png;base64,' + shot.data, width: shot.width, height: shot.height, byteLength: Buffer.byteLength(shot.data, 'base64') }
-      pngBytes(image)
+      const bytes = pngBytes(image)
+      let decoded: Electron.NativeImage | undefined
+      const decode = () => decoded ??= nativeImage.createFromBuffer(bytes)
+      const preview = (rows: number) => {
+        if (record.ending || !record.surface || record.previewIssue) return
+        try { record.preview = appendScrollPreview(record.preview, decode(), rows) }
+        catch (error) {
+          delete record.preview
+          record.previewIssue = 'Live preview unavailable: ' + message(error)
+        }
+      }
       const first = record.size!
       if (image.width !== first.width || image.height !== first.height) throw new Error('The selected display scale changed. Finish the existing sequence before choosing another region.')
       const previous = input.frames.at(-1)?.image
@@ -194,13 +205,15 @@ export class CaptureSequenceOwner {
         input.frames[0] = { image, capturedAt: Date.now(), delayMs: 1000 / record.fps }
         await this.saveFrame(record, 0)
         record.baselinePending = false
+        preview(image.height)
         await this.persist(record)
         return
       }
+      let addedRows = image.height
       if (automaticScroll && previous) {
-        const pixels = (frame: BrowserPng) => { const bitmap = nativeImage.createFromBuffer(pngBytes(frame)).toBitmap(); return { width: frame.width, height: frame.height, data: new Uint8ClampedArray(bitmap.buffer, bitmap.byteOffset, bitmap.byteLength) } }
+        const pixels = (frame: BrowserPng, decoded: Electron.NativeImage) => { const bitmap = decoded.toBitmap(); return { width: frame.width, height: frame.height, data: new Uint8ClampedArray(bitmap.buffer, bitmap.byteOffset, bitmap.byteLength) } }
         let shift: number
-        try { shift = previous.dataUrl === image.dataUrl ? 0 : matchScroll(pixels(previous), pixels(image)).shift }
+        try { shift = previous.dataUrl === image.dataUrl ? 0 : matchScroll(pixels(previous, nativeImage.createFromBuffer(pngBytes(previous))), pixels(image, decode())).shift }
         catch (error) {
           if (!(error instanceof ScrollOverlapError)) throw error
           if (input.issue !== message(error)) {
@@ -211,12 +224,14 @@ export class CaptureSequenceOwner {
         }
         if (input.issue || record.receipt.issue) { input.issue = record.receipt.issue = null; await this.persist(record) }
         if (shift === 0) return
+        addedRows = shift
       }
       if (input.frames.reduce((size, frame) => size + frame.image.byteLength, image.byteLength) > MAX_FRAME_BYTES) throw new Error('Captured PNG frames reached the 64 MB review budget. Finish this sequence or undo frames before capturing more.')
       const capturedAt = Date.now(), last = input.frames.at(-1)
       if (last) last.delayMs = Math.max(10, Math.round((capturedAt - last.capturedAt) / 10) * 10)
       input.frames.push({ image, capturedAt, delayMs: Math.max(10, Math.round(100 / record.fps) * 10) })
       await this.saveFrame(record, input.frames.length - 1)
+      if (automaticScroll) preview(addedRows)
       record.receipt.frameCount = input.frames.length
       await this.persist(record)
     })().finally(() => { delete record.inflight; if (record.window?.isDestroyed()) delete record.input })
@@ -327,6 +342,7 @@ export class CaptureSequenceOwner {
     if (focus) { window.show(); window.focus() }
   }
   private async end(record: Record, state: 'completed' | 'cancelled') {
+    delete record.preview
     record.ending = true; clearTimeout(record.timer); this.closeFrame(record); record.receipt.state = state
     const surface = record.surface ?? record.reviewSurface; delete record.surface; delete record.reviewSurface
     if (surface) {

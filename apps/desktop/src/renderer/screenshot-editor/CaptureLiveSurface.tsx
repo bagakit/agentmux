@@ -31,7 +31,19 @@ export function CaptureLiveSurface({ capture, surfaceApi, live }: {
   }
   const { selection, toolbar: anchor } = live
   const right = Math.max(8, capture.frame.width - anchor.x - anchor.width)
+  const gap = 8
+  const availableRight = capture.frame.width - selection.x - selection.width - gap * 2
+  const availableLeft = selection.x - gap * 2
+  const outside = Math.max(availableRight, availableLeft) >= 72
+  const previewWidth = Math.min(outside ? Math.max(availableRight, availableLeft) : selection.width / 3, 128)
+  const previewLeft = outside && availableRight >= availableLeft ? selection.x + selection.width + gap
+    : outside ? selection.x - previewWidth - gap : Math.max(gap, selection.x + selection.width - previewWidth - gap)
+  const previewHeight = Math.min(256, Math.max(32, selection.height - 2 * gap), capture.frame.height - capture.safeTop - gap * 2)
+  const previewTop = Math.max(capture.safeTop + gap, Math.min(selection.y + gap, capture.frame.height - previewHeight - gap))
   return <main className="capture-surface capture-surface--live">
+    {live.input.preview && <div className="capture-live-preview" style={{ left: previewLeft, top: previewTop, width: previewWidth, maxHeight: previewHeight }}>
+      <img src={live.input.preview} alt="Stitched screenshot preview" style={{ maxHeight: previewHeight }} />
+    </div>}
     <div className="capture-live-region" style={{ left: selection.x, top: selection.y, width: selection.width, height: selection.height }} />
     <nav ref={toolbar} className="capture-live-toolbar" aria-label="Scrolling capture" style={{ right, top: Math.max(capture.safeTop, Math.min(anchor.y, capture.frame.height - 48)) }}>
       <div className="capture-live-toolbar__actions">
