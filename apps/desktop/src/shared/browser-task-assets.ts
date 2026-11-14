@@ -11,6 +11,9 @@ export type BrowserTaskHumanCheckpointRead =
   | { status: 'unavailable'; warning: string }
 
 export type BrowserTaskParameter = { key: string; label: string; secret: boolean }
+export type BrowserTaskSubflow = { target:
+  | { kind: 'local'; assetId: string; version: number }
+  | { kind: 'imported'; source: { assetId: string; version: number } }; iteration: 'once' | 'each' }
 export type BrowserTaskBranch = {
   condition: { kind: 'page-url-is'; url: string } | { kind: 'element-present'; target: { role: string; name: string } }
   /** Explicit forward step identities; null finishes this path. */
@@ -29,7 +32,7 @@ export type BrowserTaskAssertion =
 export type BrowserTaskStepFailure = 'stop' | 'continue' | { goto: string }
 export type BrowserTaskStep = {
   id: string
-  kind: 'click' | 'fill' | 'upload' | 'navigate' | 'checkpoint' | 'branch' | 'wait' | 'assert' | 'press' | 'hover' | 'scroll' | 'drag' | 'tap' | 'longPress' | 'swipe' | 'pinch'
+  kind: 'click' | 'fill' | 'upload' | 'navigate' | 'checkpoint' | 'branch' | 'wait' | 'assert' | 'press' | 'hover' | 'scroll' | 'drag' | 'tap' | 'longPress' | 'swipe' | 'pinch' | 'subflow'
   /** Redacted page identity, never a stored input value. */
   url: string
   target?: BrowserReplayTarget
@@ -44,6 +47,7 @@ export type BrowserTaskStep = {
   parameterKeys?: string[]
   /** Answer only the dialog opened during this click, in its original operation. */
   dialog?: { type: 'alert' | 'confirm' | 'prompt' | 'beforeunload'; action: 'accept' | 'dismiss'; promptParameterKey?: string }
+  subflow?: BrowserTaskSubflow
   label?: string
   branch?: BrowserTaskBranch
   wait?: BrowserTaskWait
@@ -107,6 +111,10 @@ export type BrowserTaskAssetRun = {
   /** Steps whose last attempt ended script-failed, with that attempt's journal operation. Any entry keeps the run from completing. */
   failedSteps?: { stepId: string; operationId: string }[]
   executedMillis?: number
+  /** Subflow child only: the exact parent call item that owns this run. */
+  parent?: import('@agentmux/core/control').BrowserTaskRunParent
+  /** Subflow parent only: item identities and bound child runs, never fresh values or child status. */
+  calls?: import('@agentmux/core/control').BrowserTaskCallProgress[]
   pendingCheckpointId?: string
   /** Main-created trusted Continue events. Absence means their recording information is unavailable. */
   humanCheckpoints?: BrowserTaskHumanCheckpoint[]
@@ -138,6 +146,8 @@ export type BrowserTaskAssetRunInput = {
   browserId: string
   /** Values exist only for this invocation. Secret values must be supplied again after a checkpoint. */
   parameters: Record<string, string>
+  /** Fresh finite subflow items for this invocation only, keyed by subflow step id. */
+  calls?: import('@agentmux/core/control').BrowserTaskInvocationCalls
   mode?: 'run' | 'step'
   runId?: string
 }

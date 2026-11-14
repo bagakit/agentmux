@@ -725,6 +725,7 @@ export async function registerIpc(args: {
     importTaskAsset: (id, input) => browsers.importTaskAsset(id, input),
     inspectTaskAssetCreation: (id, input) => browsers.inspectTaskAssetCreation(id, input),
     getTaskAssets: async (id: string) => { await ensureBrowser(id); return await browsers.getTaskAssets(id) },
+    inspectTaskRun: async (id: string, runId?: string) => { await ensureBrowser(id); return await browsers.inspectTaskRun(id, runId) },
     saveTaskAssetDraft: (id: string, assetId: string, revision: number, content: unknown) => browsers.saveTaskAssetDraft(id, assetId, revision, content),
     publishTaskAsset: (id: string, assetId: string, revision: number) => browsers.publishTaskAsset(id, assetId, revision),
     getOperation: (id: string) => browsers.getOperation(id),

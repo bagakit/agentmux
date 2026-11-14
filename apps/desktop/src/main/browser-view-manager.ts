@@ -1,5 +1,5 @@
 import { browserUploadPort, browserDownloadPort } from './browser-page-files.js'
-import { parseBrowserTaskImportInput, type BrowserTaskImportInput, type BrowserTaskPortableBundle } from '@agentmux/core/control'
+import { BROWSER_TASK_SUBFLOW_MAX_DEPTH, parseBrowserTaskImportInput, type BrowserTaskImportInput, type BrowserTaskPortableBundle } from '@agentmux/core/control'
 import { mintObjectId, mintCapabilityToken, isObjectId } from '@agentmux/core/object-id'
 import type { CapsuleInspection, CapsuleRecord } from '@agentmux/core/capsule'
 import type { BrowserProfileActivityCheckpoint, BrowserProfileActivityGap } from './browser-profile-store.js'
@@ -105,7 +105,7 @@ import type { BrowserDemonstrationRecorder } from './browser-demonstration-recor
 import type { BrowserDemonstrationDraft, BrowserDemonstrationState } from '../shared/browser-demonstration.js'
 import type { BrowserUploads } from './browser-uploads.js'
 import type { BrowserDownloads } from './browser-downloads.js'
-import { BrowserTaskAssets, runBrowserTaskAsset } from './browser-task-assets.js'
+import { BrowserTaskAssets, isPageStep, runBrowserTaskAsset } from './browser-task-assets.js'
 import { runBrowserTaskBatch, type BrowserTaskRunBudget } from './browser-task-batch.js'
 import type { BrowserTaskAsset, BrowserTaskAssetRun, BrowserTaskAssetRunInput, BrowserTaskAssetState, BrowserTaskContent, BrowserTaskStepExecution, BrowserTaskStep, BrowserTaskBatchInput, BrowserTaskBatchRun } from '../shared/browser-task-assets.js'
 import { recoverBrowserTaskStep, runBrowserTaskNavigation } from './browser-local-recovery.js'
@@ -3345,6 +3345,12 @@ export class BrowserViewManager {
     return projected
   }
 
+  async inspectTaskRun(id: string, runId?: string): Promise<Awaited<ReturnType<BrowserTaskAssets['inspect']>>> {
+    this.require(id)
+    if (!this.taskAssets) throw new Error('Task asset storage is unavailable. The Browser remains usable.')
+    return await this.taskAssets.inspect(id, runId)
+  }
+
   async getTaskAssets(id: string): Promise<BrowserTaskAssetState> {
     const entry = this.require(id)
     const view = entry.view
@@ -3525,16 +3531,19 @@ export class BrowserViewManager {
         if (state.batches?.some(batch => batch.items.some(item => item.runId === previous.id) && batch.id !== budget?.batchId)) {
           throw new Error('Continue this item through its original batch to preserve its bounds and progress.')
         }
+        if (previous.parent) throw new Error('Continue this subflow item through its original root run to keep its items and shared budget.')
         if (previous.status !== 'ready' && previous.status !== 'waiting-human') {
           throw new Error('This task cannot continue from its current cursor. Inspect the retained progress.')
         }
         if (intent === 'control' && previous.status === 'waiting-human') {
           throw new Error('This task is waiting for the person. Agent control cannot approve or continue its checkpoint.')
         }
-        if (intent === 'human' && previous.status === 'waiting-human' && previous.pendingCheckpointId) {
-          await this.taskAssets!.recordHumanCheckpoint({ runId: previous.id, browserId: previous.browserId,
-            assetId: previous.assetId, version: previous.version }, previous.pendingCheckpointId,
-          { pendingCheckpointId: previous.pendingCheckpointId, nextStep: previous.nextStep,
+        // The fact belongs only to the exact run whose own checkpoint is pending: the root or its current subflow leaf.
+        const waiting = intent === 'human' && previous.status === 'waiting-human' ? await this.taskAssets!.waitingLeaf(previous.id) : null
+        if (waiting?.pendingCheckpointId) {
+          await this.taskAssets!.recordHumanCheckpoint({ runId: waiting.id, browserId: waiting.browserId,
+            assetId: waiting.assetId, version: waiting.version }, waiting.pendingCheckpointId,
+          { pendingCheckpointId: waiting.pendingCheckpointId, nextStep: waiting.nextStep,
             controlBefore: entry.humanControl ? 'human' : entry.activity.control })
         }
       }
@@ -3552,7 +3561,7 @@ export class BrowserViewManager {
         control: id => { const owner = this.require(id); return owner.humanControl ? 'human' : owner.activity.control },
         yieldControl: id => this.yieldControl(id),
         navigationId: id => id === entry.id && this.owns(entry, view) && !view.webContents.isDestroyed() ? entry.navigationId : null,
-        runScript: async (id, code, cursor) => {
+        runScript: async (id, code, cursor, frame) => {
           if (this.entries.get(id) !== entry) throw new Error('The original Browser owner is unavailable; the task was not replayed.')
           if (!execution.runId) throw new Error('The task cursor is unavailable; the action was not restarted.')
           const taskPage: BrowserTaskPageExecution = { cursor: { ...cursor } }
@@ -3564,12 +3573,13 @@ export class BrowserViewManager {
               if (immutableStep) {
                 taskPage.step = structuredClone(immutableStep)
                 const key = immutableStep.dialog?.promptParameterKey
-                if (key && input.parameters[key] !== undefined) taskPage.dialogPrompt = input.parameters[key]
+                const values = frame?.parameters ?? input.parameters
+                if (key && values[key] !== undefined) taskPage.dialogPrompt = values[key]
               }
               const bound = await this.taskAssets!.bindOperation(cursor, operation.id)
               const declaration = version?.completion
               const download = declaration?.criteria.find(item => item.kind === 'download-readable')
-              const producer = download?.stepId ?? version?.steps.find(step => step.kind !== 'checkpoint' && step.kind !== 'branch')?.id
+              const producer = download?.stepId ?? version?.steps.find(isPageStep)?.id
               if (declaration && producer === cursor.stepId && this.operationJournal) {
                 const registration: BrowserOutcomeRegistration = {
                   context: { workspaceId: entry.workspaceId, browserId: entry.id, operationId: operation.id, navigationId: entry.navigationId },
@@ -3590,7 +3600,7 @@ export class BrowserViewManager {
               // Preparation can finish after the person stopped this exact cursor.
               // Hand that intent to the existing operation cancellation owner before any page work.
               if (execution.stopRequested) void this.stopOperationById(operation.id)
-            }, privateTaskParameters, taskPage)
+            }, frame?.sensitive ?? privateTaskParameters, taskPage)
           } finally { execution.operationId = undefined }
         }
       }, budget)
@@ -3636,7 +3646,10 @@ export class BrowserViewManager {
     const run = state.runs.find(run => run.id === runId)
     if (!run) throw new Error('This task run does not belong to the Browser.')
     const execution = this.taskExecutions.get(id)
-    if (execution?.entry === entry && execution.runId === runId) {
+    // A subflow child stops through its root execution, which owns the current page operation.
+    let root = run
+    for (let depth = 0; root.parent && depth < BROWSER_TASK_SUBFLOW_MAX_DEPTH; depth += 1) root = state.runs.find(item => item.id === root.parent!.runId) ?? root
+    if (execution?.entry === entry && (execution.runId === runId || execution.runId === root.id)) {
       execution.stopRequested = true
       if (execution.operationId && entry.activeRun?.operationId === execution.operationId) void this.stopOperationById(execution.operationId)
     }

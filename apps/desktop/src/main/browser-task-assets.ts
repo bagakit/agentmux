@@ -1,5 +1,6 @@
 import { browserTaskStepParameterKeys } from '../shared/browser-task-assets.js'
 import { createHash } from 'node:crypto'
+import { parseBrowserTaskInvocation, BROWSER_TASK_SUBFLOW_MAX_CHILDREN, BROWSER_TASK_SUBFLOW_MAX_DEPTH, BROWSER_TASK_SUBFLOW_MAX_ITEMS, type BrowserTaskInvocationCalls, type BrowserTaskRunParent } from '@agentmux/core/control'
 import { parseBrowserTaskImportInput, parseBrowserTaskPortableBundle, parseBrowserTaskPortableBinding, type BrowserTaskImportInput, type BrowserTaskPortableBinding, type BrowserTaskPortableBundle } from '@agentmux/core/control'
 import { mintObjectId } from '@agentmux/core/object-id'
 import { AgentMuxError } from '@agentmux/core'
@@ -16,7 +17,7 @@ import type {
   BrowserTaskAsset, BrowserTaskAssetDocument, BrowserTaskAssetRun, BrowserTaskAssetRunInput,
   BrowserTaskAssetState, BrowserTaskContent, BrowserTaskParameter, BrowserTaskStep, BrowserTaskVersion,
   BrowserTaskHumanCheckpoint, BrowserTaskHumanCheckpointRead, BrowserTaskHumanCheckpointSaved, BrowserTaskRunIdentity, BrowserTaskStepExecution, BrowserTaskBatchInput, BrowserTaskBatchRun,
-  BrowserTaskAssertion, BrowserTaskSemanticTarget, BrowserTaskStepFailure, BrowserTaskWait
+  BrowserTaskAssertion, BrowserTaskSemanticTarget, BrowserTaskStepFailure, BrowserTaskWait, BrowserTaskSubflow
 } from '../shared/browser-task-assets.js'
 import { compileBrowserSteps } from './browser-replay-compiler.js'
 import { compileBrowserTaskCheck } from './browser-task-check.js'
@@ -26,9 +27,11 @@ import { compileBrowserTaskBranchObservation, evaluateBrowserTaskBranch } from '
 import { validateBrowserTaskBatchValues, BROWSER_TASK_BATCH_MAX_OPERATIONS, BROWSER_TASK_BATCH_MAX_MILLIS, BROWSER_TASK_BATCH_MAX_BYTES, type BrowserTaskBatchHost, type BrowserTaskRunBudget } from './browser-task-batch.js'
 
 export const BROWSER_TASK_ASSETS_FILE = 'browser-task-assets.json'
+/** Main-private child execution context; never accepted from a Client request. */
+type SubflowFrame = { parent: BrowserTaskRunParent; rootId: string; depth: number; limits: { operations: number; timeMillis: number }; navigationGuard?: { runId: string; stepId: string; navigationId: string } }
 const MAX_STEPS = 128
 const MAX_PARAMETERS = 32
-const STEP_KINDS: readonly BrowserTaskStep['kind'][] = ['click', 'fill', 'upload', 'navigate', 'checkpoint', 'branch', 'wait', 'assert', 'press', 'hover', 'scroll', 'drag', 'tap', 'longPress', 'swipe', 'pinch']
+const STEP_KINDS: readonly BrowserTaskStep['kind'][] = ['click', 'fill', 'upload', 'navigate', 'checkpoint', 'branch', 'wait', 'assert', 'press', 'hover', 'scroll', 'drag', 'tap', 'longPress', 'swipe', 'pinch', 'subflow']
 const HUMAN_FACT_UNAVAILABLE = 'Trusted checkpoint confirmation is unavailable for this exact run. Existing Browser and Agent work remains; restore the recorded facts before verifying completion.'
 const HUMAN_FACT_SAVE_FAILED = 'Trusted Continue occurred, but its checkpoint fact could not be saved. Verification is unavailable; Browser and Agent work remains. Restore local storage before verifying again.'
 const copy = <T>(value: T): T => structuredClone(value)
@@ -60,7 +63,8 @@ export interface BrowserTaskAssetHost {
   dialogTypes?: readonly import('@agentmux/core').AgentMuxBrowserDialogType[]
   /** Bind the actual cursor before its first durable/public projection. */
   onRunPrepared(runId: string): void
-  runScript(browserId: string, script: string, execution: BrowserTaskStepExecution): Promise<BrowserScriptRunReport>
+  /** frame carries this exact run's fresh values (prompt answers) and redaction need; it is never saved. */
+  runScript(browserId: string, script: string, execution: BrowserTaskStepExecution, frame?: { parameters: Record<string, string>; sensitive: boolean }): Promise<BrowserScriptRunReport>
   yieldControl(browserId: string): void
   control(browserId: string): 'human' | 'agent'
   /** Same original owner and current document; null means the observation cannot select a path. */
@@ -147,8 +151,19 @@ export class BrowserTaskAssets {
     if (this.loadUnavailable) return false
     const selected = this.document.selectedRuns?.find(item => item.browserId === execution.browserId)
     const bound = this.exactRun(execution)
-    return selected?.runId === execution.runId && !!bound && bound.run.status === 'running' &&
+    return !!selected && !!bound && bound.run.status === 'running' && this.isActiveUnder(selected.runId, bound.run) &&
       bound.version.steps[bound.run.nextStep]?.id === execution.stepId && bound.run.operationIds.includes(operationId)
+  }
+  /** The run is the selected root itself or the exact child at each running ancestor's current item. */
+  private isActiveUnder(rootId: string, run: BrowserTaskAssetRun): boolean {
+    let current = run
+    for (let depth = 1; depth <= BROWSER_TASK_SUBFLOW_MAX_DEPTH; depth += 1) {
+      if (current.id === rootId) return true
+      const parent = current.parent && this.document.runs.find(item => item.id === current.parent!.runId)
+      if (!parent || parent.status !== 'running' || this.currentChild(parent) !== current) return false
+      current = parent
+    }
+    return false
   }
 
   async markCompletionUnavailable(tuple: BrowserTaskRunIdentity): Promise<void> {
@@ -275,6 +290,7 @@ export class BrowserTaskAssets {
       const ids = new Map(definition.steps.map(step => [step.id, mintObjectId()]))
       const remap = (id: string | null): string | null => id === null ? null : ids.get(id)!
       const steps = definition.steps.map(step => ({ ...step, id: ids.get(step.id)!, reviewed: false,
+        ...(step.subflow?.target.kind === 'local' ? { subflow: { ...step.subflow, target: { kind: 'imported' as const, source: { assetId: step.subflow.target.assetId, version: step.subflow.target.version } } } } : {}),
         ...(step.nextStepId === undefined ? {} : { nextStepId: remap(step.nextStepId) }),
         ...(typeof step.onFail === 'object' ? { onFail: { goto: remap(step.onFail.goto)! } } : {}),
         ...(step.branch ? { branch: { ...step.branch, onTrue: remap(step.branch.onTrue), onFalse: remap(step.branch.onFalse) } } : {}) }))
@@ -358,6 +374,7 @@ export class BrowserTaskAssets {
       if (asset.revision !== expectedRevision) throw revisionChanged(asset, expectedRevision)
       if (!asset.draft.steps.length) throw new Error('The draft has no steps. Add a reviewed step before saving a runnable version.')
       validateBrowserTaskPath(asset.draft.steps)
+      this.subflowDepth(asset.browserId, asset.draft.steps)
       asset.versions.push({ ...copy(asset.draft), version: (asset.versions.at(-1)?.version ?? 0) + 1, savedAt: this.now() })
       asset.revision += 1; asset.updatedAt = this.now()
       await this.persistAuthoring(asset)
@@ -370,9 +387,11 @@ export class BrowserTaskAssets {
     return this.change(async () => {
       const run = this.document.runs.find(item => item.id === runId)
       if (!run) return null
-      if (run.status !== 'completed' && run.status !== 'interrupted') {
-        run.status = 'stopped'; run.warning = 'Task stopped. Completed steps remain; inspect the page before another run.'
-        await this.updateRun(run)
+      // A subflow tree stops as one invocation; completed and already-ended runs keep their results.
+      const affected = this.treeRuns(this.rootOf(run).id).filter(item => item.status === 'ready' || item.status === 'running' || item.status === 'waiting-human')
+      if (affected.length) {
+        for (const item of affected) { item.status = 'stopped'; item.warning = 'Task stopped. Completed steps remain; inspect the page before another run.'; item.updatedAt = this.now() }
+        await this.persist(run.browserId)
       }
       return copy(this.projectRun(run))
     })
@@ -380,11 +399,19 @@ export class BrowserTaskAssets {
 
   /** Used by runBrowserTaskAsset. Caller is the trusted Client action; continuation has no Agent API. */
   async run(input: BrowserTaskAssetRunInput, host: BrowserTaskAssetHost, budget?: BrowserTaskRunBudget): Promise<BrowserTaskAssetRun> {
+    return await this.execute(input, host, budget)
+  }
+
+  /** A subflow frame runs inside its root's lease and shares the root's one cost budget. */
+  private async execute(input: BrowserTaskAssetRunInput, host: BrowserTaskAssetHost, budget?: BrowserTaskRunBudget, frame?: SubflowFrame): Promise<BrowserTaskAssetRun> {
     await this.ready()
     const browserId = identity(input.browserId)
+    // GUI and public callers share the same bounded fresh-value contract.
+    if (!frame && input.calls !== undefined) input = { ...input, ...parseBrowserTaskInvocation({ parameters: input.parameters, calls: input.calls }) }
     const parameters = { ...input.parameters }
-    if (this.isBrowserExecuting(browserId, budget?.batchId)) throw new Error('A task is already executing in this Browser.')
-    const ownsLease = !this.activeBrowsers.has(browserId)
+    if (!frame && this.isBrowserExecuting(browserId, budget?.batchId)) throw new Error('A task is already executing in this Browser.')
+    if (!frame && Buffer.byteLength(JSON.stringify({ parameters, calls: input.calls ?? {} })) > BROWSER_TASK_BATCH_MAX_BYTES) throw new Error('Task invocation values exceed their 64 KiB budget.')
+    const ownsLease = !frame && !this.activeBrowsers.has(browserId)
     if (ownsLease) this.activeBrowsers.set(browserId, {})
     let run: BrowserTaskAssetRun | undefined
     try {
@@ -395,6 +422,9 @@ export class BrowserTaskAssets {
         if (!version) throw new Error('Task version is unavailable. Select a retained version before running.')
         const existing = input.runId ? this.document.runs.find(item => item.id === input.runId) : undefined
         if (input.runId && !existing) throw new Error('Task run is unavailable; it was not restarted.')
+        if (existing && !isDeepStrictEqual(existing.parent, frame?.parent)) {
+          throw new Error(existing.parent ? 'Continue this subflow item through its original root run to keep its items and shared budget.' : 'Task continuation identity changed; the original run was retained.')
+        }
         if (existing && (existing.assetId !== asset.id || existing.version !== version.version || existing.browserId !== browserId)) {
           throw new Error('Task continuation identity changed; the original run was retained.')
         }
@@ -407,19 +437,29 @@ export class BrowserTaskAssets {
         if (host.control(browserId) !== 'agent') throw new Error('The person has Browser control. Return control explicitly before running the task.')
         validateBrowserTaskPath(version.steps)
         validateTaskSegment(version, parameters, existing?.nextStep ?? 0, input.mode, host.dialogTypes)
+        this.validateCalls(browserId, version, input.calls, frame?.depth ?? 1)
         const batch = budget ? this.document.batches?.find(batch => batch.id === budget.batchId && batch.browserId === browserId && batch.assetId === asset.id && batch.version === version.version && batch.status === 'running') : undefined
         const batchItem = batch?.items[batch.nextItem]
         if (budget && (!batchItem || (batchItem.runId && batchItem.runId !== existing?.id) || this.activeBrowsers.get(browserId)?.batchId !== budget.batchId)) throw new Error('The original batch item changed before its task was prepared.')
         const next = existing ?? {
           id: this.allocateId(), assetId: asset.id, version: version.version, browserId,
-          nextStep: 0, status: 'ready' as const, operationIds: [], stepExecutions: [], branchDecisions: [], executedMillis: 0, humanCheckpoints: [], startedAt: this.now(), updatedAt: this.now()
+          nextStep: 0, status: 'ready' as const, operationIds: [], stepExecutions: [], branchDecisions: [], executedMillis: 0, humanCheckpoints: [], startedAt: this.now(), updatedAt: this.now(),
+          ...(frame ? { parent: copy(frame.parent) } : {})
+        }
+        if (frame && !existing) {
+          // Bind the child to its exact parent item in the same save that creates it.
+          const item = this.callItem(frame.parent)
+          if (!item || item.runId) throw new Error('The original subflow item changed before its child run was prepared.')
+          item.runId = next.id
         }
         if (!existing) {
           this.document.runs.push(next)
         }
         if (batchItem) batchItem.runId = next.id
-        host.onRunPrepared(next.id)
-        this.document.selectedRuns = [...(this.document.selectedRuns ?? []).filter(item => item.browserId !== browserId), { browserId, runId: next.id }]
+        if (!frame) {
+          host.onRunPrepared(next.id)
+          this.document.selectedRuns = [...(this.document.selectedRuns ?? []).filter(item => item.browserId !== browserId), { browserId, runId: next.id }]
+        }
         delete next.pendingCheckpointId; delete next.warning
         next.status = 'ready'
         await this.persist(next.browserId)
@@ -427,10 +467,15 @@ export class BrowserTaskAssets {
       })
       run = prepared.run
       const version = prepared.version
+      const tree = { rootId: frame?.rootId ?? run.id, depth: frame?.depth ?? 1, ...(frame?.navigationGuard ? { navigationGuard: frame.navigationGuard } : {}), limits: frame?.limits ?? {
+        operations: Math.min(BROWSER_TASK_MAX_OPERATIONS, budget?.operations ?? BROWSER_TASK_MAX_OPERATIONS),
+        timeMillis: Math.min(BROWSER_TASK_MAX_EXECUTED_MILLIS, budget?.timeMillis ?? BROWSER_TASK_MAX_EXECUTED_MILLIS) } }
       let actions = 0
       // Script failures of the step at this cursor index in this invocation; a forward cursor never revisits it.
       let failed = { index: -1, count: 0 }
-      const previousDecision = run.branchDecisions?.find(fact => fact.result !== 'unknown' && fact.nextStepId === version.steps[run!.nextStep]?.id && run!.stepExecutions?.at(-1)?.operationId === fact.operationId)
+      const currentStep = version.steps[run.nextStep]
+      const previousDecision = currentStep?.kind === 'subflow' && this.callHasOperations(run.id, currentStep.id) ? undefined
+        : run.branchDecisions?.find(fact => fact.result !== 'unknown' && fact.nextStepId === currentStep?.id && run!.stepExecutions?.at(-1)?.operationId === fact.operationId)
       let selectedByBranch: { stepId: string; index: number; navigationId: string } | undefined = previousDecision ? { stepId: previousDecision.stepId, index: version.steps.findIndex(step => step.id === previousDecision.stepId), navigationId: previousDecision.navigationId } : undefined
       const invalidateSelection = async () => {
         const selected = selectedByBranch!
@@ -445,8 +490,20 @@ export class BrowserTaskAssets {
         host.yieldControl(browserId)
         return copy(this.projectRun(run!))
       }
+      const inheritedNavigation = (): string | undefined => frame?.navigationGuard && !this.callHasOperations(frame.navigationGuard.runId, frame.navigationGuard.stepId)
+        ? frame.navigationGuard.navigationId : undefined
+      const pauseForNavigation = async () => {
+        await this.change(async () => {
+          if (run!.status !== 'stopped') {
+            run!.status = 'ready'; run!.warning = 'The condition page changed before this subflow action. No action was sent; inspect its original condition again.'
+          }
+          await this.updateRun(run!)
+        })
+        return copy(this.projectRun(run!))
+      }
       while (run.nextStep < version.steps.length) {
         if (run.status === 'stopped') break
+        if (inheritedNavigation() !== undefined && host.navigationId?.(browserId) !== inheritedNavigation()) return await pauseForNavigation()
         if (selectedByBranch && host.navigationId?.(browserId) !== selectedByBranch.navigationId) return await invalidateSelection()
         const step = version.steps[run.nextStep]!
         if (step.kind === 'checkpoint') {
@@ -459,7 +516,8 @@ export class BrowserTaskAssets {
           })
           return copy(this.projectRun(run))
         }
-        if (run.operationIds.length >= Math.min(BROWSER_TASK_MAX_OPERATIONS, budget?.operations ?? BROWSER_TASK_MAX_OPERATIONS) || (run.executedMillis ?? 0) >= Math.min(BROWSER_TASK_MAX_EXECUTED_MILLIS, budget?.timeMillis ?? BROWSER_TASK_MAX_EXECUTED_MILLIS)) {
+        const cost = this.treeCost(tree.rootId)
+        if (cost.operations >= tree.limits.operations || cost.executedMillis >= tree.limits.timeMillis) {
           await this.change(async () => { run!.status = 'interrupted'; run!.warning = 'Task execution budget reached. Existing actions and progress remain; no further step was sent.'; await this.updateRun(run!) })
           host.yieldControl(browserId)
           return copy(this.projectRun(run))
@@ -471,7 +529,24 @@ export class BrowserTaskAssets {
           await this.change(async () => { run!.status = 'ready'; run!.warning = error instanceof Error ? error.message : 'The selected path needs review before execution.'; await this.updateRun(run!) })
           return copy(this.projectRun(run))
         }
-        const execution: BrowserTaskStepExecution = { browserId, runId: run.id, assetId: run.assetId, version: run.version, stepId: step.id, ...(selectedByBranch ? { expectedNavigationId: selectedByBranch.navigationId } : {}) }
+        if (step.kind === 'subflow') {
+          const navigationGuard = selectedByBranch && !this.callHasOperations(run.id, step.id)
+            ? { runId: run.id, stepId: step.id, navigationId: selectedByBranch.navigationId } : tree.navigationGuard
+          if (!await this.runSubflow(run, version, step, input, host, { ...tree, ...(navigationGuard ? { navigationGuard } : {}) })) {
+            if (selectedByBranch && !this.callHasOperations(run.id, step.id) && host.navigationId?.(browserId) !== selectedByBranch.navigationId) return await invalidateSelection()
+            return copy(this.projectRun(run))
+          }
+          selectedByBranch = undefined
+          actions += 1
+          if (input.mode === 'step' && run.nextStep < version.steps.length) {
+            await this.change(async () => { if (run!.status !== 'stopped') run!.status = 'ready'; await this.updateRun(run!) })
+            return copy(this.projectRun(run))
+          }
+          continue
+        }
+        const expectedNavigationId = selectedByBranch?.navigationId ?? inheritedNavigation()
+        const execution: BrowserTaskStepExecution = { browserId, runId: run.id, assetId: run.assetId, version: run.version, stepId: step.id,
+          ...(expectedNavigationId === undefined ? {} : { expectedNavigationId }) }
         const navigationId = step.kind === 'branch' ? host.navigationId?.(browserId) ?? null : null
         const download = version.completion?.criteria.find(item => item.kind === 'download-readable' && item.stepId === step.id)
         const script = step.kind === 'branch' ? compileBrowserTaskBranchObservation(step, execution)
@@ -484,12 +559,13 @@ export class BrowserTaskAssets {
         })
         // A listener can stop the cursor across the await; discard the earlier loop narrowing.
         if (!started || (run as BrowserTaskAssetRun).status === 'stopped') break
+        if (inheritedNavigation() !== undefined && host.navigationId?.(browserId) !== inheritedNavigation()) return await pauseForNavigation()
         if (selectedByBranch && host.navigationId?.(browserId) !== selectedByBranch.navigationId) return await invalidateSelection()
         const branchIndex = run.nextStep
         let report: BrowserScriptRunReport, retry = false
         const callStartedAt = performance.now()
-        execution.deadlineMillis = callStartedAt + Math.min(BROWSER_TASK_MAX_EXECUTED_MILLIS, budget?.timeMillis ?? BROWSER_TASK_MAX_EXECUTED_MILLIS) - (run.executedMillis ?? 0)
-        try { report = await host.runScript(browserId, script, execution) }
+        execution.deadlineMillis = callStartedAt + tree.limits.timeMillis - this.treeCost(tree.rootId).executedMillis
+        try { report = await host.runScript(browserId, script, execution, { parameters, sensitive: version.parameters.length > 0 }) }
         catch {
           await this.change(async () => {
             run!.executedMillis = (run!.executedMillis ?? 0) + Math.max(0, performance.now() - callStartedAt)
@@ -577,6 +653,168 @@ export class BrowserTaskAssets {
     }
   }
 
+  /**
+   * Delegate each explicit item to one original child run of the fixed version, in order.
+   * Completed items are never rerun; a waiting, failed or unknown item ends this parent advance.
+   * Returns true only when the parent cursor moved past the subflow step.
+   */
+  private async runSubflow(run: BrowserTaskAssetRun, version: BrowserTaskVersion, step: BrowserTaskStep, input: BrowserTaskAssetRunInput,
+    host: BrowserTaskAssetHost, tree: Omit<SubflowFrame, 'parent'>): Promise<boolean> {
+    const pause = async (status: BrowserTaskAssetRun['status'], warning: string): Promise<false> => {
+      await this.change(async () => { if (run.status !== 'stopped') { run.status = status; run.warning = warning } await this.updateRun(run) })
+      return false
+    }
+    const supplied = input.calls && Object.hasOwn(input.calls, step.id) ? input.calls[step.id] : undefined
+    if (!supplied) return await pause('ready', `Subflow ${stepName(step)} needs fresh call items for this invocation. Nothing was run.`)
+    const target = step.subflow!.target as { kind: 'local'; assetId: string; version: number }
+    const ids = supplied.items.map(item => item.id)
+    const call = await this.change(async () => {
+      let call = run.calls?.find(call => call.stepId === step.id)
+      if (run.status === 'stopped' || (call && !isDeepStrictEqual(call.items.map(item => item.id), ids))) return call ? 'changed' as const : null
+      if (!call) {
+        call = { stepId: step.id, assetId: target.assetId, version: target.version, nextItem: 0, items: ids.map(id => ({ id })) }
+        run.calls = [...(run.calls ?? []), call]
+        await this.updateRun(run)
+      }
+      return call
+    })
+    if (call === 'changed') return await pause('ready', `Subflow ${stepName(step)} items must keep their original ids and order. Completed items remain; nothing was run.`)
+    if (!call) return false
+    while (call.nextItem < call.items.length) {
+      if (run.status === 'stopped') return false
+      const item = call.items[call.nextItem]!, values = supplied.items[call.nextItem]!
+      const existing = item.runId ? this.document.runs.find(child => child.id === item.runId) : undefined
+      if (existing && existing.status !== 'ready' && existing.status !== 'waiting-human') {
+        return await pause(existing.status === 'completed' || existing.status === 'running' ? 'interrupted' : existing.status,
+          `Subflow ${stepName(step)} item ${JSON.stringify(item.id)} ended ${existing.status}. Completed items remain; inspect its run before another invocation.`)
+      }
+      if (!item.runId && this.treeRuns(tree.rootId).length - 1 >= BROWSER_TASK_SUBFLOW_MAX_CHILDREN) {
+        return await pause('interrupted', `This invocation reached its ${BROWSER_TASK_SUBFLOW_MAX_CHILDREN} subflow child runs. Completed items remain; no further item was sent.`)
+      }
+      const cost = this.treeCost(tree.rootId)
+      if (cost.operations >= tree.limits.operations || cost.executedMillis >= tree.limits.timeMillis) {
+        return await pause('interrupted', 'Task execution budget reached. Existing actions and progress remain; no further step was sent.')
+      }
+      const started = await this.change(async () => {
+        if (run.status === 'stopped') return false
+        run.status = 'running'; delete run.warning; await this.updateRun(run); return true
+      })
+      if (!started) return false
+      try {
+        await this.execute({ browserId: run.browserId, assetId: target.assetId, version: target.version, parameters: { ...supplied.parameters, ...values.parameters },
+          ...(values.calls ? { calls: values.calls } : {}), ...(item.runId ? { runId: item.runId } : {}) }, host, undefined,
+        { parent: { runId: run.id, stepId: step.id, itemId: item.id }, ...tree, depth: tree.depth + 1 })
+      } catch (error) {
+        return await pause(item.runId ? 'interrupted' : 'ready', `Subflow ${stepName(step)} item ${JSON.stringify(item.id)}: ${error instanceof Error ? error.message : 'its child run did not start.'}`)
+      }
+      const advanced = await this.change(async () => {
+        const child = this.document.runs.find(child => child.id === item.runId)
+        if (run.status === 'stopped') return false
+        if (child?.status === 'completed') { call.nextItem += 1; await this.updateRun(run); return true }
+        const status = child && child.status !== 'running' ? child.status : 'interrupted'
+        run.status = status
+        run.warning = `Subflow ${stepName(step)} item ${JSON.stringify(item.id)} ${status === 'waiting-human' ? 'is waiting for the person' : `stopped at ${status}`}. Completed items remain; ` +
+          (status === 'waiting-human' || status === 'ready' ? 'continue this root run with the same items and fresh values.' : 'inspect its run before another invocation.')
+        await this.updateRun(run); return false
+      })
+      if (!advanced) return false
+    }
+    await this.change(async () => {
+      if (run.status !== 'stopped') run.nextStep = browserTaskNextIndex(version.steps, run.nextStep, step.nextStepId)
+      await this.updateRun(run)
+    })
+    return run.status !== 'stopped'
+  }
+
+  /** Fresh call items must match this exact version's subflow steps and their fixed callees. */
+  private validateCalls(browserId: string, version: BrowserTaskVersion, calls: BrowserTaskInvocationCalls | undefined, depth: number): void {
+    for (const [stepId, call] of Object.entries(calls ?? {})) {
+      const step = version.steps.find(step => step.id === stepId && step.kind === 'subflow')
+      if (!step) throw new Error('Subflow call items name a step that is not a subflow of this version. Nothing was run.')
+      if (depth >= BROWSER_TASK_SUBFLOW_MAX_DEPTH) throw new Error(`Subflows may nest at most ${BROWSER_TASK_SUBFLOW_MAX_DEPTH} levels. Nothing was run.`)
+      const callee = this.callee(browserId, step), once = step.subflow!.iteration === 'once'
+      const items = Array.isArray(call?.items) ? call.items : []
+      if ((once ? items.length !== 1 : items.length < 1 || items.length > BROWSER_TASK_SUBFLOW_MAX_ITEMS) || new Set(items.map(item => item?.id)).size !== items.length) {
+        throw new Error(`Subflow ${stepName(step)} takes ${once ? 'exactly one item' : `1–${BROWSER_TASK_SUBFLOW_MAX_ITEMS} uniquely identified items`}. Nothing was run.`)
+      }
+      for (const [key, value] of Object.entries(call.parameters ?? {})) {
+        if (typeof value !== 'string' || value.length > 16_384 || !callee.parameters.some(parameter => parameter.key === key)) throw new Error(`Subflow ${stepName(step)} parameters must be declared by its fixed version. Nothing was run.`)
+      }
+      for (const item of items) {
+        identity(item.id)
+        for (const [key, value] of Object.entries(item.parameters ?? {})) {
+          const parameter = callee.parameters.find(parameter => parameter.key === key)
+          if (typeof value !== 'string' || value.length > 16_384 || !parameter || parameter.secret) throw new Error('Per-item subflow values must use declared non-secret parameters; supply secrets once for the call. Nothing was run.')
+        }
+        this.validateCalls(browserId, callee, item.calls, depth + 1)
+      }
+    }
+  }
+
+  /** The parent condition is consumed by its first original child operation, including across Continue. */
+  private callHasOperations(runId: string, stepId: string): boolean {
+    const call = this.document.runs.find(run => run.id === runId)?.calls?.find(call => call.stepId === stepId)
+    return !!call?.items.some(item => item.runId && this.treeRuns(item.runId).some(run => run.operationIds.length > 0))
+  }
+  private callItem(parent: BrowserTaskRunParent): { id: string; runId?: string } | undefined {
+    return this.document.runs.find(run => run.id === parent.runId)?.calls?.find(call => call.stepId === parent.stepId)?.items.find(item => item.id === parent.itemId)
+  }
+  /** The root and every child bound through its original call items. */
+  private treeRuns(rootId: string): BrowserTaskAssetRun[] {
+    const result: BrowserTaskAssetRun[] = [], pending = [rootId]
+    while (pending.length && result.length <= BROWSER_TASK_SUBFLOW_MAX_CHILDREN) {
+      const runId = pending.shift()!
+      const run = this.document.runs.find(run => run.id === runId)
+      if (!run || result.includes(run)) continue
+      result.push(run)
+      for (const call of run.calls ?? []) for (const item of call.items) if (item.runId) pending.push(item.runId)
+    }
+    return result
+  }
+  private treeCost(rootId: string): { operations: number; executedMillis: number } {
+    const runs = this.treeRuns(rootId)
+    return { operations: runs.reduce((sum, run) => sum + run.operationIds.length, 0), executedMillis: runs.reduce((sum, run) => sum + (run.executedMillis ?? 0), 0) }
+  }
+  private rootOf(run: BrowserTaskAssetRun): BrowserTaskAssetRun {
+    let current = run
+    for (let depth = 1; current.parent && depth < BROWSER_TASK_SUBFLOW_MAX_DEPTH; depth += 1) {
+      const parent = this.document.runs.find(item => item.id === current.parent!.runId)
+      if (!parent) break
+      current = parent
+    }
+    return current
+  }
+  /** The exact child bound at the run's current subflow cursor, if any. */
+  private currentChild(run: BrowserTaskAssetRun): BrowserTaskAssetRun | undefined {
+    const version = this.document.assets.find(asset => asset.id === run.assetId)?.versions.find(item => item.version === run.version)
+    const call = run.calls?.find(call => call.stepId === version?.steps[run.nextStep]?.id)
+    const runId = call?.items[call.nextItem]?.runId
+    return runId ? this.document.runs.find(child => child.id === runId) : undefined
+  }
+
+  /** One exact run tree for public inspection: no asset bodies, values or approval payloads. */
+  async inspect(browserId: string, runId?: string): Promise<{ rootRunId: string; currentRunId: string; runs: BrowserTaskAssetRun[]; operationCount: number; executedMillis: number } | null> {
+    await this.ready()
+    if (this.loadUnavailable) throw new AgentMuxError(this.warning ?? 'Task runs could not be read. Existing data is retained.', 'BROWSER_TASK_RUNS_UNAVAILABLE')
+    const id = runId ?? this.document.selectedRuns?.find(item => item.browserId === browserId)?.runId
+    if (!id) return null
+    const target = this.document.runs.find(run => run.id === id)
+    if (!target || target.browserId !== browserId) throw new AgentMuxError('This task run does not belong to the Browser.', 'BROWSER_TASK_RUN_NOT_FOUND')
+    const root = this.rootOf(target), runs = this.treeRuns(root.id)
+    let current = root
+    for (let child = this.currentChild(current); child && runs.includes(child); child = this.currentChild(current)) current = child
+    const cost = this.treeCost(root.id)
+    return copy({ rootRunId: root.id, currentRunId: current.id, runs: runs.map(run => this.projectRun(run)), operationCount: cost.operations, executedMillis: cost.executedMillis })
+  }
+
+  /** The deepest run awaiting its own human checkpoint under this root, for the trusted Continue owner. */
+  async waitingLeaf(runId: string): Promise<BrowserTaskAssetRun | null> {
+    await this.ready()
+    let current = this.document.runs.find(run => run.id === runId)
+    for (let child = current && this.currentChild(current); child; child = this.currentChild(child)) current = child
+    return current && current.status === 'waiting-human' && current.pendingCheckpointId ? copy(current) : null
+  }
+
   /** The original execution lease also covers batch preparation and the gaps between its items. */
   isBrowserExecuting(browserId: string, batchId?: string): boolean {
     const active = this.activeBrowsers.get(browserId)
@@ -608,6 +846,7 @@ export class BrowserTaskAssets {
       batch = await this.change(async () => {
         const asset = this.requireAsset(input.assetId), version = asset.versions.find(version => version.version === input.version)
         if (asset.browserId !== browserId || !version) throw new Error('The batch asset version belongs to another Browser or is unavailable.')
+        if (version.steps.some(step => step.kind === 'subflow')) throw new Error('This version calls subflows. Run it directly and give each subflow its explicit items; a batch cannot share that budget.')
         validateBrowserTaskPath(version.steps)
         for (const item of supplied.items) {
           identity(item.id)
@@ -671,6 +910,33 @@ export class BrowserTaskAssets {
     } finally { if (this.activeBrowsers.get(browserId) === lease) { this.activeBrowsers.delete(browserId); this.notify(browserId) } }
   }
 
+  /** Exact retained callee in the same Browser. Imported references stay unbound until edited. */
+  private callee(browserId: string, step: BrowserTaskStep): BrowserTaskVersion {
+    const target = step.subflow?.target
+    if (target?.kind !== 'local') throw new Error(`Subflow ${stepName(step)} has an unbound imported target. Choose an exact local task version before publishing or running it.`)
+    const asset = this.document.assets.find(asset => asset.id === target.assetId)
+    const version = asset?.browserId === browserId ? asset.versions.find(version => version.version === target.version) : undefined
+    if (!version) throw new Error(`Subflow ${stepName(step)} names a task version that is unavailable in this Browser. Nothing was run.`)
+    return version
+  }
+  /** Validate only this definition’s retained dependency closure, reusing shared callees. */
+  private subflowDepth(browserId: string, steps: BrowserTaskStep[], ancestors = new Set<string>(), depths = new Map<string, number>()): number {
+    let depth = 1
+    for (const step of steps) if (step.kind === 'subflow') {
+      const callee = this.callee(browserId, step), target = step.subflow!.target as { assetId: string; version: number }
+      const key = JSON.stringify([target.assetId, target.version])
+      if (ancestors.has(key)) throw new Error('Subflows cannot recursively call an active task version.')
+      let childDepth = depths.get(key)
+      if (childDepth === undefined) {
+        ancestors.add(key)
+        childDepth = this.subflowDepth(browserId, callee.steps, ancestors, depths)
+        ancestors.delete(key); depths.set(key, childDepth)
+      }
+      depth = Math.max(depth, 1 + childDepth)
+      if (depth > BROWSER_TASK_SUBFLOW_MAX_DEPTH) throw new Error(`Subflows may nest at most ${BROWSER_TASK_SUBFLOW_MAX_DEPTH} levels including this task.`)
+    }
+    return depth
+  }
   private requireAsset(id: string): BrowserTaskAsset {
     const asset = this.document.assets.find(item => item.id === id)
     if (!asset) throw new Error('Task asset is unavailable; existing Browser work was retained.')
@@ -774,13 +1040,13 @@ function afterStepFailure(step: BrowserTaskStep, attempts: number, report: Brows
 
 /** Page steps that send exactly one existing Browser page function; the replay compiler checks it against the real page API. */
 const PAGE_STEP_METHOD = { click: 'click', fill: 'fillInput', upload: 'uploadFiles', navigate: 'gotoUrl', press: 'pressKey', hover: 'hover', scroll: 'scroll', drag: 'drag', tap: 'tap', longPress: 'longPress', swipe: 'swipe', pinch: 'pinch' } as const satisfies
-  Record<Exclude<BrowserTaskStep['kind'], 'checkpoint' | 'branch' | 'wait' | 'assert'>, string>
+  Record<Exclude<BrowserTaskStep['kind'], 'checkpoint' | 'branch' | 'wait' | 'assert' | 'subflow'>, string>
 
 function compileAssetStep(step: BrowserTaskStep, parameters: Record<string, string>, downloadPath?: string): string {
   if (!step.reviewed) throw new Error('Review the demonstrated step before executing it.')
   // Wait and assert only read the page; they need no element handle of their own.
   if (step.kind === 'wait' || step.kind === 'assert') return compileBrowserTaskCheck(step)
-  if (step.kind === 'checkpoint' || step.kind === 'branch') throw new Error('Checkpoints and conditions keep their own continuation; they are not page calls.')
+  if (step.kind === 'checkpoint' || step.kind === 'branch' || step.kind === 'subflow') throw new Error('Checkpoints, conditions and subflows keep their own continuation; they are not page calls.')
   if (step.kind !== 'navigate' && (!step.target || step.target.count !== 1 || step.target.ordinal !== 1)) {
     throw new Error('The task target is unknown or ambiguous. Locate the actual page target before executing it.')
   }
@@ -800,6 +1066,7 @@ function compileAssetStep(step: BrowserTaskStep, parameters: Record<string, stri
 function validateTaskSegment(version: BrowserTaskVersion, values: Record<string, string>, nextStep: number, mode?: 'run' | 'step', dialogTypes?: BrowserTaskAssetHost['dialogTypes']): void {
   if (!values || typeof values !== 'object' || Array.isArray(values)) throw new Error('Provide the task parameters for this invocation.')
   const first = version.steps[nextStep]
+  if (first?.kind === 'subflow' && !first.reviewed) throw new Error('Review the subflow and its fixed task version before executing it.')
   if (first?.kind === 'branch') {
     if (!first.reviewed || !first.branch) throw new Error('Review the condition and both paths before executing it.')
     return
@@ -897,7 +1164,7 @@ function content(value: unknown): BrowserTaskContent {
   })
   if (new Set(parameters.map(item => item.key)).size !== parameters.length) throw new Error('Duplicate task parameter')
   const steps: BrowserTaskStep[] = raw.steps.map(step => {
-    draftFields(step, ['id', 'kind', 'url', 'target', 'destination', 'durationMs', 'scale', 'parameterKey', 'parameterKeys', 'dialog', 'label', 'branch', 'wait', 'timeoutMs', 'assert', 'key', 'onFail', 'retry', 'nextStepId', 'reviewed', 'warning'])
+    draftFields(step, ['id', 'kind', 'url', 'target', 'destination', 'durationMs', 'scale', 'parameterKey', 'parameterKeys', 'dialog', 'subflow', 'label', 'branch', 'wait', 'timeoutMs', 'assert', 'key', 'onFail', 'retry', 'nextStepId', 'reviewed', 'warning'])
     if (!step || !STEP_KINDS.includes(step.kind)) throw new Error('Invalid task step')
     if (typeof step.url !== 'string' || typeof step.reviewed !== 'boolean' || (step.label !== undefined && typeof step.label !== 'string') || (step.warning !== undefined && typeof step.warning !== 'string')) throw new Error('Invalid task step field')
     const url = safeUrl(step.url)
@@ -918,6 +1185,7 @@ function content(value: unknown): BrowserTaskContent {
       ...(step.scale !== undefined ? { scale: step.scale } : {}),
       ...(step.parameterKeys ? { parameterKeys: step.parameterKeys.map(parameterKey) } : {}),
       ...(step.dialog ? { dialog: { type: step.dialog.type, action: step.dialog.action, ...(step.dialog.promptParameterKey !== undefined ? { promptParameterKey: parameterKey(step.dialog.promptParameterKey) } : {}) } } : {}),
+      ...(step.subflow !== undefined ? { subflow: subflowCall(step.subflow) } : {}),
       ...(step.parameterKey ? { parameterKey: parameterKey(step.parameterKey) } : {}), ...(step.label ? { label: text(step.label) } : {}),
       ...(step.branch !== undefined ? { branch: branch(step.branch) } : {}),
       ...(step.wait !== undefined ? { wait: waitCondition(step.wait) } : {}),
@@ -935,7 +1203,8 @@ function content(value: unknown): BrowserTaskContent {
     if ((step.kind === 'wait') !== (step.wait !== undefined) || (step.kind === 'wait') !== (step.timeoutMs !== undefined)) throw new Error('A wait step declares its condition and timeout; other steps cannot.')
     if ((step.kind === 'assert') !== (step.assert !== undefined)) throw new Error('An assert step declares its expected page fact; other steps cannot.')
     if ((step.kind === 'press') !== (step.key !== undefined)) throw new Error('A press step declares its key; other steps cannot.')
-    if ((step.kind === 'checkpoint' || step.kind === 'branch') && (step.onFail !== undefined || step.retry !== undefined)) throw new Error('Checkpoints and conditions keep their own continuation; failure handling belongs to page steps.')
+    if ((step.kind === 'checkpoint' || step.kind === 'branch' || step.kind === 'subflow') && (step.onFail !== undefined || step.retry !== undefined)) throw new Error('Checkpoints, conditions and subflows keep their own continuation; failure handling belongs to page steps.')
+    if ((step.kind === 'subflow') !== (step.subflow !== undefined) || (step.kind === 'subflow' && (step.target || step.destination || step.parameterKey || step.parameterKeys || step.dialog))) throw new Error('A subflow step declares only its fixed callee version and iteration; page fields belong to page steps.')
   }
   for (const step of steps) {
     if (step.kind === 'fill' && !step.parameterKey) throw new Error('Task fill parameter is not defined')
@@ -952,9 +1221,9 @@ function content(value: unknown): BrowserTaskContent {
       ? { kind: item.kind, path: item.path } : item) })
     const downloads = criteria.filter(item => item.kind === 'download-readable')
     if (downloads.length > 1) throw new Error('Declare one download producer per version; checkpoints may accompany it.')
-    const producer = downloads[0]?.stepId ?? steps.find(step => step.kind !== 'checkpoint' && step.kind !== 'branch')?.id
+    const producer = downloads[0]?.stepId ?? steps.find(isPageStep)?.id
     const producerIndex = steps.findIndex(step => step.id === producer)
-    if (producerIndex < 0 || (steps[producerIndex]?.kind === 'checkpoint' || steps[producerIndex]?.kind === 'branch')) throw new Error('Completion needs a real page producer before its checkpoint.')
+    if (producerIndex < 0 || !isPageStep(steps[producerIndex]!)) throw new Error('Completion needs a real page producer before its checkpoint.')
     for (const item of criteria) {
       if (item.kind === 'download-readable' && (steps[producerIndex]?.dialog !== undefined || steps[producerIndex]?.kind !== 'click' || !item.path.trim() || item.path.length > 512)) throw new Error('Download completion needs a reviewed click and a Workspace path.')
       if (item.kind === 'human-checkpoint' && !steps.some((step, index) => step.kind === 'checkpoint' && step.id === item.checkpointId && index > producerIndex)) throw new Error('Declare the checkpoint after its real producer.')
@@ -998,12 +1267,30 @@ function normalizeDocument(value: unknown): BrowserTaskAssetDocument {
         !Array.isArray(run.operationIds) || run.operationIds.length > MAX_STEPS || !Number.isFinite(run.startedAt) || !Number.isFinite(run.updatedAt)) throw new Error('Invalid task run')
     const humanCheckpoints = normalizeHumanCheckpoints(run, version)
     return { id: identity(run.id), assetId: asset.id, version: version.version, browserId: asset.browserId, nextStep: run.nextStep, status: run.status,
-      operationIds: run.operationIds.map(identity), ...normalizePathFacts(run, version), ...(run.pendingCheckpointId ? { pendingCheckpointId: identity(run.pendingCheckpointId) } : {}),
+      operationIds: run.operationIds.map(identity), ...normalizePathFacts(run, version), ...normalizeCallFacts(run, version),
+      ...(run.pendingCheckpointId ? { pendingCheckpointId: identity(run.pendingCheckpointId) } : {}),
       ...(humanCheckpoints !== undefined ? { humanCheckpoints } : {}),
       ...(run.completionWarning ? { completionWarning: text(run.completionWarning) } : {}),
       ...(run.warning ? { warning: text(run.warning) } : {}), startedAt: run.startedAt, updatedAt: run.updatedAt }
   })
   if (new Set(runs.map(run => run.id)).size !== runs.length) throw new Error('Duplicate task run identity')
+  for (const run of runs) {
+    for (const call of run.calls ?? []) call.items.forEach((item, index) => {
+      const child = item.runId ? runs.find(child => child.id === item.runId) : undefined
+      if (item.runId && (!child || child.browserId !== run.browserId || child.assetId !== call.assetId || child.version !== call.version ||
+          !isDeepStrictEqual(child.parent, { runId: run.id, stepId: call.stepId, itemId: item.id }) || (index < call.nextItem && child.status !== 'completed'))) throw new Error('Invalid subflow child binding')
+    })
+    if (run.parent && runs.find(parent => parent.id === run.parent!.runId)?.calls?.find(call => call.stepId === run.parent!.stepId)?.items.find(item => item.id === run.parent!.itemId)?.runId !== run.id) throw new Error('Subflow child has no original parent item')
+    // Every stored child must reach a root within the same finite nesting contract.
+    // Checking individual edges alone would accept a mutually bound cycle.
+    let current = run
+    const ancestors = new Set<string>([current.id])
+    for (let depth = 1; current.parent; depth += 1) {
+      const parent = runs.find(candidate => candidate.id === current.parent!.runId)
+      if (!parent || depth >= BROWSER_TASK_SUBFLOW_MAX_DEPTH || ancestors.has(parent.id)) throw new Error('Invalid subflow parent chain')
+      ancestors.add(parent.id); current = parent
+    }
+  }
   const selectedRuns = Array.isArray(raw.selectedRuns) &&
     new Set(raw.selectedRuns.map(item => item?.browserId)).size === raw.selectedRuns.length &&
     raw.selectedRuns.every(item => item && runs.some(run => run.id === item.runId && run.browserId === item.browserId))
@@ -1028,6 +1315,29 @@ function normalizeHumanCheckpoints(run: BrowserTaskAssetRun, version: BrowserTas
   return facts
 }
 
+/** Subflow targets name one exact retained version; never latest, a name or a page result. */
+function subflowCall(value: BrowserTaskSubflow): BrowserTaskSubflow {
+  draftFields(value, ['target', 'iteration'])
+  if (value.iteration !== 'once' && value.iteration !== 'each') throw new Error('A subflow runs once or each explicit item.')
+  const raw = value.target as Record<string, unknown> | undefined
+  if (raw?.kind === 'local') {
+    draftFields(raw, ['kind', 'assetId', 'version'])
+    return { target: { kind: 'local', assetId: identity(raw.assetId as string), version: versionNumber(raw.version) }, iteration: value.iteration }
+  }
+  if (raw?.kind === 'imported') {
+    draftFields(raw, ['kind', 'source'])
+    draftFields(raw.source, ['assetId', 'version'])
+    const source = raw.source as { assetId: string; version: unknown }
+    return { target: { kind: 'imported', source: { assetId: identity(source.assetId), version: versionNumber(source.version) } }, iteration: value.iteration }
+  }
+  throw new Error('A subflow names one exact local task version.')
+}
+function versionNumber(value: unknown): number {
+  if (!Number.isSafeInteger(value) || (value as number) < 1) throw new Error('A subflow names one exact retained version number.')
+  return value as number
+}
+/** The one producer rule shared by completion declarations and Main outcome registration. */
+export function isPageStep(step: BrowserTaskStep): boolean { return step.kind !== 'checkpoint' && step.kind !== 'branch' && step.kind !== 'subflow' }
 function branch(value: NonNullable<BrowserTaskStep['branch']>): NonNullable<BrowserTaskStep['branch']> {
   draftFields(value, ['condition', 'onTrue', 'onFalse'])
   if (!value || !value.condition || !['page-url-is', 'element-present'].includes(value.condition.kind) ||
@@ -1115,6 +1425,28 @@ function normalizePathFacts(run: BrowserTaskAssetRun, version: BrowserTaskVersio
   if (run.executedMillis !== undefined) {
     if (!Number.isFinite(run.executedMillis) || run.executedMillis < 0) throw new Error('Invalid task execution time budget')
     facts.executedMillis = run.executedMillis
+  }
+  return facts
+}
+
+function normalizeCallFacts(run: BrowserTaskAssetRun, version: BrowserTaskVersion): Pick<BrowserTaskAssetRun, 'parent' | 'calls'> {
+  const facts: Pick<BrowserTaskAssetRun, 'parent' | 'calls'> = {}
+  if (run.parent !== undefined) {
+    draftFields(run.parent, ['runId', 'stepId', 'itemId'])
+    facts.parent = { runId: identity(run.parent.runId), stepId: identity(run.parent.stepId), itemId: identity(run.parent.itemId) }
+  }
+  if (run.calls !== undefined) {
+    if (!Array.isArray(run.calls) || new Set(run.calls.map(call => call?.stepId)).size !== run.calls.length) throw new Error('Invalid subflow call facts')
+    facts.calls = run.calls.map(call => {
+      draftFields(call, ['stepId', 'assetId', 'version', 'nextItem', 'items'])
+      const step = version.steps.find(step => step.id === call.stepId && step.kind === 'subflow')
+      const target = step?.subflow?.target
+      if (target?.kind !== 'local' || target.assetId !== call.assetId || target.version !== call.version || !Array.isArray(call.items) || call.items.length < 1 ||
+          call.items.length > BROWSER_TASK_SUBFLOW_MAX_ITEMS || (step!.subflow!.iteration === 'once' && call.items.length !== 1) ||
+          new Set(call.items.map(item => item?.id)).size !== call.items.length || !Number.isSafeInteger(call.nextItem) || call.nextItem < 0 || call.nextItem > call.items.length) throw new Error('Invalid subflow call facts')
+      return { stepId: call.stepId, assetId: call.assetId, version: call.version, nextItem: call.nextItem,
+        items: call.items.map(item => { draftFields(item, ['id', 'runId']); return { id: identity(item.id), ...(item.runId === undefined ? {} : { runId: identity(item.runId) }) } }) }
+    })
   }
   return facts
 }

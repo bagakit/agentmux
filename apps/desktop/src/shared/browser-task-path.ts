@@ -46,7 +46,7 @@ export function browserTaskSegment(steps: BrowserTaskStep[], nextStep: number): 
   const segment: BrowserTaskStep[] = []
   for (let index = nextStep; index < steps.length;) {
     const step = steps[index]!
-    if (step.kind === 'checkpoint' || step.kind === 'branch') break
+    if (step.kind === 'checkpoint' || step.kind === 'branch' || step.kind === 'subflow') break
     segment.push(step)
     index = browserTaskNextIndex(steps, index, step.nextStepId)
   }

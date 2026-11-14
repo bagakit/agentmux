@@ -13,6 +13,7 @@ type BrowserTaskControlOwner = {
   importTaskAsset(browserId: string, input: BrowserTaskCreateInput): Promise<BrowserTaskAsset>
   inspectTaskAssetCreation(browserId: string, input: BrowserTaskCreateInput): Promise<BrowserTaskCreateStatus>
   getTaskAssets(browserId: string): Promise<BrowserTaskAssetState>
+  inspectTaskRun(browserId: string, runId?: string): Promise<{ rootRunId: string; currentRunId: string; runs: BrowserTaskAssetRun[]; operationCount: number; executedMillis: number } | null>
   saveTaskAssetDraft(browserId: string, assetId: string, expectedRevision: number, content: unknown): Promise<BrowserTaskAsset>
   publishTaskAsset(browserId: string, assetId: string, expectedRevision: number): Promise<BrowserTaskAsset>
   getOperation(operationId: string): Promise<BrowserOperation | null>
@@ -57,7 +58,11 @@ export async function executeBrowserTaskControl(value: unknown, owner: BrowserTa
   } else if (request.operation === 'browser.task.create-inspect') {
     raw = { creation: await owner.inspectTaskAssetCreation(request.browserId, request.input) }
   } else if (request.operation === 'browser.task.assets') {
-    raw = { state: await owner.getTaskAssets(request.browserId) }
+    // Subflow children belong to their root's bounded tree, read through browser.task.inspect.
+    const state = await owner.getTaskAssets(request.browserId)
+    raw = { state: { ...state, runs: state.runs.filter(run => !run.parent) } }
+  } else if (request.operation === 'browser.task.inspect') {
+    raw = { inspection: await owner.inspectTaskRun(request.browserId, request.runId) }
   } else if (request.operation === 'browser.task.edit') {
     const asset = await owner.saveTaskAssetDraft(request.browserId, request.assetId, request.expectedRevision, request.content)
     // A confirmed write receipt must not grow with the original owner's cumulative history.
