@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { BaseEdge, getViewportForBounds, Position, ReactFlow, useNodesState, type Edge, type EdgeProps, type Node, type NodeProps, type ReactFlowInstance, type XYPosition } from '@xyflow/react'
 import { Button } from '@agentmux/client-ui/components/Button'
 import type { HostConfig } from '../../../../shared/contracts'
@@ -238,12 +238,17 @@ function MeshTopologyExplorer({ snapshot, active, actions, hosts, onDevice, loca
   const fit = useCallback(() => {
     if (boundsWidth !== undefined && boundsHeight !== undefined) {
       const rect = canvas.current?.getBoundingClientRect()
-      if (rect?.width && rect.height) void instance.current?.setViewport(getViewportForBounds({
-        x: boundsX ?? 0, y: boundsY ?? 0, width: boundsWidth, height: boundsHeight
-      }, rect.width, rect.height, MIN_ZOOM, MAX_ZOOM, fitPadding))
+      if (rect?.width && rect.height) {
+        const bounds = { x: boundsX ?? 0, y: boundsY ?? 0, width: boundsWidth, height: boundsHeight }
+        const viewport = getViewportForBounds(bounds, rect.width, rect.height, MIN_ZOOM, MAX_ZOOM, fitPadding)
+        const top = 12 - bounds.y * viewport.zoom
+        void instance.current?.setViewport({ ...viewport, y: Math.min(viewport.y, top) })
+      }
     }
     else void instance.current?.fitView({ padding: fitPadding, maxZoom: 1 })
   }, [fitPadding, boundsX, boundsY, boundsWidth, boundsHeight])
+  const currentFit = useRef(fit)
+  useLayoutEffect(() => { currentFit.current = fit }, [fit])
   // Container changes are real geometry changes, not new observations. Refit the same nodes while
   // retaining their positions, so a narrow overview never leaves the original Core off-canvas.
   useEffect(() => {
@@ -259,22 +264,22 @@ function MeshTopologyExplorer({ snapshot, active, actions, hosts, onDevice, loca
       setNarrow(width < 590)
       canvasResizeRevision.current += 1
       if (frame !== undefined) cancelAnimationFrame(frame)
-      frame = requestAnimationFrame(() => { frame = undefined; fit() })
+      frame = requestAnimationFrame(() => { frame = undefined; currentFit.current() })
     }
     resize()
     const observer = new ResizeObserver(resize)
     observer.observe(element)
     return () => { observer.disconnect(); if (frame !== undefined) cancelAnimationFrame(frame) }
-  }, [active, view, fit, hasMap])
+  }, [active, view, hasMap])
   // A deliberate selection can open the inspector and narrow the canvas after a user pan.
   // Wait for its new dimensions, then fit once. Observations do not request a viewport change.
   useEffect(() => {
     if (!active || view === 'list' || focusRequest === focusedRequest.current) return
     focusedRequest.current = focusRequest
     let settled: number | undefined
-    const frame = requestAnimationFrame(() => { settled = requestAnimationFrame(() => { if (canvasResizeRevision.current === focusResizeRevision.current) fit() }) })
+    const frame = requestAnimationFrame(() => { settled = requestAnimationFrame(() => { if (canvasResizeRevision.current === focusResizeRevision.current) currentFit.current() }) })
     return () => { cancelAnimationFrame(frame); if (settled !== undefined) cancelAnimationFrame(settled) }
-  }, [focusRequest, active, view, fit])
+  }, [focusRequest, active, view])
   // Geometry is finite and off-thread. Counters, RTT and selection do not relayout the network.
   useEffect(() => {
     if (!active || view === 'list' || !hasRelayPeers || geographic) return

@@ -8,6 +8,7 @@ export const WORLD_HEIGHT = WORLD_WIDTH / 2
 const GUTTER = 16
 const ROW_HEIGHT = 86
 const TRAY_HEADER = 48
+const TRAY_CARD = { width: 176, height: 64 }
 
 export function projectMeshLocation({ latitude, longitude }: MeshLocation): XYPosition {
   return { x: (longitude + 180) * WORLD_WIDTH / 360, y: (90 - latitude) * WORLD_HEIGHT / 180 }
@@ -67,6 +68,7 @@ export function placeGeographicNodes<N extends Node>(nodes: readonly N[], points
     bottom: Math.max(box.bottom, position.y + height),
   }), { left: 0, top: 0, right: WORLD_WIDTH, bottom: WORLD_HEIGHT })
   const columns = narrow ? 3 : unplaced.length > 5 ? 2 : 1
+  const cardWidth = narrow ? 280 : TRAY_CARD.width
   const tray: Rect | undefined = unplaced.length ? {
     x: narrow ? 0 : extent.right + 28,
     y: narrow ? extent.bottom + 30 : 0,
@@ -75,8 +77,8 @@ export function placeGeographicNodes<N extends Node>(nodes: readonly N[], points
   } : undefined
   if (tray) {
     for (const [index, node] of unplaced.entries()) {
-      placements.push({ ...node, draggable: false, position: {
-        x: tray.x + (index % columns + .5) * tray.width / columns - (node.width ?? 166) / 2,
+      placements.push({ ...node, width: cardWidth, height: TRAY_CARD.height, draggable: false, className: 'mesh-unlocated-node', position: {
+        x: tray.x + (index % columns + .5) * tray.width / columns - cardWidth / 2,
         y: tray.y + TRAY_HEADER + Math.floor(index / columns) * ROW_HEIGHT,
       } })
     }

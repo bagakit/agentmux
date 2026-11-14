@@ -7,7 +7,7 @@
 .mesh-explorer h3, .mesh-explorer h4, .mesh-explorer h5, .mesh-explorer p { margin: 0; }
 .mesh-explorer .mesh-explorer__header h3 { font-size: var(--fs-title); letter-spacing: -.015em; margin: 0 0 5px; }
 .mesh-explorer .mesh-explorer__header p { color: var(--text-2); font-size: var(--fs-body); }
-.mesh-explorer__toolbar { display: flex; flex-wrap: wrap; gap: 8px; padding: 0 20px 14px; align-items: center; }
+.mesh-explorer__toolbar { display: flex; flex-wrap: wrap; gap: 8px; padding: 0 16px 14px; align-items: center; }
 .mesh-explorer__search { flex: 1 1 210px; min-width: 150px; }
 .mesh-explorer__search input { width: 100%; }
 .mesh-explorer__segments { display: flex; flex: none; padding: 3px; gap: 2px; border-radius: 7px; background: var(--surface-0); }
@@ -24,20 +24,20 @@
 .mesh-explorer__canvas-tools > span { color: var(--text-3); font-size: var(--fs-meta); flex: 1 1 140px; }
 .mesh-explorer__canvas-tools .small-button { min-height: 25px; padding: 3px 7px; }
 .mesh-explorer__layout-issue { padding: 6px 12px; color: var(--text-3); font-size: var(--fs-meta); }
-.mesh-explorer-node { display: grid; width: 188px; height: 64px; box-sizing: border-box; padding: 8px 10px; text-align: left; gap: 3px; color: var(--text); background: linear-gradient(160deg, var(--surface-2), var(--surface-1)); border: 1px solid var(--line-strong, var(--text-3)); border-radius: 9px; box-shadow: var(--elev-1), inset 0 1px 0 color-mix(in srgb, var(--text) 10%, transparent); cursor: pointer; }
+.mesh-explorer-node { display: grid; grid-template-columns: minmax(0, 1fr); grid-auto-rows: min-content; align-content: center; width: 188px; height: 64px; box-sizing: border-box; padding: 5px 10px; text-align: left; gap: 2px; color: var(--text); background: linear-gradient(160deg, var(--surface-2), var(--surface-1)); border: 1px solid var(--line-strong, var(--text-3)); border-radius: 9px; box-shadow: var(--elev-1), inset 0 1px 0 color-mix(in srgb, var(--text) 10%, transparent); cursor: pointer; }
 .mesh-explorer-node[data-on-path] { border-color: color-mix(in srgb, var(--green) 65%, var(--text-3)); background: linear-gradient(160deg, color-mix(in srgb, var(--green) 11%, var(--surface-2)), var(--surface-1)); }
 .mesh-explorer-node[aria-pressed=true] { box-shadow: 0 0 0 2px var(--green), var(--elev-1); }
 .mesh-explorer .mesh-explorer-node[data-dimmed] { background: var(--surface-1); border-color: var(--line-strong); color: var(--text-2); }
 .mesh-explorer-node[data-dimmed] .mesh-explorer-node__state { color: var(--text-3); }
 .mesh-explorer-node:hover { background: var(--surface-2); }
-.mesh-explorer-node__kind { display: flex; align-items: center; gap: 6px; font: var(--fs-micro) var(--font-mono); color: var(--text-3); letter-spacing: .06em; }
+.mesh-explorer-node__kind { display: flex; align-items: center; gap: 6px; font: var(--fs-micro)/1.2 var(--font-mono); color: var(--text-3); letter-spacing: .06em; }
 .mesh-explorer-node__kind > span:last-child:not(:first-child) { margin-left: auto; font-size: var(--fs-body); color: var(--text); }
 .mesh-explorer-node__socket { width: 7px; height: 7px; border: 1px solid currentColor; border-radius: 2px; }
 .mesh-explorer-node[data-peer-state=local] .mesh-explorer-node__socket { background: var(--text-3); }
 .mesh-explorer-node[data-shared-local] { border-color: var(--line-strong, var(--text-3)); }
 .mesh-explorer-node[data-shared-local][data-on-path] { border-color: var(--green); }
 .mesh-explorer-node strong { font-size: var(--fs-body); font-weight: 550; line-height: 1.3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.mesh-explorer-node__state { color: var(--text-2); font-size: var(--fs-micro); }
+.mesh-explorer-node__state { color: var(--text-2); font-size: var(--fs-micro); line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .mesh-explorer__canvas .react-flow__handle { width: 5px; height: 5px; background: var(--text-3); border-color: var(--surface-1); }
 .mesh-explorer-edge .react-flow__edge-path { stroke: var(--text-3); stroke-width: 1.4; }
 .mesh-explorer-edge--muted .react-flow__edge-path { opacity: .55; }
@@ -173,7 +173,7 @@
 .mesh-explorer .mesh-explorer__canvas[data-mixed] { height: clamp(380px, 49vh, 555px); }
 .mesh-explorer .mesh-explorer__canvas[data-saved][data-narrow] { height: clamp(330px, 45vh, 440px); }
 .mesh-explorer .mesh-explorer__canvas[data-mixed][data-narrow] { height: clamp(350px, 48vh, 485px); }
-.mesh-explorer[data-mesh-overview] .mesh-explorer__canvas[data-geographic] { height: clamp(385px, 54vh, 620px); }
+.mesh-explorer[data-mesh-overview] .mesh-explorer__canvas[data-geographic] { height: clamp(330px, 39cqi, 570px); }
 .mesh-explorer[data-mesh-overview] .mesh-explorer__canvas[data-geographic][data-narrow] { height: clamp(350px, 43vh, 460px); }
 .mesh-explorer .mesh-saved-host { width: 158px; height: 64px; border-style: dashed; border-color: var(--text-3); }
 .mesh-saved-host .mesh-explorer-node__kind { letter-spacing: 0; }
@@ -186,12 +186,12 @@
 .mesh-explorer .mesh-saved-connections__details p { overflow-wrap: anywhere; margin-bottom: 8px; }
 
 .mesh-explorer__canvas[data-mixed] .mesh-explorer-node:not(.mesh-saved-host) { width: 166px; }
-.mesh-explorer__canvas[data-narrow] .mesh-explorer-node { grid-template-rows: 13px 20px 16px; gap: 2px; padding: 4px 7px; }
+.mesh-explorer__canvas[data-narrow] .mesh-explorer-node { padding: 4px 7px; }
 .mesh-explorer__canvas[data-narrow] .mesh-explorer-node__kind { font-size: 12px; line-height: 1; letter-spacing: 0; }
 .mesh-explorer__canvas[data-narrow] .mesh-explorer-node strong { font-size: 19px; line-height: 1; font-weight: 600; }
 .mesh-explorer__canvas[data-narrow] .mesh-explorer-node__state { font-size: 14px; line-height: 1.1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .mesh-explorer__canvas[data-narrow] .mesh-saved-client { font-size: 15px; }
-.mesh-explorer__map-key { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 6px 14px; padding: 7px 12px; background: var(--surface-0); border-bottom: 1px solid var(--line-soft); color: var(--text-2); font-size: var(--fs-meta); }
+.mesh-explorer__map-key { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 6px 14px; padding: 7px 16px; background: var(--surface-0); border-bottom: 1px solid var(--line-soft); color: var(--text-2); font-size: var(--fs-meta); }
 .mesh-explorer__map-key > span:last-child { color: var(--text-3); }
 .mesh-explorer__companion > .mesh-explorer__detail + .mesh-gateways { border-top: 1px solid var(--line-soft); }
 .mesh-explorer__detail-actions { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -251,6 +251,9 @@
 .mesh-geography__marks line { stroke: var(--text-3); stroke-width: 1; }
 .mesh-geography__marks circle, .mesh-geography__pin { fill: var(--blue); stroke: var(--surface-0); stroke-width: 2; }
 .mesh-explorer__canvas[data-geographic] .react-flow__handle { opacity: 0; }
+.mesh-explorer__canvas[data-geographic] .mesh-unlocated-node .mesh-explorer-node,
+.mesh-explorer__canvas[data-geographic] .mesh-unlocated-node .mesh-saved-client { width: 100%; height: 100%; }
+.mesh-unlocated-node .mesh-saved-client { justify-content: start; padding-inline: 10px; }
 .mesh-explorer .mesh-geographic-node .mesh-explorer-node, .mesh-geographic-node .mesh-saved-client {
   background: var(--surface-1);
   border: 1px solid var(--line-strong);
@@ -272,8 +275,13 @@
 .mesh-explorer__map-key[data-geographic] .mesh-explorer__legend i:not([class]) {
   border-color: color-mix(in srgb, var(--green) 45%, var(--text-3));
 }
-.mesh-explorer__canvas[data-geographic][data-narrow] .mesh-explorer-node strong { font-size: 21px; }
+.mesh-explorer__canvas[data-geographic] .mesh-explorer-node strong,
+.mesh-explorer__canvas[data-geographic] .mesh-saved-client { font-size: 15px; }
+.mesh-explorer__canvas[data-geographic] .mesh-explorer-node__state { font-size: 12px; }
+.mesh-explorer__canvas[data-geographic][data-narrow] .mesh-explorer-node strong,
+.mesh-explorer__canvas[data-geographic][data-narrow] .mesh-unlocated-node .mesh-saved-client { font-size: 21px; }
 .mesh-explorer__canvas[data-geographic][data-narrow] .mesh-explorer-node__state { font-size: 15px; }
+.mesh-explorer__canvas[data-narrow] .mesh-geography__tray { font-size: 20px; }
 
 .mesh-geography__marks .mesh-geography__estimate-ring { fill: none; stroke: var(--blue); stroke-width: 1.8; stroke-dasharray: 3 2; }
 .mesh-saved-client small { font-size: var(--fs-micro); }
