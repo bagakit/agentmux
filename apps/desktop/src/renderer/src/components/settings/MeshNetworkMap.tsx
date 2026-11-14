@@ -101,7 +101,13 @@ export function MeshNetworkMap({ snapshot, active = true, reading = false, stale
   const [view, setView] = useState<MeshMapView>(props.localClient ? 'geography' : 'connections')
   useEffect(() => { onGeographicViewChange?.(view === 'geography') }, [view, onGeographicViewChange])
   const [savedId, selectSaved] = useState<string>()
-  return <MeshTopologyExplorer key={meshTopologySource(snapshot)} {...props} snapshot={snapshot} active={active}
+  const source = snapshot ? meshTopologySource(snapshot) : undefined
+  const [sourceBoundary, setSourceBoundary] = useState({ source, key: source ?? '' })
+  if (source !== undefined && sourceBoundary.source !== source) {
+    // The first receipt identifies the graph already on screen. Only a known source change replaces it.
+    setSourceBoundary({ source, key: sourceBoundary.source === undefined ? sourceBoundary.key : source })
+  }
+  return <MeshTopologyExplorer key={sourceBoundary.key} {...props} snapshot={snapshot} active={active}
     hosts={hosts} view={view} setView={setView} savedId={savedId} selectSaved={selectSaved} reading={reading} stale={stale} />
 }
 function MeshTopologyExplorer({ snapshot, active, actions, hosts, onDevice, localClient, view, setView, locations, peerLocations, observedLocations, onPeerLocation, onLocation, devices = NO_DEVICES, onEndpointLocation, savedId, selectSaved, onGateway, savedTargets, savedIssue, reading, stale }: MeshMapProps & {
