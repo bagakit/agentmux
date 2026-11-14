@@ -6,7 +6,8 @@ import type { AgentMuxAgentSession, AgentSessionHistoryPage } from '@agentmux/co
 import { agentEvidenceStale, msUntilSemanticStatusStale, type AgentObservation } from '@agentmux/core/agent-status'
 import { errorMessage } from './delivery'
 
-export type MobileConnection = { state: 'unavailable' | 'connecting' | 'connected' | 'disconnected'; message: string; issue?: string }
+/** `paired` says whether this device holds a Mac connection link; absent when the owner has not established it. */
+export type MobileConnection = { state: 'unavailable' | 'connecting' | 'connected' | 'disconnected'; message: string; issue?: string; paired?: boolean }
 type PageOwner = { client: AgentMuxHostedClient; agentSessionId: string; hostId?: string; workspacePath?: string }
 type Metadata = { id: string | null; session: AgentMuxAgentSession | null; notice: string | null; disconnected: boolean;
   activity: { owner: object; hostId: string; runId: string; observation: AgentObservation } | null }

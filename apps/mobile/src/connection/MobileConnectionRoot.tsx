@@ -62,7 +62,7 @@ export function MobileConnectionRoot({ platform, native, focusComposer, offer, l
       try { localStorage.setItem(OFFER_KEY, JSON.stringify(value)); offerNotice = '' }
       catch { offerNotice = '这次的连接链接没有保存到这台设备；当前连接可继续使用，下次请从 Mac 重新打开连接链接。' }
     }
-    let selected: ConnectionOffer | undefined
+    let selected: ConnectionOffer | undefined, unpaired = false
     try {
       if (linkIssue) throw new Error(linkIssue)
       let saved: string | null
@@ -72,12 +72,16 @@ export function MobileConnectionRoot({ platform, native, focusComposer, offer, l
       if (saved) try { original = parseConnectionOffer(JSON.parse(saved)) }
       catch { throw new Error('Mac 连接记录无法完整读取，请恢复这条记录后重新检查。') }
       selected = offer ?? original
-      if (!selected) throw new Error('请在 Mac 的手机连接中复制链接，在这台设备打开。')
+      if (!selected) { unpaired = true; throw new Error('请在 Mac 的手机连接中复制链接，在这台设备打开。') }
       const previous = getDeviceWorkface().snapshot().record.host
       if (previous && previous.hostId !== selected.serverId) throw new Error('这个链接属于另一台 Mac，请打开之前那台 Mac 的连接链接。')
       if (offer && original && original.serverId === offer.serverId && original.daemonPublicKeyB64 !== offer.daemonPublicKeyB64) throw new Error('这台 Mac 的加密身份已变化，请先在 Mac 上恢复原来的身份。')
       if (offer && (native || location.hash !== mobileUpdateFragment)) keepOffer(offer)
-    } catch (error) { setConnection({ state: 'unavailable', message: error instanceof Error ? error.message : String(error) }); return }
+    } catch (error) {
+      setConnection({ state: 'unavailable', message: error instanceof Error ? error.message : String(error), ...(selected ? { paired: true } : unpaired ? { paired: false } : {}) })
+      return
+    }
+    setConnection({ state: 'connecting', message: '正在连接 Mac', paired: true })
     const connect = async () => {
       if (controller.signal.aborted || working) return
       if (owned) { if (binding.current?.state !== 'unavailable') void owned.connect().catch(() => {}); return }
@@ -121,7 +125,7 @@ export function MobileConnectionRoot({ platform, native, focusComposer, offer, l
           if (controller.signal.aborted || binding.current?.client !== value) return
           binding.current.state = observation.state
           const issue = [observation.issue, bindingNotice, offerNotice].filter(Boolean).join('\n')
-          setConnection({ ...observation, ...(issue ? { issue } : {}) })
+          setConnection({ ...observation, paired: true, ...(issue ? { issue } : {}) })
         }
         release = value.onEvent(event => {
           if (event.type !== 'connection-state' || event.observationOrigin?.boundary !== 'consumer-core') return
@@ -136,8 +140,8 @@ export function MobileConnectionRoot({ platform, native, focusComposer, offer, l
         publish()
       } catch (error) {
         if (controller.signal.aborted) return
-        if (error && typeof error === 'object' && 'code' in error && error.code === 'AGENT_CAPABILITY_INVALID') { setConnection({ state: 'unavailable', message: '这台设备的授权未通过确认，请重新确认授权后连接。' }); return }
-        setConnection({ state: 'disconnected', message: `暂时无法连接，正在自动重试。${error instanceof Error ? error.message : String(error)}` })
+        if (error && typeof error === 'object' && 'code' in error && error.code === 'AGENT_CAPABILITY_INVALID') { setConnection({ state: 'unavailable', message: '这台设备的授权未通过确认，请重新确认授权后连接。', paired: true }); return }
+        setConnection({ state: 'disconnected', message: `暂时无法连接，正在自动重试。${error instanceof Error ? error.message : String(error)}`, paired: true })
         timer = setTimeout(() => { void connect() }, Math.min(30000, 1000 * 2 ** Math.min(attempt++, 5)))
       } finally { working = false }
     }
@@ -157,7 +161,7 @@ export function MobileConnectionRoot({ platform, native, focusComposer, offer, l
   </main>
   return <MobileWebUpdateSafetyProvider verifyConnection={verifyConnection} prepareReload={prepareReload} native={native}><MobileWebCatalogObservation.Provider value={mobileWeb.observeCatalog}>
     <MobileApp client={client} connection={connection} platform={platform} native={native} webObservation={mobileWeb.observation} restoreWorkface={restoreWorkface.current}
-      {...(focusComposer ? { focusComposer } : {})} connectionPanel={connection.state === 'unavailable'
+      {...(focusComposer ? { focusComposer } : {})} connectionPanel={connection.paired === false ? undefined : connection.state === 'unavailable'
         ? <><p>请核对 Mac 的连接与授权，修复后重新检查。</p><button type="button" onClick={() => retryConnection(value => value + 1)}>重新检查连接</button></>
         : <p>连接会自动恢复。Mac 和手机保持在同一局域网即可。</p>} />
   </MobileWebCatalogObservation.Provider></MobileWebUpdateSafetyProvider>

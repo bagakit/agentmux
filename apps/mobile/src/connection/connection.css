@@ -1,0 +1,39 @@
+/* Connect page: brand, the three-step progress from the typed connection state, then details. */
+.mobile-app .mobile-connect-page { max-width: 400px; min-height: 100%; margin: 0 auto; padding: var(--sp-7) var(--sp-6) var(--sp-8); display: flex; flex-direction: column; align-items: stretch; justify-content: center; text-align: left; }
+.mobile-app .mobile-connect-page .mobile-connect-dragon { align-self: center; width: 72px; height: 72px; margin: 0; border-radius: calc(var(--mobile-radius-group) * 1.1); object-fit: contain; }
+.mobile-app .mobile-connect-page h1 { margin: var(--sp-6) 0 var(--sp-7); text-align: center; font-size: var(--fs-display); font-weight: 700; letter-spacing: -.02em; }
+.mobile-connect-steps { display: grid; margin: 0; padding: var(--sp-2) var(--sp-6); list-style: none; border-radius: var(--mobile-radius-group); background: var(--mobile-group); }
+.mobile-connect-step { position: relative; display: grid; grid-template-columns: 24px minmax(0, 1fr); align-items: center; gap: var(--sp-5); min-height: 52px; padding: var(--sp-4) 0; color: var(--text-2); font-size: var(--fs-body); }
+.mobile-connect-step + .mobile-connect-step::before { content: ''; position: absolute; top: 0; right: 0; left: calc(24px + var(--sp-5)); border-top: 1px solid var(--mobile-hairline); }
+.mobile-connect-step__text { display: grid; gap: var(--sp-1); min-width: 0; line-height: 1.4; overflow-wrap: anywhere; }
+.mobile-connect-step__text small { color: var(--text-3); font-size: var(--fs-meta); line-height: 1.5; }
+.mobile-connect-step__mark { display: grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--text-3) 70%, transparent);
+  color: var(--text-3); font-size: var(--fs-micro); font-weight: 600; font-variant-numeric: tabular-nums; }
+.mobile-connect-step[aria-current='step'] { color: var(--text); font-weight: 600; }
+.mobile-connect-step[data-step-state='current'] .mobile-connect-step__mark { box-shadow: inset 0 0 0 1.5px var(--mobile-accent); color: var(--mobile-accent); }
+.mobile-connect-step[data-step-state='done'] .mobile-connect-step__mark { box-shadow: none; background: color-mix(in srgb, var(--mobile-accent) 18%, transparent); color: var(--mobile-accent); }
+.mobile-connect-step[data-step-state='attention'] .mobile-connect-step__mark { box-shadow: none; background: color-mix(in srgb, var(--amber) 20%, transparent); color: var(--amber); }
+.mobile-connect-step[data-step-state='unknown'] .mobile-connect-step__mark { box-shadow: none; background: var(--mobile-group-press); }
+@keyframes mobile-connect-spin { to { rotate: 360deg; } }
+.mobile-connect-step[data-step-state='current'] .mobile-connect-step__mark svg { animation: mobile-connect-spin 1.2s linear infinite; }
+.mobile-connect-panel { margin-top: var(--sp-5); color: var(--text-3); font-size: var(--fs-meta); line-height: 1.5; }
+.mobile-connect-panel p { margin: 0 var(--sp-2); }
+.mobile-connect-panel button { width: 100%; min-height: 44px; margin-top: var(--sp-5); border: 0; border-radius: var(--mobile-radius); background: var(--mobile-accent); color: var(--surface-0); font-size: var(--fs-body); font-weight: 600; }
+.mobile-app .mobile-connect-page .mobile-connect-details { margin-top: var(--sp-5); }
+
+/* Drawer connection card: brand, Mac address and the status dot, leading the menu. */
+.mobile-drawer-connection { display: grid; grid-template-columns: 36px minmax(0, 1fr) 16px; align-items: center; gap: var(--sp-5); width: 100%; min-height: 64px; margin: 0 0 var(--sp-5); padding: var(--sp-5) var(--sp-6);
+  border: 0; border-radius: var(--mobile-radius-group); background: var(--mobile-group); color: var(--text); text-align: left; font: inherit; cursor: pointer;
+  transition: background-color var(--dur-fast) ease, transform var(--dur-fast) ease; }
+.mobile-drawer-connection:active { transform: scale(.98); background: var(--mobile-group-press); transition-duration: 0s; }
+.mobile-drawer-connection:focus-visible { outline: 2px solid var(--focus-line); outline-offset: 2px; }
+.mobile-drawer-connection__icon { width: 36px; height: 36px; border-radius: var(--mobile-radius); object-fit: contain; }
+.mobile-drawer-connection__text { display: grid; gap: var(--sp-1); min-width: 0; }
+.mobile-drawer-connection__address { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 600 var(--fs-body) var(--font-mono); letter-spacing: -.01em; }
+.mobile-drawer-connection__state { display: flex; align-items: center; gap: var(--sp-3); color: var(--text-3); font-size: var(--fs-meta); }
+.mobile-drawer-connection__state .mobile-status-dot { width: 7px; height: 7px; flex: none; }
+.mobile-drawer-connection__address[data-missing] { color: var(--text-2); font-family: var(--font-sans); font-weight: 550; }
+@media (prefers-reduced-motion: reduce) {
+  .mobile-connect-step[data-step-state='current'] .mobile-connect-step__mark svg { animation: none; }
+  .mobile-drawer-connection:active { transform: none; }
+}

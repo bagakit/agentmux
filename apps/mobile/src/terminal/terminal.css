@@ -1,5 +1,19 @@
-.mobile-terminal-toolbar .mobile-terminal-mode { display: inline-flex; align-items: center; gap: 6px; padding: 0 6px; white-space: nowrap; font-size: var(--fs-meta); }
-.mobile-terminal-toolbar .mobile-terminal-mode:disabled { opacity: .45; }
+/* One toolbar row under the header: how this phone uses the terminal, the switch, keys, and reading. */
+.mobile-app .mobile-terminal-toolbar { gap: var(--sp-1); padding: 0 var(--sp-2) 0 var(--sp-6); border-bottom: 1px solid var(--mobile-hairline); }
+.mobile-app .mobile-terminal-toolbar > .mobile-terminal-mode-state { display: block; flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-2); font-size: var(--fs-meta); }
+.mobile-terminal-mode-state > svg { margin-inline-end: var(--sp-3); vertical-align: -3px; }
+.mobile-terminal-mode-state[data-mode='control'] { color: var(--text); font-weight: 600; }
+.mobile-terminal-mode-state__dot { display: inline-block; width: 7px; height: 7px; margin-inline-end: var(--sp-3); border-radius: 50%; background: var(--mobile-accent); vertical-align: 1px; }
+@media (max-width: 359px) { .mobile-terminal-mode-state__detail { display: none; } }
+.mobile-app .mobile-terminal-toolbar .mobile-terminal-mode { position: relative; isolation: isolate; display: inline-flex; align-items: center; flex: none; padding: 0 var(--sp-5); white-space: nowrap;
+  color: var(--text); font-size: var(--fs-meta); font-weight: 600; }
+.mobile-app .mobile-terminal-toolbar :is(.mobile-terminal-mode, .mobile-terminal-keys-toggle)::before { content: ''; position: absolute; inset: 6px 0; z-index: -1; border-radius: var(--mobile-radius); background: transparent;
+  transition: background-color var(--dur-fast) ease; }
+.mobile-app .mobile-terminal-toolbar .mobile-terminal-mode::before { background: var(--mobile-group-press); }
+.mobile-app .mobile-terminal-toolbar .mobile-terminal-keys-toggle { position: relative; isolation: isolate; flex: none; }
+.mobile-app .mobile-terminal-toolbar .mobile-terminal-keys-toggle[aria-expanded='true'] { color: var(--text); }
+.mobile-app .mobile-terminal-toolbar .mobile-terminal-keys-toggle[aria-expanded='true']::before { inset: 6px 4px; background: var(--mobile-group-press); }
+.mobile-app .mobile-terminal-toolbar .mobile-terminal-mode:disabled { opacity: .45; }
 .mobile-terminal .mobile-terminal-canvas { touch-action: none; }
 .mobile-terminal .mobile-terminal-canvas .xterm { min-height: 0; }
 /* Healthy details stay on demand; the marked toolbar entry owns service visibility. */

@@ -42,6 +42,7 @@ export function MobileTerminalViewer({ client, agentSessionId, connection, platf
   const [inputState, setInputState] = useState<MobileTerminalControlState>({ mode: 'watch', phase: 'idle', queuedBytes: 0,
     message: '观看不发送输入，终端大小跟随 Mac。', storageIssue: null, notice: null })
   const [sizeOpen, setSizeOpen] = useState(false)
+  const [keysOpen, setKeysOpen] = useState(true)
   const [cols, setCols] = useState('80'), [rows, setRows] = useState('24')
   const released = useRef<Promise<void>>(Promise.resolve())
   const visibleRef = useRef(visible); visibleRef.current = visible
@@ -171,19 +172,24 @@ export function MobileTerminalViewer({ client, agentSessionId, connection, platf
   const serviceMessage = renderIssue ?? (connection.state !== 'connected' ? connection.message : null) ?? inputState.notice ?? reading.notice ?? inputState.storageIssue ?? (inputState.queuedBytes > 0 ? `${inputState.queuedBytes} 字节未发送` : copyFeedback?.issue ? copyFeedback.message : null)
   const originalPending = control.current === controls.current.get(agentSessionId ?? '') ? control.current?.facts().pending : null
   return <MobileNoticeScope owner={client} identity={[agentSessionId]}><section className="mobile-terminal" data-control={inputState.mode} data-agent-session-id={agentSessionId ?? undefined} data-reading={client && agentSessionId ? reading.phase : 'unavailable'}>
-    <div className="mobile-terminal-toolbar"><span><SemanticIcon name="object.terminal" size={16} />{inputState.mode === 'control' ? '控制终端' : '观看终端'}</span>
-      {agentSessionId && (inputState.mode === 'watch' ? <button className="mobile-terminal-mode" disabled={!client || connection.state !== 'connected' || inputState.phase === 'unknown'} onClick={enableControl}><SemanticIcon name="object.keyboard" size={16} />控制终端</button>
-        : <button className="mobile-terminal-mode" onClick={() => control.current?.watch()}><SemanticIcon name="action.reveal" size={16} />回到观看</button>)}
+    <div className="mobile-terminal-toolbar" role="toolbar" aria-label="终端工具">
+      <span className="mobile-terminal-mode-state" data-mode={inputState.mode}>{inputState.mode === 'control'
+        ? <><span className="mobile-terminal-mode-state__dot" aria-hidden="true" />正在控制</>
+        : <><SemanticIcon name="action.reveal" size={16} />只读查看<span className="mobile-terminal-mode-state__detail"> · 大小跟随 Mac</span></>}</span>
+      {agentSessionId && (inputState.mode === 'watch' ? <button className="mobile-terminal-mode" disabled={!client || connection.state !== 'connected' || inputState.phase === 'unknown'} onClick={enableControl}>控制终端</button>
+        : <button className="mobile-terminal-mode" onClick={() => control.current?.watch()}>回到观看</button>)}
+      {inputState.mode === 'control' && <button className="mobile-terminal-keys-toggle" aria-label="终端按键" aria-expanded={keysOpen} onPointerDown={event => event.preventDefault()}
+        onClick={() => { setKeysOpen(value => !value); setSizeOpen(false) }}><SemanticIcon name="object.keyboard" size={18} /></button>}
       <button aria-label="最新输出" onClick={() => { terminal.current?.scrollToBottom(); if (container.current) container.current.scrollTop = container.current.scrollHeight }}><SemanticIcon name="navigation.down" size={18} /></button>
       <button className="mobile-terminal-reading-trigger" aria-label="终端阅读与状态" aria-haspopup="dialog" data-notice={Boolean(serviceMessage)} title={serviceMessage ? noticeSummary(serviceMessage) : '阅读设置与输出详情'} onClick={() => { if (control.current?.facts().mode === 'control') control.current.watch(); setReadingOpen(true) }}><SemanticIcon name="action.read-terminal" size={18} />{serviceMessage && <span className="mobile-terminal-reading-notice" aria-label="有待核实事项"><SemanticIcon name="status.terminal-notice" size={6} /></span>}</button>
     </div>
-    {inputState.mode === 'control' && <div className="mobile-terminal-keys" aria-label="终端常用按键">
+    {inputState.mode === 'control' && keysOpen && <div className="mobile-terminal-keys" aria-label="终端常用按键">
       {MOBILE_TERMINAL_KEYS.map(([label, data, icon, wide]) =>
         <button key={label} type="button" className="mobile-terminal-key" data-wide={wide || undefined} disabled={inputState.phase === 'unknown' || connection.state !== 'connected'} aria-label={`终端 ${label}`}
           onPointerDown={event => event.preventDefault()} onClick={() => terminal.current?.input(data, true)}>{icon ? <SemanticIcon name={icon} size={18} /> : label}</button>)}
       <button type="button" className="mobile-terminal-key mobile-terminal-key--quiet" aria-expanded={sizeOpen} onClick={() => { setCols(String(terminal.current?.cols ?? 80)); setRows(String(terminal.current?.rows ?? 24)); setSizeOpen(value => !value) }}>终端大小</button>
     </div>}
-    {inputState.mode === 'control' && sizeOpen && <form className="mobile-terminal-size" onSubmit={event => {
+    {inputState.mode === 'control' && keysOpen && sizeOpen && <form className="mobile-terminal-size" onSubmit={event => {
       event.preventDefault(); if (control.current?.resize(Number(cols), Number(rows))) setSizeOpen(false)
     }}><label>列<TextInput aria-label="终端列数" inputMode="numeric" value={cols} onChange={event => setCols(event.target.value)} /></label><label>行<TextInput aria-label="终端行数" inputMode="numeric" value={rows} onChange={event => setRows(event.target.value)} /></label><button disabled={inputState.mode !== 'control' || inputState.phase === 'unknown'} type="submit">应用到 Mac</button><p>只按这次选择改变 Mac 上的终端大小，手机旋转不会再改它。</p></form>}
     {!agentSessionId && <div className="mobile-terminal-empty"><h2>查看对话的终端</h2><p>先从会话列表选择一个已授权会话。这里只显示 Mac 持有的输出。</p></div>}
