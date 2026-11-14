@@ -1,3 +1,4 @@
+import { expandCliOptionAssignments } from './cli-option-assignments.js'
 import { AgentMuxError } from './errors.js';
 import { readControlJsonInput } from './cli-json-input.js';
 import { NODE_PUBLISHING_METHODS, parseNodePublishingParams, type NodePublishingMethod } from './node-publishing.js';
@@ -26,6 +27,7 @@ export const NODE_PUBLISHING_CLI_COMMANDS: readonly AgentMuxCliCommand[] = (Obje
         flags: route ? { '--host': 'value', '--expected-runtime': 'value', ...(method === 'node.resolve' ? { '--alias': 'data' as const } : {}) } : { '--input': 'data' },
         details: `JSON input: ${inputs[method]}. Node publication is not an OS sandbox or owner grant. Paths are literal; published references contain no private absolute path. Keep the original root/policy/file revision when paging. After an unknown policy save inspect the same operationId; never replay it. Read amux node --skill.`,
         parse: async (args: readonly string[]) => {
+      args = expandCliOptionAssignments(args)
             let value: unknown;
             if (route) {
                 const result: Record<string, unknown> = { hostId: 'local' }, seen = new Set<string>();

@@ -1,3 +1,4 @@
+import { expandCliOptionAssignments } from './cli-option-assignments.js'
 import { CAPSULE_METHODS, parseCapsuleRpcParams, type CapsuleMethod } from './capsule.js'
 import { readControlJsonInput } from './cli-json-input.js'
 import { AgentMuxError } from './errors.js'
@@ -62,6 +63,7 @@ export const AGENTMUX_CAPSULE_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [...
     summary: descriptions[method], flags: { '--input': 'data' as const },
     details: `JSON input: ${inputs[method]}. ${notes[method] ? notes[method] + ' ' : ''}${COMMON}`,
     parse: async (args: string[]) => {
+      args = expandCliOptionAssignments(args)
       if (!args.length && optional) return parseCapsuleRpcParams(method, {}) as unknown as Record<string, unknown>
       if (args.length !== 2 || args[0] !== '--input') throw new AgentMuxError('Capsule commands accept exactly --input <FILE|->.', 'INVALID_CLI_ARGUMENT')
       return parseCapsuleRpcParams(method, await readControlJsonInput(args[1]!, 'Capsule')) as unknown as Record<string, unknown>
@@ -74,6 +76,7 @@ export const AGENTMUX_CAPSULE_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [...
   flags: { '--input': 'data' as const },
   details: `JSON input: ${method.endsWith('.inspect') ? '{operationId?}' : method.endsWith('.start') ? '{operationId,expectedRevision,recovery?:{revision,managementOperationId,createOperationId,launchDigest,runtime:{runtimeId,instanceId,buildIdentity,protocolVersion}}}' : '{operationId,expectedRevision,expectedRun:{runId}|null}'}. Core manages the fixed independent runtime through ctxmux. App/Core exit only detaches management. An explicit Stop survives restart and ordinary page reads never undo it. After an unknown effect retain the original operation and Run; runtime inspect with its operationId reads the original command without resending. A confirmed not_applied result allows only a new explicit command with a fresh ID and current revision. For an unresolved creation, copy the exact recoveryTarget from inspect (runtime:null means original Native owner evidence is missing and must be established from original authoritative records) into an explicit new Start's recovery field. This records an exact Native retirement intent before its first invocation; only a durable retired receipt permits a new launch key in the same namespace. A matching retained Run reconnects without Stop. After an unknown recovery result, inspect its original operation and repeat only that identical recovery command to observe and explicitly continue the same retry-safe Native retirement intent; the original Start is never replayed. not_retired is no historical nonapplication receipt. Paths and loopback endpoints belong to the execution Host. Remote access grants no public bind, tunnel or Human confirmation.`,
   parse: async (args: string[]) => {
+      args = expandCliOptionAssignments(args)
     if (!args.length && method.endsWith('.inspect')) return parseCapsuleRuntimeParams(method, {}) as unknown as Record<string, unknown>
     if (args.length !== 2 || args[0] !== '--input') throw new AgentMuxError('Capsule runtime commands accept exactly --input <FILE|->.', 'INVALID_CLI_ARGUMENT')
     return parseCapsuleRuntimeParams(method, await readControlJsonInput(args[1]!, 'Capsule runtime')) as unknown as Record<string, unknown>

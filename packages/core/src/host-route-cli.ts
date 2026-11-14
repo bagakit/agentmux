@@ -1,3 +1,4 @@
+import { expandCliOptionAssignments } from './cli-option-assignments.js'
 import { AgentMuxError } from './errors.js'
 import type { AgentMuxCliCommand } from './agentmux-cli-commands.js'
 import { parseHostRouteParams } from './host-route.js'
@@ -10,6 +11,7 @@ export const HOST_ROUTE_CLI_COMMANDS: readonly AgentMuxCliCommand[] = (['route.i
   ...(method === 'route.watch' ? { stream: true } : {}),
   details: 'Route IDs/edges belong to their original Core; Runtime/key pins are not aliases. A configured connection grants no transit permission. Each receiver must approve the immediate delegator, original actor, destination and exact finite method. runtime.invoke requires an allowed inner method. Input never supplies credentials, principal or arbitrary endpoint. Call/watch input contains routeId, adoptedRoute, requestId and call:{method,params}; requestId is correlation only, original business operation IDs stay inside params. Configuration input contains expectedRevision, operationId, configuration:{routes,grants}. Readback observes the saved operation; only configure returns its original durability ACK. Retain unknown operations and inspect the same original owner; do not replay, reroute or substitute a new Session. Reader cancel/revocation does not stop an admitted operation or healthy Run.',
   parse: async args => {
+    args = expandCliOptionAssignments(args)
     if (method === 'route.edge.inspect') {
       if (args.length !== 2 || args[0] !== '--edge') throw new AgentMuxError('Use route edge inspect --edge EDGE; read --help.', 'INVALID_CLI_ARGUMENT')
       return parseHostRouteParams(method, { edgeId: args[1] })

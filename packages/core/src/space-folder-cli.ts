@@ -1,3 +1,4 @@
+import { expandCliOptionAssignments } from './cli-option-assignments.js'
 import { AgentMuxError } from './errors.js'
 import { readControlJsonInput } from './cli-json-input.js'
 import { parseFolderSpaceRegistration } from './space-folder.js'
@@ -9,6 +10,7 @@ export const SPACE_FOLDER_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [{
   details: 'Input is the selected source resource pin {hostId,workspacePath,projectRootPath}, copied from that Host’s original Workspace metadata. Labels are not identity. The Host reads its own configuration and writes only the original Space/Zone/binding; this does not register a new directory or import a client graph. Retain the entire original request if its save reply is unknown. Inspect the same endpoint with space.ls and match the exact Folder, Workspace Zone and binding before reading its original snapshot. Do not automatically register again, choose another directory or recompute an identity from a client Host alias.',
   flags: { '--runtime': 'data', '--workspace': 'data', '--input': 'data' },
   parse: async args => {
+      args = expandCliOptionAssignments(args)
     const flags = new Map<string, string>()
     for (let i = 0; i < args.length; i += 2) {
       const flag = args[i]!, value = args[i + 1]

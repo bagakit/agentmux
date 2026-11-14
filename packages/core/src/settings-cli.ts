@@ -27,6 +27,10 @@ export async function parseSettingsCommand(args: readonly string[]): Promise<Rec
       return { executorId: id, hostId: args[4], input: await input(args[6]!) }
     }
     if (action === 'ls' && args.length === 2) return {}
+    if (resource === 'prompts' && action === 'inspect' && args.length === 4 && id === '--id') {
+      if (!args[3]?.length) invalid('An exact Prompt ID is required.')
+      return { id: args[3] }
+    }
     if (resource === 'prompts' && action === 'inspect' && args.length === 4 && id === '--keyword') {
       if (!args[3]?.length) invalid('An exact Prompt keyword is required.')
       return { keyword: args[3] }

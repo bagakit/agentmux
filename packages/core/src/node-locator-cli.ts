@@ -1,3 +1,4 @@
+import { expandCliOptionAssignments } from './cli-option-assignments.js'
 import { AgentMuxError } from './errors.js'
 import { parseNodeLocateParams } from './node-locator.js'
 import type { AgentMuxCliCommand } from './agentmux-cli-commands.js'
@@ -7,6 +8,7 @@ export const NODE_LOCATOR_CLI_COMMAND: AgentMuxCliCommand = {
   flags: { '--alias': 'data', '--expected-runtime': 'value' },
   details: 'Returns status, original publications, every confirmed hostIds carrier and unknown scope issues. Unique is scope-qualified, not global discovery. An original Runtime pin survives alias rename. Unconfirmed exits nonzero; inspect status before navigation. No Node, Agent, Run, permissions or configured route is created or changed.',
   parse: async args => {
+      args = expandCliOptionAssignments(args)
     const input: Record<string, unknown> = {}, seen = new Set<string>()
     for (let i = 0; i < args.length; i += 2) {
       const flag = args[i]!, value = args[i + 1]

@@ -1,3 +1,4 @@
+import { expandCliOptionAssignments } from './cli-option-assignments.js'
 import { SPACE_MEMBER_CLI_COMMANDS } from './space-member-cli.js'
 import { parseAdoptedHostRoute } from './host-route.js'
 import { HOST_ROUTE_CLI_COMMANDS } from './host-route-cli.js'
@@ -219,14 +220,17 @@ function inspectTarget(f: Flags): Record<string, unknown> {
 }
 function settings(method: string, usage: string, summary: string, positionalData = 0): AgentMuxCliCommand {
   const prefix = method.split('.').slice(1)
-  return { method, usage, summary, positionalData, details: SAVE_NOTICE,
-    parse: args => parseSettingsCommand([...prefix, ...args]) }
+  return { method, usage, summary, positionalData, details: SAVE_NOTICE + (method === 'settings.prompts.inspect' ? ' Named --keyword selects a saved Prompt keyword; use --id for an exact literal ID, including one that looks like a named selector.' : ''),
+    parse: args => {
+      const selector = method === 'settings.prompts.inspect' && /^--(?:id|keyword)(?:=|$)/u.test(args[0] ?? '')
+      return parseSettingsCommand([...prefix, ...expandCliOptionAssignments(args, selector ? 0 : positionalData)])
+    } }
 }
 function toolkit(action: string, usage: string, summary: string, positionalData = 1): AgentMuxCliCommand {
   return { method: `toolkit.${action}`, usage, summary, positionalData,
     ...(action === 'install' ? { rpcMethod: 'toolkit.create' } : {}),
     ...(action === 'watch' ? { stream: true } : {}), details: SAVE_NOTICE,
-    parse: async args => (await parseToolkitCommand([action, ...args])).params }
+    parse: async args => (await parseToolkitCommand([action, ...expandCliOptionAssignments(args, positionalData, ['--evaluate', '--capture-failure', '--failure-evidence'])])).params }
 }
 function goal(method: string, usage: string, summary: string, specs: FlagSpec, build: (f: Flags) => Record<string, unknown>, write = false): AgentMuxCliCommand {
   return command(`goal.${method}`, usage, summary, { '--goal': 'data', ...specs, ...(write ? OP : {}) }, f => ({ goalId: id(f, '--goal'), ...build(f), ...(write ? operation(f) : {}) }), write ? SAVE_NOTICE : undefined)
@@ -243,6 +247,7 @@ export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
     usage: '--data <FILE|->', summary: `Read or explicitly ${action} original continuous progress. Creation, update, resume and check require an authenticated person or device; Agent callers may read, pause or stop an authorized exact target.`,
     details: 'Uses the original connected background Host; Desktop exit does not stop delivery. Requires exact target. Mutations keep original operationId; action and update name the exact loopId and original expectedLoop. Resume restores ordinary progress and immediately checks that Agent; check requires an active loop. Both evaluate eligibility, not force a prompt, and return the target loop outcome and decision. Update preserves the next check and any already claimed input. A list is an observation, not a disk receipt. Explicitly retry the same update request and operationId to confirm a save; never automatically replay an unknown operation.',
     flags: { '--data': 'data' as const }, parse: async (args: readonly string[]) => {
+      args = expandCliOptionAssignments(args)
       if (args.length !== 2 || args[0] !== '--data') throw new AgentMuxError('Continuous progress accepts exactly --data <FILE|->.', 'INVALID_CLI_ARGUMENT')
       return parseAgentProgressParams(`agent.progress.${action}`, await readControlJsonInput(args[1]!, 'Continuous progress')) as unknown as Record<string, unknown>
     } })),
@@ -1201,7 +1206,7 @@ export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
   settings('settings.set', '<key> <value> [--operation-id ID]', 'Set one supported value; reuse the original operation ID to recover a directory move.', 2),
   ...(['executors', 'prompts', 'themes'] as const).flatMap(resource => [
     settings(`settings.${resource}.ls`, '', resource === 'themes' ? 'List built-in and custom themes, retained-record issues, and the semantic icon catalog with meanings and default drawings.' : `List configured ${resource}, not active Sessions.`),
-    { ...settings(`settings.${resource}.inspect`, resource === 'prompts' ? '<id>|--keyword <code>' : resource === 'themes' ? '<id> [--output FILE]' : '<id>',
+    { ...settings(`settings.${resource}.inspect`, resource === 'prompts' ? '<id>|--id <id>|--keyword <code>' : resource === 'themes' ? '<id> [--output FILE]' : '<id>',
       resource === 'prompts' ? 'Read an exact saved Prompt by ID or its explicit keyword; quick reply meaning is its saved body.' : 'Inspect an exact saved resource.', 1), ...(resource === 'themes' ? { documentOutput: true } : {}) },
     settings(`settings.${resource}.create`, '<id> --input <file|->', 'Create a complete saved resource.', 1),
     settings(`settings.${resource}.update`, '<id> --input <file|->', resource === 'themes' ? 'Update a custom theme using {changes, expected}; expected is the full original value.' : 'Update using {changes, expected?}.', 1),
@@ -1413,6 +1418,7 @@ export async function parseAgentMuxCliInvocation(argv: readonly string[]): Promi
       ? '--output requires a named new local cpuprofile file.' : '--output requires a named new local diagnostic file.')
   }
   if (command.documentOutput && tail.length !== 1) {
+    tail = expandCliOptionAssignments(tail, command.positionalData ?? 0)
     if (tail.length !== 3 || tail[1] !== '--output' || !tail[2]?.length || tail[2] === '-') invalid('Use inspect <id> --output FILE; output creates a new file and never overwrites an existing file.')
     output = tail[2]; tail = tail.slice(0, 1)
   }
