@@ -252,7 +252,10 @@ export function assertControlResultTarget(request: AgentMuxControlRequest, resul
     case 'browser.targets':
       if (request.workspaceId && (result as Extract<AgentMuxControlResult, { operation: 'browser.targets' }>).targets.some(target => target.workspaceId !== request.workspaceId)) fail()
       break
-    case 'agent.view': case 'agent.rename': case 'agent.inspect':
+    case 'agent.view':
+      if (actual.agentSessionId !== request.agentSessionId || request.runtimeId !== undefined && actual.runtimeId !== request.runtimeId) fail()
+      break
+    case 'agent.rename': case 'agent.inspect':
       if (actual.agentSessionId !== request.agentSessionId) fail()
       break
     case 'space.agent-order':

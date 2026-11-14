@@ -277,6 +277,7 @@ export type AgentMuxWorkfaceReport = {
 export type AgentMuxAgentViewReport = AgentMuxWorkfaceReport & {
   scope: 'agent-session'
   agentSessionId: string
+  runtimeId?: string
   storedOverride: AgentMuxAgentViewMode | null
   effectiveMode: AgentMuxAgentViewMode | null
   sessionFacts: 'known' | 'unconfirmed'
@@ -332,7 +333,7 @@ export type AgentMuxSpaceControlRequest = Base & (
   | { operation: 'space.agent-order'; displayWorkspaceId: string; order?: AgentMuxWorkspaceAgentOrderMember[]; expectedOrder?: AgentMuxWorkspaceAgentOrderMember[] }
   | ({ operation: 'space.mote.preferences.read' } & import('./mote/preferences.js').MotePreferencesReadInput)
   | ({ operation: 'space.mote.preferences.save' } & import('./mote/preferences.js').MotePreferencesSaveInput)
-  | { operation: 'agent.view'; agentSessionId: string; mode?: AgentMuxAgentViewMode }
+  | { operation: 'agent.view'; agentSessionId: string; runtimeId?: string; mode?: AgentMuxAgentViewMode }
   | { operation: 'space.view'; regionId: string; mode?: AgentMuxFileViewMode }
   | { operation: 'file.format'; regionId: string }
   | { operation: 'file.build'; regionId: string }

@@ -165,7 +165,7 @@ export function isSpaceControlOperation(value: unknown): value is AgentMuxSpaceC
 }
 
 export function parseSpaceControlRequest(value: unknown, code: Code = 'INVALID_CONTROL_REQUEST'): AgentMuxSpaceControlRequest {
-  const source = fields(value, ['schemaVersion', 'requestId', 'operation', 'target', 'presentation', 'content', 'destination', 'focus', 'caller', 'fromRegionId', 'expectedAgentSessionId', 'agentSessionId', 'tabId', 'name', 'expectedNameRevision', 'fromLocation', 'binding', 'regionId', 'withRegionId', 'mode', 'path', 'zoneId', 'spaceId', 'displayWorkspaceId', 'groupId', 'split', 'buildId', 'kind', 'baseline', 'values', 'includeChoices', 'nameSource', 'order', 'expectedOrder', 'organization', 'expected', 'collection', 'pin', 'moteMain'], code)
+  const source = fields(value, ['schemaVersion', 'requestId', 'operation', 'target', 'presentation', 'content', 'destination', 'focus', 'caller', 'fromRegionId', 'expectedAgentSessionId', 'agentSessionId', 'runtimeId', 'tabId', 'name', 'expectedNameRevision', 'fromLocation', 'binding', 'regionId', 'withRegionId', 'mode', 'path', 'zoneId', 'spaceId', 'displayWorkspaceId', 'groupId', 'split', 'buildId', 'kind', 'baseline', 'values', 'includeChoices', 'nameSource', 'order', 'expectedOrder', 'organization', 'expected', 'collection', 'pin', 'moteMain'], code)
   if (source.schemaVersion !== 5 || !isSpaceControlOperation(source.operation)) fail('Space Control request is invalid.', code)
   const operation = source.operation as AgentMuxSpaceControlRequest['operation']
   const base = { schemaVersion: 5 as const, requestId: spaceControlId(source.requestId, 'Request ID', code) }
@@ -190,12 +190,14 @@ export function parseSpaceControlRequest(value: unknown, code: Code = 'INVALID_C
       : { ...base, operation, ...parseMotePreferencesSaveInput(input, code) }
   } else if (operation === 'agent.view' || operation === 'space.view') {
     const target = operation === 'agent.view' ? 'agentSessionId' : 'regionId'
-    fields(source, ['schemaVersion', 'requestId', 'operation', target, 'mode'], code)
+    fields(source, ['schemaVersion', 'requestId', 'operation', target, 'mode', ...(operation === 'agent.view' ? ['runtimeId'] : [])], code)
     const mode = Object.hasOwn(source, 'mode') ? (operation === 'agent.view'
       ? member(source.mode, ['terminal', 'activity'] as const, 'Agent view mode', code)
       : member(source.mode, ['source', 'diff', 'preview'] as const, 'File view mode', code)) : undefined
     request = operation === 'agent.view'
-      ? { ...base, operation, agentSessionId: spaceControlId(source.agentSessionId, 'Agent Session', code), ...(mode === undefined ? {} : { mode: mode as 'terminal' | 'activity' }) }
+      ? { ...base, operation, agentSessionId: spaceControlId(source.agentSessionId, 'Agent Session', code),
+        ...(Object.hasOwn(source, 'runtimeId') ? { runtimeId: spaceControlId(source.runtimeId, 'Runtime', code) } : {}),
+        ...(mode === undefined ? {} : { mode: mode as 'terminal' | 'activity' }) }
       : { ...base, operation, regionId: spaceControlId(source.regionId, 'File Region', code, true), ...(mode === undefined ? {} : { mode: mode as 'source' | 'diff' | 'preview' }) }
   } else if (operation === 'file.build.inspect' || operation === 'file.build.cancel') {
     fields(source, ['schemaVersion', 'requestId', 'operation', 'regionId', 'buildId'], code)
@@ -608,8 +610,9 @@ const WORKFACE_FIELDS = ['outcome', 'changed', 'save', 'issues']
 const VIEW_OUTCOMES = ['read', 'changed', 'unchanged', 'partial', 'unknown', 'refused'] as const
 function workfaceReport(operation: 'agent.view' | 'space.view' | 'space.swap' | 'open.file', value: unknown, code: Code): AgentMuxSpaceControlResult {
   if (operation === 'agent.view') {
-    const body = fields(value, [...WORKFACE_FIELDS, 'scope', 'agentSessionId', 'storedOverride', 'effectiveMode', 'sessionFacts', 'regions', 'locations'], code)
+    const body = fields(value, [...WORKFACE_FIELDS, 'scope', 'agentSessionId', 'runtimeId', 'storedOverride', 'effectiveMode', 'sessionFacts', 'regions', 'locations'], code)
     return { operation, scope: member(body.scope, ['agent-session'], 'View scope', code), agentSessionId: spaceControlId(body.agentSessionId, 'Agent Session', code),
+      ...(Object.hasOwn(body, 'runtimeId') ? { runtimeId: spaceControlId(body.runtimeId, 'Runtime', code) } : {}),
       storedOverride: body.storedOverride === null ? null : member(body.storedOverride, ['terminal', 'activity'] as const, 'Stored view mode', code),
       effectiveMode: body.effectiveMode === null ? null : member(body.effectiveMode, ['terminal', 'activity'] as const, 'Effective view mode', code),
       sessionFacts: member(body.sessionFacts, ['known', 'unconfirmed'], 'Session facts', code),
