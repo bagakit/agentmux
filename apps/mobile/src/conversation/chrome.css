@@ -5,8 +5,8 @@
 /* Conversation header: one 52px row. Back is the chevron alone (its name says where it goes), then
  * a 30px identity whose lower-right corner carries the status dot, the name and one meta line,
  * then the icon group. A Mote strip below shares the header's material and takes its hairline. */
-.mobile-app .mobile-header--session { position: relative; z-index: 3; border-bottom: 1px solid var(--mobile-hairline); }
-.mobile-app .mobile-header--session:has(+ .mobile-mote-context) { border-bottom-color: transparent; }
+.mobile-app .mobile-header--session { position: relative; z-index: 3; border-bottom: 0; box-shadow: inset 0 -1px 0 var(--mobile-hairline); }
+.mobile-app .mobile-header--session:has(+ .mobile-mote-context) { box-shadow: none; }
 .mobile-app .mobile-session-toolbar { min-height: 52px; padding-block: 4px; border-bottom: 0; gap: var(--sp-1); }
 .mobile-app .mobile-session-toolbar > .mobile-session-origin { position: relative; justify-content: center; gap: 0; width: 44px; min-width: 44px; padding: 0; border-radius: var(--mobile-radius);
   color: var(--text); transition: transform var(--dur-fast) ease, background-color var(--dur-fast) ease; }
@@ -70,11 +70,6 @@
   .mobile-app .mobile-mote-sections > button { padding-inline: 10px; }
   .mobile-app .mobile-mote-team-button { padding-inline: 6px; }
 }
-/* At the narrowest widths the name keeps its room: the identity stays the Profile entry and keeps its status word. */
-@media (max-width: 359px) {
-  .mobile-app .mobile-session-toolbar > .mobile-session-identity > .mobile-object-avatar,
-  .mobile-app .mobile-session-toolbar > .mobile-session-identity::after { display: none; }
-}
 
 /* The tab bar returns with the root page it belongs to; drilled pages own the bottom safe area. */
 .mobile-navigation-bar[data-motion='enter'] { animation: mobile-bar-enter var(--dur-screen) var(--ease-enter); }
@@ -113,7 +108,7 @@
 .mobile-app .mobile-conversation__interaction .agent-interaction__actions { gap: var(--sp-3); }
 .mobile-app .mobile-conversation__interaction .agent-interaction__actions > button:not(.agent-interaction__dismiss) { flex: 1 1 0; justify-content: center; }
 .mobile-app .mobile-conversation__interaction .agent-interaction__actions > button.is-primary { order: -1; }
-.mobile-app .mobile-conversation__interaction .agent-interaction__actions > .agent-interaction__dismiss { order: 1; flex: 1 0 100%; margin: 0; color: var(--text-2); background: transparent; }
+.mobile-app .mobile-conversation__interaction .agent-interaction__actions > .agent-interaction__dismiss { order: 1; flex: 1 0 100%; margin: 0; color: var(--text-2); background: transparent; border: 0; box-shadow: none; }
 /* A kept reply status is one line on the reading gutter: what happened, then how to check it. */
 .mobile-app .mobile-send-status[data-original-response] { display: block; margin: 2px var(--mobile-gutter) 0; }
 .mobile-app .agent-interaction .mobile-send-status[data-original-response] { margin: 4px 0 0; }
@@ -173,3 +168,9 @@
 .mobile-app .mobile-mote-source-status > summary { min-height: 36px; padding: 0 10px; border-radius: 999px; background: var(--mobile-attention-wash); color: var(--text-2); font-size: var(--fs-micro); font-weight: 600; }
 .mobile-app .mobile-session-toolbar .mobile-icon-button[aria-pressed='true'] { color: var(--text); background: transparent; }
 .mobile-app .mobile-conversation .conversation-native-thread .conversation-coverage { padding-inline: 0; }
+
+/* On the narrowest header the existing More panel carries Goal work, leaving
+ * the original identity readable beside History, Terminal and More. */
+@media (max-width: 359px) {
+  .mobile-app .mobile-session-tool-slot .mobile-conversation__goal { display: none; }
+}

@@ -79,6 +79,7 @@ const MobileZoneWorkface = deferMobileSurface('来源工作面', async () => ({ 
 
 const ThemeNavigationSubmenuIcon = semanticIconComponent('navigation.submenu')
 const ThemeObjectConversationIcon = semanticIconComponent('object.conversation')
+const ThemeObjectGoalIcon = semanticIconComponent('object.goal')
 const ThemeActionMoreIcon = semanticIconComponent('action.more')
 const ThemeActionComposeIcon = semanticIconComponent('action.compose')
 const ThemeStatusInfoIcon = semanticIconComponent('status.info')
@@ -178,6 +179,12 @@ function MobileAppContent({ client, connection, platform, native = false, focusC
   const [recentMoteSpaceId, setRecentMoteSpaceId] = useState(initial.current.presentation?.recentMoteSpaceId ?? initial.current.presentation?.identity?.mote?.spaceId ?? null)
   const startupProfile = useRef(restoreWorkface ? null : initial.current.presentation?.profile ?? null)
   const goalReturn = useRef<{ trigger: HTMLButtonElement; sessionId: string | null } | null>(null)
+  const sessionActionsButton = useRef<HTMLButtonElement | null>(null)
+  const showConversationGoals = (trigger: HTMLButtonElement) => {
+    navigationRevision.current++
+    goalReturn.current = { trigger, sessionId: workface.selectedSessionId }
+    setShowGoalWork(true)
+  }
   useEffect(() => {
     if (showGoalWork || !goalReturn.current) return
     const original = goalReturn.current
@@ -622,12 +629,12 @@ function MobileAppContent({ client, connection, platform, native = false, focusC
           : <div className="mobile-session-identity">{sessionHeading}</div>}
         <div ref={setConversationToolsTarget} className="mobile-session-tool-slot" hidden={!conversationVisible || welcomeVisible || historyVisible} />
         {workface.selectedSessionId && !welcomeVisible && !historyVisible && terminalToggle}
-        {!welcomeVisible && !historyVisible && workface.selectedSessionId ? <IconButton className="mobile-icon-button" aria-label="当前对话操作" onClick={() => setSheet('actions')}><ThemeActionMoreIcon size={18} /></IconButton> : menuButton}
+        {!welcomeVisible && !historyVisible && workface.selectedSessionId ? <IconButton className="mobile-icon-button" aria-label="当前对话操作" ref={sessionActionsButton} onClick={() => setSheet('actions')}><ThemeActionMoreIcon size={18} /></IconButton> : menuButton}
       </div> : <>
         {menuButton}
         {showSession && objectIdentity?.mote ? <button className="mobile-mote-heading" aria-label={`${objectIdentity.name} · 查看身份与状态`} onClick={() => openProfile(objectIdentity)}><MobileIdentity identity={objectIdentity} session={selected} client={client} connected={connected} size={38} visible={exposed} /></button>
           : workspaceVisible ? <div className="mobile-brand"><BrandIcon icon={hostAppearance.appIcon} className="mobile-brand-icon" size={24} /><span>AgentMux</span></div> : <span />}
-        {workspaceVisible && showSession ? <div className="mobile-session-header-actions"><div ref={setConversationToolsTarget} className="mobile-session-tool-slot" hidden={!conversationVisible || welcomeVisible || historyVisible} />{terminalToggle}<IconButton className="mobile-icon-button" aria-label="当前对话操作" onClick={() => setSheet('actions')}><ThemeActionMoreIcon size={20} /></IconButton></div> : <span className="mobile-header-spacer" />}
+        {workspaceVisible && showSession ? <div className="mobile-session-header-actions"><div ref={setConversationToolsTarget} className="mobile-session-tool-slot" hidden={!conversationVisible || welcomeVisible || historyVisible} />{terminalToggle}<IconButton className="mobile-icon-button" aria-label="当前对话操作" ref={sessionActionsButton} onClick={() => setSheet('actions')}><ThemeActionMoreIcon size={20} /></IconButton></div> : <span className="mobile-header-spacer" />}
       </>}
     </header>}
     {moteContext && teamSpaceId ? <MobileMoteContext variant={moteContext} team={team} issue={teamReading.issue} noticeRef={setMoteNoticeTarget}
@@ -707,7 +714,7 @@ function MobileAppContent({ client, connection, platform, native = false, focusC
             onShowMoteThreads={() => { if (teamSpaceId) { navigationRevision.current++; setMoteView({ spaceId: teamSpaceId, section: 'threads', detail: false }) } }}
             moteConfigurationIssue={moteEntryIssue?.client === client && moteEntryIssue.spaceId === teamSpaceId ? moteEntryIssue.message : null} onRefreshMoteConfiguration={() => { void refreshMoteConfiguration() }}
             moteSource={mobileMoteInputSource(objectIdentity, workface.selectedSessionId, identityRecipient)} connection={connection} platform={platform} toolbarTarget={conversationToolsTarget} statusTarget={conversationStatusTarget} noticeTarget={moteNoticeTarget} {...(sessionTitle ? { displayName: sessionTitle } : {})} visible={exposed && conversationVisible && !welcomeVisible && !historyVisible} onShowTerminal={() => { navigationRevision.current++; setWorkface(value => ({ ...value, panel: 'terminal' })) }}
-            onShowGoals={trigger => { navigationRevision.current++; goalReturn.current = { trigger, sessionId: workface.selectedSessionId }; setShowGoalWork(true) }} openHttpLink={openBrowserHttpLink} />}
+            onShowGoals={showConversationGoals} openHttpLink={openBrowserHttpLink} />}
         </div>
       </section><section className="mobile-terminal-panel" hidden={!workspaceVisible || !showSession || showGoalWork || workface.panel !== 'terminal'}>
         <MobileTerminalViewer loadWhen={workspaceVisible && showSession && !showGoalWork && workface.panel === 'terminal'} onLoadReturn={returnToConversation} terminalPalette={hostAppearance.terminalPalette} client={client} agentSessionId={workface.selectedSessionId} connection={connection} platform={platform} {...(sessionTitle ? { displayName: sessionTitle } : {})} inputActive={exposed} visible={workspaceVisible && showSession && !showGoalWork && workface.panel === 'terminal'} />
@@ -783,6 +790,7 @@ function MobileAppContent({ client, connection, platform, native = false, focusC
         </> : sheet === 'actions' ? <>
           {moteConversation && !moteDirectAgent && moteDialogue.page?.main.status === 'ready' && moteDialogue.page.main.current && <button type="button" className="mobile-menu-row" aria-label="新一轮" onClick={beginMoteRound}><ThemeObjectConversationIcon size={20} /><span>新一轮<small>旧对话保留，继续同一个 Mote</small></span></button>}
           <Dialog.Description id="mobile-sheet-description">{sessionTitle ?? 'Agent'} · {objectIdentity?.project ?? '项目未确认'}</Dialog.Description>
+          {workface.selectedSessionId && <button type="button" className="mobile-menu-row mobile-goal-menu-entry" aria-label="目标与结果" onClick={event => { showConversationGoals(sessionActionsButton.current ?? event.currentTarget); setSheet(null) }}><ThemeObjectGoalIcon size={18} /><span>目标与结果</span></button>}
           {native && selected && !showGoalWork && workface.panel !== 'terminal' && <button className="mobile-menu-row" aria-label="撰写消息" onClick={() => { composeAfterClose.current = { client, sessionId: selected.agentSessionId }; setSheet(null) }}><ThemeActionComposeIcon size={17} /><span>撰写消息</span></button>}
           {workface.selectedSessionId && <MobileAgentActions client={client} agentSessionId={workface.selectedSessionId} connected={connected} copyText={platform.copyText} />}
           <button type="button" className="mobile-menu-row mobile-sheet-app-menu" aria-label="手机设置、提醒与诊断" onClick={() => setSheet('settings')}><ThemeActionMenuIcon size={18} /><span>手机设置、提醒与诊断<small>{label}{notices?.hasDismissed ? ' · 有已收起的提醒' : ''}</small></span><ThemeNavigationSubmenuIcon size={16} /></button>

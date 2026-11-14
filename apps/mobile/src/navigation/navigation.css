@@ -1,6 +1,6 @@
 .mobile-spatial-panel { padding: 0 var(--mobile-gutter) var(--sp-6); }
 .mobile-spatial-panel .mobile-section-heading { padding: 0; }
-.mobile-spatial-panel .mobile-section-heading p { display: none; }
+.mobile-spatial-panel .mobile-section-heading > div:not(.mobile-section-actions) > p { display: none; }
 .mobile-spatial-search { position: relative; display: flex; align-items: center; color: var(--text-3); min-height: 44px; margin: 0 0 4px; }
 .mobile-spatial-search > svg { position: absolute; left: 16px; top: 50%; transform: translateY(-50%); pointer-events: none; }
 .mobile-spatial-search input { width: 100%; min-width: 0; color: var(--text); font: inherit; }
