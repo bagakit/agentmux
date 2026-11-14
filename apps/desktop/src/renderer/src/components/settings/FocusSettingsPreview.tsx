@@ -78,17 +78,17 @@ export function FocusSettingsPreview({ values, active, scene, onScene, previewRe
   }, [active, document])
   const enabled = active && documentVisible, [now] = useState(Date.now), id = useId()
   const contexts = useMemo(() => exampleContexts(now), [now])
-  const [selectedExampleId, setSelectedExampleId] = useState(contexts[0]!.id)
   const collectionExample = useMemo(() => exampleTopicCollection(now), [now])
-  const boardContexts = useMemo(() => [...contexts, ...collectionExample.contexts], [contexts, collectionExample])
+  const boardContexts = useMemo(() => [...contexts, { ...contexts[2]!, id: 'example-review-neighbor', name: 'Check the remaining requirements' }, ...collectionExample.contexts], [contexts, collectionExample])
   const config = useMemo(() => ({ workspaces: [...contexts.map(context => context.workspace!), collectionExample.workspace], focus: { recentActivityHours: values.recentActivityHours } }), [contexts, collectionExample, values.recentActivityHours])
-  const exampleLocations = useMemo(() => new Map(contexts.map(context => [focusContextIdentityKey(context.hostId, context.id), {
+  const exampleLocations = useMemo(() => new Map(boardContexts.filter(context => !context.topicId).map(context => [focusContextIdentityKey(context.hostId, context.id), {
     tabs: [], occurrenceCount: 1, locations: { status: 'confirmed', occurrences: [{
       source: { spaceId: context.workspaceId, zoneId: 'example-zone-' + context.id, workspaceId: context.workspaceId, hostId: context.hostId },
       display: { workspaceId: context.workspaceId, hostId: context.hostId, groupId: 'example-group', tabId: 'example-tab-' + context.id, regionId: 'example-region-' + context.id }
     }] }
-  } satisfies FocusContextIdentity])), [contexts])
+  } satisfies FocusContextIdentity])), [boardContexts])
   const lanes = useMemo(() => deriveFocusCollectionLanes(deriveFocusProjectLanes(boardContexts, config, { topics: { [collectionExample.workspace.id]: collectionExample.topics }, worktrees: [] }, exampleLocations, now), collectionExample.catalog, collectionExample.content), [boardContexts, config, collectionExample, now, exampleLocations])
+  const [selectedExampleId, setSelectedExampleId] = useState(() => lanes[0]!.contextRefs[0]!.id)
   const boardRows = useRef<HTMLDivElement>(null)
   const [boardMetrics, setBoardMetrics] = useState<FocusLaneMetrics>({ width: 0, padding: 4, gap: 2, cardGap: 2 })
   useLayoutEffect(() => {

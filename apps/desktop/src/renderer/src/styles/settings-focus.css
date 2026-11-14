@@ -119,4 +119,12 @@
 @keyframes focus-example-enter { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
 .focus-settings-preview[data-active='false'] *, .focus-settings-preview[data-active='false'] *::before, .focus-settings-preview[data-active='false'] *::after { animation-play-state: paused !important; transition: none !important; }
 @container (max-width: 700px) { .focus-settings__workspace { grid-template-columns: minmax(0,1fr); gap: var(--sp-5); } .focus-settings-preview { position: static; } .focus-settings-window { grid-template-columns: repeat(auto-fit,minmax(90px,1fr)); } }
+/* Short pages scroll naturally rather than collapse the example into its chrome. */
+@media (max-height: 620px) {
+  .focus-settings-preview { position: static; max-height: none; }
+  .focus-settings-preview > header { padding-block: 4px; }
+  .focus-settings-preview > nav { padding-block: 3px; }
+  .focus-settings-preview__canvas { flex: none; height: 300px; }
+  .focus-settings-preview__caption { display: none; }
+}
 @media (prefers-reduced-motion: reduce) { .focus-settings-preview *, .focus-settings-preview *::before, .focus-settings-preview *::after, .focus-settings-window label { animation: none !important; transition: none !important; } }
