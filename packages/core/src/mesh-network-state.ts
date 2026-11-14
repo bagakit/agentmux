@@ -156,9 +156,13 @@ export class MeshNetworkState {
         await this.write(this.file, next)
         operation.result = { ...operation.result, status: 'confirmed', updatedAt: Date.now() }
         await this.write(this.operationPath(input.operationId), operation)
-        this.options.adopt({ revision, configuration })
-      } catch { operation.result = { ...operation.result, status: 'unknown', cause: { code: 'MESH_SAVE_UNCONFIRMED', message: 'This original save has an unknown durability acknowledgement. Inspect its operation ID; do not replay it.' } } }
-      return { settings: this.settings(await this.state(), operation.result), diskDurability: operation.result.status }
+      } catch {
+        const unconfirmed: MeshSaveOperation = { ...operation.result, status: 'unknown', cause: { code: 'MESH_SAVE_UNCONFIRMED', message: 'This original save has an unknown durability acknowledgement. Inspect its operation ID; do not replay it.' } }
+        return { settings: this.settings(await this.state(), unconfirmed), diskDurability: 'unknown' as const }
+      }
+      this.stateObserved = true
+      this.options.adopt({ revision, configuration })
+      return { settings: this.settings(next, operation.result), diskDurability: 'confirmed' as const }
     }).catch(error => { if (!configurationDispatched) throw meshConfigurationNotApplied(error); throw error })
     this.tail = work.then(() => {}, () => {})
     return work
