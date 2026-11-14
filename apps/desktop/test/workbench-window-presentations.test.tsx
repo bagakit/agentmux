@@ -5,9 +5,9 @@ import { act, createElement, Fragment, useLayoutEffect, useState } from 'react'
 import { expect, it, vi } from 'vitest'
 vi.mock('react-resizable-panels', () => createRequire(import.meta.url)('../node_modules/react-resizable-panels/dist/react-resizable-panels.browser.development.cjs.js'))
 import { createClientUiRoot } from './helpers/client-ui-render'
-import { StableWorkbenchView } from '../src/renderer/src/components/StableWorkbenchView'
+import { StableWorkbenchView, WorkbenchSurfaceHost } from '../src/renderer/src/components/StableWorkbenchView'
 import { useWorkbenchDocument, useWorkbenchWindowDocument, WorkbenchDocumentContext } from '../src/renderer/src/lib/workbench-document'
-import { placeWorkbenchWindow, registerWorkbenchDocument } from '../src/renderer/src/lib/workbench-window-registry'
+import { isWorkbenchSurfaceDetached, placeWorkbenchWindow, registerWorkbenchDocument, useWorkbenchSurfaceDetached } from '../src/renderer/src/lib/workbench-window-registry'
 
 it('rebinds a nested original workface document when its parent Tab crosses native documents', async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
@@ -56,6 +56,77 @@ it('rebinds a nested original workface document when its parent Tab crosses nati
     holdFrame.mockRestore()
     await act(async () => root.unmount())
     releaseChild(); releaseMain(); container.remove(); frame.remove(); vi.unstubAllGlobals()
+  }
+})
+
+it.each(['survey', 'recall'] as const)('keeps the complete %s surface and its original Region in their committed document', async surface => {
+  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
+  const container = document.createElement('div'), frame = document.createElement('iframe')
+  document.body.append(container, frame)
+  const child = frame.contentDocument!, destination = child.createElement('div')
+  // happy-dom 20 adopts only the root and makes its ownerDocument immutable.
+  // Match browser subtree adoption for this round trip; Electron covers native transfer.
+  const adoption = [document, child].map(doc => vi.spyOn(doc, 'adoptNode').mockImplementation(node => {
+    node.parentNode?.removeChild(node)
+    const adopt = (current: Node) => {
+      Object.defineProperty(current, 'ownerDocument', { configurable: true, value: doc })
+      current.childNodes.forEach(adopt)
+    }
+    adopt(node)
+    return node
+  }))
+  destination.id = 'native-surface-window'
+  child.body.append(destination)
+  const target = { kind: 'surface' as const, surface }
+  const identity = { windowId: 'native-surface', documentGeneration: 'original-document' }
+  const release = registerWorkbenchDocument(child, identity)
+  const root = createClientUiRoot(container)
+  function Editor() {
+    const scope = useWorkbenchWindowDocument()
+    return <textarea aria-label="Editor" data-window={scope?.windowId} defaultValue="original draft" />
+  }
+  function Surface() {
+    const detached = useWorkbenchSurfaceDetached(surface)
+    const [page, setPage] = useState(1)
+    return <>
+      <div id="surface-home" />
+      <WorkbenchSurfaceHost surface={surface} homeId="surface-home" visible>
+        <button onClick={() => setPage(page + 1)}>Page {page}</button>
+        <div id={'page-slot-' + page} />
+        {page === 2 ? <div id="fresh-region-slot" /> : null}
+      </WorkbenchSurfaceHost>
+      <div id="original-region-home" />
+      <StableWorkbenchView kind="region" homeId="original-region-home" targetId={'page-slot-' + page}
+        surface={surface} active visible retainedRegionId={null}><Editor /></StableWorkbenchView>
+      {page === 2 ? <StableWorkbenchView kind="region" homeId="new-region-home" targetId="fresh-region-slot"
+        surface={surface} active visible retainedRegionId={null}><span>Next page</span></StableWorkbenchView> : null}
+      <output>{detached ? 'Detached' : 'Main'}</output>
+    </>
+  }
+  try {
+    await act(async () => root.render(<Surface />))
+    const editor = container.querySelector('textarea')!
+    editor.value = 'unsaved content'
+    let placed!: Promise<void>
+    await act(() => { placed = placeWorkbenchWindow(target, { destination, window: identity }) })
+    await placed
+    expect(isWorkbenchSurfaceDetached(surface)).toBe(true)
+    expect(container.querySelector('output')?.textContent).toBe('Detached')
+    expect(child.querySelector('#page-slot-1 textarea') === editor).toBe(true)
+    expect(editor.dataset.window).toBe(identity.windowId)
+    await act(() => child.querySelector('button')!.click())
+    expect(child.querySelector('#fresh-region-slot span')?.textContent, 'a new Region reaches its detached surface').toBe('Next page')
+    expect(child.querySelector('#page-slot-2 textarea') === editor).toBe(true)
+    expect(editor.value).toBe('unsaved content')
+    await act(() => { placed = placeWorkbenchWindow(target, null) })
+    await placed
+    expect(isWorkbenchSurfaceDetached(surface)).toBe(false)
+    expect(container.querySelector('#surface-home #page-slot-2 textarea') === editor).toBe(true)
+    expect(editor.value).toBe('unsaved content')
+  } finally {
+    await act(async () => root.unmount())
+    adoption.forEach(spy => spy.mockRestore())
+    release(); container.remove(); frame.remove(); vi.unstubAllGlobals()
   }
 })
 
@@ -186,19 +257,21 @@ it('resolves one original Browser Tab occurrence without mistaking another Group
   expect(workbenchBrowserWindowTarget([{ ...exact, projection: { ...wrongRegion.projection!, entity: { kind: 'tab', tabId: reference.tabId } } }], owner, 'original-browser-region')).toBeUndefined()
 })
 
-import { useLauncherState } from '../src/renderer/src/lib/launcher-state'
+import { initializeLauncherState } from '../src/renderer/src/lib/launcher-state'
 import { BrowserPane } from '../src/renderer/src/components/BrowserPane'
 import type { WorkbenchBrowserPresentation } from '../src/renderer/src/components/BrowserPresentationStage'
 
 it('an accurately registered Main document keeps inactive Launcher workfaces paused and resumes only its selected original', async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
-  const before = useAppStore.getState(), launcherBefore = useLauncherState.getState(), config = await api.config.get()
+  // The shipping store restores its Launcher fragment through the Desktop root.
+  const read = vi.spyOn(api.ui, 'readWorkbenchState').mockResolvedValue(JSON.stringify({ state: {}, version: 1, desktopFragments: { launcher: null } }))
+  try { await initializeLauncherState() } finally { read.mockRestore() }
+  const before = useAppStore.getState(), config = await api.config.get()
   const workspace = { id: 'main-cost-workspace', hostId: 'local', path: fixturePath('main-window-cost'), name: 'Main', kind: 'folder' as const }
   const first = createWorkbenchTab('selected-launcher', { kind: 'launcher', regionId: 'selected-launcher-region', workspaceId: workspace.id })
   const hidden = createWorkbenchTab('hidden-launcher', { kind: 'launcher', regionId: 'hidden-launcher-region', workspaceId: workspace.id })
   const layout = createWorkspaceLayout('main-cost-group', [first.id, hidden.id]); layout.groups[0]!.activeTabId = first.id
   const warm = vi.fn(), release = registerWorkbenchDocument(document, { windowId: 'accurate-main', documentGeneration: 'accurate-main-document' })
-  useLauncherState.setState({ sections: {}, drafts: {}, executors: {}, persistenceIssue: null })
   useAppStore.setState({ ...before, config: { ...config, workspaces: [workspace] }, sessions: [], tabs: { [first.id]: first, [hidden.id]: hidden }, layouts: { [workspace.id]: layout }, activeWorkspaceId: workspace.id, mainSurface: 'workbench', workbenchSpaceSelection: null, workbenchNavigationInputPolicy: null, prewarmTerminal: warm, warmTerminals: {}, detectExecutors: vi.fn().mockResolvedValue(undefined) }, true)
   const container = document.createElement('div'); document.body.append(container); const root = createClientUiRoot(container)
   try {
@@ -213,7 +286,7 @@ it('an accurately registered Main document keeps inactive Launcher workfaces pau
     expect(useAppStore.getState().tabs[first.id]).toBe(first)
     expect(useAppStore.getState().layouts[workspace.id]).toBe(layout)
   } finally {
-    await act(async () => root.unmount()); release(); container.remove(); useAppStore.setState(before, true); useLauncherState.setState(launcherBefore, true); vi.unstubAllGlobals()
+    await act(async () => root.unmount()); release(); container.remove(); useAppStore.setState(before, true); vi.unstubAllGlobals()
   }
 })
 

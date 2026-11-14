@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { spawn, execFileSync } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
 import { createRequire, isBuiltin } from 'node:module'
-import { mkdir, mkdtemp, readFile, writeFile, readdir, stat, symlink, copyFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, writeFile, readdir, stat, symlink, copyFile, rm } from 'node:fs/promises'
 import { dirname, join, relative, resolve } from 'node:path'
 import { startProfileSurveyOrigins } from './fixtures/browser-profile-survey-workface/origin-server.mjs'
 import { fixturePath } from './lib/fixture-values.mjs'
@@ -16,9 +16,13 @@ const { build } = browserSourceBuild(createRequire(join(root, 'packages/core/pac
 const { build: viteBuild } = require('vite')
 const args = process.argv.slice(2), outputIndex = args.indexOf('--output'), caseIndex = args.indexOf('--case'), mutationIndex = args.indexOf('--mutation')
 const selectedCase = caseIndex < 0 ? 'complete' : args[caseIndex + 1]
-assert.ok(['admission', 'profile-switch', 'settings', 'complete'].includes(selectedCase), 'Choose an exact Profile Survey case')
+assert.ok(['admission', 'profile-switch', 'settings', 'complete', 'surface-windows'].includes(selectedCase), 'Choose an exact Profile Survey case')
 const mutation = mutationIndex < 0 ? null : args[mutationIndex + 1]
-const mutationCases = { admission: {
+const mutationCases = { 'surface-windows': {
+  'misroute-surface-menu': { file: 'apps/desktop/src/renderer/src/components/KnowledgeSurfaceWindow.tsx',
+    before: "onSelect={() => void openWorkbenchWindow({ kind: 'surface', surface })}",
+    after: "onSelect={() => void openWorkbenchWindow({ kind: 'surface', surface: 'recall' })}" }
+}, admission: {
   'omit-explicit-admission': { file: 'apps/desktop/src/renderer/src/store.ts', before: 'if (request.profileId !== undefined) {', after: 'if (false && request.profileId !== undefined) {' },
   'project-whole-task': { file: 'apps/desktop/src/renderer/src/lib/survey-page-references.ts', before: "entity: { kind: 'region', regionId: page.regionId }", after: "entity: { kind: 'tab', tabId: owner.tab.id }" },
   'duplicate-region-host': { file: 'apps/desktop/src/renderer/src/components/WorkspaceWorkbench.tsx', before: 'const nativeRegionTarget = projectedSurface\n', after: "const nativeRegionTarget = projectedSurface && projectedSurface.kind !== 'browser'\n" },
@@ -204,7 +208,7 @@ try {
     } }] } },
     plugins: [rendererSourcePlugin()],
     build: { outDir: join(directory, 'renderer'), emptyOutDir: false, minify: false, sourcemap: false, target: 'esnext' } })
-  if(selectedCase==='complete'){
+  if(selectedCase==='complete'||selectedCase==='surface-windows'){
     // Production's privileged App portals into this exact script-free auxiliary shell.
     const shell=join(root,'apps/desktop/src/renderer/workbench-window.html')
     await bind(shell);await copyFile(shell,join(directory,'renderer/workbench-window.html'))
@@ -217,6 +221,7 @@ try {
   const first = await execute('first'), restart = await execute('restart')
   assert.notEqual(first.pid, restart.pid, 'Recovery uses a second physical process')
   assert.equal(first.businessPassed, true, 'Boot or gallery rendering cannot qualify admission'); assert.equal(restart.businessPassed, true); assert.deepEqual(restart.recoveredIdentity, first.savedIdentity, 'Second PID must read original Profile/Browser/Region/Survey and mixed Task data without reseeding')
+  if (selectedCase === 'surface-windows') for (const phase of [first, restart]) assert.ok(phase.cases.some(item => item.kind === 'surface-windows' && item.passed), 'The two-window workface must complete its own oracle')
   if(selectedCase==='profile-switch')for(const phase of [first,restart]){assert.equal(phase.profileSwitch?.completed,true);assert.ok(phase.cases.some(item=>item.kind==='profile-switch-dedicated-oracle'&&item.passed),'No admission fallthrough can qualify profile-switch')}
   if(selectedCase==='complete')for(const phase of [first,restart]){assert.equal(phase.complete?.completed,true);assert.ok(phase.complete.cases.length>0);assert.ok(phase.cases.some(item=>item.kind==='complete-dedicated-oracle'&&item.passed),'No admission/profile-switch fallthrough can qualify complete')}
   for (const [file, digest] of sources) assert.equal(hash(await readFile(resolve(root, file))), digest, 'Qualification candidate remained unchanged: ' + file)
@@ -235,5 +240,6 @@ try {
   receipt.originRequests = origins.requests
   await save()
   await origins.close()
+  if (selectedCase === 'surface-windows') await rm(directory, { recursive: true, force: true })
 }
-// Keep the bounded private run and its receipts available for review; no user directory is cleaned.
+// Receipts and screenshots remain in the original evidence directory.

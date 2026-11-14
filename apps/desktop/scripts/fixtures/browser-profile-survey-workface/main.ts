@@ -4,6 +4,7 @@ import { persistentTask } from './persistent-task'
 import { admissionGeometry } from './admission-geometry'
 import { profileSwitchPorts } from './profile-switch-ports'
 import { profileSwitchCase } from './profile-switch-case'
+import { surfaceWindowsCase } from './surface-windows-case'
 import { completeCase } from './complete-case'
 import { completePorts } from './complete-ports'
 import { cliFollow } from './cli-follow'
@@ -77,13 +78,13 @@ function nativePage(window: BrowserWindow, url: string, profileId: string) {
 async function result(args: string[], input = '') { const value = await cli(args,input); assert.equal(value.code,0,JSON.stringify(value.value)); assert.equal(value.value.ok,true); return value.value.result }
 async function run() {
  await app.whenReady()
- if (phase === 'first') { await mkdir(join(directory,'state'),{recursive:true}); await mkdir(join(directory,'workspace'),{recursive:true}); await mkdir(join(directory,'legacy-workspace'),{recursive:true}); if(selectedCase==='profile-switch'||selectedCase==='complete'){await mkdir(join(directory,'notes'),{recursive:true});await writeFile(join(directory,'legacy-workspace/original.txt'),'Original complete research input.')} await writeFile(join(directory,'workspace/original.txt'),'Original authorized Workspace file.'); await writeFile(join(directory,'state/notes-location.json'),JSON.stringify({schemaVersion:1,directory:join(directory,'notes'),operations:{},pending:null})) }
+ if (phase === 'first') { await mkdir(join(directory,'state'),{recursive:true}); await mkdir(join(directory,'workspace'),{recursive:true}); await mkdir(join(directory,'legacy-workspace'),{recursive:true}); if(selectedCase==='profile-switch'||selectedCase==='complete'||selectedCase==='surface-windows'){await mkdir(join(directory,'notes'),{recursive:true});await writeFile(join(directory,'legacy-workspace/original.txt'),'Original complete research input.')} await writeFile(join(directory,'workspace/original.txt'),'Original authorized Workspace file.'); await writeFile(join(directory,'state/notes-location.json'),JSON.stringify({schemaVersion:1,directory:join(directory,'notes'),operations:{},pending:null})) }
  const store = new AgentMuxFileAgentSessionStore(join(directory,'sessions.json'))
  const configStore=new ConfigStore(join(directory,'config.json'))
  const initial={...structuredClone(DEFAULT_CONFIG),hosts:[{id:'local',kind:'local',label:'Private Profile Survey proof'}],workspaces:[{id:workspaceId,name:'Private mixed task',kind:'folder',hostId:'local',path:join(directory,'workspace')},{id:legacyWorkspaceId,name:'Original whole-Zone exploration',kind:'folder',hostId:'local',path:join(directory,'legacy-workspace')}],executors:{proof:{providerId:'codex',label:'Private synthetic Provider',command:join(source,'packages/core/test/fixtures/fake-codex-cli.mjs'),args:[],injectAgentMuxGuide:false,env:{AGENTMUX_FAKE_READY_MODE:'before',AGENTMUX_FAKE_NATIVE_RECORD:'1',AGENTMUX_FAKE_NATIVE_RECORD_DIRECTORY:join(directory,'native-records')}}},browser:{...DEFAULT_CONFIG.browser,agentAutomation:true},notifications:{mode:'off'}}
  if(selectedCase==='complete')(initial.executors.proof.env as Record<string,string>).AGENTMUX_FAKE_CAPABILITY_RECEIPT=join(directory,'workface-credential.json')
  let config=phase==='first'?await configStore.save(initial as any):await configStore.get()
- if(selectedCase==='profile-switch'||selectedCase==='complete')config=await configStore.get()
+ if(selectedCase==='profile-switch'||selectedCase==='complete'||selectedCase==='surface-windows')config=await configStore.get()
  privateHost=await startAgentMuxHost({store,socketPath:join(directory,'semantic.sock'),desktopSocketPath:desktopBusinessSocketPath(),configurationPath:configStore.filePath,mobilePort:0,mobileBuildDirectory:join(directory,'no-mobile-assets')})
  core=privateHost.client;hosted=privateHost.hosted;hostServer=privateHost.server
  rpc=await connectAgentMuxRpc({endpoint:{transport:'unix',path:join(directory,'semantic.sock')}})
@@ -93,7 +94,7 @@ async function run() {
  window=new BrowserWindow({width:1280,height:900,show:false,title:'Private Profile Survey workface',webPreferences:{preload:join(directory,'preload.cjs'),sandbox:true,contextIsolation:true,nodeIntegration:false,backgroundThrottling:false}})
  const contents=window.webContents; contents.on('console-message',(event:any)=>{if(event.level==='error')console.error('Profile Survey Renderer:',event.message)})
  windows=new WorkbenchWindows(window,new WorkbenchWindowStore(join(directory,'windows.json')),()=>[{x:0,y:0,width:1600,height:1000}])
- if(selectedCase==='complete'){
+ if(selectedCase==='complete'||selectedCase==='surface-windows'){
   // Same thin Main bootstrap wiring as production index.ts; policy stays in WorkbenchWindows.
   contents.setWindowOpenHandler(details=>{
    const outcome=windows!.windowOpen(details,()=>{throw new Error('External App opening is outside this private fixture')})
@@ -142,6 +143,11 @@ async function run() {
    follow:async(operationId:string)=>{const reader=cliFollow(process.env.AGENTMUX_PROFILE_SURVEY_NODE!,process.env.AGENTMUX_PROFILE_SURVEY_CLI!,'unix:'+desktopBusinessSocketPath(),await cliEnvironment('workface'),operationId,receipt);completeReaders.push(reader);return reader}})
   assert.equal(receipt.complete?.completed,true,'Only the dedicated nonempty complete workface oracle may qualify T004')
   receipt.businessPassed=true;receipt.passed=true;return
+ }
+ if (selectedCase === 'surface-windows') {
+  await surfaceWindowsCase({ phase, directory, window, result, evaluate, workspaceId, pageUrl, core, receipt })
+  await windows.prepareQuit()
+  receipt.businessPassed=true; receipt.passed=true; return
  }
  if(selectedCase==='settings'){await settingsCase({phase,directory,window,evaluate,result,receipt,probeAck});receipt.businessPassed=true;receipt.passed=true;return}
  if(selectedCase==='profile-switch'){

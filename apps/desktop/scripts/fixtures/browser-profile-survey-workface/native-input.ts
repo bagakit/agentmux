@@ -20,14 +20,14 @@ export function nativeInput(contents: WebContents, trace: any[]) {
       ...(type === 'keyDown' && key === 'Enter' ? { text: '\r' } : {})
     })
   }
-  const click = async (selector: string, text?: string) => {
+  const click = async (selector: string, text?: string, button: 'left' | 'right' = 'left') => {
     const point = await nativeUntil(() => read(`(()=>{
       const e=[...document.querySelectorAll(${JSON.stringify(selector)})].find(e=>e.checkVisibility()&&(${JSON.stringify(text??null)}===null||e.textContent.trim()===${JSON.stringify(text??null)}));
       if(!e)return null;e.scrollIntoView({block:'nearest'});const r=e.getBoundingClientRect();
       return r.width&&r.height?{x:r.x+r.width/2,y:r.y+r.height/2}:null;
     })()`), 'actual pointer target ' + selector)
     for (const type of ['mouseMoved', 'mousePressed', 'mouseReleased']) await contents.debugger.sendCommand('Input.dispatchMouseEvent', {
-      type, x: point.x, y: point.y, ...(type === 'mouseMoved' ? {} : { button: 'left', clickCount: 1 })
+      type, x: point.x, y: point.y, ...(type === 'mouseMoved' ? {} : { button, clickCount: 1 })
     })
     trace.push({ kind: 'pointer', contentsId: contents.id, selector })
     await pause(70)
