@@ -110,6 +110,7 @@ app.whenReady().then(async () => {
   const previous = phase === 'restart' ? JSON.parse(await readFile(join(home, 'trash-identities.json'), 'utf8')) : null
   const original = await evaluate(`trashProof.setup(${JSON.stringify(config)},${JSON.stringify(urls.page)},${JSON.stringify(previous?.sourceId)},${Boolean(previous)})`)
   const sourceId = original.profileId
+  await until(() => evaluate('Boolean(document.querySelector("textarea[aria-label=\\\"Sibling draft\\\"]"))'), 'the actual Renderer sibling draft mounted')
   if (previous) {
     assert.equal(original.restoredFromCore, true)
     receipt.restoredBeforeNative = await evaluate('trashProof.savedWorkface()')
@@ -263,7 +264,7 @@ app.whenReady().then(async () => {
 
 }).catch(async error => {
   console.error('Profile trash proof failed', error); receipt.failure = { message: error.message, stack: error.stack }; receipt.targets = manager?.targets()
-  try { receipt.renderer = await evaluate('trashProof.facts()'); await capture('failure-observation') } catch { /* diagnostic only; never substitutes a business result */ }
+  try { receipt.renderer = await evaluate('({ ...trashProof.facts(), mountedBody: document.body.innerHTML.slice(0, 6000) })'); await capture('failure-observation') } catch { /* diagnostic only; never substitutes a business result */ }
 }).finally(async () => {
   for (const [owner, cleanup] of [ ['renderer', () => win && !win.isDestroyed() ? evaluate('globalThis.trashProof?.dispose()') : undefined],
     ['foreign-window', () => { if (outsider && !outsider.isDestroyed()) outsider.destroy() }], ['ipc', () => dispose?.()], ['progress', () => progress?.stop()],

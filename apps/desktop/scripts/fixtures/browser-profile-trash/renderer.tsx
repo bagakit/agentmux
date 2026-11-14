@@ -1,5 +1,6 @@
 import { browserProfiles } from '../../../src/renderer/src/lib/browser-profiles'
 import { createRoot } from 'react-dom/client'
+import { flushSync } from 'react-dom'
 import { useState } from 'react'
 import { createWorkspaceLayout } from '@agentmux/layout'
 import { mountThemeRuntime, updateThemeSelection } from '@agentmux/client-ui/theme'
@@ -15,7 +16,11 @@ import '../../../src/renderer/src/styles/index.css'
 import '../browser-recovery-surface/fixture.css'
 
 const removedEntities = new Set<string>()
-const root = createRoot(document.getElementById('root')!), errors: string[] = []
+const errors: string[] = []
+const root = createRoot(document.getElementById('root')!, { onUncaughtError: cause => {
+  const detail = cause instanceof Error ? cause.stack ?? cause.message : String(cause)
+  errors.push(detail); console.error('Private Profile fixture render failed', detail)
+} })
 let appearance: any, stopTheme: (() => void) | undefined, setSettings: (show: boolean) => void = () => {}, setViewed: (id: string) => void = () => {}
 const stopEvents = api.browser.onEvent(event => useAppStore.getState().applyBrowserEvent(event))
 const stopControl = api.control.onRequest((request, signal) => useAppStore.getState().executeControl(request, signal, { admittedControlRequestId: request.requestId }))
@@ -57,7 +62,8 @@ Object.assign(window, { trashProof: {
         loading: false, toolsOpen: false, reportError: error => errors.push(String(error)) })
     }
     stopTheme = mountThemeRuntime(window, { ...appearance, appAppearance: 'light' })
-    root.render(<Fixture />)
+    flushSync(() => root.render(<Fixture />))
+    if (errors.length) throw new Error(errors.at(-1))
     return browser
   },
   async resumeOriginal() {

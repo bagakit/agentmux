@@ -34,7 +34,7 @@ for (const directory of [...(await readdir(join(root, 'packages'))).map(name => 
     if (typeof mainTarget !== 'string') continue
     const artifact = resolve(directory, mainTarget)
     let source = resolve(directory, mainTarget.replace(/^\.\/dist\/(?:src\/)?/u, './src/').replace(/\.js$/u, '.ts'))
-    let external = !wildcard && await stat(artifact).then(value => value.isFile(), () => false)
+    let external = !wildcard && mainTarget.startsWith('./dist/') && await stat(artifact).then(value => value.isFile(), () => false)
     if (!external && !wildcard) { try { await stat(source) } catch { source = source.replace(/\.ts$/u, '.tsx'); try { await stat(source) } catch { continue } } }
     mainModules.push({ find: pattern, replacement: (external ? artifact : source).replace('*', '$1'), wildcard, id, external })
   }
