@@ -21,24 +21,29 @@ export interface RelayRouterOptions {
   authorizePublisher(request: IncomingMessage, serverId: string): boolean | Promise<boolean>
   /** The existing local adapter owns replace semantics; remote publishers retain a healthy incumbent. */
   publisherCollision: 'replace' | 'reject'
+  canRouteClient?(serverId: string): boolean
+  openRemoteClient?(serverId: string, signal: AbortSignal): Promise<WebSocket>
+  publisherChanged?(serverId: string, generation: string | null): void
 }
 
 type Pair = {
   client: WebSocket; data?: WebSocket; pending: { data: RawData; binary: boolean }[]
   bytes: number; timer: NodeJS.Timeout; info: RelayConnectionInfo
 }
-type Publisher = { control?: WebSocket; pairs: Map<string, Pair> }
+type Publisher = { control?: WebSocket; generation?: string; pairs: Map<string, Pair> }
 
 /**
  * V2 routing shared by local, gateway and edge hosts. The host retains HTTP/TLS,
  * publisher admission and lifecycle; encrypted endpoint RPC remains opaque here.
  */
-export function attachRelayRouter(server: Server, options: RelayRouterOptions) {
+export function createRelayRouter(options: RelayRouterOptions) {
   const clients = new WebSocketServer({ noServer: true, maxPayload: CLIENT_SOCKET_MAX_PAYLOAD, perMessageDeflate: false })
   const publishers = new WebSocketServer({ noServer: true, maxPayload: SERVER_SOCKET_MAX_PAYLOAD, perMessageDeflate: false })
   const routes = new Map<string, Publisher>()
   const forwarded = new WeakMap<WebSocket, number>()
   const drainTimers = new Set<NodeJS.Timeout>()
+  const attachments = new Set<Server>()
+  const bridges = new Set<() => void>()
   let disposed = false
   const byteLength = (data: RawData) => Array.isArray(data) ? data.reduce((sum, part) => sum + part.byteLength, 0) : data.byteLength
   const send = (socket: WebSocket | undefined, data: RawData | string, binary = false) => {
@@ -59,6 +64,36 @@ export function attachRelayRouter(server: Server, options: RelayRouterOptions) {
     }, 25)
     drainTimers.add(timer)
   }
+  // A single bounded opaque bridge serves Mesh hop sockets and remote V2 ingress.
+  const bridge = (source: WebSocket, opening: (signal: AbortSignal) => Promise<WebSocket>) => {
+    const lifetime = new AbortController()
+    let target: WebSocket | undefined, pending: { data: RawData; binary: boolean }[] = [], bytes = 0, closed = false
+    const close = () => {
+      if (closed) return
+      closed = true; bridges.delete(close); lifetime.abort()
+      source.close(4001, 'Connection ended'); target?.close(4001, 'Connection ended')
+      pending = []
+    }
+    bridges.add(close)
+    source.on('message', (data, binary) => {
+      if (closed) return
+      if (target) { forward(source, target, data, binary); return }
+      bytes += byteLength(data)
+      if (bytes > 8 * 1024 * 1024 || pending.length >= 128) { close(); return }
+      pending.push({ data, binary })
+    })
+    source.once('close', close); source.on('error', close)
+    void opening(lifetime.signal).then(socket => {
+      if (closed) { socket.terminate(); return }
+      target = socket
+      socket.on('message', (data, binary) => { if (!closed) forward(socket, source, data, binary) })
+      socket.once('close', close); socket.on('error', close)
+      for (const frame of pending) forward(source, socket, frame.data, frame.binary)
+      pending = []; bytes = 0
+      socket.resume()
+    }).catch(close)
+    return close
+  }
   const notify = (route: Publisher, message: unknown) => send(route.control, JSON.stringify(message))
   const drop = (route: Publisher, id: string) => {
     const pair = route.pairs.get(id)
@@ -66,6 +101,27 @@ export function attachRelayRouter(server: Server, options: RelayRouterOptions) {
     route.pairs.delete(id); clearTimeout(pair.timer)
     pair.client.close(4001, 'Connection ended'); pair.data?.close(4001, 'Connection ended')
     notify(route, { type: 'disconnected', connectionId: id })
+  }
+  const acceptClient = (serverId: string, ws: WebSocket, info: RelayConnectionInfo = {}, localOnly = false) => {
+    const route = routes.get(serverId)
+    if (!route?.control || route.control.readyState !== WebSocket.OPEN) {
+      if (!localOnly && options.openRemoteClient && options.canRouteClient?.(serverId)) bridge(ws, signal => options.openRemoteClient!(serverId, signal))
+      else ws.close(4001, 'Publisher reconnecting')
+      return
+    }
+    if (route.pairs.size >= 128) { ws.close(4008, 'Publisher connection budget'); return }
+    const key = mintObjectId()
+    const { address, userAgent } = info
+    const current: Pair = { client: ws, pending: [], bytes: 0, timer: setTimeout(() => drop(route, key), 10000),
+      info: { ...(address ? { address } : {}), ...(userAgent ? { userAgent } : {}) } }
+    route.pairs.set(key, current); notify(route, { type: 'connected', connectionId: key })
+    ws.on('message', (data, binary) => {
+      if (current.data) { forward(ws, current.data, data, binary); return }
+      current.bytes += byteLength(data)
+      if (current.bytes > 8 * 1024 * 1024 || current.pending.length >= 128) { drop(route, key); return }
+      current.pending.push({ data, binary })
+    })
+    ws.once('close', () => drop(route, key))
   }
   const reject = (socket: { end(data: string): unknown }, status = 403) => {
     socket.end(`HTTP/1.1 ${status} ${status === 409 ? 'Conflict' : 'Forbidden'}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`)
@@ -78,11 +134,11 @@ export function attachRelayRouter(server: Server, options: RelayRouterOptions) {
       // An embedded gateway owns /ws only; another service may own other upgrade paths.
       if (url.pathname !== '/ws') return
       const role = url.searchParams.get('role'), id = url.searchParams.get('connectionId'), serverId = url.searchParams.get('serverId')
-      if (disposed || url.searchParams.get('v') !== '2' || !serverId || !options.acceptsServer(serverId) ||
+      if (disposed || url.searchParams.get('v') !== '2' || !serverId || !(role === 'server' ? options.acceptsServer(serverId) : options.acceptsServer(serverId) || options.canRouteClient?.(serverId)) ||
         role !== 'client' && role !== 'server' || role === 'client' && id || url.searchParams.has('connectionId') && !id ||
         [...url.searchParams.keys()].some(key => !['role', 'connectionId', 'serverId', 'v'].includes(key) || url.searchParams.getAll(key).length !== 1)) { reject(socket); return }
       if (role === 'server' && !await options.authorizePublisher(request, serverId)) { reject(socket); return }
-      if (disposed || socket.destroyed || !options.acceptsServer(serverId)) { reject(socket); return }
+      if (disposed || socket.destroyed || role === 'server' && !options.acceptsServer(serverId)) { reject(socket); return }
       let route = routes.get(serverId)
       if (!route) { route = { pairs: new Map() }; routes.set(serverId, route) }
       // A data socket must attach to this original server's original pair.
@@ -104,11 +160,12 @@ export function attachRelayRouter(server: Server, options: RelayRouterOptions) {
         ws.on('error', () => ws.terminate())
         if (role === 'server' && !id) {
           original.control?.close(4001, 'Control replaced'); original.control = ws
+          original.generation = mintObjectId(); options.publisherChanged?.(serverId, original.generation)
           notify(original, { type: 'sync', connectionIds: [...original.pairs.keys()] })
           ws.on('message', data => { try { if (JSON.parse(data.toString()).type === 'ping') send(ws, JSON.stringify({ type: 'pong' })) } catch { ws.close(4002, 'Invalid control frame') } })
           ws.once('close', () => {
             if (original.control !== ws) return
-            original.control = undefined
+            original.control = undefined; original.generation = undefined; options.publisherChanged?.(serverId, null)
             for (const key of [...original.pairs.keys()]) drop(original, key)
           })
           return
@@ -122,32 +179,30 @@ export function attachRelayRouter(server: Server, options: RelayRouterOptions) {
           ws.once('close', () => { if (current.data === ws) drop(original, id) })
           return
         }
-        if (!original.control || original.control.readyState !== WebSocket.OPEN) { ws.close(4001, 'Publisher reconnecting'); return }
-        const key = mintObjectId()
-        const address = request.socket.remoteAddress?.replace(/^::ffff:/u, '')
-        const userAgent = request.headers['user-agent']
-        const current: Pair = { client: ws, pending: [], bytes: 0, timer: setTimeout(() => drop(original, key), 10000),
-          info: { ...(address ? { address } : {}), ...(userAgent ? { userAgent } : {}) } }
-        original.pairs.set(key, current); notify(original, { type: 'connected', connectionId: key })
-        ws.on('message', (data, binary) => {
-          if (current.data) { forward(ws, current.data, data, binary); return }
-          current.bytes += byteLength(data)
-          if (current.bytes > 8 * 1024 * 1024 || current.pending.length >= 128) { drop(original, key); return }
-          current.pending.push({ data, binary })
-        })
-        ws.once('close', () => drop(original, key))
+        acceptClient(serverId, ws, { address: request.socket.remoteAddress?.replace(/^::ffff:/u, ''), ...(request.headers['user-agent'] ? { userAgent: request.headers['user-agent'] } : {}) })
       })
     })().catch(() => { if (!socket.destroyed) reject(socket) })
   }
-  server.on('upgrade', onUpgrade)
   return {
+    attach(server: Server) {
+      if (disposed) throw new Error('Relay router is stopped.')
+      if (attachments.has(server)) throw new Error('Relay router is already attached.')
+      attachments.add(server); server.on('upgrade', onUpgrade)
+      return { detach() { attachments.delete(server); server.removeListener('upgrade', onUpgrade) } }
+    },
+    acceptClient, bridge,
+    revokePublisher(serverId: string) { const route = routes.get(serverId); if (!route) return; for (const id of [...route.pairs.keys()]) drop(route,id); route.control?.terminate() },
+    localPublishers: () => [...routes].flatMap(([serverId, route]) => route.control?.readyState === WebSocket.OPEN && route.generation ? [{ serverId, generation: route.generation }] : []),
     connectionInfo(serverId: string, connectionId: string): RelayConnectionInfo | undefined {
       const info = routes.get(serverId)?.pairs.get(connectionId)?.info
       return info ? { ...info } : undefined
     },
     async stop(): Promise<void> {
       if (disposed) return
-      disposed = true; server.removeListener('upgrade', onUpgrade)
+      disposed = true
+      for (const server of attachments) server.removeListener('upgrade', onUpgrade)
+      attachments.clear()
+      for (const close of [...bridges]) close()
       for (const timer of drainTimers) clearInterval(timer)
       drainTimers.clear()
       for (const route of routes.values()) {
@@ -159,4 +214,11 @@ export function attachRelayRouter(server: Server, options: RelayRouterOptions) {
       routes.clear()
     },
   }
+}
+
+/** Borrow a listener while owning this original router's sockets. */
+export function attachRelayRouter(server: Server, options: RelayRouterOptions) {
+  const router = createRelayRouter(options)
+  router.attach(server)
+  return router
 }
