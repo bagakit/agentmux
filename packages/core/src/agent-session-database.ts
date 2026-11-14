@@ -100,6 +100,11 @@ export function initializeLegacyClosedCreationSchema(db: DatabaseSync): boolean 
   db.exec('PRAGMA user_version = 2')
   return true
 }
+export const scheduledIntentColumn = "json_extract(json,'$.admission.futureIntent.intentId')"
+export const scheduledTimeColumn = "json_extract(json,'$.admission.futureIntent.occurrenceAt')"
+export const scheduledOccurrenceIndexSchema = `CREATE INDEX IF NOT EXISTS scheduled_input_occurrence
+  ON prompt_admissions(session_id, ${scheduledIntentColumn}, ${scheduledTimeColumn}, run_id, record_id)
+  WHERE ${scheduledIntentColumn} IS NOT NULL;`
 export const promptAdmissionSchema = `CREATE TABLE IF NOT EXISTS prompt_admissions (
   session_id TEXT NOT NULL, run_id TEXT NOT NULL, record_id TEXT NOT NULL,
   json TEXT NOT NULL, PRIMARY KEY(session_id, run_id, record_id));`
@@ -129,6 +134,7 @@ const schema = `
   CREATE TABLE native_bindings (native_key TEXT PRIMARY KEY, session_id TEXT NOT NULL);
   CREATE INDEX session_natives ON native_bindings(session_id);
   ${promptAdmissionSchema}
+  ${scheduledOccurrenceIndexSchema}
   ${closedCreationSchema}
 `
 

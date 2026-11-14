@@ -45,7 +45,7 @@ import { createRequire } from 'node:module'
 import { dirname, isAbsolute, join, resolve } from 'node:path'
 import { isDeepStrictEqual } from 'node:util'
 import type { DatabaseSync } from 'node:sqlite'
-import { openSessionDatabase, initializeLegacyClosedCreationSchema, promptAdmissionSchema, promptSubmissionIndexSchema, retiredCreationIndexSchema, readCurrentSessionDatabase, syncSessionDatabase,
+import { openSessionDatabase, initializeLegacyClosedCreationSchema, promptAdmissionSchema, scheduledOccurrenceIndexSchema, promptSubmissionIndexSchema, retiredCreationIndexSchema, readCurrentSessionDatabase, syncSessionDatabase,
   hasLegacySessionDatabaseName, logicalSessionDatabasePath, migrateSessionDatabaseFile, sessionDatabaseRestoreFile } from './agent-session-database.js'
 import { defaultAgentMuxStateDirectory } from './runtime-paths.js'
 import { durableWriteFile, DurableWriteError } from './durable-write.js'
@@ -4774,6 +4774,14 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
         if (this.dirty) {
           try { await syncSessionDatabase(this.path) } catch (error) { throw new AgentMuxSessionDurabilityError(error) }
           for (const changed of this.durableChangeObservers) queueMicrotask(() => { try { changed() } catch { /* Maintenance cannot revoke the original commit. */ } })
+          // Existing stores can build this read accelerator after the original write is durable.
+          // A full disk during index construction cannot roll back an unrelated receipt.
+          try {
+            if (!this.db.prepare("SELECT 1 FROM sqlite_schema WHERE name='scheduled_input_occurrence' AND type='index'").get())
+              this.db.exec(scheduledOccurrenceIndexSchema)
+          } catch (cause) {
+            process.emitWarning('Schedule history index unavailable: ' + String(cause), { code: 'SCHEDULE_HISTORY_INDEX_UNAVAILABLE' })
+          }
         }
       } catch (error) {
         // A failed SQLite COMMIT can leave the old transaction active (known rollback), or

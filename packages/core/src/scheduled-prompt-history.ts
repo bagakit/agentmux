@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import { scheduledIntentColumn, scheduledTimeColumn } from './agent-session-database.js'
 import type { DatabaseSync } from 'node:sqlite'
 import { parseAutomaticInputSource, sameAutomaticInputSource, type AutomaticInputSource } from './automatic-input-source.js'
 import { matchesScheduledInputSource, projectContinuousProgressInputFacts } from './continuous-progress-input.js'
@@ -18,7 +19,7 @@ export type ScheduledPromptHistoryRequest = {
 }
 export type ScheduledPromptHistory = Pick<ScheduleHistoryPage, 'coverage' | 'entries' | 'nextCursor'>
 type Position = readonly [occurrenceAt: number, runId: string, recordId: string]
-type Original = { position: Position; record: unknown }
+type Original = { position: Position; readRecord(): unknown }
 const unconfirmed = (): ScheduledPromptHistory => ({ coverage: 'unconfirmed', entries: [], nextCursor: null })
 const invalid = () => new AgentMuxError('Use the original schedule, published definitions and history cursor.', 'INVALID_CONTROL_REQUEST')
 
@@ -77,7 +78,7 @@ function page(request: ScheduledPromptHistoryRequest, owner: string, session: Ta
   const result: ScheduledPromptHistory = { coverage: intents.size === definitions.length ? 'recorded-inputs' : 'unconfirmed', entries: [],
     nextCursor: rows.length > limit ? cursor.next(rows[limit - 1]!.position) : null }
   for (const row of rows.slice(0, limit)) {
-    const original = parsePromptSubmissionRecord(row.record)
+    const original = parsePromptSubmissionRecord(row.readRecord())
     const claim = original.admission, key = claim?.inputKey, futureIntent = claim?.futureIntent
     const intent = futureIntent && intents.get(futureIntent.intentId)
     if (!claim || key?.kind !== 'prompt' || key.agentSessionId !== target.agentSessionId || !futureIntent || !intent ||
@@ -105,8 +106,9 @@ export function readMemoryScheduledPromptHistory(request: ScheduledPromptHistory
     for (const record of records) {
       const claim = record.admission, occurrence = claim?.futureIntent
       if (!occurrence || !intents.has(occurrence.intentId) || occurrence.occurrenceAt < request.query.from || occurrence.occurrenceAt >= request.query.to) continue
-      const row: Original = { position: [occurrence.occurrenceAt, record.run.runId, recordId(record)], record }
+      const row: Original = { position: [occurrence.occurrenceAt, record.run.runId, recordId(record)], readRecord: () => record }
       if (!before || comparePosition(row.position, before) < 0) rows.push(row)
+      if (rows.length === 2 * limit) rows.sort((a, b) => comparePosition(b.position, a.position)).length = limit
     }
     return rows.sort((a,b) => comparePosition(b.position, a.position)).slice(0, limit)
   })
@@ -118,15 +120,23 @@ export function readDatabaseScheduledPromptHistory(db: DatabaseSync, request: Sc
   const owner = db.prepare('SELECT incarnation FROM identity').get()?.incarnation
   if (typeof owner !== 'string') return unconfirmed()
   return page(request, owner, session, recordId, readIntent, (intents, before, limit) => {
-    // The existing primary key bounds the visit to the selected Session. The
-    // short time window is filtered within it, outside all scheduler hot paths.
-    const occurrence = "json_extract(json,'$.admission.futureIntent.occurrenceAt')"
-    return db.prepare(`SELECT ${occurrence} AS occurrence, run_id, record_id, json FROM prompt_admissions
-      WHERE session_id=? AND json_extract(json,'$.admission.futureIntent.intentId') IN (SELECT value FROM json_each(?))
-        AND ${occurrence}>=? AND ${occurrence}<?
-        ${before ? `AND (${occurrence},run_id,record_id)<(?,?,?)` : ''}
-      ORDER BY occurrence DESC, run_id DESC, record_id DESC LIMIT ?`)
-      .all(request.target.agentSessionId, JSON.stringify([...intents]), request.query.from, request.query.to, ...(before ?? []), limit)
-      .map(row => ({ position: [Number(row.occurrence), String(row.run_id), String(row.record_id)], record: JSON.parse(String(row.json)) }))
+    // Each published definition seeks its own range and continuation. Defer loading
+    // frozen input bodies until after the bounded merge of original positions.
+    // Give SQLite the cursor time as its actual index upper bound; the tuple
+    // comparison alone can scan every newer page before visiting this one.
+    const positions = db.prepare(`SELECT ${scheduledTimeColumn} AS occurrence, run_id, record_id FROM prompt_admissions
+      WHERE session_id=? AND ${scheduledIntentColumn}=? AND ${scheduledTimeColumn}>=? AND ${scheduledTimeColumn}${before ? "<=" : "<"}?
+        ${before ? `AND (${scheduledTimeColumn},run_id,record_id)<(?,?,?)` : ''}
+      ORDER BY ${scheduledTimeColumn} DESC, run_id DESC, record_id DESC LIMIT ?`)
+    const candidates: Position[] = []
+    for (const intentId of intents) {
+      const rows = positions.all(request.target.agentSessionId, intentId, request.query.from, before?.[0] ?? request.query.to, ...(before ?? []), limit)
+      for (const row of rows) candidates.push([Number(row.occurrence), String(row.run_id), String(row.record_id)])
+      if (candidates.length > limit) candidates.sort((a, b) => comparePosition(b, a)).length = limit
+    }
+    const body = db.prepare('SELECT json FROM prompt_admissions WHERE session_id=? AND run_id=? AND record_id=?')
+    return candidates.sort((a, b) => comparePosition(b, a)).slice(0, limit).map(position => ({
+      position, readRecord: () => JSON.parse(String(body.get(request.target.agentSessionId, position[1], position[2])?.json))
+    }))
   })
 }
