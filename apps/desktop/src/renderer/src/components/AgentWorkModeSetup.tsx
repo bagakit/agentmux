@@ -12,11 +12,13 @@ import './agent-work-mode.css'
 type Config = Pick<AppConfig, 'hosts' | 'workspaces'>
 
 /** Edits one prospective arrangement. The original Store owns addresses, registration and creation. */
-export function AgentWorkModeSetup({ config, active, initialSelection, initialMode, allowLocal = false, actionLabel, preparationNote, disabled = false, onApply, onCancel, onOpenHost }: {
+export function AgentWorkModeSetup({ config, active, initialSelection, initialMode, fixedResourceWorkspaceId, allowLocal = false, actionLabel, preparationNote, disabled = false, onApply, onCancel, onOpenHost }: {
   config: Config
   active: boolean
   initialSelection?: LauncherExecutionSelection | undefined
   initialMode?: AgentWorkMode | undefined
+  /** A project Launcher changes only its Agent end; global preparation leaves this unset. */
+  fixedResourceWorkspaceId?: string | undefined
   allowLocal?: boolean
   actionLabel: string
   preparationNote?: string | undefined
@@ -27,9 +29,13 @@ export function AgentWorkModeSetup({ config, active, initialSelection, initialMo
 }) {
   const settings = useContext(SettingsNavigation), group = useId()
   const reference = workReferenceHostId(config.hosts)
-  const initialProject = config.workspaces.find(item => item.id === initialSelection?.resourceWorkspaceId)
+  const fixedProject = fixedResourceWorkspaceId !== undefined
+  const initialProject = config.workspaces.find(item => item.id === (fixedResourceWorkspaceId ?? initialSelection?.resourceWorkspaceId))
   const initialAgent = config.workspaces.find(item => item.id === (initialSelection?.agentWorkspaceId ?? initialProject?.id))
   const observedMode = agentWorkMode(reference, initialAgent?.hostId ?? null, initialProject?.hostId ?? null)
+  const modeOptions = AGENT_WORK_MODES.filter(item => fixedProject
+    ? reference !== null && initialProject && (item.id === 'local' || item.id === 'remote-agent') === (initialProject.hostId === reference)
+    : allowLocal || item.id !== 'local')
   const [mode, setMode] = useState<AgentWorkMode>(() => initialMode ?? (observedMode === 'unknown' || !allowLocal && observedMode === 'local' ? 'remote-agent' : observedMode))
   const [projectId, setProjectId] = useState(initialProject?.id ?? '')
   const [folderHostId, setFolderHostId] = useState(initialProject?.hostId ?? '')
@@ -45,8 +51,8 @@ export function AgentWorkModeSetup({ config, active, initialSelection, initialMo
   const wantsLocalProject = mode === 'local' || mode === 'remote-agent'
   const projects = config.workspaces.filter(item => !isScratchWorkspaceId(item.id) &&
     (wantsLocalProject ? item.hostId === reference : item.hostId !== reference))
-  const project = projects.find(item => item.id === projectId)
-  const projectHostId = project?.hostId ?? (wantsLocalProject ? reference : folderHostId && folderHostId !== reference ? folderHostId : null)
+  const project = fixedProject ? initialProject : projects.find(item => item.id === projectId)
+  const projectHostId = project?.hostId ?? (fixedProject ? null : wantsLocalProject ? reference : folderHostId && folderHostId !== reference ? folderHostId : null)
   const projectHost = config.hosts.find(item => item.id === projectHostId)
   const agentHostId = mode === 'local' || mode === 'remote-project' ? reference : mode === 'remote-workspace' && !agentId ? projectHostId : agentId || null
   const agentHost = config.hosts.find(item => item.id === agentHostId)
@@ -59,6 +65,7 @@ export function AgentWorkModeSetup({ config, active, initialSelection, initialMo
   ]
   function changeMode(next: AgentWorkMode) {
     invalidate(); setMode(next); setStartupId(''); setAgentId('')
+    if (fixedProject) return
     const localProject = next === 'local' || next === 'remote-agent'
     const selected = config.workspaces.find(item => item.id === projectId)
     if (!selected || (selected.hostId === reference) !== localProject) { setProjectId(''); setFolderHostId('') }
@@ -100,11 +107,11 @@ export function AgentWorkModeSetup({ config, active, initialSelection, initialMo
     } finally { stop(); if (request.current === controller) { request.current = null; setPending(false) } }
   }
   function openHost(id: string | null) { if (id) { if (onOpenHost) onOpenHost(id); else settings?.openHost(id) } }
-  const unavailableProject = projectId && !projects.some(item => item.id === projectId)
+  const unavailableProject = fixedProject ? !project || !modeOptions.some(item => item.id === mode) : projectId && !projects.some(item => item.id === projectId)
   return <div className={`agent-work-setup${allowLocal ? ' agent-work-setup--local' : ''}`} data-work-mode={mode} aria-busy={pending || undefined}>
     <fieldset className="agent-work-mode-choices" disabled={disabled || !active}>
       <legend>Work mode <span>From {workHostLabel(config.hosts, reference)}</span></legend>
-      <div className="agent-work-mode-choices__options">{AGENT_WORK_MODES.filter(item => allowLocal || item.id !== 'local').map(item =>
+      <div className="agent-work-mode-choices__options">{modeOptions.map(item =>
         <label className="agent-work-mode-choice" data-selected={mode === item.id || undefined} key={item.id}>
           <AgentWorkModePlacement mode={item.id} />
           <span className="agent-work-mode-choice__copy"><span className="agent-work-mode-choice__name"><strong>{item.brand}</strong>{item.brand !== item.label ? <span>{item.label}</span> : null}</span><small>{item.description}</small></span>
@@ -113,9 +120,10 @@ export function AgentWorkModeSetup({ config, active, initialSelection, initialMo
     </fieldset>
     <div className="agent-work-ends" aria-label="Files and Agent placement">
       <div className="agent-work-end"><span className="agent-work-end__label">Working folder</span>
-        <SelectionField label="Working folder for this arrangement" value={projectId} options={projectOptions} disabled={disabled || !active}
-          onValueChange={id => { invalidate(); setProjectId(id); setStartupId(''); const selected = projects.find(item => item.id === id); if (selected) setFolderHostId(selected.hostId) }} />
-        {!project && !wantsLocalProject ? <SelectionField label="Working folder device" value={folderHostId} disabled={disabled || !active}
+        {fixedProject ? <span className="agent-work-end__fixed">{project?.name ?? 'Original project unavailable'}</span>
+          : <SelectionField label="Working folder for this arrangement" value={projectId} options={projectOptions} disabled={disabled || !active}
+            onValueChange={id => { invalidate(); setProjectId(id); setStartupId(''); const selected = projects.find(item => item.id === id); if (selected) setFolderHostId(selected.hostId) }} />}
+        {!fixedProject && !project && !wantsLocalProject ? <SelectionField label="Working folder device" value={folderHostId} disabled={disabled || !active}
           options={[{ value: '', label: 'Choose a remote device…' }, ...config.hosts.filter(host => host.id !== reference).map(host => ({ value: host.id, label: workHostLabel(config.hosts, host.id) }))]}
           onValueChange={id => { invalidate(); setFolderHostId(id); setStartupId('') }} /> : null}
         <span className="agent-work-end__host">{workHostLabel(config.hosts, projectHostId)}</span>

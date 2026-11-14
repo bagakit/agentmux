@@ -54,8 +54,9 @@ export function LauncherAgentDevice({ hosts, workspace, agentWorkspace, explicit
       <Dialog.Content ref={attach} className="launcher-work-arrangement__dialog" style={{ visibility: 'hidden' }}
         onOpenAutoFocus={event => { event.preventDefault(); surface.current?.focus({ preventScroll: true }) }}>
         <Dialog.Title>Edit work arrangement</Dialog.Title>
-        <Dialog.Description>Choose where the project and Agent work. Apply here, then launch with your original task.</Dialog.Description>
+        <Dialog.Description>Keep this project in its original location. Choose where the Agent runs, then launch with your original task.</Dialog.Description>
         <AgentWorkModeSetup config={{ hosts, workspaces }} active={active && open} allowLocal actionLabel="Apply arrangement" disabled={disabled}
+          fixedResourceWorkspaceId={workspace.id}
           initialSelection={{ resourceWorkspaceId: workspace.id, agentWorkspaceId: explicitAgentWorkspaceId ?? null }}
           onCancel={() => setOpen(false)} onApply={selection => { const applied = onSelect(selection); if (applied) setOpen(false); return applied }} />
       </Dialog.Content>
