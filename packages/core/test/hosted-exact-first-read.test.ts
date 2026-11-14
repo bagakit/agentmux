@@ -27,6 +27,17 @@ it('the original encrypted Relay returns exact control while the complete sessio
     expect(() => client!.agentSessions()).toThrow(expect.objectContaining({ code: 'HOSTED_SESSION_OBSERVATION_UNCONFIRMED' }))
     expect(() => client!.catalog()).toThrow(expect.objectContaining({ code: 'HOSTED_SESSION_OBSERVATION_UNCONFIRMED' }))
     expect((await client!.readAgentSession('caller'))?.run).toEqual({ runId: 'run-caller' })
+    const sessionEvents: AgentMuxClientEvent[] = []
+    client!.onStatusEvent(event => { if (event.type === 'agent-session') sessionEvents.push(event) })
+    const actualStatuses: Awaited<ReturnType<typeof f.host.client.statusAgent>>[] = []
+    const readStatus = f.host.client.statusAgent.bind(f.host.client)
+    vi.spyOn(f.host.client, 'statusAgent').mockImplementation(async id => {
+      const value = await readStatus(id); actualStatuses.push(structuredClone(value)); return value
+    })
+    const first = await client!.statusAgent('caller'), second = await client!.statusAgent('caller')
+    expect([first, second]).toEqual(actualStatuses)
+    expect(first.session.agentSessionId).toBe('caller'); expect(first.run.runId).toBe('run-caller')
+    expect(sessionEvents, 'Exact status receipts before a directory snapshot must not publish self-triggering Session mutations').toEqual([])
     const service = new AgentMuxRpcService({ coreClients: () => [{ hostId: 'relay', client: client! }] as AgentMuxRpcCoreClient[] })
     f.cleanup(() => service.dispose())
     expect((await service.call('agent.inspect', { target: { kind: 'run', run: { runId: 'run-caller' } } })).session.agentSessionId).toBe('caller')

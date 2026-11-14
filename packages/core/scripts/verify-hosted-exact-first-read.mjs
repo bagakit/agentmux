@@ -119,8 +119,8 @@ async function reuse() {
   const previous = JSON.parse(await readFile(resolve(root, pointer.file), 'utf8'))
   assert.equal(previous.passed, true)
   if (JSON.stringify(previous.inputs) !== JSON.stringify(receipt.inputs) || JSON.stringify(previous.conditions) !== JSON.stringify(receipt.conditions)) return false
-  assert.deepEqual(previous.rounds.map(row => row.name), ['baseline', 'wait-catalog', 'revoke-control', 'false-empty', 'late-owner', 'old-catalog-body', 'restored', 'related'])
-  assert.deepEqual(previous.rounds.map(row => row.mutation), [null, 'wait-catalog', 'revoke-control', 'false-empty', 'late-owner', 'old-catalog-body', null, null])
+  assert.deepEqual(previous.rounds.map(row => row.name), ['baseline', 'wait-catalog', 'revoke-control', 'false-empty', 'read-receipt-echo', 'late-owner', 'old-catalog-body', 'restored', 'related'])
+  assert.deepEqual(previous.rounds.map(row => row.mutation), [null, 'wait-catalog', 'revoke-control', 'false-empty', 'read-receipt-echo', 'late-owner', 'old-catalog-body', null, null])
   for (const fact of previous.rounds) await verifyRound(fact)
   assert.equal(previous.typecheck.exitCode, 0); assert.equal(previous.typecheck.signal, null)
   await verifyArtifact(previous.typecheck.log)
@@ -132,7 +132,7 @@ async function reuse() {
 try {
   if (!await reuse()) {
     await round('baseline')
-    for (const mutation of ['wait-catalog', 'revoke-control', 'false-empty', 'late-owner', 'old-catalog-body']) await round(mutation, mutation)
+    for (const mutation of ['wait-catalog', 'revoke-control', 'false-empty', 'read-receipt-echo', 'late-owner', 'old-catalog-body']) await round(mutation, mutation)
     await round('restored')
     await round('related', undefined, true)
   }

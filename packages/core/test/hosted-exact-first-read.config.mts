@@ -14,6 +14,8 @@ export const variants = {
     changes: [["sessionObservationState = state; sessionObservationIssue = diagnostic", "sessionObservationState = state; sessionObservationIssue = diagnostic; if (state === 'unavailable') emit({ type: 'connection-state', state: 'lost', observationOrigin: { kind: 'runtime-connection', boundary: 'consumer-core' }, evidence: { source: 'agentmux', observedAt: Date.now() } })"]] },
   'false-empty': { file: leaf, pattern: 'returns exact control while',
     changes: [['agentSessions: () => structuredClone(requireBootstrap().sessions)', 'agentSessions: () => structuredClone(bootstrap?.sessions ?? [])']] },
+  'read-receipt-echo': { file: leaf, pattern: 'returns exact control while',
+    changes: [["if (bootstrap && value && typeof value === 'object')", "if (value && typeof value === 'object')"]] },
   'late-owner': { file: leaf, pattern: 'released old reply',
     changes: [["if (disposed || controller.signal.aborted || epoch !== controlEpoch) throw", 'if (disposed) throw'],
       ['if (controlOwner === previous) acceptOwner(discovered)', 'acceptOwner(discovered)']] },
