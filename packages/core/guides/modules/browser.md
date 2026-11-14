@@ -123,7 +123,17 @@ Read only the matching local help:
   facts remain visible, and cancelling an observation never substitutes for browser.stop.
 - amux browser run --help: page-program API, capability names and original result/receipt reads.
 - amux browser task --help: source/draft discovery, draft edit/publish, original create receipts,
-  version reliability, run, batch and stop.
+  version reliability, run, batch, explicit parallel targets and stop.
+  `browser task parallel --browser SOURCE --asset ID --version N --input FILE|-` accepts
+  `{operationId, concurrency?, targets:[{id,browserId,profileId,parameters,calls?}]}`.
+  Retain that exact operation id before dispatch. It freezes one original source version;
+  target pages use their exact Profiles without copying definitions. Shared Profiles serialize
+  within parallel work while independent Profiles progress. Fresh values stay in memory.
+  `browser task parallel-inspect --browser SOURCE --operation-id ID [--after TARGET] [--limit N]`
+  reads original target/run ids and results; use each returned Browser/run with `task inspect`.
+  `browser task parallel-list --browser SOURCE [--before OPERATION] [--limit N]` pages retained
+  operations. Both reads work without native pages. Reader cancellation only stops reading;
+  unknown replies and restart never authorize automatic replay of an original operation.
   `browser task source --browser ID` reads exact recording metadata without its body.
   `browser task draft --browser ID --asset ID` reads a current definition without cumulative history.
   Create with one retained Core-minted intent via `browser task create --browser ID --input FILE|-`;
