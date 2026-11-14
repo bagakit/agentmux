@@ -888,13 +888,12 @@ export class ContinuousProgressLoopManager {
     this.deferredChecks.set(loopId, { until: now + waitMs, waitMs })
   }
   /** No input crossed the boundary. Keep the due work eligible and retry its actual save. */
-  private async saveBeforeDispatch(loopId: string, checkAt: number, beforePreparation?: ContinuousProgressLoop): Promise<void> {
+  private async saveBeforeDispatch(loopId: string, checkAt: number): Promise<void> {
     const saving = this.require(loopId)
     try { await this.saveLoops() }
     catch (error) {
       const current = this.require(loopId)
       if (current.status === 'active' && isDeepStrictEqual(current, saving)) {
-        if (beforePreparation) this.scheduler.replace(loopId, beforePreparation)
         this.deferCheck(loopId, checkAt)
         this.patch(loopId, { lastOutcome: 'skipped', lastDecision: 'The original schedule could not save this check before dispatch. It remains due and will be checked again. ' + String(error) })
         for (const listener of this.listeners) listener(this.require(loopId))
@@ -1088,8 +1087,22 @@ export class ContinuousProgressLoopManager {
                 ...(claim.loop.managedSource ? { managedSource: claim.loop.managedSource } : {}) } : undefined
             this.patch(claim.loop.loopId, { pendingCompletion: pending, ...(lastInputRef ? { lastInputRef } : {}) })
             if (isAgentSchedule(claim.loop) && !dispatched) {
-              try { await this.saveBeforeDispatch(loopId, checkAt, claim.loop) }
-              catch (error) { preparationSaveFailure = { error }; break delivery }
+              const operationId = pending.operationId
+              // A concurrent pause or postpone must save its new state without this
+              // preparation. The provider has not received it until onTick begins.
+              const discardPreparation = () => {
+                const current = this.require(loopId)
+                if (current.pendingCompletion?.operationId !== operationId) return
+                const { pendingCompletion: _, lastInputRef: ref, checkInState, ...rest } = current
+                const previousRef = isDeepStrictEqual(ref, lastInputRef) ? claim.loop.lastInputRef : ref
+                const previousCheckIn = newCheckInClaim ? claim.loop.checkInState : checkInState
+                this.scheduler.replace(loopId, { ...rest, ...(previousRef ? { lastInputRef: previousRef } : {}),
+                  ...(previousCheckIn ? { checkInState: previousCheckIn } : {}) })
+              }
+              controller.signal.addEventListener('abort', discardPreparation, { once: true })
+              try { await this.saveBeforeDispatch(loopId, checkAt) }
+              catch (error) { discardPreparation(); preparationSaveFailure = { error }; break delivery }
+              finally { controller.signal.removeEventListener('abort', discardPreparation) }
             } else await this.saveLoops()
             if (!isCurrent()) break delivery
             this.deferredChecks.delete(loopId)
@@ -1140,6 +1153,7 @@ export class ContinuousProgressLoopManager {
     } else await this.persist(claim.loop.loopId)
   }
   private cancelDelivery(loopId: string, reason?: Error): void {
+    this.deferredChecks.delete(loopId)
     for (const controller of this.activations.get(loopId) ?? []) controller.abort(reason)
     this.initialDeliveries.get(loopId)?.abort(reason)
     this.activeDeliveries.get(loopId)?.abort(reason)
