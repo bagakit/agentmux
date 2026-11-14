@@ -13,10 +13,12 @@
 .goal-agent-picker__row small { color: var(--text-3); font-size: var(--fs-meta); overflow-wrap: anywhere; }
 .goal-agent-picker__identity { opacity: .8; }
 .goal-agent-picker__creation { display: grid; gap: var(--sp-4); padding: var(--sp-3) 0; }
-.goal-agent-picker__creation label, .goal-agent-picker__replacement { display: grid; gap: var(--sp-2); color: var(--text-3); font-size: var(--fs-meta); }
+.goal-agent-picker__creation > label, .goal-agent-picker__replacement { display: grid; gap: var(--sp-2); color: var(--text-3); font-size: var(--fs-meta); }
 .goal-agent-picker__creation .selection-field { width: 100%; }
 .goal-agent-picker__creation label > .small-button { justify-self: start; }
 .goal-agent-picker__path { overflow-wrap: anywhere; color: var(--text-2); font-size: var(--fs-meta); margin: 0; }
+.goal-agent-picker__locations, .goal-agent-picker__configurations { display: grid; gap: var(--sp-2); color: var(--text-2); font-size: var(--fs-meta); line-height: 1.5; overflow-wrap: anywhere; }
+.goal-agent-picker__locations > .small-button, .goal-agent-picker__configurations > .small-button { justify-self: start; }
 .goal-agent-picker__receipt { display: grid; gap: var(--sp-2); margin: var(--sp-4) 0; padding: var(--sp-4); border: 1px solid var(--line-soft); border-radius: var(--radius-sm); color: var(--text-3); font-size: var(--fs-meta); overflow-wrap: anywhere; }
 .goal-agent-picker__receipt strong { color: var(--text-2); font-weight: 500; }
 .goal-agent-picker__receipt .small-button { justify-self: start; }

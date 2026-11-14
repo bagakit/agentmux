@@ -6,16 +6,20 @@ import { AGENTMUX_CONTROL_SCHEMA_VERSION, type AgentMuxSpaceMutationReport } fro
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
-import { clearGoalAgentCreationDraft, clearGoalAgentSelectionDraft, retainGoalAgentCreationDraft, retainGoalAgentSelectionDraft, useAppStore } from '../store'
+import { clearGoalAgentCreationDraft, clearGoalAgentSelectionDraft, retainGoalAgentCreationDraft, retainGoalAgentSelectionDraft, useAppStore, type LauncherExecutionSelection } from '../store'
 import { api } from '../lib/api'
 import type { DemandRecord } from '../lib/global-demand-board'
 import { goalAgentRows, goalCreationDraftKey, type GoalAgentCreationDraft, type GoalAgentSelectionDraft, type GoalAgentRole, type GoalAgentRow } from '../lib/goal-agent-selection'
 import { projectWorkspaces, workspaceProjectId } from '../lib/workspace-projects'
 import { moteDefaultExecutor } from '../lib/mote-quick-preferences'
+import { executorsForHost, hostExecutorInventoryMatches } from '../lib/executors'
+import { agentWorkModeLabel, launcherWorkPlacement, workHostLabel, workReferenceHostId } from '../lib/agent-work-mode'
 import { scratchTopicKind, scratchTopicsForWorkspace } from '../lib/scratch-topic-snapshots'
 import { scratchTopicIdentityPath } from '@agentmux/host/mote-model'
 import { directoryIdentity, homeZoneId, workspaceZoneId } from '../../../shared/space-addresses'
 import { AgentAvatar } from './AgentAvatar'
+import { AgentWorkModeSetup } from './AgentWorkModeSetup'
+import { AgentWorkModeBadge } from './AgentWorkModeBadge'
 import { SelectionField } from './SelectionField'
 import { DocumentOverlayPortal } from './WindowOverlayHost'
 import { useWorkbenchDocument } from '../lib/workbench-document'
@@ -36,7 +40,8 @@ export function GoalAgentFace({ row }: { row: GoalAgentRow }) {
 export function GoalAgentPicker({ demand, role, onSave, onClose }: { demand: DemandRecord; role: GoalAgentRole; onSave: GoalRelationSave; onClose(): void }) {
   const document = useWorkbenchDocument()
   const state = useAppStore(useShallow(state => ({ sessions: state.sessions, config: state.config, agentNames: state.agentNames,
-    timelines: state.timelines, scratchTopicSnapshots: state.scratchTopicSnapshots })))
+    timelines: state.timelines, scratchTopicSnapshots: state.scratchTopicSnapshots, hostExecutorInventories: state.hostExecutorInventories,
+    executorDetections: state.executorDetections })))
   const draft = useAppStore(state => state.goalAgentCreationDrafts[goalCreationDraftKey(demand.id, role)])
   const initialSelection = useRef<GoalAgentSelectionDraft>(useAppStore.getState().goalAgentSelectionDrafts[goalCreationDraftKey(demand.id, role)] ?? {
     goalId: demand.id, role, selected: role === 'assignees' ? demand.assigneeSessionIds ?? [] : role === 'related' ? demand.sessionIds : demand.supervisorSessionId ? [demand.supervisorSessionId] : [], expectedUpdatedAt: demand.updatedAt })
@@ -57,7 +62,22 @@ export function GoalAgentPicker({ demand, role, onSave, onClose }: { demand: Dem
   const creating = useRef<string | null>(null)
   const projects = projectWorkspaces(state.config?.workspaces.filter(workspace => workspace.id !== '__scratch__') ?? [])
   const [workspaceId, setWorkspaceId] = useState(projects.find(project => project.id === demand.projectId)?.preferredWorkspaceId ?? '')
+  const [arrangement, setArrangement] = useState<LauncherExecutionSelection | null>(null)
+  const [editingLocations, setEditingLocations] = useState(true), [folderSelection, setFolderSelection] = useState(0)
   const [moteId, setMoteId] = useState(''), [executorId, setExecutorId] = useState('')
+  const project = state.config?.workspaces.find(item => item.id === arrangement?.resourceWorkspaceId)
+  const agent = state.config?.workspaces.find(item => item.id === (arrangement?.agentWorkspaceId ?? arrangement?.resourceWorkspaceId))
+  const agentHost = state.config?.hosts.find(item => item.id === agent?.hostId)
+  const split = Boolean(arrangement?.agentWorkspaceId)
+  const usesHostInventory = split || agentHost?.kind === 'ssh'
+  const inventory = agent ? state.hostExecutorInventories[agent.hostId] : undefined
+  const choices = executorsForHost(state.config, agent?.hostId, state.executorDetections, inventory, split ? 'host' : undefined)
+  const configurationUnknown = usesHostInventory && (!hostExecutorInventoryMatches(inventory, agentHost) || inventory.state !== 'ready')
+  const placement = launcherWorkPlacement(project, agent, workReferenceHostId(state.config?.hosts ?? []))
+  function checkConfigurations() { if (agent) void useAppStore.getState().detectExecutors(agent.hostId, split ? { source: 'host' } : undefined) }
+  useEffect(() => {
+    if (mode === 'agent' && !draft && !editingLocations && agentHost) checkConfigurations()
+  }, [mode, Boolean(draft), editingLocations, agentHost, split])
   const scratch = state.config?.workspaces.find(workspace => workspace.id === '__scratch__')
   const observed = scratchTopicsForWorkspace(state.scratchTopicSnapshots, scratch)
   const motes = observed?.filter(topic => !topic.readError && scratchTopicKind(topic.id, observed) === 'mote') ?? []
@@ -88,16 +108,24 @@ export function GoalAgentPicker({ demand, role, onSave, onClose }: { demand: Dem
   async function createSession() {
     if (creating.current) return
     if (draft) { if (draft.phase === 'not-dispatched') await dispatchOriginal(draft); else await inspectOriginal(draft); return }
-    const workspace = state.config?.workspaces.find(workspace => workspace.id === workspaceId)
+    const config = useAppStore.getState().config
+    const selectedArrangement = arrangement
+    const workspace = config?.workspaces.find(workspace => workspace.id === selectedArrangement?.resourceWorkspaceId)
+    const execution = config?.workspaces.find(workspace => workspace.id === (selectedArrangement?.agentWorkspaceId ?? selectedArrangement?.resourceWorkspaceId))
     const mote = motes.find(topic => topic.id === moteId)
-    if (!executorId || !state.config?.executors[executorId]) { setIssue('Choose the saved Agent configuration for this new Session.'); return }
+    const selectedExecutorId = executorId
+    const current = useAppStore.getState()
+    const selectedChoice = mode === 'agent' && execution ? executorsForHost(config, execution.hostId, current.executorDetections,
+      current.hostExecutorInventories[execution.hostId], selectedArrangement?.agentWorkspaceId ? 'host' : undefined).find(item => item.id === selectedExecutorId && item.detection?.state !== 'missing') : undefined
+    if (!selectedExecutorId || (mode === 'mote' ? !config?.executors[selectedExecutorId] : !selectedChoice)) { setIssue('Choose the configuration on this Agent’s exact Host.'); return }
     if (mode === 'mote' && (!scratch || !mote)) { setIssue('Choose a Mote from its original directory observation. Existing Agents remain available.'); return }
-    if (mode === 'agent' && !workspace) { setIssue('Choose an execution directory for this new Agent.'); return }
+    if (mode === 'agent' && (!workspace || !execution)) { setIssue('Choose the exact project and Agent startup directory for this new Agent.'); return }
     const spaceId = mode === 'mote' ? directoryIdentity(scratch!.hostId, scratchTopicIdentityPath(scratch!, mote!)) : workspaceProjectId(workspace!)
     const operationId = `goal-agent-create-${mintObjectId()}`
     const original: GoalAgentCreationDraft = { goalId: demand.id, role: role as 'assignees' | 'related', operationId, phase: 'not-dispatched',
       request: { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: operationId, operation: 'agent.open', focus: false,
-        content: { kind: 'new-agent', executorId, ...(mode === 'agent' ? { executionWorkspaceId: workspace!.id } : {}) },
+        content: { kind: 'new-agent', executorId: selectedExecutorId, ...(mode === 'agent' ? { executionWorkspaceId: execution!.id,
+          ...(selectedArrangement!.agentWorkspaceId ? { toolWorkspaceId: workspace!.id } : {}) } : {}) },
         destination: { spaceId, zoneId: mode === 'mote' ? homeZoneId(spaceId) : workspaceZoneId(spaceId, workspace!.id), newTab: true } } }
     await dispatchOriginal(original)
   }
@@ -139,12 +167,21 @@ export function GoalAgentPicker({ demand, role, onSave, onClose }: { demand: Dem
   const dialogDocument = useWorkbenchWindowDocument() ?? undefined
   async function chooseFolder() {
     setBusy(true); setIssue(null)
-    try { const workspace = await api.workspaces.chooseLocalFolder(dialogDocument); if (workspace) setWorkspaceId(workspace.id) }
+    try {
+      const workspace = await api.workspaces.chooseLocalFolder(dialogDocument)
+      if (workspace) {
+        // The native chooser returns its registered Workspace, not an inferred path.
+        useAppStore.setState(current => current.config && !current.config.workspaces.some(item => item.id === workspace.id)
+          ? { config: { ...current.config, workspaces: [...current.config.workspaces, workspace] } } : current)
+        setWorkspaceId(workspace.id)
+        setArrangement({ resourceWorkspaceId: workspace.id, agentWorkspaceId: null }); setEditingLocations(true); setFolderSelection(value => value + 1); setExecutorId('')
+      }
+    }
     catch (error) { setIssue(error instanceof Error ? error.message : String(error)) }
     finally { setBusy(false) }
   }
   const location = mode === 'mote' && scratch ? motes.find(topic => topic.id === moteId) : undefined
-  const executionPath = mode === 'mote' ? scratch && location ? scratchTopicIdentityPath(scratch, location) : undefined : state.config?.workspaces.find(workspace => workspace.id === workspaceId)?.path
+  const executionPath = mode === 'mote' && scratch && location ? scratchTopicIdentityPath(scratch, location) : undefined
   return <Dialog.Root recoveryCloseDisabled={busy} open onOpenChange={open => { if (!open && !busy) onClose() }}>
     <DocumentOverlayPortal component={Dialog.Portal}><Dialog.Overlay className="confirmation-dialog__overlay dialog-scrim" />
       <Dialog.Content className="confirmation-dialog dialog-surface goal-agent-picker" aria-busy={busy} onOpenAutoFocus={event => { event.preventDefault(); previousFocus.current = document.activeElement?.nodeType === 1 ? document.activeElement as HTMLElement : null; openedContent.current = (event.target as Node | null)?.nodeType === 1 ? event.target as Element : null; search.current?.focus() }} onCloseAutoFocus={event => { event.preventDefault(); const original = previousFocus.current, active = document.activeElement; if (original?.isConnected && (active === document.body || active === original || !active?.isConnected || openedContent.current?.contains(active))) original.focus({ preventScroll: true }) }} onEscapeKeyDown={event => { if (busy) event.preventDefault() }} onInteractOutside={event => { if (busy) event.preventDefault() }}>
@@ -161,7 +198,7 @@ export function GoalAgentPicker({ demand, role, onSave, onClose }: { demand: Dem
                 return <label key={row.id} className="goal-agent-picker__row" data-session-id={row.id}>
                   <input type={role === 'supervisor' ? 'radio' : 'checkbox'} name={role === 'supervisor' ? 'goal-supervisor' : undefined} checked={selected.includes(row.id)} disabled={busy || required || !row.selectable && !selected.includes(row.id)}
                     onChange={event => changeSelection({ selected: role === 'supervisor' ? [row.id] : event.target.checked ? [...selected, row.id] : selected.filter(id => id !== row.id) })} />
-                  <GoalAgentFace row={row} /><span><strong>{row.name}</strong><small>{row.context}</small><small>{row.status}{required ? ' · Assignee retains this relationship' : row.related ? ' · Related to this Goal' : row.participated ? ' · Participated in this Goal' : row.project ? ' · Bound Project' : ''}</small><small className="goal-agent-picker__identity">{row.id}</small></span>
+                  <GoalAgentFace row={row} /><span><strong>{row.name} <AgentWorkModeBadge source={row.session} hosts={state.config?.hosts} embedded /></strong><small>{row.context}</small><small>{row.status}{required ? ' · Assignee retains this relationship' : row.related ? ' · Related to this Goal' : row.participated ? ' · Participated in this Goal' : row.project ? ' · Bound Project' : ''}</small><small className="goal-agent-picker__identity">{row.id}</small></span>
                 </label>
               })}
               {!filtered.length ? <p className="goals-muted">{query ? 'No matching Agents.' : role === 'supervisor' ? 'Choose an assignee first.' : 'No Agent Sessions are currently observed. Saved references remain.'}</p> : null}
@@ -172,10 +209,23 @@ export function GoalAgentPicker({ demand, role, onSave, onClose }: { demand: Dem
                 onValueChange={id => { setMoteId(id); setExecutorId(scratch ? moteDefaultExecutor(useAppStore.getState(), scratch.id, id) ?? '' : '') }} disabled={busy || Boolean(draft)} /></label>
               {!observed ? <p className="goals-service">The original Mote directory is not yet observed. <button type="button" className="small-button" onClick={() => { if (scratch) void useAppStore.getState().refreshScratchTopics(scratch.id, true) }}>Refresh Motes</button></p> : null}
               <p className="goals-muted">A new Session uses this Mote’s original directory, Soul and Wiki.</p>
-            </> : <label>Execution directory<SelectionField key={JSON.stringify([demand.id, role, mode])} label="New Agent execution directory" value={workspaceId} options={[{ value: '', label: 'Choose a directory…' }, ...(state.config?.workspaces.filter(workspace => workspace.id !== '__scratch__' && workspace.id !== '__notes__') ?? []).map(workspace => ({ value: workspace.id, label: workspace.name, description: workspace.path }))]} onValueChange={setWorkspaceId} disabled={busy || Boolean(draft)} /><button type="button" className="small-button" disabled={busy || Boolean(draft)} onClick={() => void chooseFolder()}>Choose local folder…</button></label>}
-            <label>Agent configuration<SelectionField key={JSON.stringify([demand.id, role, mode])} label="New Session Agent configuration" value={executorId} options={[{ value: '', label: 'Choose a saved configuration…' }, ...Object.entries(state.config?.executors ?? {}).map(([id, executor]) => ({ value: id, label: executor.label, description: `${executor.providerId} · ${executor.command}` }))]} onValueChange={setExecutorId} disabled={busy || Boolean(draft)} /></label>
+            </> : null}
+            {mode === 'mote' ? <label>Agent configuration<SelectionField key={JSON.stringify([demand.id, role, mode])} label="New Session Agent configuration" value={executorId} options={[{ value: '', label: 'Choose a saved configuration…' }, ...Object.entries(state.config?.executors ?? {}).map(([id, executor]) => ({ value: id, label: executor.label, description: `${executor.providerId} · ${executor.command}` }))]} onValueChange={setExecutorId} disabled={busy || Boolean(draft)} /></label> : null}
+            {mode === 'agent' && !draft && state.config ? <>
+              {editingLocations ? <>
+                <button type="button" className="small-button" disabled={busy} onClick={() => void chooseFolder()}>Choose local folder…</button>
+                <AgentWorkModeSetup key={JSON.stringify([workspaceId, folderSelection])} config={state.config} active={!busy} allowLocal
+                  initialSelection={arrangement ?? (workspaceId ? { resourceWorkspaceId: workspaceId, agentWorkspaceId: null } : undefined)}
+                  actionLabel="Prepare locations" preparationNote="Preparing locations starts no Agent." onApply={selection => { setArrangement(selection); setEditingLocations(false); setExecutorId('') }} />
+              </> : <>
+                <div className="goal-agent-picker__locations"><strong>{agentWorkModeLabel(placement.mode)}</strong><span>Project · {workHostLabel(state.config.hosts, project?.hostId ?? null)} · {project?.path ?? 'Directory unobserved'}</span><span>Agent · {workHostLabel(state.config.hosts, agent?.hostId ?? null)} · {agent?.path ?? 'Directory unobserved'}</span><button type="button" className="small-button" disabled={busy} onClick={() => { setEditingLocations(true); setIssue(null) }}>Edit locations</button></div>
+                <label>Agent configuration on {workHostLabel(state.config.hosts, agent?.hostId ?? null)}<SelectionField label="New Session Agent configuration" value={executorId} options={[{ value: '', label: 'Choose a configuration on this Host…' }, ...choices.map(item => ({ value: item.id, label: item.label, description: `${item.providerId} · ${item.command}`, disabled: item.detection?.state === 'missing' }))]} onValueChange={setExecutorId} disabled={busy} /></label>
+                <div className="goal-agent-picker__configurations"><span role="status">{configurationUnknown ? 'Agent configurations are unconfirmed. Existing work is kept; check this Host again.' : !choices.length ? 'No Agent is configured on this Host.' : 'Configuration belongs to the Agent Host above.'}</span><button type="button" className="small-button" disabled={busy || !agent || inventory?.state === 'checking'} onClick={checkConfigurations}>Refresh configurations</button></div>
+                <button type="button" className="primary-button" disabled={busy || !choices.some(item => item.id === executorId && item.detection?.state !== 'missing')} onClick={() => void createSession()}><ThemeActionCreateAgentIcon size={13} />Create Agent</button>
+              </>}
+            </> : null}
             {executionPath ? <p className="goal-agent-picker__path">{executionPath}</p> : null}
-            <button type="button" className="primary-button" disabled={busy} onClick={() => void createSession()}><ThemeActionCreateAgentIcon size={13} />{draft ? draft.phase === 'not-dispatched' ? 'Save selection and create once' : 'Check original creation' : mode === 'mote' ? 'Create Mote Session' : 'Create Agent'}</button>
+            {mode === 'mote' || draft ? <button type="button" className="primary-button" disabled={busy} onClick={() => void createSession()}><ThemeActionCreateAgentIcon size={13} />{draft ? draft.phase === 'not-dispatched' ? 'Save selection and create once' : 'Check original creation' : 'Create Mote Session'}</button> : null}
             <p className="goals-caption">Creation sends no task. Save the relationship below; Continue is a separate action.</p>
           </div>}
           {removingSupervisor ? <label className="goal-agent-picker__replacement">Current Supervisor is being removed<SelectionField key={JSON.stringify([demand.id, role])} label="Replacement Supervisor" value={replacement ?? '__choose__'} options={[{ value: '__choose__', label: 'Choose replacement or clear…', disabled: true }, { value: '', label: 'Clear Supervisor' }, ...rows.filter(row => selected.includes(row.id)).map(row => ({ value: row.id, label: row.name }))]} onValueChange={replacement => changeSelection({ replacement })} /></label> : null}
