@@ -34,7 +34,7 @@ export class HostMoteQuickPreferences implements MoteQuickPreferencesPort {
         const region = catalog!.regions.find(value => value.tabId === location.tabId && value.regionId === location.regionId)
         return region?.kind === 'agent' && region.agentSessionId && region.execution ? [{ reference: { hostId: region.execution.hostId, sessionId: region.agentSessionId, displayWorkspaceId: location.displayWorkspaceId, groupId: location.groupId, tabId: location.tabId, regionId: location.regionId }, label: `${region.execution.hostId} · ${region.agentSessionId}` }] : []
       })
-      const executors = await this.ports.executors().catch(() => [])
+      const executors = await this.ports.executors()
       return parseMotePreferencesReadResult({ ...input, status: 'ready', source, defaults,
         choices: { executors, conversations, destinations: locations.map(value => ({ reference: { kind: 'occurrence', displayWorkspaceId: value.displayWorkspaceId, groupId: value.groupId, tabId: value.tabId, regionId: value.regionId }, label: `${value.tabId} · ${value.regionId}` })) },
         main: main.identity.moteId === PMO_TEAMS_TOPIC_ID, issue: null, ...(this.ports.maintenance ? { maintenance: this.ports.maintenance(input.target) } : {}) }, input)

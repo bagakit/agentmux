@@ -11,7 +11,7 @@ import { createHostSpatialAgentControl } from './spatial-agent-control.js'
 import { createHostGoals } from './goals.js'
 import { projectWorkspaces } from './workspace-projects.js'
 import { readPresentationConfiguration } from './presentation-configuration.js'
-import { moteOwnedWorkspaceRoots, readConfiguredExecutor } from './mote-resources.js'
+import { moteOwnedWorkspaceRoots, readConfiguredExecutor, readConfiguredExecutorChoices } from './mote-resources.js'
 import { SCRATCH_WORKSPACE_ID } from './mote-topic-model.js'
 import { createHostSnapshotObservation } from './snapshot-observation.js'
 import { createHostSpatialPresentation } from './spatial-presentation.js'
@@ -172,7 +172,7 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
   const moteQuickPreferences = content?.files && moteMain ? new HostMoteQuickPreferences({ files: content.files, main: moteMain,
     ...(moteDialogue ? { recordMainSource: moteDialogue.recordMainSource, prepareMainSource:moteDialogue.prepareMainSource } : {}),
     catalog: async () => { const state = await spatialState.read(); return state ? spatialCatalog(state.graph) : null },
-    executors: async () => (await originalRuntime().client.listHostExecutors()).executors.map(value => ({ id: value.executorId, name: value.label, providerId: value.providerId })),
+    executors: () => readConfiguredExecutorChoices(configurationPath!),
     ...(motePresence ? { maintenance: motePresence.read, changed: motePresence.invalidate } : {}) }) : undefined
   const service = {
     spatialState,

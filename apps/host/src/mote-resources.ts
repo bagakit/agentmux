@@ -797,6 +797,24 @@ export async function readConfiguredExecutor(path: string, executorId: string): 
   try { raw = await readOriginalMoteConfiguration(path) } catch { throw new AgentMuxError('The original Executor launch configuration is unreadable. Keep its saved settings and conversations.', 'EXECUTOR_CONFIGURATION_UNAVAILABLE') }
   return configuredExecutor(raw, executorId)
 }
+/** Saved-choice discovery uses the original launch configuration, not launch readiness. */
+export async function readConfiguredExecutorChoices(path: string): Promise<Array<{ id: string; name: string; providerId: string }>> {
+  const raw = await readOriginalMoteConfiguration(path)
+  const executors = raw && typeof raw === 'object' && !Array.isArray(raw) ? (raw as Record<string, unknown>).executors : null
+  if (!executors || typeof executors !== 'object' || Array.isArray(executors)) {
+    throw new AgentMuxError('The original Executor launch configuration is unconfirmed. Keep its saved settings and conversations.', 'EXECUTOR_CONFIGURATION_UNAVAILABLE')
+  }
+  return Object.entries(executors).flatMap(([id, value]) => {
+    const executor = value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null
+    if (!executor || typeof executor.providerId !== 'string' || !executor.providerId.trim()) {
+      process.emitWarning(`Executor ${JSON.stringify(id)} in the original launch configuration has unconfirmed Provider metadata. Other configured choices and healthy Agents remain available.`, { code: 'EXECUTOR_CONFIGURATION_UNAVAILABLE' })
+      return []
+    }
+    // Command/args/env are checked only when this exact Executor is started.
+    // An unrelated broken launch must not prevent choosing a healthy Executor.
+    return [{ id, name: typeof executor.label === 'string' ? executor.label : id, providerId: executor.providerId }]
+  })
+}
 export function configuredExecutor(raw: unknown, executorId: string): AgentExecutorConfig {
   const invalid = (): never => { throw new AgentMuxError('The original Executor launch configuration is unconfirmed. Keep its saved settings and conversations; inspect that exact Executor.', 'EXECUTOR_CONFIGURATION_UNAVAILABLE') }
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return invalid()
