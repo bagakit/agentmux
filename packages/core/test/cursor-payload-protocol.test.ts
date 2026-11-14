@@ -2,7 +2,7 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { copyFile, mkdtemp, realpath, rm, stat, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { qualifyCursorPayloadProtocol } from '../src/providers/cursor-payload-protocol.js'
+import { qualifyCursorPayloadProtocol } from '../src/providers/cursor-native-sources.js'
 const native = vi.hoisted(() => ({ path: '', wrongInode: false, startedSec: 0 }))
 vi.mock('../src/agent-native-process.js', () => ({
   nativeProcessBirth: vi.fn(async () => JSON.stringify(['darwin', 999, 501, String(native.startedSec), '0'])),

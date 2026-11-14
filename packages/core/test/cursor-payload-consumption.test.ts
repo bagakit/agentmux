@@ -7,8 +7,8 @@ import { AgentMuxRpcService } from '../src/public-rpc-service.js'
 import { AgentMuxError } from '../src/errors.js'
 import { captureExecutorInvocation } from '../src/agent-executor-invocation.js'
 import { AgentProviderRegistry } from '../src/agent-provider.js'
-import { cursorPromptPayloadConsumption } from '../src/providers/cursor-payload-consumption.js'
-import { qualifyCursorPayloadProtocol } from '../src/providers/cursor-payload-protocol.js'
+import { cursorPromptPayloadConsumption } from '../src/providers/cursor-adapter.js'
+import { qualifyCursorPayloadProtocol } from '../src/providers/cursor-native-sources.js'
 import { resolveCursorStorePath } from '../src/providers/cursor-history.js'
 import { normalizePromptInputPlan } from '../src/prompt-submission-record.js'
 import { parseAgentInputHandoff } from '../src/agent-input-handoff.js'
@@ -17,9 +17,9 @@ import { agentPromptSubmissionOutcome } from '../src/agent-input-wait.js'
 // Only the current native process witness is controlled. Original physical source
 // resolution, JSON data, Provider contribution, public Core/Store/journal and
 // frozen Runtime input claims are production consumers.
-vi.mock('../src/providers/cursor-payload-protocol.js', () => ({ qualifyCursorPayloadProtocol: vi.fn(async (context: { command: string; args: string[] }) => { expect(context.command).toBe('cursor-agent'); expect(context.args).toEqual(['--model', 'auto']); return 'original-qualified-native-protocol' }) }))
 vi.mock('../src/agent-native-process.js', async importOriginal => ({ ...await importOriginal<object>(), nativeProcessBirth: vi.fn(async () => 'original-process-birth') }))
-vi.mock('../src/providers/cursor-native-session.js', async importOriginal => ({ ...await importOriginal<object>(),
+vi.mock('../src/providers/cursor-native-sources.js', async importOriginal => ({ ...await importOriginal<object>(),
+  qualifyCursorPayloadProtocol: vi.fn(async (context: { command: string; args: string[] }) => { expect(context.command).toBe('cursor-agent'); expect(context.args).toEqual(['--model', 'auto']); return 'original-qualified-native-protocol' }),
   discoverCursorNativeSession: vi.fn(async (context: { workspacePath: string; env?: Record<string, string> }) => {
     const path = await resolveCursorStorePath(context.workspacePath, nativeId, context.env)
     return { handle: { kind: 'provider', providerId: 'cursor', sessionId: nativeId, transcriptPath: path }, assertCurrent: async () => {} }

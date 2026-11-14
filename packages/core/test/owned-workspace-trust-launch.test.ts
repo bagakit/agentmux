@@ -115,7 +115,7 @@ describe('Core pre-trusts a Host-confirmed home before creating a Provider there
   it('consumes the same exact-home Provider seam on a Cursor creation', async () => {
     const created = await create(home, 'cursor-session', 'cursor')
     expect(created.creation.workspaceTrust).toMatchObject({ status: 'trusted', step: 'trust-record', trustKey: home, code: 'CURSOR_TRUST_RECORDED' })
-    const { cursorTrustMarkerPath } = await import('../src/providers/cursor-workspace-trust.js')
+    const { cursorTrustMarkerPath } = await import('../src/providers/cursor-native-sources.js')
     expect(JSON.parse(await readFile(cursorTrustMarkerPath(home, { CURSOR_DATA_DIR: join(root, 'cursor-data') }), 'utf8')).workspacePath).toBe(home)
     expect(trust).not.toHaveBeenCalled()
   })

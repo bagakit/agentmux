@@ -13,7 +13,7 @@ const mutations: Record<string, [string, string, string]> = {
   'block-typed': ['packages/core/src/client.ts', "if (provider.prepareNativeInput && session.nativeHandle?.kind === 'provider') return false", "if (provider.prepareNativeInput && session.nativeHandle?.kind === 'provider') return true"],
   'drop-create-trust-receipt': ['packages/core/src/client.ts', "createOperationId,\n        ...(workspaceTrust ? { workspaceTrust } : {}),", 'createOperationId,'],
   'drop-resume-trust-receipt': ['packages/core/src/agent-session-recovery/lifecycle.ts', 'if (continuity && workspaceTrust) continuity.workspaceTrust = workspaceTrust', 'void workspaceTrust'],
-  'cursor-drop-home-boundary': ['packages/core/src/providers/cursor-workspace-trust.ts', 'if (trustKey !== await realpath(resolve(context.ownedRoot)))', 'if (false)'],
+  'cursor-drop-home-boundary': ['packages/providers/src/cursor/workspace-trust.ts', 'if (trustKey !== await realpath(resolve(context.ownedRoot)))', 'if (false)'],
   'claude-drop-home-boundary': ['packages/providers/src/claude/workspace-trust.ts', 'if (trustKey !== await claudeTrustKey(context.ownedRoot))', 'if (false)'],
   'cursor-drop-seam': ['packages/core/src/providers/cursor-adapter.ts', 'prepareOwnedWorkspaceTrust: prepareCursorOwnedWorkspaceTrust,', ''],
   'bypass-postlaunch-startup': ['packages/core/src/client.ts', "if (!nativeSource && this.nativeSessionStarting(current, { kind: 'session-conversation', expectedRun: current.run }))", 'if (false)'],
@@ -22,6 +22,7 @@ const mutations: Record<string, [string, string, string]> = {
 }
 export default defineConfig({ ...source,
   resolve: { ...source.resolve, alias: [
+    { find: '@agentmux/providers/cursor/workspace-trust', replacement: resolve(root, 'packages/providers/src/cursor/workspace-trust.ts') },
     { find: '@agentmux/providers/cursor/native-history', replacement: resolve(root, 'packages/providers/src/cursor/native-history.ts') },
     { find: '@agentmux/providers/claude/workspace-trust', replacement: resolve(root, 'packages/providers/src/claude/workspace-trust.ts') },
     ...(Array.isArray(source.resolve?.alias) ? source.resolve.alias : [])
