@@ -45,10 +45,11 @@ exact Workspace preference. An empty order restores creation order; new Sessions
 This changes no placement, focus or Run. Applied order and confirmed storage durability are
 separate receipts. After a partial/unknown save, read that exact scope before another write.
 
-Survey is Know's browsing and research entry; its list organizes Zone references.
+Survey is Know's browsing and research entry. It retains whole research Zone references
+and exact page references {regionId,browserId} through one client preference owner.
 Read the connected client's Survey list with amux space survey-list. Global
-space ls --presentation includes the same organization and all original items,
-even inside collapsed groups. Groups organize Zone references only; they are not
+space ls --presentation includes the same organization, whole Zone items and exact
+pages, even inside collapsed groups. Manual groups organize Zone references only; they are not
 spatial Tab Groups. With --input FILE|- provide {organization:{ungrouped:[ZONE],
 groups:[{groupId,name,collapsed,zoneIds:[ZONE]}]},expected:originalStoredOrganization}.
 Use exact saved Zone and list-group IDs, each item once. Create, rename, collapse,
@@ -62,6 +63,19 @@ input. Never infer original membership from all Browser/Tab topology. Content,
 selection, layout, cwd and Runs stay unchanged. Applied preferences and disk confirmation
 are separate. After a partial or unknown save, read this same list before changing it.
 A missing client owner is unavailable, never an empty confirmed list.
+
+Read pageReferences from that same list. To change only precise page membership use
+{collection:{pageReferences:[{regionId,browserId}],expectedPageReferences:originalPageReferences}}.
+Each changed scope requires its matching expected set; omitted scopes stay unchanged.
+Pages and Zone membership can share one input. New page references must match the original
+Region's actual Browser; unavailable saved references may remain. Current Tab/Zone and
+placement come from Core, not saved display coordinates. A replacement Browser in the
+same Region does not inherit the original reference, and missing placement never expands
+its scope to the entire Zone. Closing a Survey reference leaves the page and task intact.
+Opening a page with an explicit Profile admits only that confirmed page; default/private/Capsule task
+pages, discovery and cold restoration do not auto-admit pages. Survey's explicitly created
+default pages still belong through their own creation intent. Read and repair the original
+reference after an unknown save; do not reopen the Browser or overwrite unobserved members.
 
 A Host's home workface opens from its exact homeDirectory, read with settings hosts home
 --host HOST; amux settings --skill owns that read. Retain the returned Host/path and never

@@ -220,7 +220,7 @@ Work 是 Space、Focus、Goals 共同的产品工作范围；Know 是 Survey、R
 | 上下文 | 导航与选择范围 |
 | --- | --- |
 | **Work** | Space、Focus、Goals 共用当前 Space／Zone／Tab／Region 的准确定位语义；AgentSession 是可选关联，不是工作目标存在或可导航的前提。 |
-| **Survey** | 保留自己明确创建／保存的浏览研究入口、当前 Zone／Tab／Region 与恢复引用；普通浏览不跟随 Work 的项目选择。 |
+| **Survey** | 保留自己明确创建／保存的准确网页或完整研究入口、当前 Zone／Tab／Region 与恢复引用；Profile 组织及精确页面的入列范围见[Profile 与 Survey](knowledge-workflows.md#profile-与-survey)，普通浏览不跟随 Work 的项目选择。 |
 | **Recall** | 保留自己的 Notebook、页面、原 Zone／Tab／Region 与块选择；进入知识目录不接管 Survey 正在浏览的页，也不跟随 Work 项目。 |
 | **Mote 面板** | 保留左下快捷面自己的 Mote 对象、Tab／Region 与恢复引用；Mote 实体在 Space 中复用共同框架，不把面板的导航并入 Work。 |
 

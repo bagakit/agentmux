@@ -195,6 +195,22 @@ Read only the matching local help:
   the complete definition and parameter declarations, never runtime values, sign-ins,
   recording bodies, Runs or human approvals. Source metadata describes package origin only.
 - amux browser open --help: open a new page only when needed.
+  A Profile is a reusable website sign-in environment; network and device settings
+  are optional additions. With no explicit Profile, ordinary pages use the original
+  persistent default environment and retain sign-ins. This is the same default
+  environment available in Survey; it is not private mode or a separate Survey partition.
+  Default task pages do not automatically enter Survey. Pages explicitly created in
+  Survey remain there through that original creation intent, even without a custom Profile.
+  With --profile ID, consume that exact Profile identity confirmed by Main. After exact
+  page attachment, the connected client registers only this Browser/Region in Survey,
+  preserving its original task position and siblings. Read region.profileId for the
+  confirmed identity; region.profile has the label only when observed, and profileIssue
+  explains an unconfirmed label. A label lookup failure cannot revoke an already created page.
+  The separate survey result reports not-requested, registered, partial or unknown,
+  with the exact reference, save facts and issues. Registration and disk durability
+  do not stand in for page creation. After a partial/unknown result inspect the original
+  Browser/Region and space survey-list; retry only its reference write, never open a
+  replacement page to repair a Survey preference.
   For durable generated content, prefer amux capsule open. The optional --capsule ID
   keeps the exact Capsule container and document policy; it cannot use private mode.
 For a new page in the same task, usually choose an explicit readable Region in the Agent's

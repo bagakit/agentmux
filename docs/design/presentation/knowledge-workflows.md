@@ -11,6 +11,9 @@
 
 ## Survey 的 Zone 工作面与液体玻璃
 
+- **Profile 是轻量工作环境入口。** Survey 左侧以紧凑的 Profile 选择显示真实名称与标识，始终提供默认环境，不要求先创建 Profile；当前选择、展开、未知／不可用和键盘焦点独立可辨，完整名称在窄 rail 仍可查。选择后展示该环境对应的原网页／研究入口，随后新页面的环境清楚，不叠第二条常驻工具栏或把代理／设备参数放进日常导航。Profile 管理和创建为就近次级动作；输入、空态和新建网页仍可达。切换不替换活页、不复制工作面；未知、保存未确认和恢复说明在原入口就近保持，行为只见[Profile 与 Survey](../behavior/knowledge-workflows.md#profile-与-survey)。
+- **精确网页与完整研究各有原范围。** 准确页面条目使用原网页 favicon、标题与操作者反馈，选中后呈现原 Region；完整研究沿原 Zone／Tabs／Regions 显示全部内容。缺失引用有原身份说明和恢复动作，不将网页条目画成整项目，也不把混合研究中所有网页冒称一个 Profile。Profile 的派生分组与用户人工编组层级清楚，保既有手动顺序，不为各层重复计数、路径或卡片外框；正常、窄分割、短窗和触屏都能选择、关闭一处引用及找回原来源。
+
 - **未命名多 Tab 省去重复标题行。** 沿行为合同的明确名称事实显示；未命名时各 Tab 直接构成紧凑条目，条目级动作有独立、克制的管理位置，不与 Tab 关闭入口重叠。明确名称与编辑状态保原标题行；收起 rail 保原入口。图标、标题、真实状态、创建、设置与拖拽持续可辨，不以留一条空标题栏冒充节省空间。
 - **Tab 关闭按需浮现。** 每个 Tab 的 × 在该 Tab hover、键盘 focus-within 时清楚可见，触屏保持可发现；命中区独立，点击不同时选择 Tab 或触发拖拽。图标和文本使用既有字号与材质，关闭入口出现不移动成员、不遮 favicon 或相邻操作；不嵌套按钮。准确目标、确认、后台选择与最后成员的行为只引用 [Survey 行为合同](../behavior/knowledge-workflows.md#列表与工作面的操作范围)。
 
@@ -26,9 +29,9 @@ Survey 与 Space 一样使用顶部那一行，整体精致、紧凑。左侧导
 
 探索名称、创建与成果作用域唯一见 interaction[《Survey、临时 Zone 工作面与知识入口》](../behavior/knowledge-workflows.md#survey临时-zone-工作面与知识入口)。普通浏览先呈现网页标题和标签导航；明确研究的入口以安静单行名称呈现，改名可达，不把内部结构铺成标题。起步页保中央地址／搜索输入，不增加 Notebook 空壳、教程、功能卡墙或项目分组。当前探索的成果动作集中于左侧，与底部固定的新建 Webpage 入口分开，收起后仍可发现准确动作；右侧 Tab 上方不叠这些动作。外层探索与内层内容标签通过控件作用域和留白区分，宽窄窗口都能读懂和操作；来源项目、路径、计数和结构术语按需可读。
 
-Survey 首先是一款普通用户可以日常使用的浏览器，项目 Browser 不自动属于 Survey；初步结果明确输送到 Recall 或知识库 Topic，层级与关系沿[知识库合同](../behavior/spaces-and-layout.md#topics-知识库的层级与沉淀)。默认层级以网页、地址／搜索和标签导航为主，研究组织和复杂分割按需显露；不在第一步解释 Zone、项目归属或多 Topic 关系。入口与流转只引用交互合同，单向工作流不改变通用实体与展示绑定能力。公共实体和展示合同引用 interaction[《Zone→Tabs→Regions 的实体与展示绑定》](../behavior/spaces-and-layout.md#zonetabsregions-的实体与展示绑定)；Survey 的行为、关系、控制、关闭与恢复只引用[《Survey、临时 Zone 工作面与知识入口》](../behavior/knowledge-workflows.md#survey临时-zone-工作面与知识入口)。原完整内容是主对象。
+Survey 首先提供普通用户可以日常使用的浏览体验，缺省项目 Browser 不因被发现而进入 Survey，显式 Profile 开页的精确入口沿行为合同登记；初步结果明确输送到 Recall 或知识库 Topic，层级与关系沿[知识库合同](../behavior/spaces-and-layout.md#topics-知识库的层级与沉淀)。默认层级以网页、地址／搜索和标签导航为主，研究组织和复杂分割按需显露；不在第一步解释 Zone、项目归属或多 Topic 关系。入口与流转只引用交互合同，单向工作流不改变通用实体与展示绑定能力。公共实体和展示合同引用 interaction[《Zone→Tabs→Regions 的实体与展示绑定》](../behavior/spaces-and-layout.md#zonetabsregions-的实体与展示绑定)；Survey 的行为、关系、控制、关闭与恢复只引用[《Survey、临时 Zone 工作面与知识入口》](../behavior/knowledge-workflows.md#survey临时-zone-工作面与知识入口)。原完整内容是主对象。
 
-Survey 左栏的 Item 与整体界面须现代、文字精简、宽度可调：同时建立清楚的探索列表、明确的当前网页／研究范围和原内容工作面的层级；不能仅在原行布局上换颜色、加圆角或声明 blur。左栏沿用户显式编组和顺序组织原 Item，以真实内容标题为第一层，来源信息归原 Details；分组、顺序和身份边界只引用 interaction[《Survey、临时 Zone 工作面与知识入口》](../behavior/knowledge-workflows.md#survey临时-zone-工作面与知识入口)。内容类型、关系和可信操作事实按需表达。重复通用图标、路径和状态文案不挤掉标题；条目的创建与设置控制使用紧凑且清楚的同组入口，完整信息与动作在指针、键盘及触屏下仍可达，未知／失败不靠隐藏信息换简洁。明确创建／保存的入列边界唯一引用 interaction[《Survey、临时 Zone 工作面与知识入口》](../behavior/knowledge-workflows.md#survey临时-zone-工作面与知识入口)。
+Survey 左栏的 Item 与整体界面须现代、文字精简、宽度可调：同时建立清楚的探索列表、明确的当前网页／研究范围和原内容工作面的层级；不能仅在原行布局上换颜色、加圆角或声明 blur。左栏沿 Profile 视图及完整研究的原人工编组和顺序组织原 Item，以真实内容标题为第一层，来源信息归原 Details；分组、顺序和身份边界只引用 interaction[《Survey、临时 Zone 工作面与知识入口》](../behavior/knowledge-workflows.md#survey临时-zone-工作面与知识入口)。内容类型、关系和可信操作事实按需表达。重复通用图标、路径和状态文案不挤掉标题；条目的创建与设置控制使用紧凑且清楚的同组入口，完整信息与动作在指针、键盘及触屏下仍可达，未知／失败不靠隐藏信息换简洁。明确创建／保存的入列边界唯一引用 interaction[《Survey、临时 Zone 工作面与知识入口》](../behavior/knowledge-workflows.md#survey临时-zone-工作面与知识入口)。
 
 - **收起仍是导航。** 展开列表收起为窄图标 rail，保每个原条目及真实网页 favicon、选中、hover 和完整键盘焦点；长名进入 tooltip，缺少 favicon 使用统一网页 glyph，不用字母头像、域名颜色点或空洞替代。rail 中当前条目、底部「+」与成果菜单的范围可辨，窄窗与触屏仍能操作；不清空条目或借全局栏复制另一份目录。事实只见交互合同的收起与 Browser 标识规则。
 - **停放条目保持安静。** 网页已释放或冷启动尚未加载的条目与正常静止条目同样呈现，图标显示上次所见的 favicon 或通用网页 glyph，不叠加未知状态图标；Details 说明页面未加载、显示时恢复。只有真正未知或失败的条目使用未知／失败标识。停放与未知的区分只见[《Browser 工作面》](../behavior/browser-workface.md#browser-工作面-1)的停放规则。

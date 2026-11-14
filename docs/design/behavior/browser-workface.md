@@ -33,6 +33,10 @@
 
 ## Browser 工作面
 
+**定位与完整性。** Browser 是面向项目工作、由人和 Agent 共用的网页工作台：研究有来源，操作有可核验结果，人工可接手、交还并从当前页面继续；中断后保留原工作面和准确恢复入口。完整性以这些日常工作链的真实可用为准，不以参考产品功能数量为准。可复用任务沉淀已验证做法，跨系统编排沿 Agent 与现有工具，不因此在 Browser 再建通用业务流程平台。原生引擎不具备的指纹、网络或宿主能力如实表达，不以配置字段代签；高级能力的独立缺口不抹除，也不成为无关健康网页能力的门禁。
+
+**Profile 的主要用途。** Profile 是可重复使用的网站登录环境，持有网站 session、站点数据、网站权限及其环境设置；名称和颜色帮助人识别，不授予 Agent 输入资格。Agent 明确指定 Profile 时只消费该准确身份，未指定时使用未命名的持久默认环境并保留网站登录态，页面留原任务且不自动进入 Survey；不把“未显式选择 Profile”冒作匿名隔离或无持久数据。代理和环境／指纹编辑是按需的附加能力，不承担 Profile 或 Browser 的主定位。Survey 的组织、开页入列和切换范围唯一见[《Profile 与 Survey》](knowledge-workflows.md#profile-与-survey)。
+
 - **网页标识取真实页面事实。** 网页 favicon 由原 Browser Main owner 观察，并连同准确 Browser／当前导航身份向已打开条目的呈现提供；缺失、损坏、不可用或无法确认时回落统一网页图标，不从域名猜标识或另发无关页面请求。后来导航优先，前一页迟到图标不覆盖新页；图标不是权限、加载成功或 Agent 活跃状态。已观察的图标随原 Browser 的页面记忆保留：原生页面已释放或冷启动尚未创建、且该 Browser 仍停在记录的同一地址时，呈现为上次所见的图标；恢复后的页面报告自己的图标、离开该地址或确认没有图标时被替换。活体页面的新导航仍先清除旧图标，上次所见不能冒充当前文档已确认的图标。
 - Browser 是 AgentMux 内的一等工作面，不是外链跳板：它可导航、可标记、可被 Agent 安全消费，生命周期与权限事实由准确 Browser 的唯一宿主持有；第一方 Desktop 的 owner 是 Main，独立 headless 宿主消费同一高层合同。Renderer 既不拥有 WebContents，也不持有第二份导航或权限状态。
 - **无窗口对象生命周期。** 独立 Browser 宿主通过对象级 create／close 与原 targets／run／history／inspect／follow／stop 公共能力工作，不制造 Region 或 Agent Run。创建与关闭都先保留调用方原 operation identity、typed intent 及回执；未知保留原 Browser／operation，查询原回执、不自动再启动。关闭仅作用于该宿主准确 owned target 与原 document，尊重 beforeunload；缺失 ACK、断连或发现缺口不代签关闭。停止操作保留原页面，释放原生资源保留工作面，均不冒充实体关闭。宿主进程重启按原 Browser ID／engine endpoint／targetId 接回存活页面及未保存输入，不按地址或标题替换、不重放程序。没有真实 Workspace 授权时 workspace 为空且不广告文件能力；引擎由显式宿主配置提供，Core 不管理安装、下载或分发。
