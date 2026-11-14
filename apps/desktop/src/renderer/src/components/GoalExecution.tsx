@@ -5,8 +5,10 @@ import { useShallow } from 'zustand/react/shallow'
 import { useAppStore } from '../store'
 import type { DemandProjection } from '../lib/global-demand-board'
 import type { GoalAgentRole } from '../lib/goal-agent-selection'
-import { createFirstPromptSelector } from '../lib/session-presentation'
-import { createGoalTeamSelector, type GoalTeamActor } from '../lib/goal-team'
+import { agentSessionPresentationIndex, createFirstPromptSelector } from '../lib/session-presentation'
+import { createGoalTeamSelector, goalTeamIdentities, type GoalTeamActor } from '../lib/goal-team'
+import { goalAgentPresentation } from '../lib/goal-agent-selection'
+import { useCollaborationIdentities } from '../lib/use-collaboration-identities'
 import { agentContextForSession } from '../lib/focus-context'
 import { agentDisplayName, topicIdForSession, workspaceForSession } from '../lib/workbench-tabs'
 import { scratchTopicsForConfig } from '../lib/scratch-topic-snapshots'
@@ -44,6 +46,7 @@ export function GoalExecution({ demand, onUpdate }: { demand: DemandProjection; 
       <strong>Unconfirmed reference · {reference.roles.map(role => roleNames[role]).join(' · ')}</strong><code>{reference.id}</code><span>{reference.reason}</span>
       <button type="button" className="small-button" onClick={() => setRole(reference.roles[0]!)}>Review relationship</button>
     </div>)}
+    <GoalTeamIdentityReadings demand={demand} />
     {!demand.supervisorSessionId && demand.creationOrigin?.supervisorDefaultPending ? <p className="goals-condition">The original requester is not yet confirmed. You can choose a Supervisor explicitly.</p> : null}
     {creationDrafts.map(draft => <p key={draft.operationId} className="goals-service" role="status">Original Agent creation retained.<button type="button" className="small-button" onClick={() => setRole(draft.role)}>Check creation and relationship</button></p>)}
     {issue ? <p className="goals-service" role="status">{issue}</p> : null}
@@ -51,6 +54,31 @@ export function GoalExecution({ demand, onUpdate }: { demand: DemandProjection; 
     {demand.sessionIds.length ? <details className="goals-topology" onToggle={event => { if (event.target === event.currentTarget) setArrangementOpen(event.currentTarget.open) }}><summary>Arrangement</summary>{arrangementOpen ? <GoalArrangement sessionIds={team.actors.filter(actor => actor.roles.includes('related')).map(actor => actor.session.id)} /> : null}</details> : null}
     {role ? <GoalAgentPicker key={`${demand.id}:${role}`} demand={demand} role={role} onSave={onUpdate} onClose={() => setRole(null)} /> : null}
   </section>
+}
+/** A disposable view of this Goal's exact sources; never another Session registry. */
+function GoalTeamIdentityReadings({ demand }: { demand: DemandProjection }) {
+  const refs = useMemo(() => goalTeamIdentities(demand), [demand.id, demand.participations, demand.dispatches, demand.delegations,
+    demand.progressUpdates, demand.plan, demand.creationOrigin, demand.supervisorSessionId])
+  const knownIds = useAppStore(useShallow(state => {
+    const index = agentSessionPresentationIndex(state.sessions)
+    return [...refs.identities].flatMap(([key, { subject }]) => goalAgentPresentation((index.get(subject.agentSessionId) ?? [])
+      .filter(session => session.control.hostId === subject.hostId), subject.agentSessionId) ? [key] : [])
+  }))
+  const known = useMemo(() => new Map(knownIds.map(id => [id, refs.agents.get(id)!])), [knownIds, refs])
+  const hosts = useAppStore(state => state.config?.hosts)
+  const owner = useMemo(() => ({ goalId: demand.id, hosts }), [demand.id, hosts])
+  const { reads, retry } = useCollaborationIdentities(refs.agents, refs.wanted, known, true, owner)
+  return <>{[...refs.identities].filter(([key]) => !known.has(key)).map(([key, { subject, roles }]) => {
+    const read = reads.get(key), source = read?.source
+    return <div key={key} className="goals-service goal-team__reference" data-goal-team-identity={key}>
+      <strong>{source ? source.state === 'deleted' ? 'Original record deleted' : source.state === 'retired' ? 'Retired original Session' : 'Retained original Session' : read?.loading ? 'Reading original identity' : 'Original identity not yet confirmed'}</strong>
+      <code>{subject.agentSessionId} · {subject.hostId}</code><span>{roles.join(' · ')}</span>
+      {source?.history ? <span>{source.history.executorId} · {source.history.providerId} · {source.history.workspacePath}</span> : null}
+      {source && source.state !== 'deleted' ? <span>Current Run is not observed here. The original relationship is retained.</span> : null}
+      {read?.issue ? <span role="status">{read.issue}</span> : null}
+      {read?.issue ? <button type="button" className="small-button" onClick={() => retry(key)}>Read original identity again</button> : null}
+    </div>
+  })}</>
 }
 const GoalTeamActorCard = memo(function GoalTeamActorCard({ actor, onRecommend }: { actor: GoalTeamActor; onRecommend(id: string): Promise<void> }) {
   const { session } = actor

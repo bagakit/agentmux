@@ -18,6 +18,7 @@ export function useCollaborationIdentities(agents: ReadonlyMap<string, Collabora
   })
   const scope = JSON.stringify(requests.map(({ id, reference }) => [id, referenceKey(reference)]).sort())
   const [reads, setReads] = useState<ReadonlyMap<string, IdentityRead>>(new Map())
+  const retained = useRef(reads); retained.current = reads
   const completed = useRef(new Map<string, IdentityRead>()), pending = useRef(new Map<string, { reference: SessionHistorySourceReference; invalidated: boolean }>())
   const pump = useRef<() => void>(() => {}), owner = useRef(ownerRevision), wasEnabled = useRef(false)
   const ownerToken = useMemo(() => ({}), [enabled, ownerRevision]), currentOwner = useRef<object | null>(ownerToken)
@@ -32,9 +33,9 @@ export function useCollaborationIdentities(agents: ReadonlyMap<string, Collabora
     let active = enabled
     if (enabled && !wasEnabled.current) for (const [id, read] of completed.current) if (read.issue) completed.current.delete(id)
     wasEnabled.current = enabled
-    if (owner.current !== ownerRevision) { owner.current = ownerRevision; completed.current.clear(); setReads(new Map()) }
+    if (owner.current !== ownerRevision) { owner.current = ownerRevision; completed.current.clear(); retained.current = new Map(); setReads(new Map()) }
     const current = () => enabled && currentOwner.current === ownerToken
-    const publish = (id: string, read: IdentityRead) => { if (current()) setReads(previous => new Map(previous).set(id, read)) }
+    const publish = (id: string, read: IdentityRead) => { if (current()) { retained.current = new Map(retained.current).set(id, read); setReads(retained.current) } }
     pump.current = () => {
       if (!active) return
       for (const { id, reference } of requests) {
@@ -42,19 +43,24 @@ export function useCollaborationIdentities(agents: ReadonlyMap<string, Collabora
         if (completed.current.has(id) || pending.current.has(id)) continue
         const request = { reference, invalidated: false }
         const accepted = () => current() && !request.invalidated
-        pending.current.set(id, request); publish(id, { reference, source: null, issue: null, loading: true })
+        const previous = retained.current.get(id)
+        const originalSource = () => retained.current.get(id)?.source ?? previous?.source ?? null
+        pending.current.set(id, request); publish(id, { reference, source: originalSource(), issue: null, loading: true })
         void api.sessions.historySource(reference).then((result: SessionHistorySourceObservation) => {
           if (referenceKey(result.reference) !== referenceKey(reference) || result.source &&
               (result.source.agentSessionId !== reference.agentSessionId || 'hostId' in reference && result.source.hostId !== reference.hostId)) {
             throw Error('The metadata response belongs to another original identity. Retry this reference.')
           }
           if (!accepted()) return
-          const read = { reference, source: result.source, loading: false, issue: result.issue
+          // A confirmed record deletion is terminal for this original identity.
+          const terminal = originalSource()?.state === 'deleted' ? originalSource() : null
+          const source = terminal && result.source?.state !== 'deleted' ? terminal : result.source ?? originalSource()
+          const read = { reference, source, loading: false, issue: result.issue
             ? `${result.issue.message} ${result.issue.recovery}` : result.source ? null : 'This owner has no retained metadata for the referenced Session. The original relation remains available.' }
           retries.current.delete(id); completed.current.set(id, read); publish(id, read)
         }).catch(error => {
           if (!accepted()) return
-          const read = { reference, source: null, loading: false, issue: error instanceof Error ? error.message : String(error) }
+          const read = { reference, source: originalSource(), loading: false, issue: error instanceof Error ? error.message : String(error) }
           retries.current.delete(id); completed.current.set(id, read); publish(id, read)
         }).finally(() => { pending.current.delete(id); pump.current() })
       }
@@ -65,23 +71,41 @@ export function useCollaborationIdentities(agents: ReadonlyMap<string, Collabora
   useEffect(() => {
     if (!enabled) return
     return api.sessions.onEvent(event => {
-      if (event.type !== 'core' || event.event.type !== 'connection-state' || event.event.observationOrigin.boundary !== 'consumer-core') return
+      if (event.type !== 'core') return
+      const core = event.event
+      if (core.type !== 'connection-state' && core.type !== 'run-removed' && core.type !== 'agent-session-record-deleted' && core.type !== 'agent-session') return
+      if (core.type === 'connection-state' && core.observationOrigin.boundary !== 'consumer-core') return
+      const sessionId = core.type === 'agent-session' ? core.session.agentSessionId : core.type === 'connection-state' ? null : core.agentSessionId
       const invalidated = new Set<string>()
+      const belongs = (reference: SessionHistorySourceReference, source?: AgentSessionHistoryDescriptor | null) =>
+        sessionId === null ? 'runtimeId' in reference || reference.hostId === event.hostId
+          : reference.agentSessionId === sessionId && ('hostId' in reference ? reference.hostId === event.hostId : !source || source.hostId === event.hostId)
       // A pending Runtime reference has no confirmed Host yet. Fence that bounded
       // lookup until its original request settles, then reuse the current demand.
       for (const [id, request] of pending.current) {
-        if ('runtimeId' in request.reference || request.reference.hostId === event.hostId) {
+        if (belongs(request.reference, retained.current.get(id)?.source)) {
           request.invalidated = true; invalidated.add(id)
         }
       }
       for (const [id, read] of completed.current) {
+        if (!belongs(read.reference, read.source)) continue
         const runtime = 'runtimeId' in read.reference
-        if (runtime && (!read.source || read.source.hostId === event.hostId) || read.issue && event.event.state === 'restored' &&
-            'hostId' in read.reference && read.reference.hostId === event.hostId) {
+        if (core.type !== 'connection-state' ? core.type !== 'agent-session' || read.source?.state === 'retired'
+          : runtime && (!read.source || read.source.hostId === event.hostId) || Boolean(read.issue) && core.state === 'restored') {
           completed.current.delete(id); invalidated.add(id)
         }
       }
-      if (invalidated.size) { setReads(previous => new Map([...previous].filter(([id]) => !invalidated.has(id)))); revise(value => value + 1) }
+      if (core.type === 'agent-session-record-deleted') {
+        for (const id of invalidated) {
+          const read = retained.current.get(id)
+          if (!read || !('hostId' in read.reference) && read.source?.hostId !== event.hostId) continue
+          const source: AgentSessionHistoryDescriptor = { hostId: event.hostId, agentSessionId: core.agentSessionId, state: 'deleted',
+            retiredAt: core.retiredAt, recordDeletion: { ...core.recordDeletion } }
+          const terminal = { ...read, source, loading: false, issue: null }
+          completed.current.set(id, terminal); retained.current = new Map(retained.current).set(id, terminal)
+        }
+      }
+      if (invalidated.size) { setReads(retained.current); revise(value => value + 1) }
     })
   }, [enabled])
   return useMemo(() => ({ reads, retry }), [reads, retry])

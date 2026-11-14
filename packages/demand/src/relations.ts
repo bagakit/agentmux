@@ -1,4 +1,17 @@
 import type { Demand, DemandStatus } from './demand-types.js'
+import { delegationWorkerHostId } from './delegations.js'
+
+/** Saved witnesses only. Current Runtime discovery/control remains with the Host. */
+export function goalSupervisorHostWitnesses(goal: Partial<Pick<Demand, 'supervisorSessionId' | 'creationOrigin' | 'participations' | 'plan' | 'delegations'>>): readonly string[] {
+  const sessionId = goal.supervisorSessionId
+  if (!sessionId) return []
+  const requester = goal.participations?.find(item => item.id === goal.creationOrigin?.requesterParticipationId && item.agentSessionId === sessionId)
+  return [...new Set([
+    ...(requester ? [requester.hostId] : []),
+    ...(goal.plan?.history ?? []).filter(item => item.author.kind === 'agent' && item.author.id === sessionId && item.author.hostId).map(item => item.author.hostId!),
+    ...(goal.delegations ?? []).filter(item => item.ownerAgentSessionId === sessionId).map(item => item.hostId)
+  ])]
+}
 
 export type GoalRelationRoleKind = 'assignee' | 'supervisor' | 'related' | 'create' | 'discussion' | 'requirements'
   | 'execution' | 'continuation' | 'delegation-owner' | 'delegation-worker' | 'execution-progress' | 'execution-handoff'
@@ -42,7 +55,7 @@ export function projectDemandRelations(goals: Iterable<GoalRelationSource>): Dem
     }
     for (const item of goal.delegations ?? []) {
       exact(item.hostId, item.ownerAgentSessionId, 'delegation-owner', { kind: 'delegation', id: item.operationId })
-      exact(item.hostId, item.workerAgentSessionId, 'delegation-worker', { kind: 'delegation', id: item.operationId })
+      exact(delegationWorkerHostId(item), item.workerAgentSessionId, 'delegation-worker', { kind: 'delegation', id: item.operationId })
       if (item.attention) exact(item.attention.hostId, item.attention.supervisorAgentSessionId, 'supervisor', { kind: 'delegation-attention', id: item.attention.operationId })
     }
     for (const item of goal.progressUpdates ?? []) {

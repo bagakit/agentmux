@@ -2,6 +2,27 @@ import type { DemandRecord } from './global-demand-board'
 import type { SessionSnapshot } from '../../../shared/contracts'
 import { agentSessionPresentationIndex } from './session-presentation'
 import { goalAgentPresentation, type GoalAgentRole } from './goal-agent-selection'
+import { goalSupervisorHostWitnesses, projectDemandRelations, type GoalRelationRoleKind } from '@agentmux/demand/relations'
+import { collaborationSubjectKey, type CollaborationAgent } from './agent-collaboration'
+
+export type GoalTeamIdentity = { subject: { hostId: string; agentSessionId: string }; roles: readonly (GoalRelationRoleKind | 'planned-executor')[] }
+/** Accurate recorded sources are not inferred from bare assignments or live namesakes. */
+export function goalTeamIdentities(goal: DemandRecord) {
+  const identities = new Map<string, GoalTeamIdentity>()
+  const add = (subject: GoalTeamIdentity['subject'], roles: GoalTeamIdentity['roles']) => {
+    const key = collaborationSubjectKey(subject), previous = identities.get(key)
+    identities.set(key, { subject, roles: [...new Set([...previous?.roles ?? [], ...roles])] })
+  }
+  for (const [key, relations] of projectDemandRelations([goal]).qualified) {
+    const [hostId, agentSessionId] = JSON.parse(key) as [string, string]
+    add({ hostId, agentSessionId }, relations.flatMap(relation => relation.roles.map(role => role.kind)))
+  }
+  for (const node of goal.plan?.nodes ?? []) if (node.executor) add(node.executor, ['planned-executor'])
+  const supervisorHosts = goalSupervisorHostWitnesses({ ...goal, supervisorSessionId: goal.supervisorSessionId ?? null })
+  if (goal.supervisorSessionId && supervisorHosts.length === 1) add({ hostId: supervisorHosts[0]!, agentSessionId: goal.supervisorSessionId }, ['supervisor'])
+  const agents = new Map<string, CollaborationAgent>([...identities].map(([key, { subject }]) => [key, { id: key, subject, sessionId: subject.agentSessionId }]))
+  return { identities, agents, wanted: new Set(identities.keys()) }
+}
 
 type Agent = Extract<SessionSnapshot, { kind: 'agent' }>
 export type GoalTeamActor = { key: string; session: Agent; roles: GoalAgentRole[]; recommended: boolean }

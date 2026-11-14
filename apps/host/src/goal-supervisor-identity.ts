@@ -1,6 +1,7 @@
 import { AgentMuxError } from '@agentmux/core'
 import type { Demand } from '@agentmux/demand'
 import type { GoalDelegationAuthority } from '@agentmux/core/goal-delegation'
+import { goalSupervisorHostWitnesses } from '@agentmux/demand/relations'
 
 type Runtime = { resolveGoalAgent?(agentSessionId: string): Promise<{ hostId: string }> }
 
@@ -8,14 +9,9 @@ type Runtime = { resolveGoalAgent?(agentSessionId: string): Promise<{ hostId: st
 export async function goalSupervisorHost(goal: Demand, runtime: Runtime): Promise<string> {
   const sessionId = goal.supervisorSessionId
   if (!sessionId) throw new AgentMuxError('This Goal has no current Supervisor. Original work and input remain available.', 'CONTROL_UNAVAILABLE')
-  const requester = goal.participations?.find(item => item.id === goal.creationOrigin?.requesterParticipationId && item.agentSessionId === sessionId)
-  const hosts = new Set([
-    ...(requester ? [requester.hostId] : []),
-    ...(goal.plan?.history ?? []).filter(item => item.author.kind === 'agent' && item.author.id === sessionId && item.author.hostId).map(item => item.author.hostId!),
-    ...(goal.delegations ?? []).filter(item => item.ownerAgentSessionId === sessionId).map(item => item.hostId)
-  ])
-  if (hosts.size === 1) return [...hosts][0]!
-  if (hosts.size > 1) throw new AgentMuxError('The current Supervisor has conflicting retained Host bindings. Keep its original identities and resolve that exact relationship.', 'AMBIGUOUS_AGENT_SESSION')
+  const hosts = goalSupervisorHostWitnesses(goal)
+  if (hosts.length === 1) return hosts[0]!
+  if (hosts.length > 1) throw new AgentMuxError('The current Supervisor has conflicting retained Host bindings. Keep its original identities and resolve that exact relationship.', 'AMBIGUOUS_AGENT_SESSION')
   if (!runtime.resolveGoalAgent) throw new AgentMuxError('The current Supervisor Host is not yet confirmed. Its original work and native input remain available.', 'CONTROL_UNAVAILABLE')
   return (await runtime.resolveGoalAgent(sessionId)).hostId
 }
