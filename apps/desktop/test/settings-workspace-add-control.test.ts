@@ -77,7 +77,7 @@ async function fixture() {
     const handler=ipc.handlers.get(channel);expect(handler).toBeTypeOf('function')
     return await handler!({ senderFrame: Reflect.get(sender as object, 'mainFrame'),sender} as unknown as IpcMainInvokeEvent,...values) as T
   }
-  const cli=async(input:Record<string,string>)=>{
+  const cli=async(input:Record<string,unknown>)=>{
     expect(ipc.execute).toBeTypeOf('function')
     const result=await ipc.execute!({...envelope,operation:'settings.workspaces.add',input})
     if(result.operation!=='settings.workspaces.add')throw new Error('Wrong Workspace registration receipt')
@@ -112,6 +112,14 @@ describe('Workspace registration owns current Main facts for UI and public CLI',
   const collect=(node:ts.Node)=>{if(ts.isPropertyAssignment(node)||ts.isShorthandPropertyAssignment(node))written.add(node.name.getText(source));ts.forEachChild(node,collect)}
   collect(argument!);expect(written.size).toBeGreaterThan(0)
   expect([...written].sort()).toEqual(fields.sort())
+ })
+ it('accepts expectedHost through the actual public settings.workspaces.add chain',async()=>{
+  const f=await fixture();try{
+   const expectedHost=(await f.current()).hosts.find(host=>host.id==='local')!,path=join(f.root,'public-expected')
+   const result=await f.cli({hostId:'local',path,expectedHost})
+   expect(result).toMatchObject({operation:'settings.workspaces.add',changed:true,item:{value:{hostId:'local',path,kind:'folder'}}})
+   expect(JSON.parse(await f.bytes()).workspaces.some((item:WorkspaceRecord)=>item.hostId==='local'&&item.path===path)).toBe(true)
+  }finally{await f.dispose()}
  })
  it('registers literal paths/default names and returns the actual original record for UI-first and CLI-first duplicates',async()=>{
   const f=await fixture();try{

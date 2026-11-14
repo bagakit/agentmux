@@ -44,7 +44,7 @@ export function settingsWorkbenchWindows(window: BrowserWindow): Parameters<type
 
 export function settingsWorkspaceFiles(): WorkspaceFiles {
   const unavailable = vi.fn(async () => { throw new Error('This Settings fixture does not admit workspace file reads.') })
-  return { read: unavailable, listFiles: unavailable, dispose: async () => {} } as unknown as WorkspaceFiles
+  return { read: unavailable, listFiles: unavailable, readDirectory: unavailable, dispose: async () => {} } as unknown as WorkspaceFiles
 }
 
 export class SettingsNotesStorage {
