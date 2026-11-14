@@ -22,7 +22,7 @@ function fixture() {
   tab = addWorkbenchRegion(tab, 'region-a', 'right', surface('region-b', 'browser-b', b))
   tab = addWorkbenchRegion(tab, 'region-b', 'down', { regionId: 'original-file', kind: 'file', workspaceId: 'resource', path: 'unsaved.md' })
   const tabs = { [tab.id]: tab }, layout = createWorkspaceLayout('original-group', [tab.id])
-  const catalog = { zones: [{ zoneId: 'whole-research' }], tabs: [{ tabId: tab.id, zoneId: 'whole-research' }], regions: [], locations: [], bindings: [], spaces: [] } as unknown as AgentMuxSpaceCatalog
+  const catalog = { zones: [{ zoneId: 'whole-research' }], tabs: [{ tabId: tab.id, zoneId: 'whole-research' }], regions: Object.values(tab.regions).map(surface => ({ regionId: surface.regionId, tabId: tab.id, kind: surface.kind })), locations: [], bindings: [], spaces: [] } as unknown as AgentMuxSpaceCatalog
   return { tab, tabs, layout, catalog, pages: [{ regionId: 'region-a', browserId: 'browser-a' }, { regionId: 'region-b', browserId: 'browser-b' }] }
 }
 it('the strict public environment view preserves default versus an exact ID without adding authority fields', () => {
