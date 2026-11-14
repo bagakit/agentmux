@@ -623,19 +623,19 @@ export async function runDesktopResourceProbe(options: {
   try {
     const config = await options.configStore.get()
     const identity = resourceIdentity()
-    const measuredWorkspaces = config.workspaces.filter((workspace) => !isScratchWorkspaceId(workspace.id))
-    const scratchWorkspaces = config.workspaces.filter((workspace) => isScratchWorkspaceId(workspace.id))
-    if (measuredWorkspaces.length !== 3 || scratchWorkspaces.length !== 1 || config.workspaces.length !== 4) {
-      throw new Error('Desktop resource probe requires three measured workspaces and one built-in Scratch workspace.')
+    const measuredIds: unknown = JSON.parse(process.env.AGENTMUX_DESKTOP_RESOURCE_WORKSPACES ?? 'null')
+    if (!Array.isArray(measuredIds) || measuredIds.length !== 3 || new Set(measuredIds).size !== 3 ||
+        measuredIds.some(id => typeof id !== 'string' || isScratchWorkspaceId(id))) {
+      throw new Error('Desktop resource probe requires three distinct measured workspace IDs.')
     }
-    const measuredWorkspace = measuredWorkspaces[0]!
-    if (config.workspaces[0]?.id !== measuredWorkspace.id) {
+    const [workspaceA, workspaceB, workspaceC] = measuredIds.map(id => config.workspaces.find(workspace => workspace.id === id))
+    if (!workspaceA || !workspaceB || !workspaceC || !config.workspaces.some(workspace => isScratchWorkspaceId(workspace.id))) {
+      throw new Error('Desktop resource probe requires the original measured workspaces and built-in Scratch workspace.')
+    }
+    if (config.workspaces[0]?.id !== workspaceA.id) {
       throw new Error('Desktop resource probe requires the measured workspace to be the active first workspace.')
     }
     const usedTerminalSessionIds = new Set<string>()
-    const workspaceA = measuredWorkspaces[0]!
-    const workspaceB = measuredWorkspaces[1]!
-    const workspaceC = measuredWorkspaces[2]!
     let launcherTerminal = await waitForReadyLauncherTerminal({
       description: 'fresh ready reusable Terminal launcher',
       window: options.window,
@@ -644,8 +644,8 @@ export async function runDesktopResourceProbe(options: {
       workspaceId: workspaceA.id
     })
     if (
-      launcherTerminal.hostId !== measuredWorkspace.hostId ||
-      launcherTerminal.workspacePath !== measuredWorkspace.path
+      launcherTerminal.hostId !== workspaceA.hostId ||
+      launcherTerminal.workspacePath !== workspaceA.path
     ) {
       throw new Error('Desktop resource probe reusable Terminal is not owned by the measured active workspace.')
     }
