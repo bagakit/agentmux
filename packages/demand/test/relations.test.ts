@@ -101,3 +101,15 @@ it('exposes the browser-safe public package entry without importing a Runtime or
   expect(result.qualified.size).toBe(0)
   expect(result.unqualified.get('bare-session')?.[0]?.goalId).toBe('original-goal')
 })
+
+it('the public relation entry preserves a worker on its original cross-Host delegation target', async () => {
+  const publicApi = await import('@agentmux/demand/relations')
+  const original = goal({ delegations: [{ operationId: 'cross-host-task', sourceMessageId: 'original-message', hostId: 'owner-host', workerHostId: 'worker-host',
+    ownerAgentSessionId: 'owner', workerAgentSessionId: 'worker', ownerRunId: 'owner-run', workerRunId: 'worker-run', threadId: 'original-thread', text: 'Original request',
+    alignmentRevision: 1, criterionIds: ['criterion'], capturedCriteria: [{ id: 'criterion', text: 'Original criterion' }], preparedAt: 1 }] })
+  expect(parseDemandDelegations(original.delegations)).toEqual(original.delegations)
+  const result = publicApi.projectDemandRelations([original])
+  expect(result.qualified.get(publicApi.demandRelationKey('worker-host', 'worker'))?.[0]?.roles.map(role => role.kind)).toEqual(['delegation-worker'])
+  expect(result.qualified.has(publicApi.demandRelationKey('owner-host', 'worker'))).toBe(false)
+  expect(result.qualified.get(publicApi.demandRelationKey('owner-host', 'owner'))?.[0]?.roles.map(role => role.kind)).toEqual(['delegation-owner'])
+})
