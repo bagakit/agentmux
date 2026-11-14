@@ -55,6 +55,7 @@ export * from './mote/context-observation.js'
 import type { AgentMuxMoteContextEvidenceTarget, AgentMuxMoteContextObservation } from './mote/context-observation.js'
 export * from './client-notifications.js'
 import type { AgentMuxClientNotificationsTarget, AgentMuxClientNotificationsObservation } from './client-notifications.js'
+import type { FocusParams, FocusResults, AgentMuxFocusSource } from './focus-control.js'
 import type { ConversationConsumerQuery } from './conversation-consumer-query.js'
 export { parseConversationConsumerQuery, type ConversationConsumerQuery } from './conversation-consumer-query.js'
 
@@ -62,6 +63,7 @@ export const AGENTMUX_CONTROL_SCHEMA_VERSION = 5 as const
 
 export const AGENTMUX_CONTROL_ERROR_CODES = [
   'INVALID_CONTROL_REQUEST',
+  'FOCUS_SELECTION_LIMIT',
   'CONTROL_PROTOCOL_ERROR',
   'CONTROL_TIMEOUT',
   'CONTROL_UNAVAILABLE',
@@ -731,7 +733,13 @@ export type AgentMuxControlCrashLogResult =
   | ({ operation: 'diagnostics.crash-log.get' } & AgentMuxControlCrashLogFact)
   | { operation: 'diagnostics.crash-log.reveal'; path: string; requested: true }
 
+export type AgentMuxControlFocusReadRequest = RequestBase & (
+  | { operation: 'focus.ls'; input: FocusParams['focus.ls']; source?: AgentMuxFocusSource }
+  | { operation: 'focus.read'; input: FocusParams['focus.read']; source?: AgentMuxFocusSource }
+)
+
 export type AgentMuxControlRequest =
+  | AgentMuxControlFocusReadRequest
   | PendingMessageControlRequest
   // An Agent's task run or batch carries its caller, so Main decides automation by who is asking.
   | (RequestBase & BrowserTaskControlPayload & { caller?: AgentMuxControlCaller })
@@ -873,6 +881,8 @@ export type AgentMuxControlResult =
   | { operation: 'metrics.trace.capture'; capture: RendererTraceResult }
   | AgentMuxSpaceControlResult
   | { operation: 'inspect.client'; observation: Record<string, unknown> }
+  | { operation: 'focus.ls'; page: FocusResults['focus.ls'] }
+  | { operation: 'focus.read'; page: FocusResults['focus.read'] }
   | { operation: 'inspect.mote-context'; observation: AgentMuxMoteContextObservation }
   | { operation: 'inspect.notifications'; observation: AgentMuxClientNotificationsObservation }
   | { operation: 'inspect.tab'; tab: AgentMuxInspectedTab }
@@ -1155,6 +1165,8 @@ const OPERATION_BUDGET: Record<AgentMuxControlRequest['operation'], 'long' | 'sh
   'metrics.scene.inspect': 'long',
   'metrics.profile.capture': 'long',
   'metrics.trace.capture': 'long',
+  'focus.ls': 'short',
+  'focus.read': 'short',
   'inspect.client': 'short',
   'inspect.mote-context': 'short',
   'inspect.notifications': 'short',

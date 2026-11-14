@@ -1,3 +1,4 @@
+import { parseFocusParams, parseFocusResult, parseFocusSource } from './focus-control.js'
 import { formatGoalAddress } from './sharing.js'
 import { parseGoalAgentReference, parseGoalAgentReferences, parseGoalQualifiedAccess, parseGoalInspectionAccess, parseGoalRelationAccesses } from './goal-agent-reference.js'
 import { demandAgentReferenceKey } from '@agentmux/demand/relations'
@@ -458,6 +459,13 @@ export function parseAgentMuxControlRequest(value: unknown): AgentMuxControlRequ
       : { ...base, operation: source.operation, scheme: text(source.scheme, 'Browser link scheme', code) }
     settingsResourceBudget(request, code)
     return request
+  }
+  if (source.operation === 'focus.ls' || source.operation === 'focus.read') {
+    settingsFields(source, ['schemaVersion', 'requestId', 'operation', 'input', 'source'], 'INVALID_CONTROL_REQUEST')
+    const origin = source.source === undefined ? {} : { source: parseFocusSource(source.source, 'INVALID_CONTROL_REQUEST') }
+    return source.operation === 'focus.ls'
+      ? { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation, input: parseFocusParams('focus.ls', source.input), ...origin }
+      : { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation, input: parseFocusParams('focus.read', source.input), ...origin }
   }
   if (source.operation === 'inspect.client') {
     settingsFields(source, ['schemaVersion', 'requestId', 'operation', 'conversation'], 'INVALID_CONTROL_REQUEST')
@@ -1611,6 +1619,12 @@ function parseSuccessReceipt(source: Record<string, unknown>): AgentMuxControlSu
     const body = { resource, item: resourceItem(result.item), changed: result.changed }
     if (operation === 'settings.resource.add') return resourceReceipt({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: body })
     return resourceReceipt({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation: 'settings.resource.update', result: body })
+  }
+  if (operation === 'focus.ls' || operation === 'focus.read') {
+    settingsFields(result, ['page'], 'CONTROL_PROTOCOL_ERROR')
+    return operation === 'focus.ls'
+      ? { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: { page: parseFocusResult('focus.ls', result.page) } }
+      : { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: { page: parseFocusResult('focus.read', result.page) } }
   }
   if (operation === 'inspect.client') {
     settingsFields(result, ['observation'], 'CONTROL_PROTOCOL_ERROR')
