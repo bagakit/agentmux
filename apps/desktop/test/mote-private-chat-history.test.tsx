@@ -87,7 +87,7 @@ it('preserves in-flight diagnosis across unrelated Profile renders while reading
   await f.renderMotePanel(0, false); expect(reads).toHaveLength(2)
   await f.renderMotePanel(); await settle(() => expect(reads).toHaveLength(3))
   await release(2, 'service-unavailable')
-  const minutes = panel().querySelector<HTMLInputElement>('[aria-label="Conversation update interval in minutes"]')!
+  const minutes = panel().querySelector<HTMLInputElement>('[aria-label="Guest conversation inactivity in minutes"]')!
   await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(minutes, '47'); minutes.dispatchEvent(new Event('input', { bubbles: true })) })
   await click('Save chat settings'); await settle(() => expect(reads).toHaveLength(4))
   expect((await f.client.call('space.mote.chat.inspect', { target: f.target() })).configuration?.revision).toBe(2)
@@ -101,12 +101,11 @@ it('preserves in-flight diagnosis across unrelated Profile renders while reading
   expect(activity().textContent).toContain('intake-unavailable'); expect(activity().textContent).not.toContain('target-changed')
   await click('Refresh private chat activity'); expect(reads).toHaveLength(7)
   await act(async () => useAppStore.setState({ manualConnectionSelections: { lark: nextOwner } }))
-  await click('Refresh'); await settle(() => expect(reads).toHaveLength(8))
-  expect(reads[7]).toMatchObject({ target: f.target(1), owner: nextOwner })
-  await release(7, 'service-unavailable')
-  await act(async () => reads[6]!.release('target-changed')); await f.settle()
-  expect(activity().textContent).toContain('service-unavailable'); expect(activity().textContent).not.toContain('target-changed')
-  await f.renderMotePanel(1); expect(reads).toHaveLength(8)
+  await click('Refresh'); await f.settle(); expect(reads).toHaveLength(7)
+  expect(reads[6]).toMatchObject({ target: f.target(1), owner: f.hostingTarget })
+  await release(6, 'service-unavailable')
+  expect(activity().textContent).toContain('service-unavailable')
+  await f.renderMotePanel(1); expect(reads).toHaveLength(7)
   expect(f.chatAgentCalls).toEqual({ prepare: 0, create: 0, inspect: 0, prepareInput: 0, activity: 0 })
 })
 
@@ -125,19 +124,23 @@ it('reads exact-person generations through Profile IPC/Host and real Core inputs
   expect(f.chatRequests.mock.calls.filter(([method]) => method === 'space.mote.chat.history')).toHaveLength(0)
   await click('Conversations', person())
   await settle(() => expect(person().querySelectorAll('[data-mote-chat-generation]')).toHaveLength(3))
-  expect(person().textContent).toContain('original-agent'); expect(person().textContent).not.toContain('foreign-agent')
+  expect(person().querySelector('[data-mote-chat-generation="generation-original-agent"]')).toBeTruthy()
+  expect(person().querySelector('[data-mote-chat-generation="generation-foreign-agent"]')).toBeNull()
   expect(f.chatRequests.mock.calls.find(([method]) => method === 'space.mote.chat.history')).toEqual(['space.mote.chat.history', { target: f.target(), actor: alice, limit: 3 }, f.hostingTarget])
   await click('Earlier conversations', person()); await settle(() => expect(person().querySelectorAll('[data-mote-chat-generation]')).toHaveLength(4))
-  expect(person().textContent).toContain('earliest')
-  const row = person().querySelector<HTMLElement>(`[data-mote-chat-generation="${selected.generationId}"]`)!
-  await click('View messages', row)
+  expect(person().querySelector('[data-mote-chat-generation="generation-earliest"]')).toBeTruthy()
+  const choice = person().querySelector<HTMLButtonElement>(`[data-mote-conversation-choice="${selected.generationId}"]`)!
+  await act(async () => choice.click()); await f.settle()
+  const conversation = person().querySelector<HTMLElement>(`[data-mote-conversation-pane="${selected.generationId}"]`)!
+  expect(conversation.querySelector('[data-mote-session-conversation]')?.getAttribute('data-mote-session-conversation')).toBe(JSON.stringify({ hostId: 'local', agentSessionId: 'original-agent' }))
+  await click('输入回执', conversation)
   await settle(() => expect(read).toHaveBeenCalled())
   expect(read.mock.calls[0]?.[0]).toEqual({ hostId: 'local', agentSessionId: 'original-agent' })
-  await settle(() => expect(row.querySelector('[data-input-mailbox-key]')?.textContent).toContain('Original external body'))
-  expect(row.textContent).toContain('Agent replies are in the original conversation')
+  await settle(() => expect(conversation.querySelector('[data-input-mailbox-key]')?.textContent).toContain('Original external body'))
+  expect(conversation.querySelector('code')?.textContent).toBe('local / original-agent')
   expect(useAppStore.getState().sessions).toHaveLength(0)
   const originalChoice = useAppStore.getState().workbenchSpaceSelection, defaults = await f.preferences.read({ kind: 'connection', target: f.target() })
-  await click('Locate Agent original-agent in Focus', row)
+  await click('在 Focus 打开', conversation)
   expect(useAppStore.getState().focusAgentReveal).toMatchObject({ hostId: 'local', agentSessionId: 'original-agent', pending: true })
   expect(useAppStore.getState().workbenchSpaceSelection).toEqual(originalChoice)
   expect((await f.preferences.read({ kind: 'connection', target: f.target() })).source).toEqual(defaults.source)
@@ -147,48 +150,39 @@ it('reads exact-person generations through Profile IPC/Host and real Core inputs
 
 it('keeps the original history on refresh failure and discards a late response after the Profile target changes', async () => {
   seed('kept-agent'); await show(); await click('Conversations', person())
-  await settle(() => expect(person().textContent).toContain('kept-agent'))
+  await settle(() => expect(person().querySelector('[data-mote-chat-generation="generation-kept-agent"]')).toBeTruthy())
   const forward = f.chatRequests.getMockImplementation()!
   f.chatRequests.mockImplementation(async (method, input, owner) => { if (method === 'space.mote.chat.history') throw Error('Controlled history unavailable'); return forward(method, input, owner) })
-  await click('Refresh conversations', person()); await settle(() => expect(person().textContent).toContain('Previously read conversations are kept'))
-  expect(person().textContent).toContain('kept-agent')
+  await click('Refresh conversations', person()); await settle(() => expect(person().textContent).toContain('Controlled history unavailable'))
+  expect(person().querySelector('[data-mote-chat-generation="generation-kept-agent"]')).toBeTruthy()
   let complete!: () => Promise<void>
   f.chatRequests.mockImplementation((method, input, owner) => method === 'space.mote.chat.history' ? new Promise(resolve => { complete = async () => resolve(await forward(method, input, owner)) }) : forward(method, input, owner))
   await click('Refresh conversations', person()); await settle(() => expect(complete).toBeTypeOf('function'))
   await f.renderMotePanel(1); await settle(() => expect(panel().dataset.motePrivateChat).toBe(f.scopes[1]!.topic.id))
   await act(async () => complete())
-  expect(panel().textContent).not.toContain('kept-agent')
+  expect(panel().querySelector('[data-mote-chat-generation="generation-kept-agent"]')).toBeNull()
 })
 
-it('keeps an edited draft on its original hosting owner, then adopts a new owner only with its successful configuration read', async () => {
+it('keeps edited and saved policy on its original hosting owner when global connector selection changes', async () => {
   await show()
-  const input = panel().querySelector<HTMLInputElement>('[aria-label="Conversation update interval in minutes"]')!
+  const input = panel().querySelector<HTMLInputElement>('[aria-label="Guest conversation inactivity in minutes"]')!
   await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, '47'); input.dispatchEvent(new Event('input', { bubbles: true })) })
   const nextOwner = { hostId: 'another-host', runtimeId: 'another-runtime' }, originalCall = f.runtime.callConnectionHost
   const targets: unknown[] = []
   f.runtime.callConnectionHost = async (owner, method, params) => { targets.push(owner); return originalCall(owner, method, params) }
   await act(async () => useAppStore.setState({ manualConnectionSelections: { lark: nextOwner } }))
-  await click('Refresh'); await settle(() => expect(panel().textContent).toContain('Your draft and original requests stay with original-host'))
+  await click('Refresh'); await settle(() => expect(input.value).toBe('47'))
+  expect(targets.length).toBeGreaterThan(0)
   expect(targets.every(owner => JSON.stringify(owner) === JSON.stringify(f.hostingTarget))).toBe(true)
   await click('Save chat settings'); await settle(() => expect(panel().textContent).toContain('Original chat settings save confirmed'))
-  const config = (await f.client.call('space.mote.chat.inspect', { target: f.target() })).configuration!
-  await click('Refresh'); await settle(() => expect(panel().textContent).toContain('original controlled hosting owner does not match'))
-  expect(input.value).toBe('47'); expect(panel().querySelector('[data-mote-chat-saved]')?.getAttribute('data-mote-chat-saved')).toBe('on')
-  f.runtime.callConnectionHost = async (owner, method, params) => {
-    if (JSON.stringify(owner) === JSON.stringify(nextOwner)) {
-      if (method === 'space.mote.chat.inspect') return { configuration: { ...config, revision: 1, values: { ...config.values, enabled: false, conversationIdleMs: 60000 } }, operation: null } as never
-      return originalCall(f.hostingTarget, method, params)
-    }
-    return originalCall(owner, method, params)
-  }
-  await click('Refresh'); await settle(() => expect(panel().querySelector('[data-mote-chat-saved]')?.getAttribute('data-mote-chat-saved')).toBe('off'))
-  expect(input.value).toBe('1')
-  expect(f.chatRequests.mock.calls.filter(([method]) => method === 'space.mote.chat.diagnose').at(-1)?.[2]).toEqual(nextOwner)
+  await click('Refresh'); await settle(() => expect(panel().querySelector('[data-mote-chat-saved]')?.getAttribute('data-mote-chat-saved')).toBe('on'))
+  expect(input.value).toBe('47')
+  expect(f.chatRequests.mock.calls.filter(([method]) => method === 'space.mote.chat.diagnose').at(-1)?.[2]).toEqual(f.hostingTarget)
   await act(async () => useAppStore.setState({ moteChatIntents: { 'history-policy': { method: 'space.mote.chat.configure', phase: 'may-have-dispatched', hostingTarget: f.hostingTarget,
     input: { operationId: 'history-policy', target: f.target(), expectedRevision: null, expectedConnectionRevision: 1,
       values: { ...MOTE_CHAT_DEFAULT_VALUES, enabled: true, connection: { connectionId: 'private-bot', application } } } } } }))
-  await click('Check original request'); await settle(() => expect(panel().textContent).toContain('Current settings are kept'))
-  expect(panel().querySelector('[data-mote-chat-saved]')?.getAttribute('data-mote-chat-saved')).toBe('off'); expect(input.value).toBe('1')
+  await click('Check original request'); await settle(() => expect(Object.values(useAppStore.getState().moteChatIntents)).toHaveLength(0))
+  expect(panel().querySelector('[data-mote-chat-saved]')?.getAttribute('data-mote-chat-saved')).toBe('on'); expect(input.value).toBe('47')
 })
 
 it('explains a typed interrupted original Run before observer details and never calls acceptance a completed reply', async () => {
@@ -212,27 +206,22 @@ it('explains a typed interrupted original Run before observer details and never 
   expect(f.chatAgentCalls).toEqual({ prepare: 0, create: 0, inspect: 0, prepareInput: 0, activity: 0 })
 })
 
-it('does not show an old Host allowance acknowledgement as a save on the newly selected Host', async () => {
+it('keeps a delayed allowance acknowledgement on its original owner despite a global hosting selection change', async () => {
   await show(); await click('Edit allowance', person())
   const total = person().querySelector<HTMLInputElement>('input')!
   await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(total, '8'); total.dispatchEvent(new Event('input', { bubbles: true })) })
   const nextOwner = { hostId: 'another-host', runtimeId: 'another-runtime' }, originalCall = f.runtime.callConnectionHost
-  const configuration = (await f.client.call('space.mote.chat.inspect', { target: f.target() })).configuration!
   let release!: () => Promise<void>
   f.runtime.callConnectionHost = async (owner, method, params) => {
     if (method === 'space.mote.chat.allocate') return new Promise(resolve => { release = async () => resolve(await originalCall(owner, method, params)) })
-    if (JSON.stringify(owner) === JSON.stringify(nextOwner)) {
-      if (method === 'space.mote.chat.inspect') return { configuration: { ...configuration, values: { ...configuration.values, enabled: false } }, operation: null } as never
-      return originalCall(f.hostingTarget, method, params)
-    }
     return originalCall(owner, method, params)
   }
   await click('Save allowance', person()); await settle(() => expect(release).toBeTypeOf('function'))
   await act(async () => useAppStore.setState({ manualConnectionSelections: { lark: nextOwner } }))
-  await click('Refresh'); await settle(() => expect(panel().querySelector('[data-mote-chat-saved]')?.getAttribute('data-mote-chat-saved')).toBe('off'))
+  await click('Refresh'); await settle(() => expect(panel().querySelector('[data-mote-chat-saved]')?.getAttribute('data-mote-chat-saved')).toBe('on'))
   await act(async () => release()); await settle(() => expect(Object.values(useAppStore.getState().moteChatIntents)).toHaveLength(0))
-  expect(panel().textContent).not.toContain('Message allowance saved')
-  expect(panel().querySelector('[data-mote-chat-saved]')?.getAttribute('data-mote-chat-saved')).toBe('off')
+  expect(panel().textContent).toContain('Message allowance saved')
+  expect(panel().querySelector('[data-mote-chat-saved]')?.getAttribute('data-mote-chat-saved')).toBe('on')
   const saved = await f.client.call('space.mote.chat.audience', { target: f.target() })
   expect(saved.people.find(row => JSON.stringify(row.actor) === JSON.stringify(alice))?.total).toBe(8)
 })
@@ -247,7 +236,7 @@ it('refreshes people without unmounting a loaded second-page conversation or all
   expect(panel().querySelector('[data-mote-chat-person="guest-21"]')).toBeNull()
   await click('More people'); await settle(() => expect(panel().querySelectorAll('[data-mote-chat-person]')).toHaveLength(24))
   const row = panel().querySelector<HTMLElement>('[data-mote-chat-person="guest-21"]')!
-  await click('Conversations', row); await settle(() => expect(row.textContent).toContain('second-page-agent'))
+  await click('Conversations', row); await settle(() => expect(row.querySelector('[data-mote-chat-generation="generation-second-page-agent"]')).toBeTruthy())
   await click('Edit allowance', row)
   const total = row.querySelector<HTMLInputElement>('input')!
   await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(total, '19'); total.dispatchEvent(new Event('input', { bubbles: true })) })
@@ -255,7 +244,8 @@ it('refreshes people without unmounting a loaded second-page conversation or all
   await click('Refresh people'); await settle(() => expect(f.chatRequests.mock.calls.length).toBeGreaterThan(before))
   expect(panel().querySelector('[data-mote-chat-person="guest-21"]')).toBe(row)
   expect(row.querySelector('input')).toBe(total); expect(total.value).toBe('19')
-  expect(row.querySelector<HTMLDetailsElement>('.mote-chat-person__history')?.open).toBe(true); expect(row.textContent).toContain('second-page-agent')
+  expect(row.querySelector<HTMLDetailsElement>('.mote-chat-person__history')?.open).toBe(true)
+  expect(row.querySelector('[data-mote-chat-generation="generation-second-page-agent"]')).toBeTruthy()
   expect(panel().querySelectorAll('[data-mote-chat-person]')).toHaveLength(24)
   expect(f.chatRequests.mock.calls.slice(before).filter(([method]) => method === 'space.mote.chat.audience')).toHaveLength(1)
   expect(f.chatRequests.mock.calls.some(([method]) => method === 'space.mote.chat.allocate')).toBe(false)

@@ -15,11 +15,14 @@ import { unwrapSessionInputOperationResult } from '../../src/shared/session-inpu
 import { registerConnectorIpc } from '../../src/main/connector-ipc'
 import { api } from '../../src/renderer/src/lib/api'
 import { useAppStore } from '../../src/renderer/src/store'
+import { useLauncherState } from '../../src/renderer/src/lib/launcher-state'
 import { MoteDetailsPanel } from '../../src/renderer/src/components/MoteDetailsPanel'
 import { MoteConnectionIdentity, MoteConnectionPanel } from '../../src/renderer/src/components/MoteConnectionIdentity'
 import { ExternalConnectionsSettings } from '../../src/renderer/src/components/settings/ExternalConnectionsSettings'
 import { SettingsNavigation, type SettingsNavigationRequest } from '../../src/renderer/src/components/SettingsNavigation'
 import { SettingsPanel } from '../../src/renderer/src/components/SettingsPanel'
+import { App } from '../../src/renderer/src/App'
+import { requestPmoTeamsTopicFloatingOpen } from '../../src/renderer/src/lib/pmo-teams-topic-floating'
 import type { MoteWorkfaceScope } from '../../src/renderer/src/lib/mote-workface'
 import { installNativePopover, moteConfig } from './mote-workface'
 import { objectCliEnvironment, runCompiledObjectCli } from '../../../../packages/core/test/helpers/object-cli-rpc'
@@ -27,7 +30,7 @@ import { objectCliEnvironment, runCompiledObjectCli } from '../../../../packages
 const { defaultHttpInstance } = createRequire(resolve('packages/connectors/package.json'))('@larksuiteoapi/node-sdk')
 export async function moteBotUi(options: NonNullable<Parameters<typeof moteConnectionOwner>[1]> & { native?: ReturnType<typeof moteEnrollmentWeb>; hostId?: string } = {}) {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
-  const root = await mkdtemp(join(tmpdir(), 'amx-mote-ui-')), original = useAppStore.getState()
+  const root = await mkdtemp(join(tmpdir(), 'amx-mote-ui-')), original = useAppStore.getState(), originalLauncher = useLauncherState.getState()
   const restore = installNativePopover(), calls: Array<{ method?: string; url?: string; data?: any }> = []
   const native = options.native ?? moteEnrollmentWeb(), registration = vi.fn(native.fetch)
   vi.stubGlobal('fetch', registration)
@@ -52,18 +55,23 @@ export async function moteBotUi(options: NonNullable<Parameters<typeof moteConne
   vi.spyOn(api.config, 'get').mockResolvedValue(config)
   vi.spyOn(api.sessions, 'snapshot').mockResolvedValue({ sessions: [], timelines: {}, recoveryCandidates: [] })
   window.localStorage.clear(); await useAppStore.persist.rehydrate()
+  useLauncherState.setState({ drafts: {}, persistenceIssue: null }); await useLauncherState.persist.rehydrate()
   const stop = await useAppStore.getState().initialize(); stop()
   useAppStore.setState({ config, loading: false, spaceZoneBindings: {}, moteBotRequests: {}, botTaskSelections: {}, moteConnectionSaveIntents: {}, moteChatIntents: {} })
   const handlers = new Map<string, (...args: any[]) => Promise<any>>(), sender = {}
   const handleWithEvent = (name: string, handler: (...args: any[]) => Promise<any>) => { handlers.set(name, handler) }
   const hostingTarget = { hostId: options.hostId ?? 'original-host', runtimeId: 'original-host-runtime' }
-  const runtime: import('../../src/main/connection-host-ipc').ConnectionHostIpc = {
+  const runtime: import('../../src/main/connection-host-ipc').ConnectionHostIpc & Pick<import('../../src/main/runtime-controller').RuntimeController, 'callOriginalCore'> = {
     connectionHostingTarget: async () => structuredClone(hostingTarget),
     callConnectionHost: async (target, method, params) => {
       if (JSON.stringify(target) !== JSON.stringify(hostingTarget)) throw new Error('The original controlled hosting owner does not match')
       return await owner.client.call(method, params)
     },
-    watchConnectionMetadata: async (_target, handlers) => owner.client.subscribe('connection.metadata.watch', {}, handlers)
+    watchConnectionMetadata: async (_target, handlers) => owner.client.subscribe('connection.metadata.watch', {}, handlers),
+    callOriginalCore: async (hostId, method, params) => {
+      if (hostId !== owner.workspace.hostId) throw Error('The original Mote source Core does not match')
+      return await owner.client.call(method, params)
+    }
   }
   registerMoteConnectionIpc({ runtime, handleWithEvent })
   registerMotePreferencesIpc({ socketPath: owner.server.path, runtime, handleWithEvent })
@@ -105,6 +113,12 @@ export async function moteBotUi(options: NonNullable<Parameters<typeof moteConne
   async function renderSettings(navigationRequest?: SettingsNavigationRequest, visible = true) { await act(async () => view.render(<SettingsNavigation.Provider value={navigation}><SettingsPanel initialSection="lark" navigationRequest={navigationRequest} visible={visible} onClose={() => {}} /></SettingsNavigation.Provider>)); mounted = true; await settle() }
   vi.stubEnv('AGENTMUX_TEST_OBJECT_CLI', process.env.AGENTMUX_TEST_OBJECT_CLI ?? resolve('packages/core/bin/amux'))
   return { ...owner, runtime, hostingTarget, container, scopes, calls, registration, parentCalls, connectionCalls, chatRequests, saves, forward, handlers, sender, navigation, open, click, render, renderSettings, settle,
+    async renderApplicationMote(index = 0) {
+      await act(async () => view.render(<App />)); mounted = true
+      await act(async () => { await useAppStore.getState().openScratchTopic(owner.motes[index]!.id, owner.workspace.id) })
+      await act(async () => requestPmoTeamsTopicFloatingOpen({ targetTopicId: owner.motes[index]!.id }))
+      await settle()
+    },
     async renderCreateShortcut(index = 0) { await act(async () => view.render(<MoteConnectionPanel key={'create-' + index} target={owner.target(index)} topicId={owner.motes[index]!.id} moteName={scopes[index]!.topic.title} onRead={() => {}} createOnOpen />)); mounted = true; await settle() },
     async renderMotePanel(index = 0, active = true) {
       await act(async () => view.render(<SettingsNavigation.Provider value={navigation}><MoteDetailsPanel scope={scopes[index]!} active={active} onOpenPath={async () => {}} /></SettingsNavigation.Provider>)); mounted = true; await settle()
@@ -122,7 +136,7 @@ export async function moteBotUi(options: NonNullable<Parameters<typeof moteConne
     async remountSettings(navigationRequest?: SettingsNavigationRequest) { if (mounted) await act(async () => view.unmount()); view = createClientUiRoot(container); await useAppStore.persist.rehydrate(); await renderSettings(navigationRequest) },
     async close() {
       const errors: unknown[] = []
-      const actions = [async () => { if (mounted) await act(async () => view.unmount()) }, () => container.remove(), () => owner.close(), settle, restore, () => window.localStorage.clear(), () => useAppStore.setState(original, true), () => rm(root, { recursive: true, force: true }), () => vi.restoreAllMocks(), () => vi.unstubAllGlobals(), () => vi.unstubAllEnvs()]
+      const actions = [async () => { if (mounted) await act(async () => view.unmount()) }, () => container.remove(), () => owner.close(), settle, restore, () => useLauncherState.setState(originalLauncher, true), () => window.localStorage.clear(), () => useAppStore.setState(original, true), () => rm(root, { recursive: true, force: true }), () => vi.restoreAllMocks(), () => vi.unstubAllGlobals(), () => vi.unstubAllEnvs()]
       for (const close of actions) { try { await close() } catch (error) { errors.push(error) } }
       if (errors.length) throw new AggregateError(errors, 'Mote Renderer consumer cleanup failed')
     }

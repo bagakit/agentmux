@@ -74,6 +74,7 @@ it('continues an original creation without publication intent into the same setu
   await f.click('Continue bot setup')
   expect(f.navigation.openMoteConnection).toHaveBeenCalledWith({
     target: f.target(), topicId: f.motes[0]!.id, moteName: f.scopes[0]!.topic.title, hostingTarget: f.hostingTarget,
+    connection: { connectionId: parent.enrollment!.configured!.connection.config.connectionId, adapterId: parent.enrollment!.configured!.connection.config.adapterId, application: parent.enrollment!.configured!.connection.config.application },
     setup: { connectionId: parent.enrollment!.configured!.connection.config.connectionId,
       source: { kind: 'enrollment', operationId: parent.enrollment!.operationId, expectedRevision: parent.enrollment!.revision } }
   })
@@ -258,8 +259,11 @@ it('keeps the original Mote Profile caller and source preview while leaving the 
   expect(useAppStore.getState().sessions).toBe(before.sessions)
   expect(useAppStore.getState().agentComposerDrafts).toBe(before.agentComposerDrafts)
   expect(f.beginCount).toBe(0)
-  await f.click('Manage bots')
-  expect(f.navigation.openMoteConnection).toHaveBeenCalledWith({ target: f.target(), topicId: f.scopes[0]!.topic.id, moteName: f.scopes[0]!.topic.title, hostingTarget: f.hostingTarget })
+  const connector = document.querySelector<HTMLElement>('[aria-label="Manage connector"]')!
+  await act(async () => { connector.focus(); connector.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true })) })
+  await vi.waitFor(() => expect(document.querySelector('.selection-field__option[data-value="lark"]')).not.toBeNull())
+  await act(async () => (document.querySelector('.selection-field__option[data-value="lark"]') as HTMLElement).click())
+  expect(f.navigation.openMoteConnection).toHaveBeenCalledWith({ target: f.target(), topicId: f.scopes[0]!.topic.id, moteName: f.scopes[0]!.topic.title, hostingTarget: f.hostingTarget, section: 'lark' })
 })
 
 it('retains a known not-dispatched request when local persistence is unavailable and explicitly continues that same request after recovery', async () => {

@@ -398,7 +398,7 @@ it('keeps the original private-chat draft and manual question through Ideas and 
     throw new Error('Chat activity observation is outside this navigation fixture. Original input stays available.')
   })
   await app.mount(); await moteClick(button('Profile')); await settleMoteApp()
-  const chat = node('[data-mote-private-chat]'), interval = node<HTMLInputElement>('[aria-label="Conversation update interval in minutes"]')
+  const chat = node('[data-mote-private-chat]'), interval = node<HTMLInputElement>('[aria-label="Guest conversation inactivity in minutes"]')
   expect(chat.closest('.mote-profile__preferences')).toBeNull()
   const target = chatRead.mock.calls.find(([method]) => method === 'space.mote.chat.inspect')![1]
   const before = useAppStore.getState()
@@ -409,7 +409,7 @@ it('keeps the original private-chat draft and manual question through Ideas and 
   })
   await moteClick(button('Ideas')); await moteClick(button('Calendar')); await moteClick(button('Profile'))
   expect(node('[data-mote-private-chat]')).toBe(chat)
-  expect(node<HTMLInputElement>('[aria-label="Conversation update interval in minutes"]')).toBe(interval)
+  expect(node<HTMLInputElement>('[aria-label="Guest conversation inactivity in minutes"]')).toBe(interval)
   expect(interval.value).toBe('47')
   expect(node<HTMLTextAreaElement>('[aria-label="A question for this Mote"]').value).toBe('Keep this new-discussion question unsent.')
   expect(chatRead.mock.calls.length).toBeGreaterThan(0)
