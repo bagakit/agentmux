@@ -162,37 +162,7 @@ describe('BrowserProfileStore', () => {
     expect(JSON.parse(await readFile(path, 'utf8')).profiles).toHaveLength(3)
   })
 
-  it('deletes a non-default Profile and rejects default or unknown Profile deletion', async () => {
-    const { path, store } = await storeFixture()
-    const [defaultProfile] = await store.listProfiles()
-    const { profile: created } = await store.createProfile('Temporary')
-
-    await store.deleteProfile(created.id)
-
-    expect(await store.listProfiles()).toHaveLength(1)
-    expect(JSON.parse(await readFile(path, 'utf8')).profiles).not.toContainEqual(
-      expect.objectContaining({ id: created.id })
-    )
-    await expect(store.deleteProfile(defaultProfile!.id)).rejects.toThrow('default Browser Profile cannot be deleted')
-    await expect(store.deleteProfile(created.id)).rejects.toThrow(`Unknown Browser Profile: ${created.id}`)
-  })
-
-  it('records a deleted Profile until its site data is confirmed cleared, and never reuses its id', async () => {
-    const { path, store } = await storeFixture()
-    const { profile: created } = await store.createProfile('Temporary')
-
-    await store.deleteProfile(created.id)
-    expect(await store.listPendingDeletes()).toEqual([created.id])
-    expect(JSON.parse(await readFile(path, 'utf8')).pendingDeletes).toEqual([created.id])
-    expect((await store.list()).profiles.map((profile) => profile.id)).not.toContain(created.id)
-
-    const revision = (await store.list()).revision
-    await store.finishDelete(created.id)
-    expect((await store.list()).revision, 'the list did not change, so its revision must not either').toBe(revision)
-    expect(await store.listPendingDeletes()).toEqual([])
-    expect(JSON.parse(await readFile(path, 'utf8'))).not.toHaveProperty('pendingDeletes')
-    await expect(store.finishDelete(created.id)).rejects.toThrow(`Unknown deleted Browser Profile: ${created.id}`)
-  })
+  // Full active-to-archive/restore and tombstone preservation are verified against this original Store in browser-profile-trash.test.ts.
 
   it('refuses metadata that lists a Profile it also records as deleted', async () => {
     const { path, store } = await storeFixture()

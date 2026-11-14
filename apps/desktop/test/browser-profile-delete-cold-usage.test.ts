@@ -19,8 +19,8 @@ function owner(overrides: Partial<BrowserProfileUsagePorts> = {}) {
   const ports = {
     open: vi.fn<BrowserProfileUsagePorts['open']>(() => []),
     readSaved: vi.fn<BrowserProfileUsagePorts['readSaved']>(async () => null),
-    deleteProfile: vi.fn<BrowserProfileUsagePorts['deleteProfile']>(async () => {}),
-    clearPreviews: vi.fn<BrowserProfileUsagePorts['clearPreviews']>(async () => ({ status: 'removed' as const })),
+    nativeUse: vi.fn<BrowserProfileUsagePorts['nativeUse']>(() => ({status:'idle',pages:0,workers:0,requests:0,downloads:0})),
+    deleteProfile: vi.fn<BrowserProfileUsagePorts['deleteProfile']>(async (_id, _approval, _token, assertUnused) => { await assertUnused(); return { revision:1,archive:{} } as never }),
     ...overrides
   }
   return { ports, usage: createBrowserProfileUsage(ports) }
@@ -58,7 +58,7 @@ describe('Profile usage owner', () => {
       { regionId: 'r3', browserId: 'b-saved', data: { profileId: 'profile-work', title: 'Notes' } }
     ])
     const { usage } = owner({ open: () => [{ browserId: 'b-open', workspaceId: null, title: 'Live', url: 'https://live.test/' }], readSaved: async () => ({ graph }) })
-    expect(await usage.usage('profile-work')).toEqual({ complete: true, browsers: [
+    expect(await usage.usage('profile-work')).toEqual({ complete: true, native:{status:'idle',pages:0,workers:0,requests:0,downloads:0}, browsers: [
       { browserId: 'b-open', title: 'Live', url: 'https://live.test/', state: 'open' },
       { browserId: 'b-saved', workspaceId: 'workspace', title: 'Notes', url: 'https://example.test/', state: 'saved' }
     ] })
@@ -68,7 +68,7 @@ describe('Profile usage owner', () => {
     const live = () => [{ browserId: 'b-open', workspaceId: 'workspace', title: '', url: 'https://live.test/' }]
     expect(await owner({ open: live }).usage.usage('profile-work')).toMatchObject({ complete: true, browsers: [{ browserId: 'b-open', state: 'open' }] })
     expect(await owner({ open: live, readSaved: async () => { throw new Error('EIO') } }).usage.usage('profile-work'))
-      .toEqual({ complete: false, browsers: [{ browserId: 'b-open', workspaceId: 'workspace', title: '', url: 'https://live.test/', state: 'open' }] })
+      .toMatchObject({ complete: false, browsers: [{ browserId: 'b-open', workspaceId: 'workspace', title: '', url: 'https://live.test/', state: 'open' }] })
   })
 })
 
@@ -76,16 +76,15 @@ describe('Profile deletion refuses a Profile a Browser still needs', () => {
   it('refuses while a saved Browser that is not loaded names the Profile, and deletes once none does', async () => {
     let graph = graphWith([{ regionId: 'r1', browserId: 'b-work', data: { profileId: 'profile-work' } }])
     const { ports, usage } = owner({ readSaved: async () => ({ graph }) })
-    await expect(usage.deleteProfile('profile-work', approval)).rejects.toMatchObject({
+    await expect(usage.deleteProfile('profile-work', approval, 'exact-token')).rejects.toMatchObject({
       code: 'BROWSER_PROFILE_IN_USE',
       message: expect.stringContaining('still used by the saved Browser "https://example.test/". Open it and switch it to another Profile, or close it'),
       details: { browsers: [{ browserId: 'b-work', workspaceId: 'workspace', title: '', url: 'https://example.test/', state: 'saved' }] }
     })
-    expect(ports.deleteProfile).not.toHaveBeenCalled()
+    expect(ports.deleteProfile).toHaveBeenCalledOnce()
     graph = graphWith([{ regionId: 'r1', browserId: 'b-work', data: { profileId: 'profile-other' } }])
-    await usage.deleteProfile('profile-work', approval)
-    expect(ports.deleteProfile).toHaveBeenCalledExactlyOnceWith('profile-work', approval)
-    expect(ports.clearPreviews).toHaveBeenCalledExactlyOnceWith('profile-work')
+    await usage.deleteProfile('profile-work', approval, 'exact-token')
+    expect(ports.deleteProfile).toHaveBeenLastCalledWith('profile-work', approval, 'exact-token', expect.any(Function))
   })
 
   it('sees a Browser that starts using the Profile while saved Tabs are being read', async () => {
@@ -94,31 +93,30 @@ describe('Profile deletion refuses a Profile a Browser still needs', () => {
       open: () => live ? [{ browserId: 'b-new', workspaceId: null, title: 'New', url: 'https://new.test/' }] : [],
       readSaved: async () => { live = true; return null }
     })
-    await expect(usage.deleteProfile('profile-work', approval)).rejects.toMatchObject({
+    await expect(usage.deleteProfile('profile-work', approval, 'exact-token')).rejects.toMatchObject({
       code: 'BROWSER_PROFILE_IN_USE', message: 'Browser Profile is still used by an open Browser',
       details: { browsers: [{ browserId: 'b-new', title: 'New', url: 'https://new.test/', state: 'open' }] }
     })
-    expect(ports.deleteProfile).not.toHaveBeenCalled()
+    expect(ports.deleteProfile).toHaveBeenCalledOnce()
   })
 
   it('deletes nothing when saved Tabs cannot be read, and keeps the original cause', async () => {
     const { ports, usage } = owner({ readSaved: async () => { throw new Error('EIO') } })
-    await expect(usage.deleteProfile('profile-work', approval)).rejects.toMatchObject({
-      code: 'BROWSER_PROFILE_USAGE_UNKNOWN', message: expect.stringContaining('Nothing was deleted'), cause: expect.objectContaining({ message: 'EIO' })
+    await expect(usage.deleteProfile('profile-work', approval, 'exact-token')).rejects.toMatchObject({
+      code: 'BROWSER_PROFILE_USAGE_UNKNOWN', message: expect.stringContaining('Its original data is kept'), cause: expect.objectContaining({ message: 'EIO' })
     })
-    expect(ports.deleteProfile).not.toHaveBeenCalled()
+    expect(ports.deleteProfile).toHaveBeenCalledOnce()
   })
 
   it('still deletes an unused Profile when no saved Tabs exist yet', async () => {
     const { ports, usage } = owner()
-    await usage.deleteProfile('profile-work', approval)
+    await usage.deleteProfile('profile-work', approval, 'exact-token')
     expect(ports.deleteProfile).toHaveBeenCalledOnce()
   })
 
   it('does not clear previews when the manager refuses the deletion', async () => {
     const refusal = Object.assign(new Error('Browser Profile deletion requires explicit user approval'), { code: 'BROWSER_DESTRUCTIVE_APPROVAL_REQUIRED' })
     const { ports, usage } = owner({ deleteProfile: async () => { throw refusal } })
-    await expect(usage.deleteProfile('profile-work', approval)).rejects.toBe(refusal)
-    expect(ports.clearPreviews).not.toHaveBeenCalled()
+    await expect(usage.deleteProfile('profile-work', approval, 'exact-token')).rejects.toBe(refusal)
   })
 })

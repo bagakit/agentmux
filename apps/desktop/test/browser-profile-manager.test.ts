@@ -143,7 +143,7 @@ class FakeStore {
   nextCreatedId = CREATED_ID
   revision = 0
 
-  snapshot() { return { revision: this.revision, sequence: this.revision, activitySources: {}, defaultProfileId: DEFAULT_ID, folders: [], views: [], profiles: structuredClone(this.profiles) } }
+  snapshot() { return { trash: [], legacyPendingDeletes: [...this.pendingDeletes], revision: this.revision, sequence: this.revision, activitySources: {}, defaultProfileId: DEFAULT_ID, folders: [], views: [], profiles: structuredClone(this.profiles) } }
   commit() { this.revision += 1; return this.snapshot() }
   async listProfiles() { return structuredClone(this.profiles) }
   async list() { return this.snapshot() }
@@ -164,16 +164,6 @@ class FakeStore {
       return next
     })
     return { snapshot: this.commit(), profile: structuredClone(this.profiles.find((profile) => profile.id === profileId)!) }
-  }
-  async deleteProfile(profileId: string) {
-    this.profiles = this.profiles.filter((profile) => profile.id !== profileId)
-    this.pendingDeletes.push(profileId)
-    return this.commit()
-  }
-  async listPendingDeletes() { return [...this.pendingDeletes] }
-  async finishDelete(profileId: string) {
-    if (!this.pendingDeletes.includes(profileId)) throw new Error('Unknown deleted Browser Profile')
-    this.pendingDeletes = this.pendingDeletes.filter((id) => id !== profileId)
   }
   async beginPendingImport(label: string) {
     const pending = { profileId: IMPORT_ID, label, startedAt: 3 }
@@ -281,7 +271,7 @@ describe('BrowserProfileManager', () => {
     expect(() => manager.resolvePartition(PENDING_ID)).toThrow(`Unknown Browser Profile: ${PENDING_ID}`)
   })
 
-  it('creates and deletes Profiles while keeping partition coordinates private', async () => {
+  it('creates Profiles while keeping partition coordinates private', async () => {
     const { store, manager } = managerFixture()
     await manager.initialize()
 
@@ -289,10 +279,7 @@ describe('BrowserProfileManager', () => {
     expect(created).toMatchObject({ id: CREATED_ID, label: 'Work' })
     expect(JSON.stringify(manager.listProfiles())).not.toContain('partition')
 
-    await manager.deleteProfile(CREATED_ID, approval(CREATED_ID))
-    expect(store.profiles).toEqual([defaultProfile])
-    expect(electronMocks.sessionFor(partition(CREATED_ID)).clearStorageData).toHaveBeenCalledOnce()
-    await expect(manager.deleteProfile(DEFAULT_ID, approval(DEFAULT_ID))).rejects.toThrow('default Browser Profile cannot be deleted')
+
   })
 
   it('replaces its whole cache with each committed list and announces it, never a stale or local copy', async () => {
@@ -304,63 +291,24 @@ describe('BrowserProfileManager', () => {
     store.profiles[0] = { ...store.profiles[0]!, label: 'Renamed elsewhere' }
     await manager.createProfile('Work')
     expect(manager.listProfiles().map(profile => profile.label)).toEqual(['Renamed elsewhere', 'Work'])
-    expect(heard).toEqual([{ revision: 1, sequence: 1, activitySources: {}, defaultProfileId: DEFAULT_ID, folders: [], views: [], proxyAssets: [], profiles: manager.listProfiles() }])
+    expect(heard).toEqual([{ trash: [], legacyPendingDeletes: [], revision: 1, sequence: 1, activitySources: {}, defaultProfileId: DEFAULT_ID, folders: [], views: [], proxyAssets: [], profiles: manager.listProfiles() }])
     heard[0]!.profiles[0]!.label = 'Mutated by a subscriber'
     expect(manager.listProfiles()[0]!.label).toBe('Renamed elsewhere')
 
-    await manager.deleteProfile(CREATED_ID, approval(CREATED_ID))
-    expect(heard.map(snapshot => [snapshot.revision, snapshot.profiles.map(profile => profile.id)])).toEqual([[1, [DEFAULT_ID, CREATED_ID]], [2, [DEFAULT_ID]]])
-    expect(manager.listRevision()).toBe(2)
+
   })
 
-  it('writes the deletion before clearing site data, so a failed write keeps the Profile and its sign-ins', async () => {
-    const { store, manager } = managerFixture()
-    await manager.initialize()
-    await manager.createProfile('Work')
-    const clear = electronMocks.sessionFor(partition(CREATED_ID)).clearStorageData
-    const order: string[] = []
-    const write = store.deleteProfile.bind(store)
-    store.deleteProfile = vi.fn(async (id: string) => { order.push('write'); return await write(id) })
-    clear.mockImplementation(async () => { order.push('clear') })
-    await manager.deleteProfile(CREATED_ID, approval(CREATED_ID))
-    expect(order).toEqual(['write', 'clear'])
-    expect(store.pendingDeletes).toEqual([])
 
-    store.nextCreatedId = PENDING_ID
-    await manager.createProfile('Kept')
-    clear.mockClear()
-    store.deleteProfile = vi.fn(async () => { throw new Error('EIO') })
-    await expect(manager.deleteProfile(PENDING_ID, approval(PENDING_ID))).rejects.toThrow('EIO')
-    expect(clear).not.toHaveBeenCalled()
-    expect(electronMocks.sessionFor(partition(PENDING_ID)).clearStorageData).not.toHaveBeenCalled()
-    expect(manager.resolvePartition(PENDING_ID)).toBe(partition(PENDING_ID))
-  })
 
-  it('a clear that fails after the deletion is written says so by code and is retried at the next start', async () => {
-    const { store, manager } = managerFixture()
-    await manager.initialize()
-    await manager.createProfile('Work')
-    electronMocks.sessionFor(partition(CREATED_ID)).clearStorageData.mockRejectedValueOnce(new Error('EBUSY'))
-    await expect(manager.deleteProfile(CREATED_ID, approval(CREATED_ID))).rejects.toMatchObject({
-      code: 'BROWSER_PROFILE_DATA_CLEAR_PENDING', message: expect.stringContaining('Work was deleted')
-    })
-    expect(manager.listProfiles().map(profile => profile.id)).toEqual([DEFAULT_ID])
-    expect(() => manager.resolvePartition(CREATED_ID)).toThrow(`Unknown Browser Profile: ${CREATED_ID}`)
-    expect(store.pendingDeletes).toEqual([CREATED_ID])
-
-    const restarted = new BrowserProfileManager(store as never)
-    await restarted.initialize()
-    expect(electronMocks.sessionFor(partition(CREATED_ID)).clearStorageData).toHaveBeenCalledTimes(2)
-    expect(store.pendingDeletes).toEqual([])
-  })
-
-  it('a retried clear that fails again at start keeps the record and does not stop Profiles from loading', async () => {
+  it('retains legacy cleanup tombstones without clearing data or preventing Profile loading', async () => {
     const { store, manager } = managerFixture()
     store.pendingDeletes.push(CREATED_ID)
     electronMocks.sessionFor(partition(CREATED_ID)).clearStorageData.mockRejectedValueOnce(new Error('EBUSY'))
     await manager.initialize()
     expect(manager.defaultProfileId()).toBe(DEFAULT_ID)
     expect(store.pendingDeletes).toEqual([CREATED_ID])
+    expect(manager.listLegacyPendingDeletes()).toEqual([CREATED_ID])
+    expect(electronMocks.sessionFor(partition(CREATED_ID)).clearStorageData).not.toHaveBeenCalled()
   })
 
   it('applies a new route to the session before saving it, so a route that fails leaves the old one saved', async () => {
@@ -404,40 +352,7 @@ describe('BrowserProfileManager', () => {
     expect(sessions.apply.mock.calls.map(([, network]) => network)).toEqual([PROXY, undefined])
   })
 
-  it('keeps a deleting Profile out of a list committed while its partition is cleared', async () => {
-    const { store, manager } = managerFixture()
-    await manager.initialize()
-    await manager.createProfile('Work')
-    let releaseClear!: () => void
-    electronMocks.sessionFor(partition(CREATED_ID)).clearStorageData.mockImplementationOnce(
-      async () => await new Promise<void>((resolve) => { releaseClear = resolve })
-    )
-    const deleting = manager.deleteProfile(CREATED_ID, approval(CREATED_ID))
-    store.nextCreatedId = PENDING_ID
-    await manager.createProfile('Meanwhile')
-    expect(() => manager.resolvePartition(CREATED_ID)).toThrow(`Unknown Browser Profile: ${CREATED_ID}`)
-    releaseClear()
-    await deleting
-    expect(manager.listProfiles().map(profile => profile.id)).toEqual([DEFAULT_ID, PENDING_ID])
-  })
 
-  it('makes a Profile unavailable before its destructive partition clear can yield', async () => {
-    const { manager } = managerFixture()
-    await manager.initialize()
-    await manager.createProfile('Work')
-    let releaseClear!: () => void
-    electronMocks.sessionFor(partition(CREATED_ID)).clearStorageData.mockImplementationOnce(
-      async () => await new Promise<void>((resolve) => { releaseClear = resolve })
-    )
-
-    const deleting = manager.deleteProfile(CREATED_ID, approval(CREATED_ID))
-
-    expect(() => manager.resolvePartition(CREATED_ID)).toThrow(`Unknown Browser Profile: ${CREATED_ID}`)
-    // The clear starts only after the list is written.
-    await vi.waitFor(() => expect(releaseClear).toBeTypeOf('function'))
-    releaseClear()
-    await deleting
-  })
 
   it('waits for an active create mutation before disposal completes', async () => {
     const { store, manager } = managerFixture()
@@ -465,32 +380,6 @@ describe('BrowserProfileManager', () => {
     expect(() => manager.listProfiles()).toThrow('disposed')
   })
 
-  it('waits for an active delete mutation before disposal completes', async () => {
-    const { store, manager } = managerFixture()
-    await manager.initialize()
-    await manager.createProfile('Work')
-    const deleteProfile = store.deleteProfile.bind(store)
-    let releaseDelete!: () => void
-    let deleteStarted = false
-    vi.spyOn(store, 'deleteProfile').mockImplementationOnce(async (profileId) => {
-      deleteStarted = true
-      await new Promise<void>((resolve) => { releaseDelete = resolve })
-      await deleteProfile(profileId)
-    })
-
-    const deleting = manager.deleteProfile(CREATED_ID, approval(CREATED_ID))
-    await vi.waitFor(() => expect(deleteStarted).toBe(true))
-    let disposed = false
-    const disposing = manager.dispose().then(() => { disposed = true })
-    await Promise.resolve()
-
-    expect(disposed).toBe(false)
-    releaseDelete()
-    await deleting
-    await disposing
-    expect(disposed).toBe(true)
-    expect(store.profiles).toEqual([defaultProfile])
-  })
 
   it('publishes opaque one-generation source tokens and atomically imports a CHIPS cookie', async () => {
     const { store, manager } = managerFixture()

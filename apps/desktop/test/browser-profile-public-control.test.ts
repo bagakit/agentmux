@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { createCipheriv, createDecipheriv } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -37,14 +37,18 @@ async function owners(open: Array<{ profileId: string; browserId: string }> = []
   // Route edits apply to the Profile's session first; this records them, and can refuse one.
   const applied: { profileId: string; network: unknown }[] = []
   const route = { refuse: false }
+  const nativeUse = () => ({ status:'idle' as const,pages:0,workers:0,requests:0,downloads:0 })
+  for (const id of [DEFAULT_ID,WORK_ID]) await mkdir(join(root,'Partitions',id),{recursive:true})
+  const nativeSession = (id:string) => ({storagePath:join(root,'Partitions',id)}) as never
   const profiles = new BrowserProfileManager(new BrowserProfileStore(path), {
+    nativeUse, nativeSession, retainedSession:nativeSession,
     prepare: () => undefined,
     apply: async (profileId: string, network: unknown) => {
       if (route.refuse) throw Object.assign(new Error('The route could not be applied.'), { code: 'BROWSER_PROFILE_NETWORK_UNAVAILABLE' })
       applied.push({ profileId, network })
     },
     observe: () => undefined
-  } as never)
+  } as never, () => root)
   const announced: number[] = []
   profiles.onChange(snapshot => announced.push(snapshot.revision))
   const clearPreviews = vi.fn(async () => ({ status: 'removed' as const }))
@@ -52,8 +56,8 @@ async function owners(open: Array<{ profileId: string; browserId: string }> = []
   const usage = createBrowserProfileUsage({
     open: profileId => open.filter(use => use.profileId === profileId).map(use => ({ browserId: use.browserId, workspaceId: 'w-1', title: 'Board', url: 'https://example.invalid/' })),
     readSaved: savedRead as never,
-    deleteProfile: (profileId, approval) => profiles.deleteProfile(profileId, approval),
-    clearPreviews
+    nativeUse,
+    deleteProfile: (...args) => profiles.deleteProfile(...args)
   })
   const credentialPath = join(root, 'proxy-auth.json')
   const key = Buffer.alloc(32, 7), iv = Buffer.alloc(16, 3)
@@ -76,7 +80,7 @@ const request = (fields: Record<string, unknown>) => parseAgentMuxControlRequest
 // The actor is passed through exactly; an omitted argument means a person, an explicit null means no recorded caller.
 async function call(ports: Awaited<ReturnType<typeof owners>>, fields: Record<string, unknown>, given: AgentMuxNameActor | null = person) {
   const actor = given ?? undefined
-  const parsed = request(fields)
+  const parsed = request(fields.operation==='browser.profile.delete' && fields.expectedRevision===undefined ? {...fields,expectedRevision:ports.profiles.listProfiles().find(p=>p.id===fields.profileId)?.revision ?? 'unknown-token'} : fields)
   if (!isBrowserProfileControlRequest(parsed)) throw new Error('not a Profile request')
   const { operation, ...result } = await executeBrowserProfileControl(parsed, ports, actor)
   // Every answer must pass the public receipt codec that the CLI client applies.
@@ -161,7 +165,7 @@ describe('Public Browser Profile control runs through the Main Profile owners', 
     expect(await call(ports, { operation: 'browser.profile.ls' })).toEqual({ revision: 0, sequence: 0, folders: [], views: [], profiles: ports.profiles.listProfiles() })
     expect(await call(ports, { operation: 'browser.profile.inspect', profileId: WORK_ID })).toEqual({ revision: 0, sequence: 0,
       profile: expect.objectContaining({ id: WORK_ID, label: 'Work', source: expect.objectContaining({ importedCookies: 4 }) }),
-      usage: { complete: true, browsers: [{ browserId: 'b-open', workspaceId: 'w-1', title: 'Board', url: 'https://example.invalid/', state: 'open' }] } })
+      usage: { complete: true, native:{status:'idle',pages:0,workers:0,requests:0,downloads:0}, browsers: [{ browserId: 'b-open', workspaceId: 'w-1', title: 'Board', url: 'https://example.invalid/', state: 'open' }] } })
 
     const created = await call(ports, { operation: 'browser.profile.create', label: 'Release review' })
     expect(created).toMatchObject({ revision: 1, profile: { label: 'Release review', isDefault: false } })
@@ -211,7 +215,7 @@ describe('Public Browser Profile control runs through the Main Profile owners', 
 
   it('reports unreadable saved Tabs as unknown usage and refuses delete without removing anything', async () => {
     const ports = await owners([], async () => { throw new Error('EACCES') })
-    expect((await call(ports, { operation: 'browser.profile.inspect', profileId: WORK_ID })).usage).toEqual({ browsers: [], complete: false })
+    expect((await call(ports, { operation: 'browser.profile.inspect', profileId: WORK_ID })).usage).toMatchObject({ browsers: [], complete: false })
     await expect(call(ports, { operation: 'browser.profile.delete', profileId: WORK_ID })).rejects.toMatchObject({ code: 'BROWSER_PROFILE_USAGE_UNKNOWN' })
     expect(ports.profiles.listProfiles().some(profile => profile.id === WORK_ID)).toBe(true)
   })
@@ -219,9 +223,10 @@ describe('Public Browser Profile control runs through the Main Profile owners', 
   it('deletes for a verified person through the same usage owner and builds the approval itself', async () => {
     const ports = await owners()
     const spy = vi.spyOn(ports.usage, 'deleteProfile')
-    expect(await call(ports, { operation: 'browser.profile.delete', profileId: WORK_ID })).toEqual({ revision: 1, profileId: WORK_ID, deleted: true })
-    expect(spy).toHaveBeenCalledWith(WORK_ID, { kind: 'user-confirmed', operation: 'delete-profile', scope: 'profile', profileId: WORK_ID })
-    expect(ports.clearPreviews).toHaveBeenCalledWith(WORK_ID)
+    const token=ports.profiles.listProfiles().find(p=>p.id===WORK_ID)!.revision
+    expect(await call(ports, { operation: 'browser.profile.delete', profileId: WORK_ID })).toMatchObject({ revision: 1, archive:{profile:{id:WORK_ID,revision:token}} })
+    expect(spy).toHaveBeenCalledWith(WORK_ID, { kind: 'user-confirmed', operation: 'delete-profile', scope: 'profile', profileId: WORK_ID }, token)
+    expect(ports.clearPreviews).not.toHaveBeenCalled()
     expect(ports.profiles.listProfiles().map(profile => profile.id)).toEqual([DEFAULT_ID])
   })
 
