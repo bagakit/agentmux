@@ -113,6 +113,31 @@ export class BrowserInputHistoryStore {
     })
   }
 
+  /** One batch enriches existing inputs only. Older saved memories never replace known document facts. */
+  fillAppearance(scope: BrowserInputHistoryScope, appearances: readonly BrowserInputHistoryAppearance[]): Promise<BrowserInputHistorySnapshot> {
+    return this.enqueue(async () => {
+      const actualScope = scopeSchema.parse(scope), entries = await this.read(actualScope)
+      const patches = new Map<string, BrowserInputHistoryAppearance>()
+      for (const appearance of appearances) {
+        const parsed = appearanceSchema.safeParse(appearance)
+        if (parsed.success) patches.set(parsed.data.url, parsed.data)
+      }
+      const next = entries.map(entry => {
+        const resolved = address(entry.text)
+        if (!resolved) return entry
+        const url = entry.appearance?.url ?? resolved, patch = patches.get(url)
+        if (!patch) return entry
+        const title = entry.appearance?.title || patch.title
+        const faviconDataUrl = entry.appearance?.faviconDataUrl || patch.faviconDataUrl
+        if (!title && !faviconDataUrl) return entry
+        return { ...entry, appearance: { url, title, ...(faviconDataUrl ? { faviconDataUrl } : {}) } }
+      })
+      this.fitAppearance(actualScope, next, entries)
+      if (JSON.stringify(next) !== JSON.stringify(entries)) await this.write(actualScope, next)
+      return { scope: actualScope, entries: next }
+    })
+  }
+
   remove(scope: BrowserInputHistoryScope, text: string): Promise<BrowserInputHistorySnapshot> {
     return this.enqueue(async () => {
       const actualScope = scopeSchema.parse(scope)
@@ -176,7 +201,7 @@ export class BrowserInputHistoryStore {
   }
 
   /** Optional artwork gives way before a single original input does, oldest artwork first. */
-  private fitAppearance(scope: BrowserInputHistoryScope, entries: BrowserInputHistoryEntry[]): number {
+  private fitAppearance(scope: BrowserInputHistoryScope, entries: BrowserInputHistoryEntry[], preserved?: readonly BrowserInputHistoryEntry[]): number {
     // Count the actual encoding once, then subtract only changed entry deltas. The final write validates once.
     let size = Buffer.byteLength(JSON.stringify({ version: 1, scope, entries })) + 1
     const replace = (index: number, next: BrowserInputHistoryEntry) => {
@@ -185,12 +210,14 @@ export class BrowserInputHistoryStore {
     }
     for (let index = entries.length - 1; index >= 0 && size > MAX_BROWSER_INPUT_HISTORY_FILE_BYTES; index--) {
       const entry = entries[index]!
-      if (entry.appearance?.faviconDataUrl) {
+      if (entry.appearance?.faviconDataUrl && !preserved?.[index]?.appearance?.faviconDataUrl) {
         const { faviconDataUrl: _icon, ...appearance } = entry.appearance
         replace(index, { ...entry, appearance })
       }
     }
     for (let index = entries.length - 1; index >= 0 && size > MAX_BROWSER_INPUT_HISTORY_FILE_BYTES; index--) {
+      const original = preserved?.[index]?.appearance
+      if (original) { replace(index, { ...entries[index]!, appearance: original }); continue }
       const { appearance: _appearance, ...entry } = entries[index]!
       replace(index, entry)
     }

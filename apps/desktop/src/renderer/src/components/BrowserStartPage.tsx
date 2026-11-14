@@ -59,7 +59,7 @@ function StartPageImage({ src, kind }: { src: string; kind: 'icon' | 'background
 function StartPageHistory({ historyTarget, revision, limit, onChoose }: { historyTarget: BrowserInputHistoryTarget | null; revision: number; limit: number; onChoose(text: string): void }) {
   const key = historyTarget?.kind === 'browser' ? JSON.stringify(['browser', historyTarget.browserId, historyTarget.profileId])
     : historyTarget ? JSON.stringify(['workspace', historyTarget.workspaceId]) : ''
-  const [loaded, setLoaded] = useState<{ key: string; revision: number; scope: BrowserInputHistoryScope; entries: BrowserInputHistoryEntry[]; previews: Map<string, string> } | null>(null)
+  const [loaded, setLoaded] = useState<{ key: string; revision: number; scope: BrowserInputHistoryScope; entries: BrowserInputHistoryEntry[]; previews: Map<string, string>; warning?: string | undefined } | null>(null)
   const [issue, setIssue] = useState<{ key: string; revision: number; message: string } | null>(null)
   const [attempt, setAttempt] = useState(0)
   const [expanded, setExpanded] = useState(false)
@@ -99,6 +99,8 @@ function StartPageHistory({ historyTarget, revision, limit, onChoose }: { histor
     {failure ? <p className="browser-start-page__notice" role="status">Recent input could not be read: {failure}. You can still browse.
       <button type="button" onClick={() => setAttempt(value => value + 1)}><ThemeActionRefreshIcon size={12} /> Retry history</button></p>
       : !current ? <p className="browser-start-page__notice" role="status">Reading recent input…</p> : null}
+    {!failure && current && loaded.warning ? <p className="browser-start-page__notice" role="status">{loaded.warning}
+      <button type="button" onClick={() => setAttempt(value => value + 1)}><ThemeActionRefreshIcon size={12} /> Retry history</button></p> : null}
     {entries.length && current ? <div id={gridId} className="browser-start-history__grid">{entries.map(entry =>
       <HistoryCard key={entry.text} entry={entry} scope={loaded.scope} browserId={loaded.previews.get(entry.text)} onChoose={onChoose} />
     )}</div> : null}
@@ -109,6 +111,7 @@ function StartPageHistory({ historyTarget, revision, limit, onChoose }: { histor
 
 function HistoryCard({ entry, scope, browserId, onChoose }: { entry: BrowserInputHistoryEntry; scope: BrowserInputHistoryScope; browserId: string | undefined; onChoose(text: string): void }) {
   const label = historyLabel(entry.text), url = label.url
+  const appearance = label.kind === 'address' ? entry.appearance : undefined
   const [preview, setPreview] = useState<BrowserRecoveryPreview | null>(null)
   const [unavailable, setUnavailable] = useState(false)
   useEffect(() => {
@@ -130,7 +133,7 @@ function HistoryCard({ entry, scope, browserId, onChoose }: { entry: BrowserInpu
       {preview ? <><img src={preview.image.dataUrl} alt="" loading="lazy" onError={() => { setPreview(null); setUnavailable(true) }} /><span className="browser-start-history__preview-label">Last viewed</span></>
         : <><span className="browser-start-history__monogram" aria-hidden="true">{label.kind === 'address' ? label.domain.replace(/^www\./, '').slice(0, 1).toUpperCase() : <ThemeActionSearchIcon size={30} />}</span><span className="browser-start-history__domain">{label.domain}</span></>}
     </span>
-    <span className="browser-start-history__details"><strong>{preview?.title || label.title}</strong><span className="browser-start-history__meta"><Icon size={12} aria-hidden="true" /><span>{unavailable ? 'Preview unavailable' : label.kind === 'search' ? 'Search' : label.domain}</span>{validDate ? <time dateTime={date.toISOString()}>{date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</time> : null}</span></span>
+    <span className="browser-start-history__details"><strong>{appearance?.title || preview?.title || label.title}</strong><span className="browser-start-history__meta"><span className="browser-start-history__favicon" aria-hidden="true"><Icon size={12} />{appearance?.faviconDataUrl ? <img key={appearance.faviconDataUrl} src={appearance.faviconDataUrl} alt="" onError={event => { event.currentTarget.hidden = true }} /> : null}</span><span>{unavailable ? 'Preview unavailable' : label.kind === 'search' ? 'Search' : label.domain}</span>{validDate ? <time dateTime={date.toISOString()}>{date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</time> : null}</span></span>
   </button>
 }
 

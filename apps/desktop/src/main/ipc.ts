@@ -271,6 +271,7 @@ import type { BrowserTaskAssetRunInput, BrowserTaskContent, BrowserTaskBatchInpu
 import { verifiedBrowserWorkspace } from './browser-workspace-binding.js'
 import { BrowserProfileManager } from './browser-profile-manager.js'
 import { BrowserInputHistoryStore } from './browser-input-history.js'
+import { listBrowserInputHistoryWithAppearance } from './browser-input-history-memory.js'
 import type { BrowserInputHistoryTarget, BrowserInputHistoryScope } from '../shared/browser-input-history.js'
 import { nativeImageFromBrowserPng } from './browser-image.js'
 import { savePastedImage } from './pasted-image-write.js'
@@ -2397,7 +2398,10 @@ export async function registerIpc(args: {
     ipcResult(() => browserProfiles.importProfile(sourceToken, label)))
   handleWithEvent('browser:listInputHistory', async (event, target: BrowserInputHistoryTarget) => {
     const scope = resolveInputHistoryScope(target)
-    return scope.profileId === null ? { scope, entries: [] } : await browserInputHistory.list(scope)
+    return listBrowserInputHistoryWithAppearance(scope, {
+      history: browserInputHistory, graph: async () => (await spatialState.read())?.graph ?? null,
+      knownScopes: () => browsers.knownRecoveryPreviewScopes(), readPage: actual => browserRecoveryPreviews.readPage(actual)
+    })
   })
   handleWithEvent('browser:recordInputHistory', async (event, target: BrowserInputHistoryTarget, text: string) => {
     const scope = resolveInputHistoryScope(target)

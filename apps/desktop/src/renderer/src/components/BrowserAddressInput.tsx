@@ -69,7 +69,7 @@ export function BrowserAddressInput({ value, onValueChange, onSubmit, onHistoryN
     try {
       const result = await api.browser.listInputHistory(target)
       if (!live(key, token)) return
-      setLoadedHistory({ key, snapshot: result }); setSelected(-1); setCompletion(null); setNotice(null)
+      setLoadedHistory({ key, snapshot: result }); setSelected(-1); setCompletion(null); setNotice(result.warning ?? null)
     } catch (error) {
       if (live(key, token)) setNotice(`Input history could not be read: ${presentError(error)}. Your input and browsing remain available; retry history here.`)
     } finally { if (live(key, token)) setLoading(false) }
@@ -194,13 +194,13 @@ export function BrowserAddressInput({ value, onValueChange, onSubmit, onHistoryN
         }
       }} />
     {open ? <WindowOverlayPortal><div ref={panel} className="browser-address-history" role="dialog" aria-label="Browser input history" style={{ visibility: 'hidden' }}>
-      <header><span>Addresses &amp; searches</span><button type="button" disabled={!history?.entries.length} onClick={() => void remove()}>Clear history</button></header>
+      <header><span>Addresses &amp; searches</span><button type="button" disabled={!history?.entries.length} onPointerDown={event => event.preventDefault()} onClick={() => void remove()}>Clear history</button></header>
       {notice ? <p role="status">{notice}<button type="button" onClick={() => void reload()}>Retry history</button></p> : null}
       {loading ? <p>Reading input history…</p> : null}
       <ul id={id} role="listbox" aria-label="Recent addresses and searches">{entries.map((entry, index) => <li id={`${id}-${index}`} role="option" aria-selected={selected === index} key={entry.text}>
         <button type="button" className="browser-address-history__choose" aria-label={`${entry.source === 'history' ? 'Open recent input' : entry.kind === 'search' ? 'Search' : 'Open'} ${entry.text}`} title={entry.text}
           onPointerDown={event => event.preventDefault()} onClick={() => submit(entry.text)}>
-          <span className="browser-address-history__icon" aria-hidden="true">{entry.faviconDataUrl ? <><BrowserIcon size={15} /><img key={entry.faviconDataUrl} src={entry.faviconDataUrl} alt="" onError={event => { event.currentTarget.hidden = true }} /></> : entry.source === 'history' ? <HistoryIcon size={15} /> : entry.kind === 'search' ? <SearchIcon size={15} /> : <BrowserIcon size={15} />}</span>
+          <span className="browser-address-history__icon" aria-hidden="true">{entry.faviconDataUrl ? <><BrowserIcon size={15} /><img key={entry.faviconDataUrl} src={entry.faviconDataUrl} alt="" onError={event => { event.currentTarget.hidden = true }} /></> : entry.kind === 'search' ? <SearchIcon size={15} /> : entry.kind === 'address' ? <BrowserIcon size={15} /> : <HistoryIcon size={15} />}</span>
           <span className="browser-address-history__text"><span><Matched text={entry.title} query={filtering ? value.trim() : ''} /></span><small><Matched text={entry.detail} query={filtering ? value.trim() : ''} /></small></span>
         </button>
         {entry.source === 'history' ? <button type="button" className="browser-address-history__delete" aria-label={`Remove input ${entry.text}`} onPointerDown={event => event.preventDefault()} onClick={() => void remove(entry.text)}><ThemeActionRemoveIcon size={12} /></button> : <span className="browser-address-history__action-space" />}

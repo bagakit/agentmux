@@ -10,6 +10,8 @@ export type BrowserInputHistoryEntry = { text: string; submittedAt: number; appe
 export type BrowserInputHistorySnapshot = {
   scope: BrowserInputHistoryScope
   entries: BrowserInputHistoryEntry[]
+  /** Optional detail service state for this read; never part of the durable history document. */
+  warning?: string | undefined
 }
 export type BrowserInputHistoryRecord = BrowserInputHistorySnapshot & {
   outcome: 'recorded' | 'empty' | 'url-userinfo' | 'private'

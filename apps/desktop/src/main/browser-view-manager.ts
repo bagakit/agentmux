@@ -624,6 +624,12 @@ export class BrowserViewManager {
       : { browserId: id, workspaceId: entry.workspaceId, mode: 'normal', profileId: entry.storage.profileId }
   }
 
+  /** Exact existing resource owners, including null scopes that must not borrow a stale cold identity. */
+  knownRecoveryPreviewScopes(): ReadonlyMap<string, BrowserRecoveryPreviewScope | null> {
+    return new Map([...new Set([...this.entries.keys(), ...this.releasedEntries.keys()])]
+      .map(id => [id, this.recoveryPreviewScope(id)] as const))
+  }
+
   /** Freeze one existing Main-owned page observation without navigating, restoring or focusing it. */
   inputContext(id: string, hostId: string): import('@agentmux/core/browser-input-context').BrowserInputContext | null {
     const entry = this.entries.get(id)
