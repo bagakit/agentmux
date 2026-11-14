@@ -59,7 +59,8 @@ async function checkDependencyBoundary() {
     graph.set(path, imports)
     for (const dependency of imports) {
       assert.ok(!dependency.startsWith('node:') && !['electron', 'zustand'].includes(dependency), `${relative(root, path)} imports host runtime ${dependency}`)
-      assert.ok(!dependency.includes('desktop') && !dependency.includes('host'), `${relative(root, path)} imports a client implementation`)
+      assert.ok(!/^@agentmux\/(?:desktop|mobile|host|native-desktop|editor-extensions)(?:\/|$)/u.test(dependency),
+        `${relative(root, path)} imports a client implementation: ${dependency}`)
       if (dependency === '@agentmux/core') assert.fail(`${relative(root, path)} loads the Node Core barrel at runtime; use type imports or browser-safe pure public leaves`)
       if (dependency.startsWith('.')) {
         const next = resolve(dirname(path), dependency.split('?')[0]).replace(/\.js$/, '.ts')
