@@ -61,6 +61,10 @@
 
 只读 `browser.input.inspect`／`amux browser input inspect --host-id HOST --operation-id ID` 返回原 reference、typed record 或缺失事实及 `diskDurability`，不返回正文、note、作者声明或投递结论。managed caller 仍经原 Core 鉴权，只能读准确执行 Host 上发给自身 Session 的捕获；知道引用不取得 participant 资格。当前 Host adapter 仅路由明确的 local capture owner 到 local 执行 Host，无准确远端来源时只报告本次引用未确认；普通无引用输入保持可用。定义与接线从[公共能力来源导航](public-capabilities.md#按能力找到定义与消费者)进入；这些合同不代签 Browser 浮窗、框选或安装交付。
 
+## 自动触发的阅读协议
+
+心跳、日历安排和自动继续共用一个自动触发声明，区分 heartbeat、calendar、automation。平台从原生产者生成类型，沿同一输入冻结，保留用户指令原文。原调度、输入回执和 Agent 信箱各自持有执行、投递与作者事实。阅读声明不创建 Agent 来信，不授予控制资格，也不证明工作完成。
+
 ## A2A 容器与简写
 
 `amux` 容器可表达纯平台说明、一封完整 A2A 原信，或一批 A2A 引用。完整原信使用成对 `a2a` 标签；引用使用带固定取信入口的自闭合 `a2a` 标签。批量通知只含引用，不混装多个完整正文；完整原信容器只持有这一封原信。未知节点不取得业务或执行含义。
