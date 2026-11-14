@@ -40,6 +40,18 @@ async function run(args: string[], endpoint: string) {
   })
 }
 describe('original client window public capabilities', () => {
+  it('binds the whole surface independently of spatial IDs and retains the exact return navigation intent', () => {
+    for (const surface of ['survey', 'recall'] as const) {
+      const open = { operationId: 'open-surface', target: { kind: 'surface', surface } }
+      expect(parseAppWindowParams('app.window.open', open)).toEqual(open)
+    }
+    for (const wrong of [{ kind: 'surface', surface: 'focus' }, { kind: 'surface', surface: 'survey', tabId: 'tab' },
+      { ...target, surface: 'survey' }]) expect(() => parseAppWindowParams('app.window.open', { ...input, target: wrong })).toThrow()
+    const close = { operationId: 'close-surface', windowId: 'surface-window', documentGeneration: 'generation', navigate: false }
+    expect(parseAppWindowParams('app.window.return', close)).toEqual(close)
+    expect(() => parseAppWindowParams('app.window.focus', close)).toThrow()
+    expect(() => parseAppWindowParams('app.window.return', { ...close, navigate: 'false' })).toThrow()
+  })
   it('requires exact occurrences and opaque native generations without display or cwd guesses', () => {
     expect(parseAppWindowParams('app.window.open', input)).toEqual(input)
     for (const bad of [{ ...input, cwd: 'display hint' }, { ...input, target: { ...target, regionId: 'self' } },
@@ -123,10 +135,12 @@ describe('original client window public capabilities', () => {
   it('runs typed socket calls and shipping CLI through the same borrowed owner without native-window claims', async () => {
     const calls: Array<{ method: string; input: unknown; actor: unknown }> = []
     let recorded: AppWindowOperation | null = null
+    let presented = original
     const owner: AgentMuxRpcWindowsOwner = { async call(method, value, context) {
       calls.push({ method, input: value, actor: context.actor })
       if (method !== 'app.window.ls') recorded = { ...operation, method, input: value, actor: context.actor } as AppWindowOperation
-      return { windows: [original], recordedOperation: value.operationId ? recorded : null }
+      if (recorded?.method === 'app.window.open') presented = { ...original, target: recorded.input.target }
+      return { windows: [presented], recordedOperation: value.operationId ? recorded : null }
     } }
     const server = new AgentMuxControlServer({ socketPath: join(directory, 'control.sock'), windows: owner, coreClients: () => [] }); servers.push(server); await server.start()
     const client = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: server.path } }), endpoint = 'unix:' + server.path
@@ -145,6 +159,15 @@ describe('original client window public capabilities', () => {
       expect(calls.map(call => call.method)).toEqual(['app.window.open', 'app.window.ls', 'app.window.focus', 'app.window.return', 'app.window.open'])
       expect(calls.every(call => (call.actor as typeof actor).kind === 'user' && !!(call.actor as typeof actor).id)).toBe(true)
       expect(calls.at(-1)?.input).toEqual({ operationId: 'open-cli', target, focus: false })
+      for (const surface of ['survey', 'recall']) {
+        const surfaceOpen = await run(['app', 'window', 'open', '--kind', 'surface', '--surface', surface, '--operation-id', 'open-' + surface], endpoint)
+        expect(surfaceOpen.code, surfaceOpen.stderr + surfaceOpen.stdout).toBe(0)
+        expect(JSON.parse(surfaceOpen.stdout).result.windows[0].target).toEqual({ kind: 'surface', surface })
+        expect(calls.at(-1)?.input).toEqual({ operationId: 'open-' + surface, target: { kind: 'surface', surface } })
+      }
+      const closed = await run(['app', 'window', 'return', '--window', original.windowId, '--document-generation', 'original-document', '--operation-id', 'native-close', '--preserve-navigation'], endpoint)
+      expect(closed.code, closed.stderr + closed.stdout).toBe(0)
+      expect(calls.at(-1)?.input).toEqual({ operationId: 'native-close', windowId: original.windowId, documentGeneration: 'original-document', navigate: false })
       const count = calls.length, invalid = await run(['app', 'window', 'return', '--window', original.windowId, '--document-generation', 'self'], endpoint)
       expect(invalid.code).not.toBe(0); expect(calls).toHaveLength(count)
     } finally { await client.dispose() }

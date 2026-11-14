@@ -113,6 +113,40 @@ function snapshot(f: Awaited<ReturnType<typeof fixture>>): WorkbenchWindowSnapsh
 }
 
 describe('original workface native presentation owner', () => {
+  it('reuses each whole surface, restores both by identity, and closes only the requested surface', async () => {
+    const first = await fixture()
+    const open = (surface: 'survey' | 'recall', operationId: string) =>
+      first.owner.call('app.window.open', { operationId, target: { kind: 'surface', surface } }, context)
+    const survey = (await open('survey', 'survey-original')).recordedOperation!
+    const recall = (await open('recall', 'recall-original')).recordedOperation!
+    expect(survey.state).toBe('confirmed'); expect(recall.state).toBe('confirmed')
+    expect((await open('survey', 'survey-again')).recordedOperation?.windowId).toBe(survey.windowId)
+    expect(first.children).toHaveLength(2)
+    expect(snapshot(first).issue).toBeNull()
+    const occurrence = { displayWorkspaceId: 'workspace', groupId: 'group', tabId: 'selected-tab', regionId: 'selected-page' }
+    const document = { windowId: survey.windowId!, documentGeneration: survey.documentGeneration! }
+    expect(first.owner.presentationWindow(document, occurrence, 'survey')).toBe(first.children[0])
+    expect(() => first.owner.presentationWindow(document, occurrence, 'recall')).toThrow()
+    expect(() => first.owner.presentationWindow(undefined, occurrence, 'survey')).toThrow()
+    expect(first.owner.presentationWindow(undefined, occurrence)).toBe(first.main)
+    await opened(first, 'separate-tab')
+    await first.owner.prepareQuit()
+    const restored = await fixture(first.store)
+    await vi.waitFor(() => expect(snapshot(restored).windows.filter(window => window.presentation === 'visible')).toHaveLength(4))
+    const restoredSurvey = snapshot(restored).windows.find(window => window.windowId === survey.windowId)!
+    expect(restoredSurvey.documentGeneration).not.toBe(survey.documentGeneration)
+    expect(restoredSurvey.target).toEqual({ kind: 'surface', surface: 'survey' })
+    const restoredChild = restored.owner.windowForDocument({ windowId: survey.windowId!, documentGeneration: restoredSurvey.documentGeneration! })
+    restoredChild.close()
+    await vi.waitFor(() => expect(snapshot(restored).windows.some(window => window.windowId === survey.windowId)).toBe(false))
+    const returns = () => restored.main.webContents.send.mock.calls.filter(([channel, request]) => channel === WORKBENCH_WINDOW_REQUEST && request.action === 'return').map(([,request]) => request)
+    expect(returns()).toContainEqual(expect.objectContaining({ windowId: survey.windowId, navigate: false }))
+    const restoredRecall = snapshot(restored).windows.find(window => window.windowId === recall.windowId)!
+    const returned = await restored.owner.call('app.window.return', { operationId: 'return-recall', windowId: recall.windowId!, documentGeneration: restoredRecall.documentGeneration! }, context)
+    expect(returned.recordedOperation?.state).toBe('confirmed')
+    expect(returns()).toContainEqual(expect.objectContaining({ windowId: recall.windowId, navigate: true }))
+    expect((await restored.store.load()).state.windows.map(window => window.target)).toEqual([target])
+  })
   it.each(['applied', 'rejected'] as const)('[window-return-receipt] retains one timed-out handoff and consumes its exact late result: %s', async outcome => {
     const f = await fixture(), identity = await opened(f), accept = f.owner.accept.bind(f.owner)
     let delayed: Parameters<WorkbenchWindows['accept']> | undefined
