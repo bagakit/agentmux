@@ -1,6 +1,6 @@
 import * as Popover from '@agentmux/client-ui/components/Modal'
 import { autoUpdate, computePosition, flip, offset, shift } from '@floating-ui/dom'
-import { useCallback, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { SemanticIcon } from '@agentmux/client-ui/icons'
 import { FOCUS_PROJECT_COLORS, focusProjectPreference, focusProjectTint, type FocusProjectPreference } from '../../../shared/focus-project-preferences'
 import { configValuesEqual } from '../../../shared/config-edit'
@@ -11,13 +11,15 @@ import { DocumentOverlayPortal } from './WindowOverlayHost'
 
 /** Draft stays at its exact original project on a failed save; no workspace or runtime writes. */
 export type FocusDiscussionSlot = { active: boolean; container: HTMLElement | null }
-export function FocusProjectPreferences({ projectKey, name, discussion }: {
-  projectKey?: string; name: string; discussion?: ((state: FocusDiscussionSlot) => ReactNode) | undefined
+export function FocusProjectPreferences({ projectKey, name, discussion, active = true }: {
+  active?: boolean; projectKey?: string; name: string; discussion?: ((state: FocusDiscussionSlot) => ReactNode) | undefined
 }) {
   const projects = useAppStore(state => state.config?.focus?.projects)
   const saved = focusProjectPreference(projectKey ?? '', projects ?? [])
   const subject = projectKey ? 'Project' : 'Container'
   const [open, setOpen] = useState(false), [draft, setDraft] = useState(saved)
+  const effectiveOpen = open && active
+  useEffect(() => { if (!active && open) begin(false) }, [active, open])
   const baseline = useRef<readonly FocusProjectPreference[]>([])
   const [pending, setPending] = useState(false), [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
@@ -30,7 +32,7 @@ export function FocusProjectPreferences({ projectKey, name, discussion }: {
   const attachPanel = useCallback((element: HTMLDivElement | null) => { panel.current = element; setPanelElement(element) }, [])
   useLayoutEffect(() => {
     const anchor = trigger.current, content = panel.current
-    if (!open || !anchor || !content) return
+    if (!effectiveOpen || !anchor || !content) return
     let attached = true
     const update = async () => {
       const result = await computePosition(anchor, content, { strategy: 'fixed', placement: 'bottom-start', middleware: [offset(5), flip(), shift({ padding: 8, crossAxis: true })] })
@@ -38,7 +40,7 @@ export function FocusProjectPreferences({ projectKey, name, discussion }: {
     }
     const stop = autoUpdate(anchor, content, () => { void update() })
     return () => { attached = false; stop() }
-  }, [open, panelElement])
+  }, [effectiveOpen, panelElement])
   function begin(next: boolean) {
     ++generation.current
     if (next) { setDiscussionVisited(true); baseline.current = projects ?? []; setDraft(saved); setError(null); setNotice(null); draftVersion.current = 0 }
@@ -74,8 +76,8 @@ export function FocusProjectPreferences({ projectKey, name, discussion }: {
     catch (cause) { if (generation.current === token) setError(presentError(cause)) }
     finally { inFlight.current = false; setPending(false) }
   }
-  return <><Popover.Root modal={false} open={open} onOpenChange={begin}>
-    <Popover.Trigger asChild><button ref={trigger} type="button" className={`icon-button focus-project-preferences__trigger${open ? ' is-menu-open' : ''}`} aria-label={`${subject} preferences · ${name}`} title={projectKey ? 'Project actions, pin, note and color' : 'Collection actions'}><SemanticIcon name="action.more" size={13} /></button></Popover.Trigger>
+  return <><Popover.Root modal={false} open={effectiveOpen} onOpenChange={begin}>
+    <Popover.Trigger asChild><button ref={trigger} type="button" className={`icon-button focus-project-preferences__trigger${effectiveOpen ? ' is-menu-open' : ''}`} aria-label={`${subject} preferences · ${name}`} title={projectKey ? 'Project actions, pin, note and color' : 'Collection actions'}><SemanticIcon name="action.more" size={13} /></button></Popover.Trigger>
     <DocumentOverlayPortal component={Popover.Portal}><Popover.Content ref={attachPanel} className="focus-project-preferences" data-focus-project-preferences="" aria-describedby={undefined} style={{ position: 'fixed', visibility: 'hidden' }}
       onEscapeKeyDown={() => { escape.current = true }} onCloseAutoFocus={event => { event.preventDefault(); if (escape.current) trigger.current?.focus({ preventScroll: true }); escape.current = false }}>
       <div className="focus-project-preferences__header"><Popover.Title asChild><strong className="focus-project-preferences__name">{name}</strong></Popover.Title>
@@ -88,5 +90,5 @@ export function FocusProjectPreferences({ projectKey, name, discussion }: {
       {notice ? <p role="status">{notice}</p> : null}
       <div className="focus-project-preferences__actions"><button type="button" className="small-button" onClick={() => begin(false)}>Cancel</button>{projectKey ? <button type="button" className="small-button" disabled={pending} onClick={() => void save()} aria-label={`Save ${subject.toLowerCase()} preferences`}>{pending ? 'Saving…' : error ? 'Retry save' : 'Save'}</button> : null}</div>
     </Popover.Content></DocumentOverlayPortal>
-  </Popover.Root>{discussionVisited ? discussion?.({ active: open, container: open ? discussionHost : null }) : null}</>
+  </Popover.Root>{discussionVisited ? discussion?.({ active: effectiveOpen, container: effectiveOpen ? discussionHost : null }) : null}</>
 }

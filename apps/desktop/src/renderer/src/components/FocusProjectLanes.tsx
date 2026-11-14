@@ -227,7 +227,7 @@ export function FocusProjectLanes({ lanes, selectedProjectKey, currentLaneId, re
               {first.recovery ? <span className="focus-project-lanes__recovery">{first.recovery === 'removed' ? 'Worktree removed' : 'Workspace unregistered'}</span> : null}</> : null}
             <FocusProjectActivity at={activityAt} now={now} />
             {resourceMenus ? <><FocusZoneLayoutToggle containerKey={containerKey} name={name} presentation={mode} defaultPresentation={focusZonePresentation(null, 'project', undefined)} />
-              <FocusProjectPreferences projectKey={key} name={name} discussion={renderDiscussion ? state => renderDiscussion(scanLanes[0]!, state) : undefined} /></> : null}
+              <FocusProjectPreferences active={visible} projectKey={key} name={name} discussion={renderDiscussion ? state => renderDiscussion(scanLanes[0]!, state) : undefined} /></> : null}
           </header>
         return <div key={frame.key} className={frame.project ? 'focus-project-frame' : undefined} data-project-group-key={frame.project ? key : undefined}
           data-focus-current={frame.project && currentProject || undefined} data-focus-zone-presentation={resourceMenus || frame.project ? mode : undefined} data-focus-container-key={containerKey ?? undefined}
@@ -274,7 +274,7 @@ export function FocusProjectLanes({ lanes, selectedProjectKey, currentLaneId, re
           {lane.recovery ? <span className="focus-project-lanes__recovery">{lane.recovery === 'removed' ? 'Worktree removed' : 'Workspace unregistered'}</span> : null}
           {lane.collection && resourceMenus ? <><FocusZoneLayoutToggle containerKey={containerKey} name={lane.name} presentation={mode} defaultPresentation={focusZonePresentation(null, 'collection', undefined, authoredTopicPresentation)}
             unavailable="Zone layout needs one confirmed Collection. Original members and their work surfaces remain available." />
-            <FocusProjectPreferences name={lane.name} discussion={renderDiscussion ? state => renderDiscussion(lane, state) : undefined} /></> : null}</>}
+            <FocusProjectPreferences active={visible} name={lane.name} discussion={renderDiscussion ? state => renderDiscussion(lane, state) : undefined} /></> : null}</>}
         </div>
         , compact)}</div>
       </FocusLaneArticle>})}</div>})}
