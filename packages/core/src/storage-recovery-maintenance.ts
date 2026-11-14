@@ -10,10 +10,11 @@ import { AgentMuxStorageRecovery, recoveryDigest, restoreMissingRecoveryFile, ty
 import { legacySessionRecoverySource, semanticRecoverySource, sessionRecoverySource } from './storage-recovery-sources.js'
 import { AgentMuxControlServer } from './public-rpc-server.js'
 import { STORAGE_RECOVERY_METHODS } from './storage-recovery-rpc.js'
-import { readProtectedIdentityFile } from './immutable-identity-file.js'
+import { inspectImmutableIdentity, readProtectedIdentityFile } from './immutable-identity-file.js'
 import { parseOriginalCreationIdentity } from './agent-creation-authority.js'
 import { inspectSemanticRuntimeIdentity, parseSemanticRuntimeIdentity, priorSemanticNamespace,
-  semanticRuntimeAuthority, semanticRuntimeIdentityName, semanticRuntimeIdentityMembers, type SemanticRuntimeLocation } from './semantic-runtime-identity.js'
+  semanticRuntimeAuthority, semanticRuntimeIdentityName, semanticRuntimeIdentityMembers, semanticRuntimeIdentityMaxBytes,
+  type SemanticRuntimeLocation } from './semantic-runtime-identity.js'
 
 export type AgentMuxStorageMaintenanceOptions = {
   stateDirectory: string; storePath: string; recoverySources?: readonly RecoverySource[]
@@ -34,11 +35,10 @@ async function protectedJson(path: string): Promise<Record<string, unknown>> {
 }
 
 const identityUnconfirmed = () => new AgentMuxError('The selected material does not confirm the original Runtime identity.', 'IDENTITY_SOURCE_UNCONFIRMED')
-async function retainedSigner(directory: string) {
-  const originals = (await Promise.all(['agent-creation-identity.json', 'agent-creation-identity.json.original']
-    .map(name => readProtectedIdentityFile(join(directory, name), 16_384)))).filter(bytes => bytes !== null).map(parseOriginalCreationIdentity)
-  if (originals.length === 2 && !isDeepStrictEqual(originals[0], originals[1])) throw identityUnconfirmed()
-  return originals[0]
+function targetUnconfirmed(cause?: unknown) {
+  const error = new AgentMuxError('The existing Runtime identity records could not be confirmed. Their contents were retained.', 'IDENTITY_TARGET_UNCONFIRMED')
+  error.cause = cause
+  return error
 }
 
 async function verifySemanticIdentity(options: SemanticRuntimeLocation, bytes: string, expectedRuntimeId?: string) {
@@ -46,7 +46,8 @@ async function verifySemanticIdentity(options: SemanticRuntimeLocation, bytes: s
   const seed = value.creationIdentity && parseOriginalCreationIdentity(JSON.stringify({
     schema: 'agentmux.agent-creation-authority.v1', ...value.creationIdentity
   }))
-  const witness = await retainedSigner(options.stateDirectory)
+  const witness = await inspectImmutableIdentity(join(options.stateDirectory, 'agent-creation-identity.json'),
+    parseOriginalCreationIdentity, { maxBytes: 16_384 }).catch(cause => { throw targetUnconfirmed(cause) })
   if (value.runtimeId !== (expectedRuntimeId ?? witness?.runtimeId) || witness && (witness.runtimeId !== value.runtimeId ||
     seed && !isDeepStrictEqual(seed, witness)))
     throw identityUnconfirmed()
@@ -59,7 +60,7 @@ function semanticIdentityValidator(options: SemanticRuntimeLocation, namespace: 
     let first: Awaited<ReturnType<typeof verifySemanticIdentity>> | undefined
     for (const member of identities) {
       if (member.target !== join(options.stateDirectory, member.id)) throw identityUnconfirmed()
-      const bytes = await readProtectedIdentityFile(member.file, 16_384)
+      const bytes = await readProtectedIdentityFile(member.file, semanticRuntimeIdentityMaxBytes)
       if (bytes === null || recoveryDigest(bytes) !== member.sha256) throw identityUnconfirmed()
       const identity = await verifySemanticIdentity(options, bytes, namespace)
       if (first && !isDeepStrictEqual(first, identity)) throw identityUnconfirmed()
@@ -126,22 +127,23 @@ export async function openAgentMuxStorageRecovery(options: AgentMuxStorageMainte
   } catch (error) { await lock.close(); throw error }
 }
 
-export type SemanticIdentityRecoveryResult = { state: 'unchanged' | 'restored' | 'deferred' } | { state: 'needs-backup'; code: string }
+export type SemanticIdentityRecoveryResult = { state: 'unchanged' | 'restored' | 'deferred' } | { state: 'needs-backup' | 'blocked'; code: string }
 
 /** Missing identity only. Desktop and headless maintenance use the same storage owner and lease. */
 export async function restoreMissingSemanticIdentity(options: SemanticRuntimeLocation, selectedOriginal?: string): Promise<SemanticIdentityRecoveryResult> {
   if (!isAbsolute(options.stateDirectory) || !isAbsolute(options.storePath) || selectedOriginal !== undefined && !isAbsolute(selectedOriginal))
     throw new AgentMuxError('Recovery requires the exact original configured paths.', 'STORAGE_RECOVERY_INVALID')
-  if (await inspectSemanticRuntimeIdentity(options)) return { state: 'unchanged' }
+  const inspectOriginal = () => inspectSemanticRuntimeIdentity(options).catch(cause => { throw targetUnconfirmed(cause) })
+  if (await inspectOriginal()) return { state: 'unchanged' }
   if (selectedOriginal !== undefined) {
     const lock = await lease(join(options.stateDirectory, 'semantic-owner.lock'))
     try {
-      if (await inspectSemanticRuntimeIdentity(options)) return { state: 'unchanged' }
-      const bytes = await readProtectedIdentityFile(selectedOriginal, 16_384)
+      if (await inspectOriginal()) return { state: 'unchanged' }
+      const bytes = await readProtectedIdentityFile(selectedOriginal, semanticRuntimeIdentityMaxBytes)
       if (bytes === null) throw identityUnconfirmed()
       await verifySemanticIdentity(options, bytes)
       const outcome = await restoreMissingRecoveryFile(selectedOriginal, join(options.stateDirectory, semanticRuntimeIdentityName), recoveryDigest(bytes))
-      if (outcome === 'conflict') throw identityUnconfirmed()
+      if (outcome === 'conflict') throw targetUnconfirmed()
       return { state: 'restored' }
     } finally { await lock.close() }
   }
@@ -155,7 +157,7 @@ export async function restoreMissingSemanticIdentity(options: SemanticRuntimeLoc
     throw error
   }
   try {
-    if (await inspectSemanticRuntimeIdentity(options)) return { state: 'unchanged' }
+    if (await inspectOriginal()) return { state: 'unchanged' }
     const sourceId = 'core.semantic'
     let found = false
     for (const { generationId, manifestHash, coverage } of await owner.recovery.list()) {
@@ -172,7 +174,7 @@ export async function restoreMissingSemanticIdentity(options: SemanticRuntimeLoc
       for (let attempt = 1; prior?.state === 'complete'; attempt++) {
         // A fresh confirmed loss may use the same good source. An unresolved prior
         // operation keeps its own identity and is never bypassed.
-        if (await inspectSemanticRuntimeIdentity(options)) return { state: 'unchanged' }
+        if (await inspectOriginal()) return { state: 'unchanged' }
         operationId = `${operationBase}-${attempt}`
         prior = await inspect(operationId)
       }
@@ -189,7 +191,7 @@ export async function restoreMissingSemanticIdentity(options: SemanticRuntimeLoc
       }
       if (prepared.state === 'unknown' || prepared.state === 'unavailable') return { state: 'needs-backup', code: 'IDENTITY_RECOVERY_UNCONFIRMED' }
       const applied = await owner.recovery.restoreApply(operationId)
-      return applied.state === 'complete' && await inspectSemanticRuntimeIdentity(options)
+      return applied.state === 'complete' && await inspectOriginal()
         ? { state: 'restored' } : { state: 'needs-backup', code: 'IDENTITY_RECOVERY_UNCONFIRMED' }
     }
     return { state: 'needs-backup', code: found ? 'IDENTITY_RECOVERY_UNCONFIRMED' : 'IDENTITY_SOURCE_MISSING' }

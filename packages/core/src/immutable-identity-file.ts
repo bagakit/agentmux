@@ -15,6 +15,22 @@ export async function readProtectedIdentityFile(path: string, maxBytes?: number)
   } catch (error) { if (missing(error)) return null; throw error }
 }
 
+/** Read an immutable identity without publishing or repairing either copy. */
+export async function inspectImmutableIdentity<T>(path: string, parse: (bytes: string) => T,
+  options: { requirePrimary?: boolean; maxBytes?: number } = {}): Promise<T | null> {
+  const read = async (candidate: string) => {
+    const bytes = await readProtectedIdentityFile(candidate, options.maxBytes)
+    return bytes === null ? null : parse(bytes)
+  }
+  const primary = await read(path)
+  if (primary === null) return options.requirePrimary ? null : await read(path + '.original')
+  // Auxiliary custody failures do not invalidate a readable primary.
+  const original = await read(path + '.original').catch(() => null)
+  if (original !== null && !isDeepStrictEqual(primary, original))
+    throw new AgentMuxError('The immutable identity contradicts its original recovery source.', 'IDENTITY_SOURCE_CONFLICT')
+  return primary
+}
+
 /** Publish a complete immutable identity without replacing another writer's original. */
 async function publish(path: string, bytes: string): Promise<void> {
   await mkdir(dirname(path), { recursive: true, mode: 0o700 })

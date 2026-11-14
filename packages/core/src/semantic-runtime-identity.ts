@@ -2,13 +2,14 @@ import { createHash } from 'node:crypto'
 import { basename, dirname, join } from 'node:path'
 import { lstat, readFile, readdir } from 'node:fs/promises'
 import { readCurrentSessionDatabase } from './agent-session-database.js'
-import { isDeepStrictEqual } from 'node:util'
 import { AgentMuxError } from './errors.js'
-import { readProtectedIdentityFile } from './immutable-identity-file.js'
+import { inspectImmutableIdentity } from './immutable-identity-file.js'
 import { defaultAgentMuxHookPort, defaultCtxmuxSocketPath, defaultCtxmuxStateDirectory } from './runtime-paths.js'
 
 export const semanticRuntimeIdentityName = 'semantic-runtime.json'
 export const semanticRuntimeIdentityMembers = [semanticRuntimeIdentityName, `${semanticRuntimeIdentityName}.original`] as const
+// The record contains an ID, an authority digest and at most two short signing keys.
+export const semanticRuntimeIdentityMaxBytes = 16 * 1024
 export type SemanticRuntimeLocation = { stateDirectory: string; storePath: string }
 type CreationIdentity = { runtimeId: string; publicKey: string; privateKey: string }
 type SemanticRuntimeIdentity = {
@@ -33,21 +34,13 @@ export function parseSemanticRuntimeIdentity(bytes: string, authority: string): 
     ...(seed ? { creationIdentity: { runtimeId: seed.runtimeId, publicKey: seed.publicKey, privateKey: seed.privateKey } } : {}) }
 }
 
-/** Reads the same identity a replacement Host must be able to load. */
-export async function inspectSemanticRuntimeIdentity(location: SemanticRuntimeLocation): Promise<string | null> {
+/** A replacement may require the primary so it need not publish one after shutting down the live Host. */
+export async function inspectSemanticRuntimeIdentity(location: SemanticRuntimeLocation,
+  options: { requirePrimary?: boolean } = {}): Promise<string | null> {
   const authority = semanticRuntimeAuthority(location.stateDirectory, location.storePath)
-  const read = async (name: string) => {
-    const bytes = await readProtectedIdentityFile(join(location.stateDirectory, name))
-    return bytes === null ? null : parseSemanticRuntimeIdentity(bytes, authority)
-  }
-  const primary = await read(semanticRuntimeIdentityMembers[0])
-  if (!primary) return (await read(semanticRuntimeIdentityMembers[1]))?.runtimeId ?? null
-
-  // Startup uses the canonical record when only its custody check fails.
-  const original = await read(semanticRuntimeIdentityMembers[1]).catch(() => null)
-  if (original && !isDeepStrictEqual(primary, original))
-    throw new AgentMuxError('The original semantic identity copies disagree.', 'IDENTITY_SOURCE_CONFLICT')
-  return primary.runtimeId
+  const identity = await inspectImmutableIdentity(join(location.stateDirectory, semanticRuntimeIdentityName),
+    bytes => parseSemanticRuntimeIdentity(bytes, authority), { ...options, maxBytes: semanticRuntimeIdentityMaxBytes })
+  return identity?.runtimeId ?? null
 }
 
 export async function retainedSessionRecovery(stateDirectory: string, storePath: string): Promise<boolean> {
