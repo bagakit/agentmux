@@ -80,15 +80,18 @@ class SessionIntents<T> extends Map<string, T> {
 export function createLocalDrafts(storage?: () => Pick<Storage, 'getItem' | 'setItem'>) {
   const drafts = new Map<string, string>(), moteTextSources = new Map<string, string>(), attempts = new Map<string, PromptAttempt>(), responses = new SessionIntents<ResponseAttempt>(), questions = new SessionIntents<MobileQuestionReplyAttempt>(), questionDrafts = new Map<string, AgentSessionHistoryQuestionAnswer[]>()
   const owner = getDeviceWorkface(storage)
-  const state = { drafts, moteTextSources, attempts, responses, questions, questionDrafts, conflicts: [] as ConversationConflict[], canSave: true, notice: null as string | null, save, exportBackup, unstoredDraftEdits, recordChanged: false,
+  const state = { drafts, moteTextSources, attempts, responses, questions, questionDrafts, conflicts: [] as ConversationConflict[], canSave: true, notice: null as string | null, save, saveText, exportBackup, unstoredDraftEdits, recordChanged: false,
     get saveIssue() { return owner.snapshot().issue },
-    get hasUnconfirmedSave() { return saveRevision !== durableRevision } }
+    get hasUnconfirmedSave() { return pendingSaves > 0 || saveRevision !== durableRevision } }
   let baseline: DraftRecord = { version: 1, drafts: [], attempts: [], responses: [] }
   let durableBaseline = baseline
   const snapshot = owner.snapshot()
   let originalRecord: DeviceWorkface = snapshot.record
   let recordId: string | null = null
-  let saveRevision = 0, durableRevision = 0
+  let saveRevision = 0, durableRevision = 0, pendingSaves = 0
+  // Edit identity only: a late whole-save callback cannot replace newer text,
+  // including an edit back to the same string. Durable data remains in the original baselines.
+  const textEdits = new Map<string, { bucket: 'drafts' | 'moteTextSources'; key: string; intent: object; acknowledged: number }>()
   try {
     if (snapshot.issue) {
       state.canSave = false
@@ -155,6 +158,7 @@ export function createLocalDrafts(storage?: () => Pick<Storage, 'getItem' | 'set
   }
   function save(): Promise<boolean> {
     const captured = serialize(), revision = ++saveRevision, expectedRecordId = recordId
+    const capturedTextEdits = new Map([...textEdits].map(([key, value]) => [key, value.intent]))
     const edits: ConversationEdit[] = []
     for (const bucket of ['drafts', 'attempts', 'responses', 'questions', 'questionDrafts', 'moteTextSources'] as ConversationBucket[]) {
       const before = new Map<string, ConversationValue>(baseline[bucket] ?? []), after = new Map<string, ConversationValue>(captured[bucket] ?? [])
@@ -165,12 +169,7 @@ export function createLocalDrafts(storage?: () => Pick<Storage, 'getItem' | 'set
     baseline = captured
     let operation: Promise<ConversationCommit>
     try { operation = owner.editConversation(edits, recordId) } catch (error) { operation = Promise.reject(error) }
-    return operation.then(committed => {
-      if (committed.recordId !== expectedRecordId || owner.recordIdentity() !== expectedRecordId) {
-        throw new DeviceWorkfaceRecordChangedError('这台手机上的工作面已被替换，这次保存结果没有写入。')
-      }
-      const saved = committed.conversation
-      state.conflicts = saved.conflicts ?? []
+    return acknowledge(operation, revision, expectedRecordId, saved => {
       // Do not erase edits made while saving. Replace a conflicted attempt object,
       // so its pending callback cannot mistake it for the canonical original.
       const current = serialize()
@@ -178,6 +177,11 @@ export function createLocalDrafts(storage?: () => Pick<Storage, 'getItem' | 'set
         const before = new Map<string, ConversationValue>(captured[bucket] ?? []), now = new Map<string, ConversationValue>(current[bucket] ?? [])
         const disk = new Map<string, ConversationValue>(saved[bucket] ?? [])
         for (const key of new Set([...before.keys(), ...disk.keys()])) {
+          if (bucket === 'drafts' || bucket === 'moteTextSources') {
+            const text = textEdits.get(bucket + ':' + key)
+            if (text && text.acknowledged <= revision) text.acknowledged = revision
+            if (text?.intent !== capturedTextEdits.get(bucket + ':' + key)) continue
+          }
           if (JSON.stringify(now.get(key)) !== JSON.stringify(before.get(key))) continue
           const value = disk.get(key)
           if (bucket === 'drafts') { if (value === undefined) drafts.delete(key); else drafts.set(key, value as string) }
@@ -200,11 +204,64 @@ export function createLocalDrafts(storage?: () => Pick<Storage, 'getItem' | 'set
           }
         }
       }
-      durableBaseline = saved
-      if (revision === saveRevision) { baseline = saved; durableRevision = revision }
-      state.canSave = true
-      state.recordChanged = false
-      state.notice = state.conflicts.length ? '另一个页面更新了同一条记录，两份正文都已保留。请核对保留的内容，不会自动重发。' : null
+      let durable = saved
+      for (const text of textEdits.values()) if (text.acknowledged > revision) {
+        durable = withText(durable, text.bucket, text.key, durableBaseline[text.bucket]?.find(([key]) => key === text.key)?.[1])
+      }
+      durableBaseline = durable
+      if (revision === saveRevision) baseline = durable
+    })
+  }
+  /** A text edit owns these exact keys, not a snapshot of other input intents. */
+  function saveText(key: string, expected: string | undefined, source?: { key: string; expected: string | undefined; next: string }): Promise<boolean> {
+    const revision = ++saveRevision, expectedRecordId = recordId, token = {}
+    const edits = [{ bucket: 'drafts' as const, key, expected, next: drafts.get(key) },
+      ...(source ? [{ bucket: 'moteTextSources' as const, ...source }] : [])]
+    for (const edit of edits) {
+      const address = edit.bucket + ':' + edit.key, previous = textEdits.get(address)
+      if (previous) previous.intent = token
+      else textEdits.set(address, { bucket: edit.bucket, key: edit.key, intent: token, acknowledged: 0 })
+    }
+    let operation: Promise<ConversationCommit>
+    try { operation = owner.editConversation(edits, recordId) } catch (error) { operation = Promise.reject(error) }
+    return acknowledge(operation, revision, expectedRecordId, saved => {
+      for (const edit of edits) {
+        const values = edit.bucket === 'drafts' ? drafts : moteTextSources
+        const text = textEdits.get(edit.bucket + ':' + edit.key)!
+        if (text.acknowledged > revision) continue
+        const value = saved[edit.bucket]?.find(([key]) => key === edit.key)?.[1]
+        text.acknowledged = revision
+        baseline = withText(baseline, edit.bucket, edit.key, value)
+        durableBaseline = withText(durableBaseline, edit.bucket, edit.key, value)
+        if (text.intent !== token || values.get(edit.key) !== edit.next) continue
+        if (value === undefined) values.delete(edit.key); else values.set(edit.key, value)
+      }
+      // Only the acknowledged text fields advance; other input intents still
+      // require the original complete save before an explicit send.
+    })
+  }
+  function withText(record: DraftRecord, bucket: 'drafts' | 'moteTextSources', key: string, value: string | undefined): DraftRecord {
+    if (record[bucket]?.find(([id]) => id === key)?.[1] === value) return record
+    const others = (record[bucket] ?? []).filter(([id]) => id !== key)
+    return { ...record, [bucket]: value === undefined ? others : [...others, [key, value]] }
+  }
+  function acknowledge(operation: Promise<ConversationCommit>, revision: number, expectedRecordId: string | null,
+    adopt: (saved: DraftRecord) => void): Promise<boolean> {
+    pendingSaves++
+    return operation.then(committed => {
+      if (committed.recordId !== expectedRecordId || owner.recordIdentity() !== expectedRecordId) {
+        throw new DeviceWorkfaceRecordChangedError('这台手机上的工作面已被替换，这次保存结果没有写入。')
+      }
+      const saved = committed.conversation
+      const currentReceipt = revision >= durableRevision
+      adopt(saved)
+      if (currentReceipt) state.conflicts = saved.conflicts ?? []
+      durableRevision = Math.max(durableRevision, revision)
+      if (revision === saveRevision) {
+        state.canSave = true
+        state.recordChanged = false
+        state.notice = state.conflicts.length ? '另一个页面更新了同一条记录，两份正文都已保留。请核对保留的内容，不会自动重发。' : null
+      }
       return true
     }).catch(error => {
       const issue = owner.snapshot().issue
@@ -213,6 +270,8 @@ export function createLocalDrafts(storage?: () => Pick<Storage, 'getItem' | 'set
       state.canSave = !state.recordChanged && owner.canRetrySave()
       state.notice = error instanceof DeviceWorkfaceRecordChangedError ? error.message : issue ?? '草稿暂时存不到这台手机上，先前记录仍保留。可以继续编辑和发送，但新草稿只留在当前页面。请恢复设备存储后重试保存。'
       return !(error instanceof DeviceWorkfaceRecordChangedError)
+    }).finally(() => {
+      if (--pendingSaves === 0) textEdits.clear()
     })
   }
   return state

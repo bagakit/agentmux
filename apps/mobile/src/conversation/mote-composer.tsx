@@ -23,7 +23,7 @@ export const mobileMoteTextScope = (target: MotePreferencesTarget) => deriveObje
 
 export type MobileTextDraft = {
   key: string; recordId: string | null; local: MobileLocalDrafts; edits: { current: number }; token: object
-  notify(): void; isCurrent(): boolean; bind(): void
+  notify(): void; isCurrent(): boolean; bind(): { key: string; expected: string | undefined; next: string }
 }
 type Binding = { ownerKey: string; sourceKey: string; text: MobileTextDraft; sourceCurrent(key: string): boolean }
 const Context = createContext<Binding | null>(null)
@@ -52,11 +52,14 @@ export function MobileMoteComposer({ client, target, enabled, active, sourceKey,
   const text = useMemo<MobileTextDraft | null>(() => {
     if (!target) return null
     const recordId = device.recordIdentity(), scope = mobileMoteTextScope(target)
-    const key = local.moteTextSources.get(scope) ?? mobileMoteStartDraftKey(client, target)
+    const originalBinding = local.moteTextSources.get(scope), key = originalBinding ?? mobileMoteStartDraftKey(client, target)
     const originalHost = JSON.stringify(device.snapshotIdentity().host ?? null)
     let runtimeId = client?.runtimeOwnerIdentity?.()?.runtimeId ?? null
     return { key, recordId, local, edits: { current: 0 }, token: {}, notify: () => redraw(value => value + 1),
-      bind() { if (!local.moteTextSources.has(scope)) local.moteTextSources.set(scope, key) },
+      bind() {
+        if (!local.moteTextSources.has(scope)) local.moteTextSources.set(scope, key)
+        return { key: scope, expected: originalBinding, next: key }
+      },
       isCurrent() {
         const now = current.current, runtime = now.client?.runtimeOwnerIdentity?.()?.runtimeId ?? null
         if (!runtimeId && JSON.stringify(device.snapshotIdentity().host ?? null) !== originalHost) return false
@@ -71,9 +74,10 @@ export function MobileMoteComposer({ client, target, enabled, active, sourceKey,
   const sourceCurrent = (key: string) => current.current.enabled && current.current.active && current.current.sourceKey === key && text.isCurrent()
   const draft = text.local.drafts.get(text.key) ?? ''
   const change = (value: string) => {
-    if (value !== text.local.drafts.get(text.key)) { text.bind(); text.edits.current++ }
+    const expected = text.local.drafts.get(text.key), binding = value !== expected ? text.bind() : undefined
+    if (value !== expected) text.edits.current++
     text.local.drafts.set(text.key, value); text.notify()
-    void text.local.save().then(text.notify)
+    void text.local.saveText(text.key, expected, binding).then(text.notify)
   }
   const selectedSource = enabled && text.isCurrent() ? sourceKey : 'unconfirmed-original-device'
   return <Context.Provider value={enabled ? { ownerKey, sourceKey: selectedSource, text, sourceCurrent } : null}>

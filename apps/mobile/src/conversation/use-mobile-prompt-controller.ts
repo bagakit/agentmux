@@ -172,12 +172,14 @@ export function useMobilePromptController({ local, textDraft, isTextTargetCurren
   }
   const setDraft = (value: string, key = draftKey) => {
     const map = key === draftKey ? textDrafts : drafts.current, textKey = key === draftKey ? textDraftKey : key
-    if (key === draftKey && value !== map.get(textKey)) { textDraft?.bind(); draftEdits.current++ }
+    const expected = map.get(textKey), binding = key === draftKey && value !== expected ? textDraft?.bind() : undefined
+    if (key === draftKey && value !== expected) draftEdits.current++
     const occupied = Boolean(map.get(textKey)?.trim())
     map.set(textKey, value); if (key === draftKey) textDraft?.notify()
     if (key === draftKey && value.trim() && !occupied) pauseForExplicitInput()
     if (key === draftKey && !value.trim()) automaticPause.current = null
-    void local.save().then(() => { if (mounted.current) redraw(value => value + 1) }); redraw(value => value + 1)
+    const textOwner = key === draftKey ? textDraft?.local ?? local : local
+    void textOwner.saveText(textKey, expected, binding).then(() => { if (mounted.current) redraw(value => value + 1) }); redraw(value => value + 1)
   }
   const observedEdits = useRef(draftEdits.current)
   useEffect(() => {
