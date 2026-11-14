@@ -20,6 +20,7 @@ import { workbenchProjectionSlotId, workbenchRegionProjectionSlotId, type Workbe
 import type { WorkbenchViewTargets } from '../src/renderer/src/lib/workbench-presentation'
 import { api } from '../src/renderer/src/lib/api'
 import { agentBookmarks } from '../src/renderer/src/lib/agent-bookmarks'
+import { restoreAgentFocus } from '../src/renderer/src/lib/agent-focus'
 import { agentInformationPreview } from '../src/renderer/src/lib/agent-information-preview'
 import { useAppStore } from '../src/renderer/src/store'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
@@ -562,4 +563,78 @@ it('an original missing Session opens the common parked stage and rechecks the s
   expect((await f.b.spatial.read())!.graph).toEqual(originalSpatial!.graph)
   expect((await f.d.core.readAgentSession(SID))!.run).toEqual(originalRun)
   for (const effect of sideEffects) expect(effect).not.toHaveBeenCalled()
+})
+
+
+async function savedSourceVisit(f: Awaited<ReturnType<typeof fixture>>) {
+  await f.settle(2)
+  await vi.waitFor(() => expect(cardWith('真正远端的独立任务').querySelector('.focus-context__recap')?.textContent).toContain(foreignRecap))
+  const remote = cardWith('真正远端的独立任务'), contextId = remote.dataset.sessionId!
+  await act(async () => remote.click())
+  const saved = useAppStore.persist.getOptions().partialize!(useAppStore.getState())
+  const restored = restoreAgentFocus(JSON.parse(JSON.stringify(saved.agentFocus)))
+  expect(restored.execution.history[0]?.identity).toMatchObject({ name: '真正远端的独立任务', source: { runtimeId: f.d.owner.runtimeId, agentSessionId: SID } })
+  await dom.render(null)
+  return { contextId, restored }
+}
+function unavailableOriginalSourceReaders() {
+  const originalCall = vi.mocked(api.spaceMounts.call).getMockImplementation()!
+  vi.mocked(api.spaceMounts.call).mockImplementation((method, input, signal) => {
+    if (method === 'memberNameInspect') return Promise.reject(Error('The original name reader is unavailable.'))
+    return originalCall(method, input as never, signal)
+  })
+  vi.mocked(api.spaceMounts.reading).mockRejectedValue(Error('The original conversation reader is unavailable.'))
+  vi.mocked(api.spaceMounts.member).mockRejectedValue(Error('The original Native observation is unavailable.'))
+}
+
+it('a restored exact Source visit keeps its original name while the original readers are unavailable', async () => {
+  const f = await fixture({ foreign: true }), { contextId, restored } = await savedSourceVisit(f)
+  const effects = [f.b, f.d].flatMap(source => (['createAgent', 'resumeAgent', 'restartAgent', 'reopenAgent', 'writeAgent', 'pasteAgent', 'submitAgentPrompt'] as const).map(method => vi.spyOn(source.core, method)))
+  unavailableOriginalSourceReaders()
+  await act(async () => useAppStore.setState({ agentFocus: restored }))
+  await dom.render(<MainFocusFixture navigate={f.navigate} />); await f.settle(2)
+  await vi.waitFor(() => expect(cards().find(card => card.dataset.sessionId === contextId)?.textContent).toContain('The original name reader is unavailable.'))
+  const retained = cards().find(card => card.dataset.sessionId === contextId)!
+  expect(retained.querySelector('strong')?.textContent, 'The existing persisted exact Runtime/SID visit is a display source even before the original name can be read again.').toBe('真正远端的独立任务')
+  expect(retained.textContent).not.toContain(localName)
+  expect(retained.textContent).not.toContain(localRecap)
+  expect(retained.querySelector('.focus-context__recap')).toBeNull()
+  expect(useAppStore.getState().agentFocus).toEqual(restored)
+  expect((await f.owner.core.readAgentSession(SID))!.run).toEqual(f.session.run)
+  expect(useAppStore.getState().agentComposerDrafts[SID]).toBe('Keep this original local draft')
+  for (const effect of effects) expect(effect).not.toHaveBeenCalled()
+})
+
+it.each(['another-runtime', null] as const)('a saved same-SID visit with Runtime %s cannot name the current original Source', async runtimeId => {
+  const f = await fixture({ foreign: true }), { contextId, restored } = await savedSourceVisit(f)
+  const identity = restored.execution.history[0]!.identity!
+  restored.execution.history[0] = { ...restored.execution.history[0]!, identity: { ...identity, source: { runtimeId, agentSessionId: SID } } }
+  unavailableOriginalSourceReaders()
+  await act(async () => useAppStore.setState({ agentFocus: restored }))
+  await dom.render(<MainFocusFixture navigate={f.navigate} />); await f.settle(2)
+  await vi.waitFor(() => expect(cards().find(card => card.dataset.sessionId === contextId)?.textContent).toContain('The original name reader is unavailable.'))
+  const remote = cards().find(card => card.dataset.sessionId === contextId)!
+  expect(remote.querySelector('strong')?.textContent).toBe(`Agent · ${SID}`)
+  expect(remote.textContent).not.toContain('真正远端的独立任务')
+  expect(remote.textContent).not.toContain(localName)
+  expect(remote.textContent).not.toContain(localRecap)
+})
+
+it('a fresh original name reply supersedes the restored visit name', async () => {
+  const f = await fixture({ foreign: true }), { contextId, restored } = await savedSourceVisit(f)
+  await f.main.api.call('memberNameChange', { hostId: f.target.hostId, reference: f.reference, name: { object: 'agent', target: { reference: f.reference, regionId: f.admitted.address.regionId, runtimeId: f.d.owner.runtimeId, agentSessionId: SID, expectedAdmission: { kind: 'creation', operationId: 'original-source-creation' } }, change: { kind: 'rename', operationId: 'updated-source-name', name: '原端已确认的新名称', expectedNameRevision: 1, source: 'manual' } } })
+  await act(async () => useAppStore.setState({ agentFocus: restored }))
+  await dom.render(<MainFocusFixture navigate={f.navigate} />); await f.settle(2)
+  await vi.waitFor(() => expect(cards().find(card => card.dataset.sessionId === contextId)?.querySelector('strong')?.textContent).toBe('原端已确认的新名称'))
+  expect(restored.execution.history[0]!.identity!.name).toBe('真正远端的独立任务')
+})
+
+it('an explicit original name clear does not resurrect the restored manual visit name', async () => {
+  const f = await fixture({ foreign: true }), { contextId, restored } = await savedSourceVisit(f)
+  await f.main.api.call('memberNameChange', { hostId: f.target.hostId, reference: f.reference, name: { object: 'agent', target: { reference: f.reference, regionId: f.admitted.address.regionId, runtimeId: f.d.owner.runtimeId, agentSessionId: SID, expectedAdmission: { kind: 'creation', operationId: 'original-source-creation' } }, change: { kind: 'rename', operationId: 'clear-source-name', name: null, expectedNameRevision: 1, source: 'manual' } } })
+  await act(async () => useAppStore.setState({ agentFocus: restored }))
+  await dom.render(<MainFocusFixture navigate={f.navigate} />); await f.settle(2)
+  await vi.waitFor(() => expect(cards().find(card => card.dataset.sessionId === contextId)?.querySelector('strong')?.textContent).toContain('原远端自己的输入'))
+  expect(cards().find(card => card.dataset.sessionId === contextId)?.querySelector('strong')?.textContent).not.toBe('真正远端的独立任务')
+  expect(restored.execution.history[0]!.identity!.name).toBe('真正远端的独立任务')
 })
