@@ -56,6 +56,18 @@ Read only the matching local help:
   --clear-folder. Legacy deletion tombstones have no complete recoverable record and
   remain separate unconfirmed cleanup facts. After a lost recycle/restore receipt, read
   these original identities first; do not automatically replay the write.
+  Recycled entries have no automatic expiry unless the person/device approves one with
+  `profile trash retention --archive ID --expected-revision TOKEN --purge-id ID
+  --delete-after TIMESTAMP` (future Unix milliseconds); `--keep` retains it indefinitely.
+  `profile trash purge --archive ID --expected-revision TOKEN --purge-id ID` separately
+  approves permanent removal of that exact entry. Preserve the original purge ID and read
+  `profile trash inspect --purge-id ID` after an unknown reply; inspection never repeats deletion.
+  The original Store retains progress before cleanup. An admitted native Session cannot be
+  disposed, so its cleanup waits for a later App process. That process must still confirm its
+  exclusive original storage root, no native admission and complete cold/native usage facts.
+  A verified whole safety copy is confirmed before removing original files. Copy or partial
+  cleanup failure retains a recovery source; an uncertain final erase remains unknown.
+  Metadata/partition removal and original credential/permission-owner cleanup are distinct receipts.
   A person or device can set a proxy sign-in with browser profile proxy-sign-in set
   --profile ID --input FILE|-; the JSON contains only username and password. Never put
   a password in command arguments. Managed Agents cannot set or clear sign-ins. The
