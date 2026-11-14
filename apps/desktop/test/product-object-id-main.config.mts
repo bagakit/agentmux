@@ -18,7 +18,7 @@ const mutations: Record<string, { file: string; before: string; after: string; t
   'old-path': { file: 'browser-result-artifact.ts', before: " || typeof value === 'string' && LEGACY_ID.test(value)", after: '', test: 'browser-result-artifact.test.ts' },
   'unsafe-path': { file: 'browser-result-artifact.ts', before: 'isObjectId(value) || ', after: "typeof value === 'string' || ", test: 'browser-result-artifact.test.ts' },
   'task-owner': { file: 'browser-task-assets.ts', before: 'options.id ?? mintObjectId', after: "options.id ?? (() => '11111111-1111-4111-8111-111111111111')", test: 'product-object-id-main.test.ts' },
-  'device-owner': { file: '../../../host/src/device-authority.ts', before: 'hostId: mintObjectId()', after: "hostId: '11111111-1111-4111-8111-111111111111'", test: 'product-object-id-main.test.ts' },
+  'device-owner': { file: '../../../../packages/core/src/device-authority.ts', before: 'hostId: mintObjectId()', after: "hostId: '11111111-1111-4111-8111-111111111111'", test: 'product-object-id-main.test.ts' },
   'upload-collision': { file: 'browser-uploads.ts', before: "if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error", after: 'throw error', test: 'browser-uploads.test.ts' }
 }
 const mutation = process.env.MAIN_ID_MUTATION ? mutations[process.env.MAIN_ID_MUTATION] : undefined
@@ -28,7 +28,7 @@ export default defineConfig({
   define: { __AGENTMUX_WEB_PREVIEW__: 'true' },
   plugins: [{ name: 'main-identity-production-source', enforce: 'pre', transform(source, id) {
     const clean = id.split('?')[0]!
-    if (!clean.includes('/apps/desktop/src/main/') && !clean.endsWith('/apps/host/src/device-authority.ts')) return
+    if (!clean.includes('/apps/desktop/src/main/') && !clean.endsWith('/packages/core/src/device-authority.ts')) return
     let code = source
     if (mutation && clean === sourcePath(mutation.file)) {
       if (!code.includes(mutation.before)) throw new Error('Mutation failed to load its actual target')

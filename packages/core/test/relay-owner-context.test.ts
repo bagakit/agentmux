@@ -9,8 +9,8 @@ import { connectRelayHostedClient } from '../src/relay-hosted.js'
 import type { AgentMuxRuntimeOwnerIdentity } from '../src/hosted-client-contract.js'
 import { createConnectionServices } from '../../connectors/src/connection-services.js'
 import { createCredentialAdministration } from '../../../apps/host/src/credential-administration.js'
-import { DeviceAuthority } from '../../../apps/host/src/device-authority.js'
-import { createDeviceAdministration } from '../../../apps/host/src/device-administration.js'
+import { DeviceAuthority } from '../src/device-access.js'
+import { createDeviceAdministration } from '../src/device-access.js'
 import { rpcOwnerFixture } from './helpers/public-rpc-owner.js'
 
 // Real Core registry/journal, public dispatcher, ConnectionServices database,

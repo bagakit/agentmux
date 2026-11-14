@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, expect, it } from 'vitest'
 import { exportPublicKey, generateKeyPair } from '@agentmux/relay/e2ee'
-import { DeviceAuthority } from '../src/device-authority.js'
+import { DeviceAuthority } from '@agentmux/core/device-access'
 
 const roots: string[] = []
 afterEach(async () => { for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true }) })

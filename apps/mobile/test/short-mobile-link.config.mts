@@ -11,7 +11,7 @@ const variants = {
 } as const
 if (mutation && !Object.hasOwn(variants, mutation)) throw Error('Unknown short link mutation')
 const variant = mutation ? variants[mutation as keyof typeof variants] : undefined
-const files = new Set(['packages/relay/src/connection-offer.ts','packages/core/src/public-rpc-device.ts','packages/core/src/public-rpc-client.ts','packages/core/src/mobile-web-codec.ts','apps/host/src/host.ts','apps/host/src/device-administration.ts','apps/host/src/mobile-assets-owner.ts','apps/mobile/src/main.tsx','apps/mobile/src/connection/MobileConnectionRoot.tsx','apps/mobile/src/mobile-web/page-identity.ts','apps/mobile/test/short-connection-entry.test.tsx','apps/host/test/short-mobile-http.test.ts','apps/host/test/mobile-link.test.ts'])
+const files = new Set(['packages/relay/src/connection-offer.ts','packages/core/src/public-rpc-device.ts','packages/core/src/public-rpc-client.ts','packages/core/src/mobile-web-codec.ts','apps/host/src/host.ts','packages/core/src/device-administration.ts','apps/host/src/mobile-assets-owner.ts','apps/mobile/src/main.tsx','apps/mobile/src/connection/MobileConnectionRoot.tsx','apps/mobile/src/mobile-web/page-identity.ts','apps/mobile/test/short-connection-entry.test.tsx','apps/host/test/short-mobile-http.test.ts','apps/host/test/mobile-link.test.ts'])
 const sha = (value: string) => createHash('sha256').update(value).digest('hex')
 export default defineConfig({ ...base, define: { ...base.define, __AGENTMUX_MOBILE_BUILD_ID__: JSON.stringify('short-page-build') },
   plugins: [...base.plugins ?? [], { name: 'executed-short-mobile-link', enforce: 'pre', transform(original, id) {

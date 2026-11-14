@@ -11,7 +11,7 @@ const sha=value=>createHash('sha256').update(value).digest('hex'), hashes=async 
 const owned=[
   'packages/relay/src/connection-offer.ts','packages/relay/test/connection-offer.test.ts',
   'packages/core/src/agentmux.ts','packages/core/src/public-rpc-client.ts','packages/core/src/public-rpc-device.ts','packages/core/src/mobile-web-codec.ts',
-  'apps/host/src/host.ts','apps/host/src/device-administration.ts','apps/host/src/mobile-assets-owner.ts','apps/host/src/mobile-page-response.ts',
+  'apps/host/src/host.ts','packages/core/src/device-administration.ts','apps/host/src/mobile-assets-owner.ts','apps/host/src/mobile-page-response.ts',
   'apps/mobile/src/main.tsx','apps/mobile/src/connection/MobileConnectionRoot.tsx','apps/mobile/src/mobile-web/page-identity.ts','apps/mobile/src/mobile-web/update-safety.ts',
   'apps/host/test/mobile-link.test.ts','apps/host/test/short-mobile-http.test.ts','apps/mobile/test/short-connection-entry.test.tsx','apps/mobile/test/short-mobile-link.config.mts',
   'apps/mobile/test/mobile-update-safety.test.tsx','apps/desktop/test/toolkit-phone-result-chain.test.tsx',

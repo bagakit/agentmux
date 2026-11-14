@@ -1,5 +1,5 @@
 import { fixturePath } from './helpers/fixture-values.js'
-import { DeviceAuthority } from '../../../apps/host/src/device-authority.js'
+import { DeviceAuthority } from '../src/device-access.js'
 import { AgentMuxControlServer } from '../src/public-rpc-server.js'
 import { connectAgentMuxRpc } from '../src/public-rpc-client.js'
 import { DurableAgentMuxMessageQueue } from '../src/agent-global-message-queue.js'

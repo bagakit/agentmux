@@ -18,7 +18,7 @@ import { AgentMuxRpcDispatcher, AgentMuxRpcError, type AgentMuxRpcConnection, ty
 import { connectHostedAgentMux } from '../src/hosted-client.js'
 import { DurableAgentMuxMessageQueue } from '../src/agent-global-message-queue.js'
 import type { AgentInputSubmissionReceipt } from '../src/index.js'
-import { DeviceAuthority } from '../../../apps/host/src/device-authority.js'
+import { DeviceAuthority } from '../src/device-access.js'
 
 const AgentMuxControlServer: typeof SourceServer = process.env.AGENTMUX_TEST_RPC_SERVER_ENTRY
   ? (await import(/* @vite-ignore */ pathToFileURL(process.env.AGENTMUX_TEST_RPC_SERVER_ENTRY).href)).AgentMuxControlServer : SourceServer

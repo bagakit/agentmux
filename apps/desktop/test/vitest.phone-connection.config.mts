@@ -37,7 +37,7 @@ const owners = new Set([
     'toolkit/MobileConnectionResult', 'toolkit/PhoneConnectionVisuals', 'toolkit/ToolkitResultLink', 'toolkit/UserToolkitResult']
     .map(name => `apps/desktop/src/renderer/src/components/${name}.tsx`),
   'apps/desktop/src/main/toolkit-owner.ts', 'apps/desktop/src/main/toolkit-custom-owner.ts',
-  'apps/host/src/device-administration.ts'
+  'packages/core/src/device-administration.ts'
 ])
 const runtime = `export const identityRuntimeSource = ${JSON.stringify((await bundleIdentityRuntime()).source)};\n`
 const sha = (text: string) => createHash('sha256').update(text).digest('hex')

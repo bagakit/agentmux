@@ -11,7 +11,7 @@ const output=resolve(root,'.tmp/current-phone-link','run-'+randomUUID());await m
 const files=['apps/desktop/src/renderer/src/components/toolkit/MobileConnectionResult.tsx','apps/desktop/src/renderer/src/components/settings/DeviceManagementSettings.tsx',
  'apps/desktop/src/renderer/src/styles/mobile-connection.css',
  'apps/desktop/src/main/toolkit-owner.ts','apps/desktop/src/main/toolkit-custom-owner.ts','apps/desktop/src/main/device-management-ipc.ts',
- 'apps/desktop/resources/toolkit/mobile-connection/query.mjs','apps/host/src/host.ts','apps/host/src/device-administration.ts','apps/host/src/mobile-link-candidates.ts',
+ 'apps/desktop/resources/toolkit/mobile-connection/query.mjs','apps/host/src/host.ts','packages/core/src/device-administration.ts','apps/host/src/mobile-link-candidates.ts',
  'apps/desktop/test/mobile-connection-toolkit.test.tsx','apps/desktop/test/settings-direct-actions.test.tsx','apps/desktop/test/toolkit-phone-result-chain.test.tsx',
  'apps/desktop/test/vitest.phone-connection.config.mts','apps/host/test/mobile-link.test.ts','apps/host/test/mobile-link.config.mts',
  'apps/desktop/scripts/verify-current-phone-link.mjs','apps/desktop/scripts/fixtures/toolkit-visual-craft/capture.mjs',
@@ -32,7 +32,7 @@ try{
   await writeFile(resolve(output,label+'.log'),run.log);assert.equal(run.signal,null)
   const result=JSON.parse(await readFile(report,'utf8')),tests=result.testResults.flatMap(v=>v.assertionResults).filter(v=>!['pending','skipped'].includes(v.status))
   const records=(await readFile(loaded,'utf8')).trim().split('\n').filter(Boolean).map(v=>JSON.parse(v))
-  const required=kind==='ui'?['apps/desktop/src/renderer/src/components/toolkit/MobileConnectionResult.tsx','apps/desktop/src/renderer/src/components/settings/DeviceManagementSettings.tsx','apps/desktop/src/main/toolkit-custom-owner.ts','apps/desktop/test/toolkit-phone-result-chain.test.tsx']:['apps/host/src/host.ts','apps/host/src/device-administration.ts','apps/host/test/mobile-link.test.ts']
+  const required=kind==='ui'?['apps/desktop/src/renderer/src/components/toolkit/MobileConnectionResult.tsx','apps/desktop/src/renderer/src/components/settings/DeviceManagementSettings.tsx','apps/desktop/src/main/toolkit-custom-owner.ts','apps/desktop/test/toolkit-phone-result-chain.test.tsx']:['apps/host/src/host.ts','packages/core/src/device-administration.ts','apps/host/test/mobile-link.test.ts']
   for(const file of mutationFile?[mutationFile,kind==='host'?'apps/host/test/mobile-link.test.ts':label==='phone-premature-current-copy'?'apps/desktop/test/toolkit-phone-result-chain.test.tsx':'apps/desktop/test/settings-direct-actions.test.tsx']:required)assert.ok(records.some(v=>v.file===file),'Actual evaluated owner/consumer required: '+file)
   if(mutationFile){assert.notEqual(run.code,0);assert.equal(tests.length,1);assert.equal(result.numFailedTests,1);assert.equal(result.numPassedTests,0);assert.ok(tests[0].failureMessages.some(v=>v.includes('AssertionError')),'Mutation must bear a real assertion, not import/timeout');assert.ok(records.some(v=>v.file===mutationFile&&v.mutation===label&&v.originalSHA256===inputs[mutationFile]&&v.loadedSHA256!==v.originalSHA256),'Changed production source must evaluate')}
   else{assert.equal(run.code,0,run.log);assert.ok(tests.length>0);assert.equal(result.numFailedTests,0);assert.equal(result.numPassedTests,tests.length);assert.ok(records.every(v=>v.originalSHA256===v.loadedSHA256))}

@@ -7,8 +7,8 @@ import { AgentMuxControlServer } from '../../src/public-rpc-server.js'
 import { AgentMuxHostedRuntimeService } from '../../src/hosted-runtime-service.js'
 import { connectRelayHostedClient } from '../../src/relay-hosted.js'
 import { createMobileTerminalControl, type MobileTerminalControlState } from '../../../../apps/mobile/src/terminal/control.js'
-import { DeviceAuthority } from '../../../../apps/host/src/device-authority.js'
-import { createDeviceAdministration } from '../../../../apps/host/src/device-administration.js'
+import { DeviceAuthority } from '../../src/device-access.js'
+import { createDeviceAdministration } from '../../src/device-access.js'
 import { rpcOwnerFixture } from './public-rpc-owner.js'
 
 const close: Array<() => unknown | Promise<unknown>> = []

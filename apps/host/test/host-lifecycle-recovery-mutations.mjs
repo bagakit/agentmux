@@ -1,8 +1,8 @@
 import { createHash } from 'node:crypto'
 import { workspaceSourceExport } from '../../../packages/core/test/helpers/workspace-source-export.mjs'
 export const lifecycleRecoveryMutations = {
-  'authority-permanent-failure': { path: 'apps/host/src/host.ts', before: '.finally(() => { authorityOpening = undefined })', after: '.finally(() => {})', target: 'Host lifecycle restores the original device authority and public link without replacing healthy input' },
-  'authority-remints-after-failure': { path: 'apps/host/src/host.ts', before: 'const createIfMissing = !authorityAttempted', after: 'const createIfMissing = true', target: 'Host lifecycle never mints an identity when the failed original file is absent' },
+  'authority-permanent-failure': { path: 'packages/core/src/device-access.ts', before: '.finally(() => { authorityOpening = undefined })', after: '.finally(() => {})', target: 'Host lifecycle restores the original device authority and public link without replacing healthy input' },
+  'authority-remints-after-failure': { path: 'packages/core/src/device-access.ts', before: 'const firstAttempt = !authorityAttempted', after: 'const firstAttempt = true', target: 'Host lifecycle never mints an identity when the failed original file is absent' },
   'route-abandons-recovery': { path: 'apps/host/src/configured-host-clients.ts', before: 'if (previous && accepted()) retryObservation()', after: 'void previous', target: 'Host lifecycle repairs only the failed original SSH route and cancels a stale candidate' },
   'dispose-loses-failure': { path: 'apps/host/src/host.ts', before: 'return disposal ??= (async () => { clearInterval(retryMobile); await closeResources() })()', after: 'if (disposal) return Promise.resolve(); return disposal = (async () => { clearInterval(retryMobile); await closeResources() })()', target: 'Host lifecycle repeats the same disposal outcome without replaying resource effects' }
 }

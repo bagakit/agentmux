@@ -21,7 +21,7 @@ vi.mock('@agentmux/core', async original => {
   } }
 })
 import * as core from '@agentmux/core'
-import { DeviceAuthority } from '../src/device-authority.js'
+import { DeviceAuthority } from '@agentmux/core/device-access'
 import { startAgentMuxHost } from '../src/host.js'
 import { configuredHostClients } from '../src/configured-host-clients.js'
 const cleanups: Array<() => void | Promise<void>> = []

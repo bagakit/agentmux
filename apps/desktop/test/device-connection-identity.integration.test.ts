@@ -8,7 +8,7 @@ import { promisify } from 'node:util'
 import { afterEach, expect, it, vi } from 'vitest'
 import { WebSocket } from 'ws'
 import { createClientChannel, exportPublicKey, generateKeyPair, type KeyPair, type Transport } from '../../../packages/relay/dist/e2ee.js'
-import { parseConnectionOfferUrl } from '../../../packages/relay/dist/connection-offer.js'
+import { parseConnectionLinkUrl, parseConnectionOffer } from '../../../packages/relay/dist/connection-offer.js'
 import { buildRelayWebSocketUrl } from '../../../packages/relay/dist/daemon-endpoints.js'
 import { objectCliEnvironment, runCompiledObjectCli } from '../../../packages/core/test/helpers/object-cli-rpc.js'
 import { parseAgentMuxRpcDeviceParams, parseAgentMuxRpcDeviceResult, parseDeviceConnection } from '../../../packages/core/src/public-rpc-device.js'
@@ -24,8 +24,12 @@ vi.mock('@agentmux/core', async original => {
       const server = new actual.AgentMuxControlServer({ ...options?.service, coreClients: () => [], socketPath: options?.socketPath })
       await server.start()
       return { client: {}, hosted: {}, server, stop: () => server.stop() }
-    },
-    durableWriteFile: async (...args: Parameters<typeof actual.durableWriteFile>) => {
+    }
+  }
+})
+vi.mock('../../../packages/core/src/durable-write.js', async original => {
+  const actual = await original<typeof import('../../../packages/core/src/durable-write.js')>()
+  return { ...actual, durableWriteFile: async (...args: Parameters<typeof actual.durableWriteFile>) => {
       if (!args[0].endsWith('devices.json')) return actual.durableWriteFile(...args)
       expect(args[2]?.requireDirectorySync).toBe(true)
       storage.writes++; storage.active++; storage.peak = Math.max(storage.peak, storage.active)
@@ -49,7 +53,7 @@ vi.mock('@agentmux/core', async original => {
   }
 })
 import { AgentMuxFileAgentSessionStore, connectAgentMuxRpc } from '@agentmux/core'
-import { DeviceAuthority } from '../../../apps/host/src/device-authority.js'
+import { DeviceAuthority } from '../../../packages/core/src/device-access.js'
 import { startAgentMuxHost } from '../../../apps/host/src/host.js'
 
 const cleanup: Array<() => Promise<unknown>> = []
@@ -73,7 +77,11 @@ async function ownerFixture() {
 }
 async function hostFixture(legacyKey?: KeyPair) {
   const root = await directory(), assets = join(root, 'mobile')
-  await mkdir(join(assets, 'assets'), { recursive: true }); await writeFile(join(assets, 'index.html'), '<!doctype html><title>Private phone fixture</title>')
+  const html = '<!doctype html><title>Private phone fixture</title>'
+  const digest = (value: string) => 'sha256:' + createHash('sha256').update(value).digest('hex')
+  await mkdir(join(assets, 'assets'), { recursive: true }); await writeFile(join(assets, 'index.html'), html)
+  const manifest = { schema: 'agentmux.mobile-web-release.v1', buildId: 'private-device-identity', files: [{ path: 'index.html', bytes: Buffer.byteLength(html), digest: digest(html) }] }
+  await writeFile(join(assets, 'mobile-release.json'), JSON.stringify({ ...manifest, digest: digest(JSON.stringify(manifest)) }))
   if (legacyKey) await writeFile(join(root, 'agentmux-devices.json'), JSON.stringify({ schema: 'agentmux.device-authority.v1', hostId: 'legacy-original-host',
     devices: [{ deviceId: 'legacy-kept-device', name: 'Original phone', createdAt: _reshape_fixtureEpoch(0, 0, 1),
       credentialHash: createHash('sha256').update(exportPublicKey(legacyKey.publicKey)).digest('hex') }] }) + '\n')
@@ -84,8 +92,10 @@ async function hostFixture(legacyKey?: KeyPair) {
   const local = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: socketPath } })
   cleanup.push(() => local.dispose())
   await vi.waitFor(async () => expect((await local.call('device.ls', {})).mobileAccess.state).toBe('connected'))
-  const link = await local.call('device.link', {}), original = parseConnectionOfferUrl(link.url)!
-  const offer = original
+  const link = await local.call('device.link', {}), encoded = parseConnectionLinkUrl(link.url)
+  if (!encoded) throw Error('The original Host must return its current public connection link')
+  const offer = encoded.kind === 'offer' ? encoded.offer : parseConnectionOffer(await (await fetch(new URL('/.well-known/agentmux/connection', link.pageUrl))).json())
+  if (encoded.kind === 'pin') expect(offer.daemonPublicKeyB64).toBe(encoded.pin.daemonPublicKeyB64)
   return { root, host, local, offer, socketPath, cli: (args: string[]) => runCompiledObjectCli(['--endpoint', `unix:${socketPath}`, ...args], objectCliEnvironment(root)) }
 }
 async function phone(f: Awaited<ReturnType<typeof hostFixture>>, key: KeyPair, userAgent: string) {

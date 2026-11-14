@@ -75,7 +75,7 @@ try {
       assert.ok(evaluations.some(value => value.path === mutation.path && value.mutant === label && value.originalSHA256 !== value.loadedSHA256), 'The altered original owner must evaluate')
     } else {
       assert.equal(run.code, 0, run.output); assert.equal(report.numPassedTests, 5); assert.equal(failures.length, 0)
-      for (const path of ['apps/host/src/host.ts', 'apps/host/src/device-authority.ts', 'apps/host/src/device-administration.ts', 'apps/host/src/configured-host-clients.ts',
+      for (const path of ['apps/host/src/host.ts', 'packages/core/src/device-authority.ts', 'packages/core/src/device-access.ts', 'packages/core/src/device-administration.ts', 'apps/host/src/configured-host-clients.ts',
         'packages/core/src/public-rpc-server.ts', 'packages/core/src/public-rpc-service.ts', 'packages/core/src/hosted-client.ts', 'packages/core/src/runtime-client.ts', 'packages/core/src/agentmux.ts', 'packages/core/src/control-endpoint-listener-worker.ts']) {
         assert.ok(evaluations.some(value => value.path === path), 'The actual owner/consumer source must evaluate: ' + path)
       }

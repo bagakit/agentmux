@@ -28,7 +28,7 @@ export default defineConfig({ root, cacheDir: resolve(root, '.tmp/connection-lin
     conditions: ['browser', 'module', 'import'], dedupe: ['react', 'react-dom'] },
   plugins: [react(), { name: 'loaded-connection-link-source', enforce: 'pre', transform(original, id) {
     const file = relative(root, id.split('?')[0]!)
-    if (![codec, labels, 'apps/host/src/host.ts', 'apps/host/src/device-administration.ts', 'packages/core/src/public-rpc-client.ts',
+    if (![codec, labels, 'apps/host/src/host.ts', 'packages/core/src/device-administration.ts', 'packages/core/src/public-rpc-client.ts',
       'apps/mobile/src/main.tsx', 'apps/mobile/src/connection/MobileConnectionRoot.tsx'].includes(file)) return
     const variant = mutant ? variants[mutant] : undefined
     let loaded = original

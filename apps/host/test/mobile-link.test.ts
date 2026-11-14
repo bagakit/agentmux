@@ -35,8 +35,8 @@ vi.mock('@agentmux/core', async original => {
   } }
 })
 import * as core from '@agentmux/core'
-import { createDeviceAdministration } from '../src/device-administration.js'
-import { DeviceAuthority } from '../src/device-authority.js'
+import { createDeviceAdministration } from '@agentmux/core/device-access'
+import { DeviceAuthority } from '@agentmux/core/device-access'
 import { startAgentMuxHost } from '../src/host.js'
 import { createInterfacePortLabels, mobileLinkCandidates, parsePortLabels } from '../src/mobile-link-candidates.js'
 

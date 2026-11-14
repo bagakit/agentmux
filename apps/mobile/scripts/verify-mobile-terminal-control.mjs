@@ -18,7 +18,7 @@ const paths = ['apps/mobile/src/terminal/control.ts', 'apps/mobile/src/terminal/
   'packages/client-ui/src/terminal/input.ts', 'packages/client-ui/src/terminal/live-output.ts', 'packages/client-ui/src/terminal/replay.ts',
   'apps/desktop/src/renderer/src/components/TerminalView.tsx', 'apps/desktop/src/renderer/src/lib/terminal-reveal.ts',
   'apps/desktop/test/terminal-reveal.test.ts', 'apps/mobile/vite.config.ts', 'apps/mobile/vitest.config.ts']
-const dependencies = ['apps/host/src/host.ts', 'apps/host/src/private-access.ts', 'apps/host/src/device-authority.ts',
+const dependencies = ['apps/host/src/host.ts', 'apps/host/src/private-access.ts', 'packages/core/src/device-authority.ts', 'packages/core/src/device-access.ts',
   'packages/core/src/hosted-client.ts', 'packages/core/src/hosted-runtime-service.ts', 'packages/core/src/hosted-client-contract.ts',
   'packages/core/src/public-rpc-server.ts', 'packages/core/src/public-rpc-wire.ts', 'packages/core/src/public-rpc-http.ts',
   'packages/core/src/public-rpc-service.ts', 'packages/core/src/terminal-continuation.ts',
