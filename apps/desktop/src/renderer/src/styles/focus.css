@@ -325,7 +325,7 @@
 .focus-context-card { position: relative; min-width: 0; border-radius: var(--radius-sm); }
 .focus-context-group__cards > .focus-context-card { max-width: 320px; }
 .focus-context-group[data-focus-sparse='true'] > .focus-context-group__cards > .focus-context-card { max-width: none; }
-.focus-context-card > .focus-context { height: 100%; }
+.focus-context-card > .focus-context:only-child { height: 100%; }
 .focus-context-card:hover > .focus-context { background: var(--surface-2); color: var(--text); }
 .focus-context-card > .focus-context.is-selected { background: var(--surface-3); }
 .focus-goal__space, .focus-goal__trigger { display: inline-flex; align-items: center; justify-content: center; flex: none; min-width: 18px; height: 18px; padding: 0 2px; gap: 2px; box-sizing: border-box; }
