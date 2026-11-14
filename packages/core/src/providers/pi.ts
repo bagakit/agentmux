@@ -1,6 +1,7 @@
 import { identityRuntimeSource } from '@agentmux/identity/runtime-source'
 import { executionEnvironmentValue, executionHomeDirectory, executionPath, type ProviderExecutionEnvironment } from './execution-environment.js'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { AgentMuxError } from '../errors.js'
 import type { AgentProvider, AgentProviderDefinition } from '../agent-provider.js'
 import type { AgentManagedHookPlan } from '../managed-hook-installer.js'
@@ -142,25 +143,22 @@ function piFamilyExtensionDir(
   env?: ProviderExecutionEnvironment,
   workspacePath?: string
 ): string {
-  const override = executionEnvironmentValue(env, agentDirEnv)?.trim()
-  const agentDir = executionPath(override || join(executionHomeDirectory(env), configDirName, 'agent'), workspacePath)
+  const override = executionEnvironmentValue(env, agentDirEnv)
+  const home = executionHomeDirectory(env)
+  // Native getAgentDir preserves whitespace and expands ~ / file URLs before loader resolution.
+  const nativeDir = !override ? join(home, configDirName, 'agent') : override === '~' ? home
+    : override.startsWith('~/') || process.platform === 'win32' && override.startsWith('~\\') ? join(home, override.slice(2))
+      : override.startsWith('file://') ? fileURLToPath(override) : override
+  const agentDir = executionPath(nativeDir, workspacePath)
   return join(agentDir, 'extensions')
 }
 
 /**
  * 写进扩展文件的 JS 源码。
  *
- * 与 opencode 的插件同属「内容不是 shell 命令的 managed hook」，但**两者取 endpoint 的方式相反**，
- * 原因是运行位置不同：
- *
- *   - opencode 的插件跑在 **OpenCode 自己的进程**里，那个进程不是 AgentMux 起的，看不到我们注入 PTY
- *     的环境变量，所以 endpoint 与 token 必须在安装那一刻内联进文件；
- *   - Pi 的扩展跑在 **AgentMux 通过 PTY 起的 `pi` 进程**里（上游确认扩展只在主进程加载，没有任何
- *     worker/daemon 会再加载一遍——`resource-loader.ts:559`/`:579`/`:599` 是唯二调用点），因此
- *     `process.env.AGENTMUX_HOOK_URL`/`TOKEN` 直接可读（由 `client.ts:2123-2124` 注入）。
- *
- * 于是这里**在运行时读环境变量，绝不把 token 写进磁盘**。这不是风格选择：写进去的 token 会随文件长期
- * 留在用户 home 下，而且每次 Binding 轮换都会失效——变成一份既泄密又过期的死凭证。能不落盘就不落盘。
+ * Pi 与 OpenCode 的进程内载体都不保存凭证。Pi 扩展加载在原生主进程中，先核对 AgentMux 的
+ * marker 与 Provider，再捕获本次扩展实例的原 Run ingress；后续事件只使用这个闭包快照。
+ * 非受管或其他 Provider 的宿主不读取凭证、不注册 AgentMux handler，原生 Pi 继续正常工作。
  *
  * 这也让同一份文件对所有 Run 都成立：它不绑定任何一次会话，可以真正幂等地装一次。
  *
@@ -196,6 +194,10 @@ import { existsSync } from 'node:fs'
 ${hookDeliverySource()}
 const { mintObjectId } = ${identityRuntimeSource}
 export default function (pi) {
+  if (process.env.AGENTMUX_ENV !== '1' || process.env.AGENTMUX_PROVIDER_ID !== 'pi') return
+  const url = process.env.AGENTMUX_HOOK_URL
+  const token = process.env.AGENTMUX_HOOK_TOKEN
+  if (!url || !token) return
   // session_file 只有在 transcript **真的落盘之后**才上报。
   //
   // 上游在会话创建时就把路径算出来并从 getSessionFile() 返回（session-manager.ts:954），但文件要等
@@ -219,10 +221,6 @@ export default function (pi) {
   }
 
   function post(eventName, ctx, extra) {
-    // endpoint 每次现读：扩展在 pi 进程内常驻，而这个进程是 AgentMux 起的，环境变量在其生命周期内稳定。
-    const url = process.env.AGENTMUX_HOOK_URL
-    const token = process.env.AGENTMUX_HOOK_TOKEN
-    if (!url || !token) return
     const payload = { hook_event_name: eventName }
     const session = sessionFields(ctx)
     for (const key in session) payload[key] = session[key]
