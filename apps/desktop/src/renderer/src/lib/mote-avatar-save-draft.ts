@@ -1,5 +1,6 @@
+import { avatarRequestHash, avatarSavedReceiptMatches, type AvatarActor } from '@agentmux/core/object-avatar'
 import { avatarSeriesCanonical } from '@agentmux/core/mote-avatar-series'
-import { parseMoteAvatarSave, parseMoteAvatarTarget, type MoteAvatarSave, type MoteAvatarTarget } from '@agentmux/core/mote-avatar-write'
+import { parseMoteAvatarSave, parseMoteAvatarTarget, type MoteAvatarRead, type MoteAvatarSave, type MoteAvatarTarget } from '@agentmux/core/mote-avatar-write'
 import { desktopUserFragments } from './desktop-user-state'
 
 /** Original submitted request only; saved choices and receipts stay with their native owners. */
@@ -16,11 +17,13 @@ export function readMoteAvatarSaveDraft(target: MoteAvatarTarget): MoteAvatarSav
   return request
 }
 
-export async function moteAvatarSaveRequestHash(request: MoteAvatarSave): Promise<string> {
+export async function moteAvatarSaveRequestHash(request: MoteAvatarSave, actor?: AvatarActor): Promise<string> {
   parseMoteAvatarSave(request)
-  const bytes = new TextEncoder().encode(avatarSeriesCanonical(request))
-  const digest = await crypto.subtle.digest('SHA-256', bytes)
-  return 'sha256:' + [...new Uint8Array(digest)].map(value => value.toString(16).padStart(2, '0')).join('')
+  return avatarRequestHash(request, actor)
+}
+
+export async function moteAvatarSaveMatches(request: MoteAvatarSave, read: MoteAvatarRead): Promise<boolean> {
+  return avatarSeriesCanonical(read.target) === avatarSeriesCanonical(request.target) && avatarSavedReceiptMatches(request, read.operation, read.readerIdentity)
 }
 
 async function withDraftLock(target: MoteAvatarTarget, work: () => Promise<void>): Promise<void> {

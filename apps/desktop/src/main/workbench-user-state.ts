@@ -1,3 +1,6 @@
+import { objectAvatarRequest, objectAvatarRequestKey, type ObjectAvatarAssetRequest, type ObjectAvatarRequestRecord } from '../shared/object-avatar-request.js'
+import { avatarSeriesCanonical } from '@agentmux/core/mote-avatar-series'
+import type { SpaceObjectImageTarget } from '@agentmux/core/object-avatar'
 import { createHash } from 'node:crypto'
 import { mkdir, open, readFile } from 'node:fs/promises'
 import { dirname, isAbsolute, join } from 'node:path'
@@ -42,6 +45,7 @@ async function syncDirectory(path: string): Promise<void> {
  */
 export class WorkbenchUserStateStore {
   private tail: Promise<void> = Promise.resolve()
+  private readonly avatarRequestTails = new Map<string, Promise<void>>()
   private readonly readingTails = new Map<string, Promise<void>>()
   private readonly readingReady = new Set<string>()
   private readonly readingFailures = new Map<string, unknown>()
@@ -58,6 +62,61 @@ export class WorkbenchUserStateStore {
   }
 
   observe(): WorkbenchUserStateObservation { return structuredClone(this.observation) }
+
+  private avatarRequestQueue<T>(key: string, action: () => Promise<T>): Promise<T> {
+    const result = (this.avatarRequestTails.get(key) ?? Promise.resolve()).then(action)
+    const settled = result.then(() => {}, () => {})
+    this.avatarRequestTails.set(key, settled)
+    void settled.then(() => { if (this.avatarRequestTails.get(key) === settled) this.avatarRequestTails.delete(key) })
+    return result
+  }
+  private avatarRequestsPath(key: string): string { return join(this.path + '.object-avatar-requests', digest(key) + '.json') }
+  private async readAvatarRequests(key: string): Promise<ObjectAvatarRequestRecord[]> {
+    let raw: string
+    try { raw = await (this.io.read ?? readFile)(this.avatarRequestsPath(key), 'utf8') }
+    catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return []; throw error }
+    const value: unknown = JSON.parse(raw)
+    if (!Array.isArray(value)) throw new Error('The original avatar save requests are unreadable. Their bytes and current draft are retained.')
+    const records = value.map(item => {
+      if (!item || typeof item !== 'object' || Array.isArray(item) || Object.keys(item).some(key => !['request', 'createdAt'].includes(key))) throw new Error('An original avatar request record is invalid.')
+      const request = objectAvatarRequest(item.request)
+      if (objectAvatarRequestKey(request.target) !== key || !Number.isSafeInteger(item.createdAt) || item.createdAt < 0) throw new Error('An original avatar request belongs to another object.')
+      return { request, createdAt: item.createdAt as number }
+    })
+    if (new Set(records.map(value => value.request.operationId)).size !== records.length) throw new Error('An original avatar request operation is ambiguous.')
+    return records
+  }
+  /** Exact avatar request member; ordinary root/draft writes never encode PNG bodies. */
+  async readObjectAvatarRequests(target: SpaceObjectImageTarget): Promise<ObjectAvatarRequestRecord[]> {
+    const key = objectAvatarRequestKey(target)
+    return this.avatarRequestQueue(key, () => this.readAvatarRequests(key))
+  }
+  private async writeAvatarRequests(key: string, records: ObjectAvatarRequestRecord[]) {
+    const path = this.avatarRequestsPath(key)
+    await mkdir(dirname(path), { recursive: true, mode: 0o700 })
+    await (this.io.syncDirectory ?? syncDirectory)(dirname(dirname(path)))
+    await (this.io.write ?? durableWriteFile)(path, JSON.stringify(records) + '\n', { requireDirectorySync: true })
+  }
+  async keepObjectAvatarRequest(raw: ObjectAvatarAssetRequest): Promise<void> {
+    const request = objectAvatarRequest(raw), key = objectAvatarRequestKey(request.target)
+    await this.avatarRequestQueue(key, async () => {
+      const records = await this.readAvatarRequests(key), original = records.find(value => value.request.operationId === request.operationId)
+      if (original) {
+        if (avatarSeriesCanonical(original.request) !== avatarSeriesCanonical(request)) throw new Error('This saved avatar operation belongs to another original request. Its bytes are retained.')
+        return
+      }
+      await this.writeAvatarRequests(key, [...records, { request, createdAt: Date.now() }])
+    })
+  }
+  async retireObjectAvatarRequest(raw: ObjectAvatarAssetRequest): Promise<void> {
+    const request = objectAvatarRequest(raw), key = objectAvatarRequestKey(request.target)
+    await this.avatarRequestQueue(key, async () => {
+      const records = await this.readAvatarRequests(key), original = records.find(value => value.request.operationId === request.operationId)
+      if (!original) return
+      if (avatarSeriesCanonical(original.request) !== avatarSeriesCanonical(request)) throw new Error('The original avatar request differs. Its bytes are retained.')
+      await this.writeAvatarRequests(key, records.filter(value => value !== original))
+    })
+  }
 
   private readingPath(owner: FileViewReadingOwner): string {
     return join(this.path + '.file-view-reading', digest(fileViewReadingOwnerKey(owner)) + '.json')

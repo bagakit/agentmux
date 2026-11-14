@@ -11,6 +11,7 @@ export type TopicCategory = {
 }
 export type KnowledgeTopic = {
   topicId: string; hostId: string; zoneId: string; directoryPath: string;
+  workspaceId?: string; contentIdentity?: string;
   title: string; summary: string; categorySpaceIds: string[]; chatIds: string[];
   spatialRevision: number; contentKind?: 'topic' | 'mote'; readError?: string
 }
@@ -148,11 +149,13 @@ export function parseTopicCategory(value: unknown): TopicCategory {
   return p as TopicCategory
 }
 function parseTopic(value: unknown): KnowledgeTopic {
-  const code = 'CONTROL_PROTOCOL_ERROR', p = rpcRecord(value, ['topicId','hostId','zoneId','directoryPath','title','summary','categorySpaceIds','chatIds','spatialRevision','contentKind','readError'], code)
+  const code = 'CONTROL_PROTOCOL_ERROR', p = rpcRecord(value, ['topicId','hostId','zoneId','directoryPath','title','summary','categorySpaceIds','chatIds','spatialRevision','contentKind','workspaceId','contentIdentity','readError'], code)
   topicId(p.topicId, code); string(p.hostId, code); string(p.zoneId, code); string(p.directoryPath, code); string(p.title, code)
   if (typeof p.summary !== 'string') invalid('Topic summary is invalid.', code)
   stringArray(p.categorySpaceIds, code); stringArray(p.chatIds, code); count(p.spatialRevision, code)
   if (p.readError !== undefined) string(p.readError, code)
+  if (p.workspaceId !== undefined) string(p.workspaceId, code)
+  if (p.contentIdentity !== undefined) string(p.contentIdentity, code)
   if (p.contentKind !== undefined && p.contentKind !== 'topic' && p.contentKind !== 'mote') invalid('The original content kind is invalid.', code)
   return p as KnowledgeTopic
 }

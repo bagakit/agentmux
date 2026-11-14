@@ -1,3 +1,4 @@
+import { avatarActorIdentity, isObjectAvatarMethod, parseObjectAvatarParams, parseObjectAvatarResult, parseAvatarActor, type AvatarExecutionContext, type ObjectAvatarMethod, type ObjectAvatarPort } from './object-avatar.js'
 import { assertTailcatConfigurationWriter, parseTailcatConfigurationParams, parseTailcatConfigurationResult, type TailcatConfigurationMethod, type TailcatConfigurationPort } from './public-rpc-tailcat-configuration.js'
 import { parseTerminalControl, parseTerminalControlResult, parseTerminalControlInspect, parseTerminalControlInspection } from './terminal-control.js'
 import { parseFileStatParams, parseFileStatResult, parseFileMkdirParams, parseFileMkdirResult, parseFileMutationInspectParams, parseFileMutationInspectResult } from './public-rpc-file-path.js'
@@ -256,6 +257,7 @@ export type AgentMuxRpcServiceOptions = Omit<Partial<AgentMuxControlHost>, 'exec
   files?: AgentMuxRpcFilesOwner
   git?: AgentMuxRpcGitOwner
   fileUploads?: AgentMuxRpcFileUploadsOwner
+  objectAvatars?: ObjectAvatarPort
   moteAvatars?: AgentMuxRpcMoteAvatarsOwner
   topics?: AgentMuxRpcTopicsOwner
 
@@ -509,7 +511,7 @@ const NATIVE_FIELDS = {
   'goal.activity': ['goalId', 'projectId', 'agentSessionId', 'assigneeSessionId', 'supervisorSessionId', 'status', 'since', 'limit'],
   'system.storage': ['hostId', 'runId'], 'system.doctor': ['workspacePath'], 'system.endpoint': [],
   'system.subscription.cancel': ['subscriptionId']
-} as const satisfies Record<Exclude<keyof typeof AGENTMUX_RPC_NATIVE_METHODS, MoteDialogueMethod | CapsuleRuntimeMethod | CapsuleMethod | AgentLearningMethod | 'capsule.input' | import('./public-rpc-device.js').AgentMuxRpcDeviceMethod | AgentMuxHostedRuntimeMethod | ApplicationAccessMethod | MoteChatMethod | MoteConnectionMethod | MoteAvatarSeriesMethod | MoteAvatarWriteMethod | TopicMethod | ConnectionMethod | TailcatConfigurationMethod | NotesStorageMethod | ProviderCatalogMethod | HostSettingsMethod | NodePublishingMethod | NodeLocatorMethod | import('./public-rpc-tailcat-key.js').TailcatKeyMethod | import('./public-rpc-host-maintenance.js').HostMaintenanceMethod | import('./public-rpc-files.js').FileMethod | GitMethod | AppWindowMethod | ScheduleMethod | ImageMethod | NativeDesktopMethod | keyof typeof HOST_ROUTE_METHODS>, readonly string[]>
+} as const satisfies Record<Exclude<keyof typeof AGENTMUX_RPC_NATIVE_METHODS, MoteDialogueMethod | CapsuleRuntimeMethod | CapsuleMethod | AgentLearningMethod | 'capsule.input' | import('./public-rpc-device.js').AgentMuxRpcDeviceMethod | AgentMuxHostedRuntimeMethod | ApplicationAccessMethod | MoteChatMethod | MoteConnectionMethod | MoteAvatarSeriesMethod | MoteAvatarWriteMethod | TopicMethod | ConnectionMethod | ObjectAvatarMethod | TailcatConfigurationMethod | NotesStorageMethod | ProviderCatalogMethod | HostSettingsMethod | NodePublishingMethod | NodeLocatorMethod | import('./public-rpc-tailcat-key.js').TailcatKeyMethod | import('./public-rpc-host-maintenance.js').HostMaintenanceMethod | import('./public-rpc-files.js').FileMethod | GitMethod | AppWindowMethod | ScheduleMethod | ImageMethod | NativeDesktopMethod | keyof typeof HOST_ROUTE_METHODS>, readonly string[]>
 
 /** Home follows an exact execution route; its display name does not identify that route. */
 function homeHostRoute(configuration: import('./control.js').AgentMuxControlSettingsResourceFields | null) {
@@ -724,6 +726,17 @@ export class AgentMuxRpcService {
       'Input control requires the exact original Session.', 'INVALID_AGENT_INPUT_CONTROL')
     return scope
   }
+  private avatarExecutionContext(context: AgentMuxRpcCallContext, caller: Awaited<ReturnType<AgentMuxRpcService['authenticated']>>): AvatarExecutionContext {
+    const runtimeId = caller?.client.runtimeOwnerIdentity?.()?.runtimeId
+    const actor = parseAvatarActor(caller ? { kind: 'agent', id: caller.agentSessionId, hostId: caller.hostId,
+      ...(runtimeId ? { runtimeId } : {}), ...(caller.session.run ? { runId: caller.session.run.runId } : {}) }
+      : context.principal, 'CONTROL_PERMISSION_DENIED')
+    return { actor, ...(context.signal ? { signal: context.signal } : {}), assertCurrent: async () => {
+      context.signal?.throwIfAborted(); await context.assertCurrent?.(); await this.assertRuntimeFence(context)
+      if (caller) await this.authenticated(context)
+    } }
+  }
+
   private async authenticated(context: AgentMuxRpcCallContext, exactOnly = false) {
     if (!context.caller) return undefined
     const caller = rpcRecord(context.caller, ['agentSessionId', 'capability'])
@@ -2095,12 +2108,32 @@ export class AgentMuxRpcService {
       const result = this.ports.schedules ? await this.ports.schedules.call<ScheduleMethod>(scheduleMethod, input, context) : await this.ports.forwardControl!<ScheduleMethod>(scheduleMethod, input, context)
       return validateScheduleRpcResult<ScheduleMethod>(scheduleMethod, result, input) as AgentMuxRpcResult<M>
     }
+    if (isObjectAvatarMethod(method)) {
+      const avatarMethod: ObjectAvatarMethod = method
+      const input = parseObjectAvatarParams(avatarMethod, params)
+      if (!this.ports.objectAvatars && !this.ports.forwardControl) throw new AgentMuxError('The original object avatar owner is unavailable. Saved choices and existing work are retained.', 'CONTROL_UNAVAILABLE')
+      const execution = this.avatarExecutionContext(context, caller)
+      const result = this.ports.objectAvatars ? await this.ports.objectAvatars.call<ObjectAvatarMethod>(avatarMethod, input, execution)
+        : await this.ports.forwardControl!<ObjectAvatarMethod>(avatarMethod, input, context)
+      const readerIdentity = avatarActorIdentity(execution.actor)
+      const projected = avatarMethod === 'space.object.avatar.read' ? { ...result, readerIdentity }
+        : { ...result, current: { ...(result as import('./object-avatar.js').SpaceObjectAvatarResult).current, readerIdentity } }
+      return parseObjectAvatarResult<ObjectAvatarMethod>(avatarMethod, projected, input) as AgentMuxRpcResult<M>
+    }
     if (isMoteAvatarWriteMethod(method)) {
       const input = parseMoteAvatarWriteParams(method, params)
       if (!this.ports.moteAvatars && !this.ports.forwardControl) throw new AgentMuxError('The original Host avatar owner is unavailable. The saved appearance is retained.', 'CONTROL_UNAVAILABLE')
-      const result = this.ports.moteAvatars ? await this.ports.moteAvatars.call<MoteAvatarWriteMethod>(method, input)
+      const execution = method === 'space.mote.avatar.read' && !caller && !context.principal
+        ? undefined : this.avatarExecutionContext(context, caller)
+      const result = this.ports.moteAvatars ? await this.ports.moteAvatars.call<MoteAvatarWriteMethod>(method, input, execution)
         : await this.ports.forwardControl!<MoteAvatarWriteMethod>(method, input, context)
-      return parseMoteAvatarWriteResult(method, result, input) as AgentMuxRpcResult<M>
+      // This public reader identity comes from the authenticated call, never the receipt
+      // or an internal historical read. It cannot attribute an old actorless publication.
+      const readerIdentity = execution ? avatarActorIdentity(execution.actor) : undefined
+      const { readerIdentity: _untrustedReader, ...historical } = result as import('./mote-avatar-write.js').MoteAvatarRead
+      const projected = method === 'space.mote.avatar.read' ? { ...historical, ...(readerIdentity ? { readerIdentity } : {}) }
+        : { ...result, current: { ...(result as import('./mote-avatar-write.js').MoteAvatarSaveResult).current, readerIdentity } }
+      return parseMoteAvatarWriteResult(method, projected, input) as AgentMuxRpcResult<M>
     }
     if (isMoteAvatarSeriesMethod(method)) {
       const input = parseMoteAvatarSeriesParams(method, params)

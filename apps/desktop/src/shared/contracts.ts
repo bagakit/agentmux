@@ -1830,10 +1830,12 @@ export type AgentMuxDesktopApi = {
   topics: {
     call<M extends import('@agentmux/core').TopicMethod>(method: M, params: import('@agentmux/core').TopicParams<M>): Promise<import('@agentmux/core').TopicResult<M>>
   }
+  objectAvatars: {
+    call<M extends import('@agentmux/core/object-avatar').ObjectAvatarMethod>(method: M, input: import('@agentmux/core/object-avatar').ObjectAvatarParamsMap[M]): Promise<import('@agentmux/core/object-avatar').ObjectAvatarResultMap[M]>
+  }
   spaceObjects: {
     appearance(target: SpaceObjectImageTarget): Promise<SpaceObjectAppearance>
     previewAvatar(target: SpaceObjectImageTarget, input: ObjectAvatarInput): Promise<ObjectAvatarImage>
-    saveAvatar(target: SpaceObjectImageTarget, input: ObjectAvatarInput): Promise<ObjectAvatarRef>
     readAvatar(target: SpaceObjectImageTarget, ref: ObjectAvatarRef): Promise<ObjectAvatarImage>
   }
   scratch: {
@@ -1874,6 +1876,9 @@ export type AgentMuxDesktopApi = {
     onNativeBrowserInput(listener: (input: import('./native-overlay').NativeBrowserInput) => void, document?: import('./workbench-windows').WorkbenchWindowDocument): () => void
     nativeOverlayFocus(document?: import('./workbench-windows').WorkbenchWindowDocument): boolean
     /** The fixed Main-owned Desktop user projection; no arbitrary path or key. */
+    readObjectAvatarRequests(target: import('@agentmux/core/object-avatar').SpaceObjectImageTarget): Promise<import('./object-avatar-request').ObjectAvatarRequestRecord[]>
+    keepObjectAvatarRequest(request: import('./object-avatar-request').ObjectAvatarAssetRequest): Promise<void>
+    retireObjectAvatarRequest(request: import('./object-avatar-request').ObjectAvatarAssetRequest): Promise<void>
     readFileViewReading(owner: import('./workbench-user-state').FileViewReadingOwner): Promise<import('./workbench-user-state').FileViewReadingRecord | null>
     writeFileViewReading(record: import('./workbench-user-state').FileViewReadingRecord): Promise<import('./workbench-user-state').FileViewReadingReceipt | null>
     readWorkbenchState(): Promise<string | null>

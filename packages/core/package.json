@@ -473,6 +473,10 @@
     "./space-folder-resources": {
       "types": "./dist/space-folder-resources.d.ts",
       "import": "./dist/space-folder-resources.js"
+    },
+    "./object-avatar": {
+      "types": "./dist/object-avatar.d.ts",
+      "import": "./dist/object-avatar.js"
     }
   },
   "bin": {

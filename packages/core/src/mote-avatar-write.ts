@@ -1,3 +1,4 @@
+import { avatarSavedReceiptMatches, parseAvatarActorIdentity, type AvatarActorIdentity, parseAvatarPublicationOperation, type AvatarExecutionContext, type AvatarPublicationOperation } from './object-avatar.js'
 import { AgentMuxError } from './errors.js'
 import { rpcRecord } from './rpc-data.js'
 import { parseMoteAvatarSeriesDefinition, parseMoteAvatarSeriesLocator, parseMoteAvatarSeriesParameters,
@@ -11,14 +12,12 @@ export type MoteAvatarSave = {
   source: MoteAvatarSeriesSource; definition: MoteAvatarSeriesDefinition;
   parameters: MoteAvatarSeriesParameters; pngDataUrl: string
 }
-export type MoteAvatarOperation = {
-  operationId: string; requestHash: string;
-  phase: 'intent' | 'asset' | 'publication-unknown' | 'published';
-  durability: 'unknown' | 'confirmed';
-  choice?: MoteAvatarSeriesChoice; issue?: string
-}
+export type MoteAvatarOperation = AvatarPublicationOperation<MoteAvatarSeriesChoice>
+
 export type MoteAvatarRead = {
   target: MoteAvatarTarget; revision: string;
+  /** Public RPC supplies the authenticated reader; a direct historical SDK read may have none. */
+  readerIdentity?: AvatarActorIdentity;
   /** Original authored data, including unsupported records; never silently discarded. */
   choice: unknown;
   /** Static PNG of this exact current appearance; read-only derivation does not publish another choice. */
@@ -40,7 +39,7 @@ export type MoteAvatarMethod = MoteAvatarSeriesMethod | MoteAvatarWriteMethod
 export type MoteAvatarParameterMap = MoteAvatarSeriesParameterMap & MoteAvatarWriteParameterMap
 export type MoteAvatarResultMap = MoteAvatarSeriesResultMap & MoteAvatarWriteResultMap
 export interface AgentMuxRpcMoteAvatarsOwner {
-  call<M extends MoteAvatarMethod>(method:M,params:MoteAvatarParameterMap[M]):Promise<MoteAvatarResultMap[M]>
+  call<M extends MoteAvatarMethod>(method:M,params:MoteAvatarParameterMap[M],context?:AvatarExecutionContext):Promise<MoteAvatarResultMap[M]>
 }
 export const AGENTMUX_RPC_MOTE_AVATAR_WRITE_METHODS = {'space.mote.avatar.read':'long','space.mote.avatar.save':'long'} as const
 export function isMoteAvatarWriteMethod(value:unknown):value is MoteAvatarWriteMethod {
@@ -75,17 +74,15 @@ export function parseMoteAvatarWriteParams<M extends MoteAvatarWriteMethod>(meth
   return p as MoteAvatarWriteParameterMap[M]
 }
 function operation(raw:unknown,operationId:string|undefined,code:string):MoteAvatarOperation {
-  const p=rpcRecord(raw,['operationId','requestHash','phase','durability','choice','issue'],code)
-  parseMoteAvatarOperationId(p.operationId,code);revision(p.requestHash,code)
-  if (operationId!==undefined && p.operationId!==operationId) fail('The receipt belongs to a different original operation.',code)
-  if (!['intent','asset','publication-unknown','published'].includes(p.phase as string) || !['unknown','confirmed'].includes(p.durability as string) || p.durability==='confirmed' && p.phase!=='published') fail('The avatar operation contains an unsupported outcome.',code)
-  if (p.phase!=='intent' && !isMoteAvatarSeriesChoice(p.choice)) fail('The avatar operation lost its exact saved choice.',code)
-  if (p.issue!==undefined && (typeof p.issue!=='string' || p.issue.length>4096)) fail('The avatar operation issue is invalid.',code)
+  const p = parseAvatarPublicationOperation(raw, operationId, true, code)
+  if (p.phase !== 'intent' && !isMoteAvatarSeriesChoice(p.choice)) fail('The avatar operation lost its exact saved choice.', code)
   return p as MoteAvatarOperation
 }
+
 function readResult(raw:unknown,target:MoteAvatarTarget,operationId:string|undefined,code:string):MoteAvatarRead {
-  const p=rpcRecord(raw,['target','revision','choice','image','source','operation','issues'],code)
+  const p=rpcRecord(raw,['target','readerIdentity','revision','choice','image','source','operation','issues'],code)
   const actual=parseMoteAvatarTarget(p.target,code)
+  if (p.readerIdentity !== undefined) parseAvatarActorIdentity(p.readerIdentity, code)
   if (actual.workspaceId!==target.workspaceId || actual.topicId!==target.topicId || actual.objectKey!==target.objectKey) fail('The saved appearance belongs to a different original Mote.',code)
   revision(p.revision,code)
   if (!Object.hasOwn(p,'choice') || !Array.isArray(p.issues) || p.issues.some(issue=>typeof issue!=='string' || issue.length>4096)) fail('The original appearance read is incomplete.',code)
@@ -105,8 +102,10 @@ export function parseMoteAvatarWriteResult<M extends MoteAvatarWriteMethod>(meth
   const p=rpcRecord(raw,['state','operation','issue','current'],code)
   if (!['refused','saved','unknown'].includes(p.state as string)) fail('The avatar save outcome is invalid.',code)
   const op=p.operation===undefined?undefined:operation(p.operation,input.operationId,code)
-  if (p.state==='saved' && (op?.phase!=='published' || op.durability!=='confirmed')) fail('Saved requires an acknowledged original publication.',code)
+  const current = readResult(p.current,input.target,input.operationId,code)
+  if (p.state==='saved' && (op?.phase!=='published' || op.durability!=='confirmed' ||
+    !avatarSavedReceiptMatches(input, op, current.readerIdentity) || current.operation !== undefined && !avatarSavedReceiptMatches(input, current.operation, current.readerIdentity)))
+    fail('Saved requires the original actor-bound acknowledged publication and complete request.',code)
   if (p.issue!==undefined && typeof p.issue!=='string') fail('The avatar save issue is invalid.',code)
-  readResult(p.current,input.target,input.operationId,code)
   return p as MoteAvatarWriteResultMap[M]
 }

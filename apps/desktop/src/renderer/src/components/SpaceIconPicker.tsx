@@ -1,3 +1,4 @@
+import { useObjectAvatarSave } from '../lib/use-object-avatar-save'
 import { mintObjectId } from '@agentmux/core/object-id'
 import { useWorkbenchDocument } from '../lib/workbench-document'
 import * as Dialog from '@agentmux/client-ui/components/Modal'
@@ -19,7 +20,7 @@ import { MoteFaceEditor } from './MoteFaceEditor'
 import { SpaceObjectIcon } from './SpaceObjectIcon'
 import { LiquidSelectionSurface } from './LiquidSelectionSurface'
 import { DocumentOverlayPortal } from './WindowOverlayHost'
-import { keepMoteAvatarSaveDraft, moteAvatarSaveRequestHash, readMoteAvatarSaveDraft, retireMoteAvatarSaveDraft } from '../lib/mote-avatar-save-draft'
+import { keepMoteAvatarSaveDraft, moteAvatarSaveMatches, readMoteAvatarSaveDraft, retireMoteAvatarSaveDraft } from '../lib/mote-avatar-save-draft'
 
 type SeriesSaveAttempt = { request: MoteAvatarSave; state: 'unsent' | 'unknown' | 'refused' | 'saved'; issue: string }
 const pickerIdentity = (target: SpaceIconTarget | null) => JSON.stringify([target?.key, target?.avatarTarget ?? null, target?.imageTarget ?? null])
@@ -46,6 +47,7 @@ export function SpaceIconPicker({ target, onClose, returnFocus }: {
   target: SpaceIconTarget | null; onClose(): void; returnFocus?: () => HTMLElement | null
 }) {
   const ownerDocument = useWorkbenchDocument()
+  const objectAvatar = useObjectAvatarSave(target?.imageTarget)
   const [draft, setDraft] = useState<SpaceIconChoice | null>(null)
   const [automaticPending, setAutomaticPending] = useState(false)
   const [preview, setPreview] = useState<({
@@ -103,6 +105,13 @@ export function SpaceIconPicker({ target, onClose, returnFocus }: {
     return () => { editor.current = {}; inputRequest.current = {}; avatarReadRequest.current = {} }
   }, [targetIdentity])
 
+  useLayoutEffect(() => {
+    if (!target?.imageTarget || !objectAvatar.baseline || localIntent.current ||
+      JSON.stringify(objectAvatar.baseline.target) !== JSON.stringify(target.imageTarget)) return
+    const choice = objectAvatar.baseline.choice
+    if (choice === null || isSpaceIconChoice(choice)) { setDraft(choice); setAlternativeDraft(choice) }
+  }, [objectAvatar.baseline, targetIdentity])
+
   function retainedSeriesRequest(original: SpaceIconTarget): MoteAvatarSave | null {
     if (!original.avatarTarget) return null
     const identity = pickerIdentity(original)
@@ -147,10 +156,10 @@ export function SpaceIconPicker({ target, onClose, returnFocus }: {
         }
       }
       if (submitted && value.operation?.phase === 'published' && value.operation.durability === 'confirmed') {
-        const requestHash = await moteAvatarSaveRequestHash(submitted)
+        const confirmed = await moteAvatarSaveMatches(submitted, value)
         if (!current()) return
-        if (requestHash !== value.operation.requestHash) {
-          setSeriesAttempt({ request: submitted, state: 'unknown', issue: 'This receipt belongs to a different request body. Your original kept bytes and draft are retained.' })
+        if (!confirmed) {
+          setSeriesAttempt({ request: submitted, state: 'unknown', issue: 'This historical receipt does not confirm this submission’s original actor and body. Your kept bytes and draft are retained.' })
           return
         }
         const issue = await retireSeriesRequest(submitted, original)
@@ -171,8 +180,12 @@ export function SpaceIconPicker({ target, onClose, returnFocus }: {
     const identity = pickerIdentity(original)
     const current = () => editor.current === session && pickerIdentity(currentTarget.current) === identity
     try {
+      const projection = useAppStore.getState().config
       const config = await api.config.get()
       if (!current()) return
+      // A later CONFIG_CHANGED publication owns the current projection. This older read
+      // may finish after it; never replace that newer owner fact with this reply.
+      if (useAppStore.getState().config !== projection) { if (close) onClose(); return }
       // The current owner can already contain a later choice. Never publish the receipt's old choice again.
       useAppStore.getState().setConfig(config)
       if (close) onClose()
@@ -194,8 +207,8 @@ export function SpaceIconPicker({ target, onClose, returnFocus }: {
       }
       if (current()) { setSeriesStorageIssue(null); setSeriesAttempt({ request, state: 'unknown', issue: '' }) }
       const value = await api.moteAvatars.save(request)
-      if (value.state === 'saved' && value.operation?.requestHash !== await moteAvatarSaveRequestHash(request)) {
-        if (current()) setSeriesAttempt({ request, state: 'unknown', issue: 'This receipt belongs to a different request body. Your original kept bytes and draft are retained.' })
+      if (value.state === 'saved' && !await moteAvatarSaveMatches(request, value.current)) {
+        if (current()) setSeriesAttempt({ request, state: 'unknown', issue: 'This historical receipt does not confirm this submission’s original actor and body. Your kept bytes and draft are retained.' })
         return
       }
       const storageIssue = value.state !== 'unknown' ? await retireSeriesRequest(request, original) : null
@@ -228,12 +241,26 @@ export function SpaceIconPicker({ target, onClose, returnFocus }: {
       const input = { mimeType: file.type, dataUrl } as MoteAvatarInput
       const value = original.imageTarget ? await api.spaceObjects.previewAvatar(original.imageTarget, input)
         : await api.scratch.previewMoteAvatar(original.avatarTarget!.workspaceId, original.avatarTarget!.topicId, input, original.avatarTarget!.objectKey)
-      if (current()) { setMode('alternative'); setPreviewReady(false); setCropFrame(DEFAULT_CROP_FRAME); setPreview(previous => ({ dataUrl: value.dataUrl, revision: (previous?.revision ?? 0) + 1, title: 'Uploaded image', tag: 'PNG · 256 px' })) }
+      if (current()) { if (original.imageTarget) objectAvatar.beginNewIntent(); setMode('alternative'); setPreviewReady(false); setCropFrame(DEFAULT_CROP_FRAME); setPreview(previous => ({ dataUrl: value.dataUrl, revision: (previous?.revision ?? 0) + 1, title: 'Uploaded image', tag: 'PNG · 256 px' })) }
     } catch (cause) { if (current()) { setErrorStep('prepare'); setError(presentError(cause)) } }
     finally { if (current()) setPreparing(false) }
   }
   async function save(): Promise<void> {
-    if (!target || busy || preparing || (editingSeries && !automaticPending && seriesPreparing) || (seriesAttempt && seriesAttempt.state !== 'saved' && ((editingSeries && !automaticPending) || seriesAttempt.state !== 'unsent')) || (editingSeries && !automaticPending && seriesStorageIssue) || (!editingFace && !automaticPending && preview && !previewReady)) return
+    if (!target || busy || preparing || (editingSeries && !automaticPending && seriesPreparing) || (seriesAttempt && seriesAttempt.state !== 'saved' && editingSeries && !automaticPending) || (editingSeries && !automaticPending && seriesStorageIssue) || (!editingFace && !automaticPending && preview && !previewReady)) return
+    if (target.imageTarget) {
+      const original = target, session = editor.current
+      setBusy(true); setError(null)
+      try {
+        let choice: string | null | { kind: 'png'; dataUrl: string } = automaticPending ? null : typeof draft === 'string' ? draft : null
+        if (!automaticPending && preview) {
+          if (!canvas.current) throw new Error('The avatar preview is not ready. Select the image again.')
+          choice = { kind: 'png', dataUrl: canvas.current.toDataURL('image/png') }
+        } else if (!automaticPending && draft !== null && typeof draft !== 'string') throw new Error('Choose an icon, an image, or automatic appearance before saving.')
+        if (await objectAvatar.save(choice)) await refreshSavedConfig(original, session, true)
+      } catch (cause) { if (editor.current === session) { setErrorStep('save'); setError(presentError(cause)) } }
+      finally { if (editor.current === session) setBusy(false) }
+      return
+    }
     if (editingSeries && !automaticPending) {
       if (!target.avatarTarget || !avatarBaseline || !seriesDraft || avatarReading) return
       const request = freezeSeriesSave({ target: target.avatarTarget, operationId: mintObjectId(), beforeRevision: avatarBaseline.revision,
@@ -270,8 +297,7 @@ export function SpaceIconPicker({ target, onClose, returnFocus }: {
           return
         }
         const input = { mimeType: 'image/png' as const, dataUrl }
-        const savedImage = original.imageTarget ? await api.spaceObjects.saveAvatar(original.imageTarget, input)
-          : await api.scratch.saveMoteAvatar(original.avatarTarget!.workspaceId, original.avatarTarget!.topicId, input, original.avatarTarget!.objectKey)
+        const savedImage = await api.scratch.saveMoteAvatar(original.avatarTarget!.workspaceId, original.avatarTarget!.topicId, input, original.avatarTarget!.objectKey)
         if (original.avatarTarget && preview.source && preview.definition && preview.definition.kind === 'image') {
           const maxOffset = Math.max(1, (MOTE_AVATAR_EDGE * cropFrame.zoom - MOTE_AVATAR_EDGE) / 2)
           choice = {
@@ -297,6 +323,7 @@ export function SpaceIconPicker({ target, onClose, returnFocus }: {
   }
   const select = (choice: SpaceIconChoice | null, asAutomatic = false) => {
     localIntent.current = true
+    if (target?.imageTarget) objectAvatar.beginNewIntent()
     inputRequest.current = {}; setPreparing(false); setDraft(choice); setAutomaticPending(asAutomatic); setError(null)
     if (isMoteFace(choice)) setFaceDraft(choice)
     else { setAlternativeDraft(choice); setPreview(null); setPreviewReady(false) }
@@ -306,7 +333,7 @@ export function SpaceIconPicker({ target, onClose, returnFocus }: {
     inputRequest.current = {}; setPreparing(false); setSeriesPreparing(false); setAutomaticPending(false); setError(null); setMode(next)
     if (next !== 'series') setDraft(next === 'face' ? faceDraft : alternativeDraft)
   }
-  const saveButtonLabel = busy ? 'Saving…' : seriesAttempt?.state === 'unknown' ? 'Save unconfirmed'
+  const saveButtonLabel = busy ? 'Saving…' : editingSeries && !automaticPending && seriesAttempt?.state === 'unknown' ? 'Save unconfirmed'
     : editingSeries && !automaticPending && seriesAttempt?.state === 'refused' ? 'Review current avatar'
       : editingSeries && !automaticPending && seriesAttempt?.state === 'unsent' ? 'Save not sent'
         : editingSeries && !automaticPending && seriesStorageIssue ? 'Request unconfirmed'
@@ -368,7 +395,7 @@ export function SpaceIconPicker({ target, onClose, returnFocus }: {
             <div className={`mote-avatar-stage${target.avatarTarget ? '' : ' mote-avatar-stage--single'}`}>
               {preview ? <MoteAvatarCrop key={preview.revision} source={preview.dataUrl} silhouetteId={preview.silhouetteId} initialParameters={preview.initialParameters}
                 visible={mode === 'alternative'} canvasRef={canvas} disabled={busy || preparing}
-                onReady={() => setPreviewReady(true)} onFrame={setCropFrame} onError={cause => { setErrorStep('prepare'); setError(cause) }} /> : <div className="mote-avatar-preview" role="img" aria-label={`Your ${target.kind} avatar preview`}>
+                onReady={() => setPreviewReady(true)} onFrame={frame => { if (target?.imageTarget && (frame.zoom !== cropFrame.zoom || frame.offsetX !== cropFrame.offsetX || frame.offsetY !== cropFrame.offsetY)) objectAvatar.beginNewIntent(); setCropFrame(frame) }} onError={cause => { setErrorStep('prepare'); setError(cause) }} /> : <div className="mote-avatar-preview" role="img" aria-label={`Your ${target.kind} avatar preview`}>
                 <SpaceObjectIcon kind={target.kind} name={target.name} manualIcon={alternativeDraft} imageTarget={target.imageTarget} avatarWorkspaceId={target.avatarTarget?.workspaceId}
                   avatarTopicId={target.avatarTarget?.topicId} avatarObjectKey={target.key} visible={mode === 'alternative'} />
               </div>}
@@ -431,11 +458,17 @@ export function SpaceIconPicker({ target, onClose, returnFocus }: {
                 : <button type="button" className="small-button" data-avatar-review-current disabled={busy || avatarReading} onClick={() => void readAvatarBaseline(target, true)}>{seriesAttempt?.state === 'refused' ? 'Review current avatar' : 'Read current avatar'}</button>}
           </div>
         </div> : null}
+        {target?.imageTarget && (objectAvatar.issue || objectAvatar.pending.length > 0) ? <div className="mote-series__notice" role="status" data-object-avatar-save-notice>
+          {objectAvatar.issue ? <p>{objectAvatar.issue}</p> : null}
+          {objectAvatar.needsNewIntent ? <p>The original save remains unconfirmed. Inspect its receipt; choose or edit an image or icon for a separate save.</p> : null}
+          {objectAvatar.pending.length ? <details><summary>Original save requests</summary>{objectAvatar.pending.map(value => <p key={value.request.operationId}>Save {value.request.operationId}: {value.issue}</p>)}</details> : null}
+          <button type="button" className="small-button" disabled={busy || objectAvatar.reading} onClick={() => void objectAvatar.read()}>Inspect save</button>
+        </div> : null}
         <footer>
           <button type="button" className="small-button space-icon-picker__automatic" aria-pressed={automaticSelected}
             disabled={busy} onClick={() => select(null, true)}><ThemeActionRestoreDefaultsIcon size={13} />Restore automatic</button>
           <button type="button" className="small-button" disabled={busy} onClick={onClose}>{seriesAttempt || seriesStorageIssue || error && errorStep === 'save' ? 'Close' : 'Cancel'}</button>
-          <button type="button" className={`${supportsImages ? 'primary-button' : 'small-button'} space-icon-picker__save`} aria-label={saveButtonLabel} disabled={busy || preparing || Boolean(editingSeries && !automaticPending && seriesPreparing) || Boolean(seriesAttempt && seriesAttempt.state !== 'saved' && ((editingSeries && !automaticPending) || seriesAttempt.state !== 'unsent')) || Boolean(editingSeries && !automaticPending && (!avatarBaseline || avatarReading || !seriesDraft || seriesStorageIssue)) || Boolean(!editingFace && !automaticPending && preview && !previewReady)} onClick={() => void save()}>
+          <button type="button" className={`${supportsImages ? 'primary-button' : 'small-button'} space-icon-picker__save`} aria-label={saveButtonLabel} disabled={busy || preparing || Boolean(target?.imageTarget && (!objectAvatar.baseline || objectAvatar.reading || objectAvatar.needsNewIntent)) || Boolean(editingSeries && !automaticPending && seriesPreparing) || Boolean(seriesAttempt && seriesAttempt.state !== 'saved' && editingSeries && !automaticPending) || Boolean(editingSeries && !automaticPending && (!avatarBaseline || avatarReading || !seriesDraft || seriesStorageIssue)) || Boolean(!editingFace && !automaticPending && preview && !previewReady)} onClick={() => void save()}>
             {saveButtonLabel}
           </button>
         </footer>

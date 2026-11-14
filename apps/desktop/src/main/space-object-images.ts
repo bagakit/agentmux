@@ -24,6 +24,8 @@ export class SpaceObjectImages {
     if (!directory) throw new Error('Image uploads and reads require this object’s local directory. Its original choice and workface are retained.')
     return directory
   }
+  /** Main publication borrows this same exact local asset owner; no path is public input. */
+  async directory(target: SpaceObjectImageTarget): Promise<string> { return await this.requireLocalDirectory(target) }
   async appearance(target: SpaceObjectImageTarget): Promise<SpaceObjectAppearance> {
     const directory = await this.localDirectory(target)
     return { local: directory !== null, icon: directory ? (await projectAppearance(directory)).icon : null }

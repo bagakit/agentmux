@@ -1,3 +1,4 @@
+import { parseAvatarPublicationOperation, type AvatarPublicationOperation, type SpaceObjectImageTarget } from '@agentmux/core/object-avatar'
 import { createHash } from 'node:crypto'
 import { constants, lstat, mkdir, open, realpath } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -41,7 +42,7 @@ export async function moteAvatarOperationDirectory(original: string, create = fa
   return current
 }
 
-export async function readMoteAvatarOperation(original: string, target: MoteAvatarTarget, operationId: string): Promise<MoteAvatarOperation | undefined> {
+export async function readAvatarPublicationOperation(original: string, target: MoteAvatarTarget | SpaceObjectImageTarget, operationId: string): Promise<AvatarPublicationOperation<unknown> | undefined> {
   parseMoteAvatarOperationId(operationId)
   try {
     const file = join(await moteAvatarOperationDirectory(original), operationId + '.json')
@@ -58,8 +59,12 @@ export async function readMoteAvatarOperation(original: string, target: MoteAvat
     if (record.schema !== 'agentmux.avatar-operation.v1' || avatarSeriesCanonical(record.target) !== avatarSeriesCanonical(target) ||
       record.operation?.operationId !== operationId || !/^sha256:[a-f0-9]{64}$/u.test(record.operation.requestHash) ||
       !['intent', 'asset', 'publication-unknown', 'published'].includes(record.operation.phase) || !['unknown', 'confirmed'].includes(record.operation.durability) ||
-      record.operation.phase !== 'intent' && !isMoteAvatarSeriesChoice(record.operation.choice) || record.operation.durability === 'confirmed' && record.operation.phase !== 'published')
+      !('kind' in target) && record.operation.phase !== 'intent' && !isMoteAvatarSeriesChoice(record.operation.choice) || record.operation.durability === 'confirmed' && record.operation.phase !== 'published')
       throw new Error('The original avatar receipt is unreadable. Keep this operationId and inspect its original file.')
-    return record.operation
+    return parseAvatarPublicationOperation(record.operation, operationId, !('kind' in target))
   } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined; throw error }
+}
+
+export async function readMoteAvatarOperation(original: string, target: MoteAvatarTarget, operationId: string): Promise<MoteAvatarOperation | undefined> {
+  return await readAvatarPublicationOperation(original, target, operationId) as MoteAvatarOperation | undefined
 }

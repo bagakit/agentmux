@@ -1,3 +1,4 @@
+import { isObjectAvatarMethod, parseObjectAvatarParams, parseObjectAvatarResult } from './object-avatar.js'
 import { parseTailcatConfigurationParams, parseTailcatConfigurationResult } from './public-rpc-tailcat-configuration.js'
 import { parseTerminalControl, parseTerminalControlResult, parseTerminalControlInspect, parseTerminalControlInspection } from './terminal-control.js'
 import { parseFileStatParams, parseFileStatResult, parseFileMkdirParams, parseFileMkdirResult, parseFileMutationInspectParams, parseFileMutationInspectResult } from './public-rpc-file-path.js'
@@ -463,6 +464,7 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
     if (isCapsuleMethod(method)) return parseCapsuleRpcResult(method, value, parseCapsuleRpcParams(method, params)) as unknown as Record<string, unknown>
     if (method === 'app.search') return parseAgentMuxSearchPage(value, parseAgentMuxSearchInput(params)) as unknown as Record<string, unknown>
     if (isGoalDelegationMethod(method)) return parseGoalDelegationRpcResult(method, value, parseGoalDelegationParams(method, params)) as unknown as Record<string, unknown>
+    if (isObjectAvatarMethod(method)) return parseObjectAvatarResult(method, value, parseObjectAvatarParams(method, params)) as unknown as Record<string, unknown>
     if (isMoteAvatarWriteMethod(method)) return parseMoteAvatarWriteResult(method, value, parseMoteAvatarWriteParams(method, params)) as unknown as Record<string, unknown>
     if (isMoteAvatarSeriesMethod(method)) return parseMoteAvatarSeriesResult(method, value, parseMoteAvatarSeriesParams(method, params)) as unknown as Record<string, unknown>
     if (isAppCaptureMethod(method)) return parseAppCaptureResult(method, value, parseAppCaptureParams(method, params)) as unknown as Record<string, unknown>

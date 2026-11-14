@@ -1,46 +1,19 @@
-import { createHash } from 'node:crypto'
-import { join } from 'node:path'
-import { savedMoteAvatarSnapshot, moteAvatarOperationDirectory, readMoteAvatarOperation } from '@agentmux/host/mote-avatar-state'
 import { nativeTheme } from 'electron'
-import { DEFAULT_THEME_ID, resolveTheme } from '@agentmux/client-ui/theme'
-import { moteAvatarSvg } from '@agentmux/client-ui/mote-avatar-svg'
-import { isSpaceIconId } from '@agentmux/client-ui/space-icon-ids'
-import { durableWriteFile } from '@agentmux/core'
-import { avatarSeriesCanonical, isMoteAvatarSeriesChoice, type MoteAvatarSeriesChoice } from '@agentmux/core/mote-avatar-series'
-import { parseMoteAvatarSave, parseMoteAvatarTarget,
-  type MoteAvatarTarget, type MoteAvatarSave, type MoteAvatarOperation, type MoteAvatarRead, type MoteAvatarSaveResult } from '@agentmux/core/mote-avatar-write'
+import { avatarSeriesCanonical, isMoteAvatarSeriesChoice } from '@agentmux/core/mote-avatar-series'
+import { parseMoteAvatarSave, parseMoteAvatarTarget, type MoteAvatarTarget, type MoteAvatarSave,
+  type MoteAvatarRead, type MoteAvatarSaveResult, type MoteAvatarOperation } from '@agentmux/core/mote-avatar-write'
+import { avatarActorIdentity, parseAvatarActor, type AvatarExecutionContext, type SpaceObjectImageTarget } from '@agentmux/core/object-avatar'
 import type { AppConfig } from '../shared/contracts.js'
-import { isMoteFace, type MoteAvatarImage, type MoteAvatarInput, type MoteAvatarRef } from '../shared/mote-avatars.js'
+import type { MoteAvatarImage, MoteAvatarInput, MoteAvatarRef } from '../shared/mote-avatars.js'
 import { rasterizeMoteAvatar } from './mote-avatar-raster.js'
 import type { ConfigOwner } from './config-owner.js'
 import type { MoteAvatarSeriesOwner } from './mote-avatar-series.js'
 import type { ScratchTopics } from './scratch-topics.js'
 import type { ConfigStore } from './config-store.js'
-
-const hash = (value: string) => 'sha256:' + createHash('sha256').update(value).digest('hex')
+import { AvatarPublicationWriter } from './avatar-publication.js'
+import { moteAvatarSnapshot, moteAvatarRevision } from './mote-avatar-snapshot.js'
+export { moteAvatarRevision } from './mote-avatar-snapshot.js'
 const message = (error: unknown) => (error instanceof Error ? error.message : String(error)).slice(0,2048)
-function rawChoice(config: AppConfig, target: MoteAvatarTarget): unknown {
-  const icons = config.appearance.spaceObjectIcons
-  return icons && Object.hasOwn(icons,target.objectKey) ? icons[target.objectKey] : undefined
-}
-function avatarSnapshot(config: AppConfig, target: MoteAvatarTarget, prefersDark: boolean) {
-  const value = rawChoice(config,target)
-  let svg: string | null = null, issue: string | undefined
-  try {
-    if (value == null || isSpaceIconId(value)) {
-      const appearance = config.appearance, id = appearance.themeId ?? DEFAULT_THEME_ID
-      const theme = resolveTheme({ themeId: id, appAppearance: appearance.appAppearance ?? 'dark',
-        customThemes: appearance.customThemes && Object.hasOwn(appearance.customThemes, id) ? { [id]: appearance.customThemes[id] } : {} }, prefersDark)
-      if (theme.issues.length) throw new Error(theme.issues.map(item => item.message).join(' '))
-      svg = moteAvatarSvg(value ?? null, theme)
-    } else if (isMoteFace(value)) svg = moteAvatarSvg(value)
-  } catch (error) { issue = message(error) }
-  return { ...savedMoteAvatarSnapshot(config.appearance, target.objectKey, svg ?? undefined), svg, issue }
-}
-export function moteAvatarRevision(config: AppConfig, target: MoteAvatarTarget, prefersDark = true): string {
-  return avatarSnapshot(config, target, prefersDark).revision
-}
-
 /** Production IPC, native RPC and bounded fixtures share the actual original owners. */
 export function createMoteAvatarWriter(config:ConfigOwner,sources:MoteAvatarSeriesOwner,topics:ScratchTopics,store:ConfigStore):MoteAvatarWriter {
   const workspace=(target:MoteAvatarTarget)=>{
@@ -60,7 +33,7 @@ export function createMoteAvatarWriter(config:ConfigOwner,sources:MoteAvatarSeri
 
 /** Original ConfigOwner/PNG owner remain authoritative; this journal contains history only. */
 export class MoteAvatarWriter {
-  private readonly active = new Map<string,Promise<void>>()
+  private readonly publication: AvatarPublicationWriter
   constructor(private readonly config: ConfigOwner, private readonly sources: MoteAvatarSeriesOwner,
     private readonly original: {
       directory(target:MoteAvatarTarget):Promise<string>;
@@ -70,23 +43,23 @@ export class MoteAvatarWriter {
       prefersDark():boolean;
       /** Original configuration owner must acknowledge the exact saved bytes and directory sync. */
       confirm(saved:AppConfig):Promise<void>
-    }) {}
+    }) {
+    const target = (value: MoteAvatarTarget | SpaceObjectImageTarget): MoteAvatarTarget => {
+      if ('kind' in value) throw new Error('This is not the original Mote avatar target.')
+      return value
+    }
+    this.publication = new AvatarPublicationWriter(config, sources, {
+      directory: value => original.directory(target(value)), save: (value, input) => original.save(target(value), input),
+      prefersDark: original.prefersDark, confirm: original.confirm
+    })
+  }
 
-  private async journalDirectory(target:MoteAvatarTarget, create=false):Promise<string> {
-    return moteAvatarOperationDirectory(await this.original.directory(target), create)
-  }
-  private async inspect(target:MoteAvatarTarget, operationId:string):Promise<MoteAvatarOperation|undefined> {
-    return readMoteAvatarOperation(await this.original.directory(target), target, operationId)
-  }
-  private async record(target:MoteAvatarTarget,operation:MoteAvatarOperation):Promise<void> {
-    await durableWriteFile(join(await this.journalDirectory(target,true),operation.operationId+'.json'),JSON.stringify({schema:'agentmux.avatar-operation.v1',target,operation})+'\n',{requireDirectorySync:true})
-  }
   async read(rawTarget:MoteAvatarTarget,operationId?:string):Promise<MoteAvatarRead> {
     const target=parseMoteAvatarTarget(rawTarget)
     await this.original.directory(target)
-    const current=await this.config.inspect(config=>avatarSnapshot(config,target,this.original.prefersDark()))
+    const current=await this.config.inspect(config=>moteAvatarSnapshot(config,target,this.original.prefersDark()))
     const result:MoteAvatarRead={target,choice:current.choice,revision:current.revision,issues:current.issue ? [current.issue] : []}
-    if (operationId!==undefined) { const operation=await this.inspect(target,operationId);if (operation) result.operation=operation }
+    if (operationId!==undefined) { const operation=await this.publication.inspect(target,operationId);if (operation) result.operation=operation as MoteAvatarOperation }
     if (isMoteAvatarSeriesChoice(current.choice)) {
       try { result.image=await this.original.read(target,current.choice.image) } catch(error) { result.issues.push(message(error)) }
       try { const {origin,seriesId,entryId,revision}=current.choice.source;const prepared=await this.sources.preview({source:{origin,seriesId,entryId},expectedRevision:revision});if (avatarSeriesCanonical(prepared.definition)!==avatarSeriesCanonical(current.choice.definition)) throw new Error('The exact original definition is unavailable.');result.source={state:'available'} }
@@ -105,60 +78,10 @@ export class MoteAvatarWriter {
     }
     return result
   }
-  async save(raw:MoteAvatarSave):Promise<MoteAvatarSaveResult> {
-    const input=structuredClone(parseMoteAvatarSave(raw)), key=avatarSeriesCanonical(input.target)
-    const previous=this.active.get(key)
-    let release!:()=>void
-    const complete=new Promise<void>(resolve=>{release=resolve})
-    const reserved=Promise.resolve(previous).then(()=>complete)
-    this.active.set(key,reserved)
-    await previous
-    try { return await this.commit(input) } finally { release();if (this.active.get(key)===reserved) this.active.delete(key) }
-  }
-  private async commit(input:MoteAvatarSave):Promise<MoteAvatarSaveResult> {
-    const {target,operationId}=input, requestHash=hash(avatarSeriesCanonical(input))
-    const originalWorkspace=await this.config.inspect(current=>{
-      const workspace=current.workspaces.find(value=>value.id===target.workspaceId)
-      if (!workspace) throw new Error('The original Mote workspace is unavailable.')
-      return {id:workspace.id,hostId:workspace.hostId,path:workspace.path,kind:workspace.kind}
-    })
-    // Exact target proof is repeated by the original asset owner and each journal write.
-    await this.original.directory(target)
-    let operation=await this.inspect(target,operationId)
-    if (operation && operation.requestHash!==requestHash) return {state:'refused',issue:'This operationId belongs to a different original request.',operation,current:await this.read(target,operationId)}
-    if (operation && ['publication-unknown','published'].includes(operation.phase)) return {state:operation.phase==='published'&&operation.durability==='confirmed'?'saved':'unknown',operation,current:await this.read(target,operationId)}
-    try {
-      const {origin,seriesId,entryId,revision}=input.source
-      const prepared=await this.sources.preview({source:{origin,seriesId,entryId},expectedRevision:revision})
-      if (avatarSeriesCanonical(prepared.definition)!==avatarSeriesCanonical(input.definition)) throw new Error('The selected original avatar definition changed.')
-      await this.config.inspect(config=>{if (moteAvatarRevision(config,target,this.original.prefersDark())!==input.beforeRevision) throw new Error('This Mote avatar changed while editing. Read its current choice before saving again.')})
-    } catch(error) { return {state:'refused',issue:message(error),...(operation?{operation}:{}),current:await this.read(target,operationId)} }
-    try {
-      operation??={operationId,requestHash,phase:'intent',durability:'unknown'}
-      await this.record(target,operation)
-      const image=await this.original.save(target,{mimeType:'image/png',dataUrl:input.pngDataUrl})
-      const choice:MoteAvatarSeriesChoice={kind:'series',source:input.source,definition:input.definition,parameters:input.parameters,image}
-      operation={operationId,requestHash,phase:'asset',durability:'unknown',choice}
-      await this.record(target,operation)
-      // Persist ambiguity BEFORE attempting publication. A crash/lost ACK never permits replay.
-      operation={...operation,phase:'publication-unknown'}
-      await this.record(target,operation)
-      await this.original.directory(target)
-      const saved=await this.config.update(current=>{
-        const workspace=current.workspaces.find(value=>value.id===target.workspaceId)
-        if (!workspace || avatarSeriesCanonical({id:workspace.id,hostId:workspace.hostId,path:workspace.path,kind:workspace.kind})!==avatarSeriesCanonical(originalWorkspace))
-          throw new Error('The original Mote workspace changed before publication. Its current avatar and work remain available.')
-        if (moteAvatarRevision(current,target,this.original.prefersDark())!==input.beforeRevision) throw new Error('This Mote avatar changed while the image was saving. Its later choice is retained.')
-        return {...current,appearance:{...current.appearance,spaceObjectIcons:{...current.appearance.spaceObjectIcons,[target.objectKey]:choice}}}
-      })
-      await this.original.confirm(saved)
-      operation={...operation,phase:'published',durability:'confirmed'}
-      await this.record(target,operation)
-      return {state:'saved',operation,current:await this.read(target,operationId)}
-    } catch(error) {
-      // Retain PNG/current preference and the original request. Never infer prior publication
-      // from today's value or start a replacement operation automatically.
-      return {state:'unknown',...(operation?{operation:{...operation,issue:message(error)}}:{}),issue:message(error),current:await this.read(target,operationId)}
-    }
+  async save(raw:MoteAvatarSave, context?: AvatarExecutionContext):Promise<MoteAvatarSaveResult> {
+    const input = structuredClone(parseMoteAvatarSave(raw))
+    const readerIdentity = context ? avatarActorIdentity(parseAvatarActor(context.actor, 'CONTROL_PERMISSION_DENIED')) : undefined
+    const result = await this.publication.save(input, context)
+    return { ...result, current: { ...await this.read(input.target, input.operationId), ...(readerIdentity ? { readerIdentity } : {}) } } as MoteAvatarSaveResult
   }
 }

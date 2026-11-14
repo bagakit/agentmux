@@ -401,16 +401,16 @@ const api: AgentMuxPreloadApi = {
     preview: params => ipcRenderer.invoke('moteAvatars:preview', params),
     createSeries: params => ipcRenderer.invoke('moteAvatars:createSeries', params),
     revealSeries: params => ipcRenderer.invoke('moteAvatars:revealSeries', params),
-    read: params => ipcRenderer.invoke('moteAvatars:read', params),
-    save: params => ipcRenderer.invoke('moteAvatars:save', params)
+    read: async params => unwrapSessionInputOperationResult(await ipcRenderer.invoke('moteAvatars:read', params)),
+    save: async params => unwrapSessionInputOperationResult(await ipcRenderer.invoke('moteAvatars:save', params))
   },
   topics: {
     call: (method, params) => ipcRenderer.invoke('topics:call', method, params)
   },
+  objectAvatars: { call: async (method, input) => unwrapSessionInputOperationResult(await ipcRenderer.invoke('spaceObjects:avatar', method, input)) },
   spaceObjects: {
     appearance: (target: SpaceObjectImageTarget) => ipcRenderer.invoke('spaceObjects:appearance', target),
     previewAvatar: (target: SpaceObjectImageTarget, input: ObjectAvatarInput) => ipcRenderer.invoke('spaceObjects:previewAvatar', target, input),
-    saveAvatar: (target: SpaceObjectImageTarget, input: ObjectAvatarInput) => ipcRenderer.invoke('spaceObjects:saveAvatar', target, input),
     readAvatar: (target: SpaceObjectImageTarget, ref: ObjectAvatarRef) => ipcRenderer.invoke('spaceObjects:readAvatar', target, ref)
   },
   scratch: {
@@ -495,6 +495,9 @@ const api: AgentMuxPreloadApi = {
       ipcRenderer.on(NATIVE_OVERLAY_WARNING_CHANNEL, wrapped)
       return () => ipcRenderer.off(NATIVE_OVERLAY_WARNING_CHANNEL, wrapped)
     },
+    readObjectAvatarRequests: target => ipcRenderer.invoke('ui:readObjectAvatarRequests', target).then(unwrapIpcResult<import('../shared/object-avatar-request').ObjectAvatarRequestRecord[]>),
+    keepObjectAvatarRequest: request => ipcRenderer.invoke('ui:keepObjectAvatarRequest', request).then(unwrapIpcResult<void>),
+    retireObjectAvatarRequest: request => ipcRenderer.invoke('ui:retireObjectAvatarRequest', request).then(unwrapIpcResult<void>),
     readFileViewReading: owner => ipcRenderer.invoke('ui:readFileViewReading', owner).then(unwrapIpcResult<import('../shared/workbench-user-state').FileViewReadingRecord | null>),
     writeFileViewReading: record => ipcRenderer.invoke('ui:writeFileViewReading', record).then(unwrapIpcResult<import('../shared/workbench-user-state').FileViewReadingReceipt | null>),
     readWorkbenchState: () => ipcRenderer.invoke('ui:readWorkbenchState'),

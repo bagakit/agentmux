@@ -210,7 +210,8 @@ export class TopicKnowledgeOwner implements AgentMuxRpcTopicsOwner {
     return topic
   }
   private topicFact(topic: ScratchTopicSnapshot, spatial: TopicSpatialInspection): KnowledgeTopic {
-    return { topicId: topic.id, hostId: this.scope().hostId, zoneId: spatial.zoneId,
+    return { topicId: topic.id, hostId: this.scope().hostId, zoneId: spatial.zoneId, workspaceId: this.scope().id,
+      ...(spatial.contentIdentity === undefined ? {} : { contentIdentity: spatial.contentIdentity }),
       directoryPath: scratchTopicPhysicalPath(this.scope(), topic), title: topic.title, summary: topic.summary,
       categorySpaceIds: spatial.categorySpaceIds, chatIds: spatial.chatIds, spatialRevision: spatial.spatialRevision, ...(spatial.contentKind ? { contentKind: spatial.contentKind } : {}),
       ...(topic.readError ? { readError: topic.readError } : {}) }

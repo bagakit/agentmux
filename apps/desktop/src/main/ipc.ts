@@ -1,3 +1,6 @@
+import { SpaceObjectAvatarOwner } from './space-object-avatar.js'
+import { createSpaceObjectAvatarResolver } from './space-object-avatar-target.js'
+import { isObjectAvatarMethod } from '@agentmux/core/object-avatar'
 import { configureChannelHeader, configureGoalsCommonActions, executeSettingsPreferencesControl } from './settings-preferences-control.js'
 import { isSettingsPreferenceMethod } from '@agentmux/core'
 import { SettingsTailcatConfiguration } from './settings-tailcat-configuration.js'
@@ -1475,7 +1478,7 @@ export async function registerIpc(args: {
     return moteAvatars.call('space.mote.avatar.preview', params)
   })
   handleWithEvent('moteAvatars:read', async (event, params: MoteAvatarWriteParameterMap['space.mote.avatar.read']) => {
-    return moteAvatars.call('space.mote.avatar.read', params)
+    return sessionInputOperationResult(() => callUserRpc('space.mote.avatar.read', params))
   })
   handleWithEvent('moteAvatars:createSeries', async (event, params: MoteAvatarSeriesParameterMap['space.mote.avatar.series.create']) => {
     return moteAvatars.call('space.mote.avatar.series.create', params)
@@ -1484,7 +1487,7 @@ export async function registerIpc(args: {
     return moteAvatars.call('space.mote.avatar.series.reveal', params)
   })
   handleWithEvent('moteAvatars:save', async (event, params: MoteAvatarWriteParameterMap['space.mote.avatar.save']) => {
-    return moteAvatars.call('space.mote.avatar.save', params)
+    return sessionInputOperationResult(() => callUserRpc('space.mote.avatar.save', params))
   })
   const topicKnowledge = new TopicKnowledgeOwner(args.scratchTopics, files, () => workspace(config, SCRATCH_WORKSPACE_ID))
   topicKnowledge.setFileReadPort(publicFiles)
@@ -1500,7 +1503,11 @@ export async function registerIpc(args: {
   })
   handleWithEvent('spaceObjects:previewAvatar', async (event, target: SpaceObjectImageTarget, input: ObjectAvatarInput) => { return spaceObjectImages.preview(target, input)
   })
-  handleWithEvent('spaceObjects:saveAvatar', async (event, target: SpaceObjectImageTarget, input: ObjectAvatarInput) => { return spaceObjectImages.save(target, input)
+  const objectAvatars = new SpaceObjectAvatarOwner(configOwner, args.configStore, spaceObjectImages,
+    createSpaceObjectAvatarResolver(configOwner, topicKnowledge, spatialState))
+  handleWithEvent('spaceObjects:avatar', (_event, method: import('@agentmux/core/object-avatar').ObjectAvatarMethod, input: unknown) => {
+    if (!isObjectAvatarMethod(method)) throw new Error('Choose an exact original object avatar method.')
+    return sessionInputOperationResult(() => callUserRpc(method, input as never))
   })
   handleWithEvent('spaceObjects:readAvatar', async (event, target: SpaceObjectImageTarget, ref: ObjectAvatarRef) => { return spaceObjectImages.read(target, ref)
   })
@@ -1551,6 +1558,9 @@ export async function registerIpc(args: {
     if (typeof operationId !== 'string' || !operationId) throw new Error('An exact original name operation is required.')
     return spatialState.confirmNameCommit(operationId)
   })
+  handleWithEvent('ui:readObjectAvatarRequests', (_event, target: import('@agentmux/core/object-avatar').SpaceObjectImageTarget) => ipcResult(() => workbenchUserState.readObjectAvatarRequests(target)))
+  handleWithEvent('ui:keepObjectAvatarRequest', (_event, request: import('../shared/object-avatar-request').ObjectAvatarAssetRequest) => ipcResult(() => workbenchUserState.keepObjectAvatarRequest(request)))
+  handleWithEvent('ui:retireObjectAvatarRequest', (_event, request: import('../shared/object-avatar-request').ObjectAvatarAssetRequest) => ipcResult(() => workbenchUserState.retireObjectAvatarRequest(request)))
   handleWithEvent('ui:readFileViewReading', (_event, owner: import('../shared/workbench-user-state').FileViewReadingOwner) => ipcResult(() => {
     return workbenchUserState.readFileViewReading(owner)
   }))
@@ -2650,6 +2660,7 @@ export async function registerIpc(args: {
     git: publicGit,
     fileUploads: new FileUploadOwner(),
     topics: { call: (method, params, context) => args.runtime.callOriginalCore('local', method, params as never, context ?? { transport: 'unix' }) as Promise<import('@agentmux/core').TopicResult<typeof method>> },
+    objectAvatars,
     moteAvatars,
 
 

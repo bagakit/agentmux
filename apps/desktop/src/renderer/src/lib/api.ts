@@ -796,10 +796,10 @@ const mockApi: AgentMuxDesktopApi = {
     },
     reveal: async () => {}
   },
+  objectAvatars: { call: async () => { throw new Error('Object avatar publication requires its original Desktop owner and authenticated actor. The exact request and current choice are retained.') } },
   spaceObjects: {
     appearance: async () => { throw new Error('Local image recognition requires the desktop filesystem owner.') },
     previewAvatar: async () => { throw new Error('Avatar image processing is not available in the web preview.') },
-    saveAvatar: async () => { throw new Error('Avatar file storage is not available in the web preview.') },
     readAvatar: async () => { throw new Error('Avatar file storage is not available in the web preview.') }
   },
   scratch: {
@@ -931,6 +931,9 @@ const mockApi: AgentMuxDesktopApi = {
     onNativeBrowserVisibility: () => () => {},
     publishNativeOverlays: async () => ({ projected: 0, capturedPixels: 0 }),
     onNativeOverlayWarning: () => () => {},
+    readObjectAvatarRequests: async () => [],
+    keepObjectAvatarRequest: async () => { throw new Error('Original avatar request preservation requires the Desktop user-state owner. The save was not sent.') },
+    retireObjectAvatarRequest: async () => { throw new Error('Original avatar request retirement requires the Desktop user-state owner.') },
     readFileViewReading: async () => null,
     writeFileViewReading: async () => null,
     readWorkbenchState: async () => null,
