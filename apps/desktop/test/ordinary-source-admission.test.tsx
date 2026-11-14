@@ -4,7 +4,7 @@ import { afterEach, expect, test, vi } from 'vitest'
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { AgentMuxError } from '../../../packages/core/src/errors'
+import { AgentMuxError } from '@agentmux/core'
 import { AgentMuxSpatialStateStore } from '../../../packages/core/src/spatial-state'
 import { spatialAgentOpenDigest, spatialAgentOpenRecord } from '../../../packages/core/src/spatial-agent-open'
 import { rpcControlRequest } from '../../../packages/core/src/rpc-business-codec'
@@ -40,6 +40,7 @@ test.each([false, true])('ordinary Source Start crosses the real Main, signed pu
   cleanup.push(() => rm(root, { recursive: true, force: true }))
   const spatial = new AgentMuxSpatialStateStore(join(root, 'spatial.json'))
   const project = { id: 'source-project', hostId: 'local', name: 'Source project', path: '/source/project' }
+  const agentWorkspacePath = '/executor/agent-workspaces/original-target-session'
   const folder = await spatial.registerFolder(project)
   const owner = { runtimeId: 'runtime-B', ownerInstanceId: 'source-instance', protocolVersion: 2, processId: process.pid, ctxmux: null, availability: 'connected' as const }
   let session: AgentMuxAgentSession | undefined, frozen: AgentExecutionOpenInput | undefined
@@ -51,10 +52,13 @@ test.each([false, true])('ordinary Source Start crosses the real Main, signed pu
       return session
     }),
     listHostExecutors: vi.fn(async (params: { refresh: boolean; executorId: string }) => await route.original.client.listHostExecutors(params)),
-    hostEnvironment: vi.fn(async () => ({ homeDirectory: '/executor/home' })),
+    hostEnvironment: vi.fn(async (selector?: { agentSessionId: string }) => selector ? { homeDirectory: '/executor/home',
+      agentWorkspace: { runtimeId: 'runtime-D', agentSessionId: selector.agentSessionId, workspacePath: agentWorkspacePath } } : { homeDirectory: '/executor/home' }),
     writeAgent: input, pasteAgent: input, submitAgentPrompt: input
   }
+  const reference = () => ({ bindingId: frozen!.bindingId, agentSessionId: frozen!.agent.agentSessionId, createOperationId: frozen!.agent.createOperationId })
   const bindings = {
+    admit: vi.fn(async (value: AgentExecutionOpenInput) => { frozen = structuredClone(value); return reference() }),
     create: vi.fn(async (value: AgentExecutionOpenInput) => {
       frozen = structuredClone(value)
       session = { kind: 'agent', agentSessionId: value.agent.agentSessionId, hostId: 'local', providerId: 'claude', executorId: value.agent.executorId,
@@ -64,10 +68,18 @@ test.each([false, true])('ordinary Source Start crosses the real Main, signed pu
           createdRun: { runId: 'controlled-target-run' }, initialPrompt: 'unconfirmed' } } as AgentMuxAgentSession
       return { session, creation: session.creation!, execution: {} }
     }),
-    inspect: vi.fn(async () => frozen ? { bindingId: frozen.bindingId, agentHostId: frozen.agentHostId, resourceHostId: frozen.resourceHostId,
+    inspect: vi.fn(async (bindingId: string, view?: 'association') => frozen && bindingId === frozen.bindingId ? { bindingId: frozen.bindingId, agentHostId: frozen.agentHostId, resourceHostId: frozen.resourceHostId,
       agentSessionId: frozen.agent.agentSessionId, resourceWorkspacePath: frozen.resourceWorkspacePath,
-      continuation: { bindingId: frozen.bindingId, agentSessionId: frozen.agent.agentSessionId, createOperationId: frozen.agent.createOperationId }, state: 'connected' } : null),
-    continueOriginal: vi.fn(async () => { throw Error('No continuation belongs to this one-admission proof.') })
+      continuation: reference(), state: session?.creation?.createOperationId === frozen.agent.createOperationId ? 'connected' as const : 'unavailable' as const,
+      ...(view === 'association' ? { association: { state: 'confirmed' as const, reference: reference(), agentRuntimeId: frozen.agentRuntimeId,
+        resourceRuntimeId: frozen.resourceRuntimeId, resourceWorkspacePath: frozen.resourceWorkspacePath,
+        agent: { executorId: frozen.agent.executorId, executorRevision: frozen.agent.executorRevision, workspacePath: frozen.agent.workspacePath },
+        ...(frozen.sourceRequestDigest ? { sourceRequestDigest: frozen.sourceRequestDigest } : {}) } } : {}) } : null),
+    continueOriginal: vi.fn(async () => {
+      if (!frozen) throw Error('The original frozen intent is absent.')
+      const created = session?.creation?.createOperationId === frozen.agent.createOperationId ? { session, creation: session.creation! } : await bindings.create(frozen)
+      return { ...created, execution: await bindings.inspect(frozen.bindingId) }
+    })
   }
   const localLookup = vi.fn(async () => { throw Error('The project Core cannot substitute its local Session catalogue.') })
   const executionHost = vi.fn(async (hostId: string, adoptedRoute: AdoptedHostRoute | undefined, access: HostRouteExecutionAccess | undefined) => {
@@ -120,14 +132,16 @@ test.each([false, true])('ordinary Source Start crosses the real Main, signed pu
   const state = (await spatial.read())!, admitted = spatialAgentOpenRecord(state.graph, original.request.operationId!)!
   expect(admitted).toMatchObject({ agentSessionId: 'original-target-session', requestId: original.request.operationId,
     placement: { runtimeId: owner.runtimeId, hostId: 'local', workspacePath: '/source/project', workspaceId: project.id },
-    execution: { runtimeId: 'runtime-D', hostId: 'collision', workspacePath: '/executor/home', adoptedRoute: route.route } })
+    execution: { runtimeId: 'runtime-D', hostId: 'collision', workspacePath: agentWorkspacePath, adoptedRoute: route.route } })
+  expect(d.hostEnvironment.mock.calls.filter(([selector]) => selector !== undefined)).toEqual([[{ agentSessionId: 'original-target-session' }]])
   expect(admitted.digest).toBe(spatialAgentOpenDigest(rpcControlRequest('agent.open', original.request) as never))
   expect(frozen).toMatchObject({ agentRuntimeId: 'runtime-D', agentRoute: route.route, resourceRuntimeId: owner.runtimeId, resourceWorkspacePath: '/source/project',
-    agent: { agentSessionId: admitted.agentSessionId, createOperationId: admitted.requestId, prompt: '  Work in the original source project\n', launchOptions: { model: 'original-unlisted-value' }, agentMuxNote: ' separate caller note\n' } })
+    agent: { agentSessionId: admitted.agentSessionId, createOperationId: admitted.requestId, workspacePath: agentWorkspacePath, prompt: '  Work in the original source project\n', launchOptions: { model: 'original-unlisted-value' }, agentMuxNote: ' separate caller note\n' } })
   const snapshot = await readSpaceSnapshot(route.rpc, target.reference)
-  expect(snapshot.scope?.regions).toContainEqual(expect.objectContaining({ regionId: admitted.address.regionId, creationOperationId: admitted.requestId, agentSessionId: admitted.agentSessionId }))
+  expect(snapshot.scope?.regions).toContainEqual(expect.objectContaining({ regionId: admitted.address.regionId, creationOperationId: admitted.requestId, agentSessionId: admitted.agentSessionId,
+    execution: expect.objectContaining({ cwd: agentWorkspacePath }) }))
   expect(original.request.content).toMatchObject({ kind: 'new-agent', agentTarget: { hostId: 'collision', runtimeId: 'runtime-D', adoptedRoute: route.route } })
-  expect(bindings.continueOriginal).not.toHaveBeenCalled(); expect(localLookup).not.toHaveBeenCalled(); expect(input).not.toHaveBeenCalled()
+  expect(bindings.admit).toHaveBeenCalledOnce(); expect(bindings.continueOriginal).toHaveBeenCalledOnce(); expect(localLookup).not.toHaveBeenCalled(); expect(input).not.toHaveBeenCalled()
   expect(original.origin?.names).toEqual({ agentName: 'Private original Agent name', tabName: 'Private original Tab name' })
   expect(useAppStore.getState().tabs[tab.id]?.regions[slot.regionId]?.kind).toBe('launcher')
   expect(useAppStore.getState().agentComposerDrafts[slot.regionId]).toBe('  Work in the original source project\n')
