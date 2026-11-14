@@ -3,8 +3,9 @@ import type { ConversationSourceDisplay } from '../lib/conversation-sources.js'
 import { ConversationToolPayload } from './ConversationToolPayload.js'
 import type { AgentSessionHistoryContentPart } from '@agentmux/core'
 import { SemanticIcon } from '../theme/icons.js'
-import { memo, useEffect, useId, useMemo, useState } from 'react'
+import { memo, useId, useMemo, useRef, useState } from 'react'
 import { stepTitle } from '../lib/activity-step-summary.js'
+import { ConversationDisclosure } from './ConversationDisclosure.js'
 
 export type ConversationToolTraceProps = {
   sources?: ConversationSourceDisplay | undefined
@@ -24,9 +25,8 @@ export const ConversationToolTrace = memo(function ConversationToolTrace({
 }: ConversationToolTraceProps) {
   const [localOpen, setLocalOpen] = useState(false)
   const open = expanded ?? localOpen
-  const [presented, setPresented] = useState(Boolean(expanded))
-  useEffect(() => { if (open) setPresented(true) }, [open])
   const panelId = useId()
+  const triggerRef = useRef<HTMLButtonElement>(null)
   const sourceIdentity = useMemo(() => ({}), [part.kind, traceId, copyIdentity, traceId === undefined && copyIdentity === undefined ? part : undefined])
   const isCall = part.kind === 'tool-call'
   const text = isCall ? part.input : part.output
@@ -36,10 +36,9 @@ export const ConversationToolTrace = memo(function ConversationToolTrace({
   return (
     <div className="conversation-tool-trace" data-trace-kind={part.kind}
       {...(failed ? { 'data-status': 'failed' } : {})} data-call-id={part.callId} data-trace-id={traceId}>
-      <button type="button" className="conversation-tool-trace__row" aria-expanded={open}
+      <button ref={triggerRef} type="button" className="conversation-tool-trace__row" aria-expanded={open}
         aria-controls={panelId} data-trace-id={traceId}
         onClick={() => {
-          if (!open) setPresented(true)
           if (onToggle) onToggle(!open)
           else setLocalOpen(!open)
         }} title={name}>
@@ -49,10 +48,10 @@ export const ConversationToolTrace = memo(function ConversationToolTrace({
         {failed ? <span className="conversation-tool-trace__failure">Failed</span> : null}
         <SemanticIcon name="navigation.disclosure" className="conversation-tool-trace__chevron" size={12} aria-hidden="true" />
       </button>
-      {open || presented ? <div id={panelId} className="conversation-tool-trace__payload" hidden={!open} inert={!open}>
+      <ConversationDisclosure id={panelId} className="conversation-tool-trace__payload" open={open} triggerRef={triggerRef}>
         <ConversationToolPayload text={text} identity={sourceIdentity} sourceIdentity={sourceIdentity} {...(part.callId ? { callId: part.callId } : {})}
           copyLabel={isCall ? 'Copy tool input' : 'Copy tool output'} />
-      </div> : null}
+      </ConversationDisclosure>
     </div>
   )
 })

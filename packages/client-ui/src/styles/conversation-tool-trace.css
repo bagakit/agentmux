@@ -1,19 +1,25 @@
 .conversation-tool-trace { min-width: 0; margin-block: var(--sp-1); color: var(--text-2); }
-.conversation-tool-trace__row { width: 100%; min-width: 0; min-height: 24px; display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-1) var(--sp-2); border: 0; border-radius: var(--radius-sm); color: inherit; background: transparent; font: inherit; font-size: var(--fs-micro); text-align: left; cursor: pointer; }
+.conversation-tool-trace__row { width: 100%; min-width: 0; min-height: 24px; display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-1) var(--sp-2); border: 0; border-radius: var(--radius-sm); color: inherit; background: transparent; font: inherit; font-size: var(--fs-meta); text-align: left; cursor: pointer; transition: background var(--dur-fast) ease, box-shadow var(--dur-fast) ease; }
 .conversation-tool-trace__row > svg { flex: none; color: var(--text-3); }
 .conversation-tool-trace__row:hover { background: var(--surface-2); }
 .conversation-tool-trace__row:focus-visible { outline: 2px solid var(--green-line); outline-offset: 1px; }
-.conversation-tool-trace__row[aria-expanded="true"] { background: var(--surface-2); }
+.conversation-tool-trace__row[aria-expanded="true"] { color: var(--text); background: var(--surface-2); box-shadow: var(--hl); }
+.conversation-tool-trace__row:active { background: var(--surface-3); box-shadow: inset 0 1px 2px var(--scrim-1); }
 .conversation-tool-trace__title { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.conversation-tool-trace__kind { flex: none; color: var(--text-3); }
+.conversation-tool-trace__kind { flex: none; color: var(--text-3); font-size: var(--fs-micro); }
 .conversation-tool-trace__failure { flex: none; color: var(--red-text); }
 .conversation-tool-trace[data-status="failed"] .conversation-tool-trace__row > svg:first-child { color: var(--red-text); }
-.conversation-tool-trace__chevron { transition: transform var(--dur-fast) ease; }
+.conversation-tool-trace__chevron { transition: transform var(--dur-enter) var(--ease-enter); }
 .conversation-tool-trace__row[aria-expanded="true"] .conversation-tool-trace__chevron { transform: rotate(90deg); }
-.conversation-tool-trace__payload { min-width: 0; padding: var(--sp-2) var(--sp-2) var(--sp-3) 25px; }
+.conversation-tool-trace__payload { min-width: 0; margin-inline-start: 8px; padding: var(--sp-3) var(--sp-2) var(--sp-3) 16px; box-shadow: inset 1px 0 var(--line); }
+.conversation-disclosure .conversation-tool-trace__payload { animation: none; }
 .conversation-tool-trace__payload--direct { padding-inline-start: 0; }
 .conversation-tool-trace__identity { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin-bottom: var(--sp-2); color: var(--text-3); font-size: var(--fs-micro); }
 .conversation-tool-trace__identity code { overflow-wrap: anywhere; }
 .conversation-tool-trace__payload pre { max-height: 320px; overflow: auto; margin: 0; color: var(--text-2); font: var(--fs-micro)/1.6 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
-@media (prefers-reduced-motion: reduce) { .conversation-tool-trace__chevron { transition: none; } }
+.conversation-disclosure { display: grid; grid-template-rows: 0fr; visibility: hidden; transition: grid-template-rows var(--dur-enter) var(--ease-enter), visibility var(--dur-enter) step-end; }
+.conversation-disclosure[data-open="true"] { grid-template-rows: 1fr; visibility: visible; transition: grid-template-rows var(--dur-enter) var(--ease-enter), visibility var(--dur-enter) step-start; }
+.conversation-disclosure__clip { min-height: 0; min-width: 0; overflow: hidden; opacity: 0; transform: translateY(-3px); transition: opacity var(--dur-fast) ease, transform var(--dur-enter) var(--ease-enter); }
+.conversation-disclosure[data-open="true"] > .conversation-disclosure__clip { opacity: 1; transform: none; }
+@media (prefers-reduced-motion: reduce) { .conversation-tool-trace__chevron, .conversation-tool-trace__row, .conversation-disclosure, .conversation-disclosure__clip { transition: none; } }
 @media (pointer: coarse) { .conversation-tool-trace__row { min-height: 44px; } }
