@@ -44,7 +44,7 @@ async function receipt(child: ChildProcess): Promise<{ owner: AgentMuxRuntimeOwn
     child.once('exit', code => { clearTimeout(timer); reject(new Error(`Private Headless exited ${code}: ${errors}`)) })
   })
 }
-export async function headlessFixture(options: { cli?: boolean; memoryStore?: boolean; ownerNodeArgs?: string[] } = {}) {
+export async function headlessFixture(options: { cli?: boolean; memoryStore?: boolean; ownerNodeArgs?: string[]; ownerEntry?: string } = {}) {
   const root = await mkdtemp(fixturePath("tmp/amrr-"))
   const runtimeDirectory = join(root, 'r'), stateDirectory = join(root, 's')
   await Promise.all([mkdir(runtimeDirectory, { mode: 0o700 }), mkdir(join(stateDirectory, 'ctxmux'), { recursive: true, mode: 0o700 }), mkdir(join(root, 'home'), { mode: 0o700 })])
@@ -66,8 +66,8 @@ export async function headlessFixture(options: { cli?: boolean; memoryStore?: bo
     if (daemon.pid && daemon.exitCode === null && daemon.signalCode === null) { daemon.kill('SIGTERM'); await once(daemon, 'exit') }
     await rm(root, { recursive: true, force: true }); throw error
   }
-  const ownerEntry = options.cli ? resolve(import.meta.dirname, '../../dist/headless-runtime-cli.js')
-    : process.env.AGENTMUX_TEST_OWNER_ENTRY ?? resolve(import.meta.dirname, '../fixtures/headless-runtime-worker.mjs')
+  const ownerEntry = options.ownerEntry ?? (options.cli ? resolve(import.meta.dirname, '../../dist/headless-runtime-cli.js')
+    : process.env.AGENTMUX_TEST_OWNER_ENTRY ?? resolve(import.meta.dirname, '../fixtures/headless-runtime-worker.mjs'))
   const ownerArgs = options.cli ? ['serve'] : []
   let server = spawn(process.execPath, [...(options.ownerNodeArgs ?? []), ownerEntry, ...ownerArgs], { env, stdio: ['ignore', 'pipe', 'pipe'] })
   let current: Awaited<ReturnType<typeof receipt>>

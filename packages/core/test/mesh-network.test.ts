@@ -2,6 +2,9 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createServer } from 'node:http'
+import { once } from 'node:events'
+import WebSocket from 'ws'
+import { hashPublisherToken } from '@agentmux/relay/gateway'
 import { afterEach, expect, it, vi } from 'vitest'
 import { fileURLToPath } from 'node:url'
 import { generateKeyPair, exportPublicKey } from '@agentmux/relay/e2ee'
@@ -319,4 +322,32 @@ it.each([
 it('the public link parser refuses a replaced daemon key or a URL carrying another offer', () => {
   const key = generateKeyPair(), original = parseConnectionOffer({ v: 2, serverId: 'original', daemonPublicKeyB64: exportPublicKey(key.publicKey), relay: { endpoint: '127.0.0.1:12345', useTls: false } })
   expect(() => parseMeshNetworkResult('mesh.link', { offer: { ...original, daemonPublicKeyB64: exportPublicKey(generateKeyPair().publicKey) }, url: 'http://127.0.0.1:12345/', observation: {} }, { offer: original })).toThrow()
+})
+
+it.each(['unavailable', 'pending'] as const)('an %s optional endpoint cannot gate original gateway forwarding or Unix Core', async state => {
+  const f = await fixture({ endpoint: () => {
+    if (state === 'unavailable') throw new Error('Original endpoint identity unreadable')
+    return new Promise<never>(() => {})
+  } })
+  const saved = await f.save(f.config({ role: 'gateway', listen: { host: '127.0.0.1', port: 0 },
+    publishers: [{ serverId: 'independent-original-publisher', tokenHash: hashPublisherToken('original-private-publisher-grant') }] }), 'forward-with-optional-endpoint-unconfirmed')
+  await vi.waitFor(async () => expect((await f.rpc.call('mesh.inspect', {})).activeRevision).toBe(saved.settings.revision))
+  const observation = await f.rpc.call('mesh.inspect', {})
+  expect(observation.apply.state).toBe('active')
+  expect(observation.endpoint.state).toBe(state === 'pending' ? 'starting' : 'unavailable')
+  if (observation.gateway.state !== 'listening') throw Error('Original gateway listener missing')
+  const base = `ws://127.0.0.1:${observation.gateway.listener.port}/ws?v=2&serverId=independent-original-publisher`
+  const publisher = new WebSocket(base + '&role=server', { headers: { Authorization: 'Bearer original-private-publisher-grant' } }); cleanup.push(() => publisher.terminate())
+  const syncing = once(publisher, 'message'); await once(publisher, 'open')
+  const sync = await syncing
+  expect(JSON.parse(String(sync[0])).type).toBe('sync')
+  const connected = once(publisher, 'message')
+  const reader = new WebSocket(base + '&role=client'); cleanup.push(() => reader.terminate()); await once(reader, 'open')
+  const connection = JSON.parse(String((await connected)[0]))
+  const data = new WebSocket(base + '&role=server&connectionId=' + connection.connectionId, { headers: { Authorization: 'Bearer original-private-publisher-grant' } }); cleanup.push(() => data.terminate()); await once(data, 'open')
+  const bytes = once(data, 'message'); reader.send('original-forwarding-still-usable')
+  expect(String((await bytes)[0])).toBe('original-forwarding-still-usable')
+  const response = once(reader, 'message'); data.send('original-reply')
+  expect(String((await response)[0])).toBe('original-reply')
+  expect((await f.rpc.call('system.endpoint', {})).publication!.state).toBe('available')
 })
