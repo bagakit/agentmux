@@ -55,7 +55,8 @@ it.each(historicalSources)('reloads and publicly rejoins the original %s intent 
   const start = vi.fn(async () => { throw new Error('Unexpected replacement Run') }), input = vi.fn(async () => { throw new Error('Unexpected input replay') })
   inner.kernel.start = start; inner.kernel.input = input
   const probe = vi.spyOn(client as unknown as { probePreparedAgent: typeof client.probeAgent }, 'probePreparedAgent').mockRejectedValue(new Error('Unexpected executable probe'))
-  const originalInput = { agentSessionId: before.agentSessionId, run: before.run, admission }
+  const originalInput = { agentSessionId: before.agentSessionId, run: before.run, admission,
+    nativeResult: { state: 'unsupported', reason: 'uncorrelated-carrier' } }
   expect(await client.inspectAgentPromptSubmission(key)).toEqual(originalInput)
   expect(parseRpcAgentSession(client.agentSession(before.agentSessionId)).continuity).toEqual(operation)
   const hosted = await hostedTestClient(client); cleanups.push(hosted.dispose)
@@ -81,13 +82,14 @@ it('keeps explicit admission exclusive to the exact manual and input tags', asyn
 })
 
 it.each(['active-manual', 'frontend-retry-budget-exhausted'])('grants the %s reset exception only to exact startup', async reason => {
-  const f = await rpcOwnerFixture(['original']); cleanups.push(f.close)
+  const f = await rpcOwnerFixture(['original'], undefined, () => ({ nativeHandle: { kind: 'provider', providerId: 'codex', sessionId: 'original-native' } })); cleanups.push(f.close)
   const before = (await f.store.readMetadata('original'))!, frontend = reason === 'frontend-retry-budget-exhausted'
   const operation: AgentMuxContinuityOperation = {
     operationId: 'original-intent', agentSessionId: before.agentSessionId, trigger: historicalSources[0]!, previousRun: before.run,
     policy: normalizeAgentContinuityPolicy({ activeRecovery: 'manual' }), admittedAt: 1, observedAt: 1, rechecks: 0,
     kind: frontend ? 'reattachable' : 'pending', reason: frontend ? 'run-running' : reason,
-    evidence: { kind: 'run-running', observedAt: 1 },
+    evidence: frontend ? { kind: 'run-running', observedAt: 1 } : { kind: 'run-ended', state: 'interrupted', observedAt: 1 },
+    nativeTarget: before.nativeHandle as AgentMuxContinuityOperation['nativeTarget'],
     ...(frontend ? { frontendReconnect: { previousFrontendId: 'original-frontend', frontendId: 'confirmed-frontend', outputAfterByte: 0 } } : {}),
     supervision: { phase: 'paused', activeAttemptOperationId: 'original-intent', attemptCount: frontend ? 1 : 0,
       attemptLimit: 1, reason, observedAt: 1 }
@@ -98,11 +100,12 @@ it.each(['active-manual', 'frontend-retry-budget-exhausted'])('grants the %s res
     watch: unexpected, update: unexpected, perform: unexpected, failed: () => { throw new Error('Unexpected supervisor action') } })
   cleanups.push(() => supervisor.dispose())
   const request = { agentSessionId: before.agentSessionId, expectedRun: before.run, operationId: 'fresh-observer', policy: { activeRecovery: 'automatic' as const } }
-  expect(supervisor.retainedAutomaticIntent(session, { ...request, trigger: 'startup' })).toBeUndefined()
-  for (const trigger of automaticSources) expect(supervisor.retainedAutomaticIntent(session, { ...request, trigger })).toBe(operation)
+  if (!frontend) expect(supervisor.retainedAutomaticIntent(session, { ...request, trigger: 'startup' })).toBe(operation)
+  expect(supervisor.retainedAutomaticIntent(session, { ...request, trigger: 'startup' }, undefined, true)).toBeUndefined()
+  for (const trigger of automaticSources) expect(supervisor.retainedAutomaticIntent(session, { ...request, trigger }, undefined, true)).toBe(operation)
   const cancelled = { ...operation, supervision: { ...operation.supervision!, phase: 'cancelled' as const } }
   expect(supervisor.retainedAutomaticIntent({ ...session, continuity: cancelled, continuityOperations: { [cancelled.operationId]: cancelled } },
-    { ...request, trigger: 'startup' })).toBe(cancelled)
+    { ...request, trigger: 'startup' }, undefined, true)).toBe(cancelled)
 })
 
 it('rejects malformed recovery sources at the public owner while unrelated healthy raw input remains available', async () => {

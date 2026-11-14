@@ -413,17 +413,29 @@ async function continuityHarness(options: {
     protocolVersion: 1,
     buildIdentity: 'ctxmux@test'
   })
+  internals.kernel.creationRuntimeIdentity = () => ({
+    runtimeId: 'continuity-fixture-runtime', instanceId: 'daemon', protocolVersion: 1, buildIdentity: 'ctxmux@test'
+  })
   // run-1 已退出 → decision=resume；任何 spawn 出来的新 Run 报 running。
   internals.kernel.status = async (runId: string) =>
     runId === 'run-1'
       ? continuityRun('run-1', options.runId1State ?? { type: 'exited', code: 0, signal: null }, workspacePath)
       : continuityRun(runId, { type: 'running' }, workspacePath)
   // resumeAgentRun 里 kernel.start 是唯一的 Run 创建点：对它计数即对 spawn 次数计数。
-  internals.kernel.start = async () => {
+  internals.kernel.start = async (input: { program: string; args: string[]; operationKey: string }) => {
     spawns += 1
     const runId = `spawned-run-${spawns}`
     runIds.push(runId)
-    return continuityRun(runId, { type: 'running' }, workspacePath)
+    return { ...continuityRun(runId, { type: 'running' }, workspacePath),
+      program: input.program, args: input.args, lifecycleOperationId: input.operationKey }
+  }
+  // The frozen Start owner delegates to the same instrumented Runtime port.
+  internals.kernel.startPrepared = async (request: { program: string; args: string[] }, operationKey: string) =>
+    (internals.kernel.start as Function)({ ...request, operationKey })
+  internals.kernel.inspectPreparedStart = async (request: { program: string; args: string[] }, operationKey: string) => {
+    const run = await (internals.kernel.inspectCreation as Function)(operationKey)
+    if (run && (run.program !== request.program || JSON.stringify(run.args) !== JSON.stringify(request.args))) throw new Error('Fixture observed a different frozen Start')
+    return run
   }
 
   if (options.hookIngress === 'busy') {
@@ -439,8 +451,8 @@ async function continuityHarness(options: {
       url: 'http://127.0.0.1:0',
       token: 'endpoint'.padEnd(43, 'C')
     })
-    internals.hookServer.createBinding = () => ({
-      bindingId: 'binding'.padEnd(43, 'D'),
+    internals.hookServer.createBinding = (_session: string, _provider: string, bindingId: string) => ({
+      bindingId,
       endpoint: { url: 'http://127.0.0.1:0', token: 'endpoint'.padEnd(43, 'C') },
       bindRun: async () => {},
       close: async () => {}
@@ -637,11 +649,12 @@ describe('Core-owned continuity policy and original-operation receipts', () => {
     expect(stop).not.toHaveBeenCalled()
     expect(harness.client.agentSession('agent-1').run).toEqual({ runId: 'spawned-run-1' })
     const inputRuns: string[] = []
-    internals.kernel.input = async (runId: string, op: { data: string }) => {
-      inputRuns.push(runId)
-      return { run: continuityRun(runId, { type: 'running' }, harness.client.agentSession('agent-1').workspacePath),
-        appliedByteRange: { startByte: 0, endByte: Buffer.byteLength(op.data) } }
-    }
+    internals.kernel.openInput = async (runId: string) => ({
+      run: continuityRun(runId, { type: 'running' }, harness.client.agentSession('agent-1').workspacePath),
+      waitWritable: async () => {},
+      input: async (data: string) => { inputRuns.push(runId)
+        return { appliedByteRange: { startByte: 0, endByte: Buffer.byteLength(data) } } }
+    })
     await harness.client.writeAgent({ agentSessionId: 'agent-1', expectedRun: { runId: 'spawned-run-1' }, data: 'still-usable', source: 'user' })
     expect(inputRuns).toEqual(['spawned-run-1'])
     await harness.client.dispose()
@@ -849,14 +862,12 @@ describe('重启恢复保持原 Session 身份且输入不误投递（f-25k8f8m9
     }
     // 恢复前 run-1 已退出；恢复后 spawned-run-1 running（continuityHarness 的 status 已如此约定）。
     // 记录每一次 input 打到了哪个 Run。
-    internals.kernel.input = async (runId: string, op: { data: string }) => {
-      inputs.push(op.data)
-      inputRuns.push(runId)
-      return {
-        run: continuityRun(runId, { type: 'running' }, harness.client.agentSession('agent-1').workspacePath),
-        appliedByteRange: { startByte: 0, endByte: Buffer.byteLength(op.data) }
-      }
-    }
+    internals.kernel.openInput = async (runId: string) => ({
+      run: continuityRun(runId, { type: 'running' }, harness.client.agentSession('agent-1').workspacePath),
+      waitWritable: async () => {},
+      input: async (data: string) => { inputs.push(data); inputRuns.push(runId)
+        return { appliedByteRange: { startByte: 0, endByte: Buffer.byteLength(data) } } }
+    })
 
     const resumed = await harness.client.ensureAgentContinuity({
       agentSessionId: 'agent-1',
