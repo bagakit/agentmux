@@ -50,7 +50,7 @@ function assertNativeTravel(stages) {
   assert.ok(numeric(later[0].dashoffset) < numeric(paths[0].dashoffset) - .08, 'Native path head must advance continuously before the midpoint; animation running or a discrete late jump is not movement')
 }
 
-function summarize(events, rendererPid, startMark, endMark) {
+function summarize(events, rendererPid, startMark, endMark, initialWindowMS = 1200) {
   const thread = events.find(event => event.pid === rendererPid && event.name === 'thread_name' && event.args?.name === 'CrRendererMain')
   assert.ok(thread, 'Native Renderer main thread metadata is required')
   const begin = events.find(event => event.pid === rendererPid && event.name === startMark)?.ts
@@ -60,7 +60,7 @@ function summarize(events, rendererPid, startMark, endMark) {
   const tasks = main.filter(event => event.name === 'ThreadControllerImpl::RunTask')
   assert.ok(tasks.length, 'A nonempty native task sample is required')
   const pipeline = /^(?:UpdateLayoutTree|RecalculateStyles|Layout|PrePaint|Paint|Layerize|Commit|CompositeLayers|UpdateLayerTree|IntersectionObserverController::computeIntersections)$/
-  const windows = [[0, 1200], [1200, 3200], [3200, (end - begin) / 1000]].map(([from, to]) => {
+  const windows = [[0, initialWindowMS], [initialWindowMS, 3200], [3200, (end - begin) / 1000]].map(([from, to]) => {
     const lower = begin + from * 1000, upper = Math.min(end, begin + to * 1000), statistics = {}
     for (const event of main.filter(event => pipeline.test(event.name) && event.ts < upper && event.ts + event.dur > lower)) {
       const entry = statistics[event.name] ??= { count: 0, unionMS: 0, inclusiveMS: 0, maxMS: 0 }
@@ -234,3 +234,5 @@ module.exports.verify = function verify(data, frames) {
   for (const cost of data.costs) { assert.ok(cost.native.observedMS >= 3700); assert.ok(cost.native.traceEvents > 0); assert.ok(cost.measured.frames.length > 8); assert.equal(cost.input.value, 'fixture'); assert.equal(cost.after.activity.paths.length, 0); assert.deepEqual(cost.after.controls, []) }
   assert.deepEqual(data.afterControls, [])
 }
+module.exports.summarize = summarize
+module.exports.unionMS = unionMS
