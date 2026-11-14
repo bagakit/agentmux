@@ -1,14 +1,16 @@
+import { resolveOriginalExecutionBinding } from './execution-binding-reference'
 import { AgentMuxError, parseAgentExecutionReference, type AgentExecutionBindingService } from '@agentmux/core'
 import type { IpcMainInvokeEvent } from 'electron'
 import type { ExecutionBindingReaders } from './execution-binding-readers'
 import type { AgentExecutionRecoveryReference, AgentLaunchResult } from '../shared/contracts'
 import { sessionAgentLaunchResult } from '../shared/session-agent-launch-result'
-export type ExecutionBindingChannel = 'sessions:executionBinding' | 'sessions:rejoinExecutionBinding' | 'sessions:observeExecutionBinding' | 'sessions:releaseExecutionBinding' | 'sessions:continueExecution'
+export type ExecutionBindingChannel = 'sessions:resolveExecutionBinding' | 'sessions:executionBinding' | 'sessions:rejoinExecutionBinding' | 'sessions:observeExecutionBinding' | 'sessions:releaseExecutionBinding' | 'sessions:continueExecution'
 /** Observe or explicitly rejoin the original binding. Agent/helper creation is not exposed. */
 export function registerExecutionBindingIpc(args: {
   handle(channel: ExecutionBindingChannel, listener: (event: IpcMainInvokeEvent, ...values: unknown[]) => unknown): void
   bindings: Pick<AgentExecutionBindingService, 'inspect' | 'rejoin' | 'continueOriginal'>
   readers: ExecutionBindingReaders
+  coordinatorTarget(): Promise<AgentExecutionRecoveryReference['coordinator']>
   coordinator(target: AgentExecutionRecoveryReference['coordinator']): Promise<void>
   project(hostId: string, session: AgentLaunchResult['created']): Promise<AgentLaunchResult>
 }): void {
@@ -28,6 +30,9 @@ export function registerExecutionBindingIpc(args: {
     await args.coordinator(target.coordinator)
     return target.reference.bindingId
   }
+  args.handle('sessions:resolveExecutionBinding', (_event, input) => resolveOriginalExecutionBinding(input, {
+    inspect: bindingId => args.bindings.inspect(bindingId), coordinatorTarget: args.coordinatorTarget, assertCoordinator: args.coordinator
+  }))
   args.handle('sessions:executionBinding', async (event, target) => {
     return args.bindings.inspect(await binding(target))
   })

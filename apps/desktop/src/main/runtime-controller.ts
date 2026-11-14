@@ -1,3 +1,4 @@
+import { originalExecutionBindingId } from './execution-binding-reference'
 import { configuredAgentFallbackLabel as agentFallbackLabel, workspacePresentationLabel as workspaceLabel } from '@agentmux/host/presentation-configuration'
 import { mintObjectId } from '@agentmux/core/object-id'
 import { parseCreationContinueParams, parseCreationContinueResult, type AgentMuxCreationContinueParams } from '@agentmux/core'
@@ -1181,12 +1182,13 @@ export class RuntimeController {
         }
         const localExecutor = !remoteCreation ? config.executors[request.executorId]! : undefined
         const boundCreation = resource && hostIntent ? async () => {
+          const { agentSessionId, createOperationId } = hostIntent
+          if (!agentSessionId || !createOperationId) throw new AgentMuxError(
+            'The original split creation identity is unconfirmed. Its request is kept; no binding was created.', 'EXECUTION_INTENT_UNCONFIRMED')
           const resourceHost = await this.executionBindingHost(resource.hostId)
           // Public operation IDs are opaque, not filesystem-safe binding IDs.
           // Keep the original intent intact and derive its stable private binding.
-          const bindingId = createHash('sha256').update(JSON.stringify([
-            request.hostId, hostIntent.agentSessionId, hostIntent.createOperationId
-          ])).digest('hex')
+          const bindingId = originalExecutionBindingId(request.hostId, agentSessionId, createOperationId)
           // This reference observation never gates healthy creation. Main, not the
           // Renderer, identifies the original local public Coordinator route.
           const coordinator = this.executionCoordinatorTarget().catch(error => {
@@ -1198,11 +1200,11 @@ export class RuntimeController {
             agentHostId: request.hostId, agentRuntimeId: inventory!.runtimeId,
             resourceHostId: resource.hostId, resourceRuntimeId: resourceHost.runtimeId, resourceWorkspacePath: resource.path,
             resourceGrant: { scope: 'host-user', bindingId },
-            agent: { ...hostIntent, agentSessionId: hostIntent.agentSessionId!, createOperationId: hostIntent.createOperationId! } }) }
+            agent: { ...hostIntent, agentSessionId, createOperationId } }) }
           catch (error) {
             const target = await coordinator
             if (target && error instanceof AgentMuxError && error.executionFailure?.reference.bindingId === bindingId &&
-              error.executionFailure.reference.agentSessionId === hostIntent.agentSessionId && error.executionFailure.reference.createOperationId === hostIntent.createOperationId) {
+              error.executionFailure.reference.agentSessionId === agentSessionId && error.executionFailure.reference.createOperationId === createOperationId) {
               Object.assign(error, { executionRecovery: { coordinator: target, reference: error.executionFailure.reference, failure: error.executionFailure } })
             }
             throw error

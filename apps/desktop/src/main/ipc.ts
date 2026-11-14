@@ -2598,6 +2598,7 @@ export async function registerIpc(args: {
     resolveHost: hostId => args.runtime.executionBindingHost(hostId)
   })
   registerExecutionBindingIpc({ handle: handleWithEvent, bindings: executionBindings, readers: executionBindingReaders,
+    coordinatorTarget: () => args.runtime.executionCoordinatorTarget(),
     coordinator: target => args.runtime.assertExecutionCoordinator(target),
     project: (hostId, session) => args.runtime.projectAgentCreation(hostId, session, config) })
   // Rejoin only retained tool readers. Startup never creates or restores an Agent.

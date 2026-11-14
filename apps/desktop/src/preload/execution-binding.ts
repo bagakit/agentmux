@@ -1,10 +1,11 @@
 import type { IpcRenderer, IpcRendererEvent } from 'electron'
 import type { AgentExecutionInspection } from '@agentmux/core'
 import { mintObjectId } from '@agentmux/identity'
-import type { AgentExecutionRecoveryReference, SessionAgentLaunchResult } from '../shared/contracts'
+import type { AgentExecutionLegacyLocator, AgentExecutionLegacyObservation, AgentExecutionRecoveryReference, SessionAgentLaunchResult } from '../shared/contracts'
 import { unwrapSessionAgentLaunchResult, unconfirmedSessionAgentLaunch } from '../shared/session-agent-launch-result'
 export function createExecutionBindingApi(ipc: Pick<IpcRenderer, 'invoke' | 'on' | 'off'>) {
   return {
+    resolveExecutionBinding: (input: AgentExecutionLegacyLocator): Promise<AgentExecutionLegacyObservation | null> => ipc.invoke('sessions:resolveExecutionBinding', input),
     executionBinding: (bindingId: string | AgentExecutionRecoveryReference): Promise<AgentExecutionInspection | null> => ipc.invoke('sessions:executionBinding', bindingId),
     rejoinExecutionBinding: (bindingId: string): Promise<AgentExecutionInspection> => ipc.invoke('sessions:rejoinExecutionBinding', bindingId),
     async continueExecution(input: AgentExecutionRecoveryReference) {

@@ -1141,6 +1141,18 @@ export type SessionAgentLaunchResult = { ok: true; result: AgentLaunchResult } |
 } }
 
 /** Main's exact original Coordinator, plus Core's acknowledged immutable intent locator. */
+/** Frozen locator only; it carries no prompt, grant, caller or current configuration. */
+export type AgentExecutionLegacyLocator = {
+  hostId: string
+  agentSessionId: string
+  createOperationId: string
+  toolWorkspace: { hostId: string; path: string }
+}
+export type AgentExecutionLegacyObservation = {
+  target: AgentExecutionRecoveryReference
+  inspection: import('@agentmux/core').AgentExecutionInspection
+}
+
 export type AgentExecutionRecoveryReference = {
   coordinator: { hostId: string; runtimeId: string }
   reference: import('@agentmux/core').AgentExecutionReference
@@ -1975,6 +1987,7 @@ export type AgentMuxDesktopApi = {
     snapshot(): Promise<RuntimeSnapshot>
     /** Current Desktop connection observations; never waits for Session membership. */
     endpointWarnings(): Promise<RuntimeEndpointWarning[]>
+    resolveExecutionBinding(input: AgentExecutionLegacyLocator): Promise<AgentExecutionLegacyObservation | null>
     executionBinding(bindingId: string | AgentExecutionRecoveryReference): Promise<import('@agentmux/core').AgentExecutionInspection | null>
     rejoinExecutionBinding(bindingId: string): Promise<import('@agentmux/core').AgentExecutionInspection>
     observeExecutionBinding(bindingId: string | AgentExecutionRecoveryReference, listener: (value: import('@agentmux/core').AgentExecutionInspection | null) => void, onError: (message: string) => void): () => void

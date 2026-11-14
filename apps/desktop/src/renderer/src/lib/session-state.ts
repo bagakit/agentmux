@@ -131,6 +131,18 @@ export function reducePendingAgentLaunchIssue(state: SessionProjectionState, age
   return { ...state, pendingAgentLaunches: { ...state.pendingAgentLaunches, [agentSessionId]: { ...pending, requestIssue: issue } } }
 }
 
+/** A read can enrich only its exact original failed workface; it does not create/adopt a Session. */
+export function reduceLegacyExecutionReference(state: SessionProjectionState,
+  origin: { tabId: string; regionId: string; agentSessionId: string }, request: NonNullable<PendingAgentLaunch['request']>,
+  target: import('../../../shared/contracts').AgentExecutionRecoveryReference): SessionProjectionState {
+  const pending = state.pendingAgentLaunches[origin.agentSessionId], region = state.tabs[origin.tabId]?.regions[origin.regionId]
+  if (!pending?.requestIssue || pending.request !== request || region?.kind !== 'agent' || region.sessionId !== origin.agentSessionId ||
+    state.sessions.some(session => session.id === origin.agentSessionId) || target.reference.agentSessionId !== origin.agentSessionId ||
+    target.reference.createOperationId !== request.createOperationId) return state
+  return reducePendingAgentLaunchIssue(state, origin.agentSessionId, { hostId: request.hostId ?? '', createOperationId: request.createOperationId },
+    { ...pending.requestIssue, executionRecovery: target })
+}
+
 /** The existing native user document retains only rejected original invocations, never Runtime event buffers. */
 export type RetainedPendingAgentLaunches = Record<string, Pick<PendingAgentLaunch, 'request' | 'requestIssue'>>
 let previousRetainedLaunches: RetainedPendingAgentLaunches = {}

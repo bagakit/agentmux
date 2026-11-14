@@ -43,7 +43,7 @@ import type { ConversationAnnotation } from '@agentmux/client-ui/components/Conv
 import { ConversationAnnotationNote, type ConversationAnnotationNoteHandle } from './ConversationAnnotationNote'
 import { formatConversationAnnotation } from '../lib/conversation-annotation-delivery'
 import { SessionConnectingSurface } from './SessionConnectingSurface'
-import { ExecutionConnectingSurface } from './PendingExecutionRecovery'
+import { ExecutionConnectingSurface, useLegacyExecutionRecovery } from './PendingExecutionRecovery'
 import { ServiceWindowNotice } from './ServiceWindowNotice'
 import { ContinuitySupervisionNotice } from './ContinuitySupervisionNotice'
 import { SessionRecoveryActions } from './SessionRecoveryActions'
@@ -263,6 +263,9 @@ export function SessionPane({
   // global Session projection and all other consumers retain their own owners.
   const session = surfaceKind === 'agent' && retainedHistory?.state === 'deleted' ? undefined : observedSession
   const currentConversationActions = useAgentCurrentForkControls({ session: session?.kind === 'agent' ? session : null, linkOrigin: mailboxOrigin, readOnly })
+  const legacyExecution = useLegacyExecutionRecovery(mailboxOrigin.tabId && mailboxOrigin.regionId
+    ? { tabId: mailboxOrigin.tabId, regionId: mailboxOrigin.regionId, agentSessionId: sessionId } : undefined,
+    pendingLaunch, !session && surfaceKind === 'agent' && visible && !parked)
   const storageDiagnostic = !session ? pendingAgentLaunchResourceDiagnostic(pendingLaunch, sessionId) : undefined
   const storageWait = storageDiagnostic?.code === 'AGENT_CREATION_WAITING_FOR_STORAGE'
   const retainedStorageCause = storageDiagnostic && !storageWait ? pendingLaunch?.events.slice().reverse().find(value =>
@@ -747,7 +750,7 @@ export function SessionPane({
     const scope = observationScope
     const current = () => observationActive.current && observationScopeRef.current === scope
     setRefreshing(true); setUnobservedReadError(null)
-    try { await rereadUnobservedSession(unobservedIdentity, current) }
+    try { await legacyExecution.check(); if (current()) await rereadUnobservedSession(unobservedIdentity, current) }
     catch (error) { if (current()) setUnobservedReadError(presentError(error)) }
     finally { if (observationActive.current) setRefreshing(false) }
   }
@@ -1067,7 +1070,7 @@ export function SessionPane({
               : 'The original request and initial prompt are kept. Check the original creation status.'}
             {currentCreationFeedback?.status === 'woken' ? <span className="session-connecting__status">{currentCreationFeedback.message}</span> : null}
             {unobservedReadError ? <span className="session-connecting__status">Latest check unavailable; see details.</span> : null}
-          </> } : undefined}
+          </> } : legacyExecution.message ? { waiting: false, title: 'Original request status is unconfirmed', description: legacyExecution.message } : undefined}
           surfaceKind={surfaceKind}
           request={pendingLaunch?.request}
           requestIssue={pendingLaunch?.requestIssue}
