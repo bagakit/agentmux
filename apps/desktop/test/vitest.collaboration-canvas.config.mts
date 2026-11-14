@@ -7,6 +7,7 @@ import shared from '../scripts/fixtures/agent-information-card/vitest.owning.con
 const references = 'keeps unrelated whole node references and camera through selection and metadata-only relation updates'
 const detour = 'renders and selects an actual Worker detour while both original endpoint cards are offscreen'
 const graph = 'components/AgentCollaborationGraph.tsx'
+const signal = 'components/CollaborationDispatchSignal.tsx'
 const labels = 'components/CollaborationRegionLabels.tsx'
 const camera = 'lib/collaboration-map-camera.ts'
 const metadata = 'rebuilds only one exact offscreen Agent node for metadata without another layout job or unrelated card render'
@@ -64,13 +65,13 @@ export const collaborationCanvasMutations = [
   { file: 'styles/collaboration.css', name: 'effective-motion-transitions', before: 'transition-duration: 150ms !important;', after: 'transition-duration: 150ms;', assertion: 'honors explicit map motion through the actual reduced-motion cascade without restoring unrelated animations' },
   { file: graph, name: 'original-motion-duration', before: "'--collaboration-activity-duration': `${COLLABORATION_ACTIVITY_MS}ms`", after: "'--collaboration-activity-duration': '0ms'", assertion: 'honors explicit map motion through the actual reduced-motion cascade without restoring unrelated animations' },
   { file: graph, name: 'motion-control-action', before: 'onClick={() => void motion.setEnabled(!motion.enabled)}', after: 'onClick={() => {}}', assertion: motion },
-  { file: graph, name: 'motion-pulse-gate', before: 'record.active && motion ? <path', after: 'record.active ? <path', assertion: motion },
-  { file: graph, name: 'motion-resume-phase', before: '[record.active, record.startedAt, motion]', after: '[record.active, record.startedAt]', assertion: motion },
+  { file: graph, name: 'motion-pulse-gate', before: "record.active && motion && kind !== 'creation' ? <CollaborationDispatchSignal", after: "record.active && kind !== 'creation' ? <CollaborationDispatchSignal", assertion: motion },
+  { file: signal, name: 'motion-resume-phase', before: 'if (delay <= -COLLABORATION_TRANSFER_MS) return null', after: 'if (false) return null', assertion: motion },
   { file: labels, name: 'original-region-host', before: 'const host = hostIdentityProjection(area.hostId, configuredHost)', after: 'const host = hostIdentityProjection(undefined, undefined)', assertion: 'projects complete region identities and original Host and avatars without replacing map geometry' },
   { file: graph, name: 'visible-agent-radius', before: 'const sourceRadius = sourceGlyph.overviewRadius, targetRadius = targetGlyph.overviewRadius', after: 'const sourceRadius = 6, targetRadius = targetGlyph.overviewRadius', assertion: 'overview keeps exact Agent endpoints without relayout and enters a named region through its control' },
-  { file: graph, name: 'visible-message-packet', before: "record.active && motion && kind === 'communication' ? <circle", after: 'false ? <circle', assertion: 'shows immediate source and recipient activity while the original new path is still arriving' },
-  { file: graph, name: 'original-packet-phase', before: 'offsetPath: `path("${path}")`, animationDelay: `${delay}ms`', after: 'offsetPath: `path("${path}")`, animationDelay: "0ms"', assertion: 'shows immediate source and recipient activity while the original new path is still arriving' },
-  { file: graph, name: 'screen-sized-message-packet', before: 'r={4 / zoom}', after: 'r={4}', assertion: 'shows immediate source and recipient activity while the original new path is still arriving' },
+  { file: signal, name: 'visible-message-packet', before: 'className="collaboration-edge__packet"', after: 'className="missing-packet"', assertion: 'shows immediate source and recipient activity while the original new path is still arriving' },
+  { file: signal, name: 'original-packet-phase', before: 'animationDelay: `${delay}ms`', after: 'animationDelay: "0ms"', assertion: 'draws one finite route-following head and tail without moving circles or filter effects' },
+  { file: signal, name: 'screen-sized-message-packet', before: 'Math.min(.035, 14 / screenLength)', after: '.035', assertion: 'draws one finite route-following head and tail without moving circles or filter effects' },
   { file: labels, name: 'named-overview-region', before: '<strong>{area.name}</strong>', after: '<strong />', assertion: 'keeps named region labels separated at distant scale without changing world geometry' },
   { file: labels, name: 'region-label-separation', before: '...placed.filter(other => collaborationBoundsOverlap(padded, other)), ', after: '', assertion: 'keeps named region labels separated at distant scale without changing world geometry' },
   { file: labels, name: 'region-agent-hit-clearance', before: '...blockingAgents(label)', after: '...[]', assertion: 'keeps projected region labels clear of original Agent hit targets through camera LOD' },
@@ -102,7 +103,7 @@ export const collaborationCanvasMutations = [
   { file: graph, name: 'original-pointer-selection', before: 'onClick={event => { event.stopPropagation(); onSelect(record) }}', after: 'onClick={event => { event.stopPropagation() }}', assertion: detour },
   { file: graph, name: 'original-keyboard-selection', before: 'event.preventDefault(); event.stopPropagation(); onSelect(record)', after: 'event.preventDefault(); event.stopPropagation()', assertion: detour },
   { file: graph, name: 'real-arrow-definition', before: 'id={`${markerId}-${kind}`}', after: 'id={`${markerId}-${kind}-missing`}', assertion: detour },
-  { file: graph, name: 'stable-activity-phase', before: 'useMemo(() => Math.min(0, record.startedAt - Date.now()), [record.active, record.startedAt, motion])', after: 'Math.min(0, record.startedAt - Date.now())', assertion: 'keeps an original pulse phase through selection and resumes only its elapsed phase after viewport remount' },
+  { file: signal, name: 'stable-activity-phase', before: 'useMemo(() => Math.min(0, startedAt - Date.now()), [pulseId, startedAt])', after: 'Math.min(0, startedAt - Date.now())', assertion: 'keeps an original pulse phase through selection and resumes only its elapsed phase after viewport remount' },
   { file: graph, name: 'prepared-locate-token', before: 'preparedLocate.current === locate.token', after: 'false', assertion: 'locates a member inside a folded area once and preserves a later user fold through metadata changes' },
   { file: graph, name: 'explicit-camera-intent', before: '++gestures.current; animateCamera(duration => flow.current?.zoomIn({ duration }))', after: 'animateCamera(duration => flow.current?.zoomIn({ duration }))', assertion: 'keeps explicit Zoom and Fit intent when original Worker placement arrives after the button click' },
   { file: graph, name: 'reading-exact-occurrence', before: 'readingAnchor.current = nodeId; actions.current.onSelect', after: 'readingAnchor.current = collaborationAgentNode(graphAreas[0]!.id, id); actions.current.onSelect', assertion: 'keeps the exact reading occurrence and translates all curves through an explicit rearrangement' },
