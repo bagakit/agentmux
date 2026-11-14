@@ -285,7 +285,19 @@ export function MoteQuickModeDialog({ scope, reference, onOpenPath, onClose, ret
     finally { if (lifetime.current === epoch) setResuming(false) }
   }
   const continueToConversation = onContinue ?? (space?.topicId === scope.topic.id ? () => space.select('discussion') : undefined)
-  const firstConversation = !draft.conversation && Boolean(draft.executorId) && Boolean(continueToConversation)
+  const confirmedSettings = saved && !saved.issue
+  const originalMain = confirmedSettings ? saved.defaults.conversation : scope.topic.quickMode?.status === 'saved' ? scope.topic.quickMode.defaults.conversation : undefined
+  const mainSession = useAppStore(state => {
+    if (!originalMain) return undefined
+    const region = state.tabs[originalMain.tabId]?.regions[originalMain.regionId]
+    const candidate = region?.kind === 'agent' ? sessionPresentationById(state.sessions).get(region.sessionId) : undefined
+    return candidate?.kind === 'agent' && candidate.control.kind === 'agent' && candidate.control.hostId === originalMain.hostId &&
+      candidate.control.agentSessionId === originalMain.sessionId ? candidate : undefined
+  })
+  const originalRunState = mainSession?.runUnobserved ? undefined : mainSession?.processState
+  const mainStatus = originalRunState === 'running' ? 'Run active' : originalRunState === 'exited' ? 'Run ended' :
+    originalRunState === 'interrupted' ? 'Run interrupted' : 'Run status unconfirmed'
+  const firstConversation = confirmedSettings && !originalMain && !draft.conversation && Boolean(draft.executorId) && Boolean(continueToConversation)
   async function save() {
     if (busy || !saved || draftRestoreIssue) return
     const checking = useLauncherState.getState().drafts[draftKey]?.moteQuick?.pending
@@ -340,9 +352,9 @@ export function MoteQuickModeDialog({ scope, reference, onOpenPath, onClose, ret
   }
   const guidance = maintenance?.guidance
   const heartbeat = (
-        <fieldset tabIndex={-1} className="mote-quick-mode__presence mote-quick-mode__heartbeat"><legend hidden>Heartbeat</legend>
-          <MoteHeartbeatStatus scope={scope} reading={maintenance} reports={liveHeartbeat.saved?.reports} onOpenPath={onOpenPath} unavailable={originalHeartbeat ? loading || Boolean(issue) : !moteHeartbeatReadingMatchesSource(saved)} loading={loading} onRefresh={() => { liveHeartbeat.refresh(); setAttempt(value => value + 1) }} controlsAfterStatus={focusHeartbeat}
-            actions={<>{!originalHeartbeat && !pendingRequest?.input.action && guidance?.adoptedRevision !== guidance?.availableRevision && guidance ? <div className="mote-heartbeat__guidance"><p>Follow up concrete work, keep useful results and carry the next step forward. Applies to future checks; your interval and pause stay the same.</p><Button type="button" disabled={busy || loading} onClick={() => void adopt()}>Use updated guidance</Button></div> : null}{!originalHeartbeat && pendingRequest?.input.action ? <Button type="button" variant="primary" disabled={busy || loading} onClick={() => void adopt()}>Check original adoption</Button> : null}{!originalHeartbeat && resumeRequest.current ? <Button type="button" disabled={resuming} onClick={() => void resumeHeartbeat()}>{resuming ? 'Checking original schedule…' : 'Inspect original resume'}</Button>
+        <fieldset tabIndex={-1} className="mote-quick-mode__presence mote-quick-mode__heartbeat"><legend>{originalHeartbeat ? 'Schedule' : 'Automatic care'}</legend>
+          <MoteHeartbeatStatus scope={scope} reading={maintenance} reports={liveHeartbeat.saved?.reports} onOpenPath={onOpenPath} unavailable={originalHeartbeat ? loading || Boolean(issue) : !moteHeartbeatReadingMatchesSource(saved)} loading={loading} onRefresh={() => { liveHeartbeat.refresh(); setAttempt(value => value + 1) }} settings={!originalHeartbeat}
+            actions={<>{!originalHeartbeat && !pendingRequest?.input.action && guidance?.adoptedRevision !== guidance?.availableRevision && guidance ? <Button type="button" title="Applies to future checks. Keeps the interval and pause." disabled={busy || loading} onClick={() => void adopt()}>Use updated guidance</Button> : null}{!originalHeartbeat && pendingRequest?.input.action ? <Button type="button" variant="primary" disabled={busy || loading} onClick={() => void adopt()}>Check original adoption</Button> : null}{!originalHeartbeat && resumeRequest.current ? <Button type="button" disabled={resuming} onClick={() => void resumeHeartbeat()}>{resuming ? 'Checking original schedule…' : 'Inspect original resume'}</Button>
               : maintenance?.schedule?.lastOutcome === 'unknown' ? <>{!checkedMissingKey ? <Button type="button" variant="primary" disabled={resuming} onClick={() => void inspectHeartbeat()}>{resuming ? 'Checking…' : 'Check original delivery'}</Button> : null}
                 {checkedMissingKey ? <div className="mote-heartbeat__issue" role="status"><p>Its earlier delivery remains unknown. Resuming can send a due check immediately.</p>
                   {presence.enabled ? <Button type="button" variant="primary" disabled={resuming} onClick={() => void resumeHeartbeat()}>Resume future checks</Button> : null}</div> : null}</>
@@ -360,32 +372,41 @@ export function MoteQuickModeDialog({ scope, reference, onOpenPath, onClose, ret
               const intervalMs = moteMinutesToMs(value, { wholeMinutes: true })
               if (intervalMs !== null) update({ ...form.current, presence: { ...presence, intervalMs } })
               else update({ ...form.current })
-            }} /> min</label></div><p className="mote-details__hint">Default 30 min · applies after Save. A paused heartbeat stays paused.</p></>} />
+            }} /> min</label></div><p className="mote-details__hint">Default 30 min. Saving keeps any current pause.</p></>} />
         </fieldset>
   )
   return <Dialog.Root open onOpenChange={open => { if (!open) onClose() }}><DocumentOverlayPortal component={Dialog.Portal}>
     <Dialog.Overlay className="dialog-scrim mote-behavior-overlay" />
-    <Dialog.Content ref={content} className="dialog-surface mote-quick-mode-dialog" aria-busy={busy}
+    <Dialog.Content ref={content} className="dialog-surface mote-quick-mode-dialog" aria-busy={loading || busy} data-heartbeat-only={!!originalHeartbeat}
       onOpenAutoFocus={event => { event.preventDefault(); content.current?.querySelector<HTMLElement>(focusHeartbeat ? '.mote-quick-mode__heartbeat' : '.selection-field')?.focus() }}
       onCloseAutoFocus={event => { event.preventDefault(); const node = returnFocus(), active = ownerDocument.activeElement
         if (node?.isConnected && (active === ownerDocument.body || active === node || !active?.isConnected || content.current?.contains(active))) node.focus({ preventScroll: true }) }}>
-      <header className="mote-behavior-header"><div><Dialog.Title>{originalHeartbeat ? 'Original heartbeat' : focusHeartbeat ? 'Automatic care' : 'Quick mode'}</Dialog.Title><Dialog.Description>{scope.topic.title} · {originalHeartbeat ? 'The exact arrangement from this reminder' : loading ? 'Reading saved settings' : !saved ? 'Saved settings unconfirmed' : 'Saved settings loaded'}</Dialog.Description></div><MoteBehaviorAction label="Close quick mode" onClick={onClose}><ThemeActionCloseIcon size={16} /></MoteBehaviorAction></header>
+      <header className="mote-behavior-header"><div><Dialog.Title>{originalHeartbeat ? 'Original heartbeat' : 'Quick mode'}</Dialog.Title>
+        <Dialog.Description>{scope.topic.title} · {originalHeartbeat ? 'From this reminder' : loading ? 'Reading saved settings' : confirmedSettings ? 'Saved settings loaded' : 'Saved settings unconfirmed'}</Dialog.Description></div>
+        <MoteBehaviorAction label="Close quick mode" onClick={onClose}><ThemeActionCloseIcon size={16} /></MoteBehaviorAction></header>
       <div className="mote-quick-mode-dialog__body">
+        <div className="mote-quick-mode__sections">
         {focusHeartbeat || originalHeartbeat ? heartbeat : null}
-        {!originalHeartbeat ? <>
+        {!originalHeartbeat ? <section className="mote-quick-mode__conversation" aria-label="Conversation settings">
+        <h3>Conversation</h3>
+        <div className="mote-quick-mode__main" data-run-state={originalMain ? originalRunState ?? 'unknown' : undefined}>
+          <div><small>Saved main Agent</small><strong title={originalMain?.sessionId}>{originalMain ? mainSession?.label || 'Main Agent' : confirmedSettings ? 'No main Agent yet' : 'Binding unconfirmed'}</strong>
+          {originalMain ? <span className="mote-quick-mode__run-state">{mainStatus}</span> : null}</div>
+          {originalMain && continueToConversation ? <Button type="button" onClick={() => { onClose(); continueToConversation() }}>Open discussion</Button> : null}
+        </div>
         <label htmlFor={id + '-agent'}><ThemeObjectAgentIcon size={16} /><span>Executor for new chat<small>Preselected for new conversations.</small></span></label>
         <AgentExecutorPicker presentation="field" id={id + '-agent'} label="Executor for new chat"
           selected={draft.executorId ?? null} executors={executors} unsetLabel="Use normal Launcher choice"
           onSelect={value => { const { executorId: _, ...rest } = form.current; update(value ? { ...rest, executorId: value } : rest) }} />
-        {!choices.length && !selected ? <p className="mote-quick-mode__welcome">Choose an Executor, then save and continue. Your first message will create the main Agent for this Mote.</p> : <>
-        <label htmlFor={id + '-conversation'}><ThemeActionPinIcon size={16} /><span>Main Agent<small>Your usual contact. Coordinates work with the other Agents.</small></span></label>
+        {!choices.length && !selected && !originalMain ? confirmedSettings ? <p className="mote-quick-mode__welcome">Your first message with a configured Executor can start a main Agent.</p> : null : <>
+        <label htmlFor={id + '-conversation'}><ThemeActionPinIcon size={16} /><span>Main Agent<small>Choose who handles this Mote’s main discussion.</small></span></label>
         <SelectionField id={id + '-conversation'} label="Main Agent" value={selected}
           onValueChange={value => { const { conversation: _, ...rest } = form.current; const choice = choices.find(choice => JSON.stringify(choice) === value); if (value && !choice) { setIssue('The chosen conversation is no longer confirmed. Your choices are kept.'); return } update(choice ? { ...rest, conversation: choice } : rest) }}
-          options={[{ value: '', label: 'No main Agent yet' }, ...(selected && !hasSelected ? [{ value: selected, label: 'Saved location · unconfirmed' }] : []),
-            ...choices.map(choice => ({ value: JSON.stringify(choice), label: facts.tabs[choice.tabId]?.name?.trim() || conversationLabels[choice.sessionId] || choice.sessionId, description: `${conversationLabels[choice.sessionId]} · ${choice.hostId} / ${choice.sessionId} · ${facts.config?.workspaces.find(item => item.id === choice.displayWorkspaceId)?.name ?? 'Workspace'} / ${1 + (facts.layouts[choice.displayWorkspaceId]?.groups.findIndex(group => group.id === choice.groupId) ?? -1)}` }))]} />
+          options={[{ value: '', label: originalMain ? 'No Agent selected in this draft' : 'No main Agent yet' }, ...(selected && !hasSelected ? [{ value: selected, label: 'Selected location · unconfirmed' }] : []),
+            ...choices.map(choice => ({ value: JSON.stringify(choice), label: facts.tabs[choice.tabId]?.name?.trim() || conversationLabels[choice.sessionId] || choice.sessionId, description: `${choice.hostId} · ${facts.config?.workspaces.find(item => item.id === choice.displayWorkspaceId)?.name ?? 'Workspace'}` }))]} />
         </>}
-        {!focusHeartbeat ? heartbeat : null}
-        <details className="mote-quick-mode__advanced"><summary>Conversation settings</summary>
+        {originalMain && !selected ? <p className="mote-quick-mode__welcome">Saving this draft clears the main Agent binding.</p> : null}
+        <details className="mote-quick-mode__advanced"><summary>Conversation rollover</summary>
         <fieldset className="mote-quick-mode__presence"><legend>Conversation rollover</legend>
           <label htmlFor={id + '-rollover'}>Automatic rollover policy</label>
           <SelectionField id={id + '-rollover'} label="Automatic rollover policy" value={rolloverKind}
@@ -394,18 +415,21 @@ export function MoteQuickModeDialog({ scope, reference, onOpenPath, onClose, ret
           {rolloverKind === 'idle' ? <><label htmlFor={id + '-rollover-duration'}>Conversation inactivity <small>Minutes</small></label>
             <input id={id + '-rollover-duration'} aria-label="Conversation inactivity (minutes)" type="number" inputMode="decimal" min="0" step="any" value={rolloverMinutes}
               onChange={event => editRollover('idle', event.target.value)} /></> : null}
-          <p className="mote-details__hint">Changes take effect only after Save. Once the conversation has been idle long enough, your next new question starts a new round. Previous conversations stay available. Saving sends no message and does not switch the main Agent now.</p>
+          <p className="mote-details__hint">After the idle period, your next new question starts a new round. Previous conversations stay available.</p>
           {loading || !saved || saved.issue ? <p className="mote-details__hint">The saved rollover policy is unconfirmed. Your choices are kept.</p> : !saved.defaults.conversationRollover ? <p className="mote-details__hint">No rollover policy is configured. Editing other settings keeps the existing handoff behavior.</p> : null}
         </fieldset>
         </details>
-        </> : null}
+        </section> : null}
+        {!focusHeartbeat && !originalHeartbeat ? heartbeat : null}
+        </div>
         {loading ? <p role="status" className="mote-details__hint">{originalHeartbeat ? 'Reading the original arrangement…' : 'Reading MOTE.md…'}</p> : null}
         {!loading && saved && !saved.issue && (!saved.choices || saved.choices.executors === null || saved.choices.destinations === null) ? <p role="status" className="mote-details__hint">Reading the remaining choices. Your saved settings can still be edited.</p> : null}
         {saved?.choices?.issues ? <div role="status" className="mote-details__issue">{Object.values(saved.choices.issues).join(' ')}<Button type="button" onClick={() => setAttempt(value => value + 1)}>Reread choices</Button></div> : null}
         {draftRestoreIssue ? <p role="status" className="mote-details__issue">The saved original request could not be decoded. Its stored input and your Agent are kept; no replacement request will be sent.</p> : null}
         {issue ? <div role="status" className="mote-details__issue">{issue}<Button type="button" onClick={() => setAttempt(value => value + 1)}>Reread</Button></div> : null}
       </div>
-      <footer className="mote-quick-mode-dialog__footer">{originalHeartbeat ? <><span>Reviewing this original heartbeat keeps your current chat.</span><Button type="button" onClick={onClose}>Close</Button></> : <><IconButton type="button" title="Inspect MOTE.md" aria-label="Inspect MOTE.md" onClick={() => void onOpenPath(scope.rootPath + '/' + MOTE_QUICK_MODE_PATH).then(opened => { if (opened) onClose() }).catch(cause => setIssue(presentError(cause)))}><ThemeFileTextIcon size={15} /></IconButton><span>Saving sends no message.</span><Button type="button" onClick={onClose}>Cancel</Button><Button type="button" variant="primary" disabled={loading || busy || !saved || Boolean(saved.issue) || Boolean(pendingRequest?.input.action) || draftRestoreIssue} onClick={() => void save()}>{busy ? 'Saving…' : pendingRequest ? 'Check original save' : firstConversation ? 'Save and continue' : 'Save'}</Button></>}</footer>
+      <footer className="mote-quick-mode-dialog__footer">{originalHeartbeat ? <Button type="button" onClick={onClose}>Close</Button> : <><IconButton type="button" title="Inspect MOTE.md" aria-label="Inspect MOTE.md" onClick={() => void onOpenPath(scope.rootPath + '/' + MOTE_QUICK_MODE_PATH).then(opened => { if (opened) onClose() }).catch(cause => setIssue(presentError(cause)))}><ThemeFileTextIcon size={15} /></IconButton>
+        {pendingRequest?.input.action ? <><span>Check the pending guidance update under Automatic care.</span><Button type="button" onClick={onClose}>Cancel</Button></> : <><span>Saving sends no message.</span><Button type="button" onClick={onClose}>Cancel</Button><Button type="button" variant="primary" disabled={loading || busy || !saved || Boolean(saved.issue) || draftRestoreIssue} onClick={() => void save()}>{busy ? 'Saving…' : pendingRequest ? 'Check original save' : firstConversation ? 'Save and continue' : 'Save'}</Button></>}</>}</footer>
     </Dialog.Content>
   </DocumentOverlayPortal></Dialog.Root>
 }

@@ -14,11 +14,11 @@ function Stamp({ value }: { value: number }) {
 }
 
 /** A reading of the original Host schedule. Appearance never supplies execution facts. */
-export function MoteHeartbeatStatus({ scope, reading, reports, onOpenPath, loading, issue, onRefresh, actions, controls, controlsAfterStatus = false, detailsActions, visible = true, unavailable = false }: {
+export function MoteHeartbeatStatus({ scope, reading, reports, onOpenPath, loading, issue, onRefresh, actions, controls, settings = false, detailsActions, visible = true, unavailable = false }: {
   scope: MoteWorkfaceScope; reading?: MotePresenceReading | undefined; loading?: boolean | undefined; issue?: string | null | undefined
   onRefresh(): void; actions?: import('react').ReactNode; controls?: import('react').ReactNode; detailsActions?: import('react').ReactNode; visible?: boolean
   unavailable?: boolean
-  controlsAfterStatus?: boolean
+  settings?: boolean
   reports?: MoteHeartbeatReports | undefined
   onOpenPath?: ((path: string) => Promise<unknown>) | undefined
 }) {
@@ -35,19 +35,9 @@ export function MoteHeartbeatStatus({ scope, reading, reports, onOpenPath, loadi
   const deliveryLabel = input?.delivery === 'native-admitted' ? 'Input accepted' : input?.delivery === 'terminal-confirmed' ? 'Sent · acceptance unconfirmed' : input?.delivery === 'not-applied' ? 'Confirmed not sent' : 'Delivery unconfirmed'
   const status = unavailable ? 'unconfirmed' : schedule?.status === 'stopped' ? 'stopped' : reading?.status ?? (loading ? 'unread' : 'unconfirmed')
   const title = { active: schedule?.lastOutcome === 'unknown' ? 'Delivery needs checking' : 'Heartbeat scheduled', paused: 'Heartbeat paused', disabled: 'Heartbeat off', unbound: 'No heartbeat target confirmed yet', unconfirmed: 'Schedule not yet confirmed', stopped: 'Heartbeat stopped', unread: 'Reading the actual schedule' }[status]
-  return <section className="mote-heartbeat" data-mote-maintenance-status={status} aria-label="Mote heartbeat" aria-busy={loading || undefined}>
-    <header className="mote-heartbeat__identity">
-      <span className="mote-heartbeat__portrait"><SpaceObjectIcon kind="mote" name={scope.topic.title} manualIcon={icon} avatarObjectKey={target?.key}
-        avatarWorkspaceId={scope.workspace.id} avatarTopicId={scope.topic.id} visible={visible} /></span>
-      <div><h3>{scope.topic.title}</h3><span className="mote-heartbeat__eyebrow">{title}</span></div>
-    </header>
-    <p className="mote-heartbeat__purpose">Keeps an eye on your goals, work and unfinished commitments.</p>
-    {report ? <p className="mote-heartbeat__report-summary"><span>Agent report</span>{report.report.summary}</p> : null}
-    {guidance ? <p className="mote-heartbeat__guidance-status">{!unavailable && guidance.adoptedRevision === guidance.availableRevision ? 'Current work cycle adopted' : 'Work cycle adoption not confirmed'}</p> : null}
-    <div className="mote-heartbeat__actions">{actions}<Button type="button" disabled={loading} onClick={onRefresh}>{loading ? 'Reading…' : 'Refresh actual schedule'}</Button></div>
-    {controls && !controlsAfterStatus ? <div className="mote-heartbeat__controls">{controls}</div> : null}
-    <div className="mote-heartbeat__reading" role="status">
-      {schedule?.status === 'paused' ? <p>{moteHeartbeatPresentation(reading, false).detail}</p> : null}
+  const pauseExplanation = schedule?.status === 'paused' ? <p>{moteHeartbeatPresentation(reading, false).detail}</p> : null
+  const readout = <div className="mote-heartbeat__reading" role="status">
+      {!settings ? pauseExplanation : null}
       {schedule ? <dl>
         {schedule.everyMs && !controls ? <><dt>Interval</dt><dd>{schedule.everyMs / 60000} min</dd></> : null}
         <dt>Last check</dt><dd>{schedule.lastTickAt !== undefined ? <Stamp value={schedule.lastTickAt} /> : 'No recorded check yet'}<span className="mote-heartbeat__subline">{schedule.lastOutcome === 'unknown' ? 'Delivery unconfirmed' : schedule.lastOutcome === 'sent' ? 'Host accepted input' : schedule.lastOutcome === 'skipped' ? 'No input sent on this check' : 'No confirmed delivery yet'}</span></dd>
@@ -57,8 +47,26 @@ export function MoteHeartbeatStatus({ scope, reading, reports, onOpenPath, loadi
         {status === 'active' ? <><dt>Next opportunity</dt><dd><Stamp value={schedule.nextCheckAt} /></dd></> : null}
       </dl> : <p>{status === 'unbound' ? 'Start or choose this Mote’s main Agent to arrange automatic checks.' : status === 'disabled' ? 'Turn on heartbeat below to arrange automatic checks.' : 'Saved settings alone do not confirm that heartbeat is running.'}</p>}
     </div>
+  return <section className="mote-heartbeat" data-mote-maintenance-status={status} data-settings={settings || undefined} aria-label="Mote heartbeat" aria-busy={loading || undefined}>
+    {settings ? <header className="mote-heartbeat__settings-status" role="status">
+      <h3>{title}</h3>
+      {status === 'active' && schedule && schedule.lastOutcome !== 'unknown' ? <span>Next check <Stamp value={schedule.nextCheckAt} /></span> : null}
+      {pauseExplanation}
+    </header> : <>
+    <header className="mote-heartbeat__identity">
+      <span className="mote-heartbeat__portrait"><SpaceObjectIcon kind="mote" name={scope.topic.title} manualIcon={icon} avatarObjectKey={target?.key}
+        avatarWorkspaceId={scope.workspace.id} avatarTopicId={scope.topic.id} visible={visible} /></span>
+      <div><h3>{scope.topic.title}</h3><span className="mote-heartbeat__eyebrow">{title}</span></div>
+    </header>
+    <p className="mote-heartbeat__purpose">Keeps an eye on your goals, work and unfinished commitments.</p>
+    </>}
+    {controls ? <div className="mote-heartbeat__controls">{controls}</div> : null}
+    {report && !settings ? <p className="mote-heartbeat__report-summary"><span>Agent report</span>{report.report.summary}</p> : null}
+    {guidance ? <p className="mote-heartbeat__guidance-status">{!unavailable && guidance.adoptedRevision === guidance.availableRevision ? 'Current work cycle adopted' : 'Work cycle adoption not confirmed'}</p> : null}
+    <div className="mote-heartbeat__actions">{actions}<Button type="button" disabled={loading} onClick={onRefresh}>{loading ? 'Reading…' : 'Refresh actual schedule'}</Button></div>
+    {!settings ? readout : null}
     {ref ? <details className="mote-heartbeat__report"><summary>{report ? 'Report and saved Ideas' : 'Work report not confirmed'}</summary>
-      {report ? <><p className="mote-heartbeat__attribution">Reported by this Mote’s Agent · separate from input completion</p>
+      {report ? <>{settings ? <p>{report.report.summary}</p> : null}<p className="mote-heartbeat__attribution">Reported by this Mote’s Agent · separate from input completion</p>
         {report.report.actions.map((action, index) => action.kind === 'idea' ? <div className="mote-heartbeat__idea" key={index}><span>{action.path}</span><small>{report.ideaEvidence.find(item => item.actionIndex === index)?.status === 'committed-note' ? 'Note commit confirmed' : report.ideaEvidence.find(item => item.actionIndex === index)?.status === 'observed-file' ? 'File revision observed' : 'Saved revision unconfirmed'}</small>
           {onOpenPath && resourceTarget && action.resource.hostId === resourceTarget.expectedResource.hostId && action.resource.workspaceId === resourceTarget.expectedResource.workspaceId && action.resource.workspacePath === resourceTarget.expectedResource.workspacePath && action.resource.zoneId === resourceTarget.zoneId ? <Button type="button" onClick={() => void onOpenPath(scope.rootPath + '/' + action.path)}>Open Idea</Button> : null}</div> : null)}
         <p>{report.report.inspected.some(item => item.sourceStatus === 'unconfirmed') ? 'Some declared sources remain unconfirmed.' : 'The report describes the Agent’s stated reading scope.'}</p></>
@@ -66,8 +74,8 @@ export function MoteHeartbeatStatus({ scope, reading, reports, onOpenPath, loadi
       {native === 'unsupported' ? <p>Your Agent can keep working in the original conversation. This Provider does not link terminal input to its exact execution result.</p> : input?.returnedIdle && native === 'unknown' ? <p>The original input returned idle. That alone does not confirm that it was processed or that work is complete.</p> : null}
     </details> : null}
     {issue || !schedule && reading?.issue ? <p className="mote-heartbeat__issue" role="status">{issue ?? reading?.issue}</p> : null}
-    {controls && controlsAfterStatus ? <div className="mote-heartbeat__controls">{controls}</div> : null}
     {schedule ? <details className="mote-heartbeat__details"><summary>Original schedule details</summary>
+      {settings ? readout : null}
       {schedule.lastDecision ? <p>{schedule.lastDecision}</p> : null}
       {reading?.issue ? <p>{reading.issue}</p> : null}
       {schedule.pendingCompletion ? <p>Original input: <code>{schedule.pendingCompletion.operationId}</code>. An unconfirmed delivery is inspected before another input is considered.</p> : null}
