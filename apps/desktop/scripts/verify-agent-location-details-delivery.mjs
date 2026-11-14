@@ -14,6 +14,7 @@ await mkdir(directory, { recursive: true })
 try {
   // No action or wait: the delivery owner supplies original completed records.
   const ready = await json('.tmp/agent-location-details/delivery/ready.json')
+  assert.ok(ready.mode === 'renderer' || ready.mode === 'app-install')
   assert.equal(ready.sourceCommit, git('rev-parse', 'HEAD'))
   assert.equal(ready.sourceTree, git('rev-parse', 'HEAD^{tree}'))
   git('merge-base', '--is-ancestor', ready.sourceCommit, 'main')
@@ -28,25 +29,38 @@ try {
   assert.equal(build.sourceCommit, ready.sourceCommit)
   assert.equal(build.sourceTree, ready.sourceTree)
   assert.equal(build.sourceStatus, '')
-  assert.equal(build.command, 'pnpm update:renderer')
+  assert.equal(build.command, ready.mode === 'renderer' ? 'pnpm update:renderer' : 'pnpm package:mac:install --ui-only --app-only')
   assert.equal(build.exitCode, 0)
   assert.ok(Object.keys(build.sourceSHA256).length > 0)
   for (const [file, digest] of Object.entries(build.sourceSHA256)) assert.equal(sha(await readFile(path.join(root, file))), digest)
-  const release = await record('rendererRelease'), update = await record('rendererUpdate')
+  const release = await record('rendererRelease')
   assert.equal(build.rendererReleaseSHA256, sha(await readFile(path.resolve(root, ready.records.rendererRelease))))
   assert.ok(release.id && Object.keys(release.files).length > 0)
-  assert.equal(update.outcome, 'applied')
-  assert.equal(update.requested, release.id); assert.equal(update.current, release.id)
-  assert.ok(update.at >= build.startedAt)
+  if (ready.mode === 'renderer') {
+    const update = await record('rendererUpdate')
+    assert.equal(update.outcome, 'applied')
+    assert.equal(update.requested, release.id); assert.equal(update.current, release.id)
+    assert.ok(update.at >= build.startedAt)
+  }
   const before = (await record('appBefore')).result.observation
   const after = (await record('appAfter')).result.observation
   for (const [name, key] of [['app', 'appBefore'], ['agent', 'agentBefore'], ['tab', 'tabBefore']]) {
     assert.equal(path.resolve(root, ready.records[key]), path.resolve(root, target.before[name].file))
     assert.equal(sha(await readFile(path.resolve(root, ready.records[key]))), target.before[name].sha256)
   }
-  // Renderer-only delivery keeps the installed Main package and original process.
-  assert.deepEqual(after.main.package, before.main.package)
-  assert.ok(before.main.pid > 0); assert.equal(after.main.pid, before.main.pid)
+  assert.ok(before.main.pid > 0 && after.main.pid > 0)
+  if (ready.mode === 'renderer') {
+    assert.deepEqual(after.main.package, before.main.package)
+    assert.equal(after.main.pid, before.main.pid)
+  } else {
+    const installed = await record('installedIdentity'), installation = await record('installation')
+    assert.equal(installed.sourceCommit, ready.sourceCommit)
+    assert.equal(installed.sourceTree, ready.sourceTree)
+    assert.deepEqual(after.main.package, installed)
+    assert.notEqual(after.main.pid, before.main.pid)
+    assert.equal(installation.intent, 'ui-only')
+    assert.equal(installation.native.status, 'deferred')
+  }
   assert.equal(after.main.renderer.id, release.id)
   assert.deepEqual(after.main.renderer.identity, release.identity)
   const oldAgent = (await record('agentBefore')).result, agent = (await record('agentAfter')).result
