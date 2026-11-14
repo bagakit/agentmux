@@ -136,7 +136,7 @@ const workspaceSchema = z
 
 // Registration accepts a blank optional name: Main derives the final nonempty name after parsing.
 export const createWorkspaceInputSchema = workspaceSchema.pick({ hostId: true, path: true })
-  .extend({ name: z.string().optional() }).strict()
+  .extend({ name: z.string().optional(), expectedHost: hostSchema.optional() }).strict()
 // Zod includes explicit undefined for optional fields; JSON and the shared contract omit them.
 type ParsedWorkspaceInput = {
   [Key in keyof z.infer<typeof createWorkspaceInputSchema>]: Exclude<z.infer<typeof createWorkspaceInputSchema>[Key], undefined>

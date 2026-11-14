@@ -633,6 +633,8 @@ export type CreateWorkspaceInput = {
   hostId: string
   path: string
   name?: string
+  /** Require Main's committed Host to equal the connection reviewed for this operation. */
+  expectedHost?: HostConfig
 }
 
 export type CreateWorktreeForBranchInput = {

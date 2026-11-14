@@ -4,6 +4,7 @@ import type {
   AgentMuxControlResult
 } from '@agentmux/core'
 import type { WorkspaceRecord } from '../shared/contracts.js'
+import { configValuesEqual } from '../shared/config-edit.js'
 import { createWorkspaceInputSchema } from './config-store.js'
 import type { ConfigOwner } from './config-owner.js'
 import { insertOrGetWorkspace } from './workspace-location.js'
@@ -27,7 +28,9 @@ export async function registerWorkspace(
   let selectedId: string | undefined
   let changed = false
   const saved = await owner.update(current => {
-    if (!current.hosts.some(host => host.id === input.hostId)) invalid(`Host “${input.hostId}” is not configured.`)
+    const currentHost = current.hosts.find(host => host.id === input.hostId)
+    if (!currentHost) invalid(`Host “${input.hostId}” is not configured.`)
+    if (input.expectedHost && !configValuesEqual(currentHost, input.expectedHost)) invalid('The saved Host connection changed before folder registration. Review the current connection and retry with the original folder input.')
     try {
       executionHost(input.hostId)
     } catch {

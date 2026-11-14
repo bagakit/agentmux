@@ -107,7 +107,7 @@ export const HostProjectsPane = memo(function HostProjectsPane({ config, hostId,
 
   async function register(thenOpen: boolean): Promise<void> {
     if (!host || pending.current || !path.trim()) return
-    const input = { hostId: host.id, path: path.trim(), ...(name.trim() ? { name: name.trim() } : {}) }
+    const input = { hostId: host.id, path: path.trim(), ...(name.trim() ? { name: name.trim() } : {}), expectedHost: structuredClone(host) }
     const startExecutor = thenOpen ? executorId : ''
     const selectedHost = selectionHost
     pending.current = true
