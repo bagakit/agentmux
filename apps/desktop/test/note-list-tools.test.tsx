@@ -2,7 +2,7 @@
 import { act } from 'react'
 import { afterEach, expect, it, vi } from 'vitest'
 import type { Editor, JSONContent } from '@tiptap/core'
-import { closeHistory } from '@agentmux/client-ui/note/note-content-schema'
+import { closeHistory } from '@agentmux/client-ui/note/note-editor-extensions'
 import { NoteFileContext } from '@agentmux/client-ui/components/NoteFileContext'
 import { noteKnowledge } from '@agentmux/client-ui/note/note-knowledge'
 import { newNoteDocument, readNoteDocument, serializeNoteDocument } from '@agentmux/client-ui/note/note-document'
