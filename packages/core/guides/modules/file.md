@@ -13,9 +13,17 @@ display Tab/Region. file read/ls access resources; file open/view access present
 does not save or overwrite a file. Inspect the original view and preserve unsaved user drafts.
 
 Use file stat --input FILE|- to observe one exact entry or absence. JSON is
-{zoneId,path,expectedResource:{hostId,workspaceId,workspacePath},spaceId?}. It returns the
+{zoneId,path,expectedResource:{hostId,workspaceId,workspacePath},spaceId?,includeRevision?}. It returns the
 complete original resource, root/parent witnesses, entry kind and helper implementation.
-It does not read file bodies or freeze directory children; file read still supplies content revisions.
+Default stat does not read bodies or freeze directory children. To obtain a regular file revision
+without returning its body, including large binary files, explicitly use --revision or JSON
+includeRevision:true. The same Native FD is hashed in fixed-size blocks and its exact entry/scope
+is checked before returning observation.revision={status:"observed",revision:"sha256:..."}.
+Directories, symlinks, other entries and absence return {status:"not-applicable"}; a failed requested
+observation remains unknown. Unrequested stats never hash. This does not relax Note body retention
+limits; file read still supplies editable body/revision pairs. Explicit hashing is a cold operation
+with IO proportional to file size and the existing long request timeout; a timeout leaves the
+readonly observation unknown and does not authorize deletion or stop an Agent.
 
 For one direct directory use file mkdir --input FILE|- with
 {operationId,zoneId,path,expectedResource:COMPLETE_STAT_RESOURCE,expectedAbsent:true,
@@ -51,12 +59,24 @@ an empty plan does not write the Note root. Ordinary content reads/writes keep t
 Moved receipts must identify the original source device/inode/birth generation, including inspection;
 a mismatched reply is a protocol failure. Keep the original request and query without replaying.
 
-After a missing/unknown mkdir or move reply use file mutation inspect --input FILE|- with
+Use file delete --input FILE|- with
+{operationId,zoneId,path,expectedResource:COMPLETE_STAT_RESOURCE,
+expected:{root:STAT_ROOT,parent:STAT_PARENT,entry:STAT_ENTRY},expectedRevision?,recursive?,spaceId?}.
+Regular files require the exact original revision from file read or explicit file stat --revision.
+A directory defaults to empty-only;
+recursive:true authorizes the exact original subtree, without freezing all child bytes or names.
+Symlinks delete their entry without following targets. Root, primary Mote and execution/recovery
+directory ancestors stay protected. Before Note unlink, the original history owner retains its exact
+current body, revision and deletion actor; unreadable or conflicting Note identity retains the claim.
+The catalog, original creators and history remain. A missing prior-history source reference grants
+no source/actor/undo authority. Physical deletion does not authorize discarding client drafts.
+
+After a missing/unknown mkdir, move or delete reply use file mutation inspect --input FILE|- with
 {operationId,zoneId,path,expectedResource:COMPLETE_ORIGINAL_STAT_RESOURCE,spaceId?}.
 The query returns the retained original request and separate filesystem/durability observations.
 It does not rerun the producer, infer a delete from absence, or turn a current read into an old ACK.
 A managed Agent reads only its own original actor/Host operation. Repeating the exact original
-mkdir/move only joins or observes its original record; it never republishes an unconfirmed action.
+mkdir/move/delete only joins or observes its original record; it never republishes an unconfirmed action.
 An existing private admission with a missing/corrupt request member stays unconfirmed; missing
 member bytes never authorize a new producer. Keep the original admission for recovery.
 Changing input/target/actor under that same operation ID is refused. Keep all original IDs and
