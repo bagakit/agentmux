@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { act } from 'react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import { mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { Editor } from '@tiptap/core'
@@ -63,7 +63,7 @@ async function fixture(count = 2, undoAfterStage?: import('@agentmux/host/note-s
   const publicFiles = new FileReadOwner({ share: { share: (params, context) => sharing.share(params, context), undoShare: (params, context) => sharing.undoShare(params, context), inspectShare: (params, context) => sharing.inspectShare(params, context) }, catalog: async () => ({ zones: [{ zoneId, workspaceId: workspace.id, hostId: 'local', kind: 'directory', directoryPath: root }], bindings: [{ zoneId, spaceId: birth }] }) as never,
     workspace: id => id === workspace.id ? workspace : undefined, files: { read: writer.read.bind(writer), listFiles: files.listFiles.bind(files), history: writer.history.bind(writer), write: writer.write.bind(writer), writeSharedUndo: writer.writeSharedUndo.bind(writer), createShared: writer.createShared.bind(writer) } })
   const deletion = new NoteSharedFileDeleteOwner(files, metadata)
-  const undo = new NoteSharedUndoOwner({ files, workspaces: async () => ({ workspaces: [workspace], complete: true }), target: publicFiles.targetForNote.bind(publicFiles), read: publicFiles.read.bind(publicFiles), write: publicFiles.write.bind(publicFiles), writeInverse: publicFiles.writeSharedInverse.bind(publicFiles), history: metadata.readHistory.bind(metadata), operation: metadata.readHistoryOperation.bind(metadata), lease: metadata.runWithWriteLease.bind(metadata), delete: (resource, input, context) => deletion.delete(workspace, input, context), ...(undoAfterStage ? { afterStage: undoAfterStage } : {}) })
+  const undo = new NoteSharedUndoOwner({ metadataPaths: () => metadata.metadataAuthorityPaths, files, workspaces: async () => ({ workspaces: [workspace], complete: true }), target: publicFiles.targetForNote.bind(publicFiles), read: publicFiles.read.bind(publicFiles), write: publicFiles.write.bind(publicFiles), writeInverse: publicFiles.writeSharedInverse.bind(publicFiles), history: metadata.readHistory.bind(metadata), operation: metadata.readHistoryOperation.bind(metadata), lease: metadata.runWithWriteLease.bind(metadata), delete: (resource, input, context) => deletion.delete(workspace, input, context), ...(undoAfterStage ? { afterStage: undoAfterStage } : {}) })
   sharing = new NoteSharedBlockOwner({ undo, files: { read: publicFiles.read.bind(publicFiles), write: publicFiles.write.bind(publicFiles), createShared: publicFiles.createShared.bind(publicFiles), writeInverse: publicFiles.writeSharedInverse.bind(publicFiles) }, historyOperation: metadata.readHistoryOperation.bind(metadata), withWriteLease: metadata.runWithWriteLease.bind(metadata) })
   const inFlight = new Set<Promise<unknown>>()
   const track = <T,>(promise: Promise<T>) => { inFlight.add(promise); void promise.then(() => inFlight.delete(promise), () => inFlight.delete(promise)); return promise }
@@ -565,8 +565,12 @@ it('keeps IME ownership independent when the same durable Region is presented tw
   expect(completed).toBe(true)
 })
 
-it('saves a naturally undone saved use without losing ordinary prose and restores the original when it is the last use', async () => {
-  const f = await fixture(); await f.mount()
+it.each([false, true])('saves a naturally undone saved use without losing ordinary prose and restores the original when it is the last use (metadata data alias: %s)', async metadataAlias => {
+  const f = await fixture();
+  if (metadataAlias) {
+    await rename(f.metadata.path + '.files', join(f.root, 'state', 'physical-core-metadata'))
+    await symlink('physical-core-metadata', f.metadata.path + '.files', 'dir')
+  } await f.mount()
   await act(async () => f.rich(1).commands.insertContentAt(1, 'Before sharing '))
   await f.paste(await f.copy()); await act(async () => { await f.save() })
   const shared = (await readdir(f.root)).find(name => name.startsWith('block-'))!
@@ -779,9 +783,9 @@ it('returns a definitively not-applied removal to the original conflict workflow
   expect(useAppStore.getState().documents[key]!.noteEditing?.shareUndo).toBeUndefined()
 })
 
-it('keeps confirmed source restoration visible through recovery when a later scope change prevents collection', async () => {
+it.each([false, true])('keeps confirmed source restoration visible through recovery when a later scope change prevents collection (inside metadata parent: %s)', async insideMetadataParent => {
   let root = ''
-  const f = await fixture(2, async stage => { if (stage === 'source') await writeFile(join(root, 'later.note.md'), serializeNoteDocument(newNoteDocument('A new managed Note', 'later', 'later-first'))) }); root = f.root
+  const f = await fixture(2, async stage => { if (stage === 'source') await writeFile(join(root, ...(insideMetadataParent ? ['state', 'later.note.md'] : ['later.note.md'])), serializeNoteDocument(newNoteDocument('A new managed Note', 'later', 'later-first'))) }); root = f.root
   await f.mount(); await f.paste(await f.copy()); await act(async () => { await f.save() })
   await act(async () => f.rich(1).commands.undo()); await act(async () => { await f.save() })
   const key = documentKey(f.workspace.id, 'destination.note.md')
@@ -812,7 +816,7 @@ it('reads actual collected-file history from its retained trusted File occurrenc
   await act(async () => f.rich(1).commands.undo()); await act(async () => { await f.save() })
   expect((await readdir(f.root)).includes(path)).toBe(false)
   await dom.render(<NoteVersionHistory tabId={sharedTab.id} regionId="collected-shared" noteId={parsed.note.noteId} active />)
-  await vi.waitFor(() => expect(dom.container.textContent).toContain('Shared file collected'), { timeout: 5000 })
+  await vi.waitFor(() => expect(dom.container.textContent).toContain('File deleted'), { timeout: 5000 })
   const response = await f.metadata.readHistory({ noteId: parsed.note.noteId, resource: { hostId: f.workspace.hostId, workspaceId: f.workspace.id, workspacePath: f.workspace.path, path } })
   const deletion = response.entries.find(value => value.operation === 'delete')!
   expect(deletion.status).toBe('committed')
@@ -1095,4 +1099,25 @@ it('does not submit a sharing write to another resource named by a mismatched cl
  await act(async () => await f.save())
  expect(vi.mocked(api.files.sharePublic).mock.calls, JSON.stringify(vi.mocked(api.files.sharePublic).mock.calls)).toHaveLength(0)
  expect(await readFile(join(second.path, 'source.note.md'), 'utf8')).toBe(await readFile(join(f.root, 'source.note.md'), 'utf8'))
+})
+
+
+it('keeps malformed metadata-directory replies unconfirmed instead of granting shared collection', async () => {
+  const f = await fixture()
+  await f.mount(); await f.paste(await f.copy()); await act(async () => { await f.save() })
+  const readDirectory = f.files.readDirectory.bind(f.files)
+  vi.spyOn(f.files, 'readDirectory').mockImplementation(async (workspace, path) => {
+    const entries = await readDirectory(workspace, path)
+    return path === 'state' ? [...entries, { name: 'notes.root.json.files', path: 'another-entry', isDirectory: true, isSymlink: false }] : entries
+  })
+  await act(async () => f.rich(1).commands.undo()); await act(async () => { await f.save() })
+  expect(await readFile(join(f.root, 'destination.note.md'), 'utf8')).not.toContain('::note-include')
+  expect(await readFile(join(f.root, 'source.note.md'), 'utf8')).toContain('::note-include')
+  expect((await readdir(f.root)).filter(name => name.startsWith('block-'))).toHaveLength(1)
+  expect(useAppStore.getState().documents[documentKey(f.workspace.id, 'destination.note.md')]!.noteEditing?.shareUndoReceipt).toMatchObject({
+    status: 'committed', retained: [{ code: 'scope-unconfirmed' }]
+  })
+  expect(await vi.mocked(api.files.shareUndoPublic).mock.results.at(-1)!.value).toMatchObject({
+    collections: [{ source: null, deletion: null, retainedReason: { code: 'scope-unconfirmed' } }]
+  })
 })

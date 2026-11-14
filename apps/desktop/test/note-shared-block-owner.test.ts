@@ -30,7 +30,7 @@ async function fixture() {
   const workspace: WorkspaceRecord = { id: 'notes', hostId: 'local', name: 'Notes', kind: 'folder', path: directory }
   const files = new WorkspaceFiles(() => ({ id: 'local', kind: 'local' }) as never); dispose.push(() => files.dispose())
   // Metadata is outside the configured File roots: these cases exercise content aliases,
-  // not intentional retention while a managed directory's own sidecar files change.
+  // while the mounted Shared suite also covers exact metadata inside a managed root.
   const metadataRoot = await realpath(await mkdtemp(join(tmpdir(), 'note-shared-metadata-')))
   dispose.push(() => rm(metadataRoot, { recursive: true, force: true }))
   const metadata = new AgentMuxNotebookStore(join(metadataRoot, 'notebooks.sqlite')), writer = new NoteFileWriter(files, undefined, metadata)
@@ -45,7 +45,7 @@ async function fixture() {
     workspace: id => workspaces.find(item => item.id === id),
     files: { writeSharedUndo: writer.writeSharedUndo.bind(writer), read: writer.read.bind(writer), listFiles: files.listFiles.bind(files), history: writer.history.bind(writer), write: writer.write.bind(writer), createShared: writer.createShared.bind(writer) } })
   const deletion = new NoteSharedFileDeleteOwner(files, metadata)
-  const makeUndo = (afterStage?: ConstructorParameters<typeof NoteSharedUndoOwner>[0]['afterStage']) => new NoteSharedUndoOwner({ files, workspaces: async () => ({ workspaces, complete: true }), target: port.targetForNote.bind(port), read: port.read.bind(port), write: port.write.bind(port), writeInverse: port.writeSharedInverse.bind(port), history: query => metadata.readHistory(query), operation: id => metadata.readHistoryOperation(id), lease: metadata.runWithWriteLease.bind(metadata), delete: (resource, input, context) => deletion.delete(workspaces.find(w => w.id === resource.workspaceId)!, input, context), ...(afterStage ? { afterStage } : {}) })
+  const makeUndo = (afterStage?: ConstructorParameters<typeof NoteSharedUndoOwner>[0]['afterStage'], metadataPaths = () => metadata.metadataAuthorityPaths) => new NoteSharedUndoOwner({ metadataPaths, files, workspaces: async () => ({ workspaces, complete: true }), target: port.targetForNote.bind(port), read: port.read.bind(port), write: port.write.bind(port), writeInverse: port.writeSharedInverse.bind(port), history: query => metadata.readHistory(query), operation: id => metadata.readHistoryOperation(id), lease: metadata.runWithWriteLease.bind(metadata), delete: (resource, input, context) => deletion.delete(workspaces.find(w => w.id === resource.workspaceId)!, input, context), ...(afterStage ? { afterStage } : {}) })
   const undo = makeUndo()
   const makeOwner = (afterStage?: ConstructorParameters<typeof NoteSharedBlockOwner>[0]['afterStage'], undoOwner = undo) => new NoteSharedBlockOwner({ undo: undoOwner, files: {read:port.read.bind(port),write:port.write.bind(port),createShared:port.createShared.bind(port),writeInverse:port.writeSharedInverse.bind(port)}, historyOperation: metadata.readHistoryOperation.bind(metadata), withWriteLease: metadata.runWithWriteLease.bind(metadata), ...(afterStage ? { afterStage } : {}) })
   shared = makeOwner()
@@ -714,4 +714,23 @@ it('keeps a section root with a conflicting nested forwarding declaration ambigu
   expect(await f.port.share(f.params, { actor: person })).toMatchObject({ status: 'error', code: 'NOTE_SHARE_SOURCE_CHANGED' })
   expect(await readdir(f.directory)).not.toContain('block-shared.note.md')
   expect(await readFile(join(f.directory, f.source.path), 'utf8')).toBe(f.source.content)
+})
+
+
+it('retains the confirmed destination when its original metadata authority becomes unobservable', async () => {
+  const f = await fixture()
+  expect((await f.port.share(f.params, { actor: person })).status).toBe('committed')
+  let available = true
+  const undo = f.makeUndo(async stage => { if (stage === 'destination') available = false }, () => {
+    if (!available) throw Error('Original metadata observation unavailable')
+    return f.metadata.metadataAuthorityPaths
+  })
+  const deletion = vi.spyOn(f.files, 'deleteExact')
+  const result = await f.makeOwner(undefined, undo).undoShare(await removal(f), { actor: person })
+  expect(result).toMatchObject({ status: 'committed', destination: { result: { status: 'written', noteHistory: { status: 'committed' } } },
+    collections: [{ source: null, deletion: null, retainedReason: { code: 'scope-changed' } }] })
+  expect(deletion).not.toHaveBeenCalled()
+  expect(await readFile(join(f.directory, 'destination.note.md'), 'utf8')).not.toContain('::note-include')
+  expect(await readFile(join(f.directory, 'source.note.md'), 'utf8')).toContain('::note-include')
+  expect(await readFile(join(f.directory, 'block-shared.note.md'), 'utf8')).toContain('One original knowledge source')
 })

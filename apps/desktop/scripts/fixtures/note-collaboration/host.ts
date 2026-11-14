@@ -77,7 +77,7 @@ export async function start(root: string, notify: (event: unknown) => void, opti
       restore: (target, input, context) => notes.write(target, input, actual => writer.restore(actual, input, context)),
       undo: (target, input, context) => notes.write(target, input, actual => writer.undo(actual, input, context)) } })
   const deletion = new NoteSharedFileDeleteOwner(files, metadata)
-  const sharedUndo = new NoteSharedUndoOwner({ files, workspaces: () => config.workspaces, target: owner.targetForNote.bind(owner),
+  const sharedUndo = new NoteSharedUndoOwner({ metadataPaths: () => metadata.metadataAuthorityPaths, files, workspaces: async () => ({ workspaces: config.workspaces, complete: true }), target: owner.targetForNote.bind(owner),
     read: owner.read.bind(owner), write: owner.write.bind(owner), writeInverse: owner.writeSharedInverse.bind(owner),
     history: metadata.readHistory.bind(metadata), operation: metadata.readHistoryOperation.bind(metadata), lease: metadata.runWithWriteLease.bind(metadata),
     delete: async (resource, input, context) => { const target = titleWorkspace(resource); return target ? notes.write(target, input, actual => deletion.delete(actual, input, context)) : { status: 'unknown', code: 'NOTE_RESOURCE_CHANGED', message: 'The exact original private shared deletion resource changed.' } } })
