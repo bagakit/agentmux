@@ -21,6 +21,11 @@ Release compatibility describes the actual candidate payload selected by the pac
 
 The private LaunchServices verification in `package-macos.mjs` gives launch, the ready receipt, Runtime ownership and normal application exit one shared 300-second absolute deadline. It is a hang guard, not a speed requirement: a freshly signed candidate's first launch on a loaded machine can take most of a minute before Main writes anything. Waiting for the relaunched installed GUI to prove its activation uses the same guard, because a large restored workbench can take longer than half a minute to answer. Main publishes ready only after connecting its configured local semantic Host, so the window includes that connection. Each stage consumes the remaining budget; it does not restart the clock. Exact product, version, packaged executable and Runtime ownership checks still apply. Exceeding the window rejects this candidate, without declaring a user Agent unhealthy. The original scoped cleanup remains authoritative: forced termination or unconfirmed cleanup cannot pass verification, and an unknown Runtime cleanup preserves its diagnostic profile.
 
+## Package artifact lifetimes
+
+[The installer](../../apps/desktop/scripts/package-macos.mjs) creates an exclusive stage and records its object identity. On copy/signature/pre-cutover failure it reclaims that object only while the original signed source still matches its package, executable and signature seals. Cleanup observations do not qualify installation. Explicitly adopted stages and candidates retained after cutover or rollback remain available for continuation; diagnostics preserve the original operation result.
+
+
 ## Signing identity
 
 [preflightMacosSigning](../../apps/desktop/scripts/macos-signing.mjs) qualifies signing at the start of [package-macos.mjs](../../apps/desktop/scripts/package-macos.mjs), before any build, candidate copy, signing or installation work. Environment certificate、本机 `identity.json` 建立／信任步骤与 `--ad-hoc` 边界以 [macOS 打包《签名身份》](../guides/macos-packaging.md#签名身份) 为准，本文不重复命令。
