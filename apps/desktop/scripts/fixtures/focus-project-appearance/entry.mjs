@@ -14,6 +14,8 @@ import { createFocusContextIdentitySelector } from '../../../src/renderer/src/li
 import { createFocusProjectionSelector } from '../../../src/renderer/src/lib/focus-context'
 import { workbenchSelectionCatalog } from '../../../src/renderer/src/lib/desktop-focus-navigation'
 import { prepareTakeoverRecipients } from './takeover-recipients-data.mjs'
+import { spaceNewTabFixture } from '../../../test/fixtures/space-new-tab'
+import { spaceMountKey } from '../../../src/shared/space-mount'
 
 // Reuse the maintained actual App/preview setup. Only original image transport
 // is routed to this private Main's real projectAppearance recognition owner.
@@ -75,7 +77,7 @@ api.workspaces.appearance = async id => {
 }
 const copiedInputs = []
 api.ui.writeClipboardText = async value => { copiedInputs.push(value) }
-const retainedSource = { hostId: 'local', agentSessionId: 'retained-design', state: 'retired', history: {
+const retainedSource = { hostId: 'local', agentSessionId: 'retained-design', state: 'retired', retiredAt: Date.now() - 5 * 86_400_000, history: {
   providerId: 'generic', executorId: 'generic', workspacePath: root.path, createdAt: Date.now(),
   nativeHandle: { kind: 'provider', providerId: 'generic', sessionId: 'retained-original-native' } } }
 api.sessions.historySources = async options => options?.observation ? { sources: [retainedSource], warnings: [] } : [retainedSource]
@@ -115,6 +117,19 @@ window.appearanceProof = {
   settings: requestDesktopSettingsNavigation,
   selectionPreferences() { return useAppStore.getState().config.focus },
   remember() { preserved = useAppStore.getState() },
+  seedSpacePlus() {
+    const state = useAppStore.getState()
+    const f = spaceNewTabFixture({ ...state.config, workspaces: [root, ...state.config.workspaces.filter(item => item.id !== root.id)] }, sample, 'registered-source')
+    useAppStore.setState({ ...f.state, mainSurface: 'workbench', retainedSpatialFocus: null,
+      mountedSpaceInputs: { [spaceMountKey(f.target.reference)]: { target: f.target } } })
+    return f.state.workbenchSpaceSelection
+  },
+  spacePlusFacts() {
+    const state = useAppStore.getState(), selection = state.workbenchSpaceSelection
+    const tab = state.tabs[selection?.tabId]
+    return { selection, tabIds: Object.keys(state.tabs).sort(), surface: tab?.regions[selection?.regionId]?.kind, source: tab?.source ?? null,
+      topbar: Boolean(document.querySelector('header.topbar')), launcher: Boolean(document.querySelector('.pane-body__region[data-active=true] .launch-surface')) }
+  },
   seedSavedHistory() {
     const now = Date.now(), day = 86_400_000
     const saved = (sessionId, name, focusedAt, workspace = root) => ({
@@ -132,7 +147,7 @@ window.appearanceProof = {
       saved('saved-layout-review', 'Review the original project layout', now - 240_000, { ...root, branch: 'interface' }),
       saved('retained-design', 'Preserve the original conversation while reviewing the workspace', now - 7 * day),
       saved('saved-routing-investigation', 'Independent routing investigation', now - 6 * day),
-      saved('saved-other-host', 'Same-named project on a different device', now - 180_000, anotherHost),
+      saved('retained-design', 'Same-named project on a different device', now - 180_000, anotherHost),
       saved('saved-archived-project', 'Read the old design decision', now - 10 * day, archive)
     ]
     useAppStore.setState(state => ({ agentFocus: { ...state.agentFocus, execution: { ...state.agentFocus.execution, history } } }))

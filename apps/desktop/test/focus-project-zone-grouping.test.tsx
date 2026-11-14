@@ -145,6 +145,55 @@ it('keeps Saved visits under one current project heading and leaves a same-name 
   expect(useAppStore.getState().agentComposerDrafts).toBe(before.agentComposerDrafts)
 })
 
+it('opens saved-history actions by keyboard and scopes recovery to the original Host', async () => {
+  const before = useAppStore.getState()
+  const saved = savedVisit('saved-task', 'A saved task', 1)
+  const foreign = savedVisit('saved-task', 'Same identifier on another Host', 1, 'other')
+  const source = { hostId: 'local', agentSessionId: saved.sessionId, state: 'retired' as const, retiredAt: saved.focusedAt,
+    history: { providerId: 'codex', executorId: 'codex', workspacePath: saved.identity.workspacePath, createdAt: saved.focusedAt,
+      nativeHandle: { kind: 'provider' as const, providerId: 'codex', sessionId: 'original-native' } } }
+  vi.mocked(api.sessions.historySources).mockResolvedValue({ sources: [source], warnings: [] })
+  const reopen = vi.spyOn(before, 'reopenRetiredSession').mockResolvedValue(undefined)
+  const takeover = vi.spyOn(api.spatial, 'openAgent')
+  useAppStore.setState({ agentFocus: { ...before.agentFocus, execution: { ...before.agentFocus.execution, history: [saved, foreign] } } })
+  await act(async () => root.render(createElement(GlobalFocusSurface)))
+  await act(async () => container.querySelector<HTMLButtonElement>('[data-project-history] button[aria-expanded]')!.click())
+  async function openMenu(host: string) {
+    const row = container.querySelector<HTMLButtonElement>(`[data-saved-focus-host="${host}"][data-saved-focus-session="saved-task"] button`)!
+    expect(row).toBeTruthy()
+    await act(async () => {
+      row.focus()
+      row.dispatchEvent(new KeyboardEvent('keydown', { key: 'F10', shiftKey: true, bubbles: true, cancelable: true }))
+    })
+  }
+  function action(label: string) {
+    return [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(item => item.textContent === label)
+  }
+  await openMenu('other')
+  expect(action('Quick Look')).toBeDefined()
+  expect(action('Resume from here')).toBeUndefined()
+  expect(action('Take over')).toBeUndefined()
+  await act(async () => action('Quick Look')!.click())
+  await vi.waitFor(() => expect(document.querySelector('[role="dialog"]')?.textContent).toContain(foreign.identity.name))
+  await act(async () => document.querySelector<HTMLButtonElement>('[aria-label="Close Quick Look"]')!.click())
+  expect(reopen).not.toHaveBeenCalled()
+
+  await openMenu('local')
+  expect(action('Quick Look')).toBeDefined()
+  expect(action('View in timeline')).toBeDefined()
+  expect(action('Take over')).toBeDefined()
+  await act(async () => action('Take over')!.click())
+  await vi.waitFor(() => expect(document.querySelector('[aria-label="Take over this work"]')?.textContent).toContain(saved.identity.name))
+  expect(takeover).not.toHaveBeenCalled()
+  await act(async () => document.querySelector<HTMLButtonElement>('[aria-label="Cancel takeover"]')!.click())
+  await vi.waitFor(() => expect(document.querySelector('[aria-label="Take over this work"]')).toBeNull())
+  await openMenu('local')
+  await act(async () => action('Resume from here')!.click())
+  expect(reopen).toHaveBeenCalledExactlyOnceWith(source, expect.any(String), false, expect.any(Function))
+  expect(useAppStore.getState().agentComposerDrafts).toBe(before.agentComposerDrafts)
+  expect(useAppStore.getState().sessions).toBe(before.sessions)
+})
+
 it('keeps the remaining original Saved card and its focus when the first current Session arrives', async () => {
   const before = useAppStore.getState()
   const history = [savedVisit('other', 'Saved task now observed', 1), savedVisit('still-saved', 'Keep my saved card', 2)]

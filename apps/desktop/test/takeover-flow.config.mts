@@ -4,6 +4,7 @@ import { appendFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { relative } from 'node:path'
 const mutations = {
+  'ignore-saved-result': ['lib/session-takeover.ts', "const historyReceipt = source.kind === 'saved'", "const historyReceipt = false && source.kind === 'saved'"],
   'resume-default-missing': ['components/SessionTakeoverSurface.tsx', 'return exact.length === 1 ? exact[0]!.destination : undefined', 'return undefined'],
   'cartesian-destinations': ['components/SessionTakeoverSurface.tsx', 'agentNewTabDestinations(catalog, facts.layouts, undefined, placement)', 'agentNewTabDestinations(catalog, facts.layouts)'],
   'source-run-dropped': ['lib/session-takeover.ts', 'const expectedRun = source.kind === \'session\' ? source.expectedRun : snapshot?.kind === \'agent\' ? snapshot.control.run : undefined', 'const expectedRun = undefined'],

@@ -7,7 +7,13 @@ import base from './vitest.mote-context.config.mts'
 
 const board = 'apps/desktop/src/renderer/src/components/GlobalFocusSurface.tsx'
 const lanes = 'apps/desktop/src/renderer/src/components/FocusProjectLanes.tsx'
+const saved = 'apps/desktop/src/renderer/src/components/FocusSavedTaskRow.tsx'
 const mutations: Record<string, { path: string; before: string; after: string }> = {
+  'restore-on-another-host': {
+    path: saved,
+    before: 'const source = sources.get(key)',
+    after: 'const source = [...sources.values()].find(item => item?.agentSessionId === entry.sessionId)',
+  },
   'duplicate-past': {
     path: board,
     before: 'const pastProjects = filteredRetainedProjects.filter(item => !item.recent && !currentProjectKeys.has(item.key))',
@@ -41,7 +47,7 @@ export default defineConfig({
     enforce: 'pre',
     transform(source, id) {
       const path = relative(base.root!, id.split('?')[0]!)
-      if (path !== board && path !== lanes) return
+      if (path !== board && path !== lanes && path !== saved) return
       let code = source
       if (mutation?.path === path) {
         assert.equal(code.split(mutation.before).length, 2, 'Unique production mutation anchor')

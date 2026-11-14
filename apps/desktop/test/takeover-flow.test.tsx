@@ -129,6 +129,36 @@ it('the actual shared picker sends typed Takeover through SDK/Core/Host, with th
   expect(graph.regions.find(region => region.regionId === 'original-region')?.agentSessionId).toBe(f.source.agentSessionId)
   expect(graph.resources['region:original-region']).toMatchObject({ draft: 'Keep the unsent original.' })
 })
+it('takes over a saved source without a Region and follows the exact Core result', async () => {
+  const other = { ...composerSession(f.source.agentSessionId), hostId: 'other-host' }
+  other.control = { ...other.control, hostId: 'other-host' }
+  useAppStore.setState({ sessions: [other] })
+  const receiver = 'takeover-renderer-alias'
+  vi.mocked(useAppStore.getState().refreshSpatialState).mockImplementation(async () => {
+    const graph = (await f.spatial.read())!.graph
+    vi.mocked(storeModule.currentCoreSpatialGraph).mockReturnValue(graph)
+    const created = graph.regions.find(region => region.regionId !== 'original-region')!
+    const tab = createWorkbenchTab(created.tabId, { kind: 'agent', phase: 'attached',
+      workspaceId: 'project-b', regionId: created.regionId, sessionId: receiver })
+    useAppStore.setState(state => ({ tabs: { ...state.tabs, [tab.id]: tab }, layouts: graph.layouts }))
+  })
+  const activate = vi.spyOn(useAppStore.getState(), 'activateTab').mockImplementation(() => {})
+  const focus = vi.spyOn(useAppStore.getState(), 'focusRegion').mockImplementation(() => {})
+  const saved: TakeoverSource = { kind: 'saved', agentSessionId: f.source.agentSessionId, hostId: 'local',
+    cwd: f.source.workspacePath, executorId: 'codex', label: 'Saved original work', diagnostic: '', origin: {}, destination: destination() }
+  await dom.render(<SessionTakeoverSurface source={saved} active onClose={() => {}} />)
+  await act(async () => document.querySelector<HTMLButtonElement>('button.agent-pick[data-executor-id="codex"]')!.click())
+  await vi.waitFor(() => expect(retained().phase).toBe('succeeded'))
+  expect(api.spatial.openAgent).toHaveBeenCalledOnce()
+  const content = vi.mocked(api.spatial.openAgent).mock.calls[0]![0].content
+  expect(content).toMatchObject({ kind: 'takeover-agent', source: { hostId: 'local', agentSessionId: f.source.agentSessionId } })
+  expect(content).not.toHaveProperty('source.expectedRun')
+  const result = retained().report!.to!
+  await vi.waitFor(() => expect(activate).toHaveBeenCalledWith(result.displayWorkspaceId, result.groupId, result.tabId))
+  expect(focus).toHaveBeenCalledWith(result.displayWorkspaceId, result.tabId, result.regionId, 'pointer', result.groupId)
+  expect(await f.client.readAgentSession(f.source.agentSessionId)).toEqual(f.source)
+  expect(dom.draft(original.id)).toBe('Keep the unsent original.')
+})
 it('Promotion uses the same stage, never picks the first Club, and the original owner creates a new Thread', async () => {
   await makeClub()
   useAppStore.setState({ spaceObjectIcons: { [f.b.spaceId]: { ...DEFAULT_MOTE_FACE, palette: 'rose' } } })

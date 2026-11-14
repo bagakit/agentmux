@@ -92,7 +92,7 @@ app.whenReady().then(async () => { try {
     return
   }
   if (savedInProject) {
-    await require('./saved-history-scene.cjs')({ win, read, click, frame, until, settle, result })
+    await require('./saved-history-scene.cjs')({ win, read, click, key, frame, until, settle, result, evidence })
     result.final = await read('window.appearanceProof.facts()')
     result.imageCalls = imageCalls
     result.passed = true

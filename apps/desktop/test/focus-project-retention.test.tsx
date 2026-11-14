@@ -126,11 +126,11 @@ it('shows original saved tasks before the startup directory resolves, then yield
   const original = useAppStore.getState()
   const localTasks = container!.querySelector('[aria-label="Saved tasks in Startup project"]')!
   expect(localTasks.textContent).toContain(newest.identity!.name)
-  expect(localTasks.textContent).toContain('feature/startup / original-topic')
+  expect(localTasks.querySelector('button')?.title).toContain('feature/startup / original-topic')
   expect(localTasks.textContent).not.toContain('Older task name')
   expect([...localTasks.querySelectorAll<HTMLElement>('[data-saved-focus-session]')].map(node => node.dataset.savedFocusSession)).toEqual(['same-sid', 'second-task'])
   expect(container!.querySelector('[aria-label="Saved tasks in Other Host project"]')?.textContent).toContain('Other Host original task')
-  expect(localTasks.querySelectorAll('.focus-context--card')).toHaveLength(2)
+  expect(localTasks.querySelectorAll('.focus-saved-task')).toHaveLength(2)
   expect(localTasks.closest('.focus-project-lanes__groups')).not.toBeNull()
   const pendingCard = localTasks.querySelector('[data-saved-focus-session="second-task"]')!
   expect(container!.querySelectorAll('.focus-context[data-session-id]')).toHaveLength(0)
@@ -150,6 +150,31 @@ it('shows original saved tasks before the startup directory resolves, then yield
   for (const method of ['launchAgent', 'resume', 'recover', 'stop', 'write', 'paste'] as const) expect(api.sessions[method]).not.toHaveBeenCalled()
 })
 
+it('uses the exact retired Session and checks the same restore after an unknown result', async () => {
+  const entry = history('retired-task', 'saved', 'Saved project', NOW - DAY)
+  const source = { hostId: 'local', agentSessionId: entry.sessionId, state: 'retired' as const, retiredAt: NOW - 1000 }
+  vi.mocked(api.sessions.historySources).mockImplementation(historySourcesReader([source]))
+  const restore = vi.fn<typeof initial.reopenRetiredSession>()
+    .mockRejectedValueOnce(new Error('Original receipt unavailable')).mockResolvedValueOnce(undefined)
+  useAppStore.setState({ reopenRetiredSession: restore })
+  await mount([], [], [entry])
+  await click(button('Retained projects'))
+  async function selectMenu(label: string) {
+    await vi.waitFor(() => expect(document.querySelector('[role=menu][data-state=open]')).toBeNull())
+    const row = container!.querySelector<HTMLButtonElement>('[data-saved-focus-session="retired-task"] button')!
+    await act(async () => row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2 })))
+    const item = () => [...document.querySelectorAll<HTMLElement>('[role=menuitem]')].find(node => node.textContent === label)
+    await vi.waitFor(() => expect(item()).toBeDefined())
+    await click(item()!)
+  }
+  await selectMenu('Resume from here')
+  expect(restore).toHaveBeenCalledOnce()
+  expect(restore.mock.calls[0]).toEqual([source, expect.any(String), false, expect.any(Function)])
+  await selectMenu('Check original restore')
+  expect(restore.mock.calls[1]).toEqual([source, restore.mock.calls[0]![1], true, expect.any(Function)])
+  expect(api.sessions.launchAgent).not.toHaveBeenCalled()
+})
+
 it('shows one real source-read indicator, settles errors and retry, and reads the selected saved visit without changing original work', async () => {
   let reject!: (error: Error) => void
   vi.mocked(api.sessions.historySources).mockImplementation(() => new Promise((_resolve, fail) => { reject = fail }) as never)
@@ -159,7 +184,7 @@ it('shows one real source-read indicator, settles errors and retry, and reads th
   expect(cards).toHaveLength(2)
   expect(container!.querySelectorAll('.focus-source-loading')).toHaveLength(1)
   expect(container!.querySelector('.focus-source-loading')?.textContent).toBe('Loading sources…')
-  expect(cards.every(card => !card.querySelector('[data-session-id], [data-state], .focus-context__state'))).toBe(true)
+  expect(cards.every(card => !card.querySelector('[data-session-id], .focus-context__state'))).toBe(true)
   await act(async () => reject(new Error('Original source read failed')))
   expect(container!.querySelector('.focus-source-loading')).toBeNull()
   expect(container!.querySelector('.focus-source-status__cause')?.textContent).toBe('Original source read failed')
@@ -238,9 +263,9 @@ it('retains the latest original visit per exact Host and Session, including unna
   const node = container!.querySelector('[aria-label="Saved tasks in Saved project"] [data-saved-focus-session="undated"]')!
   expect(node.textContent).toContain('undated')
   expect(node.textContent).not.toContain('Focus time unknown')
-  expect(node.querySelector('button')).toBeNull()
-  expect(node.querySelector('[data-state], .focus-context__state')).toBeNull()
-  expect(node.querySelector('.focus-context')?.getAttribute('title')).toContain('Focus time not recorded')
+  expect(node.querySelector('button')).not.toBeNull()
+  expect(node.querySelector('.focus-context__state')).toBeNull()
+  expect(node.querySelector('button')?.title).toContain('Focus time not recorded')
   expect(node.querySelector('time')).toBeNull()
 })
 
