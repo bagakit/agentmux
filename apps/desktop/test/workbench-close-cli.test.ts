@@ -201,12 +201,13 @@ it.runIf(business)('Source close plan reviews original editor input and retains 
   expect(f.store.getState().tabs['target-tab']).toBeDefined()
 })
 
-it.runIf(business).each(['tab-x', 'focus-menu', 'changed-agent', 'changed-kind'])('actual Source %s reviews and closes one original position without borrowing observer drafts', async entry => {
+it.runIf(business).each(['tab-x', 'focus-menu', 'changed-agent', 'changed-kind', 'lost-ack', 'region-x'])('actual Source %s reviews and closes one original position without borrowing observer drafts', async entry => {
   const f = await fixture({ originalSource: true })
-  f.store.setState(state => ({ layouts: { ...state.layouts, otherDisplay: createWorkspaceLayout('other-group', ['healthy-tab']) } }))
+  const originalTab = entry === 'region-x' ? 'target-tab' : 'healthy-tab', originalRegion = entry === 'region-x' ? 'file-region' : 'healthy-region'
+  if (entry !== 'region-x') f.store.setState(state => ({ layouts: { ...state.layouts, otherDisplay: createWorkspaceLayout('other-group', ['healthy-tab']) } }))
   const { prepareRendererUpdate } = await import('../src/renderer/src/store.js'); await prepareRendererUpdate('quit')
   const { bridge, destination } = await originalCloseBridge(f)
-  const originalLocation = (await f.rpc.call('space.inspect', { target: { regionId: 'healthy-region' } })).catalog.locations.find(location => location.displayWorkspaceId === 'W')!
+  const originalLocation = (await f.rpc.call('space.inspect', { target: { regionId: originalRegion } })).catalog.locations.find(location => location.displayWorkspaceId === 'W')!
   // Distinct Renderer instances keep original and observer editor namespaces apart.
   vi.resetModules()
   const { useAppStore: observer } = await import('../src/renderer/src/store.js')
@@ -215,11 +216,15 @@ it.runIf(business).each(['tab-x', 'focus-menu', 'changed-agent', 'changed-kind']
   const { GlobalFocusSurface } = await import('../src/renderer/src/components/GlobalFocusSurface.js')
   const { mainFocusPresentation } = await import('../src/renderer/src/lib/focus-tab-projection.js')
   const { workbenchSelectionCatalog } = await import('../src/renderer/src/lib/desktop-focus-navigation.js')
-  const { originalSourceWorkspaceId, originalSourceTabProjectionId } = await import('../src/renderer/src/lib/original-space-navigation.js')
+  const { originalSourceWorkspaceId, originalSourceTabProjectionId, originalSourceRegionProjectionId } = await import('../src/renderer/src/lib/original-space-navigation.js')
   const { installNativePopover } = await import('./fixtures/mote-workface.js')
   const restore = installNativePopover(); cleanup.push(async () => restore())
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
-  const calls = vi.spyOn(api.spaceMounts, 'call').mockImplementation(bridge.api.call)
+  const calls = vi.spyOn(api.spaceMounts, 'call').mockImplementation(async (method, input, signal) => {
+    const result = await bridge.api.call(method, input, signal)
+    if (entry === 'lost-ack' && method === 'close' && (input as { method: string }).method === 'space.close.apply') throw Error('Original close acknowledgement unavailable. The original operation is retained; check its original status.')
+    return result
+  })
   vi.spyOn(api.spaceMounts, 'watch').mockImplementation(bridge.api.watch)
   vi.spyOn(api.spaceMounts, 'sessions').mockImplementation(bridge.api.sessions)
   vi.spyOn(api.spaceMounts, 'reading').mockImplementation(bridge.api.reading)
@@ -233,9 +238,9 @@ it.runIf(business).each(['tab-x', 'focus-menu', 'changed-agent', 'changed-kind']
   const target = { ...destination, zoneId: originalLocation.zoneId!, workspaceId: originalLocation.workspaceId! }
   const snapshot = await bridge.api.call('snapshot', destination)
   observer.getState().mountSpace(target, false); observer.getState().observeSpaceMount(target, { snapshot, reading: false })
-  const workspaceId = originalSourceWorkspaceId(target), tabId = originalSourceTabProjectionId(target, 'healthy-tab')
+  const workspaceId = originalSourceWorkspaceId(target), tabId = originalSourceTabProjectionId(target, originalTab)
   observer.setState({ activeWorkspaceId: workspaceId })
-  if (entry === 'tab-x') observer.getState().openOriginalSpaceLocation({ target, occurrence: { tabId: 'healthy-tab', regionId: 'healthy-region', displayWorkspaceId: 'W', groupId: 'G' } })
+  if (entry === 'tab-x' || entry === 'region-x') observer.getState().openOriginalSpaceLocation({ target, occurrence: { tabId: originalTab, regionId: originalRegion, displayWorkspaceId: 'W', groupId: 'G' } })
   function Consumer() {
     const state = observer(), select = (reference: any) => state.selectMainRegion(reference, state.workbenchSpaceSelection)
     const presentation = mainFocusPresentation(state.workbenchSpaceSelection, state.tabs, workbenchSelectionCatalog(state), select)
@@ -247,6 +252,25 @@ it.runIf(business).each(['tab-x', 'focus-menu', 'changed-agent', 'changed-kind']
   const node = document.createElement('div'); document.body.append(node); const root = createClientUiRoot(node)
   cleanup.push(async () => { await act(async () => root.unmount()); node.remove() })
   await act(async () => root.render(createElement(Consumer)))
+  if (entry === 'region-x') {
+    const regionId = originalSourceRegionProjectionId(target, originalRegion)
+    let region: HTMLElement | undefined
+    await vi.waitFor(() => { region = [...node.querySelectorAll<HTMLElement>('[data-workbench-region-id]')].find(region => region.getAttribute('data-workbench-region-id') === regionId); expect(region).toBeDefined() })
+    await act(async () => region!.querySelector<HTMLElement>('[aria-label="Close split"]')!.click())
+    await vi.waitFor(() => expect(document.querySelector('[data-confirm-label="Discard & Close"]:not([disabled])')).not.toBeNull())
+    expect(document.querySelector('.confirmation-dialog')?.textContent).toContain('Region file-region')
+    if (process.env.AGENTMUX_SOURCE_CLOSE_VISUAL_DOM) await writeFile(process.env.AGENTMUX_SOURCE_CLOSE_VISUAL_DOM + '-region.html', document.body.innerHTML)
+    await act(async () => document.querySelector<HTMLElement>('[data-confirm-label="Discard & Close"]:not([disabled])')!.click())
+    await vi.waitFor(() => expect(f.store.getState().tabs[originalTab]?.regions['file-region']).toBeUndefined())
+    const appliedIndex = calls.mock.calls.findIndex(([method, input]) => method === 'close' && (input as { method: string }).method === 'space.close.apply')
+    await calls.mock.results[appliedIndex]!.value
+    const applied = calls.mock.calls[appliedIndex]![1] as import('../src/shared/source-workbench-close.js').SourceWorkbenchCloseCall
+    expect((await bridge.api.call('close', { ...destination, method: 'space.close.inspect', request: { operationId: applied.request.operationId } })).operation).toMatchObject({ outcome: 'applied', diskDurability: 'confirmed' })
+    expect(f.store.getState().tabs[originalTab]?.regions['raw-region']).toBeDefined()
+    expect((await f.native.client.status(f.run.runId)).state.type).toBe('running')
+    expect(f.stops).not.toHaveBeenCalled(); expect(localClose).not.toHaveBeenCalled()
+    return
+  }
   if (entry === 'tab-x') {
     let tabNode: HTMLElement | undefined
     await vi.waitFor(() => { tabNode = [...node.querySelectorAll<HTMLElement>('button.workbench-tab[data-workbench-tab-id]')].find(tab => tab.getAttribute('data-workbench-tab-id') === tabId); expect(tabNode, JSON.stringify({ selection: observer.getState().workbenchSpaceSelection, html: node.innerHTML })).toBeDefined() })
@@ -283,7 +307,7 @@ it.runIf(business).each(['tab-x', 'focus-menu', 'changed-agent', 'changed-kind']
     await vi.waitFor(() => expect(document.querySelector('[data-confirm-label="Check original status"]:not([disabled])')).not.toBeNull())
     await act(async () => document.querySelector<HTMLElement>('[data-confirm-label="Check original status"]:not([disabled])')!.click())
     await vi.waitFor(() => expect(document.querySelector('.confirmation-dialog')?.textContent).toContain('changed member or position'))
-    if (process.env.AGENTMUX_SOURCE_CLOSE_VISUAL_DOM && entry === 'changed-agent') await writeFile(process.env.AGENTMUX_SOURCE_CLOSE_VISUAL_DOM + '-unknown.html', document.body.innerHTML)
+    if (process.env.AGENTMUX_SOURCE_CLOSE_VISUAL_DOM && entry === 'changed-agent') await writeFile(process.env.AGENTMUX_SOURCE_CLOSE_VISUAL_DOM + '-changed.html', document.body.innerHTML)
     expect(document.querySelector('[data-confirm-label="Keep Session & Close"]')).toBeNull()
     expect(calls.mock.calls.some(([method, input]) => method === 'close' && (input as { method: string }).method === 'space.close.apply')).toBe(false)
     expect(f.store.getState().layouts.otherDisplay!.groups[0]!.tabOrder).toContain('healthy-tab')
@@ -294,6 +318,12 @@ it.runIf(business).each(['tab-x', 'focus-menu', 'changed-agent', 'changed-kind']
   expect(document.querySelector('.confirmation-dialog')?.textContent).toContain('Original position: otherDisplay · other-group')
   if (process.env.AGENTMUX_SOURCE_CLOSE_VISUAL_DOM && entry === 'focus-menu') await writeFile(process.env.AGENTMUX_SOURCE_CLOSE_VISUAL_DOM + '-review.html', document.body.innerHTML)
   await act(async () => document.querySelector<HTMLElement>('[data-confirm-label="Close"]:not([disabled])')!.click())
+  if (entry === 'lost-ack') {
+    await vi.waitFor(() => expect(document.querySelector('[data-confirm-label="Check original status"]:not([disabled])')).not.toBeNull())
+    expect(document.querySelector('.confirmation-dialog')?.textContent).toContain('acknowledgement unavailable')
+    if (process.env.AGENTMUX_SOURCE_CLOSE_VISUAL_DOM) await writeFile(process.env.AGENTMUX_SOURCE_CLOSE_VISUAL_DOM + '-unknown.html', document.body.innerHTML)
+    await act(async () => document.querySelector<HTMLElement>('[data-confirm-label="Check original status"]:not([disabled])')!.click())
+  }
   await vi.waitFor(() => expect(document.querySelector('.confirmation-dialog')?.textContent).toContain('Original view closed'))
   expect(f.store.getState().layouts.otherDisplay!.groups[0]!.tabOrder).not.toContain('healthy-tab')
   expect(f.store.getState().layouts.W!.groups[0]!.tabOrder).toContain('healthy-tab')
