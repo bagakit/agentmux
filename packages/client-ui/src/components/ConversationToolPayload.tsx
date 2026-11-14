@@ -9,6 +9,7 @@ type PayloadProps = {
   identity: object
   sourceIdentity: object
   callId?: string
+  direction?: 'input' | 'output'
   copyLabel: string
 }
 
@@ -20,7 +21,7 @@ export function ConversationToolPayload(props: PayloadProps) {
   </ConversationProgressiveBody>
 }
 
-function ConversationToolPayloadBody({ text, identity, sourceIdentity, callId, copyLabel }: PayloadProps) {
+function ConversationToolPayloadBody({ text, identity, sourceIdentity, callId, copyLabel, direction }: PayloadProps) {
   const labels = useConversationToolLabels()
   const [view, setView] = useState({ text, sourceIdentity, formatted: false })
   if (view.text !== text || view.sourceIdentity !== sourceIdentity) setView({ text, sourceIdentity, formatted: false })
@@ -34,12 +35,17 @@ function ConversationToolPayloadBody({ text, identity, sourceIdentity, callId, c
   }, [text])
   const readable = useMemo(() => formatted && validJson ? applyEdits(text, format(text, undefined, { tabSize: 2, insertSpaces: true, eol: '\n' })) : text, [text, formatted, validJson])
   return <>
-    <div className="conversation-detail-actions">
-      {callId ? <span className="conversation-tool-trace__identity">Call <code>{callId}</code></span> : null}
+    <div className="conversation-detail-actions conversation-tool-payload__actions">
+      {direction || callId ? <span className="conversation-tool-payload__identity">
+        {direction ? <span className="conversation-tool-trace__kind">{labels[direction]}</span> : null}
+        {callId ? <span className="conversation-tool-trace__identity">Call <code>{callId}</code></span> : null}
+      </span> : null}
+      <span className="conversation-tool-payload__tools">
       {validJson ? <button type="button" className="conversation-tool-trace__format" aria-label={labels.formatJson}
         aria-pressed={formatted} title={labels.formatJsonHint}
         onClick={() => setView({ text, sourceIdentity, formatted: !formatted })}>{labels.formatJson}</button> : null}
       {text.length > 0 ? <ContentCopyButton text={text} identity={identity} label={copyLabel} /> : null}
+      </span>
     </div>
     <pre>{formatted ? readable : text}</pre>
   </>

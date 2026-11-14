@@ -503,6 +503,7 @@ export function ConversationMessage({
                 {...(part.kind === 'tool-result' && part.failed ? { 'data-status': 'failed' } : {})} data-call-id={part.callId}>
                 {!sourceLabelsInDetails || sources?.parts[index]?.unread ? <ConversationSourceLabels sources={sources?.parts[index]} /> : null}
                 <ConversationToolPayload text={part.kind === 'tool-call' ? part.input : part.output} identity={readingIdentity} sourceIdentity={readingIdentity}
+                  direction={part.kind === 'tool-call' ? 'input' : 'output'}
                   {...(part.callId ? { callId: part.callId } : {})} copyLabel={part.kind === 'tool-call' ? 'Copy tool input' : 'Copy tool output'} />
               </div>
             ) : (

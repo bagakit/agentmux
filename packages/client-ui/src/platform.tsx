@@ -17,12 +17,14 @@ export type MoteInputNoticeOwner = { routeHostId: string; sourceHostId: string; 
 
 export type ConversationToolLabels = {
   copy: string; copying: string; copied: string; retryCopy: string; formatJson: string; formatJsonHint: string
+  input: string; output: string
   /** How this client names its own person as a speaker; recorded identity is unchanged. */
   self?: string
 }
 const defaultConversationToolLabels: ConversationToolLabels = {
   copy: 'Copy', copying: 'Copying…', copied: 'Copied', retryCopy: 'Retry copy',
-  formatJson: 'Format JSON', formatJsonHint: 'Format JSON for reading; copying keeps the original text'
+  formatJson: 'Format JSON', formatJsonHint: 'Format JSON for reading; copying keeps the original text',
+  input: 'Input', output: 'Output'
 }
 
 /** Client-owned IO and presentation. Nothing here discovers a Runtime or retains its facts. */

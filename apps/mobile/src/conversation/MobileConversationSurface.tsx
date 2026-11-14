@@ -54,19 +54,32 @@ import type { MobileConversationStatus } from './MobileConversationStatus'
 const inShellSlot = (target: HTMLElement | null | undefined, node: ReactNode) =>
   target === undefined ? node : target && node ? createPortal(node, target) : null
 
-/** Touch has no hover, so a tap on a message is what shows its copy and details; one message at a time. */
+/** Touch has no hover. A completed click settles the active message's copy and details. */
 function revealMessageActions(reading: HTMLElement, target: EventTarget) {
-  if (!(target instanceof Element) || target.closest('a, button, summary, input, textarea, select, label, [contenteditable="true"]')) return
+  if (!(target instanceof Element) || !reading.contains(target)) return
   if (reading.ownerDocument.getSelection()?.isCollapsed === false) return
   const message = target.closest('.log-turn')
-  const current = reading.querySelector('.log-turn[data-actions-revealed]')
-  current?.removeAttribute('data-actions-revealed')
-  if (message && message !== current && reading.contains(message)) message.setAttribute('data-actions-revealed', '')
+  const wasRevealed = message?.hasAttribute('data-actions-revealed')
+  // The clicked action has its target now. Do not collapse another message during focus,
+  // which can move this target between pointerdown and click.
+  for (const current of reading.querySelectorAll('.log-turn[data-actions-revealed]')) if (current !== message) current.removeAttribute('data-actions-revealed')
+  if (target.closest('a, button, summary, input, textarea, select, label, [contenteditable="true"]') || !message || !reading.contains(message)) return
+  if (wasRevealed) message.removeAttribute('data-actions-revealed')
+  else message.setAttribute('data-actions-revealed', '')
+}
+
+/** A focused header has already been revealed. Keep that choice when focus moves to its body,
+ * so a visible body action cannot move between pointerdown and click. */
+function retainFocusedMessageActions(reading: HTMLElement, target: EventTarget) {
+  if (!(target instanceof Element)) return
+  const message = target.closest('.log-turn')
+  if (!message || !reading.contains(message) || !message.querySelector(':scope > .log-turn__head')?.contains(target)) return
+  if (!message.hasAttribute('data-actions-revealed')) message.setAttribute('data-actions-revealed', '')
 }
 
 const mobileConversationToolLabels: NonNullable<ClientUiPlatform['conversationToolLabels']> = {
   copy: '复制', copying: '正在复制…', copied: '已复制', retryCopy: '重新复制',
-  formatJson: '格式化 JSON', formatJsonHint: '格式化便于阅读；复制时保留原文', self: '我'
+  formatJson: '格式化 JSON', formatJsonHint: '格式化便于阅读；复制时保留原文', input: '输入', output: '输出', self: '我'
 }
 
 export type { MobileConnection } from './use-hosted-conversation'
@@ -480,7 +493,7 @@ export function MobileConversationSurface({ client, agentSessionId, moteSource, 
         })}
       </details>}
       <div className="mobile-conversation__reader">
-      <div ref={feed} className="mobile-conversation__reading" onClick={event => revealMessageActions(event.currentTarget, event.target)} onScroll={event => {
+      <div ref={feed} className="mobile-conversation__reading" onClick={event => revealMessageActions(event.currentTarget, event.target)} onFocusCapture={event => retainFocusedMessageActions(event.currentTarget, event.target)} onScroll={event => {
         const node = event.currentTarget
         const programmatic = consumeProgrammaticReadingScroll(node)
         follow.current = programmatic === 'restore' ? { ...follow.current, lastScrollTop: node.scrollTop } : onScroll(follow.current, { scrollTop: node.scrollTop, scrollHeight: node.scrollHeight, clientHeight: node.clientHeight })

@@ -152,10 +152,11 @@
   background: var(--mobile-group); box-shadow: none; }
 .mobile-app .mobile-conversation .log-turn[data-message-bubble='true']:is([data-speaker-role='human'], [data-speaker-role='external']) > .log-turn__body { line-height: 1.55; }
 /* Touch has no hover: copy and details leave the reading until the message is tapped, reached by
- * keyboard, has its details open or is showing a copy result. Hidden controls stay in the tab order. */
+ * keyboard at its header, has its details open or is showing a copy result. A body control gaining
+ * focus must not reveal the header and move that control before its click. Hidden controls stay in the tab order. */
 @media (hover: none) {
-  .mobile-app .mobile-conversation .log-turn:not([data-actions-revealed], :focus-within, :has(> .log-turn__head .log-turn__actions:not([data-copy-state='idle'])), :has(> .log-turn__head .conversation-input-details__body)) > .log-turn__head > :is(.log-turn__actions, .conversation-input-details) > :is(.log-turn__action, .conversation-input-details__toggle),
-  .mobile-app .mobile-conversation .log-turn[data-message-bubble='true']:is([data-speaker-role='human'], [data-speaker-role='external']):not([data-actions-revealed], :focus-within, :has(> .log-turn__head .log-turn__actions:not([data-copy-state='idle'])), :has(> .log-turn__head .conversation-input-details__body)) > .log-turn__head {
+  .mobile-app .mobile-conversation .log-turn:not([data-actions-revealed], :has(> .log-turn__head:focus-within), :has(> .log-turn__head .log-turn__actions:not([data-copy-state='idle'])), :has(> .log-turn__head .conversation-input-details__body)) > .log-turn__head > :is(.log-turn__actions, .conversation-input-details) > :is(.log-turn__action, .conversation-input-details__toggle),
+  .mobile-app .mobile-conversation .log-turn[data-message-bubble='true']:is([data-speaker-role='human'], [data-speaker-role='external']):not([data-actions-revealed], :has(> .log-turn__head:focus-within), :has(> .log-turn__head .log-turn__actions:not([data-copy-state='idle'])), :has(> .log-turn__head .conversation-input-details__body)) > .log-turn__head {
     position: absolute; width: 1px; min-width: 0; height: 1px; min-height: 0; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
 }
 .mobile-app .mobile-conversation .log-turn__actions { color: var(--text-3); }

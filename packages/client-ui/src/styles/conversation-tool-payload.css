@@ -1,5 +1,7 @@
-.conversation-tool-trace__payload .conversation-detail-actions { flex-wrap: wrap; align-items: center; gap: var(--sp-2); }
-.conversation-tool-trace__payload .conversation-tool-trace__identity { padding-top: 0; }
+.conversation-tool-payload__actions.conversation-detail-actions { flex-wrap: wrap; align-items: center; gap: var(--sp-2); }
+.conversation-tool-payload__identity { display: flex; flex: 1 1 12rem; flex-wrap: wrap; align-items: baseline; gap: var(--sp-2); min-width: min(100%, 12rem); }
+.conversation-tool-payload__identity > .conversation-tool-trace__identity { flex: 1 1 8rem; min-width: 0; margin: 0; padding: 0; }
+.conversation-tool-payload__tools { display: inline-flex; flex: 0 1 auto; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: var(--sp-2); min-width: 0; max-width: 100%; margin-inline-start: auto; }
 .conversation-tool-trace__format { min-height: 28px; margin-inline-end: auto; padding: 0 var(--sp-2); border: 0; border-radius: var(--radius-sm); color: var(--text-3); background: transparent; font: inherit; cursor: pointer; }
 .conversation-tool-trace__format:hover { color: var(--text); background: var(--surface-2); }
 .conversation-tool-trace__format[aria-pressed='true'] { color: var(--text); background: var(--wash-2); }
