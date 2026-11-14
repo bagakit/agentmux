@@ -14,7 +14,7 @@ const inputs = [file, test, 'apps/desktop/scripts/verify-browser-outcome-downloa
   'packages/browser/src/browser-operation-journal.ts', 'packages/browser/src/browser-outcome-journal.ts',
   'packages/browser/src/browser-structured-output.ts', 'packages/browser/src/model/browser-structured-output.ts',
   'packages/browser/src/model/browser-outcome-criteria.ts', 'packages/browser/src/model/browser-download.ts',
-  'apps/desktop/src/shared/workspace-file-bytes.ts', 'packages/core/src/index.ts',
+  'apps/host/src/workspace-file-bytes.ts', 'packages/core/src/index.ts',
   'packages/core/src/durable-write.ts', 'packages/core/src/execution-host.ts',
   'packages/core/src/process-runner.ts', 'packages/core/src/errors.ts']
 const original = new Map(await Promise.all(inputs.map(async path => [path, await readFile(join(root, path))])))

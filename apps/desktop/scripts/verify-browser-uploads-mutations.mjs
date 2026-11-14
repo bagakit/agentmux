@@ -1,7 +1,7 @@
 import { verifyRendererSourceMutations } from './lib/verify-renderer-source-mutations.mjs'
 const file='apps/desktop/src/main/browser-uploads.ts'
 await verifyRendererSourceMutations({name:'browser-uploads-mutations',tests:['apps/desktop/test/browser-uploads.test.ts'],
-  sources:[file,'apps/desktop/src/shared/browser-upload.ts','apps/desktop/src/main/workspace-files.ts','apps/desktop/src/shared/workspace-file-bytes.ts'],
+  sources:[file,'apps/desktop/src/shared/browser-upload.ts','apps/desktop/src/main/workspace-files.ts','apps/host/src/workspace-file-bytes.ts'],
   mutations:[
     {label:'cdp-object-key-order-rejects-correct-file-list',file,before:'const observedFiles = observed.result?.value',after:'const observedFiles = JSON.stringify(observed.result?.value) === JSON.stringify(selection.files.map(file => ({ name: file.name, byteLength: file.byteLength }))) ? observed.result?.value : []'},
     {label:'upload-reuses-backend-instead-of-exact-object',file,before:"'DOM.setFileInputFiles', { objectId: context.target.objectId, files: staged }",after:"'DOM.setFileInputFiles', { backendNodeId: 42, files: staged }"},

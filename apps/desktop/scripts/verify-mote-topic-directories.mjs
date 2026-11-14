@@ -33,7 +33,7 @@ try {
   const files = await sourceFiles(join(repository, 'apps/desktop/src'))
   assert.ok(files.length > 0, 'The production caller scan must be nonempty.')
   for (const [name, definition, pattern] of [
-    ['physical directory resolver', 'apps/desktop/src/main/scratch-topic-directories.ts', /resolveScratchTopicDirectory\(/],
+    ['physical directory resolver', 'apps/host/src/mote-directories.ts', /resolveScratchTopicDirectory\(/],
     ['public snapshot projection', 'apps/host/src/snapshot-observation.ts', /observeClientRpcSnapshot\(/],
     ['canonical launch preparation', 'apps/desktop/src/main/scratch-topics.ts', /scratchTopics\.prepareAgent\(/],
     ['durable identity projection', 'apps/host/src/mote-topic-model.ts', /scratchTopicIdentityPath\(/],
@@ -54,10 +54,11 @@ try {
   assert.ok(receipt.callers['original file gateway'].some(hit => hit.path === 'apps/desktop/src/main/ipc.ts'), 'The actual file IPC owner must consume the gateway.')
   const packageScript = JSON.parse(await readFile(join(repository, 'apps/desktop/package.json'), 'utf8')).scripts['migrate:topic-directories']
   assert.equal(packageScript, 'node scripts/migrate-topic-directories.mjs')
-  const migration = await readFile(join(repository, 'apps/desktop/scripts/migrate-topic-directories.mjs'), 'utf8')
+  const migration = await readFile(join(repository, 'apps/host/src/mote-directory-maintenance.mjs'), 'utf8')
   assert.match(migration, /'--alias-swap'/)
-  receipt.callers['native alias swap'] = ['apps/desktop/scripts/migrate-topic-directories.mjs', 'apps/desktop/package.json']
+  receipt.callers['native alias swap'] = ['apps/host/src/mote-directory-maintenance.mjs', 'apps/desktop/scripts/migrate-topic-directories.mjs', 'apps/desktop/package.json']
   for (const file of [...files.map(file => relative(repository, file)), 'apps/host/native/workspace-move.c',
+    'apps/host/src/mote-directories.ts', 'apps/host/src/mote-directory-identity.mjs', 'apps/host/src/mote-directory-maintenance.mjs',
     'apps/desktop/scripts/migrate-topic-directories.mjs', 'apps/desktop/test/scratch-topic-directories.test.ts',
     'apps/desktop/test/space-role-soul-session.test.ts', 'apps/desktop/test/mote-conversation-identity.test.tsx',
     'apps/desktop/test/file-explorer-open-as-project.integration.test.tsx', 'apps/desktop/test/topic-directory-migration.native.test.mjs', 'apps/desktop/test/rpc-client-observations.test.ts']) {

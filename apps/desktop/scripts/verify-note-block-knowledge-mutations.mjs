@@ -6,7 +6,7 @@ const store = `${renderer}store.ts`, files = 'apps/desktop/src/main/workspace-fi
 const naming = `${renderer}lib/note-names.ts`, placement = `${renderer}lib/file-workbench-state.ts`
 const selection = `${renderer}lib/note-block-selection.ts`, presentation = `${renderer}lib/workbench-presentation.ts`
 const discovery = `${renderer}lib/note-directory-sources.ts`
-const creation = `${renderer}lib/note-creation.ts`, document = 'apps/desktop/src/shared/note-document.ts'
+const creation = `${renderer}lib/note-creation.ts`, document = 'packages/client-ui/src/note/note-document.ts'
 const tests = ['apps/desktop/test/note-block-selection-store.test.ts', 'apps/desktop/test/note-create-store.test.ts', 'apps/desktop/test/note-creation.test.ts',
   'apps/desktop/test/workspace-files-create-result.test.ts', 'apps/desktop/test/file-save-store.test.ts',
   'apps/desktop/test/note-document.test.ts', 'apps/desktop/test/note-names.test.ts',
@@ -37,6 +37,6 @@ const selected = requested ? mutations.filter(mutation => requested.includes(mut
 assert.ok(selected.length > 0, 'The requested mutation selection must not be empty.')
 if (requested) assert.deepEqual([...new Set(requested)].sort(), selected.map(mutation => mutation.label).sort(), 'Every requested mutation must exist in the actual descriptor.')
 await verifyRendererSourceMutations({ name: ("note-block-knowledge-mutations-" + (globalThis.crypto.randomUUID()) + ""), tests,
-  sources: [selection, presentation, store, files, naming, placement, creation, discovery, document, 'apps/desktop/src/shared/note-content-schema.ts',
+  sources: [selection, presentation, store, files, naming, placement, creation, discovery, document, 'packages/client-ui/src/note/note-content-schema.ts',
     'apps/desktop/scripts/verify-note-block-knowledge-mutations.mjs', 'apps/desktop/scripts/lib/verify-renderer-source-mutations.mjs'],
   mutations: selected })

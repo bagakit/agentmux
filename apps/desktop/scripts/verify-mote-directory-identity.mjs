@@ -9,13 +9,13 @@ import { runTopicDirectoryMigrationMutations } from './verify-topic-directory-mi
 const base = resolve(import.meta.dirname, '../../..'), output = join(base, '.tmp/mote-directory-identity')
 await mkdir(output, { recursive: true })
 const attempt = await mkdtemp(join(output, 'attempt-')), isolated = join(attempt, 'source')
-const schema = 'apps/desktop/src/main/scratch-directory-identity.mjs'
+const schema = 'apps/host/src/mote-directory-identity.mjs'
 const scratch = 'apps/desktop/src/main/scratch-topics.ts'
 const addresses = 'apps/desktop/src/shared/space-addresses.ts'
 const observer = 'apps/host/src/snapshot-observation.ts'
 const contentIdentity = 'apps/host/src/topic-categories.ts'
 const ipc = 'apps/desktop/src/main/ipc.ts'
-const directories = 'apps/desktop/src/main/scratch-topic-directories.ts'
+const directories = 'apps/host/src/mote-directories.ts'
 const config = 'apps/desktop/scripts/fixtures/mote-directory-identity/vitest.config.mts'
 const test = 'apps/desktop/test/mote-directory-identity.test.ts'
 const nativeSource = 'apps/host/native/workspace-move.c'
@@ -26,7 +26,7 @@ const variants = [
     to: 'value.identityDirectoryName === expected.identityDirectoryName', pattern: 'invalid wrong-root' },
   { id: 'foreign-name-accepted', file: schema, from: 'value.identityDirectoryName === expected.identityDirectoryName && value.identityPathHash === expected.identityPathHash',
     to: 'value.identityPathHash === expected.identityPathHash', pattern: 'invalid wrong-name' },
-  { id: 'original-identity-reissued', file: directories, from: 'if (identity) return identity', to: 'if (identity) return physical', pattern: 'new actual migrations' },
+  { id: 'original-identity-reissued', file: directories, from: 'if (saved) return saved', to: 'if (saved) return physical', pattern: 'new actual migrations' },
   { id: 'claimed-record-not-bound', file: nativeSource,
     from: 'if (!file_matches(fd, pending, old_dev, old_ino, old_hash, 0))\n        restore_claim(fd, pending, current, "file-publish-claimed-conflict");',
     to: '/* omit claimed original binding */', pattern: 'real native last-check window' },
@@ -46,8 +46,8 @@ const variants = [
     from: '!sameRecord(published.pending, before.pending ?? before.current) || published.current.bytes !== expectedCurrent',
     to: 'published.current.bytes !== expectedCurrent', pattern: 'a later valid pending witness after claim' },
   { id: 'pending-warning-lost', file: schema,
-    from: 'needsUpgrade: Boolean(pending || current.needsUpgrade)',
-    to: 'needsUpgrade: Boolean(current?.needsUpgrade)', pattern: 'lost flush confirmation' },
+    from: 'needsUpgrade: Boolean(pending || current.needsUpgrade || aliasPending)',
+    to: 'needsUpgrade: Boolean(current?.needsUpgrade || aliasPending)', pattern: 'lost flush confirmation' },
   { id: 'readonly-discovery-writes', file: observer, from: 'const snapshots = await scratchTopics.list(workspace)',
     to: 'await scratchTopics.normalizeDirectoryIdentities(workspace)\n    const snapshots = await scratchTopics.list(workspace)', pattern: 'cold write-before ENOSPC' },
   { id: 'physical-path-mints-identity', file: contentIdentity, from: 'return topic.readError && !topic.identityDirectoryPath ? null',
@@ -55,8 +55,8 @@ const variants = [
   { id: 'cold-mote-classification-lost', file: observer,
     from: "kind: !isKnowledgeTopic(snapshot) ? 'mote' : snapshot.readError ? 'unknown' : 'topic'",
     to: "kind: snapshot.readError ? 'unknown' : !isKnowledgeTopic(snapshot) ? 'mote' : 'topic'", pattern: 'cold write-before ENOSPC' },
-  { id: 'startup-holds-healthy-input', file: ipc, from: 'if (scratchForIdentity) void Promise.resolve().then(() => args.scratchTopics.normalizeDirectoryIdentities(scratchForIdentity))',
-    to: 'if (scratchForIdentity) await Promise.resolve().then(() => args.scratchTopics.normalizeDirectoryIdentities(scratchForIdentity))', pattern: 'executes the original IPC startup' }
+  { id: 'startup-holds-healthy-input', file: ipc, from: 'if (scratchForIdentity) void Promise.resolve().then(() => args.scratchTopics.normalizeDirectoryIdentities(scratchForIdentity, { shortenMotes: true }))',
+    to: 'if (scratchForIdentity) await Promise.resolve().then(() => args.scratchTopics.normalizeDirectoryIdentities(scratchForIdentity, { shortenMotes: true }))', pattern: 'executes the original IPC startup' }
 ]
 const checks = [
   { symbol: 'nativeFilePublication', definition: nativeSource, caller: schema, anchor: "runFilePublication('--file-publish'" },
@@ -64,11 +64,11 @@ const checks = [
   { symbol: 'readDirectoryIdentity', definition: schema, caller: directories, anchor: 'await readDirectoryIdentity(' },
   { symbol: 'normalizeDirectoryIdentity', definition: schema, caller: scratch, anchor: 'await normalizeDirectoryIdentity(' },
   { symbol: 'normalizeDirectoryIdentities', definition: scratch, caller: ipc, anchor: 'args.scratchTopics.normalizeDirectoryIdentities(' },
-  { symbol: 'retainDirectoryIdentity', definition: schema, caller: 'apps/desktop/scripts/migrate-topic-directories.mjs', anchor: 'await retainDirectoryIdentity(' },
+  { symbol: 'retainDirectoryIdentity', definition: schema, caller: 'apps/host/src/mote-directory-maintenance.mjs', anchor: 'await retainDirectoryIdentity(' },
   { symbol: 'observeClientRpcSnapshot', definition: observer, caller: ipc, anchor: 'observeClientRpcSnapshot(' },
   { symbol: 'originalTopicAddress', definition: addresses, caller: 'apps/desktop/src/renderer/src/components/SpaceTopicsTree.tsx', anchor: 'originalTopicAddress(' }
 ]
-const files = [...new Set([schema, 'apps/desktop/src/main/scratch-directory-identity.d.mts', scratch, directories, addresses,
+const files = [...new Set(['packages/identity/dist/runtime-source.js', schema, 'apps/host/src/mote-directory-identity.d.mts', scratch, directories, addresses,
   observer, contentIdentity, ipc, test, config, 'apps/host/native/workspace-move.c', 'apps/desktop/test/topic-directory-migration.native.test.mjs',
   'apps/desktop/scripts/migrate-topic-directories.mjs', 'apps/desktop/scripts/verify-topic-directory-migration-mutations.mjs',
   'apps/desktop/scripts/verify-mote-topic-directories-mutations.mjs', 'apps/desktop/scripts/verify-mote-directory-identity.mjs', ...checks.flatMap(check => [check.definition, check.caller])])]
@@ -94,20 +94,22 @@ function green(run, minimum) {
 }
 try {
   await mkdir(isolated)
-  for (const path of ['apps/desktop/src/main', 'apps/desktop/src/shared', 'apps/desktop/test/fixtures', 'packages/core/src', 'packages/core/test/helpers'])
+  for (const path of ['apps/desktop/src/main', 'apps/desktop/src/shared', 'apps/desktop/test/fixtures', 'apps/host/src', 'apps/host/scripts', 'apps/host/native', 'packages/core/src', 'packages/core/test/helpers'])
     await cp(join(base, path), join(isolated, path), { recursive: true })
   for (const path of ['apps/desktop/src/renderer/src/lib/scratch-topic-snapshots.ts', 'apps/desktop/src/preload/index.ts', test, 'apps/desktop/test/scratch-topic-directories.test.ts', 'apps/desktop/test/rpc-client-observations.test.ts',
     'apps/desktop/test/mote-avatar-assets.test.ts', 'apps/desktop/test/mote-archive-service.test.ts', 'apps/desktop/test/mote-primary-directory.test.ts',
     config, 'apps/desktop/scripts/fixtures/mote-navigation-footer/vitest.owning.config.mts', 'apps/desktop/scripts/migrate-topic-directories.mjs',
-    'apps/host/native/workspace-move.c', 'apps/desktop/scripts/build-workspace-move-helper.mjs', 'packages/core/package.json', 'apps/desktop/package.json', 'vitest.setup.ts', 'tsconfig.base.json']) {
+    'apps/host/native/workspace-move.c', 'apps/desktop/scripts/build-workspace-move-helper.mjs', 'packages/core/package.json', 'apps/host/package.json', 'apps/desktop/package.json', 'vitest.setup.ts', 'tsconfig.base.json']) {
     await mkdir(dirname(join(isolated, path)), { recursive: true }); await cp(join(base, path), join(isolated, path))
   }
   for (const path of ['node_modules', 'apps/desktop/node_modules', 'packages/core/node_modules',
-    'packages/core/vendor', 'packages/demand', 'packages/layout', 'packages/client-ui']) {
+    'packages/core/vendor', 'packages/demand', 'packages/layout', 'packages/identity', 'packages/client-ui', 'apps/host/node_modules']) {
     await mkdir(dirname(join(isolated, path)), { recursive: true }); await symlink(join(base, path), join(isolated, path))
   }
   await mkdir(join(isolated, 'apps/desktop/resources/bin'), { recursive: true })
   await cp(join(base, 'apps/desktop/resources/bin/agentmux-workspace-move'), join(isolated, 'apps/desktop/resources/bin/agentmux-workspace-move'))
+  await mkdir(join(isolated, 'apps/host/resources/bin'), { recursive: true })
+  await cp(join(base, 'apps/host/resources/bin/agentmux-workspace-move'), join(isolated, 'apps/host/resources/bin/agentmux-workspace-move'))
   await writeFile(join(isolated, 'package.json'), '{"type":"module"}')
   for (const check of checks) {
     assert.notEqual(check.definition, check.caller)

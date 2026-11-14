@@ -5,7 +5,7 @@ const file = 'apps/desktop/src/main/workspace-files.ts'
 await verifyRendererSourceMutations({
   name: 'workspace-file-bytes-mutations',
   tests: ['apps/desktop/test/workspace-file-bytes.test.ts'],
-  sources: [file, 'apps/desktop/src/shared/workspace-file-bytes.ts'],
+  sources: [file, 'apps/host/src/workspace-file-bytes.ts'],
   mutations: [
     { label: 'binary-decodes-as-utf8', file, before: 'content: Buffer.from(input.bytes)', after: "content: Buffer.from(Buffer.from(input.bytes).toString('utf8'))" },
     { label: 'outside-byte-read-follows-explorer-link', file,

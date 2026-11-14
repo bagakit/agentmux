@@ -1,7 +1,7 @@
 export const tests = ['apps/desktop/test/data-notebook-preview.test.ts', 'apps/desktop/test/notebook-file-preview-component.test.tsx']
 export const owningConfig = 'apps/desktop/test/data-file-formats.config.mts'
 export const sources = [
-  'apps/desktop/src/shared/workspace-file-bytes.ts',
+  'apps/host/src/workspace-file-bytes.ts',
   'packages/editor-extensions/src/engines/data-notebook.ts',
   'packages/editor-extensions/src/engines/data-notebook.worker.ts',
   'packages/editor-extensions/src/engines/data-model.ts',

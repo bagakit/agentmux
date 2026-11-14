@@ -633,7 +633,7 @@ const inputs = [...tests, ...(slice === 'documents' ? [component + 'document.ts'
   'apps/desktop/src/renderer/src/components/BrowserPane.tsx', host + 'context.ts', component + 'compose.ts',
   host + 'AnnotationFileDialog.tsx', 'apps/desktop/src/renderer/src/components/WindowOverlayHost.tsx', 'apps/desktop/test/helpers/client-ui-render.tsx',
   'apps/desktop/src/main/workspace-files.ts', 'apps/host/native/workspace-move.c', 'apps/desktop/scripts/build-workspace-move-helper.mjs',
-  'apps/desktop/src/shared/contracts.ts', 'apps/desktop/src/shared/workspace-file-bytes.ts'] : [adapter, 'apps/desktop/src/renderer/src/components/BrowserPane.tsx',
+  'apps/desktop/src/shared/contracts.ts', 'apps/host/src/workspace-file-bytes.ts'] : [adapter, 'apps/desktop/src/renderer/src/components/BrowserPane.tsx',
   'apps/desktop/src/renderer/src/styles/browser.css', 'apps/desktop/test/helpers/client-ui-render.tsx']),
   'apps/desktop/scripts/verify-image-annotation.mjs', owningConfig, 'apps/desktop/scripts/radix-overlay-aliases.ts',
   'apps/desktop/electron.vite.config.ts', 'vitest.config.ts', 'vitest.dist-freshness.ts']

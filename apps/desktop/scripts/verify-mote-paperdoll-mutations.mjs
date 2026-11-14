@@ -90,7 +90,7 @@ try {
     ['SpaceObjectIcon identity', 'apps/desktop/src/renderer/src/components/SpaceObjectIcon.tsx', /<SpaceObjectIcon\s/],
     ['observeMoteMotion', 'apps/desktop/src/renderer/src/lib/mote-face-motion.ts', /\bobserveMoteMotion\(/],
     ['LiquidSelectionSurface', 'apps/desktop/src/renderer/src/components/LiquidSelectionSurface.tsx', /<LiquidSelectionSurface\s/],
-    ['MoteFace', 'apps/desktop/src/renderer/src/components/MoteFace.tsx', /<MoteFace\s/],
+    ['MoteFace', 'packages/client-ui/src/components/MoteFace.tsx', /<MoteFace\s/],
     ['MoteFaceEditor', 'apps/desktop/src/renderer/src/components/MoteFaceEditor.tsx', /<MoteFaceEditor\s/],
     ['MoteIdentityMotion', 'apps/desktop/src/renderer/src/components/MoteIdentityMotion.tsx', /<MoteIdentityMotion\s/],
     ['moteExpression', 'apps/desktop/src/renderer/src/lib/mote-expression.ts', /\bmoteExpression\(/],

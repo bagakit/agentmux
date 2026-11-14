@@ -12,6 +12,8 @@ const output = await mkdtemp(join(repository, '.tmp/mote-directory-source-mutati
 const clone = join(output, 'source')
 const receipt = { passed: false, source: {}, mutations: [], native: null, userDataTouched: false }
 const hash = value => createHash('sha256').update(value).digest('hex')
+const identitySource = 'packages/identity/dist/runtime-source.js'
+receipt.source[identitySource] = hash(await readFile(join(repository, identitySource)))
 async function run(label, config, test) {
   const args = [join(repository, 'node_modules/vitest/vitest.mjs'), 'run', '--maxWorkers=1',
     ...(config ? ['--config', config] : []), test, '--reporter=verbose']
@@ -22,32 +24,33 @@ async function run(label, config, test) {
   return { status, text, args, log: label + '.log', sha256: hash(text) }
 }
 try {
-  for (const path of ['apps/desktop/src', 'apps/desktop/test', 'apps/desktop/scripts', 'apps/desktop/resources',
+  for (const path of ['apps/desktop/src', 'apps/desktop/test', 'apps/desktop/scripts', 'apps/desktop/resources', 'apps/host/src', 'apps/host/scripts', 'apps/host/resources',
     'packages/core/src', 'packages/core/vendor', 'packages/demand/src', 'packages/demand/bin', 'packages/layout/src', 'packages/client-ui/src'])
     await cp(join(repository, path), join(clone, path), { recursive: true, preserveTimestamps: true })
   for (const path of ['package.json', 'tsconfig.base.json', 'vitest.config.ts', 'vitest.dist-freshness.ts', 'vitest.setup.ts',
-    'apps/desktop/package.json', 'apps/desktop/tsconfig.json', 'packages/core/package.json',
+    'apps/desktop/package.json', 'apps/host/package.json', 'apps/desktop/tsconfig.json', 'packages/core/package.json',
     'packages/demand/package.json', 'packages/layout/package.json', 'packages/client-ui/package.json']) {
     await mkdir(dirname(join(clone, path)), { recursive: true }); await cp(join(repository, path), join(clone, path), { preserveTimestamps: true })
   }
   for (const path of ['node_modules', 'apps/desktop/node_modules', 'packages/core/node_modules', 'packages/core/dist',
-    'packages/demand/node_modules', 'packages/demand/dist', 'packages/layout/node_modules', 'packages/client-ui/node_modules', 'packages/client-ui/dist']) {
+    'packages/demand/node_modules', 'packages/demand/dist', 'packages/identity', 'apps/host/node_modules', 'packages/layout/node_modules', 'packages/client-ui/node_modules', 'packages/client-ui/dist']) {
     await mkdir(dirname(join(clone, path)), { recursive: true }); await symlink(join(repository, path), join(clone, path), 'dir')
   }
   const ordinary = 'apps/desktop/test/scratch-topic-directories.test.ts'
+  const owning = 'apps/desktop/scripts/fixtures/mote-directory-identity/vitest.config.mts'
   const ui = 'apps/desktop/scripts/fixtures/mote-navigation-footer/vitest.chat.config.mts'
   const variants = [
-    { name: 'new-mote-wrong-root', path: 'apps/desktop/src/main/scratch-topics.ts', test: ordinary,
+    { name: 'new-mote-wrong-root', path: 'apps/host/src/mote-resources.ts', config: owning, test: ordinary,
       changes: [['const root = mote ? roots.motes : roots.topics', 'const root = roots.topics']] },
-    { name: 'relocated-identity-reissued', path: 'apps/desktop/src/main/scratch-topic-directories.ts', test: ordinary,
-      changes: [['if (identity) return identity', 'if (identity) return physical']] },
-    { name: 'write-escape-opened', path: 'apps/desktop/src/main/workspace-files.ts', test: ordinary,
+    { name: 'relocated-identity-reissued', path: 'apps/host/src/mote-directories.ts', config: owning, test: ordinary,
+      changes: [['if (saved) return saved', 'if (saved) return physical']] },
+    { name: 'write-escape-opened', path: 'apps/host/src/ordinary-files.ts', config: owning, test: ordinary,
       changes: [['return { root: dirname(directory), requested: [basename(directory), ...parts.slice(1)].join(sep) }',
         'return { root: dirname(dirname(directory)), requested: [basename(dirname(directory)), basename(directory), ...parts.slice(1)].join(sep) }']] },
-    { name: 'old-provider-cwd-retargeted', path: 'packages/core/src/client.ts', config: 'apps/desktop/scripts/fixtures/mote-default-context/vitest.owning.config.mts', test: 'test/space-role-soul-session.test.ts',
-      changes: [['        cwd: current.workspacePath,', ("        cwd: current.workspacePath.replace('" + _hygiene_fixturePath("scratch/") + ("', '" + _hygiene_fixturePath("motes/") + "'),"))]] },
+    { name: 'old-provider-cwd-retargeted', path: 'packages/core/src/agent-session-recovery/lifecycle.ts', config: 'apps/desktop/scripts/fixtures/mote-default-context/vitest.owning.config.mts', test: 'test/space-role-soul-session.test.ts',
+      changes: [['cwd: current.workspacePath, env: launchEnvironment,', ("cwd: current.workspacePath.replace('" + _hygiene_fixturePath("scratch/") + ("', '" + _hygiene_fixturePath("motes/") + "'), env: launchEnvironment,"))]] },
     { name: 'canonical-avatar-key-lost', path: 'apps/desktop/src/renderer/src/lib/space-object-appearance.ts', config: ui, test: 'test/mote-conversation-identity.test.tsx',
-      changes: [['scratchTopicIdentityPath(workspace, topic)', "workspace.path + '/' + topic.directoryPath"]] }
+      changes: [['const key = address.spaceId', "const key = directoryIdentity(workspace.hostId, workspace.path + '/' + topic.directoryPath)"]] }
   ]
   for (const variant of variants) {
     const original = await readFile(join(clone, variant.path), 'utf8')

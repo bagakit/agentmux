@@ -5,7 +5,7 @@ import { AgentMuxFileAgentSessionStore, defaultAgentMuxControlSocketPath, loadAg
 import { RuntimeController } from '../../../src/main/runtime-controller'
 import { connectDesktopAgentMuxHost } from '../../../src/main/desktop-host'
 import { ScratchTopics } from '../../../src/main/scratch-topics'
-import { scratchIdentityContext } from '../../../src/main/scratch-topic-directories'
+import { scratchIdentityContext } from '@agentmux/host/mote-resources'
 import { retainDirectoryIdentity, moteDirectoryName } from '../../../src/main/scratch-directory-identity.mjs'
 import { directoryIdentity, homeZoneId } from '../../../src/shared/space-addresses'
 import { SCRATCH_WORKSPACE_ID, scratchTopicDirectoryName } from '@agentmux/host/mote-model'

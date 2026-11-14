@@ -105,7 +105,7 @@ await verifyManagerSourceMutations({
     "apps/desktop/src/main/browser-downloads.ts",
     "apps/desktop/src/main/workspace-files.ts",
     "packages/browser/src/model/browser-download.ts",
-    "apps/desktop/src/shared/workspace-file-bytes.ts",
+    "apps/host/src/workspace-file-bytes.ts",
     "packages/browser/src/browser-operation-journal.ts",
     "packages/browser/src/browser-outcome-journal.ts",
     "apps/desktop/src/main/browser-completion-control.ts",

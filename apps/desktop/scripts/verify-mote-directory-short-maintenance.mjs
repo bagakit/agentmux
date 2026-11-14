@@ -9,8 +9,8 @@ const base = resolve(import.meta.dirname, '../../..'), output = join(base, '.tmp
 await mkdir(output, { recursive: true })
 const attempt = await mkdtemp(join(output, 'attempt-')), isolated = join(attempt, 'source')
 const hash = bytes => createHash('sha256').update(bytes).digest('hex')
-const native = 'apps/host/native/workspace-move.c', owner = 'apps/desktop/src/main/scratch-directory-maintenance.mjs'
-const metadata = 'apps/desktop/src/main/scratch-directory-identity.mjs', directories = 'apps/desktop/src/main/scratch-topic-directories.ts'
+const native = 'apps/host/native/workspace-move.c', owner = 'apps/host/src/mote-directory-maintenance.mjs'
+const metadata = 'apps/host/src/mote-directory-identity.mjs', directories = 'apps/host/src/mote-directories.ts'
 const scratch = 'apps/desktop/src/main/scratch-topics.ts', files = 'apps/desktop/src/main/workspace-files.ts', ipc = 'apps/desktop/src/main/ipc.ts'
 const test = 'apps/desktop/test/mote-directory-short-maintenance.test.ts', oldTest = 'apps/desktop/test/mote-directory-identity.test.ts'
 const config = 'apps/desktop/scripts/fixtures/mote-directory-short-name/vitest.maintenance.config.mts'
@@ -100,7 +100,7 @@ const mutations = [
     to: 'if (false && physicalPrimary) for (const path of await scratchConfirmedDirectoryPaths(', pattern: 'real primary deletion protects' },
   { id: 'preview-writes-original-object', file: owner, from: "if (!execute) { row.state =", to: "if (!execute) { await ensureDirectory(join(physical, 'unrequested-preview-entry')); row.state =", pattern: 'actual discovery, File reads' },
   { id: 'startup-moves-ordinary-topic', file: scratch, from: 'execute: true, motesOnly: true,', to: 'execute: true, motesOnly: false,', pattern: 'original startup maintenance owner repairs' },
-  { id: 'startup-service-fact-disappears', file: scratch, from: 'if (issues.length) result.issues = [...new Set(issues)]', to: 'if (topicIds.issues?.length) result.issues = topicIds.issues', pattern: 'startup failure before any alias witness' },
+  { id: 'startup-service-fact-disappears', file: 'apps/host/src/mote-resources.ts', from: 'if (issues.length) result.issues = [...new Set(issues)]', to: 'if (topicIds.issues?.length) result.issues = topicIds.issues', pattern: 'startup failure before any alias witness' },
   { id: 'metadata-failure-replaces-shortening-fact', file: scratch,
     from: 'if (!(this.directoryMaintenanceIssue?.directory === workspace.path && this.directoryMaintenanceIssue.shortenMotes && !options.shortenMotes))',
     to: 'if (true)', pattern: 'startup failure before any alias witness' },
@@ -108,21 +108,24 @@ const mutations = [
   { id: 'new-physical-path-reissues-identity', file: directories, from: 'if (saved) return saved', to: 'if (saved) return physical', pattern: 'original topics Mote is shortened' }
 ]
 try {
-  for (const path of ['apps/desktop/src', 'packages/core/src']) await tree(path)
-  const copyTrees = ['apps/desktop/src', 'apps/desktop/test/fixtures', 'packages/core/src', 'packages/core/test/helpers']
+  for (const path of ['apps/desktop/src', 'apps/host/src', 'packages/core/src']) await tree(path)
+  const copyTrees = ['apps/desktop/src', 'apps/desktop/test/fixtures', 'apps/host/src', 'apps/host/scripts', 'apps/host/native', 'packages/core/src', 'packages/core/test/helpers']
+  await bind('packages/identity/dist/runtime-source.js')
   const copyFiles = [test, oldTest, 'apps/desktop/test/mote-primary-directory.test.ts', 'apps/desktop/test/topic-directory-migration.native.test.mjs',
     'apps/host/native/workspace-move.c', 'apps/desktop/scripts/migrate-topic-directories.mjs', 'apps/desktop/scripts/migrate-topic-directories.d.mts',
     'apps/desktop/scripts/build-workspace-move-helper.mjs', 'apps/desktop/scripts/verify-mote-directory-short-maintenance.mjs',
-    'apps/desktop/scripts/verify-mote-directory-short-name.mjs', 'apps/desktop/package.json', 'packages/core/package.json', 'tsconfig.base.json', 'vitest.setup.ts']
+    'apps/desktop/scripts/verify-mote-directory-short-name.mjs', 'apps/desktop/package.json', 'apps/host/package.json', 'packages/core/package.json', 'tsconfig.base.json', 'vitest.setup.ts']
   await mkdir(isolated)
   for (const path of copyTrees) await cp(join(base, path), join(isolated, path), { recursive: true })
   for (const file of copyFiles) { await bind(file); await mkdir(dirname(join(isolated, file)), { recursive: true }); await cp(join(base, file), join(isolated, file)) }
   for (const name of ['mote-directory-short-name', 'mote-directory-identity', 'mote-navigation-footer']) {
     const path = 'apps/desktop/scripts/fixtures/' + name; await tree(path); await cp(join(base, path), join(isolated, path), { recursive: true })
   }
-  for (const path of ['node_modules', 'apps/desktop/node_modules', 'packages/core/node_modules', 'packages/core/vendor', 'packages/demand', 'packages/layout', 'packages/client-ui']) {
+  for (const path of ['node_modules', 'apps/desktop/node_modules', 'packages/core/node_modules', 'packages/core/vendor', 'packages/demand', 'packages/layout', 'packages/identity', 'packages/client-ui', 'apps/host/node_modules']) {
     await mkdir(dirname(join(isolated, path)), { recursive: true }); await symlink(join(base, path), join(isolated, path))
   }
+  await mkdir(join(isolated, 'apps/host/resources/bin'), { recursive: true })
+  await cp(join(base, 'apps/host/resources/bin/agentmux-workspace-move'), join(isolated, 'apps/host/resources/bin/agentmux-workspace-move'))
   await writeFile(join(isolated, 'package.json'), '{"type":"module"}')
   assert.equal((await run('compile-original-helper', ['apps/desktop/scripts/build-workspace-move-helper.mjs'])).code, 0)
   for (const check of checks) {

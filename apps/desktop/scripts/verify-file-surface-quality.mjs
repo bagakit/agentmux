@@ -5,7 +5,7 @@ import { cp, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'n
 import { join, resolve } from 'node:path'
 
 const root = resolve(import.meta.dirname, '../../..')
-const sources = ['packages/editor-extensions/src/catalog.ts', 'apps/desktop/src/shared/note-format.ts', 'apps/desktop/src/shared/note-document.ts',
+const sources = ['packages/editor-extensions/src/catalog.ts', 'packages/client-ui/src/note/note-format.ts', 'packages/client-ui/src/note/note-document.ts',
   'packages/editor-extensions/src/ui/FileDataPreview.tsx', 'packages/editor-extensions/src/engines/file-json-preview.ts',
   'packages/editor-extensions/src/engines/file-delimited-preview.ts',
   ...['components/FileSurfaceView.tsx', 'components/FilePreviewPane.tsx', 'components/WorkspaceImage.tsx',

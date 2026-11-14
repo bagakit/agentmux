@@ -18,7 +18,8 @@ const rendererModules = ['components/FileSurfaceView.tsx','components/FilePrevie
 async function bindings() {
  const sources={}
  for(const name of rendererModules)sources['renderer:'+name]=sha(await readFile(join(sourceRoot,name)))
- for(const name of ['main/workspace-files.ts','preload/index.ts','shared/contracts.ts','shared/workspace-file-preview.ts','shared/workspace-file-bytes.ts'])sources[name]=sha(await readFile(join(desktop,'src',name)))
+ for(const name of ['main/workspace-files.ts','preload/index.ts','shared/contracts.ts','shared/workspace-file-preview.ts'])sources[name]=sha(await readFile(join(desktop,'src',name)))
+ sources['host:workspace-file-bytes.ts']=sha(await readFile(join(repository,'apps/host/src/workspace-file-bytes.ts')))
  const store=await readFile(join(sourceRoot,'store.ts'),'utf8')
  const storeAst=ts.createSourceFile('store.ts',store,ts.ScriptTarget.Latest,true)
  const saveOwner=storeAst.statements.filter(node=>ts.isFunctionDeclaration(node)&&node.name?.text==='enqueueFileSave')

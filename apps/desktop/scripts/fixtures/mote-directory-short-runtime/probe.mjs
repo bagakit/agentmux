@@ -39,26 +39,31 @@ export async function probeDirectoryRuntime({ repository, evidence, mainRef } = 
     execFileSync('tar', ['-x', '-C', source], { input: execFileSync('git', ['archive', mainRef,
       'packages/core/src', 'packages/core/package.json', 'packages/core/bin', `packages/core/vendor/ctxmux/${platform}`,
       'packages/core/test/fixtures/fake-codex-cli.mjs', 'apps/desktop/src', 'apps/desktop/package.json',
-      'packages/demand', 'packages/layout', 'packages/client-ui', 'packages/relay'], { cwd: repo, maxBuffer: 50 * 1024 * 1024 }) })
-    const overlay = ['apps/host/native/workspace-move.c', 'apps/desktop/scripts/migrate-topic-directories.mjs',
+      'packages/demand', 'packages/layout', 'packages/client-ui/src', 'packages/client-ui/package.json', 'packages/relay', 'packages/identity',
+      'packages/browser/src', 'packages/browser/package.json', 'apps/host/src', 'apps/host/package.json'], { cwd: repo, maxBuffer: 50 * 1024 * 1024 }) })
+    const overlay = ['apps/host/native/workspace-move.c', 'apps/host/native/workspace-native-platform.h', 'apps/host/native/workspace-file.inc', 'apps/desktop/scripts/migrate-topic-directories.mjs',
       'apps/desktop/src/main/scratch-directory-identity.mjs', 'apps/desktop/src/main/scratch-directory-identity.d.mts',
       'apps/desktop/src/main/scratch-directory-maintenance.mjs', 'apps/desktop/src/main/scratch-directory-maintenance.d.mts',
-      'apps/desktop/src/main/scratch-topic-directories.ts', 'apps/desktop/src/main/scratch-topics.ts',
+      'apps/host/src/mote-resources.ts', 'apps/host/src/mote-directories.ts',
+      'apps/host/src/mote-directory-identity.mjs', 'apps/host/src/mote-directory-maintenance.mjs',
+      'packages/identity/dist/runtime-source.js', 'apps/desktop/src/main/scratch-topics.ts',
       'apps/desktop/scripts/fixtures/mote-directory-short-runtime/owner.ts',
       'apps/desktop/scripts/fixtures/agent-schedules/electron.ts']
     for (const name of overlay) { await mkdir(dirname(join(source, name)), { recursive: true }); await cp(join(repo, name), join(source, name)) }
-    for (const name of ['node_modules', 'apps/desktop/node_modules', 'packages/core/node_modules', 'packages/relay/node_modules', 'packages/demand/node_modules', 'packages/layout/node_modules']) {
+    for (const name of ['node_modules', 'apps/desktop/node_modules', 'packages/core/node_modules', 'packages/relay/node_modules', 'packages/demand/node_modules', 'packages/layout/node_modules', 'packages/identity/node_modules', 'apps/host/node_modules']) {
       const available = await realpath(join(repo, name)).catch(error => { if (error.code !== 'ENOENT') throw error; return realpath(join(dependencyRoot, name)) })
       await mkdir(dirname(join(source, name)), { recursive: true }); await symlink(available, join(source, name))
     }
     const require = createRequire(join(repo, 'apps/desktop/package.json')), { build } = browserSourceBuild(createRequire(require.resolve('vite'))('esbuild'))
     const aliases = { electron: join(source, 'apps/desktop/scripts/fixtures/agent-schedules/electron.ts') }
-    for (const name of ['core', 'demand', 'layout', 'relay']) {
-      const pkg = join(source, 'packages', name), manifest = JSON.parse(await readFile(join(pkg, 'package.json'), 'utf8'))
+    for (const name of ['core', 'demand', 'layout', 'relay', 'identity', 'host']) {
+      const pkg = join(source, name === 'host' ? 'apps' : 'packages', name), manifest = JSON.parse(await readFile(join(pkg, 'package.json'), 'utf8'))
       for (const [key, value] of Object.entries(manifest.exports)) {
         const target = typeof value === 'string' ? value : value.import
         if (!target || target.endsWith('.json')) continue
-        aliases['@agentmux/' + name + (key === '.' ? '' : key.slice(1))] = resolve(pkg, target.replace('./dist/', name === 'core' || name === 'relay' ? './src/' : './').replace(/\.js$/, '.ts'))
+        const original = name === 'identity' && key === './runtime-source' ? target : name === 'identity' && key === './runtime' ? './src/runtime-entry.ts'
+          : target.replace('./dist/', ['core', 'relay', 'identity', 'host'].includes(name) ? './src/' : './').replace(/\.js$/, '.ts')
+        aliases['@agentmux/' + name + (key === '.' ? '' : key.slice(1))] = resolve(pkg, original)
       }
     }
     const clientUi = join(source, 'packages/client-ui'), clientUiManifest = JSON.parse(await readFile(join(clientUi, 'package.json'), 'utf8'))
@@ -70,15 +75,20 @@ export async function probeDirectoryRuntime({ repository, evidence, mainRef } = 
       builder.onLoad({ filter: /\.(ts|mjs|json)$/ }, async args => {
         if (!args.path.startsWith(source + '/') || args.path.includes('/node_modules/')) return null
         const bytes = await readFile(args.path); bound.set(relative(source, args.path), digest(bytes))
-        if (args.path.endsWith('/scratch-directory-identity.mjs') || args.path.endsWith('/scratch-directory-maintenance.mjs')) {
-          const text = bytes.toString('utf8'), anchor = "const defaultHelper = resolve(import.meta.dirname, '../../resources/bin/agentmux-workspace-move')"
-          assert.equal(text.split(anchor).length, 2, 'One original helper relocation seam required')
+        if (/\/apps\/host\/src\/mote-directory-(?:identity|maintenance)\.mjs$/.test(args.path)) {
+          const text = bytes.toString('utf8'), anchor = "const defaultHelper = process.env.AGENTMUX_WORKSPACE_MOVE_HELPER ?? resolve(import.meta.dirname, '../resources/bin/agentmux-workspace-move')"
+          assert.equal(text.split(anchor).length, 2, 'One original Host helper relocation seam required')
           return { contents: text.replace(anchor, 'const defaultHelper = process.env.DIRECTORY_RUNTIME_HELPER'), loader: 'js' }
+        }
+        if (/\/apps\/desktop\/src\/main\/scratch-directory-(?:identity|maintenance)\.mjs$/.test(args.path)) {
+          const text = bytes.toString('utf8'), anchor = "options.helperPath ?? resolve(import.meta.dirname, '../../resources/bin/agentmux-workspace-move')"
+          assert.equal(text.split(anchor).length, 2, 'One original Desktop helper relocation seam required')
+          return { contents: text.replace(anchor, 'options.helperPath ?? process.env.DIRECTORY_RUNTIME_HELPER'), loader: 'js' }
         }
         return null
       })
     } }
-    const options = { bundle: true, platform: 'node', format: 'esm', alias: aliases,
+    const options = { absWorkingDir: source, bundle: true, platform: 'node', format: 'esm', alias: aliases,
       external: ['@ctxmux/sdk', 'fs-native-extensions'], plugins: [plugin], logLevel: 'error', metafile: true,
       banner: { js: "import { createRequire as privateRequire } from 'node:module'; const require=privateRequire(import.meta.url);" } }
     const bundle = join(source, 'packages/core/dist/directory-owner.mjs'); await mkdir(dirname(bundle), { recursive: true })
