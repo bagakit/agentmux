@@ -125,7 +125,10 @@ it('a stale Source creation is refused before a Goal input is prepared, without 
   await f.goals.demands.update(f.goal.id, { assigneeSessionIds: [wrong] })
   const before = await f.goals.demands.get(f.goal.id)
   await expect(f.rpc.call('goal.start', { goalId: f.goal.id, operationId: 'stale-C-Start', agentReference: wrong, access: f.access })).rejects.toMatchObject({ code: 'GOAL_RELATION_SOURCE_UNCONFIRMED' })
-  expect(await f.goals.demands.get(f.goal.id)).toEqual(before)
+  const retained = await f.goals.demands.get(f.goal.id)
+  expect(retained).toMatchObject({ id: before!.id, title: before!.title, description: before!.description, assigneeSessionIds: before!.assigneeSessionIds })
+  expect(retained?.dispatches?.find(value => value.operationId === 'stale-C-Start')).toMatchObject({ stage: 'requested', target: wrong, prompt: before!.description })
+  expect(retained?.dispatches?.find(value => value.operationId === 'stale-C-Start')).not.toHaveProperty('runId')
   expect(f.send).not.toHaveBeenCalled(); expect(f.raw).not.toHaveBeenCalled(); expect(f.stop).not.toHaveBeenCalled()
 })
 
@@ -161,13 +164,14 @@ it('a complete initial pending cut settles as unconfirmed within the ordinary re
     expect(finite.kind).toBe('settled')
     if (finite.kind !== 'settled') throw Error('The finite Goal reader did not settle within the original read budget')
     expect(finite.result).toMatchObject({ error: { code: 'GOAL_RELATION_SOURCE_UNCONFIRMED' } })
-    expect(await f.goals.demands.get(f.goal.id)).toEqual(before)
+    expect(await f.goals.demands.get(f.goal.id)).toMatchObject({ id: before!.id, title: before!.title, description: before!.description })
+    expect(await f.goals.demands.inspectDispatch(f.goal.id, operationId)).toMatchObject({ stage: 'requested', target: f.reference, prompt: before!.description })
     expect(f.send).not.toHaveBeenCalled(); expect(f.raw).not.toHaveBeenCalled(); expect(f.stop).not.toHaveBeenCalled()
     expect(observations.some(event => event.type === 'member' && event.state.status === 'observed')).toBe(false)
     release()
     await vi.waitFor(() => expect(observations.some(event => event.type === 'member' && event.member.agentSessionId === f.session.agentSessionId && event.state.status === 'observed' && event.state.session.run.runId === f.session.run.runId)).toBe(true))
-    // A new explicit call uses the same OP and original Goal, never an automatic retry.
-    await f.rpc.call('goal.start', { goalId: f.goal.id, operationId, agentReference: f.reference, access: f.access }).catch(error => expect(error).toMatchObject({ code: 'CONTROL_UNAVAILABLE' }))
+    // Explicit continuation advances the same saved business request, never a fresh Start or automatic retry.
+    await f.rpc.call('goal.start', { goalId: f.goal.id, operationId, agentReference: f.reference, access: f.access, resumeOriginal: true }).catch(error => expect(error).toMatchObject({ code: 'CONTROL_UNAVAILABLE' }))
     await expect.poll(async () => (await f.d.core.inspectAgentInput({ key: { kind: 'prompt', agentSessionId: f.session.agentSessionId, expectedRun: f.session.run, submissionId: operationId } }))?.status).toBe('admitted')
     expect(f.send).toHaveBeenCalledTimes(1); expect(f.stop).not.toHaveBeenCalled()
   } finally { clearTimeout(deadline); controller.abort(); release(); await start; await sibling.dispose() }

@@ -189,7 +189,7 @@ it.each(['source-occurrence','goal'] as const)('a confirmed same-OP read for ano
  expect(execute.mock.calls.every(([request])=>request.operation==='demand.show')).toBe(true)
 })
 
-it.each(['same-request','other-operation','other-target','other-initial-access','other-version','opaque','observed-domain'] as const)('late typed not_applied preserves current access and only restores the same unprepared request: %s',async kind=>{
+it.each(['same-request','other-operation','other-target','other-initial-access','other-version','opaque','observed-domain'] as const)('late RPC-local not_applied preserves every qualified OP and current access; only exact Domain rejection permits replacement: %s',async kind=>{
  vi.spyOn(api.ui,'requestStorageFlush').mockResolvedValue(undefined)
  vi.spyOn(api.config,'get').mockRejectedValueOnce(Error('Private startup observation unavailable'))
  const close=await useAppStore.getState().initialize()
@@ -214,10 +214,11 @@ it.each(['same-request','other-operation','other-target','other-initial-access',
   if(kind==='observed-domain')useAppStore.setState({demands:{[current.id]:{...current,dispatches:[{operationId:original.operationId,target,runId:'observed-original-Run',prompt:'Original recorded body',preparedAt:1,execution:'finite',stage:'unknown'}]}}})
   else if(kind!=='same-request')await act(async()=>useAppStore.setState({goalFiniteStartIntents:{[current.id]:retained}}))
   await act(async()=>reject(new AgentMuxError('The original owner refused this attempt before preparing a Goal dispatch.','RUNTIME_OWNER_MISMATCH',undefined,{disposition:'not_applied',confirmedInputBytes:0})))
+  expect(useAppStore.getState().goalFiniteStartIntents[current.id]).toBe(retained)
   if(kind==='same-request'){
-   expect(useAppStore.getState().goalFiniteStartIntents[current.id]).toEqual({...original,phase:'not-attempted',accessDraft:{source:{hostId:'local'}}})
-   expect([...dom.container.querySelectorAll('button')].some(button=>button.textContent==='Submit retained task')).toBe(true)
-  }else expect(useAppStore.getState().goalFiniteStartIntents[current.id]).toBe(retained)
+   expect(retained).toMatchObject({...original,phase:'may-have-dispatched',accessDraft:{source:{hostId:'local'}}})
+   expect([...dom.container.querySelectorAll('button')].some(button=>button.textContent==='Submit retained task')).toBe(false)
+  }
   expect(execute.mock.calls.filter(([request])=>request.operation==='demand.start')).toHaveLength(1)
   expect(useAppStore.getState().agentComposerDrafts).toBe(drafts)
  }finally{reject(Error('Private test closed'));await dom.render(<></>);await close()}
