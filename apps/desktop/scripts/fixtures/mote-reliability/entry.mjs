@@ -10,6 +10,7 @@ import { serializeMoteQuickMode, PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, scrat
 import { parseScheduleRpcParams } from '@agentmux/core/schedule-rpc'
 import { moteMainRoleRevision } from '@agentmux/core/mote-dialogue'
 import { moteEntryDraftKey } from '../../../src/renderer/src/lib/mote-entry-hold'
+import { requestPmoTeamsTopicFloatingOpen } from '../../../src/renderer/src/lib/pmo-teams-topic-floating'
 import { scratchTopicLogicalPath } from '@agentmux/host/mote-model'
 import { observeNotifications } from '../../../src/renderer/src/lib/notification-observation'
 import { AGENTMUX_CONTROL_SCHEMA_VERSION } from '@agentmux/core/control'
@@ -137,7 +138,7 @@ if (new URL(location.href).searchParams.has('heartbeat-surface')) {
 
 
 // A controlled original Core failure. This scene changes no real Runtime or Provider.
-if (new URLSearchParams(location.search).get('main-recovery-escape') === '1') {
+if (new URLSearchParams(location.search).get('main-recovery-escape') === '1' || new URLSearchParams(location.search).get('main-policy-service') === '1') {
   const tab = useAppStore.getState().tabs[tabId], workspace = useAppStore.getState().config.workspaces.find(value => value.id === SCRATCH_WORKSPACE_ID)
   const target = { spaceId: tab.space.spaceId, zoneId: tab.space.zoneId, expectedResource: { hostId:workspace.hostId, workspaceId:workspace.id, workspacePath:workspace.path } }
   const topic = await api.scratch.readTopic(SCRATCH_WORKSPACE_ID,PMO_TEAMS_TOPIC_ID)
@@ -156,7 +157,17 @@ if (new URLSearchParams(location.search).get('main-recovery-escape') === '1') {
   api.moteDialogue.inspectRecovery = async request => ({ operation:{...originalRecovery(),operationId:request.operationId,moteMainEntry:{target:request.target,expectedRoleRevision:request.expectedRoleRevision,reference:request.reference}} })
   api.moteDialogue.ensureRecovery = async () => { throw Error('This read-only failure scene does not admit a recovery mutation') }
   window.moteRecoveryEscape = { ready:true, target, draftKey,
+    floating() { requestPmoTeamsTopicFloatingOpen({targetTopicId:PMO_TEAMS_TOPIC_ID}) },
     variant(value) { mode=value;apply() },
+    async policy(value, split = false) {
+      const current = await api.files.read(SCRATCH_WORKSPACE_ID, path)
+      if (current.status !== 'read') throw Error('Original policy document is unavailable')
+      await api.files.write(SCRATCH_WORKSPACE_ID, { path, expectedRevision:current.document.revision,
+        content:serializeMoteQuickMode(current.document.content, { executorId:'cck3',conversation:reference,presence:{enabled:true,intervalMs:1800000},
+          ...(value === 'automatic' ? {conversationRollover:{kind:'idle',idleMs:60000}} : value === 'keep-current' ? {conversationRollover:{kind:'keep-current'}} : {}) }) })
+      await useAppStore.getState().refreshScratchTopics(SCRATCH_WORKSPACE_ID,true,PMO_TEAMS_TOPIC_ID)
+      useAppStore.setState({ projectRailOpen:split,toolsOpen:split,workspaceTool:'files-branches',toolDockWidth:340 })
+    },
     async retainOriginal(prompt,draft) {
       if (restoring || !prompt?.trim()) throw Error('Only the original seed process can author this retained request')
       if (!draft?.trim() || !useLauncherState.getState().setDraft(draftKey,'prompt',draft)) throw Error('The original Mote draft is not retained')

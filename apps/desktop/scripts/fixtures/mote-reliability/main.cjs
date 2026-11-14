@@ -12,7 +12,7 @@ app.whenReady().then(async () => {
     Menu.setApplicationMenu(null)
     win = new BrowserWindow({ width: 1180, height: 820, useContentSize: true, show: false, webPreferences: { contextIsolation: true, sandbox: true, nodeIntegration: false, backgroundThrottling: false } })
     win.webContents.on('console-message', (_event, level, message) => { if (level >= 2) result.errors.push(String(message)) })
-    await win.loadFile(html, { query: { phase: 'initialization-' + phase, ...(process.env.MOTE_HEARTBEAT_SURFACE === '1' ? { 'heartbeat-surface': '1' } : {}), ...(process.env.MOTE_MAIN_RECOVERY_ESCAPE === '1' ? { 'main-recovery-escape':'1' } : {}) } })
+    await win.loadFile(html, { query: { phase: 'initialization-' + phase, ...(process.env.MOTE_HEARTBEAT_SURFACE === '1' ? { 'heartbeat-surface': '1' } : {}), ...(process.env.MOTE_MAIN_RECOVERY_ESCAPE === '1' ? { 'main-recovery-escape':'1' } : {}), ...(process.env.MOTE_MAIN_POLICY_SERVICE === '1' ? {'main-policy-service':'1'} : {}) } })
     const read = expression => win.webContents.executeJavaScript(expression)
     const until = async expression => {
       const end = Date.now() + 15000
@@ -59,6 +59,45 @@ app.whenReady().then(async () => {
         await capture('legacy-checked-recovery-' + theme + '-' + (width > 600 ? 'wide' : 'narrow')); await escape()
       }
       win.setContentSize(1180, 820); await read('window.moteInit.theme("dark")')
+    }
+    if (process.env.MOTE_MAIN_POLICY_SERVICE === '1') {
+      await until('window.moteRecoveryEscape?.ready')
+      const showMain = async () => {
+        const discussion = button('Discussion', 'document.querySelector(".mote-space-frame__header")')
+        if (await read('Boolean('+discussion+')')) await click(discussion)
+        const openMain = button('打开当前主对话')
+        if (await read('Boolean('+openMain+')')) await click(openMain)
+        await until(`[...document.querySelectorAll('[data-mote-main-service]')].some(e=>!e.closest('[hidden],[inert],[aria-hidden="true"]')&&e.getClientRects().length)`)
+      }
+      result.presentation=[]
+      for (const [name,theme,width,policy,mode,split] of [
+        ['unconfigured-dark-split','dark',920,'unconfigured','unavailable',true],
+        ['automatic-light-split','light',920,'automatic','unavailable',true],
+        ['keep-current-light-wide','light',1180,'keep-current','unavailable',false],
+        ['unknown-dark-narrow','dark',420,'unconfigured','unknown',false]
+      ]) {
+        win.setContentSize(width,width>600?820:740)
+        await read(`window.moteInit.theme(${JSON.stringify(theme)});window.moteRecoveryEscape.variant(${JSON.stringify(mode)});window.moteRecoveryEscape.policy(${JSON.stringify(policy)},${split})`)
+        await showMain()
+        result.baseline=await read('window.moteReliability.facts()')
+        await pause(180)
+        const facts=await read(`(()=>{const e=[...document.querySelectorAll('[data-mote-main-service]')].find(e=>!e.closest('[hidden],[inert],[aria-hidden="true"]')&&e.getClientRects().length);const r=e.getBoundingClientRect(),reader=e.closest('[data-mote-workface]').querySelector('.activity-feed');return {text:e.textContent,rect:r.toJSON(),readerRect:reader?.getBoundingClientRect().toJSON(),buttons:[...e.querySelectorAll('button')].map(b=>{const r=b.getBoundingClientRect();return {text:b.textContent,rect:r.toJSON(),hit:b.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2))}}),genericOutside:reader?.querySelectorAll('[data-original-session-actions]').length}})()`)
+        result.presentation.push({name,policy,mode,split,...facts})
+        await capture(name)
+        assert.ok(facts.rect.width>0 && facts.rect.right<=width)
+        assert.equal(facts.genericOutside,0)
+        assert.ok(facts.buttons.every(value=>value.hit))
+        if(split)assert.ok(facts.rect.width<540,'Actual narrow Main Region beside real tools and rail')
+      }
+      await click('document.querySelector(".mote-conversation__reading-tools summary")')
+      await capture('unknown-original-details-dark-narrow')
+      win.setContentSize(1180,820)
+      await read('window.moteInit.theme("dark");window.moteRecoveryEscape.variant("unavailable");window.moteRecoveryEscape.policy("automatic",false)')
+      result.baseline=await read('window.moteReliability.facts()')
+      await read('window.moteRecoveryEscape.floating()')
+      await until('document.querySelector(".pmo-teams-topic-floating__body [data-mote-main-service]")')
+      await capture('automatic-dark-floating')
+      result.passed=true;return
     }
     if (process.env.MOTE_MAIN_RECOVERY_ESCAPE === '1') {
       await until('window.moteRecoveryEscape?.ready')
