@@ -19,6 +19,7 @@ type PendingFrame = { snapshot: ConversationWindowSnapshot; historical: boolean;
   admission?: { accept(): void; cancel(): void } }
 type PreparedObservation = { install(): void; dispose(): void }
 type ReadAttempt = { id: string; operation: Operation; superseded: boolean; error: Error | null }
+type RetainedFrame = { client: ConversationViewClient; key: string; snapshot: ConversationWindowSnapshot; historical: boolean; pending: PendingFrame | null; releaseView(): void }
 type ViewState = { snapshot: ConversationWindowSnapshot | null; loading: boolean; operation: Operation | null; sourceRead: ConversationSourceRead | null; error: Error | null; errorOperation: Operation | null; sourceError: Error | null; observationError: Error | null; held: boolean; historical: boolean; newerAvailable: boolean }
 const empty = (): ViewState => ({ snapshot: null, loading: false, operation: null, sourceRead: null, error: null, errorOperation: null, sourceError: null, observationError: null, held: false, historical: false, newerAvailable: false })
 const errorOf = (error: unknown) => error instanceof Error ? error : new Error(String(error))
@@ -56,6 +57,27 @@ function sourceReadError(snapshot: ConversationWindowSnapshot): Error | null {
   return Object.assign(new Error(`${message} Existing messages remain available.`), { code: 'AGENT_CONVERSATION_SOURCE_READ_UNAVAILABLE' })
 }
 
+/** Only resource custody: displayed frames, retained intent and an unfinished read
+ * can independently hold the same Core view. Observers own no frame lease. */
+function createViewCustody() {
+  const clients = new Map<ConversationViewClient, Map<string, { token: string; count: number }>>()
+  return (client: ConversationViewClient, reference: ConversationRef, window: Pick<ConversationWindowSnapshot['window'], 'id' | 'view' | 'replay'>) => {
+    const views = clients.get(client) ?? new Map<string, { token: string; count: number }>()
+    clients.set(client, views)
+    const view = views.get(window.id) ?? { token: window.view ?? window.replay, count: 0 }
+    views.set(window.id, view); view.count++
+    let released = false
+    return () => {
+      if (released) return
+      released = true
+      if (--view.count) return
+      views.delete(window.id)
+      if (!views.size) clients.delete(client)
+      void client.releaseConversationView({ ...reference, view: view.token }).catch(() => {})
+    }
+  }
+}
+
 /** Presentation lifetime for the original public Reader. The client retains only
  * complete accepted frames and transport assembly; Core owns source pages/joins. */
 export function useConversationView(client: ConversationViewClient | null, reference: ConversationRef | undefined, active: boolean,
@@ -64,6 +86,14 @@ export function useConversationView(client: ConversationViewClient | null, refer
   const key = reference ? JSON.stringify([reference.hostId, reference.agentSessionId, options.identity]) : ''
   const [state, setState] = useState<ViewState>(empty)
   const snapshot = state.snapshot && reference && state.snapshot.hostId === reference.hostId && state.snapshot.agentSessionId === reference.agentSessionId ? state.snapshot : null
+  const custody = useMemo(createViewCustody, [])
+  const frameSources = useRef(new WeakMap<ConversationWindowSnapshot, { client: ConversationViewClient; reference: ConversationRef }>())
+  const holdFrame = useCallback((frame: ConversationWindowSnapshot) => {
+    // Complete frames are registered at assembly, before they can reach presentation.
+    const source = frameSources.current.get(frame)!
+    return custody(source.client, source.reference, frame.window)
+  }, [custody])
+  useLayoutEffect(() => snapshot ? holdFrame(snapshot) : undefined, [snapshot, holdFrame])
   const committed = useRef({ state, key, snapshot, active })
   useLayoutEffect(() => { committed.current = { state, key, snapshot, active } }, [state, key, snapshot, active])
   const owner = useRef<{ key: string; controller: AbortController; snapshot: ConversationWindowSnapshot | null;
@@ -72,7 +102,12 @@ export function useConversationView(client: ConversationViewClient | null, refer
     binding: ConversationWindowSnapshot | null; failures: Map<string, Error>; pending: PendingFrame | null; invalidations: number; unavailable: number;
     note(event: ConversationDiagnosticEvent): void; flush(trigger: 'progress' | 'held' | 'failure' | 'recovered' | 'release'): void;
     attempt: ReadAttempt | null; diagnosticWatchId: string | null } | null>(null)
-  const retained = useRef<{ client: ConversationViewClient; key: string; snapshot: ConversationWindowSnapshot; historical: boolean; pending: PendingFrame | null } | null>(null)
+  const retained = useRef<RetainedFrame | null>(null)
+  const replaceRetained = useCallback((next: Omit<RetainedFrame, 'releaseView'> | null) => {
+    const previous = retained.current
+    retained.current = next ? { ...next, releaseView: holdFrame(next.snapshot) } : null
+    previous?.releaseView()
+  }, [holdFrame])
   const beforeCommit = useRef(options.beforeCommit); beforeCommit.current = options.beforeCommit
   const heldReason = useRef(options.heldReason); heldReason.current = options.heldReason
   const diagnostics = useRef(options.diagnostics); diagnostics.current = options.diagnostics
@@ -124,9 +159,6 @@ export function useConversationView(client: ConversationViewClient | null, refer
       const reason = current.inFlight ? 'in-flight' : current.timer ? 'coalesced' : current.held ? 'held' : current.historical ? 'historical' : null
       if (reason) { deferred('changes', reason); return }
       current.timer = setTimeout(() => { current.timer = null; void read('changes') }, 50)
-    }
-    const release = (view: ConversationWindowSnapshot['window']['view'] | undefined) => {
-      if (view) void client.releaseConversationView({ ...ref, view }).catch(() => {})
     }
     const reconnect = () => {
       if (!alive() || current.retryTimer) return
@@ -237,7 +269,7 @@ export function useConversationView(client: ConversationViewClient | null, refer
         current.retryDelay = 100
         if (current.retryTimer) { clearTimeout(current.retryTimer); current.retryTimer = null }
         if (oldHandle && oldWatchId) note({ phase: 'watch-closed', watchId: oldWatchId, reason: 'navigation', ...oldObserved?.frame })
-        oldHandle?.dispose(); if (oldObserved?.frame.windowId !== snapshot.window.id) release(oldObserved?.view)
+        oldHandle?.dispose()
         installed.closed.addEventListener('abort', () => {
           if (alive() && current.handle === installed) {
             note({ phase: 'watch-closed', watchId, reason: 'source-unavailable', ...frame })
@@ -311,12 +343,9 @@ export function useConversationView(client: ConversationViewClient | null, refer
         let prepared: PreparedObservation | undefined
         let currentSource: ConversationObservationHandle | undefined
         let admission: PendingFrame['admission']
-        let released = false
-        let responseView: { id: string; token: string } | undefined
+        let releaseResponse: (() => void) | undefined
         const releaseComplete = () => {
-          if (!continuation && !released && responseView && responseView.id !== current.snapshot?.window.id) {
-            released = true; release(responseView.token)
-          }
+          releaseResponse?.(); releaseResponse = undefined
         }
         try {
           if (kind === 'latest' && !request.nativeSource && !request.record && !request.anchor) {
@@ -341,11 +370,15 @@ export function useConversationView(client: ConversationViewClient | null, refer
           do {
             const page = change ? await client.readConversationChanges({ ...change, ...(cursor ? { cursor } : {}) }, { signal: requestSignal })
               : await client.readAgentConversation({ ...request, ...(cursor ? { cursor, limit: 100 } : {}) }, { signal: requestSignal })
-            responseView = { id: page.window.id, token: page.window.view ?? page.window.replay }
+            const nextLease = custody(client, ref, page.window)
+            releaseResponse?.(); releaseResponse = nextLease
             if (!isCurrent()) { releaseComplete(); return }
             note({ phase: 'read-page', attemptId: attempt.id, operation: kind, sourceHostId: page.sourceHostId, itemCount: page.items.length })
             const result = consumeConversationWindowPage(page, assembly)
-            if (result.kind === 'complete') { complete = result.snapshot; more = 'more' in page && Boolean(page.more); break }
+            if (result.kind === 'complete') {
+              complete = result.snapshot; frameSources.current.set(complete, { client, reference: ref })
+              more = 'more' in page && Boolean(page.more); break
+            }
             assembly = result.pending
             if (!page.nextCursor || page.nextCursor === cursor) throw new Error('The original conversation window did not complete. Its displayed records are kept.')
             cursor = page.nextCursor
@@ -387,10 +420,12 @@ export function useConversationView(client: ConversationViewClient | null, refer
           frame.snapshot = complete; frame.historical = current.historical
           if (cancellableRecord) {
             let resolved = false
+            const releasePrior = prior ? holdFrame(prior) : () => {}
             const finishAdmission = () => {
               resolved = true
               requestSignal.removeEventListener('abort', cancelPending)
               detachCancellation()
+              releasePrior()
             }
             const cancelPending = () => admission?.cancel()
             admission = {
@@ -400,14 +435,15 @@ export function useConversationView(client: ConversationViewClient | null, refer
               },
               cancel: () => {
                 if (resolved) return
-                finishAdmission(); prepared?.dispose(); prepared = undefined
+                prepared?.dispose(); prepared = undefined
                 if (current.pending === frame) {
                   if (current.request !== requestController) current.request?.abort()
                   current.snapshot = prior; current.historical = priorHistorical
                   current.pending = priorPending; current.held = Boolean(priorPending)
-                  retained.current = priorRetained
+                  replaceRetained(priorRetained)
                   setState(value => ({ ...value, held: current.held }))
                 }
+                finishAdmission()
                 releaseComplete()
                 if (current.dirty && !current.inFlight) schedule()
               },
@@ -426,7 +462,7 @@ export function useConversationView(client: ConversationViewClient | null, refer
           if (current.held) flush('held')
           current.pending = current.held ? frame : null
           if (!current.held) frame.admission?.accept()
-          retained.current = { client, key, snapshot: complete, historical: current.historical, pending: current.pending }
+          replaceRetained({ client, key, snapshot: complete, historical: current.historical, pending: current.pending })
           attempt.error = sourceError
           if (sourceError) { note({ phase: 'read-failed', attemptId: attempt.id, operation: kind, reason: 'source-unavailable', ...conversationDiagnosticFrame(complete) }); flush('failure') }
           // Resume replays the retained frame. It cannot replace the failed cut's
@@ -476,7 +512,7 @@ export function useConversationView(client: ConversationViewClient | null, refer
           if (requestSignal.aborted) admission?.cancel()
           if (prepared && (!admission || current.pending?.admission !== admission)) prepared.dispose()
           if (!alive() || current.request !== requestController) { releaseComplete(); return }
-          if (requestSignal.aborted) releaseComplete()
+          releaseComplete()
           current.inFlight = null
           current.attempt = null
           setState(value => ({ ...value, loading: false, operation: null, sourceRead: null }))
@@ -501,14 +537,13 @@ export function useConversationView(client: ConversationViewClient | null, refer
       current.handle?.dispose()
       if (owner.current === current) owner.current = null
     }
-  }, [client, key, active])
+  }, [client, key, active, custody, holdFrame, replaceRetained])
   useEffect(() => () => {
     const value = retained.current
     if (value && value.client === client && value.key === key) {
-      retained.current = null
-      if (value.snapshot.window.view) void value.client.releaseConversationView({ hostId: value.snapshot.hostId, agentSessionId: value.snapshot.agentSessionId, view: value.snapshot.window.view }).catch(() => {})
+      replaceRetained(null)
     }
-  }, [client, key])
+  }, [client, key, replaceRetained])
 
   const readProcessDetail = useCallback<ConversationProcessDetailReader>((anchor, signal) => {
     if (!client || !reference || anchor.frontier.hostId !== reference.hostId || anchor.frontier.agentSessionId !== reference.agentSessionId) return Promise.reject(new Error('The original process detail belongs to another reading scope.'))
