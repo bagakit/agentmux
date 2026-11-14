@@ -3,11 +3,14 @@ import { createHash, randomUUID } from 'node:crypto'
 import { link, lstat, mkdir, readFile, realpath, rm } from 'node:fs/promises'
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path'
 import { isDeepStrictEqual, promisify } from 'node:util'
-import { AgentMuxError, connectAgentMuxRpc, defaultAgentMuxMessageQueuePath, defaultAgentMuxRuntimeDirectory, defaultAgentMuxSpatialStatePath, defaultAgentMuxStateDirectory, durableWriteFile, inspectCompatibleAgentMuxRuntime, type AgentMuxRuntimeOwnerIdentity } from '@agentmux/core'
+import { AgentMuxError, connectAgentMuxRpc, defaultAgentMuxMessageQueuePath, defaultAgentMuxRuntimeDirectory, defaultAgentMuxSpatialStatePath, defaultAgentMuxStateDirectory, durableWriteFile, inspectCompatibleAgentMuxRuntime, probeSocketLiveness, type AgentMuxRuntimeOwnerIdentity } from '@agentmux/core'
 
 const exec = promisify(execFile)
 const wait = (ms: number) => new Promise<void>(yes => setTimeout(yes, ms))
 const failure = (message: string, code = 'HOST_SERVICE_UNCONFIRMED') => new AgentMuxError(message, code)
+// A signed cold App can take longer to load the Host entrypoint than a warm RPC
+// takes to answer. This hang guard ends this observation only; launchd keeps the job.
+const HOST_STARTUP_HANG_GUARD_MS = 60_000
 
 export type MacosHostService = {
   label: string
@@ -243,24 +246,25 @@ export async function macosHostServiceRegistration(service: Pick<MacosHostServic
   return original ? { pid: original.pid } : null
 }
 
-async function publicOwner(service: MacosHostService): Promise<{ owner: AgentMuxRuntimeOwnerIdentity; storePath: string }> {
+async function publicOwner(service: MacosHostService, signal?: AbortSignal): Promise<{ owner: AgentMuxRuntimeOwnerIdentity; storePath: string }> {
   const rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: service.socketPath } })
   try {
-    const { owner } = await rpc.call('runtime.owner.identity', {})
+    const options = signal ? { signal } : undefined
+    const { owner } = await rpc.call('runtime.owner.identity', {}, options)
     const opening = await rpc.call('runtime.bootstrap', { consumerId: 'host-service-observer', agentSessionIds: [],
-      fence: { runtimeId: owner.runtimeId, ownerInstanceId: owner.ownerInstanceId } })
+      fence: { runtimeId: owner.runtimeId, ownerInstanceId: owner.ownerInstanceId } }, options)
     if (opening.storePath !== service.storePath || opening.hostProcessId !== owner.processId) throw failure(
       'The service endpoint belongs to another original Store or Host process. Its healthy capabilities were retained.', 'HOST_SERVICE_IDENTITY_MISMATCH')
     return { owner, storePath: opening.storePath }
   } finally { await rpc.dispose() }
 }
 
-export async function inspectMacosHostService(service: MacosHostService): Promise<MacosHostServiceOwner> {
+export async function inspectMacosHostService(service: MacosHostService, signal?: AbortSignal): Promise<MacosHostServiceOwner> {
   const registration = await macosHostServiceRegistration(service)
   if (!registration?.pid) throw failure('The original platform service is not currently running. Its registration and durable namespace were retained.')
   const pid = registration.pid
   const before = await inspectMacosHostProcess(pid)
-  const current = await publicOwner(service)
+  const current = await publicOwner(service, signal)
   if (!before || before.uid !== process.getuid!() || current.owner.processId !== pid) throw failure(
     'The platform service and original semantic owner are not the same process. No process was stopped.', 'HOST_SERVICE_IDENTITY_MISMATCH')
   await mappedExecutable(pid, service.executable)
@@ -304,17 +308,18 @@ export async function ensureMacosHostService(service: MacosHostService): Promise
   // scoped directory observation, never a bootstrap error interpreted as nonapplication.
   if (!await macosHostServiceRegistration(service)) await launchctl(['bootstrap', `gui/${process.getuid!()}`, service.plistPath])
   await macosHostServicePid(service)
-  const deadline = Date.now() + 10_000
+  const startup = AbortSignal.timeout(HOST_STARTUP_HANG_GUARD_MS)
   let observed: unknown
-  while (Date.now() < deadline) {
+  while (!startup.aborted) {
     try {
-      await publicOwner(service)
-      return await inspectMacosHostService(service)
+      // Let the original job load the signed Host before paying for a fenced
+      // Bootstrap. inspectMacosHostService confirms the Store and process once.
+      if (await probeSocketLiveness(service.socketPath) !== 'dead') return await inspectMacosHostService(service, startup)
     } catch (error) {
       observed = error
       if (error instanceof AgentMuxError && error.code === 'HOST_SERVICE_IDENTITY_MISMATCH') throw error
-      await wait(50)
     }
+    await wait(50)
   }
   throw new AgentMuxError('The platform service was registered but its original endpoint is not yet confirmed. Reconnect to the same namespace; its Runs were retained.',
     'HOST_SERVICE_UNCONFIRMED', observed instanceof Error ? observed.message : undefined)
