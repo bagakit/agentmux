@@ -1,5 +1,16 @@
 /** Production mutations for the phone chrome; each must turn exactly its bearing test red through an assertion. */
 export const mobileChromeMutations = {
+  'goals-create-missing': { file: 'apps/mobile/src/goals/MobileGoalsSurface.tsx',
+    before: '<button type="button" className="mobile-icon-button mobile-goals-new" aria-label="新建目标" title="新建目标" aria-expanded={createOpen} onClick={() => setCreateOpen(value => !value)}><SemanticIcon name="action.add-item" size={20} /></button>',
+    after: '{null}',
+    target: 'opens the original new Goal form from the header' },
+  'avatar-notice-bottom': { file: 'apps/mobile/src/navigation/MobileSpatialNavigation.tsx',
+    edits: [
+      { before: '{visible && <MobileAvatarNoticeOutlet header />}', after: '' },
+      { before: '</section></MobileNoticeScope>', after: '{visible && <MobileAvatarNoticeOutlet />}</section></MobileNoticeScope>' }
+    ],
+    testFile: 'mobile-avatar-notice-consumer.test.tsx', target: 'groups same-name Space failures into one notice' },
+
   'bar-in-conversation': { file: 'apps/mobile/src/MobileApp.tsx',
     before: '{rootPage && <footer className="mobile-navigation-bar"', after: '{workspaceVisible && <footer className="mobile-navigation-bar"',
     target: 'shows the tab bar on the five directories' },

@@ -8,7 +8,7 @@ import { mobileChromeMutations } from '../test/mobile-chrome-mutations.mjs'
 const root = resolve(import.meta.dirname, '../../..'), mobile = resolve(root, 'apps/mobile')
 const directory = resolve(root, '.local/state/mobile-chrome', 'run-' + randomUUID())
 const sourceFiles = [...new Set([...Object.values(mobileChromeMutations).map(entry => entry.file), 'apps/mobile/test/mobile-chrome.test.tsx',
-  'apps/mobile/test/mobile-chrome-mutant.config.ts', 'apps/mobile/test/mobile-chrome-mutations.mjs', 'apps/mobile/scripts/verify-mobile-chrome.mjs'])]
+  'apps/mobile/test/mobile-avatar-notice-consumer.test.tsx', 'apps/mobile/test/mobile-chrome-mutant.config.ts', 'apps/mobile/test/mobile-chrome-mutations.mjs', 'apps/mobile/scripts/verify-mobile-chrome.mjs'])]
 const sha = value => createHash('sha256').update(value).digest('hex')
 const inputs = Object.fromEntries(await Promise.all(sourceFiles.map(async file => [file, sha(await readFile(resolve(root, file)))])))
 const receipt = { schema: 'agentmux.mobile-chrome.v1', passed: false, inputs, runs: [],
@@ -30,7 +30,7 @@ try {
     const report = JSON.parse(await readFile(result, 'utf8'))
     const tests = report.testResults.flatMap(file => file.assertionResults).filter(test => !['pending', 'skipped'].includes(test.status))
     const evaluations = (await readFile(loaded, 'utf8')).trim().split('\n').filter(Boolean).map(row => JSON.parse(row))
-    for (const file of sourceFiles.filter(file => /\.tsx?$/u.test(file) && !file.endsWith('.config.ts'))) assert.ok(evaluations.some(row => row.path === file), 'Real owner and consumer must load: ' + file)
+    for (const file of (variant ? [variant.file, 'apps/mobile/test/' + (variant.testFile ?? 'mobile-chrome.test.tsx')] : sourceFiles.filter(file => /\.tsx?$/u.test(file) && !file.endsWith('.config.ts')))) assert.ok(evaluations.some(row => row.path === file), 'Real owner and consumer must load: ' + file)
     if (variant) {
       assert.notEqual(run.code, 0, 'Mutated production behavior must fail its bearing test')
       assert.equal(tests.length, 1, 'Exactly the bearing test runs'); assert.equal(report.numFailedTests, 1); assert.equal(report.numPassedTests, 0)

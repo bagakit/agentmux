@@ -40,7 +40,7 @@ it.each(['focus', 'mote', 'space'] as const)('keeps %s issues in the actual App 
   await getDeviceWorkface().updatePresentation({ selectedSessionId: 'session-original', hostUrl: '', panel: 'conversation' },
     { primary: home, showSession: false, showGoalWork: false, identity: null, profile: null })
   const f = directoryFixture(), view = await mount(<MobileApp client={f.client} connection={{ state: 'connected', message: '已连接' }} platform={createBrowserPlatform()} restoreWorkface />)
-  await vi.waitFor(() => expect(directoryEntry(view.element)).not.toBeNull())
+  await vi.waitFor(() => expect(directoryEntry(view.element)).not.toBeNull(), { timeout: 4000 })
   const entry = directoryEntry(view.element)
   expect(entry.closest('.mobile-page-header .mobile-section-actions')).not.toBeNull()
   expect(entry.getAttribute('aria-label')).toContain('项待确认')

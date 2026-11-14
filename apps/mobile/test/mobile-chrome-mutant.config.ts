@@ -9,7 +9,7 @@ const root = resolve(import.meta.dirname, '../../..'), mutation = process.env.MO
 if (mutation && !Object.hasOwn(mobileChromeMutations, mutation)) throw Error('Unknown phone chrome mutation: ' + mutation)
 const variant = mutation ? mobileChromeMutations[mutation as keyof typeof mobileChromeMutations] : undefined
 const sha = (value: string) => createHash('sha256').update(value).digest('hex')
-const recorded = new Set([...Object.values(mobileChromeMutations).map(entry => entry.file), 'apps/mobile/test/mobile-chrome.test.tsx'])
+const recorded = new Set([...Object.values(mobileChromeMutations).map(entry => entry.file), 'apps/mobile/test/mobile-chrome.test.tsx', 'apps/mobile/test/mobile-avatar-notice-consumer.test.tsx'])
 
 export default defineConfig({ cacheDir: resolve(root, '.tmp/mobile-chrome', mutation ?? 'baseline'),
   resolve: { conditions: ['browser', 'module', 'import'], dedupe: ['react', 'react-dom'] },
@@ -18,13 +18,15 @@ export default defineConfig({ cacheDir: resolve(root, '.tmp/mobile-chrome', muta
     if (!recorded.has(path)) return
     let code = original
     if (variant?.file === path) {
-      if (code.split(variant.before).length !== 2) throw Error('Production mutation must match exactly once: ' + mutation)
-      code = code.replace(variant.before, variant.after)
+      for (const edit of ('edits' in variant ? variant.edits : [variant])) {
+        if (code.split(edit.before).length !== 2) throw Error('Production mutation must match exactly once: ' + mutation)
+        code = code.replace(edit.before, edit.after)
+      }
     }
     if (report) appendFileSync(report, JSON.stringify({ path, originalSHA256: sha(readFileSync(id.split('?')[0]!, 'utf8')), loadedSHA256: sha(code),
       mutation: variant?.file === path ? mutation : null }) + '\n')
     return code === original ? undefined : { code, map: null }
   } }],
-  test: { setupFiles: ['test/device-locks.ts'], environment: 'happy-dom', restoreMocks: true, include: ['test/mobile-chrome.test.tsx'],
+  test: { setupFiles: ['test/device-locks.ts'], environment: 'happy-dom', restoreMocks: true, include: variant ? ['test/' + ('testFile' in variant ? variant.testFile : 'mobile-chrome.test.tsx')] : ['test/mobile-chrome.test.tsx', 'test/mobile-avatar-notice-consumer.test.tsx'],
     ...(variant ? { testNamePattern: variant.target } : {}), passWithNoTests: false, maxWorkers: 1, fileParallelism: false }
 })

@@ -193,6 +193,15 @@ module.exports = async ({ win, read, until, resize, tap, button, capture, result
       assert.ok(gap !== null && gap <= 48, `A short Mote discussion rests on the composer (gap ${gap})`)
     }
     await capture(`mature-${label.toLowerCase()}-390-dark`)
+    if (label === 'Goals') {
+      const entry = await read(`(()=>{const h=document.querySelector('.mobile-goals .mobile-page-header'),b=h.querySelector('[aria-label="新建目标"]');return {create:!!b,hit:b?.getBoundingClientRect().height,lookup:!!h.querySelector('.mobile-goal-lookup'),firstRow:!!document.querySelector('.mobile-goal-create__form:not([hidden])')}})()`)
+      assert.equal(entry.create, true); assert.ok(entry.hit >= 44); assert.equal(entry.lookup, true); assert.equal(entry.firstRow, false)
+      await tap('.mobile-goals-new', 'New Goal from the header')
+      await until('!!document.querySelector(".mobile-goal-create__form:not([hidden])")')
+      await capture('mature-goals-create-390-dark')
+      await tap('.mobile-goals-new', 'Fold the original creation form')
+    }
+
   }
   // A lost attention observation changes the count's presentation, preserving the current workface.
   await resize(390, 844); await read('mobileProductScene.setAppearance("dark")')

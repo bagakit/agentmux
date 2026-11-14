@@ -116,6 +116,20 @@ afterEach(async () => {
 })
 
 describe('actual phone chrome around work', () => {
+  it('opens the original new Goal form from the header and keeps project selection there', async () => {
+    const f = originalClient(), view = await mount(<MobileApp client={f.client} connection={connected} platform={createBrowserPlatform()} />)
+    await openPrimary(view.element, 'Goals')
+    const page = await waitForElement(view.element, '.mobile-goals')
+    const trigger = page.querySelector<HTMLElement>('.mobile-page-header [aria-label="新建目标"]')
+    expect(trigger, 'new Goal action belongs in the header').not.toBeNull()
+    expect(page.querySelector('.mobile-goal-create__form')?.hasAttribute('hidden')).toBe(true)
+    await click(trigger!)
+    expect(page.querySelector('.mobile-goal-create__form')?.hasAttribute('hidden')).toBe(false)
+    expect(page.querySelector('[aria-label="新目标项目"]')?.closest('[hidden]')).toBeNull()
+    expect(page.querySelector('.mobile-goal-lookup')?.closest('.mobile-page-header')).not.toBeNull()
+    expect(f.submit).not.toHaveBeenCalled()
+  })
+
   it('shows the tab bar on the five directories, the Mote main and Threads, and on no conversation, terminal or Goal work', async () => {
     const f = originalClient(), view = await mount(<MobileApp client={f.client} connection={connected} platform={createBrowserPlatform()} />)
     // Startup opens the primary Mote's saved main, which is itself a root page.

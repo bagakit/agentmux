@@ -186,6 +186,8 @@ it('groups same-name Space failures into one notice and retries only the selecte
   const summaries = () => [...document.querySelectorAll<HTMLElement>('.mobile-avatar-notice > .mobile-notice__body > details > summary')]
   await vi.waitFor(() => expect(summaries()).toHaveLength(1))
   expect(summaries()[0]!.textContent).toBe('2 个图标外观未确认')
+  expect(summaries()[0]!.closest('.mobile-page-header'), 'appearance failures stay in the current directory header').not.toBeNull()
+  expect(document.querySelector('.mobile-avatar-notice-outlet[data-placement=footer]')).toBeNull()
   const summary = summaries()[0]!
   await act(async () => {
     summary.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true }))

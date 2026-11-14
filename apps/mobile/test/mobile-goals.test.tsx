@@ -441,8 +441,10 @@ describe('Mobile Goals original owner slice', () => {
 
 it('one click saves the pending original Goal and opens its discussion with the exact selected Project', async () => {
   const view = await mount()
-  await view.change('新目标项目', 'project-original')
+  expect(view.element.querySelector('.mobile-page-header [aria-label="新建目标"]')).not.toBeNull()
   await view.click('新建目标')
+  await view.change('新目标项目', 'project-original')
+  await view.click('创建目标')
   const input = view.forwardRpc.mock.calls.find(([method]) => method === 'goal.create')![1]
   expect(isObjectId(input.goalId)).toBe(true)
   expect(input).toEqual({ goalId: input.goalId, title: 'Untitled goal', description: '', status: 'backlog', projectId: 'project-original', risk: 'low', confirmation: 'user', operationId: expect.any(String) })
@@ -454,7 +456,7 @@ it('keeps an unknown creation and its exact operation across hide/show without s
   const view = await mount()
   const invoke = view.forwardRpc.getMockImplementation()!
   view.forwardRpc.mockImplementation(async (method, params) => { if (method === 'goal.create') throw new Error('creation reply lost'); return invoke(method, params) })
-  await view.click('新建目标'); await view.render(false); await view.render(true); await view.click('新建目标')
+  await view.click('新建目标'); await view.click('创建目标'); await view.render(false); await view.render(true); await view.click('创建目标')
   expect(view.forwardRpc.mock.calls.filter(([method]) => method === 'goal.create')).toHaveLength(1)
   expect(view.element.textContent).toContain('creation reply lost')
   const input = view.forwardRpc.mock.calls.find(([method]) => method === 'goal.create')![1]
