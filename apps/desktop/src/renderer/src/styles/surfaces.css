@@ -20,6 +20,13 @@
 /* Settings shares the app's content grid row. The original footer owns the other row. */
 .settings-page { position: absolute; z-index: 90; grid-column: 1 / -1; grid-row: 1 / 2; inset: 0; display: grid; grid-template-columns: 232px minmax(0, 1fr); color: var(--text); background: var(--surface-0); }
 .settings-page[hidden] { display: none; }
+.settings-page :where(.ui-input, .selection-field) { font-size: var(--fs-body); }
+.settings-page :where(.ui-input-group, .selection-field, :is(input, select).ui-input:not(.ui-input-group > .ui-input)) { min-block-size: 32px; max-inline-size: 100%; }
+.settings-page :where(.ui-input-group > .ui-input) { flex: 1; }
+@media (max-width: 560px), (pointer: coarse) {
+  .settings-page :where(.ui-input-group, .selection-field, :is(input, select).ui-input:not(.ui-input-group > .ui-input)) { min-block-size: 44px; }
+  .settings-page :where(.ui-search-field) { --search-action-size: 44px; }
+}
 .settings-sidebar { min-width: 0; min-height: 0; display: flex; flex-direction: column; padding-top: 34px; border-right: 1px solid var(--line-soft); background: var(--surface-1); }
 .settings-sidebar > header { display: flex; align-items: center; padding: var(--sp-4) var(--sp-4) var(--sp-5); }
 .settings-sidebar__identity { display: flex; align-items: center; gap: var(--sp-3); min-height: 28px; padding-inline: var(--sp-3); }
@@ -79,7 +86,7 @@
 .settings-pane-toolbar > div strong { font-size: var(--fs-title); }
 .settings-pane-toolbar > div span { color: var(--text-3); font-size: var(--fs-meta); }
 .settings-compact-field { display: flex; align-items: center; gap: var(--sp-3); color: var(--text-2); font-size: var(--fs-body); }
-.settings-compact-field select { min-width: 120px; padding: var(--sp-2) var(--sp-3); border: 1px solid var(--line-soft); border-radius: var(--radius-sm); color: var(--text); background: var(--surface-1); font-size: var(--fs-body); }
+.settings-compact-field select { min-inline-size: min(120px, 100%); }
 .settings-group > header { min-height: 36px; display: flex; align-items: center; justify-content: space-between; padding: var(--sp-4) 0; color: var(--text); font-size: var(--fs-body); font-weight: 600; }
 .settings-group > header small { color: var(--text-3); font-size: var(--fs-meta); font-weight: 400; }
 .settings-disclosure-icon { color: var(--text-3); transition: transform var(--dur-fast); }
@@ -166,10 +173,7 @@
 
 .settings-section-picker { display: none; align-items: center; justify-content: space-between; gap: var(--sp-2); cursor: pointer; min-height: 32px; padding: var(--sp-2) var(--sp-3); border: 1px solid var(--line-soft); border-radius: var(--radius-sm); background: var(--surface-0); color: var(--text); font: inherit; }
 .settings-resource-count { color: var(--text-3); font-size: var(--fs-meta); }
-.settings-resource-search { min-width: 0; display: flex; align-items: center; gap: var(--sp-3); padding: var(--sp-3) 0; color: var(--text-3); }
-.settings-resource-search input { width: 100%; min-width: 0; padding: var(--sp-2) 0; border: 0; outline: none; background: transparent; color: var(--text); font: var(--fs-body)/1.5 var(--font-sans); }
-.settings-resource-search:focus-within { color: var(--text); }
-.settings-resource-search input:focus-visible { border-radius: var(--radius-sm); outline: 1px solid var(--focus-line); outline-offset: var(--sp-2); }
+.settings-resource-search { min-inline-size: 0; font-size: var(--fs-body); }
 .settings-resource-empty { margin: 0; padding: var(--sp-5) 0; color: var(--text-2); font-size: var(--fs-body); }
 .settings-executor-tools { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--sp-4); border-bottom: 1px solid var(--line-soft); }
 .settings-executor-tools .settings-resource-search { flex: 1 1 16rem; }
@@ -198,7 +202,7 @@
   .settings-sidebar { flex: 0 0 auto; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, .9fr); align-items: center; gap: var(--sp-3); padding: 34px var(--sp-4) var(--sp-4); border-right: 0; border-bottom: 1px solid var(--line-soft); }
   .settings-sidebar > header { grid-column: 1 / -1; padding: 0; }
   .settings-sidebar nav { display: none; }
-  .settings-section-picker { display: flex; width: 100%; min-width: 0; white-space: normal; text-align: left; }
+  .settings-section-picker { display: flex; width: 100%; min-width: 0; min-block-size: 46px; white-space: normal; text-align: left; }
   .settings-content { min-height: 0; flex: 1 1 auto; padding-top: 0; }
   .settings-content__header { position: relative; top: auto; padding: var(--sp-5) var(--sp-4); }
   .settings-content__breadcrumb { display: none; }
