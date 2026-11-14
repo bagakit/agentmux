@@ -3,8 +3,10 @@ import { spawn } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { relative, resolve } from 'node:path'
+import { createRequire } from 'node:module'
 
 const root = resolve(import.meta.dirname, '../../..'), mobile = resolve(root, 'apps/mobile')
+const vitest = createRequire(resolve(mobile, 'package.json')).resolve('vitest/vitest.mjs')
 const directory = resolve(root, '.tmp/mobile-device-startup-reads', 'run-' + randomUUID())
 await mkdir(directory, { recursive: true })
 const sha = value => createHash('sha256').update(value).digest('hex')
@@ -38,7 +40,7 @@ try {
     if (mutated) env.DEVICE_STARTUP_READ_MUTATION = label
     const command = ['exec', 'vitest', 'run', '--config', 'test/device-startup-reads.config.mts', '--reporter=json', '--outputFile=' + report]
     const run = await new Promise((accept, reject) => {
-      const child = spawn('pnpm', command, { cwd: mobile, env, stdio: ['ignore', 'pipe', 'pipe'] })
+      const child = spawn(process.execPath, [vitest, ...command.slice(2)], { cwd: mobile, env, stdio: ['ignore', 'pipe', 'pipe'] })
       let log = ''; child.stdout.on('data', value => { log += value }); child.stderr.on('data', value => { log += value })
       child.once('error', reject); child.once('close', (code, signal) => accept({ code, signal, log }))
     })
