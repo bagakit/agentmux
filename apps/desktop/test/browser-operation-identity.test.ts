@@ -13,6 +13,8 @@ import type { BrowserScriptRunReport } from '../src/shared/contracts.js'
 import { applyJournalChanges } from './browser-operation-memory-store.js'
 import { parseAgentMuxControlReceipt } from '../../../packages/core/src/control-codec.js'
 import { AGENTMUX_CONTROL_SCHEMA_VERSION } from '../../../packages/core/src/control.js'
+import { createBrowserAutomationGate } from '../src/main/browser-automation-gate.js'
+import { unwrapIpcResultMethods, BROWSER_PROFILE_RESULT_METHODS } from '../src/shared/ipc-result.js'
 
 const input = { browserId: 'original-page', operator: { id: 'operator', name: 'Operator' }, summary: 'Original program', url: 'https://fixture.invalid/page' }
 const deferred = <T,>() => { let resolve!: (value: T) => void; const promise = new Promise<T>(yes => { resolve = yes }); return { promise, resolve } }
@@ -130,7 +132,7 @@ function browserAdapter(preload: { browser: { runScript: (...args: unknown[]) =>
   walk(owner!); expect(found).toHaveLength(1)
   if (process.env.AGENTMUX_PERFORMANCE_LOADED) appendFileSync(process.env.AGENTMUX_PERFORMANCE_LOADED, JSON.stringify({ path: 'apps/desktop/src/renderer/src/lib/api.ts', sha256: createHash('sha256').update(apiSource).digest('hex'), kind: 'original-Renderer-browser-adapter' }) + '\n')
   const code = ts.transpile(`const browser = ${found[0]!.getText(file)}`, { target: ts.ScriptTarget.ES2022 })
-  return new Function('preload', 'unwrapBrowserRunResult', code + ';return browser')(preload, unwrapBrowserRunResult) as { runScript(...args: unknown[]): Promise<BrowserScriptRunReport> }
+  return new Function('preload', 'unwrapBrowserRunResult', 'unwrapIpcResultMethods', 'BROWSER_PROFILE_RESULT_METHODS', code + ';return browser')(preload, unwrapBrowserRunResult, unwrapIpcResultMethods, BROWSER_PROFILE_RESULT_METHODS) as { runScript(...args: unknown[]): Promise<BrowserScriptRunReport> }
 }
 describe('Browser operation identity Renderer boundary', () => {
   it('unwraps the copied real refusal in the production Browser adapter and retains successful reports', async () => {
@@ -159,7 +161,9 @@ function runHandler(ports: Record<string, unknown>) {
 }
 function publicPorts() {
   const browsers = { getOperation: vi.fn<BrowserOperationJournal['get']>(async () => null), runScript: vi.fn(async () => report) }
-  return { browsers, config: { browser: { agentAutomation: true } },  ensureBrowser: vi.fn(async () => {}),
+  const config = { browser: { agentAutomation: true } }
+  return { browsers, config, browserAutomation: createBrowserAutomationGate({ automation: () => config.browser.agentAutomation,
+    profileOf: async () => null, agentAccess: () => true }), ensureBrowser: vi.fn(async () => {}),
     browserRunResult, browserOperationAlreadyExistsError, workspace: vi.fn(), externalBridge: { require: vi.fn(() => ({ workspaceId: 'workspace' })) },
     externalBrowsers: { has: vi.fn(() => false), runScript: vi.fn(async () => report) } }
 }
@@ -178,7 +182,7 @@ describe('Browser operation identity public admission', () => {
     expect(ports.browsers.getOperation).not.toHaveBeenCalled(); expect(ports.ensureBrowser).not.toHaveBeenCalled()
     ports.config.browser.agentAutomation = true
     expect(unwrapBrowserRunResult(await handle({}, 'original-page', 'return 1', undefined, 'fresh'))).toEqual(report)
-    expect(ports.browsers.runScript).toHaveBeenCalledExactlyOnceWith('original-page', 'return 1', undefined, undefined, 'fresh')
+    expect(ports.browsers.runScript).toHaveBeenCalledExactlyOnceWith('original-page', 'return 1', undefined, undefined, 'fresh', undefined, false, undefined, undefined)
     expect(ports.ensureBrowser).toHaveBeenCalledExactlyOnceWith('original-page')
     ports.externalBrowsers.has.mockReturnValue(true)
     expect(unwrapBrowserRunResult(await handle({}, 'external-page', 'return 2', undefined, 'fresh-external'))).toEqual(report)
