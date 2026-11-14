@@ -1,28 +1,19 @@
 /* Goal plan graph. Facts and states come from the plan projection; this sheet only presents them. */
 .goal-plan { container: goal-plan / inline-size; display: grid; min-width: 0; gap: var(--sp-4); padding: var(--sp-5); margin-bottom: var(--sp-6); border: 1px solid transparent; border-radius: var(--radius-lg); background: var(--surface-1); }
-.goal-plan--empty { box-sizing: border-box; background: var(--surface-1); }
+.goal-plan--empty { box-sizing: border-box; gap: var(--sp-3); padding: var(--sp-4) 0; border: 0; border-top: 1px solid var(--line-soft); border-radius: 0; background: transparent; }
 .goal-plan .goals-section-heading h2 { display: flex; align-items: center; gap: var(--sp-4); }
-.goal-plan__origin { display: grid; grid-template-columns: minmax(220px, .9fr) minmax(0, 1fr); align-items: center; gap: clamp(24px, 5cqw, 64px); padding: var(--sp-6); border-radius: var(--radius); background-image: radial-gradient(var(--line-soft) .75px, transparent .75px); background-size: 18px 18px; }
-.goal-plan__goal { position: relative; display: flex; align-items: flex-start; gap: var(--sp-4); box-sizing: border-box; width: 100%; margin: 0; padding: var(--sp-5); border: 1px solid color-mix(in srgb, var(--green) 28%, var(--line-soft)); border-radius: var(--radius-lg); background: var(--surface-0); box-shadow: var(--hl), 0 6px 24px color-mix(in srgb, var(--text) 4%, transparent); }
-.goal-plan__goal::before { content: ''; position: absolute; width: 5px; height: 5px; border: 2px solid var(--surface-0); background: var(--green); border-radius: 50%; right: -5px; top: calc(50% - 4px); }
-.goal-plan--compact .goal-plan__origin { padding: var(--sp-3); gap: var(--sp-6); }
-.goal-plan--compact .goal-plan__goal { padding: var(--sp-4); }
-.goal-plan__goal-icon { display: grid; place-items: center; flex: none; width: 36px; height: 36px; border-radius: var(--radius); color: var(--green-text); background: color-mix(in srgb, var(--green) 12%, transparent); }
+.goal-plan__origin { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-4) var(--sp-6); min-width: 0; }
+.goal-plan__goal { display: flex; align-items: center; gap: var(--sp-3); flex: 1 1 220px; min-width: 0; margin: 0; }
+.goal-plan__goal-icon { display: grid; place-items: center; flex: none; width: 24px; height: 24px; border-radius: var(--radius-sm); color: var(--text-2); background: var(--surface-2); }
+.goal-plan__goal-icon > svg { width: 16px; height: 16px; }
 .goal-plan__goal-body { min-width: 0; }
-.goal-plan__goal-label { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-3); margin: 0 0 var(--sp-3); color: var(--text); font-size: var(--fs-meta); font-weight: 600; }
-.goal-plan__goal-label > span { color: var(--text-3); font-weight: 400; }
-.goal-plan__goal h3 { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; margin: 0; color: var(--text); font-size: var(--fs-title); line-height: 1.5; font-weight: 600; overflow-wrap: anywhere; }
-/* The complete editable title is above; its repeated diagram label stays compact. */
-@container goal-plan (max-width: 720px) {
-  .goal-plan__origin { grid-template-columns: minmax(0, 1fr); gap: var(--sp-4); }
-}
-@container goal-plan (min-width: 560px) {
-  .goal-plan--compact .goal-plan__origin { grid-template-columns: minmax(200px, .9fr) minmax(0, 1fr); gap: var(--sp-5); }
-}
-.goal-plan__empty-body { display: grid; gap: var(--sp-3); min-width: 0; }
-.goal-plan__empty-title { margin: 0; color: var(--text); font: 600 var(--fs-body)/1.45 var(--font-sans); }
-.goal-plan__empty-body > p { margin: 0; }
-.goal-plan__empty-body .goals-inline-actions { align-items: center; flex-wrap: wrap; }
+.goal-plan__goal-label { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-3); margin: 0; color: var(--text-3); font-size: var(--fs-meta); }
+.goal-plan__goal-label > span { color: var(--text-3); }
+.goal-plan__goal h3 { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; margin: 0; color: var(--text-2); font-size: var(--fs-body); line-height: 1.5; font-weight: 550; overflow-wrap: anywhere; }
+.goal-plan__empty-body { display: flex; flex-wrap: wrap; align-items: center; flex: 1 1 260px; gap: var(--sp-3) var(--sp-5); min-width: 0; }
+.goal-plan__empty-body > p { flex: 1 1 180px; margin: 0; font-size: var(--fs-meta); }
+.goal-plan__empty-body .goals-inline-actions { align-items: center; flex-wrap: wrap; margin: 0; }
+/* The repeated starting point stays light; the complete editable Goal remains above. */
 .goal-plan__revise { justify-content: flex-start; margin-top: calc(-1 * var(--sp-2)); }
 .goal-plan__progress { position: relative; height: 3px; border-radius: 3px; background: var(--surface-2); overflow: hidden; }
 .goal-plan__progress > span { position: absolute; inset: 0; border-radius: inherit; background: linear-gradient(90deg, color-mix(in srgb, var(--green) 70%, transparent), var(--green)); transform-origin: left center; transition: transform .42s cubic-bezier(.2, .8, .2, 1); }

@@ -202,9 +202,9 @@ export function GoalPlanGraph({ demand, onRequestPlan, pending = false, busy = f
     <div className="goal-plan__origin">
       <article className="goal-plan__goal" data-goal-plan-origin={demand.id} aria-label="Goal starting point">
         <span className="goal-plan__goal-icon" aria-hidden="true"><ThemeObjectGoalIcon size={24} /></span>
-        <div className="goal-plan__goal-body"><p className="goal-plan__goal-label">Goal <span>Starting point</span></p><h3>{demand.title}</h3></div>
+        <div className="goal-plan__goal-body"><p className="goal-plan__goal-label">Goal <span>Starting point</span></p><h3 title={demand.title}>{demand.title}</h3></div>
       </article>
-      <div className="goal-plan__empty-body"><p className="goal-plan__empty-title">No saved execution plan</p>
+      <div className="goal-plan__empty-body">
       <p className="goals-muted">{compact ? 'A saved plan will connect this goal to its tasks, dependencies and checks.' : demand.alignment ? 'Turn the agreed outcome into tasks, dependencies and checks.' : 'Shape the outcome and success criteria, then build the plan with your Supervisor.'}</p>
       <div className="goals-inline-actions">{requestAction}
       </div>
