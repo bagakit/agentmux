@@ -1,0 +1,63 @@
+const assert = require('node:assert/strict')
+module.exports = async context => {
+  const { read, until, resize, tap, button, capture, result, phase } = context
+  if (phase === 'positions-only') {
+    await until('!!document.querySelector(".mobile-conversation-panel:not([hidden]) [contenteditable=true]")')
+    await read('mobileProductScene.prepareWideWorkface();mobileProductScene.prepareCompactNavigation()')
+    await resize(390,760); await read('mobileProductScene.setAppearance("dark")')
+    await button('Focus','.mobile-navigation')
+    await until('document.querySelector(".mobile-focus-facet .mobile-row-title strong")?.textContent==="Sample Project 业务协作与代码审查"')
+    await button('Sample Project 业务协作与代码审查 · 更多操作','.mobile-focus-pane')
+    await until('!!document.querySelector("[role=dialog] .mobile-agent-locations-entry")')
+    await read('window.compactPositionEntry=document.querySelector("[role=dialog] .mobile-agent-locations-entry");true')
+    await tap('[role=dialog] .mobile-agent-locations-entry','Original nested positions')
+    await until('!!document.querySelector(".mobile-agent-locations-sheet")')
+    const opened = await read(`({moreVisibility:getComputedStyle(document.querySelector('.mobile-sheet--agent')).visibility,handles:[...document.querySelectorAll('.mobile-sheet-handle')].filter(n=>n.getClientRects().length&&getComputedStyle(n).visibility!=='hidden').length,entryRetained:window.compactPositionEntry.isConnected})`)
+    assert.equal(opened.moreVisibility,'hidden'); assert.equal(opened.handles,1); assert.equal(opened.entryRetained,true)
+    await capture('compact-positions-single-surface-390-dark')
+    await read('history.back();true')
+    await until('!document.querySelector(".mobile-sheet--underlay")&&document.activeElement===window.compactPositionEntry')
+    assert.equal(await read('window.compactPositionEntry.isConnected'),true)
+    await capture('compact-original-more-after-position-cancel-390-dark')
+    await read('history.back();true')
+    await until('!document.querySelector(".mobile-sheet--agent")')
+    result.positionOverlay={opened,closed:{sameTrigger:true,focused:true,via:'actual-browser-back',secondBackLeavesMenu:true},scope:'Original More/position owners retained; presentation-only nested surface correction.'}
+    return
+  }
+  await require('./wide-agent-workface.cjs')({ ...context, capture: (name, options) => ['wide-mote-landscape-844-dark','wide-original-portrait-390-dark','wide-restored-original-agent-951-light'].includes(name) ? capture(name,options) : Promise.resolve() })
+  if (phase === 'restore') return
+  await read('mobileProductScene.prepareCompactNavigation()')
+  await resize(951,585); await tap('.mobile-header [data-mobile-back]', 'Back keeps the full Pad shell')
+  await until('!!document.querySelector(".mobile-focus-pane[role=main]")')
+  await button('刷新空间目录', '.mobile-focus-pane')
+  await until('document.querySelector(".mobile-focus-facet .mobile-row-title strong")?.textContent==="Sample Project 业务协作与代码审查"')
+  const back = await read(`({width:document.querySelector('.mobile-app').getBoundingClientRect().width,wide:document.querySelector('.mobile-app').hasAttribute('data-wide-shell'),focus:document.querySelectorAll('.mobile-focus-facet').length,main:document.querySelector('.mobile-focus-pane')?.getAttribute('role')})`)
+  assert.equal(back.width,951); assert.equal(back.wide,true); assert.equal(back.focus,1); assert.equal(back.main,'main')
+  result.compactBack = back; await capture('compact-focus-back-951-light')
+  await button('Space','.mobile-navigation'); await capture('compact-space-root-951-light')
+  assert.equal(await read("document.querySelector('.mobile-app').getBoundingClientRect().width"),951)
+  await button('Focus','.mobile-navigation')
+  await button('原上下文中的实验建议','.mobile-focus-pane')
+  await until('!!document.querySelector(".mobile-conversation-panel:not([hidden]) [contenteditable=true]")')
+  const rows = await read(`Array.from(document.querySelectorAll('.mobile-focus-facet .mobile-agent-row')).map(row=>{const r=n=>n.getBoundingClientRect().toJSON(),title=row.querySelector('.mobile-row-title'),name=title.querySelector('strong'),avatar=row.querySelector('.mobile-row-avatar'),more=row.querySelector('.mobile-agent-row__more');return {name:name.textContent,title:r(title),font:getComputedStyle(name).fontSize,row:r(row),avatar:r(avatar),more:r(more),timeInTitle:!!title.querySelector('time'),inlinePositions:!!row.querySelector('.mobile-agent-locations-entry'),dot:!!row.querySelector('.mobile-row-dot'),mark:avatar.querySelector('[data-focus-state-icon]')?.getAttribute('data-focus-state-icon')}})`)
+  for(const row of rows) { assert.equal(row.timeInTitle,false); assert.equal(row.inlinePositions,false); assert.equal(row.dot,false); assert.ok(row.title.width>=110); assert.ok(row.more.width>=44&&row.more.height>=44); assert.ok(row.row.height>=44&&row.row.height<=60); assert.equal(row.avatar.width,32); assert.equal(row.font,'15px') }
+  assert.equal(rows.find(row=>row.name==='原上下文中的实验建议').mark,'unknown')
+  result.compactRows=rows; await capture('compact-agent-sidebar-951-light')
+  await resize(390,760); await tap('.mobile-header [data-mobile-back]','Open the original compact Focus')
+  await read('mobileProductScene.setAppearance("dark")'); await capture('compact-focus-390-dark')
+  await button('Sample Project 业务协作与代码审查 · 更多操作','.mobile-focus-pane')
+  await until('!!document.querySelector("[role=dialog] .mobile-agent-locations-entry")')
+  await capture('compact-more-390-dark')
+  await tap('[role=dialog] .mobile-agent-locations-entry','Original locations from More')
+  await until('!!document.querySelector(".mobile-agent-locations-sheet")')
+  await capture('compact-positions-390-dark')
+  await button('并行项目','.mobile-agent-locations-sheet')
+  await until('!document.querySelector(".mobile-agent-locations-sheet")&&mobileProductScene.facts().record.selectedSessionId==="session-mote"')
+  assert.equal(await read('mobileProductScene.facts().record.presentation.identity.context.regionId'),'region-other')
+  await resize(951,585); await tap('.mobile-header [data-mobile-back]','Return from exact original location')
+  await button('原上下文中的实验建议','.mobile-focus-pane')
+  await until('document.querySelector("[contenteditable=true]")?.textContent==="保留这段未发送的想法，旋转和重启后继续。"')
+  const facts=await read('mobileProductScene.facts()')
+  result.wideOriginal={recordId:facts.record.recordId,sid:facts.record.selectedSessionId,conversation:facts.record.conversation,presentation:facts.record.presentation,run:facts.sessionIds.find(item=>item.sessionId===facts.record.selectedSessionId)}
+  result.compactBoundary='Original wide workface fixture plus real Back/primary/More/exact position interactions; one original directory and unchanged controlled SDK. No live user Browser, Session or installed App operation.'
+}

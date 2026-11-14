@@ -393,6 +393,15 @@ function Scene() {
   const [webUpdateScene, setWebUpdateScene] = useState(false)
   const [connectScene, setConnectScene] = useState<MobileConnection | null>(null)
   Object.assign(window, { mobileProductScene: {
+    prepareCompactNavigation: () => {
+      const names = ['Sample Project 业务协作与代码审查', '研究材料与证据核对成员', '原上下文中的实验建议', '视觉方向与实现核对']
+      for (const [index, row] of (catalog.agentPresentation ?? []).entries()) {
+        row.name = names[index] ?? row.name; row.lastActivityAt = Date.now() - (index + 1) * 86_400_000
+      }
+      const unknown = catalog.agentPresentation!.find(row => row.agentSessionId === result.agentSessionId)!
+      Object.assign(unknown, { state: 'running', stateMark: 'unknown', group: 'idle', detail: 'Original observation is not confirmed.' })
+      return names
+    },
     prepareWideWorkface: () => { for (const row of catalog.agentPresentation ?? []) if (row.projectGroup) row.projectGroup.hostId = 'host-original' },
     prepareAgentLocations: (scene: 'multi' | 'zero' | 'one' | 'unknown' | 'long') => {
       Object.assign(catalog, structuredClone(agentLocationsOriginal))

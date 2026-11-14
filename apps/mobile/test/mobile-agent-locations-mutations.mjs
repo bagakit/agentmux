@@ -20,7 +20,7 @@ export const mobileAgentLocationMutations = {
   ] },
   'late-selection': { file: mobileAgentLocationOwners[2], target: 'rejects late exact reads',
     edits: [{ before: 'if (operation !== request.current) return', after: 'if (false) return' },
-      { before: 'if (operation !== request.current || now.client !== source.client || now.agentSessionId !== source.agentSessionId || now.hostId !== source.hostId || !sameOwner || !now.visible || !now.open)', after: 'if (false)' }] },
+      { before: 'if (operation !== request.current || now.client !== source.client || now.agentSessionId !== source.agentSessionId || now.hostId !== source.hostId || !sameOwner || !now.visible || !now.open || now.beforeChoose && !now.beforeChoose())', after: 'if (false)' }] },
   'changed-tuple': { file: mobileAgentLocationOwners[2], target: 'Zone uses the original exact tuple',
     before: 'if (!confirmsAgentLocation(value.catalog, source.hostId, source.agentSessionId, place))', after: 'if (false)' }
 }

@@ -1,12 +1,34 @@
-import { act } from 'react'
+import { act, useState } from 'react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { AgentMuxSpaceCatalog } from '@agentmux/core/control'
 import { MobileApp } from '../src/MobileApp'
+import { MobileAgentMenuContext, type MobileAgentMenuTarget } from '../src/navigation/MobileAgentRow'
+import { MobileAgentLocations } from '../src/navigation/MobileAgentLocations'
 import { MobileZoneWorkface } from '../src/navigation/MobileZoneWorkface'
 import { createBrowserPlatform } from '../src/platform/browser'
 import { emptyDeviceWorkface, getDeviceWorkface } from '../src/recovery/device-workface'
 import { button, click, deferred, editor, fixture, mount, mounted, paste, plainEnter, waitForElement } from './conversation-fixture'
 import { openPrimary } from './mobile-root-navigation'
+
+/** Only the surrounding More disclosure is a fixture; chooser, row, catalog and exact read remain production owners. */
+function ZoneWithMenu(props: Parameters<typeof MobileZoneWorkface>[0]) {
+  const [target, show] = useState<MobileAgentMenuTarget | null>(null), [open, setOpen] = useState(false)
+  return <MobileAgentMenuContext.Provider value={show}><MobileZoneWorkface {...props} />
+    {target?.location && <MobileAgentLocations client={props.client} catalog={target.location.catalog} locations={target.location.group} agentSessionId={target.agentSessionId} name={target.identity.name} visible open={open} onOpenChange={setOpen}
+      beforeChoose={() => target.location?.current?.() ?? false} onChoose={target.location.onChoose} />}
+  </MobileAgentMenuContext.Provider>
+}
+async function openLocations(element: HTMLElement, selector = '.mobile-agent-row') {
+  let more: HTMLButtonElement | undefined
+  await settled(() => {
+    const row = [...element.querySelectorAll<HTMLElement>(selector)].find(value => !value.closest('[hidden]'))
+    more = row?.querySelector<HTMLButtonElement>('.mobile-agent-row__more') ?? undefined
+    expect(more, 'Original row More reaches its retained position owner').toBeDefined()
+  })
+  await click(more!)
+  return waitForElement<HTMLButtonElement>(document.body, '.mobile-agent-locations-entry')
+}
+async function closeMore() { const close = document.body.querySelector<HTMLButtonElement>('[aria-label="关闭面板"]'); if (close) await click(close) }
 
 const connected = { state: 'connected' as const, message: '已连接原 Host' }
 const original = { spaceId: 'space-a', zoneId: 'zone', workspaceId: 'resource', displayWorkspaceId: 'display-a', groupId: 'group-a', tabId: 'tab', regionId: 'region-a' }
@@ -47,7 +69,7 @@ it('mobile locations actual App folds aliases without folding context or cross-H
   await paste(view.element, 'preserved unsent draft')
   const input = editor(view.element), retained = structuredClone(attempts()), historyCalls = f.readHistory.mock.calls.length
   await openPrimary(view.element, 'Focus')
-  const entry = await waitForElement<HTMLButtonElement>(view.element, '.mobile-agent-locations-entry')
+  const entry = await openLocations(view.element)
   expect(entry.getAttribute('aria-label')).toBe('Original Agent · 2 个位置')
   expect(view.element.querySelector('details.mobile-session-locations')).toBeNull()
   expect(f.client.forwardRpc.mock.calls.filter(([method]) => method === 'space.inspect')).toHaveLength(0)
@@ -58,6 +80,7 @@ it('mobile locations actual App folds aliases without folding context or cross-H
   expect(choices()[0]?.closest('.mobile-agent-location-group')).toBe(choices()[1]?.closest('.mobile-agent-location-group'))
   expect(choices()[2]?.closest('.mobile-agent-location-group')).not.toBe(choices()[0]?.closest('.mobile-agent-location-group'))
   expect(sheet().closest('.mobile-agent-row'), 'The location list overlays the directory instead of entering its row flow').toBeNull()
+  expect(sheet().closest('.mobile-sheet--agent'), 'The position sheet remains outside the retained More surface').toBeNull()
   expect(choices().every(choice => !choice.textContent?.includes('host-other'))).toBe(true)
   expect(choices().every(choice => choice.querySelector('strong')?.textContent !== 'Agent')).toBe(true)
   await click(button(sheet(), '关闭位置选择'))
@@ -70,8 +93,8 @@ it('mobile locations actual App folds aliases without folding context or cross-H
   expect(editor(view.element)).toBe(input); expect(input.textContent).toContain('preserved unsent draft'); expect(attempts()).toEqual(retained)
   await click(button(view.element.querySelector('.mobile-session-toolbar') as HTMLElement, '返回 Focus'))
   await openPrimary(view.element, 'Space')
-  await click(await waitForElement(view.element, '.mobile-session-list > li > button'))
-  const spaceEntry = await waitForElement<HTMLButtonElement>(view.element, '.mobile-spatial-tab .mobile-agent-locations-entry')
+  await click(await waitForElement(view.element, '.mobile-space-row'))
+  const spaceEntry = await openLocations(view.element, '.mobile-spatial-tab .mobile-agent-row')
   expect(spaceEntry.getAttribute('aria-label')).toBe('Original Agent · 2 个位置')
   await click(spaceEntry); expect(choices()).toHaveLength(3); await click(choices()[2]!)
   await settled(() => expect(getDeviceWorkface().snapshot().record.presentation?.identity?.context).toEqual(second))
@@ -81,10 +104,10 @@ it('mobile locations actual App folds aliases without folding context or cross-H
   for (const region of value.regions) if (region.execution?.hostId === 'host-original') region.execution = null
   const focus = [...view.element.querySelectorAll<HTMLElement>('.mobile-spatial-panel')].find(panel => !panel.closest('[hidden]'))!
   await click(button(focus, '刷新空间目录'))
-  expect(focus.querySelector('.mobile-agent-locations-entry')?.getAttribute('aria-label')).toBe('Original Agent · 位置待确认')
-  await click(focus.querySelector('.mobile-agent-locations-entry')!)
+  expect((await openLocations(focus)).getAttribute('aria-label')).toBe('Original Agent · 位置待确认')
+  await click(document.body.querySelector('.mobile-agent-locations-entry')!)
   expect(sheet().textContent).toContain('位置还没确认，对话入口仍可使用')
-  await click(button(sheet(), '关闭位置选择')); await click(focus.querySelector('.mobile-agent-row__open')!)
+  await click(button(sheet(), '关闭位置选择')); await closeMore(); await click(focus.querySelector('.mobile-agent-row__open')!)
   expect(editor(view.element)).toBe(input); expect(attempts()).toEqual(retained)
   expect(f.submit).toHaveBeenCalledTimes(1); expect(f.signalAgent).not.toHaveBeenCalled(); expect(f.rejoinInput).not.toHaveBeenCalled()
   expect(f.client.forwardRpc.mock.calls.some(([method]) => method === 'space.focus' || /agent\.(start|resume|stop)/.test(method))).toBe(false)
@@ -92,8 +115,8 @@ it('mobile locations actual App folds aliases without folding context or cross-H
 
 it('mobile locations Zone uses the original exact tuple and keeps a failed selection separate from healthy primary opening', async () => {
   const f = fixture(), value = catalog(), open = vi.fn(); f.client.forwardRpc = rpc(f, () => value)
-  const view = await mount(<MobileZoneWorkface client={f.client} name="Original Zone" zoneId="zone" visible openSession={open} />)
-  const entry = await waitForElement<HTMLButtonElement>(view.element, '.mobile-agent-locations-entry')
+  const view = await mount(<ZoneWithMenu client={f.client} name="Original Zone" zoneId="zone" visible openSession={open} />)
+  const entry = await openLocations(view.element)
   expect(entry.getAttribute('aria-label')).toContain('2 个位置')
   await click(entry); expect(choices()).toHaveLength(3); expect(sheet().closest('.mobile-agent-row')).toBeNull()
   await click(choices()[2]!)
@@ -116,15 +139,15 @@ it('mobile locations rejects late exact reads after client SID Runtime or cancel
     let owner = 'runtime-original'
     f.client.runtimeOwnerIdentity = () => ({ runtimeId: owner, ownerInstanceId: 'original-instance' })
     f.client.forwardRpc = rpc(f, () => value); other.client.forwardRpc = rpc(other, () => value)
-    const render = (client = f.client) => <MobileZoneWorkface client={client} name="Original Zone" zoneId="zone" visible openSession={open} />
+    const render = (client = f.client) => <ZoneWithMenu client={client} name="Original Zone" zoneId="zone" visible openSession={open} />
     const view = await mount(render())
-    await click(await waitForElement(view.element, '.mobile-agent-locations-entry'))
+    await click(await openLocations(view.element))
     f.client.forwardRpc.mockImplementationOnce(() => pending.promise)
     await click(choices()[0]!)
     if (change === 'client') await view.render(render(other.client))
     if (change === 'sid') { value.regions[0]!.agentSessionId = 'other'; await view.render(render()); await click(button(view.element, '刷新讨论')) }
     if (change === 'runtime' || change === 'runtime-reject') owner = 'runtime-replaced'
-    if (change === 'cancel') { await click(button(sheet(), '关闭位置选择')); await click(view.element.querySelector('.mobile-agent-locations-entry')!) }
+    if (change === 'cancel') { await click(button(sheet(), '关闭位置选择')); await click(document.body.querySelector('.mobile-agent-locations-entry')!) }
     await act(async () => change === 'runtime-reject' ? pending.reject(new Error('old-runtime rejection body')) : pending.resolve({ catalog: catalog() }))
     expect(open, `Late ${change} read cannot retarget local navigation`).not.toHaveBeenCalled()
     expect(sheet()).not.toBeNull()
@@ -142,14 +165,14 @@ it('mobile locations distinguishes zero one and unknown facts without closing th
     value.locations = kind === 'zero' ? [] : [original, alias]
     if (kind === 'unknown') value.regions[0]!.execution = null
     f.client.forwardRpc = rpc(f, () => value)
-    const view = await mount(<MobileZoneWorkface client={f.client} name="Zone" zoneId="zone" visible openSession={open} />)
-    const entry = await waitForElement<HTMLButtonElement>(view.element, '.mobile-agent-locations-entry')
+    const view = await mount(<ZoneWithMenu client={f.client} name="Zone" zoneId="zone" visible openSession={open} />)
+    const entry = await openLocations(view.element)
     expect(entry.getAttribute('aria-label')).toBe(`Original Agent · ${kind === 'unknown' ? '位置待确认' : `${kind === 'one' ? 1 : 0} 个位置`}`)
     await click(entry)
     if (kind === 'zero') expect(sheet().textContent).toContain('当前目录没有展示位置')
     else expect(choices()).toHaveLength(2)
     if (kind === 'unknown') { await click(choices()[0]!); expect(open).not.toHaveBeenCalled(); expect(sheet().textContent).toContain('这个位置还没确认') }
-    await click(button(sheet(), '关闭位置选择')); await click(view.element.querySelector('.mobile-agent-row__open')!)
+    await click(button(sheet(), '关闭位置选择')); await closeMore(); await click(view.element.querySelector('.mobile-agent-row__open')!)
     expect(open).toHaveBeenCalledOnce(); expect(f.submit).not.toHaveBeenCalled()
     await act(async () => mounted.pop()!.root.unmount()); view.element.remove()
   }
