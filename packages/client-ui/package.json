@@ -24,6 +24,12 @@
       "browser": "./src/components/*.tsx",
       "import": "./dist/components/*.js"
     },
+    "./components/SearchChoiceDialog": {
+      "types": "./src/components/SearchChoiceDialog.tsx",
+      "browser": "./src/components/SearchChoiceDialog.tsx",
+      "import": "./dist/components/SearchChoiceDialog.js"
+    },
+    "./styles/search-choice.css": "./src/styles/search-choice.css",
     "./patterns/agent-work-location": {
       "types": "./src/patterns/agent-work-location.tsx",
       "browser": "./src/patterns/agent-work-location.tsx",

@@ -88,8 +88,11 @@
 .mobile-posture-menu__item small { color: var(--text-3); font-size: var(--fs-meta); }
 .mobile-posture-menu__item[data-tier='caution'] strong { color: var(--amber); }
 .mobile-posture-menu__item[data-tier='danger'] strong { color: var(--red); }
-.mobile-command-menu { min-width: 220px; gap: 6px; padding: 6px; }
-.mobile-command-menu input { width: 100%; min-height: 44px; padding: 0 8px; border: 1px solid var(--line); border-radius: var(--mobile-radius-sm); background: var(--surface-0); color: var(--text); font-size: 16px; }
+.mobile-command-menu.composer-menu--search { width: min(350px, var(--choice-available-width)); min-width: 0; max-height: var(--choice-available-height); overflow: hidden; gap: 6px; padding: 6px; }
+.mobile-command-menu .composer-menu__search { padding: 0 0 6px; }
+.mobile-command-menu .composer-menu__clear { flex-basis: 44px; width: 44px; height: 44px; }
+.mobile-command-menu [data-choice]:focus-visible { outline: 2px solid var(--focus-line); outline-offset: -2px; }
+.mobile-command-menu input { flex: 1; width: 0; min-height: 44px; padding: 0 8px; border: 1px solid var(--line); border-radius: var(--mobile-radius-sm); background: var(--surface-0); color: var(--text); font-size: 16px; }
 .mobile-command-menu__list { max-height: min(32dvh, 220px); overflow-y: auto; display: grid; gap: 2px; }
 .mobile-command-menu__empty { margin: 4px 6px; font-size: var(--fs-meta); color: var(--text-3); }
 .mobile-reading-action { align-self: center; padding: 4px 10px; border: 0; background: var(--surface-1); color: var(--text-muted); font-size: var(--fs-meta); min-height: 44px; border-radius: 8px; }

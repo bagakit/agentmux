@@ -2,10 +2,9 @@ import { MobileNotice } from '../notices/MobileNotice'
 import { useEffect, useState, type ReactNode } from 'react'
 import type { AgentPostureControl } from '@agentmux/core'
 import type { ComposerSuggestion } from '@agentmux/client-ui/components/AgentComposer'
-import { TextInput } from '@agentmux/client-ui/input'
 import { SemanticIcon } from '@agentmux/client-ui/icons'
 import { ComposerLayoutToggle, type ComposerToolPhase } from '@agentmux/client-ui/components/ComposerLayoutToggle'
-import { ComposerToolMenu } from '@agentmux/client-ui/components/ComposerToolMenu'
+import { SearchChoiceDialog } from '@agentmux/client-ui/components/SearchChoiceDialog'
 import * as DropdownMenu from '@agentmux/client-ui/components/HoverDropdownMenu'
 
 export function MobilePosturePicker({ control, disabled, onSet }: {
@@ -46,37 +45,42 @@ export function MobileCommandPicker({ commands, disabled, onSelect, onOpenChange
   loading?: boolean | undefined; issue?: string | undefined; retry?: (() => void) | undefined
 }) {
   const [open, setOpen] = useState(false)
-  const [query, setQuery] = useState('')
   useEffect(() => { onOpenChange?.(open); return () => onOpenChange?.(false) }, [open, onOpenChange])
-  const normalized = query.trim().toLocaleLowerCase()
-  const matching = commands.filter(item => `${item.text} ${item.label ?? ''} ${item.description} ${item.searchText ?? ''}`.toLocaleLowerCase().includes(normalized))
-  const groups = new Map<string, ComposerSuggestion[]>()
-  for (const item of matching) {
-    const group = item.group ?? ''
-    const items = groups.get(group)
-    if (items) items.push(item)
-    else groups.set(group, [item])
-  }
   return <span className="mobile-command-picker">
-    <ComposerToolMenu open={open && !disabled} onOpenChange={next => { setOpen(next); if (!next) setQuery('') }} label="Commands" className="mobile-posture-menu mobile-command-menu" trigger={<button type="button" className="composer-tool" disabled={disabled} aria-label="Choose a command"
-      aria-expanded={open} title="Choose a command">
-      <SemanticIcon name="object.subcommand" size={14} /><span className="composer-tool__label">Commands</span>
-    </button>}>
-      <TextInput value={query} onChange={event => setQuery(event.target.value)} placeholder="查找命令…" aria-label="查找命令" />
-      {loading ? <p className="mobile-command-menu__empty" role="status">读取自定义 Commands…</p> : null}
-      {issue ? <MobileNotice identity={[issue]} className="mobile-command-menu__empty" role="status">{issue}
-        {retry ? <button type="button" className="mobile-text-button" onClick={retry}>重试读取 Commands</button> : null}</MobileNotice> : null}
-      <div className="mobile-command-menu__list">
-        {[...groups].map(([group, items]) => <div className="composer__suggestion-group" role="group" aria-label={group || 'Commands'} key={group}>
-          {groups.size > 1 ? <h4>{group || 'Commands'}</h4> : null}
-          {items.map(item => <button key={item.id ?? item.text} type="button" role="menuitem" className="mobile-posture-menu__item"
-          title={item.description} onClick={() => { setOpen(false); setQuery(''); onSelect(item) }}>
-          <strong>{item.label ?? item.text}</strong>
-          {item.description ? <small>{item.description}</small> : null}
-        </button>)}</div>)}
-        {!matching.length ? <p className="mobile-command-menu__empty" role="status">{commands.length ? '无匹配命令' : '当前对话没有可用命令，可以继续输入。'}</p> : null}
-      </div>
-    </ComposerToolMenu>
+    <SearchChoiceDialog open={open && !disabled} onOpenChange={setOpen} label="Commands" searchLabel="查找命令" clearLabel="清除命令查询"
+      className="mobile-posture-menu mobile-command-menu" trigger={<button type="button" className="composer-tool" disabled={disabled}
+        aria-label="Choose a command" title="Choose a command">
+        <SemanticIcon name="object.subcommand" size={14} /><span className="composer-tool__label">Commands</span>
+      </button>}>
+      {(query, choose) => {
+        const matching = commands.filter(item => [item.text, item.label, item.description, item.searchText].join(' ').toLocaleLowerCase().includes(query))
+        const groups = new Map<string, ComposerSuggestion[]>()
+        for (const item of matching) {
+          const group = item.group ?? '', items = groups.get(group)
+          if (items) items.push(item)
+          else groups.set(group, [item])
+        }
+        return <>
+          {loading && <p className="mobile-command-menu__empty" role="status">读取自定义 Commands…</p>}
+          {issue && <MobileNotice identity={[issue]} className="mobile-command-menu__empty" role="status">{issue}
+            {retry && <button type="button" className="mobile-text-button" onClick={retry}>重试读取 Commands</button>}
+          </MobileNotice>}
+          <div className="mobile-command-menu__list">
+            {[...groups].map(([group, items]) => <div className="composer__suggestion-group" role="group" aria-label={group || 'Commands'} key={group}>
+              {groups.size > 1 && <h4>{group || 'Commands'}</h4>}
+              {items.map(item => <button key={item.id ?? item.text} type="button" data-choice className="mobile-posture-menu__item"
+                title={item.description} onClick={() => choose(() => onSelect(item))}>
+                <strong>{item.label ?? item.text}</strong>
+                {item.description && <small>{item.description}</small>}
+              </button>)}
+            </div>)}
+            {!loading && !issue && !matching.length && <p className="mobile-command-menu__empty" role="status">
+              {commands.length ? '无匹配命令' : '当前对话没有可用命令，可以继续输入。'}
+            </p>}
+          </div>
+        </>
+      }}
+    </SearchChoiceDialog>
   </span>
 }
 

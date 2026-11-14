@@ -4,9 +4,8 @@ import type { AgentMuxAgentSession, AgentSkill } from '@agentmux/core'
 import type { MobileConversationClient } from './mobile-conversation-client'
 import type { ComposerSuggestion } from '@agentmux/client-ui/components/AgentComposer'
 import { encodeSemanticReference, semanticReferenceKind, semanticReferenceLabel } from '@agentmux/client-ui/composer-semantic-reference'
-import { TextInput } from '@agentmux/client-ui/input'
 import { SemanticIcon } from '@agentmux/client-ui/icons'
-import { ComposerToolMenu } from '@agentmux/client-ui/components/ComposerToolMenu'
+import { SearchChoiceDialog } from '@agentmux/client-ui/components/SearchChoiceDialog'
 
 /** A demand-driven reader of the original Session's public skill discovery. */
 export function MobileSkillsPicker({ client, session, agentSessionId, scope, connected, visible, onSelect }: {
@@ -14,10 +13,10 @@ export function MobileSkillsPicker({ client, session, agentSessionId, scope, con
   agentSessionId?: string | null
   connected: boolean; visible: boolean; onSelect(item: ComposerSuggestion): void
 }) {
-  const [open, setOpen] = useState(false), [query, setQuery] = useState(''), [retry, setRetry] = useState(0)
+  const [open, setOpen] = useState(false), [retry, setRetry] = useState(0)
   const [reading, setReading] = useState<{ client: MobileConversationClient | null; scope: string; skills: AgentSkill[]; loading: boolean; issue: string }>({ client: null, scope: '', skills: [], loading: false, issue: '' })
   const current = useRef({ client, scope, visible }); current.current = { client, scope, visible }
-  useEffect(() => { setOpen(false); setQuery('') }, [client, scope, visible])
+  useEffect(() => { setOpen(false) }, [client, scope, visible])
   useEffect(() => {
     if (!open || !visible) return
     let active = true
@@ -41,21 +40,28 @@ export function MobileSkillsPicker({ client, session, agentSessionId, scope, con
     return () => { active = false }
   }, [client, session?.agentSessionId, session?.hostId, session?.providerId, session?.workspacePath, agentSessionId, scope, connected, visible, open, retry])
   const own = reading.client === client && reading.scope === scope ? reading : null
-  const matching = (own?.skills ?? []).filter(skill => `${skill.name} ${skill.description} ${skill.path}`.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()))
-  return <ComposerToolMenu open={open && visible} onOpenChange={setOpen} label="Skills" className="mobile-posture-menu mobile-command-menu" trigger={
-    <button type="button" className="composer-tool" aria-label="选择 Skill" aria-expanded={open}>
+  return <SearchChoiceDialog open={open && visible} onOpenChange={setOpen} label="Skills" searchLabel="查找 Skills" clearLabel="清除 Skills 查询"
+    className="mobile-posture-menu mobile-command-menu" trigger={<button type="button" className="composer-tool" aria-label="选择 Skill">
       <SemanticIcon name="object.skill" size={14} /><span className="composer-tool__label">Skills</span>
     </button>}>
-      <TextInput value={query} onChange={event => setQuery(event.target.value)} placeholder="查找 Skills…" aria-label="查找 Skills" />
-      {own?.issue && <MobileNotice identity={[own?.issue]} className="mobile-command-menu__empty" role="status">{own.issue}<button type="button" onClick={() => setRetry(value => value + 1)}>重试读取 Skills</button></MobileNotice>}
-      <div className="mobile-command-menu__list">{matching.map(skill => <button key={`${skill.source}:${skill.path}`} type="button" role="menuitem" className="mobile-posture-menu__item"
-        onClick={() => {
-          const kind = semanticReferenceKind(skill.path)
-          onSelect({ id: `skill:${skill.source}:${skill.path}`, text: `$${skill.name}`, label: skill.name, description: skill.description,
-            insertText: encodeSemanticReference({ token: `$${skill.name}`, label: semanticReferenceLabel(skill.name), kind,
-              reference: kind === 'subcommand' ? skill.path : `@${skill.path}` }) })
-          setOpen(false); setQuery('')
-        }}><strong>{skill.name}</strong><small>{skill.description || skill.path}</small></button>)}</div>
-      {own?.loading ? <p className="mobile-command-menu__empty" role="status">正在读取工作区 Skills…</p> : !own?.issue && !matching.length && <p className="mobile-command-menu__empty" role="status">{query ? '无匹配 Skill' : '这个 Agent 没有可用的 Skill'}</p>}
-  </ComposerToolMenu>
+      {(query, choose) => {
+        const matching = (own?.skills ?? []).filter(skill => [skill.name, skill.description, skill.path].join(' ').toLocaleLowerCase().includes(query))
+        return <>
+          {own?.issue && <MobileNotice identity={[own.issue]} className="mobile-command-menu__empty" role="status">{own.issue}
+            <button type="button" onClick={() => setRetry(value => value + 1)}>重试读取 Skills</button>
+          </MobileNotice>}
+          <div className="mobile-command-menu__list">{matching.map(skill => <button key={skill.source + ':' + skill.path}
+            type="button" data-choice className="mobile-posture-menu__item" onClick={() => choose(() => {
+              const kind = semanticReferenceKind(skill.path), token = '$' + skill.name
+              onSelect({ id: 'skill:' + skill.source + ':' + skill.path, text: token, label: skill.name, description: skill.description,
+                insertText: encodeSemanticReference({ token, label: semanticReferenceLabel(skill.name), kind,
+                  reference: kind === 'subcommand' ? skill.path : '@' + skill.path }) })
+            })}><strong>{skill.name}</strong><small>{skill.description || skill.path}</small></button>)}</div>
+          {!own || own.loading ? <p className="mobile-command-menu__empty" role="status">正在读取工作区 Skills…</p>
+            : !own.issue && !matching.length && <p className="mobile-command-menu__empty" role="status">
+              {query ? '无匹配 Skill' : '这个 Agent 没有可用的 Skill'}
+            </p>}
+        </>
+      }}
+  </SearchChoiceDialog>
 }

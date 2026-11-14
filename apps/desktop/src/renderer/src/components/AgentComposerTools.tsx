@@ -1,13 +1,11 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import type { ComposerSuggestion } from '@agentmux/client-ui/components/AgentComposer'
-import { TextInput } from '@agentmux/client-ui/input'
-import { isImeOwnedKeyboardEvent } from '@agentmux/client-ui/ime-keyboard-event'
 import { composerChoiceReadingProps } from '@agentmux/client-ui/composer-choice-reading'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { AgentSkill } from '@agentmux/core'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import type { SessionViewMode } from '../lib/session-state'
-import * as DropdownMenu from './HoverDropdownMenu'
+import { SearchChoiceDialog } from '@agentmux/client-ui/components/SearchChoiceDialog'
 import { SemanticIcon } from './semantic-icons'
 import { useAppStore } from '../store'
 import { MESSAGE_TOOL_INITIAL_LAYOUT_DEFAULT } from '../../../shared/contracts'
@@ -21,62 +19,10 @@ const ThemeObjectConversationsIcon = semanticIconComponent('object.conversations
 const ThemeObjectTerminalIcon = semanticIconComponent('object.terminal')
 const ThemeStatusLoadingIcon = semanticIconComponent('status.loading')
 const ThemeActionCaptureIcon = semanticIconComponent('action.capture')
-const ThemeActionCloseIcon = semanticIconComponent('action.close')
+
+const composerBoundary = (trigger: HTMLButtonElement) => trigger.closest('[data-workbench-region-id]')
 
 export { nextToolDockPhase } from '@agentmux/client-ui/components/ComposerLayoutToggle'
-
-function ComposerChoiceMenu({ label, triggerLabel, icon, disabled, onOpenChange, children }: {
-  label: string; triggerLabel: string; icon: ReactNode; disabled: boolean
-  onOpenChange?(open: boolean): void; children(query: string): ReactNode
-}) {
-  const [query, setQuery] = useState('')
-  const search = useRef<HTMLInputElement>(null), menu = useRef<HTMLDivElement>(null)
-  const focusItem = (last = false) => {
-    const items = menu.current?.querySelectorAll<HTMLElement>('[role="menuitem"]:not([aria-disabled="true"])')
-    items?.[last ? items.length - 1 : 0]?.focus()
-  }
-  return <DropdownMenu.Root onOpenChange={open => {
-    if (!open) setQuery('')
-    onOpenChange?.(open)
-  }}>
-    <DropdownMenu.Trigger className="composer-tool" disabled={disabled} aria-label={label} title={label}>{icon} <span className="composer-tool__label">{triggerLabel}</span></DropdownMenu.Trigger>
-    <DropdownMenu.Portal><DropdownMenu.Content ref={menu} className="tab-context-menu composer-menu composer-menu--search" side="top" align="start" sideOffset={4} collisionPadding={8}
-      aria-label={triggerLabel} onFocusCapture={event => {
-        // Hover disclosure never focuses Content; explicit keyboard/click does.
-        if (event.target === event.currentTarget) search.current?.focus({ preventScroll: true })
-      }} onCloseAutoFocus={event => {
-        // Insertion or an outside interaction may already have handed focus to its owner.
-        const content = event.target as HTMLElement, document = content.ownerDocument
-        const active = document.activeElement
-        if (active && active !== document.body && !content.contains(active)) event.preventDefault()
-      }} onEscapeKeyDown={event => { if (isImeOwnedKeyboardEvent(event)) event.preventDefault() }}
-      onKeyDownCapture={event => { if (isImeOwnedKeyboardEvent(event)) event.stopPropagation() }}
-      onKeyDown={event => {
-        if (event.key === 'Tab' && event.target !== search.current) {
-          event.preventDefault()
-          if (event.shiftKey && query) menu.current?.querySelector<HTMLButtonElement>('.composer-menu__clear')?.focus()
-          else search.current?.focus({ preventScroll: true })
-        }
-      }}>
-      <div className="composer-menu__search"><TextInput ref={search} value={query} placeholder={`Find ${triggerLabel.toLocaleLowerCase()}…`} aria-label={`Find ${triggerLabel.toLocaleLowerCase()}`}
-        onChange={event => setQuery(event.target.value)} onKeyDown={event => {
-          if (event.key === 'Escape') return
-          event.stopPropagation()
-          if (event.key === 'Enter') { event.preventDefault(); return }
-          if (event.ctrlKey || event.metaKey || event.altKey) return
-          if (event.key === 'Tab' && query && !event.shiftKey) { event.preventDefault(); menu.current?.querySelector<HTMLButtonElement>('.composer-menu__clear')?.focus() }
-          else if (event.key === 'ArrowDown' || event.key === 'ArrowUp' || event.key === 'Tab') { event.preventDefault(); focusItem(event.key === 'ArrowUp' || event.shiftKey) }
-        }} />
-        {query ? <button type="button" className="composer-menu__clear" aria-label={`Clear ${triggerLabel.toLocaleLowerCase()} search`} onClick={() => { setQuery(''); search.current?.focus({ preventScroll: true }) }} onKeyDown={event => {
-          if (event.key === 'Escape') return
-          event.stopPropagation()
-          if (event.key === 'Tab') { event.preventDefault(); if (event.shiftKey) search.current?.focus({ preventScroll: true }); else focusItem() }
-        }}><ThemeActionCloseIcon size={12} /></button> : null}
-      </div>
-      <div className="composer-menu__results">{children(query.trim().toLocaleLowerCase())}</div>
-    </DropdownMenu.Content></DropdownMenu.Portal>
-  </DropdownMenu.Root>
-}
 
 export function AgentComposerTools({ active = true, disabled, commands, loadSkills, onChooseSkill, onCommand, onCapture, runAction, referenceTools, layoutControl = true, viewMode, onViewModeChange }: {
   /** Skip only never-presented DOM; hooks and every previously shown tool stay mounted. */
@@ -139,26 +85,34 @@ export function AgentComposerTools({ active = true, disabled, commands, loadSkil
     </span> : null}
     {mode === 'collapsed' ? null : <>
     <span className="composer-tool-group" role="group" aria-label="Skills, commands and references">
-    <ComposerChoiceMenu label="Choose a skill" triggerLabel="Skills" icon={<SemanticIcon name="object.skill" size={14} />} disabled={disabled} onOpenChange={open => { if (open) void runAction(discoverSkills); else discovery.current++ }}>
-      {query => <>
-        <DropdownMenu.Label className="composer-menu__hint">Choose a skill to reference</DropdownMenu.Label>
+    <SearchChoiceDialog label="Skills" searchLabel="Find skills" clearLabel="Clear skills search" previewOnHover
+      boundary={composerBoundary}
+      trigger={<button type="button" className="composer-tool" disabled={disabled} aria-label="Choose a skill" title="Choose a skill">
+        <SemanticIcon name="object.skill" size={14} /><span className="composer-tool__label">Skills</span>
+      </button>} onOpenChange={open => { if (open) void runAction(discoverSkills); else discovery.current++ }}>
+      {(query, choose) => <>
+        <p className="composer-menu__hint">Choose a skill to reference</p>
         {loading ? <div className="composer-menu__hint" role="status">Loading skills…</div> : error ? <div className="composer-menu__hint" role="status">{error}</div> : skills.length === 0 ? <div className="composer-menu__hint" role="status">No skills found in this Agent’s skill folders.</div> : <>
           {skills.filter(skill => `${skill.name} ${skill.description} ${skill.source}`.toLocaleLowerCase().includes(query)).map(skill =>
-          <DropdownMenu.Item key={skill.path} disabled={disabled} className="tab-context-menu__item composer-menu__item" textValue={skill.name} {...composerChoiceReadingProps(`${skill.name}\n${skill.source} · ${skill.description}\n${skill.path}`)} onSelect={() => { void runAction(() => onChooseSkill(skill)) }}>
+          <button type="button" data-choice key={skill.path} disabled={disabled} className="composer-menu__item" {...composerChoiceReadingProps(`${skill.name}\n${skill.source} · ${skill.description}\n${skill.path}`)} onClick={() => choose(() => { void runAction(() => onChooseSkill(skill)) })}>
             <SemanticIcon name={/(^|[\\/])components?([\\/]|$)/i.test(skill.path) ? "object.component" : "object.skill"} size={13} /><span><span data-choice-reading=""><span>{skill.name}</span></span><small data-choice-reading=""><span>{skill.source} · {skill.description ? `${skill.description} · ` : ''}{skill.path}</span></small></span>
-          </DropdownMenu.Item>)}
+          </button>)}
           {!skills.some(skill => `${skill.name} ${skill.description} ${skill.source}`.toLocaleLowerCase().includes(query)) ? <div className="composer-menu__hint" role="status">No matching skills.</div> : null}
         </>}
       </>}
-    </ComposerChoiceMenu>
-    {commands.length ? <ComposerChoiceMenu label="Choose a command" triggerLabel="Commands" icon={<SemanticIcon name="object.subcommand" size={14} />} disabled={disabled}>
-      {query => <>
-        {commands.filter(command => `${command.text} ${command.label ?? ''} ${command.description}`.toLocaleLowerCase().includes(query)).map(command => <DropdownMenu.Item key={command.id ?? command.text} disabled={disabled} className="tab-context-menu__item composer-menu__item" textValue={command.text} {...composerChoiceReadingProps(`${command.label ?? command.text}\n${command.description}`)} onSelect={() => { void runAction(() => onCommand(command.text, command)) }}>
+    </SearchChoiceDialog>
+    {commands.length ? <SearchChoiceDialog label="Commands" searchLabel="Find commands" clearLabel="Clear commands search" previewOnHover
+      boundary={composerBoundary}
+      trigger={<button type="button" className="composer-tool" disabled={disabled} aria-label="Choose a command" title="Choose a command">
+        <SemanticIcon name="object.subcommand" size={14} /><span className="composer-tool__label">Commands</span>
+      </button>}>
+      {(query, choose) => <>
+        {commands.filter(command => `${command.text} ${command.label ?? ''} ${command.description}`.toLocaleLowerCase().includes(query)).map(command => <button type="button" data-choice key={command.id ?? command.text} disabled={disabled} className="composer-menu__item" {...composerChoiceReadingProps(`${command.label ?? command.text}\n${command.description}`)} onClick={() => choose(() => { void runAction(() => onCommand(command.text, command)) })}>
           <SemanticIcon name="object.subcommand" size={13} /><span><span data-choice-reading=""><span>{command.label ?? command.text}</span></span><small data-choice-reading=""><span>{command.description}</span></small></span>
-        </DropdownMenu.Item>)}
+        </button>)}
         {!commands.some(command => `${command.text} ${command.label ?? ''} ${command.description}`.toLocaleLowerCase().includes(query)) ? <div className="composer-menu__hint" role="status">No matching commands.</div> : null}
       </>}
-    </ComposerChoiceMenu> : null}
+    </SearchChoiceDialog> : null}
     {referenceTools}
     </span>
     {onCapture ? <span className="composer-tool-group" role="group" aria-label="Screen capture"><button type="button" className="composer-tool" disabled={disabled || capturing}
