@@ -3,7 +3,7 @@ import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-valu
 import { previewMedia } from './helpers/browser-preview-media'
 import { act, createElement } from 'react'
 import { createClientUiRoot as createRoot } from './helpers/client-ui-render'
-import { expect, it, vi } from 'vitest'
+import { expect, it, vi, type MockInstance } from 'vitest'
 import { createWorkspaceLayout } from '@agentmux/layout'
 import { BrowserPane } from '../src/renderer/src/components/BrowserPane'
 import { api } from '../src/renderer/src/lib/api'
@@ -107,7 +107,7 @@ it('keeps the public Desktop reader on its unique original primary occurrence', 
     const rect = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 640, 320))
     try {
       await render(); await settle()
-      const selection: Parameters<typeof readDesktopPresentation>[0] = { surface: 'space', mainSurface: 'workbench', goalId: null,
+      const selection: Parameters<typeof readDesktopPresentation>[0] = { surface: 'space', mainSurface: 'workbench', focusView: null, goalId: null,
         space: { spaceId: null, zoneId: null, workspaceId: reference.displayWorkspaceId, tabId: reference.tabId, groupId: reference.groupId, regionId: reference.regionId, topicId: null } }
       expect(document.querySelectorAll('[data-workbench-region-id="original-region"]')).toHaveLength(2)
       expect(readDesktopPresentation(selection, useAppStore.getState().tabs).presentation.state).toBe('main-visible')
@@ -224,7 +224,7 @@ it.each(['initial-missing', 'retargeted-missing'] as const)(
       if (process.env.BROWSER_PLACEMENT_PAYLOADS) {
         const { appendFileSync } = await import('node:fs')
         appendFileSync(process.env.BROWSER_PLACEMENT_PAYLOADS, JSON.stringify({ mode, nativeStageBranch: true, phases,
-          originalTrackStops: track.stop.mock.calls.length }) + '\n')
+          originalTrackStops: vi.mocked(track.stop).mock.calls.length }) + '\n')
       }
     }
   }
@@ -290,19 +290,19 @@ type Shape = 'error' | 'blank' | 'page'
 function assertPane(host: HTMLElement, shape: Shape) {
   expect(host.querySelectorAll('.browser-surface')).toHaveLength(1)
   expect(host.querySelectorAll('.browser-toolbar')).toHaveLength(1)
-  expect(host.querySelector(shape === 'blank' ? '[aria-label="Search or enter a web address"]' : '[aria-label="Browser address"]')).not.toBeNull()
+  expect(host.querySelector('[aria-label="Browser address"]')).not.toBeNull()
   if (shape === 'error') {
-    expect(host.textContent).toContain('Page could not be loaded')
+    expect(host.textContent).toContain('Page needs attention')
     expect(host.textContent).toContain('ERR_NAME_NOT_RESOLVED')
     expect([...host.querySelectorAll('button')].some(button => button.textContent?.trim() === 'Retry')).toBe(true)
   }
 }
 async function withPane(shape: Shape, early: boolean, check: (fixture: {
   root: ReturnType<typeof createRoot>; primary: HTMLElement; host: HTMLElement;
-  render: (next?: WorkbenchBrowserPresentation[]) => Promise<void>;
+  render: (next?: WorkbenchBrowserPresentation[], primaryHost?: string) => Promise<void>;
   browser: ReturnType<typeof createWorkbenchTab>['regions'][string];
-  create: ReturnType<typeof vi.spyOn>; presentations: WorkbenchBrowserPresentation[]
-}) => Promise<void>) {
+  create: MockInstance<typeof api.browser.create>; presentations: WorkbenchBrowserPresentation[]
+}) => Promise<void>, showSpaceFirst = false) {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   const initial = useAppStore.getState(), config = await api.config.get()
   const workspace = { id: 'original-workspace', hostId: 'local', path: _hygiene_fixturePath("source-fixture"), name: 'Research', kind: 'folder' as const }
@@ -318,7 +318,7 @@ async function withPane(shape: Shape, early: boolean, check: (fixture: {
         displayWorkspaceId: workspace.id, catalog: { spaces: [], zones: [], tabs: [], regions: [], bindings: [], locations: [] },
         selection: [reference], onSelect: () => {} } }
   })
-  const presentations = [make('space', false), make('survey', true)]
+  const presentations = [make('space', showSpaceFirst), make('survey', !showSpaceFirst)]
   useAppStore.setState({ ...initial, config: { ...config, workspaces: [workspace] }, mainSurface: 'survey', tabs: { [tab.id]: tab },
     layouts: { [workspace.id]: createWorkspaceLayout('original-group', [tab.id]) }, toolsOpen: false,
     surveyZoneSelection: { zoneId: 'original-zone', selection: [reference], active: reference } }, true)
@@ -326,13 +326,63 @@ async function withPane(shape: Shape, early: boolean, check: (fixture: {
   const spies = [create, vi.spyOn(api.browser, 'registerPresentation').mockImplementation(async request => ({ leaseId: request.occurrence.presentationId + '-lease' })),
     vi.spyOn(api.browser, 'updatePresentation').mockResolvedValue(undefined), vi.spyOn(api.browser, 'removePresentation').mockResolvedValue(undefined),
     vi.spyOn(api.browser, 'onPresentationEvent').mockImplementation(() => () => {})]
-  const primary = document.createElement('div'); primary.hidden = true; document.body.append(primary); const root = createRoot(primary)
+  const primary = document.createElement('div'); primary.hidden = !showSpaceFirst; document.body.append(primary); const root = createRoot(primary)
   const host = document.createElement('div'); host.id = presentations[1]!.stageHostId; if (early) document.body.append(host)
-  const render = (next = presentations) => act(async () => root.render(createElement(BrowserPane, {
-    tab: browser, presentations: next, visible: false, presentationTargetId: 'space-original-host',
+  const render = (next = presentations, primaryHost = 'space-original-host') => act(async () => root.render(createElement(BrowserPane, {
+    tab: browser, presentations: next, visible: false, presentationTargetId: primaryHost,
     renderPresentationFrame: content => createElement('section', { 'data-workbench-region-id': browser.regionId }, content)
   })))
   try { await render(); await settle(); await check({ root, primary, host, render, browser, create, presentations }) }
   catch (error) { if (error instanceof AggregateError) throw new Error(error.errors.map(entry => entry?.stack ?? String(entry)).join("\n")); throw error }
   finally { await act(async () => root.unmount()); primary.remove(); host.remove(); useAppStore.setState(initial, true); spies.forEach(spy => spy.mockRestore()); vi.unstubAllGlobals() }
 }
+
+it('[browser-role-handoff] yields the shared primary home to Survey and back without replacing either original input tree', async () => {
+  await withPane('page', true, async ({render, presentations, browser, create}) => {
+    const sharedId=`browser-pane-home:${JSON.stringify([browser.regionId,'original-browser'])}`
+    const shared=document.getElementById(sharedId)!,space=shared.querySelector('.browser-surface')!
+    const input=space.querySelector<HTMLInputElement>('[aria-label="Browser address"]')!
+    const draft='https://unsubmitted.example.test/kept-original-draft'
+    await act(async()=>{Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(input,draft);input.dispatchEvent(new Event('input',{bubbles:true}))})
+    input.setSelectionRange(8,19)
+    const other=document.createElement('input');document.body.append(other);other.focus()
+    try {
+      await render([{...presentations[0]!,visible:false,active:false},{...presentations[1]!,visible:true,active:true}],'survey-original-host');await settle()
+      expect(shared.querySelectorAll('.browser-surface')).toHaveLength(1)
+      expect(shared.querySelector('.browser-surface--survey')).not.toBeNull()
+      const originalSpaceSlot=[...document.querySelectorAll<HTMLElement>('[id]')].find(node=>node.id.startsWith('browser-pane-content:')&&node.id.includes('space-original'))!
+      expect(originalSpaceSlot).toBeDefined();expect(originalSpaceSlot.closest('.retained-workbench-parking[inert]')).not.toBeNull()
+      expect(originalSpaceSlot.querySelector('.browser-surface')).toBe(space)
+      expect(space.querySelector('[aria-label="Browser address"]')).toBe(input)
+      expect(input.value).toBe(draft);expect([input.selectionStart,input.selectionEnd]).toEqual([8,19]);expect(document.activeElement).toBe(other)
+      const survey=shared.querySelector('.browser-surface')!,surveyInput=survey.querySelector('[aria-label="Browser address"]')
+      await render([{...presentations[0]!,visible:true,active:true},{...presentations[1]!,visible:false,active:false}],'space-original-host');await settle()
+      expect(shared.querySelectorAll('.browser-surface')).toHaveLength(1);expect(shared.querySelector('.browser-surface')).toBe(space)
+      expect(document.body.contains(survey)).toBe(true);expect(survey.closest(`#${CSS.escape(presentations[1]!.stageHostId)}`)).not.toBeNull()
+      expect(survey.querySelector('[aria-label="Browser address"]')).toBe(surveyInput)
+      expect(space.querySelector('[aria-label="Browser address"]')).toBe(input);expect(input.value).toBe(draft)
+      expect([input.selectionStart,input.selectionEnd]).toEqual([8,19]);expect(document.activeElement).toBe(other)
+      expect(useAppStore.getState().tabs['original-tab']?.regions['original-region']).toBe(browser);expect(create).not.toHaveBeenCalled()
+    } finally {other.remove()}
+  }, true)
+})
+
+it('[browser-role-handoff] keeps the original hidden alias in its private parked frame until the exact late destination arrives', async () => {
+  await withPane('error', true, async ({render,presentations,browser,create}) => {
+    const shared=document.getElementById(`browser-pane-home:${JSON.stringify([browser.regionId,'original-browser'])}`)!
+    const space=shared.querySelector('.browser-surface')!,input=space.querySelector('[aria-label="Browser address"]')
+    // No Space stage slot was ever published by this fixture. Its private content slot still exists in its retained frame.
+    expect(document.getElementById(presentations[0]!.stageHostId)).toBeNull()
+    await render([{...presentations[0]!,visible:false,active:false},{...presentations[1]!,visible:true,active:true}],'survey-original-host');await settle()
+    expect(shared.querySelectorAll('.browser-surface')).toHaveLength(1)
+    expect(space.closest('.retained-workbench-parking[inert]')).not.toBeNull()
+    expect(space.querySelector('[aria-label="Browser address"]')).toBe(input)
+    const late=document.createElement('div');late.id=presentations[0]!.stageHostId;document.body.append(late)
+    try {
+      await render([{...presentations[0]!,visible:true,active:true},{...presentations[1]!,visible:false,active:false}],'survey-original-host');await settle()
+      expect(late.querySelector('.browser-surface')).toBe(space);expect(late.querySelector('[aria-label="Browser address"]')).toBe(input)
+      expect(shared.querySelectorAll('.browser-surface')).toHaveLength(1)
+      expect(useAppStore.getState().tabs['original-tab']?.regions['original-region']).toBe(browser);expect(create).not.toHaveBeenCalled()
+    } finally {late.remove()}
+  }, true)
+})
