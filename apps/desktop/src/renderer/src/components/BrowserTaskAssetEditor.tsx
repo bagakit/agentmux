@@ -31,6 +31,7 @@ const ThemeActionRemoveIcon = semanticIconComponent('action.remove')
 const ThemeActionCreateConditionIcon = semanticIconComponent('action.create-condition')
 const ThemeActionSaveIcon = semanticIconComponent('action.save')
 const ThemeActionStartIcon = semanticIconComponent('action.start')
+const outcomeStatus = { passed: 'Passed', 'not-met': 'Not satisfied', unavailable: 'Unconfirmed' } as const
 
 
 type ActionEvent = MouseEvent<HTMLButtonElement>
@@ -161,21 +162,37 @@ export function BrowserTaskAssetEditor({ dialogTypes, asset, assets = [], record
       disabled={busy || recording.status === 'recording'} onClick={onImport}><ThemeActionEditDemonstrationIcon size={11} aria-hidden="true" />Edit demonstration</button> : null}
     {[warning, error].filter(Boolean).map((message, index) => <p key={index} className="browser-rsi-timeline__warning" role="status"><ThemeStatusWarningIcon size={12} aria-hidden="true" />{message}</p>)}
   </section> : null
+  const recordedExtractions = onShowResult && runningVersion ? (actualRun?.stepExecutions ?? []).flatMap(execution => {
+    const index = runningVersion.steps.findIndex(step => step.id === execution.stepId)
+    const step = runningVersion.steps[index]
+    return step?.kind === 'extract' ? [{ operationId: execution.operationId, label: step.label || `Extraction step ${index + 1}` }] : []
+  }) : []
   return <section className="browser-rsi-replay browser-task-asset" aria-label="Editable Browser task asset" data-task-asset-id={asset.id}>
     <header className="browser-rsi-replay__header"><strong>{asset.draft.name || 'Reusable task'}</strong>
       <small>Draft</small>
     </header>
     {[warning, error].filter(Boolean).map((message, index) => <p key={index} className="browser-rsi-timeline__warning" role="status"><ThemeStatusWarningIcon size={12} aria-hidden="true" />{message}</p>)}
     {actualRun ? <div className="browser-task-asset__progress" role="status" data-run-id={actualRun.id} data-run-status={actualRun.status} data-run-version={actualRun.version}>
-      <strong>{runningVersion?.name ?? 'Retained task run'} · v{actualRun.version}</strong>
-      <span>{actualRun.status === 'waiting-human' ? 'Waiting for human checkpoint' : actualRun.status === 'ready' ? 'Ready to continue' : actualRun.status}
+      <div className="browser-task-asset__run-title"><strong>{runningVersion?.name ?? 'Retained task run'}</strong><small>v{actualRun.version}</small></div>
+      <span className="browser-task-asset__run-state">{actualRun.status === 'waiting-human' ? 'Waiting for human checkpoint' : actualRun.status === 'ready' ? 'Ready to continue' : actualRun.status}
         {runningVersion && actualRun.nextStep < runningVersion.steps.length ? ` · next step ${actualRun.nextStep + 1}` : ''}</span>
       {actualRun.warning ? <p>{actualRun.warning}</p> : null}
       {actualRun.completionWarning ? <p>{actualRun.completionWarning}</p> : null}
       <BrowserTaskSubflowProgress run={actualRun} assets={availableAssets} runs={batchRuns} />
       {actualRun.branchDecisions?.map(fact => <small key={fact.stepId} data-task-condition-result={fact.result}>{runningVersion?.steps.find(step => step.id === fact.stepId)?.label || 'Condition'} · {fact.result}{fact.result !== 'unknown' ? fact.nextStepId ? ` → ${runningVersion?.steps.find(step => step.id === fact.nextStepId)?.label || fact.nextStepId}` : ' → finished path' : ' · no path chosen'}</small>)}
-      {recordedCompletion?.runId === actualRun.id ? <div data-task-recorded-outcome={recordedCompletion.status}><strong>Recorded task outcome · {recordedCompletion.status}</strong><small>Checks recorded for this version. This does not describe today’s page.</small><ul>{recordedCompletion.conditions.map((item, index) => <li key={index}>{conditionLabel(item.criterion)} · {item.status}<small>{item.reason}</small></li>)}</ul></div> : null}
-      {onShowResult ? actualRun.stepExecutions?.filter(item => runningVersion?.steps.find(step => step.id === item.stepId)?.kind === 'extract').map(item => <button key={item.operationId} type="button" className="browser-rsi-button browser-rsi-button--quiet" data-task-result-operation={item.operationId} onClick={event => { void onShowResult(item.operationId, event.currentTarget).catch(() => setError('The original recorded result is unavailable. The page and task remain.')) }}>View recorded fields · {runningVersion?.steps.find(step => step.id === item.stepId)?.label || `Extraction step ${(runningVersion?.steps.findIndex(step => step.id === item.stepId) ?? -1) + 1}`}</button>) : null}
+      {recordedCompletion?.runId === actualRun.id ? <div data-task-recorded-outcome={recordedCompletion.status}>
+        <div className="browser-task-asset__outcome-heading"><strong>Recorded outcome</strong><span>{outcomeStatus[recordedCompletion.status]}</span></div>
+        {recordedCompletion.warning ? <small>{recordedCompletion.warning}</small> : null}
+        {recordedCompletion.conditions.length > 0 ? <details>
+          <summary>{recordedCompletion.conditions.length} {recordedCompletion.conditions.length === 1 ? 'check' : 'checks'}</summary>
+          <ul>{recordedCompletion.conditions.map((item, index) => <li key={index}><strong>{conditionLabel(item.criterion)}</strong> · {outcomeStatus[item.status]}<small>{item.reason}</small></li>)}</ul>
+        </details> : null}
+      </div> : null}
+      {onShowResult && recordedExtractions.length > 0 ? <div className="browser-task-asset__recorded-fields">
+        <strong>Recorded fields</strong>
+        {recordedExtractions.map(item => <button key={item.operationId} type="button" className="browser-rsi-button browser-rsi-button--quiet" data-task-result-operation={item.operationId}
+          aria-label={`View recorded fields · ${item.label}`} onClick={event => { void onShowResult(item.operationId, event.currentTarget).catch(() => setError('The original recorded result is unavailable. The page and task remain.')) }}>{item.label}<span aria-hidden="true">›</span></button>)}
+      </div> : null}
       {runningVersion?.completion && !runningVersion.completion.criteria.some(item => item.kind === 'field-equals') && onVerify ? <button type="button" className="browser-rsi-button browser-rsi-button--quiet" disabled={busy}
         onClick={event => { void onVerify(actualRun.id, event).then(setEvaluation).catch(() => setError('Verification is unavailable. Existing Browser work remains; inspect its recorded facts.')) }}>Verify task evidence</button> : null}
       {evaluation && evaluation.assetRun?.runId === actualRun.id ? <div data-task-completion={evaluation.status}>

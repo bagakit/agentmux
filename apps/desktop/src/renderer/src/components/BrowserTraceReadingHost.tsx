@@ -1,12 +1,14 @@
 import { useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { Button } from '@agentmux/client-ui/components/Button'
+import { IconButton } from '@agentmux/client-ui/components/IconButton'
+import { SemanticIcon } from '@agentmux/client-ui/icons'
 import { observeBrowserReader } from '../lib/browser-reader-position'
 import { getWindowOverlayHost, WindowOverlayPortal } from './WindowOverlayHost'
 
 /** Keep the original flow footprint until Main confirms no operation needs its viewport. */
-export function BrowserTraceReadingHost({ mode, open, held, visible, anchor, onReopen, children }: {
+export function BrowserTraceReadingHost({ mode, open, held, visible, anchor, onReopen, onClose, children }: {
   mode: 'docked' | 'floating'; open: boolean; held: boolean; visible: boolean
-  anchor: () => HTMLElement | null; onReopen: () => void; children: ReactNode
+  anchor: () => HTMLElement | null; onReopen: () => void; onClose: () => void; children: ReactNode
 }) {
   const panel = useRef<HTMLElement | null>(null)
   const [reserved, setReserved] = useState(open && mode === 'docked')
@@ -27,10 +29,13 @@ export function BrowserTraceReadingHost({ mode, open, held, visible, anchor, onR
     })
     return () => { disposed = true; stop?.() }
   }, [mode, open, visible, anchor])
+  const reader = <><header className="browser-trace-rail__header"><strong>Browser activity</strong>
+    <IconButton aria-label="Close browser activity timeline" onClick={onClose}><SemanticIcon name="action.close" size={12} /></IconButton>
+  </header>{children}</>
   if (mode === 'docked') return open || held && reserved ? <aside className="browser-trace-rail" aria-label="Browser activity trace">
-    {open ? children : <div className="browser-trace-held"><span>Page size is held for this Browser operation.</span><Button type="button" onClick={onReopen}>Reopen trace</Button></div>}
+    {open ? reader : <div className="browser-trace-held"><span>Page size is held for this Browser operation.</span><Button type="button" onClick={onReopen}>Reopen trace</Button></div>}
   </aside> : null
   const source = anchor()
   return open && visible && source ? <WindowOverlayPortal container={getWindowOverlayHost(source.ownerDocument)}><aside ref={panel}
-    className="browser-trace-rail browser-trace-rail--floating" role="dialog" aria-modal="false" aria-label="Browser activity trace" style={{ visibility: 'hidden' }}>{children}</aside></WindowOverlayPortal> : null
+    className="browser-trace-rail browser-trace-rail--floating" role="dialog" aria-modal="false" aria-label="Browser activity trace" style={{ visibility: 'hidden' }}>{reader}</aside></WindowOverlayPortal> : null
 }

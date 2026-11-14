@@ -82,7 +82,6 @@
 .browser-rsi-history { min-width: 0; overflow: hidden; color: var(--text-2); }
 .browser-rsi-history__header { min-width: 0; display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); padding: var(--sp-2) var(--sp-3); }
 .browser-rsi-history__header > span { min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); }
-.browser-rsi-history__actions { display: inline-flex; align-items: center; gap: var(--sp-2); }
 .browser-rsi-history__header > span > svg { flex: none; color: var(--green-2); }
 .browser-rsi-history__header strong, .browser-rsi-history__header small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .browser-rsi-history__header strong { color: var(--text-2); font-size: var(--fs-micro); }

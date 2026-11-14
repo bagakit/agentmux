@@ -293,6 +293,9 @@
    竖读下来是一条连续的脊，而不是三个盒子摞在一起。 */
 .browser-trace-rail > * { flex: none; border: 0; border-radius: 0; background: transparent; }
 .browser-trace-rail > * + * { border-top: 1px solid var(--line-soft); }
+.browser-trace-rail:has(> .browser-trace-rail__header) { --browser-trace-header-height: 32px; scroll-padding-block-start: var(--browser-trace-header-height); }
+.browser-trace-rail > .browser-trace-rail__header { position: sticky; inset-block-start: 0; z-index: 1; display: flex; align-items: center; justify-content: space-between; min-height: var(--browser-trace-header-height); padding-inline: var(--sp-3) var(--sp-5); color: var(--text); background: var(--surface-0); font-size: var(--fs-meta); }
+.browser-trace-rail--floating > .browser-trace-rail__header { background: var(--surface-2); }
 /* Keep edge actions clear of the overlay scrollbar at their full hit size. */
 .browser-trace-rail :is(.browser-rsi-timeline__header, .browser-rsi-replay__header, .browser-rsi-history__header) { padding-right: var(--sp-6); }
 .browser-demonstration__steps .browser-rsi-timeline__empty { display: block; }

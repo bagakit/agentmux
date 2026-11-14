@@ -1,6 +1,8 @@
 .browser-step-evidence { padding: var(--sp-3); font-size: var(--fs-body); min-width: 0; }
-.browser-step-evidence header { display: flex; align-items: baseline; gap: var(--sp-2); }
-.browser-step-evidence header strong { min-width: 0; overflow-wrap: anywhere; }
+.browser-step-evidence header { display: flex; align-items: start; justify-content: space-between; gap: var(--sp-2); }
+.browser-step-evidence header > div { min-width: 0; display: grid; gap: var(--sp-1); }
+.browser-step-evidence header strong { color: var(--text); font-size: var(--fs-title); overflow-wrap: anywhere; }
+.browser-step-evidence header span { font-size: var(--fs-meta); text-transform: capitalize; }
 .browser-step-evidence header span, .browser-step-evidence__time, .browser-step-evidence__target { color: var(--text-2); }
 .browser-step-evidence p { margin: var(--sp-2) 0; overflow-wrap: anywhere; }
 .browser-step-evidence__warning { color: var(--text-2); }

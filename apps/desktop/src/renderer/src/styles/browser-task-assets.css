@@ -108,6 +108,16 @@
 .browser-task-extract__field { min-width: 0; padding-block: var(--sp-2); border-top: 1px solid var(--line-soft); }
 .browser-task-extract .browser-task-asset__field { padding-inline: 0; }
 .browser-task-extract button, .browser-task-asset__progress button { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
-.browser-task-asset__progress [data-task-recorded-outcome] { display: grid; gap: var(--sp-1); padding: var(--sp-2); border: 1px solid var(--line-soft); border-radius: var(--radius-sm); }
-.browser-task-asset__progress [data-task-recorded-outcome] ul { margin: 0; padding-left: var(--sp-5); }
+.browser-task-asset__run-title, .browser-task-asset__outcome-heading { display: flex; align-items: baseline; justify-content: space-between; gap: var(--sp-2); }
+.browser-task-asset__run-title strong { color: var(--text); font-size: var(--fs-title); }
+.browser-task-asset__run-title small, .browser-task-asset__run-state { font-size: var(--fs-meta); }
+.browser-task-asset__run-state { text-transform: capitalize; }
+.browser-task-asset__progress [data-task-recorded-outcome], .browser-task-asset__recorded-fields { display: grid; gap: var(--sp-1); padding-block: var(--sp-2); border-top: 1px solid var(--line-soft); }
+.browser-task-asset__outcome-heading strong, .browser-task-asset__recorded-fields > strong { color: var(--text); }
+.browser-task-asset__outcome-heading > span { color: var(--amber-text); font-size: var(--fs-meta); }
+[data-task-recorded-outcome='passed'] .browser-task-asset__outcome-heading > span { color: var(--green-text); }
+[data-task-recorded-outcome='not-met'] .browser-task-asset__outcome-heading > span { color: var(--red-text); }
+.browser-task-asset__progress [data-task-recorded-outcome] summary { cursor: pointer; font-size: var(--fs-meta); color: var(--text-2); }
+.browser-task-asset__progress [data-task-recorded-outcome] ul { display: grid; gap: var(--sp-2); margin: var(--sp-2) 0 0; padding-left: var(--sp-5); }
 .browser-task-asset__progress [data-task-recorded-outcome] small { display: block; color: var(--text-3); }
+.browser-task-asset__recorded-fields button { justify-content: space-between; gap: var(--sp-2); padding-inline: var(--sp-2); text-align: left; }

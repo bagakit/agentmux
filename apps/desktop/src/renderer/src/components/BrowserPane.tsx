@@ -1678,6 +1678,7 @@ function BrowserPaneContent({
       {traceViews[key] ? (
         <BrowserTraceReadingHost mode={traceViews[key].mode} open={traceViews[key].open} held={!traceCanDock} visible={visible}
           anchor={() => traceAnchors.current.get(key) ?? null}
+          onClose={() => setTraceViews(current => ({ ...current, [key]: { ...current[key]!, open: false } }))}
           onReopen={() => setTraceViews(current => ({ ...current, [key]: { ...current[key]!, open: true } }))}>
           <BrowserDemonstrationSurface
             suggestions={tab.demonstration?.suggestions}
@@ -1794,7 +1795,6 @@ function BrowserPaneContent({
             loading={historyLoading}
             error={historyError}
             onRetry={() => void loadOperationHistory()}
-            onClose={() => setTraceViews(current => ({ ...current, [key]: { ...current[key]!, open: false } }))}
             onSelect={(operation) => {
               setSelectedOperationId(operation.id)
               setSelectedStep(null)
@@ -1825,9 +1825,9 @@ function BrowserPaneContent({
               }).catch(reportError)
             }}
           /> : null}
-          {timelineOperation && timelineSelectedStep ? <Button type="button" onClick={event => { discussionOrigin.current = key; discussion.open(event.currentTarget as HTMLButtonElement, { operationId: timelineOperation.id, sequence: timelineSelectedStep.sequence }, traceAnchors.current.get(key)) }}>Comment on step {timelineSelectedStep.sequence}</Button> : null}
           {timelineOperation && timelineSelectedStep
             ? <BrowserStepEvidence operation={timelineOperation} step={timelineSelectedStep}
+                actions={<Button type="button" aria-label={`Comment on step ${timelineSelectedStep.sequence}`} onClick={event => { discussionOrigin.current = key; discussion.open(event.currentTarget as HTMLButtonElement, { operationId: timelineOperation.id, sequence: timelineSelectedStep.sequence }, traceAnchors.current.get(key)) }}>Comment</Button>}
                 {...(selectedStep?.reveal?.presentation === key ? { revealRequest: selectedStep.reveal.request, revealTrigger: selectedStep.reveal.trigger } : {})} /> : null}
           {replayPlan ? (
             <BrowserReplayPreview

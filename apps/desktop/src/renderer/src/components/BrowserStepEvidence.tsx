@@ -1,11 +1,11 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import type { BrowserOperation, BrowserOperationStep } from '@agentmux/browser/model/browser-operation'
 import type { BrowserStepEvidenceRead } from '@agentmux/browser/model/browser-step-evidence'
 import { api } from '../lib/api'
 import { BrowserStructuredFields } from './BrowserStructuredFields'
 
 /** Reads saved facts for the selected step; never takes a new snapshot of today's page. */
-export function BrowserStepEvidence({ operation, step, revealRequest, revealTrigger }: { operation: BrowserOperation; step: BrowserOperationStep; revealRequest?: number; revealTrigger?: HTMLElement }) {
+export function BrowserStepEvidence({ operation, step, revealRequest, revealTrigger, actions }: { operation: BrowserOperation; step: BrowserOperationStep; revealRequest?: number; revealTrigger?: HTMLElement; actions?: ReactNode }) {
   const surface = useRef<HTMLElement | null>(null)
   const revealed = useRef<number | undefined>(undefined)
   const [read, setRead] = useState<BrowserStepEvidenceRead | null>(null)
@@ -43,7 +43,10 @@ export function BrowserStepEvidence({ operation, step, revealRequest, revealTrig
   const item = read?.items.find(value => value.reference.id === selected) ??
     read?.items.find(value => step.status === 'failed' && value.content.kind === 'diagnostic') ?? read?.items[0]
   return <section ref={surface} tabIndex={-1} className="browser-step-evidence" aria-label={`Evidence for step ${step.sequence}: ${step.label}`}>
-    <header>{item?.content.kind !== 'structured-output' ? <strong>{step.label}</strong> : null}<span>{step.status}</span></header>
+    <header><div>
+      <strong>{item?.content.kind === 'structured-output' || step.method === 'extractStructured' ? 'Recorded fields' : step.label}</strong>
+      <span>{step.status}</span>
+    </div>{actions}</header>
     {step.target ? <p className="browser-step-evidence__target">{step.target.role} · {step.target.name}</p> : null}
     {loading ? <p role="status">Reading recorded evidence…</p> : null}
     {read?.warning ? <p className="browser-step-evidence__warning" role="status">{read.warning}</p> : null}

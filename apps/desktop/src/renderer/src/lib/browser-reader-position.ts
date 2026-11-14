@@ -23,18 +23,22 @@ async function positionBrowserReader(input: ReaderPosition, current: () => boole
   const bounds = (pane ?? anchor).getBoundingClientRect()
   const compact = pane !== null && bounds.width > 0 && bounds.width <= 380
   const viewportHeight = surface.ownerDocument.documentElement.clientHeight || surface.ownerDocument.defaultView?.innerHeight || bounds.bottom
-  const bottom = Math.min(bounds.bottom, viewportHeight - 8)
-  const availablePane = Math.max(0, bottom - Math.max(0, bounds.top))
+  const padding = 8
+  const paneBottom = Math.min(bounds.bottom, viewportHeight)
+  const bottom = paneBottom - padding
+  const availablePane = Math.max(0, paneBottom - Math.max(0, bounds.top))
+  const clipping = pane ? { boundary: pane, padding } : { padding }
   const reference = compact ? { contextElement: pane!, getBoundingClientRect: () => ({
     x: bounds.left, y: bottom, left: bounds.left, right: bounds.right,
     top: bottom, bottom, width: bounds.width, height: 0
   }) } : anchor
   if (current()) surface.dataset.compactReader = String(compact)
   return await computePosition(reference, surface, { strategy: 'fixed', placement: compact ? 'top-end' : 'bottom-end',
-    middleware: [offset(compact ? 0 : input.gap), shift({ padding: 8 }), size({ padding: 8,
+    middleware: [offset(compact ? 0 : input.gap), shift(clipping), size({ ...clipping,
       apply({ availableWidth, availableHeight }) {
         if (!current()) return
-        Object.assign(surface.style, { width: `${Math.min(360, availableWidth)}px`,
+        const paneWidth = pane ? bounds.width - 2 * padding : Infinity
+        Object.assign(surface.style, { width: `${Math.max(0, Math.min(360, paneWidth, availableWidth))}px`,
           maxHeight: `${Math.max(0, Math.min(input.maximumHeight, availableHeight, compact ? availablePane * 0.44 : Infinity))}px` })
       }
     })] })

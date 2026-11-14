@@ -454,8 +454,7 @@ export function BrowserOperationHistory({
   loading = false,
   error,
   onSelect,
-  onRetry,
-  onClose
+  onRetry
 }: {
   operations: BrowserOperation[]
   selectedOperationId?: string | null
@@ -463,16 +462,12 @@ export function BrowserOperationHistory({
   error?: string | null
   onSelect?: (operation: BrowserOperation) => void
   onRetry?: () => void
-  onClose?: () => void
 }) {
   return (
     <section className="browser-rsi-history" aria-label="Browser operation history">
       <header className="browser-rsi-history__header">
         <span><ThemeObjectHistoryIcon size={13} aria-hidden="true" /><strong>Recent operations</strong><small>{loading ? 'Loading…' : `${operations.length} recorded`}</small></span>
-        <span className="browser-rsi-history__actions">
-          {error && onRetry ? <button type="button" className="browser-rsi-button browser-rsi-button--quiet" onClick={onRetry}>Retry</button> : null}
-          {onClose ? <button type="button" className="browser-rsi-icon-button" aria-label="Close browser activity timeline" title="Close activity timeline" onClick={onClose}><SemanticIcon name="action.close" size={12} /></button> : null}
-        </span>
+        {error && onRetry ? <button type="button" className="browser-rsi-button browser-rsi-button--quiet" onClick={onRetry}>Retry</button> : null}
       </header>
       {error ? <p className="browser-rsi-history__error" role="status"><ThemeStatusWarningIcon size={12} aria-hidden="true" />{error}</p> : null}
       {!loading && !error && operations.length === 0 ? <p className="browser-rsi-history__empty">No recorded Browser operations yet.</p> : null}
