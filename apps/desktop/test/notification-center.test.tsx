@@ -301,6 +301,9 @@ it('unknown and degraded notices retain honest severity labels and exact navigat
   useAppStore.setState({ sessions: [target], environmentWarning: 'Shell setup is incomplete.', selectSession: select })
   await dom.render(<GlobalSystemNotices />); await toggleNotificationCenter(dom.container, 'open')
   expect(rows().map(row => row.dataset.kind)).toEqual(['process-degraded', 'indeterminate'])
+  expect(rows().map(row => row.dataset.noticeAppearance)).toEqual(['row', 'row'])
+  expect(rows().map(row => row.querySelector<HTMLElement>('.ui-notice__icon')?.dataset.noticeTone)).toEqual(['warning', 'unknown'])
+  expect(rows().map(row => [row.getAttribute('role'), row.getAttribute('aria-live')])).toEqual([['status', 'polite'], ['status', 'polite']])
   expect(rows()[0]!.textContent).toContain('Degraded')
   expect(rows()[1]!.textContent).toContain('Unconfirmed')
   const action = rows()[1]!.querySelector<HTMLButtonElement>('.notification-item__action')!

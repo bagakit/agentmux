@@ -174,15 +174,71 @@ app.whenReady().then(async () => {
     }
     await until('!!window.moteCalendarScene&&!!document.querySelector("[data-mote-details]")', 'Original Mote frame')
     if (ideasOnly) {
+      const service = inPanel('.mote-details__ideas .mote-ideas__service')
+      const retry = inPanel('.mote-details__ideas .ui-notice__actions button')
+      const readNotice = () => read(`(()=>{
+        const n=${service}; if(!n)return null;
+        const glyph=n.querySelector('.ui-notice__icon[data-notice-tone="unknown"][aria-hidden="true"] svg');
+        const icon=glyph?.getBoundingClientRect(), action=n.querySelector('.ui-notice__actions button'), r=action?.getBoundingClientRect();
+        const hit=r&&document.elementFromPoint(r.x+r.width/2,r.y+r.height/2);
+        const status=n.querySelector('.ui-notice__copy [role="status"]')||n.querySelector('.ui-notice__copy[role="status"]');
+        const style=getComputedStyle(n);
+        return {shared:n.matches('.ui-notice[data-notice-appearance="framed"]'),
+          icon:!!icon&&icon.width>0&&icon.height>0, heading:n.querySelector('.ui-notice__heading')?.textContent,
+          status:!!status&&status.textContent.includes('Notes are unconfirmed')&&!status.contains(action)&&!n.hasAttribute('role'),
+          borders:['Top','Right','Bottom','Left'].map(side=>({width:style['border'+side+'Width'],color:style['border'+side+'Color'],style:style['border'+side+'Style']})),
+          retry:!!action&&!action.disabled&&action.textContent.trim()==='Retry notes'&&(hit===action||action.contains(hit))};
+      })()`)
+      const checkNotice = observed => {
+        assert.ok(observed?.shared, 'Ideas must render its failure through the framed Client UI Notice')
+        assert.ok(observed.icon && observed.heading === 'Notes are unconfirmed', 'Ideas must show a visible state glyph and its heading')
+        assert.ok(observed.status, 'Ideas must announce the status copy while keeping Retry in its separate action area')
+        assert.equal(observed.retry, true, 'Retry notes must be enabled and hit-testable')
+        const first = observed.borders[0]
+        assert.equal(first.width, '1px', 'Notice must have a fine outline')
+        assert.equal(first.style, 'solid', 'Notice outline must be visible')
+        assert.deepEqual(observed.borders, Array(4).fill(first), 'Notice outline must have the same width and color on all four edges')
+      }
+      const sharedRule = `[...document.styleSheets].flatMap(sheet=>Array.from(sheet.cssRules)).find(rule=>rule.selectorText==='.ui-notice[data-notice-appearance="framed"]')`
       await read('document.querySelector(".calendar-fixture").dataset.wideProof=""')
       win.setContentSize(1600, 860)
       await click(button('Ideas'), 'Open Ideas')
-      await until(`!!(${inPanel('.mote-details__ideas .mote-ideas__service')})`, 'Directory failure stays in Ideas')
+      await until(`!!(${service})`, 'Directory failure stays in Ideas')
       assert.equal(await read(`!!(${inPanel('.mote-ideas__heading small')})`), false, 'Unconfirmed rows have no total')
+      const wide = await readNotice()
+      checkNotice(wide)
       await capture('ideas-directory-unavailable-wide-dark')
+      const originalRule = await read(`(${sharedRule})?.style.cssText`)
+      assert.ok(originalRule?.includes('border: 1px solid'), 'A loaded shared Notice rule is required for the mutation')
+      let mutated, failure
+      try {
+        await read(`(${sharedRule}).style.setProperty('border-inline-start', '3px solid rgb(255, 0, 71)')`)
+        mutated = await readNotice()
+        try { checkNotice(mutated) } catch (error) { failure = error }
+      } finally {
+        await read(`(${sharedRule}).style.cssText=${JSON.stringify(originalRule)}`)
+      }
+      const restored = await readNotice()
+      checkNotice(restored)
+      assert.ok(failure instanceof assert.AssertionError && failure.message.includes('same width and color'),
+        'A single colored edge in the loaded shared rule must fail the actual Ideas Notice')
+      result.mutations.push({ name: 'shared-notice-single-colored-edge', originalRule, baseline: wide,
+        red: { observation: mutated, message: failure.message }, restored: { passed: true, observation: restored } })
+      await click(retry, 'Check the original directory from the wide Notice')
+      await until(`!!(${service})&&window.moteCalendarScene.facts().calls.filter(call=>call.method==="file.list").length===2`, 'Wide Retry reached the original directory')
+      await read(`delete document.querySelector('.calendar-fixture').dataset.wideProof;window.moteCalendarScene.theme('light')`)
+      win.setContentSize(420, 740)
+      await until('innerWidth===420&&document.documentElement.dataset.appearance==="light"', 'Narrow light Ideas')
+      const narrow = await readNotice()
+      checkNotice(narrow)
+      await capture('ideas-directory-unavailable-narrow-light')
+      result.operations.push({ action: 'check-shared-notice', wide, narrow })
       await read('window.moteCalendarScene.allowIdeasDirectory()')
-      await click(inPanel('.mote-details__ideas .mote-ideas__service button'), 'Retry the exact directory')
+      await click(retry, 'Retry the exact directory from the narrow Notice')
       await until(`(${inPanel('.mote-ideas__heading small')})?.textContent==='3'`, 'Confirmed original notes')
+      await read(`document.querySelector('.calendar-fixture').dataset.wideProof='';window.moteCalendarScene.theme('dark')`)
+      win.setContentSize(1600, 860)
+      await until('innerWidth===1600&&document.documentElement.dataset.appearance==="dark"', 'Return to wide dark Ideas')
       await capture('ideas-list-wide-dark')
       const note = inPanel('.mote-details__ideas .mote-details__note')
       await click(note, 'Open the first saved note')
@@ -197,8 +253,8 @@ app.whenReady().then(async () => {
       await type(inPanel('[aria-label="Idea direction"]'), '先比较一版工具入口，再决定是否推广。')
       await capture('ideas-request-narrow-light')
       const listings = await read('window.moteCalendarScene.facts().calls.filter(call=>call.method==="file.list")')
-      assert.equal(listings.length, 2)
-      assert.deepEqual(listings[0].params, listings[1].params)
+      assert.equal(listings.length, 3)
+      for (const call of listings.slice(1)) assert.deepEqual(call.params, listings[0].params, 'Retry must carry the same original Files request')
       assert.deepEqual(result.errors, [])
       result.passed = true
       return

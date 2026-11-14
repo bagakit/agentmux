@@ -100,6 +100,8 @@ try {
   receipt.compiler = { esbuild: browserSourceBuild(createRequire(require.resolve('vite'))('esbuild')).version, sourceBinding: 'actual-onLoad-bytes', currentSource: true, standardCoreBuild: false }
   for (const file of [scenario === 'floating-navigation' ? 'PmoTeamsTopicFloatingPanel' : 'MoteFilesTool', 'MoteProfilePopover', 'MoteDetailsPanel', 'MoteCalendar', 'AgentSessionComposer', 'DesktopClientUiProvider'])
     assert.ok(receipt.source['apps/desktop/src/renderer/src/components/' + file + '.tsx'], 'Nonempty actual product input: ' + file)
+  if (scenario === 'ideas') for (const file of ['components/Notice.tsx', 'styles/notice.css'])
+    assert.ok(receipt.source['packages/client-ui/src/' + file], 'Ideas must consume the shared Client UI Notice: ' + file)
   await fs.writeFile(path.join(directory, 'compile-inputs.json'), JSON.stringify(built.metafile, null, 2))
   await fs.writeFile(path.join(compiled, 'index.html'), '<!doctype html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="entry.css"></head><body><div id="root"></div><script type="module" src="entry.js"></script></body></html>')
   receipt.compiled = Object.fromEntries(await Promise.all((await fs.readdir(compiled)).map(async file => [file, sha(await fs.readFile(path.join(compiled, file)))])))

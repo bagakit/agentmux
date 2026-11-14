@@ -53,6 +53,10 @@ it.each(['inline', 'deferred'] as const)('real Provider history exposes the orig
   await draw(view(initial, detail))
   const card = host.querySelector<HTMLElement>('[data-turn-failure-record-id="failed-result"]')!
   expect(card, host.textContent).not.toBeNull()
+  expect(card.tagName).toBe('SECTION')
+  expect(card.dataset.noticeAppearance).toBe('framed')
+  expect(card.querySelector<HTMLElement>('.ui-notice__icon')?.dataset.noticeTone).toBe('error')
+  expect(card.matches('[role="alert"], [aria-live]')).toBe(false)
   expect(card.closest('[hidden],[inert],.conversation-record-process')).toBeNull()
   expect(card.querySelector('.conversation-turn-failure__cause')?.textContent).toBe(message)
   expect(card.querySelector('.conversation-turn-failure__scope')?.textContent).toContain('failed-turn')
