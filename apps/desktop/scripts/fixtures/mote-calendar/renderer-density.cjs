@@ -7,7 +7,7 @@ const [html, evidence] = process.argv.slice(2)
 assert(evidence?.includes('/capture-'))
 app.setPath('userData', join(evidence, 'userData'))
 Menu.setApplicationMenu(null)
-const result = { passed: false, captureOnly: true, images: [], observations: {}, errors: [] }
+const result = { passed: false, captureOnly: true, images: [], observations: {}, mutations: [], errors: [] }
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms))
 
 app.whenReady().then(async () => {
@@ -71,8 +71,29 @@ app.whenReady().then(async () => {
       await click(control(modes, name))
       await waitFor(`(${control(modes,name)})?.getAttribute('aria-selected')==='true'`, name+' view')
     }
+    const verifyEventSurface = async (selector, declaration, reason) => {
+      await waitFor(`${locator(selector)}?.getBoundingClientRect().width>0`, 'rendered event ' + selector)
+      const inspect = async () => {
+        const style = await read(`(() => {const s=getComputedStyle(${locator(selector)});return {
+          start:s.borderInlineStartWidth,end:s.borderInlineEndWidth,fill:s.backgroundColor,image:s.backgroundImage
+        }})()`)
+        assert.equal(style.start, style.end, 'Rendered event has a one-sided stripe')
+        assert.ok(style.fill !== 'rgba(0, 0, 0, 0)' || style.image !== 'none', 'Rendered event has no surface fill')
+      }
+      await inspect()
+      const sheet = await win.webContents.insertCSS(`${selector} { ${declaration}; transition:none!important; }`)
+      try {
+        await assert.rejects(inspect, reason)
+      } finally {
+        await win.webContents.removeInsertedCSS(sheet)
+      }
+      await inspect()
+      result.mutations.push({ selector, declaration, rejected: reason.source, restored: true })
+    }
     await waitFor(`!!${control('[role="tab"]', 'Calendar')}`, 'Calendar tab')
     await click(control('[role="tab"]', 'Calendar'))
+    await verifyEventSurface('.mote-calendar__point', 'border-inline-start:3px solid currentColor!important', /one-sided stripe/)
+    await capture('month-event-surfaces')
     await view('Week')
     await waitFor('document.querySelectorAll("[data-calendar-hour]").length===168', 'original week grid')
     result.observations.canvas = await dimensions()
@@ -85,6 +106,7 @@ app.whenReady().then(async () => {
     if (!await read(`!!${locator('[data-mote-date="'+dates.yesterday+'"]')}`)) await click(locator('[aria-label="Previous week"]'))
     const past = locator(`[data-calendar-hour="${dates.yesterday}:9"]`)
     await waitFor(`(${past})?.textContent.toLowerCase().includes('fail')`, 'recorded failure visible before selecting its hour')
+    await verifyEventSurface('.mote-calendar__rate[data-attention="true"]', 'background:transparent!important', /no surface fill/)
     await read(`(${past}).scrollIntoView({block:'center'})`)
     await pause(240)
     await capture('week-recorded-events')
