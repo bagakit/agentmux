@@ -41,6 +41,7 @@ export function GoalDetail({ demand, onClose, onOpenMote, onGrill, onGrounding, 
   const [saveError, setSaveError] = useState<string | null>(null)
   const [deleteRequested, setDeleteRequested] = useState(false)
   const actionsRef = useRef<HTMLButtonElement>(null)
+  const teamRef = useRef<HTMLElement>(null)
   const [intentEditing, setIntentEditing] = useState(descriptionDirty)
   async function update(patch: Parameters<typeof updateDemand>[1], expectedUpdatedAt?: number): Promise<boolean> {
     try { await updateDemand(demand.id, patch, undefined, expectedUpdatedAt); for (const key of Object.keys(patch) as Array<keyof typeof patch>) if (failedPatch.current[key] === patch[key]) delete failedPatch.current[key]; if (!Object.keys(failedPatch.current).length) setSaveError(null); return true }
@@ -57,7 +58,7 @@ export function GoalDetail({ demand, onClose, onOpenMote, onGrill, onGrounding, 
   }
   const continueInBody = Boolean(demand.alignment?.confirmedAt && !demand.grounding)
   const finished = demand.status === 'done' || demand.status === 'cancelled'
-  const plan = <GoalPlanGraph demand={demand} onOpenDiscussion={onOpenMote} {...(finished ? {} : { onRequestPlan: onPlan })} pending={motePending === 'plan'} busy={Boolean(motePending)} />
+  const plan = <GoalPlanGraph demand={demand} {...(finished ? {} : { onRequestPlan: onPlan })} pending={motePending === 'plan'} busy={Boolean(motePending)} />
   const fact = goalNextStepFact(demand)
   const stage = acknowledgementFeedback.failure ? 'you' : fact.stage
   const next = acknowledgementFeedback.failure ? 'Acknowledgement unconfirmed' : fact.text
@@ -65,16 +66,16 @@ export function GoalDetail({ demand, onClose, onOpenMote, onGrill, onGrounding, 
     <header className="goals-detail__toolbar"><button className="small-button" type="button" onClick={onClose} aria-label="Back to goals"><ThemeNavigationBackIcon size={14} />Goals</button><span>{demand.projectName}</span>{!continueInBody ? <button type="button" className="small-button" disabled={Boolean(motePending)} onClick={onOpenMote} aria-label={`Open discussion for ${demand.title}`}>{motePending === 'open' ? 'Opening discussion…' : recipient.openLabel}</button> : null}<Menu.Root modal={false}><Menu.Trigger asChild><button ref={actionsRef} type="button" className="icon-button" aria-label="Goal actions"><ThemeActionMoreIcon size={15} /></button></Menu.Trigger><DocumentOverlayPortal component={Menu.Portal}><div className="window-overlay-host__entry" data-overlay-layer="popover"><Menu.Content className="tab-context-menu" align="end" sideOffset={4} collisionPadding={8} aria-label="Goal actions"><Menu.Item className="tab-context-menu__item goals-delete-action" onSelect={() => { actionsRef.current?.focus(); setDeleteRequested(true) }}><ThemeActionRemoveIcon size={13} />Delete goal</Menu.Item></Menu.Content></div></DocumentOverlayPortal></Menu.Root></header>
     <article className="goals-document">
       <header className="goals-detail__head">
-        <div className="goals-detail__stage-row"><p className="goals-detail__stage" data-goal-detail-stage><GoalStageMark stage={stage} /><span><strong>{GOAL_GROUP_LABELS[stage]}</strong> · {next}</span></p>
-          {queue && queue.total > 1 ? <span className="goals-detail__queue" data-goal-queue><span>{queue.index} of {queue.total}</span>{queue.nextId ? <button type="button" className="small-button" data-goal-queue-next aria-label={`Next goal that ${QUEUE_NAMES[queue.stage]}`} onClick={() => onOpenGoal?.(queue.nextId!)}>Next<ThemeNavigationForwardIcon size={13} /></button> : null}</span> : null}</div>
         <ComposerTextarea className="goals-title" aria-label="Goal title" value={title} onValueChange={value => editGoalDraft(demand.id, 'title', value)} rows={1} onBlur={() => { if (titleDirty && title.trim()) void saveGoalDrafts(demand.id, ['title']) }} />
-        <GoalMeta demand={demand} />
+        <div className="goals-detail__stage-row"><p className="goals-detail__stage" data-goal-detail-stage><GoalStageMark stage={stage} /><span><small>{GOAL_GROUP_LABELS[stage]}</small><strong>{next}</strong></span></p>
+          {queue && queue.total > 1 ? <span className="goals-detail__queue" data-goal-queue><span>{queue.index} of {queue.total}</span>{queue.nextId ? <button type="button" className="small-button" data-goal-queue-next aria-label={`Next goal that ${QUEUE_NAMES[queue.stage]}`} onClick={() => onOpenGoal?.(queue.nextId!)}>Next<ThemeNavigationForwardIcon size={13} /></button> : null}</span> : null}</div>
+        <div className="goals-detail__overview"><GoalMeta demand={demand} /><button type="button" className="goals-detail__team-link" onClick={() => { teamRef.current?.scrollIntoView({ block: 'start' }); teamRef.current?.focus({ preventScroll: true }) }}>Team<ThemeNavigationForwardIcon size={12} /></button></div>
         <p className="goals-detail__edit-status" aria-live="polite">{draft ? draftIssue ? 'Edits kept · Save unconfirmed' : 'Unsaved edits' : null}</p>
       </header>
       <div className="goals-detail__body">
         <div className="goals-detail__main">
           {plan}
-          {!demand.alignment ? <section className="goals-intent-body goals-intent-body--undefined"><div className="goals-section-heading"><h2><ThemeObjectGoalIcon size={14} aria-hidden="true" /> Goal definition</h2><span className="goals-caption">{descriptionDirty ? 'Your intent · Unsaved draft' : 'Your intent · Not outlined yet'}</span></div>{intent(6)}</section> : null}
+          {!demand.alignment ? <section className="goals-intent-body goals-intent-body--undefined"><div className="goals-section-heading"><h2><ThemeObjectGoalIcon size={14} aria-hidden="true" /> Goal definition</h2><span className="goals-caption">{descriptionDirty ? 'Your intent · Unsaved draft' : 'Your intent · Not outlined yet'}</span></div>{intent(3)}</section> : null}
           {!demand.alignment ? saveFeedback : null}
           {!demand.plan && !finished && !demand.grounding && demand.alignment?.confirmedAt ? <GoalFiniteStartControl key={`start:${demand.id}`} demand={demand} primary={!acknowledgementFeedback.failure} /> : null}
           <GoalAlignment key={demand.id} feedback={acknowledgementFeedback} onFeedbackChange={onAcknowledgementFeedbackChange} demand={demand} onGrill={onGrill} onGrounding={onGrounding} onOpenMote={onOpenMote} motePending={motePending} />
@@ -85,10 +86,9 @@ export function GoalDetail({ demand, onClose, onOpenMote, onGrill, onGrounding, 
           <GoalDelegationWork demand={demand} />
           <GoalActivity demand={demand} />
         </div>
-        <aside className="goals-detail__side" aria-label="Goal facts">
-          <GoalCommonProperties demand={demand} onUpdate={patch => void update(patch)} />
+        <aside ref={teamRef} tabIndex={-1} className="goals-detail__side" aria-label="Goal team and properties">
           <GoalExecution demand={demand} onUpdate={update} />
-          <GoalProperties demand={demand} onUpdate={patch => void update(patch)} />
+          <section className="goals-detail__properties" aria-label="Goal properties"><h2>Properties</h2><GoalCommonProperties demand={demand} onUpdate={patch => void update(patch)} /><GoalProperties demand={demand} onUpdate={patch => void update(patch)} /></section>
         </aside>
       </div>
     </article>

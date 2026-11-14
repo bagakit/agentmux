@@ -58,7 +58,7 @@ export function GoalPlanRequest({ demand, onRequest, pending, busy }: { demand: 
   const newRequest = original && observed?.state === 'stale' || retained && !original
   return <div className="goal-plan__request" data-goal-plan-request-feedback>
     {!demand.supervisorSessionId ? <>
-      <p className="goals-muted">The Supervisor makes and saves this Goal’s plan. Choose a Supervisor first; choosing does not send a request.</p>
+      <p className="goals-muted">Choose a Supervisor to make this plan.</p>
       <button type="button" className="small-button" data-goal-plan-request={original ? undefined : true} disabled={working} onClick={chooseSupervisor}>Choose Supervisor to plan</button>
     </> : null}
     {demand.supervisorSessionId || original ? <div className="goals-inline-actions">

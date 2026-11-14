@@ -78,8 +78,8 @@ type Edge = { from: string; to: string; d: string; live: boolean }
  * Edges are measured from the rendered cards, so they follow wrapping titles and opened details.
  * Only this graph's own layout changes trigger a re-measure; no global listener is installed.
  */
-function useEdges(root: React.RefObject<HTMLElement | null>, projection: GoalPlanView, layoutKey: string): { edges: Edge[]; width: number; height: number } {
-  const [state, setState] = useState<{ edges: Edge[]; width: number; height: number }>({ edges: [], width: 0, height: 0 })
+function useEdges(root: React.RefObject<HTMLElement | null>, projection: GoalPlanView, layoutKey: string): { edges: Edge[]; width: number; height: number; scrollable: boolean } {
+  const [state, setState] = useState<{ edges: Edge[]; width: number; height: number; scrollable: boolean }>({ edges: [], width: 0, height: 0, scrollable: false })
   useLayoutEffect(() => {
     const element = root.current
     if (!element) return
@@ -93,15 +93,16 @@ function useEdges(root: React.RefObject<HTMLElement | null>, projection: GoalPla
         if (!source || !target) continue
         const a = source.getBoundingClientRect(), b = target.getBoundingClientRect()
         const sourceCard = source.closest<HTMLElement>('.goal-plan-node')!.getBoundingClientRect(), targetCard = target.closest<HTMLElement>('.goal-plan-node')!.getBoundingClientRect()
-        const from = { x: sourceCard.right - box.left + element.scrollLeft, y: a.top + a.height / 2 - box.top }
-        const to = { x: targetCard.left - box.left + element.scrollLeft, y: b.top + b.height / 2 - box.top }
+        const from = { x: sourceCard.right - box.left + element.scrollLeft, y: a.top + a.height / 2 - box.top + element.scrollTop }
+        const to = { x: targetCard.left - box.left + element.scrollLeft, y: b.top + b.height / 2 - box.top + element.scrollTop }
         if (to.x <= from.x) continue
         edges.push({ from: dependency, to: item.node.id, d: goalPlanEdgePath(from, to), live: item.state === 'ready' || item.state === 'changes' })
       }
       // Measure content, not scrollHeight: the previous absolute SVG also contributes to scrolling.
       const width = Math.max(element.clientWidth, content.scrollWidth), height = content.offsetTop + content.offsetHeight
-      setState(previous => JSON.stringify(previous.edges) === JSON.stringify(edges) && previous.width === width && previous.height === height
-        ? previous : { edges, width, height })
+      const scrollable = width > element.clientWidth + 1 || height > element.clientHeight + 1
+      setState(previous => JSON.stringify(previous.edges) === JSON.stringify(edges) && previous.width === width && previous.height === height && previous.scrollable === scrollable
+        ? previous : { edges, width, height, scrollable })
     }
     measure()
     if (typeof ResizeObserver === 'undefined') return
@@ -170,8 +171,8 @@ function NodeDetail({ item, dependencyNames, onIssue }: { item: GoalPlanNodeView
  * dependency, joined to what it depends on by a smooth connector. State comes only from the
  * Goal owner's derivation; this view never decides it.
  */
-export function GoalPlanGraph({ demand, onOpenDiscussion, onRequestPlan, pending = false, busy = false }: {
-  demand: DemandProjection; onOpenDiscussion?: () => void
+export function GoalPlanGraph({ demand, onRequestPlan, pending = false, busy = false }: {
+  demand: DemandProjection
   onRequestPlan?: () => void; pending?: boolean; busy?: boolean
 }) {
   const projection = useMemo(() => goalPlanProjection(demand), [demand.plan, demand.planState, demand.delegations])
@@ -181,7 +182,7 @@ export function GoalPlanGraph({ demand, onOpenDiscussion, onRequestPlan, pending
   const canvas = useRef<HTMLDivElement>(null)
   const reading = useRef<HTMLDivElement>(null), readingId = useId()
   const empty: GoalPlanView = { revision: 0, nodes: [], next: [], progress: null }
-  const { edges, width, height } = useEdges(canvas, projection ?? empty, open ?? '')
+  const { edges, width, height, scrollable } = useEdges(canvas, projection ?? empty, open ?? '')
   useLayoutEffect(() => { if (open) reading.current?.scrollIntoView?.({ block: 'nearest' }) }, [open])
   const requestAction = onRequestPlan ? <GoalPlanRequest demand={demand} onRequest={onRequestPlan} pending={pending} busy={busy} /> : null
   async function readState() {
@@ -196,7 +197,7 @@ export function GoalPlanGraph({ demand, onOpenDiscussion, onRequestPlan, pending
     <button type="button" className="small-button" disabled={readingState} onClick={() => void readState()}>{readingState ? 'Reading Goal…' : 'Read Goal again'}</button>
   </p> : null
   if (!projection) return <section className="goal-plan goal-plan--empty" aria-label="Goal plan" data-goal-plan-empty>
-    <div className="goals-section-heading"><h2><ThemeObjectWorkflowIcon size={14} aria-hidden="true" /> Execution plan</h2><span className="goals-caption">Tasks and dependencies</span></div>
+    <div className="goals-section-heading"><h2><ThemeObjectWorkflowIcon size={14} aria-hidden="true" /> Execution plan</h2><span className="goals-caption">Starting point</span></div>
     {stateService}{issue ? <p className="goals-service" role="status">{issue}</p> : null}
     <div className="goal-plan__origin">
       <article className="goal-plan__goal" data-goal-plan-origin={demand.id} aria-label="Goal starting point">
@@ -204,8 +205,8 @@ export function GoalPlanGraph({ demand, onOpenDiscussion, onRequestPlan, pending
         <div className="goal-plan__goal-body"><p className="goal-plan__goal-label">Goal <span>Starting point</span></p><h3>{demand.title}</h3></div>
       </article>
       <div className="goal-plan__empty-body"><p className="goal-plan__empty-title">No execution plan yet</p>
-      <p className="goals-muted">{demand.alignment ? 'Shape the work into tasks, dependencies and checks.' : 'Start with the outcome and success criteria, then shape the work into a plan.'}</p>
-      <div className="goals-inline-actions">{requestAction}{onOpenDiscussion ? <button type="button" className="small-button" onClick={onOpenDiscussion}>Open goal discussion</button> : null}
+      <p className="goals-muted">{demand.alignment ? 'Shape the tasks, dependencies and checks.' : 'Clarify the outcome and success criteria first.'}</p>
+      <div className="goals-inline-actions">{requestAction}
       </div>
       </div>
     </div>
@@ -222,7 +223,7 @@ export function GoalPlanGraph({ demand, onOpenDiscussion, onRequestPlan, pending
     {requestAction ? <div className="goals-inline-actions goal-plan__revise">{requestAction}</div> : null}
     {progress ? <div className="goal-plan__progress" aria-hidden="true"><span style={{ transform: `scaleX(${ratio})` }} /></div> : stateService}
     {issue ? <p className="goals-service" role="status">{issue}</p> : null}
-    <div className="goal-plan__canvas" ref={canvas}>
+    <div className="goal-plan__canvas" ref={canvas} tabIndex={0} aria-label="Execution graph">
       <svg className="goal-plan__edges" width={width} height={height} aria-hidden="true">
         {edges.map(edge => <path key={`${edge.from}>${edge.to}`} d={edge.d} data-goal-plan-edge={`${edge.from}>${edge.to}`} className={edge.live ? 'goal-plan__edge goal-plan__edge--live' : 'goal-plan__edge'} />)}
       </svg>
@@ -248,6 +249,7 @@ export function GoalPlanGraph({ demand, onOpenDiscussion, onRequestPlan, pending
         </li>)}
       </ol>
     </div>
+    {scrollable ? <p className="goal-plan__scroll-hint">Scroll to explore the full plan</p> : null}
     {selected ? <div className="goal-plan__reading" ref={reading} id={readingId}>
       <div className="goals-section-heading"><h3>{selected.node.title}</h3><button type="button" className="small-button" onClick={() => {
         canvas.current?.querySelector<HTMLButtonElement>(`[data-goal-plan-node="${CSS.escape(selected.node.id)}"] .goal-plan-node__head`)?.focus()
