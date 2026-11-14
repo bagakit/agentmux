@@ -297,10 +297,6 @@
 /* The field's one message reads in the primary text colour, so light passing behind it keeps AAA
    contrast without a clearing shape, which would read as a cut-out in the light. */
 .activity-feed__empty-reading[data-loading-phase='loading'] .activity-feed__reading-caption strong { color: var(--text); }
-/* A read that answers quickly never flashes the field: the scene enters only after a short
-   hold, and in reduced motion it appears without a fade. Reading and content are never held. */
-.activity-feed__empty-reading[data-loading-phase='loading'] { animation: activity-reading-enter var(--dur-indicator) ease-out calc(var(--dur-fast) * 2) backwards; }
-@keyframes activity-reading-enter { from { opacity: 0; } }
 /* A low Mint pool and a raised surface opposite it give the field static depth. One Mint light
    crosses it in one direction: it enters past the lower left, keeps travelling toward the upper
    right while it is bright and leaves through the fade there; travel and brightness have their
@@ -335,7 +331,6 @@
   72% { opacity: .9; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .activity-feed__empty-reading[data-loading-phase='loading'] { animation-duration: 0s; }
   .activity-feed__reading-light::before { animation: none; opacity: .9; transform: translate3d(42%, -20%, 0); }
   .activity-feed__reading-light::after { animation: none; }
 }

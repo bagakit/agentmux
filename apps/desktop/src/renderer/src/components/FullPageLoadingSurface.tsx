@@ -115,6 +115,8 @@ export function FullPageLoadingSurface({
 }) {
   const failed = phase === 'failed'
   const busy = phase === 'loading' || phase === 'recovering'
+  // The entrance belongs to the phase the surface appeared in; later phases never replay it.
+  const [entryPhase] = useState(phase)
   const surfaceRef = useRef<HTMLElement>(null)
   const frameRef = useRef<number | null>(null)
   useEffect(() => () => { if (frameRef.current !== null) cancelAnimationFrame(frameRef.current) }, [])
@@ -146,6 +148,7 @@ export function FullPageLoadingSurface({
       ref={surfaceRef}
       className={`full-page-loading full-page-loading--${scope} full-page-loading--${phase}${className ? ` ${className}` : ''}`}
       data-loading-phase={phase}
+      data-loading-entry={entryPhase}
       data-loading-scope={scope}
       onPointerMove={scope === 'app' ? moveLight : undefined}
       onPointerLeave={scope === 'app' ? resetLight : undefined}
