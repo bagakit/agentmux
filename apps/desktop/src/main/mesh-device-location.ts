@@ -9,11 +9,17 @@ export async function readMeshDeviceLocation(link: string, signal: AbortSignal) 
   const window = existingMeshDeviceWindow(readMeshDeviceLink(link).url)
   if (!window) return null
   const contents = window.webContents, token = JSON.stringify(randomUUID())
-  const stop = () => { if (!contents.isDestroyed()) void contents.executeJavaScript('window.cancelNodeLocationRead?.(' + token + ')').catch(() => {}) }
-  signal.addEventListener('abort', stop, { once: true })
+  const lifetime = AbortSignal.any([signal, AbortSignal.timeout(6000)])
+  let rejectClosed!: (reason: unknown) => void
+  const cancelled = new Promise<never>((_, reject) => { rejectClosed = reject })
+  const stop = () => {
+    rejectClosed(lifetime.reason)
+    if (!contents.isDestroyed()) void contents.executeJavaScript('window.cancelNodeLocationRead?.(' + token + ')').catch(() => {})
+  }
+  lifetime.addEventListener('abort', stop, { once: true })
   try {
-    const result: unknown = await contents.executeJavaScript('window.readOriginalNodeLocation?.(' + token + ')')
-    signal.throwIfAborted()
+    const result: unknown = await Promise.race([contents.executeJavaScript('window.readOriginalNodeLocation?.(' + token + ')'), cancelled])
+    lifetime.throwIfAborted()
     return result == null ? null : parseNodePublishingResult('node.location', result, { hostId: 'local' })
-  } finally { signal.removeEventListener('abort', stop) }
+  } finally { lifetime.removeEventListener('abort', stop) }
 }
