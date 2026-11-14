@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
-import { TextInput } from '../input/TextInput.js'
+import { SearchInput } from '../input/SearchInput.js'
 import { focusChoice } from '../lib/choice-focus.js'
 import { isImeOwnedKeyboardEvent } from '../lib/ime-keyboard-event.js'
 import { SemanticIcon } from '../theme/semantic-icon.js'
@@ -120,10 +120,8 @@ export function SelectionField({ id, label, value, options, onValueChange, disab
       }
     }}>
     {canSearch ? <div className="selection-field__search">
-      <TextInput ref={search} aria-label={'Find ' + label.toLocaleLowerCase()} placeholder="Find options…" value={query}
-        onChange={event => setQuery(event.currentTarget.value)} />
-      {query ? <button type="button" className="selection-field__clear" aria-label="Clear option search"
-        onClick={() => { setQuery(''); search.current?.focus({ preventScroll: true }) }}><SemanticIcon name="action.close" size={12} /></button> : null}
+      <SearchInput ref={search} aria-label={'Find ' + label.toLocaleLowerCase()} clearLabel="Clear option search"
+        placeholder="Find options…" value={query} onValueChange={setQuery} />
     </div> : null}
     <div ref={choices} className="selection-field__results" role={hasDialog ? 'listbox' : undefined} aria-label={hasDialog ? label : undefined}
       tabIndex={hasDialog ? 0 : undefined} onFocus={event => {
