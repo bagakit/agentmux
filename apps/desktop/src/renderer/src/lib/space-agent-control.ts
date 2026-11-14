@@ -21,7 +21,7 @@ import { isSessionSurface } from './workbench-surface-kinds'
 import { topicContentZoneId } from '@agentmux/host/topic-categories'
 import { agentSessionPresentationIndex } from './session-presentation'
 import type { AgentMuxSpatialGraph } from '@agentmux/core/spatial-graph'
-import { desktopAgentPresentationFromSpatial } from './desktop-agent-presentation'
+import { desktopAgentExecutionFromSpatial, desktopAgentPresentationFromSpatial } from './desktop-agent-presentation'
 import type { WorkbenchProjectionSelection } from './workbench-projection'
 
 export type SpatialWorkbench = {
@@ -114,6 +114,7 @@ export function spatialCatalog(state: SpatialWorkbench, topics: readonly Scratch
       const session = isSessionSurface(surface) ? sessions.get(surface.sessionId) : undefined
       const original = originalRegions.get(JSON.stringify([tab.id, id]))
       const presentation = state.originalSpatialGraph && original ? desktopAgentPresentationFromSpatial(state.originalSpatialGraph, original) : null
+      const originalRuntime = original && session ? desktopAgentExecutionFromSpatial(original, session)?.runtimeId : undefined
       const retained = !session && surface.kind === 'agent' && original?.kind === 'agent' &&
         (original.agentSessionId === surface.sessionId || presentation?.sessionId === surface.sessionId) ? original : undefined
       if (!session && surface.kind === 'agent' && state.originalSpatialGraph !== undefined && !retained) {
@@ -136,7 +137,7 @@ export function spatialCatalog(state: SpatialWorkbench, topics: readonly Scratch
         agentSessionId: surface.kind === 'agent' ? session?.control.kind === 'agent' ? session.control.agentSessionId
           : state.originalSpatialGraph !== undefined ? retained?.agentSessionId ?? null : surface.sessionId : null,
         runId: session?.control.run.runId ?? retained?.runId ?? null,
-        execution: session ? { hostId: session.hostId, cwd: session.workspacePath } : retained?.execution ?? null,
+        execution: session ? { hostId: session.hostId, cwd: session.workspacePath, ...(originalRuntime === undefined ? {} : { runtimeId: originalRuntime }) } : retained?.execution ?? null,
         ...(surface.kind === 'browser' ? { browserId: surface.browserId } : {}), ...(file ? { file } : {}) })
     }
   }

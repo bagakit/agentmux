@@ -1,6 +1,16 @@
 import type { AgentMuxSpatialGraph } from '@agentmux/core/spatial-graph'
+import type { SessionSnapshot } from '../../../shared/contracts'
 
 export type DesktopAgentPresentation = { sessionId: string; agentSessionId: string; hostId: string }
+
+/** A Session observation retains an original Core execution only for the exact same subject. */
+export function desktopAgentExecutionFromSpatial(region: AgentMuxSpatialGraph['regions'][number], session: SessionSnapshot) {
+  if (session.kind !== 'agent') return null
+  const sameAgent = region.kind === 'agent' && region.agentSessionId === session.control.agentSessionId
+  const execution = region.execution
+  return sameAgent && region.runId === session.control.run.runId && execution?.hostId === session.control.hostId &&
+    execution.hostId === session.hostId && execution.cwd === session.workspacePath ? execution : null
+}
 
 /** A client key is valid only for this original Core Region and execution Host. */
 export function desktopAgentPresentationFromSpatial(graph: AgentMuxSpatialGraph, region: AgentMuxSpatialGraph['regions'][number]): DesktopAgentPresentation | null {

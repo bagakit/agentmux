@@ -21,7 +21,7 @@ export function desktopSpatialGraph(state: SpatialWorkbench, topics: readonly Sc
   // closeWorktreeGraph once so public Files retain their exact original owner.
   const closingZones = new Set(previous?.zones.filter(zone => closingWorkspaces.has(zone.workspaceId)).map(zone => zone.zoneId));
   const categories = [...new Map([...(previous ? categoriesFromSpatial(previous) : []), ...(state.topicCategories ?? [])].map(category => [category.spaceId, category])).values()];
-  const catalog = spatialCatalog({ ...state, topicCategories: categories }, topics);
+  const catalog = spatialCatalog({ ...state, ...(previous ? { originalSpatialGraph: previous } : {}), topicCategories: categories }, topics);
   const { locations: _, ...facts } = catalog;
   if (state.projectGroups === undefined && previous?.projectGroups) facts.projectGroups = previous.projectGroups;
   const persisted = { tabs: Object.fromEntries(Object.values(state.tabs).map(tab => [tab.id, reducePersistedTab(tab)])), layouts: state.layouts };
