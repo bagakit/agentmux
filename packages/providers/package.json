@@ -235,6 +235,22 @@
     "./claude/native-history": {
       "types": "./dist/claude/native-history.d.ts",
       "import": "./dist/claude/native-history.js"
+    },
+    "./cursor/native-session": {
+      "types": "./dist/cursor/native-session.d.ts",
+      "import": "./dist/cursor/native-session.js"
+    },
+    "./cursor/workspace-trust": {
+      "types": "./dist/cursor/workspace-trust.d.ts",
+      "import": "./dist/cursor/workspace-trust.js"
+    },
+    "./cursor/payload-protocol": {
+      "types": "./dist/cursor/payload-protocol.d.ts",
+      "import": "./dist/cursor/payload-protocol.js"
+    },
+    "./cursor/payload-consumption": {
+      "types": "./dist/cursor/payload-consumption.d.ts",
+      "import": "./dist/cursor/payload-consumption.js"
     }
   },
   "files": [

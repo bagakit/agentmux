@@ -1,13 +1,19 @@
 import { cursorProvider } from '@agentmux/providers/cursor/provider'
+import { createCursorPayloadConsumption } from '@agentmux/providers/cursor/payload-consumption'
 import type { AgentProvider, AgentProviderDefinition } from '../agent-provider.js'
 import { normalizeNativeHook } from '../hook-normalizer.js'
 import { formatHookToolOutput } from '../hook-tool-outcome.js'
 import { catalog, hookToolFields, runScopedHookCommand, hookCommandTimeout } from './shared.js'
-import { cursorDataRoot, readCursorSessionHistoryPage, observeCursorSessionHistory } from './cursor-history.js'
-import { discoverCursorNativeSession } from './cursor-native-session.js'
-import { cursorPromptPayloadConsumption } from './cursor-payload-consumption.js'
+import { cursorDataRoot, readCursorSessionHistoryPage, observeCursorSessionHistory, resolveCursorStorePath } from './cursor-history.js'
+import { discoverCursorNativeSession, prepareCursorOwnedWorkspaceTrust, qualifyCursorPayloadProtocol } from './cursor-native-sources.js'
 import { buildPromptInputPayload, sanitizeBracketedPasteText } from '../bracketed-paste.js'
-import { prepareCursorOwnedWorkspaceTrust } from './cursor-workspace-trust.js'
+import { AgentMuxError } from '../errors.js'
+import { nativeProcessBirth } from '../agent-native-process.js'
+
+export const { cursorPromptPayloadConsumption }: { cursorPromptPayloadConsumption: NonNullable<AgentProvider['promptPayloadConsumption']> } =
+  createCursorPayloadConsumption({ AgentMuxError, nativeProcessBirth: (...args) => nativeProcessBirth(...args),
+    resolveCursorStorePath, qualifyCursorPayloadProtocol, discoverCursorNativeSession
+  })
 
 export function createCursorProvider(defineAgentProvider: (definition: AgentProviderDefinition) => AgentProvider): AgentProvider {
   const { catalog: seed, planManagedHooks, hook, ...cursor } = cursorProvider({
