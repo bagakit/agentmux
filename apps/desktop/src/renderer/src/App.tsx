@@ -136,6 +136,11 @@ function DesktopApp() {
   const openMoteLark = useCallback((moteLarkOrigin: MoteLarkSettingsOrigin): void => navigateSettings({ section: 'lark', moteLarkOrigin }), [navigateSettings])
   const [windowResizeActive, setWindowResizeActive] = useState(false)
   const [quickSwitchOpen, setQuickSwitchOpen] = useState(false)
+  const sessionLocationRequestId = useAppStore(state => state.sessionLocationRequest?.requestId)
+  const quickSwitchVisible = quickSwitchOpen || Boolean(sessionLocationRequestId)
+  // Local presentation/input intent only; never an Agent input-permission fact.
+  const quickSwitchFocusEpoch = useRef(0)
+  useLayoutEffect(() => { quickSwitchFocusEpoch.current++ }, [quickSwitchVisible, sessionLocationRequestId])
   const chooseAgent = useCallback(() => { setSettingsOpen(false); setQuickSwitchOpen(true) }, [])
   const settingsNavigation = useMemo(() => ({ open: openSettings, openToolkit, openHost: openHostSettings, openHostExecutors, openChannel, channelPresentation: settingsCatalog.channelPresentation, channelEntries: settingsCatalog.channelEntries, openMoteLark, chooseAgent }), [openSettings, openToolkit, openHostSettings, openHostExecutors, openChannel, openMoteLark, chooseAgent])
   const quickSwitchOrigin = useRef<{ element: HTMLElement | null; navigation: string } | null>(null)
@@ -177,7 +182,7 @@ function DesktopApp() {
   useLayoutEffect(() => {
     const floating = readPmoTeamsTopicFloatingState()
     presentationRef.current = { loading, contentExpanded: spaceContent.expanded,
-      overlays: { settings: settingsOpen, quickSwitcher: quickSwitchOpen },
+      overlays: { settings: settingsOpen, quickSwitcher: quickSwitchVisible },
       settings: { sectionIds: desktopSettingsSectionIds,
         read: () => settingsObservation.current,
         open: sectionId => navigateSettings({ section: sectionId as SettingsPageId }, 'preserve'),
@@ -187,7 +192,7 @@ function DesktopApp() {
         tabId: pmoTeamsTopicFloatingTargetTabId(floating, tabs, layouts[SCRATCH_WORKSPACE_ID], agentFocus.pmo.sessionId) ?? null,
         regionId: floating.reference?.regionId ?? null } : null }
     desktopPresentationCommitted()
-    surfaceSwitchObservation.committed(desktopSurface[mainSurface], !loading && !settingsOpen && !quickSwitchOpen)
+    surfaceSwitchObservation.committed(desktopSurface[mainSurface], !loading && !settingsOpen && !quickSwitchVisible)
   })
   const recallSelection = useAppStore(state => state.recallZoneSelection)
   const surveySelection = useAppStore((state) => state.surveyZoneSelection)
@@ -638,7 +643,9 @@ function DesktopApp() {
   // cancel a native menu accelerator. See main/application-menu.ts.)
   useEffect(() => {
     const isMac = isMacPlatform()
+    const onInputIntent = (): void => { quickSwitchFocusEpoch.current++ }
     const onKeyDown = (event: KeyboardEvent): void => {
+      onInputIntent()
       // 在编辑控件或终端/TUI 里输入时，带 `not-in-editable` 门的绑定（Cmd+D 分屏、Cmd+W 关格）先放行；
       // 全局导航（quick switch）不带门，照常触发。终端焦点不再被工作台快捷键抢走——capture 仍只负责把
       // 未被作用域门挡住的全局动作路由到正确 owner。判定是纯函数，这里只把 DOM 事实（标签名、contentEditable、是否在 .xterm
@@ -654,15 +661,24 @@ function DesktopApp() {
       })
       const handlers = windowShortcutHandlers(useAppStore.getState(), {
         toggleQuickSwitch: () => {
+          const request = useAppStore.getState().sessionLocationRequest
+          if (request) { useAppStore.getState().dismissSessionLocationRequest(request.requestId); setQuickSwitchOpen(false); return }
+          const epoch = quickSwitchFocusEpoch.current
+          const sourceInput = sourceDocument.activeElement
           const navigation = fileNavigationSelection(useAppStore.getState())
           if (!presentationRef.current.overlays.quickSwitcher) quickSwitchOrigin.current = {
             element: sourceDocument.activeElement?.nodeType === 1 ? sourceDocument.activeElement as HTMLElement : null, navigation
           }
-          const show = () => { if (navigation === fileNavigationSelection(useAppStore.getState())) setQuickSwitchOpen(current => !current) }
+          const show = () => {
+            if (epoch === quickSwitchFocusEpoch.current && sourceDocument.activeElement === sourceInput &&
+                !useAppStore.getState().sessionLocationRequest && navigation === fileNavigationSelection(useAppStore.getState())) setQuickSwitchOpen(current => !current)
+          }
           if (sourceDocument === document) show()
           else {
-            const main = workbenchDocumentIdentity(document)
-            if (main) void focusWorkbenchWindow(main).then(confirmed => { if (confirmed) show() })
+            const main = workbenchDocumentIdentity(document), source = workbenchDocumentIdentity(sourceDocument)
+            if (main && source) void focusWorkbenchWindow(main).then(confirmed => {
+              if (confirmed && workbenchDocumentIdentity(document) === main && workbenchDocumentIdentity(sourceDocument) === source) show()
+            })
           }
         },
         openShortcuts: () => {
@@ -678,12 +694,30 @@ function DesktopApp() {
     const attached = new Set<Document>()
     const sync = () => {
       const current = new Set([document, ...workbenchDocuments()])
-      for (const doc of attached) if (!current.has(doc)) { doc.removeEventListener('keydown', onKeyDown, true); attached.delete(doc) }
-      for (const doc of current) if (!attached.has(doc)) { doc.addEventListener('keydown', onKeyDown, true); attached.add(doc) }
+      for (const doc of attached) if (!current.has(doc)) {
+        doc.removeEventListener('keydown', onKeyDown, true)
+        doc.removeEventListener('pointerdown', onInputIntent, true)
+        doc.removeEventListener('beforeinput', onInputIntent, true)
+        attached.delete(doc)
+      }
+      for (const doc of current) if (!attached.has(doc)) {
+        doc.addEventListener('keydown', onKeyDown, true)
+        doc.addEventListener('pointerdown', onInputIntent, true)
+        doc.addEventListener('beforeinput', onInputIntent, true)
+        attached.add(doc)
+      }
     }
     sync()
     const unsubscribe = subscribeWorkbenchWindows(sync)
-    return () => { unsubscribe(); for (const doc of attached) doc.removeEventListener('keydown', onKeyDown, true) }
+    return () => {
+      unsubscribe()
+      quickSwitchFocusEpoch.current++
+      for (const doc of attached) {
+        doc.removeEventListener('keydown', onKeyDown, true)
+        doc.removeEventListener('pointerdown', onInputIntent, true)
+        doc.removeEventListener('beforeinput', onInputIntent, true)
+      }
+    }
   }, [])
 
   if (loading) {
@@ -838,8 +872,14 @@ function DesktopApp() {
         if (original?.navigation !== fileNavigationSelection(useAppStore.getState()) || !original.element?.isConnected) return null
         const target = original.element, ownerDocument = target.ownerDocument, identity = workbenchDocumentIdentity(ownerDocument)
         if (ownerDocument === document) return target
+        const epoch = quickSwitchFocusEpoch.current, mainInput = document.activeElement, sourceInput = ownerDocument.activeElement
         if (identity) void focusWorkbenchWindow(identity).then(confirmed => {
-          if (confirmed && target.isConnected && target.ownerDocument === ownerDocument && original.navigation === fileNavigationSelection(useAppStore.getState()) && workbenchDocumentIdentity(ownerDocument)?.documentGeneration === identity.documentGeneration) target.focus({ preventScroll: true })
+          const currentIdentity = workbenchDocumentIdentity(ownerDocument)
+          if (confirmed && epoch === quickSwitchFocusEpoch.current && quickSwitchOrigin.current === original &&
+              !presentationRef.current.overlays.quickSwitcher && !useAppStore.getState().sessionLocationRequest &&
+              document.activeElement === mainInput && ownerDocument.activeElement === sourceInput &&
+              target.isConnected && target.ownerDocument === ownerDocument && original.navigation === fileNavigationSelection(useAppStore.getState()) &&
+              currentIdentity?.windowId === identity.windowId && currentIdentity.documentGeneration === identity.documentGeneration) target.focus({ preventScroll: true })
         })
         return null
       }} />
