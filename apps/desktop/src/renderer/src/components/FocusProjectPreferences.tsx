@@ -26,7 +26,7 @@ export function FocusProjectPreferences({ projectKey, name }: { projectKey: stri
     if (!open || !anchor || !content) return
     let attached = true
     const update = async () => {
-      const result = await computePosition(anchor, content, { strategy: 'fixed', placement: 'bottom-start', middleware: [offset(5), flip(), shift({ padding: 8 })] })
+      const result = await computePosition(anchor, content, { strategy: 'fixed', placement: 'bottom-start', middleware: [offset(5), flip(), shift({ padding: 8, crossAxis: true })] })
       if (attached) Object.assign(content.style, { left: `${result.x}px`, top: `${result.y}px`, visibility: 'visible' })
     }
     const stop = autoUpdate(anchor, content, () => { void update() })
