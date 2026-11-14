@@ -1,8 +1,8 @@
-import { readConversationProcessDetail, type ConversationProcessDetailReader } from './read-conversation-process-detail.js'
+import { readConversationProcessDetail } from './read-conversation-process-detail.js'
 import { mintObjectId } from '@agentmux/core/object-id'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { consumeConversationWindowPage, projectConversationWindow, conversationSourceKey, conversationRecordId, CONVERSATION_MAX_READ_BYTES, type ConversationWindowAssembly,
-  type ConversationWindowSnapshot, type ConversationTimelineReadInput, type ConversationChangesInput,
+  type ConversationVersionedAnchor, type ConversationWindowSnapshot, type ConversationTimelineReadInput, type ConversationChangesInput,
   type ConversationObservationHandle, type ConversationReadOptions, type ConversationRef } from '@agentmux/core/conversation'
 import type { AgentMuxClient } from '@agentmux/core'
 import type { ReadingDiagnosticReason } from '@agentmux/core/reading-diagnostic'
@@ -11,6 +11,7 @@ import { conversationDiagnosticFrame, conversationDiagnosticSource, type Convers
 
 export type ConversationViewClient = Pick<AgentMuxClient, 'readAgentConversation' | 'readConversationChanges' | 'observeConversation' | 'releaseConversationView'>
 export type ConversationViewOperation = 'latest' | 'older' | 'newer' | 'changes' | 'resume' | 'reopen'
+export type ConversationProcessDetailReader = (anchor: ConversationVersionedAnchor, signal: AbortSignal) => Promise<ConversationWindowSnapshot>
 type Operation = ConversationViewOperation
 export type ConversationSourceRead = { reference: ConversationRef; nativeSource: NonNullable<ConversationTimelineReadInput['nativeSource']> }
 type Selection = Pick<ConversationTimelineReadInput, 'nativeSource' | 'record' | 'anchor' | 'limit' | 'preserveCurrent'>

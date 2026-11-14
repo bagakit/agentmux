@@ -1,8 +1,6 @@
 import { consumeConversationWindowPage, conversationValuesEqual, CONVERSATION_MAX_READ_BYTES, type ConversationVersionedAnchor, type ConversationWindowAssembly, type ConversationWindowSnapshot } from '@agentmux/core/conversation'
 import type { ConversationViewClient } from './use-conversation-view.js'
 
-export type ConversationProcessDetailReader = (anchor: ConversationVersionedAnchor, signal: AbortSignal) => Promise<ConversationWindowSnapshot>
-
 /** One exact original read through the existing Reader. Its temporary view is
  * released after transport assembly; the mounted disclosure owns the returned body. */
 export async function readConversationProcessDetail(client: ConversationViewClient, anchor: ConversationVersionedAnchor, signal: AbortSignal): Promise<ConversationWindowSnapshot> {

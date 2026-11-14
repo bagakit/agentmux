@@ -1,7 +1,7 @@
 import { ConversationRetainedDetails } from './ConversationRetainedDetails.js'
 import { NativeProcessObservation, NativeProcessStep } from './NativeProcessObservation.js'
 import { DeferredConversationProcess } from './DeferredConversationProcess.js'
-import type { ConversationProcessDetailReader } from '../lib/read-conversation-process-detail.js'
+import type { ConversationProcessDetailReader } from '../lib/use-conversation-view.js'
 import { projectConversationWindow } from '../lib/conversation-records.js'
 import { ConversationBodyWorkContext } from './ConversationProgressiveBody.js'
 import { ConversationReadingCommit } from './ConversationReadingCommit.js'

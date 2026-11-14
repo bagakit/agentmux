@@ -1,7 +1,7 @@
 import { useEffect, useId, useState, type ReactNode } from 'react'
 import type { ConversationWindowSnapshot } from '@agentmux/core/conversation'
 import type { ConversationRecord } from '../lib/conversation-records.js'
-import type { ConversationProcessDetailReader } from '../lib/read-conversation-process-detail.js'
+import type { ConversationProcessDetailReader } from '../lib/use-conversation-view.js'
 import type { ConversationProcessProps } from './ConversationRecordSequence.js'
 import { RecordedToolRow } from './WorkflowObservation.js'
 import { SemanticIcon } from '../theme/icons.js'
