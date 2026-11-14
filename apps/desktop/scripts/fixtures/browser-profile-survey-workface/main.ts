@@ -8,6 +8,7 @@ import { surfaceWindowsCase } from './surface-windows-case'
 import { completeCase } from './complete-case'
 import { completePorts } from './complete-ports'
 import { contextMenuCase } from './context-menu-case'
+import { addressSelectionCase } from './address-selection-case'
 import { cliFollow } from './cli-follow'
 import { browserProfilePartition } from '../../../src/main/browser-profile-store'
 import { settingsCase } from './settings-case'
@@ -28,6 +29,7 @@ import { desktopBusinessSocketPath } from '../../../src/main/desktop-host'
 
 const directory = process.env.AGENTMUX_PROFILE_SURVEY_ROOT!, source = process.env.AGENTMUX_PROFILE_SURVEY_SOURCE!, phase = process.env.AGENTMUX_PROFILE_SURVEY_PHASE!
 const selectedCase = process.env.AGENTMUX_PROFILE_SURVEY_CASE!, workspaceId = 'profile-survey-workspace', legacyWorkspaceId = 'profile-survey-legacy-workspace', pageUrl = process.env.AGENTMUX_PROFILE_SURVEY_PAGE_URL!
+if (selectedCase === 'address-selection') app.commandLine.appendSwitch('host-resolver-rules', 'MAP www.google.com ~NOTFOUND')
 assert.ok(directory && source && ['first','restart'].includes(phase))
 app.on('window-all-closed', () => {})
 const receipt: any = { schema: 'agentmux.browser-profile-survey-workface.native.v1', phase, selectedCase, pid: process.pid, passed: false, businessPassed: false, cases: [], cli: [], ipc: [], closeCalls: [], frames: [], physicalInputQualified: false, independentVisualReview: 'not-performed', boundary: 'Actual production App/Survey/Region projection, full preload/registerIpc/Core/compiled CLI and private native pages in two PIDs. Repository fake Provider over actual ctxmux is not an authenticated upstream model or user Session. CDP/explicit fixture input is not physical OS input.' }
@@ -111,15 +113,21 @@ async function run() {
  access=createDesktopApplicationAccessOwner(runtime,join(directory,'application-access.sqlite'))
  let rejectSurveyWrites=false, rejectedWrites=0, rejectedSurveyBrowserId:string|null=null, loseProfileDirectoryAck=selectedCase==='profile-switch'&&phase==='first'
  const switchPorts=selectedCase==='profile-switch'||selectedCase==='complete'?profileSwitchPorts(window,receipt,enabled=>{loseProfileDirectoryAck=enabled},browserId=>{rejectSurveyWrites=browserId!==null;rejectedSurveyBrowserId=browserId},()=>{rejectSurveyWrites=true;rejectedSurveyBrowserId=null}):null
- const completeObserver=selectedCase==='complete'||selectedCase==='context-menu'?completePorts(receipt):null
+ const completeObserver=['complete','context-menu','address-selection'].includes(selectedCase)?completePorts(receipt):null
  const completeReaders:ReturnType<typeof cliFollow>[]=[]
  let holdProbeAck=false, releaseProbeAck: ((lose:boolean)=>void)|undefined
+ let releaseAddressDetails: (() => void) | undefined
+ const releaseDetails = () => { receipt.addressDetailsReleased = true; releaseAddressDetails?.() }
  const probeAck={hold(){holdProbeAck=true},release(lose:boolean){releaseProbeAck?.(lose)}}
  releaseObservationFaults=()=>{switchPorts?.dispose();completeObserver?.dispose();for(const reader of completeReaders)void reader.dispose();rejectSurveyWrites=false;loseProfileDirectoryAck=false;probeAck.release(false)}
  const userState=new WorkbenchUserStateStore(join(directory,'workbench-user-state.json'),{write:async(path,value,options)=>{const parsed=JSON.parse(String(value));if(rejectSurveyWrites&&path.endsWith('workbench-user-state.json')&&parsed.state?.surveyPageReferences?.some((page:any)=>page.browserId===rejectedSurveyBrowserId)){rejectedWrites++;if(selectedCase==='profile-switch')(receipt.profileSwitchPreferenceFailures??=[]).push({browserId:rejectedSurveyBrowserId});throw Object.assign(new Error('Private fixture original preference writer unavailable'),{code:'EIO'})}return durableWriteFile(path,value,options)}})
  const originalSend=contents.send.bind(contents);contents.send=(channel,...args)=>{completeObserver?.event(channel,args);if(loseProfileDirectoryAck&&channel==='browser:profilesChanged'){receipt.droppedProfileListPushes=(receipt.droppedProfileListPushes??0)+1;return}if(switchPorts?.observeSend(channel,args,originalSend))return;originalSend(channel,...args)}
  const originalHandle=ipcMain.handle.bind(ipcMain);ipcMain.handle=(channel,handler)=>originalHandle(channel,async(event,...args)=>{
   if(channel.startsWith('browser:')||channel==='ui:writeWorkbenchState'||selectedCase==='complete'&&channel.startsWith('ui:workbenchWindows'))receipt.ipc.push({channel,exactSender:event.sender===contents,exactFrame:event.senderFrame===contents.mainFrame})
+  if (selectedCase === 'address-selection' && channel === 'browser:listInputHistory' && args[1] !== 'saved' && !receipt.addressDetailsReleased) {
+   receipt.addressDetailsHeld = true
+   await new Promise<void>(resolve => { releaseAddressDetails = resolve })
+  }
   const close=channel==='browser:close'?{browserId:args[0],ack:'pending'}:null
   if(close)receipt.closeCalls.push(close)
   let observed
@@ -139,6 +147,11 @@ async function run() {
  const click=async(selector:string)=>{const point=await until(()=>evaluate(`(()=>{const e=[...document.querySelectorAll(${JSON.stringify(selector)})].find(node=>node.checkVisibility());if(!e)return null;e.scrollIntoView({block:'nearest'});const r=e.getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2}})()`),'actual pointer target');for(const type of ['mouseMoved','mousePressed','mouseReleased'])await contents.debugger.sendCommand('Input.dispatchMouseEvent',{type,x:point.x,y:point.y,...(type==='mouseMoved'?{}:{button:'left',clickCount:1})});await delay(80)}
  receipt.initial=await facts()
  assert.ok(await evaluate('Boolean(document.querySelector(".surface-navigation"))'),'Full production App must mount')
+ if (selectedCase === 'address-selection') {
+  assert.ok(completeObserver)
+  await addressSelectionCase({ directory, window, observation: completeObserver, evaluate, result, receipt, workspaceId, pageUrl, releaseDetails })
+  receipt.businessPassed = true; receipt.passed = true; return
+ }
  if(selectedCase==='context-menu'){
   assert.ok(completeObserver)
   receipt.boundary='Two private production Desktop App processes with original BrowserViewManager, Renderer, preload and CLI. Chromium receives guest and chrome pointer and key events. The fixture supplies the native window focus observation and never operates the current user App.'

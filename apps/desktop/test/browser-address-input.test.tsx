@@ -78,7 +78,7 @@ it('keyboard intent opens suggestions from a quietly focused field without navig
 
 it('uses the actual Main list, portal and keyboard selection to submit the original query and fragment', async () => {
   await mount(); await activate()
-  expect(api.browser.listInputHistory).toHaveBeenCalledExactlyOnceWith(target)
+  expect(vi.mocked(api.browser.listInputHistory).mock.calls).toEqual([[target, 'saved'], [target]])
   expect(popup()?.closest('[data-overlay-host]')).not.toBeNull()
   expect(historyTexts()).toEqual(snapshot.entries.map(entry => entry.text))
   await key('ArrowDown'); await key('Enter')
@@ -95,6 +95,39 @@ it('mouse selection submits the original search and ArrowUp initially selects th
   expect(choices).toHaveLength(2); await act(async () => choices[1]!.click())
   expect(submitted).toHaveBeenCalledExactlyOnceWith('original search')
   expect(api.browser.recordInputHistory).toHaveBeenCalledExactlyOnceWith(target, 'original search')
+})
+
+it('offers the original site ahead of a same-name search and submits exactly the clicked address', async () => {
+  const address = 'https://field-guide.test/manual?q=keep%2Bcase#part'
+  vi.mocked(api.browser.listInputHistory).mockResolvedValue({ ...snapshot, entries: [
+    { text: 'field guide', submittedAt: 2 },
+    { text: address, submittedAt: 1, appearance: { url: address, title: 'Field Guide' } }
+  ] })
+  await mount(); await activate(); await fill('field guide')
+  expect(historyTexts()).toEqual([address, 'field guide'])
+  const button = popup()!.querySelector<HTMLButtonElement>('.browser-address-history__choose')!
+  const press = new PointerEvent('pointerdown', { bubbles: true, cancelable: true, button: 0 })
+  await act(async () => { button.dispatchEvent(press) })
+  expect(document.activeElement).toBe(field())
+  await act(async () => { button.click() })
+  expect(submitted).toHaveBeenCalledExactlyOnceWith(address)
+  expect(api.browser.recordInputHistory).toHaveBeenCalledExactlyOnceWith(target, address)
+})
+
+it('shows cached candidates while refreshing and keeps an explicitly chosen address when rows move', async () => {
+  const pending = deferred<BrowserInputHistorySnapshot>()
+  const a = { text: 'https://field-guide.test/original', submittedAt: 1, appearance: { url: 'https://field-guide.test/original', title: 'Field Guide' } }
+  const b = { text: 'https://other.test/', submittedAt: 2, appearance: { url: 'https://other.test/', title: 'Field Guide' } }
+  vi.mocked(api.browser.listInputHistory).mockResolvedValueOnce({ ...snapshot, entries: [a] })
+    .mockResolvedValueOnce({ ...snapshot, entries: [a] }).mockReturnValueOnce(pending.promise)
+  await mount(); await activate(); await key('Escape'); await activate(); await fill('field guide')
+  expect(historyTexts()).toEqual([a.text])
+  await key('ArrowDown')
+  await act(async () => pending.resolve({ ...snapshot, entries: [b, a] }))
+  expect(historyTexts()).toEqual([b.text, a.text])
+  expect(popup()!.querySelector('[aria-selected="true"] button')?.getAttribute('title')).toBe(a.text)
+  await key('Enter')
+  expect(submitted).toHaveBeenCalledExactlyOnceWith(a.text)
 })
 
 it('Escape invalidates a real deferred suggestion read and the late reply cannot reopen the popup', async () => {
@@ -141,7 +174,7 @@ it('keeps filtering an edited draft after focus leaves and returns', async () =>
 it('typing during a real deferred suggestion read keeps the draft and selection while confirming the actual nonempty history', async () => {
   const pending = deferred<BrowserInputHistorySnapshot>(); vi.mocked(api.browser.listInputHistory).mockReturnValue(pending.promise)
   await mount(); await activate(); await fill('original'); field().setSelectionRange(2, 4)
-  expect(popup()?.textContent).toContain('Reading input history')
+  expect(popup()?.textContent).toContain('Search the web')
   expect(popup()?.textContent).not.toContain('No saved input yet')
   await act(async () => pending.resolve(snapshot))
   expect(field().value).toBe('original'); expect([field().selectionStart, field().selectionEnd]).toEqual([2, 4])
@@ -311,7 +344,7 @@ it('[address-suggestions] saved artwork gives a real title, URL and visible matc
   expect(popup()!.querySelector('img')?.getAttribute('src')).toBe(appearance.faviconDataUrl)
   expect(inspect).not.toHaveBeenCalled(); expect(capture).not.toHaveBeenCalled()
   await nativeEdit('R'); await nativeEdit('Re'); await nativeEdit('Ref')
-  expect(api.browser.listInputHistory).toHaveBeenCalledTimes(1)
+  expect(vi.mocked(api.browser.listInputHistory).mock.calls).toEqual([[target, 'saved'], [target]])
 })
 
 it('[address-suggestions] malformed explicit input remains available as its original submission, with no fake search or deletion', async () => {
@@ -340,7 +373,7 @@ it('[address-suggestions] a later exact favicon replaces a failed image without 
   await key('Escape'); await activate()
   const updated = popup()!.querySelector<HTMLImageElement>('img')!
   expect(updated).not.toBe(failed); expect(updated.hidden).toBe(false)
-  expect(api.browser.listInputHistory).toHaveBeenCalledTimes(2)
+  expect(vi.mocked(api.browser.listInputHistory).mock.calls).toEqual([[target, 'saved'], [target], [target]])
 })
 
 it('[address-appearance] closed and redirected pages retain their stored title and icon while selecting the original input', async () => {
@@ -358,7 +391,7 @@ it('[address-appearance] closed and redirected pages retain their stored title a
   expect(row.querySelector('img')?.getAttribute('src')).toBe(redirectedAppearance.faviconDataUrl)
   expect(row.querySelector('mark')?.textContent).toBe('Archived')
   expect(targets).not.toHaveBeenCalled(); expect(preview).not.toHaveBeenCalled()
-  await key('ArrowUp'); await key('Enter')
+  await key('ArrowDown'); await key('Enter')
   expect(submitted).toHaveBeenCalledExactlyOnceWith(snapshot.entries[0]!.text)
   expect(api.browser.recordInputHistory).toHaveBeenCalledExactlyOnceWith(target, snapshot.entries[0]!.text)
 })
@@ -381,7 +414,7 @@ it('[address-appearance] stored title survives missing artwork and a bad image k
 
 it('[existing-appearance] a detail warning keeps original history and navigation, then Retry can recover real metadata', async () => {
   const warning = 'Some saved page details could not be read. Your input history and browsing remain available.'
-  vi.mocked(api.browser.listInputHistory).mockResolvedValueOnce({ ...snapshot, warning })
+  vi.mocked(api.browser.listInputHistory).mockResolvedValueOnce(snapshot).mockResolvedValueOnce({ ...snapshot, warning })
   await mount(target, 'kept draft'); await activate()
   expect(historyTexts()).toEqual(snapshot.entries.map(entry => entry.text))
   expect(popup()!.querySelector('[role="status"]')?.textContent).toContain(warning)
@@ -435,7 +468,7 @@ it('[history-retry] returns keyboard recovery to the original draft and reads th
   await act(async () => retry.focus())
   expect(document.activeElement).toBe(retry)
   await act(async () => retry.click())
-  expect(api.browser.listInputHistory).toHaveBeenCalledTimes(2)
+  expect(vi.mocked(api.browser.listInputHistory).mock.calls).toEqual([[target, 'saved'], [target, 'saved'], [target]])
   expect(api.browser.listInputHistory).toHaveBeenLastCalledWith(target)
   expect(document.activeElement).toBe(field())
   expect(field().value).toBe('kept recovery draft')
