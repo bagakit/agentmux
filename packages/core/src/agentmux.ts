@@ -231,7 +231,7 @@ async function main(): Promise<number> {
     }
     if (method === 'browser.run') invocation.params.code = await readStdin()
     if (method === 'file.write') invocation.params = parseFileWriteParams({ ...invocation.params, content: await readStdin() }) as unknown as Record<string, unknown>
-    if (method === 'browser.task.run') {
+    if (method === 'browser.task.run' && invocation.params.parameters === undefined) {
       const text = await readStdin(65_536)
       try { invocation.params.parameters = text.trim() ? JSON.parse(text) : {} }
       catch { throw new AgentMuxError('Task parameters must be a JSON object on stdin.', 'INVALID_CLI_ARGUMENT') }

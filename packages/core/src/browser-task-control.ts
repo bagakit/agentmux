@@ -3,6 +3,8 @@ import { AgentMuxError } from './errors.js'
 import { rpcRecord } from './rpc-data.js'
 import { parseBrowserTaskCreateInput, type BrowserTaskCreateInput, type BrowserTaskCreateStatus } from './browser-task-creation.js'
 export * from './browser-task-creation.js'
+import { parseBrowserTaskInvocation, type BrowserTaskInvocationCalls } from './browser-task-invocation.js'
+export * from './browser-task-invocation.js'
 
 export type AgentMuxBrowserTaskSource = { id: string; browserId: string; revision: number; status: 'recording' | 'stopped' | 'interrupted'; stepCount: number; warning?: string }
 export type AgentMuxBrowserTaskDraft = { id: string; browserId: string; revision: number; sourceRecordingId?: string; importedFrom?: BrowserTaskPortableSource; draft: Record<string, unknown>; warning?: string }
@@ -16,6 +18,9 @@ export type BrowserTaskPortableBinding = { kind: 'portable'; createOperationId: 
 
 export type BrowserTaskRunStatus = 'ready' | 'running' | 'waiting-human' | 'completed' | 'interrupted' | 'failed' | 'stopped'
 export type BrowserTaskReliabilityResult = 'passed' | 'not-met' | 'unavailable' | 'unknown' | 'failed' | 'stopped' | 'interrupted'
+export type BrowserTaskRunParent = { runId: string; stepId: string; itemId: string }
+export type BrowserTaskCallProgress = { stepId: string; assetId: string; version: number; nextItem: number; items: { id: string; runId?: string }[] }
+export type AgentMuxBrowserTaskInspection = { rootRunId: string; currentRunId: string; runs: AgentMuxBrowserTaskRun[]; operationCount: number; executedMillis: number }
 
 /**
  * Typed Client facts only. Core neither interprets steps nor owns workflow execution.
@@ -31,6 +36,8 @@ export type AgentMuxBrowserTaskRun = {
   /** Steps whose known script failure was recorded so the path could continue or jump; a run with any entry never completes. */
   failedSteps?: { stepId: string; operationId: string }[]
   executedMillis?: number
+  parent?: BrowserTaskRunParent
+  calls?: BrowserTaskCallProgress[]
   startedAt: number; updatedAt: number; warning?: string; completionWarning?: string
 }
 export type AgentMuxBrowserTaskBatch = {
@@ -66,11 +73,12 @@ export type BrowserTaskControlPayload =
   | { operation: 'browser.task.create'; browserId: string; input: BrowserTaskCreateInput }
   | { operation: 'browser.task.create-inspect'; browserId: string; input: BrowserTaskCreateInput }
   | { operation: 'browser.task.assets'; browserId: string }
+  | { operation: 'browser.task.inspect'; browserId: string; runId?: string }
   | { operation: 'browser.task.edit'; browserId: string; assetId: string; expectedRevision: number; content: Record<string, unknown> }
   | { operation: 'browser.task.publish'; browserId: string; assetId: string; expectedRevision: number }
   | { operation: 'browser.task.batch'; browserId: string; assetId: string; version: number; items: { id: string; parameters: Record<string, string> }[]; parameters: Record<string, string>; batchId?: string }
   | { operation: 'browser.task.batch-stop'; browserId: string; batchId: string }
-  | { operation: 'browser.task.run'; browserId: string; assetId: string; version: number; parameters: Record<string, string>; mode?: 'run' | 'step'; runId?: string }
+  | { operation: 'browser.task.run'; browserId: string; assetId: string; version: number; parameters: Record<string, string>; calls?: BrowserTaskInvocationCalls; mode?: 'run' | 'step'; runId?: string }
   | { operation: 'browser.task.stop'; browserId: string; runId: string }
   | { operation: 'browser.task.reliability'; browserId: string; assetId: string; version: number }
 /** Confirmed write identity; cumulative definition/version history is read separately. */
@@ -84,6 +92,7 @@ export type BrowserTaskControlResult =
   | { operation: 'browser.task.create'; creation: { createOperationId: string; assetId: string; browserId: string; status: 'created' } }
   | { operation: 'browser.task.create-inspect'; creation: BrowserTaskCreateStatus }
   | { operation: 'browser.task.assets'; state: AgentMuxBrowserTaskState }
+  | { operation: 'browser.task.inspect'; inspection: AgentMuxBrowserTaskInspection | null }
   | { operation: 'browser.task.edit'; asset: AgentMuxBrowserTaskAssetReceipt }
   | { operation: 'browser.task.publish'; asset: AgentMuxBrowserTaskAssetReceipt; publishedVersion: number }
   | { operation: 'browser.task.batch'; batch: AgentMuxBrowserTaskBatch }
@@ -97,7 +106,7 @@ const RESULTS: BrowserTaskReliabilityResult[] = ['passed', 'not-met', 'unavailab
 const MAX_BYTES = 1_048_576
 
 export function isBrowserTaskControlOperation(operation: string): operation is BrowserTaskControlPayload['operation'] {
-  return operation === 'browser.task.export' || operation === 'browser.task.import' || operation === 'browser.task.import-inspect' || operation === 'browser.task.source' || operation === 'browser.task.draft' || operation === 'browser.task.create' || operation === 'browser.task.create-inspect' || operation === 'browser.task.assets' || operation === 'browser.task.edit' || operation === 'browser.task.publish' || operation === 'browser.task.batch' || operation === 'browser.task.batch-stop' || operation === 'browser.task.run' || operation === 'browser.task.stop' || operation === 'browser.task.reliability'
+  return operation === 'browser.task.export' || operation === 'browser.task.import' || operation === 'browser.task.import-inspect' || operation === 'browser.task.source' || operation === 'browser.task.draft' || operation === 'browser.task.create' || operation === 'browser.task.create-inspect' || operation === 'browser.task.assets' || operation === 'browser.task.inspect' || operation === 'browser.task.edit' || operation === 'browser.task.publish' || operation === 'browser.task.batch' || operation === 'browser.task.batch-stop' || operation === 'browser.task.run' || operation === 'browser.task.stop' || operation === 'browser.task.reliability'
 }
 
 function bad(message: string, request = false): never {
@@ -212,12 +221,24 @@ export function parseBrowserTaskControlPayload(value: unknown): BrowserTaskContr
     const common = { browserId, assetId: identifier(source.assetId, true), expectedRevision: integer(source.expectedRevision, true, 1) }
     return source.operation === 'browser.task.edit' ? { operation: source.operation, ...common, content: definition(source.content, true) } : { operation: source.operation, ...common }
   }
+  if (source.operation === 'browser.task.inspect') {
+    rpcRecord(source, ['operation', 'browserId', 'runId', 'schemaVersion', 'requestId'])
+    return { operation: source.operation, browserId, ...(source.runId === undefined ? {} : { runId: identifier(source.runId, true) }) }
+  }
   if (source.operation === 'browser.task.assets') return { operation: source.operation, browserId }
   if (source.operation === 'browser.task.batch-stop') return { operation: source.operation, browserId, batchId: identifier(source.batchId, true) }
   if (source.operation === 'browser.task.stop') return { operation: source.operation, browserId, runId: identifier(source.runId, true) }
   if (source.operation !== 'browser.task.run' && source.operation !== 'browser.task.reliability' && source.operation !== 'browser.task.batch') bad('Browser task operation is invalid.', true)
   const assetId = identifier(source.assetId, true), version = integer(source.version, true, 1)
   if (source.operation === 'browser.task.reliability') return { operation: source.operation, browserId, assetId, version }
+  if (source.operation === 'browser.task.run') {
+    rpcRecord(source, ['operation', 'browserId', 'assetId', 'version', 'parameters', 'calls', 'mode', 'runId', 'schemaVersion', 'requestId', 'caller'], 'INVALID_CONTROL_REQUEST')
+    const invocation = parseBrowserTaskInvocation({ parameters: source.parameters, ...(source.calls === undefined ? {} : { calls: source.calls }) })
+    if (source.mode !== undefined && source.mode !== 'run' && source.mode !== 'step') bad('Browser task execution mode is invalid.', true)
+    return { operation: source.operation, browserId, assetId, version, ...invocation,
+      ...(source.mode === undefined ? {} : { mode: source.mode }),
+      ...(source.runId === undefined ? {} : { runId: identifier(source.runId, true) }) }
+  }
   const supplied = record(source.parameters, true), entries = Object.entries(supplied)
   if (entries.length > 32) bad('Browser task parameter budget exceeded.', true)
   let bytes = 0
@@ -240,10 +261,7 @@ export function parseBrowserTaskControlPayload(value: unknown): BrowserTaskContr
     return { operation: source.operation, browserId, assetId, version, parameters: Object.fromEntries(entries) as Record<string, string>, items,
       ...(source.batchId === undefined ? {} : { batchId: identifier(source.batchId, true) }) }
   }
-  if (source.mode !== undefined && source.mode !== 'run' && source.mode !== 'step') bad('Browser task execution mode is invalid.', true)
-  return { operation: source.operation, browserId, assetId, version, parameters: Object.fromEntries(entries) as Record<string, string>,
-    ...(source.mode === undefined ? {} : { mode: source.mode }),
-    ...(source.runId === undefined ? {} : { runId: identifier(source.runId, true) }) }
+  bad('Browser task operation is invalid.', true)
 }
 
 function run(value: unknown): AgentMuxBrowserTaskRun {
@@ -281,7 +299,51 @@ function run(value: unknown): AgentMuxBrowserTaskRun {
     ...(stepExecutions === undefined ? {} : { stepExecutions }), ...(branchDecisions === undefined ? {} : { branchDecisions }),
     ...(failedSteps === undefined ? {} : { failedSteps }),
     ...(source.executedMillis === undefined ? {} : { executedMillis: time(source.executedMillis) }),
+    ...(source.parent === undefined ? {} : { parent: parseBrowserTaskRunParent(source.parent) }),
+    ...(source.calls === undefined ? {} : { calls: parseBrowserTaskCallProgress(source.calls) }),
     ...(source.pendingCheckpointId === undefined ? {} : { pendingCheckpointId: identifier(source.pendingCheckpointId) }), ...notices(source) }
+}
+export function parseBrowserTaskRunParent(value: unknown): BrowserTaskRunParent {
+  const row = rpcRecord(value, ['runId', 'stepId', 'itemId'], 'CONTROL_PROTOCOL_ERROR')
+  return { runId: identifier(row.runId), stepId: identifier(row.stepId), itemId: identifier(row.itemId) }
+}
+export function parseBrowserTaskCallProgress(value: unknown): BrowserTaskCallProgress[] {
+  const calls = bounded(value, 32).map(value => {
+    const row = rpcRecord(value, ['stepId', 'assetId', 'version', 'nextItem', 'items'], 'CONTROL_PROTOCOL_ERROR')
+    const items = bounded(row.items, 16).map(value => {
+      const item = rpcRecord(value, ['id', 'runId'], 'CONTROL_PROTOCOL_ERROR')
+      return { id: identifier(item.id), ...(item.runId === undefined ? {} : { runId: identifier(item.runId) }) }
+    })
+    const nextItem = integer(row.nextItem)
+    if (!items.length || nextItem > items.length || new Set(items.map(item => item.id)).size !== items.length || items.slice(0, nextItem).some(item => !item.runId)) bad('Task call progress is inconsistent.')
+    return { stepId: identifier(row.stepId), assetId: identifier(row.assetId), version: integer(row.version, false, 1), nextItem, items }
+  })
+  if (new Set(calls.map(call => call.stepId)).size !== calls.length) bad('Task call identity is duplicated.')
+  return calls
+}
+function inspection(value: unknown): AgentMuxBrowserTaskInspection {
+  const row = rpcRecord(value, ['rootRunId', 'currentRunId', 'runs', 'operationCount', 'executedMillis'], 'CONTROL_PROTOCOL_ERROR')
+  const runs = bounded(row.runs, 33).map(run), rootRunId = identifier(row.rootRunId), currentRunId = identifier(row.currentRunId)
+  const byId = new Map(runs.map(run => [run.id, run]))
+  if (byId.size !== runs.length || !byId.has(rootRunId) || byId.get(rootRunId)!.parent || !byId.has(currentRunId)) bad('Task inspection has no exact original root or cursor.')
+  const visited = new Set<string>()
+  const visit = (id: string, depth: number): void => {
+    if (depth > 4 || visited.has(id)) bad('Task inspection contains a cyclic or excessive call tree.')
+    visited.add(id)
+    const parent = byId.get(id)!
+    for (const call of parent.calls ?? []) for (const item of call.items) {
+      if (!item.runId) continue
+      const child = byId.get(item.runId)
+      if (!child || child.browserId !== parent.browserId || child.assetId !== call.assetId || child.version !== call.version ||
+          child.parent?.runId !== id || child.parent.stepId !== call.stepId || child.parent.itemId !== item.id) bad('Task child is not bound to its original call item.')
+      visit(child.id, depth + 1)
+    }
+  }
+  visit(rootRunId, 1)
+  const operationCount = integer(row.operationCount), executedMillis = time(row.executedMillis)
+  if (visited.size !== runs.length || operationCount !== runs.reduce((sum, run) => sum + run.operationIds.length, 0) ||
+      executedMillis !== runs.reduce((sum, run) => sum + (run.executedMillis ?? 0), 0)) bad('Task inspection costs do not match its original runs.')
+  return { rootRunId, currentRunId, runs, operationCount, executedMillis }
 }
 function batch(value: unknown): AgentMuxBrowserTaskBatch {
   const source = record(value), items = bounded(source.items, 16).map(value => {
@@ -390,6 +452,7 @@ export function parseBrowserTaskControlResult(operation: BrowserTaskControlPaylo
     }
     case 'browser.task.batch': return { operation, batch: batch(source.batch) }
     case 'browser.task.batch-stop': return { operation, batch: source.batch === null ? null : batch(source.batch) }
+    case 'browser.task.inspect': return { operation, inspection: source.inspection === null ? null : inspection(source.inspection) }
     case 'browser.task.run': return { operation, run: run(source.run) }
     case 'browser.task.stop': return { operation, run: source.run === null ? null : run(source.run) }
     case 'browser.task.reliability': return { operation, reliability: reliability(source.reliability) }
@@ -404,6 +467,8 @@ export function assertBrowserTaskControlTarget(request: BrowserTaskControlPayloa
     if (result.creation.browserId !== request.browserId || result.creation.assetId !== request.input.assetId || result.creation.createOperationId !== request.input.createOperationId) bad('Task import receipt belongs to another original request.')
   } else if (request.operation === 'browser.task.source' && result.operation === request.operation) {
     if (result.browserId !== request.browserId || result.source && result.source.browserId !== request.browserId) bad('Task source belongs to another Browser.')
+  } else if (request.operation === 'browser.task.inspect' && result.operation === request.operation) {
+    if (result.inspection && (result.inspection.runs.some(run => run.browserId !== request.browserId) || request.runId && !result.inspection.runs.some(run => run.id === request.runId))) bad('Task inspection belongs to another original run or Browser.')
   } else if (request.operation === 'browser.task.draft' && result.operation === request.operation) {
     if (result.asset.browserId !== request.browserId || result.asset.id !== request.assetId) bad('Task draft belongs to another asset.')
   } else if (request.operation === 'browser.task.create' && result.operation === request.operation) {

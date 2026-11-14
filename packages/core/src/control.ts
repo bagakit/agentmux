@@ -1225,6 +1225,7 @@ const OPERATION_BUDGET: Record<AgentMuxControlRequest['operation'], 'long' | 'sh
   'browser.task.create': 'short',
   'browser.task.create-inspect': 'short',
   'browser.task.assets': 'short',
+  'browser.task.inspect': 'short',
   'browser.task.edit': 'short',
   'browser.task.publish': 'short',
   'browser.task.reliability': 'short',

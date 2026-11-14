@@ -40,6 +40,7 @@ import { parseDiagnosticEvidenceParams } from './diagnostic-evidence-codec.js'
 import { CLIENT_NOTIFICATION_CATEGORIES, CLIENT_NOTIFICATIONS_MAX_PAGE, parseClientNotificationsTarget } from './client-notifications.js'
 import { parseMotePreferencesReadInput, parseMotePreferencesSaveParams } from './mote-preferences.js'
 import { readControlJsonInput } from './cli-json-input.js'
+import { rpcRecord } from './rpc-data.js'
 import { parseSessionHistoryResourceParams } from './session-history-resource.js'
 import { parseNativeHistoryParams, parseNativeHistoryResourceParams } from './public-rpc-native-history.js'
 import { AgentMuxError } from './errors.js'
@@ -749,10 +750,15 @@ export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
     value(f, '--version', true)
     return { browserId: id(f, '--browser', true), assetId: id(f, '--asset'), ...numbers(f, { '--version': 'version' }) }
   }),
-  command('browser.task.run', '--browser ID --asset ID --version N [--step] [--run ID] < parameters.json', 'Run an immutable task version with fresh stdin parameters.', { '--browser': 'data', '--asset': 'data', '--version': 'value', '--step': 'boolean', '--run': 'data' }, f => {
+  command('browser.task.run', '--browser ID --asset ID --version N [--step] [--run ID] [--input FILE|-] [< parameters.json]', 'Run an immutable task version with fresh parameters and optional finite subflow call items.', { '--browser': 'data', '--asset': 'data', '--version': 'value', '--step': 'boolean', '--run': 'data', '--input': 'data' }, async f => {
     value(f, '--version', true)
-    return { browserId: id(f, '--browser', true), assetId: id(f, '--asset'), ...numbers(f, { '--version': 'version' }), ...(f.booleans.has('--step') ? { mode: 'step' } : {}), ...fields(f, { '--run': 'runId' }) }
-  }, 'Only an existing immutable version runs. Fresh JSON object parameters are bounded to 64 KiB and never enter the saved asset or durable progress. This cannot approve a human checkpoint or reclaim human input ownership.'),
+    const input = value(f, '--input')
+    const invocation = input === undefined ? {} : rpcRecord(await readControlJsonInput(input, 'Browser task invocation'), ['parameters', 'calls'], 'INVALID_CLI_ARGUMENT')
+    return { browserId: id(f, '--browser', true), assetId: id(f, '--asset'), ...numbers(f, { '--version': 'version' }), ...(f.booleans.has('--step') ? { mode: 'step' } : {}), ...fields(f, { '--run': 'runId' }),
+      ...(input === undefined ? {} : { parameters: invocation.parameters ?? {}, ...(invocation.calls === undefined ? {} : { calls: invocation.calls }) }) }
+  }, 'Only an existing immutable version runs. Without --input, stdin is one flat JSON object of parameters. --input carries {parameters, calls}: calls maps a subflow step id to {parameters, items:[{id, parameters, calls?}]} — once takes exactly 1 item, each takes 1–16, nesting up to 4 levels and 32 child runs per invocation. Continue supplies the same item ids in the same order with fresh values; completed items are not rerun. All values together are bounded to 64 KiB and never enter the saved asset or durable progress. This cannot approve a human checkpoint or reclaim human input ownership.'),
+  command('browser.task.inspect', '--browser ID [--run ID]', 'Read one exact task run tree: root, subflow call items, child runs, cursors, operation ids and shared cost.', { '--browser': 'data', '--run': 'data' }, f => ({ browserId: id(f, '--browser', true), ...fields(f, { '--run': 'runId' }) }),
+    'Without --run this reads the Browser\'s original selected run, or null. A child run id returns its whole original tree. Asset bodies, fresh values and human approval payloads are never returned.'),
   command('browser.task.batch', '--browser ID --asset ID --version N [--batch ID] < batch.json', 'Run a bounded list of items through the original immutable task version.', { '--browser': 'data', '--asset': 'data', '--version': 'value', '--batch': 'data' }, f => {
     value(f, '--version', true)
     return { browserId: id(f, '--browser', true), assetId: id(f, '--asset'), ...numbers(f, { '--version': 'version' }), ...fields(f, { '--batch': 'batchId' }) }
