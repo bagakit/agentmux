@@ -34,6 +34,10 @@ beforeEach(() => {
     expect(path).toBe(logical)
     return files.map(name => ({ name, path: `${logical}/${name}`, isDirectory: false, isSymlink: false }))
   })
+  // Selecting a file row opens it. The same fixture files must exist for both listing and reading.
+  vi.spyOn(api.files, 'read').mockImplementation(async (id, path) => id === workspace.id && addresses.includes(path)
+    ? { status: 'read', document: { path, content: path, revision: 'fixture-revision' } }
+    : { status: 'deleted' })
   clipboard = vi.spyOn(api.ui, 'writeClipboardText').mockResolvedValue(undefined)
   report = vi.fn()
   Object.defineProperty(window, 'agentmux', { configurable: true, value: { git: {
