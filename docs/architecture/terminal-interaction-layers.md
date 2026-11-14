@@ -262,15 +262,11 @@ A 的三种触发共用选区这一个数据源，所以它们同时失效时，
 
 ## 6. 链接
 
-裸 URL 与 OSC 8 两个 provider 共用 [TerminalView.tsx](../../apps/desktop/src/renderer/src/components/TerminalView.tsx) attach 流程里的同一个局部激活函数 `activateLink`（悬停读出共用 `hoverLink`）。`activateLink` 先经 `isTerminalLinkClick` 排除拖选、右键与 macOS 的 Ctrl+点击，再按目标协议分流：`amux:` 对象链接交给 `api.ui.openObjectLink`（Alt+主键属于 TUI 鼠标透传，不在本地打开），HTTP(S) 经 `parseHttpLinkUrl` 后，平台修饰键点击（`terminalLinkModifierOpensSystemBrowser`）直接走系统浏览器，普通点击打开目的地选择面，其余协议明确报错。
+[TerminalView](../../apps/desktop/src/renderer/src/components/TerminalView.tsx) 的普通链接和 xterm 原生 OSC 8 回调都进入同一个激活和悬停出口。手势经 `isTerminalLinkClick` 核对，文件进入原文件服务，`amux:` 进入 Core 的对象地址入口，HTTP(S) 沿目的地选择或平台修饰键快路打开。
 
-- **裸文本 URL**：`WebLinksAddon(activateLink, …)`，正则为 [terminal-http-link.ts](../../apps/desktop/src/renderer/src/lib/terminal-http-link.ts): `TERMINAL_LINK_URL_REGEX`，它由 `TERMINAL_HTTP_URL_REGEX`（在 xterm 的严格语法上加了 CJK 边界，避免 URL 后的中文被吞进链接）与 `amux://` 对象地址组成。
-- **OSC 8 超链接**：xterm 内建的 `OscLinkProvider`，激活函数取自 `terminal.options.linkHandler`。TerminalView 显式设置 `linkHandler`（`allowNonHttpProtocols: true`，`activate` 指向 `activateLink`）；不设置时它会退回 xterm 自带的 `confirm()` 加 `window.open`，而这条默认路径不含任何 AgentMux 字符串，源码与包内 grep 都发现不了。
-- **文件路径**：`terminal.registerLinkProvider` 加纯函数 [terminal-path-link.ts](../../packages/client-ui/src/lib/terminal-path-link.ts): `detectTerminalPathLinks`，只算字符串，热路径不碰磁盘和 IPC。
-
-HTTP scheme 闸只有一处：[link-url.ts](../../packages/client-ui/src/lib/link-url.ts): `parseHttpLinkUrl`，只放行 http/https。它不放在组件里，非 xterm 的表面（对话正文）也能引用，而不必在模块加载时引入 xterm。
-
-`~/` 展开（[terminal-path-link.ts](../../packages/client-ui/src/lib/terminal-path-link.ts): `resolveWorkspaceRelativePath`）先按 `homeDir` 展开，再走与绝对路径相同的工作区内判定。所以 `~/proj/src/x.ts` 在工作区内可以跳转，而 `~/.claude/plugins/...` 落在工作区外，拒绝方式与工作区外的系统配置文件相同。`~user/` 与裸 `~` 都不匹配。
+- [单元格窗口](../../apps/desktop/src/renderer/src/lib/terminal-link-range.ts) 按真实软换行和字符宽度映射范围，同一结果供左键、悬停和右键消费。原生 OSC 8 声明占用其单元格，未知目标也保护标签；本例程补齐原生 provider 漏掉的单格行尾标签。
+- [目标分类](../../apps/desktop/src/renderer/src/lib/terminal-link-target.ts) 将裸 URI 与显式声明分别识别，再使用共享的 [HTTP 校验](../../packages/client-ui/src/lib/link-url.ts)、[路径语法和 Workspace 归一化](../../packages/client-ui/src/lib/terminal-path-link.ts)。裸 URI 的文本优先保留，文件候选不会从 URL 查询或混杂方案中再起一条链接。
+- [原文件上下文](../../apps/desktop/src/renderer/src/lib/session-project-file-context.ts) 提供文件的 Workspace、Host 和本机 home，当前 Region 只决定展示位置。系统打开和文件管理器定位再经 Main 的真实资源边界。热点识别只读当前相关单元格，不做文件探测或 IPC。
 
 ---
 
