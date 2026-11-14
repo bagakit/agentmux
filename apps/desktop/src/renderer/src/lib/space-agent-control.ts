@@ -204,14 +204,13 @@ export function planSpatialZone(state: SpatialWorkbench, topics: readonly Scratc
 }
 
 export async function createSpatialZone(ports: Pick<SpatialControlPorts, 'get' | 'patch' | 'topics' | 'save' | 'notice'>,
-  input: { workspaceId: string; spaceIds: readonly string[]; onPrepared?(zone: AgentMuxZoneFact): void }): Promise<{ zone: AgentMuxZoneFact; save: AgentMuxSpatialSave; issues: AgentMuxSpatialIssue[] }> {
+  input: { workspaceId: string; spaceIds: readonly string[] }): Promise<{ zone: AgentMuxZoneFact; save: AgentMuxSpatialSave; issues: AgentMuxSpatialIssue[] }> {
   const notices: AgentMuxSpatialIssue[] = []
   let topics: readonly ScratchTopicSnapshot[] = []
   if (input.spaceIds.length) try { topics = await ports.topics() } catch (error) { const notice = issue('discovery', 'SPACE_DISCOVERY_UNCONFIRMED', error); notices.push(notice); ports.notice(notice) }
   const plan = planSpatialZone(ports.get(), topics, { ...input, zoneId: mintObjectId() })
   ports.patch({ spaceZoneBindings: plan.spaceZoneBindings })
   const zone = plan.zone
-  input.onPrepared?.(zone)
   let saved: AgentMuxSpatialSave
   try { saved = await ports.save(true) }
   catch (error) { saved = { ...unsaved(true), reason: error instanceof Error ? error.message : String(error) } }

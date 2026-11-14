@@ -135,7 +135,7 @@ import { executionFocusPresentation } from './lib/focus-tab-projection'
 import { workbenchProjectionMatches, sameWorkbenchProjectionSelection, type WorkbenchProjection } from './lib/workbench-projection'
 import { projectWorkspaces, workspaceProjectId } from './lib/workspace-projects'
 import { goalProjectContext, goalProjectContextText } from '@agentmux/host/goal-project-context'
-import { executeSpatialControl, spatialCatalog, createSpatialZone, zoneContext, type SpatialControlOptions } from './lib/space-agent-control'
+import { executeSpatialControl, spatialCatalog, createSpatialZone, planSpatialZone, zoneContext, type SpatialControlOptions } from './lib/space-agent-control'
 import { executeWorkfaceAgentView } from './lib/workface-agent-view'
 import { changeSurveyCollection, executeSurveyList, moveSurveyListItem, restoreSurveyOrganization, surveyCollectedZoneIds } from './lib/survey-list'
 import { executeWorkspaceAgentOrder, restoreWorkspaceAgentOrder, workspaceAgentOrderMembers } from './lib/workspace-agent-order'
@@ -1420,7 +1420,7 @@ export type AppState = GitReadingActions & {
   chooseSessionLocation(requestId: string, reference: SessionLocationReference): boolean
   selectSession(id: string, tabGroupId?: string, options?: { keepSurface?: boolean; reference?: SessionLocationReference }): boolean
   prepareWorkbenchLayout(workspaceId: string): WorkspaceLayout
-  createWorkbenchZone(input: { workspaceId: string; spaceIds: readonly string[]; onPrepared?(zone: AgentMuxZoneFact): void }): Promise<{ zone: AgentMuxZoneFact; save: AgentMuxSpatialSave; issues: AgentMuxSpatialIssue[] }>
+  createWorkbenchZone(input: { workspaceId: string; spaceIds: readonly string[] }): Promise<{ zone: AgentMuxZoneFact; save: AgentMuxSpatialSave; issues: AgentMuxSpatialIssue[] }>
   setZoneSpaceRelation(zoneId: string, spaceId: string, linked: boolean): Promise<AgentMuxSpaceBindingReport>
   setTabDisplayPlacement(tabId: string, displayWorkspaceId: string, groupId: string, present: boolean): Promise<AgentMuxSpaceBindingReport>
   openLauncher(target: { workspaceId: string; displayWorkspaceId?: string; tabGroupId?: string; topicId?: string; zoneId?: string; reveal: boolean;
@@ -5131,7 +5131,7 @@ async function checkpointWorkbenchUserDocument(): Promise<void> {
     state: partializeAppState(useAppStore.getState()), version: 1
   })
 }
-/** Survey membership does not make unrelated bookmark or Launcher writes a prerequisite. */
+/** Survey preferences do not make unrelated bookmark or Launcher writes a prerequisite. */
 async function saveSurveyPreferences(): Promise<AgentMuxSpatialSave> {
   let clientStateWritten = false, storageFlushRequested = false, reason: string | null = null
   try {
@@ -5762,7 +5762,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     if (sameSpatialValue(get().surveyZoneSelection, surveyZoneSelection)) return
     // Local Survey selection never navigates Work; explicit focus owns that handoff.
     set({ surveyZoneSelection })
-    void saveWorkbenchSelection(false, false)
+    void saveSurveyPreferences()
   },
   async setSurveyPageCollected(reference, collected, onApplied) {
     const state = get(), pages = state.surveyPageReferences
@@ -5811,7 +5811,16 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     return true
   },
   setSurveyToolsOpen(surveyToolsOpen) { set({ surveyToolsOpen, workbenchNavigationInputPolicy: null, regionCaretFocus: null }) },
-  createSurveyBrowser(input) { return createSurveyBrowser(get, input) },
+  createSurveyBrowser(input) {
+    return createSurveyBrowser({ get,
+      prepareZone(workspaceId) {
+        const plan = planSpatialZone(get(), [], { workspaceId, spaceIds: [], zoneId: mintObjectId() })
+        set({ spaceZoneBindings: plan.spaceZoneBindings })
+        return plan.zone
+      },
+      checkpointPreparation: checkpointSpatialWorkbench
+    }, input)
+  },
   async composeSurveyTabs(request) {
     let committed: import('@agentmux/core/spatial-graph').AgentMuxSpatialState | null = null
     let tabIds: string[] = []

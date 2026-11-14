@@ -4,7 +4,9 @@ import { SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 import type { SystemPageOutcome } from '../../../shared/system-web-url'
 import type { SurveyBrowserPreparation } from './survey-browser-creation'
 
-export type SystemPageHost = { get(): AppState; navigation(): string; subscribe(listener: () => void): () => void }
+export type SystemPageState = Pick<AppState,
+  'tabs' | 'createSurveyBrowser' | 'setSurveyZoneSelection' | 'setMainSurface'>
+export type SystemPageHost = { get(): SystemPageState; navigation(): string; subscribe(listener: () => void): () => void }
 // Presentation priority only; requests, resource creation and saving keep their original owners.
 const latestPresentation = new WeakMap<SystemPageHost['get'], object>()
 

@@ -5,6 +5,9 @@ import { api } from './api'
 import { surveyPageOwner } from './survey-page-references'
 
 export type SurveyMembershipGeneration = AppState['surveyPageReferences']
+export type SurveyPageAdmissionState = Pick<AppState,
+  'tabs' | 'surveyPageReferences' | 'registerSurveyBrowserPage' | 'setSurveyPageCollected'>
+type SurveyProfileBindingState = SurveyPageAdmissionState & Pick<AppState, 'applyBrowserEvent'>
 export type SurveyProfileBindingReceipt = {
   reference: AgentMuxSurveyPageReference
   profileId: string
@@ -20,7 +23,7 @@ export function surveyAdmissionUnknown(reference: AgentMuxSurveyPageReference, c
 }
 
 /** Main's exact binding is strong; membership and saving remain a separate weak step. */
-export async function admitPreparedSurveyPage(get: () => AppState, reference: AgentMuxSurveyPageReference,
+export async function admitPreparedSurveyPage(get: () => SurveyPageAdmissionState, reference: AgentMuxSurveyPageReference,
   expected: Pick<BrowserSnapshot, 'mode' | 'profileId'>, generation: SurveyMembershipGeneration): Promise<{ admission: AgentMuxSurveyPageAdmission; membership: SurveyMembershipGeneration }> {
   const unchanged = (admission: AgentMuxSurveyPageAdmission) => ({ admission, membership: generation })
   const state = get(), owner = surveyPageOwner(state.tabs, reference)
@@ -56,7 +59,7 @@ export async function admitPreparedSurveyPage(get: () => AppState, reference: Ag
   }
 }
 
-export async function switchBrowserProfileForSurvey(get: () => AppState, reference: AgentMuxSurveyPageReference, profileId: string): Promise<SurveyProfileBindingReceipt> {
+export async function switchBrowserProfileForSurvey(get: () => SurveyProfileBindingState, reference: AgentMuxSurveyPageReference, profileId: string): Promise<SurveyProfileBindingReceipt> {
   const before = get(), owner = surveyPageOwner(before.tabs, reference)
   if (!owner || owner.surface.kind !== 'browser') throw new Error('The exact original Browser Region is unavailable. Its current work is kept; inspect that same reference.')
   const originalNavigation = owner.surface.navigationId, membership = before.surveyPageReferences
@@ -84,7 +87,7 @@ export async function switchBrowserProfileForSurvey(get: () => AppState, referen
   const attempt = await admitPreparedSurveyPage(get, reference, browser, membership)
   return { reference: { ...reference }, profileId, navigationId: browser.navigationId, switchOutcome: 'confirmed', ...attempt }
 }
-export async function repairSurveyProfileAdmission(get: () => AppState, receipt: SurveyProfileBindingReceipt): Promise<SurveyProfileBindingReceipt> {
+export async function repairSurveyProfileAdmission(get: () => SurveyPageAdmissionState, receipt: SurveyProfileBindingReceipt): Promise<SurveyProfileBindingReceipt> {
   const attempt = await admitPreparedSurveyPage(get, receipt.reference, { mode: 'normal', profileId: receipt.profileId }, receipt.membership)
   return { ...receipt, ...attempt }
 }
