@@ -29,6 +29,7 @@ export function ClusterMachinesPane({ hosts, active, compact = false, onAddDevic
   const request = useRef<(hostId?: string) => void>(() => {})
   const [query, setQuery] = useState(''), [filter, setFilter] = useState<'all' | 'observed' | 'attention'>('all')
   const [visible, setVisible] = useState(() => document.visibilityState !== 'hidden')
+  const section = useRef<HTMLElement>(null)
   const [reading, setReading] = useState(false)
   const fingerprint = JSON.stringify(hosts.map(clusterHostKey))
   useEffect(() => { const changed = () => setVisible(document.visibilityState !== 'hidden'); document.addEventListener('visibilitychange', changed); return () => document.removeEventListener('visibilitychange', changed) }, [])
@@ -72,12 +73,20 @@ export function ClusterMachinesPane({ hosts, active, compact = false, onAddDevic
       setReading(pending.size > 0); pump()
     }
     request.current = schedule
-    schedule()
+    let observer: IntersectionObserver | undefined
+    if (!compact) schedule()
+    else if (section.current && typeof IntersectionObserver !== 'undefined') {
+      observer = new IntersectionObserver(entries => {
+        if (entries.some(entry => entry.isIntersecting)) { observer?.disconnect(); schedule() }
+      })
+      observer.observe(section.current)
+    }
     return () => {
+      observer?.disconnect()
       controller.abort(); request.current = () => {}; setReading(false)
       setRows(current => Object.fromEntries(Object.entries(current).map(([id, row]) => [id, pending.has(id) ? { ...row, phase: 'idle' as const } : row])))
     }
-  }, [active, visible, fingerprint])
+  }, [active, visible, fingerprint, compact])
   const originals = hosts.map(host => ({ host, row: rows[host.id]?.key === clusterHostKey(host) ? rows[host.id] : undefined }))
   const observed = originals.filter(({ row }) => row?.phase === 'observed' && row.read?.reply.status === 'available').length
   const attention = ({ row }: { row?: Row | undefined }) => row?.phase === 'unavailable' || row?.read?.reply.status === 'withheld' || row?.read?.reply.status === 'unavailable' || row?.read?.reply.status === 'available' && partialSample(row.read.reply.sample)
@@ -89,13 +98,13 @@ export function ClusterMachinesPane({ hosts, active, compact = false, onAddDevic
     if (host.kind === 'ssh') fields.push(host.runtimeId ?? '', ...(host.transport === 'tailcat' ? [] : [host.hostname, host.port?.toString() ?? '']))
     return fields.some(field => field.toLocaleLowerCase().includes(needle)) && (compact || inFilter(item))
   })
-  return <section className="cluster-machines" aria-label="Cluster machine resources" data-settings-field="mesh-machines">
+  return <section ref={section} className="cluster-machines" aria-label="Cluster machine resources" data-settings-field="mesh-machines">
     <header className="cluster-machines-heading">
       <div>{compact ? <h3>Machines</h3> : null}<div className="cluster-machines-coverage" role="status">{observed} / {hosts.length} sampled <span>· Saved connections</span></div></div>
       <div className="cluster-machines-actions">
         <TextInput type="search" aria-label="Filter saved devices" value={query} onChange={event => setQuery(event.target.value)} placeholder="Find a machine" />
         <Button type="button" disabled={reading} onClick={() => request.current()}>{reading ? 'Reading resources…' : 'Refresh resources'}</Button>
-        {onAddDevice ? <Button type="button" className="cluster-add-device" onClick={onAddDevice}>Add device</Button> : null}
+        {onAddDevice ? <Button type="button" className="cluster-add-device" onClick={onAddDevice}>Add SSH connection</Button> : null}
       </div>
     </header>
     {!compact ? <div className="cluster-machines-toolbar" role="group" aria-label="Machine status filter">{(['all', 'observed', 'attention'] as const).map(value => <button type="button" className="small-button" key={value} aria-pressed={filter === value} onClick={() => setFilter(value)}>{value === 'all' ? 'All hosts' : value === 'observed' ? 'With samples' : 'Needs attention'}</button>)}</div> : null}
