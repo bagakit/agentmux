@@ -42,6 +42,8 @@ async function render(overrides: Partial<Parameters<typeof BrowserOperatorPresen
   await act(async () => root.render(ownerDocument
     ? <WorkbenchDocumentContext.Provider value={{ document: ownerDocument, window: null }}>{content}</WorkbenchDocumentContext.Provider>
     : content))
+  // The avatar module loads on demand; absent calls only prove something once that load has settled.
+  await act(async () => { await vi.dynamicImportSettled() })
 }
 beforeEach(() => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
