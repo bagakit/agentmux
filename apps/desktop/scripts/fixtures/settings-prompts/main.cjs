@@ -2,6 +2,7 @@ const fs = require('node:fs')
 const path = require('node:path')
 const assert = require('node:assert/strict')
 const { pathToFileURL } = require('node:url')
+const { randomUUID } = require('node:crypto')
 const { app, BrowserWindow, ipcMain } = require('electron')
 const [html, ownerBundle, privateRoot, evidence, mode] = process.argv.slice(2)
 const privatePaths = ['home', 'appData', 'userData', 'sessionData']
@@ -14,11 +15,15 @@ let win
 app.whenReady().then(async () => {
   try {
     for (const key of privatePaths) assert.equal(app.getPath(key), path.join(privateRoot, key), `Electron ${key} is isolated`)
-    const { ConfigStore, ConfigOwner, DEFAULT_CONFIG } = await import(pathToFileURL(ownerBundle).href)
+    const { BrowserProfileStore, ConfigStore, ConfigOwner, DEFAULT_CONFIG, executeToolkitConfig, prepareToolkitConfig } = await import(pathToFileURL(ownerBundle).href)
     const store = new ConfigStore(path.join(privateRoot, 'userData', 'config.json'))
     const initial = !fs.existsSync(store.filePath)
-    assert.equal(initial, ['control', 'materials', 'preview', 'liquid-settings', 'liquid-prompts', 'keyboard-shortcuts', 'message-tool-settings', 'settings-inputs-workflows', 'settings-editor-density', 'appearance-preview', 'appearance-preview-glyphs', 'session-continuity-settings', 'session-continuity-delivery'].includes(mode), 'Restart must reuse durable config, never seed again')
-    let current = initial ? await store.save({ ...structuredClone(DEFAULT_CONFIG), composerShortcuts: [
+    const editorNavigation = mode === 'settings-editor-navigation'
+    assert.equal(initial, ['settings-editor-navigation', 'control', 'materials', 'preview', 'liquid-settings', 'liquid-prompts', 'keyboard-shortcuts', 'message-tool-settings', 'settings-inputs-workflows', 'settings-editor-density', 'appearance-preview', 'appearance-preview-glyphs', 'session-continuity-settings', 'session-continuity-delivery'].includes(mode), 'Restart must reuse durable config, never seed again')
+    let current = initial ? await store.save({ ...structuredClone(DEFAULT_CONFIG), ...(editorNavigation ? {
+      toolkit: { tools: [{ id: 'audit-tool', revision: 'audit-tool-revision', name: 'Audit tool', script: 'console.log(0)', workspacePath: privateRoot,
+        enabled: false, args: [], actions: [], icon: 'terminal', statusBar: 'icon' }] }
+    } : {}), composerShortcuts: [
       { id: 'explain', label: 'Explain simply', keyword: 'eli5', body: '用大白话说说这次做了什么，指出关键变化、验证结果与还没确认的部分。', states: ['done', 'error'] },
       { id: 'review', label: 'Review changes', keyword: 'review', providerId: 'codex', states: ['waiting', 'done'], body: Array.from({ length: 10 }, (_, i) => `${i + 1}. Review the current changes for correctness, scope, readability and recovery. Explain concrete risks, cite the relevant code and propose the smallest complete fix.`).join('\n') },
       { id: 'continue', label: 'Continue improving without losing the original work surface', keyword: 'continue', providerId: 'proof-provider', states: ['working'], body: 'Continue improving the current task. Preserve the original workspace, healthy sessions and unsent drafts; report what changed and verify the result.' },
@@ -29,7 +34,9 @@ app.whenReady().then(async () => {
     ] }) : await store.get()
     result.startedConfig = structuredClone(current)
     let holdNext = false, release
-    const owner = new ConfigOwner({ read: () => current, save: async next => {
+    const owner = new ConfigOwner({ read: () => current,
+      ...(editorNavigation ? { prepare: (before, next) => prepareToolkitConfig(before, next, async () => {}) } : {}),
+      save: async next => {
       if (holdNext) { holdNext = false; await new Promise(resolve => { release = resolve }) }
       return store.save(next)
     }, publish: saved => { current = saved; result.commits.push(structuredClone(saved)); win.webContents.send('proof:config:changed', saved) } })
@@ -41,9 +48,31 @@ app.whenReady().then(async () => {
     ipcMain.handle('proof:config:external', (_event, id, patch) => owner.update(config => ({ ...config, composerShortcuts: config.composerShortcuts.map(prompt => prompt.id === id ? { ...prompt, ...patch } : prompt) })))
     ipcMain.handle('proof:config:hold', () => { assert.equal(holdNext, false); holdNext = true })
     ipcMain.handle('proof:config:release', () => { assert.ok(release, 'Actual pending Main save exists'); release(); release = undefined })
+    let profileStore, originalProxy
+    if (editorNavigation) {
+      const profilesPath = path.join(privateRoot, 'userData', 'editor-navigation-profiles.json')
+      profileStore = new BrowserProfileStore(profilesPath)
+      await profileStore.list()
+      originalProxy = (await profileStore.saveProxy({ label: 'Local proxy', server: 'http://proxy.example:8080' }, undefined, undefined,
+        { operationId: randomUUID(), actor: { kind: 'user', id: 'settings-editor-proof', verified: true } })).proxy
+      ipcMain.handle('proof:toolkit:update', async (_event, toolId, changes, expected) => {
+        const receipt = await executeToolkitConfig({ operation: 'toolkit.update', toolId, changes, expected }, owner)
+        result.toolkitSave = { toolId, changes, expected, receipt }
+        return receipt
+      })
+      ipcMain.handle('proof:profiles:read', async () => {
+        const snapshot = await profileStore.read()
+        return { ...snapshot, proxies: snapshot.proxyAssets ?? [] }
+      })
+      ipcMain.handle('proof:proxy:save', async (_event, edit, proxyId, expectedRevision) => {
+        const { proxy, snapshot } = await profileStore.saveProxy(edit, proxyId, expectedRevision)
+        result.proxySave = { edit, proxyId, expectedRevision, proxy }
+        return { proxy, revision: snapshot.revision }
+      })
+    }
     win = new BrowserWindow({ width: 1480, height: 900, show: false, webPreferences: { preload: path.join(__dirname, 'preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: true, backgroundThrottling: mode.startsWith('liquid-') } })
     win.webContents.on('console-message', (_event, _level, message) => result.errors.push(message))
-    await win.loadFile(html)
+    await win.loadFile(html, editorNavigation ? { hash: mode } : undefined)
     win.webContents.debugger.attach('1.3')
     await win.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled', { enabled: true })
     const read = expression => win.webContents.executeJavaScript(expression)
@@ -64,7 +93,7 @@ app.whenReady().then(async () => {
       win.webContents.sendInputEvent({ type: 'mouseUp', button: 'left', clickCount: 1, x: hit.x, y: hit.y })
       result.actions.push(hit); await settle()
     }
-    const field = label => `[...document.querySelectorAll('[data-prompt-editor] label')].find(n=>n.firstElementChild?.textContent===${JSON.stringify(label)}).querySelector('input,textarea,select')`
+    const field = label => `[...document.querySelectorAll('[data-prompt-editor] label')].find(n=>n.firstElementChild?.textContent===${JSON.stringify(label)}).control`
     const type = async (expression, value) => {
       await click(expression)
       await win.webContents.debugger.sendCommand('Input.dispatchKeyEvent', { type: 'keyDown', key: 'a', code: 'KeyA', modifiers: 4, windowsVirtualKeyCode: 65, commands: ['selectAll'] })
@@ -100,8 +129,9 @@ app.whenReady().then(async () => {
     await until('window.promptsProbe?.ready && !!document.querySelector(".window-status-bar [aria-label=Settings]")')
     await read('window.promptsProbe.beginSurface()')
     await click(q('.window-status-bar [aria-label="Settings"]')); await section('prompts')
-    if (mode === 'settings-inputs-workflows' || mode === 'settings-editor-density') {
-      await require(`../${mode}/scenario.cjs`).run({ win, read, q, button, until, settle, click, type, scene, capture, result })
+    if (editorNavigation || mode === 'settings-inputs-workflows' || mode === 'settings-editor-density') {
+      await require(`../${mode}/scenario.cjs`).run({ win, read, q, button, until, settle, click, type, scene, capture, result, originalProxy })
+      if (profileStore) result.profiles = await profileStore.read()
       result.disk = JSON.parse(fs.readFileSync(store.filePath, 'utf8'))
       assert.deepEqual(result.disk, owner.current)
       result.surface = await read('window.promptsProbe.surface()')

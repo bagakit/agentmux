@@ -16,6 +16,11 @@ const bridge = window.settingsProof
 api.config.get = () => bridge.get()
 api.config.save = (next, expected) => bridge.save(next, expected)
 api.config.onChange = (listener) => bridge.onChange(listener)
+if (location.hash === '#settings-editor-navigation') {
+  api.toolkit.update = bridge.editorNavigation.updateTool
+  api.browser.readProfiles = bridge.editorNavigation.readProfiles
+  api.browser.saveProxy = bridge.editorNavigation.saveProxy
+}
 await useAppStore.getState().initialize()
 createRoot(document.getElementById('root')).render(createElement(App))
 const keys = ['tabs', 'layouts', 'sessions', 'activeWorkspaceId', 'agentComposerDrafts', 'agentSteerQueues', 'agentSteerInFlight']

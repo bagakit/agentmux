@@ -2,3 +2,5 @@
 export { ConfigStore, DEFAULT_CONFIG } from '../../../src/main/config-store.js'
 export { ConfigOwner } from '../../../src/main/config-owner.js'
 export { executeSettingsControl } from '../../../src/main/settings-control.js'
+export { BrowserProfileStore } from '../../../src/main/browser-profile-store.js'
+export { executeToolkitConfig, prepareToolkitConfig } from '../../../src/main/toolkit-config.js'

@@ -9,5 +9,10 @@ contextBridge.exposeInMainWorld('settingsProof', {
   },
   external: (id, patch) => ipcRenderer.invoke('proof:config:external', id, patch),
   hold: () => ipcRenderer.invoke('proof:config:hold'),
-  release: () => ipcRenderer.invoke('proof:config:release')
+  release: () => ipcRenderer.invoke('proof:config:release'),
+  editorNavigation: {
+    updateTool: (...args) => ipcRenderer.invoke('proof:toolkit:update', ...args),
+    readProfiles: () => ipcRenderer.invoke('proof:profiles:read'),
+    saveProxy: (...args) => ipcRenderer.invoke('proof:proxy:save', ...args)
+  }
 })

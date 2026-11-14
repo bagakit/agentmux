@@ -1,0 +1,135 @@
+const assert = require('node:assert/strict')
+
+async function run({ win, read, q, button, until, settle, click, type, scene, capture, result, originalProxy }) {
+  async function open(id) {
+    await click(q(`nav[aria-label="Settings sections"] [data-settings-target="${id}"]`))
+    await until(`!!${q(`[data-settings-pane="${id}"]:not([hidden])`)}`)
+    await settle()
+  }
+  async function focus(expression) {
+    await read(`(${expression}).focus()`)
+    assert.equal(await read(`document.activeElement === (${expression})`), true, 'The native control accepts focus')
+  }
+  const key = keyCode => {
+    win.webContents.sendInputEvent({ type: 'keyDown', keyCode })
+    if (keyCode === 'Enter') win.webContents.sendInputEvent({ type: 'char', keyCode: '\r' })
+    win.webContents.sendInputEvent({ type: 'keyUp', keyCode })
+  }
+  async function assertFocus(expression, message) {
+    await settle()
+    const actual = await read(`(() => {
+      const active = document.activeElement, target = ${expression};
+      return { tag: active.tagName, label: active.getAttribute('aria-label'), text: active.textContent.trim().slice(0, 80),
+        matches: target === active, visible: target?.checkVisibility() ?? false };
+    })()`)
+    assert.ok(actual.matches && actual.visible, message + ': ' + JSON.stringify(actual))
+  }
+
+  await scene(1480, 'dark')
+  await open('derived-actions')
+  const derived = q('.derived-actions__toggle input')
+  const derivedRow = q('[data-derived-action-id="take-over"]')
+  await focus(derived)
+  assert.equal(await read(`(${derived}).checked`), true)
+  key('Space')
+  await until(`!(${derived}).checked`)
+  await read(`window.originalDerivedControl = ${derived}`)
+  const initialDerivedConfig = result.startedConfig.agentDerivedActions
+  await scene(520, 'light')
+  await assertFocus(derived, 'Derived actions keeps the focused switch visible when shrinking')
+  assert.equal(await read(`(${derived}) === window.originalDerivedControl && !(${derived}).checked`), true, 'Derived actions keeps the same switch and unsaved value')
+  assert.deepEqual(await read('window.promptsProbe.config().then(config => config.agentDerivedActions)'), initialDerivedConfig)
+  await capture('derived-editor-narrow-light.png', 'Resize while editing the default official action')
+  await focus(button('Back to actions'))
+  key('Enter')
+  await assertFocus(derivedRow, 'Back to actions focuses the exact original row')
+  key('Enter')
+  await assertFocus(q('[data-derived-editor="take-over"]'), 'Opening a narrow action from the keyboard focuses its editor')
+  await focus(derived)
+  await scene(1480, 'dark')
+  await assertFocus(derived, 'Growing the window keeps the original switch focused')
+  await scene(520, 'light')
+  await assertFocus(derived, 'A second shrink keeps the same Derived actions editor visible')
+  await click(button('Save actions'))
+  await until('window.promptsProbe.config().then(config => config.agentDerivedActions?.hidden?.includes("take-over"))')
+
+  await scene(1480, 'dark')
+  await open('toolkit')
+  const name = q('[data-settings-pane="toolkit"] .toolkit-editor__name input')
+  const toolRow = q('[data-tool-id="audit-tool"]')
+  const toolsFilter = q('[aria-label="Search tools"]')
+  await type(name, 'Edited audit tool')
+  await read(`window.originalToolName = ${name}; (${name}).setSelectionRange(2, 8, 'backward')`)
+  await scene(520, 'light')
+  await assertFocus(name, 'Toolkit keeps the focused name visible when shrinking')
+  assert.deepEqual(await read(`(() => { const field = ${name}; return [field === window.originalToolName, field.value, field.selectionStart, field.selectionEnd, field.selectionDirection] })()`),
+    [true, 'Edited audit tool', 2, 8, 'backward'], 'Toolkit keeps the same input, draft and native selection')
+  assert.equal(await read('window.promptsProbe.config().then(config => config.toolkit.tools[0].name)'), 'Audit tool', 'Changing layout does not save a Toolkit draft')
+  await capture('toolkit-editor-narrow-light.png', 'Resize while editing a custom tool')
+  await focus(button('Back to tools'))
+  key('Enter')
+  await assertFocus(toolRow, 'Back to tools focuses the exact original tool row')
+  key('Enter')
+  await assertFocus(q('.toolkit-workbench__detail'), 'Opening a narrow tool from the keyboard focuses its editor')
+  await scene(1480, 'dark')
+  await type(toolsFilter, 'No matching tool')
+  await focus(name)
+  await scene(520, 'light')
+  await assertFocus(name, 'Toolkit keeps the same focused editor with an excluding filter')
+  await focus(button('Back to tools'))
+  key('Enter')
+  await assertFocus(toolsFilter, 'A filtered Toolkit return focuses its original search control')
+  assert.equal(await read(`(${toolsFilter}).value`), 'No matching tool', 'Returning preserves the filter')
+  await type(toolsFilter, 'audit')
+  await focus(toolRow)
+  key('Enter')
+  await assertFocus(q('.toolkit-workbench__detail'), 'Filtering can lead back to the original edit')
+  assert.equal(await read(`(${name}) === window.originalToolName && (${name}).value === 'Edited audit tool'`), true)
+  await click(button('Save tool'))
+  await until('window.promptsProbe.config().then(config => config.toolkit.tools[0].name === "Edited audit tool")')
+
+  const settingsSearch = q('[aria-label="Search settings"]')
+  await type(settingsSearch, 'Display name')
+  const match = q('[data-settings-search-result="profile:display-name"]')
+  const profileName = q('#profile-display-name')
+  await focus(match)
+  key('Enter')
+  await until(`!!${q('[data-settings-pane="profile"]:not([hidden])')}`)
+  await assertFocus(profileName, 'Search focuses the native Display name input')
+  await read(`window.originalProfileName = ${profileName}`)
+  await focus(button('Search results'))
+  key('Enter')
+  await until(`!!(${match})`)
+  await assertFocus(match, 'Returning to results focuses the exact chosen Display name result')
+  assert.equal(await read(`(${settingsSearch}).value`), 'Display name', 'Returning preserves the global search terms')
+  await capture('search-return-narrow-light.png', 'Return from a field to its exact search result with the keyboard')
+  key('Enter')
+  await assertFocus(profileName, 'The same result can be reopened from the keyboard')
+  assert.equal(await read(`(${profileName}) === window.originalProfileName`), true, 'The actual input survives search navigation')
+  key('Escape')
+
+  await scene(1480, 'dark')
+  await open('browser-profiles')
+  await click(q('.browser-proxy-library > summary'))
+  const assetSelect = q('[aria-label="Saved proxy asset"]')
+  await until(`Array.from((${assetSelect}).options).some(option => option.value === ${JSON.stringify(originalProxy.id)})`)
+  await read(`(() => { const select = ${assetSelect}; select.value = ${JSON.stringify(originalProxy.id)}; select.dispatchEvent(new Event('change', { bubbles: true })) })()`)
+  const server = q('[aria-label="Proxy asset server"]')
+  await until(`(${server}).value === ${JSON.stringify(originalProxy.server)}`)
+  await type(server, 'ftp://proxy.example:21')
+  const serverFacts = await read(`(() => {
+    const field = ${server}, error = document.getElementById(field.getAttribute('aria-describedby'));
+    return { invalid: field.getAttribute('aria-invalid'), error: error?.textContent,
+      inline: field.closest('label').contains(error), disabled: (${button('Save proxy')}).disabled }
+  })()`)
+  assert.deepEqual(serverFacts, { invalid: 'true', error: 'ftp is not a supported proxy type. Use http, https, socks4 or socks5.', inline: true, disabled: true }, 'The invalid proxy address is explained by the Server field before saving')
+  assert.equal(result.proxySave, undefined, 'Invalid input does not reach the original proxy owner')
+  await capture('proxy-server-field-dark.png', 'The Proxy library explains the format issue beside Server')
+  await type(server, 'https://proxy.example:8443')
+  assert.equal(await read(`!(${server}).hasAttribute('aria-invalid') && !(${server}).hasAttribute('aria-describedby')`), true)
+  await click(button('Save proxy'))
+  await until('window.settingsProof.editorNavigation.readProfiles().then(snapshot => snapshot.proxies[0].server === "https://proxy.example:8443")')
+  assert.equal(result.proxySave.proxy.id, originalProxy.id)
+  assert.equal(result.proxySave.expectedRevision, originalProxy.revision)
+}
+module.exports = { run }
