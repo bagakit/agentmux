@@ -87,6 +87,26 @@ Read only the matching local help:
   A missing result remains unconfirmed. History updates do not invalidate settings
   drafts, change native routes or close healthy pages; the original exit check remains
   available independently of diagnostic history storage.
+- amux browser profile cookie-file --help: explicit Cookie JSON file exchange through Main's
+  original Profile/Session, trusted person confirmation and file owners. All six leaves accept
+  `--input FILE|-`. `prepare-import` takes `profileId`, `operationId`, `source` and `scope`,
+  returning a safe review ID/counts; `import` or `discard` names `profileId` and that `reviewId`.
+  `export` takes `profileId`, `operationId`, `destination` and explicit `scope`. A location is
+  `{kind:"local",path:"/absolute/selected.json"}` or
+  `{kind:"workspace",resource:{hostId,workspaceId,workspacePath},path:"selected.json"}`.
+  Scope is `{kind:"profile"}` or `{kind:"sites",sites:["example.com"]}` (all Cookie partitions
+  for those exact registrable/private-suffix sites, IPs or localhost). Main asks the person
+  before any import effect or export Cookie read; request text cannot approve it. Source
+  bytes stay fixed after prepare. Existing output files are kept; new local output is private.
+  `inspect` takes `profileId` and optional original `operationId`, `offset`/`limit` (1–64) for
+  per-index outcomes; pending IDs are discoverable after restart and never automatically
+  replayed. `reveal` names an original person-approved export ID and returns only whether its
+  selected file location was revealed. Ordinary results contain no Cookie names/values or
+  source/destination paths. Read both item counts and export `fileOutcome`; completed means
+  the file owner confirmed writing, not that a website authenticated. Invalid/expired/duplicate,
+  outside-scope and unsupported Cookie entries are reported individually without clearing
+  original data. CHIPS, host-only/domain/path, Secure/HttpOnly/SameSite and session/expiry
+  remain distinct. After an unknown reply keep the original ID; do not retry its native effects.
 - amux browser profile bookmark --help: managed bookmarks in the original Profile metadata.
   All five leaf commands use `--input FILE|-` JSON; `ls` requires `profileId` and `folderId`
   (`null` for root), optionally `operationId` to check an original receipt. It returns the exact
