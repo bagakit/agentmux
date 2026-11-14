@@ -424,6 +424,21 @@ describe('mounted Focus Terminal destinations', () => {
 })
 
 describe('mounted Terminal link exits', () => {
+  it.each(['text', 'OSC 8'] as const)('opens a root filename from %s in the original Workspace', async representation => {
+    const filename = 'summary-report.md'
+    const visible = representation === 'text' ? filename : 'Full report'
+    const content = representation === 'text' ? filename
+      : `\x1b]8;;file://${session.workspacePath}/${filename}\x07${visible}\x1b]8;;\x07`
+    const link = await fileLink(`Report (${content}).`)
+    expect(link.range).toEqual({ start: { x: 9, y: 1 }, end: { x: 8 + visible.length, y: 1 } })
+    expect(openFile).not.toHaveBeenCalled()
+    await act(async () => link.activate(pointer(), link.text))
+    expect(openFile).toHaveBeenCalledExactlyOnceWith(filename, origin.tabGroupId, undefined, origin.workspaceId,
+      undefined, expect.objectContaining({ resource: { hostId: session.hostId, path: session.workspacePath } }), undefined)
+    expect(api.files.openSystem).not.toHaveBeenCalled()
+    expect(api.sessions.detach).not.toHaveBeenCalled()
+  })
+
   it('the wrapped continuation context menu resolves the same full file in its source workspace', async () => {
     await installCells('说明 src/example.ts:3:2,', 12)
     const reveal = vi.spyOn(api.files, 'reveal').mockResolvedValue(undefined)

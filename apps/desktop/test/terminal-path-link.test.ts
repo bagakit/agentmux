@@ -156,7 +156,16 @@ describe('detectTerminalPathLinks — deliberate rejections', () => {
     expect(detectTerminalPathLinks('README.md package.json tsconfig.json', ROOT)).toEqual([])
   })
 
-  it('accepts a root-level filename ONLY when it carries a :line suffix', () => {
+  it('treats parentheses as delimiters around a root filename', () => {
+    const filename = '清理-summary.md'
+    const text = `清理结果 (${filename})。 (e.g.) (1.2.3) (README) other.md`
+    expect(detectTerminalPathLinks(text, ROOT)).toEqual([
+      { path: filename, index: text.indexOf(filename), length: filename.length }
+    ])
+    expect(onlyLink('src/(summary.md)').path).toBe('src/(summary.md)')
+  })
+
+  it('accepts a root-level filename with a :line suffix', () => {
     expect(detectTerminalPathLinks('README.md', ROOT)).toEqual([])
     const link = onlyLink('README.md:3:1')
     expect(link.path).toBe('README.md')
