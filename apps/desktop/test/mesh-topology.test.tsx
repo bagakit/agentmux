@@ -109,6 +109,26 @@ it('a newly observed geographic location preserves the adjusted viewport until a
   expect(flow!.getViewport()).not.toEqual(adjusted)
 })
 
+it('the first network observation preserves the adjusted geographic viewport', async () => {
+  const bounds = HTMLElement.prototype.getBoundingClientRect
+  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+    return this.classList.contains('mesh-explorer__canvas') ? new DOMRect(0, 0, 980, 540) : bounds.call(this)
+  })
+  const show = async (snapshot?: MeshNetworkInspection) => {
+    await act(async () => root.render(<MeshNetworkMap localClient snapshot={snapshot} />))
+    await act(async () => { await new Promise<void>(done => requestAnimationFrame(() => requestAnimationFrame(() => done()))) })
+  }
+  await show()
+  await vi.waitFor(() => expect(flowTrace.instances).toHaveLength(1))
+  const adjusted = { x: 81, y: 42, zoom: .75 }
+  await act(async () => { await flowTrace.instances[0]!.setViewport(adjusted) })
+  expect(flowTrace.instances[0]!.getViewport()).toEqual(adjusted)
+  await show(observation())
+  expect(container.querySelector('.mesh-explorer__header')?.textContent).toContain('3 reciprocal links')
+  expect(flowTrace.instances.at(-1)?.getViewport(), 'viewport after the first network receipt').toEqual(adjusted)
+  expect(flowTrace.instances).toHaveLength(1)
+})
+
 it('available routes and adopted circuits keep distinct exact paths through the production graph and list', async () => {
   await act(async () => root.render(<MeshNetworkMap snapshot={observation()} onGateway={() => {}} />))
   await click('[aria-label="Advertised gateways"] button')
