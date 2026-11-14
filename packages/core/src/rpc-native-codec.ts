@@ -1080,7 +1080,8 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
         string(page.hostId)
         if (input.hostId !== undefined && page.hostId !== input.hostId || credentials && page.participantSessionId !== credentials.agentSessionId) fail()
         const { hostId: _hostId, ...original } = page
-        parseMessageEventsPage(original, { ...input, participantSessionId: input.participantSessionId ?? credentials?.agentSessionId } as import('./agent-message-events.js').AgentMuxMessageEventsQuery)
+        const { hostId: _requestHostId, ...query } = input
+        parseMessageEventsPage(original, { ...query, participantSessionId: input.participantSessionId ?? credentials?.agentSessionId } as import('./agent-message-events.js').AgentMuxMessageEventsQuery)
         break
       }
       case 'message.ls': {
