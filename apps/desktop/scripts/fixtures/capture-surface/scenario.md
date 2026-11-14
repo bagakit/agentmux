@@ -7,11 +7,13 @@ make selections, place Rectangle marks, complete outputs, cancel, press Tab to s
 
 The Native screen-pixel boundary returns two deliberately different frozen desktops and
 virtual display geometries. A real visible host window begins at 65% opacity; the proof
-asserts the included exposure precedes its fade, the excluded exposure follows the fade,
-and every exit restores the original opacity. Each delivered PNG is inspected for its
-crop and Rectangle pixels and retains the exact background engine and capturedAt receipt.
-This fixture never records the real desktop or writes the user clipboard. It does not
-prove physical multi-monitor, TCC/signature, app installation, or actual OS capture cost.
+asserts both exposures and every exit leave that exact value untouched with no production
+opacity writes. Every real overlay reports content protection at its `showInactive` call.
+Each delivered PNG is inspected for its crop and Rectangle pixels and retains the exact
+background engine and capturedAt receipt. A held delivery is cancelled, then resolved while
+the next capture opens; its late result must not supply that next selection. This fixture
+never records the real desktop or writes the user clipboard. It does not prove physical
+multi-monitor, TCC/signature, app installation, or actual OS capture cost.
 
 The generated receipt binds every bundled input and records actual presented/shown timing.
 Open all eight PNGs in its screenshot list for independent visual review: included/excluded
