@@ -6,7 +6,7 @@ import { createRequire } from 'node:module'
 import { homedir, tmpdir } from 'node:os'
 import { dirname, join, relative, resolve } from 'node:path'
 import { runProbeProcess } from '../../../apps/desktop/scripts/probe-process.mjs'
-import { supportedExamples, supportedExportMap } from './supported-entries.mjs'
+import { standalonePatternDocs, supportedExamples, supportedExportMap } from './supported-entries.mjs'
 import { stagePortableArchive } from './standalone/build.mjs'
 
 const pkg = resolve(import.meta.dirname, '..')
@@ -65,7 +65,13 @@ async function inspect(archive, expectedPaths) {
       assert.ok(archive.paths.includes(file), 'Packaged documentation references a missing file ' + file)
     }
   }
-  assert.ok(archive.paths.every(path => /^(?:dist\/.*\.(?:js|ts|css)|examples\/[^/]+\.(?:tsx|css)|docs\/patterns\/agent-work-location\.md|(?:THIRD_PARTY_NOTICES|README)\.md|(?:package|PROVENANCE)\.json)$/u.test(path)), 'A disallowed source or asset entered the archive')
+  assert.ok(archive.paths.every(path => standalonePatternDocs.includes(path) ||
+    /^(?:dist\/.*\.(?:js|ts|css)|examples\/[^/]+\.(?:tsx|css)|(?:THIRD_PARTY_NOTICES|README)\.md|(?:package|PROVENANCE)\.json)$/u.test(path)), 'A disallowed source or asset entered the archive')
+  const readme = await readFile(join(archive.actual, 'README.md'), 'utf8')
+  for (const path of standalonePatternDocs) {
+    assert.ok(readme.includes(`](${path})`), 'The archived README must index ' + path)
+    assert.deepEqual(await readFile(join(archive.actual, path)), await readFile(join(pkg, path)), 'The archive must preserve the original ' + path)
+  }
   const provenance = await readJSON(join(archive.actual, 'PROVENANCE.json'))
   const notices = await readFile(join(archive.actual, 'THIRD_PARTY_NOTICES.md'), 'utf8')
   for (const dependency of provenance.bundled) assert.ok(notices.includes('## ' + dependency.id), 'Missing bundled copyright for ' + dependency.id)
@@ -151,7 +157,7 @@ async function mutation(name, alter) {
 try {
   const inputs = [
     'package.json', 'README.md', 'scripts/supported-entries.mjs', 'scripts/radix-overlay-aliases.ts',
-    'scripts/verify-standalone-tarball.mjs', ...(await allFiles(join(import.meta.dirname, 'standalone'))).map(file => 'scripts/standalone/' + file)
+    'scripts/verify-standalone-tarball.mjs', ...standalonePatternDocs, ...(await allFiles(join(import.meta.dirname, 'standalone'))).map(file => 'scripts/standalone/' + file)
   ]
   report.sourceHashes = Object.fromEntries(await Promise.all(inputs.map(async file => [file, digest(await readFile(join(pkg, file)))])))
   const { overlay, provenance } = await stagePortableArchive(staged)
