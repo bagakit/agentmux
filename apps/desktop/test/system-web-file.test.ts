@@ -1,3 +1,4 @@
+// @vitest-environment happy-dom
 import { agentMuxControlTimeoutMs } from '@agentmux/core/control'
 import { EventEmitter } from 'node:events'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
@@ -52,15 +53,25 @@ function fixture() {
   const state: any = {
     config: { workspaces: [{ id: SCRATCH_WORKSPACE_ID }] }, layouts: { [SCRATCH_WORKSPACE_ID]: { activeGroupId: 'scratch-group' } }, tabs: { original: { regions: { original } } },
     mainSurface: 'recall', recallNotebookId: 'original-book', recallNoteId: 'original-note', recallZoneSelection: null, surveyZoneSelection: null,
-    createWorkbenchZone: vi.fn(async () => ({ zone: { workspaceId: SCRATCH_WORKSPACE_ID, zoneId: 'exact-zone' } })), setSurveyZoneCollected: vi.fn(() => true),
+    surveyPageReferences: [], setSurveyZoneCollected: vi.fn(() => true),
     openLauncher: vi.fn(() => { state.tabs['new-tab'] = { id: 'new-tab', space: { zoneId: 'exact-zone' }, layout: { activeRegionId: 'new-region' }, regions: { 'new-region': { kind: 'launcher', workspaceId: SCRATCH_WORKSPACE_ID, regionId: 'new-region' } } }; return 'new-tab' }),
-    createBrowser: vi.fn(async (_group: string, location: { tabId: string; regionId: string }, url: string, _bookmark: unknown, workspaceId: string) => {
-      state.tabs[location.tabId].regions[location.regionId] = { kind: 'browser', browserId: location.regionId, url, workspaceId, profileId: 'original-profile' }
+    createBrowser: vi.fn(async (_group: string, location: { tabId: string; regionId: string }, url: string, _bookmark: unknown, workspaceId: string,
+      _display: string, mode: string, _capsule: unknown, _profile: unknown, receipt: { onCreated(browser: unknown): void }) => {
+      const browser = { id: location.regionId, url, mode, profileId: 'original-profile', navigationId: 'original-file-navigation' }
+      receipt.onCreated(browser)
+      state.tabs[location.tabId].regions[location.regionId] = { ...browser, kind: 'browser', regionId: location.regionId, browserId: location.regionId, workspaceId }
+    }),
+    registerSurveyBrowserPage: vi.fn(async (reference: { regionId: string; browserId: string }, _profile: string, onApplied: (pages: unknown[]) => void) => {
+      state.surveyPageReferences = [...state.surveyPageReferences, reference]; onApplied(state.surveyPageReferences)
+      return { outcome: 'registered', reference, save: null, issues: [] }
     }),
     setSurveyZoneSelection: vi.fn(value => { state.surveyZoneSelection = value }), setMainSurface: vi.fn(value => { state.mainSurface = value })
   }
   const get = () => state
-  state.createSurveyBrowser = (input: Parameters<typeof createSurveyBrowser>[1]) => createSurveyBrowser(get, input)
+  state.createSurveyBrowser = (input: Parameters<typeof createSurveyBrowser>[1]) => createSurveyBrowser({ get,
+    prepareZone: () => ({ workspaceId: SCRATCH_WORKSPACE_ID, zoneId: 'exact-zone' }) as never,
+    checkpointPreparation: async () => {}
+  }, input)
   const store = source('apps/desktop/src/renderer/src/store.ts')
   const nav = (store.statements.filter(ts.isFunctionDeclaration).find(node => node.name?.text === 'fileNavigationSelection'))!
   const dispatch = evaluate(`const fileNavigationSelection = ${nav.getText(store).replace(/^export /u, '') .replace(/^function fileNavigationSelection/u, 'function')}; return ${callArgument(store, 'api.control.onRequest', 0)}`, {
@@ -91,7 +102,7 @@ it.each(['.html', '.xhtml'])('original Main open-file → trusted readiness → 
   expect(event.preventDefault).toHaveBeenCalledTimes(1); expect(f.state.createBrowser).not.toHaveBeenCalled()
   f.ready({}); await until(() => f.replies.length === 1)
   expect(f.replies[0]).toMatchObject({ operation: 'browser.openFileFromSystem', state: 'opened', reference: { tabId: 'new-tab', regionId: 'new-region' } })
-  expect(f.state.createBrowser).toHaveBeenCalledExactlyOnceWith('scratch-group', { tabId: 'new-tab', regionId: 'new-region' }, pathToFileURL(path).href, undefined, SCRATCH_WORKSPACE_ID, undefined, 'normal')
+  expect(f.state.createBrowser).toHaveBeenCalledExactlyOnceWith('scratch-group', { tabId: 'new-tab', regionId: 'new-region' }, pathToFileURL(path).href, undefined, SCRATCH_WORKSPACE_ID, SCRATCH_WORKSPACE_ID, 'normal', undefined, undefined, expect.objectContaining({ onCreated: expect.any(Function) }))
   expect(f.state.mainSurface).toBe('survey'); expect(f.state.tabs.original.regions.original).toBe(f.original); expect(f.original.draft).toBe('Keep original draft')
   f.ready({}); await new Promise(resolve => setTimeout(resolve, 20)); expect(f.state.createBrowser).toHaveBeenCalledTimes(1); expect(f.issues).toEqual([])
 })
@@ -105,11 +116,15 @@ it('ready OS file input is consumed; missing file and unsupported inputs preserv
   expect(f.state.tabs.original.regions.original).toBe(f.original); expect(f.original.draft).toBe('Keep original draft')
 })
 it('interrupted dispatched file is not replayed while the next original file remains consumable', async () => {
-  const first = await webpage(), second = await webpage('.xhtml'), files = new WebFileIngress(), seen: string[] = [], issues: string[] = []
+  const first = await webpage(), second = await webpage('.xhtml'), next = await webpage(), files = new WebFileIngress(), seen: string[] = [], issues: string[] = []
   files.ready(async (request, signal) => { seen.push(request.path); await new Promise<void>(done => signal.addEventListener('abort', () => done(), { once: true })); throw new Error('Original observation cancelled') }, message => issues.push(message))
-  files.receive(first); files.receive(second); await until(() => seen.length === 1); files.unavailable()
+  files.receive(first); files.receive(second); files.receive(next); await until(() => seen.length === 2); files.unavailable()
   files.ready(async request => { seen.push(request.path); return { operation: request.operation, requestId: request.requestId, state: 'unconfirmed', browserId: null, reference: null, message: 'Original Browser unavailable' } }, message => issues.push(message))
-  await until(() => seen.length === 2); expect(seen).toEqual([first, second]); expect(issues.join('\n')).toContain(pathToFileURL(first).href)
+  await until(() => seen.length === 3)
+  // Both dispatched files validate independently; neither validation order replays an input.
+  expect(seen.slice(0, 2).sort()).toEqual([first, second].sort()); expect(seen[2]).toBe(next)
+  expect(issues.join('\n')).toContain(pathToFileURL(first).href)
+  expect(issues.join('\n')).toContain(pathToFileURL(second).href)
 })
 it('invalid file control never becomes a Browser request and HTTP(S) ingress stays exclusive', async () => {
   const path = await webpage(), f = fixture()
@@ -128,9 +143,11 @@ it('file preparation failure retains its exact page and later user navigation is
   const attach = second.state.createBrowser.getMockImplementation()!
   second.state.createBrowser.mockImplementationOnce(async (...args: unknown[]) => { await new Promise<void>(resolve => { finish = resolve }); await attach(...args) })
   second.ready({}); second.app.emit('open-file', { preventDefault() {} }, path); await until(() => !!finish)
-  second.state.recallNoteId = 'later-user-reading'; for (const listener of second.listeners) listener(); finish()
+  second.state.recallNoteId = 'later-user-reading'; second.state.mainSurface = 'recall'; for (const listener of second.listeners) listener()
+  const surfaces = second.state.setMainSurface.mock.calls.length; finish()
   await until(() => second.replies.length === 1)
-  expect(second.state.setMainSurface).not.toHaveBeenCalled(); expect(second.state.recallNoteId).toBe('later-user-reading'); expect(second.state.tabs.original.regions.original).toBe(second.original)
+  expect(second.state.setMainSurface).toHaveBeenCalledTimes(surfaces); expect(second.state.mainSurface).toBe('recall')
+  expect(second.state.recallNoteId).toBe('later-user-reading'); expect(second.state.tabs.original.regions.original).toBe(second.original)
 })
 it('file bridge waits the original Browser budget and cancels only that observation', async () => {
   vi.useFakeTimers()
@@ -196,16 +213,19 @@ it('crashed Renderer preserves the next undispatched page and never replays its 
   f.ready({}); f.webLinks.receive('https://example.org/original-in-flight')
   await until(() => f.sent.length === 1)
   const original = f.sent[0]!
+  f.webLinks.receive('https://example.org/second-in-flight'); await until(() => f.sent.length === 2)
+  const second = f.sent[1]!
   f.webLinks.receive('https://example.org/original-next'); f.crash()
   await new Promise(resolve => setTimeout(resolve, 30))
-  expect(f.sent).toHaveLength(1)
-  expect(f.cancelled).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ requestId: original.requestId, code: 'CONTROL_UNAVAILABLE' }))
-  f.ready({}); await until(() => f.sent.length === 2)
-  expect((f.sent[1] as { url: string }).url).toBe('https://example.org/original-next')
-  expect(f.sent[1]!.requestId).not.toBe(original.requestId)
-  f.complete(f.sent[1]!); f.ready({})
-  await new Promise(resolve => setTimeout(resolve, 20))
   expect(f.sent).toHaveLength(2)
+  expect(f.cancelled).toHaveBeenCalledTimes(2)
+  for (const request of [original, second]) expect(f.cancelled).toHaveBeenCalledWith(expect.objectContaining({ requestId: request.requestId, code: 'CONTROL_UNAVAILABLE' }))
+  f.ready({}); await until(() => f.sent.length === 3)
+  expect((f.sent[2] as { url: string }).url).toBe('https://example.org/original-next')
+  expect([original.requestId, second.requestId]).not.toContain(f.sent[2]!.requestId)
+  f.complete(f.sent[2]!); f.ready({})
+  await new Promise(resolve => setTimeout(resolve, 20))
+  expect(f.sent).toHaveLength(3)
   expect(f.contents.send.mock.calls.map(call => String(call[1])).join('\n')).toContain(original.requestId)
 })
 
