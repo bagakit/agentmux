@@ -410,15 +410,16 @@ export const MobileSpatialNavigation = memo(function MobileSpatialNavigation({ h
     return matching(object.name + ' ' + object.project + ' ' + session.providerId)
   })
   const availableSessions = !focusConfirmed ? filteredSessions(metadata.sessions.filter(session => !focusRowById.has(session.agentSessionId))) : []
-  const focusIssues = [...(issue ? [{ source: '空间目录', message: issue }] : []), ...(metadata.issue ? [{ source: '会话目录', message: metadata.issue }] : []), ...directory.issues]
+  const focusIssues = [...(issue ? [{ source: '空间目录', message: issue }] : !focusConfirmed ? [{ source: 'Focus', message: connected ? '原 Focus 呈现资料尚未返回。' : '连接暂不可用。' }] : []), ...(metadata.issue ? [{ source: '会话目录', message: metadata.issue }] : []), ...directory.issues]
   const focusView = focusVisited.current ? <MobileNoticeScope owner={client} identity={['focus']}><section className="mobile-spatial-panel mobile-focus-facet">
     <div className="mobile-section-heading mobile-page-header"><MobileHeaderMenu /><div><h1>Focus</h1>
       <p>需要你处理的事项与最近执行</p></div>
-      <div className="mobile-section-actions">{focusActive && <MobileAvatarNoticeOutlet header />}{focusConfirmed && <MobileDirectoryNotice issues={focusIssues} retry={retryDirectory} />}{onCreateAgent && <IconButton className="mobile-icon-button" aria-label="新建 Agent" onClick={() => onCreateAgent({})}><SemanticIcon name="action.create-agent" size={18} /></IconButton>}{(!wide || !focusIssues.length) && <IconButton className="mobile-icon-button" aria-label="刷新空间目录" onClick={retryDirectory}><SemanticIcon name="action.refresh" size={18} animation={pending ? 'spin' : 'none'} /></IconButton>}</div></div>
-    {!connected && <MobileNotice owner={client} identity={[connected]} className="mobile-spatial-notice" role="status">连接暂不可用，显示的是最近一次读取的目录。</MobileNotice>}
+      <div className="mobile-section-actions">{focusActive && <MobileAvatarNoticeOutlet header />}<MobileDirectoryNotice issues={focusIssues} retry={retryDirectory} />{onCreateAgent && <IconButton className="mobile-icon-button" aria-label="新建 Agent" onClick={() => onCreateAgent({})}><SemanticIcon name="action.create-agent" size={18} /></IconButton>}{(!wide || !focusIssues.length) && <IconButton className="mobile-icon-button" aria-label="刷新空间目录" onClick={retryDirectory}><SemanticIcon name="action.refresh" size={18} animation={pending ? 'spin' : 'none'} /></IconButton>}</div></div>
     <label className="mobile-spatial-search"><SemanticIcon name="action.search" size={16} /><TextInput value={focusQuery} onChange={event => setFocusQuery(event.target.value)} placeholder="查找 Agent 或工作空间" aria-label="查找" /></label>
-    {!focusConfirmed && <MobileDirectoryNotice issues={focusIssues.length ? focusIssues : [{ source: 'Focus', message: connected ? '原 Focus 呈现资料尚未返回。' : '连接暂不可用。' }]} retry={retryDirectory}
-      summary={!connected ? '连接暂不可用，Focus 资料尚未确认。' : pending && focusRows === undefined ? '正在核对项目与工作排序。' : rows.length ? '项目与工作排序尚未确认，以下是上次读取的内容。' : metadata.sessions.length ? '项目与工作排序尚未确认，已有会话仍可打开。' : '项目与工作排序尚未确认，可重新读取。'} retryLabel="重新读取 Focus" />}
+    {!focusConfirmed && <div className="mobile-focus-read-status" role="status">
+      <p>{!connected ? '连接暂不可用，Focus 资料尚未确认。' : pending && focusRows === undefined ? '正在核对项目与工作排序。' : rows.length ? '项目与工作排序尚未确认，以下是上次读取的内容。' : metadata.sessions.length ? '项目与工作排序尚未确认，已有会话仍可打开。' : '项目与工作排序尚未确认，可重新读取。'}</p>
+      <button type="button" className="mobile-text-button" onClick={retryDirectory}><SemanticIcon name="action.refresh" size={16} />重新读取 Focus</button>
+    </div>}
 
       {needsYou.length > 0 && !focusQuery.trim() && <section className="mobile-needs-you" aria-label={`需要你 · ${needsYou.length}`}>
         <header><span>需要你</span><span className="mobile-tab-badge" aria-hidden="true">{needsYou.length}</span></header>
