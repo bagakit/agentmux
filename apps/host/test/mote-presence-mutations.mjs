@@ -35,7 +35,10 @@ export const presenceMutants = {
   'headless-observation': ['apps/host/src/mote-presence.ts', "if (loop?.status === 'active' && !dirty.has(id)) {", 'if (false) {'],
   'source-reobservation': ['apps/host/src/mote-presence.ts', "if (reading?.status === 'unconfirmed' && now >= (retries.get(id)?.at ?? now)) dirty.add(id)", "if (false) dirty.add(id)"],
   'disabled-resume': ['apps/host/src/mote-presence.ts', "const method = loop.managedSource!.revision === main.roleRevision && main.current && !preference.enabled ? 'schedule.pause' : 'schedule.cancel'", "const method = 'schedule.cancel'"],
-  'role-fence': ['apps/host/src/mote-presence.ts', 'main.roleRevision !== loop.managedSource.revision', 'false']
+  'role-fence': ['apps/host/src/mote-presence.ts', 'main.roleRevision !== loop.managedSource.revision', 'false'],
+  'supervision-heartbeat-guidance': ['apps/host/src/mote-presence.ts', '+ MOTE_SUPERVISION_GUIDANCE +', '+ \'\' +'],
+  'supervision-heartbeat-target': ['apps/host/src/mote-presence.ts', 'JSON.stringify({ target })', "JSON.stringify({ target: { spaceId: 'another-mote' } })"],
+  'thread-notification-disconnected': ['packages/core/src/agent-message-notifications.ts', 'if (notice) await this.deps.submit(notice)', 'if (false && notice) await this.deps.submit(notice)']
 }
 export function instrumentPresence(original, path, surface) {
   const mutant = process.env.MOTE_PRESENCE_MUTANT, report = process.env.MOTE_PRESENCE_LOADED
@@ -46,7 +49,7 @@ export function instrumentPresence(original, path, surface) {
     if (source.split(selected[1]).length !== 2) throw Error('Presence mutant must modify one actual loaded owner: ' + mutant)
     source = source.replace(selected[1], selected[2])
   }
-  const owned = path === 'apps/desktop/src/main/mote-preferences-ipc.ts' || /^apps\/host\/src\/(mote-presence|mote-quick-preferences|mote-quick-mode|continuous-progress-loop-manager|host)\.ts$|^packages\/core\/src\/(mote-preferences|automatic-input-source|continuous-progress-scheduler|agentmux-cli-commands|client|public-rpc-service|agent-session-recovery\/(?:continuity-attempt|service))\.ts$/u.test(path)
+  const owned = path === 'apps/desktop/src/main/mote-preferences-ipc.ts' || /^apps\/host\/src\/(mote-presence|mote-quick-preferences|mote-quick-mode|continuous-progress-loop-manager|host)\.ts$|^packages\/core\/src\/(mote-preferences|automatic-input-source|continuous-progress-scheduler|agentmux-cli-commands|client|public-rpc-service|agent-message-notifications|agent-session-recovery\/(?:continuity-attempt|service))\.ts$/u.test(path)
   if (report && owned) {
     const hash = s => createHash('sha256').update(s).digest('hex')
     const fact = { path, surface, originalSHA256: hash(original), loadedSHA256: hash(source), ...(presenceSharedSource[path] ? {sharedSlices:presenceSharedSlices(path,original)} : {}), ...(source !== original ? { mutant } : {}) }

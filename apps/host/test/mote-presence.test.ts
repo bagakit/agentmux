@@ -13,12 +13,13 @@ import { ScratchTopics } from '../src/mote-resources.js'
 import { directoryIdentity, homeZoneId, SCRATCH_WORKSPACE_ID } from '../src/mote-model.js'
 import { ContinuousProgressLoopManager, MAINTENANCE_RETRY_MS } from '../src/continuous-progress-loop-manager.js'
 import { ContinuousProgressLoopStore } from '../src/continuous-progress-loop-store.js'
-import { createHostMotePresence } from '../src/mote-presence.js'
+import { createHostMotePresence, motePresenceSourceId } from '../src/mote-presence.js'
 import { createHostContent } from '../src/content-owner.js'
 import { createHostMoteMainReader, createHostMoteDialogue } from '../src/mote-dialogue.js'
 import { HostMoteQuickPreferences } from '../src/mote-quick-preferences.js'
 import { MoteConnectionPreferences } from '../src/mote-connection-preferences.js'
 import { MoteDialogueStore } from '@agentmux/core/mote-dialogue-store'
+import { MOTE_SUPERVISION_GUIDANCE } from '@agentmux/core/mote-dialogue'
 
 const cleanup: Array<() => void | Promise<void>> = []
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); vi.restoreAllMocks(); vi.unstubAllEnvs() })
@@ -147,7 +148,7 @@ it('actual headless Host and CLI save original preferences, share one schedule, 
   expect(await readFile(join(topic.physicalDirectoryPath!,'MOTE.md'),'utf8')).toContain('recovery: on-open')
 }, 120_000)
 
-async function managedFixture(initialSaveBusy=false) {
+async function managedFixture(initialSaveBusy=false, retainedPrompt?: string) {
   const f=await rpcOwnerFixture(['main','other'],core);cleanup.push(f.close)
   const configurationPath=join(f.root,'config.json');await writeFile(configurationPath,JSON.stringify({workspaces:[{id:SCRATCH_WORKSPACE_ID,hostId:'local',path:f.root}]}))
   const target={spaceId:'private-mote-space',zoneId:homeZoneId('private-mote-space'),expectedResource:{hostId:'local',workspaceId:SCRATCH_WORKSPACE_ID,workspacePath:f.root}}
@@ -162,11 +163,35 @@ async function managedFixture(initialSaveBusy=false) {
   let clock=100000,busy=false,outcome:'sent'|'unknown'='sent';const sent:any[]=[]
   const store=new ContinuousProgressLoopStore(join(f.root,'loops.json'))
   const make=()=>new ContinuousProgressLoopManager(store,async(loop,operationId)=>{sent.push({loop:structuredClone(loop),operationId});return outcome},()=>clock,async(loop,tickId)=>({session:{...f.client.agentSession(loop.agentSessionId),semanticStatus:{state:busy?'working':'done',source:'native-hook',observedAt:clock,stateEnteredAt:clock},futurePromptIntents:{[loop.futureIntentId!]:await f.client.readAgentFuturePromptIntent(loop.agentSessionId,loop.futureIntentId!)}},observation:{process:'running',semantic:busy?'active':'idle',readiness:'ready',stale:false},inputByte:0,tickId,now:clock}) as any,{saveFutureIntent:async(loop,active)=>{if(initialSaveBusy&&active)throw new core.AgentMuxError('The original Future Intent owner is busy with a person input.','AGENT_PROMPT_SUBMISSION_BUSY');await f.client.saveAgentFuturePromptIntent({agentSessionId:loop.agentSessionId,expectedRun:f.client.agentSession(loop.agentSessionId).run,intentId:loop.futureIntentId!,operationId:loop.creationOperationId!,prompt:loop.prompt,active,continuitySource:loop.managedSource})}})
-  let manager=make(),presence=createHostMotePresence({configurationPath,spatial,files,main,schedules:manager,clients:f.coreClients})
+  let manager=make()
+  await manager.start()
+  if(retainedPrompt) await manager.call('schedule.create',{target:{hostId:'local',agentSessionId:'main',providerId:f.client.agentSession('main').providerId,workspacePath:f.root},everyMs:60000,prompt:retainedPrompt,managedSource:{sourceId:motePresenceSourceId(snapshot.identity),revision:snapshot.roleRevision},operationId:'retained-original-maintenance'})
+  let presence=createHostMotePresence({configurationPath,spatial,files,main,schedules:manager,clients:f.coreClients})
   cleanup.push(async()=>{presence.dispose();await manager.stop()})
-  await manager.start();await manager.check(clock);await manager.check(clock)
+  await manager.check(clock);await manager.check(clock)
   return {f,snapshot,files,sent,target,main,saveBusy:(value:boolean)=>initialSaveBusy=value,get presence(){return presence},get manager(){return manager},loop:()=>manager.list()[0]!,advance:()=>clock+=60000,at:(value:number)=>clock=value,filesAvailable:(value:boolean,notify=true)=>{available=value;if(notify)presence.invalidate(target)},enabled:(value:boolean)=>{enabled=value;presence.invalidate(target)},busy:(value:boolean)=>busy=value,outcome:(value:typeof outcome)=>outcome=value,async restart(){presence.dispose();await manager.stop();manager=make();presence=createHostMotePresence({configurationPath,spatial,files,main,schedules:manager,clients:f.coreClients});await manager.start();await manager.check(clock)}}
 }
+it('a supervision heartbeat freezes the exact original Mote input and shares the Main duties at the actual future-intent owner',async()=>{
+  const f=await managedFixture(), loop=f.loop()
+  expect(loop.prompt).toContain(MOTE_SUPERVISION_GUIDANCE)
+  expect(JSON.parse(loop.prompt.slice(loop.prompt.lastIndexOf('\n')+1))).toEqual({target:f.target})
+  const original=await f.f.client.readAgentFuturePromptIntent('main',loop.futureIntentId!)
+  expect(original).toMatchObject({operationId:loop.creationOperationId,prompt:loop.prompt,continuitySource:loop.managedSource})
+  await f.manager.check(f.advance())
+  expect(f.sent).toHaveLength(1)
+  expect(f.sent[0].loop).toMatchObject({agentSessionId:'main',prompt:loop.prompt,managedSource:loop.managedSource})
+})
+it('a retained supervision heartbeat body and an unknown claim survive owner restart without adopting new guidance',async()=>{
+  const retained='Original previously arranged maintenance body.', f=await managedFixture(false,retained)
+  f.outcome('unknown');await f.manager.check(f.advance())
+  const frozen=structuredClone(f.loop()), intent=await f.f.client.readAgentFuturePromptIntent('main',frozen.futureIntentId!)
+  expect(frozen).toMatchObject({prompt:retained,status:'paused',lastOutcome:'unknown'})
+  expect(frozen.pendingCompletion?.operationId).toBe(f.sent[0].operationId)
+  await f.restart()
+  expect(f.loop()).toMatchObject({loopId:frozen.loopId,prompt:retained,pendingCompletion:frozen.pendingCompletion})
+  expect(await f.f.client.readAgentFuturePromptIntent('main',frozen.futureIntentId!)).toEqual(intent)
+  expect(f.sent).toHaveLength(1)
+})
 it('an unavailable original source is reobserved without a page open, file rewrite or new automatic operation',async()=>{
   const f=await managedFixture(), id=f.loop().loopId, operation=f.loop().creationOperationId
   f.filesAvailable(false);await f.manager.check(100001)
