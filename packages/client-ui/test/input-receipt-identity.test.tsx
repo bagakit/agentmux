@@ -31,3 +31,39 @@ it('accepts ACK progress on the same frozen correlation without converting an un
   expect(projectInputReceipt(prior, next)).toEqual(next)
   expect(next.status).toBe('unknown')
 })
+
+function payloadReceipt(): AgentInputSubmissionReceipt {
+  const value = receipt(), native = value.admission!.admission!
+  if (native.transport !== 'native' || !native.intent) throw Error('Expected native fixture')
+  const { transport: _transport, native: _native, ...original } = native
+  value.admission!.admission = { ...original, startByte: 0, endByte: 18, operationId: 'payload-op', intent: {
+    ...native.intent, plan: { kind: 'payload-then-submit', payload: 'original-payload', payloadText: 'original-body', submit: 'key', minimumSubmitDelayMs: 35 } } }
+  value.admission!.terminalPromptSubmission = { run: value.key.expectedRun, submissionId: 'original-input', promptDigest: 'original-digest', outputCursorBytes: 0,
+    payload: { operationId: 'payload-op', inputByteRange: { startByte: 0, endByte: 15 }, acknowledged: true },
+    submit: { operationId: 'submit-op', inputByteRange: { startByte: 15, endByte: 18 }, acknowledged: false },
+    payloadConsumption: { sourceId: 'original-source', baselineId: 'original-baseline' } }
+  return value
+}
+
+it.each(['payload', 'payloadText', 'submit', 'minimumSubmitDelayMs'] as const)('keeps the original native payload plan when %s changes', field => {
+  const prior = payloadReceipt(), next = structuredClone(prior), plan = next.admission!.admission!.intent!.plan
+  if (plan.kind !== 'payload-then-submit') throw Error('Expected native payload plan')
+  if (field === 'minimumSubmitDelayMs') plan[field] = 0; else plan[field] = 'another-body'
+  expect(() => projectInputReceipt(prior, next)).toThrowError(expect.objectContaining({ code: 'CONTROL_REQUEST_CONFLICT' }))
+})
+
+it.each(['sourceId', 'baselineId'] as const)('keeps the original payload %s across later public observations', field => {
+  const prior = payloadReceipt(), next = structuredClone(prior)
+  next.admission!.terminalPromptSubmission!.payloadConsumption![field] = 'another-source'
+  expect(() => projectInputReceipt(prior, next)).toThrowError(expect.objectContaining({ code: 'CONTROL_REQUEST_CONFLICT' }))
+})
+
+it('projects native consumption progress without granting a turn outcome and retains its confirmed original receipt', () => {
+  const prior = payloadReceipt(), consumed = structuredClone(prior)
+  consumed.admission!.terminalPromptSubmission!.payloadConsumption!.receipt = { id: 'original-native-body', observedAt: 123 }
+  expect(projectInputReceipt(prior, consumed).status).toBe('unknown')
+  expect(projectInputReceipt(consumed, prior)).toBe(consumed)
+  const conflicting = structuredClone(consumed)
+  conflicting.admission!.terminalPromptSubmission!.payloadConsumption!.receipt!.id = 'another-native-body'
+  expect(() => projectInputReceipt(consumed, conflicting)).toThrowError(expect.objectContaining({ code: 'CONTROL_REQUEST_CONFLICT' }))
+})
