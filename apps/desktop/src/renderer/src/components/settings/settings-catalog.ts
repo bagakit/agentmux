@@ -10,7 +10,7 @@ export type ChannelPresentation = { section: SettingsPageId; title: string; icon
 
 export const SETTINGS_GROUPS = [
   { id: 'preferences', icon: 'object.settings-preferences', title: 'Preferences', description: 'Your profile and everyday defaults.' },
-  { id: 'environment', icon: 'object.host', title: 'Environment', description: 'Hosts, remote work and device access.' },
+  { id: 'cluster', icon: 'object.host', title: 'Cluster', description: 'Node publishing, Host connections and remote work.' },
   { id: 'agents', icon: 'object.settings-agents', title: 'Agents', description: 'Agent CLIs, derived actions and session recovery.' },
   { id: 'mote', icon: 'object.mote', title: 'Mote', description: 'Your collaborators and how they grow.' },
   { id: 'work', icon: 'object.settings-work', title: 'Work', description: 'Organize work, focus attention and pursue goals.' },

@@ -13,7 +13,7 @@ async function saveHosts(hosts: HostConfig[], workspaces: WorkspaceRecord[], exp
 
 export const hostsSettingsModule = {
   id: 'hosts', archetype: 'console',
-  group: 'environment',
+  group: 'cluster',
   title: 'Hosts',
   description: 'Your environments and their saved connections.',
   icon: ThemeObjectHostIcon,

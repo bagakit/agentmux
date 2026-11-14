@@ -35,6 +35,7 @@ import { derivedActionsSettingsModule } from './modules/derived-actions'
 /** The only Renderer composition point. Registration preserves order within each group. */
 export const settingsModules = [
   profileSettingsModule,
+  mobileSettingsModule,
   appearanceSettingsModule,
   notificationsSettingsModule,
   agentsSettingsModule,
@@ -62,7 +63,6 @@ export const settingsModules = [
   networkNodeSettingsModule,
   hostsSettingsModule,
   remoteExecutionSettingsModule,
-  mobileSettingsModule,
   inappConversationSettingsModule,
   larkSettingsModule,
   discordSettingsModule,
