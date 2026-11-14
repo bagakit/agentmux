@@ -3,12 +3,12 @@ import { TextInput } from '@agentmux/client-ui/input'
 import { scratchTopicsForConfig } from '../lib/scratch-topic-snapshots'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
-import { agentRegionExecution, agentRegionLocationsKnown, useAppStore } from '../store'
+import { agentRegionExecution, agentRegionLocationsKnown, agentRegionLocationBindings, useAppStore } from '../store'
 import { useShallow } from 'zustand/react/shallow'
 import { createFocusProjectionSelector, agentContextForSession, retainedFocusContext } from '../lib/focus-context'
 import { FocusContextCards } from './FocusContextCards'
 import { useFocusHierarchy } from '../lib/use-focus-hierarchy'
-import { deriveFocusProjectLanes, deriveRetainedFocusProjects, focusProjectKey } from '../lib/focus-project-lanes'
+import { deriveFocusProjectLanes, deriveRetainedFocusProjects, focusProjectKey, focusLaneProjectKey, focusLanesByContext } from '../lib/focus-project-lanes'
 import { useFocusHistorySources } from '../lib/focus-history-sources'
 import type { ExecutionFocusPresentation } from '../lib/focus-tab-projection'
 import { AttentionRequestPanel } from './AttentionRequestPanel'
@@ -50,7 +50,7 @@ import { WorkspaceWorkbench } from './WorkspaceWorkbench'
 import { WorkbenchPresentationContext, type WorkbenchViewTargets } from '../lib/workbench-presentation'
 import { ServiceWindowNotice } from './ServiceWindowNotice'
 import { groupIds, regionIds } from '@agentmux/layout'
-import { createFocusContextIdentitySelector } from '../lib/focus-context-identity'
+import { createFocusContextIdentitySelector, focusContextAtRegion } from '../lib/focus-context-identity'
 import { workbenchNavigationTabs } from '../lib/workbench-navigation-catalog'
 
 const ThemeActionSearchIcon = semanticIconComponent('action.search')
@@ -131,8 +131,8 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
   const activeSurface = projection?.selection[0] && selectedTab?.regions[projection.selection[0].regionId]
   const shownSessionId = activeSurface && (activeSurface.kind === 'agent' || activeSurface.kind === 'terminal') ? activeSurface.sessionId : null
   const currentSurface = currentReference && tabs[currentReference.tabId]?.regions[currentReference.regionId]
-  const currentContext = currentSurface && (currentSurface.kind === 'agent' || currentSurface.kind === 'terminal')
-    ? executionRows.find(context => context.id === currentSurface.sessionId) ?? null : null
+  const currentContext = currentSurface && (currentSurface.kind === 'agent' || currentSurface.kind === 'terminal') && currentReference
+    ? focusContextAtRegion(executionRows.filter(context => context.id === currentSurface.sessionId), currentReference, agentRegionExecution) : null
   const showWorkspace = workspaceOpen ?? Boolean(projection || presentation?.unselected || presentation?.issue || selectedId)
   const selectedSessionIds = useMemo(() => selectedId ? [selectedId] : [], [selectedId])
   const sessions = useAppStore(useShallow(state => selectedTab ? [] : selectedSessionIds.flatMap(id => { const session = sessionPresentationById(state.sessions).get(id); return session ? [session] : [] })))
@@ -233,25 +233,29 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
     return () => { stop(); window.removeEventListener('pointermove', onPointerMove); window.removeEventListener('pointerup', stop); window.removeEventListener('pointercancel', stop); window.removeEventListener('blur', stop) }
   }, [visible])
   const { facts, errors: hierarchyErrors, refresh: refreshHierarchy } = useFocusHierarchy(laneContexts, config, visible)
-  const allLanes = useMemo(() => deriveFocusProjectLanes(laneContexts, config, facts, tabs, Date.now(), topicSnapshots), [laneContexts, config, facts, tabs, topicSnapshots])
   const boardRowsRef = useRef<HTMLDivElement>(null)
   const separateRevealRef = useRef<HTMLDivElement>(null)
-  const coordinationLanes = useMemo(() => deriveFocusProjectLanes(coordinationContexts, config, undefined, tabs, Date.now(), topicSnapshots), [coordinationContexts, config, tabs, topicSnapshots])
   const filterContexts = useMemo(() => [...executionRows, ...coordinationContexts], [executionRows, coordinationContexts])
-  const filterLanes = useMemo(() => [...allLanes, ...coordinationLanes], [allLanes, coordinationLanes])
   const scanInteraction = useRef(false)
-  const orderedLanes = useFocusProjectOrder(allLanes, visible, boardRowsRef, scanInteraction)
   const navigationCatalog = useAppStore(workbenchSelectionCatalog)
   const identityTabs = workbenchNavigationTabs(tabs)
   const identitySelector = useMemo(createFocusContextIdentitySelector, [])
   const locationsKnown = useAppStore(agentRegionLocationsKnown)
-  const contextIdentities = useMemo(() => identitySelector(navigationCatalog, identityTabs, filterContexts, config, layouts, agentRegionExecution, locationsKnown),
-    [identitySelector, navigationCatalog, identityTabs, filterContexts, config?.executors, config?.appearance.agentAvatars, config?.workspaces, layouts, locationsKnown])
+  const executionBindings = useAppStore(agentRegionLocationBindings)
+  const lastIdentities = useRef<ReturnType<typeof identitySelector>>(new Map())
+  const contextIdentities = useMemo(() => {
+    if (visible) lastIdentities.current = identitySelector(navigationCatalog, identityTabs, filterContexts, config, layouts, agentRegionExecution, locationsKnown, executionBindings)
+    return lastIdentities.current
+  }, [visible, identitySelector, navigationCatalog, identityTabs, filterContexts, config?.executors, config?.appearance.agentAvatars, config?.workspaces, layouts, locationsKnown, executionBindings])
+  const allLanes = useMemo(() => deriveFocusProjectLanes(laneContexts, config, facts, contextIdentities, Date.now(), topicSnapshots), [laneContexts, config, facts, tabs, topicSnapshots, contextIdentities])
+  const coordinationLanes = useMemo(() => deriveFocusProjectLanes(coordinationContexts, config, undefined, contextIdentities, Date.now(), topicSnapshots), [coordinationContexts, config, tabs, topicSnapshots, contextIdentities])
+  const filterLanes = useMemo(() => [...allLanes, ...coordinationLanes], [allLanes, coordinationLanes])
+  const orderedLanes = useFocusProjectOrder(allLanes, visible, boardRowsRef, scanInteraction)
   const survey = useAppStore(useShallow(state => ({ surveyCollectedZones: state.surveyCollectedZones, surveyOrganization: state.surveyOrganization, surveyExplorationNames: state.surveyExplorationNames })))
   const originContent = useAppStore(useShallow(state => ({ bindings: state.spaceZoneBindings, categories: state.topicCategories })))
   const surveyItems = useMemo(() => readSurveyPresentation({ ...survey, surveyPageReferences: [], surveyZoneSelection: null, tabs }, navigationCatalog).items, [survey, tabs, navigationCatalog])
-  const laneMembership = JSON.stringify(filterLanes.map(lane => [lane.id, lane.hostId, lane.workspaceId, lane.projectWorkspaceId, lane.topicId, lane.objectKind, lane.contextIds]))
-  const laneOrigins = useMemo(() => focusLaneOrigins(filterLanes, navigationCatalog, tabs, surveyItems, originContent), [laneMembership, navigationCatalog, tabs, surveyItems, originContent])
+  const laneMembership = JSON.stringify(filterLanes.map(lane => [lane.id, lane.hostId, lane.workspaceId, lane.projectWorkspaceId, lane.topicId, lane.objectKind, lane.contextRefs]))
+  const laneOrigins = useMemo(() => focusLaneOrigins(filterLanes, navigationCatalog, surveyItems, originContent, contextIdentities), [laneMembership, navigationCatalog, tabs, surveyItems, originContent, contextIdentities])
   const retainedProjects = useMemo(() => deriveRetainedFocusProjects(executionHistory, allLanes, {
     timelines, sources: catalogue.sources, sourcesAvailable: catalogue.available
   }), [executionHistory, allLanes, timelines, catalogue.sources, catalogue.available])
@@ -260,46 +264,54 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
   const searchCatalog = useMemo(() => searchingMetadata ? focusSearchCatalog(navigationCatalog, agentRegionExecution) : navigationCatalog,
     [searchingMetadata, navigationCatalog, executionRows])
   const searchResult = useMemo(() => searchFocus(query, { rows: filterContexts, lanes: filterLanes, catalog: searchCatalog, sources: catalogue.sources, history: executionHistory, retained: retainedProjects }), [query, filterContexts, filterLanes, searchCatalog, catalogue.sources, executionHistory, retainedProjects])
-  const laneByContext = new Map(filterLanes.flatMap(lane => lane.contextIds.map(id => [focusTopicContextKey(lane.hostId, id), lane] as const)))
+  const lanesByContext = focusLanesByContext(filterLanes)
   // The common Region choice is independent of both the project filter and Agent MRU.
   const resourceLaneIds = new Set(currentSurface && currentSurface.kind !== 'agent' && currentSurface.kind !== 'terminal'
-    ? laneContexts.filter(context => context.workspace?.id === currentSurface.workspaceId
-      && context.workspace.hostId === context.hostId
-      && context.topicId === (tabs[currentReference!.tabId]?.topicId ?? null))
-      .flatMap(context => { const lane = laneByContext.get(focusTopicContextKey(context.hostId, context.id)); return lane ? [lane.id] : [] }) : [])
-  const currentLaneId = currentContext ? laneByContext.get(focusTopicContextKey(currentContext.hostId, currentContext.id))?.id ?? null
+    ? filterLanes.filter(lane => lane.workspaceId === currentSurface.workspaceId
+      && lane.hostId === config?.workspaces.find(workspace => workspace.id === currentSurface.workspaceId)?.hostId
+      && lane.topicId === (tabs[currentReference!.tabId]?.topicId ?? null)).map(lane => lane.id) : [])
+  const currentLanes = currentContext ? (lanesByContext.get(focusTopicContextKey(currentContext.hostId, currentContext.id)) ?? []).filter(lane =>
+    contextIdentities.get(focusTopicContextKey(currentContext.hostId, currentContext.id))?.locations.status === 'confirmed' &&
+    contextIdentities.get(focusTopicContextKey(currentContext.hostId, currentContext.id))!.locations.occurrences.some(occurrence =>
+      occurrence.display.workspaceId === lane.workspaceId && occurrence.display.workspaceId === currentReference?.displayWorkspaceId &&
+      occurrence.display.groupId === currentReference.groupId && occurrence.display.tabId === currentReference.tabId && occurrence.display.regionId === currentReference.regionId)) : []
+  const currentLaneId = currentContext ? currentLanes.length === 1 ? currentLanes[0]!.id : null
     : resourceLaneIds.size === 1 ? resourceLaneIds.values().next().value ?? null : null
-  const projectForRow = (row: typeof executionRows[number]) => { const lane = laneByContext.get(focusTopicContextKey(row.hostId, row.id)); return lane ? focusProjectKey(lane.hostId, lane.projectId) : undefined }
+  const projectsForRow = (row: typeof executionRows[number]) => [...new Set((lanesByContext.get(focusTopicContextKey(row.hostId, row.id)) ?? []).map(focusLaneProjectKey))]
   const typesForRow = (row: typeof executionRows[number]): readonly FocusSourceType[] => {
-    const lane = laneByContext.get(focusTopicContextKey(row.hostId, row.id))
-    return lane ? laneOrigins.get(lane.id)?.contextTypes?.get(row.id) ?? ['unknown'] : ['unknown']
+    const lanes = lanesByContext.get(focusTopicContextKey(row.hostId, row.id)) ?? []
+    return [...new Set(lanes.flatMap(lane => laneOrigins.get(lane.id)?.contextTypes?.get(focusTopicContextKey(row.hostId, row.id)) ?? ['unknown' as const]))]
   }
   const searched = filterContexts.filter(row => searchResult.contextKeys.has(focusSearchContextKey(row.hostId, row.id, row.kind)))
-  const matching = searched.filter(row => focusMatchesProject(projectForRow(row), filters.projects) && focusMatchesTypes(typesForRow(row), filters.types))
+  const matching = searched.filter(row => (filters.projects.length === 0 || projectsForRow(row).some(key => focusMatchesProject(key, filters.projects))) && focusMatchesTypes(typesForRow(row), filters.types))
   const matched = matching.filter(row => focusMatchesState(row, filters.states))
   const revealRow = revealedContext?.lane === 'execution' ? revealedContext.context : null
-  const executionIds = new Set(executionRows.map(row => row.id))
-  const matchedExecution = matched.filter(row => executionIds.has(row.id))
-  const coordinationResults = filtering ? matched.filter(row => !executionIds.has(row.id)) : []
+  const executionIds = new Set(executionRows.map(row => focusTopicContextKey(row.hostId, row.id)))
+  const matchedExecution = matched.filter(row => executionIds.has(focusTopicContextKey(row.hostId, row.id)))
+  const coordinationResults = filtering ? matched.filter(row => !executionIds.has(focusTopicContextKey(row.hostId, row.id))) : []
   const filtered = revealRow && !matchedExecution.includes(revealRow) ? [...matchedExecution, revealRow] : matchedExecution
   const revealOutsideFilters = Boolean(revealedContext && !matched.includes(revealedContext.context))
-  const selected = executionRows.find(row => row.id === shownSessionId)
+  const selected = shownSessionId && projection?.selection[0]
+    ? focusContextAtRegion(executionRows.filter(row => row.id === shownSessionId), projection.selection[0], agentRegionExecution) ?? undefined : undefined
   const mapContext = revealedContext?.context ?? selected
   const selectedContextKey = agentReveal && revealedContext ? JSON.stringify([revealedContext.context.hostId, revealedContext.context.id]) : undefined
-  const filteredIds = new Set(filtered.map(row => row.id))
-  const focusProjectLanes = orderedLanes.filter(lane => lane.contextIds.some(id => filteredIds.has(id)))
-    .map(lane => ({ ...lane, contextIds: lane.contextIds.filter(id => filteredIds.has(id)), activeAgentIds: lane.activeAgentIds.filter(id => filteredIds.has(id)) }))
+  const filteredIds = new Set(filtered.map(row => focusTopicContextKey(row.hostId, row.id)))
+  const focusProjectLanes = orderedLanes.filter(lane => (filters.projects.length === 0 || focusMatchesProject(focusLaneProjectKey(lane), filters.projects)) && lane.contextRefs.some(ref => filteredIds.has(focusTopicContextKey(ref.hostId, ref.id))))
+    .map(lane => ({ ...lane, contextRefs: lane.contextRefs.filter(ref => filteredIds.has(focusTopicContextKey(ref.hostId, ref.id))), activeAgentRefs: lane.activeAgentRefs.filter(ref => filteredIds.has(focusTopicContextKey(ref.hostId, ref.id))) }))
   const boardLanes = useFocusCollectionLanes(focusProjectLanes, navigationCatalog, originContent, boardRowsRef, scanInteraction, visible)
-  const scanByContext = new Map(boardLanes.flatMap(lane => (lane.collection?.topics ?? [lane]).flatMap(original =>
-    original.contextIds.map(id => [focusTopicContextKey(original.hostId, id), { scanId: lane.id, originalId: original.id }] as const))))
-  const displayedCurrentLaneId = currentContext ? scanByContext.get(focusTopicContextKey(currentContext.hostId, currentContext.id))?.originalId ?? currentLaneId : currentLaneId
+  const scansByContext = new Map<string, { scanId: string; originalId: string }[]>()
+  for (const lane of boardLanes) for (const original of lane.collection?.topics ?? [lane]) for (const ref of original.contextRefs) {
+    const key = focusTopicContextKey(ref.hostId, ref.id), entries = scansByContext.get(key) ?? []
+    entries.push({ scanId: lane.id, originalId: original.id }); scansByContext.set(key, entries)
+  }
+  const displayedCurrentLaneId = currentLaneId
   const rowsByLane = new Map<string, typeof filtered>()
   for (const row of filtered) {
-    const scanId = scanByContext.get(focusTopicContextKey(row.hostId, row.id))?.scanId
-    if (!scanId) continue
+    for (const scanId of new Set((scansByContext.get(focusTopicContextKey(row.hostId, row.id)) ?? []).map(scan => scan.scanId))) {
     const rows = rowsByLane.get(scanId) ?? []
     rows.push(row)
     rowsByLane.set(scanId, rows)
+    }
   }
   const filteredRetainedProjects = retainedProjects.filter(item => focusMatchesProject(item.key, filters.projects) && filters.states.length === 0 && focusMatchesTypes(['unknown'], filters.types)
     && searchResult.projectKeys.has(item.key))
@@ -342,7 +354,7 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
     return () => { active = false; observer.disconnect() }
   }, [visible, documentActive, hasBoardCards, hasBoardLanes])
   const projectOptions = useMemo(() => {
-    const options = [...new Map([...filterLanes.map(lane => ({ id: focusProjectKey(lane.hostId, lane.projectId), name: lane.labels[0]!, hostId: lane.hostId })),
+    const options = [...new Map([...filterLanes.map(lane => ({ id: focusLaneProjectKey(lane), name: lane.labels[0]!, hostId: lane.hostId })),
       ...retainedProjects.map(item => ({ id: item.key, name: item.name, hostId: item.hostId }))].map(item => [item.id, item])).values()]
     const names = new Map<string, number>(), hosts = new Map(config?.hosts.map(host => [host.id, host.label]))
     for (const item of options) names.set(item.name, (names.get(item.name) ?? 0) + 1)
@@ -352,9 +364,9 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
   // excluded. No history reads, owner writes or unrelated-session queries.
   const projectCounts = new Map<string, number>(), stateCounts = new Map<import('../lib/focus-filters').FocusStateFilter, number>(), typeCounts = new Map<FocusSourceType, number>()
   for (const row of searched) {
-    const key = projectForRow(row), types = typesForRow(row)
-    const projectMatch = focusMatchesProject(key, filters.projects), typeMatch = focusMatchesTypes(types, filters.types), stateMatch = focusMatchesState(row, filters.states)
-    if (key && typeMatch && stateMatch) projectCounts.set(key, (projectCounts.get(key) ?? 0) + 1)
+    const keys = projectsForRow(row), types = typesForRow(row)
+    const projectMatch = filters.projects.length === 0 || keys.some(key => focusMatchesProject(key, filters.projects)), typeMatch = focusMatchesTypes(types, filters.types), stateMatch = focusMatchesState(row, filters.states)
+    if (typeMatch && stateMatch) for (const key of keys) projectCounts.set(key, (projectCounts.get(key) ?? 0) + 1)
     if (projectMatch && typeMatch) for (const state of FOCUS_FILTER_STATES) if (focusMatchesState(row, [state.id])) stateCounts.set(state.id, (stateCounts.get(state.id) ?? 0) + 1)
     if (projectMatch && stateMatch) for (const type of types) typeCounts.set(type, (typeCounts.get(type) ?? 0) + 1)
   }

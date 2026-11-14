@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useReducer, useRef, type RefObject } from 'react'
 import type { AgentMuxSpaceCatalog, TopicCategory } from '@agentmux/core/control'
 import type { SpaceZoneBindings } from '../../../shared/space-addresses'
-import type { FocusProjectLane } from './focus-project-lanes'
+import { focusLanesByContext, type FocusContextReference, type FocusProjectLane } from './focus-project-lanes'
 import { createFocusCollectionIndex, focusTopicContextKey, projectFocusCollectionLanes, type FocusScanLane } from './focus-collection-lanes'
 
 function interacting(rows: RefObject<HTMLElement | null>, pressed: RefObject<boolean>) {
@@ -11,18 +11,23 @@ function interacting(rows: RefObject<HTMLElement | null>, pressed: RefObject<boo
   const selection = root.ownerDocument.defaultView?.getSelection()
   return Boolean(selection && !selection.isCollapsed && selection.anchorNode && root.contains(selection.anchorNode))
 }
-const membership = (lanes: readonly FocusScanLane[]) => JSON.stringify(lanes.map(lane => [lane.id, lane.contextIds]))
+const membership = (lanes: readonly FocusScanLane[]) => JSON.stringify(lanes.map(lane => [lane.id, lane.contextRefs]))
 type CollectionIndex = ReturnType<typeof createFocusCollectionIndex>
+function originalLane(index: ReadonlyMap<string, readonly FocusProjectLane[]>, lane: FocusProjectLane, ref: FocusContextReference) {
+  const held = index.get(focusTopicContextKey(ref.hostId, ref.id)) ?? []
+  return held.find(previous => previous.id === lane.id)
+    ?? ((lane.topicId || held[0]?.topicId) && held.length === 1 ? held[0] : undefined)
+}
 
 /** Keep existing Contexts in their committed presentation while new ones use current facts. */
 function heldProjection(lanes: readonly FocusProjectLane[], previous: readonly FocusProjectLane[],
   priorIndex: CollectionIndex | null, currentIndex: CollectionIndex | null): FocusScanLane[] {
-  const originals = new Map(previous.flatMap(lane => lane.contextIds.map(id => [focusTopicContextKey(lane.hostId, id), lane] as const)))
+  const originals = focusLanesByContext(previous)
   const segments = new Map<string, { lane: FocusProjectLane; index: CollectionIndex | null }>()
   for (const lane of lanes) {
-    const active = new Set(lane.activeAgentIds)
-    for (const id of lane.contextIds) {
-      const original = originals.get(focusTopicContextKey(lane.hostId, id))
+    const active = new Set(lane.activeAgentRefs.map(ref => focusTopicContextKey(ref.hostId, ref.id)))
+    for (const ref of lane.contextRefs) {
+      const original = originalLane(originals, lane, ref)
       let source = original ?? lane
       if (original && original.id === lane.id) {
         // Hold only the previous classification; current labels and status stay live.
@@ -32,11 +37,11 @@ function heldProjection(lanes: readonly FocusProjectLane[], previous: readonly F
       const key = JSON.stringify([Boolean(original), source.hostId, source.id])
       let segment = segments.get(key)
       if (!segment) {
-        segment = { lane: { ...source, contextIds: [], activeAgentIds: [], lastActivityAt: null }, index: original ? priorIndex : currentIndex }
+        segment = { lane: { ...source, contextRefs: [], activeAgentRefs: [], lastActivityAt: null }, index: original ? priorIndex : currentIndex }
         segments.set(key, segment)
       }
-      segment.lane.contextIds.push(id)
-      if (active.has(id)) segment.lane.activeAgentIds.push(id)
+      segment.lane.contextRefs.push(ref)
+      if (active.has(focusTopicContextKey(ref.hostId, ref.id))) segment.lane.activeAgentRefs.push(ref)
       segment.lane.lastActivityAt = Math.max(segment.lane.lastActivityAt ?? 0, lane.lastActivityAt ?? 0) || null
     }
   }
@@ -48,8 +53,8 @@ function heldProjection(lanes: readonly FocusProjectLane[], previous: readonly F
         entry = { lane: projected, topics: [], issues: new Set() }
         result.set(projected.id, entry)
       } else {
-        entry.lane.contextIds.push(...projected.contextIds)
-        entry.lane.activeAgentIds.push(...projected.activeAgentIds)
+        entry.lane.contextRefs.push(...projected.contextRefs)
+        entry.lane.activeAgentRefs.push(...projected.activeAgentRefs)
         entry.lane.lastActivityAt = Math.max(entry.lane.lastActivityAt ?? 0, projected.lastActivityAt ?? 0) || null
       }
       if (projected.collection) entry.topics.push(...projected.collection.topics)
@@ -74,9 +79,9 @@ export function useFocusCollectionLanes(lanes: readonly FocusProjectLane[], cata
   const [, update] = useReducer(value => value + 1, 0)
   const desired: FocusScanLane[] = currentIndex ? projectFocusCollectionLanes(lanes, currentIndex) : [...lanes]
   const prior = held.current
-  const originalByContext = new Map(prior.lanes.flatMap(lane => lane.contextIds.map(id => [focusTopicContextKey(lane.hostId, id), lane] as const)))
-  const sourcesChanged = prior.index !== currentIndex || lanes.some(lane => lane.contextIds.some(id => {
-    const original = originalByContext.get(focusTopicContextKey(lane.hostId, id))
+  const originalByContext = focusLanesByContext(prior.lanes)
+  const sourcesChanged = prior.index !== currentIndex || lanes.some(lane => lane.contextRefs.some(ref => {
+    const original = originalLane(originalByContext, lane, ref)
     return original && (original.id !== lane.id || original.objectKind !== lane.objectKind)
   }))
   const heldSources = sourcesChanged ? heldProjection(lanes, prior.lanes, prior.index, currentIndex) : desired
@@ -99,8 +104,11 @@ export function useFocusCollectionLanes(lanes: readonly FocusProjectLane[], cata
     return () => { observer.disconnect(); document.removeEventListener('focusout', flush); document.removeEventListener('pointerup', flush); document.removeEventListener('keyup', flush) }
   }, [pending, rows, pressed])
   if (!pending) return desired
-  const desiredIds = new Map(desired.flatMap(lane => (lane.collection?.topics ?? [lane]).flatMap(topic =>
-    topic.contextIds.map(id => [focusTopicContextKey(topic.hostId, id), lane.id] as const))))
+  const desiredIds = new Map<string, Set<string>>()
+  for (const lane of desired) for (const topic of lane.collection?.topics ?? [lane]) for (const ref of topic.contextRefs) {
+    const key = focusTopicContextKey(ref.hostId, ref.id), ids = desiredIds.get(key) ?? new Set<string>()
+    ids.add(lane.id); desiredIds.set(key, ids)
+  }
   return heldSources.map(lane => lane.collection ? { ...lane, collection: { ...lane.collection,
-    pending: lane.collection.topics.some(topic => topic.contextIds.some(id => desiredIds.get(focusTopicContextKey(topic.hostId, id)) !== lane.id)) } } : lane)
+    pending: lane.collection.topics.some(topic => topic.contextRefs.some(ref => !desiredIds.get(focusTopicContextKey(ref.hostId, ref.id))?.has(lane.id))) } } : lane)
 }

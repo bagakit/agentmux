@@ -27,8 +27,8 @@ export function searchFocus(query: string, input: {
   text: [row.name, row.detail, row.recap?.text ?? '', row.stateLabel, row.workspacePath, row.workspaceName, row.providerId ?? ''] }))
  const kinds = new Map<string, Set<FocusContext['kind']>>()
  for (const row of input.rows) { const key = JSON.stringify([row.hostId, row.id]), values = kinds.get(key) ?? new Set<FocusContext['kind']>(); values.add(row.kind); kinds.set(key, values) }
- for (const lane of input.lanes) for (const id of lane.contextIds) {
-  for (const kind of kinds.get(JSON.stringify([lane.hostId, id])) ?? []) sessions.push({ agentSessionId: id, hostId: lane.hostId, kind, identities: [lane.workspaceId, lane.projectWorkspaceId, lane.topicId].filter((id): id is string => Boolean(id)), text: [lane.name] })
+ for (const lane of input.lanes) for (const ref of lane.contextRefs) {
+  for (const kind of kinds.get(JSON.stringify([ref.hostId, ref.id])) ?? []) sessions.push({ agentSessionId: ref.id, hostId: ref.hostId, kind, identities: [lane.workspaceId, lane.projectWorkspaceId, lane.topicId].filter((id): id is string => Boolean(id)), text: [lane.name] })
  }
  for (const entry of input.history) if (entry.identity) {
   const saved = entry.identity

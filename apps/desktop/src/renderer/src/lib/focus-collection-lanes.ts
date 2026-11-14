@@ -2,13 +2,14 @@ import type { AgentMuxSpaceCatalog, TopicCategory } from '@agentmux/core/control
 import { homeZoneId, type SpaceZoneBindings } from '../../../shared/space-addresses'
 import type { FocusContext } from './focus-context'
 import type { FocusProjectLane } from './focus-project-lanes'
+import { focusContextIdentityKey } from './focus-context-identity'
 
 export type FocusTopicHeading = { id: string; name: string; summary: string | null }
 export type FocusScanLane = FocusProjectLane & {
   /** Disposable scan projection; none of these IDs is a new Core Space/Session. */
   collection?: { categories: readonly TopicCategory[]; topics: readonly FocusProjectLane[]; confirmed: boolean; pending?: boolean }
 }
-export const focusTopicContextKey = (hostId: string, contextId: string) => JSON.stringify([hostId, contextId])
+export const focusTopicContextKey = focusContextIdentityKey
 
 /** Disposable lookup built from the same immutable spatial facts as the catalog. */
 export function createFocusCollectionIndex(catalog: AgentMuxSpaceCatalog,
@@ -59,7 +60,7 @@ export function projectFocusCollectionLanes(lanes: readonly FocusProjectLane[], 
       const name = confirmed ? members.length === 1 ? members[0]!.title : `Multiple Collections · ${members.map(member => member.title).join(' / ')}` : 'Collection not confirmed'
       const topics: FocusProjectLane[] = []
       const group: FocusScanLane = { id: key, workspaceId: '', projectId: '', projectWorkspaceId: null, name, labels: [name], path: '', hostId: lane.hostId,
-        topicId: null, recovery: null, summary: null, activeAgentIds: [], contextIds: [], lastActivityAt: null,
+        topicId: null, recovery: null, summary: null, activeAgentRefs: [], contextRefs: [], lastActivityAt: null,
         collection: { categories: members, topics, confirmed } }
       entry = { lane: group, topics, active: new Set(), contexts: new Set(), issues: new Set() }
       collections.set(key, entry); result.push(group)
@@ -69,8 +70,10 @@ export function projectFocusCollectionLanes(lanes: readonly FocusProjectLane[], 
     }
     entry.lane.summary = entry.issues.size ? [...entry.issues].join('\n') : null
     entry.topics.push(lane)
-    for (const id of lane.activeAgentIds) if (!entry.active.has(id)) { entry.active.add(id); entry.lane.activeAgentIds.push(id) }
-    for (const id of lane.contextIds) if (!entry.contexts.has(id)) { entry.contexts.add(id); entry.lane.contextIds.push(id) }
+    for (const ref of lane.activeAgentRefs) { const key = focusTopicContextKey(ref.hostId, ref.id)
+      if (!entry.active.has(key)) { entry.active.add(key); entry.lane.activeAgentRefs.push(ref) } }
+    for (const ref of lane.contextRefs) { const key = focusTopicContextKey(ref.hostId, ref.id)
+      if (!entry.contexts.has(key)) { entry.contexts.add(key); entry.lane.contextRefs.push(ref) } }
     if (lane.lastActivityAt != null) entry.lane.lastActivityAt = Math.max(entry.lane.lastActivityAt ?? 0, lane.lastActivityAt)
   }
   return result
@@ -85,7 +88,7 @@ export function focusCollectionTopics(lane: FocusScanLane): ReadonlyMap<string, 
   const result = new Map<string, FocusTopicHeading>()
   for (const topic of lane.collection?.topics ?? []) {
     const heading = { id: JSON.stringify([topic.hostId, topic.workspaceId, topic.topicId]), name: topic.labels.at(-1) ?? topic.name, summary: topic.summary }
-    for (const id of topic.contextIds) result.set(focusTopicContextKey(topic.hostId, id), heading)
+    for (const ref of topic.contextRefs) result.set(focusTopicContextKey(ref.hostId, ref.id), heading)
   }
   return result
 }

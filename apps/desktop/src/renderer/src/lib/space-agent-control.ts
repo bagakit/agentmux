@@ -42,7 +42,7 @@ export type SpatialControlPorts = {
   patch(patch: SpatialPatch): void
   topics(): Promise<readonly ScratchTopicSnapshot[]>
   appearance?(catalog: AgentMuxSpaceCatalog, imageSpaceId: string | undefined, topics: readonly ScratchTopicSnapshot[]): Promise<NonNullable<AgentMuxSpaceCatalog['appearance']>>
-  agentPresentation?(): NonNullable<AgentMuxSpaceCatalog['agentPresentation']>
+  agentPresentation?(catalog: AgentMuxSpaceCatalog): NonNullable<AgentMuxSpaceCatalog['agentPresentation']>
   motePresentation?(catalog: AgentMuxSpaceCatalog, topics: readonly ScratchTopicSnapshot[]): NonNullable<AgentMuxSpaceCatalog['motePresentation']>
   surveyPresentation?(catalog: AgentMuxSpaceCatalog): NonNullable<AgentMuxSpaceCatalog['survey']>
   createResource(input: SpaceZoneResourceInput): Promise<SpaceZoneResourceResult>
@@ -454,7 +454,7 @@ export async function executeSpatialControl(ports: SpatialControlPorts,
     const selected = selectSpatialCatalog(catalog, target ?? {})
     const imageSpaceId = request.operation === 'space.inspect' ? target?.spaceId : undefined
     catalog = { ...selected,
-      ...(ports.agentPresentation && request.operation === 'space.ls' ? { agentPresentation: ports.agentPresentation() } : {}),
+      ...(ports.agentPresentation && request.operation === 'space.ls' ? { agentPresentation: ports.agentPresentation(catalog) } : {}),
       ...(ports.surveyPresentation && request.operation === 'space.ls' && !Object.values(target ?? {}).some(Boolean) ? { survey: ports.surveyPresentation(selected) } : {}) }
     if (ports.motePresentation) {
       try { catalog.motePresentation = ports.motePresentation(selected, topics) }

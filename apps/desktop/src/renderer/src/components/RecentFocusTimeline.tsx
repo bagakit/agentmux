@@ -44,7 +44,8 @@ import { createFocusTimeFormatters, focusDateCandidates, focusRulerLabels, focus
 import { useFocusHistorySources, type FocusHistoryCatalogue } from '../lib/focus-history-sources'
 import { api } from '../lib/api'
 import { presentError } from '@agentmux/client-ui/error-presentation'
-import type { FocusHierarchyFacts, FocusProjectLane } from '../lib/focus-project-lanes'
+import { focusLanesByContext, uniqueFocusLane, type FocusHierarchyFacts, type FocusProjectLane } from '../lib/focus-project-lanes'
+import { focusContextIdentityKey } from '../lib/focus-context-identity'
 import { FOCUS_WINDOW_HOURS, HOUR_MS, focusTimePosition, focusTimeSegments, focusTimeWindow, focusWheelTimeDelta, focusWindowLabel, focusWorkSegment, type FocusTimeSegment, type FocusTimeWindow } from '../lib/focus-time-window'
 
 const ThemeStatusPresenceRunningIcon = semanticIconComponent('status.presence-running')
@@ -466,7 +467,7 @@ const FocusTimeProject = memo(function FocusTimeProject({ project, registered, c
       <span className="recent-focus__project-summary" aria-hidden="true" />
     </button>
     <div className="recent-focus__project-tracks" data-collapsed={collapsed} inert={collapsed} aria-hidden={collapsed || undefined}>
-      {project.tracks.map(track => <FocusTimeTrack key={track.key} track={track} selected={!!track.current && track.sessionId === currentContext?.id && track.current.hostId === currentContext.hostId} onEvent={onEvent} onEventChanged={onEventChanged} onCurrentPresence={onCurrentPresence} recordedMessageTracks={recordedMessageTracks.get(JSON.stringify([track.current?.hostId ?? track.inputReference?.hostId ?? track.identity?.hostId, track.sessionId]))} retainedWork={workByReference.get(JSON.stringify([track.current?.hostId ?? track.inputReference?.hostId ?? track.identity?.hostId, track.sessionId]))} observeWork={observeWork} observing={observing && !collapsed} nativeMessages={track.current ? messagesByReference.get(JSON.stringify([track.current.hostId, track.sessionId])) : messagesByTrack.get(track.key)} window={window} now={now} scaleWidth={scaleWidth} lane={track.current ? lanesByContext.get(track.sessionId) : undefined} time={time} onSelect={onSelect} onPreview={onPreview} onDismiss={onDismiss} onInspect={onInspect} onInspectWork={onInspectWork} onPresence={observePresence} />)}
+      {project.tracks.map(track => <FocusTimeTrack key={track.key} track={track} selected={!!track.current && track.sessionId === currentContext?.id && track.current.hostId === currentContext.hostId} onEvent={onEvent} onEventChanged={onEventChanged} onCurrentPresence={onCurrentPresence} recordedMessageTracks={recordedMessageTracks.get(JSON.stringify([track.current?.hostId ?? track.inputReference?.hostId ?? track.identity?.hostId, track.sessionId]))} retainedWork={workByReference.get(JSON.stringify([track.current?.hostId ?? track.inputReference?.hostId ?? track.identity?.hostId, track.sessionId]))} observeWork={observeWork} observing={observing && !collapsed} nativeMessages={track.current ? messagesByReference.get(JSON.stringify([track.current.hostId, track.sessionId])) : messagesByTrack.get(track.key)} window={window} now={now} scaleWidth={scaleWidth} lane={track.current ? lanesByContext.get(focusContextIdentityKey(track.current.hostId, track.sessionId)) : undefined} time={time} onSelect={onSelect} onPreview={onPreview} onDismiss={onDismiss} onInspect={onInspect} onInspectWork={onInspectWork} onPresence={observePresence} />)}
     </div>
   </section>
 })
@@ -616,11 +617,10 @@ export const RecentFocusTimeline = memo(function RecentFocusTimeline({ entries, 
   const displayPath = usePathDisplay()
   const config = useAppStore(state => state.config)
   const registeredProjects = useMemo(() => new Set(config?.workspaces.map(workspace => JSON.stringify([workspace.hostId, workspace.id]))), [config])
-  const lanesByContext = useMemo(() => {
-    const result = new Map<string, FocusProjectLane>()
-    for (const lane of lanes ?? []) for (const id of lane.contextIds) result.set(id, lane)
-    return result
-  }, [lanes])
+  const lanesByContext = useMemo(() => new Map([...focusLanesByContext(lanes ?? [])].flatMap(([key, values]) => {
+    const lane = uniqueFocusLane(values)
+    return lane ? [[key, lane] as const] : []
+  })), [lanes])
   const savedHeight = useAppStore(state => state.focusTimelineHeight)
   const saveHeight = useAppStore(state => state.setFocusTimelineHeight)
   const savedNameWidth = useAppStore(state => state.focusTimelineNameWidth)
@@ -997,7 +997,7 @@ export const RecentFocusTimeline = memo(function RecentFocusTimeline({ entries, 
   const previewSpeaker = preview?.message ? preview.message.speaker : undefined
   const senderId = previewSpeaker?.role === 'agent' ? previewSpeaker.id : undefined
   const sender = senderId ? contexts.find(context => context.id === senderId && context.kind === 'agent') : undefined
-  const senderLane = sender ? lanes?.find(lane => lane.contextIds.includes(sender.id)) : undefined
+  const senderLane = sender ? lanesByContext.get(focusContextIdentityKey(sender.hostId, sender.id)) : undefined
   const previewMessages = useMemo(() => preview?.message ? [...inputMessages, preview.message] : inputMessages, [inputMessages, preview?.message])
   const describePreviewSpeaker = useFocusSpeakerResolver(previewMessages, documentVisible && Boolean(preview && !preview.event))
   const inspectWindow = (next: number | null) => { setAnchor(next); setObservation(null); setDateDraft(null); setDateError(null); setDateChoice(null) }

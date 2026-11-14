@@ -1,16 +1,21 @@
 import type { AgentFocusHistoryEntry, AgentFocusHistoryIdentity } from './agent-focus'
 import type { FocusContext } from './focus-context'
-import type { FocusProjectLane } from './focus-project-lanes'
+import { focusLanesByContext, type FocusProjectLane } from './focus-project-lanes'
+import { focusContextIdentityKey } from './focus-context-identity'
 import type { FocusTimeSegment } from './focus-time-window'
 
 export type FocusTimelineTrack = {
   key: string
   sessionId: string
-  identity: AgentFocusHistoryIdentity | undefined
+  identity: FocusTimelineIdentity | undefined
   current: FocusContext | undefined
   segments: FocusTimeSegment[]
   inputProjectObserved?: boolean
   inputReference?: { hostId: string; agentSessionId: string } | undefined
+}
+/** Current display grouping only. Saved history retains its original Agent Host contract. */
+export type FocusTimelineIdentity = Omit<AgentFocusHistoryIdentity, 'project'> & {
+  project?: NonNullable<AgentFocusHistoryIdentity['project']> & { hostId?: string }
 }
 export type FocusTimelineProject = {
   key: string
@@ -19,17 +24,20 @@ export type FocusTimelineProject = {
   tracks: FocusTimelineTrack[]
 }
 const UNKNOWN_PROJECT = 'unknown-project'
-function projectKey(identity: AgentFocusHistoryIdentity | undefined, hostId?: string): string {
-  return identity?.project ? JSON.stringify([identity.hostId, identity.project.id]) : JSON.stringify([identity?.hostId ?? hostId ?? null, UNKNOWN_PROJECT])
+function projectKey(identity: FocusTimelineIdentity | undefined, hostId?: string): string {
+  return identity?.project ? JSON.stringify([identity.project.hostId ?? identity.hostId, identity.project.id]) : JSON.stringify([identity?.hostId ?? hostId ?? null, UNKNOWN_PROJECT])
 }
-export function focusTimelineTrackKey(sessionId: string, identity: AgentFocusHistoryIdentity | undefined, hostId?: string): string {
-  return JSON.stringify([projectKey(identity, hostId), sessionId])
+export function focusTimelineTrackKey(sessionId: string, identity: FocusTimelineIdentity | undefined, hostId?: string): string {
+  return JSON.stringify([projectKey(identity, hostId), identity?.hostId ?? hostId ?? null, sessionId])
 }
 const trackKey = focusTimelineTrackKey
-function currentIdentity(context: FocusContext, lane: FocusProjectLane | undefined): AgentFocusHistoryIdentity {
+function currentIdentity(context: FocusContext, lanes: readonly FocusProjectLane[] | undefined): FocusTimelineIdentity {
+  const first = lanes?.[0]
+  const project = first?.projectWorkspaceId && lanes!.every(lane => !lane.locationUnconfirmed && lane.hostId === first.hostId && lane.projectId === first.projectId)
+    ? { id: first.projectId, name: first.labels[0]!, hostId: first.hostId } : undefined
   return {
     name: context.name, kind: context.kind, providerId: context.providerId, hostId: context.hostId, workspacePath: context.workspacePath,
-    ...(lane?.projectWorkspaceId ? { project: { id: lane.projectId, name: lane.labels[0]! } } : {}),
+    ...(project ? { project } : {}),
     ...(context.workspace?.branch ? { branch: context.workspace.branch } : {}),
     ...(context.topicId ? { topicId: context.topicId } : {})
   }
@@ -65,8 +73,8 @@ export function resolveFocusInputTrack(observations: ReadonlyMap<string, FocusIn
 export function groupFocusTimeline(contexts: readonly FocusContext[], lanes: readonly FocusProjectLane[], segments: ReadonlyMap<string, readonly FocusTimeSegment[]>, readonlyInputTracks: readonly FocusInputTrack[] = []): FocusTimelineProject[] {
   const groups = new Map<string, FocusTimelineProject>()
   const tracks = new Map<string, FocusTimelineTrack>()
-  const byContext = new Map(lanes.flatMap(lane => lane.contextIds.map(id => [id, lane] as const)))
-  const ensure = (sessionId: string, identity: AgentFocusHistoryIdentity | undefined, hostId?: string) => {
+  const byContext = focusLanesByContext(lanes)
+  const ensure = (sessionId: string, identity: FocusTimelineIdentity | undefined, hostId?: string) => {
     const groupKey = projectKey(identity, hostId), key = trackKey(sessionId, identity, hostId)
     let track = tracks.get(key)
     if (!track) {
@@ -82,8 +90,7 @@ export function groupFocusTimeline(contexts: readonly FocusContext[], lanes: rea
     if (!track.identity || track.segments.length > 1) track.identity = visit.identity
   }
   for (const context of contexts) {
-    const lane = byContext.get(context.id)
-    const identity = currentIdentity(context, lane)
+    const identity = currentIdentity(context, byContext.get(focusContextIdentityKey(context.hostId, context.id)))
     const track = ensure(context.id, identity)
     track.current = context
     // This identity is used only for current-only rows; it cannot fill an old observation.
@@ -116,7 +123,7 @@ const compareName = (a: { key: string; name: string }, b: { key: string; name: s
  * Focus timestamps select a recorded name only; they never supply task activity. */
 export function focusTimelineOrderCandidates(contexts: readonly FocusContext[], lanes: readonly FocusProjectLane[], entries: readonly AgentFocusHistoryEntry[], inputTracks: readonly FocusInputTrack[] = []): FocusTimelineOrderCandidate[] {
   const groups = new Map<string, { key: string; name: string; namedAt: number; activityAt: number | null; tracks: Map<string, { key: string; name: string; namedAt: number }> }>()
-  const remember = (sessionId: string, identity: AgentFocusHistoryIdentity | undefined, namedAt: number, activityAt: number | null = null, hostId?: string) => {
+  const remember = (sessionId: string, identity: FocusTimelineIdentity | undefined, namedAt: number, activityAt: number | null = null, hostId?: string) => {
     const key = projectKey(identity, hostId)
     const group = groups.get(key) ?? { key, name: identity?.project?.name ?? 'Project not recorded', namedAt, activityAt: null, tracks: new Map() }
     if (namedAt >= group.namedAt) { group.name = identity?.project?.name ?? 'Project not recorded'; group.namedAt = namedAt }
@@ -126,8 +133,8 @@ export function focusTimelineOrderCandidates(contexts: readonly FocusContext[], 
     groups.set(key, group)
   }
   for (const entry of entries) remember(entry.sessionId, entry.identity, entry.focusedAt)
-  const byContext = new Map(lanes.flatMap(lane => lane.contextIds.map(id => [id, lane] as const)))
-  for (const context of contexts) remember(context.id, currentIdentity(context, byContext.get(context.id)), Infinity, context.lastActivityAt)
+  const byContext = focusLanesByContext(lanes)
+  for (const context of contexts) remember(context.id, currentIdentity(context, byContext.get(focusContextIdentityKey(context.hostId, context.id))), Infinity, context.lastActivityAt)
   for (const inputTrack of inputTracks) remember(inputTrack.sessionId, inputTrack.identity, -Infinity, null, inputTrack.reference?.hostId)
   return [...groups.values()].map(group => ({ key: group.key, name: group.name, activityAt: group.activityAt,
     tracks: [...group.tracks.values()].map(({ key, name }) => ({ key, name })) }))

@@ -4580,7 +4580,7 @@ async function commitDisplayName(target: AgentMuxNameTarget, value: string | nul
 
 const agentRegionExecutionIndex = new WeakMap<readonly import('@agentmux/core/spatial-graph').AgentMuxSpatialGraph['regions'][number][], Map<string, import('@agentmux/core/spatial-graph').AgentMuxSpatialGraph['regions'][number]>>()
 
-export type AgentRegionReference = { tabId: string; regionId: string; agentSessionId: string }
+export type AgentRegionReference = { tabId: string; regionId: string; agentSessionId: string; expectedRunId?: string }
 
 /** The existing Core document owns execution identity; display placement never supplies a Host. */
 /** Availability of the original spatial owner, not Agent or Run health. */
@@ -4600,7 +4600,11 @@ export function agentRegionExecution(reference: AgentRegionReference) {
     agentRegionExecutionIndex.set(regions, byRegion)
   }
   const region = byRegion.get(JSON.stringify([reference.tabId, reference.regionId]))
-  return region?.kind === 'agent' && region.agentSessionId === reference.agentSessionId ? region.execution ?? null : null
+  if (region?.kind === 'agent' && region.agentSessionId === reference.agentSessionId) return region.execution ?? null
+  // An Agent may be presented through its original Terminal Region. Terminal
+  // facts have no Agent SID, so only that exact retained Run can qualify it.
+  return region?.kind === 'terminal' && reference.expectedRunId !== undefined && region.runId === reference.expectedRunId
+    ? region.execution ?? null : null
 }
 
 /** An explicit related reader refreshes the original owner, without applying or resaving the graph. */
@@ -6741,7 +6745,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         address.displayWorkspaceId === localFocus.reference.displayWorkspaceId && address.groupId === localFocus.reference.groupId)
       try { return await executeSpatialControl({
         get: () => ({ ...get(), originalSpatialGraph: coreSpatialPersistence?.current?.graph ?? null }),
-        agentPresentation: () => readAgentPresentation(get()),
+        agentPresentation: catalog => readAgentPresentation(get(), { catalog, layouts: get().layouts,
+          executionFor: agentRegionExecution, known: agentRegionLocationsKnown(), bindings: agentRegionLocationBindings() }),
         motePresentation: (catalog, topics) => readMotePresentation(get(), catalog, topics),
         surveyPresentation: catalog => readSurveyPresentation(get(), catalog),
         appearance: (catalog, imageSpaceId, topics) => readSpatialAppearance(get(), catalog, imageSpaceId, topics,

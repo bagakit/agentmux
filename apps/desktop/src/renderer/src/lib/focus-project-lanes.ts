@@ -1,6 +1,5 @@
 import type { AgentFocusHistoryEntry, AgentFocusHistoryIdentity } from './agent-focus'
 import type { AppConfig, ScratchTopicSnapshot, WorkspaceBranchesSnapshot } from '../../../shared/contracts'
-import type { WorkbenchTab } from './workbench-tabs'
 import { focusLastTaskActivityAt, type FocusContext } from './focus-context'
 import type { AgentSessionHistoryDescriptor, AgentTimelineSnapshot } from '@agentmux/core'
 import { scratchTopicKind, scratchTopicsForWorkspace, type ScratchTopicsSnapshot } from './scratch-topic-snapshots'
@@ -8,6 +7,7 @@ import { topicSpaceIconTarget } from './space-object-appearance'
 import { FOCUS_RECENT_PROJECT_HOURS, resolveFocusRecentActivityHours } from '../../../shared/focus-preferences'
 import { directoryIdentity } from '../../../shared/space-addresses'
 import { compareFocusWork, focusWorkPriority } from '@agentmux/client-ui/focus-order'
+import { focusContextIdentityKey, type FocusContextIdentity } from './focus-context-identity'
 
 export type FocusWorktreeFact = { hostId: string; path: string; repoPath: string; branch: string; removed: boolean }
 export type FocusHierarchyFacts = {
@@ -33,12 +33,15 @@ function focusProjectIndex(config: Pick<AppConfig, 'workspaces'> | null): Projec
   return index
 }
 export function focusProjectRoots(config: Pick<AppConfig, 'workspaces'> | null) { return focusProjectIndex(config).roots }
+export type FocusContextReference = Pick<FocusContext, 'hostId' | 'id'>
 export type FocusProjectLane = {
+  /** The lane belongs to its Project; each Agent keeps its own qualified identity. */
   id: string; workspaceId: string; projectId: string; name: string; path: string; hostId: string
+  locationUnconfirmed?: boolean
   labels: string[]; topicId: string | null; recovery: 'removed' | 'unknown' | null
   projectWorkspaceId: string | null; summary: string | null
   objectKind?: 'topic' | 'mote' | 'unknown'; objectIconKey?: string
-  activeAgentIds: string[]; contextIds: string[]
+  activeAgentRefs: FocusContextReference[]; contextRefs: FocusContextReference[]
   lastActivityAt?: number | null
 }
 const activityKey = (lane: FocusProjectLane) => lane.topicId ? lane.id : focusProjectKey(lane.hostId, lane.projectId)
@@ -51,12 +54,11 @@ export function retainedWorktreeFacts(previous: readonly FocusWorktreeFact[], sn
   return [...other, ...known.filter(fact => !current.some(item => item.path === fact.path)).map(fact => ({ ...fact, removed: true })), ...current]
 }
 /** Project/checkout/Topic are held ownership facts, never a guess from Agent liveness. */
-export function deriveFocusProjectLanes(rows: readonly FocusContext[], config: Pick<AppConfig, 'workspaces' | 'focus'> | null = null, facts: FocusHierarchyFacts = EMPTY_FOCUS_HIERARCHY, tabs: Readonly<Record<string, WorkbenchTab>> = {}, now = Date.now(), topicSnapshots?: Readonly<Record<string, ScratchTopicsSnapshot>>): FocusProjectLane[] {
-  const tabWorkspace = new Map<string, string>()
-  for (const tab of Object.values(tabs)) for (const region of Object.values(tab.regions)) if ('sessionId' in region) tabWorkspace.set(region.sessionId, tab.workspaceId)
+export function deriveFocusProjectLanes(rows: readonly FocusContext[], config: Pick<AppConfig, 'workspaces' | 'focus'> | null = null, facts: FocusHierarchyFacts = EMPTY_FOCUS_HIERARCHY, identities?: ReadonlyMap<string, FocusContextIdentity>, now = Date.now(), topicSnapshots?: Readonly<Record<string, ScratchTopicsSnapshot>>): FocusProjectLane[] {
   const lanes = new Map<string, FocusProjectLane>()
   const priorities = new Map<string, number>()
   const groupRanks = new Map<string, number>()
+  const members = new Map<string, Set<string>>()
   const { roots: projectRoots, workspaces: workspacesById } = focusProjectIndex(config)
   const activity = new Map<string, number>()
   const recentActivityMs = resolveFocusRecentActivityHours(config?.focus?.recentActivityHours) * 3_600_000
@@ -64,44 +66,60 @@ export function deriveFocusProjectLanes(rows: readonly FocusContext[], config: P
     const resource = row.workspace
     const configured = workspacesById.get(resource?.id ?? row.workspaceId)
     const closeout = configured?.closeout ?? resource?.closeout
-    const displayId = closeout?.targetWorkspaceId ?? (!configured ? tabWorkspace.get(row.id) : undefined)
-    const candidate = displayId ? workspacesById.get(displayId) : undefined
-    const display = candidate && !candidate.closeout && candidate.hostId === row.hostId ? candidate : undefined
-    // Focus groups current presentation, while the Context retains its original
-    // execution path. A completed closeout must not revive its former branch from
-    // retained Git observations after the source resource is withdrawn.
-    const gathered = Boolean(display && (closeout || display.id !== resource?.id))
-    const workspace = gathered ? display : resource
-    const displayPath = gathered ? workspace!.path : row.workspacePath
-    const checkout = gathered ? undefined : facts.worktrees.find(item => item.path === row.workspacePath && item.hostId === row.hostId)
-    const repoPath = workspace?.repoPath ?? checkout?.repoPath
-    const project = repoPath ? projectRoots.get(JSON.stringify([row.hostId, repoPath])) : workspace
-    const projectId = project?.id ?? (repoPath ? directoryIdentity(row.hostId, repoPath) : workspace?.id ?? row.workspaceId)
-    const workspaceId = workspace?.id ?? tabWorkspace.get(row.id) ?? row.workspaceId
-    const topicId = row.topicId ?? null
-    const topics = topicSnapshots ? scratchTopicsForWorkspace(topicSnapshots, workspace) : facts.topics[workspaceId]
-    const topic = topicId ? topics?.find(item => item.id === topicId) : undefined
-    const labels = [project?.name ?? repoPath ?? row.workspaceName]
-    const branch = workspace?.branch ?? checkout?.branch
-    if (branch) labels.push(branch)
-    if (topicId) labels.push(topic?.title || topicId)
-    const id = JSON.stringify([row.hostId, workspaceId, displayPath, topicId])
-    const iconTarget = workspace && topic ? topicSpaceIconTarget(workspace, topic) : null
-    const lane = lanes.get(id) ?? { id, workspaceId, projectId, projectWorkspaceId: project?.id ?? workspace?.id ?? null,
-      name: labels.join(' / '), labels, summary: topic?.readError ? null : topic?.summary.trim() || null,
-      path: displayPath, hostId: row.hostId, topicId,
-      ...(topicId ? { objectKind: scratchTopicKind(topicId, topics),
-        ...(iconTarget ? { objectIconKey: iconTarget.key } : {}) } : {}),
-      recovery: checkout?.removed ? 'removed' : !workspace && config ? 'unknown' : null, activeAgentIds: [], contextIds: [] }
-    if (row.liveAgent) lane.activeAgentIds.push(row.id)
-    lane.contextIds.push(row.id)
-    lanes.set(id, lane)
-    const key = activityKey(lane)
-    if (!groupRanks.has(key)) groupRanks.set(key, groupRanks.size)
-    const at = row.lastActivityAt
-    if (at != null && Number.isFinite(at) && at > 0 && at <= now) activity.set(key, Math.max(activity.get(key) ?? 0, at))
-    const priority = focusWorkPriority(row.bucket, at, now, recentActivityMs)
-    priorities.set(key, Math.min(priorities.get(key) ?? priority, priority))
+    const identity = identities?.get(focusContextIdentityKey(row.hostId, row.id))
+    const displayed = new Map<string, AppConfig['workspaces'][number]>()
+    if (identities && !row.topicId && !closeout) for (const occurrence of identity?.locations.occurrences ?? []) {
+      const candidate = workspacesById.get(occurrence.display.workspaceId)
+        ?? (occurrence.display.workspaceId === occurrence.source.workspaceId ? occurrence.source.resource : undefined)
+      if (candidate && candidate.hostId === occurrence.display.hostId && !candidate.closeout) displayed.set(candidate.id, candidate)
+    }
+    const closeoutDisplay = closeout ? workspacesById.get(closeout.targetWorkspaceId) : undefined
+    const placements = closeoutDisplay && closeoutDisplay.hostId === row.hostId ? [closeoutDisplay]
+      : identities && !row.topicId ? displayed.size ? [...displayed.values()] : [undefined] : [resource]
+    for (const display of placements) {
+      // Focus groups current presentation, while the Context retains its original
+      // execution path. A completed closeout must not revive its former branch from
+      // retained Git observations after the source resource is withdrawn.
+      const located = Boolean(identities && !row.topicId)
+      const gathered = Boolean(display && (closeout || located))
+      const workspace = gathered ? display : located ? undefined : resource
+      const displayPath = gathered ? workspace!.path : located ? '' : row.workspacePath
+      const projectHostId = workspace?.hostId ?? row.hostId
+      const checkout = gathered || located ? undefined : facts.worktrees.find(item => item.path === row.workspacePath && item.hostId === row.hostId)
+      const repoPath = workspace?.repoPath ?? checkout?.repoPath
+      const project = repoPath ? projectRoots.get(JSON.stringify([projectHostId, repoPath])) : workspace
+      const projectId = project?.id ?? (repoPath ? directoryIdentity(projectHostId, repoPath) : workspace?.id ?? (located ? 'unconfirmed-project' : row.workspaceId))
+      const workspaceId = workspace?.id ?? (located ? 'unconfirmed-project' : row.workspaceId)
+      const topicId = row.topicId ?? null
+      const topics = topicSnapshots ? scratchTopicsForWorkspace(topicSnapshots, workspace) : facts.topics[workspaceId]
+      const topic = topicId ? topics?.find(item => item.id === topicId) : undefined
+      const labels = [project?.name ?? repoPath ?? (located ? 'Project location unconfirmed' : row.workspaceName)]
+      const branch = workspace?.branch ?? checkout?.branch
+      if (branch) labels.push(branch)
+      if (topicId) labels.push(topic?.title || topicId)
+      const id = JSON.stringify([projectHostId, workspaceId, displayPath, topicId])
+      const iconTarget = workspace && topic ? topicSpaceIconTarget(workspace, topic) : null
+      const lane = lanes.get(id) ?? { id, workspaceId, projectId, projectWorkspaceId: project?.id ?? workspace?.id ?? null,
+        name: labels.join(' / '), labels, summary: topic?.readError ? null : topic?.summary.trim() || null,
+        path: displayPath, hostId: projectHostId, topicId,
+        ...(located && (!workspace || identity?.locations.status !== 'confirmed') ? { locationUnconfirmed: true } : {}),
+        ...(topicId ? { objectKind: scratchTopicKind(topicId, topics),
+          ...(iconTarget ? { objectIconKey: iconTarget.key } : {}) } : {}),
+        recovery: checkout?.removed ? 'removed' : !workspace && config && !located ? 'unknown' : null, activeAgentRefs: [], contextRefs: [] }
+      const reference = { hostId: row.hostId, id: row.id }, key = focusContextIdentityKey(row.hostId, row.id)
+      const included = members.get(id) ?? new Set<string>()
+      if (!included.has(key)) {
+        if (row.liveAgent) lane.activeAgentRefs.push(reference)
+        lane.contextRefs.push(reference); included.add(key); members.set(id, included)
+      }
+      lanes.set(id, lane)
+      const projectKey = activityKey(lane)
+      if (!groupRanks.has(projectKey)) groupRanks.set(projectKey, groupRanks.size)
+      const at = row.lastActivityAt
+      if (at != null && Number.isFinite(at) && at > 0 && at <= now) activity.set(projectKey, Math.max(activity.get(projectKey) ?? 0, at))
+      const priority = focusWorkPriority(row.bucket, at, now, recentActivityMs)
+      priorities.set(projectKey, Math.min(priorities.get(projectKey) ?? priority, priority))
+    }
   }
   for (const lane of lanes.values()) lane.lastActivityAt = activity.get(activityKey(lane)) ?? null
   return [...lanes.values()].sort((a, b) => {
@@ -113,6 +131,21 @@ export function deriveFocusProjectLanes(rows: readonly FocusContext[], config: P
 
 /** Display identity is a Host/Project pair, independent of a checkout or view. */
 export const focusProjectKey = (hostId: string, projectId: string) => JSON.stringify([hostId, projectId])
+export const focusLaneProjectKey = (lane: FocusProjectLane) => focusProjectKey(lane.hostId, lane.projectId)
+/** Every member keeps its original Agent Host; project memberships are sets. */
+export function focusLanesByContext(lanes: readonly FocusProjectLane[]): ReadonlyMap<string, readonly FocusProjectLane[]> {
+  const result = new Map<string, FocusProjectLane[]>()
+  for (const lane of lanes) for (const reference of lane.contextRefs) {
+    const key = focusContextIdentityKey(reference.hostId, reference.id), held = result.get(key) ?? []
+    if (!held.some(value => value.id === lane.id)) held.push(lane)
+    result.set(key, held)
+  }
+  return result
+}
+/** A singular decoration cannot choose a principal project from several positions. */
+export function uniqueFocusLane(lanes: readonly FocusProjectLane[] | undefined): FocusProjectLane | undefined {
+  return lanes?.length === 1 ? lanes[0] : undefined
+}
 export type FocusRetainedProject = {
   key: string; projectId: string; name: string; hostId: string
   identity: AgentFocusHistoryIdentity; lastFocusedAt: number | null
@@ -127,7 +160,7 @@ export function deriveRetainedFocusProjects(entries: readonly AgentFocusHistoryE
   timelines?: Readonly<Record<string, AgentTimelineSnapshot>>
 } = {}): FocusRetainedProject[] {
   const now = options.now ?? Date.now()
-  const current = new Set(lanes.flatMap(lane => lane.contextIds.map(id => JSON.stringify([lane.hostId, lane.projectId, id]))))
+  const current = new Set(lanes.flatMap(lane => lane.contextRefs.map(reference => JSON.stringify([reference.hostId, lane.projectId, reference.id]))))
   const projects = new Map<string, FocusRetainedProject>()
   const sources = new Map(options.sources?.map(source => [JSON.stringify([source.hostId, source.agentSessionId]), source]))
   const members = new Map<string, Map<string, AgentSessionHistoryDescriptor | undefined>>()

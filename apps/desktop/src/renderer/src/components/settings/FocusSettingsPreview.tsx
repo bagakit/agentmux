@@ -16,6 +16,7 @@ import { FocusScanLaneContent } from '../FocusScanLaneContent'
 import { FocusTopicLabel } from '../FocusTopicLabel'
 import { focusCardTrackHeight, type FocusLaneMetrics } from '../../lib/focus-lane-layout'
 import type { FocusContext } from '../../lib/focus-context'
+import { focusContextIdentityKey, type FocusContextIdentity } from '../../lib/focus-context-identity'
 import { useAgentPreviewIntent } from '../../lib/use-agent-preview-intent'
 import { useWorkbenchDocument } from '../../lib/workbench-document'
 import { FocusMapPreview } from './FocusMapSettings'
@@ -78,8 +79,13 @@ export function FocusSettingsPreview({ values, active, scene, onScene, previewRe
   const collectionExample = useMemo(() => exampleTopicCollection(now), [now])
   const boardContexts = useMemo(() => [...contexts, ...collectionExample.contexts], [contexts, collectionExample])
   const config = useMemo(() => ({ workspaces: [...contexts.map(context => context.workspace!), collectionExample.workspace], focus: { recentActivityHours: values.recentActivityHours } }), [contexts, collectionExample, values.recentActivityHours])
-  const lanes = useMemo(() => deriveFocusCollectionLanes(deriveFocusProjectLanes(boardContexts, config,
-    { topics: { [collectionExample.workspace.id]: collectionExample.topics }, worktrees: [] }, undefined, now), collectionExample.catalog, collectionExample.content), [boardContexts, config, collectionExample, now])
+  const exampleLocations = useMemo(() => new Map(contexts.map(context => [focusContextIdentityKey(context.hostId, context.id), {
+    tabs: [], occurrenceCount: 1, locations: { status: 'confirmed', occurrences: [{
+      source: { spaceId: context.workspaceId, zoneId: 'example-zone-' + context.id, workspaceId: context.workspaceId, hostId: context.hostId },
+      display: { workspaceId: context.workspaceId, hostId: context.hostId, groupId: 'example-group', tabId: 'example-tab-' + context.id, regionId: 'example-region-' + context.id }
+    }] }
+  } satisfies FocusContextIdentity])), [contexts])
+  const lanes = useMemo(() => deriveFocusCollectionLanes(deriveFocusProjectLanes(boardContexts, config, { topics: { [collectionExample.workspace.id]: collectionExample.topics }, worktrees: [] }, exampleLocations, now), collectionExample.catalog, collectionExample.content), [boardContexts, config, collectionExample, now, exampleLocations])
   const boardRows = useRef<HTMLDivElement>(null)
   const [boardMetrics, setBoardMetrics] = useState<FocusLaneMetrics>({ width: 0, padding: 4, gap: 2, cardGap: 2 })
   useLayoutEffect(() => {
@@ -136,7 +142,7 @@ export function FocusSettingsPreview({ values, active, scene, onScene, previewRe
         <div className="focus-settings-preview__caption"><span>Projects and Collections</span><span>Recent · {values.recentActivityHours === 168 ? '1 week' : `${values.recentActivityHours}h`}</span></div>
         <FocusProjectLanes lanes={lanes} selectedProjectKey="all" onSelect={() => {}} visible={enabled} rowsRef={boardRows}
           renderLane={(lane, heading) => <div data-example-project={lane.collection ? undefined : lane.name} data-example-collection={lane.collection ? lane.id : undefined}>
-            <FocusScanLaneContent lane={lane} contexts={boardContexts.filter(context => lane.contextIds.includes(context.id))} heading={heading}
+            <FocusScanLaneContent lane={lane} contexts={boardContexts.filter(context => lane.contextRefs.some(ref => ref.hostId === context.hostId && ref.id === context.id))} heading={heading}
               metrics={boardMetrics} replyLines={values.replyLines} topicPresentation={values.topicPresentation}
               renderCards={(rows, columns, topics, sections) => <div className="focus-context-group__cards" style={{ '--focus-card-columns': columns } as CSSProperties}>
                 {rows.map(context => { const key = focusTopicContextKey(context.hostId, context.id), topic = topics?.get(key), section = sections?.get(key)

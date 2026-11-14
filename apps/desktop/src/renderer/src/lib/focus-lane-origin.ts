@@ -1,9 +1,9 @@
 import type { AgentMuxSpaceCatalog } from '@agentmux/core'
 import type { FocusProjectLane } from './focus-project-lanes'
-import type { WorkbenchTab } from './workbench-tabs'
 import type { SpaceZoneBindings } from '../../../shared/space-addresses'
 import type { TopicCategory } from '@agentmux/core/control'
 import { isScratchWorkspaceId } from '../../../shared/contracts'
+import { focusContextIdentityKey, type FocusContextIdentity } from './focus-context-identity'
 
 export const FOCUS_SOURCE_TYPES = ['project', 'topic', 'mote', 'survey', 'unknown'] as const
 export type FocusSourceType = typeof FOCUS_SOURCE_TYPES[number]
@@ -20,17 +20,10 @@ export type FocusLaneOrigin = {
 /** A disposable join of original spatial facts, never a content/identity registry.
  * Survey references are display membership and can coexist with Topic/Mote. */
 export function focusLaneOrigins(lanes: readonly FocusProjectLane[], catalog: AgentMuxSpaceCatalog,
-  tabs: Readonly<Record<string, WorkbenchTab>>, survey: readonly { zoneId: string; name: string }[], content: { bindings: SpaceZoneBindings; categories: readonly TopicCategory[] }): ReadonlyMap<string, FocusLaneOrigin> {
+  survey: readonly { zoneId: string; name: string }[], content: { bindings: SpaceZoneBindings; categories: readonly TopicCategory[] }, identities?: ReadonlyMap<string, FocusContextIdentity>): ReadonlyMap<string, FocusLaneOrigin> {
   const zonesBySession = new Map<string, Set<string>>()
-  const tabZones = new Map(catalog.tabs.map(tab => [tab.tabId, tab.zoneId]))
-  for (const tab of Object.values(tabs)) {
-    const zone = tabZones.get(tab.id)
-    if (!zone) continue
-    for (const region of Object.values(tab.regions)) if ('sessionId' in region) {
-      const zones = zonesBySession.get(region.sessionId) ?? new Set<string>()
-      zones.add(zone); zonesBySession.set(region.sessionId, zones)
-    }
-  }
+  for (const [key, identity] of identities ?? []) zonesBySession.set(key,
+    new Set(identity.locations.occurrences.flatMap(occurrence => occurrence.source.zoneId ? [occurrence.source.zoneId] : [])))
   const spaces = new Map(catalog.spaces.map(space => [space.spaceId, space]))
   const bound = new Map<string, typeof catalog.spaces>()
   const objectZones = new Map<string, Set<string>>()
@@ -55,15 +48,16 @@ export function focusLaneOrigins(lanes: readonly FocusProjectLane[], catalog: Ag
   }
   const explorations = new Map(survey.map(item => [item.zoneId, item.name]))
   return new Map(lanes.map(lane => {
-    const zones = new Set(lane.contextIds.flatMap(id => [...(zonesBySession.get(id) ?? [])]))
+    const zones = new Set(lane.contextRefs.flatMap(ref => [...(zonesBySession.get(focusContextIdentityKey(ref.hostId, ref.id)) ?? [])]))
     // Topic content identity remains usable when its Session has no open view.
     const contentObjectZones = new Set<string>()
     if (lane.topicId) for (const zone of objectZones.get(JSON.stringify([lane.hostId, lane.topicId])) ?? []) contentObjectZones.add(zone)
     if (lane.topicId) for (const zone of contentZones.get(JSON.stringify([lane.hostId, lane.workspaceId, lane.topicId])) ?? []) contentObjectZones.add(zone)
     for (const zone of contentObjectZones) zones.add(zone)
     const contextTypes = new Map<string, readonly FocusSourceType[]>()
-    for (const id of lane.contextIds) {
-      const memberZones = new Set(zonesBySession.get(id) ?? [])
+    for (const ref of lane.contextRefs) {
+      const key = focusContextIdentityKey(ref.hostId, ref.id)
+      const memberZones = new Set(zonesBySession.get(key) ?? [])
       // A content object's exact Zone belongs to its Contexts even without an open
       // view. Ordinary Project lane members never borrow another Session's Zones.
       for (const zone of contentObjectZones) memberZones.add(zone)
@@ -76,16 +70,16 @@ export function focusLaneOrigins(lanes: readonly FocusProjectLane[], catalog: Ag
       // Survey is an additional display relationship, including for an unknown
       // content classification; it cannot establish or erase that classification.
       if ([...memberZones].some(zone => explorations.has(zone))) types.push('survey')
-      contextTypes.set(id, types)
+      contextTypes.set(key, types)
     }
     const locations = new Map<string, string>()
     for (const zone of zones) for (const space of bound.get(zone) ?? []) {
-      if (space.hostId === lane.hostId && (categoryIds.has(space.spaceId) || (lane.objectKind === 'mote' && space.kind === 'folder'))) locations.set(space.spaceId, space.name)
+      if (space.hostId === zoneFacts.get(zone)?.hostId && (categoryIds.has(space.spaceId) || (lane.objectKind === 'mote' && space.kind === 'folder'))) locations.set(space.spaceId, space.name)
     }
     const surveyed = [...zones].filter(zone => explorations.has(zone))
     for (const zone of surveyed) locations.set(zone, lane.objectKind ? `Survey · ${explorations.get(zone)!}` : explorations.get(zone)!)
-    const allSurvey = lane.contextIds.length > 0 && lane.contextIds.every(id => {
-      const memberZones = zonesBySession.get(id)
+    const allSurvey = lane.contextRefs.length > 0 && lane.contextRefs.every(ref => {
+      const memberZones = zonesBySession.get(focusContextIdentityKey(ref.hostId, ref.id))
       return memberZones !== undefined && memberZones.size > 0 && [...memberZones].every(zone => explorations.has(zone))
     })
     const kind = lane.objectKind === 'topic' || lane.objectKind === 'mote' ? lane.objectKind

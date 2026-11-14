@@ -13,7 +13,10 @@ import { createFocusProjectionSelector } from './focus-context'
 import { topicSpaceIconTarget, type SpaceIconOverrides } from './space-object-appearance'
 import { moteExpressionPresentation } from './mote-expression'
 import type { RendererAgentTimelineSnapshot } from './session-state'
-import { deriveFocusProjectLanes, focusProjectKey } from './focus-project-lanes'
+import { deriveFocusProjectLanes, focusProjectKey, focusLanesByContext } from './focus-project-lanes'
+import { createFocusContextIdentitySelector, focusContextIdentityKey } from './focus-context-identity'
+import type { WorkspaceLayout } from '@agentmux/layout'
+import { workbenchNavigationTabs } from './workbench-navigation-catalog'
 import { focusStateMarkKind } from '@agentmux/client-ui/focus-state-mark'
 import { directoryIdentity } from '../../../shared/space-addresses'
 import { originalTopicAddress } from '../../../shared/space-addresses'
@@ -22,21 +25,35 @@ import { resolveFocusRecentActivityHours } from '../../../shared/focus-preferenc
 import { resolveMoteDefaultConversation, moteDefaultCatalog } from './mote-default-conversation'
 type State = { tabs?: Record<string, WorkbenchTab> } & Omit<Parameters<ReturnType<typeof createFocusProjectionSelector>>[0], 'timelines'> & { timelines: Record<string, RendererAgentTimelineSnapshot> } & { spaceObjectIcons: SpaceIconOverrides; spaceZoneBindings: SpaceZoneBindings }
 const originalFocus = createFocusProjectionSelector()
+const originalLocations = createFocusContextIdentitySelector()
 /** Only read existing presentation owners. No alternate names, statuses, identities or image store. */
-export function readAgentPresentation(state: State): NonNullable<AgentMuxSpaceCatalog['agentPresentation']> {
-  const sessions = new Map(state.sessions.map(value => [value.id, value]))
+export function readAgentPresentation(state: State, locations?: { catalog: AgentMuxSpaceCatalog;
+  layouts: Readonly<Record<string, WorkspaceLayout>>; executionFor: Parameters<ReturnType<typeof createFocusContextIdentitySelector>>[5]; known: boolean; bindings?: unknown }): NonNullable<AgentMuxSpaceCatalog['agentPresentation']> {
+  const sessions = new Map(state.sessions.map(value => [focusContextIdentityKey(value.hostId, value.id), value]))
+  const originalHosts = new Map<string, Set<string>>()
+  for (const session of state.sessions) if (session.control.kind === 'agent') {
+    const hosts = originalHosts.get(session.control.agentSessionId) ?? new Set<string>()
+    hosts.add(session.control.hostId); originalHosts.set(session.control.agentSessionId, hosts)
+  }
   const projection = originalFocus(state)
   const workspaces = new Map(state.config?.workspaces.map(value => [value.id, value]))
-  const lanes = deriveFocusProjectLanes(projection.laneContexts, state.config, undefined, state.tabs ?? {}, Date.now(), state.scratchTopicSnapshots)
-  const byContext = new Map(lanes.flatMap(lane => lane.contextIds.map(id => [id, lane] as const)))
+  const identities = locations ? originalLocations(locations.catalog, workbenchNavigationTabs(state.tabs ?? {}), projection.laneContexts,
+    state.config, locations.layouts, locations.executionFor, locations.known, locations.bindings) : new Map()
+  const lanes = deriveFocusProjectLanes(projection.laneContexts, state.config, undefined, identities, Date.now(), state.scratchTopicSnapshots)
+  const byContext = focusLanesByContext(lanes)
   return orderFocusPresentation(projection.contexts.map(row => {
-    const lane = byContext.get(row.id)
+    const memberships = byContext.get(focusContextIdentityKey(row.hostId, row.id)) ?? []
+    const groups = new Set(memberships.map(lane => JSON.stringify([lane.hostId, lane.projectId, lane.topicId])))
+    const lane = groups.size === 1 ? memberships[0] : undefined
     const projectWorkspace = lane?.projectWorkspaceId ? workspaces.get(lane.projectWorkspaceId) : undefined
     const objectLane = lane?.objectKind === 'mote' || lane?.objectKind === 'topic'
-    const projectGroup = lane && lane.projectId && (objectLane || projectWorkspace) ? { key: objectLane ? lane.id : focusProjectKey(lane.hostId, lane.projectId), projectId: lane.projectId,
+    const original = sessions.get(focusContextIdentityKey(row.hostId, row.id))
+    // The existing public presentation DTO has a SID-only subject. It cannot
+    // select a Host's project when that SID appears at several original Hosts.
+    const uniqueSubject = original?.control.kind !== 'agent' || originalHosts.get(original.control.agentSessionId)?.size === 1
+    const projectGroup = uniqueSubject && lane && !lane.locationUnconfirmed && lane.projectId && (objectLane || projectWorkspace) ? { key: objectLane ? lane.id : focusProjectKey(lane.hostId, lane.projectId), projectId: lane.projectId,
       hostId: lane.hostId, name: objectLane ? lane.labels.at(-1)! : lane.labels[0]!,
       spaceId: objectLane ? lane.objectIconKey ?? null : projectWorkspace ? directoryIdentity(projectWorkspace.hostId, projectWorkspace.repoPath ?? projectWorkspace.path) : null } : undefined
-    const original = sessions.get(row.id)
     const executorId = original?.kind === 'agent' ? original.executorId : undefined
     const avatar = executorId ? state.config?.executors[executorId]?.avatar ?? state.config?.appearance.agentAvatars?.[executorId] : undefined
     return { agentSessionId: original?.control.kind === 'agent' ? original.control.agentSessionId : row.id, name: row.name, project: row.workspace ? row.workspaceName : 'Project unconfirmed',
