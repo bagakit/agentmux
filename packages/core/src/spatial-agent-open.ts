@@ -1,3 +1,4 @@
+import { parseAgentTakeoverProvenance, takeoverDestinationOrganization, qualifyTakeoverOrganization, sameTakeoverOrganization, type AgentTakeoverPreparation } from './agent-takeover.js'
 import { mintObjectId } from './object-id.js'
 import { AgentMuxError } from './errors.js'
 import { agentCreationIntentDigest } from './agent-creation-authority.js'
@@ -47,7 +48,7 @@ function spatialAgentOpenDestination(graph: AgentMuxSpatialGraph, request: Agent
 }
 /** Admission and topology are one graph mutation; no Runtime operation occurs here. */
 export function admitSpatialAgentOpen(graph: AgentMuxSpatialGraph, input: { request: AgentMuxSpatialAgentOpenRequest;
-  agentSessionId: string; execution: AgentMuxSpatialAgentOpenRecord['execution']; placement?: AgentMuxSpatialAgentOpenRecord['placement'];
+  agentSessionId: string; takeover?: { preparation: AgentTakeoverPreparation; requestDigest: string; sourceAgentMuxNote?: string }; execution: AgentMuxSpatialAgentOpenRecord['execution']; placement?: AgentMuxSpatialAgentOpenRecord['placement'];
   executionBinding?: AgentMuxSpatialAgentOpenRecord['executionBinding']; regionResource: SpatialJson }) {
   if (spatialAgentAssociationRecord(graph, input.request.requestId)) throw new AgentMuxError('This operation already belongs to an external association, not an Agent creation.', 'SPACE_REQUEST_CONFLICT')
   if (input.request.moteMain) {
@@ -78,6 +79,13 @@ export function admitSpatialAgentOpen(graph: AgentMuxSpatialGraph, input: { requ
     return { graph, record: previous, admitted: false }
   }
   const { graph: next, address, zone } = spatialAgentOpenDestination(graph, input.request)
+  if (input.takeover) {
+    const frozen = input.takeover.preparation.destination
+    const actual = takeoverDestinationOrganization(graph, address, frozen.owner.runtimeId)
+    if (!sameTakeoverOrganization(actual, frozen.organization)) throw new AgentMuxError('The original Takeover destination organization changed before admission.', 'SPACE_TARGET_CHANGED')
+    const origin = input.takeover.preparation.source
+    if (origin.organization?.reference.runtimeId === frozen.owner.runtimeId && !sameTakeoverOrganization(qualifyTakeoverOrganization(graph, origin.organization.reference, origin), origin.organization)) throw new AgentMuxError('The original Takeover source organization changed before admission.', 'AGENT_TAKEOVER_SOURCE_CHANGED')
+  }
   if (input.request.content.kind !== 'new-agent') throw new AgentMuxError('Spatial admission requires the original new Agent intent.', 'INVALID_CONTROL_REQUEST')
   if (input.request.content.agentTarget && (!input.placement || input.execution.runtimeId !== input.request.content.agentTarget.runtimeId ||
       input.executionBinding && (input.executionBinding.agentSessionId !== input.agentSessionId || input.executionBinding.createOperationId !== input.request.requestId))) throw new AgentMuxError(
@@ -92,7 +100,7 @@ export function admitSpatialAgentOpen(graph: AgentMuxSpatialGraph, input: { requ
       ...(input.execution.runtimeId ? { runtimeId: input.execution.runtimeId } : {}) } })
   next.resources['region:' + address.regionId] = structuredClone(input.regionResource)
   const record: AgentMuxSpatialAgentOpenRecord = { executorId: input.request.content.executorId, requestId: input.request.requestId, digest, agentSessionId: input.agentSessionId,
-    address, execution: structuredClone(input.execution), ...(input.placement ? { placement: structuredClone(input.placement) } : {}),
+    address, execution: structuredClone(input.execution), ...(input.takeover ? { takeover: parseAgentTakeoverProvenance({ ...input.takeover.preparation, destination: { ...input.takeover.preparation.destination, address } }), takeoverRequestDigest: input.takeover.requestDigest, takeoverContent: structuredClone(input.request.content), ...(input.takeover.sourceAgentMuxNote === undefined ? {} : { takeoverSourceAgentMuxNote: input.takeover.sourceAgentMuxNote }) } : {}), ...(input.placement ? { placement: structuredClone(input.placement) } : {}),
     ...(input.executionBinding ? { executionBinding: structuredClone(input.executionBinding) } : {}),
     ...(input.request.moteMain ? { moteMain: structuredClone(input.request.moteMain) } : {}) }
   const original = spatialAgentOpenDocument(next); original.requests = Object.fromEntries([...Object.entries(original.requests), [record.requestId, record]])

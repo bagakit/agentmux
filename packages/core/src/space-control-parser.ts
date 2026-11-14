@@ -1,3 +1,4 @@
+import { parseAgentTakeoverSource, parseAgentTakeoverProvenance } from './agent-takeover.js'
 import type { AgentExecutionSourceDiagnostics } from './agent-execution-source-diagnostics.js'
 import { parseAgentToolExecutionBinding } from './agent-tool-execution.js'
 import { parseAdoptedHostRoute } from './host-route.js'
@@ -265,6 +266,12 @@ export function parseSpaceControlRequest(value: unknown, code: Code = 'INVALID_C
         ...(Object.hasOwn(input, 'toolWorkspaceId') ? { toolWorkspaceId: spaceControlId(input.toolWorkspaceId, 'Tool Workspace', code) } : {}),
         ...(Object.hasOwn(input, 'nativeResumeSource') ? { nativeResumeSource: parseAgentNativeResumeSource(input.nativeResumeSource) } : {}),
         ...(Object.hasOwn(input, 'prompt') ? { prompt: string(input.prompt, 'Initial prompt', code) } : {}) }
+    } else if (input.kind === 'takeover-agent') {
+      fields(input, ['kind', 'executorId', 'agentTarget', 'source', ...AGENT_OPEN_LAUNCH_FIELDS], code)
+      if (target.newZone) fail('Takeover requires an exact existing destination; new resources have their original owner.', code)
+      const originalTarget = input.agentTarget === undefined ? undefined : fields(input.agentTarget, ['hostId', 'runtimeId', 'adoptedRoute'], code)
+      const agentTarget = originalTarget && { hostId: spaceControlId(originalTarget.hostId, 'Agent Host', code), runtimeId: spaceControlId(originalTarget.runtimeId, 'Agent Runtime', code), ...(originalTarget.adoptedRoute === undefined ? {} : { adoptedRoute: parseAdoptedHostRoute(originalTarget.adoptedRoute) }) }
+      content = { ...(agentTarget ? { agentTarget } : {}), kind: 'takeover-agent', executorId: spaceControlId(input.executorId, 'Executor', code), source: parseAgentTakeoverSource(input.source), ...parseAgentOpenLaunchFields(input, code) }
     } else if (input.kind === 'fork-agent') {
       fields(input, ['kind', 'source', 'prompt'], code)
       if (target.newZone) fail('Fork preserves its source execution directory; select an existing destination.', code)
@@ -512,7 +519,7 @@ function save(value: unknown, code: Code): AgentMuxSpatialSave {
 function report(value: unknown, code: Code): AgentMuxSpaceMutationReport {
   const source = fields(value, ['requestId', 'outcome', 'from', 'to', 'agent', 'execution', 'resource', 'association', 'save', 'issues'], code)
   const agent = source.agent === null ? null : (() => {
-    const item = fields(source.agent, ['agentSessionId', 'runId', 'providerId', 'executorId', 'hostId', 'cwd', 'createOperationId', 'initialPrompt', 'agentMuxContext', 'forkedFrom', 'creationPersistence', 'creationFailure', 'executorRevision', 'initialMessageOrigin', 'createdBy', 'createdRun', 'initialMessageId', 'retirement', 'toolExecution'], code)
+    const item = fields(source.agent, ['agentSessionId', 'runId', 'providerId', 'executorId', 'hostId', 'cwd', 'createOperationId', 'initialPrompt', 'agentMuxContext', 'forkedFrom', 'creationPersistence', 'creationFailure', 'executorRevision', 'initialMessageOrigin', 'createdBy', 'createdRun', 'initialMessageId', 'retirement', 'toolExecution', 'takeover'], code)
     return { agentSessionId: spaceControlId(item.agentSessionId, 'Agent Session', code), runId: nullableId(item.runId, 'Run', code),
       providerId: nullableId(item.providerId, 'Provider', code), executorId: nullableId(item.executorId, 'Executor', code), hostId: spaceControlId(item.hostId, 'Host', code),
       cwd: string(item.cwd, 'Execution cwd', code), createOperationId: nullableId(item.createOperationId, 'Creation operation', code),
@@ -526,6 +533,7 @@ function report(value: unknown, code: Code): AgentMuxSpaceMutationReport {
       ...(item.creationPersistence === undefined ? {} : { creationPersistence: member(item.creationPersistence, ['unconfirmed'], 'Creation persistence', code) }),
       ...(item.executorRevision === undefined ? {} : { executorRevision: string(item.executorRevision, 'Executor revision', code, 256) }),
       ...(item.initialMessageOrigin === undefined ? {} : { initialMessageOrigin: parseAgentMuxCreationOrigin(item.initialMessageOrigin) }),
+      ...(item.takeover === undefined ? {} : { takeover: parseAgentTakeoverProvenance(item.takeover) }),
       ...(item.createdBy === undefined ? {} : { createdBy: parseAgentSpawnCreator(item.createdBy) }),
       ...(item.createdRun === undefined ? {} : { createdRun: (() => {
         const created = fields(item.createdRun, ['runId'], code)

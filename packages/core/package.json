@@ -521,6 +521,10 @@
     "./mesh-network": {
       "types": "./dist/mesh-network.d.ts",
       "import": "./dist/mesh-network.js"
+    },
+    "./agent-takeover": {
+      "types": "./dist/agent-takeover.d.ts",
+      "import": "./dist/agent-takeover.js"
     }
   },
   "bin": {

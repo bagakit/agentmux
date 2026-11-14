@@ -1,4 +1,5 @@
 import { parseNativeSubagents, agentHasActiveSubagents, subagentScopeMatches } from './agent-subagent-state.js'
+import { parseAgentTakeoverProvenance } from './agent-takeover.js'
 import { sessionUsageWindow, sessionUsageMeasurement, type AgentSessionUsagePage } from './agent-session-usage.js'
 import { parseAgentSessionRecordDeletion, deletedAgentSessionRecord } from './agent-session-record.js'
 import { agentNativeTurnEnd } from './agent-session-identity.js'
@@ -1800,6 +1801,7 @@ export function parseAgentCreationFact(value: unknown): NonNullable<AgentMuxAgen
   return { createOperationId: string(creation.createOperationId, 'creation.createOperationId'), initialPrompt: initialPrompt as NonNullable<AgentMuxAgentSession['creation']>['initialPrompt'],
     ...(creation.workspaceTrust === undefined ? {} : { workspaceTrust: parseWorkspaceTrustPreparation(creation.workspaceTrust) }),
     ...(creation.spatialIntent === undefined ? {} : { spatialIntent: parseAgentCreationSpatialIntent(creation.spatialIntent) }),
+    ...(creation.takeover === undefined ? {} : { takeover: parseAgentTakeoverProvenance(creation.takeover) }),
     ...(creation.initialInputKey === undefined ? {} : { initialInputKey: (() => {
       const key = validateAgentPromptInputKey(creation.initialInputKey)
       if (key.kind !== 'prompt') throw new AgentMuxError('Creation requires its original prompt key.', 'INVALID_AGENT_SESSION_STORE')

@@ -37,7 +37,7 @@ export type SpaceAgentRegion = {
   admission?: Pick<import('./spatial-agent-open-contract.js').AgentMuxSpatialAgentOpenRecord, 'requestId' | 'agentSessionId' | 'address' | 'execution' | 'placement'>
 };
 type SpaceAgentIndex = Map<string, { kind: AgentMuxSpatialGraph['spaces'][number]['kind']; agents: Set<string>; regions: Map<string, SpaceAgentRegion> }>;
-type SpaceAgentSnapshot = { stamp: string; index: SpaceAgentIndex };
+type SpaceAgentSnapshot = { stamp: string; index: SpaceAgentIndex; takeovers: Map<string, import('./spatial-agent-open-contract.js').AgentMuxSpatialAgentOpenRecord[]>; takeoverIssue?: string };
 const spatialFileStamp = (file: { dev: bigint; ino: bigint; size: bigint; mtimeNs: bigint; ctimeNs: bigint }) =>
   [file.dev, file.ino, file.size, file.mtimeNs, file.ctimeNs].join(':');
 const spatialAgentKey = (agent: { hostId: string; agentSessionId: string }) => JSON.stringify([agent.hostId, agent.agentSessionId]);
@@ -164,6 +164,17 @@ export class AgentMuxSpatialStateStore {
       return { spaceKind: space?.kind ?? null, member: structuredClone(space?.regions.get(input.regionId) ?? null) };
     });
   }
+  /** Bounded related admission metadata from the same opened-file index; no Session bodies or Native calls. */
+  async readTakeoverAdmissions(input: { direction: 'incoming' | 'outgoing'; subject: { runtimeId: string; agentSessionId: string }; after: string; limit: number }) {
+    return await this.readAgentMembership((snapshot, stable) => {
+      if (!stable) throw new AgentMuxError('The original Takeover admission document changed during this read.', 'SPACE_MEMBER_UNAVAILABLE');
+      if (snapshot.takeoverIssue) throw new AgentMuxError('The original Takeover relation index is unconfirmed. Original membership and Sessions remain available.', 'AGENT_TAKEOVER_INDEX_UNCONFIRMED', snapshot.takeoverIssue);
+      const values = (snapshot.takeovers.get(JSON.stringify([input.direction, input.subject.runtimeId, input.subject.agentSessionId])) ?? []).filter(value => value.requestId > input.after);
+      const records = values.slice(0, input.limit).map(value => ({ requestId: value.requestId, agentSessionId: value.agentSessionId, execution: value.execution,
+        ...(value.executionBinding ? { executionBinding: value.executionBinding } : {}), takeover: value.takeover }));
+      return structuredClone({ records, hasMore: values.length > input.limit });
+    });
+  }
   private async readAgentMembership<T>(select: (snapshot: SpaceAgentSnapshot, stable: boolean) => T): Promise<T | null> {
     let file: FileHandle | undefined, selected = this.agentMembership;
     try {
@@ -217,7 +228,21 @@ export class AgentMuxSpatialStateStore {
         const space = index.get(spaceId); if (key) space?.agents.add(key); space?.regions.set(region.regionId, member);
       }
     }
-    return { stamp: spatialFileStamp(await file.stat({ bigint: true })), index };
+    const takeovers: SpaceAgentSnapshot['takeovers'] = new Map();
+    let takeoverIssue: string | undefined;
+    // Unreadable relation metadata must not revoke healthy member control.
+    try {
+    // Index only relation headers. Validation and execution observation stay scoped to the selected page.
+    for (const value of Object.values(spatialAgentOpenDocument(graph).requests)) {
+      if ('kind' in value || !value.takeover || typeof value.requestId !== 'string') continue;
+      if (!value.execution || typeof value.agentSessionId !== 'string' || !value.takeover.source || typeof value.takeover.source.runtimeId !== 'string') throw new AgentMuxError('The retained Takeover relation header is unreadable.', 'AGENT_TAKEOVER_INDEX_UNCONFIRMED');
+      const keys: Array<[string, string, string]> = [['incoming', value.execution.runtimeId ?? '', value.agentSessionId]];
+      if (value.takeover.source.agentSessionId) keys.push(['outgoing', value.takeover.source.runtimeId, value.takeover.source.agentSessionId]);
+      for (const key of keys) { const scope = JSON.stringify(key), rows = takeovers.get(scope) ?? []; rows.push(value); takeovers.set(scope, rows); }
+    }
+    for (const rows of takeovers.values()) rows.sort((a, b) => a.requestId < b.requestId ? -1 : a.requestId > b.requestId ? 1 : 0);
+    } catch (cause) { takeoverIssue = cause instanceof Error ? cause.message : String(cause); }
+    return { stamp: spatialFileStamp(await file.stat({ bigint: true })), index, takeovers, ...(takeoverIssue ? { takeoverIssue } : {}) };
   }
   async readForLayout(): Promise<AgentMuxSpatialState | null> {
     const state = await this.read();
@@ -339,10 +364,11 @@ export class AgentMuxSpatialStateStore {
       return { state: projectSpatialState(state), spaceId: space.spaceId, zoneId: zone.zoneId, workspaceId: id, created: true };
     });
   }
-  async admitAgentOpen(input: Parameters<typeof admitSpatialAgentOpen>[1]) {
+  async admitAgentOpen(input: Parameters<typeof admitSpatialAgentOpen>[1], assertCurrent?: (admission: ReturnType<typeof admitSpatialAgentOpen>) => Promise<void>) {
     return this.locked(async () => {
       const current = await this.requiredState(), admission = admitSpatialAgentOpen(current.graph, input);
       if (!admission.admitted) return { ...admission, state: projectSpatialState(current) };
+      await assertCurrent?.(admission);
       const state = await this.writeLocked(current, parseAgentMuxSpatialGraph(admission.graph));
       return { ...admission, state: projectSpatialState(state) };
     });

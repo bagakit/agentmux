@@ -1,3 +1,4 @@
+import { parseAgentTakeoverPage, type AgentTakeoverQuery } from './agent-takeover.js'
 import { SPACE_LINK_METHODS, parseSpaceLinkParams, parseSpaceLinkResult, type SpaceLinkMethod } from './space-link.js'
 import { isAgentPromotionMethod, parseAgentPromotionParams, parseAgentPromotionResult } from './agent-promotion.js'
 import { isMeshNetworkMethod, parseMeshNetworkParams, parseMeshNetworkResult } from './mesh-network.js'
@@ -1013,6 +1014,7 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
       }
       case 'agent.discuss': record(p, ['threadId', 'delivery', 'targetAgentSessionId', 'creation']); string(p.threadId); string(p.targetAgentSessionId); if (!isAgentDeliveryState(p.delivery)) fail();
         if (!isDeepStrictEqual(parseAgentCreationFact(p.creation), p.creation)) fail(); break
+      case 'agent.takeover.ls': parseAgentTakeoverPage(p, input as AgentTakeoverQuery); break
       case 'agent.spawn.ls': {
         record(p, ['hostId', 'participantSessionId', 'direction', 'creatorRuntimeId', 'records', 'nextCursor', 'coverage'])
         if (p.hostId !== input.hostId || p.participantSessionId !== input.participantSessionId || p.direction !== input.direction ||

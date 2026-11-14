@@ -1435,6 +1435,8 @@ export type AgentPromptSubmissionRecord = {
 export type AgentMuxAgentCreationSpatialIntent = { tabId: string; regionId: string; executionWorkspaceId: string }
 
 export type AgentMuxAgentCreationFact = {
+  /** Original Takeover work source and admitted destination, separate from creator/fork identity. */
+  takeover?: import('./agent-takeover.js').AgentTakeoverProvenance
   createOperationId: string
   /** Original pre-launch preparation only; this never grants input or native readiness. */
   workspaceTrust?: import('./workspace-trust-preparation.js').AgentWorkspaceTrustPreparation

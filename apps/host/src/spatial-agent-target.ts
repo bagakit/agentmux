@@ -17,6 +17,7 @@ export async function openSpatialAgentTarget(options: {
   runtime(): AgentMuxHeadlessRuntime
   reconcile(record: AgentMuxSpatialAgentOpenRecord, context: AgentMuxRpcCallContext, issue?: unknown, originalRequest?: AgentMuxSpatialAgentOpenRequest): Promise<AgentMuxSpaceMutationReport>
   descriptor(record: Pick<AgentMuxSpatialAgentOpenRecord, 'agentSessionId' | 'execution' | 'placement'>, phase: 'launching' | 'attached'): import('@agentmux/core/spatial-state').SpatialJson
+  assertTakeover?: NonNullable<Parameters<AgentMuxSpatialStateStore['admitAgentOpen']>[1]>
   agentMuxContext?(request: AgentMuxSpatialAgentOpenRequest): Promise<string | undefined>
 }, request: NewAgentRequest, state: AgentMuxSpatialState, context: AgentMuxRpcCallContext) {
   // Same owner boundary as public agent.execution.create: a managed Agent cannot
@@ -31,7 +32,8 @@ export async function openSpatialAgentTarget(options: {
     if (observed.outcome === 'opened' || observed.outcome === 'retired') return { operation: 'agent.open' as const, ...observed }
   }
   context.signal?.throwIfAborted(); await context.assertCurrent?.()
-  const catalog = selectSpatialCatalog(spatialCatalog(state.graph), request.destination)
+  const { spaceId, zoneId, tabId, regionId } = request.destination
+  const catalog = selectSpatialCatalog(spatialCatalog(state.graph), { ...(spaceId ? { spaceId } : {}), ...(zoneId ? { zoneId } : {}), ...(tabId ? { tabId } : {}), ...(regionId ? { regionId } : {}) })
   if (catalog.zones.length !== 1) throw new AgentMuxError('Choose the exact original project Zone.', 'SPACE_ZONE_REQUIRED')
   const zone = catalog.zones[0]!
   if (zone.hostId !== 'local' || !zone.directoryPath) throw new AgentMuxError('This source has no confirmed local project resource for the chosen split execution. Keep the project and original request.', 'SPACE_RESOURCE_UNKNOWN')
@@ -55,7 +57,7 @@ export async function openSpatialAgentTarget(options: {
     if (previous && !sameRuntime && !binding) throw new AgentMuxError('The original split creation has no confirmed coordinator reference. Keep its request; no replacement binding was constructed.', 'SPATIAL_CREATION_UNCONFIRMED')
     // A lost Core admission reply leaves no Source record. Consult the original
     // journal before current inventory, home or generated launch context.
-    const retained = !previous && binding ? await runtime.executionBindings.inspect(binding.bindingId, 'association', context) : null
+    const retained = binding && (!previous || previous.takeover) ? await runtime.executionBindings.inspect(binding.bindingId, 'association', context) : null
     const witness = retained?.association
     if (retained && (!binding || retained.bindingId !== binding.bindingId || retained.agentSessionId !== agentSessionId ||
         !isDeepStrictEqual(retained.agentRoute, adoptedRoute) || retained.resourceRoute !== undefined ||
@@ -70,7 +72,7 @@ export async function openSpatialAgentTarget(options: {
     if (inventory && inventory.runtimeId !== host.runtimeId) throw new AgentMuxError('The executor inventory belongs to another original Agent Core.', 'RUNTIME_OWNER_MISMATCH')
     const matches = inventory?.executors.filter(executor => executor.executorId === request.content.executorId)
     if (matches && matches.length !== 1) throw new AgentMuxError('Choose an executor registered on the original Agent Core.', 'UNKNOWN_EXECUTOR')
-    const launch = parseAgentOpenLaunchFields(request.content), note = !previous && !retained ? await options.agentMuxContext?.(request) : undefined
+    const launch = parseAgentOpenLaunchFields(request.content), note = previous?.takeover ? previous.takeoverSourceAgentMuxNote : !previous && !retained ? await options.agentMuxContext?.(request) : undefined
     if (!previous && !retained && (Object.keys(launch).length || Boolean(note)) && matches![0]!.creationContract?.ordinaryLaunch !== 1) throw new AgentMuxError(
       'The selected execution Core has no confirmed handler for this complete launch input. Keep this request and update or confirm that Core; no Agent or helper was started.', 'AGENT_OPEN_CONTRACT_UNCONFIRMED')
     const execution = previous?.execution ?? { hostId: sameRuntime ? 'local' : target.hostId, runtimeId: host.runtimeId,
@@ -85,23 +87,26 @@ export async function openSpatialAgentTarget(options: {
         save: { layoutApplied: false, clientStateWritten: false, storageFlushRequested: false, diskDurability: 'unconfirmed' as const, reason: 'The original Agent has no confirmed association with this source Space.' },
         issues: [{ step: 'creation', code: 'SPATIAL_CREATION_UNCONFIRMED', message: 'The original creation has no confirmed source placement.', recovery: 'Inspect the original creation; do not recreate or resend its input.' }] }
     } catch (error) { if (!(error instanceof AgentMuxError) || error.code !== 'AGENT_CREATION_UNKNOWN') throw error }
-    if (binding && !previous && !retained) {
-      if (!runtime.executionBindings.admit) throw new AgentMuxError(
-        'The original Core cannot acknowledge this frozen execution intent. Keep the request; no Source placement or helper was created.', 'CONTROL_UNAVAILABLE')
+    const admit = () => options.spatial.admitAgentOpen({ request, agentSessionId, placement, execution,
+      ...(context.agentTakeover ? { takeover: { preparation: context.agentTakeover.preparation, requestDigest: context.agentTakeover.requestDigest, ...(note === undefined ? {} : { sourceAgentMuxNote: note }) } } : {}),
+      ...(binding ? { executionBinding: binding } : {}), regionResource: options.descriptor({ agentSessionId, execution, placement }, 'launching') }, options.assertTakeover)
+    if (binding && !retained && (!previous || previous.takeover) && !runtime.executionBindings.admit) throw new AgentMuxError(
+      'The original Core cannot acknowledge this frozen execution intent. Keep the original Source request; no helper was started.', 'CONTROL_UNAVAILABLE')
+    const frozenAdmission = context.agentTakeover && !previous ? await admit() : undefined
+    if (binding && !retained && (!previous || previous.takeover)) {
       const agent = { agentSessionId, createOperationId: request.requestId, executorId: request.content.executorId,
         executorRevision: execution.executorRevision, workspacePath: execution.workspacePath, ...launch,
         ...(request.content.prompt === undefined ? {} : { prompt: request.content.prompt }), ...(note ? { sourceAgentMuxNote: note } : {}) }
       context.signal?.throwIfAborted(); await context.assertCurrent?.()
-      const acknowledged = await runtime.executionBindings.admit({ bindingId: binding.bindingId, agentHostId: execution.hostId, agentRuntimeId: execution.runtimeId,
+      const acknowledged = await runtime.executionBindings.admit!({ bindingId: binding.bindingId, agentHostId: execution.hostId, agentRuntimeId: execution.runtimeId,
         ...(execution.adoptedRoute ? { agentRoute: execution.adoptedRoute } : {}), sourceRequestDigest: spatialAgentOpenDigest(request),
         resourceHostId: placement.hostId, resourceRuntimeId: placement.runtimeId, resourceWorkspacePath: placement.workspacePath,
         resourceGrant: { scope: 'host-user', bindingId: binding.bindingId }, agent }, context)
       if (acknowledged.bindingId !== binding.bindingId || acknowledged.agentSessionId !== agentSessionId || acknowledged.createOperationId !== request.requestId)
-        throw new AgentMuxError('The Core did not acknowledge this original frozen intent. No Source placement was admitted.', 'EXECUTION_INTENT_UNCONFIRMED')
+        throw new AgentMuxError('The Core did not acknowledge this original frozen intent. Keep the Source operation and inspect its original binding.', 'EXECUTION_INTENT_UNCONFIRMED')
     }
     context.signal?.throwIfAborted(); await context.assertCurrent?.()
-    const admission = await options.spatial.admitAgentOpen({ request, agentSessionId, placement, execution,
-      ...(binding ? { executionBinding: binding } : {}), regionResource: options.descriptor({ agentSessionId, execution, placement }, 'launching') })
+    const admission = frozenAdmission ?? await admit()
     try {
       context.signal?.throwIfAborted(); await context.assertCurrent?.()
       if (binding) await runtime.executionBindings.continueOriginal(binding, context)
@@ -112,8 +117,9 @@ export async function openSpatialAgentTarget(options: {
           ...launch,
           ...(request.content.prompt === undefined ? {} : { prompt: request.content.prompt }), ...(sourceNote ? { sourceAgentMuxNote: sourceNote } : {}) }
         context.signal?.throwIfAborted(); await context.assertCurrent?.()
-        await host.client.createHostAgentWithDelivery({ ...agent, spatialIntent: { tabId: admission.record.address.tabId,
-          regionId: admission.record.address.regionId, executionWorkspaceId: placement.workspaceId } })
+        const create = { ...agent, spatialIntent: { tabId: admission.record.address.tabId, regionId: admission.record.address.regionId, executionWorkspaceId: placement.workspaceId } }
+        if (admission.record.takeover) await runtime.client.createSpatialHostAgentWithDelivery(create, options.spatial)
+        else await host.client.createHostAgentWithDelivery(create)
       }
       return response = { operation: 'agent.open' as const, ...await options.reconcile(admission.record, context, undefined, request) }
     } catch (error) { return response = { operation: 'agent.open' as const, ...await options.reconcile(admission.record, context, error, request) } }

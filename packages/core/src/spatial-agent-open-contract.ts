@@ -1,3 +1,4 @@
+import { parseAgentTakeoverProvenance } from './agent-takeover.js'
 import { safeId } from './agent-identifiers.js'
 import { deriveObjectId } from './object-id.js'
 import { parseMoteMainRolloverDecision, type MoteMainRolloverDecision } from './mote/main-period.js'
@@ -89,6 +90,11 @@ export function isHeadlessSpatialAgentOpen(request: { operation: string; content
 }
 /** Spatial intent only. Creation, input and Run facts remain with the original Core Session. */
 export type AgentMuxSpatialAgentOpenRecord = {
+  takeover?: import('./agent-takeover.js').AgentTakeoverProvenance
+  takeoverRequestDigest?: string
+  /** Private frozen invocation. Public relation reads expose only the qualified facts. */
+  takeoverSourceAgentMuxNote?: string
+  takeoverContent?: Extract<AgentMuxSpatialAgentOpenRequest['content'], {kind:'new-agent'}>
   requestId: string; digest: string; agentSessionId: string; executorId: string; address: AgentMuxSpaceAddress
   execution: { hostId: string; workspacePath: string; workspaceId: string | null; runtimeId?: string; executorRevision?: string; adoptedRoute?: import('./host-route.js').AdoptedHostRoute }
   /** Source-owned resource/placement; an execution home is never its substitute. */
@@ -161,7 +167,7 @@ export function pendingMoteMainCreation(graph: AgentMuxSpatialGraph, target: Mot
 }
 
 export function spatialAgentFact(session: Pick<AgentMuxAgentSession, 'agentSessionId' | 'run' | 'providerId' | 'executorId' | 'workspacePath' | 'creation' | 'forkedFrom' | 'toolExecution'>, hostId: string): AgentMuxSpaceAgentFact {
-  return { agentSessionId: session.agentSessionId, runId: session.run.runId, providerId: session.providerId,
+  return { ...(session.creation?.takeover ? { takeover: session.creation.takeover } : {}), agentSessionId: session.agentSessionId, runId: session.run.runId, providerId: session.providerId,
     executorId: session.executorId, hostId, cwd: session.workspacePath,
     createOperationId: session.creation?.createOperationId ?? null, initialPrompt: session.creation?.initialPrompt ?? 'unknown',
     ...(session.creation?.executorRevision ? { executorRevision: session.creation.executorRevision } : {}),
@@ -213,6 +219,7 @@ export function spatialAgentOpenRecord(graph: AgentMuxSpatialGraph, requestId: s
       original.executionBinding && (original.executionBinding.agentSessionId !== original.agentSessionId ||
         original.executionBinding.createOperationId !== original.requestId || !original.executionBinding.bindingId)) throw new AgentMuxError(
     'The original split execution reference is unconfirmed. Keep its Session, placement and operation.', 'SPATIAL_CREATION_UNCONFIRMED')
+  if (original.takeover) { parseAgentTakeoverProvenance(original.takeover); if (original.takeoverSourceAgentMuxNote !== undefined && typeof original.takeoverSourceAgentMuxNote !== 'string' || !original.takeoverContent || original.takeoverContent.kind !== 'new-agent' || original.takeoverContent.executorId !== original.executorId) throw new AgentMuxError('The original frozen Takeover invocation is unconfirmed.', 'SPATIAL_CREATION_UNCONFIRMED'); if (typeof original.takeoverRequestDigest !== 'string' || !/^[a-f0-9]{64}$/u.test(original.takeoverRequestDigest)) throw new AgentMuxError('The original Takeover request digest is unconfirmed.', 'SPATIAL_CREATION_UNCONFIRMED') }
   if (original.moteMain) parseMoteMainCreationIntent(original.moteMain, 'CONTROL_PROTOCOL_ERROR')
   if (original.moteMainFollowUps && Object.entries(original.moteMainFollowUps).some(([key,value]) => !['sourceStarted','bindStarted','bindingReceipt','refusedBeforeBinding','bindingObserved','deferredInputKey','handoverInputKey','deferredInputObserved'].includes(key) || !['bindingReceipt','refusedBeforeBinding','bindingObserved','deferredInputKey','handoverInputKey','deferredInputObserved'].includes(key) && value !== true))
     throw new AgentMuxError('The original Main follow-up admission is unreadable.', 'SPATIAL_CREATION_UNCONFIRMED')

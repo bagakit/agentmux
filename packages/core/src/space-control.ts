@@ -206,6 +206,7 @@ export type AgentMuxSpatialSave = {
 }
 export type AgentMuxSpatialIssue = { step: string; code: string; message: string; recovery: string; candidates?: AgentMuxSpaceSelector[]; executionFailure?: import('./agent-execution-contract.js').AgentExecutionFailure }
 export type AgentMuxSpaceAgentFact = {
+  takeover?: import('./agent-takeover.js').AgentTakeoverProvenance
   /** Authoritative retirement of this exact Session/Run; never an active projection. */
   retirement?: { source: 'user'; observedAt: number }
   executorRevision?: string
@@ -348,6 +349,7 @@ export type AgentMuxSpaceControlRequest = Base & (
   | { operation: 'space.inspect'; presentation?: boolean; target: AgentMuxSpaceSelector | { requestId: string } }
   | { operation: 'agent.open'; content:
       | ({ kind: 'new-agent'; executorId: string; agentTarget?: AgentMuxSpaceAgentTarget; executionWorkspaceId?: string; toolWorkspaceId?: string; nativeResumeSource?: import('./types.js').AgentNativeResumeSource; prompt?: string } & import('./agent-open-contract.js').AgentOpenLaunchFields)
+      | ({ kind: 'takeover-agent'; executorId: string; agentTarget?: AgentMuxSpaceAgentTarget; source: import('./agent-takeover.js').AgentTakeoverSource } & import('./agent-open-contract.js').AgentOpenLaunchFields)
       | { kind: 'fork-agent'; source: import('./agent-fork.js').AgentMuxAgentForkSource; prompt?: string }
       /** A public request only: the Core service expands it into new-agent or fork-agent content before admission. */
       | { kind: 'derived-action'; actionId: string; source: { agentSessionId: string }; executorId?: string }

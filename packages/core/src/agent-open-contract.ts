@@ -3,7 +3,7 @@ import type { AgentExecutionReference } from './agent-execution-contract.js'
 import { normalizeLaunchOptionSelection, type LaunchOptionSelection } from './agent-launch-option.js'
 import { rpcRecord, rpcString } from './rpc-data.js'
 
-export type AgentOpenContracts = { ordinaryLaunch: { revision: 1; destination: 'source-zone-background' } | null; externalAssociation: 1 | null }
+export type AgentOpenContracts = { ordinaryLaunch: { revision: 1; destination: 'source-zone-background' } | null; externalAssociation: 1 | null; takeover: 1 | null }
 export type AgentOpenDescription = { source: { runtimeId: string; ownerInstanceId: string }; contracts: AgentOpenContracts }
 export const AGENT_OPEN_METHODS = { 'agent.open.describe': 'short' } as const
 export type AgentOpenParams = { 'agent.open.describe': { expectedRuntimeId: string } }
@@ -27,12 +27,12 @@ export function parseAgentOpenDescribe(value: unknown): AgentOpenParams['agent.o
 }
 export function parseAgentOpenDescription(value: unknown, input: AgentOpenParams['agent.open.describe']): AgentOpenDescription {
   const code = 'CONTROL_PROTOCOL_ERROR', p = rpcRecord(value, ['source','contracts'], code)
-  const source = rpcRecord(p.source, ['runtimeId','ownerInstanceId'], code), contracts = rpcRecord(p.contracts, ['ordinaryLaunch','externalAssociation'], code)
+  const source = rpcRecord(p.source, ['runtimeId','ownerInstanceId'], code), contracts = rpcRecord(p.contracts, ['ordinaryLaunch','externalAssociation','takeover'], code)
   if (contracts.ordinaryLaunch !== null) {
     const launch = rpcRecord(contracts.ordinaryLaunch,['revision','destination'],code)
     if (launch.revision !== 1 || launch.destination !== 'source-zone-background') throw new AgentMuxError('The original Source launch destination contract is unconfirmed.',code)
   }
-  if (source.runtimeId !== input.expectedRuntimeId || contracts.externalAssociation !== 1 && contracts.externalAssociation !== null) throw new AgentMuxError('The Source launch contracts are unconfirmed or belong to another Runtime.', code)
+  if (source.runtimeId !== input.expectedRuntimeId || contracts.externalAssociation !== 1 && contracts.externalAssociation !== null || contracts.takeover !== 1 && contracts.takeover !== null) throw new AgentMuxError('The Source launch contracts are unconfirmed or belong to another Runtime.', code)
   if (typeof source.ownerInstanceId !== 'string' || !source.ownerInstanceId || /[\0\r\n]/u.test(source.ownerInstanceId)) throw new AgentMuxError('The original Source instance is unconfirmed.', code)
   return { source: { runtimeId: input.expectedRuntimeId, ownerInstanceId: source.ownerInstanceId }, contracts: contracts as AgentOpenContracts }
 }

@@ -1,5 +1,7 @@
 import { parseInputInitialization } from './agent-initialization.js'
 import { invalidateSubagentSource, agentHasActiveSubagents, agentSubagentActivityUnconfirmed, subagentScopeMatches } from './agent-subagent-state.js'
+import { parseAgentOpenLaunchFields } from './agent-open-contract.js'
+import { parseAgentTakeoverProvenance } from './agent-takeover.js'
 import { NativeCreationAdmission } from './native-creation-admission.js'
 import { parseTerminalCreationRetire, parseTerminalCreationInspect, type TerminalCreationInspect, type TerminalCreationInspection } from './terminal-creation.js'
 import { parseTerminalControl, parseTerminalControlInspect, parseTerminalControlResult, terminalInputBytes, type TerminalControlRequest, type TerminalControlReceipt, type TerminalControlInspect, type TerminalStopResult } from './terminal-control.js'
@@ -293,13 +295,14 @@ type AgentStopAdmission = {
   stages: AgentMuxAgentStopStage[]
 }
 
-type LocalHostAgentCreateInput = AgentMuxHostAgentCreateInput & Pick<AgentMuxAgentCreateInput, 'initialMessage'> & {
+type TakeoverCreationContribution = { takeover?: import('./agent-takeover.js').AgentTakeoverProvenance }
+type LocalHostAgentCreateInput = AgentMuxHostAgentCreateInput & TakeoverCreationContribution & Pick<AgentMuxAgentCreateInput, 'initialMessage'> & {
   creationCaller: NonNullable<AgentMuxAgentCreateInput['creationCaller']>
 }
 type ActiveAgentCreation = {
   kind: 'direct' | 'host' | 'local-host'
   wake?: () => boolean
-  input: AgentMuxAgentCreateInput | AgentMuxHostAgentCreateInput | LocalHostAgentCreateInput
+  input: (AgentMuxAgentCreateInput | AgentMuxHostAgentCreateInput | LocalHostAgentCreateInput) & TakeoverCreationContribution
   agentSessionId?: string
   controller: AbortController
   pending: ReturnType<AgentMuxClient['createAgentWithDelivery']>
@@ -791,23 +794,41 @@ export class AgentMuxClient {
   }
 
   async createHostAgentWithDelivery(input: AgentMuxHostAgentCreateInput) {
+    if ('takeover' in input) throw new AgentMuxError('Takeover provenance is read only from its original spatial admission.', 'INVALID_CONTROL_REQUEST')
     return await this.createConfiguredHostAgentWithDelivery(input)
+  }
+
+  /** In-process original spatial-owner composition. This method is not a Hosted/RPC operation.
+   * It reads provenance from the admitted C rather than accepting a caller-authored fact. */
+  async createSpatialHostAgentWithDelivery(input: AgentMuxHostAgentCreateInput, spatial: import('./spatial-state.js').AgentMuxSpatialStateStore) {
+    if ('takeover' in input) throw new AgentMuxError('Takeover provenance cannot be supplied as creation JSON.', 'INVALID_CONTROL_REQUEST')
+    const { spatialAgentOpenRecord } = await import('./spatial-agent-open-contract.js')
+    const state = await spatial.read(), original = state && input.createOperationId ? spatialAgentOpenRecord(state.graph, input.createOperationId) : null
+    const identity = await this.agentCreationAuthority()
+    if (!original?.takeover || original.agentSessionId !== input.agentSessionId || original.executorId !== input.executorId ||
+      original.execution.hostId !== 'local' || original.execution.runtimeId !== identity.runtimeId || original.execution.workspacePath !== input.workspacePath || input.executorRevision !== original.execution.executorRevision ||
+      !original.takeoverContent || input.prompt !== original.takeoverContent.prompt || !isDeepStrictEqual(parseAgentOpenLaunchFields(input), parseAgentOpenLaunchFields(original.takeoverContent)) || input.nativeResumeSource !== undefined ||
+      original.takeover.destination.owner.runtimeId !== identity.runtimeId || input.spatialIntent?.tabId !== original.address.tabId || input.spatialIntent.regionId !== original.address.regionId)
+      throw new AgentMuxError('The original Core Takeover admission and creation target are unconfirmed.', 'AGENT_TAKEOVER_ADMISSION_UNCONFIRMED')
+    return await this.createConfiguredHostAgentWithDelivery({ ...input, takeover: original.takeover })
   }
 
   /** Same-Core caller credentials never enter the Hosted or JSON-RPC SDK surface. */
   async createLocalHostAgentWithDelivery(input: AgentMuxHostAgentCreateInput, caller: NonNullable<AgentMuxAgentCreateInput['creationCaller']>) {
+    if ('takeover' in input) throw new AgentMuxError('Takeover provenance is read only from its original spatial admission.', 'INVALID_CONTROL_REQUEST')
     if (!caller || typeof caller.agentSessionId !== 'string' || typeof caller.capability !== 'string' || input.initialMessageAdmission !== undefined) throw new AgentMuxError(
       'A local target-owned creation requires its original local caller, without a foreign signed admission.', 'INVALID_CONTROL_REQUEST')
     return await this.createConfiguredHostAgentWithDelivery(input, structuredClone(caller))
   }
 
-  private async createConfiguredHostAgentWithDelivery(input: AgentMuxHostAgentCreateInput, caller?: NonNullable<AgentMuxAgentCreateInput['creationCaller']>) {
+  private async createConfiguredHostAgentWithDelivery(input: AgentMuxHostAgentCreateInput & TakeoverCreationContribution, caller?: NonNullable<AgentMuxAgentCreateInput['creationCaller']>) {
     if (!this.hostExecutorOwner) throw new AgentMuxError('Target Host Executor registry is unavailable.', 'CONTROL_UNAVAILABLE')
     // Freeze the whole original intent before registry admission can await another turn.
     input = structuredClone(input)
+    if (input?.takeover !== undefined) input = { ...input, takeover: parseAgentTakeoverProvenance(input.takeover) }
     if (input?.spatialIntent !== undefined) input = { ...input, spatialIntent: parseAgentCreationSpatialIntent(input.spatialIntent) }
     const allowed = ['toolExecution', 'agentSessionId', 'createOperationId', 'executorId', 'executorRevision', 'workspacePath', 'prompt',
-      'agentMuxNote', 'sourceAgentMuxNote', 'agentMuxTask', 'optionalContext', 'launchOptions', 'cols', 'rows', 'initialMessageAdmission', 'threadId', 'nativeResumeSource', 'spatialIntent']
+      'agentMuxNote', 'sourceAgentMuxNote', 'agentMuxTask', 'optionalContext', 'launchOptions', 'cols', 'rows', 'initialMessageAdmission', 'threadId', 'nativeResumeSource', 'spatialIntent', 'takeover']
     if (!input || Object.keys(input).some(key => !allowed.includes(key)) || !input.agentSessionId || !input.createOperationId || !input.executorRevision ||
       input.agentMuxTask !== undefined && typeof input.agentMuxTask !== 'string' ||
       input.sourceAgentMuxNote !== undefined && typeof input.sourceAgentMuxNote !== 'string') {
@@ -818,7 +839,7 @@ export class AgentMuxClient {
     const localInput: LocalHostAgentCreateInput | undefined = caller ? { ...input, creationCaller: caller,
       ...(input.prompt?.trim() ? { initialMessage: { callerAgentSessionId: caller.agentSessionId, capability: caller.capability } } : {}) } : undefined
     return await this.runAgentCreation(caller ? 'local-host' : 'host', localInput ?? input, async (request, execution) => {
-      const input = request as AgentMuxHostAgentCreateInput
+      const input = request as AgentMuxHostAgentCreateInput & TakeoverCreationContribution
       const { preparation } = execution
       const sources = caller ? await this.readCreationCallers(request as LocalHostAgentCreateInput, execution) : undefined
       const intentDigest = sources ? creationIntentDigest(request as LocalHostAgentCreateInput, input.agentSessionId!, input.executorId, input.createOperationId!, sources.initialAuthor, sources.creator) : hostAgentCreationIntent(input)
@@ -866,6 +887,7 @@ export class AgentMuxClient {
           agentSessionId: input.agentSessionId!, createOperationId: input.createOperationId!,
           ...(input.toolExecution === undefined ? {} : { toolExecution: input.toolExecution }),
           ...(input.spatialIntent === undefined ? {} : { spatialIntent: input.spatialIntent }),
+          ...(input.takeover === undefined ? {} : { takeover: input.takeover }),
           providerId: config.providerId, executorId: input.executorId, workspacePath: input.workspacePath,
           injectAgentMuxGuide: config.injectAgentMuxGuide, args: config.args, env: config.env, commandOverride: config.command,
           ...(input.prompt === undefined ? {} : { prompt: input.prompt }),
@@ -5664,6 +5686,7 @@ export class AgentMuxClient {
     session: AgentMuxAgentSession; promptConfirmed: boolean;
     creation: NonNullable<AgentMuxAgentSession['creation']>
   }> {
+    if ('takeover' in input) throw new AgentMuxError('Takeover provenance is read only from its original spatial admission.', 'INVALID_CONTROL_REQUEST')
     if ('initialMessageAdmission' in input || 'verifiedAuthor' in input || 'initialMessageOrigin' in input || 'createdBy' in input) {
       throw new AgentMuxError('Cross-Host initial messages require the target-owned creation contract.', 'MESSAGE_ENVELOPE_REQUIRED')
     }
@@ -5716,6 +5739,7 @@ export class AgentMuxClient {
   ): ReturnType<AgentMuxClient['createAgentWithDelivery']> {
     const frozen = structuredClone(input)
     if (frozen.toolExecution !== undefined) frozen.toolExecution = parseAgentToolExecutionBinding(frozen.toolExecution)
+    if (frozen.takeover !== undefined) frozen.takeover = parseAgentTakeoverProvenance(frozen.takeover)
     if (frozen.spatialIntent !== undefined) frozen.spatialIntent = parseAgentCreationSpatialIntent(frozen.spatialIntent)
     frozen.createOperationId ??= mintObjectId()
     const cid = frozen.createOperationId
@@ -5770,7 +5794,7 @@ export class AgentMuxClient {
     }
   }
 
-  private async createAgentWithDeliveryAttempt(input: AgentMuxAgentCreateInput,
+  private async createAgentWithDeliveryAttempt(input: AgentMuxAgentCreateInput & TakeoverCreationContribution,
     admitted: AgentCreationAdmission | undefined, execution: AgentCreationExecution): Promise<{
     session: AgentMuxAgentSession; promptConfirmed: boolean; creation: NonNullable<AgentMuxAgentSession['creation']>
   }> {
@@ -5969,7 +5993,7 @@ export class AgentMuxClient {
           ...(initialInput ? { initialInput } : {}),
           ...(executorInvocation ? { executorInvocation: executorInvocation.value } : {}),
           capabilityHash: hashAgentCapability(invocationCapability), createdAt: preparedAt, updatedAt: preparedAt,
-          creation: { createOperationId, intentDigest, ...(executorInvocation ? { executorInvocationDigest: executorInvocation.digest } : {}), ...(workspaceTrust ? { workspaceTrust } : {}), ...(input.spatialIntent ? { spatialIntent: input.spatialIntent } : {}), ...(createdBy ? { createdBy } : {}),
+          creation: { createOperationId, intentDigest, ...(executorInvocation ? { executorInvocationDigest: executorInvocation.digest } : {}), ...(workspaceTrust ? { workspaceTrust } : {}), ...(input.spatialIntent ? { spatialIntent: input.spatialIntent } : {}), ...(input.takeover ? { takeover: input.takeover } : {}), ...(createdBy ? { createdBy } : {}),
             ...(initialEnvelope ? { initialMessageId: initialEnvelope.messageId } : {}),
             initialPrompt: input.prompt?.trim() ? 'unknown' : 'not-requested', ...(contextRequested ? { agentMuxContext: 'unknown' as const } : {}), ...(admitted?.origin ? { initialMessageOrigin: admitted.origin } : {}), ...(admitted?.executorRevision ? { executorRevision: admitted.executorRevision } : {}) },
           ...(forkSource ? { forkedFrom: structuredClone(forkSource) } : {}),
@@ -6048,7 +6072,7 @@ export class AgentMuxClient {
         createdAt: preparedCreation?.createdAt ?? now,
         updatedAt: preparedCreation?.updatedAt ?? now,
         creation: { createOperationId, ...(executorInvocation ? { executorInvocationDigest: executorInvocation.digest } : {}), ...(workspaceTrust ? { workspaceTrust } : {}), ...(boundInitialInput?.key ? { initialInputKey: boundInitialInput.key } : {}), initialPrompt: input.prompt?.trim() ? 'unknown' : 'not-requested',
-          intentDigest, ...(input.spatialIntent ? { spatialIntent: input.spatialIntent } : {}), ...(createdBy ? { createdBy } : {}), createdRun: runRef(run.runId),
+          intentDigest, ...(input.spatialIntent ? { spatialIntent: input.spatialIntent } : {}), ...(input.takeover ? { takeover: input.takeover } : {}), ...(createdBy ? { createdBy } : {}), createdRun: runRef(run.runId),
           ...(initialEnvelope ? { initialMessageId: initialEnvelope.messageId } : {}), ...(contextRequested ? { agentMuxContext: 'unknown' as const } : {}),
           ...(admitted?.origin ? { initialMessageOrigin: admitted.origin } : {}), ...(admitted?.executorRevision ? { executorRevision: admitted.executorRevision } : {}) },
         ...(forkSource ? { forkedFrom: structuredClone(forkSource) } : {}),
@@ -6192,7 +6216,7 @@ export class AgentMuxClient {
         ...(workspaceTrust ? { workspaceTrust } : {}),
         ...(boundInitialInput?.key ? { initialInputKey: boundInitialInput.key } : {}),
         intentDigest,
-        ...(input.spatialIntent ? { spatialIntent: input.spatialIntent } : {}),
+        ...(input.spatialIntent ? { spatialIntent: input.spatialIntent } : {}), ...(input.takeover ? { takeover: input.takeover } : {}),
         ...(createdBy ? { createdBy } : {}), createdRun: runRef(run.runId),
         ...(initialEnvelope ? { initialMessageId: initialEnvelope.messageId } : {}),
         ...(admitted?.origin ? { initialMessageOrigin: admitted.origin } : {}), ...(admitted?.executorRevision ? { executorRevision: admitted.executorRevision } : {}),

@@ -1,3 +1,5 @@
+import { spatialDestination } from './spatial-destination.js'
+import { parseAgentTakeoverProvenance, parseAgentTakeoverQuery, parseAgentTakeoverPage, takeoverDestinationOrganization, qualifyTakeoverOrganization, agentTakeoverNature, type AgentTakeoverPreparation, type AgentTakeoverRecord, type AgentTakeoverPage } from './agent-takeover.js'
 import { SPACE_LINK_METHODS, formatSpaceLink, parseSpaceLinkParams, parseSpaceLinkResult, type SpaceLinkMethod } from './space-link.js'
 import { isAgentPromotionMethod, parseAgentPromotionParams, parseAgentPromotionResult, type AgentPromotionPort, type AgentPromotionMethod } from './agent-promotion.js'
 import { isMeshNetworkMethod, parseMeshNetworkParams, parseMeshNetworkResult, meshConfigurationNotApplied, type MeshNetworkPort, type MeshNetworkMethod } from './mesh-network.js'
@@ -358,7 +360,10 @@ export type AgentMuxRpcServiceOptions = Omit<Partial<AgentMuxControlHost>, 'exec
   forwardSubscription?<M extends AgentMuxRpcStreamMethod>(method: M, params: import('./public-rpc.js').AgentMuxRpcStreamParams<M>,
     handlers: AgentMuxRpcSubscriptionOptions<M>, context: AgentMuxRpcCallContext): Promise<AgentMuxRpcSubscription>
 }
-export type AgentMuxRpcCallContext = { routeDelegation?: VerifiedHostRouteDelegation; caller?: AgentMuxRpcCredentials; signal?: AbortSignal; principal?: AgentMuxRpcPrincipal;
+export type AgentMuxRpcCallContext = {
+  /** Original Core-qualified Takeover preparation; never accepted in RPC parameters. */
+  agentTakeover?: { requestId: string; requestDigest: string; preparation: AgentTakeoverPreparation; prompt: string };
+  routeDelegation?: VerifiedHostRouteDelegation; caller?: AgentMuxRpcCredentials; signal?: AbortSignal; principal?: AgentMuxRpcPrincipal;
   /** Optional pre-admission read-opening lifetime. Never substitutes for the business operation signal. */
   openingSignal?: AbortSignal;
   /** In-process transport capability. Never decoded from business arguments. */
@@ -519,6 +524,7 @@ const NATIVE_FIELDS = {
   'agent.broadcast': ['operationId', 'recipientSessionIds', 'text', 'sourceChannel'],
   'agent.broadcast.inspect': ['operationId', 'hostId'],
   'agent.discuss': ['executorId', 'providerId', 'text', 'operationId'],
+  'agent.takeover.ls': ['expectedRuntimeId', 'direction', 'subject', 'cursor', 'limit'],
   'agent.spawn.ls': ['hostId', 'participantSessionId', 'direction', 'creatorRuntimeId', 'cursor', 'limit'],
   'agent.handoff': ['toAgentSessionId', 'taskId'], 'agent.output': ['agentSessionId', 'afterByte', 'follow'],
   'system.diagnostics.inspect': ['target', 'includeRaw', 'includeRelated', 'budget'],
@@ -624,6 +630,60 @@ export class AgentMuxRpcService {
    * new-agent or fork-agent content the spatial owner already admits: the same Core prompt the
    * Desktop menu sends, from the exact source Session and the saved definition.
    */
+  private async prepareTakeover(params: AgentMuxRpcParams<'agent.open'>, context: AgentMuxRpcCallContext): Promise<void> {
+    const request = rpcControlRequest('agent.open', params)
+    if (request.operation !== 'agent.open' || request.content.kind !== 'takeover-agent') return
+    const caller = await this.authenticated(context)
+    if (caller || !context.principal || !['user', 'device'].includes(context.principal.kind)) throw new AgentMuxError('Takeover requires the original person or device; existing Agents remain available.', 'CONTROL_PERMISSION_DENIED')
+    const state = await this.spatial.read()
+    if (!state) throw new AgentMuxError('The original Takeover spatial owner is unavailable. Original work remains available.', 'SPATIAL_STATE_ABSENT')
+    const { spatialAgentOpenDigest } = await import('./spatial-agent-open.js')
+    const previous = spatialAgentOpenRecord(state.graph, request.requestId), requestDigest = spatialAgentOpenDigest(request)
+    if (previous) {
+      if (!previous.takeover || previous.takeoverRequestDigest !== requestDigest) throw new AgentMuxError('This operation belongs to another original Takeover intent.', 'SPACE_REQUEST_CONFLICT')
+      return
+    }
+    const origin = request.content.source, matches = (await this.clients(origin.hostId)).filter(value => value.hostId === origin.hostId)
+    if (matches.length !== 1 || this.endpointUnverified(matches[0]!.client)) throw new AgentMuxError('The exact Takeover source Host is unavailable or ambiguous.', 'CONTROL_UNAVAILABLE')
+    const client = matches[0]!.client, identity = await client.agentCreationAuthority()
+    if (origin.expectedRuntimeId !== undefined && origin.expectedRuntimeId !== identity.runtimeId) throw new AgentMuxError('The selected Takeover source route answers for another original Runtime. Keep the original source and request.', 'RUNTIME_OWNER_MISMATCH')
+    const session = origin.agentSessionId ? await client.readAgentSession(origin.agentSessionId) : null
+    const history = session || !origin.agentSessionId ? null : (await client.sessionHistorySources({ agentSessionId: origin.agentSessionId })).find(value => value.agentSessionId === origin.agentSessionId)
+    const metadata = session ?? history?.history ?? (origin.nativeSource ? { workspacePath: origin.nativeSource.workspacePath, executorId: origin.executorId } : null)
+    if (origin.agentSessionId && !session && !history?.history && history?.state !== 'deleted') throw new AgentMuxError('The selected original Agent is not retained on that exact source owner.', 'AGENT_TAKEOVER_SOURCE_CHANGED')
+    if (!metadata || origin.expectedRun && (!session || session.run.runId !== origin.expectedRun.runId)) throw new AgentMuxError('The original Takeover source or Run is unconfirmed or changed.', 'AGENT_TAKEOVER_SOURCE_CHANGED')
+    const owner = await this.hosted('runtime.owner.identity', {}, context), current = (await owner.owner.call('runtime.owner.identity', {}, context)).owner
+    let organization: import('./agent-takeover.js').AgentTakeoverOrganization | null = null, organizationIssue: string | undefined
+    if (origin.organization) try {
+      if (origin.organization.runtimeId === current.runtimeId) organization = qualifyTakeoverOrganization(state.graph, origin.organization, { runtimeId: identity.runtimeId, agentSessionId: origin.agentSessionId ?? null })
+      else {
+        // The original selected route is the only available remote organization authority.
+        if (origin.organization.runtimeId !== identity.runtimeId || !client.subscribeRpc) throw new AgentMuxError('The exact original organization Core has no available qualified read route.', 'CONTROL_UNAVAILABLE')
+        const { readSpaceSnapshot } = await import('./space-authority-stream.js')
+        const forwarded = await this.inputForwardContext(context)
+        const snapshot = await readSpaceSnapshot({ subscribe: (method, params, handlers) => client.subscribeRpc!(method, params, { ...handlers, ...(forwarded.forwarding ? { forwarding: forwarded.forwarding } : {}) }) }, origin.organization, context.signal ? { signal: context.signal } : {})
+        organization = qualifyTakeoverOrganization({ spaces: snapshot.scope.space ? [snapshot.scope.space] : [], ...snapshot.scope }, origin.organization, { runtimeId: identity.runtimeId, agentSessionId: origin.agentSessionId ?? null })
+      }
+      if (!organization) organizationIssue = 'The original selected Space has no confirmed Project or Club identity.'
+    } catch (cause) {
+      if (cause instanceof AgentMuxError && cause.code === 'AGENT_TAKEOVER_SOURCE_CHANGED') throw cause
+      organizationIssue = 'The original organization could not be observed; its identity remains unknown: ' + (cause instanceof Error ? cause.message : String(cause)).slice(0, 2048)
+    }
+    // Resolve exactly as the final original allocator, including zone-only and empty-Region targets.
+    const located = spatialDestination(spatialCatalog(state.graph), request.destination, { tabId: mintObjectId(), regionId: mintObjectId() }, state.graph.layouts)
+    const destination = takeoverDestinationOrganization(state.graph, located.address, current.runtimeId)
+    let contextPage: unknown, diagnostic = 'Read the original complete context through its exact owner.'
+    const sameCore = (request.content.agentTarget?.runtimeId ?? current.runtimeId) === identity.runtimeId
+    if (!sameCore || !origin.agentSessionId) try { contextPage = origin.agentSessionId
+      ? await this.call('agent.context', { hostId: origin.hostId, agentSessionId: origin.agentSessionId }, context)
+      : await this.call('agent.native.history', { hostId: origin.hostId, executorId: origin.executorId!, source: origin.nativeSource!, limit: 100 }, context) }
+    catch (cause) { diagnostic = 'Original context observation is unavailable: ' + String(cause) }
+    const prompt = [agentTakeoverPrompt({ hostId: origin.hostId, agentSessionId: origin.agentSessionId, nativeSource: origin.nativeSource, cwd: metadata.workspacePath, executorId: metadata.executorId, label: origin.agentSessionId ?? origin.nativeSource!.nativeHandle.sessionId, diagnostic }, undefined, sameCore ? 'local' : null),
+      ...(!sameCore && contextPage ? ['Original-owner bounded context page; continue its nextCursor only at that original owner or through a verified route. This is not complete history.', JSON.stringify(contextPage)] : [])].join('\n\n')
+    context.agentTakeover = { requestId: request.requestId, requestDigest, prompt, preparation: { source: { hostId: origin.hostId, runtimeId: identity.runtimeId, agentSessionId: origin.agentSessionId ?? null, ...(origin.nativeSource ? { nativeSource: origin.nativeSource } : {}), ...(origin.executorId ? { executorId: origin.executorId } : {}), run: session?.run ?? null, organization, ...(organizationIssue ? { organizationIssue } : {}) },
+      destination: { owner: { runtimeId: current.runtimeId }, organization: destination }, nature: agentTakeoverNature(organization, destination) } }
+  }
+
   private async expandDerivedAction(params: AgentMuxRpcParams<'agent.open'>, context: AgentMuxRpcCallContext): Promise<AgentMuxRpcParams<'agent.open'>> {
     const content = (params as { content?: { kind?: unknown } }).content
     if (!content || content.kind !== 'derived-action') return params
@@ -983,7 +1043,7 @@ export class AgentMuxRpcService {
       const endpoint = await this.ports.hostedRuntime?.()
       if (!endpoint) throw new AgentMuxError('The original Source launch owner is unconfirmed. Existing requests and healthy Agents remain available.', 'AGENT_OPEN_CONTRACT_UNCONFIRMED')
       const { owner } = await endpoint.call('runtime.owner.identity', input, context)
-      const contracts = this.ports.spatialAgentControl?.describe?.() ?? { ordinaryLaunch: null, externalAssociation: null }
+      const contracts = this.ports.spatialAgentControl?.describe?.() ?? { ordinaryLaunch: null, externalAssociation: null, takeover: null }
       return parseAgentOpenDescription({ source: { runtimeId: owner.runtimeId, ownerInstanceId: owner.ownerInstanceId }, contracts }, input) as AgentMuxRpcResult<M>
     }
     if (method === 'space.folder.inspect') {
@@ -1932,6 +1992,8 @@ export class AgentMuxRpcService {
       return parseHostSettingsResult(method, result, input) as AgentMuxRpcResult<M>
     }
     if (method === 'agent.open') {
+      if ((params as AgentMuxRpcParams<'agent.open'>).content.kind === 'takeover-agent' && this.ports.callOriginalCore) return await this.ports.callOriginalCore('local', method, params, context)
+      await this.prepareTakeover(params as AgentMuxRpcParams<'agent.open'>, context)
       params = await this.expandDerivedAction(params as AgentMuxRpcParams<'agent.open'>, context) as typeof params
       const request = rpcControlRequest('agent.open', params)
       if (isSpatialAgentAssociation(request)) {
@@ -2661,7 +2723,7 @@ export class AgentMuxRpcService {
       const originalSpatialRequest = method === 'agent.open' || method === 'space.inspect' ? rpcControlRequest(method, params) : null
       const originalResumeRequest = method === 'agent.resume' ? rpcControlRequest(method, params, internalCaller) : null
       const independentResume = originalResumeRequest?.operation === 'resume' && !originalResumeRequest.text.trim()
-      let independentSpatial = originalSpatialRequest && (isHeadlessSpatialAgentOpen(originalSpatialRequest) || isSpatialAgentAssociation(originalSpatialRequest) ||
+      let independentSpatial = originalSpatialRequest && (originalSpatialRequest.operation === 'agent.open' && originalSpatialRequest.content.kind === 'takeover-agent' || isHeadlessSpatialAgentOpen(originalSpatialRequest) || isSpatialAgentAssociation(originalSpatialRequest) ||
         originalSpatialRequest.operation === 'space.inspect' && 'requestId' in originalSpatialRequest.target)
       if (independentSpatial && method === 'space.inspect') {
         const originalContext = context
@@ -2672,7 +2734,7 @@ export class AgentMuxRpcService {
       }
       const originalSpatialState = independentSpatial && originalSpatialRequest?.operation === 'agent.open' ? await this.spatial.readForLayout() : null
       if (independentSpatial && originalSpatialRequest?.operation === 'agent.open') independentSpatial =
-        isHeadlessSpatialAgentOpen(originalSpatialRequest, originalSpatialState?.graph) || isSpatialAgentAssociation(originalSpatialRequest)
+        originalSpatialRequest.content.kind === 'takeover-agent' || isHeadlessSpatialAgentOpen(originalSpatialRequest, originalSpatialState?.graph) || isSpatialAgentAssociation(originalSpatialRequest)
       const retainedSpatialLaunch = originalSpatialRequest?.operation === 'agent.open' && originalSpatialState &&
         spatialAgentOpenRecord(originalSpatialState.graph, originalSpatialRequest.requestId)
       if (originalSpatialRequest && isSpatialAgentAssociation(originalSpatialRequest) && !this.ports.callOriginalCore &&
@@ -3498,6 +3560,49 @@ export class AgentMuxRpcService {
           operationId: rpcString(p.operationId, 'Operation ID') })
         result = { threadId: discussion.thread.threadId, delivery: discussion.thread.delivery.state,
           targetAgentSessionId: discussion.session.agentSessionId, creation: discussion.session.creation! }; break
+      }
+      case 'agent.takeover.ls': {
+        if (this.ports.callOriginalCore) { result = await this.ports.callOriginalCore('local', method, params, context); break }
+        const input = parseAgentTakeoverQuery(p)
+        if (caller || !context.principal || !['user', 'device'].includes(context.principal.kind)) throw new AgentMuxError('Original Takeover relation reading requires the person or device.', 'CONTROL_PERMISSION_DENIED')
+        const local = await this.hosted('runtime.owner.identity', { expectedRuntimeId: input.expectedRuntimeId }, context), owner = (await local.owner.call('runtime.owner.identity', {}, context)).owner
+        if (owner.runtimeId !== input.expectedRuntimeId) throw new AgentMuxError('This is another original Takeover admission Core.', 'RUNTIME_OWNER_MISMATCH')
+        const scope = JSON.stringify([input.expectedRuntimeId, input.direction, input.subject.runtimeId, input.subject.agentSessionId])
+        let after = ''
+        if (input.cursor) {
+          let cursor
+          try { cursor = JSON.parse(Buffer.from(input.cursor, 'base64url').toString('utf8')) } catch { throw new AgentMuxError('The original Takeover query cursor is invalid.', 'INVALID_CONTROL_REQUEST') }
+          if (!cursor || Object.keys(cursor).sort().join(',') !== 'after,scope' || cursor.scope !== scope || typeof cursor.after !== 'string') throw new AgentMuxError('The Takeover cursor belongs to another original subject.', 'INVALID_CONTROL_REQUEST')
+          after = cursor.after
+        }
+        const selected = await this.spatial.readTakeoverAdmissions({ direction: input.direction, subject: input.subject, after, limit: input.limit ?? 50 })
+        if (!selected) throw new AgentMuxError('The original Takeover admission metadata is unavailable.', 'SPATIAL_STATE_ABSENT')
+        const records: AgentTakeoverRecord[] = []
+        for (const original of selected.records) {
+          const takeover = parseAgentTakeoverProvenance(original.takeover)
+          const record: AgentTakeoverRecord = { requestId: original.requestId, takeover, agent: { hostId: original.execution.hostId, runtimeId: original.execution.runtimeId ?? null, agentSessionId: original.agentSessionId, run: null }, phase: 'unconfirmed', issue: takeover.source.organizationIssue ?? null }
+          try {
+            const matches = (await this.clients(original.execution.hostId)).filter(value => value.hostId === original.execution.hostId)
+            if (matches.length !== 1 || this.endpointUnverified(matches[0]!.client)) throw new AgentMuxError('The exact created Takeover Session owner is unavailable.', 'CONTROL_UNAVAILABLE')
+            const client = matches[0]!.client, actual = await client.agentCreationAuthority()
+            if (actual.runtimeId !== original.execution.runtimeId) throw new AgentMuxError('The created Takeover Runtime changed.', 'RUNTIME_OWNER_MISMATCH')
+            const active = await client.readAgentSession(original.agentSessionId)
+            const retired = active ? null : (await client.sessionHistorySources({ agentSessionId: original.agentSessionId })).find(value => value.agentSessionId === original.agentSessionId)
+            const metadata = active ?? retired?.history
+            if (!metadata) { record.phase = 'prepared'; record.issue = [record.issue, 'The original spatial admission is retained; its created Session has not been confirmed.'].filter(Boolean).join('\n') }
+            else {
+              if (metadata.creation?.createOperationId !== original.requestId || metadata.workspacePath !== original.execution.workspacePath ||
+                original.executionBinding && (metadata.toolExecution?.bindingId !== original.executionBinding.bindingId || metadata.toolExecution.resourceRuntimeId !== input.expectedRuntimeId)) throw new AgentMuxError('The created Session does not match this original Takeover admission.', 'AGENT_TAKEOVER_ADMISSION_UNCONFIRMED')
+              record.phase = active ? 'active' : retired?.state === 'retired' ? 'retired' : 'unconfirmed'
+              record.agent.run = active?.run ?? null
+              if (metadata.creation.initialPrompt === 'unknown' || metadata.creation.initialPrompt === 'unconfirmed' || metadata.creation.persistence === 'unconfirmed') record.issue = [record.issue, 'The original creation or first input acknowledgement is unconfirmed. Inspect its exact operation without replaying.'].filter(Boolean).join('\n')
+            }
+          } catch (cause) { record.issue = [record.issue, cause instanceof Error ? cause.message : String(cause)].filter(Boolean).join('\n') }
+          records.push(record)
+        }
+        const page: AgentTakeoverPage = { owner: { runtimeId: owner.runtimeId, ownerInstanceId: owner.ownerInstanceId }, direction: input.direction, subject: input.subject, records,
+          nextCursor: selected.hasMore && records.length ? Buffer.from(JSON.stringify({ scope, after: records.at(-1)!.requestId })).toString('base64url') : null, coverage: { scope: 'selected-owner', history: 'recorded-takeovers' } }
+        result = parseAgentTakeoverPage(page, input); break
       }
       case 'agent.spawn.ls': {
         const hostId = rpcString(p.hostId, 'Original creation Host'), participant = rpcString(p.participantSessionId, 'Spawn participant Session')

@@ -1,3 +1,4 @@
+import { AGENT_TAKEOVER_METHODS } from './agent-takeover.js'
 import { SPACE_LINK_METHODS, type SpaceLinkParams, type SpaceLinkResult } from './space-link.js'
 import { AGENT_PROMOTION_METHODS, type AgentPromotionParamsMap, type AgentPromotionResultMap, type AgentPromotionMethod } from './agent-promotion.js'
 import { MESH_NETWORK_METHODS, type MeshNetworkParams, type MeshNetworkResults, type MeshNetworkMethod } from './mesh-network.js'
@@ -364,6 +365,7 @@ type NativeParams = SpaceLinkParams & MeshNetworkParams & AgentPromotionParamsMa
   'agent.broadcast': import('./agent-message-broadcast.js').AgentMuxMessageBroadcastInput
   'agent.broadcast.inspect': { operationId: string; hostId?: string }
   'agent.discuss': { executorId: string; providerId?: string; text: string; operationId: string }
+  'agent.takeover.ls': import('./agent-takeover.js').AgentTakeoverQuery
   'agent.spawn.ls': import('./agent-spawn-query.js').AgentMuxSpawnQuery & { hostId: string }
   'agent.handoff': { toAgentSessionId: string; taskId: string }
   'agent.output': { agentSessionId: string; afterByte?: number; follow?: boolean }
@@ -489,6 +491,7 @@ type NativeResult = SpaceLinkResult & MeshNetworkResults & AgentPromotionResultM
   'agent.broadcast': import('./agent-message-broadcast.js').AgentMuxMessageBroadcastReceipt
   'agent.broadcast.inspect': { hostId: string; broadcast: import('./agent-message-broadcast.js').AgentMuxMessageBroadcastReceipt | null }
   'agent.discuss': { threadId: string; delivery: string; targetAgentSessionId: string; creation: import('./types.js').AgentMuxAgentCreationFact }
+  'agent.takeover.ls': import('./agent-takeover.js').AgentTakeoverPage
   'agent.spawn.ls': import('./agent-spawn-query.js').AgentMuxSpawnPage & { hostId: string }
   'agent.handoff': ReturnType<AgentMuxClient['handOff']>
   'agent.output': AgentMuxRpcOutputInitial & { replay: AgentMuxRpcOutputBytes[] }
@@ -584,7 +587,7 @@ export const AGENTMUX_RPC_NATIVE_METHODS = {
   'goal.watch': 'long',
   'settings.appearance.watch': 'long',
   'notebook.scan': 'long', 'notebook.ls': 'short', 'notebook.inspect': 'long', 'notebook.graph': 'long', 'notebook.resolve': 'long', 'notebook.apply': 'long',
-  ...SPACE_LINK_METHODS, ...NAME_CONTROL_METHODS, ...SPACE_MEMBER_METHODS, ...SPACE_SESSION_METHODS, ...SPACE_FOLDER_METHODS, ...SPACE_AUTHORITY_METHODS, ...AGENT_OPEN_METHODS,
+  ...SPACE_LINK_METHODS, ...NAME_CONTROL_METHODS, ...SPACE_MEMBER_METHODS, ...SPACE_SESSION_METHODS, ...SPACE_FOLDER_METHODS, ...SPACE_AUTHORITY_METHODS, ...AGENT_OPEN_METHODS, ...AGENT_TAKEOVER_METHODS,
   'space.state': 'short', 'space.commit': 'long', 'space.resolve': 'short', 'name.history': 'short', 'name.confirm': 'long',
   'agent.conversation.landmark.ls': 'short', 'agent.conversation.landmark.apply': 'long',
   'agent.conversation.snapshot.ls': 'long', 'agent.conversation.snapshot.release': 'short', whoami: 'short', 'skill.ls': 'long', 'agent.ls': 'short', 'agent.inspect': 'short', 'agent.creation.continue': 'short', 'agent.execution.inspect': 'short', 'agent.execution.admit': 'long', 'agent.execution.create': 'long', 'agent.execution.continue': 'long', 'agent.execution.binding': 'short', 'agent.execution.watch': 'short', 'agent.execution.rejoin': 'long', 'agent.restart': 'long', 'agent.restart.inspect': 'short', 'agent.stop.inspect': 'short', 'agent.refresh': 'short', 'agent.continuity.control': 'short', 'agent.native.confirm': 'long', 'agent.native.ls': 'long', 'agent.native.history': 'long', 'agent.native.history.resource': 'long', 'agent.context': 'long', 'agent.history': 'long', 'agent.conversation.record': 'long', 'agent.conversation.release': 'short', 'agent.conversation.inspect': 'long', 'agent.conversation.checkpoint': 'long', 'agent.conversation.changes': 'long', 'agent.conversation.watch': 'long', 'agent.history.usage': 'long', 'agent.history.record.inspect': 'long', 'agent.history.record.delete': 'long', 'agent.history.resource': 'long', 'agent.interaction.respond': 'long', 'agent.interaction.inspect': 'short', 'agent.question.reply': 'long', 'agent.reopen': 'long', 'agent.reopen.check': 'long',
