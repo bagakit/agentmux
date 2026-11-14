@@ -577,3 +577,38 @@ it('aborting a binding watch releases only that reader while other readers and h
   expect((await service.inspect(f.input.bindingId))?.continuation?.createOperationId).toBe(f.input.agent.createOperationId)
   await retained.dispose()
 })
+
+it('admission durably freezes the complete original intent with no endpoint effects, and explicit continuation survives reopen', async () => {
+  const f = await fixture(); f.input.sourceRequestDigest = 'd'.repeat(64); f.input.agent.sourceAgentMuxNote = 'Frozen original Source context'
+  const inventory = f.frontend.api.listHostExecutors.getMockImplementation()!
+  f.frontend.api.listHostExecutors.mockImplementation(async () => { const value = await inventory(); return { ...value, runtimeId: f.input.agentRuntimeId, executors: value.executors.map(executor => ({ ...executor, creationContract: { ordinaryLaunch: 1 } })) } })
+  let service = new AgentExecutionBindingService(f.root, { resolveHost: f.resolveHost }); cleanups.push(() => service.dispose())
+  const key = { bindingId: f.input.bindingId, agentSessionId: f.input.agent.agentSessionId, createOperationId: f.input.agent.createOperationId }
+  expect(await service.admit(f.input)).toEqual(key); expect(f.resolveHost).not.toHaveBeenCalled(); expect(f.read().input).toEqual(f.input)
+  await service.dispose(); service = new AgentExecutionBindingService(f.root, { resolveHost: f.resolveHost })
+  expect(await service.inspect(f.input.bindingId, 'association')).toMatchObject({ continuation: key, association: { sourceRequestDigest: f.input.sourceRequestDigest,
+    agent: { executorId: f.input.agent.executorId, executorRevision: f.input.agent.executorRevision, workspacePath: f.input.agent.workspacePath } } })
+  await expect(service.admit({ ...f.input, agent: { ...f.input.agent, sourceAgentMuxNote: 'Changed Source context' } })).rejects.toMatchObject({ code: 'EXECUTION_BINDING_CONFLICT' })
+  expect(f.resolveHost).not.toHaveBeenCalled(); expect(await service.admit(f.input)).toEqual(key)
+  await service.continueOriginal(key)
+  expect(f.read().input).toEqual(f.input); expect(f.frontend.api.createHostAgentWithDelivery).toHaveBeenCalledOnce()
+  expect(f.executor.api.createPreparedTerminal).toHaveBeenCalledOnce(); expect(f.frontend.api.createPreparedTerminal).toHaveBeenCalledOnce()
+})
+it('admit and create serialize coherently in one lane without nested public calls or duplicate effects', async () => {
+  const f = await fixture(), entered = gate(), held = gate(), authorize = vi.fn(async () => { entered.release(); await held.promise; return undefined })
+  const service = new AgentExecutionBindingService(f.root, { resolveHost: f.resolveHost, authorize }); cleanups.push(() => service.dispose())
+  const admitted = service.admit(f.input); await entered.promise
+  const created = service.create(f.input)
+  expect(f.resolveHost).not.toHaveBeenCalled(); held.release()
+  const [key, result] = await Promise.all([admitted, created])
+  expect(key.agentSessionId).toBe(result.session.agentSessionId); expect(authorize).toHaveBeenCalledTimes(2)
+  expect(f.frontend.api.createHostAgentWithDelivery).toHaveBeenCalledOnce(); expect(f.frontend.api.createPreparedTerminal).toHaveBeenCalledOnce(); expect(f.executor.api.createPreparedTerminal).toHaveBeenCalledOnce()
+})
+it('direct admission refuses coerced Source identities and storage failure never produces a durable ACK or endpoint effect', async () => {
+  const f = await fixture(), service = new AgentExecutionBindingService(f.root, { resolveHost: f.resolveHost }); cleanups.push(() => service.dispose())
+  await expect(service.admit({ ...f.input, sourceRequestDigest: ['a'.repeat(64)] } as never)).rejects.toMatchObject({ code: 'EXECUTION_BINDING_CONFLICT' })
+  expect(await service.inspect(f.input.bindingId)).toBeNull()
+  io.target(join(f.root, 'bindings.sqlite')); io.fault('sync')
+  try { await expect(service.admit(f.input)).rejects.toThrow() } finally { io.reset() }
+  expect(f.resolveHost).not.toHaveBeenCalled(); expect(f.frontend.api.createHostAgentWithDelivery).not.toHaveBeenCalled()
+})

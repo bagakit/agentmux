@@ -21,7 +21,7 @@ const creation = () => dom.container.querySelector('[aria-label="Original creati
  * response delivery are leaves; no production writer or original task is run. */
 async function fixture(kind: 'writer' | 'prepare' = 'writer') {
   const source = await sourceCreationFixture(cleanup)
-  if (kind === 'writer') source.bindings.create.mockRejectedValueOnce(new AgentMuxError('The original execution coordinator already has a writer.', 'EXECUTION_OWNER_UNAVAILABLE'))
+  if (kind === 'writer') source.bindings.continueOriginal.mockRejectedValueOnce(new AgentMuxError('The original execution coordinator already has a writer.', 'EXECUTION_OWNER_UNAVAILABLE'))
   else source.pending()
   const receipt = await source.rpc.call('agent.open', source.input)
   const calls: Array<{ method: string; params: unknown; context: unknown }> = []
@@ -63,8 +63,8 @@ test.each(['writer', 'prepare'] as const)('the real Source %s failure is readabl
   expect(creation()?.textContent).toContain(code)
   expect(f.calls.filter(call => call.method === 'space.inspect')).toEqual([expect.objectContaining({ params: { target: { operationId: f.input.request.operationId } },
     context: expect.objectContaining({ runtimeFence: { runtimeId: 'runtime-b', ownerInstanceId: 'instance-b' } }) })])
-  expect(f.source.bindings.create).toHaveBeenCalledTimes(1)
-  expect(f.source.bindings.continueOriginal).not.toHaveBeenCalled(); expect(f.source.create).not.toHaveBeenCalled(); expect(f.source.agentInput).not.toHaveBeenCalled()
+  expect(f.source.bindings.admit).toHaveBeenCalledTimes(1)
+  expect(f.source.bindings.continueOriginal).toHaveBeenCalledTimes(1); expect(f.source.create).not.toHaveBeenCalled(); expect(f.source.agentInput).not.toHaveBeenCalled()
   expect(f.onContinue).not.toHaveBeenCalled()
   expect(useAppStore.getState().agentComposerDrafts['original-launcher']).toBe('Keep this newer private draft unsent')
   expect(useAppStore.getState().sessions).toEqual([f.healthy])
@@ -83,7 +83,7 @@ test('a newer observer failure leaves the original creation cause and request in
   await act(async () => button('Check original task').click())
   await vi.waitFor(() => expect(dom.container.textContent).toContain('Latest observation: Transport observation failed'))
   expect(creation()?.textContent).toContain('already has a writer')
-  expect(f.source.create).not.toHaveBeenCalled(); expect(f.source.bindings.continueOriginal).not.toHaveBeenCalled(); expect(f.onContinue).not.toHaveBeenCalled()
+  expect(f.source.create).not.toHaveBeenCalled(); expect(f.source.bindings.continueOriginal).toHaveBeenCalledTimes(1); expect(f.onContinue).not.toHaveBeenCalled()
 })
 
 test.each(['operation', 'session', 'runtime'] as const)('a foreign %s report cannot replace this original diagnosis or actions', async kind => {
@@ -132,6 +132,6 @@ test.each(['confirmed', 'retired'] as const)('an original %s Agent is not presen
   expect(creation()?.textContent).toContain('Earlier creation')
   expect(creation()?.textContent).toContain('EXECUTION_HELPER_UNAVAILABLE')
   if (kind === 'retired') expect(button('Continue original task')).toBeUndefined()
-  expect(f.source.bindings.continueOriginal).not.toHaveBeenCalled(); expect(f.source.agentInput).not.toHaveBeenCalled()
+  expect(f.source.bindings.continueOriginal).toHaveBeenCalledTimes(1); expect(f.source.agentInput).not.toHaveBeenCalled()
   expect(useAppStore.getState().sessions).toEqual([f.healthy])
 })

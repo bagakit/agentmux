@@ -34,7 +34,7 @@ it('the actual Source and CLI return the original binding before Agent creation 
   expect(report.agent).toBeNull()
   expect(report.execution).toEqual(initial.execution)
   expect(report.issues).toContainEqual(expect.objectContaining({ step: 'observation', code: 'AGENT_CREATION_UNKNOWN' }))
-  expect(f.bindings.create).toHaveBeenCalledTimes(1); expect(f.bindings.continueOriginal).not.toHaveBeenCalled()
+  expect(f.bindings.admit).toHaveBeenCalledTimes(1); expect(f.bindings.continueOriginal).toHaveBeenCalledTimes(1)
   expect(f.create).not.toHaveBeenCalled(); expect(f.agentInput).not.toHaveBeenCalled()
 })
 
@@ -49,7 +49,7 @@ it('a managed observer cannot obtain protected binding facts through Source insp
   expect(report?.issues).toContainEqual(expect.objectContaining({ step: 'observation', code: 'CONTROL_PERMISSION_DENIED' }))
   expect(report?.issues.some(item => item.code === 'CONTROL_PERMISSION_DENIED' && item.step === 'creation')).toBe(false)
   expect(f.bindings.inspect.mock.calls.length).toBe(count)
-  expect(f.bindings.create).toHaveBeenCalledTimes(1); expect(f.bindings.continueOriginal).not.toHaveBeenCalled(); expect(f.create).not.toHaveBeenCalled()
+  expect(f.bindings.admit).toHaveBeenCalledTimes(1); expect(f.bindings.continueOriginal).toHaveBeenCalledTimes(1); expect(f.create).not.toHaveBeenCalled()
 })
 
 it('the public Source codec refuses another creation inside either the original continuation or preparation failure', async () => {
@@ -62,7 +62,7 @@ it('the public Source codec refuses another creation inside either the original 
   const failure = changedFailure.issues.find(item => item.executionFailure)!
   failure.executionFailure!.reference.createOperationId = 'another-original-operation'
   expect(() => parseRpcControlResult('agent.open', changedFailure, f.input)).toThrow('another original creation')
-  expect(f.bindings.create).toHaveBeenCalledTimes(1); expect(f.create).not.toHaveBeenCalled(); expect(f.agentInput).not.toHaveBeenCalled()
+  expect(f.bindings.admit).toHaveBeenCalledTimes(1); expect(f.create).not.toHaveBeenCalled(); expect(f.agentInput).not.toHaveBeenCalled()
 })
 
 it('the public Source codec rejects a wrong-SID failure against a confirmed Agent even when the execution view is absent', async () => {
@@ -97,13 +97,13 @@ it('the public Source describes its actual owner and preserves complete CLI laun
   expect(f.frozen()?.agent).toMatchObject({ prompt, agentMuxNote: note, sourceAgentMuxNote: '  Source business context\n', launchOptions: { model: 'target-choice' }, cols: 117, rows: 39 })
   const original = structuredClone(f.frozen())
   await expect(f.rpc.call('agent.open', { ...wire, content: { ...wire.content, rows: 40 } })).rejects.toMatchObject({ code: 'SPACE_REQUEST_CONFLICT' })
-  expect(f.frozen()).toEqual(original); expect(f.bindings.create).toHaveBeenCalledTimes(1)
+  expect(f.frozen()).toEqual(original); expect(f.bindings.admit).toHaveBeenCalledTimes(1)
 })
 it('an old target creation handler cannot receive new Source fields after helper Start, while original reads stay independent', async () => {
   const f = await fixture()
   f.client.listHostExecutors.mockResolvedValueOnce({ runtimeId: 'runtime-d', executors: [{ executorId: 'd-executor', configRevision: 'd'.repeat(64) }] } as never)
   await expect(f.rpc.call('agent.open', f.input)).rejects.toMatchObject({ code: 'AGENT_OPEN_CONTRACT_UNCONFIRMED' })
-  expect(f.create).not.toHaveBeenCalled(); expect(f.bindings.create).not.toHaveBeenCalled()
+  expect(f.create).not.toHaveBeenCalled(); expect(f.bindings.admit).not.toHaveBeenCalled()
   expect(spatialAgentOpenRecord((await f.spatial.read())!.graph, f.input.operationId)).toBeNull()
   expect(await f.rpc.call('space.inspect', { target: { operationId: f.input.operationId } })).toMatchObject({ request: { known: false } })
   expect(f.input.operationId).toBe('source-create-operation')
@@ -129,8 +129,8 @@ it('public source agent.open freezes B placement and D execution separately, and
   const snapshot = await readSpaceSnapshot(f.rpc, { runtimeId: 'runtime-b', spaceId: f.folder.spaceId })
   expect(snapshot.scope.regions).toMatchObject([{ execution: { hostId: 'D-in-B', runtimeId: 'runtime-d', cwd: '/d/home' }, runId: 'original-d-run' }])
   await f.rpc.call('agent.open', f.input)
-  expect(f.bindings.create).toHaveBeenCalledTimes(1); expect(f.client.listHostExecutors).toHaveBeenCalledTimes(1)
-  expect(f.bindings.continueOriginal).not.toHaveBeenCalled()
+  expect(f.bindings.admit).toHaveBeenCalledTimes(1); expect(f.client.listHostExecutors).toHaveBeenCalledTimes(1)
+  expect(f.bindings.continueOriginal).toHaveBeenCalledTimes(1)
   expect(f.runtime.client.inspectAgentCreation).not.toHaveBeenCalled()
 })
 it('an explicit same-operation continuation uses only the original frozen binding while B placement stays independent of D home', async () => {
@@ -140,7 +140,7 @@ it('an explicit same-operation continuation uses only the original frozen bindin
   expect(admitted.executionBinding).toEqual({ bindingId: f.frozen()!.bindingId, agentSessionId: 'original-d-session', createOperationId: f.input.operationId })
   f.client.listHostExecutors.mockRejectedValue(Error('Current inventory cannot replace a frozen executor.'))
   expect(await f.rpc.call('agent.open', f.input)).toMatchObject({ outcome: 'opened', agent: { runId: 'original-d-run' } })
-  expect(f.bindings.create).toHaveBeenCalledTimes(1); expect(f.bindings.continueOriginal).toHaveBeenCalledTimes(1)
+  expect(f.bindings.admit).toHaveBeenCalledTimes(1); expect(f.bindings.continueOriginal).toHaveBeenCalledTimes(2)
   expect(f.client.listHostExecutors).toHaveBeenCalledTimes(1)
   expect(f.create).toHaveBeenCalledTimes(1)
 })
@@ -155,12 +155,12 @@ it('a started Agent with an incomplete binding continues the same public Host op
   expect(inspected.request?.report).toMatchObject({ outcome: 'partial', agent: first.agent })
   expect(inspected.request?.report?.issues).toContainEqual(expect.objectContaining({ step: 'observation', code: 'EXECUTION_READER_UNAVAILABLE' }))
   expect(inspected.request?.report?.issues.some(item => item.step === 'creation' && item.code === 'EXECUTION_READER_UNAVAILABLE')).toBe(false)
-  expect(f.bindings.continueOriginal).not.toHaveBeenCalled()
+  expect(f.bindings.continueOriginal).toHaveBeenCalledTimes(1)
   const result = await f.rpc.call('agent.open', structuredClone(f.input))
-  expect(f.bindings.continueOriginal).toHaveBeenCalledExactlyOnceWith(original.executionBinding, expect.anything())
+  expect(f.bindings.continueOriginal).toHaveBeenLastCalledWith(original.executionBinding, expect.anything())
   expect(result).toMatchObject({ outcome: 'opened', operationId: f.input.operationId,
     agent: { agentSessionId: first.agent!.agentSessionId, runId: first.agent!.runId }, to: first.to })
-  expect(f.bindings.create).toHaveBeenCalledTimes(1); expect(f.create).toHaveBeenCalledTimes(1)
+  expect(f.bindings.admit).toHaveBeenCalledTimes(1); expect(f.create).toHaveBeenCalledTimes(1)
   expect(f.client.listHostExecutors).toHaveBeenCalledTimes(1); expect(f.agentInput).not.toHaveBeenCalled()
   expect(spatialAgentOpenRecord((await f.spatial.read())!.graph, f.input.operationId)).toEqual(original)
 })
@@ -171,7 +171,7 @@ it('a binding observation failure keeps the started Agent and original partial r
   const result = await f.rpc.call('space.inspect', { target: { operationId: f.input.operationId } })
   expect(result.request?.report).toMatchObject({ outcome: 'partial', agent: first.agent, to: first.to })
   expect(result.request?.report?.issues).toContainEqual(expect.objectContaining({ message: 'Original binding observation is temporarily unavailable.' }))
-  expect(f.bindings.continueOriginal).not.toHaveBeenCalled(); expect(f.create).toHaveBeenCalledTimes(1)
+  expect(f.bindings.continueOriginal).toHaveBeenCalledTimes(1); expect(f.create).toHaveBeenCalledTimes(1)
   expect(f.agentInput).not.toHaveBeenCalled()
   expect((await f.spatial.read())!.graph.regions).toMatchObject([{ kind: 'agent', agentSessionId: first.agent!.agentSessionId, runId: first.agent!.runId }])
 })
@@ -186,7 +186,7 @@ it('a same-SID binding receipt for another creation operation cannot complete th
   const result = await f.rpc.call('space.inspect', { target: { operationId: f.input.operationId } })
   expect(result.request?.report).toMatchObject({ outcome: 'partial', agent: first.agent, to: first.to })
   expect(result.request?.report?.issues).toContainEqual(expect.objectContaining({ code: 'EXECUTION_INTENT_UNCONFIRMED' }))
-  expect(f.bindings.continueOriginal).not.toHaveBeenCalled(); expect(f.create).toHaveBeenCalledTimes(1)
+  expect(f.bindings.continueOriginal).toHaveBeenCalledTimes(1); expect(f.create).toHaveBeenCalledTimes(1)
   expect(f.agentInput).not.toHaveBeenCalled()
 })
 it('a changed original B Zone rejects only the replay and retains the admitted operation without dispatching a new binding', async () => {
@@ -195,16 +195,16 @@ it('a changed original B Zone rejects only the replay and retains the admitted o
   await f.spatial.commit({ expectedRevision: state.revision, graph: { ...state.graph, zones: state.graph.zones.map(zone => ({ ...zone, directoryPath: '/changed-b-project' })) } })
   const before = await readFile(f.spatial.path, 'utf8')
   await expect(f.rpc.call('agent.open', f.input)).rejects.toMatchObject({ code: 'SPACE_TARGET_CHANGED' })
-  expect(f.bindings.continueOriginal).not.toHaveBeenCalled(); expect(f.bindings.create).toHaveBeenCalledTimes(1)
+  expect(f.bindings.continueOriginal).toHaveBeenCalledTimes(1); expect(f.bindings.admit).toHaveBeenCalledTimes(1)
   expect(await readFile(f.spatial.path, 'utf8')).toBe(before)
 })
 it('a changed D Runtime and a managed self-grant cannot turn the retained Space into another execution target', async () => {
   const f = await fixture(); f.changeRuntime()
   await expect(f.rpc.call('agent.open', f.input)).rejects.toMatchObject({ code: 'RUNTIME_OWNER_MISMATCH' })
-  expect(f.bindings.create).not.toHaveBeenCalled(); expect((await f.spatial.read())!.graph.regions).toEqual([])
+  expect(f.bindings.admit).not.toHaveBeenCalled(); expect((await f.spatial.read())!.graph.regions).toEqual([])
   await expect(f.control({ schemaVersion: 5, requestId: f.input.operationId, operation: 'agent.open', ...f.input } as never,
     { transport: 'unix', principal: { kind: 'user', id: 'test-owner' }, caller: {} as never })).rejects.toMatchObject({ code: 'CONTROL_PERMISSION_DENIED' })
-  expect(f.bindings.create).not.toHaveBeenCalled()
+  expect(f.bindings.admit).not.toHaveBeenCalled()
 })
 
 it('a retained foreign creation without its original Runtime pin remains unconfirmed instead of reading a local same-SID creation', async () => {
@@ -213,7 +213,7 @@ it('a retained foreign creation without its original Runtime pin remains unconfi
     content:{kind:'new-agent',executorId:'d-executor',executionWorkspaceId:'d-original-workspace'},
     destination:{spaceId:f.folder.spaceId,zoneId:f.folder.zoneId,newTab:true},focus:false},agentSessionId:sid,
     execution:{hostId:'D-in-B',workspacePath:'/d/home',workspaceId:'d-original-workspace'},regionResource:{}})
-  vi.mocked(f.runtime.client.inspectAgentCreation).mockResolvedValue({kind:'agent',agentSessionId:sid,hostId:'local',providerId:'codex',executorId:'d-executor',workspacePath:'/d/home',run:{runId:'different-local-run'},hookBindingId:'private-binding',hookToken:'private-token',retiredRuns:[],createdAt:1,updatedAt:1,
+  vi.mocked(f.runtime.client.inspectAgentCreation).mockResolvedValue({kind:'agent',agentSessionId:sid,hostId:'local',providerId:'codex',executorId:'d-executor',workspacePath:'/d/home',run:{runId:'different-local-run'},retiredRuns:[],createdAt:1,updatedAt:1,
     creation:{createOperationId:operationId,createdRun:{runId:'different-local-run'},initialPrompt:'not-requested'}})
   const before=await readFile(f.spatial.path,'utf8'),result=await f.rpc.call('space.inspect',{target:{operationId}})
   expect(result.request?.report).toMatchObject({outcome:'unknown',agent:null,issues:[expect.objectContaining({code:'SPATIAL_CREATION_UNCONFIRMED'})]})
@@ -227,7 +227,7 @@ it('an empty optional Source context does not add a contract gate to the origina
   const f = await fixture('')
   f.client.listHostExecutors.mockResolvedValueOnce({runtimeId:'runtime-d',executors:[{executorId:'d-executor',configRevision:'d'.repeat(64)}]} as never)
   expect(await f.rpc.call('agent.open',f.input)).toMatchObject({outcome:'opened'})
-  expect(f.frozen()!.agent).not.toHaveProperty('sourceAgentMuxNote');expect(f.bindings.create).toHaveBeenCalledTimes(1)
+  expect(f.frozen()!.agent).not.toHaveProperty('sourceAgentMuxNote');expect(f.bindings.admit).toHaveBeenCalledTimes(1)
 })
 
 
@@ -246,7 +246,7 @@ it('the background local Host creator preserves the same ordinary fields without
   const result = await f.rpc.call('agent.open',{...f.input,content:{...content,...fields,prompt:'  original task\n'}})
   expect(result, JSON.stringify(result.issues)).toMatchObject({outcome:'opened'})
   expect(create).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({...fields,prompt:'  original task\n',sourceAgentMuxNote:'  Source business context\n'}))
-  expect(f.runtime.executionHost).not.toHaveBeenCalled();expect(f.bindings.create).not.toHaveBeenCalled()
+  expect(f.runtime.executionHost).not.toHaveBeenCalled();expect(f.bindings.admit).not.toHaveBeenCalled()
 })
 
 
@@ -257,7 +257,7 @@ it('an original launch with ordinary fields continues its frozen binding without
   const original = structuredClone(f.frozen());delete f.control.describe
   f.client.listHostExecutors.mockRejectedValue(Error('Current discovery cannot replace an original creation.'))
   expect(await f.rpc.call('agent.open',request)).toMatchObject({outcome:'opened',agent:{runId:'original-d-run'}})
-  expect(f.bindings.create).toHaveBeenCalledTimes(1);expect(f.bindings.continueOriginal).toHaveBeenCalledTimes(1);expect(f.frozen()).toEqual(original)
+  expect(f.bindings.admit).toHaveBeenCalledTimes(1);expect(f.bindings.continueOriginal).toHaveBeenCalledTimes(2);expect(f.frozen()).toEqual(original)
 })
 
 it('the actual Host admissions keep two same-SID same-Run creation pins distinct at the Source resolver', async () => {
@@ -277,6 +277,6 @@ it.each(['matching','missing','other-creation'] as const)('the public Source ret
   const report = result.request!.report!
   if (history === 'matching') expect(report).toMatchObject({ outcome: 'retired', to: null, agent: { agentSessionId: 'original-d-session', runId: 'original-d-run', createOperationId: f.input.operationId, retirement: { source: 'user', observedAt: 2 } } })
   else expect(report).toMatchObject({ outcome: 'unknown', agent: null, issues: expect.arrayContaining([expect.objectContaining({ code: 'AGENT_CREATION_UNCONFIRMED' })]) })
-  expect(f.create).toHaveBeenCalledTimes(1); expect(f.bindings.create).toHaveBeenCalledTimes(1)
-  expect(f.bindings.continueOriginal).not.toHaveBeenCalled(); expect(f.agentInput).not.toHaveBeenCalled()
+  expect(f.create).toHaveBeenCalledTimes(1); expect(f.bindings.admit).toHaveBeenCalledTimes(1)
+  expect(f.bindings.continueOriginal).toHaveBeenCalledTimes(1); expect(f.agentInput).not.toHaveBeenCalled()
 })
