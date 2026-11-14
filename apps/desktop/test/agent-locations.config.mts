@@ -14,7 +14,7 @@ const variants = {
   'persistent-card-action': { file: 'apps/desktop/src/renderer/src/components/FocusContextRow.tsx', before: '<div className="focus-context-card">{main}', after: '<div className="focus-context-card">{main}<button className="agent-locations">3 locations</button>' },
   'missing-details-action': { file: 'apps/desktop/src/renderer/src/components/AgentLocationsButton.tsx', before: 'return <><button', after: 'return null; return <><button' },
   'admission-bypass': { file: 'apps/desktop/src/renderer/src/store.ts', before: "if (options?.subject === null || options?.subject && (original?.control.kind !== 'agent' ||\n      original.control.hostId !== options.subject.hostId || original.control.agentSessionId !== options.subject.agentSessionId)) return false", after: 'if (false) return false' },
-  'drop-membership': { file: 'apps/desktop/src/renderer/src/store.ts', before: 'if (request.subject && execution?.hostId !== request.subject.hostId)', after: 'if (false && request.subject && execution?.hostId !== request.subject.hostId)' }
+  'drop-membership': { file: 'apps/desktop/src/renderer/src/store.ts', before: 'if (request.subject && (execution?.hostId !== request.subject.hostId || request.subject.runtimeId !== undefined && execution?.runtimeId !== request.subject.runtimeId))', after: 'if (false && request.subject && (execution?.hostId !== request.subject.hostId || request.subject.runtimeId !== undefined && execution?.runtimeId !== request.subject.runtimeId))' }
 } as const
 const mutation = process.env.AGENT_LOCATIONS_MUTANT as keyof typeof variants | undefined
 if (mutation && !variants[mutation]) throw new Error('Unknown Agent location mutation')

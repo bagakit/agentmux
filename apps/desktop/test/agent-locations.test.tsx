@@ -14,6 +14,7 @@ import * as storeOwner from '../src/renderer/src/store'
 import { GlobalFocusSurface } from '../src/renderer/src/components/GlobalFocusSurface'
 import { AgentRoster } from '../src/renderer/src/components/AgentRoster'
 import { FocusContextRow } from '../src/renderer/src/components/FocusContextRow'
+import { WorkspaceAgentRow } from '../src/renderer/src/components/WorkspaceAgentRow'
 import { SurfaceToolDock } from '../src/renderer/src/components/SurfaceToolDock'
 import { QuickSwitcher } from '../src/renderer/src/components/QuickSwitcher'
 import { api } from '../src/renderer/src/lib/api'
@@ -26,6 +27,7 @@ import * as navigation from '../src/renderer/src/lib/desktop-focus-navigation'
 import * as quickSwitch from '../src/renderer/src/lib/quick-switch'
 import { directoryIdentity, workspaceZoneId } from '../src/shared/space-addresses'
 import type { SessionLocationReference } from '../src/renderer/src/lib/desktop-focus-navigation'
+import type { AgentTakeoverPage } from '@agentmux/core/agent-takeover'
 
 const initial = useAppStore.getState(), id = 'original-agent'
 let root: Root, container: HTMLDivElement, overlay: HTMLDivElement
@@ -121,6 +123,59 @@ afterEach(async () => {
   for (const fixture of completed) while (fixture.pending.size) await Promise.allSettled([...fixture.pending])
   for (const fixture of completed) if (fixture.directory) await rm(fixture.directory, { recursive: true })
   container.remove(); overlay.remove(); useAppStore.setState(initial, true); vi.restoreAllMocks()
+})
+
+it('Takeover Source keeps the exact Runtime through the real chooser, rejects a rebound target and recovers in the same request', async () => {
+  const runtimeId = 'original-location-runtime', source = composerSession('source-for-takeover-detail')
+  const reference = { displayWorkspaceId: 'workspace', groupId: 'group-a', tabId: 'first', regionId: 'right' }
+  async function binding(value: string) {
+    await act(async () => {
+      await useAppStore.getState().retryWorkbenchSave()
+      const current = (await api.spatial.read())!, graph = structuredClone(current.graph)
+      for (const region of graph.regions) if (region.agentSessionId === id && region.execution) region.execution.runtimeId = value
+      await api.spatial.commit({ expectedRevision: current.revision, graph })
+      await rereadAgentRegionExecution({ tabId: reference.tabId, regionId: reference.regionId, agentSessionId: id })
+    })
+  }
+  await binding(runtimeId)
+  useAppStore.setState(state => ({ sessions: [...state.sessions, source] }))
+  const owner = { runtimeId, ownerInstanceId: 'original-instance', protocolVersion: 2 as const, processId: null, availability: 'connected' as const, ctxmux: null }
+  vi.spyOn(api.spatial, 'owner').mockResolvedValue({ owner })
+  vi.spyOn(api.sessions, 'owner').mockResolvedValue({ owner })
+  vi.spyOn(api.sessions, 'creation').mockResolvedValue({ kind: 'agent', agentSessionId: source.id, hostId: 'local', providerId: source.providerId,
+    executorId: source.executorId, workspacePath: source.workspacePath, run: source.control.run, retiredRuns: [], createdAt: 1, updatedAt: 1 })
+  vi.spyOn(api.sessions, 'takeovers').mockImplementation(async query => ({ owner: { runtimeId, ownerInstanceId: 'original-instance' },
+    direction: query.direction, subject: query.subject, nextCursor: null, coverage: { scope: 'selected-owner', history: 'recorded-takeovers' },
+    records: query.direction === 'incoming' ? [] : [{ requestId: 'original-takeover-record',
+      agent: { hostId: 'local', runtimeId, agentSessionId: id, run: composerSession(id).control.run }, phase: 'active', issue: null,
+      takeover: { source: { hostId: 'local', runtimeId, agentSessionId: source.id, run: source.control.run, organization: null },
+        destination: { owner: { runtimeId }, address: { spaceId: null, zoneId: null, workspaceId: 'workspace', ...reference }, organization: null }, nature: null } }]
+  } satisfies AgentTakeoverPage))
+  const context = { ...agentContextForSession(source, undefined, 'Original source', composerConfig.workspaces[0]),
+    access: { identity: { runtimeId, agentSessionId: source.id }, session: source, locations: [], select() {}, open() {}, refresh() {}, isCurrent: () => true } }
+  await dom.render(<><WorkspaceAgentRow context={context} selected={false} selecting={false} disabled={false} onToggle={() => {}} onOpen={() => { throw Error('Reading does not navigate') }} />{picker}</>)
+  const anchor = document.querySelector<HTMLButtonElement>('.focus-context')!
+  await act(async () => anchor.focus()); await key(anchor, 'ArrowDown')
+  await click(document.querySelector('.agent-information-reader__facts'))
+  await click([...document.querySelectorAll('.agent-information-details__tabs button')].find(button => button.textContent === 'Source'))
+  await vi.waitFor(() => expect([...document.querySelectorAll<HTMLButtonElement>('.agent-information-takeovers button')].some(button => button.textContent === 'Locate created Agent')).toBe(true))
+  await click([...document.querySelectorAll<HTMLButtonElement>('.agent-information-takeovers button')].find(button => button.textContent === 'Locate created Agent'))
+  const request = useAppStore.getState().sessionLocationRequest!, before = selected(), draft = useAppStore.getState().agentComposerDrafts
+  expect(request.subject).toEqual({ hostId: 'local', agentSessionId: id, runtimeId })
+  expect(choices()).toHaveLength(3)
+  await binding('foreign-rebound-runtime')
+  await click(choices().find(choice => choice.title.includes('"regionId":"right"')))
+  expect(selected()).toBe(before)
+  expect(useAppStore.getState().sessionLocationRequest?.requestId).toBe(request.requestId)
+  expect(document.querySelector('.quick-switch')?.textContent).toContain('binding at this location is unconfirmed')
+  expect(useAppStore.getState().agentComposerDrafts).toBe(draft)
+  await binding(runtimeId)
+  await click(choices().find(choice => choice.title.includes('"regionId":"right"')))
+  expect(selected()).toMatchObject({ workspaceId: reference.displayWorkspaceId, groupId: reference.groupId, tabId: reference.tabId, regionId: reference.regionId })
+  expect(useAppStore.getState().sessionLocationRequest).toBeNull()
+  expect(useAppStore.getState().sessions.find(session => session.id === id)?.control).toEqual(composerSession(id).control)
+  expect(useAppStore.getState().agentComposerDrafts).toBe(draft)
+  for (const call of lifecycle) expect(call).not.toHaveBeenCalled()
 })
 
 it('Focus explicitly reselects the second Region while a held occurrence stays intact until exact choice', async () => {
