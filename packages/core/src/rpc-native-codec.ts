@@ -1,3 +1,4 @@
+import { parseRpcAgentSession } from './agent-session-codec.js'
 import { parseCreationInspectParams, parseCreationResolveParams } from './agent-creation-resolution.js'
 import { parseCreationInspectionResult } from './agent-creation-inspection.js'
 import { isCaptureSequenceMethod, parseCaptureSequenceParams, parseCaptureSequenceResult } from './capture-sequence.js'
@@ -124,7 +125,7 @@ import { AgentMuxError, parseAgentMuxStorageFailure } from './errors.js'
 import { parseAgentSessionHistoryReadPage, type AgentSessionHistoryReadInput } from './session-history-reader.js'
 import { parseSessionHistoryResourceResult, type AgentSessionHistoryResourceParams } from './session-history-resource.js'
 import { parseHostedBootstrap } from './hosted-value.js'
-import { normalizeInteractionOperationReceipt, normalizeAgentSession, normalizeSessionHistoryMetadata, parseAgentCreationFact } from './agent-session-store.js'
+import { normalizeInteractionOperationReceipt, normalizeAgentSession, normalizeSessionHistoryMetadata, parseAgentCreationFact } from "./agent-session-codec.js";
 import { agentInteractionResponseUnavailableReason } from './agent-interaction-state.js'
 import { validateAgentMuxMessageEnvelope } from './agent-global-message-queue.js'
 import { agentPromptInputId, validateAgentPromptAdmissionIntent, validateAgentPromptCondition, validateAgentPromptInputKey } from './agent-prompt-condition.js'
@@ -190,48 +191,6 @@ function runRef(value: unknown): Record<string, unknown> { const run = record(va
 function issues(value: unknown, source = false): void {
   array(value, item => { const issue = record(item, source ? ['source', 'code', 'message', 'recovery'] : ['code', 'message', 'recovery'])
     string(issue.code); text(issue.message); string(issue.recovery); if (source) string(issue.source) })
-}
-export function parseRpcAgentSession(value: unknown): ReturnType<typeof normalizeAgentSession> {
-  const source = record(value)
-  if (Object.hasOwn(source, 'hookBindingId') || Object.hasOwn(source, 'hookToken') || Object.hasOwn(source, 'nativeActor') || Object.hasOwn(source, 'initialInput') || Object.hasOwn(source, 'executorInvocation')) fail()
-  try {
-    const session = normalizeAgentSession(source)
-    if (source.terminalFrontend !== undefined) session.terminalFrontend = parseTerminalFrontend(source.terminalFrontend, session.run)
-    if (source.turnUsage !== undefined) {
-      const usage = record(source.turnUsage)
-      if (usage.cumulative !== undefined && !isDeepStrictEqual(usage.cumulative, session.turnUsage?.cumulative)) fail()
-    }
-    if (source.nativeHandlePersistence !== undefined) {
-      if (!session.nativeHandle) fail()
-      member(source.nativeHandlePersistence, ['confirmed', 'unconfirmed'])
-      session.nativeHandlePersistence = source.nativeHandlePersistence as 'confirmed' | 'unconfirmed'
-    }
-    if (source.hookDeliveryObservation !== undefined) {
-      // One live delivery loss of this exact Run; a loss of another Run is not this Session's fact.
-      const loss = record(source.hookDeliveryObservation, ['run', 'since', 'accepted', 'code', 'reason'])
-      if (runRef(loss.run).runId !== session.run.runId || (loss.accepted !== false && loss.accepted !== 'unknown')) fail()
-      count(loss.since); string(loss.code); if (loss.reason !== undefined) text(loss.reason)
-      session.hookDeliveryObservation = structuredClone(loss) as NonNullable<typeof session.hookDeliveryObservation>
-    }
-    for (const field of ['currentActivity', 'mainSessionActivity'] as const) if (source[field] !== undefined) {
-      const activity = record(source[field], ['state', 'source', 'run', 'nativeSessionId', 'nativeTurnId',
-        'sourceId', 'sequence', 'hookReceiptId', 'observedAt', 'interruption', 'mainState', 'evidenceRevision'])
-      member(activity.state, ['active', 'idle', 'unknown']); member(activity.source, ['native-hook'])
-      if (activity.mainState !== undefined) member(activity.mainState, ['active', 'idle', 'unknown'])
-      if (runRef(activity.run).runId !== session.run.runId || session.nativeHandle?.kind !== 'provider' ||
-          activity.nativeSessionId !== session.nativeHandle.sessionId) fail()
-      for (const key of ['nativeSessionId', 'sourceId', 'hookReceiptId']) string(activity[key])
-      if (activity.state !== 'unknown' || activity.nativeTurnId !== undefined) string(activity.nativeTurnId)
-      count(activity.sequence); if (activity.sequence === 0) fail(); count(activity.observedAt)
-      if (activity.evidenceRevision !== undefined) { count(activity.evidenceRevision); if (activity.evidenceRevision === 0) fail() }
-      if (activity.interruption !== undefined) {
-        if (activity.state !== 'idle') fail()
-        member(activity.interruption, ['interrupted', 'not-interrupted'])
-      }
-      session[field] = structuredClone(activity) as NonNullable<typeof session.currentActivity>
-    }
-    return session
-  } catch { return fail() }
 }
 /** Prefix admission belongs to the service's full durable set. The client only
  * verifies that its canonical answer can be the exact requested identity. */

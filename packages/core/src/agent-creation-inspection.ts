@@ -1,6 +1,6 @@
-import { isDeepStrictEqual } from 'node:util'
-import { parseAgentCreationFact, normalizeSessionHistoryMetadata } from './agent-session-store.js'
-import { parseRpcAgentSession } from './rpc-native-codec.js'
+import { dequal } from 'dequal'
+import { parseAgentCreationFact, normalizeSessionHistoryMetadata } from "./agent-session-codec.js";
+import { parseRpcAgentSession } from "./agent-session-codec.js";
 import { parseCreationResolution, type AgentMuxCreationInspectParams, type AgentMuxCreationResolveParams } from './agent-creation-resolution.js'
 import { AgentMuxError } from './errors.js'
 import { rpcRecord } from './rpc-data.js'
@@ -18,14 +18,14 @@ export function parseCreationInspection(value: unknown, target?: string | { crea
     if (r.source !== 'user' || typeof run.runId !== 'string' || !run.runId || !Number.isSafeInteger(r.observedAt) || Number(r.observedAt) < 0 ||
         typeof r.agentSessionId !== 'string' || !r.agentSessionId || typeof r.hostId !== 'string' || !r.hostId || !r.history) invalid()
     const history = normalizeSessionHistoryMetadata(r.history)
-    if (!isDeepStrictEqual(history, r.history)) invalid()
+    if (!dequal(history, r.history)) invalid()
     result = structuredClone(r) as unknown as AgentMuxAgentCreationInspection
   } else {
     const r = rpcRecord(source, ['kind', 'agentSessionId', 'providerId', 'executorId', 'hostId', 'workspacePath', 'creation', 'resolution', 'observation'])
     if (!['prepared-agent-creation', 'closed-agent-creation'].includes(String(r.kind)) ||
         ['agentSessionId', 'providerId', 'executorId', 'hostId', 'workspacePath'].some(key => typeof r[key] !== 'string' || !r[key] || /[\0\r\n]/u.test(String(r[key])))) invalid()
     const creation = parseAgentCreationFact(r.creation)
-    if (!isDeepStrictEqual(creation, r.creation) || creation.createdRun || creation.initialInputKey || creation.resolution) invalid()
+    if (!dequal(creation, r.creation) || creation.createdRun || creation.initialInputKey || creation.resolution) invalid()
     const receipt = r.resolution === undefined ? undefined : parseCreationResolution(r.resolution)
     if (r.kind === 'closed-agent-creation' ? receipt?.outcome !== 'fenced' : receipt && receipt.outcome !== 'pending') invalid()
     if (receipt && (receipt.agentSessionId !== r.agentSessionId || receipt.createOperationId !== creation.createOperationId)) invalid()

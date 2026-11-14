@@ -18,7 +18,7 @@ import { agentPromptNotApplied } from '../agent-prompt-condition.js'
 import { sameRun } from '../agent-session-identity.js'
 import { AgentMuxError } from '../errors.js'
 import { executorUnavailableError } from '../executable-probe.js'
-import { agentLifecycleOperationIdentity } from '../agent-session-store.js'
+import { agentLifecycleOperationIdentity } from "../agent-session-identity.js";
 import { normalizeAgentContinuityMessageInput, normalizeAgentContinuityPolicy, DEFAULT_AGENT_CONTINUITY_CONTINUATION, type AgentMuxContinuityOperation, type AgentMuxAgentContinuityInput, type AgentMuxAgentContinuityResult } from './continuity-contract.js'
 import { decideAgentSessionContinuity, agentContinuityAdmission, agentSessionHasNoNativeConversation } from './continuity-policy.js'
 import type { AgentCapabilitySnapshot, AgentMuxRun, AgentMuxStoredAgentSession } from '../types.js'

@@ -1,3 +1,5 @@
+import { sha256 } from '@noble/hashes/sha2.js'
+import { base64urlnopad } from '@scure/base'
 import { agentHasActiveSubagents, subagentScopeMatches } from './agent-subagent-state.js'
 import { canonicalHookLifecycleEvent } from './agent-hook-event.js'
 import type { AgentHookReceipt, AgentMuxAgentSession, AgentMuxRunRef, AgentMuxStoredAgentSession, AgentNativeSessionHandle } from './types.js'
@@ -73,4 +75,8 @@ export function agentTurnEndEvidence(session: Pick<AgentMuxAgentSession,
 export function agentTurnEndBoundary(session: Parameters<typeof agentTurnEndEvidence>[0]): ReturnType<typeof agentTurnEndEvidence> {
   return session.terminalPromptReadiness?.consumedBySubmissionId === undefined
     ? agentTurnEndEvidence(session) : undefined
+}
+
+export function agentLifecycleOperationIdentity(kind: 'create' | 'resume' | 'stop' | 'reopen' | 'restart', agentSessionId: string, requestedOperationId: string): string {
+  return base64urlnopad.encode(sha256(new TextEncoder().encode(JSON.stringify(['agentmux-agent-lifecycle-v1', kind, agentSessionId, requestedOperationId]))))
 }

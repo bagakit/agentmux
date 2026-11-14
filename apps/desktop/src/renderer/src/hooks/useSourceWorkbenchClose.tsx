@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
-import { mintObjectId, spaceCloseDecisions, type SpaceClosePrepare, type SpaceCloseReceipt } from '@agentmux/core'
+import { mintObjectId } from '@agentmux/core/object-id'
+import { spaceCloseDecisions, type SpaceClosePrepare, type SpaceCloseReceipt } from '@agentmux/core/space-close'
 import type { SourceWorkbenchCloseDestination, SourceWorkbenchCloseLocations, SourceWorkbenchCloseMember } from '../../../shared/source-workbench-close'
 import { sourceWorkbenchCloseMemberMatches } from '../../../shared/source-workbench-close'
 import { api } from '../lib/api'

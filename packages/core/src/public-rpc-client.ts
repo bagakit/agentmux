@@ -37,7 +37,8 @@ import { agentMuxControlTimeoutMs } from './control.js'
 import { defaultAgentMuxControlSocketPath } from './runtime-paths.js'
 import { rpcRecord, rpcString } from './rpc-business-codec.js'
 import { parseRpcControlResult } from './rpc-business-codec.js'
-import { parseRpcNativeResult, parseRpcAgentSession, rpcSessionTargetMatches } from './rpc-native-codec.js'
+import { parseRpcNativeResult, rpcSessionTargetMatches } from './rpc-native-codec.js';
+import { parseRpcAgentSession } from "./agent-session-codec.js";
 import { parseMetricsObservation } from './metrics.js'
 import { parseToolkitSnapshot } from './toolkit.js'
 import { classifyReplayGap } from './ctxmux-replay-gap.js'

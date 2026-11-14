@@ -17,7 +17,8 @@ import { sameRun } from '../agent-session-identity.js'
 import { type CtxmuxAdapterRun } from '../ctxmux-run-adapter.js'
 import { AgentMuxError } from '../errors.js'
 import { parseMoteMainEntrySource } from '../mote/main-entry-source.js'
-import { agentLifecycleOperationIdentity, type AgentMuxLifecycleReservation } from '../agent-session-store.js'
+import { type AgentMuxLifecycleReservation } from '../agent-session-store.js';
+import { agentLifecycleOperationIdentity } from "../agent-session-identity.js";
 import { normalizeAgentContinuityPolicy, parseAgentContinuityTrigger, type AgentMuxContinuityOperation, type AgentMuxAgentContinuityInput, type AgentMuxAgentContinuityResult } from './continuity-contract.js'
 import { parseAgentContinuityControlInput, sameAgentContinuityControlInput, type AgentMuxContinuityControlInput, type AgentMuxContinuityControlReceipt, type AgentMuxContinuityControlResult } from './control-contract.js'
 import type { AgentMuxAgentSession, AgentMuxRunRef, AgentMuxStoredAgentSession } from '../types.js'

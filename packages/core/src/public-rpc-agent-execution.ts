@@ -6,7 +6,7 @@ import { parseAgentExecutionNotices } from './agent-execution-helper.js'
 import { rpcRecord } from './rpc-data.js'
 import { normalizeLaunchOptionSelection } from './agent-launch-option.js'
 import { parseAgentNativeResumeSource } from './agent-native-sessions.js'
-import { parseAgentCreationSpatialIntent } from './agent-session-store.js'
+import { parseAgentCreationSpatialIntent } from "./agent-session-codec.js";
 import { parseAgentMuxCreationAdmission } from './agent-creation-admission.js'
 import type { AgentExecutionOpenInput, AgentExecutionInspection, AgentExecutionBindingObservation } from './agent-execution-coordinator.js'
 

@@ -20,7 +20,8 @@ import { AGENT_TERMINAL_HANDSHAKE_FAILED } from '../agent-terminal-handshake-out
 import { sameRun } from '../agent-session-identity.js'
 import { type CtxmuxAdapterRun } from '../ctxmux-run-adapter.js'
 import { AgentMuxError } from '../errors.js'
-import { agentLifecycleOperationIdentity, reopenedPriorRuns, type AgentMuxLifecycleReservation, type AgentMuxPreparedResumeDispatch } from '../agent-session-store.js'
+import { reopenedPriorRuns, type AgentMuxLifecycleReservation, type AgentMuxPreparedResumeDispatch } from '../agent-session-store.js';
+import { agentLifecycleOperationIdentity } from "../agent-session-identity.js";
 import { normalizeAgentContinuityPolicy, type AgentMuxContinuityOperation, type AgentMuxAgentContinuityRunEvidence, type AgentMuxAgentContinuityInput, type AgentMuxAgentContinuityResult } from './continuity-contract.js'
 import { type AgentHookBinding } from '../hook-server.js'
 import type { AgentCapabilitySnapshot, AgentLaunchPromptInputPlan, AgentMuxAgentSession, AgentPromptMessageContent, AgentMuxRunRef, AgentMuxStoredAgentSession } from '../types.js'

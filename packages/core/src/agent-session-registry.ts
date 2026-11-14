@@ -8,23 +8,8 @@ import { isDeepStrictEqual } from 'node:util'
 import { cloneSession } from './agent-session-identity.js'
 import { resolveAgentSessionId } from './agent-session-id.js'
 import type { AgentCapabilityBinding } from './agent-capability.js'
-import {
-  loadAgentSessionMetadata,
-  agentSessionMetadata,
-  AgentMuxSessionDurabilityError,
-  agentLifecycleOperationIdentity,
-  normalizeStoredAgentSession,
-  reopenedPriorRuns,
-  stopRetiredRuns,
-  stoppablePreparedResume,
-  type AgentMuxAgentSessionStore,
-  type AgentMuxMetadataTimelineResult,
-  type AgentMuxLifecycleReservation,
-  type AgentMuxPreparedCreation,
-  type AgentMuxPreparedResumeDispatch,
-  type AgentMuxRecoverableStopOperation,
-  type AgentMuxRetiredAgentSession
-} from './agent-session-store.js'
+import { loadAgentSessionMetadata, agentSessionMetadata, AgentMuxSessionDurabilityError, normalizeStoredAgentSession, reopenedPriorRuns, stopRetiredRuns, stoppablePreparedResume, type AgentMuxAgentSessionStore, type AgentMuxMetadataTimelineResult, type AgentMuxLifecycleReservation, type AgentMuxPreparedCreation, type AgentMuxPreparedResumeDispatch, type AgentMuxRecoverableStopOperation, type AgentMuxRetiredAgentSession } from './agent-session-store.js';
+import { agentLifecycleOperationIdentity } from "./agent-session-identity.js";
 import type {
   AgentMuxRunRef,
   AgentMuxAgentSession,

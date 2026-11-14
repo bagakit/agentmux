@@ -296,3 +296,7 @@ export type { AgentInputInitializationObservation } from './agent-initialization
 export type { AgentNativeSubagents, AgentSubagentSession } from './agent-subagent-state.js'
 
 export * from './capture-sequence.js'
+
+export { normalizeAgentSession, normalizeInteractionOperationReceipt, normalizeSessionHistoryMetadata, parseAgentCreationFact, parseAgentCreationSpatialIntent, normalizeAgentInteractionRequest } from './agent-session-codec.js'
+export { agentLifecycleOperationIdentity } from './agent-session-identity.js'
+export { parseCumulativeUsage } from './agent-cumulative-usage.js'

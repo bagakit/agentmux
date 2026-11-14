@@ -26,7 +26,7 @@ export type AgentMuxCreationResolution = {
 } & ({ outcome: 'pending' } | { outcome: 'retained'; retainedRun: AgentMuxRunRef } | { outcome: 'fenced' })
 
 const invalid = (): never => { throw new AgentMuxError('Creation recovery requires the exact original operation, optional Session, and a distinct control operation.', 'INVALID_CREATION_RESOLUTION') }
-const id = (value: unknown): value is string => typeof value === 'string' && !!value.trim() && Buffer.byteLength(value) <= 512 && !/[\0\r\n]/u.test(value)
+const id = (value: unknown): value is string => typeof value === 'string' && !!value.trim() && new TextEncoder().encode(value).byteLength <= 512 && !/[\0\r\n]/u.test(value)
 export function parseCreationInspectParams(value: unknown): AgentMuxCreationInspectParams {
   const r = rpcRecord(value, ['hostId', 'createOperationId', 'agentSessionId'], 'INVALID_CREATION_RESOLUTION')
   if (!id(r.hostId) || !id(r.createOperationId) || r.agentSessionId !== undefined && !id(r.agentSessionId)) invalid()

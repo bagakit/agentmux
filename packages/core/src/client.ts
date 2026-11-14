@@ -206,19 +206,9 @@ import { readRecordedFile, readRecordedImage, readRecordedMarkdownImage } from '
 import { nativeContentSnapshotBacking, nativeContentSnapshotBacked, isNativeContentReference, nativeContentNeedsRevalidation, readNativeContentResource, revalidateNativeContentReference } from './native-history-content.js'
 import { readAgentSessionHistory, type AgentSessionHistoryReadInput, type AgentSessionHistoryReadPage } from './session-history-reader.js'
 import { deriveAgentSessionId, mintAgentSessionId } from './agent-session-id.js'
-import {
-  normalizeAgentInteractionRequest,
-  AgentMuxFileAgentSessionStore,
-  AgentMuxSessionDurabilityError,
-  loadAgentSessionMetadata,
-  agentLifecycleOperationIdentity,
-  parseAgentCreationSpatialIntent,
-  loadSessionHistorySources,
-  type AgentMuxAgentSessionStore,
-  type AgentMuxMetadataTimelineResult,
-  type AgentMuxLifecycleReservation,
-  type AgentMuxPreparedCreation
-} from './agent-session-store.js'
+import { AgentMuxFileAgentSessionStore, AgentMuxSessionDurabilityError, loadAgentSessionMetadata, loadSessionHistorySources, type AgentMuxAgentSessionStore, type AgentMuxMetadataTimelineResult, type AgentMuxLifecycleReservation, type AgentMuxPreparedCreation } from './agent-session-store.js';
+import { normalizeAgentInteractionRequest, parseAgentCreationSpatialIntent } from "./agent-session-codec.js";
+import { agentLifecycleOperationIdentity } from "./agent-session-identity.js";
 import {
   AgentMuxAgentSessionRegistry,
   type AgentMuxAgentSessionLookup
