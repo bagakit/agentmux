@@ -398,12 +398,7 @@
 .session-record-delete .danger-button:hover:not(:disabled) { background: color-mix(in srgb, var(--red) 22%, var(--surface-0)); }
 
 /* Separate hit targets retain the original full card and its primary action. */
-.agent-locations { display: inline-flex; align-items: center; justify-content: center; gap: 3px; flex: none; min-width: 34px; min-height: 22px; padding: 2px 5px; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-3); font-size: var(--fs-micro); font-variant-numeric: tabular-nums; cursor: pointer; }
+.agent-locations { display: flex; align-items: center; gap: var(--sp-2); width: 100%; min-height: 30px; margin: var(--sp-2) 0; padding: var(--sp-1) var(--sp-2); border: 1px solid var(--border); border-radius: var(--radius-sm); background: transparent; color: var(--text-2); font-size: var(--fs-sm); font-variant-numeric: tabular-nums; text-align: left; cursor: pointer; }
+.agent-locations > span:last-child { margin-left: auto; color: var(--text-3); font-size: var(--fs-xs); }
 .agent-locations:hover, .agent-locations[data-highlighted] { background: var(--surface-3); color: var(--text); }
 .agent-locations:focus-visible { outline: 1px solid var(--green); outline-offset: -1px; }
-.focus-context-card--locations { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; }
-.focus-context-card--locations > .agent-locations { margin: var(--sp-1) 3px 0 0; }
-.focus-context-card--locations > .agent-operation-feedback { grid-column: 1 / -1; }
-.focus-context-card--locations .focus-goal__trigger { right: calc(var(--sp-2) + 58px); }
-.agent-roster__entry { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; }
-.agent-roster__entry > .agent-locations { margin: var(--sp-2) 3px 0 0; }

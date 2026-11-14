@@ -1,16 +1,32 @@
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
-import * as DropdownMenu from './HoverDropdownMenu'
-import { useAppStore } from '../store'
+import { useMemo, useState } from 'react'
+import { agentRegionExecution, agentRegionLocationBindings, agentRegionLocationsKnown, useAppStore } from '../store'
+import { sessionWorkbenchLocationCounts, workbenchSelectionCatalog } from '../lib/desktop-focus-navigation'
+import { workbenchNavigationTabs } from '../lib/workbench-navigation-catalog'
+import type { FocusContext } from '../lib/focus-context'
 
 const LocationIcon = semanticIconComponent('navigation.space')
 
-/** A disclosure of original display facts, never Session or Run control. */
-export function AgentLocationsButton({ sessionId, name, count, menu = false, beforeOpen }: {
-  sessionId: string; name: string; count?: number | undefined; menu?: boolean; beforeOpen?: () => void
+/** Mounted by Source details only; original display facts never control a Run. */
+export function AgentLocationsButton({ context, subject = context.control, beforeOpen }: {
+  context: FocusContext; subject?: { hostId: string; agentSessionId: string } | undefined; beforeOpen?: () => void
 }) {
-  const label = `${name} · ${count === undefined ? 'locations unconfirmed' : `${count} ${count === 1 ? 'location' : 'locations'}`} · Choose location`
-  const open = () => { beforeOpen?.(); useAppStore.getState().requestSessionLocations(sessionId) }
-  const content = <><LocationIcon size={12} aria-hidden="true" /><span>{count ?? '…'}</span></>
-  return menu ? <DropdownMenu.Item className="agent-locations" aria-label={label} title={label} onSelect={open}>{content}</DropdownMenu.Item>
-    : <button type="button" className="agent-locations" aria-label={label} title={label} onClick={open}>{content}</button>
+  const [issue, setIssue] = useState<string | null>(null)
+  const tabs = useAppStore(state => workbenchNavigationTabs(state.tabs))
+  const catalog = useAppStore(workbenchSelectionCatalog)
+  const known = useAppStore(agentRegionLocationsKnown)
+  const bindings = useAppStore(agentRegionLocationBindings)
+  const hostId = subject?.hostId ?? context.hostId, agentSessionId = subject?.agentSessionId
+  const observed = useMemo(() => sessionWorkbenchLocationCounts(tabs, catalog,
+    id => id === context.id && agentSessionId ? { hostId, agentSessionId } : null, agentRegionExecution).get(context.id),
+  [tabs, catalog, bindings, context.id, hostId, agentSessionId])
+  const count = known && agentSessionId && observed !== null ? observed ?? 0 : undefined
+  const quantity = count === undefined ? 'Locations unconfirmed' : `${count} ${count === 1 ? 'location' : 'locations'}`
+  const label = `${context.name} · ${quantity.toLowerCase()} · Choose location`
+  return <><button type="button" className="agent-locations" aria-label={label} onClick={() => {
+    if (useAppStore.getState().requestSessionLocations(context.id, { subject: subject ?? null })) {
+      setIssue(null); beforeOpen?.()
+    } else setIssue('The original Agent identity is no longer confirmed. This reading is kept; reopen the Agent’s current details to choose its location.')
+  }}><LocationIcon size={14} aria-hidden="true" /><span>{quantity}</span><span>Choose location</span></button>
+  {issue ? <p role="status">{issue}</p> : null}</>
 }

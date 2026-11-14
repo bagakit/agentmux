@@ -1,13 +1,8 @@
-import { sessionPresentationById } from '../lib/session-presentation'
-import { useMemo } from 'react'
-import { AgentLocationsButton } from './AgentLocationsButton'
-import { workbenchSelectionCatalog, sessionWorkbenchLocationCounts } from '../lib/desktop-focus-navigation'
-import { workbenchNavigationTabs } from '../lib/workbench-navigation-catalog'
 import { scratchTopicsForConfig } from '../lib/scratch-topic-snapshots'
 import * as ContextMenu from '@radix-ui/react-context-menu'
 import * as DropdownMenu from './HoverDropdownMenu'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
-import { agentRegionExecution, agentRegionLocationBindings, agentRegionLocationsKnown, useAppStore } from '../store'
+import { useAppStore } from '../store'
 import { buildAgentRoster, rowRiskTier, type RosterRow } from '../lib/agent-roster'
 import { buildAgentTree, type AgentTreeFilter } from '../lib/agent-tree'
 import { agentRosterMenuActions } from '../lib/agent-roster-menu'
@@ -48,11 +43,9 @@ function stateFor(row: RosterRow): ReturnType<typeof statusDotTier> {
 export function RosterRowView({
   row,
   onSelect,
-  reportError,
-  locationCount
+  reportError
 }: {
   row: RosterRow
-  locationCount?: number | undefined
   onSelect: (sessionId: string) => void
   reportError: (error: unknown) => void
 }) {
@@ -70,7 +63,7 @@ export function RosterRowView({
   return (
     // 右键点这一行就寻址这一个 Agent——Roster 恰恰最该有寻址/交接入口，不必先切到分屏格。
     // 左键仍走 DropdownMenu.Item 的 onSelect（导航到该 Session）；右键交给 ContextMenu。
-    <div className="agent-roster__entry"><ContextMenu.Root>
+    <ContextMenu.Root>
       <ContextMenu.Trigger asChild>
         <DropdownMenu.Item
           className="agent-roster__row"
@@ -145,7 +138,7 @@ export function RosterRowView({
           ))}
         </ContextMenu.Content>
       </DocumentOverlayPortal>
-    </ContextMenu.Root><AgentLocationsButton sessionId={row.sessionId} name={row.label} count={locationCount} menu /></div>
+    </ContextMenu.Root>
   )
 }
 
@@ -154,20 +147,6 @@ function AgentRosterContents() {
   const providerCatalog = useAppStore((state) => state.providerCatalog)
   const selectSession = useAppStore((state) => state.selectSession)
   const reportError = useAppStore((state) => state.reportError)
-  const catalog = useAppStore(workbenchSelectionCatalog)
-  const tabs = useAppStore(state => workbenchNavigationTabs(state.tabs))
-  const known = useAppStore(agentRegionLocationsKnown)
-  const bindings = useAppStore(agentRegionLocationBindings)
-  const subjectKey = sessions.filter(session => session.kind === 'agent').map(session => JSON.stringify([
-    session.id, session.control.hostId, session.control.kind === 'agent' ? session.control.agentSessionId : null
-  ])).sort().join('\n')
-  const locationCounts = useMemo(() => {
-    const subjects = sessionPresentationById(sessions)
-    return sessionWorkbenchLocationCounts(tabs, catalog, id => {
-      const original = subjects.get(id)
-      return original?.control.kind === 'agent' ? original.control : null
-    }, agentRegionExecution)
-  }, [tabs, catalog, bindings, subjectKey])
   const rows = buildAgentRoster({ sessions, providerCatalog })
   return <>
     <div className="agent-roster__heading">
@@ -175,10 +154,7 @@ function AgentRosterContents() {
       <span className="agent-roster__heading-count">{rows.length}</span>
     </div>
     <div className="agent-roster__list">
-      {rows.map(row => {
-        const count = locationCounts.get(row.sessionId)
-        return <RosterRowView key={row.sessionId} row={row} onSelect={selectSession} reportError={reportError} locationCount={known && count !== null ? count ?? 0 : undefined} />
-      })}
+      {rows.map(row => <RosterRowView key={row.sessionId} row={row} onSelect={selectSession} reportError={reportError} />)}
     </div>
   </>
 }

@@ -1392,7 +1392,7 @@ export type AppState = GitReadingActions & {
   /** Whether the original display selection was committed. Refusal preserves the current context.
    * `keepSurface` places and selects the same occurrence without leaving the current main surface (Focus shows it in place). */
   sessionLocationRequest: { requestId: string; sessionId: string; label: string; groupId?: string; keepSurface?: boolean; subject?: { hostId: string; agentSessionId: string }; issue?: string } | null
-  requestSessionLocations(sessionId: string, options?: { keepSurface?: boolean }): void
+  requestSessionLocations(sessionId: string, options?: { keepSurface?: boolean; subject?: { hostId: string; agentSessionId: string } | null }): boolean
   dismissSessionLocationRequest(requestId: string): void
   chooseSessionLocation(requestId: string, reference: SessionLocationReference): boolean
   selectSession(id: string, tabGroupId?: string, options?: { keepSurface?: boolean; reference?: SessionLocationReference }): boolean
@@ -7547,10 +7547,15 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   },
   requestSessionLocations(sessionId, options) {
     const current = get(), original = sessionPresentationById(current.sessions).get(sessionId)
+    // A held reading names its original Agent, even if this Renderer alias was reused.
+    // Refuse only the mismatched navigation; existing content, input and Runs stay available.
+    if (options?.subject === null || options?.subject && (original?.control.kind !== 'agent' ||
+      original.control.hostId !== options.subject.hostId || original.control.agentSessionId !== options.subject.agentSessionId)) return false
     set({ sessionLocationRequest: { requestId: mintObjectId(), sessionId, label: original?.label ?? sessionId,
       keepSurface: options?.keepSurface ?? current.mainSurface === 'agents',
       ...(original?.control.kind === 'agent' ? { subject: { hostId: original.control.hostId, agentSessionId: original.control.agentSessionId } } : {}),
       ...(!agentRegionLocationsKnown() ? { issue: 'Location sources are not confirmed yet. The original Agent and workface are kept.' } : {}) } })
+    return true
   },
   dismissSessionLocationRequest(requestId) {
     if (get().sessionLocationRequest?.requestId === requestId) set({ sessionLocationRequest: null })

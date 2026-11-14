@@ -27,6 +27,7 @@ import { observeAgentSession } from '../lib/agent-observation'
 import { currentConversationSpeakerMetadata } from '../lib/conversation-sender-details'
 import { usePathDisplay } from '../hooks/usePathDisplay'
 import { AgentInformationDetails, AgentInformationSummary, type AgentInformationTab } from './AgentInformationDetails'
+import { AgentLocationsButton } from './AgentLocationsButton'
 import { FocusContextStateMark } from './FocusContextState'
 import { ConversationMessageAvatar } from './ConversationMessageAvatar'
 import { WorkbenchTabGlyph } from './WorkbenchTopology'
@@ -255,6 +256,9 @@ export function AgentInformationReader({ request: opening }: { request: PreviewR
   const displayPath = usePathDisplay(), path = displayPath(context.workspacePath, context.hostId)
   const source = <>
     <h3>Status and source</h3><p>{currentContext.detail}</p>
+    {context.kind === 'agent' ? <AgentLocationsButton context={context} subject={request.control ?? request.bookmark} beforeOpen={() => {
+      if (!request.pinned) { request.restoreFocus(); agentInformationPreview.dismiss(request.token) }
+    }} /> : null}
     {affiliation?.mote ? <p>Mote · {affiliation.mote.name}</p> : affiliation?.project ? <p>Project · {affiliation.project.name}</p> : <p>Project or Mote affiliation is not confirmed. The Executor identity is retained.</p>}
     {currentContext.detail !== context.detail ? <p>At opening: {context.detail}</p> : null}
     <dl className="agent-information-reader__source">
