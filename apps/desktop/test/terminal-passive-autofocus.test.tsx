@@ -12,9 +12,15 @@ import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { TerminalView } from '../src/renderer/src/components/TerminalView'
+import { terminalResourceOwnerCounts } from '../src/renderer/src/lib/terminal-resource-owners'
 
 // Native parser, buffers, modes and viewport methods are real; DOM paint/addons and Run boundary are not.
-const fixture = vi.hoisted(() => ({ terminals: [] as BrowserTerminal[], receive: null as ((event: RuntimeEvent) => void) | null, keyHandler: null as ((event: KeyboardEvent) => boolean) | null }))
+const fixture = vi.hoisted(() => ({
+  terminals: [] as BrowserTerminal[], receive: null as ((event: RuntimeEvent) => void) | null,
+  keyHandler: null as ((event: KeyboardEvent) => boolean) | null,
+  searchActivations: vi.fn(), searchDisposals: vi.fn(), searchSubscriptions: vi.fn(),
+  searchUnsubscriptions: vi.fn(), findNext: vi.fn()
+}))
 vi.mock('@xterm/xterm', async () => {
   const { Terminal } = await vi.importActual<typeof import('@xterm/xterm')>('@xterm/xterm')
   return { Terminal: class extends Terminal {
@@ -32,7 +38,22 @@ vi.mock('@xterm/xterm', async () => {
   } }
 })
 vi.mock('@xterm/addon-fit', () => ({ FitAddon: class { activate() {} dispose() {} fit() {} proposeDimensions() { return { cols: 80, rows: 24 } } } }))
-vi.mock('@xterm/addon-search', () => ({ SearchAddon: class { activate() {} dispose() {} onDidChangeResults() { return { dispose() {} } } } }))
+vi.mock('@xterm/addon-search', () => ({ SearchAddon: class {
+  private listener?: (event: { resultIndex: number; resultCount: number }) => void
+  activate(terminal: BrowserTerminal) { fixture.searchActivations(terminal) }
+  dispose() { fixture.searchDisposals() }
+  onDidChangeResults(listener: NonNullable<typeof this.listener>) {
+    fixture.searchSubscriptions()
+    this.listener = listener
+    return { dispose: () => { delete this.listener; fixture.searchUnsubscriptions() } }
+  }
+  findNext(query: string) {
+    fixture.findNext(query)
+    this.listener?.({ resultIndex: 0, resultCount: 8 })
+    return true
+  }
+  clearDecorations() {}
+} }))
 vi.mock('@xterm/addon-web-links', () => ({ WebLinksAddon: class { activate() {} dispose() {} } }))
 vi.mock('@xterm/addon-webgl', () => ({ WebglAddon: class { activate() {} dispose() {} onContextLoss() { return { dispose() {} } } } }))
 vi.mock('../src/renderer/src/lib/terminal-viewport-sync', () => ({ TerminalViewportSynchronizer: class {
@@ -70,6 +91,8 @@ const lines = Array.from({ length: 600 }, (_, i) => `private-${i}\r\n`).join('')
 beforeEach(() => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   fixture.terminals.length = 0; fixture.receive = null; fixture.keyHandler = null; releases = []
+  for (const observation of [fixture.searchActivations, fixture.searchDisposals, fixture.searchSubscriptions,
+    fixture.searchUnsubscriptions, fixture.findNext]) observation.mockClear()
   attach = vi.spyOn(api.sessions, 'attach').mockResolvedValue(replay(lines))
   vi.spyOn(api.sessions, 'detach').mockResolvedValue(undefined)
   vi.spyOn(api.sessions, 'onEvent').mockImplementation(receive => { fixture.receive = receive; return () => { fixture.receive = null } })
@@ -235,4 +258,66 @@ it('an explicit terminal caret bypasses a retained search field while ordinary n
   expect(document.activeElement).toBe(fixture.terminals[0]!.element!.querySelector('textarea'))
   expect(useAppStore.getState().regionCaretFocus).toBeNull()
   expect(search.isConnected).toBe(true); expect(attach).toHaveBeenCalledTimes(1); expect(write).not.toHaveBeenCalled()
+})
+
+it('only allocates search for an actual query and releases it without remounting the terminal', async () => {
+  await retainedTerminal(true)
+  const terminal = fixture.terminals[0]!
+  await vi.waitFor(() => expect(terminal.buffer.active.baseY).toBeGreaterThan(100))
+  const before = terminalResourceOwnerCounts()
+  expect(fixture.searchActivations).not.toHaveBeenCalled()
+  const open = async () => {
+    await act(async () => {
+      fixture.keyHandler!(new KeyboardEvent('keydown', { key: 'f', code: 'KeyF', metaKey: true }))
+      fixture.keyHandler!(new KeyboardEvent('keydown', { key: 'f', code: 'KeyF', ctrlKey: true, shiftKey: true }))
+    })
+    const input = document.querySelector<HTMLInputElement>('[aria-label="Find in terminal"]')!
+    expect(input).not.toBeNull()
+    return input
+  }
+  const input = await open()
+  expect(fixture.searchActivations).not.toHaveBeenCalled()
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, 'private')
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+  })
+  expect(fixture.searchActivations).toHaveBeenCalledExactlyOnceWith(terminal)
+  expect(fixture.searchSubscriptions).toHaveBeenCalledOnce()
+  expect(fixture.findNext).toHaveBeenCalledExactlyOnceWith('private')
+  expect(document.querySelector('.terminal-search__count')?.textContent?.trim()).toBe('1 of 8')
+  expect(terminalResourceOwnerCounts()).toEqual({
+    ...before, terminalAddons: before.terminalAddons + 1, terminalListeners: before.terminalListeners + 1
+  })
+  terminal.scrollToLine(21)
+  await retainedTerminal(false)
+  const data = 'private-output-while-hidden'
+  const dataBytes = new TextEncoder().encode(data)
+  await act(async () => fixture.receive!({
+    type: 'core', hostId: session.hostId,
+    event: {
+      type: 'terminal-output', run: session.control.run, data, dataBytes,
+      evidence: { source: 'terminal-output', observedAt: 2, run: session.control.run,
+        outputByteRange: { startByte: lines.length, endByte: lines.length + dataBytes.length } }
+    }
+  }))
+  await vi.waitFor(() => expect(terminal.buffer.active.getLine(600)?.translateToString(true)).toBe(data))
+  await retainedTerminal(true)
+  expect(fixture.searchActivations).toHaveBeenCalledOnce()
+  expect(document.querySelector('[aria-label="Find in terminal"]')).toBe(input)
+  expect(terminal.buffer.active.viewportY).toBe(21)
+
+  await act(async () => input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })))
+  expect(fixture.searchUnsubscriptions).toHaveBeenCalledOnce()
+  expect(fixture.searchDisposals).toHaveBeenCalledOnce()
+  expect(terminalResourceOwnerCounts()).toEqual(before)
+  expect(terminal.buffer.active.viewportY).toBe(21)
+  const reopened = await open()
+  expect(reopened.value).toBe('private')
+  expect(fixture.searchActivations).toHaveBeenCalledOnce()
+  await act(async () => reopened.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })))
+  expect(fixture.searchActivations).toHaveBeenCalledTimes(2)
+  expect(fixture.findNext).toHaveBeenCalledTimes(2)
+  expect(attach).toHaveBeenCalledTimes(1)
+  expect(api.sessions.detach).not.toHaveBeenCalled()
+  expect(write).not.toHaveBeenCalled()
 })

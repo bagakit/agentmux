@@ -599,7 +599,7 @@ it('converges original restart resources with queued output and independent clea
       element: new WeakRef(terminal.element!), addon: new WeakRef(addon) })
     const owners = terminalResourceOwnerCounts(), readers = rendererPerformance.snapshot().terminals.length
     samples.push({ generation: index, frames: frames.size, queuedBytes, owners, readers, renderListeners: fixture.renderListeners.length })
-    expect(owners).toEqual({ terminalViews: 1, terminalAddons: 4, terminalListeners: 11 })
+    expect(owners).toEqual({ terminalViews: 1, terminalAddons: 3, terminalListeners: 10 })
     expect(readers).toBe(1)
     expect(fixture.renderListeners).toHaveLength(2)
     if (index % 4 !== 0) {
@@ -655,7 +655,7 @@ it('converges original restart resources with queued output and independent clea
   expect.soft(activeObsolete).toEqual(collected)
   expect.soft(afterObsolete).toEqual(collected)
   expect(samples.map(sample => sample.frames)).toEqual(Array(generations).fill(samples[0]!.frames))
-  expect(active).toEqual({ owners: { terminalViews: 1, terminalAddons: 4, terminalListeners: 11 }, readers: 1, frames: samples[0]!.frames })
+  expect(active).toEqual({ owners: { terminalViews: 1, terminalAddons: 3, terminalListeners: 10 }, readers: 1, frames: samples[0]!.frames })
   expect(after).toEqual({ owners: { terminalViews: 0, terminalAddons: 0, terminalListeners: 0 }, readers: 0, renderListeners: 0, frames: 0 })
   // These are controlled object-reachability facts. The latest React generation and physical
   // GPU/native/allocator memory are outside this oracle; no RSS or all-App leak claim follows.

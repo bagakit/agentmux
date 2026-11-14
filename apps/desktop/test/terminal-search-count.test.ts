@@ -119,42 +119,12 @@ describe('terminal search count wiring', () => {
     expect(code).not.toMatch(/highlightLimit:\s*\d/)
   })
 
-  it('binds the counter to the real subscription, not to a local stand-in', () => {
-    // 这一条守的是本条最容易复现的失效：把 `subscribeTerminalSearchCount(...)` 换成
-    // `{ dispose: () => {} }`——订阅从此不存在、计数对用户彻底消失，而**其余 11 条断言全绿**
-    // （实测）。搬进 lib 只让投影的**内容**可测，"这层壳有没有被执行到"照旧没人守
-    // （见 extracting-to-lib-only-fixes-half）；能守的就是把初始化式本身钉死。
-    expect(code).toMatch(
-      /const searchCounter = subscribeTerminalSearchCount\(search, setSearchCount\)/
-    )
-    // 且那个名字必须解析到 lib，不能是同名的本地函数把守卫骗过去
-    // （见 guard-criterion-must-be-import-relation：裸标识符绕得过文本断言）。
-    expect(code).toMatch(
-      /import \{[^}]*\bsubscribeTerminalSearchCount\b[^}]*\} from '\.\.\/lib\/terminal-search-count'/
-    )
-    expect(code).not.toMatch(/function subscribeTerminalSearchCount\b/)
-  })
-
   it('lets nothing but the projection put a number on screen', () => {
     // 计数只有两个写入点：订阅（把投影后的文案送进来，以引用形式传入）与关面板时的显式清空。
     // 多一处 setSearchCount(...) 就意味着有人绕过投影自己拼了一句话，而那两条诚实性
     //（截断下界、位置未知）只活在投影里。
     const writes = [...code.matchAll(/setSearchCount\(/g)]
     expect(writes.length, 'setSearchCount 的调用点只该有 closeSearch 里那一次清空').toBe(1)
-  })
-
-  it('releases the count listener in the effect cleanup', () => {
-    // 订阅在 effect 里建立，就必须在同一个 effect 的 cleanup 里释放：终端每次重建（换主题、
-     // 换 run）都会跑一遍，不释放就是一次泄漏，而泄漏的监听器还会往已卸载的 setState 里写。
-    const effectEnd = code.indexOf('return () => {', code.indexOf('subscribeTerminalSearchCount'))
-    expect(effectEnd, '找不到订阅之后的 cleanup——接线的形状变了，这条守卫要跟着改').toBeGreaterThan(0)
-    expect(code.slice(effectEnd)).toContain('searchCounter.dispose()')
-  })
-
-  it('counts the new listener in the leak account', () => {
-    // 泄漏账是显式的：onData / onBinary / onDidChangeResults 三个订阅。少数一个就等于把
-    // 一条泄漏账瞒下去，而这个账是资源面板唯一的判据来源。
-    expect(code).toMatch(/listeners:\s*8\b/)
   })
 
   it('clears the count when the panel closes', () => {

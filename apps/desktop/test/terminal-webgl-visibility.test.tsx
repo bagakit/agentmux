@@ -275,12 +275,12 @@ it('releases only the GPU when hidden, parses ordered hidden bytes, and refreshe
   expect(fixture.webgl).toHaveLength(1)
   const terminal = fixture.terminals[0]!
   const first = fixture.webgl[0]!
-  expect(terminalResourceOwnerCounts()).toEqual({ terminalViews: 1, terminalAddons: 4, terminalListeners: 11 })
+  expect(terminalResourceOwnerCounts()).toEqual({ terminalViews: 1, terminalAddons: 3, terminalListeners: 10 })
 
   await render(false)
   expect(first.disposed).toHaveBeenCalledOnce()
   expect(first.contextLossDisposed).toHaveBeenCalledOnce()
-  expect(terminalResourceOwnerCounts()).toEqual({ terminalViews: 1, terminalAddons: 3, terminalListeners: 11 })
+  expect(terminalResourceOwnerCounts()).toEqual({ terminalViews: 1, terminalAddons: 2, terminalListeners: 10 })
   // Split an ANSI parser sequence across separate hidden writes, in byte order.
   await hiddenOutput('\u001b[3', 7)
   await hiddenOutput('1mhidden\u001b[0m', 10)
@@ -299,12 +299,12 @@ it('releases only the GPU when hidden, parses ordered hidden bytes, and refreshe
   expect(fixture.webgl).toHaveLength(2)
   expect(terminal.refresh).toHaveBeenCalledWith(0, terminal.rows - 1)
   expect(terminal.buffer.active.getLine(0)?.translateToString(true)).toBe('before hidden')
-  expect(terminalResourceOwnerCounts().terminalAddons).toBe(4)
+  expect(terminalResourceOwnerCounts().terminalAddons).toBe(3)
   const second = fixture.webgl[1]!
   await act(async () => second.loseContext())
   expect(second.disposed).toHaveBeenCalledOnce()
   expect(second.contextLossDisposed).toHaveBeenCalledOnce()
-  expect(terminalResourceOwnerCounts().terminalAddons).toBe(3)
+  expect(terminalResourceOwnerCounts().terminalAddons).toBe(2)
   await render(false)
   expect(second.disposed).toHaveBeenCalledOnce()
   await act(async () => root!.unmount())
@@ -560,7 +560,7 @@ it('mounts an initially hidden terminal without allocating a GPU context', async
   expect(fixture.terminals).toHaveLength(1)
   expect(fixture.webgl).toHaveLength(0)
   expect(fixture.attach).toHaveBeenCalledExactlyOnceWith(session.control, 0)
-  expect(terminalResourceOwnerCounts()).toEqual({ terminalViews: 1, terminalAddons: 3, terminalListeners: 11 })
+  expect(terminalResourceOwnerCounts()).toEqual({ terminalViews: 1, terminalAddons: 2, terminalListeners: 10 })
   await render(true)
   expect(fixture.terminals).toHaveLength(1)
   expect(fixture.webgl).toHaveLength(1)
@@ -779,7 +779,7 @@ it('moves only the retained Terminal view to its actual document and keeps the o
   child.body.append(child.adoptNode(rootContainer));currentDocument=child
   await act(async()=>root!.render(tree()))
   expect(fixture.terminals).toHaveLength(1);expect(fixture.terminals[0]).toBe(original);expect(original.open).toHaveBeenCalledTimes(2)
-  expect(originalGpu.disposed).toHaveBeenCalledOnce();expect(fixture.webgl).toHaveLength(2);expect(terminalResourceOwnerCounts().terminalAddons).toBe(4)
+  expect(originalGpu.disposed).toHaveBeenCalledOnce();expect(fixture.webgl).toHaveLength(2);expect(terminalResourceOwnerCounts().terminalAddons).toBe(3)
   expect((original as unknown as {element:HTMLElement}).element).toBe(originalElement);expect(originalElement.ownerDocument).toBe(child)
   await hiddenOutput('continued',7)
   expect(original.buffer.active.getLine(0)?.translateToString(true)).toBe('before continued')
@@ -809,7 +809,7 @@ it.each(['reading', 'latest', 'later wheel', 'later pointer', 'later key', 'late
     child.body.append(child.adoptNode(rootContainer));currentDocument=child
     await act(async()=>root!.render(tree()))
     expect(terminal.buffer.active.viewportY).toBe(originalLine)
-    expect(terminalResourceOwnerCounts()).toEqual({terminalViews:1,terminalAddons:4,terminalListeners:11})
+    expect(terminalResourceOwnerCounts()).toEqual({terminalViews:1,terminalAddons:3,terminalListeners:10})
     if(mode.startsWith('later ')){
       terminal.scrollToLine(75)
       const event=mode==='later wheel'?'wheel':mode==='later pointer'?'pointerdown':mode==='later key'?'keydown':'touchstart'
@@ -1271,7 +1271,7 @@ it.each(['listener', 'addon', 'both', 'undefined'] as const)(
     expect(gpu.contextLossDisposed).toHaveBeenCalledTimes(1)
     expect(gpu.disposed).toHaveBeenCalledTimes(1)
     expect(entries.map(entry => entry.isDisposed)).toEqual(fault === 'listener' ? [] : [true])
-    expect(owners.terminalAddons).toBe(fault === 'listener' ? 3 : 4)
+    expect(owners.terminalAddons).toBe(fault === 'listener' ? 2 : 3)
     // This old callback cannot retry a disposed native body or turn unknown release into success.
     expect(() => gpu.loseContext()).not.toThrow()
     expect(gpu.contextLossDisposed).toHaveBeenCalledTimes(1)
@@ -1331,7 +1331,7 @@ it('keeps a replacement GPU alive when a retired context listener fires again', 
   current.loseContext()
   expect(current.disposed).toHaveBeenCalledTimes(1)
   expect(current.contextLossDisposed).toHaveBeenCalledTimes(1)
-  expect(terminalResourceOwnerCounts().terminalAddons).toBe(3)
+  expect(terminalResourceOwnerCounts().terminalAddons).toBe(2)
   terminal.input('HEALTHY_AFTER_RETIRED_CONTEXT', true)
   expect(fixture.write).toHaveBeenCalledWith(session.control, 'HEALTHY_AFTER_RETIRED_CONTEXT', 'terminal-protocol', expect.anything())
   expect(fixture.terminals).toHaveLength(1)
