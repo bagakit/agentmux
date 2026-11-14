@@ -18,7 +18,7 @@
 .settings-profile__context header h3 { margin: 0; font-size: var(--fs-body); font-weight: 550; }
 .settings-profile__context header p { margin: 6px 0 4px; font-size: var(--fs-body); color: var(--text-3); }
 .settings-profile__context > label { font-size: var(--fs-meta); color: var(--text-2); }
-.settings-profile__context textarea { width: 100%; min-height: 144px; max-height: 42vh; padding: var(--sp-4); field-sizing: content; font: var(--fs-prose)/1.6 var(--font-sans); resize: vertical; }
+.settings-profile__context textarea { font-size: var(--fs-prose); }
 .settings-profile__context-footer { display: flex; justify-content: space-between; gap: 16px; font-size: var(--fs-body); color: var(--text-3); line-height: 1.55; }
 .settings-profile__context-footer small { flex: none; font-size: var(--fs-micro); font-variant-numeric: tabular-nums; }
 .settings-profile__sharing { display: flex; align-items: flex-start; gap: 12px; padding: 0; }

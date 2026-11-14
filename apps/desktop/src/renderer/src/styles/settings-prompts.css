@@ -38,7 +38,7 @@
 .prompt-editor__name input { font: 600 var(--fs-title)/1.4 var(--font-sans); }
 .prompt-editor__instruction > span { font-weight: 550; }
 .prompt-editor__instruction > small:not(.settings-inline-error), .prompt-editor__reach small:not(.settings-inline-error) { color: var(--text-3); }
-.prompt-editor__instruction textarea { width: 100%; min-height: 144px; max-height: 42vh; padding: var(--sp-3); field-sizing: content; resize: vertical; font-size: var(--fs-prose); line-height: 1.6; }
+.prompt-editor__instruction textarea { font-size: var(--fs-prose); }
 .prompt-editor__fields { padding: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-5); background: var(--surface-0); border-top: 0; }
 .prompt-editor__fields label { min-width: 0; }
 .prompt-editor__fields > label { display: grid; gap: var(--sp-2); }

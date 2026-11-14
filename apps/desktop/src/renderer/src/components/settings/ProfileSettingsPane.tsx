@@ -91,8 +91,8 @@ export function ProfileSettingsPane({ profile, onSave }: {
     <div className="settings-profile__details">
     <section className="settings-profile__context" data-settings-field="profile-about">
       <header><h3><label htmlFor="profile-about">About you &amp; how you work</label></h3><p id="profile-about-hint">Your work, experience and communication preferences.</p></header>
-      <ComposerTextarea id="profile-about" aria-label="About you and how you work" aria-describedby="profile-about-hint" value={value.about} maxLength={USER_PROFILE_ABOUT_LIMIT}
-        rows={6} placeholder="For example: I build desktop apps. Prefer concise answers, concrete examples and clear tradeoffs."
+      <ComposerTextarea variant="compact" id="profile-about" aria-label="About you and how you work" aria-describedby="profile-about-hint" value={value.about} maxLength={USER_PROFILE_ABOUT_LIMIT}
+        placeholder="For example: I build desktop apps. Prefer concise answers, concrete examples and clear tradeoffs."
         onValueChange={value => draft.setField('about', value)} />
       <div className="settings-profile__context-footer"><span>This is your context. Each Mote keeps its own role and instructions.</span><small>{value.about.length} / {USER_PROFILE_ABOUT_LIMIT}</small></div>
     </section>

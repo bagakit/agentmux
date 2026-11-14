@@ -191,7 +191,7 @@ export function DerivedActionsSettingsPane({ config, active, onSave }: {
             </label>
           })}</div></fieldset>
           <label className="prompt-editor__instruction"><span>Instruction</span>
-            <ComposerTextarea value={custom.instruction} rows={7} aria-describedby={`${describedBy}-instruction`} placeholder="Review the changes and list concrete bugs. Do not edit files."
+            <ComposerTextarea variant="compact" value={custom.instruction} aria-describedby={`${describedBy}-instruction`} placeholder="Review the changes and list concrete bugs. Do not edit files."
               onValueChange={value => update(custom.id, { instruction: value })} />
             <small id={`${describedBy}-instruction`} className={problems.has(custom.id) ? 'settings-inline-error' : ''}>{problems.get(custom.id) ?? (custom.base === 'fork'
               ? 'Sent first to the forked conversation, exactly as written.' : 'The new Agent also gets the original Session, its records and how to read them. The original keeps running.')}</small></label>
