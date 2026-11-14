@@ -17,11 +17,12 @@ const mutations: Record<string, [string, string, string]> = {
   'claude-drop-home-boundary': ['packages/providers/src/claude/workspace-trust.ts', 'if (trustKey !== await claudeTrustKey(context.ownedRoot))', 'if (false)'],
   'cursor-drop-seam': ['packages/core/src/providers/cursor-adapter.ts', 'prepareOwnedWorkspaceTrust: prepareCursorOwnedWorkspaceTrust,', ''],
   'bypass-postlaunch-startup': ['packages/core/src/client.ts', "if (!nativeSource && this.nativeSessionStarting(current, { kind: 'session-conversation', expectedRun: current.run }))", 'if (false)'],
-  'cursor-spelled-namespace': ['packages/core/src/providers/cursor-native-history.ts', 'try { return await realpath(resolve(workspacePath)) }', 'try { return resolve(workspacePath) }'],
-  'cursor-spelled-transcript': ['packages/core/src/providers/cursor-native-history.ts', 'const slug = cursorWorkspaceSlug(workspace)', 'const slug = cursorWorkspaceSlug(workspacePath)'],
+  'cursor-spelled-namespace': ['packages/providers/src/cursor/native-history.ts', 'try { return await realpath(resolve(workspacePath)) }', 'try { return resolve(workspacePath) }'],
+  'cursor-spelled-transcript': ['packages/providers/src/cursor/native-history.ts', 'const slug = cursorWorkspaceSlug(workspace)', 'const slug = cursorWorkspaceSlug(workspacePath)'],
 }
 export default defineConfig({ ...source,
   resolve: { ...source.resolve, alias: [
+    { find: '@agentmux/providers/cursor/native-history', replacement: resolve(root, 'packages/providers/src/cursor/native-history.ts') },
     { find: '@agentmux/providers/claude/workspace-trust', replacement: resolve(root, 'packages/providers/src/claude/workspace-trust.ts') },
     ...(Array.isArray(source.resolve?.alias) ? source.resolve.alias : [])
   ] },

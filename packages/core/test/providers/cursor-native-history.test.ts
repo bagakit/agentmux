@@ -12,7 +12,7 @@ import { AgentMuxClient, AgentMuxFileAgentSessionStore } from '../../src/index.j
 import { NativeSqliteHistoryReader } from '../../src/native-sqlite-history-reader.js'
 import { projectConversationRecords } from '../../../client-ui/src/lib/conversation-records.js'
 import type { CtxmuxRunAdapter } from '../../src/ctxmux-run-adapter.js'
-import { observeCursorSessionHistory, readCursorSessionHistoryPage, resolveCursorStorePath } from '../../src/providers/cursor-native-history.js'
+import { observeCursorSessionHistory, readCursorSessionHistoryPage, resolveCursorStorePath } from '../../src/providers/cursor-history.js'
 import { discoverCursorNativeSession } from '../../src/providers/cursor-native-session.js'
 import { createCursorProvider } from '../../src/providers/cursor-adapter.js'
 import { defineAgentProvider } from '../../src/agent-provider.js'

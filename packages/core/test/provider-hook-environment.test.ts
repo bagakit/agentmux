@@ -9,7 +9,7 @@ import { AgentMuxClient } from '../src/client.js'
 import { AgentMuxMemoryAgentSessionStore } from '../src/agent-session-store.js'
 import { AgentManagedHookInstaller } from '../src/managed-hook-installer.js'
 import { executionEnvironmentValue, executionHomeDirectory, executionPath } from '../src/providers/execution-environment.js'
-import { cursorConfigRoot, cursorDataRoot } from '../src/providers/cursor-native-history.js'
+import { cursorConfigRoot, cursorDataRoot } from '../src/providers/cursor-history.js'
 import { claudeGlobalConfigPath } from '../src/providers/claude-native-settings.js'
 
 const exec = promisify(execFile)

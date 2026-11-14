@@ -22,7 +22,7 @@ const definitions = {
   environment: { config: 'vitest.hook-environment.config.mts', env: 'AGENTMUX_HOOK_ENVIRONMENT_MUTATION',
     owners: ['providers/execution-environment.ts', 'packages/providers/src/grok/provider.ts', 'client.ts', 'packages/providers/src/gemini/provider.ts', 'packages/providers/src/claude/hook-settings.ts', 'packages/providers/src/claude/workspace-trust.ts', 'packages/providers/src/opencode/provider.ts'],
     inputs: ['agent-provider.ts', 'client.ts', 'providers/execution-environment.ts', 'providers/shared.ts',
-      ...['claude', 'claude-native-settings', 'cursor-adapter', 'cursor-native-history',
+      ...['claude', 'claude-native-settings', 'cursor-adapter', 'cursor-history',
         'hermes', 'opencode', 'pi'].map(name => 'providers/' + name + '.ts')].map(source)
       .concat(['packages/providers/src/claude/hook-settings.ts', 'packages/providers/src/claude/workspace-trust.ts'])
       .concat(['antigravity', 'copilot', 'gemini', 'droid', 'grok', 'cursor', 'pi', 'opencode', 'hermes'].map(name => 'packages/providers/src/' + name + '/provider.ts')),
