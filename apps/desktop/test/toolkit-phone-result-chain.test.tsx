@@ -10,7 +10,7 @@ import { createHash } from 'node:crypto'
 import { afterAll, beforeAll, beforeEach, expect, it, vi } from 'vitest'
 import { AgentMuxControlServer, connectAgentMuxRpc, defaultAgentMuxControlSocketPath, type AgentMuxClientEvent, type AgentMuxRun, type AgentMuxRunAttachment } from '@agentmux/core'
 import { type ToolkitScriptSnapshot } from '@agentmux/core/control'
-import { connectionOfferUrl } from '../../../packages/relay/src/connection-offer'
+import { connectionLinkUrl, connectionOfferUrl, parseConnectionLinkUrl } from '../../../packages/relay/src/connection-offer'
 import { createDeviceAdministration } from '../../host/src/device-administration'
 import { DeviceAuthority } from '../../host/src/device-authority'
 import { ConfigOwner } from '../src/main/config-owner'
@@ -27,7 +27,7 @@ vi.mock('electron', () => ({ app: { getPath: () => process.cwd(), getAppPath: ()
 
 const repository = resolve(dirname(fileURLToPath(import.meta.url)), '../../..')
 const dom = composerDOM()
-const appOrigin = 'https://192.0.2.44:4700'
+const appOrigin = 'https://10.0.0.44:4700'
 const hash = (bytes: Uint8Array | string) => createHash('sha256').update(bytes).digest('hex')
 let moduleDirectory: string, cli: string, preload: string
 let cliSha256: string, helperSha256: string
@@ -85,8 +85,10 @@ it.each(['', 'Native bridge diagnostic\n', 'NativeError: logger initialization\n
   const device = await authority.authorizeKey(Buffer.alloc(32, 7).toString('base64'))
   await authority.hello(device.deviceId, 'Original phone')
   const connection = authority.observe(device, { address: '192.0.2.24', userAgent: 'Private browser declaration' })
-  const completeURL = connectionOfferUrl(appOrigin + '/mobile/', { v: 2, serverId: authority.hostId, daemonPublicKeyB64: Buffer.alloc(32, 9).toString('base64'), relay: { endpoint: '192.0.2.44:4700', useTls: true } })
-  const devices = createDeviceAdministration(() => Promise.resolve(authority), () => ({ state: 'connected', message: 'Original private Host', origin: appOrigin }), async () => ({ url: completeURL, candidates: [] }))
+  const offer = { v: 2 as const, serverId: authority.hostId, daemonPublicKeyB64: Buffer.alloc(32, 9).toString('base64'), relay: { endpoint: '10.0.0.44:4700', useTls: true } }
+  const completeURL = connectionLinkUrl(appOrigin + '/', offer)
+  expect(parseConnectionLinkUrl(completeURL)).toEqual({ kind: 'pin', pin: { daemonPublicKeyB64: offer.daemonPublicKeyB64 } })
+  const devices = createDeviceAdministration(() => Promise.resolve(authority), () => ({ state: 'connected', message: 'Original private Host', origin: appOrigin }), async () => ({ url: completeURL, offer, candidates: [] }))
   const config = new ConfigOwner({ read: () => DEFAULT_CONFIG, save: async value => value, publish() {} }), processes = nodeProcessPort()
   const owner = new ToolkitOwner({ openRunPort: async () => processes.port, enabled: () => true, config, receiptPath: join(directory, 'receipts.json'),
     launch: () => ({ runner: process.execPath, cli, script: resolve(repository, 'apps/desktop/resources/toolkit/performance.mjs'), cwd: work,
@@ -156,8 +158,8 @@ async function currentLinkChain() {
   let endpoint = '192.0.2.44:4700', gate: Promise<void> | null = null, release: (() => void) | null = null, loseNext = false, creates = 0
   const hostLink = vi.fn(async () => {
     if (gate) await gate
-    return { url: connectionOfferUrl('https://' + endpoint + '/mobile/', { v: 2, serverId: authority.hostId,
-      daemonPublicKeyB64: Buffer.alloc(32, 9).toString('base64'), relay: { endpoint, useTls: true } }), candidates: [] }
+    const offer = { v: 2 as const, serverId: authority.hostId, daemonPublicKeyB64: Buffer.alloc(32, 9).toString('base64'), relay: { endpoint, useTls: true } }
+    return { url: connectionOfferUrl('https://' + endpoint + '/mobile/', offer), offer, candidates: [] }
   })
   const devices = createDeviceAdministration(() => Promise.resolve(authority), () => ({ state: 'connected', message: 'Controlled original Host' }), hostLink)
   const config = new ConfigOwner({ read: () => DEFAULT_CONFIG, save: async value => value, publish() {} })

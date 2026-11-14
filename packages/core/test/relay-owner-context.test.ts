@@ -44,7 +44,7 @@ async function fixture() {
   services.connections.credential = createCredentialAdministration({ target: owner, secrets: services.secrets })
   const authority = await DeviceAuthority.open(join(f.root, 'device-authority.json'))
   cleanups.push(() => authority.flush())
-  const administration = createDeviceAdministration(Promise.resolve(authority), () => ({ state: 'connected', message: 'Private loopback' }), () => 'http://127.0.0.1/')
+  const administration = createDeviceAdministration(async () => authority, () => ({ state: 'connected', message: 'Private loopback' }), async () => { throw Error('This private fixture does not serve connection links') })
   const deviceCall = vi.spyOn(administration, 'call')
   const credentialStore = vi.spyOn(services.connections.credential, 'store')
   const server = new AgentMuxControlServer({ coreClients: f.coreClients, hostedRuntime: () => hosted,

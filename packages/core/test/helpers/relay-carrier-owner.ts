@@ -3,7 +3,7 @@ import { appendFileSync, existsSync } from 'node:fs'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
 import { join } from 'node:path'
-import { parseConnectionOfferUrl } from '@agentmux/relay/offer'
+import { parseConnectionLinkUrl, parseConnectionOffer } from '@agentmux/relay/offer'
 import { generateKeyPair } from '@agentmux/relay/e2ee'
 import * as core from '../../src/index.js'
 import { connectRelayHostedClient } from '../../src/relay-hosted.js'
@@ -104,8 +104,10 @@ export async function actualRelayOwner() {
   const local = await core.connectAgentMuxRpc({ endpoint: { transport: 'unix', path: join(original.root, 'host.sock') } })
   cleanups.push(() => local.dispose())
   const link = await local.call('device.link', {})
-  const offered = parseConnectionOfferUrl(link.url)
-  if (!offered) throw Error('Actual Host returned no connection offer')
+  const input = parseConnectionLinkUrl(link.url)
+  if (!input) throw Error('Actual Host returned no connection link')
+  const offered = input.kind === 'offer' ? input.offer : parseConnectionOffer(await (await fetch(new URL('/.well-known/agentmux/connection', link.pageUrl), { redirect: 'error', cache: 'no-store' })).json())
+  if (input.kind === 'pin' && input.pin.daemonPublicKeyB64 !== offered.daemonPublicKeyB64) throw Error('Actual Host description did not match the original pin')
   const offer = { ...offered, relay: { ...offered.relay, endpoint: '127.0.0.1:' + offered.relay.endpoint.split(':').at(-1)! } }
   const keyPair = generateKeyPair()
   const options = { offer, keyPair }

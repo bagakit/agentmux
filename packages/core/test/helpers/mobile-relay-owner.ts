@@ -84,7 +84,7 @@ export async function mobileRelayOwner(delay = 0) {
   const authority = await DeviceAuthority.open(join(f.root, 'r20-devices.json'))
   close.push(() => authority.flush())
   const administration = createDeviceAdministration(async () => authority,
-    () => ({ state: 'connected', message: 'private' }), () => 'http://127.0.0.1/')
+    () => ({ state: 'connected', message: 'private' }), async () => { throw Error('This private fixture does not serve connection links') })
   const server = new AgentMuxControlServer({
     coreClients: f.coreClients, hostedRuntime: () => hosted, deviceAdministration: administration
   })

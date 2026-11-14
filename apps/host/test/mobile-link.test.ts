@@ -1,10 +1,11 @@
+// @vitest-environment node
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { createHash } from 'node:crypto'
-import { createServer } from 'node:http'
+import { createServer, request } from 'node:http'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { connectionOfferUrl, parseConnectionOfferUrl } from '@agentmux/relay/offer'
+import { connectionOfferUrl, parseConnectionOfferUrl, parseConnectionLinkUrl } from '@agentmux/relay/offer'
 import { rpcOwnerFixture } from '../../../packages/core/test/helpers/public-rpc-owner.js'
 import { objectCliEnvironment, runCompiledObjectCli } from '../../../packages/core/test/helpers/object-cli-rpc.js'
 
@@ -54,7 +55,7 @@ const offer = (hostId: string, endpoint: string, useTls = false) => connectionOf
   `${useTls ? 'https' : 'http'}://${endpoint}/`, { v: 2, serverId: hostId,
     daemonPublicKeyB64: 'A'.repeat(43) + '=', relay: { endpoint, useTls } })
 /** A link owner with no local-network candidates, as for a TLS Relay endpoint. */
-const linked = (url: string) => async () => ({ url, candidates: [] })
+const linked = (url: string) => async () => ({ url, offer: parseConnectionOfferUrl(url)!, candidates: [] })
 
 const nic = (address: string, internal = false) => ({ address, netmask: '255.255.252.0', family: 'IPv4' as const, mac: '00:00:00:00:00:00', internal, cidr: `${address}/22` })
 describe('choosing the address a phone connects to', () => {
@@ -108,7 +109,8 @@ describe('choosing the address a phone connects to', () => {
     const link = vi.fn(async (address?: string) => {
       const chosen = address === undefined ? candidates[0]! : candidates.find(candidate => candidate.address === address)
       if (!chosen) throw new core.AgentMuxError('Not a candidate', 'INVALID_CONTROL_REQUEST')
-      return { url: offer(original.hostId, endpointFor(chosen.address)), candidates }
+      const url = offer(original.hostId, endpointFor(chosen.address))
+      return { url, offer: parseConnectionOfferUrl(url)!, candidates }
     })
     const administration = createDeviceAdministration(() => Promise.resolve(original), () => ({ state: 'connected', message: 'Ready' }), link)
     const preferred = await administration.call('device.link', {}, {})
@@ -205,7 +207,19 @@ describe('original mobile link discovery', () => {
     expect(cli.code, cli.stderr).toBe(0)
     const receipt = JSON.parse(cli.stdout)
     expect(receipt).toMatchObject({ ok: true, operation: 'device.link', result: expected })
-    expect(receipt.result.relay).toEqual(parseConnectionOfferUrl(receipt.result.url)!.relay)
+    const pin = parseConnectionLinkUrl(receipt.result.url)!
+    expect(pin.kind).toBe('pin')
+    const devicesBeforeMetadata = (await user.call('device.ls', {})).devices
+    const metadataResponse = await fetch(new URL('/.well-known/agentmux/connection', expected.pageUrl))
+    expect(metadataResponse.headers.get('cache-control')).toBe('no-store')
+    const metadata = await metadataResponse.json()
+    expect(metadata).toMatchObject({ v: 2, serverId: expected.hostId, relay: expected.relay })
+    expect(Object.keys(metadata).sort()).toEqual(['daemonPublicKeyB64', 'relay', 'serverId', 'v'])
+    expect(pin.kind === 'pin' && pin.pin.daemonPublicKeyB64).toBe(metadata.daemonPublicKeyB64)
+    expect((await user.call('device.ls', {})).devices).toEqual(devicesBeforeMetadata)
+    const badHost = await new Promise<number>((resolve, reject) => { const read = request(new URL('/.well-known/agentmux/connection', expected.pageUrl), { headers: { Host: '203.0.113.8:' + new URL(expected.pageUrl).port } }, response => { response.resume(); resolve(response.statusCode!) }); read.on('error', reject); read.end() })
+    expect(badHost).toBe(503)
+    expect((await fetch(new URL('/.well-known/agentmux/connection', expected.pageUrl), { method: 'POST' })).status).toBe(405)
     const address = host.server.httpAddress!
     const http = await runCompiledObjectCli(['--endpoint', `http://${address.host}:${address.port}/`, 'device', 'link'],
       { ...env, AGENTMUX_RPC_HTTP_TOKEN: 'private-mobile-link-probe' })
@@ -235,7 +249,7 @@ describe('original mobile link discovery', () => {
     expect(phone.code, phone.stdout + phone.stderr).toBe(0)
     expect(JSON.parse(phone.stdout)).toMatchObject({ ok: true, operation: 'device.hello', result: { hostId: expected.hostId, device: { name: 'Private CLI phone' } } })
     if (process.env.AGENTMUX_TEST_MOBILE_LINK_HANDOFF) await writeFile(process.env.AGENTMUX_TEST_MOBILE_LINK_HANDOFF,
-      JSON.stringify({ url: expected.url, offer: parseConnectionOfferUrl(expected.url), hostId: expected.hostId }), { mode: 0o600 })
+      JSON.stringify({ url: expected.url, offer: metadata, hostId: expected.hostId }), { mode: 0o600 })
   }, 30000)
 })
 
@@ -251,15 +265,16 @@ it('the original running Host reads changed NIC candidates on the next public li
   closes.push(() => host.dispose())
   const user = await core.connectAgentMuxRpc({ endpoint: { transport: 'unix', path: socketPath } }); closes.push(() => user.dispose())
   await vi.waitFor(async () => expect((await user.call('device.ls', {})).mobileAccess.state).toBe('connected'), { timeout: 10000 })
-  const before = await user.call('device.link', {}), beforeOffer = parseConnectionOfferUrl(before.url)!
+  const before = await user.call('device.link', {}), beforeLink = parseConnectionLinkUrl(before.url)!
   expect(new URL(before.pageUrl).hostname).toBe('192.168.2.45')
   native.interfaces = { en0: [nic('10.69.59.116')] }
-  const after = await user.call('device.link', {}), afterOffer = parseConnectionOfferUrl(after.url)!
+  const after = await user.call('device.link', {}), afterLink = parseConnectionLinkUrl(after.url)!
   expect(new URL(after.pageUrl).hostname).toBe('10.69.59.116')
   expect(after.candidates.map(value => value.address)).toEqual(['10.69.59.116'])
-  expect(afterOffer.relay.endpoint).toBe('10.69.59.116:' + new URL(before.pageUrl).port)
-  expect(afterOffer.serverId).toBe(beforeOffer.serverId)
-  expect(afterOffer.daemonPublicKeyB64).toBe(beforeOffer.daemonPublicKeyB64)
+  expect(after.relay.endpoint).toBe('10.69.59.116:' + new URL(before.pageUrl).port)
+  expect(after.hostId).toBe(before.hostId)
+  expect(beforeLink.kind).toBe('pin'); expect(afterLink.kind).toBe('pin')
+  expect(afterLink).toEqual(beforeLink)
   expect((await user.call('device.ls', {})).devices).toEqual([])
   expect(h.client.agentSession('caller').run).toEqual(originalRun)
   expect(h.inner.kernel.stop).not.toHaveBeenCalled()

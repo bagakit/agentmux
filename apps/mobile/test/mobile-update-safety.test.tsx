@@ -2,6 +2,7 @@ import { openPrimary } from './mobile-root-navigation'
 import { act, createRef } from 'react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { fileUploadRevision } from '@agentmux/core/files'
+import { mobileAssetNamespace } from '@agentmux/core/mobile-web-codec'
 import { MobileAttachments, type MobileAttachmentControls } from '../src/conversation/MobileAttachments'
 import { MobileWebUpdateSafetyProvider, useMobileWebDispatchedOperations, useMobileWebUpdateSafety, useMobileWebUpdateSafetyOwner } from '../src/mobile-web/update-safety'
 import { emptyDeviceWorkface, getDeviceWorkface } from '../src/recovery/device-workface'
@@ -672,9 +673,10 @@ it('retains the page if the root entry is unavailable or points elsewhere', asyn
   expect(await apply()).toMatchObject({ status: 'blocked', message: expect.stringContaining('连接') })
 })
 
-it('opens the same-origin root after the original owners and entry confirm', async () => {
+it.each(['full namespace', 'short namespace'])('opens the same-origin root after the original owners and %s entry confirm', async representation => {
   const navigate = vi.spyOn(location, 'assign').mockImplementation(() => {})
   await mount(<MobileWebUpdateSafetyProvider verifyConnection={verifyConnection}><Action /></MobileWebUpdateSafetyProvider>)
+  if (representation === 'short namespace') vi.mocked(fetch).mockResolvedValueOnce({ ok: true, url: location.origin + mobileAssetNamespace('sha256:' + 'a'.repeat(64)) } as Response)
   expect(await apply()).toEqual({ status: 'navigating' })
   expect(navigate).toHaveBeenCalledExactlyOnceWith('/#amux-update')
 })

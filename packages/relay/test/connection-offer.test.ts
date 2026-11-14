@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { connectionOfferUrl, hasConnectionOffer, parseConnectionOfferUrl, type ConnectionOffer } from '../src/connection-offer.js'
+import { connectionOfferUrl, connectionLinkUrl, hasConnectionOffer, parseConnectionLinkUrl, parseConnectionOfferUrl, type ConnectionOffer } from '../src/connection-offer.js'
 
 const key = Buffer.from(Array.from({ length: 32 }, (_, i) => i * 7 + 3)).toString('base64')
 const offer = (serverId: string, endpoint: string, useTls = false): ConnectionOffer => ({ v: 2, serverId, daemonPublicKeyB64: key, relay: { endpoint, useTls } })
@@ -44,7 +44,7 @@ describe('the compact phone connection link', () => {
       }
     }
     // Every other first byte stays outside this format, even when its first character is A.
-    for (const format of Array.from({ length: 256 }, (_, value) => value).filter(value => value !== 2 && value !== 3)) {
+    for (const format of Array.from({ length: 256 }, (_, value) => value).filter(value => value !== 2 && value !== 3 && !(value >= 4 && value <= 7))) {
       const fragment = Buffer.from([format, ...new Uint8Array(50)]).toString('base64url')
       expect(hasConnectionOffer('http://10.0.0.2:8443/#' + fragment), String(format)).toBe(false)
     }
@@ -65,7 +65,7 @@ describe('the compact phone connection link', () => {
     // Truncated, padded with trailing bytes, or with a wrong format byte.
     expect(() => parseConnectionOfferUrl('http://10.0.0.2:8443/#' + fragment.slice(0, -6))).toThrow()
     expect(() => parseConnectionOfferUrl('http://10.0.0.2:8443/#' + fragment + 'AAAA')).toThrow()
-    const bytes = Buffer.from(fragment, 'base64url'); bytes[0] = 0x04
+    const bytes = Buffer.from(fragment, 'base64url'); bytes[0] = 0x08
     expect(parseConnectionOfferUrl('http://10.0.0.2:8443/#' + bytes.toString('base64url'))).toBeNull()
     bytes[0] = 0x02; bytes[33] = 3
     expect(() => parseConnectionOfferUrl('http://10.0.0.2:8443/#' + bytes.toString('base64url'))).toThrow()
@@ -78,3 +78,15 @@ describe('the compact phone connection link', () => {
     expect(() => parseConnectionOfferUrl(moved)).toThrow(/local network/)
   })
 })
+
+ it('same-origin pin links keep the complete key while full independent Relay offers remain exact', () => {
+  const original = offer('original-host', '10.0.0.2:8443'), full = connectionOfferUrl('http://10.0.0.2:8443/', original)
+  const short = connectionLinkUrl('http://10.0.0.2:8443/', original)
+  expect(new URL(short).hash.slice(1)).toHaveLength(44)
+  expect(short.length).toBeLessThan(full.length)
+  expect(parseConnectionLinkUrl(short)).toEqual({ kind: 'pin', pin: { daemonPublicKeyB64: original.daemonPublicKeyB64 } })
+  expect(() => parseConnectionOfferUrl(short)).toThrow('requires its original Host')
+  for (const damaged of [short.slice(0,-1), short + '=', short + 'A']) { expect(hasConnectionOffer(damaged)).toBe(true); expect(() => parseConnectionLinkUrl(damaged)).toThrow() }
+  const independent = offer('original-host', 'relay.example.org', true)
+  expect(parseConnectionLinkUrl(connectionLinkUrl('https://app.example.org/', independent))).toEqual({ kind: 'offer', offer: independent })
+ })
