@@ -2,8 +2,9 @@
 import { afterEach, expect, it, vi } from 'vitest'
 import { createWorkspaceLayout } from '@agentmux/layout'
 import { useAppStore } from '../src/renderer/src/store'
-import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
-import { surveyPageOwner, surveyPageProjection } from '../src/renderer/src/lib/survey-page-references'
+import { addWorkbenchRegion, createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
+import { surveyPageOwner, surveyPageProjection, persistedSurveySelection, restoredSurveySelection } from '../src/renderer/src/lib/survey-page-references'
+import { parseSurveyPageSelection } from '@agentmux/core/control'
 import { spatialCatalog } from '../src/renderer/src/lib/space-agent-control'
 import { config } from './helpers/workface-control-fixture'
 const initial = useAppStore.getState(), page = { regionId: 'original-page-region', browserId: 'separate-Main-browser' }
@@ -27,6 +28,43 @@ it('cached topology and slices never retain a live Browser binding or an old sel
   const replacement = { ...f.tab, regions: { [page.regionId]: { ...f.tab.regions[page.regionId]!, browserId: 'replacement-browser', id: 'replacement-browser' } } }
   expect(surveyPageOwner({ [f.tab.id]: replacement }, page, f.catalog)).toBeNull()
   expect(surveyPageProjection(page, f.catalog, { [f.tab.id]: replacement }, second)).toBeNull()
+})
+
+it('[survey-agent-placement] one saved Tab occurrence exposes its original split and never its other resource Tabs', () => {
+  const f = fixture(), tab = addWorkbenchRegion(f.tab, page.regionId, 'right', {
+    kind: 'agent', phase: 'attached', workspaceId: 'resource', sessionId: 'original-agent', regionId: 'original-agent-region' })
+  const other = createWorkbenchTab('another-resource-tab', { kind: 'file', regionId: 'unrelated-file', workspaceId: 'resource', path: 'other.txt' })
+  useAppStore.setState({ tabs: { [tab.id]: tab, [other.id]: other }, layouts: {
+    resource: createWorkspaceLayout('original-group', [tab.id, other.id]), display: f.layouts.display } })
+  const current = useAppStore.getState(), catalog = spatialCatalog(current, [])
+  const choice = { kind: 'page' as const, ...page, presentation: { kind: 'tab' as const,
+    displayWorkspaceId: 'display', groupId: 'mirror-group', tabId: tab.id, regionId: 'original-agent-region' } }
+  const projection = surveyPageProjection(choice, catalog, current.tabs, () => {})!
+  expect(projection.entity).toEqual({ kind: 'tab', tabId: tab.id })
+  expect(projection.selection).toEqual([{ displayWorkspaceId: 'display', groupId: 'mirror-group', tabId: tab.id, regionId: 'original-agent-region' }])
+  expect(projection.catalog.tabs.map(item => item.tabId)).toEqual([tab.id])
+  expect(projection.catalog.regions.map(item => item.regionId).sort()).toEqual([page.regionId, 'original-agent-region'].sort())
+  expect(surveyPageProjection({ ...choice, presentation: { ...choice.presentation, regionId: 'unrelated-file' } }, catalog, current.tabs, () => {})).toBeNull()
+  expect(surveyPageProjection({ ...choice, presentation: { ...choice.presentation, groupId: 'stale-group' } }, catalog, current.tabs, () => {})).toBeNull()
+  expect(current.tabs[other.id]).toBe(other)
+})
+
+it('[survey-agent-placement] durable and public page choice retain the exact Tab occurrence and active Agent', () => {
+  const choice = { kind: 'page' as const, ...page, presentation: { kind: 'tab' as const,
+    displayWorkspaceId: 'original-display', groupId: 'original-group', tabId: 'original-tab', regionId: 'original-agent-region' } }
+  const saved = JSON.parse(JSON.stringify(persistedSurveySelection(choice)))
+  expect(restoredSurveySelection(saved)).toEqual(choice)
+  expect(parseSurveyPageSelection(saved)).toEqual(choice)
+  expect(() => parseSurveyPageSelection({ ...choice, presentation: { ...choice.presentation, extra: 'another authority' } })).toThrow()
+  expect(restoredSurveySelection({ kind: 'page', ...page })).toEqual({ kind: 'page', ...page })
+})
+
+it('[survey-agent-placement] an unread presentation keeps its raw saved field and the original usable Browser identity', () => {
+  const raw = { kind: 'page', ...page, presentation: { kind: 'tab', tabId: 'original-tab', regionId: 'original-agent-region' } }
+  const restored = restoredSurveySelection(raw)!
+  expect(restored).toMatchObject({ kind: 'page', ...page, presentationReadRecovery: { source: raw.presentation } })
+  expect(persistedSurveySelection(restored)).toEqual(raw)
+  expect(restoredSurveySelection(persistedSurveySelection(restored))).toEqual(restored)
 })
 it('each projection validates the current preferred occurrence and does not guess between multiple original placements', () => {
   const f = fixture(), original = { displayWorkspaceId: 'resource', groupId: 'original-group', tabId: f.tab.id, regionId: page.regionId }

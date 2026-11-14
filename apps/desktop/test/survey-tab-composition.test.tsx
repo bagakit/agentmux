@@ -40,6 +40,10 @@ import { moteDefaultConversation } from '../src/renderer/src/lib/mote-quick-pref
 import { directoryIdentity } from '../src/shared/space-addresses'
 import { scratchTopicIdentityPath } from '@agentmux/host/mote-model'
 import { connectWorkbenchCloseApiOwner } from './helpers/workbench-close-api-owner'
+import { agentCreationFixture } from './helpers/agent-creation-fixture'
+import type { AgentLaunchResult } from '../src/shared/contracts'
+import { prepareSourceCoreCli } from './helpers/source-core-cli.mjs'
+import '../scripts/fixtures/survey-tab-composition/native-listener.setup'
 
 vi.hoisted(() => vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true))
 vi.mock('../src/renderer/src/components/SessionPane', () => ({ SessionPane: () => <textarea aria-label="Original Agent input" defaultValue="Unsent Agent input" /> }))
@@ -49,6 +53,7 @@ vi.mock('../src/renderer/src/components/EditorPane', () => ({ EditorPane: () => 
 const initialStore = useAppStore.getState()
 let restartFiles: WorkspaceFiles | undefined
 let headerCloseOwner: Awaited<ReturnType<typeof connectWorkbenchCloseApiOwner>> | undefined
+let placementRelease: (() => void) | undefined
 let root: Root, container: HTMLDivElement, overlay: HTMLDivElement, dispose: (() => void) | undefined
 const dom = { async render(element: React.ReactNode) { await act(async () => root.render(element)) } }
 let suppressObservation = false
@@ -123,6 +128,7 @@ beforeEach(async () => {
   original = useAppStore.getState()
 })
 afterEach(async () => {
+  placementRelease?.(); placementRelease = undefined
   await headerCloseOwner?.dispose(); headerCloseOwner = undefined
   await act(async () => root.unmount())
   vi.mocked(api.ui.requestStorageFlush).mockResolvedValue(undefined)
@@ -1684,3 +1690,111 @@ it('[survey-header] exact page creation uses the current browsing environment an
   expect(useAppStore.getState().surveyPageReferences).toContainEqual(page)
   expect(useAppStore.getState().surveyZoneSelection).toMatchObject({ kind: 'page', regionId: native.mock.calls[0]![0] })
 })
+
+it.each(['none', 'save', 'launch'] as const)('[survey-agent-placement] the actual exact-page Browser entry preserves the original Tab and later %s navigation', async later => {
+  const originalBrowser = source().regions['composition-page']!
+  if (originalBrowser.kind !== 'browser') throw Error('The fixture must retain its original Browser.')
+  const native = await api.browser.restore(originalBrowser.browserId, { workspaceId: resource.id, profileId: originalBrowser.profileId,
+    mode: originalBrowser.mode, viewport: originalBrowser.viewport })
+  const confirmedBrowser = { ...native, control: { owner: 'human' as const, agent: null, activeOperationId: null, revision: 3, inputIsolation: 'inactive' as const } }
+  vi.spyOn(api.browser, 'restore').mockResolvedValue(confirmedBrowser)
+  const page = await showHeaderPage()
+  await vi.waitFor(() => expect(document.querySelector('[aria-label="Original file input"]')).not.toBeNull())
+  await act(async () => useAppStore.getState().applyBrowserEvent({ type: 'updated', browser: confirmedBrowser }))
+  const before = useAppStore.getState(), browser = source().regions[page.regionId]!
+  if (browser.kind !== 'browser') throw Error('The fixture must retain its original Browser.')
+  const heldWork = structuredClone(before.workbenchSpaceSelection), heldWorkspace = before.activeWorkspaceId
+  const originalFile = document.querySelector<HTMLTextAreaElement>('[aria-label="Original file input"]')!
+  originalFile.value = 'Original sibling input survives Agent creation'
+  let saved = false, launching = false
+  const gate = new Promise<void>(resolve => { placementRelease = resolve })
+  vi.spyOn(api.ui, 'requestStorageFlush').mockImplementation(async () => {
+    if (later === 'save' && !saved && Object.values(source().regions).some(region => region.kind === 'agent' && region.sessionId !== session.id)) {
+      saved = true; await gate
+    }
+  })
+  const launch = vi.spyOn(api.sessions, 'launchAgent').mockImplementation(async input => {
+    launching = true
+    if (later === 'launch') await gate
+    const session = { ...composerSession(input.agentSessionId!), workspacePath: input.workspacePath, executorId: input.executorId }
+    const result: AgentLaunchResult = { created: { ...agentCreationFixture(session), creation: { createOperationId: input.createOperationId!, initialPrompt: 'unknown' } },
+      creation: { createOperationId: input.createOperationId!, initialPrompt: 'confirmed' }, session,
+      timeline: { agentSessionId: session.id, revision: 0, items: [] }, projectionFailures: [] }
+    return result
+  })
+  const handoff = vi.spyOn(api.browser, 'returnControl').mockImplementation(async (_id, input) => ({ ...browser,
+    control: { ...browser.control!, owner: 'agent', revision: browser.control!.revision + 1,
+      agent: 'agent' in input! ? { hostId: input.agent.hostId, agentSessionId: input.agent.agentSessionId } : browser.control!.agent ?? null } }))
+  const send = vi.spyOn(before, 'sendQueuedAgentSteer').mockResolvedValue('submitted')
+  const activity = document.querySelector<HTMLElement>('.global-survey-surface [aria-label^="Browser activity:"]')!
+  expect(activity).not.toBeNull()
+  await act(async () => { activity.focus(); activity.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', code: 'ArrowDown', bubbles: true })) })
+  await vi.waitFor(() => expect(document.querySelector('[role="menuitem"][aria-label="在右侧创建 Agent"]')).not.toBeNull())
+  const create = document.querySelector<HTMLButtonElement>('[role="menuitem"][aria-label="在右侧创建 Agent"]')
+  expect(create, document.body.textContent ?? '').not.toBeNull()
+  await click(create!)
+  if (later !== 'none') {
+    await vi.waitFor(() => expect(later === 'save' ? saved : launching).toBe(true))
+    await act(async () => {
+      useAppStore.getState().setMainSurface('board'); useAppStore.getState().setMainSurface('survey')
+      useAppStore.getState().setSurveyZoneSelection({ kind: 'page', ...page })
+      placementRelease!()
+    })
+  }
+  await vi.waitFor(() => expect(send, JSON.stringify({ error: useAppStore.getState().error,
+    requests: Object.values(useAppStore.getState().spatialRequests), launches: launch.mock.calls.length,
+    surface: document.querySelector('.global-survey-surface')?.textContent?.slice(-1500) })).toHaveBeenCalledOnce())
+  const state = useAppStore.getState(), record = Object.values(state.spatialRequests).find(record => record.purpose === 'browser-agent')!
+  const region = Object.values(source().regions).find(region => region.kind === 'agent' && region.sessionId === record.agentSessionId)!
+  expect(state.surveyZoneSelection).toEqual(later === 'none' ? { kind: 'page', ...page,
+    presentation: { kind: 'tab', displayWorkspaceId: resource.id, groupId: 'source-group', tabId: source().id, regionId: region.regionId } } : { kind: 'page', ...page })
+  expect(state.workbenchSpaceSelection).toEqual(heldWork); expect(state.activeWorkspaceId).toBe(heldWorkspace)
+  expect(state.mainSurface).toBe('survey'); expect(state.surveyCollectedZones).toEqual(before.surveyCollectedZones)
+  const presentedAgent = document.querySelector('.global-survey-surface [data-workbench-region-id="' + region.regionId + '"]')
+  if (later === 'none') expect(presentedAgent).not.toBeNull()
+  else expect(presentedAgent).toBeNull()
+  expect(pageHeader()).not.toBeNull()
+  expect(pageHeader().querySelectorAll('[data-workbench-tab-id]')).toHaveLength(1)
+  expect(document.querySelector('[aria-label="Original file input"]')).toBe(originalFile)
+  expect(originalFile.value).toBe('Original sibling input survives Agent creation')
+  expect(launch).toHaveBeenCalledOnce(); expect(handoff).toHaveBeenCalledOnce()
+  expect(source().regions[page.regionId]?.kind).toBe('browser')
+  if (later === 'none') {
+    const address = document.querySelector<HTMLInputElement>('.global-survey-surface [data-workbench-region-id="' + page.regionId + '"] [aria-label="Browser address"]')!
+    expect(address).not.toBeNull()
+    await act(async () => address.focus())
+    await vi.waitFor(() => expect(useAppStore.getState().surveyZoneSelection).toMatchObject({ presentation: { regionId: page.regionId } }))
+    expect(useAppStore.getState().workbenchSpaceSelection).toEqual(heldWork)
+    const agentInput = document.querySelector<HTMLTextAreaElement>('.global-survey-surface [data-workbench-region-id="' + region.regionId + '"] [aria-label="Original Agent input"]')!
+    expect(agentInput).not.toBeNull()
+    await act(async () => agentInput.focus())
+    await vi.waitFor(() => expect(useAppStore.getState().surveyZoneSelection).toMatchObject({ presentation: { regionId: region.regionId } }))
+    expect(useAppStore.getState().workbenchSpaceSelection).toEqual(heldWork)
+    const cli = await prepareSourceCoreCli(), socketDirectory = await mkdtemp('/tmp/asel-')
+    const server = new AgentMuxControlServer({ socketPath: join(socketDirectory, 'control.sock'), execute: request => useAppStore.getState().executeControl(request) })
+    try {
+      await server.start()
+      const result = await new Promise<{ code: number | null; stdout: string; stderr: string }>((resolve, reject) => {
+        const child = spawn(process.execPath, [cli.cliPath, 'space', 'ls', '--presentation'], { env: privateEnvironment({
+          AGENTMUX_RUNTIME_DIRECTORY: socketDirectory, AGENTMUX_STATE_DIRECTORY: join(socketDirectory, 'state'),
+          AGENTMUX_RPC_ENDPOINT: 'unix:' + join(socketDirectory, 'control.sock') }), stdio: ['ignore', 'pipe', 'pipe'] })
+        let stdout = '', stderr = ''; child.stdout.on('data', value => { stdout += value }); child.stderr.on('data', value => { stderr += value })
+        child.once('error', reject); child.once('close', code => resolve({ code, stdout, stderr }))
+      })
+      expect(result.code, result.stderr).toBe(0)
+      expect(objectCliReceipt(JSON.parse(result.stdout)).result.catalog.survey.selection).toEqual(state.surveyZoneSelection)
+    } finally { await server.stop(); await cli.cleanup(); await rm(socketDirectory, { recursive: true, force: true }) }
+    const originalAgent = source().regions[region.regionId], originalSessions = useAppStore.getState().sessions
+    const closeTab = vi.spyOn(useAppStore.getState(), 'closeTab'), close = vi.spyOn(api.browser, 'close').mockResolvedValue(undefined)
+    await click(headerClose())
+    await vi.waitFor(() => expect(Boolean(named('Close')) || !source().regions[page.regionId], JSON.stringify({ error: useAppStore.getState().error, body: document.body.textContent?.slice(-1000) })).toBe(true))
+    if (named('Close')) await click(named('Close'))
+    await vi.waitFor(() => expect(source().regions[page.regionId]).toBeUndefined())
+    expect(close).toHaveBeenCalledExactlyOnceWith(page.browserId); expect(closeTab).not.toHaveBeenCalled()
+    expect(source().regions[region.regionId]).toBe(originalAgent)
+    expect(useAppStore.getState().sessions).toBe(originalSessions)
+    expect(source().regions['composition-file']).toBe(before.tabs[source().id]!.regions['composition-file'])
+    expect(document.querySelector('[aria-label="Original file input"]')).toBe(originalFile)
+    expect(originalFile.value).toBe('Original sibling input survives Agent creation')
+  }
+}, 20_000)
