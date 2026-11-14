@@ -109,6 +109,15 @@ groups:[{groupId,name,collapsed,zoneIds:[ZONE]}]},expected:originalStoredOrganiz
 Use exact saved Zone and list-group IDs, each item once. Create, rename, collapse,
 dissolve and reorder by replacing that organization at its exact expected value.
 Organization writes preserve membership; omitted members return to ungrouped.
+Manual pins are a separate presentation preference in the same owner. Read
+pinnedReferences, then use --input with {pin:{reference:{kind:"zone",zoneId:ZONE},
+pinned:true,expectedPinned:false}}, or {kind:"page",regionId:REGION,browserId:BROWSER}
+for an exact page. Unpin with pinned:false and its current expectedPinned. Ordinary
+system links never imply a pin. Pinning keeps membership, original organization,
+resources and inputs; unpinning returns to that original organization. Known saved
+items can be unpinned even while their source is unavailable. Partial reads retain
+unread neighboring preference records; inspect the original list and repair only
+the exact preference after an unknown save, without reopening or moving content.
 Read collectedZoneIds from the same list. Explicit collection/restoration uses
 {collection:{zoneIds:[ZONE],expectedZoneIds:originalCollectedZoneIds}}. These IDs
 are a set; organization still owns order. New members require a confirmed exact
