@@ -4,7 +4,7 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { AgentMuxError } from '../../../packages/core/src/errors'
+import { AgentMuxError } from '@agentmux/core'
 import { AgentMuxSpatialStateStore } from '../../../packages/core/src/spatial-state'
 import { spatialAgentOpenRecord } from '../../../packages/core/src/spatial-agent-open'
 import { AgentMuxControlServer } from '../../../packages/core/src/public-rpc-server'
@@ -48,36 +48,53 @@ async function fixture(sourceCarrier = 'B-in-A') {
   const executor = { executorId: 'selected', providerId: 'codex', label: 'Original D configuration', command: '/D/private-cli', source: 'registered' as const,
     configRevision: 'D-revision', availability: 'unknown' as const, launchOptions: [], creationContract: { ordinaryLaunch: 1 as const } }
   let session: AgentMuxAgentSession | undefined, frozen: AgentExecutionOpenInput | undefined
+  const locatorWorkspacePath = '/D/agent-workspaces/' + 'a'.repeat(64)
   const forbidden = vi.fn(async () => { throw Error('Creation sends no task or navigation input.') })
   const d = { resolveAgentCreationSessionId: vi.fn(async () => 'same-SID'), inspectAgentCreation: vi.fn(async () => {
     if (!session) throw new AgentMuxError('The original creation is absent.', 'AGENT_CREATION_UNKNOWN'); return session
-  }), listHostExecutors: vi.fn(async () => ({ runtimeId: 'D', executors: [executor] })), hostEnvironment: vi.fn(async () => ({ homeDirectory: '/D/home' })),
+  }), listHostExecutors: vi.fn(async () => ({ runtimeId: 'D', executors: [executor] })), hostEnvironment: vi.fn(async (selector?: { agentSessionId: string }) => selector ? {
+    homeDirectory: '/D/home', agentWorkspace: { runtimeId: 'D', agentSessionId: selector.agentSessionId, workspacePath: locatorWorkspacePath }
+  } : { homeDirectory: '/D/home' }),
     writeAgent: forbidden, pasteAgent: forbidden, submitAgentPrompt: forbidden }
-  const bindings = { create: vi.fn(async (input: AgentExecutionOpenInput) => {
-    frozen = input; session = { kind: 'agent', agentSessionId: input.agent.agentSessionId, hostId: 'local', providerId: 'codex', executorId: 'selected', workspacePath: input.agent.workspacePath,
-      createdAt: 1, updatedAt: 1, run: { runId: 'controlled-original-D-run' }, retiredRuns: [], creation: { createOperationId: input.agent.createOperationId, executorRevision: input.agent.executorRevision, initialPrompt: 'not-requested' },
-      toolExecution: { bindingId: input.bindingId, resourceHostId: input.resourceHostId, resourceRuntimeId: input.resourceRuntimeId, workspacePath: input.resourceWorkspacePath } }
-    return { session, creation: session.creation!, execution: {} }
-  }), inspect: vi.fn(async () => frozen ? { bindingId: frozen.bindingId, agentHostId: frozen.agentHostId, resourceHostId: frozen.resourceHostId, agentSessionId: frozen.agent.agentSessionId,
-    resourceWorkspacePath: frozen.resourceWorkspacePath, state: 'connected', continuation: { bindingId: frozen.bindingId, agentSessionId: frozen.agent.agentSessionId, createOperationId: frozen.agent.createOperationId } } : null),
-    continueOriginal: vi.fn(async () => { throw Error('No automatic continuation is allowed.') }) }
-  const local = { ...d, listHostExecutors: vi.fn(async () => ({ runtimeId: 'B', executors: [{ ...executor, configRevision: 'B-revision', label: 'Original B configuration' }] })),
+  const reference = () => ({ bindingId: frozen!.bindingId, agentSessionId: frozen!.agent.agentSessionId, createOperationId: frozen!.agent.createOperationId })
+  const bindings = {
+    admit: vi.fn(async (input: AgentExecutionOpenInput) => { frozen = input; return reference() }),
+    create: vi.fn(async (input: AgentExecutionOpenInput) => {
+      frozen = input; session = { kind: 'agent', agentSessionId: input.agent.agentSessionId, hostId: 'local', providerId: 'codex', executorId: 'selected', workspacePath: input.agent.workspacePath,
+        createdAt: 1, updatedAt: 1, run: { runId: 'controlled-original-D-run' }, retiredRuns: [], creation: { createOperationId: input.agent.createOperationId, executorRevision: input.agent.executorRevision, initialPrompt: 'not-requested' },
+        toolExecution: { bindingId: input.bindingId, resourceHostId: input.resourceHostId, resourceRuntimeId: input.resourceRuntimeId, workspacePath: input.resourceWorkspacePath } }
+      return { session, creation: session.creation!, execution: {} }
+    }),
+    inspect: vi.fn(async (bindingId: string, view?: 'association') => frozen && bindingId === frozen.bindingId ? {
+      bindingId: frozen.bindingId, agentHostId: frozen.agentHostId, resourceHostId: frozen.resourceHostId, agentSessionId: frozen.agent.agentSessionId,
+      resourceWorkspacePath: frozen.resourceWorkspacePath, state: session?.creation?.createOperationId === frozen.agent.createOperationId ? 'connected' as const : 'unavailable' as const,
+      continuation: reference(), ...(view === 'association' ? { association: { state: 'confirmed' as const, reference: reference(), agentRuntimeId: frozen.agentRuntimeId,
+        resourceRuntimeId: frozen.resourceRuntimeId, resourceWorkspacePath: frozen.resourceWorkspacePath,
+        agent: { executorId: frozen.agent.executorId, executorRevision: frozen.agent.executorRevision, workspacePath: frozen.agent.workspacePath },
+        ...(frozen.sourceRequestDigest ? { sourceRequestDigest: frozen.sourceRequestDigest } : {}) } } : {}) } : null),
+    continueOriginal: vi.fn(async () => {
+      if (!frozen) throw Error('The original frozen intent is absent.')
+      const created = session?.creation?.createOperationId === frozen.agent.createOperationId ? { session, creation: session.creation! } : await bindings.create(frozen)
+      return { ...created, execution: await bindings.inspect(frozen.bindingId) }
+    }) }
+  const local = { ...d, agentCreationAuthority: vi.fn(async () => ({ runtimeId: 'B' })),
+    listHostExecutors: vi.fn(async (selector?: { executorId?: string }) => ({ runtimeId: 'B', executors: [{ ...executor, configRevision: 'B-revision', label: 'Original B configuration' },
+      ...(selector?.executorId === 'codex' ? [{ ...executor, executorId: 'codex', configRevision: 'B-codex-revision', label: 'Codex' }] : [])] })),
     createHostAgentWithDelivery: vi.fn(async (input: { agentSessionId: string; createOperationId: string; executorId: string; executorRevision?: string; workspacePath: string }) => {
       session = { kind: 'agent', agentSessionId: input.agentSessionId, hostId: 'local', providerId: 'codex', executorId: input.executorId, workspacePath: input.workspacePath,
         createdAt: 1, updatedAt: 1, run: { runId: 'controlled-B-run' }, retiredRuns: [], creation: { createOperationId: input.createOperationId, ...(input.executorRevision ? { executorRevision: input.executorRevision } : {}), initialPrompt: 'not-requested' } }
       return { session, creation: session.creation!, promptConfirmed: true }
     }) }
-  const legacyCreate = vi.fn(local.createHostAgentWithDelivery.getMockImplementation()!)
-  Object.assign(local, { createAgentWithDelivery: legacyCreate })
   const runtime = { ownerIdentity: () => owner, executionHost: async (hostId: string) => {
     expect(['local', 'D-in-B']).toContain(hostId); return hostId === 'local' ? { runtimeId: 'B', client: local } : { runtimeId: 'D', client: d }
   }, executionBindings: bindings, client: local } as unknown as AgentMuxHeadlessRuntime
-  const server = new AgentMuxControlServer({ socketPath: join(root, 'rpc.sock'), spatialState: spatial,
+  const server = new AgentMuxControlServer({ socketPath: join(root, 'rpc.sock'), spatialState: spatial, executionBindings: bindings as never,
     coreClients: () => [{ hostId: 'local', client: local }, { hostId: 'D-in-B', client: d }] as never,
     snapshot: async () => ({ workspaces: [{ workspaceId: project.id, hostId: project.hostId, name: project.name, path: project.path, repoPath: null, kind: 'directory', projectId: null, branch: null }] }),
     forwardControl: async method => { expect(method).toBe('settings.hosts.ls'); return { hosts: await readHostSettingsHosts(path) } as never },
     spatialFolderResource: createHostFolderSpaceResource(path), spatialAgentControl: createHostSpatialAgentControl({ configurationPath: path, spatial, runtime: () => runtime }),
     hostedRuntime: () => ({ call: async (method: string) => { expect(method).toBe('runtime.owner.identity'); return { owner } }, assertFence() {}, subscribe: forbidden }) as never })
+  Object.assign(runtime, { server })
   await server.start(); cleanup.push(() => server.stop())
   const rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: server.path } }); cleanup.push(() => rpc.dispose())
   const transport = spaceMountTransport(cleanup, [{ id: sourceCarrier, carrier: { forwardRpc: rpc.call.bind(rpc), subscribeRpc: rpc.subscribe.bind(rpc) } }])
@@ -86,7 +103,7 @@ async function fixture(sourceCarrier = 'B-in-A') {
   useAppStore.setState({ config: { ...composerConfig, hosts: sourceCarrier === 'local' ? composerConfig.hosts : [...composerConfig.hosts, { id: sourceCarrier, kind: 'ssh', label: 'Original B', hostname: 'private.invalid' }], workspaces: [observerProject] },
     goalAgentCreationDrafts: {}, goalAgentSelectionDrafts: {}, mountedSpaceInputs: {}, sessions: [], agentComposerDrafts: { original: 'Keep unsent input' } })
   await initializeSpatialControlFixture()
-  return { root, configurationPath: path, spatial, folder, observerProject, bindings, local, legacyCreate, forbidden, get frozen() { return frozen } }
+  return { root, configurationPath: path, spatial, folder, observerProject, bindings, local, forbidden, d, locatorWorkspacePath, get frozen() { return frozen } }
 }
 async function prepareProject(f: Awaited<ReturnType<typeof fixture>>, target = JSON.stringify(['host', 'D-in-B'])) {
   await button('New Agent'); await field('Project for this arrangement', f.observerProject.id)
@@ -105,16 +122,35 @@ it.each([{ carrier: 'local', agent: 'local' }, { carrier: 'local', agent: 'D-in-
   await vi.waitFor(() => expect(agent === 'local' ? f.local.createHostAgentWithDelivery : f.bindings.create).toHaveBeenCalledOnce())
   await vi.waitFor(() => expect(document.querySelector('.goal-agent-picker__search')).not.toBeNull())
   const draft = readGoalSourceCreationDraft(useAppStore.getState().goalAgentCreationDrafts[key], goal.id, 'assignees')!
-  expect(draft.kind).toBe('goal-source-create')
+  expect(draft).toMatchObject({ kind: 'goal-source-create', receipt: { outcome: 'opened', save: { diskDurability: 'confirmed' } } })
   const admitted = spatialAgentOpenRecord((await f.spatial.read())!.graph, draft.operationId)!
   const selected = useAppStore.getState().goalAgentSelectionDrafts[key]
   expect(selected).toMatchObject({ selected: [{ kind: 'space-member', source: { runtimeId: 'B', spaceId: f.folder.spaceId, regionId: admitted.address.regionId,
     admission: { kind: 'creation', operationId: draft.operationId } }, execution: { runtimeId: agent === 'local' ? 'B' : 'D', agentSessionId: 'same-SID' } }],
     relationAccess: [{ access: { source: { hostId: carrier } } }] })
-  if (agent !== 'local') expect(f.frozen).toMatchObject({ agentRuntimeId: 'D', resourceRuntimeId: 'B', resourceWorkspacePath: '/B/original-project', agent: { createOperationId: draft.operationId } })
+  if (agent !== 'local') {
+    expect(f.frozen).toMatchObject({ agentRuntimeId: 'D', resourceRuntimeId: 'B', resourceWorkspacePath: '/B/original-project', agent: { createOperationId: draft.operationId, workspacePath: f.locatorWorkspacePath } })
+    expect(f.d.hostEnvironment).toHaveBeenCalledExactlyOnceWith({ agentSessionId: 'same-SID' })
+  } else expect(f.d.hostEnvironment).not.toHaveBeenCalled()
   expect(f.frozen?.agent.prompt).toBeUndefined(); expect(f.forbidden).not.toHaveBeenCalled(); expect(oldMain).not.toHaveBeenCalled(); expect(save).not.toHaveBeenCalled()
   expect(useAppStore.getState().agentComposerDrafts).toBe(before.agentComposerDrafts); expect(useAppStore.getState().tabs).toBe(before.tabs)
   expect(useAppStore.getState().layouts).toBe(before.layouts); expect(useAppStore.getState().selectedSpaceMount).toBe(before.selectedSpaceMount)
+})
+
+it('an unsupported selected locator keeps the Goal request and composer draft without admission or a home retry', async () => {
+  const f = await fixture(), before = useAppStore.getState(), render = () => dom.render(<GoalAgentPicker demand={goal} role="assignees" onSave={async () => false} onClose={() => {}} />)
+  f.d.hostEnvironment.mockRejectedValueOnce(new AgentMuxError('The selected target cannot resolve an exact Agent workspace.', 'REMOTE_CORE_UPGRADE_REQUIRED'))
+  await render(); await prepareProject(f); await button('Create Agent')
+  await vi.waitFor(() => expect(document.body.textContent).toContain('The selected target cannot resolve an exact Agent workspace.'))
+  expect(f.d.hostEnvironment).toHaveBeenCalledExactlyOnceWith({ agentSessionId: 'same-SID' })
+  expect(f.bindings.admit).not.toHaveBeenCalled(); expect(f.bindings.create).not.toHaveBeenCalled(); expect(f.local.createHostAgentWithDelivery).not.toHaveBeenCalled(); expect(f.forbidden).not.toHaveBeenCalled()
+  expect((await f.spatial.read())!.graph.regions).toEqual([])
+  const original = useAppStore.getState().goalAgentCreationDrafts[key]
+  expect(readGoalSourceCreationDraft(original, goal.id, 'assignees')).toMatchObject({ kind: 'goal-source-create', operationId: expect.any(String) })
+  expect(useAppStore.getState().agentComposerDrafts).toBe(before.agentComposerDrafts)
+  await dom.render(null); await render()
+  expect(useAppStore.getState().goalAgentCreationDrafts[key]).toBe(original)
+  expect(f.d.hostEnvironment).toHaveBeenCalledOnce(); expect(f.bindings.admit).not.toHaveBeenCalled(); expect(f.bindings.create).not.toHaveBeenCalled(); expect(f.forbidden).not.toHaveBeenCalled()
 })
 
 it('an original Reach C with an unknown ACK is inspected and explicitly continued through the same Main reference before the actual Source L, without a Launcher slot or repeated creation', async () => {
@@ -310,14 +346,14 @@ it('the original Mote producer keeps one legacy OP through actual Source Host pr
   const render = () => dom.render(<GoalAgentPicker demand={goal} role="assignees" onSave={async () => false} onClose={() => {}} />)
   await render(); await button('Mote · new Session'); await field('Mote for new Session', topic.id); await field('New Session Agent configuration', 'codex')
   await button('Create Mote Session'); await vi.waitFor(() => expect(document.body.textContent).toContain('Original Mote creation ACK lost'))
-  expect(f.legacyCreate).toHaveBeenCalledOnce()
+  expect(f.local.createHostAgentWithDelivery).toHaveBeenCalledOnce()
   const original = useAppStore.getState().goalAgentCreationDrafts[key]
   expect(original).toMatchObject({ phase: 'may-have-dispatched', request: { content: { kind: 'new-agent', executorId: 'codex' } } })
-  expect(f.legacyCreate.mock.calls[0]![0]).toMatchObject({ workspacePath: topicPath, sourceAgentMuxNote: expect.stringContaining(`Your persistent Mote identity is ${topic.id}`), optionalContext: expect.arrayContaining([expect.objectContaining({ text: expect.stringContaining('Mote personality from') })]) })
-  expect(f.legacyCreate.mock.calls[0]![0]).not.toHaveProperty('prompt')
+  expect(f.local.createHostAgentWithDelivery.mock.calls[0]![0]).toMatchObject({ workspacePath: topicPath, sourceAgentMuxNote: expect.stringContaining(`Your persistent Mote identity is ${topic.id}`), optionalContext: expect.arrayContaining([expect.objectContaining({ text: expect.stringContaining('Mote personality from') })]) })
+  expect(f.local.createHostAgentWithDelivery.mock.calls[0]![0]).not.toHaveProperty('prompt')
   await dom.render(null); await render(); await vi.waitFor(() => expect(document.body.textContent).toContain('Original Session observed'))
   expect(calls.filter(value => value === 'agent.open')).toHaveLength(1); expect(calls).toContain('space.inspect')
-  expect(f.legacyCreate).toHaveBeenCalledOnce(); expect(f.forbidden).not.toHaveBeenCalled()
+  expect(f.local.createHostAgentWithDelivery).toHaveBeenCalledOnce(); expect(f.forbidden).not.toHaveBeenCalled()
   expect(useAppStore.getState().goalAgentCreationDrafts[key]).toBe(original)
   expect(useAppStore.getState().goalAgentSelectionDrafts[key]).toMatchObject({ selected: ['same-SID'] })
 })

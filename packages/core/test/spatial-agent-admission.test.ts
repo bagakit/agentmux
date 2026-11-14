@@ -39,7 +39,7 @@ it('a lost durable Core admission ACK recovers through original witness before c
  await expect(f.rpc.call('agent.open',f.input)).rejects.toThrow('Core admission ACK lost')
  expect(spatialAgentOpenRecord((await f.spatial.read())!.graph,f.input.operationId)).toBeNull();expect(f.prepare).not.toHaveBeenCalled()
  const key=reference(f),frozen=await f.bindings.inspect(key.bindingId,'association')
- expect(frozen?.association).toMatchObject({state:'confirmed',reference:key,sourceRequestDigest:spatialAgentOpenDigest(request(f)),agent:{executorId:'d-executor',executorRevision:'d'.repeat(64),workspacePath:'/d/home'}})
+ expect(frozen?.association).toMatchObject({state:'confirmed',reference:key,sourceRequestDigest:spatialAgentOpenDigest(request(f)),agent:{executorId:'d-executor',executorRevision:'d'.repeat(64),workspacePath:f.locatorWorkspacePath}})
  expect(JSON.stringify(frozen)).not.toContain('Original Source context')
  noCurrentConfiguration(f);await f.restartBindings()
  const cli=await runSourceObjectCli(['--endpoint','unix:'+f.server.path,'agent','open','--executor','d-executor','--agent-host','D-in-B','--agent-runtime','runtime-d','--space',f.folder.spaceId,'--zone',f.folder.zoneId,'--new-tab','--operation-id',f.input.operationId],objectCliEnvironment(f.root),'',15000,process.env.T012_CLI_LOADER?new URL(process.env.T012_CLI_LOADER):undefined)
@@ -47,9 +47,9 @@ it('a lost durable Core admission ACK recovers through original witness before c
  expect(cli.stdout,cli.stderr).not.toBe('')
  expect(JSON.parse(cli.stdout)).toMatchObject({ok:true,result:{outcome:'unknown',execution:{reference:key},issues:expect.arrayContaining([expect.objectContaining({step:'creation',code:'EXECUTION_HELPER_UNAVAILABLE'})])}})
  const record=spatialAgentOpenRecord((await f.spatial.read())!.graph,f.input.operationId)!
- expect(record.executionBinding).toEqual(key);expect(record.execution).toMatchObject({workspacePath:'/d/home',executorRevision:'d'.repeat(64)});expect(record.placement).toMatchObject({runtimeId:'runtime-b',workspacePath:'/b/project'})
+ expect(record.executionBinding).toEqual(key);expect(record.execution).toMatchObject({workspacePath:f.locatorWorkspacePath,executorRevision:'d'.repeat(64)});expect(record.placement).toMatchObject({runtimeId:'runtime-b',workspacePath:'/b/project'})
  expect(f.bindings.admit).toHaveBeenCalledOnce();expect(f.bindings.create).not.toHaveBeenCalled();expect(f.bindings.continueOriginal).toHaveBeenCalledExactlyOnceWith(key,expect.anything())
- expect(f.client.listHostExecutors).toHaveBeenCalledOnce();expect(f.client.hostEnvironment).toHaveBeenCalledOnce();expect(f.sourceNote).toHaveBeenCalledOnce()
+ expect(f.client.listHostExecutors).toHaveBeenCalledOnce();expect(f.client.hostEnvironment).toHaveBeenCalledExactlyOnceWith({agentSessionId:'original-d-session'});expect(f.sourceNote).toHaveBeenCalledOnce()
  expect(f.prepare).toHaveBeenCalledOnce();expect(f.starts).not.toHaveBeenCalled();expect(f.create).not.toHaveBeenCalled();expect(f.agentInput).not.toHaveBeenCalled()
 })
 it('a lost Source placement ACK leaves the frozen original request recoverable without another admission or current note',async()=>{

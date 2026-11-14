@@ -1,5 +1,6 @@
 import { vi, expect } from 'vitest'
 import { mkdtemp, rm } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { isDeepStrictEqual } from 'node:util'
@@ -29,11 +30,14 @@ export async function sourceCreationFixture(releases: Array<() => unknown | Prom
         executorRevision: input.executorRevision, createdRun: { runId: 'original-d-run' }, initialPrompt: 'not-requested' } } as AgentMuxAgentSession
     return { session: observed, creation: observed.creation! }
   })
+  const agentWorkspacePath = (agentSessionId: string) => '/d/agent-workspaces/' + createHash('sha256').update(agentSessionId, 'utf8').digest('hex')
   const agentInput = vi.fn(async () => { throw Error('No Agent input belongs to this Host continuation fixture.') })
   const client = { writeAgent: agentInput, pasteAgent: agentInput, submitAgentPrompt: agentInput, resolveAgentCreationSessionId: vi.fn(async () => 'original-d-session'),
     inspectAgentCreation: vi.fn(async () => { if (retired) return retired; if (!observed) throw new AgentMuxError('No original creation is observed.', 'AGENT_CREATION_UNKNOWN'); return observed }),
     listHostExecutors: vi.fn(async () => ({ runtimeId, executors: [{ executorId: 'd-executor', configRevision: 'd'.repeat(64), creationContract: { ordinaryLaunch: 1 } }] })),
-    hostEnvironment: vi.fn(async () => ({ homeDirectory: '/d/home' })), createHostAgentWithDelivery: create }
+    hostEnvironment: vi.fn(async (selector?: { agentSessionId: string }) => selector ? { homeDirectory: '/d/home',
+      agentWorkspace: { runtimeId, agentSessionId: selector.agentSessionId, workspacePath: agentWorkspacePath(selector.agentSessionId) } } : { homeDirectory: '/d/home' }),
+    createHostAgentWithDelivery: create }
   const reference = () => ({ bindingId: frozen!.bindingId, agentSessionId: frozen!.agent.agentSessionId, createOperationId: frozen!.agent.createOperationId })
   const freeze = async (input: AgentExecutionOpenInput) => {
     if (frozen && !isDeepStrictEqual(input, frozen)) throw new AgentMuxError('Another original frozen creation.', 'EXECUTION_INTENT_UNCONFIRMED')
@@ -105,6 +109,7 @@ export async function sourceCreationFixture(releases: Array<() => unknown | Prom
   const input = { operationId: 'source-create-operation', content: { kind: 'new-agent' as const, executorId: 'd-executor', agentTarget: { hostId: 'D-in-B', runtimeId } },
     destination: { spaceId: folder.spaceId, zoneId: folder.zoneId, newTab: true as const }, focus: false }
   return { root, rpc, spatial, runtime, server, client, create, bindings, input, folder, control, agentInput, sourceNote, prepare, starts,
+    locatorWorkspacePath: agentWorkspacePath('original-d-session'),
     restartBindings: async () => { if (!service) throw Error('Real binding owner required.'); await service.dispose(); service = newService() },
     retire: (history: 'matching' | 'missing' | 'other-creation' = 'matching') => {
       if (!observed) throw Error('Retirement needs the original controlled creation first.')
