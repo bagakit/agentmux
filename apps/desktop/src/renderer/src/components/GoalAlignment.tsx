@@ -9,6 +9,7 @@ import { goalNextStepFact, goalResultExplanation } from '../lib/goal-presentatio
 import { GoalEvidence } from './GoalEvidence'
 import { useGoalDiscussionRecipient } from '../lib/goal-discussion-recipient'
 import dialogueArtworkUrl from '@agentmux/client-ui/brand/illustrations/goals/demand-dialogue.png'
+import '../styles/goal-review.css'
 
 const ThemeObjectGoalIcon = semanticIconComponent('object.goal')
 const ThemeActionConfirmIcon = semanticIconComponent('action.confirm')
@@ -62,54 +63,70 @@ export function GoalAlignment({ demand, emphasis, children, onGrill, onGrounding
     finally { acknowledgementPending.current = false; onFeedbackChange({ pending: false }) }
   }
   const checks = new Map(grounding?.checks.map(check => [check.criterionId, check]) ?? [])
+  const currentReport = Boolean(alignment && grounding && !stale)
+  const compactAgreement = Boolean(alignment?.confirmedAt && !confirmIssue && !grounding && demand.status !== 'done' && !failure)
+  const criterionIds = new Set(alignment?.criteria.map(criterion => criterion.id))
+  const extraChecks = grounding?.checks.filter(check => !criterionIds.has(check.criterionId)) ?? []
   const resultExplanation = goalResultExplanation(demand)
   const goalRequestButton = <button type="button" className={!failure && focus === 'definition' && (!alignment || confirmIssue) ? 'primary-button' : 'small-button'} data-goal-grill disabled={Boolean(motePending)} onClick={onGrill}>{motePending === 'grill' ? 'Sending request…' : recipient.requestLabel('grill')}</button>
   const goalRequestNote = <span className="goals-request-action"><img className="goals-request-action__art" src={dialogueArtworkUrl} alt="" aria-hidden="true" onError={(event) => { event.currentTarget.hidden = true }} /><span className="goals-caption">{recipient.description}</span></span>
   const resultRequest = alignment?.confirmedAt ? <button type="button" className={!failure && focus === 'results' && demand.status === 'done' && !grounding ? 'primary-button' : 'small-button'} data-goal-grounding disabled={Boolean(motePending)} onClick={onGrounding}>{motePending === 'grounding' ? 'Sending request…' : recipient.requestLabel('grounding')}</button> : null
+  const reportCaption = accepted ? hasGaps ? 'Accepted with gaps' : 'Accepted by you' : stale ? 'Report needs updating' : 'Agent report · Not accepted yet'
+  const reportState = accepted ? (hasGaps ? 'accepted-with-gaps' : 'accepted') : stale ? 'stale' : 'reported'
+  const reportActions = grounding ? <>
+    {!accepted && !stale && resultExplanation ? <p className="goals-condition">{resultExplanation}</p> : null}
+    {accepted && hasGaps ? <p className="goals-condition">You accepted this result with the reported gaps. Those gaps remain part of the record.</p> : null}
+    {accepted ? <p className="goals-caption" data-goal-completion-state>{demand.status === 'done' ? 'Goal finished · Results and original work are kept.' : 'Results accepted · Goal remains open.'}</p> : null}
+    <div className="goals-inline-actions">
+      {!failure && alignment && gapIssue === null && demand.status !== 'done' ? <button type="button" className={focus === 'results' ? 'primary-button' : 'small-button'} data-goal-finish disabled={pending} onClick={() => void acknowledge({ kind: 'accept', revision: alignment.revision, submissionId: grounding.submissionId, gaps: hasGaps, finish: true })}>{pending ? 'Saving…' : accepted ? 'Finish goal' : hasGaps ? 'Accept with gaps and finish' : 'Accept and finish'}<ThemeActionAcceptResultsIcon size={13} /></button> : null}
+      {!failure && !accepted && alignment && gapIssue === null ? <button type="button" className={focus === 'results' && demand.status === 'done' ? 'primary-button' : 'small-button'} {...(hasGaps ? { 'data-goal-accept-gaps': true } : { 'data-goal-accept': true })} disabled={pending} onClick={() => void acknowledge({ kind: 'accept', revision: alignment.revision, submissionId: grounding.submissionId, gaps: hasGaps })}>{pending ? 'Saving…' : hasGaps ? 'Accept results, keep gaps' : 'Accept results'}<ThemeActionAcceptResultsIcon size={13} /></button> : null}
+      {resultRequest}
+    </div>
+    {!accepted && gapIssue === null && demand.status !== 'done' ? <p className="goals-caption">Accept and finish also closes the goal.</p> : null}
+  </> : null
+  const noResults = <div className={`goals-no-results${compactAgreement ? ' goal-review__no-results--compact' : ''}`} data-goal-result-state="missing">
+    {!compactAgreement ? <div className="goals-section-heading"><h2>Results review</h2><span className="goals-caption">No report yet</span></div> : null}
+    {demand.status === 'done' ? <><p className="goals-condition"><strong>Results not verified</strong></p><p className="goals-muted">Marked done, but no report has checked the work against success criteria.</p></> : <p className="goals-muted">Agents work on this goal next. Ask for a result check when the work is ready.</p>}
+    <div className="goals-inline-actions">{alignment?.confirmedAt ? <button type="button" className="small-button" disabled={Boolean(motePending)} onClick={onOpenMote} aria-label={`Open discussion for ${demand.title}`}>{motePending === 'open' ? 'Opening discussion…' : recipient.openLabel}</button> : null}{resultRequest}</div>
+  </div>
   return <>
     {failure ? <div className="goals-service" role="status" data-goal-acknowledgement-failure>{failure.attempt.kind === 'confirm' ? 'Goal confirmation' : 'Result acceptance'} is unconfirmed. Your goal and current work are kept. <span>{failure.message}</span><button type="button" className="primary-button" disabled={pending} onClick={() => void reload()}>Reload current proposal</button>{reloadError ? <span>Reload failed: {reloadError}</span> : null}</div> : null}
-    {alignment ? <section className="goals-alignment" aria-label="Goal definition" data-goal-id={demand.id} data-goal-alignment-revision={alignment.revision} data-goal-confirmation-state={alignment.confirmedAt ? 'confirmed' : 'unconfirmed'}>
-      <div className="goals-section-heading"><h2 ref={heading}><ThemeObjectGoalIcon key={cue.key} size={14} aria-hidden="true" animation={cue.animation} onAnimationEnd={cue.stop} /> Goal definition</h2><span className="goals-caption">{alignment.confirmedAt ? 'Confirmed by you' : confirmIssue ? alignment.openQuestions.length ? 'Decisions needed' : 'Define success criteria' : 'Needs your confirmation'}</span></div>
+    {alignment ? <section className={`goals-alignment goal-review${currentReport ? ' goals-grounding' : ''}${compactAgreement ? ' goal-review--compact' : ''}`} aria-label={currentReport ? 'Goal definition and results review' : 'Goal definition'} data-goal-id={demand.id} data-goal-alignment-revision={alignment.revision} data-goal-confirmation-state={alignment.confirmedAt ? 'confirmed' : 'unconfirmed'} {...(currentReport ? { 'data-goal-grounding-submission': grounding!.submissionId, 'data-goal-result-state': reportState } : {})}>
+      <details className="goal-review__disclosure" open={!compactAgreement}>
+      <summary className="goals-section-heading"><h2 ref={heading}><ThemeObjectGoalIcon key={cue.key} size={14} aria-hidden="true" animation={cue.animation} onAnimationEnd={cue.stop} />{currentReport ? 'Results review' : 'Goal definition'}</h2><span className="goals-caption">{currentReport ? reportCaption : alignment.confirmedAt ? `Confirmed by you · ${alignment.criteria.length} success criteria${compactAgreement ? ' · No report yet' : ''}` : confirmIssue ? alignment.openQuestions.length ? 'Decisions needed' : 'Define success criteria' : 'Needs your confirmation'}</span></summary>
+      <div className="goal-review__body">
       <p className="goals-proposal" data-goal-summary>{alignment.summary}</p>
-      <details className="goals-criteria-reading" open={!alignment.confirmedAt} key={`${demand.id}:${alignment.revision}:${Boolean(alignment.confirmedAt)}`}><summary>Success criteria · {alignment.criteria.length}</summary>
-      {alignment.criteria.length ? <ol className="goals-criteria">{alignment.criteria.map(criterion => <li key={criterion.id} data-goal-success-criterion={criterion.id}>{criterion.text}</li>)}</ol> : <p className="goals-muted">Define how to recognize success before confirming this goal.</p>}
-      </details>
+      {currentReport ? <p className="goals-proposal" data-goal-result-summary>{grounding!.summary}</p> : null}
+      {alignment.criteria.length ? grounding ? <div className="goals-result-checks">{alignment.criteria.map(criterion => <GoalResultCheck key={criterion.id} criterionId={criterion.id} criterion={criterion.text} check={stale ? undefined : checks.get(criterion.id)} stale={stale} currentCriterion />)}</div>
+        : <ol className="goals-criteria">{alignment.criteria.map(criterion => <li key={criterion.id} data-goal-success-criterion={criterion.id}>{criterion.text}</li>)}</ol> : <p className="goals-muted">Define how to recognize success before confirming this goal.</p>}
+      {currentReport && extraChecks.length ? <div className="goal-review__extra-checks"><h3>Additional reported checks</h3>{extraChecks.map(check => <GoalResultCheck key={check.criterionId} criterionId={check.criterionId} criterion={`Reported criterion: ${check.criterionId}`} check={check} stale={false} />)}</div> : null}
       {alignment.openQuestions.length ? <div className="goals-open-questions"><h3>Decisions needed</h3><ul>{alignment.openQuestions.map((question, i) => <li key={i}>{question}</li>)}</ul></div> : null}
       {confirmIssue && alignment.openQuestions.length ? <p className="goals-condition">Resolve these decisions before confirming the goal.</p> : null}
       <div className="goals-inline-actions">{!failure && !alignment.confirmedAt && !confirmIssue ? <button type="button" className={focus === 'definition' ? 'primary-button' : 'small-button'} data-goal-confirm disabled={pending} onClick={() => void acknowledge({ kind: 'confirm', revision: alignment.revision })}>{pending ? 'Saving…' : 'Confirm goal'}<ThemeActionConfirmIcon size={13} /></button> : null}{goalRequestButton}{goalRequestNote}</div>
+      {currentReport ? reportActions : null}
+      </div></details>
+      {compactAgreement ? noResults : null}
     </section> : <div className="goals-clarification" aria-label="Clarify goal" data-goal-id={demand.id} data-goal-confirmation-state="unconfirmed">
       <p className="goals-muted">Clarify the outcome and what success looks like with the agent.</p><div className="goals-inline-actions">{goalRequestButton}{goalRequestNote}</div>
     </div>}
     {children}
-    {grounding ? <section className="goals-grounding" aria-label="Results review" data-goal-grounding-submission={grounding.submissionId} data-goal-result-state={accepted ? (hasGaps ? 'accepted-with-gaps' : 'accepted') : stale ? 'stale' : 'reported'}>
-      <div className="goals-section-heading"><h2>Results review</h2><span className="goals-caption">{accepted ? hasGaps ? 'Accepted with gaps' : 'Accepted by you' : stale ? 'Report needs updating' : 'Agent report · Not accepted yet'}</span></div>
+    {grounding && !currentReport ? <section className="goals-grounding" aria-label="Results review" data-goal-grounding-submission={grounding.submissionId} data-goal-result-state={reportState}>
+      <div className="goals-section-heading"><h2>Results review</h2><span className="goals-caption">{reportCaption}</span></div>
       {stale ? <p className="goals-condition">This report is for the previous goal (v{grounding.alignmentRevision}). Check the current goal (v{alignment!.revision}) again; previous acceptance does not apply.</p> : <p className="goals-proposal" data-goal-result-summary>{grounding.summary}</p>}
-      {alignment?.criteria.length ? <div className="goals-result-checks">{alignment.criteria.map(criterion => <GoalResultCheck key={criterion.id} criterionId={criterion.id} criterion={criterion.text} check={stale ? undefined : checks.get(criterion.id)} stale={stale} />)}</div> : <div className="goals-result-checks">{grounding.checks.map(check => <GoalResultCheck key={check.criterionId} criterionId={check.criterionId} criterion={`Reported criterion: ${check.criterionId}`} check={check} stale={false} />)}</div>}
-      {stale ? <details className="goals-previous-report"><summary>Previous agent report</summary><p className="goals-proposal">{grounding.summary}</p>{grounding.checks.map(check => <GoalResultCheck key={check.criterionId} criterionId={check.criterionId} criterion={alignment?.criteria.find(criterion => criterion.id === check.criterionId)?.text ?? check.criterionId} check={check} stale={false} />)}</details> : null}
-      {!accepted && !stale && resultExplanation ? <p className="goals-condition">{resultExplanation}</p> : null}
-      {accepted && hasGaps ? <p className="goals-condition">You accepted this result with the reported gaps. Those gaps remain part of the record.</p> : null}
-      {accepted ? <p className="goals-caption" data-goal-completion-state>{demand.status === 'done' ? 'Goal finished · Results and original work are kept.' : 'Results accepted · Goal remains open.'}</p> : null}
-      <div className="goals-inline-actions">
-        {!failure && alignment && gapIssue === null && demand.status !== 'done' ? <button type="button" className={focus === 'results' ? 'primary-button' : 'small-button'} data-goal-finish disabled={pending} onClick={() => void acknowledge({ kind: 'accept', revision: alignment.revision, submissionId: grounding.submissionId, gaps: hasGaps, finish: true })}>{pending ? 'Saving…' : accepted ? 'Finish goal' : hasGaps ? 'Accept with gaps and finish' : 'Accept and finish'}<ThemeActionAcceptResultsIcon size={13} /></button> : null}
-        {!failure && !accepted && alignment && gapIssue === null ? <button type="button" className={focus === 'results' && demand.status === 'done' ? 'primary-button' : 'small-button'} {...(hasGaps ? { 'data-goal-accept-gaps': true } : { 'data-goal-accept': true })} disabled={pending} onClick={() => void acknowledge({ kind: 'accept', revision: alignment.revision, submissionId: grounding.submissionId, gaps: hasGaps })}>{pending ? 'Saving…' : hasGaps ? 'Accept results, keep gaps' : 'Accept results'}<ThemeActionAcceptResultsIcon size={13} /></button> : null}
-        {resultRequest}
-      </div>
-      {!accepted && gapIssue === null && demand.status !== 'done' ? <p className="goals-caption">Accept and finish also closes the goal.</p> : null}
-    </section> : demand.status === 'done' || alignment?.confirmedAt ? <div className="goals-no-results" data-goal-result-state="missing">
-      <div className="goals-section-heading"><h2>Results review</h2><span className="goals-caption">No report yet</span></div>
-      {demand.status === 'done' ? <><p className="goals-condition"><strong>Results not verified</strong></p><p className="goals-muted">Marked done, but no report has checked the work against success criteria.</p></> : <p className="goals-muted">Agents work on this goal next. Ask for a result check when the work is ready.</p>}
-      <div className="goals-inline-actions">{alignment?.confirmedAt ? <button type="button" className="small-button" disabled={Boolean(motePending)} onClick={onOpenMote} aria-label={`Open discussion for ${demand.title}`}>{motePending === 'open' ? 'Opening discussion…' : recipient.openLabel}</button> : null}{resultRequest}</div>
-    </div> : null}
+      {stale ? <details className="goals-previous-report"><summary>Previous agent report · v{grounding.alignmentRevision}</summary><p className="goals-proposal">{grounding.summary}</p>{grounding.checks.map(check => <GoalResultCheck key={check.criterionId} criterionId={check.criterionId} criterion={`Reported criterion: ${check.criterionId}`} check={check} stale={false} />)}</details>
+        : <div className="goals-result-checks">{grounding.checks.map(check => <GoalResultCheck key={check.criterionId} criterionId={check.criterionId} criterion={`Reported criterion: ${check.criterionId}`} check={check} stale={false} />)}</div>}
+      {reportActions}
+    </section> : !grounding && !compactAgreement && (demand.status === 'done' || alignment?.confirmedAt) ? noResults : null}
   </>
 
 }
 
-function GoalResultCheck({ criterionId, criterion, check, stale }: { criterionId: string; criterion: string; check: DemandGroundingCheck | undefined; stale: boolean }) {
+function GoalResultCheck({ criterionId, criterion, check, stale, currentCriterion = false }: { criterionId: string; criterion: string; check: DemandGroundingCheck | undefined; stale: boolean; currentCriterion?: boolean }) {
   const outcome = stale ? 'stale' : check?.outcome ?? 'missing'
   const Icon = outcome === 'met' ? ThemeStatusCompletedIcon : outcome === 'gap' ? ThemeStatusGapIcon : ThemeStatusUnknownIcon
   const label = { met: 'Reported met', gap: 'Reported gap', unknown: 'Unknown', missing: 'Missing check', stale: 'Needs current check' }[outcome]
   return <div className="goals-result-check" data-goal-criterion-id={criterionId} data-goal-outcome={outcome}>
-    <div className="goals-result-check__heading"><strong>{criterion}</strong><span><Icon size={12} />{label}</span></div>
+    <div className="goals-result-check__heading"><strong {...(currentCriterion ? { 'data-goal-success-criterion': criterionId } : {})}>{criterion}</strong><span><Icon size={12} />{label}</span></div>
     {check?.note ? <p className="goals-result-note">{check.note}</p> : null}
     {check?.evidence.length ? <GoalEvidence evidence={check.evidence} criterion={criterion} /> : check ? <p className="goals-result-note goals-result-note--missing">No evidence provided.</p> : null}
   </div>

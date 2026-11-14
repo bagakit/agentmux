@@ -429,13 +429,13 @@
 .goal-responsibility-preview > .goal-responsibility { margin-top: var(--sp-3); padding: var(--sp-2) 0; cursor: auto; }
 
 /* Native disclosure keeps its original mounted controls and keyboard semantics. */
-.goals-surface :is(.goal-responsibility-preview, .goals-detail__properties) { interpolate-size: allow-keywords; }
-.goals-surface :is(.goal-responsibility-preview, .goals-detail__properties)::details-content { block-size: 0; opacity: 0; overflow: clip; transition: block-size var(--goal-motion-disclosure) var(--goal-motion-ease), opacity 180ms ease, content-visibility var(--goal-motion-disclosure) allow-discrete; }
-.goals-surface :is(.goal-responsibility-preview, .goals-detail__properties)[open]::details-content { block-size: auto; opacity: 1; }
-.goals-surface :is(.goal-responsibility-preview, .goals-detail__properties):not([open]) > :not(summary) { interactivity: inert; }
+.goals-surface :is(.goal-responsibility-preview, .goals-detail__properties, .goal-review__disclosure) { interpolate-size: allow-keywords; }
+.goals-surface :is(.goal-responsibility-preview, .goals-detail__properties, .goal-review__disclosure)::details-content { block-size: 0; opacity: 0; overflow: clip; transition: block-size var(--goal-motion-disclosure) var(--goal-motion-ease), opacity 180ms ease, content-visibility var(--goal-motion-disclosure) allow-discrete; }
+.goals-surface :is(.goal-responsibility-preview, .goals-detail__properties, .goal-review__disclosure)[open]::details-content { block-size: auto; opacity: 1; }
+.goals-surface :is(.goal-responsibility-preview, .goals-detail__properties, .goal-review__disclosure):not([open]) > :not(summary) { interactivity: inert; }
 .goals-board, .goals-list { animation: goal-collection-enter 280ms var(--goal-motion-ease) both; }
 @keyframes goal-collection-enter { from { opacity: .35; transform: translateY(4px); } to { opacity: 1; transform: none; } }
 @media (prefers-reduced-motion: reduce) {
-  .goals-surface :is(.goal-responsibility-preview, .goals-detail__properties)::details-content, .goal-responsibility-preview__more svg { transition: none; }
+  .goals-surface :is(.goal-responsibility-preview, .goals-detail__properties, .goal-review__disclosure)::details-content, .goal-responsibility-preview__more svg { transition: none; }
   .goals-board, .goals-list { animation: none; }
 }
