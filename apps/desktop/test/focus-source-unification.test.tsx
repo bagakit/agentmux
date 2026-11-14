@@ -33,7 +33,7 @@ import { composerDOM, composerSession } from './helpers/composer-dom-fixture'
 import { spaceMountTransport } from './helpers/space-mount-fixture'
 
 const dom = composerDOM({ agentInformation: true }), cleanup: Array<() => unknown | Promise<unknown>> = []
-afterEach(async () => { for (const dispose of cleanup.splice(0).reverse()) await dispose() })
+afterEach(async () => { await dom.render(null); for (const dispose of cleanup.splice(0).reverse()) await dispose() })
 const foreignRecap = '原远端自己的非空分析结论，沿原 Provider 和有界阅读载体消费。'
 const SID = 'same-original-sid', localName = '原本机任务：核对分析结果', localRecap = '原本机已经核对的业务结论，不能借给另一个 Runtime。'
 const timeline = (sid: string, text: string): AgentTimelineSnapshot => ({ agentSessionId: sid, revision: 1, items: [{ id: 'original-answer', agentSessionId: sid, kind: 'assistant_message', title: 'Original answer', source: 'native-hook', status: 'complete', content: text, createdAt: 1, updatedAt: 1 }] })
@@ -44,9 +44,10 @@ function MainFocusFixture({ navigate, regionOnly = false }: { navigate: (id: str
   const select = (reference: WorkbenchProjectionSelection) => { state.selectMainRegion(reference, state.workbenchSpaceSelection) }
   const presentation = mainFocusPresentation(state.workbenchSpaceSelection, state.tabs, catalog, select, regionOnly ? 'region' : 'tab')
   const projection = presentation.projection, reference = projection?.selection[0]
+  const focusVisible = state.mainSurface === 'agents' && state.focusView === 'list'
   const viewTargets: WorkbenchViewTargets = reference && projection ? { [reference.tabId]: [{
     hostId: (projection.entity.kind === 'region' ? workbenchRegionProjectionSlotId : workbenchProjectionSlotId)(`${projection.presentationId}-slot`, reference),
-    active: true, visible: true, surface: 'focus', retainedRegionId: reference.regionId, projection, reference,
+    active: focusVisible, visible: focusVisible, surface: 'focus', retainedRegionId: reference.regionId, projection, reference,
     onSelectRegion: regionId => select({ ...reference, regionId })
   }] } : {}
   return <>
@@ -60,7 +61,7 @@ function MainFocusFixture({ navigate, regionOnly = false }: { navigate: (id: str
 /** Real original Core/Space and scoped Unix→Main→IPC→Preload→Renderer.
  * Native process state is the existing source fixture leaf. No unified hook,
  * Context, lane, card, filter, menu or preview implementation is mocked. */
-async function fixture(options: { foreign?: boolean; unavailable?: boolean; nativeUnavailable?: boolean; metadataUnknown?: boolean; sourceOnly?: boolean; legacyNoAdmission?: boolean; multiple?: boolean; missing?: boolean; unconfirmed?: boolean } = {}) {
+async function fixture(options: { foreign?: boolean; unavailable?: boolean; nativeUnavailable?: boolean; metadataUnknown?: boolean; sourceOnly?: boolean; legacyNoAdmission?: boolean; multiple?: boolean; missing?: boolean; unconfirmed?: boolean; staleRun?: boolean; unobservedRun?: boolean } = {}) {
   const privateCleanup: Array<() => unknown | Promise<unknown>> = []
   const original = await createSpaceSessionsFixture(privateCleanup)
   const privateRoots = new Set([original.b.root, original.d.root])
@@ -119,6 +120,9 @@ async function fixture(options: { foreign?: boolean; unavailable?: boolean; nati
   const sourceDocument = (await original.b.spatial.read())!
   const originalTab = sourceDocument.graph.tabs.find(tab => tab.tabId === admitted.address.tabId)!
   const originalRegion = sourceDocument.graph.regions.find(region => region.regionId === admitted.address.regionId)!
+  // The durable member can retain a previous Run while its original Session's
+  // conversation remains readable. This is not permission to reuse that Run.
+  const retainedMember = options.unobservedRun ? { ...originalRegion, runId: null } : options.staleRun ? { ...originalRegion, runId: 'source-retained-prior-run' } : originalRegion
   const { creationOperationId: _creation, ...retainedRegion } = originalRegion
   const secondRegion = options.multiple ? { ...retainedRegion, regionId: 'another-original-position' }
     : { regionId: 'original-browser-position', tabId: originalTab.tabId, kind: 'browser' as const, agentSessionId: null, runId: null, execution: null }
@@ -129,7 +133,7 @@ async function fixture(options: { foreign?: boolean; unavailable?: boolean; nati
   const originalLayout = sourceDocument.graph.tabLayouts[originalTab.tabId]!
   await original.b.spatial.commit({ expectedRevision: sourceDocument.revision, graph: { ...sourceDocument.graph,
     tabs: sourceDocument.graph.tabs.map(tab => tab.tabId === originalTab.tabId ? { ...tab, regionIds: [...tab.regionIds, secondRegion.regionId, ...(options.unconfirmed ? [unconfirmedRegion.regionId, otherUnconfirmedRegion.regionId] : [])] } : tab),
-    regions: [...sourceDocument.graph.regions, secondRegion, ...(options.unconfirmed ? [unconfirmedRegion, otherUnconfirmedRegion] : [])],
+    regions: [...sourceDocument.graph.regions.map(region => region.regionId === originalRegion.regionId ? retainedMember : region), secondRegion, ...(options.unconfirmed ? [unconfirmedRegion, otherUnconfirmedRegion] : [])],
     tabLayouts: { ...sourceDocument.graph.tabLayouts, [originalTab.tabId]: options.unconfirmed
       ? splitWorkbenchRegion(splitWorkbenchRegion(splitWorkbenchRegion(originalLayout, originalLayout.activeRegionId, 'right', secondRegion.regionId), secondRegion.regionId, 'right', unconfirmedRegion.regionId), unconfirmedRegion.regionId, 'right', otherUnconfirmedRegion.regionId)
       : splitWorkbenchRegion(originalLayout, originalLayout.activeRegionId, 'right', secondRegion.regionId) } } })
@@ -502,17 +506,15 @@ it('an original missing Session opens the common parked stage and rechecks the s
   expect(stage().textContent).toContain('Original session unavailable')
   expect(stage().getAttribute('aria-busy')).toBe('false')
   expect(region().textContent).not.toMatch(/Restoring your session|Waiting for this session to reconnect/)
-  const draft = region().querySelector<HTMLTextAreaElement>('[aria-label="Original Space task draft"]')!
-  expect(draft).not.toBeNull()
-  expect(draft.closest('details')?.open).toBe(false)
+  const composerSelector = '[data-agent-composer="true"] [aria-label="Message Agent"]'
+  const draft = () => region().querySelector<HTMLElement & { editor?: import('@tiptap/core').Editor }>(composerSelector)!
+  await vi.waitFor(() => expect(draft()?.editor, 'Unconfirmed Native observation still uses the common draft editor.').toBeDefined())
   const heldDraft = `原设备未发送的草稿
 必须逐字保留，也不自动补发。`
   await act(async () => {
-    draft.closest('details')!.open = true
-    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(draft, heldDraft)
-    draft.dispatchEvent(new Event('input', { bubbles: true }))
+    draft().editor!.commands.setContent({ type: 'doc', content: heldDraft.split('\n').map(line => ({ type: 'paragraph', content: [{ type: 'text', text: line }] })) })
   })
-  expect(draft.value).toBe(heldDraft)
+  expect(draft().editor!.getText({ blockSeparator: '\n' })).toBe(heldDraft)
   const before = f.sessionsRead.mock.calls.length
   f.beginOriginalCheck()
   const check = [...region().querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent?.includes('Check again'))!
@@ -521,7 +523,7 @@ it('an original missing Session opens the common parked stage and rechecks the s
   await vi.waitFor(async () => { await act(async () => {}); expect(f.sessionsRead.mock.calls.length).toBeGreaterThan(before); expect(stage().dataset.loadingPhase).toBe('loading') })
   expect(stage().getAttribute('aria-busy')).toBe('true')
   expect(stage().textContent).toContain('Checking the original session')
-  expect(region().querySelector<HTMLTextAreaElement>('[aria-label="Original Space task draft"]')!.value).toBe(heldDraft)
+  expect(draft().editor!.getText({ blockSeparator: '\n' })).toBe(heldDraft)
   expect(useAppStore.getState().sessions).toHaveLength(1)
   await act(async () => f.emitMetadataError())
   expect(stage().dataset.loadingPhase).toBe('parked')
@@ -547,7 +549,6 @@ it('an original missing Session opens the common parked stage and rechecks the s
   await act(async () => useAppStore.setState(state => { const entries = state.mountedSpaceInputs as Record<string, { drafts: Record<string, string> }>; return { mountedSpaceInputs: { ...entries, [f.key]: { ...entries[f.key], drafts: { ...entries[f.key]!.drafts, [originalDraftKey]: legacyDraft } } } } }))
   const mountedBefore = structuredClone(useAppStore.getState().mountedSpaceInputs), canonicalBefore = structuredClone(useAppStore.getState().agentComposerDrafts)
   expect(mountedSpaceInput(useAppStore.getState().mountedSpaceInputs, f.key)!.drafts[originalDraftKey]).toBe(legacyDraft)
-  const composerSelector = '[data-agent-composer="true"] [aria-label="Message Agent"]'
   const composer = region().querySelector<HTMLElement & { editor?: import('@tiptap/core').Editor }>(composerSelector)
   await vi.waitFor(() => {
     const field = region().querySelector<HTMLElement & { editor?: import('@tiptap/core').Editor }>(composerSelector)
@@ -637,4 +638,109 @@ it('an explicit original name clear does not resurrect the restored manual visit
   await vi.waitFor(() => expect(cards().find(card => card.dataset.sessionId === contextId)?.querySelector('strong')?.textContent).toContain('原远端自己的输入'))
   expect(cards().find(card => card.dataset.sessionId === contextId)?.querySelector('strong')?.textContent).not.toBe('真正远端的独立任务')
   expect(restored.execution.history[0]!.identity!.name).toBe('真正远端的独立任务')
+})
+
+it.each([false, true])('the selected original workface reads its real conversation without Native readiness or a current Run, using the shared qualified mode and draft (unobserved Run: %s)', async unobservedRun => {
+  const f = await fixture({ foreign: true, nativeUnavailable: true, metadataUnknown: true, staleRun: !unobservedRun, unobservedRun })
+  await f.settle(2)
+  await vi.waitFor(() => expect(cardWith('真正远端的独立任务').querySelector('.focus-context__recap')?.textContent).toContain(foreignRecap))
+  const owner = originalSourceInputOwnerKey(f.d.owner.runtimeId, SID), draft = 'Original Source conversation draft remains unsent'
+  const effects = [f.b, f.d].flatMap(source => (['createAgent', 'resumeAgent', 'restartAgent', 'reopenAgent', 'writeAgent', 'pasteAgent', 'submitAgentPrompt'] as const).map(method => vi.spyOn(source.core, method)))
+  const spatial = await f.b.spatial.read()
+  await act(async () => {
+    useAppStore.getState().setAgentComposerDraft(owner, draft)
+    useAppStore.getState().setViewMode(owner, 'activity', { focus: false })
+    cardWith('真正远端的独立任务').click()
+  })
+  const workface = () => dom.container.querySelector<HTMLElement>('.global-session-workspace [aria-label="Original member workface"]')!
+  await vi.waitFor(() => expect(workface(), dom.container.querySelector('.global-session-workspace')?.textContent).not.toBeNull())
+  const reading = () => workface().querySelector<HTMLElement>('.activity-feed')
+  await vi.waitFor(() => {
+    expect(reading(), 'A real selected original conversation must mount without a Native Session or current Run.').not.toBeNull()
+    expect(reading()!.textContent).toContain(foreignRecap)
+    expect(reading()!.textContent).toContain('原远端自己的输入，不是同 SID 本机输入。')
+  }, { timeout: 10000 })
+  const body = reading(), focus = useAppStore.getState().agentFocus
+  expect(body!.textContent).not.toContain(localRecap)
+  expect(workface().dataset.agentSurfaceMode).toBe('activity')
+  expect(vi.mocked(api.spaceMounts.reading).mock.calls.some(([target]) =>
+    target.target.runtimeId === f.d.owner.runtimeId && target.target.agentSessionId === SID &&
+    target.target.expectedAdmission.operationId === 'original-source-creation' && !('expectedRun' in target.target))).toBe(true)
+  const terminal = () => workface().querySelector<HTMLButtonElement>('[aria-label="Show Terminal"]')
+  await vi.waitFor(() => expect(terminal()).not.toBeNull())
+  await act(async () => terminal()!.click())
+  expect(workface().dataset.agentSurfaceMode).toBe('terminal')
+  expect(useAppStore.getState().viewModes[owner]).toBe('terminal')
+  expect(useAppStore.getState().agentFocus).toBe(focus)
+  const conversation = () => workface().querySelector<HTMLButtonElement>('[aria-label="Show Activity"]')
+  await vi.waitFor(() => expect(conversation()).not.toBeNull())
+  await act(async () => conversation()!.click())
+  expect(workface().dataset.agentSurfaceMode).toBe('activity')
+  expect(reading()).toBe(body)
+  expect(useAppStore.getState().agentFocus).toBe(focus)
+  expect(useAppStore.getState().agentComposerDrafts[owner]).toBe(draft)
+  expect(useAppStore.getState().agentComposerDrafts[SID]).toBe('Keep this original local draft')
+  expect(useAppStore.getState().viewModes[SID]).toBeUndefined()
+  expect((await f.b.spatial.read())!.graph).toEqual(spatial!.graph)
+  expect((await f.d.core.readAgentSession(SID))!.run).toEqual(f.session.run)
+  // A newer Run witness only replaces the Native reader, never this original
+  // admitted conversation's React instance or its saved reading preference.
+  await act(async () => {
+    const current = (await f.b.spatial.read())!
+    await f.b.spatial.commit({ expectedRevision: current.revision, graph: { ...current.graph,
+      regions: current.graph.regions.map(region => region.regionId === f.admitted.address.regionId ? { ...region, runId: f.session.run.runId } : region) } })
+    const snapshot = await f.main.api.call('snapshot', { hostId: f.target.hostId, reference: f.reference })
+    useAppStore.getState().observeSpaceMount(f.target, { snapshot, reading: false })
+  })
+  // Restore this metadata edge to its real Core reader, rather than handing
+  // the Renderer a guessed Session. Its observed Run must reach the Native target.
+  vi.mocked(api.spaceMounts.sessions).mockImplementation(f.main.api.sessions)
+  const refresh = () => [...workface().querySelectorAll<HTMLButtonElement>('button')].find(button =>
+    ['Check again', 'Check original status', 'Refresh member observation'].includes(button.textContent ?? ''))
+  await vi.waitFor(() => expect(refresh()).toBeDefined())
+  await act(async () => refresh()!.click())
+  await vi.waitFor(() => expect(f.member.mock.calls.some(([target]) => target.target.expectedRun.runId === f.session.run.runId)).toBe(true))
+  await vi.waitFor(() => expect(reading()).toBe(body))
+  await act(async () => useAppStore.getState().setMainSurface('board'))
+  await act(async () => useAppStore.getState().setMainSurface('agents'))
+  await vi.waitFor(() => {
+    expect(reading()).toBe(body)
+    expect(reading()!.textContent).toContain(foreignRecap)
+  })
+  expect(useAppStore.getState().viewModes[owner]).toBe('activity')
+  expect(useAppStore.getState().agentComposerDrafts[owner]).toBe(draft)
+  // A later reader observation failure keeps already accepted original records
+  // visible and gives an explicit retry, independent of Native recovery.
+  const originalReader = vi.mocked(api.spaceMounts.reading).mock.calls.filter(([target]) =>
+    target.target.runtimeId === f.d.owner.runtimeId && target.target.agentSessionId === SID).at(-1)!
+  await act(async () => originalReader[1]({ type: 'observation-error', error: { code: 'SOURCE_OBSERVATION_UNAVAILABLE', message: 'The original reading connection is temporarily unavailable.' } }))
+  expect(reading()).toBe(body)
+  expect(reading()!.textContent).toContain(foreignRecap)
+  expect(workface().textContent).toContain('The original reading connection is temporarily unavailable.')
+  const retry = [...workface().querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Retry original reading')!
+  await act(async () => retry.click())
+  await vi.waitFor(() => expect(workface().textContent).not.toContain('The original reading connection is temporarily unavailable.'))
+  expect(reading()).toBe(body)
+  for (const effect of effects) expect(effect).not.toHaveBeenCalled()
+})
+
+it('the selected original conversation refuses a different admission without borrowing the namesake local records', async () => {
+  const f = await fixture({ foreign: true, nativeUnavailable: true, metadataUnknown: true })
+  await f.settle(2)
+  await vi.waitFor(() => expect(cardWith('真正远端的独立任务').querySelector('.focus-context__recap')?.textContent).toContain(foreignRecap))
+  vi.mocked(api.spaceMounts.reading).mockImplementation((input, listener, signal) => f.main.api.reading({ ...input,
+    target: { ...input.target, expectedAdmission: { kind: 'creation', operationId: 'another-creation-is-not-this-Agent' } } }, listener, signal))
+  const owner = originalSourceInputOwnerKey(f.d.owner.runtimeId, SID)
+  await act(async () => {
+    useAppStore.getState().setViewMode(owner, 'activity', { focus: false })
+    cardWith('真正远端的独立任务').click()
+  })
+  const body = () => dom.container.querySelector('.global-session-workspace .activity-feed')
+  await vi.waitFor(() => expect(body()?.textContent).toContain('The original member creation or association changed.'))
+  expect(body()!.textContent).not.toContain(localRecap)
+  expect(body()!.textContent).not.toContain(foreignRecap)
+  expect(body()!.querySelector('button')).not.toBeNull()
+  expect(useAppStore.getState().sessions).toHaveLength(1)
+  expect((await f.d.core.readAgentSession(SID))!.run).toEqual(f.session.run)
+  expect(useAppStore.getState().agentComposerDrafts[SID]).toBe('Keep this original local draft')
 })

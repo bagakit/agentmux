@@ -5,6 +5,11 @@ import { createHash } from 'node:crypto'
 import assert from 'node:assert/strict'
 import source from './vitest.mote-context.config.mts'
 const mutations: Record<string, [string, string, string]> = {
+  'runtime-gate-reading': ['apps/desktop/src/renderer/src/components/MountedSpaceAgent.tsx', "enabled: visible && mode === 'activity', opened: true, readCaptured: true,", "enabled: visible && mode === 'activity' && Boolean(session), opened: true, readCaptured: true,"],
+  'private-mode': ['apps/desktop/src/renderer/src/components/MountedSpaceAgent.tsx', 'const mode = useAppStore(viewModeSelector)', "const mode = (useAppStore(viewModeSelector), 'terminal' as const)"],
+  'full-run-reading': ['apps/desktop/src/renderer/src/components/MountedSpaceAgent.tsx', 'api.spaceMounts.reading(readingTarget, event =>', 'api.spaceMounts.member(target, event =>'],
+  'run-owned-reading': ['apps/desktop/src/renderer/src/components/OrdinarySpaceMemberViewport.tsx', '<SpaceMemberWorkface key={witness}', '<SpaceMemberWorkface key={JSON.stringify(currentTarget)}'],
+  'creation-gate-reading': ['apps/desktop/src/renderer/src/components/OrdinarySpaceMemberViewport.tsx', 'visible={visible} active={active && activeRegion}', 'visible={visible && !recoverCreation} active={active && activeRegion}'],
   'unconfirmed-name': ['apps/desktop/src/renderer/src/lib/use-focus-sources.tsx', 'fallbackLabel: current?.session?.label ?? `Agent · ${candidate.sid}`', "fallbackLabel: current?.session?.label ?? 'Agent task'"],
   'unconfirmed-position': ['apps/desktop/src/renderer/src/lib/focus-source-model.ts', 'const detail = !runtimeId && access.locations.length === 1 ? `Position ${access.locations[0]!.regionId} · ${observation}` : observation', 'const detail = observation'],
   'borrow-sid': ['apps/desktop/src/renderer/src/lib/focus-source-model.ts', 'runtimeByHost.get(context.control?.hostId ?? context.hostId) === runtimeId', 'true'],
