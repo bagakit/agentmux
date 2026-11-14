@@ -52,17 +52,38 @@ module.exports = async function ({ win, evaluate, waitFor, visible, painted, cli
           const state = `${theme}-tools-end`, file = `${width}-toolbar-${state}.png`, png = await capture(file.slice(0, -4))
           result.frames.push({ width, state, file, png })
         }
-        // Files uses the actual host picker. Open the original Skills menu without sending or capturing.
-        const skills = `${composer}.querySelector('[aria-label="Choose a skill"]')`
-        await evaluate(`${skills}.focus()`); await key('Enter', 'Enter', 13)
-        await waitFor(visible(`document.querySelector('[role="menu"]')`))
-        assert.ok(await evaluate(`document.querySelector('[role="menu"]').textContent.trim().length>0`), 'The opened original menu has readable content')
-        await key('Escape', 'Escape', 27); await waitFor(`!document.querySelector('[role="menu"]')`)
+        const commands = `${composer}.querySelector('[aria-label="Choose a command"]')`
+        const dialog = "document.querySelector('.composer-menu--search[role=dialog]')"
+        await evaluate(`${commands}.focus()`); await key('ArrowDown', 'ArrowDown', 40)
+        await waitFor(visible(dialog))
+        await waitFor(`document.activeElement===${dialog}.querySelector('input')`)
+        await win.webContents.debugger.sendCommand('Input.insertText', { text: 'preview workspace' })
+        await waitFor(`${dialog}.querySelector('button[data-choice]')?.textContent.includes('/review')`)
+        await key('ArrowDown', 'ArrowDown', 40)
+        await waitFor(`document.activeElement===${dialog}.querySelector('button[data-choice]')`)
+        await evaluate('Promise.all(' + dialog + '.getAnimations().map(animation => animation.finished.catch(() => {})))')
+        await painted()
+        const ownership = await evaluate('(()=>{const trigger=' + commands + ', panel=' + dialog +
+          ',scope=trigger.closest("[data-workbench-region-id]"),a=scope.getBoundingClientRect(),b=panel.getBoundingClientRect();' +
+          'return {opacity:+getComputedStyle(panel).opacity,within:b.left >= a.left && b.right <= a.right+1};})()')
+        assert.deepEqual(ownership,{opacity:1,within:true},'Search is opaque and contained by the original Region')
+        if (width === 320) {
+          const state = theme + '-search-focus', file = width + '-toolbar-' + state + '.png', png = await capture(file.slice(0, -4))
+          result.frames.push({ width, state, file, png })
+        }
+        await key('Escape', 'Escape', 27)
+        await waitFor(`!${dialog} && document.activeElement===${commands}`)
+        if (width === 320) {
+          const neighbor = await evaluate('(()=>{const main=(' + commands + ').closest("[data-workbench-region-id]");' +
+            'const button=[...document.querySelectorAll("[data-workbench-region-id] button")].find(node=>!main.contains(node)&&node.textContent.trim()==="Restore original");' +
+            'const r=button?.getBoundingClientRect(),hit=r&&document.elementFromPoint(r.x+r.width/2,r.y+r.height/2);return !!button&&button.contains(hit);})()')
+          assert.equal(neighbor,true,'The original neighboring recovery action is reachable after Escape')
+        }
         assert.equal(await evaluate(`${editor}.textContent`), draft)
       }
     }
     const after = await evaluate('identityMenu.terminal()')
     assert.equal(after.id, before.id, 'The original terminal remains mounted')
   }
-  assert.equal(result.frames.length, 26, 'All widths, themes, input modes and overflow endpoints are captured')
+  assert.equal(result.frames.length, 28, 'All widths, themes, input modes and overflow endpoints are captured')
 }

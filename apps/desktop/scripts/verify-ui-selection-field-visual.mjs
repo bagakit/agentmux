@@ -10,9 +10,10 @@ const sha = bytes => createHash('sha256').update(bytes).digest('hex')
 const read = path => JSON.parse(readFileSync(path, 'utf8'))
 const desktopScenes = ['focus-form-menu', 'focus-information-menu', 'focus-lod-menu', 'projects-executor-menu', 'projects-executor-selected', 'routes-device-menu', 'routes-device-tail', 'routes-edge-menu']
 const desktopImages = [...desktopScenes.map(scene => `${scene}-light.png`), ...desktopScenes.map(scene => `${scene}-dark.png`), 'focus-lod-menu-narrow-dark.png', 'routes-device-tail-narrow-dark.png', 'projects-executor-unavailable-narrow-dark.png', 'projects-executor-unavailable-narrow-light.png', 'focus-lod-menu-short-light.png'].sort()
-const settingsImages = ['connection-transport-draft-420-dark.png', 'connection-transport-menu-420-dark.png', 'connection-transport-selected-420-dark.png', 'node-menu-960-light.png', 'node-selected-960-light.png', 'node-menu-420-dark.png', 'node-selected-420-dark.png', 'node-menu-320-light.png', 'node-selected-320-light.png', 'node-missing-menu-420-dark.png', 'node-missing-recovered-420-dark.png', 'node-identity-error-420-dark.png', 'node-owner-error-420-dark.png'].sort()
+const settingsImages = ['connection-transport-draft-420-dark.png', 'connection-transport-menu-420-dark.png', 'connection-transport-selected-420-dark.png', 'node-menu-960-light.png', 'node-selected-960-light.png', 'node-menu-420-dark.png', 'node-keyboard-focus-420-dark.png', 'node-selected-420-dark.png', 'node-menu-320-light.png', 'node-selected-320-light.png', 'node-missing-menu-420-dark.png', 'node-missing-recovered-420-dark.png', 'node-identity-error-420-dark.png', 'node-owner-error-420-dark.png'].sort()
 const settingsOwningSources = [
   'apps/desktop/src/renderer/src/components/SelectionField.tsx',
+  'packages/client-ui/src/components/SelectionField.tsx',
   'apps/desktop/src/renderer/src/components/settings/HostSettingsPane.tsx',
   'apps/desktop/src/renderer/src/components/settings/NetworkNodeSettingsPane.tsx',
   'apps/desktop/src/renderer/src/components/settings/hosts-settings.css',

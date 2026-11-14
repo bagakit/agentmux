@@ -31,7 +31,7 @@ app.whenReady().then(async () => {
     }
     // Opens Runs on and picks one exact device (the first other device by default).
     const chooseRunsOn = async (value = null) => {
-      const item = value ? `[role="menuitemradio"][data-value="${value}"]` : '[role="menuitemradio"][data-value]:not([data-value="local"])'
+      const item = value ? `[role="option"][data-value="${value}"]` : '[role="option"][data-value]:not([data-value="local"])'
       await click('.launcher-agent-device [aria-label="Runs on"]')
       await wait(`Boolean(document.querySelector('${item}'))`)
       await evaluate(`document.querySelector('${item}').click()`); await paint()

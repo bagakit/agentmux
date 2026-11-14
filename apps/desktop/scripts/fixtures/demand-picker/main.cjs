@@ -30,13 +30,13 @@ app.whenReady().then(async()=>{
     await frame(width,theme,'assignees')
     await click(button('Mote · new Session'))
     for(const label of ['Mote for new Session','New Session Agent configuration']){
-     await click(`document.querySelector('[aria-label="${label}"]')`);await until('!!document.querySelector("[role=menuitemradio]")')
-     await click(`[...document.querySelectorAll('[role=menuitemradio]')].find(n=>n.dataset.value && n.getAttribute('aria-disabled')!=='true')`)
+     await click(`document.querySelector('[aria-label="${label}"]')`);await until('!!document.querySelector("[role=option]")')
+     await click(`[...document.querySelectorAll('[role=option]')].find(n=>n.dataset.value && n.getAttribute('aria-disabled')!=='true')`)
     }
     await frame(width,theme,'mote-new-session')
     await click(button('New Agent'))
-    await click(`document.querySelector('[aria-label="New Agent execution directory"]')`);await until('!!document.querySelector("[role=menuitemradio]")')
-    await click(`[...document.querySelectorAll('[role=menuitemradio]')].find(n=>n.dataset.value && n.getAttribute('aria-disabled')!=='true')`)
+    await click(`document.querySelector('[aria-label="New Agent execution directory"]')`);await until('!!document.querySelector("[role=option]")')
+    await click(`[...document.querySelectorAll('[role=option]')].find(n=>n.dataset.value && n.getAttribute('aria-disabled')!=='true')`)
     await frame(width,theme,'new-agent')
     await click(button('Cancel'));await until('!document.querySelector(".goal-agent-picker")')
     await click(`document.querySelector('[aria-label="Choose Goal Supervisor"]')`);await until('!!document.querySelector(".goal-agent-picker")');await frame(width,theme,'supervisor-picker')

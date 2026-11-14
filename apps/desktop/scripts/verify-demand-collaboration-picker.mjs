@@ -8,7 +8,7 @@ const root = path.resolve(import.meta.dirname, '../../..'), evidence = path.join
 const digest = bytes => createHash('sha256').update(bytes).digest('hex')
 const base = 'apps/desktop/src/renderer/src/'
 const files = ['components/GoalAgentPicker.tsx','components/GoalDetail.tsx','components/GoalProperties.tsx','components/GoalExecution.tsx','lib/goal-agent-selection.ts','styles/goals.css'].map(file => base+file)
-files.push(base+'components/GlobalBoardSurface.tsx',base+'styles/goal-agent-picker.css',base+'styles/index.css',base+'components/SelectionField.tsx',base+'styles/selection-field.css','apps/desktop/test/helpers/injected-context-core.ts','apps/desktop/scripts/fixtures/demand-picker/vitest.config.mts','apps/desktop/scripts/verify-demand-collaboration-picker.mjs')
+files.push(base+'components/GlobalBoardSurface.tsx',base+'styles/goal-agent-picker.css',base+'styles/index.css',base+'components/SelectionField.tsx','packages/client-ui/src/styles/selection-field.css','packages/client-ui/src/components/SelectionField.tsx','apps/desktop/test/helpers/injected-context-core.ts','apps/desktop/scripts/fixtures/demand-picker/vitest.config.mts','apps/desktop/scripts/verify-demand-collaboration-picker.mjs')
 async function hashes() {
   const hashes = Object.fromEntries(await Promise.all(files.map(async file => [file, digest(await fs.readFile(path.join(root,file)))])))
   const tests = await fs.readFile(path.join(root,'apps/desktop/test/mote-daily-goal.test.tsx'),'utf8')

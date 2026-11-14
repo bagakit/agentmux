@@ -39,6 +39,13 @@ app.whenReady().then(async () => {
       result.stage = 'capture-menu'
       await settle()
       await shot(`node-menu-${width}-${theme}.png`, width, theme, 'menu')
+      if (width === 420) {
+        await press('Down')
+        if (await read('document.activeElement?.matches(".selection-field__menu [role=option][aria-selected=true]")')) await press('Down')
+        await until('document.activeElement?.matches(".selection-field__menu [role=option][aria-selected=false]")')
+        assert.equal(await read('document.querySelectorAll(".selection-field__menu [role=option][aria-selected=true]").length'), 1)
+        await shot('node-keyboard-focus-420-dark.png', width, theme, 'keyboard-focus')
+      }
       await click('.selection-field__menu [data-value="host-02"]')
       await until(`document.querySelector(${JSON.stringify(pane + ' [aria-label="Node to manage"]')})?.dataset.value==='host-02'&&document.querySelector('[id^="node-to-manage-hint-"]')?.textContent.includes('Runtime controlled-bound-runtime')&&Boolean(document.querySelector('[aria-label="Node alias"]'))`)
       await click(pane + ' [aria-label="Node to manage"]')
@@ -114,7 +121,7 @@ app.whenReady().then(async () => {
     await shot('connection-transport-draft-420-dark.png', 420, 'dark', 'connection-draft')
     assert.equal(await read('window.connectionsProof.calls.filter(call => call.kind === "preview-config-save").length'), 0, 'Selection never saves configuration')
     assert.equal(await read('window.connectionsProof.calls.filter(call => call.kind === "controlled-node-configure").length'), 0, 'Selection never configures Node policy')
-    assert.equal(result.images.length, 13)
+    assert.equal(result.images.length, 14)
     result.completed = true
   } catch (error) {
     result.failure = { name: error.name, message: error.message, stack: error.stack, stage: result.stage }

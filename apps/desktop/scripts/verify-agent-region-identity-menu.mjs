@@ -113,7 +113,7 @@ async function renderer(label,probe='complete',unreadableProgressActions=false,f
     export class Terminal extends xterm.Terminal { constructor(...args){super(...args);const entries=globalThis.identityTerminals??=[];this.probeIdentity={id:entries.length,terminal:this,disposed:false};entries.push(this.probeIdentity)}
       dispose(){this.probeIdentity.disposed=true;return super.dispose()} }
   `)
-  const cssPath=agentMenuOwning?join(desktop,'src/renderer/src/styles/agent-region-header.css'):composerToolbarOwning||mailboxLayoutOwning?join(repository,'packages/client-ui/src/styles/composer.css'):join(desktop,'src/renderer/src/styles',terminalLoadingOwning?'terminal.css':'agent.css'),cssBefore=await readFile(cssPath)
+  const cssPath=agentMenuOwning?join(desktop,'src/renderer/src/styles/agent-region-header.css'):composerToolbarOwning?join(repository,'packages/client-ui/src/styles/composer-editor.css'):mailboxLayoutOwning?join(repository,'packages/client-ui/src/styles/composer.css'):join(desktop,'src/renderer/src/styles',terminalLoadingOwning?'terminal.css':'agent.css'),cssBefore=await readFile(cssPath)
   const loadedSourceInputs={},importedStyleInputs={},progressCssMutations=[],sourceMutations=[],isolatedSourceInputs=[],positioningImports={}
   await build({configFile:false,root:fixture,base:'./',logLevel:'error',worker:{format:'es'},resolve:{alias:[{find:/^@xterm\/xterm$/,replacement:wrapper}]},
     plugins:[{name:'record-private-renderer-inputs',enforce:'pre',async transform(source,id){

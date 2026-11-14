@@ -31,7 +31,7 @@ const mutations = {
   'dialog-path-disclosure': ['components/AgentWorkProjectAnchor.tsx', '<code className="agent-work-project-anchor__path">{project.path}</code>', '<code className="agent-work-project-anchor__path">{project.path.slice(0, 24)}</code>'],
   'dialog-menu-boundary': ['components/LauncherAgentDevice.tsx', "menuBoundary={anchor?.closest<HTMLElement>('[data-workbench-region-id]') ?? null}", 'menuBoundary={null}'],
   'dialog-device-tail': ['components/SourceAgentTargetSetup.tsx', "...(choices?.hosts.filter(host => host.kind !== 'local').map(host =>", "...(choices?.hosts.filter(host => host.kind !== 'local').slice(0, -1).map(host =>"],
-  'dialog-device-scroll': ['components/SelectionField.tsx', '<div className="selection-field__results">', '<div className="selection-field__results" style={{ overflow: \'hidden\' }}>'],
+  'dialog-device-scroll': ['packages/client-ui/src/components/SelectionField.tsx', 'className="selection-field__results" role={hasDialog', 'className="selection-field__results" style={{ overflow: \'hidden\' }} role={hasDialog'],
   'footer-nowrap': null,
   'pointer-focus-tooltip': ['components/WorkbenchNameTooltip.tsx', "const show = () => { if (parent.matches(':focus-visible')) current.current.showFor(parent) }", 'const show = () => { current.current.showFor(parent) }'],
   'tooltip-anchor-overlap': ['components/WorkbenchNameTooltip.tsx', 'shift({ padding: 8 }), size({ padding: 8,', 'shift({ padding: 8, crossAxis: true }), size({ padding: 8,']
@@ -64,7 +64,9 @@ try {
       const relative = file.slice(repository.length + 1)
       if (file.endsWith('.css')) styles[relative] = hash(source)
       else if (!id.includes('?')) sources[relative] = hash(source)
-      if (mutation && !['position', 'footer-nowrap'].includes(mutation) && file === join(repository, 'apps/desktop/src/renderer/src', mutations[mutation][0])) {
+      const target = mutations[mutation]?.[0]
+      const targetPath = target?.startsWith('packages/') ? target : target && 'apps/desktop/src/renderer/src/' + target
+      if (targetPath && file === join(repository, targetPath)) {
         const [, from, to] = mutations[mutation]
         assert.equal(source.split(from).length, 2, 'Mutation must replace exactly one actual implementation')
         const code = source.replace(from, to)
