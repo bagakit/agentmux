@@ -16,7 +16,7 @@ import { browserProfiles, useBrowserProfiles } from '../../lib/browser-profiles'
 import { browserProfileEnvironmentDescription } from '../../lib/browser-profile-presentation'
 import { useAppStore } from '../../store'
 import { awaitDesktopPresentation, readDesktopOverlays } from '../../lib/desktop-presentation'
-import { tabGroupForTab, workbenchSurfaces, type BrowserWorkbenchSurface } from '../../lib/workbench-tabs'
+import { tabGroupForTab, workbenchSurfaces } from '../../lib/workbench-tabs'
 import { PROFILE_HUES, ProfileMark, profileTone, assignProfileHues } from '../ProfileMark'
 import { BrowserProfileLibrary } from './BrowserProfileLibrary'
 import { BrowserProfileTrash } from './BrowserProfileTrash'
@@ -68,13 +68,6 @@ type Run = {
 
 type Use = { browserId: string; tabId: string; title: string; url: string; state: 'open' | 'saved' }
 
-function usesOf(profileId: string, surfaces: readonly (BrowserWorkbenchSurface & { tabId: string })[]): Use[] {
-  return surfaces.filter(surface => surface.profileId === profileId).map(surface => ({
-    browserId: surface.browserId, tabId: surface.tabId, title: surface.title, url: surface.url,
-    state: surface.nativeOwnerDeferred || surface.nativeOwnerReleased ? 'saved' : 'open'
-  }))
-}
-
 /** Close Settings, then select the exact Browser Region; selection is refused while Settings covers the workbench. */
 async function showBrowser(use: Use, onClose: () => void): Promise<void> {
   onClose()
@@ -110,12 +103,25 @@ export function BrowserProfilesSettingsPane({ active, onClose = () => {} }: { ac
   // The Profile switch only narrows the global one, so the editor says when the global switch already keeps Agents out.
   const automation = useAppStore(state => state.config?.browser?.agentAutomation === true)
   const exitCheckUrl = useAppStore(state => state.config?.browser?.exitCheckUrl ?? '')
-  const surfaces = useMemo(() => Object.values(tabs).flatMap(tab => workbenchSurfaces(tab)
-    .flatMap(surface => surface.kind === 'browser' ? [{ ...surface, tabId: tab.id }] : [])), [tabs])
+  // Derive each Browser's use once; adding unrelated Profiles does not rescan pages.
+  const usage = useMemo(() => {
+    const byProfile = new Map<string, Use[]>(), openCounts = new Map<string, number>()
+    for (const tab of Object.values(tabs)) for (const surface of workbenchSurfaces(tab)) {
+      if (surface.kind !== 'browser') continue
+      const profileId = surface.profileId
+      if (!profileId) continue
+      const use: Use = { browserId: surface.browserId, tabId: tab.id, title: surface.title, url: surface.url,
+        state: surface.nativeOwnerDeferred || surface.nativeOwnerReleased ? 'saved' : 'open' }
+      const uses = byProfile.get(profileId)
+      if (uses) uses.push(use)
+      else byProfile.set(profileId, [use])
+      if (use.state === 'open') openCounts.set(profileId, (openCounts.get(profileId) ?? 0) + 1)
+    }
+    return { byProfile, openCounts }
+  }, [tabs])
   const profiles = list.profiles ?? []
   const folders = list.folders ?? []
   const hueAssignment = useMemo(() => assignProfileHues(profiles), [list.profiles])
-  const openCounts = useMemo(() => new Map(profiles.map(profile => [profile.id, usesOf(profile.id, surfaces).filter(use => use.state === 'open').length])), [list.profiles, surfaces])
   const [showTrash, setShowTrash] = useState(false)
   const retainedEditor = useRef<BrowserProfileSummary | null>(null)
   const [restoredTarget, setRestoredTarget] = useState<{ id: string; label: string } | null>(null)
@@ -194,7 +200,7 @@ export function BrowserProfilesSettingsPane({ active, onClose = () => {} }: { ac
       </p> : null}
       <BrowserProfileTrash active={active && showTrash} folders={folders} onBack={() => setShowTrash(false)} onRestored={(id, label) => { setRestoredTarget({ id, label }); setNotice(`Restored \"${label}\" with its original sign-ins and site data.`) }} />
       <div className="settings-resource-split" hidden={showTrash}>
-        <BrowserProfileLibrary list={list} active={active && !showTrash} selectedId={selected?.id ?? null} focusRequest={returnFocus} assignment={hueAssignment} openCounts={openCounts} detailLine={detailLine}
+        <BrowserProfileLibrary list={list} active={active && !showTrash} selectedId={selected?.id ?? null} focusRequest={returnFocus} assignment={hueAssignment} openCounts={usage.openCounts} detailLine={detailLine}
           onSelect={id => { setSelectedId(id); setView('editor'); setError(null); setErrorCode(null) }} />
         <div className="settings-resource-editor">
           {!selectedIsActive && selected ? <p className="browser-profiles-settings__service" role="status">This Profile is recycled. Its editor draft is kept. <button type="button" onClick={() => setShowTrash(true)}>Show recycled Profiles</button></p> : null}
@@ -203,7 +209,7 @@ export function BrowserProfilesSettingsPane({ active, onClose = () => {} }: { ac
             <ThemeNavigationBackIcon size={13} />All Profiles
           </button>
           {selected && list.revision !== null ? <ProfileEditor active={active && !showTrash} assignment={hueAssignment} key={selected.id} profile={selected} revision={list.revision} folders={folders} proxies={list.proxies ?? []}
-            uses={usesOf(selected.id, surfaces)} busy={busy} run={run} error={error} errorCode={errorCode} automation={automation} exitCheckUrl={exitCheckUrl}
+            uses={usage.byProfile.get(selected.id) ?? []} busy={busy} run={run} error={error} errorCode={errorCode} automation={automation} exitCheckUrl={exitCheckUrl}
             onShow={use => void showBrowser(use, onClose)} onOpen={() => void openInProfile(selected.id, onClose)}
             onCopy={() => void copy(selected, selected.revision)}
             editName={renameRequest === selected.id} onNameEdited={() => setRenameRequest(null)}
