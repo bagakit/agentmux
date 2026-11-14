@@ -49,7 +49,7 @@ Client 的 coreLogId 是客户端声明。取得双方原记录且 authority ver
 
 ## 查询预算与生命周期
 
-当前小封套上限由 [query 常量](../../packages/diagnostic-evidence/src/query.ts)唯一持有：8 次读取、2 层关联、128KiB 序列化结果、1500ms，以及每个 service 8 个实际在途调用。请求只能收紧，maxDepth 可为 0，maxBytes 最小 4KiB；target 上限 1KiB。深度、重复目标、关系依据、错误封套和 capabilities 均计入预算。profile/heap/图片等大 artifact 由原 owner 分块读取，不塞进此封套。
+小封套的默认上限（读取次数、关联深度、序列化结果字节与期限）由 [query.ts](../../packages/diagnostic-evidence/src/query.ts) 的 `DIAGNOSTIC_EVIDENCE_DEFAULT_BUDGET` 持有，每个 service 的实际在途调用上限、请求可收紧到的下限与单个 target 的字节上限也在同一文件。请求只能收紧预算，`maxDepth` 可以为 0。深度、重复目标、关系依据、错误封套和 capabilities 都计入预算。profile/heap/图片等大 artifact 由原 owner 分块读取，不塞进此封套。
 
 查询使用本机 monotonic 时间控制本次期限；原观测时间仍保持原来源语义。超时/取消只中止本次等待并传递 signal，已经启动且不能取消的 IO 继续占实际槽至真正 settle。deferred reader 调用前重核取消和期限；不会重放读取或采集。Delivery 文件 reader 另保每 store 8 个真实 pending IO，并复用同 logId pending；finite 等待返回不释放原 IO 槽。
 
@@ -86,7 +86,11 @@ managed Agent 沿原 capability 认证，受自身 Host 路线限定，不能借
 
 `agent.startup` 的 `--recent` 不要求 Session ID，可按原 source observedAt 范围、SID／Run 和最多 32 条分页；cursor 绑定原 authority 与筛选，返回顺序是该 journal 的接收序列，不把来源 wall clock 当单调时钟。精确读取沿 `--logid` 和可选 `--authority`；恢复记录的 `previousLogId` 仅关联同一 SID／Run／actor／frontend／lifecycle 下原已保留的异常，不授予恢复权限。正常启动不新增记录，订阅前与 owner 空窗均是未知覆盖，不能从空页推定没有发生过故障。
 
-原 Headless semantic owner 注入已确认 runtimeId 和当时 ownerInstanceId；file Store 的 durable authority 可在另一 owner 下读回，bare SDK 仅有 instance 范围并留在有界内存。持久记录在原状态根旁独立存放，最多 128 条／512 KiB 记录 payload；索引、单条未完成发布凭据及临时候选分别有额外固定边界，最多 32 条待写观察、一个实际写入和四个实际文件读取。写入／索引失败停止本 owner 扩盘，保有界内存和缺口；新 owner 仅对一个原发布凭据对账，不碰 Session／Run／输入。取得独立诊断写锁后，最多检查该诊断目录 141 项；超过 140 项时停止新持久化并报告覆盖缺口，不删除未知临时文件，也不把目录项当 Agent 历史。此上限限制本机制继续扩盘，不声明已有未知文件的字节数或全盘保留量。索引损坏不覆盖原索引，合法 exact 原件与 recent 缺证分别表达。
+原 Headless semantic owner 注入已确认 runtimeId 和当时 ownerInstanceId；file Store 的 durable authority 可在另一 owner 下读回，bare SDK 仅有 instance 范围并留在有界内存。持久记录在状态根旁独立存放。记录条数与 payload 字节、待写观察数、索引与单条未完成发布凭据的大小，以及目录项检查上限，都是 [startup-diagnostic-journal.ts](../../packages/core/src/startup-diagnostic-journal.ts) 顶部的固定常量。同一时刻只有一个实际写入，最多四个实际文件读取；更多的并发读取直接返回 `DIAGNOSTIC_EVIDENCE_SOURCE_BUSY`，不排队（四个并发读取是该文件内联判断，不在顶部常量）。这些是诊断留存的边界，不限制 Session、初始化或输入。
+
+- 写入或索引失败时，本 owner 停止扩盘，保留有界内存与覆盖缺口；新 owner 只对一个发布凭据对账，不碰 Session、Run 或输入。
+- 取得独立的诊断写锁后，目录项超过上限即停止新的持久化并报告覆盖缺口，不删除未知的临时文件，也不把目录项当成 Agent 历史。这个上限只阻止本机制继续扩盘，不声明已有未知文件的字节数或全盘保留量。
+- 索引损坏时不覆盖原索引；合法的 exact 原件与 recent 缺证分别表达。
 
 诊断写锁独立于 semantic lease。旧 owner 的真实诊断 IO 未结束时仍持原锁，Core 关闭与新 owner 的业务接回不等待它；新 owner 仅报告诊断 busy 并保有界观察，后续实际诊断读取或观察再尝试原锁并加载最新索引，没有后台重试计时器。诊断自身失败不会改变启动结果。
 
