@@ -13,7 +13,7 @@ const clientAliases = Object.entries(clientExports).sort(([a], [b]) => Number(a.
 // Transform the actual production module, leaving the shared source tree untouched.
 const mutations = {
   fieldDiscovery: ['settings/settings-catalog.ts', '|| (module as SettingsModule).searchTargets?.some(target => targetText(target).includes(normalized))', '|| false'],
-  explicitTarget: ['SettingsPanel.tsx', 'onChoose={chooseSection}', 'onChoose={() => {}}'],
+  explicitTarget: ['SettingsPanel.tsx', 'onChoose={chooseSearchResult}', 'onChoose={() => {}}'],
   originalReading: ['SettingsPanel.tsx', 'setActive(origin.section); restoreReading.current = origin.scrollTop', 'restoreReading.current = null'],
   originalSearchScope: ['SettingsPanel.tsx', 'if (!searchOrigin.current) searchOrigin.current =', 'searchOrigin.current ='],
   imeEscape: ['SettingsPanel.tsx', ' || isImeOwnedKeyboardEvent(event)', ''],

@@ -152,6 +152,25 @@ it('returns to results and can reveal the same original target repeatedly withou
   expect(target.hasAttribute('data-settings-search-highlight')).toBe(true)
 })
 
+
+it('focuses the native control for a labeled field and returns to its exact result and reading position', async () => {
+  await dom.render(<SettingsPanel onClose={() => {}} />)
+  await fill('[aria-label="Search settings"]', 'Display name')
+  const results = connected<HTMLElement>('[data-settings-search-results]')
+  results.scrollTop = 47
+  await dom.click(result('profile:display-name'))
+  const name = connected<HTMLInputElement>('[aria-label="Display name"]')
+  expect(document.activeElement).toBe(name)
+  await fill('[aria-label="Display name"]', 'Keep this draft')
+  await dom.click('.settings-search-return button')
+  expect(document.activeElement).toBe(connected(result('profile:display-name')))
+  expect(connected<HTMLElement>('[data-settings-search-results]').scrollTop).toBe(47)
+  expect(query().value).toBe('Display name')
+  await dom.click(result('profile:display-name'))
+  expect(document.activeElement).toBe(name)
+  expect(name.value).toBe('Keep this draft')
+})
+
 it('shows absent exact targets truthfully and never substitutes a nearby connected field', async () => {
   await dom.render(<SettingsPanel onClose={() => {}} />)
   await fill('[aria-label="Search settings"]', 'absent-needle')
@@ -287,7 +306,8 @@ it('every production static target reaches its connected original Pane location 
     expect(pane.querySelectorAll(`[data-settings-field="${target.id}"]`), `${module.id}:${target.id} (${target.title}); mounted fields: ${[...pane.querySelectorAll<HTMLElement>('[data-settings-field]')].map(node => node.dataset.settingsField).join(', ')}`).toHaveLength(1)
     const location = connected(`[data-settings-field="${target.id}"]`, pane)
     expect(location.closest('[hidden], [inert]')).toBeNull()
-    expect(document.activeElement).toBe(location)
+    const control = location instanceof HTMLLabelElement ? location.control : null
+    expect(document.activeElement).toBe(control instanceof HTMLElement && !control.matches(':disabled') ? control : location)
     expect(location.hasAttribute('data-settings-search-highlight')).toBe(true)
     expect(dom.container.querySelector('.settings-search-return [role="status"]')).toBeNull()
   }
