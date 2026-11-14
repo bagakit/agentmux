@@ -1,6 +1,6 @@
 import { useSpaceSourceReader as useMountedSpaceReader } from './SpaceSourceReaders'
 import { MountedSpaceAgent } from './MountedSpaceAgent'
-import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { createContext, useContext, memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Panel, PanelGroup, type ImperativePanelGroupHandle } from 'react-resizable-panels'
 import { MIN_SPLIT_PERCENT, regionIds, groupIds, setSplitRatio, setWorkbenchRegionSplitRatio, type TabGroupLayoutNode, type WorkbenchRegionLayoutNode } from '@agentmux/layout'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
@@ -25,6 +25,7 @@ import './mounted-space.css'
 const FolderIcon = semanticIconComponent('object.folder')
 const AgentIcon = semanticIconComponent('object.agent')
 const RefreshIcon = semanticIconComponent('action.refresh')
+const MountedResizeContext = createContext(false)
 
 /** One visible reader per source Scope, shared by its Workbench and Focus presentation. */
 export { useSpaceSourceReader as useMountedSpaceReader } from './SpaceSourceReaders'
@@ -39,14 +40,15 @@ function MountedRegionSplit({ node, path, source, visible, commit, children }: {
     const current = latest.current
     if (current.visible) current.commit(current.path, ratio)
   }))
+  const ancestorDragging = useContext(MountedResizeContext)
   committer.synchronizePersistedRatio(node.ratio)
   useLayoutEffect(() => { if (!dragging && group.current) synchronizeSplitLayout(group.current, node.ratio) }, [node.ratio, dragging, visible])
-  return <PanelGroup ref={group} direction={node.direction} className="workbench-region-split" onLayout={sizes => committer.observeLayout(sizes)}>
+  return <MountedResizeContext.Provider value={ancestorDragging || dragging}><PanelGroup ref={group} direction={node.direction} className="workbench-region-split" onLayout={sizes => committer.observeLayout(sizes)}>
     <Panel minSize={MIN_SPLIT_PERCENT} defaultSize={node.ratio * 100}>{children[0]}</Panel>
     <WorkbenchSplitHandle className="workbench-region-resize-handle" group={group} committer={committer} ratio={node.ratio}
       sourceKey={JSON.stringify([source, path, node.direction])} disabled={!visible} onDragging={setDragging} />
     <Panel minSize={MIN_SPLIT_PERCENT} defaultSize={(1 - node.ratio) * 100}>{children[1]}</Panel>
-  </PanelGroup>
+  </PanelGroup></MountedResizeContext.Provider>
 }
 
 /** Metadata and private draft only until an exact original Session control is supplied. */
@@ -62,6 +64,7 @@ function MountedSessionMetadata({ current, last, stale, error }: { current?: Mou
   </div>
 }
 function MountedSpaceRegionView({ member, draft, onDraft, session, sessionError, reading, onRefresh, target, mountKey, active, visible }: { visible?: boolean; target?: SpaceMountRecord | undefined; mountKey?: string; active?: boolean; member: MountedSpaceRegion; draft?: string; onDraft?: (value: string) => void; session?: MountedRegionSessionFact | undefined; sessionError?: string | undefined; reading?: boolean; onRefresh?: (() => void) | undefined }) {
+  const interactiveResize = useContext(MountedResizeContext)
   const original = member.region
   const fact = session?.current?.state.status === 'observed' ? session.current : session?.last?.state.status === 'observed' ? session.last : undefined
   const known = fact?.state.status === 'observed' ? fact.state : undefined
@@ -83,7 +86,7 @@ function MountedSpaceRegionView({ member, draft, onDraft, session, sessionError,
   const privateDraft = onDraft ? <details ref={draftDetails} className="mounted-space-session-draft"><summary>Unsent draft</summary>
     <label><span>Private task draft</span><textarea aria-label="Mounted Space task draft" value={draft ?? ''} onChange={event => onDraft(event.target.value)} /></label>
   </details> : undefined
-  return <section className={`mounted-space-region${waiting ? ' mounted-space-region--connecting' : ''}`} data-source-region={member.key}>
+  return <section className={`mounted-space-region${waiting ? ' mounted-space-region--connecting' : memberTarget ? ' mounted-space-region--agent' : ''}`} data-source-region={member.key}>
     {waiting ? target && original.creationOperationId ? <MountedCreationRecovery target={target} member={member} visible={visible !== false}
       onRefresh={onRefresh} reference={<><MountedExecutionRelation member={member} target={target} occurrence={session?.occurrence} />{reference}</>}
       supplement={privateDraft} sessionIssue={issue} /> : <FullPageLoadingSurface scope="region" visible={visible !== false} phase={checking ? 'loading' : 'parked'} eyebrow="Session connection"
@@ -95,11 +98,12 @@ function MountedSpaceRegionView({ member, draft, onDraft, session, sessionError,
       actions={onRefresh ? <button type="button" className="primary-button" onClick={onRefresh}>Check again</button> : undefined}
       details={{ summary: 'Connection details', content: <>{issue ? <p>{issue}</p> : null}{reference}</> }}
       supplement={privateDraft} /> : <>
-    <header>{original.agentSessionId ? <MountedExecutionRelation member={member} target={target} occurrence={session?.occurrence} /> : <AgentIcon size={14} aria-hidden="true" />}<strong>{original.kind === 'agent' ? 'Original Agent' : original.kind === 'launcher' ? 'New work' : original.kind}</strong></header>
-    <details><summary>Original reference</summary>{reference}</details>
-    {original.agentSessionId ? <MountedSessionMetadata {...session} error={sessionError} /> : null}
+    <header>{original.agentSessionId ? <MountedExecutionRelation member={member} target={target} occurrence={session?.occurrence} /> : <AgentIcon size={14} aria-hidden="true" />}{!memberTarget ? <strong>{original.kind === 'agent' ? 'Original Agent' : original.kind === 'launcher' ? 'New work' : original.kind}</strong> : null}
+      <details><summary>Original reference</summary>{reference}{memberTarget ? <MountedSessionMetadata {...session} error={sessionError} /> : null}</details></header>
+    {original.agentSessionId && !memberTarget ? <MountedSessionMetadata {...session} error={sessionError} /> : null}
+    {memberTarget && issue ? <p role="status" className="mounted-space-agent__issue">Source metadata updates unconfirmed: {issue}. The original member remains available.</p> : null}
     {!memberTarget ? <p className="settings-group-note" role="status">{original.agentSessionId ? 'Original Session control is unconfirmed. Its identity and your draft are kept.' : 'No Agent is attached to this original Region. Your unsent task stays private.'}</p> : null}
-    {memberTarget && mountKey ? <MountedSpaceAgent target={memberTarget} visible={!!visible} active={!!active} mountKey={mountKey} tabId={member.tab.tabId} onRefreshSource={onRefresh} /> : null}
+    {memberTarget && mountKey ? <MountedSpaceAgent target={memberTarget} visible={!!visible} active={!!active} interactiveResize={interactiveResize} mountKey={mountKey} tabId={member.tab.tabId} onRefreshSource={onRefresh} /> : null}
     {onDraft && !memberTarget ? <label><span>Private task draft</span><textarea aria-label="Mounted Space task draft" value={draft ?? ''} onChange={event => onDraft(event.target.value)} /></label> : null}
     {original.kind === 'launcher' && target && mountKey ? <MountedSpaceLauncher target={target} project={member.zone} slot={{ kind: 'region', tabId: member.tab.tabId, regionId: member.region.regionId }} mountKey={mountKey} active={!!active} draft={draft ?? ''} /> : null}
     </>}

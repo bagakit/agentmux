@@ -11,12 +11,12 @@ import './ordinary-space-member.css'
 
 /** An ordinary private Region keeps its layout; only its exact foreign IO source differs. */
 export function OrdinarySpaceMemberViewport(props: {
-  tabId: string; regionId: string; sessionId: string; visible: boolean; active: boolean; children: ReactNode
+  tabId: string; regionId: string; sessionId: string; visible: boolean; active: boolean; interactiveResize?: boolean; children: ReactNode
 }) {
   return <SpaceSourceReaders><Viewport {...props} /></SpaceSourceReaders>
 }
-function Viewport({ tabId, regionId, sessionId, visible, active, children }: {
-  tabId: string; regionId: string; sessionId: string; visible: boolean; active: boolean; children: ReactNode
+function Viewport({ tabId, regionId, sessionId, visible, active, interactiveResize = false, children }: {
+  tabId: string; regionId: string; sessionId: string; visible: boolean; active: boolean; interactiveResize?: boolean; children: ReactNode
 }) {
   const occurrence = useAppStore(() => ordinaryAgentSpaceMember({ tabId, regionId, sessionId }))
   const refreshSource = useSpaceSourceReader(occurrence.kind === 'foreign' ? occurrence.source : undefined, visible)
@@ -43,6 +43,6 @@ function Viewport({ tabId, regionId, sessionId, visible, active, children }: {
       <dt>Session</dt><dd><code>{occurrence.member.target.agentSessionId}</code></dd>
     </dl></details></header>
     <SpaceMemberWorkface key={JSON.stringify([currentTarget,occurrence.creationOperationId])} target={currentTarget} privateInput={occurrence.source} onRefreshSource={refreshSource}
-      mountKey={spaceMountKey(occurrence.source.reference)} tabId={tabId} visible={visible} active={active && activeRegion} />
+      mountKey={spaceMountKey(occurrence.source.reference)} tabId={tabId} visible={visible} active={active && activeRegion} interactiveResize={interactiveResize} />
   </section>
 }

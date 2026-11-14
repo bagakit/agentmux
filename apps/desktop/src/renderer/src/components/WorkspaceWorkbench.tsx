@@ -581,7 +581,7 @@ const SurfaceContentBody = memo(function SurfaceContentBody({
       />
     )
     return surface.kind === 'agent' ? <OrdinarySpaceMemberViewport tabId={tabId} regionId={surface.regionId} sessionId={surface.sessionId}
-      visible={surfaceVisible && !parked} active={surfaceVisible && !parked}>{original}</OrdinarySpaceMemberViewport> : original
+      visible={surfaceVisible && !parked} active={surfaceVisible && !parked} interactiveResize={interactiveResize}>{original}</OrdinarySpaceMemberViewport> : original
   }
   if (surface.kind === 'git') {
     return <Suspense fallback={<FullPageLoadingSurface scope="region" phase="loading" eyebrow="Git" title="Opening Git" detail="Restoring the saved Git reading target." />}>

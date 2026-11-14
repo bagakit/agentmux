@@ -14,7 +14,7 @@ export async function createSpaceMemberSurface(input: SpaceMountMemberTarget, po
   const client = await connectSpaceMember(ports.rpc, input.target)
   const initial = { id: JSON.stringify(['space-member', input.hostId, input.target]),
     hostId: JSON.stringify(['space-member', input.hostId, input.target.reference, input.target.runtimeId]) }
-  let closed = false, reading: Promise<SessionSnapshot> | undefined
+  let closed = false, reading: Promise<SessionSnapshot> | undefined, readAgain = false
   const leases = new Set<string>()
   const views = new Set<string>(), conversationReference = { hostId: 'local', agentSessionId: input.target.agentSessionId }
   const conversations = new Map<string, Awaited<ReturnType<typeof client.observeConversation>>>()
@@ -36,15 +36,20 @@ export async function createSpaceMemberSurface(input: SpaceMountMemberTarget, po
   }
   const report = (cause: unknown) => { if (!closed) emit({ type: 'observation-error', error: { code: cause instanceof AgentMuxError ? cause.code : 'SPACE_MEMBER_OBSERVATION_UNAVAILABLE', message: cause instanceof Error ? cause.message : String(cause) } }) }
   const refresh = () => {
-    if (closed || reading) return
+    if (closed) return
+    if (reading) { readAgain = true; return }
+    readAgain = false
     reading = read()
-    void reading.then(session => { if (!closed) emit({ type: 'session', session }) }).catch(report).finally(() => { reading = undefined })
+    void reading.then(session => { if (!closed) emit({ type: 'session', session }) }).catch(report).finally(() => {
+      reading = undefined
+      if (readAgain) refresh()
+    })
   }
   const unlisten = client.onEvent(event => {
     if (closed || signal.aborted) return
     try { ports.assertCurrent() } catch (cause) { report(cause); return }
     emit({ type: 'runtime', event: { type: 'core', hostId: initial.hostId, event } })
-    if (event.type === 'agent-session' || event.type === 'process-state' || event.type === 'connection-state' && event.state === 'restored') refresh()
+    if (event.type === 'agent-session' || event.type === 'agent-status' || event.type === 'process-state' || event.type === 'connection-state' && event.state === 'restored') refresh()
   }, { observeMessages: false })
   const requireLease = (id: string) => { if (!leases.has(id)) throw new AgentMuxError('This attachment belongs to another original member view.', 'INVALID_ATTACHMENT') }
   const attach = async (afterByte: number, previous?: string | null) => {
