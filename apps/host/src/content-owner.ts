@@ -170,7 +170,7 @@ export function createHostContent(options: {
     resolve: async (...args) => (await owners()).observation.resolve(...args),
     scan: async (...args) => (await owners()).observation.scan(...args)
   }
-  const agentPromotions = new HostAgentPromotions({ configurationPath: options.configurationPath, spatial: options.spatial, scratch,
+  const agentPromotions = new HostAgentPromotions({ configurationPath: options.configurationPath, spatial: options.spatial, scratch, files: publicFiles,
     ...(options.inspectPromotionAgent ? { inspectAgent: options.inspectPromotionAgent } : {}),
     workspace: async () => {
       const current = await configuration(), matches = current.workspaces.filter(value => value.id === SCRATCH_WORKSPACE_ID)

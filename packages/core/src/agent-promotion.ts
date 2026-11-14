@@ -1,15 +1,18 @@
 import { AgentMuxError } from './errors.js'
 import { rpcRecord } from './rpc-data.js'
-import { parseMoteDefaultConversation, type MoteDefaultConversation } from './mote/preferences.js'
+import { parseMoteDefaultConversation, parseMotePreferencesTarget, sameMotePreferencesTarget,
+  type MoteDefaultConversation, type MotePreferencesTarget } from './mote/preferences.js'
 import type { AgentMuxRpcCallContext } from './public-rpc-service.js'
 import { spatialCatalog, type AgentMuxSpatialGraph } from './spatial-graph.js'
 import { addTabOrThrow, createWorkbenchViewLayout, createWorkspaceLayout } from './spatial-layout.js'
 
 export type AgentPromotionTarget = { hostId: string; agentSessionId: string }
+export type AgentPromotionDestination = { kind: 'existing-club'; target: MotePreferencesTarget } | { kind: 'new-club' }
 export type AgentPromotionApply = {
   target: AgentPromotionTarget; source: MoteDefaultConversation; operationId: string; title: string
+  destination: AgentPromotionDestination
 }
-export type AgentPromotionInspection = { target: AgentPromotionTarget; operationId?: string }
+export type AgentPromotionInspection = { target: AgentPromotionTarget; operationId?: string; cursor?: string }
 export type AgentPromotionReceipt = AgentPromotionApply & {
   topicId: string; moteSpaceId: string; zoneId: string; directoryPath: string
   conversation: MoteDefaultConversation
@@ -17,6 +20,17 @@ export type AgentPromotionReceipt = AgentPromotionApply & {
   diskDurability: 'confirmed' | 'unconfirmed'
   unavailable: Array<{ code: string; message: string; recovery: string }>
 }
+export type AgentPromotionClub = { title: string; directoryPath: string; target: MotePreferencesTarget }
+export type AgentPromotionMembership = AgentPromotionClub & { main: boolean | null }
+export type AgentPromotionDiscovery = {
+  pending: AgentPromotionReceipt[]
+  clubs: AgentPromotionClub[]
+  memberships: AgentPromotionMembership[]
+  /** Original operation scan only; it does not identify the latest action or current membership. */
+  nextCursor: string | null
+  issue: string | null
+}
+export type AgentPromotionInspectResult = { promotion: AgentPromotionReceipt | null; discovery: AgentPromotionDiscovery | null }
 export const AGENT_PROMOTION_METHODS = { 'agent.promote.inspect': 'short', 'agent.promote.apply': 'long' } as const
 export type AgentPromotionMethod = keyof typeof AGENT_PROMOTION_METHODS
 export type AgentPromotionParamsMap = {
@@ -24,7 +38,7 @@ export type AgentPromotionParamsMap = {
   'agent.promote.apply': AgentPromotionApply
 }
 export type AgentPromotionResultMap = {
-  'agent.promote.inspect': { promotion: AgentPromotionReceipt | null }
+  'agent.promote.inspect': AgentPromotionInspectResult
   'agent.promote.apply': { promotion: AgentPromotionReceipt }
 }
 export type AgentPromotionParams<M extends AgentPromotionMethod> = AgentPromotionParamsMap[M]
@@ -40,6 +54,10 @@ function text(value: unknown, code: string, max = 16384): string {
   if (typeof value !== 'string' || !value.trim() || value.length > max || /[\0\r\n]/u.test(value)) fail('An exact original promotion identity or text is required.', code)
   return value as string
 }
+function diagnostic(value: unknown, code: string): string {
+  if (typeof value !== 'string' || !value.trim() || value.includes('\0')) fail('An original operation diagnostic is required.', code)
+  return value
+}
 function target(value: unknown, code: string): AgentPromotionTarget {
   const p = rpcRecord(value, ['hostId', 'agentSessionId'], code)
   return { hostId: text(p.hostId, code, 512), agentSessionId: text(p.agentSessionId, code, 512) }
@@ -50,33 +68,81 @@ function sameTarget(a: AgentPromotionTarget, b: AgentPromotionTarget): boolean {
 function sameConversation(a: MoteDefaultConversation, b: MoteDefaultConversation): boolean {
   return (['hostId', 'sessionId', 'displayWorkspaceId', 'groupId', 'tabId', 'regionId'] as const).every(key => a[key] === b[key])
 }
+function destination(value: unknown, code: 'INVALID_CONTROL_REQUEST' | 'CONTROL_PROTOCOL_ERROR'): AgentPromotionDestination {
+  const p = rpcRecord(value, ['kind', 'target'], code)
+  if (p.kind === 'new-club') { rpcRecord(value, ['kind'], code); return { kind: 'new-club' } }
+  if (p.kind !== 'existing-club') return fail('Choose an exact existing Club or explicitly establish a new Club.', code)
+  return { kind: 'existing-club', target: parseMotePreferencesTarget(p.target, code) }
+}
+function sameDestination(a: AgentPromotionDestination, b: AgentPromotionDestination): boolean {
+  return a.kind === b.kind && (a.kind === 'new-club' || b.kind === 'existing-club' && sameMotePreferencesTarget(a.target, b.target))
+}
 export function parseAgentPromotionParams<M extends AgentPromotionMethod>(method: M, value: unknown): AgentPromotionParamsMap[M] {
-  const p = rpcRecord(value, method === 'agent.promote.inspect' ? ['target', 'operationId'] : ['target', 'source', 'operationId', 'title'])
+  const p = rpcRecord(value, method === 'agent.promote.inspect' ? ['target', 'operationId', 'cursor'] : ['target', 'source', 'operationId', 'title', 'destination'])
   const original = target(p.target, 'INVALID_CONTROL_REQUEST')
-  if (method === 'agent.promote.inspect') return { target: original, ...(p.operationId === undefined ? {} : { operationId: text(p.operationId, 'INVALID_CONTROL_REQUEST', 512) }) } as AgentPromotionParamsMap[M]
+  if (method === 'agent.promote.inspect') {
+    if (p.operationId !== undefined && p.cursor !== undefined) fail('An exact operation and an operation discovery cursor are separate reads.')
+    return { target: original, ...(p.operationId === undefined ? {} : { operationId: text(p.operationId, 'INVALID_CONTROL_REQUEST', 512) }),
+      ...(p.cursor === undefined ? {} : { cursor: text(p.cursor, 'INVALID_CONTROL_REQUEST', 2048) }) } as AgentPromotionParamsMap[M]
+  }
   const source = parseMoteDefaultConversation(p.source)
   if (source.hostId !== original.hostId || source.sessionId !== original.agentSessionId) fail('The original promotion source belongs to another Agent.')
-  return { target: original, source, operationId: text(p.operationId, 'INVALID_CONTROL_REQUEST', 512), title: text(p.title, 'INVALID_CONTROL_REQUEST', 120) } as AgentPromotionParamsMap[M]
+  return { target: original, source, operationId: text(p.operationId, 'INVALID_CONTROL_REQUEST', 512), title: text(p.title, 'INVALID_CONTROL_REQUEST', 120),
+    destination: destination(p.destination, 'INVALID_CONTROL_REQUEST') } as AgentPromotionParamsMap[M]
 }
-export function parseAgentPromotionResult<M extends AgentPromotionMethod>(method: M, value: unknown, input: AgentPromotionParamsMap[M]): AgentPromotionResultMap[M] {
-  const code = 'CONTROL_PROTOCOL_ERROR', result = rpcRecord(value, ['promotion'], code)
-  if (result.promotion === null && method === 'agent.promote.inspect') return { promotion: null } as AgentPromotionResultMap[M]
-  const p = rpcRecord(result.promotion, ['operationId', 'target', 'source', 'title', 'topicId', 'moteSpaceId', 'zoneId', 'directoryPath', 'conversation', 'state', 'stage', 'diskDurability', 'unavailable'], code)
+function promotion(value: unknown, input: AgentPromotionInspection, apply?: AgentPromotionApply): AgentPromotionReceipt {
+  const code = 'CONTROL_PROTOCOL_ERROR'
+  const p = rpcRecord(value, ['operationId', 'target', 'source', 'title', 'destination', 'topicId', 'moteSpaceId', 'zoneId', 'directoryPath', 'conversation', 'state', 'stage', 'diskDurability', 'unavailable'], code)
   const original = target(p.target, code), source = parseMoteDefaultConversation(p.source, code), conversation = parseMoteDefaultConversation(p.conversation, code)
-  const operationId = text(p.operationId, code, 512), title = text(p.title, code, 120)
+  const operationId = text(p.operationId, code, 512), title = text(p.title, code, 120), selected = destination(p.destination, code)
   if (!sameTarget(original, input.target) || input.operationId !== undefined && input.operationId !== operationId ||
     source.hostId !== original.hostId || source.sessionId !== original.agentSessionId || conversation.hostId !== original.hostId || conversation.sessionId !== original.agentSessionId ||
-    method === 'agent.promote.apply' && (!sameConversation(source, (input as AgentPromotionApply).source) || title !== (input as AgentPromotionApply).title))
-    fail('The promotion receipt belongs to another original operation or Agent.', code)
+    apply && (!sameConversation(source, apply.source) || title !== apply.title || !sameDestination(selected, apply.destination)))
+    fail('The promotion receipt belongs to another original operation, destination or Agent.', code)
   for (const key of ['topicId', 'moteSpaceId', 'zoneId', 'directoryPath']) text(p[key], code)
+  if (selected.kind === 'existing-club' && (p.moteSpaceId !== selected.target.spaceId || p.zoneId !== selected.target.zoneId || !['spatial', 'complete'].includes(String(p.stage))))
+    fail('The existing Club receipt changed its destination or claims an unrelated content/Main stage.', code)
   if (p.state !== 'complete' && p.state !== 'partial' || !['files', 'spatial', 'main', 'complete'].includes(String(p.stage)) ||
     p.diskDurability !== 'confirmed' && p.diskDurability !== 'unconfirmed' || !Array.isArray(p.unavailable)) fail('Promotion completion is unconfirmed.', code)
   const unavailable = (p.unavailable as unknown[]).map(value => {
     const issue = rpcRecord(value, ['code', 'message', 'recovery'], code)
-    return { code: text(issue.code, code), message: text(issue.message, code), recovery: text(issue.recovery, code) }
+    return { code: text(issue.code, code), message: diagnostic(issue.message, code), recovery: diagnostic(issue.recovery, code) }
   })
   if (p.state === 'complete' && (p.stage !== 'complete' || p.diskDurability !== 'confirmed' || unavailable.length)) fail('Promotion completion lacks the original confirmed facts.', code)
-  return { promotion: { ...p, target: original, source, conversation, operationId, title, unavailable } as AgentPromotionReceipt } as AgentPromotionResultMap[M]
+  return { ...p, target: original, source, conversation, operationId, title, destination: selected, unavailable } as AgentPromotionReceipt
+}
+function club(value: unknown): AgentPromotionClub {
+  const p = rpcRecord(value, ['title', 'directoryPath', 'target'], 'CONTROL_PROTOCOL_ERROR')
+  if (typeof p.title !== 'string') fail('A Club title must be a string.', 'CONTROL_PROTOCOL_ERROR')
+  return { title: p.title, directoryPath: text(p.directoryPath, 'CONTROL_PROTOCOL_ERROR'), target: parseMotePreferencesTarget(p.target, 'CONTROL_PROTOCOL_ERROR') }
+}
+function discovery(value: unknown, input: AgentPromotionInspection): AgentPromotionDiscovery {
+  const code = 'CONTROL_PROTOCOL_ERROR', p = rpcRecord(value, ['pending', 'clubs', 'memberships', 'nextCursor', 'issue'], code)
+  if (!Array.isArray(p.pending) || !Array.isArray(p.clubs) || !Array.isArray(p.memberships)) fail('Original promotion discovery is unconfirmed.', code)
+  const pending = p.pending.map(value => promotion(value, { target: input.target }))
+  if (pending.some(value => value.state !== 'partial') || new Set(pending.map(value => value.operationId)).size !== pending.length) fail('Discovery must retain distinct original unfinished operations.', code)
+  const clubs = p.clubs.map(club), memberships = p.memberships.map(value => {
+    const item = rpcRecord(value, ['title', 'directoryPath', 'target', 'main'], code)
+    if (item.main !== null && typeof item.main !== 'boolean') fail('The original Main role observation is unconfirmed.', code)
+    return { ...club({ title: item.title, directoryPath: item.directoryPath, target: item.target }), main: item.main as boolean | null }
+  })
+  for (const values of [clubs, memberships]) if (new Set(values.map(value => JSON.stringify(value.target))).size !== values.length) fail('Club discovery contains duplicate original targets.', code)
+  return { pending, clubs, memberships, nextCursor: p.nextCursor === null ? null : text(p.nextCursor, code, 2048),
+    issue: p.issue === null ? null : diagnostic(p.issue, code) }
+}
+export function parseAgentPromotionResult<M extends AgentPromotionMethod>(method: M, value: unknown, input: AgentPromotionParamsMap[M]): AgentPromotionResultMap[M] {
+  const code = 'CONTROL_PROTOCOL_ERROR'
+  if (method === 'agent.promote.apply') {
+    const result = rpcRecord(value, ['promotion'], code)
+    return { promotion: promotion(result.promotion, input, input as AgentPromotionApply) } as AgentPromotionResultMap[M]
+  }
+  const result = rpcRecord(value, ['promotion', 'discovery'], code), query = input as AgentPromotionInspection
+  if (query.operationId !== undefined) {
+    if (result.discovery !== null) fail('An exact original operation read cannot substitute discovery.', code)
+    return { promotion: result.promotion === null ? null : promotion(result.promotion, query), discovery: null } as AgentPromotionResultMap[M]
+  }
+  if (result.promotion !== null) fail('Operation discovery cannot appoint a historical receipt as a new action result.', code)
+  return { promotion: null, discovery: discovery(result.discovery, query) } as AgentPromotionResultMap[M]
 }
 
 export type PromotedAgentAssociation = {
