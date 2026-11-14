@@ -52,6 +52,10 @@ async function open() {
   })
   await dom.click('[data-open-folder]')
 }
+it('gives the optional Executor a full form row for its identity and status', async () => {
+  await show()
+  expect(dom.container.querySelector('.host-projects__executor')).not.toBeNull()
+})
 it('projects target-only choices and prepares the selected target in its returned folder without starting', async () => {
   await show()
   const optionItems = await options()
