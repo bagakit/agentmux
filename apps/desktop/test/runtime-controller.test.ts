@@ -3676,3 +3676,171 @@ describe('tool execution Desktop boundary', () => {
     } finally { await controller.dispose() }
   })
 })
+
+describe('Desktop work placement', () => {
+  beforeEach(() => {
+    runtimeFixture.FakeClient.instances.length = 0
+    runtimeFixture.FakeClient.failNextConnect = false
+    runtimeFixture.FakeClient.initializeNext = undefined
+    runtimeFixture.createdHosts.length = 0
+    vi.clearAllMocks()
+  })
+
+  async function placementFixture(input: {
+    localRuntimeId?: string; agentHostId?: string; resourceRuntimeId?: string; resourceHostId?: string
+    duplicate?: boolean; unavailableResource?: boolean
+  } = {}) {
+    const localRuntimeId = input.localRuntimeId ?? 'runtime-B'
+    const agentHostId = input.agentHostId ?? 'peer'
+    const semanticIds: Record<string, string> = { local: localRuntimeId, peer: localRuntimeId === 'runtime-A' ? 'runtime-B' : 'runtime-A', alias: localRuntimeId }
+    const availability: Record<string, 'connected' | 'unverified'> = { local: 'connected', peer: 'connected', alias: 'connected' }
+    const config: AppConfig = { ...localConfig, hosts: [...localConfig.hosts,
+      { ...remoteHost, id: 'peer', runtimeId: semanticIds.peer },
+      ...(input.duplicate ? [{ ...remoteHost, id: 'alias', hostname: 'alias.example.test', runtimeId: semanticIds.alias }] : [])] }
+    const controller = new RuntimeController(store, async (host, sessionStore) => {
+      const client = await localRuntimeConnector(host, sessionStore)
+      return Object.assign(client, { runtimeOwnerIdentity: vi.fn(() => ({ runtimeId: semanticIds[host.id]!,
+        ownerInstanceId: `instance-${host.id}`, protocolVersion: 1 as const, processId: 42,
+        ctxmux: client.runtimeIdentity(), availability: availability[host.id]! })) })
+    })
+    controller.commit(await controller.prepare(config))
+    const clients = Object.fromEntries(config.hosts.map((host, index) => [host.id, runtimeFixture.FakeClient.instances[index]!]))
+    await vi.waitFor(() => expect(clients.peer!.connected).toBe(true))
+    const status = agentStatusFixture()
+    const binding = { bindingId: 'original-coordinator-binding', resourceHostId: input.resourceHostId ?? 'B-as-known-to-A',
+      resourceRuntimeId: input.resourceRuntimeId ?? localRuntimeId, workspacePath: status.session.workspacePath }
+    const session = { ...status.session, toolExecution: binding }
+    const subject = { subjectId: 'agent:local:agent-1', kind: 'agent' as const, hostId: 'local',
+      workspacePath: session.workspacePath, providerId: session.providerId, executorId: session.executorId,
+      agentSession: session, run: status.run }
+    const client = clients[agentHostId]!
+    client.agentSessions.mockReturnValue([session])
+    client.agentSession.mockReturnValue(session)
+    client.runtimeProjection.mockResolvedValue({ hostId: 'local', subjects: [subject] })
+    const descriptor: AgentSessionHistoryDescriptor = { agentSessionId: session.agentSessionId, hostId: 'local', state: 'active',
+      history: { providerId: session.providerId, executorId: session.executorId, workspacePath: session.workspacePath,
+        createdAt: session.createdAt, toolExecution: binding } }
+    client.sessionHistorySources.mockResolvedValue([descriptor])
+    if (input.unavailableResource) availability.local = 'unverified'
+    return { controller, config, clients, client, session, subject, binding, descriptor, availability, semanticIds, agentHostId }
+  }
+
+  it.each([
+    { name: 'A sees B project with A Agent', localRuntimeId: 'runtime-A', agentHostId: 'local', resourceRuntimeId: 'runtime-B', resourceHostId: 'B-as-known-to-A', expected: 'peer' },
+    { name: 'B sees its own project with A Agent', localRuntimeId: 'runtime-B', agentHostId: 'peer', resourceRuntimeId: 'runtime-B', resourceHostId: 'B-as-known-to-A', expected: 'local' },
+    { name: 'A sees its own project with B Agent', localRuntimeId: 'runtime-A', agentHostId: 'peer', resourceRuntimeId: 'runtime-A', resourceHostId: 'local', expected: 'local' },
+    { name: 'B never mistakes A coordinator local for B files', localRuntimeId: 'runtime-B', agentHostId: 'local', resourceRuntimeId: 'runtime-A', resourceHostId: 'local', expected: 'peer' }
+  ])('projects observer-relative routes in every Main consumer: $name', async row => {
+    const f = await placementFixture(row), original = structuredClone(f.binding)
+    const placement = { agentHostId: row.agentHostId, resourceHostId: row.expected }
+    const renderer = webContentsFixture(), release = f.controller.attach(renderer)
+    try {
+      const snapshot = await f.controller.snapshot(f.config)
+      expect(snapshot.sessions[0]).toMatchObject({ workPlacement: placement, hostId: row.agentHostId,
+        control: { hostId: row.agentHostId }, toolExecution: original })
+      expect(await f.controller.resolveSession(f.session.agentSessionId, f.config)).toMatchObject({ workPlacement: placement })
+      expect(await f.controller.refresh({ kind: 'agent', hostId: row.agentHostId, agentSessionId: f.session.agentSessionId,
+        run: f.session.run }, f.config)).toMatchObject({ workPlacement: placement })
+      f.client.eventListener?.({ type: 'agent-session', session: f.session })
+      const frame = renderer.send.mock.calls.find(call => call[1].event.type === 'agent-session')?.[1]
+      expect(frame?.event.session).toMatchObject({ hostId: row.agentHostId, workPlacement: placement, toolExecution: original })
+      const reduced = projectRuntimeEvent({ sessions: snapshot.sessions, timelines: snapshot.timelines,
+        pendingAgentLaunches: {}, tabs: {}, layouts: {}, viewModes: {} }, frame)
+      expect(reduced.state.sessions[0]).toMatchObject({ workPlacement: placement, toolExecution: original })
+      const sources = await f.controller.sessionHistorySources()
+      expect(sources).toEqual([{ ...f.descriptor, hostId: row.agentHostId, workPlacement: placement }])
+      expect(await f.controller.sessionHistorySource({ hostId: row.agentHostId, agentSessionId: f.session.agentSessionId }))
+        .toMatchObject({ source: { workPlacement: placement, history: { toolExecution: original } }, issue: null })
+      f.client.runtimeProjection.mockResolvedValue({ hostId: 'local', subjects: [] })
+      expect((await f.controller.snapshot(f.config)).recoveryCandidates).toEqual([expect.objectContaining({
+        workPlacement: placement, hostId: row.agentHostId, toolExecution: original })])
+      expect(f.binding).toEqual(original)
+      for (const client of Object.values(f.clients)) expect(client.stopAgent).not.toHaveBeenCalled()
+    } finally { release(); await f.controller.dispose() }
+  })
+
+  it.each(['unmapped', 'ambiguous', 'conflicting'] as const)('retains the original Agent control with %s resource identity', async condition => {
+    const f = await placementFixture({ resourceHostId: 'local', resourceRuntimeId: condition === 'unmapped' ? 'unmapped-runtime' : 'runtime-B',
+      duplicate: condition === 'ambiguous' })
+    if (condition === 'conflicting') f.semanticIds.peer = 'runtime-B'
+    const renderer = webContentsFixture(), release = f.controller.attach(renderer)
+    try {
+      expect((await f.controller.snapshot(f.config)).sessions[0]).toMatchObject({ workPlacement: {
+        agentHostId: 'peer', resourceHostId: null }, control: { hostId: 'peer', agentSessionId: 'agent-1', run: f.session.run } })
+      f.client.eventListener?.({ type: 'agent-session', session: f.session })
+      expect(renderer.send.mock.calls.at(-1)?.[1].event.session.workPlacement.resourceHostId).toBeNull()
+      await f.controller.write({ kind: 'agent', hostId: 'peer', agentSessionId: f.session.agentSessionId, run: f.session.run }, 'still working', 'user')
+      expect(f.client.writeAgent).toHaveBeenCalledWith({ agentSessionId: f.session.agentSessionId, expectedRun: f.session.run, data: 'still working', source: 'user' })
+      expect(f.client.stopAgent).not.toHaveBeenCalled(); expect(f.client.dispose).not.toHaveBeenCalled()
+    } finally { release(); await f.controller.dispose() }
+  })
+
+  it('refreshes unknown and known resource routes through the actual Main wire and Renderer consumer', async () => {
+    const f = await placementFixture(), renderer = webContentsFixture(), release = f.controller.attach(renderer)
+    f.semanticIds.local = 'not-yet-mapped'
+    try {
+      const snapshot = await f.controller.snapshot(f.config)
+      let state = { sessions: snapshot.sessions, timelines: snapshot.timelines, pendingAgentLaunches: {}, tabs: {}, layouts: {}, viewModes: {} }
+      f.client.eventListener?.({ type: 'agent-session', session: f.session })
+      state = projectRuntimeEvent(state, renderer.send.mock.calls.at(-1)![1]).state
+      expect(state.sessions[0]).toMatchObject({ workPlacement: { agentHostId: 'peer', resourceHostId: null } })
+      f.semanticIds.local = 'runtime-B'
+      f.client.eventListener?.({ type: 'agent-session', session: f.session })
+      state = projectRuntimeEvent(state, renderer.send.mock.calls.at(-1)![1]).state
+      expect(state.sessions[0]).toMatchObject({ workPlacement: { agentHostId: 'peer', resourceHostId: 'local' },
+        control: { hostId: 'peer', agentSessionId: f.session.agentSessionId, run: f.session.run }, toolExecution: f.binding })
+      f.semanticIds.local = 'not-yet-mapped'
+      f.client.eventListener?.({ type: 'agent-session', session: f.session })
+      state = projectRuntimeEvent(state, renderer.send.mock.calls.at(-1)![1]).state
+      expect(state.sessions[0]).toMatchObject({ workPlacement: { agentHostId: 'peer', resourceHostId: null } })
+    } finally { release(); await f.controller.dispose() }
+  })
+
+  it('keeps a healthy single-Session lookup when another Host presentation fails', async () => {
+    const f = await placementFixture()
+    f.clients.local!.runtimeProjection.mockResolvedValue({ hostId: 'local', subjects: [{ ...f.subject, providerId: 'unknown-provider' }] })
+    try {
+      expect(await f.controller.resolveSession(f.session.agentSessionId, f.config)).toMatchObject({ hostId: 'peer', workPlacement: {
+        agentHostId: 'peer', resourceHostId: 'local' } })
+      expect(f.client.stopAgent).not.toHaveBeenCalled()
+    } finally { await f.controller.dispose() }
+  })
+
+  it('retains a cached authenticated local identity across observation loss without another probe', async () => {
+    const f = await placementFixture({ unavailableResource: true })
+    try {
+      for (const client of Object.values(f.clients)) client.connect.mockClear()
+      expect((await f.controller.sessionHistorySources())[0]?.workPlacement).toEqual({ agentHostId: 'peer', resourceHostId: 'local' })
+      for (const client of Object.values(f.clients)) expect(client.connect).not.toHaveBeenCalled()
+    } finally { await f.controller.dispose() }
+  })
+
+  it('uses the saved authenticated remote Runtime binding while its client identity is unavailable', async () => {
+    const f = await placementFixture({ agentHostId: 'local', resourceRuntimeId: 'runtime-A', resourceHostId: 'local' })
+    Object.assign(f.clients.peer!, { runtimeOwnerIdentity: vi.fn(() => null) })
+    try {
+      expect((await f.controller.sessionHistorySource({ hostId: 'local', agentSessionId: f.session.agentSessionId })).source?.workPlacement)
+        .toEqual({ agentHostId: 'local', resourceHostId: 'peer' })
+    } finally { await f.controller.dispose() }
+  })
+
+  it('keeps ordinary same-Host remote work unbound and indexes identity once per snapshot collection', async () => {
+    const f = await placementFixture()
+    try {
+      const ordinary = { ...agentStatusFixture().session }
+      const subjects = Array.from({ length: 150 }, (_, index) => ({ ...f.subject, agentSession: { ...ordinary, agentSessionId: `ordinary-${index}` } }))
+      f.client.runtimeProjection.mockResolvedValue({ hostId: 'local', subjects })
+      f.client.agentSessions.mockReturnValue([])
+      const identityReads = Object.values(f.clients).map(client => (client as typeof client & { runtimeOwnerIdentity: ReturnType<typeof vi.fn> }).runtimeOwnerIdentity)
+      identityReads.forEach(read => read.mockClear())
+      const snapshot = await f.controller.snapshot(f.config)
+      expect(snapshot.sessions).toHaveLength(150)
+      expect(snapshot.sessions.every(session => session.hostId === 'peer' && !('toolExecution' in session) && !('workPlacement' in session))).toBe(true)
+      // Identity reads depend on the two configured Hosts, not the number of unrelated Sessions.
+      expect(identityReads.reduce((sum, read) => sum + read.mock.calls.length, 0)).toBeLessThanOrEqual(8)
+      identityReads.forEach(read => read.mockClear())
+      f.client.eventListener?.({ type: 'agent-session', session: ordinary })
+      expect(identityReads.every(read => read.mock.calls.length === 0)).toBe(true)
+    } finally { await f.controller.dispose() }
+  })
+})

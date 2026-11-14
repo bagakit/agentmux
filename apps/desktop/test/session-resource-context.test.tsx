@@ -11,6 +11,8 @@ import { useAppStore } from '../src/renderer/src/store'
 import { useLauncherState } from '../src/renderer/src/lib/launcher-state'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { api } from '../src/renderer/src/lib/api'
+import { createSessionProjectFileContextSelector } from '../src/renderer/src/lib/session-project-file-context'
+import { createWorkspaceLayout } from '@agentmux/layout'
 import { sessionResourceContext } from '../src/renderer/src/lib/session-resource-context'
 import { composerDOM, composerConfig, composerSession } from './helpers/composer-dom-fixture'
 
@@ -27,6 +29,7 @@ function seed(resourceHost: 'local' | 'remote', runtimeHost: 'local' | 'remote')
   const resource = { ...runtime, id: 'resource', name: 'Project files', hostId: resourceHost, path: resourcePath }
   const session = { ...composerSession(), hostId: runtimeHost, workspacePath: runtime.path,
     control: { ...composerSession().control, hostId: runtimeHost },
+    workPlacement: { agentHostId: runtimeHost, resourceHostId: resourceHost },
     toolExecution: { bindingId: 'original-binding', resourceHostId: resourceHost, resourceRuntimeId: 'original-resource-runtime', workspacePath: resource.path } }
   useAppStore.setState({ config: { ...composerConfig,
     hosts: [...composerConfig.hosts, { id: 'remote', kind: 'ssh', label: 'Remote host', hostname: 'resource-proof' }], workspaces: [runtime, resource] }, sessions: [session],
@@ -158,4 +161,72 @@ it('a mixed local file paste keeps the image on its original input channel and r
   expect(localPath).not.toHaveBeenCalled()
   expect(dom.draft()).not.toContain('@local.txt')
   expect(dom.draft()).toContain('Keep my draft')
+})
+
+
+it('observer reversal reads current local project from Runtime projection, preserving the original coordinator alias', async () => {
+  const { session } = seed('local', 'remote')
+  session.toolExecution.resourceHostId = 'the-other-desktop-called-this-B'
+  await dom.render(<AgentSessionComposer sessionId="agent-1" />)
+  await text('@correct')
+  await wait(() => expect(document.querySelector('.composer__suggestions')?.textContent).toContain('correct-project.txt'))
+  expect(api.files.readDirectory).toHaveBeenCalledExactlyOnceWith('resource', '')
+  expect(session.toolExecution.resourceHostId).toBe('the-other-desktop-called-this-B')
+  expect(editor().isEditable).toBe(true)
+})
+
+it.each([false, true])('unmapped resource never borrows observer local files or stops healthy input (projection present=%s)', async present => {
+  const { session } = seed('local', 'remote')
+  // This raw local belongs to the original coordinator, not this Desktop.
+  session.toolExecution.resourceHostId = 'local'
+  Object.assign(session, { workPlacement: present ? { agentHostId: 'remote', resourceHostId: null } : undefined })
+  const choose = vi.spyOn(api.ui, 'chooseFiles'), stop = vi.spyOn(api.sessions, 'stop')
+  await dom.render(<AgentSessionComposer sessionId="agent-1" />)
+  await text('@correct')
+  await wait(() => expect(document.body.textContent).toContain('original project Host is unconfirmed'))
+  expect(api.files.readDirectory).not.toHaveBeenCalled()
+  expect(choose).not.toHaveBeenCalled()
+  expect(editor().isEditable).toBe(true)
+  expect(dom.draft()).toBe('@correct')
+  expect(stop).not.toHaveBeenCalled()
+  expect(useAppStore.getState().sessions[0]).toBe(session)
+})
+
+
+it('mounted Composer refreshes its file owner when only current-route projection changes', async () => {
+  const { session }=seed('local','remote')
+  Object.assign(session,{workPlacement:{agentHostId:'remote',resourceHostId:null}})
+  await dom.render(<AgentSessionComposer sessionId="agent-1" />)
+  await text('@correct')
+  await wait(()=>expect(document.body.textContent).toContain('original project Host is unconfirmed'))
+  expect(api.files.readDirectory).not.toHaveBeenCalled()
+  await act(async()=>useAppStore.setState({sessions:[{...session,workPlacement:{agentHostId:'remote',resourceHostId:'local'}}]}))
+  await wait(()=>expect(api.files.readDirectory).toHaveBeenCalledExactlyOnceWith('resource',''))
+  expect(editor().isEditable).toBe(true)
+})
+
+it('Session file-link selector refreshes the same binding on projected Host changes, retaining only confirmed local home', () => {
+  const {session,runtime}=seed('local','remote')
+  const tab=createWorkbenchTab('source',{kind:'agent',phase:'attached',regionId:'agent-region',workspaceId:runtime.id,sessionId:session.id})
+  useAppStore.setState({localHome:'/original-home',tabs:{source:tab},layouts:{[runtime.id]:createWorkspaceLayout('group',[tab.id])}})
+  const select=createSessionProjectFileContextSelector(session.id,{workspaceId:runtime.id,tabGroupId:'group',tabId:tab.id,regionId:'agent-region',sessionId:session.id},()=>null)
+  const before=select(useAppStore.getState())
+  expect(before).toMatchObject({kind:'session',workspaceId:'resource',homeDir:'/original-home'})
+  useAppStore.setState({sessions:[{...session,workPlacement:{agentHostId:'remote',resourceHostId:null}}]})
+  const unknown=select(useAppStore.getState())
+  expect(unknown).toMatchObject({kind:'unconfirmed',homeDir:''})
+  expect(unknown).not.toBe(before)
+  expect(unknown.workspaceId).toBeUndefined()
+  useAppStore.setState({sessions:[{...session,workPlacement:{agentHostId:'remote',resourceHostId:'local'}}]})
+  expect(select(useAppStore.getState())).toMatchObject({kind:'session',workspaceId:'resource',homeDir:'/original-home'})
+})
+
+it('Host route edits refresh original bound placement while label and local listener edits do not query Sessions', async()=>{
+  const {session}=seed('local','remote'),state=useAppStore.getState(),config=state.config!
+  const snapshot=vi.spyOn(api.sessions,'snapshot').mockResolvedValue({sessions:[session]} as Awaited<ReturnType<typeof api.sessions.snapshot>>)
+  state.setConfig({...config,hosts:config.hosts.map(host=>({...host,label:host.label+' renamed'}))})
+  expect(snapshot).not.toHaveBeenCalled()
+  state.setConfig({...config,hosts:config.hosts.map(host=>host.id==='remote'?{...host,hostname:'changed.invalid'}:host)})
+  await wait(()=>expect(snapshot).toHaveBeenCalledOnce())
+  expect(useAppStore.getState().agentComposerDrafts['agent-1']).toBe('Keep my draft')
 })
