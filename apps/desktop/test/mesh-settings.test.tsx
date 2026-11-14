@@ -44,6 +44,38 @@ it('Mesh shows the App recovery action before Host answers, and reopens setup af
     expect(dom.container.textContent).toContain('Connect to a gateway')
   } finally { read.mockRestore(); choose.mockRestore(); call.mockRestore() }
 })
+it('refreshing Mesh after the offline owner lease releases shows the App recovery action', async () => {
+  const read = vi.spyOn(api.ui, 'readLocalRuntimeRecovery').mockResolvedValue({ state: 'deferred' })
+  const call = vi.spyOn(api.mesh, 'call').mockRejectedValue(Error('The original Host is unavailable'))
+  try {
+    await dom.render(<Editor active />)
+    await settled(() => dom.container.textContent?.includes('Refresh Mesh') ?? false)
+    read.mockResolvedValue({ state: 'needs-backup', code: 'IDENTITY_SOURCE_MISSING' })
+    await dom.click('[data-mesh-settings] .primary-button')
+    await settled(() => dom.container.textContent?.includes('Restore this Mac’s identity') ?? false)
+    expect(read.mock.calls.length).toBeGreaterThan(1)
+  } finally { read.mockRestore(); call.mockRestore() }
+})
+it('Mesh reopens setup when automatic recovery finishes after its refresh already failed', async () => {
+  let restored = false, finish!: () => void
+  const read = vi.spyOn(api.ui, 'readLocalRuntimeRecovery').mockResolvedValue({ state: 'deferred' })
+  const call = vi.spyOn(api.mesh, 'call').mockImplementation(async method => {
+    if (!restored) throw Error('The original Host is unavailable')
+    return structuredClone(method === 'mesh.inspect' ? observation() : settings) as never
+  })
+  try {
+    await dom.render(<Editor active />)
+    await settled(() => dom.container.textContent?.includes('Refresh Mesh') ?? false)
+    read.mockImplementation(async () => await new Promise(resolve => {
+      finish = () => { restored = true; resolve({ state: 'restored' }) }
+    }))
+    await dom.click('[data-mesh-settings] .primary-button')
+    expect(dom.container.textContent).toContain('Refresh Mesh')
+    await act(async () => finish())
+    await ready()
+    expect(dom.container.textContent).toContain('Connect to a gateway')
+  } finally { read.mockRestore(); call.mockRestore() }
+})
 it('the original Settings section exposes Mesh and a real editor; saved connection identities keep their original route', async () => {
   inspectOnly(); expect(hostsSettingsModule.id).toBe('hosts'); expect(hostsSettingsModule.title).toBe('Mesh')
   await dom.render(<hostsSettingsModule.Pane config={useAppStore.getState().config!} active onClose={vi.fn()} onNavigate={vi.fn()} navigationRequest={{section:'hosts',field:'mesh-configuration'}} />)

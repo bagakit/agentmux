@@ -100,6 +100,28 @@ it('Desktop boot restores missing identity from its verified backup and the same
   expect(after.owner.ownerInstanceId).not.toBe(before.owner.ownerInstanceId)
 })
 
+it('Desktop uses a verified earlier backup when the newest identity blob is missing and can recover a later confirmed loss', async () => {
+  const f = await backedUpHost(), identity = join(f.directory, 'semantic-runtime.json')
+  const original = await readFile(identity, 'utf8')
+  await writeFile(identity, original + '\n')
+  const latest = (await f.rpc.call('storage.backup.create', {})).generation
+  expect(latest.generationId).not.toBe(f.generation.generationId)
+  const recoveryDirectory = join(f.directory, 'recovery')
+  const manifest = JSON.parse(await readFile(join(recoveryDirectory, 'generations', latest.generationId + '.json'), 'utf8'))
+  const canonical = manifest.sources.find((source: { id: string }) => source.id === 'core.semantic').members.find((member: { id: string }) => member.id === 'semantic-runtime.json')
+  const custody = manifest.sources.find((source: { id: string }) => source.id === 'core.semantic').members.find((member: { id: string }) => member.id === 'semantic-runtime.json.original')
+  expect(canonical.sha256).not.toBe(custody.sha256)
+  await f.rpc.dispose(); await f.host.dispose()
+  await unlink(join(recoveryDirectory, 'objects', canonical.sha256))
+
+  for (let loss = 0; loss < 2; loss++) {
+    await unlink(identity); await unlink(identity + '.original')
+    expect(await localRuntimeRecovery(f.source).check()).toEqual({ state: 'restored' })
+    expect(await readFile(identity, 'utf8')).toBe(original)
+    expect(await readFile(identity + '.original', 'utf8')).toBe(original)
+  }
+})
+
 it('the App picker keeps a signer-only namespace intact until an original backup is selected', async () => {
   const f = await backedUpHost(), identity = join(f.directory, 'semantic-runtime.json')
   const bytes = await readFile(identity, 'utf8'), original = JSON.parse(bytes)
