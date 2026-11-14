@@ -204,13 +204,13 @@ Mote 输入的工作面 locator 从 `@agentmux/core/mote-input-source` 解析。
 
 一个 Agent 可以把进程和模型访问放在一台 Host，把项目文件和工具执行放在另一台 Host。从项目启动、选择两端到继续原工作的步骤见[远程执行使用指南](guides/actions/remote-execution.md)，Settings 和 CLI 帮助使用同一份正文；本节说明实现与当前适配范围。
 
-`agent.execution.create`、`agent.execution.binding`、`agent.execution.rejoin` 与 `agent.execution.inspect`（RPC 与同名 CLI）复用 [Core 执行协调器](src/agent-execution-coordinator.ts)。Provider 通过 `prepareToolExecutionLaunch`（改写 Agent 端的启动）和 `prepareExecutionHelper`（准备资源端 helper）贡献原生接法，客户端始终使用同一个绑定、Session 与操作回执；`rejoin` 重新接上原 reader，不重发结果未知的工具操作。内置 Provider 中只有 Claude Code 和 Codex 实现了这两个接口，其他 Provider 请求分端执行时返回 `EXECUTION_PROVIDER_UNSUPPORTED`。两家都只接受各自核验过的一个 CLI 版本，`--version` 输出不符时拒绝本次启动，不退回本机执行。
+`agent.execution.create`、`agent.execution.binding`、`agent.execution.rejoin` 与 `agent.execution.inspect`（RPC 与同名 CLI）复用 [Core 执行协调器](src/agent-execution-coordinator.ts)。Provider 通过 `prepareToolExecutionLaunch`（改写 Agent 端的启动）和 `prepareExecutionHelper`（准备资源端 helper）贡献原生接法，客户端始终使用同一个绑定、Session 与操作回执；`rejoin` 重新接上原 reader，不重发结果未知的工具操作。内置 Provider 中只有 Claude Code 和 Codex 实现了这两个接口，其他 Provider 请求分端执行时返回 `EXECUTION_PROVIDER_UNSUPPORTED`。各 Provider 的原生协议与配置边界如下；分端操作失败不会退回 Agent 本机执行。
 
 两家共同的边界：原生配置、Hooks 与 Skills 从 Agent 端加载，不自动同步资源端的同名项目配置；连接成功不等于所有扩展都与本机运行等价。每个绑定通过 notice 公开当前限制，用户不需要删除自己的 Hook 才能使用分端执行。工具侧的 `amux` 控制在每次启动时登记，原 Agent 路由尚未确认时，资源端 notice `AGENT_TOOL_CONTEXT_UNAVAILABLE` 说明这一点，资源工具照常可用。
 
 ### Claude Code
 
-[Claude Provider](src/providers/claude.ts) 只接受 [`qualifyClaudeExecutionExecutable`](src/providers/claude-tool-execution-launch.ts) 核验的 `2.1.314 (Claude Code)`。启动时，Core 在用户已有的 `--mcp-config` 列表末尾追加本次绑定专用的 `amux_exec` MCP 服务（loopback WebSocket），用 `--plugin-dir` 挂载执行策略，并通过 `--append-system-prompt` 加入一段说明资源 Host 与目录的文字（用户已有的追加提示保留在其后）；用户已有的 MCP、插件、提示与原生会话配置继续由 Claude 加载。选择了其他工具环境的启动参数（`--remote`、`--teleport`、`--worktree`）会被拒绝。
+[Claude Provider](src/providers/claude.ts) 通过 [`resolveClaudeExecutionExecutable`](src/providers/claude-tool-execution-launch.ts) 按原启动目录与环境解析可执行文件，不额外运行 `--version` 作为创建门槛。启动时，Core 在用户已有的 `--mcp-config` 列表末尾追加本次绑定专用的 `amux_exec` MCP 服务（loopback WebSocket），用 `--plugin-dir` 挂载执行策略，并通过 `--append-system-prompt` 加入一段说明资源 Host 与目录的文字（用户已有的追加提示保留在其后）；用户已有的 MCP、插件、提示与原生会话配置继续由 Claude 加载。选择其他工具环境的参数（`--remote`、`--teleport`、`--worktree`），或停用路由插件的原生配置（如安全模式、`disableAllHooks`），会拒绝本次分端启动并解释冲突。设置的读取与优先级复用原 Hook 配置 owner；无法确认这次路由配置时保留原请求并说明未知，不以错误机器上的本地工具代替，也不自动改写用户设置或停止已有 Agent。
 
 `Bash`、`Read`、`Write`、`Edit`、`NotebookEdit` 和资源任务的 `TaskStop` 经该 MCP 服务在资源端执行：文件校验与读取状态由资源端持有，`Bash` 与 `TaskStop` 使用 helper 自己的进程句柄。资源授权是绑定中明确给出的 `host-user`，不是操作系统沙箱。原工具池、主 Agent 的原生权限查询与资源 MCP 许可分别成立，不会整类自动批准工具，也不在 Agent 本机重放整条工具调用来探测权限。
 
