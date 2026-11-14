@@ -1,0 +1,11 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Finite task input</title></head>
+<body><form><label for="entry">Item value</label><input id="entry" autocomplete="off"><button>Submit item</button></form>
+<button id="confirm">Confirm item</button><button id="changed">Changed version</button><input id="draft" aria-label="Unsent page draft" value="retained page draft">
+<ol id="results"></ol><script>
+const state=JSON.parse(localStorage.getItem('finite-native-items')||'{"items":[],"confirmed":0,"confirmCalls":0,"changed":0}');
+function save(){localStorage.setItem('finite-native-items',JSON.stringify(state));document.querySelector('#results').replaceChildren(...state.items.map(value=>{const row=document.createElement('li');row.textContent=value;return row}))}
+document.querySelector('form').onsubmit=event=>{event.preventDefault();state.items.push(document.querySelector('#entry').value);save()};
+document.querySelector('#confirm').onclick=()=>{state.confirmCalls++;if(confirm('Confirm current item'))state.confirmed++;save()};
+document.querySelector('#changed').onclick=()=>{state.changed++;save()};
+globalThis.finiteTaskFacts=()=>({state:structuredClone(state),draft:document.querySelector('#draft').value,url:location.href});save();
+</script></body></html>
