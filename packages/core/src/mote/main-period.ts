@@ -18,7 +18,9 @@ export type MoteMainRolloverDecision = { target:MotePreferencesTarget; expectedR
   queryInputKey?:Extract<AgentPromptInputKey,{kind:'prompt'}>;
   policyRevision:string; evaluatedAt:number; queryOperationId:string; creationOperationId:string } & (
   { policy:Extract<MoteMainRolloverPolicy,{kind:'idle'}>; activity:{inputKey:AgentPromptInputKey;run:AgentMuxRunRef;sourceId:string;sequence:number;idleSince:number} }
-  | { policy:{kind:'executor-change';previousExecutorId:string;executorId:string}; queryInputKey:Extract<AgentPromptInputKey,{kind:'prompt'}>; activity?:never })
+  | { policy:{kind:'executor-change';previousExecutorId:string;executorId:string}; queryInputKey:Extract<AgentPromptInputKey,{kind:'prompt'}>; activity?:never }
+  | { policy:{kind:'continuity-unavailable';idleMs:number}; queryInputKey:Extract<AgentPromptInputKey,{kind:'prompt'}>; activity?:never;
+      continuity:{operationId:string;previousRun:AgentMuxRunRef;reason:'native-handle-unavailable';evidence:{kind:'run-ended';state:'exited'|'interrupted';observedAt:number}} })
 export type MoteMainRolloverReading = {status:'keep-current'|'not-due'|'due'|'unconfirmed';decision:MoteMainRolloverDecision|null;issue:string|null}
 export function parseMoteMainPeriod(value: unknown): MoteMainPeriod {
  const p=rpcRecord(value,['id','roleRevision','reference','startedAt','endedAt','start','end','range'],'CONTROL_PROTOCOL_ERROR')
@@ -42,7 +44,7 @@ export type MoteMainTransitionPreparation = {
 }
 
 export function parseMoteMainRolloverDecision(value:unknown,code:'INVALID_CONTROL_REQUEST'|'INVALID_CLI_ARGUMENT'|'CONTROL_PROTOCOL_ERROR'='INVALID_CONTROL_REQUEST'):MoteMainRolloverDecision {
- const p=rpcRecord(value,['target','expectedRoleRevision','reference','queryInputKey','policyRevision','policy','activity','evaluatedAt','queryOperationId','creationOperationId'],code)
+ const p=rpcRecord(value,['target','expectedRoleRevision','reference','queryInputKey','policyRevision','policy','activity','continuity','evaluatedAt','queryOperationId','creationOperationId'],code)
  parseMotePreferencesTarget(p.target,code);const reference=parseMoteDefaultConversation(p.reference,code)
  for(const field of ['expectedRoleRevision','policyRevision','queryOperationId','creationOperationId'])if(typeof p[field]!=='string'||!String(p[field]).trim()||/[\0\r\n]/u.test(String(p[field])))throw new AgentMuxError('The original rollover identity is invalid.',code)
  if(!Number.isSafeInteger(p.evaluatedAt)||Number(p.evaluatedAt)<0)throw new AgentMuxError('The original rollover evaluation time is invalid.',code)
@@ -52,6 +54,17 @@ export function parseMoteMainRolloverDecision(value:unknown,code:'INVALID_CONTRO
   catch { throw new AgentMuxError('The rollover Query key is invalid.',code) }
   if(key.kind!=='prompt'||key.agentSessionId!==reference.sessionId||key.submissionId!==p.queryOperationId)throw new AgentMuxError('The rollover Query key names another original input.',code)
  }
+ if(p.policy && typeof p.policy==='object' && 'kind' in p.policy && p.policy.kind==='continuity-unavailable') {
+  const policy=rpcRecord(p.policy,['kind','idleMs'],code),source=rpcRecord(p.continuity,['operationId','previousRun','reason','evidence'],code)
+  const run=rpcRecord(source.previousRun,['runId'],code),evidence=rpcRecord(source.evidence,['kind','state','observedAt'],code)
+  if(!Number.isSafeInteger(policy.idleMs)||Number(policy.idleMs)<=0||p.activity!==undefined||p.queryInputKey===undefined||
+    typeof source.operationId!=='string'||!source.operationId.trim()||/[\0\r\n]/u.test(source.operationId)||
+    typeof run.runId!=='string'||!run.runId||run.runId!==(p.queryInputKey as Extract<AgentPromptInputKey,{kind:'prompt'}>).expectedRun.runId||
+    source.reason!=='native-handle-unavailable'||evidence.kind!=='run-ended'||!['exited','interrupted'].includes(evidence.state as string)||
+    !Number.isSafeInteger(evidence.observedAt)||Number(evidence.observedAt)<0)throw new AgentMuxError('The original unavailable continuity source is invalid.',code)
+  return p as MoteMainRolloverDecision
+ }
+ if(p.continuity!==undefined)throw new AgentMuxError('Only unavailable continuity can name its original recovery source.',code)
  if(p.policy && typeof p.policy==='object' && 'kind' in p.policy && p.policy.kind==='executor-change') {
   const choice=rpcRecord(p.policy,['kind','previousExecutorId','executorId'],code)
   for(const field of ['previousExecutorId','executorId'])if(typeof choice[field]!=='string'||!String(choice[field]).trim()||/[\0\r\n]/u.test(String(choice[field])))throw new AgentMuxError('The original Executor change identity is invalid.',code)

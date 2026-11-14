@@ -4394,6 +4394,7 @@ export class AgentMuxRpcService {
         // Only their owner supplies defaults; Core never reparses display text or YAML.
         const policy=preference.defaults.conversationRollover
         const executorId=preference.defaults.executorId
+        let originalMain:{scope:AgentMuxRpcCoreClient;session:NonNullable<Awaited<ReturnType<AgentMuxRpcCoreClient['client']['readAgentSession']>>>}|undefined
         if(executorId) {
           const scopes=(await this.clients()).filter(scope=>scope.hostId===main.current!.hostId),scope=scopes.length===1?scopes[0]:undefined
           if(!scope||this.endpointUnverified(scope.client))throw new AgentMuxError('The original Main Executor owner is unconfirmed. Keep this Query and inspect that original Host; no input was sent.', 'MOTE_MAIN_EXECUTOR_UNCONFIRMED')
@@ -4402,6 +4403,7 @@ export class AgentMuxRpcService {
           catch { throw new AgentMuxError('The original Main Executor could not be read. Keep this Query and inspect the original Session; no input was sent.', 'MOTE_MAIN_EXECUTOR_UNCONFIRMED') }
           if(!session||session.agentSessionId!==main.current.sessionId||!session.executorId)throw new AgentMuxError('The original Main Executor is unconfirmed. Keep this Query and inspect the original Session; no input was sent.', 'MOTE_MAIN_EXECUTOR_UNCONFIRMED')
           if(queryInputKey.agentSessionId!==session.agentSessionId||queryInputKey.expectedRun.runId!==session.run.runId)throw new AgentMuxError('The original Main Run changed before this new Query. Keep its original key and inspect that Session.','MOTE_MAIN_CHANGED')
+          originalMain={scope,session}
           if(session.executorId!==executorId) {
             const choice={kind:'executor-change' as const,previousExecutorId:session.executorId,executorId}
             const policyRevision=createHash('sha256').update(JSON.stringify([main.identity,choice])).digest('hex')
@@ -4413,6 +4415,29 @@ export class AgentMuxRpcService {
         }
         if(policy?.kind==='idle') {
           rollover={status:'unconfirmed',decision:null,issue:'The original Main dialogue idle source is unconfirmed. Its existing input remains available.'}
+          const original=originalMain?.session,continuity=original?.continuity
+          // A stored failure is not a live death detector. Only this exact ended
+          // Run's still-current Core receipt may qualify a separately new Query.
+          if(originalMain&&original&&continuity?.kind==='unavailable'&&continuity.reason==='native-handle-unavailable'&&
+            continuity.agentSessionId===original.agentSessionId&&continuity.previousRun.runId===queryInputKey.expectedRun.runId&&
+            !continuity.newRun&&continuity.evidence.kind==='run-ended'&&
+            isDeepStrictEqual(original.continuityOperations?.[continuity.operationId],continuity)&&
+            (!continuity.moteMainEntry||continuity.moteMainEntry.expectedRoleRevision===main.roleRevision&&sameMoteMainEntrySource(continuity.moteMainEntry,{target:main.target,expectedRoleRevision:main.roleRevision,reference:main.current}))) {
+            const observed=await originalMain.scope.client.statusAgent(original.agentSessionId),current=observed.session
+            if(observed.run.runId===queryInputKey.expectedRun.runId&&['exited','interrupted'].includes(observed.run.state)&&
+              current.agentSessionId===original.agentSessionId&&current.run.runId===queryInputKey.expectedRun.runId&&
+              !current.nativeHandle&&!current.observedNativeHandle&&!current.nativeSourceObservation&&
+              isDeepStrictEqual(current.continuity,continuity)&&isDeepStrictEqual(current.continuityOperations?.[continuity.operationId],continuity)&&
+              !Object.values(current.continuityOperations??{}).some(operation=>operation.previousRun.runId===queryInputKey.expectedRun.runId&&unconfirmedMoteMainEntryOperation(operation))) {
+              const source={operationId:continuity.operationId,previousRun:continuity.previousRun,reason:'native-handle-unavailable' as const,evidence:continuity.evidence}
+              const choice={kind:'continuity-unavailable' as const,idleMs:policy.idleMs}
+              const policyRevision=createHash('sha256').update(JSON.stringify([main.identity,choice,source])).digest('hex')
+              const creationOperationId='mote-rollover:'+createHash('sha256').update(JSON.stringify([main.identity,main.roleRevision,policyRevision,operationId])).digest('hex')
+              await this.ports.moteDialogue?.mainInput?.assertCurrent(main,context.signal)
+              return {status:'due',decision:{target:main.target,expectedRoleRevision:main.roleRevision,reference:main.current,
+                queryInputKey,policyRevision,policy:choice,continuity:source,evaluatedAt:Date.now(),queryOperationId:operationId,creationOperationId},issue:null}
+            }
+          }
           const latest=await journal.latestMoteMainInputRoute(main.identity,main.roleRevision)
           if(latest) {
             const scopes=(await this.clients()).filter(scope=>scope.hostId===latest.reference.hostId),scope=scopes.length===1?scopes[0]:undefined
