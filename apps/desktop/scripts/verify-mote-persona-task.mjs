@@ -56,7 +56,7 @@ export async function verifyMotePersonaTask(task) {
     { symbol: 'prepareMoteIdeaDraft', definition: 'apps/desktop/src/renderer/src/lib/mote-idea-request.ts', caller: 'apps/desktop/src/renderer/src/components/MoteIdeaControls.tsx', anchor: 'finish(prepareMoteIdeaDraft(' },
     { symbol: 'stageMoteIdeaFeedback', definition: 'apps/desktop/src/renderer/src/lib/mote-idea-request.ts', caller: 'apps/desktop/src/renderer/src/components/MoteIdeaControls.tsx', anchor: 'finish(stageMoteIdeaFeedback(' },
     { symbol: 'MoteIdeaControls', definition: 'apps/desktop/src/renderer/src/components/MoteIdeaControls.tsx', caller: 'apps/desktop/src/renderer/src/components/MoteDetailsPanel.tsx', anchor: '<MoteIdeaControls ' },
-    { symbol: 'MOTE_COORDINATION_ROLE', definition: 'apps/desktop/src/shared/scratch-topics.ts', caller: 'apps/desktop/src/main/scratch-topics.ts', anchor: '...(snapshot.soul ? [MOTE_COORDINATION_ROLE] : [])' },
+    { symbol: 'MOTE_COORDINATION_ROLE', definition: 'apps/host/src/mote-topic-model.ts', caller: 'apps/desktop/src/main/scratch-topics.ts', anchor: '...(snapshot.soul ? [MOTE_COORDINATION_ROLE] : [])' },
     { symbol: 'setMoteIdeaDraft', definition: 'apps/desktop/src/renderer/src/lib/launcher-state.ts', caller: 'apps/desktop/src/renderer/src/components/MoteIdeaControls.tsx', anchor: 'useLauncherState.getState().setMoteIdeaDraft(' }
   ] : [
     { symbol: 'readMoteMaterial', definition: 'apps/desktop/src/renderer/src/lib/mote-cooperation.ts', caller: 'apps/desktop/src/renderer/src/components/MoteDetailsPanel.tsx', anchor: 'void readMoteMaterial(scope, selected)' },

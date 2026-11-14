@@ -30,7 +30,7 @@ await verifyRendererSourceMutations({
     'apps/desktop/scripts/lib/verify-renderer-source-mutations.mjs',
     'apps/desktop/src/main/scratch-topics.ts', 'apps/desktop/src/main/ipc.ts',
     'apps/host/src/goal-role-input.ts', 'apps/desktop/src/main/runtime-controller.ts',
-    'apps/desktop/src/shared/scratch-topics.ts', 'apps/desktop/src/shared/topic-agent-instructions.ts',
+    'apps/host/src/mote-topic-model.ts', 'apps/host/src/mote-agent-instructions.ts',
     'apps/desktop/test/helpers/injected-context-core.ts', 'apps/desktop/test/helpers/isolate-core-environment.ts',
     'apps/desktop/test/helpers/local-runtime-connector.ts', 'test/fixture-values.mjs',
     'packages/core/dist/goal-role-guidance.js', 'packages/core/dist/generated/agentmux-guides.js'],

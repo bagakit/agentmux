@@ -25,7 +25,7 @@ if (!quickMode && !behaviorOnly && !required.every(name => cases.some(item => it
     'apps/desktop/src/renderer/src/lib/mote-cooperation.ts', 'apps/desktop/src/renderer/src/store.ts',
     'apps/desktop/src/renderer/src/lib/launcher-state.ts', 'apps/desktop/src/renderer/src/lib/desktop-spatial-state.ts',
     'apps/desktop/src/renderer/src/lib/workbench-persistence.ts', 'apps/desktop/src/shared/space-addresses.ts',
-    'apps/desktop/src/shared/scratch-topics.ts', 'packages/core/src/public-rpc-files.ts'
+    'apps/host/src/mote-topic-model.ts', 'packages/core/src/public-rpc-files.ts'
   ]
   const hashes = Object.fromEntries(await Promise.all(cooperationOwners.map(async file => [file, createHash('sha256').update(await readFile(join(root, file))).digest('hex')])))
   const names = (await readdir(dirname(dirname(capturePath)))).filter(name => /^persona-renderer-\d+$/.test(name)).sort((a, b) => Number(b.slice('persona-renderer-'.length)) - Number(a.slice('persona-renderer-'.length)))

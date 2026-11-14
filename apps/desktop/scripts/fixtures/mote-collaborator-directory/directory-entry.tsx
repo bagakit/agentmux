@@ -12,7 +12,7 @@ import { createWorkbenchTab } from '../../../src/renderer/src/lib/workbench-tabs
 import { scratchTopicsScope } from '../../../src/renderer/src/lib/scratch-topic-snapshots'
 import { directoryIdentity, homeZoneId } from '../../../src/shared/space-addresses'
 import { DEFAULT_MOTE_FACE } from '../../../src/shared/mote-avatars'
-import { SCRATCH_WORKSPACE_ID, PMO_TEAMS_TOPIC_ID, scratchTopicDirectoryName } from '../../../src/shared/scratch-topics'
+import { SCRATCH_WORKSPACE_ID, PMO_TEAMS_TOPIC_ID, scratchTopicDirectoryName } from '@agentmux/host/mote-model'
 import type { ScratchTopicSnapshot, MoteDirectoryView } from '../../../src/shared/contracts'
 import '../../../src/renderer/src/styles/index.css'
 

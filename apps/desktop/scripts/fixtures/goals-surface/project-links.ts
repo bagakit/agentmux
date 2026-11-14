@@ -5,7 +5,7 @@ import { useAppStore } from '../../../src/renderer/src/store'
 import { api } from '../../../src/renderer/src/lib/api'
 import { createWorkbenchTab } from '../../../src/renderer/src/lib/workbench-tabs'
 import { directoryIdentity } from '../../../src/shared/space-addresses'
-import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '../../../src/shared/scratch-topics'
+import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 import type { DemandRecord } from '../../../src/renderer/src/lib/global-demand-board'
 import type { SessionSnapshot } from '../../../src/shared/contracts'
 

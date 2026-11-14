@@ -70,7 +70,7 @@ async function run(name, mutation) {
     assert.equal(exitCode, 0, output); assert.equal(failed.length, 0)
     for (const consumer of ['actual-source-cli', 'actual-vite-module']) assert.ok(graph.some(row => row.consumer === consumer), consumer + ' must execute')
     for (const file of [main, store, projection, 'apps/desktop/src/preload/index.ts', 'packages/core/src/client.ts',
-      'apps/desktop/src/main/workspace-files.ts', 'apps/desktop/src/main/scratch-topics.ts', 'apps/desktop/src/shared/mote-quick-mode.ts',
+      'apps/desktop/src/main/workspace-files.ts', 'apps/desktop/src/main/scratch-topics.ts', 'apps/host/src/mote-quick-mode.ts',
       'apps/desktop/src/renderer/src/lib/executors.ts', 'apps/desktop/src/main/runtime-controller.ts', 'apps/desktop/src/shared/goal-pmo-origin.ts'])
       assert.ok(graph.some(row => row.file === file), 'Actual original owner/consumer must load: ' + file)
   }

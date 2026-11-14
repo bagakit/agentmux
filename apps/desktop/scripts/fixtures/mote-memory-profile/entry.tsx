@@ -2,7 +2,7 @@
 import '../mote-companion-workflows/persona-entry'
 import { api } from '../../../src/renderer/src/lib/api'
 import { useAppStore } from '../../../src/renderer/src/store'
-import { SCRATCH_WORKSPACE_ID, PMO_TEAMS_TOPIC_ID, scratchTopicDirectoryName } from '../../../src/shared/scratch-topics'
+import { SCRATCH_WORKSPACE_ID, PMO_TEAMS_TOPIC_ID, scratchTopicDirectoryName } from '@agentmux/host/mote-model'
 import { directoryIdentity, homeZoneId } from '../../../src/shared/space-addresses'
 import type { FileReadResult } from '@agentmux/core'
 import { mountThemeRuntime, updateThemeSelection } from '@agentmux/client-ui/theme'

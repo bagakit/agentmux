@@ -12,7 +12,7 @@ const attempt = await mkdtemp(join(output, 'attempt-'))
 const isolated = join(attempt, 'source')
 await mkdir(isolated)
 const paths = {
-  defaults: 'apps/desktop/src/shared/scratch-topics.ts',
+  defaults: 'apps/host/src/mote-topic-model.ts',
   topics: 'apps/desktop/src/main/scratch-topics.ts',
   controller: 'apps/desktop/src/main/runtime-controller.ts'
 }

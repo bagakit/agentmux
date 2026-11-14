@@ -14,7 +14,7 @@ import { projectPersistedWorkbench, restorePersistedWorkbench, type PersistedWor
 import { applyGoalDelegationResult } from '../../../src/renderer/src/lib/goal-delegation-work'
 import { scratchTopicsScope } from '../../../src/renderer/src/lib/scratch-topic-snapshots'
 import { EMPTY_AGENT_FOCUS } from '../../../src/renderer/src/lib/agent-focus'
-import { SCRATCH_WORKSPACE_ID, scratchTopicDirectoryName } from '../../../src/shared/scratch-topics'
+import { SCRATCH_WORKSPACE_ID, scratchTopicDirectoryName } from '@agentmux/host/mote-model'
 import type { AppConfig, SessionSnapshot, ScratchTopicSnapshot } from '../../../src/shared/contracts'
 import type { DemandRecord } from '../../../src/renderer/src/lib/global-demand-board'
 import '../../../src/renderer/src/styles/index.css'

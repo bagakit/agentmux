@@ -1,7 +1,7 @@
 import '../mote-continuous-frame/entry'
 import { api } from '../../../src/renderer/src/lib/api'
 import { useAppStore } from '../../../src/renderer/src/store'
-import { PMO_TEAMS_TOPIC_ID, scratchTopicDirectoryName } from '../../../src/shared/scratch-topics'
+import { PMO_TEAMS_TOPIC_ID, scratchTopicDirectoryName } from '@agentmux/host/mote-model'
 import type { MoteDialoguePage, MoteDialogueRead } from '@agentmux/core/mote-dialogue'
 const workspace = useAppStore.getState().config!.workspaces.find(w => w.id === '__scratch__')!
 const reference = { hostId: 'local', sessionId: 'mote-primary', displayWorkspaceId: workspace.id, groupId: 'original-mote-group', tabId: 'mote-primary-tab', regionId: 'mote-primary-region' }

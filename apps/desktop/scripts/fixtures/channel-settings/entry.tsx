@@ -3,7 +3,7 @@ import { parseConnectionServiceParams, type ConnectionMethod, type ConnectionPar
 import type { MoteChatMethod, MoteChatParamsMap, MoteChatResultMap } from '@agentmux/core/mote-chat'
 import type { MoteConnectionPreferencesReadResult } from '@agentmux/core/mote-preferences'
 import type { AppConfig, ConnectionHostingTarget, ScratchTopicSnapshot } from '../../../src/shared/contracts'
-import { SCRATCH_WORKSPACE_ID, PMO_TEAMS_TOPIC_ID, scratchTopicDirectoryName } from '../../../src/shared/scratch-topics'
+import { SCRATCH_WORKSPACE_ID, PMO_TEAMS_TOPIC_ID, scratchTopicDirectoryName } from '@agentmux/host/mote-model'
 import { SettingsPanel } from '../../../src/renderer/src/components/SettingsPanel'
 import { SettingsNavigation } from '../../../src/renderer/src/components/SettingsNavigation'
 import { settingsCatalog } from '../../../src/renderer/src/components/settings/settings-modules'

@@ -2,9 +2,8 @@ import '../mote-discussion-threads/entry'
 import { api } from '../../../src/renderer/src/lib/api'
 import { useAppStore } from '../../../src/renderer/src/store'
 import { requestPmoTeamsTopicFloatingOpen, requestPmoTeamsTopicFloatingClose } from '../../../src/renderer/src/lib/pmo-teams-topic-floating'
-import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, scratchTopicDirectoryName } from '../../../src/shared/scratch-topics'
+import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, scratchTopicDirectoryName, serializeMoteQuickMode } from '@agentmux/host/mote-model'
 import { directoryIdentity, homeZoneId } from '../../../src/shared/space-addresses'
-import { serializeMoteQuickMode } from '../../../src/shared/mote-quick-mode'
 import type { MoteDialoguePage, MoteDialogueLink, MoteMainPeriod, MoteMainRolloverDecision } from '@agentmux/core/mote-dialogue'
 
 const original = (window as any).moteDiscussionCapture, state = useAppStore.getState()

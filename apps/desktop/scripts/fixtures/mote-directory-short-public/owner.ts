@@ -27,7 +27,7 @@ import { sessionSnapshotPayload } from '../../../src/main/session-snapshot-paylo
 import { sessionInputWriteResult } from '../../../src/shared/session-input-result'
 import { WorkbenchUserStateStore } from '../../../src/main/workbench-user-state'
 import { directoryIdentity, homeZoneId } from '../../../src/shared/space-addresses'
-import { SCRATCH_WORKSPACE_ID, scratchTopicDirectoryName } from '../../../src/shared/scratch-topics'
+import { SCRATCH_WORKSPACE_ID, scratchTopicDirectoryName } from '@agentmux/host/mote-model'
 import type { AppConfig } from '../../../src/shared/contracts'
 
 const execFile = promisify(callbackExecFile), pause = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))

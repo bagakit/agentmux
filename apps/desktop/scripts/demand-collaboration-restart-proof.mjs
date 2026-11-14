@@ -4,7 +4,7 @@ import { execFile } from 'node:child_process'
 import { mkdir, readFile, readdir, realpath, stat, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { isDeepStrictEqual, promisify } from 'node:util'
-import { PMO_TEAMS_TOPIC_ID, scratchTopicLogicalPath } from '../src/shared/scratch-topics.ts'
+import { PMO_TEAMS_TOPIC_ID, scratchTopicLogicalPath } from '@agentmux/host/mote-model'
 import { openDemandStore } from '../../../packages/demand/dist/src/index.js'
 import { readRecoverySpatialState, assertOriginalRecoveryGraph } from './goals-alignment-restart-proof.mjs'
 

@@ -11,7 +11,7 @@ import { projectPersistedWorkbench } from '../../../src/renderer/src/lib/workben
 import { createWorkbenchTab } from '../../../src/renderer/src/lib/workbench-tabs'
 import { readPmoTeamsTopicFloatingState } from '../../../src/renderer/src/lib/pmo-teams-topic-floating'
 import { topicSpaceIconTarget } from '../../../src/renderer/src/lib/space-object-appearance'
-import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '../../../src/shared/scratch-topics'
+import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 import type { AppConfig, RuntimeEvent } from '../../../src/shared/contracts'
 import type { MoteAvatarRef } from '../../../src/shared/mote-avatars'
 import { customAgent, customMoteId, defaultAgent, defaultTab, executionAgent, moteSessions, moteTabs, quietMoteId, quietTab, savedMoteKey } from '../../../test/fixtures/mote-workface'

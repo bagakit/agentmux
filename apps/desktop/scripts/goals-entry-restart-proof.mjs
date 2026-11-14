@@ -4,7 +4,7 @@ import { execFile } from 'node:child_process'
 import { chmod, mkdir, readFile, readdir, realpath, stat, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { promisify } from 'node:util'
-import { PMO_TEAMS_TOPIC_ID, scratchTopicDirectoryName } from '../src/shared/scratch-topics.ts'
+import { PMO_TEAMS_TOPIC_ID, scratchTopicDirectoryName } from '@agentmux/host/mote-model'
 import { openDemandStore } from '../../../packages/demand/dist/src/index.js'
 import { readRecoverySpatialState, assertOriginalRecoveryGraph } from './goals-alignment-restart-proof.mjs'
 
@@ -20,7 +20,7 @@ const sourceFiles = [
   'src/renderer/src/components/GlobalBoardSurface.tsx', 'src/renderer/src/components/NewTabSurface.tsx',
   'src/renderer/src/lib/goals-entry-actions.ts', 'src/renderer/src/lib/workbench-tabs.ts',
   'src/renderer/src/lib/workbench-persistence.ts', 'src/renderer/src/store.ts', 'src/renderer/src/styles/goals.css',
-  'src/shared/scratch-topics.ts', 'src/renderer/src/lib/goals-direct-pmo.ts',
+  '../host/src/mote-topic-model.ts', 'src/renderer/src/lib/goals-direct-pmo.ts',
   'src/renderer/src/components/GoalDetail.tsx', 'src/renderer/src/components/GoalAlignment.tsx'
 ]
 

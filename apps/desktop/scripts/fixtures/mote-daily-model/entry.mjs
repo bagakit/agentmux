@@ -9,7 +9,7 @@ import { prepareMoteIdeaSchedule, stageMoteIdeaFeedback } from '../../../src/ren
 import { CalendarScheduleControl } from '../../../src/renderer/src/components/CalendarScheduleControl'
 import { documentKey } from '../../../src/renderer/src/lib/workbench-tabs'
 import { useMoteMaterialsActions } from '../../../src/renderer/src/lib/mote-materials-actions'
-import { SCRATCH_WORKSPACE_ID, scratchTopicLogicalPath } from '../../../src/shared/scratch-topics'
+import { SCRATCH_WORKSPACE_ID, scratchTopicLogicalPath } from '@agentmux/host/mote-model'
 import '../../../src/renderer/src/styles/index.css'
 
 // The model journey owns only Agent Runs. Optional shell prewarming is outside it;

@@ -10,7 +10,7 @@ import { mountThemeRuntime, updateThemeSelection } from '@agentmux/client-ui/the
 import { api } from '../../../src/renderer/src/lib/api'
 import { useAppStore } from '../../../src/renderer/src/store'
 import { directoryIdentity, homeZoneId } from '../../../src/shared/space-addresses'
-import { scratchTopicDirectoryName } from '../../../src/shared/scratch-topics'
+import { scratchTopicDirectoryName } from '@agentmux/host/mote-model'
 import { scratchTopicsScope } from '../../../src/renderer/src/lib/scratch-topic-snapshots'
 import { createWorkspaceLayout } from '@agentmux/layout'
 import { createWorkbenchTab } from '../../../src/renderer/src/lib/workbench-tabs'

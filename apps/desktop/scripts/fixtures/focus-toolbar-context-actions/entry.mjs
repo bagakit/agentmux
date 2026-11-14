@@ -17,7 +17,7 @@ import { PmoTeamsTopicEntry } from '../../../src/renderer/src/components/PmoTeam
 import { GlobalSystemNotices } from '../../../src/renderer/src/components/GlobalSystemNotices'
 import { DesktopClientUiProvider } from '../../../src/renderer/src/components/DesktopClientUiProvider'
 import { usePmoTeamsTopicFloatingState, pmoTeamsTopicFloatingViewTargets, requestPmoTeamsTopicFloatingClose } from '../../../src/renderer/src/lib/pmo-teams-topic-floating'
-import { SCRATCH_WORKSPACE_ID } from '../../../src/shared/scratch-topics'
+import { SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 import { moteConfig, moteSessions, moteTabs, moteTopics, executionAgent } from '../../../test/fixtures/mote-workface'
 import '../../../src/renderer/src/styles/index.css'
 

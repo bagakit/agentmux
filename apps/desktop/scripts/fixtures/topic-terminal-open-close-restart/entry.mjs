@@ -11,7 +11,7 @@ import { projectPersistedWorkbench } from '../../../src/renderer/src/lib/workben
 import { desktopSpatialGraph } from '../../../src/renderer/src/lib/desktop-spatial-state'
 import { workbenchProjectionSlotId } from '../../../src/renderer/src/lib/workbench-projection'
 import { requestPmoTeamsTopicFloatingOpen, requestPmoTeamsTopicFloatingClose } from '../../../src/renderer/src/lib/pmo-teams-topic-floating'
-import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, scratchTopicPhysicalPath } from '../../../src/shared/scratch-topics'
+import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, scratchTopicPhysicalPath } from '@agentmux/host/mote-model'
 import { topicSpatialAddress } from '../../../src/shared/space-addresses'
 import '../../../src/renderer/src/styles/index.css'
 window.terminals = []

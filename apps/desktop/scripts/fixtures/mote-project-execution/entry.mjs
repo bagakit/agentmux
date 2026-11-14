@@ -14,7 +14,7 @@ import { ConfigStore, DEFAULT_CONFIG } from '../../../src/main/config-store.ts'
 import { executeSettingsWorkspaceAddControl } from '../../../src/main/settings-workspace-add-control.ts'
 import { executeSettingsResourcesControl } from '../../../src/main/settings-resources-control.ts'
 import { executeSettingsControl } from '../../../src/main/settings-control.ts'
-import { SCRATCH_WORKSPACE_ID, MOTE_COORDINATION_ROLE } from '../../../src/shared/scratch-topics.ts'
+import { SCRATCH_WORKSPACE_ID, MOTE_COORDINATION_ROLE } from '@agentmux/host/mote-model'
 
 const [root, output, executable, model] = process.argv.slice(2)
 const record = { schema: 'agentmux.mote-project-execution.v1', passed: false, root, model, executable,

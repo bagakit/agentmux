@@ -7,7 +7,7 @@ import { api } from '../../../src/renderer/src/lib/api'
 import { createWorkbenchTab } from '../../../src/renderer/src/lib/workbench-tabs'
 import { projectPersistedWorkbench } from '../../../src/renderer/src/lib/workbench-persistence'
 import { createWorkspaceLayout, splitWorkbenchRegion } from '@agentmux/layout'
-import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, scratchTopicDirectoryName } from '../../../src/shared/scratch-topics'
+import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, scratchTopicDirectoryName } from '@agentmux/host/mote-model'
 import '../../../src/renderer/src/styles/index.css'
 
 // Only the api.ts export is privately transformed. Every product desktop branch,

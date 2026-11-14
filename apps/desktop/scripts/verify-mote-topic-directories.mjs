@@ -36,8 +36,8 @@ try {
     ['physical directory resolver', 'apps/desktop/src/main/scratch-topic-directories.ts', /resolveScratchTopicDirectory\(/],
     ['public snapshot projection', 'apps/host/src/snapshot-observation.ts', /observeClientRpcSnapshot\(/],
     ['canonical launch preparation', 'apps/desktop/src/main/scratch-topics.ts', /scratchTopics\.prepareAgent\(/],
-    ['durable identity projection', 'apps/desktop/src/shared/scratch-topics.ts', /scratchTopicIdentityPath\(/],
-    ['Session ownership', 'apps/desktop/src/shared/scratch-topics.ts', /scratchTopicIdFromWorkspacePath\(|workspaceOwnsSessionPath\(/],
+    ['durable identity projection', 'apps/host/src/mote-topic-model.ts', /scratchTopicIdentityPath\(/],
+    ['Session ownership', 'apps/host/src/mote-topic-model.ts', /scratchTopicIdFromWorkspacePath\(|workspaceOwnsSessionPath\(/],
     ['original file gateway', 'apps/desktop/src/main/workspace-files.ts', /\b(?:workspaceFiles|files)\.(read|write|move|create|delete|localPathForReveal)\(/]
   ]) {
     const hits = []

@@ -11,7 +11,7 @@ import { readPmoTeamsTopicFloatingState } from '../../../src/renderer/src/lib/pm
 import { effectiveSessionViewMode } from '../../../src/renderer/src/lib/session-presentation'
 import { scratchTopicKind } from '../../../src/renderer/src/lib/scratch-topic-snapshots'
 import { topicSpaceIconTarget } from '../../../src/renderer/src/lib/space-object-appearance'
-import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '../../../src/shared/scratch-topics'
+import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 import type { AppConfig } from '../../../src/shared/contracts'
 import { customAgent, customMoteId, customTab, defaultAgent, executionAgent, moteSessions, moteTabs,
   ordinaryTopicId, quietMoteId, savedMoteKey } from '../../../test/fixtures/mote-workface'

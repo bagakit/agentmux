@@ -13,7 +13,7 @@ import { SemanticIcon } from '../../../src/renderer/src/components/semantic-icon
 import { useAppStore } from '../../../src/renderer/src/store'
 import { api } from '../../../src/renderer/src/lib/api'
 import { createWorkbenchTab } from '../../../src/renderer/src/lib/workbench-tabs'
-import { SCRATCH_WORKSPACE_ID } from '../../../src/shared/scratch-topics'
+import { SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 import '../../../src/renderer/src/styles/index.css'
 
 const config = await api.config.get()

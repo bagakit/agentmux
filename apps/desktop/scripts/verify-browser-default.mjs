@@ -119,7 +119,7 @@ try {
       let content = original.replace(change.from, change.to)
       // Only these two relative imports leave this copied Renderer owner. Runtime logic remains the actual source.
       if (change.path.endsWith('survey-system-url.ts')) {
-        for (const specifier of ['../../../shared/scratch-topics', '../../../shared/system-web-url']) {
+        for (const specifier of ['../../../shared/system-web-url', './survey-system-page']) {
           assert(content.split(`'${specifier}'`).length === 2, 'The private owner dependency must be exact')
           content = content.replace(`'${specifier}'`, JSON.stringify(resolve(dirname(sourcePath), specifier) + '.ts'))
         }

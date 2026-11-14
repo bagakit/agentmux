@@ -18,7 +18,7 @@ import { registerWorkspace } from '../../../src/main/settings-workspace-add-cont
 import { createSpaceZoneResource } from '../../../src/main/space-zone-resources'
 import { ScratchTopics } from '../../../src/main/scratch-topics'
 import { observeClientRpcSnapshot } from '@agentmux/host/snapshot-observation'
-import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '../../../src/shared/scratch-topics'
+import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 import { DatabaseSync } from 'node:sqlite'
 import type { AppConfig } from '../../../src/shared/contracts'
 

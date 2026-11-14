@@ -9,7 +9,7 @@ import { WorkspaceTopicsPanel } from '../../../src/renderer/src/components/Works
 import { GlobalSystemNotices } from '../../../src/renderer/src/components/GlobalSystemNotices'
 import { createWorkbenchTab } from '../../../src/renderer/src/lib/workbench-tabs'
 import { projectPersistedWorkbench } from '../../../src/renderer/src/lib/workbench-persistence'
-import { SCRATCH_WORKSPACE_ID } from '../../../src/shared/scratch-topics'
+import { SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 import { folderSpaceIconTarget } from '../../../src/renderer/src/lib/space-object-appearance'
 import '../../../src/renderer/src/styles/index.css'
 

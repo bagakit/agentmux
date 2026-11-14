@@ -7,7 +7,7 @@ import { conversationRevision, parseConversationReadPage, projectConversationTim
 import { parseMessageEventsPage } from '../../../../../packages/core/src/agent-message-events'
 import type { AgentMuxAgentSession, AgentSessionHistoryDescriptor, AgentMuxMessageEvent, AgentMuxSpawnRecord, AgentTimelineSnapshot } from '@agentmux/core'
 import type { RuntimeEvent, SessionSnapshot, SessionHistorySourcesObservation, ScratchTopicSnapshot, WorkspaceRecord } from '../../../src/shared/contracts'
-import { SCRATCH_WORKSPACE_ID, scratchTopicDirectoryName } from '../../../src/shared/scratch-topics'
+import { SCRATCH_WORKSPACE_ID, scratchTopicDirectoryName } from '@agentmux/host/mote-model'
 import { directoryIdentity, homeZoneId, workspaceZoneId } from '../../../src/shared/space-addresses'
 import { App } from '../../../src/renderer/src/App'
 import { api } from '../../../src/renderer/src/lib/api'

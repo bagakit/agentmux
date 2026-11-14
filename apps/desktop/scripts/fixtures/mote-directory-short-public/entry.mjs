@@ -4,7 +4,7 @@ import { App } from '../../../src/renderer/src/App'
 import { useLauncherState } from '../../../src/renderer/src/lib/launcher-state'
 import { api } from '../../../src/renderer/src/lib/api'
 import { useAppStore, prepareRendererUpdate } from '../../../src/renderer/src/store'
-import { SCRATCH_WORKSPACE_ID } from '../../../src/shared/scratch-topics'
+import { SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 import { readTerminalViewObservation } from '../../../src/renderer/src/lib/terminal-view-observation'
 import '../../../src/renderer/src/styles/index.css'
 

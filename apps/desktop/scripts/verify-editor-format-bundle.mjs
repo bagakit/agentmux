@@ -97,7 +97,7 @@ try {
   const sharedYaml = eagerEngines.filter(id => /\/yaml(?:@|\/)/.test('/' + id))
   const isolated = eagerEngines.filter(id => !sharedYaml.includes(id))
   assert.deepEqual(isolated, [], 'New format engines must be outside the actual App static import closure.')
-  if (sharedYaml.length) for (const file of ['apps/desktop/src/shared/mote-behavior.ts', 'apps/desktop/src/shared/mote-quick-mode.ts']) {
+  if (sharedYaml.length) for (const file of ['apps/host/dist/mote-model.js']) {
     assert.ok(modules.includes(file), `Existing shared YAML consumer: ${file}`)
   }
   assert.deepEqual(modules.filter(id => /\/engines\/(?:data-config|data-parse|vega-spec|mermaid-engine|dot-engine|drawio-engine|plantuml-engine|format-engine)\.ts$/.test(id)), [], 'File parser/compiler implementations stay outside startup.')

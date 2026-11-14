@@ -7,7 +7,7 @@ import { api } from '../../../src/renderer/src/lib/api'
 import { useAppStore } from '../../../src/renderer/src/store'
 import { createWorkbenchTab } from '../../../src/renderer/src/lib/workbench-tabs'
 import { requestPmoTeamsTopicFloatingOpen } from '../../../src/renderer/src/lib/pmo-teams-topic-floating'
-import { SCRATCH_WORKSPACE_ID, scratchTopicDirectoryName } from '../../../src/shared/scratch-topics'
+import { SCRATCH_WORKSPACE_ID, scratchTopicDirectoryName } from '@agentmux/host/mote-model'
 import '../../../src/renderer/src/styles/index.css'
 
 // Only api.ts's maintained typed data factory is selected by the private compiler.

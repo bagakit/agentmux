@@ -4,7 +4,7 @@ import { seedMoteWorkface, moteTopics, customMoteId, scratchWorkspace } from '..
 import { MoteWorkface } from '../../../src/renderer/src/components/MoteWorkface'
 import { api } from '../../../src/renderer/src/lib/api'
 import { useAppStore } from '../../../src/renderer/src/store'
-import { scratchTopicLogicalPath } from '../../../src/shared/scratch-topics'
+import { scratchTopicLogicalPath } from '@agentmux/host/mote-model'
 import '../../../src/renderer/src/styles/index.css'
 
 seedMoteWorkface()

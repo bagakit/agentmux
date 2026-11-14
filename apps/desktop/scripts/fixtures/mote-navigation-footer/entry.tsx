@@ -10,7 +10,7 @@ import { createWorkbenchTab } from '../../../src/renderer/src/lib/workbench-tabs
 import { rendererCssBoundsToWindowDip } from '../../../src/renderer/src/lib/browser-bounds-sync'
 import type { AppConfig, ScratchTopicSnapshot } from '../../../src/shared/contracts'
 import { APP_APPEARANCE_DATASET_KEY } from '../../../src/renderer/src/lib/theme-contract'
-import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '../../../src/shared/scratch-topics'
+import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 import { customAgent, customMoteId, customTab, defaultAgent, defaultTab, executionAgent,
   moteTopics, moteSessions, moteTabs, moteConfig, quietMoteId, savedMoteKey, seedMoteWorkface } from '../../../test/fixtures/mote-workface'
 import '../../../src/renderer/src/styles/index.css'

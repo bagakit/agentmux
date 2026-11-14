@@ -8,7 +8,7 @@ import { createRendererControlApi } from '../../../src/renderer/src/lib/control-
 import { createWorkbenchTab } from '../../../src/renderer/src/lib/workbench-tabs'
 import { createWorkspaceLayout } from '@agentmux/layout'
 import { requestPmoTeamsTopicFloatingOpen } from '../../../src/renderer/src/lib/pmo-teams-topic-floating'
-import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '../../../src/shared/scratch-topics'
+import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 import '../../../src/renderer/src/styles/index.css'
 const boundary = window.settingsNavigationBoundary
 const setup = await boundary.setup(), preview = await api.config.get()

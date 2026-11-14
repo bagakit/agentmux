@@ -9,7 +9,7 @@ import { desktopWorkbenchFromSpatial } from '../../../src/renderer/src/lib/deskt
 import { projectPersistedWorkbench } from '../../../src/renderer/src/lib/workbench-persistence'
 import { requestPmoTeamsTopicFloatingOpen } from '../../../src/renderer/src/lib/pmo-teams-topic-floating'
 import { createWorkspaceLayout, splitWorkbenchRegion } from '@agentmux/layout'
-import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, scratchTopicDirectoryName } from '../../../src/shared/scratch-topics'
+import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, scratchTopicDirectoryName } from '@agentmux/host/mote-model'
 import '../../../src/renderer/src/styles/index.css'
 
 const phase = new URLSearchParams(location.search).get('phase')

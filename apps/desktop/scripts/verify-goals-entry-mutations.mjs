@@ -8,7 +8,7 @@ const direct = 'apps/desktop/src/renderer/src/lib/goals-direct-pmo.ts'
 const context = 'apps/desktop/src/renderer/src/lib/goal-project-context.ts'
 const common = 'apps/desktop/src/renderer/src/components/GoalsCommonActions.tsx'
 const primary = 'apps/desktop/src/renderer/src/lib/primary-mote-executor.ts'
-const role = 'apps/desktop/src/shared/scratch-topics.ts'
+const role = 'apps/host/src/mote-topic-model.ts'
 const flags = process.argv.slice(2)
 assert.ok(flags.length <= 1 && flags.every(flag => ['--direct-goal-only', '--project-context-only', '--project-links-only', '--goal-main-mote-only', '--goal-coordination-only', '--goal-readability-only', '--goal-primary-status-only'].includes(flag)), 'Unknown or combined Goals mutation flags')
 const linksOnly = flags.includes('--project-links-only')

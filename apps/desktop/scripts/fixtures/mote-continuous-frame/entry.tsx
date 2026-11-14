@@ -2,8 +2,8 @@
 import '../mote-cooperation/entry'
 import { api } from '../../../src/renderer/src/lib/api'
 import { useAppStore } from '../../../src/renderer/src/store'
-import { PMO_TEAMS_TOPIC_ID, scratchTopicDirectoryName } from '../../../src/shared/scratch-topics'
-import type { ScratchTopic } from '../../../src/shared/scratch-topics'
+import { PMO_TEAMS_TOPIC_ID, scratchTopicDirectoryName } from '@agentmux/host/mote-model'
+import type { ScratchTopic } from '@agentmux/host/mote-model'
 const workspace = useAppStore.getState().config!.workspaces.find(item => item.id === '__scratch__')!
 const qualify = (topic: ScratchTopic) => ({ ...topic,
   physicalDirectoryPath: workspace.path + '/' + scratchTopicDirectoryName(topic.id),
@@ -136,7 +136,7 @@ if (new URLSearchParams(location.search).has('conversation')) {
   const preferencesRead = api.motePreferences.read
   api.motePreferences.read = async input => {
     if (input.target.spaceId !== directoryIdentity(workspace.hostId, customTopic.directoryPath)) return preferencesRead(input)
-    const { serializeMoteQuickMode } = await import('../../../src/shared/mote-quick-mode')
+    const { serializeMoteQuickMode } = await import('@agentmux/host/mote-model')
     return { target: input.target, kind: 'quick', status: 'ready', source: { resource: { ...input.target.expectedResource, zoneId: input.target.zoneId,
       zonePath: customTopic.directoryPath, path: scratchTopicDirectoryName(customId) + '/MOTE.md' }, result: { status: 'read', document: {
       path: scratchTopicDirectoryName(customId) + '/MOTE.md', content: serializeMoteQuickMode('', { conversation: customReference }), revision: 'sha256:' + 'd'.repeat(64) } } },

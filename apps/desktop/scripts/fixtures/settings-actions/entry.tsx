@@ -5,7 +5,7 @@ import '../../../src/renderer/src/monaco'
 import { SettingsPanel } from '../../../src/renderer/src/components/SettingsPanel'
 import { useAppStore } from '../../../src/renderer/src/store'
 import { api } from '../../../src/renderer/src/lib/api'
-import { resolveUserProfile } from '../../../src/shared/user-profile'
+import { resolveUserProfile } from '@agentmux/host/mote-model'
 import { fixturePath, fixtureEpoch } from '../../../../../test/fixture-values.mjs'
 import '../../../src/renderer/src/styles/index.css'
 

@@ -2,7 +2,7 @@
 import '../space-agent-cli/entry.mjs'
 import { api } from '../../../src/renderer/src/lib/api'
 import { useAppStore, prepareRendererUpdate } from '../../../src/renderer/src/store'
-import { SCRATCH_WORKSPACE_ID } from '../../../src/shared/scratch-topics'
+import { SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 import { spatialCatalog } from '../../../src/renderer/src/lib/space-agent-control'
 import { surveyInitialZoneSelection } from '../../../src/renderer/src/lib/survey-workface'
 

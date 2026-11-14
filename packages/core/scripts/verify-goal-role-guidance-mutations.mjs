@@ -28,7 +28,7 @@ const source = ['packages/core/src/goal-role-guidance.ts', 'packages/core/src/ag
   'packages/core/src/agentmux-cli-module-skills.ts', 'apps/host/src/goal-role-input.ts', 'apps/desktop/src/main/ipc.ts',
   'apps/host/src/goal-delegation-owner.ts', 'apps/host/src/goal-patrol-owner.ts', 'apps/desktop/src/main/runtime-controller.ts', 'apps/host/src/continuous-progress-loop-manager.ts', 'apps/host/src/continuous-progress-delivery.ts', 'apps/desktop/src/main/index.ts',
   'packages/core/dist/client.js', 'packages/core/dist/index.js', 'packages/core/dist/goal-role-guidance.js', 'packages/core/dist/agent-outbound-message.js',
-  'apps/desktop/src/renderer/src/store.ts', 'apps/desktop/src/shared/topic-agent-instructions.ts',
+  'apps/desktop/src/renderer/src/store.ts', 'apps/host/src/mote-agent-instructions.ts',
   'apps/desktop/test/helpers/injected-context-core.ts', 'apps/desktop/test/helpers/local-runtime-connector.ts', ...tests]
 const cases = [
   { name: 'shared-lifecycle-precedes-selected-responsibility', file: 'packages/core/src/goal-role-guidance.ts',

@@ -5,7 +5,7 @@ import { useAppStore } from '../../../src/renderer/src/store'
 import { api } from '../../../src/renderer/src/lib/api'
 import { applyAppAppearance } from '../../../src/renderer/src/lib/app-appearance'
 import { scratchTopicsScope } from '../../../src/renderer/src/lib/scratch-topic-snapshots'
-import { SCRATCH_WORKSPACE_ID, PMO_TEAMS_TOPIC_ID } from '../../../src/shared/scratch-topics'
+import { SCRATCH_WORKSPACE_ID, PMO_TEAMS_TOPIC_ID } from '@agentmux/host/mote-model'
 import { goalCreationDraftKey, type GoalAgentCreationDraft } from '../../../src/renderer/src/lib/goal-agent-selection'
 import { workspaceZoneId } from '../../../src/shared/space-addresses'
 const state = useAppStore.getState(), config = state.config!, sessions = state.sessions.filter(session => session.kind === 'agent')

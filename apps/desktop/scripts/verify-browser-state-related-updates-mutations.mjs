@@ -14,7 +14,7 @@ await verifyRendererSourceMutations({
     "apps/desktop/src/renderer/src/lib/workbench-tabs.ts",
     "apps/desktop/src/renderer/src/lib/display-name.ts",
     "apps/desktop/src/shared/contracts.ts",
-    "apps/desktop/src/shared/scratch-topics.ts",
+    "apps/host/src/mote-topic-model.ts",
     "packages/layout/src/workbench-layout.ts",
     "packages/layout/src/workbench-view-layout.ts",
     "packages/layout/src/split-tree.ts",

@@ -12,7 +12,7 @@ const owners = [
   'apps/desktop/src/renderer/src/lib/mote-idea-request.ts', 'apps/desktop/src/renderer/src/lib/launcher-state.ts',
   'apps/desktop/src/renderer/src/store.ts', 'apps/desktop/src/renderer/src/lib/desktop-spatial-state.ts',
   'apps/desktop/src/renderer/src/lib/workbench-persistence.ts', 'apps/desktop/src/shared/space-addresses.ts',
-  'apps/desktop/src/shared/scratch-topics.ts', 'apps/desktop/src/renderer/src/styles/mote-workface.css', 'packages/core/src/public-rpc-files.ts'
+  'apps/host/src/mote-topic-model.ts', 'apps/desktop/src/renderer/src/styles/mote-workface.css', 'packages/core/src/public-rpc-files.ts'
 ]
 const sha = bytes => createHash('sha256').update(bytes).digest('hex')
 const files = [...owners, relative(root, import.meta.filename), fixture + 'verify-persona-restart.mjs', fixture + 'persona-restart-entry.ts']

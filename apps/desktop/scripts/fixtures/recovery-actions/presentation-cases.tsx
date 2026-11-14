@@ -6,7 +6,7 @@ import { SessionPane } from '../../../src/renderer/src/components/SessionPane'
 import { DesktopClientUiProvider } from '../../../src/renderer/src/components/DesktopClientUiProvider'
 import { createWorkbenchTab } from '../../../src/renderer/src/lib/workbench-tabs'
 import { createWorkspaceLayout } from '@agentmux/layout'
-import { SCRATCH_WORKSPACE_ID } from '../../../src/shared/scratch-topics'
+import { SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 import type { AppConfig, SessionSnapshot, AgentLaunchResult } from '../../../src/shared/contracts'
 
 const config: AppConfig = { version: 9, hosts: [{ id: 'local', label: 'This Mac', kind: 'local' }],

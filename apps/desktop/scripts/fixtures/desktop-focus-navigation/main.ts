@@ -19,7 +19,7 @@ import { WorktreeService } from '../../../src/main/worktree-service'
 import { registerWorkspace } from '../../../src/main/settings-workspace-add-control'
 import { createSpaceZoneResource } from '../../../src/main/space-zone-resources'
 import { ScratchTopics } from '../../../src/main/scratch-topics'
-import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '../../../src/shared/scratch-topics'
+import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 import type { AppConfig } from '../../../src/shared/contracts'
 
 const execFile = promisify(execFileCallback)

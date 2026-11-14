@@ -8,7 +8,7 @@ import { WorkspaceTopicsPanel } from '../../../src/renderer/src/components/Works
 import { createWorkbenchTab } from '../../../src/renderer/src/lib/workbench-tabs'
 import { createWorkspaceLayout, splitWorkbenchRegion } from '@agentmux/layout'
 import { projectPersistedWorkbench } from '../../../src/renderer/src/lib/workbench-persistence'
-import { SCRATCH_WORKSPACE_ID } from '../../../src/shared/scratch-topics'
+import { SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 import '../../../src/renderer/src/styles/index.css'
 
 const request = window.spaceRestartBoundary.request

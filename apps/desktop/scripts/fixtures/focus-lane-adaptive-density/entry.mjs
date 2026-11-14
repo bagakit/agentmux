@@ -6,7 +6,7 @@ import { App } from '../../../src/renderer/src/App'
 import { api } from '../../../src/renderer/src/lib/api'
 import { useAppStore, prepareRendererUpdate } from '../../../src/renderer/src/store'
 import { createWorkbenchTab } from '../../../src/renderer/src/lib/workbench-tabs'
-import { SCRATCH_WORKSPACE_ID } from '../../../src/shared/scratch-topics'
+import { SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 import { scratchTopicsScope } from '../../../src/renderer/src/lib/scratch-topic-snapshots'
 import '../../../src/renderer/src/styles/index.css'
 

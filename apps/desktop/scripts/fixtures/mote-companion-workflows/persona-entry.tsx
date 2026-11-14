@@ -13,7 +13,7 @@ import { useMoteWorkfaceScope } from '../../../src/renderer/src/lib/mote-workfac
 import { useLauncherState } from '../../../src/renderer/src/lib/launcher-state'
 import { createWorkbenchTab } from '../../../src/renderer/src/lib/workbench-tabs'
 import { scratchTopicsScope } from '../../../src/renderer/src/lib/scratch-topic-snapshots'
-import { SCRATCH_WORKSPACE_ID, PMO_TEAMS_TOPIC_ID, scratchTopicDirectoryName } from '../../../src/shared/scratch-topics'
+import { SCRATCH_WORKSPACE_ID, PMO_TEAMS_TOPIC_ID, scratchTopicDirectoryName } from '@agentmux/host/mote-model'
 import { serializeMoteBehaviorDocument, DEFAULT_MOTE_BEHAVIOR, MOTE_BEHAVIOR_LINK } from '../../../src/renderer/src/lib/mote-behavior'
 import { DEFAULT_MOTE_FACE } from '../../../src/shared/mote-avatars'
 import { topicSpaceIconTarget } from '../../../src/renderer/src/lib/space-object-appearance'

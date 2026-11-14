@@ -7,7 +7,7 @@ import { AgentMuxSpatialStateStore } from '@agentmux/core/spatial-state'
 import { localRuntimeConnector } from '../../../test/helpers/local-runtime-connector'
 import { RuntimeController } from '../../../src/main/runtime-controller'
 import { ScratchTopics } from '../../../src/main/scratch-topics'
-import { SCRATCH_WORKSPACE_ID } from '../../../src/shared/scratch-topics'
+import { SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 import type { AppConfig, BrowserSnapshot } from '../../../src/shared/contracts'
 
 const [root, output, phase, nodeExecutable, html, preload] = process.argv.slice(2)

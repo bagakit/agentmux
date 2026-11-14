@@ -5,7 +5,7 @@ import { AgentMuxClient } from '../../../../../packages/core/src/client'
 import { AgentMuxFileAgentSessionStore } from '../../../../../packages/core/src/agent-session-store'
 import { AgentMuxControlServer } from '../../../../../packages/core/src/public-rpc-server'
 import type { AgentMuxStoredAgentSession } from '../../../../../packages/core/src/types'
-import { scratchTopicDirectoryName, PMO_TEAMS_TOPIC_ID } from '../../../src/shared/scratch-topics'
+import { scratchTopicDirectoryName, PMO_TEAMS_TOPIC_ID } from '@agentmux/host/mote-model'
 import { readingSessionId, readingNativeId, readingRunId, readingLines } from './source'
 
 const sha = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex')

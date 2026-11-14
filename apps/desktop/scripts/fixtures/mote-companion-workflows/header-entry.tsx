@@ -13,7 +13,7 @@ import { useMoteMaterialsActions } from '../../../src/renderer/src/lib/mote-mate
 import { useMoteWorkfaceScope } from '../../../src/renderer/src/lib/mote-workface'
 import { useAppStore } from '../../../src/renderer/src/store'
 import { api } from '../../../src/renderer/src/lib/api'
-import { SCRATCH_WORKSPACE_ID, PMO_TEAMS_TOPIC_ID, scratchTopicDirectoryName } from '../../../src/shared/scratch-topics'
+import { SCRATCH_WORKSPACE_ID, PMO_TEAMS_TOPIC_ID, scratchTopicDirectoryName } from '@agentmux/host/mote-model'
 import { directoryIdentity, homeZoneId } from '../../../src/shared/space-addresses'
 import '../../../src/renderer/src/styles/index.css'
 

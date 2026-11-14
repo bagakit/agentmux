@@ -19,7 +19,7 @@ import { usePmoTeamsTopicFloatingState, readPmoTeamsTopicFloatingState, pmoTeams
 import { createWorkbenchTab, addWorkbenchRegion } from '../../../src/renderer/src/lib/workbench-tabs'
 import { draftDocument } from '@agentmux/client-ui/components/InlineComposer'
 import type { Editor } from '@tiptap/core'
-import { SCRATCH_WORKSPACE_ID, PMO_TEAMS_TOPIC_ID } from '../../../src/shared/scratch-topics'
+import { SCRATCH_WORKSPACE_ID, PMO_TEAMS_TOPIC_ID } from '@agentmux/host/mote-model'
 import '../../../src/renderer/src/styles/index.css'
 
 // The production Workbench/Region, rich inputs, CSS and xterm run unchanged. Only native preview

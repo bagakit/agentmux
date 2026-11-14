@@ -8,7 +8,7 @@ import { ScratchTopics } from '../../../src/main/scratch-topics'
 import { scratchIdentityContext } from '../../../src/main/scratch-topic-directories'
 import { retainDirectoryIdentity, moteDirectoryName } from '../../../src/main/scratch-directory-identity.mjs'
 import { directoryIdentity, homeZoneId } from '../../../src/shared/space-addresses'
-import { SCRATCH_WORKSPACE_ID, scratchTopicDirectoryName } from '../../../src/shared/scratch-topics'
+import { SCRATCH_WORKSPACE_ID, scratchTopicDirectoryName } from '@agentmux/host/mote-model'
 import { migrateTopicDirectories } from '../../migrate-topic-directories.mjs'
 import type { AppConfig, SessionControl } from '../../../src/shared/contracts'
 

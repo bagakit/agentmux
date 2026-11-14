@@ -13,7 +13,7 @@ import { spatialCatalog } from '../../../src/renderer/src/lib/space-agent-contro
 import { workbenchProjectionSlotId } from '../../../src/renderer/src/lib/workbench-projection'
 import { scratchTopicsForWorkspace } from '../../../src/renderer/src/lib/scratch-topic-snapshots'
 import { DesktopClientUiProvider } from '../../../src/renderer/src/components/DesktopClientUiProvider'
-import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, scratchTopicDirectoryName } from '../../../src/shared/scratch-topics'
+import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, scratchTopicDirectoryName } from '@agentmux/host/mote-model'
 import '../../../src/renderer/src/styles/index.css'
 
 const phase = new URL(location.href).searchParams.get('phase')

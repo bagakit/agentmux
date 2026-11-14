@@ -7,7 +7,7 @@ import { deriveFocusProjectLanes } from '../../../src/renderer/src/lib/focus-pro
 import { useAppStore } from '../../../src/renderer/src/store'
 import { api } from '../../../src/renderer/src/lib/api'
 import type { AgentTimelineSnapshot } from '../../../src/shared/contracts'
-import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, scratchTopicDirectoryName } from '../../../src/shared/scratch-topics'
+import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, scratchTopicDirectoryName } from '@agentmux/host/mote-model'
 import { scratchTopicsScope } from '../../../src/renderer/src/lib/scratch-topic-snapshots'
 import { topicSpaceIconTarget } from '../../../src/renderer/src/lib/space-object-appearance'
 import { DEFAULT_MOTE_FACE } from '../../../src/shared/mote-avatars'

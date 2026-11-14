@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url'
 const base = resolve(fileURLToPath(new URL('../../..', import.meta.url)))
 const output = join(base, '.tmp/mote-project-execution')
 const last = join(output, 'capture-last.json')
-const owning = ['apps/desktop/src/shared/scratch-topics.ts', 'apps/desktop/src/main/scratch-topics.ts', 'packages/core/src/agentmux-cli-help.ts']
+const owning = ['apps/host/src/mote-topic-model.ts', 'apps/desktop/src/main/scratch-topics.ts', 'packages/core/src/agentmux-cli-help.ts']
 const hash = async path => createHash('sha256').update(await readFile(path)).digest('hex')
 const current = async () => Object.fromEntries(await Promise.all(owning.map(async path => [path, await hash(join(base, path))])))
 const run = async (command, args, env, timeout = 10000) => {
