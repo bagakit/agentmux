@@ -9,6 +9,8 @@ module.exports = async ({ read, until, resize, tap, button, capture, result, evi
     assert.deepEqual(retained, [original], 'Exact original Goal operation survives a new OS process')
     result.originalGoalRequest = original
   }
+  // Startup opens the original chat; the settings menu leads the directory header one step back.
+  await button('返回 Mote', '.mobile-header')
   await button('手机设置与连接')
   await button('提醒与诊断', '[role=dialog]')
   await until('document.querySelector("[aria-label=未确认的目标操作]")?.textContent.includes("原目标-已删除")')

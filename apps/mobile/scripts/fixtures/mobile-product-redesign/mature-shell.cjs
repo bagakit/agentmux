@@ -33,6 +33,12 @@ module.exports = async ({ win, read, until, resize, tap, button, capture, result
     await capture(`mature-focus-${width}-${appearance}`)
   }
   await resize(390, 844); await read('mobileProductScene.setAppearance("dark")')
+  // The platform marks the root while the soft keyboard is up; the browser's own cascade must fold the tab bar away.
+  const keyboard = await read(`(()=>{const root=document.documentElement,original=root.dataset.browserKeyboard,display=()=>getComputedStyle(document.querySelector('.mobile-navigation-bar')).display
+    root.dataset.browserKeyboard='shown';const shown=display();root.dataset.browserKeyboard='hidden';const hidden=display()
+    if(original===undefined)delete root.dataset.browserKeyboard;else root.dataset.browserKeyboard=original;return {shown,hidden}})()`)
+  assert.deepEqual(keyboard, { shown: 'none', hidden: 'block' }, 'The soft keyboard folds the tab bar away and restores it afterwards')
+  result.operations.push({ action: 'tab-bar-soft-keyboard', ...keyboard })
   await tap('.mobile-spatial-panel .mobile-page-header [aria-label="手机设置与连接"]', 'Header menu')
   await until('!!document.querySelector(".mobile-drawer")')
   await capture('mature-drawer-390-dark')
@@ -141,11 +147,12 @@ module.exports = async ({ win, read, until, resize, tap, button, capture, result
     run:f.sessionIds.find(value=>value.sessionId===f.record.selectedSessionId),conversation:f.record.conversation,
     effects:f.calls.filter(call=>['sdk.submitAgentPrompt','sdk.respondAgentInteraction','agent.open','file.upload'].includes(call.method)).length}})()`)
   await read('mobileProductScene.setDirectoryReadFailure(true);document.dispatchEvent(new Event("visibilitychange"))')
-  await until('!!document.querySelector("[data-workface=focus] .mobile-tab-badge[data-unconfirmed]")&&!!document.querySelector(".mobile-attention-notice")')
-  const attentionCollapsed = await read(`(()=>{const focus=document.querySelector('[data-workface=focus]'),notice=document.querySelector('.mobile-attention-notice');return {
-    focus:focus.querySelector('.mobile-tab-badge')?.textContent,description:focus.getAttribute('aria-description'),back:document.querySelector('.mobile-back-badge')?.textContent,
+  // A conversation has no tab bar; Back carries the unconfirmed list until the person returns to a directory.
+  await until('document.querySelector(".mobile-header [data-mobile-back] .mobile-back-badge[data-unconfirmed]")?.textContent==="?"&&!!document.querySelector(".mobile-attention-notice")')
+  const attentionCollapsed = await read(`(()=>{const back=document.querySelector('.mobile-header [data-mobile-back]'),notice=document.querySelector('.mobile-attention-notice');return {
+    bar:!!document.querySelector('.mobile-navigation'),back:back.querySelector('.mobile-back-badge')?.textContent,description:back.getAttribute('aria-description'),
     summary:notice.querySelector('.mobile-text-button')?.textContent,technicalVisible:notice.innerText.includes('DIRECTORY_READ_FAILED')}})()`)
-  assert.equal(attentionCollapsed.focus, '?'); assert.equal(attentionCollapsed.back, '?')
+  assert.equal(attentionCollapsed.bar, false); assert.equal(attentionCollapsed.back, '?')
   assert.ok(attentionCollapsed.description.includes('尚未确认')); assert.equal(attentionCollapsed.technicalVisible, false)
   await capture('mature-attention-unconfirmed-390-dark')
   await resize(320, 480); await read('mobileProductScene.setAppearance("light")')
@@ -168,7 +175,7 @@ module.exports = async ({ win, read, until, resize, tap, button, capture, result
   await capture('mature-attention-details-320-short-light')
   await read('mobileProductScene.setDirectoryReadFailure(false)')
   await button('重新读取需要你列表', '.mobile-attention-details')
-  await until('!document.querySelector(".mobile-attention-details")&&!document.querySelector(".mobile-attention-notice")&&!document.querySelector("[data-workface=focus] .mobile-tab-badge[data-unconfirmed]")')
+  await until('!document.querySelector(".mobile-attention-details")&&!document.querySelector(".mobile-attention-notice")&&!document.querySelector(".mobile-header .mobile-back-badge[data-unconfirmed]")')
   const recoveredAttention = await read(`(()=>{const f=mobileProductScene.facts();return {sid:f.record.selectedSessionId,
     run:f.sessionIds.find(value=>value.sessionId===f.record.selectedSessionId),conversation:f.record.conversation,
     sameEditor:document.querySelector('.mobile-conversation-panel:not([hidden]) [contenteditable=true]')===matureAttentionEditor,

@@ -39,7 +39,7 @@ module.exports = async ({ read, until, resize, tap, button, capture, result }) =
   await read(`(()=>{const rows=[...document.querySelectorAll('.mobile-focus-project .mobile-agent-row')];const row=rows.find(n=>n.querySelector('strong')?.textContent==='日常协作');if(!row)throw Error('Original main row missing');row.dataset.quietMain='original'})()`)
   await tap('[data-quiet-main=original] .mobile-session-locations > summary', '展开原主对话位置')
   await button('我的 Mote', '[data-quiet-main=original] .mobile-session-locations')
-  await until('document.querySelector(".mobile-mote-team-button, .mobile-mote-team-trigger")')
+  await until('document.querySelector(".mobile-mote-context .mobile-mote-team-button")')
   await button('查看本 Mote 团队')
   await until('document.querySelector("[role=dialog] .mobile-mote-team-panel [data-mote-member=session-result]")')
   const member = '[role=dialog] .mobile-mote-team-panel [data-mote-member="session-result"]'

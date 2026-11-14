@@ -39,7 +39,15 @@ app.whenReady().then(async () => {
   }
   const namedButton = (label, scope) => `(()=>{const ns=[...document.querySelectorAll(${JSON.stringify(scope)}+' button')].filter(n=>n.getClientRects().length);return ns.find(n=>n.getAttribute('aria-label')===${JSON.stringify(label)}||n.textContent.trim()===${JSON.stringify(label)})||ns.find(n=>n.querySelector('strong')?.textContent.trim()===${JSON.stringify(label)})||ns.find(n=>n.textContent.trim().startsWith(${JSON.stringify(label)}))||null})()`
   const hasButton = (label, scope = 'body') => read(`Boolean(${namedButton(label, scope)})`)
+  // The tab bar exists only on root pages; a drilled page reaches it through back, one layer at a time, as a person does.
+  const toRoot = async () => {
+    for (let depth = 0; depth < 4 && !await visible('.mobile-navigation'); depth++) {
+      if (!await read('[...document.querySelectorAll("[data-mobile-back]")].some(n=>n.getClientRects().length)')) break
+      await tap('[data-mobile-back]', 'Back toward the tab bar')
+    }
+  }
   const button = async (label, scope = 'body') => {
+    if (scope === '.mobile-navigation') await toRoot()
     // Explicit navigation may load its original workface asynchronously. Wait for
     // that exact visible action; a missing action still fails the bounded read.
     await until(`Boolean(${namedButton(label, scope)})`)
@@ -57,6 +65,8 @@ app.whenReady().then(async () => {
     await pause(120)
     win.webContents.invalidate()
     await read('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))')
+    // A capture shows a settled screen; an in-flight push, pop or tab-bar entrance is motion, not layout.
+    await until('![...document.querySelectorAll(".mobile-main, .mobile-navigation-bar")].some(n=>n.getAnimations().some(a=>a.playState==="running"))')
     await pause(40)
     const facts = await read(`(()=>{const n=document.querySelector('.mobile-app'),e=document.querySelector('[contenteditable=true]');return {text:n.innerText,overlay:document.querySelector('[role=dialog]')?.innerText,overflow:n.scrollWidth>n.clientWidth,root:n.getBoundingClientRect().toJSON(),structure:Object.fromEntries(['.mobile-header','.mobile-main','.mobile-conversation-panel','.mobile-conversation','.mobile-conversation__connection','.mobile-conversation__reading'].map(selector=>{const n=document.querySelector(selector);return[selector,n?{rect:n.getBoundingClientRect().toJSON(),scrollTop:n.scrollTop,position:getComputedStyle(n).position,overflow:getComputedStyle(n).overflowY}:null]})),viewport:{width:innerWidth,height:innerHeight,visualHeight:visualViewport.height,top:visualViewport.offsetTop},selectedSession:document.querySelector('[data-agent-session-id]')?.getAttribute('data-agent-session-id'),editor:{text:e?.textContent,visible:!!e?.getClientRects().length,rect:e?.getBoundingClientRect().toJSON(),sameOriginal:e===window.originalCaptureEditor,focused:document.activeElement===e},...mobileProductScene.facts()}})()`)
     await fs.writeFile(path.join(evidence, name + '.png'), (await win.webContents.capturePage()).toPNG())

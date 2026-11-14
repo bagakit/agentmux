@@ -9,10 +9,11 @@ module.exports = async ({ win, read, until, resize, tap, button, capture, result
   await read('window.moteOriginalEditor=document.querySelector("[contenteditable=true]")')
   const draft = await read('window.moteOriginalEditor.textContent')
   const geometry = async () => {
-    const values = await read('[...document.querySelectorAll(".mobile-mote-navigation button")].map(n=>({label:n.textContent,rect:n.getBoundingClientRect().toJSON()}))')
+    const values = await read('[...document.querySelectorAll(".mobile-mote-context[data-variant=main] :is(.mobile-mote-sections > button, .mobile-mote-team-button)")].map(n=>({label:n.textContent,rect:n.getBoundingClientRect().toJSON()}))')
     assert.equal(values.length, 3)
     for (const {rect,label} of values) assert.ok(rect.width>=44&&rect.height>=44,label+' retains touch geometry')
     assert.ok(values[0].rect.height<=48, 'Navigation keeps content first')
+    if (await read('!document.querySelector(".mobile-mote-context .mobile-mote-source-status")')) assert.ok(await read('!!document.querySelector(".mobile-mote-context .mobile-mote-team-button__label")?.getClientRects().length'), 'Without a strip notice the team entry keeps its named label')
     result.operations.push({action:'compact-navigation-touch-geometry',values})
   }
   await geometry(); await capture('01-mobile-discussion-390-dark')
@@ -29,7 +30,9 @@ module.exports = async ({ win, read, until, resize, tap, button, capture, result
   await button('继续原工作')
   await until('mobileProductScene.facts().record.selectedSessionId==="session-waiting"')
   await capture('04-mobile-original-thread-390-dark')
-  await button('Discussion')
+  await button('返回 Threads', '.mobile-header')
+  await until('document.querySelector(".mobile-mote-context[data-variant=main] [role=tab][aria-selected=true]")?.textContent==="Threads"')
+  await button('Discussion', '.mobile-mote-context')
   await until('mobileProductScene.facts().record.selectedSessionId==="session-mote"')
   assert.equal(await read('document.querySelector("[contenteditable=true]").textContent'), draft)
   await read('mobileProductScene.replaceMoteMain()')

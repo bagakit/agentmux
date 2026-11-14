@@ -67,7 +67,14 @@ try {
     'menu-full-snapshot': { file: 'apps/mobile/src/MobileApp.tsx', edits: [
       { before: 'client && workface.selectedSessionId ? client.agentSession(workface.selectedSessionId) : undefined', after: 'client?.agentSessions().find(value => value.agentSessionId === workface.selectedSessionId)' },
       { before: '[client, connection.state, workface.selectedSessionId, sessionRevision])', after: '[client, connection.state, workface.selectedSessionId, sessionRevision, sheet, home, secondary])' }
-    ] }
+    ] },
+    'mote-strip-overlap': { file: 'apps/mobile/src/conversation/chrome.css', edits: [
+      { before: '.mobile-app .mobile-mote-context .mobile-mote-source-status__label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }', after: '.mobile-app .mobile-mote-context .mobile-mote-source-status__label { white-space: nowrap; }' },
+      { before: '.mobile-app .mobile-mote-context .mobile-mote-source-status__subject, .mobile-app .mobile-mote-context .mobile-mote-source-status__chevron { display: none; }', after: '.mobile-app .mobile-mote-context .mobile-mote-source-status__chevron { display: none; }' }
+    ] },
+    'mote-title-squeeze': { file: 'apps/mobile/src/conversation/chrome.css', before: '.mobile-session-toolbar > .mobile-session-identity::after { display: none; }', after: '.mobile-session-toolbar > .mobile-session-identity::after { }' },
+    'mote-team-label-hidden': { file: 'apps/mobile/src/conversation/chrome.css', before: '  .mobile-app .mobile-mote-context .mobile-mote-source-status__count { display: none; }',
+      after: '  .mobile-app .mobile-mote-team-button__label, .mobile-app .mobile-mote-context .mobile-mote-source-status__count { display: none; }' }
   }
   const variant = mutationId ? variants[mutationId] : null
   if (mutationId) assert.ok(variant, 'Known bounded Mobile presentation mutation is required')

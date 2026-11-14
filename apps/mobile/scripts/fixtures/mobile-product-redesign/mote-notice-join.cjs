@@ -41,7 +41,7 @@ module.exports = async ({ win, read, until, resize, tap, capture, result }) => {
     assert.ok(rect.left >= Math.max(0, viewport.left) && rect.right <= Math.min(await read('innerWidth'), viewport.right), 'The complete 44px Mobile notice action remains inside its actual horizontal reading viewport: ' + selector)
     geometry.push({ selector, viewport: await read('({width:innerWidth,height:innerHeight})'), rect })
   }
-  await until('document.querySelector(".mobile-mote-team-summary")?.innerText.includes("团队 2")')
+  await until('document.querySelector(".mobile-mote-context .mobile-mote-team-button__label")?.textContent==="团队 2"')
   await until('document.querySelector(".conversation-mote-notice__member")||document.querySelector(".mobile-conversation__notice")')
   const readIssue = await read('document.querySelector(".mobile-conversation__notice p")?.textContent')
   if (readIssue) { result.fixtureReadIssue = readIssue; throw Error('Controlled original conversation page: ' + readIssue) }

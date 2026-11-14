@@ -24,7 +24,8 @@ module.exports = async ({ win, read, until, resize, tap, button, capture, result
   await tap('.mobile-conversation-panel [contenteditable=true]', 'Retain original draft')
   win.webContents.insertText('原草稿在重启后保留')
   await until('mobileProductScene.facts().record.conversation?.drafts.some(([,text])=>text.includes("原草稿在重启后保留"))')
-  await button('Mote', '.mobile-navigation')
+  // The Mote tab keeps the recent Mote's main; the directory of Motes sits one step back.
+  await button('返回 Mote', '.mobile-header')
   await until('document.querySelectorAll(".mobile-mote-choice").length===2')
   assert.equal(await read('document.querySelectorAll(".mobile-mote-directory .mobile-space-children").length'), 0, 'Mote is not a file or Profile tree')
   for (const mode of ['dark', 'light']) for (const width of [390, 320]) {
@@ -39,9 +40,11 @@ module.exports = async ({ win, read, until, resize, tap, button, capture, result
   await until('!!document.querySelector(".mobile-mote-profile")')
   await capture('chat-start-profile-light-narrow')
   await button('关闭面板', '[role=dialog]')
-  await button('选择 Mote · 资料协作', '.mobile-spatial-panel')
+  await button('打开 Mote 主对话 · 资料协作', '.mobile-spatial-panel')
   await until('mobileProductScene.facts().record.presentation.recentMoteSpaceId==="mote-resources"')
   await capture('chat-start-secondary-light-narrow')
+  await button('返回 Mote', '.mobile-header')
+  await until('mobileProductScene.facts().record.presentation.showSession===false')
   await read('mobileProductScene.seedSpatialRecovery()')
   result.recoveryOriginal = (await facts()).record
   assert.equal(result.recoveryOriginal.selectedSessionId, 'session-mote')
