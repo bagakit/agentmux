@@ -1,4 +1,5 @@
 import { ComposerTextarea } from '@agentmux/client-ui/input'
+import { ActionFeedback } from '@agentmux/client-ui/components/ActionFeedback'
 import { Button } from '@agentmux/client-ui/components/Button'
 import { SemanticIcon } from '@agentmux/client-ui/icons'
 import { ComposerEditFooter } from '@agentmux/client-ui/components/ComposerEditFooter'
@@ -45,12 +46,12 @@ export function ComposerQueuedMessageEditor({ entry, onSave, onCancel, status, t
       {status}
     </div>
     <ComposerTextarea variant="compact" id={fieldId} ref={textareaRef} autoFocus aria-label={editorLabel} rows={3} value={text} onValueChange={setText} readOnly={saving} />
-    <div className="agent-action-feedback" tabIndex={error ? 0 : undefined}>
+    <ActionFeedback bounded tabIndex={error ? 0 : undefined}>
       {!entry.editable ? <span role="status">原消息已锁定，编辑稿仍可复制。</span> : null}
       {error ? <span role="alert">{error}</span> : entry.editable
         ? <span role="status">{saving ? <><SemanticIcon name="status.loading" animation="spin" size={13} /> 正在保存待发消息</>
           : '保存修改后仍需单独发送。'}</span> : null}
-    </div>
+    </ActionFeedback>
     <ComposerEditFooter leading={tools}>
       <Button onClick={onCancel} disabled={saving}>取消</Button>
       <Button variant="primary" aria-label="保存待发消息" aria-busy={saving} disabled={saving || !entry.editable || !text.trim()} onClick={() => { void save() }}>保存</Button>

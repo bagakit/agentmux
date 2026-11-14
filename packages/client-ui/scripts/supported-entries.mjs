@@ -34,8 +34,11 @@ export const supportedExamples = {
     styles: [fieldStyles, actionStyles, './styles/overlays.css']
   },
   feedback: {
-    entries: { './components/InlineRenameField': 'components/InlineRenameField.tsx' },
-    styles: [fieldStyles, semanticIcons, './styles/inline-rename-field.css']
+    entries: {
+      './components/ActionFeedback': 'components/ActionFeedback.tsx',
+      './components/InlineRenameField': 'components/InlineRenameField.tsx'
+    },
+    styles: [fieldStyles, actionStyles, semanticIcons, './styles/inline-rename-field.css']
   },
   locations: {
     entries: { './patterns/agent-work-location': 'patterns/agent-work-location.tsx' },

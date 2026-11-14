@@ -90,8 +90,7 @@
 .settings-disclosure-icon { color: var(--text-3); transition: transform var(--dur-fast); }
 .settings-inline-error { margin: 0; color: var(--red-text); font-size: var(--fs-body); }
 .settings-pane-actions { position: sticky; z-index: 3; bottom: 0; display: flex; align-items: center; justify-content: flex-end; gap: var(--sp-4); margin-top: auto; padding: var(--sp-4) 0; border-top: 1px solid var(--line-soft); background: var(--surface-0); }
-.settings-pane-actions > span.settings-save-feedback { margin-right: auto; color: var(--text-2); font-size: var(--fs-meta); line-height: 1.5; }
-.settings-pane-actions > span.settings-save-feedback { order: -2; }
+.settings-pane-actions > .settings-save-feedback { margin-inline-end: auto; line-height: 1.5; order: -2; }
 .settings-conflict-actions { display: flex; flex-wrap: wrap; gap: var(--sp-2); order: -1; }
 .settings-diagnostics { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-4); }
 .settings-diagnostics > span { flex: 1 1 200px; color: var(--text-2); font-size: var(--fs-meta); line-height: 1.5; }

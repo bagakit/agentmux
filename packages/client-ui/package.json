@@ -44,6 +44,11 @@
       "import": "./dist/overlay-host.js"
     },
     "./styles/overlays.css": "./src/styles/overlays.css",
+    "./components/ActionFeedback": {
+      "types": "./src/components/ActionFeedback.tsx",
+      "browser": "./src/components/ActionFeedback.tsx",
+      "import": "./dist/components/ActionFeedback.js"
+    },
     "./components/InlineRenameField": {
       "types": "./src/components/InlineRenameField.tsx",
       "browser": "./src/components/InlineRenameField.tsx",

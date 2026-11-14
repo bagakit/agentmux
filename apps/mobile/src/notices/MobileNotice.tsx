@@ -1,4 +1,5 @@
 import { createContext, useCallback, useContext, useId, useLayoutEffect, useMemo, useRef, useState, type HTMLAttributes, type ReactNode } from 'react'
+import { ActionFeedback } from '@agentmux/client-ui/components/ActionFeedback'
 import { SemanticIcon } from '@agentmux/client-ui/icons'
 
 export const DELIVERY_DISMISSAL_STORAGE = 'agentmux-mobile-dismissed-delivery-v1'
@@ -109,7 +110,7 @@ export function MobileNotice({ identity = [], owner, children, className, dismis
   const key = JSON.stringify([scope, id, ownerKey(owner), identityKey(identity)])
   const [localDismissed, setLocalDismissed] = useState<string | null>(null)
   if (dismissible && (presentation ? presentation.dismissed.has(key) : localDismissed === key)) return null
-  return <div role="status" {...attributes} data-notice-kind={kind} className={`mobile-notice${className ? ' ' + className : ''}`}>
+  return <ActionFeedback role="status" {...attributes} data-notice-kind={kind} className={`mobile-notice${className ? ' ' + className : ''}`}>
     <div className="mobile-notice__body">{children}</div>
     {dismissible && <button type="button" className="mobile-notice__dismiss" aria-label="收起提醒" title="收起提醒；可从菜单恢复显示"
       onClick={event => {
@@ -119,7 +120,7 @@ export function MobileNotice({ identity = [], owner, children, className, dismis
         if (onDismiss) onDismiss()
         else presentation ? presentation.dismiss(key) : setLocalDismissed(key)
       }}><SemanticIcon name="action.close" size={14} /></button>}
-  </div>
+  </ActionFeedback>
 }
 
 export function MobileNoticeRestore({ onRestored }: { onRestored?(): void }) {

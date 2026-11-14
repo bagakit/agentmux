@@ -82,14 +82,15 @@
 }
 
 /* Status occupies two text lines at every phase. Longer descriptions remain readable in place. */
-.agent-action-feedback {
+[data-bounded-feedback] {
   block-size: 2lh;
   min-inline-size: 0;
   overflow: auto;
   overflow-wrap: anywhere;
+  overscroll-behavior-block: contain;
   color: var(--text-2);
   font-size: var(--fs-meta);
   line-height: 1.45;
 }
-.agent-action-feedback:focus-visible { outline: 2px solid var(--focus-line); outline-offset: -2px; }
-.agent-action-feedback [role="alert"] { color: var(--red-text); }
+[data-bounded-feedback]:focus-visible { outline: 2px solid var(--focus-line); outline-offset: -2px; }
+[data-bounded-feedback][role="alert"], [data-bounded-feedback] [role="alert"] { color: var(--red-text); }

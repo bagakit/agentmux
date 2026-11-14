@@ -1,3 +1,4 @@
+import { ActionFeedback } from '@agentmux/client-ui/components/ActionFeedback'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { autoUpdate, computePosition, offset, shift, size } from '@floating-ui/dom'
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type RefObject, type ReactNode } from 'react'
@@ -281,7 +282,7 @@ export function ComposerPendingDelivery({ queued, pendingInteraction, composerRe
             </li>
           })}
         </ol>
-        <span className="composer-pending__sr-only" role="status">{copyResult && queued.some(entry => entry.id === copyResult.id && entry.text === copyResult.text) ? copyResult.state === 'copied' ? '已复制待发消息' : '复制未确认，请重试' : ''}</span>
+        <ActionFeedback className="composer-pending__sr-only" role="status">{copyResult && queued.some(entry => entry.id === copyResult.id && entry.text === copyResult.text) ? copyResult.state === 'copied' ? '已复制待发消息' : '复制未确认，请重试' : ''}</ActionFeedback>
     </section>
   </WindowOverlayPortal>
 }

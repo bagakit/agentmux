@@ -153,8 +153,8 @@
 .composer-queued-editor { display: grid; gap: 8px; min-width: 0; }
 .composer-queued-editor__heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .composer-queued-editor__heading label { font-size: var(--fs-meta); font-weight: 600; color: var(--text); }
-.composer-queued-editor .agent-action-feedback > span { display: block; }
-.composer-queued-editor .agent-action-feedback svg { margin-inline-end: var(--sp-1); vertical-align: -2px; }
+.composer-queued-editor [data-bounded-feedback] > span { display: block; }
+.composer-queued-editor [data-bounded-feedback] svg { margin-inline-end: var(--sp-1); vertical-align: -2px; }
 .composer-edit-footer { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2) var(--sp-4); }
 .composer-edit-footer__actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--sp-2); margin-inline-start: auto; }
 .composer-edit-footer .agent-button { min-height: 28px; padding: 0 10px; font-size: var(--fs-meta); white-space: nowrap; box-shadow: none; }

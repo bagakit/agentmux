@@ -41,7 +41,6 @@
   align-items: center;
 }
 .settings-pane-actions[data-settings-save-bar] > .settings-save-feedback { margin: 0; align-items: start; }
-.settings-pane-actions[data-settings-save-bar] > .settings-save-feedback[role="alert"] { color: var(--red-text); }
 .settings-pane-actions[data-settings-save-bar] > button {
   grid-column: 2;
   grid-row: 1;
