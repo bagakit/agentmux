@@ -4,7 +4,7 @@ import { chmod, link, mkdir, open, readFile, rename, unlink } from 'node:fs/prom
 import { dirname } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { durableWriteFile } from '@agentmux/core'
-import type { BrowserOperation, BrowserOperationStep } from './model/browser-operation.js'
+import type { BrowserOperation, BrowserOperationStep, BrowserOperationPhase } from './model/browser-operation.js'
 import type { BrowserOperationEvent, BrowserOperationJournalDocument } from './browser-operation-journal.js'
 
 export const BROWSER_OPERATION_JOURNAL_VERSION = 1 as const
@@ -25,7 +25,11 @@ export type BrowserOperationJournalChanges = {
 }
 
 export interface BrowserOperationJournalStore {
-  load(): Promise<BrowserOperationJournalDocument | null>
+  /** A complete result is valid too; windowed stores also provide synchronous original identity/detail reads. */
+  load(window?: { maxOperations: number; protectedPhases: readonly BrowserOperationPhase[] }): Promise<BrowserOperationJournalDocument | null>
+  /** Optional for a full in-memory store; windowed storage retains exact original identity and detail. */
+  hasLoadedOperation?(operationId: string): boolean
+  readOperation?(operationId: string, loadedIds: readonly string[]): { operation: BrowserOperation; beforeId: string | null } | null
   /** Only immutable facts changed by this save; there is no full-snapshot write path. */
   save(changes: BrowserOperationJournalChanges): Promise<void>
 }
@@ -36,10 +40,12 @@ export class BrowserOperationFileStore implements BrowserOperationJournalStore {
   private loaded = false
   private unavailable = false
   private existed = false
+  // Only immutable identities/coordinates observed at load. New live identities stay in Journal's original map.
+  private readonly positions = new Map<string, number>()
 
   constructor(private readonly path: string) {}
 
-  async load(): Promise<BrowserOperationJournalDocument | null> {
+  async load(window?: { maxOperations: number; protectedPhases: readonly BrowserOperationPhase[] }): Promise<BrowserOperationJournalDocument | null> {
     const loading = this.tail.catch(() => {}).then(async () => {
       try {
         const header = await this.header()
@@ -52,14 +58,29 @@ export class BrowserOperationFileStore implements BrowserOperationJournalStore {
         if (header !== SQLITE_HEADER) await this.convertOriginal()
         const database = this.database()
         try {
-          const operations = database.prepare('SELECT metadata FROM operations ORDER BY ordinal').all()
+          // Identity coordinates, body window, steps and events belong to one read snapshot.
+          database.exec('BEGIN')
+          if (window !== undefined) {
+            const positions = database.prepare('SELECT id, ordinal FROM operations ORDER BY ordinal').all()
+            this.positions.clear()
+            for (const row of positions) this.positions.set(String(row.id), Number(row.ordinal))
+          }
+          const protectedPhases = window ? JSON.stringify(window.protectedPhases) : ''
+          const operations = database.prepare(window === undefined ? 'SELECT metadata FROM operations ORDER BY ordinal' : `SELECT metadata FROM operations
+            WHERE COALESCE(json_extract(metadata, '$.phase'), '') IN (SELECT value FROM json_each(?))
+              OR ordinal IN (SELECT ordinal FROM operations WHERE COALESCE(json_extract(metadata, '$.phase'), '') NOT IN (SELECT value FROM json_each(?)) ORDER BY ordinal DESC LIMIT ?)
+            ORDER BY ordinal`).all(...(window === undefined ? [] : [protectedPhases, protectedPhases, window.maxOperations]))
             .map(row => ({ ...JSON.parse(String(row.metadata)), steps: [] })) as BrowserOperation[]
-          const byId = new Map(operations.map(operation => [operation.id, operation]))
-          for (const row of database.prepare('SELECT operation_id, body FROM steps ORDER BY operation_id, sequence').all()) {
-            byId.get(String(row.operation_id))!.steps.push(JSON.parse(String(row.body)))
+          if (window === undefined) {
+            const byId = new Map(operations.map(operation => [operation.id, operation]))
+            for (const row of database.prepare('SELECT operation_id, body FROM steps ORDER BY operation_id, sequence').all()) byId.get(String(row.operation_id))!.steps.push(JSON.parse(String(row.body)))
+          } else {
+            const readSteps = database.prepare('SELECT body FROM steps WHERE operation_id = ? ORDER BY sequence')
+            for (const operation of operations) for (const row of readSteps.all(operation.id)) operation.steps.push(JSON.parse(String(row.body)))
           }
           const events = database.prepare('SELECT events.body FROM events JOIN writers ON writers.id = events.writer ORDER BY writers.ordinal, events.sequence').all()
             .map(row => JSON.parse(String(row.body))) as BrowserOperationEvent[]
+          database.exec('COMMIT')
           this.loaded = true
           this.unavailable = false
           return { version: BROWSER_OPERATION_JOURNAL_VERSION, operations, events }
@@ -91,6 +112,30 @@ export class BrowserOperationFileStore implements BrowserOperationJournalStore {
     await saving
   }
 
+  hasLoadedOperation(operationId: string): boolean { return this.positions.has(operationId) }
+
+  /** Synchronous after load: a cold miss never yields between original identity admission and dispatch. */
+  readOperation(operationId: string, loadedIds: readonly string[]): { operation: BrowserOperation; beforeId: string | null } | null {
+    const ordinal = this.positions.get(operationId)
+    if (ordinal === undefined) return null
+    const database = this.database(this.path, true)
+    try {
+      database.exec('BEGIN')
+      const row = database.prepare('SELECT metadata FROM operations WHERE id = ?').get(operationId)
+      if (!row) throw new Error('The original Browser operation is temporarily unavailable; its identity is retained.')
+      const operation = { ...JSON.parse(String(row.metadata)), steps: database.prepare('SELECT body FROM steps WHERE operation_id = ? ORDER BY sequence').all(operationId).map(step => JSON.parse(String(step.body))) } as BrowserOperation
+      if (operation.id !== operationId) throw new Error('Stored Browser operation identity does not match its original ID.')
+      database.exec('COMMIT')
+      let beforeId: string | null = null, beforeOrdinal = Infinity
+      for (const id of loadedIds) {
+        const position = this.positions.get(id)
+        if (position === undefined) { beforeId ??= id; continue }
+        if (position > ordinal && position < beforeOrdinal) { beforeId = id; beforeOrdinal = position }
+      }
+      return { operation, beforeId }
+    } finally { database.close() }
+  }
+
   private async header(): Promise<string | null> {
     let file
     try { file = await open(this.path, 'r') } catch (error) {
@@ -104,8 +149,8 @@ export class BrowserOperationFileStore implements BrowserOperationJournalStore {
     } finally { await file.close() }
   }
 
-  private database(path = this.path): DatabaseSync {
-    const database = new DatabaseSync(path)
+  private database(path = this.path, readOnly = false): DatabaseSync {
+    const database = new DatabaseSync(path, { readOnly })
     try {
       database.exec('PRAGMA busy_timeout = 0; PRAGMA foreign_keys = ON; PRAGMA synchronous = EXTRA;')
       if (Number(database.prepare('PRAGMA application_id').get()!.application_id) !== APPLICATION_ID

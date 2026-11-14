@@ -202,7 +202,7 @@ export class BrowserOperationJournal {
       ...(input.replayOf ? { replayOf: input.replayOf } : {})
     })
     // The original map admits the sanitized identity synchronously before any persistence await.
-    if (this.operations.has(operation.id)) throw browserOperationAlreadyExistsError()
+    if (this.operations.has(operation.id) || this.saveStore.hasLoadedOperation?.(operation.id)) throw browserOperationAlreadyExistsError()
     this.document.operations.push(operation)
     this.indexOperation(operation)
     this.trim()
@@ -354,7 +354,7 @@ export class BrowserOperationJournal {
 
   async get(operationId: string): Promise<BrowserOperation | null> {
     await this.ready()
-    const operation = this.find(operationId)
+    const operation = this.find(operationId, false)
     return operation ? cloneOperation(operation) : null
   }
 
@@ -418,6 +418,7 @@ export class BrowserOperationJournal {
     deliver: (event: BrowserOperationSequencedEvent) => void
   ): Promise<BrowserOperationSubscription> {
     await this.ready()
+    const operation = this.find(operationId, false)
     const id = this.nextSubscriberId++
     const cursor = afterSequence ?? 0
     const backlog = this.document.events
@@ -434,7 +435,7 @@ export class BrowserOperationJournal {
       this.deliveryQueues.get(operationId)?.entries[0]?.sequence ?? this.sequenced + 1)
     const droppedThrough = oldest - 1
     return {
-      operation: this.find(operationId) ? cloneOperation(this.find(operationId) as BrowserOperation) : null,
+      operation: operation ? cloneOperation(operation) : null,
       gap: droppedThrough > cursor ? { droppedThrough } : null,
       backlog,
       dispose: () => {
@@ -446,7 +447,7 @@ export class BrowserOperationJournal {
 
   private async load(): Promise<void> {
     try {
-      const loaded = await this.saveStore.load()
+      const loaded = await this.saveStore.load({ maxOperations: this.maxOperations, protectedPhases: [...ACTIVE_PHASES, 'indeterminate'] })
       if (loaded && isJournalDocument(loaded)) {
         this.document = normalizeDocument(loaded)
       } else {
@@ -506,8 +507,18 @@ export class BrowserOperationJournal {
     this.maxSequences.set(operation.id, maximum)
   }
 
-  private find(operationId: string): BrowserOperation | undefined {
-    return this.operations.get(operationId)
+  private find(operationId: string, retain = true): BrowserOperation | undefined {
+    const present = this.operations.get(operationId)
+    if (present) return present
+    if (!this.saveStore.hasLoadedOperation?.(operationId)) return undefined
+    const retained = this.saveStore.readOperation?.(operationId, retain ? this.document.operations.map(operation => operation.id) : [])
+    if (!retained) return undefined
+    const operation = sanitizeOperation(retained.operation)
+    if (!retain) return operation
+    this.indexOperation(operation)
+    const before = retained.beforeId === null ? -1 : this.document.operations.findIndex(value => value.id === retained.beforeId)
+    this.document.operations.splice(before < 0 ? this.document.operations.length : before, 0, operation)
+    return operation
   }
 
   private publish(event: BrowserOperationEvent): void {
