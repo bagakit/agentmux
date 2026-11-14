@@ -1,6 +1,7 @@
 import { mintObjectId } from '@agentmux/core/object-id'
 import { parseHostConfigurations } from '@agentmux/host/host-configuration'
 import { HostTailcatClientFields } from './HostTailcatClientFields'
+import { LocalIncomingConnections } from './LocalIncomingConnections'
 import { hostConnectionSummary } from '../../lib/host-transport'
 import { TextInput } from '@agentmux/client-ui/input'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
@@ -253,6 +254,8 @@ export function HostSettingsPane({ config, onSave, active, onClose, navigationRe
   }
 
   const selectedNetworkHost = hosts.find(host => host.id === selectedId)
+  const selectedSavedLocal = config.hosts.find(host => host.kind === 'local' && host.id === selectedId)
+  const localConnectionVisible = active && view === 'editor' && !pendingHostNavigation && panel === 'connection' && selectedSavedLocal !== undefined && hosts.some(host => host.id === selectedSavedLocal.id && host.kind === 'local')
   return (
     <div ref={container} className="settings-pane-stack settings-resource-workbench remote-management" data-resource-view={view} data-remote-mode={showTopology ? 'topology' : 'list'} data-remote-wide={wide}
       data-settings-host={active && view === 'editor' && !pendingHostNavigation && hosts.some(host => host.id === selectedId) ? selectedId ?? undefined : undefined}>
@@ -349,11 +352,12 @@ export function HostSettingsPane({ config, onSave, active, onClose, navigationRe
                   onChange={(patch) => update(host.id, patch)}
                   onClear={(field) => clear(host.id, field)}
                 />
-              ) : <div className="settings-local-host"><strong>This device’s node</strong><p>Incoming connections, publishing and shared folders are managed in Node.</p><button type="button" className="small-button" onClick={() => settingsNavigation?.open('network-node', undefined, 'incoming', host.id)}>Open Node</button></div> : null}
+              ) : <div className="settings-local-host"><strong>This device’s node</strong><p>Publishing and shared folders are managed in Node.</p><button type="button" className="small-button" onClick={() => settingsNavigation?.open('network-node', undefined, 'publishing', host.id)}>Open Node publishing</button></div> : null}
               {panel === 'connection' && sessionCount > 0 ? <p className="field-hint">{sessionCount} Session reference{sessionCount === 1 ? '' : 's'}. Removal is protected while this connection is referenced.</p> : null}
             </section>
           )
         })}
+          <LocalIncomingConnections config={config} active={localConnectionVisible} visible={localConnectionVisible} />
           {maintenanceHosts.map(id => {
             const draft = hosts.find(host => host.id === id)
             if (!draft) return null

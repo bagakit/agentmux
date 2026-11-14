@@ -9,12 +9,12 @@ import { requestPmoTeamsTopicFloatingOpen } from '../lib/pmo-teams-topic-floatin
 import { MoteActionChooser } from './MoteActionChooser'
 
 /** A task handoff shares the original chooser and Main queue, without launching an Agent. */
-export function MoteTaskAction({ preview, createTask, scopeKey }: {
-  preview: string; createTask(): Promise<string>; scopeKey: string
+export function MoteTaskAction({ preview, createTask, scopeKey, active = true }: {
+  preview: string; createTask(): Promise<string>; scopeKey: string; active?: boolean
 }) {
   const topicId = useLauncherState(state => state.moteTopicId ?? PMO_TEAMS_TOPIC_ID)
   const selectMote = useLauncherState(state => state.selectMote)
-  const { topics, error } = useScratchTopics(SCRATCH_WORKSPACE_ID)
+  const { topics, error } = useScratchTopics(SCRATCH_WORKSPACE_ID, active)
   const motes = scratchMoteTopics(topics)
   const workspace = useAppStore(state => state.config?.workspaces.find(item => item.id === SCRATCH_WORKSPACE_ID))
   const [result, setResult] = useState<{ key: string; state: 'queued' | 'not-queued' | 'unconfirmed'; prompt: string; detail?: string; draftSaved?: boolean }>()
@@ -59,7 +59,7 @@ export function MoteTaskAction({ preview, createTask, scopeKey }: {
   return <div ref={root} className="mote-task-action" data-mote-task-action>
     <div className="launcher-mote__actions"><button type="button" className="launcher-mote__create" disabled={busy} onClick={event => void handoff(event.currentTarget)}>
       {busy ? 'Preparing task…' : original?.state === 'queued' ? 'Open queued task' : original?.state === 'unconfirmed' ? 'Check original task' : original?.draftSaved ? 'Open task draft' : 'Ask Mote to handle setup'}
-    </button><MoteActionChooser motes={motes} topicId={topicId} pending={busy} onSelect={selectMote} /></div>
+    </button><MoteActionChooser active={active} motes={motes} topicId={topicId} pending={busy} onSelect={selectMote} /></div>
     {original ? <p role="status">{original.state === 'queued' ? 'Task queued. Open Mote to follow up.' : original.detail}</p> : null}
     {original?.state === 'not-queued' && !original.draftSaved ? <button type="button" className="small-button" onClick={open}>Open selected Mote</button> : null}
     {error ? <p role="status">Mote list could not be confirmed. Your saved choice is kept. <button type="button" className="small-button" onClick={() => void useAppStore.getState().refreshScratchTopics(SCRATCH_WORKSPACE_ID, true)}>Refresh Motes</button></p> : null}

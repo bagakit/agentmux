@@ -40,11 +40,12 @@ function retainMoteAvatarRead(workspaceId: string, topicId: string, fileName: st
   } }
 }
 
-function MoteAvatar({ kind, workspaceId, topicId, choice, objectKey }: { kind: SpaceIconTarget['kind']; workspaceId: string; topicId: string; choice: MoteAvatarRef; objectKey: string }) {
+function MoteAvatar({ kind, workspaceId, topicId, choice, objectKey, active = true }: { kind: SpaceIconTarget['kind']; workspaceId: string; topicId: string; choice: MoteAvatarRef; objectKey: string; active?: boolean }) {
   const [image, setImage] = useState<{ identity: string; url: string } | null>(null)
   const [issue, setIssue] = useState<string | null>(null)
   const fileName = choice.fileName, identity = JSON.stringify([workspaceId, topicId, objectKey])
   useEffect(() => {
+    if (!active) return
     let current = true
     setIssue(null)
     const read = retainMoteAvatarRead(workspaceId, topicId, fileName, objectKey)
@@ -57,7 +58,7 @@ function MoteAvatar({ kind, workspaceId, topicId, choice, objectKey }: { kind: S
       if (!read.entry.reported) { read.entry.reported = true; useAppStore.getState().reportError(new Error(message)) }
     })
     return () => { current = false; read.release() }
-  }, [workspaceId, topicId, fileName, identity, objectKey])
+  }, [active, workspaceId, topicId, fileName, identity, objectKey])
   return <span className="project-rail-row__icon space-object-icon" data-space-icon-kind={kind} data-space-icon-source="image"
     data-space-avatar={fileName} title={issue ?? 'Mote avatar'} aria-hidden="true">
     <span className="mote-image-follow">{image?.identity === identity ? <img className="space-object-icon__avatar" src={image.url} alt="" draggable={false} /> : <MoteIcon size={14} />}</span>
@@ -70,7 +71,7 @@ type SpaceObjectIconProps = {
   folderIdentityKey?: string | undefined
   imageTarget?: SpaceObjectImageTarget | undefined
   avatarWorkspaceId?: string | undefined; avatarTopicId?: string | undefined; avatarObjectKey?: string | undefined
-  lastActivityAt?: number | null | undefined; visible?: boolean | undefined; topicGlyph?: boolean
+  lastActivityAt?: number | null | undefined; visible?: boolean | undefined; readActive?: boolean | undefined; topicGlyph?: boolean
 } & MoteIdentityMotionProps
 export const SpaceObjectIcon = memo(function SpaceObjectIcon(props: SpaceObjectIconProps) {
   if (props.kind === 'mote' && props.visible === false && !props.moteSessionId) return <SpaceObjectIconContents {...props} expression={moteExpression(undefined, props.moteAvailability ?? 'static', undefined)} />
@@ -86,7 +87,7 @@ export const SpaceObjectIcon = memo(function SpaceObjectIcon(props: SpaceObjectI
   return sameTarget && Object.keys(aProps).length === Object.keys(bProps).length &&
     (Object.keys(aProps) as Array<keyof typeof aProps>).every(key => Object.is(aProps[key], bProps[key]))
 })
-function SpaceObjectIconContents({ kind, name, manualIcon, workspaceId, folderIdentityKey, lastActivityAt, visible, topicGlyph = false, avatarWorkspaceId, avatarTopicId, avatarObjectKey, imageTarget, expression }: SpaceObjectIconProps & { expression?: MoteExpression }) {
+function SpaceObjectIconContents({ kind, name, manualIcon, workspaceId, folderIdentityKey, lastActivityAt, visible, readActive = true, topicGlyph = false, avatarWorkspaceId, avatarTopicId, avatarObjectKey, imageTarget, expression }: SpaceObjectIconProps & { expression?: MoteExpression }) {
   const FallbackIcon = kind === 'topic' ? ThemeObjectTopicIcon : ThemeObjectNotebookIcon
   if (isMoteFace(manualIcon)) return <span className="project-rail-row__icon space-object-icon" data-space-icon-kind={kind} data-space-icon-source="face" aria-hidden="true">
     {kind === 'mote' ? <MoteFace face={manualIcon} expression={expression} /> : <FallbackIcon size={14} />}
@@ -103,7 +104,7 @@ function SpaceObjectIconContents({ kind, name, manualIcon, workspaceId, folderId
     const image = manualIcon.kind === 'series' ? manualIcon.image : manualIcon
     if (imageTarget) return <SpaceDirectoryImage target={imageTarget} choice={image} fallback={<FallbackIcon size={14} />} />
     if (!avatarWorkspaceId || !avatarTopicId || !avatarObjectKey) return <span className="space-object-icon" data-space-icon-kind={kind} data-space-icon-source="image" title="Saved avatar target is unavailable" aria-hidden="true"><MoteIcon size={14} /></span>
-    return <MoteAvatar kind={kind} workspaceId={avatarWorkspaceId} topicId={avatarTopicId} choice={image} objectKey={avatarObjectKey} />
+    return <MoteAvatar kind={kind} workspaceId={avatarWorkspaceId} topicId={avatarTopicId} choice={image} objectKey={avatarObjectKey} active={readActive} />
   }
   if (manualIcon !== null) {
     const { Icon, label } = SPACE_ICON_CATALOG[manualIcon]

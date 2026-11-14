@@ -54,6 +54,12 @@
 .host-connection-fields > [data-tailcat-client] { margin-top: var(--sp-4); }
 .host-transport-field select { width: 100%; min-height: 32px; padding: 5px 9px; border: 1px solid var(--line-soft); border-radius: 6px; color: var(--text); background: var(--surface-0); font: inherit; font-size: var(--fs-body); }
 .host-tailcat-listener { display: grid; gap: 12px; min-width: 0; }
+.host-local-incoming { display: grid; gap: 18px; padding: 22px 0; border-top: 1px solid var(--line-soft); min-width: 0; }
+.host-local-incoming[hidden] { display: none; }
+.host-local-incoming > header, .host-local-incoming > header > div { display: grid; gap: 6px; }
+.host-local-incoming h3 { margin: 0; font-size: 15px; font-weight: 600; }
+.host-local-incoming header p { margin: 0; color: var(--text-2); font-size: 12px; line-height: 1.6; }
+.host-local-incoming > .settings-pane-actions { position: static; margin: 0; }
 .host-tailcat-toggle { display: flex; align-items: center; gap: 10px; cursor: pointer; }
 .host-tailcat-toggle > span { display: grid; gap: 3px; }
 .host-tailcat-toggle strong { font-size: var(--fs-body); font-weight: 550; }

@@ -8,12 +8,13 @@ import { TailcatSetupHelp } from './TailcatSetupHelp'
 import { tailcatPreparationFailure } from '../../lib/tailcat-preparation-failure'
 
 /** The original Host owns preparation. This component owns only its explicit action and receipt. */
-export function TailcatKeyPreparation({ host, role, keyFile, onPrepared, saveLabel = 'Save hosts' }: {
+export function TailcatKeyPreparation({ host, role, keyFile, onPrepared, saveLabel = 'Save hosts', active = true }: {
   host: HostConfig
   role: TailcatKeyRole
   keyFile: string
   onPrepared: (result: PreparedKey, mayFocus: boolean) => boolean
   saveLabel?: string
+  active?: boolean
 }) {
   const [state, setState] = useState<{ busy?: boolean; result?: PreparedKey; error?: ReturnType<typeof tailcatPreparationFailure>; keptDraft?: boolean }>({})
   const [copied, setCopied] = useState(false), [copyError, setCopyError] = useState<string>()
@@ -50,6 +51,6 @@ export function TailcatKeyPreparation({ host, role, keyFile, onPrepared, saveLab
         void copyTextToClipboard(code, () => setCopyError('Copy failed. Select the public code and copy it again.')).then(ok => { if (live.current) setCopied(ok) })
       }}>{copied ? 'Copied code' : 'Copy code'}</button></div> : null}
     {copyError ? <p role="alert" className="host-check-detail">{copyError}</p> : null}
-    <TailcatSetupHelp host={host} role={role} failure={state.error ? { step: 'prepare-key', code: state.error.code } : undefined} />
+    <TailcatSetupHelp active={active} host={host} role={role} failure={state.error ? { step: 'prepare-key', code: state.error.code } : undefined} />
   </div>
 }

@@ -54,7 +54,7 @@ export function HostTailcatListenerFields({ host, committed, active, onChange, a
   const address = listener?.state === 'listening' ? listener.address : undefined
   return <div className="host-tailcat-listener" data-tailcat-listener>
     <TailcatSetupFlow role="server" peerName="The other Mac" />
-    <TailcatKeyPreparation host={host} role="server" keyFile={configuration.keyFile} saveLabel={saveLabel} onPrepared={(result, mayFocus) => {
+    <TailcatKeyPreparation active={active} host={host} role="server" keyFile={configuration.keyFile} saveLabel={saveLabel} onPrepared={(result, mayFocus) => {
       if (!configValuesEqual(latest.current, configuration)) return false
       onChange({ ...latest.current, keyFile: latest.current.keyFile || result.key, enabled: true })
       if (visible.current && mayFocus) allowedInput.current?.focus()

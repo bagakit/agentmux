@@ -6,12 +6,9 @@ import { api } from '../../lib/api'
 import { useAppStore, updateNodePublicationDraft } from '../../store'
 import { nodePublicationDraftForRuntime, type NodePublicationDraft } from '../../lib/node-publication-draft'
 import { configValuesEqual } from '../../../../shared/config-edit'
-import { HostTailcatListenerFields } from './HostTailcatListenerFields'
 import { HostRuntimePanel } from './HostRuntimePanel'
 import { nodePublicationTarget, useNodePublicationReporter } from './NodePublicationObservation'
 import { NodeShareAddress } from './NodeShareAddress'
-import { useTailcatConnectionDrafts } from './use-tailcat-connection-drafts'
-import { useSettingsSave, SettingsSaveBar } from './SettingsSaveBar'
 import type { HostConfig } from '../../../../shared/contracts'
 import type { NodeOwnerTarget } from '../../../../shared/node-publishing'
 import type { SettingsPaneProps } from './settings-catalog'
@@ -52,7 +49,6 @@ export function NetworkNodeSettingsPane({ config, active, onNavigate, navigation
       {config.hosts.map(item => <option key={item.id} value={item.id}>{item.label} · {item.kind === 'local' ? 'This device' : 'Remote Host'}</option>)}
     </select><small>{host ? `${host.id}${target ? ` · Runtime ${target.expectedRuntimeId}` : ' · Identity not confirmed'}` : 'Select an original saved Host; no replacement target is selected automatically.'}</small></label>
     {host && target ? <NodePublicationEditor key={route + target.expectedRuntimeId} host={host} target={target} active={active} /> : <section className="network-node-section"><p role="status">{identity?.route === route && identity.error ? identity.error : host ? 'Reading the selected Node identity…' : 'The requested saved Host is unavailable. Original drafts are retained.'}</p><button type="button" className="small-button" onClick={() => setRefresh(value => value + 1)}>Refresh Node identity</button></section>}
-    <LocalIncomingConnections config={config} active={active && host?.kind === 'local'} visible={host?.kind === 'local'} />
   </div>
 }
 
@@ -226,24 +222,5 @@ function NodePublicationEditor({ host, target, active }: { host: HostConfig; tar
       {saved ? <details className="network-node-identities"><summary>Original node identity</summary><dl><dt>Runtime</dt><dd>{saved.node.runtimeId}</dd><dt>Core instance</dt><dd>{saved.node.ownerInstanceId}</dd><dt>Policy revision</dt><dd>{saved.policyRevision}</dd></dl><button type="button" className="small-button" disabled={busy || Boolean(operation)} onClick={() => { if (observed) void useSaved(observed) }}>Use saved settings</button></details> : null}
     </section>
     <details className="network-node-section" data-settings-field="monitoring" open={monitor} onToggle={event => setMonitor(event.currentTarget.open)}><summary>Service status <span>Private owner observation · {host.label}</span></summary><HostRuntimePanel host={host} committed={host} ownerTarget={target} active={active && monitor} /></details>
-  </>
-}
-
-function LocalIncomingConnections({ config, active, visible }: Pick<SettingsPaneProps, 'config' | 'active'> & { visible: boolean }) {
-  const local = config.hosts.find(host => host.kind === 'local')
-  const listener = useTailcatConnectionDrafts(Object.fromEntries(local ? [[local.id, local]] : []), 'incoming'), listenerSave = useSettingsSave()
-  const localDraft = local ? listener.value[local.id] : undefined
-  async function saveListener() {
-    if (!local || localDraft?.kind !== 'local') return
-    const submitted = listener.beginSave(), next = localDraft.tailcat, expectedHost = listener.expected[local.id]
-    const expected = expectedHost?.kind === 'local' ? expectedHost.tailcat : undefined
-    const ok = await listenerSave.run(async () => {
-      await api.hosts.configureTailcat({ hostId: 'local', expected: expected ?? null, candidate: next ?? null })
-    })
-    submitted.finish(ok ? submitted.value : undefined)
-  }
-  if (!visible) return null
-  return <>
-    {local && localDraft?.kind === 'local' ? <section className="network-node-section" data-settings-field="incoming"><header><div><h3>Incoming connections</h3><p>Let an approved client reach this running service. Connection keys do not grant Agent creation or message trust.</p></div></header>{listener.retained}<HostTailcatListenerFields allowedClientsText={listener.allowedText[local.id]} onAllowedClientsTextChange={text => listener.setAllowedText(local.id, text)} host={localDraft} committed={local} active={active} saveLabel="Save incoming connections" onChange={tailcat => listener.setValue(current => ({ ...current, [local.id]: { ...localDraft, tailcat } }))} /><SettingsSaveBar save={listenerSave} dirty={listener.dirty} resolution={listener} scopeLabel="Incoming connections" label="Save incoming connections" onSave={() => void saveListener()} /></section> : null}
   </>
 }
