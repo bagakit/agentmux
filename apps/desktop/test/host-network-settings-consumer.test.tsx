@@ -13,7 +13,7 @@ const dom = composerDOM()
 const host: HostConfig = { id: 'network-target', kind: 'ssh', label: 'Network target', hostname: 'compute.internal', runtimeId: 'network-runtime' }
 const second: HostConfig = { ...host, id: 'other-network', label: 'Other network', hostname: 'other.internal', runtimeId: 'other-runtime' }
 let config: AppConfig
-beforeEach(() => { config = { ...composerConfig, hosts: [...composerConfig.hosts, host, second] }; useAppStore.setState({ config, sessions: [], hostChecks: {} }) })
+beforeEach(() => { config = { ...composerConfig, hosts: [host, second] }; useAppStore.setState({ config, sessions: [], hostChecks: {} }) })
 function sample(input = host): HostNetworkObservation {
   const readAt = fixtureEpoch(0, 2, 0), interfaces = [{ name: 'eth0', address: '2001:db8:1234:5678:abcd:ef01:2345:6789', cidr: '2001:db8:1234:5678:abcd:ef01:2345:6789/64', family: 'IPv6' as const, internal: false, scopeid: 0 }]
   return { routeHostId: input.id, configuration: input, requestedAt: readAt - 20, completedAt: readAt,
