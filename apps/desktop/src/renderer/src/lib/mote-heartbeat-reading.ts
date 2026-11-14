@@ -80,7 +80,11 @@ function createReader(key: string, target: MotePreferencesTarget, initialScope: 
       const record = result.schedule
       if (!record || (['hostId', 'agentSessionId', 'providerId', 'workspacePath'] as const).some(field => record[field] !== selectedSchedule[field]))
         throw Error('The original heartbeat arrangement is not confirmed. Its last reading and input are kept.')
-      sourceChanged = record.status === 'stopped' && selectedSchedule.status !== 'stopped' ||
+      const adoption = record.guidanceAdoptions?.find(value => value.newDefinition.intentId === record.futureIntentId)
+      const selectedAdoption = selectedSchedule.guidanceAdoptions?.find(value => value.newDefinition.intentId === selectedSchedule.futureIntentId)
+      sourceChanged = record.revision !== selectedSchedule.revision || record.futureIntentId !== selectedSchedule.futureIntentId ||
+        adoption?.operationId !== selectedAdoption?.operationId || adoption?.state !== selectedAdoption?.state ||
+        record.status === 'stopped' && selectedSchedule.status !== 'stopped' ||
         record.pause?.reason === 'source-changed' && selectedSchedule.pause?.reason !== 'source-changed' ||
         record.managedSource?.revision !== selectedSchedule.managedSource?.revision || record.managedSource?.sourceId !== selectedSchedule.managedSource?.sourceId
       const { input: _previous, ...maintenance } = selected.maintenance!

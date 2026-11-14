@@ -97,7 +97,8 @@ export function MoteQuickModeDialog({ scope, reference, onOpenPath, onClose, ret
   const [originalSafeInput, setOriginalSafeInput] = useState<MotePresenceReading['input']>()
   const liveMaintenance = liveHeartbeat.saved?.maintenance
   const maintenance: MotePresenceReading | undefined = originalSchedule ? { status: originalSchedule.status === 'active' ? 'active' : 'paused', schedule: originalSchedule, issue: null, ...(originalSafeInput ? { input: originalSafeInput } : {}) }
-    : saved?.maintenance?.schedule?.loopId === liveMaintenance?.schedule?.loopId && !liveHeartbeat.unavailable ? liveMaintenance : saved?.maintenance
+    : saved?.maintenance?.schedule?.loopId === liveMaintenance?.schedule?.loopId && !liveHeartbeat.unavailable &&
+      (liveMaintenance?.schedule?.revision ?? 0) >= (saved?.maintenance?.schedule?.revision ?? 0) ? liveMaintenance : saved?.maintenance
   const resumeRequest = useRef<ResumeRequest | null>(restored.current?.resume ?? null)
   const [resuming, setResuming] = useState(false)
   const [inputReading, setInputReading] = useState<{ identity: string; hostId: string; input: AgentInputSubmissionReceipt | null; record: AgentPromptSubmissionRecord | null }>()
@@ -327,7 +328,7 @@ export function MoteQuickModeDialog({ scope, reference, onOpenPath, onClose, ret
       if (lifetime.current !== epoch) return
       restored.current = undefined
       retainDraft(); await checkpointLauncherState()
-      if (lifetime.current === epoch) setAttempt(value => value + 1)
+      if (lifetime.current === epoch) { liveHeartbeat.refresh(); setAttempt(value => value + 1) }
     } catch (error) { if (lifetime.current === epoch) { if (!saved.pending) restored.current = undefined; retainDraft(); setIssue(presentError(error)) } }
     finally {
       try { if (!saved.pending) await settleRequest(operationId) }
@@ -335,7 +336,7 @@ export function MoteQuickModeDialog({ scope, reference, onOpenPath, onClose, ret
       finally { if (lifetime.current === epoch) setBusy(false) }
     }
   }
-  const guidance = saved?.maintenance?.guidance
+  const guidance = maintenance?.guidance
   const heartbeat = (
         <fieldset tabIndex={-1} className="mote-quick-mode__presence mote-quick-mode__heartbeat"><legend hidden>Heartbeat</legend>
           <MoteHeartbeatStatus scope={scope} reading={maintenance} reports={liveHeartbeat.saved?.reports} onOpenPath={onOpenPath} unavailable={originalHeartbeat ? loading || Boolean(issue) : !moteHeartbeatReadingMatchesSource(saved)} loading={loading} onRefresh={() => { liveHeartbeat.refresh(); setAttempt(value => value + 1) }} controlsAfterStatus={focusHeartbeat}
