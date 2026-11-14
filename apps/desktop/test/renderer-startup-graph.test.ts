@@ -11,7 +11,7 @@ const root = resolve(import.meta.dirname, '../../..')
 const esbuild: Esbuild = createRequire(createRequire(resolve(root, 'apps/desktop/package.json')).resolve('vite/package.json'))('esbuild')
 const entry = 'apps/desktop/src/renderer/src/main.tsx'
 // Only on-demand surfaces use these. A static path from the entry makes every launch parse and evaluate them.
-const onDemand = /^(three|react-dom\/server)([./]|$)/
+const onDemand = /^(three|react-dom\/server|@xyflow\/react)([./]|$)/
 const loads = (edge: Edge) => edge.kind === 'import-statement' || edge.kind === 'require-call'
 const aliases = candidate.resolve!.alias as { find: string | RegExp; replacement: string }[]
 
@@ -32,12 +32,15 @@ it('keeps on-demand libraries out of the static Renderer startup graph', async (
   const imports = (paths: Iterable<string>, kept: (edge: Edge) => boolean) => [...paths].flatMap(path =>
     inputs[path]!.imports.filter(edge => edge.external && onDemand.test(edge.path) && kept(edge)).map(edge => `${path} -> ${edge.path}`))
   expect([...startup].filter(path => /renderer\/src\/(App|store)\.tsx?$/.test(path)).sort()).toEqual(['apps/desktop/src/renderer/src/App.tsx', 'apps/desktop/src/renderer/src/store.ts'])
-  expect(new Set(imports(Object.keys(inputs), () => true).map(line => line.split(' -> ')[1]!.split(/[./]/)[0]))).toEqual(new Set(['three', 'react-dom']))
+  expect(new Set(imports(Object.keys(inputs), () => true).map(line => line.split(' -> ')[1]!.split(/[./]/)[0]))).toEqual(new Set(['three', 'react-dom', '@xyflow']))
   expect(imports(startup, loads)).toEqual([])
   const map = ['apps/desktop/src/renderer/src/components/AgentCollaborationMap.tsx',
     'apps/desktop/src/renderer/src/components/AgentCollaborationGraph.tsx']
   expect(map.every(path => path in inputs)).toBe(true)
   expect(map.filter(path => startup.has(path))).toEqual([])
+  const mesh = 'apps/desktop/src/renderer/src/components/settings/MeshSettingsPane.tsx'
+  expect(mesh in inputs).toBe(true)
+  expect(startup.has(mesh)).toBe(false)
   const gallery = ['apps/desktop/src/renderer/src/components/WorkflowComponentGallery.tsx',
     'apps/desktop/src/renderer/src/components/ObservationSurfaceGallery.tsx']
   expect(gallery.every(path => path in inputs)).toBe(true)

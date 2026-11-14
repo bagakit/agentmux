@@ -16,9 +16,10 @@ beforeEach(() => {
     { id: 'b', kind: 'ssh', label: 'Second', hostname: 'second.invalid' }] }
   useAppStore.setState({ config, hostChecks: {}, sessions: [] })
 })
-const render = (request: SettingsNavigationRequest) => {
+const render = async (request: SettingsNavigationRequest) => {
   const Pane = hostsSettingsModule.Pane
-  return dom.render(<Pane config={config} active={true} onClose={vi.fn()} onNavigate={vi.fn()} navigationRequest={request} />)
+  await dom.render(<Pane config={config} active={true} onClose={vi.fn()} onNavigate={vi.fn()} navigationRequest={request} />)
+  await vi.waitFor(() => expect(dom.container.querySelector('.mesh-settings-pane')).not.toBeNull(), { timeout: 5000 })
 }
 async function fill(input: HTMLInputElement, value: string) {
   await act(async () => {
