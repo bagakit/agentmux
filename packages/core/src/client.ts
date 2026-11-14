@@ -103,7 +103,7 @@ import {
 import { normalizeNativeSessionId, normalizeNativeTranscriptPath, matchesProviderNativeSessionTarget } from './agent-native-locator.js'
 import { captureAgentNativeSessionIdentity } from './agent-native-session-capture.js'
 import { normalizeAgentInteractionResponse } from './agent-interaction.js'
-import { hasCurrentNativeMainBinding, hasSelectedNativeTarget, nativeTargetSourceUnconfirmed, resolveNativeSessionWitness } from './agent-native-source.js'
+import { currentNativeMainHook, hasCurrentNativeMainBinding, hasSelectedNativeTarget, nativeTargetSourceUnconfirmed, resolveNativeSessionWitness } from './agent-native-source.js'
 import { parseAgentNativeSessionConfirmation } from './agent-native-session-confirmation.js'
 import { parseAgentNativeResumeSource } from './agent-native-sessions.js'
 import { nativeCatalogIssue } from './providers/native-session-catalog-files.js'
@@ -10854,11 +10854,20 @@ export class AgentMuxClient {
             const next = await this.updateExactAgentSession(current.agentSessionId, current.run, saved => {
               displayAccepted = false; unattributedInitialSnapshot = false
               if (watch.controller.signal.aborted || saved.providerId !== session.providerId || !sameNativeHandle(saved.nativeHandle, session.nativeHandle)) return saved
-              if (observation.initialSnapshot && [...Object.values(saved.continuityOperations ?? {}), saved.continuity].some(operation =>
-                operation?.kind === 'resumed' && operation.agentSessionId === saved.agentSessionId && operation.newRun?.runId === saved.run.runId)) {
+              const resume = observation.initialSnapshot && [...Object.values(saved.continuityOperations ?? {}), saved.continuity].find(operation =>
+                operation?.kind === 'resumed' && operation.agentSessionId === saved.agentSessionId && operation.newRun?.runId === saved.run.runId)
+              if (resume) {
                 const predecessor = saved.nativePromptPredecessor
                 const exactPredecessor = predecessor?.run.runId === saved.run.runId && predecessor.previousRun.runId === saved.retiredRuns.at(-1)?.runId
-                if (!exactPredecessor) { unattributedInitialSnapshot = true; return saved }
+                if (!exactPredecessor) {
+                  // The Hook attributes the turn to this Run; only the Provider supplies its end.
+                  // Bound retained ends by the resume, independently of when the Hook arrived.
+                  const mainHook = currentNativeMainHook(saved)
+                  const currentTurnEnded = (observation.state === 'done' || observation.state === 'error') &&
+                    mainHook?.nativeTurnId === observation.nativeTurnId && observation.nativeObservedAt !== undefined &&
+                    observation.nativeObservedAt >= resume.admittedAt && !nativeTargetSourceUnconfirmed(saved)
+                  if (!currentTurnEnded) { unattributedInitialSnapshot = true; return saved }
+                }
               }
               if (ended) {
                 const previous = nativeTurnEndScopeMatches(saved) ? saved.nativeTurnEnds!.turns : {}
