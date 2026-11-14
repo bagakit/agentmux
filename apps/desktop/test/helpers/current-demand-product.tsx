@@ -25,7 +25,6 @@ import { ConfigStore } from '../../src/main/config-store'
 import { WorkbenchWindows } from '../../src/main/workbench-windows'
 import { WorkbenchWindowStore } from '../../src/main/workbench-window-store'
 import { AgentMuxApplicationAccessOwner } from '@agentmux/core'
-import type { WorkspaceFiles } from '../../src/main/workspace-files'
 vi.hoisted(() => vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', false))
 const bridge = vi.hoisted(() => ({  api: null as AgentMuxPreloadApi | null, invoke: vi.fn(),
   storagePath: '', listenerPackagePath: '', controlOptions: null as any,
@@ -72,7 +71,7 @@ import { parseAgentMuxCliInvocation } from '../../../../packages/core/src/agentm
 import { issueAgentCapability, hashAgentCapability } from '../../../../packages/core/src/agent-capability'
 import { AGENTMUX_CONTROL_SCHEMA_VERSION } from '@agentmux/core/control'
 import { readFile } from 'node:fs/promises'
-vi.mock('../../src/main/browser-profile-manager', () => ({ BrowserProfileManager: class { cookieFiles = { setFileOwner() {}, setConfirmationHandler() {} }; extensions = { setConfirmationHandler() {} }; listProfiles() { return [] }; async initialize() {} async dispose() {} onChange() { return () => {} }; onEnvironmentApplicationChange() { return () => {} } } }))
+vi.mock('../../src/main/browser-profile-manager', () => ({ BrowserProfileManager: class { storage = { setConfirmationHandler() {} }; cookieFiles = { setFileOwner() {}, setConfirmationHandler() {} }; extensions = { setConfirmationHandler() {} }; listProfiles() { return [] }; async initialize() {} async dispose() {} onChange() { return () => {} }; onEnvironmentApplicationChange() { return () => {} } } }))
 vi.mock('@agentmux/browser/browser-operation-journal', () => ({ BROWSER_OPERATION_JOURNAL_FILE: 'private.json', BrowserOperationFileStore: class {}, BrowserOperationJournal: class { async ready() {} } }))
 vi.mock('@agentmux/browser/browser-ref-ledger-store', () => ({ BrowserRefLedgerStore: class {} }))
 vi.mock('../../src/main/browser-view-manager', () => ({ BrowserViewManager: class { async flushProfileActivity() {} setPresentationWindowOwner() {} async release() { throw new Error('Browser release is outside this Goal fixture') } dispose() {} } }))
@@ -115,7 +114,7 @@ beforeAll(async () => {
   process.env.AGENTMUX_PRIVATE_LISTENER_ASSET = join(listenerPackage, 'dist/control-endpoint-listener-worker.js')
   await build({ entryPoints: [worker], outfile: join(listenerPackage, 'dist/control-endpoint-listener-worker.js'), bundle: true, platform: 'node', format: 'esm', logLevel: 'error' })
   if (proof) appendFileSync(proof, JSON.stringify({ file: relative(repository, worker), sha256: createHash('sha256').update(readFileSync(worker)).digest('hex'), consumer: 'actual-source-listener-worker' }) + '\n')
-  await build({ entryPoints: [resolve(repository, 'packages/core/src/agentmux.ts')], outfile: sourceCli, alias: { '@agentmux/demand/delegations': resolve(repository, 'packages/demand/src/delegations.ts'), '@agentmux/demand/goals': resolve(repository, 'packages/demand/src/goals.ts'), '@agentmux/demand/goal-plan': resolve(repository, 'packages/demand/src/goal-plan.ts'), '@agentmux/demand': resolve(repository, 'packages/demand/src/index.ts'), '@scure/base': resolve(repository, 'node_modules/.pnpm/@scure+base@2.2.0/node_modules/@scure/base/index.js') }, bundle: true, platform: 'node', format: 'esm', logLevel: 'error', banner: { js: "import { createRequire as bundleRequire } from 'node:module'; const require=bundleRequire(import.meta.url);" },
+  await build({ entryPoints: [resolve(repository, 'packages/core/src/agentmux.ts')], outfile: sourceCli, alias: { '@agentmux/demand/delegations': resolve(repository, 'packages/demand/src/delegations.ts'), '@agentmux/demand/goals': resolve(repository, 'packages/demand/src/goals.ts'), '@agentmux/demand/goal-plan': resolve(repository, 'packages/demand/src/goal-plan.ts'), '@agentmux/demand/relations': resolve(repository, 'packages/demand/src/relations.ts'), '@agentmux/demand': resolve(repository, 'packages/demand/src/index.ts'), '@scure/base': resolve(repository, 'node_modules/.pnpm/@scure+base@2.2.0/node_modules/@scure/base/index.js') }, bundle: true, platform: 'node', format: 'esm', logLevel: 'error', banner: { js: "import { createRequire as bundleRequire } from 'node:module'; const require=bundleRequire(import.meta.url);" },
     plugins: [{ name: 'actual-daily-goal-cli-imports', setup(builder: { onLoad(filter: { filter: RegExp }, handler: (args: { path: string }) => { contents: string; loader: 'ts' } | null): void }) { builder.onLoad({ filter: /\.(ts|json)$/ }, args => {
       if (proof && (args.path.startsWith(resolve(repository, 'packages/core/src') + '/') || args.path.startsWith(resolve(repository, 'packages/demand/src') + '/'))) appendFileSync(proof, JSON.stringify({ file: relative(repository, args.path), sha256: createHash('sha256').update(readFileSync(args.path)).digest('hex'), consumer: 'actual-source-cli' }) + '\n')
       const mutant = process.env.AGENTMUX_DAILY_GOAL_MUTANT ? JSON.parse(process.env.AGENTMUX_DAILY_GOAL_MUTANT) : null
@@ -212,7 +211,7 @@ beforeEach(async () => {
   applicationAccess = new AgentMuxApplicationAccessOwner({ path: join(directory, 'application-access.sqlite'), resolveHost: async () => { throw new Error('Application access is outside this Goal fixture') } })
   disposeIpc = await registerIpc({ workbenchUserState: testWorkbenchUserState(), appDocumentSources: testAppDocumentSources((mainWindow).webContents), initialConfig: config, window: mainWindow, workbenchWindows, applicationAccess,
     runtime, configStore: { get: async () => config, validate: (next: AppConfig) => fixtureConfigStore.validate(next), save: async (next: AppConfig) => { config = await fixtureConfigStore.save(next); return config } } as unknown as ConfigStore,
-    scratchTopics: new ScratchTopics(), workspaceFiles: { read: vi.fn(), listFiles: vi.fn(), dispose: async () => {} } as unknown as WorkspaceFiles })
+    scratchTopics: new ScratchTopics() })
   bridge.invoke.mockImplementation(async (channel: string, ...values: unknown[]) => {
     const handler = bridge.handlers.get(channel); expect(handler).toBeTypeOf('function')
     return handler!({ sender: bridge.sender, senderFrame: bridge.sender.mainFrame } as IpcMainInvokeEvent, ...values)
