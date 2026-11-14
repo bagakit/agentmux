@@ -196,7 +196,7 @@ function parseDeclaredContexts(text: string): AgentMuxMessagePrefix | null {
   const opening = '<amux>'
   if (!text.startsWith(opening)) return null
   const declaredContexts: { raw: string; inputContext?: BrowserInputContext }[] = []
-  let start = 0
+  let start = 0, previousEnd = 0
   while (text.startsWith(opening, start)) {
     // An A2A body may itself contain closing amux tags. Recognize its exact
     // terminal grammar before inspecting a text-only platform declaration.
@@ -215,6 +215,9 @@ function parseDeclaredContexts(text: string): AgentMuxMessagePrefix | null {
       if (!root || root.tagName !== 'amux' || root.attributes.length !== 0 || Array.from(document.childNodes).some(node => node !== root)) return null
       const children = Array.from(root.childNodes)
       const trigger = readAmuxTriggerNote(raw.slice('<amux>\n'.length))
+      // Only a leading trigger belongs to this producer. A complete wire example after
+      // ordinary platform guidance may be the user's original body.
+      if (start > 0 && trigger) return { kind: 'content', sourceLabel: '', declaredAgentSessionId: null, declaredContexts, body: text.slice(previousEnd) }
       if (trigger && children.length === 3 && children[1]?.nodeName === AMUX_PROTOCOL_DEFINITIONS.trigger.tag) {
         // Match the producer's complete encoding. Guidance remains escaped text and the body stays opaque.
         const note = (children[2]?.textContent ?? '').slice(1, -1)
@@ -238,6 +241,7 @@ function parseDeclaredContexts(text: string): AgentMuxMessagePrefix | null {
     // A partly authored or unknown second declaration keeps the entire input readable.
     if (/^<amux(?:\s|>|$)/u.test(text.slice(next))) {
       if (!text.startsWith(opening, next)) return null
+      previousEnd = end
       start = next
     } else {
       return { kind: 'content', sourceLabel: '', declaredAgentSessionId: null, declaredContexts, body: text.slice(end) }
