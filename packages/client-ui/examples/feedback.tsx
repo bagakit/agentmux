@@ -1,6 +1,8 @@
 import { useState } from 'react'
+import { ActionFeedback } from '@agentmux/client-ui/components/ActionFeedback'
 import { InlineRenameField } from '@agentmux/client-ui/components/InlineRenameField'
 import '@agentmux/client-ui/input/styles.css'
+import '@agentmux/client-ui/styles/buttons.css'
 import '@agentmux/client-ui/styles/semantic-icons.css'
 import '@agentmux/client-ui/styles/inline-rename-field.css'
 
@@ -17,6 +19,6 @@ export default function Feedback() {
       onCommit={() => new Promise<void>(resolve => { setError(null); setFinish(() => resolve) })} />
     <button disabled={!finish} onClick={() => { setSaved(value); finish?.(); setFinish(null) }}>Confirm save</button>
     <button disabled={!finish} onClick={() => { setError('This name is already in use.'); finish?.(); setFinish(null) }}>Reject save</button>
-    <output aria-live="polite">Saved name {saved}</output>
+    <ActionFeedback bounded role="status">Saved name {saved}</ActionFeedback>
   </fieldset>
 }
