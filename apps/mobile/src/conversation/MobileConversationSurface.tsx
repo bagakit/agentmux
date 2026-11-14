@@ -48,6 +48,8 @@ import './conversation.css'
 import { DELIVERY_DISMISSAL_STORAGE, MobileNotice, MobileNoticeScope, useMobileNotices } from '../notices/MobileNotice'
 import { useMobileWebUpdateSafetyOwner } from '../mobile-web/update-safety'
 import { mobileInteractionLabels } from '../presentation/interaction'
+import { readMobileConversationSession } from './mobile-conversation-session'
+import type { MobileConversationStatus } from './MobileConversationStatus'
 
 const inShellSlot = (target: HTMLElement | null | undefined, node: ReactNode) =>
   target === undefined ? node : target && node ? createPortal(node, target) : null
@@ -75,6 +77,7 @@ export type MobileConversationSurfaceProps = Pick<ConversationMessageProps,
   moteSource?: AgentInputMoteSource | undefined
   connection: MobileConnection
   platform: ClientUiPlatform
+  onStatusChange?(status: MobileConversationStatus): void
   onAttach?: () => void
   onShowTerminal?: () => void
   onShowGoals?: (trigger: HTMLButtonElement) => void
@@ -99,7 +102,7 @@ export type MobileConversationSurfaceProps = Pick<ConversationMessageProps,
   onReturnMoteMain?(reference?: MoteDefaultConversation): void
 }
 /** A first-party SDK reader and input client. Core owns ordering, authorship and admission. */
-export function MobileConversationSurface({ client, agentSessionId, moteSource, connection, platform, onAttach, onShowTerminal, onShowGoals, toolbarTarget, statusTarget, noticeTarget, visible = true, displayName, moteMemberName, moteTarget, moteDialogue, moteDirectAgent, moteName, moteAppearance, moteWorkMemberName, onOpenMoteWork, onShowMoteThreads, moteConfigurationIssue, onRefreshMoteConfiguration, onMoteRolloverRequired, onReturnMoteMain,
+export function MobileConversationSurface({ client, agentSessionId, moteSource, connection, platform, onStatusChange, onAttach, onShowTerminal, onShowGoals, toolbarTarget, statusTarget, noticeTarget, visible = true, displayName, moteMemberName, moteTarget, moteDialogue, moteDirectAgent, moteName, moteAppearance, moteWorkMemberName, onOpenMoteWork, onShowMoteThreads, moteConfigurationIssue, onRefreshMoteConfiguration, onMoteRolloverRequired, onReturnMoteMain,
   openWorkspaceFile, readPastedImage, openHttpLink }: MobileConversationSurfaceProps) {
   const conversationIoPlatform = useMemo(() => ({ ...platform,
     readA2AMessage: async (reference: { hostId: string; agentSessionId: string }, messageId: string, notificationId?: string) => {
@@ -145,6 +148,17 @@ export function MobileConversationSurface({ client, agentSessionId, moteSource, 
   useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
   const current = useRef({ client, agentSessionId })
   current.current = { client, agentSessionId }
+  const refreshConversation = useCallback(async () => {
+    if (current.current.client !== client || current.current.agentSessionId !== agentSessionId) return
+    await reading.refresh()
+  }, [client, agentSessionId, reading.refresh])
+  const conversationStatus = useMemo<MobileConversationStatus>(() => ({ client, agentSessionId,
+    session: reading.id === agentSessionId && reading.metadataClient === client ? reading.session : null,
+    metadata: reading.id === agentSessionId && reading.metadataClient === client ? reading.metadata : { state: 'loading', issue: null },
+    readingIssue: reading.id === agentSessionId && reading.metadataClient === client ? reading.notice : null,
+    agentIssue: reading.id === agentSessionId && reading.metadataClient === client ? reading.agentIssue : null, connection, refresh: refreshConversation
+  }), [client, agentSessionId, reading.id, reading.metadataClient, reading.session, reading.metadata, reading.notice, reading.agentIssue, connection, refreshConversation])
+  useLayoutEffect(() => { onStatusChange?.(conversationStatus) }, [onStatusChange, conversationStatus])
   const mainObservation = useRef<MobileMoteMainInput | undefined>(undefined)
   const moteMain = moteDirectAgent ? undefined : retainMobileMoteMain(mainObservation.current,
     moteDialogue?.page?.main, moteTarget, agentSessionId)
@@ -153,7 +167,7 @@ export function MobileConversationSurface({ client, agentSessionId, moteSource, 
     ?? (moteTarget && !moteMain ? '主对话角色还没核对。可以重新核对，或从 Threads 打开之前的 Agent。' : undefined)
   const { draftKey, draft, attempt, available, diagnostics, setDraft, submit, sendBodyOnly, confirmedAttachmentPrompt, retryOriginalPrompt, stopManualInput, preparing, preparationIssue, preparationDetail,
     historyLocalEntries, retainedAttempts, sessionAttempts, promptWasRefused, hasAnyPreparation, isDispatchedPrompt, hasPendingAction, cancelPendingAction, cancelPreparation } = useMobilePromptController({ local, client, agentSessionId, moteSource, moteMain, moteMainIssue, moteDirectAgent, onRolloverRequired: onMoteRolloverRequired,
-      session: reading.session, timeline: reading.timeline, connection, disconnected: reading.disconnected, visible, refresh: reading.refresh })
+      session: conversationStatus.session, sessionState: conversationStatus.metadata.state, timeline: reading.timeline, connection, disconnected: reading.disconnected, visible, refresh: reading.refresh })
   useMobileWebUpdateSafetyOwner(() => {
     if (local.saveIssue || local.recordChanged || local.hasUnconfirmedSave) return '草稿或操作尚未确认保存在设备上。请先恢复设备存储并保存，再更新网页。'
     if (hasAnyPreparation() || [...local.attempts.entries()].some(([key, item]) => item.phase === 'sending' && !isDispatchedPrompt(key, item)) ||
@@ -444,8 +458,6 @@ export function MobileConversationSurface({ client, agentSessionId, moteSource, 
   return <ClientUiProvider platform={conversationPlatform}><MobileNoticeScope owner={client} identity={[ agentSessionId, session?.run.runId]}>
     <section className="mobile-conversation" aria-label="会话" data-agent-surface-mode="activity" data-agent-session-id={agentSessionId ?? ''}>
       {readers}
-      {!available || connection.issue ? <MobileNotice identity={[connection.state,connection.issue,available]} className="mobile-conversation__connection" role="status">{connection.issue ?? connection.message}{!available ? ' 当前发送暂不可用。' : ''}</MobileNotice> : null}
-      {reading.notice ? <details className="mobile-conversation__notice"><summary>对话读取还没确认 · 可以继续输入</summary><p>{reading.notice}</p><button onClick={() => { void reading.refresh() }}>刷新记录</button></details> : null}
       {questionCapability.issue ? <MobileNotice identity={[questionCapability.issue]} className="mobile-conversation__notice" role="status">
         异步问题能力观察未确认，普通输入照常可用。{questionCapability.issue}
         <button type="button" onClick={() => redraw(value => value + 1)}>重新核对问题能力</button>
@@ -476,7 +488,7 @@ export function MobileConversationSurface({ client, agentSessionId, moteSource, 
       }}>
         {(reading.page?.nextCursor || reading.capturedHasMore) && <button className="mobile-reading-action" disabled={reading.reading} onClick={() => { follow.current.following = false; void reading.older() }}>更早消息</button>}
         {reading.hasNewer && <button className="mobile-reading-action" disabled={reading.reading} onClick={() => { void reading.newer() }}>较新消息</button>}
-        {inShellSlot(statusTarget, workingObservedAt !== undefined ? <span className="mobile-active-state" role="status" data-activity-current={currentActivity}
+        {inShellSlot(statusTarget, conversationStatus.metadata.state === 'retired' ? <span className="mobile-conversation-history-state">历史对话</span> : workingObservedAt !== undefined ? <span className="mobile-active-state" role="status" data-activity-current={currentActivity}
           title={`最后观察：${new Date(workingObservedAt).toLocaleString()}`}><SemanticIcon name="status.presence-working" size={5} />{currentActivity ? '正在执行' : '最近观察：执行中'}</span> : null)}
         {inShellSlot(noticeTarget, !moteDirectAgent && moteTarget ? <MobileMoteSourceNotice roleIssue={moteMainIssue} readingIssue={moteDialogue?.issue} configurationIssue={moteConfigurationIssue}
           refresh={() => { moteDialogue?.refresh(); onRefreshMoteConfiguration?.() }} onMain={onReturnMoteMain} /> : null)}
@@ -544,8 +556,9 @@ export function MobileConversationSurface({ client, agentSessionId, moteSource, 
           bodyOnlyDisabled={!draft.trim() || attempt?.phase === 'sending'}
           insert={async (resolve, original) => {
             const originalClient = current.current.client, selectedId = current.current.agentSessionId
-            const selected = selectedId ? originalClient?.agentSession(selectedId) : null
-            if (!fileUploadScopeMatches(original, { runtimeId: originalClient?.runtimeOwnerIdentity?.()?.runtimeId ?? null,
+            const selected = originalClient && selectedId ? (await readMobileConversationSession(originalClient, selectedId)).session : null
+            if (current.current.client !== originalClient || current.current.agentSessionId !== selectedId ||
+              !fileUploadScopeMatches(original, { runtimeId: originalClient?.runtimeOwnerIdentity?.()?.runtimeId ?? null,
               hostId: selected?.hostId ?? null, sessionId: selectedId, runId: selected?.run.runId ?? null }) || !insertion.current) {
               throw new Error('当前编辑器属于另一个对话或另一台 Mac，草稿没有改变。')
             }
@@ -553,8 +566,9 @@ export function MobileConversationSurface({ client, agentSessionId, moteSource, 
               const path = await resolve()
               if (path === null) return null
               const selectedId = current.current.agentSessionId, client = current.current.client
-              const selected = selectedId ? client?.agentSession(selectedId) : null
-              if (!fileUploadScopeMatches(original, { runtimeId: client?.runtimeOwnerIdentity?.()?.runtimeId ?? null,
+              const selected = client && selectedId ? (await readMobileConversationSession(client, selectedId)).session : null
+              if (current.current.client !== originalClient || client !== originalClient || current.current.agentSessionId !== selectedId ||
+                !fileUploadScopeMatches(original, { runtimeId: client?.runtimeOwnerIdentity?.()?.runtimeId ?? null,
                 hostId: selected?.hostId ?? null, sessionId: selectedId, runId: selected?.run.runId ?? null })) {
                 throw new Error('附件已上传，但编辑器已切换，草稿没有改变。')
               }
@@ -578,9 +592,9 @@ export function MobileConversationSurface({ client, agentSessionId, moteSource, 
           {...(postureControl && available && !reading.activity ? { feedback: <MobileNotice identity={[session?.run.runId]} className="composer-feedback" role="status">运行状态未确认，模式切换以 Mac 的结果为准。</MobileNotice> } : {})}
           primaryAction={isWorking && !draft.trim() && !hasPendingAttachments ? 'stop' : 'send'}
           {...(isWorking && available ? { onInterrupt: () => { void interruptCurrentTurn() } } : {})}
-          value={draft} disabled={false} placeholder={available ? '发消息' : '离线草稿'}
+          value={draft} disabled={false} placeholder={connection.state !== 'connected' || reading.disconnected ? '离线草稿' : conversationStatus.metadata.state === 'retired' || conversationStatus.metadata.state === 'deleted' ? '保留一份草稿' : '发消息'}
           hasPendingContent={hasPendingAttachments}
-          onChange={setDraft} {...(attempt?.phase !== 'sending' && !preparing ? {
+          onChange={setDraft} {...(conversationStatus.metadata.state !== 'retired' && conversationStatus.metadata.state !== 'deleted' && attempt?.phase !== 'sending' && !preparing ? {
             onSubmit: () => void submit(true, undefined, draftKey, attachmentControls.current?.captureForSend()),
             onQueue: () => void submit(false, undefined, draftKey, attachmentControls.current?.captureForSend())
           } : {})}
