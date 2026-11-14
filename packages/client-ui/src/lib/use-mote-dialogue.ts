@@ -5,7 +5,7 @@ type Snapshot = { page: MoteDialoguePage | null; issue: string | null; unavailab
 const empty: Snapshot = { page: null, issue: null, unavailable: false, loading: false }
 /** Read-only projections are shared across retained DOM presentations of the
  * same original resource and reader. Core remains the only role/link owner. */
-function createProjection(read: MoteDialogueReader, target: MoteDialogueRead['target']) {
+function createProjection(read: MoteDialogueReader, target: MoteDialogueRead['target'], selection?: Pick<MoteDialogueRead, 'kind' | 'eventId'>) {
   let snapshot = empty, pending: Promise<void> | null = null, revision: string | undefined, refreshRequested = false
   const listeners = new Set<() => void>()
   const publish = (value: Snapshot) => { snapshot = value; for (const listener of listeners) listener() }
@@ -13,7 +13,7 @@ function createProjection(read: MoteDialogueReader, target: MoteDialogueRead['ta
     if (pending) { if (!older) refreshRequested = true; return pending }
     const prior = snapshot.page
     if (older && !prior?.next) return
-    const query: MoteDialogueRead = { target, limit: 50, ...(older ? { cursor: prior!.next! } : {}) }
+    const query: MoteDialogueRead = { target, ...selection, limit: 50, ...(older ? { cursor: prior!.next! } : {}) }
     publish({ ...snapshot, issue: null, loading: true })
     pending = Promise.resolve().then(async () => {
       try {
@@ -40,14 +40,14 @@ function createProjection(read: MoteDialogueReader, target: MoteDialogueRead['ta
 }
 const readers = new WeakMap<MoteDialogueReader, Map<string, ReturnType<typeof createProjection>>>()
 const noProjection = { snapshot: () => empty, subscribe: (_listener: () => void) => () => {}, refresh: () => {}, older: async () => {} }
-export function useMoteDialogue(read: MoteDialogueReader | undefined, target: MoteDialogueRead['target'] | undefined, visible: boolean, sourceRevision?: string) {
-  const key = target ? JSON.stringify(target) : ''
+export function useMoteDialogue(read: MoteDialogueReader | undefined, target: MoteDialogueRead['target'] | undefined, visible: boolean, sourceRevision?: string, selection?: Pick<MoteDialogueRead, 'kind' | 'eventId'>) {
+  const key = target ? selection ? JSON.stringify([target, selection.kind ?? null, selection.eventId ?? null]) : JSON.stringify(target) : ''
   const projection = useMemo(() => {
     if (!read || !target) return null
     let resources = readers.get(read)
     if (!resources) { resources = new Map(); readers.set(read, resources) }
     let value = resources.get(key)
-    if (!value) { value = createProjection(read, target); resources.set(key, value) }
+    if (!value) { value = createProjection(read, target, selection); resources.set(key, value) }
     return value
   }, [read, key])
   const source = projection ?? noProjection

@@ -3,6 +3,9 @@ import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
 import type { SpaceIconTarget } from '../lib/space-object-appearance'
 import { DocumentOverlayPortal } from './WindowOverlayHost'
+import { formatMoteAddress } from '@agentmux/core/sharing'
+import { copyTextToClipboard } from '../lib/clipboard-copy'
+import { useAppStore } from '../store'
 
 const ThemeActionEditIcon = semanticIconComponent('action.edit')
 const ThemeObjectShapesIcon = semanticIconComponent('object.shapes')
@@ -13,6 +16,7 @@ const ThemeLayoutExpandIcon = semanticIconComponent('layout.expand')
 const ThemeActionPinIcon = semanticIconComponent('action.pin')
 const ThemeActionRestoreIcon = semanticIconComponent('action.restore')
 const ThemeActionArchiveIcon = semanticIconComponent('action.archive')
+const ThemeObjectLinkIcon = semanticIconComponent('object.link')
 
 
 /** Radix handles pointer menus; these object menus also expose the standard keyboard gesture. */
@@ -84,6 +88,9 @@ export function SpaceObjectContextMenu({ target, onChangeIcon, children, onMenuO
       <ContextMenu.Content className="tab-context-menu" collisionPadding={8} onCloseAutoFocus={event => {
         menu.onCloseAutoFocus(event); archiveReturnFocus.current?.()
       }}>
+        {target?.kind === 'mote' ? <ContextMenu.Item className="tab-context-menu__item" onSelect={() => {
+          void copyTextToClipboard(formatMoteAddress({ spaceId: target.key }), useAppStore.getState().reportError)
+        }}><ThemeObjectLinkIcon size={14} /><span>Copy Mote link</span></ContextMenu.Item> : null}
         {moteActions?.onRename ? <ContextMenu.Item className="tab-context-menu__item" onSelect={() => menu.changeIcon(moteActions.onRename!)}><ThemeActionEditIcon size={14} /><span>Rename Mote…</span></ContextMenu.Item> : null}
         {onChangeIcon && target ? <ContextMenu.Item className="tab-context-menu__item" onSelect={() => menu.changeIcon(() => target && onChangeIcon(target))}>
           <ThemeObjectShapesIcon size={14} /><span>{target.avatarTarget || target.imageTarget ? 'Change avatar…' : 'Change icon…'}</span>

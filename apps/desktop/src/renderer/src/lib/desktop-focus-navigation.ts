@@ -12,6 +12,7 @@ import { projectWorkbenchProjection, resolveWorkbenchZone, sameWorkbenchProjecti
 import { createWorkspaceLayout } from '@agentmux/layout'
 import { workbenchNavigationCatalog } from './workbench-navigation-catalog'
 import type { AgentMuxSpatialGraph } from '@agentmux/core/spatial-graph'
+import { homeZoneId } from '../../../shared/space-addresses'
 import { categoriesFromSpatial } from '@agentmux/host/topic-categories'
 
 export const desktopMainSurface = { space: 'workbench', focus: 'agents', goals: 'board', survey: 'survey', recall: 'recall' } as const
@@ -233,6 +234,19 @@ function reject(code: string, message: string, candidates?: AgentMuxSpaceSelecto
   throw new DesktopFocusFailure({ step: 'target', code, message,
     recovery: 'Inspect the client or list this Space/Zone, then choose an exact existing target.',
     ...(candidates ? { candidates } : {}) })
+}
+
+/** A Mote link selects its durable object and logical discussion, never an incidental member. */
+export function resolveDesktopMoteSelection(state: Pick<SpatialWorkbench, 'config'>, catalog: AgentMuxSpaceCatalog,
+  spaceId: string): AgentMuxDesktopSpaceSelection {
+  const spaces = catalog.spaces.filter(space => space.spaceId === spaceId)
+  const mote = spaces.length === 1 && spaces[0]?.kind === 'mote' ? spaces[0] : null
+  if (!mote?.topicId) reject('MOTE_OBJECT_UNCONFIRMED', 'The exact original Space is not a confirmed Mote. Its reference and existing work are kept.')
+  const zoneId = homeZoneId(spaceId), zone = catalog.zones.find(item => item.zoneId === zoneId)
+  const workspaces = state.config?.workspaces.filter(workspace => workspace.id === zone?.workspaceId && workspace.hostId === mote.hostId) ?? []
+  if (!zone || zone.hostId !== mote.hostId || !catalog.bindings.some(binding => binding.spaceId === spaceId && binding.zoneId === zoneId) || workspaces.length !== 1)
+    reject('MOTE_RESOURCE_UNCONFIRMED', 'The original Mote home and resource Host are unconfirmed. No other Mote or member was selected.')
+  return { spaceId, zoneId, workspaceId: workspaces[0]!.id, topicId: mote.topicId, tabId: null, groupId: null, regionId: null }
 }
 
 /** Resolve the durable placement, never execution cwd or the first unrelated Tab/Agent. */

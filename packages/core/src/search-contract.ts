@@ -9,7 +9,7 @@ export type AgentMuxSearchInput = {
   limit?: number; scanLimit?: number; maxBytes?: number; cursor?: string
 }
 export type AgentMuxSearchTarget =
-  | (AmuxObjectLinkTarget & { hostId?: string; sourceHostId?: string })
+  | (Exclude<AmuxObjectLinkTarget, { kind: 'mote' }> & { hostId?: string; sourceHostId?: string })
   | { kind: 'terminal'; hostId: string; terminalId: string }
   | { kind: 'project'; hostId: string; projectId: string }
   | { kind: 'workspace'; hostId: string; workspaceId: string }

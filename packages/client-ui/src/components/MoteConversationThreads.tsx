@@ -68,12 +68,13 @@ function EarlierConversation({ source, client, visible, name, geometry, describe
   </section>
 }
 export { EarlierConversation as MoteOriginalConversation }
-function WorkEventCard({ event, read, visible, memberName, onOpen, expanded, onExpand, refreshSource, discovering = false, onSummary, detailHost }: {
+function WorkEventCard({ event, read, visible, memberName, onOpen, expanded, onExpand, refreshSource, discovering = false, onSummary, detailHost, renderEventActions }: {
   event: MoteWorkEvent; read: MoteWorkReader; visible: boolean; memberName?: ((source: Work) => string) | undefined; onOpen?: ((source: Work) => void) | undefined
   expanded: boolean; onExpand(): void; refreshSource: MoteDialoguePage | null; discovering?: boolean
   onSummary?: ((id: string, summary: ThreadSummary) => void) | undefined
   /** When present, the opened thread renders in this pane instead of below its row. The same element and reads are kept. */
   detailHost?: HTMLElement | null | undefined
+  renderEventActions?: ((event: MoteWorkEvent) => ReactNode) | undefined
 }) {
   const visibility = useVisibleWork<HTMLElement>(visible)
   const key = workKey(event)
@@ -111,6 +112,7 @@ function WorkEventCard({ event, read, visible, memberName, onOpen, expanded, onE
           <span> · {reported ? '已回报' : hasQuestion ? '含问题记录' : first ? '已派出' : '待核对'}{replies ? ` · ${replies} 条回复` : ''}</span></small></span>
       {recordedTime(event.at)}<span className="mote-work-event__disclosure" aria-hidden="true">{expanded ? '−' : '+'}</span>
     </button>
+    {expanded ? renderEventActions?.(event) : null}
     {expanded ? (thread => detailHost ? createPortal(thread, detailHost) : thread)(<div className="mote-work-event__thread" data-mote-work-thread={event.id}>
       {onOpen ? <div className="mote-work-event__actions">{event.sources.map(source => <button type="button" key={source.sequence} onClick={() => onOpen(source)}>继续原工作{event.sources.length > 1 ? ` · ${memberName?.(source) ?? '执行者未确认'}` : ''}</button>)}</div> : null}
       {selected.issue ? <p role="status" className="mote-work-event__issue">{selected.issue}<button type="button" onClick={() => setRetry(value => value + 1)}>重读原来源</button></p> : null}
@@ -134,11 +136,14 @@ function WorkEventCard({ event, read, visible, memberName, onOpen, expanded, onE
 /** Original dispatch threads, independent of the Main Agent's native reader.
  * Master-detail: one toolbar row (status tabs, search, refresh), a dense list, and the selected thread as a flat document.
  * Narrow containers show the list, then the selected thread full width with a back control. Grouping by day is a list option, not a mode. */
-export function MoteWorkThreads({ page, issue, loading, visible, readWork, memberName, onRefresh, onOlder, onOpenWork, members }: {
+export function MoteWorkThreads({ page, issue, loading, visible, readWork, memberName, onRefresh, onOlder, onOpenWork, members, requestedEvent, renderEventActions }: {
   page: MoteDialoguePage | null; issue: string | null; loading: boolean; visible: boolean; readWork: MoteWorkReader
   memberName?: ((source: Work) => string) | undefined; onRefresh(): void; onOlder?(): void; onOpenWork(source: Work): void
   /** The host's original member directory, shown as a peer tab instead of a second block under the list. */
   members?: { count: number | null; attention?: boolean | undefined; content: ReactNode } | undefined
+  /** One explicit host navigation to this Mote's original event; no member inference. */
+  requestedEvent?: { eventId: string; token: string } | undefined
+  renderEventActions?: ((event: MoteWorkEvent) => ReactNode) | undefined
 }) {
   const viewport = useVisibleWork<HTMLElement>(visible)
   const [history, setHistory] = useState(false), [expanded, setExpanded] = useState<Set<string>>(() => new Set())
@@ -165,6 +170,22 @@ export function MoteWorkThreads({ page, issue, loading, visible, readWork, membe
   // The open thread is the most recently opened one; the list keeps every expanded card's DOM so reads are not repeated.
   const [selected, setSelected] = useState<string | null>(null)
   useEffect(() => { setSelected(null) }, [identity])
+  const requested = useRef<{ token: string; settled: boolean } | null>(null)
+  if (requestedEvent && requested.current?.token !== requestedEvent.token) requested.current = { token: requestedEvent.token, settled: false }
+  useEffect(() => {
+    if (!visible || !requestedEvent || requested.current?.settled || !events.some(event => event.id === requestedEvent.eventId)) return
+    requested.current!.settled = true
+    setView('work'); setQuery(''); setFilter('all')
+    setExpanded(previous => new Set(previous).add(requestedEvent.eventId)); setSelected(requestedEvent.eventId)
+  }, [visible, requestedEvent?.token, events])
+  useEffect(() => {
+    if (!visible || !requestedEvent || requested.current?.settled) return
+    const cancel = () => { if (requested.current?.token === requestedEvent.token) requested.current.settled = true }
+    const node = viewport.ref.current
+    node?.addEventListener('pointerdown', cancel, true); node?.addEventListener('keydown', cancel, true)
+    return () => { node?.removeEventListener('pointerdown', cancel, true); node?.removeEventListener('keydown', cancel, true) }
+  }, [visible, requestedEvent?.token, events])
+
   // Wide containers read the selected thread in a right pane; narrow ones read it in place. The pane is chosen by measured width, not by a device guess.
   const [pane, setPane] = useState<HTMLElement | null>(null), [wide, setWide] = useState(false)
   useEffect(() => {
@@ -208,7 +229,7 @@ export function MoteWorkThreads({ page, issue, loading, visible, readWork, membe
       const shown = matches(event), heading = history && shown && previousDay !== day
       if (shown) previousDay = day
       return <li key={event.id} hidden={!shown} data-selected={open === event.id || undefined}>{heading ? <h3 className="mote-threads__day">{day}</h3> : null}
-        <WorkEventCard key={event.id} event={event} read={readWork} visible={visible && view === 'work'} discovering={discovering && viewport.visible} memberName={memberName} onOpen={onOpenWork} refreshSource={page} onSummary={onSummary}
+        <WorkEventCard key={event.id} event={event} read={readWork} visible={visible && view === 'work'} discovering={discovering && viewport.visible} memberName={memberName} onOpen={onOpenWork} refreshSource={page} onSummary={onSummary} renderEventActions={renderEventActions}
           expanded={expanded.has(event.id)} onExpand={() => toggle(event.id)} detailHost={wide ? (open === event.id ? pane : null) : undefined} />
       </li>
     })}</ol>

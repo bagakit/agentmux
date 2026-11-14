@@ -5,6 +5,7 @@ import { api } from '../lib/api'
 import { copyTextToClipboard } from '../lib/clipboard-copy'
 import { useAppStore } from '../store'
 import { InlineAgentLink } from './InlineAgentLink'
+import { MoteReference } from './MoteReference'
 
 const ThemeObjectRegionIcon = semanticIconComponent('object.region')
 const ThemeObjectTabIcon = semanticIconComponent('object.tab')
@@ -19,6 +20,7 @@ const ThemeActionCopyIcon = semanticIconComponent('action.copy')
 export function InlineObjectLink({ uri, target, label }: ObjectLinkReference) {
   const [copiedUri, setCopiedUri] = useState<string | null>(null)
   const copied = copiedUri === uri
+  if (target.kind === 'mote') return <MoteReference uri={uri} target={target} {...(label ? { label } : {})} />
   if (target.kind === 'agent') return <InlineAgentLink uri={uri} agentSessionId={target.agentSessionId} {...(label ? {label} : {})} />
   const kind = target.kind === 'region' ? 'Region' : target.kind === 'tab' ? 'Tab' : target.kind === 'space' ? 'Space' : target.kind === 'capsule' ? 'Capsule' : 'Zone'
   const id = target.kind === 'region' ? target.regionId : target.kind === 'tab' ? target.tabId : target.kind === 'space' ? target.spaceId : target.kind === 'capsule' ? target.capsuleId : target.zoneId

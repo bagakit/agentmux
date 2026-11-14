@@ -42,7 +42,7 @@ export const AMUX_PROTOCOL_DEFINITIONS = {
   },
   link: {
     tag: 'amux://', form: 'link', title: 'Object link',
-    description: 'One exact Agent or spatial identity. A valid link does not prove the object exists or authorize navigation.',
+    description: 'An exact object identity or a Mote-scoped work reference. A valid link does not prove the object exists or authorize navigation.',
   },
   generic: {
     tag: 'amux:NAME', form: 'extension', title: 'Other amux declarations',

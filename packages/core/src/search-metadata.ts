@@ -3,10 +3,10 @@ import type { AgentMuxSpaceCatalog, AgentMuxSpaceLocation } from './space-contro
 import type { AgentMuxSearchTarget } from './search-contract.js'
 import type { AgentSessionHistoryDescriptor } from './types.js'
 
-type Identity = { agent: Set<string>; region: Set<string>; tab: Set<string>; space: Set<string>; zone: Set<string>; capsule: Set<string>; ids: Set<string>; text: string[] }
-const identity = (): Identity => ({ agent: new Set(), region: new Set(), tab: new Set(), space: new Set(), zone: new Set(), capsule: new Set(), ids: new Set(), text: [] })
+type Identity = { agent: Set<string>; region: Set<string>; tab: Set<string>; space: Set<string>; zone: Set<string>; capsule: Set<string>; mote: Set<string>; ids: Set<string>; text: string[] }
+const identity = (): Identity => ({ agent: new Set(), region: new Set(), tab: new Set(), space: new Set(), zone: new Set(), capsule: new Set(), mote: new Set(), ids: new Set(), text: [] })
 const add = (set: Set<string>, ...values: (string | null | undefined)[]) => { for (const value of values) if (value) set.add(value) }
-const targetId = (target: AmuxObjectLinkTarget) => target.kind === 'agent' ? target.agentSessionId : target.kind === 'region' ? target.regionId : target.kind === 'tab' ? target.tabId : target.kind === 'space' ? target.spaceId : target.kind === 'zone' ? target.zoneId : target.capsuleId
+const targetId = (target: AmuxObjectLinkTarget) => target.kind === 'agent' ? target.agentSessionId : target.kind === 'region' ? target.regionId : target.kind === 'tab' ? target.tabId : target.kind === 'space' || target.kind === 'mote' ? target.spaceId : target.kind === 'zone' ? target.zoneId : target.capsuleId
 export const agentMuxSearchSessionKey = (hostId: string, sessionId: string, kind: 'agent' | 'terminal' = 'agent') => JSON.stringify([hostId, kind, sessionId])
 export type AgentMuxSearchLocation = { reference: Pick<AgentMuxSpaceLocation, 'displayWorkspaceId' | 'groupId' | 'tabId' | 'regionId'>; name: string; kind: string; address: string; sessionId: string | null }
 
@@ -37,7 +37,7 @@ export function searchAgentMuxMetadata(query: string, input: AgentMuxSearchMetad
   }
   let target: AmuxObjectLinkTarget | undefined, issue: string | null = null
   if (/^amux:/iu.test(raw)) {
-    try { target = parseAmuxObjectLink(raw) } catch (error) { issue = error instanceof Error ? error.message : String(error) }
+    try { target = parseAmuxObjectLink(raw); if (target.kind === 'mote' && target.eventId !== undefined) issue = 'Read this exact work event through its original Mote thread; metadata does not inspect thread records.' } catch (error) { issue = error instanceof Error ? error.message : String(error) }
   }
   const matches = (fact: Identity) => !issue && (!raw || (target
     ? fact[target.kind].has(targetId(target))
@@ -71,6 +71,11 @@ export function searchAgentMuxMetadata(query: string, input: AgentMuxSearchMetad
   const tabs = new Map(input.catalog.tabs.map(tab => [tab.tabId, tab]))
   const zones = new Map(input.catalog.zones.map(zone => [zone.zoneId, zone]))
   const spaces = new Map(input.catalog.spaces.map(space => [space.spaceId, space]))
+  const moteSpacesByTopic = new Map<string, string[]>()
+  for (const space of input.catalog.spaces) if (space.kind === 'mote' && space.topicId) {
+    const key = JSON.stringify([space.hostId, space.topicId]), ids = moteSpacesByTopic.get(key) ?? []
+    ids.push(space.spaceId); moteSpacesByTopic.set(key, ids)
+  }
   const spacesByZone = new Map<string, string[]>()
   for (const binding of input.catalog.bindings) {
     const members = spacesByZone.get(binding.zoneId) ?? []; members.push(binding.spaceId); spacesByZone.set(binding.zoneId, members)
@@ -107,12 +112,12 @@ export function searchAgentMuxMetadata(query: string, input: AgentMuxSearchMetad
     if (region.kind === 'agent') add(fact.agent, region.agentSessionId); add(fact.ids, region.runId, region.browserId, tab?.workspaceId, zone?.hostId)
     fact.text.push(tab?.name ?? '', region.kind, zone?.directoryPath ?? '', zone?.branch ?? '', region.file?.path ?? '')
     for (const id of tab?.zoneId ? spacesByZone.get(tab.zoneId) ?? [] : []) {
-      const space = spaces.get(id); add(fact.space, id); add(fact.ids, space?.projectId, space?.topicId); fact.text.push(space?.name ?? '')
+      const space = spaces.get(id); add(fact.space, id); if (space?.kind === 'mote') add(fact.mote, id); add(fact.ids, space?.projectId, space?.topicId); fact.text.push(space?.name ?? '')
     }
     const occurrences = locationsByRegion.get(JSON.stringify([region.tabId, region.regionId])) ?? []
     const host = region.execution?.hostId
     const row = region.agentSessionId && host !== undefined ? agents.get(JSON.stringify([host, 'agent', region.agentSessionId])) : undefined
-    if (row) for (const key of ['agent', 'region', 'tab', 'space', 'zone', 'ids'] as const) for (const id of fact[key]) row[key].add(id)
+    if (row) for (const key of ['agent', 'region', 'tab', 'space', 'zone', 'mote', 'ids'] as const) for (const id of fact[key]) row[key].add(id)
     if (row) for (const location of occurrences) add(row.ids, location.workspaceId, location.displayWorkspaceId, location.groupId)
     // Resource entries keep every exact occurrence. They never borrow an Agent's target.
     if (raw) for (const location of occurrences) {
@@ -126,7 +131,7 @@ export function searchAgentMuxMetadata(query: string, input: AgentMuxSearchMetad
     }
   }
   const unplaced = [
-    ...input.catalog.spaces.map(space => ({ kind: 'space' as const, id: space.spaceId, name: space.name, fact: (() => { const fact = identity(); add(fact.space, space.spaceId); add(fact.ids, space.projectId, space.topicId, space.hostId); fact.text.push(space.name, space.directoryPath); return fact })() })),
+    ...input.catalog.spaces.map(space => ({ kind: 'space' as const, id: space.spaceId, name: space.name, fact: (() => { const fact = identity(); add(fact.space, space.spaceId); if (space.kind === 'mote') add(fact.mote, space.spaceId); add(fact.ids, space.projectId, space.topicId, space.hostId); fact.text.push(space.name, space.directoryPath); return fact })() })),
     ...input.catalog.zones.map(zone => ({ kind: 'zone' as const, id: zone.zoneId, name: zone.directoryPath ?? zone.zoneId, fact: (() => { const fact = identity(); add(fact.zone, zone.zoneId); add(fact.ids, zone.workspaceId, zone.hostId); fact.text.push(zone.directoryPath ?? '', zone.branch ?? ''); return fact })() })),
     ...input.catalog.tabs.map(tab => ({ kind: 'tab' as const, id: tab.tabId, name: tab.name ?? tab.tabId, fact: (() => { const fact = identity(); add(fact.tab, tab.tabId); add(fact.ids, tab.workspaceId); return fact })() })),
     ...input.catalog.regions.map(region => ({ kind: 'region' as const, id: region.regionId, name: region.regionId, fact: (() => { const fact = identity(); add(fact.region, region.regionId); return fact })() }))
@@ -144,6 +149,7 @@ export function searchAgentMuxMetadata(query: string, input: AgentMuxSearchMetad
     const fact = identity(), original = object.target
     if (original.kind === 'agent' || original.kind === 'region' || original.kind === 'tab' || original.kind === 'space' || original.kind === 'zone' || original.kind === 'capsule') add(fact[original.kind], targetId(original))
     else add(fact.ids, original.kind === 'terminal' ? original.terminalId : original.kind === 'project' ? original.projectId : original.kind === 'workspace' ? original.workspaceId : original.topicId)
+    if (original.kind === 'mote') add(fact.mote, ...moteSpacesByTopic.get(JSON.stringify([original.hostId, original.topicId])) ?? [])
     add(fact.ids, original.hostId, ...object.identities); fact.text.push(object.name, ...object.text)
     return matches(fact)
   })

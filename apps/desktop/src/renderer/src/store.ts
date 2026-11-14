@@ -139,9 +139,9 @@ import { executeWorkfaceFileOpen, resolveFileOpenTarget } from './lib/workface-f
 import { executeWorkfaceFileView } from './lib/workface-file-view'
 import type { WorkbenchProjectionSelection } from './lib/workbench-projection'
 import type { WorkbenchPresentation } from './lib/workbench-presentation'
-import { mainRegionReference, desktopMainSurface, desktopSelection, desktopSpaceSelectionAfterClose, resolveDesktopSpaceSelection, resolveWorkbenchOccurrenceSelection, reconcileWorkbenchSpaceSelection, workbenchSelectionCatalog, sessionWorkbenchReferences, projectWorkbenchSpaceSelection, workbenchObjectLayout, restoreWorkbenchSpaceSelection, DesktopFocusFailure } from './lib/desktop-focus-navigation'
+import { mainRegionReference, desktopMainSurface, desktopSelection, desktopSpaceSelectionAfterClose, resolveDesktopSpaceSelection, resolveDesktopMoteSelection, resolveWorkbenchOccurrenceSelection, reconcileWorkbenchSpaceSelection, workbenchSelectionCatalog, sessionWorkbenchReferences, projectWorkbenchSpaceSelection, workbenchObjectLayout, restoreWorkbenchSpaceSelection, DesktopFocusFailure } from './lib/desktop-focus-navigation'
 import type { FocusAgentReveal, FocusAgentTarget } from './lib/focus-agent-navigation'
-import { captureDesktopInput, readDesktopPresentation, readDesktopOverlays, requestDesktopSettingsNavigation, readFocusAgentPresentation, awaitDesktopPresentation, desktopInputPreserved } from './lib/desktop-presentation'
+import { captureDesktopInput, readDesktopPresentation, readDesktopOverlays, requestDesktopSettingsNavigation, readFocusAgentPresentation, readMoteLinkPresentation, awaitDesktopPresentation, desktopInputPreserved } from './lib/desktop-presentation'
 import { notebookRelocations, refreshNotebookLibrary, recordNotebookChanges, restoreNotebookRecoveries, useNotebookLibrary, type NotebookRecovery } from './lib/notebook-library'
 import type { AgentMuxDesktopSpaceSelection, AgentMuxDesktopFocusResult, AgentMuxSpatialSave, AgentMuxSpatialIssue } from '@agentmux/core/control'
 import type { SpaceZoneBindings, SpatialRequestBinding } from '../../shared/space-addresses'
@@ -1021,7 +1021,7 @@ export type AppState = GitReadingActions & {
   workbenchSpaceSelection: AgentMuxDesktopSpaceSelection | null
   /** Default CLI navigation suppresses automatic caret until explicit human/keyboard navigation. */
   /** Ephemeral explicit Mote navigation; never persisted or an execution authority. */
-  moteDiscussionEntry: { workspaceId: string; topicId: string; token: string; memberReference?: WorkbenchProjectionSelection } | null
+  moteDiscussionEntry: { workspaceId: string; topicId: string; token: string; memberReference?: WorkbenchProjectionSelection; eventId?: string } | null
   workbenchNavigationInputPolicy: 'preserve' | 'target' | null
   desktopNavigationNotice: AgentMuxSpatialIssue | null
   config: AppConfig | null
@@ -6894,7 +6894,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       signal?.addEventListener('abort', stopObservingNavigation, { once: true })
       const issues: AgentMuxSpatialIssue[] = []
       let topics: ScratchTopicSnapshot[] = []
-      try { if (request.target.kind === 'space' && get().config?.workspaces.some(workspace => workspace.id === SCRATCH_WORKSPACE_ID)) topics = await api.scratch.listTopics(SCRATCH_WORKSPACE_ID) }
+      try { if ((request.target.kind === 'space' || request.target.kind === 'mote') && get().config?.workspaces.some(workspace => workspace.id === SCRATCH_WORKSPACE_ID)) topics = await api.scratch.listTopics(SCRATCH_WORKSPACE_ID) }
       catch (error) { issues.push({ step: 'discovery', code: 'SPACE_DISCOVERY_UNCONFIRMED', message: presentError(error),
         recovery: 'Existing placement is kept. Inspect the client or retry discovery when its directory owner is available.' }) }
       finally { stopObservingNavigation(); signal?.removeEventListener('abort', stopObservingNavigation) }
@@ -6903,6 +6903,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       const beforeSelection = desktopSelection(get(), catalog)
       const settingsBefore = request.target.kind === 'settings' ? readDesktopOverlays() : undefined
       let navigationState: AgentMuxDesktopFocusResult['navigation']['state'] = 'applied'
+      let moteEntryToken: string | undefined
       try {
         requireActive()
         if (navigationChanged || fileNavigationSelection(get()) !== originalNavigation) throw new DesktopFocusFailure({ step: 'navigation', code: 'NAVIGATION_CHANGED',
@@ -6920,6 +6921,13 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           // Viewing a Goal never selects its associated execution workface.
           get().setSelectedDemand(request.target.goalId)
           set({ mainSurface: 'board', regionCaretFocus: null, workbenchNavigationInputPolicy: request.inputPolicy })
+        } else if (request.target.kind === 'mote') {
+          const resolved = resolveDesktopMoteSelection(get(), catalog, request.target.spaceId)
+          moteEntryToken = mintObjectId()
+          set({ activeWorkspaceId: resolved.workspaceId, mainSurface: 'workbench', retainedSpatialFocus: null,
+            workbenchSpaceSelection: resolved, regionCaretFocus: null, workbenchNavigationInputPolicy: request.inputPolicy,
+            moteDiscussionEntry: { workspaceId: resolved.workspaceId, topicId: resolved.topicId!, token: moteEntryToken,
+              ...(request.target.eventId === undefined ? {} : { eventId: request.target.eventId }) } })
         } else if (request.target.kind === 'focus-agent') {
           get().revealFocusAgent(request.target)
         } else if (request.target.kind === 'surface') {
@@ -6961,6 +6969,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       }
       if (navigationState !== 'rejected') await awaitDesktopPresentation(() => {
         const actual = desktopSelection(get(), catalog)
+        if (request.target.kind === 'mote') return get().moteDiscussionEntry?.token !== moteEntryToken ||
+          actual.space?.spaceId !== request.target.spaceId || Boolean(readMoteLinkPresentation(request.target))
         if (JSON.stringify(actual) !== JSON.stringify(expected)) return true
         const observed = readDesktopPresentation(actual, get().tabs)
         if (request.target.kind === 'settings') return request.target.sectionId === null ? observed.overlays.settings === false :
@@ -6975,7 +6985,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         diskDurability: 'unconfirmed' as const, reason: 'Settings navigation is transient. The original workface selection and preferences are unchanged.' } : navigationState === 'rejected' ? { layoutApplied: false, clientStateWritten: false, storageFlushRequested: false,
         diskDurability: 'unconfirmed' as const, reason: 'No selection was applied.' } : await saveWorkbenchSelection(true)
       const selection = desktopSelection(get(), catalog)
-      if (navigationState !== 'rejected' && (signal?.aborted || JSON.stringify(selection) !== JSON.stringify(expected))) {
+      const retainedMote = request.target.kind === 'mote' && selection.space?.spaceId === request.target.spaceId && get().moteDiscussionEntry?.token === moteEntryToken
+      if (navigationState !== 'rejected' && (signal?.aborted || (request.target.kind === 'mote' ? !retainedMote : JSON.stringify(selection) !== JSON.stringify(expected)))) {
         navigationState = 'unconfirmed'
         issues.push({ step: 'navigation', code: 'NAVIGATION_CHANGED', message: 'Selection changed before this navigation was observed.',
           recovery: 'Inspect the current client. A later selection is kept and the old input intent is not repeated.' })
@@ -6990,6 +7001,14 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         }
       }
       const observed = readDesktopPresentation(selection, get().tabs)
+      const motePresentation = request.target.kind === 'mote' ? readMoteLinkPresentation(request.target) : null
+      if (motePresentation) observed.presentation = { ...observed.presentation, mote: motePresentation }
+      if (navigationState !== 'rejected' && request.target.kind === 'mote' && !motePresentation) {
+        navigationState = 'unconfirmed'
+        issues.push({ step: 'presentation', code: 'MOTE_PRESENTATION_UNCONFIRMED',
+          message: 'The exact Mote logical discussion or original work thread has not been visibly confirmed.',
+          recovery: 'The original target, workface and input are kept. Open this same Mote reference when its original source is available.' })
+      }
       const focusAgent = readFocusAgentPresentation(get().focusAgentReveal)
       if (navigationState !== 'rejected' && request.target.kind === 'settings' && (request.target.sectionId === null ? observed.overlays.settings !== false : observed.overlays.settings !== true ||
         observed.overlays.settingsPage?.sectionId !== request.target.sectionId || observed.overlays.settingsPage.visible !== true)) {

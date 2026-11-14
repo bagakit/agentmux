@@ -176,6 +176,20 @@ export function readDesktopPresentation(selection: AgentMuxDesktopSelection, tab
   return { presentation, floating: observeFloating(owner, tabs), overlays, input: captureDesktopInput(tabs).fact }
 }
 
+/** Presentation confirmation only; object/role qualification stays with the original Mote owners. */
+export function readMoteLinkPresentation(target: { spaceId: string; eventId?: string }): AgentMuxDesktopPresentation['mote'] | null {
+  if (typeof document === 'undefined') return null
+  const frames = [...document.querySelectorAll<HTMLElement>('[data-mote-space-id]')].filter(frame =>
+    frame.dataset.moteSpaceId === target.spaceId && desktopElementVisible(frame))
+  if (frames.length !== 1) return null
+  const frame = frames[0]!, spaceId = frame.dataset.moteSpaceId!
+  if (target.eventId === undefined) return frame.dataset.motePage === 'discussion' ? { spaceId, page: 'discussion', eventId: null } : null
+  if (frame.dataset.motePage !== 'threads') return null
+  const thread = [...frame.querySelectorAll<HTMLElement>('[data-mote-work-thread]')]
+    .find(thread => thread.dataset.moteWorkThread === target.eventId && desktopElementVisible(thread))
+  return thread ? { spaceId, page: 'threads', eventId: thread.dataset.moteWorkThread! } : null
+}
+
 /** Only an in-flight cold navigation listens. No steady observer, output scan or polling loop. */
 export async function awaitDesktopPresentation(ready: () => boolean, signal?: AbortSignal): Promise<void> {
   if (signal?.aborted || typeof document === 'undefined' || typeof requestAnimationFrame === 'undefined') return

@@ -73,3 +73,16 @@ button.agent-avatar--inline:hover { border-color: var(--focus-line); background-
 .inline-object-link__copy:hover { background: color-mix(in srgb, var(--text-2) 9%, transparent); }
 .inline-object-link button:focus-visible { outline: 2px solid var(--focus-line); outline-offset: -2px; }
 @media (prefers-reduced-motion: reduce) { .inline-object-link { transition: none; } }
+
+/* Mote references keep persistent identity separate from the current executor. */
+.mote-reference { display: inline; }
+.mote-reference .agent-avatar--inline { max-width: min(100%, 38ch); }
+.mote-reference .agent-avatar__label { white-space: normal; overflow-wrap: anywhere; }
+.mote-reference__details { min-width: 0; }
+.mote-reference__details header small, .mote-reference__details dd small { display: block; color: var(--text-3); font-size: var(--fs-micro); }
+.mote-reference__details header { align-items: baseline; }
+.mote-reference__details .mote-reference__quoted { font-weight: 500; }
+.mote-reference__details code { display: block; margin-top: var(--sp-3); max-height: 7em; overflow: auto; overflow-wrap: anywhere; color: var(--text-3); font-size: var(--fs-micro); }
+.mote-reference__actions { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin-top: var(--sp-3); }
+
+.mote-reference__source { display: contents; }

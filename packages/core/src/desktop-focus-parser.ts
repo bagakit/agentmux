@@ -44,13 +44,18 @@ function budget(value: unknown, code: Code): void {
 }
 
 function parseDesktopFocusTarget(value: unknown, code: Code): AgentMuxDesktopFocusTarget {
-  const source = fields(value, ['kind', 'spaceId', 'zoneId', 'tabId', 'regionId', 'displayWorkspaceId', 'groupId', 'goalId', 'surface', 'view', 'hostId', 'agentSessionId', 'sectionId'], code)
+  const source = fields(value, ['kind', 'spaceId', 'zoneId', 'tabId', 'regionId', 'displayWorkspaceId', 'groupId', 'goalId', 'surface', 'view', 'hostId', 'agentSessionId', 'sectionId', 'eventId'], code)
   if (source.kind === 'space') {
     fields(source, ['kind', 'spaceId', 'zoneId', 'tabId', 'regionId', 'displayWorkspaceId', 'groupId'], code)
     const { kind: _, ...raw } = source
     const target = parseSpaceControlSelector(raw, code)
     if (!Object.keys(target).length) fail('Focus requires a Space/Zone/Tab/Region identity.', code)
     return { kind: 'space', ...target }
+  }
+  if (source.kind === 'mote') {
+    fields(source, ['kind', 'spaceId', 'eventId'], code)
+    return { kind: 'mote', spaceId: spaceControlId(source.spaceId, 'Mote Space', code, true),
+      ...(Object.hasOwn(source, 'eventId') ? { eventId: spaceControlId(source.eventId, 'Mote work event', code, true) } : {}) }
   }
   if (source.kind === 'settings') {
     fields(source, ['kind', 'sectionId'], code)
@@ -131,8 +136,15 @@ function input(value: unknown, code: Code): AgentMuxDesktopInput {
     connected: nullableBoolean(source.connected, 'Input connected', code), visible: nullableBoolean(source.visible, 'Input visible', code), inert: nullableBoolean(source.inert, 'Input inert', code) }
 }
 function presentation(value: unknown, code: Code): AgentMuxDesktopPresentation {
-  const source = fields(value, ['provenance', 'state', 'tabId', 'regionId', 'blockers', 'windowId', 'documentGeneration'], code)
-  const result = { provenance: provenance(source.provenance, code), state: member(source.state, ['main-visible', 'floating', 'window', 'covered', 'pending', 'unknown'], 'Presentation', code),
+  const source = fields(value, ['provenance', 'state', 'tabId', 'regionId', 'blockers', 'windowId', 'documentGeneration', 'mote'], code)
+  const mote = Object.hasOwn(source, 'mote') ? (() => {
+    const value = fields(source.mote, ['spaceId', 'page', 'eventId'], code)
+    const page = member(value.page, ['discussion', 'threads'], 'Mote page', code)
+    const eventId = nullableId(value.eventId, 'Mote event', code, true)
+    if (page === 'discussion' ? eventId !== null : eventId === null) fail('Mote page and original event disagree.', code)
+    return { spaceId: spaceControlId(value.spaceId, 'Presented Mote Space', code, true), page, eventId }
+  })() : undefined
+  const result = { ...(mote ? { mote } : {}), provenance: provenance(source.provenance, code), state: member(source.state, ['main-visible', 'floating', 'window', 'covered', 'pending', 'unknown'], 'Presentation', code),
     ...documentIdentity(source, source.state === 'window', code),
     tabId: nullableId(source.tabId, 'Presented Tab', code), regionId: nullableId(source.regionId, 'Presented Region', code),
     blockers: list(source.blockers, value => member(value, ['settings', 'quick-switcher'] as const, 'Overlay blocker', code), code) }
@@ -208,6 +220,9 @@ export function parseDesktopFocusSuccessReceipt(value: unknown): AgentMuxControl
       fail('Settings receipt is not visibly confirmed for the exact registered page.', code)
     if (requested.kind === 'goal' && (actual.goalId !== requested.goalId || actual.surface !== 'goals')) fail('Goal receipt target is mismatched.', code)
     if (requested.kind === 'surface' && (actual.surface !== requested.surface || requested.surface === 'focus' && requested.view !== undefined && actual.focusView !== requested.view)) fail('Surface receipt target is mismatched.', code)
+    if (requested.kind === 'mote' && (actual.surface !== 'space' || actual.space?.spaceId !== requested.spaceId ||
+      result.presentation.mote?.spaceId !== requested.spaceId || result.presentation.mote.page !== (requested.eventId === undefined ? 'discussion' : 'threads') ||
+      result.presentation.mote.eventId !== (requested.eventId ?? null))) fail('Mote receipt identities or original thread presentation are mismatched.', code)
     if (requested.kind === 'space') {
       const { kind: _, ...parent } = requested
       if (actual.surface !== 'space' || !actual.space || Object.entries(parent).some(([key, id]) => actual.space![(key === 'displayWorkspaceId' ? 'workspaceId' : key) as keyof AgentMuxDesktopSpaceSelection] !== id)) {

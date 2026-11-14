@@ -1,5 +1,6 @@
 import { useCallback, useMemo, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
+import { useMoteDialogue } from '@agentmux/client-ui/use-mote-dialogue'
 import { MoteWorkThreads, type MoteWorkReader } from '@agentmux/client-ui/components/MoteConversationThreads'
 import { useMoteDialogueView } from '../lib/mote-dialogue-view'
 import type { MoteWorkfaceScope } from '../lib/mote-workface'
@@ -10,12 +11,19 @@ import type { WorkbenchProjectionSelection } from '../lib/workbench-projection'
 import { useAppStore } from '../store'
 import { api } from '../lib/api'
 import { MoteCooperation } from './MoteCooperation'
+import { formatMoteAddress } from '@agentmux/core/sharing'
+import { copyTextToClipboard } from '../lib/clipboard-copy'
 
 /** Threads reads original work sources even when the Main native conversation is unavailable. */
-export function MoteThreadsPanel({ scope, active, onSelect }: {
-  scope: MoteWorkfaceScope; active: boolean; onSelect(reference: WorkbenchProjectionSelection): boolean
+export function MoteThreadsPanel({ scope, active, onSelect, requestedEvent }: {
+  scope: MoteWorkfaceScope; active: boolean; requestedEvent?: { eventId: string; token: string } | undefined; onSelect(reference: WorkbenchProjectionSelection): boolean
 }) {
   const dialogue = useMoteDialogueView()
+  const direct = useMoteDialogue(api.moteDialogue.read, dialogue?.target ?? undefined, active && requestedEvent !== undefined,
+    requestedEvent?.token, requestedEvent ? { kind: 'work', eventId: requestedEvent.eventId } : undefined)
+  const work = requestedEvent ? direct : dialogue
+  const requestedIssue = requestedEvent && direct.page && !direct.loading && !direct.page.links.some(link => link.kind === 'work' && link.eventId === requestedEvent.eventId)
+    ? '原工作 thread 尚未在这个 Mote 的关联来源中确认。准确引用仍保留；可重读同一来源。' : null
   const facts = useAppStore(useShallow(state => ({ config: state.config, tabs: workbenchNavigationTabs(state.tabs), layouts: state.layouts,
     spaceZoneBindings: state.spaceZoneBindings, topicCategories: state.topicCategories, projectGroups: state.projectGroups,
     scratchTopicSnapshots: state.scratchTopicSnapshots })))
@@ -28,9 +36,12 @@ export function MoteThreadsPanel({ scope, active, onSelect }: {
   }, [])
   if (!dialogue) return null
   return <div className="mote-threads-panel" hidden={!active}>
-    <MoteWorkThreads page={dialogue.page} issue={dialogue.issue} loading={dialogue.loading} visible={active} readWork={readWork}
+    <MoteWorkThreads page={work?.page ?? null} issue={work?.issue ?? requestedIssue} loading={work?.loading ?? false} visible={active} readWork={readWork} requestedEvent={requestedEvent}
+      renderEventActions={event => dialogue.target ? <button type="button" className="mote-conversation__link" aria-label="复制 thread 链接" onClick={() => {
+        void copyTextToClipboard(formatMoteAddress({ spaceId: dialogue.target!.spaceId, eventId: event.id }), useAppStore.getState().reportError)
+      }}>复制 thread 链接</button> : null}
       memberName={source => members.find(member => member.hostId === source.origin.hostId && member.agentSessionId === source.origin.recipientSessionId)?.regions.find(region => region.title)?.title ?? source.origin.recipientSessionId}
-      onRefresh={dialogue.refresh} onOlder={() => void dialogue.older()}
+      onRefresh={() => work?.refresh()} onOlder={() => void work?.older()}
       members={{ count: null, content: <MoteCooperation scope={scope} active={active} presentation="threads" onSelect={onSelect} /> }} onOpenWork={source => {
         const original = dialogue.target && moteMembers(workbenchSelectionCatalog(useAppStore.getState()), dialogue.target.spaceId)
           .find(member => member.hostId === source.origin.hostId && member.agentSessionId === source.origin.recipientSessionId)

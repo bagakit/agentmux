@@ -83,7 +83,10 @@ export class SpatialLinkIngress {
       }
       let request: AgentMuxControlFocusRequest
       const base = { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: mintObjectId(), operation: 'focus' as const, inputPolicy: 'preserve' as const }
-      if (target.kind === 'agent') {
+      if (target.kind === 'mote') {
+        request = { ...base, target: { kind: 'mote', spaceId: target.spaceId,
+          ...(target.eventId === undefined ? {} : { eventId: target.eventId }) } }
+      } else if (target.kind === 'agent') {
         const discovery = await execute({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: mintObjectId(), operation: 'space.ls', target: {} }, controller.signal)
         if (controller.signal.aborted) return null
         if (discovery.operation !== 'space.ls') throw new Error('The spatial discovery owner returned another operation.')
