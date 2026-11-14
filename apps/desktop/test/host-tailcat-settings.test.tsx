@@ -94,8 +94,8 @@ it('the real Host editor saves Tailcat-only with no SSH hostname and tests the s
   await show()
   const trigger = dom.container.querySelector<HTMLElement>('[aria-label="Connection transport"]')!
   await act(async () => trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })))
-  await vi.waitFor(() => expect(document.querySelectorAll('.selection-field__menu [role="menuitemradio"]')).toHaveLength(3))
-  expect([...document.querySelectorAll('.selection-field__menu [role="menuitemradio"]')].map(node => [node.getAttribute('data-value'), node.textContent])).toEqual([['ssh', 'SSH'], ['ssh-tailcat', 'SSH first, Tailcat backup'], ['tailcat', 'Tailcat only']])
+  await vi.waitFor(() => expect(document.querySelectorAll('.selection-field__menu [role="option"]')).toHaveLength(3))
+  expect([...document.querySelectorAll('.selection-field__menu [role="option"]')].map(node => [node.getAttribute('data-value'), node.textContent])).toEqual([['ssh', 'SSH'], ['ssh-tailcat', 'SSH first, Tailcat backup'], ['tailcat', 'Tailcat only']])
   expect(document.querySelector('.selection-field__search')).toBeNull()
   await act(async () => document.activeElement?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })))
   await act(async () => { await new Promise(resolve => setTimeout(resolve, 40)) })
@@ -211,4 +211,31 @@ it('listener address is a masked credential and Copy uses the existing clipboard
   expect(dom.container.textContent).not.toContain('tcfixturecredential')
   await button('Copy address')
   expect(copy).toHaveBeenCalledExactlyOnceWith('tcfixturecredential')
+})
+
+it('copies a confirmed private address once per attempt and clears stale feedback when the address changes', async () => {
+  const local = config.hosts[0]!
+  let address = 'tcfixturecredential'
+  vi.spyOn(api.hosts, 'inspect').mockImplementation(async () => ({ routeHostId: 'local', configuration: local,
+    tailcat: { state: 'listening', address } }) as never)
+  const write = vi.spyOn(api.ui, 'writeClipboardText').mockRejectedValueOnce(new Error('Clipboard unavailable')).mockResolvedValue(undefined)
+  await show('local')
+  await button('Copy address')
+  expect(dom.container.querySelector('[role="alert"]')?.textContent).toBe('Address copy failed. Select the private field and copy it again.')
+  expect(input('Private Tailcat address').value).toBe(address)
+
+  let finish!: () => void
+  write.mockImplementationOnce(() => new Promise<void>(resolve => { finish = resolve }))
+  await button('Copy address')
+  await button('Copy address')
+  expect(write.mock.calls).toEqual([[address], [address]])
+  address = 'tcfixturelatercredential'
+  await button('Refresh status')
+  await vi.waitFor(() => expect(input('Private Tailcat address').value).toBe(address))
+  expect(dom.container.querySelector('.host-tailcat-address button')?.hasAttribute('aria-disabled')).toBe(false)
+  await act(async () => finish())
+  expect(dom.container.querySelector('[role="alert"]')).toBeNull()
+  await button('Copy address')
+  expect(write.mock.calls.at(-1)).toEqual([address])
+  expect(dom.container.querySelector('.host-tailcat-address [role="status"]')?.textContent).toBe('Copied')
 })
