@@ -75,7 +75,7 @@ app.whenReady().then(async () => {
         default: result.runtimeCalls.push({ operation, args: json(args) }); throw new Error(`Unowned operation in spatial-only proof: ${operation}`)
       }
     })
-    win = new BrowserWindow({ width: 1280, height: 860, useContentSize: true, show: true,
+    win = new BrowserWindow({ width: 1280, height: 860, useContentSize: true, show: !scenarioPath,
       webPreferences: { preload, contextIsolation: true, nodeIntegration: false, sandbox: true, backgroundThrottling: false } })
     win.webContents.on('console-message', event => process.stderr.write(`project-groups:console:${event.message}\n`))
     win.webContents.on('render-process-gone', (_event, details) => process.stderr.write(`project-groups:renderer-gone:${JSON.stringify(details)}\n`))
@@ -94,7 +94,23 @@ app.whenReady().then(async () => {
     const flush = () => read('window.projectGroupsFlush()')
     const capture = async (name, scene) => {
       await read('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')
-      await read('Promise.allSettled(document.getAnimations().filter(animation=>Number.isFinite(animation.effect?.getComputedTiming().iterations)).map(animation=>animation.finished))')
+      if (scenarioPath) {
+        const motion = await read(`(() => {
+          const visible = document.getAnimations().filter(animation => {
+            const target = animation.effect?.target
+            return animation.playState === 'running' && !animation.pending && Number.isFinite(animation.effect.getComputedTiming().endTime) &&
+              target?.checkVisibility({ contentVisibilityAuto: true, checkVisibilityCSS: true })
+          })
+          return Promise.race([
+            Promise.allSettled(visible.map(animation => animation.finished)).then(() => ({ settled: true })),
+            new Promise(resolve => setTimeout(() => resolve({ settled: false, remaining: visible
+              .filter(animation => animation.playState === 'running').map(animation => animation.animationName ?? animation.transitionProperty ?? '') }), 2000))
+          ])
+        })()`)
+        assert.equal(motion.settled, true, 'Visible resize presentation motion did not settle: ' + JSON.stringify(motion.remaining))
+      } else {
+        await read('Promise.allSettled(document.getAnimations().filter(animation=>Number.isFinite(animation.effect?.getComputedTiming().iterations)).map(animation=>animation.finished))')
+      }
       const bytes = (await win.webContents.capturePage()).toPNG(), file = `${phase}-${name}.png`
       await fs.writeFile(path.join(evidence, file), bytes, { mode: 0o600 })
       result.images.push({ file, absolutePath: path.join(evidence, file), scene, phase, electronPid: process.pid,
@@ -104,6 +120,7 @@ app.whenReady().then(async () => {
     await stage('load-real-app-initialize')
     await win.loadFile(html)
     await until('window.projectGroupsReady && window.projectGroupsState().loading === false')
+    if (scenarioPath) await stage('real-app-initialized')
     win.webContents.debugger.attach('1.3')
     const dispatch = (method, params) => win.webContents.debugger.sendCommand(method, params)
     await dispatch('Emulation.setFocusEmulationEnabled', { enabled: true })
@@ -140,9 +157,11 @@ app.whenReady().then(async () => {
     if (phase === 'seed') await click(`[data-space-folder] [data-workspace-id="${local.id}"]`)
     await until('window.projectGroupsState().mainSurface === "workbench" && window.projectGroupsState().visibleRegions.length > 0')
     await fileReady()
+    if (scenarioPath) await stage('original-file-regions-visible')
     result.initialState = await state(); result.originalDurable = await flush()
     if (scenarioPath) {
-      await require(scenarioPath)({ win, read, until, click, dispatch, capture, flush, phase, result, input, evidence })
+      await stage('original-client-storage-and-spatial-owner-ready')
+      await require(scenarioPath)({ win, read, until, click, dispatch, capture, flush, stage, phase, result, input, evidence })
       result.finalState = await state(); result.finalDurable = await flush()
       assert.equal(result.runtimeCalls.length, 0, 'The additional spatial-only scene cannot invoke Runtime or file writes')
       result.passed = true

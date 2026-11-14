@@ -1,10 +1,10 @@
 const assert = require('node:assert/strict')
 const fs = require('node:fs/promises'), path = require('node:path')
-module.exports = async ({ win, read, until, click, dispatch, capture, flush, phase, result, evidence }) => {
+module.exports = async ({ win, read, until, click, dispatch, capture, flush, stage, phase, result, evidence }) => {
   const settle = () => read('new Promise(done => requestAnimationFrame(() => requestAnimationFrame(done)))')
   const widths = () => read('window.sidebarResizeFixture.widths()')
   const key = async value => {
-    const code = value === 'Escape' ? 27 : value === 'Enter' ? 13 : 39
+    const code = { Escape: 27, Enter: 13, Home: 36, End: 35, ArrowLeft: 37, ArrowRight: 39 }[value]
     for (const type of ['keyDown', 'keyUp']) await dispatch('Input.dispatchKeyEvent', { type, key: value, code: value, windowsVirtualKeyCode: code })
     await settle()
   }
@@ -46,9 +46,23 @@ module.exports = async ({ win, read, until, click, dispatch, capture, flush, pha
     ['agents', 'Resize timeline names', 'focusTimelineNameWidth', 112]
   ]
   for (const [surface, label, field, expectedDefault] of consumers) {
+    await stage('resize-' + field)
     await read(`window.sidebarResizeFixture.show('${surface}')`); await settle()
     if (label === 'Resize surface tools' && await read('Boolean(document.querySelector(\'[aria-label="Show Space tools"]\'))')) await click('[aria-label="Show Space tools"]')
     const selector = `[aria-label="${label}"]`; await until(`document.querySelector(${JSON.stringify(selector)})?.checkVisibility({checkVisibilityCSS:true})`)
+    const handle = `document.querySelector(${JSON.stringify(selector)})`
+    const sharesWidthControl = ['projectRailWidth', 'surveySidebarWidth', 'recallSidebarWidth'].includes(field)
+    if (sharesWidthControl) {
+      await dispatch('Input.dispatchMouseEvent', { type: 'mouseMoved', ...await box(selector) })
+      await settle()
+      const hover = await read(`(() => {
+        const node = ${handle}, line = getComputedStyle(node, '::after')
+        return { hovered: node.matches(':hover'), width: parseFloat(line.inlineSize), color: line.backgroundColor }
+      })()`)
+      assert.equal(hover.hovered, true, 'The original full-width edge receives pointer hover')
+      assert.equal(hover.width, 1)
+      assert.notEqual(hover.color, 'rgba(0, 0, 0, 0)', 'Hover shows one thin line within the original hit target')
+    }
     const before = await widths(); let point = await drag(selector)
     assert.deepEqual(await widths(), before); await key('Escape'); await release(point)
     assert.deepEqual(await widths(), before); assert.equal(await read('document.body.style.cursor'), '')
@@ -72,7 +86,14 @@ module.exports = async ({ win, read, until, click, dispatch, capture, flush, pha
       result.operations.push({ settingsOverlayCancelsOriginalTools: true })
     }
     if (label === 'Resize Survey items') {
+      const originalWidthSettled = `(() => {
+        const pane = document.querySelector(${JSON.stringify(selector)}).parentElement
+        return Math.abs(pane.getBoundingClientRect().width - parseFloat(pane.style.width)) < 1
+      })()`
+      // The reset deliberately animates. Start the independently tested bounds-change drag after it settles.
+      await until(originalWidthSettled)
       const retained = await widths(), moving = await drag(selector)
+      assert.equal(await read('document.body.style.cursor'), 'col-resize', 'Resize begins on the original Survey handle before the viewport changes')
       win.setContentSize(700, 860)
       await until('document.body.style.cursor === ""')
       await release(moving); assert.deepEqual(await widths(), retained)
@@ -84,9 +105,50 @@ module.exports = async ({ win, read, until, click, dispatch, capture, flush, pha
       win.setContentSize(1280, 860); await settle()
       result.operations.push({ originalSurveyBoundsCancel: true, immediateHandleHit: true })
     }
-    await read(`document.querySelector(${JSON.stringify(selector)}).focus()`); await key('ArrowRight'); await key('Enter')
+    await read(`${handle}.focus()`)
+    if (sharesWidthControl) {
+      const range = await read(`(() => {
+        const node = ${handle}
+        const pane = node.ownerDocument.getElementById(node.getAttribute('aria-controls'))
+        return { min: Number(node.getAttribute('aria-valuemin')), max: Number(node.getAttribute('aria-valuemax')),
+          now: Number(node.getAttribute('aria-valuenow')), panel: pane === node.parentElement,
+          orientation: node.getAttribute('aria-orientation'), hitWidth: node.getBoundingClientRect().width }
+      })()`)
+      assert.equal(range.panel, true, 'The separator names its original navigation pane')
+      assert.equal(range.orientation, 'vertical')
+      assert.equal(range.now, expectedDefault)
+      assert.ok(range.hitWidth >= 4, 'The full width edge is a hit target')
+      const readHandle = attribute => read(`${handle}.getAttribute(${JSON.stringify(attribute)})`)
+      const originalWidths = await widths()
+      const onlyChanged = async width => assert.deepEqual(await widths(), { ...originalWidths, [field]: width })
+      await key('Home')
+      assert.equal((await widths())[field], range.min, 'Home reaches the original pane minimum')
+      await onlyChanged(range.min)
+      await key('End')
+      await onlyChanged(range.max)
+      assert.equal(Number(await readHandle('aria-valuenow')), range.max)
+      await read(`${handle}.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', isComposing: true, bubbles: true, cancelable: true }))`)
+      await onlyChanged(range.max)
+      await key('ArrowLeft'); await onlyChanged(range.max - 16)
+      assert.equal(await read(`${handle} === document.activeElement && ${handle}.matches(':focus-visible')`), true)
+      const focus = await read(`(() => {
+        const node = ${handle}, style = getComputedStyle(node), line = getComputedStyle(node, '::after')
+        const range = node.getBoundingClientRect()
+        const center = parseFloat(line.top) + new DOMMatrix(line.transform).m42 + parseFloat(line.blockSize) / 2
+        return { width: parseFloat(line.inlineSize), height: parseFloat(line.blockSize), outline: style.outlineStyle,
+          edgeHeight: range.height, center, color: line.backgroundColor }
+      })()`)
+      assert.equal(focus.width, 2, 'Keyboard focus is a thicker single line within the mouse hit target')
+      assert.equal(focus.outline, 'none', 'The handle does not stack a full-height outline with its focus line')
+      assert.ok(focus.height > 0 && focus.height <= 48 && focus.height < focus.edgeHeight, 'The focus line is shorter than the edge')
+      assert.ok(Math.abs(focus.center - focus.edgeHeight / 2) <= 1 && focus.color !== 'rgba(0, 0, 0, 0)', 'Keyboard focus stays visible at the middle of the edge')
+      result.operations.push({ originalConsumer: label, defaultWidth: expectedDefault, range, nativeHomeEnd: true,
+        nativeFocusVisible: true, composingEnterPreservedWidth: true })
+    }
+    await key('ArrowRight'); await key('Enter')
     assert.equal((await widths())[field], expectedDefault); await key('ArrowRight')
     for (const mode of ['dark', 'light']) {
+      await stage('capture-' + field + '-' + mode)
       await read(`window.sidebarResizeFixture.theme('${mode}')`); await settle()
       await capture(`sidebar-${field}-${mode}`, `${label}: native cancellation, release, double-click and keyboard reset at original width`)
     }
