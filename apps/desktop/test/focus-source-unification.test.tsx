@@ -290,6 +290,8 @@ it('a foreign task uses the same durable bookmark and execution-history owners w
   const focus = useAppStore.getState().agentFocus.execution
   expect(focus.sessionId).toBe(remote.dataset.sessionId)
   expect(focus.history[0]?.identity?.source).toEqual({ runtimeId: f.d.owner.runtimeId, agentSessionId: SID })
+  expect(focus.history[0]?.identity?.project?.id).toBe('original-b-project')
+  expect(dom.container.querySelector(`[data-saved-focus-session='${remote.dataset.sessionId}']`)).toBeNull()
   expect(useAppStore.getState().sessions).toHaveLength(1)
   expect(useAppStore.getState().sessions[0]!.id).toBe(SID)
   expect(useAppStore.getState().agentComposerDrafts[SID]).toBe('Keep this original local draft')
