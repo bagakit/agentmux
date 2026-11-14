@@ -88,7 +88,7 @@ it('registers on the exact committed Host despite unknown checks, without openin
   const before = structuredClone(useAppStore.getState().layouts), drafts = structuredClone(useAppStore.getState().agentComposerDrafts)
   const selectWorkspace = vi.spyOn(useAppStore.getState(), 'selectWorkspace')
   await click('[data-register-folder]'); await settle()
-  expect(api.workspaces.add).toHaveBeenCalledExactlyOnceWith({ hostId: 'remote', path: _hygiene_fixturePath("owned-new"), name: 'Authored project' })
+  expect(api.workspaces.add).toHaveBeenCalledExactlyOnceWith({ hostId: 'remote', path: _hygiene_fixturePath("owned-new"), name: 'Authored project', expectedHost: { id: 'remote', kind: 'ssh', label: 'Remote', hostname: 'saved.invalid' } })
   const saved = f.owner.current.workspaces.find(workspace => workspace.path === _hygiene_fixturePath("owned-new"))!
   expect(saved.hostId).toBe('remote'); expect(saved.id).toBeTruthy()
   expect((await f.disk()).workspaces).toEqual(f.owner.current.workspaces)

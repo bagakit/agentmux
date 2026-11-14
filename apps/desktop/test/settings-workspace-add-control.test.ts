@@ -172,6 +172,21 @@ describe('Workspace registration owns current Main facts for UI and public CLI',
    expect((await f.current()).workspaces).toHaveLength(1)
   }finally{await f.dispose()}
  })
+ it('rejects a same-ID Host replacement instead of registering on a different connection',async()=>{
+  const f=await configOwnerFixture({hosts:[DEFAULT_CONFIG.hosts[0]!,{id:'remote',kind:'ssh',label:'Owned remote',hostname:'private.invalid'}]})
+  const expectedHost=f.owner.current.hosts.find(host=>host.id==='remote')!,executionHost=vi.fn(()=>({}))
+  const accepted=await registerWorkspace({hostId:'remote',path:_hygiene_fixturePath("literal"),expectedHost},f.owner,executionHost)
+  expect(accepted.workspace.hostId).toBe('remote');expect(executionHost).toHaveBeenCalledOnce();executionHost.mockClear()
+  const entered=deferred<void>(),held=deferred<void>(),prepare=vi.mocked(f.runtime.prepare).getMockImplementation()!
+  vi.mocked(f.runtime.prepare).mockImplementationOnce(async(...args)=>{entered.resolve();await held.promise;return prepare(...args)})
+  const replace=f.owner.update(current=>({...current,hosts:current.hosts.map(host=>host.id==='remote'?{...host,hostname:'replacement.invalid'}:host)}));await entered.promise
+  const add=registerWorkspace({hostId:'remote',path:_hygiene_fixturePath("other"),expectedHost},f.owner,executionHost)
+  const rejected=expect(add).rejects.toMatchObject({code:'INVALID_SETTING_VALUE',message:/connection changed before folder registration/})
+  held.resolve();await replace
+  const bytes=await f.bytes(),publications=f.publish.mock.calls.length
+  await rejected
+  expect(executionHost).not.toHaveBeenCalled();expect(await f.bytes()).toBe(bytes);expect(f.publish).toHaveBeenCalledTimes(publications)
+ })
  it('checks the Host in the current updater rather than accepting an old queued Host fact',async()=>{
   const f=await configOwnerFixture({hosts:[DEFAULT_CONFIG.hosts[0]!,{id:'remote',kind:'ssh',label:'Owned remote',hostname:'private.invalid'}]})
   const entered=deferred<void>(),held=deferred<void>(),prepare=vi.mocked(f.runtime.prepare).getMockImplementation()!
