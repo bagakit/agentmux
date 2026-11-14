@@ -21,6 +21,8 @@ import { objectCliEnvironment, runCompiledObjectCli } from '../../../packages/co
 import type { AppConfig } from '../src/shared/contracts.js'
 
 vi.mock('electron', () => ({ app: { getPath: () => '/private-unused' } }))
+vi.mock('../src/renderer/src/monaco', () => ({}))
+vi.mock('@monaco-editor/react', () => ({ default: ({ value, path }: { value: string; path: string }) => process.env.AGENTMUX_TEST_FILE_CLIENT_VISUAL_DOM ? createElement('textarea', { 'data-native-monaco-paint': path, value, readOnly: true }) : null }))
 const native = process.env.AGENTMUX_TEST_FILE_CLIENT_NATIVE === '1'
 const restartMode = process.env.AGENTMUX_TEST_FILE_CLIENT_RESTART
 const business = native && !restartMode
@@ -78,6 +80,26 @@ async function fixture(options: { sharedProject?: boolean } = {}, existing?: Awa
   return { ...f, source, bridge, api, store, workspace, user, watchReady: () => watchReady }
 }
 
+async function visualScene(f: Awaited<ReturnType<typeof fixture>>, name: string, title: string, extra?: import('react').ReactNode) {
+  const out = process.env.AGENTMUX_TEST_FILE_CLIENT_VISUAL_DOM
+  if (!out) return
+  const { createClientUiRoot } = await import('./helpers/client-ui-render.js')
+  const { installNativePopover } = await import('./fixtures/mote-workface.js'); cleanup.push(installNativePopover())
+  const { EditorPane } = await import('../src/renderer/src/components/EditorPane.js'), { SourceFilesAccess } = await import('../src/renderer/src/components/SourceFilesAccess.js')
+  const tab = Object.values(f.store.getState().tabs).find(tab => Object.values(tab.regions).some(region => region.kind === 'file'))!
+  const surface = Object.values(tab.regions).find(region => region.kind === 'file')!
+  await f.store.getState().setEditorRegionMode(surface.regionId, surface.workspaceId, surface.path, 'edit')
+  const element = document.createElement('div'), root = createClientUiRoot(element); document.body.append(element)
+  cleanup.push(async () => { await act(async () => root.unmount()); element.remove() })
+  await act(async () => root.render(createElement('main', { 'data-source-scene': name }, createElement('h2', { 'data-scene-title': true }, title),
+    createElement(SourceFilesAccess, { workspace: f.workspace, visible: true }), createElement(EditorPane, { tabId: tab.id, surface: surface as any }), extra)))
+  await vi.waitFor(() => expect(element.querySelector('[data-native-monaco-paint]')).not.toBeNull())
+  await writeFile(join(out, name + '.dom.html'), document.body.innerHTML)
+  await writeFile(join(out, name + '.state.json'), JSON.stringify({ sourceCommit: 'qualification candidate', tab, surface,
+    document: f.store.getState().documents[f.workspace.id + '\0' + surface.path], issue: f.store.getState().documentIssues[f.workspace.id + '\0' + surface.path], sourceInputs: f.store.getState().sourceFilesInputs }, null, 2))
+  return { element, root, async capture(next: string) { await writeFile(join(out, next + '.dom.html'), document.body.innerHTML) } }
+}
+
 async function connectCloseOwner(f: Awaited<ReturnType<typeof fixture>>) {
   const { DesktopControlIpcBridge } = await import('../src/main/control-ipc-bridge.js')
   const { createDesktopWorkbenchCloseOwner } = await import('../src/main/workbench-close-owner.js')
@@ -98,15 +120,22 @@ async function connectCloseOwner(f: Awaited<ReturnType<typeof fixture>>) {
 
 it.runIf(business)('original Files UI checkpoints the directory packet before registration and CLI delete retains a clean body in actual UserState', async () => {
   const f = await fixture(), { SourceFilesAccess } = await import('../src/renderer/src/components/SourceFilesAccess.js')
+  if (process.env.AGENTMUX_TEST_FILE_CLIENT_VISUAL_DOM) {
+    const ordinary = new OrdinaryWorkspaceFiles()
+    vi.spyOn(f.api.files, 'read').mockImplementation(async (_workspaceId, path) => ordinary.read(f.workspace, path))
+    await f.store.getState().openFile('original.txt', 'file-group', undefined, f.workspace.id)
+  }
   const element = document.createElement('div'); document.body.append(element); const root = createRoot(element)
   cleanup.push(async () => { await act(async () => root.unmount()); element.remove() })
   await act(async () => root.render(createElement(SourceFilesAccess, { workspace: f.workspace, visible: true })))
   await vi.waitFor(() => expect(element.textContent).toContain('Use this folder for Files'))
+  if (process.env.AGENTMUX_TEST_FILE_CLIENT_VISUAL_DOM) await visualScene(f, 'folder-needed', 'Source Files · choose the original folder')
   const use = [...element.querySelectorAll('button')].find(button => button.textContent === 'Use this folder for Files')!
   await act(async () => use.click())
   await vi.waitFor(() => expect(f.store.getState().sourceFilesInputs.selections[f.workspace.id]?.locator).toBeTruthy())
   expect(f.api.spaceMounts.call).toHaveBeenCalledWith('register', expect.objectContaining({ hostId: f.source.id, registration: expect.objectContaining({ runtimeId: f.source.identity.runtimeId }) }))
   await f.store.getState().openFile('original.txt', 'file-group', undefined, f.workspace.id)
+  if (process.env.AGENTMUX_TEST_FILE_CLIENT_VISUAL_DOM) await f.store.getState().refreshDocument(f.workspace.id, 'original.txt')
   await vi.waitFor(() => expect(f.watchReady()).toBe(true))
   const key = f.workspace.id + '\0original.txt', original = f.store.getState().documents[key]!
   expect(original.readSource?.target).toMatchObject({ hostId: f.source.id, expectedRuntimeId: f.source.identity.runtimeId })
@@ -130,6 +159,7 @@ it.runIf(business)('original Files UI checkpoints the directory packet before re
   const state = f.store.getState(), tab = Object.values(state.tabs).find(tab => Object.values(tab.regions).some(region => region.kind === 'file' && region.path === 'original.txt'))!
   const frozen = captureWorkbenchClose(state, { operationId: 'clean-deleted-close', target: { kind: 'tab-occurrence', displayWorkspaceId: f.workspace.id, groupId: 'file-group', tabId: tab.id }, keepAgentSessions: true })
   expect(frozen.drafts).toHaveLength(1)
+  await visualScene(f, 'deleted-body-kept', 'Source Files · deleted file, editor contents kept')
   await connectCloseOwner(f)
   const { useWorkbenchTabsClose } = await import('../src/renderer/src/hooks/useWorkbenchTabsClose.js')
   const { installNativePopover } = await import('./fixtures/mote-workface.js')
@@ -145,6 +175,7 @@ it.runIf(business)('original Files UI checkpoints the directory packet before re
   await act(async () => closeRoot.render(createElement(CloseConsumer)))
   await act(async () => closeNode.querySelector<HTMLButtonElement>('button')!.click())
   await vi.waitFor(() => expect(document.body.textContent).toContain('Discard editor contents?'))
+  if (process.env.AGENTMUX_TEST_FILE_CLIENT_VISUAL_DOM) await writeFile(join(process.env.AGENTMUX_TEST_FILE_CLIENT_VISUAL_DOM, 'deleted-discard-confirmation.dom.html'), document.body.innerHTML)
   expect(f.store.getState().tabs[tab.id]).toBeDefined(); expect(f.store.getState().documents[key]?.content).toBe(original.content)
   // The user's old confirmation cannot discard input arriving while the dialog is open.
   f.store.getState().updateDocument(tab.id, 'Later input after the delete confirmation', Object.values(tab.regions).find(region => region.kind === 'file')!.regionId)
@@ -312,6 +343,12 @@ it.runIf(business)('two real Notes owners with the same Note ID keep their creat
     beforeContent: null, baseRevision: null, content: original, revision: noteHistoryRevision(original),
     provenance: { noteId, resource: sourceResource, revision: noteHistoryRevision(original), blocks: blocks(sourceActor) } })
   const mainRoot = await readFile(main.path), mainHistory = await main.readHistory({ noteId, resource: mainResource, eventId: 'main-only-event', includeContent: true })
+  if (process.env.AGENTMUX_TEST_FILE_CLIENT_VISUAL_DOM) {
+    vi.spyOn(f.api.files, 'readPublic').mockImplementation(async params => ({ resource: { ...mainResource, zoneId: params.zoneId, zonePath: f.workspace.path }, result: await mainWriter.read(f.workspace, params.path) }))
+    vi.spyOn(f.api.files, 'historyPublic').mockImplementation(async params => ({ resource: params.expectedResource,
+      result: await main.readHistory({ noteId, resource: mainResource, ...(params.before === undefined ? {} : { before: params.before }), ...(params.limit === undefined ? {} : { limit: params.limit }),
+        ...(params.eventId === undefined ? {} : { eventId: params.eventId }), ...(params.includeContent === undefined ? {} : { includeContent: params.includeContent }) }) }))
+  }
   await f.store.getState().refreshDocument(f.workspace.id, path)
   expect(f.store.getState().documents[key]?.noteProvenance).toEqual(sourceProvenance)
   expect(f.store.getState().documents[key]?.legacyMainNote).toMatchObject({ noteId, resource: mainResource, provenance: mainProvenance })
@@ -343,6 +380,20 @@ it.runIf(business)('two real Notes owners with the same Note ID keep their creat
   const { source: _source, ...mainTarget } = target
   await expect(f.store.getState().applyNoteHistory(tab.id, regionId, { target: { ...mainTarget, expectedResource: { ...target.expectedResource, ...mainResource } }, eventId: 'main-only-event' })).rejects.toThrow('Original Main history is read-only')
   expect(legacyWrite).not.toHaveBeenCalled(); expect(legacyRestore).not.toHaveBeenCalled(); expect(legacyUndo).not.toHaveBeenCalled()
+  if (process.env.AGENTMUX_TEST_FILE_CLIENT_VISUAL_DOM) {
+    const scene = await visualScene(f, 'source-history', 'Source Note · history stays with its original owner')
+    const historyButton = [...scene!.element.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent?.includes('History'))!
+    await act(async () => historyButton.click())
+    await vi.waitFor(() => expect(document.querySelector('.note-version-history__activity')).not.toBeNull())
+    await scene?.capture('source-history')
+    const mainButton = [...document.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Original Main history')!
+    await act(async () => mainButton.click())
+    await vi.waitFor(() => expect(document.querySelector('.note-version-history__activities')?.textContent).toContain('original-main-author'))
+    const originalReference = document.querySelector<HTMLDetailsElement>('.note-version-history__scope')!; originalReference.open = true
+    expect(document.querySelector('.note-version-history')?.textContent).toContain('read-only')
+    expect([...document.querySelectorAll('button')].some(button => button.textContent?.includes('Undo this activity'))).toBe(false)
+    await scene?.capture('main-history-readonly')
+  }
   expect(await readFile(main.path)).toEqual(mainRoot)
   expect(await main.readHistory({ noteId, resource: mainResource, eventId: 'main-only-event', includeContent: true })).toEqual(mainHistory)
   expect(await main.readProvenance({ noteId, resource: mainResource, revision: noteHistoryRevision(original), blockIds: [blockId] })).toEqual(mainProvenance)
@@ -364,6 +415,8 @@ it.runIf(business)('Source text saves keep older sharing requests and cleanup se
   expect(f.store.getState().dirtyDocuments[key]).not.toBe(true)
   expect(f.store.getState().documents[key]?.noteEditing?.receipt?.noteHistory?.status).toBe('committed')
   expect(f.store.getState().documents[key]?.noteEditing?.shareCleanupIssue?.referenceIds).toEqual(['saved-reference'])
+  const cleanupScene = await visualScene(f, 'source-save-cleanup-unconfirmed', 'Source Note · text saved, shared-reference cleanup unconfirmed')
+  if (cleanupScene) expect(cleanupScene.element.textContent).toContain('Shared-reference cleanup unconfirmed')
   expect(mainUndo).not.toHaveBeenCalled(); expect(mainShare).not.toHaveBeenCalled(); expect(mainInspect).not.toHaveBeenCalled()
   // A complete pre-existing request is retained as a request; it is not relabelled as a Source action.
   const params = { destination: { ...binding.query, expectedResource: { ...binding.resource, hostId: f.workspace.hostId, workspaceId: f.workspace.id },
@@ -594,6 +647,7 @@ it.runIf(business)('a bound Source read failure never replaces its body or later
   expect(f.store.getState().documents[key]?.content).toBe(original.content)
   expect(f.store.getState().documents[key]?.readSource).toEqual(original.readSource)
   expect(f.store.getState().documentIssues[key]?.kind).toBe('read-error')
+  await visualScene(f, 'source-unavailable-body-kept', 'Source Files · original Source unavailable, editor contents kept')
   const tab = Object.values(f.store.getState().tabs).find(tab => Object.values(tab.regions).some(region => region.kind === 'file' && region.path === 'original.txt'))!
   f.store.getState().updateDocument(tab.id, 'Original Source draft retained', Object.values(tab.regions).find(region => region.kind === 'file')!.regionId)
   await f.store.getState().saveDocument(tab.id)

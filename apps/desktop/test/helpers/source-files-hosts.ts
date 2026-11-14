@@ -14,7 +14,7 @@ import { RuntimeController } from '../../src/main/runtime-controller.js'
  * Main uses its production local carrier factory; only the configured map is a leaf. */
 export async function sourceFilesHosts(cleanup: Array<() => unknown | Promise<unknown>>, options: { scratch?: boolean; sharedProject?: boolean } = {}) {
   const root = await mkdtemp(join(tmpdir(), 'amx-source-files-'))
-  cleanup.push(() => rm(root, { recursive: true, force: true }))
+  cleanup.push(() => rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 40 }))
   for (const key of Object.keys(process.env)) if (/^(AGENTMUX_|CTXMUX_)/u.test(key) && !key.startsWith('AGENTMUX_TEST_')) vi.stubEnv(key, undefined)
   const helper = resolve('apps/host/resources/bin/agentmux-workspace-move')
   vi.stubEnv('AGENTMUX_WORKSPACE_MOVE_HELPER', helper)
