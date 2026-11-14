@@ -23,7 +23,6 @@ export const RETRO_THEME: ThemeDocument = {
     'action.stop': { kind: 'paths', paths: [{ d: 'M7 5 L17 5 Q19 5 19 7 L19 17 Q19 19 17 19 L7 19 Q5 19 5 17 L5 7 Q5 5 7 5' }] },
     'action.open-external': { kind: 'paths', paths: [{ d: 'M14 4 L20 4 L20 10 M20 4 L10 14 M10 5 L6 5 Q4 5 4 7 L4 18 Q4 20 6 20 L17 20 Q19 20 19 18 L19 14' }] },
     'object.terminal': { kind: 'paths', paths: [{ d: 'M5 4 L19 4 Q21 4 21 6 L21 18 Q21 20 19 20 L5 20 Q3 20 3 18 L3 6 Q3 4 5 4 M6 8 L10 12 L6 16 M13 16 L18 16' }] },
-    'object.agent': { kind: 'paths', paths: [{ d: 'M7 7 L17 7 Q20 7 20 10 L20 17 Q20 20 17 20 L7 20 Q4 20 4 17 L4 10 Q4 7 7 7 M12 7 L12 3 M10 3 L14 3 M8 12 L8 13 M16 12 L16 13 M9 17 Q12 19 15 17' }] },
     'object.file': { kind: 'paths', paths: [{ d: 'M7 3 L14 3 L19 8 L19 19 Q19 21 17 21 L7 21 Q5 21 5 19 L5 5 Q5 3 7 3 M14 3 L14 8 L19 8 M8 13 L16 13 M8 17 L13 17' }] },
     'object.folder': { kind: 'paths', paths: [{ d: 'M5 5 L9 5 L12 8 L19 8 Q21 8 21 10 L21 18 Q21 20 19 20 L5 20 Q3 20 3 18 L3 7 Q3 5 5 5' }] },
     'object.browser': { kind: 'paths', paths: [{ d: 'M20 12 A8 8 0 1 1 4 12 A8 8 0 1 1 20 12 M4 12 L20 12 M12 4 Q6 12 12 20 Q18 12 12 4' }] },

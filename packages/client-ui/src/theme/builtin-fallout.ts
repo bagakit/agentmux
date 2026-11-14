@@ -23,7 +23,6 @@ export const FALLOUT_THEME: ThemeDocument = {
     'action.stop': { kind: 'paths', paths: [{ d: 'M5 5 L19 5 L19 19 L5 19 Z' }] },
     'action.open-external': { kind: 'paths', paths: [{ d: 'M13 3 L21 3 L21 11 M21 3 L10 14 M9 5 L3 5 L3 21 L19 21 L19 15' }] },
     'object.terminal': { kind: 'paths', paths: [{ d: 'M3 4 L21 4 L21 20 L3 20 Z M6 8 L10 12 L6 16 M13 16 L18 16' }] },
-    'object.agent': { kind: 'paths', paths: [{ d: 'M5 8 L19 8 L19 19 L5 19 Z M12 8 L12 3 M9 3 L15 3 M8 12 L8 14 M16 12 L16 14 M9 17 L15 17 M2 10 L2 16 M22 10 L22 16' }] },
     'object.file': { kind: 'paths', paths: [{ d: 'M5 3 L14 3 L19 8 L19 21 L5 21 Z M14 3 L14 8 L19 8 M8 12 L16 12 M8 16 L16 16' }] },
     'object.folder': { kind: 'paths', paths: [{ d: 'M3 5 L9 5 L12 8 L21 8 L21 20 L3 20 Z M3 11 L21 11' }] },
     'object.browser': { kind: 'paths', paths: [{ d: 'M3 4 L21 4 L21 20 L3 20 Z M3 8 L21 8 M6 6 L7 6 M10 6 L11 6 M7 14 L17 14 M12 10 L12 18' }] },

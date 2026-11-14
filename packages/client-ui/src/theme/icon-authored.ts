@@ -34,9 +34,9 @@ export const AUTHORED_ICON_DEFINITIONS = {
     }
   },
   "agent-unit": {
-    shapes: [["rect", {"x":"4","y":"5","width":"16","height":"15","rx":"4"}], ["path", {"d":"M9 11v1 M15 11v1 M9 16h6"}]],
+    shapes: [["path", {"d":"M8 3h8a5 5 0 0 1 5 5v8a5 5 0 0 1-5 5H8a5 5 0 0 1-5-5V8a5 5 0 0 1 5-5Z M8.5 10.2a1.5 2 0 1 0 0 4 1.5 2 0 1 0 0-4Z M15.5 10.2a1.5 2 0 1 0 0 4 1.5 2 0 1 0 0-4Z", "fill":"currentColor", "stroke":"none", "fill-rule":"evenodd"}]],
     design: {
-      rest: "安定圆角主体内两枚短眼孔与短基线，在12–16px保留Agent角色而减少天线和耳片碎部。",
+      rest: "规整圆角实心小方脸和两枚椭圆眼孔，与Mote同族而轮廓可辨；12–16px保留剪影与双眼留白，无嘴线、天线或耳片。",
       motion: { kind: "still", animation: "none", description: "角色对象保持完整静止，不借眼孔表达在线或产出。", trigger: "通用Agent引用或未知Provider的原fallback槽；Provider品牌与Mote身份保持各自原选择。" }
     }
   },
