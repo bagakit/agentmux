@@ -14,7 +14,6 @@ import { SpaceObjectContextMenu } from './SpaceObjectContextMenu'
 import { useMoteWorkfaceScope } from '../lib/mote-workface'
 import { useMoteHeartbeatReading } from '../lib/mote-heartbeat-reading'
 import { moteHeartbeatReadingPresentation } from '../lib/mote-heartbeat-presentation'
-import { MoteHeartbeatGlyph } from './MoteHeartbeatGlyph'
 
 export function PmoTeamsTopicEntry({ style, placement = 'compact' }: {
   placement?: 'compact' | 'floating'; style?: CSSProperties
@@ -50,13 +49,13 @@ export function PmoTeamsTopicEntry({ style, placement = 'compact' }: {
       onMouseDown={event => { if (event.button === 0) event.preventDefault() }}
       onClick={event => { event.preventDefault(); floating.open ? requestPmoTeamsTopicFloatingClose() : requestPmoTeamsTopicFloatingOpen({ targetTopicId: target.topicId }) }}
       >
-      <span className={className + '__surface'} data-state="open">
+      <span className={className + '__surface'} data-state="open" data-mote-care={care.state}>
+        <MoteCareRim key={target.topicId} cue={care.state === 'active' ? heartbeat.deliveryCue : null} />
         <SpaceObjectIcon kind="mote" name={target.moteName} manualIcon={manualIcon}
           moteSessionId={target.region?.kind === 'agent' ? target.region.sessionId : undefined} moteHostId={workspace?.hostId}
           moteAvailability={topic && (!target.tabId || target.region?.kind === 'launcher') ? 'no-agent' : target.region && target.region.kind !== 'agent' ? 'static' : 'restoring'}
           avatarObjectKey={iconTarget?.key} avatarWorkspaceId={iconTarget?.avatarTarget?.workspaceId} avatarTopicId={iconTarget?.avatarTarget?.topicId ?? (identityConfirmed ? target.topicId : undefined)} />
         {target.session ? <span className={className + '__status'} aria-hidden="true"><StatusDot status={target.session.status} /></span> : null}
-        <span className="mote-heartbeat-entry" data-mote-care={care.state} aria-hidden="true"><MoteHeartbeatGlyph key={target.topicId} state={care.state} deliveryCue={heartbeat.deliveryCue} size={13} /></span>
       </span>
       <span hidden id="mote-shortcut-status">{target.label} · {target.statusText} · {care.label}</span>
     </button>
@@ -71,4 +70,11 @@ export function PmoTeamsTopicEntry({ style, placement = 'compact' }: {
     {iconTarget ? <SpaceObjectContextMenu target={iconTarget} onMenuOpen={closeForEditor} onChangeIcon={setEditing}>{launcher}</SpaceObjectContextMenu> : launcher}
     <SpaceIconPicker target={editing} onClose={() => setEditing(null)} returnFocus={() => button.current} />
   </>
+}
+
+function MoteCareRim({ cue }: { cue: string | null }) {
+  const [initialCue] = useState(cue)
+  return <span className="pmo-teams-topic-compact-launcher__rim" aria-hidden="true">
+    {cue && cue !== initialCue ? <span key={cue} className="pmo-teams-topic-compact-launcher__delivery" /> : null}
+  </span>
 }

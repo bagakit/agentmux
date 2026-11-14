@@ -28,13 +28,12 @@ export const MOTE_COMPANION_PARTS = {
 export const AUTHORED_ICON_DEFINITIONS = {
   "mote-heartbeat": {
     shapes: [
-      ["path", {"d":"M8.5 4H15.5L20.3 20H3.7Z", "stroke-width":"calc(var(--icon-stroke-width, 1.75) + .35)"}],
-      ["path", {"d":"M11.4 16.5 14.4 9", "data-semantic-icon-part":"heartbeat-pendulum"}],
-      ["path", {"d":"M13.32 11.7 13.63 10.92", "stroke-width":"calc(var(--icon-stroke-width, 1.75) + 1.4)", "data-semantic-icon-part":"heartbeat-pendulum"}]
+      ["path", {"d":"M19.2 17.25A9 9 0 1 1 17.25 4.8L15.3 7.45A5.73 5.73 0 1 0 16.55 15.3Z", "fill":"currentColor", "stroke":"none"}],
+      ["path", {"d":"M21.25 9.75A2.25 2.25 0 1 1 16.75 9.75A2.25 2.25 0 1 1 21.25 9.75Z", "fill":"currentColor", "stroke":"none", "data-semantic-icon-part":"heartbeat-beat"}]
     ],
     design: {
-      rest: "梯形机身和内侧的短摆杆组成机械节拍器，头像外缘和主对话共用，在线点单独显示。",
-      motion: { kind: "once", animation: "feedback", description: "摆杆与配重向内摆一次后归位，机身固定。", trigger: "持续查看同一开启安排时，原安排的新一轮输入确认投递。首次读回和重复回执保持静止。" }
+      rest: "实心弧和独立的一拍在紧凑主对话入口保留可读轮廓。",
+      motion: { kind: "once", animation: "feedback", description: "独立的一拍短促放大后归位。", trigger: "持续查看同一开启安排时，原安排的新一轮输入确认投递。" }
     }
   },
   "workflow-route": {

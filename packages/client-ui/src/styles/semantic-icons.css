@@ -64,7 +64,7 @@
 [data-semantic-icon-part="agreement-flag"] { animation: var(--icon-selection-flag, var(--icon-feedback-flag, none)) var(--icon-selection-duration, .8s) ease-out; transform-box: view-box; transform-origin: 9px 9.5px; }
 [data-semantic-icon-part="note-content"] { animation: var(--icon-feedback-content, none) .8s ease-out; }
 [data-semantic-icon-part="survey-reflection"] { animation: var(--icon-feedback-probe, none) .8s ease-in-out; }
-[data-semantic-icon-part="heartbeat-pendulum"] { animation: var(--icon-feedback-heartbeat, none) .22s ease-in-out; transform-box: view-box; transform-origin: 11.4px 16.5px; }
+[data-semantic-icon-part="heartbeat-beat"] { animation: var(--icon-feedback-heartbeat, none) .32s ease-out; transform-box: fill-box; transform-origin: center; }
 /* Only registered sand parts receive these instance selectors; custom drawings stay whole. */
 .semantic-icon-motion[data-icon-animation="wait"] {
   --icon-hourglass-frame-animation: semantic-icon-hourglass-turn;
@@ -162,7 +162,7 @@
 @keyframes semantic-icon-content-once { from { stroke-dasharray: 1; stroke-dashoffset: 1; } to { stroke-dasharray: 1; stroke-dashoffset: 0; } }
 @keyframes semantic-icon-flag-once { from { transform: scaleX(.35); } 65% { transform: scaleX(1.04); } to { transform: scaleX(1); } }
 @keyframes semantic-icon-probe-once { 0%, 100% { transform: none; } 38% { transform: translate(.6px, -.4px); } 68% { transform: translate(-.2px, .2px); } }
-@keyframes semantic-icon-heartbeat-once { 0%, 100% { transform: none; } 45% { transform: rotate(-11deg); } }
+@keyframes semantic-icon-heartbeat-once { 0%, 100% { transform: none; } 30% { transform: scale(1.28); } }
 @keyframes semantic-icon-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) {
   .semantic-icon-motion[data-icon-animation] { --icon-motion-iterations: 0; --icon-feedback-content: none; --icon-feedback-probe: none; --icon-feedback-flag: none; --icon-feedback-heartbeat: none; animation: none; will-change: auto; }

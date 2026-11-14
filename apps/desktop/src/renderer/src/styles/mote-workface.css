@@ -12,12 +12,10 @@
 .mote-heartbeat-lamp { appearance: none; display: inline-flex; align-items: center; justify-content: center; gap: 5px; flex: 0 0 auto; min-height: 26px; padding: 3px 7px; border: 1px solid var(--line-soft); border-radius: 14px; background: transparent; color: var(--text-2); font: inherit; font-size: var(--fs-meta); cursor: pointer; -webkit-app-region: no-drag; }
 .mote-heartbeat-lamp:hover { background: var(--surface-2); color: var(--text); }
 .mote-heartbeat-lamp:focus-visible { outline: 2px solid var(--focus-line); outline-offset: 2px; }
-.mote-heartbeat-lamp__signal, .mote-heartbeat-entry { display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box; width: 16px; height: 16px; flex: none; color: var(--text-2); }
+.mote-heartbeat-lamp__signal { display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box; width: 16px; height: 16px; flex: none; color: var(--text-2); }
 .mote-heartbeat-lamp[data-mote-care="attention"] { color: var(--amber-text); background: var(--amber-bg); border-color: var(--amber-line); }
-.mote-heartbeat-entry[data-mote-care="attention"] { color: var(--amber-text); }
 .mote-heartbeat-lamp[data-mote-care="attention"] .mote-heartbeat-lamp__signal { color: inherit; }
-.mote-heartbeat-lamp[data-mote-care="unbound"] .mote-heartbeat-lamp__signal, .mote-heartbeat-entry[data-mote-care="unbound"] { color: var(--text-3); }
-.mote-heartbeat-entry { position: absolute; z-index: 3; top: -3px; right: -1px; width: 13px; height: 13px; pointer-events: none; }
+.mote-heartbeat-lamp[data-mote-care="unbound"] .mote-heartbeat-lamp__signal { color: var(--text-3); }
 @container mote-space (max-width: 760px) { .mote-heartbeat-lamp { width: 26px; padding: 3px; } .mote-heartbeat-lamp__label { display: none; } }
 @container mote-workface (max-width: 560px) { .mote-heartbeat-lamp { width: 26px; padding: 3px; } .mote-heartbeat-lamp__label { display: none; } }
 .mote-space-frame__header .mote-cooperation--navigation { padding: 0; }

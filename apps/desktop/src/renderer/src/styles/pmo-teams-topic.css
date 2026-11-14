@@ -46,7 +46,34 @@
 .pmo-teams-topic-compact-launcher__button:hover { background: transparent; }
 .pmo-teams-topic-compact-launcher__button:focus-visible { outline: none; }
 .pmo-teams-topic-compact-launcher__surface { position: relative; display: inline-flex; flex: none; align-items: center; justify-content: center; width: 34px; height: 34px; border-radius: 17px; background: var(--surface-2); pointer-events: none; }
-.pmo-teams-topic-compact-launcher__button:focus-visible .pmo-teams-topic-compact-launcher__surface { outline: 2px solid var(--green-2); outline-offset: -2px; }
+/* The perimeter leaves a break for the independent runtime status point. */
+.pmo-teams-topic-compact-launcher__rim { position: absolute; inset: 0; border-radius: inherit;
+  mask: radial-gradient(farthest-side, transparent calc(100% - 2.7px), #000 calc(100% - 2px) calc(100% - .55px), transparent 100%); }
+[data-mote-care="active"] > .pmo-teams-topic-compact-launcher__rim {
+  color: var(--green-2);
+  background: conic-gradient(from 157deg, currentColor 0deg, color-mix(in srgb, currentColor 54%, transparent) 110deg, currentColor 291deg, transparent 294deg); }
+[data-mote-care="paused"] > .pmo-teams-topic-compact-launcher__rim {
+  color: var(--text-2);
+  background: conic-gradient(from 157deg, currentColor 0deg 91deg, transparent 94deg 188deg, currentColor 191deg 290deg, transparent 293deg); }
+[data-mote-care="attention"] > .pmo-teams-topic-compact-launcher__rim {
+  color: var(--amber-text);
+  background: conic-gradient(from 157deg, currentColor 0deg 144deg, transparent 147deg 158deg, currentColor 161deg 290deg, transparent 293deg); }
+[data-mote-care="unknown"] > .pmo-teams-topic-compact-launcher__rim {
+  color: var(--text-2);
+  background: conic-gradient(from 191deg, currentColor 0deg 30deg, transparent 33deg 115deg, currentColor 118deg 150deg, transparent 153deg 227deg, currentColor 230deg 254deg, transparent 257deg); }
+[data-mote-care="off"] > .pmo-teams-topic-compact-launcher__rim {
+  background: conic-gradient(from 241deg, var(--text-3) 0deg 43deg, transparent 46deg); }
+.pmo-teams-topic-compact-launcher__delivery { position: absolute; inset: 0;
+  background: conic-gradient(from 157deg, transparent 0deg 9deg, var(--text) 47deg, transparent 67deg);
+  animation: mote-care-rim-delivery 560ms cubic-bezier(.18,.56,.35,1) both; }
+@keyframes mote-care-rim-delivery {
+  0% { opacity: 0; transform: rotate(0deg); }
+  18% { opacity: .9; }
+  75% { opacity: .56; }
+  100% { opacity: 0; transform: rotate(222deg); }
+}
+@media (prefers-reduced-motion: reduce) { .pmo-teams-topic-compact-launcher__delivery { display: none; } }
+.pmo-teams-topic-compact-launcher__button:focus-visible .pmo-teams-topic-compact-launcher__surface { outline: 2px solid var(--focus-line); outline-offset: 2px; }
 .pmo-teams-topic-compact-launcher__button img { position: relative; z-index: 1; width: 26px; height: 26px; border-radius: 5px; object-fit: contain; }
 .pmo-teams-topic-compact-launcher__status { position: absolute; z-index: 3; bottom: 4px; right: 4px; display: flex; padding: 1px; border-radius: 50%; background: var(--surface-2); }
 .pmo-teams-topic-compact-launcher__status .status__dot { width: 5px; height: 5px; box-shadow: none; }
