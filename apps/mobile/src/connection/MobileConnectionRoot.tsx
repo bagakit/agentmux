@@ -4,7 +4,8 @@ import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
 import { connectRelayHostedClient } from '@agentmux/core/relay-hosted'
 import { parseConnectionOffer, readPinnedConnectionOffer, type ConnectionOffer, type ConnectionPin } from '@agentmux/relay/offer'
 import type { ClientUiPlatform } from '@agentmux/client-ui/platform'
-import { MobileApp } from '../MobileApp'
+import { prepareMobileApp } from './prepare-mobile-app'
+import { LoadFailure } from '../navigation/defer-mobile-surface'
 import type { MobileConnection } from '../conversation/use-hosted-conversation'
 import { getDeviceWorkface } from '../recovery/device-workface'
 import { withDeviceStorageLock } from '../recovery/device-storage-lock'
@@ -13,6 +14,7 @@ import type { KeyPair } from '@agentmux/relay/e2ee'
 import { MobileWebCatalogObservation, useMobileWebObservation } from '../mobile-web/use-mobile-web-observation'
 import { MobileWebUpdateSafetyProvider } from '../mobile-web/update-safety'
 import { finishReloadIdentity, matchesReloadIdentity, mobileUpdateFragment, prepareReloadIdentity, reloadOfferIdentity } from './reload-identity'
+import './startup.css'
 
 const OFFER_KEY = 'agentmux.connection-offer.v2'
 function reloadRecordIdentity(hostId: string): string | null {
@@ -29,6 +31,10 @@ export function MobileConnectionRoot({ platform, native, focusComposer, offer, p
   const restoreWorkface = useRef(false)
   const [connectionRetry, retryConnection] = useState(0)
   const [returnIssue, setReturnIssue] = useState('')
+  const [App, setApp] = useState<(typeof import('../MobileApp'))['MobileApp'] | null>(null)
+  const [moduleIssue, setModuleIssue] = useState<string | null>(null)
+  const [metadataPending, setMetadataPending] = useState(false)
+  const cancelMetadata = useRef<(() => void) | null>(null)
   const binding = useRef<{ client: AgentMuxHostedClient; offer: string; hostId: string; key: KeyPair; state: MobileConnection['state'] } | null>(null)
   const verifyConnection = useCallback(async () => {
     const original = binding.current
@@ -53,7 +59,15 @@ export function MobileConnectionRoot({ platform, native, focusComposer, offer, p
   }, [])
   const mobileWeb = useMobileWebObservation(client, !native)
   useEffect(() => {
+    let current = true
+    void prepareMobileApp().then(module => { if (current) setApp(() => module.MobileApp) }, error => {
+      if (current) setModuleIssue(error instanceof Error ? error.message : String(error))
+    })
+    return () => { current = false }
+  }, [])
+  useEffect(() => {
     const controller = new AbortController()
+    const metadata = new AbortController()
     let owned: AgentMuxHostedClient | undefined, release: (() => void) | undefined, timer: ReturnType<typeof setTimeout> | undefined
     let pinKey: KeyPair | undefined
     let attempt = 0, working = false, pinAwaitingRetry = false, bindingNotice = '', offerNotice = ''
@@ -69,8 +83,15 @@ export function MobileConnectionRoot({ platform, native, focusComposer, offer, p
       try { return !controller.signal.aborted && location.origin === pinOrigin && getDeviceWorkface().recordIdentity() === pinRecord && localStorage.getItem(OFFER_KEY) === saved }
       catch { return false }
     }
+    const cancelObservation = () => {
+      if (!cancelMetadata.current || selected || metadata.signal.aborted) return
+      pinAwaitingRetry = true
+      metadata.abort()
+      cancelMetadata.current = null; setMetadataPending(false)
+      setConnection({ state: 'unavailable', message: '本次连接读取已取消，原工作面与连接记录保留。', paired: true })
+    }
     const checkOffer = (value: ConnectionOffer) => {
-      const previous = getDeviceWorkface().snapshot().record.host
+      const previous = getDeviceWorkface().snapshotIdentity().host
       if (previous && previous.hostId !== value.serverId) throw new Error('这个链接属于另一台 Mac，请打开之前那台 Mac 的连接链接。')
       if (original && original.serverId === value.serverId && original.daemonPublicKeyB64 !== value.daemonPublicKeyB64) throw new Error('这台 Mac 的加密身份已变化，请先在 Mac 上恢复原来的身份。')
     }
@@ -95,7 +116,10 @@ export function MobileConnectionRoot({ platform, native, focusComposer, offer, p
       working = true
       try {
         if (pin && !selected) {
-          const value = await readPinnedConnectionOffer(pinOrigin, pin, controller.signal)
+          cancelMetadata.current = cancelObservation; setMetadataPending(true)
+          const value = await readPinnedConnectionOffer(pinOrigin, pin, metadata.signal)
+          if (metadata.signal.aborted || controller.signal.aborted) return
+          cancelMetadata.current = null; setMetadataPending(false)
           if (!pinSourceCurrent()) { pinAwaitingRetry = true; throw new Error('读取连接时原工作面或连接记录已变化，请核对后重新读取。') }
           checkOffer(value)
           selected = value
@@ -109,13 +133,16 @@ export function MobileConnectionRoot({ platform, native, focusComposer, offer, p
         if (pin && !pinSourceCurrent()) { pinAwaitingRetry = true; throw new Error('连接前原工作面或连接记录已变化，请核对后重新读取。') }
         if (updating && offer) keepOffer(offer)
         if (updating) {
+          // The actual component must be ready before the synchronous locked first read.
+          const module = await prepareMobileApp().catch(() => null)
+          if (!module || controller.signal.aborted) return
           // All DeviceWorkface writers take this same cross-page lock. React's
           // first read is committed inside its synchronous transaction callback.
           await withDeviceStorageLock(() => {
             if (controller.signal.aborted) return
             if (!matchesReloadIdentity(keyPair, reloadOfferIdentity(selected!), reloadRecordIdentity(selected!.serverId))) throw new Error('重新打开网页期间工作面发生了变化，请恢复后重试。')
             restoreWorkface.current = true
-            flushSync(() => setUpdatePending(false))
+            flushSync(() => { setApp(() => module.MobileApp); setUpdatePending(false) })
           })
           if (controller.signal.aborted) return
         }
@@ -162,7 +189,7 @@ export function MobileConnectionRoot({ platform, native, focusComposer, offer, p
         catch { bindingNotice = '设备工作面保存尚未确认，当前连接可继续使用；请保全工作面或恢复设备存储。' }
         publish()
       } catch (error) {
-        if (controller.signal.aborted) return
+        if (controller.signal.aborted || metadata.signal.aborted) return
         const code = error && typeof error === 'object' && 'code' in error ? error.code : undefined
         if (pin && (!selected || pinAwaitingRetry || !pinSourceCurrent() || code === 'CONTROL_PROTOCOL_ERROR' || code === 'CONTROL_PERMISSION_DENIED' || code === 'AGENT_CAPABILITY_INVALID')) {
           pinAwaitingRetry = true; setConnection({ state: 'unavailable', message: `这次连接尚未确认。${error instanceof Error ? error.message : String(error)}。可重新读取连接或从原 Mac 重新复制。`, paired: true }); return
@@ -170,14 +197,24 @@ export function MobileConnectionRoot({ platform, native, focusComposer, offer, p
         if (error && typeof error === 'object' && 'code' in error && error.code === 'AGENT_CAPABILITY_INVALID') { setConnection({ state: 'unavailable', message: '这台设备的授权未通过确认，请重新确认授权后连接。', paired: true }); return }
         setConnection({ state: 'disconnected', message: `暂时无法连接，正在自动重试。${error instanceof Error ? error.message : String(error)}`, paired: true })
         timer = setTimeout(() => { void connect() }, Math.min(30000, 1000 * 2 ** Math.min(attempt++, 5)))
-      } finally { working = false }
+      } finally {
+        working = false
+        if (!controller.signal.aborted && cancelMetadata.current === cancelObservation) { cancelMetadata.current = null; setMetadataPending(false) }
+      }
     }
     const resume = () => { if (document.visibilityState !== 'hidden') { clearTimeout(timer); void connect() } }
     window.addEventListener('online', resume); document.addEventListener('visibilitychange', resume)
     void connect()
-    return () => { controller.abort(); clearTimeout(timer); release?.(); if (binding.current?.client === owned) binding.current = null; void owned?.dispose(); window.removeEventListener('online', resume); document.removeEventListener('visibilitychange', resume) }
+    return () => { controller.abort(); metadata.abort(); if (cancelMetadata.current === cancelObservation) cancelMetadata.current = null; clearTimeout(timer); release?.(); if (binding.current?.client === owned) binding.current = null; void owned?.dispose(); window.removeEventListener('online', resume); document.removeEventListener('visibilitychange', resume) }
   }, [offer, pin, linkIssue, connectionRetry])
-  if (updatePending) return <main className="mobile-chat-start mobile-update-recovery" aria-live="polite">
+  const observationPanel = metadataPending ? <div className="mobile-startup-observation" role="status"><p>正在读取连接…</p><button type="button" onClick={() => cancelMetadata.current?.()}>取消本次读取</button></div>
+    : connection.state === 'unavailable' && pin ? <div className="mobile-startup-observation"><p>{connection.message}</p><button type="button" onClick={() => retryConnection(value => value + 1)}>重新检查连接</button></div> : null
+  const waiting = <main className="mobile-startup" aria-live="polite" aria-busy={!moduleIssue}>
+    <strong>{moduleIssue ? '工作面暂时无法打开' : '正在准备工作面'}</strong><p>{connection.message}</p>
+    {moduleIssue ? <LoadFailure active label="工作面" failure={moduleIssue} onReturn={() => { if (history.length > 1) history.back(); else setReturnIssue('没有可返回的上一页，原工作面仍保留。') }} /> : <div className="mobile-startup-skeleton" aria-hidden="true"><span /><span /><span /></div>}
+    {observationPanel}{returnIssue && <p role="status">{returnIssue}</p>}
+  </main>
+  const recovery = <main className="mobile-chat-start mobile-update-recovery mobile-startup" aria-live="polite">
     <strong>正在接回工作面</strong><p>{connection.message}</p>
     <p>如果无法返回上一页，请恢复这台设备的工作面、身份与 Mac 连接后重新检查。</p>
     <div className="mobile-update-recovery__actions">
@@ -185,11 +222,13 @@ export function MobileConnectionRoot({ platform, native, focusComposer, offer, p
       <button type="button" onClick={() => { if (history.length > 1) history.back(); else setReturnIssue('没有可返回的上一页，请恢复工作面、设备身份与 Mac 连接后重新检查。') }}>返回上一页</button>
     </div>
     {returnIssue && <p role="status">{returnIssue}</p>}
+    {moduleIssue && <LoadFailure active label="工作面" failure={moduleIssue} onReturn={() => { if (history.length > 1) history.back(); else setReturnIssue('没有可返回的上一页，原工作面仍保留。') }} />}
+    {metadataPending && observationPanel}
   </main>
   return <MobileWebUpdateSafetyProvider verifyConnection={verifyConnection} prepareReload={prepareReload} native={native}><MobileWebCatalogObservation.Provider value={mobileWeb.observeCatalog}>
-    <MobileApp client={client} connection={connection} platform={platform} native={native} webObservation={mobileWeb.observation} restoreWorkface={restoreWorkface.current}
-      {...(focusComposer ? { focusComposer } : {})} connectionPanel={connection.paired === false ? undefined : connection.state === 'unavailable'
+    {updatePending ? recovery : App ? <App client={client} connection={connection} platform={platform} native={native} webObservation={mobileWeb.observation} restoreWorkface={restoreWorkface.current}
+    {...(focusComposer ? { focusComposer } : {})} connectionPanel={metadataPending ? observationPanel : connection.paired === false ? undefined : connection.state === 'unavailable'
         ? <><p>请核对 Mac 的连接与授权，修复后重新检查。</p><button type="button" onClick={() => retryConnection(value => value + 1)}>重新检查连接</button></>
-        : <p>连接会自动恢复。Mac 和手机保持在同一局域网即可。</p>} />
+        : <p>连接会自动恢复。Mac 和手机保持在同一局域网即可。</p>} /> : waiting}
   </MobileWebCatalogObservation.Provider></MobileWebUpdateSafetyProvider>
 }

@@ -1,0 +1,16 @@
+@import '@agentmux/client-ui/styles/palette.css';
+/* Entry recovery must remain usable before the product stylesheet is available. */
+html, body, #root { min-height: 100%; margin: 0; }
+body { color: var(--text); background: var(--bg); }
+.mobile-startup { box-sizing: border-box; max-width: 560px; margin: 0 auto; padding: max(24px, env(safe-area-inset-top)) 16px max(24px, env(safe-area-inset-bottom)); font: 14px/1.5 system-ui, sans-serif; color: var(--text); }
+.mobile-startup > strong { font-size: 18px; }
+.mobile-startup p { margin: 8px 0; overflow-wrap: anywhere; }
+.mobile-startup button, .mobile-startup summary, .mobile-startup-observation button { min-height: 44px; padding: 8px 12px; font: inherit; color: inherit; cursor: pointer; }
+.mobile-startup button { border: 1px solid var(--line-soft); border-radius: var(--radius); background: var(--surface-1); }
+.mobile-startup button:disabled { cursor: progress; }
+.mobile-startup :focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
+.mobile-startup-skeleton { display: grid; gap: 8px; margin-block: 16px; }
+.mobile-startup-skeleton > span { display: block; height: 12px; width: 100%; border-radius: var(--radius); background: var(--surface-2); }
+.mobile-startup-skeleton > span:last-child { width: 60%; }
+.mobile-startup-observation { margin-block: 8px; }
+.mobile-startup .mobile-update-recovery__actions { display: flex; flex-wrap: wrap; gap: 8px; }

@@ -18,7 +18,7 @@ class LoadBoundary extends Component<LoadBoundaryProps, { failure: string | null
   }
 }
 
-function LoadFailure({ active, label, failure, onReturn }: { active: boolean; label: string; failure: string; onReturn(): void }) {
+export function LoadFailure({ active, label, failure, onReturn }: { active: boolean; label: string; failure: string; onReturn(): void }) {
   const { busy, issue, reload, cancel } = useMobileWebReloadAction(active)
   return <section className="mobile-deferred-surface" role="status">
     <p>{label}暂时无法打开。可保全当前内容后重新打开网页。</p>
