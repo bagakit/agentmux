@@ -17,6 +17,9 @@ import { yieldTerminalWork } from '@agentmux/client-ui/terminal/replay'
 import { terminalResourceOwnerCounts } from '../src/renderer/src/lib/terminal-resource-owners'
 import * as terminalResourceOwners from '../src/renderer/src/lib/terminal-resource-owners'
 import * as clientIncidents from '../src/renderer/src/lib/client-incident-recorder'
+import type { AgentMuxAgentSession, AgentMuxNativeService } from '@agentmux/core'
+import { DEFAULT_AGENT_CONTINUITY_POLICY, type AgentMuxContinuityOperation } from '@agentmux/core/agent-session-recovery'
+import { projectRuntimeEvent, type SessionProjectionState } from '../src/renderer/src/lib/session-state'
 
 type FixtureTerminal = HeadlessTerminal & {
   refresh: ReturnType<typeof vi.fn>
@@ -25,6 +28,8 @@ type FixtureTerminal = HeadlessTerminal & {
   written: string[]
   completed: string[]
   restoreSelection: ReturnType<typeof vi.fn>
+  onUserInput(listener: () => void): { dispose(): void }
+  userInput(data: string): void
 }
 type FixtureWebgl = {
   disposed: ReturnType<typeof vi.fn>
@@ -68,7 +73,15 @@ vi.mock('@xterm/xterm', async () => {
     }
     open = vi.fn((root: HTMLElement) => { this.element ??= root.ownerDocument.createElement('div'); root.append(this.element) })
     focus() {}
-    onUserInput() { return { dispose() {} } }
+    private userInputListeners = new Set<() => void>()
+    onUserInput(listener: () => void) {
+      this.userInputListeners.add(listener)
+      return { dispose: () => { this.userInputListeners.delete(listener) } }
+    }
+    userInput(data: string) {
+      for (const listener of this.userInputListeners) listener()
+      this.input(data, true)
+    }
     onRender() { return { dispose: fixture.renderDispose } }
     onSelectionChange() { return { dispose() {} } }
     getSelection() { return '' }
@@ -1388,4 +1401,169 @@ it('a retried caret handoff reveals once and then leaves the reader where they s
     expect(scroll).toHaveBeenCalledOnce()
     expect(terminal.buffer.active.viewportY).toBe(40)
   } finally { store.regionCaretFocus = null }
+})
+
+type TerminalAgentFixture = Extract<SessionSnapshot, { kind: 'agent' }>
+function terminalAgentFixture(): TerminalAgentFixture {
+  return { ...session, kind: 'agent', providerId: 'codex', executorId: 'codex', agentSessionUpdatedAt: 1,
+    capabilities: { terminal: true, timeline: 'complete-events', permission: 'observe', providerResume: true, replyCorrelation: 'none' },
+    control: { kind: 'agent', hostId: 'local', agentSessionId: session.id, run: session.control.run } }
+}
+function terminalOwnerScene(value: SessionSnapshot) {
+  return <WorkbenchPresentationContext.Provider value={{ active: false, retainedRegionId: null, reference, surface: 'space' }}>
+    <TerminalView session={value} themeId="graphite" interactiveResize={false} visible={false} autoFocus={false} linkOrigin={linkOrigin} />
+  </WorkbenchPresentationContext.Provider>
+}
+function terminalCoreFacts(base: TerminalAgentFixture, updatedAt: number, continuity?: AgentMuxContinuityOperation): AgentMuxAgentSession {
+  return { kind: 'agent', agentSessionId: base.id, providerId: base.providerId, executorId: base.executorId,
+    hostId: base.hostId, workspacePath: base.workspacePath, run: base.control.run, retiredRuns: [],
+    createdAt: base.createdAt, updatedAt, ...(continuity ? { continuity } : {}) }
+}
+function terminalCoreProjection(state: SessionProjectionState, base: TerminalAgentFixture, updatedAt: number, continuity?: AgentMuxContinuityOperation) {
+  return projectRuntimeEvent(state, { type: 'core', hostId: base.hostId,
+    event: { type: 'agent-session', session: terminalCoreFacts(base, updatedAt, continuity) } }).state
+}
+function terminalOwnerAttach(base: SessionSnapshot) {
+  // The native port owns no synthetic input; only the public Core projection does.
+  fixture.attach.mockResolvedValue({ attachmentId: 'attachment-retained', currentSize: { cols: 80, rows: 24 },
+    session: { ...base, latestOutputBytes: 7 }, terminal: { type: 'unavailable', reason: 'source_gap' },
+    resizeRevision: 0, gap: null,
+    replay: [{ runId: base.control.run.runId, data: 'before ', dataBytes: new TextEncoder().encode('before '), startByte: 0, endByte: 7 }] })
+}
+async function terminalOwnerSeed() {
+  const base = terminalAgentFixture()
+  const key = { kind: 'message' as const, agentSessionId: base.id, expectedRun: base.control.run, messageId: 'terminal-original-input' }
+  const continuity: AgentMuxContinuityOperation = { operationId: 'terminal-original-operation', agentSessionId: base.id, trigger: 'startup',
+    policy: { ...DEFAULT_AGENT_CONTINUITY_POLICY }, previousRun: base.control.run, admittedAt: 1, observedAt: 2,
+    rechecks: 0, kind: 'pending', reason: 'operation-unconfirmed', evidence: { kind: 'run-running', observedAt: 2 },
+    messageInput: { ref: { key, waitGeneration: 1 }, key, admissionIntent: { kind: 'session-conversation', expectedRun: base.control.run },
+      prompt: 'Original pending terminal input', message: { userContent: 'Original pending body 中文'.repeat(50_000), authorHuman: true },
+      lifecycleOperationId: 'terminal-original-lifecycle' } }
+  const state = terminalCoreProjection({ sessions: [base], timelines: {}, pendingAgentLaunches: {}, tabs: {}, layouts: {}, viewModes: {} }, base, 2, continuity)
+  const current = state.sessions[0]!
+  if (current.kind !== 'agent' || !current.continuity?.messageInput) throw Error('The actual Core projection must carry its nonempty current input')
+  terminalOwnerAttach(base)
+  await act(async () => root!.render(terminalOwnerScene(current)))
+  await act(async () => { await vi.waitFor(() => expect(fixture.terminals[0]?.completed).toContain('before ')) })
+  return { state, base, weak: new WeakRef(current.continuity.messageInput.message) }
+}
+async function collectTerminalOwner() {
+  for (let index = 0; index < 30; index++) { globalThis.gc!(); await new Promise(done => setTimeout(done, 15)) }
+}
+function terminalOwnerFact(value: unknown) {
+  if (process.env.TERMINAL_OWNER_FACTS) appendFileSync(process.env.TERMINAL_OWNER_FACTS, JSON.stringify(value) + '\n')
+}
+
+it('[terminal-owner-retention] releases retired Core input while the same actual terminal keeps its current body, reading, queued bytes and input', async () => {
+  expect(globalThis.gc).toBeTypeOf('function')
+  const trace = Error.stackTraceLimit
+  Error.stackTraceLimit = 0
+  let restoreWrite: (() => void) | undefined
+  try {
+    let { state, base, weak } = await terminalOwnerSeed()
+    const terminal = fixture.terminals[0]!, node = rootContainer.querySelector('.terminal-view')
+    await collectTerminalOwner()
+    expect(weak.deref(), 'The current legitimate Core/props input must remain held').toBeDefined()
+    expect(state.sessions[0]!.kind === 'agent' && state.sessions[0]!.continuity?.messageInput?.message.userContent?.startsWith('Original pending body 中文')).toBe(true)
+    const history = Array.from({ length: 70 }, (_, index) => 'history-' + index + '\r\n').join('')
+    await hiddenOutput(history, 7)
+    terminal.scrollToLine(10)
+    const readingLine = terminal.buffer.active.getLine(10)?.translateToString(true), readingViewport = terminal.buffer.active.viewportY
+    expect(readingLine).toContain('history-')
+    expect(readingViewport).toBe(10)
+    const first = 'queued-A', second = 'queued-B', nextByte = 7 + history.length
+    let resume: (() => void) | undefined
+    const nativeWrite = terminal.write.bind(terminal), write = vi.spyOn(terminal, 'write').mockImplementation((data, callback) => {
+      const text = typeof data === 'string' ? data : new TextDecoder().decode(data)
+      nativeWrite(data, () => { if (text === first) resume = callback; else callback?.() })
+    })
+    restoreWrite = () => write.mockRestore()
+    await act(async () => {
+      fixture.receive!({ type: 'core', hostId: base.hostId, event: { type: 'terminal-output', run: base.control.run,
+        data: first, dataBytes: new TextEncoder().encode(first), evidence: { source: 'run-process', observedAt: 3, outputByteRange: { startByte: nextByte, endByte: nextByte + first.length } } } })
+      await vi.waitFor(() => expect(resume).toBeTypeOf('function'))
+      fixture.receive!({ type: 'core', hostId: base.hostId, event: { type: 'terminal-output', run: base.control.run,
+        data: second, dataBytes: new TextEncoder().encode(second), evidence: { source: 'run-process', observedAt: 4, outputByteRange: { startByte: nextByte + first.length, endByte: nextByte + first.length + second.length } } } })
+    })
+    expect(rendererPerformance.snapshot().terminals[0]!.queuedBytes, 'Real second output remains queued behind the outstanding parser acknowledgement').toBeGreaterThan(0)
+    // Advance accepted Core facts and React alternate props; the current projection
+    // now omits the completed operation. No terminal effect/Run is retired.
+    for (let index = 0; index < 5; index++) {
+      state = terminalCoreProjection(state, base, 3 + index)
+      await act(async () => root!.render(terminalOwnerScene(state.sessions[0]!)))
+    }
+    expect(state.sessions[0]!.kind === 'agent' && state.sessions[0]!.continuity).toBeFalsy()
+    await collectTerminalOwner()
+    const retiredInputHeld = weak.deref() !== undefined
+    await act(async () => { resume!(); resume = undefined; await vi.waitFor(() => expect(terminal.completed).toContain(second)) })
+    expect(terminal.completed.indexOf(second)).toBeGreaterThan(terminal.completed.indexOf(first))
+    expect(rendererPerformance.snapshot().terminals[0]).toMatchObject({ runId: base.control.run.runId, liveReady: true,
+      acceptsInput: true, visible: false, queuedBytes: 0, queuedItems: 0 })
+    expect(terminal.buffer.active.viewportY).toBe(readingViewport)
+    expect(terminal.buffer.active.getLine(10)?.translateToString(true)).toBe(readingLine)
+    terminal.userInput('HEALTHY_ORIGINAL_AGENT_INPUT')
+    expect(fixture.write).toHaveBeenLastCalledWith(base.control, 'HEALTHY_ORIGINAL_AGENT_INPUT', 'user', expect.anything())
+    expect(rootContainer.querySelector('.terminal-view')).toBe(node)
+    expect(fixture.terminals).toEqual([terminal])
+    expect(fixture.attach).toHaveBeenCalledExactlyOnceWith(base.control, 0)
+    expect(fixture.detach).not.toHaveBeenCalled()
+    expect(terminal.dispose).not.toHaveBeenCalled()
+    expect(fixture.webgl).toHaveLength(0)
+    terminalOwnerFact({ case: 'core-clear-during-real-queued-output', currentBodyHeld: true, retiredInputHeld,
+      sameTerminalDOMRun: true, queuedOutputOrdered: true, readingPreserved: true, inputTarget: base.control,
+      sourceClock: state.sessions[0]!.kind === 'agent' ? state.sessions[0]!.agentSessionUpdatedAt : null,
+      attachCalls: fixture.attach.mock.calls.length, owners: terminalResourceOwnerCounts(),
+      isolation: 'Private Node GC and nonempty synthetic Core input; actual TerminalView lifecycle, headless parser and controlled native ports; no user App or RSS claim.' })
+    expect(retiredInputHeld, 'The actual mounted terminal owner must release the retired complete input after authoritative same-Run clearing').toBe(false)
+  } finally { restoreWrite?.(); Error.stackTraceLimit = trace }
+})
+
+function terminalOwnerService(revision: number, pressured = false): AgentMuxNativeService {
+  return { revision, owner: { type: 'serving' }, output: pressured ? { type: 'backpressured' } : { type: 'serving' },
+    input: { phase: { type: 'open' }, unsettledCommands: 0, unsettledRequestBytes: 0, writeBlocked: false,
+      completedInputBytes: 5, currentSize: { cols: 80, rows: 24 }, activeConfirmedBytes: 0 }, terminalFault: null }
+}
+it('[terminal-owner-retention] propagates fresh Native, capability, output, Hook and recovery facts and their authoritative optional clearings', async () => {
+  const base = terminalAgentFixture()
+  terminalOwnerAttach(base)
+  const show = async (value: TerminalAgentFixture) => { await act(async () => root!.render(terminalOwnerScene(value))) }
+  await show(base)
+  await act(async () => { await vi.waitFor(() => expect(fixture.terminals[0]?.completed).toContain('before ')) })
+  const terminal = fixture.terminals[0]!, node = rootContainer.querySelector('.terminal-view')
+  await show({ ...base, nativeService: terminalOwnerService(10, true) })
+  expect(rootContainer.textContent).toContain('Serving output under resource pressure')
+  await show({ ...base, nativeService: terminalOwnerService(11) })
+  expect(rootContainer.textContent).not.toContain('Serving output under resource pressure')
+  await show({ ...base, nativeService: null })
+  expect(rootContainer.textContent).not.toContain('Serving output under resource pressure')
+  await show({ ...base, terminalCapability: { state: 'unknown', mode: 'degraded', reason: 'handshake-unconfirmed',
+    diagnostic: { code: 'original-capability-code', message: 'Original capability observation' }, run: base.control.run, observedAt: 12 } })
+  expect(rootContainer.textContent).toContain('original-capability-code')
+  await show(base)
+  expect(rootContainer.textContent).not.toContain('original-capability-code')
+  await show({ ...base, terminalOutputChannel: { state: 'severed', mode: 'degraded', reason: 'reattach-failed', run: base.control.run, observedAt: 13 } })
+  expect(rootContainer.textContent).toContain('Reattaching this window’s output')
+  await show(base)
+  expect(rootContainer.textContent).not.toContain('Reattaching this window’s output')
+  await show({ ...base, hookIngressObservation: { run: base.control.run, phase: 'binding', code: 'original-hook-code', message: 'Original Hook observation', observedAt: 14 },
+    hookDeliveryObservation: { run: base.control.run, since: 14, accepted: 'unknown', code: 'original-delivery-code', reason: 'Original loss observation' } })
+  expect(rootContainer.textContent).toContain('original-hook-code')
+  expect(rootContainer.textContent).toContain('original-delivery-code')
+  await show(base)
+  expect(rootContainer.textContent).not.toContain('original-hook-code')
+  expect(rootContainer.textContent).not.toContain('original-delivery-code')
+  await show({ ...base, processState: 'interrupted', interruptionReason: 'daemon_restart',
+    status: { state: 'disconnected', source: 'run-process', observedAt: 15 } })
+  expect(rootContainer.textContent).not.toContain('Reconnecting to this Agent')
+  await show({ ...base, processState: 'interrupted', interruptionReason: 'daemon_restart', runUnobserved: true,
+    status: { state: 'disconnected', source: 'run-process', observedAt: 16 } })
+  expect(rootContainer.textContent).toContain('Reconnecting to this Agent')
+  await show(base)
+  expect(rootContainer.textContent).not.toContain('Reconnecting to this Agent')
+  terminal.userInput('HEALTHY_AFTER_CURRENT_FACTS')
+  expect(fixture.write).toHaveBeenLastCalledWith(base.control, 'HEALTHY_AFTER_CURRENT_FACTS', 'user', expect.anything())
+  expect(fixture.terminals).toEqual([terminal]); expect(rootContainer.querySelector('.terminal-view')).toBe(node)
+  expect(fixture.attach).toHaveBeenCalledExactlyOnceWith(base.control, 0); expect(fixture.detach).not.toHaveBeenCalled()
+  terminalOwnerFact({ case: 'fresh-facts-and-optional-clearings', nativeServiceRevision: 11, capability: true, output: true,
+    hookIngress: true, hookDelivery: true, runtimeRestartAndUnknown: true, sameTerminalDOMRun: true, healthyInput: true })
 })
