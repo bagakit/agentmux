@@ -4,7 +4,7 @@ import { LiquidSelectionSurface } from './LiquidSelectionSurface'
 /** Native local modes; the caller owns selection and the content being shown. */
 export function SurfaceModeSwitch<Value extends string>({ value, options, onChange, active, ariaLabel, semantics = 'tabs', className }: {
   value: Value
-  options: readonly { value: NoInfer<Value>; label: ReactNode; ariaLabel?: string }[]
+  options: readonly { value: NoInfer<Value>; label: ReactNode; ariaLabel?: string; ariaDescription?: string }[]
   onChange(value: NoInfer<Value>): void
   active: boolean
   ariaLabel: string
@@ -23,7 +23,7 @@ export function SurfaceModeSwitch<Value extends string>({ value, options, onChan
   }}>
     <LiquidSelectionSurface selected={value} active={active} targetAttribute="data-surface-mode" />
     {options.map(option => <button key={option.value} type="button" role={semantics === 'tabs' ? 'tab' : undefined} data-surface-mode={option.value}
-      aria-label={option.ariaLabel} aria-selected={semantics === 'tabs' ? value === option.value : undefined}
+      aria-label={option.ariaLabel} aria-description={option.ariaDescription} aria-selected={semantics === 'tabs' ? value === option.value : undefined}
       aria-pressed={semantics === 'pressed' ? value === option.value : undefined} tabIndex={semantics === 'tabs' ? value === option.value ? 0 : -1 : undefined}
       className={value === option.value ? 'selected' : ''} onClick={() => onChange(option.value)}>{option.label}</button>)}
   </div>

@@ -1,7 +1,8 @@
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { useMoteDialogue } from '@agentmux/client-ui/use-mote-dialogue'
-import { MoteWorkThreads, type MoteWorkReader } from '@agentmux/client-ui/components/MoteConversationThreads'
+import { MoteWorkThreads, moteWorkEvents, type MoteWorkReader, type MoteThreadView } from '@agentmux/client-ui/components/MoteConversationThreads'
+import type { MoteThreadCount } from './MoteThreadNavigation'
 import { useMoteDialogueView } from '../lib/mote-dialogue-view'
 import type { MoteWorkfaceScope } from '../lib/mote-workface'
 import { moteMembers } from '../lib/mote-team'
@@ -16,10 +17,15 @@ import { formatMoteAddress } from '@agentmux/core/sharing'
 import { copyTextToClipboard } from '../lib/clipboard-copy'
 
 /** Threads reads original work sources even when the Main native conversation is unavailable. */
-export function MoteThreadsPanel({ scope, active, onSelect, requestedEvent }: {
+export function MoteThreadsPanel({ scope, active, observe = active, onSelect, requestedEvent, view, onViewChange, onCount }: {
   scope: MoteWorkfaceScope; active: boolean; requestedEvent?: { eventId: string; token: string } | undefined; onSelect(reference: WorkbenchProjectionSelection): boolean
+  observe?: boolean; view?: MoteThreadView | undefined; onViewChange?: ((view: MoteThreadView) => void) | undefined
+  onCount?: ((view: MoteThreadView, count: MoteThreadCount) => void) | undefined
 }) {
   const dialogue = useMoteDialogueView()
+  const workCount = dialogue?.page?.sourceStatus === 'read' ? moteWorkEvents(dialogue.page.links).length : null
+  useEffect(() => { if (observe) onCount?.('work', { value: workCount, more: Boolean(dialogue?.page?.next), unavailable: Boolean(dialogue?.issue) }) }, [observe, workCount, dialogue?.page?.next, dialogue?.issue, onCount])
+  const privateCount = useCallback((count: MoteThreadCount) => onCount?.('private', count), [onCount])
   const direct = useMoteDialogue(api.moteDialogue.read, dialogue?.target ?? undefined, active && requestedEvent !== undefined,
     requestedEvent?.token, requestedEvent ? { kind: 'work', eventId: requestedEvent.eventId } : undefined)
   const work = requestedEvent ? direct : dialogue
@@ -37,13 +43,13 @@ export function MoteThreadsPanel({ scope, active, onSelect, requestedEvent }: {
   }, [])
   if (!dialogue) return null
   return <div className="mote-threads-panel" hidden={!active}>
-    <MoteWorkThreads page={work?.page ?? null} issue={work?.issue ?? requestedIssue} loading={work?.loading ?? false} visible={active} readWork={readWork} requestedEvent={requestedEvent}
+    <MoteWorkThreads page={work?.page ?? null} issue={work?.issue ?? requestedIssue} loading={work?.loading ?? false} visible={active} readWork={readWork} requestedEvent={requestedEvent} view={view} onViewChange={onViewChange} showViews={view === undefined}
       renderEventActions={event => dialogue.target ? <button type="button" className="mote-conversation__link" aria-label="复制 thread 链接" onClick={() => {
         void copyTextToClipboard(formatMoteAddress({ spaceId: dialogue.target!.spaceId, eventId: event.id }), useAppStore.getState().reportError)
       }}>复制 thread 链接</button> : null}
       memberName={source => members.find(member => member.hostId === source.origin.hostId && member.agentSessionId === source.origin.recipientSessionId)?.regions.find(region => region.title)?.title ?? source.origin.recipientSessionId}
       onRefresh={() => work?.refresh()} onOlder={() => void work?.older()}
-      privateChats={visible => <MotePrivateConversations scope={scope} active={visible} />}
+      privateChats={visible => <MotePrivateConversations scope={scope} active={visible} observe={observe} onCount={privateCount} />}
       members={{ count: null, content: visible => <MoteCooperation scope={scope} active={visible} presentation="threads" onSelect={onSelect} /> }} onOpenWork={source => {
         const original = dialogue.target && moteMembers(workbenchSelectionCatalog(useAppStore.getState()), dialogue.target.spaceId)
           .find(member => member.hostId === source.origin.hostId && member.agentSessionId === source.origin.recipientSessionId)

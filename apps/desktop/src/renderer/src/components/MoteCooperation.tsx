@@ -24,6 +24,9 @@ import { resolveMoteDefaultConversation, moteDefaultCatalog, useMoteDefaultConve
 import { MoteConversationBrowser } from './MoteConversationBrowser'
 import { MoteSessionConversation } from './MoteSessionConversation'
 import '../styles/mote-cooperation.css'
+import { agentActivityRemainingMs } from '@agentmux/core/agent-status'
+import { observeAgentSession } from '../lib/agent-observation'
+import type { MoteThreadCount, MoteWorkingMember } from './MoteThreadNavigation'
 
 const Team = semanticIconComponent('object.team')
 const Forward = semanticIconComponent('navigation.forward')
@@ -35,10 +38,11 @@ const Search = semanticIconComponent('action.search')
 const Back = semanticIconComponent('navigation.back')
 
 /** One compact reading surface over original members. All actions navigate existing owners. */
-export function MoteCooperation({ scope, active, reference, onSelect, actions, presentation, conversation }: {
+export function MoteCooperation({ scope, active, reference, onSelect, actions, presentation, conversation, onMembers }: {
   scope: MoteWorkfaceScope; active: boolean; reference?: WorkbenchProjectionSelection | null | undefined
   onSelect(reference: WorkbenchProjectionSelection): boolean; actions?: ReactNode; presentation: 'navigation' | 'threads'
   conversation?: { mode: 'main' | 'member' | 'threads'; original: boolean; onMain(): void; onThreads(): void; onWorkspace(): void } | undefined
+  onMembers?: ((count: MoteThreadCount, working: MoteWorkingMember[]) => void) | undefined
 }) {
   const facts = useAppStore(useShallow(state => ({ config: state.config, tabs: workbenchNavigationTabs(state.tabs), layouts: state.layouts,
     spaceZoneBindings: state.spaceZoneBindings, topicCategories: state.topicCategories, projectGroups: state.projectGroups,
@@ -182,6 +186,24 @@ export function MoteCooperation({ scope, active, reference, onSelect, actions, p
   // Keep rows in their original directory order while the person chooses. A
   // background status change should not move a different target under the pointer.
   const ordered = members.filter(member => !roleConfirmed || !isPrimary(member) || conversation?.mode === 'member' && current?.key === member.key)
+  const [activityNow, setActivityNow] = useState(Date.now)
+  const activities = members.flatMap(member => {
+    const session = sessions[member.key]
+    return session?.kind === 'agent' && (member.hostId === null || session.control.hostId === member.hostId) && session.control.agentSessionId === member.agentSessionId
+      ? [{ member, hostId: session.control.hostId, observation: observeAgentSession(session, Math.max(activityNow, Date.now())) }] : []
+  })
+  const working = [...new Map(activities.filter(item => item.observation.semantic === 'active').map(({ member, hostId }) => [JSON.stringify([hostId, member.agentSessionId]), { hostId, agentSessionId: member.agentSessionId, title: title(member) }])).values()]
+  // Reuse this directory's exact subscription. One expiry timer, no polling or unrelated Agent scan.
+  const expires = Math.min(...activities.map(item => agentActivityRemainingMs(item.observation, Date.now())).filter(ms => ms > 0))
+  useEffect(() => {
+    if (!active || !onMembers || !Number.isFinite(expires)) return
+    const timer = setTimeout(() => setActivityNow(Date.now()), expires + 1)
+    return () => clearTimeout(timer)
+  }, [active, onMembers, expires])
+  const counted = members.filter(member => !roleConfirmed || !isPrimary(member))
+  const known = counted.flatMap(member => { const host = member.hostId ?? sessions[member.key]?.control.hostId; return host ? [JSON.stringify([host, member.agentSessionId])] : [] })
+  const memberProjection = JSON.stringify({ count: { value: spaceId ? new Set(known).size : null, ...(!spaceId ? { unavailable: true } : {}), ...(known.length !== counted.length || !roleConfirmed ? { more: true } : {}) }, working })
+  useEffect(() => { if (active) { const result = JSON.parse(memberProjection); onMembers?.(result.count, result.working) } }, [active, memberProjection, onMembers])
   const search = query.trim().toLocaleLowerCase()
   const shown = ordered.filter(member => !search || title(member).toLocaleLowerCase().includes(search))
   const currentTitle = conversation?.mode === 'main' ? '主对话' : conversation?.mode === 'threads' ? '全部工作' : current ? title(current) : '原对话'
@@ -251,8 +273,6 @@ export function MoteCooperation({ scope, active, reference, onSelect, actions, p
         aria-expanded={expanded} aria-controls={id} data-needs-you={needed > 0 ? 'true' : undefined}>
         <Conversations size={14} /><span>{conversation ? currentTitle : '对话'}</span>{needed ? <small aria-label={`${needed} 项待你处理`}>{needed}</small> : null}<Down size={12} />
       </button></Dialog.Trigger>
-      {conversation ? <button type="button" className="mote-cooperation__browse" data-mote-threads-entry aria-label="Threads" title="查看工作与回报" aria-current={conversation.mode === 'threads' ? 'page' : undefined}
-        onClick={() => { setExpanded(false); conversation.onThreads() }}><Team size={14} /></button> : null}
       <DocumentOverlayPortal component={Dialog.Portal}>
         <Dialog.Content ref={setPanel} className="mote-cooperation mote-cooperation__popover" style={{ visibility: 'hidden' }} aria-describedby={undefined}
           onOpenAutoFocus={event => { event.preventDefault(); panel?.focus({ preventScroll: true }) }}>

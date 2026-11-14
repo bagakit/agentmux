@@ -136,7 +136,8 @@ function WorkEventCard({ event, read, visible, memberName, onOpen, expanded, onE
 /** Original dispatch threads, independent of the Main Agent's native reader.
  * Master-detail: one toolbar row (status tabs, search, refresh), a dense list, and the selected thread as a flat document.
  * Narrow containers show the list, then the selected thread full width with a back control. Grouping by day is a list option, not a mode. */
-export function MoteWorkThreads({ page, issue, loading, visible, readWork, memberName, onRefresh, onOlder, onOpenWork, members, privateChats, requestedEvent, renderEventActions }: {
+export type MoteThreadView = 'work' | 'private' | 'members'
+export function MoteWorkThreads({ page, issue, loading, visible, readWork, memberName, onRefresh, onOlder, onOpenWork, members, privateChats, requestedEvent, renderEventActions, view: controlledView, onViewChange, showViews = true }: {
   page: MoteDialoguePage | null; issue: string | null; loading: boolean; visible: boolean; readWork: MoteWorkReader
   memberName?: ((source: Work) => string) | undefined; onRefresh(): void; onOlder?(): void; onOpenWork(source: Work): void
   /** The host's original member directory, shown as a peer tab instead of a second block under the list. */
@@ -145,10 +146,14 @@ export function MoteWorkThreads({ page, issue, loading, visible, readWork, membe
   /** One explicit host navigation to this Mote's original event; no member inference. */
   requestedEvent?: { eventId: string; token: string } | undefined
   renderEventActions?: ((event: MoteWorkEvent) => ReactNode) | undefined
+  /** Desktop places these same views in its persistent header; other hosts retain local navigation. */
+  view?: MoteThreadView | undefined; onViewChange?: ((view: MoteThreadView) => void) | undefined; showViews?: boolean
 }) {
   const viewport = useVisibleWork<HTMLElement>(visible)
   const [history, setHistory] = useState(false), [expanded, setExpanded] = useState<Set<string>>(() => new Set())
-  const [view, setView] = useState<'work' | 'private' | 'members'>('work')
+  const [localView, setLocalView] = useState<MoteThreadView>('work')
+  const view = controlledView ?? localView
+  const setView = useCallback((next: MoteThreadView) => { setLocalView(next); if (next !== controlledView) onViewChange?.(next) }, [onViewChange, controlledView])
   const [query, setQuery] = useState(''), [filter, setFilter] = useState<ThreadFilter>('all')
   const [summaries, setSummaries] = useState<Record<string, ThreadSummary>>({})
   const identity = page?.main.identity ? JSON.stringify(page.main.identity) : ''
@@ -202,7 +207,7 @@ export function MoteWorkThreads({ page, issue, loading, visible, readWork, membe
   let previousDay = ''
   return <section ref={viewport.ref} className="mote-conversation mote-threads" data-mote-threads={identity || undefined} data-view={view} data-detail={open ? 'open' : undefined} data-layout={wide ? 'split' : 'stack'}>
     <header className="mote-threads__toolbar">
-      {members || privateChats ? <div className="mote-threads__views" role="tablist" aria-label="Threads 内容">
+      {showViews && (members || privateChats) ? <div className="mote-threads__views" role="tablist" aria-label="Threads 内容">
         <button type="button" role="tab" aria-selected={view === 'work'} onClick={() => setView('work')}>工作<span>{events.length}</span></button>
         {privateChats ? <button type="button" role="tab" aria-selected={view === 'private'} onClick={() => setView('private')}>私聊</button> : null}
         {members ? <button type="button" role="tab" aria-selected={view === 'members'} data-attention={members.attention || undefined} onClick={() => setView('members')}>成员{members.count === null ? null : <span>{members.count}</span>}</button> : null}

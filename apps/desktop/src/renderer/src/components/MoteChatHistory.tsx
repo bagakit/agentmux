@@ -8,30 +8,37 @@ import { api } from '../lib/api'
 import { useAppStore } from '../store'
 import { MoteConversationBrowser } from './MoteConversationBrowser'
 import { MoteSessionConversation } from './MoteSessionConversation'
+import type { MoteThreadCount } from './MoteThreadNavigation'
 
 const LoadingIcon = semanticIconComponent('status.loading')
 const PersonIcon = semanticIconComponent('object.user')
 
 /** Original generations. Selection reads the exact source without creating or resuming it. */
-export function MoteChatHistory({ target, actor, people = [], hostingTarget, active }: {
+export function MoteChatHistory({ target, actor, people = [], hostingTarget, active, observe = active, onCount }: {
   target: MoteChatTarget; actor?: ConnectionActor; people?: readonly MoteChatPerson[]; hostingTarget: ConnectionHostingTarget; active: boolean
+  observe?: boolean; onCount?: ((count: MoteThreadCount) => void) | undefined
 }) {
   const [generations, setGenerations] = useState<MoteChatGeneration[]>([]), [next, setNext] = useState<string | null>(null)
   const [reading, setReading] = useState(false), [issue, setIssue] = useState('')
   const lifetime = useRef(0)
+  const [confirmed, setConfirmed] = useState(false)
   const read = useCallback(async (cursor?: string) => {
     const epoch = ++lifetime.current
     setReading(true); setIssue('')
     try {
       const page = await api.moteChat.call('space.mote.chat.history', { target, ...(actor ? { actor } : {}), ...(cursor ? { cursor } : {}), limit: 3 }, hostingTarget)
       if (lifetime.current !== epoch) return
-      setGenerations(current => cursor ? [...current, ...page.generations.filter(row => !current.some(old => old.generationId === row.generationId))]
-        : [...page.generations, ...current.filter(row => !page.generations.some(updated => updated.generationId === row.generationId))])
-      setNext(page.next)
+      setGenerations(current => {
+        const unique = new Map<string, MoteChatGeneration>()
+        for (const row of cursor ? [...current, ...page.generations] : [...page.generations, ...current]) if (!unique.has(row.generationId)) unique.set(row.generationId, row)
+        return [...unique.values()]
+      })
+      setNext(page.next); setConfirmed(true)
     } catch (error) { if (lifetime.current === epoch) setIssue(presentError(error)) }
     finally { if (lifetime.current === epoch) setReading(false) }
   }, [target, actor, hostingTarget])
-  useEffect(() => { if (active) void read(); return () => { lifetime.current++ } }, [active, read])
+  useEffect(() => { if (observe) void read(); return () => { lifetime.current++ } }, [observe, read])
+  useEffect(() => { onCount?.({ value: confirmed ? generations.length : null, more: Boolean(next), unavailable: Boolean(issue) }) }, [confirmed, generations.length, next, issue, onCount])
   const choices = generations.map(generation => {
     const name = people.find(person => JSON.stringify(person.actor) === JSON.stringify(generation.actor))?.name ?? generation.actor.userId
     const at = new Date(generation.lastActivityAt)
