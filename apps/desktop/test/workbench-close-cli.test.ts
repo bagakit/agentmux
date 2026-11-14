@@ -19,7 +19,7 @@ import { monacoKeybindingConstants } from './helpers/editor-pane-store.js'
 vi.mock('electron', () => ({ app: { getPath: () => '/private-unused' } }))
 const sourceEditor = vi.hoisted(() => ({ mount: null as ((editor: any, monaco: any) => void) | null }))
 vi.mock('../src/renderer/src/monaco', () => ({}))
-vi.mock('@monaco-editor/react', () => ({ default: ({ onMount }: { onMount: typeof sourceEditor.mount }) => { sourceEditor.mount = onMount; return null } }))
+vi.mock('@monaco-editor/react', () => ({ default: ({ onMount, value, path }: { onMount: typeof sourceEditor.mount; value: string; path: string }) => { sourceEditor.mount = onMount; return process.env.AGENTMUX_WORKBENCH_CLOSE_VISUAL_DOM ? createElement('textarea', { 'data-isolated-monaco-paint': path, readOnly: true, value, style: { width: '100%', height: '180px' } }) : null } }))
 const nativeBranch = process.env.AGENTMUX_WORKBENCH_CLOSE_NATIVE === '1'
 const restartMode = process.env.AGENTMUX_WORKBENCH_CLOSE_RESTART
 const business = nativeBranch && !restartMode
@@ -183,12 +183,15 @@ it.runIf(business)('prepared and unknown IDs are discoverable after owner reopen
   expect(f.store.getState().tabs['target-tab']?.regions['raw-region']).toBeDefined()
   expect((await f.native.client.status(f.run.runId)).state.type).toBe('running')
   f.reopenOwner()
+  const originalCalls = vi.spyOn(f.runtime, 'callOriginalCore')
   const list = await f.rpc.call('space.close.ls', { limit: 1 })
   expect(list.coverage).toBe('live-page'); expect(list.items).toHaveLength(1)
   const next = list.nextCursor ? await f.rpc.call('space.close.ls', { limit: 10, cursor: list.nextCursor }) : list
   expect([...list.items, ...next.items].map(o => o.operationId)).toContain('prepared-original')
   const inspection = await f.rpc.call('space.close.inspect', { operationId: prepared.operationId })
   expect(inspection.operation).toMatchObject({ outcome: 'partial', diskDurability: 'unconfirmed' })
+  expect(originalCalls.mock.calls.some(([, method]) => method === 'terminal.operation.inspect')).toBe(true)
+  expect(originalCalls.mock.calls.filter(([, method]) => method === 'terminal.stop')).toHaveLength(0)
   expect((await f.apply(prepared)).code).toBe(1); expect(f.stops).toHaveBeenCalledTimes(1)
   expect((await f.managed.call('space.close.ls', {})).items.map(o => o.operationId)).toEqual(['managed-original'])
   expect(originalStop).toBeUndefined()
@@ -455,18 +458,35 @@ it.runIf(business).each(['Keep Session & Close', 'Stop & Close'])('actual GUI %s
   const restorePopover = installNativePopover(); cleanup.push(async () => restorePopover())
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   const calls = vi.spyOn(f.api.workbenchClose, 'call').mockImplementation((method, input) => f.rpc.call(method, input))
+  const visual = choice === 'Stop & Close' ? process.env.AGENTMUX_WORKBENCH_CLOSE_VISUAL_DOM : undefined
+  const { AgentOperationFeedback } = await import('../src/renderer/src/components/AgentOperationFeedback.js')
+  let releaseVisual: (() => void) | undefined
+  if (visual) {
+    const native = (f.host.client as any).kernel.client, stop = native.attachRecoverableStop.bind(native)
+    const held = new Promise<void>(resolve => { releaseVisual = resolve })
+    vi.spyOn(native, 'attachRecoverableStop').mockImplementationOnce(async (...args: any[]) => { await held; return stop(...args) })
+    cleanup.push(async () => releaseVisual?.())
+  }
   const { createClientUiRoot } = await import('./helpers/client-ui-render.js')
   const node = document.createElement('div'); document.body.append(node); const root = createClientUiRoot(node)
   cleanup.push(async () => { await act(async () => root.unmount()); node.remove() })
   function Consumer() {
     const close = useWorkbenchTabsClose()
-    return createElement(Fragment, null, createElement('button', { onClick: () => void close.request({ workspaceId: 'W', group: { id: 'G', tabOrder: ['target-tab', 'healthy-tab'] }, tabIds: ['healthy-tab'], subject: 'Original Agent' }) }, 'Close original Agent View'), close.dialog)
+    return createElement(Fragment, null, createElement('button', { onClick: () => void close.request({ workspaceId: 'W', group: { id: 'G', tabOrder: ['target-tab', 'healthy-tab'] }, tabIds: ['healthy-tab'], subject: 'Original Agent' }) }, 'Close original Agent View'), createElement(AgentOperationFeedback, { subject: { hostId: 'local', agentSessionId: f.agent.agentSessionId } }), close.dialog)
   }
   await act(async () => root.render(createElement(Consumer)))
   await act(async () => node.querySelector<HTMLButtonElement>('button')!.click())
   await vi.waitFor(() => expect([...document.querySelectorAll('button')].some(b => b.textContent === choice), JSON.stringify({ error: f.store.getState().error, calls: calls.mock.calls, html: document.body.innerHTML })).toBe(true), { timeout: 5000 })
+  if (visual) await writeFile(visual + '-confirmation.html', document.body.innerHTML)
   const button = [...document.querySelectorAll<HTMLButtonElement>('button')].find(b => b.textContent === choice)!
   await act(async () => button.click())
+  if (visual) {
+    await vi.waitFor(() => expect(document.querySelector('.agent-operation-feedback')).not.toBeNull())
+    await act(async () => document.querySelector<HTMLElement>('.agent-operation-feedback__label')!.click())
+    await writeFile(visual + '-pending.html', document.body.innerHTML)
+    await writeFile(visual + '-original-operation.json', JSON.stringify({ agentOperations: f.store.getState().agentOperations, healthyDraft: f.store.getState().agentComposerDrafts['healthy-region'], stopCalls: f.stops.mock.calls.length }, null, 2))
+    releaseVisual?.()
+  }
   await vi.waitFor(async () => {
     const applied = calls.mock.calls.find(([method]) => method === 'space.close.apply')?.[1] as Core.SpaceCloseParams['space.close.apply'] | undefined
     const result = applied ? await f.rpc.call('space.close.inspect', { operationId: applied.operationId }) : null
@@ -622,9 +642,13 @@ it.runIf(Boolean(restartMode))('private restart worker restores the original wor
   const f = await fixture()
   if (restartMode === 'writer') {
     f.prepared(await f.prepare('restart-prepared'))
+    const { setNoteComposition } = await import('../src/renderer/src/lib/note-live-merge.js')
+    setNoteComposition(f.key, 'private-restart-file-input', true)
     const unknown = f.prepared(await f.prepare('restart-unknown'))
     f.stops.mockRejectedValueOnce(Error('Private original Stop unavailable'))
     expect((await f.apply(unknown)).code).toBe(1)
+    setNoteComposition(f.key, 'private-restart-file-input', false)
+    expect(f.store.getState().tabs['target-tab']?.regions['file-region']).toBeDefined()
     const { prepareRendererUpdate } = await import('../src/renderer/src/store.js')
     f.store.getState().setAgentComposerDraft('healthy-region', 'Original draft across two OS processes')
     await prepareRendererUpdate('quit')
@@ -633,7 +657,11 @@ it.runIf(Boolean(restartMode))('private restart worker restores the original wor
   } else {
     const original = JSON.parse(await readFile(join(f.root, 'writer-proof.json'), 'utf8'))
     expect(process.pid).not.toBe(original.pid)
-    expect(f.store.getState().tabs['target-tab']).toEqual(original.tab)
+    const { directoryIdentity, workspaceZoneId } = await import('../src/shared/space-addresses.js')
+    const spaceId = directoryIdentity('local', f.root)
+    // Core restores the original directory/Zone binding; a freshly arranged
+    // fixture may not yet have that derived association on its local Tab.
+    expect(f.store.getState().tabs['target-tab']).toEqual({ ...original.tab, space: { spaceId, zoneId: workspaceZoneId(spaceId, 'W') } })
     expect(f.store.getState().layouts).toEqual(original.layouts)
     expect(f.store.getState().agentComposerDrafts['healthy-region']).toBe('Original draft across two OS processes')
     expect(f.store.getState().sessions.find(s => s.control.kind === 'agent' && s.control.agentSessionId === f.agent.agentSessionId)?.control.run.runId).toBe(original.agentRun)
@@ -656,6 +684,28 @@ it.runIf(Boolean(restartMode))('private restart worker restores the original wor
     expect((await f.native.client.status(original.rawRun)).state.type).toBe('running')
     await f.host.client.writeAgent({ agentSessionId: f.agent.agentSessionId, expectedRun: f.agent.run, data: 'healthy-after-OS-restart', source: 'user' })
     expect((await f.native.client.status(original.agentRun)).state.type).toBe('running')
+    const visual = process.env.AGENTMUX_WORKBENCH_CLOSE_VISUAL_DOM
+    if (visual) {
+      const { FileSourceEditor } = await import('../src/renderer/src/components/FileSourceEditor.js')
+      const { AgentComposer } = await import('@agentmux/client-ui/components/AgentComposer')
+      const { createClientUiRoot } = await import('./helpers/client-ui-render.js')
+      vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
+      const node = document.createElement('div'); document.body.append(node); const root = createClientUiRoot(node)
+      cleanup.push(async () => { await act(async () => root.unmount()); node.remove() })
+      const state = f.store.getState(), surface = state.tabs['target-tab']!.regions['file-region']!
+      expect(surface.kind).toBe('file')
+      await act(async () => root.render(createElement(Fragment, null,
+        createElement('h3', null, 'Restored original File Region · target-tab / file-region'),
+        createElement(FileSourceEditor, { tabId: 'target-tab', surface: surface as any, viewState: createRef() }),
+        createElement('h3', null, 'Restored original unsent Agent draft · healthy-region'),
+        createElement(AgentComposer, { value: state.agentComposerDrafts['healthy-region']!, disabled: false, placeholder: 'Message original Agent', onChange: () => {}, onSubmit: () => {} }))))
+      expect(node.querySelector<HTMLTextAreaElement>('[data-isolated-monaco-paint]')?.value).toBe('Original unsaved content')
+      expect(node.textContent).toContain('Original draft across two OS processes')
+      await writeFile(visual + '-restored.html', document.body.innerHTML)
+      await writeFile(visual + '-restored-original.json', JSON.stringify({ writerPid: original.pid, readerPid: process.pid, tabId: 'target-tab', regionId: surface.regionId,
+        originalAgentSessionId: f.agent.agentSessionId, originalAgentRun: original.agentRun, originalRawRun: original.rawRun, stopCalls: f.stops.mock.calls.length,
+        scope: 'Original restored FileSourceEditor consumes original Store document; Monaco paint alone is a declared readonly textarea leaf. Actual shared AgentComposer consumes the restored unsent draft. Native Electron later paints this immutable DOM with original product CSS.' }, null, 2))
+    }
     await writeFile(join(f.root, 'reader-proof.json'), JSON.stringify({ pid: process.pid, restored: true, originalIds: found.items.map(x => x.operationId), stopCalls: f.stops.mock.calls.length }))
   }
 })
