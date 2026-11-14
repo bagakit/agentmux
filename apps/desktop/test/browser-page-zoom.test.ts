@@ -88,7 +88,8 @@ const native = vi.hoisted(() => {
 })
 vi.mock('electron', () => ({ WebContentsView: native.View, session: { fromPartition: native.fromPartition }, app: { getPath: () => tmpdir() } }))
 
-import { BrowserViewManager, steppedBrowserZoom, type BrowserProfileResolver } from '../src/main/browser-view-manager.js'
+import { BrowserViewManager, type BrowserProfileResolver } from '../src/main/browser-view-manager.js'
+import { steppedBrowserZoom } from '../src/shared/browser-zoom.js'
 import { BrowserRefLedgerStore } from '@agentmux/browser/browser-ref-ledger-store'
 import type { BrowserEvent, BrowserSnapshot } from '../src/shared/contracts.js'
 

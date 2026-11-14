@@ -162,7 +162,7 @@ describe('Main-owned renderer crash recovery', () => {
     const f = fixture()
     f.crash()
     await f.recover()
-    const menu = applicationMenuTemplate(true, undefined, () => { void f.recover() })
+    const menu = applicationMenuTemplate(true, { zoom: () => {}, recoverInterface: () => { void f.recover() } })
     const view = menu.find(item => item.label === 'View')
     expect(Array.isArray(view?.submenu)).toBe(true)
     const item = (view!.submenu as import('electron').MenuItemConstructorOptions[]).find(item => item.label === 'Recover interface')

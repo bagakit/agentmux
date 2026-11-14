@@ -216,11 +216,11 @@ import {
   assertAllowedBrowserUrl,
   BrowserViewManager,
   type BrowserProfileResolver,
-  DEFAULT_BROWSER_ZOOM_FACTOR,
   normalizeBrowserUrl
 } from '../src/main/browser-view-manager.js'
 import { BrowserRefLedgerStore } from '@agentmux/browser/browser-ref-ledger-store'
 import { normalizeBrowserBounds } from '../src/shared/browser-bounds.js'
+import { DEFAULT_BROWSER_ZOOM_FACTOR } from '../src/shared/browser-zoom.js'
 import { BROWSER_EVENT_CHANNEL, BROWSER_PRESENTATION_EVENT_CHANNEL, type BrowserEvent, type BrowserPresentationEvent } from '../src/shared/contracts.js'
 import type { BrowserAgentAuthority } from '../src/main/browser-agent-authority.js'
 import type { BrowserControlHandoff } from '../src/shared/contracts.js'

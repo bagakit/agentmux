@@ -79,13 +79,13 @@ describe('毁灭性加速键守卫自检——证明守卫有分辨力，不是�
     const handAddedReload = walk([{ label: 'View', submenu: [{ label: 'Reload', accelerator: 'CmdOrCtrl+R' }] }])
     expect(handAddedReload.filter(injectsDestructiveAccelerator)).not.toEqual([])
     // 反向：当前这份真实模板跑同一表达式必须是空——否则上面的 not.toEqual 只是恒真。
-    expect(walk(applicationMenuTemplate(true)).filter(injectsDestructiveAccelerator)).toEqual([])
+    expect(walk(applicationMenuTemplate(true, { zoom: () => {} })).filter(injectsDestructiveAccelerator)).toEqual([])
   })
 })
 
 for (const isMac of [true, false]) {
   describe(`applicationMenuTemplate (isMac=${isMac})`, () => {
-    const items = walk(applicationMenuTemplate(isMac))
+    const items = walk(applicationMenuTemplate(isMac, { zoom: () => {} }))
 
     it('不含 close role——它默认绑 Cmd+W，会抢走关格键位', () => {
       expect(items.some((item) => item.role === 'close')).toBe(false)
