@@ -223,7 +223,6 @@ export class CoreRelayGateway implements MeshNetworkPort {
     return value
   }
   private async publishEndpoint(value: Awaited<ReturnType<AgentMuxMeshEndpointSource>>, listener: Awaited<ReturnType<CoreRelayGateway['listener']>>) {
-    if (this.endpointPublisher) return
     const address = listener.server.address()
     if (!address || typeof address === 'string') throw new Error('Original private endpoint listener unavailable')
     const relay = { endpoint: `127.0.0.1:${address.port}`, useTls: false }
@@ -281,6 +280,7 @@ export class CoreRelayGateway implements MeshNetworkPort {
       if (!value || this.shutdown.signal.aborted) return
       this.application = this.application.then(async () => {
         if (this.shutdown.signal.aborted || this.activeRevision !== revision || this.desiredRevision !== revision) return
+        if (this.endpointPublisher) return
         const config = this.activeConfiguration!
         if (config.role === 'disabled') return
         if (config.publishers.some(p => p.serverId === value.serverId)) throw new AgentMuxError('Public gateway admission cannot replace the original local endpoint publisher.', 'MESH_ENDPOINT_COLLISION')
