@@ -133,6 +133,31 @@ it('stops an original human-wait tree without writing approval or allowing a lat
   expect(f.operations).toHaveLength(1)
 })
 
+it('continues the original waiting subflow leaf and stops the next one while completed items keep their identities and approvals', async () => {
+  const f = await fixture(true)
+  const imported = await importTaskRecording(f.owner, { id: 'root-recording', browserId: source, revision: 1, navigationId: 'original-document', url, status: 'stopped', startedAt: 1, updatedAt: 2, steps: [] })
+  const edited = await f.owner.edit(imported.id, imported.revision, { ...imported.draft, steps: [{ id: 'original-loop', kind: 'subflow', url, reviewed: true, subflow: { target: { kind: 'local', assetId: f.asset.id, version: 1 }, iteration: 'each' } }] })
+  const root = await f.owner.saveVersion(edited.id, edited.revision)
+  const calls = { 'original-loop': { parameters: {}, items: [{ id: 'original-first', parameters: {} }, { id: 'original-second', parameters: {} }] } }
+  await f.manager.runControlledTaskParallel(source, root.id, 1, { operationId: 'group', targets: [{ ...target('a'), calls }] }, permission)
+  const first = await f.settled(), rootId = first.targets[0]!.run!.id, firstLeaf = (await f.owner.waitingLeaf(rootId))!
+  expect(firstLeaf.parent).toMatchObject({ runId: rootId, itemId: 'original-first' })
+  await f.manager.continueTaskParallelTarget(source, 'group', 'a', { continuationId: 'original-leaf-continue', expectedRevision: first.targets[0]!.continuationRevision!, parameters: {}, calls }, permission)
+  await f.settled()
+  const tree = (await f.owner.inspect('browser-a', rootId))!, nextLeaf = (await f.owner.waitingLeaf(rootId))!
+  expect(tree.rootRunId).toBe(rootId)
+  expect(tree.runs.find(run => run.id === rootId)!.calls).toMatchObject([{ nextItem: 1, items: [{ id: 'original-first', runId: firstLeaf.id }, { id: 'original-second', runId: nextLeaf.id }] }])
+  expect(nextLeaf.id).not.toBe(firstLeaf.id); expect(nextLeaf.humanCheckpoints).toEqual([])
+  const completed = tree.runs.find(run => run.id === firstLeaf.id)!
+  expect(completed).toMatchObject({ status: 'completed', humanCheckpoints: [{ runId: firstLeaf.id, checkpointId: 'person-review', origin: 'trusted-ui' }] })
+  expect(f.operations).toHaveLength(4)
+  await f.manager.stopTaskParallel(source, 'group')
+  const stopped = (await f.owner.inspect('browser-a', rootId))!
+  expect(stopped.runs.find(run => run.id === firstLeaf.id)).toEqual(completed)
+  expect(stopped.runs.find(run => run.id === nextLeaf.id)).toMatchObject({ status: 'stopped', humanCheckpoints: [], parent: { itemId: 'original-second' } })
+  expect(stopped.operationCount).toBe(4)
+})
+
 it.each(['before', 'after'] as const)('keeps a %s-write continuation ACK unknown under its original ID and never auto replays it', async fault => {
   const f = await fixture(true); await f.start(); const waiting = await f.settled()
   const input = { continuationId: `lost-${fault}`, expectedRevision: waiting.targets[0]!.continuationRevision!, parameters: {} }
