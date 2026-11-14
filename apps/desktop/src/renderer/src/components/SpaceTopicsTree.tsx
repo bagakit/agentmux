@@ -1,3 +1,4 @@
+import { useWorkbenchDocument } from '../lib/workbench-document'
 import { usePathDisplay } from '../hooks/usePathDisplay'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
@@ -47,6 +48,7 @@ const NO_TOPICS: readonly ScratchTopicSnapshot[] = []
 export function SpaceTopicsTree({ workspace, query = '', icons, onChangeIcon, visible = true }: {
   workspace: WorkspaceRecord; query?: string; visible?: boolean; icons: SpaceIconOverrides; onChangeIcon(target: SpaceIconTarget): void
 }) {
+  const ownerDocument = useWorkbenchDocument()
   const displayPath = usePathDisplay()
   const contentPresentation = useSpaceContentPresentation()
   const { topics, error } = useScratchTopics(workspace.id, visible)
@@ -69,8 +71,10 @@ export function SpaceTopicsTree({ workspace, query = '', icons, onChangeIcon, vi
   const bindings = useAppStore(state => state.spaceZoneBindings)
   const [categoryTarget, setCategoryTarget] = useState<TopicCategory | 'create' | null>(null)
   const categoryInvoker = useRef<HTMLElement | null>(null)
-  function editCategory(target: TopicCategory | 'create'): void {
-    categoryInvoker.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
+  function editCategory(target: TopicCategory | 'create', invoker?: HTMLElement): void {
+    const original = ownerDocument.activeElement
+    const HTMLElement = ownerDocument.defaultView?.HTMLElement
+    categoryInvoker.current = invoker ?? (HTMLElement && original instanceof HTMLElement ? original : null)
     setCategoryTarget(target)
   }
   const current = selection?.workspaceId === workspace.id ? selection.topicId : layout ? activeTopicIdFromLayout(layout, tabs) : undefined
@@ -226,7 +230,7 @@ export function SpaceTopicsTree({ workspace, query = '', icons, onChangeIcon, vi
     <div className="space-section space-topics-section"><SpaceSectionHeader label="Topics" count={categories.length} icon={<ThemeObjectTopicIcon size={14} />}
       expanded={filtering || collapsedGroups['space:topics'] !== true} filtering={filtering} onToggle={() => toggleGroup('space:topics')}
       onOpen={() => void openOverview()} createLabel="Create Category" createIcon={<ThemeActionCreateFolderIcon size={13} />}
-      onCreate={async () => editCategory('create')} />
+      onCreate={async invoker => editCategory('create', invoker)} />
       {filtering || collapsedGroups['space:topics'] !== true ? <>
         {matchingCategories.map(category => {
           const target = categorySpaceIconTarget(category)

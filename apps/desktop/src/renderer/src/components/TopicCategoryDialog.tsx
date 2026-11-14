@@ -8,7 +8,6 @@ import type { TopicCategory } from '@agentmux/core/control'
 import { useEffect, useRef, useState } from 'react'
 import { api } from '../lib/api'
 import { refreshTopicSpatial } from '../lib/topic-knowledge-actions'
-import { DocumentOverlayPortal } from './WindowOverlayHost'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { isImeOwnedKeyboardEvent } from '@agentmux/client-ui/ime-keyboard-event'
 
@@ -33,7 +32,7 @@ export function TopicCategoryDialog({ target, onClose, returnFocus }: { target: 
     } catch (cause) { setError(presentError(cause)) } finally { setBusy(false) }
   }
   return <Dialog.Root recoveryCloseDisabled={busy} open={Boolean(target)} onOpenChange={open => { if (!open && !busy) onClose() }}>
-    <DocumentOverlayPortal component={Dialog.Portal}><Dialog.Overlay className="confirmation-dialog__overlay dialog-scrim" />
+    <Dialog.Portal><Dialog.Overlay className="confirmation-dialog__overlay dialog-scrim" />
       <Dialog.Content ref={content} className="confirmation-dialog dialog-surface topic-dialog" aria-busy={busy} onOpenAutoFocus={event => { event.preventDefault(); input.current?.focus() }}
         onCloseAutoFocus={event => {
           if (!returnFocus) return
@@ -49,6 +48,6 @@ export function TopicCategoryDialog({ target, onClose, returnFocus }: { target: 
           {error ? <p role="alert" className="surface-inline-error">{error}</p> : null}
           <footer><Button className="confirmation-dialog__cancel" disabled={busy} onClick={onClose}>Cancel</Button><Button type="submit" variant="primary" disabled={busy || !name.trim()}>{busy ? 'Saving…' : 'Save category'}</Button></footer>
         </form>
-      </Dialog.Content></DocumentOverlayPortal>
+      </Dialog.Content></Dialog.Portal>
   </Dialog.Root>
 }

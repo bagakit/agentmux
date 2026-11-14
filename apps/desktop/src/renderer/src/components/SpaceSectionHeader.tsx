@@ -23,7 +23,7 @@ export function SpaceDisclosure({ icon, expanded, label, disabled = false, onTog
 export function SpaceSectionHeader({ label, count, icon, expanded, filtering, onToggle, onOpen, openLabel, opening = false,
   labelSuffix, labelHint, createLabel, onCreate, createIcon, activity, actions, selected = false, navigationId, parentNavigationId, collapsible = true, iconTargetKey }: {
   label: string; count: number; icon: ReactNode; expanded: boolean; filtering: boolean;
-  onToggle(): void; onOpen?: () => void; openLabel?: string; opening?: boolean; createLabel?: string; onCreate?: () => Promise<unknown>; createIcon?: ReactNode;
+  onToggle(): void; onOpen?: () => void; openLabel?: string; opening?: boolean; createLabel?: string; onCreate?: (invoker: HTMLButtonElement) => Promise<unknown>; createIcon?: ReactNode;
   labelSuffix?: ReactNode; labelHint?: { name: string; detail: string };
   activity?: ReactNode; actions?: ReactNode; selected?: boolean; navigationId?: string; parentNavigationId?: string; collapsible?: boolean; iconTargetKey?: string
 }) {
@@ -31,9 +31,9 @@ export function SpaceSectionHeader({ label, count, icon, expanded, filtering, on
   const hint = useWorkbenchNameTooltip(labelHint?.name ?? '', labelHint?.detail ?? '', !labelHint, { pointerPassThrough: true })
   const reportError = useAppStore((state) => state.reportError)
   const canCollapse = collapsible && count > 0
-  async function create(): Promise<void> {
+  async function create(invoker: HTMLButtonElement): Promise<void> {
     setBusy(true)
-    try { await onCreate?.() } catch (error) { reportError(error) } finally { setBusy(false) }
+    try { await onCreate?.(invoker) } catch (error) { reportError(error) } finally { setBusy(false) }
   }
   return <div className={`space-section-heading space-${label.toLowerCase()}-heading`} data-space-entry>
     {canCollapse ? <SpaceDisclosure icon={icon} expanded={expanded} label={`${expanded ? 'Collapse' : 'Expand'} ${label}`}
@@ -49,7 +49,7 @@ export function SpaceSectionHeader({ label, count, icon, expanded, filtering, on
     {activity}
     {actions}
     {onCreate ? <button type="button" className="icon-button space-section-add" aria-label={createLabel} title={createLabel}
-      disabled={busy} onClick={() => void create()}>{createIcon ?? <ThemeActionCreateIcon size={13} />}</button> : null}
+      disabled={busy} onClick={event => void create(event.currentTarget)}>{createIcon ?? <ThemeActionCreateIcon size={13} />}</button> : null}
     {hint.content}
   </div>
 }
