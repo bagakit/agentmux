@@ -516,6 +516,8 @@ const api: AgentMuxPreloadApi = {
     readFileViewReading: owner => ipcRenderer.invoke('ui:readFileViewReading', owner).then(unwrapIpcResult<import('../shared/workbench-user-state').FileViewReadingRecord | null>),
     writeFileViewReading: record => ipcRenderer.invoke('ui:writeFileViewReading', record).then(unwrapIpcResult<import('../shared/workbench-user-state').FileViewReadingReceipt | null>),
     readWorkbenchState: () => ipcRenderer.invoke('ui:readWorkbenchState'),
+    readWorkbenchInputArchive: query => ipcRenderer.invoke('ui:readWorkbenchInputArchive', query)
+      .then(unwrapIpcResult<import('../shared/workbench-user-state').WorkbenchInputArchivePage>),
     readStorageRecovery: () => ipcRenderer.invoke('ui:readStorageRecovery'),
     readLocalRuntimeRecovery: () => ipcRenderer.invoke('ui:readLocalRuntimeRecovery'),
     restoreLocalRuntimeIdentity: () => ipcRenderer.invoke('ui:restoreLocalRuntimeIdentity'),

@@ -154,6 +154,7 @@ import { registerDeviceManagementIpc } from './device-management-ipc.js'
 import { resolvePerformancePreferences } from '../shared/toolkit-preferences.js'
 import { projectBrowserControlEvent, projectBrowserControlOperation, projectBrowserControlResult } from './browser-completion-control.js'
 import { WorkbenchUserStateStore } from './workbench-user-state.js'
+import { parseWorkbenchInputArchiveQuery } from '../shared/workbench-user-state.js'
 import type { DesktopLoadedRenderer, DesktopPackageIdentity } from '../shared/client-observation.js'
 import { projectAppearance } from './project-appearance.js'
 import { readBrowserOperationResult } from '@agentmux/browser/browser-operation-result'
@@ -1679,6 +1680,8 @@ export async function registerIpc(args: {
     return await workbenchClose.call(method, parseSpaceCloseParams(method, value), context)
   }))
   handleWithEvent('ui:readWorkbenchState', () => workbenchUserState.read())
+  handleWithEvent('ui:readWorkbenchInputArchive', (_event, query: unknown) => ipcResult(() =>
+    workbenchUserState.readInputArchive(parseWorkbenchInputArchiveQuery(query))))
   handleWithEvent('ui:readStorageRecovery', () => args.runtime.readStorageRecovery())
   handleWithEvent('ui:readLocalRuntimeRecovery', () => args.runtimeIdentityRecovery?.check() ?? { state: 'unchanged' })
   handleWithEvent('ui:restoreLocalRuntimeIdentity', event => args.runtimeIdentityRecovery?.choose(async () => {

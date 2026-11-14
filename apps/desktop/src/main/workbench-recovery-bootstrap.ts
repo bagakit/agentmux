@@ -14,15 +14,20 @@ const sourceId = 'desktop.workbench'
 
 /** Before load/default writes: borrow only the original data owners and Core maintenance API. */
 export async function recoverWorkbenchBeforeLoad(options: Options): Promise<WorkbenchRecoveryBootstrap> {
+  let discoveryIssue: string | undefined
+  const userTarget = await options.user.recoveryPath().catch(error => {
+    discoveryIssue = (error as NodeJS.ErrnoException)?.code ?? 'DESKTOP_RECOVERY_DISCOVERY_UNCONFIRMED'
+    return options.user.databasePath
+  })
   const primary = [
-    { memberId: 'desktop.user-state/document', target: options.user.path },
+    { memberId: 'desktop.user-state/document', target: userTarget },
     { memberId: 'desktop.windows/document', target: options.windows.path }
   ]
-  const absent: typeof primary = []; let discoveryIssue: string | undefined
+  const absent: typeof primary = []
   for (const member of primary) try { if (await missing(member.target)) absent.push(member) }
   catch (error) { absent.push(member); discoveryIssue = (error as NodeJS.ErrnoException)?.code ?? 'DESKTOP_RECOVERY_DISCOVERY_UNCONFIRMED' }
   // Ordinary startup has no backup inventory, object hash or Native work.
-  if (!absent.length) return { state: 'unchanged' }
+  if (!absent.length && !discoveryIssue) return { state: 'unchanged' }
   let owner: Awaited<ReturnType<typeof openAgentMuxStorageRecovery>> | undefined, rpc: AgentMuxRpcClient | undefined, server: AgentMuxControlServer | undefined
   let coverage: NonNullable<RecoveryGeneration['coverage']> = [], operationId: string | undefined, generationId: string | undefined
   const retain = (issue: string): WorkbenchRecoveryBootstrap => {

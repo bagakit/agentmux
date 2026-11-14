@@ -1961,6 +1961,7 @@ export type AgentMuxDesktopApi = {
     readFileViewReading(owner: import('./workbench-user-state').FileViewReadingOwner): Promise<import('./workbench-user-state').FileViewReadingRecord | null>
     writeFileViewReading(record: import('./workbench-user-state').FileViewReadingRecord): Promise<import('./workbench-user-state').FileViewReadingReceipt | null>
     readWorkbenchState(): Promise<string | null>
+    readWorkbenchInputArchive(query: import('./workbench-user-state').WorkbenchInputArchiveQuery): Promise<import('./workbench-user-state').WorkbenchInputArchivePage>
     readStorageRecovery(): Promise<import('./storage-recovery').DesktopStorageRecoveryRead>
     readLocalRuntimeRecovery(): Promise<import('@agentmux/core').SemanticIdentityRecoveryResult>
     restoreLocalRuntimeIdentity(): Promise<import('@agentmux/core').SemanticIdentityRecoveryResult>

@@ -30,7 +30,9 @@ import { OriginalInputWaitingControl } from './OriginalInputWaitingControl'
 import { useMailboxMotion } from './use-mailbox-motion'
 import type { EditQueuedMessage } from './ComposerQueuedMessageEditor'
 import { ComposerOutbox, type ComposerQueuedMessage, type ArchiveQueuedMessage, type MoveQueuedMessageToDraft } from './ComposerOutbox'
-import { useAppStore } from '../store'
+import { useAppStore, type AgentSteerQueueEntry } from '../store'
+import { useWorkbenchInputArchive } from '../lib/use-workbench-input-archive'
+import { archivedInputMatchesSession } from '../lib/workbench-input-archive'
 import { serviceNoticeFingerprint, useReadReceipts, type useServiceNotices } from '../lib/use-service-notices'
 import { useSessionUserMessages } from '../lib/session-user-messages'
 import { useSessionMessages, type SessionMailReading } from '../lib/use-session-messages'
@@ -169,7 +171,7 @@ function MessageHistory({ hostId, mailboxOrigin, items, selectedKey, onOpen, onC
 }
 
 /** Folders project durable delivery facts; read receipts never advance delivery state. */
-export function SessionMailbox({ pendingLayout, system, queued, timeline, progressSession, originalProgress, originalMail, progressUnavailable, visible = true, control: propControl, userMessages: propUserMessages, onArchiveQueued, onMoveQueuedToDraft, onMoveQueued, onSendQueued, onCancelQueuedPreparation, onCopyQueued, onEditQueued, sendImmediately = false, reading: baseReading, onRevealMessage, mailboxOrigin, children, pendingInteraction = false, noticePresentation, inputHistory, historyResourceReader, onHistoryVisible }: {
+export function SessionMailbox({ pendingLayout, system, queued: workbenchQueue, archiveOwner, timeline, progressSession, originalProgress, originalMail, progressUnavailable, visible = true, control: propControl, userMessages: propUserMessages, onArchiveQueued, onMoveQueuedToDraft, onMoveQueued, onSendQueued, onCancelQueuedPreparation, onCopyQueued, onEditQueued, sendImmediately = false, reading: baseReading, onRevealMessage, mailboxOrigin, children, pendingInteraction = false, noticePresentation, inputHistory, historyResourceReader, onHistoryVisible }: {
   pendingLayout?: PendingDeliveryLayout | undefined
   children?: (mailbox: ReactNode, pending: ReactNode, composerRef: import('react').RefObject<HTMLDivElement | null>) => ReactNode
   /** Presentation of an existing notice, shared by this mailbox and its right dock. */
@@ -183,6 +185,7 @@ export function SessionMailbox({ pendingLayout, system, queued, timeline, progre
   reading?: ConversationReadingProps | undefined
   system: ReturnType<typeof useServiceNotices>
   queued: readonly ComposerQueuedMessage[]
+  archiveOwner?: { ownerKey: string; target?: { hostId: string; agentSessionId: string }; present(entry: AgentSteerQueueEntry): ComposerQueuedMessage } | undefined
   timeline?: AgentTimelineSnapshot | undefined
   progressSession?: Extract<SessionSnapshot, { kind: 'agent' }> | undefined
   originalProgress?: import('../../../shared/continuous-progress').OriginalContinuousProgressControl | undefined
@@ -279,7 +282,19 @@ export function SessionMailbox({ pendingLayout, system, queued, timeline, progre
     propControl === null ? undefined : propControl ?? (storeSession?.kind === 'agent' ? storeSession.control : undefined)
 
   const scope = JSON.stringify([effectiveControl?.hostId, effectiveControl?.agentSessionId ?? timeline?.agentSessionId, effectiveControl?.run.runId,
-    inputHistory?.reference?.hostId, inputHistory?.reference?.agentSessionId, ...(originalMail ? [originalMail.identity] : [])])
+    inputHistory?.reference?.hostId, inputHistory?.reference?.agentSessionId, archiveOwner?.ownerKey, ...(originalMail ? [originalMail.identity] : [])])
+  const archiveVisible = Boolean(archiveOwner && open && visible && documentVisible && folder === 'user')
+  const archive = useWorkbenchInputArchive(archiveOwner?.ownerKey, archiveVisible)
+  const presentArchived = archiveOwner?.present
+  const archiveTarget = archiveOwner?.target
+  const archivedQueue = useMemo(() => archiveVisible && presentArchived ? archive.entries.flatMap(({ entry }) =>
+    !archiveTarget || archivedInputMatchesSession(entry, archiveTarget.hostId, archiveTarget.agentSessionId) ? [presentArchived(entry)] : []) : [],
+  [archiveVisible, archive.entries, archiveTarget, presentArchived])
+  const queued = useMemo(() => {
+    if (!archivedQueue.length) return workbenchQueue
+    const workbenchIds = new Set(workbenchQueue.map(entry => entry.id))
+    return [...workbenchQueue, ...archivedQueue.filter(entry => !workbenchIds.has(entry.id))]
+  }, [workbenchQueue, archivedQueue])
   const previousScope = useRef(scope)
   const navigationGeneration = useRef(0)
   const [navigationFeedback, setNavigationFeedback] = useState<{ scope: string; key: string; message: string } | null>(null)
@@ -520,7 +535,7 @@ export function SessionMailbox({ pendingLayout, system, queued, timeline, progre
       return <MessageHistory key={row.key} hostId={inputMailboxHost} mailboxOrigin={mailboxOrigin} items={[item]} selectedKey={null} rowsOnly
         onOpen={selectRecord} onCopy={onCopyQueued} reading={reading} sessionId={mailboxSessionId} renderNavigation={renderNavigation}
         historyResourceReader={historyResourceReader} />
-    })}</ol> : <MailboxEmpty title="No recorded messages" />
+    })}</ol> : archive.loading || archive.error ? null : <MailboxEmpty title={query || archive.nextCursor !== null ? 'No matching records in this window' : 'No recorded messages'} />
   }
 
   useLayoutEffect(() => {
@@ -534,7 +549,7 @@ export function SessionMailbox({ pendingLayout, system, queued, timeline, progre
       if (ownedFocus) (document.getElementById(`${id}-${folder}-tab`) ?? popover.current?.querySelector<HTMLButtonElement>('[aria-label="Back to messages"]'))?.focus({ preventScroll: true })
       return
     }
-    if (selection && !detail && !selectedQueue) {
+    if (selection && !detail && !selectedQueue && visible && documentVisible && !archive.loading) {
       if (document.activeElement === document.body && lastReadingFocus.current) focusAfter.current = 'row'
       setSelection(null)
     }
@@ -559,7 +574,7 @@ export function SessionMailbox({ pendingLayout, system, queued, timeline, progre
       if (body.current) body.current.scrollTop = automationReturn.current?.scope === scope ? automationReturn.current.scroll : 0
       automationEntry.current?.focus({ preventScroll: true })
     }
-  }, [open, detail, selectedQueue, selection, scope, folder, id])
+  }, [open, detail, selectedQueue, selection, scope, folder, id, visible, documentVisible, archive.loading])
   useLayoutEffect(() => {
     if (!open || !visible) return
     const panel = popoverNode, editor = trigger.current?.closest<HTMLElement>('.composer')
@@ -701,7 +716,7 @@ export function SessionMailbox({ pendingLayout, system, queued, timeline, progre
         {readingMounted && folder === 'collaboration' ? <MailboxCollaboration key={scope} {...(originalMail ? { originalMail } : { control: effectiveControl! })} active={open && visible} reading={messageReading} onCopy={onCopyQueued} /> : null}
       </div> : null}
       </div>
-      <div id={`${id}-user`} role="tabpanel" aria-labelledby={`${id}-user-tab`} aria-busy={Boolean(inputHistory?.history.loading || inputMailbox.loading)} hidden={folder !== 'user'}>
+      <div id={`${id}-user`} role="tabpanel" aria-labelledby={`${id}-user-tab`} aria-busy={Boolean(inputHistory?.history.loading || inputMailbox.loading || archive.loading)} hidden={folder !== 'user'}>
         {readingMounted && folder === 'user' ? <>
           <InputMailboxFrame compact refreshInParent={Boolean(inputHistory)} coverageInParent={Boolean(inputHistory)}
             selected={Boolean(selectedJournal)} mailbox={groupedMailbox} hostId={inputMailboxHost}>
@@ -713,18 +728,22 @@ export function SessionMailbox({ pendingLayout, system, queued, timeline, progre
             {observationError ? <SourceNotice title="Automatic native updates are unavailable" message={observationError.message} action="Refresh source" onAction={() => void refresh()} /> : null}
             {windowFrozen ? <SourceNotice title="The native source changed" message="This reading window is kept." action="Read latest records" onAction={() => void refresh()} /> : null}
             {historyError && !historyError.message.includes('unavailable in the web preview') ? <SourceNotice title="Failed to read native conversation history" message={historyError.message} action="Retry" onAction={() => void refresh()} /> : null}
+            {archive.error ? <SourceNotice title="Reading the saved input archive failed" message={archive.error} action="Retry saved inputs" onAction={() => void archive.refresh()} /> : null}
             {inputHistory ? <InputHistoryList history={inputHistory.history}
               localEntries={inputHistory.localEntries} onCopy={inputHistory.copy} {...(inputHistory.canFill !== false ? { onFill: inputHistory.fill, onFillLocal: inputHistory.fillLocal } : {})}
-              onRefresh={() => { void inputMailbox.refresh(); void refresh() }}
-              refreshing={inputMailbox.loading || inputHistory.history.loading}
-              coverage={<>{inputMailbox.loading || inputHistory.history.loading ? 'Reading inputs…' : 'Loaded inputs'} · Partial history
+              onRefresh={() => { void inputMailbox.refresh(); void refresh(); void archive.refresh() }}
+              refreshing={inputMailbox.loading || inputHistory.history.loading || archive.loading}
+              coverage={<>{inputMailbox.loading || inputHistory.history.loading || archive.loading ? 'Reading inputs…' : 'Loaded inputs'} · Partial history
                 <details className="composer-mailbox__coverage-details"><summary>Sources</summary>
                   <span>Journal: {journalRows.length} loaded; earlier coverage unconfirmed. {inputHistory.history.complete ? 'Available history checked for this read.' : 'History is a partial reading window.'}{inputHistory.history.examined ? ` Examined ${inputHistory.history.examined} history records.` : ''}</span>
+                  {archiveOwner ? <span>{archive.error ? 'Saved input archive: read unconfirmed.' : `Saved input archive: ${archivedQueue.length} loaded${archive.nextCursor !== null ? '; earlier records available.' : '.'}`}</span> : null}
                 </details></>}
               beforeRecords={renderPending()}>{renderRecorded()}</InputHistoryList> : <>
               {renderPending()}{renderRecorded()}
               {hasMore ? <div className="composer-mailbox__boundary"><button type="button" className="composer-tool" onClick={() => void loadEarlier()}>Load earlier messages</button></div> : null}
             </>}
+            {archive.loading ? <p role="status" className="composer-mailbox__boundary">Reading saved inputs…</p> : null}
+            {archive.nextCursor !== null ? <div className="composer-mailbox__boundary"><button type="button" className="composer-tool" disabled={archive.loading} onClick={archive.loadEarlier}>Load earlier saved inputs</button></div> : null}
           </>}
           </InputMailboxFrame>
         </> : null}

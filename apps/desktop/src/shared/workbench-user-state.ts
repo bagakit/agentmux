@@ -84,7 +84,7 @@ export function parseWorkbenchInputArchiveQuery(value: unknown): WorkbenchInputA
 /** Archive is presentation. Only a confirmed original direct input can leave the hot workface. */
 export function workbenchInputArchiveEligible(value: unknown): boolean {
   const entry = record(value)
-  if (!entry || entry.archived !== true || !inputKey(entry.operationId) ||
+  if (!entry || entry.archived !== true || !inputKey(entry.operationId) || typeof entry.text !== 'string' ||
       ['movedToDraft', 'originalMember', 'recoveredSourceInput', 'resumeInputIntent', 'inputStopIntent', 'inputStopReceipt', 'mainRollover', 'browserInput', 'browserRecipient',
         'goalDispatch', 'goalPmo', 'goalContinuation', 'agentMuxNote', 'moteMain', 'moteSource'].some(key => entry[key] !== undefined)) return false
   const control = record(entry.directInputControl), binding = record(entry.directInputBinding)

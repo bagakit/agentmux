@@ -10,7 +10,7 @@ type StateStorage<State> = {
   getItem(name: string): StoredValue<State> | Promise<StoredValue<State>>
   removeItem(name: string): void | Promise<unknown>
 } & ({ setItem(name: string, value: string): void | Promise<unknown> }
-  | { writeProjection(name: string, value: StorageValue<State>): void | Promise<unknown> })
+  | { writeProjection(name: string, value: StorageValue<State>, checkpoint: boolean): void | Promise<unknown> })
 const asynchronous = <T>(value: T | Promise<T>): value is Promise<T> =>
   value !== null && typeof value === 'object' && typeof (value as Promise<T>).then === 'function'
 const decodeStoredValue = <State>(value: StoredValue<State>): StorageValue<State> | null =>
@@ -34,6 +34,7 @@ export function createBatchedPersistentStorage<State>(
   onRecovered?: (error: unknown) => void
 ): FlushablePersistentStorage<State> {
   const pending = new Map<string, StorageValue<State>>()
+  const checkpoints = new Map<string, object>()
   // Input identity does not imply that its pending write has reached storage.
   const inputs = new Map<string, StorageValue<State>>()
   const removals = new Map<string, number>()
@@ -47,8 +48,10 @@ export function createBatchedPersistentStorage<State>(
     if (generation !== attempt) return
     for (const [name, value] of pending) {
       if (removals.has(name)) continue
+      const checkpoint = checkpoints.get(name)
       const finish = () => {
         // An ACK belongs to its captured input; newer edits remain pending.
+        if (generation === attempt && checkpoints.get(name) === checkpoint) checkpoints.delete(name)
         if (generation === attempt && pending.get(name) === value) pending.delete(name)
       }
       const save = (current: StoredValue<State>, confirm = false): void | Promise<void> => {
@@ -57,7 +60,7 @@ export function createBatchedPersistentStorage<State>(
         if ('writeProjection' in base) {
           // Only the native document owner can confirm a durable write, even
           // when a read sees bytes from an earlier unconfirmed replacement.
-          result = base.writeProjection(name, value)
+          result = base.writeProjection(name, value, checkpoint !== undefined)
         } else {
           const encoded = JSON.stringify(value)
           if (current === encoded && !confirm) { finish(); return }
@@ -143,6 +146,7 @@ export function createBatchedPersistentStorage<State>(
     },
     removeItem: name => {
       pending.delete(name)
+      checkpoints.delete(name)
       inputs.delete(name)
       if (pending.size === 0 && timer !== null) { clearTimeout(timer); timer = null }
       // An already accepted write must settle before removal, otherwise its
@@ -174,6 +178,7 @@ export function createBatchedPersistentStorage<State>(
       // Explicit save captures current inputs even when observation missed a
       // mutation or the original native file was removed after an earlier ACK.
       pending.set(name, value)
+      checkpoints.set(name, {})
       inputs.set(name, value)
       return flush()
     } }

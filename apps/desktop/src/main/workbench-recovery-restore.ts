@@ -9,6 +9,10 @@ const stamp = (value: { dev: bigint; ino: bigint; size: bigint; mtimeNs: bigint;
 
 /** The local-user maintenance transport is authority; a supplied path is not. */
 export async function readWorkbenchRecoveryMember(member: RecoveryRestoreMember, target: string): Promise<string> {
+  return new TextDecoder('utf-8', { fatal: true }).decode(await readWorkbenchRecoveryBytes(member, target))
+}
+
+export async function readWorkbenchRecoveryBytes(member: RecoveryRestoreMember, target: string): Promise<Buffer> {
   if (member.kind !== 'file' || member.target !== target || !/^[a-f0-9]{64}$/u.test(member.sha256)) throw recoveryUnavailable('DESKTOP_RECOVERY_MEMBER_MISMATCH')
   const handle = await open(member.file, constants.O_RDONLY | constants.O_NOFOLLOW)
   try {
@@ -16,7 +20,7 @@ export async function readWorkbenchRecoveryMember(member: RecoveryRestoreMember,
     if (!before.isFile() || (before.mode & 0o077n) !== 0n || process.getuid && before.uid !== BigInt(process.getuid())) throw recoveryUnavailable('DESKTOP_RECOVERY_SOURCE_UNPROTECTED')
     const bytes = await handle.readFile(), after = await handle.stat({ bigint: true }), current = await lstat(member.file, { bigint: true })
     if (stamp(before) !== stamp(after) || stamp(after) !== stamp(current) || recoveryDigest(bytes) !== member.sha256) throw recoveryUnavailable('DESKTOP_RECOVERY_SOURCE_CHANGED')
-    return new TextDecoder('utf-8', { fatal: true }).decode(bytes)
+    return bytes
   } finally { await handle.close() }
 }
 
@@ -43,7 +47,7 @@ export async function confirmExistingWorkbenchRecoveryMember(member: RecoveryRes
 
 /** All selected members are checked before any original target is touched. */
 export async function prepareWorkbenchRecoveryMembers(members: RecoveryRestoreMember[], directory: string,
-  prepare: (member: RecoveryRestoreMember) => Promise<string>): Promise<RecoveryPreparation> {
+  prepare: (member: RecoveryRestoreMember) => Promise<string | Buffer>): Promise<RecoveryPreparation> {
   const prepared: RecoveryRestoreMember[] = [], selectors: Extract<RecoveryPreparation, { state: 'unavailable' }>['selectors'] = []
   for (const member of members) {
     try {

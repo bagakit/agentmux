@@ -6,7 +6,7 @@ import type { AgentSessionUsagePage } from '@agentmux/core'
 import { api } from '../lib/api'
 import { SessionRecordDelete } from './SessionRecordDelete'
 import type { AgentSessionRecordDeletionReceipt } from '@agentmux/core/agent-session-record'
-import { LocalRetainedInputs } from './LocalRetainedInputs'
+import { LocalRetainedInputDetails } from './LocalRetainedInputs'
 import type { LocalInputTarget } from '../lib/local-retained-inputs'
 
 type Observation = { page: AgentSessionUsagePage; records: number; logicalBytes: number; pages: number }
@@ -72,7 +72,7 @@ export function SessionRecordDetails({ target, deleted = false, onDeleted }: { t
           <dl className="session-record-details__facts"><div><dt>Host</dt><dd>{target.hostId}</dd></div><div><dt>Session</dt><dd>{target.agentSessionId}</dd></div><div><dt>Owner</dt><dd>AgentMux Core · captured body JSON</dd></div></dl>
           {!deleted && !confirmedDeleted ? <Usage target={target} /> : null}
           <SessionRecordDelete target={target} onDeleted={receipt => { setConfirmedDeleted(true); onDeleted?.(receipt) }} />
-          <details><summary>Saved local inputs</summary><LocalRetainedInputs target={target} /></details>
+          <LocalRetainedInputDetails target={target} />
         </div> : null}
       </Dialog.Content>
     </DocumentOverlayPortal>

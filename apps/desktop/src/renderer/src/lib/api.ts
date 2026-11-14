@@ -894,6 +894,7 @@ const mockApi: AgentMuxDesktopApi = {
     readFileViewReading: async () => null,
     writeFileViewReading: async () => null,
     readWorkbenchState: async () => null,
+    readWorkbenchInputArchive: async () => ({ entries: [], nextCursor: null }),
     readStorageRecovery: async () => { throw new Error('Storage recovery status requires the original Desktop Host.') },
     readLocalRuntimeRecovery: async () => ({ state: 'unchanged' }),
     restoreLocalRuntimeIdentity: async () => ({ state: 'unchanged' }),

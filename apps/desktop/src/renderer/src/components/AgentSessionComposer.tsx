@@ -9,7 +9,7 @@ import { reportMessageDeliveryDiagnostics } from '../lib/message-delivery-diagno
 import { scratchTopicsForConfig } from '../lib/scratch-topic-snapshots'
 import { PosturePicker } from './PosturePicker'
 import { createFirstPromptSelector, createSessionViewModeSelector, sessionPresentationById } from '../lib/session-presentation'
-import { useContext, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react'
+import { useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react'
 import type { ComposerInsertionHandle } from '@agentmux/client-ui/composer-insertion'
 import { AgentContextUsage } from './AgentContextUsage'
 import { AgentComposerTools } from './AgentComposerTools'
@@ -410,7 +410,7 @@ export function AgentSessionComposer({
   const capabilities = session?.kind === 'agent' ? session.capabilities : undefined
   const runId = control?.run.runId
   const canDrain = session?.kind === 'agent' && steerQueueCanEverDrain(session.processState)
-  const queued = useMemo(() => queuedEntries.map((entry) => ({
+  const presentQueueEntry = useCallback((entry: AgentSteerQueueEntry) => ({
     id: entry.operationId,
     ...(entry.directInputControl && entry.directInputBinding ? { inputOrigin: {
       hostId: entry.directInputControl.hostId, key: entry.inputReceipt?.key ?? { kind: 'prompt' as const,
@@ -443,7 +443,8 @@ export function AgentSessionComposer({
     ...(entry.error ? { error: entry.error } : {}),
     ...(entry.preparationWait ? { preparationWait: entry.preparationWait } : {}),
     ...(staleManualSteerDraftKey(entry, session) ? { staleRunDraft: true } : {}),
-  })), [queuedEntries, control, capabilities, session, runId, canDrain, sendingId, sendingPhase, timeline, timelineRevision])
+  }), [control, capabilities, session, runId, canDrain, sendingId, sendingPhase, timeline, timelineRevision])
+  const queued = useMemo(() => queuedEntries.map(presentQueueEntry), [queuedEntries, presentQueueEntry])
   const sendImmediately = useMemo(() => queued.some(entry => entry.immediateSend), [queued])
 
   return (
@@ -455,6 +456,8 @@ export function AgentSessionComposer({
         progressUnavailable={source && !source.originalProgress ? { message: 'The original Session Provider and workspace metadata are unconfirmed. Its exact automation target cannot be formed yet. Existing arrangements and your draft are kept.', onRefresh: source.onRefreshTools } : undefined}
         control={source ? null : control}
         queued={queued}
+        archiveOwner={source ? { ownerKey, present: presentQueueEntry }
+          : control ? { ownerKey, target: control, present: presentQueueEntry } : undefined}
         {...(!readOnly ? { onArchiveQueued: async (operationId: string, expectedText: string, archived: boolean) => {
           await feedback.run(async () => { await archiveAgentSteer(ownerKey, operationId, expectedText, archived) })
         } } : {})}

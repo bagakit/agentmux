@@ -45,8 +45,6 @@ import { persistedAgentOperations, restoredAgentOperations } from './lib/agent-o
 import { DeviceHomeError, type DeviceHomeStep } from './lib/device-home-feedback'
 import { restoredMoteMainCreationReferences, type MoteMainCreationReference } from '../../shared/mote-main-action'
 import { parseAmuxObjectLink } from '@agentmux/core/sharing'
-import { sha256 } from '@noble/hashes/sha2.js'
-import { bytesToHex, utf8ToBytes } from '@noble/hashes/utils.js'
 import { createGitReadingActions, type GitReadingActions } from './store/git-reading-actions'
 import { runIndependentCheckpoints } from './store/storage-checkpoint'
 import { MOTE_INPUT_GUIDANCE } from './lib/mote-input-source'
@@ -201,6 +199,7 @@ import { DEFAULT_FOCUS_RULER, restoreFocusRuler, sameFocusRuler, type FocusRuler
 import { readTerminalViewObservation } from './lib/terminal-view-observation'
 import type { GitCommitSnapshot, GitHistoryResult, GitCommitDetailsResult } from '../../shared/git-contracts'
 import { confirmedSteerDelivery, reconcileDeliveredSteers } from './lib/steer-queue-delivery'
+import { archivedInputMatchesSession, readArchivedInputForSession, readWorkbenchInputArchive } from './lib/workbench-input-archive'
 import { browserOperatorForSession } from './lib/browser-operator-identity'
 import { clampProjectRailWidth, PROJECT_RAIL_DEFAULT_WIDTH } from './lib/project-rail-width'
 import { clampSurveySidebarWidth, SURVEY_SIDEBAR_DEFAULT_WIDTH } from './lib/survey-sidebar-width'
@@ -7887,7 +7886,15 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     requireActive()
     if (request.operation === 'message.pending.ls' || request.operation === 'message.pending.edit' || request.operation === 'message.pending.send' || request.operation === 'message.pending.stop' ||
         request.operation === 'message.pending.archive' || request.operation === 'message.pending.restore') {
-      const session = agentSession({ kind: 'agent-session', agentSessionId: request.agentSessionId })
+      const target = { kind: 'agent-session' as const, agentSessionId: request.agentSessionId }
+      const session = agentSession(target)
+      function verifyArchiveTarget() {
+        requireActive()
+        const current = agentSession(target)
+        if (current.control.hostId !== session.control.hostId || current.control.agentSessionId !== session.control.agentSessionId) {
+          throw controlFailure('STALE_AGENT_SESSION', 'The original Session changed during the archive read. Its saved input is kept.')
+        }
+      }
       const records = (): AgentMuxPendingMessage[] => {
         const state = get()
         const current = reconcileDeliveredSteers(state, session.id)
@@ -7895,9 +7902,38 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           pendingSteerRecord(entry, state.agentSteerInFlight[session.id], state.agentSteerInFlightPhase[session.id],
             !entry.directInputBinding && Boolean(confirmedSteerDelivery(state.timelines[session.id], session.control, entry.operationId))))
       }
-      if (request.operation === 'message.pending.ls') return { operation: request.operation, agentSessionId: session.id, messages: records() }
-      const before = records().find(item => item.pendingId === request.pendingId)
-      if (!before) throw controlFailure('CONTROL_REQUEST_CONFLICT', 'This original pending message is no longer available. No new message was created.')
+      if (request.operation === 'message.pending.ls') {
+        const archived: AgentMuxPendingMessage[] = []
+        let after: string | undefined
+        do {
+          const page = await readWorkbenchInputArchive({ ownerKey: session.id, limit: 100, ...(after === undefined ? {} : { after }) })
+          verifyArchiveTarget()
+          for (const { entry } of page.entries) {
+            if (archivedInputMatchesSession(entry, session.control.hostId, session.control.agentSessionId)) archived.push(pendingSteerRecord(entry))
+          }
+          after = page.nextCursor ?? undefined
+        } while (after !== undefined)
+        const messages = records()
+        const activeIds = new Set(messages.map(message => message.pendingId))
+        return { operation: request.operation, agentSessionId: session.id, messages: [...messages, ...archived.filter(message => !activeIds.has(message.pendingId))] }
+      }
+      const pendingId = request.pendingId
+      let before = records().find(item => item.pendingId === pendingId)
+      if (!before) {
+        const archived = await readArchivedInputForSession(session.id, session.control, pendingId)
+        verifyArchiveTarget()
+        before = records().find(item => item.pendingId === pendingId)
+        if (!before) {
+          if (!archived) throw controlFailure('CONTROL_REQUEST_CONFLICT', 'This original pending message is no longer available. No new message was created.')
+          if (request.operation === 'message.pending.archive' || request.operation === 'message.pending.restore') {
+            if (archived.text !== request.expectedText) throw controlFailure('CONTROL_REQUEST_CONFLICT', 'This original message changed. Read its current text before archiving or restoring it.')
+            if (request.operation === 'message.pending.archive') return { operation: request.operation, agentSessionId: session.id, message: pendingSteerRecord(archived), changed: false }
+            throw controlFailure('CONTROL_REQUEST_CONFLICT', 'Core confirmed this original input. Its archived record is kept; read the confirmed History instead of restoring it to Pending.')
+          }
+          if (request.operation === 'message.pending.stop') throw controlFailure('CONTROL_REQUEST_CONFLICT', 'This original message has no active preparation backoff to stop. Its message and Run are kept.')
+          throw controlFailure('CONTROL_REQUEST_CONFLICT', 'Core confirmed this original input. Its archived record remains available in Inputs.')
+        }
+      }
       if (request.operation === 'message.pending.stop') {
         const changed = await get().cancelAgentSteerPreparation(session.id, request.pendingId)
         const message = records().find(item => item.pendingId === request.pendingId)
@@ -7963,10 +7999,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         survey: { collectedZoneIds: Object.keys(state.surveyCollectedZones).filter(id => state.surveyCollectedZones[id] === true),
           organization: state.surveyOrganization, pageReferences: state.surveyPageReferences, pinnedReferences: surveyPinnedReferences(state), ...(state.surveyPinReadRecovery ? { pinIssue: state.surveyPinReadRecovery.issue } : {}), selection: surveySelectionPresentation(state.surveyZoneSelection) },
         persistence: { userStatePending: (__AGENTMUX_WEB_PREVIEW__ ? persistentWorkbenchStorage.pending() : desktopUserDocument.pending()) || auxiliaryUserDataPending(),
-          userStateContentDigest: (() => {
-            const encoded = desktopUserDocument.encodeProjection({ state: partializeAppState(state), version: 1 })
-            return encoded === null ? null : bytesToHex(sha256(utf8ToBytes(encoded)))
-          })(),
+          userStateContentDigest: desktopUserDocument.confirmedProjectionDigest(),
           spatial: { revision: coreSpatialPersistence?.current?.revision ?? null,
             aligned: !!coreSpatialPersistence?.ready && !coreSpatialPersistence.pendingChanges &&
               sameSpatialValue(captureSpatialWorkbench(coreSpatialPersistence), coreSpatialPersistence.current!.graph),
@@ -14743,6 +14776,28 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   },
   partialize: partializeAppState
 }))
+
+if (!__AGENTMUX_WEB_PREVIEW__) desktopUserDocument.subscribeInputQueueEvictions(rows => {
+  const byOwner = new Map<string, Set<unknown>>()
+  for (const { ownerKey, entry } of rows) {
+    const entries = byOwner.get(ownerKey) ?? new Set()
+    entries.add(entry)
+    byOwner.set(ownerKey, entries)
+  }
+  useAppStore.setState(state => {
+    let queues: AppState['agentSteerQueues'] | undefined
+    for (const [ownerKey, entries] of byOwner) {
+      const current = state.agentSteerQueues[ownerKey]
+      if (!current) continue
+      const kept = current.filter(entry => !entries.has(entry))
+      if (kept.length === current.length) continue
+      queues ??= { ...state.agentSteerQueues }
+      if (kept.length) queues[ownerKey] = kept
+      else delete queues[ownerKey]
+    }
+    return queues ? { agentSteerQueues: queues } : state
+  })
+})
 
 let projectingNativeBrowsers = false
 useAppStore.subscribe((state, previous) => {

@@ -1,5 +1,5 @@
 import { Button } from '@agentmux/client-ui/components/Button'
-import { LocalRetainedInputs } from './LocalRetainedInputs'
+import { LocalRetainedInputDetails } from './LocalRetainedInputs'
 import { SessionRecordDetails } from './SessionRecordDetails'
 import { MoteWorkfaceContext } from '../lib/mote-workface'
 import { useMoteDialogueView } from '../lib/mote-dialogue-view'
@@ -1010,7 +1010,7 @@ export function SessionPane({
         <h3>AgentMux record deleted</h3>
         <p>Core confirmed deletion of this original closed Session record. Its original Tab and Region are kept.</p>
         <p className="muted">Provider originals and Runtime resources remain with their owners. No physical disk recovery is claimed.</p>
-        <LocalRetainedInputs target={target} />
+        <LocalRetainedInputDetails key={JSON.stringify([target.hostId, target.agentSessionId])} target={target} visible={visible} />
       </div>
     </section>
   }

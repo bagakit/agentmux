@@ -7,33 +7,19 @@ import { dirname, isAbsolute, join } from 'node:path'
 import { durableWriteFile, DurableWriteError, restoreMissingRecoveryFile } from '@agentmux/core'
 import type { RecoverySource, RecoveryRestoreMember } from '@agentmux/core'
 import { captureWorkbenchRecoveryFiles, inspectWorkbenchRecoveryFiles } from './workbench-recovery-source.js'
-import { confirmExistingWorkbenchRecoveryMember, holdRecoveredWorkbenchDocument, prepareWorkbenchRecoveryMembers, readWorkbenchRecoveryMember, recoveryUnavailable } from './workbench-recovery-restore.js'
+import { confirmExistingWorkbenchRecoveryMember, holdRecoveredWorkbenchDocument, prepareWorkbenchRecoveryMembers, readWorkbenchRecoveryBytes, readWorkbenchRecoveryMember, recoveryUnavailable } from './workbench-recovery-restore.js'
+import { decodeWorkbenchUserState, holdRecoveredWorkbenchDatabase, isWorkbenchUserDatabase, WorkbenchUserDatabase } from './workbench-user-database.js'
 
-import type { WorkbenchUserStateFailure, WorkbenchUserStateReceipt, WorkbenchUserStateObservation } from '../shared/workbench-user-state.js'
+import type { WorkbenchInputArchivePage, WorkbenchInputArchiveQuery, WorkbenchUserStateFailure, WorkbenchUserStateReceipt, WorkbenchUserStateObservation } from '../shared/workbench-user-state.js'
 import type { WorkbenchUserStateWrite, WorkbenchUserStateWriteReceipt } from '../shared/workbench-user-state.js'
 export type { WorkbenchUserStateFailure, WorkbenchUserStateReceipt, WorkbenchUserStateObservation } from '../shared/workbench-user-state.js'
-import { captureFileViewReadingOwner, encodeFileViewReading, fileViewReadingOwnerKey, isFileViewReadingPosition, type FileViewReadingOwner, type FileViewReadingRecord, type FileViewReadingReceipt } from '../shared/workbench-user-state.js'
+import { captureFileViewReadingOwner, encodeFileViewReading, fileViewReadingOwnerKey, isFileViewReadingPosition, parseWorkbenchInputArchiveQuery,
+  type FileViewReadingOwner, type FileViewReadingRecord, type FileViewReadingReceipt } from '../shared/workbench-user-state.js'
 
 type UserStateIo = {
   read?: (path: string, encoding: 'utf8') => Promise<string>
   write?: typeof durableWriteFile
   syncDirectory?: (path: string) => Promise<void>
-}
-
-function invalid(): Error & { code: string } {
-  return Object.assign(new Error('Desktop user state must be a JSON object containing an object state and numeric version. Original data is retained.'),
-    { code: 'WORKBENCH_USER_STATE_INVALID' })
-}
-
-/** Validate the existing Zustand envelope without interpreting or removing user fields. */
-function validate(value: unknown): asserts value is string {
-  if (typeof value !== 'string') throw invalid()
-  let parsed: unknown
-  try { parsed = JSON.parse(value) } catch { throw invalid() }
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw invalid()
-  const envelope = parsed as Record<string, unknown>
-  if (!envelope.state || typeof envelope.state !== 'object' || Array.isArray(envelope.state) ||
-    typeof envelope.version !== 'number' || !Number.isFinite(envelope.version)) throw invalid()
 }
 
 const digest = (value: string) => createHash('sha256').update(value).digest('hex')
@@ -48,6 +34,7 @@ async function syncDirectory(path: string): Promise<void> {
  * Reads join admitted writes. No browser API, Session lifecycle or second layout owner lives here.
  */
 export class WorkbenchUserStateStore {
+  private readonly database: WorkbenchUserDatabase
   private tail: Promise<void> = Promise.resolve()
   private rootOpened = false
   private readonly openedAuxiliary = new Set<string>()
@@ -57,7 +44,7 @@ export class WorkbenchUserStateStore {
   private rendererValue: string | null = null
   private rendererFlight: Promise<WorkbenchUserStateWriteReceipt> | null = null
   private rendererDrain: Promise<void> | null = null
-  private rendererPending: { writer: object; request: WorkbenchUserStateWrite; current(): boolean;
+  private rendererPending: { writer: object; request: WorkbenchUserStateWrite; document: ReturnType<typeof decodeWorkbenchUserState>; current(): boolean;
     resolve(receipt: WorkbenchUserStateWriteReceipt): void; reject(error: unknown): void } | null = null
   private readonly avatarRequestTails = new Map<string, Promise<void>>()
   private readonly readingTails = new Map<string, Promise<void>>()
@@ -67,15 +54,23 @@ export class WorkbenchUserStateStore {
   private diagnosticReading: Promise<void> | null = null
   private diagnosticWrite: Promise<void> | null = null
   private pendingDiagnostic: WorkbenchUserStateFailure | null = null
+  private confirmedDatabaseFile: string | undefined
   private observation: WorkbenchUserStateObservation
 
   constructor(readonly path: string, private readonly io: UserStateIo = {}) {
     if (!isAbsolute(path)) throw new Error('Desktop user state requires an absolute host-owned path.')
+    this.database = new WorkbenchUserDatabase(path, io.syncDirectory)
     this.observation = { path, availability: 'unconfirmed', contentDigest: null, sizeBytes: null,
       diskDurability: 'unconfirmed', confirmedAt: null, lastConfirmedWrite: null, lastFailure: null }
   }
 
   observe(): WorkbenchUserStateObservation { return structuredClone(this.observation) }
+  get databasePath(): string { return this.database.path }
+
+  async recoveryPath(): Promise<string> {
+    if (await this.database.acknowledged()) return this.databasePath
+    return await this.database.presence() === 'database' ? this.databasePath : this.path
+  }
 
   retainRecoveryGaps(memberIds: readonly string[], reason: string): void {
     for (const id of memberIds) if (id === 'document' || /^(?:object-avatar-requests|file-view-reading)\/[a-f0-9]{64}\.json$/u.test(id)) this.recoveryGaps.set(id, reason)
@@ -87,9 +82,10 @@ export class WorkbenchUserStateStore {
       { id: 'object-avatar-requests', directory: this.path + '.object-avatar-requests', accepts: (name: string) => /^[a-f0-9]{64}\.json$/u.test(name) },
       { id: 'file-view-reading', directory: this.path + '.file-view-reading', accepts: (name: string) => /^[a-f0-9]{64}\.json$/u.test(name) }
     ]
-    return { id, ownedPaths: [this.path, ...namespaces.map(value => value.directory)], inspect: () => inspectWorkbenchRecoveryFiles(files, namespaces), capture: async directory => {
-      await this.queue(async () => {})
-      const root = await captureWorkbenchRecoveryFiles(id, directory, files)
+    return { id, ownedPaths: [this.path, this.databasePath, ...namespaces.map(value => value.directory)],
+      inspect: async () => inspectWorkbenchRecoveryFiles([{ id: 'document', target: await this.recoveryPath() }], namespaces), capture: async directory => {
+      const target = await this.queue(() => this.recoveryPath())
+      const root = target === this.databasePath ? await this.captureDatabase(directory) : await captureWorkbenchRecoveryFiles(id, directory, files)
       // Independent atomic members have their own cuts; a stalled auxiliary
       // request must never hold the original root document's writer queue.
       const auxiliary = await captureWorkbenchRecoveryFiles(id, directory, [], namespaces)
@@ -98,15 +94,38 @@ export class WorkbenchUserStateStore {
     restoreMissing: member => this.restoreRecoveryMember(member) }
   }
 
+  private async captureDatabase(directory: string): Promise<Awaited<ReturnType<typeof captureWorkbenchRecoveryFiles>>> {
+    const id = 'document', sourceId = 'desktop.user-state', target = this.databasePath, file = join(directory, digest(id))
+    try {
+      const revision = await this.database.capture(file)
+      return { revision, members: [{ id, target, file, kind: 'file', capturedAt: Date.now(), revision }], gaps: [] }
+    } catch (error) {
+      return { revision: 'unavailable', members: [], gaps: [{ sourceId, memberId: id,
+        code: (error as NodeJS.ErrnoException)?.code ?? 'RECOVERY_SOURCE_UNAVAILABLE' }] }
+    }
+  }
+
   private recoveryTarget(member: RecoveryRestoreMember): string {
-    if (member.id === 'document') return this.path
+    if (member.id === 'document') {
+      if (member.target !== this.path && member.target !== this.databasePath) throw recoveryUnavailable('DESKTOP_RECOVERY_MEMBER_MISMATCH')
+      return member.target
+    }
     if (!/^(?:object-avatar-requests|file-view-reading)\/[a-f0-9]{64}\.json$/u.test(member.id)) throw recoveryUnavailable('DESKTOP_RECOVERY_MEMBER_MISMATCH')
     const [kind, name] = member.id.split('/')
     return join(this.path + '.' + kind, name!)
   }
-  private async prepareRecoveryMember(member: RecoveryRestoreMember, protectCurrent = true): Promise<string> {
+  private async prepareRecoveryMember(member: RecoveryRestoreMember, protectCurrent = true): Promise<string | Buffer> {
     if (protectCurrent && (member.id === 'document' ? this.rootOpened : this.openedAuxiliary.has(member.id))) throw recoveryUnavailable('DESKTOP_DOCUMENT_ALREADY_OPEN')
-    const raw = await readWorkbenchRecoveryMember(member, this.recoveryTarget(member))
+    const target = this.recoveryTarget(member)
+    if (member.id === 'document' && target === this.databasePath) {
+      const bytes = await readWorkbenchRecoveryBytes(member, target)
+      if (!isWorkbenchUserDatabase(bytes)) throw recoveryUnavailable('DESKTOP_RECOVERY_MEMBER_MISMATCH')
+      const prepared = await holdRecoveredWorkbenchDatabase(bytes, await this.database.acknowledged())
+      if (protectCurrent && this.rootOpened) throw recoveryUnavailable('DESKTOP_DOCUMENT_ALREADY_OPEN')
+      return prepared
+    }
+    if (protectCurrent && member.id === 'document' && await this.recoveryPath() === this.databasePath) throw recoveryUnavailable('DESKTOP_RECOVERY_MEMBER_MISMATCH')
+    const raw = await readWorkbenchRecoveryMember(member, target)
     let value = raw
     if (member.id === 'document') value = holdRecoveredWorkbenchDocument(raw)
     else if (member.id.startsWith('file-view-reading/')) {
@@ -131,11 +150,18 @@ export class WorkbenchUserStateStore {
     // user input or grant permission to overwrite a later admitted image.
     const restore = async () => {
       const prepared = await this.prepareRecoveryMember(member, false)
-      if (prepared !== await readWorkbenchRecoveryMember(member, this.recoveryTarget(member))) throw recoveryUnavailable('DESKTOP_RECOVERY_PREPARATION_REQUIRED')
-      const existing = await confirmExistingWorkbenchRecoveryMember(member, this.recoveryTarget(member))
+      const target = this.recoveryTarget(member)
+      if (!Buffer.from(prepared).equals(await readWorkbenchRecoveryBytes(member, target))) throw recoveryUnavailable('DESKTOP_RECOVERY_PREPARATION_REQUIRED')
+      if (member.id === 'document' && target === this.path && await this.recoveryPath() === this.databasePath) {
+        // An old-format restore ACK may be lost just before migration. Reconcile
+        // only its same persisted request, without publishing to the legacy path.
+        if ((await this.database.readMetadata().catch(() => null))?.contentDigest !== member.sha256) return 'conflict'
+        return await confirmExistingWorkbenchRecoveryMember(member, target) ?? 'conflict'
+      }
+      const existing = await confirmExistingWorkbenchRecoveryMember(member, target)
       if (existing) return existing
       if (member.id === 'document' ? this.rootOpened : this.openedAuxiliary.has(member.id)) throw recoveryUnavailable('DESKTOP_DOCUMENT_ALREADY_OPEN')
-      return await restoreMissingRecoveryFile(member.file, this.recoveryTarget(member), member.sha256)
+      return await restoreMissingRecoveryFile(member.file, target, member.sha256)
     }
     if (member.id === 'document') return await this.queue(restore)
     const hash = member.id.slice(member.id.indexOf('/') + 1, -'.json'.length)
@@ -325,26 +351,39 @@ export class WorkbenchUserStateStore {
   private async readCurrent(): Promise<string | null> {
     // Historical diagnostics must never delay the original user document.
     if (!this.diagnosticRead) this.diagnosticReading = this.readDiagnostic()
-    let value: string
-    try { value = await (this.io.read ?? readFile)(this.path, 'utf8') }
-    catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
-      if (this.recoveryGaps.has('document')) throw recoveryUnavailable('DESKTOP_RECOVERY_SOURCE_UNCONFIRMED')
+    if (!await this.openDatabase()) {
       Object.assign(this.observation, { availability: 'missing', contentDigest: null, sizeBytes: null,
         diskDurability: 'unconfirmed', confirmedAt: null })
       return null
     }
-    const contentDigest = digest(value)
-    const sizeBytes = size(value)
-    const confirmed = this.observation.lastConfirmedWrite
-    // All confirmed writes have a validated envelope. Reuse that validation only
-    // for matching bytes from this fresh read of the original file.
-    if (!confirmed || confirmed.contentDigest !== contentDigest || confirmed.sizeBytes !== sizeBytes) validate(value)
-    // Equal bytes do not establish that this path still names the file confirmed
-    // by an earlier write. Retain that receipt as history, separate from this read.
-    Object.assign(this.observation, { availability: 'present', contentDigest, sizeBytes,
+    const original = await this.database.fileStamp()
+    const { value, metadata: { contentDigest, sizeBytes } } = await this.database.read()
+    const current = await this.database.fileStamp()
+    const matches = original === current && (this.observation.lastConfirmedWrite === null || this.confirmedDatabaseFile === current)
+    Object.assign(this.observation, { availability: matches ? 'present' : 'unconfirmed',
+      contentDigest: matches ? contentDigest : null, sizeBytes: matches ? sizeBytes : null,
       diskDurability: 'unconfirmed', confirmedAt: null })
     return value
+  }
+
+  private async openDatabase(): Promise<boolean> {
+    const presence = await this.database.presence()
+    if (presence === 'database') return true
+    if (presence === 'legacy') {
+      let value: string
+      if (this.io.read) value = await this.io.read(this.path, 'utf8')
+      else {
+        const bytes = await readFile(this.path)
+        try { value = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes) }
+        catch { throw recoveryUnavailable('WORKBENCH_USER_STATE_INVALID') }
+      }
+      const document = decodeWorkbenchUserState(value)
+      if (document.inputQueueDelta !== undefined) throw recoveryUnavailable('WORKBENCH_USER_STATE_INVALID')
+      await this.database.create(value, document, value)
+      return true
+    }
+    if (this.recoveryGaps.has('document')) throw recoveryUnavailable('DESKTOP_RECOVERY_SOURCE_UNCONFIRMED')
+    return false
   }
 
   read(): Promise<string | null> {
@@ -355,18 +394,49 @@ export class WorkbenchUserStateStore {
     })
   }
 
-  private async writeCurrent(value: string): Promise<WorkbenchUserStateReceipt> {
+  readInputArchive(query: WorkbenchInputArchiveQuery): Promise<WorkbenchInputArchivePage> {
+    this.rootOpened = true
+    return this.queue(async () => {
+      const selected = parseWorkbenchInputArchiveQuery(query)
+      if (!await this.openDatabase()) return { entries: [], nextCursor: null }
+      return this.database.readInputArchive(selected)
+    })
+  }
+
+  private async confirmReceipt(metadata: Awaited<ReturnType<WorkbenchUserDatabase['write']>>): Promise<WorkbenchUserStateReceipt> {
+    this.confirmedDatabaseFile = await this.database.fileStamp()
+    const { contentDigest, sizeBytes, inputQueueArchiveOwners, inputQueueArchived } = metadata
+    const receipt: WorkbenchUserStateReceipt = { path: this.path, contentDigest, sizeBytes, diskDurability: 'confirmed', confirmedAt: Date.now(),
+      ...(inputQueueArchiveOwners === undefined ? {} : { inputQueueArchiveOwners }),
+      ...(inputQueueArchived === undefined ? {} : { inputQueueArchived }) }
+    const { inputQueueArchiveOwners: _archive, inputQueueArchived: _archived, ...observation } = receipt
+    Object.assign(this.observation, { availability: 'present', ...observation, lastConfirmedWrite: receipt })
+    return structuredClone(receipt)
+  }
+
+  private async writeCurrent(value: string, document: ReturnType<typeof decodeWorkbenchUserState>): Promise<WorkbenchUserStateReceipt> {
+    if (!this.diagnosticRead) this.diagnosticReading = this.readDiagnostic()
+    let existed: boolean
     try {
-      await mkdir(dirname(this.path), { recursive: true, mode: 0o700 })
-      // Explicit saves always obtain a writer ACK, including identical bytes
-      // after replacement or a previous unknown directory sync. User-change
-      // coalescing belongs to the existing Renderer batch writer.
-      await (this.io.write ?? durableWriteFile)(this.path, value, { requireDirectorySync: true })
-      const receipt: WorkbenchUserStateReceipt = { path: this.path, contentDigest: digest(value), sizeBytes: size(value),
-        diskDurability: 'confirmed', confirmedAt: Date.now() }
-      Object.assign(this.observation, { availability: 'present', ...receipt, lastConfirmedWrite: receipt })
-      return structuredClone(receipt)
-    } catch (error) { this.failed('write', error); throw error }
+      existed = await this.openDatabase()
+      await this.confirmOriginalDatabaseFile()
+    }
+    catch (error) { this.failed('read', error); throw error }
+    try {
+      return await this.confirmReceipt(existed ? await this.database.write(value, document) : await this.database.create(value, document))
+    } catch (error) {
+      // A SQLite rollback can change the file stamp. Do not reuse the prior
+      // receipt, or let the unknown result block the original writer's retry.
+      this.confirmedDatabaseFile = undefined
+      this.failed('write', error)
+      throw error
+    }
+  }
+
+  private async confirmOriginalDatabaseFile(): Promise<void> {
+    if (this.confirmedDatabaseFile !== undefined && await this.database.fileStamp() !== this.confirmedDatabaseFile) {
+      throw recoveryUnavailable('WORKBENCH_USER_DATABASE_CHANGED')
+    }
   }
 
   /** The native absence check and first import are one owner-serialized operation. */
@@ -377,14 +447,18 @@ export class WorkbenchUserStateStore {
       try { current = await this.readCurrent() }
       catch (error) { this.failed('read', error); throw error }
       if (current !== null) {
-        // A concurrent native winner must be acknowledged too: the importer
-        // may remove equal legacy bytes only after this exact writer confirms.
-        await this.writeCurrent(current)
+        // Confirm a concurrent winner without writing the active projection
+        // back over its separately retained archive.
+        await this.confirmOriginalDatabaseFile()
+        const receipt = await this.confirmReceipt(await this.database.confirmCurrent())
+        if (receipt.contentDigest === digest(value) && receipt.sizeBytes === size(value)) return value
         return current
       }
-      try { validate(value) }
+      let document
+      try { document = decodeWorkbenchUserState(value) }
       catch (error) { this.failed('write', error, true); throw error }
-      await this.writeCurrent(value)
+      if (document.inputQueueDelta !== undefined) throw recoveryUnavailable('WORKBENCH_USER_STATE_INVALID')
+      await this.writeCurrent(value, document)
       return value
     })
   }
@@ -392,11 +466,10 @@ export class WorkbenchUserStateStore {
   write(value: string): Promise<WorkbenchUserStateReceipt> {
     this.rootOpened = true
     return this.queue(async () => {
-      try { validate(value) }
+      let document
+      try { document = decodeWorkbenchUserState(value) }
       catch (error) { await this.failed('write', error, true); throw error }
-      try { await this.readCurrent() }
-      catch (error) { await this.failed('read', error); throw error }
-      return this.writeCurrent(value)
+      return this.writeCurrent(value, document)
     })
   }
 
@@ -407,20 +480,24 @@ export class WorkbenchUserStateStore {
     const superseded = () => Object.assign(new Error('A newer original Desktop input replaced this save request. Current input is retained.'),
       { code: 'WORKBENCH_USER_STATE_SUPERSEDED' })
     if (!current() || !request || !Number.isSafeInteger(request.writeRevision) || request.writeRevision < 1) return Promise.reject(superseded())
-    try { validate(request.value) } catch (error) { return Promise.reject(error) }
+    let document
+    try {
+      document = decodeWorkbenchUserState(request.value)
+      if (document.inputQueueDelta === undefined) throw recoveryUnavailable('WORKBENCH_USER_STATE_INVALID')
+    } catch (error) { return Promise.reject(error) }
     if (this.rendererWriter !== writer) {
       this.rendererWriter = writer; this.rendererRevision = 0; this.rendererValue = null; this.rendererFlight = null
     }
     if (request.writeRevision < this.rendererRevision) return Promise.reject(superseded())
     if (request.writeRevision === this.rendererRevision) {
       if (request.value !== this.rendererValue) return Promise.reject(superseded())
-      return this.rendererFlight!
+      if (this.rendererFlight) return this.rendererFlight
     }
     const captured = { value: request.value, writeRevision: request.writeRevision }
     this.rendererRevision = captured.writeRevision; this.rendererValue = captured.value
     this.rendererPending?.reject(superseded())
     const flight = new Promise<WorkbenchUserStateWriteReceipt>((resolve, reject) => {
-      this.rendererPending = { writer, request: captured, current, resolve, reject }
+      this.rendererPending = { writer, request: captured, document, current, resolve, reject }
     })
     // The IPC consumer observes its own rejection; retaining custody must not create an unhandled promise.
     void flight.catch(() => {})
@@ -436,12 +513,13 @@ export class WorkbenchUserStateStore {
         const input = this.rendererPending; this.rendererPending = null
         try {
           if (input.writer !== this.rendererWriter || !input.current()) throw new Error('The original Desktop writer changed. Its newer input is retained.')
-          try { await this.readCurrent() }
-          catch (error) { this.failed('read', error); throw error }
-          // Never cancel an admitted filesystem effect or let another rename pass it.
-          const receipt = await this.writeCurrent(input.request.value)
+          // Never cancel an admitted durability effect or let another write pass it.
+          const receipt = await this.writeCurrent(input.request.value, input.document)
           input.resolve({ ...receipt, writeRevision: input.request.writeRevision })
-        } catch (error) { input.reject(error) }
+        } catch (error) {
+          if (input.writer === this.rendererWriter && input.request.writeRevision === this.rendererRevision) this.rendererFlight = null
+          input.reject(error)
+        }
       }
     }).finally(() => {
       this.rendererDrain = null
