@@ -6,8 +6,8 @@ import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { act } from 'react'
 import { createRoot } from 'react-dom/client'
-import { renderToStaticMarkup } from 'react-dom/server'
 import { beforeEach, expect, it, vi } from 'vitest'
+import { mountThemeRuntime } from '@agentmux/client-ui/theme'
 import type { AppConfig } from '../src/shared/contracts.js'
 
 const fixture = vi.hoisted(() => {
@@ -21,10 +21,12 @@ const fixture = vi.hoisted(() => {
     config: null as AppConfig | null
   } }
 })
-vi.mock('../src/renderer/src/store.js', () => ({
-  useAppStore: Object.assign((selector: (state: typeof fixture.state) => unknown) => selector(fixture.state),
-    { getState: () => fixture.state })
-}))
+vi.mock('../src/renderer/src/store.js', async importOriginal => {
+  const actual = await importOriginal<typeof import('../src/renderer/src/store.js')>()
+  const state = () => ({ ...actual.useAppStore.getInitialState(), ...fixture.state })
+  return { ...actual, useAppStore: Object.assign((selector: (value: ReturnType<typeof state>) => unknown) => selector(state()),
+    { ...actual.useAppStore, getState: state }) }
+})
 import { BrowserPane } from '../src/renderer/src/components/BrowserPane.js'
 import { api } from '../src/renderer/src/lib/api.js'
 
@@ -38,8 +40,11 @@ const tab = {
   id: 'browser-1', navigationId: 'navigation-1', browserId: 'browser-1', regionId: 'region-1',
   workspaceId: 'workspace-1', profileId: 'profile-1', kind: 'browser' as const,
   url: 'https://example.com/', title: 'Example', loading: false, canGoBack: true, canGoForward: true,
-  viewport: 'responsive' as const, driving: false, appLinkPrompt: null, error: null
+  viewport: 'responsive' as const, driving: false, appLinkPrompt: null, error: null,
+  retention: { status: 'eligible' as const, reasons: [] },
+  control: { owner: 'human' as const, activeOperationId: null, revision: 1, inputIsolation: 'inactive' as const, agent: null }
 }
+const closeSplit = () => {}
 
 beforeEach(() => {
   fixture.state.config = structuredClone(config)
@@ -49,20 +54,22 @@ beforeEach(() => {
 // Geometry uses the actual BrowserPane markup and complete product stylesheet in Chromium.
 // The wrapper is the real Region/SessionRegionHost mounting boundary, including Close split.
 it('keeps the page, trace and disjoint toolbar hit areas usable in actual Chromium at both zooms', async () => {
-  const cases = [
+  const widths = [
     { width: 234.5, more: true }, { width: 234.5, more: false },
     { width: 234.5, more: true, active: true },
     { width: 260, more: true }, { width: 340, more: true }, { width: 480, more: true },
-    { width: 760, more: true }, { width: 260, more: false }, { width: 760, more: false }
-  ].map(({ width, more, active }) => {
-    fixture.state.config = { ...config, browser: { toolbar: { ...config.browser.toolbar, more } } }
-    const activeTab = { ...tab, driving: true, activity: { control: 'agent' as const, operation: {
-      id: 'operation-minimum-pane', browserId: tab.browserId,
-      operator: { id: 'agent-1', name: 'Navigator', providerId: 'codex' },
-      startedAt: 1, phase: 'running' as const, summary: 'Inspect page', url: tab.url, steps: []
-    } } }
-    return { width, more, active: Boolean(active), trace: false, markup: renderToStaticMarkup(<BrowserPane tab={active ? activeTab : tab} visible />) }
-  })
+    { width: 650, more: false, active: true }, { width: 710, more: true, active: true },
+    { width: 760, more: true, active: true }, { width: 880, more: true, active: true },
+    { width: 260, more: false }, { width: 880, more: false }
+  ]
+  const cases: { width: number; more: boolean; active: boolean; trace: boolean; markup: string }[] = []
+  const activeTab = { ...tab, driving: true, source: { browserId: 'source', navigationId: 'source-navigation' },
+    zoomFactor: 1.25, control: { owner: 'agent' as const, activeOperationId: 'operation-minimum-pane', revision: 2,
+      inputIsolation: 'isolated' as const, agent: { hostId: 'local', agentSessionId: 'agent-1' } }, activity: { control: 'agent' as const, operation: {
+    id: 'operation-minimum-pane', browserId: tab.browserId,
+    operator: { id: 'agent-1', name: 'Long Browser Research Operator', providerId: 'codex' },
+    startedAt: 1, phase: 'running' as const, summary: 'Inspect page', url: tab.url, steps: []
+  } } }
   // Open the actual Renderer drawer through More, then consume the protocol's fresh, empty recording
   // projection. This is a geometry oracle; canonical trusted Record and native-page input remain separate.
   fixture.state.config = structuredClone(config)
@@ -71,7 +78,13 @@ it('keeps the page, trace and disjoint toolbar hit areas usable in actual Chromi
   const traceRoot = createRoot(traceHost)
   let traceMarkup = ''
   try {
-    await act(async () => traceRoot.render(<BrowserPane tab={tab} visible />))
+    for (const { width, more, active } of widths) {
+      fixture.state.config = { ...config, browser: { toolbar: { ...config.browser.toolbar, more } } }
+      await act(async () => traceRoot.render(<BrowserPane key={`${width}:${more}:${active}`} tab={active ? activeTab : tab} visible onRegionClose={closeSplit} />))
+      cases.push({ width, more, active: Boolean(active), trace: false, markup: traceHost.innerHTML })
+    }
+    fixture.state.config = structuredClone(config)
+    await act(async () => traceRoot.render(<BrowserPane tab={tab} visible onRegionClose={closeSplit} />))
     const menu = await openMore(traceHost)
     const demonstration = menu.querySelector('[aria-label="Open human demonstration draft"]')
     expect(demonstration).not.toBeNull()
@@ -81,7 +94,7 @@ it('keeps the page, trace and disjoint toolbar hit areas usable in actual Chromi
       id: 'new-recording', browserId: tab.browserId, navigationId: tab.navigationId, url: tab.url,
       revision: 1, status: 'recording' as const, startedAt: 1, updatedAt: 1, steps: []
     } } }
-    await act(async () => traceRoot.render(<BrowserPane tab={recordingTab} visible />))
+    await act(async () => traceRoot.render(<BrowserPane tab={recordingTab} visible onRegionClose={closeSplit} />))
     expect(traceHost.querySelector('[aria-label="Stop recording demonstration"]')).not.toBeNull()
     expect(traceHost.querySelector('.browser-trace-rail')?.textContent).toContain('No demonstrated steps yet')
     traceMarkup = traceHost.innerHTML
@@ -89,13 +102,21 @@ it('keeps the page, trace and disjoint toolbar hit areas usable in actual Chromi
   cases.push(...[234.5, 340, 480, 760].map(width => ({ width, more: true, active: false, trace: true, markup: traceMarkup })))
   const directory = await mkdtemp(join(tmpdir(), 'amux-toolbar-layout-'))
   try {
+    const unmountTheme = mountThemeRuntime(window, { ...config.appearance, appAppearance: 'dark' })
+    try {
+      const { dataset, style } = document.documentElement
+      const sprite = document.querySelector('[data-semantic-icon-sprite]')?.outerHTML
+      expect(sprite).toContain('agentmux-icon-action.close')
+      await writeFile(join(directory, 'theme.json'), JSON.stringify({ theme: dataset.theme, appearance: dataset.appearance, style: style.cssText, sprite }))
+    } finally { unmountTheme() }
     const stylesheet = resolve('apps/desktop/src/renderer/src/styles/index.css')
     const index = await readFile(stylesheet, 'utf8')
-    const imports = [...index.matchAll(/@import '\.\/([^']+)';/g)]
+    const imports = [...index.matchAll(/@import '([^']+)';/g)]
     expect(imports.length).toBeGreaterThan(0)
-    const styles = await Promise.all(imports.map(match => readFile(join(dirname(stylesheet), match[1]!), 'utf8')))
+    const styles = await Promise.all(imports.map(match => readFile(match[1]!.startsWith('.')
+      ? join(dirname(stylesheet), match[1]!) : createRequire(import.meta.url).resolve(match[1]!), 'utf8')))
     await writeFile(join(directory, 'cases.json'), JSON.stringify(cases))
-    await writeFile(join(directory, 'page.html'), `<!doctype html><style>${styles.join('\n')}</style><div class="workbench-region" style="height:320px"><div class="session-region-host workbench-session-region-host"></div><button class="workbench-region__close" aria-label="Close split">×</button></div>`)
+    await writeFile(join(directory, 'page.html'), `<!doctype html><style>${styles.join('\n')}</style><div class="workbench-region" style="height:320px"><div class="session-region-host workbench-session-region-host"></div></div>`)
     await writeFile(join(directory, 'package.json'), JSON.stringify({ type: 'module', main: 'main.mjs' }))
     await writeFile(join(directory, 'main.mjs'), `
 import { app, BrowserWindow } from 'electron'
@@ -107,6 +128,10 @@ app.whenReady().then(async()=>{
  try {
   window=new BrowserWindow({width:1200,height:800,show:false,webPreferences:{sandbox:true}})
   await window.loadFile(join(process.env.TOOLBAR_ROOT,'page.html'))
+  window.webContents.debugger.attach('1.3')
+  await window.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled',{enabled:true})
+  const theme=await readFile(join(process.env.TOOLBAR_ROOT,'theme.json'),'utf8')
+  await window.webContents.executeJavaScript('((theme)=>{const root=document.documentElement; root.dataset.theme=theme.theme;root.dataset.appearance=theme.appearance;root.style.cssText=theme.style;document.body.insertAdjacentHTML("afterbegin",theme.sprite)})('+theme+')')
   const cases=JSON.parse(await readFile(join(process.env.TOOLBAR_ROOT,'cases.json'),'utf8'))
   for(const zoom of [1,1.25]){
    window.webContents.setZoomFactor(zoom)
@@ -121,7 +146,7 @@ app.whenReady().then(async()=>{
       const visible=element=>getComputedStyle(element).display!=='none'&&element.getBoundingClientRect().width>0
       const toolbar=region.querySelector('.browser-toolbar')
       const more=toolbar.querySelector('[aria-label="More browser tools"]')
-      const close=region.querySelector('.workbench-region__close')
+      const close=toolbar.querySelector('.browser-toolbar__close')
       const rail=region.querySelector('.browser-trace-rail')
       const stop=rail?.querySelector('[aria-label="Stop recording demonstration"]')
       const closeTrace=rail?.querySelector('[aria-label="Close browser activity timeline"]')
@@ -136,7 +161,12 @@ app.whenReady().then(async()=>{
       // The existing rail scroll keeps later actions reachable in a short pane. Record is checked
       // before scrolling; Close is checked after the user's normal scroll-to-action geometry.
       if(closeTrace){closeTrace.scrollIntoView({block:'nearest'});await new Promise(done=>requestAnimationFrame(done));const r=closeTrace.getBoundingClientRect();const rightHit=document.elementFromPoint(r.right-1,r.y+r.height/2);trace.close={bounds:rect(closeTrace),hitSamples:hitSamples(closeTrace),rightHit:{tag:rightHit?.tagName,ariaLabel:rightHit?.getAttribute('aria-label'),className:rightHit?.className},railClientWidth:rail.clientWidth,railScrollWidth:rail.scrollWidth,railScrollLeft:rail.scrollLeft}}
-      return {pane:rect(region),toolbar:rect(toolbar),stage:rect(region.querySelector('.browser-stage')),address:rect(toolbar.querySelector('label')),
+      const input=toolbar.querySelector('input'), address=rect(input), discussion=toolbar.querySelector('.browser-toolbar__discussion');
+      input.focus();
+      const focusedAddress=rect(input), focusedClose=hit(close), focusedMore=visible(more)&&hit(more), focusedDiscussion=visible(discussion)&&hit(discussion), addressFocused=input.matches(':focus');
+      input.blur();
+      return {pane:rect(region),toolbar:rect(toolbar),stage:rect(region.querySelector('.browser-stage')),address,focusedAddress,focusedClose,focusedMore,focusedDiscussion,addressFocused,
+       overflow:toolbar.scrollWidth-toolbar.clientWidth,
        trace,
        secondary:[...toolbar.querySelectorAll('.browser-toolbar__secondary')].filter(visible).map(node=>node.getAttribute('aria-label')),
        navigation:[...toolbar.querySelectorAll('.browser-toolbar__navigation')].filter(visible).map(node=>node.getAttribute('aria-label')),
@@ -144,9 +174,15 @@ app.whenReady().then(async()=>{
        reloadVisible:visible(toolbar.querySelector('[aria-label="Reload"]')),
        more:{visible:visible(more),bounds:rect(more),ownHit:visible(more)&&hit(more),hitSamples:visible(more)?hitSamples(more):[]},
        close:{visible:visible(close),bounds:rect(close),ownHit:hit(close),hitSamples:hitSamples(close)},
-       buttons:[...toolbar.querySelectorAll('button')].filter(visible).map(node=>({label:node.getAttribute('aria-label'),bounds:rect(node),ownHit:hit(node),hitSamples:hitSamples(node)}))}
+       buttons:[...toolbar.querySelectorAll('button')].filter(node=>node!==close&&visible(node)).map(node=>({label:node.getAttribute('aria-label'),bounds:rect(node),ownHit:hit(node),hitSamples:hitSamples(node)}))}
      }`)} )+')('+JSON.stringify(entry)+')')
     report.cases.push({...layout,width:entry.width,morePreference:entry.more,active:entry.active,hasTrace:entry.trace,zoom})
+    if(process.env.AGENTMUX_TOOLBAR_LAYOUT_SHOTS && entry.active && zoom===1 && [234.5,650,760,880].includes(entry.width)) {
+      const bounds = layout.pane
+      const image = await window.webContents.capturePage({x:Math.floor(bounds.x),y:Math.floor(bounds.y),width:Math.ceil(bounds.width),height:Math.ceil(bounds.height)})
+      if(image.isEmpty()) throw new Error('Empty Browser toolbar capture')
+      await writeFile(join(process.env.AGENTMUX_TOOLBAR_LAYOUT_SHOTS,'active-'+entry.width+'.png'),image.toPNG())
+    }
    }
   }
  }catch(error){report.error=error.stack||String(error)}
@@ -168,11 +204,17 @@ app.whenReady().then(async()=>{
       await writeFile(resolve(process.env.AGENTMUX_TOOLBAR_LAYOUT_PROOF), `${JSON.stringify(report, null, 2)}\n`)
     }
     expect(report.error, JSON.stringify(report)).toBeUndefined()
-    expect(report.cases).toHaveLength(26)
+    expect(report.cases).toHaveLength(cases.length * 2)
     for (const result of report.cases) {
       const context = JSON.stringify(result)
       expect(result.toolbar.height, context).toBe(38)
-      expect(result.address.width, context).toBeGreaterThanOrEqual(96)
+      expect(result.overflow, context).toBeLessThanOrEqual(0)
+      expect(result.address.width, context).toBeGreaterThanOrEqual(result.width < 380 ? 28 : 96)
+      expect(result.addressFocused, context).toBe(true)
+      expect(result.focusedAddress.width, context).toBeGreaterThanOrEqual(result.width < 380 ? 80 : 96)
+      expect(result.focusedClose, context).toBe(true)
+      expect(result.focusedDiscussion, context).toBe(true)
+      if (result.width <= 820) expect(result.focusedMore, context).toBe(true)
       expect(result.stage.width, context).toBeGreaterThanOrEqual(result.pane.width / 2)
       expect(result.stage.height, context).toBeGreaterThan(0)
       if (result.hasTrace) {
@@ -208,14 +250,18 @@ app.whenReady().then(async()=>{
       expect(result.close.ownHit, context).toBe(true)
       expect(result.close.hitSamples, context).toEqual([true, true, true, true, true])
       expect(result.status.phase, context).toBe(result.active ? 'running' : 'idle')
-      expect(result.status.bounds.width, context).toBe(27)
-      expect(result.more.visible, context).toBe(result.morePreference || result.width <= 620)
+      if (result.active) {
+        expect(result.status.bounds.width, context).toBeGreaterThanOrEqual(27)
+        expect(result.buttons.some(button => button.label === 'Take control of Browser' && button.ownHit), context).toBe(true)
+      }
+      expect(result.more.visible, context).toBe(result.morePreference || result.width <= 820)
       if (result.more.visible) {
         expect(result.more.ownHit, context).toBe(true)
         expect(result.more.hitSamples, context).toEqual([true, true, true, true, true])
         expect(result.more.bounds.x + result.more.bounds.width, context).toBeLessThanOrEqual(result.close.bounds.x)
       }
-      expect(result.secondary, context).toEqual(result.width <= 620 ? [] : ['Select element', 'Screenshot', 'Open DevTools', 'Viewport', 'Save this page as a bookmark'])
+      const tools = ['Select element', 'Screenshot', 'Open DevTools', 'Viewport', 'Save this page as a bookmark']
+      expect(result.secondary, context).toEqual(result.width <= 720 ? [] : result.width <= 820 ? tools.slice(0, 2) : tools)
       expect(result.navigation, context).toEqual(result.width <= 380 ? [] : ['Back', 'Forward'])
       expect(result.reloadVisible, context).toBe(result.width > 380)
       expect(result.buttons.length, context).toBeGreaterThanOrEqual(3)
@@ -260,7 +306,10 @@ it('overflow reaches navigation, bookmark, DevTools, viewport and demonstration 
       verify()
     }
     let menu = await openMore(container)
-    const mobile = [...menu.querySelectorAll('[role="menuitemradio"]')].find(item => item.textContent?.includes('Mobile'))
+    const viewportMenu = [...menu.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(item => item.textContent?.trim() === 'Viewport')
+    expect(viewportMenu).toBeDefined()
+    await act(async () => { viewportMenu!.focus(); viewportMenu!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true })) })
+    const mobile = [...document.querySelectorAll('.browser-viewport-menu [role="menuitemradio"]')].find(item => item.textContent?.includes('Mobile'))
     expect(mobile).not.toBeUndefined()
     await act(async () => mobile!.dispatchEvent(new MouseEvent('click', { bubbles: true })))
     expect(viewport).toHaveBeenCalledWith(tab.browserId, 'mobile')
@@ -274,6 +323,21 @@ it('overflow reaches navigation, bookmark, DevTools, viewport and demonstration 
   } finally { await act(async () => root.unmount()); container.remove(); vi.restoreAllMocks() }
 })
 
+it('keeps site zoom reset available in More when the inline zoom indicator is condensed', async () => {
+  const resetZoom = vi.spyOn(api.browser, 'zoom').mockResolvedValue(tab)
+  const container = document.createElement('div')
+  document.body.appendChild(container)
+  const root = createRoot(container)
+  try {
+    await act(async () => root.render(<BrowserPane tab={{ ...tab, zoomFactor: 1.25 }} visible />))
+    const menu = await openMore(container)
+    const zoomAction = [...menu.querySelectorAll('[role="menuitem"]')].find(item => item.textContent?.includes('Reset page zoom'))
+    expect(zoomAction?.textContent).toContain('125%')
+    await act(async () => zoomAction!.dispatchEvent(new MouseEvent('click', { bubbles: true })))
+    expect(resetZoom).toHaveBeenCalledExactlyOnceWith(tab.browserId, 'reset')
+  } finally { await act(async () => root.unmount()); container.remove(); vi.restoreAllMocks() }
+})
+
 it('overflow preserves disabled page/navigation actions and configured tool exclusions', async () => {
   fixture.state.config!.browser.toolbar.screenshot = false
   const container = document.createElement('div')
@@ -283,7 +347,7 @@ it('overflow preserves disabled page/navigation actions and configured tool excl
     await act(async () => root.render(<BrowserPane tab={{ ...tab, url: 'about:blank', canGoBack: false, canGoForward: false }} visible />))
     const menu = await openMore(container)
     const disabled = [...menu.querySelectorAll('[data-disabled]')].map(item => item.getAttribute('aria-label'))
-    expect(disabled).toEqual(['Back', 'Forward', 'Select element', 'Open DevTools', 'Save this page as a bookmark'])
+    expect(disabled).toEqual(['Open in external browser', 'Back', 'Forward', 'Select element', 'Open DevTools', 'Save this page as a bookmark'])
     expect(menu.querySelector('[aria-label="Screenshot"]')).toBeNull()
   } finally { await act(async () => root.unmount()); container.remove() }
 })

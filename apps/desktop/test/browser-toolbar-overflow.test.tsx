@@ -158,7 +158,7 @@ it('links actual toolbar classes to nonempty narrow-pane rules and the sole styl
   expect(imports.length).toBeGreaterThan(0)
   expect(imports.filter(match => match[1] === 'browser.css')).toHaveLength(1)
   const source = await readFile('apps/desktop/src/renderer/src/styles/browser.css', 'utf8')
-  const scope = source.indexOf('@container browser-pane (max-width: 620px)')
+  const scope = source.indexOf('@container browser-pane (max-width: 820px)')
   const end = source.indexOf('.browser-menu {', scope)
   expect(scope).toBeGreaterThan(-1)
   expect(end).toBeGreaterThan(scope)
