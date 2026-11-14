@@ -17,6 +17,8 @@ const labels = { prepared: 'Planning request saved', delivered: 'Delivered · wa
 export function GoalPlanRequest({ demand, onRequest, pending, busy }: { demand: Goal; onRequest(): void; pending: boolean; busy: boolean }) {
   const retained = useAppStore(state => state.goalDiscussionRequests?.[goalDiscussionRequestKey(demand.id, 'plan')])
   const [choose, setChoose] = useState(false), [issue, setIssue] = useState<string | null>(null), [working, setWorking] = useState(false)
+  // Only this picker can know its freshly minted reference has never reached the Host.
+  const [unsentSelection, setUnsentSelection] = useState<string | null>(null)
   const flight = useRef(false)
   const requests = (demand.patrols ?? []).filter(item => item.purpose === 'plan')
   const original = requests.find(item => item.operationId === retained?.requestId || item.requestOperationIds?.includes(retained?.requestId ?? '')) ?? requests.at(-1)
@@ -44,7 +46,12 @@ export function GoalPlanRequest({ demand, onRequest, pending, busy }: { demand: 
     await useAppStore.getState().updateDemand(demand.id, patch, undefined, expectedUpdatedAt)
     return true
   }
-  const chooseSupervisor = () => void run(async () => { await retainGoalPlanRequest(demand.id); setChoose(true) })
+  const chooseSupervisor = () => void run(async () => {
+    const key = goalDiscussionRequestKey(demand.id, 'plan'), previous = useAppStore.getState().goalDiscussionRequests[key]
+    await retainGoalPlanRequest(demand.id)
+    if (!previous) setUnsentSelection(useAppStore.getState().goalDiscussionRequests[key]!.requestId)
+    setChoose(true)
+  })
   const canContinue = original && original.supervisorAgentSessionId === demand.supervisorSessionId && !original.attempts.some(item => item.attemptedAt) &&
     currentRun && (!attempt || attempt.target.runId !== currentRun)
   const newRequest = original && observed?.state === 'stale' || retained && !original
@@ -53,8 +60,9 @@ export function GoalPlanRequest({ demand, onRequest, pending, busy }: { demand: 
       <p className="goals-muted">The Supervisor makes and saves this Goal’s plan. Choose a Supervisor first; choosing does not send a request.</p>
       <button type="button" className="small-button" data-goal-plan-request disabled={working} onClick={chooseSupervisor}>Choose Supervisor to plan</button>
     </> : <div className="goals-inline-actions">
-      <button type="button" className="small-button" data-goal-plan-request disabled={pending || busy || working} onClick={onRequest}>
-        {pending ? 'Preparing planning request…' : original || retained ? 'Check original planning request' : `Ask ${currentPresentation.name ?? 'Supervisor'} to plan`}
+      <button type="button" className="small-button" data-goal-plan-request disabled={pending || busy || working} onClick={() => { setUnsentSelection(null); onRequest() }}>
+        {pending ? `Preparing request to ${presentation.name ?? 'Supervisor'}…` : original ? `Check request to ${presentation.name ?? 'original Supervisor'}`
+          : retained && retained.requestId !== unsentSelection ? `Check request to ${currentPresentation.name ?? 'Supervisor'}` : `Ask ${currentPresentation.name ?? 'Supervisor'} to plan`}
       </button>
       {newRequest ? <button type="button" className="small-button" disabled={working || pending} onClick={() => void run(async () => {
         await useAppStore.getState().requestDemandPmoTask(demand.id, 'plan', { newRequest: true })
