@@ -141,7 +141,11 @@ function DesktopApp() {
     const presentation = settingsCatalog.channelPresentation(connection.application, connection.adapterId)
     navigateSettings({ section: presentation?.section ?? 'overview', channelOrigin })
   }, [navigateSettings])
-  const openMoteConnection = useCallback((moteConnectionOrigin: MoteConnectionSettingsOrigin): void => navigateSettings({ section: 'lark', moteConnectionOrigin }), [navigateSettings])
+  const openMoteConnection = useCallback((moteConnectionOrigin: MoteConnectionSettingsOrigin): void => {
+    const connection = moteConnectionOrigin.connection
+    const section = connection ? settingsCatalog.channelPresentation(connection.application, connection.adapterId)?.section : moteConnectionOrigin.section
+    if (section) navigateSettings({ section, moteConnectionOrigin })
+  }, [navigateSettings])
   const [windowResizeActive, setWindowResizeActive] = useState(false)
   const [quickSwitchOpen, setQuickSwitchOpen] = useState(false)
   const sessionLocationRequestId = useAppStore(state => state.sessionLocationRequest?.requestId)

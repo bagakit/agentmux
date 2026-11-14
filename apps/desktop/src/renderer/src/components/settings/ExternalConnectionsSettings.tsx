@@ -52,6 +52,7 @@ export function ExternalConnectionsSettings({ active, onClose, navigationRequest
   const initial = useRef(remembered?.view !== 'library' ? remembered : !manualOnly && (ownManagement || ownEnrollment) ? undefined : remembered)
   const pending = useAppStore(state => state.manualConnectionIntents[intentKey]?.pending)
   const navigation = useContext(SettingsNavigation), origin = navigationRequest?.channelOrigin
+  const applicationOrigin = origin ?? (navigationRequest?.moteConnectionOrigin?.connection ? navigationRequest.moteConnectionOrigin : undefined)
   const [routeIssue, setRouteIssue] = useState('')
   const originalAgent = useAppStore(state => {
     if (!active || !origin) return undefined
@@ -238,7 +239,7 @@ export function ExternalConnectionsSettings({ active, onClose, navigationRequest
     if (!original) { setIssue('The original bot Host is not recorded. This setup is kept.'); return }
     if (JSON.stringify(original) !== ownerKey) {
       const origin = moteSelection?.origin ?? navigationRequest?.moteConnectionOrigin
-      if (origin && navigation) navigation.openMoteConnection({ ...origin, hostingTarget: original, setup: { connectionId: record.config.connectionId, source } })
+      if (origin && navigation) { const { connectionId, adapterId, application } = record.config; navigation.openMoteConnection({ ...origin, hostingTarget: original, connection: { connectionId, adapterId, application }, setup: { connectionId, source } }) }
       else { onOpenOriginalHost?.(original); setIssue('Choose this bot’s original hosting Host to continue its saved setup.') }
       return
     }
@@ -247,24 +248,26 @@ export function ExternalConnectionsSettings({ active, onClose, navigationRequest
     setContinuation({ connectionId: record.config.connectionId, source })
   }
   useEffect(() => {
-    if (active && navigationRequest?.moteConnectionOrigin && appliedRoute.current !== navigationRequest) openMote(navigationRequest.moteConnectionOrigin)
+    if (active && navigationRequest?.moteConnectionOrigin && !navigationRequest.moteConnectionOrigin.connection && !navigationRequest.moteConnectionOrigin.section && appliedRoute.current !== navigationRequest) openMote(navigationRequest.moteConnectionOrigin)
   }, [active, navigationRequest])
   const appliedContinuation = useRef<SettingsNavigationRequest | undefined>(undefined)
   useEffect(() => {
     const setup = navigationRequest?.moteConnectionOrigin?.setup
     if (!active || !setup || appliedContinuation.current === navigationRequest) return
+    if (pending) { setRouteIssue('Check the current original save before opening another application. Your draft and original request are kept.'); return }
     const record = records.find(item => item.config.connectionId === setup.connectionId)
     if (!record) return
     appliedContinuation.current = navigationRequest
     continueMoteSetup(record, setup.source, navigationRequest?.moteConnectionOrigin?.hostingTarget ?? null)
-  }, [active, navigationRequest, records])
+  }, [active, navigationRequest, records, pending])
   useEffect(() => {
-    if (!active || appliedRoute.current === navigationRequest || !origin) return
+    if (!active || appliedRoute.current === navigationRequest || !applicationOrigin?.connection) return
     if (pending) { setRouteIssue('Check the current original save before opening another application. Your draft and original request are kept.'); return }
-    const record = records.find(record => record.config.connectionId === origin.connection.connectionId && record.config.adapterId === origin.connection.adapterId &&
-      sameConnectionApplication(record.config.application, origin.connection.application))
+    const connection = applicationOrigin.connection
+    const record = records.find(record => record.config.connectionId === connection.connectionId && record.config.adapterId === connection.adapterId &&
+      sameConnectionApplication(record.config.application, connection.application))
     if (!record) {
-      if (view !== 'loading') setRouteIssue(`The requested application is not confirmed here: ${origin.connection.application.domain} · ${origin.connection.application.appId} · ${origin.connection.connectionId}. Refresh the bot list to read this exact identity again. Your existing draft and results are kept.`)
+      if (view !== 'loading') setRouteIssue(`The requested application is not confirmed here: ${connection.application.domain} · ${connection.application.appId} · ${connection.connectionId}. Refresh the bot list to read this exact identity again. Your existing draft and results are kept.`)
       return
     }
     appliedRoute.current = navigationRequest; edit(record); setView('saved')

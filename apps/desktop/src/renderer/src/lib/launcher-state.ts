@@ -9,6 +9,7 @@ import { desktopUserFragments } from './desktop-user-state'
 import type { SplitDirection } from '@agentmux/layout'
 import { launcherSourceExecution } from './launcher-source'
 import { restoredMoteQuickDraft, type MoteQuickDraft } from './mote-quick-draft'
+import { moteChatDraftKey, restoredMoteChatDraft, type MoteChatDraft } from './mote-chat-draft'
 import { prepareMoteTask, type PreparedMoteTask } from './mote-task-packet'
 
 export type LauncherSection = 'agents' | 'terminal' | 'browser' | 'note'
@@ -22,6 +23,7 @@ export type QueuedDraftMove = { operationId: string; sessionId: string; runId: s
 export type LauncherDraft = { browser: string; note: string; noteCreation?: NoteCreationReceipt; moteIdea?: MoteIdeaDraft; schedule?: ScheduleDraft;
   moteProfile?: MoteProfileDraft | undefined;
   moteQuick?: MoteQuickDraft | undefined;
+  moteChat?: MoteChatDraft | undefined;
   progressUpdate?: import('../../../shared/continuous-progress').ProgressUpdateRequest | undefined;
   progressDraft?: { interval: string; prompt: string; expectedLoop?: import('@agentmux/core').ContinuousProgressLoop | undefined } | undefined;
   unconfirmedProgressUpdates?: import('../../../shared/continuous-progress').ProgressUpdateRequest[];
@@ -55,6 +57,7 @@ type LauncherState = {
   setMoteIdeaDraft(launcherId: string, value: MoteIdeaDraft): boolean
   setMoteProfileDraft(launcherId: string, value: MoteProfileDraft | undefined): boolean
   setMoteQuickDraft(launcherId: string, value: MoteQuickDraft | undefined): boolean
+  setMoteChatDraft(launcherId: string, value: MoteChatDraft | undefined, expectedVersion?: string): boolean
   setScheduleDraft(launcherId: string, patch: Partial<ScheduleDraft>): boolean
   setProgressUpdate(launcherId: string, request: import('../../../shared/continuous-progress').ProgressUpdateRequest | undefined): boolean
   setProgressDraft(launcherId: string, patch: Partial<NonNullable<LauncherDraft['progressDraft']>> | undefined): boolean
@@ -99,6 +102,17 @@ export const useLauncherState = create<LauncherState>()(persist((save) => {
     if (value && !parsed) return false
     try { set(state => ({ persistenceIssue: null, drafts: { ...state.drafts, [launcherId]: { ...(state.drafts[launcherId] ?? EMPTY_LAUNCHER_DRAFT), moteQuick: parsed } } })); return true }
     catch { reportStorageIssue('Your original Mote settings request could not be saved on this device. Current input remains available.'); return false }
+  },
+  setMoteChatDraft(launcherId, value, expectedVersion) {
+    const parsed = value === undefined ? undefined : restoredMoteChatDraft(value, launcherId)
+    if (value && (!parsed || moteChatDraftKey(parsed) !== launcherId)) return false
+    let matched = false
+    try { set(state => {
+      if (expectedVersion !== undefined && restoredMoteChatDraft(state.drafts[launcherId]?.moteChat, launcherId)?.version !== expectedVersion) return state
+      matched = true
+      return { persistenceIssue: null, drafts: { ...state.drafts, [launcherId]: { ...(state.drafts[launcherId] ?? EMPTY_LAUNCHER_DRAFT), moteChat: parsed } } }
+    }); return matched }
+    catch { reportStorageIssue('Your private-chat draft could not be saved on this device. Current input and original requests are kept.'); return false }
   },
   setProgressUpdate(launcherId, request) {
     try { set(state => ({ persistenceIssue: null, drafts: { ...state.drafts, [launcherId]: { ...(state.drafts[launcherId] ?? EMPTY_LAUNCHER_DRAFT), progressUpdate: request } } })); return true }

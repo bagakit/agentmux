@@ -8,12 +8,15 @@ import { TextInput } from '@agentmux/client-ui/input'
 import { api } from '../lib/api'
 import { submitMoteChatIntent } from '../lib/mote-chat-request'
 import { useAppStore } from '../store'
+import { checkpointLauncherState, useLauncherState } from '../lib/launcher-state'
+import { moteChatDraftKey, restoredMoteChatDraft, type MoteChatDraft } from '../lib/mote-chat-draft'
 import { sameMotePreferencesTarget } from '@agentmux/core/mote-preferences'
 import type { ConnectionHostingTarget } from '../../../shared/contracts'
 import { MoteChatHistory } from './MoteChatHistory'
 import { useConnectorEntityProfiles, type ConnectorEntityProfileRead } from '../lib/use-connector-room-name'
 
 const actorKey = (person: MoteChatPerson) => JSON.stringify(person.actor)
+type AllowanceDraft = Extract<MoteChatDraft, { kind: 'allowance' }>
 
 export function MoteChatPeople({ configuration, hostingTarget, active, refreshRevision, onSaved }: { configuration: MoteChatConfiguration; hostingTarget: ConnectionHostingTarget; active: boolean; refreshRevision: number; onSaved(): void }) {
   const [people, setPeople] = useState<MoteChatPerson[]>([]), [next, setNext] = useState<string | null>(null)
@@ -34,7 +37,7 @@ export function MoteChatPeople({ configuration, hostingTarget, active, refreshRe
   }
   useEffect(() => { if (active) void read(); return () => { lifetime.current++ } }, [active, configuration.revision, refreshRevision])
   return <div className="mote-chat-people" aria-label="Private chat people" aria-busy={reading}>
-    <p className="mote-details__hint">The confirmed bot creator has unlimited access. Other people have their own message allowance; changing a total keeps messages already used.</p>
+    <p className="mote-details__hint">{configuration.creator ? 'The confirmed native creator uses Main and has unlimited access.' : 'Native creator not confirmed. People use separate guest conversations.'} Each guest has their own message allowance; changing a total keeps messages already used.</p>
     <ConnectorProfileUpdates reads={profiles} />
     {people.map(person => <MoteChatPersonRow key={JSON.stringify([hostingTarget, configuration.target, configuration.values.connection, actorKey(person)])} person={person} profileRead={profiles.get(channelMetadataSubjectKey({ kind: 'actor', actor: person.actor }))} configuration={configuration} hostingTarget={hostingTarget} active={active} onSaved={updated => {
       lifetime.current++; setReading(false); setPeople(current => current.map(old => actorKey(old) === actorKey(updated) ? updated : old)); onSaved()
@@ -47,23 +50,34 @@ export function MoteChatPeople({ configuration, hostingTarget, active, refreshRe
 
 function MoteChatPersonRow({ person, profileRead, configuration, hostingTarget, active, onSaved }: { person: MoteChatPerson; profileRead?: ConnectorEntityProfileRead | undefined; configuration: MoteChatConfiguration; hostingTarget: ConnectionHostingTarget; active: boolean; onSaved(person: MoteChatPerson): void }) {
   const profile = profileRead?.observation?.profile
-  const [editing, setEditing] = useState(false), [total, setTotal] = useState(String(person.total ?? 0)), [busy, setBusy] = useState(false), [issue, setIssue] = useState('')
+  const original = { kind: 'allowance' as const, target: configuration.target, hostingTarget, connection: configuration.values.connection, actor: person.actor }, draftKey = moteChatDraftKey(original)
+  const storedDraft = useLauncherState(state => state.drafts[draftKey]?.moteChat)
+  const saved = restoredMoteChatDraft(storedDraft, draftKey), retainedDraft = saved?.kind === 'allowance' ? saved : undefined
+  const ownVersion = useRef(retainedDraft?.version), mounted = useRef(true)
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
+  const [editing, setEditing] = useState(Boolean(retainedDraft)), [total, setTotal] = useState(retainedDraft?.total ?? String(person.total ?? 0)), [busy, setBusy] = useState(false), [issue, setIssue] = useState(retainedDraft?.issue ?? '')
   const [historyOpen, setHistoryOpen] = useState(false)
   const pending = useAppStore(state => Object.values(state.moteChatIntents).some(intent => intent.method === 'space.mote.chat.allocate'
+    && intent.hostingTarget?.hostId === hostingTarget.hostId && intent.hostingTarget.runtimeId === hostingTarget.runtimeId
     && sameMotePreferencesTarget(intent.input.target, configuration.target) && JSON.stringify(intent.input.actor) === actorKey(person)))
+  function retainTotal(value: string, message = '', version = mintObjectId()) { const draft: AllowanceDraft = { ...original, total: value, issue: message, version }; useLauncherState.getState().setMoteChatDraft(draftKey, draft); return draft }
+  function editTotal(value: string) { ownVersion.current = retainTotal(value).version; setTotal(value); setIssue('') }
   async function save() {
     const count = Number(total)
     if (!Number.isSafeInteger(count) || count < 0 || !total.trim()) { setIssue('Enter a total of zero or more messages.'); return }
     if (busy || pending) return
+    const operationId = mintObjectId(), originalDraft = retainTotal(total, '', operationId); ownVersion.current = originalDraft.version
     setBusy(true); setIssue('')
     try {
+      await checkpointLauncherState()
       const result = await submitMoteChatIntent({ method: 'space.mote.chat.allocate', phase: 'not-dispatched', hostingTarget, input: {
-        operationId: mintObjectId(), target: configuration.target, expectedConfigurationRevision: configuration.revision,
+        operationId, target: configuration.target, expectedConfigurationRevision: configuration.revision,
         actor: person.actor, expectedPersonRevision: person.revision, total: count } })
       if (result.action !== 'allocate') throw Error('The original allowance receipt is not confirmed.')
-      onSaved(result.person); setEditing(false)
-    } catch (error) { setIssue('The allowance was not confirmed. Your entered total is kept. ' + presentError(error)) }
-    finally { setBusy(false) }
+      const cleared = useLauncherState.getState().setMoteChatDraft(draftKey, undefined, originalDraft.version)
+      if (mounted.current) { if (cleared) setEditing(false); onSaved(result.person) }
+    } catch (error) { const message = (useAppStore.getState().moteChatIntents[operationId] ? 'The allowance was not confirmed. Your entered total is kept. ' : 'The allowance was not saved. Your entered total is kept. ') + presentError(error), current = restoredMoteChatDraft(useLauncherState.getState().drafts[draftKey]?.moteChat, draftKey); if (current?.kind === 'allowance' && current.version === originalDraft.version) retainTotal(current.total, message, current.version); if (mounted.current) setIssue(message) }
+    finally { if (mounted.current) setBusy(false) }
   }
   return <article className="mote-chat-person" data-mote-chat-person={person.actor.userId}>
     <ConnectorEntityIdentity identityKey={actorKey(person)} kind="person" profileRead={profileRead} profileIssueSummary="Profile update unconfirmed" name={profile?.name ?? person.name} avatarUrl={profile?.avatarUrl} missingName={person.creator ? 'Bot creator' : 'Chat participant'} />
@@ -72,10 +86,10 @@ function MoteChatPersonRow({ person, profileRead, configuration, hostingTarget, 
     </details>
     <dl><div><dt>Used</dt><dd>{person.used}</dd></div><div><dt>Total</dt><dd>{person.creator ? 'Unlimited' : person.total}</dd></div><div><dt>Remaining</dt><dd>{person.creator ? 'Unlimited' : person.remaining}</dd></div></dl>
     {!person.creator ? editing ? <form className="mote-chat-person__allocation" onSubmit={event => { event.preventDefault(); void save() }}>
-      <label><span>Total message allowance</span><TextInput type="number" min="0" step="1" aria-label={`Total allowance for ${person.name ?? person.actor.userId}`} value={total} disabled={busy} onChange={event => setTotal(event.target.value)} /></label>
-      <div className="mote-chat-actions"><button type="submit" className="small-button" disabled={busy || pending}>{busy ? 'Saving…' : 'Save allowance'}</button><button type="button" className="small-button" disabled={busy} onClick={() => setEditing(false)}>Cancel</button></div>
-    </form> : <button type="button" className="small-button" onClick={() => { setTotal(String(person.total)); setEditing(true) }}>Edit allowance</button> : <span className="mote-details__hint">Creator · unlimited</span>}
-    {issue ? <p role="status" className="mote-details__issue">{issue}</p> : null}
+      <label><span>Total message allowance</span><TextInput type="number" min="0" step="1" aria-label={`Total allowance for ${person.name ?? person.actor.userId}`} value={total} disabled={busy} onChange={event => editTotal(event.target.value)} /></label>
+      <div className="mote-chat-actions"><button type="submit" className="small-button" disabled={busy || pending}>{busy ? 'Saving…' : 'Save allowance'}</button><button type="button" className="small-button" disabled={busy} onClick={() => { if (useLauncherState.getState().setMoteChatDraft(draftKey, undefined, ownVersion.current)) setEditing(false) }}>Cancel</button></div>
+    </form> : <button type="button" className="small-button" onClick={() => { editTotal(String(person.total)); setEditing(true) }}>Edit allowance</button> : <span className="mote-details__hint">Creator · unlimited</span>}
+    {issue || retainedDraft?.issue ? <p role="status" className="mote-details__issue">{issue || retainedDraft?.issue}</p> : null}
     {pending ? <p role="status" className="mote-details__hint">Check this person’s original allowance request below before another save.</p> : null}
     <details className="mote-chat-person__history" onToggle={event => setHistoryOpen(event.currentTarget.open)}><summary>Conversations</summary><MoteChatHistory target={configuration.target} actor={person.actor} hostingTarget={hostingTarget} active={active && historyOpen} /></details>
   </article>

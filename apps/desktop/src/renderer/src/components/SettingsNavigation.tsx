@@ -6,7 +6,7 @@ import type { ChannelEntry, ChannelPresentation } from './settings/settings-cata
 import type { SettingsPageId } from './SettingsPanel'
 
 export type ChannelSettingsOrigin = { hostingTarget?: ConnectionHostingTarget | null; sessionId: string; hostId: string; agentSessionId: string; connection: Pick<ConnectionConfig, 'connectionId' | 'adapterId' | 'application'> }
-export type MoteConnectionSettingsOrigin = { hostingTarget?: ConnectionHostingTarget | null; target: MotePreferencesTarget | null; topicId: string; moteName: string; setup?: { connectionId: string; source: ConnectionSetupEnrollmentSource } | undefined }
+export type MoteConnectionSettingsOrigin = { hostingTarget?: ConnectionHostingTarget | null; target: MotePreferencesTarget | null; topicId: string; moteName: string; connection?: Pick<ConnectionConfig, 'connectionId' | 'adapterId' | 'application'> | undefined; section?: SettingsPageId | undefined; setup?: { connectionId: string; source: ConnectionSetupEnrollmentSource } | undefined }
 export type SettingsNavigationRequest = { section: SettingsPageId; field?: string | undefined; executorId?: string | undefined; toolId?: string | undefined; hostId?: string | undefined; channelOrigin?: ChannelSettingsOrigin | undefined; moteConnectionOrigin?: MoteConnectionSettingsOrigin | undefined }
 
 /** Canonical incoming navigation names the configured local Host, never array order or a remote substitute. */

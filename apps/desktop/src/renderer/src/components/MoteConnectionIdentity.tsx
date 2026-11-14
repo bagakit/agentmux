@@ -58,7 +58,7 @@ export function MoteConnectionIdentity({ scope, active, hostingTarget }: { scope
   }
   return <section className="mote-connection" aria-label="Mote bot" data-mote-connection={scope.topic.id}>
     <button ref={invoker} type="button" className="mote-connection__row" onClick={() => setEditing({ identity, hostingTarget: hostingTarget === undefined ? snapshot?.hostingTarget : hostingTarget })}>
-      <BotIcon size={14} /><span>Chat bot</span><strong>{choice?.record?.config.label ?? (ref ? 'Saved bot' : snapshot?.saved.status === 'ready' ? 'Choose a bot' : snapshot || issue ? 'Not confirmed' : 'View bots')}</strong><ForwardIcon size={12} />
+      <BotIcon size={14} /><span>Default bot for new groups</span><strong>{choice?.record?.config.label ?? (ref ? 'Saved bot' : snapshot?.saved.status === 'ready' ? 'Choose a bot' : snapshot || issue ? 'Not confirmed' : 'View bots')}</strong><ForwardIcon size={12} />
     </button>
     {issue || snapshot?.saved.issue || snapshot?.connectionIssue || choice?.issue ? <p role="status" className="mote-details__hint">{issue || snapshot?.saved.issue || snapshot?.connectionIssue || choice?.issue}</p> : null}
     {active && editing?.identity === identity ? <MoteConnectionDialog key={identity} hostingTarget={editing.hostingTarget} target={target} topicId={scope.topic.id} moteName={scope.topic.title} onClose={() => setEditing(null)}
@@ -166,7 +166,8 @@ function MoteConnectionPanelBody({ active = true, hostingTarget, target, topicId
           <MoteBotSetup active={active} hostingTarget={snapshot?.hostingTarget ?? hostingTarget} target={target} topicId={topicId} record={currentChoice?.record ?? null} hasSavedBot={!!current} onChoose={choose} onCurrent={() => void refresh()}
             createOnOpen={createOnOpen} onCreateIntentConsumed={onCreateIntentConsumed} onContinue={onContinueSetup ?? (settings ? (record, source, hostingTarget) => {
               onSaved?.()
-              settings.openMoteConnection({ target, topicId, moteName, hostingTarget, setup: { connectionId: record.config.connectionId, source } })
+              const { connectionId, adapterId, application } = record.config
+              settings.openMoteConnection({ target, topicId, moteName, hostingTarget, connection: { connectionId, adapterId, application }, setup: { connectionId, source } })
             } : undefined)} />
           <details ref={identityOptions} className="mote-identity-options"><summary>Identity options</summary>
           {snapshot ? <details className="mote-bot-existing" open={choosing} onToggle={event => setChoosing(event.currentTarget.open)}><summary>Choose a saved bot</summary><label htmlFor={fieldId}>Chat bot</label><SelectionField id={fieldId} label="Mote chat bot" value={selection} menuClassName="mote-connection-dialog__choices"
@@ -181,7 +182,12 @@ function MoteConnectionPanelBody({ active = true, hostingTarget, target, topicId
           <div className="mote-connection-dialog__secondary">
             <button type="button" className="small-button" onClick={() => void refresh()} disabled={loading}>Check current choice</button>
             {pending && reviewed && !busy ? <button type="button" className="small-button" onClick={() => { setAttempt(null); setNewChoice(true); edited.current = true }}>Use current revision for a new choice</button> : null}
-            {!inSettings && settings ? <button type="button" className="small-button" onClick={() => { onSaved?.(); settings.openMoteConnection({ target, topicId, moteName, hostingTarget: snapshot?.hostingTarget ?? hostingTarget ?? null }) }}>Manage bots</button> : null}
+            {!inSettings && settings && currentChoice?.record ? <button type="button" className="small-button" onClick={() => {
+              const { connectionId, adapterId, application } = currentChoice.record!.config
+              if (!settings.channelPresentation(application, adapterId)) { setIssue('The original connector settings are not confirmed. Your saved identity is kept.'); return }
+              onSaved?.(); settings.openMoteConnection({ target, topicId, moteName, hostingTarget: snapshot?.hostingTarget ?? hostingTarget ?? null, connection: { connectionId, adapterId, application } })
+            }}>Manage bot</button> : null}
+            {!inSettings && settings && !currentChoice?.record ? <SelectionField label="Manage connector" value="" options={[{ value: '', label: 'Manage a connector…' }, ...settings.channelEntries.map(entry => ({ value: entry.section, label: entry.title, icon: <entry.icon size={14} /> }))]} onValueChange={value => { const entry = settings.channelEntries.find(entry => entry.section === value); if (entry) { onSaved?.(); settings.openMoteConnection({ target, topicId, moteName, hostingTarget: snapshot?.hostingTarget ?? hostingTarget ?? null, section: entry.section }) } }} /> : null}
           </div>
           {originalSaves.length ? <details className="mote-connection-dialog__requests"><summary>Retained save requests</summary>
             {originalSaves.map(({ input, phase, hostingTarget }) => <p key={input.operationId}><code>{input.operationId}</code><br />{input.values.connection?.application.appId ?? 'Remove default bot'} · {phase === 'not-dispatched' ? 'Not sent' : 'Result unconfirmed'} · {hostingTarget ? `Bot hosting: ${hostingTarget.hostId}` : 'Original bot hosting owner unconfirmed'}</p>)}
