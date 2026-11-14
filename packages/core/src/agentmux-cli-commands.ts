@@ -691,7 +691,7 @@ export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
     const selected = selector(f)
     if (f.values.has('--operation-id') && Object.keys(selected).length) invalid('--operation-id cannot be combined with a spatial selector.')
     return { target: f.values.has('--operation-id') ? { operationId: id(f, '--operation-id') } : selected, ...(f.booleans.has('--presentation') ? { presentation: true } : {}) }
-  }),
+  }, 'An original creation can retain execution diagnostics before its Agent exists. The protected execution observation requires the original user/device authority; observation errors do not prove creation failed. Inspect never starts or sends input. Continue only the exact original reference through agent execution continue; missing historical facts remain unknown.'),
   command('space.rename', '--tab ID --name-revision N (--name TEXT|--clear) [--derived]', 'Edit one exact Tab name; --derived preserves explicit and retained naming intent.', { '--tab': 'data', '--name': 'data', '--clear': 'boolean', '--name-revision': 'value', '--derived': 'boolean', ...OP }, f => ({ ...operation(f), tabId: id(f, '--tab', true), name: name(f), expectedNameRevision: Number(value(f, '--name-revision', true)), ...(f.booleans.has('--derived') ? { nameSource: 'derived' } : {}) }), SAVE_NOTICE),
   command('space.mv', '--from-region ID --expect-session SID <destination>', 'Move a presentation while keeping Session, Run, Host and cwd.', { ...DESTINATION, '--from-region': 'data', '--expect-session': 'data', '--from-space': 'data', '--from-display-workspace': 'data', '--from-group': 'data' }, f => {
     const fromLocation = fields(f, { '--from-space': 'spaceId', '--from-display-workspace': 'displayWorkspaceId', '--from-group': 'groupId' })

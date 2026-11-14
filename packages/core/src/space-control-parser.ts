@@ -2,7 +2,8 @@ import { parseAgentToolExecutionBinding } from './agent-tool-execution.js'
 import { parseAdoptedHostRoute } from './host-route.js'
 import { parseSurveyOrganization, parseSurveyCollectionChange, parseSurveyZoneIds, parseSurveyPageReferences, parseSurveyPageSelection, parseSurveyProfileView, parseSurveyPinChange, parseSurveyPinnedReferences } from './survey-organization.js'
 import { AGENTMUX_CONTROL_MAX_MESSAGE_BYTES, type AgentMuxControlSuccessReceipt } from './control.js'
-import { AgentMuxError } from './errors.js'
+import { AgentMuxError, parseAgentExecutionReference, parseAgentExecutionFailure } from './errors.js'
+import { parseAgentExecutionInspection } from './public-rpc-agent-execution.js'
 import { parseAgentForkSource } from './agent-fork.js'
 import { parseAgentSpawnCreator } from './agent-spawn.js'
 import { parseAgentNativeResumeSource } from './agent-native-sessions.js'
@@ -482,9 +483,10 @@ function catalog(value: unknown, code: Code): AgentMuxSpaceCatalog {
 }
 function issues(value: unknown, code: Code): AgentMuxSpaceBindingReport['issues'] {
   return list(value, value => {
-    const item = fields(value, ['step', 'code', 'message', 'recovery', 'candidates'], code)
+    const item = fields(value, ['step', 'code', 'message', 'recovery', 'candidates', 'executionFailure'], code)
     return { step: string(item.step, 'Issue step', code), code: string(item.code, 'Issue code', code), message: string(item.message, 'Issue message', code), recovery: string(item.recovery, 'Issue recovery', code),
-      ...(Object.hasOwn(item, 'candidates') ? { candidates: list(item.candidates, value => selector(value, code), 'Spatial candidates', code) } : {}) }
+      ...(Object.hasOwn(item, 'candidates') ? { candidates: list(item.candidates, value => selector(value, code), 'Spatial candidates', code) } : {}),
+      ...(item.executionFailure === undefined ? {} : { executionFailure: parseAgentExecutionFailure(item.executionFailure) }) }
   }, 'Issues', code)
 }
 
@@ -495,7 +497,7 @@ function save(value: unknown, code: Code): AgentMuxSpatialSave {
     reason: nullableString(saved.reason, 'Save reason', code) }
 }
 function report(value: unknown, code: Code): AgentMuxSpaceMutationReport {
-  const source = fields(value, ['requestId', 'outcome', 'from', 'to', 'agent', 'resource', 'association', 'save', 'issues'], code)
+  const source = fields(value, ['requestId', 'outcome', 'from', 'to', 'agent', 'execution', 'resource', 'association', 'save', 'issues'], code)
   const agent = source.agent === null ? null : (() => {
     const item = fields(source.agent, ['agentSessionId', 'runId', 'providerId', 'executorId', 'hostId', 'cwd', 'createOperationId', 'initialPrompt', 'agentMuxContext', 'forkedFrom', 'creationPersistence', 'creationFailure', 'executorRevision', 'initialMessageOrigin', 'createdBy', 'createdRun', 'initialMessageId', 'retirement', 'toolExecution'], code)
     return { agentSessionId: spaceControlId(item.agentSessionId, 'Agent Session', code), runId: nullableId(item.runId, 'Run', code),
@@ -538,13 +540,27 @@ function report(value: unknown, code: Code): AgentMuxSpaceMutationReport {
     if (value.operationId !== source.requestId || agent !== null || source.from !== null || source.resource !== null) fail('A Source association receipt cannot claim another creation or execution.', code)
     return { operationId: spaceControlId(value.operationId, 'Association operation', code), reference: parseCoordinatorAgentReference(value.reference), resource: parseAgentAssociationResource(value.resource) }
   })()
-  return { ...(association ? { association } : {}), requestId: spaceControlId(source.requestId, 'Mutation Request', code), outcome: member(source.outcome, ['opened', 'moved', 'unchanged', 'partial', 'unknown', 'retired'], 'Mutation outcome', code),
+  const execution = source.execution === undefined ? undefined : (() => {
+    const item = fields(source.execution, ['coordinatorRuntimeId', 'reference', 'inspection'], code)
+    const reference = parseAgentExecutionReference(item.reference)
+    if (reference.createOperationId !== source.requestId || agent && reference.agentSessionId !== agent.agentSessionId || association)
+      fail('Execution observation identifies another original creation.', code)
+    const inspection = item.inspection === null ? null : parseAgentExecutionInspection(item.inspection, { bindingId: reference.bindingId, agentSessionId: reference.agentSessionId })
+    if (inspection?.continuation && (inspection.continuation.createOperationId !== reference.createOperationId || inspection.continuation.bindingId !== reference.bindingId || inspection.continuation.agentSessionId !== reference.agentSessionId))
+      fail('Execution continuation identifies another original creation.', code)
+    return { coordinatorRuntimeId: spaceControlId(item.coordinatorRuntimeId, 'Original Coordinator Runtime', code), reference, inspection }
+  })()
+  return { ...(association ? { association } : {}), ...(execution ? { execution } : {}), requestId: spaceControlId(source.requestId, 'Mutation Request', code), outcome: member(source.outcome, ['opened', 'moved', 'unchanged', 'partial', 'unknown', 'retired'], 'Mutation outcome', code),
     from: source.from === null ? null : address(source.from, code), to: source.to === null ? null : address(source.to, code), agent, resource,
     save: save(source.save, code),
     issues: list(source.issues, value => {
-      const item = fields(value, ['step', 'code', 'message', 'recovery', 'candidates'], code)
+      const item = fields(value, ['step', 'code', 'message', 'recovery', 'candidates', 'executionFailure'], code)
+      const executionFailure = item.executionFailure === undefined ? undefined : parseAgentExecutionFailure(item.executionFailure)
+      if (executionFailure && (executionFailure.reference.createOperationId !== source.requestId || agent && executionFailure.reference.agentSessionId !== agent.agentSessionId || execution &&
+        (executionFailure.reference.bindingId !== execution.reference.bindingId || executionFailure.reference.agentSessionId !== execution.reference.agentSessionId))) fail('Execution failure identifies another original creation.', code)
       return { step: string(item.step, 'Issue step', code), code: string(item.code, 'Issue code', code), message: string(item.message, 'Issue message', code), recovery: string(item.recovery, 'Issue recovery', code),
-        ...(Object.hasOwn(item, 'candidates') ? { candidates: list(item.candidates, value => selector(value, code), 'Spatial candidates', code) } : {}) }
+        ...(Object.hasOwn(item, 'candidates') ? { candidates: list(item.candidates, value => selector(value, code), 'Spatial candidates', code) } : {}),
+        ...(executionFailure ? { executionFailure } : {}) }
     }, 'Issues', code) }
 }
 

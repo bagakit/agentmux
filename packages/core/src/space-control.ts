@@ -204,7 +204,7 @@ export type AgentMuxSpatialSave = {
   diskDurability: 'unconfirmed' | 'confirmed'
   reason: string | null
 }
-export type AgentMuxSpatialIssue = { step: string; code: string; message: string; recovery: string; candidates?: AgentMuxSpaceSelector[] }
+export type AgentMuxSpatialIssue = { step: string; code: string; message: string; recovery: string; candidates?: AgentMuxSpaceSelector[]; executionFailure?: import('./agent-execution-contract.js').AgentExecutionFailure }
 export type AgentMuxSpaceAgentFact = {
   /** Authoritative retirement of this exact Session/Run; never an active projection. */
   retirement?: { source: 'user'; observedAt: number }
@@ -233,6 +233,9 @@ export type AgentMuxSpaceMutationReport = {
   from: AgentMuxSpaceAddress | null
   to: AgentMuxSpaceAddress | null
   agent: AgentMuxSpaceAgentFact | null
+  /** Original Source-owned execution observation, under the binding reader's existing authority. */
+  execution?: { coordinatorRuntimeId: string; reference: import('./agent-execution-contract.js').AgentExecutionReference;
+    inspection: import('./agent-execution-coordinator.js').AgentExecutionInspection | null }
   /** A Source membership ACK, never an execution/Start or input receipt. */
   association?: { operationId: string; reference: import('./agent-open-contract.js').CoordinatorAgentReference; resource: import('./agent-open-contract.js').AgentAssociationResource }
   resource: { projectId: string | null; sourceWorkspaceId: string | null; hostId: string; path: string; workspaceId: string | null; kind: 'directory' | 'worktree'; branch: string | null } | null

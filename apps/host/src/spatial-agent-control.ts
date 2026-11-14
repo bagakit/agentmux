@@ -9,8 +9,9 @@ import { SCRATCH_WORKSPACE_ID } from './mote-topic-model.js'
 import { configuredProfileAgentContext } from './mote-user-profile.js'
 
 const object = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value)
-const issue = (error: unknown) => ({ step: 'creation', code: error instanceof AgentMuxError ? error.code : 'AGENT_CREATION_UNCONFIRMED',
-  message: error instanceof Error ? error.message : String(error), recovery: 'Inspect this original operation. Do not repeat creation or its first input.' })
+const issue = (error: unknown, step = 'creation') => ({ step, code: error instanceof AgentMuxError ? error.code : 'AGENT_CREATION_UNCONFIRMED',
+  message: error instanceof Error ? error.message : String(error), recovery: 'Inspect this original operation. Do not repeat creation or its first input.',
+  ...(error instanceof AgentMuxError && error.executionFailure ? { executionFailure: error.executionFailure } : {}) })
 const regionDescriptor = (record: Pick<AgentMuxSpatialAgentOpenRecord, 'agentSessionId' | 'execution' | 'placement'>, phase: 'launching' | 'attached') => ({
   workspaceId: record.placement?.workspaceId ?? record.execution.workspaceId, phase, agentPresentation: { sessionId: record.agentSessionId,
     agentSessionId: record.agentSessionId, hostId: record.execution.hostId,
@@ -37,6 +38,19 @@ export function createHostSpatialAgentControl(options: { configurationPath: stri
       agent: null, resource: null, save: { layoutApplied: true, clientStateWritten: false, storageFlushRequested: false,
         diskDurability: 'confirmed', reason: null }, issues: initialIssue ? [issue(initialIssue)] : [] }
     let borrowed: Awaited<ReturnType<AgentMuxHeadlessRuntime['executionHost']>> | null = null
+    // A reserved Source Region can precede Agent creation. The original public
+    // binding reader owns both the permission check and this independent read.
+    if (record.executionBinding) try {
+      if (record.placement?.runtimeId !== options.runtime().ownerIdentity().runtimeId)
+        throw new AgentMuxError('The original execution Coordinator belongs to another Source Runtime.', 'RUNTIME_OWNER_MISMATCH')
+      const binding = await options.runtime().server.callRpc('agent.execution.binding', { bindingId: record.executionBinding.bindingId }, context)
+      if (binding && (binding.bindingId !== record.executionBinding.bindingId || binding.agentSessionId !== record.agentSessionId ||
+        binding.agentHostId !== record.execution.hostId || binding.resourceHostId !== record.placement?.hostId ||
+        binding.resourceWorkspacePath !== record.placement?.workspacePath || binding.continuation &&
+          (binding.continuation.bindingId !== record.executionBinding.bindingId || binding.continuation.agentSessionId !== record.agentSessionId || binding.continuation.createOperationId !== record.requestId)))
+        throw new AgentMuxError('The original execution observation identifies another creation or resource.', 'EXECUTION_INTENT_UNCONFIRMED')
+      report.execution = { coordinatorRuntimeId: options.runtime().ownerIdentity().runtimeId, reference: record.executionBinding, inspection: binding }
+    } catch (error) { report.issues.push(issue(error, 'observation')) }
     try {
       context.signal?.throwIfAborted(); await context.assertCurrent?.()
       if (record.execution.hostId !== 'local' && !record.execution.runtimeId) throw new AgentMuxError(
@@ -70,25 +84,25 @@ export function createHostSpatialAgentControl(options: { configurationPath: stri
       const settled = await options.spatial.settleAgentOpen(record.requestId, session, regionDescriptor(record, 'attached'))
       report.to = settled.attached ? record.address : null
       if (!settled.attached) report.issues.push(issue(new AgentMuxError('The original Agent exists, but its reserved Region binding changed. Existing contents were retained.', 'SPACE_PLACEMENT_UNKNOWN')))
-      if (record.executionBinding) {
-        const binding = await options.runtime().executionBindings.inspect(record.executionBinding.bindingId)
+      if (record.executionBinding && report.execution) {
+        const binding = report.execution?.inspection
         const original = binding?.continuation
         if (!binding || binding.bindingId !== record.executionBinding.bindingId || binding.agentSessionId !== record.agentSessionId ||
             binding.agentHostId !== record.execution.hostId || binding.resourceHostId !== record.placement?.hostId ||
             binding.resourceWorkspacePath !== record.placement?.workspacePath ||
             !original || original.bindingId !== record.executionBinding.bindingId || original.agentSessionId !== record.agentSessionId ||
             original.createOperationId !== record.requestId) report.issues.push(issue(new AgentMuxError(
-          'The original execution binding has no confirmed matching receipt. The Agent and its original operation are retained.', 'EXECUTION_INTENT_UNCONFIRMED')))
+          'The original execution binding has no confirmed matching receipt. The Agent and its original operation are retained.', 'EXECUTION_INTENT_UNCONFIRMED'), 'observation'))
         else if (binding.state !== 'connected') report.issues.push(issue(new AgentMuxError(
           binding.diagnostic?.message ?? 'The original execution binding has not been confirmed connected. The Agent remains available.',
-          binding.diagnostic?.code ?? 'EXECUTION_OBSERVATION_UNCONFIRMED')))
+          binding.diagnostic?.code ?? 'EXECUTION_OBSERVATION_UNCONFIRMED'), 'observation'))
       }
       if (creation.persistence === 'unconfirmed' || creation.failure || ['unknown', 'unconfirmed'].includes(creation.initialPrompt)) {
         report.issues.push(issue(new AgentMuxError(creation.failure?.message ?? 'The original creation or first input is unconfirmed. Read the same operation without replaying.', creation.failure?.code ?? 'AGENT_CREATION_UNCONFIRMED')))
       }
       report.outcome = report.issues.length ? 'partial' : 'opened'
-    } catch (error) { report.issues.push(issue(error)); report.outcome = report.agent ? 'partial' : 'unknown' }
-    finally { try { await borrowed?.dispose?.() } catch (error) { report.issues.push(issue(error)); if (report.agent) report.outcome = 'partial' } }
+    } catch (error) { report.issues.push(issue(error, 'observation')); report.outcome = report.agent ? 'partial' : 'unknown' }
+    finally { try { await borrowed?.dispose?.() } catch (error) { report.issues.push(issue(error, 'observation')); if (report.agent) report.outcome = 'partial' } }
     return report
   }
   return Object.assign(async (request: Parameters<NonNullable<AgentMuxRpcServiceOptions['spatialAgentControl']>>[0], context: AgentMuxRpcCallContext): Promise<AgentMuxControlResult | undefined> => {
