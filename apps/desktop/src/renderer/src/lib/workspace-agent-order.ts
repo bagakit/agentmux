@@ -1,5 +1,4 @@
 import type { AgentMuxSpaceControlRequest, AgentMuxSpatialSave, AgentMuxWorkspaceAgentOrderMember, AgentMuxWorkspaceAgentOrderReport } from '@agentmux/core/control'
-import type { SessionSnapshot } from '../../../shared/contracts'
 import { workspaceAgentListMembers, type WorkspaceAgentScopeState, type WorkspaceAgentExecutionResolver } from './workspace-agent-scope'
 import { workspaceAgentOrderKey } from './workspace-agent-key'
 import { workspaceAgentGroups, type WorkspaceAgentEntry, type WorkspaceAgentLink } from './workspace-agent-arrangement'
@@ -62,21 +61,34 @@ export async function executeWorkspaceAgentOrder(ports: Ports, request: Request)
   const workspace = workspaces.length === 1 ? workspaces[0] : undefined
   let members: readonly WorkspaceAgentEntry[] = workspace ? workspaceAgentListMembers(state, workspace, ports.resolveExecution) : []
   const observations: AgentMuxWorkspaceAgentOrderReport['issues'] = []
-  if (workspace) {
+  let sources: Parameters<typeof workspaceAgentOrderEntries>[2] | undefined
+  const known = new Set([...before, ...members.map(workspaceAgentOrderKey)])
+  // A manual write uses exact known members and derivations, never communication weights.
+  const needsHistory = request.order === undefined || request.order.some(value => !known.has(memberKey(value)))
+  if (workspace && needsHistory) {
     try {
       const observation = await api.sessions.historySources({ observation: true })
-      members = workspaceAgentOrderEntries({ ...state, workbenchSpaceSelection: null }, workspace, observation.sources, ports.resolveExecution)
+      sources = observation.sources
+      members = workspaceAgentOrderEntries({ ...state, workbenchSpaceSelection: null }, workspace, sources, ports.resolveExecution)
       if (observation.warnings.length) observations.push({ step: 'observation', code: 'AGENT_ORDER_HISTORY_UNCONFIRMED', message: observation.warnings.map(warning => warning.message).join(' · '), recovery: 'Refresh the original Host sources. Confirmed members and the stored order remain available.' })
     } catch (error) { observations.push({ step: 'observation', code: 'AGENT_ORDER_HISTORY_UNCONFIRMED', message: error instanceof Error ? error.message : String(error), recovery: 'Refresh the original Host sources. Confirmed members and the stored order remain available.' }) }
   }
-  const communication = await readWorkspaceAgentLinks(members), links = communication.links
-  if (communication.incomplete) observations.push({ step: 'observation', code: 'AGENT_ORDER_RELATIONS_UNCONFIRMED', message: 'Communication proximity is partially observed; the effective order uses confirmed relationships only.', recovery: 'Read this exact order again to refresh relationships. Stored preferences and Agent actions remain available.' })
+  let links: readonly WorkspaceAgentLink[] = []
+  if (request.order === undefined) {
+    const communication = await readWorkspaceAgentLinks(members)
+    links = communication.links
+    if (communication.incomplete) observations.push({ step: 'observation', code: 'AGENT_ORDER_RELATIONS_UNCONFIRMED', message: 'Communication proximity is partially observed; the effective order uses confirmed relationships only.', recovery: 'Read this exact order again to refresh relationships. Stored preferences and Agent actions remain available.' })
+  }
   const references = (keys: readonly string[]) => keys.flatMap(key => { const value = member(key); return value ? [value] : [] })
-  const report = (outcome: AgentMuxWorkspaceAgentOrderReport['outcome'], issues: AgentMuxWorkspaceAgentOrderReport['issues'] = [], save: AgentMuxSpatialSave | null = null, stored = before): AgentMuxWorkspaceAgentOrderReport => ({
-    scope: 'workspace-agent-list', displayWorkspaceId, storedOrder: references(stored),
-    effectiveOrder: references(orderedWorkspaceAgents(members, stored, links).map(workspaceAgentOrderKey)),
-    changed: JSON.stringify(stored) !== JSON.stringify(before), outcome, save, issues: [...issues, ...observations]
-  })
+  const report = (outcome: AgentMuxWorkspaceAgentOrderReport['outcome'], issues: AgentMuxWorkspaceAgentOrderReport['issues'] = [], save: AgentMuxSpatialSave | null = null, stored = before): AgentMuxWorkspaceAgentOrderReport => {
+    const groups = workspaceAgentGroups(members, stored, links), pinned = new Set(stored)
+    return { scope: 'workspace-agent-list', displayWorkspaceId, storedOrder: references(stored),
+    effectiveOrder: references(groups.flatMap(group => group.members.map(({ session }) => workspaceAgentOrderKey(session)))),
+    changed: JSON.stringify(stored) !== JSON.stringify(before), outcome, save, issues: [...issues, ...observations,
+      ...(request.order !== undefined && groups.some(group => !group.members.some(({ session }) => pinned.has(workspaceAgentOrderKey(session)))) ? [{
+        step: 'observation', code: 'AGENT_ORDER_RELATIONS_UNCONFIRMED', message: 'This manual write did not read communication weights for remaining automatic groups.',
+        recovery: 'Read this exact order to observe automatic proximity. The current stored manual order is retained.' }] : [])] }
+  }
   if (!workspace) return report('unknown', [{ step: 'target', code: 'WORKSPACE_LIST_UNCONFIRMED',
     message: 'The exact original Workspace list scope is not currently confirmed.', recovery: 'Read the original Workspace catalog; its saved preference and all Sessions are retained.' }])
   if (request.order === undefined) return report('read')
@@ -88,6 +100,8 @@ export async function executeWorkspaceAgentOrder(ports: Ports, request: Request)
   }
   if (!current.config?.workspaces.some(value => value.id === workspace.id && value.hostId === workspace.hostId && value.path === workspace.path))
     return report('unknown', [{ step: 'target', code: 'WORKSPACE_LIST_UNCONFIRMED', message: 'The original Workspace scope changed during observation.', recovery: 'Read its original scope again. No order was changed.' }])
+  members = sources ? workspaceAgentOrderEntries({ ...current, workbenchSpaceSelection: null }, workspace, sources, ports.resolveExecution)
+    : workspaceAgentListMembers(current, workspace, ports.resolveExecution)
   if (request.expectedOrder && JSON.stringify(request.expectedOrder.map(memberKey)) !== JSON.stringify(before)) return report('refused', [{
     step: 'target', code: 'AGENT_ORDER_CONFLICT', message: 'The original Workspace Agent order changed after it was read.', recovery: 'Read this exact Workspace order and review the current preference before changing it.' }])
   const available = new Set(members.map(workspaceAgentOrderKey)), retained = new Set(before)

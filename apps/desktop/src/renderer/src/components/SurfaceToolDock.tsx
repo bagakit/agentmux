@@ -11,7 +11,7 @@ import { useWorkbenchPresentationActive } from '../lib/workbench-presentation'
 import { useShallow } from 'zustand/react/shallow'
 import { createWorkspaceAgentContextsSelector, retainedFocusContext, FOCUS_BUCKETS, focusNeutralGroupSummary, type FocusBucket } from '../lib/focus-context'
 import { useFocusHistorySources, type FocusHistoryCatalogue } from '../lib/focus-history-sources'
-import { retainedWorkspaceAgentEntry, workspaceAgentGroups } from '../lib/workspace-agent-arrangement'
+import { retainedWorkspaceAgentEntry, workspaceAgentGroups, workspaceAgentRetiredSources } from '../lib/workspace-agent-arrangement'
 import { useWorkspaceAgentLinks } from '../lib/workspace-agent-relations'
 import { DndContext, KeyboardSensor, PointerSensor, closestCenter, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core'
 import { SortableContext, arrayMove, sortableKeyboardCoordinates, verticalListSortingStrategy } from '@dnd-kit/sortable'
@@ -108,9 +108,8 @@ const WorkspaceAgentListView = memo(function WorkspaceAgentListView({ workspace,
   const scoped = list.sessions
   const closedSources = useMemo(() => {
     const members = new Set(list.members.map(member => JSON.stringify([member.subject.hostId, member.subject.agentSessionId])))
-    return new Map(history.sources.filter(source => source.state === 'retired' && members.has(JSON.stringify([source.hostId, source.agentSessionId])))
-      .map(source => [JSON.stringify([source.hostId, source.agentSessionId]), source]))
-  }, [history.sources, list.members])
+    return new Map([...workspaceAgentRetiredSources(scoped, history.sources)].filter(([key]) => members.has(key)))
+  }, [scoped, history.sources, list.members])
   const entries = useMemo(() => [...scoped.filter(session => !closedSources.has(workspaceAgentOrderKey(session))), ...[...closedSources.values()].map(retainedWorkspaceAgentEntry)], [scoped, closedSources])
   const timelines = useAppStore(useShallow(state => Object.fromEntries(scoped.map(session => [session.id, state.timelines[session.id]]))))
   const names = useAppStore(useShallow(state => Object.fromEntries(entries.map(session => [session.id, state.agentNames[session.id]]))))

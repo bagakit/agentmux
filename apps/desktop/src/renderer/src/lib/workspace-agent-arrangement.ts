@@ -11,6 +11,17 @@ export type WorkspaceAgentEntry = {
 export type WorkspaceAgentLink = { source: string; target: string; weight: number }
 export type WorkspaceAgentGroup<T> = { key: string; members: { session: T; depth: number }[] }
 
+/** A newer Core Session record supersedes an older retirement, even if its catalogue cannot refresh. */
+export function workspaceAgentRetiredSources(sessions: readonly SessionSnapshot[], sources: readonly AgentSessionHistoryDescriptor[]) {
+  const current = new Map(sessions.flatMap(session => session.kind === 'agent' && session.hostId === session.control.hostId
+    ? [[workspaceAgentOrderKey(session), session] as const] : []))
+  return new Map(sources.filter(source => {
+    if (source.state !== 'retired') return false
+    const session = current.get(JSON.stringify([source.hostId, source.agentSessionId]))
+    return !session || source.retiredAt !== undefined && session.agentSessionUpdatedAt <= source.retiredAt
+  }).map(source => [JSON.stringify([source.hostId, source.agentSessionId]), source]))
+}
+
 /** A retained entry is ordering metadata, never a fabricated live Session/Run. */
 export function retainedWorkspaceAgentEntry(source: AgentSessionHistoryDescriptor): WorkspaceAgentEntry {
   return { id: source.agentSessionId, hostId: source.hostId, createdAt: source.history?.createdAt ?? source.retiredAt ?? 0,
