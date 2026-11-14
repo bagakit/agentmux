@@ -95,7 +95,7 @@ Remote 管理首先帮助用户回答四个问题：我连接了哪些环境；�
 
 Settings 的 **Node** 管“所管理节点对外提供什么”，**Hosts** 管“我连接谁、对方允许我看什么”，**Remote** 管“在哪里开始或继续工作”。连接、监控与浏览不以选择或登记项目为前提。Node 默认本机；显式选择已保存 Host 或从该 Host 进入 Node 设置后，页头、观察、草稿与保存均绑定其准确 Core／Runtime，不把远端节点冒充本机。
 
-节点管理沿原 Core 的 owner 接口与真实 user principal 执行。可信 App 可借原配置路由和 Runtime fence 访问选定 Core；固定的目标范围只承接原 Node inspect／configure／owner-resources，不接任意 RPC，不在 Agent 请求被拒后剥离 caller 重试。同一 owner 已认证的 managed Agent 可以在原 user operator transport 下读取准确 Node 的完整 policy 与原操作；远端只沿已保存且由接收者确认 operator 资格的 carrier，并固定 Runtime／owner 实例，不传递本机 Agent capability 冒充远端身份。该有限只读不授予 publication 写入、私有 owner-resources、密钥或信任权限；device、guest、有限发布 scope 与 route delegation 不能借它升级资格。managed Agent、页面与名字不能取得发布管理权。当前操作者不能完成原用户动作时，保留准确目标、待确认操作与可达入口，不以对话授权冒充协议 principal。
+节点管理沿原 Core 的 owner 接口与传输认证的原 user operator 资格执行。同一 owner 已认证的 managed Agent 可在该原用户管理通道上执行用户授权的准确 Node inspect／configure，入口保留真实 Agent 认证；目标 Core 独立认证原 operator carrier。现有 Node 保存回执记录策略与操作，不另造审核主体。远端只借用已保存且由接收者确认 operator 资格的 carrier，固定 Runtime 与 owner 实例；来源 caller 先在原 Core 认证，其 capability 不成为目标 Core 的本机 Agent 身份。configure 保留完整策略、expectedRevision 和原 operationId，回执未知沿同一操作读取。device、guest、有限发布 scope 与 route delegation 不因 Agent 在场而取得 owner 资格；私有 owner-resources、密钥和来源信任仍按各自权限合同执行。不得剥离 caller 后重试被拒请求，也不把对话文字当作传输 principal。
 
 切换目标只改变管理视图，保留各原 Runtime 的未保存内容和操作；迟到回复不能替另一节点保存、显示其策略或覆盖后续输入。远端不可用或缺少接口时给出准确维护入口，不回退为本机策略。入站 listener 仍由原设备自己的配置 owner 管理，远端发布页不得误挂本机 listener 表单。仅打开系统资源共享时，保留原目录授权；原完整 policy 保存会重新确认目录目标，不把它误报为毫无目录效果的窄开关。
 
@@ -294,7 +294,7 @@ Host 的公共配置链支持按稳定 ID 新增、读取、完整 expected/CAS 
 
 本机Tailcat入站监听的开关、key引用与allowed clients由原ConfigOwner以准确listener slice CAS提供公共读取／配置入口，保传输认证的原用户与managed caller边界；不移除普通Host configure对local敏感字段的保护，也不把单次Core维护审核变成通用授权平台。key准备、配置保存、监听实际采用与网络可达分别成立；当前listener查询不重新启动进程，不因CLI或检查失败阻断显式禁用保存。远端路由、Node发布policy和同名另一机器的local不能代替这个准确入站对象；不读取／输送私钥，失败保原Core／Native／Run能力。
 
-Agent 可为一个准确已保存 Host 提交单次 install 或 upgrade 请求，绑定原请求者 Session/已确认 Run、完整 Host 配置、维护 expected 与候选身份、原 operationId。申请和查询不执行维护，也不授予 standing 权限。只有传输认证的真人用户或设备且没有 managed Agent caller 可显式批准或拒绝；批准核对原请求摘要，再由原维护 owner 复核 Host、expected 和候选，持久记录审核主体与执行采用事实后施效。Agent 不能自批，也不能把请求 ID 当 bearer 授权；原直接真人维护命令保持可用。重启、记录失败、连接断开或未知执行回执保留原请求与查询路径，不重新批准或自动重放部署。审核范围不包括来源信任、凭据准备、远端清理或批量操作。 原接收 Core 与配置／维护 owner 分属进程时，公共申请、查询和审核沿原 client 转发接缝抵达唯一 owner，保留原认证主体；接收 Core 在转发前核验自己的 Runtime fence，目的端继续核验原主体与审核资格。不因本地未持有配置 owner 而阻断已提供的准确转发，也不另选 Core、降身份或自动重放。
+Agent 可为一个准确已保存 Host 提交单次 install 或 upgrade 请求，绑定原请求者 Session／已确认 Run、完整 Host 配置、维护 expected、候选身份和原 operationId。原用户 operator transport 上已认证的本机 managed Agent 可以按用户授权审核自己的原请求并执行维护，审核回执保留真实 Agent 主体；真人用户和设备沿各自原权限操作。审核核对原请求摘要，再由原维护 owner 复核 Host、expected 和候选，持久记录审核主体与采用事实后施效。请求 ID 不能作为 bearer 授权，另一个 Agent 不能审核他人的请求。直接维护命令复用同一 operator 资格与准确维护校验。重启、记录失败、连接断开或未知执行回执保留原请求与查询路径，不重新批准或自动重放部署。此范围不扩展来源信任、凭据准备或远端清理权限。接收 Core 与配置／维护 owner 分属进程时沿原转发接缝保留认证主体，转发前核验 Runtime fence，目的端继续核验其原主体与资格。
 
 应用账户同步由[Remote 应用授权同步](remote-application-access.md)唯一持有：用户配置准确来源、目标、应用账户和 scope，先比较差异，再显式传递最小材料并由目标验真。应用与访问页消费该能力，与 Agent 配置盘点、来源 Core 信任分区呈现；不把三者合成一个权限开关。
 

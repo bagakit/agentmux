@@ -95,15 +95,18 @@ For full-policy preparation, an authenticated managed Agent on the original user
 transport may read `settings node inspect --host ID --expected-runtime RT`. This selects
 one saved operator carrier and pins the original Runtime, not a Host label or global UID.
 Use `--input` with the original operationId when inspecting a prior save. Device, guest,
-publication-only and delegated routes cannot borrow that private read; configure and owner
-resources remain person-only. Preserve every original allowed/denied/default path when
+publication-only and delegated routes cannot borrow that operator scope. The same
+authenticated local Agent can use settings node configure with both target flags
+and its original complete policy, expectedRevision and operationId. Private owner
+resources retain their separate permission. Preserve every original allowed/denied/default path when
 preparing a Share change; published roots are not the complete private policy.
 
 Cluster → Node defaults to this device and can explicitly select another saved Core.
 Its publishing editor uses that original Node owner, Runtime and policy operation;
 switching the management target does not change an Agent's execution or replay a save.
-Owner publication still requires the original authenticated person. A managed caller or
-ordinary device cannot acquire it by selecting a target. Incoming connections remain
+Publication uses the original user operator transport. A local managed Agent must
+retain its authenticated caller; an ordinary device gains no owner scope by selecting
+a target. Incoming connections remain
 the original device's listener settings; another Node never shows this Mac's editor.
 
 ## Tailcat transport
@@ -207,8 +210,10 @@ Core is missing or authorize a first install. A changed candidate or target must
 be checked and explicitly selected again, not silently substituted after the
 original action.
 
-Upgrade and reconnect require the original transport-approved user/device, without
-a managed Agent caller; command parameters cannot supply that identity. Read-only
+Upgrade and reconnect require the original operator transport. A local managed
+Agent may execute user-authorized maintenance on the authenticated user operator
+transport while retaining its actual caller. An Agent on a device or delegated
+transport gains no operator authority. Command parameters cannot supply an identity. Read-only
 checks and original result inspection retain their diagnostic scope.
 
 Read `settings hosts upgrade --help` before an explicitly authorized update. Keep
@@ -252,7 +257,7 @@ Reading a declaration does not authenticate its author, execute hints or grant p
 [Current protocol-catalog](../../dist/amux-protocol-definition.js "amux:generated protocol-catalog")
 
 
-## Ask a person to review one Core maintenance action
+## Review one original Core maintenance action
 
 A managed Agent can prepare an exact install or upgrade request after saving the
 Host and reading its original `install-check` or `upgrade-check`. Use
@@ -264,12 +269,15 @@ Runs. Submitting only retains the request. It neither installs nor upgrades.
 The answering service records the authenticated requester Session, source Host,
 known source Runtime and Run; missing Runtime identity remains unknown.
 
-Retain the returned `requestDigest` and original `operationId`. The person/device
+Retain the returned `requestDigest` and original `operationId`. The authenticated operator
 reads `settings hosts maintenance-inspect --operation-id ID`, reviews the exact
 Host, candidate, action, requester and effects, then calls
 `settings hosts maintenance-review --operation-id ID --input FILE|-` with
 `{requestDigest,decision:"approve"|"reject"}` from its authenticated transport.
-An Agent cannot approve, supply a user identity, or acquire a reusable grant.
+A local managed Agent on the original user operator transport can review its own
+request under the user’s authorization. The record retains the actual Agent reviewer,
+including its current Run; another Agent cannot review that request. No caller may
+supply a user identity or turn a request ID into a reusable grant.
 Approval executes that one original action through the existing maintenance
 owner; it does not authorize future operations or source trust. A changed Host,
 candidate or expected tuple requires a fresh explicit check and request.
@@ -283,7 +291,7 @@ unconfirmed result, inspect this same operation. A missing original remote
 receipt is unknown, never permission to execute it again. Repeating review of
 an already decided request only reads its original result. Rejection changes no
 Host, Agent, Run or remote service. Direct install/upgrade commands keep their
-existing transport-approved person/device requirement.
+original operator transport and exact target requirements.
 
 ## First install on a saved Linux SSH Host
 
@@ -296,7 +304,8 @@ For an eligible result, retain the exact `expected` fields, add
 `keepRunning: "start-script"` or `"systemd"`, and explicitly authorize
 `settings hosts install <id> --input <file|->` with
 `{expected, operationId}`. The same transport-approved user/device authority as
-upgrade is required; a managed Agent cannot grant it. Systemd is a user service;
+upgrade is required. A local managed Agent on that original user operator transport
+can perform the user-authorized installation. Systemd is a user service;
 AgentMux does not enable linger or overwrite an existing service unit.
 
 Installation copies the pinned Linux Node and the same offline Core candidate

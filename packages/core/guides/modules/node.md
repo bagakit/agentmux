@@ -13,19 +13,23 @@ Use node inspect --host ID to obtain the original Runtime, policy revision, publ
 root references and default landing. An expected Runtime pin follows that original Node
 across alias rename. Alias collision or an unavailable route never selects another owner.
 
-Owner management is settings node inspect/configure. A managed Agent authenticated by
-this owner can inspect the complete policy through its original user operator transport:
-settings node inspect --host ID --expected-runtime RT. Both flags select one saved carrier;
-they are not an endpoint or a grant. JSON --input may carry {operationId} alongside those
-flags, or the complete {target:{hostId,expectedRuntimeId},operationId?} instead. Without a
-target, inspect stays with the original endpoint. The receiver independently requires its
-own operator transport; a device, guest, publication-only or delegated route is not one.
-Private paths never come from published roots. This finite read does not authorize
-configure, private owner measurements, trust or keys. Those owner operations retain the
-original authenticated person's restriction; managed Agents cannot grant publication. Policy is
+Owner management is settings node inspect/configure. An authenticated local managed
+Agent on the original user operator transport can carry out a user-authorized policy
+change. Use settings node inspect/configure --host ID --expected-runtime RT, with
+--input FILE|- for configure's {expectedRevision,operationId,policy}. Both route flags
+are required together, or use target:{hostId,expectedRuntimeId} in the JSON input.
+Without target the operation stays at its original endpoint. The receiving Core
+independently requires its original operator carrier. Device, guest, publication-only
+and delegated transports do not gain owner authority. The originating Agent is
+verified at ingress; its capability is never sent as another Core's local identity.
+Node policy receipts identify the policy and operation and contain no actor field.
+Private owner measurements, trust and keys keep their separate permissions.
+
+Read the complete private policy before saving and preserve its allowed/denied/default
+paths. Published roots do not represent that complete policy. Policy is
 {alias,shareResources,allowedPaths,deniedPaths,defaultPath}. Alias may be empty; a declared
-alias is one lowercase DNS label. Owner paths are literal absolute paths. The default path
-is navigation, not an Agent working-directory change or an OS sandbox.
+alias is one lowercase DNS label. Owner paths are literal absolute paths. The default
+path is navigation, not an Agent working-directory change or an OS sandbox.
 
 Configure carries expectedRevision and an explicit operationId. Keep that original ID
 when a save is unknown; settings node inspect --input with {operationId} observes and
@@ -33,7 +37,7 @@ confirms the same saved bytes without replaying configuration. Inspect waits for
 saves on that unique Core owner. For an explicitly requested ID, operation:null means no
 record was found after those saves settled and the current policy does not name it. It is
 not a success receipt. A missing record named by current policy is unavailable, never
-reported absent. A person may explicitly start a new save; the old request is not replayed.
+reported absent. An authorized operator may explicitly start a new save; the old request is not replayed.
 Existing Agent, Run and
 full-owner SSH capabilities are independent of Node publication and remain available.
 
