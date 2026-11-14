@@ -34,11 +34,13 @@ export function LauncherAgentDevice({ hosts, workspace, agentWorkspace, explicit
   useEffect(() => { setOpen(false) }, [workspace?.id, workspace?.hostId, workspace?.path])
   useLayoutEffect(() => {
     if (!open || !active || !anchor || !content) return
+    const boundary = anchor.closest<HTMLElement>('[data-workbench-region-id]') ?? ('clippingAncestors' as const)
+    const collision = { boundary, padding: 12 }
     let current = true
     const position = async () => {
-      const result = await computePosition(anchor, content, { strategy: 'fixed', placement: 'bottom-end', middleware: [offset(8), flip(), shift({ padding: 12 }),
-        size({ padding: 12, apply: ({ availableHeight, availableWidth }) => {
-          if (current) Object.assign(content.style, { maxHeight: `${Math.max(0, availableHeight)}px`, maxWidth: `${Math.max(0, availableWidth)}px` })
+      const result = await computePosition(anchor, content, { strategy: 'fixed', placement: 'bottom-end', middleware: [offset(8), flip(collision), shift(collision),
+        size({ ...collision, apply: ({ availableHeight, availableWidth }) => {
+          if (current) Object.assign(content.style, { maxHeight: `${Math.max(0, availableHeight)}px`, maxWidth: `${Math.max(0, Math.min(420, availableWidth))}px` })
         } })] })
       if (current) Object.assign(content.style, { left: `${result.x}px`, top: `${result.y}px`, visibility: 'visible' })
     }
@@ -49,13 +51,16 @@ export function LauncherAgentDevice({ hosts, workspace, agentWorkspace, explicit
   const selectedAgent = explicitAgentWorkspaceId === undefined ? agentWorkspace ?? workspace : agentWorkspace
   const placement = launcherWorkPlacement(workspace, selectedAgent,
     isScratchWorkspaceId(workspace.id) ? workReferenceHostId(hosts) : workspace.hostId)
+  const target = sourceExecution?.kind === 'source-coordinator' ? sourceExecution.coordinator : sourceExecution?.agentTarget
+  const agentLabel = sourceExecution?.kind === 'source-coordinator' ? workHostLabel(hosts, sourceExecution.coordinator.hostId) : target ? target.runtimeId === sourceExecution?.target.reference.runtimeId
+    ? workHostLabel(hosts, workspace.hostId) : target.hostId : workHostLabel(hosts, placement.agentHostId)
   if (isScratchWorkspaceId(workspace.id)) return <span className="launcher-work-arrangement" title="This context keeps its original project and Agent. Split tools require registered project folders.">
     <ModeIcon size={12} /><span>{agentWorkModeLabel(placement.mode)}</span>{onEditArrangement ? <button className="agent-work-text-action" type="button" onClick={onEditArrangement}>Remote work</button> : null}
   </span>
   return <Dialog.Root modal={false} open={open && active} onOpenChange={setOpen}>
     <span className="launcher-work-arrangement"><Dialog.Trigger asChild><button ref={setAnchor} type="button" className="launcher-work-arrangement__trigger" disabled={disabled || !active}
       aria-label="Agent location" title={sourceExecution ? undefined : `Agent on ${workHostLabel(hosts, placement.agentHostId)} · Project on ${workHostLabel(hosts, placement.projectHostId)}`}>
-      <AgentWorkModeBadge sourceSelection={sourceExecution} placement={placement} hosts={hosts} showLocal hideTooltip={open || !active} /><DownIcon size={11} /></button></Dialog.Trigger></span>
+      <AgentWorkModeBadge sourceSelection={sourceExecution} placement={placement} hosts={hosts} showLocal hideTooltip={open || !active} /><span className="launcher-work-arrangement__name">{agentLabel}</span><DownIcon size={11} /></button></Dialog.Trigger></span>
     <DocumentOverlayPortal component={Dialog.Portal}>
       <Dialog.Content ref={attach} className="launcher-work-arrangement__dialog" style={{ visibility: 'hidden' }}
         onOpenAutoFocus={event => { event.preventDefault(); surface.current?.focus({ preventScroll: true }) }}>

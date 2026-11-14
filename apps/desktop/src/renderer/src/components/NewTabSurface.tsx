@@ -506,9 +506,9 @@ export function NewTabSurface({
       {regionId ? operationHosts.map(hostId => <AgentOperationFeedback key={hostId} compact subject={{ hostId, regionId }} />) : null}
 
 
-      {sourceMode ? sourceSupportIssue ? <div className="launcher-source-contract" role="status">{sourceSupportIssue}
+      {sourceMode && sourceSupportIssue ? <div className="launcher-source-contract" role="status"><span>{sourceSupportIssue}</span>
         {settings && workspace ? <button type="button" className="agent-work-text-action" onClick={() => settings.openHost(workspace.hostId)}>{sourceLauncher.description && !sourceLauncher.description.contracts.ordinaryLaunch ? `Open ${host?.label ?? 'project device'} to update Core` : 'Project device settings'}</button> : null}
-      </div> : <details className="agent-work-startup"><summary>Launch compatibility</summary><p>The project device and selected Agent accept complete launch fields. Native tool qualification is unconfirmed here and checked during Launch preparation.</p></details> : null}
+      </div> : null}
       {retainedSourceRequests.inputs.map(input => <SourceLauncherRequest key={`${mountedAgentOpenKey(input.target, input.slot)}:${input.request.operationId}`} input={input} busy={busy !== null} active={motionActive && !moteId}
         onContinue={original => { if (original.slot.kind === 'region') void run('agent', () => launchAtSource({ tabId: original.slot.kind === 'region' ? original.slot.tabId : '', regionId: original.slot.kind === 'region' ? original.slot.regionId : '' }, original)) }} />)}
       {retainedSourceRequests.issue ? <p role="status">{retainedSourceRequests.issue}</p> : null}
@@ -582,6 +582,7 @@ export function NewTabSurface({
           <button className="primary-button launcher-launch-button" title={`Launch · ${isMacPlatform() ? '⌘' : 'Ctrl+'}Enter`} disabled={!launcherCanLaunch(readiness)} onClick={launchFromLauncher}>{busy === 'agent' ? <ThemeStatusLoadingIcon size={15} animation="spin" /> : <ThemeActionStartIcon size={15} />}{busy === 'agent' ? 'Launching…' : executionPreparing ? 'Review arrangement…' : 'Launch'}</button>
         </div>
       </div> : null}
+      {sourceMode && !sourceSupportIssue && sections.agents === 'expanded' ? <details className="agent-work-startup launcher-compatibility"><summary>Launch compatibility</summary><p>The project device and selected Agent accept complete launch fields. Native tool qualification is unconfirmed here and checked during Launch preparation.</p></details> : null}
       {sourceMode ? null : emptyHostInventoryUnconfirmed && sections.agents !== 'hidden' ? sections.agents === 'expanded' ? null : unconfirmedConfigurations : (splitExecution || agentHost?.kind === 'ssh') && inventory && inventory.state !== 'ready' && sections.agents !== 'hidden' ? <ServiceWindowNotice notice={{ kind: 'indeterminate', notice: {
         step: inventory.state === 'checking' ? 'Checking agents on this host' : 'Host Executor discovery failed', mode: `${agentHost?.label ?? agentWorkspace?.hostId}: ${inventory.detail ?? 'Current inventory is unknown.'} Previously read configurations remain selectable.`,
         restore: inventory.state === 'checking' ? 'Checking this host. Existing configurations remain selectable.'

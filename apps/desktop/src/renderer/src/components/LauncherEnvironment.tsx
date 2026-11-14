@@ -40,7 +40,7 @@ export function LauncherEnvironment({ workspace, host, check, displayPath, execu
       <span className="launcher-environment__path" title={displayPath || undefined}>{displayPath || 'No working directory selected'}</span>
     </div>
     {executionControl ? <div className="launcher-environment__execution">
-      <span className="launcher-environment__execution-label">Run mode</span>
+      <span className="launcher-environment__execution-label">Agent device</span>
       {executionControl}
     </div> : null}
     {tooltip.content}

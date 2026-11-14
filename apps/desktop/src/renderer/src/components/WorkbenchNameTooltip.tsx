@@ -13,9 +13,11 @@ export function useWorkbenchTooltipFocus(element: RefObject<HTMLElement | null>,
     const parent = suppressed ? null : element.current?.parentElement?.closest<HTMLElement>('button, summary, a[href], [tabindex]:not([tabindex="-1"])') ?? null
     setOwner(parent)
     if (!parent) return
-    const show = () => current.current.showFor(parent), hide = () => current.current.hide()
+    const show = () => { if (parent.matches(':focus-visible')) current.current.showFor(parent) }, hide = () => current.current.hide()
+    const pointer = () => current.current.cancelHover()
     parent.addEventListener('focus', show); parent.addEventListener('blur', hide)
-    return () => { parent.removeEventListener('focus', show); parent.removeEventListener('blur', hide) }
+    parent.addEventListener('pointerdown', pointer)
+    return () => { parent.removeEventListener('focus', show); parent.removeEventListener('blur', hide); parent.removeEventListener('pointerdown', pointer) }
   }, [element, suppressed, identity])
   const describedBy = tooltip.props['aria-describedby']
   useLayoutEffect(() => {
@@ -44,9 +46,12 @@ export function useWorkbenchNameTooltip(name: string, detail: ReactNode, suppres
     setAnchor(null)
   }, [])
   const departure = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const hover = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const cancelHover = () => { clearTimeout(hover.current); hover.current = undefined }
   const keepOpen = () => clearTimeout(departure.current)
-  const hide = () => { keepOpen(); departure.current = setTimeout(close, 120) }
+  const hide = () => { cancelHover(); keepOpen(); departure.current = setTimeout(close, 120) }
   const showFor = (element: Element) => {
+    cancelHover()
     keepOpen()
     if (suppressed) return
     const document = element.ownerDocument, previous = nameTooltipOwners.get(document)
@@ -55,11 +60,12 @@ export function useWorkbenchNameTooltip(name: string, detail: ReactNode, suppres
   }
   useEffect(() => () => {
     clearTimeout(departure.current)
+    clearTimeout(hover.current)
     if (ownedDocument.current && nameTooltipOwners.get(ownedDocument.current) === close) nameTooltipOwners.delete(ownedDocument.current)
   }, [close])
   const visible = anchor !== null && !suppressed
   useEffect(() => {
-    if (suppressed) close()
+    if (suppressed) { cancelHover(); close() }
   }, [suppressed, close])
   useEffect(() => {
     if (!visible || !anchor || !surface.current) return
@@ -67,7 +73,7 @@ export function useWorkbenchNameTooltip(name: string, detail: ReactNode, suppres
     const panel = surface.current, document = anchor.ownerDocument, window = document.defaultView!
     const update = async () => {
       const position = await computePosition(anchor, panel, { strategy: 'fixed', placement,
-        middleware: [offset(8), flip(), shift({ padding: 8, crossAxis: true }), size({ padding: 8,
+        middleware: [offset(8), flip(), shift({ padding: 8 }), size({ padding: 8,
           apply: ({ availableWidth, availableHeight }) => {
             if (!disposed) {
               panel.style.setProperty('--tooltip-available-width', `${Math.max(0, availableWidth)}px`)
@@ -97,8 +103,16 @@ export function useWorkbenchNameTooltip(name: string, detail: ReactNode, suppres
     return () => { disposed = true; if (startFrame !== undefined) window.cancelAnimationFrame(startFrame); stop?.(); window.removeEventListener('blur', hide)
       document.removeEventListener('visibilitychange', hide); document.removeEventListener('keydown', key, true) }
   }, [visible, anchor, name, detail, placement, pointerPassThrough, close])
-  const show = (event: MouseEvent<Element> | FocusEvent<Element>) => showFor(event.currentTarget)
-  return { showFor, hide, props: { onMouseEnter: show, onMouseLeave: hide, onFocus: show,
+  const show = (event: MouseEvent<Element>) => {
+    cancelHover(); keepOpen()
+    if (event.buttons !== 0) return
+    const element = event.currentTarget
+    // Pointer focus must not promote a native popover between press and release.
+    // A deliberate hover reads the identity; clicking cancels that pending read.
+    hover.current = setTimeout(() => showFor(element), 300)
+  }
+  const focus = (event: FocusEvent<Element>) => { if ((event.target as Element).matches(':focus-visible')) showFor(event.currentTarget) }
+  return { showFor, hide, cancelHover, props: { onMouseEnter: show, onMouseLeave: hide, onFocus: focus, onPointerDown: cancelHover,
     onBlur: hide, 'aria-describedby': visible ? id : undefined },
     content: visible ? <WindowOverlayPortal layer="tooltip"><div ref={surface} id={id} role="tooltip" tabIndex={0} className="workbench-tab-name-tooltip" style={pointerPassThrough && !overflowing ? { pointerEvents: 'none' } : undefined} onMouseEnter={keepOpen} onMouseLeave={hide} onFocus={keepOpen} onBlur={hide}>
       <strong>{name}</strong>{detail ? <span>{detail}</span> : null}

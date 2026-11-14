@@ -139,7 +139,7 @@ export function SourceAgentTargetSetup({ config, active, initialSelection, fixed
         if (route) setSelected(route.agentTarget)
         else if (value === JSON.stringify(['host', 'local'])) setSelected(undefined)
         else { const host = choices?.hosts.find(item => JSON.stringify(['host', item.hostId]) === value); if (host) setSelected({ hostId: host.hostId, runtimeId: host.runtimeId ?? '' }) }
-      }} options={[{ value: '', label: project ? 'Reading this project device…' : 'Choose a project first' },
+      }} options={[...(!resources ? [{ value: '', label: project ? 'Reading this project device…' : 'Choose a project first', disabled: true }] : []),
         ...(target && target.adoptedRoute && !routes?.routes.some(route => configValuesEqual(route.agentTarget, target)) ? [{ value: choiceKey, label: `Retained route · ${target.hostId}` }] : []),
         ...(resources ? [{ value: JSON.stringify(['host', 'local']), label: 'Project device', description: host?.label ?? 'Original project device' }] : []),
         ...(localHost && host?.kind !== 'local' ? [{ value: 'independent-coordinator', label: localHost.label, description: 'Reach · Agent here, files on the project device' }] : []),
