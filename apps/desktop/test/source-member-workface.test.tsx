@@ -265,8 +265,45 @@ async function privateNativeFixture() {
   useAppStore.getState().setAgentComposerDraft(originalSourceInputOwnerKey(f.d.owner.runtimeId, sid), 'Private Native proof draft')
   const sessions = useAppStore.getState().sessions
   const view = (visible = true, interactiveResize = false) => <DesktopClientUiProvider><SpaceMemberWorkface target={target} visible={visible} active={visible} interactiveResize={interactiveResize} sourceTabId={admission.address.tabId!} /></DesktopClientUiProvider>
-  return { ...f, original, run, target, sid, main, sessions, view, daemon, metadataUnavailable: (value: boolean) => { metadataUnavailable = value } }
+  return { ...f, original, run, target, sid, main, sessions, view, daemon, admission, metadataUnavailable: (value: boolean) => { metadataUnavailable = value } }
 }
+
+it('Source history returns original retained byte ranges after a real Native terminal checkpoint', async () => {
+  const f = await privateNativeFixture(), target = { ...f.target, target: { ...f.target.target,
+    expectedAdmission: { kind: 'creation' as const, operationId: f.admission.requestId } } }
+  const surface = await f.main.api.member(target, () => {}, new AbortController().signal)
+  try {
+    const attached = await surface.call('attach', { afterByte: 0 }), data = 'Retained Source history λ\r'
+    await surface.call('write', { data, source: 'user' })
+    await vi.waitFor(async () => {
+      const raw = await f.d.core.readRunReplay(f.original.run, 0, 'raw')
+      expect(raw.run.acceptedInputBytes).toBe(Buffer.byteLength(data))
+      expect(raw.replay.map(chunk => chunk.data).join('')).toContain('Retained Source history λ')
+    })
+    const checkpoint = await f.d.core.readRunReplay(f.original.run, 0, 'terminal')
+    expect(checkpoint.terminal.type).toBe('basic-vt')
+    if (checkpoint.terminal.type !== 'basic-vt') throw Error('Expected the original Native terminal checkpoint')
+    expect(checkpoint.terminal.checkpoint.throughByte).toBeGreaterThan(0)
+    const replay = await surface.call('replay', { attachmentId: attached.attachmentId, afterByte: 0 })
+    expect(replay.gap).toBeNull()
+    expect(replay.replay.map(chunk => chunk.data).join('')).toContain('Retained Source history λ')
+    let cursor = 0
+    for (const chunk of replay.replay) {
+      expect(chunk.runId).toBe(f.run.runId)
+      expect(chunk.startByte).toBe(cursor)
+      expect(chunk.endByte - chunk.startByte).toBe(chunk.dataBytes.length)
+      cursor = chunk.endByte
+    }
+    expect(cursor).toBeGreaterThanOrEqual(checkpoint.terminal.checkpoint.throughByte)
+    const current = await f.d.core.readRunReplay(f.original.run, cursor, 'raw')
+    expect({ runId: current.run.runId, pid: current.run.pid, state: current.run.state,
+      acceptedInputBytes: current.run.acceptedInputBytes }).toEqual({ runId: f.run.runId, pid: f.run.pid,
+      state: 'running', acceptedInputBytes: Buffer.byteLength(data) })
+  } finally {
+    await surface.dispose()
+    await f.d.core.signalAgent(f.sid, f.original.run, 'SIGINT')
+  }
+})
 
 it('actual private Native retains the original Run/PID and receives settled and post-drag dimensions through Source Main and Preload', async () => {
   const f = await privateNativeFixture(), { run, sessions, view, original, sid, daemon } = f
