@@ -89,7 +89,7 @@ it('reads the private-chat diagnosis as launch-carried rather than unknown or Ag
     readiness: { state: 'ready', code: null }, service: { enabled: true, revision: 1 }, adapterService: null, connection: null,
     incoming: { rows: [{ key: moteChatDiagnosisKey(target, 'original-intake'), state: 'claimed', code: null, codeRecorded: false, preparation: 'ready',
       input: { status: 'launch-carried', observation: 'observed', controlState: 'dispatch-authorized', receiptObservation: 'closed',
-        waiting: null, preparationReason: null, failureCode: null, runtime: null } }], more: false }, publications: [], issues: [] })
+        waiting: null, waitObservation: null, preparationReason: null, failureCode: null, runtime: null } }], more: false }, publications: [], issues: [] })
   const call = vi.spyOn(api.moteChat, 'call').mockResolvedValue(report)
   await dom.render(<MoteChatActivity target={target} hostingTarget={{ hostId: 'local', runtimeId: 'original-runtime' }} active revision={1} />)
   await vi.waitFor(() => expect(dom.container.textContent).toContain('Message carried by recovery startup'))
@@ -113,8 +113,13 @@ it('preserves launch delivery and unknown native adoption in group status consum
   const report: GroupDiagnosis = { ...decoded.groups.value!.items[0]!, service: decoded.service }
   expect(report.incoming.value!.rows[0]!.coreStatus).toBe('launch-carried')
   const summary = connectorGroupSummary(report)
-  expect(summary.incoming.value).toBe('Message carried by recovery startup')
-  expect(summary.incoming.detail).toContain('Agent acceptance is unconfirmed')
+  expect(summary.incoming.value).toBe('Connection unconfirmed')
+  expect(summary.incoming.problem).toBe('receiver-unconfirmed')
+  expect(summary.incoming.secondary).toContain('Message carried by recovery startup')
+  const originalInput = summary.problems.find(problem => problem.kind === 'agent-unconfirmed')
+  expect(originalInput?.title).toBe('Message carried by recovery startup')
+  expect(originalInput?.detail).toContain('Agent acceptance is unconfirmed')
+  expect(originalInput?.detail).toContain('This input will not be sent again')
   expect(connectorGroupDiagnostics({ report, checking: false, checkedAt: 2 }).rows.find(row => row[0] === 'Group → Agent')?.[1]).toContain('Recovery startup carried the message')
   expect(report.incoming.value!.rows[0]!.nativeAdoption).toBe('unknown')
 })
@@ -125,7 +130,7 @@ it('names a private-chat input waiting for its Agent to start, not a recovery or
     readiness: { state: 'ready', code: null }, service: { enabled: true, revision: 1 }, adapterService: null, connection: null,
     incoming: { rows: [{ key: moteChatDiagnosisKey(target, 'starting-intake'), state: 'claimed', code: null, codeRecorded: false, preparation: 'ready',
       input: { status: 'waiting', observation: 'observed', controlState: 'enabled', receiptObservation: 'owned',
-        waiting: { phase: 'session', reason: 'native-session-starting', wake: 'session-restored' }, preparationReason: null, failureCode: null, runtime: null } }], more: false }, publications: [], issues: [] })
+        waiting: { phase: 'session', reason: 'native-session-starting', wake: 'session-restored' }, waitObservation: null, preparationReason: null, failureCode: null, runtime: null } }], more: false }, publications: [], issues: [] })
   vi.spyOn(api.moteChat, 'call').mockResolvedValue(report)
   await dom.render(<MoteChatActivity target={target} hostingTarget={{ hostId: 'local', runtimeId: 'original-runtime' }} active revision={1} />)
   await vi.waitFor(() => expect(dom.container.textContent).toContain('Waiting for the Agent to finish starting'))
