@@ -13,6 +13,20 @@ knowledge ls/search/read. Preserve returned Host, resource path, Topic and docum
 A Mote display location is not its knowledge directory. Missing/unavailable sources stay
 explicit; do not replace a user's SOUL/Wiki or invent a parallel registry.
 
+## Read an original search observation
+
+`topic knowledge search` returns `observation.record.searchId` together with the original
+query, scope, outcome and measured costs. Use `topic knowledge history --search ID` to read
+that retained observation without repeating the search or reading document bodies. Optional
+`--topic ID`, `--query TEXT` and `--limit N` filter the original records; query text matches
+exactly. Read the leaf help for the current accepted fields and limits.
+
+History reports `hasMore`, retention and unavailable independently. An absent record can
+mean it was not saved or has been pruned; it never proves that the search did not run.
+History failures preserve original search results, files and workfaces. Inspect or repair
+the original history owner before another explicit query; do not automatically rerun a
+search to fabricate its missing original observation.
+
 ## Use the existing structure
 
 - topic.md: short current purpose, confirmed context, key decisions, open questions and links to
