@@ -14,6 +14,7 @@ import { focusContextHeat, focusContextVisit } from '../lib/focus-attention'
 import { focusTopicContextKey, type FocusTopicHeading } from '../lib/focus-collection-lanes'
 import { FocusTopicLabel } from './FocusTopicLabel'
 import { FocusZoneFooter } from './FocusZoneFooter'
+import { FocusTaskListContent } from './FocusTaskListContent'
 
 const contextKey = (context: FocusContext) => JSON.stringify([context.hostId, context.id])
 
@@ -122,6 +123,7 @@ export function FocusContextCards({ contexts, columns, scrollRef, visible, list 
     const requested = revealRequest?.pending && (context.control?.hostId ?? context.hostId) === revealRequest.hostId && (context.control?.agentSessionId ?? context.id) === revealRequest.agentSessionId &&
       (revealRequest.presentationSessionId === undefined || revealRequest.presentationSessionId === context.id)
     const full = visited.current.has(contextKey(context)) || requested
+    const goals = goalLinks.get(focusGoalCardKey(context.hostId, context.id))
     const selected = selectedKey === undefined ? selectedId === context.id : selectedKey === contextKey(context)
     const sourceKey = focusTopicContextKey(context.hostId, context.id), topic = topics?.get(sourceKey), section = sections?.get(sourceKey)
     return <Fragment key={contextKey(context)}>{section ? <div className="focus-topic-section" data-focus-topic-section={section.kind === 'worktree' ? undefined : section.id} aria-label={`${section.kind === 'worktree' ? 'Zone' : 'Topic'} · ${section.name}`} data-focus-zone-section={section.kind === 'worktree' ? section.id : undefined}>{section.content ?? <FocusTopicLabel topic={section} />}</div> : null}
@@ -129,11 +131,11 @@ export function FocusContextCards({ contexts, columns, scrollRef, visible, list 
       data-focus-card-key={contextKey(context)} data-focus-card-body={full ? 'mounted' : 'pending'} data-focus-heat={focusContextHeat(context, visits ? focusContextVisit(context, visits) : undefined, Date.now())}
       data-focus-agent-host={context.control?.hostId ?? context.hostId} data-focus-agent-session={context.control?.agentSessionId ?? context.id}
       data-focus-presentation-session={context.id} data-focus-agent-selected={selected ? 'true' : undefined}>
-      {full ? <FocusContextCardBody context={context} list={list} summaryActive={visible} goalLinks={goalLinks.get(focusGoalCardKey(context.hostId, context.id))}
+      {full ? <FocusContextCardBody context={context} list={list} topic={list ? topic : undefined} summaryActive={visible} goalLinks={goals}
         identity={identities.get(focusContextIdentityKey(context.hostId, context.id))} selected={selected} activity={activity?.get(focusListActivityKey(context))} onSelect={onSelect} />
         : <button type="button" className={`focus-context focus-context--card${list ? ' focus-context--list' : ''}${selected ? ' is-selected' : ''}`}
           data-session-id={context.id} data-state={context.state} data-bucket={context.bucket} data-activity={context.activitySemantic}
-          aria-pressed={selected} aria-label={`${context.name} · ${context.stateLabel}${context.detailKind === 'service' ? ` · ${context.detail}` : ''}${topic ? ` · ${topic.kind === 'worktree' ? 'Zone' : 'Topic'} · ${topic.name}` : ''}`} aria-description={context.originAddress}
+          data-focus-list-goal={list && Boolean(goals) || undefined} aria-pressed={selected} aria-label={`${context.name} · ${context.stateLabel}${context.detailKind === 'service' ? ` · ${context.detail}` : ''}${topic ? ` · ${topic.kind === 'worktree' ? 'Zone' : 'Topic'} · ${topic.name}` : ''}`} aria-description={context.originAddress}
           onMouseDown={event => { if (event.button === 0) event.preventDefault() }}
           onClick={() => onSelect(context.id)}
           onFocus={event => { reveal(context, event.currentTarget.parentElement as HTMLDivElement) }}
@@ -141,7 +143,9 @@ export function FocusContextCards({ contexts, columns, scrollRef, visible, list 
             event.preventDefault(); event.stopPropagation()
             const button = reveal(context, event.currentTarget.parentElement as HTMLDivElement)
             button?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: event.clientX, clientY: event.clientY }))
-          }}><span className="focus-context__copy"><strong>{context.name}</strong>{context.kind === 'agent' ? <AgentWorkModeBadge source={context} embedded /> : null}<span className="focus-context__detail">{context.stateLabel}</span></span></button>}
+          }}>
+            {list ? <FocusTaskListContent context={context} placeholder /> : <span className="focus-context__copy"><strong>{context.name}</strong>{context.kind === 'agent' ? <AgentWorkModeBadge source={context} embedded /> : null}<span className="focus-context__detail">{context.stateLabel}</span></span>}
+          </button>}
       {topic?.notice ? <div className="focus-zone-notices" data-focus-zone-notices="" role="status">{topic.notice}</div> : null}
       <FocusZoneFooter zone={topic} />
     </div></Fragment>
