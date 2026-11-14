@@ -3,6 +3,10 @@ import { createHash } from 'node:crypto'
 
 const leaf = 'packages/core/src/providers/grok-session-status.ts', client = 'packages/core/src/client.ts'
 export const grokStatusMutations = {
+  'reject-current-resumed-turn': [client, [['if (!currentTurnEnded) { unattributedInitialSnapshot = true; return saved }', 'if (true) { unattributedInitialSnapshot = true; return saved }']]],
+  'accept-foreign-resumed-turn': [client, [['mainHook?.nativeTurnId === observation.nativeTurnId && observation.nativeObservedAt !== undefined', 'observation.nativeObservedAt !== undefined']]],
+  'accept-pre-resume-end': [client, [['observation.nativeObservedAt >= resume.admittedAt && !nativeTargetSourceUnconfirmed(saved)', '!nativeTargetSourceUnconfirmed(saved)']]],
+  'require-hook-arrival-before-end': [client, [['observation.nativeObservedAt >= resume.admittedAt', 'observation.nativeObservedAt >= mainHook.observedAt']]],
   'cold-empty-keeps-old-idle': [leaf, [["if (initial && !latest) throw new AgentMuxError('The original native source has no qualified turn boundary.', 'AGENT_NATIVE_STATUS_UNCONFIRMED')", '']]],
   'grant-idle-before-cut-validation': [leaf, [['if (next) latest = next', 'if (next) { latest = next; emit(next) }']]],
   'descriptor-source-race': [leaf, [['BigInt(actual.dev) !== original.stat.dev || BigInt(actual.ino) !== original.stat.ino', 'false']]],

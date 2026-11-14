@@ -1,4 +1,4 @@
-import { appendFile, mkdir, readFile, rename, writeFile } from 'node:fs/promises'
+import { appendFile, mkdir, readFile, rename, truncate, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { spawn } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
@@ -13,6 +13,7 @@ import { runSourceObjectCli } from './helpers/source-object-cli.js'
 import { AgentMuxRpcService } from '../src/public-rpc-service.js'
 import { AgentMuxClient } from '../src/client.js'
 import { captureExecutorInvocation } from '../src/agent-executor-invocation.js'
+import { DEFAULT_AGENT_CONTINUITY_POLICY } from '../src/agent-session-recovery/continuity-contract.js'
 import { encodeCwdDirname } from '../src/providers/grok-native-history.js'
 import { readGrokPromptExecutionEvidence, observeGrokSessionStatus } from '../src/providers/grok-session-status.js'
 import { grokDone, grokUpdate, grokUser } from './fixtures/grok-updates.js'
@@ -21,7 +22,7 @@ import { createGoalRuntime } from '../../../apps/host/src/goal-runtime.js'
 import { ContinuousProgressLoopManager } from '../../../apps/host/src/continuous-progress-loop-manager.js'
 import { deliverContinuousProgress } from '../../../apps/host/src/continuous-progress-delivery.js'
 import type { AgentMuxRpcMethod, AgentMuxRpcParams } from '../src/public-rpc.js'
-import type { AgentProviderSessionStatus } from '../src/types.js'
+import type { AgentMuxStoredAgentSession, AgentProviderSessionStatus } from '../src/types.js'
 
 const SID = 'recipient', NATIVE = 'original-grok', TURN = 'original-turn'
 const closes: (() => Promise<unknown>)[] = []
@@ -33,7 +34,7 @@ async function proof(value: Record<string, unknown>) {
   if (process.env.MOTE_GROK_STATUS_CASE_PROOF) await appendFile(process.env.MOTE_GROK_STATUS_CASE_PROOF, JSON.stringify(value) + '\n')
 }
 
-async function fixture(rows: unknown[] = [start(), done()]) {
+async function fixture(rows: unknown[] = [start(), done()], prepare?: (session: AgentMuxStoredAgentSession, path: string) => AgentMuxStoredAgentSession) {
   const f = await rpcOwnerFixture([SID, 'neighbor'], undefined, () => ({ providerId: 'grok', executorId: 'grok' }),
     () => ({ sessionExecutorConfiguration: async () => { throw Error('A current configuration cannot replace the original environment') } }))
   closes.push(f.close)
@@ -44,9 +45,10 @@ async function fixture(rows: unknown[] = [start(), done()]) {
   const path = join(dir, 'updates.jsonl'), summary = join(dir, 'summary.json')
   await writeFile(path, jsonl(rows)); await writeFile(summary, JSON.stringify({ info: { id: NATIVE, cwd: f.root } }))
   const before = (await f.store.readMetadata(SID))!, original = captureExecutorInvocation('grok', 'grok', 'original-create', 'b'.repeat(64), { env })!
-  const session = { ...before, hookBindingId: 'b'.repeat(43), hookToken: 't'.repeat(43), nativeHandle: { kind: 'provider' as const, providerId: 'grok', sessionId: NATIVE },
+  const seed = { ...before, hookBindingId: 'b'.repeat(43), hookToken: 't'.repeat(43), nativeHandle: { kind: 'provider' as const, providerId: 'grok', sessionId: NATIVE },
     semanticStatus: { state: 'working' as const, source: 'native-hook' as const, observedAt: 1 },
     creation: { createOperationId: 'original-create', initialPrompt: 'not-requested' as const, intentDigest: 'b'.repeat(64), executorInvocationDigest: original.digest }, executorInvocation: original.value }
+  const session = prepare?.(seed, path) ?? seed
   await f.store.compareAndSwap(before, session)
   const originalRun = f.inner.kernel.status as (id: string) => Promise<any>
   f.inner.kernel.status = vi.fn(async (id: string) => ({ ...await originalRun(id), program: '/original/grok', args: ['--model', 'original-model'] }))
@@ -57,6 +59,105 @@ async function fixture(rows: unknown[] = [start(), done()]) {
     signal: new AbortController().signal }
   return { ...f, env, dir, path, summary, session, context, inspect, service, saved }
 }
+
+function resumed(session: AgentMuxStoredAgentSession, path: string): AgentMuxStoredAgentSession {
+  const previousRun = { runId: 'original-ended-run' }
+  const operationId = 'resume-original-conversation'
+  return { ...session, retiredRuns: [previousRun], nativeHandle: { kind: 'provider', providerId: 'grok', sessionId: NATIVE, transcriptPath: path },
+    continuityOperations: { [operationId]: { operationId, agentSessionId: SID, trigger: 'standing-maintenance',
+      policy: DEFAULT_AGENT_CONTINUITY_POLICY, kind: 'resumed', reason: 'standing-intent', previousRun, newRun: session.run,
+      admittedAt: 1000, observedAt: 1200, rechecks: 0, evidence: { kind: 'agent-session-store' } } },
+    hookReceipt: { id: 'current-native-hook', providerId: 'grok', agentSessionId: SID, run: session.run, eventName: 'stop',
+      lifecycleEvent: null, nativeTurnId: TURN, observedAt: 2500,
+      subject: { kind: 'main', basis: 'provider-protocol', nativeSessionId: NATIVE, reason: 'run-bound-protocol' } }
+  }
+}
+
+it('reattaches a witnessed terminal of the resumed Run and delivers the still-due standing heartbeat once', async () => {
+  const f = await fixture(undefined, resumed), run = f.session.run
+  const diagnostics: string[] = []
+  f.client.onEvent(event => { if (event.type === 'agent-error') diagnostics.push(event.code) })
+  const bytes = await readFile(f.path)
+  await truncate(f.path, bytes.byteLength - 1)
+
+  const clock = Date.now()
+  let records: any[] = []
+  const runtime = createGoalRuntime({ clients: f.coreClients, checkIn: async () => ({ known: false, reason: 'not used' }) })
+  const manager = new ContinuousProgressLoopManager({ load: async () => records, save: async (next: any[]) => { records = structuredClone(next) } } as any,
+    (...args) => deliverContinuousProgress(runtime, ...args), () => clock,
+    (loop, tick, now, signal) => runtime.observeContinuousProgress(loop, tick, now, signal), runtime)
+  closes.push(() => manager.stop())
+  const { schedule } = await manager.call('schedule.create', { target: { hostId: 'local', agentSessionId: SID, providerId: 'grok', workspacePath: f.root },
+    everyMs: 60000, prompt: 'Original standing check', operationId: 'resumed-heartbeat', managedSource: { sourceId: 'original-mote', revision: 'original-role' } })
+  manager.setMaintenanceOwner({ maintain: async () => {}, qualify: async () => ({ action: 'continue' }) })
+  const due = schedule.nextCheckAt
+  await manager.check(due)
+  expect(manager.inspectLoop(schedule.loopId)).toMatchObject({ status: 'active', nextCheckAt: due, lastOutcome: 'skipped' })
+  expect(manager.inspectLoop(schedule.loopId)?.lastInputRef).toBeUndefined()
+  expect(f.run(run.runId).acceptedInputBytes).toBe(0)
+  expect((await f.inspect()).status?.observation.semantic).toBe('unknown')
+
+  await appendFile(f.path, bytes.subarray(-1))
+  await f.client.refreshAgentSession(SID, run)
+  await vi.waitFor(async () => expect((await f.inspect()).status?.observation.semantic).toBe('idle'))
+  expect((await f.saved())?.semanticStatus).toMatchObject({ state: 'done', nativeTurnId: TURN, observedAt: 2000 })
+  const probe = new ObjectCliProbe(request => f.service.call(request.method as AgentMuxRpcMethod, request.params as AgentMuxRpcParams<AgentMuxRpcMethod>))
+  await probe.start(); closes.push(() => probe.stop())
+  const cli = await runSourceObjectCli(['--endpoint', 'unix:' + probe.socketPath, 'agent', 'inspect', '--session', SID], probe.environment())
+  expect(cli.code, cli.stderr).toBe(0)
+  const inspected = JSON.parse(cli.stdout).result.status
+  expect(inspected.observation.semantic, JSON.stringify({ observation: inspected.observation, diagnostics })).toBe('idle')
+
+  await manager.check(due)
+  const sent = manager.inspectLoop(schedule.loopId)!
+  expect(sent, JSON.stringify({ decision: sent.lastDecision, diagnostics })).toMatchObject({
+    status: 'active', lastOutcome: 'sent', lastOccurrenceAt: due, nextCheckAt: due + 60000
+  })
+  const receipt = await f.client.inspectAgentPromptSubmission({ kind: 'prompt', agentSessionId: SID, expectedRun: run, submissionId: sent.lastTickId! })
+  expect(receipt?.admission?.acknowledged).toBe(true)
+  const written = f.run(run.runId).acceptedInputBytes
+  expect(written).toBeGreaterThan(0)
+  await manager.check(due)
+  expect(f.run(run.runId).acceptedInputBytes).toBe(written)
+  expect(f.inner.kernel.start).not.toHaveBeenCalled()
+  expect(f.client.agentSession(SID)).toMatchObject({ run, nativeHandle: f.session.nativeHandle })
+})
+
+it.each(['no-hook', 'foreign-session', 'foreign-turn', 'child', 'old-end', 'unconfirmed-source'] as const)(
+  'keeps a resumed initial terminal unconfirmed when its main witness is %s', async mismatch => {
+    const rows = mismatch === 'old-end' ? [{ ...start(), timestamp: 0.7 }, { ...done(), timestamp: 0.9 }] : undefined
+    const f = await fixture(rows, (session, path) => {
+      const saved = resumed(session, path), hook = saved.hookReceipt!
+      if (mismatch === 'no-hook') delete saved.hookReceipt
+      if (mismatch === 'foreign-session') hook.subject!.nativeSessionId = 'another-conversation'
+      if (mismatch === 'foreign-turn') hook.nativeTurnId = 'another-turn'
+      if (mismatch === 'child') hook.subject!.kind = 'child'
+      if (mismatch === 'unconfirmed-source') saved.nativeSourceObservation = {
+        state: 'unknown', run: session.run, observedAt: session.updatedAt, reason: 'No exact native source'
+      }
+      return saved
+    })
+    const warnings: string[] = []
+    f.client.onEvent(event => { if (event.type === 'agent-error') warnings.push(event.code) })
+    await f.inspect()
+    await vi.waitFor(async () => {
+      const watch = f.inner.nativeStatusWatches.get(SID)
+      await watch?.pending
+      expect(watch?.recordId).toBeDefined()
+    })
+    expect((await f.inspect()).status?.observation.semantic).not.toBe('idle')
+    expect((await f.saved())?.nativeTurnEnds).toBeUndefined()
+    expect(f.rawInput).not.toHaveBeenCalled()
+    expect(warnings).toContain('AGENT_NATIVE_STATUS_UNCONFIRMED')
+  })
+
+it('rejects a retained Hook receipt attributed to the prior Run before opening the observer', async () => {
+  await expect(fixture(undefined, (session, path) => {
+    const saved = resumed(session, path)
+    saved.hookReceipt!.run = saved.retiredRuns[0]!
+    return saved
+  })).rejects.toMatchObject({ code: 'INVALID_AGENT_SESSION_STORE' })
+})
 
 it('native final reaches public Client and real CLI, original input activity, and the Host due consumer', async () => {
   const f = await fixture(), run = f.session.run
