@@ -163,11 +163,14 @@ export function MediaPlayer({ lease, name, onRetry, resume, readStatus }: { leas
     return () => document.removeEventListener('fullscreenchange', change)
   }, [])
 
+  // Mirrors active, so a pointer moving over controls already shown only restarts the idle timer and never renders the player.
+  const activeNow = useRef(true)
+  const markActive = useCallback((next: boolean) => { if (activeNow.current === next) return; activeNow.current = next; setActive(next) }, [])
   const wake = useCallback(() => {
-    setActive(true)
+    markActive(true)
     if (idle.current) clearTimeout(idle.current)
-    idle.current = setTimeout(() => setActive(false), IDLE_HIDE_MS)
-  }, [])
+    idle.current = setTimeout(() => markActive(false), IDLE_HIDE_MS)
+  }, [markActive])
 
   const fail = useCallback(async () => {
     const element = media.current
@@ -381,7 +384,7 @@ export function MediaPlayer({ lease, name, onRetry, resume, readStatus }: { leas
   return <div ref={root} className={`media-player media-player--${audioOnly ? 'audio' : 'video'}`} role="group"
     aria-label={`${audioOnly ? 'Audio' : 'Video'} player: ${name}`} tabIndex={0}
     data-decode-state={decode} data-stream={stream} data-controls={audioOnly || controlsVisible ? 'visible' : 'hidden'} data-fullscreen={fullscreen || undefined}
-    onKeyDown={onKeyDown} onPointerMove={audioOnly ? undefined : wake} onPointerLeave={() => { if (!audioOnly && playing) setActive(false) }} onFocus={audioOnly ? undefined : wake}>
+    onKeyDown={onKeyDown} onPointerMove={audioOnly ? undefined : wake} onPointerLeave={() => { if (!audioOnly && playing) markActive(false) }} onFocus={audioOnly ? undefined : wake}>
     <div ref={frame} className="media-player__frame" hidden={audioOnly}>
       <div className="media-player__stage" data-fitted={fitted ? '' : undefined}
         style={fitted ? { '--media-fit-width': `${fitted.width}px`, '--media-fit-height': `${fitted.height}px` } as CSSProperties : undefined}>
