@@ -2438,6 +2438,12 @@ export class RuntimeController {
       }, { transport: 'unix' })
       this.handoffMoteMainRollover(result)
       const recovery = result.recovery
+      if (recovery?.kind === 'unavailable' && recovery.reason === 'native-handle-unavailable' &&
+          recovery.evidence.kind === 'run-ended' && !recovery.newRun && recovery.launchInput?.state === 'prepared' &&
+          !recovery.launchInput.key && !recovery.launchInput.receipt && !result.record && !result.input) {
+        throw new AgentMuxError('主 Agent 已退出，原生续接标识尚未确认。这条消息停在恢复阶段，原文已保留。',
+          'AGENT_NATIVE_IDENTITY_UNCONFIRMED', undefined, { disposition: 'not_applied', confirmedInputBytes: 0 })
+      }
       if (!recovery || recovery.kind !== 'resumed' || !recovery.newRun) throw new AgentMuxError(
         'The original main recovery input is unconfirmed. Its operation, captured context and source are retained; inspect that original request.', 'MOTE_MAIN_INPUT_UNCONFIRMED')
       const session = await this.sessionByTarget(client, { kind: 'agent-session', agentSessionId: control.agentSessionId }, config)
