@@ -369,7 +369,7 @@ export function useFocusSources({ visible, contexts, onSelectLocation, onChooseL
       context = { ...readOnly, id: candidate.runtimeId ? focusSourceContextId(candidate.runtimeId, candidate.sid) : candidate.key,
         hostId: focusSourceHostId(candidate.runtimeId ?? candidate.key), access, recap: context.recap ?? null }
       if (access.issue) context = { ...context,
-        detail: context.detail === access.issue ? access.issue : `${context.detail} · Observation: ${access.issue}`,
+        detail: current?.session && context.detail !== access.issue ? `${context.detail} · Observation: ${access.issue}` : context.detail,
         detailKind: context.bucket === 'attention' ? 'service' : 'observation', detailIsRecap: false }
       focusedContext = context
       rows.push(context)

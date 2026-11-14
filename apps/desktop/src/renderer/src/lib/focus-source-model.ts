@@ -47,10 +47,12 @@ export function matchingFocusContext(contexts: readonly FocusContext[], runtimeB
 /** An unobserved task is still a Context, never a fabricated Session or recovery decision. */
 export function unobservedFocusContext(runtimeId: string, sid: string, workspace: WorkspaceRecord | undefined, name: string | undefined,
   issue: string | undefined, access: FocusContextAccess): FocusContext {
-  return { id: focusSourceContextId(runtimeId, sid), hostId: focusSourceHostId(runtimeId), name: name ?? 'Agent task',
+  const observation = issue ?? 'The original Agent observation has not arrived.'
+  const detail = !runtimeId && access.locations.length === 1 ? `Position ${access.locations[0]!.regionId} · ${observation}` : observation
+  return { id: focusSourceContextId(runtimeId, sid), hostId: focusSourceHostId(runtimeId), name: name ?? `Agent · ${sid}`,
     kind: 'agent', providerId: null, workspace, workspaceId: workspace?.id ?? '', workspaceName: workspace?.name ?? 'Project unconfirmed',
     workspacePath: workspace?.path ?? '', topicId: null, runId: '', runUnobserved: true, processState: 'interrupted',
     state: 'running', stateLabel: 'Activity unknown', activitySemantic: 'unknown', bucket: 'idle', liveAgent: false,
-    actionable: false, lastActivityAt: null, workingEnteredAt: null, detail: issue ?? 'The original Agent observation has not arrived.',
+    actionable: false, lastActivityAt: null, workingEnteredAt: null, detail,
     detailIsRecap: false, detailKind: 'observation', recap: null, access }
 }
