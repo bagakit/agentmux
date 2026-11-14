@@ -19,6 +19,7 @@ import { RuntimeController } from '../../src/main/runtime-controller'
 import { WorkbenchUserStateStore } from '../../src/main/workbench-user-state'
 
 const bridge = vi.hoisted(() => ({ api: null as AgentMuxPreloadApi | null,
+  publicCoreEndpointPath: undefined as string | undefined,
   directory: '', goals: new Map<string, { id: string }>(), invoke: vi.fn(), handlers: new Map<string, (...args: unknown[]) => unknown>(),
   listeners: new Map<string, Set<(...args: unknown[]) => void>>(),
   notesInitializations: new Set<Promise<unknown>>(), nativeDisposals: new Set<Promise<void>>() }))
@@ -60,14 +61,18 @@ vi.mock('@agentmux/native-desktop', async importOriginal => {
   } }
 })
 vi.mock('@agentmux/core', async importOriginal => ({ ...await importOriginal<typeof import('@agentmux/core')>(),
-  AgentMuxControlServer: class { async start() {} async stop() {} }
+  AgentMuxControlServer: class { readonly path = bridge.publicCoreEndpointPath; async start() {} async stop() {} }
 }))
 vi.mock('@agentmux/demand', () => ({ openDemandStore: () => ({ subscribe: () => () => {},
   get: async (id: string) => bridge.goals.get(id) ?? null,
   list: async () => [...bridge.goals.values()],
   recordParticipation: async (id: string) => { const goal = bridge.goals.get(id); if (!goal) throw Error('Unknown original fixture Goal'); return goal }
 }) }))
-vi.mock('../../src/main/browser-profile-manager', () => ({ BrowserProfileManager: class { async initialize() {} async dispose() {} onChange() { return () => {} } onEnvironmentApplicationChange() { return () => {} } profileOfSession() { return undefined } } }))
+vi.mock('../../src/main/browser-profile-manager', () => ({ BrowserProfileManager: class {
+  cookieFiles = { setFileOwner() {}, setConfirmationHandler() {} }
+  extensions = { setConfirmationHandler() {} }
+  async initialize() {} async dispose() {} onChange() { return () => {} } onEnvironmentApplicationChange() { return () => {} } profileOfSession() { return undefined }
+} }))
 vi.mock('@agentmux/browser/browser-operation-journal', () => ({ BROWSER_OPERATION_JOURNAL_FILE: 'private.json',
   BrowserOperationFileStore: class {}, BrowserOperationJournal: class { async ready() {} } }))
 vi.mock('@agentmux/browser/browser-ref-ledger-store', () => ({ BrowserRefLedgerStore: class {} }))
@@ -101,12 +106,14 @@ afterAll(async () => {
 
 export const control: AgentSessionControl = { kind: 'agent', hostId: 'local', agentSessionId: 'private-agent', run: { runId: 'old-run' } }
 
-export async function owningBridge(actual?: { client: DesktopRuntimeClient; store: AgentMuxAgentSessionStore; config: AppConfig; scratchTopics?: ScratchTopics; goals?: readonly { id: string }[] }, options?: { filesWorkspace?: boolean; scratchWorkspace?: boolean }) {
+export async function owningBridge(actual?: { client: DesktopRuntimeClient; store: AgentMuxAgentSessionStore; config: AppConfig; scratchTopics?: ScratchTopics; goals?: readonly { id: string }[]; publicCoreEndpointPath?: string; spatialStatePath?: string }, options?: { filesWorkspace?: boolean; scratchWorkspace?: boolean }) {
   const root = await mkdtemp(_hygiene_fixturePath("tmp/amux-first-execution-ipc-"))
   const previousInitializations = new Set(bridge.notesInitializations)
   isolateCoreFixtureEnvironment(actual ? dirname(actual.client.agentMessageQueuePath()) : root)
   if (actual) vi.stubEnv('AGENTMUX_MESSAGE_QUEUE_PATH', actual.client.agentMessageQueuePath())
+  if (actual?.spatialStatePath) vi.stubEnv('AGENTMUX_SPATIAL_STATE_STORE', actual.spatialStatePath)
   bridge.directory = root
+  bridge.publicCoreEndpointPath = actual?.publicCoreEndpointPath
   bridge.goals.clear(); for (const goal of actual?.goals ?? []) bridge.goals.set(goal.id, structuredClone(goal))
   await mkdir(join(root, 'Local Storage', 'leveldb'), { recursive: true })
   if (options?.scratchWorkspace) await mkdir(join(root, 'scratch'))
