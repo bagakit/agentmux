@@ -2564,6 +2564,8 @@ export class RuntimeController {
   private connectEndpointInBackground(hostId: string, client: AgentMuxClient): void {
     if (this.endpointConnections.has(client) || this.hosts.get(hostId)?.client !== client) return
     const connection = (async () => {
+      if ('sessionObservation' in client) this.publish(hostId, { type: 'session-observation-state',
+        observation: client.sessionObservation(), evidence: { source: 'agentmux', observedAt: Date.now() } })
       try {
         await client.connect()
         // The Hosted SDK confirms its consumer lease, not completion of Core recovery observation.
@@ -2571,6 +2573,9 @@ export class RuntimeController {
         if (this.hosts.get(hostId)?.client !== client) return
       } catch (error) {
         if (this.hosts.get(hostId)?.client !== client) return
+        // The Hosted directory owner already publishes its local failure and retry.
+        // A failed directory opening is not a control-connection observation.
+        if ('sessionObservation' in client) return
         const available = runtimeOwner(client)?.availability === 'connected'
         this.publish(hostId, { type: 'connection-state', state: available ? 'restored' : 'unrecoverable',
           observationOrigin: { kind: 'runtime-connection', boundary: 'consumer-core' },
@@ -2601,7 +2606,8 @@ export class RuntimeController {
       // route to connect first; this says nothing about other work on the remote.
       // Adopted identity, Sessions and original quiescence remain protected.
       if (host.config.kind === 'ssh' && !host.config.runtimeId &&
-          runtimeOwner(host.client) === null && host.client.agentSessions().length === 0) continue
+          runtimeOwner(host.client) === null &&
+          ('sessionObservation' in host.client && !host.client.sessionObservation().hasSnapshot || host.client.agentSessions().length === 0)) continue
       await host.client.connect()
       const runs = await host.client.listRuns()
       if (!nextSignatures.has(hostId)) {
@@ -3148,14 +3154,23 @@ export class RuntimeController {
     const hosts = [...this.hosts.values()]
     // A known exact route avoids unrelated handshakes. Its projection is only a hint:
     // confirm the nonsecret durable identity before sending the capability to its owner.
-    const known = hosts.filter(host => (host.config.kind !== 'ssh' || runtimeOwner(host.client)?.availability === 'connected') &&
-      host.client.agentSessions().some(session => session.agentSessionId === input.agentSessionId))
+    const known = hosts.filter(host => {
+      if ('sessionObservation' in host.client && !host.client.sessionObservation().hasSnapshot) return false
+      if (host.config.kind === 'ssh' && runtimeOwner(host.client)?.availability !== 'connected') return false
+      try { return host.client.agentSession(input.agentSessionId).agentSessionId === input.agentSessionId }
+      catch (error) {
+        if (error instanceof AgentMuxError && error.code === 'UNKNOWN_AGENT_SESSION') return false
+        throw error
+      }
+    })
     const scopes = known.length === 1 ? known : hosts
     const observed = await Promise.allSettled(scopes.map(async host => {
-      this.assertObservationHostConnection(host.config.id, host)
+      // A previously confirmed Hosted fence still admits an exact authority read
+      // when an independent identity refresh is unconfirmed. First adoption stays gated.
+      if (runtimeOwner(host.client) === null) this.assertObservationHostConnection(host.config.id, host)
       const ownerRuntimeId = runtimeOwner(host.client)?.runtimeId
-      const sessions = await host.client.readAgentSessions()
-      return { host, ownerRuntimeId, owns: sessions.some(session => session.hostId === 'local' && session.agentSessionId === input.agentSessionId) }
+      const session = await host.client.readAgentSession(input.agentSessionId)
+      return { host, ownerRuntimeId, owns: session?.hostId === 'local' && session.agentSessionId === input.agentSessionId }
     }))
     const owners = observed.flatMap(result => result.status === 'fulfilled' && result.value.owns ? [result.value] : [])
     if (owners.length > 1) {
@@ -3172,7 +3187,7 @@ export class RuntimeController {
       if (this.hosts.get(owner.host.config.id) !== owner.host || runtimeOwner(owner.host.client)?.runtimeId !== owner.ownerRuntimeId) {
         throw new AgentMuxError('The caller Host changed while resolving its owner. Read the original owner again.', 'RUNTIME_OWNER_MISMATCH')
       }
-      this.assertObservationHostConnection(owner.host.config.id, owner.host)
+      if (runtimeOwner(owner.host.client) === null) this.assertObservationHostConnection(owner.host.config.id, owner.host)
     }
     assertOwner()
     await owner.host.client.authorizeAgentCaller(input.capability, input.agentSessionId)
@@ -3334,6 +3349,24 @@ export class RuntimeController {
     if (toolkit) { toolkit(event); return }
     let warningChange: RuntimeEndpointWarning | null | undefined
     let endpointObservation: RuntimeEvent['endpointObservation']
+    if (event.type === 'session-observation-state') {
+      const step = 'Reading Session directory', key = JSON.stringify([hostId, step])
+      const diagnostic = event.observation.diagnostic
+      const warning: RuntimeEndpointWarning | null = event.observation.state === 'ready' ? null : {
+        ...endpointWarning(hostId, step, new AgentMuxError(diagnostic?.message ??
+          'The complete Session directory is not confirmed. Exact reads remain available.',
+        diagnostic?.code ?? 'HOSTED_SESSION_OBSERVATION_UNCONFIRMED')),
+        scope: 'observation', availability: this.hosts.has(hostId) && runtimeOwner(this.hosts.get(hostId)!.client)?.availability === 'connected'
+          ? 'connected' : 'unverified', evidence: event.evidence,
+        recovery: 'Refresh the original Host Session observation. Existing Sessions, accurate reads and pending operation receipts are retained.'
+      }
+      if (warning) this.observationWarnings.set(key, warning)
+      else this.observationWarnings.delete(key)
+      endpointObservation = { step, warning }
+      if (event.observation.state === 'ready' && this.endpointWarnings.get(hostId)?.step === 'Connecting to Runtime') {
+        this.endpointWarnings.delete(hostId); warningChange = null
+      }
+    }
     if (event.type === 'control-endpoint-state') {
       const step = CONTROL_ENDPOINT_PUBLICATION_STEP
       const key = JSON.stringify([hostId, step])

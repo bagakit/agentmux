@@ -34,6 +34,7 @@ export async function waitForDesktopHostConnection(client: Pick<DesktopRuntimeCl
       }
       signal.addEventListener('abort', cancel, { once: true })
       unsubscribe = client.onEvent(event => {
+        if (event.type === 'session-observation-state' && event.observation.state === 'ready') { confirm(); return }
         if (event.type !== 'connection-state') return
         if (event.state === 'restored') confirm()
         else if (event.state === 'unrecoverable' && event.observationOrigin.kind === 'runtime-connection' &&
