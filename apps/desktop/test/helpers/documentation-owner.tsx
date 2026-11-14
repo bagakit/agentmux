@@ -6,6 +6,6 @@ import { DocumentationOverlay } from '../../src/renderer/src/components/document
 export function DocumentationTestOwner({ children }: { children: ReactNode }) {
   const owner = useDocumentationOwner()
   return <DocumentationNavigation.Provider value={owner.navigation}>{children}
-    {owner.opening ? <DocumentationOverlay opener={owner.opening.opener} onClose={owner.close} /> : null}
+    {owner.opening ? <DocumentationOverlay target={owner.opening.target} opener={owner.opening.opener} onClose={owner.close} /> : null}
   </DocumentationNavigation.Provider>
 }

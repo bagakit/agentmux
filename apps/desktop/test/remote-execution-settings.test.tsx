@@ -11,6 +11,7 @@ import { settingsNavGroups, visibleSettingsSections } from '../src/renderer/src/
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
 import { composerDOM, composerSession } from './helpers/composer-dom-fixture'
+import { DocumentationTestOwner } from './helpers/documentation-owner'
 
 const dom = composerDOM()
 let config: AppConfig
@@ -34,7 +35,7 @@ beforeEach(async () => {
 })
 async function pane(active = true) {
   const Pane = remoteExecutionSettingsModule.Pane
-  await dom.render(<Pane config={config} active={active} onClose={close} onNavigate={() => {}} />)
+  await dom.render(<DocumentationTestOwner><Pane config={config} active={active} onClose={close} onNavigate={() => {}} /></DocumentationTestOwner>)
 }
 async function selectWork(selector: string) {
   const tab = dom.container.querySelector<HTMLButtonElement>('.remote-work-tasks [role=tab][aria-controls$="-existing"]')!
@@ -58,12 +59,6 @@ async function chooseField(label: string, value: string) {
 const chooseProject = (id: string) => chooseField('Working folder for this arrangement', id)
 async function startPreparation() {
   await act(async () => dom.container.querySelector<HTMLButtonElement>('.remote-work-tasks [role=tab][aria-controls$="-start"]')!.click())
-}
-async function toggleGuide(open: boolean) {
-  const guide = dom.container.querySelector<HTMLDetailsElement>('[data-settings-field="guide"]')
-  expect(guide).not.toBeNull()
-  await act(async () => { guide!.open = open; guide!.dispatchEvent(new Event('toggle')) })
-  return guide!
 }
 function guideText(content: string) {
   return content.replace(/^```[^\n]*$/gmu, '').replace(/^#{1,6} /gmu, '').replace(/^\|(?:\s*:?-+:?\s*\|)+\s*$/gmu, '').replace(/\|/gu, '').replace(/^\d+\. /gmu, '').replace(/^\s*- /gmu, '')
@@ -105,29 +100,22 @@ describe('Remote execution Settings', () => {
     expect(launch).not.toHaveBeenCalled(); expect(resume).not.toHaveBeenCalled(); expect(stop).not.toHaveBeenCalled()
     expect(observe).toHaveBeenCalled()
   })
-  it('expands the complete Core guide as read-only Markdown and hides it without creating, resuming or stopping work', async () => {
+  it('opens the complete Core guide in the original document reader without creating, resuming or stopping work', async () => {
     const launch = vi.spyOn(api.sessions, 'launchAgent'), resume = vi.spyOn(api.sessions, 'resume'), stop = vi.spyOn(api.sessions, 'stop')
-    const prepare = vi.spyOn(useAppStore.getState(), 'openLauncher')
-    const before = useAppStore.getState()
+    const prepare = vi.spyOn(useAppStore.getState(), 'openLauncher'), before = useAppStore.getState()
     await pane()
     expect(dom.container.querySelector('.remote-execution-guide__body')).toBeNull()
-    const guide = await toggleGuide(true)
-    const body = guide.querySelector<HTMLElement>('.remote-execution-guide__body')
+    await dom.click('[data-settings-field="guide"] button')
+    const body = document.querySelector<HTMLElement>('.documentation-guide')
     expect(body).not.toBeNull()
-    expect(body!.querySelector('.md-document')).not.toBeNull()
     expect(AGENT_EXECUTION_GUIDE.length).toBeGreaterThan(1000)
     expect(guideText(body!.textContent!)).toBe(guideText(AGENT_EXECUTION_GUIDE))
     const sourceHeadings = [...AGENT_EXECUTION_GUIDE.matchAll(/^## (.+)$/gmu)].map(match => match[1])
     expect(sourceHeadings.length).toBeGreaterThan(0)
     expect([...body!.querySelectorAll('.md-heading[data-level="2"]')].map(heading => heading.textContent)).toEqual(sourceHeadings)
     expect(body!.querySelector('button, a, [contenteditable="true"]')).toBeNull()
-    await toggleGuide(false)
-    expect(guide.querySelector('.remote-execution-guide__body')).toBeNull()
-    await toggleGuide(true); await pane(false)
-    expect(guide.open).toBe(true)
-    expect(guide.querySelector('.remote-execution-guide__body')).toBeNull()
-    await pane(true)
-    expect(guide.querySelector('.remote-execution-guide__body')).not.toBeNull()
+    await act(async () => document.querySelector<HTMLButtonElement>('[aria-label="Close documentation"]')!.click())
+    expect(document.querySelector('.documentation-dialog')).toBeNull()
     expect(useAppStore.getState().sessions).toBe(before.sessions)
     expect(useAppStore.getState().tabs).toBe(before.tabs)
     expect(useAppStore.getState().agentComposerDrafts).toBe(before.agentComposerDrafts)
@@ -135,17 +123,17 @@ describe('Remote execution Settings', () => {
     expect(resume).not.toHaveBeenCalled(); expect(stop).not.toHaveBeenCalled()
   })
 
-  it('resolves the real SettingsPanel guide deep link to the expanded original field', async () => {
+  it('resolves the real SettingsPanel guide deep link to the original documentation action', async () => {
     const launch = vi.spyOn(api.sessions, 'launchAgent'), stop = vi.spyOn(api.sessions, 'stop')
-    await dom.render(<SettingsPanel initialSection="remote-execution" navigationRequest={{ section: 'remote-execution', field: 'guide' }} onClose={close} />)
-    const guide = dom.container.querySelector<HTMLDetailsElement>('[data-settings-pane="remote-execution"] [data-settings-field="guide"]')
+    await dom.render(<DocumentationTestOwner><SettingsPanel initialSection="remote-execution" navigationRequest={{ section: 'remote-execution', field: 'guide' }} onClose={close} /></DocumentationTestOwner>)
+    const guide = dom.container.querySelector<HTMLElement>('[data-settings-pane="remote-execution"] [data-settings-field="guide"]')
     expect(guide).not.toBeNull()
-    expect(guide!.open).toBe(true)
-    expect(document.activeElement).toBe(guide)
     expect(guide!.dataset.settingsSearchHighlight).toBe('')
-    // Native details dispatches toggle after presentation; flush that event for happy-dom.
-    await act(async () => guide!.dispatchEvent(new Event('toggle')))
-    expect(guideText(guide!.querySelector('.remote-execution-guide__body')!.textContent!)).toBe(guideText(AGENT_EXECUTION_GUIDE))
+    expect(document.querySelector('.documentation-dialog')).toBeNull()
+    await act(async () => guide!.querySelector<HTMLButtonElement>('button')!.click())
+    const documentBody = document.querySelector('.documentation-guide')
+    expect(documentBody).not.toBeNull()
+    expect(guideText(documentBody!.textContent!)).toBe(guideText(AGENT_EXECUTION_GUIDE))
     expect(launch).not.toHaveBeenCalled(); expect(stop).not.toHaveBeenCalled()
   })
 
