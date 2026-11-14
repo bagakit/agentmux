@@ -6,7 +6,7 @@ import type { AgentInputMoteSource, AgentInputSubmissionReceipt, AgentMuxAgentSe
 import { randomClientRequestId } from '@agentmux/core/relay-hosted'
 import { agentPromptCondition, agentPromptNotApplied, validateAgentPromptCondition } from '@agentmux/core/prompt-condition'
 import { expandSemanticReferences } from '@agentmux/client-ui/composer-semantic-reference'
-import { projectInputReceipt } from '@agentmux/client-ui/input-receipt-projection'
+import { originalInputCanRejoin, projectInputReceipt } from '@agentmux/client-ui/input-receipt-projection'
 import { presentMessageDeliveryFailure } from '@agentmux/client-ui/message-delivery-presentation'
 import { ClientDeliveryDiagnostics, startDeliveryAttempt, type DeliveryAttemptSeed } from '@agentmux/client-ui/delivery-diagnostics'
 import { deliveryOutcome, errorMessage } from './delivery'
@@ -62,7 +62,7 @@ function originalPromptRequest(session: AgentMuxAgentSession | null | undefined,
 function originalPromptRefused(session: AgentMuxAgentSession | null | undefined, agentSessionId: string | null,
   attempt: PromptAttempt | undefined, runtimeId: string | null | undefined): boolean {
   if (attempt?.moteMain && attempt.mainRecord) return agentPromptSubmissionOutcome(attempt.mainRecord) === 'not-applied'
-  if (attempt?.manualInput && attempt.inputReceipt?.status === 'not-applied') return session?.agentSessionId === agentSessionId &&
+  if (attempt?.manualInput && attempt.inputReceipt?.persistence === 'confirmed' && attempt.inputReceipt.status === 'not-applied') return session?.agentSessionId === agentSessionId &&
     session.run.runId === attempt.manualInput.expectedRun.runId && session.hostId === attempt.originalHostId &&
     Boolean(runtimeId && runtimeId === attempt.manualInput.runtimeId)
   const request = attempt?.request, originalRuntime = request?.runtimeId ?? attempt?.originalRuntimeId
@@ -256,19 +256,22 @@ export function useMobilePromptController({ local, textDraft, isTextTargetCurren
     if (!mounted.current || attempts.current.get(key) !== original || !input || target.kind !== 'prompt' ||
         target.agentSessionId !== input.agentSessionId || target.expectedRun.runId !== input.expectedRun.runId ||
         target.submissionId !== original.operationId) return false
-    if (original.phase === 'confirmed' && !original.inputReceipt && next.status !== 'terminal-confirmed' && next.status !== 'admitted') {
-      throw Object.assign(new Error('当前读到的结果和这条消息之前的确认记录冲突，请核对发送结果。'), { code: 'CONTROL_REQUEST_CONFLICT' })
+    if (original.phase === 'confirmed' && !original.inputReceipt) {
+      if (next.persistence === 'observed') return true
+      if (next.status !== 'terminal-confirmed' && next.status !== 'admitted') {
+        throw Object.assign(new Error('当前读到的结果和这条消息之前的确认记录冲突，请核对发送结果。'), { code: 'CONTROL_REQUEST_CONFLICT' })
+      }
     }
     const receipt = projectInputReceipt(original.inputReceipt, next)
     if (receipt === original.inputReceipt && original.inputRequested === true) return true
     original.inputRequested = true
     original.inputReceipt = receipt
     const summary = presentMessageDeliveryFailure({ error: null, inputReceipt: receipt, inputStopReceipt: input.stopReceipt })
-    if (receipt.status === 'terminal-confirmed' || receipt.status === 'admitted') {
+    if (receipt.persistence === 'confirmed' && (receipt.status === 'terminal-confirmed' || receipt.status === 'admitted')) {
       confirmPrompt(key, original, summary.state)
       return true
     }
-    original.phase = receipt.status === 'not-applied' ? 'rejected' : 'unknown'
+    original.phase = receipt.persistence === 'confirmed' && receipt.status === 'not-applied' ? 'rejected' : 'unknown'
     original.message = `${summary.state} ${summary.action}`
     void local.save(); redraw(value => value + 1)
     return true
@@ -331,6 +334,51 @@ export function useMobilePromptController({ local, textDraft, isTextTargetCurren
       agentSessionId: original.manualInput!.agentSessionId, expectedRun: original.manualInput!.expectedRun })).input
       : mobileCapability(source, 'inspectAgentInput')({ key: manualKey(original) })
   }
+  function canMoveManualInputToDraft(original: PromptAttempt, target = session) {
+    const input = original.manualInput
+    return Boolean(input && target && input.runtimeId && client?.runtimeOwnerIdentity?.()?.runtimeId === input.runtimeId &&
+      input.agentSessionId === agentSessionId && target.agentSessionId === input.agentSessionId &&
+      target.hostId === original.originalHostId && target.run.runId !== input.expectedRun.runId &&
+      !textDraft && !moteSource && !moteMain && !original.moteSource && !original.moteMain && !original.textSource &&
+      !original.agentMuxNote && !original.admissionIntent && !original.movedToDraft && !original.inputReceipt &&
+      (original.phase === 'unknown' || original.phase === 'rejected'))
+  }
+  function moveManualInputToDraft(key: string, original: PromptAttempt) {
+    return protectPendingAction(key, 'retry', async action => {
+      if (!canMoveManualInputToDraft(original)) return
+      try {
+        const source = originalManualClient(original), input = original.manualInput!
+        const observed = await inspectOriginalManual(source, original)
+        if (action.cancelled || !mounted.current || attempts.current.get(key) !== original) return
+        if (observed) {
+          if (!observeInputReceipt(key, original, observed)) throw new Error('返回的是另一条消息的结果。原消息已保留。')
+          return
+        }
+        const target = await readSession(source, input.agentSessionId)
+        if (action.cancelled || !mounted.current || attempts.current.get(key) !== original ||
+            current.current.client !== source || current.current.agentSessionId !== input.agentSessionId ||
+            !canMoveManualInputToDraft(original, target) || isTextTargetCurrent && !isTextTargetCurrent()) return
+        const previous = drafts.current.get(draftKey) ?? ''
+        const body = previous === original.draft ? previous : [previous, original.draft].filter(Boolean).join('\n\n')
+        if (new TextEncoder().encode(body).byteLength > 65536) throw new Error('合并后超过草稿容量。原消息仍可复制。')
+        const retained = retainedPromptKey(input.agentSessionId, original.operationId)
+        original.movedToDraft = true
+        if (retained !== key) {
+          attempts.current.set(retained, original)
+          attempts.current.delete(key)
+        }
+        draftEdits.current++
+        drafts.current.set(draftKey, body)
+        action.dispatched = true
+        redraw(value => value + 1)
+        if (!await savePendingAction(action)) throw new Error('正文已移至当前草稿，设备保存仍未确认。')
+      } catch (error) {
+        if (!action.cancelled && mounted.current) setPreparationIssue({
+          client, sessionId: agentSessionId, message: errorMessage(error)
+        })
+      }
+    })
+  }
   async function retryManualInput(key: string, original: PromptAttempt, action: PendingInputAction) {
     try {
       const source = originalManualClient(original), input = original.manualInput!
@@ -339,14 +387,14 @@ export function useMobilePromptController({ local, textDraft, isTextTargetCurren
       if (observed && !observeInputReceipt(key, original, observed)) throw Object.assign(
         new Error('返回的是另一条消息的结果，没有采用。'), { code: 'CONTROL_PROTOCOL_ERROR' })
       if (attempts.current.get(key) !== original) return
-      if (observed && (observed.status !== 'stopped' && (observed.status !== 'waiting' ||
-          observed.observation !== 'rejoin-needed' && observed.control.waiting?.wake !== 'explicit-rejoin'))) return
+      if (original.movedToDraft || observed && !(originalInputCanRejoin(observed) ||
+          observed.status === 'stopped' && observed.persistence === 'confirmed')) return
       if (!observed && original.moteMain && original.inputRequested !== false) { original.message = '已核对，主对话消息仍没确认送达，不会重复发送。'; await local.save(); return }
       if (!await savePendingAction(action) || attempts.current.get(key) !== original) return
       if (action.cancelled) return
       const target = await readSession(source, input.agentSessionId)
       if (!mounted.current || action.cancelled || attempts.current.get(key) !== original) return
-      if (originalManualClient(original) !== source || target.run.runId !== input.expectedRun.runId ||
+      if (originalManualClient(original) !== source || !observed?.continuation && target.run.runId !== input.expectedRun.runId ||
           original.originalHostId && target.hostId !== original.originalHostId) throw Object.assign(
         new Error('这条消息所在的对话或 Mac 已改变，这次没有发送。'), { code: 'STALE_AGENT_SESSION' })
       const previousRequested = original.inputRequested
@@ -473,8 +521,7 @@ export function useMobilePromptController({ local, textDraft, isTextTargetCurren
     originalClient: MobileConversationClient | null, key: string, retry: boolean) {
     const ownerId = original.manualInput?.runtimeId ?? original.request?.runtimeId
     const owner = ownerId ? `runtime:${ownerId}` : diagnosticOwner(originalClient)
-    const settled = original.phase === 'confirmed' || original.inputReceipt?.status === 'terminal-confirmed' || original.inputReceipt?.status === 'admitted'
-    if (!settled && mounted.current && attempts.current.get(key) === original) {
+    if (original.phase !== 'confirmed' && mounted.current && attempts.current.get(key) === original) {
       original.phase = error instanceof MainPromptNotApplied ? 'rejected' : original.inputRequested === false ? 'rejected'
         : retry && original.phase !== 'rejected' ? 'unknown' : deliveryOutcome(error, 'prompt')
       original.message = errorMessage(error)
@@ -485,7 +532,7 @@ export function useMobilePromptController({ local, textDraft, isTextTargetCurren
     reportDiagnostics(originalClient)
     if (!mounted.current || attempts.current.get(key) !== original) return
     // A refusal of this click cannot settle an older unknown logical message.
-    if (original.phase === 'confirmed' || original.inputReceipt?.status === 'terminal-confirmed' || original.inputReceipt?.status === 'admitted') {
+    if (original.phase === 'confirmed') {
       original.logId = log.record.logId; local.save(); redraw(value => value + 1); return
     }
     original.phase = error instanceof MainPromptNotApplied ? 'rejected' : original.inputRequested === false ? 'rejected'
@@ -567,13 +614,13 @@ export function useMobilePromptController({ local, textDraft, isTextTargetCurren
     try { await protectUpdate(() => preparing.cancelled
       ? '发送准备已取消；设备保存仍未确认，请保留当前页面，恢复设备存储后再更新。'
       : '消息仍在发送，请等确认后再更新网页。', async allowUpdate => {
-      const refused = existing?.manualInput ? existing.inputReceipt?.status === 'not-applied'
+      const refused = existing?.manualInput ? existing.inputReceipt?.persistence === 'confirmed' && existing.inputReceipt.status === 'not-applied'
         : originalPromptRefused(session, agentSessionId, existing, client?.runtimeOwnerIdentity?.()?.runtimeId)
       if (originalBody && !refused) return
       // An identical unresolved input keeps its original identity, even after another
       // draft became active. A distinct explicit body is a new intent for Core to qualify.
       const unresolved = !originalBody && promptAttemptsForSession(attempts.current, agentSessionId, draftKey, client?.runtimeOwnerIdentity?.()?.runtimeId).find(([, value]) =>
-        value.phase === 'unknown' && expandSemanticReferences(value.draft) === expandSemanticReferences(body))
+        !value.movedToDraft && value.phase === 'unknown' && expandSemanticReferences(value.draft) === expandSemanticReferences(body))
       if (unresolved) {
         if (bodyOnly) { setPreparationIssue({ client, sessionId: agentSessionId, message: '同一正文已有一次还没确认的发送。请先核对那条消息的结果，这次不会重发。' }); return }
         endPreparation()
@@ -822,6 +869,7 @@ export function useMobilePromptController({ local, textDraft, isTextTargetCurren
     if (runtimeId && hostId && runId && sessionId) confirmedAttachmentPrompt = { operationId: attempt.operationId, body: attempt.draft, source: { runtimeId, hostId, sessionId, runId } }
   }
   return { draftKey, textDraftKey, draft, attempt, available, diagnostics, setDraft, submit, retryOriginalPrompt, stopManualInput,
+    canMoveManualInputToDraft, moveManualInputToDraft,
     confirmedAttachmentPrompt,
     sendBodyOnly: () => submit(true, undefined, draftKey, undefined, true),
     preparing: Boolean(preparingKeys.current.get(draftKey) && !preparingKeys.current.get(draftKey)!.cancelled),

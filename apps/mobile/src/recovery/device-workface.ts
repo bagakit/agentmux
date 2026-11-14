@@ -136,6 +136,7 @@ export function parseDraftRecord(value: unknown): DraftRecord {
     if (item && typeof item === 'object' && Object.hasOwn(item, 'moteMain')) keys.push('moteMain')
     if (item && typeof item === 'object' && Object.hasOwn(item, 'textSource')) keys.push('textSource')
     if (item && typeof item === 'object' && Object.hasOwn(item, 'admissionIntent')) keys.push('admissionIntent')
+    if (item && typeof item === 'object' && Object.hasOwn(item, 'movedToDraft')) keys.push('movedToDraft')
     const attempt = record(item, keys)
     if (!id(attempt.operationId) || !(attempt.runId === null || id(attempt.runId))
       || !body(attempt.draft) || !phase(attempt.phase)) throw invalid()
@@ -156,6 +157,9 @@ export function parseDraftRecord(value: unknown): DraftRecord {
     }
     if (attempt.inputRequested !== undefined && typeof attempt.inputRequested !== 'boolean') throw invalid()
     if (attempt.explicit !== undefined && typeof attempt.explicit !== 'boolean') throw invalid()
+    if (attempt.movedToDraft !== undefined && (attempt.movedToDraft !== true || !attempt.manualInput ||
+      attempt.moteMain !== undefined || attempt.moteSource !== undefined || attempt.agentMuxNote !== undefined ||
+      attempt.textSource !== undefined || attempt.admissionIntent !== undefined)) throw invalid()
     if (attempt.originalRuntimeId !== undefined && !(attempt.originalRuntimeId === null || id(attempt.originalRuntimeId))) throw invalid()
     if (attempt.originalHostId !== undefined && !(attempt.originalHostId === null || id(attempt.originalHostId))) throw invalid()
     if (attempt.manualInput !== undefined) {

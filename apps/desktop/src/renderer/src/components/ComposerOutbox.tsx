@@ -57,8 +57,19 @@ export type ComposerQueuedMessage = {
   confirmed?: boolean
 }
 
+export function queuedInputContinuationLabel(entry: ComposerQueuedMessage): string | undefined {
+  if (entry.inputReceipt?.persistence !== 'confirmed') return undefined
+  if (entry.inputReceipt.continuation === 'continue-handoff') return '继续原投递'
+  if (entry.inputReceipt.continuation === 'rejoin-wait') return '接回原等待'
+  return undefined
+}
+
 /** Labels describe the queue owner's facts, not native CLI rendering or model progress. */
 export function queuedMessageState(entry: ComposerQueuedMessage, pendingInteraction = false) {
+  if (entry.inputReceipt?.persistence === 'observed') return { label: '已读到原输入 · 保存未确认',
+    detail: '原记录仍可核对。保存确认和投递结果分别记录。', busy: Boolean(entry.preparing || entry.sending) }
+  if (!entry.archived && entry.inputReceipt?.continuation === 'continue-handoff') return { label: '可继续原投递',
+    detail: '继续时 Core 会核对原投递记录和接纳状态。', busy: Boolean(entry.preparing || entry.sending) }
   if (entry.inputReceipt?.status === 'launch-carried') return { label: entry.archived ? '已归档 · 恢复启动已携带消息' : '恢复启动已携带消息',
     detail: '恢复启动已携带原消息；Agent 是否接收尚未确认。归档不会撤回输入，不能恢复为待发重投。', busy: false }
   if (entry.resumeInputReceipt?.state === 'launch-carried') return { label: entry.archived ? '已归档 · 随恢复启动提交' : '随恢复启动提交',
@@ -118,6 +129,7 @@ export function queuedMessageState(entry: ComposerQueuedMessage, pendingInteract
 
 /** A retained queue record is not a submission receipt or a conversation position. */
 export function queuedMessageLocation(entry: ComposerQueuedMessage) {
+  if (entry.inputReceipt?.persistence === 'observed') return '已读到原记录，保存与对话位置待确认'
   if (entry.inputReceipt?.status === 'launch-carried') return '恢复启动已携带消息；Agent 是否接收与回复位置尚未确认'
   if (entry.resumeInputReceipt?.state === 'launch-carried') return '恢复启动参数已携带原消息；Native 采用与回复位置另行核对'
   if (entry.resumeInputReceipt?.state === 'not-applied') return 'Core 已确认原恢复输入未应用'
@@ -198,7 +210,8 @@ export function ComposerOutbox({ queued, selectedId, onSelect, onCopy, onArchive
         if (query && !entry.text.includes(query)) return null
         const selected = selectedId === entry.id, state = queuedMessageState(entry,pendingInteraction)
         const moveToDraft = entry.staleRunDraft || entry.errorCode === 'AGENT_PROMPT_CONDITION_CHANGED'
-        const launchCarried = entry.inputReceipt?.status === 'launch-carried'
+        const launchCarried = entry.inputReceipt?.persistence === 'confirmed' && entry.inputReceipt.status === 'launch-carried'
+        const continuation = queuedInputContinuationLabel(entry)
         const confirmed = entry.confirmed || launchCarried
         const canSend = !moveToDraft && !launchCarried && !entry.archived && !state.busy && editingId !== entry.id
         const ownFailure = failure?.id === entry.id && failure.text === entry.text ? failure.message : null
@@ -209,7 +222,7 @@ export function ComposerOutbox({ queued, selectedId, onSelect, onCopy, onArchive
             text={entry.text} metadata={<MailboxTime value={entry.enqueuedAt} />} source={entry.archived ? 'Archived original message' : 'Pending original message'}
             onOpen={(_key,event) => { if (!editingId) onSelect(entry.id,event) }} actions={<>
             {!moveToDraft && !launchCarried && !entry.archived && onSend ? <button key="send" type="button" className="composer-tool composer-outbox__send" disabled={!canSend}
-              aria-label={(entry.immediateSend ?? sendImmediately) ? 'Send queued message immediately' : 'Send queued message'} title={canSend ? '只发送这条原消息' : state.detail}
+              aria-label={continuation ?? ((entry.immediateSend ?? sendImmediately) ? 'Send queued message immediately' : 'Send queued message')} title={canSend ? continuation ?? '只发送这条原消息' : state.detail}
               onClick={() => onSend(entry.id)}><ThemeActionSubmitIcon size={14} /></button> : null}
             {onFill ? <MailboxDraftAction key={`fill:${entry.id}`} value={entry.text} onFill={() => onFill(entry.text)} /> : null}
             {moveToDraft && !entry.archived && onMoveToDraft ? <button type="button" className="composer-tool" disabled={state.busy || Boolean(editingId)} aria-label="移至草稿" title="退出待发队列并追加正文到草稿；保留原投递记录，不会发送" onClick={async () => {

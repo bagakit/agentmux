@@ -34,6 +34,8 @@ export type PromptAttempt = {
   originalHostId?: string | null
   explicit?: boolean
   logId?: string
+  /** The author explicitly recovered this text into the draft; original delivery remains queryable. */
+  movedToDraft?: true
 }
 export type ResponseAttempt = { phase: PromptAttempt['phase']; message: string;
   /** Live Core evidence. Cold readers inspect the original intent again. */
@@ -142,7 +144,8 @@ export function createLocalDrafts(storage?: () => Pick<Storage, 'getItem' | 'set
           ...(intent.inputRequested !== undefined ? { inputRequested: intent.inputRequested } : {}),
           ...(intent.originalRuntimeId !== undefined ? { originalRuntimeId: intent.originalRuntimeId } : {}),
           ...(intent.originalHostId !== undefined ? { originalHostId: intent.originalHostId } : {}),
-          ...(intent.explicit !== undefined ? { explicit: intent.explicit } : {})
+          ...(intent.explicit !== undefined ? { explicit: intent.explicit } : {}),
+          ...(intent.movedToDraft ? { movedToDraft: true as const } : {})
         }]), responses: [...responses].map(([key, intent]) => [key, { phase: intent.phase,
           ...(intent.original ? { original: structuredClone(intent.original) } : {}) }]),
         ...(questions.size ? { questions: [...questions].map(([key, intent]) => [key, structuredClone(intent)] as [string, MobileQuestionReplyAttempt]) } : {}),

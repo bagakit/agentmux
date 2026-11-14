@@ -41,6 +41,9 @@ export function presentMessageDeliveryFailure(input: MessageDeliveryDiagnostic) 
   const control = fields(failure?.controlFailure)
   const receipt = input.inputReceipt
   const status = receipt?.status ?? input.inputSubmission?.status
+  if (receipt?.persistence === 'observed') return { kind: 'unknown', title: '已读到原输入 · 保存未确认',
+    state: 'Core 读到了原记录，尚未确认它的耐久性。原消息和投递记录会保留。',
+    action: '可以再次核对原输入。' }
   // A terminal original-owner receipt resolves prior uncertainty. The old error remains in the report.
   if (status === 'launch-carried') return { kind: 'launch-carried', title: '恢复启动已携带消息',
     state: '恢复启动已携带原消息；Agent 是否接收尚未确认。', action: '可检查原输入与 Agent 回复；不会重新发送这条消息。' }
@@ -52,6 +55,9 @@ export function presentMessageDeliveryFailure(input: MessageDeliveryDiagnostic) 
     state: '这次输入尚未送达，原消息已保留。', action: '可重试这条消息。' }
   if (isOriginalInputWaitStopped(receipt, input.inputStopReceipt)) return { kind: 'stopped', title: '已停止等待',
     state: 'Core 已确认停止这一代等待，原消息保留。', action: '再次发送会重新确认这条原消息。' }
+  if (receipt?.continuation === 'continue-handoff') return { kind: 'saved-waiting', title: '可继续原投递',
+    state: 'Core 保留了原投递记录。继续时会重新核对原输入的接纳状态。',
+    action: '可明确继续同一次投递。' }
   const unknown = input.inputUnconfirmed || control?.disposition === 'unknown' ||
     typeof control?.confirmedInputBytes === 'number' && control.confirmedInputBytes > 0 ||
     status === 'unknown' || receipt && (receipt.admission !== null || receipt.control.state === 'dispatch-authorized')
@@ -133,6 +139,7 @@ export function messageDeliveryDiagnosticReport(input: MessageDeliveryDiagnostic
     `Core: ${receipt ? `status=${receipt.status}; persistence=${receipt.persistence}; control=${receipt.control.state}; observation=${receipt.observation}` : '未知'}`,
     `admission: ${receipt ? receipt.admission === null ? 'null（本回执无输入记录，不代签此前未输入）' : '收到原输入记录（实际层次见 status，完整字段见资料）' : '未知'}`]
   if (receipt?.control.deliveryKey) lines.push(`实际投递: ${JSON.stringify(receipt.control.deliveryKey)}`)
+  if (receipt?.continuation) lines.push(`可用的原操作续接: ${receipt.continuation}`)
   const dispatch = receipt?.admission?.admission
   if (dispatch) lines.push(`admission.admission: ${JSON.stringify({ transport: dispatch.transport,
     nativeOutcome: dispatch.native?.outcome, acknowledged: dispatch.acknowledged, notApplied: dispatch.notApplied,

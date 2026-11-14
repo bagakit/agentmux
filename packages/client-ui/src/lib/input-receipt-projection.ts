@@ -41,6 +41,17 @@ function receiptIdentity(record: NonNullable<AgentInputSubmissionReceipt['admiss
       : plan?.kind === 'payload-then-submit' ? [plan.payload, plan.payloadText, plan.submit, plan.minimumSubmitDelayMs] : undefined])
 }
 
+/** A client can request continuation only for the exact recorded input. Core rechecks its authority. */
+export function originalInputCanRejoin(receipt: AgentInputSubmissionReceipt): boolean {
+  return receipt.persistence === 'confirmed' && (receipt.continuation !== undefined ||
+    receipt.status === 'waiting' && (receipt.observation === 'rejoin-needed' || receipt.control.waiting?.wake === 'explicit-rejoin'))
+}
+
+export function originalInputDeliveryConfirmed(receipt: AgentInputSubmissionReceipt | undefined): boolean {
+  return receipt?.persistence === 'confirmed' &&
+    (receipt.status === 'admitted' || receipt.status === 'terminal-confirmed' || receipt.status === 'launch-carried')
+}
+
 const settled = (receipt: AgentInputSubmissionReceipt) =>
   receipt.status === 'admitted' || receipt.status === 'terminal-confirmed' || receipt.status === 'launch-carried' || receipt.status === 'not-applied'
 
@@ -69,7 +80,7 @@ export function projectInputReceipt(prior: AgentInputSubmissionReceipt | undefin
     phases.payload.operationId, phases.payload.inputByteRange.startByte, phases.payload.inputByteRange.endByte,
     phases.submit.operationId, phases.submit.inputByteRange.startByte, phases.submit.inputByteRange.endByte,
     phases.payloadConsumption?.sourceId, phases.payloadConsumption?.baselineId])
-  if (settled(prior) && settled(next) && prior.status !== next.status ||
+  if (prior.persistence === next.persistence && settled(prior) && settled(next) && prior.status !== next.status ||
       prior.control.state === 'dispatch-authorized' && next.control.state === 'dispatch-authorized' && prior.control.gateId !== next.control.gateId ||
       prior.admission && next.admission && receiptIdentity(prior.admission) !== receiptIdentity(next.admission) ||
       oldPhases && newPhases && phasesIdentity(oldPhases) !== phasesIdentity(newPhases) ||
@@ -83,12 +94,20 @@ export function projectInputReceipt(prior: AgentInputSubmissionReceipt | undefin
     throw Object.assign(new Error('Core observations conflict for this original input generation. Its original gate and admission remain retained; refresh the original input before another action.'),
       { code: 'CONTROL_REQUEST_CONFLICT' })
   }
+  if (settled(prior) && prior.persistence === 'confirmed' && next.persistence === 'observed') return prior
+  if (prior.persistence === 'observed' && next.persistence === 'confirmed') return next
   if (prior.admission && !next.admission || settled(prior) && next.status !== prior.status ||
       oldNative?.transport === 'native' && oldNative.native.turnId !== undefined && newNative?.transport === 'native' && newNative.native.turnId === undefined ||
       oldPhases && (!newPhases || oldPhases.payload.acknowledged && !newPhases.payload.acknowledged || oldPhases.submit.acknowledged && !newPhases.submit.acknowledged) ||
       oldPhases?.payloadConsumption?.receipt && !newPhases?.payloadConsumption?.receipt ||
       prior.control.state === 'dispatch-authorized' && next.control.state !== 'dispatch-authorized' ||
       prior.control.state === 'stopped-before-dispatch' && next.control.state !== 'stopped-before-dispatch' ||
-      prior.status === 'unknown' && (next.status === 'waiting' || next.status === 'stopped')) return prior
+      prior.status === 'unknown' && (next.status === 'waiting' || next.status === 'stopped')) {
+    if (next.persistence === 'observed' && !settled(prior)) {
+      const { continuation: _continuation, ...original } = prior
+      return { ...original, persistence: 'observed' }
+    }
+    return prior
+  }
   return next
 }

@@ -219,7 +219,7 @@ export function MobileConversationSurface({ client, agentSessionId, draftScope, 
   mainObservation.current = moteMain
   const moteMainIssue = moteDirectAgent ? undefined : mobileMoteMainInputIssue(moteDialogue?.page?.main, moteTarget, agentSessionId, Boolean(moteDialogue?.unavailable))
     ?? ((moteTarget || moteDirectAgent === false) && !moteMain ? '主对话角色还没核对。可以重新核对，或从 Threads 打开之前的 Agent。' : undefined)
-  const { draftKey, textDraftKey, draft, attempt, available, diagnostics, setDraft, submit, sendBodyOnly, confirmedAttachmentPrompt, retryOriginalPrompt, stopManualInput, preparing, preparationIssue, preparationDetail,
+  const { draftKey, textDraftKey, draft, attempt, available, diagnostics, setDraft, submit, sendBodyOnly, confirmedAttachmentPrompt, retryOriginalPrompt, stopManualInput, canMoveManualInputToDraft, moveManualInputToDraft, preparing, preparationIssue, preparationDetail,
     historyLocalEntries, retainedAttempts, sessionAttempts, promptWasRefused, hasAnyPreparation, isDispatchedPrompt, hasPendingAction, cancelPendingAction, cancelPreparation } = useMobilePromptController({ local, textDraft: composer?.text,
       isTextTargetCurrent: composer ? () => composer.sourceCurrent(composerSource) : undefined,
       client, agentSessionId, draftScope, moteSource, moteMain, moteMainIssue, moteDirectAgent, onRolloverRequired: onMoteRolloverRequired,
@@ -454,10 +454,15 @@ export function MobileConversationSurface({ client, agentSessionId, draftScope, 
     ...(reading.pageOwner?.hostId ? { executionHostId: reading.pageOwner.hostId } : {}),
     workspaceRoot: reading.pageOwner?.workspacePath ?? '', readHistoryResource: readNativeResource }
   const renderPromptAttempt = ([key, original]: [string, PromptAttempt]) => {
-    const waiting = original.inputReceipt?.control.waiting
+    const receipt = original.inputReceipt
+    const waiting = receipt?.control.waiting
+    const canStop = receipt?.persistence === 'confirmed' && receipt.status === 'waiting'
+    const canResend = receipt?.persistence === 'confirmed' && receipt.status === 'not-applied'
     const failure = waiting?.phase === 'native-environment' ? waiting.observation?.failure : waiting?.failure
+    const canMoveToDraft = canMoveManualInputToDraft(original)
     const signature = JSON.stringify([key, original.operationId, original.phase, original.phase === 'confirmed' ? original.logId ?? null : null,
-      original.inputReceipt?.status ?? null, original.inputReceipt?.ref.waitGeneration ?? null, original.manualInput?.stopReceipt?.cancelOperationId ?? null])
+      receipt?.status ?? null, receipt?.ref.waitGeneration ?? null, receipt?.persistence ?? null,
+      receipt?.continuation ?? null, original.manualInput?.stopReceipt?.cancelOperationId ?? null])
     const clearDismissedForOperation = () => updateDismissed(set => {
       for (const item of [...set]) if (item.includes(JSON.stringify(original.operationId))) set.delete(item)
     })
@@ -493,26 +498,31 @@ export function MobileConversationSurface({ client, agentSessionId, draftScope, 
               onRetry={original.phase === 'confirmed' ? undefined : () => { clearDismissedForOperation(); void retryOriginalPrompt(key) }}
               onDismiss={() => updateDismissed(set => set.add(signature))}
               copyText={text => platform.copyText(text, error => setCopyNotice(errorMessage(error)))} />}
-            {(original.inputReceipt?.status === 'waiting' || original.inputReceipt?.status === 'not-applied' || key !== draftKey || onShowTerminal) ? <div className="mobile-send-status__actions">
-              {original.inputReceipt?.status === 'waiting' ? <button type="button" onClick={() => { void stopManualInput(key, original) }}>
+            {(canStop || canResend || key !== draftKey || onShowTerminal) ? <div className="mobile-send-status__actions">
+              {canStop ? <button type="button" onClick={() => { void stopManualInput(key, original) }}>
                 {original.manualInput!.stopIntent && !original.manualInput!.stopReceipt ? '重试停止等待' : '停止等待'}</button> : null}
-              {original.inputReceipt?.status === 'not-applied' ? <button type="button" onClick={() => { clearDismissedForOperation(); void submit(true, original, key) }}>重新发送</button> : null}
+              {canResend ? <button type="button" onClick={() => { clearDismissedForOperation(); void submit(true, original, key) }}>重新发送</button> : null}
               {key !== draftKey ? <button type="button" onClick={() => { void platform.copyText(original.draft, error => setCopyNotice(errorMessage(error))) }}>复制正文</button> : null}
               {onShowTerminal ? <button type="button" onClick={onShowTerminal}>终端</button> : null}
             </div> : null}
           </> : <>
           <div className="mobile-send-status__summary">
-            <span>{original.phase === 'sending' ? '正在发送…' : key !== draftKey
+            <span>{original.phase === 'sending' ? '正在发送…' : original.movedToDraft ? '正文已移至草稿 · 原投递待核对'
+              : canMoveToDraft ? '消息绑定的 Run 已变更'
+              : key !== draftKey
               ? original.phase === 'unknown' ? '之前的消息还没确认送达' : '之前的消息没有发送'
               : original.phase === 'unknown' ? '发送结果未确认 · 草稿已保留' : '尚未发送 · 草稿已保留'}</span>
             {original.phase !== 'sending' ? <div className="mobile-send-status__actions">
-              <button type="button" onClick={() => { clearDismissedForOperation(); void retryOriginalPrompt(key) }}>{original.moteMain ? '核对主对话消息' : promptWasRefused(original) ? '重新发送' : key === draftKey ? '重试发送' : '重试这条消息'}</button>
+              {canMoveToDraft ? <button type="button" disabled={hasPendingAction(key, 'retry')} onClick={() => { clearDismissedForOperation(); void moveManualInputToDraft(key, original) }}>移至草稿</button>
+                : <button type="button" onClick={() => { clearDismissedForOperation(); void retryOriginalPrompt(key) }}>{original.movedToDraft ? '核对原输入' : original.moteMain ? '核对主对话消息' : promptWasRefused(original) ? '重新发送' : key === draftKey ? '重试发送' : '重试这条消息'}</button>}
               <button type="button" onClick={() => { void reading.refresh() }}>刷新</button>
               <button type="button" className="mobile-send-status__dismiss" aria-label="关闭操作说明" title="关闭操作说明" onClick={() => updateDismissed(set => set.add(signature))}>收起</button>
             </div> : null}
           </div>
           {original.phase !== 'sending' ? <details className="mobile-send-status__diagnosis"><summary>发送详情</summary>
-            <p>{original.moteMain ? '核对只查询这次发送的结果，不会改发给新的主 Agent。' : original.phase === 'unknown' ? 'Mac 尚未确认这次发送；正文已保留。核对后可重试同一次请求。' : '这条消息尚未发送；正文已保留，可核对原因后重试。'}</p>
+            <p>{original.movedToDraft ? '原投递结果仍可核对，编辑器中的草稿可另行发送。'
+              : canMoveToDraft ? '移至草稿前会核对原输入。移动正文会保留原投递记录。'
+              : original.moteMain ? '核对只查询这次发送的结果，不会改发给新的主 Agent。' : original.phase === 'unknown' ? 'Mac 尚未确认这次发送；正文已保留。核对后可重试同一次请求。' : '这条消息尚未发送；正文已保留，可核对原因后重试。'}</p>
             <details><summary>消息正文</summary><pre>{original.draft}</pre>
               <button type="button" onClick={() => { void platform.copyText(original.draft, error => setCopyNotice(`正文没有复制：${errorMessage(error)}`))
                 .then(copied => { if (copied) setCopyNotice('已复制正文。') }) }}>复制正文</button>

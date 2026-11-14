@@ -31,6 +31,7 @@ import {
 } from '../lib/composer-history'
 import { ComposerResubmitGuard } from '../lib/composer-resubmit-guard'
 import { useAppStore, agentSteerCanEdit, agentSteerExecution, staleManualSteerDraftKey, type AgentSteerQueueEntry } from '../store'
+import { originalInputDeliveryConfirmed } from '@agentmux/client-ui/input-receipt-projection'
 import { steerEntryTargetsRun, steerEntryWakesItself, steerQueueCanEverDrain } from '../lib/agent-steer-queue-drain'
 import { copyTextToClipboard } from '../lib/clipboard-copy'
 import { AgentComposer, type AgentComposerProps } from '@agentmux/client-ui/components/AgentComposer'
@@ -418,7 +419,7 @@ export function AgentSessionComposer({
     text: entry.text,
     ...(entry.archived ? { archived: true as const } : {}),
     inputControlled: Boolean(entry.directInputBinding || entry.resumeInputIntent),
-    confirmed: Boolean(entry.resumeInputReceipt && ['launch-carried', 'terminal-confirmed'].includes(entry.resumeInputReceipt.state)) || (entry.inputReceipt?.status === 'admitted' || entry.inputReceipt?.status === 'terminal-confirmed' || entry.inputReceipt?.status === 'launch-carried') || !entry.directInputBinding && Boolean(confirmedSteerDelivery(timeline, control, entry.operationId)),
+    confirmed: Boolean(entry.resumeInputReceipt && ['launch-carried', 'terminal-confirmed'].includes(entry.resumeInputReceipt.state)) || originalInputDeliveryConfirmed(entry.inputReceipt) || !entry.directInputBinding && Boolean(confirmedSteerDelivery(timeline, control, entry.operationId)),
     ...(entry.inputReceipt ? { inputReceipt: entry.inputReceipt } : {}),
     ...(entry.resumeInputReceipt ? { resumeInputReceipt: entry.resumeInputReceipt } : {}),
     ...(entry.inputStopReceipt ? { inputStopReceipt: entry.inputStopReceipt } : {}),
@@ -428,7 +429,7 @@ export function AgentSessionComposer({
     immediateSend: capabilities !== undefined && agentSteerExecution(entry, capabilities) === 'immediate',
     preparing: !entry.archived && entry.operationId === sendingId && sendingPhase !== 'submitting',
     sending: !entry.archived && entry.operationId === sendingId && sendingPhase === 'submitting',
-    unconfirmed: entry.resumeInputReceipt ? !['launch-carried', 'terminal-confirmed', 'not-applied'].includes(entry.resumeInputReceipt.state) : entry.inputReceipt ? entry.inputReceipt.status === 'unknown'
+    unconfirmed: entry.resumeInputReceipt ? !['launch-carried', 'terminal-confirmed', 'not-applied'].includes(entry.resumeInputReceipt.state) : entry.inputReceipt ? entry.inputReceipt.persistence === 'observed' || entry.inputReceipt.status === 'unknown'
       : Boolean(entry.inputIntakeStarted) || entry.promptCondition !== null && !entry.preparationInputNotApplied && (entry.status === 'deferred' || entry.status === 'failed'),
     ...(entry.awaitingExplicitSend ? { awaitingExplicitSend: true as const } : {}),
     wakesItself: runId !== undefined && steerEntryWakesItself(entry, runId),
