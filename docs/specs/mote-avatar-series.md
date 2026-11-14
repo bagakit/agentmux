@@ -1,6 +1,6 @@
 # Mote 头像系列来源合同
 
-本文是头像系列来源与 Mote 头像读写的公共数据合同：来源目录与声明格式、`space.mote.avatar.*` 方法的输入与回执，以及单次输入的资源边界。行为归[《Mote 头像与主 Mote》](../design/behavior/motes-and-coordination.md#mote-头像与主-mote)，呈现归[同名呈现专题](../design/presentation/motes-and-coordination.md#mote-头像与主-mote)。可执行的类型与严格 codec 是 [mote-avatar-series.ts](../../packages/core/src/mote-avatar-series.ts) 与 [mote-avatar-write.ts](../../packages/core/src/mote-avatar-write.ts)；来源准备归 Desktop [Main](../../apps/desktop/src/main/mote-avatar-series.ts)，已保存的选择经[原生 writer](../../apps/desktop/src/main/mote-avatar-writer.ts) 交给各原 owner。命令参数以所运行版本的 `amux space mote avatar --help` 为准。
+本文是头像系列来源与 Mote 头像读写的公共数据合同：来源目录与声明格式、`space.mote.avatar.*` 方法的输入与回执，以及单次输入的资源边界。行为归[《Mote 头像与主 Mote》](../design/behavior/motes-and-coordination.md#mote-头像与主-mote)，呈现归[同名呈现专题](../design/presentation/motes-and-coordination.md#mote-头像与主-mote)。可执行的类型与严格 codec 是 [mote/avatar-series.ts](../../packages/core/src/mote/avatar-series.ts) 与 [mote/avatar-write.ts](../../packages/core/src/mote/avatar-write.ts)；来源准备归 Desktop [Main](../../apps/desktop/src/main/mote-avatar-series.ts)，已保存的选择经[原生 writer](../../apps/desktop/src/main/mote-avatar-writer.ts) 交给各原 owner。命令参数以所运行版本的 `amux space mote avatar --help` 为准。
 
 ## 来源与声明
 
@@ -16,7 +16,7 @@
 | `kind` | 字段 | 含义 |
 | --- | --- | --- |
 | `image` | `file` | 同一目录内的图片文件 |
-| `face2d` | `face` | 现有纯数据的[二维脸型 schema](../../packages/core/src/mote-face.ts)（`shape`、`palette`、`eyes`、`brows`、`mouth`、`accessory` 等） |
+| `face2d` | `face` | 现有纯数据的[二维脸型 schema](../../packages/core/src/mote/face.ts)（`shape`、`palette`、`eyes`、`brows`、`mouth`、`accessory` 等） |
 | `glb` | `file`、可选的 `materials`、`morphs`、`framing` | 自包含的 GLB 模型 |
 
 - `materials` 的每项为 `{index, role}`，绑定原生材质索引；`morphs` 的每项为 `{id, label, meshIndex, targetIndex}`，绑定原生 mesh 与 morph target 索引；`framing.nodeIndex` 选择取景所用的原模型节点。未声明的可选控件不出现。索引必须真实存在于该模型中；名字与 label 只是显示文本。
