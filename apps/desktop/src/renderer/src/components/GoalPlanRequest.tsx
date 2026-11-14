@@ -2,13 +2,14 @@ import { useEffect, useRef, useState } from 'react'
 import type { DemandProjection } from '../lib/global-demand-board'
 import { useAppStore, retainGoalPlanRequest } from '../store'
 import { goalDiscussionRequestKey } from '../lib/goal-discussion-request'
-import { useGoalAgentPresentation } from '../lib/goal-discussion-recipient'
+import { goalRequestFirstDestination, useGoalAgentPresentation } from '../lib/goal-discussion-recipient'
 import { api } from '../lib/api'
 import { applyGoalDelegationResult, beginGoalDelegationRead, refreshGoalDelegations } from '../lib/goal-delegation-work'
-import { requestAgentConversationFloatingOpen } from '../lib/pmo-teams-topic-floating'
-import { mintObjectId } from '@agentmux/core/object-id'
+import { bindAgentConversationFloatingTarget, readPmoTeamsTopicFloatingState, requestAgentConversationFloatingOpen, setAgentConversationFloatingMessage } from '../lib/pmo-teams-topic-floating'
+import { deriveObjectId, mintObjectId } from '@agentmux/core/object-id'
 import { GoalAgentPicker, type GoalRelationSave } from './GoalAgentPicker'
 import { agentSessionPresentationIndex } from '../lib/session-presentation'
+import { goalSupervisorHostWitnesses } from '@agentmux/demand/relations'
 
 type Goal = DemandProjection
 const labels = { prepared: 'Planning request saved', delivered: 'Delivered · waiting for a saved plan', missing: 'Planning request saved · Supervisor unavailable',
@@ -24,12 +25,17 @@ export function GoalPlanRequest({ demand, onRequest, pending, busy }: { demand: 
   const requests = (demand.patrols ?? []).filter(item => item.purpose === 'plan')
   const original = requests.find(item => item.operationId === retained?.requestId || item.requestOperationIds?.includes(retained?.requestId ?? '')) ?? requests.at(-1)
   const observed = original && demand.patrolObservations?.find(item => item.operationId === original.operationId)
-  const attempt = original?.attempts.at(-1), target = original?.supervisorAgentSessionId ?? demand.supervisorSessionId
-  const presentation = useGoalAgentPresentation(original && !attempt ? null : target, attempt?.target.hostId)
-  const currentPresentation = useGoalAgentPresentation(demand.supervisorSessionId)
+  const attempt = original?.attempts.at(-1), target = attempt?.target.agentSessionId ?? original?.supervisorAgentSessionId ?? demand.supervisorSessionId
+  const supervisorHosts = goalSupervisorHostWitnesses(demand), currentHostId = supervisorHosts.length === 1 ? supervisorHosts[0] : undefined
+  const targetHostId = original ? attempt?.target.hostId : currentHostId
+  const presentation = useGoalAgentPresentation(target, targetHostId)
+  const currentPresentation = useGoalAgentPresentation(demand.supervisorSessionId, currentHostId)
+  const firstDestination = goalRequestFirstDestination(demand, original)
+  const firstPresentation = useGoalAgentPresentation(firstDestination?.agentSessionId, firstDestination?.hostId)
+  const firstHostName = useAppStore(state => firstDestination ? state.config?.hosts.find(host => host.id === firstDestination.hostId)?.label ?? firstDestination.hostId : null)
   const currentRun = useAppStore(state => {
-    const matches = (target ? agentSessionPresentationIndex(state.sessions).get(target) ?? [] : []).filter(item => item.control.agentSessionId === target &&
-      (!attempt || item.control.hostId === attempt.target.hostId))
+    const matches = (target && targetHostId ? agentSessionPresentationIndex(state.sessions).get(target) ?? [] : []).filter(item => item.control.agentSessionId === target &&
+      item.control.hostId === targetHostId && item.hostId === targetHostId)
     return matches.length === 1 && matches[0]?.kind === 'agent' ? matches[0].control.run.runId : null
   })
   useEffect(() => {
@@ -56,6 +62,22 @@ export function GoalPlanRequest({ demand, onRequest, pending, busy }: { demand: 
   const canContinue = original && original.supervisorAgentSessionId === demand.supervisorSessionId && !original.attempts.some(item => item.attemptedAt) &&
     currentRun && (!attempt || attempt.target.runId !== currentRun)
   const newRequest = original && observed?.state === 'stale' || retained && !original
+  async function sendFirstDestination() {
+    if (!original || !firstDestination) return
+    const entry = requestAgentConversationFloatingOpen(null, undefined, 'Confirming this planning request’s first Supervisor destination.')
+    try {
+      const cut = beginGoalDelegationRead()
+      const result = await api.demands.delegation('goal.patrol.continue', { goalId: demand.id, patrolOperationId: original.operationId,
+        operationId: deriveObjectId('goal-plan-first-destination', JSON.stringify([demand.id, original.operationId, firstDestination.hostId, firstDestination.agentSessionId, firstDestination.runId])), expectedRunId: firstDestination.runId })
+      applyGoalDelegationResult(result, cut)
+      const target = result.patrols?.find(item => item.operationId === original.operationId)?.attempts.at(-1)?.target
+      if (target) bindAgentConversationFloatingTarget(entry, target.agentSessionId, target.hostId)
+    } catch (error) {
+      const floating = readPmoTeamsTopicFloatingState()
+      if (floating?.conversationEntry === entry) setAgentConversationFloatingMessage(floating.agentTarget?.agentSessionId ?? null, error instanceof Error ? error.message : String(error), entry)
+      throw error
+    }
+  }
   return <div className="goal-plan__request" data-goal-plan-request-feedback>
     {!demand.supervisorSessionId ? <>
       <p className="goals-muted">Choose a Supervisor to make this plan.</p>
@@ -69,14 +91,18 @@ export function GoalPlanRequest({ demand, onRequest, pending, busy }: { demand: 
       {newRequest && demand.supervisorSessionId ? <button type="button" className="small-button" disabled={working || pending} onClick={() => void run(async () => {
         await useAppStore.getState().requestDemandPmoTask(demand.id, 'plan', { newRequest: true })
       })}>New request to {currentPresentation.name ?? 'current Supervisor'}</button> : null}
-      {target ? <button type="button" className="small-button" onClick={() => requestAgentConversationFloatingOpen(original ? attempt?.target.agentSessionId ?? null : target,
-        original ? attempt?.target.hostId : presentation.hostId ?? undefined, original && !attempt ? 'The original Supervisor destination is unconfirmed. Check the retained request to read its destination.' : undefined)}>
+      {target ? <button type="button" className="small-button" onClick={() => requestAgentConversationFloatingOpen(targetHostId ? target : null,
+        targetHostId, targetHostId === undefined ? 'The original Supervisor destination is unconfirmed. Check the retained request to read its destination.' : undefined)}>
         Open {presentation.name ?? 'Supervisor'} conversation</button> : null}
       {canContinue ? <button type="button" className="small-button" disabled={working} onClick={() => void run(async () => {
         const cut = beginGoalDelegationRead()
         applyGoalDelegationResult(await api.demands.delegation('goal.patrol.continue', { goalId: demand.id, patrolOperationId: original.operationId,
           operationId: mintObjectId(), expectedRunId: currentRun }), cut)
       })}>Continue original planning request</button> : null}
+    </div> : null}
+    {firstDestination ? <div className="goals-inline-actions">
+      <button type="button" className="small-button" disabled={working || pending || busy} onClick={() => void run(sendFirstDestination)}>Send planning request</button>
+      <span className="goals-caption" title={`Host ${firstDestination.hostId} · Session ${firstDestination.agentSessionId} · Run ${firstDestination.runId}`}>First send to {firstPresentation.name ?? 'the current Supervisor'} on {firstHostName}.</span>
     </div> : null}
     {observed ? <p className="goals-service" role="status"><strong>{labels[observed.state]}</strong><span>{observed.reason}</span></p>
       : original ? <p className="goals-caption" role="status">Planning request saved. Reading its original input receipt…</p>

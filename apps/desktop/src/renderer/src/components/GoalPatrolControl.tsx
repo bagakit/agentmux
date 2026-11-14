@@ -1,11 +1,12 @@
-import { useGoalAgentName } from '../lib/goal-discussion-recipient'
+import { goalRequestFirstDestination, useGoalAgentName } from '../lib/goal-discussion-recipient'
 import { useRef, useState } from 'react'
 import type { DemandRecord } from '../lib/global-demand-board'
 import { api } from '../lib/api'
 import { applyGoalDelegationResult, beginGoalDelegationRead, refreshGoalDelegations } from '../lib/goal-delegation-work'
 import { useAppStore } from '../store'
 import { GoalAgentPicker, type GoalRelationSave } from './GoalAgentPicker'
-import { requestAgentConversationFloatingOpen, setAgentConversationFloatingMessage } from '../lib/pmo-teams-topic-floating'
+import { bindAgentConversationFloatingTarget, readPmoTeamsTopicFloatingState, requestAgentConversationFloatingOpen, setAgentConversationFloatingMessage } from '../lib/pmo-teams-topic-floating'
+import { goalSupervisorHostWitnesses } from '@agentmux/demand/relations'
 
 async function operation(kind: string, original: readonly unknown[]): Promise<string> {
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(JSON.stringify([kind, ...original])))
@@ -21,75 +22,109 @@ export function GoalPatrolControl({ demand, compact = false, embedded = false, p
   const patrol = demand.patrols?.filter(item => item.purpose !== 'plan').at(-1), observed = patrol && demand.patrolObservations?.find(item => item.operationId === patrol.operationId)
   const pending = Boolean(patrol && !patrol.report && observed?.state !== 'stale')
   const manager = demand.responsibility?.supervisor, attempt = patrol?.attempts.at(-1)
-  const targetSessionId = pending ? patrol?.supervisorAgentSessionId ?? null : demand.supervisorSessionId ?? manager?.agentSessionId ?? null
-  const targetHostId = attempt?.target.agentSessionId === targetSessionId ? attempt.target.hostId : manager?.agentSessionId === targetSessionId ? manager.hostId : undefined
+  const targetSessionId = pending ? attempt?.target.agentSessionId ?? patrol?.supervisorAgentSessionId ?? null : demand.supervisorSessionId ?? manager?.agentSessionId ?? null
+  const supervisorHosts = goalSupervisorHostWitnesses(demand)
+  const targetHostId = pending ? attempt?.target.hostId : (manager?.agentSessionId === targetSessionId ? manager.hostId : undefined) ??
+    (targetSessionId === demand.supervisorSessionId && supervisorHosts.length === 1 ? supervisorHosts[0] : undefined)
   const targetName = useGoalAgentName(targetSessionId, targetHostId)
+  const firstDestination = goalRequestFirstDestination(demand, pending ? patrol : undefined)
+  const firstName = useGoalAgentName(firstDestination?.agentSessionId, firstDestination?.hostId)
+  const firstHostName = useAppStore(state => firstDestination ? state.config?.hosts.find(host => host.id === firstDestination.hostId)?.label ?? firstDestination.hostId : null)
   const latestReport = [...demand.patrols ?? []].reverse().find(item => item.purpose !== 'plan' && item.report)
   const entryContext = { kind: 'goal-patrol' as const, goalId: demand.id, scope: demand.responsibility?.scope ?? null,
     afterReportOperationId: latestReport?.report?.operationId ?? null }
   const attention = demand.responsibility?.executions.some(row => row.alert !== null) || Boolean(demand.responsibility?.executions.length && manager && !['available', 'busy'].includes(manager.state))
   if (!attention && !patrol) return null
+  function setEntryMessage(entry: number, message?: string) {
+    const floating = readPmoTeamsTopicFloatingState()
+    if (floating?.conversationEntry === entry) setAgentConversationFloatingMessage(floating.agentTarget?.agentSessionId ?? null, message, entry)
+  }
+  function bindOriginalTarget(entry: number, original: typeof patrol) {
+    const target = original?.attempts.at(-1)?.target
+    if (target) bindAgentConversationFloatingTarget(entry, target.agentSessionId, target.hostId)
+  }
+  async function readOriginal(entry: number) {
+    await refreshGoalDelegations(demand.id)
+    bindOriginalTarget(entry, useAppStore.getState().demands[demand.id]?.patrols?.find(item => item.operationId === patrol?.operationId))
+  }
   async function run(action: () => Promise<void>, expectedEntry?: number) {
     if (flight.current) return
     flight.current = true; const goalId = demand.id; setBusy(true); setIssue(null)
     try { await action() }
     catch (e) { const message = (e instanceof Error ? e.message : String(e)) + ' 原请求与工作保留；读取原巡查核对。'
-      if (expectedEntry !== undefined) setAgentConversationFloatingMessage(targetSessionId, message, expectedEntry)
+      if (expectedEntry !== undefined) setEntryMessage(expectedEntry, message)
       if (scope.current === goalId) setIssue(message) }
     finally { flight.current = false; if (scope.current === goalId) setBusy(false); void refreshGoalDelegations(goalId) }
   }
   async function request(expectedEntry: number) {
     const goalId = demand.id, basis = demand.responsibility?.scope
-    if (!basis) { const message = '执行责任依据尚未确认，尚未提交巡查；正在读取原执行责任，请核对后再试。'; setIssue(message); setAgentConversationFloatingMessage(targetSessionId, message, expectedEntry); return }
+    if (!basis) { const message = '执行责任依据尚未确认，尚未提交巡查；正在读取原执行责任，请核对后再试。'; setIssue(message); setEntryMessage(expectedEntry, message); return }
     const operationId = await operation('goal-patrol-request', [goalId, basis, patrol?.report?.operationId ?? null]), cut = beginGoalDelegationRead()
     const result = await api.demands.delegation('goal.patrol', { goalId, operationId })
     applyGoalDelegationResult(result, cut)
     const saved = result.patrols?.find(item => item.purpose !== 'plan' && item.operationId === operationId) ?? result.patrols?.find(item => item.purpose !== 'plan' && !item.report && item.expectedScope === basis)
+    bindOriginalTarget(expectedEntry, saved)
     // This click explicitly starts work. Only an authoritative ended original Run
     // may use the existing same-Session Core recovery, and only never-attempted input continues.
     if (manager?.state === 'ended' && saved?.supervisorAgentSessionId === targetSessionId && !saved.report && !saved.attempts.some(item => item.attemptedAt)) {
-      const state = useAppStore.getState(), originals = state.sessions.filter(session => session.kind === 'agent' && session.control.agentSessionId === targetSessionId && (!targetHostId || session.control.hostId === targetHostId))
+      const state = useAppStore.getState(), originals = targetHostId && manager.hostId === targetHostId && manager.runId ? state.sessions.filter(session => session.kind === 'agent' && session.control.agentSessionId === targetSessionId &&
+        session.hostId === targetHostId && session.control.hostId === targetHostId && session.control.run.runId === manager.runId) : []
       const original = originals.length === 1 ? originals[0] : undefined
-      if (!original || original.kind !== 'agent') { setAgentConversationFloatingMessage(targetSessionId, '原管理 Run 已结束；原 Session 恢复元数据尚未确认。请求与工作面保留，请读取原 Session 后接续原巡查。', expectedEntry); return }
-      setAgentConversationFloatingMessage(targetSessionId, '原管理 Run 已结束，正在通过 Core 恢复同一 Session；巡查尚未投递。', expectedEntry)
+      if (!original || original.kind !== 'agent') { setEntryMessage(expectedEntry, '原管理 Run 已结束；原 Session 恢复元数据尚未确认。请求与工作面保留，请读取原 Session 后接续原巡查。'); return }
+      setEntryMessage(expectedEntry, '原管理 Run 已结束，正在通过 Core 恢复同一 Session；巡查尚未投递。')
       const recoveryId = await operation('goal-patrol-resume', [goalId, saved.operationId, original.control.run.runId])
       const recovered = await state.recoverSession(original.id, recoveryId, { preserveView: true })
       if (!recovered || recovered.kind !== 'agent' || recovered.control.agentSessionId !== targetSessionId || recovered.control.hostId !== original.control.hostId ||
         recovered.processState !== 'running' || recovered.control.run.runId === original.control.run.runId) {
-        setAgentConversationFloatingMessage(targetSessionId, '原 Session 的恢复尚未确认。原请求与工作面保留；读取原恢复状态后接续，未重投任何原输入。', expectedEntry); return
+        setEntryMessage(expectedEntry, '原 Session 的恢复尚未确认。原请求与工作面保留；读取原恢复状态后接续，未重投任何原输入。'); return
       }
       const continuationId = await operation('goal-patrol-continue', [goalId, saved.operationId, recovered.control.run.runId]), continuationCut = beginGoalDelegationRead()
       applyGoalDelegationResult(await api.demands.delegation('goal.patrol.continue', { goalId, patrolOperationId: saved.operationId,
         operationId: continuationId, expectedRunId: recovered.control.run.runId }), continuationCut)
     }
-    setAgentConversationFloatingMessage(targetSessionId, undefined, expectedEntry)
+    setEntryMessage(expectedEntry)
   }
   async function continueOriginal() {
-    if (!patrol || !manager?.runId || manager.agentSessionId !== patrol.supervisorAgentSessionId) return
+    if (!patrol || !manager?.runId || manager.agentSessionId !== patrol.supervisorAgentSessionId || manager.agentSessionId !== targetSessionId || !targetHostId || manager.hostId !== targetHostId) return
     const operationId = await operation('goal-patrol-continue', [demand.id, patrol.operationId, manager.runId]), cut = beginGoalDelegationRead()
     applyGoalDelegationResult(await api.demands.delegation('goal.patrol.continue', { goalId: demand.id, patrolOperationId: patrol.operationId, operationId, expectedRunId: manager.runId }), cut)
+  }
+  async function sendFirstDestination(entry: number) {
+    if (!patrol || !firstDestination) return
+    const operationId = await operation('goal-patrol-continue', [demand.id, patrol.operationId, firstDestination.runId]), cut = beginGoalDelegationRead()
+    const result = await api.demands.delegation('goal.patrol.continue', { goalId: demand.id, patrolOperationId: patrol.operationId, operationId, expectedRunId: firstDestination.runId })
+    applyGoalDelegationResult(result, cut)
+    bindOriginalTarget(entry, result.patrols?.find(item => item.operationId === patrol.operationId))
   }
   const saveSupervisor: GoalRelationSave = async (patch, expectedUpdatedAt) => {
     await useAppStore.getState().updateDemand(demand.id, patch, undefined, expectedUpdatedAt)
     return true
   }
   const needsSupervisor = !manager || !['available', 'busy'].includes(manager.state)
-  const canContinue = pending && patrol?.supervisorAgentSessionId && manager?.agentSessionId === patrol.supervisorAgentSessionId && manager.runId &&
-    manager.state !== 'ended' && manager.state !== 'unknown' && !patrol.attempts.some(a => a.attemptedAt) && (!attempt || attempt.target.runId !== manager.runId)
-  const openConversation = targetSessionId ? <button type="button" className="small-button" onClick={() => requestAgentConversationFloatingOpen(targetSessionId, targetHostId, undefined, undefined, entryContext)}>{targetName ? `Open ${targetName} conversation` : 'Open owner conversation'}</button> : null
+  const canContinue = pending && patrol?.supervisorAgentSessionId && manager?.agentSessionId === patrol.supervisorAgentSessionId && manager.agentSessionId === targetSessionId && manager.runId &&
+    targetHostId && manager.hostId === targetHostId && manager.state !== 'ended' && manager.state !== 'unknown' && !patrol.attempts.some(a => a.attemptedAt) && (!attempt || attempt.target.runId !== manager.runId)
+  const openConversation = targetSessionId ? <button type="button" className="small-button" onClick={() => requestAgentConversationFloatingOpen(targetHostId ? targetSessionId : null, targetHostId,
+    targetHostId ? undefined : 'The original Supervisor destination is unconfirmed. Check the retained inspection to read its destination.', undefined, entryContext)}>{targetName ? `Open ${targetName} conversation` : 'Open owner conversation'}</button> : null
   return <div className={`goal-patrol${compact ? ' goal-patrol--compact' : ''}`} aria-label="PMO 巡查" onClick={event => event.stopPropagation()}>
     <div className="goal-patrol__actions">
-      <button type="button" className={(primary ?? !pending) && !needsSupervisor ? 'primary-button' : 'small-button'} aria-busy={busy}
+      <button type="button" className={(primary ?? !pending) && !needsSupervisor && !firstDestination ? 'primary-button' : 'small-button'} aria-busy={busy}
         aria-label={pending ? 'Check original inspection' : targetName ? `Request inspection from ${targetName}` : 'Request owner inspection'} onClick={() => {
-        const entry = requestAgentConversationFloatingOpen(targetSessionId, targetHostId,
+        const entry = requestAgentConversationFloatingOpen(targetHostId ? targetSessionId : null, targetHostId,
           pending ? observed?.reason ?? '原巡查请求已保存；正在读取原回执。' : '正在请求原 PMO 巡查；实际工作状态以原 Agent 为准。', undefined, entryContext)
-        void run(pending ? () => refreshGoalDelegations(demand.id) : () => request(entry), entry)
+        void run(pending ? () => readOriginal(entry) : () => request(entry), entry)
       }}>{busy ? 'Checking original inspection…' : pending ? 'Check original inspection' : targetName ? `Request inspection from ${targetName}` : 'Request owner inspection'}</button>
       {!compact && !embedded && patrol ? <button type="button" className="small-button" disabled={busy} onClick={() => void run(() => refreshGoalDelegations(demand.id))}>Read inspection</button> : null}
       {canContinue ? <button type="button" className="small-button" disabled={busy} onClick={() => void run(continueOriginal)}>Continue original inspection</button> : null}
       {!embedded && (!compact || needsSupervisor) ? openConversation : null}
-      {needsSupervisor ? <button type="button" className={primary ? 'primary-button' : 'small-button'} onClick={() => setSupervisorGoalId(demand.id)}>Choose Supervisor</button> : null}
+      {needsSupervisor ? <button type="button" className={primary && !firstDestination ? 'primary-button' : 'small-button'} onClick={() => setSupervisorGoalId(demand.id)}>Choose Supervisor</button> : null}
     </div>
+    {firstDestination ? <div className="goals-inline-actions">
+      <button type="button" className={primary ? 'primary-button' : 'small-button'} disabled={busy} onClick={() => {
+        const entry = requestAgentConversationFloatingOpen(null, undefined, 'Confirming this inspection’s first Supervisor destination.', undefined, entryContext)
+        void run(() => sendFirstDestination(entry), entry)
+      }}>Send first inspection</button>
+      <span className="goals-caption" title={`Host ${firstDestination.hostId} · Session ${firstDestination.agentSessionId} · Run ${firstDestination.runId}`}>First send to {firstName ?? 'the current Supervisor'} on {firstHostName}.</span>
+    </div> : null}
     {observed ? <p className="goal-patrol__feedback" role="status"><strong data-goal-current-conclusion={primary ? true : undefined} data-goal-current-source={primary ? 'patrol' : undefined}>{labels[observed.state]}</strong>{!compact || !['delivered', 'reported'].includes(observed.state) ? <span>{observed.reason}</span> : null}</p> : null}
     {!embedded && observed?.state === 'missing' ? <p className="goal-patrol__feedback">原 PMO 尚未确认，巡查尚未开始。恢复原 PMO 后接续原巡查，或明确选择 Supervisor；选择不会自动发送。</p> : null}
     {!embedded && manager?.state === 'ended' ? <p className="goal-patrol__feedback">原管理 Run 已结束；打开原 PMO 恢复同一 Session，再接续或回报实际巡查。</p> : null}

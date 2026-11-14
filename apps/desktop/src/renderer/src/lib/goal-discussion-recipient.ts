@@ -7,6 +7,21 @@ import { agentDisplayName } from './workbench-tabs'
 import { firstPromptFromTimeline } from '@agentmux/client-ui/display-name'
 import { agentSessionPresentationIndex, createFirstPromptSelector, sessionPresentationById } from './session-presentation'
 import type { GoalDiscussionTaskMode } from './goal-discussion-request'
+import { demandPatrolScope, type DemandPatrol } from '@agentmux/demand/goal-patrol'
+import { demandResponsibilityScope } from '@agentmux/demand/responsibility'
+import type { DemandRecord } from './global-demand-board'
+
+/** A candidate for an explicit first binding, never the old operation's destination. */
+export function goalRequestFirstDestination(goal: DemandRecord, original: DemandPatrol | undefined) {
+  const manager = goal.responsibility?.supervisor
+  if (!original || original.attempts.length || original.report || !original.supervisorAgentSessionId ||
+    original.supervisorAgentSessionId !== goal.supervisorSessionId || !manager?.agentSessionId || manager.agentSessionId !== original.supervisorAgentSessionId ||
+    !manager.hostId || !manager.runId || ['ended', 'unknown', 'missing'].includes(manager.state)) return null
+  const scope = { ...goal, supervisorSessionId: goal.supervisorSessionId ?? null }
+  const currentScope = original.purpose === 'plan' ? demandPatrolScope(scope, 'plan') : demandResponsibilityScope(scope)
+  if (original.expectedScope !== currentScope) return null
+  return { agentSessionId: manager.agentSessionId, hostId: manager.hostId, runId: manager.runId }
+}
 
 type State = Pick<ReturnType<typeof useAppStore.getState>, 'demandPmoTabIds' | 'tabs' | 'layouts'>
 /** Read the same dedicated workface used by the original discussion owner. Never substitute the Supervisor. */
@@ -41,9 +56,9 @@ export function useGoalDiscussionRecipient(goalId: string) {
 /** Presentation for one exact canonical recipient; absence never selects a replacement. */
 export function useGoalAgentPresentation(agentSessionId: string | null | undefined, hostId?: string) {
   const presentation = useAppStore(useShallow(state => {
-    if (!agentSessionId) return null
+    if (!agentSessionId || hostId === undefined) return null
     const matches = (agentSessionPresentationIndex(state.sessions).get(agentSessionId) ?? []).filter(session => session.control.agentSessionId === agentSessionId &&
-      session.control.hostId === session.hostId && (hostId === undefined || session.control.hostId === hostId))
+      session.control.hostId === session.hostId && session.control.hostId === hostId)
     const session = matches.length === 1 ? matches[0] : undefined
     return session ? { id: session.id, label: session.label, providerId: session.providerId, hostId: session.control.hostId, toolExecution: session.toolExecution ?? null, workPlacement: session.workPlacement, workspacePath: session.workspacePath } : null
   }))
