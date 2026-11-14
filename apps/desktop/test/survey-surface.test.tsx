@@ -2414,6 +2414,43 @@ it('[survey-item-chrome] closes background member Tabs without selecting their i
   healthy()
 })
 
+it('[survey-delivery-close] closes an alias-only Tab at its real external Workspace, preserving the current Survey item', async () => {
+  const source = createWorkbenchTab('alias-close-tab', { ...pageB, browserId: 'alias-close-browser', regionId: 'alias-close-region', agent: null }, 'External original')
+  useAppStore.setState(state => ({ config: { ...state.config!, workspaces: [...state.config!.workspaces, otherWorkspace] },
+    tabs: { ...state.tabs, [source.id]: source }, layouts: { ...state.layouts, [otherWorkspace.id]: createWorkspaceLayout('alias-close-group', [source.id]) } }))
+  await renderApp(); await enterSurvey(); await choose()
+  const before = useAppStore.getState(), close = vi.spyOn(before, 'closeTab')
+  const column = surveyRow(originalZoneId()).querySelector<HTMLElement>(`[data-survey-tab-id="${source.id}"]`)!
+  await act(async () => column.parentElement!.querySelector<HTMLButtonElement>('.survey-tab-close')!.click())
+  expect(close).toHaveBeenCalledExactlyOnceWith(otherWorkspace.id, 'alias-close-group', source.id, { keepAgentSessions: false })
+  expect(api.browser.close).toHaveBeenCalledExactlyOnceWith('alias-close-browser')
+  expect(useAppStore.getState().tabs[source.id]).toBeUndefined()
+  expect(useAppStore.getState().surveyZoneSelection?.zoneId).toBe(before.surveyZoneSelection?.zoneId)
+  expect(useAppStore.getState().surveyZoneSelection?.active).toEqual(before.surveyZoneSelection?.active)
+  expect(document.querySelectorAll('[data-survey-panel-reference]')).toHaveLength(0); healthy()
+})
+
+it('[survey-delivery-close] asks for an exact alias when several external placements exist, then removes only that binding', async () => {
+  const source = createWorkbenchTab('alias-choice-tab', { ...pageB, browserId: 'alias-choice-browser', regionId: 'alias-choice-region', agent: null }, 'External original')
+  const third = { ...otherWorkspace, id: 'third-workspace', name: 'Third' }
+  useAppStore.setState(state => ({ config: { ...state.config!, workspaces: [...state.config!.workspaces, otherWorkspace, third] },
+    tabs: { ...state.tabs, [source.id]: source }, layouts: { ...state.layouts, [otherWorkspace.id]: createWorkspaceLayout('alias-first', [source.id]), [third.id]: createWorkspaceLayout('alias-chosen', [source.id]) } }))
+  await renderApp(); await enterSurvey(); await choose()
+  const before = useAppStore.getState(), close = vi.spyOn(before, 'closeTab')
+  const column = surveyRow(originalZoneId()).querySelector<HTMLElement>(`[data-survey-tab-id="${source.id}"]`)!
+  await act(async () => column.parentElement!.querySelector<HTMLButtonElement>('.survey-tab-close')!.click())
+  expect(close).not.toHaveBeenCalled(); expect(api.browser.close).not.toHaveBeenCalled()
+  await vi.waitFor(() => expect(document.querySelectorAll('[data-survey-panel-reference]')).toHaveLength(2))
+  const choice = [...document.querySelectorAll<HTMLElement>('[data-survey-panel-reference]')].find(item => JSON.parse(item.dataset.surveyPanelReference!).displayWorkspaceId === third.id)!
+  await act(async () => choice.click())
+  expect(close).toHaveBeenCalledExactlyOnceWith(third.id, 'alias-chosen', source.id, { keepAgentSessions: false })
+  expect(useAppStore.getState().tabs[source.id]).toBe(before.tabs[source.id])
+  expect(useAppStore.getState().layouts[otherWorkspace.id]).toBe(before.layouts[otherWorkspace.id])
+  expect(useAppStore.getState().layouts[third.id]!.groups.flatMap(group => group.tabOrder)).not.toContain(source.id)
+  expect(useAppStore.getState().surveyZoneSelection).toEqual(before.surveyZoneSelection)
+  expect(api.browser.close).not.toHaveBeenCalled(); healthy()
+})
+
 it('[survey-item-chrome] shares the Agent and dirty-content confirmation; Cancel keeps the original Tab and input', async () => {
   const second = createWorkbenchTab('chrome-browser', pageB, 'Reference page')
   useAppStore.setState({ tabs: { [mixed.id]: mixed, [second.id]: second },

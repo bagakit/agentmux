@@ -11,7 +11,8 @@ import { useAppStore } from '../src/renderer/src/store'
 import { api } from '../src/renderer/src/lib/api'
 import { floatingMoteDefaultSelection, requestPmoTeamsTopicFloatingOpen, readPmoTeamsTopicFloatingState } from '../src/renderer/src/lib/pmo-teams-topic-floating'
 import { createMoteApp, moteClick, settleMoteApp, type MoteAppFixture } from './fixtures/mote-app'
-import { moteTopics, defaultTab, neighborTab, neighborAgent, defaultAgent, scratchWorkspace, quietMoteId, quietTab } from './fixtures/mote-workface'
+import { moteTopics, defaultTab, neighborTab, neighborAgent, defaultAgent, executionAgent, scratchWorkspace, quietMoteId, quietTab } from './fixtures/mote-workface'
+import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { scratchTopicsScope } from '../src/renderer/src/lib/scratch-topic-snapshots'
 import { useLauncherState } from '../src/renderer/src/lib/launcher-state'
 
@@ -90,6 +91,111 @@ describe('original Mote quick preferences', () => {
     expect(useAppStore.getState().tabs[neighborTab.id]).toBeDefined()
     expect(useAppStore.getState().reportError).toHaveBeenCalledWith(expect.objectContaining({ message: expect.stringContaining('main Agent conversation stays open') }), expect.anything())
     expect(app.stop).not.toHaveBeenCalled()
+  })
+})
+
+describe('[survey-delivery-close] one original Tab close owner', () => {
+  async function surveyCloseMain() {
+    const state = useAppStore.getState(), catalog = spatialCatalog(state, moteTopics)
+    const zoneId = catalog.tabs.find(tab => tab.tabId === neighborTab.id)!.zoneId!
+    expect(state.setSurveyZoneCollected(zoneId, true)).toBe(true)
+    await app.mount()
+    await moteClick(app.container.querySelector<HTMLElement>('[aria-label="Survey: browse and explore"]')!)
+    const row = [...app.container.querySelectorAll<HTMLElement>('[data-survey-zone-id]')].find(row => row.dataset.surveyZoneId === zoneId)!
+    expect(row).toBeDefined()
+    const column = row.querySelector<HTMLElement>(`[data-survey-tab-id="${neighborTab.id}"]`)!
+    expect(column).not.toBeNull()
+    await moteClick(column.parentElement!.querySelector<HTMLElement>('.survey-tab-close')!)
+  }
+  it('protects a legally collected Mote original through Survey and direct Store without opening a stop confirmation', async () => {
+    preferences()
+    const stop = vi.spyOn(api.sessions, 'stop'), before = useAppStore.getState()
+    await surveyCloseMain()
+    expect(document.querySelector('[role="dialog"]')?.textContent ?? '').not.toContain('Stop Agent Session?')
+    expect(await useAppStore.getState().closeTab(SCRATCH_WORKSPACE_ID, 'mote-group', neighborTab.id, { keepAgentSessions: true })).toBe(false)
+    expect(useAppStore.getState().tabs[neighborTab.id]).toBe(before.tabs[neighborTab.id])
+    expect(useAppStore.getState().sessions.map(({ id, control, processState }) => ({ id, control, processState })))
+      .toEqual(before.sessions.map(({ id, control, processState }) => ({ id, control, processState })))
+    expect(useAppStore.getState().agentComposerDrafts).toEqual(before.agentComposerDrafts)
+    expect(useAppStore.getState().reportError).toHaveBeenCalledWith(expect.objectContaining({ message: expect.stringContaining('main Agent conversation stays open') }), expect.anything())
+    expect(stop).not.toHaveBeenCalled()
+  })
+  it.each(['Keep Session & Close', 'Stop & Close'])('rechecks the original pin at confirmation commit: %s', async action => {
+    const stop = vi.spyOn(api.sessions, 'stop')
+    await surveyCloseMain()
+    expect(document.querySelector('[role="dialog"]')?.textContent).toContain('Stop Agent Session?')
+    const before = useAppStore.getState()
+    await act(async () => { preferences() })
+    const button = [...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')].find(button => button.textContent === action)!
+    expect(button).toBeDefined(); await moteClick(button)
+    expect(useAppStore.getState().tabs[neighborTab.id]).toBe(before.tabs[neighborTab.id])
+    expect(useAppStore.getState().sessions).toBe(before.sessions)
+    expect(useAppStore.getState().agentComposerDrafts).toBe(before.agentComposerDrafts)
+    expect(stop).not.toHaveBeenCalled()
+  })
+  it('closes another exact display binding and allows the original after an explicit unpin', async () => {
+    const topic = preferences(), state = useAppStore.getState()
+    useAppStore.setState({ layouts: { ...state.layouts, project: createWorkspaceLayout('project-copy', [neighborTab.id]) } })
+    expect(await useAppStore.getState().closeTab('project', 'project-copy', neighborTab.id, { keepAgentSessions: true })).toBe(true)
+    expect(useAppStore.getState().tabs[neighborTab.id]).toBe(state.tabs[neighborTab.id])
+    expect(useAppStore.getState().layouts[SCRATCH_WORKSPACE_ID]!.groups[0]!.tabOrder).toContain(neighborTab.id)
+    const unpinned = { ...topic, quickMode: { status: 'saved' as const, defaults: {}, version: 'explicit-unpin' } }
+    useAppStore.setState({ scratchTopicSnapshots: { [SCRATCH_WORKSPACE_ID]: { scope: scratchTopicsScope(scratchWorkspace), revision: 1, topics: [unpinned, ...moteTopics.slice(1)], error: null, reading: false } } })
+    expect(await useAppStore.getState().closeTab(SCRATCH_WORKSPACE_ID, 'mote-group', neighborTab.id, { keepAgentSessions: true })).toBe(true)
+    expect(useAppStore.getState().tabs[neighborTab.id]).toBeUndefined()
+    expect(useAppStore.getState().sessions).toBe(state.sessions)
+  })
+  it('protects a Project Agent linked to a Mote using that Mote preference owner, while another display remains closable', async () => {
+    const topic = preferences(), initial = useAppStore.getState()
+    const projectTab = createWorkbenchTab('cross-resource-main', { kind: 'agent', phase: 'attached', workspaceId: 'project', regionId: 'cross-resource-region', sessionId: executionAgent.id }, 'Existing Project Agent')
+    const projectLayout = createWorkspaceLayout('project-original', [projectTab.id])
+    projectLayout.groups.push({ id: 'project-other-view', tabOrder: [projectTab.id], activeTabId: projectTab.id, recentTabIds: [projectTab.id] })
+    projectLayout.root = { type: 'split', direction: 'horizontal', ratio: 0.5, first: projectLayout.root, second: { type: 'leaf', groupId: 'project-other-view' } }
+    useAppStore.setState({ tabs: { ...initial.tabs, [projectTab.id]: projectTab }, layouts: { ...initial.layouts, project: projectLayout } })
+    const original = spatialCatalog(useAppStore.getState(), moteTopics)
+    const zoneId = original.tabs.find(tab => tab.tabId === projectTab.id)!.zoneId!
+    const moteSpaces = original.spaces.filter(space => space.kind === 'mote' && space.topicId === topic.id)
+    expect(moteSpaces).toHaveLength(1)
+    const origin = original.bindings.find(binding => binding.zoneId === zoneId)!
+    expect(origin).toBeDefined()
+    const saved = { hostId: executionAgent.control.hostId, sessionId: executionAgent.id, displayWorkspaceId: 'project', groupId: 'project-original', tabId: projectTab.id, regionId: projectTab.layout.activeRegionId }
+    const linkedTopic = { ...topic, quickMode: { status: 'saved' as const, version: 'linked-project-main', defaults: { conversation: saved } } }
+    const topics = [linkedTopic, ...moteTopics.slice(1)]
+    useAppStore.setState({ spaceZoneBindings: { ...initial.spaceZoneBindings, [zoneId]: { workspaceId: 'project', spaceId: origin.spaceId, relations: { [moteSpaces[0]!.spaceId]: true } } },
+      scratchTopicSnapshots: { [SCRATCH_WORKSPACE_ID]: { scope: scratchTopicsScope(scratchWorkspace), revision: 1, topics, error: null, reading: false } } })
+    vi.mocked(api.scratch.listTopics).mockResolvedValue(topics)
+    vi.mocked(api.scratch.readTopic).mockImplementation(async (_workspace, id) => topics.find(topic => topic.id === id) ?? null)
+    const state = useAppStore.getState(), catalog = spatialCatalog(state, topics)
+    expect(catalog.locations.some(location => location.tabId === projectTab.id && location.workspaceId === 'project' && location.spaceId === moteSpaces[0]!.spaceId)).toBe(true)
+    expect(resolveMoteDefaultConversation(state, linkedTopic, SCRATCH_WORKSPACE_ID, catalog).conversation).toEqual(saved)
+    expect(moteConversationChoices(state, linkedTopic, SCRATCH_WORKSPACE_ID, catalog)).toContainEqual(saved)
+    expect(state.setSurveyZoneCollected(zoneId, true)).toBe(true)
+    const stop = vi.spyOn(api.sessions, 'stop')
+    await app.mount(); await moteClick(app.container.querySelector<HTMLElement>('[aria-label="Survey: browse and explore"]')!)
+    const row = [...app.container.querySelectorAll<HTMLElement>('[data-survey-zone-id]')].find(row => row.dataset.surveyZoneId === zoneId)!
+    expect(row).toBeDefined(); await moteClick(row.querySelector<HTMLElement>('.survey-item-tab-close')!)
+    expect(document.querySelector('[role="dialog"]')?.textContent ?? '').not.toContain('Stop Agent Session?')
+    expect(await useAppStore.getState().closeTab('project', 'project-original', projectTab.id, { keepAgentSessions: true })).toBe(false)
+    expect(useAppStore.getState().tabs[projectTab.id]).toBe(projectTab)
+    expect(await useAppStore.getState().closeTab('project', 'project-other-view', projectTab.id, { keepAgentSessions: true })).toBe(true)
+    expect(useAppStore.getState().tabs[projectTab.id]).toBe(projectTab)
+    expect(useAppStore.getState().layouts.project!.groups.find(group => group.id === 'project-original')!.tabOrder).toContain(projectTab.id)
+    expect(useAppStore.getState().sessions.find(session => session.id === executionAgent.id)?.control).toEqual(executionAgent.control)
+    expect(stop).not.toHaveBeenCalled()
+  })
+  it.each(['different-region', 'replacement-session', 'unconfirmed-config'] as const)('does not infer a pin from stale or unknown facts: %s', async kind => {
+    const topic = preferences(), state = useAppStore.getState()
+    if (kind === 'replacement-session') useAppStore.setState({ tabs: { ...state.tabs, [neighborTab.id]: { ...neighborTab,
+      regions: { ...neighborTab.regions, [conversation.regionId]: { ...neighborTab.regions[conversation.regionId]!, sessionId: defaultAgent.id } } } } })
+    else {
+      const changed = { ...topic, quickMode: kind === 'unconfirmed-config'
+        ? { status: 'unconfirmed' as const, message: 'Original settings observation unavailable' }
+        : { status: 'saved' as const, defaults: { conversation: { ...conversation, regionId: 'different-original-region' } }, version: 'changed' } }
+      useAppStore.setState({ scratchTopicSnapshots: { [SCRATCH_WORKSPACE_ID]: { scope: scratchTopicsScope(scratchWorkspace), revision: 1, topics: [changed, ...moteTopics.slice(1)], error: null, reading: false } } })
+    }
+    expect(await useAppStore.getState().closeTab(SCRATCH_WORKSPACE_ID, 'mote-group', neighborTab.id, { keepAgentSessions: true })).toBe(true)
+    expect(useAppStore.getState().tabs[neighborTab.id]).toBeUndefined()
+    expect(useAppStore.getState().sessions).toBe(state.sessions)
   })
 })
 
