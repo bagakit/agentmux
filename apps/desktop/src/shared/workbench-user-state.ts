@@ -11,11 +11,90 @@ export type WorkbenchUserStateReceipt = {
   sizeBytes: number
   diskDurability: 'confirmed'
   confirmedAt: number
+  /** Owners whose cold records changed in this commit. Null means an explicit full clear. */
+  inputQueueArchiveOwners?: string[] | null
+  /** Exact submitted entries the owner has durably removed from the hot projection. */
+  inputQueueArchived?: { ownerKey: string; operationId: string }[]
 }
 
 /** Private Desktop IPC admission, scoped by Main to the original native document. */
 export type WorkbenchUserStateWrite = { value: string; writeRevision: number }
 export type WorkbenchUserStateWriteReceipt = WorkbenchUserStateReceipt & { writeRevision: number }
+
+/** A private save names changed inputs. The envelope's state carries the drafts in the same transaction. */
+export type WorkbenchInputQueueChange = {
+  ownerKey: string
+  order: readonly string[]
+  upsert: readonly { operationId: string; entry: Record<string, unknown> }[]
+  remove: readonly string[]
+}
+export type WorkbenchInputQueueDelta = { changes: readonly WorkbenchInputQueueChange[]; clear?: true }
+export type WorkbenchInputArchiveQuery = { ownerKey?: string; operationId?: string; after?: string; limit?: number }
+export type WorkbenchInputArchivePage = {
+  entries: { ownerKey: string; entry: Record<string, unknown> }[]
+  nextCursor: string | null
+}
+
+function record(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined
+}
+
+function inputKey(value: unknown): value is string {
+  return typeof value === 'string' && value.length > 0 && !value.includes('\0')
+}
+
+function uniqueInputKeys(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every(inputKey) && new Set(value).size === value.length
+}
+
+export function parseWorkbenchInputQueueDelta(value: unknown): WorkbenchInputQueueDelta {
+  const delta = record(value)
+  const invalid = () => Object.assign(new Error('Desktop input changes must name their original queue and operation. The saved document is retained.'),
+    { code: 'WORKBENCH_USER_STATE_INVALID' })
+  if (!delta || !Array.isArray(delta.changes) || delta.clear !== undefined && delta.clear !== true) throw invalid()
+  const owners = new Set<string>()
+  for (const value of delta.changes) {
+    const change = record(value)
+    if (!change || !inputKey(change.ownerKey) || owners.has(change.ownerKey) || !uniqueInputKeys(change.order) ||
+        !uniqueInputKeys(change.remove) || !Array.isArray(change.upsert)) throw invalid()
+    owners.add(change.ownerKey)
+    const order = new Set(change.order), changed = new Set<string>()
+    if (change.remove.some(id => order.has(id))) throw invalid()
+    for (const value of change.upsert) {
+      const update = record(value)
+      if (!update || !inputKey(update.operationId) || !order.has(update.operationId) || changed.has(update.operationId) ||
+          record(update.entry)?.operationId !== update.operationId) throw invalid()
+      changed.add(update.operationId)
+    }
+  }
+  return delta as WorkbenchInputQueueDelta
+}
+
+export function parseWorkbenchInputArchiveQuery(value: unknown): WorkbenchInputArchiveQuery {
+  const query = record(value)
+  if (!query || (Object.hasOwn(query, 'ownerKey') && !inputKey(query.ownerKey)) ||
+      (Object.hasOwn(query, 'operationId') && (!inputKey(query.operationId) || !inputKey(query.ownerKey) || query.after !== undefined)) ||
+      (Object.hasOwn(query, 'after') && !inputKey(query.after)) ||
+      (Object.hasOwn(query, 'limit') && (typeof query.limit !== 'number' || !Number.isSafeInteger(query.limit) || query.limit < 1 || query.limit > 100))) {
+    throw Object.assign(new Error('Choose an original input archive or open one bounded page.'), { code: 'WORKBENCH_INPUT_ARCHIVE_QUERY_INVALID' })
+  }
+  return query as WorkbenchInputArchiveQuery
+}
+
+/** Archive is presentation. Only a confirmed original direct input can leave the hot workface. */
+export function workbenchInputArchiveEligible(value: unknown): boolean {
+  const entry = record(value)
+  if (!entry || entry.archived !== true || !inputKey(entry.operationId) ||
+      ['movedToDraft', 'originalMember', 'recoveredSourceInput', 'resumeInputIntent', 'inputStopIntent', 'inputStopReceipt', 'mainRollover', 'browserInput', 'browserRecipient',
+        'goalDispatch', 'goalPmo', 'goalContinuation', 'agentMuxNote', 'moteMain', 'moteSource'].some(key => entry[key] !== undefined)) return false
+  const control = record(entry.directInputControl), binding = record(entry.directInputBinding)
+  const receipt = record(entry.inputReceipt), key = record(receipt?.key)
+  const runId = record(control?.run)?.runId
+  return control?.kind === 'agent' && inputKey(control.hostId) && inputKey(control.agentSessionId) && inputKey(runId) &&
+    record(binding?.expectedRun)?.runId === runId && key?.kind === 'prompt' && key.agentSessionId === control.agentSessionId &&
+    key.submissionId === entry.operationId && record(key.expectedRun)?.runId === runId && receipt?.persistence === 'confirmed' &&
+    (receipt.status === 'admitted' || receipt.status === 'terminal-confirmed' || receipt.status === 'launch-carried')
+}
 
 export type WorkbenchUserStateObservation = {
   path: string
