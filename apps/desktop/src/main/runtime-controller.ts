@@ -1986,10 +1986,10 @@ export class RuntimeController {
   }
 
   private async withAgentInputClient<T>(route: ResolvedAgentInputTarget, connected: boolean | 'runtime',
-    operation: (client: AgentInputClient) => Promise<T>): Promise<T> {
+    operation: (client: AgentInputClient) => Promise<T>, connectSignal?: AbortSignal): Promise<T> {
     if (route.kind === 'configured-control') {
       const client = connected === false ? this.configuredClient(route.hostId)
-        : await this.connectedClient(route.hostId, connected === 'runtime' ? 'runtime' : undefined)
+        : await observeProgressRead(connectSignal, () => this.connectedClient(route.hostId, connected === 'runtime' ? 'runtime' : undefined))
       return await operation(client)
     }
     const carrier = this.spaceMountHost(route.hostId)
@@ -2108,7 +2108,7 @@ export class RuntimeController {
           ...(runState ? { runState } : {})
         })
       }
-    }))
+    }, automation?.signal))
   }
 
   async replyQuestion(control: AgentSessionControl, input: SessionQuestionReplyInput, config: AppConfig): Promise<AgentSessionQuestionReplyReceipt> {
