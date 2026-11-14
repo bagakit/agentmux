@@ -7,7 +7,7 @@ import { useShallow } from 'zustand/react/shallow'
 import { AGENTMUX_CONTROL_SCHEMA_VERSION } from '@agentmux/core/control'
 import { mintObjectId } from '@agentmux/core/object-id'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
-import { fileNavigationSelection, useAppStore } from '../store'
+import { currentCoreSpatialGraph, fileNavigationSelection, useAppStore } from '../store'
 import { workbenchSelectionCatalog } from '../lib/desktop-focus-navigation'
 import { workbenchNavigationTabs } from '../lib/workbench-navigation-catalog'
 import { agentSessionPresentationIndex, sessionStatusLabel } from '../lib/session-presentation'
@@ -15,7 +15,8 @@ import { useObservedAppStore } from '../lib/use-observed-app-store'
 import { moteMembers, moteMemberSnapshot, type MoteMember } from '../lib/mote-team'
 import type { MoteWorkfaceScope } from '../lib/mote-workface'
 import { sameWorkbenchProjectionSelection, type WorkbenchProjectionSelection } from '../lib/workbench-projection'
-import { moteCurrentGoals, goalsForMote } from '../lib/mote-goals'
+import { moteCurrentGoals, goalsForMote, moteGoalContext, moteGoalSourceLocator, moteGoalSourceFacts, retainMoteGoalContext } from '../lib/mote-goals'
+import { demandAgentReferenceKey } from '@agentmux/demand/relations'
 import { ResolvedAgentAvatar } from './AgentAvatar'
 import { MoteQuickModeDialog } from './MoteQuickMode'
 import { openMoteMaterial } from '../lib/mote-materials-actions'
@@ -42,6 +43,18 @@ export function MoteCooperation({ scope, active, reference, onSelect, actions, p
   const facts = useAppStore(useShallow(state => ({ config: state.config, tabs: workbenchNavigationTabs(state.tabs), layouts: state.layouts,
     spaceZoneBindings: state.spaceZoneBindings, topicCategories: state.topicCategories, projectGroups: state.projectGroups,
     scratchTopicSnapshots: state.scratchTopicSnapshots })))
+  const sourceGraph = useAppStore(() => active && scope.workspace.hostId === 'local' ? currentCoreSpatialGraph() : null)
+  const sourceLocator = useMemo(() => moteGoalSourceLocator(useAppStore.getState(), scope, sourceGraph), [scope, sourceGraph, facts.config, facts.spaceZoneBindings])
+  const sourceFacts = useAppStore(useShallow(state => active ? moteGoalSourceFacts(state, scope, sourceLocator) : null))
+  const retainedGoals = useRef<ReturnType<typeof moteGoalContext> | null>(null)
+  const goalContext = useMemo(() => {
+    if (!active) return retainedGoals.current
+    const observed = moteGoalContext(useAppStore.getState(), scope, reference, sourceGraph, sourceLocator)
+    const current = retainedGoals.current ? retainMoteGoalContext(retainedGoals.current, observed) : observed
+    retainedGoals.current = current
+    return current
+  }, [active, facts, sourceGraph, sourceLocator, sourceFacts, scope, reference])
+  const qualifiedMembers = useMemo(() => new Set(goalContext?.agentReferences.map(demandAgentReferenceKey)), [goalContext])
   const graph = useMemo(() => workbenchSelectionCatalog(useAppStore.getState()), [facts])
   const spaces = graph.spaces.filter(space => space.kind === 'mote' && space.hostId === scope.workspace.hostId && space.topicId === scope.topic.id)
   const spaceId = spaces.length === 1 ? spaces[0]!.spaceId : null
@@ -97,13 +110,16 @@ export function MoteCooperation({ scope, active, reference, onSelect, actions, p
     } : null
     const contentOwned = (goal: (typeof demands)[string]) => Boolean(content && goal.contentRefs?.some(ref =>
       ref.hostId === content.hostId && ref.workspaceId === content.workspaceId && ref.zoneId === content.zoneId))
-    const memberRow = (row: NonNullable<(typeof demands)[string]['responsibility']>['executions'][number]) => goalMembers.some(member =>
-      row.execution.hostId === member.hostId && row.execution.agentSessionId === member.agentSessionId)
-    const current = moteCurrentGoals(goalsForMote(demands, unambiguousIds, content).filter(goal =>
+    const memberRow = (row: NonNullable<(typeof demands)[string]['responsibility']>['executions'][number]) => {
+      const execution = row.execution
+      return 'target' in execution ? qualifiedMembers.has(demandAgentReferenceKey(execution.target)) : goalMembers.some(member =>
+        execution.hostId === member.hostId && execution.agentSessionId === member.agentSessionId)
+    }
+    const current = moteCurrentGoals(goalsForMote(demands, unambiguousIds, content, goalContext?.agentReferences).filter(goal =>
       contentOwned(goal) || !goal.responsibility?.executions.length || goal.responsibility.executions.some(memberRow)))
     return { current, human: current.filter(goal => goal.responsibility?.executions.some(row =>
       row.nextOwner.kind === 'human' && (contentOwned(goal) || memberRow(row)))) }
-  }, [demands, goalMembers, graph, spaceId, scope.workspace.hostId, scope.workspace.id])
+  }, [demands, goalMembers, graph, spaceId, scope.workspace.hostId, scope.workspace.id, goalContext, qualifiedMembers])
   const humanGoals = work.human
   const needed = attention.length + humanGoals.length
   const [expanded, setExpanded] = useState(false), [editing, setEditing] = useState(false)
@@ -175,7 +191,7 @@ export function MoteCooperation({ scope, active, reference, onSelect, actions, p
   function main() { setExpanded(false); conversation?.onMain() }
   const membersPanel = presentation === 'navigation' ? <div className="mote-cooperation__team-body" id={id} data-mote-team>
       <div className="mote-cooperation__team-heading"><strong>原工作对话</strong><span>{ordered.length}</span></div>
-      {scope.issue || !spaceId ? <p className="mote-cooperation__issue" role="status">{spaceId ? '显示最后确认的成员及其原对话。' : '原团队绑定尚未确认，已有成员和对话都保留。'}</p> : null}
+      {scope.issue || !spaceId || goalContext?.issue ? <p className="mote-cooperation__issue" role="status">{goalContext?.issue ?? (spaceId ? '显示最后确认的成员及其原对话。' : '原团队绑定尚未确认，已有成员和对话都保留。')}</p> : null}
       {humanGoals.map(goal => <button key={goal.id} type="button" className="mote-cooperation__goal" onClick={() => openGoal(goal.id)}>
         <span>待你审阅</span><strong>{goal.title}</strong><Forward size={14} /></button>)}
       {shown.map(member => {
