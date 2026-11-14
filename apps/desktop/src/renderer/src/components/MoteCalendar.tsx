@@ -46,8 +46,9 @@ function matchesTarget(session: SessionSnapshot | undefined, target: ContinuousP
     session.control.agentSessionId === target.agentSessionId
 }
 
-export function MoteCalendar({ scope, reference, active, openRequest }: {
+export function MoteCalendar({ scope, reference, active, openRequest, onSelectDiscussion }: {
   scope: MoteWorkfaceScope; reference?: WorkbenchProjectionSelection | null | undefined; active: boolean
+  onSelectDiscussion?: (reference: WorkbenchProjectionSelection) => boolean
   openRequest?: { scheduleId: string } | undefined
 }) {
   const contentPresentation = useSpaceContentPresentation()
@@ -117,12 +118,14 @@ export function MoteCalendar({ scope, reference, active, openRequest }: {
       ...(reference && original?.kind === 'agent' && original.sessionId === sessionId ? { reference } : {}) },
       state.tabs, spatialCatalog(state, scratchTopicsForConfig(state.config, state.scratchTopicSnapshots) ?? []), () => {}, 'tab', candidates[0]!.control.agentSessionId)
     const location = located.projection?.selection[0]
-    if (!location || !state.selectMainRegion(location, state.workbenchSpaceSelection)) {
+    if (!location || !(onSelectDiscussion ? onSelectDiscussion(location) : state.selectMainRegion(location, state.workbenchSpaceSelection))) {
       setNavigationIssue(located.issue ?? 'The original discussion could not be focused. Its arrangement is kept.'); return
     }
+    setNavigationIssue(undefined)
+    if (onSelectDiscussion) return
     const choice = useAppStore.getState().workbenchSpaceSelection
     if (choice) requestDesktopFocusWorkfaceReveal(choice)
-    state.setMainSurface('workbench'); contentPresentation?.collapse(); setNavigationIssue(undefined)
+    state.setMainSurface('workbench'); contentPresentation?.collapse()
   }
   const records = useMemo(() => source.records.filter(record => record.status !== 'stopped'), [source.records])
   const ended = source.records.length - records.length

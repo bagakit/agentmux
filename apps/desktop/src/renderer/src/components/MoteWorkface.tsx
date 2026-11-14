@@ -23,7 +23,8 @@ import { MoteQuickModeDialog } from './MoteQuickMode'
 import { openMoteMaterial } from '../lib/mote-materials-actions'
 import { MoteConversationStart } from './MoteConversationStart'
 import { MoteEntryReading } from './MoteEntryReading'
-import { MoteConversationIdentity } from './MoteConversationIdentity'
+import { MotePageNavigation } from './MotePageNavigation'
+import { MoteCalendar } from './MoteCalendar'
 import { MoteStartupStatus } from './MoteStartupStatus'
 import { moteEntryDraftKey, useMoteHeldEntryInput } from '../lib/mote-entry-hold'
 import { MotePeriodConversation, MoteOriginalConversation } from '@agentmux/client-ui/components/MoteConversationThreads'
@@ -31,8 +32,7 @@ import type { MoteDialogueLink } from '@agentmux/core/mote-dialogue'
 import { api } from '../lib/api'
 import { useWorkbenchDocument } from '../lib/workbench-document'
 import { motePresentationContextKey, usePublishMotePresentation } from '../lib/mote-presentation-context'
-import { SurfaceModeSwitch } from './SurfaceModeSwitch'
-import { emptyMoteThreadCounts, moteThreadOptions, type MoteThreadCount, type MoteWorkingMember } from './MoteThreadNavigation'
+import { emptyMoteThreadCounts, type MoteThreadCount, type MoteWorkingMember } from './MoteThreadNavigation'
 import type { MoteThreadView } from '@agentmux/client-ui/components/MoteConversationThreads'
 import { MoteActiveWorkShortcut } from './MoteActiveWorkShortcut'
 import { ComposerSurface, useComposerConnection } from '@agentmux/client-ui/components/ComposerHost'
@@ -69,12 +69,12 @@ export function MoteWorkface(props: Props) {
   const scope = useMoteWorkfaceScope(props.workspaceId, props.topicId, props.visible ?? true)
   return <MoteDialogueViewProvider scope={scope} active={props.visible ?? true}><MoteWorkfaceBody {...props} scope={scope} /></MoteDialogueViewProvider>
 }
-function MoteWorkfaceBody({ scope, workspaceId, topicId, floating = false, visible = true, recoverOnOpen = visible,
+function MoteWorkfaceBody({ scope, workspaceId, topicId, floating = false, visible: surfaceVisible = true, recoverOnOpen = surfaceVisible,
   reference, conversationEntry, memberEntry = false, threadsEntry, navigationActions, onTabSelect, onReferenceSelect, children }: Props & { scope: MoteWorkfaceScope | null }) {
-  const defaults = useMoteDefaultConversation(scope?.topic, scope?.workspace.id ?? workspaceId, visible)
+  const defaults = useMoteDefaultConversation(scope?.topic, scope?.workspace.id ?? workspaceId, surfaceVisible)
   const dialogue = useMoteDialogueView(), frame = useMoteSpace()
   const owner = JSON.stringify([scope?.workspace.hostId, scope?.workspace.id, scope?.workspace.path, scope?.topic.id, scope?.rootPath])
-  const [local, setLocal] = useState<{ owner: string; section: 'discussion' | 'threads'; member: boolean; original: boolean; token?: string; start?: boolean; period?: Extract<MoteDialogueLink, {kind:'main'}>; periodOriginal?: boolean; rollover?: MoteRolloverStart }>({ owner, section: 'discussion', member: false, original: false })
+  const [local, setLocal] = useState<{ owner: string; section: 'discussion' | 'threads'; calendarVisit?: 'open' | 'returned'; member: boolean; original: boolean; token?: string; start?: boolean; period?: Extract<MoteDialogueLink, {kind:'main'}>; periodOriginal?: boolean; rollover?: MoteRolloverStart }>({ owner, section: 'discussion', member: false, original: false })
   const [floatingActionsHost, setFloatingActionsHost] = useState<HTMLSpanElement | null>(null)
   const [settings, setSettings] = useState(false)
   const settingsInvoker = useRef<HTMLElement | null>(null), ownerDocument = useWorkbenchDocument()
@@ -85,6 +85,9 @@ function MoteWorkfaceBody({ scope, workspaceId, topicId, floating = false, visib
     setSettings(true)
   }
   const currentLocal = local.owner === owner ? local : { owner, section: 'discussion' as const, member: false, original: false }
+  // A Calendar visit suspends this local page. Returning keeps its original reader and does not mint a Main entry.
+  const calendarOpen = floating && currentLocal.calendarVisit === 'open'
+  const visible = surfaceVisible && !calendarOpen
   const sharedFrame = !floating && frame?.topicId === scope?.topic.id ? frame : null
   const [threads, setThreads] = useState({ owner, view: 'work' as MoteThreadView, counts: emptyMoteThreadCounts(), working: [] as MoteWorkingMember[], event: undefined as { eventId: string; token: string } | undefined })
   const currentThreads = threads.owner === owner ? threads : { owner, view: 'work' as MoteThreadView, counts: emptyMoteThreadCounts(), working: [] as MoteWorkingMember[], event: undefined }
@@ -130,9 +133,10 @@ function MoteWorkfaceBody({ scope, workspaceId, topicId, floating = false, visib
     return true
   }, [owner, dialogue?.target])
   function openMain(next: import('@agentmux/core/mote-preferences').MoteDefaultConversation) {
-    if (!scope || !confirmedMoteReference(useAppStore.getState(), scope, { reference: next }) || !selectReference(next, 'main')) return
+    if (!scope || !confirmedMoteReference(useAppStore.getState(), scope, { reference: next }) || !selectReference(next, 'main')) return false
     setLocal({ owner, section: 'discussion', member: false, original: false })
     showMoteConversation(scope, { reference: next, floating })
+    return true
   }
   function showThread(next: WorkbenchProjectionSelection) {
     if (!scope || !confirmedMoteReference(useAppStore.getState(), scope, { reference: next }) || !selectReference(next, 'member')) return false
@@ -165,7 +169,7 @@ function MoteWorkfaceBody({ scope, workspaceId, topicId, floating = false, visib
   useEffect(() => {
     if (floating && threadsEntry !== undefined) setLocal({ owner, section: 'threads', member: false, original: false })
   }, [owner, floating, threadsEntry])
-  const entryToken = visible && recoverOnOpen && section === 'discussion' && !currentLocal.start && !currentLocal.period ? sharedFrame?.entryToken ?? currentLocal.token ??
+  const entryToken = visible && currentLocal.calendarVisit === undefined && recoverOnOpen && section === 'discussion' && !currentLocal.start && !currentLocal.period ? sharedFrame?.entryToken ?? currentLocal.token ??
     (floating && conversationEntry !== undefined && !memberEntry ? `${owner}:${conversationEntry}:${memberEntry}` : undefined) : undefined
   const entryRecovery = useMoteMainEntry({ scope, entryToken, active: visible && section === 'discussion' && !memberIntent })
   const selected = useAppStore(state => floating ? reference : state.workbenchSpaceSelection)
@@ -237,7 +241,7 @@ function MoteWorkfaceBody({ scope, workspaceId, topicId, floating = false, visib
   const entry = !scope || section !== 'discussion' || showOriginal || currentLocal.period ? null : currentLocal.start ? 'welcome' as const
     : roleOwned && !main?.current ? 'welcome' as const : currentMain ? 'current' as const : !dialogue?.page && !dialogue?.issue ? 'reading' as const : 'unconfirmed' as const
   // A message held while reading goes to the Main the role owner then confirms, once it is shown, never to a guessed one.
-  const heldInput = entryHold.held && showOriginal && selectedMain && currentMain && readingMain?.sessionId === currentMain.sessionId
+  const heldInput = visible && entryHold.held && showOriginal && selectedMain && currentMain && readingMain?.sessionId === currentMain.sessionId
     ? entryHold.held : undefined
   const settleHeldInput = entryHold.settle
   // An unconfirmed role source sends nothing; the held text returns to the editable draft.
@@ -257,12 +261,12 @@ function MoteWorkfaceBody({ scope, workspaceId, topicId, floating = false, visib
     ? moteMainServicePresentation(entryRecovery.status, moteMainServicePolicy(scope, main), pendingCreations.owner === owner && pendingCreations.ids.length > 0) : null
   const mainService = service && serviceSession?.kind === 'agent' ? { hostId: serviceSession.control.hostId, agentSessionId: serviceSession.control.agentSessionId,
     runId: serviceSession.control.run.runId, composerHint: service.hint } : undefined
-  const context = useMemo(() => scope ? { ...scope, floating, defaultConversation: defaults.conversation, presentation, section, memberIntent, entryToken, bodyVisible: showOriginal, mainService,
+  const context = useMemo(() => scope ? { ...scope, floating, defaultConversation: defaults.conversation, presentation, section, memberIntent, entryToken, bodyVisible: showOriginal && !calendarOpen, mainService,
     composer: { draftKey: moteEntryDraftKey(scope), sourceKey: composerSource, active: composerActive, reference: readingMain ?? null },
     showOriginalWorkface: () => setLocal(previous => ({ ...previous, owner, original: true })),
     showConversation: showDiscussion, startRollover, showThreads, showThread, selectReference, heldInput, settleHeldInput,
     selectTab: (tabId: string, groupId: string) => onTabSelect ? onTabSelect(tabId, groupId) : useAppStore.getState().activateTab(workspaceId, groupId, tabId, 'local')
-  } : null, [scope, floating, defaults.conversation, presentation, section, memberIntent, entryToken, showOriginal, owner, selectReference, onTabSelect, workspaceId, startRollover,
+  } : null, [scope, floating, defaults.conversation, presentation, section, memberIntent, entryToken, showOriginal, calendarOpen, owner, selectReference, onTabSelect, workspaceId, startRollover,
     heldInput?.operationId, settleHeldInput, composerSource, composerActive, readingMain, mainService?.hostId, mainService?.agentSessionId, mainService?.runId, mainService?.composerHint])
   const issue = scope?.issue ?? defaults.issue
   const selectedReference = selected?.groupId && selected.tabId && selected.regionId ? {
@@ -273,17 +277,26 @@ function MoteWorkfaceBody({ scope, workspaceId, topicId, floating = false, visib
     conversation={{ mode: section === 'discussion' ? 'main' : memberIntent ? 'member' : 'threads', original: currentLocal.original,
       onMain: showDiscussion, onThreads: () => showThreads(), onWorkspace: () => setLocal(previous => ({ ...previous, owner, original: !previous.original })) }}
     actions={<MoteFirstCooperation scope={scope} reference={selectedReference} disclosure />} /> : null
+  const conversationPage = section === 'threads' ? memberIntent ? 'members' : threadView : 'discussion'
   const notice = issue ? <ServiceWindowNotice disclosure={{ scope: JSON.stringify(['mote-context', scope?.workspace.hostId, workspaceId, topicId ?? scope?.topic.id]), id: 'mote-context', occurrence: issue, cause: 'mote-context-observation', visible }} notice={{ kind: 'indeterminate', notice: {
     step: 'Mote context read incomplete', mode: issue, restore: 'Retry this Mote context. Its original Agents and drafts remain available.' } }} /> : null
   const body = <MoteComposerPresentation value={context} dialogue={dialogue}
-    publishKey={floating && visible && scope ? motePresentationContextKey(scope.topic.id, conversationEntry) : undefined}>
-    <div className={`${floating ? 'mote-workface' : 'workbench-context-frame'}${scope ? ' mote-composer-workface' : ''}`} data-mote-workface={scope?.topic.id} data-mote-section={section} data-mote-workface-presentation={scope ? presentation : undefined}>
-      {floating && scope ? <header className="mote-workface__navigation"><MoteConversationIdentity scope={scope} visible={visible} />
-        <SurfaceModeSwitch<'discussion' | MoteThreadView> className="mote-thread-navigation" value={section === 'threads' ? memberIntent ? 'members' : threadView : 'discussion'} active={visible} ariaLabel="Mote 内容" onChange={next => next === 'discussion' ? showDiscussion() : showThreads(next)} options={[{ value: 'discussion', label: '主对话' }, ...moteThreadOptions(currentThreads.counts)]} />
-        {conversations}<span className="mote-main-slot" ref={setFloatingActionsHost} />{navigationActions}</header> : null}
+    publishKey={floating && surfaceVisible && scope ? motePresentationContextKey(scope.topic.id, conversationEntry) : undefined}>
+    <div className={`${floating ? 'mote-workface' : 'workbench-context-frame'}${scope ? ' mote-composer-workface' : ''}`} data-mote-workface={scope?.topic.id} data-mote-section={calendarOpen ? 'calendar' : section} data-mote-workface-presentation={scope ? presentation : undefined}>
+      {floating && scope ? <MotePageNavigation surface="floating" scope={scope} active={surfaceVisible} counts={currentThreads.counts}
+        value={calendarOpen ? 'calendar' : conversationPage} onChange={next => {
+          if (next === 'calendar' || calendarOpen && next === conversationPage) {
+            setLocal({ ...currentLocal, calendarVisit: next === 'calendar' ? 'open' : 'returned' })
+          } else if (next === 'discussion') showDiscussion()
+          else showThreads(next)
+        }} actions={<>{calendarOpen ? null : <>{conversations}<span className="mote-main-slot" ref={setFloatingActionsHost} /></>}{navigationActions}</>} /> : null}
+      {floating && scope && currentLocal.calendarVisit !== undefined ? <div className="mote-details__mode" hidden={!calendarOpen} inert={!calendarOpen}>
+        <MoteCalendar key={owner} scope={scope} reference={reference} active={surfaceVisible && calendarOpen}
+          onSelectDiscussion={next => currentMain && landing && sameSelection(next, landing) ? openMain(currentMain) : showThread(next)} />
+      </div> : null}
       {scope && visible && section === 'discussion' && presentation === 'conversation' && dialogue?.page ? <MoteActiveWorkShortcut links={dialogue.page.links} members={currentThreads.working} onOpen={eventId => showThreads('work', { eventId, token: crypto.randomUUID() })} /> : null}
-      {notice}
-      <div className="mote-composer-stage" data-phase={showOriginal ? 'conversation' : entry === 'welcome' ? 'welcome' : 'reading'}>
+      {calendarOpen ? null : notice}
+      <div className="mote-composer-stage" hidden={calendarOpen} inert={calendarOpen} data-phase={showOriginal ? 'conversation' : entry === 'welcome' ? 'welcome' : 'reading'}>
       {readingMain && selectedMain && showOriginal && section === 'discussion' && presentation === 'conversation' ? <MoteStartupStatus reference={readingMain} active={visible && (!sharedFrame || sharedFrame.section === 'discussion')} onOpenTerminal={sessionId => {
         if (!selectReference(readingMain, 'main')) return
         useAppStore.getState().setViewMode(sessionId, 'terminal')

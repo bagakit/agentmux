@@ -15,7 +15,7 @@
 @container mote-space (max-width: 760px) { .mote-heartbeat-lamp { width: 26px; padding: 3px; } .mote-heartbeat-lamp__label { display: none; } }
 @container mote-workface (max-width: 560px) { .mote-heartbeat-lamp { width: 26px; padding: 3px; } .mote-heartbeat-lamp__label { display: none; } }
 .mote-workface { container-name: mote-workface; }
-.mote-workface__original[hidden], .mote-threads-panel[hidden], .pane-tabbar[hidden] { display: none; }
+.mote-composer-stage[hidden], .mote-workface__original[hidden], .mote-threads-panel[hidden], .pane-tabbar[hidden] { display: none; }
 .pane-group.pane-group--mote-conversation { --pane-tabbar-height: 0px; }
 .mote-threads-panel { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow: hidden; padding: 8px 20px 20px; --mote-conversation-browser-height: 100%; }
 .mote-threads-panel > .mote-threads { flex: 1; min-width: 0; min-height: 0; overflow: auto; }
