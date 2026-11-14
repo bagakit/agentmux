@@ -7,6 +7,7 @@ import { createWorkspaceLayout } from '@agentmux/layout'
 import { createWorkbenchTab } from '../../../src/renderer/src/lib/workbench-tabs'
 import type { SessionSnapshot } from '../../../src/shared/contracts'
 import type { HostConfig, HostCreationTrustSnapshot } from '../../../src/shared/contracts'
+import type { NodePublication, NodeSettings } from '@agentmux/core/node-publishing'
 import type { DesktopHostRouteTarget } from '../../../src/shared/host-routes'
 import { SettingsPanel } from '../../../src/renderer/src/components/SettingsPanel'
 import { SettingsNavigation } from '../../../src/renderer/src/components/SettingsNavigation'
@@ -112,6 +113,23 @@ api.hostRoutes.call = (async (target: DesktopHostRouteTarget, method: string) =>
     edges: [{ edgeId: 'D', label: 'Build node', kind: 'ssh', runtimeId: 'controlled-build-runtime' }], observedAt: Date.now() }
   throw new Error('Controlled route preview only reads identity, policy and saved connections. No route write was sent.')
 }) as typeof api.hostRoutes.call
+// Controlled Node observations preserve exact Host and Runtime targets without claiming a real Core.
+let nodePhase: 'healthy' | 'identity-error' | 'owner-error' = 'healthy'
+api.nodePublishing.call = (async (method: string, input: { hostId: string; expectedRuntimeId?: string }) => {
+  calls.push({ kind: 'controlled-node-publication-read', input: { method, ...structuredClone(input) } })
+  if (method !== 'node.inspect') throw new Error('Controlled Node preview only inspects publication metadata')
+  if (nodePhase === 'identity-error') throw new Error('Controlled Node identity is unconfirmed. The original saved Host and drafts are retained.')
+  const runtimeId = input.expectedRuntimeId ?? 'controlled-bound-runtime'
+  return { node: { runtimeId, ownerInstanceId: 'controlled-node-owner', alias: `${input.hostId}-node` }, policyRevision: 'controlled-revision', resourcesShared: false, roots: [], landing: null } satisfies NodePublication
+}) as typeof api.nodePublishing.call
+api.nodePublishing.owner = (async (target: { hostId: string; expectedRuntimeId: string }, method: string) => {
+  calls.push({ kind: method === 'settings.node.configure' ? 'controlled-node-configure' : 'controlled-node-owner-read', input: { target: structuredClone(target), method } })
+  if (method === 'settings.node.configure') throw new Error('Controlled Node preview does not write publication policy')
+  if (method !== 'settings.node.inspect') throw new Error('Controlled Node preview only reads policy')
+  if (nodePhase === 'owner-error') throw new Error('Controlled Node owner read failed. Original publication drafts are retained.')
+  return { node: { runtimeId: target.expectedRuntimeId, ownerInstanceId: 'controlled-node-owner', alias: `${target.hostId}-node` }, policyRevision: 'controlled-revision', operation: null,
+    policy: { alias: `${target.hostId}-node`, shareResources: false, allowedPaths: [], deniedPaths: [], defaultPath: null } } satisfies NodeSettings
+}) as typeof api.nodePublishing.owner
 // Controlled metadata for real application UI. Domain transfer/verification is proved separately through actual connectors.
 const applications = { configurations: [] as ApplicationAccessConfiguration[], operations: [] as ApplicationAccessOperation[], plans: [] as ApplicationAccessPlan[] }
 api.applications.call = (async (method: string, input: Record<string, unknown>) => {
@@ -179,11 +197,12 @@ useAppStore.setState({ config, providerCatalog: await api.providers.list(), acti
 api.config.onChange(next => useAppStore.setState({ config: next }))
 let disposeAppearance = mountThemeRuntime(window, { appAppearance: 'dark' })
 const probe = { ready: false, calls, errors: [] as string[], closeCount: 0,
-  select: (_section: SettingsPageId) => {}, reopen: (_section: SettingsPageId) => {}, theme: (_theme: 'light' | 'dark', _themeId: string = 'graphite') => {},
+  select: (_section: SettingsPageId) => {}, reopen: (_section: SettingsPageId, _hostId?: string) => {}, theme: (_theme: 'light' | 'dark', _themeId: string = 'graphite') => {},
   current: () => api.config.get(),
   onlineDevices: (value: boolean) => { onlineDeviceScenario = value },
   runtimeScenario: (phase: typeof runtimeCapture.phase) => { runtimeCapture.phase = phase },
   networkScenario: (phase: typeof networkCapture.phase) => { networkCapture.phase = phase },
+  nodeScenario: (phase: typeof nodePhase) => { nodePhase = phase },
   selection: () => useAppStore.getState().workbenchSpaceSelection,
   seedRemote: async () => {
     const current = await api.config.get()
@@ -225,17 +244,17 @@ const probe = { ready: false, calls, errors: [] as string[], closeCount: 0,
     calls.push({ kind: 'controlled-final-editable-seed', input: hosts.map(host => host.id) })
     await realSave({ ...current, hosts, workspaces: current.workspaces.filter(workspace => workspace.hostId === 'host-02') }, current)
   },
-  reset: async () => { onlineDeviceScenario = false; const current = await api.config.get(); await realSave(seeded, current); useAppStore.setState({ hostChecks: {} }); calls.length = 0 }
+  reset: async () => { onlineDeviceScenario = false; nodePhase = 'healthy'; const current = await api.config.get(); await realSave(seeded, current); useAppStore.setState({ hostChecks: {} }); calls.length = 0 }
 }
 Object.assign(window, { connectionsProof: probe })
 window.addEventListener('error', event => probe.errors.push(event.message))
 window.addEventListener('unhandledrejection', event => probe.errors.push(String(event.reason)))
 function Fixture() {
   const [opened, setOpened] = useState(true), [section, setSection] = useState<SettingsPageId>('hosts')
-  const [request, setRequest] = useState({ section: 'hosts' as SettingsPageId })
+  const [request, setRequest] = useState<{ section: SettingsPageId; hostId?: string }>({ section: 'hosts' })
   const [epoch, setEpoch] = useState(0)
   probe.select = id => { setSection(id); setRequest({ section: id }) }
-  probe.reopen = id => { setSection(id); setRequest({ section: id }); setEpoch(value => value + 1); setOpened(true) }
+  probe.reopen = (id, hostId) => { setSection(id); setRequest({ section: id, ...(hostId === undefined ? {} : { hostId }) }); setEpoch(value => value + 1); setOpened(true) }
   probe.theme = (theme, themeId = 'graphite') => {
     disposeAppearance(); disposeAppearance = mountThemeRuntime(window, { appAppearance: theme, themeId })
     useAppStore.setState(state => ({ config: { ...state.config!, appearance: { ...state.config!.appearance, appAppearance: theme } } }))

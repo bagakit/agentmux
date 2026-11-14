@@ -10,12 +10,14 @@ app.setName('Owned SelectionField Preview')
 Menu.setApplicationMenu(Menu.buildFromTemplate([{ label: 'Edit', submenu: [{ role: 'copy' }, { role: 'selectAll' }] }]))
 const result = { completed: false, images: [], interactions: [], boundary: 'Actual Node settings and shared SelectionField with controlled DTOs; no real SSH/Runtime claim.' }
 let win
+let read, until, settle, click, press
 app.whenReady().then(async () => {
   try {
     win = new BrowserWindow({ width: 960, height: 760, show: false, webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true, backgroundThrottling: false } })
     await win.loadFile(html)
     const pane = '.network-node-settings'
-    const { read, until, settle, click } = nativeRendererInput(win, result.interactions, pane)
+    const shot = async (name, width, theme, scenario) => { fs.writeFileSync(path.join(evidence, name), (await win.webContents.capturePage()).toPNG()); result.images.push({ path: name, width, theme, scenario }) }
+    ;({ read, until, settle, click, press } = nativeRendererInput(win, result.interactions, pane))
     await until('Boolean(window.connectionsProof?.ready&&document.querySelector(".settings-page"))')
     await read("window.__connectionsTrustedEvents=[];for(const type of ['click','keydown','keypress','keyup','input'])document.addEventListener(type,event=>window.__connectionsTrustedEvents.push({type,trusted:event.isTrusted,key:event.key,target:event.target.tagName}),true)")
     for (const [width, theme] of [[960, 'light'], [420, 'dark'], [320, 'light']]) {
@@ -33,20 +35,82 @@ app.whenReady().then(async () => {
       result.stage = 'click-field'
       await click(pane + ' [aria-label="Node to manage"]')
       result.stage = 'open-menu'
-      await until('Boolean(document.querySelector(".selection-field__menu"))')
+      await until('document.querySelector(".selection-field__menu")?.checkVisibility() === true')
       result.stage = 'capture-menu'
-      const menuImage = `node-menu-${width}-${theme}.png`
-      fs.writeFileSync(path.join(evidence, menuImage), (await win.webContents.capturePage()).toPNG())
-      result.images.push({ path: menuImage, width, theme, scenario: 'menu' })
+      await settle()
+      await shot(`node-menu-${width}-${theme}.png`, width, theme, 'menu')
       await click('.selection-field__menu [data-value="host-02"]')
-      await until(`document.querySelector(${JSON.stringify(pane + ' [aria-label="Node to manage"]')})?.dataset.value==='host-02'`)
-      await read('document.activeElement?.dispatchEvent(new KeyboardEvent("keydown",{key:"Escape",bubbles:true}))'); await settle()
-      assert.equal(await read('document.activeElement?.getAttribute("aria-label")'), 'Node to manage', 'Escape returns focus to the original Node field')
-      const selectedImage = `node-selected-${width}-${theme}.png`
-      fs.writeFileSync(path.join(evidence, selectedImage), (await win.webContents.capturePage()).toPNG())
-      result.images.push({ path: selectedImage, width, theme, scenario: 'selected' })
+      await until(`document.querySelector(${JSON.stringify(pane + ' [aria-label="Node to manage"]')})?.dataset.value==='host-02'&&document.querySelector('[id^="node-to-manage-hint-"]')?.textContent.includes('Runtime controlled-bound-runtime')&&Boolean(document.querySelector('[aria-label="Node alias"]'))`)
+      await click(pane + ' [aria-label="Node to manage"]')
+      await until('document.querySelector(".selection-field__menu")?.checkVisibility() === true')
+      await press('Escape')
+      assert.equal(await read('Boolean(document.querySelector(".selection-field__menu"))'), false, 'Native Escape closes the Node menu')
+      assert.equal(await read('document.activeElement?.getAttribute("aria-label")'), 'Node to manage', 'Native Escape returns focus to the original Node field')
+      assert.equal(await read(`document.querySelector(${JSON.stringify(pane + ' [aria-label="Node to manage"]')})?.dataset.value`), 'host-02', 'Escape preserves the selected Host')
+      assert.equal(await read('Boolean(document.querySelector(".settings-page"))'), true, 'Settings remains open')
+      await shot(`node-selected-${width}-${theme}.png`, width, theme, 'selected')
     }
-    assert.equal(result.images.length, 6)
+    result.stage = 'missing-host'
+    win.setContentSize(420, 760)
+    await read('window.connectionsProof.reset()')
+    await read('window.connectionsProof.reopen("network-node", "missing-host")')
+    await read('window.connectionsProof.theme("dark")')
+    await until('document.querySelector(\'[aria-label="Node to manage"]\')?.dataset.value === "missing-host"')
+    await click('[aria-label="Node to manage"]')
+    await until('document.querySelector(".selection-field__menu")?.checkVisibility() === true')
+    await settle()
+    await shot('node-missing-menu-420-dark.png', 420, 'dark', 'missing-menu')
+    await click('.selection-field__menu [data-value="host-02"]')
+    await until('document.querySelector(\'[aria-label="Node to manage"]\')?.dataset.value === "host-02" && Boolean(document.querySelector(\'[aria-label="Node alias"]\'))')
+    await shot('node-missing-recovered-420-dark.png', 420, 'dark', 'missing-recovered')
+
+    result.stage = 'identity-error'
+    await read('window.connectionsProof.reset()')
+    await read('window.connectionsProof.nodeScenario("identity-error")')
+    await read('window.connectionsProof.reopen("network-node", "local")')
+    await until('document.body.innerText.includes("Controlled Node identity is unconfirmed")')
+    await read('new Promise(resolve => setTimeout(resolve, 80))')
+    assert.equal(await read('Boolean(document.querySelector(\'[aria-label="Node alias"]\'))'), false, 'Identity failure does not substitute a local policy editor')
+    assert.equal(await read("document.evaluate('count(//button[text()=\"Refresh Node identity\" and not(@disabled)])', document, null, XPathResult.NUMBER_TYPE, null).numberValue > 0"), true, 'Identity recovery remains enabled')
+    await shot('node-identity-error-420-dark.png', 420, 'dark', 'identity-error')
+    result.stage = 'identity-recovery'
+    await read('window.connectionsProof.nodeScenario("healthy")')
+    await click('js:[...document.querySelectorAll("button")].find(node => node.textContent === "Refresh Node identity")')
+    await until('Boolean(document.querySelector(\'[aria-label="Node alias"]\'))', 'Identity recovery reaches the original editor')
+
+    result.stage = 'owner-error'
+    await read('window.connectionsProof.reset()')
+    await read('window.connectionsProof.nodeScenario("owner-error")')
+    await read('window.connectionsProof.reopen("network-node", "host-02")')
+    await until('document.body.innerText.includes("Controlled Node owner read failed")')
+    await until("document.evaluate('count(//button[text()=\"Refresh\" and not(@disabled)])', document, null, XPathResult.NUMBER_TYPE, null).numberValue > 0", 'Owner recovery becomes enabled after the busy transition')
+    assert.equal(await read('Boolean(document.querySelector(\'[aria-label="Node alias"]\'))'), false, 'Owner failure does not replace the original policy editor')
+    await shot('node-owner-error-420-dark.png', 420, 'dark', 'owner-error')
+    await read('window.connectionsProof.nodeScenario("healthy")')
+    await click('js:[...document.querySelectorAll("button")].find(node => node.textContent === "Refresh")')
+    await until('Boolean(document.querySelector(\'[aria-label="Node alias"]\'))', 'Owner recovery reaches the original editor')
+
+    result.stage = 'connection-transport'
+    await read('window.connectionsProof.reset()')
+    await read('window.connectionsProof.reopen("hosts", "host-02")')
+    await until('Boolean(document.querySelector(\'[aria-label="Connection transport"]\'))')
+    await click('[aria-label="Connection transport"]')
+    await until('document.querySelector(".selection-field__menu")?.checkVisibility() === true')
+    await settle()
+    await shot('connection-transport-menu-420-dark.png', 420, 'dark', 'connection-menu')
+    await click('.selection-field__menu [data-value="tailcat"]')
+    await until('document.querySelector(\'[aria-label="Connection transport"]\')?.dataset.value === "tailcat" && Boolean(document.querySelector(\'[aria-label="Tailcat address"]\'))')
+    await click('[aria-label="Connection transport"]')
+    await until('document.querySelector(".selection-field__menu")?.checkVisibility() === true')
+    await press('Escape')
+    assert.equal(await read('document.activeElement?.getAttribute("aria-label")'), 'Connection transport', 'Native Escape returns focus to Connection transport')
+    assert.equal(await read('document.querySelector(\'[aria-label="Connection transport"]\')?.dataset.value'), 'tailcat', 'Escape preserves the transport draft')
+    await read('document.querySelector(\'[aria-label="Tailcat address"]\').scrollIntoView({block:"center"})'); await settle()
+    await until('document.querySelector(\'[aria-label="Tailcat address"]\').checkVisibility() && [...document.querySelectorAll("button")].find(node => node.textContent === "Save hosts")?.checkVisibility()', 'Tailcat draft and save action are visible together')
+    await shot('connection-transport-selected-420-dark.png', 420, 'dark', 'connection-selected')
+    assert.equal(await read('window.connectionsProof.calls.filter(call => call.kind === "preview-config-save").length'), 0, 'Selection never saves configuration')
+    assert.equal(await read('window.connectionsProof.calls.filter(call => call.kind === "controlled-node-configure").length'), 0, 'Selection never configures Node policy')
+    assert.equal(result.images.length, 12)
     result.completed = true
   } catch (error) {
     result.failure = { name: error.name, message: error.message, stack: error.stack, stage: result.stage }
