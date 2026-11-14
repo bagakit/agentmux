@@ -30,10 +30,10 @@ export default { ...base, cacheDir: resolve(root, '.cache/mote-human-input-contr
     const file = relative(root, id.split('?')[0]!)
     if (id.includes('?') || !owners.has(file)) return
     const applies = selected && file === 'apps/desktop/src/renderer/src/store.ts'
-    const from = "{ expectedRun: { ...session.control.run }, admissionIntent: { kind: 'manual-actor' } }"
+    const from = "{ expectedRun: { ...session.control.run }, ...(session.inputEpoch === undefined ? {} : { inputEpoch: session.inputEpoch }), admissionIntent: { kind: 'manual-actor' } }"
     if (applies && source.split(from).length !== 2) throw Error('Mote human input mutation must match one evaluated producer')
     const code = applies ? source.replace(from,
-      "{ expectedRun: { ...session.control.run }, admissionIntent: { kind: options?.moteMain ? 'session-conversation' : 'manual-actor' } }") : source
+      from.replace("kind: 'manual-actor'", "kind: options?.moteMain ? 'session-conversation' : 'manual-actor'")) : source
     const trace = process.env.AGENTMUX_MOTE_HUMAN_TRACE
     if (!trace) return applies ? { code, map: null } : undefined
     const fact = { file, fileSHA256: sha(readFileSync(id)), sourceSHA256: sha(source), loadedSHA256: sha(code), mutation: applies ? selected : null }
