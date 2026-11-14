@@ -214,6 +214,13 @@ Read only the matching local help:
   credentials; its `--help` describes setup. Browser/operation IDs stay explicit, stream Gap
   facts remain visible, and cancelling an observation never substitutes for browser.stop.
 - amux browser run --help: page-program API, capability names and original result/receipt reads.
+- For visual reading in Desktop, focus the webpage or its Browser toolbar. The person can
+  use `Cmd+-` to fit more content (try 75%) or `Cmd+=` to enlarge small text (try 125%).
+  Use Ctrl on other platforms. `Cmd+0` or `Ctrl+0` restores the Desktop default of 90%.
+  A non-default percentage is shown by the address field or in More on a narrow pane. Future opens
+  reuse that site's saved zoom in the same Profile. Agents read at the applied zoom.
+  For a wider layout during an Agent task, use
+  `amux browser viewport --browser ID --preset desktop` when the original target supports it.
 - amux browser viewport --help: change the same embedded page's execution Viewport through its original owner.
   `--preset mobile|tablet|desktop|responsive` shares the App's presets; custom `--width 844 --height 390`
   (mobile layout by default) tests landscape without navigation. `--screen desktop` chooses desktop
