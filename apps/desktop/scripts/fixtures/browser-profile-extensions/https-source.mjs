@@ -21,16 +21,17 @@ export async function startExtensionHttpsFixture(home, out) {
   execFileSync('openssl', ['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-days', '2', '-keyout', join(home, 'fixture-key.pem'), '-out', caPath, '-subj', '/CN=Private extension acquisition fixture', '-addext', 'subjectAltName=IP:127.0.0.1', '-addext', 'basicConstraints=critical,CA:TRUE'], { stdio: 'ignore' })
   const certificate = await readFile(caPath); await writeFile(join(out, 'fixture-ca.pem'), certificate)
   const files = new Map(Object.entries({ '/package.zip': 'package.zip', '/signed.crx': 'signed.crx', '/signed.xml': 'signed.xml', '/webextensions.json': 'webextensions.json', '/webextension.xpi': 'webextension.xpi', '/unknown.zip': 'unknown.zip' }))
-  let slow, remaining, closed = false, released = false
+  let slow, remaining, closed = false, released = false, holdManifest = false
   const server = createServer({ key: await readFile(join(home, 'fixture-key.pem')), cert: certificate }, async (request, response) => {
     const path = new URL(request.url, 'https://127.0.0.1').pathname
     requests.push({ path, method: request.method, cookiePresent: !!request.headers.cookie, authorizationPresent: !!request.headers.authorization })
     if (path === '/slow-state') { response.setHeader('Content-Type', 'application/json'); response.end(JSON.stringify({ started: !!slow, open: !!slow && !closed && !released })); return }
     if (path === '/release-slow') { released = true; if (slow && !closed) slow.end(remaining); response.end('{}'); return }
+    if (path === '/hold-next-manifest') { holdManifest = true; slow = undefined; closed = false; released = false; response.end('{}'); return }
     if (path === '/failure') { response.writeHead(503); response.end(); return }
     try {
-      if (path === '/slow.zip') {
-        const bytes = await readFile(join(directory, 'package.zip')); slow = response; remaining = bytes.subarray(1)
+      if (path === '/slow.zip' || path === '/signed.xml' && holdManifest) {
+        const bytes = await readFile(join(directory, path === '/slow.zip' ? 'package.zip' : 'signed.xml')); slow = response; remaining = bytes.subarray(1); holdManifest = false
         response.on('close', () => { closed = true }); response.writeHead(200, { 'Content-Length': bytes.length, 'Content-Type': 'application/octet-stream' }); response.write(bytes.subarray(0, 1)); return
       }
       const name = files.get(path)

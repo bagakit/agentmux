@@ -26,15 +26,23 @@ const receipt = { schema: 'agentmux.browser-profile-extensions.native.v1', passe
   sources: {}, processes: [], out, cleanup: {} }
 let server, onlineFixture
 const uiOnly = process.env.EXTENSIONS_CASE === 'online-ui'
-const online = uiOnly || process.env.EXTENSIONS_CASE === 'online-install'
+const onlineUpdate = process.env.EXTENSIONS_CASE === 'online-update'
+const online = uiOnly || onlineUpdate || process.env.EXTENSIONS_CASE === 'online-install'
 const mutateResultBridge = (code, path) => {
   if (process.env.EXTENSIONS_RESULT_MUTATION !== '1' || !path.endsWith('/shared/ipc-result.ts')) return code
-  const target = "'listProfileExtensions', 'prepareProfileExtension', 'applyProfileExtension', 'removeProfileExtension', 'loadProfileExtension', "
+  const target = "'listProfileExtensions', 'checkProfileExtensionUpdate', 'prepareProfileExtension', 'applyProfileExtension', 'removeProfileExtension', 'loadProfileExtension', "
   assert.equal(code.split(target).length, 2, 'Mutate the one actual production IPC result method list')
   receipt.productionMutation = { target: 'BROWSER_PROFILE_RESULT_METHODS', kind: 'omit-extension-result-unwrapping', originalSha256: hash(code) }
   return code.replace(target, '')
 }
 const mutateOnline = (code, path) => {
+  if (process.env.EXTENSIONS_ONLINE_MUTATION === 'hide-update-candidate' && path === join(repo, 'apps/desktop/src/main/browser-profile-extensions.ts')) {
+    const target = 'compareExtensionVersions(observed.candidate.version, record.version) > 0'
+    assert.equal(code.split(target).length, 2, 'Mutate the original observed version comparison')
+    const changed = code.replace(target, 'false')
+    receipt.productionMutation = { file: relative(repo, path), kind: 'hide-newer-original-manifest-candidate', originalSha256: hash(code), effectiveSha256: hash(changed) }
+    return changed
+  }
   if (process.env.EXTENSIONS_ONLINE_MUTATION === 'hold-profile-lock' && path === join(repo, 'apps/desktop/src/main/browser-profile-extensions.ts')) {
     const target = "pkg = source.kind === 'local' ? await prepareExtensionPackage(source.path, staging, admitted.previous?.key) : await prepareOnlineExtension(source, staging, admitted.previous?.key)"
     assert.equal(code.split(target).length, 2, 'Restore the former configuration lock around the real acquisition only')
@@ -120,7 +128,7 @@ try {
   const reports = []
   for (const phase of (uiOnly ? ['first'] : ['first', 'second'])) {
     const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^(AGENTMUX_|CTXMUX_)/u.test(key) && key !== 'ELECTRON_RUN_AS_NODE'))
-    Object.assign(env, { EXTENSIONS_HOME: home, EXTENSIONS_OUT: out, EXTENSIONS_BASE: base, EXTENSIONS_PHASE: phase, EXTENSIONS_NODE: process.execPath, ...(online ? { EXTENSIONS_CASE: uiOnly ? 'online-ui' : 'online-install', EXTENSIONS_ONLINE_BASE: onlineBase, NODE_EXTRA_CA_CERTS: fixtureCA } : {}) })
+    Object.assign(env, { EXTENSIONS_HOME: home, EXTENSIONS_OUT: out, EXTENSIONS_BASE: base, EXTENSIONS_PHASE: phase, EXTENSIONS_NODE: process.execPath, ...(online ? { EXTENSIONS_CASE: uiOnly ? 'online-ui' : onlineUpdate ? 'online-update' : 'online-install', EXTENSIONS_ONLINE_BASE: onlineBase, NODE_EXTRA_CA_CERTS: fixtureCA } : {}) })
     const lines = []
     const processReport = await runProbeProcess(electron, [join(out, 'bootstrap.cjs')], {
       temporaryRoot: home, cwd: home, env, timeoutMs: 240_000,
@@ -143,7 +151,7 @@ try {
   assert.notEqual(reports[0].pid, reports[1].pid, 'Actual second process has a distinct PID')
   assert.equal(reports[1].cases[0].originalProfileId, reports[0].retained.profileId, 'Second process reads the first original Profile'); assert.equal(reports[1].cases[0].extensionId, reports[0].retained.extensionId)
   }
-  if (online) { assert.ok(onlineFixture.requests.length >= (uiOnly ? 1 : 5), 'Real HTTPS requests consumed'); assert.ok(onlineFixture.requests.every(request => !request.cookiePresent && !request.authorizationPresent), 'Website cookie and authorization headers never enter acquisition'); receipt.onlineRequests = onlineFixture.requests; receipt.case = uiOnly ? 'online-ui' : 'online-install' }
+  if (online) { assert.ok(onlineFixture.requests.length >= (uiOnly ? 1 : 5), 'Real HTTPS requests consumed'); assert.ok(onlineFixture.requests.every(request => !request.cookiePresent && !request.authorizationPresent), 'Website cookie and authorization headers never enter acquisition'); receipt.onlineRequests = onlineFixture.requests; receipt.case = uiOnly ? 'online-ui' : onlineUpdate ? 'online-update' : 'online-install' }
   receipt.passed = true
 } catch (error) { receipt.failure = { message: error.message, stack: error.stack } }
 finally {

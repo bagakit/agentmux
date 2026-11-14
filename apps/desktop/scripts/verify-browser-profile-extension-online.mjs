@@ -7,12 +7,12 @@ import { dirname, join, resolve } from 'node:path'
 
 const repo = resolve(import.meta.dirname, '../../..')
 const args = process.argv.slice(2)
-assert.ok(args.every((arg, i) => ['--case', '--fresh', '--record'].includes(arg) || i > 0 && ['--case', '--record'].includes(args[i - 1])), 'Use --case install [--fresh | --record FILE].')
+assert.ok(args.every((arg, i) => ['--case', '--fresh', '--record'].includes(arg) || i > 0 && ['--case', '--record'].includes(args[i - 1])), 'Use --case install|update [--fresh | --record FILE].')
 const selected = args[args.indexOf('--case') + 1]
-assert.equal(selected, 'install', 'Update is a separate Task.')
+assert.ok(selected === 'install' || selected === 'update', 'Choose the exact install or update Task.')
 assert.ok(!(args.includes('--fresh') && args.includes('--record')), 'Prepare fresh or record explicitly selected existing proof.')
 const common = resolve(repo, execFileSync('git', ['rev-parse', '--git-common-dir'], { cwd: repo, encoding: 'utf8' }).trim())
-const area = join(dirname(common), '.local/browser-daily-p0p1/t001')
+const area = join(dirname(common), '.local/browser-daily-p0p1', selected === 'install' ? 't001' : 't002')
 const indexPath = join(area, 'index.json'), reviewPath = join(area, 'visual-review.json')
 const sha = bytes => createHash('sha256').update(bytes).digest('hex')
 const fileHash = async path => sha(await readFile(path))
@@ -24,10 +24,13 @@ const historicalProducers = [
   'apps/desktop/scripts/verify-browser-profile-extensions-native.mjs',
   'apps/desktop/scripts/fixtures/browser-profile-extensions/main.ts',
   'apps/desktop/scripts/fixtures/browser-profile-extensions/online-install.ts',
+  'apps/desktop/scripts/fixtures/browser-profile-extensions/online-update.ts',
   'apps/desktop/scripts/fixtures/browser-profile-extensions/renderer.tsx'
 ]
 const extras = ['apps/desktop/scripts/verify-browser-profile-extension-online.mjs', 'packages/core/guides/modules/browser.md', 'packages/core/scripts/generate-guides.mjs', 'apps/desktop/package.json', 'pnpm-lock.yaml']
-const variants = {
+const variants = selected === 'update' ? {
+  'hide-update-candidate': { kind: 'hide-newer-original-manifest-candidate', oracle: 'The original manifest check must report its newer version without applying it' }
+} : {
   'skip-manifest-hash': { kind: 'skip-declared-manifest-package-hash', oracle: 'A standard manifest digest mismatch must not become an installable review' },
   'hold-profile-lock': { kind: 'restore-configuration-lock-around-acquisition', oracle: 'Profile metadata must complete while the real acquisition response is still open' }
 }
@@ -110,7 +113,13 @@ async function verify(index, visual = true) {
   assert.equal(native.passed, true); assert.equal(native.processes.length, 2)
   assert.ok(first.cases.length > 0 && second.cases.length > 0)
   assert.notEqual(first.pid, second.pid)
-  assert.ok(first.cases.some(item => item.metadataCompletedBeforeResponseRelease === true))
+  if (selected === 'install') assert.ok(first.cases.some(item => item.metadataCompletedBeforeResponseRelease === true))
+  else {
+    assert.equal(native.case, 'online-update')
+    for (const name of ['manifest-check-does-not-lock-Profile-configuration-and-rechecks-original-revision', 'actual-compiled-public-CLI-check-reports-v2-without-package-application', 'actual-production-GUI-added-permission-review-cancel-keeps-v1-and-explicit-update-runs-v2', 'wrong-key-version-and-source-cannot-replace-v2-and-original-native-unknown-remains-inspectable']) assert.ok(first.cases.some(item => item.kind === name), 'Actual update business case: ' + name)
+    assert.ok(second.cases.some(item => item.kind === 'second-process-exact-manifest-check-does-not-warm-cold-Profile-or-replay-original-unknown'))
+    assert.ok(second.cases.some(item => item.kind === 'second-process-approved-v2-functional-content-background-storage-and-original-identity'))
+  }
   assert.equal(second.cases[0].extensionId, first.retained.extensionId)
   const derived = await checkSources(index.native, index, true)
   for (const [variant, expected] of Object.entries(variants)) {
@@ -120,8 +129,11 @@ async function verify(index, visual = true) {
     derived.push(...await checkSources(record, index, true))
   }
   const { receipt: ui, first: uiFacts } = await checkRecord(index.ui)
-  assert.equal(ui.passed, true); assert.equal(ui.case, 'online-ui'); assert.equal(ui.processes.length, 1)
-  assert.ok(uiFacts.cases.some(item => item.kind === 'current-production-GUI-presentation-and-original-Theme-runtime'))
+  assert.equal(ui.passed, true)
+  if (selected === 'install') {
+    assert.equal(ui.case, 'online-ui'); assert.equal(ui.processes.length, 1)
+    assert.ok(uiFacts.cases.some(item => item.kind === 'current-production-GUI-presentation-and-original-Theme-runtime'))
+  } else assert.equal(index.ui.receiptSha256, index.native.receiptSha256, 'Update images come from the same current business/UI candidate')
   await checkSources(index.ui, index)
   if (visual) {
     const review = JSON.parse(await readFile(reviewPath, 'utf8'))
@@ -133,7 +145,7 @@ async function verify(index, visual = true) {
     }
   }
   return { passed: true, case: selected, sourceRoot: repo, recordedSourceRoot: index.sourceRoot, index: indexPath, nativeReceipt: index.native.receipt, currentGUIReceipt: index.ui.receipt, visualReview: reviewPath, derived, appLaunched: false,
-    boundary: 'Original public CLI/Profile/component/preload/IPC/Native and two bearing mutations. Current GUI tested separately after exactly two copy changes and fixture Theme-runtime initialization. Host confirmation fixture is not a person clicking the production dialog; full Desktop/Run journey is a separate integration.' }
+    boundary: selected === 'install' ? 'Original public CLI/Profile/component/preload/IPC/Native and two bearing mutations. Current GUI tested separately after exactly two copy changes and fixture Theme-runtime initialization. Host confirmation fixture is not a person clicking the production dialog; full Desktop/Run journey is a separate integration.' : 'Original check/prepare/apply public CLI/Profile/component/preload/IPC/Native, exact v2 functionality after two App processes and a bearing observed-version mutant. Check does not warm cold Profiles or confirm pending native changes. Host confirmation fixture is not a person clicking the production dialog; full Desktop/Run journey is a separate integration.' }
 }
 async function recordReceipt(path, storage) {
   path = resolve(path)
@@ -159,7 +171,7 @@ async function recordReceipt(path, storage) {
   return record
 }
 async function execute(variant, run) {
-  const env = { ...process.env, EXTENSIONS_CASE: variant === 'ui' ? 'online-ui' : 'online-install', EXTENSIONS_OUTPUT_ROOT: join(area, 'native') }
+  const env = { ...process.env, EXTENSIONS_CASE: selected === 'update' ? 'online-update' : variant === 'ui' ? 'online-ui' : 'online-install', EXTENSIONS_OUTPUT_ROOT: join(area, 'native') }
   delete env.EXTENSIONS_RESULT_MUTATION; delete env.EXTENSIONS_ONLINE_MUTATION
   if (variants[variant]) env.EXTENSIONS_ONLINE_MUTATION = variant
   let output = ''
@@ -205,8 +217,9 @@ if (!args.includes('--fresh') && !args.includes('--record')) {
   const inputs = fresh ? null : JSON.parse(await readFile(resolve(args[args.indexOf('--record') + 1]), 'utf8'))
   const native = await recordCompleted(fresh ? await execute('native', run) : inputs.native, storage, run, 'native', fresh), mutations = {}
   for (const variant of Object.keys(variants)) mutations[variant] = await recordCompleted(fresh ? await execute(variant, run) : inputs.mutations[variant], storage, run, variant, fresh)
-  const ui = await recordCompleted(fresh ? await execute('ui', run) : inputs.ui, storage, run, 'ui', fresh)
-  const images = Object.fromEntries(await Promise.all(['first-online-source.png', 'first-online-review.png', 'first-online-installed.png'].map(async name => { const path = join(ui.directory, name); return [path, await fileHash(path)] })))
+  const ui = selected === 'update' ? native : await recordCompleted(fresh ? await execute('ui', run) : inputs.ui, storage, run, 'ui', fresh)
+  const imageNames = selected === 'update' ? ['first-update-available.png', 'first-update-review.png', 'first-update-installed.png'] : ['first-online-source.png', 'first-online-review.png', 'first-online-installed.png']
+  const images = Object.fromEntries(await Promise.all(imageNames.map(async name => { const path = join(ui.directory, name); return [path, await fileHash(path)] })))
   const old = native.sources[view], current = await fileHash(join(repo, view))
   const index = { schema: 'agentmux.profile-extension-online.proof.v2', case: selected, sourceRoot: repo, sourceCommit: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repo, encoding: 'utf8' }).trim(), native, mutations, ui, images, visualReview: reviewPath,
     currentProducers: Object.fromEntries(await Promise.all(historicalProducers.map(async path => [path, await fileHash(join(repo, path))]))),

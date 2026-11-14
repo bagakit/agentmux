@@ -30,18 +30,92 @@ function packageBytes(version = '1.0.0', signed = false, extra = {}) {
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), 'amux-extension-online-unit-')); roots.push(root)
   let current: any = { profileRevision: 'r1', records: [], receipts: [], pending: [] }, consent = false
+  const resources = { roots: 0, sessions: 0, preparations: 0 }
   const loads: any[] = [], confirmations: any[] = [], live = new Map<string, any>()
-  const owner = new BrowserProfileExtensions({ root: () => root, read: async () => structuredClone(current), change: async (_id, action) => action(),
-    prepareSession: async () => {}, existingSession: () => session as any, session: () => session as any,
+  const owner = new BrowserProfileExtensions({ root: () => { resources.roots++; return root }, read: async () => structuredClone(current), change: async (_id, action) => action(),
+    prepareSession: async () => { resources.preparations++ }, existingSession: () => session as any, session: () => { resources.sessions++; return session as any },
     begin: async (_id, _rev, intent) => { current.pending.push(intent) },
     commit: async (_id, _rev, records, receipt) => { current = { profileRevision: 'r2', records, receipts: [...current.receipts, receipt], pending: [] }; return current } })
   const session = { extensions: { getExtension: (id: string) => live.get(id), getAllExtensions: () => [...live.values()], removeExtension: (id: string) => live.delete(id),
     loadExtension: async (path: string) => { const manifest = JSON.parse(await readFile(join(path, 'manifest.json'), 'utf8')); const result = { id: nativeId, path, version: manifest.version }; loads.push(result); live.set(nativeId, result); return result } } }
   owner.setConfirmationHandler(async request => { confirmations.push(request); return consent })
   const prepare = (source: BrowserProfileExtensionInputSource, operationId = 'original-online-prepare') => owner.review('profile', current.profileRevision, operationId, source)
-  return { owner, prepare, loads, confirmations, consent: () => { consent = true }, current: () => current }
+  return { owner, prepare, loads, confirmations, resources, consent: (value = true) => { consent = value }, current: () => current }
 }
 afterEach(async () => { vi.restoreAllMocks(); network.routes.clear(); network.calls.length = 0; await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))) })
+describe('explicit checks and updates of one retained extension source', () => {
+  const manifestUrl = 'https://updates.invalid/source.xml?signature=private-exact-source'
+  const packageUrl = 'https://packages.invalid/signed.crx'
+  const xml = (version: string) => Buffer.from(`<gupdate xmlns="http://www.google.com/update2/response" protocol="2.0"><app appid="${nativeId}"><updatecheck codebase="${packageUrl}" version="${version}"/></app></gupdate>`)
+  async function installed() {
+    const f = await fixture()
+    network.routes.set(manifestUrl, { bytes: xml('1.0.0') }); network.routes.set(packageUrl, { bytes: packageBytes('1.0.0', true) })
+    const review = await f.prepare({ kind: 'update-manifest', url: manifestUrl, addonId: nativeId }); f.consent()
+    await f.owner.apply('profile', review.expectedRevision, review.reviewId)
+    return { ...f, extensionId: review.extensionId }
+  }
+  it('checks only the exact manifest and version, without package, staging, native load or approval', async () => {
+    const f = await installed(), resources = { ...f.resources }, loads = f.loads.length, approvals = f.confirmations.length
+    network.calls.length = 0; network.routes.set(manifestUrl, { bytes: xml('2.0.0') })
+    const check = await f.owner.check('profile', f.extensionId)
+    expect(check).toMatchObject({ status: 'update-available', extensionId: f.extensionId, currentVersion: '1.0.0', candidateVersion: '2.0.0', source: { origin: 'https://updates.invalid' } })
+    expect(network.calls.map(call => call.url)).toEqual([manifestUrl])
+    expect(f.resources).toEqual(resources); expect(f.loads).toHaveLength(loads); expect(f.confirmations).toHaveLength(approvals)
+    expect(JSON.stringify(check)).not.toContain('private-exact-source')
+    expect(parseBrowserProfileExtensionResult('browser.profile.extension.check', check)).toMatchObject({ status: 'update-available', extensionId: f.extensionId })
+  })
+  it('distinguishes no newer candidate, protocol no-update, source failure and missing original source', async () => {
+    const f = await installed()
+    network.routes.set(manifestUrl, { bytes: xml('1') }); expect((await f.owner.check('profile', f.extensionId)).status).toBe('current')
+    network.routes.set(manifestUrl, { bytes: Buffer.from(`<gupdate xmlns="http://www.google.com/update2/response" protocol="2.0"><app appid="${nativeId}"><updatecheck status="noupdate"/></app></gupdate>`) })
+    expect((await f.owner.check('profile', f.extensionId)).status).toBe('current')
+    network.routes.set(manifestUrl, { bytes: Buffer.from(JSON.stringify({ addons: { [nativeId]: { updates: [] } } })) })
+    expect((await f.owner.check('profile', f.extensionId)).status).toBe('current')
+    network.routes.set(manifestUrl, { bytes: Buffer.alloc(0), status: 503 })
+    expect((await f.owner.check('profile', f.extensionId)).status).toBe('unknown')
+    delete f.current().records[0].acquisition
+    f.current().records[0].source.updateUrl = 'https://display.invalid/stripped'
+    network.calls.length = 0
+    expect((await f.owner.check('profile', f.extensionId)).status).toBe('manual'); expect(network.calls).toEqual([])
+    await expect(f.owner.review('profile', f.current().profileRevision, 'missing-retained-source', { kind: 'installed-update' }, f.extensionId)).rejects.toThrow('no retained update manifest')
+  })
+  it.each(['metadata', 'pending'] as const)('does not publish a candidate after original %s changes during the held manifest read', async change => {
+    const f = await installed(), body = new PassThrough(), bytes = xml('2.0.0')
+    network.calls.length = 0; network.routes.set(manifestUrl, { bytes, body })
+    const pending = f.owner.check('profile', f.extensionId); body.write(bytes.subarray(0, 1))
+    await vi.waitFor(() => expect(network.calls).toHaveLength(1))
+    if (change === 'metadata') f.current().profileRevision = 'changed-by-person'
+    else f.current().pending.push({ operationId: 'original-native-unknown', extensionId: f.extensionId, kind: 'update' })
+    body.end(bytes.subarray(1))
+    expect(await pending).toMatchObject({ status: 'unknown', profileRevision: 'r2' })
+    expect(network.calls.map(call => call.url)).toEqual([manifestUrl])
+  })
+  it('keeps an unconfirmed original native change unknown instead of relabeling its saved version current', async () => {
+    const f = await installed(), resources = { ...f.resources }
+    f.current().pending.push({ operationId: 'original-native-unknown', extensionId: f.extensionId, kind: 'update' })
+    network.calls.length = 0
+    expect(await f.owner.check('profile', f.extensionId)).toMatchObject({ status: 'unknown', currentVersion: '1.0.0', reason: expect.stringContaining('remains unconfirmed') })
+    expect(network.calls).toEqual([]); expect(f.resources).toEqual(resources)
+    expect(f.current().pending[0].operationId).toBe('original-native-unknown')
+    const originalPending = structuredClone(f.current().pending), loads = f.loads.length, approvals = f.confirmations.length
+    network.routes.set(manifestUrl, { bytes: xml('2.0.0') }); network.routes.set(packageUrl, { bytes: packageBytes('2.0.0', true) })
+    const prepared = await f.owner.review('profile', f.current().profileRevision, 'another-installed-update', { kind: 'installed-update' }, f.extensionId)
+    expect(prepared).toMatchObject({ reviewId: 'another-installed-update', extensionId: f.extensionId, previousVersion: '1.0.0', version: '2.0.0' })
+    expect(f.current().pending).toEqual(originalPending); expect(f.loads).toHaveLength(loads); expect(f.confirmations).toHaveLength(approvals)
+  })
+  it('prepares the exact installed source and added permissions, keeps cancelled bytes and rejects a non-newer package', async () => {
+    const f = await installed(), loads = f.loads.length
+    network.routes.set(manifestUrl, { bytes: xml('2.0.0') }); network.routes.set(packageUrl, { bytes: packageBytes('2.0.0', true, { permissions: ['storage', 'tabs'] }) })
+    const review = await f.owner.review('profile', f.current().profileRevision, 'original-installed-update', { kind: 'installed-update' }, f.extensionId)
+    expect(review).toMatchObject({ extensionId: f.extensionId, previousVersion: '1.0.0', version: '2.0.0', addedPermissions: ['API: tabs'] })
+    f.consent(false); expect((await f.owner.apply('profile', review.expectedRevision, review.reviewId)).outcome).toBe('cancelled')
+    expect(f.loads).toHaveLength(loads); expect(f.current().records[0].version).toBe('1.0.0')
+    f.consent(); await f.owner.apply('profile', review.expectedRevision, review.reviewId)
+    expect(f.current().records[0]).toMatchObject({ id: f.extensionId, version: '2.0.0', acquisition: { url: manifestUrl } })
+    await expect(f.owner.review('profile', f.current().profileRevision, 'not-newer', { kind: 'installed-update' }, f.extensionId)).rejects.toThrow('no newer version')
+    expect(() => parseBrowserProfileExtensionPayload({ operation: 'browser.profile.extension.prepare', profileId: 'profile', expectedRevision: 'r2', operationId: 'missing-target', source: { kind: 'installed-update' } })).toThrow()
+  })
+})
 describe('original Profile extension online preparation', () => {
   it('freezes explicit HTTPS bytes, exposes safe provenance, and still requires the original trusted confirmation', async () => {
     const f = await fixture(), url = 'https://packages.invalid/private-token.zip?signature=source-secret'; network.routes.set(url, { bytes: packageBytes() })

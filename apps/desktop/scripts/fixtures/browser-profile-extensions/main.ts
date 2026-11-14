@@ -13,6 +13,7 @@ import { BrowserViewManager } from '../../../src/main/browser-view-manager.js'
 import { registerBrowserProfileEditorIpc } from '../../../src/main/browser-profile-editor-ipc.js'
 import { THEME_BOOTSTRAP_CHANNEL } from '../../../src/shared/theme-bootstrap.js'
 import { onlineInstall } from './online-install.js'
+import { onlineUpdate } from './online-update.js'
 import { executeBrowserProfileControl } from '../../../src/main/browser-profile-control.js'
 
 const home = process.env.EXTENSIONS_HOME!, out = process.env.EXTENSIONS_OUT!, phase = process.env.EXTENSIONS_PHASE!, base = process.env.EXTENSIONS_BASE!, node = process.env.EXTENSIONS_NODE!
@@ -89,7 +90,8 @@ async function main() {
     control = new AgentMuxControlServer({ socketPath: join(home, 'control.sock'), coreClients: () => [], execute: (request, context) => executeBrowserProfileControl(request as never,
       { profiles: profiles!, usage: {} as never, network: {} as never }, context?.actor) }); await control.start()
     if (process.env.EXTENSIONS_CASE?.startsWith('online-')) {
-      await onlineInstall({ home, out, phase, base, profileId, retained, profiles, browsers, host, store, receipt, cli, token, contents, source, setConsent: (value: boolean) => { consent = value } })
+      const scenario = process.env.EXTENSIONS_CASE === 'online-update' ? onlineUpdate : onlineInstall
+      await scenario({ home, out, phase, base, profileId, retained, profiles, browsers, host, store, receipt, cli, token, contents, source, setConsent: (value: boolean) => { consent = value } })
       receipt.passed = true
       return
     }

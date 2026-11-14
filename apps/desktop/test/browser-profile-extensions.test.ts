@@ -297,6 +297,11 @@ describe('Profile extensions share the original configuration and native Session
       const read = await cli(['ls', '--profile', f.profile.id, '--operation-id', 'compiled-review'])
       expect(read.extensions).toHaveLength(1); expect(read.receipt).toMatchObject({ operationId: 'compiled-review', kind: 'install' })
       expect(f.loadedCalls).toHaveLength(1)
+      const checked = await cli(['check', '--profile', f.profile.id, '--extension', read.extensions[0].id])
+      expect(checked).toMatchObject({ profileId: f.profile.id, extensionId: read.extensions[0].id, currentVersion: '1.0.0', status: 'manual' })
+      expect(f.loadedCalls).toHaveLength(1)
+      const unavailableSource = await runCompiledObjectCli(['browser', 'profile', 'extension', 'prepare', '--profile', f.profile.id, '--expected-revision', f.token(), '--operation-id', 'compiled-recorded-source', '--recorded-source', '--extension', read.extensions[0].id], env)
+      expect(unavailableSource.code).toBe(1); expect(JSON.parse(unavailableSource.stderr).error.message).toContain('no retained update manifest')
       expect(() => parseBrowserProfileControlPayload({ operation: 'browser.profile.extension.apply', profileId: f.profile.id, expectedRevision: f.token(), reviewId: 'compiled-review', approved: true }, [])).toThrow()
       const request = parseBrowserProfileControlPayload({ operation: 'browser.profile.extension.ls', profileId: f.other.id }, [])
       const result = { operation: request.operation, ...parseBrowserProfileControlResult(request.operation, read) } as any
