@@ -2089,7 +2089,8 @@ export type AgentMuxDesktopApi = {
     recover(session: SessionControl, workspacePath?: string, operationId?: string, request?: (Pick<import('@agentmux/core/agent-session-recovery').AgentMuxAgentContinuityInput, 'trigger' | 'timingOverride' | 'input'> & { moteMain?: Pick<import('@agentmux/core/mote-dialogue').MoteDialogueInputSubmit, 'target' | 'expectedRoleRevision'>; inputImages?: readonly import('@agentmux/core').AgentInputImageReference[] })): Promise<SessionRecoveryResult>
     /**
      * Stop one exact Run. An Agent Stop answers with the Core receipt; a retry with the same
-     * `operationId` continues that same Stop. A Terminal Stop has no receipt and no operation id.
+     * `operationId` continues that same Stop. A Terminal Stop retains its original operation ID
+     * and TerminalControlReceipt; inspect reads that original result without repeating Stop.
      */
     stop(session: SessionControl, operationId?: string): Promise<import('@agentmux/core').AgentMuxAgentStopReceipt | import('@agentmux/core').TerminalControlReceipt | undefined>
     /** Read the original Stop receipt without reconnecting or repeating its side effect. */
