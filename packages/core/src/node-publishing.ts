@@ -173,6 +173,7 @@ export type NodePublishingParams = {
         operationId?: string;
     };
     'settings.node.configure': {
+        target?: NodeOwnerTarget;
         expectedRevision: string;
         operationId: string;
         policy: NodePublishingPolicy;
@@ -247,8 +248,9 @@ export function parseNodePublishingParams<M extends NodePublishingMethod>(method
             ...(p.target === undefined ? {} : { target: parseNodeOwnerTarget(p.target) }) } as NodePublishingParams[M];
     }
     if (method === 'settings.node.configure') {
-        const p = rpcRecord(value, ['expectedRevision', 'operationId', 'policy']);
-        return { expectedRevision: rpcString(p.expectedRevision, 'Expected policy revision'), operationId: rpcString(p.operationId, 'Original policy operation'), policy: parseNodePublishingPolicy(p.policy) } as NodePublishingParams[M];
+        const p = rpcRecord(value, ['expectedRevision', 'operationId', 'policy', 'target']);
+        return { expectedRevision: rpcString(p.expectedRevision, 'Expected policy revision'), operationId: rpcString(p.operationId, 'Original policy operation'), policy: parseNodePublishingPolicy(p.policy),
+            ...(p.target === undefined ? {} : { target: parseNodeOwnerTarget(p.target) }) } as NodePublishingParams[M];
     }
     if (method === 'settings.node.resources') {
         rpcRecord(value, []);

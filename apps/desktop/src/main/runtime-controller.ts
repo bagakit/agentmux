@@ -2882,8 +2882,8 @@ export class RuntimeController {
     target: NodeOwnerTarget, method: NodeOwnerMethod,
     params: import('@agentmux/core/node-publishing').NodePublishingParams[NodeOwnerMethod], context: { signal?: AbortSignal } = {}
   ): Promise<import('@agentmux/core/node-publishing').NodePublishingResults[NodeOwnerMethod]> {
-    if (method === 'settings.node.inspect' && 'target' in params) throw new AgentMuxError(
-      'This Node owner call is already bound to its original target. Use the public inspection target only at its original ingress.', 'INVALID_CONTROL_REQUEST')
+    if ((method === 'settings.node.inspect' || method === 'settings.node.configure') && 'target' in params) throw new AgentMuxError(
+      'This Node owner call is already bound to its original target. Use the public policy target only at its original ingress.', 'INVALID_CONTROL_REQUEST')
     const client = this.configuredClient(target.hostId)
     const assertCurrent = () => {
       context.signal?.throwIfAborted()
