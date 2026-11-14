@@ -15,9 +15,10 @@ const config = await api.config.get()
 const list = await api.browser.readProfiles()
 const personal = list.profiles[0]!
 await api.browser.updateProfile(personal.id, { label: 'Personal', notes: '' }, list.profiles.find(value => value.id === personal.id)!.revision)
-const switchScene = new URLSearchParams(location.search).get('scene') === 'switch'
-const client = switchScene ? personal : await api.browser.createProfile('Northwind client')
-if (!switchScene) {
+const scene = new URLSearchParams(location.search).get('scene')
+const singleProfileScene = scene === 'switch' || scene === 'trash-empty'
+const client = singleProfileScene ? personal : await api.browser.createProfile('Northwind client')
+if (!singleProfileScene) {
   await api.browser.updateProfile(client.id, { notes: 'Launch QA for Northwind. Their staging only accepts the Tokyo gateway.' }, (await api.browser.readProfiles()).profiles.find(value => value.id === client.id)!.revision)
   await api.browser.createProfile('QA de-DE')
   await api.browser.createProfile('Release review')
@@ -39,6 +40,8 @@ const root = createRoot(document.getElementById('root')!)
 const readProxySignIn = api.browser.readProfileProxySignIn
 const setProxySignIn = api.browser.setProfileProxySignIn
 let releaseAccessSave: (() => void) | undefined
+let refreshTrash: (() => Promise<void>) | undefined
+let finishTrashRead: (() => void) | undefined
 const settings = () => flushSync(() => root.render(<DesktopClientUiProvider><SettingsPanel initialSection="browser-profiles" onClose={() => {}} /></DesktopClientUiProvider>))
 function BrowserScene() {
   const original = useAppStore(state => state.tabs['b-launch'])!
@@ -50,9 +53,31 @@ async function browser(warning?: string) {
   useAppStore.getState().applyBrowserEvent({ type: 'updated', browser: warning ? { ...snapshot, activity: { operation: null, control: 'human', warning } } : snapshot })
   flushSync(() => root.render(<BrowserScene />))
 }
+if (scene === 'trash-empty') {
+  const listeners = new Set<Parameters<typeof api.browser.onProfilesChanged>[0]>()
+  const subscribe = api.browser.onProfilesChanged
+  api.browser.onProfilesChanged = listener => {
+    const release = subscribe(listener)
+    listeners.add(listener)
+    return () => { listeners.delete(listener); release() }
+  }
+  refreshTrash = async () => {
+    const snapshot = await api.browser.readProfiles()
+    for (const listener of listeners) listener(snapshot)
+  }
+  let readAttempt = 0
+  api.browser.readProfileTrash = async () => {
+    const attempt = ++readAttempt
+    if (attempt === 2) throw new Error('Could not read the original archive.')
+    if (attempt === 3) await new Promise<void>(resolve => { finishTrashRead = resolve })
+    return { revision: attempt, sequence: attempt, entries: [], legacyPendingDeletes: [] }
+  }
+}
 settings()
 Object.assign(window, { profilesVisual: {
   appearance: (mode: 'dark' | 'light') => updateThemeSelection({ ...config.appearance, appAppearance: mode }),
+  refreshTrash: () => refreshTrash?.(),
+  finishTrashRead: () => { finishTrashRead?.(); finishTrashRead = undefined },
   client: client.id,
   settings,
   holdAccessSave() {

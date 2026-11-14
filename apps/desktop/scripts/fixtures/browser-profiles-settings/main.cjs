@@ -51,7 +51,7 @@ app.whenReady().then(async () => {
     await win.loadFile(process.env.PROFILES_VISUAL_HTML, { query: { scene: receipt.scene } })
     win.webContents.debugger.attach('1.3')
     await win.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled', { enabled: true })
-    const expectedRows = receipt.scene === 'switch' ? 1 : 4
+    const expectedRows = ['switch', 'trash-empty'].includes(receipt.scene) ? 1 : 4
     await ready(`Boolean(window.profilesVisual && document.querySelectorAll('[data-settings-pane="browser-profiles"] [data-resource-row]').length === ${expectedRows})`)
     if (receipt.scene === 'switch') {
       await click('[data-resource-row="' + await evaluate('profilesVisual.client') + '"]')
@@ -101,6 +101,40 @@ app.whenReady().then(async () => {
       await ready(`${input}.checked && !${input}.disabled`)
       assert.equal(await evaluate(`document.activeElement === ${search}`), true, 'Saving leaves the alternate focus chosen during the request')
       receipt.switchBehavior = { tab: true, space: true, focusRetained: true, otherFocusPreserved: true, rtl: true, reducedMotion: true, footprint }
+      receipt.complete = true
+    } else if (receipt.scene === 'trash-empty') {
+      const filter = 'input[aria-label="Filter profiles"]'
+      win.setContentSize(560, 780)
+      await evaluate('profilesVisual.appearance("light")')
+      await ready('document.querySelector(".settings-resource-back")?.getClientRects().length > 0')
+      await click('.settings-resource-back')
+      await ready(`document.querySelector(${JSON.stringify(filter)})?.getClientRects().length > 0`)
+      await evaluate(`void (window.originalProfileFilter = document.querySelector(${JSON.stringify(filter)}))`)
+      await type(filter, 'No matching profile')
+      await ready('document.querySelector(".settings-resource-empty.surface-state h2")?.textContent.includes("No matching profile")')
+      await capture('profiles-filter-no-match-light', 560, 780)
+      await click('[aria-label="Clear profiles filter"]')
+      assert.equal(await evaluate('document.activeElement === window.originalProfileFilter && !window.originalProfileFilter.value'), true)
+      await ready('document.querySelectorAll("[data-resource-row]").length === 1')
+      await evaluate('profilesVisual.appearance("dark")')
+      await capture('profiles-filter-restored-dark', 620, 780)
+      const trash = 'document.querySelector(".browser-profile-trash")'
+      const confirmedEmpty = `${trash}?.querySelector('.surface-state h2')?.textContent === 'No recycled Profiles.'`
+      const press = label => evaluate(`[...document.querySelectorAll('button')].find(button => button.textContent.trim() === ${JSON.stringify(label)}).click()`)
+      await press('Recycled Profiles')
+      await ready(confirmedEmpty)
+      await evaluate('profilesVisual.refreshTrash()')
+      await ready(`${trash}?.textContent.includes('Could not read the original archive.')`)
+      assert.equal(await evaluate(`Boolean(${trash}.querySelector('.surface-state'))`), false)
+      await capture('profiles-trash-read-failed-dark', 620, 780)
+      await press('Retry')
+      await ready(`${trash}?.textContent.includes('Reading recycled Profiles…')`)
+      assert.equal(await evaluate(`Boolean(${trash}.querySelector('.surface-state'))`), false)
+      await capture('profiles-trash-retry-pending-dark', 620, 780)
+      await evaluate('profilesVisual.finishTrashRead()')
+      await ready(confirmedEmpty)
+      await evaluate('profilesVisual.appearance("light")')
+      await capture('profiles-trash-confirmed-empty-light', 560, 780)
       receipt.complete = true
     } else if (receipt.scene === 'service-notice' || receipt.scene === 'environment-notice') {
       const prefix='profiles-'+receipt.scene
