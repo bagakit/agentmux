@@ -10,7 +10,7 @@ import { promisify } from 'node:util'
 const exec = promisify(execFile), root = resolve(import.meta.dirname, '../../..')
 const evidence = join(root, '.local/state/pi-hook-binding-proof'), nativeRoot = join(root, '.local/hook-carrier/pi-native')
 const version = '0.84.4', mutations = process.argv.includes('--mutations')
-const paths = ['packages/core/src/providers/pi.ts', 'packages/core/test/providers/pi.test.ts', 'packages/core/test/providers/pi-hook-binding.test.ts',
+const paths = ['packages/providers/src/pi/provider.ts', 'packages/core/test/providers/pi.test.ts', 'packages/core/test/providers/pi-hook-binding.test.ts',
   'packages/core/test/providers/pi-hook-binding.native.test.ts', 'packages/core/test/vitest.pi-hook-binding.config.mts', 'packages/core/scripts/verify-pi-hook-binding.mjs']
 const hash = value => createHash('sha256').update(value).digest('hex')
 const fingerprints = async () => Object.fromEntries(await Promise.all(paths.map(async path => [path, hash(await readFile(join(root, path)))])))

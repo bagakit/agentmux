@@ -8,7 +8,8 @@ const USAGE_FINALIZATION_EVENTS = new Set(lifecycleProvider.hook.usageFinalizati
 import { fixturePath } from '../helpers/fixture-values.js'
 import { describe, expect, it } from 'vitest'
 import { AgentProviderRegistry } from '../../src/agent-provider.js'
-import { HERMES_HOOK_EVENTS, HERMES_HOOKS, createHermesManagedHookPlan } from '../../src/providers/hermes.js'
+import { HERMES_HOOK_EVENTS } from '@agentmux/providers/hermes/provider'
+import { HERMES_HOOKS, createHermesManagedHookPlan } from '../../src/providers/hermes.js'
 import { canonicalHookLifecycleEvent as declaredHookLifecycleEvent } from '../../src/agent-hook-event.js'
 import type { AgentSemanticState } from '../../src/types.js'
 

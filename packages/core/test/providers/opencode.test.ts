@@ -1,7 +1,8 @@
 import { fixturePath } from '../helpers/fixture-values.js'
 import { describe, expect, it } from 'vitest'
 import { AgentProviderRegistry, type AgentProviderHookNormalizationContext } from '../../src/agent-provider.js'
-import { OPENCODE_HOOK_EVENTS, OPENCODE_HOOKS, createOpenCodeManagedHookPlan } from '../../src/providers/opencode.js'
+import { OPENCODE_HOOK_EVENTS } from '@agentmux/providers/opencode/provider'
+import { OPENCODE_HOOKS, createOpenCodeManagedHookPlan } from '../../src/providers/opencode.js'
 import type { AgentSemanticState } from '../../src/types.js'
 
 /**

@@ -11,7 +11,7 @@ import { AgentManagedHookInstaller } from '../../src/managed-hook-installer.js'
 import { AgentHookServer } from '../../src/hook-server.js'
 import { prepareManagedHookRuntime } from '../../src/managed-hook-runtime.js'
 import { retainedHookEnvironment } from '../../src/providers/shared.js'
-import { HERMES_HOOK_EVENTS } from '../../src/providers/hermes.js'
+import { HERMES_HOOK_EVENTS } from '@agentmux/providers/hermes/provider'
 import type { NativeHookEnvelope } from '../../src/types.js'
 
 const exec = promisify(execFile)

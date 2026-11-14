@@ -4,7 +4,7 @@ import { resolve } from 'node:path'
 import { defineConfig } from 'vitest/config'
 
 const root = resolve(import.meta.dirname, '../../..')
-const sourceAliases = ['identity', 'demand', 'diagnostic-evidence', 'git', 'relay', 'capsule', 'browser'].flatMap(name => {
+const sourceAliases = ['identity', 'demand', 'diagnostic-evidence', 'git', 'relay', 'capsule', 'browser', 'providers'].flatMap(name => {
   const directory = resolve(root, `packages/${name}`)
   const manifest = JSON.parse(readFileSync(resolve(directory, 'package.json'), 'utf8'))
   return Object.entries(manifest.exports as Record<string, string | { import?: string }>).flatMap(([key, value]) => {
@@ -20,12 +20,12 @@ const mutants: Record<string, [string, string]> = {
   'last-binding-wins': ['sendHookReceipt(endpoint, token, JSON.stringify({', 'sendHookReceipt(process.env.AGENTMUX_HOOK_URL, process.env.AGENTMUX_HOOK_TOKEN, JSON.stringify({'],
   'foreign-host-admitted': ["if (process.env.AGENTMUX_ENV !== '1' || process.env.AGENTMUX_PROVIDER_ID !== 'opencode' ||\n      process.env.AGENTMUX_OPENCODE_HOOK_HOST === 'unbound') return {}", 'if (false) return {}'],
   'external-host-claimed': ['const external = openCodeExternalHost(plan.args)', 'const external = false'],
-  'persist-run-environment': ['content: openCodePluginSource(),',
-    'content: openCodePluginSource() + "\\nconst persistedRunEnvironment = " + JSON.stringify(env) + ";\\n",']
+  'persist-run-environment': ['content: openCodePluginSource(services),',
+    'content: openCodePluginSource(services) + "\\nconst persistedRunEnvironment = " + JSON.stringify(env) + ";\\n",']
 }
 export default defineConfig({ root, resolve: { alias: sourceAliases }, cacheDir: resolve(root, '.local/hook-durability/opencode-vitest', process.env.AGENTMUX_OPENCODE_MUTANT ?? 'positive'),
   plugins: [{ name: 'opencode-binding-production-owner', enforce: 'pre', transform(original, id) {
-    if (id.split('?')[0] !== resolve(root, 'packages/core/src/providers/opencode.ts')) return
+    if (id.split('?')[0] !== resolve(root, 'packages/providers/src/opencode/provider.ts')) return
     const name = process.env.AGENTMUX_OPENCODE_MUTANT
     let code = original
     if (name) {

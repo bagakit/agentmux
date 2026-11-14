@@ -101,15 +101,6 @@ const DELIBERATE: ReadonlyArray<{
       '（apps/desktop/src/main/host-factory.ts）。多宿主接线尚未走到需要注册表的那一步。'
   },
 
-  {
-    module: 'src/providers/pi.ts',
-    name: 'PI_HOOK_EVENTS',
-    premise:
-      '它不是死代码而是**判据的锚点**：test/providers/pi.test.ts 用它逐个断言七个事件名' +
-      '真的出现在生成的扩展源码里（声明 ↔ 生成代码的漂移守卫），' +
-      'test/agent-provider-protocol.test.ts 也按它核对 provider 自报的事件名。' +
-      '删掉它等于删掉那两道守卫。真正该做的是让 PI_HOOKS.rules 从它派生（另一次改动）。'
-  },
 
 ]
 

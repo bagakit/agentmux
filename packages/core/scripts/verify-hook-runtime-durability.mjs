@@ -20,11 +20,11 @@ const regressions = ['managed-hook-installer', 'doctor-hook-installation', 'hook
   'unified-identifiers', 'permission-hook-callback'].map(name => test(name + '.test.ts'))
 const definitions = {
   environment: { config: 'vitest.hook-environment.config.mts', env: 'AGENTMUX_HOOK_ENVIRONMENT_MUTATION',
-    owners: ['providers/execution-environment.ts', 'packages/providers/src/grok/provider.ts', 'client.ts', 'packages/providers/src/gemini/provider.ts', 'providers/claude-hook-activation.ts', 'providers/claude-workspace-trust.ts', 'providers/opencode.ts'],
+    owners: ['providers/execution-environment.ts', 'packages/providers/src/grok/provider.ts', 'client.ts', 'packages/providers/src/gemini/provider.ts', 'providers/claude-hook-activation.ts', 'providers/claude-workspace-trust.ts', 'packages/providers/src/opencode/provider.ts'],
     inputs: ['agent-provider.ts', 'client.ts', 'providers/execution-environment.ts', 'providers/shared.ts',
       ...['claude', 'claude-hook-activation', 'claude-workspace-trust', 'cursor-adapter', 'cursor-native-history',
         'hermes', 'opencode', 'pi'].map(name => 'providers/' + name + '.ts')].map(source)
-      .concat(['antigravity', 'copilot', 'gemini', 'droid', 'grok', 'cursor'].map(name => 'packages/providers/src/' + name + '/provider.ts')),
+      .concat(['antigravity', 'copilot', 'gemini', 'droid', 'grok', 'cursor', 'pi', 'opencode', 'hermes'].map(name => 'packages/providers/src/' + name + '/provider.ts')),
     tests: ['provider-hook-environment.test.ts', 'claude-hook-activation.test.ts'],
     mutants: ['ignore-home', 'inherit-unset', 'drop-provider-env', 'core-cwd-relative', 'ignore-gemini-home', 'drop-inspect-unset',
       'ignore-claude-inspection-home', 'ignore-claude-trust-env', 'ignore-grok-home', 'trim-opencode-override'] },
@@ -41,8 +41,8 @@ const definitions = {
     inputs: ['providers/shared.ts', 'managed-hook-installer.ts', 'hook-config-merge.ts', 'agent-hook-command.ts', 'agent-hook-delivery.ts',
       'hook-passive-response.ts', 'hook-server.ts'].map(source), tests: ['managed-hook-bridge.test.ts'], extras: grokInputs,
     mutants: ['drop-launch-mark', 'borrow-foreign-provider', 'persist-installation-path', 'retire-live-callback', 'forget-owned-callback'] },
-  opencode: { config: 'vitest.opencode-hook-binding.config.mts', owners: ['providers/opencode.ts'],
-    inputs: ['providers/opencode.ts', 'providers/execution-environment.ts', 'agent-provider.ts', 'client.ts', 'hook-server.ts',
+  opencode: { config: 'vitest.opencode-hook-binding.config.mts', owners: ['packages/providers/src/opencode/provider.ts'],
+    inputs: ['packages/providers/src/opencode/provider.ts', 'providers/execution-environment.ts', 'agent-provider.ts', 'client.ts', 'hook-server.ts',
       'agent-hook-delivery.ts', 'hook-normalizer.ts', 'managed-hook-installer.ts'].map(source),
     tests: ['providers/opencode.test.ts', 'providers/opencode-hook-binding.test.ts', 'providers/opencode-hook-binding.native.test.ts',
       'fixtures/opencode-hook-hosts.py'], extras: [core('scripts/verify-opencode-hook-binding.mjs')],
@@ -187,7 +187,7 @@ try {
     if (suite === 'opencode') {
       assert.equal(await command('opencode-' + mode, [join(root, core('scripts/verify-opencode-hook-binding.mjs')), ...(mode === 'mutations' ? ['--mutations'] : [])]), 0)
       const prefix = join(root, '.local/hook-durability/opencode-proof'), proofPath = join(prefix, mode + '.json'), value = await json(proofPath)
-      assert(value.passed && value.ownerSHA256 === await hash(source('providers/opencode.ts')))
+      assert(value.passed && value.ownerSHA256 === await hash(source('packages/providers/src/opencode/provider.ts')))
       for (const label of mode === 'mutations' ? definition.mutants : ['positive']) {
         const entries = (await readFile(join(prefix, label + '.loaded.ndjson'), 'utf8')).trim().split('\n').filter(Boolean).map(JSON.parse)
         await loadedOwner(entries, mode === 'mutations' ? label : undefined)

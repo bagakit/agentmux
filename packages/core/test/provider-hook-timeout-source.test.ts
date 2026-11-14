@@ -66,6 +66,7 @@ import { parse as parseToml } from 'smol-toml'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const providersDir = join(here, '..', 'src', 'providers')
+const packagedProvidersDir = join(here, '../../providers/src')
 const sharedPath = join(providersDir, 'shared.js') // 类型检查器用的是 tsconfig 里的 .ts；.js 仅用于运行时 import 对照
 const sharedTsPath = join(providersDir, 'shared.ts')
 
@@ -76,9 +77,10 @@ const HELPER_NAME = 'hookCommandTimeout'
 const FIELD_MAP_NAME = 'HOOK_COMMAND_TIMEOUT_FIELD'
 
 function providerFiles(): string[] {
-  return readdirSync(providersDir)
+  const composition = readdirSync(providersDir)
     .filter((name) => name.endsWith('.ts'))
     .map((name) => join(providersDir, name))
+  return [...composition, ...ts.sys.readDirectory(packagedProvidersDir, ['.ts'])]
 }
 
 function parse(path: string, source: string): ts.SourceFile {
@@ -90,7 +92,8 @@ type PlanScope = ts.FunctionDeclaration | ts.FunctionExpression | ts.ArrowFuncti
 /** 从实际贡献 callback 沿 TypeChecker 已解析的调用声明取生成 owner；别名与推导不改调用关系。 */
 function generatedPlanScan(overrides?: ReadonlyMap<string, string>) {
   const { checker, program } = programForProviders(overrides)
-  const scopes = new Set<PlanScope>(), contributions: PlanScope[] = [], findings: Finding[] = []
+  const scopes = new Set<PlanScope>()
+  const contributions: PlanScope[] = [], findings: Finding[] = []
   const collect = (scope: PlanScope): void => {
     if (scopes.has(scope)) return
     scopes.add(scope)
@@ -99,8 +102,8 @@ function generatedPlanScan(overrides?: ReadonlyMap<string, string>) {
     const walk = (node: ts.Node): void => {
       if (ts.isCallExpression(node)) {
         const declaration = checker.getResolvedSignature(node)?.declaration
-        if (declaration && declaration.getSourceFile().fileName.startsWith(providersDir + '/') &&
-            (ts.isFunctionDeclaration(declaration) || ts.isFunctionExpression(declaration) || ts.isArrowFunction(declaration)) && declaration.body) {
+        if (declaration && (ts.isFunctionDeclaration(declaration) || ts.isFunctionExpression(declaration) || ts.isArrowFunction(declaration)) && declaration.body &&
+            [providersDir, packagedProvidersDir].some(directory => declaration.getSourceFile().fileName.startsWith(directory + '/'))) {
           collect(declaration)
         }
       }
@@ -290,7 +293,12 @@ function programForProviders(overrides?: ReadonlyMap<string, string>): {
     }
   })
   if (!parsed) throw new Error('tsconfig 解析返回空——类型检查器守卫无法建立 Program')
-  const host = ts.createCompilerHost(parsed.options)
+  const options: ts.CompilerOptions = {
+    ...parsed.options,
+    baseUrl: join(here, '..', '..'),
+    paths: { '@agentmux/providers/*': ['providers/src/*'] }
+  }
+  const host = ts.createCompilerHost(options)
   if (overrides && overrides.size > 0) {
     const origGetSF = host.getSourceFile.bind(host)
     host.getSourceFile = (fileName, lv, onError, shouldCreate) =>
@@ -300,7 +308,7 @@ function programForProviders(overrides?: ReadonlyMap<string, string>): {
     const origReadFile = host.readFile.bind(host)
     host.readFile = (fileName) => (overrides.has(fileName) ? overrides.get(fileName)! : origReadFile(fileName))
   }
-  const program = ts.createProgram({ rootNames: providerFiles(), options: parsed.options, host })
+  const program = ts.createProgram({ rootNames: providerFiles(), options, host })
   const checker = program.getTypeChecker()
   const sharedSf = program.getSourceFile(sharedTsPath)
   const moduleSymbol = sharedSf ? checker.getSymbolAtLocation(sharedSf) : undefined
@@ -365,6 +373,7 @@ describe('受管 Hook 超时只有一个 SSOT——值与键都是（F6）', () 
     // `timeout: 0x0a`、`timeout: T`（指向本地 const 的标识符）都产生一个 timeout 属性位，但都不是 NumericLiteral，
     // 只查「值是不是裸数字」会全部放行。键侧三种拼法（标识符/字符串/常量计算键）已由 `propertyKeyName` 归一。
     expect(scopes.length, '没有扫到实际受管计划生成函数').toBeGreaterThan(0)
+    expect(scopes.some(scope => scope.getSourceFile().fileName.startsWith(packagedProvidersDir + '/'))).toBe(true)
     const managed = new AgentProviderRegistry().list().filter(provider => provider.catalog.hookStrategy.kind === 'native' &&
       provider.catalog.hookStrategy.installation === 'explicit-managed')
     expect(managed.length).toBeGreaterThan(0)
@@ -426,7 +435,7 @@ describe('受管 Hook 超时只有一个 SSOT——值与键都是（F6）', () 
   })
 
   it('自检 A3：注入一份 copilot 拼法的 timeoutSec 字面量同样必红（timeoutSec 真的在禁区内）', () => {
-    const copilotPath = join(providersDir, 'copilot.ts')
+    const copilotPath = join(packagedProvidersDir, 'copilot/provider.ts')
     const original = readFileSync(copilotPath, 'utf8')
     const mutated = original.replace(`...${HELPER_NAME}('copilot')`, 'timeoutSec: 10')
     expect(mutated, '注入替换没生效——被测锚点文本变了').not.toBe(original)
@@ -470,21 +479,21 @@ describe('受管 Hook 超时只有一个 SSOT——值与键都是（F6）', () 
   it('自检 A2a：注入 D2（计算键索引 SSOT 映射、值手抄 10），判据 A2 必红——判据 A 对它失明', () => {
     // 复现审查者的盲点 D2：键 `[HOOK_COMMAND_TIMEOUT_FIELD['gemini']]` 从 SSOT 取对了，值却是手抄的 10。
     // 先证判据 A（AST 键名归一）确实看不见它，再证判据 A2（类型检查器）抓得住。
-    const geminiPath = join(providersDir, 'gemini.ts')
+    const geminiPath = join(packagedProvidersDir, 'gemini/provider.ts')
     const original = readFileSync(geminiPath, 'utf8')
-    const mutated = `import { ${FIELD_MAP_NAME} } from './shared.js'\n` + original
+    const mutated = `import { ${FIELD_MAP_NAME} } from '../../../core/src/providers/shared.js'\n` + original
       .replace(`...${HELPER_NAME}('gemini', 'milliseconds')`, `[${FIELD_MAP_NAME}['gemini']]: 10`)
     expect(mutated, '注入替换没生效——被测锚点文本变了').not.toBe(original)
     // 判据 A 的 AST 扫描对这种非字面量计算键失明（这正是需要判据 A2 的原因）：
     expect(forbiddenKeyValues(parse(geminiPath, mutated), geminiPath), '判据 A 本不该看见非字面量计算键').toEqual([])
     // 判据 A2 抓得住：
     const { offenders } = badComputedKeyTimeoutSites(new Map([[geminiPath, mutated]]))
-    expect(offenders.some((o) => o.file === 'gemini.ts' && o.valueText === '10'), 'D2 没被判据 A2 抓到').toBe(true)
+    expect(offenders.some((o) => o.file === 'provider.ts' && o.valueText === '10'), 'D2 没被判据 A2 抓到').toBe(true)
   })
 
   it('自检 A2b：注入 D1（字面量类型的本地 const 作计算键、值手抄 10），判据 A2 必红', () => {
     // 复现盲点 D1：`const GEMINI_TIMEOUT_KEY: 'timeout' = 'timeout'`，键 `[GEMINI_TIMEOUT_KEY]`。
-    const geminiPath = join(providersDir, 'gemini.ts')
+    const geminiPath = join(packagedProvidersDir, 'gemini/provider.ts')
     const original = readFileSync(geminiPath, 'utf8')
     const mutated = original
       .replace(
@@ -495,7 +504,7 @@ describe('受管 Hook 超时只有一个 SSOT——值与键都是（F6）', () 
     expect(mutated, '注入替换没生效——被测锚点文本变了').not.toBe(original)
     expect(forbiddenKeyValues(parse(geminiPath, mutated), geminiPath), '判据 A 本不该看见非字面量计算键').toEqual([])
     const { offenders } = badComputedKeyTimeoutSites(new Map([[geminiPath, mutated]]))
-    expect(offenders.some((o) => o.file === 'gemini.ts' && o.keyText === 'GEMINI_TIMEOUT_KEY'), 'D1 没被判据 A2 抓到').toBe(true)
+    expect(offenders.some((o) => o.file === 'provider.ts' && o.keyText === 'GEMINI_TIMEOUT_KEY'), 'D1 没被判据 A2 抓到').toBe(true)
   })
 
   // 判据 B：类型检查器层——helper 返回的值就是那个导出常量符号本身。

@@ -123,8 +123,6 @@ export const NON_EXPORTED_INTERMEDIARY_WITNESSES: ReadonlyArray<{
   // 七个方言常量只被非导出的 HOOK_LIFECYCLE_DIALECTS 表收着。
   // 截断上限只被非导出的 clamp() 读。
   { module: 'src/hook-tool-outcome.ts', export: 'MAX_TOOL_OUTPUT_CHARS', intermediary: 'clamp' },
-  // 事件名清单只被非导出的 openCodePluginSource() 插进生成的插件源码里。
-  { module: 'src/providers/opencode.ts', export: 'OPENCODE_HOOK_EVENTS', intermediary: 'openCodePluginSource' }
 ]
 
 /**

@@ -9,12 +9,12 @@ const edits: Record<string, [string, string]> = {
   'no-retained-runtime': ['  retainedRuntime: true,', '  retainedRuntime: false,'],
   'allowlist-command-drift': ['({ event: eventName, command }))', "({ event: eventName, command: command + ' mismatched-native-consent' }))"],
   'no-explicit-shell': ["const command = runScopedHookCommand('hermes')", "const command = runScopedHookCommand('hermes').replace('/bin/sh -c ', '')"],
-  'retire-old-declaration': ['    retainPreviousDeclarations: true,', '    retainPreviousDeclarations: false,']
+  'retire-old-declaration': ['    retainPreviousDeclarations: true as const,', '    retainPreviousDeclarations: false as const,']
 }
 if (mutation && !edits[mutation]) throw Error('Unknown Hermes production owner mutation: ' + mutation)
 export default defineConfig({ ...base, cacheDir: resolve(base.root!, '.local/hook-carrier/hermes-vitest', mutation ?? 'positive'),
   plugins: [...base.plugins ?? [], { name: 'hermes-hook-production-owner', enforce: 'pre', transform(original, id) {
-    if (relative(base.root!, id.split('?')[0]!) !== 'packages/core/src/providers/hermes.ts') return
+    if (relative(base.root!, id.split('?')[0]!) !== 'packages/providers/src/hermes/provider.ts') return
     let code = original
     if (mutation) {
       const edit = edits[mutation]!
@@ -23,7 +23,7 @@ export default defineConfig({ ...base, cacheDir: resolve(base.root!, '.local/hoo
     }
     const path = process.env.AGENTMUX_HERMES_HOOK_LOADED
     const sha = (value: string) => createHash('sha256').update(value).digest('hex')
-    if (path) appendFileSync(path, JSON.stringify({ path: 'packages/core/src/providers/hermes.ts', mutation: mutation ?? null,
+    if (path) appendFileSync(path, JSON.stringify({ path: 'packages/providers/src/hermes/provider.ts', mutation: mutation ?? null,
       originalSHA256: sha(original), loadedSHA256: sha(code), applied: code !== original }) + '\n')
     return code === original ? undefined : { code, map: null }
   } }],

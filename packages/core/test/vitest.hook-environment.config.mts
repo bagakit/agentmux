@@ -20,7 +20,7 @@ const mutants: Record<string, [string, string, string]> = {
     'return resolve(workspacePath, path)', 'return resolve(path)'],
   'ignore-gemini-home': ['packages/providers/src/gemini/provider.ts',
     "executionEnvironmentValue(env, 'GEMINI_CLI_HOME') || executionHomeDirectory(env)", 'executionHomeDirectory(env)'],
-  'trim-opencode-override': ['packages/core/src/providers/opencode.ts',
+  'trim-opencode-override': ['packages/providers/src/opencode/provider.ts',
     "const override = executionEnvironmentValue(env, 'OPENCODE_CONFIG_DIR')", "const override = executionEnvironmentValue(env, 'OPENCODE_CONFIG_DIR')?.trim()"],
   'ignore-claude-inspection-home': ['packages/core/src/providers/claude-hook-activation.ts',
     'join(executionHomeDirectory(context.env),', 'join(executionHomeDirectory(),'],

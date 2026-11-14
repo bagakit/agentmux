@@ -9,7 +9,8 @@ import { AgentMuxFileAgentSessionStore, loadAgentSessions } from '../../src/agen
 import { defaultAgentMuxHookPort } from '../../src/runtime-paths.js'
 import { agentPromptCondition } from '../../src/agent-prompt-condition.js'
 import { agentTurnCompletionIdentity, agentTurnEndEvidence } from '../../src/agent-session-identity.js'
-import { createPiManagedHookPlan, PI_HOOK_EVENTS, PI_HOOKS } from '../../src/providers/pi.js'
+import { PI_HOOK_EVENTS } from '@agentmux/providers/pi/provider'
+import { createPiManagedHookPlan, PI_HOOKS } from '../../src/providers/pi.js'
 import type { CtxmuxRunAdapter } from '../../src/ctxmux-run-adapter.js'
 import type { AgentMuxStoredAgentSession, AgentSemanticState } from '../../src/types.js'
 

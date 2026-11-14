@@ -52,7 +52,7 @@ function readEvidence(): string | null {
   }
 }
 const EVIDENCE = readEvidence()
-const PI_PROVIDER = readFileSync(`${REPOSITORY}packages/core/src/providers/pi.ts`, 'utf8')
+const PI_PROVIDER = readFileSync(`${REPOSITORY}packages/providers/src/pi/provider.ts`, 'utf8')
 const HOOK_EVENT = readFileSync(`${REPOSITORY}packages/core/src/agent-hook-event.ts`, 'utf8')
 
 const VERIFIED_EVENT = 'agent_settled'
@@ -76,7 +76,7 @@ const PI_EVENTS = [
  * 自己退出判据（漂移正好从判据里消失），这是本仓已有先例的一族假绿。
  */
 const HAND_COPY_SITES = [
-  { path: 'packages/core/src/providers/pi.ts', source: PI_PROVIDER },
+  { path: 'packages/providers/src/pi/provider.ts', source: PI_PROVIDER },
   { path: 'packages/core/src/agent-hook-event.ts', source: HOOK_EVENT }
 ] as const
 

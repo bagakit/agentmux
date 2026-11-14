@@ -13,7 +13,7 @@ await mkdir(evidence, { recursive: true, mode: 0o700 })
 const mutations = process.argv.includes('--mutations')
 const version = '1.18.25'
 const config = 'packages/core/test/vitest.opencode-hook-binding.config.mts'
-const owner = join(root, 'packages/core/src/providers/opencode.ts')
+const owner = join(root, 'packages/providers/src/opencode/provider.ts')
 const hash = bytes => createHash('sha256').update(bytes).digest('hex')
 const original = hash(await readFile(owner))
 

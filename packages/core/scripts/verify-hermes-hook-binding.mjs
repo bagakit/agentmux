@@ -18,6 +18,7 @@ const paths = ['src/providers/hermes.ts', 'src/providers/shared.ts', 'src/manage
   'src/hook-config-merge.ts', 'src/hook-server.ts', 'src/agent-hook-command.ts', 'src/agent-hook-delivery.ts', 'dist/agentmux-hook.mjs',
   'test/providers/hermes-hook-binding.native.test.ts', 'test/providers/hermes.test.ts', 'test/fixtures/hermes-native-hooks.py',
   'test/vitest.hermes-hook-binding.config.mts', 'test/vitest.hook-environment.config.mts', 'scripts/verify-hermes-hook-binding.mjs'].map(path => 'packages/core/' + path)
+  .concat('packages/providers/src/hermes/provider.ts')
 const snapshot = async () => Object.fromEntries(await Promise.all(paths.map(async path => [path, await hash(join(root, path))])))
 async function nativePython() {
   let path = (await exec('/bin/sh', ['-c', 'command -v hermes'], { env: { PATH: process.env.PATH } })).stdout.trim()

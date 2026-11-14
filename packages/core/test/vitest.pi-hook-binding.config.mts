@@ -12,7 +12,7 @@ const changes: Record<string, [string, string]> = {
   'trim-native-root': ["const override = executionEnvironmentValue(env, agentDirEnv)", "const override = executionEnvironmentValue(env, agentDirEnv)?.trim()"]
 }
 if (mutation && !changes[mutation]) throw Error('Unknown Pi Hook owner mutant')
-const owner = resolve(import.meta.dirname, '../src/providers/pi.ts')
+const owner = resolve(import.meta.dirname, '../../providers/src/pi/provider.ts')
 export default defineConfig({ ...base, cacheDir: resolve(import.meta.dirname, '../../../.local/hook-carrier/pi-vitest', mutation ?? 'positive'),
   plugins: [...(base.plugins ?? []), { name: 'pi-binding-owner', enforce: 'pre', transform(original: string, id: string) {
     if (id.split('?')[0] !== owner) return

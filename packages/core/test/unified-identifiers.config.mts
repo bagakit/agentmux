@@ -12,17 +12,18 @@ const mutations: Record<string, [string, string, string]> = {
   'captured-epoch': ['packages/core/src/captured-history.ts', '.run(id, mintObjectId(),', ".run(id, 'legacy-captured-epoch',"],
   'registry-reservation': ['packages/core/src/agent-session-registry.ts', 'reservationId: mintObjectId(),\n      ownerId:', "reservationId: 'legacy-reservation',\n      ownerId:"],
   'observer-source': ['packages/core/src/providers/claude-native-activity.ts', 'const sourceId = mintObjectId()', "const sourceId = 'legacy-observer-source'"],
-  'pi-receipt': ['packages/core/src/providers/pi.ts', 'receiptId: mintObjectId(),', "receiptId: 'legacy-hook-receipt',"],
+  'pi-receipt': ['packages/providers/src/pi/provider.ts', 'receiptId: mintObjectId(),', "receiptId: 'legacy-hook-receipt',"],
   'rpc-request': ['packages/core/src/public-rpc-client.ts', "id: mintObjectId(), method,", "id: 'fc69400b-bc24-4915-b35f-01a26a085af9', method,"],
   'rpc-subscription': ['packages/core/src/public-rpc-wire.ts', 'const subscriptionId = mintObjectId()', "const subscriptionId = 'legacy-subscription'"],
 }
 const selected = process.env.AMUX_IDENTIFIER_MUTATION
 if (selected && !mutations[selected]) throw new Error('Unknown unified identifier source mutation')
 export default defineConfig({ root,
+  resolve: { alias: { '@agentmux/providers/pi/provider': resolve(root, 'packages/providers/src/pi/provider.ts') } },
   plugins: [{ name: 'unified-identifier-source-proof', enforce: 'pre', transform(source, id) {
     if (id.includes('?')) return
     const path = relative(root, id)
-    if (!/^packages\/(core|identity)\/(src|test)\//u.test(path)) return
+    if (!/^packages\/(core|identity|providers)\/(src|test)\//u.test(path)) return
     const change = selected ? mutations[selected] : undefined
     let code = source
     if (change?.[0] === path) {
