@@ -68,25 +68,44 @@ function protection(root: HTMLElement | null, previous: ReadonlyMap<string, Plac
         (!next || prior?.parent !== next.parent || prior?.mount !== next.mount)) return 'focus'
     }
   }
-  const anchor = preserveAnchor ? currentAnchor(root) : null
-  if (anchor && !incoming.has(anchor.key)) return 'anchor'
+  if (preserveAnchor) {
+    const displaced = (key: string) => {
+      const prior = previous.get(key), next = incoming.get(key)
+      return !next || prior?.parent !== next.parent || prior?.mount !== next.mount
+    }
+    // A frame retaining every mounted placement cannot retire the reading
+    // anchor. Keep ordinary streamed appends out of the geometry path.
+    for (const key of previous.keys()) {
+      if (!displaced(key)) continue
+      const anchor = currentAnchorKey(root, previous)
+      if (anchor && displaced(anchor)) return 'anchor'
+      break
+    }
+  }
   return null
 }
 const scrollParent = conversationScrollParent
-function currentAnchor(root: HTMLElement | null) {
+const readingKeySelector = '[data-conversation-layout-key]'
+function currentAnchorKey(root: HTMLElement | null, placements: ReadonlyMap<string, Placement>): string | null {
   const viewport = scrollParent(root)
   if (!viewport || !root) return null
   const bounds = viewport.getBoundingClientRect()
   if (bounds.height <= 0) return null
-  const anchorFor = (node: HTMLElement) => {
+  const anchorFor = (node: HTMLElement): string | null => {
     const rect = readingNode(node)?.getBoundingClientRect()
-    return rect && rect.height > 0 && rect.bottom > bounds.top && rect.top < bounds.bottom
-      ? { viewport, key: node.dataset.conversationLayoutKey!, offset: rect.top - bounds.top } : null
+    if (!rect || rect.height <= 0 || rect.bottom <= bounds.top || rect.top >= bounds.bottom) return null
+    // Expanded deferred detail can supply visible nested rows, while its
+    // owning shell determines whether that exact detail remains mounted.
+    for (let shell: HTMLElement | null = node; shell && shell !== root && root.contains(shell); shell = shell.parentElement?.closest<HTMLElement>(readingKeySelector) ?? null) {
+      const key = shell.dataset.conversationLayoutKey!
+      if (placements.has(key)) return key
+    }
+    return null
   }
-  const selected = selectedConversationReadingNode(root, '[data-conversation-layout-key]', node => anchorFor(node) !== null,
-    () => root.querySelectorAll<HTMLElement>('[data-conversation-layout-key]'))
+  const selected = selectedConversationReadingNode(root, readingKeySelector, node => anchorFor(node) !== null,
+    () => root.querySelectorAll<HTMLElement>(readingKeySelector))
   if (selected) return anchorFor(selected)
-  for (const node of root.querySelectorAll<HTMLElement>('[data-conversation-layout-key]')) {
+  for (const node of root.querySelectorAll<HTMLElement>(readingKeySelector)) {
     const anchor = anchorFor(node)
     if (anchor) return anchor
   }
