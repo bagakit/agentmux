@@ -35,6 +35,8 @@ const mutations = [
   { id: 'deferred-partial-geometry', file: surface, from: 'for (const frame of result.displays) {', to: 'for (const frame of result.displays.slice(0, 1)) {', expected: 'one bad display' },
   { id: 'deferred-safe-top-not-compared', file: surface, from: '|| (prepared.input !== undefined && prepared.input.safeTop !== frame.safeTop)\n        ', to: '', expected: 'changed safeTop' },
   { id: 'double-failure-loses-requested-error', file: surface, from: 'if (first instanceof Error && second instanceof Error) throw first', to: "if (first instanceof Error && second instanceof Error) throw firstMode === 'included' ? first : second", expected: 'excluded-first double failure' },
+  { id: 'replacement-bypasses-producer-tail', file: surface, from: 'const result = this.producerTail.then(produce)', to: 'const result = produce()', expected: 'replacement native work sequential' },
+  { id: 'final-overwrites-first-shown-time', file: surface, from: 'shownMs: active.shownMs!,', to: 'shownMs: since(active.startedAt),', expected: progressive },
   { id: 'late-deferred-pollution', file: surface, from: 'private completeBackup(active: Active, mode: CaptureBackground, result: NativeDisplayFrames | Error): void {\n    if (this.active !== active) return', to: 'private completeBackup(active: Active, mode: CaptureBackground, result: NativeDisplayFrames | Error): void {', expected: 'a late deferred snapshot' },
   { id: 'final-diagnostic-missing', file: surface, from: 'if (active.shown) this.recordTiming(active, true)', to: 'void 0', expected: progressive },
   { id: 'final-native-timings-dropped', file: surface, from: 'nativeIncluded: active.nativeIncluded, nativeExcluded: active.nativeExcluded,', to: 'nativeIncluded: null, nativeExcluded: null,', expected: progressive },
@@ -69,7 +71,7 @@ async function command(label, executable, args, extra = {}, timeoutMs = 60000) {
   return result
 }
 async function units() {
-  assert.equal(mutations.length, 20)
+  assert.equal(mutations.length, 22)
   for (const mutation of mutations) assert.equal(sources[mutation.file].split(mutation.from).length, 2, 'Unique production anchor: ' + mutation.id)
   for (const mutation of [null, ...mutations]) {
     const label = mutation?.id ?? 'unit-baseline', loaded = join(out, label + '.loaded.ndjson'), json = join(out, label + '.tests.json')
@@ -93,7 +95,7 @@ async function units() {
     } else {
       assert.equal(result.code, 0, result.log)
       assert.equal(assertions.length, report.numTotalTests)
-      assert.ok(assertions.length >= 100 && assertions.every(row => row.status === 'passed'))
+      assert.ok(assertions.length >= 104 && assertions.every(row => row.status === 'passed'))
       for (const file of [surface, ipc]) assert.ok(consumed.some(row => row.file === file))
     }
     receipt.units.push({ label, code: result.code, executed: assertions.length, consumed })
@@ -108,31 +110,39 @@ function baselinePath() {
     assert.notEqual(dirname(directory), directory, 'baseline.json was not found in this checkout or its feature worktree')
   }
 }
+function sourceFile(tree, candidates) {
+  const file = candidates.find(candidate => existsSync(join(tree, candidate)))
+  assert.ok(file, 'No source file in this Git tree: ' + candidates.join(' or '))
+  return join(tree, file)
+}
 async function electron() {
   assert.equal(process.platform, 'darwin', 'This startup proof uses the actual macOS Electron capture owner')
-  assert.equal(execFileSync('git', ['status', '--porcelain', '--untracked-files=no'], { cwd: root, encoding: 'utf8' }).trim(), '', 'The candidate must be a complete clean Git tree')
-  const candidateRef = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim()
+  assert.equal(execFileSync('git', ['status', '--porcelain', '--untracked-files=no'], { cwd: root, encoding: 'utf8', timeout: 30000 }).trim(), '', 'The candidate must be a complete clean Git tree')
+  const candidateRef = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8', timeout: 30000 }).trim()
   const baselineFile = baselinePath(), baseline = JSON.parse(await readFile(baselineFile, 'utf8'))
   assert.equal(baseline.schema, 'agentmux.capture-startup-baseline.v2')
   assert.deepEqual(Object.keys(baseline).sort(), ['ref', 'schema'], 'v2 points only to a complete pre-change Git tree')
   assert.match(baseline.ref, /^[0-9a-f]{40}$/i, 'Pin a full Git commit, never a moving branch')
   assert.notEqual(baseline.ref, candidateRef)
-  execFileSync('git', ['merge-base', '--is-ancestor', baseline.ref, candidateRef], { cwd: root })
+  execFileSync('git', ['merge-base', '--is-ancestor', baseline.ref, candidateRef], { cwd: root, timeout: 30000 })
   receipt.candidate = { ref: candidateRef }
   receipt.baseline = { ref: baseline.ref }
-  const mainRoot = execFileSync('git', ['worktree', 'list', '--porcelain'], { cwd: root, encoding: 'utf8' }).split('\n')[0].slice('worktree '.length)
+  const mainRoot = execFileSync('git', ['worktree', 'list', '--porcelain'], { cwd: root, encoding: 'utf8', timeout: 30000 }).split('\n')[0].slice('worktree '.length)
   const baselineTree = join(mainRoot, '.worktrees', 'capture-startup-baseline-' + baseline.ref.slice(0, 12) + '-' + process.pid)
+  const cleanupPaths = new Set()
   let added = false
   try {
-    execFileSync('git', ['worktree', 'add', '--detach', baselineTree, baseline.ref], { cwd: root, stdio: 'pipe' })
+    execFileSync('git', ['worktree', 'add', '--detach', baselineTree, baseline.ref], { cwd: root, stdio: 'pipe', timeout: 120000 })
     added = true
     await symlink(join(root, 'node_modules'), join(baselineTree, 'node_modules'), 'dir')
-    for (const directory of ['apps/desktop', 'packages/client-ui', 'packages/core', 'packages/native-desktop', 'packages/identity'])
+    for (const directory of ['apps/desktop', 'apps/host', 'packages/client-ui', 'packages/core', 'packages/native-desktop', 'packages/identity', 'packages/browser',
+      'packages/capsule', 'packages/connectors', 'packages/demand', 'packages/editor-extensions', 'packages/git', 'packages/layout'])
       await symlink(join(root, directory, 'node_modules'), join(baselineTree, directory, 'node_modules'), 'dir')
     await copyFile(join(root, fixture), join(baselineTree, fixture))
     const variants = {}
     for (const [variant, tree, ref] of [['baseline', baselineTree, baseline.ref], ['candidate', root, candidateRef]]) {
       const appRoot = join(out, variant + '-app'), mainRoot = join(appRoot, 'out/main'), preloadRoot = join(appRoot, 'out/preload'), rendererRoot = join(appRoot, 'out/renderer/screenshot-editor')
+      cleanupPaths.add(appRoot)
       for (const directory of [mainRoot, preloadRoot, rendererRoot]) await mkdir(directory, { recursive: true })
       await symlink(join(root, 'apps/desktop/node_modules'), join(appRoot, 'node_modules'), 'dir')
       await writeFile(join(appRoot, 'package.json'), JSON.stringify({ type: 'module', main: 'out/main/main.js' }))
@@ -140,11 +150,21 @@ async function electron() {
       assert.equal(ipcSource.split(from).length, 2, variant + ' production IPC registration is unique')
       const registration = ipcSource.slice(ipcSource.indexOf(from), ipcSource.indexOf(until, ipcSource.indexOf(from)))
       const alias = { react: dirname(require.resolve('react/package.json')), 'react-dom': dirname(require.resolve('react-dom/package.json')),
+        '@agentmux/client-ui': join(tree, 'packages/client-ui/src'),
         '@agentmux/client-ui/theme': join(tree, 'packages/client-ui/src/theme/index.ts'), '@agentmux/client-ui/error-presentation': join(tree, 'packages/client-ui/src/lib/error-presentation.ts'),
+        '@agentmux/client-ui/ime-keyboard-event': join(tree, 'packages/client-ui/src/lib/ime-keyboard-event.ts'), '@agentmux/client-ui/icons': join(tree, 'packages/client-ui/src/theme/icons.tsx'),
+        '@agentmux/client-ui/pasted-images': join(tree, 'packages/client-ui/src/lib/pasted-images.ts'),
         '@agentmux/client-ui/input': join(tree, 'packages/client-ui/src/input/index.ts'), '@agentmux/client-ui/input/styles.css': join(tree, 'packages/client-ui/src/input/input.css'),
         '@agentmux/client-ui/styles/theme-transition.css': join(tree, 'packages/client-ui/src/styles/theme-transition.css'),
         '@agentmux/client-ui/styles/semantic-icons.css': join(tree, 'packages/client-ui/src/styles/semantic-icons.css'),
-        '@agentmux/native-desktop/image': join(tree, 'packages/native-desktop/src/image.ts'), '@agentmux/core/object-id': join(tree, 'packages/core/src/object-id.ts') }
+        '@agentmux/native-desktop': join(tree, 'packages/native-desktop/src'),
+        '@agentmux/native-desktop/image': join(tree, 'packages/native-desktop/src/image.ts'),
+        '@agentmux/core': join(tree, 'packages/core/src'), '@agentmux/identity': join(tree, 'packages/identity/src'), '@agentmux/host': join(tree, 'apps/host/src'),
+        '@agentmux/core/mote-preferences': sourceFile(tree, ['packages/core/src/mote/preferences.ts', 'packages/core/src/mote-preferences.ts']),
+        '@agentmux/core/mote-dialogue': sourceFile(tree, ['packages/core/src/mote/dialogue.ts', 'packages/core/src/mote-dialogue.ts']),
+        '@agentmux/browser': join(tree, 'packages/browser/src'), '@agentmux/capsule': join(tree, 'packages/capsule/src'),
+        '@agentmux/connectors': join(tree, 'packages/connectors/src'), '@agentmux/demand': join(tree, 'packages/demand/src'),
+        '@agentmux/editor-extensions': join(tree, 'packages/editor-extensions/src'), '@agentmux/git': join(tree, 'packages/git/src'), '@agentmux/layout': join(tree, 'packages/layout/src') }
       const builds = []
       builds.push(await build({ absWorkingDir: root, entryPoints: [join(tree, 'apps/desktop/src/preload/capture-surface.ts')], outfile: join(preloadRoot, 'capture-surface.cjs'), bundle: true, platform: 'node', format: 'cjs', external: ['electron'], alias, metafile: true, logLevel: 'silent' }))
       builds.push(await build({ absWorkingDir: root, entryPoints: [join(tree, 'apps/desktop/src/renderer/screenshot-editor/entry.tsx')], outfile: join(rendererRoot, 'entry.js'), bundle: true, platform: 'browser', format: 'esm', jsx: 'automatic', alias, conditions: ['browser'], define: { __AGENTMUX_WEB_PREVIEW__: 'true' }, metafile: true, logLevel: 'silent' }))
@@ -157,24 +177,29 @@ async function electron() {
       const record = async (absolute, forcedKind) => {
         const path = isAbsolute(absolute) ? absolute : resolve(root, absolute), bytes = await readFile(path), hash = sha(bytes), rel = relative(tree, path)
         let key, kind = forcedKind
-        if (!rel.startsWith('..') && !isAbsolute(rel)) {
+        const dependencyMarker = path.lastIndexOf('/node_modules/')
+        if (dependencyMarker >= 0) {
+          key = 'dependency/' + path.slice(dependencyMarker + '/node_modules/'.length) + '#' + hash
+          kind ??= 'dependency'
+        } else if (!rel.startsWith('..') && !isAbsolute(rel)) {
           key = rel
           if (rel === fixture) kind = 'shared-driver'
           else {
-            const committed = execFileSync('git', ['show', ref + ':' + rel], { cwd: root, maxBuffer: 64 * 1024 * 1024 })
+            const committed = execFileSync('git', ['show', ref + ':' + rel], { cwd: root, timeout: 30000, maxBuffer: 64 * 1024 * 1024 })
             assert.equal(sha(committed), hash, variant + ' consumed input comes from its exact Git tree: ' + rel)
             kind ??= 'production'
           }
         } else {
           const shared = relative(root, path)
           if (!shared.startsWith('..') && !isAbsolute(shared)) {
-            key = 'shared-workspace/' + shared
-            kind ??= 'shared-workspace-dependency'
+            const baselineBlob = execFileSync('git', ['show', baseline.ref + ':' + shared], { cwd: root, timeout: 30000, maxBuffer: 64 * 1024 * 1024 })
+            const candidateBlob = execFileSync('git', ['show', candidateRef + ':' + shared], { cwd: root, timeout: 30000, maxBuffer: 64 * 1024 * 1024 })
+            assert.equal(sha(baselineBlob), hash, 'shared input must equal the baseline Git blob: ' + shared)
+            assert.equal(sha(candidateBlob), hash, 'shared input must equal the candidate Git blob: ' + shared)
+            key = 'shared-identical/' + shared
+            kind ??= 'shared-identical-git-dependency'
           } else {
-            const marker = path.lastIndexOf('/node_modules/')
-            assert.ok(marker >= 0, variant + ' input is outside both Git trees and declared dependencies: ' + path)
-            key = 'dependency/' + path.slice(marker + '/node_modules/'.length)
-            kind ??= 'dependency'
+            assert.fail(variant + ' input is outside both Git trees and declared dependencies: ' + path)
           }
         }
         if (consumed[key]) assert.equal(consumed[key].sha256, hash, variant + ' has one identity for ' + key)
@@ -191,22 +216,25 @@ async function electron() {
       receipt.productionInputs[variant] = consumed
     }
     let processIndex = 0
-    for (const count of [1, 2]) for (const background of ['included', 'excluded']) for (const pair of [1, 2, 3, 4]) {
-      const variantsOrder = (pair + count + (background === 'excluded' ? 1 : 0)) % 2 ? ['baseline', 'candidate'] : ['candidate', 'baseline']
+    for (const count of [1, 2]) for (const background of ['included', 'excluded']) for (const iteration of [1, 2]) for (const pair of [1, 2, 3, 4]) {
+      const variantsOrder = (pair + count + iteration + (background === 'excluded' ? 1 : 0)) % 2 ? ['baseline', 'candidate'] : ['candidate', 'baseline']
       for (const variant of variantsOrder) {
-        const label = [count, background, 'pair-' + pair, ++processIndex, variant].join('-'), scene = join(out, label), userData = join(out, label + '-user-data')
+        const label = [count, background, iteration, 'pair-' + pair, ++processIndex, variant].join('-'), scene = join(out, label), userData = join(out, label + '-user-data')
+        cleanupPaths.add(userData)
         await mkdir(scene); await mkdir(userData)
         const result = await command(label, require('electron'), [variants[variant].appRoot], { AGENTMUX_CAPTURE_STARTUP_OUT: scene, AGENTMUX_CAPTURE_STARTUP_VARIANT: variant,
-          AGENTMUX_CAPTURE_STARTUP_DISPLAYS: String(count), AGENTMUX_CAPTURE_STARTUP_BACKGROUND: background, AGENTMUX_CAPTURE_STARTUP_USER_DATA: userData, ELECTRON_RENDERER_URL: '' }, 45000)
+          AGENTMUX_CAPTURE_STARTUP_DISPLAYS: String(count), AGENTMUX_CAPTURE_STARTUP_BACKGROUND: background, AGENTMUX_CAPTURE_STARTUP_ITERATION: String(iteration),
+          AGENTMUX_CAPTURE_STARTUP_NONCE: String(processIndex * 8), AGENTMUX_CAPTURE_STARTUP_USER_DATA: userData, ELECTRON_RENDERER_URL: '' }, 45000)
         const native = JSON.parse(await readFile(join(scene, 'native.json'), 'utf8'))
         assert.equal(result.code, 0, JSON.stringify(native.failure) + result.log)
         assert.equal(native.passed, true)
-        assert.equal(native.captures.length, 2, label + ': first and repeat capture must execute')
+        assert.equal(native.captures.length, 1, label + ': each independent process executes exactly its assigned iteration')
+        assert.equal(native.captures[0].iteration, iteration)
         assert.equal(native.count, count); assert.equal(native.background, background); assert.equal(native.variant, variant)
         receipt.native.push({ label, pair, processIndex, ...native })
       }
     }
-    assert.equal(receipt.native.length, 64, 'four independent pairs in every display/background group')
+    assert.equal(receipt.native.length, 64, 'first/repeat x single/dual x included/excluded each has four independent process pairs')
     for (const count of [1, 2]) for (const background of ['included', 'excluded']) for (const iteration of [1, 2]) {
       const rows = receipt.native.filter(scene => scene.count === count && scene.background === background)
       const pairs = []
@@ -225,9 +253,14 @@ async function electron() {
     }
     assert.equal(receipt.comparisons.length, 8, 'first/repeat x single/dual x included/excluded, without cross-cell aggregation')
   } finally {
-    if (added) {
-      execFileSync('git', ['worktree', 'remove', '--force', baselineTree], { cwd: root, stdio: 'pipe' })
-      receipt.cleanup.baselineWorktreeRemoved = !existsSync(baselineTree)
+    try {
+      for (const path of cleanupPaths) await rm(path, { recursive: true, force: true })
+      receipt.cleanup.generatedArtifactsRemoved = [...cleanupPaths].every(path => !existsSync(path))
+    } finally {
+      if (added) {
+        execFileSync('git', ['worktree', 'remove', '--force', baselineTree], { cwd: root, stdio: 'pipe', timeout: 120000 })
+        receipt.cleanup.baselineWorktreeRemoved = !existsSync(baselineTree)
+      }
     }
   }
 }

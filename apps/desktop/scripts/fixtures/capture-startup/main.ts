@@ -15,7 +15,9 @@ const out = process.env.AGENTMUX_CAPTURE_STARTUP_OUT!
 const variant = process.env.AGENTMUX_CAPTURE_STARTUP_VARIANT! as 'baseline' | 'candidate'
 const count = Number(process.env.AGENTMUX_CAPTURE_STARTUP_DISPLAYS)
 const background = process.env.AGENTMUX_CAPTURE_STARTUP_BACKGROUND! as CaptureBackground
+const iteration = Number(process.env.AGENTMUX_CAPTURE_STARTUP_ITERATION), nonceStart = Number(process.env.AGENTMUX_CAPTURE_STARTUP_NONCE)
 assert.ok(out && ['baseline', 'candidate'].includes(variant) && [1, 2].includes(count) && ['included', 'excluded'].includes(background))
+assert.ok([1, 2].includes(iteration) && Number.isSafeInteger(nonceStart) && nonceStart > 0)
 assert.ok(process.env.AGENTMUX_CAPTURE_STARTUP_USER_DATA)
 const userData = process.env.AGENTMUX_CAPTURE_STARTUP_USER_DATA!
 app.setPath('userData', userData)
@@ -26,7 +28,7 @@ const receipt: any = { schema: 'agentmux.capture-startup-electron.v2', passed: f
   boundary: 'Real registered shortcut callback, GlobalScreenshot, ScreenCapture, CaptureSurface, production IPC timing sink, preload and Renderer. Native pixels and per-display producer delays are controlled; no real OS capture claim.',
   conditions: { loadavg: loadavg(), freeMemory: freemem(), totalMemory: totalmem(), electron: process.versions.electron },
   visibilityObservation: 'Native BrowserWindow.isVisible() sampled every 5 ms; show event offsets remain separate.' }
-let host: BrowserWindow, surface: CaptureSurface, globalCapture: GlobalScreenshot, shortcut: { dispose(): void }, active: any = null, nonce = 0
+let host: BrowserWindow, surface: CaptureSurface, globalCapture: GlobalScreenshot, shortcut: { dispose(): void }, active: any = null, nonce = nonceStart
 const shortcutCallbacks: Array<() => void> = []
 const latestPath = join(userData, 'capture-timing.json')
 const info = console.info
@@ -178,6 +180,7 @@ async function capture(iteration: number) {
   if (variant === 'candidate') {
     assert.equal(row.timing.schema, 'agentmux.capture-timing.v2')
     assert.equal(row.finalTiming.schema, 'agentmux.capture-timing.v2')
+    assert.equal(row.finalTiming.shownMs, row.timing.shownMs, 'the final record adds alternate timings without replacing the first show')
     assert.equal(row.writes.filter((write: any) => write.requestId === row.timing.requestId).length, 2, 'one initial and one final record for the same request')
     assert.deepEqual(row.writes.map((write: any) => write.final), [false, true])
     for (const key of ['callbackToPrepareMs', 'prepareMs', 'screenCaptureMs', 'presentMs', 'dataReadyMs', 'shownMs']) assert.ok(Number.isFinite(row.finalTiming[key]), key + ' is measured')
@@ -211,7 +214,6 @@ async function capture(iteration: number) {
   assert.deepEqual(receipt.opacityChanges.slice(opacityStart).map((row: any) => row.value), variant === 'candidate' ? [] : [0, 0.65])
   assert.ok(overlays.every(window => window.isDestroyed()), 'the capture releases all shells')
   const sourceHashes = row.grabs.map((grab: any) => Object.fromEntries(Object.entries(grab.sources).map(([id, png]) => [id, createHash('sha256').update(String(png)).digest('hex')])))
-  if (receipt.captures.length) assert.notDeepEqual(sourceHashes, receipt.captures[0].sourceHashes, 'repeat capture freezes new pixels')
   receipt.captures.push({ iteration, actualShownMs, observedShownMs, showEventMs: row.windows.map((entry: any) => entry.showEventMs),
     constructedMs: row.windows.map((entry: any) => entry.constructedMs), grabs: row.grabs.map(({ sources, alternateGate, ...grab }: any) => grab), sourceHashes,
     timing: row.timing, finalTiming: row.finalTiming, diagnostic })
@@ -243,8 +245,8 @@ async function run() {
       active.globalPromise = promise
       void promise.catch(error => console.error('Shortcut capture failed:', error))
     } })
-  for (const iteration of [1, 2]) await capture(iteration)
-  assert.equal(receipt.opacityChanges.length, variant === 'candidate' ? 0 : 4)
+  await capture(iteration)
+  assert.equal(receipt.opacityChanges.length, variant === 'candidate' ? 0 : 2)
   receipt.passed = true
 }
 void run().catch(error => {
