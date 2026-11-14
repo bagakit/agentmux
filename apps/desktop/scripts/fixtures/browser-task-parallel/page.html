@@ -1,0 +1,12 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Explicit task target</title></head><body>
+<form><label for="entry">Item value</label><input id="entry" autocomplete="off"><button>Submit item</button></form>
+<button id="confirm">Confirm item</button><button id="changed">Changed version</button>
+<input id="draft" aria-label="Unsent page draft" value="original unsent draft"><ol id="results"></ol><script>
+let identity,state;
+function save(){localStorage.setItem('parallel-native-'+identity,JSON.stringify(state));document.querySelector('#results').replaceChildren(...state.items.map(value=>{const row=document.createElement('li');row.textContent=value;return row}))}
+function openGate(){if(!document.querySelector('#gate')){const button=document.createElement('button');button.id='gate';button.textContent='Gate opened';document.body.append(button)}}
+globalThis.parallelProof={configure(id,{closed=false,bad=false}={}){identity=id;state=JSON.parse(localStorage.getItem('parallel-native-'+id)||'{"items":[],"confirmed":0,"confirmCalls":0,"changed":0}');if(closed)document.querySelector('#gate')?.remove();else openGate();if(bad)document.querySelector('#entry')?.remove();save()},openGate,closeGate(){document.querySelector('#gate')?.remove()},facts(){return{identity,state:structuredClone(state),draft:document.querySelector('#draft').value,url:location.href}}};
+document.querySelector('form').onsubmit=event=>{event.preventDefault();state.items.push(document.querySelector('#entry').value);save()};
+document.querySelector('#confirm').onclick=()=>{state.confirmCalls++;if(confirm('Confirm explicit item'))state.confirmed++;save()};
+document.querySelector('#changed').onclick=()=>{state.changed++;save()};
+</script></body></html>
