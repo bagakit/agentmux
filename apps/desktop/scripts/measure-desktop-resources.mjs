@@ -230,10 +230,19 @@ import(${JSON.stringify(pathToFileURL(entry).href)}).catch(error=>{console.error
   return { bootstrap, environment, configurationPath, hostPaths: paths }
 }
 
+async function loadResourceWorkbenchFixture() {
+  const { build } = await import(createRequire(join(coreRoot, 'package.json')).resolve('esbuild'))
+  const fixtureModule = join(desktopRoot, 'out', 'main', 'resource-workbench-documents.mjs')
+  await build({ entryPoints: [join(import.meta.dirname, 'resource-workbench-documents.ts')],
+    platform: 'node', format: 'esm', bundle: true, packages: 'external', outfile: fixtureModule })
+  return await import(pathToFileURL(fixtureModule).href)
+}
+
 async function runStage(stage, identity, run) {
   const { root, runtimeRoot, userData, reportPath, workspaces } = stage
   const fixturePath = stage.representative ? join(root, 'workface.json') : undefined
   const { bootstrap, environment, configurationPath, hostPaths } = await prepareStage(stage)
+  await stage.initializeResourceWorkbench(userData)
   const storePath = environment.AGENTMUX_AGENT_SESSION_STORE
   const hostEntry = join(desktopRoot, 'out', 'main', 'agentmux-host.js')
   const host = spawn(electron, [hostEntry, '--store', storePath], {
@@ -287,7 +296,8 @@ async function runStage(stage, identity, run) {
     ], {
       cwd: desktopRoot,
       env: { ...environment, AGENTMUX_DESKTOP_RESOURCE_REPORT: reportPath,
-        ...(fixturePath ? { AGENTMUX_DESKTOP_RESOURCE_WORKFACE: fixturePath } : {}),
+        ...(fixturePath ? { AGENTMUX_DESKTOP_RESOURCE_WORKFACE: fixturePath }
+          : { AGENTMUX_DESKTOP_RESOURCE_WORKSPACES: JSON.stringify(workspaces.map(workspace => workspace.id)) }),
         AGENTMUX_DESKTOP_RESOURCE_IDENTITY: JSON.stringify(identity),
         AGENTMUX_DESKTOP_SPAWNED_AT_MS: String(Date.now()),
         AGENTMUX_DESKTOP_RESOURCE_DEBUG: process.env.AGENTMUX_DESKTOP_RESOURCE_DEBUG ?? '0' },
@@ -350,18 +360,19 @@ async function main() {
     receiptlessDaemonCleanup = true
     await materializeRuntimePayload(await inspectRuntimeApplicationPayload(repositoryRoot), desktopRoot)
     await access(entry)
+    const { initializeResourceWorkbench } = await loadResourceWorkbenchFixture()
     await Promise.all(measuredWorkspaces.map(({ path }) => (
       writeFile(join(path, 'resource-probe.ts'), 'export const value = 1\n'.repeat(20_000))
     )))
     const workspaces = measuredWorkspaces.map(workspace => ({ ...workspace, hostId: 'local', kind: 'folder' }))
     try {
-      await runStage({ root: directory, runtimeRoot: runtimeDirectory, userData, reportPath, workspaces }, identity, diagnostic)
+      await runStage({ root: directory, runtimeRoot: runtimeDirectory, userData, reportPath, workspaces, initializeResourceWorkbench }, identity, diagnostic)
     } catch (error) { failures.push(error) }
 
     if (diagnostic.cleanup) {
       try {
         await runStage({ root: representativeDirectory, runtimeRoot: representativeRuntime,
-          userData: join(representativeDirectory, 'user-data'), reportPath: representativeReportPath, representative: true,
+          userData: join(representativeDirectory, 'user-data'), reportPath: representativeReportPath, representative: true, initializeResourceWorkbench,
           workspaces: workspaces.map((workspace, index) => ({ ...workspace,
             path: join(representativeDirectory, 'workspaces', String(index)) })) }, identity, representative)
       } catch (error) { failures.push(error) }
