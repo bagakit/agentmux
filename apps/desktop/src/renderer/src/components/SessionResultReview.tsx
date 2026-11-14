@@ -3,7 +3,6 @@ import { useWorkbenchDocument } from '../lib/workbench-document'
 import { sessionPresentationById } from '../lib/session-presentation'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useEffect, useId, useRef, useState } from 'react'
-import type { AgentTimelineItem } from '../../../shared/contracts'
 import type { OpenHttpLinkOrigin } from '../lib/open-destination'
 import { useAppStore } from '../store'
 import { SessionResultReviewContent } from './SessionResultReviewContent'
@@ -14,22 +13,23 @@ const ThemeActionCloseIcon = semanticIconComponent('action.close')
 
 
 /** Header-only entrance. Composer reuses the same body inside its receiver face. */
-export function SessionResultReview({ sessionId, items, origin, visible, surfaceAnchor }: {
+export function SessionResultReview({ sessionId, origin, visible, surfaceAnchor }: {
   sessionId: string
-  items: readonly AgentTimelineItem[]
   origin: OpenHttpLinkOrigin
   visible: boolean
   surfaceAnchor: string
 }) {
   const document = useWorkbenchDocument()
-  const session = useAppStore((state) => sessionPresentationById(state.sessions).get(sessionId))
+  const ready = useAppStore(state => {
+    const session = sessionPresentationById(state.sessions).get(sessionId)
+    return session?.kind === 'agent' && session.status.state === 'done'
+  })
   const [expanded, setExpanded] = useState(false)
   const [dismissed, setDismissed] = useState(false)
   const popoverId = useId()
   const trigger = useRef<HTMLButtonElement>(null)
   const popover = useRef<HTMLElement>(null)
   const previousFocus = useRef<HTMLElement | null>(null)
-  const ready = session?.kind === 'agent' && session.status.state === 'done'
   useEffect(() => { setExpanded(false); setDismissed(false) }, [sessionId])
   useEffect(() => {
     if (!ready) { setExpanded(false); setDismissed(false) }
@@ -44,7 +44,7 @@ export function SessionResultReview({ sessionId, items, origin, visible, surface
       onClick={() => setExpanded(value => !value)}><ThemeStatusCompletedIcon size={14} aria-hidden="true" /><span className="session-result-review__label">Review</span></button>
     <aside ref={popover} id={popoverId} popover="auto" className="session-result-review__popover" aria-label="Review Agent result"
       style={{ positionAnchor: surfaceAnchor }} onToggle={event => setExpanded(event.newState === 'open')}>
-      {expanded && visible ? <SessionResultReviewContent sessionId={sessionId} items={items} origin={origin} onNavigate={collapse}
+      {expanded && visible ? <SessionResultReviewContent sessionId={sessionId} origin={origin} onNavigate={collapse}
         controls={<div className="session-result-review__actions" aria-label="Result review controls">
           <button type="button" className="small-button" onClick={() => { collapse(); trigger.current?.focus({ preventScroll: true }) }}><ThemeNavigationDownIcon size={12} /> Collapse</button>
           <button type="button" className="small-button" aria-label="Dismiss result review" onClick={() => {

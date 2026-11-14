@@ -94,7 +94,6 @@ const ThemeStatusHostUnavailableIcon = semanticIconComponent('status.host-unavai
 const ThemeActionStopIcon = semanticIconComponent('action.stop')
 
 
-const NO_TIMELINE_ITEMS: never[] = []
 const NO_PRESENTATIONS: readonly WorkbenchViewTarget[] = []
 
 // Stable callbacks must not share the render context that owns a full Session.
@@ -316,7 +315,6 @@ export function SessionPane({
     return new Set([...(current ? [JSON.stringify([current.hostId, current.sessionId])] : []),
       ...(page?.links.flatMap(link => link.kind === 'main' ? [JSON.stringify([link.reference.hostId, link.reference.sessionId])] : []) ?? [])])
   }, [moteDialogue?.page])
-  const timeline = useObservedAppStore('sessionPane', observationVisible, consumerScope, (state) => state.timelines[sessionId]?.items ?? NO_TIMELINE_ITEMS)
   const firstPromptSelector = useMemo(() => createFirstPromptSelector(sessionId), [sessionId])
   const firstPrompt = useObservedAppStore('sessionPane', observationVisible, consumerScope, firstPromptSelector)
   const userName = useObservedAppStore('sessionPane', observationVisible, consumerScope, (state) => state.agentNames?.[sessionId])
@@ -1271,7 +1269,7 @@ export function SessionPane({
   })
   const presentedActivity = activityContent.current
   const resultReview = session.kind === 'agent'
-    ? <SessionResultReview sessionId={session.id} items={timeline} origin={linkOrigin} visible={visible} surfaceAnchor={resultSurfaceAnchor} />
+    ? <SessionResultReview sessionId={sessionId} origin={linkOrigin} visible={visible} surfaceAnchor={resultSurfaceAnchor} />
     : null
   const frontendDiagnostic = frontendSurface && frontendNotice.diagnostic ? <div className="session-frontend-diagnostic">
     <span>{frontendNotice.kind === 'initialization' ? 'Startup diagnostic' : 'Terminal diagnostic'}</span><pre>{frontendNotice.diagnostic}</pre>
@@ -1444,7 +1442,7 @@ export function SessionPane({
           data-input-surface={session.kind === 'agent' && viewMode === 'terminal' ? 'terminal' : 'activity'}
           aria-label={viewMode === 'terminal' ? 'Agent input channel' : undefined}
         >
-          <AgentSessionComposer {...composerExecutionProps} aboveInput={<ConversationProcessDockSlot />} resourceWorkspaceId={fileContext.workspaceId} pendingLayout={pendingLayout} reading={mailboxReading} mailboxOrigin={mailboxOrigin} onRevealMessage={revealMailboxMessage} onOpenTerminal={openTerminal} key={sessionId} sessionId={session.id} resultReview={(onNavigate) => <SessionResultReviewContent showStatus={false} sessionId={session.id} items={timeline} origin={linkOrigin} onNavigate={onNavigate} />} visible={visible} {...(tabName ? { tabName } : {})} />
+          <AgentSessionComposer {...composerExecutionProps} aboveInput={<ConversationProcessDockSlot />} resourceWorkspaceId={fileContext.workspaceId} pendingLayout={pendingLayout} reading={mailboxReading} mailboxOrigin={mailboxOrigin} onRevealMessage={revealMailboxMessage} onOpenTerminal={openTerminal} key={sessionId} sessionId={session.id} resultReview={(onNavigate) => <SessionResultReviewContent showStatus={false} sessionId={sessionId} origin={linkOrigin} onNavigate={onNavigate} />} visible={visible} {...(tabName ? { tabName } : {})} />
         </div>
       ) : null}
     </section></ConversationProcessSurface>

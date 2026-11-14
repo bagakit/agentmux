@@ -18,6 +18,7 @@ const ThemeFileDiffIcon = semanticIconComponent('file.diff')
 const ThemeObjectBrowserIcon = semanticIconComponent('object.browser')
 const ThemeObjectConversationIcon = semanticIconComponent('object.conversation')
 
+const NO_TIMELINE_ITEMS: readonly AgentTimelineItem[] = []
 
 function resultTargets(items: readonly AgentTimelineItem[]): { diffPath: string | null; previewUrls: string[] } {
   let diffPath: string | null = null
@@ -53,15 +54,17 @@ function timelinePathForWorkspace(
 }
 
 /** Mounted only after a user enters Review; the existing Git/target owner lives here. */
-export function SessionResultReviewContent({ sessionId, items, origin, controls, onNavigate, showStatus = true }: {
+export function SessionResultReviewContent({ sessionId, origin, controls, onNavigate, showStatus = true }: {
   sessionId: string
-  items: readonly AgentTimelineItem[]
   origin: OpenHttpLinkOrigin
   showStatus?: boolean
   controls?: ReactNode
   onNavigate?: () => void
 }) {
   const session = useAppStore((state) => sessionPresentationById(state.sessions).get(sessionId))
+  const items = useAppStore(state => state.timelines[sessionId]?.items ?? NO_TIMELINE_ITEMS)
+  // Preview can publish a new revision of the original timeline array.
+  useAppStore(state => state.timelines[sessionId]?.revision)
   const setViewMode = useAppStore((state) => state.setViewMode)
   const openFileDiff = useAppStore((state) => state.openFileDiff)
   const openHttpLink = useAppStore((state) => state.openHttpLink)
