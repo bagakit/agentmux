@@ -70,6 +70,7 @@ export const AGENTMUX_RPC_CONTROL_METHODS = {
   'browser.profile.network.check': 'browser.profile.network.check',
   'browser.profile.network.probe': 'browser.profile.network.probe',
   'browser.profile.network.history': 'browser.profile.network.history',
+  'browser.profile.cookie-file.prepare-import': 'browser.profile.cookie-file.prepare-import', 'browser.profile.cookie-file.import': 'browser.profile.cookie-file.import', 'browser.profile.cookie-file.export': 'browser.profile.cookie-file.export', 'browser.profile.cookie-file.inspect': 'browser.profile.cookie-file.inspect', 'browser.profile.cookie-file.discard': 'browser.profile.cookie-file.discard', 'browser.profile.cookie-file.reveal': 'browser.profile.cookie-file.reveal',
   'browser.profile.bookmark.ls': 'browser.profile.bookmark.ls', 'browser.profile.bookmark.edit': 'browser.profile.bookmark.edit',
   'browser.profile.bookmark.import': 'browser.profile.bookmark.import', 'browser.profile.bookmark.export': 'browser.profile.bookmark.export', 'browser.profile.bookmark.open': 'browser.profile.bookmark.open',
   'browser.profile.extension.ls': 'browser.profile.extension.ls', 'browser.profile.extension.prepare': 'browser.profile.extension.prepare',

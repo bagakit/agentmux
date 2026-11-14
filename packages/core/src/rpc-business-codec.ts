@@ -1,3 +1,4 @@
+import { isBrowserProfileCookieFileOperation } from './browser-profile-cookie-files.js'
 import { isBrowserProfileBookmarkOperation } from './browser-profile-bookmarks.js'
 import { isBrowserProfileExtensionOperation } from './browser-profile-extensions.js'
 import { mintObjectId } from './object-id.js'
@@ -81,7 +82,7 @@ export function rpcControlRequest(method: keyof typeof AGENTMUX_RPC_CONTROL_METH
   // Inspect/stop address an existing Browser operation. Their observation/command must not
   // occupy the in-flight run's original request slot or replace its business identity.
   const addressesBrowserOperation = operation === 'browser.operation' || operation === 'browser.stop'
-  const requestId = explicitId === undefined || addressesBrowserOperation || (isBrowserProfileExtensionOperation(operation) || isBrowserProfileBookmarkOperation(operation)) ? mintObjectId() : explicitId
+  const requestId = explicitId === undefined || addressesBrowserOperation || (isBrowserProfileExtensionOperation(operation) || (isBrowserProfileBookmarkOperation(operation) || isBrowserProfileCookieFileOperation(operation))) ? mintObjectId() : explicitId
   if (method === 'space.inspect' && body.target && typeof body.target === 'object' &&
     Object.hasOwn(body.target, 'operationId')) {
     const target = rpcRecord(body.target, ['operationId'])
@@ -108,7 +109,7 @@ export function rpcControlRequest(method: keyof typeof AGENTMUX_RPC_CONTROL_METH
   if (method === 'toolkit.stop' && body.input !== undefined) {
     const p = rpcRecord(body.input, ['executionId']); delete body.input; Object.assign(body, p)
   }
-  if ((isBrowserProfileExtensionOperation(operation) || isBrowserProfileBookmarkOperation(operation)) && operationId !== undefined) body.operationId = operationId
+  if ((isBrowserProfileExtensionOperation(operation) || (isBrowserProfileBookmarkOperation(operation) || isBrowserProfileCookieFileOperation(operation))) && operationId !== undefined) body.operationId = operationId
   if (operation !== 'browser.restore' && operation !== 'browser.release' &&
     (!isBrowserProfileControlOperation(operation) || operation === 'browser.profile.network.probe' || operation === 'browser.profile.network.history') &&
     operation.startsWith('browser.') && operationId !== undefined) body.operationId = operationId
@@ -428,7 +429,7 @@ export function parseRpcControlResult(method: keyof typeof AGENTMUX_RPC_CONTROL_
     throw new AgentMuxError('RPC result contains an internal Control envelope.', 'CONTROL_PROTOCOL_ERROR')
   }
   // Maintenance receipts already own operationId; it is not a Control requestId.
-  const legacy = (isBrowserProfileExtensionOperation(method) || isBrowserProfileBookmarkOperation(method)) || method === 'browser.create' || method === 'browser.close' || method === 'settings.hosts.install' || method === 'settings.hosts.install-inspect' || method === 'settings.hosts.upgrade' || method === 'settings.hosts.upgrade-inspect' || method === 'settings.hosts.upgrade-reconnect' ? body
+  const legacy = (isBrowserProfileExtensionOperation(method) || (isBrowserProfileBookmarkOperation(method) || isBrowserProfileCookieFileOperation(method))) || method === 'browser.create' || method === 'browser.close' || method === 'settings.hosts.install' || method === 'settings.hosts.install-inspect' || method === 'settings.hosts.upgrade' || method === 'settings.hosts.upgrade-inspect' || method === 'settings.hosts.upgrade-reconnect' ? body
     : operationKeys(method.startsWith('goal.') && method !== 'goal.focus' ? goalKeys(body, true) : body, true)
   const operation = AGENTMUX_RPC_CONTROL_METHODS[method]
   // The spatial owner validates this envelope against the same durable business
