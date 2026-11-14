@@ -10,6 +10,15 @@ const sha = bytes => createHash('sha256').update(bytes).digest('hex')
 const read = path => JSON.parse(readFileSync(path, 'utf8'))
 const desktopScenes = ['focus-form-menu', 'focus-information-menu', 'focus-lod-menu', 'projects-executor-menu', 'projects-executor-selected', 'routes-device-menu', 'routes-device-tail', 'routes-edge-menu']
 const desktopImages = [...desktopScenes.map(scene => `${scene}-light.png`), ...desktopScenes.map(scene => `${scene}-dark.png`)].sort()
+const settingsImages = ['connection-transport-menu-420-dark.png', 'connection-transport-selected-420-dark.png', 'node-menu-960-light.png', 'node-selected-960-light.png', 'node-menu-420-dark.png', 'node-selected-420-dark.png', 'node-menu-320-light.png', 'node-selected-320-light.png', 'node-missing-menu-420-dark.png', 'node-missing-recovered-420-dark.png', 'node-identity-error-420-dark.png', 'node-owner-error-420-dark.png'].sort()
+const settingsOwningSources = [
+  'apps/desktop/src/renderer/src/components/SelectionField.tsx',
+  'apps/desktop/src/renderer/src/components/settings/HostSettingsPane.tsx',
+  'apps/desktop/src/renderer/src/components/settings/NetworkNodeSettingsPane.tsx',
+  'apps/desktop/src/renderer/src/components/settings/hosts-settings.css',
+  'apps/desktop/src/renderer/src/components/settings/network-node.css',
+  'apps/desktop/scripts/fixtures/settings-connections/entry.tsx',
+]
 const requiredDriverSources = section => [
   'apps/desktop/scripts/capture-ui-selection-field.mjs',
   `apps/desktop/scripts/fixtures/ui-selection-field/${section}-main.cjs`,
@@ -49,6 +58,12 @@ function validate(review, directory, mode) {
     assert.equal(capture.sources?.[file], digest, `Reviewed source hash must match capture: ${file}`)
     assert.equal(sha(readFileSync(resolve(root, file))), digest, `Reviewed source must match the current candidate: ${file}`)
   }
+  if (mode === 'settings') {
+    for (const file of settingsOwningSources) assert.ok(review.sourceHashes?.[file], `Review owning source hash is required: ${file}`)
+    const interactions = capture.interactions ?? []
+    assert.ok(interactions.some(item => item.kind === 'native-renderer-click' && item.selector?.includes('[data-value=')), 'Native selection evidence is required')
+    assert.ok(interactions.some(item => item.kind === 'native-renderer-key' && item.expectedDOMKey === 'Escape' && item.events?.some(event => event.type === 'keydown' && event.key === 'Escape' && event.trusted)), 'Native Escape evidence is required')
+  }
   const actual = [...review.actualViews].sort()
   const declared = review.images.map(image => image.path).sort()
   assert.deepEqual(actual, declared, 'Every declared image must be actually viewed, with no extras')
@@ -62,6 +77,7 @@ function validate(review, directory, mode) {
   const captured = [...capturedImages.keys()].sort()
   assert.ok(captured.length > 0, 'Capture must declare its actual image set')
   if (mode === 'desktop' || mode === 'final') assert.deepEqual(captured, desktopImages, 'Desktop capture must contain the exact complete scene set')
+  if (mode === 'settings') assert.deepEqual(captured, settingsImages, 'Settings capture must contain the exact complete scene set')
   assert.deepEqual(declared, captured, 'Review must cover exactly every captured image and no unrelated file')
   for (const image of review.images) {
     assert.equal(capturedImages.get(image.path), image.sha256, `Capture PNG must match review: ${image.path}`)
@@ -104,12 +120,15 @@ function selfTest() {
   writeFileSync(image, Buffer.from('controlled-png-content'))
   review.images[0].sha256 = sha(readFileSync(image))
   const driverReceiptPath = join(directory, 'driver-capture.json')
-  const driverSources = Object.fromEntries([...requiredDriverSources('node'), relative(root, sourceFile)].map(file => [file, sha(readFileSync(resolve(root, file)))]))
+  const driverSources = Object.fromEntries([...requiredDriverSources('node'), ...settingsOwningSources, relative(root, sourceFile)].map(file => [file, sha(readFileSync(resolve(root, file)))]))
   const driverIdentity = sourceIdentity(driverSources)
-  const driverReceipt = { completed: true, execution: { exitCode: 0 }, sourceIdentity: driverIdentity, sources: driverSources, images: [{ path: 'node.png', sha256: sha(readFileSync(image)) }] }
+  const driverFrames = settingsImages.map(name => { const path = join(directory, name); writeFileSync(path, Buffer.from('controlled-png-content')); return { path: name, sha256: sha(readFileSync(path)), conclusion: 'Controlled complete scene' } })
+  const driverReceipt = { completed: true, execution: { exitCode: 0 }, sourceIdentity: driverIdentity, sources: { ...driverSources }, images: driverFrames.map(({ path, sha256 }) => ({ path, sha256 })),
+    interactions: [{ kind: 'native-renderer-click', selector: '.selection-field__menu [data-value="host-02"]' }, { kind: 'native-renderer-key', expectedDOMKey: 'Escape', events: [{ type: 'keydown', key: 'Escape', trusted: true }] }] }
   writeFileSync(driverReceiptPath, JSON.stringify(driverReceipt))
-  const driverReview = { ...review, sourceIdentity: driverIdentity, sourceHashes: {}, captureReceipt: { path: 'driver-capture.json', sha256: sha(readFileSync(driverReceiptPath)) } }
-  assert.deepEqual(validate(driverReview, directory, 'settings'), { reviewer: 'independent-ui-reviewer', images: 1, sourceIdentity: driverIdentity })
+  const driverReview = { ...review, sourceIdentity: driverIdentity, sourceHashes: Object.fromEntries(settingsOwningSources.map(file => [file, driverSources[file]])), captureReceipt: { path: 'driver-capture.json', sha256: sha(readFileSync(driverReceiptPath)) },
+    actualViews: settingsImages, images: driverFrames }
+  assert.deepEqual(validate(driverReview, directory, 'settings'), { reviewer: 'independent-ui-reviewer', images: settingsImages.length, sourceIdentity: driverIdentity })
   delete driverReceipt.sources['apps/desktop/scripts/fixtures/settings-connections/native-input.cjs']
   driverReceipt.sourceIdentity = sourceIdentity(driverReceipt.sources)
   writeFileSync(driverReceiptPath, JSON.stringify(driverReceipt))
@@ -122,6 +141,28 @@ function selfTest() {
   driverReview.sourceIdentity = driverIdentity
   driverReview.captureReceipt.sha256 = sha(readFileSync(driverReceiptPath))
   assert.throws(() => validate(driverReview, directory, 'settings'), /its own manifest/)
+  driverReceipt.sources = driverSources
+  driverReceipt.sourceIdentity = driverIdentity
+  writeFileSync(driverReceiptPath, JSON.stringify(driverReceipt))
+  driverReview.sourceIdentity = driverIdentity
+  driverReview.captureReceipt.sha256 = sha(readFileSync(driverReceiptPath))
+  const owningHashes = driverReview.sourceHashes
+  driverReview.sourceHashes = {}
+  assert.throws(() => validate(driverReview, directory, 'settings'), /Review owning source hash is required/)
+  driverReview.sourceHashes = owningHashes
+  driverReceipt.interactions = []
+  writeFileSync(driverReceiptPath, JSON.stringify(driverReceipt))
+  driverReview.captureReceipt.sha256 = sha(readFileSync(driverReceiptPath))
+  assert.throws(() => validate(driverReview, directory, 'settings'), /Native selection evidence is required/)
+  driverReceipt.interactions = [{ kind: 'native-renderer-click', selector: '.selection-field__menu [data-value="host-02"]' }]
+  writeFileSync(driverReceiptPath, JSON.stringify(driverReceipt))
+  driverReview.captureReceipt.sha256 = sha(readFileSync(driverReceiptPath))
+  assert.throws(() => validate(driverReview, directory, 'settings'), /Native Escape evidence is required/)
+  driverReceipt.interactions = [{ kind: 'native-renderer-click', selector: '.selection-field__menu [data-value="host-02"]' }, { kind: 'native-renderer-key', expectedDOMKey: 'Escape', events: [{ type: 'keydown', key: 'Escape', trusted: true }] }]
+  driverReceipt.images = driverReceipt.images.slice(1)
+  writeFileSync(driverReceiptPath, JSON.stringify(driverReceipt))
+  driverReview.captureReceipt.sha256 = sha(readFileSync(driverReceiptPath))
+  assert.throws(() => validate(driverReview, directory, 'settings'), /Settings capture must contain the exact complete scene set/)
   const finalReceiptPath = join(directory, 'final-capture.json')
   const finalSources = { ...driverSources, 'apps/desktop/scripts/fixtures/ui-selection-field/desktop-main.cjs': sha(readFileSync(resolve(root, 'apps/desktop/scripts/fixtures/ui-selection-field/desktop-main.cjs'))) }
   delete finalSources['apps/desktop/scripts/fixtures/settings-connections/native-input.cjs']
