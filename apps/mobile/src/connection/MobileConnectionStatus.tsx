@@ -34,21 +34,21 @@ function StepMark({ state, index }: { state: StepState; index: number }) {
 }
 const stepStatus: Record<StepState, string> = { done: '已完成', current: '进行中', pending: '未开始', attention: '需要处理', unknown: '未确认' }
 
-export function MobileConnectPage({ connection, appIcon, panel, onDetails }: {
-  connection: MobileConnection; appIcon?: AppIcon; panel?: ReactNode; onDetails(): void
+export function MobileConnectPage({ connection, appIcon, panel, gatewayEndpoint, onDetails }: {
+  connection: MobileConnection; appIcon?: AppIcon; panel?: ReactNode; gatewayEndpoint?: string; onDetails(): void
 }) {
   const progress = connectProgress(connection)
   const active = progress.findIndex(state => state === 'current' || state === 'attention')
   return <section className="mobile-connect-page" data-connect-state={connection.paired === false ? 'unpaired' : connection.state}>
     <BrandIcon icon={appIcon} className="mobile-connect-dragon" size={72} alt="AgentMux" />
     <h1>{connectTitle(connection)}</h1>
-    <ol className="mobile-connect-steps" aria-label="接入进度">
+    {gatewayEndpoint ? <p className="mobile-connect-gateway">通过网关 <bdi>{gatewayEndpoint}</bdi></p> : <ol className="mobile-connect-steps" aria-label="接入进度">
       {STEPS.map((label, index) => <li key={label} className="mobile-connect-step" data-step-state={progress[index]} aria-current={index === active ? 'step' : undefined}>
         <StepMark state={progress[index]!} index={index} />
         <span className="mobile-connect-step__text"><span>{label}<span className="mobile-visually-hidden">，{stepStatus[progress[index]!]}</span></span>
           {index === active && connection.paired !== false && connection.message ? <small>{connection.message}</small> : null}</span>
       </li>)}
-    </ol>
+    </ol>}
     {panel ? <div className="mobile-connect-panel">{panel}</div> : null}
     <button type="button" className="mobile-secondary mobile-connect-details" onClick={onDetails}><ThemeObjectConnectionIcon size={16} />连接详情</button>
   </section>

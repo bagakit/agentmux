@@ -19,6 +19,9 @@
 .mobile-connect-panel { margin-top: var(--sp-5); color: var(--text-3); font-size: var(--fs-meta); line-height: 1.5; }
 .mobile-connect-panel p { margin: 0 var(--sp-2); }
 .mobile-connect-panel button { width: 100%; min-height: 44px; margin-top: var(--sp-5); border: 0; border-radius: var(--mobile-radius); background: var(--mobile-accent); color: var(--surface-0); font-size: var(--fs-body); font-weight: 600; }
+.mobile-connect-gateway { margin: 0; color: var(--text-2); overflow-wrap: anywhere; }
+.mobile-connect-panel button.mobile-secondary { background: var(--mobile-group); color: var(--text); }
+.mobile-connect-panel code { overflow-wrap: anywhere; }
 .mobile-app .mobile-connect-page .mobile-connect-details { margin-top: var(--sp-5); }
 
 /* Drawer connection card: brand, Mac address and the status dot, leading the menu. */

@@ -115,6 +115,7 @@ function loadWorkface(): { workface: Workface; presentation?: MobilePresentation
 type MobileAppProps = {
   client: AgentMuxHostedClient | null; connection: MobileConnection; platform: ClientUiPlatform
   native?: boolean; focusComposer?: () => boolean
+  gatewayEndpoint?: string
   connectionPanel?: ReactNode
   webObservation?: MobileWebPageObservation | null
   /** First presentation only, after the connection owner verifies the original reload handoff. */
@@ -123,7 +124,7 @@ type MobileAppProps = {
 export function MobileApp(props: MobileAppProps) {
   return <MobileNoticeProvider><MobileAppContent {...props} /></MobileNoticeProvider>
 }
-function MobileAppContent({ client, connection, platform: basePlatform, native = false, focusComposer = () => false, connectionPanel, webObservation, restoreWorkface = false }: MobileAppProps) {
+function MobileAppContent({ client, connection, platform: basePlatform, native = false, focusComposer = () => false, connectionPanel, gatewayEndpoint, webObservation, restoreWorkface = false }: MobileAppProps) {
   const attachmentOwner = useMobileWebAttachmentOwner()
   const composeAfterClose = useRef<{ client: MobileAppProps['client']; sessionId: string } | null>(null)
   const composeScope = useRef({ client, sessionId: null as string | null, visible: false, focusComposer })
@@ -691,7 +692,7 @@ function MobileAppContent({ client, connection, platform: basePlatform, native =
       onTeam={() => setSheet('team')} onMain={() => returnToMoteMain()}
       showMain={Boolean(team?.main?.confirmed && (team.main.reference.sessionId !== workface.selectedSessionId || team.main.reference.hostId !== selected?.hostId))} /> : null}
     <main ref={mainRef} aria-hidden={focusRoot || undefined} className="mobile-main" tabIndex={-1} {...(screenMotion ? { 'data-motion': screenMotion.kind, 'data-motion-phase': screenMotion.key % 2 } : {})}>
-      {!workspaceVisible && <MobileConnectPage connection={connection} appIcon={hostAppearance.appIcon} panel={connectionPanel} onDetails={() => setSheet('connection')} />}
+      {!workspaceVisible && <MobileConnectPage {...(gatewayEndpoint ? { gatewayEndpoint } : {})} connection={connection} appIcon={hostAppearance.appIcon} panel={connectionPanel} onDetails={() => setSheet('connection')} />}
       {workspaceVisible && <>
         <div className="mobile-spatial-host" hidden={!spatialPresented}><MobileSpatialNavigation wide={wideShell} loadingLabel={focusShown ? 'Focus' : home === 'mote' ? 'Mote' : home === 'focus' ? 'Focus' : 'Space'} loadWhen={spatialPresented || focusVisible} focusTarget={focusTarget} fallbackTarget={focusShown ? focusTarget : null} focusVisible={focusVisible} focusSelected={focusSelected} openFocusSession={openFocusSession} onLoadReturn={returnToConversation} onCreateAgent={createAgent} visible={directoryVisible} home={home} client={client} connected={connected} openSession={openSession} onPresentation={attention.publish} needsYou={needsYou} openMainAgent={openMainAgent} openProfile={openProfile} onBackChange={registerSpatialBack}
           recentMoteSpaceId={recentMoteSpaceId} onSelectMote={selectMote}
@@ -837,7 +838,7 @@ function MobileAppContent({ client, connection, platform: basePlatform, native =
           <button type="button" className="mobile-menu-row mobile-sheet-app-menu" aria-label="手机设置、提醒与诊断" onClick={() => setSheet('settings')}><ThemeActionMenuIcon size={18} /><span>手机设置、提醒与诊断<small>{label}{notices?.hasDismissed ? ' · 有已收起的提醒' : ''}</small></span><ThemeNavigationSubmenuIcon size={16} /></button>
         </> : <>
           <Dialog.Description id="mobile-sheet-description">连接同一私网里的 Mac。Agent 与会话由 Mac 管理。</Dialog.Description>
-          <p>Mac：{location.origin} · {label}</p>
+          <p>{gatewayEndpoint ? '网关：' + gatewayEndpoint : 'Mac：' + location.origin} · {label}</p>
           <p className="mobile-sheet-note">Mac 保持在线即可继续使用对话。</p>
           {connectionPanel}
           <MobileRecoveryPanel {...(native ? { exportFile: exportNativeWorkfaceFile } : {})} />

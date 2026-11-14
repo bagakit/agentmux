@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { flushSync } from 'react-dom'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
 import { connectRelayHostedClient } from '@agentmux/core/relay-hosted'
@@ -22,11 +22,19 @@ function reloadRecordIdentity(hostId: string): string | null {
   if (issue || record.host?.origin !== location.origin || record.host.hostId !== hostId) throw new Error('这台设备的工作面记录暂时无法完整读取。')
   return record.recordId ?? null
 }
-export function MobileConnectionRoot({ platform, native, focusComposer, offer, pin, linkIssue }: {
+export function MobileConnectionRoot({ platform, native, focusComposer, offer, pin, linkIssue, deviceAccess, onDeviceClient }: {
   platform: ClientUiPlatform; native: boolean; focusComposer?: () => boolean; offer?: ConnectionOffer; pin?: ConnectionPin; linkIssue?: string
+  onDeviceClient?: (client: AgentMuxHostedClient | null) => void
+  deviceAccess?: (retry: () => void, connected: boolean) => ReactNode
 }) {
   const [client, setClient] = useState<AgentMuxHostedClient | null>(null)
   const [connection, setConnection] = useState<MobileConnection>({ state: 'connecting', message: '正在连接 Mac' })
+  useEffect(() => {
+    if (client && connection.state === 'connected' && onDeviceClient) {
+      onDeviceClient(client)
+      return () => onDeviceClient(null)
+    }
+  }, [client, connection.state, onDeviceClient])
   const [updatePending, setUpdatePending] = useState(() => !native && location.hash === mobileUpdateFragment)
   const restoreWorkface = useRef(false)
   const [connectionRetry, retryConnection] = useState(0)
@@ -57,7 +65,7 @@ export function MobileConnectionRoot({ platform, native, focusComposer, offer, p
     if (original?.state !== 'connected') throw new Error('连接暂不可用')
     return prepareReloadIdentity(original.key, original.offer, reloadRecordIdentity(original.hostId))
   }, [])
-  const mobileWeb = useMobileWebObservation(client, !native)
+  const mobileWeb = useMobileWebObservation(client, !native && !deviceAccess)
   useEffect(() => {
     let current = true
     void prepareMobileApp().then(module => { if (current) setApp(() => module.MobileApp) }, error => {
@@ -147,7 +155,7 @@ export function MobileConnectionRoot({ platform, native, focusComposer, offer, p
           })
           if (controller.signal.aborted) return
         }
-        const name = /iPhone/.test(navigator.userAgent) ? 'iPhone' : /iPad/.test(navigator.userAgent) ? 'iPad' : /Android/.test(navigator.userAgent) ? 'Android' : '浏览器'
+        const name = deviceAccess ? 'AgentMux Desktop' : /iPhone/.test(navigator.userAgent) ? 'iPhone' : /iPad/.test(navigator.userAgent) ? 'iPad' : /Android/.test(navigator.userAgent) ? 'Android' : '浏览器'
         const value = await connectRelayHostedClient({ offer: selected!, keyPair, name, signal: controller.signal, sessions: 'summary', waitForReady: false })
         if (controller.signal.aborted) { await value.dispose(); return }
         if (pin) {
@@ -207,7 +215,7 @@ export function MobileConnectionRoot({ platform, native, focusComposer, offer, p
     window.addEventListener('online', resume); document.addEventListener('visibilitychange', resume)
     void connect()
     return () => { controller.abort(); metadata.abort(); if (cancelMetadata.current === cancelObservation) cancelMetadata.current = null; clearTimeout(timer); release?.(); if (binding.current?.client === owned) binding.current = null; void owned?.dispose(); window.removeEventListener('online', resume); document.removeEventListener('visibilitychange', resume) }
-  }, [offer, pin, linkIssue, connectionRetry])
+  }, [offer, pin, linkIssue, connectionRetry, deviceAccess])
   const observationPanel = metadataPending ? <div className="mobile-startup-observation" role="status"><button type="button" onClick={() => cancelMetadata.current?.()}>取消本次读取</button></div>
     : connection.state === 'unavailable' && pin ? <div className="mobile-startup-observation"><button type="button" onClick={() => retryConnection(value => value + 1)}>重新检查连接</button></div> : null
   const waiting = <main className="mobile-startup" aria-live="polite" aria-busy={!moduleIssue}>
@@ -228,7 +236,7 @@ export function MobileConnectionRoot({ platform, native, focusComposer, offer, p
   </main>
   return <MobileWebUpdateSafetyProvider verifyConnection={verifyConnection} prepareReload={prepareReload} native={native}><MobileWebCatalogObservation.Provider value={mobileWeb.observeCatalog}>
     {updatePending ? recovery : App ? <App client={client} connection={connection} platform={platform} native={native} webObservation={mobileWeb.observation} restoreWorkface={restoreWorkface.current}
-    {...(focusComposer ? { focusComposer } : {})} connectionPanel={metadataPending ? observationPanel : connection.paired === false ? undefined : connection.state === 'unavailable'
+    {...(focusComposer ? { focusComposer } : {})} {...(deviceAccess && offer ? { gatewayEndpoint: offer.relay.endpoint } : {})} connectionPanel={deviceAccess ? deviceAccess(() => retryConnection(value => value + 1), connection.state === 'connected') : metadataPending ? observationPanel : connection.paired === false ? undefined : connection.state === 'unavailable'
         ? <><p>请核对 Mac 的连接与授权，修复后重新检查。</p><button type="button" onClick={() => retryConnection(value => value + 1)}>重新检查连接</button></>
         : <p>连接会自动恢复。Mac 和手机保持在同一局域网即可。</p>} /> : waiting}
   </MobileWebCatalogObservation.Provider></MobileWebUpdateSafetyProvider>
