@@ -62,7 +62,8 @@ async function renderer(label, mutation = false) {
   for (const name of ['entry.tsx', 'main.cjs']) { const data = await readFile(join(fixture, name)); harnessInputs[name] = hash(data); await writeFile(join(directory, 'driver-' + name), data) }
   await writeFile(join(directory, 'compiled.json'), JSON.stringify({ loadedSourceInputs, importedStyleInputs, compiledFiles, sourceMutations, harnessInputs, terminalWrapperSHA256: hash(await readFile(wrapper)) }, null, 2))
   const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE
-  const log = [], outcome = await runProbeProcess(require('electron'), [join(fixture, 'main.cjs'), join(outDir, 'index.html'), temporaryRoot, directory, ...(splitOnly ? ['split-only'] : [])], {
+  const profile = splitOnly ? join(temporaryRoot, 'profile-' + label) : temporaryRoot
+  const log = [], outcome = await runProbeProcess(require('electron'), [join(fixture, 'main.cjs'), join(outDir, 'index.html'), profile, directory, ...(splitOnly ? ['split-only'] : [])], {
     cwd: repository, env, timeoutMs: 90000, onLine: line => log.push(line)
   })
   await writeFile(join(directory, 'process.log'), log.join('\n'))
