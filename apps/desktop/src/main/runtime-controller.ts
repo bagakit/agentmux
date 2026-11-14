@@ -1,3 +1,4 @@
+import { parseFocusTaskReference } from '@agentmux/core/focus-control'
 import { createSpaceMemberSurface } from './space-member-surface.js'
 import { readSpaceSnapshot, observeSpace, type AgentMuxRpcClient } from '@agentmux/core'
 import type { SpaceMountSourceTarget, SpaceMountTarget, SpaceMountResources, SpaceMountWatch, SpaceMountEvent } from '../shared/space-mount.js'
@@ -1940,7 +1941,7 @@ export class RuntimeController {
     operationId: string,
     condition: AgentPromptInputBinding,
     automation?: { completionId?: string; futureIntent?: { intentId: string; occurrenceAt: number }; inputByte?: number; isCurrent(): boolean; signal: AbortSignal },
-    choice?: { allowUncertainTurn?: true; execution?: AgentPromptExecution; preparationRetry?: import('@agentmux/core').AgentPromptPreparationRetryFence; moteSource?: import('@agentmux/core').AgentInputMoteSource; moteMain?: Pick<import('@agentmux/core/mote-dialogue').MoteDialogueInputSubmit, 'target' | 'expectedRoleRevision'> },
+    choice?: { focusTask?: import('@agentmux/core/focus-control').AgentMuxFocusTaskReference; allowUncertainTurn?: true; execution?: AgentPromptExecution; preparationRetry?: import('@agentmux/core').AgentPromptPreparationRetryFence; moteSource?: import('@agentmux/core').AgentInputMoteSource; moteMain?: Pick<import('@agentmux/core/mote-dialogue').MoteDialogueInputSubmit, 'target' | 'expectedRoleRevision'> },
     authorHuman?: boolean,
     agentMuxNote?: string,
     sourceChannel: AgentMessageChannel = 'message-tool',
@@ -1954,6 +1955,7 @@ export class RuntimeController {
         'This logical main input retains its original human intent, Session and Run.', 'INVALID_AGENT_PROMPT')
       const content = {
         agentSessionId: control.agentSessionId, operationId, prompt, sourceChannel,
+        ...(choice.focusTask ? { focusTask: parseFocusTaskReference(choice.focusTask) } : {}),
         ...(choice.allowUncertainTurn ? { allowUncertainTurn: true } : {}),
         ...(choice.moteSource ? { moteSource: choice.moteSource } : {}),
         ...(inputImages?.length ? { inputImages: [...inputImages] } : {}),
@@ -2315,7 +2317,7 @@ export class RuntimeController {
     config: AppConfig,
     workspacePath?: string,
     operationId: string = mintObjectId(),
-    request?: (Pick<import('@agentmux/core/agent-session-recovery').AgentMuxAgentContinuityInput, 'trigger' | 'timingOverride' | 'input'> & { moteMain?: Pick<import('@agentmux/core/mote-dialogue').MoteDialogueInputSubmit, 'target' | 'expectedRoleRevision'>; inputImages?: readonly import('@agentmux/core').AgentInputImageReference[] })
+    request?: (Pick<import('@agentmux/core/agent-session-recovery').AgentMuxAgentContinuityInput, 'trigger' | 'timingOverride' | 'input'> & { moteMain?: Pick<import('@agentmux/core/mote-dialogue').MoteDialogueInputSubmit, 'target' | 'expectedRoleRevision'>; focusTask?: import('@agentmux/core/focus-control').AgentMuxFocusTaskReference; inputImages?: readonly import('@agentmux/core').AgentInputImageReference[] })
   ): Promise<SessionRecoveryResult> {
     return await this.trackHostOperation(
       control.hostId,
@@ -2328,7 +2330,7 @@ export class RuntimeController {
     config: AppConfig,
     workspacePath: string | undefined,
     operationId: string,
-    request?: (Pick<import('@agentmux/core/agent-session-recovery').AgentMuxAgentContinuityInput, 'trigger' | 'timingOverride' | 'input'> & { moteMain?: Pick<import('@agentmux/core/mote-dialogue').MoteDialogueInputSubmit, 'target' | 'expectedRoleRevision'>; inputImages?: readonly import('@agentmux/core').AgentInputImageReference[] })
+    request?: (Pick<import('@agentmux/core/agent-session-recovery').AgentMuxAgentContinuityInput, 'trigger' | 'timingOverride' | 'input'> & { moteMain?: Pick<import('@agentmux/core/mote-dialogue').MoteDialogueInputSubmit, 'target' | 'expectedRoleRevision'>; focusTask?: import('@agentmux/core/focus-control').AgentMuxFocusTaskReference; inputImages?: readonly import('@agentmux/core').AgentInputImageReference[] })
   ): Promise<SessionRecoveryResult> {
     const client = await this.connectedClient(control.hostId, 'runtime')
     if (request?.moteMain) {
@@ -2337,6 +2339,7 @@ export class RuntimeController {
       const original = request.input
       const result = await this.callOriginalCore(request.moteMain.target.expectedResource.hostId, 'space.mote.dialogue.input.submit', {
         ...request.moteMain, recovery: { operationId }, input: {
+          ...(request.focusTask ? { focusTask: parseFocusTaskReference(request.focusTask) } : {}),
           agentSessionId: control.agentSessionId, operationId: original.submissionId, prompt: original.prompt,
           expectedRun: control.run, admissionIntent: { kind: 'manual-actor' }, execution: 'immediate',
           ...(original.sourceChannel ? { sourceChannel: original.sourceChannel } : {}),

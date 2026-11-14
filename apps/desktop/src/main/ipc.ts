@@ -133,6 +133,7 @@ import type { ContinuousProgressTarget, ContinuousProgressTaskSource } from '@ag
 import { inspectDesktopClient, observeWorkbenchUserState, registerLoadedIdentityIpc } from './client-observation.js'
 import { inspectNotifications, clientNotificationsPort } from './notification-observation.js'
 import { inspectMoteContext, moteContextEvidencePort } from './mote-context-observation.js'
+import { createFocusObservation } from './focus-observation.js'
 import { observeClientRpcSnapshot } from '@agentmux/host/snapshot-observation'
 import { SessionHistoryObservationOwners } from './session-history-observation.js'
 import { registerNodePublishingIpc } from './node-publishing-ipc.js'
@@ -857,6 +858,11 @@ export async function registerIpc(args: {
     stopTaskBatch: (id: string, batchId: string) => browsers.stopTaskBatch(id, batchId),
     stopTaskAsset: (id: string, runId: string) => browsers.stopTaskAsset(id, runId)
   }, browserAutomation)
+  const observeFocus = createFocusObservation({
+    renderer: () => contents.isLoadingMainFrame() ? null : args.loadedRenderer?.() ?? null,
+    generation: () => args.runtime.rendererGeneration(contents),
+    execute: (request, signal) => controlBridge.execute(request, signal)
+  })
   const executeControlOwner = async (
     request: AgentMuxControlRequest, signal?: AbortSignal
   ): Promise<AgentMuxControlResult> => {
@@ -882,6 +888,7 @@ export async function registerIpc(args: {
       }
     }
 
+    if (request.operation === 'focus.ls' || request.operation === 'focus.read') return await observeFocus(request, signal)
     if (request.operation === 'inspect.notifications') return await inspectNotifications(request, {
       renderer: () => contents.isLoadingMainFrame() ? null : args.loadedRenderer?.() ?? null,
       generation: () => args.runtime.rendererGeneration(contents),
@@ -2162,7 +2169,7 @@ export async function registerIpc(args: {
   handle('sessions:observeStorage', async (session: SessionControl) => await args.runtime.observeStorage(session))
   handle('sessions:controlContinuity', async (hostId: string, input: import('@agentmux/core/agent-session-recovery').AgentMuxContinuityControlInput) => await sessionObservationResult(() => args.runtime.controlContinuity(hostId, input)))
   handle('sessions:refresh', async (session: SessionControl) => await args.runtime.refresh(session, config))
-  handleWithEvent('sessions:recover', async (event, session: SessionControl, workspacePath?: string, operationId?: string, request?: (Pick<import('@agentmux/core/agent-session-recovery').AgentMuxAgentContinuityInput, 'trigger' | 'timingOverride' | 'input'> & { moteMain?: Pick<import('@agentmux/core/mote-dialogue').MoteDialogueInputSubmit, 'target' | 'expectedRoleRevision'>; inputImages?: readonly import('@agentmux/core').AgentInputImageReference[] })) => { return await sessionRecoveryOperationResult(() => args.runtime.recoverSession(session, config, workspacePath, operationId, request)) })
+  handleWithEvent('sessions:recover', async (event, session: SessionControl, workspacePath?: string, operationId?: string, request?: (Pick<import('@agentmux/core/agent-session-recovery').AgentMuxAgentContinuityInput, 'trigger' | 'timingOverride' | 'input'> & { moteMain?: Pick<import('@agentmux/core/mote-dialogue').MoteDialogueInputSubmit, 'target' | 'expectedRoleRevision'>; focusTask?: import('@agentmux/core/focus-control').AgentMuxFocusTaskReference; inputImages?: readonly import('@agentmux/core').AgentInputImageReference[] })) => { return await sessionRecoveryOperationResult(() => args.runtime.recoverSession(session, config, workspacePath, operationId, request)) })
   handleWithEvent('sessions:restart', async (event, session: AgentSessionControl, operationId: string, observeOnly?: boolean) => {
     if (!observeOnly) pauseUserProgress(session, 'Paused because you restarted this Agent. Resume explicitly when ready.')
     return await sessionObservationResult(() => args.runtime.restartSession(session, config, operationId, observeOnly))
