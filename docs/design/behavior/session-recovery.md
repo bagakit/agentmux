@@ -16,6 +16,12 @@
 
 ### Session、Run 与 View
 
+精确 Tab／Region 的安全关闭须对 GUI 与 CLI 提供同一个准备、执行和原结果查询协调入口，复用原 close planner／reconcile 与资源 owner，不以 raw graph remove、解绑或关窗口外壳代替。准备固定 occurrence、原文档 lifetime／generation／内容摘要与保存基线、在途编辑／保存、原 Session／Run、其他 View 和资源后果；正文不进入普通计划摘要。准备不停止或丢内容，返回前保留原操作记录；preparedBy与实际批准／执行主体分别记录，managed Agent准备不授予自己 discard／stop 权限。
+
+需要丢弃草稿或停止最后 View 的原对象时，原人或设备明确确认该计划中准确文档 witness／原 Run；没有敏感影响的原准备者只可执行自己仍有效的计划。每个外部 child action 前核对真实目标与 last-view 事实，等待结束后的最终 state transaction 必须再次核对 dirty witness：等待期间的新输入、IME、保存或 Run／绑定换代不能被旧决定消费。keep Agent与停止后果分开；单格 Region不得暗中升级为关闭整个Tab。失败或未知只保留受影响工作面与原草稿，独立成功的部分按真实原 reconcile回执。
+
+关闭记录由原用户状态／关闭 owner持有，复用其按操作独立成员或存储边界；仅保存计划、原 actor、child引用和已得结果，不复制布局／草稿／子业务状态，也不将全部历史回执嵌入每次普通输入／布局保存。投影、原空间贡献、资源效果与各自保存分别确认。普通进程重启后 prepared不自动apply，派发未知只查询原child；原工作面、草稿、Session／Run及所有未确认责任保留，迟到回执不能二次关闭替代目标。
+
 - Composer 普通 Prompt 的排队、投递时机、草稿归属与队列容量唯一见[《Composer 消息队列与紧凑状态》](conversation-input.md#composer-消息队列与紧凑状态)。Agent 正等待 typed interaction 时，排队的普通 Prompt 不能当作权限或问题的回答。用户在原生终端明确输入的按键仍可送达健康 Run；待答观察不能禁用该入口，原生输入也不能冒充 typed 回答成功、清除请求或扩大权限。界面保留真实待答事实与原生入口；无法确认是否已处理时显示待核实。
 - 同一健康 Run 已由合法输入推进后，准确 typed 回答仍通过原 Core owner 处理；新回答的输入边界以本次同一当前 Run 的权威事实为准，不能让过时的本地记账替代它。已有回答保留原请求、内容、操作身份与冻结输入范围，按原受据结算；回执未知不重新认领、不自动重放。权威边界未取得时如实说明边界未知与本次回答是否已实际提交，保留原请求、工作面和健康原生输入，不猜零、不以重启 Agent 清除记账。
 - Agent Session 是 Core 持有的 Provider 语义身份；Run 是 ctxmux 进程身份；Tab/Region 是 Core 持有的持久空间身份，View 是 Client 的呈现实例。本节的 View 指承载一个 Session 的一处展示位置：承载它的一个 Region，或关联该 Agent 的 Browser；这与[《Tab、Tab Group 与 Region》](spaces-and-layout.md#tabtab-group-与-region)中作为整张工作视图（一个 Tab）的 View 不同。

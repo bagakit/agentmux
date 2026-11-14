@@ -269,6 +269,14 @@ Space 是共同的外层产品概念，Project 表达可选项目来源，不能
 
 ### Folder 与项目树
 
+资源文件的目录创建、移动／改名与删除须能经原 Files owner 公共接入，GUI与CLI共用准确资源映射、Note写租约、原文件系统安全原语与命名审计。先发现原entry／parent／root witness和能力，再带完整预期与原 operation执行；同 Host／Workspace与no-replace等原边界不因新入口而扩大。witness只是对象代次，不授予权限；验证后至 native效果前的原source／parent换代仍由原安全原语拒绝。符号链接只作用于原entry、不追随其目标，root／在用执行cwd和原工作不被顺手删除。
+
+目录默认只删空目录，显式recursive授权准确原subtree，不冒称原root witness冻结了全部子文件内容；无支持的原平台安全能力如实unsupported，不退回shell `rm -rf`。原operation查询只读物理效果、保存与辅助审计等原事实；原路径现在缺席不证明某次删除完成，派发未知不自动再执行。
+
+**文件系统效果与丢弃用户草稿分别授权。** CLI或其他客户端确认删除后，原dirty buffer默认保为可恢复的deleted／conflict工作面；不能复用会删除全部matching documents/dirty generations的旧成功reducer。GUI本人明确discard也要冻结准确draft witness，等待文件效果后在最终state transaction重新CAS，等待期的新输入必须保留。移动的路径采用只消费仍匹配的原资源／lifetime，保正文与未保存编辑；不能以watcher的old missing/new present猜同一次move或改变Session cwd。原资源事件与operation查询承接离线client，不增加全目录／全操作轮询。
+
+Git 分支比较沿原 Git owner公开准确base／target分支与merge-base／two-point模式的观察，返回固定完整OID snapshot及entries，供已有文件diff读取；后续分支移动不重新按label解析旧比较。普通Git写入、同步与PR继续用成熟git／gh工具在准确执行Host／cwd完成，AgentMux只持有自己的资源定位、工作面与worktree收尾，不再造通用Git／GitHub状态机。
+
 - 导航围绕 Space 的工作上下文组织；Folder/Project、Mote 与知识分类／Topic 的产品归属见[《Space、Folder 与 Topic》](#spacefolder-与-topic)。当前 Project Rail 负责选择工作上下文、显示紧凑状态和进入 Settings/Hosts。
 
 - **选中和运行状态是两件独立的事实。** 选中项目只用中性的整行 Surface 与 `aria-current` 表达；项目行尾的独立状态槽对所有有 Agent 的项目都显示，不因项目未选中而隐藏，也不因选中而变亮。状态槽沿[全窗共享的 Agent 状态判定](agent-capabilities-and-messaging.md#agent-全局状态唯一事实与投影)计数，不维护第二份 Session 状态：进程存活但当前回合安静计为 idle，只有已确认的当前语义活动计为 working，Run 未观察到、进程不在运行或活动无法确认计为 unknown，同一 Agent 不能同时读成 working 和 idle。待回答与错误即使活动未确认也照常计入；已确认的完成结果不因之后失去 Run 观察而消失。图形与数量的呈现只见密度 SSOT[《Project Rail 与 Topic 行密度》](../presentation/spaces-and-layout.md#project-rail-与-topic-行密度)。
@@ -315,6 +323,8 @@ Space 导航必须同时回答「这是什么、在哪里、是否需要我、�
 - 分区开合、查找、pin、密度和人格入口不改写 Session/Run、Tab/Region 或布局；查找继续暂时显示命中上下文并在清除时恢复原折叠与滚动。进程重启后保留原对象、分区折叠、pin、密度、选中及工作面，并沿既有恢复路径继续原 Session；探测或显示信息失败按原服务窗合同保留健康工作面。顶部层数、左缘、折叠字形与无连线层级的视觉约束只定义在 surface-density[《Project Rail 与 Topic 行密度》](../presentation/spaces-and-layout.md#project-rail-与-topic-行密度)；调整这些外观不能改写对象归属、工作面、焦点、Session/Run 或健康 Agent 的可用性。
 
 ### 用户图标与近期活动
+
+Category／Topic等对象头像的公共preview/read/save沿同一原对象、资产与配置发表owner，完整动作区分素材准备、不可变PNG保存、选择发布与原operation查询；新操作由真实上下文提供原actor并绑定原operation，不接受JSON自报主体，旧无actor记录只保旧来源而不补造历史。不能只公开上传helper就称头像已发布。Mote与其他对象复用已有发表／原结果算法，不另造图片Store或对象身份。target与object key由原Category／Topic事实核对，调用参数不授予目录访问或本人批准。普通icon选择保持准确配置CAS；当前选择与历史发表ACK分开，未知操作不重复保存素材或另选目标。
 
 一级归属、身份槽、分类与聚合组的辨认、pin 尺度和目录背景的视觉约束唯一见 surface-density[《Project Rail 与 Topic 行密度》](../presentation/spaces-and-layout.md#project-rail-与-topic-行密度)。
 

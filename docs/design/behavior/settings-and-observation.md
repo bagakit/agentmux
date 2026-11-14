@@ -331,6 +331,10 @@ Prompt 的当前对象、未提交修改与只读使用示意应在同一编辑�
 
 ### 分区、资源与配置生效
 
+结构化设置按已知业务对象提供typed读取和完整slice CAS，不以任意JSON path覆盖AppConfig。Goals常用动作的有序builtin／Prompt引用及本次关联Prompt编辑须在原ConfigOwner一次提交，正文仍原Prompt库；渠道header显隐按准确adapter的authored值与默认值分别读取，不影响connection traffic／权限。普通配置编辑包括原已授权Agent，未知保存后只读当前对象，不用匹配值伪造历史ACK，也不为每个标量新建journal。
+
+执行Host Executor注册删除独立于Desktop模板库：原registry owner以原注册发表／incarnation witness核对删除，防止相同配置删除重建后的ABA；Session恢复所用配置内容digest保持原语义，可读旧注册数据与身份不得丢弃。删除同时核active／retired Session的恢复／历史引用与在途launch准入，在同一必要临界区保护配置采用。未知引用只拒该次删除，不能停Run或删除Session。移除registered override后同ID可能显露Provider默认项，回执分别给removed registration和effective descriptor，不谎称该ID从此不存在，不回传private env／argv。GUI和CLI共用此owner及安全descriptor。
+
 远程管理的产品范围、拓扑、Host 连接配置与测试、来源核验和维护入口由 [Remote 管理 PRD](remote-management.md) 持有；本节只持有通用设置导航、草稿与保存，以及 Agent 配置和设备模块的相邻规则。Hosts 中的网络面板（`HostNetworkPanel`）只在用户明确读取或刷新时取得一次观察，不轮询；观察来源与范围见[《所选 Host 的只读网络观察》](remote-management.md#所选-host-的只读网络观察)。
 
 - 设置结构优化必须落到真实页面。日常 Preferences 在前（My Profile、Mobile、Appearance、Notifications、General、Keyboard shortcuts），Agents 位于 Preferences 之后，分组内依次提供 Agent CLIs（安装与原启动配置）、Derived actions（官方与用户的派生动作，行为见[Agent 派生动作](agent-capabilities-and-messaging.md#agent-派生动作)）和 Session recovery（原会话恢复、复查与重试）；各页沿原分区身份和保存 owner，不再把 Agent 配置呈现为无标题的孤立入口。Browser 基础设置与 Agent 操作呈现归独立的 [Browser use](#browser-use-与-agent-操作呈现) 组，Message Tool 独立归组，其配置入口沿[本组职责](#message-tool-设置分组)。Cluster 紧随 Preferences，依次承接 Node 节点发布、Hosts 基础拓扑与 [Remote](remote-management.md#独立-remote-execution-工作台) 工作能力；Node 保持原 network-node 分区身份，Remote 保持原 remote-execution 身份，不另拆工作能力分组。Mobile 归入 Preferences 的个人设备访问入口，保持原 mobile 分区身份与设备 owner；具体节点发布、Host 连接、工作安排与设备接入仍各有准确对象和保存 owner，Conversation Channels 提供 InApp、Lark 与 Discord 子项，分别面向 App 内对话模式及对应外部对话应用；Mods 承载 Toolkit Library。分组的当前顺序与成员在 Renderer 模块目录（`settings-catalog.ts` 的 `SETTINGS_GROUPS` 与 `settings-modules.ts`）落地；实现与本节分组约束不一致时按实现缺口处理，例如 Topic 模块当前仍在 Know 组。原能力全部保留，Copied paths 在 General 内与本地数据／诊断分层，原单字段草稿、expected 和保存范围不扩大。统一底栏入口进入 Overview，项目管理沿 Hosts 的原项目入口进入；不新增第二齿轮，显式分区与 Executor ID 仍指向原精确对象；不保留独立 Copy Paths 页面或另造兼容路由。搜索仍能定位路径、`~`／absolute、字号、通知、日志、恢复、Provider 与设备接入。诊断或只读说明不进入偏好保存，不自动触发资源检测或更改健康 Run。

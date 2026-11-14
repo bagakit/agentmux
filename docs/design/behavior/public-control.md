@@ -113,6 +113,18 @@ Agent 能用本产品既有 CLI 打开文件／Editor、切换 Region 展示模�
 
 ## 对象优先 CLI 与统一公共业务服务
 
+### 完整业务链与公共扩展
+
+CLI 的完整性以用户或 Agent 能完成的原业务为单位：从原对象与能力发现，取得准确参数和预期修订，经唯一 owner 执行，再读原结果或当前事实。公共方法有命令名、help 非空或 GUI 已可用，都不代签这条链已接通；需要逐层核实际 Host／Desktop composition 与真实消费者。
+
+扩展沿现有业务对象和 typed 公共合同，不提供任意 SDK invoke、shell trampoline 或配置 JSON path setter。GUI 与 CLI 消费同一 owner，必要协调在原边界提炼，不复制状态、Provider 输入规则或文件系统实现。Core 仍无 UI 依赖，ctxmux 仍持有 Run／PTY／bytes；已存在的成熟 Git／GitHub 工具继续承担通用资源操作，AgentMux 持有自己的资源身份、工作面与 Runtime 事实。
+
+普通已知配置以准确对象、完整 CAS 和当前只读查询闭合；当前值不是历史保存 ACK。产生新身份或有不可重放效果的动作须在原业务 owner 绑定原 actor、operation、冻结请求与结果。已有业务 journal 直接复用；不得为统一名字给每个标量增加操作数据库或通用授权平台。未知原效果可持续只读查询并保留请求，不能要求所有 unknown 自动变确定，也不能用重调 mutator 冒充 inspect。
+
+复杂 JSON 载荷的 leaf help 给出完整准确字段、合法值与最小可运行形状，示例经原 domain parser 核对；不让使用者必须读源码才能构造正常调用。共享 `--flag=value` 转义在准确参数语法边界一致成立，positional IDs、路径和 JSON／stdin 正文仍是字面数据；解析失败不能被报告成 Host 或 Run 故障。
+
+相关业务约束各归原专题：Provider 声明与模式意图见[Provider 能力](agent-capabilities-and-messaging.md#provider-能力对齐与移植边界)，raw Terminal 读写与控制见[终端公开字节边界](terminal-reading.md#ordered-bytes-的公开传输边界)，工作面关闭见[Session、Run 与 View](session-recovery.md#sessionrun-与-view)，资源文件和 Git 见[Folder 与项目树](spaces-and-layout.md#folder-与项目树)，Profile 创建见[Profile 管理](browser-workface.md#profile-管理环境与指纹编辑)，Notes 原操作见[笔记目录与搬迁](knowledge-workflows.md#笔记目录设置与搬迁)。这些约束不证明某构建或安装实例已完成。
+
 公开 CLI 按业务对象组织，`agent open` 与 `space mv` 是创建 Agent 与移动展示位置的主入口。PMO 仍是协调工作方法／角色，不把原 PMO 查询改名为 Mote 查询；跨对象观察归 `app snapshot`，各对象的 inspect 归其对象，原 PMO activity 来自 Goal 的活动事实，归 `goal activity`。公开词汇以 Goal 取代 Demand，旧顶层动词与原 Demand 词汇不保留兼容别名。
 
 **主公开 CLI 的可执行名统一为 `amux`。** 命令发现与帮助、版本输出、skill／运行时指引、复制与错误恢复动作、`AGENTMUX_CLI` 注入的可执行路径、默认远端 CLI 调用及打包安装产物必须使用同一真实 `amux` 入口，不依赖 shell alias 或保留另一主 CLI 名作为兼容用法。源码、编译产物、安装入口与实际消费分别核对，不能只改展示文本或用别名可执行代签一致。
