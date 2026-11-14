@@ -30,7 +30,7 @@ async function choose() {
   if (snapshot.restoring) return
   publish({ ...snapshot, restoring: true })
   try { publish({ result: await api.ui.restoreLocalRuntimeIdentity(), restoring: false }) }
-  catch { publish({ result: { state: 'needs-backup', code: 'IDENTITY_RECOVERY_UNCONFIRMED' }, restoring: false }) }
+  catch { publish({ result: { state: 'blocked', code: 'IDENTITY_RECOVERY_UNCONFIRMED' }, restoring: false }) }
 }
 
 export function useLocalRuntimeRecovery(active: boolean, onRestored?: () => void) {
@@ -46,24 +46,25 @@ export function useLocalRuntimeRecovery(active: boolean, onRestored?: () => void
     const prior = previous.current
     previous.current = result
     const restored = result?.state === 'restored' && prior?.state !== 'restored'
-    const foundOriginal = result?.state === 'unchanged' && prior?.state === 'needs-backup'
+    const foundOriginal = result?.state === 'unchanged' && prior != null && prior.state !== 'unchanged' && prior.state !== 'restored'
     if (active && (restored || foundOriginal)) onRestored?.()
   }, [active, result, onRestored])
-  if (!active || result?.state !== 'needs-backup') return { notice: null, restoring, refresh: observe }
-  const guidance = result.code === 'IDENTITY_BACKUP_UNVERIFIED'
-    ? 'That file couldn’t confirm this Mac’s original identity. Choose another backup.'
-    : result.code === 'RUNTIME_OWNER_BUSY'
-      ? 'The background service is still active. Try again in a moment.'
+  if (!active || result?.state !== 'needs-backup' && result?.state !== 'blocked') return { notice: null, restoring, refresh: observe }
+  const blocked = result.state === 'blocked'
+  const guidance = blocked ? 'Your current records are kept. View the details or check again.'
+    : result.code === 'IDENTITY_BACKUP_UNVERIFIED' ? 'That file couldn’t confirm this Mac’s original identity. Choose another backup.'
       : 'Choose a backup of this Mac’s original Runtime identity.'
   const notice: ServiceNoticeItem = {
     id: 'local-runtime-identity', cause: result.code,
     notice: { kind: 'indeterminate', notice: {
-      step: 'Restore this Mac’s identity',
-      mode: 'The background service needs its original identity to reconnect. Your saved work is still in place.',
+      step: blocked ? 'Couldn’t verify this Mac’s identity' : 'Restore this Mac’s identity',
+      mode: blocked ? 'The background service needs an identity it can verify. Your saved work is still in place.'
+        : 'The background service needs its original identity to reconnect. Your saved work is still in place.',
       restore: guidance
     } },
     detail: result.code,
-    action: { label: restoring ? 'Restoring…' : 'Restore from backup…', run: () => { void choose() } }
+    action: blocked ? { label: 'Check again', run: observe }
+      : { label: restoring ? 'Restoring…' : 'Restore from backup…', run: () => { void choose() } }
   }
   return { notice, restoring, refresh: observe }
 }

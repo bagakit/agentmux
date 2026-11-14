@@ -152,8 +152,11 @@ export function MeshNetworkSettings({ active, onConnections, showTopology = true
   const refresh = () => { if (!settings) identityRecovery.refresh(); void inspect() }
   return <div className="mesh-network-settings" data-mesh-settings>
     <header className="mesh-network-heading"><MeshConnectionIntro />{!identityRecovery.notice && (settings || !issue) ? <button className="small-button" onClick={refresh} disabled={reading || saving}>{reading ? 'Reading…' : 'Refresh'}</button> : null}</header>
-    {identityRecovery.notice ? <ServiceWindowNotice layout="surface" notice={identityRecovery.notice.notice}
-      actions={<><button className="primary-button" disabled={identityRecovery.restoring} onClick={identityRecovery.notice.action?.run}>{identityRecovery.notice.action?.label}</button>{onConnections ? <button className="small-button" onClick={onConnections}>Open saved connections</button> : null}</>} />
+    {identityRecovery.notice ? <div>
+      <ServiceWindowNotice layout="surface" notice={identityRecovery.notice.notice}
+        actions={<><button className="primary-button" disabled={identityRecovery.restoring} onClick={identityRecovery.notice.action?.run}>{identityRecovery.notice.action?.label}</button>{onConnections ? <button className="small-button" onClick={onConnections}>Open saved connections</button> : null}</>} />
+      <details className="mesh-advanced"><summary>Technical details</summary><p>{identityRecovery.notice.detail}</p></details>
+    </div>
     : !settings ? <section className="mesh-availability" role={issue ? 'alert' : 'status'}>
       <span className="mesh-section-kicker">{issue ? 'Setup unavailable' : 'Connecting to this Core'}</span>
       <h3>{issue ? 'Couldn’t read Mesh settings.' : 'Reading your network settings…'}</h3>

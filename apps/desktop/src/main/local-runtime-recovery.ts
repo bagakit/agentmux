@@ -4,14 +4,20 @@ import { restoreMissingSemanticIdentity, type SemanticIdentityRecoveryResult } f
 export function localRuntimeRecovery(location: { storePath: string; stateDirectory: string }) {
   let current: Promise<SemanticIdentityRecoveryResult> | undefined
   let selecting: Promise<SemanticIdentityRecoveryResult> | undefined
-  const report = (error: unknown): SemanticIdentityRecoveryResult => {
-    const code = (error as NodeJS.ErrnoException)?.code
-    return { state: 'needs-backup', code: typeof code === 'string' && /^[A-Z0-9_-]+$/u.test(code) ? code : 'IDENTITY_RECOVERY_UNCONFIRMED' }
+  const report = (error: unknown, picked = false): SemanticIdentityRecoveryResult => {
+    const detail = (error as NodeJS.ErrnoException)?.code
+    const code = typeof detail === 'string' && /^[A-Z0-9_-]+$/u.test(detail) ? detail : 'IDENTITY_RECOVERY_UNCONFIRMED'
+    if (['IDENTITY_SOURCE_MISSING', 'IDENTITY_SOURCE_UNCONFIRMED',
+      'RUNTIME_AUTHORITY_MISMATCH', 'AGENT_CREATION_AUTHORITY_INVALID'].includes(code))
+      return { state: 'needs-backup', code: picked ? 'IDENTITY_BACKUP_UNVERIFIED' : code }
+    return { state: 'blocked', code }
   }
-  const check = () => current ??= restoreMissingSemanticIdentity(location).catch(report).then(result => {
-    if (result.state === 'deferred') current = undefined
+  const run = (work: Promise<SemanticIdentityRecoveryResult>) => {
+    const result = work.finally(() => { if (current === result) current = undefined })
+    current = result
     return result
-  })
+  }
+  const check = () => current ?? run(restoreMissingSemanticIdentity(location).catch(error => report(error)))
   const choose = (pick: () => Promise<string | null>) => {
     if (!selecting) {
       selecting = (async () => {
@@ -19,10 +25,8 @@ export function localRuntimeRecovery(location: { storePath: string; stateDirecto
         if (previous.state !== 'needs-backup') return previous
         const selected = await pick()
         if (!selected) return previous
-        current = restoreMissingSemanticIdentity(location, selected).catch(error =>
-          (error as NodeJS.ErrnoException)?.code === 'RUNTIME_OWNER_BUSY' ? report(error) :
-            { state: 'needs-backup', code: 'IDENTITY_BACKUP_UNVERIFIED' })
-        return await current
+        if (current) await current
+        return await run(restoreMissingSemanticIdentity(location, selected).catch(error => report(error, true)))
       })().finally(() => { selecting = undefined })
     }
     return selecting

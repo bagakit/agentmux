@@ -8,8 +8,8 @@ import { useLocalRuntimeRecovery } from './use-local-runtime-recovery'
 
 /** Only caches exact owner observations for this mounted reader; no backup state or persistence owner. */
 export function useStorageRecoveryNotice() {
-  const { notice: identityRecovery } = useLocalRuntimeRecovery(!__AGENTMUX_WEB_PREVIEW__)
-  const identityNeedsBackup = Boolean(identityRecovery)
+  const { notice: identityRecovery, refresh: refreshIdentity } = useLocalRuntimeRecovery(!__AGENTMUX_WEB_PREVIEW__)
+  const hasIdentityRecoveryNotice = Boolean(identityRecovery)
   const [read, setRead] = useState<DesktopStorageRecoveryRead | null>(null)
   const [error, setError] = useState<string | null>(null)
   const lastPoint = useRef<{ runtimeId: string; value: RecoveryGeneration } | null>(null)
@@ -23,16 +23,21 @@ export function useStorageRecoveryNotice() {
   const check = useCallback(async () => {
     const generation = ++observation.current
     try { accept(await api.ui.readStorageRecovery(), generation) }
-    catch (error) { if (mounted.current && generation === observation.current) setError(presentError(error)) }
-  }, [accept])
+    catch (error) {
+      if (mounted.current && generation === observation.current) {
+        setError(presentError(error))
+        refreshIdentity()
+      }
+    }
+  }, [accept, refreshIdentity])
   useEffect(() => {
-    if (__AGENTMUX_WEB_PREVIEW__ || identityNeedsBackup) return
+    if (__AGENTMUX_WEB_PREVIEW__ || hasIdentityRecoveryNotice) return
     mounted.current = true
     let stopped = false, timer: ReturnType<typeof setTimeout> | undefined
     const observe = async () => { await check(); if (!stopped) timer = setTimeout(() => { void observe() }, 5_000) }
     void observe()
     return () => { stopped = true; mounted.current = false; ++observation.current; clearTimeout(timer) }
-  }, [check, identityNeedsBackup])
+  }, [check, hasIdentityRecoveryNotice])
   const retry = useCallback(async () => {
     if (!read) { await check(); return }
     const generation = ++observation.current
