@@ -4,7 +4,7 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { readFile } from 'node:fs/promises'
 import { WorkspaceSidebar } from '../src/renderer/src/components/WorkspaceSidebar'
 import { SourceFolderNavigation, useSourceFolderNavigation, sourceFolderMatchesWorkspace } from '../src/renderer/src/components/SourceFolderNavigation'
-import { originalSourceEntryForSelection, originalSourceWorkspaceId } from '../src/renderer/src/lib/original-space-navigation'
+import { originalSourceEntryForSelection, originalSourceGroupProjectionId, originalSourceRegionProjectionId, originalSourceTabProjectionId, originalSourceWorkspaceId } from '../src/renderer/src/lib/original-space-navigation'
 import { restoreWorkbenchSpaceSelection } from '../src/renderer/src/lib/desktop-focus-navigation'
 import * as store from '../src/renderer/src/store'
 import { useAppStore } from '../src/renderer/src/store'
@@ -43,7 +43,8 @@ async function source(regions = ['original-region']) {
   return {...f,saved,graph:committed.graph,target,key,tabId,regions,snapshot}
 }
 function Navigation(){const navigation=useSourceFolderNavigation('');return <SourceFolderNavigation navigation={navigation}/>}
-const exactSelection=(f:Awaited<ReturnType<typeof source>>,regionId=f.regions[0]!)=>({spaceId:f.saved.reference.spaceId,zoneId:f.saved.zoneId,workspaceId:f.saved.workspaceId,groupId:'original-group',tabId:f.tabId,regionId})
+const exactSelection=(f:Awaited<ReturnType<typeof source>>,regionId=f.regions[0]!)=>({spaceId:f.saved.reference.spaceId,zoneId:f.saved.zoneId,workspaceId:originalSourceWorkspaceId(f.target),
+  groupId:originalSourceGroupProjectionId(f.target,'original-group'),tabId:originalSourceTabProjectionId(f.target,f.tabId),regionId:originalSourceRegionProjectionId(f.target,regionId)})
 
 
 it('a new Source Folder reaches the ordinary Sidebar without config injection, and its explicit click selects the unique original Region',async()=>{
@@ -58,7 +59,7 @@ it('a new Source Folder reaches the ordinary Sidebar without config injection, a
   useAppStore.getState().observeSpaceMount(f.target,{snapshot:f.snapshot,reading:false})
   const current=useAppStore.getState()
   expect(Object.hasOwn(current,'selectedSpaceMount')).toBe(false)
-  expect(current.activeWorkspaceId).toBe(f.saved.workspaceId)
+  expect(current.activeWorkspaceId).toBe(originalSourceWorkspaceId(f.target))
   expect(current.workbenchSpaceSelection).toMatchObject(exactSelection(f))
   expect(mountedSpaceInput(current.mountedSpaceInputs,f.key)).toMatchObject({target:f.target,drafts:{}})
   expect(current.tabs[f.tabId]).toBe(before.tabs[f.tabId]);for(const [id,layout] of Object.entries(before.layouts))expect(current.layouts[id]).toBe(layout)
@@ -84,7 +85,7 @@ it('an existing explicit mount stays in the original Folder partition once and p
   expect(result.neighbour).toBe(neighbour);expect(result['pending-operation']).toBe(pending)
   expect(mountedSpaceInput(result,f.key)?.view).toBeUndefined()
   expect(Object.hasOwn(current,'selectedSpaceMount')).toBe(false)
-  expect(current.workbenchSpaceSelection).toMatchObject(exactSelection(f))
+  expect(current.workbenchSpaceSelection).toMatchObject({...exactSelection(f),groupId:current.layouts[originalSourceWorkspaceId(f.target)]!.activeGroupId})
   expect(dom.container.querySelector('[aria-label="Mounted Spaces"]')).toBeNull()
   expect(dom.container.querySelectorAll('[aria-label="Source Folder projects"] button')).toHaveLength(1)
   await act(async()=>useAppStore.setState({mountedSpaceInputs:{[f.key]:{target:f.target,drafts:{original:'Retained'}}}}))
@@ -105,7 +106,7 @@ it('a configured resource reuses its original project row and that row opens the
   expect(row.textContent).toContain('Configured original')
   await act(async()=>row.click())
   useAppStore.getState().observeSpaceMount(f.target,{snapshot:f.snapshot,reading:false})
-  expect(useAppStore.getState().activeWorkspaceId).toBe(f.saved.workspaceId)
+  expect(useAppStore.getState().activeWorkspaceId).toBe(originalSourceWorkspaceId(f.target))
   expect(Object.hasOwn(useAppStore.getState(),'selectedSpaceMount')).toBe(false)
   expect(useAppStore.getState().workbenchSpaceSelection).toMatchObject(exactSelection(f))
   expect(useAppStore.getState().config!.workspaces).toEqual([configured])

@@ -3,13 +3,15 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { createWorkbenchViewLayout, createWorkspaceLayout } from '@agentmux/layout'
 import { sourceFolderFixture } from '../../../packages/core/test/helpers/space-folder-directory-fixture'
 import { readSpaceSnapshot } from '../../../packages/core/src/space-authority-stream'
+import { folderDirectoryResourceKey } from '@agentmux/core/space-folder-resources'
 import { useAppStore, restorePersistedUiState } from '../src/renderer/src/store'
 import { initialMountedSpaceView, mountedSpaceInput } from '../src/renderer/src/lib/space-mount-view'
 import { spaceMountKey } from '../src/shared/space-mount'
 import { desktopSpatialGraph } from '../src/renderer/src/lib/desktop-spatial-state'
-import { originalSourceRegionProjectionId, originalSourceScopeFromGraph, originalSourceTabProjectionId, originalSourceWorkspaceId } from '../src/renderer/src/lib/original-space-navigation'
+import { api } from '../src/renderer/src/lib/api'
+import { originalSourceRegionProjectionId, originalSourceScopeFromGraph, originalSourceTabProjectionId, originalSourceWorkspaceId, reconcileOriginalSourceProjection } from '../src/renderer/src/lib/original-space-navigation'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
-import { reducePersistedTab, restorePersistedWorkbench } from '../src/renderer/src/lib/workbench-persistence'
+import { reducePersistedTab, restorePersistedWorkbench, persistedSessionSurfaceIds } from '../src/renderer/src/lib/workbench-persistence'
 import { composerConfig } from './helpers/composer-dom-fixture'
 
 const cleanup: Array<() => unknown | Promise<unknown>> = []
@@ -30,6 +32,16 @@ it('a confirmed Source snapshot reconciles ordinary qualified workbench state wi
   useAppStore.setState({ config: { ...composerConfig, workspaces: [] }, mountedSpaceInputs: { [key]: { target, view, drafts: { keep: 'private bytes' } }, pending }, mountedSpaceObservations: {},
     tabs: {}, layouts: {}, activeWorkspaceId: null, workbenchSpaceSelection: null, spaceZoneBindings: {} })
   useAppStore.getState().mountSpace(target)
+  const opened = useAppStore.getState()
+  expect(opened.activeWorkspaceId).toBe(originalSourceWorkspaceId(target))
+  expect(opened.workbenchSpaceSelection?.tabId).toBeNull()
+  const executionOnlyGraph = structuredClone(graph)
+  delete executionOnlyGraph.resources[folderDirectoryResourceKey(saved.workspaceId)]
+  executionOnlyGraph.tabs.push({ tabId: 'other-runtime-tab', zoneId: saved.zoneId, workspaceId: saved.workspaceId, name: 'Same Zone other Runtime', regionIds: ['other-runtime-region'] })
+  executionOnlyGraph.regions.push({ regionId: 'other-runtime-region', tabId: 'other-runtime-tab', kind: 'launcher', agentSessionId: null, runId: null,
+    execution: { hostId: 'local', cwd: f.directory, runtimeId: 'another-runtime' } })
+  expect(originalSourceScopeFromGraph({ ...target, reference: { ...target.reference, runtimeId: 'missing-runtime' } }, executionOnlyGraph)).toBeUndefined()
+  expect(originalSourceScopeFromGraph(target, executionOnlyGraph)).toBeDefined()
   useAppStore.getState().observeSpaceMount(target, { snapshot, reading: false })
   const current = useAppStore.getState(), tab = Object.values(current.tabs).find(tab => tab.source?.reference.runtimeId === target.reference.runtimeId)
   expect(tab, 'The Source snapshot must produce a view-only ordinary Tab projection').toBeDefined()
@@ -37,9 +49,11 @@ it('a confirmed Source snapshot reconciles ordinary qualified workbench state wi
   expect(tab!.source).toMatchObject({ reference: target.reference, zoneId: target.zoneId, workspaceId: target.workspaceId, tabId })
   const region = tab!.regions[Object.keys(tab!.regions)[0]!]!
   expect(region.source).toMatchObject({ reference: target.reference, zoneId: target.zoneId, workspaceId: target.workspaceId, tabId, regionId })
-  const restoredScope = originalSourceScopeFromGraph(target, graph)
+  const restoredScope = originalSourceScopeFromGraph(target, executionOnlyGraph)
   expect(restoredScope?.reference).toEqual(target.reference)
   expect(restoredScope?.scope.tabs).toContainEqual(expect.objectContaining({ tabId }))
+  expect(restoredScope?.scope.tabs).not.toContainEqual(expect.objectContaining({ tabId: 'other-runtime-tab' }))
+  expect(restoredScope?.scope.regions).not.toContainEqual(expect.objectContaining({ regionId: 'other-runtime-region' }))
   expect(current.layouts[tab!.workspaceId]).toBeDefined()
   expect(current.workbenchSpaceSelection).toMatchObject({ workspaceId: originalSourceWorkspaceId(target),
     groupId: current.layouts[tab!.workspaceId]!.activeGroupId, tabId: originalSourceTabProjectionId(target, tabId),
@@ -48,6 +62,8 @@ it('a confirmed Source snapshot reconciles ordinary qualified workbench state wi
   expect(mountedSpaceInput(current.mountedSpaceInputs, key)?.drafts.keep).toBe('private bytes')
   expect((current.mountedSpaceInputs as Record<string, unknown>).pending).toBe(pending)
   expect(current.sessions).toBe(sessions)
+  const unrelated = reconcileOriginalSourceProjection({ ...current, activeWorkspaceId: target.workspaceId, workbenchSpaceSelection: null }, target, snapshot)
+  expect(Object.hasOwn(unrelated, 'activeWorkspaceId')).toBe(false)
   const graphBefore = (await f.spatial.read())!.graph
   expect((await f.spatial.read())!.graph).toEqual(graphBefore)
   const tabs = current.tabs, layouts = current.layouts
@@ -64,6 +80,39 @@ it('Source active identity remains qualified through UI restore', () => {
     topicId: null, tabId: null, groupId: null, regionId: null } })
   expect(restored.activeWorkspaceId).toBe(workspaceId)
   expect(restored.workbenchSpaceSelection).toMatchObject({ workspaceId, sourceRuntimeId: target.reference.runtimeId })
+  const raw = restorePersistedUiState(composerConfig, { activeWorkspaceId: target.workspaceId, workbenchSpaceSelection: {
+    spaceId: target.reference.spaceId, zoneId: target.zoneId, workspaceId: target.workspaceId, sourceRuntimeId: target.reference.runtimeId,
+    topicId: null, tabId: null, groupId: null, regionId: null } })
+  expect(raw.activeWorkspaceId).toBe(workspaceId)
+  expect(raw.workbenchSpaceSelection).toMatchObject({ workspaceId, sourceRuntimeId: target.reference.runtimeId })
+})
+
+it('Source Sessions stay out of the local Runtime missing-fact startup warning', () => {
+  const reference = { runtimeId: 'source-runtime', spaceId: 'source-space' }, source = { reference, zoneId: 'source-zone', workspaceId: 'source-workspace', tabId: 'source-tab' }
+  const sourceTab = { ...createWorkbenchTab('source-tab', { regionId: 'source-region', kind: 'agent', phase: 'attached', sessionId: 'source-agent', workspaceId: 'source-workspace' }), source }
+  sourceTab.regions['source-region']!.source = { ...source, regionId: 'source-region' }
+  const localTab = createWorkbenchTab('local-tab', { regionId: 'local-region', kind: 'agent', phase: 'attached', sessionId: 'local-agent', workspaceId: 'local-workspace' })
+  const ids = persistedSessionSurfaceIds({ tabs: { 'source-tab': reducePersistedTab(sourceTab), 'local-tab': reducePersistedTab(localTab) }, layouts: {} })
+  expect(ids.has('local-agent')).toBe(true)
+  expect(ids.has('source-agent')).toBe(false)
+})
+
+it('a folder-confirmed empty Source remains restorable while an empty graph without Runtime evidence stays unknown', async () => {
+  const f = await sourceFolderFixture(cleanup), observed = await f.rpc.call('space.folder.inspect', { runtimeId: f.source.runtimeId, path: f.directory })
+  const saved = await f.rpc.call('space.folder.register', { runtimeId: f.source.runtimeId, directory: observed.resource! })
+  const graph = (await f.spatial.read())!.graph, target = { hostId: 'local', reference: saved.reference, zoneId: saved.zoneId, workspaceId: saved.workspaceId }
+  expect(graph.tabs).toHaveLength(0)
+  const restored = originalSourceScopeFromGraph(target, graph)
+  expect(restored?.scope.space).toMatchObject({ spaceId: saved.reference.spaceId })
+  expect(restored?.scope.tabs).toEqual([])
+  expect(restored?.scope.regions).toEqual([])
+  const projection = reconcileOriginalSourceProjection({ config: composerConfig, mountedSpaceInputs: {}, tabs: {}, layouts: {}, activeWorkspaceId: null,
+    workbenchSpaceSelection: { spaceId: saved.reference.spaceId, zoneId: saved.zoneId, workspaceId: originalSourceWorkspaceId(target), sourceRuntimeId: saved.reference.runtimeId,
+      topicId: null, tabId: null, groupId: null, regionId: null } }, target, restored!)
+  expect(Object.hasOwn(projection.layouts ?? {}, originalSourceWorkspaceId(target))).toBe(true)
+  const noEvidence = structuredClone(graph)
+  delete noEvidence.resources[folderDirectoryResourceKey(saved.workspaceId)]
+  expect(originalSourceScopeFromGraph(target, noEvidence)).toBeUndefined()
 })
 
 it('a saved split Source view remains readable for cold restoration', () => {
@@ -75,6 +124,28 @@ it('a saved split Source view remains readable for cold restoration', () => {
   const input = mountedSpaceInput({ [key]: { target, view, drafts: {} } }, key)
   expect(input?.target).toEqual(target)
   expect(input?.view?.selection).toEqual({ groupId: 'private-source-view-group', tabId, regionId })
+})
+
+it('Core-ready persistence retains a qualified empty Source layout for the next ordinary restore', async () => {
+  const f = await sourceFolderFixture(cleanup), observed = await f.rpc.call('space.folder.inspect', { runtimeId: f.source.runtimeId, path: f.directory })
+  const saved = await f.rpc.call('space.folder.register', { runtimeId: f.source.runtimeId, directory: observed.resource! })
+  const target = { hostId: 'local', reference: saved.reference, zoneId: saved.zoneId, workspaceId: saved.workspaceId }, workspaceId = originalSourceWorkspaceId(target)
+  const config = { ...composerConfig, workspaces: [{ id: saved.workspaceId, name: 'Empty original', hostId: 'local', path: f.directory, kind: 'folder' as const }] }
+  vi.spyOn(api.config, 'get').mockResolvedValue(config)
+  vi.spyOn(api.spatial, 'read').mockImplementation(() => f.spatial.read())
+  vi.spyOn(api.spatial, 'commit').mockImplementation(input => f.spatial.commit(input))
+  vi.spyOn(api.spatial, 'onChange').mockImplementation(listener => f.spatial.subscribe(listener))
+  cleanup.push(await useAppStore.getState().initialize())
+  const layout = createWorkspaceLayout(originalSourceWorkspaceId(target) + ':group', [])
+  useAppStore.setState({ config, tabs: {}, layouts: { [workspaceId]: layout }, activeWorkspaceId: workspaceId,
+    mountedSpaceInputs: { [spaceMountKey(target.reference)]: { target, drafts: {} } },
+    workbenchSpaceSelection: { spaceId: saved.reference.spaceId, zoneId: saved.zoneId, workspaceId, sourceRuntimeId: saved.reference.runtimeId,
+      topicId: null, tabId: null, groupId: null, regionId: null } })
+  const persisted = useAppStore.persist.getOptions().partialize!(useAppStore.getState())
+  expect(persisted.restoredWorkbench?.layouts[workspaceId]).toEqual(layout)
+  expect(persisted.restoredWorkbench?.tabs).toEqual({})
+  const restored = restorePersistedWorkbench({ config, sessions: [], persisted: persisted.restoredWorkbench ?? null, createTabGroupId: () => 'restored-group' })
+  expect(restored.layouts[workspaceId]).toEqual(layout)
 })
 
 it('Core spatial capture excludes every Source projection while preserving its ordinary user-state restore', () => {

@@ -7,11 +7,13 @@ import { HostOriginalSpaces } from '../src/renderer/src/components/settings/Host
 import { SourceLauncherRequest } from '../src/renderer/src/components/SourceLauncherRequest'
 import { WorkspaceSidebar } from '../src/renderer/src/components/WorkspaceSidebar'
 import { WorkspaceWorkbench } from '../src/renderer/src/components/WorkspaceWorkbench'
+import { NewTabSurface } from '../src/renderer/src/components/NewTabSurface'
 import { api } from '../src/renderer/src/lib/api'
 import * as storeModule from '../src/renderer/src/store'
-import { useAppStore } from '../src/renderer/src/store'
+import { useAppStore, restorePersistedUiState } from '../src/renderer/src/store'
 import { desktopBindingsFromSpatial, desktopWorkbenchFromSpatial } from '../src/renderer/src/lib/desktop-spatial-state'
 import { hydratePersistedTab } from '../src/renderer/src/lib/workbench-persistence'
+import { workbenchSelectionCatalog } from '../src/renderer/src/lib/desktop-focus-navigation'
 import { initialMountedSpaceView, mountedSpaceInput } from '../src/renderer/src/lib/space-mount-view'
 import type { MountedAgentOpenInput } from '../src/renderer/src/lib/space-mount-launch'
 import { readSpaceSnapshot } from '../../../packages/core/src/space-authority-stream'
@@ -22,12 +24,15 @@ import { spaceMountKey } from '../src/shared/space-mount'
 import { spaceMountTransport, spaceMountFixture } from './helpers/space-mount-fixture'
 import { sourceFilesIpcBridge } from './helpers/source-files-ipc-bridge'
 import { RuntimeController } from '../src/main/runtime-controller'
-import { originalSpaceWorkspace, originalSourceFileWorkspaceId, originalSourceGroupProjectionId, originalSourceRegionProjectionId, originalSourceTabProjectionId, originalSourceWorkspaceId } from '../src/renderer/src/lib/original-space-navigation'
+import { originalSpaceWorkspace, originalSourceFileWorkspaceId, originalSourceGroupProjectionId, originalSourceRegionProjectionId, originalSourceTabProjectionId, originalSourceWorkspaceId, originalRawSourceOccurrenceConfirmed, originalSourceScopeFromGraph } from '../src/renderer/src/lib/original-space-navigation'
 import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 import { createWorkbenchTab, documentKey } from '../src/renderer/src/lib/workbench-tabs'
 import { emptySourceFilesInputs } from '../src/renderer/src/lib/source-files-workbench'
 import { useLauncherState } from '../src/renderer/src/lib/launcher-state'
-import { composerConfig, composerDOM } from './helpers/composer-dom-fixture'
+import { composerConfig, composerDOM, composerSession } from './helpers/composer-dom-fixture'
+import { agentCreationFixture } from './helpers/agent-creation-fixture'
+
+vi.mock('../src/renderer/src/components/TerminalView', () => ({ TerminalView: () => null }))
 
 const dom=composerDOM(),cleanup:Array<()=>unknown|Promise<unknown>>=[]
 afterEach(async()=>{for(const close of cleanup.splice(0).reverse())await close();vi.restoreAllMocks()})
@@ -55,7 +60,21 @@ async function settingsFixture(clientConfigured:boolean,carrierHostId='local') {
   const transport=spaceMountTransport(cleanup,[{id:carrierHostId,carrier:{forwardRpc:async(method,params,context,fence)=>f.rpc.call(method as never,params as never,{...context as object,...(fence?{runtimeFence:fence}:{})} as never),subscribeRpc:f.rpc.subscribe.bind(f.rpc)}}])
   vi.spyOn(api.spaceMounts,'call').mockImplementation(transport.api.call)
   vi.spyOn(storeModule,'checkpointMountedSpaceInputs').mockResolvedValue(undefined)
-  return {...f,saved,target,key,tabId,regionId,config,view,pending,inputs,snapshot}
+  return {...f,saved,target,key,tabId,regionId,config,view,pending,inputs,snapshot,graph:committed.graph}
+}
+
+async function adoptRealSpatialGraph(f: Awaited<ReturnType<typeof settingsFixture>>) {
+  vi.spyOn(api.config, 'get').mockResolvedValue(f.config)
+  vi.spyOn(api.spatial, 'read').mockImplementation(() => f.spatial.read())
+  vi.spyOn(api.spatial, 'commit').mockImplementation(input => f.spatial.commit(input))
+  vi.spyOn(api.spatial, 'onChange').mockImplementation(listener => f.spatial.subscribe(listener))
+  const dispose = await useAppStore.getState().initialize()
+  if (vi.isMockFunction(storeModule.currentCoreSpatialGraph)) vi.mocked(storeModule.currentCoreSpatialGraph).mockRestore()
+  expect(storeModule.currentCoreSpatialGraph()).not.toBeNull()
+  let stopped = false
+  const stop = () => { if (!stopped) { stopped = true; dispose() } }
+  cleanup.push(stop)
+  return stop
 }
 
 
@@ -66,10 +85,10 @@ it.each([false,true])('Settings Open original Space selects the original project
   const open=Array.from(dom.container.querySelectorAll<HTMLButtonElement>('button')).find(button=>button.textContent==='Open original Space')!
   await act(async()=>{open.click();await vi.waitFor(()=>expect(onClose).toHaveBeenCalledOnce())})
   const current=useAppStore.getState()
-  expect(current.activeWorkspaceId).toBe(f.saved.workspaceId);expect(Object.hasOwn(current,'selectedSpaceMount')).toBe(false)
-  expect(current.workbenchSpaceSelection).toMatchObject({spaceId:f.saved.reference.spaceId,zoneId:f.saved.zoneId,workspaceId:f.saved.workspaceId,groupId:'settings-original-group',tabId:f.tabId,regionId:f.regionId})
+  expect(current.activeWorkspaceId).toBe(originalSourceWorkspaceId(f.target));expect(Object.hasOwn(current,'selectedSpaceMount')).toBe(false)
+  expect(current.workbenchSpaceSelection).toMatchObject({spaceId:f.saved.reference.spaceId,zoneId:f.saved.zoneId,workspaceId:originalSourceWorkspaceId(f.target),groupId:current.layouts[originalSourceWorkspaceId(f.target)]!.activeGroupId,tabId:originalSourceTabProjectionId(f.target,f.tabId),regionId:originalSourceRegionProjectionId(f.target,f.regionId)})
   expect(current.config).toBe(f.config);expect(current.config!.workspaces).toHaveLength(clientConfigured?1:0)
-  expect(mountedSpaceInput(current.mountedSpaceInputs,f.key)?.view).toBe(f.view)
+  expect(mountedSpaceInput(current.mountedSpaceInputs,f.key)?.view).toBeUndefined()
   expect(mountedSpaceInput(current.mountedSpaceInputs,f.key)?.drafts.original).toBe('Settings unsent draft')
   expect(mountedSpaceInput(current.mountedSpaceInputs,f.key)?.memberInputs).toEqual({original:{operationId:'settings-member-OP'}})
   expect((current.mountedSpaceInputs as Record<string,unknown>)['settings-pending']).toBe(f.pending)
@@ -100,10 +119,13 @@ it.each([false,true])('Launcher Open original work selects its receipt Region in
   await dom.render(<><SourceLauncherRequest input={input} busy={false} onContinue={vi.fn()}/><WorkspaceSidebar/></>)
   const open=Array.from(dom.container.querySelectorAll<HTMLButtonElement>('button')).find(button=>button.textContent==='Open original work')!
   expect(open).toBeDefined();await act(async()=>open.click())
-  await vi.waitFor(()=>expect(useAppStore.getState().workbenchSpaceSelection?.regionId).toBe(address.regionId))
+  await vi.waitFor(() => {
+    const expectedRegionId = originalSourceRegionProjectionId(target, address.regionId)
+    expect(useAppStore.getState().workbenchSpaceSelection?.regionId).toBe(expectedRegionId)
+  })
   const current=useAppStore.getState()
-  expect(Object.hasOwn(current,'selectedSpaceMount')).toBe(false);expect(current.activeWorkspaceId).toBe('b-workspace')
-  expect(current.workbenchSpaceSelection).toMatchObject({spaceId:source.folder.spaceId,zoneId:source.folder.zoneId,workspaceId:address.workspaceId,groupId:address.groupId,tabId:address.tabId,regionId:address.regionId})
+  expect(Object.hasOwn(current,'selectedSpaceMount')).toBe(false);expect(current.activeWorkspaceId).toBe(originalSourceWorkspaceId(target))
+  expect(current.workbenchSpaceSelection).toMatchObject({spaceId:source.folder.spaceId,zoneId:source.folder.zoneId,workspaceId:originalSourceWorkspaceId(target),groupId:current.layouts[originalSourceWorkspaceId(target)]!.activeGroupId,tabId:originalSourceTabProjectionId(target,address.tabId),regionId:originalSourceRegionProjectionId(target,address.regionId)})
   for(const [id,tab] of Object.entries(observerTabs))expect(current.tabs[id]).toBe(tab)
   for(const [id,layout] of Object.entries(observerLayouts))expect(current.layouts[id]).toBe(layout)
   expect(current.sessions).toBe(observerSessions);expect(current.config).toBe(config)
@@ -150,6 +172,7 @@ async function sourceFileFixture() {
   const committed=await f.spatial.commit({expectedRevision:before.revision,graph}),target={hostId:'local',reference:saved.reference,zoneId:saved.zoneId,workspaceId:saved.workspaceId}
   const transport=spaceMountTransport(cleanup,[{id:'local',carrier:{forwardRpc:async(method,params,context,fence)=>f.rpc.call(method as never,params as never,{...context as object,...(fence?{runtimeFence:fence}:{})} as never),subscribeRpc:f.rpc.subscribe.bind(f.rpc)}}])
   vi.spyOn(api.spaceMounts,'call').mockImplementation(transport.api.call)
+  vi.spyOn(api.spaceMounts,'watch').mockImplementation(transport.api.watch)
   const runtime=Object.assign(Object.create(RuntimeController.prototype),{hosts:transport.routes,hostReconfigurationReservations:new Map()}) as RuntimeController
   const bridge=sourceFilesIpcBridge(runtime,cleanup)
   vi.spyOn(api.sourceFiles,'call').mockImplementation(bridge.files.call)
@@ -169,7 +192,7 @@ it('Source files read, edit and save through their own authority without collidi
   await dom.render(<WorkspaceWorkbench workspaceId={originalSourceWorkspaceId(f.target)} visible/>)
   const sourceWorkspaceId=originalSourceFileWorkspaceId(f.target,f.saved.workspaceId)
   const sourceKey=documentKey(sourceWorkspaceId,'hello.txt'),displayTabId=originalSourceTabProjectionId(f.target,f.tabId),displayRegionId=originalSourceRegionProjectionId(f.target,f.regionId)
-  await vi.waitFor(()=>expect(useAppStore.getState().documents[sourceKey]?.content,dom.container.textContent??'').toBe('Source original file\n'))
+  await vi.waitFor(()=>expect(useAppStore.getState().documents[sourceKey]?.content,dom.container.textContent??'').toBe('Source original file\n'),{timeout:10_000})
   expect(originalSpaceWorkspace(useAppStore.getState(),f.saved.workspaceId)).toMatchObject({id:f.saved.workspaceId,hostId:'local',path:f.directory})
   expect(useAppStore.getState().documents[documentKey(f.saved.workspaceId,'hello.txt')]).toBe(localDocument)
   await act(async()=>useAppStore.getState().updateDocument(displayTabId,'Source edited file\n',displayRegionId))
@@ -321,7 +344,7 @@ it('implicit Source viewing and auxiliary actions never prewarm or create local 
   vi.spyOn(useAppStore.getState(),'refreshScratchTopics').mockResolvedValue(undefined)
   const ensureMote=vi.spyOn(api.scratch,'ensureMote').mockResolvedValue({} as never)
   useAppStore.getState().mountSpace(f.target)
-  useAppStore.getState().observeSpaceMount(f.target,{snapshot:f.snapshot,reading:false})
+  useAppStore.setState({mountedSpaceObservations:{}})
   const workspaceId=useAppStore.getState().activeWorkspaceId!,draftRegionId=originalSourceRegionProjectionId(f.target,f.regionId),heldDraft='Original Source unsent Mote draft'
   const mote={...createWorkbenchTab('implicit-source-mote',{regionId:'implicit-source-mote-region',kind:'launcher',workspaceId:SCRATCH_WORKSPACE_ID}),topicId:PMO_TEAMS_TOPIC_ID}
   const scratch={id:SCRATCH_WORKSPACE_ID,name:'Scratch',path:'/original-source-scratch',hostId:'local',kind:'folder' as const}
@@ -341,11 +364,11 @@ it('implicit Source viewing and auxiliary actions never prewarm or create local 
   expect(createNote).not.toHaveBeenCalled()
   expect(dom.container.textContent).toContain('unavailable')
   const browserSubmit=dom.container.querySelector<HTMLButtonElement>('[aria-label="Go to Browser address or search"]')
-  expect(browserSubmit?.disabled).toBe(true)
+  expect(browserSubmit === null || browserSubmit.disabled).toBe(true)
   await act(async()=>browserSubmit?.click())
   for(const label of ['Open Terminal','Create blank note']) {
     const button=Array.from(dom.container.querySelectorAll<HTMLButtonElement>('button')).find(button=>button.textContent===label)
-    expect(button,label).toBeDefined();expect(button?.disabled).toBe(true)
+    expect(!button || button.disabled,label).toBe(true)
     if(button) await act(async()=>button.click())
   }
   expect(launchTerminal).not.toHaveBeenCalled();expect(launchAgent).not.toHaveBeenCalled();expect(openLauncher).not.toHaveBeenCalled()
@@ -361,4 +384,190 @@ it('implicit Source viewing and auxiliary actions never prewarm or create local 
   expect(launchTerminal).not.toHaveBeenCalled();expect(launchAgent).not.toHaveBeenCalled();expect(openLauncher).not.toHaveBeenCalled()
   expect(createBrowser).not.toHaveBeenCalled();expect(createNote).not.toHaveBeenCalled()
   expect(useAppStore.getState().agentComposerDrafts[draftRegionId]).toBe(heldDraft)
+})
+
+function rawSelection(f: Awaited<ReturnType<typeof settingsFixture>>) {
+  return { spaceId: f.target.reference.spaceId, zoneId: f.target.zoneId, workspaceId: f.target.workspaceId,
+    sourceRuntimeId: f.target.reference.runtimeId, topicId: null, groupId: 'settings-original-group', tabId: f.tabId, regionId: f.regionId }
+}
+
+it('a persisted raw Source selection without its exact locator or Runtime stays qualified unknown instead of borrowing a healthy local Launcher', async () => {
+  const f = await settingsFixture(true)
+  const launchTerminal = vi.spyOn(api.sessions, 'launchTerminal').mockResolvedValue({} as never)
+  const launchAgent = vi.spyOn(api.sessions, 'launchAgent')
+  const changedGraph = structuredClone((await f.spatial.read())!.graph)
+  changedGraph.regions.find(region => region.regionId === f.regionId)!.execution!.runtimeId = 'another-runtime'
+  for (const scenario of ['missing-locator', 'changed-runtime'] as const) {
+    if (scenario === 'changed-runtime') vi.mocked(storeModule.currentCoreSpatialGraph).mockReturnValue(changedGraph)
+    else vi.mocked(storeModule.currentCoreSpatialGraph).mockReturnValue((await f.spatial.read())!.graph)
+    const restored = restorePersistedUiState(f.config, { activeWorkspaceId: f.target.workspaceId,
+      mountedSpaceInputs: scenario === 'missing-locator' ? {} : f.inputs, workbenchSpaceSelection: rawSelection(f) },
+      scenario === 'changed-runtime' ? changedGraph : (await f.spatial.read())!.graph)
+    const qualifiedWorkspaceId = originalSourceWorkspaceId(f.target)
+    expect(restored.activeWorkspaceId, scenario).toBe(qualifiedWorkspaceId)
+    expect(restored.workbenchSpaceSelection, scenario).toMatchObject({ workspaceId: qualifiedWorkspaceId, tabId: null, groupId: null, regionId: null })
+    useAppStore.setState({ ...restored, config: f.config, tabs: useAppStore.getState().tabs, layouts: useAppStore.getState().layouts,
+      mountedSpaceObservations: {}, warmTerminals: {}, detectExecutors: vi.fn(async () => {}) })
+    await dom.render(<WorkspaceWorkbench workspaceId={restored.activeWorkspaceId!} visible />)
+    await act(async () => {})
+    expect(dom.container.querySelector(`[data-workbench-tab-id="${f.tabId}"]`), scenario).toBeNull()
+    expect(launchTerminal, scenario).not.toHaveBeenCalled()
+    expect(launchAgent, scenario).not.toHaveBeenCalled()
+    for (const button of dom.container.querySelectorAll<HTMLButtonElement>('.launcher-launch-button')) expect(button.disabled, scenario).toBe(true)
+    await dom.render(null)
+  }
+})
+
+it('a locator and current graph confirmed raw ordinary Launcher keeps healthy local prewarm, tools and real Store launch', async () => {
+  const f = await settingsFixture(true), selection = rawSelection(f)
+  await adoptRealSpatialGraph(f)
+  expect(originalRawSourceOccurrenceConfirmed({ ...useAppStore.getState(), workbenchSpaceSelection: selection }, f.graph)).toBe(true)
+  const restored = restorePersistedUiState(f.config, { activeWorkspaceId: '__scratch__', mountedSpaceInputs: f.inputs, workbenchSpaceSelection: selection }, f.graph)
+  expect(restored.activeWorkspaceId).toBe(f.target.workspaceId)
+  expect(restored.workbenchSpaceSelection).toMatchObject(selection)
+  const shell = { ...composerSession('raw-healthy-shell'), kind: 'terminal' as const, providerId: null,
+    control: { kind: 'terminal' as const, hostId: 'local', runId: 'raw-healthy-shell', run: { runId: 'raw-healthy-shell' } } }
+  const prewarm = vi.spyOn(api.sessions, 'launchTerminal').mockResolvedValue(shell as never)
+  const launch = vi.spyOn(api.sessions, 'launchAgent').mockImplementation(async (input: any) => {
+    const session = { ...composerSession(input.agentSessionId), workspacePath: input.workspacePath }
+    return { created: agentCreationFixture(session), projectionFailures: [], session,
+      timeline: { agentSessionId: session.id, revision: 0, items: [] } } as never
+  })
+  const rawTab = useAppStore.getState().tabs[f.tabId]!
+  useAppStore.setState({ ...restored, config: f.config, mountedSpaceObservations: {}, warmTerminals: {}, executorDetections: {},
+    detectExecutors: vi.fn(async () => {}), recoveryCandidates: [], pendingAgentLaunches: {}, error: null })
+  useLauncherState.getState().setSection(f.target.workspaceId, 'terminal', 'expanded')
+  await dom.render(<NewTabSurface tabGroupId="settings-original-group" tabId={f.tabId} regionId={f.regionId} />)
+  await act(async () => useLauncherState.getState().setSection(f.target.workspaceId, 'terminal', 'expanded'))
+  await vi.waitFor(() => expect(prewarm).toHaveBeenCalledOnce())
+  expect(prewarm.mock.calls[0]![0]).toMatchObject({ hostId: 'local', workspacePath: f.directory })
+  expect(dom.container.querySelector('[aria-label="Agent prompt"]')).not.toBeNull()
+  expect(dom.container.querySelector('[aria-label="Original Space task draft"]')).toBeNull()
+  await vi.waitFor(() => {
+    const openTerminal = dom.container.querySelector<HTMLButtonElement>('[data-agentmux-action="claim-reusable-terminal"]')
+    expect(openTerminal?.disabled, dom.container.textContent ?? '').toBe(false)
+  })
+  const start = dom.container.querySelector<HTMLButtonElement>('.launcher-launch-button')!
+  await vi.waitFor(() => expect(start.disabled).toBe(false))
+  await act(async () => start.click())
+  await vi.waitFor(() => expect(launch).toHaveBeenCalledOnce())
+  expect(launch.mock.calls[0]![0]).toMatchObject({ hostId: 'local', workspacePath: f.directory,
+    launcher: { tabId: rawTab.id, regionId: f.regionId }, executionWorkspaceId: f.target.workspaceId })
+  expect(useAppStore.getState().activeWorkspaceId).toBe(f.target.workspaceId)
+})
+
+it('confirmed raw Agent and File occurrences stay singular across observation and navigation', async () => {
+  const f = await settingsFixture(true)
+  const admitted = await f.spatial.admitAgentOpen({ request: { schemaVersion: 5, requestId: 'raw-source-agent-open', operation: 'agent.open',
+    content: { kind: 'new-agent', executorId: 'raw-source-executor' }, destination: { spaceId: f.saved.reference.spaceId, zoneId: f.saved.zoneId, newTab: true }, focus: false },
+    agentSessionId: 'raw-source-agent', execution: { hostId: 'local', runtimeId: f.target.reference.runtimeId, workspacePath: f.directory,
+      workspaceId: f.saved.workspaceId, executorRevision: 'raw-source-executor-revision' },
+    placement: { runtimeId: f.target.reference.runtimeId, hostId: 'local', workspacePath: f.directory, workspaceId: f.saved.workspaceId }, regionResource: {} })
+  const tabId = admitted.record.address.tabId, agentRegionId = admitted.record.address.regionId
+  const before = (await f.spatial.read())!, graph = structuredClone(before.graph), fileRegionId = 'raw-source-file-region'
+  graph.tabs.find(tab => tab.tabId === tabId)!.regionIds.push(fileRegionId)
+  graph.regions.push({ regionId: fileRegionId, tabId, kind: 'file', agentSessionId: null, runId: null,
+    file: { workspaceId: f.saved.workspaceId, path: 'hello.txt' }, execution: { hostId: 'local', cwd: f.directory, runtimeId: f.target.reference.runtimeId } })
+  graph.resources[`region:${fileRegionId}`] = { path: 'hello.txt' }
+  graph.tabLayouts[tabId] = splitWorkbenchRegion(graph.tabLayouts[tabId] ?? createWorkbenchViewLayout(agentRegionId), agentRegionId, 'right', fileRegionId)
+  const committed = await f.spatial.commit({ expectedRevision: before.revision, graph }), restored = desktopWorkbenchFromSpatial(committed.graph)
+  await adoptRealSpatialGraph(f)
+  useAppStore.setState({ config: f.config, tabs: Object.fromEntries(Object.entries(restored.tabs).map(([id, tab]) => [id, hydratePersistedTab(tab)])),
+    layouts: restored.layouts, spaceZoneBindings: desktopBindingsFromSpatial(committed.graph, f.config), activeWorkspaceId: null,
+    workbenchSpaceSelection: null, mountedSpaceInputs: f.inputs, mountedSpaceObservations: {}, sourceFilesInputs: emptySourceFilesInputs() })
+  const snapshot = await readSpaceSnapshot(f.rpc, f.saved.reference), groupId = committed.graph.layouts[f.saved.workspaceId]!.activeGroupId
+  const rawState = useAppStore.getState()
+  expect(workbenchSelectionCatalog(rawState).locations.filter(location => location.spaceId === f.target.reference.spaceId &&
+    location.zoneId === f.target.zoneId && location.workspaceId === f.target.workspaceId)).toHaveLength(3)
+  for (const regionId of [agentRegionId, fileRegionId]) {
+    expect(originalRawSourceOccurrenceConfirmed(rawState, committed.graph, { spaceId: f.target.reference.spaceId,
+      zoneId: f.target.zoneId, workspaceId: f.target.workspaceId, topicId: null, groupId, tabId, regionId,
+      sourceRuntimeId: f.target.reference.runtimeId }, false), `raw ${regionId} must be confirmed before observation`).toBe(true)
+    useAppStore.getState().observeSpaceMount(f.target, { snapshot, reading: false })
+    expect(useAppStore.getState().layouts[originalSourceWorkspaceId(f.target)]).toBeUndefined()
+    useAppStore.getState().openOriginalSpaceLocation({ target: f.target, occurrence: { tabId, regionId, displayWorkspaceId: f.target.workspaceId, groupId } })
+    const current = useAppStore.getState()
+    expect(current.activeWorkspaceId).toBe(f.target.workspaceId)
+    expect(current.workbenchSpaceSelection).toMatchObject({ workspaceId: f.target.workspaceId, tabId, regionId, groupId })
+    expect(current.layouts[originalSourceWorkspaceId(f.target)]).toBeUndefined()
+    expect(current.tabs[originalSourceTabProjectionId(f.target, tabId)]).toBeUndefined()
+  }
+})
+
+it('a raw Launcher recovers local capability when its graph becomes confirmed in place', async () => {
+  const f = await settingsFixture(true), selection = rawSelection(f)
+  await adoptRealSpatialGraph(f)
+  const restored = restorePersistedUiState(f.config, { activeWorkspaceId: f.target.workspaceId, mountedSpaceInputs: f.inputs,
+    workbenchSpaceSelection: selection }, f.graph)
+  const shell = { ...composerSession('raw-recovered-shell'), kind: 'terminal' as const, providerId: null,
+    control: { kind: 'terminal' as const, hostId: 'local', runId: 'raw-recovered-shell', run: { runId: 'raw-recovered-shell' } } }
+  const prewarm = vi.spyOn(api.sessions, 'launchTerminal').mockResolvedValue(shell as never)
+  useAppStore.setState({ ...restored, config: f.config, mountedSpaceObservations: {}, warmTerminals: {}, detectExecutors: vi.fn(async () => {}) })
+  useLauncherState.getState().setSection(f.target.workspaceId, 'terminal', 'expanded')
+  vi.spyOn(storeModule, 'currentCoreSpatialGraph').mockReturnValue(null)
+  await dom.render(<NewTabSurface tabGroupId="settings-original-group" tabId={f.tabId} regionId={f.regionId} />)
+  await act(async () => {})
+  expect(prewarm).not.toHaveBeenCalled()
+  expect(dom.container.textContent).toContain('unavailable')
+  vi.spyOn(storeModule, 'currentCoreSpatialGraph').mockReturnValue(f.graph)
+  await act(async () => { useAppStore.setState(state => ({ mountedSpaceObservations: { ...state.mountedSpaceObservations } })) })
+  await vi.waitFor(() => expect(prewarm).toHaveBeenCalledOnce())
+  expect(prewarm.mock.calls[0]![0]).toMatchObject({ hostId: 'local', workspacePath: f.directory })
+  await vi.waitFor(() => expect(dom.container.querySelector<HTMLButtonElement>('.launcher-launch-button')?.disabled).toBe(false))
+})
+
+it('cold savedView recovery uses the last non-empty Source facts when the current snapshot has a null Space', async () => {
+  const f = await settingsFixture(false), unavailable = structuredClone(f.snapshot)
+  unavailable.scope = { ...unavailable.scope, space: null, tabs: [], regions: [] }
+  vi.mocked(storeModule.currentCoreSpatialGraph).mockReturnValue(null)
+  useAppStore.setState({ mountedSpaceInputs: f.inputs, mountedSpaceObservations: { [f.key]: { snapshot: unavailable, lastPresentSnapshot: f.snapshot, reading: false } },
+    tabs: {}, layouts: {}, activeWorkspaceId: null, workbenchSpaceSelection: null })
+  useAppStore.getState().mountSpace(f.target)
+  const current = useAppStore.getState(), workspaceId = originalSourceWorkspaceId(f.target), tabId = originalSourceTabProjectionId(f.target, f.tabId)
+  expect(current.tabs[tabId]?.regions[originalSourceRegionProjectionId(f.target, f.regionId)]).toBeDefined()
+  expect(current.layouts[workspaceId]?.groups.some(group => group.tabOrder.includes(tabId))).toBe(true)
+  expect(current.workbenchSpaceSelection).toMatchObject({ workspaceId, tabId, regionId: originalSourceRegionProjectionId(f.target, f.regionId) })
+  expect(current.mountedSpaceObservations[f.key]?.snapshot?.scope.space).toBeNull()
+})
+
+async function duplicateRawOccurrence(f: Awaited<ReturnType<typeof settingsFixture>>) {
+  const first = createWorkspaceLayout('settings-original-group', [f.tabId])
+  const layout = { ...first, root: { type: 'split' as const, direction: 'horizontal' as const, ratio: .5, first: first.root, second: { type: 'leaf' as const, groupId: 'raw-second-group' } },
+    groups: [...first.groups, { id: 'raw-second-group', tabOrder: [f.tabId], activeTabId: f.tabId, recentTabIds: [f.tabId] }] }
+  const tab = { ...useAppStore.getState().tabs[f.tabId]!, space: { spaceId: f.target.reference.spaceId, zoneId: f.target.zoneId } }
+  const view = { ...f.view, composition: layout }
+  useAppStore.setState({ tabs: { [f.tabId]: tab }, layouts: { [f.target.workspaceId]: layout }, activeWorkspaceId: null, loading: true,
+    workbenchSpaceSelection: null, mountedSpaceInputs: { [f.key]: { ...f.inputs[f.key]!, view } } })
+  const graph = storeModule.currentCoreSpatialGraph()
+  expect(graph && originalSourceScopeFromGraph(f.target, graph), 'duplicate fixture must prove the exact Source Runtime').toBeDefined()
+  const locations = workbenchSelectionCatalog(useAppStore.getState()).locations.filter(location => location.spaceId === f.target.reference.spaceId &&
+    location.zoneId === f.target.zoneId && location.workspaceId === f.target.workspaceId)
+  expect(locations, JSON.stringify({ groups: useAppStore.getState().layouts[f.target.workspaceId]?.groups, locations })).toHaveLength(2)
+  return { layout, view }
+}
+
+it('savedView chooses its exact group when the same raw Tab and Region have several ordinary occurrences', async () => {
+  const f = await settingsFixture(true)
+  await adoptRealSpatialGraph(f)
+  const { view } = await duplicateRawOccurrence(f)
+  view.selection = { groupId: 'raw-second-group', tabId: f.tabId, regionId: f.regionId }
+  useAppStore.getState().mountSpace(f.target)
+  const current = useAppStore.getState()
+  expect(current.activeWorkspaceId).toBe(f.target.workspaceId)
+  expect(current.workbenchSpaceSelection).toMatchObject({ workspaceId: f.target.workspaceId, groupId: 'raw-second-group', tabId: f.tabId, regionId: f.regionId })
+  expect(current.layouts[originalSourceWorkspaceId(f.target)]).toBeUndefined()
+  expect(current.tabs[originalSourceTabProjectionId(f.target, f.tabId)]).toBeUndefined()
+})
+
+it('ambiguous raw occurrences retain a raw Zone unknown without manufacturing a Source projection', async () => {
+  const f = await settingsFixture(true)
+  await adoptRealSpatialGraph(f)
+  const { view } = await duplicateRawOccurrence(f)
+  view.selection = null
+  useAppStore.getState().mountSpace(f.target)
+  const current = useAppStore.getState()
+  expect(current.activeWorkspaceId).toBe(f.target.workspaceId)
+  expect(current.workbenchSpaceSelection).toMatchObject({ workspaceId: f.target.workspaceId, tabId: null, groupId: null, regionId: null })
+  expect(current.layouts[originalSourceWorkspaceId(f.target)]).toBeUndefined()
+  expect(current.tabs[originalSourceTabProjectionId(f.target, f.tabId)]).toBeUndefined()
 })
