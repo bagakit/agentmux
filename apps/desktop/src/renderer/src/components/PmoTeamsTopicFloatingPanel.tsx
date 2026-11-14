@@ -411,7 +411,9 @@ export function PmoTeamsTopicFloatingPanel({ floating, setFloating, projectionSt
     if (!panel) return
     if (!visible) { if (panel.matches(':popover-open')) panel.hidePopover(); return }
     if (!anchor) return
+    let revealFocus: Element | null = null
     if (!panel.matches(':popover-open')) {
+      revealFocus = document.activeElement
       panel.style.visibility = 'hidden'
       ;(panel.showPopover as (options: { source: HTMLButtonElement }) => void).call(panel, { source: anchor })
     }
@@ -439,6 +441,8 @@ export function PmoTeamsTopicFloatingPanel({ floating, setFloating, projectionSt
             })] })
           if (!disposed && !dirty && revision === geometryRevision.current) {
             Object.assign(panel.style, { left: result.x + 'px', top: result.y + 'px', visibility: 'visible' })
+            if (floatingRef.current.open && revealFocus && document.activeElement === revealFocus) panel.focus({ preventScroll: true })
+            revealFocus = null
             if (drag.current) { drag.current.left = result.x; drag.current.bottom = result.y + drag.current.size.height }
           }
         } finally {
@@ -458,14 +462,15 @@ export function PmoTeamsTopicFloatingPanel({ floating, setFloating, projectionSt
   }, [visible, railMode, scratch, topics])
   useLayoutEffect(() => { positionRef.current?.() }, [floating.size?.width, floating.size?.height])
   useEffect(() => {
-    if (!floating.preview) return
+    if (!visible) return
     const dismiss = (event: KeyboardEvent) => {
       if (event.key !== 'Escape' || event.defaultPrevented || isImeOwnedKeyboardEvent(event) || foreignFloatOwnsKeyboardEvent(event, panelRef.current)) return
-      event.preventDefault(); event.stopPropagation(); requestPmoTeamsTopicFloatingClose({ restoreFocus: false })
+      event.preventDefault(); event.stopPropagation(); spaceActionRef.current?.abort()
+      requestPmoTeamsTopicFloatingClose({ restoreFocus: floatingRef.current.open })
     }
     document.addEventListener('keydown', dismiss, true)
     return () => document.removeEventListener('keydown', dismiss, true)
-  }, [floating.preview])
+  }, [visible])
   // Retained Views are React portals whose logical owner stays in App. The
   // operative boundary is this actual DOM surface, including those Views.
   useEffect(() => {
@@ -474,21 +479,15 @@ export function PmoTeamsTopicFloatingPanel({ floating, setFloating, projectionSt
     const enter = (event: PointerEvent) => { if (event.pointerType === 'mouse') keepPmoTeamsTopicFloatingPreview() }
     const leave = (event: PointerEvent) => { if (event.pointerType === 'mouse') leavePmoTeamsTopicFloatingPreview() }
     const pin = () => pinPmoTeamsTopicFloating()
-    const escape = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape' || event.defaultPrevented || isImeOwnedKeyboardEvent(event) || foreignFloatOwnsKeyboardEvent(event, panel)) return
-      event.preventDefault(); event.stopPropagation(); spaceActionRef.current?.abort(); requestPmoTeamsTopicFloatingClose()
-    }
     panel.addEventListener('pointerenter', enter)
     panel.addEventListener('pointerleave', leave)
     panel.addEventListener('pointerdown', pin, true)
     panel.addEventListener('focus', pin, true)
-    panel.addEventListener('keydown', escape)
     return () => {
       panel.removeEventListener('pointerenter', enter)
       panel.removeEventListener('pointerleave', leave)
       panel.removeEventListener('pointerdown', pin, true)
       panel.removeEventListener('focus', pin, true)
-      panel.removeEventListener('keydown', escape)
     }
   }, [])
 
