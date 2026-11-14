@@ -11,7 +11,7 @@ import { ProviderObservations, useProviderObservations, type ProviderObservation
 type Fact = {
   label: string
   icon: ComponentProps<typeof SemanticIcon>['name']
-  tone?: 'positive' | 'muted'
+  tone?: 'positive' | 'muted' | undefined
 }
 
 const noneDeclared: Fact = { label: 'None declared', icon: 'action.collapse', tone: 'muted' }
