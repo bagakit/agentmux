@@ -86,7 +86,7 @@ it.each(['', 'Native bridge diagnostic\n', 'NativeError: logger initialization\n
   await authority.hello(device.deviceId, 'Original phone')
   const connection = authority.observe(device, { address: '192.0.2.24', userAgent: 'Private browser declaration' })
   const completeURL = connectionOfferUrl(appOrigin + '/mobile/', { v: 2, serverId: authority.hostId, daemonPublicKeyB64: Buffer.alloc(32, 9).toString('base64'), relay: { endpoint: '192.0.2.44:4700', useTls: true } })
-  const devices = createDeviceAdministration(Promise.resolve(authority), () => ({ state: 'connected', message: 'Original private Host', origin: appOrigin }), () => completeURL)
+  const devices = createDeviceAdministration(() => Promise.resolve(authority), () => ({ state: 'connected', message: 'Original private Host', origin: appOrigin }), async () => ({ url: completeURL, candidates: [] }))
   const config = new ConfigOwner({ read: () => DEFAULT_CONFIG, save: async value => value, publish() {} }), processes = nodeProcessPort()
   const owner = new ToolkitOwner({ openRunPort: async () => processes.port, enabled: () => true, config, receiptPath: join(directory, 'receipts.json'),
     launch: () => ({ runner: process.execPath, cli, script: resolve(repository, 'apps/desktop/resources/toolkit/performance.mjs'), cwd: work,
@@ -103,7 +103,7 @@ it.each(['', 'Native bridge diagnostic\n', 'NativeError: logger initialization\n
     const run = vi.spyOn(api.toolkit, 'run'), action = vi.spyOn(api.toolkit, 'action'), clipboard = vi.spyOn(api.ui, 'writeClipboardText').mockResolvedValue(undefined)
     vi.spyOn(api.toolkit, 'observe').mockImplementation((toolId, read, end, options) => {
       const sub = rpc.subscribe('toolkit.watch', { toolId, evaluateOnDisplay: options?.evaluateOnDisplay }, {
-        onInitial: value => read(value.snapshot), onEvent: value => { if (value.type === 'snapshot') read(value.data) }, onEnd: end })
+        onInitial: value => { expect(value.toolId).toBe(toolId) }, onEvent: value => { if (value.type === 'snapshot') read(value.data) }, onEnd: error => end?.(error?.message ?? 'Original toolkit observation ended') })
       subscriptions.push(sub); return { dispose() { void sub.then(value => value.dispose()) } }
     })
     const navigate = vi.fn()
@@ -120,10 +120,10 @@ it.each(['', 'Native bridge diagnostic\n', 'NativeError: logger initialization\n
     expect(snapshot.display?.latestConfirmed?.run?.runId).toMatch(/^private-process-/u)
     const textarea = dom.container.querySelector<HTMLTextAreaElement>('textarea[aria-label="Phone connection link"]')!
     expect(textarea.value).toBe(settingsLink.url)
-    const copy = [...dom.container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent?.trim() === 'Copy link')!
+    const copy = [...dom.container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent?.trim() === 'Copy shown link')!
     await act(async () => copy.click())
     expect(clipboard).toHaveBeenCalledExactlyOnceWith(settingsLink.url)
-    const manage = [...dom.container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent?.trim() === 'Manage devices')!
+    const manage = [...dom.container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent?.trim() === 'Phone settings')!
     await act(async () => manage.click())
     expect(navigate).toHaveBeenCalledExactlyOnceWith('mobile')
     expect(evaluate).not.toHaveBeenCalled(); expect(run).not.toHaveBeenCalled(); expect(action).not.toHaveBeenCalled()
@@ -146,4 +146,122 @@ it.each(['', 'Native bridge diagnostic\n', 'NativeError: logger initialization\n
     await rpc.dispose(); await server.stop(); await owner.dispose(); await processes.close(); connection.dispose(); await authority.flush()
     await rm(directory, { recursive: true }); vi.unstubAllEnvs()
   }
+}, 30000)
+
+/** Reuse the real finite process/result-channel and public Host/Toolkit owners. */
+async function currentLinkChain() {
+  const directory = await mkdtemp(fixturePath('tmp/amux-current-phone-')), work = join(directory, 'external-cwd'), envReport = join(directory, 'child-env.jsonl')
+  await mkdir(work); vi.stubEnv('AGENTMUX_RUNTIME_DIRECTORY', directory)
+  const authority = await DeviceAuthority.open(join(directory, 'devices.json'), () => 1), processes = nodeProcessPort()
+  let endpoint = '192.0.2.44:4700', gate: Promise<void> | null = null, release: (() => void) | null = null, loseNext = false, creates = 0
+  const hostLink = vi.fn(async () => {
+    if (gate) await gate
+    return { url: connectionOfferUrl('https://' + endpoint + '/mobile/', { v: 2, serverId: authority.hostId,
+      daemonPublicKeyB64: Buffer.alloc(32, 9).toString('base64'), relay: { endpoint, useTls: true } }), candidates: [] }
+  })
+  const devices = createDeviceAdministration(() => Promise.resolve(authority), () => ({ state: 'connected', message: 'Controlled original Host' }), hostLink)
+  const config = new ConfigOwner({ read: () => DEFAULT_CONFIG, save: async value => value, publish() {} })
+  const owner = new ToolkitOwner({ openRunPort: async () => ({ ...processes.port, create: async (input, listener) => {
+    creates++; const result = await processes.port.create(input, listener)
+    if (loseNext) { loseNext = false; throw Error('Controlled original display creation reply lost') }
+    return result
+  } }), enabled: () => true, config, receiptPath: join(directory, 'receipts.json'),
+    launch: () => ({ runner: process.execPath, cli, script: resolve(repository, 'apps/desktop/resources/toolkit/performance.mjs'), cwd: work,
+      env: { ELECTRON_RUN_AS_NODE: '1', NODE_OPTIONS: `--import=${preload}`, PRIVATE_ENV_REPORT: envReport } }) })
+  const server = new AgentMuxControlServer({ socketPath: defaultAgentMuxControlSocketPath(), coreClients: () => [], toolkit: owner, deviceAdministration: devices })
+  await server.start(); const rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: server.path } })
+  const subscriptions: Array<Promise<{ dispose(): Promise<void> }>> = []
+  const get = vi.spyOn(api.toolkit, 'get').mockImplementation(async () => {
+    const value = await rpc.call('toolkit.inspect', { toolId: MOBILE_CONNECTION_TOOL_ID })
+    return value.snapshot
+  })
+  const evaluate = vi.spyOn(api.toolkit, 'evaluate').mockImplementation(async (toolId, input) => {
+    return (await rpc.call('toolkit.evaluate', { toolId, ...(input ? { input } : {}) })).snapshot
+  })
+  const run = vi.spyOn(api.toolkit, 'run'), action = vi.spyOn(api.toolkit, 'action'), clipboard = vi.spyOn(api.ui, 'writeClipboardText').mockResolvedValue(undefined)
+  vi.spyOn(api.toolkit, 'observe').mockImplementation((toolId, read, end, options) => {
+    const sub = rpc.subscribe('toolkit.watch', { toolId, evaluateOnDisplay: options?.evaluateOnDisplay }, {
+      onInitial: value => { expect(value.toolId).toBe(toolId) }, onEvent: value => { if (value.type === 'snapshot') read(value.data) }, onEnd: error => end?.(error?.message ?? 'Original toolkit observation ended') })
+    subscriptions.push(sub); return { dispose() { void sub.then(value => value.dispose()) } }
+  })
+  const inspect = async () => (await rpc.call('toolkit.inspect', { toolId: MOBILE_CONNECTION_TOOL_ID })).snapshot as ToolkitScriptSnapshot
+  const press = async (label: string) => { await act(async () => {
+    const button = [...dom.container.querySelectorAll<HTMLButtonElement>('button')].find(value => value.textContent?.trim() === label)
+    expect(button, label).toBeDefined(); expect(button!.disabled, label).toBe(false); button!.click()
+  }) }
+  await dom.render(<MobileConnectionResult active close={() => {}} />)
+  await vi.waitFor(async () => {
+    const snapshot = await inspect()
+    expect(snapshot.display?.latestConfirmed?.document?.links).toHaveLength(1)
+    expect(snapshot.display?.admission, 'The original owner must finish its exact Run cleanup before another display admission').toBeNull()
+    const button = [...dom.container.querySelectorAll<HTMLButtonElement>('button')].find(value => value.textContent?.trim() === 'Refresh & copy link')
+    expect(button?.disabled).toBe(false)
+  }, { timeout: 10000 })
+  return { authority, owner, rpc, inspect, evaluate, clipboard, run, action, hostLink, processes, press, creates: () => creates,
+    change: (value: string) => { endpoint = value }, hold: () => { gate = new Promise<void>(resolve => { release = resolve }) },
+    release: () => { release?.(); gate = null; release = null }, loseNext: () => { loseNext = true },
+    close: async () => {
+      release?.(); gate = null; await dom.render(<p>Closed</p>)
+      for (const sub of subscriptions) await (await sub).dispose()
+      await rpc.dispose(); await server.stop(); await owner.dispose(); await processes.close(); await authority.flush()
+      await rm(directory, { recursive: true }); vi.unstubAllEnvs()
+    } }
+}
+
+it('real current phone producer waits for the new exact display receipt after the original Host address changes', async () => {
+  const f = await currentLinkChain()
+  try {
+    const before = await f.inspect(), original = before.display!.latestConfirmed!, previousURL = original.document!.links[0]!.url
+    f.change('192.0.2.62:4700'); f.hold()
+    await f.press('Refresh & copy link')
+    await vi.waitFor(() => expect(f.hostLink, JSON.stringify({ evaluations: f.evaluate.mock.calls, creates: f.creates(), ui: dom.container.textContent })).toHaveBeenCalledTimes(2), { timeout: 10000 })
+    expect(f.evaluate).toHaveBeenCalledExactlyOnceWith(MOBILE_CONNECTION_TOOL_ID, { invocationId: expect.any(String),
+      expectedRevision: before.definition.revision, expectedLatestExecutionId: original.executionId })
+    const admitted = (await f.inspect()).display!.admission!
+    expect(admitted.invocationId).toBe(f.evaluate.mock.calls[0]![1]!.invocationId)
+    expect(admitted.executionId).not.toBe(original.executionId)
+    expect(f.clipboard).not.toHaveBeenCalled()
+    expect((dom.container.querySelector('textarea') as HTMLTextAreaElement).value).toBe(previousURL)
+    f.release()
+    await vi.waitFor(async () => {
+      const live = (await f.inspect()).display!
+      expect(f.clipboard, JSON.stringify({ state: live.state, reason: live.reason, admission: live.admission?.executionId,
+        result: live.latestConfirmed && { executionId: live.latestConfirmed.executionId, invocationId: live.latestConfirmed.invocationId,
+          expectedLatestExecutionId: live.latestConfirmed.expectedLatestExecutionId, revision: live.latestConfirmed.definition.revision,
+          workspacePath: live.latestConfirmed.target.workspacePath, state: live.latestConfirmed.state, hasDocument: Boolean(live.latestConfirmed.document) }, ui: dom.container.textContent })).toHaveBeenCalledTimes(1)
+    }, { timeout: 10000 })
+    const after = await f.inspect(), current = after.display!.latestConfirmed!, url = current.document!.links[0]!.url
+    expect(current.executionId).toBe(admitted.executionId)
+    expect(new URL(url).origin).toBe('https://192.0.2.62:4700')
+    expect(f.clipboard).toHaveBeenCalledExactlyOnceWith(url)
+    expect((dom.container.querySelector('textarea') as HTMLTextAreaElement).value).toBe(url)
+    expect(dom.container.querySelector('svg[role="img"]')).not.toBeNull()
+    expect(f.authority.devices()).toEqual([])
+    expect(after.admission).toEqual(before.admission); expect(after.latestConfirmed).toEqual(before.latestConfirmed)
+    expect(f.run).not.toHaveBeenCalled(); expect(f.action).not.toHaveBeenCalled(); expect(f.creates()).toBe(2)
+  } finally { await f.close() }
+}, 30000)
+
+it('real fresh-copy pins a new invocation and conflicts without resuming an old unknown display admission', async () => {
+  const f = await currentLinkChain()
+  try {
+    const before = await f.inspect(), previous = before.display!.latestConfirmed!
+    f.hold(); f.loseNext()
+    await f.rpc.call('toolkit.evaluate', { toolId: MOBILE_CONNECTION_TOOL_ID, input: { invocationId: 'controlled-original-unknown-display',
+      expectedRevision: before.definition.revision, expectedLatestExecutionId: previous.executionId } }).catch(() => {})
+    await vi.waitFor(async () => expect((await f.inspect()).display).toMatchObject({ state: 'unknown', admission: { run: null } }))
+    const original = (await f.inspect()).display!.admission!, creates = f.creates()
+    await vi.waitFor(() => expect(dom.container.textContent).toContain('Current connection details are unavailable'))
+    await f.press('Refresh & copy link')
+    await vi.waitFor(() => expect(dom.container.textContent).toContain('Display evaluation targets another in-use request.'))
+    const input = f.evaluate.mock.calls[0]![1]!
+    expect(input.invocationId).not.toBe(original.invocationId)
+    expect(input).toMatchObject({ expectedRevision: before.definition.revision, expectedLatestExecutionId: previous.executionId })
+    expect((await f.inspect()).display!.admission).toEqual(original)
+    expect(f.creates()).toBe(creates)
+    expect(f.clipboard).not.toHaveBeenCalled(); expect(f.run).not.toHaveBeenCalled(); expect(f.action).not.toHaveBeenCalled()
+    await f.press('Copy shown link')
+    expect(f.clipboard).toHaveBeenCalledExactlyOnceWith(previous.document!.links[0]!.url)
+    expect(f.creates()).toBe(creates)
+  } finally { await f.close() }
 }, 30000)

@@ -3,7 +3,7 @@ import { fixtureEpoch as _reshape_fixtureEpoch } from "../../../test/fixture-val
 import { act } from 'react'
 import { fixturePath as hygieneFixturePath } from '../scripts/lib/fixture-values.mjs'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { ToolkitAdmission, ToolkitConfirmedResult, ToolkitScriptSnapshot, ToolkitToolDefinition, ToolkitResultDocument } from '@agentmux/core/control'
+import type { ToolkitAdmission, ToolkitConfirmedResult, ToolkitScriptSnapshot, ToolkitToolDefinition, ToolkitResultDocument, ToolkitRunInput } from '@agentmux/core/control'
 import { MobileConnectionResult } from '../src/renderer/src/components/toolkit/MobileConnectionResult'
 import { ToolkitStatusBar } from '../src/renderer/src/components/toolkit/ToolkitStatusBar'
 import { UserToolkitResult } from '../src/renderer/src/components/toolkit/UserToolkitResult'
@@ -61,7 +61,7 @@ describe('phone Toolkit consumes the independent display program', () => {
   it.each(['', 'Native bridge diagnostic\n', 'Warning: native logger unavailable\nDebug: using the original process\n'])('uses the typed document independently of terminal diagnostics %j', async diagnostics => {
     const confirmed = { ...result('display-diagnostics', currentURL), text: diagnostics + JSON.stringify(connectionDocument(originalURL)) }
     const f = fixture({ display: { state: 'succeeded', reason: null, admission: null, latestConfirmed: confirmed, sequence: 2 } })
-    await render(); await click('Copy link')
+    await render(); await click('Copy shown link')
     expect(f.clipboard).toHaveBeenCalledExactlyOnceWith(currentURL)
     expect((dom.container.querySelector('textarea') as HTMLTextAreaElement).value).toBe(currentURL)
     expect(dom.container.querySelector('svg[role="img"]')).not.toBeNull()
@@ -74,7 +74,7 @@ describe('phone Toolkit consumes the independent display program', () => {
     const latest = kind === 'missing' ? plain : { ...plain, document: null, reason: 'Authenticated machine document was invalid' }
     const f = fixture({ display: { state: 'succeeded', reason: latest.reason, admission: null, latestConfirmed: latest, lastSucceeded: saved, sequence: 3 } })
     for (let mount = 0; mount < 2; mount++) {
-      await render(); await click('Copy link')
+      await render(); await click('Copy shown link')
       expect((dom.container.querySelector('textarea') as HTMLTextAreaElement).value).toBe(currentURL)
       expect(dom.container.querySelector('.phone-connection__updated time')?.getAttribute('datetime')).toBe(new Date(saved.endedAt).toISOString())
       expect(dom.container.textContent).toContain('Saved code · current details not confirmed')
@@ -96,7 +96,7 @@ describe('phone Toolkit consumes the independent display program', () => {
   })
   it('keeps clipboard failure with Copy instead of declaring current connection unavailable', async () => {
     const f = fixture(); f.clipboard.mockRejectedValue(new Error('clipboard is locked'))
-    await render(); await click('Copy link')
+    await render(); await click('Copy shown link')
     expect(dom.container.textContent).toContain('Could not copy the link')
     expect(dom.container.textContent).not.toContain('Current connection details are unavailable')
     expect(button('Refresh').disabled).toBe(false)
@@ -122,8 +122,8 @@ describe('phone Toolkit consumes the independent display program', () => {
     expect(f.observe).toHaveBeenCalledWith(definition.id, expect.any(Function), expect.any(Function), { evaluateOnDisplay: true })
     expect(f.run).not.toHaveBeenCalled(); expect(f.action).not.toHaveBeenCalled(); expect(f.clipboard).not.toHaveBeenCalled()
   })
-  it('copies the display confirmed full URL used by the code without evaluating or generating another link', async () => {
-    const f = fixture(); await render(); await click('Copy link')
+  it('copies the explicitly shown full URL from details without evaluating or generating another link', async () => {
+    const f = fixture(); await render(); await click('Copy shown link')
     expect(f.clipboard).toHaveBeenCalledExactlyOnceWith(currentURL)
     expect((dom.container.querySelector('textarea') as HTMLTextAreaElement).value).toBe(currentURL)
     expect(dom.container.querySelector('svg[role="img"]')).not.toBeNull()
@@ -138,13 +138,13 @@ describe('phone Toolkit consumes the independent display program', () => {
     expect(dom.container.querySelector('[data-toolkit-previous-request] summary')?.textContent).toContain('Previous link request is unconfirmed')
     expect(dom.container.querySelector('[data-toolkit-previous-request]')?.hasAttribute('open')).toBe(false)
     expect(dom.container.textContent).not.toContain('current details not confirmed')
-    expect(f.clipboard).not.toHaveBeenCalled(); await click('Copy link')
+    expect(f.clipboard).not.toHaveBeenCalled(); await click('Copy shown link')
     expect(f.clipboard).toHaveBeenCalledExactlyOnceWith(originalURL); expect(f.action).not.toHaveBeenCalled(); expect(f.run).not.toHaveBeenCalled()
   })
   it.each([false, true])('continues only the original ordinary request, generic=%s, while current display copying stays available', async generic => {
     const admission = unknown(), f = fixture({ state: 'unknown', reason: admission.reason, admission })
     await render(generic)
-    if (!generic) { await click('Copy link'); expect(f.clipboard).toHaveBeenCalledWith(currentURL) }
+    if (!generic) { await click('Copy shown link'); expect(f.clipboard).toHaveBeenCalledWith(currentURL) }
     if (generic) {
       await act(async () => { const more = button('More'); more.focus(); more.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })) })
       expect(dom.container.querySelector('[role="menu"]')).not.toBeNull()
@@ -163,7 +163,7 @@ describe('phone Toolkit consumes the independent display program', () => {
   it('retains durable last successful display code and time when mounted after a failed evaluation', async () => {
     const saved = { ...result('saved-display', currentURL), endedAt: _reshape_fixtureEpoch(0, 0, 1234) }, failed = { ...result('failed-display', null), state: 'failed' as const, reason: 'current-display-failed', exitCode: 1, endedAt: _reshape_fixtureEpoch(0, 0, 2345) }
     const f = fixture({ display: { state: 'failed', reason: failed.reason, admission: null, latestConfirmed: failed, lastSucceeded: saved, sequence: 3 } })
-    await render(); await click('Copy link')
+    await render(); await click('Copy shown link')
     expect(f.clipboard).toHaveBeenCalledExactlyOnceWith(currentURL)
     expect(dom.container.querySelector('.phone-connection__updated time')?.getAttribute('datetime')).toBe(new Date(saved.endedAt).toISOString())
     expect(dom.container.textContent).toContain('current-display-failed'); expect(dom.container.textContent).toContain('Saved code · current details not confirmed')
@@ -173,7 +173,7 @@ describe('phone Toolkit consumes the independent display program', () => {
     const f = fixture(); await render()
     f.get.mockRejectedValueOnce(new Error('observation-offline'))
     f.evaluate.mockRejectedValueOnce(new Error('display-unavailable'))
-    await click('Refresh'); await click('Copy link')
+    await click('Refresh'); await click('Copy shown link')
     expect(f.clipboard).toHaveBeenCalledWith(currentURL)
     expect(dom.container.textContent).toContain('observation-offline'); expect(button('Refresh').disabled).toBe(false)
   })
@@ -197,4 +197,91 @@ describe('phone Toolkit consumes the independent display program', () => {
       sourceExecutionId: 'execution-previous-request', expectedAdmissionExecutionId: null })
     expect(f.run).not.toHaveBeenCalled()
   })
+})
+
+function freshResult(input: ToolkitRunInput, url = originalURL): ToolkitConfirmedResult {
+  return { ...result(input.invocationId, url), expectedLatestExecutionId: input.expectedLatestExecutionId }
+}
+async function beginFresh(f: ReturnType<typeof fixture>, input: ToolkitRunInput) {
+  const { endedAt: _ended, exitCode: _exit, document: _document, ...execution } = freshResult(input)
+  await f.publish({ display: { ...f.current().display!, state: 'running', admission: { ...execution, state: 'running', reason: null } } })
+  return f.current()
+}
+async function finishFresh(f: ReturnType<typeof fixture>, value: ToolkitConfirmedResult) {
+  await f.publish({ display: { state: value.state, reason: value.reason, admission: null, latestConfirmed: value, sequence: f.current().display!.sequence + 1 } })
+}
+
+describe('explicit current phone link copy', () => {
+  it('waits for its exact fresh display execution before copying the same new code and full URL', async () => {
+    const f = fixture()
+    f.evaluate.mockImplementation(async (_id, input) => beginFresh(f, input!))
+    await render(); await click('Refresh & copy link')
+    const input = f.evaluate.mock.calls[0]![1]!
+    expect(input).toEqual({ invocationId: expect.any(String), expectedRevision: definition.revision, expectedLatestExecutionId: 'execution-display-current' })
+    expect(input.invocationId).not.toBe('display-current')
+    expect(f.clipboard).not.toHaveBeenCalled()
+    expect(button('Reading current link…').disabled).toBe(true)
+    expect((dom.container.querySelector('textarea') as HTMLTextAreaElement).value).toBe(currentURL)
+    await f.publish({ display: { ...f.current().display!, latestConfirmed: result('unrelated-display', originalURL) } })
+    expect(f.clipboard).not.toHaveBeenCalled()
+    await finishFresh(f, freshResult(input))
+    expect(f.clipboard).toHaveBeenCalledExactlyOnceWith(originalURL)
+    expect((dom.container.querySelector('textarea') as HTMLTextAreaElement).value).toBe(originalURL)
+    expect(dom.container.querySelector('svg[role="img"]')).not.toBeNull()
+    expect(dom.container.textContent).toContain('Current connection link copied.')
+    expect(f.run).not.toHaveBeenCalled(); expect(f.action).not.toHaveBeenCalled()
+  })
+
+  it.each(['failed', 'stopped', 'missing-document', 'different-execution', 'different-target', 'different-version'] as const)
+  ('retains the shown original link without copying an unusable fresh result: %s', async kind => {
+    const f = fixture(); f.evaluate.mockImplementation(async (_id, input) => beginFresh(f, input!))
+    await render(); await click('Refresh & copy link')
+    const value = freshResult(f.evaluate.mock.calls[0]![1]!)
+    if (kind === 'failed' || kind === 'stopped') Object.assign(value, { state: kind, reason: 'Original fresh lookup failed', document: null })
+    if (kind === 'missing-document') value.document = null
+    if (kind === 'different-execution') value.executionId = 'another-execution'
+    if (kind === 'different-target') value.target = { workspacePath: '/different-original-target' }
+    if (kind === 'different-version') value.definition = { ...definition, revision: 'different-version' }
+    await finishFresh(f, value)
+    expect(f.clipboard).not.toHaveBeenCalled()
+    expect((dom.container.querySelector('textarea') as HTMLTextAreaElement).value).toBe(currentURL)
+    expect(dom.container.textContent).not.toContain('Current connection link copied.')
+    await click('Copy shown link')
+    expect(f.clipboard).toHaveBeenCalledExactlyOnceWith((dom.container.querySelector('textarea') as HTMLTextAreaElement).value)
+    expect(f.evaluate).toHaveBeenCalledTimes(1); expect(f.run).not.toHaveBeenCalled(); expect(f.action).not.toHaveBeenCalled()
+  })
+
+  it.each(['close', 'revision', 'saved-copy'] as const)('does not late-copy after the original intent changes: %s', async change => {
+    const f = fixture(); f.evaluate.mockImplementation(async (_id, input) => beginFresh(f, input!))
+    await render(); await click('Refresh & copy link')
+    const input = f.evaluate.mock.calls[0]![1]!
+    if (change === 'close') await dom.render(<p>Closed</p>)
+    if (change === 'revision') await f.publish({ definition: { ...definition, revision: 'changed-revision' } })
+    if (change === 'saved-copy') await click('Copy shown link')
+    await finishFresh(f, freshResult(input))
+    expect(f.clipboard.mock.calls).toEqual(change === 'saved-copy' ? [[currentURL]] : [])
+    expect(f.evaluate).toHaveBeenCalledOnce()
+  })
+
+  it('pins the latest display terminal baseline instead of the last successful QR or ordinary result', async () => {
+    const failed = { ...result('failed-display', null), state: 'failed' as const, reason: 'Original failed read' }
+    const f = fixture({ display: { state: 'failed', reason: failed.reason, admission: null, latestConfirmed: failed, lastSucceeded: result('older-success', currentURL), sequence: 3 } })
+    f.evaluate.mockImplementation(async (_id, input) => beginFresh(f, input!))
+    await render(); await click('Refresh & copy link')
+    expect(f.evaluate.mock.calls[0]![1]).toMatchObject({ expectedLatestExecutionId: failed.executionId })
+    expect(f.clipboard).not.toHaveBeenCalled()
+  })
+})
+
+it('replaces a previous refresh failure with the exact successful fresh-copy observation', async () => {
+  const f = fixture(); f.evaluate.mockRejectedValueOnce(new Error('Previous original refresh failed'))
+  await render(); await click('Refresh')
+  expect(dom.container.textContent).toContain('Previous original refresh failed')
+  f.evaluate.mockImplementation(async (_id, input) => beginFresh(f, input!))
+  await click('Refresh & copy link')
+  await finishFresh(f, freshResult(f.evaluate.mock.calls[1]![1]!))
+  expect(f.clipboard).toHaveBeenCalledExactlyOnceWith(originalURL)
+  expect(dom.container.textContent).not.toContain('Current connection details are unavailable')
+  expect(dom.container.textContent).not.toContain('Previous original refresh failed')
+  expect(dom.container.textContent).not.toContain('Saved code · current details not confirmed')
 })

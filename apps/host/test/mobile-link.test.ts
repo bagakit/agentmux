@@ -8,7 +8,12 @@ import { connectionOfferUrl, parseConnectionOfferUrl } from '@agentmux/relay/off
 import { rpcOwnerFixture } from '../../../packages/core/test/helpers/public-rpc-owner.js'
 import { objectCliEnvironment, runCompiledObjectCli } from '../../../packages/core/test/helpers/object-cli-rpc.js'
 
-const native = vi.hoisted(() => ({ client: null as unknown, observeRelay: null as ((state: 'disconnected') => void) | null }))
+const native = vi.hoisted(() => ({ client: null as unknown, observeRelay: null as ((state: 'disconnected') => void) | null,
+  interfaces: null as ReturnType<typeof import('node:os')['networkInterfaces']> | null }))
+vi.mock('node:os', async original => {
+  const actual = await original<typeof import('node:os')>()
+  return { ...actual, networkInterfaces: () => native.interfaces ?? actual.networkInterfaces() }
+})
 vi.mock('@agentmux/relay/server', async original => {
   const actual = await original<typeof import('@agentmux/relay/server')>()
   return { ...actual, startRelayTransport: (options: Parameters<typeof actual.startRelayTransport>[0]) => {
@@ -35,7 +40,7 @@ import { startAgentMuxHost } from '../src/host.js'
 import { createInterfacePortLabels, mobileLinkCandidates, parsePortLabels } from '../src/mobile-link-candidates.js'
 
 const closes: Array<() => Promise<unknown>> = []
-afterEach(async () => { native.client = null; native.observeRelay = null; for (const close of closes.splice(0).reverse()) await close(); vi.restoreAllMocks() })
+afterEach(async () => { native.client = null; native.observeRelay = null; native.interfaces = null; for (const close of closes.splice(0).reverse()) await close(); vi.restoreAllMocks() })
 async function owner() {
   const value = await rpcOwnerFixture(['caller'], { AgentMuxClient: core.AgentMuxClient, AgentMuxFileAgentSessionStore: core.AgentMuxFileAgentSessionStore })
   closes.push(value.close); return value
@@ -233,3 +238,29 @@ describe('original mobile link discovery', () => {
       JSON.stringify({ url: expected.url, offer: parseConnectionOfferUrl(expected.url), hostId: expected.hostId }), { mode: 0o600 })
   }, 30000)
 })
+
+it('the original running Host reads changed NIC candidates on the next public link without replacing its identity', async () => {
+  const h = await owner(), assets = join(h.root, 'mobile'), socketPath = join(h.root, 'control.sock')
+  const originalRun = structuredClone(h.client.agentSession('caller').run)
+  const html = '<!doctype html><title>Original phone link</title>', digest = (text: string) => 'sha256:' + createHash('sha256').update(text).digest('hex')
+  await mkdir(assets); await writeFile(join(assets, 'index.html'), html)
+  const manifest = { schema: 'agentmux.mobile-web-release.v1', buildId: 'changed-nic', files: [{ path: 'index.html', bytes: Buffer.byteLength(html), digest: digest(html) }] }
+  await writeFile(join(assets, 'mobile-release.json'), JSON.stringify({ ...manifest, digest: digest(JSON.stringify(manifest)) }))
+  native.client = h.client; native.interfaces = { en0: [nic('192.168.2.45')] }
+  const host = await startAgentMuxHost({ store: h.store, socketPath, mobileBuildDirectory: assets, mobilePort: 0 })
+  closes.push(() => host.dispose())
+  const user = await core.connectAgentMuxRpc({ endpoint: { transport: 'unix', path: socketPath } }); closes.push(() => user.dispose())
+  await vi.waitFor(async () => expect((await user.call('device.ls', {})).mobileAccess.state).toBe('connected'), { timeout: 10000 })
+  const before = await user.call('device.link', {}), beforeOffer = parseConnectionOfferUrl(before.url)!
+  expect(new URL(before.pageUrl).hostname).toBe('192.168.2.45')
+  native.interfaces = { en0: [nic('10.69.59.116')] }
+  const after = await user.call('device.link', {}), afterOffer = parseConnectionOfferUrl(after.url)!
+  expect(new URL(after.pageUrl).hostname).toBe('10.69.59.116')
+  expect(after.candidates.map(value => value.address)).toEqual(['10.69.59.116'])
+  expect(afterOffer.relay.endpoint).toBe('10.69.59.116:' + new URL(before.pageUrl).port)
+  expect(afterOffer.serverId).toBe(beforeOffer.serverId)
+  expect(afterOffer.daemonPublicKeyB64).toBe(beforeOffer.daemonPublicKeyB64)
+  expect((await user.call('device.ls', {})).devices).toEqual([])
+  expect(h.client.agentSession('caller').run).toEqual(originalRun)
+  expect(h.inner.kernel.stop).not.toHaveBeenCalled()
+}, 30000)

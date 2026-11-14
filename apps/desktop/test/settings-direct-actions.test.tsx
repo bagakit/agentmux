@@ -183,15 +183,15 @@ it('Mobile offers scanning independently of clipboard or device observation and 
   expect(node('.device-management__read-issue').textContent).toContain('Device status unavailable')
   await dom.click('[data-device-action="copy"]')
   expect(clipboard).toHaveBeenCalledExactlyOnceWith(connectionUrl)
-  expect(link).toHaveBeenCalledOnce()
+  expect(link).toHaveBeenCalledTimes(2)
   const refreshed = connectionUrl + '-refreshed'
-  link.mockResolvedValueOnce(linkResult(refreshed))
+  link.mockResolvedValue(linkResult(refreshed))
   expect(node('[data-device-action="scan"]').textContent).toBe('Refresh code')
   await dom.click('[data-device-action="scan"]')
   expect(node<HTMLTextAreaElement>('[aria-label="Phone connection link"]').value).toBe(refreshed)
   await dom.click('[data-device-action="copy"]')
   expect(clipboard).toHaveBeenLastCalledWith(refreshed)
-  expect(link).toHaveBeenCalledTimes(2)
+  expect(link).toHaveBeenCalledTimes(4)
   expect(revoke).not.toHaveBeenCalled()
 })
 
@@ -212,7 +212,7 @@ it('Mobile can copy first and keeps the original QR and full link available afte
   expect([full.selectionStart, full.selectionEnd]).toEqual([0, connectionUrl.length])
   await dom.click('[data-device-action="copy"]')
   expect(node('.device-management__feedback').textContent).toContain('Link copied')
-  expect(link).toHaveBeenCalledOnce()
+  expect(link).toHaveBeenCalledTimes(2)
 })
 
 it('Mobile ignores a departed link read and retains the same original device record after refresh failure', async () => {
@@ -263,7 +263,7 @@ it('Mobile lets the person pick the network when this Mac has more than one, and
   expect(link).toHaveBeenLastCalledWith({ address: wifi.address })
   await dom.click('[data-device-action="copy"]')
   expect(clipboard).toHaveBeenLastCalledWith(at(wifi.address))
-  expect(link).toHaveBeenCalledTimes(3)
+  expect(link).toHaveBeenCalledTimes(4)
 })
 
 it('Mobile hides the network picker when this Mac has one local address', async () => {
@@ -308,4 +308,20 @@ it('Mobile does not pin the default address, and drops a pick that a network cha
   link.mockRejectedValueOnce(new Error('Relay unavailable'))
   await dom.click('[data-device-action="scan"]')
   expect(node('.device-management__feedback').textContent).toContain('Relay unavailable')
+})
+
+it('Mobile current copy re-reads the Host after its default network address changes', async () => {
+  devices()
+  let current = connectionUrl
+  const link = vi.spyOn(api.deviceManagement, 'link').mockImplementation(async () => linkResult(current))
+  const clipboard = vi.spyOn(api.ui, 'writeClipboardText').mockResolvedValue(undefined)
+  await dom.render(<SettingsPanel initialSection="mobile" onClose={() => {}} />)
+  await dom.click('[data-device-action="copy"]')
+  expect(clipboard).toHaveBeenLastCalledWith(connectionUrl)
+  current = 'http://192.0.2.62:8443/#offer=new-complete-original-offer'
+  await dom.click('[data-device-action="copy"]')
+  expect(link.mock.calls.map(([params]) => params)).toEqual([{}, {}])
+  expect(clipboard.mock.calls).toEqual([[connectionUrl], [current]])
+  expect(node<HTMLTextAreaElement>('[aria-label="Phone connection link"]').value).toBe(current)
+  expect(node('.connection-link-code svg')).toBeDefined()
 })
