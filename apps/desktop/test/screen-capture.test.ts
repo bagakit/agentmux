@@ -1,4 +1,6 @@
 import { afterEach, expect, it, vi } from 'vitest'
+import { createHash } from 'node:crypto'
+import { deriveObjectId } from '@agentmux/core/object-id'
 import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -31,7 +33,8 @@ it('a region capture is the capture surface; Done copies and saves the same fina
   expect(f.present).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ attachToDraft: true, expandable: true, returnFocus: false }))
   expect(f.native.captureScreenshot, 'no native picker is involved').not.toHaveBeenCalled()
   expect(f.native.writeClipboardImage).toHaveBeenCalledExactlyOnceWith(image)
-  expect(path).toMatch(/\.agentmux\/pasted\/[a-f0-9]{64}\.png$/)
+  const sha256 = createHash('sha256').update(bytes).digest('hex')
+  expect(path).toBe(join(f.home, '.agentmux', 'pasted', `paste-${deriveObjectId('pasted-image.v1', JSON.stringify([sha256, 'png']))}.png`))
   expect(await readFile(path!)).toEqual(bytes)
   expect(await readPastedImage(f.home, path!)).toEqual({ dataUrl: image.dataUrl })
   expect(f.edit).not.toHaveBeenCalled()
