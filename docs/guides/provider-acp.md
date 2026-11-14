@@ -17,6 +17,10 @@ Antigravity 新建 Agent 的 **Interaction** 选项提供 **Terminal** 和 **ACP
 
 会话提供模型、推理力度或模式等选项时，输入框的 **Session settings** 显示原生当前值和可选项。切换完成以原会话返回的整组配置为准。CLI 可用 `amux agent configuration inspect --host HOST --session SESSION --run RUN` 读取原选项和修订，用 `amux agent configuration set --input FILE` 提交该原 Run 的选择。回执未知时，用 `inspect --operation-id OPERATION` 查询原操作。
 
+图片随原输入提交，只有原 ACP 连接声明支持图片时才投递。当前连接报告上下文用量时，输入框与 Agent 详情显示原生已用量和总容量。恢复同一健康 Run 后能读取它最后的原生样本，新 Run 使用自己的观察。
+
 重开 Desktop 或 Core 时接回健康 Run。原生进程已结束时，恢复沿保存的 Session 和原生 ID，等待 `session/resume` 或已声明的 `session/load` 确认再接入后续工作。取消的终局来自原 `session/prompt` 回包。原权限请求使用它自己提供的选项和对应的原生请求 ID。
+
+Antigravity 标准配置下，按原 ACP 返回的原生 ID 找到对话文件，沿既有 Conversation 历史读取。自定义原生数据目录缺少已核实的绑定时，历史来源仍待确认。原生提问、分支和压缩须各自验证；ACP 适配声明本身不表示可调用。
 
 可用的原生能力取决于选定 Executor 运行的二进制与账号环境。协议定义见 [ACP v1 会话](https://agentclientprotocol.com/protocol/v1/session-setup)、[ACP v1 回合](https://agentclientprotocol.com/protocol/v1/prompt-turn)与 [ACP v1 会话选项](https://agentclientprotocol.com/protocol/v1/session-config-options)。
