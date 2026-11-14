@@ -11,7 +11,8 @@ vi.mock('electron', () => ({ app: { getPath: () => tmpdir() } }))
 vi.mock('../src/renderer/src/components/SessionPane', () => ({ SessionPane: () => null }))
 vi.mock('../src/renderer/src/components/TerminalView', () => ({ TerminalView: ({ session }: { session: { id: string; control: { run: { runId: string } } } }) => createElement('div', { 'data-fixture-original-terminal': session.id, 'data-native-run': session.control.run.runId }) }))
 import { createSpaceSessionsFixture } from '../../../packages/core/test/helpers/space-session-fixture'
-import { AgentMuxControlServer } from '@agentmux/core'
+import { AgentMuxControlServer, connectAgentMuxRpc } from '@agentmux/core'
+import { decodeHostedValue } from '../../../packages/core/src/hosted-value'
 import { privateEnvironment } from './helpers/workface-control-fixture'
 import type { AgentMuxAgentSessionStore } from '../../../packages/core/src/agent-session-store'
 import { AgentProviderRegistry } from '../../../packages/core/src/agent-provider'
@@ -65,7 +66,7 @@ function MainFocusFixture({ navigate, regionOnly = false }: { navigate: (id: str
 /** Real original Core/Space and scoped Unix→Main→IPC→Preload→Renderer.
  * Native process state is the existing source fixture leaf. No unified hook,
  * Context, lane, card, filter, menu or preview implementation is mocked. */
-async function fixture(options: { foreign?: boolean; unavailable?: boolean; nativeUnavailable?: boolean; metadataUnknown?: boolean; sourceOnly?: boolean; legacyNoAdmission?: boolean; multiple?: boolean; missing?: boolean; unconfirmed?: boolean; staleRun?: boolean; unobservedRun?: boolean } = {}) {
+async function fixture(options: { foreign?: boolean; unavailable?: boolean; nativeUnavailable?: boolean; metadataUnknown?: boolean; sourceOnly?: boolean; legacyNoAdmission?: boolean; multiple?: boolean; missing?: boolean; unconfirmed?: boolean; staleRun?: boolean; unobservedRun?: boolean; largeHistory?: boolean; historyImage?: boolean } = {}) {
   const privateCleanup: Array<() => unknown | Promise<unknown>> = []
   const original = await createSpaceSessionsFixture(privateCleanup)
   const privateRoots = new Set([original.b.root, original.d.root])
@@ -93,7 +94,9 @@ async function fixture(options: { foreign?: boolean; unavailable?: boolean; nati
   const owner = options.foreign ? original.d : original.b, creationId = 'original-source-creation', now = Date.now()
   const before = await owner.put(SID)
   const transcriptPath = join(owner.root, 'original-native.jsonl')
-  await writeFile(transcriptPath, [{ type: 'session_meta', payload: { id: 'original-native-history', cwd: options.foreign ? '/runtime-d/home' : '/b/project' } }, { type: 'response_item', timestamp: new Date(now - 2000).toISOString(), payload: { type: 'message', id: 'original-native-prompt', role: 'user', content: [{ type: 'input_text', text: '原远端自己的输入，不是同 SID 本机输入。' }] } }, { type: 'response_item', timestamp: new Date(now - 1000).toISOString(), payload: { type: 'message', id: 'original-native-response', role: 'assistant', content: [{ type: 'output_text', text: foreignRecap }] } }].map(value => JSON.stringify(value)).join('\n')+'\n')
+  const originalInput = '原远端自己的输入，不是同 SID 本机输入。' + (options.largeHistory ? '这是原始长正文。'.repeat(12000) + '原始长正文末尾' : '')
+  const originalParts = [{ type: 'input_text', text: originalInput }, ...(options.historyImage ? [{ type: 'input_image', image_url: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+i8egAAAAASUVORK5CYII=' }] : [])]
+  await writeFile(transcriptPath, [{ type: 'session_meta', payload: { id: 'original-native-history', cwd: options.foreign ? '/runtime-d/home' : '/b/project' } }, { type: 'response_item', timestamp: new Date(now - 2000).toISOString(), payload: { type: 'message', id: 'original-native-prompt', role: 'user', content: originalParts } }, { type: 'response_item', timestamp: new Date(now - 1000).toISOString(), payload: { type: 'message', id: 'original-native-response', role: 'assistant', content: [{ type: 'output_text', text: foreignRecap }] } }].map(value => JSON.stringify(value)).join('\n')+'\n')
   const session: AgentMuxStoredAgentSession = { ...before, updatedAt: now, workspacePath: options.foreign ? '/runtime-d/home' : '/b/project',
     creation: { createOperationId: creationId, initialPrompt: 'unknown' }, nativeHandle: { kind: 'provider', providerId: 'codex', sessionId: 'original-native-history', transcriptPath }, semanticStatus: { state: 'working', source: 'native-hook', observedAt: now, stateEnteredAt: now } }
   await (owner.core as unknown as { registry: { put(value: AgentMuxStoredAgentSession, expected: AgentMuxStoredAgentSession['run']): Promise<void> } }).registry.put(session, before.run)
@@ -806,4 +809,155 @@ it('the public runtime-qualified view changes the selected original conversation
   expect(useAppStore.getState().agentComposerDrafts[owner]).toBe(draft)
   expect(useAppStore.getState().agentComposerDrafts[SID]).toBe('Keep this original local draft')
   for (const effect of effects) expect(effect).not.toHaveBeenCalled()
+})
+
+it.each([true, false])('the original Source input tools read and fill the original user history without a Native Session or local same-SID records (foreign: %s)', async foreign => {
+  const f = await fixture({ foreign, sourceOnly: !foreign, nativeUnavailable: true, metadataUnknown: true, largeHistory: true })
+  const taskName = foreign ? '真正远端的独立任务' : localName
+  await f.settle(foreign ? 2 : 1)
+  await vi.waitFor(() => expect(cardWith(taskName).querySelector('.focus-context__recap')?.textContent).toContain(foreignRecap))
+  const owner = originalSourceInputOwnerKey(f.owner.owner.runtimeId, SID), draft = 'Keep this qualified unsent Source draft.'
+  const originalQuery = vi.spyOn(f.owner.core, 'readAgentSessionHistory')
+  const unknownInput = { operationId: 'original-input-ack-unknown', text: 'Keep the original unknown input.', status: 'deferred' as const,
+    inputIntakeStarted: true as const, awaitingExplicitSend: true as const }
+  const effects = [f.b, f.d].flatMap(source => (['createAgent', 'resumeAgent', 'restartAgent', 'reopenAgent', 'writeAgent', 'pasteAgent', 'submitAgentPrompt'] as const).map(method => vi.spyOn(source.core, method)))
+  await act(async () => {
+    useAppStore.getState().setAgentComposerDraft(owner, draft)
+    useAppStore.setState(state => ({ agentSteerQueues: { ...state.agentSteerQueues, [owner]: [unknownInput] } }))
+    cardWith(taskName).click()
+  })
+  const workface = () => dom.container.querySelector<HTMLElement>('.global-session-workspace [aria-label="Original member workface"]')!
+  await vi.waitFor(() => { expect(workface()).not.toBeNull(); expect(workface().querySelector('.composer-mailbox')).not.toBeNull() })
+  const panel = workface().querySelector<HTMLElement>('.composer-mailbox')!
+  await act(async () => {
+    for (const type of ['beforetoggle', 'toggle']) {
+      const event = new Event(type); Object.defineProperty(event, 'newState', { value: 'open' }); panel.dispatchEvent(event)
+    }
+    panel.querySelector<HTMLButtonElement>('[id$="-user-tab"]')!.click()
+  })
+  await vi.waitFor(() => expect(panel.querySelector('[id$="-user"]')?.textContent).toContain('原远端自己的输入，不是同 SID 本机输入。'), { timeout: 10000 })
+  const search = panel.querySelector<HTMLInputElement>('.input-history__search input')!
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(search, '原远端自己的输入')
+    search.dispatchEvent(new Event('input', { bubbles: true }))
+  })
+  await act(async () => search.form!.querySelector<HTMLButtonElement>('button[type="submit"]')!.click())
+  await vi.waitFor(() => {
+    expect(panel.querySelector('.input-history__sources [role="status"]'), panel.querySelector('[id$="-user"]')?.textContent?.slice(-4000)).toBeNull()
+    expect(panel.querySelector('[id$="-user"]')?.getAttribute('aria-busy')).toBe('false')
+    expect(panel.querySelector('.input-history__coverage')?.textContent).toContain('Examined')
+    expect(panel.querySelector('.input-history__sources [role="status"]')).toBeNull()
+    expect(panel.querySelector('[id$="-user"]')?.textContent).toContain('原远端自己的输入，不是同 SID 本机输入。')
+  })
+  expect(panel.textContent).not.toContain(localRecap)
+  const row = [...panel.querySelectorAll<HTMLElement>('[data-record-key]')].find(node => node.textContent?.includes('原远端自己的输入，不是同 SID 本机输入。'))!
+  expect(row).toBeDefined()
+  await act(async () => row.click())
+  const fill = panel.querySelector<HTMLButtonElement>('[aria-label="填入草稿"]')!
+  expect(fill).toBeDefined()
+  await act(async () => fill.click())
+  await vi.waitFor(() => expect(useAppStore.getState().agentComposerDrafts[owner]).toContain('原远端自己的输入，不是同 SID 本机输入。'))
+  expect(useAppStore.getState().agentComposerDrafts[owner]).toContain('原始长正文末尾')
+  expect(useAppStore.getState().agentComposerDrafts[owner]).toContain(draft)
+  expect(useAppStore.getState().agentComposerDrafts[SID]).toBe('Keep this original local draft')
+  expect(useAppStore.getState().agentSteerQueues[owner]).toEqual([unknownInput])
+  expect((await f.owner.core.readAgentSession(SID))!.run).toEqual(f.session.run)
+  for (const effect of effects) expect(effect).not.toHaveBeenCalled()
+})
+
+it('the original Source input history rejects a removed admission after the original read awaits', async () => {
+  const f = await fixture({ foreign: true, nativeUnavailable: true, metadataUnknown: true })
+  await f.settle(2)
+  // Keep this API race independent of card-reader cancellation after membership changes.
+  await dom.render(null)
+  const target = { hostId: f.target.hostId, target: { kind: 'conversation' as const, reference: f.reference,
+    regionId: f.admitted.address.regionId, runtimeId: f.d.owner.runtimeId, agentSessionId: SID,
+    expectedAdmission: { kind: 'creation' as const, operationId: 'original-source-creation' } } }
+  const surface = await f.main.api.reading(target, () => {})
+  cleanup.push(() => surface.dispose())
+  const owner = originalSourceInputOwnerKey(f.d.owner.runtimeId, SID), draft = 'Keep the original pending read draft.'
+  useAppStore.getState().setAgentComposerDraft(owner, draft)
+  let captured!: () => void, release!: () => void
+  const started = new Promise<void>(resolve => { captured = resolve }), gate = new Promise<void>(resolve => { release = resolve })
+  const originalRead = f.d.core.readAgentSessionHistory.bind(f.d.core)
+  vi.spyOn(f.d.core, 'readAgentSessionHistory').mockImplementation(async (...args) => {
+    const result = await originalRead(...args); captured(); await gate; return result
+  })
+  const reading = surface.call('history', { input: { source: 'native', kind: 'user-message', query: '', limit: 30, maxBytes: 128 * 1024 } })
+    .then(page => ({ page, error: undefined }), error => ({ page: undefined, error }))
+  await started
+  try {
+    const snapshot = await f.main.api.call('snapshot', { hostId: f.target.hostId, reference: f.reference })
+    const writer = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: f.b.server.path } })
+    cleanup.push(() => writer.dispose())
+    await writer.call('space.apply', { reference: f.reference, expectedRevision: snapshot.revision, changes: {
+      tabs: snapshot.scope.tabs.filter(tab => tab.tabId === f.admitted.address.tabId).map(tab => ({ ...tab, regionIds: tab.regionIds.filter(id => id !== target.target.regionId) })),
+      remove: { regions: [target.target.regionId] }
+    } })
+    expect((await f.b.spatial.read()).graph.regions.some(region => region.regionId === target.target.regionId)).toBe(false)
+  } finally { release() }
+  const result = await reading
+  expect(result.page).toBeUndefined()
+  expect(result.error).toMatchObject({ code: 'SPACE_MEMBER_ADMISSION_UNCONFIRMED' })
+  expect(useAppStore.getState().agentComposerDrafts[owner]).toBe(draft)
+  expect((await f.d.core.readAgentSession(SID))!.run).toEqual(f.session.run)
+})
+
+it('the original Source input history is consumable by the actual public member CLI and refuses another Runtime', async () => {
+  const f = await fixture({ foreign: true, nativeUnavailable: true, metadataUnknown: true, unobservedRun: true })
+  await f.settle(2)
+  const cli = process.env.AGENTMUX_SOURCE_INPUT_TOOLS_CLI ?? process.env.AGENTMUX_ORIGINAL_VIEW_CLI
+  expect(cli, 'Use the current-source locked public CLI.').toBeTruthy()
+  const directory = await mkdtemp(join(tmpdir(), 'amx-original-input-tools-cli-'))
+  cleanup.push(() => rm(directory, { recursive: true, force: true }))
+  const input = { target: { kind: 'conversation', reference: f.reference, regionId: f.admitted.address.regionId,
+    runtimeId: f.d.owner.runtimeId, agentSessionId: SID, expectedAdmission: { kind: 'creation', operationId: 'original-source-creation' } },
+    call: { method: 'runtime.invoke', params: { consumerId: 'original-input-history-cli',
+      fence: { runtimeId: f.d.owner.runtimeId, ownerInstanceId: f.d.owner.ownerInstanceId }, invocation: { method: 'readAgentSessionHistory',
+        args: [{ hostId: 'local', agentSessionId: SID, source: 'native', kind: 'user-message', query: '原远端自己的输入', limit: 20, maxBytes: 128 * 1024, scanLimit: 200 }] } } } }
+  const file = join(directory, 'original-call.json'), run = promisify(execFile)
+  const env = privateEnvironment({ AGENTMUX_RUNTIME_DIRECTORY: directory, AGENTMUX_STATE_DIRECTORY: join(directory, 'state') })
+  const invoke = () => run(process.execPath, [cli!, '--endpoint', 'unix:' + f.b.server.path, 'space', 'member', 'call', '--input', file], { env, timeout: 15000 })
+  await writeFile(file, JSON.stringify(input))
+  const response = JSON.parse(String((await invoke()).stdout))
+  expect(response.ok).toBe(true)
+  expect(response.operation).toBe('space.member.call')
+  const page = decodeHostedValue(response.result.value) as { agentSessionId: string; userMessages: Array<{ content: string }> }
+  expect(page.agentSessionId).toBe(SID)
+  expect(page.userMessages.some(message => message.content.includes('原远端自己的输入，不是同 SID 本机输入。'))).toBe(true)
+  expect(page.userMessages.some(message => message.content.includes(localRecap))).toBe(false)
+  const wrong = { ...input, target: { ...input.target, runtimeId: f.b.owner.runtimeId },
+    call: { ...input.call, params: { ...input.call.params, fence: { runtimeId: f.b.owner.runtimeId, ownerInstanceId: f.b.owner.ownerInstanceId } } } }
+  await writeFile(file, JSON.stringify(wrong))
+  const failure = await invoke().then(() => undefined, cause => cause as { code: number; stdout: string; stderr: string })
+  expect(failure).toBeDefined()
+  expect(failure!.stderr).toContain('SPACE_MEMBER_TARGET_MISMATCH')
+  expect((await f.d.core.readAgentSession(SID))!.run).toEqual(f.session.run)
+})
+
+it('the original Source history resource reads the exact original native image through Main and Preload while Native is unavailable', async () => {
+  const f = await fixture({ foreign: true, nativeUnavailable: true, metadataUnknown: true, historyImage: true, unobservedRun: true })
+  await f.settle(2)
+  const target = { hostId: f.target.hostId, target: { kind: 'conversation' as const, reference: f.reference,
+    regionId: f.admitted.address.regionId, runtimeId: f.d.owner.runtimeId, agentSessionId: SID,
+    expectedAdmission: { kind: 'creation' as const, operationId: 'original-source-creation' } } }
+  const surface = await f.main.api.reading(target, () => {})
+  cleanup.push(() => surface.dispose())
+  const history = await surface.call('history', { input: { source: 'native', kind: 'user-message', query: '原远端自己的输入', limit: 20, maxBytes: 128 * 1024 } })
+  const message = history.userMessages!.find(message => message.source.kind === 'native')!
+  expect(message.source.kind).toBe('native')
+  if (message.source.kind !== 'native') throw Error('Expected original Provider source')
+  const partIndex = message.contentParts.findIndex(part => part.kind === 'resource' && part.resourceType === 'image')
+  expect(partIndex).toBeGreaterThanOrEqual(0)
+  const part = message.contentParts[partIndex]!
+  if (part.kind !== 'resource') throw Error('Expected original image part')
+  const request = { source: { providerId: message.source.providerId, nativeSessionId: message.source.nativeSessionId },
+    recordId: message.source.recordId, ...(message.turnId ? { turnId: message.turnId } : {}), partIndex, expectedReference: part.reference,
+    representation: 'image' as const }
+  const result = await surface.call('historyResource', { input: request })
+  expect(result.agentSessionId).toBe(SID)
+  expect(result.result).toMatchObject({ status: 'read', mimeType: 'image/png' })
+  await expect(surface.call('historyResource', { input: { ...request, expectedReference: part.reference + '-not-the-original-resource' } }))
+    .rejects.toMatchObject({ code: 'AGENT_SESSION_HISTORY_RESOURCE_MISMATCH' })
+  expect((await f.d.core.readAgentSession(SID))!.run).toEqual(f.session.run)
 })
