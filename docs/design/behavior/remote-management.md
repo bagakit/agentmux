@@ -263,7 +263,7 @@ Host 的公共配置链支持按稳定 ID 新增、读取、完整 expected/CAS 
 
 ## 诊断、维护与授权入口
 
-Agent 可为一个准确已保存 Host 提交单次 install 或 upgrade 请求，绑定原请求者 Session/已确认 Run、完整 Host 配置、维护 expected 与候选身份、原 operationId。申请和查询不执行维护，也不授予 standing 权限。只有传输认证的真人用户或设备且没有 managed Agent caller 可显式批准或拒绝；批准核对原请求摘要，再由原维护 owner 复核 Host、expected 和候选，持久记录审核主体与执行采用事实后施效。Agent 不能自批，也不能把请求 ID 当 bearer 授权；原直接真人维护命令保持可用。重启、记录失败、连接断开或未知执行回执保留原请求与查询路径，不重新批准或自动重放部署。审核范围不包括来源信任、凭据准备、远端清理或批量操作。
+Agent 可为一个准确已保存 Host 提交单次 install 或 upgrade 请求，绑定原请求者 Session/已确认 Run、完整 Host 配置、维护 expected 与候选身份、原 operationId。申请和查询不执行维护，也不授予 standing 权限。只有传输认证的真人用户或设备且没有 managed Agent caller 可显式批准或拒绝；批准核对原请求摘要，再由原维护 owner 复核 Host、expected 和候选，持久记录审核主体与执行采用事实后施效。Agent 不能自批，也不能把请求 ID 当 bearer 授权；原直接真人维护命令保持可用。重启、记录失败、连接断开或未知执行回执保留原请求与查询路径，不重新批准或自动重放部署。审核范围不包括来源信任、凭据准备、远端清理或批量操作。 原接收 Core 与配置／维护 owner 分属进程时，公共申请、查询和审核沿原 client 转发接缝抵达唯一 owner，保留原认证主体；接收 Core 在转发前核验自己的 Runtime fence，目的端继续核验原主体与审核资格。不因本地未持有配置 owner 而阻断已提供的准确转发，也不另选 Core、降身份或自动重放。
 
 应用账户同步由[Remote 应用授权同步](remote-application-access.md)唯一持有：用户配置准确来源、目标、应用账户和 scope，先比较差异，再显式传递最小材料并由目标验真。应用与访问页消费该能力，与 Agent 配置盘点、来源 Core 信任分区呈现；不把三者合成一个权限开关。
 
