@@ -28,11 +28,11 @@ export function createPreloadSpaceMount(ipc: Ipc): SpaceMountPreloadApi {
       const memberToken = mintObjectId()
       const result = await reader<SpaceMountMemberIdentity, SpaceMountMemberEvent>('spaceMounts:member', SPACE_MOUNT_MEMBER_EVENT, input, listener, context, memberToken)
       if (!result.ok) return result
-      return { ok: true, value: { ...result.value, call: async (method, value, signal) => {
-        signal?.throwIfAborted(); const token = mintObjectId(), cancel = () => { void ipc.invoke('spaceMounts:cancel', token).catch(() => {}) }
-        signal?.addEventListener('abort', cancel, { once: true })
-        try { const reply = await ipc.invoke('spaceMounts:memberCall', token, memberToken, method, value); signal?.throwIfAborted(); return unwrapSessionInputOperationResult(reply) }
-        finally { signal?.removeEventListener('abort', cancel) }
+      return { ok: true, value: { ...result.value, call: async (method, value, context) => {
+        const token = mintObjectId(), pending = ipc.invoke('spaceMounts:memberCall', token, memberToken, method, value)
+        const release = context?.onAbort?.(() => { void ipc.invoke('spaceMounts:cancel', token).catch(() => {}) })
+        try { return unwrapSessionInputOperationResult(await pending) }
+        finally { release?.() }
       } } }
     },
     call: async (method, input, context) => {

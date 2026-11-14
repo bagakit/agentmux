@@ -48,7 +48,7 @@ export type SpaceMountPort = {
 export const SPACE_MOUNT_EVENT = 'spaceMounts:event'
 export const SPACE_MOUNT_SESSIONS_EVENT = 'spaceMounts:sessionsEvent'
 export type SpaceMountPreloadApi = {
-  member(input: SpaceMountMemberTarget, listener: (event: SpaceMountMemberEvent) => void, context?: { onAbort?: (cancel: () => void) => () => void }): Promise<import('./contracts').SessionInputOperationResult<SpaceMountMemberSurface>>
+  member(input: SpaceMountMemberTarget, listener: (event: SpaceMountMemberEvent) => void, context?: { onAbort?: (cancel: () => void) => () => void }): Promise<import('./contracts').SessionInputOperationResult<SpaceMountPreloadMemberSurface>>
   call<M extends keyof SpaceMountMethods>(method: M, input: SpaceMountMethods[M]['input'], context?: { onAbort?: (cancel: () => void) => () => void }): Promise<import('./contracts').SessionInputOperationResult<SpaceMountMethods[M]['result']>>
   watch(input: SpaceMountWatch, listener: (event: SpaceMountEvent) => void, context?: { onAbort?: (cancel: () => void) => () => void }): Promise<import('./contracts').SessionInputOperationResult<{ initial: SpaceSnapshot; dispose(): void }>>
   sessions(input: SpaceMountTarget, listener: (event: SpaceMountSessionsEvent) => void, context?: { onAbort?: (cancel: () => void) => () => void }): Promise<import('./contracts').SessionInputOperationResult<{ initial: SpaceSessionsOpening; dispose(): void }>>
@@ -88,5 +88,9 @@ export type SpaceMountMemberSurface = {
   initial: SpaceMountMemberIdentity
   call<M extends keyof SpaceMountMemberMethods>(method: M, input: SpaceMountMemberMethods[M]['input'], signal?: AbortSignal): Promise<SpaceMountMemberMethods[M]['result']>
   dispose(): void | Promise<void>
+}
+/** AbortSignal belongs to Renderer; only functions cross the isolated bridge. */
+export type SpaceMountPreloadMemberSurface = Omit<SpaceMountMemberSurface, 'call'> & {
+  call<M extends keyof SpaceMountMemberMethods>(method: M, input: SpaceMountMemberMethods[M]['input'], context?: { onAbort?: (cancel: () => void) => () => void }): Promise<SpaceMountMemberMethods[M]['result']>
 }
 export const SPACE_MOUNT_MEMBER_EVENT = 'spaceMounts:memberEvent'
