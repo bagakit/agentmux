@@ -147,6 +147,8 @@ describe('one public JSON-RPC service over bounded transports', () => {
     expect(await raw(h.path, { schemaVersion: 5, requestId: 'old-wire', operation: 'space.ls', target: {} })).toMatchObject({ id: null, error: { code: -32600 } })
     expect(await raw(h.path, { ...request, id: 'wrong-version', jsonrpc: '1.0' })).toMatchObject({ id: 'wrong-version', error: { code: -32600 } })
     expect(await raw(h.path, { ...request, id: 'old-envelope-field', schemaVersion: 5 })).toMatchObject({ id: 'old-envelope-field', error: { code: -32600 } })
+    expect(await raw(h.path, { ...request, id: 'invalid-params-scalar', params: 1 })).toMatchObject({ id: 'invalid-params-scalar', error: { code: -32602 } })
+    expect(await raw(h.path, { ...request, id: 'invalid-params-array', params: [] })).toMatchObject({ id: 'invalid-params-array', error: { code: -32602 } })
     expect(await raw(h.path, { jsonrpc: '2.0', id: 'old-method', method: 'list.agents' })).toMatchObject({ error: { code: -32601 } })
     for (const method of ['constructor', '__proto__', 'toString']) expect(await raw(h.path, { jsonrpc: '2.0', id: method, method })).toMatchObject({ id: method, error: { code: -32601 } })
     const batch = await raw(h.path, [{ ...request, id: 32 }, { jsonrpc: '2.0', method: 'space.ls', params: { target: {} } }])
