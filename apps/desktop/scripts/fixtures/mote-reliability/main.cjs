@@ -1,5 +1,6 @@
 const { app, BrowserWindow, Menu } = require('electron')
 const fs = require('node:fs/promises'), path = require('node:path'), assert = require('node:assert/strict')
+const { randomUUID } = require('node:crypto')
 const [html, privateRoot, phase, evidence] = process.argv.slice(2)
 app.setPath('userData', path.join(privateRoot, 'user-data'))
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms))
@@ -43,10 +44,26 @@ app.whenReady().then(async () => {
     const profile = async () => { await click(button('Profile', 'document.querySelector(".mote-space-frame__header")')); await until('document.querySelector("[data-mote-page=profile]")') }
     const refresh = async () => { await click(button('Refresh actual schedule', 'document.querySelector(".mote-quick-mode")')) }
     if (phase === 'restore') {
-      const seed = JSON.parse(await fs.readFile(path.join(evidence, 'seed.json'), 'utf8')).original
+      const seeded = JSON.parse(await fs.readFile(path.join(evidence, 'seed.json'), 'utf8')), seed = seeded.original
       result.restored = await read('window.moteReliability.facts()')
+      assert.ok(Object.keys(seed.drafts).length > 0 && Object.values(seed.drafts).some(value => value.prompt?.trim()), 'Seed contains a nonempty original Launcher draft')
+      assert.ok(Object.keys(seed.agentDrafts).length > 0 && seed.agentDrafts[seed.session.id]?.trim(), 'Seed contains a nonempty original Agent draft')
+      assert.equal(seed.drafts['private-mote-reliability-original-draft'].prompt, seeded.draftWitness.launcher)
+      assert.equal(seed.agentDrafts[seed.session.id], seeded.draftWitness.agent)
+      assert.deepEqual(result.restored.inputAtEntry.drafts, seed.drafts, 'Launcher input is hydrated before fixture writes')
+      assert.deepEqual(result.restored.inputAtEntry.agentDrafts, seed.agentDrafts, 'Agent input is hydrated before fixture writes')
+      assert.deepEqual(result.restored.fixtureWrites, [], 'The restore fixture never reseeds a draft or workface')
       assert.deepEqual(result.restored.drafts, seed.drafts, 'Original durable drafts retained in independent process')
+      assert.deepEqual(result.restored.agentDrafts, seed.agentDrafts, 'Original Agent draft retained in independent process')
       assert.deepEqual(result.restored.tabs['original-initialization-tab'], seed.tabs['original-initialization-tab'], 'Original durable workface identity retained')
+      assert.deepEqual(result.restored.inputAtEntry.tab, seed.tabs['original-initialization-tab'], 'Original Tab exists before fixture projection')
+      assert.deepEqual(result.restored.layouts, seed.layouts, 'Original layouts retained')
+      assert.deepEqual(result.restored.selection, seed.selection, 'Original selection retained')
+      assert.deepEqual(result.restored.focus, seed.focus, 'Original focus retained')
+      assert.deepEqual(result.restored.session.control, seed.session.control, 'Original Session and Run retained')
+      result.persistedInputs = await read('window.moteReliability.persistedInputs()')
+      assert.deepEqual(result.persistedInputs, seeded.persistedInputs, 'The original persisted inputs survive the independent process')
+      result.draftRecovery = { originalNonempty: true, hydratedBeforeFixture: true, restoreFixtureWrites: 0, exactPersistedInputs: true, exactWorkface: true }
       await profile(); await capture('restored-heartbeat-dark-wide')
       result.passed = true; return
     }
@@ -69,7 +86,27 @@ app.whenReady().then(async () => {
     await until(`document.querySelector('[aria-label="Mote startup"]')`)
     await capture('startup-guidance-dark-narrow')
     win.setContentSize(1180, 820); await read('window.moteInit.theme("light")'); await capture('startup-guidance-light-wide')
+    result.draftWitness = { agent: 'Original Agent draft · ' + randomUUID() + ' · 原输入跨进程保留。', launcher: 'Original Launcher draft · ' + randomUUID() + '\n原草稿不可重新播种。' }
+    const editors = `[...document.querySelectorAll('[aria-label="Message Agent"]')].filter(e=>!e.closest('[hidden],[inert],[aria-hidden="true"]')&&e.getClientRects().length)`
+    await until(editors + '.length===1')
+    await click('(' + editors + ')[0]')
+    await until('window.moteReliability.facts().focus.pmo?.sessionId===window.moteReliability.facts().session.id')
+    await read(`(()=>{const e=(${editors})[0],range=document.createRange();range.selectNodeContents(e);const selection=getSelection();selection.removeAllRanges();selection.addRange(range)})()`)
+    await input('Input.insertText', { text: result.draftWitness.agent })
+    await until('window.moteReliability.facts().agentDrafts[window.moteReliability.facts().session.id]===' + JSON.stringify(result.draftWitness.agent))
+    await read('window.moteReliability.editDrafts(' + JSON.stringify(result.draftWitness) + ')')
+    const deadline = Date.now() + 15000
+    do {
+      result.persistedInputs = await read('window.moteReliability.persistedInputs()')
+      const facts = await read('window.moteReliability.facts()')
+      if (result.persistedInputs?.agentDrafts?.[facts.session.id] === result.draftWitness.agent &&
+          result.persistedInputs?.drafts?.['private-mote-reliability-original-draft']?.prompt === result.draftWitness.launcher) break
+      await pause(30)
+    } while (Date.now() < deadline)
     result.original = await read('window.moteReliability.facts()')
+    assert.deepEqual(result.persistedInputs, { drafts: result.original.drafts, agentDrafts: result.original.agentDrafts }, 'Nonempty exact draft witnesses reached original persistent input storage')
+    assert.equal(result.original.agentDrafts[result.original.session.id], result.draftWitness.agent)
+    assert.equal(result.original.drafts['private-mote-reliability-original-draft'].prompt, result.draftWitness.launcher)
     await until('window.sharedFrameProof.persistence().spatial?.graph.tabs.some(tab=>tab.tabId==="original-initialization-tab")')
     result.persisted = await read('window.sharedFrameProof.persistence()'); result.passed = true
   } catch (error) { result.failure = { message: error.message, stack: error.stack }; try { result.failedFacts = await win.webContents.executeJavaScript('window.moteReliability?.facts()') } catch {} }

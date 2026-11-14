@@ -109,6 +109,22 @@ try {
     assert.equal(exit.exitCode, 0, app.failure?.message); assert.equal(app.passed, true, app.failure?.message)
   }
   assert.equal(new Set(result.phases.map(one => one.app.pid)).size, 2, 'Two actual independent Electron processes')
+  if (reliability) {
+    const seed = result.phases.find(one => one.phase === 'seed').app, restore = result.phases.find(one => one.phase === 'restore').app
+    assert.ok(seed.original.agentDrafts[seed.original.session.id]?.trim() && seed.original.drafts['private-mote-reliability-original-draft']?.prompt?.trim(), 'Nonempty original inputs are required')
+    assert.deepEqual(seed.persistedInputs, { agentDrafts: seed.original.agentDrafts, drafts: seed.original.drafts })
+    assert.deepEqual(restore.restored.inputAtEntry.agentDrafts, seed.original.agentDrafts)
+    assert.deepEqual(restore.restored.inputAtEntry.drafts, seed.original.drafts)
+    assert.deepEqual(restore.restored.agentDrafts, seed.original.agentDrafts)
+    assert.deepEqual(restore.restored.drafts, seed.original.drafts)
+    assert.deepEqual(restore.persistedInputs, seed.persistedInputs)
+    assert.deepEqual(restore.restored.fixtureWrites, [])
+    result.draftRestore = { restoreDidNotSeed: true, persistedOriginalVerified: true, nonemptyOriginalVerified: true,
+      seedPid: seed.pid, restorePid: restore.pid, seedWitness: seed.draftWitness,
+      seed: { file: 'seed.json', sha256: hash(await readFile(join(evidence, 'seed.json'))) },
+      restore: { file: 'restore.json', sha256: hash(await readFile(join(evidence, 'restore.json'))) },
+      fields: { seedInputs: 'original.{drafts,agentDrafts}', persistedInputs: 'persistedInputs', restoredBeforeFixture: 'restored.inputAtEntry', restoredInputs: 'restored.{drafts,agentDrafts}', topology: 'original/restored.{tabs,layouts,selection,focus,session.control}' } }
+  }
   result.passed = true
   await writeFile(join(evidence, 'review.md'), ['# Mote initialization screenshots - independent review pending', '',
     result.boundary, '', ...result.phases.flatMap(one => one.app.frames.map(frame => '- ' + one.phase + ' / ' + frame.name + ': [' + frame.name + '](' + frame.file + ')')), ''].join('\n'))
