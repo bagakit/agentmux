@@ -1,5 +1,8 @@
 import { createHash } from 'node:crypto'
 const variants = {
+  'skip-cancellation-pair': {path:'packages/core/src/client.ts',edits:[
+    ['    if (actual !== expected) throw new AgentMuxError(', '    if (false && actual !== expected) throw new AgentMuxError('],
+    ['    for (const reservation of [closed, correlation]) {', '    for (const reservation of []) {']]},
   'missing-core-is-cancelled': {path:'packages/core/src/client.ts',edits:[["    return unknown(issue ?? (pending?.preparedDispatch ? 'The original prepared Start has not been confirmed fenced or retained. Inspect this same cancellation.'\n      : 'Future original creation and initial input are held; missing Core history does not confirm whether an earlier Native Start occurred. Inspect this same cancellation.'))\n","    return {cancellation,outcome:'cancelled',run:null,initialInput:'held',diskDurability:acknowledged?'confirmed':'unconfirmed',issue:null}\n"]]},
   'missing-private-is-held': {path:'packages/core/src/client.ts',edits:[["        initialInput: confirmed ? 'already-dispatched' : notDispatched || notRequested ? 'held' : 'unknown',", "        initialInput: 'held',"]]},
   'skip-input-claim-fence': {path:'packages/core/src/agent-session-store.ts',edits:[['  if (cancellation && newPromptClaim(previous, next)', '  if (false && cancellation && newPromptClaim(previous, next)']]},

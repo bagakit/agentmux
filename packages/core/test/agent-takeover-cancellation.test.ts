@@ -6,6 +6,7 @@ import { writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { afterEach, expect, it, vi } from 'vitest'
 import { createTakeoverOwnerFixture } from './helpers/takeover-owner.js'
+import { hostedTestClient } from './helpers/hosted-runtime-port.js'
 const cleanup: Array<() => unknown | Promise<unknown>> = []
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); vi.restoreAllMocks() })
 it('cancels a complete original public takeover before admission and keeps its source workface', async () => {
@@ -37,6 +38,52 @@ function originalRequest(f: Awaited<ReturnType<typeof createTakeoverOwnerFixture
   return { operationId, content: { kind: 'takeover-agent' as const, executorId: 'codex', source: { hostId: 'local', agentSessionId: f.source.agentSessionId, organization: { runtimeId: f.owner.runtimeId, spaceId: f.a.spaceId } } },
     destination: { spaceId: f.b.spaceId, zoneId: f.b.zoneId, newTab: true as const, displayWorkspaceId: 'project-a', groupId: 'original-group' }, focus: false }
 }
+it.each(['existing', 'retired', 'closed', 'prepared'] as const)('Hosted cancellation rejects an unrelated CID paired with an %s Session before writing or consuming its facts', async state => {
+  const f = await createTakeoverOwnerFixture(cleanup), request = originalRequest(f, 'paired-original')
+  const reached = deferred(), release = deferred()
+  if (state === 'prepared') {
+    const prepare = f.inner.registry.prepareCreate.bind(f.inner.registry)
+    vi.spyOn(f.inner.registry, 'prepareCreate').mockImplementation(async (...args: unknown[]) => {
+      const value = await prepare(...args); reached.resolve(); await release.promise; return value
+    })
+  }
+  if (state === 'closed') vi.spyOn(f.inner.kernel, 'startPrepared').mockRejectedValue(Error('Original Start acknowledgement is unavailable.'))
+  const opening = f.rpc.call('agent.open', request), settled = opening.catch(error => error)
+  if (state === 'prepared') await reached.promise
+  else await settled
+  const record = ((await f.spatial.read())!.graph.resources['core:agent-open'] as any).requests[request.operationId]
+  const agentSessionId = record.agentSessionId as string
+  if (state === 'retired') {
+    const session = (await f.client.readAgentSession(agentSessionId))!
+    f.inner.kernel.prepareStop = async (runId: string, operationKey: string) => ({ daemonInstance: 'fixture-runtime', operationKey, runId })
+    f.inner.kernel.remove = async () => {}
+    await f.client.stopAgent(agentSessionId, session.run, { operationId: 'paired-original-stop' })
+    expect(await f.store.readRetiredAgentSession(agentSessionId)).not.toBeNull()
+  }
+  if (state === 'closed') {
+    await f.client.resolveAgentCreation({ createOperationId: request.operationId, agentSessionId, operationId: 'paired-original-resolution' })
+    expect((await f.store.loadClosedCreation(agentSessionId))?.creationResolution?.receipt.outcome).toBe('fenced')
+  }
+  const remote = await hostedTestClient(f.client); cleanup.push(() => remote.dispose())
+  remote.port.call = async (method, params, options) => await remote.service.call(method, structuredClone(params),
+    { ...options, principal: { kind: 'user', id: 'paired-cancellation-user' } }) as never
+  const input = { createOperationId: 'unrelated-creation', agentSessionId, operationId: 'unrelated-cancellation' }
+  expect(await f.store.loadCreationSessionId(input.createOperationId)).toBeNull()
+  const before = { metadata: await f.store.readMetadata(agentSessionId), retired: await f.store.readRetiredAgentSession(agentSessionId),
+    closed: await f.store.loadClosedCreation(agentSessionId), correlation: await f.store.loadCreationCorrelation(agentSessionId) }
+  const stop = vi.spyOn(f.inner.kernel, 'stop'), start = vi.spyOn(f.inner.kernel, 'startPrepared'), inputCount = f.inner.kernel.input.mock.calls.length
+  start.mockClear(); stop.mockClear()
+  await expect(remote.sdk.cancelAgentCreation(input)).rejects.toMatchObject({ code: 'AGENT_CREATION_OPERATION_CONFLICT' })
+  expect(await f.store.readCreationCancellation(input.createOperationId)).toBeNull()
+  // A control persisted by an older client is not evidence that this Session belongs to that CID.
+  await f.store.admitCreationCancellation({ ...input, runtimeId: f.owner.runtimeId })
+  await expect(remote.sdk.inspectAgentCreationCancellation(input)).rejects.toMatchObject({ code: 'AGENT_CREATION_OPERATION_CONFLICT' })
+  expect({ metadata: await f.store.readMetadata(agentSessionId), retired: await f.store.readRetiredAgentSession(agentSessionId),
+    closed: await f.store.loadClosedCreation(agentSessionId), correlation: await f.store.loadCreationCorrelation(agentSessionId) }).toEqual(before)
+  expect(start).not.toHaveBeenCalled(); expect(stop).not.toHaveBeenCalled(); expect(f.inner.kernel.input).toHaveBeenCalledTimes(inputCount)
+  if (state === 'prepared') { release.resolve(); expect((await settled).outcome).toBe('opened'); expect(f.started).toHaveLength(1) }
+  expect(await f.client.readAgentSession(f.source.agentSessionId)).toEqual(f.source)
+})
 it('cancellation wins the real admission transaction after takeover preparation was already in flight', async () => {
   const f = await createTakeoverOwnerFixture(cleanup), reached = deferred(), release = deferred(), request = originalRequest(f, 'admission-race')
   const admit = f.spatial.admitAgentOpen.bind(f.spatial)
