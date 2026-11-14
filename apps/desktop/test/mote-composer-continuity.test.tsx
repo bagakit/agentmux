@@ -88,7 +88,7 @@ it('actual App keeps one editor, selection, composition and Mote text while its 
  await moteClick(button('Send'))
  await vi.waitFor(() => expect(submit).toHaveBeenCalledOnce())
  expect(submit.mock.calls[0]![1]).toBe('Later Mote text after loading')
- expect(submit.mock.calls[0]![3]).toEqual({ expectedRun: defaultAgent.control.run, admissionIntent: { kind: 'session-conversation' } })
+ expect(submit.mock.calls[0]![3]).toEqual({ expectedRun: defaultAgent.control.run, admissionIntent: { kind: 'manual-actor' } })
  expect(submit.mock.calls[0]![4]?.moteMain).toEqual({ target: { ...originalTopicAddress(scratchWorkspace, moteTopics[0]!, {})!,
   expectedResource: { hostId: scratchWorkspace.hostId, workspaceId: scratchWorkspace.id, workspacePath: scratchWorkspace.path } }, expectedRoleRevision: 'saved-role' })
  expect(useLauncherState.getState().drafts[draftKey()]?.prompt).toBe('')

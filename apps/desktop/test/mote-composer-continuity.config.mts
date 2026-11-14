@@ -29,7 +29,8 @@ const mutations: Record<string, { file: string; from: string; to: string }> = {
   'dock-loses-original-context': { file: 'apps/desktop/src/renderer/src/components/AgentSessionComposer.tsx',
     from: '{moteComposer ? aboveInput : null}', to: '{null}' },
   'main-query-keeps-manual-intent': { file: 'apps/desktop/src/renderer/src/store.ts',
-    from: "kind: options?.moteMain ? 'session-conversation' : 'manual-actor'", to: "kind: 'manual-actor'" },
+    from: "{ expectedRun: { ...session.control.run }, admissionIntent: { kind: 'manual-actor' } }",
+    to: "{ expectedRun: { ...session.control.run }, admissionIntent: { kind: options?.moteMain ? 'session-conversation' : 'manual-actor' } }" },
   'history-keeps-session-owner': { file: 'apps/desktop/src/renderer/src/store.ts',
     from: "if (moteDraftKey) useLauncherState.getState().setDraft(moteDraftKey, 'prompt', result.value)",
     to: '/* wrong: history still edits the original Session owner */' }
