@@ -36,7 +36,7 @@ import { browserInputContextFields } from './browser-input-context.js'
 import { normalizeOperationDevice } from './operation-device.js'
 import { configureMessageJournal, initializeInputDeliveryIndex, initializeInputWaitingIndex, inputControlJournalSchema, messageRouteJournalSchema, mainInputRouteJournalSchema, messageObservationJournalSchema, messageObservationQuery, dispatchDiscoveryJournalSchema, dispatchReplyJournalSchema, initializeMessageEventIndex, messageBroadcastJournalSchema, openMessageJournal, openMessageJournalSnapshot, syncMessageJournal } from './agent-message-journal.js'
 import { assertAgentMessageRouteIntent, validateAgentMessageRoute, type AgentMessageRoute } from './agent-message-route.js'
-import { agentInputJournalKey, agentInputDeliveryKey, validateAgentInputRetry, validateAgentInputControlId, validateAgentInputDeliveryKey, validateAgentInputWaitRef,
+import { agentInputJournalKey, agentInputDeliveryKey, validateAgentInputRetry, validateAgentInputControlId, validateAgentInputDeliveryKey, validateAgentInputWaitRef, isRestorableLocalPromptInput,
   type AgentInputJournalIntent, type AgentInputJournalEntry, type AgentInputSelector, type AgentInputWaitControl,
   type AgentInputWaitJournalRecord, type AgentInputWaitReason, type AgentInputWaitRef,
   type AgentInputWaitStopReceipt, type AgentInputDispatchLink } from './agent-input-wait.js'
@@ -675,7 +675,7 @@ export class DurableAgentMuxMessageQueue {
     return await this.withLock(async () => structuredClone(this.inputOwnerKey(key)))
   }
 
-  /** Only this recipient's pending human manual inputs, or a bounded cold-start page across recipients. */
+  /** Only this recipient's restorable local inputs, or a bounded cold-start page across recipients. */
   async readRestorablePromptInputs(afterSequence = 0, limit = 100, agentSessionId?: string): Promise<AgentInputJournalEntry[]> {
     if (!Number.isSafeInteger(afterSequence) || afterSequence < 0 || !Number.isSafeInteger(limit) || limit < 1 || limit > 100) throw new AgentMuxError(
       'Input recovery requires a finite original sequence and a page of at most 100 waiting inputs.', 'INVALID_AGENT_INPUT_CONTROL')
@@ -693,8 +693,7 @@ export class DurableAgentMuxMessageQueue {
   }
 
   private updateInputWaitingIndex(intent: AgentInputJournalIntent, sequence: number, state: AgentInputWaitControl['state']): void {
-    if (intent.source.kind === 'prompt' && intent.source.authorHuman === true && intent.source.recoveryAuthorization === 'local-human' &&
-        intent.admissionIntent.kind === 'manual-actor' && state === 'enabled') {
+    if (isRestorableLocalPromptInput(intent) && state === 'enabled') {
       this.db.prepare('INSERT OR IGNORE INTO input_waiting VALUES (?, ?, ?)').run(agentInputJournalKey(intent.key), intent.key.agentSessionId, sequence)
     } else this.db.prepare('DELETE FROM input_waiting WHERE input_id=?').run(agentInputJournalKey(intent.key))
   }
@@ -722,8 +721,7 @@ export class DurableAgentMuxMessageQueue {
         if (key.kind !== 'prompt' || typeof intent.source.prompt !== 'string' ||
             intent.source.agentMuxNote !== undefined && typeof intent.source.agentMuxNote !== 'string' ||
             intent.source.authorHuman !== undefined && typeof intent.source.authorHuman !== 'boolean' ||
-            intent.source.recoveryAuthorization !== undefined && (intent.source.recoveryAuthorization !== 'local-human' ||
-              intent.source.authorHuman !== true || admissionIntent.kind !== 'manual-actor')) {
+            intent.source.recoveryAuthorization !== undefined && !isRestorableLocalPromptInput(intent)) {
           throw new AgentMuxError('Original prompt intent is invalid.', 'INVALID_AGENT_INPUT_CONTROL')
         }
         browserInputContextFields(intent.source)

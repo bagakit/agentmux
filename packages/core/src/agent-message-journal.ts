@@ -79,7 +79,8 @@ export function initializeInputWaitingIndex(db: DatabaseSync): void {
         AND json_extract(original.json, '$.intent.source.kind')='prompt'
         AND json_extract(original.json, '$.intent.source.authorHuman')=1
         AND json_extract(original.json, '$.intent.source.recoveryAuthorization')='local-human'
-        AND json_extract(original.json, '$.intent.admissionIntent.kind')='manual-actor'
+        AND json_extract(original.json, '$.intent.admissionIntent.kind') IN ('manual-actor', 'session-conversation')
+        AND json_extract(original.json, '$.intent.source.inputContext') IS NULL
         AND COALESCE(json_extract(latest.json, '$.control.state'), 'enabled')='enabled';`)
 }
 

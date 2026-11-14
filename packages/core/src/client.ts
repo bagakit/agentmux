@@ -145,7 +145,7 @@ import {
 } from './agent-global-message-queue.js'
 import { sessionSemanticResumeSourceRuns, originalInputResumeEnvironment } from './agent-session-resume-sources.js'
 import { renderAgentMuxMessageEnvelope } from './agent-message-render.js'
-import { agentInputSubmissionStatus, agentInputJournalKey, agentInputDeliveryKey, validateAgentInputWaitRef,
+import { agentInputSubmissionStatus, agentInputJournalKey, agentInputDeliveryKey, validateAgentInputWaitRef, isRestorableLocalPromptInput,
   type AgentInputJournalIntent, type AgentInputJournalEntry, type AgentInputSelector, type AgentInputSubmissionReceipt,
   type AgentInputWaitRef, type AgentInputWaitStopReceipt, type AgentInputSavedEnvironment, type AgentInputCallContext, type AgentRawInputCallContext } from './agent-input-wait.js'
 import { answerAsk, cancelAsk, type AgentAsk } from './agent-ask.js'
@@ -6801,7 +6801,8 @@ export class AgentMuxClient {
             ...(input.agentMuxNote === undefined ? {} : { agentMuxNote: input.agentMuxNote }),
             ...(input.authorHuman === undefined ? {} : { authorHuman: input.authorHuman }),
             ...(saved ? saved.intent.source.kind === 'prompt' && saved.intent.source.recoveryAuthorization ? { recoveryAuthorization: saved.intent.source.recoveryAuthorization } : {}
-              : input.authorHuman === true && input.admissionIntent.kind === 'manual-actor' && input.inputContext === undefined && authority === undefined ? { recoveryAuthorization: 'local-human' as const } : {}),
+              : input.authorHuman === true && (input.admissionIntent.kind === 'manual-actor' || input.admissionIntent.kind === 'session-conversation') &&
+                input.inputContext === undefined && authority === undefined ? { recoveryAuthorization: 'local-human' as const } : {}),
             sourceChannel: normalizeMessageChannel(input.sourceChannel ?? 'api'),
             ...(input.sourceDevice === undefined ? {} : { sourceDevice: normalizeOperationDevice(input.sourceDevice) }) } }
         const original = await this.messageQueue.savePromptInput(intent, async () => !await this.inspectAgentPromptSubmission(key))
@@ -7320,7 +7321,7 @@ export class AgentMuxClient {
         for (const saved of page) {
           if (this.inputWaitingDisposed) return
           after = saved.sequence
-          if (!this.isRetainedHumanInput(saved.intent) || saved.intent.source.kind !== 'prompt' || saved.intent.source.recoveryAuthorization !== 'local-human') continue
+          if (!isRestorableLocalPromptInput(saved.intent)) continue
           try {
             const prompt = await this.inputWaitingPrompt(saved.intent)
             await this.acceptInputWaiting(saved.control.ref, prompt.input, 'prompt', undefined, prompt.authority)

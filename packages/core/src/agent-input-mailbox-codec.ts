@@ -61,7 +61,8 @@ export function parseAgentInputMailboxItem(value: unknown, agentSessionId: strin
         if (source.promptWire !== undefined && (typeof source.promptWire !== 'string' || !source.promptWire.trim())) fail()
         if (key.kind !== 'prompt' || typeof source.prompt !== 'string' || source.agentMuxNote !== undefined && typeof source.agentMuxNote !== 'string' ||
           source.authorHuman !== undefined && typeof source.authorHuman !== 'boolean' ||
-          source.recoveryAuthorization !== undefined && (source.recoveryAuthorization !== 'local-human' || source.authorHuman !== true || admission.kind !== 'manual-actor') ||
+          source.recoveryAuthorization !== undefined && (source.recoveryAuthorization !== 'local-human' || source.authorHuman !== true ||
+            source.inputContext !== undefined || admission.kind !== 'manual-actor' && admission.kind !== 'session-conversation') ||
           source.messageId !== undefined || source.originalControlOperationId !== undefined || entry.message !== undefined || entry.sourceChannel !== undefined || entry.sourceDevice !== undefined) fail()
         if (source.sourceChannel !== undefined) normalizeMessageChannel(source.sourceChannel)
         if (source.sourceDevice !== undefined) normalizeOperationDevice(source.sourceDevice)
