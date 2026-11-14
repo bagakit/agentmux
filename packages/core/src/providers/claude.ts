@@ -25,6 +25,7 @@ import { CLAUDE_LAUNCH_OPTIONS } from './launch-options.js'
 import { createNumberedTerminalInteractionProtocol, type TerminalPermissionOption } from '../agent-interaction.js'
 import type { AgentProvider, AgentProviderDefinition } from '../agent-provider.js'
 import type { AgentNativeHookSpecification } from '../hook-normalizer.js'
+import { formatHookToolOutput } from '../hook-tool-outcome.js'
 import {
   buildPromptInputPayload,
   catalog,
@@ -64,6 +65,14 @@ export const CLAUDE_HOOK_EVENTS = [
 ] as const
 
 export const CLAUDE_HOOKS: AgentNativeHookSpecification = {
+  toolOutcome(eventName, payload) {
+    const failed = eventName === 'PostToolUseFailure'
+    const body = failed ? (typeof payload.error === 'string' ? payload.error : undefined)
+      : eventName === 'PostToolUse' ? payload.tool_response : undefined
+    // Native tool_response is opaque; its business JSON does not establish failure.
+    const output = formatHookToolOutput(body)
+    return { failed, ...(output === undefined ? {} : { output }) }
+  },
   launchCarried: true,
   // Return a decision on the original native PermissionRequest pipe. This does not
   // grant an Agent authority to answer: the common interaction owner verifies its author.

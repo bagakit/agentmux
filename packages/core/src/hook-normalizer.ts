@@ -29,7 +29,7 @@ import {
   type HookEventNamePayloadKey
 } from './agent-hook-event.js'
 import { agentDisplayState } from './agent-status-freshness.js'
-import { hookToolOutcome } from './hook-tool-outcome.js'
+import type { HookToolOutcome } from './hook-tool-outcome.js'
 import { HOOK_PAYLOAD_USAGE_KEY, parseTurnUsage } from './agent-usage-transcript.js'
 
 export type AgentNativeHookStateRule = {
@@ -62,6 +62,8 @@ export type AgentNativeSubagentTracking = {
 
 export type AgentNativeHookSpecification = {
   lifecycle?: AgentHookLifecycleDialect
+  /** Interpret only this Provider's original payload; shared nesting is not a result protocol. */
+  toolOutcome?: (eventName: string, rawPayload: Readonly<Record<string, unknown>>) => HookToolOutcome
   /**
    * The Provider's managed Hooks travel with its launch (a launch-loaded plugin or per-launch flags)
    * instead of a file in the user's workspace. Its Runs then accept only calls marked by that launch.
@@ -571,7 +573,7 @@ function buildTimeline(
     const isToolResult = lifecycleEvent === 'tool-use-end'
     const toolCallId = nativeHookToolCallId(payload)
     // 结果只有事后才知道，所以只在事后事件上采集——事前那一行谈不上成败，给它盖任何结论都是编造。
-    const outcome = isToolResult ? hookToolOutcome(payload) : undefined
+    const outcome = isToolResult ? specification.toolOutcome?.(eventName, envelope.payload ?? {}) : undefined
     if (subject && toolCallId && kind === 'tool_call') {
       // Provider 给了关联 id：把一次调用的入参与结果收敛到**同一条 item**。
       // id 包含 [run, provider, subject-kind, nativeID, callID] 的 JSON tuple base64url，

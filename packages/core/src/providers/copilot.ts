@@ -3,6 +3,7 @@ import { join, resolve } from 'node:path'
 import type { AgentProvider, AgentProviderDefinition } from '../agent-provider.js'
 import type { AgentManagedHookPlan } from '../managed-hook-installer.js'
 import type { AgentNativeHookSpecification } from '../hook-normalizer.js'
+import { formatHookToolOutput } from '../hook-tool-outcome.js'
 import { catalog, managedHookCommand, hookCommandTimeout } from './shared.js'
 import { normalizeNativeSessionId } from '../agent-native-locator.js'
 
@@ -71,6 +72,20 @@ export const COPILOT_HOOK_EVENTS = [
  * 「等我点一下」和「正在干活」在界面上长得一模一样（与 Cursor 的两个授权门同一判断）。
  */
 export const COPILOT_HOOKS: AgentNativeHookSpecification = {
+  toolOutcome(eventName, payload) {
+    if (eventName === 'postToolUseFailure') {
+      const output = formatHookToolOutput(typeof payload.error === 'string' ? payload.error : undefined)
+      return { failed: true, ...(output === undefined ? {} : { output }) }
+    }
+    if (eventName !== 'postToolUse') return { failed: false }
+    const result = payload.toolResult && typeof payload.toolResult === 'object' && !Array.isArray(payload.toolResult)
+      ? payload.toolResult as Record<string, unknown> : undefined
+    const failed = result?.resultType === 'failure' || result?.resultType === 'rejected'
+      || result?.resultType === 'denied' || result?.resultType === 'timeout'
+    const output = formatHookToolOutput(typeof result?.textResultForLlm === 'string' ? result.textResultForLlm : undefined)
+      ?? (failed && typeof result?.error === 'string' ? formatHookToolOutput(result.error) : undefined)
+    return { failed, ...(output === undefined ? {} : { output }) }
+  },
   lifecycle: {
     sessionStart: 'session-start',
     userPromptSubmitted: 'user-prompt-submit',

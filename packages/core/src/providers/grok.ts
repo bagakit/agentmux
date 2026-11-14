@@ -5,6 +5,7 @@ import type { PostureControlDeclaration } from '../agent-interaction.js'
 import type { AgentProvider, AgentProviderDefinition } from '../agent-provider.js'
 import type { AgentManagedHookPlan } from '../managed-hook-installer.js'
 import type { AgentNativeHookSpecification } from '../hook-normalizer.js'
+import { formatHookToolOutput } from '../hook-tool-outcome.js'
 import { observeGrokSessionHistory, readGrokSessionHistoryPage, readGrokConversationChanges, readGrokSessionHistoryRecord } from './grok-native-history.js'
 import { catalog, managedHookCommand, hookCommandTimeout } from './shared.js'
 import { normalizeNativeSessionId } from '../agent-native-locator.js'
@@ -39,6 +40,22 @@ export const GROK_HOOK_EVENTS = [
  * 那是零依赖叶子，hook 子进程靠它拿表，不能反向依赖本模块。此处只保留配置侧清单与 rules。
  */
 export const GROK_HOOKS: AgentNativeHookSpecification = {
+  toolOutcome(eventName, payload) {
+    if (eventName === 'post_tool_use_failure') {
+      const output = formatHookToolOutput(typeof payload.error === 'string' ? payload.error : undefined)
+      return { failed: true, ...(output === undefined ? {} : { output }) }
+    }
+    if (eventName !== 'post_tool_use') return { failed: false }
+    // Native stdin sends toolResult and its same-value tool_response alias.
+    const raw = payload.toolResult === undefined ? payload.tool_response : payload.toolResult
+    const result = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw as Record<string, unknown> : undefined
+    // The documented Execute name is run_terminal_command; MCP keeps its qualified server__tool target.
+    const bash = payload.toolName === 'run_terminal_command' && result?.type === 'Bash'
+    const body = bash ? (typeof result.pre_formatted === 'string' ? result.pre_formatted : result.output_for_prompt) : raw
+    const failed = bash && typeof result.exit_code === 'number' && Number.isFinite(result.exit_code) && result.exit_code !== 0
+    const output = formatHookToolOutput(body)
+    return { failed, ...(output === undefined ? {} : { output }) }
+  },
   lifecycle: {
     session_start: 'session-start',
     user_prompt_submit: 'user-prompt-submit',

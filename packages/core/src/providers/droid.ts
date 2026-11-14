@@ -4,6 +4,7 @@ import { join, resolve } from 'node:path'
 import type { AgentProvider, AgentProviderDefinition } from '../agent-provider.js'
 import type { AgentManagedHookPlan } from '../managed-hook-installer.js'
 import type { AgentNativeHookSpecification } from '../hook-normalizer.js'
+import { formatHookToolOutput } from '../hook-tool-outcome.js'
 import { catalog, managedHookCommand, hookCommandTimeout } from './shared.js'
 import { readDroidSessionHistoryPage, readDroidSessionHistoryRecord } from './droid-native-history.js'
 
@@ -41,6 +42,11 @@ export const DROID_HOOK_EVENTS = [
 ] as const
 
 export const DROID_HOOKS: AgentNativeHookSpecification = {
+  toolOutcome(eventName, payload) {
+    // Factory defines tool_response as tool-specific; arbitrary keys are not failure flags.
+    const output = formatHookToolOutput(eventName === 'PostToolUse' ? payload.tool_response : undefined)
+    return { failed: false, ...(output === undefined ? {} : { output }) }
+  },
   lifecycle: {
     SessionStart: 'session-start',
     UserPromptSubmit: 'user-prompt-submit',

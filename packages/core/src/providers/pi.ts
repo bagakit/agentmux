@@ -34,6 +34,8 @@ export const PI_HOOK_EVENTS = [
  * - Pi 自身无交互权限事件，catalog.permission 记 `none`；工具与轮次无双向关联，replyCorrelation 记 `none`。
  */
 export const PI_HOOKS: AgentNativeHookSpecification = {
+  // Our extension forwards only tool_name at tool_execution_end, without result or failure facts.
+  toolOutcome: () => ({ failed: false }),
   lifecycle: {
     before_agent_start: 'session-start',
     agent_start: 'session-start',

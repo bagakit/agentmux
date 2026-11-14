@@ -6,6 +6,7 @@ import type { AgentManagedHookPlan } from '../managed-hook-installer.js'
 import { ANTIGRAVITY_LAUNCH_OPTIONS } from './launch-options.js'
 import type { AgentProvider, AgentProviderDefinition } from '../agent-provider.js'
 import type { AgentNativeHookSpecification } from '../hook-normalizer.js'
+import { formatHookToolOutput } from '../hook-tool-outcome.js'
 import { catalog, managedHookCommand, hookCommandTimeout } from './shared.js'
 
 type ProviderFactory = (definition: AgentProviderDefinition) => AgentProvider
@@ -15,6 +16,13 @@ export const ANTIGRAVITY_HOOK_EVENTS = [
 ] as const
 
 export const ANTIGRAVITY_HOOKS: AgentNativeHookSpecification = {
+  toolOutcome(eventName, payload) {
+    const error = eventName === 'PostToolUse' && typeof payload.error === 'string' ? payload.error : undefined
+    const failed = error !== undefined && error.trim().length > 0
+    const output = formatHookToolOutput(error)
+    // Native PostToolUse has an optional error string, but no successful output field.
+    return { failed, ...(output === undefined ? {} : { output }) }
+  },
   lifecycle: {
     SessionStart: 'session-start',
     UserPromptSubmit: 'user-prompt-submit',

@@ -25,6 +25,7 @@ import { createNumberedTerminalInteractionProtocol, type TerminalPermissionOptio
 import type { AgentProvider, AgentProviderDefinition, AgentProviderHookNormalizationContext } from '../agent-provider.js'
 import type { AgentNativeHookSpecification } from '../hook-normalizer.js'
 import { nativeHookToolCallId } from '../hook-normalizer.js'
+import { formatHookToolOutput } from '../hook-tool-outcome.js'
 import type { AgentHookToolInvocation, AgentLaunchPlan } from '../types.js'
 import { buildPromptInputPayload, catalog, sanitizeBracketedPasteText } from './shared.js'
 
@@ -84,6 +85,11 @@ function permissionToolCallId(eventName: string, payload: Readonly<Record<string
 }
 
 export const CODEX_HOOKS: AgentNativeHookSpecification = {
+  toolOutcome(eventName, payload) {
+    // Unified exec sends plain output without its exit code; other responses are tool-owned JSON.
+    const output = formatHookToolOutput(eventName === 'PostToolUse' ? payload.tool_response : undefined)
+    return { failed: false, ...(output === undefined ? {} : { output }) }
+  },
   launchCarried: true,
   lifecycle: {
     SessionStart: 'session-start',

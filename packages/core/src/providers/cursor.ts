@@ -4,6 +4,7 @@ import { CURSOR_LAUNCH_OPTIONS } from './launch-options.js'
 import type { AgentProvider, AgentProviderDefinition } from '../agent-provider.js'
 import type { AgentManagedHookPlan } from '../managed-hook-installer.js'
 import { normalizeNativeHook, type AgentNativeHookSpecification } from '../hook-normalizer.js'
+import { formatHookToolOutput } from '../hook-tool-outcome.js'
 import { catalog, managedHookCommand, hookCommandTimeout } from './shared.js'
 import { cursorDataRoot, cursorWorkspaceSlug, readCursorSessionHistoryPage, observeCursorSessionHistory } from './cursor-native-history.js'
 import { discoverCursorNativeSession } from './cursor-native-session.js'
@@ -59,6 +60,13 @@ export const CURSOR_HOOK_EVENTS = [
  * 隔离子代理事件（`subagentStart`/`subagentStop` 携带 `subagent_id`），防止子代理覆盖主会话句柄。
  */
 export const CURSOR_HOOKS: AgentNativeHookSpecification = {
+  toolOutcome(eventName, payload) {
+    const failed = eventName === 'postToolUseFailure'
+    const body = failed ? (typeof payload.error_message === 'string' ? payload.error_message : undefined)
+      : eventName === 'postToolUse' ? payload.tool_output : undefined
+    const output = formatHookToolOutput(body)
+    return { failed, ...(output === undefined ? {} : { output }) }
+  },
   lifecycle: {
     beforeSubmitPrompt: 'user-prompt-submit',
     preToolUse: 'tool-use-start',

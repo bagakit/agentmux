@@ -4,6 +4,7 @@ import type { AgentManagedHookPlan } from '../managed-hook-installer.js'
 import { HERMES_LAUNCH_OPTIONS } from './launch-options.js'
 import type { AgentProvider, AgentProviderDefinition } from '../agent-provider.js'
 import type { AgentNativeHookSpecification } from '../hook-normalizer.js'
+import { formatHookToolOutput } from '../hook-tool-outcome.js'
 import { readHermesSessionHistoryPage } from './hermes-native-history.js'
 import { catalog, hermesHookCommand, hookCommandTimeout } from './shared.js'
 
@@ -48,6 +49,15 @@ function extraField(payload: Readonly<Record<string, unknown>>, field: string): 
 }
 
 export const HERMES_HOOKS: AgentNativeHookSpecification = {
+  toolOutcome(eventName, payload) {
+    if (eventName !== 'post_tool_call') return { failed: false }
+    const extra = payload.extra && typeof payload.extra === 'object' && !Array.isArray(payload.extra)
+      ? payload.extra as Record<string, unknown> : undefined
+    const failed = extra?.status === 'error' || extra?.status === 'blocked'
+    const output = formatHookToolOutput(extra?.result)
+      ?? (failed && typeof extra?.error_message === 'string' ? formatHookToolOutput(extra.error_message) : undefined)
+    return { failed, ...(output === undefined ? {} : { output }) }
+  },
   lifecycle: {
     on_session_start: 'session-start',
     pre_llm_call: 'turn-start',

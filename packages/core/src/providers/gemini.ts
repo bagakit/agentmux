@@ -4,9 +4,20 @@ import { GEMINI_LAUNCH_OPTIONS } from './launch-options.js'
 import type { AgentProvider, AgentProviderDefinition } from '../agent-provider.js'
 import type { AgentManagedHookPlan } from '../managed-hook-installer.js'
 import type { AgentNativeHookSpecification } from '../hook-normalizer.js'
+import { formatHookToolOutput } from '../hook-tool-outcome.js'
 import { catalog, managedHookCommand, hookCommandTimeout } from './shared.js'
 
 type ProviderFactory = (definition: AgentProviderDefinition) => AgentProvider
+
+function geminiToolText(value: unknown): unknown {
+  const parts = Array.isArray(value) ? value : [value]
+  const text = parts.map(part => {
+    if (typeof part === 'string') return part
+    if (part && typeof part === 'object' && !Array.isArray(part) && typeof part.text === 'string') return part.text
+    return undefined
+  })
+  return text.every(part => part !== undefined) ? text.join('\n') : value
+}
 
 /**
  * Gemini 写进 hooks 配置、也在负载里报的事件名——**两侧同一种拼法**（PascalCase），
@@ -33,6 +44,17 @@ export const GEMINI_HOOK_EVENTS = [
  * `SessionEnd` 属于会话终结，Core 不拿它判轮次。
  */
 export const GEMINI_HOOKS: AgentNativeHookSpecification = {
+  toolOutcome(eventName, payload) {
+    if (eventName !== 'AfterTool') return { failed: false }
+    const response = payload.tool_response && typeof payload.tool_response === 'object' && !Array.isArray(payload.tool_response)
+      ? payload.tool_response as Record<string, unknown> : undefined
+    const error = response?.error && typeof response.error === 'object' && !Array.isArray(response.error)
+      ? response.error as Record<string, unknown> : undefined
+    // Native ToolResult error has a required message, including an explicitly empty one.
+    const failed = typeof error?.message === 'string'
+    const output = formatHookToolOutput(failed ? error.message : geminiToolText(response?.llmContent))
+    return { failed, ...(output === undefined ? {} : { output }) }
+  },
   lifecycle: {
     SessionStart: 'session-start',
     BeforeAgent: 'user-prompt-submit',
