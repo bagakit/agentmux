@@ -77,11 +77,15 @@ it('explicit ordinary preparation reads the original Source catalogue and regist
   } finally { releaseChoices() }
 })
 
-async function routedLauncher(catalogue?: Promise<void>) {
+async function routedLauncher(catalogue?: Promise<void>, explicit = true, observation?: { availability: 'missing' | 'check-failed'; cause: { code: string; message: string } }, withoutConfiguration = false) {
   const route = await createHostRouteInventoryFixture(cleanup as Array<() => Promise<void>>)
+  if (withoutConfiguration) {
+    const registered = (await route.original.client.listHostExecutors()).executors.find(item => item.executorId === 'same-executor')!
+    await route.original.client.removeHostExecutor({ executorId: registered.executorId, expectedRegistrationRevision: registered.registrationRevision! })
+  }
   const source: LauncherSourceExecution = { project: { id: project.id, hostId: project.hostId, path: project.path },
     target: { hostId: project.hostId, reference: { runtimeId: route.b.identity.runtimeId, spaceId: 'original-space-B' }, workspaceId: 'B-project', zoneId: 'B-zone' },
-    agentTarget: { hostId: 'collision', runtimeId: route.d.identity.runtimeId, adoptedRoute: route.route }, executorId: 'same-executor' }
+    agentTarget: { hostId: 'collision', runtimeId: route.d.identity.runtimeId, adoptedRoute: route.route }, ...(explicit ? { executorId: 'same-executor' } : {}) }
   let supported = true
   let inspected: SpaceMountMethods['open']['result'] | undefined
   const opens: SpaceMountMethods['open']['input']['request'][] = [], methods: Array<{ method: string; params: unknown }> = []
@@ -98,6 +102,10 @@ async function routedLauncher(catalogue?: Promise<void>) {
     }
     if (method === 'space.inspect') { const input = params as AgentMuxRpcParams<'space.inspect'>; if (!('operationId' in input.target)) throw Error('Only the original operation is inspected.'); return { request: inspected ? { known: true, requestId: input.target.operationId, report: inspected } : { known: false, requestId: input.target.operationId } } }
     if (method === 'route.executors' && !(params as AgentMuxRpcParams<'route.executors'>).executorId) await catalogue
+    if (method === 'route.executors' && observation) {
+      const reply = await route.rpc.call('route.executors', params as AgentMuxRpcParams<'route.executors'>, context)
+      return { ...reply, inventory: { ...reply.inventory, executors: reply.inventory.executors.map(item => item.executorId === 'same-executor' ? { ...item, ...observation } : item) } }
+    }
     return await route.rpc.call(method, params, context)
   }
   const forwardRpc: AgentMuxHostedForwardRpc = async <M extends AgentMuxRpcMethod>(method: M, params: AgentMuxRpcParams<M>, context?: Parameters<AgentMuxHostedForwardRpc>[2]) => await dispatch(method, params, context) as AgentMuxRpcResult<M>
@@ -112,7 +120,8 @@ async function routedLauncher(catalogue?: Promise<void>) {
     launchAgent: localLaunch, detectExecutors: detect, prewarmTerminal: vi.fn(), sessions: [] })
   useLauncherState.setState({ drafts: { 'region:original-slot': { browser: '', note: '', sourceExecution: source } }, sections: {}, executors: {} })
   await dom.render(<NewTabSurface tabId={tab.id} regionId="original-slot" tabGroupId="group" />)
-  await vi.waitFor(async () => { await act(async () => {}); expect(button('Launch').disabled).toBe(false) })
+  if (withoutConfiguration) await vi.waitFor(() => expect(dom.container.textContent).toContain('Other Agent types'))
+  await vi.waitFor(async () => { await act(async () => {}); expect(button('Launch').disabled).toBe(withoutConfiguration) })
   return { route, source, opens, methods, localLaunch, detect, checkpoint, unsupported: () => { supported = false }, inspect: (value: typeof inspected) => { inspected = value } }
 }
 
@@ -138,6 +147,59 @@ it('real ordinary Launcher uses selected D declarations and the complete Source 
   await vi.waitFor(() => expect(dom.container.textContent).toContain('Update AgentMux Core'))
   await act(async () => button('Continue original task').click()); await vi.waitFor(() => expect(f.opens).toHaveLength(2))
   expect(f.opens[1]).toEqual(retained.request); expect(f.route.creation).not.toHaveBeenCalled()
+})
+
+it('the actual target configuration leads unchecked Provider defaults, which remain explicitly selectable through the same Source route', async () => {
+  const f = await routedLauncher(undefined, false)
+  const selected = dom.container.querySelector('[data-executor-id="same-executor"]')!
+  expect(selected.getAttribute('aria-pressed')).toBe('true')
+  expect(selected.querySelector('.agent-pick__unconfirmed')?.getAttribute('aria-label')).toBe('Not checked')
+  expect(dom.container.querySelector('[data-executor-id="codex"]')).toBeNull()
+  expect(dom.container.textContent).not.toContain('No Agent is configured')
+  const otherTypes = [...dom.container.querySelectorAll<HTMLButtonElement>('button')].find(item => item.textContent?.startsWith('Other Agent types'))!
+  expect(otherTypes).toBeDefined()
+  await act(async () => otherTypes.click())
+  const codex = dom.container.querySelector<HTMLButtonElement>('[data-executor-id="codex"]')!
+  expect(codex.disabled).toBe(false)
+  expect(codex.querySelector('.agent-pick__unconfirmed')?.getAttribute('aria-label')).toBe('Not checked')
+  await act(async () => codex.click())
+  await vi.waitFor(() => expect(button('Launch').disabled).toBe(false))
+  expect(useLauncherState.getState().drafts['region:original-slot']?.sourceExecution).toMatchObject({ executorId: 'codex', agentTarget: f.source.agentTarget })
+  await act(async () => button('Launch').click())
+  await vi.waitFor(() => expect(f.opens).toHaveLength(1))
+  expect(f.opens[0]?.content).toMatchObject({ kind: 'new-agent', executorId: 'codex', agentTarget: f.source.agentTarget, prompt: '  original task\n' })
+  expect(f.detect).not.toHaveBeenCalled(); expect(f.localLaunch).not.toHaveBeenCalled(); expect(f.route.native).not.toHaveBeenCalled()
+})
+
+it.each([
+  ['missing', 'EXECUTABLE_NOT_FILE', 'Not available'],
+  ['check-failed', 'EXACT_HOST_OBSERVATION_FAILED', 'Check failed'],
+] as const)('the Source %s observation keeps its structured cause and precise presentation', async (availability, code, label) => {
+  const f = await routedLauncher(undefined, true, { availability, cause: { code, message: 'Original Host cause' } })
+  if (availability === 'missing') {
+    const unavailable = [...dom.container.querySelectorAll<HTMLButtonElement>('button')].find(item => item.textContent?.startsWith('Unavailable'))!
+    expect(unavailable).toBeDefined(); await act(async () => unavailable.click())
+    expect(dom.container.querySelector('.launcher-unavailable-agents')?.textContent).toContain(label)
+    expect(dom.container.querySelector('.launcher-unavailable-agents')?.textContent).not.toContain('Not found')
+  } else {
+    const selected = dom.container.querySelector<HTMLButtonElement>('[data-executor-id="same-executor"]')!
+    expect(selected.disabled).toBe(false)
+    expect(selected.querySelector('.agent-pick__unconfirmed')?.getAttribute('aria-label')).toBe(label)
+  }
+  expect(f.localLaunch).not.toHaveBeenCalled(); expect(f.detect).not.toHaveBeenCalled()
+})
+
+it('a target with only unchecked default types asks for an explicit choice without hiding those launch capabilities', async () => {
+  const f = await routedLauncher(undefined, false, undefined, true)
+  expect(dom.container.querySelector('[data-executor-id="codex"]')).toBeNull()
+  expect(dom.container.textContent).toContain('No configured Agent selected')
+  const otherTypes = [...dom.container.querySelectorAll<HTMLButtonElement>('button')].find(item => item.textContent?.startsWith('Other Agent types'))!
+  expect(otherTypes).toBeDefined(); await act(async () => otherTypes.click())
+  await dom.click('[data-executor-id="codex"]')
+  await vi.waitFor(() => expect(button('Launch').disabled).toBe(false))
+  expect(dom.container.querySelector('[data-executor-id="codex"]')?.getAttribute('aria-pressed')).toBe('true')
+  expect(useAppStore.getState().agentComposerDrafts['original-slot']).toBe('  original task\n')
+  expect(f.opens).toHaveLength(0); expect(f.detect).not.toHaveBeenCalled()
 })
 
 it('a late actual project registration retains its original confirmation without applying to a different ordinary Launcher', async () => {
