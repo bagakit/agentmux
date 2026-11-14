@@ -4,7 +4,7 @@ import { act } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { RemoteCoreUpgradeCheck, RemoteCoreUpgradeReceipt } from '@agentmux/core'
 import type { SshHostConfig } from '../src/shared/contracts'
-import { HostUpgradePanel } from '../src/renderer/src/components/settings/HostUpgradePanel'
+import { HostCorePanel as HostUpgradePanel } from '../src/renderer/src/components/settings/HostCorePanel'
 import { api } from '../src/renderer/src/lib/api'
 import { composerDOM } from './helpers/composer-dom-fixture'
 
@@ -49,33 +49,33 @@ it('automatically reads exact versions without deployment and shows same-version
   expect(dom.container.textContent).toContain('Core owner API protocol · deployed / app1 / 2')
   expect(dom.container.textContent).toContain('Native protocol · current / required25 / 25')
 })
-it('review and cancel do not upgrade; final confirmation submits only the frozen reviewed tuple with no fresh check', async () => {
-  await render(); await review()
+it('one explicit Core-only update submits the displayed tuple without another review or fresh check', async () => {
+  await render()
   expect(upgradeCall).not.toHaveBeenCalled()
-  expect(dom.container.querySelector('[aria-label="Review upgrade"]')!.textContent).toContain('Source bbbbbbbbbb')
-  await dom.click('[data-upgrade-cancel]')
-  expect(upgradeCall).not.toHaveBeenCalled()
-  await review()
+  expect(dom.container.querySelector('[data-upgrade-action]')!.textContent).toBe('Update Core')
   checkCall.mockResolvedValue({ ...check, candidate: { ...check.candidate, digest: 'f'.repeat(64) }, expected: { ...check.expected!, candidateDigest: 'f'.repeat(64) } })
-  await confirm()
+  await action()
+  expect(dom.container.querySelector('[aria-label="Review upgrade"]')).toBeNull()
   expect(checkCall).toHaveBeenCalledTimes(1)
   expect(upgradeCall).toHaveBeenCalledExactlyOnceWith(host, check.expected, expect.any(String))
   expect(dom.container.textContent).toContain('Deployment completed')
   expect(dom.container.textContent).toContain('Connection verified at')
 })
-it('does not borrow a reviewed target when the same-ID saved route changes', async () => {
-  await render(); await review()
-  const changed = { ...host, hostname: 'other.invalid' }
-  checkCall.mockImplementation(async input => ({ ...check, input }))
-  await render(changed, changed)
+it('does not borrow a checked target when the same-ID saved route changes', async () => {
+  await render()
+  const changed = { ...host, hostname: 'other.invalid' }, pending = deferred<RemoteCoreUpgradeCheck>()
+  checkCall.mockReturnValueOnce(pending.promise)
+  await render(changed, changed); await action()
   expect(dom.container.querySelector('[data-upgrade-confirm]')).toBeNull()
   expect(upgradeCall).not.toHaveBeenCalled()
-  await render(); await review()
-  await confirm(); expect(upgradeCall.mock.calls[0]![0]).toEqual(host)
+  const expected = { ...check.expected!, targetDigest: 'f'.repeat(64) }
+  await act(async () => pending.resolve({ ...check, input: changed, expected }))
+  await action()
+  expect(upgradeCall).toHaveBeenCalledExactlyOnceWith(changed, expected, expect.any(String))
 })
 it('preserves the original admitted ID after a lost response and inspects it without replay', async () => {
   upgradeCall.mockRejectedValue(new Error('Lost result after admission'))
-  await render(); await review(); await confirm()
+  await render(); await action()
   const operationId = upgradeCall.mock.calls[0]![2]
   expect(dom.container.textContent).toContain('Original upgrade result unconfirmed')
   await action()
@@ -86,7 +86,7 @@ it('preserves the original admitted ID after a lost response and inspects it wit
 it('a refusal before admission leaves no record, so the original check clears it and restores Check versions', async () => {
   upgradeCall.mockRejectedValue(new Error('Save this exact Host configuration before upgrading it.'))
   inspectCall.mockResolvedValue(null)
-  await render(); await review(); await confirm()
+  await render(); await action()
   const operationId = upgradeCall.mock.calls[0]![2]
   expect(dom.container.querySelector('[data-upgrade-action]')!.textContent).toBe('Check original result')
   await action()
@@ -94,10 +94,10 @@ it('a refusal before admission leaves no record, so the original check clears it
   expect(dom.container.querySelector('[role="status"]')!.textContent).toBe('Upgrade not started')
   expect(dom.container.querySelector('[aria-label="Original update receipt"]')).toBeNull()
   expect(dom.container.textContent).toContain('Save this exact Host configuration before upgrading it.')
-  expect(dom.container.querySelector('[data-upgrade-action]')!.textContent).toBe('Check versions')
+  expect(dom.container.querySelector('[data-upgrade-action]')!.textContent).toBe('Check Core')
   await action()
   expect(checkCall).toHaveBeenCalledTimes(2)
-  expect(dom.container.querySelector('[data-upgrade-action]')!.textContent).toBe('Review upgrade')
+  expect(dom.container.querySelector('[data-upgrade-action]')!.textContent).toBe('Update Core')
   expect(upgradeCall).toHaveBeenCalledTimes(1)
 })
 it('names an unreadable update record beside the receipt of a prior operation', async () => {
@@ -126,11 +126,11 @@ it.each([
   expect(upgradeCall).not.toHaveBeenCalled(); expect(inspectCall).not.toHaveBeenCalled(); expect(reconnectCall).not.toHaveBeenCalled()
 })
 
-it('same-tick double confirmation admits one operation and preserves its exact ID for inspection', async () => {
+it('same-tick double update admits one operation and preserves its exact ID for inspection', async () => {
   const pending = deferred<RemoteCoreUpgradeReceipt>()
   upgradeCall.mockReturnValue(pending.promise)
-  await render(); await review()
-  const button = dom.container.querySelector<HTMLButtonElement>('[data-upgrade-confirm]')!
+  await render()
+  const button = dom.container.querySelector<HTMLButtonElement>('[data-upgrade-action]')!
   await act(async () => { button.click(); button.click() })
   expect(upgradeCall).toHaveBeenCalledTimes(1)
   const operationId = upgradeCall.mock.calls[0]![2]
@@ -274,13 +274,13 @@ it('keeps deployed and bundled versions independent and names a different origin
   expect(upgradeCall).not.toHaveBeenCalled()
 })
 
-it('a completed older update awaiting adoption does not block review of a newly qualified candidate', async () => {
+it('a completed older update awaiting adoption does not block a newly qualified candidate', async () => {
   const older = { ...receipt('completed'), expected: { ...check.expected!, candidateDigest: 'f'.repeat(64) }, candidate: { ...check.candidate, digest: 'f'.repeat(64), version: '0.0.9' } }
   checkCall.mockResolvedValue({ ...check, latestOperation: older })
   await render()
-  expect(dom.container.querySelector('[role=status]')!.textContent).toBe('Ready for review')
+  expect(dom.container.querySelector('[role=status]')!.textContent).toBe('Update available')
   expect(dom.container.querySelector('[data-upgrade-reconnect]')!.textContent).toContain('Reconnect original update')
-  await review(); await confirm()
+  await action()
   expect(upgradeCall).toHaveBeenCalledExactlyOnceWith(host, check.expected, expect.any(String))
   expect(reconnectCall).not.toHaveBeenCalled()
   expect(inspectCall).not.toHaveBeenCalled()
@@ -296,11 +296,11 @@ it('shows an unavailable app candidate without hiding current deployment or inve
   expect(dom.container.querySelector('[data-upgrade-candidate-unavailable]')!.closest('details')).toBeNull()
   const explanation = dom.container.querySelector('.host-upgrade__description')!.textContent!
   expect(explanation).toContain('local update bundle could not be prepared')
-  expect(explanation).toContain('Check versions')
+  expect(explanation).toContain('Check Core')
   expect(explanation).toContain('Technical details')
   expect(explanation).not.toContain('Read the original service')
   expect(explanation).not.toContain('operations remain available')
-  expect(dom.container.querySelector('[data-upgrade-action]')!.textContent).toContain('Check versions')
+  expect(dom.container.querySelector('[data-upgrade-action]')!.textContent).toContain('Check Core')
   expect(dom.container.querySelector('[data-upgrade-confirm]')).toBeNull()
   expect(upgradeCall).not.toHaveBeenCalled()
   expect(dom.container.textContent).toContain('Local candidate archive was not assembled.')
@@ -352,7 +352,7 @@ describe('Native replacement review', () => {
   it('names the reason, what ends and what is kept, and confirms with a danger button that counts the processes', async () => {
     checkCall.mockResolvedValue(replacementCheck())
     await render()
-    expect(dom.container.querySelector('[role="status"]')!.textContent).toBe('Ready for review · Native Runtime restart')
+    expect(dom.container.querySelector('[role="status"]')!.textContent).toBe('Native Runtime update required')
     expect(dom.container.textContent).toContain('This upgrade also restarts the Native Runtime. Review what ends before confirming.')
     await review()
     const block = dom.container.querySelector('[data-upgrade-native-replacement]')!

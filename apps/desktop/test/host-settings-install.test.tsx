@@ -1,10 +1,11 @@
 // @vitest-environment happy-dom
 import { fixturePath } from '../scripts/lib/fixture-values.mjs'
+import { act } from 'react'
 import { beforeEach, expect, it, vi } from 'vitest'
 import type { RemoteCoreInstallCheck, RemoteCoreInstallReceipt } from '@agentmux/core'
 import type { SshHostConfig } from '../src/shared/contracts'
 import { HostCorePanel } from '../src/renderer/src/components/settings/HostCorePanel'
-import { HostInstallPanel } from '../src/renderer/src/components/settings/HostInstallPanel'
+import { HostCorePanel as HostInstallPanel } from '../src/renderer/src/components/settings/HostCorePanel'
 import { api } from '../src/renderer/src/lib/api'
 import { composerDOM } from './helpers/composer-dom-fixture'
 
@@ -21,12 +22,15 @@ const receipt = (status: RemoteCoreInstallReceipt['status'] = 'completed'): Remo
   ...(status === 'completed' ? { installed: { remoteCommand: fixturePath('core/amux'), remoteSocketPath: fixturePath('core/control.sock'), runtimeId: 'new-runtime', startScript: fixturePath('core/start.sh'), unit: null } } : {}) })
 let checks: ReturnType<typeof vi.spyOn>, installs: ReturnType<typeof vi.spyOn>, inspections: ReturnType<typeof vi.spyOn>
 beforeEach(() => {
+  vi.spyOn(api.hosts, 'upgradeCheck').mockImplementation(async input => ({ input,
+    current: { state: 'unavailable', observedAt: 1, code: 'UNAVAILABLE', detail: 'No observation' },
+    candidate: null, eligible: false, reason: 'unverified', detail: 'No observation' }))
   checks = vi.spyOn(api.hosts, 'installCheck').mockResolvedValue(check)
   installs = vi.spyOn(api.hosts, 'install').mockImplementation(async (input, expected, operationId) => ({ ...receipt(), input, expected, operationId }))
   inspections = vi.spyOn(api.hosts, 'installInspect').mockResolvedValue(receipt('unknown'))
 })
 const render = (draft = host, committed: SshHostConfig | undefined = host, active = true) => dom.render(<HostInstallPanel host={draft} committed={committed} active={active} />)
-const read = () => dom.click('[data-install-check]')
+const read = () => dom.click(dom.container.querySelector('[data-install-check]') ? '[data-install-check]' : '[data-upgrade-action]')
 const confirm = () => dom.click('[data-install-confirm]')
 it('checks explicitly and installs only the reviewed candidate and selected startup mode', async () => {
   await render()
@@ -81,6 +85,7 @@ it('keeps completed installation visible after Main adopts its new connection', 
 it('shows an existing Core or unavailable probe without an install confirmation', async () => {
   checks.mockResolvedValue({ ...check, eligible: false, expected: undefined, reason: 'installed', detail: 'A Core already runs here. Use Core update.' })
   await render(); await read()
+  expect(dom.container.querySelector('[data-host-install]')).toBeNull()
   expect(dom.container.textContent).toContain('Use Core update')
   expect(dom.container.querySelector('[data-install-confirm]')).toBeNull()
 })
@@ -119,7 +124,7 @@ it('keeps the original operation discoverable when this Host route is edited', a
   await render(changed, changed)
   expect(dom.container.textContent).toContain('Original install on build.invalid')
   expect(dom.container.textContent).toContain(id)
-  expect(dom.container.querySelector<HTMLButtonElement>('[data-install-check]')?.disabled).toBe(false)
+  expect(dom.container.querySelector<HTMLButtonElement>('[data-upgrade-action]')?.disabled).toBe(false)
   expect(installs).toHaveBeenCalledTimes(1)
 })
 it('explicitly adopts a reconciled completed installation with the same operation ID', async () => {
@@ -143,10 +148,67 @@ it('keeps completed installation primary until the user explicitly moves to upda
   const installed = receipt().installed!
   const adopted = { ...host, remoteCommand: installed.remoteCommand, remoteSocketPath: installed.remoteSocketPath, runtimeId: installed.runtimeId }
   await dom.render(<HostCorePanel host={adopted} committed={adopted} active />)
-  expect(dom.container.querySelector('[data-host-upgrade]')?.closest('[hidden]')).not.toBeNull()
+  expect(dom.container.querySelector('[data-host-upgrade]')).toBeNull()
   const before = updates.mock.calls.length
   await dom.click('[data-install-updates]')
   expect(updates.mock.calls.length).toBe(before + 1)
   expect(dom.container.querySelector('[data-host-upgrade]')?.closest('[hidden]')).toBeNull()
-  expect(dom.container.querySelector('[data-host-install]')?.closest('[hidden]')).not.toBeNull()
+  expect(dom.container.querySelector('[data-host-install]')).toBeNull()
+})
+
+it('unverified probes share one maintenance summary and keep raw diagnostics collapsed without proposing installation', async () => {
+  const detail = 'Original probe traceback: unsupported subprocess keyword'
+  checks.mockResolvedValue({ input: host, eligible: false, reason: 'unverified', detail })
+  const copy = vi.spyOn(api.ui, 'writeClipboardText').mockResolvedValue(undefined)
+  const upgrades = vi.spyOn(api.hosts, 'upgrade')
+  await render(); await read()
+  expect(checks).toHaveBeenCalledExactlyOnceWith(host)
+  expect(dom.container.querySelectorAll('[data-host-upgrade]')).toHaveLength(1)
+  expect(dom.container.querySelector('[data-host-install]')).toBeNull()
+  expect(dom.container.textContent).not.toContain('Set up this machine')
+  expect(dom.container.textContent).not.toContain('Ready to install')
+  const raw = Array.from(dom.container.querySelectorAll('.host-upgrade__diagnostic-message')).find(node => node.textContent === detail)!
+  expect(raw).toBeDefined()
+  expect(raw.closest('details')?.open).toBe(false)
+  await dom.click('[data-copy-upgrade-diagnostics]')
+  expect(copy.mock.calls[0]![0]).toContain(detail)
+  expect(installs).not.toHaveBeenCalled(); expect(upgrades).not.toHaveBeenCalled()
+  expect(dom.draft()).toBe('Keep my draft')
+})
+it('does not start an installation check for a newly observed unresolved original upgrade', async () => {
+  const original = { input: host, operationId: 'original-upgrade', status: 'unknown' as const, stage: 'starting' as const,
+    expected: { targetDigest: 'a'.repeat(64), runtimeId: 'original-runtime', ownerInstanceId: 'original-owner', processId: 100, startTicks: '1', candidateDigest: 'b'.repeat(64), nativeInstanceId: 'original-native', nativeProcessId: 101, nativeStartTicks: '2' }, detail: 'Original response lost', updatedAt: 1 }
+  const upgrade = vi.spyOn(api.hosts, 'upgradeCheck')
+  await render()
+  upgrade.mockResolvedValueOnce({ input: host, current: { state: 'unavailable', code: 'UNAVAILABLE', detail: 'Not observed', observedAt: 1 }, candidate: null, eligible: false, reason: 'unverified', latestOperation: original, detail: 'Original operation unconfirmed' })
+  const inspect = vi.spyOn(api.hosts, 'upgradeInspect').mockResolvedValue(original)
+  await read()
+  expect(inspect).not.toHaveBeenCalled()
+  expect(dom.container.textContent).toContain('Original upgrade needs checking')
+  await read()
+  expect(inspect).toHaveBeenCalledExactlyOnceWith(host, original.operationId)
+  expect(checks).not.toHaveBeenCalled(); expect(installs).not.toHaveBeenCalled()
+})
+it('a late unavailable observation never checks installation on a newly selected same-ID route', async () => {
+  let finish!: (value: Awaited<ReturnType<typeof api.hosts.upgradeCheck>>) => void
+  const pending = new Promise<Awaited<ReturnType<typeof api.hosts.upgradeCheck>>>(resolve => { finish = resolve })
+  const upgrade = vi.spyOn(api.hosts, 'upgradeCheck')
+  await render()
+  upgrade.mockReturnValueOnce(pending)
+  await act(async () => { dom.container.querySelector<HTMLButtonElement>('[data-upgrade-action]')!.click() })
+  const changed = { ...host, hostname: 'changed.invalid' }
+  await render(changed, changed)
+  await act(async () => finish({ input: host, current: { state: 'unavailable', code: 'UNAVAILABLE', detail: 'Original unavailable', observedAt: 1 }, candidate: null, eligible: false, reason: 'unverified', detail: 'Original unavailable' }))
+  expect(checks).not.toHaveBeenCalled(); expect(installs).not.toHaveBeenCalled()
+})
+
+it('a failed new installation check keeps the old facts as diagnostics rather than a ready install', async () => {
+  await render(); await read()
+  expect(dom.container.querySelector('[data-install-confirm]')).not.toBeNull()
+  checks.mockRejectedValueOnce(new Error('This later probe is unconfirmed'))
+  await read()
+  expect(dom.container.querySelector('[data-install-confirm]')).toBeNull()
+  expect(dom.container.querySelector('[data-host-install]')).toBeNull()
+  expect(dom.container.textContent).toContain('This later probe is unconfirmed')
+  expect(installs).not.toHaveBeenCalled()
 })

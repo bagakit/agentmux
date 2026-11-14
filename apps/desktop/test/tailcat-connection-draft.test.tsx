@@ -91,3 +91,66 @@ it('a rejected original save keeps the old CAS baseline and the authored edit wi
  await dom.render(null);await show();expect(value('Tailcat client key')).toBe('keep-after-conflict')
  expect(save).toHaveBeenCalledOnce()
 })
+
+it('ordinary SSH fields and the selected Host survive a native-document round trip without a config write', async () => {
+ const ssh:SshHostConfig={id:'ordinary-ssh',kind:'ssh',label:'Original SSH',hostname:'original.invalid',runtimeId:'original-runtime',remoteCommand:'/original/amux'}
+ config={...config,hosts:[config.hosts[0]!,ssh]}
+ const opaque={future:'keep-private-neighbor'}
+ useAppStore.setState({config,tailcatConnectionDrafts:{hosts:{opaque},incoming:{future:'keep-incoming'}}})
+ await dom.render(<HostSettingsPane config={config} active onSave={save} navigationRequest={{section:'hosts',hostId:ssh.id}}/>)
+ const input=dom.container.querySelector<HTMLInputElement>('[data-host-name]')!
+ await act(async()=>{Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(input,'Unsent SSH name');input.dispatchEvent(new Event('input',{bubbles:true}))})
+ expect(read('hosts',ssh.id)?.value.label).toBe('Unsent SSH name')
+ expect(read('hosts',ssh.id)?.expected).toEqual(ssh)
+ const partial=useAppStore.persist.getOptions().partialize!(useAppStore.getState()) as {tailcatConnectionDrafts:unknown}
+ await dom.render(null);useAppStore.setState({tailcatConnectionDrafts:JSON.parse(JSON.stringify(partial.tailcatConnectionDrafts))})
+ await dom.render(<HostSettingsPane config={config} active onSave={save}/>)
+ expect(dom.container.querySelector('[data-resource-editor]')?.getAttribute('data-resource-editor')).toBe(ssh.id)
+ expect(dom.container.querySelector<HTMLInputElement>('[data-host-name]')?.value).toBe('Unsent SSH name')
+ expect(dom.container.querySelector('[data-host-upgrade]')).not.toBeNull()
+ expect((useAppStore.getState().tailcatConnectionDrafts as {hosts:Record<string,unknown>}).hosts.opaque).toEqual(opaque)
+ expect((useAppStore.getState().tailcatConnectionDrafts as {incoming:unknown}).incoming).toEqual({future:'keep-incoming'})
+ expect(save).not.toHaveBeenCalled()
+})
+it('an ordinary SSH replacement Runtime does not inherit the old edit or rewrite its retained input',async()=>{
+ const ssh:SshHostConfig={id:'ordinary-ssh',kind:'ssh',label:'Original SSH',hostname:'original.invalid',runtimeId:'original-runtime'}
+ config={...config,hosts:[config.hosts[0]!,ssh]};useAppStore.setState({config})
+ await dom.render(<HostSettingsPane config={config} active onSave={save} navigationRequest={{section:'hosts',hostId:ssh.id}}/>)
+ const input=dom.container.querySelector<HTMLInputElement>('[data-host-name]')!
+ await act(async()=>{Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(input,'Keep the original edit');input.dispatchEvent(new Event('input',{bubbles:true}))})
+ const original=structuredClone(useAppStore.getState().tailcatConnectionDrafts)
+ expect(read('hosts',ssh.id)?.expected).toEqual(ssh)
+ await dom.render(null)
+ config={...config,hosts:[config.hosts[0]!,{...ssh,label:'Replacement SSH',runtimeId:'replacement-runtime'}]};useAppStore.setState({config})
+ await dom.render(<HostSettingsPane config={config} active onSave={save}/>)
+ expect(dom.container.querySelector<HTMLInputElement>('[data-host-name]')?.value).toBe('Replacement SSH')
+ expect(dom.container.textContent).toContain('not applied to another target')
+ expect(useAppStore.getState().tailcatConnectionDrafts).toEqual(original)
+ expect(save).not.toHaveBeenCalled()
+})
+
+it('maintenance branch changes and a late receipt preserve the selected SSH Host and its newer unsaved edit',async()=>{
+ vi.spyOn(api.hosts,'inspect').mockRejectedValue(Error('Runtime observation is unavailable in this maintenance fixture'))
+ const ssh:SshHostConfig={id:'ordinary-ssh',kind:'ssh',label:'Original SSH',hostname:'original.invalid',runtimeId:'original-runtime',remoteCommand:'/original/amux',remoteSocketPath:'/original/control.sock'}
+ config={...config,hosts:[config.hosts[0]!,ssh]};useAppStore.setState({config})
+ const expected={targetDigest:'a'.repeat(64),runtimeId:'original-runtime',ownerInstanceId:'original-owner',processId:10,startTicks:'1',candidateDigest:'b'.repeat(64),nativeInstanceId:'original-native',nativeProcessId:11,nativeStartTicks:'2'}
+ const candidate={digest:expected.candidateDigest,sourceCommit:'original-candidate',version:'0.1.0',ownerProtocolVersion:2,requiredNativeProtocolVersion:25}
+ vi.spyOn(api.hosts,'upgradeCheck').mockImplementation(async input=>({input,eligible:true,reason:'ready',detail:'Core-only update',candidate,expected,current:{state:'available',observedAt:1,version:'0.1.0',sourceCommit:'original-source',deploymentDigest:'c'.repeat(64),ownerProtocolVersion:2,runtimeId:ssh.runtimeId!,ownerInstanceId:'original-owner',processId:10,native:{instanceId:'original-native',buildId:'original-native-build',protocolVersion:25}}}))
+ let finish!:()=>void
+ const pending=new Promise<void>(resolve=>{finish=resolve})
+ const upgrade=vi.spyOn(api.hosts,'upgrade').mockImplementation(async(input,expected,operationId)=>{await pending;return{input,expected,operationId,status:'unknown',stage:'starting',detail:'Original reply unconfirmed',updatedAt:1}})
+ await dom.render(<HostSettingsPane config={config} active onSave={save} navigationRequest={{section:'hosts',hostId:ssh.id}}/>)
+ await dom.click('[data-upgrade-action]')
+ expect(upgrade).toHaveBeenCalledOnce()
+ const input=dom.container.querySelector<HTMLInputElement>('[data-host-name]')!
+ await act(async()=>{Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(input,'Keep the newer SSH edit');input.dispatchEvent(new Event('input',{bubbles:true}))})
+ await dom.click('[data-host-panel="overview"]')
+ await act(async()=>finish())
+ await dom.click('[data-host-panel="connection"]')
+ expect(dom.container.querySelector('[data-resource-editor]')?.getAttribute('data-resource-editor')).toBe(ssh.id)
+ expect(dom.container.querySelector<HTMLInputElement>('[data-host-name]')?.value).toBe('Keep the newer SSH edit')
+ expect(read('hosts',ssh.id)?.expected).toEqual(ssh)
+ expect(dom.container.textContent).toContain('Original upgrade result unconfirmed')
+ expect(upgrade).toHaveBeenCalledExactlyOnceWith(ssh,expected,expect.any(String))
+ expect(save).not.toHaveBeenCalled()
+})
