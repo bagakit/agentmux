@@ -51,11 +51,17 @@ configuration alone does not prove a working end-to-end connection.
 ## Start work
 
 Open New Tab or New Agent for the project, then use the work-mode entry beside Agent
-to edit its arrangement. Settings → Environment → Remote offers the same preparation under Start work.
-Choose a mode, an exact registered project and the Agent device. For separate execution,
+to edit its arrangement. Settings → Environment → Remote first shows existing work;
+choose Set up new work when you want to prepare an Agent. Connecting to or browsing
+a Host does not require a project.
+
+Choose a mode, the working folder and the Agent device. The working folder is where
+this task's files and commands live. Use an exact saved folder, or choose The device
+home and its device; preparation reads that device's confirmed home and registers
+the original folder. A generic Agent does not need a business project first. For separate execution,
 the Agent startup directory defaults to that Host's confirmed home and may be another
-registered directory there; it does not need a project copy. Register a missing project
-through its original Host entry rather than guessing a same-named local path.
+registered directory there; it does not need a project copy. Register another missing
+folder through its original Host entry rather than guessing a same-named local path.
 
 Review the Agent and Project ends, then Apply arrangement in the Launcher or Open in
 Launcher from Settings. This only prepares the original target. Choose an Agent from
