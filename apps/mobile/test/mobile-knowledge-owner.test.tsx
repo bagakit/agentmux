@@ -1,3 +1,4 @@
+import { KnowledgeTestSurface } from './topics-navigation-fixture'
 import './mobile-lan-crypto.setup'
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
@@ -63,8 +64,8 @@ async function mount(options: { draftKey?: string; restored?: boolean; scopeSurf
   const root = createRoot(element); mounts.push({ root, element })
   const target = options.restored ? { topicId, entryId, ...(options.draftKey ? { draftKey: options.draftKey } : {}) } : { topicId, entryId, entry, scope }
   const render = async (connected = !options.offline, visible = true, reference = options.scopeSurface) => {
-    await act(async () => root.render(options.scopeSurface ? <MobileTopicKnowledge rpc={forwardRpc as any} client={connected ? client : null} connected={connected}
-      topicId={topicId} title="原真实Topic" visible={visible} {...(reference ? { initialReference: reference } : {})} onReferenceChange={onReferenceChange} openSource={vi.fn()} />
+    await act(async () => root.render(options.scopeSurface ? <KnowledgeTestSurface rpc={forwardRpc as any} client={connected ? client : null} connected={connected}
+      scopeTopicId={topicId} title="原真实Topic" visible={visible} {...(reference ? { initialPosition: reference } : {})} onProjection={route => onReferenceChange(route.knowledge)} openSource={vi.fn()} />
       : <MobileTopicKnowledgeEditor rpc={forwardRpc as any} client={connected ? client : null} connected={connected} target={target} onSaved={onSaved} onClose={vi.fn()} onDraftKeyChange={onDraftKeyChange} />))
   }
   await render()

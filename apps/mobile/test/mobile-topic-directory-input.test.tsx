@@ -1,8 +1,8 @@
+import { TopicsTestSurface, KnowledgeTestSurface, topicIntents } from './topics-navigation-fixture'
 import { fixturePath } from '../../../test/fixture-values.mjs'
 import { act, type ReactNode } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, expect, it, vi } from 'vitest'
-import { MobileTopicsSurface } from '../src/topics/MobileTopicsSurface'
 import { MobileTopicOrganization } from '../src/topics/MobileTopicOrganization'
 import type { TopicsRpc } from '../src/topics/MobileTopicKnowledge'
 
@@ -25,7 +25,7 @@ const category = { categoryId: 'original-category', title: '工作笔记', hostI
 
 it('filters the original directory locally while retaining the untrimmed query and exact category identity', async () => {
   const rpc = vi.fn(async (method: string) => method === 'topic.category.ls' ? { categories: [category, { ...category, categoryId: 'other', title: '参考资料' }], unavailable: [] } : { topics: [], unavailable: [] }) as unknown as TopicsRpc
-  const element = await mount(<MobileTopicsSurface rpc={rpc} onOpenTopic={vi.fn()} renderWorkface={() => null} openSource={vi.fn()} />)
+  const element = await mount(<TopicsTestSurface rpc={rpc} onIntent={vi.fn()} renderWorkface={() => null} openSource={vi.fn()} />)
   const field = element.querySelector<HTMLInputElement>('[aria-label="查找 Topic 或分类"]')!
   expect(field.placeholder).toBe('查找 Topic 或分类'); await fill(field, '  工作  ')
   expect(field.value).toBe('  工作  '); expect(element.querySelector('.mobile-topics-list')?.textContent).toBe('工作笔记')

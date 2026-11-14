@@ -34,7 +34,7 @@ it.each(['browser', 'native'])('%s Back leaves visible Survey content without po
   const tabs = ['first', 'second'].map(name => ({ tabId: `${name}-tab`, zoneId: zone.zoneId, workspaceId: zone.workspaceId, name: `${name}原标签`, regionIds: [`${name}-browser-region`] }))
   const catalog = { spaces: [], zones: [zone], tabs, regions: tabs.map((tab, index) => ({ regionId: tab.regionIds[0]!, tabId: tab.tabId,
     kind: 'browser' as const, browserId: index ? 'original-browser' : 'wrong-browser', agentSessionId: null, runId: null, execution: null })), bindings: [], locations: [] }
-  const survey = readSurveyPresentation({ surveyCollectedZones: { [zone.zoneId]: true }, surveyExplorationNames: { [zone.zoneId]: '准确原研究' },
+  const survey = readSurveyPresentation({ surveyPageReferences: [], surveyCollectedZones: { [zone.zoneId]: true }, surveyExplorationNames: { [zone.zoneId]: '准确原研究' },
     surveyZoneSelection: { zoneId: zone.zoneId, selection: [{ tabId: tabs[0]!.tabId, regionId: tabs[0]!.regionIds[0]! }], active: { tabId: tabs[0]!.tabId, regionId: tabs[0]!.regionIds[0]! } }, tabs: {} } as any, catalog)
   f.client.forwardRpc = vi.fn().mockImplementation(async (method: string) => {
     if (method === 'space.ls') return { catalog: { ...catalog, survey } }

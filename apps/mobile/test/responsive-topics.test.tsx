@@ -1,3 +1,5 @@
+import { createTopicsOwnerFixture } from './topics-owner-fixture'
+import { TopicsTestSurface, KnowledgeTestSurface, topicIntents } from './topics-navigation-fixture'
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, expect, it, vi } from 'vitest'
@@ -15,21 +17,21 @@ import { FileReadOwner } from '@agentmux/host/file-read-owner'
 import { ScratchTopics } from '../../desktop/src/main/scratch-topics'
 import { WorkspaceFiles } from '../../desktop/src/main/workspace-files'
 import { SCRATCH_WORKSPACE_ID } from '../../host/src/mote-model'
-import { MobileTopicsSurface } from '../src/topics/MobileTopicsSurface'
 import { MobileTopicSource } from '../src/topics/MobileTopicSource'
 import { DeviceWorkfaceStore, emptyDeviceWorkface, getDeviceWorkface } from '../src/recovery/device-workface'
 import type { TopicsRpc } from '../src/topics/MobileTopicKnowledge'
 import { fixture as conversationFixture } from './conversation-fixture'
 import { MobileApp } from '../src/MobileApp'
+import type { TopicsNavigationController } from '../src/topics/topics-navigation'
 import { createBrowserPlatform } from '../src/platform/browser'
 
 vi.mock('electron', () => ({ nativeImage: { createFromBuffer: () => { throw new Error('Content-only Topics proof does not decode avatars.') } } }))
 ;(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 const mounts: { root: Root; element: HTMLDivElement }[] = []
-const resources: { path: string; files: WorkspaceFiles }[] = []
+const resources: { dispose(): Promise<void> }[] = []
 afterEach(async () => {
   for (const view of mounts.splice(0)) { await act(async () => view.root.unmount()); view.element.remove() }
-  for (const value of resources.splice(0)) { await value.files.dispose(); await rm(value.path, { recursive: true, force: true }) }
+  for (const value of resources.splice(0)) { await value.dispose() }
   localStorage.clear(); vi.restoreAllMocks(); vi.unstubAllGlobals()
 })
 const waitFor = async (check: () => void) => vi.waitFor(async () => { await act(async () => {}); check() }, { timeout: 10000 })
@@ -38,45 +40,23 @@ async function click(scope: HTMLElement, text: string) {
   expect(action, `Original visible action: ${text}`).toBeDefined(); await act(async () => action!.click())
 }
 async function ownerFixture() {
-  localStorage.clear()
-  const path = await realpath(await mkdtemp(join(tmpdir(), 'amx-responsive-topics-')))
-  await mkdir(join(path, 'scratch'))
-  const workspace = { id: SCRATCH_WORKSPACE_ID, hostId: 'local', name: 'Private responsive Topics', path: join(path, 'scratch'), kind: 'folder' as const }
-  const files = new WorkspaceFiles(() => ({ kind: 'local' } as ExecutionHost)); resources.push({ path, files })
-  const owner = new TopicKnowledgeOwner(new ScratchTopics(), files, () => workspace)
-  const state = new AgentMuxSpatialStateStore(join(path, 'spatial.json'))
-  owner.setSpatialPort(new TopicSpatialOwner({ state, workspace: () => workspace, topics: () => owner.listTopicSnapshots(), categories: () => owner.listCategories(), ensureDefaultCategory: () => owner.ensureDefaultCategoryContent() }))
-  const firstCategory = (await owner.call('topic.category.create', { categoryId: mintObjectId(), title: 'First category' })).category
-  const category = (await owner.call('topic.category.create', { categoryId: mintObjectId(), title: 'Original category' })).category
-  await owner.call('topic.create', { topicId: mintObjectId(), categoryId: firstCategory.categoryId, title: 'Unrelated Topic' })
-  const topic = (await owner.call('topic.create', { topicId: mintObjectId(), categoryId: category.categoryId, title: 'Original Topic' })).topic
-  const source = { kind: 'file' as const, hostId: workspace.hostId, projectId: 'responsive-project', path: join(workspace.path, 'original-source.md') }
-  await writeFile(source.path, '# Exact original source\n\nOriginal file owner bytes.')
-  const first = (await owner.call('topic.knowledge.write', { topicId: topic.topicId, entryId: mintObjectId(), title: 'First knowledge', content: 'Do not substitute this first entry.', form: 'derived', certainty: 'fact', sources: [], expectedRevision: null })).entry
-  const entry = (await owner.call('topic.knowledge.write', { topicId: topic.topicId, entryId: mintObjectId(), title: 'Original second knowledge', content: 'Original second entry body.', form: 'reference', certainty: 'proposal', sources: [source], expectedRevision: null })).entry
-  const zone = { zoneId: mintObjectId(), workspaceId: workspace.id, hostId: workspace.hostId, directoryPath: workspace.path, kind: 'directory' as const, branch: null }
-  const catalog: AgentMuxSpaceCatalog = { spaces: [], zones: [zone], tabs: [], regions: [], bindings: [], locations: [], agentPresentation: [], motePresentation: [] }
-  const fileOwner = new FileReadOwner({ files, workspace: id => id === workspace.id ? workspace : undefined, catalog: async () => catalog })
-  const service = new AgentMuxRpcService({ topics: owner, files: fileOwner, coreClients: () => [] })
-  // Original discovery metadata selects the same fixture resource; all Topic/file operations consume real owners and public RPC codecs.
-  const call = vi.fn(async (method: string, input: any) => method === 'app.snapshot' ? { workspaces: [{ ...workspace, workspaceId: workspace.id, projectId: 'responsive-project', repoPath: null, branch: null }], unavailable: [] }
-    : method === 'space.ls' ? { catalog } : service.call(method as any, input, { principal: { kind: 'device', id: 'private-responsive-device' } }))
-  const rpc = call as unknown as TopicsRpc
-  const origin = location.origin, scope = { origin, runtimeId: 'responsive-runtime', deviceHostId: workspace.hostId }
-  await getDeviceWorkface().replaceBackup({ ...emptyDeviceWorkface(), hostUrl: origin, host: { origin, hostId: workspace.hostId } })
-  const client = { forwardRpc: rpc, runtimeOwnerIdentity: () => ({ runtimeId: scope.runtimeId, ownerInstanceId: 'responsive-process', availability: 'connected' }) } as unknown as AgentMuxHostedClient
-  return { owner, topic, category, first, entry, rpc, call, client, scope, source }
+  const fixture = await createTopicsOwnerFixture(); resources.push(fixture); return fixture
 }
 async function surface(f: Awaited<ReturnType<typeof ownerFixture>>) {
   const element = document.createElement('div'); document.body.append(element)
   const root = createRoot(element); mounts.push({ root, element })
   const opened = vi.fn(), context = vi.fn(), reference = vi.fn(), workface = vi.fn((topic, visible) => <div data-original-discussion={topic.topicId} data-active={visible}>{topic.title}</div>)
-  let wide = true, visible = true, sourceActive = false
+  let navigation!: TopicsNavigationController, wide = true, visible = true, sourceActive = false
   const render = async (next: { wide?: boolean; visible?: boolean; sourceActive?: boolean } = {}) => {
-    wide = next.wide ?? wide; visible = next.visible ?? visible; sourceActive = next.sourceActive ?? sourceActive
-    await act(async () => root.render(<div className="mobile-topics-host"><MobileTopicsSurface rpc={f.rpc} client={f.client} connected visible={visible} wide={wide}
-      onOpenTopic={opened} onContextChange={context} onKnowledgeChange={reference} renderWorkface={workface} openSource={opened}
-      sourceActive={sourceActive} /><div className="mobile-topics-source-slot" hidden={!sourceActive}><MobileTopicSource source={f.source} rpc={f.rpc} visible={visible && sourceActive} onBack={() => {}} openScope={() => {}} /></div></div>))
+    wide = next.wide ?? wide; visible = next.visible ?? visible
+    if (next.sourceActive !== undefined && next.sourceActive !== sourceActive) {
+      sourceActive = next.sourceActive
+      await act(async () => navigation.send(sourceActive ? { type: 'source-open', source: f.source } : { type: 'source-leave' }))
+    }
+    await act(async () => root.render(<div className="mobile-topics-host"><TopicsTestSurface rpc={f.rpc} client={f.client} connected visible={visible} wide={wide}
+      onController={value => { navigation = value }} onIntent={opened}
+      onProjection={route => { context(route.context); reference(route.knowledge) }} renderWorkface={workface} openSource={opened}
+      /><div className="mobile-topics-source-slot" hidden={!sourceActive}><MobileTopicSource source={f.source} rpc={f.rpc} visible={visible && sourceActive} onBack={() => {}} openScope={() => {}} /></div></div>))
   }
   await render()
   await waitFor(() => expect(element.querySelector(`[data-topic-category="${f.category.categoryId}"]`)).not.toBeNull())
@@ -92,14 +72,14 @@ it('keeps the exact original Topic navigation beside its discussion, without wid
   const reading = v.element.querySelector('[data-original-discussion]')!
   expect(directory.hidden, 'Responsive Topic navigation must remain visible after exact Topic selection.').toBe(false)
   expect(row.getAttribute('aria-current')).toBe('page')
-  expect(v.opened).toHaveBeenCalledExactlyOnceWith(f.topic)
+  expect(topicIntents(v.opened)).toEqual([{ type: 'topic', topicId: f.topic.topicId }])
   const before = v.context.mock.calls.at(-1)![0]
   await v.render({ wide: false }); expect(directory.hidden).toBe(true)
   await v.render({ wide: true }); expect(directory.hidden).toBe(false)
   expect(v.element.querySelector('[data-original-discussion]')).toBe(reading)
   expect(v.element.querySelector('.mobile-topics-topic')).toBe(row)
   expect(v.context.mock.calls.at(-1)![0]).toEqual(before)
-  expect(v.opened).toHaveBeenCalledTimes(1)
+  expect(topicIntents(v.opened)).toHaveLength(1)
   const count = f.call.mock.calls.length
   await v.render({ visible: false }); await v.render({ wide: false }); await v.render({ wide: true })
   expect(f.call.mock.calls).toHaveLength(count)

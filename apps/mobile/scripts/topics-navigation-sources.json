@@ -1,0 +1,49 @@
+{
+  "production": [
+    "apps/mobile/src/topics/topics-navigation.ts",
+    "apps/mobile/src/topics/use-topics-navigation.ts",
+    "apps/mobile/src/topics/MobileTopicsSurface.tsx",
+    "apps/mobile/src/topics/MobileTopicKnowledge.tsx",
+    "apps/mobile/src/MobileApp.tsx",
+    "apps/mobile/src/recovery/presentation-route.ts"
+  ],
+  "tests": [
+    "apps/mobile/test/topics-navigation.test.tsx",
+    "apps/mobile/test/topics-source-metadata.test.tsx",
+    "apps/mobile/test/topics-navigation-fixture.tsx",
+    "apps/mobile/test/topics-owner-fixture.ts",
+    "apps/mobile/test/topics-navigation.config.mts",
+    "apps/mobile/test/responsive-topics.test.tsx",
+    "apps/mobile/test/responsive-topics.config.mts",
+    "apps/mobile/test/mobile-topics.test.tsx",
+    "apps/mobile/test/mobile-topics-tree.test.tsx",
+    "apps/mobile/test/mobile-topic-directory-input.test.tsx",
+    "apps/mobile/test/mobile-knowledge-input.test.tsx",
+    "apps/mobile/test/mobile-knowledge-owner.test.tsx",
+    "apps/mobile/test/mobile-content-route.test.tsx"
+  ],
+  "harness": [
+    "apps/mobile/scripts/verify-topics-navigation.mjs",
+    "apps/mobile/scripts/topics-navigation-sources.json"
+  ],
+  "documents": [
+    "docs/design/behavior/mobile-client.md"
+  ],
+  "existingConsumers": [
+    "apps/mobile/test/responsive-source-loading.test.tsx",
+    "apps/mobile/test/mobile-topics-route.test.tsx",
+    "apps/mobile/test/mobile-topic-source-reference.test.tsx",
+    "apps/mobile/test/conversation-fixture.tsx",
+    "apps/mobile/test/device-locks.ts",
+    "apps/mobile/test/mobile-lan-crypto.setup.ts",
+    "apps/mobile/vitest.config.ts",
+    "apps/mobile/src/topics/MobileTopicSource.tsx",
+    "apps/mobile/src/topics/source-reference.ts",
+    "apps/mobile/src/topics/useKnowledgeDraft.ts",
+    "apps/mobile/src/recovery/knowledge-drafts.ts",
+    "apps/mobile/src/recovery/device-workface.ts",
+    "apps/mobile/src/navigation/defer-mobile-surface.tsx",
+    "apps/desktop/src/main/scratch-topics.ts",
+    "apps/desktop/src/main/workspace-files.ts"
+  ]
+}

@@ -4,14 +4,14 @@ import { defineConfig } from 'vitest/config'
 import base from '../vitest.config'
 const mutant = process.env.MOBILE_RESPONSIVE_TOPICS_MUTANT ?? 'baseline'
 const changes: Record<string, { file: string; from: string; to: string; target: string }> = {
-  'source-navigation-sticky': { file: '/src/topics/MobileTopicKnowledge.tsx', from: 'function read(entry: TopicKnowledgeItem) {\n    onNavigate?.()', to: 'function read(entry: TopicKnowledgeItem) {', target: 'actual App leaves original Source A' },
+  'source-navigation-sticky': { file: '/src/topics/topics-navigation.ts', from: 'const active = visit({ ...state, sources: sourcesForTarget(state, intent.scope), context:', to: 'const active = visit({ ...state, sources: state.sources, context:', target: 'actual App leaves original Source A' },
   'source-reader-active': { file: '/src/topics/MobileTopicKnowledge.tsx', from: 'const readingVisible = visible && !sourceActive', to: 'const readingVisible = visible', target: 'withdraws the actual in-flight knowledge read' },
   'topic-navigation-hidden': { file: '/src/topics/MobileTopicsSurface.tsx', from: 'hidden={!directoryVisible}', to: 'hidden={!directoryVisible || inTopic}', target: 'keeps the exact original Topic navigation' },
   'knowledge-navigation-hidden': { file: '/src/topics/MobileTopicKnowledge.tsx', from: 'hidden={!directoryVisible}', to: 'hidden={!directoryVisible || Boolean(selection) || editorVisible}', target: 'retains the same original knowledge editor' },
 }
 const sha = (input: string) => createHash('sha256').update(input).digest('hex')
 export default defineConfig({ ...base, plugins: [...(base.plugins ?? []), { name: 'responsive-topics-loaded-proof', enforce: 'pre', transform(input, id) {
-  if (!/\/src\/topics\/(MobileTopicsSurface|MobileTopicKnowledge|MobileTopicSource)\.tsx$/.test(id) && !id.endsWith('/src/MobileApp.tsx') && !id.endsWith('/test/responsive-topics.test.tsx')) return
+  if (!/\/src\/topics\/(?:topics-navigation\.ts|(?:MobileTopicsSurface|MobileTopicKnowledge|MobileTopicSource)\.tsx)$/.test(id) && !id.endsWith('/src/MobileApp.tsx') && !id.endsWith('/test/responsive-topics.test.tsx')) return
   let consumed = input
   const change = changes[mutant]
   if (mutant !== 'baseline' && !change) throw new Error(`Unknown responsive Topics mutation: ${mutant}`)

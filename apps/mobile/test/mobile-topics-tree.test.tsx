@@ -1,3 +1,4 @@
+import { TopicsTestSurface, KnowledgeTestSurface, topicIntents } from './topics-navigation-fixture'
 import { fixturePath } from '../../../test/fixture-values.mjs'
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
@@ -15,7 +16,6 @@ import { TopicKnowledgeOwner } from '@agentmux/host/topic-knowledge'
 import { TopicSpatialOwner } from '@agentmux/host/topic-spatial-owner'
 import { WorkspaceFiles } from '../../desktop/src/main/workspace-files'
 import { SCRATCH_WORKSPACE_ID } from '../../host/src/mote-model'
-import { MobileTopicsSurface } from '../src/topics/MobileTopicsSurface'
 import type { TopicsRpc } from '../src/topics/MobileTopicKnowledge'
 
 vi.mock('electron', () => ({ nativeImage: { createFromBuffer: () => { throw new Error('Avatar decoding is not consumed by this Topics tree proof.') } } }))
@@ -24,8 +24,9 @@ const mounts: Array<{ root: Root; element: HTMLDivElement }> = []
 async function mount(rpc: TopicsRpc, onOpenTopic = vi.fn(), onBackChange = vi.fn()) {
   const element = document.createElement('div'); document.body.append(element)
   const root = createRoot(element); mounts.push({ root, element })
-  const render = async (visible = true) => act(async () => root.render(<MobileTopicsSurface rpc={rpc} visible={visible} onOpenTopic={onOpenTopic} renderWorkface={value => <div data-original-topic={value.topicId}>{value.title}</div>} openSource={vi.fn()} onBackChange={onBackChange} />))
-  await render(); return { element, render, onOpenTopic, onBackChange }
+  const workface = vi.fn((value, visible) => <div data-original-topic={value.topicId} data-active={visible}>{value.title}</div>)
+  const render = async (visible = true) => act(async () => root.render(<TopicsTestSurface rpc={rpc} visible={visible} onIntent={onOpenTopic} renderWorkface={workface} openSource={vi.fn()} onBackChange={onBackChange} />))
+  await render(); return { element, render, onOpenTopic, onBackChange, workface }
 }
 afterEach(async () => { for (const { root, element } of mounts.splice(0)) { await act(async () => root.unmount()); element.remove() } })
 async function click(button: HTMLButtonElement) { expect(button).not.toBeNull(); await act(async () => button.click()) }
@@ -47,7 +48,7 @@ it('opens exact category children in the same tree, keeps sibling category and T
   expect(view.element.querySelector('header h1')?.textContent).toBe('Topics')
   expect(rpc).toHaveBeenLastCalledWith('topic.ls', { categoryId: otherCategory.categoryId })
   await click(view.element.querySelector<HTMLButtonElement>(`[data-topic-branch="${otherCategory.categoryId}"] .mobile-topics-topic`)!)
-  expect(view.onOpenTopic).toHaveBeenCalledExactlyOnceWith(otherTopic)
+  expect(topicIntents(view.onOpenTopic)).toEqual([{ type: 'topic', topicId: otherTopic.topicId }])
   await act(async () => view.onBackChange.mock.calls.at(-1)![0]())
   expect(view.element.querySelector(`[data-topic-branch="${otherCategory.categoryId}"]`)).not.toBeNull()
   await act(async () => view.onBackChange.mock.calls.at(-1)![0]())
@@ -69,7 +70,7 @@ it('cannot apply a late collapsed category response to the later selected same-n
   const branch = view.element.querySelector(`[data-topic-branch="${otherCategory.categoryId}"]`)!
   expect(branch.textContent).toContain(otherTopic.title)
   await click(branch.querySelector<HTMLButtonElement>('.mobile-topics-topic')!)
-  expect(view.onOpenTopic).toHaveBeenCalledExactlyOnceWith(otherTopic)
+  expect(topicIntents(view.onOpenTopic)).toEqual([{ type: 'topic', topicId: otherTopic.topicId }])
   const calls = vi.mocked(rpc).mock.calls.length
   await view.render(false); await view.render(false)
   expect(vi.mocked(rpc).mock.calls).toHaveLength(calls)
@@ -89,7 +90,8 @@ it('keeps confirmed children and their callback through a failed branch refresh;
   expect(branch.textContent).toContain('original-category-read-unavailable')
   expect(branch.querySelector('.mobile-topics-service')?.hasAttribute('open')).toBe(false)
   await click(branch.querySelector<HTMLButtonElement>('.mobile-topics-topic')!)
-  expect(view.onOpenTopic).toHaveBeenCalledWith(topic)
+  expect(topicIntents(view.onOpenTopic)).toContainEqual({ type: 'topic', topicId: topic.topicId })
+  expect(view.workface).toHaveBeenCalledWith(topic, true)
   await act(async () => view.onBackChange.mock.calls.at(-1)![0]())
   await click(categoryButton(view.element, otherCategory.categoryId))
   expect(view.element.querySelector(`[data-topic-branch="${otherCategory.categoryId}"]`)?.textContent).not.toContain('original-category-read-unavailable')
@@ -105,7 +107,7 @@ it('retains previously confirmed children when an owner explicitly reports an un
   const branch = view.element.querySelector(`[data-topic-branch="${category.categoryId}"]`)!
   expect(branch.textContent).toContain('Original Topic owner unknown')
   await click(branch.querySelector<HTMLButtonElement>('.mobile-topics-topic')!)
-  expect(view.onOpenTopic).toHaveBeenCalledExactlyOnceWith(topic)
+  expect(topicIntents(view.onOpenTopic)).toEqual([{ type: 'topic', topicId: topic.topicId }])
 })
 
 it('consumes real Topic owner category bindings through strict public RPC and opens the exact Topic workface', async () => {
@@ -132,10 +134,11 @@ it('consumes real Topic owner category bindings through strict public RPC and op
     const branch = view.element.querySelector(`[data-topic-branch="${secondId}"]`)!
     expect(branch.querySelectorAll('.mobile-topics-topic')).toHaveLength(1)
     await click(branch.querySelector<HTMLButtonElement>('.mobile-topics-topic')!)
-    expect(view.onOpenTopic).toHaveBeenCalledExactlyOnceWith(created)
+    expect(topicIntents(view.onOpenTopic)).toEqual([{ type: 'topic', topicId: created.topicId }])
+    expect(view.workface).toHaveBeenCalledWith(created, true)
     expect(view.element.querySelector(`[data-original-topic="${secondTopicId}"]`)).not.toBeNull()
     expect(created.zoneId).toBeTypeOf('string')
-    expect(view.onOpenTopic.mock.calls[0]![0].categorySpaceIds).toEqual(created.categorySpaceIds)
+    expect(view.workface.mock.calls.find(([value]) => value.topicId === created.topicId)![0].categorySpaceIds).toEqual(created.categorySpaceIds)
     expect(vi.mocked(rpc).mock.calls.map(([method]) => method)).toEqual(['topic.category.ls', 'topic.ls'])
     if (process.env.MOBILE_TOPICS_OWNER_EVIDENCE) {
       const categoriesResult = await service.call('topic.category.ls', {}, { principal: { kind: 'device', id: 'controlled-tree-device' } })
@@ -145,7 +148,7 @@ it('consumes real Topic owner category bindings through strict public RPC and op
       writeFileSync(process.env.MOBILE_TOPICS_OWNER_EVIDENCE, JSON.stringify({ schema: 'agentmux.mobile-topics-owner-consumer.v1',
         sourceSHA256: Object.fromEntries(sourcePaths.map(path => [path, createHash('sha256').update(readFileSync(path)).digest('hex')])),
         categoriesResult, topicsByCategory: { [firstId]: firstTopics, [secondId]: secondTopics }, expandedCategoryId: secondId,
-        openedTopic: view.onOpenTopic.mock.calls[0]![0], calls: vi.mocked(rpc).mock.calls.map(([method, input]) => ({ method, input })),
+        openedTopic: view.workface.mock.calls.find(([value]) => value.topicId === created.topicId)![0], calls: vi.mocked(rpc).mock.calls.map(([method, input]) => ({ method, input })),
         owner: 'ScratchTopics + TopicKnowledgeOwner + TopicSpatialOwner + WorkspaceFiles → AgentMuxRpcService',
         at: new Date().toISOString() }, null, 2) + '\n')
     }

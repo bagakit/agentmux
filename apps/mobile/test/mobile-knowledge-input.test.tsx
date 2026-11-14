@@ -1,3 +1,4 @@
+import { KnowledgeTestSurface } from './topics-navigation-fixture'
 import { act } from 'react'
 import { createRoot } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
@@ -35,7 +36,7 @@ it('keeps composition in the original Knowledge edit when a later target prop ar
 
 it('forwards the search field through the original explicit search RPC without write or implicit submission', async () => {
   const rpc = vi.fn(async () => ({ entries: [], unavailable: [] })) as unknown as TopicsRpc
-  await act(async () => root.render(<MobileTopicKnowledge rpc={rpc} title="All Topics" openSource={() => {}} />))
+  await act(async () => root.render(<KnowledgeTestSurface rpc={rpc} title="All Topics" openSource={() => {}} />))
   const input = host.querySelector<HTMLInputElement>('[aria-label="搜索知识"]')!
   expect(input.type).toBe('text'); expect(input.placeholder).toBe('搜索 All Topics')
   await act(async () => { setDom(input, '  保留原文  '); input.dispatchEvent(new Event('input', { bubbles: true })) })
