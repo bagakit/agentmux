@@ -238,6 +238,13 @@ export function AgentInformationReader({ request: opening }: { request: PreviewR
   }, [document, request.bookmark?.key, tab])
   const readingSameSource = Boolean(context.access ? context.access.isCurrent?.() && session?.control.run.runId === currentReading.context.runId && currentReading.context.access?.identity.runtimeId === context.access.identity.runtimeId && currentReading.context.access?.identity.agentSessionId === context.access.identity.agentSessionId : session && session.control.run.runId === currentReading.context.runId && (session.kind !== 'agent' || nativeBindingKey(session) === currentReading.sourceKey))
   const sameSource = context.access ? context.access.isCurrent?.() === true : Boolean(session)
+  const replacedLocalSource = useAppStore(state => visible && !context.access && state.sessions.some(current =>
+    current.id === context.id && current.hostId === context.hostId &&
+    (current.control.run.runId !== context.runId || current.kind === 'agent' && nativeBindingKey(current) !== request.sourceKey)))
+  const changedSource = context.access?.observation === 'changed' || replacedLocalSource || Boolean(
+    context.access && currentReading.context.access?.identity.runtimeId && context.access.identity.runtimeId &&
+    (currentReading.context.access.identity.runtimeId !== context.access.identity.runtimeId ||
+      currentReading.context.access.identity.agentSessionId !== context.access.identity.agentSessionId))
   const currentContext = useMemo(() => context.access ? context : visible && session
     ? { ...agentContextForSession(session, undefined, context.name, context.workspace, context.topicId), lastActivityAt: context.lastActivityAt } : context,
   [visible, session, context, observationNow])
@@ -252,7 +259,9 @@ export function AgentInformationReader({ request: opening }: { request: PreviewR
       config: identityFacts.config, agentNames: {}, scratchTopicSnapshots: identityFacts.topics ?? {}, spaceObjectIcons: identityFacts.icons ?? {}, spaceZoneBindings: identityFacts.bindings ?? {} }) : undefined,
   [session?.id, session?.kind, session?.hostId, session?.workspacePath, identityFacts])
   const usage = session?.kind === 'agent' ? session.turnUsage : request.session?.kind === 'agent' ? request.session.turnUsage : undefined
-  const sourceNotice = !sameSource ? 'Original Run or source is no longer confirmed. This reading is kept; new source data is not attached.'
+  const sourceNotice = !sameSource ? `${changedSource ? 'The original Run or source has changed.'
+    : context.access?.observation === 'unavailable' || context.runId || request.session ? 'The original Run observation is currently unavailable.'
+      : 'The current Run has not been confirmed.'} This reading is kept; new source data is not attached.`
     : request.bookmark && !readingSameSource ? 'Reading an earlier Run or source. Show latest to follow the current Agent.' : null
   const service = !currentContext.detailIsRecap && currentContext.detailKind === 'service' ? currentContext.detail : null
   const displayPath = usePathDisplay(), path = displayPath(context.workspacePath, context.hostId)

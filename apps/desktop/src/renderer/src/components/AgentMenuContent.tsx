@@ -22,6 +22,9 @@ const Promotion = semanticIconComponent('object.promotion')
 /** Slots contain already-targeted actions. They never resolve a Session or grant control. */
 export type AgentMenuExtensions = {
   context?: ReactNode
+  /** Concise recovery beside the identity; complete diagnostics stay in details. */
+  observation?: ReactNode
+  details?: ReactNode
   identityActions?: ReactNode
   /** The Fork entry and its review; placed in the derived group's official order. */
   controls?: ReactNode
@@ -35,7 +38,7 @@ export type AgentMenuExtensions = {
 /** One Agent menu body for cards, Region context menus and Header More. */
 export function AgentMenuContent({ name, executorLabel, sessionId, sessionKind = 'agent', executionHost, readOnly = false,
   links, onHistory, onTakeOver, onLearn, onDerived, onCustomize, onPromote, onRestart, onStop, onCloseWorkface, onRefreshObservation, refreshing = false,
-  nativeSourceDetails, nativeSourceCheck, extensions = {} }: {
+  nativeSourceDetails, nativeSourceCheck, refreshPlacement = 'maintenance', extensions = {} }: {
   name: string; executorLabel: string; sessionId: string | undefined; sessionKind?: 'agent' | 'terminal'
   executionHost: RegionExecutionHost; readOnly?: boolean
   links: ReactNode
@@ -47,6 +50,7 @@ export function AgentMenuContent({ name, executorLabel, sessionId, sessionKind =
   onRestart?: (() => void) | undefined; onStop?: (() => void) | undefined
   onCloseWorkface?: (() => void) | undefined
   onRefreshObservation?: (() => void) | undefined; refreshing?: boolean
+  refreshPlacement?: 'maintenance' | 'primary'
   nativeSourceDetails?: ReactNode; nativeSourceCheck?: ReactNode
   extensions?: AgentMenuExtensions
 }) {
@@ -63,7 +67,10 @@ export function AgentMenuContent({ name, executorLabel, sessionId, sessionKind =
     return canControl && onLearn ? [<Menu.Item key="pass-on-experience" className="tab-context-menu__item" onSelect={onLearn}><PassOn size={14} /><span>Pass on experience</span></Menu.Item>] : []
   }) : []
   const lifecycle = canControl && (onRestart || onStop) || onCloseWorkface
-  const maintenance = nativeSourceCheck || onRefreshObservation || extensions.maintenance
+  const refresh = onRefreshObservation ? <Menu.Item className="tab-context-menu__item" disabled={refreshing} onSelect={onRefreshObservation}>
+    <Refresh size={14} /><span>{refreshing ? 'Refreshing observation…' : 'Refresh observation'}</span>
+  </Menu.Item> : null
+  const maintenance = nativeSourceCheck || refreshPlacement === 'maintenance' && refresh || extensions.maintenance
   return <>
     {extensions.context}
     {extensions.context ? <Menu.Separator className="tab-context-menu__separator" /> : null}
@@ -75,6 +82,8 @@ export function AgentMenuContent({ name, executorLabel, sessionId, sessionKind =
       {links}
     </div>
     {links ? <Menu.Separator className="tab-context-menu__separator" /> : null}
+    {extensions.observation}
+    {refreshPlacement === 'primary' ? refresh : null}
     <Menu.Group aria-label="Conversation">
       {extensions.identityActions}
       {canControl && onPromote ? <Menu.Item className="tab-context-menu__item" data-agent-promotion onSelect={onPromote}><Promotion size={14} /><span>Promotion…</span></Menu.Item> : null}
@@ -91,6 +100,7 @@ export function AgentMenuContent({ name, executorLabel, sessionId, sessionKind =
           <span>Directory: {executionHost.cwd || 'Unknown'}</span>
         </Menu.Label>
         {nativeSourceDetails}
+        {extensions.details}
       </WorkbenchMenuSubmenu>
     </Menu.Group>
     {derived.length ? <>
@@ -122,9 +132,7 @@ export function AgentMenuContent({ name, executorLabel, sessionId, sessionKind =
       {maintenance ? <WorkbenchMenuSubmenu label="Maintenance" icon={<Refresh size={14} />}
         Sub={Menu.Sub} SubTrigger={Menu.SubTrigger} SubContent={Menu.SubContent} Portal={Menu.Portal}>
         {nativeSourceCheck}
-        {onRefreshObservation ? <Menu.Item className="tab-context-menu__item" disabled={refreshing} onSelect={onRefreshObservation}>
-          <Refresh size={14} /><span>{refreshing ? 'Refreshing observation…' : 'Refresh observation'}</span>
-        </Menu.Item> : null}
+        {refreshPlacement === 'maintenance' ? refresh : null}
         {extensions.maintenance}
       </WorkbenchMenuSubmenu> : null}
     </> : null}

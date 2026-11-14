@@ -10,6 +10,12 @@ export type FocusContextAccess = {
   identity: { runtimeId: string | null; agentSessionId: string }
   locations: readonly { source: SpaceMountRecord; tabId: string; regionId: string; reference?: WorkbenchProjectionSelection }[]
   session?: SessionSnapshot
+  /** Last exact member metadata for reading identity, never live control. */
+  retainedSession?: SessionSnapshot
+  /** Presentation of original protocol observations; never a control grant. */
+  observation?: 'current' | 'unconfirmed' | 'unavailable' | 'changed'
+  /** Host ID in the original Source's namespace, separate from its Runtime ID. */
+  executionHostId?: string
   timeline?: AgentTimelineSnapshot
   nameRevision?: number
   issue?: string

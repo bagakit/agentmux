@@ -46,6 +46,10 @@
 .agent-region-menu__summary { display: grid; min-width: 0; gap: var(--sp-1); overflow-wrap: anywhere; }
 .agent-region-menu__summary > strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-2); font-size: var(--fs-meta); font-weight: 500; line-height: 28px; }
 .agent-region-menu__summary > span { color: var(--text-3); font-size: var(--fs-meta); line-height: 1.4; }
+.agent-region-menu__notice { display: flex; align-items: start; gap: var(--sp-2); padding: var(--sp-2) var(--sp-4); color: var(--text-3); font-size: var(--fs-meta); line-height: 1.5; }
+.agent-region-menu__notice > svg { flex: none; margin-top: 2px; }
+.agent-region-menu__diagnostic { user-select: text; white-space: pre-wrap; }
+.agent-region-menu__diagnostic p { margin: var(--sp-1) 0; }
 :is(.agent-region-menu, .focus-context-menu) .workbench-layout-menu { padding: 0 var(--sp-4); }
 .agent-region-menu__identity .workbench-layout-menu { padding: 0; }
 .workbench-layout-menu--icons-only .workbench-menu-row[role='group'] { grid-template-columns: minmax(0, 1fr); }

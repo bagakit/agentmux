@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import type { SpaceSnapshot } from '@agentmux/core'
 import { mintObjectId } from '@agentmux/core/object-id'
 import { msUntilSemanticStatusStale } from '@agentmux/core/agent-status'
@@ -33,8 +33,13 @@ type ReadFact = { key: string; session?: SessionSnapshot; name?: NameObservation
   conversationPort?: ConversationReadApi; readConversation?: () => Promise<void>; reading?: ReturnType<typeof projectConversationWindow>;
   rename?: ((name: string | null, expectedRevision: number) => Promise<boolean>) | undefined; nameSaveIssue?: string | undefined; sessionIssue?: string | undefined; nameIssue?: string | undefined; readingIssue?: string | undefined; readingCurrent?: () => boolean }
 
-function SourceReader({ target, visible }: { target: SpaceMountRecord; visible: boolean }) {
-  useSpaceSourceReader(target, visible)
+function SourceReader({ target, visible, revision }: { target: SpaceMountRecord; visible: boolean; revision: number }) {
+  const refresh = useSpaceSourceReader(target, visible), previous = useRef(revision)
+  useEffect(() => {
+    if (previous.current === revision) return
+    previous.current = revision
+    refresh()
+  }, [revision, refresh])
   return null
 }
 
@@ -305,7 +310,7 @@ export function useFocusSources({ visible, contexts, onSelectLocation, onChooseL
     const aliases = new Map<string, FocusContextAccess>()
     const issues: Array<{ key: string; message: string; refresh(): void }> = [], readers: ReactNode[] = []
     for (const [key, source] of sources) {
-      readers.push(<SourceReader key={'source:' + key + ':' + (refreshes.get(key) ?? 0)} target={source} visible={visible} />)
+      readers.push(<SourceReader key={'source:' + key} target={source} visible={visible} revision={refreshes.get(key) ?? 0} />)
       const issue = observations[key]?.error ?? metadata[key]?.error
       if (issue) issues.push({ key, message: issue, refresh: () => refresh(key) })
     }
@@ -394,8 +399,15 @@ export function useFocusSources({ visible, contexts, onSelectLocation, onChooseL
       // A current name reply, including an explicit clear, supersedes visit-time display facts.
       const userName = current?.name ? current.name.current.override ?? undefined : historyNames.get(candidate.key)
       const readingCurrent = current?.readingCurrent?.()
+      const originalHosts = candidate.locations.map(location => location.member.region.execution?.hostId
+        ? JSON.stringify([location.source.reference.runtimeId, location.member.region.execution.hostId]) : null)
+      const executionHostId = originalHosts.every(Boolean) && new Set(originalHosts).size === 1 ? first.member.region.execution?.hostId : undefined
       const access: FocusContextAccess = { identity: { runtimeId: candidate.runtimeId ?? null, agentSessionId: candidate.sid },
         locations: candidate.locations, ...(session ? { session } : {}),
+        ...(current?.session ? { retainedSession: current.session } : {}),
+        observation: session ? 'current' : current?.session?.kind === 'agent' && candidate.target &&
+          current.session.control.run.runId !== candidate.target.target.expectedRun.runId ? 'changed' : candidate.target ? 'unavailable' : 'unconfirmed',
+        ...(executionHostId ? { executionHostId } : {}),
         ...(current?.name ? { nameRevision: current.name.current.nameRevision } : {}),
         ...(current?.rename ? { rename: current.rename } : {}),
         isCurrent: () => Boolean(session && candidate.target && session.control.run.runId === candidate.target.target.expectedRun.runId),

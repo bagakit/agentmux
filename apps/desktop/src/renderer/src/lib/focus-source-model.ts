@@ -11,6 +11,14 @@ export const focusSourceKey = (runtimeId: string, agentSessionId: string) => JSO
 export const focusSourceContextId = (runtimeId: string, agentSessionId: string) => JSON.stringify(['source-agent', runtimeId, agentSessionId])
 export const focusSourceHostId = (runtimeId: string) => JSON.stringify(['source-runtime', runtimeId])
 
+/** A reading/diagnostic label never decides whether an Agent can receive input. */
+export function focusSourceObservationLabel(observation: FocusContextAccess['observation']) {
+  if (observation === 'current') return 'Some Agent details are unavailable'
+  if (observation === 'changed') return 'The original Run has changed'
+  if (observation === 'unavailable') return 'Current Run observation unavailable'
+  return 'Execution identity unconfirmed'
+}
+
 /** Existing visit observations supply display names, never current access or Run facts. */
 export function focusSourceHistoryNames(history: readonly AgentFocusHistoryEntry[]): ReadonlyMap<string, string> {
   const names = new Map<string, string>()
@@ -60,7 +68,7 @@ export function matchingFocusContext(contexts: readonly FocusContext[], runtimeB
 /** An unobserved task is still a Context, never a fabricated Session or recovery decision. */
 export function unobservedFocusContext(runtimeId: string, sid: string, workspace: WorkspaceRecord | undefined, name: string | undefined,
   issue: string | undefined, access: FocusContextAccess): FocusContext {
-  const observation = issue ?? 'The original Agent observation has not arrived.'
+  const observation = focusSourceObservationLabel(access.observation)
   const detail = !runtimeId && access.locations.length === 1 ? `Position ${access.locations[0]!.regionId} · ${observation}` : observation
   return { id: focusSourceContextId(runtimeId, sid), hostId: focusSourceHostId(runtimeId), name: name ?? `Agent · ${sid}`,
     kind: 'agent', providerId: null, workspace, workspaceId: workspace?.id ?? '', workspaceName: workspace?.name ?? 'Project unconfirmed',
