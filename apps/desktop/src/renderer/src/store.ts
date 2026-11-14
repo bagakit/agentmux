@@ -1037,7 +1037,7 @@ export type AppState = GitReadingActions & {
   sessionRecordDeletionRequests: Record<string, unknown>
   goalDiscussionRequests: Record<string, GoalDiscussionRequest>
   goalEditDrafts: GoalEditDrafts
-  goalAgentCreationDrafts: Record<string, GoalAgentCreationDraft>
+  goalAgentCreationDrafts: Record<string, unknown>
   /** Exact logical focus retained when a background move removes the active leaf. */
   retainedSpatialFocus: (AgentMuxSpaceAddress & { topicId?: string }) | null
   workbenchSpaceSelection: AgentMuxDesktopSpaceSelection | null
@@ -3965,7 +3965,7 @@ type PersistedAppState = {
   sessionRecordDeletionRequests?: Record<string, unknown>
   goalDiscussionRequests?: Record<string, GoalDiscussionRequest>
   goalEditDrafts?: GoalEditDrafts
-  goalAgentCreationDrafts?: Record<string, GoalAgentCreationDraft>
+  goalAgentCreationDrafts?: Record<string, unknown>
   /** Exact logical focus retained when a background move removes the active leaf. */
   retainedSpatialFocus: (AgentMuxSpaceAddress & { topicId?: string }) | null
   connectorRoomIntents?: Record<string, ConnectorRoomIntent>
@@ -5052,9 +5052,9 @@ export async function clearGoalFiniteStartIntent(goalId: string, operationId: st
   await saveWorkbenchSelection(false)
 }
 
-export async function retainGoalAgentCreationDraft(draft: GoalAgentCreationDraft): Promise<AgentMuxSpatialSave> {
+export async function retainGoalAgentCreationDraft(draft: GoalAgentCreationDraft | import('./lib/goal-source-creation-draft').GoalSourceCreationDraft, expected?: unknown): Promise<AgentMuxSpatialSave> {
   const key = goalCreationDraftKey(draft.goalId, draft.role), original = useAppStore.getState().goalAgentCreationDrafts[key]
-  if (original && original.operationId !== draft.operationId) throw new Error('An original creation is retained. Inspect that operation before creating another Agent for this selection.')
+  if (original !== expected && original !== draft) throw new Error('An original creation is retained. Its request has not been replaced or dispatched again.')
   useAppStore.setState(state => ({ goalAgentCreationDrafts: { ...state.goalAgentCreationDrafts, [key]: draft } }))
   return await saveWorkbenchSelection(false)
 }
@@ -5086,10 +5086,10 @@ export async function checkpointHostRouteDrafts(): Promise<void> {
     await checkpointWorkbenchUserDocument()
   } catch (cause) { useAppStore.getState().reportWorkbenchSaveFailure(cause, 'local-storage'); throw cause }
 }
-export async function clearGoalAgentCreationDraft(goalId: string, role: 'assignees' | 'related', operationId: string): Promise<void> {
+export async function clearGoalAgentCreationDraft(goalId: string, role: 'assignees' | 'related', expected: unknown): Promise<void> {
   const key = goalCreationDraftKey(goalId, role)
   useAppStore.setState(state => {
-    if (state.goalAgentCreationDrafts[key]?.operationId !== operationId) return state
+    if (state.goalAgentCreationDrafts[key] !== expected) return state
     const goalAgentCreationDrafts = { ...state.goalAgentCreationDrafts }; delete goalAgentCreationDrafts[key]
     return { goalAgentCreationDrafts }
   })

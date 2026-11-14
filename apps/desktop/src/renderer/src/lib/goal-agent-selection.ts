@@ -21,22 +21,22 @@ export type GoalAgentCreationDraft = {
 }
 export type GoalAgentSelectionDraft = { goalId: string; role: GoalAgentRole; selected: DemandAgentReference[]; expectedUpdatedAt: number; replacement?: DemandAgentReference; relationAccess?: GoalRelationAccess[] }
 export const goalCreationDraftKey = (goalId: string, role: GoalAgentRole): string => JSON.stringify([goalId, role])
-export function restoredGoalAgentCreationDrafts(value: unknown): Record<string, GoalAgentCreationDraft> {
+export function restoredGoalAgentCreationDrafts(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
-  const retained: Record<string, GoalAgentCreationDraft> = {}
-  for (const [key, entry] of Object.entries(value)) {
+  return { ...value as Record<string, unknown> }
+}
+/** Legacy Mote and already submitted spatial requests keep their original owner. */
+export function readGoalAgentCreationDraft(entry: unknown, goalId: string, role: GoalAgentRole): GoalAgentCreationDraft | undefined {
     try {
       const draft = entry as GoalAgentCreationDraft, request = draft.request
-      if (typeof draft.goalId !== 'string' || !draft.goalId || !['assignees', 'related'].includes(draft.role) ||
-        key !== goalCreationDraftKey(draft.goalId, draft.role) || request?.operation !== 'agent.open' ||
+      if (!entry || typeof entry !== 'object' || Array.isArray(entry) || Object.keys(entry).some(key => !['goalId', 'role', 'operationId', 'phase', 'request'].includes(key)) ||
+        draft.goalId !== goalId || draft.role !== role || !['assignees', 'related'].includes(draft.role) || request?.operation !== 'agent.open' ||
         request.schemaVersion !== AGENTMUX_CONTROL_SCHEMA_VERSION || request.content?.kind !== 'new-agent' ||
         typeof request.content.executorId !== 'string' || !request.content.executorId || !request.destination ||
         request.content.prompt !== undefined || request.focus !== false || typeof draft.operationId !== 'string' || !draft.operationId ||
-        request.requestId !== draft.operationId) continue
-      retained[key] = { goalId: draft.goalId, role: draft.role, operationId: draft.operationId, phase: draft.phase === 'not-dispatched' ? 'not-dispatched' : 'may-have-dispatched', request }
-    } catch { /* Invalid UI intent is never dispatched; original spatial bindings remain intact. */ }
-  }
-  return retained
+        request.requestId !== draft.operationId || !['not-dispatched', 'may-have-dispatched'].includes(draft.phase)) return
+      return draft
+    } catch { return } // The leaf retains unreadable input; it is never dispatched here.
 }
 /** The private leaf keeps unrecognized entries verbatim. A typed reader never owns their bytes. */
 export function restoredGoalAgentSelectionDrafts(value: unknown): Record<string, unknown> {

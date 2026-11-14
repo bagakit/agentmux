@@ -14,9 +14,10 @@ import { SelectionField } from './SelectionField'
 import type { LauncherSourceCoordinatorExecution } from '../lib/launcher-source'
 
 /** Chooses identities in the project's original Core realm. Preparation creates no Agent. */
-export function SourceAgentTargetSetup({ config, active, initialSelection, fixedResourceWorkspaceId, actionLabel, disabled, onApply, onCancel, onOpenHost }: {
+export function SourceAgentTargetSetup({ config, active, initialSelection, fixedResourceWorkspaceId, actionLabel, preparationNote, disabled, onApply, onCancel, onOpenHost }: {
   config: Pick<AppConfig, 'hosts' | 'workspaces'>; active: boolean; initialSelection?: LauncherExecutionSelection | undefined
   fixedResourceWorkspaceId?: string | undefined; actionLabel: string; disabled?: boolean | undefined
+  preparationNote?: string | undefined
   onApply(selection: LauncherExecutionSelection): boolean | void | Promise<boolean | void>
   onCancel?: (() => void) | undefined; onOpenHost?: ((hostId: string) => void) | undefined
 }) {
@@ -155,7 +156,7 @@ export function SourceAgentTargetSetup({ config, active, initialSelection, fixed
     {issue || resourceIssue ? <p className="agent-work-setup__error" role="status">{issue ?? resourceIssue}</p> : null}
     {choiceIssue || routeIssue ? <details><summary>Other Agent devices unconfirmed</summary><p>{choiceIssue}</p><p>{routeIssue}</p></details> : null}
     {host && onOpenHost ? <button type="button" className="agent-work-text-action" onClick={() => onOpenHost(host.id)}>{description && !description.contracts.ordinaryLaunch ? `Open ${host.label} to update Core` : 'Project device settings'}</button> : null}
-    <footer className="agent-work-setup__actions"><span>Applies to this Launcher. Launch starts the task.</span><div>
+    <footer className="agent-work-setup__actions"><span>{preparationNote ?? 'Applies to this Launcher. Launch starts the task.'}</span><div>
       {onCancel ? <button type="button" className="small-button" onClick={onCancel}>Cancel</button> : null}
       <button type="button" className="small-button" disabled={!active || pending} onClick={() => setRefresh(value => value + 1)}>Refresh</button>
       <button type="button" className="primary-button" disabled={disabled || !active || pending || !project || !target || independent && !coordinator} onClick={() => void prepare()}>{pending ? 'Preparing…' : actionLabel}</button>

@@ -4,7 +4,7 @@ import { memo, useCallback, useMemo, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { useAppStore } from '../store'
 import type { DemandProjection } from '../lib/global-demand-board'
-import type { GoalAgentRole } from '../lib/goal-agent-selection'
+import { goalCreationDraftKey, type GoalAgentRole } from '../lib/goal-agent-selection'
 import { createFirstPromptSelector } from '../lib/session-presentation'
 import { createGoalTeamSelector, goalTeamIdentities, type GoalTeamActor } from '../lib/goal-team'
 import { useCollaborationIdentities } from '../lib/use-collaboration-identities'
@@ -38,7 +38,7 @@ export function GoalExecution({ demand, onUpdate }: { demand: DemandProjection; 
   const hosts = useAppStore(state => state.config?.hosts)
   const owner = useMemo(() => ({ goalId: demand.id, hosts }), [demand.id, hosts])
   const { reads, retry } = useCollaborationIdentities(refs.agents, refs.wanted, known, active, owner)
-  const creationDrafts = useAppStore(useShallow(state => Object.values(state.goalAgentCreationDrafts).filter(draft => draft.goalId === demand.id)))
+  const creationDrafts = useAppStore(useShallow(state => (['assignees', 'related'] as const).filter(role => state.goalAgentCreationDrafts[goalCreationDraftKey(demand.id, role)] !== undefined)))
   async function recommend(id: string) {
     setIssue(null)
     try { if (!await onUpdate({ assigneeSessionIds: [...new Set([...demand.assigneeSessionIds ?? [], id])], supervisorSessionId: id }, demand.updatedAt)) setIssue('Supervisor is not saved. The original selection and Agent remain available.') }
@@ -67,7 +67,7 @@ export function GoalExecution({ demand, onUpdate }: { demand: DemandProjection; 
     </div>)}</div>
     {!team.groups.length ? <p className="goals-caption">No Agents assigned yet. Use Edit relationships to choose them.</p> : null}
     {!demand.supervisorSessionId && demand.creationOrigin?.supervisorDefaultPending ? <p className="goals-condition">The original requester is not yet confirmed. You can choose a Supervisor explicitly.</p> : null}
-    {creationDrafts.map(draft => <p key={draft.operationId} className="goals-service" role="status">Original Agent creation retained.<button type="button" className="small-button" onClick={() => setRole(draft.role)}>Check creation and relationship</button></p>)}
+    {creationDrafts.map(role => <p key={role} className="goals-service" role="status">Original Agent creation retained.<button type="button" className="small-button" onClick={() => setRole(role)}>Check creation and relationship</button></p>)}
     {issue ? <p className="goals-service" role="status">{issue}</p> : null}
     <GoalContinuationControl demand={demand} active={active} onChooseSupervisor={() => setRole('supervisor')} />
     {demand.sessionIds.length ? <details className="goals-topology" onToggle={event => { if (event.target === event.currentTarget) setArrangementOpen(event.currentTarget.open) }}><summary>Arrangement</summary>{arrangementOpen ? <GoalArrangement sessionIds={team.groups.filter(group => group.roles.includes('related')).flatMap(group => group.actors.map(actor => actor.session.id))} /> : null}</details> : null}
