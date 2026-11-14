@@ -503,6 +503,6 @@ export class NativeDesktop {
 
 export function parseRecognizedText(raw: unknown, image: { width: number; height: number }): import('./protocol.js').NativeRecognizedText {
   const r = raw as import('./protocol.js').NativeRecognizedText
-  if (!r || r.state !== 'recognized' || r.width !== image.width || r.height !== image.height || !Array.isArray(r.lines) || r.lines.some(line => !line || typeof line.text !== 'string' || !Number.isFinite(line.confidence) || line.confidence < 0 || line.confidence > 1 || !line.rect || !Object.values(line.rect).every(Number.isFinite) || line.rect.x < 0 || line.rect.y < 0 || line.rect.width <= 0 || line.rect.height <= 0 || line.rect.x + line.rect.width > r.width + 1 || line.rect.y + line.rect.height > r.height + 1)) throw new NativeRequestError('invalid_protocol', 'Recognition returned invalid text or image coordinates')
+  if (!r || r.state !== 'recognized' || r.width !== image.width || r.height !== image.height || !Array.isArray(r.lines) || r.lines.some(line => !line || typeof line.text !== 'string' || !Number.isFinite(line.confidence) || line.confidence < 0 || line.confidence > 1 || !line.rect || ![line.rect.x, line.rect.y, line.rect.width, line.rect.height].every(Number.isFinite) || line.rect.x < 0 || line.rect.y < 0 || line.rect.width <= 0 || line.rect.height <= 0 || line.rect.x + line.rect.width > r.width + 1 || line.rect.y + line.rect.height > r.height + 1)) throw new NativeRequestError('invalid_protocol', 'Recognition returned invalid text or image coordinates')
   return r
 }
