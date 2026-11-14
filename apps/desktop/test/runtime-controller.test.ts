@@ -51,6 +51,7 @@ const runtimeFixture = vi.hoisted(() => {
         throw new Error('Runtime discovery failed')
       }
       this.connected = true
+      this.eventListener?.({ type: 'connection-state', state: 'restored', observationOrigin: { kind: 'runtime-connection', boundary: 'consumer-core' }, evidence: { source: 'agentmux', observedAt: Date.now() } })
     })
     readonly connectRuntime = vi.fn(async () => { this.connected = true })
     readonly dispose = vi.fn(async () => {})
@@ -125,6 +126,7 @@ const runtimeFixture = vi.hoisted(() => {
       },
       acceptedThroughByte: operation.expectedByte + Buffer.byteLength(operation.data)
     }))
+    readonly writeTerminalBytes = vi.fn(async (run: { runId: string }, data: string) => this.writeTerminal(run, { ownerInstanceId: 'runtime-1', operationId: 'fixture-write', expectedByte: 0, data }))
     readonly writeAgent = vi.fn(async ({ data }: { data: string }) => ({
       runId: 'agent-run',
       appliedByteRange: { startByte: 0, endByte: Buffer.byteLength(data) },
@@ -178,6 +180,7 @@ const runtimeFixture = vi.hoisted(() => {
     }))
     readonly refreshAgentSession = vi.fn(async () => this.agentSession())
     readonly agentSessions = vi.fn((): AgentMuxAgentSession[] => [])
+    readonly readAgentSessions = vi.fn(async () => this.agentSessions())
     readonly submitAgentPrompt = vi.fn(async (_input: AgentMuxAgentPromptInput) => {})
     readonly respondAgentInteraction = vi.fn(async () => {})
     readonly resumeAgent = vi.fn(async () => {})
@@ -217,6 +220,7 @@ const runtimeFixture = vi.hoisted(() => {
         replyCorrelation: 'native-turn-id'
       }
     }
+    readonly providerCatalogRead = vi.fn(async () => ({ routeHostId: 'local', runtimeId: null, observedAt: Date.now(), catalog: this.providers.catalog() }))
     readonly providers = {
       catalog: vi.fn((): AgentCatalogEntry[] => []),
       get: vi.fn((providerId: string) => {
@@ -294,6 +298,12 @@ vi.mock('@agentmux/core', async (importOriginal) => {
         ctxmux: client.runtimeIdentity(), availability: client.connected ? 'connected' : 'unverified' }) })
     }
   }
+})
+vi.mock('../src/main/desktop-host.js', async (importOriginal) => {
+  const original = await importOriginal<typeof import('../src/main/desktop-host.js')>()
+  return { ...original, callOriginalDesktopHost: (client: any, method: string, ...args: any[]) =>
+    method === 'agent.provider.ls' && client instanceof runtimeFixture.FakeClient
+      ? client.providerCatalogRead() : (original.callOriginalDesktopHost as any)(client, method, ...args) }
 })
 vi.mock('../src/main/host-factory.js', () => ({
   createExecutionHost: vi.fn((host: { id: string; kind: 'local' | 'ssh' }) => {
@@ -653,7 +663,8 @@ describe('RuntimeController configuration transaction', () => {
         ['Reading Provider catalog', 'connected'], ['Reading retained History sources', 'connected']
       ])
       await controller.snapshot(config)
-      remote!.eventListener?.({ type: 'connection-state', state: 'restored' })
+      remote!.eventListener?.({ type: 'connection-state', state: 'restored',
+        observationOrigin: { kind: 'runtime-connection', boundary: 'consumer-core' }, evidence: { source: 'agentmux', observedAt: Date.now() } })
       expect(warnings()).toHaveLength(2)
       remote!.providers.catalog.mockReturnValue([])
       await controller.providerCatalog()
@@ -693,7 +704,7 @@ describe('RuntimeController configuration transaction', () => {
     const original = runtimeFixture.FakeClient.instances[1]!
     await vi.waitFor(() => expect(original.connected).toBe(true))
     const observation = deferred<void>()
-    if (step === 'Provider') original.connect.mockImplementationOnce(async () => { await observation.promise })
+    if (step === 'Provider') original.providerCatalogRead.mockImplementationOnce(async () => { await observation.promise; return { routeHostId: 'local', runtimeId: null, observedAt: Date.now(), catalog: original.providers.catalog() } })
     else original.sessionHistorySources.mockImplementationOnce(async () => { await observation.promise; return [{ agentSessionId: 'retired-owner-data', hostId: 'local', state: 'active' }] })
     const pending = step === 'Provider' ? controller.providerCatalog({ observation: true }) : controller.sessionHistorySources({ observation: true })
     const changed: AppConfig = { ...config, hosts: [config.hosts[0]!, { ...remoteHost, hostname: 'replacement.example.test' }] }
@@ -703,7 +714,7 @@ describe('RuntimeController configuration transaction', () => {
       observation.resolve()
       if (step === 'Provider') expect(await pending).toEqual({ catalog: [], warnings: [expect.objectContaining({ hostId: 'remote', scope: 'observation', code: 'EXECUTOR_HOST_CHANGED' })] })
       else expect(await pending).toEqual({ sources: [], warnings: [expect.objectContaining({ hostId: 'remote', scope: 'observation', code: 'EXECUTOR_HOST_CHANGED' })] })
-      expect(original.providers.catalog).not.toHaveBeenCalled()
+      if (step === 'Provider') expect(original.providerCatalogRead).toHaveBeenCalledOnce()
       expect(controller.endpointWarningSnapshot().filter(warning => warning.hostId === 'remote')).toEqual([])
       expect(replacement.sessionHistorySources).not.toHaveBeenCalled()
       expect(replacement.providers.catalog).not.toHaveBeenCalled()
@@ -714,13 +725,14 @@ describe('RuntimeController configuration transaction', () => {
     const controller = await configuredController()
     const config = { ...localConfig, hosts: [{ ...remoteHost, id: 'waiting' }, remoteHost] }
     controller.commit(await controller.prepare(config))
-    const [waiting, completed] = runtimeFixture.FakeClient.instances
+    // The initial local client was retired by this two-remote-Host configuration.
+    const [waiting, completed] = runtimeFixture.FakeClient.instances.slice(1)
     await vi.waitFor(() => expect(waiting!.connected && completed!.connected).toBe(true))
     const release = deferred<void>()
     const registry = new AgentProviderRegistry().catalog()
     const retainedProvider = registry.filter(entry => entry.id === 'claude'), oldProvider = registry.filter(entry => entry.id === 'codex')
     if (step === 'Provider') {
-      waiting!.connect.mockImplementationOnce(async () => { await release.promise })
+      waiting!.providerCatalogRead.mockImplementationOnce(async () => { await release.promise; return { routeHostId: 'local', runtimeId: null, observedAt: Date.now(), catalog: waiting!.providers.catalog() } })
       waiting!.providers.catalog.mockReturnValue(retainedProvider)
       completed!.providers.catalog.mockReturnValue(oldProvider)
     } else {
