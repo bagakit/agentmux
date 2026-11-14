@@ -25,6 +25,8 @@ vi.mock('../src/renderer/src/components/TerminalView', () => ({ TerminalView: ()
 // File editing is outside this read-only Current seam; the actual File surface and Region owner remain mounted.
 vi.mock('../src/renderer/src/components/EditorPane', () => ({ EditorPane: () => createElement('div', { 'data-private-file-editor-paint-isolated': '' }) }))
 import { App } from '../src/renderer/src/App'
+import { initializeSpatialControlFixture } from './helpers/spatial-control-owner-fixture'
+import { desktopSpatialGraph } from '../src/renderer/src/lib/desktop-spatial-state'
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
 import { useLauncherState } from '../src/renderer/src/lib/launcher-state'
@@ -53,7 +55,7 @@ async function fixture() {
   const displayLayout: WorkspaceLayout = { ...first, root: { type: 'split', direction: 'horizontal', ratio: .5,
     first: first.root, second: { type: 'leaf', groupId: 'display-exact-group' } },
     groups: [...first.groups, { ...first.groups[0]!, id: 'display-exact-group' }], activeGroupId: first.activeGroupId }
-  useAppStore.setState({ ...initial, initialize: async () => () => {}, loading: false,
+  useAppStore.setState({ ...initial, loading: false,
     config: { ...config, workspaces: [resource, display] }, sessions: [session, other],
     tabs: { [decoy.id]: decoy, [exact.id]: exact },
     layouts: { [resource.id]: createWorkspaceLayout('resource-home-group', [decoy.id, exact.id]), [display.id]: displayLayout },
@@ -64,6 +66,9 @@ async function fixture() {
   const unrelated = Array.from({length: 6}, (_, index) => createWorkbenchTab(`launcher:unrelated-${index}`, {kind: 'launcher', workspaceId: resource.id, regionId: `unrelated-r-${index}`}))
   useAppStore.setState({tabs: {...seeded.tabs, ...Object.fromEntries(unrelated.map(tab => [tab.id, tab]))}, layouts: {...seeded.layouts, [resource.id]: createWorkspaceLayout('resource-home-group', [decoy.id, exact.id, ...unrelated.map(tab => tab.id)])}})
   const reference = { displayWorkspaceId: display.id, groupId: 'display-exact-group', tabId: exact.id, regionId: 'exact-r2' }
+  vi.spyOn(api.spatial, 'read').mockResolvedValue({ schemaVersion: 1, revision: 1, graph: desktopSpatialGraph(useAppStore.getState(), []) })
+  await initializeSpatialControlFixture()
+  useAppStore.setState({ initialize: async () => () => {} })
   const container = document.createElement('div'); document.body.append(container); const root = createRoot(container)
   await act(async () => root.render(createElement(App)))
   expect(container.querySelector('main.main-shell')).not.toBeNull()
@@ -71,6 +76,10 @@ async function fixture() {
     useAppStore.getState().focusRegion(reference.displayWorkspaceId, reference.tabId, reference.regionId, 'pointer', reference.groupId)
     useAppStore.getState().setMainSurface('agents')
   })
+  // This fixture isolates Current eligibility across display occurrences. Inspect all projects;
+  // the selected ProjectRail resource now independently scopes the default timeline.
+  const showAll = container.querySelector<HTMLButtonElement>('[aria-label="Show all timeline projects"]')
+  if (showAll) await act(async () => showAll.click())
   expect(container.querySelector('.focused-tab-workspace')?.getAttribute('data-focus-tab-id')).toBe(exact.id)
   const file = { ...reference, regionId: 'exact-r1' }
   return { container, root, reference, file, resource, display, session, other, exact,

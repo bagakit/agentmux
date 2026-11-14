@@ -17,10 +17,10 @@ beforeEach(() => {
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
   vi.stubGlobal('IntersectionObserver', class { observe() {} unobserve() {} disconnect() {} })
 })
-afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close() })
+afterEach(async () => { await dom.render(null); for (const close of cleanup.splice(0).reverse()) await close() })
 async function fixture(_unused?: unknown, count = 2) {
   const directory = await mkdtemp(join(tmpdir(), 'focus-original-port-'))
-  cleanup.push(() => rm(directory, { recursive: true, force: true }))
+  cleanup.push(() => rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 }))
   const store = new AgentMuxFileAgentSessionStore(join(directory, 'sessions.json'))
   for (let index = 0; index < count; index++) {
     const id = `archived-${index}`, path = join(directory, `${id}.jsonl`), at = Date.now() - 3_600_000
@@ -30,6 +30,7 @@ async function fixture(_unused?: unknown, count = 2) {
       nativeHandle: { kind: 'provider', providerId: 'claude', sessionId: `native-${id}`, transcriptPath: path } })
   }
   const client = new AgentMuxClient({ store })
+  cleanup.push(() => client.dispose())
   const wait = async (check: () => void) => { for (let i = 0; i < 120; i++) { await act(async () => { await new Promise(resolve => setTimeout(resolve, 5)) }); try { check(); return } catch (error) { if (i === 119) throw error } } }
   return { client, root: { render: (node: React.ReactNode) => dom.render(node) }, get element() { return dom.container }, wait,
     markers: () => Array.from(dom.container.querySelectorAll<HTMLElement>('[data-message-id]')) }
@@ -54,13 +55,20 @@ it('the production Timeline uses and retains each original source port and Runti
   const render = (current: number) => act(async () => h.root.render(createElement(RecentFocusTimeline, { contexts, entries: [], currentContext: contexts[current], currentSessionId: contexts[current]!.id, onSelect: vi.fn(),
     catalogue: { sources: [], loading: false, error: null, refresh() {} } as never })))
   await render(0)
+  await h.wait(() => expect(ports[0]!.observeConversation).toHaveBeenCalled())
+  // The original public view admits observation before reading its first frame.
+  await act(async () => { await ports[0]!.observeConversation.mock.results[0]!.value })
   await h.wait(() => expect(ports[0]!.readAgentConversation).toHaveBeenCalled())
+  await act(async () => { await ports[0]!.readAgentConversation.mock.results[0]!.value })
   await h.wait(() => expect(h.markers().length).toBeGreaterThan(0))
   expect(h.element.textContent).not.toContain('WRONG LOCAL')
   expect(h.element.querySelector('[data-focus-timeline-id="presentation-runtime-0"]')).not.toBeNull()
   await render(1)
+  await h.wait(() => expect(ports[1]!.observeConversation).toHaveBeenCalled())
+  await act(async () => { await ports[1]!.observeConversation.mock.results[0]!.value })
   await h.wait(() => expect(ports[1]!.readAgentConversation).toHaveBeenCalled())
-  await h.wait(() => expect(h.markers().some(marker => marker.dataset.messageRawId === 'other-1')).toBe(true))
+  await act(async () => { await ports[1]!.readAgentConversation.mock.results[0]!.value })
+  await h.wait(() => expect(h.markers().map(marker => marker.dataset.messageRawId)).toContain('other-1'))
   await render(0)
   await h.wait(() => expect(h.element.textContent).toContain('Original task 0'))
   for (let i = 0; i < ports.length; i++) {
@@ -92,8 +100,16 @@ it('accepted partitions retain their own original port when two Runtime scopes s
     id: `qualified-runtime-${i}`, hostId: 'source-carrier', access: { identity: { runtimeId: `runtime-${i}`, agentSessionId: 'archived-0' }, locations: [], select() {}, open() {}, refresh() {},
       conversationReference: { hostId: 'private-host', agentSessionId: 'archived-0' }, conversationPort: port } }))
   const render = (current: number) => dom.render(createElement(RecentFocusTimeline, { contexts, entries: [], currentContext: contexts[current], currentSessionId: contexts[current]!.id, onSelect: vi.fn(), catalogue: { sources: [], loading: false, error: null, refresh() {} } as never }))
-  await render(0); await h.wait(() => expect(h.element.querySelector('.recent-focus')?.getAttribute('data-read-source-count')).toBe('1'))
-  await render(1); await h.wait(() => expect(h.element.querySelector('.recent-focus')?.getAttribute('data-read-source-count')).toBe('2'))
+  const readOriginal = async (current: number) => {
+    await render(current)
+    const port = ports[current]!
+    await h.wait(() => expect(port.observeConversation).toHaveBeenCalled())
+    await act(async () => { await port.observeConversation.mock.results[0]!.value })
+    await h.wait(() => expect(port.readAgentConversation).toHaveBeenCalled())
+    await act(async () => { await port.readAgentConversation.mock.results[0]!.value })
+  }
+  await readOriginal(0); await h.wait(() => expect(h.element.querySelector('.recent-focus')?.getAttribute('data-read-source-count')).toBe('1'))
+  await readOriginal(1); await h.wait(() => expect(h.element.querySelector('.recent-focus')?.getAttribute('data-read-source-count')).toBe('2'))
   const bReads = ports[1]!.readAgentConversation.mock.calls.length
   await render(0); await h.wait(() => expect(h.element.querySelectorAll('[data-focus-timeline-id]')).toHaveLength(2))
   expect(ports[1]!.readAgentConversation).toHaveBeenCalledTimes(bReads)
