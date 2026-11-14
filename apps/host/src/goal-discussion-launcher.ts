@@ -1,6 +1,6 @@
 import { AgentMuxError, type AgentMuxAgentCreationInspection } from '@agentmux/core'
 import { spatialAgentOpenRecord } from '@agentmux/core/spatial-state'
-import { confirmGoalDiscussionLauncher, readGoalDiscussionBinding, type GoalDiscussionLauncherReference } from './goal-discussion-bindings.js'
+import { confirmGoalDiscussionLauncher, readGoalDiscussionBinding, type GoalDiscussionBindingReceipt, type GoalDiscussionLauncherReference } from './goal-discussion-bindings.js'
 
 const unconfirmed = (message: string): never => { throw new AgentMuxError(message + ' The original Goal, workface and Core creation remain retained.', 'GOAL_DISCUSSION_UNCONFIRMED') }
 /** Native creation intent and public spatial admission each prove their original position. */
@@ -9,7 +9,7 @@ export async function confirmSpatialGoalDiscussionLauncher(input: {
   original: GoalDiscussionLauncherReference
   candidates?(tabId: string, regionId: string): Promise<import('@agentmux/core').AgentMuxAgentSession[]>
   agent(hostId: string, agentSessionId: string): Promise<AgentMuxAgentCreationInspection>
-}) {
+}): Promise<GoalDiscussionBindingReceipt | null> {
   const state = await input.spatial.read(), binding = input.original.binding
   if (!state || binding.recipient.kind !== 'launcher') return unconfirmed('The original discussion Launcher is unconfirmed.')
   const saved = readGoalDiscussionBinding(state.graph, input.original.goalId)
