@@ -46,7 +46,7 @@ const mutations = [
   { id: 'legitimate-link-cleanup', file: writer, from: 'before.size !== after.size || before.mtimeMs !== after.mtimeMs',
     to: 'before.size !== after.size || before.mtimeMs !== after.mtimeMs || before.ctimeMs !== after.ctimeMs', expected: 'accepts concurrent identical bytes when the original publisher removes its private hard link' },
   { id: 'actual-ipc-writer', file: ipc, from: "return (await savePastedImage(app.getPath('home'), input)).path",
-    to: "const destination=join(app.getPath('home'),'.agentmux','pasted');await mkdir(destination,{recursive:true});const path=join(destination,randomUUID()+'.png');await writeFile(path,Buffer.from(input.bytes));return path",
+    to: "const destination=join(app.getPath('home'),'.agentmux','pasted');await mkdir(destination,{recursive:true});const path=join(destination,mintObjectId()+'.png');await writeFile(path,Buffer.from(input.bytes));return path",
     expected: 'actual IPC retry must return the same original pasted object', native: true }
 ]
 async function mutationReceipt(mutation) {
@@ -68,7 +68,7 @@ for (const name of await readdir(join(root, 'packages'))) {
   await bind(manifest)
   for (const [key, spec] of Object.entries(pkg.exports ?? {}).sort(([a], [b]) => Number(a.includes('*')) - Number(b.includes('*')) || b.length - a.length)) {
     const target = typeof spec === 'string' ? spec : spec.browser
-    if (!target?.startsWith('./src/')) continue
+    if (!target || !(target.startsWith('./src/') || target.startsWith('./brand/'))) continue
     const pattern = pkg.name + (key === '.' ? '' : key.slice(1))
     browserSourceAliases.push({ find: new RegExp('^' + pattern.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&').replace('\\*', '(.+)') + '$'),
       replacement: resolve(dirname(manifest), target).replace('*', '$1') })
@@ -150,7 +150,7 @@ async function native(label, mutation) {
   await bind(html)
   if (!renderer) {
   renderer = join(output, 'renderer')
-  await viteBuild({ configFile: false, root: dirname(html), base: './', logLevel: 'error',
+  await viteBuild({ configFile: false, root: dirname(html), base: './', logLevel: 'error', assetsInclude: ['**/*.avif'],
     define: { __AGENTMUX_WEB_PREVIEW__: 'false', 'process.env.NODE_ENV': '"production"' },
     esbuild: { jsx: 'automatic' }, resolve: { dedupe: ['react', 'react-dom'], alias: browserSourceAliases }, worker: { format: 'es' },
     plugins: [{ name: 'pasted-renderer-source-binding', async transform(_source, id) { const file = id.split('?')[0]; if (file.startsWith(root + '/') && !file.includes('/node_modules/')) await bind(file) } }],

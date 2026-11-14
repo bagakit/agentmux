@@ -9,6 +9,7 @@ import { RuntimeController } from '../../../src/main/runtime-controller'
 import { ConfigStore, DEFAULT_CONFIG } from '../../../src/main/config-store'
 import { WorkbenchWindows } from '../../../src/main/workbench-windows'
 import { WorkbenchWindowStore } from '../../../src/main/workbench-window-store'
+import { WorkbenchUserStateStore } from '../../../src/main/workbench-user-state'
 import { createDesktopApplicationAccessOwner } from '../../../src/main/application-access-owner'
 import { ScratchTopics } from '../../../src/main/scratch-topics'
 import { registerIpc } from '../../../src/main/ipc'
@@ -52,7 +53,7 @@ async function run() {
     return await handler(event, ...args)
   })
   dispose = await registerIpc({ appDocumentSources: () => ({ current: { mode: 'prod', filePath: join(root, 'renderer/index.html') }, loading: null }), window, workbenchWindows: windows, runtime, configStore: store, initialConfig: config,
-    applicationAccess, scratchTopics: new ScratchTopics(), progressLoops: { subscribe: () => () => {}, pauseTarget: async () => {} } as never })
+    applicationAccess, workbenchUserState: new WorkbenchUserStateStore(join(root, 'workbench-user-state.json')), scratchTopics: new ScratchTopics(), progressLoops: { subscribe: () => () => {}, pauseTarget: async () => {} } as never })
   await window.loadFile(join(root, 'renderer/index.html'))
   const evaluate = (expression: string) => window.webContents.executeJavaScript(expression)
   const until = async (expression: string) => {
@@ -69,7 +70,7 @@ async function run() {
   assert.equal(facts.images.length, 0, 'unknown save must not insert an unconfirmed reference')
   assert.equal(report.ipc.filter((item: any) => item.channel === 'ui:savePastedImage').length, 1)
   await evaluate('pastedProof.retry()')
-  await until('pastedProof.facts().images.some(image => image.width > 0)')
+  await until(`pastedProof.facts().drafts['pasted-agent'].includes('agentmux-image:')`)
   const saves = report.ipc.filter((item: any) => item.channel === 'ui:savePastedImage')
   assert.equal(saves.length, 2)
   assert.equal(saves[0].sender && saves[1].sender, true, 'actual paste must use the original trusted Renderer')
@@ -79,14 +80,15 @@ async function run() {
   const originalPath = join(pastedDirectory(app.getPath('home')), sha + '.png')
   assert.equal(saves[1].result, originalPath, 'actual IPC must consume the content-addressed writer')
   assert.equal((await readFile(originalPath)).equals(bytes), true)
+  await until('pastedProof.facts().images.some(image => image.width > 0)')
   facts = await evaluate('pastedProof.facts()')
-  assert.ok(facts.drafts['pasted-agent'].includes('@' + originalPath), 'actual Composer must insert the confirmed original path')
+  assert.ok(facts.drafts['pasted-agent'].includes('agentmux-image:'), 'actual Composer must insert the confirmed semantic image reference')
   assert.ok(report.ipc.some((item: any) => item.channel === 'ui:readPastedImage' && item.path === originalPath), 'actual preview must consume the original pasted reader')
   const foreign = new BrowserWindow({ show: false, webPreferences: { preload: join(root, 'preload.cjs'), sandbox: true, contextIsolation: true } })
   try {
     await foreign.loadURL('data:text/html,<title>Untrusted paste source</title>')
     const error = await foreign.webContents.executeJavaScript(`window.agentmux.ui.savePastedImage({bytes:new Uint8Array([1]),extension:'png'}).then(()=>null,error=>error.message)`)
-    assert.match(error, /Untrusted pasted image sender/u, 'foreign Renderer must not gain the trusted paste writer')
+    assert.match(error, /Untrusted application main document sender/u, 'foreign Renderer must not gain the trusted paste writer')
   } finally { foreign.destroy() }
   hold = true
   await evaluate(`pastedProof.paste(${JSON.stringify(bytes.toString('base64'))})`)
