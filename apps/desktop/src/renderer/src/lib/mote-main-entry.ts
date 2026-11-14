@@ -127,5 +127,5 @@ export function useMoteMainEntry({ scope, entryToken, active }: { scope:MoteWork
     })
   }, [observe,session,key])
   return { ...(canonicalUnavailable ? { status:'unavailable' as const, issue:moteMainUnavailableIssue(currentOriginal.reason) }
-    : canonicalUnknown ? { status:'unconfirmed' as const, issue:'原主 Agent 的恢复结果尚未确认，原对话和未确认的消息都在。可核对原恢复，或明确开始新一轮。' } : state.key === key ? state : { status:'idle' as const, issue:null }), inspect }
+    : canonicalUnknown ? { status:'unconfirmed' as const, issue:'原主 Agent 的恢复结果尚未确认，原对话和未确认的消息都在。可核对原恢复，或明确开始新一轮。' } : state.key === key && !(state.status === 'unavailable' && session?.processState === 'running') ? state : { status:'idle' as const, issue:null }), inspect }
 }
