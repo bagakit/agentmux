@@ -1,4 +1,4 @@
-import { HostAgentPromotions, type PromotionAgentInspection } from './agent-promotion.js'
+import { HostAgentPromotions } from './agent-promotion.js'
 import { assertPromotionEnabled } from './promotion-policy.js'
 import { FileMutationObservations } from './file-mutation-observations.js'
 import { dirname, join } from 'node:path'
@@ -36,7 +36,6 @@ export function createHostContent(options: {
   storage?: AgentMuxNotesStorage
   files?: OrdinaryWorkspaceFiles
   resources?: HostWorkspaceResources
-  inspectPromotionAgent?(target: import('@agentmux/core/agent-promotion').AgentPromotionTarget, context?: import('@agentmux/core').AgentMuxRpcCallContext): Promise<PromotionAgentInspection>
   directoryScope?: (isRelated: (cwd: string) => Promise<boolean>) => ReturnType<AgentMuxClient['retainExecutionDirectoryMutation']>
 }): ContentPorts {
   const storage = options.storage ?? new AgentMuxNotesStorage()
@@ -170,8 +169,7 @@ export function createHostContent(options: {
     resolve: async (...args) => (await owners()).observation.resolve(...args),
     scan: async (...args) => (await owners()).observation.scan(...args)
   }
-  const agentPromotions = new HostAgentPromotions({ configurationPath: options.configurationPath, spatial: options.spatial, scratch, files: publicFiles,
-    ...(options.inspectPromotionAgent ? { inspectAgent: options.inspectPromotionAgent } : {}),
+  const agentPromotions = new HostAgentPromotions({ configurationPath: options.configurationPath, spatial: options.spatial, scratch,
     workspace: async () => {
       const current = await configuration(), matches = current.workspaces.filter(value => value.id === SCRATCH_WORKSPACE_ID)
       if (matches.length !== 1) throw new AgentMuxError('The original Mote content Workspace is unconfirmed. Existing Agents and promotions are retained.', 'AGENT_PROMOTION_RESOURCE_UNAVAILABLE')
