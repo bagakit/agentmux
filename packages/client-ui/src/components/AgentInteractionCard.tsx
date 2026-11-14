@@ -1,6 +1,6 @@
 import { mintObjectId } from '@agentmux/core/object-id'
 import { SemanticIcon } from '../theme/icons.js'
-import { useEffect, useId, useRef, useState, type ReactNode, type Ref } from 'react'
+import { useLayoutEffect, useId, useRef, useState, type ReactNode, type Ref } from 'react'
 import { agentInteractionOperationReceiptMatches, agentInteractionRequestsMatch } from '@agentmux/core/agent-interaction-state'
 import type {
   AgentMuxInteractionRequest,
@@ -73,17 +73,17 @@ export function AgentInteractionCard({
   const operation = useRef<(AgentMuxInteractionOperationIntent & { moteSource?: import('@agentmux/core').AgentInputMoteSource }) | null>(null)
   const [{ receipt, failure, receiptUnconfirmed }, setObservation] = useState<InteractionObservation>({ receipt: null, failure: null, receiptUnconfirmed: false })
   const requestIdentity = useRef(request)
-  if (!agentInteractionRequestsMatch(requestIdentity.current, request)) requestIdentity.current = request
-  const requestKey = requestIdentity.current
   const currentRequest = useRef(request)
-  currentRequest.current = request
   const [detailsOpen, setDetailsOpen] = useState(false)
   const detailsRef = useRef<HTMLButtonElement>(null)
   const panelId = useId()
-  useEffect(() => {
+  useLayoutEffect(() => {
+    currentRequest.current = request
+    if (agentInteractionRequestsMatch(requestIdentity.current, request)) return
+    requestIdentity.current = request
     operation.current = null; submission.current = false
     setPhase('idle'); setObservation({ receipt: null, failure: null, receiptUnconfirmed: false }); setSelectedOption(null); setDetailsOpen(false)
-  }, [requestKey])
+  }, [request])
   const [selectedOption, setSelectedOption] = useState<string | null>(null)
   const originalResponse = useRef<AgentMuxInteractionResponse | null>(null)
   function isCurrent(original: AgentMuxInteractionOperationIntent) {
