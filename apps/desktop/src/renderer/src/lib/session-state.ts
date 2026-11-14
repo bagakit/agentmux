@@ -45,32 +45,41 @@ export function projectContinuityFacts(source: ContinuityFacts, previous?: Conti
     ...(previous.continuity ? { continuity: previous.continuity } : {}),
     ...(previous.continuityOperations ? { continuityOperations: previous.continuityOperations } : {})
   }
-  const operation = source.continuity && source.continuityOperations?.[source.continuity.operationId]
+  const operation = source.continuity && source.continuityOperations && Object.hasOwn(source.continuityOperations, source.continuity.operationId)
+    ? source.continuityOperations[source.continuity.operationId] : undefined
   const continuity = operation && configValuesEqual(source.continuity, operation) ? operation : source.continuity
-  const next = structuredClone({ ...(continuity ? { continuity } : {}),
+  if (!previous) return structuredClone({ ...(continuity ? { continuity } : {}),
     ...(source.continuityOperations ? { continuityOperations: source.continuityOperations } : {}) })
-  if (!previous) return next
-  const continuityOperations = next.continuityOperations && shareEqualSubtrees(previous.continuityOperations, next.continuityOperations)
+  const copies = new WeakMap<object, object>()
+  const continuityOperations = source.continuityOperations && copyContinuitySubtree(previous.continuityOperations, source.continuityOperations, copies)
   const shared = continuity && continuity === operation ? continuityOperations![continuity.operationId]
-    : next.continuity && shareEqualSubtrees(previous.continuity, next.continuity)
+    : continuity && copyContinuitySubtree(previous.continuity, continuity, copies)
   return { ...(shared ? { continuity: shared } : {}), ...(continuityOperations ? { continuityOperations } : {}) }
 }
 
-// Older Session arrays stay reachable from retained callbacks; sharing equal subtrees keeps a
-// changed operation from duplicating its unchanged frozen input body in every retained version.
-// Writes into `next`, so it accepts only a freshly cloned plain JSON graph.
-function shareEqualSubtrees<T>(previous: unknown, next: T): T {
-  if (Object.is(previous, next)) return previous as T
-  if (!previous || !next || typeof previous !== 'object' || typeof next !== 'object' ||
-    Array.isArray(previous) !== Array.isArray(next)) return next
-  const before = previous as Record<string, unknown>, after = next as Record<string, unknown>
-  let same = Object.keys(before).length === Object.keys(after).length
-  for (const key of Object.keys(after)) {
-    const value = shareEqualSubtrees(before[key], after[key])
-    after[key] = value
-    same &&= Object.hasOwn(before, key) && value === before[key]
+// Continuity is acyclic structured data. Copy changed branches directly, without first
+// cloning their unchanged large strings. The per-call map also preserves shared children.
+function copyContinuitySubtree<T>(previous: unknown, source: T, copies: WeakMap<object, object>): T {
+  if (!source || typeof source !== 'object') return source
+  const known = copies.get(source)
+  if (known) return known as T
+  const before = previous && typeof previous === 'object' && Array.isArray(previous) === Array.isArray(source)
+    ? previous as Record<string, unknown> : undefined
+  const keys = Object.keys(source), after = source as Record<string, unknown>
+  let same = !!before && Object.keys(before).length === keys.length &&
+    (!Array.isArray(source) || (previous as unknown[]).length === source.length)
+  const entries = keys.map(key => {
+    const owned = !!before && Object.hasOwn(before, key)
+    const value = copyContinuitySubtree(owned ? before[key] : undefined, after[key], copies)
+    same &&= owned && Object.is(value, before![key])
+    return [key, value] as const
+  })
+  const result = same ? previous as object : Array.isArray(source) ? new Array(source.length) : Object.fromEntries(entries)
+  if (!same && Array.isArray(source)) for (const [key, value] of entries) {
+    Object.defineProperty(result, key, { value, enumerable: true, writable: true, configurable: true })
   }
-  return same ? previous as T : next
+  copies.set(source, result)
+  return result as T
 }
 
 /** Renderer-only live provenance on the original timeline slot. Never persisted or transported by Core. */
