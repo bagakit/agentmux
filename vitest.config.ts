@@ -1,6 +1,7 @@
 import { execFileSync } from 'node:child_process'
 import { relative, join } from 'node:path'
 import { defaultExclude, defineConfig } from 'vitest/config'
+import { radixOverlayAliases } from './apps/desktop/scripts/radix-overlay-aliases'
 
 // 下面两个辅助文件跟着**本配置文件**走，不跟着 cwd 走。写成 `./x.ts` 的话，vitest 按 cwd 解析：
 // 从仓根跑没事，而 `pnpm --filter @agentmux/core exec vitest`（gate 命令的形态）把 cwd 切到
@@ -60,7 +61,7 @@ function nestedWorktreeGlobs(): string[] {
 }
 
 export default defineConfig({
-  resolve: { alias: { '@agentmux/browser': join(import.meta.dirname, 'packages/browser/src') } },
+  resolve: { alias: { '@agentmux/browser': join(import.meta.dirname, 'packages/browser/src'), ...radixOverlayAliases } },
   /**
    * `__AGENTMUX_WEB_PREVIEW__` 是 vite 的构建期常量（`apps/desktop/electron.vite.config.ts:22`
    * 注入 `'false'`），`lib/api.ts` 在**模块作用域**读它来决定走 mock 还是 desktop 桥。plain
@@ -89,6 +90,8 @@ export default defineConfig({
     // 就把没点名的测试文件挡掉了——那里的守卫只在不需要它的那些次运行里生效。
     globalSetup: [join(import.meta.dirname, 'vitest.dist-freshness.ts')],
     // 见 vitest.setup.ts：把测试夹具跑的 git 与开发者本人的 gitconfig 隔开。
-    setupFiles: [join(import.meta.dirname, 'vitest.setup.ts')]
+    setupFiles: [join(import.meta.dirname, 'vitest.setup.ts')],
+    // Dialog and Menu share the same Radix browser-side dismissal/focus implementations in tests.
+    server: { deps: { inline: [/@radix-ui\//] } }
   }
 })
