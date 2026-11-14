@@ -289,6 +289,13 @@ async function run() {
     dialog.showSaveDialog = (async () => ({ canceled: false, filePath: gifPath })) as typeof dialog.showSaveDialog
     console.log('stage: save'); await click('Save GIF…'); await until('GIF exported', async () => { try { return (await readFile(gifPath)).length > 0 } catch { return false } })
     console.log('stage: file read'); const bytes = await readFile(gifPath), info = inspectGif(bytes)
+    // Metadata inspection should never form views over the compressed frame payload.
+    const observed = new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+    const slice = observed.subarray.bind(observed)
+    let inspectedBytes = 0
+    observed.subarray = (begin, end) => { const view = slice(begin, end); inspectedBytes += view.byteLength; return view }
+    assert.deepEqual(inspectGif(observed).metadata, info.metadata)
+    assert.equal(inspectedBytes, 6 + Buffer.byteLength(JSON.stringify(info.metadata)), 'only the header and embedded metadata payload are inspected')
     assert.ok(info.delays.length >= 4); assert.equal(info.metadata?.keyframes.length, 1)
     assert.equal(info.metadata!.keyframes[0]!.note, '这里是关键帧：检查滚动与标注 ✓', 'the actual exported file carries Unicode notes')
     await until('original export receipt', async () => (await service.call('capture.sequence.inspect', { hostId: 'local', operationId: input.operationId }, context)).state === 'completed')

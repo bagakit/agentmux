@@ -115,7 +115,7 @@ async function run() {
     suggested = options.defaultPath
     return { canceled: false, filePath: join(out, 'chosen.gif') }
   }) as typeof dialog.showSaveDialog
-  await js(gifWindow, `window.captureSequence.saveGif(${JSON.stringify(gifId.operationId)},${JSON.stringify([...annotated])})`)
+  await js(gifWindow, `window.captureSequence.saveGif(${JSON.stringify(gifId.operationId)},Uint8Array.from(${JSON.stringify([...annotated])}))`)
   assert.match(suggested!, /\.gif$/)
   await click(gifWindow, 'Close')
   await until('GIF closed', () => gifWindow.isDestroyed())
