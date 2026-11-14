@@ -1,6 +1,7 @@
 import { NativeSelect, Textarea, TextInput } from '@agentmux/client-ui/input'
+import { FormRow } from '@agentmux/client-ui/components/FormRow'
 import { submitProfileCreation } from '../../lib/browser-profile-creations'
-import { normalizeBrowserProfileNetwork } from '../../../../shared/browser-profile-network'
+import { parseBrowserProfileBypass, parseBrowserProfileProxyLine } from '../../../../shared/browser-profile-network'
 import { useEffect, useRef, useState } from 'react'
 import { parseBrowserProxyEdit, type BrowserProxyAsset } from '@agentmux/core/control'
 import { presentError } from '@agentmux/client-ui/error-presentation'
@@ -58,13 +59,23 @@ export function BrowserProxyLibrary({ assets, active }: { assets: BrowserProxyAs
     const next = fromAsset(assets?.find(item => item.id === id)), held = loaded ? browserProxyDrafts.get(id || 'new') : undefined, pending = pendingDrafts.current.get(id || 'new')
     changed.current = Boolean(pending || held?.active); put(pending ?? held?.active ?? next); setEarlier(Boolean(held?.retained.length)); setIssue(null)
   }
+  let serverError: string | undefined
+  if (value.server.includes('@')) {
+    serverError = 'Leave sign-in credentials out of the server address. Use the Profile sign-in fields.'
+  } else {
+    try { parseBrowserProfileProxyLine(value.server) }
+    catch (error) { serverError = presentError(error) }
+  }
   let input: ReturnType<typeof parseBrowserProxyEdit> | undefined
   let problem: string | undefined
-  try {
-    input = parseBrowserProxyEdit({ label: value.label, server: value.server, bypass: value.bypass.split(/[\s,]+/).filter(Boolean), notes: value.notes })
-    normalizeBrowserProfileNetwork({ mode: 'proxy', server: input.server, ...(input.bypass ? { bypass: input.bypass } : {}) })
+  if (!serverError) {
+    try {
+      const edit = parseBrowserProxyEdit({ label: value.label, server: value.server, bypass: value.bypass.split(/[\s,]+/).filter(Boolean), notes: value.notes })
+      parseBrowserProfileBypass(edit.bypass ?? [])
+      input = edit
+    } catch (error) { problem = presentError(error) }
   }
-  catch (error) { input = undefined; problem = presentError(error) }
+  const shownServerError = value.label || value.server ? serverError : undefined
   const submit = async () => {
     if (!input) return
     interactions.current += 1
@@ -98,7 +109,10 @@ export function BrowserProxyLibrary({ assets, active }: { assets: BrowserProxyAs
     <label>Saved proxy<NativeSelect aria-label="Saved proxy asset" value={value.assetId ?? ''} onChange={event => choose(event.target.value)}><option value="">New proxy</option>{value.assetId && !asset ? <option value={value.assetId}>Unavailable saved proxy</option> : null}{assets?.map(item => <option key={item.id} value={item.id}>{item.label}</option>)}</NativeSelect></label>
     <div className="browser-proxy-library__fields">
       <label>Name<TextInput aria-label="Proxy asset name" value={value.label} maxLength={128} onBlur={checkpointDraft} onChange={event => edit({ label: event.target.value })} /></label>
-      <label>Server<TextInput aria-label="Proxy asset server" spellCheck={false} placeholder="http://host:port" value={value.server} onBlur={checkpointDraft} onChange={event => edit({ server: event.target.value })} /></label>
+      <FormRow label="Server" layout="stacked" invalid={Boolean(shownServerError)} error={shownServerError ?? null}>{attributes =>
+        <TextInput {...attributes} aria-label="Proxy asset server" spellCheck={false} placeholder="http://host:port" value={value.server}
+          onBlur={checkpointDraft} onChange={event => edit({ server: event.target.value })} />
+      }</FormRow>
       <label>Don’t proxy<TextInput aria-label="Proxy asset bypass" value={value.bypass} onBlur={checkpointDraft} onChange={event => edit({ bypass: event.target.value })} /></label>
       <label>Notes<Textarea aria-label="Proxy asset notes" value={value.notes} maxLength={2000} onBlur={checkpointDraft} onChange={event => edit({ notes: event.target.value })} /></label>
     </div>
