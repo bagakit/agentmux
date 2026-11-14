@@ -2,7 +2,7 @@ import { sha256 } from '@noble/hashes/sha2.js'
 import { AgentMuxError } from './errors.js'
 import { rpcRecord, rpcString, rpcCount } from './rpc-data.js'
 import { parseTerminalControl, parseTerminalControlResult, type TerminalControlRequest, type TerminalControlReceipt } from './terminal-control.js'
-import { parseAgentStopReceipt, type AgentMuxAgentStopReceipt } from './agent-stop-receipt.js'
+import { parseAgentStopReceipt, parseAgentStopInspection, type AgentMuxAgentStopReceipt, type AgentMuxAgentStopInspection } from './agent-stop-receipt.js'
 
 /** Client-owned workface close: these are frozen references, never a second layout or Runtime. */
 export type SpaceCloseTarget = { kind: 'tab-occurrence'; displayWorkspaceId: string; groupId: string; tabId: string }
@@ -37,7 +37,8 @@ export type SpaceCloseList = { ownerId: string; observedAt: number; coverage: 'l
   nextCursor: NonNullable<SpaceCloseListParams['cursor']> | null; issues: Array<{ code: 'member-unconfirmed'; member: string | null }> }
 
 export type SpaceCloseResourceResult = { key: string; operationId: string; outcome: 'pending' | 'acknowledged' | 'unknown' | 'not-applied';
-  receipt: TerminalControlReceipt | AgentMuxAgentStopReceipt | { kind: 'browser-closed'; browserId: string } | null; issue?: string }
+  receipt: TerminalControlReceipt | AgentMuxAgentStopReceipt | { kind: 'browser-closed'; browserId: string } | null;
+  inspection?: AgentMuxAgentStopInspection; inspectionIssue?: string; issue?: string }
 export type SpaceCloseSave = { layoutApplied: boolean; clientStateWritten: boolean; storageFlushRequested: boolean; diskDurability: 'confirmed' | 'unconfirmed'; reason: string | null }
 export type SpaceCloseProjectionResult = { applied: boolean; removedRegions: string[]; retainedRegions: string[]; save: SpaceCloseSave | null }
 export type SpaceCloseCommitResult = { clientProjection: SpaceCloseProjectionResult; spatialContribution: { save: SpaceCloseSave | null } }
@@ -56,7 +57,7 @@ function invalid(): never { throw new AgentMuxError('The original workface close
 const member = (v: unknown, values: readonly string[]): v is string => typeof v === 'string' && values.includes(v)
 const text = (v: unknown): string => rpcString(v, 'Original workface close reference')
 const bool = (v: unknown): boolean => { if (typeof v !== 'boolean') invalid(); return v }
-const list = <T>(v: unknown, parse: (item: unknown) => T): T[] => { if (!Array.isArray(v) || v.length > 512) invalid(); return v.map(parse) }
+const list = <T>(v: unknown, parse: (item: unknown) => T): T[] => { if (!Array.isArray(v)) invalid(); return v.map(parse) }
 const strings = (v: unknown): string[] => list(v, text)
 const unique = (v: readonly string[]) => { if (new Set(v).size !== v.length) invalid() }
 export const spaceCloseDigest = (v: unknown): string => 'sha256:' + Array.from(sha256(new TextEncoder().encode(JSON.stringify(v))), b => b.toString(16).padStart(2, '0')).join('')
@@ -186,16 +187,21 @@ export function parseSpaceCloseReceipt(value: unknown): SpaceCloseReceipt {
     p.phase === 'prepared' && (!['prepared', 'unknown'].includes(p.outcome as string) || approvedBy !== null) || p.phase !== 'prepared' && !approvedBy || p.issue !== undefined && typeof p.issue !== 'string') invalid()
   const decisions = list(p.decisions, parseSpaceCloseDecision)
   const resources = list(p.resources, value => {
-    const r = rpcRecord(value, ['key', 'operationId', 'outcome', 'receipt', 'issue']), child = plan.children.find(c => c.key === r.key), resource = plan.projection.resources.find(c => c.key === r.key)
-    if (!child || !resource || r.operationId !== child.operationId || !member(r.outcome, ['pending', 'acknowledged', 'unknown', 'not-applied']) || r.issue !== undefined && typeof r.issue !== 'string') invalid()
+    const r = rpcRecord(value, ['key', 'operationId', 'outcome', 'receipt', 'inspection', 'inspectionIssue', 'issue']), child = plan.children.find(c => c.key === r.key), resource = plan.projection.resources.find(c => c.key === r.key)
+    if (!child || !resource || r.operationId !== child.operationId || !member(r.outcome, ['pending', 'acknowledged', 'unknown', 'not-applied']) || r.issue !== undefined && typeof r.issue !== 'string' || r.inspectionIssue !== undefined && typeof r.inspectionIssue !== 'string') invalid()
     let receipt: SpaceCloseResourceResult['receipt'] = null
     if (r.receipt !== null) {
       if (resource.kind === 'browser') { const b = rpcRecord(r.receipt, ['kind', 'browserId']); if (b.kind !== 'browser-closed' || b.browserId !== resource.browserId) invalid(); receipt = { kind: 'browser-closed', browserId: resource.browserId } }
       else if (resource.control.kind === 'terminal') { if (!child.terminal) invalid(); receipt = parseTerminalControlResult(r.receipt, child.terminal) }
       else { receipt = parseAgentStopReceipt(r.receipt, { agentSessionId: resource.control.agentSessionId }); if (receipt.expectedRun.runId !== resource.control.run.runId || receipt.admission === 'new' && receipt.operationId !== child.operationId) invalid() }
     }
+    let inspection: AgentMuxAgentStopInspection | undefined
+    if (r.inspection !== undefined) {
+      if (resource.kind !== 'session' || resource.control.kind !== 'agent') invalid()
+      inspection = parseAgentStopInspection(r.inspection, { agentSessionId: resource.control.agentSessionId, expectedRun: resource.control.run, operationId: child.operationId })
+    }
     if (r.outcome === 'acknowledged' && (receipt === null || 'action' in receipt && !['applied', 'no-op'].includes(receipt.outcome))) invalid()
-    return { key: text(r.key), operationId: text(r.operationId), outcome: r.outcome as SpaceCloseResourceResult['outcome'], receipt, ...(r.issue === undefined ? {} : { issue: r.issue as string }) }
+    return { key: text(r.key), operationId: text(r.operationId), outcome: r.outcome as SpaceCloseResourceResult['outcome'], receipt, ...(inspection ? { inspection } : {}), ...(r.inspectionIssue === undefined ? {} : { inspectionIssue: r.inspectionIssue as string }), ...(r.issue === undefined ? {} : { issue: r.issue as string }) }
   })
   unique(resources.map(r => r.key)); if (resources.length !== plan.children.length) invalid()
   const spatial = rpcRecord(p.spatialContribution, ['save'])
@@ -229,6 +235,7 @@ export function parseSpaceCloseList(value: unknown, input: SpaceCloseListParams)
   return { ownerId, observedAt: p.observedAt as number, coverage: 'live-page', availability: p.availability, items, nextCursor, issues }
 }
 export function parseSpaceCloseResult<M extends SpaceCloseMethod>(method: M, value: unknown, input: SpaceCloseParams[M]): SpaceCloseResults[M] {
+  input = parseSpaceCloseParams(method, input)
   if (method === 'space.close.ls') return parseSpaceCloseList(value, input as SpaceCloseListParams) as SpaceCloseResults[M]
   const p = rpcRecord(value, ['operation'], 'CONTROL_PROTOCOL_ERROR'), operation = p.operation === null ? null : parseSpaceCloseReceipt(p.operation)
   const operationId = (input as SpaceCloseInspect).operationId

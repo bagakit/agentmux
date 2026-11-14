@@ -15,6 +15,7 @@ export type WorkbenchClosePorts = {
   reserve(record: SpaceCloseReceipt): Promise<void>
   validate(record: SpaceCloseReceipt, key: string): Promise<void>
   effect(resource: SpaceCloseResource, child: SpaceClosePlan['children'][number], context: SpaceCloseContext): Promise<SpaceCloseResourceResult>
+  inspect(resource: SpaceCloseResource, child: SpaceClosePlan['children'][number], context: SpaceCloseContext): Promise<Pick<SpaceCloseResourceResult, 'receipt' | 'inspection'> | null>
   commit(record: SpaceCloseReceipt): Promise<SpaceCloseCommitResult>
   release(record: SpaceCloseReceipt): Promise<void>
 }
@@ -29,10 +30,18 @@ export class WorkbenchCloseOwner implements SpaceClosePort {
   private readonly acknowledgedImages = new Map<string, string>()
   private readonly writes = new Map<string, Promise<void>>()
   private readonly observationVersions = new Map<string, number>()
+  /** Only admitted work/reads retain a shared image, never the historical namespace. */
+  private readonly live = new Map<string, { record: SpaceCloseReceipt; references: number; applying: boolean }>()
   private readonly directory: string
   private readonly ownerId: string
   constructor(store: Pick<WorkbenchUserStateStore, 'path'>, private readonly ports: WorkbenchClosePorts) { this.directory = store.path + '.close-operations'; this.ownerId = spaceCloseDigest(store.path) }
   private path(id: string): string { return join(this.directory, hash(id) + '.json') }
+  private retain(record: SpaceCloseReceipt) {
+    let entry = this.live.get(record.operationId)
+    if (!entry) { entry = { record, references: 0, applying: false }; this.live.set(record.operationId, entry) }
+    entry.references++
+    return { entry, release: () => { if (--entry!.references === 0) this.live.delete(record.operationId) } }
+  }
   private async marker(path: string, value: unknown): Promise<boolean> {
     await mkdir(this.directory, { recursive: true, mode: 0o700 }); await syncDirectory(dirname(this.directory))
     const handle = await open(path, 'wx', 0o600).catch(error => { if ((error as NodeJS.ErrnoException).code === 'EEXIST') return null; throw error })
@@ -46,6 +55,7 @@ export class WorkbenchCloseOwner implements SpaceClosePort {
     catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false; throw error }
   }
   private async read(id: string, diskOnly = false): Promise<SpaceCloseReceipt | null> {
+    if (!diskOnly && this.live.has(id)) return structuredClone(this.live.get(id)!.record)
     if (!diskOnly && this.observed.has(id)) return structuredClone(this.observed.get(id)!)
     let image: string
     try { image = await readFile(this.path(id), 'utf8') }
@@ -128,24 +138,25 @@ export class WorkbenchCloseOwner implements SpaceClosePort {
     return structuredClone(record)
   }
   private async observeEffect(record: SpaceCloseReceipt, index: number, resource: SpaceCloseResource, child: SpaceClosePlan['children'][number], context: SpaceCloseContext): Promise<SpaceCloseResourceResult> {
-    const pending = this.ports.effect(resource, child, context)
+    const lease = this.retain(record), pending = Promise.resolve().then(() => this.ports.effect(resource, child, context))
     let timer: NodeJS.Timeout | undefined, expired = false
     try { return await Promise.race([pending, new Promise<never>((_resolve, reject) => {
       timer = setTimeout(() => { expired = true; reject(unavailable('This child result is unconfirmed after five seconds; its original effect was not cancelled.')) }, 5_000)
     })]) }
     finally {
       if (timer) clearTimeout(timer)
-      if (expired) void pending.then(async result => {
+      if (!expired) lease.release()
+      else void pending.then(async result => {
         // A late original ACK updates only its retained facts, never the projection a second time.
         const resources = [...record.resources]; resources[index] = result
         parseSpaceCloseReceipt({ ...record, resources }); record.resources = resources
         await this.save(record)
-      }).catch(error => { record.issue = [record.issue, 'The original late child result remains unconfirmed: ' + String(error)].filter(Boolean).join('\n') })
+      }).catch(error => { record.issue = [record.issue, 'The original late child result remains unconfirmed: ' + String(error)].filter(Boolean).join('\n') }).finally(lease.release)
     }
   }
   private async apply(input: SpaceCloseApply, context: SpaceCloseContext): Promise<SpaceCloseReceipt> {
     if (context.actor.kind === 'agent') throw new AgentMuxError('A managed Agent cannot approve discard, Stop or Browser close.', 'CONTROL_PERMISSION_DENIED')
-    const record = await this.read(input.operationId)
+    let record = await this.read(input.operationId)
     if (!record || record.planDigest !== input.expectedPlanDigest) throw unavailable('The exact original prepared plan is unavailable or has another digest.')
     const sorted = (values: unknown[]) => values.map(spaceCloseDigest).sort()
     if (!same(sorted(input.decisions), sorted(spaceCloseDecisions(record.plan)))) throw new AgentMuxError('Confirm every exact original draft and resource decision, without duplicates or substitutions.', 'WORKBENCH_CLOSE_DECISIONS_REQUIRED')
@@ -161,38 +172,41 @@ export class WorkbenchCloseOwner implements SpaceClosePort {
       if (!original) throw unavailable('The original apply result is unavailable.')
       return original
     }
-    record.approvedBy = context.actor; record.decisions = input.decisions; record.phase = 'applying'; record.outcome = 'unknown'
-    await this.save(record)
-    if (record.diskDurability !== 'confirmed') return structuredClone(record)
+    const lease = this.retain(record); record = lease.entry.record; lease.entry.applying = true
     try {
-      await this.ports.reserve(record)
-      await Promise.all(record.plan.children.map(async child => {
-        const index = record.resources.findIndex(r => r.key === child.key), resource = record.plan.projection.resources.find(r => r.key === child.key)!
-        try {
-          await context.assertCurrent?.(); context.signal?.throwIfAborted()
-          if (!same(record.plan.authority, this.ports.authority())) throw unavailable('The original workface document changed before this child effect.')
-          await this.ports.validate(record, child.key)
-          if (child.issue) throw unavailable('The original raw Native fence was unconfirmed at preparation.')
-          record.resources[index] = await this.observeEffect(record, index, resource, child, context)
-          // Validate the real child receipt against its frozen original before consuming it.
-          parseSpaceCloseReceipt(record)
-        } catch (error) {
-          record.resources[index] = { key: child.key, operationId: child.operationId, outcome: 'unknown', receipt: null, issue: String(error) }
-        }
-        await this.save(record)
-      }))
-      while (this.writes.has(record.operationId)) await this.writes.get(record.operationId)
+      record.approvedBy = context.actor; record.decisions = input.decisions; record.phase = 'applying'; record.outcome = 'unknown'
+      await this.save(record)
       if (record.diskDurability !== 'confirmed') return structuredClone(record)
-      const committed = parseSpaceCloseCommitResult(await this.ports.commit(record))
-      record.clientProjection = committed.clientProjection; record.spatialContribution = committed.spatialContribution
-      record.phase = 'settled'
-      record.outcome = record.clientProjection.retainedRegions.length || record.resources.some(r => r.outcome !== 'acknowledged') ? 'partial'
-        : record.clientProjection.save?.diskDurability === 'confirmed' && record.spatialContribution.save?.diskDurability === 'confirmed' ? 'applied' : 'unknown'
-    } catch (error) {
-      record.phase = 'settled'; record.outcome = 'unknown'; record.issue = String(error)
-    } finally { await this.ports.release(record).catch(error => { record.issue = [record.issue, 'Releasing original close reservation is unconfirmed: ' + String(error)].filter(Boolean).join('\n') }) }
-    await this.save(record)
-    return structuredClone(record)
+    try {
+        await this.ports.reserve(record)
+        await Promise.all(record.plan.children.map(async child => {
+          const index = record.resources.findIndex(r => r.key === child.key), resource = record.plan.projection.resources.find(r => r.key === child.key)!
+          try {
+            await context.assertCurrent?.(); context.signal?.throwIfAborted()
+            if (!same(record.plan.authority, this.ports.authority())) throw unavailable('The original workface document changed before this child effect.')
+            await this.ports.validate(record, child.key)
+            if (child.issue) throw unavailable('The original raw Native fence was unconfirmed at preparation.')
+            record.resources[index] = await this.observeEffect(record, index, resource, child, context)
+            // Validate the real child receipt against its frozen original before consuming it.
+            parseSpaceCloseReceipt(record)
+          } catch (error) {
+            record.resources[index] = { key: child.key, operationId: child.operationId, outcome: 'unknown', receipt: null, issue: String(error) }
+          }
+          await this.save(record)
+        }))
+        while (this.writes.has(record.operationId)) await this.writes.get(record.operationId)
+        if (record.diskDurability !== 'confirmed') return structuredClone(record)
+        const committed = parseSpaceCloseCommitResult(await this.ports.commit(record))
+        record.clientProjection = committed.clientProjection; record.spatialContribution = committed.spatialContribution
+        record.phase = 'settled'
+        record.outcome = record.clientProjection.retainedRegions.length || record.resources.some(r => r.outcome !== 'acknowledged') ? 'partial'
+          : record.clientProjection.save?.diskDurability === 'confirmed' && record.spatialContribution.save?.diskDurability === 'confirmed' ? 'applied' : 'unknown'
+      } catch (error) {
+        record.phase = 'settled'; record.outcome = 'unknown'; record.issue = String(error)
+      } finally { await this.ports.release(record).catch(error => { record.issue = [record.issue, 'Releasing original close reservation is unconfirmed: ' + String(error)].filter(Boolean).join('\n') }) }
+      await this.save(record)
+      return structuredClone(record)
+    } finally { lease.entry.applying = false; lease.release() }
   }
   private async list(value: SpaceCloseListParams, context: SpaceCloseContext): Promise<SpaceCloseList> {
     const input = parseSpaceCloseListParams(value), actorScope = spaceCloseDigest(context.actor), cursor = input.cursor
@@ -248,8 +262,39 @@ export class WorkbenchCloseOwner implements SpaceClosePort {
     if (method === 'space.close.ls') return await this.list(input as SpaceCloseListParams, context) as SpaceCloseResults[M]
     if (method === 'space.close.prepare') return { operation: await this.prepare(input as SpaceClosePrepare, context) } as SpaceCloseResults[M]
     if (method === 'space.close.apply') return { operation: await this.apply(input as SpaceCloseApply, context) } as SpaceCloseResults[M]
-    const operation = await this.read((input as { operationId: string }).operationId)
-    if (operation) this.authorizeRead(operation, context)
+    let operation = await this.read((input as { operationId: string }).operationId)
+    if (operation) {
+      this.authorizeRead(operation, context)
+      if (operation.phase !== 'prepared' && context.actor.kind !== 'agent') {
+        const lease = this.retain(operation), querying = lease.entry.record; operation = querying
+        try {
+          if (lease.entry.applying) return { operation: structuredClone(querying) } as SpaceCloseResults[M]
+          let changed = false
+          await Promise.all(querying.resources.map(async (original, index) => {
+            if (original.outcome !== 'unknown' && original.outcome !== 'pending') return
+            const child = querying.plan.children.find(c => c.key === original.key)!, resource = querying.plan.projection.resources.find(r => r.key === child.key)!
+            try {
+              await context.assertCurrent?.(); context.signal?.throwIfAborted()
+              const facts = await this.ports.inspect(resource, child, context)
+              if (!facts) return
+              const current = querying.resources[index]!
+              if (current.outcome !== 'unknown' && current.outcome !== 'pending') return
+              const { inspectionIssue: _previousRead, ...retained } = current
+              const candidate = { ...retained, ...facts, outcome: facts.receipt && 'action' in facts.receipt && ['applied', 'no-op'].includes(facts.receipt.outcome) ? 'acknowledged' as const : current.outcome }
+              const resources = [...querying.resources]; resources[index] = candidate
+              parseSpaceCloseReceipt({ ...querying, resources })
+              if (!same(current, candidate)) { querying.resources[index] = candidate; changed = true }
+            } catch (error) {
+              const current = querying.resources[index]!, inspectionIssue = 'Reading this original child is unconfirmed: ' + String(error)
+              if ((current.outcome === 'unknown' || current.outcome === 'pending') && current.inspectionIssue !== inspectionIssue) { querying.resources[index] = { ...current, inspectionIssue }; changed = true }
+            }
+          }))
+          // Only facts change. In particular a recovered child ACK never repeats
+          // the final projection transaction or consumes another draft witness.
+          if (changed) await this.save(querying)
+        } finally { lease.release() }
+      }
+    }
     return { operation } as SpaceCloseResults[M]
   }
 }
@@ -307,6 +352,24 @@ export function createDesktopWorkbenchCloseOwner(input: {
         if (receipt.expectedRun.runId !== resource.control.run.runId) throw unavailable('The original Agent Stop returned another Run.')
       }
       return { key: child.key, operationId: child.operationId, outcome: 'action' in receipt && !['applied', 'no-op'].includes(receipt.outcome) ? 'unknown' : 'acknowledged', receipt }
+    },
+    inspect: async (resource, child, context) => {
+      if (resource.kind === 'browser') return null // No original queryable Browser close ACK exists.
+      if (resource.control.kind === 'agent') {
+        const inspection = await input.runtime.callOriginalCore(resource.control.hostId, 'agent.stop.inspect', {
+          agentSessionId: resource.control.agentSessionId, expectedRun: resource.control.run, operationId: child.operationId
+        }, context.originalContext)
+        return { receipt: null, inspection }
+      }
+      if (!child.terminal) return null
+      const result = await input.runtime.callOriginalCore(resource.control.hostId, 'terminal.operation.inspect', {
+        hostId: 'local', run: resource.control.run, runtimeId: child.terminal.target.runtimeId, operationId: child.operationId
+      }, context.originalContext)
+      if (!result.operation) return null
+      const original = { ...child.terminal, target: { ...child.terminal.target, hostId: 'local' } }
+      const receipt = parseTerminalControlResult(result.operation, original)
+      if (context.actor.kind === 'device' && !same(receipt.actor, context.actor)) throw unavailable('The original device was not preserved by the child observation.')
+      return { receipt: { ...receipt, target: { ...receipt.target, hostId: resource.control.hostId } } }
     }
   })
 }

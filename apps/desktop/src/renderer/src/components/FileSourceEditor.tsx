@@ -1,5 +1,6 @@
 import '../monaco'
 import { setNoteComposition } from '../lib/note-live-merge'
+import { mintObjectId } from '@agentmux/core/object-id'
 import Editor, { type OnMount } from '@monaco-editor/react'
 import { useEffect, useLayoutEffect, useRef, type RefObject } from 'react'
 import { copyTextToClipboard } from '../lib/clipboard-copy'
@@ -49,6 +50,7 @@ export function FileSourceEditor({ tabId, surface, visible = true, viewState }: 
   const monacoTheme = useMonacoTheme()
   const typography = useEditorTypography()
   const editorRef = useRef<MonacoStandaloneEditor | null>(null)
+  const clearComposition = useRef<(() => void) | null>(null)
   const unregisterFormatter = useRef<(() => void) | null>(null)
   const editorDocument = useRef(hostDocument)
   useLayoutEffect(() => {
@@ -61,7 +63,8 @@ export function FileSourceEditor({ tabId, surface, visible = true, viewState }: 
   const visibleRef = useRef(visible)
   visibleRef.current = visible
   useLayoutEffect(() => () => {
-    setNoteComposition(key, `file-source:${surface.regionId}`, false)
+    clearComposition.current?.()
+    clearComposition.current = null
     unregisterFormatter.current?.()
     unregisterFormatter.current = null
     const editor = editorRef.current
@@ -194,8 +197,6 @@ export function FileSourceEditor({ tabId, surface, visible = true, viewState }: 
     // agent-context item must appear only for a multi-line selection, so we own that key and refresh
     // it whenever the selection changes. Same key name as the action's precondition (one constant).
     const multiline = editor.createContextKey<boolean>(MULTILINE_SELECTION_CONTEXT_KEY, false)
-    editor.onDidCompositionStart(() => setNoteComposition(key, `file-source:${surface.regionId}`, true))
-    editor.onDidCompositionEnd(() => setNoteComposition(key, `file-source:${surface.regionId}`, false))
     editor.onDidChangeCursorSelection((event) => {
       multiline.set(hasMultilineSelection(event.selection.startLineNumber, event.selection.endLineNumber))
     })
@@ -250,6 +251,13 @@ export function FileSourceEditor({ tabId, surface, visible = true, viewState }: 
     value={document.content}
     onChange={(value) => update(tabId, value ?? '', surface.regionId)}
     onMount={(editor, monaco) => {
+      clearComposition.current?.()
+      const compositionOwner = `file-source:${mintObjectId()}`
+      let live = true
+      const clear = () => { live = false; setNoteComposition(key, compositionOwner, false) }
+      clearComposition.current = clear
+      editor.onDidCompositionStart(() => { if (live) setNoteComposition(key, compositionOwner, true) })
+      editor.onDidCompositionEnd(() => { if (live) setNoteComposition(key, compositionOwner, false) })
       editorRef.current = editor
       unregisterFormatter.current?.()
       const unregister = registerFileRegionFormatter(surface.regionId, monacoFormatAdapter(editor, {
@@ -279,7 +287,8 @@ export function FileSourceEditor({ tabId, surface, visible = true, viewState }: 
       // Monaco owns the editor lifetime. Clear only the instance that disposed itself so a
       // late dispose from an old Region cannot erase a newer editor reference after restore.
       editor.onDidDispose(() => {
-        setNoteComposition(key, `file-source:${surface.regionId}`, false)
+        clear()
+        if (clearComposition.current === clear) clearComposition.current = null
         unregister()
         if (editorRef.current === editor) editorRef.current = null
       })

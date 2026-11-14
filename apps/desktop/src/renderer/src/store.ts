@@ -278,7 +278,7 @@ import {
   retainUnconfirmedStop, sessionStopErrorCode, sessionStopFailedStage, sessionStopFailure, sessionStopInspectCommand, sessionStopIntentFor,
   settleSessionStop, STALE_STOP_CODE, unconfirmedStopFor, type SessionStopOutcome
 } from './lib/session-stop-intent'
-import { acceptAgentStopReceipt } from './lib/agent-operation-feedback'
+import { acceptAgentStopReceipt, beginAgentOperation, updateAgentOperation } from './lib/agent-operation-feedback'
 import { beginMoteStartupRecovery, cancelMoteSessionRecovery, deferScratchConversationRecovery, recoverMoteConversationAtStartup, recoverScratchConversationsAtStartup } from './lib/mote-session-recovery'
 import { agentContinuityDetail, currentUnconfirmedResumeOperation } from './lib/continuity-presentation'
 import { publishWorkbenchTabRemoved } from './lib/workbench-tab-removal'
@@ -8075,7 +8075,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   async prepareWorkbenchClose(input) {
     const request: SpaceClosePrepare = { ...input, operationId: input.operationId ?? mintObjectId() }
     const result = parseSpaceCloseResult('space.close.prepare', await api.workbenchClose.call('space.close.prepare', request), request)
-    if (!result.operation || result.operation.diskDurability !== 'confirmed') throw new Error('The original close plan has no confirmed save. Its ID, workface and drafts are retained; inspect the same operation.')
+    if (!result.operation || !__AGENTMUX_WEB_PREVIEW__ && result.operation.diskDurability !== 'confirmed') throw new Error('The original close plan has no confirmed save. Its ID, workface and drafts are retained; inspect the same operation.')
     return result.operation
   },
   async applyWorkbenchClose(record) {
@@ -8096,6 +8096,14 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     const record = parseSpaceCloseReceipt(request.record), target = record.plan.target
     const held = () => get().closingWorkbenchViews[target.tabId]?.operationId === record.operationId
     if (request.operation === 'workbench.close.release') {
+      for (const resource of record.plan.projection.resources) {
+        if (resource.kind !== 'session' || resource.control.kind !== 'agent') continue
+        const child = record.plan.children.find(c => c.key === resource.key)!, result = record.resources.find(r => r.key === resource.key)!
+        const operation = { kind: 'stop' as const, operationId: child.operationId, control: resource.control,
+          subject: { hostId: resource.control.hostId, agentSessionId: resource.control.agentSessionId }, startedAt: record.preparedAt, phase: 'pending' as const }
+        if (result.receipt && 'agentSessionId' in result.receipt) acceptAgentStopReceipt(operation, result.receipt)
+        else updateAgentOperation(operation, { phase: 'unconfirmed', canContinue: false, message: `原关闭 ${record.operationId} 的停止请求尚未确认；原工作面与草稿保留。${result.issue ?? ''}` })
+      }
       set(current => {
         if (current.closingWorkbenchViews[target.tabId]?.operationId !== record.operationId) return current
         const closingWorkbenchViews = { ...current.closingWorkbenchViews }; delete closingWorkbenchViews[target.tabId]
@@ -8110,6 +8118,14 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       set(current => ({ closingWorkbenchViews: { ...current.closingWorkbenchViews, [target.tabId]: {
         operationId: record.operationId, tabId: target.tabId, ...(target.kind === 'region' ? { regionId: target.regionId } : {}),
         reservedSessionIds: [] } } }))
+      // Existing client intent references feed the nonmodal card/Header only;
+      // they grant no Core stopping fact and reserve no input capability.
+      for (const resource of record.plan.projection.resources) if (resource.kind === 'session' && resource.control.kind === 'agent') {
+        const child = record.plan.children.find(c => c.key === resource.key)!
+        beginAgentOperation({ kind: 'stop', operationId: child.operationId, control: resource.control,
+          subject: { hostId: resource.control.hostId, agentSessionId: resource.control.agentSessionId }, startedAt: record.preparedAt,
+          phase: 'pending', canContinue: false, message: `原关闭请求 ${record.operationId} 已批准；此处观察停止子请求，不代表 Core 已确认停止。` })
+      }
       return { operation: request.operation, requestId: request.requestId }
     }
     if (!held()) throw new Error('The original close reservation is unavailable. The current workface and drafts are retained.')

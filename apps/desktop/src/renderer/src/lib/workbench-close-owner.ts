@@ -30,7 +30,7 @@ function originalPlan(state: State, input: SpaceClosePrepare): WorkbenchViewClos
 }
 function draftBusy(state: State, workspaceId: string, path: string): boolean {
   const key = documentKey(workspaceId, path), editing = state.documents[key]?.noteEditing
-  return state.savingDocuments[key] === true || fileSaveTails.has(key) || hasNoteComposition(key) || Boolean(editing?.attempt || editing?.input || editing?.share || editing?.shareUndo)
+  return state.dirtyDocuments[key] === true && !state.documents[key] || state.savingDocuments[key] === true || fileSaveTails.has(key) || hasNoteComposition(key) || Boolean(editing?.attempt || editing?.input || editing?.share || editing?.shareUndo)
 }
 function fileWitness(state: State, workspaceId: string, path: string, cache?: Map<string, string>): string {
   const key = documentKey(workspaceId, path), document = state.documents[key], workspace = state.config?.workspaces.find(w => w.id === workspaceId)
@@ -120,7 +120,12 @@ export function reconcileWorkbenchClose(state: State, record: SpaceCloseReceipt)
 
 /** Both GUI choices are prepared before confirmation; Keep cannot consume a newer draft or binding. */
 export function samePreparedCloseReview(left: SpaceCloseReceipt, right: SpaceCloseReceipt): boolean {
-  return spaceCloseDigest(left.plan.projection.drafts) === spaceCloseDigest(right.plan.projection.drafts) &&
+  const a = left.plan.projection, b = right.plan.projection
+  const occurrences = (p: SpaceCloseProjection) => p.otherOccurrences.map(spaceCloseDigest).sort()
+  return spaceCloseDigest(left.plan.authority) === spaceCloseDigest(right.plan.authority) && spaceCloseDigest(left.plan.target) === spaceCloseDigest(right.plan.target) &&
+    a.workspaceId === b.workspaceId && a.tabGroupId === b.tabGroupId && a.tabId === b.tabId && a.closesView === b.closesView &&
+    a.surfaces.length === b.surfaces.length && spaceCloseDigest(occurrences(a)) === spaceCloseDigest(occurrences(b)) &&
+    spaceCloseDigest(a.drafts) === spaceCloseDigest(b.drafts) &&
     left.plan.projection.surfaces.every(surface => {
       const other = right.plan.projection.surfaces.find(s => s.owner.regionId === surface.owner.regionId)
       return other && spaceCloseDigest(surface.binding) === spaceCloseDigest(other.binding) &&

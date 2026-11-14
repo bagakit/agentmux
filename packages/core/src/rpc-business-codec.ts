@@ -443,8 +443,8 @@ export function parseRpcControlResult(method: keyof typeof AGENTMUX_RPC_CONTROL_
   if (['schemaVersion', 'requestId', 'operation'].some(key => Object.hasOwn(body, key))) {
     throw new AgentMuxError('RPC result contains an internal Control envelope.', 'CONTROL_PROTOCOL_ERROR')
   }
-  // Maintenance receipts already own operationId; it is not a Control requestId.
-  const legacy = (isBrowserProfileExtensionOperation(method) || (isBrowserProfileBookmarkOperation(method) || isBrowserProfileCookieFileOperation(method))) || method === 'browser.create' || method === 'browser.close' || method === 'settings.hosts.install' || method === 'settings.hosts.install-inspect' || method === 'settings.hosts.upgrade' || method === 'settings.hosts.upgrade-inspect' || method === 'settings.hosts.upgrade-reconnect' ? body
+  // Business receipts already own operationId; it is not a Control requestId.
+  const legacy = method === 'agent.stop' || (isBrowserProfileExtensionOperation(method) || (isBrowserProfileBookmarkOperation(method) || isBrowserProfileCookieFileOperation(method))) || method === 'browser.create' || method === 'browser.close' || method === 'settings.hosts.install' || method === 'settings.hosts.install-inspect' || method === 'settings.hosts.upgrade' || method === 'settings.hosts.upgrade-inspect' || method === 'settings.hosts.upgrade-reconnect' ? body
     : operationKeys(method.startsWith('goal.') && method !== 'goal.focus' ? goalKeys(body, true) : body, true)
   const operation = AGENTMUX_RPC_CONTROL_METHODS[method]
   // The spatial owner validates this envelope against the same durable business
