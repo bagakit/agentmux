@@ -19,18 +19,21 @@ it('locates the confirmed Hook issue and clears the dot only after an exact succ
     result: { routeHostId: host.id, runtimeId: target.runtimeId, executors: [descriptor] } } } })
   const { hostId, ...resultTarget } = target
   const base = { routeHostId: hostId, ...resultTarget, canUpdate: true }
+  const revision = 'ae3f1'.repeat(12) + '6d32'
   const legacy = { providerId: 'grok', checkedAt: 1, status: 'partial' as const, code: 'MANAGED_HOOK_LEGACY_CARRIER',
-    action: 'Older callbacks were retained.', targets: [{ path: workspace.path, status: 'partial' as const, legacyDeclarations: 3 }] }
+    action: 'Older callbacks were retained.', targets: [{ path: workspace.path, status: 'partial' as const, legacyDeclarations: 3, expectedRevision: revision }] }
   const maintain = vi.spyOn(api.executors, 'hooks')
     .mockResolvedValueOnce({ ...base, health: 'issue', inspection: legacy, update: { status: 'not-requested' } })
     .mockResolvedValueOnce({ ...base, health: 'issue', inspection: legacy, update: { status: 'unchanged' } })
-    .mockResolvedValueOnce({ ...base, health: 'current', inspection: { ...legacy, targets: [], status: 'installed',
+    .mockResolvedValueOnce({ ...base, health: 'current', inspection: { ...legacy, status: 'installed',
+      targets: [{ path: workspace.path, status: 'current', expectedRevision: revision, observedRevision: revision }],
       action: null, code: 'MANAGED_HOOK_CURRENT' }, update: { status: 'updated', receiptId: 'write-receipt' } })
   await dom.render(<HostExecutorSettings config={composerConfig} active hookNavigation={{ executorId: 'selected' }} />)
   expect(maintain).toHaveBeenNthCalledWith(1, target, false)
   expect(dom.container.querySelector('[aria-label="Hook workspace"]')).toBeNull()
   expect(dom.container.querySelector('[role="img"][aria-label="Hook needs attention"]')).not.toBeNull()
   expect(dom.container.querySelector('[aria-label="Managed Hook"]')?.textContent).toContain('3 older declarations')
+  expect(dom.container.querySelector('[aria-label="Managed Hook"]')?.textContent).toContain('Observed config revisionUnconfirmed')
 
   async function update() {
     const button = [...dom.container.querySelectorAll('button')].find(item => item.textContent === 'Update configuration')!
@@ -43,6 +46,7 @@ it('locates the confirmed Hook issue and clears the dot only after an exact succ
   expect(maintain).toHaveBeenNthCalledWith(3, target, true)
   expect(dom.container.querySelector('[role="img"][aria-label="Hook needs attention"]')).toBeNull()
   expect(dom.container.querySelector('[aria-label="Managed Hook"]')?.textContent).toContain('Loading by existing Runs is unconfirmed')
+  expect(dom.container.querySelector('[aria-label="Managed Hook"]')?.textContent).toContain('Observed config revision' + revision.slice(0, 12))
 })
 
 it('asks for a workspace only when the exact executor resolves relative configuration', async () => {

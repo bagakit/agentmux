@@ -1,4 +1,5 @@
 import { fixtureEpoch as reshapeFixtureEpoch } from './helpers/fixture-values.js'
+import { createHash } from 'node:crypto'
 import { chmod, mkdir, mkdtemp, readFile, readdir, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
@@ -31,6 +32,7 @@ const plan = (): AgentManagedHookPlan => ({ providerId: 'claude', mutations: [{ 
   mode: 0o600, merge: { kind: 'json-managed-events' } }] })
 
 async function snapshot(path: string) { const metadata = await stat(path); return { bytes: await readFile(path), mode: metadata.mode, mtime: metadata.mtimeMs } }
+const revision = (content: string) => createHash('sha256').update(content).digest('hex')
 
 describe('fresh managed Hook disk observations', () => {
   it('observes every existing managed Provider plan and every companion without a second path registry', async () => {
@@ -47,7 +49,8 @@ describe('fresh managed Hook disk observations', () => {
       const before = await Promise.all(resolved.mutations.map(mutation => snapshot(mutation.path)))
       const result = await installer.inspect(resolved)
       expect(result.status, resolved.providerId).toBe('installed')
-      expect(result.targets).toEqual(resolved.mutations.map(mutation => ({ path: mutation.path, status: 'current' })))
+      expect(result.targets).toEqual(resolved.mutations.map(mutation => ({ path: mutation.path, status: 'current',
+        expectedRevision: revision(mutation.content), observedRevision: revision(mutation.content) })))
       expect(await Promise.all(resolved.mutations.map(mutation => snapshot(mutation.path)))).toEqual(before)
       if (resolved.mutations.length > 1) {
         await rm(resolved.mutations[1]!.path)
@@ -59,7 +62,10 @@ describe('fresh managed Hook disk observations', () => {
   it('reads exact current declarations without guessing historical ownership', async () => {
     const resolved = plan(), path = resolved.mutations[0]!.path
     await writeFile(path, JSON.stringify({ secret: 'DO-NOT-REPORT', hooks: { Stop: [{ hooks: [{ type: 'command', command: 'foreign-audit', timeout: 10 }] }] } }))
-    expect((await installer.inspect(resolved)).status).toBe('not_installed')
+    const changed = await installer.inspect(resolved)
+    expect(changed.status).toBe('not_installed')
+    expect(changed.targets[0]).toMatchObject({ expectedRevision: revision(resolved.mutations[0]!.content) })
+    expect(changed.targets[0]).not.toHaveProperty('observedRevision')
     await installer.ensure(resolved)
     const parsed = JSON.parse(await readFile(path, 'utf8'))
     await writeFile(path, JSON.stringify(parsed))
@@ -111,7 +117,8 @@ describe('fresh managed Hook disk observations', () => {
     expect(writes).not.toHaveBeenCalled()
     writes.mockRestore()
     expect(result.status).toBe('error')
-    expect(result.targets).toEqual([{ path, status: 'error', code: mode === 'json' || mode === 'schema' || mode === 'utf8' ? 'HOOK_TARGET_UNPARSEABLE'
+    expect(result.targets).toEqual([{ path, status: 'error', expectedRevision: revision(resolved.mutations[0]!.content),
+      code: mode === 'json' || mode === 'schema' || mode === 'utf8' ? 'HOOK_TARGET_UNPARSEABLE'
       : mode === 'oversized' || mode === 'growth' ? 'HOOK_FILE_TOO_LARGE' : mode === 'symlink' ? 'UNSAFE_HOOK_TARGET' : 'HOOK_TARGET_READ_FAILED' }])
     expect(JSON.stringify(result)).not.toContain('DO-NOT-REPORT')
     await expect(stat(join(root, 'receipts'))).rejects.toMatchObject({ code: 'ENOENT' })
@@ -137,7 +144,8 @@ describe('fresh managed Hook disk observations', () => {
     await writeFile(hermes.mutations[1]!.path, JSON.stringify(approvals))
     const before = await Promise.all(hermes.mutations.map(mutation => snapshot(mutation.path)))
     const result = await installer.inspect(hermes)
-    expect(result.targets).toEqual(hermes.mutations.map(mutation => ({ path: mutation.path, status: 'current' })))
+    expect(result.targets).toEqual(hermes.mutations.map(mutation => ({ path: mutation.path, status: 'current',
+      expectedRevision: revision(mutation.content), observedRevision: revision(mutation.content) })))
     expect(result.status).toBe('installed')
     expect(await Promise.all(hermes.mutations.map(mutation => snapshot(mutation.path)))).toEqual(before)
     expect(JSON.stringify(result)).not.toMatch(/private-credential|foreign-shell-hook|native-extra-fact/)

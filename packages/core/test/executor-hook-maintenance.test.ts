@@ -101,7 +101,10 @@ it('checks the exact Host and preserves coexisting legacy entries through a mana
     expect(JSON.parse(await readFile(mutation.path, 'utf8')).hooks.PreToolUse).toEqual([user, ...current.hooks.PreToolUse])
     const readback = await cli('hooks-inspect')
     expect(readback.code, readback.stderr).toBe(0)
-    expect(JSON.parse(readback.stdout).result).toMatchObject({ health: 'current', update: { status: 'not-requested' } })
+    const observed = JSON.parse(readback.stdout).result
+    expect(observed).toMatchObject({ health: 'current', update: { status: 'not-requested' },
+      inspection: { targets: [{ path: mutation.path, expectedRevision: expect.stringMatching(/^[0-9a-f]{64}$/) }] } })
+    expect(observed.inspection.targets[0].observedRevision).toBe(observed.inspection.targets[0].expectedRevision)
     const invalid = '{"hooks":'
     await writeFile(mutation.path, invalid)
     const refused = await client.call('settings.executors.hooks-update', target)
