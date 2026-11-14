@@ -11,7 +11,7 @@ type State = ReturnType<typeof useAppStore.getState>
 // This is the read protocol for the retained Pane/Composer, not a second Store.
 // A new fact read must join its notification owner here; actions are imperative.
 const sharedFacts = {
-  composer: ['config', 'scratchTopicSnapshots', 'providerCatalog', 'errorNoticeContext', 'error', 'lastError', 'lastActiveFileByWorkspace'],
+  composer: ['config', 'scratchTopicSnapshots', 'providerCatalog', 'lastActiveFileByWorkspace'],
   sessionPane: ['config', 'workbenchSaveWarning', 'scratchTopicSnapshots', 'runtimeEndpointWarnings', 'providerCatalog',
     'localHome', 'demands', 'layouts', 'spaceZoneBindings', 'spatialRequests', 'topicCategories', 'projectGroups'],
   reactions: ['config'],
