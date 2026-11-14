@@ -13,6 +13,7 @@ import { awaitDesktopPresentation, readDesktopOverlays } from '../../lib/desktop
 import { tabGroupForTab, workbenchSurfaces, type BrowserWorkbenchSurface } from '../../lib/workbench-tabs'
 import { PROFILE_HUES, ProfileMark, profileTone, assignProfileHues } from '../ProfileMark'
 import { BrowserProfileLibrary } from './BrowserProfileLibrary'
+import { BrowserProfileTrash } from './BrowserProfileTrash'
 import { ProfileExitCheck, ProfileNetworkRoute, ProfileProxySignIn } from './BrowserProfileNetwork'
 import { ProfileEnvironmentEditor } from './ProfileEnvironmentEditor'
 import { BrowserProfileOrganization } from './BrowserProfileOrganization'
@@ -107,6 +108,9 @@ export function BrowserProfilesSettingsPane({ active, onClose = () => {} }: { ac
   const folders = list.folders ?? []
   const hueAssignment = useMemo(() => assignProfileHues(profiles), [list.profiles])
   const openCounts = useMemo(() => new Map(profiles.map(profile => [profile.id, usesOf(profile.id, surfaces).filter(use => use.state === 'open').length])), [list.profiles, surfaces])
+  const [showTrash, setShowTrash] = useState(false)
+  const retainedEditor = useRef<BrowserProfileSummary | null>(null)
+  const [restoredTarget, setRestoredTarget] = useState<{ id: string; label: string } | null>(null)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [view, setView] = useState<'library' | 'editor'>('editor')
   const [returnFocus, setReturnFocus] = useState<{ id: string | null } | null>(null)
@@ -114,10 +118,12 @@ export function BrowserProfilesSettingsPane({ active, onClose = () => {} }: { ac
   const [error, setError] = useState<string | null>(null)
   // The refusal's machine code decides recovery; the shown sentence never does.
   const [errorCode, setErrorCode] = useState<string | null>(null)
-  // A delete that committed while its site data still clears: the Profile is gone, so the notice outlives its editor.
+  // A confirmed recycle/restore notice outlives the editor without discarding its draft.
   const [notice, setNotice] = useState<string | null>(null)
   const [copyTarget, setCopyTarget] = useState<{ id: string; label: string } | null>(null)
-  const selected = profiles.find(profile => profile.id === selectedId) ?? profiles.find(profile => profile.isDefault) ?? profiles[0] ?? null
+  const selected = profiles.find(profile => profile.id === selectedId) ?? (retainedEditor.current?.id === selectedId ? retainedEditor.current : null) ?? profiles.find(profile => profile.isDefault) ?? profiles[0] ?? null
+  if (selected) retainedEditor.current = selected
+  const selectedIsActive = selected !== null && profiles.some(profile => profile.id === selected.id)
   useEffect(() => { if (active) void browserProfiles.refresh() }, [active])
 
   const run = (async (key: string, action: () => Promise<unknown>, report = false) => {
@@ -127,6 +133,7 @@ export function BrowserProfilesSettingsPane({ active, onClose = () => {} }: { ac
     catch (cause) {
       const failure = { code: describeError(cause).code ?? null, message: presentError(cause) }
       setError(failure.message); setErrorCode(failure.code)
+      if (failure.code === 'BROWSER_PROFILE_WRITE_UNCONFIRMED') { setNotice(failure.message); setCopyTarget(null) }
       return report ? failure : false
     }
     finally { setBusy(null) }
@@ -163,19 +170,24 @@ export function BrowserProfilesSettingsPane({ active, onClose = () => {} }: { ac
         <button className="small-button" type="button" aria-label="New Profile" title="New Profile" disabled={busy !== null || !list.profiles} onClick={() => void create()}>
           {busy === 'create' ? <ThemeStatusLoadingIcon animation="spin" size={13} /> : <ThemeActionCreateIcon size={13} />} New
         </button>
+        <button className="small-button" type="button" aria-pressed={showTrash} onClick={() => setShowTrash(value => !value)}>Recycled Profiles</button>
         <ImportMenu disabled={busy !== null || !list.profiles} onImported={id => { setSelectedId(id); setView('editor') }} />
       </div>
       {notice ? <p className="browser-profiles-settings__service" role="status">{notice}{' '}
         {copyTarget ? <button type="button" onClick={() => { setSelectedId(copyTarget.id); setView('editor'); setRenameRequest(copyTarget.id); setCopyTarget(null); setNotice(null) }}>Edit copy</button> : null}{' '}
-        <button type="button" aria-label="Dismiss" onClick={() => { setNotice(null); setCopyTarget(null) }}>Dismiss</button></p> : null}
+        {restoredTarget ? <button type="button" onClick={() => { setSelectedId(restoredTarget.id); setShowTrash(false); setView('editor'); setRestoredTarget(null); setNotice(null) }}>Edit restored Profile</button> : null}{' '}
+        <button type="button" aria-label="Dismiss" onClick={() => { setNotice(null); setCopyTarget(null); setRestoredTarget(null) }}>Dismiss</button></p> : null}
       {list.error ? <p className="browser-profiles-settings__service" role="status">
         Couldn’t refresh Profiles{list.profiles ? '; showing the last list' : ''}. {list.error}{' '}
         <button type="button" disabled={list.reading} onClick={() => void browserProfiles.refresh()}>{list.reading ? 'Retrying…' : 'Retry'}</button>
       </p> : null}
-      <div className="settings-resource-split">
-        <BrowserProfileLibrary list={list} active={active} selectedId={selected?.id ?? null} focusRequest={returnFocus} assignment={hueAssignment} openCounts={openCounts} detailLine={detailLine}
+      <BrowserProfileTrash active={active && showTrash} folders={folders} onBack={() => setShowTrash(false)} onRestored={(id, label) => { setRestoredTarget({ id, label }); setNotice(`Restored \"${label}\" with its original sign-ins and site data.`) }} />
+      <div className="settings-resource-split" hidden={showTrash}>
+        <BrowserProfileLibrary list={list} active={active && !showTrash} selectedId={selected?.id ?? null} focusRequest={returnFocus} assignment={hueAssignment} openCounts={openCounts} detailLine={detailLine}
           onSelect={id => { setSelectedId(id); setView('editor'); setError(null); setErrorCode(null) }} />
         <div className="settings-resource-editor">
+          {!selectedIsActive && selected ? <p className="browser-profiles-settings__service" role="status">This Profile is recycled. Its editor draft is kept. <button type="button" onClick={() => setShowTrash(true)}>Show recycled Profiles</button></p> : null}
+          <div hidden={!selectedIsActive}>
           <button className="small-button settings-resource-back" type="button" onClick={() => { setView('library'); setReturnFocus({ id: selected?.id ?? null }) }}>
             <ThemeNavigationBackIcon size={13} />All Profiles
           </button>
@@ -184,8 +196,9 @@ export function BrowserProfilesSettingsPane({ active, onClose = () => {} }: { ac
             onShow={use => void showBrowser(use, onClose)} onOpen={() => void openInProfile(selected.id, onClose)}
             onCopy={() => void copy(selected, selected.revision)}
             editName={renameRequest === selected.id} onNameEdited={() => setRenameRequest(null)}
-            onDeleted={pending => { setSelectedId(null); setView('library'); setError(null); setErrorCode(null); setCopyTarget(null); setNotice(pending) }} />
+            onDeleted={() => { setSelectedId(selected.id); setShowTrash(true); setError(null); setErrorCode(null); setCopyTarget(null); setNotice(`Recycled \"${selected.label}\". Its original sign-ins, site data and saved settings are kept.`) }} />
             : <p className="settings-resource-empty" role="status">{list.reading ? 'Loading Profiles…' : 'No Profile selected.'}</p>}
+          </div>
         </div>
       </div>
     </div>
@@ -209,8 +222,8 @@ function ProfileEditor({ assignment, profile, revision, uses, busy, run, error, 
   exitCheckUrl: string
   editName: boolean
   onNameEdited(): void
-  /** `pending` names site data that is still being cleared after the Profile was deleted. */
-  onDeleted(pending: string | null): void
+  /** Confirmed active-to-archive transition; all original data remains retained. */
+  onDeleted(): void
   onShow(use: Use): void
   onOpen(): void
   onCopy(): void
@@ -222,6 +235,7 @@ function ProfileEditor({ assignment, profile, revision, uses, busy, run, error, 
   const [hues, setHues] = useState(false)
   const [saved, setSaved] = useState(false)
   const [confirm, setConfirm] = useState<'delete' | null>(null)
+  const recycleRevision = useRef(profile.revision)
   const nameRevision = useRef(profile.revision), notesRevision = useRef(profile.revision)
   const [baselineRefresh, setBaselineRefresh] = useState(0)
   const nameInput = useRef<HTMLInputElement>(null)
@@ -261,7 +275,7 @@ function ProfileEditor({ assignment, profile, revision, uses, busy, run, error, 
     setNoting(false)
     if (draft.trim() !== (profile.notes ?? '') && !await commit({ notes: draft.trim() }, notesRevision.current)) { setNotes(draft); setNoting(true) }
   }
-  const blockedDelete = profile.isDefault ? 'The default Profile can’t be deleted' : uses.length ? `Used by ${uses.length} Browser${uses.length > 1 ? 's' : ''}` : null
+  const blockedDelete = profile.isDefault ? 'The default Profile can’t be recycled' : uses.length ? `Used by ${uses.length} Browser${uses.length > 1 ? 's' : ''}` : null
   const open = uses.filter(use => use.state === 'open')
 
   return (
@@ -287,8 +301,8 @@ function ProfileEditor({ assignment, profile, revision, uses, busy, run, error, 
               <Menu.Item className="tab-context-menu__item" onSelect={() => setNaming(true)}>Rename</Menu.Item>
               <Menu.Item className="tab-context-menu__item" disabled={busy !== null} onSelect={onCopy}>Copy settings</Menu.Item>
               <Menu.Separator className="tab-context-menu__separator" />
-              <Menu.Item className="tab-context-menu__item browser-profile-menu__delete" disabled={blockedDelete !== null} onSelect={() => setConfirm('delete')}>
-                <span>Delete Profile…</span>{blockedDelete ? <small>{blockedDelete}</small> : null}
+              <Menu.Item className="tab-context-menu__item browser-profile-menu__delete" disabled={blockedDelete !== null} onSelect={() => { recycleRevision.current = profile.revision; setConfirm('delete') }}>
+                <span>Recycle Profile…</span>{blockedDelete ? <small>{blockedDelete}</small> : null}
               </Menu.Item>
             </Menu.Content>
           </DocumentOverlayPortal>
@@ -382,18 +396,17 @@ function ProfileEditor({ assignment, profile, revision, uses, busy, run, error, 
         </ul> : null}
       </section> : null}
 
-      {confirm === 'delete' ? <div className="browser-profile-editor__confirm" role="alertdialog" aria-label={`Delete ${profile.label}`}
+      {confirm === 'delete' ? <div className="browser-profile-editor__confirm" role="alertdialog" aria-label={`Recycle ${profile.label}`}
         onKeyDown={event => { if (event.key === 'Escape' && busy !== 'delete') { event.preventDefault(); event.stopPropagation(); closeConfirm() } }}>
-        <p>Delete <strong>{profile.label}</strong>? Its sign-ins, cookies, site data and address history are removed for good.</p>
+        <p>Recycle <strong>{profile.label}</strong>? Its original sign-ins, site data and saved settings stay here so you can restore it. This does not free disk space or create a separate backup. Unsaved editor inputs are kept, not saved into the recycled settings.</p>
         <div>
           <button ref={cancelDelete} type="button" className="small-button" onClick={closeConfirm}>Cancel</button>
           <button type="button" className="danger-button" disabled={busy !== null} onClick={() => void run('delete', () => api.browser.deleteProfile(profile.id,
-            { kind: 'user-confirmed', operation: 'delete-profile', scope: 'profile', profileId: profile.id }), true).then(result => {
-              if (result === true) onDeleted(null)
-              else if (result.code === 'BROWSER_PROFILE_DATA_CLEAR_PENDING') onDeleted(result.message)
+            { kind: 'user-confirmed', operation: 'delete-profile', scope: 'profile', profileId: profile.id }, recycleRevision.current), true).then(result => {
+              if (result === true) { setConfirm(null); onDeleted() }
               else setConfirm(null)
             })}>
-            {busy === 'delete' ? <ThemeStatusLoadingIcon animation="spin" size={12} /> : null}Delete {profile.label}
+            {busy === 'delete' ? <ThemeStatusLoadingIcon animation="spin" size={12} /> : null}Recycle {profile.label}
           </button>
         </div>
       </div> : null}

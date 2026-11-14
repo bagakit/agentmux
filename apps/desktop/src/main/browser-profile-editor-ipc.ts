@@ -25,6 +25,7 @@ export function registerBrowserProfileEditorIpc(ports: {
   ports.handle('browser:readProfiles', () =>
     ipcResult(async () => {
       await ports.profiles.initialize()
+      await ports.profiles.refresh()
       return readBrowserProfileSnapshot(ports.profiles)
     })
   )

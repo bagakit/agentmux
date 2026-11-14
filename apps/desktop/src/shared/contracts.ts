@@ -1376,6 +1376,7 @@ export type BrowserProfileSummary = {
   agentAccess?: false
 }
 
+export type BrowserProfileTrashList = { revision: number; sequence: number; entries: import('@agentmux/core/control').BrowserProfileTrashEntry[]; legacyPendingDeletes: string[] }
 export type BrowserProfileList = { proxies?: import('@agentmux/core/control').BrowserProxyAsset[]; revision: number; sequence: number; profiles: BrowserProfileSummary[]; folders: BrowserProfileFolder[]; views: import('@agentmux/core/control').BrowserProfileView[] }
 
 /** Fields a person can change; null clears the chosen hue, an empty string clears the notes. */
@@ -2056,6 +2057,8 @@ export type AgentMuxDesktopApi = {
     saveProxy(edit: import('@agentmux/core/control').BrowserProxyEdit, proxyId?: string, expectedRevision?: string): Promise<{ proxy: import('@agentmux/core/control').BrowserProxyAsset; revision: number }>
     deleteProxy(proxyId: string, expectedRevision: string): Promise<{ proxyId: string; revision: number; deleted: true }>
     assignProxy(proxyId: string, expectedRevision: string, items: import('@agentmux/core/control').BrowserProfileSelectionItem[]): Promise<import('@agentmux/core/control').BrowserProfileBulkItemResult[]>
+    readProfileTrash(): Promise<BrowserProfileTrashList>
+    restoreProfile(archiveId: string, expectedRevision: string, folderId?: string | null): Promise<import('@agentmux/core/control').BrowserProfileRestoreReceipt>
     /** Main publishes the whole list after every committed change, in revision order. */
     onProfilesChanged(listener: (list: BrowserProfileList) => void): () => void
     updateProfile(profileId: string, edit: BrowserProfileEdit, expectedRevision: string): Promise<BrowserProfileSummary>
@@ -2069,7 +2072,7 @@ export type AgentMuxDesktopApi = {
     createProfileFolder(label: string, expectedRevision: number): Promise<BrowserProfileFolder>
     renameProfileFolder(folderId: string, label: string, expectedRevision: number): Promise<BrowserProfileFolder>
     deleteProfileFolder(folderId: string, expectedRevision: number): Promise<{ folderId: string; unassignedProfileIds: string[] }>
-    deleteProfile(profileId: string, approval: BrowserProfileDeleteApproval): Promise<void>
+    deleteProfile(profileId: string, approval: BrowserProfileDeleteApproval, expectedRevision: string): Promise<import('@agentmux/core/control').BrowserProfileRecycleReceipt>
     /** Sites holding cookies in this Profile, for the person to pick one to clear. */
     listProfileSites(profileId: string): Promise<BrowserProfileSite[]>
     clearProfileSite(profileId: string, site: string, approval: BrowserProfileClearSiteApproval): Promise<void>

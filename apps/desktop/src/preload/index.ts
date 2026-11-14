@@ -795,6 +795,8 @@ const api: AgentMuxPreloadApi = {
     saveProxy: (edit, proxyId, expectedRevision) => ipcRenderer.invoke('browser:saveProxy', edit, proxyId, expectedRevision),
     deleteProxy: (proxyId, expectedRevision) => ipcRenderer.invoke('browser:deleteProxy', proxyId, expectedRevision),
     assignProxy: (proxyId, expectedRevision, items) => ipcRenderer.invoke('browser:assignProxy', proxyId, expectedRevision, items),
+    readProfileTrash: () => ipcRenderer.invoke('browser:readProfileTrash'),
+    restoreProfile: (archiveId, expectedRevision, folderId) => ipcRenderer.invoke('browser:restoreProfile', archiveId, expectedRevision, folderId),
     onProfilesChanged(listener) {
       const wrapped = (_event: unknown, list: Parameters<typeof listener>[0]): void => listener(list)
       ipcRenderer.on('browser:profilesChanged', wrapped)
@@ -810,7 +812,7 @@ const api: AgentMuxPreloadApi = {
     createProfileFolder: (label: string, expectedRevision: number) => ipcRenderer.invoke('browser:createProfileFolder', label, expectedRevision),
     renameProfileFolder: (folderId: string, label: string, expectedRevision: number) => ipcRenderer.invoke('browser:renameProfileFolder', folderId, label, expectedRevision),
     deleteProfileFolder: (folderId: string, expectedRevision: number) => ipcRenderer.invoke('browser:deleteProfileFolder', folderId, expectedRevision),
-    deleteProfile: (profileId: string, approval: BrowserProfileDeleteApproval) => ipcRenderer.invoke('browser:deleteProfile', profileId, approval),
+    deleteProfile: (profileId: string, approval: BrowserProfileDeleteApproval, expectedRevision: string) => ipcRenderer.invoke('browser:deleteProfile', profileId, approval, expectedRevision),
     listProfileSites: (profileId: string) => ipcRenderer.invoke('browser:listProfileSites', profileId),
     clearProfileSite: (profileId: string, site: string, approval: BrowserProfileClearSiteApproval) => ipcRenderer.invoke('browser:clearProfileSite', profileId, site, approval),
     checkProfileExit: (profileId: string) => ipcRenderer.invoke('browser:checkProfileExit', profileId),

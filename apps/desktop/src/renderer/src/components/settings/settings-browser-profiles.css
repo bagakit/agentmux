@@ -5,6 +5,7 @@
   padding-inline: max(var(--sp-7), calc((100% - 960px) / 2));
   overflow: hidden;
 }
+.settings-browser-profiles.settings-resource-workbench { display: flex; flex-direction: column; }
 /* The list's own actions stay over the list. The toolbar spans only the library column (the same width
    the split gives it), so New Profile and Import never read as editor actions. */
 .settings-browser-profiles .settings-pane-toolbar { display: flex; align-items: center; gap: var(--sp-2); width: max(190px, 27%); min-width: 0; }
@@ -178,3 +179,14 @@
 }
 .browser-profile-library__results ul { list-style: none; padding-left: 0; }
 .browser-profile-library__results li + li { margin-top: var(--sp-2); }
+
+/* Keep the original editor/query mounted while its explicit archive view is shown. */
+.settings-browser-profiles [hidden] { display: none !important; }
+.browser-profile-trash { flex: 1; min-height: 0; overflow: auto; display: grid; gap: var(--sp-5); align-content: start; min-width: 0; padding-right: var(--sp-2); }
+.browser-profile-trash > header { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-4); }
+.browser-profile-trash h3, .browser-profile-trash h4, .browser-profile-trash p { margin: 0; }
+.browser-profile-trash > p, .browser-profile-trash__entry p, .browser-profile-trash__entry small { color: var(--text-3); font-size: var(--fs-meta); line-height: 1.55; overflow-wrap: anywhere; }
+.browser-profile-trash__entry { display: grid; gap: var(--sp-4); padding: var(--sp-5) 0; border-top: 1px solid var(--line-soft); min-width: 0; }
+.browser-profile-trash__entry label { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-3); color: var(--text-2); font-size: var(--fs-meta); }
+.browser-profile-trash__entry select { max-width: 100%; min-width: 0; min-height: 28px; padding: var(--sp-1) var(--sp-2); background: var(--surface-1); color: var(--text); border: 1px solid var(--line-soft); border-radius: var(--radius); font: inherit; }
+.browser-profile-trash__entry > button { justify-self: start; max-width: 100%; white-space: normal; overflow-wrap: anywhere; }

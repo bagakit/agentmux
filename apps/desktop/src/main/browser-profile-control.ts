@@ -14,7 +14,7 @@ export function isBrowserProfileControlRequest(request: AgentMuxControlRequest):
 }
 
 export type BrowserProfileControlPorts = {
-  profiles: Pick<BrowserProfileManager, 'listProxies' | 'saveProxy' | 'deleteProxy' | 'assignProxy' | 'initialize' | 'listProfiles' | 'listRevision' | 'listSequence' | 'createProfile' | 'copyProfile' | 'updateProfile' | 'listViews' | 'saveView' | 'deleteView' | 'bulkUpdate' | 'listFolders' | 'createFolder' | 'renameFolder' | 'deleteFolder' | 'setDefaultProfile'>
+  profiles: Pick<BrowserProfileManager, 'listProxies' | 'saveProxy' | 'deleteProxy' | 'assignProxy' | 'initialize' | 'listProfiles' | 'listRevision' | 'listSequence' | 'createProfile' | 'copyProfile' | 'updateProfile' | 'listViews' | 'saveView' | 'deleteView' | 'bulkUpdate' | 'listFolders' | 'createFolder' | 'renameFolder' | 'deleteFolder' | 'setDefaultProfile' | 'refresh' | 'listTrash' | 'listLegacyPendingDeletes' | 'restoreProfile'>
   usage: Pick<BrowserProfileUsageOwner, 'usage' | 'deleteProfile'>
   network: BrowserProfileNetworkControl
 }
@@ -42,6 +42,7 @@ async function owned<T>(write: () => Promise<T>): Promise<T> {
 export async function executeBrowserProfileControl(request: ProfileRequest, ports: BrowserProfileControlPorts,
   actor: AgentMuxNameActor | undefined): Promise<ProfileResult> {
   await ports.profiles.initialize()
+  if (request.operation === 'browser.profile.ls' || request.operation === 'browser.profile.inspect' || request.operation === 'browser.profile.trash.ls') await ports.profiles.refresh()
   switch (request.operation) {
     case 'browser.profile.proxy.ls': return { operation: request.operation, revision: ports.profiles.listRevision(), proxies: ports.profiles.listProxies() }
     case 'browser.profile.proxy.create': return { operation: request.operation, ...await owned(() => ports.profiles.saveProxy(request.edit)) }
@@ -103,6 +104,15 @@ export async function executeBrowserProfileControl(request: ProfileRequest, port
       const revision = ports.profiles.listRevision()
       return { operation: request.operation, revision, sequence: ports.profiles.listSequence(), profile, usage: await ports.usage.usage(request.profileId) }
     }
+    case 'browser.profile.trash.ls':
+      return { operation: request.operation, revision: ports.profiles.listRevision(), sequence: ports.profiles.listSequence(),
+        entries: ports.profiles.listTrash(), legacyPendingDeletes: ports.profiles.listLegacyPendingDeletes() }
+    case 'browser.profile.trash.restore': {
+      if (!actor?.verified || (actor.kind !== 'user' && actor.kind !== 'device')) {
+        throw new AgentMuxError('Restoring a Browser Profile requires a person or device. Its original data is kept; ask the person to restore it.', 'BROWSER_PROFILE_RESTORE_REQUIRES_PERSON')
+      }
+      return { operation: request.operation, ...await owned(() => ports.profiles.restoreProfile(request.archiveId, request.expectedRevision, request.folderId)) }
+    }
     case 'browser.profile.create': {
       const profile = await owned(() => ports.profiles.createProfile(request.label))
       return { operation: request.operation, revision: ports.profiles.listRevision(), profile }
@@ -123,12 +133,12 @@ export async function executeBrowserProfileControl(request: ProfileRequest, port
       return { operation: request.operation, revision: ports.profiles.listRevision(), profileId: request.profileId }
     case 'browser.profile.delete': {
       if (!actor?.verified || (actor.kind !== 'user' && actor.kind !== 'device')) {
-        throw new AgentMuxError('Deleting a Browser Profile requires a person or device, not a managed Agent. The Profile, its Browsers and the Agent remain available; ask the person to delete it.',
+        throw new AgentMuxError('Recycling a Browser Profile requires a person or device. The Profile, its Browsers and the Agent remain available; ask the person to recycle it.',
           'BROWSER_PROFILE_DELETE_REQUIRES_PERSON')
       }
       existing(ports, request.profileId)
-      await ports.usage.deleteProfile(request.profileId, { kind: 'user-confirmed', operation: 'delete-profile', scope: 'profile', profileId: request.profileId })
-      return { operation: request.operation, revision: ports.profiles.listRevision(), profileId: request.profileId, deleted: true }
+      const receipt = await ports.usage.deleteProfile(request.profileId, { kind: 'user-confirmed', operation: 'delete-profile', scope: 'profile', profileId: request.profileId }, request.expectedRevision)
+      return { operation: request.operation, ...receipt }
     }
   }
 }

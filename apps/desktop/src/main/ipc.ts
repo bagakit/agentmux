@@ -498,7 +498,9 @@ export async function registerIpc(args: {
   // A sign-in belongs to one Profile's proxy: forget it when that Profile is gone or no longer uses a proxy.
   // This listens to every committed list, so the GUI, the public CLI and deletion all reach it.
   const disposeProfileProxyAuthSync = browserProfiles.onChange(({ profiles }) => {
-    const proxied = new Set(profiles.filter(profile => profile.network?.mode === 'proxy').map(profile => profile.id))
+    const proxied = new Set([...profiles, ...browserProfiles.listTrashedProfiles()].filter(profile => profile.network?.mode === 'proxy').map(profile => profile.id))
+    // Incomplete legacy deletion facts cannot authorize discarding their remaining credentials.
+    for (const profileId of browserProfiles.listLegacyPendingDeletes()) proxied.add(profileId)
     void profileProxyAuth.forgetExcept(proxied).catch(error => console.warn('A Browser Profile proxy sign-in could not be forgotten; it is kept until the next change.', error instanceof Error ? error.message : String(error)))
   })
   void browserProfiles.initialize().catch(error => {
@@ -2150,6 +2152,13 @@ export async function registerIpc(args: {
     await browserProfiles.initialize()
     return browserProfiles.assignProxy(proxyId, expectedRevision, items)
   }))
+  handleWithEvent('browser:readProfileTrash', () => ipcResult(async () => {
+    await browserProfiles.initialize()
+    await browserProfiles.refresh()
+    return { revision: browserProfiles.listRevision(), sequence: browserProfiles.listSequence(), entries: browserProfiles.listTrash(), legacyPendingDeletes: browserProfiles.listLegacyPendingDeletes() }
+  }))
+  handleWithEvent('browser:restoreProfile', (_event, archiveId: string, expectedRevision: string, folderId?: string | null) =>
+    ipcResult(() => browserProfiles.restoreProfile(archiveId, expectedRevision, folderId)))
   handleWithEvent('browser:createProfile', (event, label: string) => ipcResult(() => browserProfiles.createProfile(label)))
   handleWithEvent('browser:copyProfile', (_event, profileId: string, label: string, expectedRevision: string) => ipcResult(() => browserProfiles.copyProfile(profileId, label, expectedRevision)))
   handleWithEvent('browser:saveProfileView', (_event, label: string, query: import('@agentmux/core/control').BrowserProfileQuery, expectedRevision: number, viewId?: string) => ipcResult(() => browserProfiles.saveView(label, query, expectedRevision, viewId)))
@@ -2162,13 +2171,13 @@ export async function registerIpc(args: {
   const profileUsage = createBrowserProfileUsage({
     open: profileId => browsers.profileUses(profileId),
     readSaved: () => spatialState.read(),
-    deleteProfile: (profileId, approval) => browserProfiles.deleteProfile(profileId, approval),
-    clearPreviews: profileId => browserRecoveryPreviews.clearProfile(profileId)
+    nativeUse: profileId => browserProfiles.nativeUse(profileId),
+    deleteProfile: (profileId, approval, expectedRevision, assertUnused) => browserProfiles.deleteProfile(profileId, approval, expectedRevision, assertUnused)
   })
-  handleWithEvent('browser:deleteProfile', (event, profileId: string, approval: BrowserProfileDeleteApproval) =>
-    ipcResult(() => profileUsage.deleteProfile(profileId, approval)))
+  handleWithEvent('browser:deleteProfile', (event, profileId: string, approval: BrowserProfileDeleteApproval, expectedRevision: string) =>
+    ipcResult(() => profileUsage.deleteProfile(profileId, approval, expectedRevision)))
   // Site data is cleared inside the Profile's own session, which only a confirmed Profile resolves to.
-  const profileSites = createBrowserProfileSiteData({ session: profileId => session.fromPartition(browserProfiles.resolvePartition(profileId)) })
+  const profileSites = createBrowserProfileSiteData({ session: profileId => browserProfiles.sessions.nativeSession(profileId) })
   handleWithEvent('browser:listProfileSites', (event, profileId: string) => ipcResult(async () => {
     await browserProfiles.initialize()
     return await profileSites.list(profileId)
@@ -2179,13 +2188,13 @@ export async function registerIpc(args: {
   }))
   // The saved address is read at call time; the Renderer names only the Profile, never the URL.
   const profileExitCheck = createBrowserProfileExitCheck({
-    session: profileId => session.fromPartition(browserProfiles.resolvePartition(profileId)),
+    session: profileId => browserProfiles.sessions.nativeSession(profileId),
     prepare: profileId => browserProfiles.prepareSession(profileId),
     now: () => performance.now()
   })
   const profileNetworkControl = createBrowserProfileNetworkControl({ profiles: browserProfiles, proxyAuth: profileProxyAuth,
     checkExit: profileExitCheck, checkAddress: () => config.browser.exitCheckUrl ?? '',
-    reconnect: profileId => session.fromPartition(browserProfiles.resolvePartition(profileId)).closeAllConnections() })
+    reconnect: profileId => browserProfiles.sessions.nativeSession(profileId).closeAllConnections() })
   handleWithEvent('browser:readProfileProxySignIn', (event, profileId: string) => ipcResult(async () => {
     await browserProfiles.initialize()
     browserProfiles.resolvePartition(profileId)

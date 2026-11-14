@@ -1509,16 +1509,9 @@ const mockApi: AgentMuxDesktopApi = {
       publishMockBrowserProfiles()
       return structuredClone(profile)
     },
-    deleteProfile: async (profileId, approval: BrowserProfileDeleteApproval) => {
-      if (approval.kind !== 'user-confirmed' || approval.operation !== 'delete-profile' || approval.scope !== 'profile' || approval.profileId !== profileId) {
-        throw Object.assign(new Error('Browser Profile deletion requires explicit user approval'), { code: 'BROWSER_DESTRUCTIVE_APPROVAL_REQUIRED' })
-      }
-      if ([...mockBrowsers.values()].some((browser) => browser.profileId === profileId)) {
-        throw new Error('Browser Profile is still used by an open Browser')
-      }
-      mockBrowserProfiles = mockBrowserProfiles.filter((profile) => profile.id !== profileId)
-      publishMockBrowserProfiles()
-    },
+    readProfileTrash: async () => { throw new Error('Retained Profile data requires the Desktop Main owner.') },
+    restoreProfile: async () => { throw new Error('Restoring original Profile data requires the Desktop Main owner.') },
+    deleteProfile: async () => { throw new Error('Recycling original Profile data requires the Desktop Main owner.') },
     listProfileSites: async (profileId) => structuredClone(mockBrowserProfileSites.get(profileId) ?? []),
     readProfileProxySignIn: async (profileId) => mockProxySignIns.has(profileId) ? { username: mockProxySignIns.get(profileId)! } : null,
     setProfileProxySignIn: async (profileId, signIn) => { if (signIn) mockProxySignIns.set(profileId, signIn.username.trim()); else mockProxySignIns.delete(profileId); return { reconnected: true } },
