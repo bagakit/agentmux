@@ -126,8 +126,8 @@ export const AUTHORED_ICON_DEFINITIONS = {
     design: { rest: "A modular workspace with a deliberate extension point.", motion: { kind: "still", animation: "none", description: "Complete static identity; no inferred activity.", trigger: "The original object or settings group is displayed; this drawing grants no permission and reports no operation result." } }
   },
   "promotion-rise": {
-    shapes: [["path", {"d": "M9 3H8a5 5 0 0 0-5 5v8a5 5 0 0 0 5 5h1 M15 3h1a5 5 0 0 1 5 5v8a5 5 0 0 1-5 5h-1"}], ["path", {"d": "M12 7l4 5-4 5-4-5Z"}]],
-    design: { rest: "Two facing arcs retain one shared core, marking an existing collaboration becoming a lasting companion.", motion: { kind: "still", animation: "none", description: "Complete static identity; no inferred activity.", trigger: "The Promotion settings or Promote to Mote action is displayed; the mark grants no permission and reports neither completion, automatic promotion nor established identity." } }
+    shapes: [["path",{"d": "M11 3H8a5 5 0 0 0-5 5v7a6 6 0 0 0 6 6 M13 21h3a5 5 0 0 0 5-5V9a6 6 0 0 0-6-6"}],["path",{"d": "M11.3 8.7a.9.9 0 0 1 1.4 0l2.1 2.7a1 1 0 0 1 0 1.2l-2.1 2.7a.9.9 0 0 1-1.4 0l-2.1-2.7a1 1 0 0 1 0-1.2Z","fill": "currentColor","stroke": "none"}]],
+    design: { rest: "Two offset arcs embrace a compact, softly cornered core, retaining an existing collaboration as a lasting companion with a clear center at small sizes.", motion: { kind: "still", animation: "none", description: "Complete static identity; no inferred activity.", trigger: "The Promotion settings or Promote to Mote action is displayed; the mark grants no permission and reports neither completion, automatic promotion nor established identity." } }
   },
   "agent-message-relay": {
     shapes: [["path", {"d": "M3 4h9v7H6l-3 2Z M12 13h9v7h-6l-3 2Z"}], ["path", {"d": "M15 5h5v5 M9 19H4v-5"}]],
