@@ -15,10 +15,13 @@ const config = await api.config.get()
 const list = await api.browser.readProfiles()
 const personal = list.profiles[0]!
 await api.browser.updateProfile(personal.id, { label: 'Personal', notes: '' }, list.profiles.find(value => value.id === personal.id)!.revision)
-const client = await api.browser.createProfile('Northwind client')
-await api.browser.updateProfile(client.id, { notes: 'Launch QA for Northwind. Their staging only accepts the Tokyo gateway.' }, (await api.browser.readProfiles()).profiles.find(value => value.id === client.id)!.revision)
-await api.browser.createProfile('QA de-DE')
-await api.browser.createProfile('Release review')
+const switchScene = new URLSearchParams(location.search).get('scene') === 'switch'
+const client = switchScene ? personal : await api.browser.createProfile('Northwind client')
+if (!switchScene) {
+  await api.browser.updateProfile(client.id, { notes: 'Launch QA for Northwind. Their staging only accepts the Tokyo gateway.' }, (await api.browser.readProfiles()).profiles.find(value => value.id === client.id)!.revision)
+  await api.browser.createProfile('QA de-DE')
+  await api.browser.createProfile('Release review')
+}
 const workspaceId = config.workspaces[0]!.id
 const tab = (id: string, title: string, profileId: string, deferred: boolean) => {
   const created = createWorkbenchTab(id, { kind: 'browser', workspaceId, regionId: id + '-region' } as never)
@@ -35,6 +38,7 @@ mountThemeRuntime(window, { ...config.appearance, appAppearance: 'dark' })
 const root = createRoot(document.getElementById('root')!)
 const readProxySignIn = api.browser.readProfileProxySignIn
 const setProxySignIn = api.browser.setProfileProxySignIn
+let releaseAccessSave: (() => void) | undefined
 const settings = () => flushSync(() => root.render(<DesktopClientUiProvider><SettingsPanel initialSection="browser-profiles" onClose={() => {}} /></DesktopClientUiProvider>))
 function BrowserScene() {
   const original = useAppStore(state => state.tabs['b-launch'])!
@@ -51,6 +55,16 @@ Object.assign(window, { profilesVisual: {
   appearance: (mode: 'dark' | 'light') => updateThemeSelection({ ...config.appearance, appAppearance: mode }),
   client: client.id,
   settings,
+  holdAccessSave() {
+    const update = api.browser.updateProfile
+    const pending = new Promise<void>(resolve => { releaseAccessSave = resolve })
+    api.browser.updateProfile = async (...args) => {
+      api.browser.updateProfile = update
+      await pending
+      return update(...args)
+    }
+  },
+  finishAccessSave() { releaseAccessSave?.(); releaseAccessSave = undefined },
   signInReadFailure() {
     api.browser.readProfileProxySignIn = async () => { throw new Error('The system keychain could not be read.') }
     settings()

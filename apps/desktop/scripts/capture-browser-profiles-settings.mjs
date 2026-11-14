@@ -10,9 +10,13 @@ import { join, resolve } from 'node:path'
 const root = resolve(import.meta.dirname, '../../..'), desktop = join(root, 'apps/desktop')
 const fixture = join(desktop, 'scripts/fixtures/browser-profiles-settings'), directory = join(root, '.tmp/browser-profiles-visual', randomUUID())
 const output = join(directory, 'compiled')
-const scene = process.argv.includes('--environment-notice') ? 'environment-notice' : process.argv.includes('--service-notice') ? 'service-notice' : 'profiles'
+const scene = process.argv.includes('--switch') ? 'switch'
+  : process.argv.includes('--environment-notice') ? 'environment-notice'
+  : process.argv.includes('--service-notice') ? 'service-notice' : 'profiles'
 await mkdir(directory, { recursive: true })
 const sourceFiles = [
+  'packages/client-ui/src/input/Switch.tsx',
+  'packages/client-ui/src/input/input.css',
   'apps/desktop/src/renderer/src/components/settings/BrowserProfilesSettingsPane.tsx',
   'apps/desktop/src/renderer/src/components/settings/BrowserProfileNetwork.tsx',
   'apps/desktop/src/renderer/src/components/settings/settings-browser-profiles.css',

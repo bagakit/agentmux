@@ -1,3 +1,4 @@
+const assert = require('node:assert/strict')
 const { app, BrowserWindow } = require('electron')
 const { writeFile } = require('node:fs/promises')
 const { mkdirSync, writeFileSync } = require('node:fs')
@@ -8,11 +9,17 @@ const wait = ms => new Promise(done => setTimeout(done, ms))
 const receipt = { scene: process.env.PROFILES_VISUAL_SCENE ?? 'profiles', captureOnly: true, aestheticReview: 'not-performed', realComponents: ['SettingsPanel', 'BrowserProfilesSettingsPane', 'BrowserPane', 'BrowserOperationWarning', 'ProfileMark'], fixtureConfigOnly: true, userDataTouched: false, screenshots: [] }
 app.whenReady().then(async () => {
   try {
-    const win = new BrowserWindow({ width: 1250, height: 900, show: false, title: 'Browser Profiles · private review', webPreferences: { contextIsolation: true, nodeIntegration: false } })
-    win.webContents.on('console-message', (_event, details) => { if (details.level === 'error') console.error('Renderer:', details.message) })
-    win.webContents.debugger.attach('1.3')
+    const win = new BrowserWindow({ width: 1250, height: 900, show: false, title: 'Browser Profiles · private review', webPreferences: { contextIsolation: true, nodeIntegration: false, backgroundThrottling: false } })
+    win.webContents.on('console-message', event => { if (event.level === 'error') console.error('Renderer:', event.message) })
+    win.webContents.debugger.on('message', (_event, method, payload) => {
+      if (method === 'Runtime.exceptionThrown') console.error('Renderer:', payload.exceptionDetails.exception?.description ?? payload.exceptionDetails.text)
+    })
     const evaluate = async expression => { const result = await win.webContents.debugger.sendCommand('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true }); if (result.exceptionDetails) throw new Error(result.exceptionDetails.exception?.description ?? result.exceptionDetails.text); return result.result.value }
-    const ready = async expression => { for (let i = 0; i < 100; i++) { if (await evaluate(expression)) return; await wait(100) } throw new Error('Private visual document not ready: ' + expression) }
+    const ready = async expression => {
+      for (let i = 0; i < 100; i++) { if (await evaluate(expression)) return; await wait(100) }
+      const observed = await evaluate(`({ document: document.readyState, started: Boolean(window.profilesVisual), rows: document.querySelectorAll('[data-resource-row]').length, text: document.body.innerText.slice(0, 400) })`)
+      throw new Error('Private visual document not ready: ' + expression + ' ' + JSON.stringify(observed))
+    }
     const click = async selector => {
       const point = await evaluate(`(()=>{const e=document.querySelector(${JSON.stringify(selector)});if(!e)throw new Error('Missing real control '+${JSON.stringify(selector)});e.scrollIntoView({block:'nearest'});const r=e.getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2}})()`)
       for (const type of ['mousePressed', 'mouseReleased']) await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type, ...point, button: 'left', clickCount: 1 })
@@ -40,10 +47,62 @@ app.whenReady().then(async () => {
       await writeFile(join(directory, name + '.png'), (await win.webContents.capturePage()).toPNG())
       receipt.screenshots.push({ name, file: name + '.png', width, height })
     }
-    await win.loadFile(process.env.PROFILES_VISUAL_HTML)
-    await ready('Boolean(window.profilesVisual && document.querySelectorAll(\'[data-settings-pane="browser-profiles"] [data-resource-row]\').length === 4)')
     win.showInactive()
-    if (receipt.scene === 'service-notice' || receipt.scene === 'environment-notice') {
+    await win.loadFile(process.env.PROFILES_VISUAL_HTML, { query: { scene: receipt.scene } })
+    win.webContents.debugger.attach('1.3')
+    await win.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled', { enabled: true })
+    const expectedRows = receipt.scene === 'switch' ? 1 : 4
+    await ready(`Boolean(window.profilesVisual && document.querySelectorAll('[data-settings-pane="browser-profiles"] [data-resource-row]').length === ${expectedRows})`)
+    if (receipt.scene === 'switch') {
+      await click('[data-resource-row="' + await evaluate('profilesVisual.client') + '"]')
+      const selector = '.browser-profile-editor__agents > input[role="switch"]'
+      const input = 'document.querySelector(' + JSON.stringify(selector) + ')'
+      await ready(`Boolean(${input})`)
+      await evaluate(`${input}.scrollIntoView({ block: 'center' })`)
+      const key = async (key, code, windowsVirtualKeyCode) => {
+        for (const type of ['keyDown', 'keyUp']) await win.webContents.debugger.sendCommand('Input.dispatchKeyEvent', { type, key, code, windowsVirtualKeyCode })
+      }
+      const focused = () => evaluate(`document.activeElement === ${input}`)
+      const focusWithTab = async () => {
+        for (let attempt = 0; attempt < 50 && !await focused(); attempt++) await key('Tab', 'Tab', 9)
+        assert.equal(await focused(), true, 'Tab reaches the real Profile switch')
+        assert.equal(await evaluate(`${input}.matches(':focus-visible')`), true)
+      }
+      await focusWithTab()
+      assert.equal(await evaluate(`${input}.type`), 'checkbox')
+      assert.equal(await evaluate(`${input}.checked`), false)
+      await capture('profile-switch-off-focus-dark', 960, 780)
+      const size = () => evaluate(`(() => { const { width, height } = ${input}.getBoundingClientRect(); return { width, height }; })()`)
+      const footprint = await size()
+      assert.deepEqual(footprint, { width: 32, height: 19 })
+      await key(' ', 'Space', 32)
+      await ready(`${input}.checked && !${input}.disabled`)
+      assert.deepEqual(await size(), footprint, 'The checked track keeps the same bounds')
+      await evaluate('profilesVisual.appearance("light")')
+      await capture('profile-switch-on-narrow-light', 560, 780)
+      await win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] })
+      assert.equal(await evaluate(`getComputedStyle(${input}, '::before').transitionDuration`), '0s')
+      await evaluate("document.documentElement.dir = 'rtl'")
+      assert.equal(await evaluate(`new DOMMatrix(getComputedStyle(${input}, '::before').transform).m41`), -13)
+      await evaluate("document.documentElement.dir = 'ltr'")
+      await focusWithTab()
+      await key(' ', 'Space', 32)
+      await ready(`!${input}.checked && !${input}.disabled`)
+      assert.equal(await focused(), true, 'Saving keeps focus on the original Profile control')
+      await win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia', { features: [{ name: 'forced-colors', value: 'active' }] })
+      await capture('profile-switch-off-forced-colors', 560, 780)
+      await focusWithTab()
+      await evaluate('profilesVisual.holdAccessSave()')
+      await key(' ', 'Space', 32)
+      await ready(`${input}.disabled`)
+      const search = 'document.querySelector(".settings-search input")'
+      await evaluate(`${search}.focus()`)
+      await evaluate('profilesVisual.finishAccessSave()')
+      await ready(`${input}.checked && !${input}.disabled`)
+      assert.equal(await evaluate(`document.activeElement === ${search}`), true, 'Saving leaves the alternate focus chosen during the request')
+      receipt.switchBehavior = { tab: true, space: true, focusRetained: true, otherFocusPreserved: true, rtl: true, reducedMotion: true, footprint }
+      receipt.complete = true
+    } else if (receipt.scene === 'service-notice' || receipt.scene === 'environment-notice') {
       const prefix='profiles-'+receipt.scene
       await evaluate(receipt.scene==='environment-notice'?'profilesVisual.environmentNotice()':'profilesVisual.serviceNotice()')
       await ready('document.querySelector(".browser-operation-warning")?.textContent.includes("Settings → Browser Profiles")')
