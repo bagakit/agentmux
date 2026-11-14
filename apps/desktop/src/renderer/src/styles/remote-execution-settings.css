@@ -71,3 +71,24 @@
 .tool-execution-details > summary { cursor: pointer; width: fit-content; }
 .tool-execution-details > summary:focus-visible { outline: 2px solid var(--focus-line); outline-offset: 3px; }
 .tool-execution-details > p { line-height: 1.6; overflow-wrap: anywhere; }
+
+.remote-work-header { display: flex; justify-content: space-between; align-items: center; gap: var(--sp-4); margin-bottom: var(--sp-4); }
+.remote-work-header > div { min-width: 0; }
+.remote-work-header > div > span { color: var(--text-3); font: 10px var(--font-mono); letter-spacing: .12em; }
+.remote-work-header h3 { margin: 8px 0 6px; font-size: 25px; line-height: 1.25; letter-spacing: -.035em; font-weight: 550; }
+.remote-work-header p { margin: 0; color: var(--text-3); font-size: var(--fs-body); line-height: 1.6; }
+.remote-work-header > button { flex: none; }
+.remote-work-tasks--primary { display: grid; width: 100%; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--sp-2); padding: 0; border: 0; background: transparent; }
+.remote-work-tasks--primary > button { justify-content: flex-start; align-items: center; min-height: 76px; padding: 13px 15px; border: 1px solid var(--line-soft); border-radius: var(--radius-lg); gap: 12px; text-align: left; background: var(--surface-1); }
+.remote-work-tasks--primary > button[aria-selected='true'] { border-color: color-mix(in srgb, var(--green) 45%, var(--line)); background: color-mix(in srgb, var(--green) 5%, var(--surface-1)); box-shadow: none; }
+.remote-work-tasks--primary > button > svg { flex: none; color: var(--text-3); }
+.remote-work-tasks--primary > button[aria-selected='true'] > svg { color: var(--green); }
+.remote-work-tasks--primary > button > span { display: grid; gap: 5px; min-width: 0; }
+.remote-work-tasks--primary strong { color: var(--text); font-size: var(--fs-body); font-weight: 550; }
+.remote-work-tasks--primary strong > small { margin-left: 5px; color: var(--text-3); font-size: var(--fs-meta); font-weight: 400; }
+.remote-work-tasks--primary span > small { color: var(--text-3); font-size: var(--fs-micro); font-weight: 400; line-height: 1.4; }
+@container (max-width: 620px) {
+  .remote-work-header { align-items: flex-start; }
+  .remote-work-header h3 { font-size: 21px; }
+  .remote-work-tasks--primary > button { flex-direction: column; align-items: flex-start; padding: 10px; gap: 8px; }
+}

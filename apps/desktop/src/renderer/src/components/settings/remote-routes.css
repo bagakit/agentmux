@@ -8,6 +8,7 @@
 .host-route-toolbar { justify-content: space-between; margin-bottom: var(--sp-4); }
 .host-route-toolbar .remote-work-tasks > button[aria-pressed='true'] { background: var(--surface-2); border-color: var(--line); color: var(--text); font-weight: 600; box-shadow: 0 1px 3px #0001; }
 .host-route-layout { display: grid; grid-template-columns: minmax(160px, .65fr) minmax(0, 1.65fr); gap: var(--sp-6); align-items: start; }
+.host-route-layout[data-empty-routes='true'] { grid-template-columns: minmax(0, 1fr); }
 .host-route-library { display: grid; gap: var(--sp-3); min-width: 0; }
 .host-route-library > button { justify-self: start; }
 .host-route-detail { min-width: 0; }

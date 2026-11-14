@@ -34,7 +34,7 @@ export function RemoteRoutesPane({ config, active }: { config: AppConfig; active
   }, [active, carrierKey, refresh])
   const current = identity?.key === carrierKey ? identity : undefined
   return <div className="remote-routes">
-    <div className="remote-work-intro"><h3>Choose an execution route</h3><p>Build a path through your connected devices. Each receiving node decides who may pass through it and what they may do.</p></div>
+    <div className="remote-work-intro"><h3>Routes between devices</h3><p>Follow saved connections directly or through other nodes. Each device controls who can pass through it.</p></div>
     <label className="host-route-owner"><span>Manage routes on</span><select aria-label="Route policy device" value={hostId} onChange={event => setHostId(event.target.value)}>
       {!host ? <option value={hostId}>Original saved device unavailable</option> : null}
       {config.hosts.map(item => <option key={item.id} value={item.id}>{item.label}{item.kind === 'local' ? ' · This device' : ''}</option>)}
@@ -109,8 +109,8 @@ function RoutePolicyEditor({ host, identity, active }: { host: HostConfig; ident
     </div><button type="button" className="small-button" onClick={() => void policy.inspect()}>Read saved policy</button></div>
     {policy.issue ? <p className="settings-inline-error" role="status">{policy.issue}</p> : null}
     {!edit ? <p>Reading the saved policy. Existing work stays available.</p> : <>
-      {tab === 'paths' ? <div className="host-route-layout">
-        <div className="host-route-library"><SettingsResourceLibrary label="Saved and draft routes" selectedId={selected === null ? null : String(selected)} focusRequest={null}
+      {tab === 'paths' ? <div className="host-route-layout" data-empty-routes={edit.configuration.routes.length === 0}>
+        <div className="host-route-library" hidden={edit.configuration.routes.length === 0}><SettingsResourceLibrary label="Saved and draft routes" selectedId={selected === null ? null : String(selected)} focusRequest={null}
           onSelect={value => { setSelected(Number(value)); setActionIssue(''); setEdgeIssue('') }} items={edit.configuration.routes.map((value, index) => ({ id: String(index), name: value.id || 'Unnamed route',
             detail: `${value.route.hops.length === 1 ? 'Direct' : `${value.route.hops.length} hops`} · ${observed?.routes.some(saved => equal(saved, value)) ? 'Saved configuration' : 'Unsaved edit'}`, mark: <HostIcon size={18} /> }))} />
           <button type="button" className="small-button" onClick={() => { setSelected(null); setActionIssue(''); setEdgeIssue('') }}>New route</button>
