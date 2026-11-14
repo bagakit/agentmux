@@ -38,7 +38,7 @@ export function SelectionField({ id, label, value, options, onValueChange, disab
   const needle = query.trim().toLocaleLowerCase()
   const visibleOptions = canSearch && needle ? options.filter(option => `${option.label} ${option.description ?? ''}`.toLocaleLowerCase().includes(needle)) : options
   const focusOption = (last = false) => {
-    const items = menu.current?.querySelectorAll<HTMLElement>('[role=menuitemradio]:not([aria-disabled=true])')
+    const items = menu.current?.querySelectorAll<HTMLElement>(`[role=menuitemradio]:not([aria-disabled=true])${needle ? ':not([data-missing])' : ''}`)
     const target = items?.[last ? items.length - 1 : 0]
     target?.focus()
   }
@@ -46,7 +46,7 @@ export function SelectionField({ id, label, value, options, onValueChange, disab
   const currentLabel = selected?.label ?? missingOptionLabel
   const currentDescription = selected?.description ? `${selected.label} · ${selected.description}` : selected?.label ?? missingOptionDescription ?? currentLabel
   const describedByIds = [describedBy, descriptionId].filter(Boolean).join(' ') || undefined
-  const currentTitle = selected ? currentDescription : `${currentDescription}: ${value}`
+  const currentTitle = selected ? currentDescription : `${currentLabel}${missingOptionDescription && missingOptionDescription !== currentLabel ? ` · ${missingOptionDescription}` : ''}: ${value}`
   return <Menu.Root open={open} onOpenChange={open => {
     if (controlledOpen === undefined) setLocalOpen(open)
     onOpenChange?.(open)
@@ -84,7 +84,7 @@ export function SelectionField({ id, label, value, options, onValueChange, disab
         <Menu.RadioGroup value={value} onValueChange={next => {
           if (!disabled && options.some(option => option.value === next && !option.disabled)) onValueChange(next)
         }}>
-          {!selected ? <Menu.RadioItem className="tab-context-menu__item selection-field__option" value={value}>
+          {!selected ? <Menu.RadioItem className="tab-context-menu__item selection-field__option" value={value} data-missing disabled={disabled}>
             <span className="selection-field__mark"><ThemeStatusSelectedIcon size={13} /></span><span title={value}>{currentLabel}</span>
           </Menu.RadioItem> : null}
           {visibleOptions.map(option => <Menu.RadioItem key={option.value} value={option.value} data-value={option.value} disabled={disabled || (option.disabled ?? false)}
