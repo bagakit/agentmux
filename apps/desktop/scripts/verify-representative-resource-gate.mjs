@@ -138,6 +138,7 @@ async function runHarnessMain(source, status) {
   const receipts = []
   const events = []
   const noIo = async () => {}
+  const initializeResourceWorkbench = async () => {}
   const options = {
     execFileAsync: async () => ({ stdout: 'fixture-source' }),
     readFile: async () => JSON.stringify({ source: {}, product: {}, support: {}, binaries: [] }),
@@ -147,7 +148,9 @@ async function runHarnessMain(source, status) {
     materializeRuntimePayload: async (closure, root) => {
       assert.equal(closure, 'published-closure'); assert.equal(root, 'private-app'); events.push('staged')
     },
+    loadResourceWorkbenchFixture: async () => ({ initializeResourceWorkbench }),
     runStage: async (stage, _identity, run) => {
+      assert.equal(stage.initializeResourceWorkbench, initializeResourceWorkbench)
       events.push(stage.representative ? 'representative' : 'diagnostic')
       run.report = stage.representative ? { representative: { status } } : { schema: 'diagnostic-report' }
     },

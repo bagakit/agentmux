@@ -354,7 +354,8 @@ const CONFIG = {
     { id: WORKSPACES.a.id, name: 'A', hostId: WORKSPACES.a.hostId, path: WORKSPACES.a.path, kind: 'folder' },
     { id: WORKSPACES.b.id, name: 'B', hostId: WORKSPACES.b.hostId, path: WORKSPACES.b.path, kind: 'folder' },
     { id: WORKSPACES.c.id, name: 'C', hostId: WORKSPACES.c.hostId, path: WORKSPACES.c.path, kind: 'folder' },
-    { id: '__scratch__', name: 'Scratch', hostId: 'local', path: _hygiene_fixturePath("tmp/agentmux-resource/scratch"), kind: 'folder' }
+    { id: '__scratch__', name: 'Scratch', hostId: 'local', path: _hygiene_fixturePath("tmp/agentmux-resource/scratch"), kind: 'folder' },
+    { id: '__notes__', name: 'Notes', hostId: 'local', path: _hygiene_fixturePath("tmp/agentmux-resource/notes"), kind: 'folder' }
   ]
 }
 
@@ -375,7 +376,9 @@ async function driveProbe(options: {
   temporaryRoots.push(directory)
   const reportPath = join(directory, 'report.json')
   const previousReportPath = process.env.AGENTMUX_DESKTOP_RESOURCE_REPORT
+  const previousWorkspaceIds = process.env.AGENTMUX_DESKTOP_RESOURCE_WORKSPACES
   process.env.AGENTMUX_DESKTOP_RESOURCE_REPORT = reportPath
+  process.env.AGENTMUX_DESKTOP_RESOURCE_WORKSPACES = JSON.stringify([WORKSPACES.a.id, WORKSPACES.b.id, WORKSPACES.c.id])
 
   const world = createWorld({
     plan: options.plan,
@@ -416,6 +419,8 @@ async function driveProbe(options: {
     hoisted.holder.world = null
     if (previousReportPath === undefined) delete process.env.AGENTMUX_DESKTOP_RESOURCE_REPORT
     else process.env.AGENTMUX_DESKTOP_RESOURCE_REPORT = previousReportPath
+    if (previousWorkspaceIds === undefined) delete process.env.AGENTMUX_DESKTOP_RESOURCE_WORKSPACES
+    else process.env.AGENTMUX_DESKTOP_RESOURCE_WORKSPACES = previousWorkspaceIds
   }
 
   expect(settled, 'probe never settled inside the fake-clock budget').toBe(true)
