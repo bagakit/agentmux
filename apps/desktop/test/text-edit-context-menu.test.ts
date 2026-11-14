@@ -41,7 +41,8 @@ class Frame {
 class Contents extends EventEmitter {
   destroyed = false; mainFrame = new Frame(); focusedFrame = this.mainFrame; url = 'https://generic.invalid/'
   session = Object.assign(new EventEmitter(), { setPermissionCheckHandler() {}, setPermissionRequestHandler() {}, setDevicePermissionHandler() {} }); commands: string[] = []
-  navigationHistory = { canGoBack: () => false, canGoForward: () => false }
+  navigationHistory = { canGoBack: () => false, canGoForward: () => false, goBack: vi.fn(), goForward: vi.fn() }
+  copyImageAt = vi.fn(); copyVideoFrameAt = vi.fn(); saveVideoFrameAs = vi.fn(); downloadURL = vi.fn(); inspectElement = vi.fn(); isDevToolsOpened = () => true; reload = vi.fn()
   constructor() { super(); native.frames.set(this.mainFrame, this) }
   isDestroyed() { return this.destroyed }; getURL() { return this.url }; getTitle() { return 'Page' }; isLoading() { return false }
   getZoomFactor() { return 1 }; setZoomFactor() {}; setBackgroundThrottling() {}; getBackgroundThrottling() { return true }
@@ -254,10 +255,10 @@ describe('actual definition-external consumers', () => {
       { isEditable: false, mediaType: 'none', pageURL, ...overrides })
     const link = await openAddress({ linkURL })
     expect(link.options.frame).toBe(frame)
-    expect(link.items.map((item: any) => item.label)).toEqual(['Copy Link Address'])
+    expect(link.items.map((item: any) => item.label)).toContain('Copy Link Address')
     await click(link, 'Copy Link Address')
     const image = await openAddress({ linkURL, mediaType: 'image', srcURL })
-    expect(image.items.map((item: any) => item.label)).toEqual(['Copy Link Address', 'Copy Image Address'])
+    expect(image.items.map((item: any) => item.label)).toEqual(expect.arrayContaining(['Copy Link Address', 'Copy Image Address']))
     await click(image, 'Copy Image Address')
     await click(await openAddress(), 'Copy Page Address')
     expect(native.writeClipboardText.mock.calls).toEqual([[linkURL], [srcURL], [pageURL]])
@@ -273,5 +274,61 @@ describe('actual definition-external consumers', () => {
     contents.emit('did-start-navigation', { isMainFrame: false, frame })
     await click(stale, 'Copy Link Address')
     expect(native.writeClipboardText).toHaveBeenCalledTimes(5)
+  })
+  it('dispatches the chosen exact menu destination and Profile through the actual BVM', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'agentmux-context-destination-test-')); roots.push(root)
+    const window = new Window()
+    const resolvePartition = vi.fn(id => `persist:${id}`)
+    const manager = new BrowserViewManager(window as never,
+      { defaultProfileId: () => 'source', resolvePartition, listProfiles: () => [{ id: 'source', label: 'Original' }, { id: 'work', label: 'Work' }] },
+      new BrowserRefLedgerStore(join(root, 'refs.json')), { rememberedSchemes: async () => ({}), rememberScheme: async () => {}, openExternal() {} })
+    disposers.push(() => manager.dispose())
+    const workspace = 'workspace', pageURL = 'https://generic.invalid/page', linkURL = 'https://generic.invalid/other?x=2#target'
+    await manager.create('source', pageURL, workspace)
+    manager.setBounds('source', { x: 40, y: 50, width: 500, height: 400 })
+    const contents: Contents = native.contents[0], frame = contents.mainFrame
+    native.focused = contents
+    const fixture = { contents, window, owner: { current: true }, frame }
+    const openHit = (overrides: Record<string, unknown> = {}) => open(fixture, { pageURL, mediaType: 'none', isEditable: false, ...overrides })
+    const projections = () => window.webContents.send.mock.calls.map(call => call[1]).filter(event => event?.type === 'native-opened')
+    await click(await openHit({ linkURL }), 'Open Link in Split')
+    expect(projections()).toHaveLength(1)
+    expect(projections()[0]).toMatchObject({ opening: { destination: 'region' }, browser: { url: linkURL, profileId: 'source', source: { browserId: 'source' } } })
+    expect(projections()[0].browser.agent).toBeUndefined()
+
+    const profileMenu = await openHit({ linkURL })
+    const submenu = profileMenu.items.find((item: any) => item.label === 'Open Link as').submenu
+    expect(submenu.map((item: any) => item.label)).toEqual(['Work'])
+    submenu[0].click(); await flush()
+    expect(projections()).toHaveLength(2)
+    expect(projections()[1]).toMatchObject({ opening: { destination: 'tab' }, browser: { profileId: 'work', url: linkURL } })
+    expect(resolvePartition).toHaveBeenCalledWith('work')
+    expect(contents.getURL()).toBe(pageURL)
+
+    const srcURL = 'https://generic.invalid/picture.png'
+    await click(await openHit({ mediaType: 'image', srcURL, hasImageContents: true }), 'Copy Image')
+    expect(contents.copyImageAt).toHaveBeenCalledWith(21, 34)
+    await click(await openHit({ mediaType: 'image', srcURL, hasImageContents: true }), 'Save Image As…')
+    expect(contents.downloadURL).toHaveBeenCalledWith(srcURL)
+    const video = { mediaType: 'video', srcURL: 'https://generic.invalid/video.mp4', mediaFlags: { canSave: true, inError: false } }
+    await click(await openHit(video), 'Copy Video Frame')
+    await click(await openHit(video), 'Save Video Frame As…')
+    expect(contents.copyVideoFrameAt).toHaveBeenCalledWith(21, 34)
+    expect(contents.saveVideoFrameAs).toHaveBeenCalledWith(21, 34)
+    await click(await openHit(), 'Reload')
+    expect(contents.reload).toHaveBeenCalledTimes(1)
+    await click(await openHit(), 'Inspect')
+    expect(contents.inspectElement).toHaveBeenCalledWith(21, 34)
+
+    const resized = await openHit({ mediaType: 'image', srcURL, hasImageContents: true })
+    manager.setBounds('source', { x: 40, y: 50, width: 400, height: 400 })
+    await click(resized, 'Copy Image')
+    expect(contents.copyImageAt).toHaveBeenCalledTimes(1)
+    expect(window.webContents.send.mock.calls.at(-1)?.[1].browser.activity.warning).toContain('The page size changed')
+
+    const stale = await openHit({ linkURL })
+    manager.setBounds('source', null)
+    await click(stale, 'Open Link in Split')
+    expect(projections()).toHaveLength(2)
   })
 })

@@ -10,16 +10,18 @@ const outIndex = process.argv.indexOf('--evidence-root')
 const out = resolve(root, outIndex >= 0 ? process.argv[outIndex + 1] : ("docs/reviews/evidence/browser-text-edit-source/mutations/attempt-" + (globalThis.crypto.randomUUID()) + ""))
 mkdirSync(out, { recursive: true })
 const helper = 'apps/desktop/src/main/text-edit-context-menu.ts', bvm = 'apps/desktop/src/main/browser-view-manager.ts', index = 'apps/desktop/src/main/index.ts'
-const paths = [helper, bvm, index]
+const pageMenu = 'apps/desktop/src/main/browser-page-context-menu.ts'
+const paths = [helper, bvm, index, pageMenu]
 const original = new Map(paths.map(path => [path, readFileSync(join(root, path), 'utf8')]))
 const sha = value => createHash('sha256').update(value).digest('hex')
 const definitions = [
   { id: 'renderer-binding', path: index, before: '    installTextEditContextMenu(window.webContents, window, { isCurrent: () => workbenchWindow === window })', after: '', test: 'executes the exact renderer-host registration call' },
   { id: 'page-binding', path: bvm, before: '    installTextEditContextMenu(contents, () => this.windowForView(view), {', after: '    if (false) installTextEditContextMenu(contents, () => this.windowForView(view), {', test: 'actual BVM attaches to each original page' },
-  { id: 'browser-link-address', path: helper, before: "label: 'Copy Link Address', address: params.linkURL", after: "label: 'Copy Link Address', address: params.pageURL", test: 'copies exact native link, linked image and page addresses through the actual BVM' },
-  { id: 'wrong-host-target', path: helper, before: '            contents[item.action]()', after: '            window.webContents[item.action]()', test: 'targets original contents for all four native commands' },
+  { id: 'browser-link-address', path: pageMenu, before: "label: 'Copy Link Address', run: owner.copyAddress(linkURL)", after: "label: 'Copy Link Address', run: owner.copyAddress(pageURL)", test: 'copies exact native link, linked image and page addresses through the actual BVM' },
+  { id: 'browser-context-destination', path: pageMenu, before: "label: 'Open Link in Split', run: owner.open(linkURL, { destination: 'region' })", after: "label: 'Open Link in Split', run: owner.open(linkURL, { destination: 'tab' })", test: 'dispatches the chosen exact menu destination and Profile through the actual BVM' },
+  { id: 'wrong-host-target', path: helper, before: "{ run: () => contents.cut(), label: 'Cut'", after: "{ run: () => ownerWindow().webContents.cut(), label: 'Cut'", test: 'targets original contents for all four native commands' },
   { id: 'disabled-action', path: helper, before: '        if (chosen || ended || !item.enabled) return', after: '        if (chosen || ended) return', test: 'derives disabled actions from real editFlags' },
-  { id: 'same-frame-target', path: helper, before: '            if (!sameTarget || ended || !current()) { finish(); notice(); return }', after: '            if (ended || !current()) { finish(); notice(); return }', test: 'same frame changed input invalidates' },
+  { id: 'same-frame-target', path: helper, before: 'if (!sameTarget || ended || !current() || commands && !commands.isCurrent()) { finish(); notice(); return }', after: 'if (ended || !current() || commands && !commands.isCurrent()) { finish(); notice(); return }', test: 'same frame changed input invalidates' },
   { id: 'native-owner', path: helper, before: ' && owner.isCurrent()', after: '', test: 'changed owner invalidates the old menu' },
   { id: 'navigation-cancel', path: helper, before: '      if (event.isMainFrame || ancestors.some(original => original.frame === event.frame)) finish()', after: '      // mutated: original navigation no longer cancels its menu', test: 'navigation cancels before a delayed local identity result' },
   { id: 'focused-frame', path: helper, before: ' && contents.focusedFrame === frame', after: '', test: 'rechecks actual native frame focus after awaiting' },
@@ -41,7 +43,7 @@ function run(id) {
   const log = (result.stdout ?? '') + (result.stderr ?? '')
   writeFileSync(join(dir, 'raw.log'), log)
   const loaded = JSON.parse(readFileSync(report, 'utf8'))
-  assert.equal(loaded.length, 2, 'Both actual helper and BVM must have been loaded')
+  assert.equal(loaded.length, 3, 'The actual menu helpers and BVM must have been loaded')
   for (const item of loaded) assert.equal(item.sha256, sha(readFileSync(item.loadedPath)), `Loaded original bytes must bind ${item.path}`)
   return { exitCode: result.status, log, dir, loaded }
 }

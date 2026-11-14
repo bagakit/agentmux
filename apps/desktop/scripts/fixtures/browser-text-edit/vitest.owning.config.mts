@@ -10,7 +10,7 @@ export default {
   plugins: [{ name: 'text-edit-owning-actual-source', enforce: 'pre' as const,
     load(id: string) {
       const path = id.split('?')[0]!
-      const own = ['apps/desktop/src/main/text-edit-context-menu.ts', 'apps/desktop/src/main/browser-view-manager.ts'].find(relative => path === join(root, relative))
+      const own = ['apps/desktop/src/main/text-edit-context-menu.ts', 'apps/desktop/src/main/browser-view-manager.ts', 'apps/desktop/src/main/browser-page-context-menu.ts'].find(relative => path === join(root, relative))
       if (!own) return null
       const loadedPath = process.env.AGENTMUX_TEXT_EDIT_MUTATION_ROOT ? join(process.env.AGENTMUX_TEXT_EDIT_MUTATION_ROOT, own) : path
       const code = readFileSync(loadedPath, 'utf8')
