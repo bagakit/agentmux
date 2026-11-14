@@ -18,6 +18,18 @@ app.whenReady().then(async () => {
   await until('Boolean(window.resourceSettingsVisual?.ready && document.querySelectorAll("[data-browser-resource]").length===5)', 'The actual Settings directory must mount')
   await evaluate('resourceSettingsVisual.markPrevious()')
   await until('document.querySelector("[data-browser-resource=unconfirmed]").textContent.includes("Previously observed")', 'The original partial read retains its previous row')
+  const firstBox = 'document.querySelector("[data-browser-resource=documentation] input")'
+  const allBox = 'document.querySelector(".browser-resources__columns > input")'
+  await evaluate(`${firstBox}.click()`)
+  await until(`${allBox}.indeterminate`, 'Partial selection reaches the real native mixed state')
+  const mixed = await evaluate(`(() => {
+    const input = ${allBox}, pseudo = getComputedStyle(input, '::before')
+    return { indeterminate: input.indeterminate, checked: input.checked, visibility: pseudo.visibility, mask: pseudo.maskImage }
+  })()`)
+  assert.equal(mixed.checked, false)
+  assert.equal(mixed.visibility, 'visible', 'The checkbox mixes selected and unselected rows visibly')
+  assert.notEqual(mixed.mask, 'none', 'The shared checkbox mask draws the mixed mark')
+  receipt.mixedSelection = mixed
   for (const [name, width, height] of [['normal', 1180, 900], ['narrow', 560, 850]]) {
     win.setContentSize(width, height); await wait(300)
     await evaluate('document.querySelector(".browser-resources").scrollIntoView({block:"start"})')

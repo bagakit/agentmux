@@ -24,6 +24,7 @@ import { composerConfig } from './helpers/composer-dom-fixture'
 import { MobileRegionContent } from '../../mobile/src/navigation/MobileRegionContent'
 import { parseBrowserTargetsResult } from '../../../packages/core/src/control-browser-targets'
 import { TOOLKIT_CHANGED_CHANNEL } from '../src/shared/toolkit'
+import { sessionInputOperationResult } from '../src/shared/session-input-result'
 import { performanceAttributionSnapshots } from '../scripts/fixtures/performance-panel/data'
 
 // Controlled wire material exercises real Settings/Store/API/preload consumers; no machine measurement or native page.
@@ -80,7 +81,7 @@ beforeEach(async () => {
     if (channel === 'toolkit:release') { metricIds.delete(args[0] as string); return }
     if (channel === 'browser:release') return await release(...args)
     if (channel === 'browser:restoreResource') return await restore(...args)
-    if (channel === 'config:save') return await saveConfig(...args)
+    if (channel === 'config:save') return sessionInputOperationResult(() => saveConfig(...args))
     if (channel === 'browser:listRetainedUploads') return await uploadRead()
     if (channel === 'browser:createExternalPairing') return { link: 'ws://private-pairing.invalid/#original', expiresAt: Date.now() + 600000 }
     throw new Error(`Unexpected fixture IPC ${channel}`)
@@ -247,6 +248,7 @@ it('dispatches one finite release batch serially through preload and keeps each 
 it('keeps the selected original document when refresh, filtering and new pages change the visible directory', async () => {
   current = { targets: [embedded('a'), embedded('b')], coverage: 'complete' }; await render(true)
   await act(async () => row('a').querySelector<HTMLInputElement>('input[type="checkbox"]')!.click()); await settle()
+  expect(resources().querySelector<HTMLInputElement>('[aria-label="Select eligible pages in this filter"]')!.indeterminate).toBe(true)
   current = { targets: [{ ...embedded('a'), navigationId: 'new-document-a' }, embedded('b'), embedded('later')], coverage: 'complete' }
   await change()
   const search = resources().querySelector<HTMLInputElement>('[aria-label="Find Browser resources"]')!

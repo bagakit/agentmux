@@ -24,7 +24,7 @@ const page = (id: string, title: string, state: 'live' | 'released' | 'cold' | '
 })
 const targets = [page('documentation', 'Developer documentation', 'live', 77),
   page('design-notes', 'Design notes — Browser collaboration', 'live', 78, 'visible'),
-  page('report', 'Background research report', 'live', 78, 'operation'),
+  page('report', 'Background research report', 'live', 78),
   page('archive', 'Reference archive', 'released', null), page('unconfirmed', 'Earlier page observation', 'unknown', null)]
 const snapshot = structuredClone(performanceAttributionSnapshots.fresh)
 snapshot.observation!.app.data!.processes = [

@@ -65,7 +65,7 @@ try {
   await build({ ...options, entryPoints: [join(repo, 'packages/core/src/agentmux.ts')], outfile: join(out, 'cli.mjs') })
   await build({ ...options, alias, format: 'cjs', banner: {}, entryPoints: [join(repo, 'apps/desktop/src/preload/index.ts')], outfile: join(out, 'preload.cjs') })
   const { build: buildRenderer } = await import('vite')
-  await buildRenderer({ configFile: false, resolve: { alias: [{ find: /^@agentmux\/host\/(.+)$/, replacement: join(repo, 'apps/host/src/$1.ts') }] }, root: join(repo, 'apps/desktop/scripts/fixtures/browser-profile-cookie-files'), base: './', logLevel: 'error', define: { __AGENTMUX_WEB_PREVIEW__: 'false' }, plugins: [{ name: 'bookmark-real-renderer-source', enforce: 'pre', async transform(code, id) {
+  await buildRenderer({ configFile: false, worker: { format: 'es' }, resolve: { alias: [{ find: /^@agentmux\/host\/(.+)$/, replacement: join(repo, 'apps/host/src/$1.ts') }] }, root: join(repo, 'apps/desktop/scripts/fixtures/browser-profile-cookie-files'), base: './', logLevel: 'error', define: { __AGENTMUX_WEB_PREVIEW__: 'false' }, plugins: [{ name: 'bookmark-real-renderer-source', enforce: 'pre', async transform(code, id) {
     const path = id.split('?')[0]
     if (!path.startsWith(repo + '/') || path.includes('/node_modules/') || !/\.(?:[cm]?[jt]sx?|css)$/.test(path)) return
     sources.set(path, hash(await readFile(path)))

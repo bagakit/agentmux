@@ -50,7 +50,12 @@ describe('production Profile Cookie file consumer', () => {
   })
   it('keeps the exact original ID locked after lost ACK or ALREADY_ADMITTED and checks without reissuing', async () => {
     const m = await mount()
-    try { await m.open(); await m.click('Export…'); await m.select('profile'); await m.click('Choose destination folder…'); ports.exportProfileCookies.mockRejectedValueOnce(Object.assign(new Error('lost acknowledgement'), { code: 'BROWSER_PROFILE_COOKIE_FILE_ALREADY_ADMITTED' })); await m.click('Continue to native confirmation…')
+    try {
+      await m.open(); await m.click('Export…')
+      const name = m.host.querySelector<HTMLInputElement>('[aria-label="Cookie export file name"]')!
+      await act(async () => name.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', isComposing: true, bubbles: true })))
+      expect(m.host.querySelector('[aria-label="Cookie export file name"]')).toBe(name)
+      await m.select('profile'); await m.click('Choose destination folder…'); ports.exportProfileCookies.mockRejectedValueOnce(Object.assign(new Error('lost acknowledgement'), { code: 'BROWSER_PROFILE_COOKIE_FILE_ALREADY_ADMITTED' })); await m.click('Continue to native confirmation…')
       const id = ports.exportProfileCookies.mock.calls[0]![1]; expect(m.host.textContent).toContain(id); expect(m.button('Continue to native confirmation…').disabled).toBe(true); expect(m.host.querySelector('form [role=alert]')).not.toBeNull(); expect(m.host.textContent).not.toContain('/private/export-folder'); await m.click('Continue to native confirmation…'); expect(ports.exportProfileCookies).toHaveBeenCalledTimes(1)
       ports.inspectProfileCookieFiles.mockResolvedValueOnce(inspection({ receipt: null })); await m.click('Check original operation'); expect(ports.inspectProfileCookieFiles).toHaveBeenLastCalledWith(profile.id, id, 0, 24); expect(m.button('Continue to native confirmation…').disabled).toBe(true)
       ports.inspectProfileCookieFiles.mockResolvedValueOnce(inspection({ receipt: receipt(id, 'export', { scope: { kind: 'sites', sites: ['wrong.test'] } }) })); await m.click('Check original operation'); expect(m.host.textContent).not.toContain('wrong.test'); expect(m.button('Continue to native confirmation…').disabled).toBe(true)

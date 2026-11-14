@@ -28,7 +28,7 @@ app.whenReady().then(async () => {
       await click('.profile-cookie-files__draft .profile-cookie-files__actions > button')
       await click('[data-cookie-submit]')
     }
-    await win.loadFile(process.env.COOKIE_FILES_VISUAL_HTML)
+    await win.loadFile(process.env.COOKIE_FILES_VISUAL_HTML, { query: { scene: 'cookie-files' } })
     await ready('Boolean(window.cookieFilesVisual && document.querySelector(".profile-cookie-files__heading"))')
     win.showInactive(); await click('.profile-cookie-files__heading'); await ready('Boolean(document.querySelector("[data-cookie-action=export]"))')
     await beginExport(); await ready('document.querySelector(".profile-cookie-files").textContent.includes("Partially completed")')

@@ -90,7 +90,7 @@ async function main(){
       await openCookiePanel();await ready('document.body.textContent.includes("native-lost-ack")');await click('[data-cookie-check="native-lost-ack"]')
       note('second-process-native-Profile-and-signin-and-GUI-original-pending',{originalProfileId:profileId,targetProfileId:retained.otherId,realSiteAuthenticated:true,guiOriginalIdVisible:true})
     }else{
-      const other=await profiles.createProfile('Independent target'),otherId=other.id
+      const other=await profiles.createProfile('Independent target','create-cookie-independent-profile',{kind:'user',id:'private-cookie-files-fixture',verified:true}),otherId=other.id
       await browsers.create(browserId,base+'/original',undefined,profileId);browsers.setBounds(browserId,{x:0,y:0,width:660,height:500});await browsers.create(otherBrowserId,base+'/independent',undefined,otherId);browsers.setBounds(otherBrowserId,{x:0,y:0,width:660,height:500})
       await contents().executeJavaScript('localStorage.setItem("original-note","kept-native-work");document.querySelector("input").value="original-unsent"')
       await contents(otherBrowserId).executeJavaScript('document.querySelector("input").value="independent-unsent"')

@@ -16,7 +16,7 @@ const list = await api.browser.readProfiles()
 const personal = list.profiles[0]!
 await api.browser.updateProfile(personal.id, { label: 'Personal', notes: '' }, list.profiles.find(value => value.id === personal.id)!.revision)
 const scene = new URLSearchParams(location.search).get('scene')
-const singleProfileScene = scene === 'switch' || scene === 'trash-empty'
+const singleProfileScene = scene === 'switch' || scene === 'trash-empty' || scene === 'notes' || scene === 'cookie-files'
 const client = singleProfileScene ? personal : await api.browser.createProfile('Northwind client')
 if (!singleProfileScene) {
   await api.browser.updateProfile(client.id, { notes: 'Launch QA for Northwind. Their staging only accepts the Tokyo gateway.' }, (await api.browser.readProfiles()).profiles.find(value => value.id === client.id)!.revision)
@@ -79,6 +79,10 @@ Object.assign(window, { profilesVisual: {
   refreshTrash: () => refreshTrash?.(),
   finishTrashRead: () => { finishTrashRead?.(); finishTrashRead = undefined },
   client: client.id,
+  async editNotesElsewhere(notes: string) {
+    const original = (await api.browser.readProfiles()).profiles.find(value => value.id === client.id)!
+    await api.browser.updateProfile(original.id, { notes }, original.revision)
+  },
   settings,
   holdAccessSave() {
     const update = api.browser.updateProfile

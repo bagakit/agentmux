@@ -78,7 +78,7 @@ app.whenReady().then(async () => {
       cue:document.querySelector('.browser-agent-preview .browser-operation-status__cue')?.textContent,
       boundary:!!document.querySelector('.browser-agent-preview [data-browser-control-boundary]'),
       pointer:!!root.querySelector('.amux-browser-agent-pointer'),ripple:!!root.querySelector('.amux-browser-agent-ripple')}})()`)
-    assert.equal(state.boundary, !['completed', 'human'].includes(phase), 'The simulation projects the exact control state')
+    assert.equal(state.boundary, phase !== 'human', 'The simulation retains agent control through completion until the person takes over')
     assert.equal(state.pointer, false, 'No invented target while reading, navigating, waiting or after handoff')
     assert.equal(state.ripple, false, 'No invented click while reading, navigating, waiting or after handoff')
     receipt.states ??= []

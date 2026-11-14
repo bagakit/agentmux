@@ -167,6 +167,74 @@ describe('Settings › Browser Profiles', () => {
     expect($('.browser-profile-editor__who small')?.textContent).toContain('Open in 1 Browser')
   })
 
+  it('commits only the completed note when a blur interrupts IME composition', async () => {
+    await select('Northwind client')
+    await act(async () => $<HTMLButtonElement>('.browser-profile-editor__note')!.click())
+    const notes = $<HTMLTextAreaElement>('textarea[aria-label="Notes"]')!
+    const next = $<HTMLButtonElement>('.browser-profile-editor__open')!
+    const setValue = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!
+    await act(async () => {
+      notes.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true }))
+      setValue.call(notes, '仮'); notes.dispatchEvent(new Event('input', { bubbles: true }))
+      notes.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', isComposing: true, bubbles: true }))
+      next.focus()
+    })
+    expect($('textarea[aria-label="Notes"]')).toBe(notes)
+    expect(port.updateProfile).not.toHaveBeenCalled()
+    await act(async () => {
+      notes.dispatchEvent(new CompositionEvent('compositionend', { data: '確定', bubbles: true }))
+      setValue.call(notes, '確定したメモ'); notes.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+    expect(port.updateProfile).toHaveBeenCalledExactlyOnceWith(client.id, { notes: '確定したメモ' }, client.revision)
+    expect(document.activeElement).toBe(next)
+    expect($('.browser-profile-editor__note')?.textContent).toBe('確定したメモ')
+  })
+
+  it('keeps later note input mounted and submits its next blur on the confirmed revision', async () => {
+    let release = () => {}
+    const gate = new Promise<void>(resolve => { release = resolve })
+    const update = port.updateProfile.getMockImplementation()!
+    port.updateProfile.mockImplementationOnce(async (...args) => { await gate; return update(...args) })
+    await select('Northwind client')
+    await act(async () => $<HTMLButtonElement>('.browser-profile-editor__note')!.click())
+    const notes = $<HTMLTextAreaElement>('textarea[aria-label="Notes"]')!
+    const next = $<HTMLButtonElement>('.browser-profile-editor__open')!
+    const setValue = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!
+    await act(async () => {
+      setValue.call(notes, 'First note'); notes.dispatchEvent(new Event('input', { bubbles: true }))
+      next.focus()
+    })
+    expect(port.updateProfile).toHaveBeenCalledExactlyOnceWith(client.id, { notes: 'First note' }, client.revision)
+    expect($('textarea[aria-label="Notes"]')).toBe(notes)
+    await act(async () => {
+      notes.focus()
+      setValue.call(notes, 'Later note'); notes.dispatchEvent(new Event('input', { bubbles: true }))
+      next.focus()
+    })
+    expect(port.updateProfile).toHaveBeenCalledTimes(1)
+    await act(async () => release())
+    expect(port.updateProfile).toHaveBeenLastCalledWith(client.id, { notes: 'Later note' }, 'profile-token-5')
+    expect($('.browser-profile-editor__note')?.textContent).toBe('Later note')
+    expect(document.activeElement).toBe(next)
+  })
+
+  it('does not label a conflicting note with an earlier confirmed save', async () => {
+    const next = $<HTMLButtonElement>('.browser-profile-editor__open')!
+    const setValue = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!
+    const writeAndBlur = async (text: string) => {
+      await act(async () => $<HTMLButtonElement>('.browser-profile-editor__note')!.click())
+      const note = $<HTMLTextAreaElement>('textarea[aria-label="Notes"]')!
+      await act(async () => { setValue.call(note, text); note.dispatchEvent(new Event('input', { bubbles: true })); next.focus() })
+    }
+    await writeAndBlur('Earlier confirmed note')
+    expect($('.browser-profile-editor__saved')?.textContent).toContain('Saved')
+    port.updateProfile.mockRejectedValueOnce(Object.assign(new Error('Another edit was confirmed first.'), { code: 'BROWSER_PROFILE_REVISION_CONFLICT' }))
+    await writeAndBlur('Current draft')
+    expect($<HTMLTextAreaElement>('textarea[aria-label="Notes"]')?.value).toBe('Current draft')
+    expect($('[role="alert"]')?.textContent).toContain('Another edit was confirmed first.')
+    expect($('.browser-profile-editor__saved')).toBeNull()
+  })
+
   it('a refused edit keeps the editor usable and offers Reload for a changed list', async () => {
     port.set({ revision: 9, sequence: 9, folders: [], views: [], profiles: [{ ...personal, revision: 'personal-updated' }, client] })
     await act(async () => $<HTMLButtonElement>('.browser-profile-editor__note')!.click())
@@ -178,6 +246,7 @@ describe('Settings › Browser Profiles', () => {
     await act(async () => notes.dispatchEvent(new FocusEvent('focusout', { bubbles: true })))
     expect(port.updateProfile).toHaveBeenCalledWith('p-personal', { notes: 'Personal sign-ins' }, 'personal-token')
     expect($('[role="alert"]')?.textContent).toContain('changed since')
+    expect($('textarea[aria-label="Notes"]')).toBe(notes)
     const reload = [...container.querySelectorAll<HTMLButtonElement>('[role="alert"] button')].find(button => button.textContent === 'Reload')!
     // A macOS pointer click need not move focus to the button: prevent its mousedown
     // from blurring the retained editor and starting another stale save before click.

@@ -51,7 +51,7 @@ app.whenReady().then(async () => {
     await win.loadFile(process.env.PROFILES_VISUAL_HTML, { query: { scene: receipt.scene } })
     win.webContents.debugger.attach('1.3')
     await win.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled', { enabled: true })
-    const expectedRows = ['switch', 'trash-empty'].includes(receipt.scene) ? 1 : 4
+    const expectedRows = ['switch', 'trash-empty', 'notes'].includes(receipt.scene) ? 1 : 4
     await ready(`Boolean(window.profilesVisual && document.querySelectorAll('[data-settings-pane="browser-profiles"] [data-resource-row]').length === ${expectedRows})`)
     if (receipt.scene === 'switch') {
       await click('[data-resource-row="' + await evaluate('profilesVisual.client') + '"]')
@@ -101,6 +101,46 @@ app.whenReady().then(async () => {
       await ready(`${input}.checked && !${input}.disabled`)
       assert.equal(await evaluate(`document.activeElement === ${search}`), true, 'Saving leaves the alternate focus chosen during the request')
       receipt.switchBehavior = { tab: true, space: true, focusRetained: true, otherFocusPreserved: true, rtl: true, reducedMotion: true, footprint }
+      receipt.complete = true
+    } else if (receipt.scene === 'notes') {
+      const selector = 'textarea[aria-label="Notes"]'
+      const input = 'document.querySelector(' + JSON.stringify(selector) + ')'
+      const note = 'document.querySelector(".browser-profile-editor__note")'
+      const next = 'document.querySelector(".browser-profile-editor__open")'
+      await click('[data-resource-row="' + await evaluate('profilesVisual.client') + '"]')
+      await click('.browser-profile-editor__note')
+      await ready(`${input} === document.activeElement`)
+      await evaluate(`void (${input}.select())`)
+      const finalText = 'Launch QA · 確定したメモ'
+      await win.webContents.debugger.sendCommand('Input.imeSetComposition', { text: '仮', selectionStart: 1, selectionEnd: 1 })
+      await ready(`${input}.value === '仮'`)
+      assert.equal(await evaluate(`Boolean(${note})`), false, 'The original Notes remains open while composing')
+      await win.webContents.debugger.sendCommand('Input.insertText', { text: finalText })
+      await ready(`${input}.value === ${JSON.stringify(finalText)}`)
+      const compact = await evaluate(`(() => {
+        const e = ${input}, style = getComputedStyle(e)
+        return { height: e.clientHeight, line: parseFloat(style.lineHeight), padding: parseFloat(style.paddingTop) + parseFloat(style.paddingBottom), resize: style.resize }
+      })()`)
+      assert.ok(compact.height <= Math.ceil(compact.line + compact.padding), 'One line of notes uses one line of visible height')
+      assert.equal(compact.resize, 'none')
+      await capture('profiles-notes-focus-dark', 1250, 860)
+      await evaluate('profilesVisual.appearance("light")')
+      await capture('profiles-notes-focus-narrow-light', 560, 860)
+      await evaluate(`void (${next}.focus())`)
+      await ready(`${note}?.textContent === ${JSON.stringify(finalText)}`)
+      assert.equal(await evaluate(`document.activeElement === ${next}`), true, 'The original blur destination keeps focus after the composed note is saved')
+      assert.equal(await evaluate(`[...document.querySelectorAll('[data-resource-row]')].some(node => node.textContent.includes(${JSON.stringify(finalText)}))`), true, 'The matching Profile row consumes the confirmed note')
+      await click('.browser-profile-editor__note')
+      const retained = 'Draft for supplier sign-ins'
+      await type(selector, retained)
+      await evaluate('profilesVisual.editNotesElsewhere("A focused note saved elsewhere")')
+      await evaluate(`void (${next}.focus())`)
+      await ready('Boolean(document.querySelector(".browser-profile-editor__error button"))')
+      assert.equal(await evaluate(`${input}.value`), retained)
+      assert.equal(await evaluate('Boolean(document.querySelector(".browser-profile-editor__saved"))'), false, 'An earlier receipt cannot label the current note conflict as saved')
+      assert.equal(await evaluate(`document.activeElement === ${next}`), true)
+      await capture('profiles-notes-conflict-narrow-light', 560, 860)
+      receipt.notesBehavior = { nativeComposition: true, blur: true, savedNote: true, focusKept: true, conflictKeptDraft: true, compact }
       receipt.complete = true
     } else if (receipt.scene === 'trash-empty') {
       const filter = 'input[aria-label="Filter profiles"]'

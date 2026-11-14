@@ -48,7 +48,11 @@ describe('original Profile bookmark Renderer consumer', () => {
     const m = await mount()
     try {
       await m.click('› Bookmarks'); expect(m.host.textContent).toContain(exactUrl)
-      await m.click('Edit'); expect((m.host.querySelector('[aria-label="Bookmark address"]') as HTMLInputElement).value).toBe(exactUrl)
+      await m.click('Edit')
+      const address = m.host.querySelector<HTMLInputElement>('[aria-label="Bookmark address"]')!
+      expect(address.value).toBe(exactUrl)
+      await act(async () => address.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', isComposing: true, bubbles: true })))
+      expect(m.host.querySelector('[aria-label="Bookmark address"]')).toBe(address)
       await m.input('form input', 'Revised reading')
       ports.listProfileBookmarks.mockResolvedValueOnce({ ...base, revision: 'library-later' })
       await m.click('Refresh library'); await m.click('Save')

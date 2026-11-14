@@ -47,6 +47,7 @@ if (args[0] === '--prepare') {
     'apps/desktop/src/renderer/src/components/browser/BrowserResources.tsx',
     'apps/desktop/src/renderer/src/lib/browser-resource-view.ts',
     'apps/desktop/src/renderer/src/styles/browser-resources.css',
+    'packages/client-ui/src/styles/native-controls.css',
     'apps/desktop/src/renderer/src/styles/settings-materials.css']) {
     assert.equal(sources[file]?.file, hash(await readFile(join(root, file))), 'Actual candidate Renderer input: ' + file)
     assert.equal(sources[file].consumed, sources[file].file, 'Unmodified actual presentation source')
