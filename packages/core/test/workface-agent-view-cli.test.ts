@@ -37,6 +37,23 @@ describe('Agent view public CLI wire', () => {
     expect(actual.code).toBe(1); expect(JSON.parse(actual.stderr)).toMatchObject({ ok: false, error: { code: 'CONTROL_PROTOCOL_ERROR' } })
     h.setReply(body)
   })
+  it('qualifies the original Runtime and rejects a same-SID reply from another Runtime', async () => {
+    h.setReply({ ...body, runtimeId: 'runtime-exact' })
+    expect(await h.receipt(['agent', 'view', '--session', 'agent-exact', '--runtime', 'runtime-exact'])).toMatchObject({
+      result: { agentSessionId: 'agent-exact', runtimeId: 'runtime-exact', outcome: 'read' }
+    })
+    expect(h.seen.at(-1)).toEqual({ ...base, requestId: expect.any(String), operation: 'agent.view', agentSessionId: 'agent-exact', runtimeId: 'runtime-exact' })
+    h.setReply({ ...body, runtimeId: 'another-runtime' })
+    const actual = await h.run(['agent', 'view', '--session', 'agent-exact', '--runtime', 'runtime-exact'])
+    expect(actual.code).toBe(1)
+    expect(JSON.parse(actual.stderr)).toMatchObject({ ok: false, error: { code: 'CONTROL_PROTOCOL_ERROR' } })
+    h.setReply(body)
+  })
+  it('keeps Runtime qualification specific to Agent view requests', () => {
+    expect(parseSpaceControlRequest({ ...base, operation: 'agent.view', agentSessionId: 'agent-exact', runtimeId: 'runtime-exact' })).toMatchObject({ runtimeId: 'runtime-exact' })
+    expect(() => parseSpaceControlRequest({ ...base, operation: 'agent.view', agentSessionId: 'agent-exact', runtimeId: '' })).toThrow()
+    expect(() => parseSpaceControlRequest({ ...base, operation: 'space.view', regionId: 'file-exact', runtimeId: 'runtime-exact' })).toThrow()
+  })
   it('strictly decodes modes and real nonempty region facts', () => {
     expect(parseSpaceControlRequest({ ...base, operation: 'agent.view', agentSessionId: 'constructor', mode: 'terminal' })).toMatchObject({ agentSessionId: 'constructor', mode: 'terminal' })
     const { operation, ...result } = body

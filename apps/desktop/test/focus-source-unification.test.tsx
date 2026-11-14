@@ -1,14 +1,18 @@
 // @vitest-environment happy-dom
 import { act, createElement } from 'react'
+import { execFile } from 'node:child_process'
+import { promisify } from 'node:util'
 import { afterEach, expect, it, vi } from 'vitest'
 import { tmpdir } from 'node:os'
-import { rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 vi.mock('electron', () => ({ app: { getPath: () => tmpdir() } }))
 // Native terminal/PTY painting is the only product leaf replaced in this scene.
 vi.mock('../src/renderer/src/components/SessionPane', () => ({ SessionPane: () => null }))
 vi.mock('../src/renderer/src/components/TerminalView', () => ({ TerminalView: ({ session }: { session: { id: string; control: { run: { runId: string } } } }) => createElement('div', { 'data-fixture-original-terminal': session.id, 'data-native-run': session.control.run.runId }) }))
 import { createSpaceSessionsFixture } from '../../../packages/core/test/helpers/space-session-fixture'
+import { AgentMuxControlServer } from '@agentmux/core'
+import { privateEnvironment } from './helpers/workface-control-fixture'
 import type { AgentMuxAgentSessionStore } from '../../../packages/core/src/agent-session-store'
 import { AgentProviderRegistry } from '../../../packages/core/src/agent-provider'
 import type { AgentMuxStoredAgentSession, AgentTimelineSnapshot } from '@agentmux/core'
@@ -743,4 +747,63 @@ it('the selected original conversation refuses a different admission without bor
   expect(useAppStore.getState().sessions).toHaveLength(1)
   expect((await f.d.core.readAgentSession(SID))!.run).toEqual(f.session.run)
   expect(useAppStore.getState().agentComposerDrafts[SID]).toBe('Keep this original local draft')
+})
+
+it('the public runtime-qualified view changes the selected original conversation through the real CLI without borrowing a same-SID local preference', async () => {
+  const f = await fixture({ foreign: true, nativeUnavailable: true, metadataUnknown: true })
+  await f.settle(2)
+  await vi.waitFor(() => expect(cardWith('真正远端的独立任务').querySelector('.focus-context__recap')?.textContent).toContain(foreignRecap))
+  await act(async () => cardWith('真正远端的独立任务').click())
+  const workface = () => dom.container.querySelector<HTMLElement>('.global-session-workspace [aria-label="Original member workface"]')!
+  await vi.waitFor(() => expect(workface()).not.toBeNull())
+  const owner = originalSourceInputOwnerKey(f.d.owner.runtimeId, SID), focus = useAppStore.getState().agentFocus
+  const draft = 'Keep the original qualified view draft'
+  await act(async () => useAppStore.getState().setAgentComposerDraft(owner, draft))
+  const directory = await mkdtemp(join(tmpdir(), 'amx-original-view-'))
+  const server = new AgentMuxControlServer({ socketPath: join(directory, 'control.sock'),
+    execute: request => useAppStore.getState().executeControl(request) })
+  await server.start()
+  cleanup.push(async () => { await server.stop(); await rm(directory, { recursive: true, force: true }) })
+  const cli = process.env.AGENTMUX_ORIGINAL_VIEW_CLI ?? join(process.cwd(), 'packages/core/bin/amux')
+  const run = promisify(execFile), env = privateEnvironment({ AGENTMUX_RUNTIME_DIRECTORY: directory, AGENTMUX_STATE_DIRECTORY: join(directory, 'state') })
+  const effects = [f.b, f.d].flatMap(source => (['createAgent', 'resumeAgent', 'restartAgent', 'reopenAgent', 'writeAgent', 'pasteAgent', 'submitAgentPrompt'] as const).map(method => vi.spyOn(source.core, method)))
+  const change = async (runtime: string | undefined, mode: 'terminal' | 'activity', operation: string) => {
+    let output!: Awaited<ReturnType<typeof run>>
+    await act(async () => {
+      try { output = await run(process.execPath, [cli!, 'agent', 'view', '--session', SID,
+        ...(runtime === undefined ? [] : ['--runtime', runtime]), '--mode', mode, '--operation-id', operation], { env, timeout: 15000 }) }
+      catch (cause) {
+        const failure = cause as { code?: unknown; stdout?: string; stderr?: string }
+        // This scene has no confirmed Desktop save owner. Keep the CLI's
+        // applied preference and partial/unknown save outcome distinct.
+        if (failure.code !== 1 || typeof failure.stdout !== 'string') throw cause
+        output = { stdout: failure.stdout, stderr: failure.stderr ?? '' } as typeof output
+      }
+    })
+    const receipt = JSON.parse(String(output.stdout))
+    expect(receipt.ok, String(output.stderr)).toBe(true)
+    expect(receipt.operation).toBe('agent.view')
+    return receipt.result
+  }
+  const first = await change(f.d.owner.runtimeId, 'activity', 'qualified-original-view')
+  expect(first).toMatchObject({ runtimeId: f.d.owner.runtimeId, agentSessionId: SID, storedOverride: 'activity', effectiveMode: 'activity', sessionFacts: 'unconfirmed', changed: true })
+  expect(first).toMatchObject({ outcome: 'partial', save: { diskDurability: 'unconfirmed' }, issues: [{ code: 'SPACE_SAVE_UNCONFIRMED' }] })
+  await vi.waitFor(() => {
+    expect(workface().dataset.agentSurfaceMode).toBe('activity')
+    expect(workface().querySelector('.activity-feed')?.textContent).toContain(foreignRecap)
+  })
+  expect(useAppStore.getState().viewModes[owner]).toBe('activity')
+  expect(useAppStore.getState().viewModes[SID]).toBeUndefined()
+  const wrong = await change('another-original-runtime', 'terminal', 'wrong-original-view')
+  expect(wrong).toMatchObject({ runtimeId: 'another-original-runtime', outcome: 'unknown', changed: false, save: null })
+  const ambiguous = await change(undefined, 'terminal', 'ambiguous-original-view')
+  expect(ambiguous).toMatchObject({ outcome: 'unknown', changed: false, save: null })
+  expect(workface().dataset.agentSurfaceMode).toBe('activity')
+  const back = await change(f.d.owner.runtimeId, 'terminal', 'qualified-original-terminal')
+  expect(back).toMatchObject({ runtimeId: f.d.owner.runtimeId, storedOverride: 'terminal', effectiveMode: 'terminal', changed: true })
+  await vi.waitFor(() => expect(workface().dataset.agentSurfaceMode).toBe('terminal'))
+  expect(useAppStore.getState().agentFocus).toBe(focus)
+  expect(useAppStore.getState().agentComposerDrafts[owner]).toBe(draft)
+  expect(useAppStore.getState().agentComposerDrafts[SID]).toBe('Keep this original local draft')
+  for (const effect of effects) expect(effect).not.toHaveBeenCalled()
 })

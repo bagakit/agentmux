@@ -330,3 +330,70 @@ it('updates received during an in-flight original snapshot read are coalesced in
   await vi.waitFor(() => expect(container.querySelector('.mounted-space-agent__heading')?.textContent).toContain('Idle'))
   expect(f.writes).not.toHaveBeenCalled(); expect(f.prompt).not.toHaveBeenCalled(); expect(paint.terminals).toHaveLength(1)
 })
+
+it('public view changes the actual ordinary foreign workface without borrowing a same-SID local mode', async () => {
+  vi.spyOn(readingPublication, 'publishReadingDiagnostic').mockImplementation(() => {})
+  const f = await fixture('ordinary-public-view')
+  const { desktopWorkbenchFromSpatial } = await import('../src/renderer/src/lib/desktop-spatial-state')
+  const { ordinarySpaceMember } = await import('../src/renderer/src/lib/ordinary-space-member')
+  const { executeWorkfaceAgentView } = await import('../src/renderer/src/lib/workface-agent-view')
+  const { composerSession } = await import('./helpers/composer-dom-fixture')
+  const document = (await f.b.spatial.readForLayout())!, workbench = desktopWorkbenchFromSpatial(document.graph)
+  const local = { ...composerSession(), id: f.sid, control: { kind: 'agent' as const, hostId: 'local', agentSessionId: f.sid, run: { runId: 'different-local-run' } } }
+  useAppStore.setState({ ...workbench, originalSpatialGraph: document.graph, sessions: [local], viewModes: { [f.sid]: 'terminal' },
+    config: { ...structuredClone(DEFAULT_CONFIG), hosts: [{ id: f.target.hostId, kind: 'local', label: 'Original Core carrier' }] } })
+  const reference = { tabId: f.tabId, regionId: f.target.target.regionId, sessionId: f.sid }
+  const occurrence = ordinarySpaceMember(document.graph, reference, f.target.hostId, local)
+  expect(occurrence.kind).toBe('foreign')
+  if (occurrence.kind !== 'foreign') throw Error('Expected actual ordinary foreign admission')
+  expect(useAppStore.getState().tabs[f.tabId]?.source).toBeUndefined()
+  expect(useAppStore.getState().tabs[f.tabId]?.regions[reference.regionId]).toMatchObject({ sessionId: f.sid })
+  const owner = originalSourceInputOwnerKey(f.target.target.runtimeId, f.sid)
+  useAppStore.getState().setAgentComposerDraft(f.sid, 'Keep local same-SID draft')
+  const protectedState = useAppStore.getState()
+  const sourceStore = (f.d.core as unknown as { store: AgentMuxMemoryAgentSessionStore }).store
+  await sourceStore.applyTimelineMutation({ type: 'append', agentSessionId: f.sid, item: { id: 'ordinary-original-message', agentSessionId: f.sid,
+    kind: 'assistant_message', source: 'native-hook', status: 'complete', title: 'Original result', content: 'Ordinary foreign original conversation.', createdAt: 1, updatedAt: 1 } })
+  vi.spyOn(api.spaceMounts, 'reading').mockImplementation(f.main.api.reading)
+  const localRead = vi.spyOn(api.conversation, 'readAgentConversation').mockRejectedValue(Error('Local same-SID reading is not this target'))
+  const carrierRead = vi.spyOn(f.b.core, 'readAgentConversation').mockRejectedValue(Error('Carrier same-SID reading is not this target'))
+  const originalRead = vi.spyOn(f.d.core, 'readAgentConversation')
+  const lifecycle = [f.b, f.d].flatMap(source => (['createAgent', 'resumeAgent', 'restartAgent', 'reopenAgent'] as const).map(method => vi.spyOn(source.core, method)))
+  await act(async () => root.render(<DesktopClientUiProvider><SpaceMemberWorkface target={occurrence.member} sourceTabId={f.tabId} visible active /></DesktopClientUiProvider>))
+  const workface = () => container.querySelector<HTMLElement>('[aria-label="Original member workface"]')!
+  await vi.waitFor(() => expect(workface()?.dataset.agentSurfaceMode).toBe('terminal'))
+  const save = vi.fn(async () => ({ layoutApplied: false, clientStateWritten: false, storageFlushRequested: false,
+    diskDurability: 'unconfirmed' as const, reason: 'Private test has no confirmed Desktop save owner.' }))
+  const change = async (runtimeId: string | undefined, mode: 'activity' | 'terminal') => {
+    let result!: Awaited<ReturnType<typeof executeWorkfaceAgentView>>
+    await act(async () => { result = await executeWorkfaceAgentView({ get: useAppStore.getState,
+      setViewMode: (id, next, options) => useAppStore.getState().setViewMode(id, next, options), save },
+    { schemaVersion: 5, requestId: 'ordinary-view-' + mode + '-' + (runtimeId ?? 'bare'), operation: 'agent.view', agentSessionId: f.sid, ...(runtimeId ? { runtimeId } : {}), mode }) })
+    return result
+  }
+  const first = await change(f.d.owner.runtimeId, 'activity')
+  expect(first).toMatchObject({ runtimeId: f.d.owner.runtimeId,
+    outcome: 'partial', changed: true, effectiveMode: 'activity', sessionFacts: 'unconfirmed', issues: [{ code: 'SPACE_SAVE_UNCONFIRMED' }] })
+  expect(first.regions).toEqual([expect.objectContaining({ tabId: f.tabId, regionId: reference.regionId, agentSessionId: f.sid,
+    runId: f.original.run.runId, execution: expect.objectContaining({ runtimeId: f.d.owner.runtimeId, hostId: 'D-in-B' }) })])
+  await vi.waitFor(() => {
+    expect(workface().dataset.agentSurfaceMode).toBe('activity')
+    expect(workface().querySelector('.activity-feed')?.textContent).toContain('Ordinary foreign original conversation.')
+  })
+  expect(useAppStore.getState().viewModes).toEqual({ [f.sid]: 'terminal', [owner]: 'activity' })
+  const applied = useAppStore.getState().viewModes
+  for (const runtime of ['unrelated-execution-runtime', undefined]) {
+    expect(await change(runtime, 'terminal')).toMatchObject({ outcome: 'unknown', changed: false, sessionFacts: 'unconfirmed', storedOverride: null, save: null })
+    expect(workface().dataset.agentSurfaceMode).toBe('activity')
+    expect(useAppStore.getState().viewModes).toBe(applied)
+  }
+  expect(save).toHaveBeenCalledTimes(1)
+  expect(await change(f.d.owner.runtimeId, 'terminal')).toMatchObject({ changed: true, effectiveMode: 'terminal', outcome: 'partial' })
+  await vi.waitFor(() => expect(workface().dataset.agentSurfaceMode).toBe('terminal'))
+  expect(useAppStore.getState().agentComposerDrafts).toEqual(protectedState.agentComposerDrafts)
+  expect(useAppStore.getState().sessions).toBe(protectedState.sessions)
+  expect(useAppStore.getState().agentFocus).toBe(protectedState.agentFocus)
+  expect(originalRead).toHaveBeenCalled(); expect(localRead).not.toHaveBeenCalled(); expect(carrierRead).not.toHaveBeenCalled()
+  expect(f.writes).not.toHaveBeenCalled(); expect(f.prompt).not.toHaveBeenCalled()
+  for (const effect of lifecycle) expect(effect).not.toHaveBeenCalled()
+})
