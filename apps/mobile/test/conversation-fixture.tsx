@@ -46,6 +46,8 @@ export function fixture() {
     runtimeOwnerIdentity: () => ({ runtimeId: 'original-runtime' }),
     agentSession: (id: string) => { const value = sessions.get(id); if (!value) throw new Error('unknown Session'); return value },
     agentSessions: () => [...sessions.values()],
+    readAgentSession: vi.fn<AgentMuxHostedClient['readAgentSession']>(async id => sessions.get(id) ?? null),
+    sessionHistorySources: vi.fn<AgentMuxHostedClient['sessionHistorySources']>(async input => [...sessions.values()].filter(value => !input?.agentSessionId || value.agentSessionId === input.agentSessionId).map(value => ({ agentSessionId: value.agentSessionId, hostId: value.hostId, state: 'active' as const }))),
     onEvent(listener: (event: AgentMuxClientEvent) => void) { listeners.add(listener); return () => { listeners.delete(listener); unsubscribe() } },
     onStatusEvent(listener: (event: AgentMuxClientEvent) => void) { statusListeners.add(listener); return () => { statusListeners.delete(listener); unsubscribe() } },
     observeSessionHistory: vi.fn<AgentMuxHostedClient['observeSessionHistory']>(async (id, listener) => {
