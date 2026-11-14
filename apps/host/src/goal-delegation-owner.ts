@@ -11,6 +11,7 @@ import type { AgentMuxRpcMethod, AgentMuxRpcParams, AgentMuxRpcResult, AgentMuxR
 import { delegationWorkerHostId, validateDemandDelegationReport, type DemandDelegation, type DemandDelegationReportInput } from '@agentmux/demand/delegations'
 import { hostGoalPlan } from './goal-projection.js'
 import { submitGoalSourceReport } from './goal-source-report.js'
+import { changeGoalPlanAssignment } from './goal-plan-assignment.js'
 import { isGoalSupervisor } from './goal-supervisor-identity.js'
 import type { DurableAgentMuxMessage } from '@agentmux/core'
 import type { DemandStore, Demand, DemandDispatch, GoalStartObservation } from '@agentmux/demand'
@@ -29,17 +30,28 @@ export interface GoalDelegationCorePort {
 /** Original Demand owner and original Host clients; no private journal or second queue. */
 export class GoalDelegationOwner implements GoalDelegationsOwner {
   constructor(private readonly demands: DemandStore,
-    private readonly runtime: Pick<GoalRuntimePort, 'agentCreation'> & Partial<Pick<GoalRuntimePort, 'resolveGoalAgent'>>,
+    private readonly runtime: Pick<GoalRuntimePort, 'agentCreation'> & Partial<Pick<GoalRuntimePort, 'resolveGoalAgent' | 'locateGoalAgentHost'>>,
     private readonly readMaterials?: (input: FileReadParams) => Promise<FileReadResult>,
     private readonly core?: GoalDelegationCorePort,
     private readonly readAttention?: (goalId: string, delegation: DemandDelegation) => Promise<GoalDelegationObservation['attention']>,
     private readonly readStart?: (goal: Demand, start: DemandDispatch) => Promise<GoalStartObservation>,
     private readonly responsibility?: Pick<GoalResponsibilityOwner, 'observe' | 'progress'>,
-    private readonly patrol?: Pick<GoalPatrolOwner, 'request' | 'continue' | 'report' | 'observe'>) {}
+    private readonly patrol?: Pick<GoalPatrolOwner, 'request' | 'continue' | 'report' | 'observe'>,
+    private readonly planOwner?: () => Promise<{ runtimeId: string; namespace: string }>) {}
 
   async call<M extends GoalDelegationMethod>(method: M, input: GoalDelegationParamsMap[M],
     context: AgentMuxRpcCallContext, authority: GoalDelegationAuthority): Promise<GoalDelegationResultMap[M]> {
     context.signal?.throwIfAborted()
+    if (method === 'goal.plan' || method === 'goal.plan.assignment' || method === 'goal.plan.claim') {
+      const expected = (input as GoalDelegationParamsMap['goal.plan']).expectedOwner
+      if (expected) {
+        const owner = await this.planOwner?.()
+        if (expected.runtimeId !== owner?.runtimeId || expected.namespace !== owner.namespace)
+          throw new AgentMuxError('This request names another Goal owner. Read the plan at its original Runtime and store.', 'CONTROL_REQUEST_CONFLICT')
+      }
+      if (method !== 'goal.plan') await changeGoalPlanAssignment(this.demands, this.runtime,
+        input as GoalDelegationParamsMap['goal.plan.assignment' | 'goal.plan.claim'], context, authority)
+    }
     if (method === 'goal.report' && (input as GoalDelegationParamsMap['goal.report']).sourceMessageId !== undefined)
       return await submitGoalSourceReport(this.requireCore(), this.runtime, input as GoalDelegationParamsMap['goal.report'], context, authority) as GoalDelegationResultMap[M]
     if (method === 'goal.patrol' || method === 'goal.patrol.continue' || method === 'goal.patrol.report') {
@@ -235,7 +247,7 @@ export class GoalDelegationOwner implements GoalDelegationsOwner {
     }
     const goal = await this.demands.get(input.goalId)
     if (!goal) throw new AgentMuxError('The original Goal is unavailable. Original Sessions and input remain available.', 'CONTROL_UNAVAILABLE')
-    const quiet = method === 'goal.delegation.prepare' || method === 'goal.plan' || method === 'goal.plan.revise' || method === 'goal.plan.review'
+    const quiet = method === 'goal.plan.assignment' || method === 'goal.plan.claim' || method === 'goal.delegation.prepare' || method === 'goal.plan' || method === 'goal.plan.revise' || method === 'goal.plan.review'
     const observations = quiet ? undefined
       : await Promise.all((goal.delegations ?? []).map(delegation => this.observeDelegation(input.goalId, delegation, context, authority, goal)))
     const startObservations = quiet || !this.readStart ? undefined

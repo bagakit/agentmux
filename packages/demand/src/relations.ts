@@ -11,7 +11,7 @@ export function goalSupervisorHostWitnesses(goal: Partial<Pick<Demand, 'supervis
   const requester = goal.participations?.find(item => item.id === goal.creationOrigin?.requesterParticipationId && item.agentSessionId === sessionId)
   return [...new Set([
     ...(requester ? [requester.hostId] : []),
-    ...(goal.plan?.history ?? []).filter(item => item.author.kind === 'agent' && item.author.id === sessionId && item.author.hostId).map(item => item.author.hostId!),
+    ...(goal.plan?.history ?? []).filter(item => item.change?.assignment.kind !== 'claim' && item.author.kind === 'agent' && item.author.id === sessionId && item.author.hostId).map(item => item.author.hostId!),
     ...(goal.delegations ?? []).filter(item => item.ownerAgentSessionId === sessionId).map(item => item.hostId)
   ])]
 }

@@ -22,6 +22,8 @@ export type GoalPlanNodeInput = {
   /** A check another party can repeat, e.g. a command; the reviewer runs it. */
   check: string
   executor: GoalPlanExecutor | null
+  /** Only an explicit owner operation opens an unassigned node for self-claim. */
+  claimOpen?: true
   cancelled?: true
 }
 export type GoalPlanReviewInput = {
@@ -36,7 +38,9 @@ export type GoalPlanReviewInput = {
 }
 export type GoalPlanReviewer = { kind: 'agent' | 'user' | 'device'; id: string; hostId?: string; runtimeId?: string }
 export type GoalPlanReview = GoalPlanReviewInput & { reviewer: GoalPlanReviewer; reviewedAt: number }
-export type GoalPlanRevisionRecord = { operationId: string; revision: number; author: GoalPlanReviewer; revisedAt: number }
+export type GoalPlanAssignment = { kind: 'open' } | { kind: 'close' } | { kind: 'assign'; executor: GoalPlanExecutor }
+export type GoalPlanAssignmentChange = { nodeId: string; assignment: GoalPlanAssignment | { kind: 'claim' } }
+export type GoalPlanRevisionRecord = { operationId: string; revision: number; author: GoalPlanReviewer; revisedAt: number; change?: GoalPlanAssignmentChange }
 export type GoalPlan = {
   revision: number
   /** The Goal proposal version the node criteria were written against. */
@@ -84,16 +88,34 @@ function actor(value: unknown, label: string): GoalPlanReviewer {
     ...(data.runtimeId === undefined ? {} : { runtimeId: identity(data.runtimeId, `${label}.runtimeId`) }) }
 }
 
+function parseExecutor(value: unknown): GoalPlanExecutor {
+  const item = object(value, 'plan node executor', ['hostId', 'agentSessionId'])
+  return { hostId: identity(item.hostId, 'executor.hostId'), agentSessionId: identity(item.agentSessionId, 'executor.agentSessionId') }
+}
+
+export function parseGoalPlanAssignment(value: unknown): GoalPlanAssignment {
+  const item = object(value, 'plan node assignment', ['kind', 'executor'], ['executor'])
+  if (item.kind === 'assign') return { kind: 'assign', executor: parseExecutor(item.executor) }
+  if ((item.kind === 'open' || item.kind === 'close') && !Object.hasOwn(item, 'executor')) return { kind: item.kind }
+  throw new Error('A node assignment must open, close or assign an exact executor')
+}
+
+function parseAssignmentChange(value: unknown): GoalPlanAssignmentChange {
+  const change = object(value, 'plan assignment change', ['nodeId', 'assignment'])
+  const a = object(change.assignment, 'plan assignment action', ['kind', 'executor'], ['executor'])
+  const assignment = a.kind === 'claim' && !Object.hasOwn(a, 'executor') ? { kind: 'claim' as const } : parseGoalPlanAssignment(a)
+  return { nodeId: identity(change.nodeId, 'plan assignment nodeId'), assignment }
+}
+
 export function parseGoalPlanNode(value: unknown): GoalPlanNodeInput {
-  const data = object(value, 'plan node', ['id', 'title', 'outcome', 'dependsOn', 'criterionIds', 'check', 'executor', 'cancelled'], ['cancelled'])
-  const executor = data.executor === null ? null : (() => {
-    const item = object(data.executor, 'plan node executor', ['hostId', 'agentSessionId'])
-    return { hostId: identity(item.hostId, 'executor.hostId'), agentSessionId: identity(item.agentSessionId, 'executor.agentSessionId') }
-  })()
+  const data = object(value, 'plan node', ['id', 'title', 'outcome', 'dependsOn', 'criterionIds', 'check', 'executor', 'cancelled', 'claimOpen'], ['cancelled', 'claimOpen'])
+  const executor = data.executor === null ? null : parseExecutor(data.executor)
+  if (data.claimOpen !== undefined && (data.claimOpen !== true || executor !== null || data.cancelled))
+    throw new Error('An open plan node must be unassigned and uncancelled')
   if (data.cancelled !== undefined && data.cancelled !== true) throw new Error('plan node cancelled must be true when present')
   return { id: identity(data.id, 'plan node id'), title: prose(data.title, 'plan node title'), outcome: prose(data.outcome, 'plan node outcome'),
     dependsOn: identities(data.dependsOn, 'plan node dependsOn'), criterionIds: identities(data.criterionIds, 'plan node criterionIds'),
-    check: prose(data.check, 'plan node check'), executor, ...(data.cancelled ? { cancelled: true as const } : {}) }
+    check: prose(data.check, 'plan node check'), executor, ...(data.claimOpen ? { claimOpen: true as const } : {}), ...(data.cancelled ? { cancelled: true as const } : {}) }
 }
 
 export function parseGoalPlanReviewInput(value: unknown): GoalPlanReviewInput {
@@ -149,11 +171,12 @@ export function parseGoalPlan(value: unknown): GoalPlan {
   if (new Set(reviews.map(review => review.operationId)).size !== reviews.length) throw new Error('plan reviews repeat an operation')
   if (reviews.some(review => !nodes.some(node => node.id === review.nodeId))) throw new Error('plan review names an absent node')
   const history = data.history.map(value => {
-    const item = object(value, 'plan revision record', ['operationId', 'revision', 'author', 'revisedAt'])
+    const item = object(value, 'plan revision record', ['operationId', 'revision', 'author', 'revisedAt', 'change'], ['change'])
     return { operationId: identity(item.operationId, 'plan revision operationId'), revision: positive(item.revision, 'plan revision'),
-      author: actor(item.author, 'plan revision author'), revisedAt: positive(item.revisedAt, 'plan revision revisedAt') }
+      ...(item.change === undefined ? {} : { change: parseAssignmentChange(item.change) }), author: actor(item.author, 'plan revision author'), revisedAt: positive(item.revisedAt, 'plan revision revisedAt') }
   })
   const revision = positive(data.revision, 'plan revision')
+  if (new Set(history.map(record => record.operationId)).size !== history.length) throw new Error('plan history repeats an operation')
   if (history.length !== revision || history.some((record, index) => record.revision !== index + 1)) throw new Error('plan history must record every revision in order')
   return { revision, alignmentRevision: positive(data.alignmentRevision, 'plan alignmentRevision'), nodes, reviews, history }
 }
@@ -306,6 +329,7 @@ export function parseGoalPlanState(value: unknown, plan: GoalPlan, delegations: 
 export function goalPlanDelegationIssue(plan: GoalPlan, delegations: readonly DemandDelegation[], criteria: readonly DemandCriterion[], nodeId: string, worker: GoalPlanExecutor): string | null {
   const projection = projectGoalPlan(plan, delegations, criteria).nodes.find(item => item.node.id === nodeId)
   if (!projection) return `Plan node ${nodeId} is not in the current plan.`
+  if (projection.node.claimOpen) return `Plan node ${nodeId} is open for claim. Assign or claim it before delegating.`
   if (projection.state !== 'ready' && projection.state !== 'changes')
     return `Plan node ${nodeId} is ${projection.state}${projection.unknown.length ? ` (${projection.unknown.join(', ')})` : ''}; only a ready node or one whose review requested changes can be delegated.`
   const executor = projection.node.executor

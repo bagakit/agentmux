@@ -17,13 +17,17 @@ export async function goalSupervisorHost(goal: Demand, runtime: Runtime): Promis
   return (await runtime.resolveGoalAgent(sessionId)).hostId
 }
 
+export function goalSupervisorRuntimeWitnesses(goal: Demand, id: string): Set<string> {
+  return new Set([
+    ...(goal.plan?.history ?? []).filter(item => item.change?.assignment.kind !== 'claim' && item.author.kind === 'agent' && item.author.id === id && item.author.runtimeId).map(item => item.author.runtimeId!),
+    ...(goal.delegations ?? []).filter(item => item.ownerAgentSessionId === id && item.runtimeIdentity).map(item => item.runtimeIdentity!.ownerRuntimeId)
+  ])
+}
+
 export async function isGoalSupervisor(goal: Demand, authority: GoalDelegationAuthority, runtime: Runtime): Promise<boolean> {
   if (authority.actor.kind !== 'agent') return true
   if (authority.actor.id !== goal.supervisorSessionId) return false
-  const runtimes = new Set([
-    ...(goal.plan?.history ?? []).filter(item => item.author.kind === 'agent' && item.author.id === authority.actor.id && item.author.runtimeId).map(item => item.author.runtimeId!),
-    ...(goal.delegations ?? []).filter(item => item.ownerAgentSessionId === authority.actor.id && item.runtimeIdentity).map(item => item.runtimeIdentity!.ownerRuntimeId)
-  ])
+  const runtimes = goalSupervisorRuntimeWitnesses(goal, authority.actor.id)
   if (runtimes.size > 1) throw new AgentMuxError('The current Supervisor has conflicting original Core Runtime identities. Keep its original work and resolve the exact relationship.', 'AMBIGUOUS_AGENT_SESSION')
   if (runtimes.size === 1) return authority.runtimeId === [...runtimes][0]
   return authority.hostId === await goalSupervisorHost(goal, runtime)

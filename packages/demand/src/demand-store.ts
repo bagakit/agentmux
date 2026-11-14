@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from 'node:util'
 import { parseDemandAgentReference, parseDemandAgentReferences, demandAgentReferenceKey, mergeDemandAgentReferences, type DemandAgentReference } from './agent-reference.js'
 import { parseDemandDiscussionInput, parseDemandDiscussionInputs, parseDemandDiscussionIntent, type DemandDiscussionInput, type DemandDiscussionIntent } from './discussion.js'
 import { demandPatrolScope, completedGoalPlanRequest, assertPatrolExecutions, parseDemandPatrols, parseDemandPatrolAttempt, parseDemandPatrolReportInput, type DemandPatrolPreparation, type DemandPatrolAttempt, type DemandPatrolReportInput } from './goal-patrol.js'
@@ -39,7 +40,7 @@ import {
 } from './demand-types.js'
 import { DemandStoreError } from './errors.js'
 import { assertGoalPlanKeepsRecordedNodes, goalPlanDelegationIssue, parseGoalPlan, parseGoalPlanReviewInput, parseGoalPlanRevisionInput, projectGoalPlan,
-  type GoalPlanReviewer, type GoalPlanReviewInput, type GoalPlanRevisionInput } from './goal-plan.js'
+  type GoalPlanAssignmentChange, type GoalPlanReviewer, type GoalPlanReviewInput, type GoalPlanRevisionInput } from './goal-plan.js'
 import { demandNameContext, parseDemandNameChange } from './demand-name-change.js'
 import { alignmentConfirmationIssue, groundingAcceptanceIssue, parseAlignment, parseAlignmentProposal, parseGrounding, parseGroundingProposal, type DemandAlignmentProposal, type DemandGroundingProposal } from './goals.js'
 
@@ -804,6 +805,7 @@ export class DemandStore {
       const demand = findDemand(snapshot, id, this.storePath), current = demand.plan
       if (current?.history.some(record => record.operationId === revision.operationId)) {
         const original = current.history.find(record => record.operationId === revision.operationId)!
+        if (original.change) this.rejectDelegation('This operation already belongs to a node assignment. Read its original plan history.')
         if (original.author.kind !== author.kind || original.author.id !== author.id || (original.author.runtimeId ? original.author.runtimeId !== author.runtimeId : original.author.hostId !== undefined && original.author.hostId !== author.hostId)) this.rejectDelegation('This plan revision operation belongs to another author.')
         if (original.revision !== current.revision)
           this.rejectDelegation(`This operation already applied at plan revision ${original.revision}; the current plan is revision ${current.revision}. Read the current plan instead of repeating the revision.`)
@@ -818,6 +820,10 @@ export class DemandStore {
       try { assertGoalPlanKeepsRecordedNodes(current, revision.nodes, demand.delegations ?? []) } catch (error) { this.rejectDelegation(error instanceof Error ? error.message : String(error)) }
       for (const node of revision.nodes) {
         const previous = current?.nodes.find(item => item.id === node.id)
+        if (node.claimOpen && !previous?.claimOpen)
+          this.rejectDelegation('Open a ready node using the explicit plan assignment operation.')
+        if (previous?.claimOpen && node.executor)
+          this.rejectDelegation('Assign an open node using the explicit plan assignment operation.')
         const criteriaWritten = !previous || previous.criterionIds.length !== node.criterionIds.length || previous.criterionIds.some(id => !node.criterionIds.includes(id))
         if (criteriaWritten && (!node.criterionIds.length || node.criterionIds.some(id => !demand.alignment!.criteria.some(criterion => criterion.id === id))))
           this.rejectDelegation(`Plan node ${node.id} must write at least one success criterion, all from the current Goal proposal. Unchanged existing criteria and recorded work are retained.`)
@@ -829,6 +835,50 @@ export class DemandStore {
       validateNewDemand(demand, this.storePath)
       return demand
     }, undefined, revision.operationId)
+  }
+
+  /** Compare the observed plan and write one node under the original store's writer lock. */
+  async changePlanAssignment(id: string, expectedRevision: number, operationId: string, change: GoalPlanAssignmentChange,
+    author: GoalPlanReviewer, assertAuthorized: (current: Demand) => void): Promise<DemandReceipt> {
+    return this.mutate(change.assignment.kind === 'claim' ? 'plan.claim' : 'plan.assignment', snapshot => {
+      const demand = findDemand(snapshot, id, this.storePath), plan = demand.plan
+      if (!plan) this.rejectDelegation('This Goal has no saved plan.')
+      const original = plan.history.find(record => record.operationId === operationId)
+      if (original) {
+        if (original.author.kind !== author.kind || original.author.id !== author.id || original.author.hostId !== author.hostId ||
+            original.author.runtimeId !== author.runtimeId || original.revision - 1 !== expectedRevision || !isDeepStrictEqual(original.change, change))
+          this.rejectDelegation('This operation belongs to another original request or actor. Read plan history to reconcile it.')
+        return { unchanged: demand }
+      }
+      assertAuthorized(demand)
+      if (expectedRevision !== plan.revision)
+        this.rejectDelegation(`The plan changed to revision ${plan.revision} after you read revision ${expectedRevision}. Read the current plan and its executor.`)
+      const projection = projectGoalPlan(plan, demand.delegations ?? [], demand.alignment?.criteria ?? []).nodes.find(item => item.node.id === change.nodeId)
+      if (!projection) this.rejectDelegation(`Plan node ${change.nodeId} is not in the current plan.`)
+      const { node } = projection, action = change.assignment
+      if (action.kind !== 'close' && (demand.status === 'done' || demand.status === 'cancelled' || projection.state !== 'ready' || projection.delegation))
+        this.rejectDelegation(`This assignment requires an unfinished Goal and a ready node with no current delegation. Read the current plan (${demand.status}, ${projection.state}).`)
+      if (action.kind === 'open') {
+        if (node.executor || node.claimOpen) this.rejectDelegation('Only an unassigned node with closed claims can be opened.')
+        node.claimOpen = true
+      } else {
+        if ((action.kind === 'claim' || action.kind === 'close') && !node.claimOpen) this.rejectDelegation('This node is not open for claim. Read its current executor.')
+        if (action.kind === 'claim') {
+          if (node.executor || author.kind !== 'agent' || !author.hostId || !author.runtimeId)
+            this.rejectDelegation('Claiming requires an unassigned node and an authenticated Agent, Host and Runtime.')
+          node.executor = { hostId: author.hostId, agentSessionId: author.id }
+        } else if (action.kind === 'assign') {
+          node.executor = clone(action.executor)
+        }
+        delete node.claimOpen
+      }
+      const now = Date.now()
+      plan.revision += 1
+      plan.history.push({ operationId, revision: plan.revision, author, revisedAt: now, change: clone(change) })
+      demand.updatedAt = Math.max(now, demand.updatedAt + 1)
+      validateNewDemand(demand, this.storePath)
+      return demand
+    }, undefined, operationId)
   }
 
   /**

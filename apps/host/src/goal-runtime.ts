@@ -50,6 +50,7 @@ export interface GoalRuntimePort {
   readInputEpoch(hostId: string): Promise<string | undefined>
   agentCreation(hostId: string, agentSessionId: string): Promise<AgentMuxAgentCreationInspection>
   observeGoalAgent(hostId: string, agentSessionId: string): Promise<AgentMuxAgentRuntimeStatus>
+  locateGoalAgentHost(agentSessionId: string, expectedHostId?: string): string
   resolveGoalAgent(agentSessionId: string, expectedHostId?: string): Promise<{ hostId: string; status: AgentMuxAgentRuntimeStatus }>
   observeOriginalRun(hostId: string, runId: string): Promise<Pick<AgentMuxRun, 'runId' | 'state'>>
   observeCoreEvents(types: readonly AgentMuxClientEvent['type'][], listener: (hostId: string, event: AgentMuxClientEvent) => void): () => void
@@ -87,6 +88,14 @@ export function createGoalRuntime(options: {
     const matches = options.clients().filter(entry => entry.hostId === hostId)
     if (matches.length !== 1) throw new AgentMuxError('The original Goal execution Host is unavailable or ambiguous. Original input and healthy Agents are retained.', 'CONTROL_UNAVAILABLE')
     return matches[0]!.client
+  }
+  const locateGoalAgentHost = (sessionId: string, expectedHostId?: string) => {
+    const matches = options.clients().filter(entry => {
+      if (expectedHostId !== undefined && entry.hostId !== expectedHostId) return false
+      try { return entry.client.agentSession(sessionId).agentSessionId === sessionId } catch { return false }
+    })
+    if (matches.length !== 1) throw new AgentMuxError('The exact Goal Agent has no unique retained Host binding. Reconnect its original owner; no unrelated Host was probed.', 'CONTROL_UNAVAILABLE')
+    return matches[0]!.hostId
   }
   const status = async (hostId: string, sessionId: string) => {
     const client = exact(hostId), value = await client.statusAgent(sessionId)
@@ -127,10 +136,10 @@ export function createGoalRuntime(options: {
     },
     observeGoalAgent: status,
     readInputEpoch: hostId => exact(hostId).readAgentInputEpoch(),
+    locateGoalAgentHost,
     resolveGoalAgent: async (sessionId, expectedHostId) => {
-      const matches = options.clients().filter(entry => { if (expectedHostId !== undefined && entry.hostId !== expectedHostId) return false; try { return entry.client.agentSession(sessionId).agentSessionId === sessionId } catch { return false } })
-      if (matches.length !== 1) throw new AgentMuxError('The exact Goal Agent has no unique retained Host binding. Reconnect its original owner; no unrelated Host was probed.', 'CONTROL_UNAVAILABLE')
-      return { hostId: matches[0]!.hostId, status: await status(matches[0]!.hostId, sessionId) }
+      const hostId = locateGoalAgentHost(sessionId, expectedHostId)
+      return { hostId, status: await status(hostId, sessionId) }
     },
     observeOriginalRun: async (hostId, runId) => { const value = await exact(hostId).runtimeSubject({ kind: 'terminal-run', runId }); return { runId: value.run.runId, state: value.run.state } },
     observeCoreEvents: (types, listener) => {

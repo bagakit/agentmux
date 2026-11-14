@@ -63,18 +63,22 @@ export function createHostGoals(options: {
 }) {
   const root = dirname(options.configurationPath)
   const demands = openDemandStore({ root: join(root, 'demands') })
+  const planOwner = async () => {
+    const runtimeId = options.runtime().ownerIdentity().runtimeId
+    if (!runtimeId) throw new AgentMuxError('The original semantic Runtime identity is unavailable.', 'CONTROL_UNAVAILABLE')
+    const canonicalRoot = await realpath(demands.root).catch(() => {
+      throw new AgentMuxError('The original canonical Goal store could not be read.', 'CONTROL_UNAVAILABLE')
+    })
+    const namespace = createHash('sha256').update(JSON.stringify(['agentmux.goal-namespace.v1', canonicalRoot])).digest('hex')
+    return { runtimeId, namespace }
+  }
   const projectGoals = async (goals: Demand[]) => {
     if (!goals.length) return []
-    let step = 'the original semantic Runtime identity'
     try {
-      const runtimeId = options.runtime().ownerIdentity().runtimeId
-      if (!runtimeId) throw new Error('The original semantic Runtime identity is unavailable.')
-      step = 'the original canonical Goal store'
-      const canonicalRoot = await realpath(demands.root)
-      const namespace = createHash('sha256').update(JSON.stringify(['agentmux.goal-namespace.v1', canonicalRoot])).digest('hex')
+      const { runtimeId, namespace } = await planOwner()
       return goals.map(goal => projectHostGoal(goal, formatGoalAddress(goal.id, runtimeId, namespace)))
-    } catch {
-      return goals.map(goal => ({ ...projectHostGoal(goal), addressIssue: `Goal link source is unconfirmed: ${step} could not be read. The original Goal and work are retained.` }))
+    } catch (error) {
+      return goals.map(goal => ({ ...projectHostGoal(goal), addressIssue: `Goal link source is unconfirmed: ${error instanceof Error ? error.message : String(error)} The original Goal and work are retained.` }))
     }
   }
   const projectGoal = async (goal: Demand) => (await projectGoals([goal]))[0]!
@@ -130,7 +134,7 @@ export function createHostGoals(options: {
     { observe: (goal, work) => responsibility.observe(goal, work), progress: (id, input, context, authority) => responsibility.progress(id, input, context, authority) },
     { request: (id, op, context, authority) => patrol.request(id, op, context, authority),
       continue: (id, patrolId, op, run, context, authority) => patrol.continue(id, patrolId, op, run, context, authority),
-      report: (id, patrolId, report, authority) => patrol.report(id, patrolId, report, authority), observe: goal => patrol.observe(goal) })
+      report: (id, patrolId, report, authority) => patrol.report(id, patrolId, report, authority), observe: goal => patrol.observe(goal) }, planOwner)
   const readDelegations = (goalId: string, context: AgentMuxRpcCallContext) => delegations.call('goal.delegations', { goalId }, context, { actor: person })
   attention = new GoalDelegationAttentionOwner(demands, runtime, delegations, changed)
   starts = new GoalStartResponsibilityOwner(demands, runtime, changed)
