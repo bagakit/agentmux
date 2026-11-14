@@ -7,20 +7,24 @@ import { readFileSync, watch } from 'node:fs'
 assert.ok(process.stdin.isTTY && process.stdout.isTTY)
 process.stdin.setRawMode(true)
 const marker = process.argv[2]
-for (let row = 0; row < 320; row++) process.stdout.write('\u001b[32mprivate-history-'+row+'\u001b[0m\r\n')
-process.stdout.write('private-live-ready\r\n')
 process.stdin.on('data', bytes => process.stdout.write('private-echo:'+bytes.toString()+'\r\n'))
 const started = new Set()
 watch(marker, () => {
   const phase = readFileSync(marker, 'utf8')
-  if (!['solo', 'with', 'unrelated'].includes(phase) || started.has(phase)) return
+  if (!['history', 'solo', 'with', 'unrelated'].includes(phase) || started.has(phase)) return
   started.add(phase)
+  if (phase === 'history') {
+    for (let row = 0; row < 320; row++) process.stdout.write('\u001b[32mprivate-history-'+row+'\u001b[0m\r\n')
+    process.stdout.write('private-history-ready\r\n')
+    return
+  }
   let record = 0
   const timer = setInterval(() => {
     process.stdout.write('private-'+phase+'-burst-'+ ++record +'\r\n')
     if (record === 24) clearInterval(timer)
   }, 15)
 })
+process.stdout.write('private-live-ready\r\n')
 `
 
 export async function startTerminalNeighbor({ runtime, config, privateRoot, nodeExecutable, name = 'original' }) {
@@ -63,16 +67,30 @@ export async function exerciseTerminalNeighbor({ win, read, ready, until, click,
   const untilTail = (tail) => ready(`(()=>{const state=liveTerminalProof();return state?.buffer.tail===${JSON.stringify(tail)} && state})()`)
   const visiblePoint = (selector) => read(`(()=>{const element=document.querySelector(${JSON.stringify(selector)}),r=element?.getBoundingClientRect();
     if(!r?.width||!r.height)throw Error('Original split reading region is absent');return {x:r.x+r.width/2,y:r.y+r.height/2}})()`)
-  const readyBefore = await untilTail('private-live-ready')
-  assert.ok(readyBefore.buffer.base > 200)
-  assert.equal(readyBefore.buffer.viewport, readyBefore.buffer.base)
+  await ready('liveTerminalProof()?.buffer.top==="private-live-ready"')
   await click(`document.querySelector(${JSON.stringify(terminalSelector)})`)
   await ready('liveTerminalProof().focused')
   await read(twoFrames)
-  const before = await inspect()
+  const zero = await inspect()
+  assert.equal(zero.buffer.type, 'normal')
+  assert.equal(zero.buffer.base, 0)
+  assert.equal(zero.buffer.viewport, 0)
   const attachment = structuredClone(attachmentActivity(calls))
   assert.equal(attachment.filter(call => call.kind === 'attach').length, 1)
   assert.equal(attachment.find(call => call.kind === 'attach')?.runId, privateTerminal.reference.runId)
+  await wheel(zero.bounds, -240)
+  await ready('liveTerminalProof().input.includes("wheel")')
+  await read(twoFrames)
+  const afterZeroWheel = await inspect()
+  sameHistory(zero, afterZeroWheel)
+  assert.deepEqual(afterZeroWheel.buffer, zero.buffer, 'A real active screen without local scrollback stays in place')
+  assert.ok(afterZeroWheel.focused)
+  assert.deepEqual(attachmentActivity(calls), attachment, 'A zero-history wheel cannot change terminal attachment or request replay')
+  assert.equal(calls.filter(call => call.kind === 'write').length, 0)
+  await privateTerminal.emit('history')
+  const before = await untilTail('private-history-ready')
+  assert.ok(before.buffer.base > 200)
+  assert.equal(before.buffer.viewport, before.buffer.base)
   const scrolling = []
   const scroll = async delta => {
     const state = await inspect(), started = performance.now()
@@ -143,7 +161,9 @@ export async function exerciseTerminalNeighbor({ win, read, ready, until, click,
   await ready(`readingProof.events.slice(${readerBefore}).some(event=>event.type==='wheel' && event.detail.trusted && event.detail.deltaY===-250)`)
   const readerFeed = `document.querySelector(${JSON.stringify(readerSelector)})`
   const latestReaderAction = `document.querySelector('[data-workbench-region-id="reading-region"] [data-message-tool-control="jump-to-latest"]')`
-  const readerTailDistance = `(()=>{const feed=${readerFeed};return feed.scrollHeight-feed.clientHeight-feed.scrollTop})()`
+  const readerTailDistance = `(()=>{const feed=${readerFeed},tail=feed.querySelector('[data-conversation-reading-tail]');
+    if(!tail?.isConnected||!feed.checkVisibility()||!feed.clientHeight)throw Error('Original Reader tail is absent');
+    return tail.getBoundingClientRect().top-feed.getBoundingClientRect().top-feed.clientHeight})()`
   const awayFromTail = await ready(`${latestReaderAction}?.checkVisibility() && ${readerTailDistance} > 2 && ${readerTailDistance}`)
   await click(latestReaderAction)
   await ready(`${readerTailDistance} <= 2 && !${latestReaderAction}`)
@@ -203,7 +223,7 @@ export async function exerciseTerminalNeighbor({ win, read, ready, until, click,
     [privateTerminal.reference.runId, 1, 'user'], [privateTerminal.reference.runId, 6, 'user']
   ])
   await shot('terminal-neighbor')
-  return { before, up, older, duringReader, duringNative, after, live, calls, originalAttachment: attachment,
+  return { zeroHistory: { before: zero, after: afterZeroWheel }, before, up, older, duringReader, duringNative, after, live, calls, originalAttachment: attachment,
     unrelated: { runId: unrelated.reference.runId, rawBytes: otherReplay.replay.reduce((n, row) => n + row.dataBytes.byteLength, 0), rendererBytes: unrelatedBytes },
     reader: { recordId, awayFromTail, followingTail: readerFollowingTail.tailDistance, acceptedRevision: accepted.accepted.revision }, timings: { scroll: scrolling, scrollP95: p95(scrolling),
       input, inputP95: p95(input), nativeOutput: { solo, shared } } }
