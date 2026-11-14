@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { app, BrowserWindow, nativeImage, screen } from 'electron'
+import { app, BrowserWindow, nativeImage, screen, type NativeImage, type Rectangle } from 'electron'
 import { writeFile } from 'node:fs/promises'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
@@ -69,11 +69,51 @@ const js = async (window: BrowserWindow, code: string) => { try { return await w
 async function click(window: BrowserWindow, label: string) {
   await js(window, `(()=>{const b=[...document.querySelectorAll('button')].find(b=>(b.textContent.trim()===${JSON.stringify(label)}||b.getAttribute('aria-label')===${JSON.stringify(label)}));if(!b||b.disabled)throw Error('Missing enabled '+${JSON.stringify(label)});b.click()})()`)
 }
+function assertSourcePixels(actual: Buffer, expected: Buffer, context: string) {
+  assert.equal(actual.length, expected.length, context + ' must have the source dimensions')
+  let changed = 0
+  for (let i = 0; i < expected.length; i += 4) {
+    if ([0, 1, 2].some(channel => Math.abs(actual[i + channel] - expected[i + channel]) > 12)) changed++
+  }
+  const fraction = changed / (expected.length / 4)
+  assert.ok(fraction < .001, `${context} must contain only source pixels, ${(fraction * 100).toFixed(3)}% differ`)
+}
+function assertStitchedSource(image: NativeImage, first: NativeImage, last: NativeImage, context: string) {
+  const appended = image.getSize().height - first.getSize().height
+  assert.ok(appended > 0 && appended <= last.getSize().height, 'scroll must append source rows')
+  const stripBytes = appended * image.getSize().width * 4
+  assertSourcePixels(image.toBitmap(), Buffer.concat([first.toBitmap(), last.toBitmap().subarray(-stripBytes)]), context)
+}
+async function readPreview(overlay: BrowserWindow, previous?: string) {
+  return await until('decoded accepted image preview', () => js(overlay, `(() => {
+    const preview = document.querySelector('.capture-live-preview img')
+    if (!preview?.complete || !preview.naturalWidth || preview.src === ${JSON.stringify(previous ?? '')}) return null
+    return { src: preview.src, width: preview.naturalWidth, height: preview.naturalHeight }
+  })()`))
+}
+function assertThumbnail(preview: { src: string; width: number; height: number }, full: NativeImage) {
+  const size = full.getSize()
+  assert.ok(Math.abs(preview.width * size.height / size.width - preview.height) <= 2, 'preview aspect ratio must follow accepted long-image pixels')
+  // Probe the underlying row colors, well inside the source image and away from
+  // text boundaries. Different color bands detect blank, stale or repeated art.
+  const thumb = nativeImage.createFromDataURL(preview.src).toBitmap()
+  const source = full.resize({ width: preview.width, height: preview.height }).toBitmap()
+  let matches = 0, count = 0
+  for (let y = 3; y < preview.height - 3; y += 4) {
+    for (let x = 3; x < preview.width - 3; x += 5) {
+      const i = (preview.width * y + x) * 4
+      if (![0, 1, 2].every(c => [-2, 2, -2 * preview.width, 2 * preview.width].every(d => Math.abs(source[i + c] - source[i + d * 4 + c]) < 3))) continue
+      if ([0, 1, 2].every(c => Math.abs(thumb[i + c] - source[i + c]) <= 8)) matches++
+      count++
+    }
+  }
+  assert.ok(count >= 8 && matches / count > .95, `thumbnail must show accepted source rows (${matches}/${count})`)
+}
 async function run() {
   await app.whenReady()
   native = new NativeDesktop({ executablePath: process.env.CAPTURE_SEQUENCE_HELPER!, connectTimeoutMs: 15000, requestTimeoutMs: 15000 })
   const area = screen.getPrimaryDisplay().workArea
-  source = new BrowserWindow({ x: area.x + 40, y: area.y + 40, width: 740, height: 520, webPreferences: { backgroundThrottling: false } })
+  source = new BrowserWindow({ x: area.x + 40, y: area.y + 40, width: Math.min(area.width, 1060), height: Math.min(area.height - 60, 750), webPreferences: { backgroundThrottling: false } })
   source.setAlwaysOnTop(true, 'floating')
   const rows = Array.from({ length: 24 }, (_, i) => `<section style="height:85px;box-sizing:border-box;padding:14px 24px;background:hsl(${i * 47 % 360} 30% 92%);color:#213044;border-bottom:1px solid #aebbc7"><b>${i + 1} · Capture evidence</b><div>Scroll the real source while the original screenshot surface stays in place.</div><small id="counter-${i}">Screen capture</small></section>`).join('')
   await source.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent('<!doctype html><body style="margin:0;font:14px/1.5 system-ui;user-select:none"><main style="height:calc(100vh + 85px);overflow:clip">' + rows + '</main></body>'))
@@ -81,7 +121,21 @@ async function run() {
   const bounds = source.getContentBounds(), rect = { x: bounds.x + 32, y: bounds.y + 32, width: 480, height: 260 }
   surface = new CaptureSurface({ appearance: () => ({ terminalTheme: 'graphite', appAppearance: 'dark' }), native: () => native,
     returnFocus: () => {}, copyText: async () => {}, pin: async () => { throw new Error('Not used') } })
-  const owner = new CaptureSequenceOwner({ directory: join(out, 'captures'), home: join(out, 'home'), appearance: () => ({ terminalTheme: 'graphite', appAppearance: 'dark' }), native: () => native,
+  let observeCandidate: ((image: NativeImage) => void) | undefined
+  const sampling = {
+    captureScreenshot: async (params: Parameters<NativeDesktop['captureScreenshot']>[0]) => {
+      const observer = observeCandidate
+      const result = await native.captureScreenshot(params)
+      if (observer && result.screenshot) observer(nativeImage.createFromBuffer(Buffer.from(result.screenshot.data, 'base64')))
+      return result
+    }
+  }
+  async function sourcePixels(selection: Rectangle) {
+    return nativeImage.createFromBuffer((await source.webContents.capturePage({
+      x: selection.x - bounds.x, y: selection.y - bounds.y, width: selection.width, height: selection.height
+    })).toPNG())
+  }
+  const owner = new CaptureSequenceOwner({ directory: join(out, 'captures'), home: join(out, 'home'), appearance: () => ({ terminalTheme: 'graphite', appAppearance: 'dark' }), native: () => sampling,
     select: async mode => {
       const outcome = await surface.present({ attachToDraft: false, expandable: false, ...(mode === 'scroll' ? { sequenceMode: mode } : {}), returnFocus: false, complete: async () => {} })
       return outcome.state === 'sequence' ? outcome : null
@@ -107,8 +161,21 @@ async function run() {
     if (!publicEntry) await click(overlay, 'Scrolling')
     await until('scrolling Start is ready', () => js(overlay, "[...document.querySelectorAll('button')].some(b=>b.getAttribute('aria-label')==='Start scrolling capture'&&!b.disabled)"))
     const originalWindows = BrowserWindow.getAllWindows().map(window => window.id).sort()
-    await js(overlay, "(()=>{const r=document.querySelector('.image-annotation-editor__capture-bar').getBoundingClientRect();window.fixtureStartAnchor={x:r.x,y:r.y,width:r.width,height:r.height};document.querySelector('button[aria-label=\"Start scrolling capture\"]').click()})()")
-    const toolbar = await js(overlay, 'window.fixtureStartAnchor')
+    const toolbar = await js(overlay, "document.querySelector('.image-annotation-editor__capture-bar').getBoundingClientRect().toJSON()")
+    if (publicEntry) await click(overlay, 'Start scrolling capture')
+    else {
+      const start = await js(overlay, `(() => {
+        const button = document.querySelector('button[aria-label="Start scrolling capture"]')
+        const r = button.getBoundingClientRect()
+        return { x: r.x + r.width / 2, y: r.y + r.height / 2, nativeTitle: button.closest('[title]')?.title }
+      })()`)
+      assert.equal(start.nativeTitle, undefined, 'Start must not create an unowned native tooltip')
+      const startPoint = { x: Math.round(offset.x + start.x), y: Math.round(offset.y + start.y) }
+      await routeTo(overlay, startPoint)
+      await until('Start hint painted inside the owned overlay', () => js(overlay, `[...document.querySelectorAll('[role="tooltip"]')].some(el => el.textContent.includes('Start scrolling capture') && el.checkVisibility({ visibilityProperty: true, opacityProperty: true }) && el.getBoundingClientRect().width > 0)`))
+      await clickAt(overlay, startPoint)
+      result.observations.push({ startHover: 'visible in capture overlay', nativeTitle: false })
+    }
     await until('original overlay became live without a new window', async () => {
       assert.deepEqual(BrowserWindow.getAllWindows().map(window => window.id).sort(), originalWindows, 'Start must not create a capture, preview or border window')
       return await js(overlay, "!!document.querySelector('.capture-live-toolbar')")
@@ -126,6 +193,9 @@ async function run() {
   const sourceSelection = await js(overlay, 'window.captureSequence.load().then(s=>s.source)')
   const selected = sourceSelection.rect
   await until('fresh native baseline before input', () => js(overlay, 'window.captureSequence.load().then(s=>s.frames[0].capturedAt>s.source.capturedAt)'))
+  const firstPreview = await readPreview(overlay)
+  const firstGuiSource = await sourcePixels(selected)
+  assertThumbnail(firstPreview, firstGuiSource)
   const sourcePoint = { x: Math.round(selected.x + selected.width / 2), y: Math.round(selected.y + selected.height / 2) }
   await writeFile(join(out, 'awaiting-input.json'), JSON.stringify({ phase: 'source-input', pid: process.pid, sourceBounds: source.getBounds(), requested: rect, selected, sourcePoint, overlayId: overlay.id }))
   const initialOffset = await js(source, 'document.scrollingElement.scrollTop')
@@ -139,21 +209,34 @@ async function run() {
   await until('actual scrolled pixels accepted', async () => (await js(overlay, 'window.captureSequence.load()')).frames.length >= 2)
   const sourceInput = await js(source, '({clicks:window.sourceClicks,wheels:window.sourceWheels,scroll:document.scrollingElement.scrollTop})')
   assert.ok(sourceInput.scroll > initialOffset, 'the original source must actually scroll after input')
-  const toolbarBounds = await js(overlay, "document.querySelector('.capture-live-toolbar').getBoundingClientRect().toJSON()")
+  const lastGuiSource = await sourcePixels(selected)
+  const nextPreview = await readPreview(overlay, firstPreview.src)
+  const chromeBounds = await js(overlay, `[...document.querySelectorAll('.capture-live-toolbar, .capture-live-preview')].map(el => el.getBoundingClientRect().toJSON())`)
   const overlayFrame = overlay.getBounds()
-  const left = Math.max(0, Math.min(selected.x, overlayFrame.x + toolbarBounds.left) - 8)
-  const top = Math.max(0, Math.min(selected.y, overlayFrame.y + toolbarBounds.top) - 8)
+  const left = Math.max(0, Math.min(selected.x, ...chromeBounds.map((r: DOMRect) => overlayFrame.x + r.left)) - 8)
+  const top = Math.max(0, Math.min(selected.y, ...chromeBounds.map((r: DOMRect) => overlayFrame.y + r.top)) - 8)
   const shotRect = { x: Math.floor(left), y: Math.floor(top),
-    width: Math.ceil(Math.max(selected.x + selected.width, overlayFrame.x + toolbarBounds.right) - left + 8),
-    height: Math.ceil(Math.max(selected.y + selected.height, overlayFrame.y + toolbarBounds.bottom) - top + 8) }
+    width: Math.ceil(Math.max(selected.x + selected.width, ...chromeBounds.map((r: DOMRect) => overlayFrame.x + r.right)) - left + 8),
+    height: Math.ceil(Math.max(selected.y + selected.height, ...chromeBounds.map((r: DOMRect) => overlayFrame.y + r.bottom)) - top + 8) }
   // The actual overlay is capture-protected. Allow photos of this fixture's own
   // synthetic surface only, then restore protection before testing delivery.
+  const stop = await js(overlay, "document.querySelector('.capture-live-toolbar button.primary-button').getBoundingClientRect().toJSON()")
+  const stopGlobal = { x: Math.round(overlayFrame.x + stop.left + stop.width / 2), y: Math.round(overlayFrame.y + stop.top + stop.height / 2) }
+  if (!humanInput) await routeTo(overlay, stopGlobal)
   overlay.setContentProtection(false)
   try {
     const shots = []
     for (const theme of ['dark', 'light']) {
       await js(overlay, `window.setCaptureFixtureTheme('${theme}')`)
       await js(overlay, 'new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))')
+      const stopStyle = await js(overlay, `(() => {
+        const button = document.querySelector('.capture-live-toolbar button.primary-button')
+        const style = getComputedStyle(button)
+        return { disabled: button.disabled, hovered: button.matches(':hover'), text: style.color, background: style.backgroundColor }
+      })()`)
+      assert.equal(stopStyle.disabled, false, 'stable recording must allow Stop')
+      if (!humanInput) assert.equal(stopStyle.hovered, true, 'composed screenshot must exercise the enabled Stop hover appearance')
+      result.observations.push({ theme, stopStyle })
       const file = `scroll-inline-${theme}.png`
       await execute('/usr/sbin/screencapture', ['-x', '-R' + [shotRect.x, shotRect.y, shotRect.width, shotRect.height].join(','), join(out, file)])
       result.screenshots.push(file)
@@ -163,8 +246,6 @@ async function run() {
   } finally {
     overlay.setContentProtection(true)
   }
-  const stop = await js(overlay, "(()=>{const r=[...document.querySelectorAll('button')].find(b=>b.textContent.trim()==='Stop scrolling capture').getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}})()")
-  const stopGlobal = { x: Math.round(overlayFrame.x + stop.x), y: Math.round(overlayFrame.y + stop.y) }
   await writeFile(join(out, 'awaiting-stop.json'), JSON.stringify({ phase: 'toolbar-stop', stopGlobal, screenshot: 'scroll-inline-dark.png' }))
   if (!humanInput) {
     const stopHit = await clickAt(overlay, stopGlobal)
@@ -174,6 +255,10 @@ async function run() {
   await until('review ready', () => js(review, "document.body.textContent.includes('Confirm') && !document.querySelector('button.primary-button').disabled"))
   assert.equal(overlay.isVisible(), false, 'the original surface is retained hidden for Resume until this original operation ends')
   await click(review, 'Confirm'); await closed
+  const guiImage = nativeImage.createFromDataURL(delivered.dataUrl)
+  assertThumbnail(nextPreview, guiImage)
+  assertStitchedSource(guiImage, firstGuiSource, lastGuiSource, 'Confirmed GUI PNG')
+  result.observations.push({ acceptedPreview: [[firstPreview.width, firstPreview.height], [nextPreview.width, nextPreview.height]] })
   assert.equal(delivered.height, Math.round((selected.height + sourceInput.scroll - initialOffset) * sourceSelection.scale), 'the original editor gets the actual native long image')
   await until('confirm released original windows', () => review.isDestroyed() && overlay.isDestroyed())
   assert.deepEqual(BrowserWindow.getAllWindows().map(window => window.id), [source.id], 'delivery releases all original overlays and the review')
@@ -187,8 +272,35 @@ async function run() {
   const publicOverlay = await selectAndStart(true)
   const publicSelection = await js(publicOverlay, 'window.captureSequence.load().then(s=>s.source)')
   await until('public native baseline', async () => await js(publicOverlay, 'window.captureSequence.load().then(s=>s.frames[0].capturedAt>s.source.capturedAt)'))
+  const firstSource = await sourcePixels(publicSelection.rect)
+  const surfaceBounds = publicOverlay.getBounds()
+  // Force the real preview over the selected region on this controlled source.
+  // Disable OS capture protection on this fixture only so explicit window
+  // exclusion has to work even when the host capture API can see the chrome.
+  await readPreview(publicOverlay)
+  await js(publicOverlay, `(() => {
+    const preview = document.querySelector('.capture-live-preview')
+    Object.assign(preview.style, {position:'fixed', left:'${publicSelection.rect.x - surfaceBounds.x + 12}px', top:'${publicSelection.rect.y - surfaceBounds.y + 12}px', right:'auto', bottom:'auto', transform:'none'})
+    return new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))
+  })()`)
+  const overlap = await js(publicOverlay, "document.querySelector('.capture-live-preview img').getBoundingClientRect().toJSON()")
+  assert.ok(overlap.width >= 12 && overlap.height >= 12 && overlap.left + surfaceBounds.x >= publicSelection.rect.x && overlap.top + surfaceBounds.y >= publicSelection.rect.y &&
+    overlap.left + surfaceBounds.x + 12 < publicSelection.rect.x + publicSelection.rect.width && overlap.top + surfaceBounds.y + 12 < publicSelection.rect.y + publicSelection.rect.height, 'visible preview must actually overlap the native source')
+  publicOverlay.setContentProtection(false)
+  try {
+    let candidate: NativeImage | undefined
+    observeCandidate = image => { candidate = image }
+    const sampled = await until('native sample with overlapping preview', () => candidate)
+    assertSourcePixels(sampled.toBitmap(), firstSource.toBitmap(), 'Native sample with overlapping preview')
+  } finally {
+    observeCandidate = undefined
+    publicOverlay.setContentProtection(true)
+  }
   await js(source, 'window.scrollTo(0,85);new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))')
   await until('public changed native frame', async () => (await service.call('capture.sequence.inspect', identity, context)).frameCount >= 2)
+  const afterScroll = await sourcePixels(publicSelection.rect)
+  const accepted = await js(publicOverlay, 'window.captureSequence.load().then(s=>s.frames.at(-1).image.dataUrl)')
+  assertSourcePixels(nativeImage.createFromDataURL(accepted).toBitmap(), afterScroll.toBitmap(), 'Accepted native frame')
   await service.call('capture.sequence.stop', identity, context)
   const publicReview = await until('public review', () => BrowserWindow.getAllWindows().find(window => window !== source && window !== publicOverlay && !window.webContents.getURL().startsWith('data:') && window.isVisible()))
   await until('public review ready', () => js(publicReview, "document.body.textContent.includes('Confirm') && !document.querySelector('button.primary-button').disabled"))
@@ -197,6 +309,8 @@ async function run() {
   const artifact = await service.call('capture.sequence.read', identity, context)
   const image = nativeImage.createFromBuffer(Buffer.from(artifact.artifact!.data, 'base64'))
   assert.equal(image.getSize().height, Math.round((publicSelection.rect.height + 85) * publicSelection.scale))
+  assertStitchedSource(image, firstSource, afterScroll, 'Exported public PNG')
+  result.observations.push({ cleanNativeAndExportedPixels: true, forcedPreviewOverlap: overlap })
   result.observations.push({ publicOpenInspectStopRead: true, publicOutput: image.getSize(), originalOperationsPreserved: true })
   result.passed = true
 }

@@ -31,10 +31,11 @@ try {
   async function mainBundle(mutation = false) { await bundle({ entryPoints: [inlineScroll ? 'apps/desktop/scripts/fixtures/capture-sequences/inline.ts' : 'apps/desktop/scripts/fixtures/capture-sequences/main.ts'], outfile: join(main, 'main.js'), platform: 'node', format: 'esm', external: ['electron', '@agentmux/core', '@agentmux/core/*'], banner: { js: "import { createRequire as fixtureRequire } from 'node:module';const require=fixtureRequire(import.meta.url);" }, plugins: [{ name: 'live-frame-input', setup(builder) { builder.onLoad({ filter: /\/main\/capture-sequence\.ts$/ }, async args => {
     const original = await readFile(args.path, 'utf8')
     const contents = mutation === 'extra-window' ? original.replace('selection.surface?.window ?? this.createWindow(record, source)', 'this.createWindow(record, source)').replace('record.surface = selection.surface', 'record.surface = undefined')
+      : mutation === 'include-preview' ? original.replace("rect: input.source.rect, excludeWindowIds }", "rect: input.source.rect, excludeWindowIds: excludeWindowIds.filter(id => id !== windowId) }")
       : mutation === 'stale-baseline' ? original.replace("record.baselinePending ??= record.input!.mode === 'scroll' && record.receipt.state === 'ready'", 'record.baselinePending = false')
       : mutation === 'stop-on-overlap' ? original.replace('if (!(error instanceof ScrollOverlapError)) throw error', 'throw error')
-      : mutation ? original.replace('frame.setIgnoreMouseEvents(true)', 'frame.setIgnoreMouseEvents(false)').replace("show: false, frame: false, transparent: true", "show: false, frame: false, transparent: false") : original
-    if (mutation) assert.notEqual(contents, original, 'the owner mutation must be consumed')
+      : mutation === true ? original.replace('frame.setIgnoreMouseEvents(true)', 'frame.setIgnoreMouseEvents(false)').replace("show: false, frame: false, transparent: true", "show: false, frame: false, transparent: false") : original
+    if (mutation && mutation !== 'native-start-title') assert.notEqual(contents, original, 'the owner mutation must be consumed')
     return { contents, loader: 'ts', resolveDir: dirname(args.path) }
   }) } }] }) }
   await mainBundle()
@@ -43,13 +44,19 @@ try {
   const productionHtml = 'apps/desktop/src/renderer/screenshot-editor/index.html'
   const html = await readFile(productionHtml, 'utf8'); inputs.set(productionHtml, hash(html))
   await writeFile(join(renderer, 'index.html'), html.replace('./entry.tsx', './entry.js').replace('</head>', '<link rel="stylesheet" href="entry.css" /></head>'))
-  for (const mutant of (inlineScroll ? [false, 'extra-window'] : startRecovery ? [false, 'stale-baseline', 'stop-on-overlap'] : live && !interaction ? [false] : [false, true])) {
+  for (const mutant of (inlineScroll ? [false, 'native-start-title', 'include-preview', 'extra-window'] : startRecovery ? [false, 'stale-baseline', 'stop-on-overlap'] : live && !interaction ? [false] : [false, true])) {
     const label = typeof mutant === 'string' ? mutant : mutant ? interaction ? 'blocked-source' : mode === 'scroll' ? 'wrong-overlap' : 'dropped-keyframes' : 'baseline', scene = join(out, label)
     await mkdir(scene)
     if (interaction || startRecovery || inlineScroll) await mainBundle(mutant)
     let consumed = false
     await bundle({ entryPoints: ['apps/desktop/scripts/fixtures/capture-sequences/entry.tsx'], outfile: join(renderer, 'entry.js'), platform: 'browser', format: 'esm', jsx: 'automatic', conditions: ['browser'], plugins: [{ name: 'capture-candidate', setup(builder) {
       builder.onResolve({ filter: /^@agentmux\/core\// }, args => { const entry = JSON.parse(require('node:fs').readFileSync('packages/core/package.json')).exports['.' + args.path.slice('@agentmux/core'.length)]?.import; assert.ok(entry, 'actual Core export: ' + args.path); return { path: resolve('packages/core', entry.replace('./dist/', './src/').replace(/\.js$/, '.ts')) } })
+      if (mutant === 'native-start-title') builder.onLoad({ filter: /CaptureToolbar\.tsx$/ }, async args => {
+        const original = await readFile(args.path, 'utf8')
+        const contents = original.replace("data-capture-hint={label + ' (↵)'}", "title={label + ' (↵)'}")
+        assert.notEqual(contents, original, 'reintroduce the native Start tooltip at the product control')
+        return { contents, loader: 'tsx', resolveDir: dirname(args.path) }
+      })
       builder.onLoad({ filter: /CaptureSequenceView\.tsx$/ }, async args => ({ contents: (await readFile(args.path, 'utf8')).replace("'./gif-encode.worker.ts'", "'./gif-encode.worker.js'"), loader: 'tsx', resolveDir: dirname(args.path) }))
       builder.onLoad({ filter: /scroll-stitch\.ts$/ }, async args => { const original = await readFile(args.path, 'utf8'); consumed = true; return { contents: mutant && mode === 'scroll' && !interaction && !startRecovery && !inlineScroll ? original.replace('return best', 'return { ...best, shift: best.shift + 1 }') : original, loader: 'ts', resolveDir: dirname(args.path) } })
     } }] })
@@ -69,7 +76,11 @@ try {
     const result = JSON.parse(await readFile(join(scene, 'result.json'), 'utf8'))
     receipt.variants.push({ label, code: execution.code, result })
     if (!mutant) { assert.equal(execution.code, 0, JSON.stringify(result.failure)); assert.equal(result.passed, true) }
-    else { assert.notEqual(execution.code, 0, 'the product consumer must reject this actual mutation'); assert.equal(result.failure.name, 'AssertionError') }
+    else { assert.notEqual(execution.code, 0, 'the product consumer must reject this actual mutation'); assert.equal(result.failure.name, 'AssertionError')
+      if (mutant === 'native-start-title') assert.match(result.failure.message, /Start must not create an unowned native tooltip/)
+      if (mutant === 'include-preview') assert.match(result.failure.message, /Native sample with overlapping preview must contain only source pixels/)
+      if (mutant === 'extra-window') assert.match(result.failure.message, /Start must not create a capture, preview or border window/)
+    }
     process.stdout.write(`${mode} ${label}: ${mutant ? 'AssertionRED' : 'GREEN'}\n`)
   }
   for (const [file, digest] of inputs) assert.equal(hash(await readFile(file)), digest, 'Candidate changed during verification: ' + file)
