@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { promisify } from 'node:util'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AgentProviderRegistry, type AgentProviderInputInitializationContext } from '../../src/agent-provider.js'
-import { readClaudeInputInitialization } from '../../src/providers/claude-input-initialization.js'
+import { readClaudeInputInitialization } from '../../src/providers/claude-native-settings.js'
 
 const execute = promisify(execFile)
 const unavailable = { state: 'unknown', reason: 'inspection-unavailable', source: 'unavailable', scope: 'unknown' }

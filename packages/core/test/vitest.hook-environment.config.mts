@@ -22,9 +22,9 @@ const mutants: Record<string, [string, string, string]> = {
     "executionEnvironmentValue(env, 'GEMINI_CLI_HOME') || executionHomeDirectory(env)", 'executionHomeDirectory(env)'],
   'trim-opencode-override': ['packages/providers/src/opencode/provider.ts',
     "const override = executionEnvironmentValue(env, 'OPENCODE_CONFIG_DIR')", "const override = executionEnvironmentValue(env, 'OPENCODE_CONFIG_DIR')?.trim()"],
-  'ignore-claude-inspection-home': ['packages/core/src/providers/claude-hook-activation.ts',
+  'ignore-claude-inspection-home': ['packages/providers/src/claude/hook-settings.ts',
     'join(executionHomeDirectory(context.env),', 'join(executionHomeDirectory(),'],
-  'ignore-claude-trust-env': ['packages/core/src/providers/claude-workspace-trust.ts',
+  'ignore-claude-trust-env': ['packages/providers/src/claude/workspace-trust.ts',
     "executionEnvironmentValue(env, 'CLAUDE_CONFIG_DIR')", "executionEnvironmentValue(undefined, 'CLAUDE_CONFIG_DIR')"],
   'drop-inspect-unset': ['packages/core/src/client.ts',
     'const planEnv = options.env', "const planEnv = options.env === undefined ? undefined : Object.fromEntries(Object.entries(options.env).filter(([, value]) => value !== undefined))"]

@@ -14,13 +14,18 @@ const mutations: Record<string, [string, string, string]> = {
   'drop-create-trust-receipt': ['packages/core/src/client.ts', "createOperationId,\n        ...(workspaceTrust ? { workspaceTrust } : {}),", 'createOperationId,'],
   'drop-resume-trust-receipt': ['packages/core/src/agent-session-recovery/lifecycle.ts', 'if (continuity && workspaceTrust) continuity.workspaceTrust = workspaceTrust', 'void workspaceTrust'],
   'cursor-drop-home-boundary': ['packages/core/src/providers/cursor-workspace-trust.ts', 'if (trustKey !== await realpath(resolve(context.ownedRoot)))', 'if (false)'],
-  'claude-drop-home-boundary': ['packages/core/src/providers/claude-workspace-trust.ts', 'if (trustKey !== await claudeTrustKey(context.ownedRoot))', 'if (false)'],
+  'claude-drop-home-boundary': ['packages/providers/src/claude/workspace-trust.ts', 'if (trustKey !== await claudeTrustKey(context.ownedRoot))', 'if (false)'],
   'cursor-drop-seam': ['packages/core/src/providers/cursor-adapter.ts', 'prepareOwnedWorkspaceTrust: prepareCursorOwnedWorkspaceTrust,', ''],
   'bypass-postlaunch-startup': ['packages/core/src/client.ts', "if (!nativeSource && this.nativeSessionStarting(current, { kind: 'session-conversation', expectedRun: current.run }))", 'if (false)'],
   'cursor-spelled-namespace': ['packages/core/src/providers/cursor-native-history.ts', 'try { return await realpath(resolve(workspacePath)) }', 'try { return resolve(workspacePath) }'],
   'cursor-spelled-transcript': ['packages/core/src/providers/cursor-native-history.ts', 'const slug = cursorWorkspaceSlug(workspace)', 'const slug = cursorWorkspaceSlug(workspacePath)'],
 }
-export default defineConfig({ ...source, plugins: [...(source.plugins ?? []), { name: 'mote-startup-actual-owner-mutation', enforce: 'pre', transform(code, id) {
+export default defineConfig({ ...source,
+  resolve: { ...source.resolve, alias: [
+    { find: '@agentmux/providers/claude/workspace-trust', replacement: resolve(root, 'packages/providers/src/claude/workspace-trust.ts') },
+    ...(Array.isArray(source.resolve?.alias) ? source.resolve.alias : [])
+  ] },
+  plugins: [...(source.plugins ?? []), { name: 'mote-startup-actual-owner-mutation', enforce: 'pre', transform(code, id) {
   const name = process.env.AGENTMUX_MOTE_STARTUP_MUTATION
   if (!name) return
   const mutation = mutations[name]

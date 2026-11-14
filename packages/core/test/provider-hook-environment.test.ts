@@ -10,7 +10,7 @@ import { AgentMuxMemoryAgentSessionStore } from '../src/agent-session-store.js'
 import { AgentManagedHookInstaller } from '../src/managed-hook-installer.js'
 import { executionEnvironmentValue, executionHomeDirectory, executionPath } from '../src/providers/execution-environment.js'
 import { cursorConfigRoot, cursorDataRoot } from '../src/providers/cursor-native-history.js'
-import { claudeGlobalConfigPath } from '../src/providers/claude-workspace-trust.js'
+import { claudeGlobalConfigPath } from '../src/providers/claude-native-settings.js'
 
 const exec = promisify(execFile)
 const configKeys = ['GROK_HOME', 'GEMINI_CLI_HOME', 'CLAUDE_CONFIG_DIR', 'COPILOT_HOME', 'FACTORY_HOME_OVERRIDE', 'HERMES_HOME',

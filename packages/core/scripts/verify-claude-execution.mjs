@@ -19,11 +19,11 @@ const packageRoot = fileURLToPath(new URL('../', import.meta.url))
 const root = await realpath(await mkdtemp('/tmp/amx-claude-'))
 const sourcePaths = ['src/agent-execution-frontend.ts', 'src/agent-execution-helper-run.ts', 'src/agent-execution-bridge.ts', 'src/recoverable-input-frame.ts',
   'src/agent-execution-executor.ts', 'src/agent-execution-coordinator.ts', 'src/agent-execution-protocol.ts',
-  'src/providers/claude.ts', 'src/providers/claude-launch-options.ts', 'src/providers/claude-hook-activation.ts', 'src/providers/claude-tool-execution-launch.ts', 'src/providers/claude-execution-helper.ts',
+  'src/providers/claude.ts', '../providers/src/claude/launch-options.ts', '../providers/src/claude/hook-settings.ts', 'src/providers/claude-native-settings.ts', 'src/providers/claude-tool-execution-launch.ts', 'src/providers/claude-execution-helper.ts',
   'src/providers/claude-execution-run.ts', 'src/providers/claude-execution-protocol.ts', 'src/providers/claude-execution-policy.ts', 'src/providers/claude-execution-shell.ts', 'src/providers/claude-execution-operations.ts']
 const hash = bytes => createHash('sha256').update(bytes).digest('hex')
 const fingerprint = async paths => Object.fromEntries(await Promise.all(paths.map(async path => [path, hash(await readFile(join(packageRoot, path)))])))
-const sourceHashes = await fingerprint(sourcePaths), compiledHashes = await fingerprint(sourcePaths.map(path => path.replace(/^src\//u, 'dist/').replace(/\.ts$/u, '.js')))
+const sourceHashes = await fingerprint(sourcePaths), compiledHashes = await fingerprint(sourcePaths.map(path => path.replace(/(^|\/)src\//u, '$1dist/').replace(/\.ts$/u, '.js')))
 const harnessPaths = ['scripts/verify-claude-execution.mjs', 'scripts/fixtures/claude-execution-proof-model.mjs', 'scripts/fixtures/execution-proof-cleanup.mjs']
 const harnessHashes = await fingerprint(harnessPaths)
 await mkdir(join(root, 'harness'))

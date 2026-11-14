@@ -1,13 +1,13 @@
 import { readFile } from 'node:fs/promises'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { inspectClaudeHookActivation } from '../src/providers/claude-hook-activation.js'
+import { inspectClaudeHookSettings } from '../src/providers/claude-native-settings.js'
 
 vi.mock('node:fs/promises', () => ({ readFile: vi.fn() }))
 
 const workspacePath = '/private/claude-hook-workspace'
 const home = '/private/claude-hook-home'
 const files = new Map<string, string>()
-const inspect = (args: string[] = [], env: Record<string, string> = {}) => inspectClaudeHookActivation({
+const inspect = (args: string[] = [], env: Record<string, string> = {}) => inspectClaudeHookSettings({
   workspacePath, args, env: { HOME: home, CLAUDE_CONFIG_DIR: '', CLAUDE_CODE_SAFE_MODE: '', ...env },
   command: 'claude', plan: { providerId: 'claude', mutations: [] }, signal: new AbortController().signal
 })
@@ -59,7 +59,7 @@ describe('Claude launch-carried Hook activation sources', () => {
     put('/private/custom-claude/settings.json', { disableAllHooks: true })
     expect(await inspect([], { CLAUDE_CONFIG_DIR: '/private/custom-claude' })).toMatchObject({ active: false })
     vi.stubEnv('CLAUDE_CONFIG_DIR', '/private/custom-claude')
-    expect(await inspectClaudeHookActivation({ workspacePath, args: [], env: { HOME: home }, command: 'claude',
+    expect(await inspectClaudeHookSettings({ workspacePath, args: [], env: { HOME: home }, command: 'claude',
       plan: { providerId: 'claude', mutations: [] }, signal: new AbortController().signal })).toMatchObject({ active: false })
   })
 
@@ -68,7 +68,7 @@ describe('Claude launch-carried Hook activation sources', () => {
     vi.stubEnv('CLAUDE_CONFIG_DIR', '/private/core-claude-config')
     const target = workspacePath + '/private-home/.claude/settings.json'
     put(target, { disableAllHooks: true })
-    expect(await inspectClaudeHookActivation({ workspacePath, args: [], env: {
+    expect(await inspectClaudeHookSettings({ workspacePath, args: [], env: {
       HOME: 'private-home', CLAUDE_CONFIG_DIR: undefined, CLAUDE_CODE_SAFE_MODE: ''
     }, command: 'claude', plan: { providerId: 'claude', mutations: [] }, signal: new AbortController().signal }))
       .toMatchObject({ active: false, code: 'HOOK_CONFIGURATION_DISABLED' })

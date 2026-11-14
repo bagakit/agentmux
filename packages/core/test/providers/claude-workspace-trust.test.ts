@@ -3,7 +3,8 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { AgentProviderRegistry } from '../../src/agent-provider.js'
-import { claudeGlobalConfigPath, claudeTrustKey, prepareClaudeOwnedWorkspaceTrust } from '../../src/providers/claude-workspace-trust.js'
+import { claudeTrustKey } from '@agentmux/providers/claude/workspace-trust'
+import { claudeGlobalConfigPath, prepareClaudeOwnedWorkspaceTrust } from '../../src/providers/claude-native-settings.js'
 
 /**
  * Pre-trusting an AgentMux-owned home is what stops Claude's "Is this a project you trust?"
