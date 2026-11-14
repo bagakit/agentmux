@@ -14,6 +14,8 @@ import {
 } from './agent-hook-event.js'
 import { usageTranscriptDecoder } from './providers/usage-transcript.js'
 import { isLeftoverHookInvocation } from './launch-scoped-hook.js'
+import { hookResponseFor } from './hook-passive-response.js'
+export { hookResponseFor } from './hook-passive-response.js'
 
 const MAX_HOOK_INPUT_BYTES = 128 * 1024
 
@@ -108,15 +110,6 @@ export function isAgentMuxManagedHookEnvironment(env: NodeJS.ProcessEnv = proces
  * Synchronous decisions are a separate, explicitly Provider-declared path below. All other hooks
  * remain passive; a Provider sharing a name does not establish another Provider's decision schema.
  */
-export function hookResponseFor(provider: string | null, eventName: string | null): string {
-  if (provider === 'antigravity') {
-    if (eventName === 'PreToolUse') return '{"decision":"ask"}\n'
-    // This passive response is Antigravity's protocol, not a common turn-completion fact.
-    if (eventName === 'Stop' || eventName === 'StopFailure') return '{"decision":""}\n'
-  }
-  return '{}\n'
-}
-
 export async function runAgentHookCommand(): Promise<void> {
   const flagEvent = parseEventFromArgv()
   // 空串/纯空白的环境变量读作「没设」，避免覆盖后续有效来源。

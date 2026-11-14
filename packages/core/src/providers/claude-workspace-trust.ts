@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { mkdir, open, readFile, realpath, rename, rmdir, stat, unlink } from 'node:fs/promises'
-import { homedir } from 'node:os'
+import { executionEnvironmentValue, executionHomeDirectory, executionPath, type ProviderExecutionEnvironment } from './execution-environment.js'
 import { join, resolve } from 'node:path'
 import type { AgentWorkspaceTrustContext, AgentWorkspaceTrustReceipt } from '../agent-provider.js'
 
@@ -37,16 +37,17 @@ export async function claudeTrustKey(directory: string): Promise<string> {
 }
 
 /** Mirror Claude's own choice of its global configuration file. */
-export async function claudeGlobalConfigPath(env: Readonly<Record<string, string>>): Promise<string> {
-  const configDirectory = env.CLAUDE_CONFIG_DIR ?? process.env.CLAUDE_CONFIG_DIR
-  const home = env.HOME ?? homedir()
-  const legacy = join(configDirectory ? resolve(configDirectory) : join(home, '.claude'), '.config.json')
+export async function claudeGlobalConfigPath(env: ProviderExecutionEnvironment, workspacePath?: string): Promise<string> {
+  const configDirectory = executionEnvironmentValue(env, 'CLAUDE_CONFIG_DIR')
+  const home = executionPath(executionHomeDirectory(env), workspacePath)
+  const configRoot = configDirectory ? executionPath(configDirectory, workspacePath) : join(home, '.claude')
+  const legacy = join(configRoot, '.config.json')
   try {
     const legacyStat = await stat(legacy)
     if (legacyStat.isFile() && legacyStat.size > 0) return legacy
   } catch { /* absent legacy file: use the current name */ }
-  const suffix = (env.CLAUDE_CODE_CUSTOM_OAUTH_URL ?? process.env.CLAUDE_CODE_CUSTOM_OAUTH_URL) ? '-custom-oauth' : ''
-  return join(configDirectory ? resolve(configDirectory) : home, `.claude${suffix}.json`)
+  const suffix = executionEnvironmentValue(env, 'CLAUDE_CODE_CUSTOM_OAUTH_URL') ? '-custom-oauth' : ''
+  return join(configDirectory ? configRoot : home, `.claude${suffix}.json`)
 }
 
 function trusted(config: ClaudeConfig, key: string): boolean {
@@ -104,7 +105,7 @@ export async function prepareClaudeOwnedWorkspaceTrust(context: AgentWorkspaceTr
   let trustKey: string | null = null, configPath: string | null = null
   try {
     trustKey = await claudeTrustKey(context.workspacePath)
-    configPath = await claudeGlobalConfigPath(context.env)
+    configPath = await claudeGlobalConfigPath(context.env, context.workspacePath)
     const before = await readConfig(configPath)
     // Claude creates and owns a missing configuration during its own onboarding.
     if (!before) return { status: 'unconfirmed', trustKey, configPath, code: 'CLAUDE_CONFIG_ABSENT' }

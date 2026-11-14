@@ -111,7 +111,7 @@ function ownedHookIndices(actual: JsonObject, expected: JsonObject): number[] | 
   }
   return isDeepStrictEqual(first, last) ? first : undefined
 }
-function mergeEventBuckets(current: JsonObject, owned: Record<string, JsonObject[]>, previous: Record<string, JsonObject[]> = {}) {
+function mergeEventBuckets(current: JsonObject, owned: Record<string, JsonObject[]>, previous: Record<string, JsonObject[]> = {}, retainPrevious = false) {
   let value = { ...current }
   let changed = false
   const retained: Record<string, JsonObject[]> = Object.create(null), added: Record<string, JsonObject[]> = Object.create(null)
@@ -124,7 +124,7 @@ function mergeEventBuckets(current: JsonObject, owned: Record<string, JsonObject
       if (matches.length !== 1) continue
       const index = matches[0]!, actual = bucket[index] as JsonObject, indices = ownedHookIndices(actual, definition)
       if (!indices) continue
-      if (owned[event]?.some(expected => isDeepStrictEqual(expected, definition))) {
+      if (retainPrevious || owned[event]?.some(expected => isDeepStrictEqual(expected, definition))) {
         const declarations = retained[event] ??= []
         declarations.push(definition)
         continue
@@ -161,10 +161,10 @@ function applyOwnedKey(current: string | null, owned: JsonObject, key: string): 
   if (!Object.hasOwn(owned, key)) return invalidPlan('Managed Hook owned content is missing its owned key.')
   return SERIALIZE({ ...parseCurrentObject(current), [key]: owned[key] })
 }
-function applyManagedEvents(current: string | null, owned: JsonObject, previous: JsonObject | undefined, root = false) {
+function applyManagedEvents(current: string | null, owned: JsonObject, previous: JsonObject | undefined, root = false, retainPrevious = false) {
   const parsed = parseCurrentObject(current)
   const expected = declarations(root ? owned : owned.hooks)
-  const merged = mergeEventBuckets(root ? parsed : currentHooks(parsed), expected, previous ? declarations(root ? previous : previous.hooks) : undefined)
+  const merged = mergeEventBuckets(root ? parsed : currentHooks(parsed), expected, previous ? declarations(root ? previous : previous.hooks) : undefined, retainPrevious)
   const ownedContent = Object.keys(merged.ownership).length ? SERIALIZE(root ? merged.ownership : { hooks: merged.ownership }) : null
   if (!merged.changed && current !== null) return { content: current, ownedContent }
   if (root) return { content: SERIALIZE(merged.value), ownedContent }
@@ -203,7 +203,7 @@ function yamlEntry(node: unknown): unknown {
   if (opaque) return undefined
   try { return node.toJSON() } catch { return undefined }
 }
-function applyYamlManagedEvents(current: string | null, owned: JsonObject, previous: JsonObject | undefined) {
+function applyYamlManagedEvents(current: string | null, owned: JsonObject, previous: JsonObject | undefined, retainPrevious = false) {
   const expected = declarations(owned.hooks), doc = yamlDocument(current)
   let hooks = yamlHooks(doc)
   const events = new Set([...Object.keys(expected), ...Object.keys(previous ? declarations(previous.hooks) : {})])
@@ -212,7 +212,7 @@ function applyYamlManagedEvents(current: string | null, owned: JsonObject, previ
     if (bucket !== undefined && !isSeq(bucket) && Object.hasOwn(expected, event)) return targetShape('Managed Hook target event must be a YAML sequence; retaining the target.')
     return [event, bucket === undefined ? [] : isSeq(bucket) ? bucket.items.map(yamlEntry) : null]
   }))
-  const merged = mergeEventBuckets(existing, expected, previous ? declarations(previous.hooks) : undefined)
+  const merged = mergeEventBuckets(existing, expected, previous ? declarations(previous.hooks) : undefined, retainPrevious)
   for (const retired of merged.retired) {
     const bucket = yamlBucket(hooks, retired.event)!
     if (retired.hooks) {
@@ -245,14 +245,14 @@ function currentApprovals(parsed: JsonObject): unknown[] {
 function containsApproval(current: unknown[], expected: JsonObject): boolean {
   return current.some(entry => object(entry) && entry.event === expected.event && entry.command === expected.command)
 }
-function applyManagedApprovals(current: string | null, owned: JsonObject, previous: JsonObject | undefined) {
+function applyManagedApprovals(current: string | null, owned: JsonObject, previous: JsonObject | undefined, retainPrevious = false) {
   const expected = approvalDeclarations(owned), parsed = parseCurrentObject(current)
   let approvals = [...currentApprovals(parsed)]
   const retained: JsonObject[] = []
   for (const definition of previous ? approvalDeclarations(previous) : []) {
     const matches = approvals.flatMap((entry, index) => isDeepStrictEqual(entry, definition) ? [index] : [])
     if (matches.length !== 1) continue
-    if (containsApproval(expected, definition)) retained.push(definition)
+    if (retainPrevious || containsApproval(expected, definition)) retained.push(definition)
     else approvals.splice(matches[0]!, 1)
   }
   const missing = expected.filter(entry => !containsApproval(approvals, entry))
@@ -263,15 +263,15 @@ function applyManagedApprovals(current: string | null, owned: JsonObject, previo
 }
 
 /** Deterministic preparation; unknown shared entries never acquire deletion authority. */
-export function prepareMergedHookContent(current: string | null, ownedContent: string, strategy: AgentHookMergeStrategy, previousOwnedContent?: string | null): { content: string; ownedContent: string | null } {
+export function prepareMergedHookContent(current: string | null, ownedContent: string, strategy: AgentHookMergeStrategy, previousOwnedContent?: string | null, retainPrevious = false): { content: string; ownedContent: string | null } {
   const owned = parseOwnedObject(ownedContent)
   const previous = previousOwnedContent ? parseOwnedObject(previousOwnedContent) : undefined
   switch (strategy.kind) {
     case 'json-owned-key': return { content: applyOwnedKey(current, owned, strategy.key), ownedContent: null }
-    case 'json-managed-events': return applyManagedEvents(current, owned, previous)
-    case 'json-root-managed-events': return applyManagedEvents(current, owned, previous, true)
-    case 'yaml-managed-events': return applyYamlManagedEvents(current, owned, previous)
-    case 'json-managed-approvals': return applyManagedApprovals(current, owned, previous)
+    case 'json-managed-events': return applyManagedEvents(current, owned, previous, false, retainPrevious)
+    case 'json-root-managed-events': return applyManagedEvents(current, owned, previous, true, retainPrevious)
+    case 'yaml-managed-events': return applyYamlManagedEvents(current, owned, previous, retainPrevious)
+    case 'json-managed-approvals': return applyManagedApprovals(current, owned, previous, retainPrevious)
   }
 }
 

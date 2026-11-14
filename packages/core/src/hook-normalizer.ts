@@ -79,6 +79,8 @@ export type AgentNativeHookSpecification = {
    * instead of a file in the user's workspace. Its Runs then accept only calls marked by that launch.
    */
   launchCarried?: true
+  /** Shared native declarations whose executable and routing come from the original Run. */
+  retainedRuntime?: true
   /** Transcript sample availability is independent of final turn outcome. */
   usageFinalizationEvents?: readonly string[]
   /** Pure projection from the original native payload, only after current main-subject verification. */

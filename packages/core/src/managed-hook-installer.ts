@@ -36,6 +36,8 @@ export type AgentManagedHookMutation = {
 export type AgentManagedHookPlan = {
   providerId: AgentProviderId
   mutations: readonly AgentManagedHookMutation[]
+  /** A new shared carrier cannot retire callbacks still used by prior Run environments. */
+  retainPreviousDeclarations?: true
 }
 
 export type AgentManagedHookInspection = {
@@ -217,6 +219,9 @@ export class AgentManagedHookInstaller {
   private readonly previews = new Map<string, PreparedPreview>()
   private readonly stateRoot: string
 
+  /** The same Core-owned deployment scope also retains executable Hook artifacts. */
+  get stateDirectory(): string { return this.stateRoot }
+
   constructor(stateDirectory: string) {
     this.stateRoot = resolve(stateDirectory)
     if (dirname(this.stateRoot) === this.stateRoot) {
@@ -239,7 +244,7 @@ export class AgentManagedHookInstaller {
           const facts = content === undefined ? { present: false, current: false }
             : mutation.merge ? inspectManagedHookContent(content, mutation.content, mutation.merge)
               : { present: true, current: content === mutation.content }
-          if (facts.current && mutation.merge && previous?.content &&
+          if (!plan.retainPreviousDeclarations && facts.current && mutation.merge && previous?.content &&
               prepareMergedHookContent(content ?? null, mutation.content, mutation.merge, previous.content).content !== content) facts.current = false
           targets.push({ path: mutation.path, status: facts.current ? 'current' : facts.present ? 'partial' : 'not_present' })
         } catch (error) {
@@ -274,7 +279,8 @@ export class AgentManagedHookInstaller {
       const ownedPath = original ? registrationPath(this.stateRoot, original) : undefined
       const raw = ownedPath ? await readRegistrationFile(ownedPath) : null
       const prior = raw && original ? registration(raw, original, current ? hash(current.content) : null) : undefined
-      const merged = mutation.merge ? prepareMergedHookContent(currentContent, mutation.content, mutation.merge, prior?.owner?.content) : undefined
+      const merged = mutation.merge ? prepareMergedHookContent(currentContent, mutation.content, mutation.merge,
+        prior?.owner?.content, plan.retainPreviousDeclarations) : undefined
       const effectiveContent = merged?.content ?? mutation.content
       if (Buffer.byteLength(effectiveContent) > MAX_HOOK_FILE_BYTES) {
         throw new AgentMuxError('Managed Hook merged content exceeds the file size limit.', 'HOOK_FILE_TOO_LARGE')

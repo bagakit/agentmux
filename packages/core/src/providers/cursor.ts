@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import type { ProviderExecutionEnvironment } from './execution-environment.js'
 import { join, resolve } from 'node:path'
 import { CURSOR_LAUNCH_OPTIONS } from './launch-options.js'
 import type { AgentProvider, AgentProviderDefinition } from '../agent-provider.js'
@@ -109,7 +110,7 @@ export const CURSOR_HOOKS: AgentNativeHookSpecification = {
  */
 export function cursorTrustMarkerPath(
   workspacePath: string,
-  env?: Readonly<Record<string, string>>
+  env?: ProviderExecutionEnvironment
 ): string {
   return join(cursorDataRoot(workspacePath, env), 'projects', cursorWorkspaceSlug(workspacePath), '.workspace-trusted')
 }
@@ -135,7 +136,7 @@ export function cursorTrustMarkerPath(
  */
 export function createCursorManagedHookPlan(
   workspacePath: string,
-  env?: Readonly<Record<string, string>>
+  env?: ProviderExecutionEnvironment
 ): AgentManagedHookPlan {
   const command = managedHookCommand('cursor')
   const hooks = Object.fromEntries(CURSOR_HOOK_EVENTS.map((eventName) => [eventName, [

@@ -1,7 +1,7 @@
 import { proto3, type AnyMessage } from '@bufbuild/protobuf'
 import { cursorNativeType } from './cursor-native-schema.js'
 import { createHash } from 'node:crypto'
-import { homedir } from 'node:os'
+import { executionEnvironmentValue, executionHomeDirectory, executionPath } from './execution-environment.js'
 import { isAbsolute, join, resolve } from 'node:path'
 import { AgentMuxError } from '../errors.js'
 import { NativeSqliteHistoryReader, type NativeSqliteHistoryIdentity } from '../native-sqlite-history-reader.js'
@@ -51,12 +51,12 @@ export function cursorDataRoot(
   workspacePath?: string,
   env?: Readonly<Record<string, string | undefined>>
 ): string {
-  const raw = cursorEnvironmentValue(env, 'CURSOR_DATA_DIR')
+  const raw = executionEnvironmentValue(env, 'CURSOR_DATA_DIR')
   if (raw !== undefined && raw.trim().length > 0) {
     if (isAbsolute(raw)) return raw
     return workspacePath ? resolve(workspacePath, raw) : resolve(raw)
   }
-  return join(homedir(), '.cursor')
+  return executionPath(join(executionHomeDirectory(env), '.cursor'), workspacePath)
 }
 
 /**
@@ -68,22 +68,17 @@ export function cursorConfigRoot(
   workspacePath?: string,
   env?: Readonly<Record<string, string | undefined>>
 ): string {
-  const raw = cursorEnvironmentValue(env, 'CURSOR_CONFIG_DIR')
+  const raw = executionEnvironmentValue(env, 'CURSOR_CONFIG_DIR')
   if (raw !== undefined && raw.trim().length > 0) {
     if (isAbsolute(raw)) return raw
     return workspacePath ? resolve(workspacePath, raw) : resolve(raw)
   }
-  const xdg = cursorEnvironmentValue(env, 'XDG_CONFIG_HOME')
+  const xdg = executionEnvironmentValue(env, 'XDG_CONFIG_HOME')
   if (xdg !== undefined && xdg.trim().length > 0) {
     if (isAbsolute(xdg)) return join(xdg, 'cursor')
     return join(workspacePath ? resolve(workspacePath, xdg) : resolve(xdg), 'cursor')
   }
-  return join(homedir(), '.cursor')
-}
-
-// CLI invocations inherit ambient environment; explicit undefined removes a key.
-function cursorEnvironmentValue(env: Readonly<Record<string, string | undefined>> | undefined, key: string): string | undefined {
-  return env && Object.hasOwn(env, key) ? env[key] : process.env[key]
+  return executionPath(join(executionHomeDirectory(env), '.cursor'), workspacePath)
 }
 
 /**

@@ -1,5 +1,5 @@
-import { homedir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { executionHomeDirectory, executionPath, type ProviderExecutionEnvironment } from './execution-environment.js'
+import { join } from 'node:path'
 import { readAntigravitySessionHistoryPage } from './antigravity-native-history.js'
 import { discoverAntigravityNativeSession, observeAntigravitySessionHistory } from './antigravity-native-session.js'
 import type { AgentManagedHookPlan } from '../managed-hook-installer.js'
@@ -59,8 +59,8 @@ export const ANTIGRAVITY_HOOKS: AgentNativeHookSpecification = {
   }
 }
 
-export function createAntigravityManagedHookPlan(homeOrWorkspacePath?: string): AgentManagedHookPlan {
-  const targetRoot = homeOrWorkspacePath ? resolve(homeOrWorkspacePath) : homedir()
+export function createAntigravityManagedHookPlan(homeOrWorkspacePath?: string, env?: ProviderExecutionEnvironment, workspacePath?: string): AgentManagedHookPlan {
+  const targetRoot = executionPath(homeOrWorkspacePath ?? executionHomeDirectory(env), workspacePath)
   const targetPath = targetRoot.endsWith('.json') ? targetRoot : join(targetRoot, '.gemini', 'config', 'hooks.json')
   const command = managedHookCommand('antigravity')
   const bundle: Record<string, unknown> = {}
@@ -86,7 +86,7 @@ export function createAntigravityProvider(defineAgentProvider: ProviderFactory):
     discoverNativeSession: discoverAntigravityNativeSession,
     readSessionHistoryPage: readAntigravitySessionHistoryPage,
     observeSessionHistory: observeAntigravitySessionHistory,
-    planManagedHooks: () => createAntigravityManagedHookPlan(),
+    planManagedHooks: ({ env, workspacePath }) => createAntigravityManagedHookPlan(undefined, env, workspacePath),
     catalog: catalog({
       id: 'antigravity', label: 'Antigravity', executable: 'agy', expectedProcess: 'agy',
       promptDelivery: 'flag-prompt-interactive',

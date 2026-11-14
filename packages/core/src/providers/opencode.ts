@@ -1,8 +1,9 @@
 import { identityRuntimeSource } from '@agentmux/identity/runtime-source'
 import { existsSync } from 'node:fs'
-import { homedir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { executionEnvironmentValue, executionHomeDirectory, executionPath, type ProviderExecutionEnvironment } from './execution-environment.js'
+import { join } from 'node:path'
 import type { AgentProvider, AgentProviderDefinition } from '../agent-provider.js'
+import type { AgentLaunchPlan } from '../types.js'
 import type { AgentManagedHookPlan } from '../managed-hook-installer.js'
 import type { AgentNativeHookSpecification } from '../hook-normalizer.js'
 import { readOpenCodeSessionHistoryPage } from './opencode-native-history.js'
@@ -103,11 +104,11 @@ export const OPENCODE_HOOKS: AgentNativeHookSpecification = {
  * 配置目录一处：项目级安装会把 AgentMux 的插件写进用户仓库（可能被提交），home 级则与全局目录重复
  * 加载同一个插件。装一处、且是用户不会提交的那一处，是唯一无副作用的选择。
  */
-function openCodeConfigDir(env?: Readonly<Record<string, string>>): string {
-  const override = env?.OPENCODE_CONFIG_DIR?.trim()
-  if (override) return resolve(override)
-  const xdg = env?.XDG_CONFIG_HOME?.trim()
-  return xdg ? join(resolve(xdg), 'opencode') : join(homedir(), '.config', 'opencode')
+function openCodeConfigDir(env?: ProviderExecutionEnvironment, workspacePath?: string): string {
+  const override = executionEnvironmentValue(env, 'OPENCODE_CONFIG_DIR')?.trim()
+  if (override) return executionPath(override, workspacePath)
+  const xdg = executionEnvironmentValue(env, 'XDG_CONFIG_HOME')?.trim()
+  return executionPath(xdg ? join(xdg, 'opencode') : join(executionHomeDirectory(env), '.config', 'opencode'), workspacePath)
 }
 
 function adaptOpenCodePayload(payload: Record<string, unknown>): Record<string, unknown> {
@@ -162,21 +163,29 @@ function adaptOpenCodePayload(payload: Record<string, unknown>): Record<string, 
  *   （`loader.ts:206-207`），所以这份源码必须一次就能被解析：不用任何需要构建的语法，只用 Bun 原生可跑的
  *   ESM。
  * - **事件是按目录过滤的**：监听器丢弃 `event.location?.directory !== ctx.directory` 的事件
- *   （`plugin/index.ts:255-262`），所以插件只会收到它自己那个目录的事件——这正是我们要的。
+ *   （`plugin/index.ts:255-262`）。这只是原生投递范围，同目录可有多个 Session；主体仍由 Core 的
+ *   原 Run 绑定与已确认 native session ID 判定，目录不提供会话身份。
  *
- * `endpoint`/`token` 在写盘时**内联成字面量**，不从插件进程的环境变量读：插件跑在 OpenCode 自己的进程里，
- * 那个进程不继承 AgentMux 给 PTY 注入的 `AGENTMUX_HOOK_URL`/`AGENTMUX_HOOK_TOKEN`。
+ * 普通 TUI 在 cli/cmd/tui.ts 创建本地 Server Worker 时完整传递 process.env；真实 1.18.25
+ * 双 TUI、同配置／目录探针验证了此继承和原生事件路径。共享插件不写凭证，工厂只快照本 Run 环境。
+ * attach 已存在的外部 Server 不继承新 TUI 的环境，由下方 launch contribution 明确保留未绑定。
  *
  * 投递是 fire-and-forget 且**整体 catch**：插件跑在 Agent 的事件回路里，一次网络失败绝不能把用户的
  * 会话打断。失败保留诊断，绝不抛入 Provider 事件回路。
  */
-function openCodePluginSource(endpoint: string, token: string): string {
+function openCodePluginSource(): string {
   return `// AgentMux managed plugin. Generated — edits are overwritten on reinstall.
 ${hookDeliverySource()}
 const { mintObjectId } = ${identityRuntimeSource}
 export async function server() {
-  const endpoint = ${JSON.stringify(endpoint)}
-  const token = ${JSON.stringify(token)}
+  if (process.env.AGENTMUX_ENV !== '1' || process.env.AGENTMUX_PROVIDER_ID !== 'opencode' ||
+      process.env.AGENTMUX_OPENCODE_HOOK_HOST === 'unbound') return {}
+  const endpoint = process.env.AGENTMUX_HOOK_URL
+  const token = process.env.AGENTMUX_HOOK_TOKEN
+  if (!endpoint || !token) {
+    console.error('[AgentMux Hook] OpenCode host binding is unavailable; the Agent remains available.')
+    return {}
+  }
   const events = new Set(${JSON.stringify([...OPENCODE_HOOK_EVENTS])})
   return {
     event: async ({ event }) => {
@@ -204,23 +213,61 @@ export async function server() {
  * 「这就是要被原样执行的 JS」。
  */
 export function createOpenCodeManagedHookPlan(
-  endpoint: string,
-  token: string,
-  env?: Readonly<Record<string, string>>
+  env?: ProviderExecutionEnvironment,
+  workspacePath?: string
 ): AgentManagedHookPlan {
   return {
     providerId: 'opencode',
     mutations: [{
-      path: join(openCodeConfigDir(env), 'plugin', 'agentmux.js'),
-      content: openCodePluginSource(endpoint, token),
+      path: join(openCodeConfigDir(env, workspacePath), 'plugin', 'agentmux.js'),
+      content: openCodePluginSource(),
       mode: 0o600
     }]
   }
 }
 
+// Native value options consume opaque data, including a value literally named "attach".
+const OPENCODE_VALUE_OPTIONS = new Set([
+  '--log-level', '--port', '--hostname', '--mdns-domain', '--cors', '--model', '-m', '--session', '-s',
+  '--prompt', '--agent', '--replay-limit', '--dir', '--password', '-p', '--username', '-u'
+])
+
+/** Only an explicit native external-host operation is unbound; no cwd or display inference. */
+function openCodeExternalHost(args: readonly string[]): boolean {
+  let command: string | undefined
+  for (let index = 0; index < args.length; index += 1) {
+    const argument = args[index]!
+    if (argument === '--') break
+    const equals = argument.indexOf('=')
+    const option = equals < 0 ? argument : argument.slice(0, equals)
+    if (argument.startsWith('-')) {
+      if (command === 'run' && option === '--attach') return true
+      if (equals < 0 && OPENCODE_VALUE_OPTIONS.has(option)) index += 1
+      continue
+    }
+    if (command === undefined) {
+      command = argument
+      if (command === 'attach') return true
+    }
+  }
+  return false
+}
+
+function qualifyOpenCodeHookHost(plan: AgentLaunchPlan): AgentLaunchPlan {
+  const external = openCodeExternalHost(plan.args)
+  return {
+    ...plan,
+    env: { ...plan.env, AGENTMUX_OPENCODE_HOOK_HOST: external ? 'unbound' : 'owned' },
+    ...(external ? { hookLaunchIssue: {
+      code: 'OPENCODE_HOOK_HOST_UNBOUND',
+      message: 'This OpenCode invocation attaches to an existing native server. Its Hook host does not inherit this Run binding; native terminal use is retained and Hook delivery remains unconfirmed.'
+    } } : {})
+  }
+}
+
 export function createOpenCodeProvider(defineAgentProvider: ProviderFactory): AgentProvider {
   const provider = defineAgentProvider({
-    planManagedHooks: ({ env, endpoint }) => endpoint ? createOpenCodeManagedHookPlan(endpoint.url, endpoint.token, env) : null,
+    planManagedHooks: ({ env, workspacePath }) => createOpenCodeManagedHookPlan(env, workspacePath),
     catalog: catalog({
       id: 'opencode', label: 'OpenCode', executable: 'opencode', expectedProcess: 'opencode',
       promptDelivery: 'positional-argv',
@@ -238,6 +285,10 @@ export function createOpenCodeProvider(defineAgentProvider: ProviderFactory): Ag
     buildArgs: (prompt, args) => [...args, ...(prompt ? [prompt] : [])],
     hook: OPENCODE_HOOKS,
     inspectHookActivation: async (context) => {
+      if (openCodeExternalHost(context.args)) return {
+        active: false, code: 'OPENCODE_HOOK_HOST_UNBOUND',
+        action: 'This invocation attaches to an existing native server; inspect that original host binding. Native terminal use remains available.'
+      }
       const target = context.plan.mutations[0]
       if (!target) return { active: false, code: 'HOOK_PLAN_EMPTY', action: 'The managed Hook plan is empty.' }
       if (!existsSync(target.path)) {
@@ -260,6 +311,8 @@ export function createOpenCodeProvider(defineAgentProvider: ProviderFactory): Ag
 
   return {
     ...provider,
+    buildLaunch: context => qualifyOpenCodeHookHost(provider.buildLaunch(context)),
+    buildResumeLaunch: context => qualifyOpenCodeHookHost(provider.buildResumeLaunch(context)),
     normalizeHook(envelope, context) {
       const payload = envelope.payload ?? {}
       const nativeHandle = context.nativeHandle

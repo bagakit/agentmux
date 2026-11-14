@@ -1,5 +1,5 @@
-import { homedir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { executionEnvironmentValue, executionHomeDirectory, executionPath, type ProviderExecutionEnvironment } from './execution-environment.js'
+import { join } from 'node:path'
 import type { AgentManagedHookPlan } from '../managed-hook-installer.js'
 import { HERMES_LAUNCH_OPTIONS } from './launch-options.js'
 import type { AgentProvider, AgentProviderDefinition } from '../agent-provider.js'
@@ -125,13 +125,13 @@ export const HERMES_HOOKS: AgentNativeHookSpecification = {
   ]
 }
 
-export function resolveHermesHome(env?: Readonly<Record<string, string | undefined>>): string {
-  const hermesHome = env?.HERMES_HOME?.trim()
-  return hermesHome ? resolve(hermesHome) : join(homedir(), '.hermes')
+export function resolveHermesHome(env?: ProviderExecutionEnvironment, workspacePath?: string): string {
+  const hermesHome = executionEnvironmentValue(env, 'HERMES_HOME')?.trim()
+  return executionPath(hermesHome || join(executionHomeDirectory(env), '.hermes'), workspacePath)
 }
 
-export function createHermesManagedHookPlan(env?: Readonly<Record<string, string>>): AgentManagedHookPlan {
-  const home = resolveHermesHome(env)
+export function createHermesManagedHookPlan(env?: ProviderExecutionEnvironment, workspacePath?: string): AgentManagedHookPlan {
+  const home = resolveHermesHome(env, workspacePath)
   const command = hermesHookCommand()
   const hooks = Object.fromEntries(
     HERMES_HOOK_EVENTS.map((eventName) => [eventName, [{ command, ...hookCommandTimeout('hermes') }]])
@@ -158,7 +158,7 @@ export function createHermesManagedHookPlan(env?: Readonly<Record<string, string
 
 export function createHermesProvider(defineAgentProvider: ProviderFactory): AgentProvider {
   return defineAgentProvider({
-    planManagedHooks: ({ env }) => createHermesManagedHookPlan(env),
+    planManagedHooks: ({ env, workspacePath }) => createHermesManagedHookPlan(env, workspacePath),
     catalog: catalog({
       id: 'hermes', label: 'Hermes', executable: 'hermes', expectedProcess: 'hermes',
       promptDelivery: 'hermes-query',

@@ -72,7 +72,7 @@ export type AgentExecutableProbe = {
 
 export type AgentManagedHookPlanContext = {
   workspacePath: string
-  env?: Readonly<Record<string, string>>
+  env?: Readonly<Record<string, string | undefined>>
   endpoint?: { url: string; token: string }
 }
 

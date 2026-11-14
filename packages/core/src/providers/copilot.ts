@@ -1,5 +1,5 @@
-import { homedir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { executionEnvironmentValue, executionHomeDirectory, executionPath, type ProviderExecutionEnvironment } from './execution-environment.js'
+import { join } from 'node:path'
 import type { AgentProvider, AgentProviderDefinition } from '../agent-provider.js'
 import type { AgentManagedHookPlan } from '../managed-hook-installer.js'
 import type { AgentNativeHookSpecification } from '../hook-normalizer.js'
@@ -150,9 +150,9 @@ export const COPILOT_HOOKS: AgentNativeHookSpecification = {
  * `--config-dir` 那条旗标在它的 `--help` 里已标注 deprecated 并指向 `COPILOT_HOME`，所以这里只认
  * 环境变量，不去接一个正在被上游淘汰的旗标。
  */
-function copilotHome(env?: Readonly<Record<string, string>>): string {
-  const override = env?.COPILOT_HOME?.trim()
-  return override ? resolve(override) : join(homedir(), '.copilot')
+function copilotHome(env?: ProviderExecutionEnvironment, workspacePath?: string): string {
+  const override = executionEnvironmentValue(env, 'COPILOT_HOME')?.trim()
+  return executionPath(override || join(executionHomeDirectory(env), '.copilot'), workspacePath)
 }
 
 /**
@@ -192,7 +192,7 @@ function copilotHome(env?: Readonly<Record<string, string>>): string {
  * `{type:'command', command}` 形状上——antigravity 正是往这个形状的 command 尾部追加 `--event`（见
  * antigravity.ts），而 payload 通道对 Copilot 是明确关死的，故这是仅有且方向正确的修法。
  */
-export function createCopilotManagedHookPlan(env?: Readonly<Record<string, string>>): AgentManagedHookPlan {
+export function createCopilotManagedHookPlan(env?: ProviderExecutionEnvironment, workspacePath?: string): AgentManagedHookPlan {
   const command = managedHookCommand('copilot')
   const hooks = Object.fromEntries(COPILOT_HOOK_EVENTS.map((eventName) => [eventName, [{
     ...(eventName === 'preToolUse' || eventName === 'postToolUse' ? { matcher: '.*' } : {}),
@@ -203,7 +203,7 @@ export function createCopilotManagedHookPlan(env?: Readonly<Record<string, strin
   return {
     providerId: 'copilot',
     mutations: [{
-      path: join(copilotHome(env), 'hooks', 'agentmux.json'),
+      path: join(copilotHome(env, workspacePath), 'hooks', 'agentmux.json'),
       content: `${JSON.stringify({ version: 1, hooks }, null, 2)}\n`,
       mode: 0o600
     }]
@@ -212,7 +212,7 @@ export function createCopilotManagedHookPlan(env?: Readonly<Record<string, strin
 
 export function createCopilotProvider(defineAgentProvider: ProviderFactory): AgentProvider {
   return defineAgentProvider({
-    planManagedHooks: ({ env }) => createCopilotManagedHookPlan(env),
+    planManagedHooks: ({ env, workspacePath }) => createCopilotManagedHookPlan(env, workspacePath),
     catalog: catalog({
       id: 'copilot', label: 'Copilot', executable: 'copilot', expectedProcess: 'copilot',
       promptDelivery: 'positional-argv',

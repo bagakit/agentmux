@@ -1,5 +1,5 @@
 import { readFile } from 'node:fs/promises'
-import { homedir } from 'node:os'
+import { executionEnvironmentValue, executionHomeDirectory, executionPath } from './execution-environment.js'
 import { isAbsolute, join, resolve } from 'node:path'
 import { AgentMuxError } from '../errors.js'
 import { claudeLaunchValueOptions } from './claude-launch-options.js'
@@ -77,7 +77,8 @@ export async function inspectClaudeHookActivation(context: AgentProviderHookActi
   if (sourcesToRead.some(value => !['user', 'project', 'local'].includes(value))) {
     throw new AgentMuxError('Claude setting sources are not recognized.', 'HOOK_TARGET_UNPARSEABLE')
   }
-  const userRoot = env.CLAUDE_CONFIG_DIR?.trim() || join(env.HOME?.trim() || homedir(), '.claude')
+  const userRoot = executionPath(executionEnvironmentValue(context.env, 'CLAUDE_CONFIG_DIR')?.trim() ||
+    join(executionHomeDirectory(context.env), '.claude'), context.workspacePath)
   const sources: Source[] = [
     { name: 'managed settings', read: () => settingsFile(MANAGED_SETTINGS, context.signal) },
     ...[launchSettings(context, options)].filter((source): source is Source => source !== undefined),

@@ -1,5 +1,5 @@
-import { homedir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { executionEnvironmentValue, executionHomeDirectory, executionPath, type ProviderExecutionEnvironment } from './execution-environment.js'
+import { join } from 'node:path'
 import { GROK_LAUNCH_OPTIONS } from './launch-options.js'
 import type { PostureControlDeclaration } from '../agent-interaction.js'
 import type { AgentProvider, AgentProviderDefinition } from '../agent-provider.js'
@@ -7,7 +7,7 @@ import type { AgentManagedHookPlan } from '../managed-hook-installer.js'
 import type { AgentNativeHookSpecification } from '../hook-normalizer.js'
 import { formatHookToolOutput } from '../hook-tool-outcome.js'
 import { observeGrokSessionHistory, readGrokSessionHistoryPage, readGrokConversationChanges, readGrokSessionHistoryRecord } from './grok-native-history.js'
-import { catalog, hookToolFields, managedHookCommand, hookCommandTimeout } from './shared.js'
+import { catalog, hookToolFields, runScopedHookCommand, hookCommandTimeout } from './shared.js'
 import { normalizeNativeSessionId } from '../agent-native-locator.js'
 
 type ProviderFactory = (definition: AgentProviderDefinition) => AgentProvider
@@ -40,6 +40,7 @@ export const GROK_HOOK_EVENTS = [
  * 那是零依赖叶子，hook 子进程靠它拿表，不能反向依赖本模块。此处只保留配置侧清单与 rules。
  */
 export const GROK_HOOKS: AgentNativeHookSpecification = {
+  retainedRuntime: true,
   toolFields(eventName, payload) {
     if (!['pre_tool_use', 'post_tool_use', 'post_tool_use_failure'].includes(eventName)) return {}
     // Native stdin emits these same-value aliases; camelCase is the original spelling.
@@ -134,15 +135,19 @@ export const GROK_HOOKS: AgentNativeHookSpecification = {
 /**
  * grok 的 managed hook 计划。
  *
- * 只写 `~/.grok/hooks/`：那是 grok 文档标注「Always trusted」的全局目录，无需 folder-trust 授权。
+ * 只写原生配置根的 `hooks/`，不写兼容读取的 Claude／Cursor 配置。
+ * 原生 trust 与文件位置分开：headless 加载 own hooks，TUI 仍沿原生 folder trust。
  * grok 还会主动扫 `~/.claude/settings.json` 与 `~/.cursor/hooks.json` 做兼容——**绝不**往那两处写，
  * 那是用户为别的 CLI 维护的配置，AgentMux 挤进去会让一次 grok 安装污染 Claude 的行为。
  *
  * 单独一个文件名而非合并进 `config.toml`：同一目录下各文件互不干扰，卸载就是删这一个文件。
  */
-export function createGrokManagedHookPlan(homeOverride?: string): AgentManagedHookPlan {
-  const home = homeOverride ? resolve(homeOverride) : homedir()
-  const command = managedHookCommand('grok')
+export function createGrokManagedHookPlan(homeOverride?: string, env?: ProviderExecutionEnvironment, workspacePath?: string): AgentManagedHookPlan {
+  const configRoot = homeOverride === undefined
+    ? executionEnvironmentValue(env, 'GROK_HOME') || join(executionHomeDirectory(env), '.grok')
+    : join(homeOverride, '.grok')
+  const grokHome = executionPath(configRoot, workspacePath)
+  const command = runScopedHookCommand('grok')
   const hooks = Object.fromEntries(GROK_HOOK_EVENTS.map((eventName) => [eventName, [{
     // 工具类事件才有 matcher 语义（它测的是工具名）；grok 明说 Stop/UserPromptSubmit 上的 matcher
     // 会被忽略并告警，所以不写——写了只会在用户的 /hooks 面板里留一条噪音警告。
@@ -153,8 +158,9 @@ export function createGrokManagedHookPlan(homeOverride?: string): AgentManagedHo
   }]]))
   return {
     providerId: 'grok',
+    retainPreviousDeclarations: true,
     mutations: [{
-      path: join(home, '.grok', 'hooks', 'agentmux-status.json'),
+      path: join(grokHome, 'hooks', 'agentmux-status.json'),
       content: `${JSON.stringify({ hooks }, null, 2)}\n`,
       mode: 0o600,
       merge: { kind: 'json-managed-events' }
@@ -164,7 +170,7 @@ export function createGrokManagedHookPlan(homeOverride?: string): AgentManagedHo
 
 export function createGrokProvider(defineAgentProvider: ProviderFactory): AgentProvider {
   return defineAgentProvider({
-    planManagedHooks: () => createGrokManagedHookPlan(),
+    planManagedHooks: ({ env, workspacePath }) => createGrokManagedHookPlan(undefined, env, workspacePath),
     catalog: catalog({
       id: 'grok', label: 'Grok', executable: 'grok', expectedProcess: 'grok', promptDelivery: 'positional-argv',
       hookStrategy: { kind: 'native', installation: 'explicit-managed' },

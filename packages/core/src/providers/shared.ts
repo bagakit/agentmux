@@ -5,6 +5,10 @@ import { AgentMuxError } from '../errors.js'
 import type { AgentManagedHookPlan } from '../managed-hook-installer.js'
 import { resolveCoreBinPath } from '../runtime-paths.js'
 import { LAUNCH_SCOPED_HOOK_FLAG } from '../launch-scoped-hook.js'
+import type { ManagedHookRuntime } from '../managed-hook-runtime.js'
+import { HOOK_COMMAND_TIMEOUT_SECONDS } from '../hook-command-timeout.js'
+import { passiveHookResponses } from '../hook-passive-response.js'
+export { HOOK_COMMAND_TIMEOUT_SECONDS } from '../hook-command-timeout.js'
 import type { BuiltInAgentProviderId } from '../agent-provider-id.js'
 import type { AgentCatalogEntry, AgentProviderId } from '../types.js'
 import type { AgentNativeHookToolFields } from '../hook-normalizer.js'
@@ -82,29 +86,55 @@ export function hermesHookCommand(): string {
 
 /**
  * The command a launch-carried Hook runs. It names no install path: the launching Core puts its own
- * Node and runner in the Run environment ({@link launchScopedHookEnvironment}), so one declaration
+ * Node and runner in the Run environment ({@link retainedHookEnvironment}), so one declaration
  * serves every install. Outside such a Run both are unset and the shell test answers the passive `{}`
  * (Codex requires JSON on Stop), so a session started elsewhere never reports a Hook error for it.
  */
+export function runScopedHookCommand(providerId: AgentProviderId): string {
+  const cases = Object.entries(passiveHookResponses(providerId)).map(([event, response]) =>
+    `${shellQuote(event)}) printf '%s' ${shellQuote(response)} ;;`).join('\n')
+  const script = `event=
+previous=
+for argument in "$@"; do
+  if [ "$previous" = '--event' ]; then event="$argument"; break; fi
+  previous="$argument"
+done
+passive() {
+  case "$event" in
+${cases}
+    *) printf '{}\\n' ;;
+  esac
+}
+if [ "\${AGENTMUX_ENV-}" != '1' ] || [ "\${AGENTMUX_PROVIDER_ID-}" != ${shellQuote(providerId)} ]; then
+  passive
+  exit 0
+fi
+if [ ! -x "\${AGENTMUX_HOOK_NODE-}" ] || [ ! -f "\${AGENTMUX_HOOK_RUNNER-}" ]; then
+  passive
+  printf '%s\\n' '[AgentMux Hook] The original Run runtime is unavailable; Hook delivery is unconfirmed. The native Agent remains available.' >&2
+  exit 0
+fi
+ELECTRON_RUN_AS_NODE=1 AGENTMUX_HOOK_PROVIDER=${shellQuote(providerId)} exec "$AGENTMUX_HOOK_NODE" "$AGENTMUX_HOOK_RUNNER" ${LAUNCH_SCOPED_HOOK_FLAG} "$@"`
+  // argv[0] is explicit: native consumers may append --event and shell=False
+  // consumers can execute this argv without doing their own variable expansion.
+  return `/bin/sh -c ${shellQuote(script)} amux-hook`
+}
+
 export function launchScopedHookCommand(providerId: AgentProviderId): string {
-  return `[ -n "$AGENTMUX_HOOK_RUNNER" ] || { printf '{}\\n'; exit 0; }; ELECTRON_RUN_AS_NODE=1 AGENTMUX_HOOK_PROVIDER=${shellQuote(providerId)} ` +
-    `"$AGENTMUX_HOOK_NODE" "$AGENTMUX_HOOK_RUNNER" ${LAUNCH_SCOPED_HOOK_FLAG}`
+  return runScopedHookCommand(providerId)
 }
 
 /**
- * Every Run states whether its Hooks travel with the launch. The value is written for every Provider,
- * '0' included, because ctxmux starts a Run from Core's own process environment: a Core that itself
- * runs inside an AgentMux Run would otherwise hand its '1' to a Provider whose Hooks are not marked.
- * The runner is named only when it exists; a missing runner leaves the commands passive, and
- * ensureManagedHooks reports the missing file. Preparation failure leaves the runner available
- * for any successfully materialized plugin, while carrierReady disables only duplicate suppression.
+ * Scope distinguishes this Run's prepared declaration from leftover callbacks, whether the
+ * native definition travels at launch or lives in shared config. Always clear inherited values.
+ * Preparation failure keeps any available runtime but disables only duplicate suppression;
+ * Core has already reported that the native carrier is unconfirmed.
  */
-export function launchScopedHookEnvironment(launchScoped: boolean, carrierReady = true): Record<string, string> {
-  const runner = resolveCoreBinPath('agentmux-hook.js')
+export function retainedHookEnvironment(scoped: boolean, carrierReady = true, runtime?: ManagedHookRuntime): Record<string, string> {
   return {
-    AGENTMUX_HOOK_LAUNCH_SCOPED: launchScoped && carrierReady ? '1' : '0',
-    AGENTMUX_HOOK_NODE: launchScoped ? process.execPath : '',
-    AGENTMUX_HOOK_RUNNER: launchScoped && existsSync(runner) ? runner : ''
+    AGENTMUX_HOOK_LAUNCH_SCOPED: scoped && carrierReady ? '1' : '0',
+    AGENTMUX_HOOK_NODE: runtime?.nodePath ?? '',
+    AGENTMUX_HOOK_RUNNER: runtime?.runnerPath ?? ''
   }
 }
 
@@ -132,8 +162,6 @@ export {
  * 会被静默剥掉、退回它自己的默认超时）。这里把「值」与「每家用哪个键」都收成 SSOT——见
  * {@link HOOK_COMMAND_TIMEOUT_FIELD} 与 {@link hookCommandTimeout}——各 Provider 不再自己拼这个属性位。
  */
-export const HOOK_COMMAND_TIMEOUT_SECONDS = 10
-
 /**
  * 每家内置 Provider 的 hook 命令超时**字段名**——键拼法的 SSOT，与值 SSOT 并列。
  *

@@ -1,5 +1,5 @@
-import { homedir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { executionEnvironmentValue, executionHomeDirectory, executionPath, executionTemporaryDirectory, type ProviderExecutionEnvironment } from './execution-environment.js'
+import { join } from 'node:path'
 import { GEMINI_LAUNCH_OPTIONS } from './launch-options.js'
 import type { AgentProvider, AgentProviderDefinition } from '../agent-provider.js'
 import type { AgentManagedHookPlan } from '../managed-hook-installer.js'
@@ -88,8 +88,10 @@ export const GEMINI_HOOKS: AgentNativeHookSpecification = {
  * settings.json 是用户的主配置（本机实测同时含 `security` 与 `mcpServers`），所以必须走
  * `json-managed-events` 合并：仅补当前准确声明，保留 foreign 顶层键与全部原 Hook 定义。
  */
-export function createGeminiManagedHookPlan(homeOverride?: string): AgentManagedHookPlan {
-  const home = homeOverride ? resolve(homeOverride) : homedir()
+export function createGeminiManagedHookPlan(homeOverride?: string, env?: ProviderExecutionEnvironment, workspacePath?: string): AgentManagedHookPlan {
+  // Native Storage uses GEMINI_CLI_HOME as its home base, then appends .gemini.
+  const nativeHome = homeOverride ?? (executionEnvironmentValue(env, 'GEMINI_CLI_HOME') || executionHomeDirectory(env))
+  const home = executionPath(nativeHome || executionTemporaryDirectory(env), workspacePath)
   const command = managedHookCommand('gemini')
   const hooks = Object.fromEntries(GEMINI_HOOK_EVENTS.map((eventName) => [eventName, [{
     // matcher 只在工具类事件上有意义（`matchesContext` 拿它去比 `context.toolName`）。
@@ -110,7 +112,7 @@ export function createGeminiManagedHookPlan(homeOverride?: string): AgentManaged
 
 export function createGeminiProvider(defineAgentProvider: ProviderFactory): AgentProvider {
   return defineAgentProvider({
-    planManagedHooks: () => createGeminiManagedHookPlan(),
+    planManagedHooks: ({ env, workspacePath }) => createGeminiManagedHookPlan(undefined, env, workspacePath),
     catalog: catalog({
       id: 'gemini', label: 'Gemini', executable: 'gemini', expectedProcess: 'gemini',
       promptDelivery: 'flag-prompt-interactive',

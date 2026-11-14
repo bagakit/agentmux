@@ -86,7 +86,8 @@ import { hasSelectedNativeTarget, nativeTargetSourceUnconfirmed, resolveNativeSe
 import { parseAgentNativeSessionConfirmation } from './agent-native-session-confirmation.js'
 import { parseAgentNativeResumeSource } from './agent-native-sessions.js'
 import { nativeCatalogIssue } from './providers/native-session-catalog-files.js'
-import { launchScopedHookEnvironment } from './providers/shared.js'
+import { retainedHookEnvironment } from './providers/shared.js'
+import { prepareManagedHookRuntime, type ManagedHookRuntime } from './managed-hook-runtime.js'
 import { agentForkIdentityReminder, assertAgentForkSource, parseAgentForkSource } from './agent-fork.js';
 import { agentInteractionActiveRequest, agentInteractionResponseUnavailableReason, agentInteractionResponseSettled, agentInteractionRequestTarget } from './agent-interaction-state.js'
 import { normalizeLaunchOptionSelection } from './agent-launch-option.js';
@@ -800,6 +801,8 @@ export class AgentMuxClient {
   private readonly acp: AgentMuxAcpBridge
   private readonly hookServer: AgentHookServer
   private readonly hookInstaller: AgentManagedHookInstaller
+  private hookRuntimePreparation: Promise<ManagedHookRuntime> | undefined
+  private hookRuntime?: ManagedHookRuntime
   private readonly ownedWorkspaceRoots: () => Promise<readonly string[]>
   private unsubscribeKernel: (() => void) | null = null
   private unsubscribeKernelErrors: (() => void) | null = null
@@ -2223,9 +2226,7 @@ export class AgentMuxClient {
           strategy.kind === 'none' ? null : 'This Provider owns its Hook setup; inspect it through the Provider.')
       }
       if (workspacePath === null) return skipped('HOOK_WORKSPACE_REQUIRED', 'Provide the exact workspace for this inspection.')
-      const planEnv = options.env === undefined ? undefined : Object.fromEntries(
-        Object.entries(options.env).filter((entry): entry is [string, string] => entry[1] !== undefined)
-      )
+      const planEnv = options.env
       const launchCarried = strategy.installation === 'launch-carried'
       const plan = this.managedHookPlan(provider, { workspacePath, ...(planEnv ? { env: planEnv } : {}), ...(options.endpoint ? { endpoint: options.endpoint } : {}) })
       if (!plan && !launchCarried) return skipped('HOOK_PLAN_CONTEXT_UNAVAILABLE', 'Provide the existing native binding context or a managed Hook plan; inspection does not create a binding.')
@@ -2243,7 +2244,7 @@ export class AgentMuxClient {
       let activation
       try {
         const launch = launchCarried ? provider.buildLaunch({ workspacePath, prompt: '',
-          args: options.args ?? [], env: planEnv ?? {}, commandOverride: resolveAgentExecutable(options.command, provider.executable) }) : null
+          args: options.args ?? [], env: Object.fromEntries(Object.entries(planEnv ?? {}).filter((entry): entry is [string, string] => entry[1] !== undefined)), commandOverride: resolveAgentExecutable(options.command, provider.executable) }) : null
         activation = await lifetime.read(provider.inspectHookActivation({
           plan: plan ?? { providerId, mutations: [] }, workspacePath,
           command: launch?.command ?? resolveAgentExecutable(options.command, provider.executable), args: launch?.args ?? options.args ?? [],
@@ -5462,10 +5463,8 @@ export class AgentMuxClient {
         delivery: managedLaunch?.promptDelivery === 'post-launch' || deferredPrompt.trim() ? 'post-launch' : 'launch',
         lifecycleOperationId, launchPlan: { program: plan.command, argsDigest: createHash('sha256').update(JSON.stringify(plan.args)).digest('base64url') }, state: 'prepared'
       } : undefined
-      // Binding 必须先于 Hook 安装：一个把 hook 投递代码**写进文件**的 Provider（opencode 的 JS
-      // 插件）跑在自己进程里，拿不到 AgentMux 注入 PTY 的 `AGENTMUX_HOOK_URL`/`TOKEN`，所以 endpoint
-      // 必须在安装那一刻就内联进被写出去的内容。写命令的那九家不受影响——它们的命令在运行时才从
-      // 自己进程的环境变量读。createBinding 不依赖 hook 安装结果，故这个顺序是安全的。
+      // Bind the original operation before preparing its carrier. Shared declarations contain no
+      // binding credentials; the native process inherits this binding only through its Run env.
       await this.requireHookIngressOwner()
       hookBinding = this.hookServer.createBinding(
         agentSessionId,
@@ -5893,6 +5892,14 @@ export class AgentMuxClient {
     if (hookStrategy.kind !== 'native' || hookStrategy.installation === 'unmanaged') return true
     try {
       if (launchIssue) throw new AgentMuxError(launchIssue.message, launchIssue.code)
+      if (provider.hook.launchCarried || provider.hook.retainedRuntime) {
+        const preparation = this.hookRuntimePreparation ??= prepareManagedHookRuntime(this.hookInstaller.stateDirectory)
+        try { this.hookRuntime = await preparation }
+        catch (error) {
+          if (this.hookRuntimePreparation === preparation) this.hookRuntimePreparation = undefined
+          throw error
+        }
+      }
       const plan = this.managedHookPlan(provider, { workspacePath, env, ...(endpoint ? { endpoint } : {}) })
       if (hookStrategy.installation === 'launch-carried') return true
       if (!plan) throw new AgentMuxError('The exact managed Hook planning context is unavailable.', 'HOOK_PLAN_CONTEXT_UNAVAILABLE')
@@ -8756,6 +8763,7 @@ export class AgentMuxClient {
     // launch/resume 贡献当前声明，并在 flag/generated-code/source absent 时清除继承的旧 payload 声明。
     const usage = provider.catalog.capabilities.usage
     const source = provider.hook.eventNameSource
+    const retainedRuntime = provider.hook.launchCarried || provider.hook.retainedRuntime
     const resolved: Record<string, string> = {
       ...terminalEnvironment({ ...environment, AGENTMUX_MESSAGE_QUEUE_PATH: this.messageQueue.path }, this.agentSessionStorePath()),
       AGENTMUX_RPC_ENDPOINT: `unix:${this.controlSocketPath}`,
@@ -8772,7 +8780,7 @@ export class AgentMuxClient {
       ...(usage ? { AGENTMUX_USAGE_TRANSCRIPT_FORMAT: usage.transcriptFormat } : {}),
       AGENTMUX_HOOK_USAGE_EVENTS: JSON.stringify(provider.hook.usageFinalizationEvents ?? []),
       ...(source?.kind === 'payload' ? { AGENTMUX_HOOK_PAYLOAD_KEY: source.payloadKey } : {}),
-      ...launchScopedHookEnvironment(provider.hook.launchCarried === true, launchHooksReady)
+      ...retainedHookEnvironment(retainedRuntime === true, launchHooksReady, retainedRuntime ? this.hookRuntime : undefined)
     }
     if (source?.kind !== 'payload') {
       delete resolved.AGENTMUX_HOOK_PAYLOAD_KEY

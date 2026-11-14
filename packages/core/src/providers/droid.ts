@@ -1,6 +1,6 @@
 import { inspectHookDisableSetting } from './shared.js'
-import { homedir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { executionEnvironmentValue, executionHomeDirectory, executionPath, type ProviderExecutionEnvironment } from './execution-environment.js'
+import { join } from 'node:path'
 import type { AgentProvider, AgentProviderDefinition } from '../agent-provider.js'
 import type { AgentManagedHookPlan } from '../managed-hook-installer.js'
 import type { AgentNativeHookSpecification } from '../hook-normalizer.js'
@@ -120,9 +120,9 @@ export const DROID_HOOKS: AgentNativeHookSpecification = {
  * 我们的根级事件键直接盖在用户同名的桶上，最后再写一个这个 CLI 不认的 `hooks: {}`。用户手写的
  * `PreToolUse` 审计 hook 会在下一次启动时消失。这不是推理——`renderMergedHookContent` 实测如此。
  */
-export function createDroidManagedHookPlan(env?: Readonly<Record<string, string>>): AgentManagedHookPlan {
-  const override = env?.FACTORY_HOME_OVERRIDE?.trim()
-  const home = override ? resolve(override) : homedir()
+export function createDroidManagedHookPlan(env?: ProviderExecutionEnvironment, workspacePath?: string): AgentManagedHookPlan {
+  const override = executionEnvironmentValue(env, 'FACTORY_HOME_OVERRIDE')?.trim()
+  const home = executionPath(override || executionHomeDirectory(env), workspacePath)
   const command = managedHookCommand('droid')
   const events = Object.fromEntries(DROID_HOOK_EVENTS.map((eventName) => [eventName, [{
     // matcher 测的是工具名，只有两个工具事件有这个语义。其余事件上写 matcher 是噪音。
@@ -142,7 +142,7 @@ export function createDroidManagedHookPlan(env?: Readonly<Record<string, string>
 
 export function createDroidProvider(defineAgentProvider: ProviderFactory): AgentProvider {
   return defineAgentProvider({
-    planManagedHooks: ({ env }) => createDroidManagedHookPlan(env),
+    planManagedHooks: ({ env, workspacePath }) => createDroidManagedHookPlan(env, workspacePath),
     readSessionHistoryPage: readDroidSessionHistoryPage,
     readSessionHistoryRecord: readDroidSessionHistoryRecord,
     catalog: catalog({

@@ -1,5 +1,5 @@
 import { request as httpRequest } from 'node:http'
-import { HOOK_COMMAND_TIMEOUT_SECONDS } from './providers/shared.js'
+import { HOOK_COMMAND_TIMEOUT_SECONDS } from './hook-command-timeout.js'
 
 // Two observations and a bounded backoff leave room for stdin/transcript work
 // inside the Provider's command deadline. The server uses the same request budget.

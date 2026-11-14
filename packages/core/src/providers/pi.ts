@@ -1,6 +1,6 @@
 import { identityRuntimeSource } from '@agentmux/identity/runtime-source'
-import { homedir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { executionEnvironmentValue, executionHomeDirectory, executionPath, type ProviderExecutionEnvironment } from './execution-environment.js'
+import { join } from 'node:path'
 import { AgentMuxError } from '../errors.js'
 import type { AgentProvider, AgentProviderDefinition } from '../agent-provider.js'
 import type { AgentManagedHookPlan } from '../managed-hook-installer.js'
@@ -139,10 +139,11 @@ export const PI_HOOKS: AgentNativeHookSpecification = {
 function piFamilyExtensionDir(
   agentDirEnv: string,
   configDirName: string,
-  env?: Readonly<Record<string, string>>
+  env?: ProviderExecutionEnvironment,
+  workspacePath?: string
 ): string {
-  const override = env?.[agentDirEnv]?.trim()
-  const agentDir = override ? resolve(override) : join(homedir(), configDirName, 'agent')
+  const override = executionEnvironmentValue(env, agentDirEnv)?.trim()
+  const agentDir = executionPath(override || join(executionHomeDirectory(env), configDirName, 'agent'), workspacePath)
   return join(agentDir, 'extensions')
 }
 
@@ -297,11 +298,11 @@ export default function (pi) {
  * 不需要 endpoint 参数：内容在运行时从环境变量取（见 `piExtensionSource` 那段），所以修复路径（没有
  * Binding）也能照常产出一份完全有效的 plan。
  */
-export function createPiManagedHookPlan(env?: Readonly<Record<string, string>>): AgentManagedHookPlan {
+export function createPiManagedHookPlan(env?: ProviderExecutionEnvironment, workspacePath?: string): AgentManagedHookPlan {
   return {
     providerId: 'pi',
     mutations: [{
-      path: join(piFamilyExtensionDir('PI_CODING_AGENT_DIR', '.pi', env), 'agentmux.js'),
+      path: join(piFamilyExtensionDir('PI_CODING_AGENT_DIR', '.pi', env, workspacePath), 'agentmux.js'),
       content: piExtensionSource(),
       mode: 0o600
     }]
@@ -310,7 +311,7 @@ export function createPiManagedHookPlan(env?: Readonly<Record<string, string>>):
 
 export function createPiProvider(defineAgentProvider: ProviderFactory): AgentProvider {
   return defineAgentProvider({
-    planManagedHooks: ({ env }) => createPiManagedHookPlan(env),
+    planManagedHooks: ({ env, workspacePath }) => createPiManagedHookPlan(env, workspacePath),
     readSessionHistoryPage: readPiSessionHistoryPage,
     readConversationChanges: readPiConversationChanges,
     observeSessionHistory: observeNativeJsonlHistory,

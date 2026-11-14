@@ -5,6 +5,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 import ctxmuxArtifacts from '../src/ctxmux-artifact-contract.json' with { type: 'json' }
+import { buildHookWorker } from './build-hook-worker.mjs'
 
 const execFileAsync = promisify(execFile)
 const artifactPlatform = `${process.platform}-${process.arch}`
@@ -89,6 +90,7 @@ try {
     cwd: packageRoot,
     maxBuffer: 4 * 1024 * 1024
   })
+  await buildHookWorker(packageRoot)
   await execFileAsync(process.execPath, [join(packageRoot, 'scripts/check-guides.mjs'), '--dist'], {
     cwd: packageRoot,
     maxBuffer: 1024 * 1024
