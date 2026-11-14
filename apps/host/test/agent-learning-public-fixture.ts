@@ -22,7 +22,10 @@ export async function learningPublicFixture(ownerRuntimeId = 'original-host') {
   const workspace = { id: SCRATCH_WORKSPACE_ID, name: 'Original knowledge homes', hostId: 'local', path: join(h.root, 'homes'), kind: 'folder' }
   await mkdir(workspace.path)
   const topics = new ScratchTopics(), mote = await topics.ensureMote(workspace, 'view:experience-mote')
-  const spaces = [mote].map(snapshot => ({ spaceId: directoryIdentity('local', snapshot.identityDirectoryPath!), kind: snapshot.kind, name: 'Same displayed destination', hostId: 'local', directoryPath: snapshot.physicalDirectoryPath!, projectId: null, topicId: snapshot.id }))
+  const spaces = [mote].map(snapshot => {
+    if (snapshot.kind !== 'mote') throw new Error('The original learning fixture requires its created Mote resource')
+    return { spaceId: directoryIdentity('local', snapshot.identityDirectoryPath!), kind: snapshot.kind, name: 'Same displayed destination', hostId: 'local', directoryPath: snapshot.physicalDirectoryPath!, projectId: null, topicId: snapshot.id }
+  })
   const zones = spaces.map(space => ({ zoneId: homeZoneId(space.spaceId), workspaceId: workspace.id, kind: 'home' as const, hostId: 'local', directoryPath: space.directoryPath, branch: null }))
   const spatial = new AgentMuxSpatialStateStore(join(h.root, 'spatial.json'))
   await spatial.commit({ expectedRevision: 0, graph: { spaces, zones, bindings: spaces.map((space, index) => ({ spaceId: space.spaceId, zoneId: zones[index]!.zoneId })), tabs: [], regions: [], layouts: {}, tabLayouts: {}, resources: {} } })

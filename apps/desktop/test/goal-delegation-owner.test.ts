@@ -1,3 +1,4 @@
+import { nonSessionCreation } from '../../host/test/helpers/non-session-creation.js'
 import { fixtureEpoch as _reshape_fixtureEpoch } from "../../../test/fixture-values.mjs"
 import { mkdtemp, writeFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -36,7 +37,8 @@ it('runs the actual CLI/RPC/Main prepare owner, retains frozen intent and reject
   await demands.create({ id: 'goal', title: 'Original Goal', description: 'Original intent', status: 'in_progress',
     assigneeSessionIds: ['owner', 'worker'], supervisorSessionId: 'owner' })
   await demands.proposeAlignment('goal', { summary: 'Original scope', criteria: [{ id: 'AC', text: 'Recover the result' }], openQuestions: [] })
-  const owner = new GoalDelegationOwner(demands, { resolveGoalAgent: async () => ({ hostId: 'local', status: {} as never }), agentCreation: async (_hostId, id) => (await store.readMetadata(id))! })
+  let pending: { id: string; kind: 'prepared-agent-creation' | 'closed-agent-creation' } | null = null
+  const owner = new GoalDelegationOwner(demands, { resolveGoalAgent: async () => ({ hostId: 'local', status: {} as never }), agentCreation: async (_hostId, id) => pending?.id === id ? nonSessionCreation(pending.kind, { agentSessionId: id, hostId: 'local', workspacePath: root, createOperationId: 'create-' + id, runId: id + '-run' }) : (await store.readMetadata(id))! })
   const server = new AgentMuxControlServer({ socketPath: join(root, 'rpc.sock'),
     coreClients: () => [{ hostId: 'local', client }], goalDelegations: owner })
   await server.start(); cleanup.push(() => server.stop())
@@ -50,6 +52,14 @@ it('runs the actual CLI/RPC/Main prepare owner, retains frozen intent and reject
     })
     return JSON.parse(result.stdout)
   }
+  const before = await demands.snapshot()
+  for (const kind of ['prepared-agent-creation', 'closed-agent-creation'] as const) for (const id of ['owner', 'worker']) {
+    pending = { id, kind }
+    await expect(cli('owner', ['goal', 'delegation', 'prepare', '--input', inputPath])).rejects.toMatchObject({ code: 1,
+      stderr: expect.stringContaining('CONTROL_UNAVAILABLE') })
+    expect(await demands.snapshot()).toEqual(before)
+  }
+  pending = null
   const first = await cli('owner', ['goal', 'delegation', 'prepare', '--input', inputPath])
   expect(first.ok).toBe(true)
   expect(first.result.delegations).toHaveLength(1)
@@ -105,7 +115,8 @@ async function retirementFixture() {
     },
     observeRun: async () => { throw new Error('Retirement is read without connecting to a Run') }
   }
-  const owner = new GoalDelegationOwner(demands, { resolveGoalAgent: async () => ({ hostId: 'local', status: {} as never }), agentCreation: async (_hostId, id) => client.inspectAgentCreation(id) }, undefined, core)
+  const agentCreation = vi.fn(async (_hostId: string, id: string) => client.inspectAgentCreation(id))
+  const owner = new GoalDelegationOwner(demands, { resolveGoalAgent: async () => ({ hostId: 'local', status: {} as never }), agentCreation }, undefined, core)
   const intent = { operationId: 'original-operation', sourceMessageId: 'original-message', hostId: 'local',
     ownerAgentSessionId: 'owner', workerAgentSessionId: 'worker', ownerRunId: 'owner-run', workerRunId: 'worker-run',
     threadId: 'original-thread', text: 'Original frozen input', alignmentRevision: 1, criterionIds: ['AC'] }
@@ -120,7 +131,7 @@ async function retirementFixture() {
     expect(await client.inspectAgentCreation(id)).toMatchObject({ kind: 'retired-agent', agentSessionId: id })
     return await store.readRetiredAgentSession(id)
   }
-  return { owner, demands, store, calls, intent, authority, retire }
+  return { owner, demands, store, calls, intent, authority, retire, agentCreation }
 }
 
 it('reuses an original delegation packet and request verbatim without recomposing current role guidance', async () => {
@@ -158,4 +169,19 @@ it('retains a frozen delegation but rejects a new report to its retired owner wi
   expect(f.calls).toEqual(['message.read'])
   expect(await f.demands.snapshot()).toEqual(original)
   expect(await f.store.readRetiredAgentSession('owner')).toEqual(retired)
+})
+
+it.each(['prepared-agent-creation', 'closed-agent-creation'] as const)('retains the original worker report when its recipient is %s', async kind => {
+  const f = await retirementFixture()
+  await f.owner.call('goal.delegation.prepare', { goalId: 'goal', intent: f.intent }, {}, f.authority)
+  await f.demands.linkDelegation('goal', f.intent.operationId, f.intent.sourceMessageId, 'owner')
+  const before = await f.demands.snapshot()
+  f.agentCreation.mockResolvedValue(nonSessionCreation(kind, { agentSessionId: 'owner', hostId: 'local', workspacePath: 'original-source', createOperationId: 'create-owner', runId: 'owner-run' }))
+  const report = { operationId: 'report-operation', replyMessageId: 'report-reply', authorAgentSessionId: 'worker',
+    grounding: { alignmentRevision: 1, summary: 'Original worker result',
+      checks: [{ criterionId: 'AC', outcome: 'met' as const, evidence: ['fixture-result:7'], note: '' }] } }
+  await expect(f.owner.call('goal.report', { goalId: 'goal', operationId: f.intent.operationId, report }, {},
+    { actor: { kind: 'agent', id: 'worker' }, hostId: 'local', runId: 'worker-run' })).rejects.toMatchObject({ code: 'CONTROL_UNAVAILABLE' })
+  expect(f.calls).toEqual(['message.read'])
+  expect(await f.demands.snapshot()).toEqual(before)
 })

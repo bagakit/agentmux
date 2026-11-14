@@ -1,3 +1,4 @@
+import { nonSessionCreation } from '../../host/test/helpers/non-session-creation.js'
 import { fixtureEpoch as _reshape_fixtureEpoch } from "../../../test/fixture-values.mjs"
 import { promises as fs } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -12,7 +13,7 @@ import { GoalStartResponsibilityOwner } from '@agentmux/host/goal-start-responsi
 
 const cleanup: Array<() => void | Promise<unknown>> = []
 afterEach(async () => { for (const dispose of cleanup.splice(0).reverse()) await dispose(); vi.restoreAllMocks() })
-const task: DemandDispatchIntent = { operationId: 'original-start', agentSessionId: 'worker', hostId: 'local', runId: 'worker-run', execution: 'finite', prompt: ' Original task\n with exact body. ' }
+const task = { operationId: 'original-start', agentSessionId: 'worker', hostId: 'local', runId: 'worker-run', execution: 'finite', prompt: ' Original task\n with exact body. ' } satisfies DemandDispatchIntent
 type Mode = 'idle' | 'busy' | 'draft' | 'unknown'
 function processEvent(runId: string, state: AgentMuxRun['state']): AgentMuxClientEvent {
   return { type: 'process-state', run: { runId }, state, pid: null, evidence: { source: 'run-process', observedAt: Date.now() } }
@@ -52,7 +53,7 @@ async function fixture() {
     run: { runId: id === 'owner' ? state.supervisorRun : id + '-run' }, retiredRuns: [], createdAt: _reshape_fixtureEpoch(0, 0, 100), updatedAt: _reshape_fixtureEpoch(0, 0, 100) })
   const actualInputs: Array<{ operationId: string; supervisorSessionId: string; supervisorRunId: string; note: string }> = []
   const runtime = {
-    agentCreation: vi.fn(async (_hostId: string, id: string) => creation(id)),
+    agentCreation: vi.fn(async (_hostId: string, id: string): Promise<import('@agentmux/core').AgentMuxAgentCreationInspection> => creation(id)),
     observeOriginalRun: vi.fn(async (_hostId: string, runId: string) => { if (!state.workerRun) throw new Error('Original Run observation unavailable'); return { runId, state: state.workerRun } }),
     inspectGoalStart: vi.fn(async () => state.inputReceipt === 'missing' ? null : ({ agentSessionId: task.agentSessionId, run: { runId: task.runId }, admission: { submissionId: task.operationId, acknowledged: true, inputKey: { kind: 'prompt', agentSessionId: task.agentSessionId, expectedRun: { runId: state.inputReceipt === 'wrong-key' ? 'another-run' : task.runId }, submissionId: task.operationId }, intent: { run: { runId: task.runId }, prompt: state.inputReceipt === 'wrong-body' ? task.prompt.trim() : task.prompt } } })),
     observeCoreEvents: vi.fn((_types: readonly AgentMuxClientEvent['type'][], consume: (hostId: string, event: AgentMuxClientEvent) => void) => {
@@ -122,6 +123,20 @@ async function fixture() {
 }
 
 describe('original finite Start event responsibility', () => {
+  it.each(['prepared-agent-creation', 'closed-agent-creation'] as const)('retains %s without preparing a Run-bound notice, then continues the same Start', async kind => {
+    const f = await fixture(), original = f.runtime.agentCreation.getMockImplementation()!
+    f.state.receiptConfirmed = true; f.state.workerRun = 'exited'
+    f.runtime.agentCreation.mockResolvedValue(nonSessionCreation(kind, { agentSessionId: 'owner', hostId: 'local', workspacePath: f.root, createOperationId: 'original-owner-create', runId: f.state.supervisorRun }))
+    await f.owner.start(); await f.idle()
+    expect(f.demands.prepareDispatchAttention, 'an uncommitted Supervisor must not prepare a Run-bound Start notice').not.toHaveBeenCalled()
+    expect(f.runtime.submitPrompt).not.toHaveBeenCalled(); expect(f.runtime.stop).not.toHaveBeenCalled()
+    expect((await f.demands.inspectDispatch('goal', task.operationId))!.attention).toBeUndefined()
+    f.runtime.agentCreation.mockImplementation(original)
+    f.nativeCompletion(); await f.idle()
+    expect(f.actualInputs).toHaveLength(1)
+    expect((await f.demands.inspectDispatch('goal', task.operationId))!.attention).toMatchObject({ supervisorAgentSessionId: 'owner', supervisorRunId: f.state.supervisorRun })
+  })
+
   it.each(['exited', 'interrupted'] as const)('uses the exact original %s Run and Core input for one platform-only Supervisor notice', async ended => {
     const f = await fixture(); f.state.receiptConfirmed = true; await f.owner.start(); await f.idle()
     expect(f.runtime.submitPrompt).not.toHaveBeenCalled()

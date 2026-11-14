@@ -1,4 +1,5 @@
-import { afterEach, expect, it } from 'vitest'
+import { nonSessionCreation } from './helpers/non-session-creation.js'
+import { afterEach, expect, it, vi } from 'vitest'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -13,9 +14,9 @@ async function fixture() {
   const intent = { goalId: 'original-goal', creationOperationId: 'original-goal-creation' }, operationId = await goalPmoOperation(intent, 'create')
   await demands.create({ id: 'original-goal', title: 'Original Goal' }, { operationId: 'original-goal-creation', discussionOperationId: operationId, creationOrigin: { requesterAsSupervisor: true } })
   const input = { ...intent, hostId: 'original-host', agentSessionId: 'original-session', expectedRun: { runId: 'original-run' }, operationId, evidence: 'creation-input' as const }
-  const creation = { createOperationId: operationId, createdRun: input.expectedRun, initialPrompt: 'confirmed' }
+  const creation = { createOperationId: operationId, createdRun: input.expectedRun, initialPrompt: 'confirmed' as const }
   let promptReceipt: unknown, originalMessage: unknown, role = true, beforeSource: (() => Promise<void>) | undefined
-  const client = { inspectAgentCreation: async () => ({ kind: 'agent', agentSessionId: input.agentSessionId, workspacePath: root, run: { runId: 'later-run' }, creation }),
+  const client = { inspectAgentCreation: async (): Promise<import('@agentmux/core').AgentMuxAgentCreationInspection> => ({ kind: 'agent', providerId: 'codex', executorId: 'codex', hostId: input.hostId, retiredRuns: [], createdAt: 1, updatedAt: 1, agentSessionId: input.agentSessionId, workspacePath: root, run: { runId: 'later-run' }, creation }),
     inspectAgentPromptSubmission: async () => promptReceipt, readMessage: async () => originalMessage, authorizeAgentCaller: async () => ({ agentSessionId: input.agentSessionId }) }
   const owner = createGoalParticipationOwner({ demands, client: () => client as never, discussion: async () => role, activeContinuation: async () => false,
     source: async (hostId, agentSessionId) => { await beforeSource?.(); return { kind: 'discussion', hostId, agentSessionId, entryPoint: 'original-source' } } })
@@ -34,6 +35,23 @@ it('does not infer a creation Run when Core has not retained its original proven
   await expect(f.owner.confirm(f.input, context)).rejects.toMatchObject({ code: 'CONTROL_UNAVAILABLE' })
   expect((await f.demands.get(f.input.goalId))!.participations).toEqual([])
 })
+it.each(['prepared-agent-creation', 'closed-agent-creation'] as const)('keeps %s out of confirmed participation and retries the same source', async kind => {
+  const f = await fixture(), original = await f.client.inspectAgentCreation(), before = await f.demands.get(f.input.goalId)
+  if (original.kind !== 'agent') throw Error('Original fixture Session required')
+  const pending = nonSessionCreation(kind, { ...f.input, workspacePath: original.workspacePath, createOperationId: f.input.operationId, runId: f.input.expectedRun.runId })
+  // The controlled Core read has no committed Session, even when an original
+  // creation input and a retained Runtime observation are both present.
+  const operationId = await goalPmoOperation(f.input, 'discussion'), input = { ...f.input, operationId, evidence: 'prompt-input' as const }
+  f.setReceipt({ agentSessionId: input.agentSessionId, run: input.expectedRun, admission: { submissionId: operationId, acknowledged: true,
+    inputKey: { kind: 'prompt', agentSessionId: input.agentSessionId, expectedRun: input.expectedRun, submissionId: operationId }, intent: { run: input.expectedRun } } })
+  const inspect = vi.spyOn(f.client, 'inspectAgentCreation').mockImplementation(async () => pending)
+  const outcome = await f.owner.confirm(input, context).then(result => ({ result }), error => ({ error }))
+  expect(outcome).toMatchObject({ error: { code: 'CONTROL_UNAVAILABLE' } })
+  expect(await f.demands.get(f.input.goalId)).toEqual(before)
+  inspect.mockRestore()
+  expect((await f.owner.confirm(input, context)).goal.participations).toHaveLength(1)
+})
+
 it('uses the exact Core input key, Run and acknowledged submission for later prompt provenance', async () => {
   const f = await fixture(), operationId = await goalPmoOperation(f.input, 'discussion')
   const input = { ...f.input, operationId, evidence: 'prompt-input' as const }

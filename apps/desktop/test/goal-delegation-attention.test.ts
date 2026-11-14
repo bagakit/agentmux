@@ -1,3 +1,4 @@
+import { nonSessionCreation } from '../../host/test/helpers/non-session-creation.js'
 import { fixtureEpoch as _reshape_fixtureEpoch } from "../../../test/fixture-values.mjs"
 import { promises as fs } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -53,7 +54,7 @@ async function fixture() {
     run: { runId: id === 'owner' ? state.supervisorRun : id + '-run' }, retiredRuns: [], createdAt: _reshape_fixtureEpoch(0, 0, 100), updatedAt: _reshape_fixtureEpoch(0, 0, 100) })
   const actualInputs: Array<{ operationId: string; supervisorSessionId: string; supervisorRunId: string; note: string }> = []
   const runtime = {
-    agentCreation: vi.fn(async (_hostId: string, id: string) => creation(id)),
+    agentCreation: vi.fn(async (_hostId: string, id: string): Promise<import('@agentmux/core').AgentMuxAgentCreationInspection> => creation(id)),
     observeOriginalRun: vi.fn(async (_hostId: string, runId: string) => ({ runId, state: state.workerRun ?? 'running' })),
     observeCoreEvents: vi.fn((_types: readonly AgentMuxClientEvent['type'][], consume: (hostId: string, event: AgentMuxClientEvent) => void) => {
       listener = consume; return () => { listener = undefined }
@@ -126,6 +127,22 @@ async function fixture() {
 }
 
 describe('event-driven original Goal responsibility notice', () => {
+  it.each(['prepared-agent-creation', 'closed-agent-creation'] as const)('retains %s without preparing a Run-bound notice, then continues the same delegation', async kind => {
+    const f = await fixture(), original = f.runtime.agentCreation.getMockImplementation()!
+    f.state.receiptConfirmed = true; f.state.workerRun = 'exited'
+    f.runtime.agentCreation.mockResolvedValue(nonSessionCreation(kind, { agentSessionId: 'owner', hostId: 'local', workspacePath: f.root, createOperationId: 'original-owner-create', runId: f.state.supervisorRun }))
+    await f.owner.start(); await f.idle()
+    expect(f.demands.prepareDelegationAttention, 'an uncommitted Supervisor must not prepare a Run-bound delegation notice').not.toHaveBeenCalled()
+    expect(f.runtime.submitPrompt).not.toHaveBeenCalled(); expect(f.runtime.stop).not.toHaveBeenCalled()
+    const retained = (await f.demands.inspectDelegation('goal', task.operationId))!
+    expect(retained).toMatchObject({ sourceMessageId: task.sourceMessageId, ownerAgentSessionId: 'owner', workerAgentSessionId: 'worker' })
+    expect(retained.attention).toBeUndefined()
+    f.runtime.agentCreation.mockImplementation(original)
+    f.nativeCompletion(); await f.idle()
+    expect(f.actualInputs).toHaveLength(1)
+    expect((await f.demands.inspectDelegation('goal', task.operationId))!.attention).toMatchObject({ supervisorAgentSessionId: 'owner', supervisorRunId: f.state.supervisorRun })
+  })
+
   it.each(['exited', 'interrupted'] as const)('reacts to an exact %s worker Run with one frozen platform note and one eligible Supervisor input', async ended => {
     const f = await fixture(); f.state.receiptConfirmed = true
     await f.owner.start(); await f.idle()
