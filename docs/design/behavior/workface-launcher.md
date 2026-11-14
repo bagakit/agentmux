@@ -7,7 +7,7 @@
 ## 环境、目录与文件引用
 
 
-- **工作地点由入口确定，起点只读呈现。** Launcher 的项目与所在设备来自打开它的 Space 入口（已登记目录或[设备入口](spaces-and-layout.md#设备主目录工作面)确认的 home）。起点以只读的项目名、路径与设备标签呈现，不再提供另一个项目或机器选择器；换项目或设备回到 Space 的原入口。设备标签的悬停或键盘焦点可读完整路径、设备名称与身份，以及原连接 owner 的当前通信方式与最近一次检查结果；未知观察明确未知，不画成已连接。选择、显示与实际创建请求使用同一个执行目标，执行目标与当前展示落点分开；选择未来创建目标不迁移、重建或停止已有 Session/Run，不改其它 Region 的执行身份；原未发送输入、名称与选项保留。明确选择的 Agent 与运行设备沿该 Launcher Region 的原持久 owner 保存，保存回执、Agent 或 Terminal 启动失败重挂及普通进程重启后仍是同一选择，不能按 Tab 的展示项目覆盖执行目标。环境信息复用已有配置与 Runtime/discovery，配置存在、观察未知与已连通不能互相代称；健康边界沿[联邦 Runtime 与远端恢复合同](session-recovery.md#联邦-runtime-与远端恢复边界)。
+- **工作地点由入口确定，起点只读呈现。** Launcher 的项目与所在设备来自打开它的 Space 入口（已登记目录或[设备入口](spaces-and-layout.md#设备主目录工作面)确认的 home）。起点的项目身份头部只读呈现项目名、路径与设备，不在头部混入第二个选择器；未来工作安排通过下节具名 Work mode 编辑面修改，原 Space 入口继续可用。设备标签的悬停或键盘焦点可读完整路径、设备名称与身份，以及原连接 owner 的当前通信方式与最近一次检查结果；未知观察明确未知，不画成已连接。选择、显示与实际创建请求使用同一个执行目标，执行目标与当前展示落点分开；选择未来创建目标不迁移、重建或停止已有 Session/Run，不改其它 Region 的执行身份；原未发送输入、名称与选项保留。明确选择的 Agent 与运行设备沿该 Launcher Region 的原持久 owner 保存，保存回执、Agent 或 Terminal 启动失败重挂及普通进程重启后仍是同一选择，不能按 Tab 的展示项目覆盖执行目标。环境信息复用已有配置与 Runtime/discovery，配置存在、观察未知与已连通不能互相代称；健康边界沿[联邦 Runtime 与远端恢复合同](session-recovery.md#联邦-runtime-与远端恢复边界)。
 
 - **目录沿项目已有的路径表示选择。** 启动页目录摘要与展开详情遵循既有路径转换设置，规则唯一见[《路径显示与复制》](spaces-and-layout.md#路径显示与复制)：仅已确认本机路径可按真实本机 home 显示为 `~`，选择绝对路径时给完整路径；远端、其他用户和未知 home 保持原路径。表示变化不改 Workspace 实际目录、Host、warm Terminal key、启动、Resume 或 Mote 委托的资源事实，不另加路径转换设置或第二份转换逻辑。摘要与悬停路径都沿同一表示偏好；完整原始地址在设备标签的悬停面按需阅读或复制，缩写不隐藏实际执行目录。
 
@@ -15,17 +15,19 @@
 
 ## Agent 运行端与项目工具端
 
-主场景是「远端 Agent 开发当前本机项目」：项目／工具仍是 Space 入口确定的准确项目，Agent 区的 **Runs on** 选择 Agent 运行设备。它只在配置了不止一台设备且项目位于本机时出现，默认是项目所在设备。选择另一设备默认采用其已确认 home 作为 Agent 启动目录；home 查询、普通目录登记沿原公共能力，不猜路径、不导航或启动 Agent。选择后 Agent 候选原地换成该设备的准确清单，项目与 Agent 两端同时清楚可读；准备期间可继续编辑，失败在该字段就近说明原因与重试，原选择不变。只有离开这个准确项目或该 Launcher 结束才取消在途准备，无关的文件或焦点导航不取消；异步结果不得覆盖用户后选目标。
+Launcher 沿原两个地址表达项目端与 Agent 运行端：项目取原 resource Workspace，Agent 取原 agent Workspace，未显式分端时跟随项目。模式及参照定义唯一见[Remote 工作模式](remote-management.md#独立-remote-execution-工作台)，不新增持久模式字段、创建协议或配置副本。
 
-反向（本机 Agent 开发远端项目）、两个远端、同设备不同启动目录及显式同目录 binding 不在起点展开，归 Settings 的 Remote Agents 准备，并带着这两个原字段进入同一个 Launcher。Region 已带有这类安排时，Agent 区只读显示 Agent 设备与启动目录，提供回到项目设备的直接动作和前往 Remote Agents 修改的入口。组合事实来自原字段，不新增模式协议或第二份创建状态。
+普通项目、初始页、空 Zone／Group 与 New Agent 共用同一工作起点。默认沿当前项目设备普通启动；紧凑模式／两端入口可展开与 Settings 相同的准备面，直接选择 Remote Project、Remote Agent、Remote Workspace 及 Local，而非只允许本机项目切远端 Agent。项目身份头部保持只读，改变安排在具名编辑面明确完成。Apply arrangement 一次提交准确原字段，Cancel 保留原安排；用户正在编辑未提交安排时不把旧地址冒充新选择发起启动。Launcher 的准备不创建 Agent，最终仍由原 Launch 动作确认。已有独立创建与关系事务的普通入口（如 Goal 新建 Agent）复用同一两端准备，再选择目标 Host 的配置，沿原 Create Agent 确认；原创建回执、未知结果与关系草稿仍由原事务持有，不因复用界面而转交或丢弃。
 
-Agent 启动目录是配置与 Skills 的运行来源，不要求项目副本。Executor 仍从准确运行 Host 的原配置来源和 revision 选择，不能按名称继承另一来源配置。设置中的 Remote Agents 只准备这两个原字段，Provider、Prompt 与最终启动仍由同一个 Launcher 完成。
+分端时 Agent 启动目录默认用目标 Host 已确认 home，经原查询与普通目录登记，不猜路径、不要求项目副本。Settings 的 Open in Launcher 仅携带同样两端进入原起点；来自 Settings 的安排在 Launcher 可原位修改，不需返回高级页面才能反向选择。登记缺失或读取失败就地说明准确对象、原原因和恢复入口；异步结果只作用于原项目／Launcher 与 Host 配置，后选对象或后续输入不被覆盖。
 
-同一项目中切运行设备，保持原 Region、完整 Prompt、名称、Provider 选项、辅助工具草稿与原操作回执。准确目标与 Launcher 由原 Store 一次提交，不先改目标再异步补运行端。空 Zone 同资源建立原 Region 仍沿原输入认领链保全。
+Agent 启动目录持有原生配置、登录与 Skills 来源；项目端持有文件、命令与工作区工具。Executor 从准确 Agent Host 的原配置及 revision 选择，不能按名字继承另一 Host 配置。同项目切运行端保留原 Region、完整 Prompt、名字、Provider 选项、辅助工具草稿与原操作回执；明确换到另一项目时打开该项目自己的 Launcher，原项目输入与相对文件／Note／Browser 回执仍留原 owner，不跨文件系统根复制或吞掉。准确两端由原 Store 一次提交，不先改项目再异步补运行端。空 Zone 建立原 Region 仍沿原输入认领链保全。
 
-新 Session 冻结准确的项目端和 Agent 端。项目文件候选、文件选择及正文项目文件链接消费原 `toolExecution` 资源地址；Agent 原生 Skills、配置、输入交付与历史来源各归原 Session 运行端。缺少资源登记只说明本次文件操作的未确认事实，保原 binding 和输入，不回落到运行端的同名目录。图片的本机来源、持久保留及原 Session 输入上传保持各自原 owner，不能机械替换所有 Host。无显式 binding 的普通 Session、Scratch／Mote 与 canonical Goal 项目规则保持原合同。
+新 Session 冻结准确两端，Resume、接管及重接沿原身份／binding，选择新建模式不迁移已有 Agent。项目文件候选、文件选择与正文链接消费原 toolExecution 资源地址；原生 Skills、配置、输入与历史仍归运行端。缺少登记只影响该次文件操作，保留 binding，不回落到运行端同名目录。图片的本机来源、持久保留与原 Session 上传保持各自 owner。
 
-设置页是准备与观察入口，仍进入同一个项目 Launcher；两处引用[同一操作指南](../../../packages/core/guides/actions/remote-execution.md)。已有 Session 的 Resume 沿原身份与原绑定，不跟新模式改端。Host inventory 未读、失败或目标不符时，空候选说明配置未确认，提供原 Host 重读或重选环境；只有准确 ready 空结果才称未配置。未知不以 App 同名模板代替，已保存选择与正常输入保留，同一缺口只呈现一份具体恢复说明。读取失败保留已确认配置与全部输入，显示观察缺口；已知 revision 改变则明确重新选择。首次支持两个已登记的普通项目；Scratch／Mote 尚无跨端资格时，说明该次限制，保留普通启动和原草稿。
+Scratch／Mote 及 canonical Goal 上下文沿原资格：没有分端能力时解释这次受限安排，保留原普通启动、草稿与恢复，不静默替换普通项目或关闭健康能力。配置 inventory 未读、失败或来源不符时保留原输入、已确认来源和重读／重选动作；只有原 ready 零集合才称未配置，不借本机同名模板代替。Provider 分项资格、原生权限及实际回执仍由原 owner 判定，模式不能代签 Ready 或授权。
+
+设置与 Launcher 的指南消费[同一 Core 正文](../../../packages/core/guides/actions/remote-execution.md)，不另写一份流程或能力清单。
 
 ## Agent 选择、选项与草稿
 

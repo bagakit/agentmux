@@ -1,45 +1,63 @@
-# Remote Agents
+# Remote work
 
 <!-- amux:content -->
-## Use another device's Agent for this project
+## Choose where the project and Agent work
 
-Tasks, files and commands stay on the project machine. The Agent device chooses where
-the Agent process, model access and native configuration run. The common arrangement
-keeps the project on this Mac and runs the Agent on a remote Host.
+Hosts are the connection foundation in Settings → Environment → Hosts. Remote work
+uses those saved Hosts. Preparation can read the selected Host’s home through its
+saved connection; it does not automatically install, upgrade, approve or start an Agent.
 
-These choices belong to the person in AgentMux Desktop. An Agent does not make them on the
-person's behalf: name the location below and ask the person to complete it there. The
-equivalent agent open workspace flags also require an authenticated user or device.
+From the Desktop that starts or views the work:
 
-- The remote Host is configured in Settings → Remote → Hosts. AgentMux must already run
-  on that Host; choosing a device neither installs nor upgrades its Core.
-- The Agent device is the Runs on field in the Launcher that New Tab or New Agent opens
-  for the project in Space. The field appears when more than one device is configured.
-  The device's confirmed home directory is the default Agent startup directory; the device
-  does not need a copy of the project. The Agent list then shows that device's
-  configurations. Choosing a device starts no Agent; only Launch does.
+| Mode | Agent runs | Project files and commands |
+| --- | --- | --- |
+| Local | On this device | On this device |
+| Remote Project | On this device | On the remote Host |
+| Remote Agent | On the remote Host | On this device |
+| Remote Workspace | Remotely | Remotely, on the Agent Host by default |
 
-The task draft stays editable while a device is being prepared. A preparation failure
-stays next to Runs on with its real cause and a Retry action; it never selects another
-device or a guessed directory. Changing the Agent device keeps the same Launcher and
-draft. Existing Agents keep their original two-end bindings.
+Remote Workspace keeps computation and the project off this device. It does not enable
+continuous autonomous tasks or change access permissions. Existing arrangements with two
+different remote Hosts keep their exact two ends; the screen names each Host.
 
-## Other arrangements
+These choices belong to the person in Desktop. An Agent does not make them on the
+person's behalf. The equivalent explicit split-workspace flags also require an
+authenticated user or device; do not assume that identity.
 
-Settings → Remote → Remote Agents selects the project and the Agent device. Its More
-options also select a project folder on any device or the Agent's startup directory.
-This covers a local Agent working on remote project files, two remote devices, and
-different directories on one device. Open in Launcher carries these selections into a
-Launcher; preparing creates no Agent and sends no task. That Launcher shows the
-arrangement read-only, with Use project device and a link back to Remote Agents.
+## Start work
+
+Open New Tab or New Agent for the project, then use the work-mode entry beside Agent
+to edit its arrangement. Settings → Remote → Remote work offers the same preparation.
+Choose a mode, an exact registered project and the Agent device. For separate execution,
+the Agent startup directory defaults to that Host's confirmed home and may be another
+registered directory there; it does not need a project copy. Register a missing project
+through its original Host entry rather than guessing a same-named local path.
+
+Review the Agent and Project ends, then Apply arrangement in the Launcher or Open in
+Launcher from Settings. This only prepares the original target. Choose an Agent from
+that Host's configuration, enter your task and explicitly Launch. Nothing starts while
+you browse settings or edit the arrangement.
+
+In a Goal's New Agent flow, prepare the same locations first, choose the configuration
+on that Agent Host, then explicitly Create Agent. Creation sends no task; save its
+Goal relationship separately through the original Goal flow.
+
+The task, names and launch options remain editable and retained. Cancel or preparation
+failure preserves the original arrangement; retry the exact failed target, not a guessed
+replacement. A later selection cannot be overwritten by an older reply. Existing Agents
+keep their original execution binding.
 
 ## Continue existing work
 
-Reopen the original Agent Tab, or ask the person to use Open original work under
-Cross-device Agents in Settings → Remote → Remote Agents. Resume original continues the
-original Session and binding; Refresh observation only rereads status. If an operation's
-result is unknown, inspect that original operation rather than creating a replacement
-Agent or repeating the command. Connection issues do not require closing healthy work.
+Every non-local Agent identity shows its relative work mode; inspect that label to read
+the exact Agent and Project Hosts and paths. Moving its display does not move execution.
+The Remote work list includes both split-tool bindings and ordinary remote Sessions.
+Open original work returns to that exact Session. Resume original and tool rejoin keep
+the original identities; Refresh observation only rereads the relevant facts.
+
+If an operation result is unknown, inspect the original operation instead of creating a
+replacement Agent or repeating its input. Connection issues do not require closing
+healthy work. Mode labels explain placement, not connectivity, permission or completion.
 
 ## Environments and permissions
 
