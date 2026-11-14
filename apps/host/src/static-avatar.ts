@@ -8,7 +8,7 @@ import { agentAvatarSvg } from '@agentmux/client-ui/agent-avatar-svg'
 import { moteAvatarSvg } from '@agentmux/client-ui/mote-avatar-svg'
 import { isSpaceIconId } from '@agentmux/client-ui/space-icon-ids'
 import { isAgentAvatarBadge } from '@agentmux/client-ui/components/AgentAvatarBadgeIcon'
-import { resolveTheme, themeColorSchema } from '@agentmux/client-ui/theme'
+import { resolveTheme, themeColorSchema } from '@agentmux/client-ui/theme/model'
 
 const record = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value)
 const digest = (value: string | Uint8Array) => 'sha256:' + createHash('sha256').update(value).digest('hex')

@@ -67,6 +67,11 @@
       "browser": "./src/components/NoteReader.tsx",
       "import": "./dist/components/NoteReader.js"
     },
+    "./theme/model": {
+      "types": "./src/theme/model.ts",
+      "browser": "./src/theme/model.ts",
+      "import": "./dist/theme/model.js"
+    },
     "./theme": {
       "types": "./src/theme/index.ts",
       "browser": "./src/theme/index.ts",

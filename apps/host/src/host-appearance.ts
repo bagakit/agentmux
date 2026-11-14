@@ -1,7 +1,7 @@
 import { watch, type FSWatcher } from 'node:fs'
 import { basename, dirname } from 'node:path'
 import { AgentMuxError, type AgentMuxAppearanceObservationPort } from '@agentmux/core'
-import { APP_APPEARANCE_IDS, TERMINAL_THEME_IDS } from '@agentmux/client-ui/theme'
+import { APP_APPEARANCE_IDS, TERMINAL_THEME_IDS } from '@agentmux/client-ui/theme/model'
 import { readOriginalMoteConfiguration } from './mote-resources.js'
 import { themeObservation, type ThemeConfiguration, type ThemeConfigurationReader } from './theme-observation.js'
 

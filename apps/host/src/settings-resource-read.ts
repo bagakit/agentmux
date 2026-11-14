@@ -1,7 +1,7 @@
 import { AgentMuxError, type AgentMuxControlSettingsResourceFields as Fields,
   type AgentMuxControlSettingsResourceItem as Item, type AgentMuxControlSettingsResourceKind as Kind,
   type AgentMuxControlSettingsResourceRequest as Request, type AgentMuxControlSettingsResourceResult as Result } from '@agentmux/core'
-import { getThemeCatalog, getSemanticIconCatalog, themeDocumentSchema, serializeThemeFile } from '@agentmux/client-ui/theme'
+import { getThemeCatalog, getSemanticIconCatalog, themeDocumentSchema, serializeThemeFile } from '@agentmux/client-ui/theme/model'
 import { readOriginalMoteConfiguration } from './mote-resources.js'
 import { AGENT_BUILT_IN_DERIVED_ACTIONS, parseAgentDerivedActionsConfig } from '@agentmux/core/agent-derived-actions'
 
