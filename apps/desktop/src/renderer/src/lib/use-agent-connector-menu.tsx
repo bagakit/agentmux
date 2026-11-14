@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import type { ConnectionHostingTarget } from '../../../shared/contracts'
 import { api } from './api'
 import { useAppStore } from '../store'
@@ -8,6 +8,19 @@ import { agentMoteConnectionSource } from './mote-connection-default'
 import { readConnectorService, selectConnectorServiceObservation } from './connector-service-observation'
 import { agentMenuSession, type AgentMenuTarget } from './agent-menu-target'
 import { useWorkbenchPresentationActive } from './workbench-presentation'
+
+function inactiveStoreSubscription(): () => void {
+  return () => {}
+}
+
+function connectorServiceSnapshot(observing: boolean, sessionId: string | null, hostingTarget: ConnectionHostingTarget | null) {
+  return () => observing && sessionId
+    ? selectConnectorServiceObservation(useAppStore.getState().connectorServiceObservation, hostingTarget) : null
+}
+
+function connectorReadCleanup(read: { current: number }): () => void {
+  return () => { read.current++ }
+}
 
 /** Session and Region menus share this transient presentation; opening reads only configuration. */
 export function useAgentConnectorMenu(regionId: string | undefined, sessionId: string | null, tabId?: string,
@@ -21,12 +34,11 @@ export function useAgentConnectorMenu(regionId: string | undefined, sessionId: s
   const selection = useRef<typeof dialog>(null), menuOpen = useRef(false)
   const returned = useRef<HTMLElement | null>(null), read = useRef(0)
   const observing = active && (menuVisible || dialog !== null)
-  const subscribe = useCallback((listener: () => void) => observing ? useAppStore.subscribe(listener) : () => {}, [observing])
-  const snapshot = useCallback(() => observing && sessionId
-    ? selectConnectorServiceObservation(useAppStore.getState().connectorServiceObservation, hostingTarget) : null, [observing, sessionId, hostingTarget])
+  const subscribe = observing ? useAppStore.subscribe : inactiveStoreSubscription
+  const snapshot = useMemo(() => connectorServiceSnapshot(observing, sessionId, hostingTarget), [observing, sessionId, hostingTarget])
   const observed = useSyncExternalStore(subscribe, snapshot, snapshot)
   const service = observed?.state
-  useEffect(() => { setHostingTarget(null); return () => { read.current++ } }, [regionId, sessionId, tabId])
+  useEffect(() => { setHostingTarget(null); return connectorReadCleanup(read) }, [regionId, sessionId, tabId])
   useEffect(() => {
     if (active) return
     read.current++; menuOpen.current = false; selection.current = null

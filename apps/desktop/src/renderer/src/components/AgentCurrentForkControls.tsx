@@ -28,6 +28,10 @@ const creationSettled = (report: AgentMuxSpaceMutationReport | null | undefined)
 type Controls = { reason: string | null; readOnly: boolean; unsettled: boolean; state: ForkState; derived?: CurrentForkReview['derived'] | undefined; begin(): void; cancel(): void;
   select(destination: OpenDestination, newTab: AgentNewTabDestination | undefined, submitted: () => void): void; inspect(): void }
 
+function forkControlsCleanup(mounted: { current: boolean }): () => void {
+  return () => { mounted.current = false }
+}
+
 /** Lives with SessionPane, outside the dismissible menu, so an unknown operation is retained. */
 export function useAgentCurrentForkControls({ session, linkOrigin, readOnly, sessionSource = false }: {
   session: CurrentForkSession | null; linkOrigin: Partial<OpenHttpLinkOrigin>; readOnly: boolean; sessionSource?: boolean
@@ -49,7 +53,7 @@ export function useAgentCurrentForkControls({ session, linkOrigin, readOnly, ses
   const receiptRevision = useRef(0)
   stateRef.current = state
   function update(next: ForkState) { stateRef.current = next; if (mounted.current) setState(next) }
-  useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
+  useEffect(() => { mounted.current = true; return forkControlsCleanup(mounted) }, [])
   useEffect(() => {
     if (owner.current !== ownerKey) { owner.current = ownerKey; update(restoredState()) }
   }, [ownerKey])

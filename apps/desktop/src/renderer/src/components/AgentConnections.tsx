@@ -15,6 +15,10 @@ import { useWorkbenchPresentationActive } from '../lib/workbench-presentation'
 
 const CLOSED_CONNECTION_FACTS = { hasRetainedSetup: false, syncEnabled: null }
 
+function inactiveStoreSubscription(): () => void {
+  return () => {}
+}
+
 /** Connection management belongs to the original Agent header, independently of its input surface. */
 export function AgentConnections({ session, regionId, visible }: { session: Extract<SessionSnapshot, { kind: 'agent' }>; regionId?: string | undefined; visible: boolean }) {
   const navigation = useContext(SettingsNavigation)
@@ -23,7 +27,7 @@ export function AgentConnections({ session, regionId, visible }: { session: Extr
   const connector = useAgentConnectorMenu(regionId, session.id, undefined, { source: session, active: observing })
   const target = { executionHostId: session.control.hostId, agentSessionId: session.control.agentSessionId }
   const current = useSessionConnections(target, observing)
-  const subscribe = useCallback((listener: () => void) => observing ? useAppStore.subscribe(listener) : () => {}, [observing])
+  const subscribe = observing ? useAppStore.subscribe : inactiveStoreSubscription
   const selectFacts = useShallow((state: ReturnType<typeof useAppStore.getState>) => ({
     hasRetainedSetup: hasConnectorRoomIntent(state.connectorRoomIntents, target),
     syncEnabled: selectConnectorServiceObservation(state.connectorServiceObservation, current?.hostingTarget ?? null)?.state?.enabled ?? null

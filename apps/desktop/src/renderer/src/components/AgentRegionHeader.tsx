@@ -95,7 +95,7 @@ export function AgentRegionHeader({ name, executorLabel, sessionId, sessionKind,
     observer.observe(document.body, { childList: true, subtree: true })
     return () => observer.disconnect()
   }, [host, targetId])
-  useLayoutEffect(() => () => host?.remove(), [host])
+  useLayoutEffect(() => host ? host.remove.bind(host) : undefined, [host])
   const content = (Menu: typeof ContextMenu | typeof DropdownMenu, contextual?: RegionContextContribution | null) => <AgentMenuContent
     name={name} executorLabel={executorLabel} sessionId={nativeSession?.control.agentSessionId ?? sessionId}
     sessionKind={sessionKind} executionHost={executionHost} readOnly={readOnly}
