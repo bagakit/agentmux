@@ -49,7 +49,7 @@ function ConversationToolPayloadBody({ text, identity, sourceIdentity, callId, c
         </ConversationRetainedDetails> : null}
       </div> : null}
       <span className="conversation-tool-payload__tools">
-      {validJson ? <Button className="conversation-tool-trace__format" aria-label={labels.formatJson}
+      {validJson ? <Button className="conversation-tool-trace__format" aria-label={labels.formatJson} data-conversation-reading-action=""
         aria-pressed={formatted} title={labels.formatJsonHint}
         onClick={() => setView(previous => {
           const current = previous.text === text && previous.sourceIdentity === sourceIdentity

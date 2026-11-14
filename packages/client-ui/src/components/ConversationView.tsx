@@ -308,6 +308,12 @@ export const ConversationView = memo(function ConversationView({
 
   }
   return <ConversationBodyWorkContext.Provider value={bodyScope}><ConversationReadingCommit work={layout.bodyWork} preserve={layout.preserve}><section ref={layout.root} className="conversation-native-thread" aria-label="Conversation"
+    onClickCapture={event => {
+      const view = event.currentTarget.ownerDocument.defaultView
+      if (!view || !(event.target instanceof view.Element)) return
+      const control = event.target.closest<HTMLElement>('[data-conversation-reading-action]')
+      if (control?.closest('.conversation-native-thread') === event.currentTarget) layout.bodyWork.beginReadingAt(control)
+    }}
     data-native-provider={page?.source.providerId} data-native-source={describedRecords.some(record => record.original.kind === 'captured') || insertions?.length || !page ? undefined : JSON.stringify([page.source.providerId, page.source.nativeSessionId])}>
     <ConversationCoverage coverage={projection.coverage} summary={coverageSummary} {...(onLocateRecord ? { onLocate: onLocateRecord } : {})} />
     {additional.length > 0 ? <div className="conversation-detail-summary">

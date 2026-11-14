@@ -1,6 +1,7 @@
 import { useMobileCommands } from './use-mobile-commands'
 import { useMobileAgentReferences } from './use-mobile-agent-references'
 import { consumeProgrammaticReadingScroll, markProgrammaticReadingScroll } from '@agentmux/client-ui/reading-scroll'
+import type { ConversationReadingGeometry } from '@agentmux/client-ui/conversation-body-work'
 import { MessageDeliveryFailure } from '@agentmux/client-ui/components/MessageDeliveryFailure'
 import { presentMessageDeliveryFailure } from '@agentmux/client-ui/message-delivery-presentation'
 import { SemanticIcon } from '@agentmux/client-ui/icons'
@@ -137,7 +138,11 @@ export function MobileConversationSurface({ client, agentSessionId, draftScope, 
   const { reading, readers, follow, presentation, presentationIntent, readingKey } = useMobileConversationReading(
     client, agentSessionId, moteTarget, visible && connection.state === 'connected', feed)
   const [jump, setJump] = useState(false)
-  useLayoutEffect(() => { setJump(shouldShowJumpToLatest(follow.current)) }, [follow])
+  const updateJump = useCallback(() => {
+    const node = feed.current
+    setJump(Boolean(node && shouldShowJumpToLatest(follow.current) && node.scrollHeight - node.clientHeight - node.scrollTop > 1))
+  }, [follow])
+  useLayoutEffect(updateJump, [updateJump])
   useLayoutEffect(() => {
     const node = feed.current
     if (!visible || !node) return
@@ -146,6 +151,21 @@ export function MobileConversationSurface({ client, agentSessionId, draftScope, 
     follow.current = change.state
     if (change.scrollToBottom && !reading.olderWindow) node.scrollTop = node.scrollHeight
   }, [reading.page, reading.timeline, reading.olderWindow, visible])
+  const readingGeometry: ConversationReadingGeometry = {
+    viewport: () => feed.current,
+    following: () => follow.current.following && !reading.olderWindow,
+    pauseFollowing: () => {
+      if (!follow.current.following) return
+      follow.current = { ...follow.current, following: false }
+    },
+    pinToBottom: () => {
+      const node = feed.current
+      if (!node) return
+      node.scrollTop = node.scrollHeight
+      markProgrammaticReadingScroll(node)
+    },
+    onLayout: updateJump
+  }
   const local = useMobileLocalDrafts(), composer = useMobileMoteComposer(), composerSource = mobileSessionComposerSource(agentSessionId)
   const drafts = useMemo(() => ({ current: composer?.text.local.drafts ?? local.drafts }), [local, composer?.text])
   const currentComposer = useRef(composer); currentComposer.current = composer
@@ -549,7 +569,7 @@ export function MobileConversationSurface({ client, agentSessionId, draftScope, 
         const node = event.currentTarget
         const programmatic = consumeProgrammaticReadingScroll(node)
         follow.current = programmatic === 'restore' ? { ...follow.current, lastScrollTop: node.scrollTop } : onScroll(follow.current, { scrollTop: node.scrollTop, scrollHeight: node.scrollHeight, clientHeight: node.clientHeight })
-        setJump(shouldShowJumpToLatest(follow.current))
+        updateJump()
       }}>
         {(reading.page?.nextCursor || reading.capturedHasMore) && <button className="mobile-reading-action" disabled={reading.reading} onClick={() => { follow.current.following = false; void reading.older() }}>更早消息</button>}
         {reading.hasNewer && <button className="mobile-reading-action" disabled={reading.reading} onClick={() => { void reading.newer() }}>较新消息</button>}
@@ -563,12 +583,9 @@ export function MobileConversationSurface({ client, agentSessionId, draftScope, 
           mainAvatar={mainAvatar}
           {...(moteWorkMemberName ? { memberName: moteWorkMemberName } : {})} {...(onOpenMoteWork ? { onOpenWork: onOpenMoteWork } : {})}
           {...(onShowMoteThreads ? { onShowThreads: onShowMoteThreads } : {})}
-          readingGeometry={{ viewport: () => feed.current, following: () => follow.current.following && !reading.olderWindow,
-            pinToBottom: () => { if (feed.current) { feed.current.scrollTop = feed.current.scrollHeight; markProgrammaticReadingScroll(feed.current) } } }}
+          readingGeometry={readingGeometry}
           renderCurrent={insertions => <ConversationView key={readingKey} insertions={insertions}
-            readProcessDetail={reading.readProcessDetail} sourceLabelsInDetails detailsOnlyMetadata coverageSummary="阅读范围与来源" readingGeometry={{ viewport: () => feed.current,
-            following: () => follow.current.following && !reading.olderWindow,
-            pinToBottom: () => { if (feed.current) { feed.current.scrollTop = feed.current.scrollHeight; markProgrammaticReadingScroll(feed.current) } } }} presentation={{ controller: presentation, pending: reading.held, onRelease: reading.acceptHeld, intent: presentationIntent.current }} page={reading.page} readActivity={reading.readActivity} timeline={reading.timeline ?? undefined} questionAnswerContext={reading.answerContext} records={reading.projection?.records ?? []} originalRecords={reading.projection?.originalRecords ?? []} coverage={reading.projection?.timeline.coverage ?? []} showInputSource={false} sessionId={agentSessionId} describeSpeaker={describeSpeaker}
+            readProcessDetail={reading.readProcessDetail} sourceLabelsInDetails detailsOnlyMetadata coverageSummary="阅读范围与来源" readingGeometry={readingGeometry} presentation={{ controller: presentation, pending: reading.held, onRelease: reading.acceptHeld, intent: presentationIntent.current }} page={reading.page} readActivity={reading.readActivity} timeline={reading.timeline ?? undefined} questionAnswerContext={reading.answerContext} records={reading.projection?.records ?? []} originalRecords={reading.projection?.originalRecords ?? []} coverage={reading.projection?.timeline.coverage ?? []} showInputSource={false} sessionId={agentSessionId} describeSpeaker={describeSpeaker}
             renderProcess={props => <NativeProcessObservation {...props} compact />}
             questionReplyState={target => {
               const state = mobileQuestionReplyState(local, agentSessionId, target), original = state?.original

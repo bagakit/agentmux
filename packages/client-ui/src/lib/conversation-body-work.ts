@@ -2,12 +2,14 @@ import { observeVisibleWork } from './use-visible-work.js'
 import { markProgrammaticReadingScroll } from './reading-scroll.js'
 import { selectedConversationReadingNode } from './conversation-reading-anchor.js'
 
-/** Host follow policy is read-only here. No layout event grants a reading intent. */
+/** The host owns follow intent. Layout changes apply its current choice. */
 export type ConversationReadingGeometry = {
   viewport(): HTMLElement | null
   content?(): HTMLElement | null
   following(): boolean
   pinToBottom(): void
+  /** An explicit local reading action can pause the host’s follow intent. */
+  pauseFollowing?(): void
   /** Desktop can retain a terminal segment outside the shared record sequence. */
   captureAnchor?(): void
   restoreAnchor?(): void
@@ -110,6 +112,15 @@ export class ConversationBodyWork {
       this.bodies.delete(node); this.near.delete(node); this.observer?.unobserve(node)
       if (this.mounting === node) { this.mounting = null; this.schedule() }
     }
+  }
+  beginReadingAt(control: HTMLElement): void {
+    const viewport = this.viewport, pauseFollowing = this.geometry?.pauseFollowing
+    if (!viewport || !pauseFollowing || !this.available() || !this.root?.contains(control)) return
+    const bounds = viewport.getBoundingClientRect(), rect = control.getBoundingClientRect()
+    if (rect.height === 0 || rect.bottom <= bounds.top || rect.top >= bounds.bottom) return
+    pauseFollowing()
+    this.anchor = { node: control, viewport, offset: rect.top - bounds.top }
+    this.anchorCaptured = true
   }
   capture(cold = false): boolean {
     if (!this.available() || this.geometry?.following()) return false
