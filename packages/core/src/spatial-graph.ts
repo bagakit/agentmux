@@ -101,6 +101,22 @@ function facts(value: unknown, key: string, check: (entry: Record<string, unknow
     check(entry);
   }
 }
+/** Bulk view writes retain the original Core occurrence address. This preserves
+ * pointers even when their admission record is unknown; it does not validate an
+ * admission, grant access or decide a Session's current Run. Business owners
+ * settle their original operations outside this bulk projection. */
+export function retainAdmittedAgentIdentity(graph: AgentMuxSpatialGraph, previous: AgentMuxSpatialGraph | null): AgentMuxSpatialGraph {
+  if (!previous) return graph;
+  const original = new Map(previous.regions.map(region => [JSON.stringify([region.tabId, region.regionId]), region]));
+  graph.regions = graph.regions.map(region => {
+    const old = original.get(JSON.stringify([region.tabId, region.regionId]));
+    if (region.kind !== 'agent' || old?.kind !== 'agent' || !old.creationOperationId ||
+        !old.agentSessionId || region.agentSessionId !== old.agentSessionId) return region;
+    return { ...region, creationOperationId: old.creationOperationId, runId: old.runId,
+      execution: old.execution === null ? null : { ...old.execution } };
+  });
+  return graph;
+}
 /** Validation preserves unknown references; observation gaps never delete facts. */
 export function parseAgentMuxSpatialGraph(value: unknown): AgentMuxSpatialGraph {
   const g = record(value);

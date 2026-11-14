@@ -12,7 +12,7 @@ import { AgentMuxError } from './errors.js';
 import { defaultAgentMuxStateDirectory } from './runtime-paths.js';
 import type { AgentMuxSpaceBindingTarget } from './space-control.js';
 import { addTabOccurrence, removeTab } from './spatial-layout.js';
-import { parseAgentMuxSpatialGraph, type AgentMuxSpatialGraph, type AgentMuxSpatialState, type AgentMuxSpatialCommit, type SpatialJson } from './spatial-graph.js';
+import { parseAgentMuxSpatialGraph, retainAdmittedAgentIdentity, type AgentMuxSpatialGraph, type AgentMuxSpatialState, type AgentMuxSpatialCommit, type SpatialJson } from './spatial-graph.js';
 import { AGENTMUX_SPATIAL_AGENT_OPEN_RESOURCE, admitSpatialAgentOpen, spatialAgentOpenRecord, retainedMoteMainBindingReceipt, parseMoteMainBaseline, sameMoteMainBaseline, type MoteMainFollowUpInput, spatialAgentOpenDocument, matchesMoteMainBindingInput, validateMoteMainBindingObservation, type MoteMainBindingObservation } from './spatial-agent-open.js';
 export * from './spatial-agent-open.js';
 import { AGENTMUX_DISPLAY_LABEL_RESOURCE, displayLabelDocument, setDisplayLabelDocument, projectSpatialState, nameTargetKey, validateNameIntent,
@@ -652,6 +652,7 @@ export class AgentMuxSpatialStateStore {
         if (key.startsWith('owned:')) graph.resources[key] = value;
       }
       if (current) retainFolderDirectoryIdentity(graph,current.graph);
+      if (current) retainAdmittedAgentIdentity(graph, current.graph);
       const groupIds = new Set(graph.projectGroups?.map(group => group.groupId));
       const removedGroupIds = new Set(input.removedProjectGroupIds ?? []);
       if (current?.graph.projectGroups?.some(group => !groupIds.has(group.groupId) && !removedGroupIds.has(group.groupId))) {
