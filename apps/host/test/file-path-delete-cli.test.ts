@@ -8,7 +8,8 @@ import { afterAll, afterEach, beforeAll, expect, it, vi } from 'vitest'
 import { createRequire } from 'node:module'
 import * as core from '@agentmux/core'
 import type { FileDeleteParams } from '@agentmux/core/files'
-import { noteHistoryRevision } from '@agentmux/core/note-history'
+import { noteHistoryRevision, noteFileDeleteEventId, noteFileDeleteFingerprint } from '@agentmux/core/note-history'
+import { noteProvenanceResourceKey } from '@agentmux/core/note-provenance'
 import { OrdinaryWorkspaceFiles } from '../src/ordinary-files.js'
 import { FileDeleteHistory } from '../src/file-delete-history.js'
 import { agent, cleanup, fixture, helper, hostFixture, operationRecord } from './helpers/file-path-fixture.js'
@@ -16,10 +17,19 @@ import { objectCliEnvironment, runCompiledObjectCli } from '../../../packages/co
 import { FilePathMutations } from '../src/file-path-mutations.js'
 import { cleanupExecutableNativeFixtures, executableNativeFixture, until } from '../../../packages/core/test/helpers/executable-native-fixture.js'
 
+const snapshotIO = vi.hoisted(() => ({ tracking: false, reads: [] as string[] }))
+vi.mock('node:fs/promises', async original => {
+  const actual = await original<typeof import('node:fs/promises')>()
+  return { ...actual, readFile: async (...args: Parameters<typeof actual.readFile>) => {
+    if (snapshotIO.tracking) snapshotIO.reads.push(String(args[0]))
+    return actual.readFile(...args)
+  } }
+})
+
 const facts: unknown[] = []
 afterAll(async () => { if (process.env.AGENTMUX_FILE_PATH_DELETE_EVIDENCE) await writeFile(process.env.AGENTMUX_FILE_PATH_DELETE_EVIDENCE, JSON.stringify({ schema: 'agentmux.file-delete-proof.v1', platform: process.platform, facts }, null, 2) + '\n') })
 beforeAll(async () => { await promisify(execFile)(process.execPath, [resolve('apps/host/scripts/build-workspace-move-helper.mjs')]) })
-afterEach(async () => { await cleanupExecutableNativeFixtures(); for (const close of cleanup.splice(0).reverse()) await close(); vi.restoreAllMocks(); vi.unstubAllEnvs() })
+afterEach(async () => { snapshotIO.tracking = false; snapshotIO.reads = []; await cleanupExecutableNativeFixtures(); for (const close of cleanup.splice(0).reverse()) await close(); vi.restoreAllMocks(); vi.unstubAllEnvs() })
 
 async function target(f: Awaited<ReturnType<typeof hostFixture>>, path: string, operationId: string, options: { recursive?: boolean; expectedRevision?: string } = {}): Promise<FileDeleteParams> {
   const observed = await f.cli(['stat'], { zoneId: 'original-files-zone', path,
@@ -590,5 +600,151 @@ it('original history-only and provenance-only resources keep their externally up
   expect(Object.keys((await notes.read()).pages)).toEqual([])
   facts.push({ case: 'metadata-only-note-current-bodies', observations, priorEventAndCreatorPreserved: true, automaticallyRegistered: false })
 }, 30000)
+
+async function consumeSnapshotHistory(f: Awaited<ReturnType<typeof hostFixture>>, query: import('@agentmux/core/files').FileHistoryParams) {
+  const reply = await runCompiledObjectCli(['--endpoint', 'unix:' + join(f.original.root, 'host.sock'), 'file', 'history', '--zone', query.zoneId,
+    '--path', query.path, '--resource', JSON.stringify(query.expectedResource), '--note', query.noteId, '--event-id', query.eventId!, '--content'],
+    objectCliEnvironment(f.original.root, { AGENTMUX_AGENT_SESSION_ID: agent.actor.id, AGENTMUX_AGENT_CAPABILITY: f.original.capability }))
+  expect(reply.code, reply.stdout + reply.stderr).toBe(0)
+  return JSON.parse(reply.stdout).result
+}
+
+it('only the original delete OP discovers unknown child Note IDs through paged CLI references and existing exact history content reads', async () => {
+  const f = await hostFixture(); await mkdir(join(f.root, 'tree'))
+  const bodies = new Map<string, string>()
+  for (const name of ['first', 'second']) {
+    const path = 'tree/' + name + '.data', body = '---\nschema: agentmux.note.md.v1\nnote-id: opaque-' + name + '\n---\n\nOriginal body ' + name + '\n'
+    bodies.set(path, body); await writeFile(join(f.root, path), body)
+  }
+  const input = await target(f, 'tree', 'discover-deleted-originals', { recursive: true }), native = vi.spyOn(OrdinaryWorkspaceFiles.prototype, 'deletePath')
+  expect((await f.cli(['delete'], input)).body.result.result).toMatchObject({ filesystem: 'deleted', noteHistory: { status: 'recorded' } })
+  const request = { operationId: input.operationId, zoneId: input.zoneId, path: input.path, expectedResource: input.expectedResource, limit: 1 }
+  snapshotIO.tracking = true; snapshotIO.reads = []
+  const first = await f.cli(['delete', 'snapshots'], request)
+  expect(first.code, first.stdout + first.stderr).toBe(0)
+  expect(first.body.result.result).toMatchObject({ status: 'read', hasMore: true, filesystem: 'deleted' })
+  expect(first.body.result.result.entries).toHaveLength(1)
+  const second = await f.cli(['delete', 'snapshots'], { ...request, cursor: first.body.result.result.cursor })
+  expect(second.code, second.stdout + second.stderr).toBe(0)
+  expect(second.body.result.result).toMatchObject({ status: 'read', hasMore: false, cursor: null })
+  expect(second.body.result.result.entries).toHaveLength(1)
+  const bodyReads = snapshotIO.reads.filter(path => path.includes('/bodies/'))
+  snapshotIO.tracking = false
+  expect(bodyReads, 'Reference discovery must not load body files').toEqual([])
+  const references = [...first.body.result.result.entries, ...second.body.result.result.entries]
+  expect(new Set(references.map(ref => ref.eventId)).size).toBe(2)
+  for (const ref of references) {
+    expect(ref.historyQuery).toBeDefined()
+    expect(ref.originalResource.zoneId).toBe(input.zoneId)
+    const history = await consumeSnapshotHistory(f, ref.historyQuery)
+    expect(history.result.entries).toHaveLength(1)
+    expect(history.result.entries[0]).toMatchObject({ eventId: ref.eventId, noteId: ref.noteId, operation: 'delete', status: 'committed', beforeContent: bodies.get(ref.originalResource.path) })
+  }
+  const denied = await f.cli(['delete', 'snapshots'], request, 'other-files-agent')
+  expect(denied.code).toBe(1); expect(denied.stdout + denied.stderr).toContain('CONTROL_PERMISSION_DENIED')
+  const forged = Buffer.from(JSON.stringify({ schema: 'agentmux.file-delete-snapshots.v1', query: 'f'.repeat(64), root: 'a'.repeat(64), after: { key: 'a'.repeat(64) } })).toString('base64url')
+  const wrong = await f.cli(['delete', 'snapshots'], { ...request, cursor: forged })
+  expect(wrong.body.result.result).toMatchObject({ status: 'unknown', cursor: forged })
+  expect(native).toHaveBeenCalledTimes(1)
+  facts.push({ case: 'original-op-to-unknown-child-history-cli', references: references.map(ref => ({ noteId: ref.noteId, eventId: ref.eventId, originalResource: ref.originalResource })), discoveryBodyReads: 0, nativeDispatches: 1, managedOtherActorDenied: true })
+}, 30000)
+
+it('snapshot cold pages bound metadata reads, allow an empty intermediate page and preserve the cursor when the original root changes', async () => {
+  const f = await hostFixture(), notes = new core.AgentMuxNotebookStore(), creator = { kind: 'user' as const, id: 'cold-query-original' }, revision = noteHistoryRevision('Prior body')
+  for (let index = 0; index < 105; index++) await notes.recordProvenance({ noteId: 'unrelated-' + index, resource: { hostId: 'local', workspaceId: f.workspace.id, workspacePath: f.root, path: 'unrelated/' + index + '.txt' }, revision, blocks: {} })
+  const root = JSON.parse(await readFile(notes.path, 'utf8')), boundary = Object.keys(root.originals).sort()[99]!
+  const resource = { hostId: 'local', workspaceId: f.workspace.id, workspacePath: f.root, path: 'tree/current.data' }
+  // Fixture placement only: the actual immutable owner root below verifies that
+  // the related original lies beyond the first 100 metadata candidates.
+  let noteId = ''
+  for (let index = 0; index < 10000; index++) {
+    const candidate = 'later-original-' + index, key = createHash('sha256').update(JSON.stringify([candidate, noteProvenanceResourceKey(resource)])).digest('hex')
+    if (key > boundary) { noteId = candidate; break }
+  }
+  expect(noteId).not.toBe('')
+  await mkdir(join(f.root, 'tree'))
+  const body = '---\nschema: agentmux.note.md.v1\nnote-id: ' + noteId + '\n---\n\nOriginal late-page body\n'
+  await writeFile(join(f.root, resource.path), body)
+  const input = await target(f, 'tree', 'cold-snapshot-original', { recursive: true }), native = vi.spyOn(OrdinaryWorkspaceFiles.prototype, 'deletePath')
+  expect((await f.cli(['delete'], input)).body.result.result.filesystem).toBe('deleted')
+  const current = JSON.parse(await readFile(notes.path, 'utf8')), relatedKey = Object.keys(current.originals).find(key => current.originals[key].noteId === noteId)!
+  expect(Object.keys(current.originals).sort().indexOf(relatedKey)).toBeGreaterThanOrEqual(100)
+  const request = { operationId: input.operationId, zoneId: input.zoneId, path: input.path, expectedResource: input.expectedResource }
+  snapshotIO.tracking = true; snapshotIO.reads = []
+  const first = await f.cli(['delete', 'snapshots'], request)
+  expect(first.code, first.stdout + first.stderr).toBe(0)
+  expect(first.body.result.result).toMatchObject({ status: 'read', entries: [], hasMore: true })
+  expect(snapshotIO.reads.filter(path => path.includes('/metadata/'))).toHaveLength(100)
+  expect(snapshotIO.reads.some(path => path.includes('/bodies/'))).toBe(false)
+  snapshotIO.tracking = false
+  await notes.recordProvenance({ noteId: 'new-after-page', resource: { ...resource, path: 'unrelated/new.txt' }, revision, blocks: {} })
+  const changed = await f.cli(['delete', 'snapshots'], { ...request, cursor: first.body.result.result.cursor })
+  expect(changed.body.result.result).toMatchObject({ status: 'unknown', code: 'FILE_DELETE_SNAPSHOTS_CHANGED', cursor: first.body.result.result.cursor })
+  const restart = await f.cli(['delete', 'snapshots'], request)
+  const next = await f.cli(['delete', 'snapshots'], { ...request, cursor: restart.body.result.result.cursor })
+  expect(next.body.result.result).toMatchObject({ status: 'read', hasMore: false, cursor: null })
+  expect(next.body.result.result.entries).toHaveLength(1)
+  expect((await consumeSnapshotHistory(f, next.body.result.result.entries[0].historyQuery)).result.entries[0]).toMatchObject({ beforeContent: body })
+  expect(native).toHaveBeenCalledTimes(1)
+  facts.push({ case: 'bounded-cold-snapshot-page', firstPageReferences: 0, firstPageMetadataReads: 100, discoveryBodyReads: 0, rootChangedCursorRetained: true })
+}, 60000)
+
+it('original deletion references survive legitimate metadata relocation, keep current mappings distinct and preserve unknown records or roots', async () => {
+  const f = await hostFixture(), notes = new core.AgentMuxNotebookStore(); await mkdir(join(f.root, 'deleted'))
+  const body = '---\nschema: agentmux.note.md.v1\nnote-id: relocated-history-original\n---\n\nRetained original body\n'
+  await writeFile(join(f.root, 'deleted/body.data'), body)
+  const input = await target(f, 'deleted', 'metadata-relocated-delete', { recursive: true }), native = vi.spyOn(OrdinaryWorkspaceFiles.prototype, 'deletePath')
+  expect((await f.cli(['delete'], input)).body.result.result.filesystem).toBe('deleted')
+  const scope = { hostId: 'local', workspaceId: f.workspace.id, workspacePath: f.root, path: 'deleted' }
+  await notes.runWithWriteLease(async () => { const plan = await notes.planFileRelocation(scope, { ...scope, path: 'archive' }); await notes.applyFileRelocation(plan, 'archive-original-history-metadata', { kind: 'user', id: 'metadata-owner' }) })
+  const request = { operationId: input.operationId, zoneId: input.zoneId, path: input.path, expectedResource: input.expectedResource }
+  const mapped = await f.cli(['delete', 'snapshots'], request)
+  expect(mapped.code, mapped.stdout + mapped.stderr).toBe(0)
+  expect(mapped.body.result.result).toMatchObject({ status: 'read', hasMore: false })
+  expect(mapped.body.result.result.entries).toHaveLength(1)
+  const ref = mapped.body.result.result.entries[0]
+  expect(ref).toMatchObject({ originalResource: { path: 'deleted/body.data' }, currentHistoryResource: { path: 'archive/body.data' }, historyQuery: { path: 'archive/body.data', expectedResource: { path: 'archive/body.data' } } })
+  expect((await consumeSnapshotHistory(f, ref.historyQuery)).result.entries[0]).toMatchObject({ beforeContent: body, resource: { path: 'archive/body.data' }, originalResource: { path: 'deleted/body.data' } })
+  const spatial = (await f.spatial.read())!
+  await f.spatial.commit({ expectedRevision: spatial.revision, allowEntityRemoval: true, graph: { ...spatial.graph, zones: [], bindings: [] } })
+  const unavailable = await f.cli(['delete', 'snapshots'], request)
+  expect(unavailable.body.result.result).toMatchObject({ status: 'read', entries: [{ eventId: ref.eventId, currentHistoryResource: { path: 'archive/body.data' }, historyUnavailable: expect.stringContaining('Source') }] })
+  expect(unavailable.body.result.result.entries[0]).not.toHaveProperty('historyQuery')
+  const record = operationRecord(f.original.root, input.operationId)
+  await rename(record, record + '.retained')
+  expect((await f.cli(['delete', 'snapshots'], request)).body.result.result).toMatchObject({ status: 'unknown', cursor: null })
+  await rename(record + '.retained', record)
+  const rootBytes = await readFile(notes.path); await writeFile(notes.path, 'unconfirmed original root')
+  expect((await f.cli(['delete', 'snapshots'], request)).body.result.result).toMatchObject({ status: 'unknown', cursor: null })
+  await writeFile(notes.path, rootBytes)
+  expect(await notes.readHistoryOperation(ref.eventId)).toMatchObject({ beforeContent: body, status: 'committed' })
+  expect(native).toHaveBeenCalledTimes(1)
+  facts.push({ case: 'snapshot-history-relocation-and-unknown', eventId: ref.eventId, originalResource: ref.originalResource, currentHistoryResource: ref.currentHistoryResource, mappingUnavailablePreservedReference: true, missingRecordAndBadRootStayedUnknown: true, nativeDispatches: 1 })
+}, 30000)
+
+it.each(['actor', 'fingerprint'] as const)('snapshot history correlation cannot replace the original actor or intent at the gate or reference query (%s)', async mode => {
+  const f = await hostFixture(), notes = new core.AgentMuxNotebookStore(), noteId = 'actor-bound-snapshot'
+  const body = '---\nschema: agentmux.note.md.v1\nnote-id: ' + noteId + '\n---\n\nOriginal actor-bound body\n'
+  await writeFile(join(f.root, 'body.data'), body)
+  const input = await target(f, 'body.data', 'actor-bound-delete', { expectedRevision: noteHistoryRevision(body) })
+  const resource = { hostId: 'local', workspaceId: f.workspace.id, workspacePath: f.root, path: input.path }
+  nativeDeleteOptions({ beforeDeleteUnlink: async () => {
+    const record = JSON.parse(await readFile(operationRecord(f.original.root, input.operationId), 'utf8'))
+    const { birthtimeNs: _birth, ...fileWitness } = record.producer.entry
+    const eventId = noteFileDeleteEventId(input.operationId, noteId, resource)
+    await notes.recordHistory({ eventId, batchId: input.operationId, sequence: 0, noteId, resource, originalResource: resource, actor: mode === 'actor' ? { kind: 'user', id: 'different-history-actor' } : agent.actor, at: 1,
+      operation: 'delete', status: 'prepared', requestFingerprint: mode === 'fingerprint' ? noteHistoryRevision('another original snapshot intent') : noteFileDeleteFingerprint(record.digest, noteId, resource, fileWitness, noteHistoryRevision(body)),
+      parentEventId: null, beforeContent: body, baseRevision: noteHistoryRevision(body), content: null, revision: null, fileWitness })
+  } })
+  const reply = await f.cli(['delete'], input)
+  expect(reply.code, reply.stdout + reply.stderr).toBe(0)
+  expect(reply.body.result.result).toMatchObject({ filesystem: 'unknown', phase: 'claimed' })
+  const record = JSON.parse(await readFile(operationRecord(f.original.root, input.operationId), 'utf8'))
+  expect(await readFile(join(f.root, record.stage, 'entry'), 'utf8')).toBe(body)
+  const query = await f.cli(['delete', 'snapshots'], { operationId: input.operationId, zoneId: input.zoneId, path: input.path, expectedResource: input.expectedResource })
+  expect(query.code, query.stdout + query.stderr).toBe(0)
+  expect(query.body.result.result).toMatchObject({ status: 'unknown', cursor: null })
+  facts.push({ case: 'snapshot-correlation-is-not-authority', mode, filesystem: reply.body.result.result.filesystem, queryStatus: query.body.result.result.status, bodyRetained: true })
+})
 
 
