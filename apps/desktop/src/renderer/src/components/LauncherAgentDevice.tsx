@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 import * as Dialog from '@agentmux/client-ui/components/Modal'
 import { autoUpdate, computePosition, flip, offset, shift, size } from '@floating-ui/dom'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
+import { IconButton } from '@agentmux/client-ui/components/IconButton'
 import type { HostConfig, WorkspaceRecord } from '../../../shared/contracts'
 import { isScratchWorkspaceId } from '../../../shared/contracts'
 import { useAppStore, type LauncherExecutionSelection } from '../store'
@@ -73,7 +74,7 @@ export function LauncherAgentDevice({ hosts, workspace, agentWorkspace, explicit
       <Dialog.Content ref={attach} className="launcher-work-arrangement__dialog" style={{ visibility: 'hidden' }}
         onOpenAutoFocus={event => { event.preventDefault(); const field = surface.current?.querySelector<HTMLButtonElement>('[aria-label="Agent runs on"]'); if (field) field.focus({ preventScroll: true }); else surface.current?.focus({ preventScroll: true }) }}>
         <div className="agent-work-dialog__header"><Dialog.Title>Choose the Agent’s device</Dialog.Title>
-          <button type="button" className="icon-button" aria-label="Close Agent device editor" title="Close Agent device editor" onClick={() => setOpen(false)}><CloseIcon size={14} /></button></div>
+          <IconButton type="button" aria-label="Close Agent device editor" title="Close Agent device editor" onClick={() => setOpen(false)}><CloseIcon size={14} /></IconButton></div>
         <Dialog.Description className="agent-work-dialog__description">Choose a device to run the Agent for this project. The project and your draft stay here. Apply only changes this Launcher; Launch starts the task.</Dialog.Description>
         <AgentWorkModeSetup config={{ hosts, workspaces: arrangementWorkspaces }} active={active && open} allowLocal sourceTargets actionLabel="Apply" disabled={disabled}
           presentation="anchored-editor" menuBoundary={anchor?.closest<HTMLElement>('[data-workbench-region-id]') ?? null}

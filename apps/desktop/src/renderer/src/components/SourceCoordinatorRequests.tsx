@@ -1,4 +1,5 @@
 import { useMemo, useRef, useState } from 'react'
+import { Button } from '@agentmux/client-ui/components/Button'
 import type { AgentExecutionRecoveryReference } from '../../../shared/contracts'
 import type { AgentMuxRpcResult } from '@agentmux/core'
 import { api } from '../lib/api'
@@ -89,9 +90,9 @@ function OriginalSourceCoordinator({ input }: { input: SourceCoordinatorInput })
     {coordinatorIssue ? <p role="status">Coordinator observation: {coordinatorIssue}</p> : null}
     {linkIssue ? <p role="status">Project-link observation: {linkIssue}</p> : null}
     <div className="agent-work-setup__actions"><div>
-      <button type="button" className="small-button" onClick={() => void check()}>Check original Reach request</button>
-      {!originalComplete && (input.acknowledged || target) ? <button type="button" className="small-button" disabled={busy} onClick={() => void continueOriginal()}>
-        {busy ? 'Continuing…' : input.acknowledged ? 'Continue original project link' : 'Continue original Coordinator request'}</button> : null}
+      <Button type="button" onClick={() => void check()}>Check original Reach request</Button>
+      {!originalComplete && (input.acknowledged || target) ? <Button type="button" disabled={busy} onClick={() => void continueOriginal()}>
+        {busy ? 'Continuing…' : input.acknowledged ? 'Continue original project link' : 'Continue original Coordinator request'}</Button> : null}
     </div></div>
     <OriginalLaunchNames owner={{ kind: 'reach', input, ...(observed ? { observation: observed } : {}) }} />
     <details><summary>Original request details</summary><pre>{JSON.stringify({ request: original, association: input.association, names: input.origin.names, observation: report }, null, 2)}</pre></details>

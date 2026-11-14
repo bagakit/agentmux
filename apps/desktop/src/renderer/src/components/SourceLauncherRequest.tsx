@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { Button } from '@agentmux/client-ui/components/Button'
 import { api } from '../lib/api'
 import type { AgentMuxRpcResult } from '@agentmux/core'
 import { presentError } from '@agentmux/client-ui/error-presentation'
@@ -77,13 +78,13 @@ export function SourceLauncherRequest({ input, busy, onContinue, active = true }
   return <section className="launcher-source-original source-launch-feedback" aria-label="Original launch status">
     <div className="source-launch-feedback__top">
       <div className="source-launch-feedback__status"><strong>{title}</strong><p role="status">{reason}</p></div>
-      <button type="button" className="small-button source-launch-feedback__copy" disabled={copyState === 'writing'} onClick={() => void copyDiagnosis()}>Copy diagnostics</button>
+      <Button type="button" className="source-launch-feedback__copy" disabled={copyState === 'writing'} onClick={() => void copyDiagnosis()}>Copy diagnostics</Button>
     </div>
     {copyState ? <p className="source-launch-feedback__copy-status" role="status">{copyState === 'copied' ? 'Diagnostics copied' : copyState === 'writing' ? 'Copying diagnostics…' : 'Could not copy diagnostics. Try again.'}</p> : null}
     <div className="source-launch-feedback__actions">
-      {!terminal ? <button type="button" className="small-button source-launch-feedback__primary" disabled={busy} onClick={() => onContinue(input)}>{input.submitted ? 'Continue original task' : 'Send original task'}</button> : null}
+      {!terminal ? <Button type="button" className="source-launch-feedback__primary" disabled={busy} onClick={() => onContinue(input)}>{input.submitted ? 'Continue original task' : 'Send original task'}</Button> : null}
       {report?.to ? <button type="button" className={`small-button${terminal ? ' source-launch-feedback__primary' : ''}`} onClick={() => void open()}>Open original work</button> : null}
-      <button type="button" className="small-button" onClick={() => void check()}>Check original task</button>
+      <Button type="button" onClick={() => void check()}>Check original task</Button>
     </div>
     <details className="source-launch-feedback__details">
       <summary>Diagnosis details</summary>

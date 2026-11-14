@@ -1,4 +1,5 @@
 import { useMemo, type RefObject } from 'react'
+import { Button } from '@agentmux/client-ui/components/Button'
 import type { SpaceMountMemberTarget } from '../../../shared/space-mount'
 import { spaceMountKey } from '../../../shared/space-mount'
 import { useAppStore } from '../store'
@@ -24,9 +25,9 @@ export function SourceComposerRecovery({ target, tabId, surfaceRef }: { target: 
   return <details ref={surfaceRef} className="mounted-space-agent__inputs"><summary>Saved inputs to recover · {rows.length}</summary>
     <p>These saved inputs have not been sent again. Filling the current draft changes only its text; any original delivery remains separate.</p>
     <ul>{rows.map(row => <li key={JSON.stringify(row.path)}><p role="status">{row.issue}</p>
-      {row.text !== undefined ? <><pre>{row.text}</pre><button type="button" className="small-button"
-        onClick={() => useAppStore.getState().appendAgentComposerDraft(owner, row.text!)}>Append to current draft</button></> : null}
-      <button type="button" className="small-button" onClick={() => void copyTextToClipboard(JSON.stringify({ path: row.path, original: row.raw }, null, 2), useAppStore.getState().reportError)}>Copy saved input</button>
+      {row.text !== undefined ? <><pre>{row.text}</pre><Button type="button"
+        onClick={() => useAppStore.getState().appendAgentComposerDraft(owner, row.text!)}>Append to current draft</Button></> : null}
+      <Button type="button" onClick={() => void copyTextToClipboard(JSON.stringify({ path: row.path, original: row.raw }, null, 2), useAppStore.getState().reportError)}>Copy saved input</Button>
       <details><summary>Original saved data</summary><pre>{JSON.stringify(row.raw, null, 2)}</pre></details>
     </li>)}</ul>
   </details>

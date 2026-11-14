@@ -1,5 +1,6 @@
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { FormEvent, ReactElement } from 'react'
+import { Button } from '@agentmux/client-ui/components/Button'
 import type { PrLaunchPlan } from '../lib/pr-launch'
 import { ComposerTextarea, TextInput } from '@agentmux/client-ui/input'
 
@@ -65,9 +66,9 @@ export function PrLaunchSurface({
             external-navigation authority of its own, so a plain link either does nothing in this host or
             navigates the whole app away.
           */}
-          <button type="button" className="small-button" onClick={() => onOpenCreated(createdUrl)}>
+          <Button type="button" onClick={() => onOpenCreated(createdUrl)}>
             View on GitHub
-          </button>
+          </Button>
         </div>
       ) : null}
       {plan?.kind === 'blocked' ? (
@@ -83,9 +84,9 @@ export function PrLaunchSurface({
               <li key={plan.blockers[index] ?? line}>{line}</li>
             ))}
           </ul>
-          <button type="button" className="small-button" onClick={onDismiss}>
+          <Button type="button" onClick={onDismiss}>
             Dismiss
-          </button>
+          </Button>
         </div>
       ) : null}
       {plan?.kind === 'ready' ? (
@@ -131,14 +132,14 @@ export function PrLaunchSurface({
             disabled={submitting}
             onValueChange={onBodyChange}
           />
-          <button
+          <Button
             type="submit"
-            className="primary-button pr-form__submit"
+            variant="primary" className="pr-form__submit"
             disabled={submitting || !title.trim()}
           >
             {submitting ? <ThemeStatusLoadingIcon animation="spin" size={12} /> : <ThemeGitPullRequestIcon size={13} />}
             {submitting ? 'Opening…' : 'Open pull request'}
-          </button>
+          </Button>
         </form>
       ) : null}
     </>

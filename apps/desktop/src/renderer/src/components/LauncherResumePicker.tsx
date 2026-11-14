@@ -1,3 +1,5 @@
+import { Button } from '@agentmux/client-ui/components/Button'
+import { IconButton } from '@agentmux/client-ui/components/IconButton'
 import { AgentWorkModeBadge } from './AgentWorkModeBadge'
 import { COLLECTED_REPLY_TITLE } from '@agentmux/client-ui/conversation-sources'
 import { TextInput } from '@agentmux/client-ui/input'
@@ -351,10 +353,10 @@ export function LauncherResumePicker({ workspace, disabled = false, originalTarg
 
   return <Dialog.Root open={open} onOpenChange={changeOpen}>
     <Dialog.Trigger asChild>
-      <button type="button" className="small-button launcher-resume-trigger" disabled={disabled}
+      <Button type="button" className="launcher-resume-trigger" disabled={disabled}
         title={originalTarget ? "Resume a saved Session on its original Host and tool binding; the new Agent target does not change it" : "Choose a saved Session from this project or all projects"}>
         <ThemeActionResumeSessionIcon size={13} aria-hidden="true" /><span>{originalTarget ? 'Resume original' : 'Resume'}</span><ThemeNavigationDownIcon size={11} aria-hidden="true" />
-      </button>
+      </Button>
     </Dialog.Trigger>
     <DocumentOverlayPortal component={Dialog.Portal}>
       <Dialog.Overlay className="dialog-scrim launcher-resume__scrim" />
@@ -385,8 +387,8 @@ export function LauncherResumePicker({ workspace, disabled = false, originalTarg
               }} />
             {query ? <button type="button" className="icon-button" aria-label="Clear Session search" onClick={() => { changeQuery(''); searchRef.current?.focus() }}><ThemeActionClearIcon size={12} /></button> : null}
           </label>
-          <button type="button" className="icon-button" aria-label="Refresh discovery" title="Refresh saved conversations"
-            onClick={() => { setDiscoveryPaused(false); setDiscoveryRetry(value => value + 1); setRecapRetry(value => value + 1) }}><ThemeActionRefreshIcon size={14} /></button>
+          <IconButton type="button" aria-label="Refresh discovery" title="Refresh saved conversations"
+            onClick={() => { setDiscoveryPaused(false); setDiscoveryRetry(value => value + 1); setRecapRetry(value => value + 1) }}><ThemeActionRefreshIcon size={14} /></IconButton>
         </div>
         <div className="launcher-resume__body">
           <div className="launcher-resume__list" ref={setList} id={listId} role="listbox" aria-label="Saved Sessions">
@@ -421,7 +423,7 @@ export function LauncherResumePicker({ workspace, disabled = false, originalTarg
                 : query ? 'No matching Sessions' : scope === 'project' ? 'No saved Sessions in this project' : 'No saved Sessions yet'}</strong>
               <p>{discovery.pending.length || discoveryPaused || discovery.errors.length ? 'Some conversation sources are still unconfirmed. Completed sources appear here as they are read.'
                 : query ? 'Try an Agent name, Session ID, project or a recap already available here.' : scope === 'project' ? 'Switch to All projects to continue work elsewhere.' : 'Your saved Sessions will appear here.'}</p>
-              {scope === 'project' ? <button type="button" className="small-button" onClick={() => changeScope('global')}>Browse all projects <ThemeNavigationForwardIcon size={12} /></button> : null}
+              {scope === 'project' ? <Button type="button" onClick={() => changeScope('global')}>Browse all projects <ThemeNavigationForwardIcon size={12} /></Button> : null}
             </div> : null}
           </div>
           {selected ? <section className="launcher-resume__detail" aria-label="Selected Session details">
@@ -439,18 +441,18 @@ export function LauncherResumePicker({ workspace, disabled = false, originalTarg
               {selectedNativeRead?.page ? <>
                 <LauncherResumeConversation page={selectedNativeRead.page} sourceKey={nativeSourceKey!} workspacePath={nativeCandidate.workspacePath}
                   readHistoryResource={readNativeResource} lastMessageRef={nativeLastMessageRef} />
-                {selectedNativeRead.page.nextCursor ? <button type="button" className="small-button" disabled={selectedNativeRead.loadingMore}
-                  onClick={() => void readOlderNativeMessages()}>{selectedNativeRead.loadingMore ? 'Reading older messages…' : 'Read older messages'}</button> : null}
+                {selectedNativeRead.page.nextCursor ? <Button type="button" disabled={selectedNativeRead.loadingMore}
+                  onClick={() => void readOlderNativeMessages()}>{selectedNativeRead.loadingMore ? 'Reading older messages…' : 'Read older messages'}</Button> : null}
               </> : null}
               {selectedNativeRead?.error ? <div className="launcher-resume__recap-notice" role="status"><span>Conversation could not be read: {selectedNativeRead.error}. The original conversation and Resume remain available.</span>
-                <button type="button" className="small-button" onClick={() => setRecapRetry(value => value + 1)}>Retry conversation</button></div> : null}
+                <Button type="button" onClick={() => setRecapRetry(value => value + 1)}>Retry conversation</Button></div> : null}
             </div> : <div className="launcher-resume__recap"><h3>Recap</h3>
               {selected.recap ? <><p>{selected.recap.text}</p><small>{selected.recap.source} · {selected.recap.origin === 'native' ? 'Provider conversation' : 'Captured conversation'}</small></>
                 : selectedRead?.state === 'loading' ? <p className="launcher-resume__muted"><ThemeStatusLoadingIcon size={12} animation="spin" /> Reading this Session’s recap…</p>
                   : <p className="launcher-resume__muted">No recap available. This Session has no readable conversation excerpt.</p>}
               {!selected.recap && selectedRead?.state === 'error' ? <div className="launcher-resume__recap-notice" role="status">
                 <span>Recap could not be read: {selectedRead.error}. Resume remains available.</span>
-                <button type="button" className="small-button" onClick={() => setRecapRetry(value => value + 1)}>Retry recap</button>
+                <Button type="button" onClick={() => setRecapRetry(value => value + 1)}>Retry recap</Button>
               </div> : null}
             </div>}
             <dl className="launcher-resume__facts">
@@ -463,28 +465,28 @@ export function LauncherResumePicker({ workspace, disabled = false, originalTarg
             </dl>
             <div className="launcher-resume__state" role="status"><strong>{selected.stateLabel}</strong><p>{selected.stateDetail}</p></div>
             {!selectedHostConfigured ? <div className="launcher-resume__state" role="status"><strong>Host is not configured</strong><p>Configure this Session’s original Host to open its project.</p>
-              {settings ? <button type="button" className="small-button" onClick={() => { setOpen(false); settings.open('hosts') }}>Configure Host</button> : null}</div> : null}
+              {settings ? <Button type="button" onClick={() => { setOpen(false); settings.open('hosts') }}>Configure Host</Button> : null}</div> : null}
           </section> : null}
         </div>
         {discovery.pending.length || discoveryPaused ? <div className="launcher-resume__discovery" role="status">
           <div><span>{discoveryPaused ? 'Discovery updates paused' : <><ThemeStatusLoadingIcon size={12} animation="spin" /> Reading saved conversations</>} · {discovery.total - discovery.pending.length}/{discovery.total} sources checked</span>
-            <button type="button" className="small-button" onClick={() => { if (discoveryPaused) { setDiscoveryPaused(false); setDiscoveryRetry(value => value + 1) } else setDiscoveryPaused(true) }}>
-              {discoveryPaused ? 'Refresh discovery' : 'Pause updates'}</button></div>
+            <Button type="button" onClick={() => { if (discoveryPaused) { setDiscoveryPaused(false); setDiscoveryRetry(value => value + 1) } else setDiscoveryPaused(true) }}>
+              {discoveryPaused ? 'Refresh discovery' : 'Pause updates'}</Button></div>
           <details><summary>{discovery.pending.length} {discovery.pending.length === 1 ? 'source' : 'sources'} still unconfirmed · Listed Sessions remain available</summary>
             <ul>{discovery.pending.map(input => <li key={launcherDiscoveryKey(input)}>{config?.hosts.find(host => host.id === input.hostId)?.label ?? input.hostId} · {config?.executors[input.executorId]?.label ?? input.executorId}</li>)}</ul></details>
         </div> : null}
         {discovery.errors.length ? <div className="launcher-resume__feedback launcher-resume__catalog-notice" role="status">
           <details><summary><strong>{discovery.errors.length} discovery {discovery.errors.length === 1 ? 'notice' : 'notices'}</strong><span> · Listed Sessions remain available</span></summary>
             {discovery.errors.map((error, index) => <p key={index}>{error}</p>)}
-          </details><button type="button" className="small-button" onClick={() => { setDiscoveryPaused(false); setDiscoveryRetry(value => value + 1) }}>Retry discovery</button>
+          </details><Button type="button" onClick={() => { setDiscoveryPaused(false); setDiscoveryRetry(value => value + 1) }}>Retry discovery</Button>
         </div> : null}
         {feedback ? <div className="launcher-resume__feedback" role="status"><strong>{feedback.outcome === 'restored' ? 'Session restored' : 'Restoring this Session did not complete'} · {feedback.name}</strong><code>{feedback.id}</code><p>{feedback.text}</p></div> : null}
         <footer className="launcher-resume__footer"><span>{filtered.length} {filtered.length === 1 ? 'Session' : 'Sessions'}{workspace && scope === 'project' ? ` · ${workspace.name}` : ' · all projects'}</span>
-          <button type="button" className="primary-button" disabled={!selected || busyId !== null || disabled}
+          <Button type="button" variant="primary" disabled={!selected || busyId !== null || disabled}
             onClick={() => selected && void resume(selected)}>
             {busyId ? <ThemeStatusLoadingIcon size={13} animation="spin" /> : <ThemeActionResumeSessionIcon size={13} />}
             {busyId ? 'Restoring…' : selectedSession?.status.continuityConflict === 'session-run-changed' ? 'Open current Session' : selected && !selected.workspace && selectedHostConfigured ? 'Open project & resume' : 'Resume Session'}
-          </button></footer>
+          </Button></footer>
         {takeover ? <SessionTakeoverSurface source={takeover.source} active={open} returnTrigger={takeover.trigger}
           onClose={() => setTakeover(null)} onSubmitted={() => changeOpen(false)}
           onOpened={() => { takeoverOpened.current = true; changeOpen(false) }} /> : null}

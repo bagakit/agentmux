@@ -2,6 +2,8 @@ import { useEffect, useRef, useState, type RefObject } from 'react'
 import type { AgentOpenDescription } from '@agentmux/core/agent-open-contract'
 import type { AgentMuxSpaceAgentTarget } from '@agentmux/core'
 import type { HostRouteChoices } from '@agentmux/core/host-route'
+import { IconButton } from '@agentmux/client-ui/components/IconButton'
+import { Button } from '@agentmux/client-ui/components/Button'
 import type { AppConfig } from '../../../shared/contracts'
 import type { SpaceMountHostChoices, SpaceMountResources } from '../../../shared/space-mount'
 import { isScratchWorkspaceId } from '../../../shared/contracts'
@@ -162,7 +164,7 @@ export function SourceAgentTargetSetup({ config, active, initialSelection, fixed
         onValueChange={id => { setProjectId(id); setSelected(undefined); setIndependent(false); setIssue(undefined) }} />}
     <div className="agent-work-device-choice">
       {anchored ? <div className="agent-work-device-choice__label"><span className="agent-work-end__label">Agent runs on</span>
-        <button type="button" className="icon-button" aria-label="Refresh Agent device choices" title="Refresh Agent devices known by the project device" disabled={!active || pending} onClick={() => setRefresh(value => value + 1)}><RefreshIcon size={13} /></button></div> : null}
+        <IconButton type="button" aria-label="Refresh Agent device choices" title="Refresh Agent devices known by the project device" disabled={!active || pending} onClick={() => setRefresh(value => value + 1)}><RefreshIcon size={13} /></IconButton></div> : null}
       <SelectionField label="Agent runs on" value={choiceKey} disabled={disabled || !active || pending} menuBoundary={menuBoundary ?? null} onValueChange={value => {
         if (value === 'independent-coordinator') { setIndependent(true); setSelected(undefined); return }
         setIndependent(false)
@@ -185,16 +187,16 @@ export function SourceAgentTargetSetup({ config, active, initialSelection, fixed
       : contractIssue ? `The project device’s launch support is unconfirmed. ${contractIssue}` : 'Reading launch support…'}</p> : null}
     {anchored ? (compatibility || hostLink && !hostRecovery || onChooseCustom ? <details className="agent-work-startup"><summary>Startup & device details</summary><div className="agent-work-setup__details-body">
       {compatibility}
-      <div className="agent-work-setup__utility-actions">{!hostRecovery ? hostLink : null}{onChooseCustom ? <button type="button" className="small-button agent-work-setup__custom-startup" onClick={onChooseCustom}>Choose a custom startup directory</button> : null}</div>
+      <div className="agent-work-setup__utility-actions">{!hostRecovery ? hostLink : null}{onChooseCustom ? <Button type="button" className="agent-work-setup__custom-startup" onClick={onChooseCustom}>Choose a custom startup directory</Button> : null}</div>
     </div></details> : null) : compatibility ? <details><summary>Launch compatibility</summary><p>{compatibilityText}</p></details> : null}
     {issue || resourceIssue ? <p className="agent-work-setup__error" role="status">{issue ?? resourceIssue}</p> : null}
     {choiceIssue || routeIssue ? <details><summary>Other Agent devices unconfirmed</summary><p>{choiceIssue}</p><p>{routeIssue}</p></details> : null}
     {!anchored || hostRecovery ? hostLink : null}
     </div>
     <footer className="agent-work-setup__actions"><span>{preparationNote ?? 'Applies to this Launcher. Launch starts the task.'}</span><div>
-      {onCancel ? <button type="button" className="small-button" onClick={onCancel}>Cancel</button> : null}
-      {!anchored ? <button type="button" className="small-button" disabled={!active || pending} onClick={() => setRefresh(value => value + 1)}>Refresh</button> : null}
-      <button type="button" className="primary-button" disabled={disabled || !active || pending || !project || !target || independent && !coordinator} onClick={() => void prepare()}>{pending ? 'Preparing…' : actionLabel}</button>
+      {onCancel ? <Button type="button" onClick={onCancel}>Cancel</Button> : null}
+      {!anchored ? <Button type="button" disabled={!active || pending} onClick={() => setRefresh(value => value + 1)}>Refresh</Button> : null}
+      <Button type="button" variant="primary" disabled={disabled || !active || pending || !project || !target || independent && !coordinator} onClick={() => void prepare()}>{pending ? 'Preparing…' : actionLabel}</Button>
     </div></footer>
   </div>
 }

@@ -1,6 +1,7 @@
 import { ContentCopyButton } from '@agentmux/client-ui/components/ContentCopyButton'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { formatSessionAddress } from '@agentmux/core/sharing'
+import { Button } from '@agentmux/client-ui/components/Button'
 import type { LauncherResumeRow } from '../lib/launcher-resume'
 import { launcherResumeActionIdentity } from '../lib/launcher-resume-actions'
 import { useAppStore } from '../store'
@@ -20,7 +21,7 @@ export function LauncherResumeActions({ row, onTakeOver, disabled = false }: {
       identity={identity.agentSessionId} label="Copy Agent link" actionLabel="Agent link" onCopyError={copyError} /> : null}
     {identity.nativeSessionId ? <ContentCopyButton text={identity.nativeSessionId} identity={identity.nativeSessionId}
       label="Copy origin session ID" actionLabel="Origin ID" onCopyError={copyError} /> : null}
-    {onTakeOver ? <button type="button" className="small-button" disabled={disabled}
-      onClick={event => onTakeOver(row, event.currentTarget)}><ForwardIcon size={13} aria-hidden="true" /> Take over</button> : null}
+    {onTakeOver ? <Button type="button" disabled={disabled}
+      onClick={event => onTakeOver(row, event.currentTarget)}><ForwardIcon size={13} aria-hidden="true" /> Take over</Button> : null}
   </div>
 }

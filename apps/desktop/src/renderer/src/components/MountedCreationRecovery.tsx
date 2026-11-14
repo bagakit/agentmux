@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { Button } from '@agentmux/client-ui/components/Button'
 import type { SpaceMountMethods, SpaceMountRecord } from '../../../shared/space-mount'
 import type { MountedSpaceRegion } from '../lib/space-mount-view'
 import { api } from '../lib/api'
@@ -76,8 +77,8 @@ export function MountedCreationRecovery({ target, member, visible, onRefresh, re
   const creationIssues = report?.issues.filter(issue => issue.step === 'creation') ?? []
   const observerIssues = report?.issues.filter(issue => issue.step === 'observation') ?? []
   const actions = <>
-    {continuation ? <button type="button" className="primary-button" disabled={busy === scope.current} onClick={() => void continueOriginal()}>Continue original request</button> : null}
-    <button type="button" className="small-button" onClick={() => { void inspect(); onRefresh?.() }}>Check original status</button>
+    {continuation ? <Button type="button" variant="primary" disabled={busy === scope.current} onClick={() => void continueOriginal()}>Continue original request</Button> : null}
+    <Button type="button" onClick={() => { void inspect(); onRefresh?.() }}>Check original status</Button>
   </>
   if (layout === 'inline') return <ServiceWindowNotice disclosure={{ scope: key, id: 'original-creation',
     cause: current.error ?? report?.outcome ?? 'creation-unconfirmed', visible }}

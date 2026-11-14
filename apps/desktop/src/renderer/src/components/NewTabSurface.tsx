@@ -1,3 +1,5 @@
+import { Button } from '@agentmux/client-ui/components/Button'
+import { IconButton } from '@agentmux/client-ui/components/IconButton'
 import { SurfaceState } from './SurfaceState'
 import { useWorkbenchWindowDocument } from '../lib/workbench-document'
 import { moteDefaultExecutor } from '../lib/mote-quick-preferences'
@@ -526,8 +528,8 @@ export function NewTabSurface({
       : `${agentHost?.label ?? agentWorkspace?.hostId ?? 'Agent environment'}: ${inventory?.detail ?? (inventory?.state === 'checking' ? 'Reading the original Host configuration.' : 'The original Host inventory has not been confirmed.')} Your draft and saved selection are kept.`,
     restore: sourceMode ? 'Check the original Agent device again to read its configurations.'
       : agentWorkspace ? 'Check this Host again to read its configurations, or choose another Agent environment.' : 'Choose the registered Agent environment to read its configurations.'
-  } }} actions={sourceMode || agentWorkspace ? <button type="button" className="small-button" disabled={detecting}
-    onClick={() => sourceMode ? sourceLauncher.refresh() : agentWorkspace && void checkAgents(agentWorkspace.hostId)}>{detecting ? 'Checking…' : 'Check again'}</button> : undefined} />
+  } }} actions={sourceMode || agentWorkspace ? <Button type="button" disabled={detecting}
+    onClick={() => sourceMode ? sourceLauncher.refresh() : agentWorkspace && void checkAgents(agentWorkspace.hostId)}>{detecting ? 'Checking…' : 'Check again'}</Button> : undefined} />
 
   const executorPicker = <AgentExecutorPicker executors={executors} selected={selectedExecutor?.id ?? null}
     {...(compact ? { presentation: 'field' as const, label: 'Agent configuration', unsetLabel: 'Choose Agent' } : { presentation: 'catalog' as const })}
@@ -549,8 +551,8 @@ export function NewTabSurface({
       {sourceMode && sourceSupportIssue ? <ServiceWindowNotice disclosure={{ scope: launcherId, id: 'launch-support', cause: sourceSupportIssue, visible: motionActive }}
         notice={{ kind: 'indeterminate', notice: { step: 'Launch support unconfirmed', mode: sourceSupportIssue,
           restore: 'Check this original project device again. Your complete task draft is kept.' } }}
-        actions={<><button type="button" className="small-button" disabled={detecting} onClick={sourceLauncher.refresh}>Check Source</button>
-          {settings && workspace ? <button type="button" className="small-button" onClick={() => settings.openHost(workspace.hostId)}>Project device settings</button> : null}</>} /> : null}
+        actions={<><Button type="button" disabled={detecting} onClick={sourceLauncher.refresh}>Check Source</Button>
+          {settings && workspace ? <Button type="button" onClick={() => settings.openHost(workspace.hostId)}>Project device settings</Button> : null}</>} /> : null}
       {retainedSourceRequests.inputs.map(input => <SourceLauncherRequest key={`${mountedAgentOpenKey(input.target, input.slot)}:${input.request.operationId}`} input={input} busy={busyKind !== null} active={motionActive && !moteId}
         onContinue={original => { if (original.slot.kind === 'region') void run('agent', () => launchAtSource({ tabId: original.slot.kind === 'region' ? original.slot.tabId : '', regionId: original.slot.kind === 'region' ? original.slot.regionId : '' }, original)) }} />)}
       {retainedSourceRequests.issue ? <p role="status">{retainedSourceRequests.issue}</p> : null}
@@ -585,9 +587,9 @@ export function NewTabSurface({
         </button> : <span className="launcher-agents-head__identity">{compact && executors.length ? executorPicker : <strong>Agent</strong>}</span>}
         <span className="launcher-section-actions">
           {sections.agents === 'collapsed' ? <LauncherResumePicker getTakeoverOrigin={getTakeoverOrigin} workspace={workspace} originalTarget={splitExecution || sourceMode} disabled={busyKind !== null} /> : null}
-          <button type="button" className="icon-button" aria-label="Refresh agents on this device" title="Refresh agents on this device" disabled={!agentWorkspace || detecting} onClick={() => agentWorkspace && void checkAgents(agentWorkspace.hostId)}>{detecting ? <ThemeStatusLoadingIcon size={13} animation="spin" /> : <ThemeActionRefreshIcon size={13} />}</button>
-          {sections.agents === 'expanded' ? <button type="button" className="icon-button" aria-label="Collapse Agents" title="Collapse" onClick={() => setSection('agents', 'collapsed')}><ThemeActionCollapseIcon size={13} /></button> : null}
-          <button type="button" className="icon-button" aria-label="Close Agents" title="Close Agents" onClick={() => setSection('agents', 'hidden')}><ThemeActionCloseIcon size={13} /></button>
+          <IconButton type="button" aria-label="Refresh agents on this device" title="Refresh agents on this device" disabled={!agentWorkspace || detecting} onClick={() => agentWorkspace && void checkAgents(agentWorkspace.hostId)}>{detecting ? <ThemeStatusLoadingIcon size={13} animation="spin" /> : <ThemeActionRefreshIcon size={13} />}</IconButton>
+          {sections.agents === 'expanded' ? <IconButton type="button" aria-label="Collapse Agents" title="Collapse" onClick={() => setSection('agents', 'collapsed')}><ThemeActionCollapseIcon size={13} /></IconButton> : null}
+          <IconButton type="button" aria-label="Close Agents" title="Close Agents" onClick={() => setSection('agents', 'hidden')}><ThemeActionCloseIcon size={13} /></IconButton>
         </span>
       </div> : null}
 
@@ -629,8 +631,8 @@ export function NewTabSurface({
         restore: inventory.state === 'checking' ? 'Checking this host. Existing configurations remain selectable.'
           : retryingAvailability ? 'Rechecking automatically. You can keep writing or check again now.'
             : 'Check again to refresh this host. Existing configurations and your draft are kept.'
-      } }} actions={<button type="button" className="small-button" disabled={inventory.state === 'checking'}
-        onClick={() => { if (agentWorkspace) void checkAgents(agentWorkspace.hostId) }}>{inventory.state === 'checking' ? 'Checking…' : 'Check again'}</button>} /> : sections.agents !== 'hidden' ? <LauncherAvailabilityNotice executor={selectedExecutor}
+      } }} actions={<Button type="button" disabled={inventory.state === 'checking'}
+        onClick={() => { if (agentWorkspace) void checkAgents(agentWorkspace.hostId) }}>{inventory.state === 'checking' ? 'Checking…' : 'Check again'}</Button>} /> : sections.agents !== 'hidden' ? <LauncherAvailabilityNotice executor={selectedExecutor}
         checking={selectedExecutor?.detection?.state === 'checking'} retrying={retryingAvailability} onCheck={() => { if (agentWorkspace) void checkAgents(agentWorkspace.hostId) }} /> : null}
       {fileReferencesOpen && workspace && motionActive ? <ComposerFileReferences key={toolsScope} workspace={workspace} hostLabel={host?.label}
         onSelect={path => { void attachments.referencePaths([path]) }} onClose={() => setFileReferencesOpen(false)} /> : null}

@@ -1,3 +1,4 @@
+import { Button } from '@agentmux/client-ui/components/Button'
 import type { ExecutorChoice } from '../lib/executors'
 import { ServiceWindowNotice } from './ServiceWindowNotice'
 
@@ -17,7 +18,7 @@ export function LauncherAvailabilityNotice({ executor, checking, retrying, onChe
       : 'Check again to refresh this host. Your draft and launch options are kept.'
   return <ServiceWindowNotice notice={{ kind: 'indeterminate', notice: { step, mode, restore } }}
     summary={{ step, mode: `${executor.label} is configured. Launch remains available.`, restore }}
-    actions={<button type="button" className="small-button" disabled={checking} onClick={onCheck}>
+    actions={<Button type="button" disabled={checking} onClick={onCheck}>
       {checking ? 'Checking…' : 'Check again'}
-    </button>} />
+    </Button>} />
 }

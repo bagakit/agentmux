@@ -3,6 +3,7 @@ import { TextInput } from '@agentmux/client-ui/input'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useLayoutEffect, useRef, useState } from 'react'
 import * as Dialog from '@agentmux/client-ui/components/Modal'
+import { Button } from '@agentmux/client-ui/components/Button'
 import { DocumentOverlayPortal } from './WindowOverlayHost'
 import { autoUpdate, computePosition, flip, offset, shift, size } from '@floating-ui/dom'
 import type { LaunchOption, LaunchOptionSelection } from '@agentmux/core'
@@ -79,7 +80,7 @@ export function LaunchRefine({ options, selection, expanded, active, onToggle, o
       <header><Dialog.Title>Launch options</Dialog.Title><Dialog.Close className="icon-button" aria-label="Close launch options" onClick={() => trigger.current?.focus()}><ThemeActionCloseIcon size={14} /></Dialog.Close></header>
       <Dialog.Description>For this launch. Unset values use Agent defaults.</Dialog.Description>
       {unavailable.length ? <p className="launch-refine__notice" role="status">Saved choices are no longer listed: {unavailable.map(({ label, choiceId }) => `${label}: ${choiceId}`).join(' · ')}. They are retained until you choose another value or use Agent defaults.</p> : null}
-      {selectionCount && onReset ? <button type="button" className="small-button launch-refine__reset" disabled={disabled} onClick={onReset}>Use Agent defaults</button> : null}
+      {selectionCount && onReset ? <Button type="button" className="launch-refine__reset" disabled={disabled} onClick={onReset}>Use Agent defaults</Button> : null}
       <div className="launch-refine__fields">
         {options.map(option => {
           const choice = option.choices.find(item => item.id === selection[option.id])

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { AgentMuxRpcResult, SpaceSnapshot } from '@agentmux/core'
 import type { HostRouteAgentTarget, HostRouteChoices, HostRouteExecutors } from '@agentmux/core/host-route'
 import { presentError } from '@agentmux/client-ui/error-presentation'
+import { Button } from '@agentmux/client-ui/components/Button'
 import { api } from '../lib/api'
 import { checkpointMountedSpaceInputs, useAppStore } from '../store'
 import { mountedAgentOpenInput, mountedAgentOpenKey, mountedLauncherSelection, type MountedAgentOpenInput, type MountedLauncherSlot } from '../lib/space-mount-launch'
@@ -167,14 +168,14 @@ function MountedSpaceLauncherContent({ target, project, slot, mountKey, active, 
       try { useAppStore.getState().editSpaceMountLauncher(mountKey, slot, { agentHostId, agentTarget: routeTarget, executorId, prompt: event.target.value }) } catch (cause) { setIssue(presentError(cause)) }
     }} /></label> : null}
     <div className="mounted-space-launcher__actions">
-      {!original ? <button type="button" className="small-button" disabled={!canStart} onClick={() => void create()}>Start in original Space</button> : <>
+      {!original ? <Button type="button" disabled={!canStart} onClick={() => void create()}>Start in original Space</Button> : <>
         <p role="status">{retired ? 'Original Agent was retired. Its request and creation history are retained.' : completed ? 'Original Space confirmed the new Agent.' : busy ? 'Submitting the original task…' : original.submitted ? 'Original task retained. Check its original result.' : 'The original task was not sent.'}</p>
-        {!original.submitted ? <button type="button" className="small-button" disabled={busy} onClick={() => void send(original)}>Send original task</button> : null}
-        {original.submitted && !terminalObservation ? <button type="button" className="small-button" disabled={busy} onClick={() => void send(original, true)}>Continue original task</button> : null}
-        <button type="button" className="small-button" onClick={() => void inspect()}>Check original task</button>
-        {terminalObservation ? <button type="button" className="small-button" onClick={() => { useAppStore.getState().retainSpaceMountAgentOpen(key, current => current === original ? undefined : current); setInspection(undefined) }}>Prepare another task</button> : null}
+        {!original.submitted ? <Button type="button" disabled={busy} onClick={() => void send(original)}>Send original task</Button> : null}
+        {original.submitted && !terminalObservation ? <Button type="button" disabled={busy} onClick={() => void send(original, true)}>Continue original task</Button> : null}
+        <Button type="button" onClick={() => void inspect()}>Check original task</Button>
+        {terminalObservation ? <Button type="button" onClick={() => { useAppStore.getState().retainSpaceMountAgentOpen(key, current => current === original ? undefined : current); setInspection(undefined) }}>Prepare another task</Button> : null}
       </>}
-      <button type="button" className="small-button" onClick={() => setRefresh(value => value + 1)}>Refresh devices</button>
+      <Button type="button" onClick={() => setRefresh(value => value + 1)}>Refresh devices</Button>
     </div>
     {original ? <details><summary>Original task request</summary><p>Continuing uses this same request and its frozen execution target. It does not confirm or resend the original first input.</p><pre>{JSON.stringify({ request: original.request, ...(original.issue ? { originalIssue: original.issue } : {}), ...(original.receipt ? { receipt: original.receipt } : {}) }, null, 2)}</pre></details> : null}
     {inspection ? <details><summary>Current original task observation</summary><p>This read does not repeat the original request or confirm its write response.</p><pre>{JSON.stringify(inspection, null, 2)}</pre></details> : null}

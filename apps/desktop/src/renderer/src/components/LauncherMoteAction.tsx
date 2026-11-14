@@ -1,5 +1,6 @@
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { Button } from '@agentmux/client-ui/components/Button'
 import type { WorkspaceRecord } from '../../../shared/contracts'
 import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 import { useScratchTopics } from '../hooks/useScratchTopics'
@@ -112,12 +113,12 @@ export function LauncherMoteAction({ workspace, prompt, sourceTabId, sourceRegio
     <MoteActionChooser motes={motes} topicId={topicId} pending={pending} onSelect={selectMote} /></div>
     {selectedMote?.moteArchive?.state === 'archived' ? <div className="launcher-mote__archive" role="status">
       <span>Archived · You can still create with this Mote.</span>
-      <button type="button" className="small-button" disabled={archive.pending === topicId} onClick={() => void archive.change(selectedMote, false)}>Restore Mote</button>
+      <Button type="button" disabled={archive.pending === topicId} onClick={() => void archive.change(selectedMote, false)}>Restore Mote</Button>
     </div> : null}
     {directoryIssue ? <ServiceWindowNotice notice={{ kind: 'indeterminate', notice: {
       step: directoryError ? 'Mote directory read needs attention' : 'Selected Mote directory is unconfirmed', mode: `${directoryIssue}${archiveIssue ? ` Mote archive state is unconfirmed: ${archiveIssue}` : ''}${archive.failure ? ` ${archive.failure.action} for ${archive.failure.title} was not confirmed: ${archive.failure.message}` : ''} Your saved selection is kept; you can still open this Mote or choose another.`,
       restore: archive.failure ? `Refresh the directory, then retry ${archive.failure.action.toLowerCase()} for ${archive.failure.title}.` : 'Refresh the directory to confirm the same Mote.'
-    } }} actions={<button type="button" className="small-button" onClick={() => void useAppStore.getState().refreshScratchTopics(SCRATCH_WORKSPACE_ID, true)}>Retry directory</button>} /> : null}
+    } }} actions={<Button type="button" onClick={() => void useAppStore.getState().refreshScratchTopics(SCRATCH_WORKSPACE_ID, true)}>Retry directory</Button>} /> : null}
     {!directoryIssue ? <MoteArchiveNotice workspaceId={SCRATCH_WORKSPACE_ID} issue={archive.issue} failure={archive.failure} /> : null}
     {!directoryIssue ? <MoteArchiveNotice workspaceId={SCRATCH_WORKSPACE_ID} issue={archiveIssue} targetName={moteName} /> : null}
     {issue ? <ServiceWindowNotice notice={{ kind: 'indeterminate', notice: { step: `Creation handoff to ${moteName} is unconfirmed`, mode: `${issue} Both original drafts and the current project are kept.`, restore: 'Open the selected Mote to inspect its request queue and launch status before retrying.' } }} /> : null}

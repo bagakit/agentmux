@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { NameChangeResult, NameObservation } from '@agentmux/core/name-control'
 import { presentError } from '@agentmux/client-ui/error-presentation'
+import { Button } from '@agentmux/client-ui/components/Button'
 import { useAppStore } from '../store'
 import { sourceCoordinatorInputKey } from '../lib/source-coordinator-input'
 import { mountedAgentOpenKey } from '../lib/space-mount-launch'
@@ -62,9 +63,9 @@ function OriginalName({ owner, role }: { owner: LaunchNameOwner; role: LaunchNam
     {unreadable || issue || input?.issue ? <p role="status">{unreadable ?? issue ?? input?.issue}</p> : null}
     {!target && !unreadable ? <p role="status">The original name target is unconfirmed. Its name and original Agent workface are retained.</p> : null}
     {target && !unreadable ? <div className="agent-work-setup__actions"><div>
-      <button type="button" className="small-button" onClick={() => void check()}>Check {label.toLowerCase()}</button>
-      {!input?.response?.applied ? <button type="button" className="small-button" disabled={busy} onClick={() => void apply(false)}>Apply original {label.toLowerCase()}</button> : null}
-      {!saved && (input?.response?.applied || observed?.record?.status === 'applied') ? <button type="button" className="small-button" disabled={busy} onClick={() => void apply(true)}>Confirm original {label.toLowerCase()}</button> : null}
+      <Button type="button" onClick={() => void check()}>Check {label.toLowerCase()}</Button>
+      {!input?.response?.applied ? <Button type="button" disabled={busy} onClick={() => void apply(false)}>Apply original {label.toLowerCase()}</Button> : null}
+      {!saved && (input?.response?.applied || observed?.record?.status === 'applied') ? <Button type="button" disabled={busy} onClick={() => void apply(true)}>Confirm original {label.toLowerCase()}</Button> : null}
     </div></div> : null}
     <details><summary>Name operation details</summary><pre>{JSON.stringify({ input, observation: observed }, null, 2)}</pre></details>
   </details>
