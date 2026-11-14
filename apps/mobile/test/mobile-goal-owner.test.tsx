@@ -15,6 +15,10 @@ import { api } from '../../desktop/src/renderer/src/lib/api'
 import { useAppStore } from '../../desktop/src/renderer/src/store'
 import { SCRATCH_WORKSPACE_ID } from '../../host/src/mote-model'
 import { MobileGoalsSurface } from '../src/goals/MobileGoalsSurface'
+import { MobileApp } from '../src/MobileApp'
+import { createBrowserPlatform } from '../src/platform/browser'
+import { fixture, session } from './conversation-fixture'
+import { openPrimary } from './mobile-root-navigation'
 import { getDeviceWorkface, emptyDeviceWorkface, DEVICE_WORKFACE_KEY, DeviceWorkfaceStore } from '../src/recovery/device-workface'
 import { freezeMobileGoalUpdateRequest } from '../src/recovery/goal-drafts'
 
@@ -24,6 +28,7 @@ let directory: string, owner: ReturnType<typeof openDemandStore>, hostGoals: Ret
 const discussions = new Map<string, { tabId: string; regionId: string; sessionId: string }>()
 const inFlight = new Set<Promise<unknown>>()
 let discussionUnavailable = false
+let directoryProjects: import('@agentmux/core/control').AgentMuxControlProject[] = []
 const discussionName = 'Original discussion Agent'
 const mounts: { root: Root; element: HTMLDivElement }[] = []
 const scratch = { id: SCRATCH_WORKSPACE_ID, name: 'Main Mote', hostId: 'local', path: fixturePath("private-topic-fixture"), kind: 'scratch' as const }
@@ -31,10 +36,10 @@ const config = { ...baseline.config, version: 9, hosts: [{ id: 'local', kind: 'l
 const proposal = { summary: 'Read real current proposal', criteria: [{ id: 'c', text: 'Original criterion' }], openQuestions: [] }
 beforeEach(async () => {
   localStorage.clear(); await getDeviceWorkface().replaceBackup(emptyDeviceWorkface())
-  directory = await mkdtemp(join(tmpdir(), 'mgoal-')); discussions.clear(); discussionUnavailable = false
+  directory = await mkdtemp(join(tmpdir(), 'mgoal-')); discussions.clear(); discussionUnavailable = false; directoryProjects = []
   const configurationPath = join(directory, 'configuration.json')
   await writeFile(configurationPath, JSON.stringify(config))
-  hostGoals = createHostGoals({ configurationPath, projects: async () => [],
+  hostGoals = createHostGoals({ configurationPath, projects: async () => directoryProjects,
     runtime: () => { throw new Error('This mounted CRUD fixture must not start or observe a native Agent.') },
     coreCall: async () => { throw new Error('Native discussion execution is qualified by the Host integration suite, not this mounted client fixture.') } })
   owner = openDemandStore({ root: join(directory, 'demands') })
@@ -67,7 +72,8 @@ afterEach(async () => {
   for (const view of mounts.splice(0)) { await act(async () => view.root.unmount()); view.element.remove() }
   await Promise.allSettled([...inFlight]); await hostGoals.dispose(); vi.restoreAllMocks(); useAppStore.setState(baseline, true); await rm(directory, { recursive: true, force: true })
 })
-async function mount(initialContext?: import('../src/recovery/presentation-route').MobileGoalsContext) {
+async function mount(initialContext?: import('../src/recovery/presentation-route').MobileGoalsContext, mobileApp = false) {
+  const sdk = mobileApp ? fixture() : null
   const service = new AgentMuxRpcService({ execute: request => {
     if (request.operation === 'space.inspect') {
       const binding = [...discussions.values()].find(value => value.tabId === ('tabId' in request.target ? request.target.tabId : undefined))
@@ -77,21 +83,29 @@ async function mount(initialContext?: import('../src/recovery/presentation-route
         regions: [{ tabId: binding!.tabId, regionId: binding!.regionId, kind: 'agent', agentSessionId: binding!.sessionId, runId: 'original-discussion-run', execution: { hostId: 'local', cwd: scratch.path } }] } } as never)
     }
     return useAppStore.getState().executeControl(request)
-  }, coreClients: () => [], snapshot: async () => ({ projects: [], executors: [] }) })
+  }, coreClients: () => [], snapshot: async () => ({ projects: directoryProjects, executors: [] }) })
   const forwardRpc = vi.fn((method: any, params: any) => {
     const pending = service.call(method, params, { principal: { kind: 'device', id: 'approved-phone' } })
-    inFlight.add(pending); void pending.then(() => inFlight.delete(pending), () => inFlight.delete(pending))
+    inFlight.add(pending); void pending.then(result => {
+      const receipt = method === 'goal.discuss' ? (result as any).receipt : null
+      if (sdk && receipt?.agentSessionId) sdk.sessions.set(receipt.agentSessionId, session(receipt.agentSessionId))
+      inFlight.delete(pending)
+    }, () => inFlight.delete(pending))
     return pending
   })
-  const client = { forwardRpc, runtimeOwnerIdentity: () => ({ runtimeId: 'private-goal-runtime', ownerInstanceId: 'original-goal-process', availability: 'connected' }) } as any, element = document.createElement('div'); document.body.append(element)
+  const client = Object.assign(sdk?.client ?? {}, { forwardRpc, runtimeOwnerIdentity: () => ({ runtimeId: 'private-goal-runtime', ownerInstanceId: 'original-goal-process', availability: 'connected' }) }) as any, element = document.createElement('div'); document.body.append(element)
   const root = createRoot(element); mounts.push({ root, element })
   const openSession = vi.fn()
-  const render = async (visible = true) => { await act(async () => root.render(<MobileGoalsSurface client={client} visible={visible} connected={true} openSession={openSession} {...(initialContext ? { initialContext } : {})} />)) }
+  if (mobileApp) await getDeviceWorkface().updatePresentation({ selectedSessionId: null, hostUrl: '', panel: 'conversation' },
+    { primary: 'goals', showSession: false, showGoalWork: false, identity: null, profile: null, ...(initialContext ? { goals: initialContext } : {}) })
+  const render = async (visible = true) => { await act(async () => root.render(mobileApp
+    ? <MobileApp restoreWorkface client={client} connection={{ state: 'connected', message: 'Original Host' }} platform={createBrowserPlatform()} />
+    : <MobileGoalsSurface client={client} visible={visible} connected={true} openSession={openSession} {...(initialContext ? { initialContext } : {})} />)) }
   await render()
   const buttons = (text: string) => [...element.querySelectorAll('button')].filter(button => (button.getAttribute('aria-label') ?? button.textContent) === text && !button.closest('[hidden]'))
   const click = async (text: string) => { const button = buttons(text)[0]; expect(button, text).toBeDefined(); await act(async () => { button!.click() }) }
   const wait = async (text: string) => { await vi.waitFor(async () => { await act(async () => {}); expect(element.textContent).toContain(text) }, { timeout: 5000 }) }
-  return { element, forwardRpc, render, click, wait, buttons, openSession, root, client }
+  return { element, forwardRpc, render, click, wait, buttons, openSession, root, client, sdk }
 }
 async function existingGoal() {
   await owner.create({ id: 'original-goal', title: 'Actual goal' }); await owner.update('original-goal', { alignment: proposal })
@@ -583,3 +597,108 @@ it.each([false, true])('mobile exact acceptance keeps the goal open or explicitl
   await view.wait(finish ? '已验收，目标已结束。' : '已验收，目标仍开放。')
   expect(useAppStore.getState().sessions).toEqual([])
 })
+
+
+// These brand consumers use MobileApp and the same real public service/Host
+// domain/durable store above. Only native Agent execution remains controlled.
+it('mobile brand CTA opens the original form without writes and explicitly creates the same project Goal through its owner', async () => {
+  directoryProjects = [{ projectId: 'brand-project', name: 'Original workshop project', hostId: 'local', path: scratch.path, kind: 'workspace', repoPath: null, branch: null, activeAgentSessionIds: [] }]
+  const view = await mount(undefined, true)
+  await view.wait('从一个想法开始')
+  expect(await owner.list()).toEqual([])
+  expect(view.forwardRpc.mock.calls.filter(([method]) => ['goal.create', 'goal.discuss'].includes(method))).toEqual([])
+  await view.click('开始新目标')
+  const form = view.element.querySelector<HTMLElement>('.mobile-goal-create__form')!
+  expect(form.hasAttribute('hidden'), 'the brand CTA expands the original creation owner').toBe(false)
+  expect(view.element.querySelector('.mobile-goals-start__create'), 'the expanded form has one primary submission').toBeNull()
+  const project = form.querySelector<HTMLSelectElement>('[aria-label="新目标项目"]')!
+  expect(document.activeElement).toBe(project)
+  await act(async () => { project.value = 'brand-project'; project.dispatchEvent(new Event('change', { bubbles: true })) })
+  await view.click('新建目标'); await view.click('开始新目标')
+  expect(form.querySelector<HTMLSelectElement>('[aria-label="新目标项目"]')!.value).toBe('brand-project')
+  expect(document.activeElement).toBe(project)
+  expect(view.forwardRpc.mock.calls.filter(([method]) => ['goal.create', 'goal.discuss'].includes(method))).toEqual([])
+  expect(view.sdk!.submit).not.toHaveBeenCalled(); expect(view.sdk!.rejoinInput).not.toHaveBeenCalled()
+  await view.click('创建目标')
+  await vi.waitFor(async () => expect(await owner.list()).toHaveLength(1))
+  const input = view.forwardRpc.mock.calls.find(([method]) => method === 'goal.create')![1]
+  const saved = await openDemandStore({ root: join(directory, 'demands') }).get(input.goalId)
+  expect(saved).toMatchObject({ id: input.goalId, projectId: 'brand-project', projectName: 'Original workshop project', description: '', sessionIds: [] })
+  await vi.waitFor(() => expect(discussions.has(input.goalId)).toBe(true))
+  expect(view.forwardRpc).toHaveBeenCalledWith('goal.discuss', { goalId: input.goalId, mode: 'grill', operationId: expect.any(String) })
+  expect(view.forwardRpc.mock.calls.filter(([method]) => method === 'goal.create')).toHaveLength(1)
+  expect(view.forwardRpc.mock.calls.filter(([method]) => method === 'goal.discuss')).toHaveLength(1)
+  expect(view.sdk!.submit).not.toHaveBeenCalled(); expect(view.sdk!.respond).not.toHaveBeenCalled(); expect(view.sdk!.rejoinInput).not.toHaveBeenCalled()
+}, 30000)
+
+it('mobile brand art appears only on the visible Goal directory and current proposal while unknown and filters keep their facts', async () => {
+  const reads: Array<(value: any[]) => void> = []
+  const list = vi.spyOn(hostGoals.demands, 'list').mockImplementation(() => new Promise(resolve => { reads.push(resolve) }))
+  const view = await mount(undefined, true)
+  try {
+    await view.wait('目标列表尚未确认')
+    const art = view.element.querySelector<HTMLImageElement>('.mobile-goals-start__art')!
+    expect(art, 'the real MobileApp presents the shared workshop art').not.toBeNull()
+    expect(art.hidden, 'the shared brand art is visible').toBe(false)
+    expect(art.src).toContain('goals-companions-header.png')
+    expect(art.getAttribute('loading')).toBe('lazy'); expect(art.getAttribute('decoding')).toBe('async')
+    expect(view.element.querySelector('.mobile-goals-start--empty')).toBeNull()
+  } finally {
+    list.mockImplementation(() => owner.list())
+    await act(async () => { for (const release of reads) release([]) })
+  }
+  await view.wait('从一个想法开始')
+  expect(view.element.querySelector<HTMLImageElement>('.mobile-goals-start--empty img')?.src).toContain('/concepts/goals-companions.png')
+  const filter = view.element.querySelector<HTMLSelectElement>('[aria-label="筛选工作状态"]')!
+  await act(async () => { filter.value = 'done'; filter.dispatchEvent(new Event('change', { bubbles: true })) })
+  await view.wait('没有匹配的目标')
+  expect(view.element.querySelector('.mobile-goals-start--empty')).toBeNull()
+  list.mockRejectedValue(new Error('Original list is unknown'))
+  await view.click('刷新目标'); await view.wait('Original list is unknown')
+  expect(view.element.querySelector('.mobile-goals-start--empty')).toBeNull()
+  await openPrimary(view.element, 'Focus')
+  expect(view.element.querySelector('.mobile-goals-start__art'), 'hidden directories do not retain an image request').toBeNull()
+  expect(view.element.querySelector('.mobile-goal-discussion-heading img')).toBeNull()
+  expect(view.sdk!.submit).not.toHaveBeenCalled()
+}, 30000)
+
+it('mobile brand proposal actions retain the exact Goal owner, draft, confirmation and acceptance with explicit discussion only', async () => {
+  await owner.create({ id: 'brand-original-goal', title: 'Original brand proposal', status: 'in_review' })
+  await owner.update('brand-original-goal', { alignment: proposal })
+  const view = await mount(undefined, true)
+  await view.wait('Original brand proposal')
+  await view.click('Original brand proposal未分配项目 · 待检查'); await view.wait(proposal.summary)
+  const illustration = view.element.querySelector<HTMLImageElement>('.mobile-goal-discussion-heading img')!
+  expect(illustration.src).toContain('demand-dialogue.png'); expect(illustration.getAttribute('loading')).toBe('lazy')
+  await view.click('编辑目标正文')
+  const draft = view.element.querySelector<HTMLTextAreaElement>('article textarea')!
+  await act(async () => { Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(draft, 'Original unsaved brand draft'); draft.dispatchEvent(new Event('input', { bubbles: true })) })
+  await view.click('返回目标正文')
+  expect(view.forwardRpc.mock.calls.filter(([method]) => ['goal.discuss', 'goal.confirm', 'goal.accept', 'goal.update'].includes(method))).toEqual([])
+  await view.click('讨论目标变更')
+  expect(view.forwardRpc).toHaveBeenCalledWith('goal.discuss', { goalId: 'brand-original-goal', mode: 'grill', operationId: expect.any(String) })
+  await vi.waitFor(() => expect(discussions.has('brand-original-goal')).toBe(true))
+  await vi.waitFor(() => expect(getDeviceWorkface().snapshot().record.selectedSessionId).toBe('discussion-agent:brand-original-goal'))
+  // The real App opens the original receipt's Session. Return through its
+  // directory and reopen the retained Goal rather than reconstructing it.
+  await openPrimary(view.element, 'Goals')
+  await view.wait(proposal.summary)
+  await view.click('编辑目标正文')
+  expect(view.element.querySelector<HTMLTextAreaElement>('article textarea')?.value).toBe('Original unsaved brand draft')
+  await view.click('返回目标正文')
+  vi.mocked(hostGoals.demands.confirmAlignment).mockImplementationOnce(async (id, revision) => { await owner.confirmAlignment(id, revision); throw new Error('Original brand ACK unknown') })
+  await view.click('确认当前目标'); await view.wait('Original brand ACK unknown')
+  expect(view.forwardRpc).toHaveBeenCalledWith('goal.confirm', { goalId: 'brand-original-goal', expectedRevision: 1, operationId: expect.any(String) })
+  const pending = getDeviceWorkface().snapshot().record.goalIntents!
+  expect(pending).toMatchObject([{ goalId: 'brand-original-goal', kind: 'confirm', phase: 'unknown' }])
+  expect(view.buttons('读取当前提案与报告')).toHaveLength(1)
+  await view.click('读取当前提案与报告'); await view.wait('已读取当前目标')
+  expect(view.forwardRpc.mock.calls.filter(([method]) => method === 'goal.confirm')).toHaveLength(1)
+  await owner.update('brand-original-goal', { grounding: { alignmentRevision: 1, summary: 'Original checked brand result', checks: [{ criterionId: 'c', outcome: 'met', evidence: ['proof.log'], note: '' }] } })
+  await view.click('刷新目标'); await view.wait('Original checked brand result')
+  const submission = (await owner.get('brand-original-goal'))!.grounding!.submissionId
+  await view.click('接受当前结果'); await view.wait('已验收，目标仍开放')
+  expect(view.forwardRpc).toHaveBeenCalledWith('goal.accept', { goalId: 'brand-original-goal', expectedAlignmentRevision: 1, expectedSubmissionId: submission, acceptGaps: false, operationId: expect.any(String) })
+  expect((await owner.get('brand-original-goal'))!.grounding!.acceptedAt).not.toBeNull()
+  expect(view.sdk!.submit).not.toHaveBeenCalled(); expect(view.sdk!.respond).not.toHaveBeenCalled(); expect(view.sdk!.rejoinInput).not.toHaveBeenCalled()
+}, 30000)
