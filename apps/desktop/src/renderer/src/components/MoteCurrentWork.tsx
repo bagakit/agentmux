@@ -1,3 +1,4 @@
+import { demandAgentReferenceKey, mergeDemandAgentReferences } from '@agentmux/demand/relations'
 import { mintObjectId } from '@agentmux/core/object-id'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useEffect, useMemo, useRef, useState } from 'react'
@@ -6,9 +7,9 @@ import { AGENTMUX_CONTROL_SCHEMA_VERSION } from '@agentmux/core/control'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import type { MoteWorkfaceScope } from '../lib/mote-workface'
 import type { WorkbenchProjectionSelection } from '../lib/workbench-projection'
-import { goalsForMote, moteCurrentGoals, moteGoalContext, moteGoalSummary } from '../lib/mote-goals'
+import { goalsForMote, moteCurrentGoals, moteGoalContext, moteGoalSummary, moteGoalSourceFacts, moteGoalSourceLocator, retainMoteGoalContext } from '../lib/mote-goals'
 import { sessionPresentationById } from '../lib/session-presentation'
-import { fileNavigationSelection, useAppStore } from '../store'
+import { currentCoreSpatialGraph, fileNavigationSelection, useAppStore } from '../store'
 import { MoteBehaviorAction } from './MoteBehaviorDialog'
 import { SelectionField } from './SelectionField'
 import { GoalContinuationControl } from './GoalContinuationControl'
@@ -24,26 +25,32 @@ const ThemeNavigationGoalsIcon = semanticIconComponent('navigation.goals')
 export function MoteCurrentWork({ scope, reference, active = true }: {
   scope: MoteWorkfaceScope; reference?: WorkbenchProjectionSelection | null | undefined; active?: boolean
 }) {
+  const sourceGraph = useAppStore(() => active && scope.workspace.hostId === 'local' ? currentCoreSpatialGraph() : null)
+  const sourceConfig = useAppStore(state => active ? state.config : null)
+  const sourceBindings = useAppStore(state => active ? state.spaceZoneBindings : null)
+  const sourceLocator = useMemo(() => moteGoalSourceLocator(useAppStore.getState(), scope, sourceGraph), [scope, sourceGraph, sourceConfig, sourceBindings])
   const facts = useAppStore(useShallow(state => active ? ({ config: state.config, tabs: state.tabs, layouts: state.layouts,
     scratchTopicSnapshots: state.scratchTopicSnapshots, spaceZoneBindings: state.spaceZoneBindings,
-    topicCategories: state.topicCategories, workbenchSpaceSelection: state.workbenchSpaceSelection, activeWorkspaceId: state.activeWorkspaceId }) : null))
+    topicCategories: state.topicCategories, workbenchSpaceSelection: state.workbenchSpaceSelection, activeWorkspaceId: state.activeWorkspaceId, coreGraph: sourceGraph, ...moteGoalSourceFacts(state, scope, sourceLocator) }) : null))
   const observedDemands = useAppStore(state => active ? state.demands : null)
   const retainedDemands = useRef(observedDemands ?? useAppStore.getState().demands)
   if (observedDemands !== null) retainedDemands.current = observedDemands
   const demands = retainedDemands.current
   const currentContext = useRef<{ identity: string; value: ReturnType<typeof moteGoalContext> } | null>(null)
   const identity = JSON.stringify([scope.workspace.id, scope.workspace.hostId, scope.workspace.path, scope.topic.id, scope.rootPath, reference])
-  const context = useMemo(() => {
+  const observedContext = useMemo(() => {
     if (!active && currentContext.current?.identity === identity) return currentContext.current.value
-    const value = moteGoalContext(useAppStore.getState(), scope, reference)
+    const value = moteGoalContext(useAppStore.getState(), scope, reference, sourceGraph, sourceLocator)
     currentContext.current = { identity, value }; return value
-  }, [active, facts, scope, reference, identity])
+  }, [active, facts, scope, reference, identity, sourceLocator])
   const resourceIdentity = JSON.stringify([scope.workspace.hostId, scope.workspace.id, scope.workspace.path, scope.topic.id, scope.rootPath])
-  const retainedContext = useRef({ identity: resourceIdentity, value: context })
-  if (retainedContext.current.identity !== resourceIdentity || !context.issue || context.sessionIds.length || context.contentRef)
-    retainedContext.current = { identity: resourceIdentity, value: context }
-  const visibleContext = context.issue ? retainedContext.current.value : context
+  const retainedContext = useRef({ identity: resourceIdentity, value: observedContext })
+  const context = retainedContext.current.identity === resourceIdentity ? retainMoteGoalContext(retainedContext.current.value, observedContext) : observedContext
+  retainedContext.current = { identity: resourceIdentity, value: context }
+  const visibleContext = context
   const visibleSessionIds = visibleContext.sessionIds
+  const qualifiedKeys = useMemo(() => new Set(visibleContext.agentReferences.map(demandAgentReferenceKey)), [visibleContext.agentReferences])
+  const loadedQualifiedKeys = useMemo(() => new Set(context.loadedReferenceKeys), [context.loadedReferenceKeys])
   const observedLabels = useAppStore(useShallow(state => {
     if (!active) return null
     const byId = sessionPresentationById(state.sessions)
@@ -60,7 +67,7 @@ export function MoteCurrentWork({ scope, reference, active = true }: {
     retainedLabels.current = { identity: labelIdentity, value: Object.fromEntries(visibleSessionIds.flatMap(id => { const session = byId.get(id); return session ? [[id, session.label]] : [] })) }
   }
   const labels = retainedLabels.current.value
-  const goals = useMemo(() => goalsForMote(demands, visibleSessionIds, visibleContext.contentRef), [demands, visibleSessionIds, visibleContext.contentRef])
+  const goals = useMemo(() => goalsForMote(demands, visibleSessionIds, visibleContext.contentRef, visibleContext.agentReferences), [demands, visibleSessionIds, visibleContext.contentRef, visibleContext.agentReferences])
   const currentGoals = useMemo(() => moteCurrentGoals(goals), [goals])
   const [showAll, setShowAll] = useState(false)
   const visibleGoals = showAll ? goals : currentGoals.slice(0, 3)
@@ -112,7 +119,7 @@ export function MoteCurrentWork({ scope, reference, active = true }: {
   }
   async function link() {
     if (flight.current) return
-    const state = useAppStore.getState(), current = moteGoalContext(state, scope, reference), goal = state.demands[selectedGoal]
+    const state = useAppStore.getState(), current = moteGoalContext(state, scope, reference, currentCoreSpatialGraph()), goal = state.demands[selectedGoal]
     if (!goal || !current.sessionIds.includes(sessionId)) { setIssue('Choose a current Goal and an exact Mote discussion. Existing work is kept.'); return }
     const token = {}; flight.current = token; const owner = lifetime.current
     const submittedIntent = associationIntent.current
@@ -120,7 +127,7 @@ export function MoteCurrentWork({ scope, reference, active = true }: {
     const unsubscribe = useAppStore.subscribe(next => { if (fileNavigationSelection(next) !== navigation) moved = true })
     setLoading(true)
     try {
-      await state.updateDemand(goal.id, { sessionIds: [...new Set([...goal.sessionIds, sessionId])],
+      await state.updateDemand(goal.id, { sessionIds: mergeDemandAgentReferences(goal.sessionIds, [sessionId]),
         ...(current.contentRef ? { contentRefs: [current.contentRef] } : {}) }, undefined, goal.updatedAt)
       if (lifetime.current === owner && associationIntent.current === submittedIntent && !moved) { setChooser(false); setIssue(null); setExpanded(goal.id) }
     } catch (error) { if (lifetime.current === owner && associationIntent.current === submittedIntent) setIssue(presentError(error)) }
@@ -135,7 +142,7 @@ export function MoteCurrentWork({ scope, reference, active = true }: {
     {loading ? <p role="status" className="mote-details__hint">Reading original goals…</p> : null}
     {visibleGoals.map(goal => {
       const summary = moteGoalSummary(goal), open = expanded === goal.id
-      const unloaded = goal.sessionIds.filter(id => context.sessionIds.includes(id) && !Object.hasOwn(labels, id))
+      const unloaded = goal.sessionIds.filter(id => typeof id === 'string' ? visibleSessionIds.includes(id) && !Object.hasOwn(labels, id) : qualifiedKeys.has(demandAgentReferenceKey(id)) && !loadedQualifiedKeys.has(demandAgentReferenceKey(id)))
       return <div className="mote-current-work__goal" key={goal.id} data-mote-goal={goal.id}>
         <div className="mote-current-work__row"><button type="button" className="mote-current-work__copy" aria-expanded={open}
           onClick={() => { associationIntent.current = {}; setExpanded(open ? null : goal.id) }}><strong>{goal.title}</strong><span>{summary.next}</span></button>
