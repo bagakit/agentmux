@@ -14,10 +14,13 @@ const ThemeActionCloseIcon = semanticIconComponent('action.close')
 export interface SelectionOption { value: string; label: string; disabled?: boolean; icon?: ReactNode; description?: string }
 
 /** Controlled presentation only. The caller owns options, saved identity and domain actions. */
-export function SelectionField({ id, label, value, options, onValueChange, disabled = false, className = '', menuClassName = '', menuBoundary, triggerLabel, searchable, open: controlledOpen, onOpenChange, footer }: {
+export function SelectionField({ id, label, value, options, onValueChange, disabled = false, className = '', menuClassName = '', menuBoundary, triggerLabel, searchable, open: controlledOpen, onOpenChange, footer, labelledBy, describedBy, missingOptionLabel = 'Not in current options', missingOptionDescription }: {
   id?: string | undefined; label: string; value: string; options: readonly SelectionOption[]
   onValueChange(value: string): void; disabled?: boolean; className?: string; menuClassName?: string; menuBoundary?: HTMLElement | null; triggerLabel?: string | undefined; searchable?: boolean
   open?: boolean; onOpenChange?(open: boolean): void; footer?: ReactNode
+  labelledBy?: string | undefined; describedBy?: string | undefined
+  /** Caller-owned meaning for a value absent from options; never inferred as a saved or unavailable identity. */
+  missingOptionLabel?: string | undefined; missingOptionDescription?: string | undefined
 }) {
   const ownerDocument = useWorkbenchDocument()
   const descriptionId = useId(), trigger = useRef<HTMLButtonElement>(null)
@@ -40,8 +43,10 @@ export function SelectionField({ id, label, value, options, onValueChange, disab
     target?.focus()
   }
   const selected = options.find(option => option.value === value)
-  const currentLabel = selected?.label ?? 'Saved selection · not in current options'
-  const currentDescription = selected?.description ? `${currentLabel} · ${selected.description}` : currentLabel
+  const currentLabel = selected?.label ?? missingOptionLabel
+  const currentDescription = selected?.description ? `${selected.label} · ${selected.description}` : selected?.label ?? missingOptionDescription ?? currentLabel
+  const describedByIds = [describedBy, descriptionId].filter(Boolean).join(' ') || undefined
+  const currentTitle = selected ? currentDescription : `${currentDescription}: ${value}`
   return <Menu.Root open={open} onOpenChange={open => {
     if (controlledOpen === undefined) setLocalOpen(open)
     onOpenChange?.(open)
@@ -50,8 +55,8 @@ export function SelectionField({ id, label, value, options, onValueChange, disab
   }}>
     <Menu.Trigger asChild>
       <button ref={trigger} id={id} type="button" className={`selection-field ${className}`} aria-label={label}
-        aria-describedby={descriptionId} data-value={value} title={selected ? currentDescription : `${currentLabel}: ${value}`} disabled={disabled}>
-        <span className="selection-field__choice">{selected?.icon ? <span className="selection-field__icon" inert aria-hidden="true">{selected.icon}</span> : null}<span>{triggerLabel ?? currentLabel}</span></span><span id={descriptionId} hidden>{selected ? currentDescription : `${currentLabel}: ${value}`}</span><ThemeNavigationDownIcon size={13} aria-hidden="true" />
+        aria-describedby={describedByIds} aria-labelledby={labelledBy} data-value={value} title={currentTitle} disabled={disabled}>
+        <span className="selection-field__choice">{selected?.icon ? <span className="selection-field__icon" inert aria-hidden="true">{selected.icon}</span> : null}<span>{triggerLabel ?? currentLabel}</span></span><span id={descriptionId} hidden>{currentTitle}</span><ThemeNavigationDownIcon size={13} aria-hidden="true" />
       </button>
     </Menu.Trigger>
     <DocumentOverlayPortal component={Menu.Portal}>
@@ -79,7 +84,7 @@ export function SelectionField({ id, label, value, options, onValueChange, disab
         <Menu.RadioGroup value={value} onValueChange={next => {
           if (!disabled && options.some(option => option.value === next && !option.disabled)) onValueChange(next)
         }}>
-          {!selected ? <Menu.RadioItem className="tab-context-menu__item selection-field__option" value={value} disabled>
+          {!selected ? <Menu.RadioItem className="tab-context-menu__item selection-field__option" value={value}>
             <span className="selection-field__mark"><ThemeStatusSelectedIcon size={13} /></span><span title={value}>{currentLabel}</span>
           </Menu.RadioItem> : null}
           {visibleOptions.map(option => <Menu.RadioItem key={option.value} value={option.value} data-value={option.value} disabled={disabled || (option.disabled ?? false)}
