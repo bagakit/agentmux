@@ -176,7 +176,6 @@ it('actual native save bridge protects a same-length corrupted database', async 
     await expect(bridge.api!.ui.writeWorkbenchState(workbenchDelta('Edited input'))).rejects.toThrow()
     expect(await readFile(workbenchUserState.databasePath)).toEqual(damaged)
     expect(workbenchUserState.observe()).toMatchObject({ availability: 'unconfirmed', diskDurability: 'unconfirmed', lastConfirmedWrite: receipt })
-    await workbenchUserState.flushDiagnostics()
   } finally { await dispose() }
 })
 

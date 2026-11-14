@@ -167,6 +167,7 @@ export async function owningBridge(actual?: { client: DesktopRuntimeClient; stor
     for (const pending of initializations) bridge.notesInitializations.delete(pending)
     try { await release?.() } catch (error) { failures.push(error) }
     try { await runtime.dispose() } catch (error) { failures.push(error) }
+    try { await workbenchUserState.flushDiagnostics() } catch (error) { failures.push(error) }
     try { await rm(root, { recursive: true, force: true }) } catch (error) { failures.push(error) }
     if (failures.length) throw new AggregateError(failures, 'Private IPC owner cleanup failed: ' + failures.flatMap(error => error instanceof AggregateError ? error.errors : [error]).map(error => error instanceof Error ? error.message : String(error)).join('; '))
   })()
