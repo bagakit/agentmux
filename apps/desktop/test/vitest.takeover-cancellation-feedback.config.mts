@@ -1,0 +1,42 @@
+import { defineConfig } from 'vitest/config'
+import { createHash } from 'node:crypto'
+import { appendFileSync } from 'node:fs'
+import { relative, resolve } from 'node:path'
+import assert from 'node:assert/strict'
+import source from './vitest.mote-context.config.mts'
+
+const mutations: Record<string, [string, string, string]> = {
+  'unknown-write-replayed': ['session-takeover-cancellation.ts', "if (held.cancellation?.dispatch === 'unconfirmed' && !continueOriginal) return inspectTakeoverCancellation(held)", ''],
+  'inspection-writes': ['session-takeover-cancellation.ts', 'api.sessions.takeoverCancelInspect(cancellation.input)', 'api.sessions.takeoverCancel(cancellation.input)'],
+  'effect-requires-lost-write-ack': ['session-takeover-cancellation.ts', "phase: accepted.outcome === 'cancelled' ? 'cancelled'", "phase: accepted.outcome === 'cancelled' && accepted.diskDurability === 'confirmed' ? 'cancelled'"],
+  'save-ack-hidden': ['AgentOperationFeedback.tsx', "cancellation?.result?.outcome !== 'unconfirmed' && cancellation?.result?.diskDurability === 'unconfirmed'", 'false'],
+  'cancelled-revived': ['agent-operation-feedback.ts', "held.phase === 'cancelled' || ", ''],
+  'restored-cancellation-reset': ['agent-operation.ts', "phase: result?.outcome === 'cancelled' ? 'cancelled' : 'unconfirmed'", "phase: 'unconfirmed'"],
+  'discard-original-message': ['session-takeover-cancellation.ts', '...held, cancellation: next,', '...held, message: undefined, cancellation: next,'],
+  'weaker-observation-wins': ['session-takeover-cancellation.ts', "const weaker = known && known.outcome !== 'unconfirmed' &&", "const weaker = false && known && known.outcome !== 'unconfirmed' &&"],
+  'source-runtime-used': ['session-takeover-cancellation.ts', 'held.takeoverSource.coreRuntimeId ?? (await api.spatial.owner()).owner.runtimeId', 'held.takeoverSource.expectedRuntimeId ?? (await api.spatial.owner()).owner.runtimeId'],
+  'inspection-renames': ['session-takeover.ts', 'return takeoverReport(result.request.report)', 'return nameTakeover(source, takeoverReport(result.request.report))'],
+  'continuation-replaces-control': ['session-takeover-cancellation.ts', 'const cancellation: TakeoverCancellation = held.cancellation ??', 'const cancellation: TakeoverCancellation =']
+}
+const mutation = process.env.AGENTMUX_TAKEOVER_FEEDBACK_MUTATION
+if (mutation) assert.ok(mutations[mutation], 'Known original feedback consumer mutation')
+export default defineConfig({ ...source,
+  define: { ...source.define, __AGENTMUX_WEB_PREVIEW__: 'false' },
+  cacheDir: resolve(source.root!, '.tmp/takeover-cancellation-feedback-cache', mutation ?? 'baseline'),
+  plugins: [...source.plugins ?? [], { name: 'actual-takeover-cancellation-consumer', enforce: 'pre', transform(original, id) {
+    const path = relative(source.root!, id.split('?')[0]!)
+    if (!path.startsWith('apps/desktop/src/') && !path.startsWith('packages/core/src/') && !path.startsWith('apps/host/src/')) return
+    let loaded = original
+    const change = mutation && mutations[mutation]
+    if (change && path.endsWith('/' + change[0])) {
+      assert.equal(original.split(change[1]).length - 1, 1, 'One loaded original mutation anchor')
+      loaded = original.replace(change[1], change[2])
+    }
+    if (process.env.AGENTMUX_TAKEOVER_FEEDBACK_LOADED) appendFileSync(process.env.AGENTMUX_TAKEOVER_FEEDBACK_LOADED,
+      JSON.stringify({ path, originalSHA256: createHash('sha256').update(original).digest('hex'), loadedSHA256: createHash('sha256').update(loaded).digest('hex'),
+        mutation: original === loaded ? null : mutation }) + '\n')
+    return loaded === original ? undefined : { code: loaded, map: null }
+  } }],
+  test: { ...source.test, include: ['apps/desktop/test/takeover-cancellation-feedback.test.tsx'], setupFiles: [], globalSetup: [],
+    passWithNoTests: false, maxWorkers: 1, fileParallelism: false, testTimeout: 15000, hookTimeout: 15000 }
+})

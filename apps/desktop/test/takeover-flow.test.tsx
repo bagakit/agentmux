@@ -179,7 +179,7 @@ it('retained continuation is available on the original operation feedback and ne
   const operation = retained(), frozen = structuredClone(operation.takeoverSource.coreRequest)
   await dom.render(<AgentOperationFeedback subject={operation.subject} />)
   const summary = document.querySelector<HTMLElement>('.agent-operation-feedback__label')!
-  await act(async () => summary.click())
+  expect(summary.getAttribute('aria-expanded')).toBe('true')
   const button = [...document.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === '继续原接手')!
   expect(button).toBeDefined(); await act(async () => button.click())
   await vi.waitFor(() => expect(retained().phase, JSON.stringify(retained())).toBe('succeeded'))
