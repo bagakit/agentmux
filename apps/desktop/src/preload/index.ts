@@ -13,7 +13,7 @@ import { readInputObservation } from '@agentmux/core/control'
 import type { BrowserResultArtifactChunk, BrowserResultReadOptions } from '@agentmux/browser/model/browser-result-artifact'
 import type { BrowserTaskAssetRunInput, BrowserTaskContent, BrowserTaskBatchInput } from '../shared/browser-task-assets'
 import { NATIVE_BROWSER_VISIBILITY_CHANNEL, NATIVE_BROWSER_INPUT_CHANNEL, NATIVE_OVERLAY_WARNING_CHANNEL } from '../shared/contracts'
-import type { ContinuousProgressLoop, ContinuousProgressTarget, ContinuousProgressTaskSource } from '@agentmux/core'
+import type { ContinuousProgressLoop, ContinuousProgressTarget } from '@agentmux/core'
 import type { DesktopControlRequest } from '../shared/contracts'
 import { contextBridge, ipcRenderer, webFrame, webUtils } from 'electron'
 let workbenchWriteRevision = 0
@@ -624,8 +624,8 @@ const api: AgentMuxPreloadApi = {
   continuousProgress: {
     goals: goalId => ipcRenderer.invoke('continuousProgress:goals', goalId),
     goalAction: (goalId, loopId, action, revision, operationId, caller) => ipcRenderer.invoke('continuousProgress:goalAction', goalId, loopId, action, revision, operationId, caller),
-    list: (target: ContinuousProgressTarget) => ipcRenderer.invoke('continuousProgress:list', target),
-    create: (target: ContinuousProgressTarget, intervalMs: number, prompt: string, taskSource?: ContinuousProgressTaskSource,inputEpoch?:string) => ipcRenderer.invoke('continuousProgress:create', target, intervalMs, prompt, taskSource,inputEpoch),
+    list: (target: ContinuousProgressTarget, operationId?: string) => ipcRenderer.invoke('continuousProgress:list', target, operationId),
+    create: input => ipcRenderer.invoke('continuousProgress:create', input),
     update: async input => {
       const result: import('../shared/continuous-progress').ProgressUpdateResult = await ipcRenderer.invoke('continuousProgress:update', input)
       if (!result.ok) throw Object.assign(new Error(result.error.message), { code: result.error.code })

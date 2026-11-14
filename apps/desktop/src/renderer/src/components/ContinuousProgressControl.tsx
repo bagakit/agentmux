@@ -1,7 +1,7 @@
 import { mintObjectId } from '@agentmux/core/object-id'
 import { usePathDisplay } from '../hooks/usePathDisplay'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { isAgentSchedule, type ContinuousProgressLoop } from '@agentmux/core/continuous-progress-scheduler'
+import { continuousProgressRequestDigest, isAgentSchedule, type ContinuousProgressLoop } from '@agentmux/core/continuous-progress-scheduler'
 import type { SessionSnapshot } from '../../../shared/contracts'
 import { api } from '../lib/api'
 import { ContinuousProgressPanel } from './ContinuousProgressPanel'
@@ -10,28 +10,40 @@ import { agentProviderLabel } from '@agentmux/client-ui/components/AgentProvider
 import { CalendarScheduleControl } from './CalendarScheduleControl'
 import { useAppStore } from '../store'
 import { resolveAutomationPreferences } from '../../../shared/automation-preferences'
-import type { ProgressUpdateRequest } from '../../../shared/continuous-progress'
+import type { ProgressUpdateRequest, ProgressRequest, OriginalContinuousProgressControl } from '../../../shared/continuous-progress'
 import { useLauncherState, checkpointLauncherState, initializeLauncherState } from '../lib/launcher-state'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 
 export type ContinuousProgressStatus = 'inactive' | 'active' | 'paused' | 'unconfirmed'
+function recordedProgressRequest(request: ProgressRequest, loop: ContinuousProgressLoop | undefined): boolean {
+  if (!loop || ['hostId', 'agentSessionId', 'providerId', 'workspacePath'].some(key =>
+    loop[key as keyof typeof request.input.target] !== request.input.target[key as keyof typeof request.input.target])) return false
+  return request.kind === 'create' ? loop.creationOperationId === request.input.operationId && loop.intervalMs === request.input.intervalMs &&
+    loop.prompt === request.input.prompt && loop.inputEpoch === request.input.inputEpoch && JSON.stringify(loop.taskSource) === JSON.stringify(request.input.taskSource)
+    : loop.loopId === request.input.loopId && loop.lastMutation?.operationId === request.input.operationId && loop.lastMutation.action === request.input.action &&
+      loop.lastMutation.expectedRevision === (request.input.expectedLoop.revision ?? 0) && loop.lastMutation.requestDigest === continuousProgressRequestDigest(request.input) && loop.lastMutation.phase === 'settled'
+}
 
 /** Read the original Host only for this visible Session consumer; retained forms stay mounted. */
-export function ContinuousProgressControl({ session, targetName, onStatusChange, presented = true, visible = presented }: {
-  session: Extract<SessionSnapshot, { kind: 'agent' }>
+type ContinuousProgressControlProps = {
   targetName?: string | undefined
   onStatusChange?: (status: ContinuousProgressStatus) => void
   /** Only the detail DOM waits for first use; observation and action state stay mounted. */
   presented?: boolean
   /** Visibility controls presentation work without discarding retained forms. */
   visible?: boolean
-}) {
+} & ({ session: Extract<SessionSnapshot, { kind: 'agent' }>; original?: never } | { original: OriginalContinuousProgressControl; session?: never })
+export function ContinuousProgressControl({ session, original, targetName, onStatusChange, presented = true, visible = presented }: ContinuousProgressControlProps) {
   const displayPath = usePathDisplay()
-  const target = useMemo(() => ({ hostId: session.control.hostId, agentSessionId: session.control.agentSessionId,
-    providerId: session.providerId, workspacePath: session.workspacePath }),
-  [session.control.hostId, session.control.agentSessionId, session.providerId, session.workspacePath])
-  const targetKey = JSON.stringify([target.hostId, target.agentSessionId, target.providerId, target.workspacePath])
+  const target = useMemo(() => original?.target ?? { hostId: session!.control.hostId, agentSessionId: session!.control.agentSessionId,
+    providerId: session!.providerId, workspacePath: session!.workspacePath },
+  [original?.identity, original?.target.hostId, original?.target.agentSessionId, original?.target.providerId, original?.target.workspacePath,
+    session?.control.hostId, session?.control.agentSessionId, session?.providerId, session?.workspacePath])
+  const progressApi = original?.port ?? api.continuousProgress
+  const targetKey = JSON.stringify([target.hostId, target.agentSessionId, target.providerId, target.workspacePath, ...(original ? [original.identity] : [])])
   const draftKey = 'progress-update:' + targetKey
+  const pendingRequest = useLauncherState(state => state.drafts[draftKey]?.progressRequest)
+  const previousRequests = useLauncherState(state => state.drafts[draftKey]?.unconfirmedProgressRequests)
   const pendingUpdate = useLauncherState(state => state.drafts[draftKey]?.progressUpdate)
   const previousUpdates = useLauncherState(state => state.drafts[draftKey]?.unconfirmedProgressUpdates)
   const persistenceIssue = useLauncherState(state => state.persistenceIssue)
@@ -78,7 +90,7 @@ export function ContinuousProgressControl({ session, targetName, onStatusChange,
         const pending = reads.current.get(targetKey)
         if (pending) await pending.catch(() => {})
         if (!alive || document.hidden) return
-        const before = updates.current, request = api.continuousProgress.list(target); readCut = before
+        const before = updates.current, request = progressApi.list(target); readCut = before
         reads.current.set(targetKey, request)
         try {
           const result = await request
@@ -94,7 +106,7 @@ export function ContinuousProgressControl({ session, targetName, onStatusChange,
     const visibility = () => { void refresh() }
     document.addEventListener('visibilitychange', visibility)
     return () => { alive = false; window.clearInterval(timer); document.removeEventListener('visibilitychange', visibility) }
-  }, [target, targetKey, visible])
+  }, [target, targetKey, visible, progressApi])
   async function run(action: () => Promise<ContinuousProgressLoop>, onFailure?: (error: unknown) => void) {
     if (busy) return
     const captured = target, before = ++updates.current
@@ -131,15 +143,76 @@ export function ContinuousProgressControl({ session, targetName, onStatusChange,
     setBindSource(false); setSourceRoot(''); setSourceId(''); setReaderPath('')
     editBasis.current = undefined
   }, [target, loop?.loopId, observedTarget])
-  const status: ContinuousProgressStatus = error || observationError || displayed?.lastOutcome === 'unknown' || observedTarget !== target
+  const status: ContinuousProgressStatus = pendingRequest || previousRequests?.some(request => request.dispatch !== 'prepared') || error || observationError || displayed?.lastOutcome === 'unknown' || observedTarget !== target
     ? 'unconfirmed' : loop?.status === 'active' ? 'active' : loop?.status === 'paused' ? 'paused' : 'inactive'
-  const combinedStatus = [status, calendarStatus].includes('unconfirmed') ? 'unconfirmed' : [status, calendarStatus].includes('active') ? 'active' : [status, calendarStatus].includes('paused') ? 'paused' : 'inactive'
+  const combinedStatus = original ? status : [status, calendarStatus].includes('unconfirmed') ? 'unconfirmed' : [status, calendarStatus].includes('active') ? 'active' : [status, calendarStatus].includes('paused') ? 'paused' : 'inactive'
   useEffect(() => { onStatusChange?.(combinedStatus) }, [onStatusChange, combinedStatus])
+  async function performRequest(request: ProgressRequest) {
+    const captured = target
+    try { await initializeLauncherState() }
+    catch (failure) { setSaveNotice(presentError(failure)); return }
+    if (current.current !== captured) return
+    const held = useLauncherState.getState().drafts[draftKey]?.progressRequest
+    if (held || !useLauncherState.getState().setProgressRequest(draftKey, { ...request, dispatch: 'prepared' })) {
+      setSaveNotice('The original progress request is unconfirmed. Check that operation before another action.'); return
+    }
+    try {
+      await checkpointLauncherState()
+      if (!useLauncherState.getState().setProgressRequestDispatch(draftKey, request.input.operationId, 'started')) throw new Error('The original dispatch record could not be retained.')
+      await checkpointLauncherState()
+    } catch (failure) {
+      useLauncherState.getState().setProgressRequestDispatch(draftKey, request.input.operationId, 'prepared')
+      setSaveNotice('The original request could not be retained. No action was dispatched. ' + presentError(failure)); return
+    }
+    const result = await run(() => request.kind === 'create' ? progressApi.create(request.input) : progressApi.action(request.input.target,
+      request.input.loopId, request.input.action, request.input.expectedLoop, request.input.operationId))
+    if (result && recordedProgressRequest(request, result)) {
+      useLauncherState.getState().clearProgressRequest(draftKey, request.input.operationId)
+      try { await checkpointLauncherState() }
+      catch (failure) { if (current.current === captured) setSaveNotice(presentError(failure)) }
+    }
+    else if (result && current.current === captured) setSaveNotice('The original action is recorded but its result remains unconfirmed. Check its original operation; no action was repeated.')
+    return result && recordedProgressRequest(request, result) ? result : undefined
+  }
+  async function returnToEditing() {
+    const request = useLauncherState.getState().drafts[draftKey]?.progressRequest
+    if (busy || !request) return
+    const captured = target
+    useLauncherState.getState().retainProgressRequest(draftKey, request.input.operationId)
+    try { await checkpointLauncherState(); if (current.current === captured) setSaveNotice(request.dispatch === 'prepared' ? 'The original request was not dispatched and is kept below. Edit, then explicitly save a new request.' : 'The original request remains unconfirmed and is kept below. Edit, then explicitly save a new independent request.') }
+    catch (failure) { if (current.current === captured) setSaveNotice(presentError(failure)) }
+  }
+  async function checkOriginalRequest(returnToLoop = false) {
+    const request = useLauncherState.getState().drafts[draftKey]?.progressRequest
+    if (!request || busy) return
+    const captured = target
+    setBusy(true)
+    try {
+      const records = await progressApi.list(request.input.target, request.input.operationId)
+      const latest = await progressApi.list(request.input.target)
+      if (current.current !== captured || useLauncherState.getState().drafts[draftKey]?.progressRequest?.input.operationId !== request.input.operationId) return
+      const found = records.find(value => request.kind === 'create' ? value.creationOperationId === request.input.operationId : value.loopId === request.input.loopId)
+      const currentLoop = latest.find(value => request.kind === 'create' ? value.creationOperationId === request.input.operationId : value.loopId === request.input.loopId)
+      const sameTarget = currentLoop && ['hostId', 'agentSessionId', 'providerId', 'workspacePath'].every(key =>
+        currentLoop[key as keyof typeof target] === request.input.target[key as keyof typeof target])
+      const confirmed = recordedProgressRequest(request, found)
+      updates.current++; setLoops(latest.filter(value => !isAgentSchedule(value))); setObservedTarget(target)
+      if (confirmed) {
+        useLauncherState.getState().clearProgressRequest(draftKey, request.input.operationId)
+        setSaveNotice('The original operation was found in Host storage. This is a recovered observation; no action was repeated.'); setError(undefined)
+      } else if (returnToLoop && sameTarget) {
+        useLauncherState.getState().retainProgressRequest(draftKey, request.input.operationId)
+        setSaveNotice('The original loop is shown. The previous action remains unconfirmed below; it was not repeated.'); setError(undefined)
+      } else setSaveNotice('The original operation remains unconfirmed. Missing records do not prove it was not applied. No action was repeated.')
+      await checkpointLauncherState()
+    } catch (failure) { if (current.current === captured) setSaveNotice(presentError(failure)) }
+    finally { if (current.current === captured) setBusy(false) }
+  }
   async function action(kind: 'pause' | 'resume' | 'stop' | 'check') {
     if (!loop || busy) return
     const captured = target
     setActionNotice(kind === 'resume' ? 'Resuming and checking this Agent…' : kind === 'check' ? 'Checking this Agent…' : kind === 'pause' ? 'Pausing automatic progress…' : 'Stopping automatic progress…')
-    const result = await run(() => api.continuousProgress.action(target, loop.loopId, kind, loop, mintObjectId()))
+    const result = await performRequest({ kind: 'action', input: { target, loopId: loop.loopId, action: kind, expectedLoop: loop, operationId: mintObjectId() } })
     if (current.current !== captured) return
     setActionNotice(!result ? undefined : kind === 'pause' ? 'Automatic progress paused.' : kind === 'stop' ? 'Automatic progress stopped.'
       : result.lastOutcome === 'unknown' ? 'The check result is unconfirmed. Review the latest decision.'
@@ -159,6 +232,7 @@ export function ContinuousProgressControl({ session, targetName, onStatusChange,
     if (busy || configurationSave.current) return
     configurationSave.current = true
     try {
+    if (useLauncherState.getState().drafts[draftKey]?.progressRequest) { if (pendingRequest?.dispatch === 'prepared') await returnToEditing(); else await checkOriginalRequest(); return }
     setSaveNotice(undefined)
     try { await initializeLauncherState() }
     catch (error) { setSaveNotice(presentError(error)); return }
@@ -175,9 +249,10 @@ export function ContinuousProgressControl({ session, targetName, onStatusChange,
     } : undefined)
     if (!request) {
       let inputEpoch:string|undefined
-      try{inputEpoch=await api.sessions.readInputEpoch(target.hostId)??undefined}catch{/* Preserve the original request without guessing a storage cut. The final owner decides input. */}
+      try{inputEpoch=await (original ? original.readInputEpoch() : api.sessions.readInputEpoch(target.hostId))??undefined}catch{/* Preserve the original request without guessing a storage cut. The final owner decides input. */}
       if(current.current!==captured)return
-      const created = await run(() => api.continuousProgress.create(target, Number(interval) * 60_000, prompt, bindSource ? { root: sourceRoot, ownerId: sourceId, readerPath } : undefined,inputEpoch))
+      const created = await performRequest({ kind: 'create', input: { target, intervalMs: Number(interval) * 60_000, prompt, operationId: mintObjectId(),
+        ...(bindSource ? { taskSource: { root: sourceRoot, ownerId: sourceId, readerPath } } : {}), ...(inputEpoch ? { inputEpoch } : {}) } })
       if (created && current.current === captured) {
         editBasis.current = created
         if (editVersion.current === version) { edited.current = false; useLauncherState.getState().setProgressDraft(draftKey, undefined) }
@@ -187,10 +262,11 @@ export function ContinuousProgressControl({ session, targetName, onStatusChange,
     useLauncherState.getState().setProgressUpdate(draftKey, request)
     try { await checkpointLauncherState() }
     catch {
-      setSaveNotice('The save request could not be retained on this device. Your original request and current draft are kept; retry when storage is available.')
+      if (!restoredPending) useLauncherState.getState().retainProgressUpdate(draftKey, true)
+      setSaveNotice('The save request could not be retained on this device. No update was dispatched. Your original request is kept below; edit and explicitly save when storage is available.')
       return
     }
-    const saved = await run(() => api.continuousProgress.update(request), failure => {
+    const saved = await run(() => progressApi.update(request), failure => {
       const code = (failure as { code?: string })?.code
       // Only an explicit first-attempt rejection proves this request was not applied.
       if (!restoredPending && ['CONTROL_REQUEST_CONFLICT', 'INVALID_CONTROL_REQUEST', 'CONTROL_PERMISSION_DENIED'].includes(code ?? '')) {
@@ -212,7 +288,7 @@ export function ContinuousProgressControl({ session, targetName, onStatusChange,
   async function reviewLatest() {
     const captured = target
     try {
-      const latest = await api.continuousProgress.list(target)
+      const latest = await progressApi.list(target)
       if (current.current !== captured) return
       updates.current++; setLoops(latest.filter(value => !isAgentSchedule(value))); setObservedTarget(target)
       editBasis.current = latest.find(value => value.loopId === loop?.loopId)
@@ -227,14 +303,14 @@ export function ContinuousProgressControl({ session, targetName, onStatusChange,
     <details className="continuous-progress-control__details" data-progress-details="interval" onToggle={event => event.stopPropagation()}>
       <summary><span className="automation-progress__title">Continuous progress</span> <span className="automation-state" data-state={status}>{status === 'unconfirmed' ? 'Unconfirmed' : displayed?.status === 'stopped' ? 'Stopped' : status === 'inactive' ? 'Not enabled' : status === 'active' ? 'Active' : 'Paused'}</span>{displayed ? <><small className="automation-progress__summary">{displayed.prompt.split('\n')[0]}</small><small className="automation-progress__cadence">Every {displayed.intervalMs / 60000} min</small></> : null}</summary>
       <div className="continuous-progress-control__detail-body">
-    {displayed ? <ContinuousProgressPanel loop={{ loopId: displayed.loopId, providerLabel: agentProviderLabel(session.providerId),
-      executionState: session.status.state, loopState: displayed.status,
+    {displayed ? <ContinuousProgressPanel loop={{ loopId: displayed.loopId, providerLabel: agentProviderLabel(target.providerId),
+      executionState: original?.executionState ?? session!.status.state, loopState: displayed.status,
       ...(displayed.status === 'active' && status !== 'unconfirmed' ? { nextCheckAt: displayed.nextCheckAt } : {}),
       ...(displayed.lastTickAt !== undefined ? { lastTickAt: displayed.lastTickAt } : {}),
       ...(displayed.lastDecision ? { lastDecision: displayed.lastDecision } : displayed.lastOutcome === 'sent' ? { lastDecision: 'Host accepted the request; a new Agent turn is not yet confirmed.' } : {}) }}
       unconfirmed={status === 'unconfirmed'}
       notice={error ?? actionNotice}
-      disabled={busy} onPause={() => action('pause')} onResume={() => action('resume')} onStop={() => action('stop')} onCheck={() => action('check')} />
+      disabled={busy || !!pendingRequest} onPause={() => action('pause')} onResume={() => action('resume')} onStop={() => action('stop')} onCheck={() => action('check')} />
       : null}
     {displayed ? <details className="continuous-progress-control__details" data-progress-details="configuration" onToggle={event => event.stopPropagation()}>
       <summary>Saved configuration</summary>
@@ -270,21 +346,34 @@ export function ContinuousProgressControl({ session, targetName, onStatusChange,
         {pendingUpdate && !busy ? <p className="continuous-progress-control__help">Previous save is unconfirmed. Retry saves its original values; your newer draft is kept.</p> : null}
         {pendingUpdate ? <button type="button" className="small-button" disabled={busy} onClick={() => void reviewLatest()}>Review latest settings</button> : null}
         {previousUpdates?.length ? <details className="continuous-progress-control__details" onToggle={event => event.stopPropagation()}><summary>Previous unconfirmed saves</summary>
-          {previousUpdates.map(request => <div key={request.operationId} className="continuous-progress-control__detail-body"><code>{request.operationId}</code><p>{request.intervalMs / 60_000} minutes</p><p className="continuous-progress-control__prompt">{request.prompt}</p></div>)}
+          {previousUpdates.map(request => <div key={request.operationId} className="continuous-progress-control__detail-body"><code>{request.operationId}</code><p>{request.notDispatched ? 'Not dispatched. ' : ''}{request.intervalMs / 60_000} minutes</p><p className="continuous-progress-control__prompt">{request.prompt}</p></div>)}
         </details> : null}
         {conflict ? <button type="button" className="small-button" onClick={() => void reviewLatest()}>Review latest settings</button>
-          : <button type="submit" className="automation-button automation-button--primary automation-submit" disabled={busy || (!pendingUpdate && (!prompt.trim() || (!loop && bindSource && (!sourceRoot.trim() || !sourceId.trim() || !readerPath.trim()))))}>{busy ? 'Saving…' : pendingUpdate ? 'Retry save' : loop ? 'Save changes' : 'Enable continuous progress'}</button>}
+          : <button type="submit" className="automation-button automation-button--primary automation-submit" disabled={busy || (!pendingRequest && !pendingUpdate && (!prompt.trim() || (!loop && bindSource && (!sourceRoot.trim() || !sourceId.trim() || !readerPath.trim()))))}>{busy ? 'Saving…' : pendingRequest ? pendingRequest.dispatch === 'prepared' ? 'Keep request and edit' : 'Check original request' : pendingUpdate ? 'Retry save' : loop ? 'Save changes' : 'Enable continuous progress'}</button>}
       </form>
   return <div className="continuous-progress-control" data-progress-state={status}>
-    <CalendarScheduleControl target={target} onStatusChange={setCalendarStatus} presented={visible} detailsPresented={presented} unified
+    {presented && pendingRequest ? <section className="continuous-progress-control__notice" aria-label="Original progress request" role="status">
+      <p>{pendingRequest.dispatch === 'prepared' ? 'The original request was not dispatched. Your input is kept.' : `The original ${pendingRequest.kind === 'create' ? 'creation' : pendingRequest.input.action} operation is unconfirmed. Your input is kept.`}</p>
+      <code>{pendingRequest.input.operationId}</code>
+      <button type="button" className="small-button" disabled={busy} onClick={() => void returnToEditing()}>{pendingRequest.dispatch === 'prepared' ? 'Keep request and edit' : 'Keep unknown request and edit'}</button>
+      {pendingRequest.dispatch !== 'prepared' ? <>
+        <button type="button" className="small-button" disabled={busy} onClick={() => void checkOriginalRequest()}>Check original request</button>
+        <button type="button" className="small-button" disabled={busy} onClick={() => void checkOriginalRequest(true)}>Return to original loop</button>
+      </> : null}
+      <details><summary>Original request</summary><pre className="continuous-progress-control__prompt">{JSON.stringify(pendingRequest.input, null, 2)}</pre></details>
+      {saveNotice ? <p>{saveNotice}</p> : null}
+    </section> : null}
+    {presented && previousRequests?.length ? <details><summary>Retained progress requests</summary>{previousRequests.map(request =>
+      <div key={request.input.operationId}><p>{request.dispatch === 'prepared' ? 'Not dispatched.' : 'Original result remains unconfirmed.'}</p><code>{request.input.operationId}</code><pre className="continuous-progress-control__prompt">{JSON.stringify(request.input, null, 2)}</pre></div>)}</details> : null}
+    {original ? <>{presented ? progress : null}{presented ? progressForm : null}<p className="continuous-progress-control__help">Calendar schedules are not connected through this original Session route.</p></> : <CalendarScheduleControl target={target} onStatusChange={setCalendarStatus} presented={visible} detailsPresented={presented} unified
       progressConfigured={!!loop}
-      progress={presented ? progress : null} progressForm={presented ? progressForm : null} />
+      progress={presented ? progress : null} progressForm={presented ? progressForm : null} />}
     {presented ? <>
     <details className="continuous-progress-control__details automation-target" data-progress-details="target" onToggle={event => event.stopPropagation()}>
       <summary>Agent details</summary>
       <dl className="continuous-progress-control__detail-body">
-        <dt>Sending to</dt><dd>{targetName || session.label}</dd>
-        <dt>Provider</dt><dd>{agentProviderLabel(session.providerId)} ({target.providerId})</dd>
+        <dt>Sending to</dt><dd>{targetName || original?.label || session?.label}</dd>
+        <dt>Provider</dt><dd>{agentProviderLabel(target.providerId)} ({target.providerId})</dd>
         <dt>Host</dt><dd>{target.hostId}</dd>
         <dt>Session</dt><dd>{target.agentSessionId}</dd>
         <dt>Workspace</dt><dd title={displayPath(target.workspacePath, target.hostId)}>{displayPath(target.workspacePath, target.hostId)}</dd>

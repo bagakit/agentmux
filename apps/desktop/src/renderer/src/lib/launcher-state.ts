@@ -25,8 +25,10 @@ export type LauncherDraft = { browser: string; note: string; noteCreation?: Note
   moteQuick?: MoteQuickDraft | undefined;
   moteChat?: MoteChatDraft | undefined;
   progressUpdate?: import('../../../shared/continuous-progress').ProgressUpdateRequest | undefined;
+  progressRequest?: import('../../../shared/continuous-progress').ProgressRequest | undefined;
+  unconfirmedProgressRequests?: import('../../../shared/continuous-progress').ProgressRequest[];
   progressDraft?: { interval: string; prompt: string; expectedLoop?: import('@agentmux/core').ContinuousProgressLoop | undefined } | undefined;
-  unconfirmedProgressUpdates?: import('../../../shared/continuous-progress').ProgressUpdateRequest[];
+  unconfirmedProgressUpdates?: (import('../../../shared/continuous-progress').ProgressUpdateRequest & { notDispatched?: true })[];
   /** Cross-owner custody until this exact queue archive and destination draft both have storage ACKs. */
   queuedInputMoves?: Record<string, QueuedDraftMove> | undefined
   prompt?: string; focusTask?: PreparedMoteTask['focusTask']; names?: LauncherNames; optionsByProvider?: LauncherProviderOptions
@@ -60,8 +62,12 @@ type LauncherState = {
   setMoteChatDraft(launcherId: string, value: MoteChatDraft | undefined, expectedVersion?: string): boolean
   setScheduleDraft(launcherId: string, patch: Partial<ScheduleDraft>): boolean
   setProgressUpdate(launcherId: string, request: import('../../../shared/continuous-progress').ProgressUpdateRequest | undefined): boolean
+  setProgressRequest(launcherId: string, request: import('../../../shared/continuous-progress').ProgressRequest): boolean
+  setProgressRequestDispatch(launcherId: string, operationId: string, dispatch: 'prepared' | 'started'): boolean
+  clearProgressRequest(launcherId: string, operationId: string): boolean
+  retainProgressRequest(launcherId: string, operationId: string): boolean
   setProgressDraft(launcherId: string, patch: Partial<NonNullable<LauncherDraft['progressDraft']>> | undefined): boolean
-  retainProgressUpdate(launcherId: string): boolean
+  retainProgressUpdate(launcherId: string, notDispatched?: boolean): boolean
   setAgentName(launcherId: string, field: LauncherNameField, value: string): boolean
   setSourceExecution(launcherId: string, value: import('./launcher-source').LauncherSourceExecution | undefined): boolean
   setAgentOption(launcherId: string, providerId: string, optionId: string, choiceId: string | null): boolean
@@ -114,6 +120,42 @@ export const useLauncherState = create<LauncherState>()(persist((save) => {
     }); return matched }
     catch { reportStorageIssue('Your private-chat draft could not be saved on this device. Current input and original requests are kept.'); return false }
   },
+  setProgressRequest(launcherId, request) {
+    let retained = false
+    try { set(state => {
+      const draft = state.drafts[launcherId] ?? EMPTY_LAUNCHER_DRAFT
+      if (draft.progressRequest) return state
+      retained = true
+      return { drafts: { ...state.drafts, [launcherId]: { ...draft, progressRequest: request } } }
+    }); return retained }
+    catch { reportStorageIssue('The original progress request could not be saved. Your input is kept.'); return false }
+  },
+  setProgressRequestDispatch(launcherId, operationId, dispatch) {
+    let matched = false
+    try { set(state => {
+      const draft = state.drafts[launcherId], request = draft?.progressRequest
+      if (!draft || !request || request.input.operationId !== operationId) return state
+      matched = true
+      return { drafts: { ...state.drafts, [launcherId]: { ...draft, progressRequest: { ...request, dispatch } } } }
+    }); return matched }
+    catch { reportStorageIssue('The original progress dispatch could not be retained. Its request is kept.'); return false }
+  },
+  clearProgressRequest(launcherId, operationId) {
+    try { set(state => {
+      const draft = state.drafts[launcherId]
+      return draft?.progressRequest?.input.operationId !== operationId ? state : { drafts: { ...state.drafts, [launcherId]: { ...draft, progressRequest: undefined } } }
+    }); return true }
+    catch { reportStorageIssue('The original progress result could not be saved. Its operation is kept.'); return false }
+  },
+  retainProgressRequest(launcherId, operationId) {
+    try { set(state => {
+      const draft = state.drafts[launcherId], request = draft?.progressRequest
+      if (!draft || !request || request.input.operationId !== operationId) return state
+      return { drafts: { ...state.drafts, [launcherId]: { ...draft, progressRequest: undefined,
+        unconfirmedProgressRequests: [...(draft.unconfirmedProgressRequests ?? []), request] } } }
+    }); return true }
+    catch { reportStorageIssue('The original progress request remains unconfirmed. Its input is kept.'); return false }
+  },
   setProgressUpdate(launcherId, request) {
     try { set(state => ({ persistenceIssue: null, drafts: { ...state.drafts, [launcherId]: { ...(state.drafts[launcherId] ?? EMPTY_LAUNCHER_DRAFT), progressUpdate: request } } })); return true }
     catch { reportStorageIssue('The original configuration request could not be saved. Your current input is kept.'); return false }
@@ -123,11 +165,11 @@ export const useLauncherState = create<LauncherState>()(persist((save) => {
       progressDraft: patch ? { interval: '', prompt: '', ...state.drafts[launcherId]?.progressDraft, ...patch } : undefined } } })); return true }
     catch { reportStorageIssue('Your configuration draft could not be saved on this device. Current input remains available.'); return false }
   },
-  retainProgressUpdate(launcherId) {
+  retainProgressUpdate(launcherId, notDispatched) {
     try { set(state => {
       const draft = state.drafts[launcherId], request = draft?.progressUpdate
       return !request ? state : { drafts: { ...state.drafts, [launcherId]: { ...draft, progressUpdate: undefined,
-        unconfirmedProgressUpdates: [...(draft.unconfirmedProgressUpdates ?? []), request] } } }
+        unconfirmedProgressUpdates: [...(draft.unconfirmedProgressUpdates ?? []), { ...request, ...(notDispatched ? { notDispatched: true as const } : {}) }] } } }
     }); return true }
     catch { reportStorageIssue('The original unconfirmed save remains available; its local persistence is unconfirmed.'); return false }
   },

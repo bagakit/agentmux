@@ -1,5 +1,5 @@
 import { CaptureSequenceOwner } from './capture-sequence.js'
-import { parseSpaceLinkParams, parseSpaceLinkResult } from '@agentmux/core'
+import { parseAgentProgressParams, parseSpaceLinkParams, parseSpaceLinkResult } from '@agentmux/core'
 import { registerAgentTakeoverIpc } from './agent-takeover-ipc.js'
 import { registerMeshNetworkIpc } from './mesh-network-ipc.js'
 import { registerSourceFilesIpc } from './source-files-ipc.js'
@@ -132,7 +132,7 @@ import { sessionObservationResult } from '../shared/session-observation-result.j
 import { sessionStopReply } from '../shared/session-stop-result.js'
 import { sessionAgentLaunchResult } from '../shared/session-agent-launch-result.js'
 import { NATIVE_BROWSER_VISIBILITY_CHANNEL, NATIVE_BROWSER_INPUT_CHANNEL, NATIVE_OVERLAY_WARNING_CHANNEL } from '../shared/contracts.js'
-import type { ContinuousProgressTarget, ContinuousProgressTaskSource } from '@agentmux/core'
+import type { ContinuousProgressTarget } from '@agentmux/core'
 import { inspectDesktopClient, observeWorkbenchUserState, registerLoadedIdentityIpc } from './client-observation.js'
 import { inspectNotifications, clientNotificationsPort } from './notification-observation.js'
 import { inspectMoteContext, moteContextEvidencePort } from './mote-context-observation.js'
@@ -2007,8 +2007,8 @@ export async function registerIpc(args: {
   handleWithEvent('schedule:cancel', async (event, input: import('@agentmux/core').ScheduleParamsMap['schedule.cancel']) => {
     return callUserRpc('schedule.cancel', input)
   })
-  handleWithEvent('continuousProgress:list', async (event, target: ContinuousProgressTarget) => {
-    return (await callUserRpc('agent.progress.list', { target })).loops
+  handleWithEvent('continuousProgress:list', async (event, target: ContinuousProgressTarget, operationId?: string) => {
+    return (await callUserRpc('agent.progress.list', { target, ...(operationId === undefined ? {} : { operationId }) })).loops
   })
   handleWithEvent('continuousProgress:goals', async (event, goalId: string) => {
     return (await callUserRpc('goal.inspect', { goalId })).goalContinuations
@@ -2031,10 +2031,10 @@ export async function registerIpc(args: {
       if (hostId === target.hostId && agentSessionId === target.agentSessionId) typingBursts.delete(key)
     }
   }
-  handleWithEvent('continuousProgress:create', async (event, target: ContinuousProgressTarget, intervalMs: number, prompt: string, taskSource?: ContinuousProgressTaskSource,inputEpoch?:string) => {
-    if (taskSource?.kind === 'goal') throw new AgentMuxError('Goal continuation requires its original explicit Goal Start.', 'INVALID_CONTROL_REQUEST')
-    endInputBursts(target)
-    return (await callUserRpc('agent.progress.create', { target, intervalMs, prompt,...(inputEpoch===undefined?{}:{inputEpoch}), ...(taskSource ? { taskSource } : {}), operationId: mintObjectId() })).loop
+  handleWithEvent('continuousProgress:create', async (event, raw: unknown) => {
+    const input = parseAgentProgressParams('agent.progress.create', raw)
+    endInputBursts(input.target)
+    return (await callUserRpc('agent.progress.create', input)).loop
   })
   handleWithEvent('continuousProgress:action', async (event, target: ContinuousProgressTarget, loopId: string, action: 'pause' | 'resume' | 'stop' | 'check', expectedLoop: import('@agentmux/core').ContinuousProgressLoop, operationId: string) => {
     endInputBursts(target)
