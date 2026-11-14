@@ -239,8 +239,9 @@ enum NativeDesktopOperations {
                 // host visibility on every display, including non-normal panels.
                 let allWindows = visibleWindows(excludingOwners: [], allLayers: true)
                 let windowListMs = captureMilliseconds(since: windowListStarted)
-                let windows = allWindows.filter { $0.normalLayer && !excludedOwners.contains($0.pid) }
-                let hostWindows = allWindows.filter { $0.pid == hostPID }
+                let windowSnapshot = allWindows ?? []
+                let windows = windowSnapshot.filter { $0.normalLayer && !excludedOwners.contains($0.pid) }
+                let hostWindows = windowSnapshot.filter { $0.pid == hostPID }
                 let pixels: (CGDirectDisplayID, CGRect, CGFloat) throws -> CapturedImage
                 var contentMs = 0.0
                 if #available(macOS 14.0, *) {
@@ -262,6 +263,11 @@ enum NativeDesktopOperations {
                             excludingWindows: resolved.excludedWindows, ownership: ownership)
                     }
                 } else {
+                    // An absent list is unknown, not proof that the host is absent.
+                    // Included pixels remain available; excluded pixels cannot be certified.
+                    guard allWindows != nil || includeHostWindows else {
+                        throw ProviderError.coded("window_list_unavailable", "CoreGraphics cannot establish whether the visible host is present")
+                    }
                     pixels = { _, frame, scale in
                         // CoreGraphics cannot subtract one process from a display grab.
                         // Never label pixels that still contain the host as excluded.
@@ -281,19 +287,13 @@ enum NativeDesktopOperations {
                     var entry: [String: Any] = ["displayId": screen.id, "frame": renderRect(frame), "scale": screen.scale, "safeTop": screen.safeTop,
                         "windows": windows.filter { $0.frame.intersects(frame) }.map(\.entry)]
                     do {
-                        let captureStarted = DispatchTime.now().uptimeNanoseconds
-                        let capture = try pixels(screen.id, frame, screen.scale)
-                        captureMs = captureMilliseconds(since: captureStarted)
-                        let pngStarted = DispatchTime.now().uptimeNanoseconds
-                        let png = try pngData(capture.image)
-                        pngMs = captureMilliseconds(since: pngStarted)
+                        let capture = try captureStage(&captureMs) { try pixels(screen.id, frame, screen.scale) }
+                        let png = try captureStage(&pngMs) { try pngData(capture.image) }
                         let encodedBytes = (png.count + 2) / 3 * 4
                         guard encodedBytes <= remainingFrameBytes else {
                             throw ProviderError.coded("image_too_large", "this display's pixels do not fit one response beside the displays listed before it")
                         }
-                        let base64Started = DispatchTime.now().uptimeNanoseconds
-                        let encoded = png.base64EncodedString()
-                        base64Ms = captureMilliseconds(since: base64Started)
+                        let encoded = captureStage(&base64Ms) { png.base64EncodedString() }
                         remainingFrameBytes -= encodedBytes
                         entry["png"] = encoded
                         entry["width"] = capture.image.width
@@ -321,8 +321,8 @@ enum NativeDesktopOperations {
     /// On-screen windows in the window server's front-to-back order, with global
     /// Quartz frames. Metadata keeps normal layer 0 only. The same one-shot list
     /// may retain other layers solely to establish whether exclusion is possible.
-    private static func visibleWindows(excludingOwners owners: Set<pid_t>, allLayers: Bool = false) -> [(pid: pid_t, frame: CGRect, normalLayer: Bool, entry: [String: Any])] {
-        guard let infos = CGWindowListCopyWindowInfo(.optionOnScreenOnly, kCGNullWindowID) as? [[String: Any]] else { return [] }
+    private static func visibleWindows(excludingOwners owners: Set<pid_t>, allLayers: Bool = false) -> [(pid: pid_t, frame: CGRect, normalLayer: Bool, entry: [String: Any])]? {
+        guard let infos = CGWindowListCopyWindowInfo(.optionOnScreenOnly, kCGNullWindowID) as? [[String: Any]] else { return nil }
         return infos.compactMap { info in
             guard let pid = (info[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value, !owners.contains(pid),
                   ((info[kCGWindowAlpha as String] as? NSNumber)?.doubleValue ?? 1) > 0,
@@ -341,6 +341,12 @@ enum NativeDesktopOperations {
 
     private static func captureMilliseconds(since start: UInt64) -> Double {
         Double(DispatchTime.now().uptimeNanoseconds - start) / 1_000_000
+    }
+
+    private static func captureStage<T>(_ milliseconds: inout Double, _ body: () throws -> T) rethrows -> T {
+        let start = DispatchTime.now().uptimeNanoseconds
+        defer { milliseconds = captureMilliseconds(since: start) }
+        return try body()
     }
 
     /// One grab of one exact display. The asynchronous producer keeps
