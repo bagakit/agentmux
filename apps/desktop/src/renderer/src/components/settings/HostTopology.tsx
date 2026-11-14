@@ -6,7 +6,9 @@ import type { HostCheckState } from '../../store'
 import { hostCheckLabel } from '../../lib/host-check'
 import { hostTransportLabel } from '../../lib/host-transport'
 import { HostIcon } from '../HostBadge'
-import { useHostConnectionTooltip } from '../HostConnectionTooltip'
+import { useHostConnectionHint } from '../HostConnectionTooltip'
+import { useWorkbenchNameTooltip } from '../WorkbenchNameTooltip'
+import type { LocalHostAddress } from './local-host-address'
 import '@xyflow/react/dist/base.css'
 
 const TopologyIcon = semanticIconComponent('object.topology')
@@ -20,6 +22,7 @@ export type HostTopologyItem = {
   projectCount: number
   sessionCount: number
   network?: string | null | undefined
+  localAddress?: LocalHostAddress | undefined
 }
 type HostNodeData = HostTopologyItem & { selected: boolean; onSelect: (id: string) => void }
 type HostNode = Node<HostNodeData, 'host'>
@@ -28,7 +31,9 @@ type TopologyNode = HostNode | EntryNode
 
 const HostTopologyNode = memo(function HostTopologyNode({ data }: NodeProps<HostNode>) {
   const { host, check } = data
-  const tooltip = useHostConnectionTooltip(host.id, host.label)
+  const hint = useHostConnectionHint(host.id, host.label)
+  const address = data.localAddress
+  const tooltip = useWorkbenchNameTooltip(hint.name, host.kind === 'local' ? <LocalAddressDetails address={address} /> : hint.detail, false, { pointerPassThrough: host.kind !== 'local' })
   const checkedAt = check && check.state !== 'idle' && check.state !== 'checking' ? check.observedAt : undefined
   return <>
     <Handle className={data.selected ? 'remote-host-port remote-host-port--selected' : 'remote-host-port'} type="target" position={Position.Left} isConnectable={false} />
@@ -38,10 +43,10 @@ const HostTopologyNode = memo(function HostTopologyNode({ data }: NodeProps<Host
       <span className="remote-host-node__kind"><HostIcon kind={host.kind} size={15} />{host.kind === 'local' ? 'LOCAL ROUTE' : `${hostTransportLabel(host).toUpperCase()} HOST`}
         <span className="remote-host-node__selection" aria-hidden="true">{data.selected ? 'Selected' : null}</span></span>
       <strong>{host.label}</strong>
-      <span className="remote-host-node__address" title={host.kind === 'ssh' && host.transport !== 'tailcat' ? host.hostname : undefined}>{host.kind === 'local' ? 'Host-local execution' : host.transport === 'tailcat' ? 'Private Tailcat address' : host.hostname || 'Address required'}</span>
+      <span className="remote-host-node__address" title={host.kind === 'ssh' && host.transport !== 'tailcat' ? host.hostname : undefined}>{host.kind === 'local' ? address?.label ?? 'Local address unknown' : host.transport === 'tailcat' ? 'Private Tailcat address' : host.hostname || 'Address required'}</span>
       <span className="remote-host-node__network" aria-label="Configured connection">
-        <span><small>{host.kind === 'ssh' && host.transport !== 'tailcat' ? 'SSH USER' : 'ACCESS'}</small><code data-route-user>{host.kind === 'ssh' ? host.transport === 'tailcat' ? 'Client key' : host.user || 'SSH config' : 'Local route'}</code></span>
-        <span><small>{host.kind === 'ssh' && host.transport !== 'tailcat' ? 'PORT OVERRIDE' : 'TRANSPORT'}</small><code data-route-port>{host.kind === 'ssh' ? host.transport === 'tailcat' ? 'Tailcat' : host.port ?? 'SSH config' : 'Not applicable'}</code></span>
+        <span><small>{host.kind === 'local' ? 'INTERFACE' : host.transport !== 'tailcat' ? 'SSH USER' : 'ACCESS'}</small><code data-route-user>{host.kind === 'ssh' ? host.transport === 'tailcat' ? 'Client key' : host.user || 'SSH config' : address?.preferred?.name ?? 'Not observed'}</code></span>
+        <span><small>{host.kind === 'local' ? 'ADDRESSES' : host.transport !== 'tailcat' ? 'PORT OVERRIDE' : 'TRANSPORT'}</small><code data-route-port>{host.kind === 'ssh' ? host.transport === 'tailcat' ? 'Tailcat' : host.port ?? 'SSH config' : address?.addresses.length ? `${address.addresses.length} addresses` : 'Local route'}</code></span>
       </span>
       <span className="remote-host-node__readout"><span className="remote-host-node__binding"><span>Service ID</span><code data-route-runtime title={host.kind === 'ssh' ? host.runtimeId : undefined}>{host.kind === 'ssh' ? host.runtimeId ?? 'Unconfirmed' : 'Inspect host'}</code></span>
       <span className="remote-host-node__link" data-route-network title={data.network ?? undefined}>{data.network ?? 'Network · read on demand'}</span></span>
@@ -52,6 +57,12 @@ const HostTopologyNode = memo(function HostTopologyNode({ data }: NodeProps<Host
     {tooltip.content}
   </>
 })
+function LocalAddressDetails({ address }: { address: LocalHostAddress | undefined }) {
+  return <span className="remote-local-address-detail">
+    {address?.addresses.length ? <span className="remote-local-address-list" role="list">{address.addresses.map(item => <span role="listitem" key={item.name + ':' + item.address}><span>{item.name}</span><code>{item.address}</code></span>)}</span> : <span>{address?.detail ?? address?.label ?? 'Local address unknown'}</span>}
+    {address?.observedAt !== undefined ? <small>Local Owner · {new Date(address.observedAt).toLocaleString()}<br />Interface addresses do not confirm reachability.</small> : null}
+  </span>
+}
 function ManagementEntry({ data }: NodeProps<EntryNode>) {
   return <div className="remote-entry-node"><span className="remote-entry-node__label">CONNECTION MANAGER</span><TopologyIcon size={32} /><strong>{data.label}</strong><span>Configured hosts</span>
     <Handle type="source" position={Position.Right} isConnectable={false} /></div>

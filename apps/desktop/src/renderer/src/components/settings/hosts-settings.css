@@ -36,3 +36,10 @@
 .host-tailcat-status > span { flex: 1 1 180px; color: var(--text-3); font-size: 11px; overflow-wrap: anywhere; }
 .host-tailcat-address > label { display: grid; gap: 6px; flex: 1 1 200px; min-width: 0; }
 .host-tailcat-address > button { align-self: end; }
+
+.remote-local-address-detail { display: grid; gap: var(--sp-2); white-space: normal; }
+.remote-local-address-list { display: grid; gap: var(--sp-2); margin: 0; }
+.remote-local-address-list > span { display: grid; grid-template-columns: minmax(42px, auto) minmax(0, 1fr); gap: var(--sp-3); }
+.remote-local-address-list > span > span { color: var(--text-3); }
+.remote-local-address-list code { margin: 0; font-family: var(--font-mono); overflow-wrap: anywhere; }
+.remote-local-address-detail small { color: var(--text-3); font-size: inherit; }

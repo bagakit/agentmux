@@ -1,12 +1,12 @@
 import { autoUpdate, computePosition, flip, offset, shift, type Placement } from '@floating-ui/dom'
-import { useCallback, useEffect, useId, useRef, useState, type MouseEvent, type FocusEvent } from 'react'
+import { useCallback, useEffect, useId, useRef, useState, type MouseEvent, type FocusEvent, type ReactNode } from 'react'
 import { markWindowOverlayDismissal, WindowOverlayPortal } from './WindowOverlayHost'
 
 // Pointer and keyboard can occupy different anchors. The latest reading intent owns one tooltip.
 const nameTooltipOwners = new WeakMap<Document, () => void>()
 
 /** Full names and descriptions stay outside their original surface’s overflow. */
-export function useWorkbenchNameTooltip(name: string, detail: string, suppressed: boolean,
+export function useWorkbenchNameTooltip(name: string, detail: ReactNode, suppressed: boolean,
   { placement = 'bottom-start', pointerPassThrough = false }: { placement?: Placement; pointerPassThrough?: boolean } = {}) {
   const [anchor, setAnchor] = useState<Element | null>(null)
   const [overflowing, setOverflowing] = useState(false)

@@ -16,27 +16,36 @@ export function currentHostNetwork(read: HostNetworkRead | undefined, host: Host
   return read && configValuesEqual(read.configuration, host) ? read : undefined
 }
 /** One workbench-local observation per visited route. No polling or connection ownership. */
-export function useHostNetworkObservation(activeHost: HostConfig | null) {
+export function useHostNetworkObservation(activeHost: HostConfig | null, localHost: HostConfig | null = null) {
   const [reads, setReads] = useState<Record<string, HostNetworkRead>>({})
   const [visible, setVisible] = useState(() => typeof document === 'undefined' || document.visibilityState !== 'hidden')
-  const controller = useRef<{ key: string; configuration: HostConfig; controller: AbortController } | null>(null)
+  const controllers = useRef(new Map<string, { configuration: HostConfig; controller: AbortController }>())
   const scope = activeHost ? JSON.stringify(activeHost) : null
+  const localScope = localHost ? JSON.stringify(localHost) : null
+  const automatic = useRef<string | null>(null)
   useEffect(() => { const changed = () => setVisible(document.visibilityState !== 'hidden'); document.addEventListener('visibilitychange', changed)
     return () => document.removeEventListener('visibilitychange', changed) }, [])
-  const cancel = useCallback(() => {
-    const pending = controller.current
+  const cancel = useCallback((id: string) => {
+    const pending = controllers.current.get(id)
     if (!pending) return
-    pending.controller.abort(); controller.current = null
+    pending.controller.abort(); controllers.current.delete(id)
     setReads(previous => {
-      const held = currentHostNetwork(previous[pending.configuration.id], pending.configuration)
-      return held ? { ...previous, [pending.configuration.id]: { ...held, busy: false, error: 'This read was cancelled. Read the original link again when needed.' } } : previous
+      const held = currentHostNetwork(previous[id], pending.configuration)
+      return held ? { ...previous, [id]: { ...held, busy: false, error: 'This read was cancelled. Read the original link again when needed.' } } : previous
     })
   }, [])
-  useEffect(() => () => { if (controller.current?.key === scope) cancel() }, [scope, visible, cancel])
+  useEffect(() => {
+    for (const [id, pending] of controllers.current) {
+      const key = JSON.stringify(pending.configuration)
+      if (!visible || key !== scope && key !== localScope) cancel(id)
+    }
+  }, [scope, localScope, visible, cancel])
+  useEffect(() => () => { for (const pending of controllers.current.values()) pending.controller.abort(); controllers.current.clear() }, [])
   const read = useCallback(async (configuration: HostConfig) => {
-    if (!visible || scope !== JSON.stringify(configuration)) return
-    cancel()
-    const current = new AbortController(); controller.current = { key: scope, configuration, controller: current }
+    const key = JSON.stringify(configuration)
+    if (!visible || key !== scope && key !== localScope) return
+    cancel(configuration.id)
+    const current = new AbortController(); controllers.current.set(configuration.id, { configuration, controller: current })
     setReads(previous => ({ ...previous, [configuration.id]: { ...currentHostNetwork(previous[configuration.id], configuration), configuration, busy: true, error: undefined } }))
     try {
       const observation = await api.hosts.network(configuration, { signal: current.signal })
@@ -46,13 +55,19 @@ export function useHostNetworkObservation(activeHost: HostConfig | null) {
         retained: retain(observation, currentHostNetwork(previous[configuration.id], configuration)?.retained), busy: false } }))
     } catch (error) {
       // Capture request ownership before React schedules the updater; finally releases the ref.
-      if (controller.current?.controller !== current) return
+      if (controllers.current.get(configuration.id)?.controller !== current) return
       const message = current.signal.aborted ? 'This read was cancelled. Read the original link again when needed.' : error instanceof Error ? error.message : 'This link could not be observed.'
       setReads(previous => {
         const held = currentHostNetwork(previous[configuration.id], configuration)
         return held ? { ...previous, [configuration.id]: { ...held, busy: false, error: message } } : previous
       })
-    } finally { if (controller.current?.controller === current) controller.current = null }
-  }, [scope, visible, cancel])
+    } finally { if (controllers.current.get(configuration.id)?.controller === current) controllers.current.delete(configuration.id) }
+  }, [scope, localScope, visible, cancel])
+  useEffect(() => {
+    if (!localScope) { automatic.current = null; return }
+    if (!visible || automatic.current === localScope) return
+    automatic.current = localScope
+    void read(localHost!)
+  }, [localScope, visible, read])
   return { reads, read, visible }
 }

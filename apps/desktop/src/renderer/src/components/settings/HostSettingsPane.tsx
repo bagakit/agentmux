@@ -24,6 +24,7 @@ import { HostRuntimePanel } from './HostRuntimePanel'
 import { HostNetworkPanel } from './HostNetworkPanel'
 import { hostNetworkSummary } from './host-network-view'
 import { HostNetworkMap } from './HostNetworkMap'
+import { localHostAddress } from './local-host-address'
 import { currentHostNetwork, useHostNetworkObservation } from './use-host-network-observation'
 import { HostApplicationAccessPanel } from './HostApplicationAccessPanel'
 import { HostSessionSummary, HostExecutorsSummary } from './HostWorkSummary'
@@ -89,7 +90,8 @@ export function HostSettingsPane({ config, onSave, active, onClose, navigationRe
   const appliedNavigation = useRef(navigationRequest)
   const pendingHostNavigation = requestedHostId !== undefined && appliedNavigation.current !== navigationRequest
   const network = useHostNetworkObservation(active && panel === 'overview' && !pendingHostNavigation && (measuredWide === true || view === 'editor')
-    ? hosts.find(host => host.id === selectedId) ?? null : null)
+    ? hosts.find(host => host.id === selectedId) ?? null : null,
+    active ? config.hosts.find(host => host.kind === 'local') ?? null : null)
   const editor = useRef<HTMLDivElement>(null)
   const [removeRequest, setRemoveRequest] = useState<SshHostConfig | null>(null)
   useEffect(() => { if (!active) setRemoveRequest(null) }, [active])
@@ -249,14 +251,14 @@ export function HostSettingsPane({ config, onSave, active, onClose, navigationRe
         {showTopology ? active ? <HostTopology selectedId={selectedId} onSelect={selectTopologyHost}
           onOpenLink={() => { if (selectedNetworkHost) selectTopologyHost(selectedNetworkHost.id) }}
           linkView={selectedNetworkHost ? <HostNetworkMap key={selectedNetworkHost.id} host={selectedNetworkHost} committed={config.hosts.find(host => host.id === selectedNetworkHost.id)} state={network.reads[selectedNetworkHost.id]} onRead={network.read} active={active && !pendingHostNavigation && panel === 'overview'} visible={network.visible} /> : null}
-          items={hosts.filter(host => matches(host.id)).map(host => ({ host, network: hostNetworkSummary(currentHostNetwork(network.reads[host.id], host)), check: currentHostCheck(checks[host.id], host), projectCount: projectFacts.get(host.id)?.count ?? 0, sessionCount: sessionsByHost.get(host.id)?.length ?? 0 }))} /> : <div /> : <HostConnectionLibrary selectedId={selectedId} panel={panel} query={filter.query} onQuery={filterHosts} onSelect={selectHostPanel} focusRequest={returnFocus}
+          items={hosts.filter(host => matches(host.id)).map(host => ({ host, localAddress: host.kind === 'local' ? localHostAddress(currentHostNetwork(network.reads[host.id], host)) : undefined, network: hostNetworkSummary(currentHostNetwork(network.reads[host.id], host)), check: currentHostCheck(checks[host.id], host), projectCount: projectFacts.get(host.id)?.count ?? 0, sessionCount: sessionsByHost.get(host.id)?.length ?? 0 }))} /> : <div /> : <HostConnectionLibrary selectedId={selectedId} panel={panel} query={filter.query} onQuery={filterHosts} onSelect={selectHostPanel} focusRequest={returnFocus}
           items={hosts.filter((host) => matches(host.id)).map((host) => {
             const check = currentHostCheck(checks[host.id], host)
             const projects = projectFacts.get(host.id)?.count ?? 0
             return {
               id: host.id, name: host.label,
               projectCount: projects,
-              detail: `${hostConnectionSummary(host)}${projects ? ` · ${projects} ${projects === 1 ? 'project' : 'projects'}` : ''}`,
+              detail: `${host.kind === 'local' ? localHostAddress(currentHostNetwork(network.reads[host.id], host)).label : hostConnectionSummary(host)}${projects ? ` · ${projects} ${projects === 1 ? 'project' : 'projects'}` : ''}`,
               mark: <HostIcon kind={host.kind} size={18} />,
               status: <span className={`settings-resource-row__check check-pill--${check?.state === 'error' ? check.result?.outcome ?? 'check-failed' : check?.state ?? 'idle'}`} role="img" aria-label={hostCheckLabel(check ?? { state: 'idle' })} title={hostCheckLabel(check ?? { state: 'idle' })}>{check?.state === 'checking' ? <ThemeStatusLoadingIcon animation="spin" size={13} /> : check?.state === 'ready' ? <ThemeStatusCompletedIcon size={13} /> : <ThemeStatusInfoIcon size={13} />}<span>{hostCheckLabel(check ?? { state: 'idle' })}</span></span>
             }
