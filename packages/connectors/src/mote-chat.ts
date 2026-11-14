@@ -208,12 +208,13 @@ export class MoteChatHost implements MoteChatPort, RoomBindingReadPort {
     if (!publication || !adapter || admission.kind !== 'main') return fail('MOTE_CHAT_REPLY_UNAVAILABLE', 'The original publication owner is unavailable. Keep this input and operation ID; no reply was queued.')
     const binding = this.mainBinding(admission), payloads = publicationSpeechFragments(input.body,
       { connectionId: binding.connectionId, application: binding.application, externalConversationId: binding.externalConversationId }, adapter)
+    const details = await publication.speakerDetails({ hostId: source.input.hostId, agentSessionId: source.input.agentSessionId }, context.signal)
     await context.assertCurrent?.()
     const result = this.store.transaction(() => {
       const retained = inspectOriginal()
       if (retained) return retained
       if (!same(source, this.replySource(this.intake().readMessage(input.ingressId)))) return fail('MOTE_CHAT_REPLY_SOURCE_UNCONFIRMED', 'The original private input changed before its reply was queued. Its request is retained.')
-      const deliveryOperationIds = publication.store.queueMoteReply(input.operationId, input.ingressId, binding, payloads)
+      const deliveryOperationIds = publication.store.queueMoteReply(input.operationId, input.ingressId, binding, payloads, details)
       const operation: MoteChatReplyOperation = { operationId: input.operationId, action: 'reply', target: admission.target, ingressId: input.ingressId, deliveryOperationIds, binding }
       this.store.saveReply(input.operationId, { source, payloads, proof }); this.store.saveOperation(intent, operation)
       return { operation, deliveries: this.replyDeliveries(operation) }

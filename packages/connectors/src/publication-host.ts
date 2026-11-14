@@ -500,8 +500,9 @@ export class PublicationHost implements ConnectionDeliveryPort {
     return originals
   }
   /** Share the real optional read; one lane ending its observation cannot cancel another. */
-  private async speakerDetails(reference: ConversationRef, signal: AbortSignal): Promise<PublicationSpeakerDetails> {
+  async speakerDetails(reference: ConversationRef, signal: AbortSignal = this.speakerLifetime.signal): Promise<PublicationSpeakerDetails> {
     signal.throwIfAborted()
+    if (!this.options.speaker) return {}
     const key = JSON.stringify([reference.hostId, reference.agentSessionId])
     let reading = this.speakerPreparations.get(key)
     if (!reading) {

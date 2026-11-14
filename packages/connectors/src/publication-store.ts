@@ -13,7 +13,7 @@ import { publicationInputAlias } from './publication-input-alias.js'
 import { replyRecord, replyMetadata, type ReplyPublicationMetadata, type ReplyFact, type ReplyProjection } from './publication-reply-metadata.js'
 export type { ReplyPublicationMetadata } from './publication-reply-metadata.js'
 import type { PublicationA2A, PublicationOriginalMessage } from './publication-a2a.js'
-import type { PublicationSpeaker } from './publication-speaker.js'
+import type { PublicationSpeaker, PublicationSpeakerDetails } from './publication-speaker.js'
 import type { PublicationCardAdapter, PublicationCardPreparation, PublicationPortrait, CardCreateReceipt, PortraitReceipt } from './publication-card.js'
 import { parsePreparedPublication, publicationSpeechText, type PreparedPublication, type PublicationPreparer } from './publication-wire.js'
 import type { DatabaseSync, StatementSync } from 'node:sqlite'
@@ -595,7 +595,7 @@ export class PublicationStore {
       .all().map(row => this.read(row)!)
   }
   /** Explicit authored speech joins the original Outbox; it creates no conversation reader. */
-  queueMoteReply(replyOperationId: string, ingressId: string, relationship: RoomBinding, payloads: Array<Extract<PublicationPayload, { kind: 'speech' }>>): string[] {
+  queueMoteReply(replyOperationId: string, ingressId: string, relationship: RoomBinding, payloads: Array<Extract<PublicationPayload, { kind: 'speech' }>>, details: PublicationSpeakerDetails): string[] {
     const projectionId = 'mote-reply-' + digest([replyOperationId]), sourceRevision = digest([replyOperationId, ingressId, payloads])
     return payloads.map((payload, ordinal) => {
       const operationId = 'publication-' + digest([projectionId, ordinal]), existing = this.inspect(operationId)
@@ -603,7 +603,7 @@ export class PublicationStore {
       const operation: PublicationOperation = { operationId, projectionId, sourceRevision, bindingId: relationship.bindingId, bindingRevision: relationship.revision,
         reference: { ...ref(relationship), source: { kind: 'mote-chat-reply', operationId: replyOperationId, ingressId } },
         target: { connectionId: relationship.connectionId, application: relationship.application, externalConversationId: relationship.externalConversationId },
-        publicationScope: relationship.scope.publication, presentationTime: Date.now(), payload, effect: 'upsert', fragment: { ordinal, count: payloads.length }, state: 'pending' }
+        publicationScope: relationship.scope.publication, presentationTime: Date.now(), payload, speaker: { ...details, kind: 'agent', reference: ref(relationship) }, effect: 'upsert', fragment: { ordinal, count: payloads.length }, state: 'pending' }
       this.database.prepare('INSERT INTO connector_publication_operation (operation_id,projection_id,source_revision,fragment_ordinal,binding_id,binding_revision,operation_json,state) VALUES (?,?,?,?,?,?,?,?)')
         .run(operationId, projectionId, sourceRevision, ordinal, relationship.bindingId, relationship.revision, encode(operation), 'pending')
       return operationId
