@@ -84,3 +84,10 @@ nextCursor unchanged. Its Goal/through/before activity IDs bind a fixed original
 new appends do not enter later pages. Missing anchors explicitly expire the read; begin a new read
 only when intended. Empty history is an explicit zero-count page. Original full SDK activity reads
 keep their semantics, and no history inspection appends an event or replays a business operation.
+
+Aggregate Goal filtering and activity confirmation are two observations: the original Goal list
+selects IDs, then their activities are read and file/directory synchronization is confirmed once
+under the original Store lock. Coverage names this `selected-goals-then-confirmed-activity` cut;
+it does not claim atomic filtering across both observations or an original business-operation ACK.
+`goal.activity.collection` is the exact-ID SDK composition read used by this aggregate. It has
+no separate CLI because `goal activity` owns the user workflow; it creates no second event Store.
