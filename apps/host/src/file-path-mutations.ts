@@ -18,6 +18,7 @@ type Base = { schema: 'agentmux.file-path-mutation.v1'; actor: Actor; callerHost
 type MkdirOriginal = Base & { action: 'mkdir'; request: FileMkdirParams; result?: FilePathMutationReceipt }
 type MoveOriginal = Base & { action: 'move'; request: FileMoveParams; notePlan?: NotebookFileRelocationPlan; result?: FileMoveReceipt }
 type Original = MkdirOriginal | MoveOriginal
+type Admission = { schema: 'agentmux.file-path-admission.v1'; operationId: string; action: Original['action']; digest: string; actor: Actor; callerHostId?: string }
 
 const sameIdentity = sameFileEntryIdentity
 const moveUnknown = (cause: unknown, code = 'FILE_MOVE_UNCONFIRMED'): FileMoveReceipt => ({ action: 'move', phase: 'prepared', filesystem: 'unknown', durability: 'unconfirmed', code, message: 'The original move is unconfirmed. Keep its request and claim; inspect without replaying. ' + (cause instanceof Error ? cause.message : String(cause)) })
@@ -57,13 +58,44 @@ export class FilePathMutations {
     noteLease<T>(work: () => Promise<T>): Promise<T>
   }) {}
   stat(workspace: WorkspaceRecord, path: string): Promise<FilePathObservation> { return this.ports.files.statPath(workspace, path) }
-  private operationDirectory(operationId: string) { return join(this.ports.directory, createHash('sha256').update(operationId).digest('hex')) }
+  private operationHash(operationId: string) { return createHash('sha256').update(operationId).digest('hex') }
+  private operationDirectory(operationId: string) { return join(this.ports.directory, this.operationHash(operationId)) }
+  private admissionPath(operationId: string) { return join(dirname(this.ports.directory), 'file-path-admission-' + this.operationHash(operationId) + '.json') }
   private path(operationId: string) { return join(this.operationDirectory(operationId), 'request.json') }
-  private async load(operationId: string): Promise<Original | null> {
+  private async admission(operationId: string): Promise<Admission | null> {
+    let handle
+    try { handle = await open(this.admissionPath(operationId), constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK) }
+    catch (cause) { if ((cause as NodeJS.ErrnoException).code === 'ENOENT') return null; throw cause }
+    try {
+      const info = await handle.stat()
+      if (!info.isFile() || info.size < 1 || info.size > 16384) throw new Error('The original Files once-admission witness is partial or invalid. It cannot be recreated.')
+      const value = JSON.parse(await handle.readFile('utf8')) as Admission
+      if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).some(key => !['schema', 'operationId', 'action', 'digest', 'actor', 'callerHostId'].includes(key)) || value.schema !== 'agentmux.file-path-admission.v1' || value.operationId !== operationId || !['mkdir', 'move'].includes(value.action) || typeof value.digest !== 'string' || !/^[a-f0-9]{64}$/u.test(value.digest)) throw new Error('The original Files once-admission identity is unconfirmed.')
+      try { actor({ actor: value.actor, ...(value.callerHostId ? { callerHostId: value.callerHostId } : {}) }) }
+      catch { throw new Error('The original Files once-admission actor or Host scope is unconfirmed.') }
+      return value
+    } finally { await handle.close() }
+  }
+  private async publishAdmission(value: Original): Promise<boolean> {
+    const admission: Admission = { schema: 'agentmux.file-path-admission.v1', operationId: value.request.operationId, action: value.action,
+      digest: value.digest, actor: value.actor, ...(value.callerHostId ? { callerHostId: value.callerHostId } : {}) }
+    let handle
+    try { handle = await open(this.admissionPath(admission.operationId), constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600) }
+    catch (cause) { if ((cause as NodeJS.ErrnoException).code === 'EEXIST') return false; throw cause }
+    try { await handle.writeFile(JSON.stringify(admission)); await handle.sync() } finally { await handle.close() }
+    const base = await open(dirname(this.ports.directory), 'r')
+    try { await base.sync() } finally { await base.close() }
+    return true
+  }
+  private async load(operationId: string, expectedDigest?: string, reader?: FilePathMutationContext): Promise<Original | null> {
+    const admission = await this.admission(operationId)
+    if (admission && expectedDigest !== undefined && admission.digest !== expectedDigest) throw new AgentMuxError('This original Files once-admission belongs to different input, action or actor.', 'FILE_MUTATION_CONFLICT')
+    if (admission && reader) this.authorizeRead(admission, reader)
     let handle
     try { handle = await open(this.path(operationId), constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK) }
     catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+      if (admission) throw new Error('The original Files once-admission exists but its member or namespace is missing. It must not be recreated or replayed.')
       try { await lstat(this.operationDirectory(operationId)) }
       catch (missing) { if ((missing as NodeJS.ErrnoException).code === 'ENOENT') return null; throw missing }
       throw new Error('The original Files admission exists but its request member is missing. It must not be recreated or replayed.')
@@ -76,6 +108,7 @@ export class FilePathMutations {
       if (value.transport !== undefined && (typeof value.transport !== 'string' || !value.transport || value.transport.length > 512 || /[\0\r\n]/u.test(value.transport))) throw new Error('The original Files transport observation is invalid.')
       const input = value.action === 'move' ? parseFileMoveParams(value.request) : parseFileMkdirParams(value.request), original = actor({ actor: value.actor, ...(value.callerHostId ? { callerHostId: value.callerHostId } : {}) })
       if (input.operationId !== operationId || value.digest !== digest(input, original, value.callerHostId, value.action) || value.stage !== '.agentmux-' + value.action + '-' + value.digest) throw new Error('The original Files record belongs to another intent.')
+      if (admission && (admission.action !== value.action || admission.digest !== value.digest || !isDeepStrictEqual(admission.actor, value.actor) || admission.callerHostId !== value.callerHostId)) throw new Error('The retained request and its original once-admission disagree.')
       if (value.action === 'move' && value.notePlan) parseNotebookFileRelocationPlan(value.notePlan)
       if (value.producer) this.producer(value.producer, input, value.action)
       if (value.result) { if (value.action === 'move') parseFileMoveReceipt(value.result, value.request.expected.entry.witness); else parseFilePathMutationReceipt(value.result) }
@@ -101,6 +134,7 @@ export class FilePathMutations {
   private async prepare(value: Original): Promise<boolean> {
     const encoded = JSON.stringify(value)
     if (Buffer.byteLength(encoded) > MAX_RECORD_BYTES - 96 * 1024) throw new AgentMuxError('The exact original Files request exceeds the retained request budget. No admission or helper was created.', 'FILE_MUTATION_RECORD_TOO_LARGE')
+    if (!await this.publishAdmission(value)) return false
     await mkdir(this.ports.directory, { recursive: true, mode: 0o700 })
     // The containing config directory also confirms the new domain directory.
     const parent = await open(dirname(this.ports.directory), 'r')
@@ -119,7 +153,7 @@ export class FilePathMutations {
     if (original.zoneId !== input.zoneId || original.path !== input.path || input.spaceId !== undefined && original.spaceId !== input.spaceId || targetKeys.some(key => original.expectedResource[key] !== input.expectedResource[key]))
       throw new AgentMuxError('This Files operation belongs to another original target.', 'FILE_MUTATION_CONFLICT')
   }
-  private authorizeRead(value: Original, context: FilePathMutationContext | undefined): void {
+  private authorizeRead(value: Pick<Original, 'actor' | 'callerHostId'>, context: FilePathMutationContext | undefined): void {
     const reader = actor(context)
     if (reader.kind === 'agent' && (!isDeepStrictEqual(reader, value.actor) || context?.callerHostId !== value.callerHostId))
       throw new AgentMuxError('A managed Agent may inspect only its own original Files mutation.', 'CONTROL_PERMISSION_DENIED')
@@ -139,8 +173,8 @@ export class FilePathMutations {
   async inspect(input: FileMutationInspectParams, context: FilePathMutationContext | undefined, workspace?: WorkspaceRecord): Promise<FileMutationInspectResult> {
     actor(context)
     let original: Original | null
-    try { original = await this.load(input.operationId) }
-    catch (cause) { return { operationId: input.operationId, resource: workspace ? input.expectedResource : null,
+    try { original = await this.load(input.operationId, undefined, context) }
+    catch (cause) { if (cause instanceof AgentMuxError && cause.code === 'CONTROL_PERMISSION_DENIED') throw cause; return { operationId: input.operationId, resource: workspace ? input.expectedResource : null,
       result: { action: 'unknown', phase: 'unavailable', filesystem: 'unknown', durability: 'unconfirmed', code: 'FILE_MUTATION_RECORD_UNAVAILABLE', message: cause instanceof Error ? cause.message : String(cause) } } }
     if (!original) return { operationId: input.operationId, resource: workspace ? input.expectedResource : null,
       result: { action: 'unknown', phase: 'absent', filesystem: 'unknown', durability: 'unconfirmed', code: 'FILE_MUTATION_NOT_OBSERVED', message: 'No original operation record was observed. No filesystem action was replayed.' } }
@@ -167,7 +201,7 @@ export class FilePathMutations {
   private async execute(workspace: WorkspaceRecord, input: FileMkdirParams, originalActor: Actor, callerHostId: string | undefined, fingerprint: string): Promise<FileMkdirResult> {
     const result = (receipt: FilePathMutationReceipt): FileMkdirResult => ({ operationId: input.operationId, resource: input.expectedResource, result: receipt })
     let prior
-    try { prior = await this.load(input.operationId) } catch (cause) { return result(unknown(cause, 'FILE_MUTATION_RECORD_UNAVAILABLE')) }
+    try { prior = await this.load(input.operationId, fingerprint) } catch (cause) { if (cause instanceof AgentMuxError && cause.code === 'FILE_MUTATION_CONFLICT') throw cause; return result(unknown(cause, 'FILE_MUTATION_RECORD_UNAVAILABLE')) }
     if (prior) {
       if (prior.action !== 'mkdir' || prior.digest !== fingerprint) throw new AgentMuxError('This original Files operation has different input or actor.', 'FILE_MUTATION_CONFLICT')
       return result(await this.observe(prior, workspace))
@@ -176,7 +210,7 @@ export class FilePathMutations {
       ...(callerHostId ? { callerHostId } : {}), digest: fingerprint, stage: '.agentmux-mkdir-' + fingerprint }
     try {
       if (!await this.prepare(prepared)) {
-        const retained = await this.load(input.operationId)
+        const retained = await this.load(input.operationId, fingerprint)
         if (!retained || retained.action !== 'mkdir' || retained.digest !== fingerprint) throw new AgentMuxError('The original Files operation belongs to different input or actor.', 'FILE_MUTATION_CONFLICT')
         return result(await this.observe(retained, workspace))
       }
@@ -231,7 +265,7 @@ export class FilePathMutations {
   private async executeMove(workspace: WorkspaceRecord, input: FileMoveParams, originalActor: Actor, context: FilePathMutationContext | undefined, fingerprint: string): Promise<FileMoveResult> {
     const result = (receipt: FileMoveReceipt): FileMoveResult => ({ operationId: input.operationId, resource: input.expectedResource, destination: input.destination.expectedResource, result: receipt })
     let prior: Original | null
-    try { prior = await this.load(input.operationId) } catch (cause) { return result(moveUnknown(cause, 'FILE_MUTATION_RECORD_UNAVAILABLE')) }
+    try { prior = await this.load(input.operationId, fingerprint) } catch (cause) { if (cause instanceof AgentMuxError && cause.code === 'FILE_MUTATION_CONFLICT') throw cause; return result(moveUnknown(cause, 'FILE_MUTATION_RECORD_UNAVAILABLE')) }
     if (prior) {
       if (prior.action !== 'move' || prior.digest !== fingerprint) throw new AgentMuxError('This original Files operation has different input or actor.', 'FILE_MUTATION_CONFLICT')
       return result(await this.observeMove(prior, workspace))
@@ -240,7 +274,7 @@ export class FilePathMutations {
       ...(context?.callerHostId ? { callerHostId: context.callerHostId } : {}), ...(context?.transport ? { transport: context.transport } : {}), digest: fingerprint, stage: '.agentmux-move-' + fingerprint }
     try {
       if (!await this.prepare(prepared)) {
-        const retained = await this.load(input.operationId)
+        const retained = await this.load(input.operationId, fingerprint)
         if (!retained || retained.action !== 'move' || retained.digest !== fingerprint) throw new AgentMuxError('This original Files operation belongs to different input or actor.', 'FILE_MUTATION_CONFLICT')
         return result(await this.observeMove(retained, workspace))
       }
