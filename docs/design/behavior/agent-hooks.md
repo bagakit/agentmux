@@ -68,7 +68,7 @@ Hook 对原生主会话的解释同时使用当前已校验的 Session／Run／P
 | --- | --- | --- | --- |
 | [Codex](../../../packages/core/src/providers/codex.ts) | 实时工具、状态、主体、用量与原权限请求；每次启动的 session flags。 | 已接入原 `PermissionRequest`。 | 随启动携带不等于不用 Hook；原生记录继续提供独立事实。保留用户自己的 flags／Hook；原生加载、enabled 与 trust 分开检查。 |
 | [Claude](../../../packages/core/src/providers/claude.ts) | classic Hook 与原生模块使用同一状态目录插件，由启动参数加载；原生模块提供轮次与后台活动。 | 已接入原 `PermissionRequest`。 | 不写 workspace settings。插件需要准备文件，所以 catalog 仍为 `explicit-managed`，同时声明 `launchCarried`；不能因 Stop 到达就认定主轮成功。 |
-| [Grok](../../../packages/core/src/providers/grok.ts) | 工具、状态、子主体与轮末通知；全局 `hooks/agentmux-status.json`。 | 当前仅观察。 | 原生记录与 Hook 各守事实范围；Stop 的通知反馈可让本轮继续，不是权限答复。不向兼容读取的 Claude／Cursor 配置写条目。 |
+| [Grok](../../../packages/core/src/providers/grok.ts) | 工具、状态、子主体与轮末通知；原生配置根 `hooks/agentmux-status.json` 中的稳定声明，由原 Run 环境选择保留运行器。 | 当前仅观察。 | 原生记录与 Hook 各守事实范围；Stop 的通知反馈可让本轮继续，不是权限答复。不向兼容读取的 Claude／Cursor 配置写条目；headless 的 own-hook 加载证据不代签 TUI folder trust。 |
 | [Gemini](../../../packages/core/src/providers/gemini.ts) | 精选 Agent／工具观察；用户 `settings.json` 内合并受管叶子。 | 当前仅观察。 | 不注册没有消费者的高频模型事件。`AfterAgent` 可被否决／重试，不能代签最终成功；与同根其他 Provider 分清配置文件。 |
 | [Antigravity](../../../packages/core/src/providers/antigravity.ts) | 生命周期与工具；`config/hooks.json` 的受管独占键。 | 当前仅观察。 | 与 Gemini 不共用配置合同。其被动 PreToolUse 需要原生 `ask` 响应，Stop 使用空 decision；这不授予 AgentMux 代答权限。 |
 | [Cursor](../../../packages/core/src/providers/cursor.ts) | 工具与状态；数据根下 `hooks.json`。 | 当前仅观察。 | 不写项目／Claude 兼容配置；当前计划还含 workspace trust marker，信任是独立副作用，不能由发现或 Hook 路径推导授权。 |
@@ -76,11 +76,11 @@ Hook 对原生主会话的解释同时使用当前已校验的 Session／Run／P
 | [Droid](../../../packages/core/src/providers/droid.ts) | 工具、状态与通知；Factory 配置根的 `hooks.json`，事件位于根层。 | 当前仅观察。 | 不套用 `hooks` 包装；Stop 是决策前观察，idle 通知也不能代签本轮成功。 |
 | [Hermes](../../../packages/core/src/providers/hermes.ts) | 模型／工具、授权等待与结果、原轮终局；`config.yaml` 加原生 shell Hook allowlist。 | 当前仅观察；现用授权事件为 observer。 | 原生按 `shlex.split`、`shell=False` 执行，不能套 shell 插值。不注册会改写模型／工具行为的策略 Hook，不声明未证实的子代理追踪。 |
 | [Pi](../../../packages/core/src/providers/pi.ts) | 进程内生成扩展，位于其 agent 配置根的 `extensions/agentmux.js`；运行时读取 ingress 环境。 | 无权限能力声明。 | 复用宿主进程，不额外启动 Node；`agent_settled` 才消费最终结果，`message_end` 不代签收口。当前工具关联与完整结果仍有未接线范围。 |
-| [OpenCode](../../../packages/core/src/providers/opencode.ts) | 进程内生成插件，位于原生配置根的 `plugin/agentmux.js`；事件总线与权限观察。 | 当前仅观察。 | 当前把 endpoint／token 内联插件，不能假定宿主能读 Run 环境；共享插件的并发路由与凭证寿命仍需解决。`session.idle` 不代签成功。 |
+| [OpenCode](../../../packages/core/src/providers/opencode.ts) | 进程内生成插件，位于原生配置根的 `plugin/agentmux.js`；事件总线与权限观察。 | 当前仅观察。 | 共享插件不保存凭证；普通 TUI 的本地 Server Worker 沿原生继承的 Run 环境快照原绑定。同一 Server 的其他 native Session 仍须按已确认主体隔离，目录不提供会话身份。`attach`／`run --attach` 不把新 Run 的环境交给既有 Server，保留原终端并明确 Hook 未绑定。`session.idle` 不代签成功。 |
 | [Kimi](../../../packages/core/src/providers/kimi.ts) | 已有原生 Hook 解析，策略为 `unmanaged`；不自动写配置。 | 当前仅观察。 | 原生 TOML loader／merge 尚未完整确认；保持不受管，不猜配置。正常主轮完成没有对应 Hook；原生记录读取不自动补成已确认的完成观察，不从可 veto 的 Stop 补造结束。 |
 | [TraeX](../../../packages/core/src/providers/traex.ts) | 不使用 Hook；启动／恢复沿现有原生入口。 | 无权限能力声明。 | 保持 `none`，不为能力表对齐而安装 Hook；当前 timeline 声明仍为 unavailable。 |
 
-当前共性缺口须与上述目标分别阅读：[命令生成](../../../packages/core/src/providers/shared.ts)仍把发起 Core 的解释器／脚本路径固化进多家配置，随启动的路径也仍指向该安装；配置作用域尚未在所有 Provider 中完整消费执行环境。现有[安装器](../../../packages/core/src/managed-hook-installer.ts)只处理有原回执归属的声明，不能替它认领其他副本的旧配置。文档要求不代表这些缺口已经修复。
+当前实现按 Provider 保留明确边界：配置根按执行环境及各家原生 override 解析；Codex、Claude、Grok 经稳定入口使用 AgentMux 状态目录内按内容保留的完整运行器。Pi、OpenCode 复用原生宿主进程，后者按原 Run 环境绑定。其余命令型 Provider 仍有安装目录路径随各自载体固化的缺口，须在各自原生载体中落实，不能由通用入口已存在就宣称完成。[安装器](../../../packages/core/src/managed-hook-installer.ts)只处理有原回执归属的声明，不能替它认领其他副本的旧配置。既有健康 Run 的环境不会被新安装追改；它们在用的旧回调继续保留，清理另按准确归属和终局事实执行。
 
 ## 验收与公共入口
 
