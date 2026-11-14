@@ -67,6 +67,12 @@ const ThemeActionZoomInIcon = semanticIconComponent('action.zoom-in')
 const ThemeNavigationUpIcon = semanticIconComponent('navigation.up')
 
 
+// Keep the temporary Store snapshot outside the long-lived resolver's closure scope.
+function focusSpeakerMetadata(ids: readonly string[]) {
+  const state = useAppStore.getState()
+  return new Map(ids.map(id => [id, currentConversationSpeakerMetadata(id, { sessions: state.sessions, config: state.config, workspaces: state.config?.workspaces ?? [], agentNames: state.agentNames, timelines: state.timelines, scratchTopicSnapshots: state.scratchTopicSnapshots, spaceObjectIcons: state.spaceObjectIcons })]))
+}
+
 // Subscribe only to the canonical authors in this mounted input surface. Session
 // output/status and other senders cannot re-render it or start avatar reads.
 function useFocusSpeakerResolver(messages: readonly ConversationRecord[], visible: boolean): FocusDescribeSpeaker {
@@ -101,8 +107,7 @@ function useFocusSpeakerResolver(messages: readonly ConversationRecord[], visibl
   }, [ids])
   const facts = useAppStore(useShallow(selectFacts))
   return useMemo(() => {
-    const state = useAppStore.getState()
-    const metadataById = new Map(ids.map(id => [id, currentConversationSpeakerMetadata(id, { sessions: state.sessions, config: state.config, workspaces: state.config?.workspaces ?? [], agentNames: state.agentNames, timelines: state.timelines, scratchTopicSnapshots: state.scratchTopicSnapshots, spaceObjectIcons: state.spaceObjectIcons })]))
+    const metadataById = focusSpeakerMetadata(ids)
     const original = createSpeakerResolver({ lookupExternal: author => profiles.get(channelProfileKey(author)), lookupAgent: id => {
       const metadata = metadataById.get(id)
       return metadata ? { ...metadata, readDetails: () => {
