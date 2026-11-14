@@ -1,3 +1,4 @@
+import { requestDesktopFocusWorkfaceReveal } from '../lib/desktop-presentation'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import { DateTime } from 'luxon'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
@@ -107,6 +108,8 @@ export function MoteCalendar({ scope, reference, active, openRequest }: {
     if (!location || !state.selectMainRegion(location, state.workbenchSpaceSelection)) {
       setNavigationIssue(located.issue ?? 'The original discussion could not be focused. Its arrangement is kept.'); return
     }
+    const choice = useAppStore.getState().workbenchSpaceSelection
+    if (choice) requestDesktopFocusWorkfaceReveal(choice)
     state.setMainSurface('workbench'); contentPresentation?.collapse(); setNavigationIssue(undefined)
   }
   const records = useMemo(() => source.records.filter(record => showEnded || record.status !== 'stopped'), [source.records, showEnded])

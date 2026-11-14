@@ -65,7 +65,8 @@ import {
 } from '../lib/region-focus'
 import { layoutForActiveTopic } from '../lib/scratch-topic-layout'
 import { useWorkbenchObjectLayout } from '../hooks/useWorkbenchObjectLayout'
-import { workbenchSelectionCatalog } from '../lib/desktop-focus-navigation'
+import { mainRegionReference, workbenchSelectionCatalog } from '../lib/desktop-focus-navigation'
+import { requestDesktopFocusWorkfaceReveal } from '../lib/desktop-presentation'
 import { projectWorkbenchProjection, workbenchZoneUnplacedGroupId, selectWorkbenchProjectionTab, sameWorkbenchProjectionSelection, workbenchProjectionMatches, workbenchProjectionSlotId, workbenchRegionProjectionSlotId, workbenchProjectionTabIds, workbenchProjectionZone, WorkbenchProjectionContext, type WorkbenchProjection } from '../lib/workbench-projection'
 import { StableWorkbenchView } from './StableWorkbenchView'
 import { workbenchDisplayTabs, workbenchDisplayReferenceMatches, workbenchDisplayOccurrenceAmbiguous, workbenchDisplayGroupMatches, workbenchProjectionSplitPath } from '../lib/workbench-resource-display'
@@ -147,6 +148,12 @@ const ThemeActionCloseIcon = semanticIconComponent('action.close')
 const ThemeActionCreateTabIcon = semanticIconComponent('action.create-tab')
 const ThemeActionStopIcon = semanticIconComponent('action.stop')
 const ThemeActionCreateDiscussionIcon = semanticIconComponent('action.create-discussion')
+
+/** The actual Work input selects this occurrence; native focus observation does not reveal it. */
+function revealSelectedFocusWorkface(reference: { displayWorkspaceId: string; groupId: string; tabId: string; regionId: string }): void {
+  const choice = useAppStore.getState().workbenchSpaceSelection
+  if (choice && sameWorkbenchProjectionSelection(mainRegionReference(choice), reference)) requestDesktopFocusWorkfaceReveal(choice)
+}
 
 
 const GitWorkbenchPane = lazy(async () => {
@@ -443,6 +450,7 @@ function SortableWorkbenchTab({
               if (projection) selectWorkbenchProjectionTab(projection, group.id, tab)
               else if (mote) mote.selectTab(tab.id, group.id)
               else activateTab(workspaceId, group.id, tab.id, 'local')
+              if (!mote && (useAppStore.getState().mainSurface === 'workbench' || useAppStore.getState().mainSurface === 'agents')) revealSelectedFocusWorkface(switchTarget)
               actionResult = 'returned'
             } finally { tabSwitchObservation.actionEnded(observationId, actionResult) }
             if (visible && group.activeTabId === tab.id) tabSwitchObservation.selected(switchTarget, 'already-selected-handler')
@@ -915,6 +923,15 @@ function WorkbenchRegionContent({
       if ((target?.surface ?? browserPresentation.surface) && !reference) return
       focusRegion(reference?.displayWorkspaceId ?? tab.workspaceId, tab.id, node.regionId,
         floating || target?.surface === 'mote' ? 'floating-pointer' : 'pointer', reference?.groupId)
+    }
+    const presentation = target?.surface ?? browserPresentation.surface
+    const mainSurface = useAppStore.getState().mainSurface
+    if (!floating && (mainSurface === 'workbench' || mainSurface === 'agents') &&
+      (presentation === 'space' || presentation === 'focus' || !presentation)) {
+      const reference = target?.reference ?? browserPresentation.reference
+      const selectedGroupId = reference?.groupId ?? groupId
+      if (selectedGroupId) revealSelectedFocusWorkface({ displayWorkspaceId: reference?.displayWorkspaceId ?? tab.workspaceId,
+        groupId: selectedGroupId, tabId: tab.id, regionId: node.regionId })
     }
   }
 

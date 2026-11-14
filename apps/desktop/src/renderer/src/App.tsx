@@ -47,7 +47,8 @@ import { moteWorkbenchProjection } from './lib/mote-workbench-projection'
 import { pmoTeamsTopicFloatingViewTargets, pmoTeamsTopicFloatingTargetTabId, pmoTeamsTopicFloatingTargetTopicId, readPmoTeamsTopicFloatingState, usePmoTeamsTopicFloatingState } from './lib/pmo-teams-topic-floating'
 import { desktopSurface, DesktopFocusFailure } from './lib/desktop-focus-navigation'
 import { focusTimelineCurrentReference } from './lib/focus-timeline-current'
-import { installDesktopPresentationOwner, desktopPresentationCommitted, type DesktopAppPresentationOwner } from './lib/desktop-presentation'
+import { installDesktopPresentationOwner, desktopPresentationCommitted, requestDesktopFocusWorkfaceReveal, type DesktopAppPresentationOwner } from './lib/desktop-presentation'
+import { sameSpatialValue } from './lib/spatial-merge'
 import { surfaceSwitchObservation } from './lib/surface-switch-observation'
 import { SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 import { ProjectRail } from './components/ProjectRail'
@@ -199,6 +200,14 @@ function DesktopApp() {
           ...(hostId === undefined ? {} : { hostId, ...(sectionId === 'hosts' ? { field: 'resources' } : {}) }) }, 'preserve'),
         close: () => { setSettingsInputPolicy('preserve'); closeSettings() } },
       survey: { select: selectSurveyTarget },
+      focusWorkface: { reveal: (expected, intent) => {
+        if (!sameSpatialValue(useAppStore.getState().workbenchSpaceSelection, expected)) return false
+        setFocusWorkfaceView(value => {
+          if (intent === 'surface-return') return value === 'unconfirmed' ? 'tab' : value
+          return value === 'region' ? 'region' : 'tab'
+        })
+        return true
+      } },
       floating: floating ? { state: floating.open ? 'pinned' : floating.preview ? 'preview' : 'closed',
         topicId: pmoTeamsTopicFloatingTargetTopicId(floating, tabs),
         tabId: pmoTeamsTopicFloatingTargetTabId(floating, tabs, layouts[SCRATCH_WORKSPACE_ID], agentFocus.pmo.sessionId) ?? null,
@@ -322,12 +331,13 @@ function DesktopApp() {
     tabs, layouts, agentFocus.pmo.sessionId, moteProjection, selectMoteReference])
   const [focusWorkfaceView, setFocusWorkfaceView] = useState<'tab' | 'region' | 'closed' | 'unconfirmed'>('tab')
   const selectFocusReference = useCallback<WorkbenchProjection['onSelect']>(reference => {
-    if (useAppStore.getState().selectMainRegion(reference, workbenchSpaceSelection)) setFocusWorkfaceView(value => value === 'region' ? 'region' : 'tab')
+    if (!useAppStore.getState().selectMainRegion(reference, workbenchSpaceSelection)) return false
+    setFocusWorkfaceView(value => value === 'region' ? 'region' : 'tab')
+    return true
   }, [workbenchSpaceSelection])
   const selectFocusContext = useCallback((id: string, reference?: WorkbenchProjectionSelection) => {
     setFocusWorkfaceView(useAppStore.getState().focusExecutionSession(id, reference) ? 'tab' : 'unconfirmed')
   }, [])
-  useEffect(() => { setFocusWorkfaceView(value => value === 'closed' || value === 'unconfirmed' ? 'tab' : value) }, [workbenchSpaceSelection])
   const focusRegionOnly = focusWorkfaceView === 'region'
   // The exact main choice survives closing only its Focus presentation.
   const mainFocus = useMemo(() => mainFocusPresentation(workbenchSpaceSelection, tabs, surveyCatalog, selectFocusReference, focusRegionOnly ? 'region' : 'tab'),
@@ -753,6 +763,10 @@ function DesktopApp() {
         surfaceOwnsChord: surfaceOwnsChord(element, event)
       })
       const handlers = windowShortcutHandlers(useAppStore.getState(), {
+        onWorkfaceNavigation: reference => {
+          const choice = useAppStore.getState().workbenchSpaceSelection
+          if (choice && sameWorkbenchProjectionSelection(mainRegionReference(choice), reference)) requestDesktopFocusWorkfaceReveal(choice)
+        },
         toggleQuickSwitch: () => {
           const request = useAppStore.getState().sessionLocationRequest
           if (request) { useAppStore.getState().dismissSessionLocationRequest(request.requestId); setQuickSwitchOpen(false); return }

@@ -5,6 +5,7 @@ import { useMoteDefaultConversation } from '../lib/mote-quick-preferences'
 import { useShallow } from 'zustand/react/shallow'
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type ContextType } from 'react'
 import { useAppStore } from '../store'
+import { requestDesktopFocusWorkfaceReveal } from '../lib/desktop-presentation'
 import { MoteWorkfaceContext, useMoteWorkfaceScope, type MoteWorkfaceScope, type MoteRolloverStart } from '../lib/mote-workface'
 import { moteMainServicePolicy, moteMainServicePresentation } from '../lib/mote-main-service'
 import { ServiceWindowNotice } from './ServiceWindowNotice'
@@ -143,6 +144,8 @@ function MoteWorkfaceBody({ scope, workspaceId, topicId, floating = false, visib
     const state = useAppStore.getState()
     if (!state.selectMainRegion(next, state.workbenchSpaceSelection)) return false
     state.setFocusView('list')
+    const choice = useAppStore.getState().workbenchSpaceSelection
+    if (choice) requestDesktopFocusWorkfaceReveal(choice)
     state.setMainSurface('agents')
     if (floating) requestPmoTeamsTopicFloatingClose({ restoreFocus: false })
     return true

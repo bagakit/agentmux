@@ -176,7 +176,7 @@ import type { WorkbenchProjectionSelection } from './lib/workbench-projection'
 import type { WorkbenchPresentation } from './lib/workbench-presentation'
 import { mainRegionReference, desktopMainSurface, desktopSelection, desktopSpaceSelectionAfterClose, resolveDesktopSpaceSelection, resolveDesktopMoteSelection, resolveWorkbenchOccurrenceSelection, reconcileWorkbenchSpaceSelection, workbenchSelectionCatalog, sessionWorkbenchReferences, type SessionLocationReference, projectWorkbenchSpaceSelection, workbenchObjectLayout, restoreWorkbenchSpaceSelection, DesktopFocusFailure } from './lib/desktop-focus-navigation'
 import type { FocusAgentReveal, FocusAgentTarget } from './lib/focus-agent-navigation'
-import { captureDesktopInput, readDesktopPresentation, readDesktopOverlays, requestDesktopSettingsNavigation, requestDesktopSurveyNavigation, readGoalReadingPresentation, readFocusAgentPresentation, readMoteLinkPresentation, awaitDesktopPresentation, desktopInputPreserved } from './lib/desktop-presentation'
+import { captureDesktopInput, readDesktopPresentation, readDesktopOverlays, requestDesktopSettingsNavigation, requestDesktopSurveyNavigation, requestDesktopFocusWorkfaceReveal, readGoalReadingPresentation, readFocusAgentPresentation, readMoteLinkPresentation, awaitDesktopPresentation, desktopInputPreserved } from './lib/desktop-presentation'
 import { refreshNotebookLibrary, restoreNotebookRecoveries, useNotebookLibrary, type NotebookRecovery } from './lib/notebook-library'
 import type { AgentMuxDesktopSpaceSelection, AgentMuxDesktopFocusResult, AgentMuxSpatialSave, AgentMuxSpatialIssue } from '@agentmux/core/control'
 import type { SpaceZoneBindings, SpatialRequestBinding } from '../../shared/space-addresses'
@@ -6189,6 +6189,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           delete next.selectedSpaceMount
           return next
         })
+        if (reveal && get().workbenchSpaceSelection) requestDesktopFocusWorkfaceReveal(get().workbenchSpaceSelection!)
         return
       } catch { /* A changed ordinary occurrence remains unknown; the original Zone stays selected below. */ }
     }
@@ -6225,6 +6226,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         workbenchSpaceSelection: { spaceId: target.reference.spaceId, zoneId: target.zoneId, workspaceId, topicId: null, tabId, groupId: tabGroupId, regionId,
           sourceRuntimeId: target.reference.runtimeId } as AgentMuxDesktopSpaceSelection }
     })
+    if (created && get().workbenchSpaceSelection) requestDesktopFocusWorkfaceReveal(get().workbenchSpaceSelection!)
     return created ? { tabId, regionId } : null
   },
   openSourceFolder(target) {
@@ -8098,6 +8100,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           if (resolved.tabId && resolved.regionId) get().focusRegion(resolved.workspaceId, resolved.tabId, resolved.regionId, 'pointer', resolved.groupId ?? undefined)
           set({ activeWorkspaceId: resolved.workspaceId, mainSurface: 'workbench', retainedSpatialFocus: null,
             workbenchSpaceSelection: resolved, regionCaretFocus: null, workbenchNavigationInputPolicy: request.inputPolicy })
+          requestDesktopFocusWorkfaceReveal(resolved)
         }
       } catch (error) {
         navigationState = 'rejected'
@@ -8684,6 +8687,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         displacedAgentSessionIds: state.displacedAgentSessionIds.filter((sessionId) => sessionId !== id)
       }))
       get().focusRegion(reference.displayWorkspaceId, reference.tabId, reference.regionId, options?.reference ? 'navigation' : 'pointer', reference.groupId)
+      if (!options?.keepSurface) requestDesktopFocusWorkfaceReveal(choice)
       return true
     }
     if (options?.reference) return fail('This location no longer contains the original Session. Its existing work is kept; no new view was created.')
@@ -8739,6 +8743,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       // Placement succeeded in this same commit; a later intentional close is not this old failure.
       displacedAgentSessionIds: state.displacedAgentSessionIds.filter((sessionId) => sessionId !== id)
     }))
+    if (!options?.keepSurface) requestDesktopFocusWorkfaceReveal(choice)
     return true
   },
   prepareWorkbenchLayout(workspaceId) {
@@ -8849,6 +8854,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       } : {}),
       layouts: { ...state.layouts, [displayId]: reveal || initialInputs ? nextLayout : retainLayoutSelection(layout, nextLayout) }
     }))
+    if (reveal && selectedObject) requestDesktopFocusWorkfaceReveal(selectedObject)
     // Publish the durable Region owner before releasing only its unchanged Group inputs.
     // Utility drafts and Note receipts retain the original Group record.
     if (initialInputs) useLauncherState.getState().clearAgentInputsIfUnchanged(
@@ -9471,6 +9477,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     set({ mainSurface, workbenchNavigationInputPolicy: null, regionCaretFocus: null,
       ...(mainSurface === 'board' ? {} : { goalReadingEntry: null }),
       ...(choice && !state.workbenchSpaceSelection ? { workbenchSpaceSelection: choice } : {}) })
+    if (mainSurface === 'agents' && state.mainSurface !== 'agents' && choice) requestDesktopFocusWorkfaceReveal(choice, 'surface-return')
   },
   selectMainRegion(reference, expected) {
     const state = get()
@@ -10085,6 +10092,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         set({ activeWorkspaceId: choice.workspaceId, mainSurface: 'workbench', workbenchSpaceSelection: choice,
           ...(inputPolicy === 'preserve' ? { regionCaretFocus: null } : {}), workbenchNavigationInputPolicy: inputPolicy })
         result.navigation = 'applied'
+        requestDesktopFocusWorkfaceReveal(choice)
         return
       }
       if (placement?.reference && !placement.projection && !bookmarkOpened) {
@@ -10098,6 +10106,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           const applied = current.selectMainRegion({ displayWorkspaceId: displayId, groupId: group.id,
             tabId: destinationTabId, regionId: exactRegionId }, navigation.workbenchSpaceSelection)
           result.navigation = applied ? 'applied' : 'unconfirmed'
+          if (applied && get().workbenchSpaceSelection) requestDesktopFocusWorkfaceReveal(get().workbenchSpaceSelection!)
         }
         return
       }
@@ -10115,6 +10124,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       }
       else if (presentationId === 'focus-workbench') result.navigation = get().mainSurface === 'agents' &&
         sameWorkbenchProjectionSelection(mainRegionReference(get().workbenchSpaceSelection), reference) ? 'applied' : 'cancelled'
+      if (presentationId === 'space-workbench' && result.navigation === 'applied' && get().workbenchSpaceSelection)
+        requestDesktopFocusWorkfaceReveal(get().workbenchSpaceSelection!)
     }
     const key = documentKey(workspaceId, path)
     // 书签文件（`.webloc`/`.url`）默认开进 Browser，不进 Monaco——用户原话「应该是默认 browser」。

@@ -25,6 +25,7 @@ import { SHORTCUT_BINDINGS } from './shortcut-registry'
 import { logicalRegionId, layoutForLogicalRegionFocus, type RegionFocusCause } from './region-focus'
 import { workbenchObjectLayout, type NavigationState } from './desktop-focus-navigation'
 import { isOriginalSourceWorkspaceProjection } from './original-space-navigation'
+import type { WorkbenchProjectionSelection } from './workbench-projection'
 
 /**
  * 一次按键解析出的命令——已经定到「哪个动作、往哪个方向、第几张」，但**落点（哪个 Workspace/Tab/
@@ -247,7 +248,8 @@ function visibleShortcutLayout(store: WorkbenchShortcutStore, workspaceId: strin
  */
 export function dispatchWorkbenchCommand(
   command: WorkbenchShortcutCommand,
-  store: WorkbenchShortcutStore
+  store: WorkbenchShortcutStore,
+  onSelected?: (reference: WorkbenchProjectionSelection) => void
 ): boolean {
   // 快捷键只作用于 Workbench 面；Board 等其他主面不接管这些键。
   if (store.mainSurface !== 'workbench') return false
@@ -265,6 +267,8 @@ export function dispatchWorkbenchCommand(
     const tabId = tabIdForOrdinal(group.tabOrder, command.ordinal)
     if (!tabId) return false
     store.activateTab(workspaceId, group.id, tabId)
+    const tab = store.tabs[tabId]
+    if (tab) onSelected?.({ displayWorkspaceId: workspaceId, groupId: group.id, tabId, regionId: tab.layout.activeRegionId })
     return true
   }
 
@@ -275,6 +279,8 @@ export function dispatchWorkbenchCommand(
     const tabId = tabIdForStep(group.tabOrder, group.activeTabId, command.delta)
     if (!tabId) return false
     store.activateTab(workspaceId, group.id, tabId)
+    const tab = store.tabs[tabId]
+    if (tab) onSelected?.({ displayWorkspaceId: workspaceId, groupId: group.id, tabId, regionId: tab.layout.activeRegionId })
     return true
   }
 
@@ -341,6 +347,7 @@ export function dispatchWorkbenchCommand(
   // 键盘导航：搬绿环 **并** 搬 DOM caret（cause 'keyboard'）。少了 cause 这一路就退回「绿环移了、
   // 键入没移」——本层要修的正是它。
   store.focusRegion(workspaceId, tabId, neighbourRegionId, 'keyboard')
+  onSelected?.({ displayWorkspaceId: workspaceId, groupId: group.id, tabId, regionId: neighbourRegionId })
   return true
 }
 
@@ -406,7 +413,7 @@ export function dispatchNextAttention(store: WorkbenchShortcutStore): boolean {
  */
 export function windowShortcutHandlers(
   store: WorkbenchShortcutStore,
-  actions: { toggleQuickSwitch: () => void; openShortcuts: () => void }
+  actions: { toggleQuickSwitch: () => void; openShortcuts: () => void; onWorkfaceNavigation?: (reference: WorkbenchProjectionSelection) => void }
 ): Record<string, () => boolean> {
   const handlers: Record<string, () => boolean> = {
     'quick-switch.toggle': () => {
@@ -424,7 +431,7 @@ export function windowShortcutHandlers(
   for (const id of workbenchWindowBindingIds()) {
     handlers[id] = () => {
       const command = commandForWorkbenchId(id)
-      return command ? dispatchWorkbenchCommand(command, store) : false
+      return command ? dispatchWorkbenchCommand(command, store, actions.onWorkfaceNavigation) : false
     }
   }
   return handlers

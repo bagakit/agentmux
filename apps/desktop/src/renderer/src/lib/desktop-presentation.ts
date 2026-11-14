@@ -1,7 +1,7 @@
 import type { FocusAgentTarget } from './focus-agent-navigation'
 import { workbenchDocuments, workbenchDocumentIdentity } from './workbench-window-registry'
 import type { AgentMuxDesktopFocusTarget, AgentMuxDesktopFloating, AgentMuxDesktopInput, AgentMuxDesktopObservation,
-  AgentMuxDesktopOverlays, AgentMuxDesktopPresentation, AgentMuxDesktopSelection } from '@agentmux/core'
+  AgentMuxDesktopOverlays, AgentMuxDesktopPresentation, AgentMuxDesktopSelection, AgentMuxDesktopSpaceSelection } from '@agentmux/core'
 import type { WorkbenchTab } from './workbench-tabs'
 import { workbenchRegionProjectionSlotId } from './workbench-projection'
 import { surveyPageOwner } from './survey-page-references'
@@ -11,6 +11,7 @@ export type DesktopAppPresentationOwner = {
   overlays: { settings: boolean; quickSwitcher: boolean }
   settings?: { sectionIds: readonly string[]; open(sectionId: string, hostId?: string): void; close(): void; read(): { sectionId: string; visible: boolean; hostId?: string | null } | null }
   survey?: { select(target: Extract<AgentMuxDesktopFocusTarget, { kind: 'survey' }>): void }
+  focusWorkface?: { reveal(expected: AgentMuxDesktopSpaceSelection, intent: 'selection' | 'surface-return'): boolean }
   /** The existing Space content slot may cover its retained main workface. */
   contentExpanded?: boolean
   floating: { state: 'closed' | 'preview' | 'pinned'; topicId: string | null; tabId: string | null; regionId?: string | null } | null
@@ -25,6 +26,11 @@ export function installDesktopPresentationOwner(read: () => DesktopAppPresentati
 }
 export function desktopPresentationCommitted(): void {
   for (const listener of commitListeners) listener()
+}
+
+/** Explicit navigation contributes presentation intent to the original App, never to an observer. */
+export function requestDesktopFocusWorkfaceReveal(expected: AgentMuxDesktopSpaceSelection, intent: 'selection' | 'surface-return' = 'selection'): boolean {
+  return appReader?.()?.focusWorkface?.reveal(expected, intent) ?? false
 }
 
 /** Overlay control comes from the App owner; it does not require a DOM presentation probe. */

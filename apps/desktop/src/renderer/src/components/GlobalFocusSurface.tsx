@@ -192,7 +192,7 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
   const currentSurface = currentReference && tabs[currentReference.tabId]?.regions[currentReference.regionId]
   const currentContext = sourceSelection?.context ?? (currentSurface && (currentSurface.kind === 'agent' || currentSurface.kind === 'terminal') && currentReference
     ? focusContextAtRegion(executionRows.filter(context => context.id === currentSurface.sessionId), currentReference, agentRegionExecution) : null)
-  const showWorkspace = Boolean(sourceSelection || sourceChoices) || (workspaceOpen ?? Boolean(projection || presentation?.unselected || presentation?.issue || selectedId))
+  const showWorkspace = Boolean(sourceChoices) || (workspaceOpen ?? Boolean(sourceSelection || projection || presentation?.unselected || presentation?.issue || selectedId))
   const selectedSessionIds = useMemo(() => selectedId ? [selectedId] : [], [selectedId])
   const sessions = useAppStore(useShallow(state => selectedTab ? [] : selectedSessionIds.flatMap(id => { const session = sessionPresentationById(state.sessions).get(id); return session ? [session] : [] })))
   // A Session Core still lists, with no Region occurrence at all: the reachable recovery is to give it one.

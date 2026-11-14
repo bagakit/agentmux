@@ -1,3 +1,4 @@
+import { requestDesktopFocusWorkfaceReveal } from '../lib/desktop-presentation'
 import { useState } from 'react'
 import { ArrowLeft } from 'lucide-react'
 import { useWorkbenchBrowserPresentation } from '../lib/workbench-presentation'
@@ -27,6 +28,8 @@ export function NoteReadingReturn() {
     if (selected.mainSurface !== journey.surface || !noteReadingReferenceIsSelected(selected, from)) {
       setIssue('Returning to the original reading position was not confirmed. Its identity and draft are kept; retry from this reading surface.'); return
     }
+    if ((!presentation.projection || presentation.projection.presentationId === 'space-workbench') && selected.mainSurface === 'workbench' && selected.workbenchSpaceSelection)
+      requestDesktopFocusWorkfaceReveal(selected.workbenchSpaceSelection)
     clearNoteReadingReturn(journey); setIssue(null)
   }
   return <div className="note-reading-return"><button type="button" className="note-text-button" onClick={back}><ArrowLeft size={13} />Return to {journey.title}</button>{issue && <span role="status">{issue}</span>}</div>

@@ -1,3 +1,4 @@
+import { requestDesktopFocusWorkfaceReveal } from '../lib/desktop-presentation'
 import { useMemo, useState } from 'react'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useWorkbenchObjectLayout } from '../hooks/useWorkbenchObjectLayout'
@@ -38,7 +39,11 @@ export function MoteDiscussions({ scope, active, limit }: { scope: MoteWorkfaceS
     const original = state.tabs[tab.id]
     if (!original || !display || choice?.topicId !== scope.topic.id) { setIssue('This original discussion location is not confirmed. Its reference and work are kept.'); return }
     const selected = state.selectMainRegion({ displayWorkspaceId: display, groupId, tabId: tab.id, regionId: original.layout.activeRegionId }, choice)
-    if (selected) { setIssue(''); presentation?.collapse() }
+    if (selected) {
+      const choice = useAppStore.getState().workbenchSpaceSelection
+      if (choice) requestDesktopFocusWorkfaceReveal(choice)
+      setIssue(''); presentation?.collapse()
+    }
     else setIssue('This original discussion location is not confirmed. Its reference and work are kept.')
   }
   return <section className="mote-discussions" aria-label={limit ? 'Recent discussions' : 'Discussions'}>

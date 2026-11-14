@@ -10,6 +10,7 @@ import { spaceMountKey, type SpaceMountMemberSurface, type SpaceMountMemberTarge
 import { api } from './api'
 import { agentDisplayName } from './workbench-tabs'
 import { requestWorkbenchReferenceClose } from './workbench-close-request'
+import { requestDesktopFocusWorkfaceReveal } from './desktop-presentation'
 import { agentRegionLocationBindings, ordinaryAgentSpaceMember, useAppStore } from '../store'
 import { workbenchSelectionCatalog } from './desktop-focus-navigation'
 import { mountedSpaceInputs, mountedSpaceRegions, mountedSpaceTarget, type MountedSpaceRegion } from './space-mount-view'
@@ -118,11 +119,15 @@ function MemberReader({ candidate, visible, publish, refresh }: { candidate: Can
   return null
 }
 
-function openSourceLocation(location: Location, surface: 'agents' | 'workbench', onSelectLocation?: (reference: WorkbenchProjectionSelection) => void) {
+function openSourceLocation(location: Location, surface: 'agents' | 'workbench', onSelectLocation?: (reference: WorkbenchProjectionSelection) => boolean | void) {
   if (location.reference) {
-    if (onSelectLocation) onSelectLocation(location.reference)
-    else useAppStore.getState().selectMainRegion(location.reference)
+    const selected = onSelectLocation ? onSelectLocation(location.reference) : useAppStore.getState().selectMainRegion(location.reference)
+    if (selected === false) return false
     if (surface === 'workbench') useAppStore.setState({ mainSurface: surface })
+    else if (!onSelectLocation) {
+      const choice = useAppStore.getState().workbenchSpaceSelection
+      if (choice) requestDesktopFocusWorkfaceReveal(choice)
+    }
     return true
   }
   const state = useAppStore.getState(), key = spaceMountKey(location.source.reference)
@@ -134,14 +139,18 @@ function openSourceLocation(location: Location, surface: 'agents' | 'workbench',
     }
   }
   state.openOriginalSpaceLocation({ target: location.source, resource: originalSpaceResource(state, location.source),
-    occurrence: { tabId: location.tabId, regionId: location.regionId, displayWorkspaceId: location.source.workspaceId } })
+    occurrence: { tabId: location.tabId, regionId: location.regionId, displayWorkspaceId: location.source.workspaceId } }, surface === 'workbench')
   useAppStore.setState({ mainSurface: surface })
+  if (surface === 'agents') {
+    const choice = useAppStore.getState().workbenchSpaceSelection
+    if (choice) requestDesktopFocusWorkfaceReveal(choice)
+  }
   return true
 }
 
 /** Joins source-qualified facts to the common Context pipeline; it owns no task UI. */
 export function useFocusSources({ visible, contexts, onSelectLocation, onChooseLocation, onFocusContext }: { visible: boolean; contexts: readonly FocusContext[];
-  onSelectLocation?: (reference: WorkbenchProjectionSelection) => void; onChooseLocation?: (choice: SourceChoice) => void;
+  onSelectLocation?: (reference: WorkbenchProjectionSelection) => boolean | void; onChooseLocation?: (choice: SourceChoice) => void;
   onFocusContext?: (context: FocusContext) => void }) {
   const inputs = useAppStore(state => state.mountedSpaceInputs), observations = useAppStore(state => state.mountedSpaceObservations)
   const metadata = useAppStore(state => state.mountedSpaceSessions), config = useAppStore(state => state.config)
