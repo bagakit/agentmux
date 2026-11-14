@@ -11,7 +11,7 @@ import type { MoteDialogueIdentity } from './dialogue.js'
 const applicationId = 0x414d444c
 const key = (identity: MoteDialogueIdentity) => JSON.stringify([identity.hostId, identity.moteId])
 type Source = MoteDialogueLink extends infer T ? T extends MoteDialogueLink ? Omit<T, 'sequence' | 'operationId' | 'identity'> : never : never
-/** Indexed source relationships only. No current role, conversation body or task state is stored here. */
+/** Original source relationships and bounded Agent statements. No current role, conversation transcript or task state is stored here. */
 export class MoteDialogueStore {
   constructor(readonly path: string) {}
   private async open(write = false): Promise<DatabaseSync | null> {

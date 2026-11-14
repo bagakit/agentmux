@@ -1242,6 +1242,7 @@ export class AgentMuxRpcService {
       if (!caller && (!context.principal || !['user', 'device'].includes(context.principal.kind)))
         throw new AgentMuxError('Mote dialogue sources require their original authenticated actor.', 'CONTROL_PERMISSION_DENIED')
       const input = parseMoteDialogueParams(method, params)
+      if (method === 'space.mote.dialogue.heartbeat.report' && !caller) throw new AgentMuxError('A heartbeat work report requires its original authenticated Agent; a person or device cannot author its statement.', 'MANAGED_AGENT_CONTEXT_REQUIRED')
       if (method === 'space.mote.dialogue.setup.inspect' || method === 'space.mote.dialogue.setup.advance') {
         if (caller || context.caller !== undefined || !context.principal || !['user','device'].includes(context.principal.kind)) throw new AgentMuxError('Main setup requires its original authenticated person or device; an Agent cannot assign the standing Main.', 'CONTROL_PERMISSION_DENIED')
         rpcString(context.principal.id,'Original Main setup actor')
@@ -1265,11 +1266,25 @@ export class AgentMuxRpcService {
           : await this.moteMainInput(method, parseMoteDialogueParams(method,params),context)
         return parseMoteDialogueResult(method,value,input) as AgentMuxRpcResult<M>
       }
-      const original = { ...(caller ? { caller: { hostId: caller.hostId, agentSessionId: caller.agentSessionId } } : {}),
+      const originalCallerRun = caller ? { ...caller.session.run } : null
+      const original = { ...(caller ? { caller: { hostId: caller.hostId, agentSessionId: caller.agentSessionId, run: originalCallerRun! } } : {}),
+        readInput: async (hostId: string, key: import('./agent-prompt-condition.js').AgentPromptInputKey) => {
+          if (!caller || hostId !== caller.hostId || key.agentSessionId !== caller.agentSessionId) throw new AgentMuxError('The original heartbeat input reader cannot cross its authenticated participant.', 'CONTROL_PERMISSION_DENIED')
+          return (await this.call('agent.input.inspect', { key }, context)).record
+        },
+        readFile: (request: import('./public-rpc-files.js').FileReadParams) => this.call('file.read', request, context),
+        readNoteHistory: (request: import('./public-rpc-files.js').FileHistoryParams) => this.call('file.history', request, context),
         readDispatch: async (hostId: string, sourceMessageId: string) => this.call('message.dispatch.read', { hostId, sourceMessageId }, context),
         ...(context.signal ? { signal: context.signal } : {}), assertCurrent: async () => {
-          context.signal?.throwIfAborted(); await context.assertCurrent?.(); if (caller) await this.authenticated(context)
+          context.signal?.throwIfAborted(); await context.assertCurrent?.(); if (caller) {
+            const current = await this.authenticated(context)
+            if (method === 'space.mote.dialogue.heartbeat.report' && (!current || current.hostId !== caller.hostId || current.session.run.runId !== originalCallerRun?.runId)) throw new AgentMuxError('The original reporting Agent Run changed. Keep the statement and its selected input.', 'CONTROL_PERMISSION_DENIED')
+          }
         } }
+      if (method === 'space.mote.dialogue.heartbeat.report') {
+        if (!this.ports.moteDialogue.heartbeatReport) throw new AgentMuxError('The original heartbeat report owner is unavailable. Keep its operation and statement.', 'CONTROL_UNAVAILABLE')
+        return parseMoteDialogueResult(method, await this.ports.moteDialogue.heartbeatReport(parseMoteDialogueParams(method, params), original), input) as AgentMuxRpcResult<M>
+      }
       const result = method === 'space.mote.dialogue.supervision.read'
         ? await this.ports.moteDialogue.supervision(parseMoteDialogueParams(method, params), original)
         : method === 'space.mote.dialogue.read'

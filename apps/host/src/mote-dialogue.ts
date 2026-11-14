@@ -1,3 +1,4 @@
+import { reportMoteHeartbeat } from './mote-heartbeat-report.js'
 import { isDeepStrictEqual } from 'node:util'
 import { sameMotePreferencesTarget } from '@agentmux/core/mote-preferences'
 import { spatialAgentOpenDocument, spatialAgentOpenRecord } from '@agentmux/core/mote-dialogue'
@@ -84,6 +85,7 @@ export function createHostMoteDialogue(options: {
   main: MoteMainReader
   spatial: AgentMuxSpatialStateStore
   store: MoteDialogueStore
+  qualifyHeartbeatSource?(source: import('@agentmux/core/mote-dialogue').MoteHeartbeatSource, main: MoteMainSnapshot, context: MoteDialogueCallContext): Promise<void>
   clientForHost(hostId: string): Pick<AgentMuxClient, 'readDispatch'> & Partial<Pick<AgentMuxClient,'conversationCheckpoint'>> | Promise<Pick<AgentMuxClient, 'readDispatch'> & Partial<Pick<AgentMuxClient,'conversationCheckpoint'>>>
 }): MoteDialoguePort & { prepareMainSource(before:MoteMainSnapshot, roleRevision:string, reference:import('@agentmux/core/mote-preferences').MoteDefaultConversation|null, operationId:string):Promise<MoteMainTransitionMarker>; recordMainSource(before: MoteMainSnapshot, after: MoteMainSnapshot, operationId: string): Promise<void> } {
   const mainSource = (snapshot: MoteMainSnapshot, associatedAt: number) => {
@@ -103,6 +105,7 @@ export function createHostMoteDialogue(options: {
   }
   return {
     mainInput: options.main,
+    heartbeatReport: (input, context) => reportMoteHeartbeat(input, context, options),
     async prepareMainSource(before,roleRevision,reference,operationId) {
       if(!before.identity)throw new AgentMuxError('The original role identity is unconfirmed.','MOTE_DIALOGUE_SOURCE_UNCONFIRMED')
       if(before.transition&&before.roleRevision)await options.store.confirmTransition(before.identity,before.transition,before.roleRevision,before.current)
@@ -141,8 +144,8 @@ export function createHostMoteDialogue(options: {
       await context?.assertCurrent?.(); await authorizeRead(main, context)
       try {
         const page = main.identity ? await options.store.read(main.identity, input, main) : { links: [], incarnation: null, throughSequence: 0, next: null }
-        const bindingLinks=main.identity&&main.transition&&input.kind!=='work'?await options.store.inspect(main.identity,main.transition.operationId):null
-        const recordingGap=!!main.transition&&input.kind!=='work'&&!bindingLinks?.some(link=>link.kind==='main'&&link.roleRevision===main.roleRevision)
+        const bindingLinks=main.identity&&main.transition&&input.kind!=='work'&&input.kind!=='heartbeat'?await options.store.inspect(main.identity,main.transition.operationId):null
+        const recordingGap=!!main.transition&&input.kind!=='work'&&input.kind!=='heartbeat'&&!bindingLinks?.some(link=>link.kind==='main'&&link.roleRevision===main.roleRevision)
         return parseMoteDialogueResult('space.mote.dialogue.read', { main, ...page, coverage: 'linked-sources-only', sourceStatus:recordingGap?'unconfirmed':'read', sourceIssue:recordingGap?'The saved Main role is available; its original source recording is unconfirmed. Advance the original setup to reconcile it.':null }, input)
       } catch (error) {
         context?.signal?.throwIfAborted()

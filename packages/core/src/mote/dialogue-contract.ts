@@ -1,3 +1,5 @@
+import { parseMoteHeartbeatSource, parseMoteHeartbeatReport, parseMoteHeartbeatStatement, type MoteHeartbeatSource, type MoteHeartbeatReport, type MoteHeartbeatStatement } from './heartbeat-report.js'
+export * from './heartbeat-report.js'
 import { parseMoteMainPeriod, parseMoteMainRolloverDecision, type MoteMainPeriod, type MoteMainRolloverReading } from './main-period.js'
 import { dequal } from 'dequal'
 import { parseMoteSupervisionObservations, type MoteSupervisionRead, type MoteSupervisionPage } from './supervision.js'
@@ -28,13 +30,14 @@ export type MoteDialogueLink = {
   /** No inferred message cut: this source is the complete original Session, with original coverage. */
   range: 'whole-session'; period?: MoteMainPeriod; file: { resource: FileReadResource; revision: string } }
   | { kind: 'work'; eventId: string; mainRoleRevision: string; main: { hostId: string; agentSessionId: string };
-    origin: { hostId: string; messageId: string; threadId: string; senderSessionId: string; recipientSessionId: string; createdAt: number | null } })
+    origin: { hostId: string; messageId: string; threadId: string; senderSessionId: string; recipientSessionId: string; createdAt: number | null } } | MoteHeartbeatStatement)
 export type MoteDialogueCursor = { identity: MoteDialogueIdentity; incarnation: string; selection: string; throughSequence: number; beforeSequence: number }
-export type MoteDialogueRead = { target: MotePreferencesTarget; kind?: 'main' | 'work'; eventId?: string; operationId?: string; cursor?: MoteDialogueCursor; limit?: number }
+export type MoteDialogueRead = { target: MotePreferencesTarget; kind?: 'main' | 'work' | 'heartbeat'; eventId?: string; operationId?: string; cursor?: MoteDialogueCursor; limit?: number }
 export type MoteDialoguePage = { main: MoteMainSnapshot; links: MoteDialogueLink[]; incarnation: string | null; throughSequence: number;
   next: MoteDialogueCursor | null; coverage: 'linked-sources-only'; sourceStatus: 'read' | 'unconfirmed'; sourceIssue: string | null }
 export type MoteDialogueWrite = { target: MotePreferencesTarget; operationId: string; expectedRoleRevision: string;
   source: { kind: 'main' } | { kind: 'work'; messageHostId: string; messageId: string; eventId?: string } }
+export type MoteHeartbeatReportRequest = { target: MotePreferencesTarget; operationId: string; source: MoteHeartbeatSource; report: MoteHeartbeatReport }
 export type MoteDialogueReceipt = { operationId: string; links: MoteDialogueLink[] }
 /** Frozen intake in the original Core input journal; never a current-role registry or another input. */
 export type MoteDialogueInputRoute = {
@@ -69,26 +72,30 @@ export type MoteMainSetupResult = {
   bindingReceipt: MoteMainBindingReceipt | null; bindingObserved: MoteMainBindingObservation | null
   deferredInput?: MoteDialogueInputInspection | null; handoverInput?: MoteDialogueInputInspection | null
 }
-export type MoteDialogueParamsMap = { 'space.mote.dialogue.supervision.read': MoteSupervisionRead; 'space.mote.dialogue.read': MoteDialogueRead; 'space.mote.dialogue.link': MoteDialogueWrite; 'space.mote.dialogue.input.submit': MoteDialogueInputSubmit; 'space.mote.dialogue.input.inspect': MoteDialogueInputRead;
+export type MoteDialogueParamsMap = { 'space.mote.dialogue.heartbeat.report': MoteHeartbeatReportRequest; 'space.mote.dialogue.supervision.read': MoteSupervisionRead; 'space.mote.dialogue.read': MoteDialogueRead; 'space.mote.dialogue.link': MoteDialogueWrite; 'space.mote.dialogue.input.submit': MoteDialogueInputSubmit; 'space.mote.dialogue.input.inspect': MoteDialogueInputRead;
   'space.mote.dialogue.recovery.ensure': MoteDialogueRecoveryRequest; 'space.mote.dialogue.recovery.inspect': MoteDialogueRecoveryRequest;
   'space.mote.dialogue.setup.inspect': MoteMainSetupRequest; 'space.mote.dialogue.setup.advance': MoteMainSetupRequest }
-export type MoteDialogueResultMap = { 'space.mote.dialogue.supervision.read': MoteSupervisionPage; 'space.mote.dialogue.read': MoteDialoguePage; 'space.mote.dialogue.link': MoteDialogueReceipt; 'space.mote.dialogue.input.submit': MoteDialogueInputInspection; 'space.mote.dialogue.input.inspect': MoteDialogueInputInspection;
+export type MoteDialogueResultMap = { 'space.mote.dialogue.heartbeat.report': MoteDialogueReceipt; 'space.mote.dialogue.supervision.read': MoteSupervisionPage; 'space.mote.dialogue.read': MoteDialoguePage; 'space.mote.dialogue.link': MoteDialogueReceipt; 'space.mote.dialogue.input.submit': MoteDialogueInputInspection; 'space.mote.dialogue.input.inspect': MoteDialogueInputInspection;
   'space.mote.dialogue.recovery.ensure': MoteDialogueRecoveryInspection; 'space.mote.dialogue.recovery.inspect': MoteDialogueRecoveryInspection;
   'space.mote.dialogue.setup.inspect': MoteMainSetupResult; 'space.mote.dialogue.setup.advance': MoteMainSetupResult }
 export type MoteDialogueMethod = keyof MoteDialogueParamsMap
-export const MOTE_DIALOGUE_METHODS = { 'space.mote.dialogue.supervision.read': 'short', 'space.mote.dialogue.read': 'short', 'space.mote.dialogue.link': 'long', 'space.mote.dialogue.input.submit': 'long', 'space.mote.dialogue.input.inspect': 'short',
+export const MOTE_DIALOGUE_METHODS = { 'space.mote.dialogue.heartbeat.report': 'long', 'space.mote.dialogue.supervision.read': 'short', 'space.mote.dialogue.read': 'short', 'space.mote.dialogue.link': 'long', 'space.mote.dialogue.input.submit': 'long', 'space.mote.dialogue.input.inspect': 'short',
   'space.mote.dialogue.recovery.ensure': 'long', 'space.mote.dialogue.recovery.inspect': 'short', 'space.mote.dialogue.setup.inspect': 'short', 'space.mote.dialogue.setup.advance': 'long' } as const
 export function isMoteDialogueMethod(method: unknown): method is MoteDialogueMethod { return typeof method === 'string' && Object.hasOwn(MOTE_DIALOGUE_METHODS, method) }
 export type MoteDialogueCallContext = {
-  caller?: { hostId: string; agentSessionId: string }
+  caller?: { hostId: string; agentSessionId: string; run?: AgentMuxRunRef }
   signal?: AbortSignal
   assertCurrent?(): Promise<void>
   /** Original authenticated RPC context retained by Core, including Runtime participant authority. */
+  readInput?(hostId: string, key: AgentPromptInputKey): Promise<AgentPromptSubmissionRecord | null>
+  readFile?(input: import('../public-rpc-files.js').FileReadParams): Promise<import('../public-rpc-files.js').FileReadResult>
+  readNoteHistory?(input: import('../public-rpc-files.js').FileHistoryParams): Promise<import('../public-rpc-files.js').FileHistoryResult>
   readDispatch?(hostId: string, sourceMessageId: string): Promise<import('../agent-handoff.js').DispatchObservation>
 }
 export interface MoteDialoguePort {
   /** Trusted original MOTE owner for logical-main intake; not a wire-supplied snapshot. */
   mainInput?: import('./dialogue.js').MoteMainReader
+  heartbeatReport?(input: MoteHeartbeatReportRequest, context: MoteDialogueCallContext): Promise<MoteDialogueReceipt>
   read(input: MoteDialogueRead, context?: MoteDialogueCallContext): Promise<MoteDialoguePage>
   supervision(input: MoteSupervisionRead, context?: MoteDialogueCallContext): Promise<MoteSupervisionPage>
   link(input: MoteDialogueWrite, context?: MoteDialogueCallContext): Promise<MoteDialogueReceipt>
@@ -103,6 +110,12 @@ export function parseMoteDialogueIdentity(value: unknown, code = 'CONTROL_PROTOC
 export function sameMoteDialogue(a: MoteDialogueIdentity, b: MoteDialogueIdentity): boolean { return a.hostId === b.hostId && a.moteId === b.moteId }
 export function parseMoteDialogueLink(value: unknown, code: 'CONTROL_PROTOCOL_ERROR' | 'INVALID_CONTROL_REQUEST' = 'CONTROL_PROTOCOL_ERROR'): MoteDialogueLink {
   const p = rpcRecord(value, undefined, code)
+  if (p.kind === 'heartbeat') {
+    const { sequence, identity, operationId, associatedAt, ...statement } = p
+    count(sequence, code, 1); count(associatedAt, code); parseMoteDialogueIdentity(identity, code); text(operationId, code)
+    parseMoteHeartbeatStatement(statement, code)
+    return p as MoteDialogueLink
+  }
   rpcRecord(p, ['sequence','identity','operationId','associatedAt', ...(p.kind === 'main' ? ['kind','roleRevision','reference','range','file','period'] : ['kind','eventId','mainRoleRevision','main','origin'])], code)
   count(p.sequence, code, 1); count(p.associatedAt, code); parseMoteDialogueIdentity(p.identity, code); text(p.operationId, code)
   if (p.kind === 'main') {
@@ -124,6 +137,12 @@ export function parseMoteDialogueLink(value: unknown, code: 'CONTROL_PROTOCOL_ER
   return p as MoteDialogueLink
 }
 export function parseMoteDialogueParams<M extends MoteDialogueMethod>(method:M,value:unknown):MoteDialogueParamsMap[M] {
+  if (method === 'space.mote.dialogue.heartbeat.report') {
+    const p = rpcRecord(value, ['target', 'operationId', 'source', 'report'])
+    parseMotePreferencesReadInput({ kind: 'quick', target: p.target }); text(p.operationId, 'INVALID_CONTROL_REQUEST')
+    parseMoteHeartbeatSource(p.source); parseMoteHeartbeatReport(p.report)
+    return p as MoteDialogueParamsMap[M]
+  }
   if (method === 'space.mote.dialogue.supervision.read') {
     const p = rpcRecord(value, ['target','eventId','operationId','cursor','limit'])
     parseMoteDialogueParams('space.mote.dialogue.read', { ...p, kind: 'work' })
@@ -173,9 +192,9 @@ export function parseMoteDialogueParams<M extends MoteDialogueMethod>(method:M,v
       if(source.eventId!==undefined)text(source.eventId,code)
     }else return fail(code)
   }else{
-    if(p.kind!==undefined&&!['main','work'].includes(String(p.kind)))return fail(code)
+    if(p.kind!==undefined&&!['main','work','heartbeat'].includes(p.kind as string))return fail(code)
     for(const key of ['eventId','operationId'])if(p[key]!==undefined)text(p[key],code)
-    if(p.eventId!==undefined&&p.kind==='main')return fail(code)
+    if(p.eventId!==undefined&&p.kind!==undefined&&p.kind!=='work')return fail(code)
     if(p.limit!==undefined&&(count(p.limit,code,1)>100))return fail(code)
     if(p.cursor!==undefined){const c=rpcRecord(p.cursor,['identity','incarnation','selection','throughSequence','beforeSequence'],code);parseMoteDialogueIdentity(c.identity,code);text(c.incarnation,code);text(c.selection,code);count(c.throughSequence,code);count(c.beforeSequence,code,1);if(Number(c.beforeSequence)>Number(c.throughSequence)+1)return fail(code)}
   }
@@ -249,7 +268,8 @@ export function parseMoteDialogueResult<M extends MoteDialogueMethod>(method:M,v
   const code='CONTROL_PROTOCOL_ERROR',p=rpcRecord(value,method==='space.mote.dialogue.read'?['main','links','incarnation','throughSequence','next','coverage','sourceStatus','sourceIssue']:['operationId','links'],code)
   if(!Array.isArray(p.links))return fail(code)
   const links=p.links.map(link=>parseMoteDialogueLink(link,code))
-  if(method==='space.mote.dialogue.link'){
+  if(method==='space.mote.dialogue.link'||method==='space.mote.dialogue.heartbeat.report'){
+    if(method==='space.mote.dialogue.heartbeat.report'&&(links.length!==1||links.some(link=>link.kind!=='heartbeat'||!dequal(link.source,(input as MoteHeartbeatReportRequest).source)||!dequal(link.report,(input as MoteHeartbeatReportRequest).report))))return fail(code)
     if(p.operationId!==(input as MoteDialogueWrite).operationId||links.some(link=>link.operationId!==p.operationId))return fail(code)
   }else{
     const query=input as MoteDialogueRead,main=rpcRecord(p.main,['target','identity','status','resource','documentRevision','roleRevision','current','issue','transition'],code)

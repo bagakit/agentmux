@@ -227,6 +227,10 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
   moteMain = configurationPath && content?.files ? createHostMoteMainReader({ configurationPath, spatial: spatialState, files: content.files }) : undefined
   const moteDialogue = moteMain && options.store instanceof AgentMuxFileAgentSessionStore ? createHostMoteDialogue({
     main: moteMain, spatial: spatialState, store: new MoteDialogueStore(join(dirname(options.store.path), 'mote-dialogue.sqlite')),
+    qualifyHeartbeatSource: (source, main, context) => {
+      if (!motePresence) throw new AgentMuxError('The original heartbeat source owner is unavailable. Retain its source and report.', 'CONTROL_UNAVAILABLE')
+      return motePresence.qualifyHeartbeatSource(source, main, context)
+    },
     clientForHost: hostId => {
       if (hostId === 'local') return originalRuntime().client
       const matches = options.connections?.clients?.().filter(value => value.hostId === hostId) ?? []
