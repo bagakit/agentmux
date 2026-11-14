@@ -1,11 +1,11 @@
 import { useWorkbenchDocument } from '../lib/workbench-document'
 import { sessionPresentationById } from '../lib/session-presentation'
 import * as Dialog from '@agentmux/client-ui/components/Modal'
-import { useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { useShallow } from 'zustand/react/shallow'
-import { DEFAULT_MOTE_PRESENCE, moteMinutesToMs } from '@agentmux/core/mote-preferences'
+import { DEFAULT_MOTE_PRESENCE, moteMinutesToMs, type MotePresenceReading } from '@agentmux/core/mote-preferences'
 import { MOTE_QUICK_MODE_PATH, type MoteQuickDefaults } from '@agentmux/host/mote-model'
 import type { MoteWorkfaceScope } from '../lib/mote-workface'
 import type { WorkbenchProjectionSelection } from '../lib/workbench-projection'
@@ -21,6 +21,12 @@ import { DocumentOverlayPortal } from './WindowOverlayHost'
 import { api } from '../lib/api'
 import { moteConnectionTarget } from '../lib/mote-connection-default'
 import { useMoteSpace } from './MoteSpaceFrame'
+import { MoteHeartbeatStatus } from './MoteHeartbeatStatus'
+import { useScheduleRecords } from '../lib/schedule-controller'
+import { OriginalInputWaitingControl } from './OriginalInputWaitingControl'
+import { originalInputExplanation } from '../lib/original-input-presentation'
+import type { AgentInputSubmissionReceipt, AgentPromptSubmissionRecord } from '@agentmux/core'
+import { agentPromptSubmissionOutcome } from '@agentmux/core/mote-dialogue'
 
 const ThemeActionQuickModeIcon = semanticIconComponent('action.quick-mode')
 const ThemeActionEditIcon = semanticIconComponent('action.edit')
@@ -43,18 +49,38 @@ export function MoteQuickMode({ scope, reference, onOpenPath, active }: {
   const ownerDocument = useWorkbenchDocument()
   const [editing, setEditing] = useState(false), invoker = useRef<HTMLElement | null>(null)
   const saved = scope.topic.quickMode, defaults = saved?.status === 'saved' ? saved.defaults : {}
-  const presence = defaults.presence ?? DEFAULT_MOTE_PRESENCE
   const resolved = useMoteDefaultConversation(scope.topic, scope.workspace.id, active)
   const executorFacts = useAppStore(useShallow(state => ({ config: state.config, detections: state.executorDetections, inventory: state.hostExecutorInventories[scope.workspace.hostId] })))
   const executorLabel = useMemo(() => executorsForHost(executorFacts.config, scope.workspace.hostId, executorFacts.detections, executorFacts.inventory)
     .find(item => item.id === defaults.executorId)?.label ?? defaults.executorId, [executorFacts, scope.workspace.hostId, defaults.executorId])
   const conversationLabel = useAppStore(state => defaults.conversation ? moteConversationLabel(state, defaults.conversation) : undefined)
+  const [heartbeat, setHeartbeat] = useState<SavedMoteQuickMode | null>(null), [reading, setReading] = useState(false), [heartbeatIssue, setHeartbeatIssue] = useState<string | null>(null)
+  const [refresh, setRefresh] = useState(0)
+  const identity = JSON.stringify(moteConnectionTarget(scope, useAppStore.getState().spaceZoneBindings))
+  useEffect(() => {
+    if (!active) return
+    let current = true
+    setReading(true); setHeartbeatIssue(null)
+    void readMoteQuickDefaults(scope).then(value => { if (current) { setHeartbeat(value); setHeartbeatIssue(value.issue ?? null) } })
+      .catch(cause => { if (current) setHeartbeatIssue(presentError(cause)) }).finally(() => { if (current) setReading(false) })
+    return () => { current = false }
+  }, [identity, active, saved?.status === 'saved' ? saved.version : saved?.status, editing, refresh])
+  const originalSchedule = heartbeat?.maintenance?.schedule
+  // Reuse the ordinary arrangement observer. This reads facts; only the Host executes a heartbeat.
+  const scheduleQuery = useMemo(() => originalSchedule ? [{ target: { hostId: originalSchedule.hostId, agentSessionId: originalSchedule.agentSessionId,
+    providerId: originalSchedule.providerId, workspacePath: originalSchedule.workspacePath } }] : [], [originalSchedule?.hostId, originalSchedule?.agentSessionId, originalSchedule?.providerId, originalSchedule?.workspacePath])
+  const observed = useScheduleRecords(scheduleQuery, active && Boolean(originalSchedule))
+  const newer = observed.records.find(value => value.loopId === originalSchedule?.loopId)
+  const schedule = newer && ((newer.revision ?? 0) > (originalSchedule?.revision ?? 0) || newer.revision === originalSchedule?.revision && (newer.lastTickAt ?? 0) >= (originalSchedule?.lastTickAt ?? 0)) ? newer : originalSchedule
+  const maintenance = heartbeat?.maintenance ? { ...heartbeat.maintenance, schedule: schedule ?? null,
+    ...(schedule && ['active', 'paused'].includes(heartbeat.maintenance.status) ? { status: schedule.status === 'active' ? 'active' as const : 'paused' as const } : {}) } : undefined
   const edit = () => { invoker.current = ownerDocument.activeElement as HTMLElement; setEditing(true) }
   return <section className="mote-quick-mode" aria-label="Quick mode">
     <div className="mote-details__section-actions"><span><ThemeActionQuickModeIcon size={13} />Quick mode</span><MoteBehaviorAction label="Edit quick mode" onClick={edit}><ThemeActionEditIcon size={14} /></MoteBehaviorAction></div>
     <button className="mote-quick-mode__row" type="button" onClick={edit}><ThemeObjectAgentIcon size={14} /><span>Executor for new chat</span><strong title={defaults.executorId}>{executorLabel ?? 'Choose Executor'}</strong></button>
     <button className="mote-quick-mode__row" type="button" onClick={edit}><ThemeObjectConversationIcon size={14} /><span>Main Agent</span><strong title={defaults.conversation?.sessionId}>{conversationLabel ?? (defaults.conversation ? 'Saved main Agent' : 'Choose main Agent')}</strong>{defaults.conversation ? <ThemeActionPinIcon size={12} aria-label="Kept open" /> : null}</button>
-    <button className="mote-quick-mode__row" type="button" onClick={edit}><HeartbeatIcon size={14} /><span>Automatic heartbeat</span><strong>{presence.enabled ? `Every ${presence.intervalMs / 60000} min` : 'Disabled'}</strong></button>
+    <MoteHeartbeatStatus scope={scope} reading={maintenance} loading={reading} issue={heartbeatIssue ?? observed.error} visible={active} onRefresh={() => { setRefresh(value => value + 1); observed.refresh() }}
+      actions={<button type="button" className="small-button" onClick={edit}>Configure heartbeat</button>} />
     <button className="mote-quick-mode__row" type="button" onClick={edit}><ThemeObjectConversationIcon size={14} /><span>Conversation rollover</span><strong>{saved?.status !== 'saved' ? 'Unconfirmed' : defaults.conversationRollover?.kind === 'idle' ? `After ${defaults.conversationRollover.idleMs / 60000} min idle` : defaults.conversationRollover ? 'Keep current conversation' : 'Not configured'}</strong></button>
     {resolved.issue ? <p role="status" className="mote-details__issue">{resolved.issue}</p> : null}
     {editing ? <MoteQuickModeDialog key={scope.workspace.hostId + scope.topic.id + scope.rootPath} scope={scope} reference={reference} onOpenPath={onOpenPath}
@@ -80,7 +106,10 @@ export function MoteQuickModeDialog({ scope, reference, onOpenPath, onClose, ret
   const maintenance = saved?.maintenance
   const resumeRequest = useRef<ResumeRequest | null>(restored.current?.resume ?? null)
   const [resuming, setResuming] = useState(false)
-  const maintenanceLabel = maintenance?.schedule?.status === 'stopped' ? 'Original heartbeat stopped' : maintenance ? { active: 'Automatic heartbeat scheduled', paused: 'Original heartbeat paused', disabled: 'Automatic maintenance disabled', unbound: 'Choose a main Agent to maintain', unconfirmed: 'Actual schedule unconfirmed' }[maintenance.status] : 'Actual schedule not yet read'
+  const [inputReading, setInputReading] = useState<{ identity: string; hostId: string; input: AgentInputSubmissionReceipt | null; record: AgentPromptSubmissionRecord | null }>()
+  const inputIdentity = (schedule: NonNullable<MotePresenceReading['schedule']>) => JSON.stringify([schedule.loopId, schedule.hostId, schedule.agentSessionId,
+    schedule.pendingCompletion?.operationId ?? null, schedule.pendingCompletion?.condition?.expectedRun.runId ?? null])
+  const originalInput = maintenance?.schedule && inputReading?.identity === inputIdentity(maintenance.schedule) ? inputReading : undefined
   const form = useRef(draft); form.current = draft
   const edited = useRef(Boolean(restored.current)), lifetime = useRef<object>({}), content = useRef<HTMLDivElement>(null), id = useId()
   const latestDraft = useRef({ draft, minutes, rolloverKind, rolloverMinutes, saved, accepted: false })
@@ -148,6 +177,23 @@ export function MoteQuickModeDialog({ scope, reference, onOpenPath, onClose, ret
     } catch (cause) { if (lifetime.current === epoch) setIssue(presentError(cause)) }
     finally { if (lifetime.current === epoch) setResuming(false) }
   }
+  async function inspectHeartbeat() {
+    const schedule = saved?.maintenance?.schedule, ownerHostId = saved?.source?.resource?.hostId, epoch = lifetime.current
+    if (!schedule || !ownerHostId || resuming) return
+    setResuming(true); setIssue(null)
+    try {
+      const result = await api.schedule.inspect({ scheduleId: schedule.loopId }, ownerHostId)
+      if (!result.schedule || result.schedule.loopId !== schedule.loopId) throw Error('The original schedule is unconfirmed. Its identity and input are kept.')
+      const pending = result.schedule.pendingCompletion
+      const control = pending?.condition ? { kind: 'agent' as const, hostId: schedule.hostId, agentSessionId: schedule.agentSessionId, run: pending.condition.expectedRun } : null
+      const key = pending?.condition ? { kind: 'prompt' as const, agentSessionId: schedule.agentSessionId, expectedRun: pending.condition.expectedRun, submissionId: pending.operationId } : null
+      const [input, record] = control && key ? await Promise.all([api.sessions.inspectInput(control, key), api.sessions.inspectSubmission(control, key)]) : [null, null]
+      if (lifetime.current !== epoch) return
+      setInputReading({ identity: inputIdentity(result.schedule), hostId: schedule.hostId, input, record })
+      setSaved(previous => previous ? { ...previous, maintenance: { status: result.schedule!.status === 'active' ? 'active' : 'paused', schedule: result.schedule!, issue: previous.maintenance?.issue ?? null } } : previous)
+    } catch (cause) { if (lifetime.current === epoch) setIssue(presentError(cause)) }
+    finally { if (lifetime.current === epoch) setResuming(false) }
+  }
   const continueToConversation = onContinue ?? (space?.topicId === scope.topic.id ? () => space.select('discussion') : undefined)
   const firstConversation = !draft.conversation && Boolean(draft.executorId) && Boolean(continueToConversation)
   async function save() {
@@ -184,7 +230,24 @@ export function MoteQuickModeDialog({ scope, reference, onOpenPath, onClose, ret
           options={[{ value: '', label: 'No main Agent yet' }, ...(selected && !hasSelected ? [{ value: selected, label: 'Saved location · unconfirmed' }] : []),
             ...choices.map(choice => ({ value: JSON.stringify(choice), label: facts.tabs[choice.tabId]?.name?.trim() || conversationLabels[choice.sessionId] || choice.sessionId, description: `${conversationLabels[choice.sessionId]} · ${choice.hostId} / ${choice.sessionId} · ${facts.config?.workspaces.find(item => item.id === choice.displayWorkspaceId)?.name ?? 'Workspace'} / ${1 + (facts.layouts[choice.displayWorkspaceId]?.groups.findIndex(group => group.id === choice.groupId) ?? -1)}` }))]} />
         </>}
-        <details className="mote-quick-mode__advanced"><summary>Heartbeat & conversation settings</summary>
+        <fieldset className="mote-quick-mode__presence mote-quick-mode__heartbeat"><legend><HeartbeatIcon size={14} />Heartbeat</legend>
+          <MoteHeartbeatStatus scope={scope} reading={maintenance} loading={loading} onRefresh={() => setAttempt(value => value + 1)}
+            actions={maintenance?.schedule?.lastOutcome === 'unknown' ? <button type="button" className="primary-button" disabled={resuming} onClick={() => void inspectHeartbeat()}>{resuming ? 'Checking…' : 'Check original delivery'}</button>
+              : resumeRequest.current || maintenance?.schedule?.status === 'paused' && presence.enabled ? <button type="button" className="small-button" disabled={resuming}
+                onClick={() => void resumeHeartbeat()}>{resuming ? 'Checking original schedule…' : resumeRequest.current ? 'Inspect original resume' : 'Resume saved heartbeat'}</button> : null}
+            detailsActions={<>{originalInput && !originalInput.input && !originalInput.record ? <p>The original input was not observed in this read. That does not prove it was never sent.</p> : originalInput?.input ? <><p>{originalInputExplanation(originalInput.input.status, originalInput.input.control.waiting).title}</p><OriginalInputWaitingControl hostId={originalInput.hostId} receipt={originalInput.input} onRefresh={inspectHeartbeat} /></> : originalInput?.record ? <p>{originalInputExplanation(agentPromptSubmissionOutcome(originalInput.record)).title}</p> : null}
+              {originalInput?.record ? <><p>{originalInput.record.semanticIdle ? 'The original native turn ended. Its result remains in the conversation.' : 'Native processing is not confirmed by this receipt.'}</p><pre>{JSON.stringify(originalInput.record, null, 2)}</pre></> : null}
+              {maintenance?.schedule?.lastOutcome === 'unknown' && presence.enabled ? <><p>Resuming checks this same retained operation first. It does not resend an unconfirmed input.</p><button type="button" className="small-button" disabled={resuming} onClick={() => void resumeHeartbeat()}>{resumeRequest.current ? 'Inspect original resume' : 'Resume saved heartbeat'}</button></> : null}</>}
+            controls={<><label><input type="checkbox" aria-label="Enable automatic Mote maintenance" checked={presence.enabled}
+            onChange={event => update({ ...form.current, presence: { ...presence, enabled: event.target.checked } })} />Keep an eye on my work</label>
+          <div className="mote-quick-mode__interval"><label htmlFor={id + '-interval'}>Check every<small>Minutes · default 30</small></label>
+          <input id={id + '-interval'} aria-label="Heartbeat interval (minutes)" type="number" inputMode="numeric" min="1" step="1" value={minutes}
+            onChange={event => { const value = event.target.value; setMinutes(value); edited.current = true
+              const intervalMs = moteMinutesToMs(value, { wholeMinutes: true })
+              if (intervalMs !== null) update({ ...form.current, presence: { ...presence, intervalMs } })
+            }} /></div><p className="mote-details__hint">Applies after Save. Changing the interval keeps a paused schedule paused.</p></>} />
+        </fieldset>
+        <details className="mote-quick-mode__advanced"><summary>Conversation settings</summary>
         <fieldset className="mote-quick-mode__presence"><legend>Conversation rollover</legend>
           <label htmlFor={id + '-rollover'}>Automatic rollover policy</label>
           <SelectionField id={id + '-rollover'} label="Automatic rollover policy" value={rolloverKind}
@@ -195,27 +258,6 @@ export function MoteQuickModeDialog({ scope, reference, onOpenPath, onClose, ret
               onChange={event => editRollover('idle', event.target.value)} /></> : null}
           <p className="mote-details__hint">Changes take effect only after Save. Once the conversation has been idle long enough, your next new question starts a new round. Previous conversations stay available. Saving sends no message and does not switch the main Agent now.</p>
           {loading || !saved || saved.issue ? <p className="mote-details__hint">The saved rollover policy is unconfirmed. Your choices are kept.</p> : !saved.defaults.conversationRollover ? <p className="mote-details__hint">No rollover policy is configured. Editing other settings keeps the existing handoff behavior.</p> : null}
-        </fieldset>
-        <fieldset className="mote-quick-mode__presence"><legend>Main Agent & heartbeat</legend>
-          <label><input type="checkbox" aria-label="Enable automatic Mote maintenance" checked={presence.enabled}
-            onChange={event => update({ ...form.current, presence: { ...presence, enabled: event.target.checked } })} />Keep the main Agent available</label>
-          <label htmlFor={id + '-interval'}>Heartbeat interval <small>Minutes · default 30</small></label>
-          <input id={id + '-interval'} aria-label="Heartbeat interval (minutes)" type="number" inputMode="numeric" min="1" step="1" value={minutes}
-            onChange={event => { const value = event.target.value; setMinutes(value); edited.current = true
-              const intervalMs = moteMinutesToMs(value, { wholeMinutes: true })
-              if (intervalMs !== null) {
-                update({ ...form.current, presence: { ...presence, intervalMs } })
-              }
-            }} />
-          <p className="mote-details__hint">Mote checks goals, work threads and unfinished commitments. It can stay quiet when nothing needs attention. Changing the interval keeps a paused schedule paused.</p>
-          <p className="mote-details__hint" data-mote-maintenance-status={maintenance?.status ?? 'unread'}>{maintenanceLabel}</p>
-          {maintenance?.issue ? <p role="status" className="mote-details__issue">{maintenance.issue}</p> : null}
-          {maintenance?.schedule ? <details><summary>Original heartbeat schedule</summary>
-            <p>{maintenance.schedule.everyMs ? `Every ${maintenance.schedule.everyMs / 60000} min. ` : ''}{maintenance.schedule.lastOutcome === 'unknown' ? 'Last delivery unconfirmed; its original request is retained.' : maintenance.schedule.lastOutcome === 'sent' ? 'Last delivery confirmed; task completion is tracked separately.' : maintenance.schedule.lastOutcome === 'skipped' ? 'Last check sent no input.' : 'No confirmed delivery yet.'}</p>
-            <pre>{JSON.stringify(maintenance.schedule, null, 2)}</pre></details> : null}
-          <button type="button" className="small-button" onClick={() => setAttempt(value => value + 1)}>Refresh actual schedule</button>
-          {resumeRequest.current || maintenance?.schedule?.status === 'paused' && presence.enabled ? <button type="button" className="small-button" disabled={resuming}
-            onClick={() => void resumeHeartbeat()}>{resuming ? 'Checking original schedule…' : resumeRequest.current ? 'Inspect original resume' : 'Resume saved heartbeat'}</button> : null}
         </fieldset>
         </details>
         {loading ? <p role="status" className="mote-details__hint">Reading MOTE.md…</p> : null}

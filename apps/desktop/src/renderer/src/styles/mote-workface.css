@@ -17,6 +17,15 @@
 .pane-group.pane-group--mote-conversation { --pane-tabbar-height: 0px; }
 .mote-threads-panel { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow: hidden; padding: 8px 20px 20px; --mote-conversation-browser-height: 100%; }
 .mote-threads-panel > .mote-threads { flex: 1; min-width: 0; min-height: 0; overflow: auto; }
+.mote-startup-status { flex: none; min-width: 0; max-height: min(46vh, 380px); overflow: auto; display: grid; gap: 10px; margin: 10px 16px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-1); color: var(--text-2); font-size: 12px; line-height: 1.6; }
+.mote-startup-status p { margin: 4px 0 0; overflow-wrap: anywhere; }
+.mote-startup-status__summary > strong { color: var(--text); font-weight: 550; }
+.mote-startup-status__actions { display: flex; align-items: flex-start; flex-wrap: wrap; gap: 8px; }
+.mote-startup-status__actions > details { min-width: 0; flex: 1 1 180px; }
+.mote-startup-status summary { cursor: pointer; padding-block: 3px; }
+.mote-startup-status dl { display: grid; grid-template-columns: 60px minmax(0, 1fr); gap: 3px 8px; }
+.mote-startup-status dd { margin: 0; overflow-wrap: anywhere; }
+.mote-startup-status .agent-interaction-card { min-width: 0; }
 .mote-threads-panel > .mote-threads:is([data-view="private"], [data-view="members"]) { display: flex; flex-direction: column; overflow: hidden; }
 .mote-threads-panel__locations { display: flex; flex-wrap: wrap; gap: 6px; padding: 10px; }
 .mote-cooperation--threads { border: 0; padding: 0; }

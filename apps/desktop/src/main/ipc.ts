@@ -2036,6 +2036,9 @@ export async function registerIpc(args: {
   handleWithEvent('sessions:inspectInput', async (event, session: AgentSessionControl, key: import('@agentmux/core').AgentPromptInputKey) => sessionInputOperationResult(async () => {
     return await args.runtime.inspectInput(session, key)
   }))
+  handleWithEvent('sessions:inspectSubmission', async (event, session: AgentSessionControl, key: import('@agentmux/core').AgentPromptInputKey) => sessionInputOperationResult(async () => {
+    return await args.runtime.inspectSubmission(session, key)
+  }))
   handleWithEvent('sessions:stopInputWaiting', async (event, session: AgentSessionControl, ref: import('@agentmux/core').AgentInputWaitRef, cancelOperationId: string) => sessionInputOperationResult(async () => {
     return await args.runtime.stopInputWaiting(session, ref, cancelOperationId)
   }))

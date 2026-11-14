@@ -2057,6 +2057,10 @@ export class RuntimeController {
     this.assertInputControl(control, key)
     return await this.configuredClient(control.hostId).inspectAgentInput({ key })
   }
+  async inspectSubmission(control: AgentSessionControl, key: import('@agentmux/core').AgentPromptInputKey) {
+    this.assertInputControl(control, key)
+    return await this.configuredClient(control.hostId).inspectAgentPromptSubmission(key)
+  }
   async stopInputWaiting(control: AgentSessionControl, ref: import('@agentmux/core').AgentInputWaitRef, cancelOperationId: string) {
     this.assertInputControl(control, ref.key)
     return await this.configuredClient(control.hostId).stopAgentInputWaiting({ ref, cancelOperationId })

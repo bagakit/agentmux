@@ -722,6 +722,7 @@ const api: AgentMuxPreloadApi = {
     inputMailbox: (session, options) => ipcRenderer.invoke('sessions:inputMailbox', session, options),
     inspectMoteInput: (session, observationId) => ipcRenderer.invoke('sessions:inspectMoteInput',session,observationId),
     inspectInput: (session, key) => ipcRenderer.invoke('sessions:inspectInput', session, key),
+    inspectSubmission: (session, key) => ipcRenderer.invoke('sessions:inspectSubmission', session, key),
     stopInputWaiting: (session, ref, cancelOperationId) => ipcRenderer.invoke('sessions:stopInputWaiting', session, ref, cancelOperationId),
     rejoinInputWaiting: (session, ref) => ipcRenderer.invoke('sessions:rejoinInputWaiting', session, ref),
     respondInteraction: (session, response, intent) =>

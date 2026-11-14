@@ -235,10 +235,10 @@ function MoteContent({ scope, reference, section, onShowIdeas, onShowCalendar, o
       {!sharedQuestion ? <section className="mote-profile__start" aria-label="Work together">
         <MoteFirstCooperation scope={scope} reference={reference} disclosure />
       </section> : null}
+      <MoteQuickMode scope={scope} reference={reference} onOpenPath={onOpenPath} active={profileActive} />
       <details className="mote-profile__preferences" onToggle={event => setPreferencesOpen(event.currentTarget.open)}>
         <summary>Connections &amp; cooperation<ThemeNavigationDownIcon size={14} /></summary>
         <MotePrivateChat scope={scope} active={profileActive && preferencesOpen} reference={reference} onOpenPath={onOpenPath} />
-        <MoteQuickMode scope={scope} reference={reference} onOpenPath={onOpenPath} active={profileActive && preferencesOpen} />
         <MoteConnectionIdentity key={JSON.stringify([scope.workspace.id, scope.workspace.hostId, scope.topic.id])} scope={scope} active={profileActive && preferencesOpen} />
       </details>
       </aside>

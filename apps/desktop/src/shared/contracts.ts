@@ -2045,6 +2045,7 @@ export type AgentMuxDesktopApi = {
     inputMailbox(session: SessionHistoryReference, options?: Omit<import('@agentmux/core/agent-input-mailbox').AgentInputMailboxRead, 'agentSessionId'>): Promise<import('@agentmux/core/agent-input-mailbox').AgentInputMailboxPage>
     inspectMoteInput(session: SessionHistoryReference, observationId: string): Promise<import('@agentmux/core').MoteInputInspection | null>
     inspectInput(session: AgentSessionControl, key: import('@agentmux/core').AgentPromptInputKey): Promise<import('@agentmux/core').AgentInputSubmissionReceipt | null>
+    inspectSubmission(session: AgentSessionControl, key: import('@agentmux/core').AgentPromptInputKey): Promise<import('@agentmux/core').AgentPromptSubmissionRecord | null>
     stopInputWaiting(session: AgentSessionControl, ref: import('@agentmux/core').AgentInputWaitRef, cancelOperationId: string): Promise<import('@agentmux/core').AgentInputWaitStopReceipt>
     rejoinInputWaiting(session: AgentSessionControl, ref: import('@agentmux/core').AgentInputWaitRef): Promise<import('@agentmux/core').AgentInputSubmissionReceipt>
     respondInteraction(
@@ -2320,7 +2321,7 @@ export type AgentMuxPreloadApi = Omit<AgentMuxDesktopApi, 'control' | 'sessions'
   scratch: Omit<AgentMuxDesktopApi['scratch'], 'listTopics'> & {
     listTopics(workspaceId: string): Promise<import('@agentmux/host/mote-model').ScratchTopicListResponse>
   }
-  sessions: Omit<AgentMuxDesktopApi['sessions'], 'onEvent' | 'observeHistory' | 'readHistory' | 'readUsage' | 'inspectRecord' | 'deleteRecord' | 'write' | 'paste' | 'submitPrompt' | 'inspectInput' | 'stopInputWaiting' | 'rejoinInputWaiting' | 'attach' | 'refreshAttachment' | 'replay' | 'restart' | 'controlContinuity' | 'recover' | 'stop' | 'inspectStop'> & {
+  sessions: Omit<AgentMuxDesktopApi['sessions'], 'onEvent' | 'observeHistory' | 'readHistory' | 'readUsage' | 'inspectRecord' | 'deleteRecord' | 'write' | 'paste' | 'submitPrompt' | 'inspectInput' | 'inspectSubmission' | 'stopInputWaiting' | 'rejoinInputWaiting' | 'attach' | 'refreshAttachment' | 'replay' | 'restart' | 'controlContinuity' | 'recover' | 'stop' | 'inspectStop'> & {
     recover(...args: Parameters<AgentMuxDesktopApi['sessions']['recover']>): Promise<import('./session-recovery-result').SessionRecoveryOperationReply>
     stop(...args: Parameters<AgentMuxDesktopApi['sessions']['stop']>): Promise<import('./session-stop-result').SessionStopReply>
     inspectStop(...args: Parameters<AgentMuxDesktopApi['sessions']['inspectStop']>): Promise<import('./session-observation-result').SessionObservationResult<Awaited<ReturnType<AgentMuxDesktopApi['sessions']['inspectStop']>>>>
@@ -2334,6 +2335,7 @@ export type AgentMuxPreloadApi = Omit<AgentMuxDesktopApi, 'control' | 'sessions'
     paste(...args: Parameters<AgentMuxDesktopApi['sessions']['paste']>): Promise<SessionInputWriteResult>
     submitPrompt(...args: Parameters<AgentMuxDesktopApi['sessions']['submitPrompt']>): Promise<SessionInputWriteResult>
     inspectInput(...args: Parameters<AgentMuxDesktopApi['sessions']['inspectInput']>): Promise<SessionInputOperationResult<Awaited<ReturnType<AgentMuxDesktopApi['sessions']['inspectInput']>>>>
+    inspectSubmission(...args: Parameters<AgentMuxDesktopApi['sessions']['inspectSubmission']>): Promise<SessionInputOperationResult<Awaited<ReturnType<AgentMuxDesktopApi['sessions']['inspectSubmission']>>>>
     stopInputWaiting(...args: Parameters<AgentMuxDesktopApi['sessions']['stopInputWaiting']>): Promise<SessionInputOperationResult<Awaited<ReturnType<AgentMuxDesktopApi['sessions']['stopInputWaiting']>>>>
     rejoinInputWaiting(...args: Parameters<AgentMuxDesktopApi['sessions']['rejoinInputWaiting']>): Promise<SessionInputOperationResult<Awaited<ReturnType<AgentMuxDesktopApi['sessions']['rejoinInputWaiting']>>>>
     /** Raw native transport. Renderer owns scoped subscriptions and its single bridge callback. */

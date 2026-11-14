@@ -21,6 +21,7 @@ import { openMoteMaterial } from '../lib/mote-materials-actions'
 import { MoteConversationStart } from './MoteConversationStart'
 import { MoteEntryReading } from './MoteEntryReading'
 import { MoteConversationIdentity } from './MoteConversationIdentity'
+import { MoteStartupStatus } from './MoteStartupStatus'
 import { moteEntryDraftKey, useMoteHeldEntryInput } from '../lib/mote-entry-hold'
 import { MotePeriodConversation, MoteOriginalConversation } from '@agentmux/client-ui/components/MoteConversationThreads'
 import type { MoteDialogueLink } from '@agentmux/core/mote-dialogue'
@@ -139,7 +140,7 @@ function MoteWorkfaceBody({ scope, workspaceId, topicId, floating = false, visib
     if (attempt.selected === undefined && attempt.chosen !== shown && !(selected && landing && sameSelection(selected, landing))) attempt.ended = true
     if (attempt.ended || !visible || !recoverOnOpen || !entryToken || !scope || section !== 'discussion' || currentLocal.original) return
     const requested = JSON.stringify(currentMain)
-    if (currentMain && attempt.selected !== requested) {
+    if (currentMain && attempt.selected === undefined) {
       const next = { displayWorkspaceId: currentMain.displayWorkspaceId, groupId: currentMain.groupId, tabId: currentMain.tabId, regionId: currentMain.regionId }
       const session = mainOccurrence?.session
       if (confirmedMoteReference(useAppStore.getState(), scope, { reference: next }) && session?.control.kind === 'agent' &&
@@ -194,6 +195,12 @@ function MoteWorkfaceBody({ scope, workspaceId, topicId, floating = false, visib
     <div className={floating ? 'mote-workface' : 'workbench-context-frame'} data-mote-workface={scope?.topic.id} data-mote-section={section} data-mote-workface-presentation={scope ? presentation : undefined}>
       {floating && scope ? <header className="mote-workface__navigation"><MoteConversationIdentity scope={scope} visible={visible} />{conversations}<span className="mote-main-slot" ref={setFloatingActionsHost} />{navigationActions}</header> : null}
       {notice}
+      {readingMain && selectedMain && showOriginal && section === 'discussion' && presentation === 'conversation' ? <MoteStartupStatus reference={readingMain} active={visible && (!sharedFrame || sharedFrame.section === 'discussion')} onOpenTerminal={sessionId => {
+        if (!selectReference(readingMain, 'main')) return
+        useAppStore.getState().setViewMode(sessionId, 'terminal')
+        setLocal({ owner, section: 'discussion', member: false, original: true })
+        sharedFrame?.select('discussion')
+      }} /> : null}
       {selectedMain && currentMain && readingMain?.sessionId !== currentMain.sessionId ? <div className="mote-workface__handoff" role="status">主 Agent 已更换，原对话和草稿保留。<button type="button" onClick={showDiscussion}>返回当前主对话</button></div> : null}
       {entryRecovery.issue ? <p role="status" className="mote-conversation__issue">{entryRecovery.issue}{entryRecovery.status === 'unavailable'
         ? <button type="button" className="small-button" onClick={showNewRound}>开始新一轮</button>
