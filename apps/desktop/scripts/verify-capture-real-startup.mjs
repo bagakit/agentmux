@@ -42,6 +42,20 @@ const baselineTree = join(mainRoot, '.worktrees', 'capture-real-baseline-' + pro
 const receipt = { schema: 'agentmux.capture-real-startup-proof.v1', passed: false, smoke, candidate: { head }, baseline: { ref: baseline.ref }, productionInputs: {}, samples: [], comparisons: [], cleanup: {}, boundary: 'Real ScreenCaptureKit and actual display topology. Time starts at the registered shortcut callback; physical keydown before it remains unknown.' }
 let added = false
 const temporaryUserData = new Set()
+const variants = {}
+function helperPids(executablePath) {
+  const result = spawnSync('ps', ['-axo', 'pid=,command='], { encoding: 'utf8', timeout: 10000 })
+  assert.equal(result.status, 0, 'The original native helper processes must be observable')
+  return result.stdout.split('\n').filter(line => line.includes(executablePath + ' --agent ')).map(line => Number(line.trim().split(/\s+/, 1)[0])).filter(Number.isSafeInteger)
+}
+async function awaitHelperExit(executablePath) {
+  for (let attempt = 0; attempt < 100; attempt++) {
+    const remaining = helperPids(executablePath)
+    if (!remaining.length) return remaining
+    await new Promise(resolve => setTimeout(resolve, 50))
+  }
+  return helperPids(executablePath)
+}
 async function sourceFiles(directory) {
   const files = []
   for (const entry of await readdir(directory, { withFileTypes: true })) {
@@ -57,7 +71,7 @@ const command = async (label, executable, args, env, timeout = 120000) => {
     let log = '', timedOut = false, kill
     for (const stream of [child.stdout, child.stderr]) stream.on('data', bytes => { log += bytes })
     const timer = setTimeout(() => { timedOut = true; child.kill('SIGTERM'); kill = setTimeout(() => child.kill('SIGKILL'), 3000) }, timeout)
-    child.once('error', reject)
+    child.once('error', error => { clearTimeout(timer); clearTimeout(kill); reject(error) })
     child.once('exit', (code, signal) => { clearTimeout(timer); clearTimeout(kill); done({ code, signal, timedOut, log }) })
   })
   await writeFile(join(out, label + '.log'), result.log)
@@ -73,7 +87,6 @@ try {
   }
   await mkdir(join(baselineTree, dirname(fixture)), { recursive: true })
   await copyFile(join(root, fixture), join(baselineTree, fixture))
-  const variants = {}
   for (const [variant, tree, ref] of [['baseline', baselineTree, baseline.ref], ['candidate', root, head]]) {
     const appRoot = join(out, variant + '-app'), main = join(appRoot, 'out/main'), preload = join(appRoot, 'out/preload'), renderer = join(appRoot, 'out/renderer/screenshot-editor')
     for (const path of [main, preload, renderer]) await mkdir(path, { recursive: true })
@@ -118,6 +131,7 @@ try {
       const sample = JSON.parse(await readFile(join(scene, 'native.json'), 'utf8'))
       assert.equal(result.code, 0, JSON.stringify(sample.failure))
       assert.equal(sample.passed, true); assert.equal(sample.cleanup.nativeDisposed, true); assert.equal(sample.cleanup.windowsRemaining, 0)
+      assert.deepEqual(await awaitHelperExit(variants[variant].executablePath), [], 'The measured native helper must exit after disposal')
       assert.equal(sample.captures.length, 1); assert.equal(sample.captures[0].iteration, iteration)
       if (receipt.samples.length) assert.deepEqual(sample.topology, receipt.samples[0].topology, 'The exact physical display topology must remain stable')
       receipt.samples.push({ pair, ...sample })
@@ -151,8 +165,13 @@ try {
     execFileSync('git', ['worktree', 'remove', '--force', baselineTree], { cwd: root, stdio: 'pipe', timeout: 120000 })
     receipt.cleanup.baselineWorktreeRemoved = !existsSync(baselineTree)
   }
-  for (const path of temporaryUserData) await rm(path, { recursive: true, force: true })
-  for (const name of ['baseline-app', 'candidate-app', 'baseline-native-scratch', 'candidate-native-scratch']) await rm(join(out, name), { recursive: true, force: true })
+  let helpers = null
+  try { helpers = Object.values(variants).flatMap(variant => helperPids(variant.executablePath)) } catch (error) { receipt.cleanup.helperObservationError = String(error) }
+  receipt.cleanup.nativeHelpersRemaining = helpers
+  if (helpers?.length === 0) {
+    for (const path of temporaryUserData) await rm(path, { recursive: true, force: true })
+    for (const name of ['baseline-app', 'candidate-app', 'baseline-native-scratch', 'candidate-native-scratch']) await rm(join(out, name), { recursive: true, force: true })
+  } else { receipt.passed = false; process.exitCode = 1 }
   receipt.cleanup.generatedArtifactsRemoved = [...temporaryUserData].every(path => !existsSync(path)) && ['baseline-app', 'candidate-app', 'baseline-native-scratch', 'candidate-native-scratch'].every(name => !existsSync(join(out, name)))
   await writeFile(join(out, 'receipt.json'), JSON.stringify(receipt, null, 2))
 }
