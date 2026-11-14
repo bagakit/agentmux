@@ -12,7 +12,8 @@ const evidence = join(root, '.bagakit/feature-tracker/codex-provider-failure-art
 const config = 'packages/core/test/fixtures/provider-session-failure/vitest.owning.config.mts'
 const typeConfig = 'packages/core/test/fixtures/provider-session-failure/tsconfig.owning.json'
 const tests = ['packages/core/test/provider-session-failure.test.ts', 'packages/core/test/codex-error-classification.test.ts']
-const sources = ['packages/providers/src/codex/errors.ts', 'packages/core/src/providers/codex-session-status.ts',
+const sources = ['packages/providers/src/codex/errors.ts', 'packages/providers/src/codex/turn-outcome.ts',
+  'packages/providers/src/codex/session-status.ts', 'packages/providers/src/codex/turn-evidence.ts', 'packages/core/src/providers/codex-session-status.ts',
   'packages/core/src/providers/codex-prompt-execution-evidence.ts', 'packages/core/src/providers/codex.ts',
   'packages/core/src/agent-provider.ts', 'packages/core/src/types.ts', 'packages/core/src/client.ts',
   'packages/core/src/agent-session-store.ts', 'packages/core/src/agent-status-freshness.ts', 'packages/core/src/session-timeline.ts',
@@ -77,10 +78,10 @@ for (const mutation of mutations) {
 }
 const callers = {}
 for (const [symbol, definition] of [['codexFailure(', 'packages/providers/src/codex/errors.ts'],
-  ['observeCodexSessionStatus', 'packages/core/src/providers/codex-session-status.ts'],
+  ['observeCodexSessionStatus', 'packages/providers/src/codex/session-status.ts'],
   ['ensureNativeStatusObservation(', 'packages/core/src/client.ts'],
   ['statusAgent(', 'packages/core/src/client.ts'], ['isAgentActivityStatusSource(', 'packages/core/src/agent-status-freshness.ts']]) {
-  const search = spawnSync('rg', ['-n', '--fixed-strings', symbol, 'packages/core/src', 'apps/desktop/src'], { cwd: root, encoding: 'utf8' })
+  const search = spawnSync('rg', ['-n', '--fixed-strings', symbol, 'packages/core/src', 'packages/providers/src', 'apps/desktop/src'], { cwd: root, encoding: 'utf8' })
   assert.equal(search.status, 0)
   const hits = search.stdout.trim().split('\n').filter(line => symbol === 'ensureNativeStatusObservation('
     ? !line.includes('private async ensureNativeStatusObservation(') : !line.startsWith(definition + ':'))

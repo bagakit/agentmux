@@ -148,7 +148,7 @@ export async function runPendingEditRestart(arguments_, mode = 'pending-edit') {
       const manifest = JSON.parse(manifestBytes)
       assert.equal(manifest.schema, 'agentmux.t010.urgent-source.v1')
       const allowed = ['packages/core/src/agent-provider.ts', 'packages/core/src/client.ts', 'packages/core/src/prompt-submission.ts',
-        'packages/core/src/providers/codex-prompt-execution-evidence.ts', 'packages/core/src/providers/codex.ts',
+        'packages/providers/src/codex/turn-evidence.ts', 'packages/core/src/providers/codex-prompt-execution-evidence.ts', 'packages/core/src/providers/codex.ts',
         'packages/core/src/providers/codex-prompt-transport-preparation.ts', 'packages/core/test/initial-transport-preparation.test.ts',
         'packages/core/test/initial-transport-provider.test.ts', 'packages/core/scripts/initial-transport-preparation.vitest.config.mts',
         'packages/core/scripts/verify-initial-transport-preparation.mjs']

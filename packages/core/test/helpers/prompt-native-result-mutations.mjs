@@ -23,7 +23,7 @@ export const mutations={
 }
 export const owners=new Set([leaf,store,client,'packages/core/src/types.ts','packages/core/src/native-input-adoption.ts','packages/core/src/prompt-submission-record.ts',
  'packages/core/src/public-rpc-service.ts','packages/core/src/rpc-native-codec.ts','packages/core/src/native-input-correlation.ts',
- 'packages/core/src/providers/codex-native-input.ts','packages/core/src/providers/codex-session-status.ts','packages/providers/src/codex/saved-history.ts','packages/providers/src/codex/turn-outcome.ts'])
+ 'packages/core/src/providers/codex-native-input.ts','packages/providers/src/codex/session-status.ts', 'packages/providers/src/codex/turn-evidence.ts','packages/providers/src/codex/saved-history.ts','packages/providers/src/codex/turn-outcome.ts'])
 export function instrument(code,file){
  if(!owners.has(file))return code
  const name=process.env.PROMPT_NATIVE_RESULT_MUTATION,mutation=mutations[name];if(name&&!mutation)throw Error('Unknown native result mutation')

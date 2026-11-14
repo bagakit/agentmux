@@ -13,7 +13,7 @@ const attempt = await mkdtemp(join(directory, 'attempt-'))
 const owners = ['packages/core/src/client.ts', 'packages/core/src/session-observation-retry.ts',
   'packages/core/src/hosted-runtime-service.ts', 'packages/core/src/hosted-client.ts',
   'packages/core/src/hosted-client-contract.ts', 'packages/core/src/public-rpc-client.ts', 'packages/core/src/public-rpc-server.ts',
-  'packages/core/src/ctxmux-run-adapter.ts', 'packages/core/src/providers/codex-session-status.ts',
+  'packages/core/src/ctxmux-run-adapter.ts', 'packages/core/src/providers/codex-session-status.ts', 'packages/providers/src/codex/session-status.ts',
   'packages/core/src/control-endpoint-listener-worker.ts', 'apps/desktop/test/helpers/mote-diagnostics-cli.ts',
   'packages/core/test/helpers/public-rpc-owner.ts', 'packages/core/test/runtime-observation-admission.test.ts',
   'packages/core/test/session-observation-retry.integration.test.ts', 'packages/core/test/session-observation-retry.integration.config.mts',

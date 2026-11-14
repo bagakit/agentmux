@@ -49,9 +49,10 @@ const evidence=join(root,'.tmp','verify-immediate-prompt');await mkdir(evidence,
 const report={schema:'agentmux.immediate-prompt-verification.v1',passed:false,callers:[],mutations:[]}
 const run=async(argv,options={})=>exec(process.execPath,argv,{cwd:root,env:{...process.env,pnpm_config_verify_deps_before_run:'false'},maxBuffer:8*1024*1024,...options})
 const tests=()=>run([join(root,'node_modules/vitest/vitest.mjs'),'run','--config',join(core,'scripts/immediate-prompt.vitest.config.mts')])
-const selectedSource=['packages/core/src','packages/core/scripts/build.mjs','packages/core/package.json','packages/core/tsconfig.json','packages/core/tsconfig.build.json','tsconfig.base.json']
+const selectedSource=['packages/providers/src','packages/providers/tsconfig.json','packages/providers/package.json','packages/core/src','packages/core/scripts/build.mjs','packages/core/package.json','packages/core/tsconfig.json','packages/core/tsconfig.build.json','tsconfig.base.json']
 try{
  report.sourceQualification=await qualifySharedMainSource(root,selectedSource)
+ await run([join(root,'node_modules/typescript/bin/tsc'),'-p',join(root,'packages/providers/tsconfig.json')])
  await run([join(core,'scripts/build.mjs')]);report.build=true
  // All witnesses are outside the symbol's defining file; an empty set is a failure.
  for(const [file,expressions]of[
@@ -73,7 +74,7 @@ try{
   ['execution-conflict','packages/core/src/prompt-submission.ts',"(previous.intent.execution ?? 'default') !== execution","false"],
   ['native-turn-binding','packages/core/src/prompt-submission.ts','evidence.sourceId !== prepared.nativeSourceId || evidence.nativeTurnId !== prepared.nativeTurnId','false'],
   ['full-draft','packages/core/src/providers/codex-prompt-execution.ts',"if (composer.cells.slice(markerColumn + 2).some(cell => cell.chars.trim() && !cell.dim)) return 'unavailable'","if (false) return 'unavailable'"],
-  ['native-session-binding','packages/core/src/providers/codex-prompt-execution-evidence.ts',"if (meta.type !== 'session_meta' || (meta.payload?.session_id ?? meta.payload?.id) !== handle.sessionId) return null","if (meta.type !== 'session_meta') return null"],
+  ['native-session-binding','packages/providers/src/codex/turn-evidence.ts',"if (meta.type !== 'session_meta' || (meta.payload?.session_id ?? meta.payload?.id) !== handle.sessionId) return null","if (meta.type !== 'session_meta') return null"],
   ['checkpoint-screen-attributes','packages/core/src/screen-evidence.ts','else built.accept(step)',"else if (step.type !== 'restore') built.accept(step)"],
   ['checkpoint-frame-proof','packages/core/src/screen-evidence.ts','built.seedFrameEvidence(chunks, fence)','/* deliberately omit the real frame proof */'],
   ['transport-source-binding','packages/core/src/prompt-submission.ts','provider.verifyPromptExecutionTransport && transportEvidence?.sourceId !== nativeEvidence?.sourceId','false'],

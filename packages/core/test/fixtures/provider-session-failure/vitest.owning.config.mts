@@ -5,16 +5,20 @@ import { defineConfig } from 'vitest/config'
 const root = resolve(import.meta.dirname, '../../../../..')
 const mutations: Record<string, [string, string, string]> = {
   capacity: ['packages/providers/src/codex/errors.ts', "server_overloaded: ['AGENT_MODEL_OVERLOADED'", "server_overloaded: ['AGENT_PROVIDER_ERROR'"],
-  'failure-is-done': ['packages/core/src/providers/codex-session-status.ts', "evidence.endReason === 'failed' ? 'error'", "evidence.endReason === 'failed' ? 'done'"],
-  'ignore-native-error': ['packages/core/src/providers/codex-prompt-execution-evidence.ts', "state === 'ended' && event.error != null", 'false'],
-  'late-old-turn': ['packages/core/src/providers/codex-prompt-execution-evidence.ts', "if (latest && evidence.state === 'ended' && evidence.nativeTurnId !== latest.nativeTurnId) continue", '/* accept an old turn end */'],
+  'failure-is-done': ['packages/providers/src/codex/session-status.ts', "evidence.endReason === 'failed' ? 'error'", "evidence.endReason === 'failed' ? 'done'"],
+  'ignore-native-error': ['packages/providers/src/codex/turn-outcome.ts', 'if (payload.error != null)', 'if (false)'],
+  'late-old-turn': ['packages/providers/src/codex/turn-evidence.ts', "state === 'ended' && !sameTurn ||", ''],
   'late-stop': ['packages/core/src/client.ts', "!(nativeEnd && normalized.lifecycleEvent === 'turn-end')", 'true'],
   'no-reconnect': ['packages/core/src/client.ts', "if (code !== 'AGENT_NATIVE_STATUS_GAP') {", 'if (false) {'],
   'old-run': ['packages/core/src/client.ts', '!sameRun(current.run, session.run) || !sameNativeHandle(current.nativeHandle, session.nativeHandle) || this.endedRuns.has(current.run.runId)', '!sameNativeHandle(current.nativeHandle, session.nativeHandle) || this.endedRuns.has(current.run.runId)'],
   'batch-start-clock': ['packages/core/src/client.ts', "if (observation.initialSnapshot && observation.state === 'working' &&", "if (observation.state === 'working' &&"],
   'late-phase': ['packages/core/src/client.ts', 'await this.flushAgentActivity(next)\n            if (watch.controller.signal.aborted || this.nativeStatusWatches.get(session.agentSessionId) !== watch) return', 'await this.flushAgentActivity(next)']
 }
-export default defineConfig({ root, cacheDir: resolve(root, '.local/cache/provider-session-failure'), resolve: { alias: { '@agentmux/providers/codex/errors': resolve(root, 'packages/providers/src/codex/errors.ts') } },
+export default defineConfig({ root, cacheDir: resolve(root, '.local/cache/provider-session-failure'), resolve: { alias: {
+  '@agentmux/providers/codex/errors': resolve(root, 'packages/providers/src/codex/errors.ts'),
+  '@agentmux/providers/codex/turn-evidence': resolve(root, 'packages/providers/src/codex/turn-evidence.ts'),
+  '@agentmux/providers/codex/session-status': resolve(root, 'packages/providers/src/codex/session-status.ts')
+} },
   plugins: [{
   name: 'provider-failure-actual-source', enforce: 'pre', transform(code, id) {
     const path = relative(root, id.split('?')[0]!)
