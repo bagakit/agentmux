@@ -31,6 +31,7 @@
     "@agentmux/relay": "workspace:*"
   },
   "devDependencies": {
+    "@agentmux/host": "workspace:*",
     "@capacitor/cli": "8.5.2",
     "@types/node": "^24.0.0",
     "@types/react": "^19.0.0",

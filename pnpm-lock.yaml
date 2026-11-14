@@ -377,6 +377,9 @@ importers:
         specifier: ^19.2.0
         version: 19.2.8(react@19.2.8)
     devDependencies:
+      '@agentmux/host':
+        specifier: workspace:*
+        version: link:../host
       '@capacitor/cli':
         specifier: 8.5.2
         version: 8.5.2
