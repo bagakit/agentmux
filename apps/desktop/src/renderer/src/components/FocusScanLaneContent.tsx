@@ -14,7 +14,9 @@ export function FocusScanLaneContent({ lane, contexts, heading, metrics, replyLi
   replyLines?: FocusReplyLines; topicPresentation?: FocusTopicPresentation
   renderCards(contexts: readonly FocusContext[], columns: number, topics?: ReadonlyMap<string, FocusTopicHeading>, sections?: ReadonlyMap<string, FocusTopicHeading>): ReactNode
 }) {
-  const topics = useMemo(() => focusCollectionTopics(lane), [lane.collection])
+  const topics = useMemo(() => focusCollectionTopics(lane), [lane.collection, lane.zones, lane.zoneHeadings])
+  const organization = lane.zonePresentation ?? topicPresentation
+  const organized = Boolean(lane.collection || lane.zones)
   const groupsRef = useRef<HTMLDivElement>(null)
   const actual = groupFocusContexts(contexts)
   const { groups, pending } = useFocusContextPlacements(contexts, groupsRef)
@@ -41,11 +43,11 @@ export function FocusScanLaneContent({ lane, contexts, heading, metrics, replyLi
       if (!grouped.length) return null
       const moving = grouped.some(context => pending.has(focusTopicContextKey(context.hostId, context.id)))
       const label = bucket === 'idle' ? focusNeutralGroupSummary(grouped).label : FOCUS_BUCKET_PRESENTATION[bucket].label
-      const sectioned = lane.collection && topicPresentation === 'sections' ? focusTopicSections(grouped, topics) : null
+      const sectioned = organized && organization === 'sections' ? focusTopicSections(grouped, topics) : null
       return <section className="focus-context-group global-agents-group" aria-label={label} data-bucket={bucket} data-focus-sparse={sparse || undefined}
         style={{ gridRow: layout.rowByBucket[index]! + 1, '--focus-group-offset': `${layout.columnStart[index]}px`, '--focus-card-columns': layout.columns[index], '--focus-group-width': `${layout.widths[index]}px` } as CSSProperties} key={bucket}>
         {!sparse ? groupHeader(bucket, false, moving) : moving ? <span className="focus-context-group__pending" role="status">Position held until interaction ends</span> : null}
-        {renderCards(sectioned?.contexts ?? grouped, layout.columns[index]!, lane.collection && !sectioned ? topics : undefined, sectioned?.sections)}
+        {renderCards(sectioned?.contexts ?? grouped, layout.columns[index]!, organized && !sectioned ? topics : undefined, sectioned?.sections)}
       </section>
     })
   }</FocusLaneGroups> : null}</>

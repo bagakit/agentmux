@@ -24,6 +24,7 @@ import { useWorkbenchDocument } from '../lib/workbench-document'
 import { TopicCategoryDialog } from './TopicCategoryDialog'
 import { SpaceIconPicker } from './SpaceIconPicker'
 import { FocusProjectPreferences } from './FocusProjectPreferences'
+import { focusZoneContainerKey, focusZonePresentation } from '../../../shared/focus-zone-presentation'
 import { focusProjectPreference, focusProjectTint, moveFocusProject, type FocusProjectPreference } from '../../../shared/focus-project-preferences'
 import { saveFocusPreferences } from '../lib/focus-preferences'
 import { presentError } from '@agentmux/client-ui/error-presentation'
@@ -84,6 +85,8 @@ export function FocusProjectLanes({ lanes, selectedProjectKey, currentLaneId, re
   const hosts = useAppStore(state => state.config?.hosts)
   const workspaces = useAppStore(state => state.config?.workspaces)
   const preferences = useAppStore(state => state.config?.focus?.projects)
+  const zonePreferences = useAppStore(state => state.config?.focus?.zonePresentations)
+  const authoredTopicPresentation = useAppStore(state => state.config?.focus?.topicPresentation)
   const dragged = useRef<string | null>(null)
   const [dropTarget, setDropTarget] = useState<{ key: string; after: boolean } | null>(null)
   const [orderFailure, setOrderFailure] = useState<{ message: string; change: ProjectChange; original: readonly FocusProjectPreference[] } | null>(null)
@@ -179,35 +182,60 @@ export function FocusProjectLanes({ lanes, selectedProjectKey, currentLaneId, re
           <span className="focus-project-lanes__label"><strong>{name}</strong></span>
           <HostBadge context="Host" compact host={hostIdentityProjection(first.hostId, hosts?.find(host => host.id === first.hostId))} />
         </button>
-        return <div key={frame.key} className={frame.project ? 'focus-project-frame' : undefined} data-project-group-key={frame.project ? key : undefined}
-          data-focus-current={frame.project && currentProject || undefined}
-          data-pinned={frame.project && preference.pinned || undefined} data-focus-project-color={frame.project ? preference.color : undefined}
-          data-project-drop-target={frame.project && dropTarget?.key === key ? dropTarget.after ? 'after' : 'before' : undefined}
-          style={frame.project ? { '--focus-project-color': focusProjectTint(preference.color) } as CSSProperties : undefined}
-          onDragOver={event => { if (frame.project && preference.pinned && dragged.current && dragged.current !== key) { event.preventDefault(); event.dataTransfer.dropEffect = 'move'; const box = event.currentTarget.getBoundingClientRect(); setDropTarget({ key, after: event.clientY > box.top + box.height / 2 }) } }}
-          onDragLeave={event => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDropTarget(null) }}
-          onDrop={event => { if (!frame.project) return; event.preventDefault(); const from = dragged.current; dragged.current = null; setDropTarget(null); const box = event.currentTarget.getBoundingClientRect(); if (from && preference.pinned) void saveProjectChange({ kind: 'move', key: from, target: key, after: event.clientY > box.top + box.height / 2 }, preferences ?? []) }}>
-          {frame.project ? <header className="focus-project-frame__heading focus-project-lanes__heading">
+        const category = first.collection?.confirmed && first.collection.categories.length === 1 ? first.collection.categories[0] : null
+        const containerKey = frame.project ? focusZoneContainerKey('project', first.hostId, first.projectId)
+          : category ? focusZoneContainerKey('collection', category.hostId, category.spaceId) : null
+        const mode = focusZonePresentation(containerKey, frame.project ? 'project' : 'collection', resourceMenus ? zonePreferences : undefined, resourceMenus ? authoredTopicPresentation : undefined)
+        const zoneHeadings = new Map(frame.lanes.map(zone => [zone.id, <span className="focus-zone-heading" data-focus-zone-id={zone.id} key={zone.id}>
+          <FocusLaneHeadingMenu enabled={resourceMenus} lane={zone} onRename={renameCategory} onChangeIcon={changeIcon}>
+            <button type="button" className="focus-project-lanes__axis focus-zone-heading__axis" data-focus-project-scope-control
+              aria-current={zone.id === currentLaneId ? 'location' : undefined} aria-pressed={selectedProjectKey === focusLaneProjectKey(zone)}
+              title={[zone.name, displayPath(zone.path, zone.hostId), zone.summary, origins?.get(zone.id)?.label, ...(origins?.get(zone.id)?.locations ?? []), ...(origins?.get(zone.id)?.addresses ?? [])].filter(Boolean).join('\n')} onClick={() => onSelect(focusLaneProjectKey(zone))}>
+              <ThemeObjectBranchIcon size={11} /><span className="focus-project-lanes__label"><strong>{zone.labels.slice(1).join(' / ') || 'Root'}</strong></span>
+            </button>
+          </FocusLaneHeadingMenu>
+          {origins?.get(zone.id)?.kind === 'unknown' ? <span className="focus-project-lanes__source">Source unknown</span> : null}
+          {zone.locationUnconfirmed ? <span className="focus-project-lanes__recovery">Location unconfirmed</span> : null}
+          {zone.recovery ? <span className="focus-project-lanes__recovery">{zone.recovery === 'removed' ? 'Worktree removed' : 'Workspace unregistered'}</span> : null}
+          {zone.summary ? <span className="focus-project-lanes__summary" title={zone.summary}>{zone.summary}</span> : null}
+        </span>]))
+        const references = (field: 'contextRefs' | 'activeAgentRefs') => [...new Map(frame.lanes.flatMap(zone => zone[field]).map(ref => [JSON.stringify([ref.hostId, ref.id]), ref])).values()]
+        const scanLanes: readonly FocusScanLane[] = frame.project ? [{ ...first, id: frame.key, labels: [name], name,
+          zones: frame.lanes, zoneHeadings, zonePresentation: mode, contextRefs: references('contextRefs'), activeAgentRefs: references('activeAgentRefs'),
+          summary: null, recovery: null, lastActivityAt: activityAt }] : [{ ...first, ...(resourceMenus ? { zonePresentation: mode } : {}) }]
+        const projectHeading = <header className="focus-project-frame__heading focus-project-lanes__heading">
             {resourceMenus ? <button type="button" className="focus-project-disclosure" aria-label={`${compact ? 'Expand' : 'Collapse'} project · ${name}`} aria-expanded={!compact} disabled={preferencePending || forceExpanded || revealed} title={forceExpanded || revealed ? 'Expanded for this search or exact reveal' : compact ? 'Expand project' : 'Collapse project'} onClick={() => toggleProject(key, compact)}><ThemeNavigationDisclosureIcon size={11} /></button> : null}
             {resourceMenus && preference.pinned ? <button type="button" className="focus-project-pin-handle" draggable={!preferencePending} disabled={preferencePending} aria-busy={preferencePending || undefined} aria-label={`Reorder pinned project · ${name}`} title={preferencePending ? 'Saving project order…' : 'Drag to reorder · Alt + ↑ / ↓'}
               onDragStart={event => { dragged.current = key; event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('text/plain', key) }} onDragEnd={() => { dragged.current = null; setDropTarget(null) }}
               onKeyDown={event => { if (event.altKey && (event.key === 'ArrowUp' || event.key === 'ArrowDown')) { event.preventDefault(); movePin(key, event.key === 'ArrowUp' ? -1 : 1) } }}><SemanticIcon name="action.pin" size={12} /></button> : null}
             {resource && resourceMenus ? <WorkspaceRowContextMenu workspaceId={resource.id} path={resource.path} branch={resource.branch ?? null} isLocal={Boolean(hosts?.some(host => host.id === resource.hostId && host.kind === 'local'))} onChangeIcon={() => changeIcon(folderSpaceIconTarget({ hostId: resource.hostId, repoPath: resource.repoPath ?? resource.path, name: resource.name }))}>{title}</WorkspaceRowContextMenu> : title}
             {preference.note ? <span className="focus-project-lanes__personal-note" data-focus-project-note="" title={preference.note}>{preference.note}</span> : null}
+            {frame.lanes.length === 1 ? <>{origins?.get(first.id)?.kind === 'unknown' ? <FocusProjectOrigin origin={origins?.get(first.id)} /> : null}
+              {first.summary ? <span className="focus-project-lanes__summary" title={first.summary}>{first.summary}</span> : null}
+              {first.recovery ? <span className="focus-project-lanes__recovery">{first.recovery === 'removed' ? 'Worktree removed' : 'Workspace unregistered'}</span> : null}</> : null}
             <FocusProjectActivity at={activityAt} now={now} />
-            {resourceMenus ? <FocusProjectPreferences projectKey={key} name={name} /> : null}
-          </header> : null}
-          {frame.lanes.map(lane => {
+            {resourceMenus ? <FocusProjectPreferences projectKey={key} name={name} zoneKey={containerKey} zoneDefault="sections" /> : null}
+          </header>
+        return <div key={frame.key} className={frame.project ? 'focus-project-frame' : undefined} data-project-group-key={frame.project ? key : undefined}
+          data-focus-current={frame.project && currentProject || undefined} data-focus-zone-presentation={resourceMenus || frame.project ? mode : undefined} data-focus-container-key={containerKey ?? undefined}
+          data-pinned={frame.project && preference.pinned || undefined} data-focus-project-color={frame.project ? preference.color : undefined}
+          data-project-drop-target={frame.project && dropTarget?.key === key ? dropTarget.after ? 'after' : 'before' : undefined}
+          style={frame.project ? { '--focus-project-color': focusProjectTint(preference.color) } as CSSProperties : undefined}
+          onDragOver={event => { if (frame.project && preference.pinned && dragged.current && dragged.current !== key) { event.preventDefault(); event.dataTransfer.dropEffect = 'move'; const box = event.currentTarget.getBoundingClientRect(); setDropTarget({ key, after: event.clientY > box.top + box.height / 2 }) } }}
+          onDragLeave={event => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDropTarget(null) }}
+          onDrop={event => { if (!frame.project) return; event.preventDefault(); const from = dragged.current; dragged.current = null; setDropTarget(null); const box = event.currentTarget.getBoundingClientRect(); if (from && preference.pinned) void saveProjectChange({ kind: 'move', key: from, target: key, after: event.clientY > box.top + box.height / 2 }, preferences ?? []) }}>
+
+          {scanLanes.map(lane => {
         const key = focusLaneProjectKey(lane), preference = focusProjectPreference(key, resourceMenus ? preferences ?? [] : [])
-        const current = currentLaneId === lane.id || Boolean(lane.collection?.topics.some(topic => topic.id === currentLaneId))
-        const compact = compactLanes.get(lane.id)!
+        const current = frame.project ? currentProject : currentLaneId === lane.id || Boolean(lane.collection?.topics.some(topic => topic.id === currentLaneId))
+        const compact = frame.project ? frame.lanes.every(zone => compactLanes.get(zone.id)) : compactLanes.get(lane.id)!
         return <FocusLaneArticle name={lane.name} summary={lane.summary} visible={visible} className={`focus-project-lanes__row${!lane.collection && selectedProjectKey === key ? ' is-selected' : ''}`} data-focus-source={lane.collection ? 'collection' : origins?.get(lane.id)?.kind} data-focus-collection={lane.collection ? lane.id : undefined} data-collapsed={compact || undefined} data-focus-current={current || undefined} data-project-id={lane.collection ? undefined : lane.projectId} data-project-key={lane.collection ? undefined : key} data-lane-id={lane.id} data-recovery={lane.recovery ?? undefined} key={lane.id}
           data-pinned={preference.pinned || undefined} data-focus-project-color={preference.color} data-project-drop-target={dropTarget?.key === key ? dropTarget.after ? 'after' : 'before' : undefined}
           style={{ '--focus-project-color': focusProjectTint(preference.color) } as CSSProperties}
           >
         <div className="focus-project-lanes__track">{renderLane(lane,
-        <span className="focus-project-lanes__heading">
-          {lane.collection ? <>
+        <div className={frame.project ? 'focus-project-frame__title' : 'focus-project-lanes__heading'}>
+          {frame.project ? projectHeading : <>{lane.collection ? <>
             <span className="focus-project-lanes__source">Collection</span>
             <FocusLaneHeadingMenu enabled={resourceMenus} lane={lane} collapsed={compact} onToggleCollection={() => toggleCollection(lane.id, compact)} onRename={renameCategory} onChangeIcon={changeIcon}><button type="button" className="focus-project-lanes__axis focus-project-lanes__collection" aria-expanded={!compact}
               aria-current={lane.collection.topics.some(topic => topic.id === currentLaneId) ? 'location' : undefined}
@@ -231,7 +259,9 @@ export function FocusProjectLanes({ lanes, selectedProjectKey, currentLaneId, re
           {!frame.project || lane.labels.length > 1 ? <FocusProjectActivity at={lane.lastActivityAt ?? null} now={now} /> : null}
           {lane.locationUnconfirmed ? <span className="focus-project-lanes__recovery">Location unconfirmed</span> : null}
           {lane.recovery ? <span className="focus-project-lanes__recovery">{lane.recovery === 'removed' ? 'Worktree removed' : 'Workspace unregistered'}</span> : null}
-        </span>
+          {lane.collection && resourceMenus ? <FocusProjectPreferences name={lane.name} zoneKey={containerKey} zoneDefault={authoredTopicPresentation ?? 'cards'}
+            zoneUnavailable="Zone layout needs one confirmed Collection. Original members and their work surfaces remain available." /> : null}</>}
+        </div>
         , compact)}</div>
       </FocusLaneArticle>})}</div>})}
       {recentProjects.map(project => <article className="focus-project-lanes__row" data-project-id={project.projectId} data-project-key={project.key} data-observed-project="true" key={`observed:${project.key}`}>

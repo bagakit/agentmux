@@ -274,10 +274,12 @@
 /* A remembered route: tint affects the surface, never text or state contrast. */
 .focus-project-frame { position: relative; isolation: isolate; overflow: clip; background: color-mix(in srgb, var(--focus-project-color) 5%, var(--surface-0)); border-top: 1px solid color-mix(in srgb, var(--focus-project-color) 14%, var(--line-soft)); }
 .focus-project-frame > .focus-project-lanes__row { background: transparent; border-top: 0; }
-.focus-project-frame__heading { border-bottom: 1px solid var(--line-soft); }
+.focus-project-frame__heading { flex: 1; min-width: 0; }
+.focus-project-frame__title { display: flex; flex: 1; min-width: 0; }
+.focus-project-frame .focus-project-lanes__title { border-bottom: 1px solid var(--line-soft); }
 .focus-project-frame[data-focus-current='true'] > .focus-project-frame__heading { background: color-mix(in srgb, var(--text) 6%, transparent); }
 .focus-project-frame .focus-project-lanes__heading:empty { display: none; }
-.focus-project-frame .project-appearance-backdrop { position: absolute; z-index: -1; right: 12px; bottom: 12px; width: min(280px, 48%); height: min(280px, 100%); object-fit: contain; opacity: .055; pointer-events: none; user-select: none; }
+.focus-project-frame .project-appearance-backdrop { position: absolute; z-index: -1; right: 0; top: 0; width: min(280px, 48%); height: min(280px, 100%); object-fit: contain; object-position: right top; opacity: .07; mask-image: radial-gradient(ellipse at top right, #000 5%, #000b 35%, transparent 78%); pointer-events: none; user-select: none; }
 .focus-project-frame[data-project-drop-target='before'] { box-shadow: inset 0 2px var(--blue); }
 .focus-project-frame[data-project-drop-target='after'] { box-shadow: inset 0 -2px var(--blue); }
 .focus-project-pin-handle { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 22px; height: 22px; padding: 0; border: 0; border-radius: 3px; color: var(--text-2); background: transparent; cursor: grab; }
@@ -285,19 +287,19 @@
 .focus-project-pin-handle:hover, .focus-project-pin-handle:focus-visible { background: var(--surface-2); color: var(--text); }
 .focus-project-lanes__personal-note { max-width: 180px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-micro); color: var(--text-2); }
 .focus-project-preferences__trigger { flex: none; width: 22px; height: 22px; margin-inline-start: auto; }
-.focus-project-preferences { z-index: 200; display: flex; flex-direction: column; gap: 8px; box-sizing: border-box; width: min(248px, calc(100vw - 16px)); max-height: calc(100vh - 16px); overflow: auto; padding: 9px; border: 1px solid var(--line); border-radius: 6px; color: var(--text); background: var(--surface-1); box-shadow: 0 5px 18px #0003; font-size: var(--fs-small); }
+.focus-project-preferences { z-index: 200; display: flex; flex-direction: column; gap: 6px; box-sizing: border-box; width: min(248px, calc(100vw - 16px)); max-height: calc(100vh - 16px); overflow: auto; padding: 8px; border: 1px solid var(--line); border-radius: 6px; color: var(--text); background: var(--surface-1); box-shadow: 0 5px 18px #0003; font-size: var(--fs-meta); }
 .focus-project-preferences__header { display: flex; align-items: center; gap: 10px; }
-.focus-project-preferences__name { flex: 1; min-width: 0; overflow-wrap: anywhere; font-size: inherit; }
+.focus-project-preferences__name { font-weight: 600; flex: 1; min-width: 0; overflow-wrap: anywhere; font-size: inherit; }
 .focus-project-preferences__pin { display: inline-flex; flex: none; align-items: center; gap: 4px; }
 .focus-project-preferences__pin input { margin: 0; }
 .focus-project-preferences__note { display: grid; grid-template-columns: 36px minmax(0, 1fr); align-items: center; gap: 6px; color: var(--text-2); }
-.focus-project-preferences__note input { width: 100%; min-width: 0; box-sizing: border-box; padding: 4px 6px; font: inherit; color: var(--text); background: var(--surface-0); border: 1px solid var(--line); border-radius: 4px; }
+.focus-project-preferences__note input { width: 100%; min-width: 0; box-sizing: border-box; padding: 3px 5px; font: inherit; color: var(--text); background: var(--surface-0); border: 1px solid var(--line); border-radius: 4px; }
 .focus-project-preferences__color-row { display: grid; grid-template-columns: 36px minmax(0, 1fr); align-items: center; gap: 6px; color: var(--text-2); }
 .focus-project-preferences__colors { display: flex; flex-wrap: wrap; gap: 5px; padding: 2px; }
-.focus-project-preferences__colors button { display: grid; place-items: center; width: 22px; height: 22px; padding: 0; border: 1px solid var(--line); border-radius: 4px; color: var(--text); cursor: pointer; }
+.focus-project-preferences__colors button { display: grid; place-items: center; width: 20px; height: 20px; padding: 0; border: 1px solid var(--line); border-radius: 3px; color: var(--text); cursor: pointer; }
 .focus-project-preferences__colors button[aria-pressed='true'] { outline: 1px solid var(--text-2); outline-offset: 2px; }
 .focus-project-preferences__actions { display: flex; justify-content: flex-end; gap: 8px; }
-.focus-project-preferences__error, .focus-project-order-error { margin: 0; color: var(--amber); font-size: var(--fs-small); overflow-wrap: anywhere; }
+.focus-project-preferences__error, .focus-project-order-error { margin: 0; color: var(--amber); font-size: var(--fs-meta); overflow-wrap: anywhere; }
 .focus-project-order-error { padding: 5px 8px; }
 .focus-project-preferences__error { display: flex; flex-direction: column; gap: 7px; }
 .focus-project-preferences__error > button { align-self: flex-start; }
@@ -314,3 +316,20 @@
 .focus-context-card[data-focus-heat='cool'] { background: color-mix(in srgb, var(--text-3) 2%, transparent); border-radius: var(--radius-sm); }
 .focus-context-card:is(:hover, :focus-within) { background: var(--surface-2); }
 .focus-project-order-error { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 8px; }
+
+/* Container controls and subordinate original Zone labels share the existing type scale. */
+.focus-project-preferences__organization { display: grid; grid-template-columns: 36px minmax(0, 1fr); align-items: center; gap: 3px 6px; margin: 0; padding: 5px 0; border: 0; border-block: 1px solid var(--line-soft); }
+.focus-project-preferences__organization > span { color: var(--text-3); font-size: var(--fs-micro); }
+.focus-project-preferences__modes { display: flex; gap: 3px; padding: 2px; border-radius: 4px; background: var(--surface-0); }
+.focus-project-preferences__modes button { display: inline-flex; align-items: center; justify-content: center; flex: 1; gap: 5px; min-height: 22px; padding: 2px 5px; border: 1px solid transparent; border-radius: 3px; font: inherit; color: var(--text-3); background: transparent; cursor: pointer; }
+.focus-project-preferences__modes button[aria-pressed='true'] { border-color: var(--line); color: var(--text); background: var(--surface-2); }
+.focus-project-preferences__modes button:is(:hover,:focus-visible) { color: var(--text); outline: 1px solid var(--focus-line); outline-offset: -1px; }
+.focus-project-preferences__default { grid-column: 2; justify-self: start; min-height: 16px; padding: 0; border: 0; background: transparent; color: var(--text-3); font: inherit; font-size: var(--fs-micro); cursor: pointer; }
+.focus-project-preferences__default:is(:hover,:focus-visible) { color: var(--text); }
+.focus-project-preferences__notice { margin: 0; color: var(--text-3); font-size: var(--fs-micro); }
+.focus-zone-heading { display: inline-flex; align-items: center; gap: 4px; min-width: 0; max-width: 100%; }
+.focus-zone-heading .focus-project-lanes__label strong { font-weight: 400; color: var(--text-3); }
+.focus-zone-heading .focus-project-lanes__summary { max-width: 220px; }
+.focus-zone-heading [aria-current='location'] .focus-project-lanes__label strong { font-weight: 500; color: var(--text); }
+.focus-zone-tags { display: flex; align-items: center; flex-wrap: wrap; gap: 2px 8px; min-height: 22px; padding-inline: var(--sp-2); }
+.focus-zone-tags .focus-zone-heading__axis { font-size: var(--fs-micro); }

@@ -514,7 +514,7 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
     } })
   }
   const laneRows = (lane: typeof boardLanes[number], heading: ReactNode, compact = false) => <FocusScanLaneContent lane={lane} compact={compact}
-    contexts={rowsByLane.get(lane.id) ?? []} heading={heading} metrics={laneMetrics} replyLines={replyLines} topicPresentation={topicPresentation}
+    contexts={lane.zones ? [...new Map(lane.zones.flatMap(zone => rowsByLane.get(zone.id) ?? []).map(context => [focusTopicContextKey(context.hostId, context.id), context])).values()] : rowsByLane.get(lane.id) ?? []} heading={heading} metrics={laneMetrics} replyLines={replyLines} topicPresentation={topicPresentation}
     renderCards={(grouped, columns, topics, sections) => <FocusContextCards contexts={grouped} columns={columns} layoutReady={laneMetrics.measured}
       replyLines={replyLines} topics={topics} sections={sections} visits={focusVisits} scrollRef={boardRowsRef} visible={!compact && visible && documentActive}
       selectedId={shownSessionId} selectedKey={selectedContextKey} revealRequest={agentReveal} onRevealed={finishReveal}
