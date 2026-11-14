@@ -121,11 +121,12 @@ function useEdges(root: React.RefObject<HTMLElement | null>, projection: GoalPla
   return state
 }
 
-function NodeExecutor({ item }: { item: GoalPlanNodeView }) {
+function NodeExecutor({ item, compact = false }: { item: GoalPlanNodeView; compact?: boolean }) {
   const executor = item.delegation ? { hostId: delegationWorkerHostId(item.delegation), agentSessionId: item.delegation.workerAgentSessionId } : item.node.executor
   const presentation = useGoalAgentPresentation(executor?.agentSessionId, executor?.hostId)
   const hosts = useAppStore(state => state.config?.hosts)
   if (!executor) return <span className="goal-plan-node__who goal-plan-node__who--open">Unassigned</span>
+  if (compact) return <span className="goal-plan-node__who" title={`${executor.agentSessionId} · ${executor.hostId}`}><ThemeObjectAgentIcon size={11} aria-hidden="true" />{presentation.name ?? executor.agentSessionId}</span>
   const host = hosts?.find(host => host.id === executor.hostId)
   const toolsHost = presentation.toolExecution && hosts?.find(host => host.id === presentation.workPlacement?.resourceHostId)
   const place = presentation.toolExecution ? `Tools · ${toolsHost?.label ?? presentation.workPlacement?.resourceHostId ?? 'Host unknown'}`
@@ -269,7 +270,7 @@ export function GoalPlanGraph({ demand, onRequestPlan, pending = false, busy = f
         <h3>Assignments</h3>
         {projection.nodes.map(item => <button key={item.node.id} type="button"
           aria-current={open === item.node.id ? 'true' : undefined} onClick={event => toggleNode(item, event.currentTarget)}>
-          <strong>{item.node.title}</strong><span>{goalPlanStateLabel(item)}</span><NodeExecutor item={item} />
+          <strong>{item.node.title}</strong><span>{goalPlanStateLabel(item)}</span><NodeExecutor item={item} compact />
         </button>)}
       </nav>
     <div className="goal-plan__canvas" ref={canvas} tabIndex={0} aria-label="Execution graph">

@@ -6,12 +6,14 @@ import { delegationWorkerHostId, type DemandDelegation } from '@agentmux/demand/
 import type { GoalPlanReviewer } from '@agentmux/demand/goal-plan'
 import { Button } from '@agentmux/client-ui/components/Button'
 import type { DemandProjection } from '../lib/global-demand-board'
+import { useGoalAgentName } from '../lib/goal-discussion-recipient'
 import { useWorkbenchPresentationActive } from '../lib/workbench-presentation'
 import { GoalContinuationAgent } from './GoalContinuationControl'
 import '../styles/goal-supervisor-rail.css'
 
 const DiscussionIcon = semanticIconComponent('object.conversation')
 const RECENT = 6
+const coordinationTime = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
 type RecordedAuthor = GoalPlanReviewer | { kind: 'recorded'; id: string }
 type AttemptTarget = { nodeId: string; operationId: string; title: string }
 type CoordinationEntry = {
@@ -23,6 +25,12 @@ function authorLabel(author: RecordedAuthor | null): string {
   if (!author) return 'Author not recorded'
   const role = { agent: 'Agent', user: 'User', device: 'Device', recorded: 'Recorded actor' }[author.kind]
   return `${role} ${author.id}${'hostId' in author && author.hostId ? ` · Host ${author.hostId}` : ''}${'runtimeId' in author && author.runtimeId ? ` · Runtime ${author.runtimeId}` : ''}`
+}
+
+function CoordinationAgentAuthor({ author }: { author: GoalPlanReviewer }) {
+  const name = useGoalAgentName(author.id, author.hostId)
+  const original = authorLabel(author)
+  return <span className="goal-supervisor-rail__author" title={original}>{name ?? original}</span>
 }
 
 /** Original records provide authors and times; this reader never attributes them to today's Supervisor. */
@@ -105,8 +113,9 @@ export function GoalSupervisorRail({ demand, onOpenDiscussion, discussionBusy = 
     <section className="goal-supervisor-rail__coordination" aria-label="Coordination history">
       <h3>Coordination</h3>
       {entries.length ? <ol className="goal-supervisor-rail__timeline">{shown.map(entry => <li key={entry.key} data-goal-coordination={entry.key}>
-        <div className="goal-supervisor-rail__event-head"><strong>{entry.label}</strong><time dateTime={new Date(entry.at).toISOString()} title={new Date(entry.at).toLocaleString()}>{new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }).format(entry.at)}</time></div>
-        <span className="goal-supervisor-rail__author">{authorLabel(entry.author)}</span>
+        <div className="goal-supervisor-rail__event-head"><strong>{entry.label}</strong><time dateTime={new Date(entry.at).toISOString()} title={new Date(entry.at).toLocaleString()}>{coordinationTime.format(entry.at)}</time></div>
+        {entry.author?.kind === 'agent' && entry.author.hostId ? <CoordinationAgentAuthor author={entry.author} />
+          : <span className="goal-supervisor-rail__author">{authorLabel(entry.author)}</span>}
         {entry.attempt ? <button type="button" className="goal-supervisor-rail__attempt" data-goal-coordination-node={entry.attempt.nodeId} data-goal-coordination-attempt={entry.attempt.operationId}
           aria-label={`Read ${entry.attempt.title} · ${entry.label}`} onClick={event => onRevealAttempt(entry.attempt!.nodeId, entry.attempt!.operationId, event.currentTarget)}>{entry.attempt.title}<span aria-hidden="true">↗</span></button> : null}
         {entry.detail ? <details className="goal-supervisor-rail__detail"><summary>Read record</summary><p>{entry.detail}</p></details> : null}
