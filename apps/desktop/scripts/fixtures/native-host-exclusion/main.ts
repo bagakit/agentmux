@@ -15,6 +15,7 @@ const receipt: any = {
 }
 let host: BrowserWindow | undefined
 let native: NativeDesktop | undefined
+const marker = { x: 32, y: 96, width: 160, height: 80 }
 const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
 function check(name: string, value: unknown): asserts value {
   receipt.checks.push({ name, passed: Boolean(value) })
@@ -46,14 +47,10 @@ function frameFor(frames: any, displayId: number) {
   check('the host display has captured pixels', frame && typeof frame.png === 'string')
   return frame
 }
-function hostRegion(frame: any, content: { x: number; y: number; width: number; height: number }) {
+function markerRegion(frame: any, content: { x: number; y: number; width: number; height: number }) {
   const scaleX = frame.width / frame.frame.width, scaleY = frame.height / frame.frame.height
-  const inset = 12
-  const left = Math.max(content.x, frame.frame.x) + inset, top = Math.max(content.y, frame.frame.y) + inset
-  const right = Math.min(content.x + content.width, frame.frame.x + frame.frame.width) - inset
-  const bottom = Math.min(content.y + content.height, frame.frame.y + frame.frame.height) - inset
-  return { x: (left - frame.frame.x) * scaleX, y: (top - frame.frame.y) * scaleY,
-    width: (right - left) * scaleX, height: (bottom - top) * scaleY }
+  return { x: (content.x + marker.x - frame.frame.x) * scaleX, y: (content.y + marker.y - frame.frame.y) * scaleY,
+    width: marker.width * scaleX, height: marker.height * scaleY }
 }
 function finderWindowBounds(): Array<{ x: number; y: number; width: number; height: number }> {
   const output = execFileSync('/usr/bin/osascript', ['-l', 'JavaScript', '-e',
@@ -65,10 +62,15 @@ async function run() {
   await app.whenReady()
   const primary = screen.getPrimaryDisplay()
   host = new BrowserWindow({ show: false, frame: false, roundedCorners: false, hasShadow: false, resizable: false,
-    x: primary.workArea.x + 100, y: primary.workArea.y + 100, width: 360, height: 260, useContentSize: true,
-    backgroundColor: '#ff00c8', title: `Native host exclusion ${process.pid}`,
+    x: primary.workArea.x + 100, y: primary.workArea.y + 100, width: 320, height: 220, useContentSize: true,
+    backgroundColor: '#17191f', title: `Native host exclusion ${process.pid}`,
     webPreferences: { sandbox: true, contextIsolation: true, backgroundThrottling: false } })
-  await host.loadURL('data:text/html,<html><body style="margin:0;width:100vw;height:100vh;overflow:hidden;background:%23ff00c8"></body></html>')
+  const hostMarkup = `<html><body style="margin:0;width:100vw;height:100vh;overflow:hidden;background:#17191f;color:#aab0be;font:12px -apple-system,BlinkMacSystemFont,sans-serif">
+    <div style="position:absolute;left:32px;top:28px;letter-spacing:.02em">Native capture check</div>
+    <div style="position:absolute;left:32px;top:52px;color:#686f7d;font-size:11px">Controlled host-window fixture</div>
+    <div style="position:absolute;left:${marker.x}px;top:${marker.y}px;width:${marker.width}px;height:${marker.height}px;background:#ff00c8"></div>
+  </body></html>`
+  await host.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(hostMarkup))
   host.show(); app.focus({ steal: true }); host.focus()
   await host.webContents.executeJavaScript('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))')
   for (const deadline = Date.now() + 5000; Date.now() < deadline && (!app.isActive() || !host.isFocused());) {
@@ -76,11 +78,13 @@ async function run() {
     await wait(50)
   }
   await wait(150)
-  check('the uniquely colored host window is visible and frontmost', host.isVisible() && app.isActive() && host.isFocused())
+  check('the host with its exact colored marker is visible and frontmost', host.isVisible() && app.isActive() && host.isFocused())
   const content = host.getContentBounds(), display = screen.getDisplayMatching(content)
-  const own = colorPixels((await host.webContents.capturePage()).toPNG().toString('base64'),
-    { x: 20, y: 20, width: content.width - 40, height: content.height - 40 })
-  check('the painted host contains its unique color before native capture', own.matches > own.area * 0.9)
+  const paintedHost = await host.webContents.capturePage(), paintedSize = paintedHost.getSize()
+  const own = colorPixels(paintedHost.toPNG().toString('base64'), markerRegion(
+    { width: paintedSize.width, height: paintedSize.height, frame: { x: 0, y: 0, width: content.width, height: content.height } },
+    { x: 0, y: 0, width: content.width, height: content.height }))
+  check('the painted host contains its exact marker before native capture', own.matches === own.area && own.area > 100)
 
   native = new NativeDesktop({ executablePath, connectTimeoutMs: 15_000, requestTimeoutMs: 30_000 })
   const apps: any = await native.request('listApps', {})
@@ -105,13 +109,13 @@ async function run() {
   check('the host is frontmost immediately before included capture', app.isActive() && host.isFocused())
 
   const included = await native.captureDisplays({ includeHostWindows: true })
-  const includedFrame = frameFor(included, display.id), includedRegion = hostRegion(includedFrame, content)
+  const includedFrame = frameFor(included, display.id), includedRegion = markerRegion(includedFrame, content)
   const includedPixels = colorPixels(includedFrame.png, includedRegion)
   const includedWholeDisplay = colorPixels(includedFrame.png, { x: 0, y: 0, width: includedFrame.width, height: includedFrame.height })
   receipt.included = { colorPixels: includedPixels.matches, regionArea: includedPixels.area, fullDisplayColorPixels: includedWholeDisplay.matches,
     region: includedRegion, capturedAt: included.capturedAt, engine: includedFrame.engine, timing: included.timing }
   check('included window list contains the discovered host', includedFrame.windows.some((window: any) => window.windowId === discovered.id))
-  check('included isolated-region unique color is present', includedPixels.area > 100 && includedPixels.matches > includedPixels.area * 0.9)
+  check('included isolated-region unique color is present', includedPixels.area > 100 && includedPixels.matches === includedPixels.area)
 
   // The host stays fully visible. Exclusion is native filtering, not opacity or hiding.
   execFileSync('/usr/bin/osascript', ['-l', 'JavaScript', '-e',
@@ -125,7 +129,7 @@ async function run() {
   receipt.frontmost = { finderWindowCount: finderWindows.length, obscuringFinderWindowCount: obscuringFinderWindows.length }
   check('no Finder window obscures the visible host', host.isVisible() && obscuringFinderWindows.length === 0)
   const excluded = await native.captureDisplays({ includeHostWindows: false })
-  const excludedFrame = frameFor(excluded, display.id), excludedRegion = hostRegion(excludedFrame, content)
+  const excludedFrame = frameFor(excluded, display.id), excludedRegion = markerRegion(excludedFrame, content)
   const excludedPixels = colorPixels(excludedFrame.png, excludedRegion)
   receipt.excluded = { colorPixels: excludedPixels.matches, regionArea: excludedPixels.area, capturedAt: excluded.capturedAt,
     engine: excludedFrame.engine, hostListed: excludedFrame.windows.some((window: any) => window.windowId === discovered.id), timing: excluded.timing }
