@@ -30,7 +30,10 @@ export class ToolkitReceiptStore {
         Object.keys(value).length !== 2 || !value.tools || typeof value.tools !== 'object' || Array.isArray(value.tools) ||
         Object.keys(value.tools).length > TOOLKIT_RECEIPT_LIMIT) throw new AgentMuxError('Toolkit receipt storage is invalid.', 'CONTROL_PROTOCOL_ERROR')
       this.values = value.tools
-    })()
+    })().catch(error => {
+      this.loaded = null
+      throw error
+    })
     return await this.loaded
   }
 

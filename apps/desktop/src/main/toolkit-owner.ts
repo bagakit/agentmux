@@ -102,13 +102,12 @@ export class PerformanceToolkitOwner implements AgentMuxToolkitPort {
       void this.loadFailure()
       try {
         const receipt = await this.args.receipts.read('performance') as PerformanceReceipt | null
-        if (receipt === null) return
-        if (!receipt || typeof receipt !== 'object' || Array.isArray(receipt) ||
+        if (receipt !== null && (!receipt || typeof receipt !== 'object' || Array.isArray(receipt) ||
           receipt.schema !== 'agentmux.performance.receipt.v1' || !Object.hasOwn(receipt, 'admission') ||
-          Object.keys(receipt).some(key => !['schema', 'admission', 'recoveries'].includes(key))) {
+          Object.keys(receipt).some(key => !['schema', 'admission', 'recoveries'].includes(key)))) {
           throw new AgentMuxError('Performance receipt is invalid.', 'CONTROL_PROTOCOL_ERROR')
         }
-        if (receipt.recoveries !== undefined) {
+        if (receipt?.recoveries !== undefined) {
           if (!Array.isArray(receipt.recoveries)) throw new AgentMuxError('Performance recovery records are invalid.', 'CONTROL_PROTOCOL_ERROR')
           const ids = new Set<string>(), invocations = new Set<string>()
           for (const entry of receipt.recoveries) {
@@ -119,20 +118,27 @@ export class PerformanceToolkitOwner implements AgentMuxToolkitPort {
             if (ids.has(entry.admission.executionId!) || invocations.has(entry.invocationId)) throw new AgentMuxError('Performance recovery identity is ambiguous.', 'CONTROL_PROTOCOL_ERROR')
             ids.add(entry.admission.executionId!); invocations.add(entry.invocationId)
           }
-          this.recoveries = receipt.recoveries
         }
-        if (receipt.admission === null) return
-        const admission = receipt.admission
-        const value = this.parseAdmission(admission)
+        const value = receipt && receipt.admission !== null ? this.parseAdmission(receipt.admission) : null
+        this.recoveries = receipt?.recoveries ?? []
+        if (value === null) {
+          if (this.value.state === 'unknown' && !this.execution) {
+            this.value = { ...this.value, state: 'idle', reason: null }
+            this.publish()
+          }
+          return
+        }
         const execution = this.newExecution(value.executionId)
         execution.ref = value.run === null ? null : { runId: value.run.runId }
         execution.creationPending = execution.ref === null
         execution.admissionSaved = true; execution.ended = true
         this.execution = execution
         this.value = { ...value, reason: value.reason ?? 'Previous Performance execution outcome needs confirmation.' }
+        this.publish()
       } catch (error) {
         this.value.state = 'unknown'
         this.value.reason = 'Performance admission is unconfirmed: ' + String(error instanceof Error ? error.message : error).slice(0,4000)
+        this.loaded = null
       }
     })()
     return await this.loaded
@@ -157,7 +163,9 @@ export class PerformanceToolkitOwner implements AgentMuxToolkitPort {
           this.value.diagnostics = { ...this.value.diagnostics, lastFailure: this.safeFailure(failure),
             failureEvidence: this.hasFailureEvidence(failure) ? 'retained' : 'none', persistence: 'observed-on-disk' }
         }
+        if (this.value.diagnostics.issue?.operation === 'read-failure') this.value.diagnostics.issue = null
       } catch (error) {
+        this.failureLoaded = null
         if (this.failure === null) this.value.diagnostics.issue = this.issue('read-failure', error)
       }
       this.publish()

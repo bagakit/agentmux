@@ -215,8 +215,10 @@ export class CustomToolkitOwner {
     }
     const value = tool
     if (!value.loading) value.loading = (async () => {
+      const previousError = value.error
       try {
         const receipt = await this.args.receipts.read(id)
+        value.error = null
         if (receipt === null) return
         if (!receipt || typeof receipt !== 'object' || Array.isArray(receipt) ||
             !Object.hasOwn(receipt, 'admission') || !Object.hasOwn(receipt, 'latestConfirmed') ||
@@ -263,7 +265,12 @@ export class CustomToolkitOwner {
           if (display.admission) display.admission = { ...display.admission, state: 'unknown', reason: display.admission.document === null
             ? display.admission.reason ?? 'Original display document is unavailable; exact Run outcome needs confirmation.' : 'Display evaluation restored; exact Run outcome needs confirmation.' }
         }
-      } catch (error) { value.error = 'Tool receipt is unconfirmed: ' + message(error) }
+      } catch (error) {
+        value.error = 'Tool receipt is unconfirmed: ' + message(error)
+        value.loading = null
+      } finally {
+        if (value.error !== previousError) this.publish(value)
+      }
     })()
     await value.loading
     this.configuration(id)
