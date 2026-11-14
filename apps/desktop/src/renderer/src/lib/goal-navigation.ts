@@ -1,19 +1,18 @@
 import type { GoalGroup } from './goal-groups'
 import type { GoalStage } from './goal-presentation'
-import type { GoalFiniteStartIntent } from './goal-finite-start'
 
 /** Read only the collection's retained inputs, once per actual input-map revision. */
 export function createGoalRetainedStartsSelector(goals: readonly { id: string }[]) {
-  type Intents = Readonly<Record<string, GoalFiniteStartIntent>>
+  type Intents = Readonly<Record<string, unknown>>
   let observed: Intents | undefined
-  let selected: Record<string, GoalFiniteStartIntent> = {}
-  return (state: { goalFiniteStartIntents: Intents }): Record<string, GoalFiniteStartIntent> => {
+  let selected: Record<string, unknown> = {}
+  return (state: { goalFiniteStartIntents: Intents }): Record<string, unknown> => {
     if (state.goalFiniteStartIntents === observed) return selected
     observed = state.goalFiniteStartIntents
     selected = {}
     for (const { id } of goals) {
       const intent = observed[id]
-      if (intent) selected[id] = intent
+      if (intent !== undefined) selected[id] = intent
     }
     return selected
   }

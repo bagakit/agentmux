@@ -3,7 +3,7 @@ import { alignmentConfirmationIssue, groundingAcceptanceIssue, isDemandEvidenceR
 import { delegationWorkerHostId } from '@agentmux/demand/delegations'
 import type { DemandRecord } from './global-demand-board'
 import { goalDelegationNextRow, type GoalDelegationRow } from './goal-delegation-presentation'
-import type { GoalFiniteStartIntent } from './goal-finite-start'
+import { readGoalFiniteStartIntent } from './goal-finite-start'
 import { goalStartNextRow, type GoalStartRow } from './goal-start-presentation'
 
 /**
@@ -34,11 +34,17 @@ const DELEGATION_STAGE: Record<GoalDelegationRow['state'], GoalStage> = {
   question: 'attention', exited: 'attention', unknown: 'unknown'
 }
 const START_STAGE: Record<GoalStartRow['state'], GoalStage> = { review: 'attention', continuation: 'attention', working: 'agents', unknown: 'unknown' }
+function retainedGoalInputHere(value: unknown, goalId: string): boolean {
+  if (value === undefined) return false
+  if (value && typeof value === 'object' && 'goalId' in value && typeof value.goalId === 'string' && value.goalId !== goalId &&
+      readGoalFiniteStartIntent(value, value.goalId)) return false
+  return true
+}
 
 /** Reading budget only; these retained objects do not grant input or completion. */
-export function goalHasOriginalWork(demand: Pick<DemandRecord, 'id' | 'dispatches' | 'delegations' | 'patrols' | 'responsibility'>, retainedStart?: GoalFiniteStartIntent): boolean {
+export function goalHasOriginalWork(demand: Pick<DemandRecord, 'id' | 'dispatches' | 'delegations' | 'patrols' | 'responsibility'>, retainedStart?: unknown): boolean {
   return Boolean(demand.dispatches?.some(item => item.execution === 'finite') || demand.delegations?.length ||
-    (retainedStart && retainedStart.goalId === demand.id) || demand.patrols?.some(item => item.purpose !== 'plan') || demand.responsibility?.executions.length)
+    retainedGoalInputHere(retainedStart, demand.id) || demand.patrols?.some(item => item.purpose !== 'plan') || demand.responsibility?.executions.length)
 }
 
 /** Display the owner facts. Business status is not an acknowledgement. */
@@ -47,7 +53,8 @@ export function goalNextStep(demand: GoalNextStepInput): string {
 }
 
 /** One branch decides both the sentence and its stage, so they cannot drift apart. */
-export function goalNextStepFact(demand: GoalNextStepInput, retainedStart?: GoalFiniteStartIntent): GoalNextStepFact {
+export function goalNextStepFact(demand: GoalNextStepInput, retainedInput?: unknown): GoalNextStepFact {
+  const retainedStart = readGoalFiniteStartIntent(retainedInput, demand.id)
   const { alignment, grounding } = demand
   const resultSource: GoalNextStepSource = { kind: 'results', submissionId: grounding?.submissionId ?? null, revision: alignment?.revision ?? null }
   const definitionSource: GoalNextStepSource = { kind: 'definition', revision: alignment?.revision ?? null }
@@ -57,10 +64,11 @@ export function goalNextStepFact(demand: GoalNextStepInput, retainedStart?: Goal
   }
   if (demand.status === 'done' && !grounding) return { stage: 'attention', text: 'Results not verified', source: resultSource }
   if (demand.status !== 'done') {
+    if (retainedGoalInputHere(retainedInput, demand.id) && !retainedStart) return { stage: 'unknown', text: 'Original task input unreadable · Retained', source: { kind: 'goal' } }
     if (retainedStart && retainedStart.goalId === demand.id && !demand.dispatches?.some(start => start.operationId === retainedStart.operationId && start.stage === 'confirmed'))
       return { stage: retainedStart.phase === 'not-attempted' ? 'attention' : 'unknown',
         text: retainedStart.phase === 'not-attempted' ? 'Original task retained · Not submitted' : 'Original task input unconfirmed',
-        source: { kind: 'start', operationId: retainedStart.operationId, agentSessionId: retainedStart.sessionId } }
+        source: { kind: 'start', operationId: retainedStart.operationId, ...(retainedStart.agentReference ? { agentReference: retainedStart.agentReference } : { agentSessionId: retainedStart.sessionId }) } }
     const patrol = demand.patrols?.filter(item => item.purpose !== 'plan').at(-1)
     const observed = patrol && demand.patrolObservations?.find(item => item.operationId === patrol.operationId)
     if (patrol && !patrol.report && observed && observed.state !== 'stale' && observed.state !== 'reported' && observed.state !== 'planned') {

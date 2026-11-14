@@ -46,7 +46,7 @@ import { emptyApplicationAccess, restoredApplicationAccess, type ApplicationAcce
 import { restoreToolkitPresentations, updateToolkitPresentation, type ToolkitPresentations, type ToolkitPresentationPatch } from './lib/toolkit-presentation'
 import { isSessionRecoveryReplyUnconfirmed } from '../../shared/session-recovery-result'
 import { handoffSavedGoalDiscussions } from './lib/goal-discussion-handoff'
-import { restoredGoalFiniteStartIntents, type GoalFiniteStartIntent } from './lib/goal-finite-start'
+import { readGoalFiniteStartIntent, restoredGoalFiniteStartIntents, type GoalFiniteStartIntent } from './lib/goal-finite-start'
 import type { GoalEditDrafts } from './lib/goal-edit-drafts'
 import { goalDiscussionRequestKey, originalGoalDiscussionRequest, type GoalDiscussionRequest, type GoalDiscussionTaskMode } from './lib/goal-discussion-request'
 import { observeNotifications } from './lib/notification-observation'
@@ -1040,7 +1040,7 @@ export type AppState = GitReadingActions & {
   agentOperations: AgentOperationReferences
   /** UI intent only; original Core/spatial creation still owns the reserved Session. */
   goalAgentSelectionDrafts: Record<string, unknown>
-  goalFiniteStartIntents: Record<string, GoalFiniteStartIntent>
+  goalFiniteStartIntents: Record<string, unknown>
   sessionRecordDeletionRequests: Record<string, unknown>
   goalDiscussionRequests: Record<string, GoalDiscussionRequest>
   goalEditDrafts: GoalEditDrafts
@@ -4165,7 +4165,7 @@ type PersistedAppState = {
   spatialRequests: Record<string, SpatialRequestBinding>
   agentOperations: AgentOperationReferences
   goalAgentSelectionDrafts?: Record<string, unknown>
-  goalFiniteStartIntents?: Record<string, GoalFiniteStartIntent>
+  goalFiniteStartIntents?: Record<string, unknown>
   sessionRecordDeletionRequests?: Record<string, unknown>
   goalDiscussionRequests?: Record<string, GoalDiscussionRequest>
   goalEditDrafts?: GoalEditDrafts
@@ -5278,19 +5278,26 @@ export async function clearGoalAgentSelectionDraft(goalId: string, role: GoalAge
   useAppStore.setState(state => { if (state.goalAgentSelectionDrafts[key] !== expected) return state; const goalAgentSelectionDrafts = { ...state.goalAgentSelectionDrafts }; delete goalAgentSelectionDrafts[key]; return { goalAgentSelectionDrafts } })
   await saveWorkbenchSelection(false)
 }
-export async function retainGoalFiniteStartIntent(intent: GoalFiniteStartIntent): Promise<AgentMuxSpatialSave> {
-  const original = useAppStore.getState().goalFiniteStartIntents[intent.goalId]
-  if (original && original.operationId !== intent.operationId) throw new Error('Inspect the original Goal Start before starting another task. The Agent remains available.')
+export async function retainGoalFiniteStartIntent(intent: GoalFiniteStartIntent, expected: unknown): Promise<AgentMuxSpatialSave> {
+  const raw = useAppStore.getState().goalFiniteStartIntents[intent.goalId], original = readGoalFiniteStartIntent(raw, intent.goalId)
+  if (raw !== expected && raw !== intent) throw new Error('The original Goal Start input changed. Your newer private input is retained.')
+  if (!readGoalFiniteStartIntent(intent, intent.goalId) || raw !== undefined && (!original ||
+      JSON.stringify([original.operationId, original.agentReference ?? original.sessionId, original.access]) !==
+      JSON.stringify([intent.operationId, intent.agentReference ?? intent.sessionId, intent.access]) ||
+      original.expectedUpdatedAt !== intent.expectedUpdatedAt && (original.phase !== 'not-attempted' || intent.phase !== 'not-attempted')))
+    throw new Error('The original Goal Start request cannot be replaced. Keep its operation and input; the Agent is retained.')
   useAppStore.setState(state => ({ goalFiniteStartIntents: { ...state.goalFiniteStartIntents, [intent.goalId]: intent } }))
   return await saveWorkbenchSelection(false)
 }
-export async function clearGoalFiniteStartIntent(goalId: string, operationId: string): Promise<void> {
+export async function clearGoalFiniteStartIntent(goalId: string, operationId: string, expected: unknown): Promise<{ cleared: boolean; save: AgentMuxSpatialSave }> {
+  let cleared = false
   useAppStore.setState(state => {
-    if (state.goalFiniteStartIntents[goalId]?.operationId !== operationId) return state
+    if (state.goalFiniteStartIntents[goalId] !== expected || readGoalFiniteStartIntent(expected, goalId)?.operationId !== operationId) return state
     const goalFiniteStartIntents = { ...state.goalFiniteStartIntents }; delete goalFiniteStartIntents[goalId]
+    cleared = true
     return { goalFiniteStartIntents }
   })
-  await saveWorkbenchSelection(false)
+  return { cleared, save: await saveWorkbenchSelection(false) }
 }
 
 export async function retainGoalAgentCreationDraft(draft: GoalAgentCreationDraft | import('./lib/goal-source-creation-draft').GoalSourceCreationDraft, expected?: unknown): Promise<AgentMuxSpatialSave> {
