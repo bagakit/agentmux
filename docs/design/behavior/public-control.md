@@ -164,6 +164,7 @@ CLI 的完整性以用户或 Agent 能完成的原业务为单位：从原对象
 长期无 UI Host 借原 Core，通过 `runtime.*` 方法族提供有限、从原 SDK 类型派生的调用与观察：会话消费者的建立、调用、事件、对话／历史／Attachment／Replay 观察与释放，以及 owner 身份、网络与 profile 等只读入口。准确方法表以 [`AGENTMUX_HOSTED_RPC_METHODS`](../../../packages/core/src/hosted-client-contract.ts) 为准；下列约束适用于该方法族全部方法，消费身份一条适用于其中带 consumer 的方法。
 
 - **不复制原 owner。** 不复制 Provider、Session Store、Run Runtime、方法白名单或 wire codec。缺少 Host 端口时明确不可用，不隐式创建另一个 Core。
+- **准确读取与完整目录独立准备。** 同一 Hosted consumer 的准确 owner 核验、原 Session／对话读取与已有操作准入，不等待无关 Session 的整份目录初帧；完整目录仍由原观察 owner 在后台持续取得，不裁范围或另建 client／缓存补全。目录 opening、ready、unavailable 与控制连接分别表达：首份目录未确认不冒充空集合，丢流保留已确认目录并标明未更新，恢复后消费同一原观察的完整快照与后续事件。目录失败不撤销准确 reader、已确认身份或健康输入；真实 owner、权限与本次目标错误仍按原协议拒绝该次操作。并发读取复用同一控制身份准入，旧代次迟到结果不能覆盖新 owner。
 - **只接受用户或设备 principal。** `runtime.*` 只接受传输 owner 实际认证或批准的用户或设备 principal。Agent capability 不能提升为用户输入权限；managed Agent 继续使用原 `agent.*` 语义与 A2A owner，调用 `runtime.*` 明确拒绝。Unix 私有用户 endpoint、共享 HTTP 用户授权与实际设备授权分别如实表达；共享 token 不冒充每设备身份，跨请求不以随机连接 ID 代替稳定身份。
 - **消费身份与转发主体保真。** 消费身份绑定稳定 principal：同一 consumer 名在不同 principal 下是不同消费者，另一设备不能写入或释放它的观察。真实连接的取消信号与 GUI 转发的原 Agent caller 必须到达原业务 owner，不能由自由参数伪造；GUI 转发保留原业务 code 与 detail／details／candidates 字段，取消只收回相关消费者，不停止健康 Run。
 - **数据按原样输送。** 原 SDK 参数、事件与 ordered bytes 保真：普通业务数据不被当成连接控制字段剥除，也不被协议 tag 重新解释；不同来源的事件不因同名而丢失。`agent.output` 的初始事实来自同一次原 Attachment，保留真实 `terminal` continuation、`resizeRevision` 与 Run 字节边界；未知不填零，不另读一次状态冒充同一快照。
