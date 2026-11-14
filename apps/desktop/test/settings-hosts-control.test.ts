@@ -241,11 +241,11 @@ describe('Host configuration through the compiled public CLI and registered Main
 
 
 it('removes a never-bound offline draft through the real Runtime preparation, retaining original bound Sessions and Runs', async () => {
-  const clients = new Map<string, { connect: ReturnType<typeof vi.fn>; connectRuntime: ReturnType<typeof vi.fn>; dispose: ReturnType<typeof vi.fn>; agentSessions: ReturnType<typeof vi.fn>; readAgentSessions: ReturnType<typeof vi.fn>; listRuns: ReturnType<typeof vi.fn>; onEvent: ReturnType<typeof vi.fn> }>()
+  const clients = new Map<string, { connect: ReturnType<typeof vi.fn>; connectRuntime: ReturnType<typeof vi.fn>; dispose: ReturnType<typeof vi.fn>; agentSessions: ReturnType<typeof vi.fn>; readAgentSessions: ReturnType<typeof vi.fn>; listRuns: ReturnType<typeof vi.fn>; sessionHistorySources: ReturnType<typeof vi.fn>; onEvent: ReturnType<typeof vi.fn> }>()
   const connector = vi.fn(async (host: HostConfig) => {
     const client = { connect: vi.fn(async () => {}), connectRuntime: vi.fn(async () => {}),
       dispose: vi.fn(async () => {}), agentSessions: vi.fn(() => []), readAgentSessions: vi.fn(async () => []),
-      listRuns: vi.fn(async () => []), onEvent: vi.fn(() => () => {}) }
+      sessionHistorySources: vi.fn(async () => []), listRuns: vi.fn(async () => []), onEvent: vi.fn(() => () => {}) }
     clients.set(host.id, client)
     return client as never
   })
@@ -276,6 +276,13 @@ it('removes a never-bound offline draft through the real Runtime preparation, re
     original.listRuns.mockResolvedValue([])
     original.readAgentSessions.mockRejectedValue(new Error('Original Session observation unavailable'))
     await expect(runtime.prepare(config)).rejects.toThrow('Original Session observation unavailable')
+    original.readAgentSessions.mockResolvedValue([])
+    original.sessionHistorySources.mockResolvedValue([{ agentSessionId: 'retired-resumable-session', hostId: 'bound', state: 'retired' }])
+    await expect(runtime.prepare(config)).rejects.toMatchObject({ code: 'SETTING_RESOURCE_IN_USE' })
+    expect(original.dispose).not.toHaveBeenCalled()
+    original.sessionHistorySources.mockRejectedValue(new Error('Original recovery references unavailable'))
+    await expect(runtime.prepare(config)).rejects.toThrow('Original recovery references unavailable')
+
     expect(original.dispose).not.toHaveBeenCalled()
     expect(runtime.executionHost('local')).toBeDefined()
   } finally { await runtime.dispose() }
