@@ -8,9 +8,10 @@ when: "Inspect, install, edit, run or stop a saved tool"
 
 <!-- amux:content -->
 The Toolkit owner holds saved definitions, exact admissions and results. Reading this
-module, inspect/script/ls and passive watch do not execute scripts. Creating or enabling a
-TUI loads its shell command; Host startup reconnects its original Run or starts one confirmed
-new execution. Source edits affect the next execution. Distinguish configuration, action
+module, inspect/script/ls and passive watch do not execute scripts. All custom Script, TUI and package tools have autoStart, default true. Creating or activating
+an enabled tool with autoStart selected runs it once; each Host startup reconnects its healthy
+original Run or, after a confirmed terminal outcome, admits one new execution. Set autoStart:false
+through toolkit create/update JSON to keep manual execution. Source edits affect the next execution. Distinguish configuration, action
 execution, display evaluation, TUI Run binding and each retained invocation before acting.
 Unknown creation or Run state retains its original identity; never automatically replay it.
 Local package file changes are read on the next explicit execution or source inspection.

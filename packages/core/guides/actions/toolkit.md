@@ -5,6 +5,10 @@ Create a saved local JavaScript ESM tool with a complete input such as:
   {"name":"Summary","icon":"terminal","workspacePath":"<WORKSPACE_DIRECTORY>",
    "enabled":true,"statusBar":"icon","script":"console.log('Ready')","args":[]}
 Inline definitions require enabled, statusBar ("icon" or "label") and args; actions is optional.
+The optional autoStart defaults to true for all custom tools, including local packages.
+Enabled tools run once at Host startup, creation or activation; set autoStart:false for manual execution.
+Healthy original Runs reconnect; unknown admissions are retained without replay.
+Update autoStart through the same changes/expected JSON fields; inspect and ls expose the saved choice.
 The optional mode is "script" or "tui"; omitted means a finite JavaScript ESM script.
 Update uses {"changes":{...},"expected":{...}}; expected covers changed fields.
 Delete input uses {"expected":{...}} with complete saved editable fields.
@@ -28,7 +32,8 @@ definition revision, content SHA256 and exact source entries. Package and execut
 are separate paths. A missing package retains its configuration and original execution facts.
 Stop still targets the retained admission; unavailable source cannot admit a new execution.
 
-Installing, saving or enabling finite-result tools does not execute their scripts.
+Creating or activating an enabled finite-result tool runs it when autoStart is selected.
+Editing an existing tool's source does not execute it.
 Inspect/script/ls and passive watch do not execute either mode.
 Run captures the definition/result baseline once in the service and admits one execution.
 Full input can pin invocationId, expectedRevision and expectedLatestExecutionId. Stop input
@@ -46,7 +51,7 @@ original request retains that shell and environment even after the Host environm
 with shell -lc and a fixed script name; args become $1, $2, and so on, without being
 concatenated into shell source. TUI accepts no nonempty actions or nonnull display.
 Local packages retain their JavaScript contract and do not accept TUI mode.
-Creating an enabled TUI, enabling a disabled TUI, and Host startup load the tool once.
+Creating or activating an enabled TUI with autoStart selected, and Host startup, load it once.
 A running exact Run is reconnected; a confirmed ended Run starts a new execution on the next
 load cycle. An exit never causes a restart loop within the current cycle. Source edits only
 affect the next execution. Opening or closing its terminal view neither starts nor stops it.
