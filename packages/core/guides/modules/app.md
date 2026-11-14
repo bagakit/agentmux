@@ -18,6 +18,12 @@ Use `app window open --kind surface --surface survey` for the whole Survey navig
 workface, or `--surface recall` for the notebook library and editor. Each surface has one
 window and keeps its current selection while the main window shows Focus or another surface.
 The native close button on a surface window preserves the main window's navigation.
+`app focus --surface survey` and `app focus --surface recall` navigate the surface in its
+existing window and preserve input. A saved Survey page or research uses that same window.
+The receipt keeps the main view in `navigation.selection.surface` and identifies the
+independent workface in `presentation.surface`, `windowId` and `documentGeneration`.
+Only an observed visible workface reports `presentation.state: "window"`. For native
+foreground focus, use `app window focus` with the original window and document identities.
 `app window return` presents its original surface in the main window by default.
 Use `--preserve-navigation` to keep the current main view while returning the content.
 A whole-Tab window uses --kind tab without --region. recordedOperation keeps the original
