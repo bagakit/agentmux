@@ -1,4 +1,4 @@
-import { detectTerminalPathLinks, resolveWorkspaceRelativePath, type TerminalPathLink } from './terminal-path-link.js'
+import { decodeFileReferencePath, detectTerminalPathLinks, resolveWorkspaceRelativePath, terminalFileLocation, type TerminalPathLink } from './terminal-path-link.js'
 
 /**
  * Which references in an agent's markdown answer point at a file in this Workspace — and where each
@@ -69,39 +69,21 @@ export function classifyMarkdownLinkHref(
 ): MarkdownFileReference | null {
   const trimmed = href.trim()
   const scheme = /^[a-zA-Z][a-zA-Z0-9+.-]*:/
-  // Raw spaces are ambiguous prose; encoded spaces are an explicit filename. Raw query/fragment
-  // syntax is not a file destination, while %23 and %3F can name real files after the single decode.
-  // A percent-encoded separator must not turn one filename segment into a different directory.
-  if (!trimmed || scheme.test(trimmed) || /[\s?#\\]/u.test(trimmed) || /%(?:2f|5c)/i.test(trimmed)) return null
-  let decoded: string
-  try { decoded = decodeURIComponent(trimmed) } catch { return null }
-  if (scheme.test(decoded) || /[\u0000-\u001f\u007f-\u009f\\]/u.test(decoded)) return null
-
-  const suffix = /:(\d+)(?::(\d+))?$/.exec(decoded)
-  const core = suffix ? decoded.slice(0, suffix.index) : decoded
-  if (!core || core.length > 260 || core.includes(':') ||
+  const suffix = /:(\d+)(?::(\d+))?$/.exec(trimmed)
+  const pathText = suffix ? trimmed.slice(0, suffix.index) : trimmed
+  // Only an explicit filename may have a colon-location suffix; arbitrary schemes remain inert.
+  if (!trimmed || /[\s?#\\]/u.test(trimmed) || scheme.test(pathText) ||
+      scheme.test(trimmed) && !(suffix && /\.[^./]+$/u.test(pathText))) return null
+  const coordinates = suffix ? terminalFileLocation(suffix[0]) : undefined
+  const core = decodeFileReferencePath(pathText)
+  if (coordinates === null || !core || scheme.test(core) ||
       (core.startsWith('~') && !core.startsWith('~/'))) return null
-  // Preserve the explicit bare-filename case; an extension or directory marker identifies a file.
   if (!core.includes('/') && !/^[^/]+\.[^/.]+$/u.test(core)) return null
-  let candidate: string | null = core
-  if (core.startsWith('/') || core.startsWith('~/')) {
-    candidate = resolveWorkspaceRelativePath(core, workspaceRoot, homeDir)
-  } else if (sourcePath) {
-    const directory = sourcePath.slice(0, Math.max(0, sourcePath.lastIndexOf('/')))
-    candidate = `${directory}/${core}`
-  }
-  if (candidate === null) return null
-  const segments: string[] = []
-  for (const segment of candidate.split('/')) {
-    if (!segment || segment === '.') continue
-    if (segment === '..') { if (!segments.length) return null; segments.pop() }
-    else segments.push(segment)
-  }
-  const path = resolveWorkspaceRelativePath(`./${segments.join('/')}`, workspaceRoot, homeDir)
-  if (path === null) return null
-  return { index: 0, length: trimmed.length, path,
-    ...(suffix ? { line: Number(suffix[1]) } : {}),
-    ...(suffix?.[2] !== undefined ? { column: Number(suffix[2]) } : {}) }
+  const slash = sourcePath?.lastIndexOf('/') ?? -1
+  const candidate = core.startsWith('/') || core.startsWith('~/') || slash < 0
+    ? core : sourcePath!.slice(0, slash + 1) + core
+  const path = resolveWorkspaceRelativePath(candidate, workspaceRoot, homeDir)
+  return path === null ? null : { index: 0, length: trimmed.length, path, ...coordinates }
 }
 
 /**

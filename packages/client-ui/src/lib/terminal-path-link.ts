@@ -54,136 +54,101 @@ export function isSystemArtifactPath(path: string): boolean {
   return [...SYSTEM_ARTIFACT_EXTENSIONS].some((extension) => name.endsWith(extension))
 }
 
-/**
- * Path-token scanner.
- *   - The leading negative lookbehind anchors to a token start and, by excluding `/` and `:`,
- *     refuses to start inside a URL already owned by the http link provider, so the two providers
- *     never underline the same span.
- *   - Group 1 = path core (optional `./` `../` `~/` `/` prefix, then `seg/`* then a final `seg`).
- *   - Group 2 = line, Group 3 = column.
- */
-const PATH_TOKEN = /(?<![\w./@~:-])((?:\.\.?\/|~\/|\/)?(?:[\w.@+-]+\/)*[\w.@+-]+)(?::(\d+)(?::(\d+))?)?/g
+/** Reserve complete URI and foreign absolute-path tokens, including unsupported ones. */
+export function terminalUriTokens(text: string): { index: number; text: string }[] {
+  const pattern = /(?<![a-zA-Z0-9_./%+:-])(?:[a-zA-Z][a-zA-Z0-9+.-]*:\/\/|[a-zA-Z][a-zA-Z0-9+.-]*:(?!-?\d)|[a-zA-Z]:[\/\\]|\\\\|\/\/)[^\s<>"\x60\p{Cc}]+/gu
+  return [...text.matchAll(pattern)].map(match => ({ index: match.index, text: match[0] }))
+}
 
-/** A path core longer than this is not a path a developer would click; bounds pathological lines. */
-const MAX_CORE_LENGTH = 260
-/** Cap matches per line so a pathological line cannot make the provider do unbounded work. */
-const MAX_LINKS_PER_LINE = 8
-/** Prose punctuation that trails a path but is not part of it: `see src/x.ts.` / `(src/x.ts)`. */
-const TRAILING_PUNCTUATION = /[.,;:)\]]+$/
+const NAME = String.raw`[\p{L}\p{M}\p{N}\p{Pc}\p{Pd}\p{Extended_Pictographic}\u200c\u200d.@+%~]`
+const SEGMENT = String.raw`(?:` + NAME + String.raw`|\\[ \t]|\(` + NAME + String.raw`+\)|\[` + NAME + String.raw`+\])+`
+const LOCATION = String.raw`(?::-?\d+(?::-?\d+)?|\(-?\d+,-?\d+\)|#L-?\d+(?::-?\d+)?)`
+const INLINE_EXPLICIT_PREFIX = /^[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}\p{Script=Bopomofo}]+(?=(?:\.\.?|~)\/)/u
+const PATH_TOKEN = new RegExp(String.raw`(?<![\p{L}\p{M}\p{N}\p{Pc}\p{Pd}\p{Extended_Pictographic}\u200c\u200d.\/\\%@~:+\[\]])(?:` +
+  String.raw`(?<quoted>"(?:\\["\\]|[^"\r\n])+"|'[^'\r\n]+'|\x60[^\x60\r\n]+\x60)|(?<bare>@?(?:\.\.?\/|~\/|\/)?(?:` +
+  SEGMENT + String.raw`\/+)*` + SEGMENT + '))(?<location>' + LOCATION + String.raw`|(?<="), line \d+)?`, 'gu')
+export function terminalFileLocation(suffix: string): { line: number; column?: number } | null {
+  const [line, column] = suffix.match(/-?\d+/g)?.map(Number) ?? []
+  if (line === undefined || !Number.isSafeInteger(line) || line < 1 ||
+      column !== undefined && (!Number.isSafeInteger(column) || column < 1)) return null
+  return { line, ...(column === undefined ? {} : { column }) }
+}
 
-/**
- * Scan one line and return every clickable path link on it, resolved to a canonical
- * workspace-relative path. Purely syntactic — see the module doc comment.
- *
- * @param text The line text as read from the xterm buffer.
- * @param workspaceRoot Absolute path of the active workspace, used only for the string-only
- *   within-root test on absolute paths. Empty string means "no active root": absolute paths are
- *   then rejected (never underlined) while relative paths still resolve.
- * @param homeDir Absolute path of the host home directory, used only to expand a leading `~/` to an
- *   absolute path before the same within-root test runs. Empty string means "no home known": a `~/`
- *   path is then rejected (never underlined), exactly as an absolute path is with no root.
- */
 export function detectTerminalPathLinks(
   text: string,
   workspaceRoot: string,
-  homeDir = ''
+  homeDir = '',
+  reserved = terminalUriTokens(text)
 ): TerminalPathLink[] {
   const links: TerminalPathLink[] = []
-  PATH_TOKEN.lastIndex = 0
-  let match: RegExpExecArray | null
-  while ((match = PATH_TOKEN.exec(text)) !== null && links.length < MAX_LINKS_PER_LINE) {
-    const rawCore = match[1]
-    if (rawCore === undefined) continue
-    const lineStr = match[2]
-    const colStr = match[3]
-    const hasSuffix = lineStr !== undefined
-    // A LEADING `@` is a mention/composer sigil, not part of the path. `PATH_TOKEN` puts `@` in both
-    // the lookbehind and the segment class, and the lookbehind only stops a match RESTARTING after an
-    // `@` — it does not stop one STARTING at an `@`. So `@src/foo.ts` arrives here with the `@` glued
-    // on and, left in place, resolves against the root as `<root>/@/…` (a path that never exists).
-    // Strip only the leading `@`; a mid-segment `@` (`node_modules/@types/node/index.d.ts`) must
-    // survive, and it does — there the `@` never starts a match because the preceding `/` is in the
-    // lookbehind set, so it is never at `rawCore[0]`. The stripped `@` stays OUTSIDE the link span
-    // (index advances past it, length shrinks) so it renders as the plain sigil it is.
-    const atPrefixLength = rawCore.startsWith('@') ? 1 : 0
-    // Trim trailing prose punctuation from the core. This is only reachable when there is no
-    // `:line` suffix, since a suffix ends the token in digits.
-    const core = rawCore.slice(atPrefixLength).replace(TRAILING_PUNCTUATION, '')
-    if (!core || core.length > MAX_CORE_LENGTH) continue
-    // The crux: a real path either has a directory separator or a line-number suffix. This drops
-    // every bare dotted word (`e.g.`, `1.2.3`, `README`) without touching real paths.
-    if (!core.includes('/') && !hasSuffix) continue
-    // ...but a `:n` suffix only promotes a core that could be a FILENAME, and a core carrying no
-    // letter is a number. a clock-formatted token is a time, `1.2.3:4` a version, a date-formatted numeric token a date — each
-    // satisfies the suffix branch above with a bare numeric core and would underline as a file.
-    // Timestamped log lines make this the common case, not an edge one. A directory-bearing core is
-    // exempt: `logs/<numeric-name>:5` names a real place, and the `/` is the signal.
-    if (!core.includes('/') && !/[A-Za-z]/.test(core)) continue
-    const resolved = resolveWorkspaceRelativePath(core, workspaceRoot, homeDir)
-    if (resolved === null) continue
-    const suffix = hasSuffix ? match[0].slice(rawCore.length) : ''
-    links.push({
-      index: match.index + atPrefixLength,
-      length: core.length + suffix.length,
-      path: resolved,
-      ...(lineStr !== undefined ? { line: Number(lineStr) } : {}),
-      ...(colStr !== undefined ? { column: Number(colStr) } : {})
-    })
+  let reservation = 0
+  for (const match of text.matchAll(PATH_TOKEN)) {
+    const { quoted, bare, location } = match.groups!
+    const at = bare?.startsWith('@') ? 1 : 0
+    const bareToken = bare?.slice(at)
+    // Explicit relative and home prefixes can follow CJK prose without a space.
+    // In all other bare and quoted paths CJK characters retain their file meaning.
+    const prose = bareToken?.match(INLINE_EXPLICIT_PREFIX)?.[0].length ?? 0
+    const visibleName = bareToken?.slice(prose)
+    const bareName = location ? visibleName : visibleName?.replace(/\.+$/, '')
+    const name = quoted ? quoted.slice(1, -1).replace(/\\(["'\\])/g, '$1') : bareName?.replace(/\\([ \t])/g, '$1')
+    if (!name || name.startsWith('~') && !name.startsWith('~/') ||
+        /[\p{Cc}\\]/u.test(name)) continue
+    const coordinates = location === undefined ? undefined : terminalFileLocation(location)
+    if (coordinates === null || !name.includes('/') && (!coordinates || !/\p{L}/u.test(name))) continue
+    const index = match.index + at + prose
+    const length = match[0].length - at - ((bareToken?.length ?? 0) - (bareName?.length ?? 0))
+    while (reserved[reservation] && reserved[reservation]!.index + reserved[reservation]!.text.length <= index) reservation++
+    const occupied = reserved[reservation]
+    if (occupied && occupied.index < index + length) continue
+    // Don't turn a malformed path into a plausible prefix with another target.
+    const tail = text.slice(match.index + match[0].length)
+    if (location && /^[:\p{L}\p{M}\p{N}]/u.test(tail)) continue
+    if (!quoted && /^[\/\\[\](]/u.test(tail) && !/^[)\]](?:$|\s|[.,;:)\]])/u.test(tail)) continue
+    const path = resolveWorkspaceRelativePath(name, workspaceRoot, homeDir)
+    if (path === null) continue
+    links.push({ index, length, path, ...coordinates })
   }
   return links
 }
 
-/**
- * Convert a matched core to the canonical workspace-relative path `openFile` expects, or `null` to
- * reject the match entirely (so it is never underlined). All pure string math against a root string
- * the caller already holds — no disk, no IPC.
- *
- * `~/` is expanded against `homeDir` FIRST, then the result runs through the very same within-root
- * test an absolute path gets — because the only thing the open pipeline can open is a path inside the
- * active Workspace (`files.read` throws "Path escapes the workspace root" for anything else). So
- * `~/proj/src/x.ts` with home `<home>` and root `<home>/proj` relativises to `src/x.ts`, while
- * `~/.claude/plugins/...` — the reported case — expands to an absolute path OUTSIDE the root and is
- * rejected, exactly as `/etc/passwd` is. Expanding then reusing the absolute branch is what keeps
- * `~/` from becoming a second, looser notion of "openable" that drifts from the absolute one.
- *
- * Three tilde shapes, decided deliberately, not collapsed together:
- *   - `~/...` → expand against `homeDir`. This is the case agents and tools actually print.
- *   - `~` alone → never reaches here: `PATH_TOKEN` requires a final path segment, so a bare `~` does
- *     not match at all. Nothing to decide.
- *   - `~user/...` → deliberately NOT treated as home, and it never even reaches this function: the
- *     scanner cannot match it. The prefix group's only tilde alternative is `~\/` (a slash must
- *     follow `~` immediately), and `~` is absent from the segment class `[\w.@+-]`, so the scan can
- *     neither begin with `~user` nor start at `user` (the lookbehind excludes a preceding `~`). A
- *     per-user home is not `homeDir`, so silently mapping `~user/` onto `homeDir` would open the
- *     wrong person's file — leaving it unmatched is the correct refusal, not an oversight.
- *
- * `homeDir` empty means "no home known" (the host has not supplied one): a `~/` path is then rejected
- * rather than guessed, the same posture absolute paths take when there is no workspace root.
- */
-export function resolveWorkspaceRelativePath(
-  core: string,
-  workspaceRoot: string,
-  homeDir = ''
-): string | null {
-  // `~/` is the home directory. Expand it to an absolute path, then let the absolute branch below
-  // apply the identical within-root test. With no home known, reject rather than guess.
+/** Decode one explicit pathname without interpreting line suffixes or encoded separators. */
+export function decodeFileReferencePath(value: string): string | null {
+  if (/%(?:2f|5c)/i.test(value)) return null
+  let decoded: string
+  try { decoded = decodeURIComponent(value) } catch { return null }
+  return /[\p{Cc}\\]/u.test(decoded) ? null : decoded
+}
+
+export function resolveTerminalFileUri(raw: string, workspaceRoot: string): string | null {
+  if (!/^file:\/\/(?:localhost)?\//i.test(raw) || /[?#\\\p{Cc}]/u.test(raw)) return null
+  const pathname = raw.replace(/^file:\/\/(?:localhost)?/i, '')
+  if (pathname.startsWith('//')) return null
+  const decoded = decodeFileReferencePath(pathname)
+  return decoded === null ? null : resolveWorkspaceRelativePath(decoded, workspaceRoot)
+}
+
+/** Produce the lexical Workspace-relative name. Main checks real resource confinement at open. */
+export function resolveWorkspaceRelativePath(core: string, workspaceRoot: string, homeDir = ''): string | null {
   let candidate = core
-  if (core.startsWith('~/')) {
+  if (candidate.startsWith('~/')) {
     if (!homeDir) return null
-    candidate = `${homeDir.replace(/\/+$/, '')}${core.slice(1)}`
+    candidate = homeDir.replace(/\/+$/, '') + candidate.slice(1)
   }
   if (candidate.startsWith('/')) {
-    // Absolute (including an expanded `~/`): keep it only when it lives inside the active workspace,
-    // so system paths like `/usr/lib/...` — and a home path outside the workspace — never render as
-    // confident-but-dead links.
-    const root = workspaceRoot.replace(/\/+$/, '')
-    if (!root || candidate === root || !candidate.startsWith(`${root}/`)) return null
-    const relative = candidate.slice(root.length + 1)
-    return relative.length > 0 ? relative : null
+    const prefix = workspaceRoot.replace(/\/+$/, '') + '/'
+    if (!workspaceRoot.startsWith('/') || !candidate.startsWith(prefix)) return null
+    candidate = candidate.slice(prefix.length)
   }
-  // Relative: strip a single leading `./`. A leading `../` escapes the root (relative paths resolve
-  // against the workspace root), so reject rather than underline a link main would refuse.
-  const relative = candidate.startsWith('./') ? candidate.slice(2) : candidate
-  if (!relative || relative === '..' || relative.startsWith('../')) return null
-  return relative
+  const parts: string[] = []
+  for (const part of candidate.split('/')) {
+    if (!part || part === '.') continue
+    if (part === '..') {
+      if (!parts.length) return null
+      parts.pop()
+    } else {
+      parts.push(part)
+    }
+  }
+  return parts.join('/') || null
 }

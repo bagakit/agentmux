@@ -17,7 +17,6 @@ import { terminalCheckpointHistoryPolicy, terminalContinuationSteps } from '@age
 import { registerTerminalViewObservation, type TerminalInputGeometry } from '../lib/terminal-view-observation'
 import { FitAddon } from '@xterm/addon-fit'
 import { SearchAddon } from '@xterm/addon-search'
-import { WebLinksAddon } from '@xterm/addon-web-links'
 import { WebglAddon } from '@xterm/addon-webgl'
 import { Terminal, type IBuffer, type IMarker } from '@xterm/xterm'
 import '@xterm/xterm/css/xterm.css'
@@ -31,7 +30,6 @@ import { copyTextToClipboard } from '../lib/clipboard-copy'
 import { workspaceRootForPath } from '../lib/workbench-tabs'
 import { dismissOpenDestinationRequest, type OpenHttpLinkOrigin } from '../lib/open-destination'
 import { parseAmuxObjectLink } from '@agentmux/core/sharing'
-import { parseHttpLinkUrl } from '@agentmux/client-ui/link-url'
 import { useAppStore, currentCoreSpatialGraph } from '../store'
 import { useShallow } from 'zustand/react/shallow'
 import { installTerminalOscHandlers } from '../lib/terminal-capability-replies'
@@ -43,10 +41,10 @@ import {
   isSystemArtifactPath,
   type TerminalPathLink
 } from '@agentmux/client-ui/terminal-path-link'
-import { terminalPathLinksInBuffer } from '../lib/terminal-link-range'
+import { terminalLinksAtRow } from '../lib/terminal-link-range'
 import { terminalContextPathAtBufferCell } from '../lib/terminal-context-path'
 import { terminalLinkReadoutOverlapsText } from '../lib/terminal-link-readout'
-import { openTerminalFileLink, terminalFileMenuActions } from '../lib/terminal-file-action'
+import { openTerminalFileLink, terminalFileMenuActions, type TerminalFileMenuAction } from '../lib/terminal-file-action'
 import { createSessionProjectFileContextSelector, sessionFileResourcePath, type SessionProjectFileContext } from '../lib/session-project-file-context'
 import { openSessionFileLink } from '../lib/session-link-opening'
 import { sameWorkbenchProjectionSelection } from '../lib/workbench-projection'
@@ -57,7 +55,7 @@ import {
   terminalScrollbackText,
   terminalViewportText
 } from '../lib/terminal-buffer-copy'
-import { TERMINAL_LINK_URL_REGEX } from '../lib/terminal-http-link'
+import { resolveTerminalDeclaredLink, type TerminalLinkTarget } from '../lib/terminal-link-target'
 import { terminalOptions, terminalTheme, activateTerminalUnicodeWidth, UNICODE_WIDTH_VERSION } from '../lib/terminal-theme'
 import {
   terminalKeyEventHandler,
@@ -162,7 +160,8 @@ function terminalPathAtPointer(
   element: HTMLElement,
   clientX: number,
   clientY: number,
-  workspaceRoot: string
+  workspaceRoot: string,
+  homeDir: string
 ): TerminalPathLink | null {
   if (!terminal || terminal.cols <= 0 || terminal.rows <= 0) return null
   const screen = element.querySelector('.xterm-screen')
@@ -173,7 +172,7 @@ function terminalPathAtPointer(
   const row = Math.floor(((clientY - rect.top) / rect.height) * terminal.rows)
   if (row < 0 || row >= terminal.rows || column < 1 || column > terminal.cols) return null
   const lineNumber = terminal.buffer.active.viewportY + row
-  return terminalContextPathAtBufferCell(terminal, column, lineNumber + 1, workspaceRoot)
+  return terminalContextPathAtBufferCell(terminal, column, lineNumber + 1, workspaceRoot, homeDir)
 }
 
 // 终端与对话正文都要判「哪些 scheme 点了能打开」，那必须是同一个判据，而不是各抄一份。判据本体
@@ -316,7 +315,7 @@ function TerminalViewOwner({
   const presentationRef = useRef(presentation)
   presentationRef.current = presentation
   /** Where the current press began, so a drag that ends over a link is not mistaken for a click. */
-  const linkPressRef = useRef<{ x: number; y: number; altKey: boolean } | null>(null)
+  const linkPressRef = useRef<{ x: number; y: number; altKey: boolean; fileContext: SessionProjectFileContext } | null>(null)
   const linkPreviewTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const linkPreviewElementRef = useRef<HTMLDivElement>(null)
   const linkPreviewShownRef = useRef(false)
@@ -357,7 +356,7 @@ function TerminalViewOwner({
    * 初值 'none'（不压制、不提示）：还没右键过就没有可信的模式，不猜。
    */
   const [mouseTrackingMode, setMouseTrackingMode] = useState<MouseTrackingMode>('none')
-  const [pathActions, setPathActions] = useState<TerminalPathLink | null>(null)
+  const [pathActions, setPathActions] = useState<TerminalFileMenuAction[] | null>(null)
   const [hydrating, setHydrating] = useState(true)
   /**
    * 揭示是被我们自己的步骤逼出来的，而不是走通了（`lib/terminal-reveal.ts`）。
@@ -426,11 +425,6 @@ function TerminalViewOwner({
   const openHttpLink = useAppStore((state) => state.openHttpLink)
   const reportError = useAppStore((state) => state.reportError)
   const terminalConfig = useAppStore((state) => state.config)
-  const workspaceIsLocal = useMemo(() =>
-    !sessionSource && terminalConfig?.workspaces.find((workspace) => workspace.id === linkOrigin?.workspaceId)?.hostId === 'local',
-  [terminalConfig, linkOrigin?.workspaceId, sessionSource])
-  const workspaceIsLocalRef = useRef(workspaceIsLocal)
-  workspaceIsLocalRef.current = workspaceIsLocal
   const regionCaretFocus = useAppStore((state) =>
     !sessionSource && regionCaretFocusTargets(state.regionCaretFocus, linkOrigin?.regionId) ? state.regionCaretFocus : null)
   const clearRegionCaretFocus = useAppStore((state) => state.clearRegionCaretFocus)
@@ -442,11 +436,12 @@ function TerminalViewOwner({
   fileContextRef.current = fileContext
   // Parse against the original physical directory, then translate to the File owner's
   // logical address. Conversation and Terminal share the same confirmed directory facts.
-  const activeWorkspaceRoot = useMemo(() => sessionSource ? session.workspacePath : fileContext.pathPrefix ? fileContext.workspaceRoot
-    : workspaceRootForPath(terminalConfig ?? null, session) ?? '',
-  [sessionSource, fileContext.pathPrefix, fileContext.workspaceRoot, terminalConfig, session.kind, session.hostId, session.workspacePath])
+  const activeWorkspaceRoot = useMemo(() => sessionSource ? session.workspacePath
+    : fileContext.workspaceRoot || workspaceRootForPath(terminalConfig ?? null, session) || '',
+  [sessionSource, fileContext.workspaceRoot, terminalConfig, session.kind, session.hostId, session.workspacePath])
   const activeWorkspaceRootRef = useRef(activeWorkspaceRoot)
   activeWorkspaceRootRef.current = activeWorkspaceRoot
+  const linkScope = () => ({ workspaceRoot: activeWorkspaceRootRef.current, homeDir: fileContextRef.current.homeDir })
   const isMac = isMacPlatform()
 
   function releaseViewportMemoryMarker(terminal?: Terminal): void {
@@ -701,14 +696,41 @@ function TerminalViewOwner({
       scrollback: 5_000
     })
     const fit = new FitAddon()
-    // xterm has separate providers for bare URIs and OSC 8 declarations. Both
-    // reach this handler: target protocol, never representation, selects the owner.
-    // An explicit OSC 8 handler also avoids xterm's confirm/window.open default.
-    const activateLink = (event: MouseEvent, uri: string): void => {
+    function activateFileLink(match: TerminalPathLink, context: SessionProjectFileContext): void {
+      const displayOrigin = displayOriginRef.current
+      if (!displayOrigin || !linkOriginRef.current) return
+      if (context !== fileContextRef.current) {
+        reportError(new Error('The original file resource changed. Choose the link again to confirm its target.'))
+        return
+      }
+      const workspaceId = context.workspaceId ?? context.project?.workspaceId
+      const path = sessionFileResourcePath(context, match.path)
+      const location = match.line === undefined ? undefined : { line: match.line, ...(match.column === undefined ? {} : { column: match.column }) }
+      void openTerminalFileLink({
+        link: { ...match, path },
+        local: !sessionSource && workspaceId !== undefined && context.placement?.resource.hostId === 'local',
+        openSystem: file => api.files.openSystem(workspaceId!, file),
+        openFile: async link => {
+          const origin = { ...displayOrigin, sessionId: displayOrigin.sessionId ?? session.id }
+          const state = useAppStore.getState()
+          const presentation = presentationRef.current
+          const local = presentation.surface === 'mote' || presentation.surface === 'survey'
+          const focus = presentation.surface === 'focus' || presentation.surface === undefined && state.mainSurface === 'agents'
+          const destination = local || focus && resolveFocusLinkDestination(state.config?.focus?.linkDestination) === 'region' ? 'right' : 'tab'
+          const filePresentation = { ...presentation, ...(presentation.onSelectRegion ? { onSelectRegion: (regionId: string) => {
+            const current = presentationRef.current
+            const parent = (value: WorkbenchPresentation) => value.reference ? { ...value.reference, regionId: origin.regionId! } : null
+            const heldParent = parent(presentation), currentParent = parent(current)
+            if (current.surface !== presentation.surface || (heldParent ? !sameWorkbenchProjectionSelection(currentParent, heldParent) : currentParent !== null)) return
+            current.onSelectRegion?.(regionId)
+          } } : {}) }
+          await openSessionFileLink(origin, context, link.path, location, destination, presentation.surface, filePresentation)
+        }
+      }).catch(reportError)
+    }
+
+    function activateLink(event: MouseEvent, target: TerminalLinkTarget, context: SessionProjectFileContext): void {
       clearLinkPreview()
-      // Both providers activate on a mouse-up over the link, so a drag that selects text across one
-      // would otherwise raise the picker instead of selecting. Only a gesture that stayed put and
-      // left no selection is a click on the link.
       const origin = linkPressRef.current
       linkPressRef.current = null
       if (!isTerminalLinkClick({
@@ -718,29 +740,34 @@ function TerminalViewOwner({
         release: { x: event.clientX, y: event.clientY },
         hasSelection: terminal.hasSelection()
       })) return
-      // Scheme selection is not identity parsing. Main's original ingress owns
-      // exact Core parsing, target discovery and visible navigation failures.
-      if (/^amux:/iu.test(uri)) {
-        // Alt+primary belongs to xterm's TUI mouse passthrough, not local navigation.
+      if (target.kind === 'file') {
+        if (origin && origin.fileContext !== context) {
+          reportError(new Error('The original file resource changed. Choose the link again to confirm its target.'))
+          return
+        }
+        activateFileLink(target.file, context)
+        return
+      }
+      if (target.kind === 'unsupported') {
+        reportError(new Error('This terminal link uses an unsupported protocol or its file target is outside the original Workspace. Copy its original address to open it in the appropriate application.'))
+        return
+      }
+      const { url } = target
+      if (target.kind === 'object') {
+        // Alt+primary belongs to xterm's TUI mouse passthrough.
         if (origin?.altKey || event.altKey) return
         if (sessionSource) {
           let qualified = false
-          try { const target = parseAmuxObjectLink(uri); qualified = target.kind === 'host' && target.runtimeId !== undefined && target.resource !== undefined } catch { /* Unqualified source identities stay with their original source. */ }
+          try { const address = parseAmuxObjectLink(url); qualified = address.kind === 'host' && address.runtimeId !== undefined && address.resource !== undefined } catch { /* Unqualified source identities stay with their original source. */ }
           if (!qualified) {
             reportError(new Error('This link belongs to the original source. Copy its address; navigation from this view is not confirmed.'))
             return
           }
         }
-        void api.ui.openObjectLink(uri).catch(reportError)
-        return
-      }
-      const url = parseHttpLinkUrl(uri)
-      if (!url) {
-        reportError(new Error('This terminal link uses an unsupported protocol. Copy its original address to open it in the appropriate application.'))
+        void api.ui.openObjectLink(url).catch(reportError)
         return
       }
       if (sessionSource) {
-        // WHATWG URL normalizes equivalent numeric IP spellings before this source check.
         const host = new URL(url).hostname.toLowerCase().replace(/\.$/, '')
         const loopback = host === 'localhost' || host.endsWith('.localhost') || host === '[::1]' ||
           /^127\.\d+\.\d+\.\d+$/.test(host) || /^\[::ffff:7f[0-9a-f]{2}:[0-9a-f]{1,4}\]$/.test(host)
@@ -753,46 +780,37 @@ function TerminalViewOwner({
         void api.ui.openExternal(url).catch(reportError)
         return
       }
-      // Cmd (macOS) / Ctrl (elsewhere) + click opens the system browser immediately, skipping the
-      // destination picker. A plain click keeps the picker.
       if (terminalLinkModifierOpensSystemBrowser(event, isMac)) {
         void openHttpLink(displayOriginRef.current, url, 'system', presentationRef.current).catch(reportError)
         return
       }
       const request = {
-        id: ++nextLinkRequestIdRef.current,
-        url,
-        x: event.clientX,
-        y: event.clientY,
-        terminalGeneration,
-        origin: displayOriginRef.current,
-        presentation: presentationRef.current
+        id: ++nextLinkRequestIdRef.current, url, x: event.clientX, y: event.clientY, terminalGeneration,
+        origin: displayOriginRef.current, presentation: presentationRef.current
       }
       linkRequestRef.current = request
       setLinkRequest(request)
     }
-    const hoverLink = (event: MouseEvent, text: string): void => {
-      if (/^amux:/iu.test(text)) {
-        showLinkPreview(event, { kind: 'object', url: text })
-        return
+
+    function hoverLink(event: MouseEvent, target: TerminalLinkTarget): void {
+      if (target.kind === 'unsupported') return
+      if (target.kind === 'file') {
+        const { file } = target
+        const label = file.line === undefined ? file.path : file.path + ':' + file.line + (file.column === undefined ? '' : ':' + file.column)
+        showLinkPreview(event, { kind: 'file', label, system: isSystemArtifactPath(file.path) })
+      } else {
+        showLinkPreview(event, target)
       }
-      const url = parseHttpLinkUrl(text)
-      if (!url) return
-      showLinkPreview(event, { kind: 'http', url })
     }
-    // xterm otherwise drops declared amux links before activation. The shared
-    // handler accepts only amux and HTTP(S), never xterm's window.open default.
+
+    // The built-in OSC provider still owns its native mouse arbitration. The
+    // bounded provider below recovers one-cell declarations the native scan misses.
     terminal.options.linkHandler = {
       allowNonHttpProtocols: true,
-      activate: (event, text) => activateLink(event, text),
-      hover: (event, text) => hoverLink(event, text),
+      activate: (event, uri) => activateLink(event, resolveTerminalDeclaredLink(uri, linkScope()), fileContextRef.current),
+      hover: (event, uri) => hoverLink(event, resolveTerminalDeclaredLink(uri, linkScope())),
       leave: clearLinkPreview
     }
-    const webLinks = new WebLinksAddon(activateLink, {
-      hover: hoverLink,
-      leave: clearLinkPreview,
-      urlRegex: TERMINAL_LINK_URL_REGEX
-    })
     // Like a browser status readout, stay at the opposite edge of this pane instead of covering
     // the lines around the pointer. One timer belongs to this retained TerminalView, not the Run.
     function showLinkPreview(event: MouseEvent, preview: TerminalLinkPreviewContent): void {
@@ -852,7 +870,6 @@ function TerminalViewOwner({
       }
     }
     terminal.loadAddon(fit)
-    terminal.loadAddon(webLinks)
     terminal.open(root)
     terminalDocumentRef.current = root.ownerDocument
     terminalRef.current = terminal
@@ -868,81 +885,24 @@ function TerminalViewOwner({
       console.warn(`[terminal] Unicode width table did not activate (active=${activeUnicodeVersion})`)
     }
 
-    // File-path links use only a bounded related buffer window and its actual cell facts.
-    // No disk, no IPC, no existence probe here — a path that does not exist fails visibly on click
-    // via reportError, never on this path.
-    const pathLinks = terminal.registerLinkProvider({
-      provideLinks: (bufferLineNumber, callback) => {
-        if (!linkOriginRef.current) return callback(undefined)
+    // One bounded native-cell window supplies the same bare and declared targets
+    // used by the context menu, without reading the filesystem or original history.
+    const links = terminal.registerLinkProvider({
+      provideLinks: (row, callback) => {
         const context = fileContextRef.current
-        const matches = terminalPathLinksInBuffer(terminal.buffer.active, bufferLineNumber, activeWorkspaceRootRef.current)
-        if (matches.length === 0) return callback(undefined)
-        callback(matches.map(({ link: match, range }) => {
-          const location = match.line !== undefined
-            ? { line: match.line, ...(match.column !== undefined ? { column: match.column } : {}) }
-            : undefined
-          const label = match.line !== undefined
-            ? `${match.path}:${match.line}${match.column !== undefined ? `:${match.column}` : ''}`
-            : match.path
-          return {
-            // xterm's actual 1-based inclusive cell range, including soft-wrapped rows.
-            range,
-            text: match.path,
-            activate: (event: MouseEvent) => {
-              clearLinkPreview()
-              // Same drag-guard as the http provider: a drag that ends over a path must select,
-              // not open. Shares the single linkPressRef set on pointerdown.
-              const origin = linkPressRef.current
-              linkPressRef.current = null
-              if (!isTerminalLinkClick({
-                button: event.button,
-                contextMenu: isMac && event.ctrlKey,
-                origin,
-                release: { x: event.clientX, y: event.clientY },
-                hasSelection: terminal.hasSelection()
-              })) return
-              // System artifacts belong to the host OS. Keep the Workspace id on the typed seam so
-              // Main can enforce local/root confinement; never turn a `.dmg`/`.app` path into an
-              // editor or Browser Tab. Ordinary source paths retain the existing openFile route.
-              const linkOrigin = linkOriginRef.current, displayOrigin = displayOriginRef.current
-              if (!linkOrigin || !displayOrigin) return
-              void openTerminalFileLink({
-                link: { ...match, path: sessionFileResourcePath(context, match.path) },
-                local: workspaceIsLocalRef.current,
-                openSystem: (path) => api.files.openSystem(linkOrigin.workspaceId, path),
-                openFile: async (link) => {
-                  const origin = { ...displayOrigin, sessionId: displayOrigin.sessionId ?? session.id }
-                  const state = useAppStore.getState()
-                  const presentation = presentationRef.current
-                  const local = presentation.surface === 'mote' || presentation.surface === 'survey'
-                  const focus = presentation.surface === 'focus' || presentation.surface === undefined && state.mainSurface === 'agents'
-                  const destination = local || focus && resolveFocusLinkDestination(state.config?.focus?.linkDestination) === 'region' ? 'right' : 'tab'
-                  const filePresentation = { ...presentation, ...(presentation.onSelectRegion ? { onSelectRegion: (regionId: string) => {
-                    const current = presentationRef.current
-                    const parent = (value: WorkbenchPresentation) => value.reference ? { ...value.reference, regionId: origin.regionId! } : null
-                    const heldParent = parent(presentation), currentParent = parent(current)
-                    if (current.surface !== presentation.surface || (heldParent ? !sameWorkbenchProjectionSelection(currentParent, heldParent) : currentParent !== null)) return
-                    current.onSelectRegion?.(regionId)
-                  } } : {}) }
-                  await openSessionFileLink(origin, context, link.path, location, destination, presentation.surface, filePresentation)
-                }
-              }).catch(reportError)
-            },
-            hover: (event: MouseEvent) => {
-              showLinkPreview(event, {
-                kind: 'file',
-                label,
-                system: isSystemArtifactPath(match.path)
-              })
-            },
-            leave: clearLinkPreview
-          }
-        }))
+        const matches = terminalLinksAtRow(terminal, row, linkScope()).filter(({ target }) => target.kind !== 'file' || linkOriginRef.current)
+        callback(matches.length ? matches.map(({ target, range }) => ({
+          range,
+          text: target.kind === 'file' ? target.file.path : target.kind === 'unsupported' ? target.uri : target.url,
+          activate: event => activateLink(event, target, context),
+          hover: event => hoverLink(event, target),
+          leave: clearLinkPreview
+        })) : undefined)
       }
     })
 
     const resourceOwners = acquireTerminalResourceOwners({
-      addons: 2,
+      addons: 1,
       listeners: 10
     })
     let search: {
@@ -2148,7 +2108,7 @@ function TerminalViewOwner({
       cleanup(searchOwner.release)
       cleanup(() => selection.dispose())
       cleanup(() => linkPreviewScroll.dispose())
-      cleanup(() => pathLinks.dispose())
+      cleanup(() => links.dispose())
       cleanup(pasteSanitizer)
       cleanup(disposeEvents)
       cleanup(() => input.dispose())
@@ -2263,11 +2223,19 @@ function TerminalViewOwner({
   }
 
   function pathMenuActions(link: TerminalPathLink | null) {
-    const origin = linkOriginRef.current
-    if (!origin) return []
-    return terminalFileMenuActions({ link, local: workspaceIsLocal,
-      onReveal: path => { void api.files.reveal(origin.workspaceId, path).catch(reportError) },
-      onOpenSystem: path => { void api.files.openSystem(origin.workspaceId, path).catch(reportError) } })
+    const context = fileContextRef.current
+    const workspaceId = context.workspaceId ?? context.project?.workspaceId
+    if (!workspaceId || !linkOriginRef.current) return []
+    const runAction = (action: () => Promise<void>) => {
+      if (context !== fileContextRef.current) {
+        reportError(new Error('The original file resource changed. Choose the link again to confirm its target.'))
+        return
+      }
+      void action().catch(reportError)
+    }
+    return terminalFileMenuActions({ link, local: !sessionSource && context.placement?.resource.hostId === 'local',
+      onReveal: path => runAction(() => api.files.reveal(workspaceId, path)),
+      onOpenSystem: path => runAction(() => api.files.openSystem(workspaceId, path)) })
   }
 
   function resourcePathLink(link: TerminalPathLink | null): TerminalPathLink | null {
@@ -2384,7 +2352,7 @@ function TerminalViewOwner({
       <TerminalContextMenu
         hasSelection={hasSelection}
         historyBoundary={!hydrating && !historyReadFailure && !replayGap && !runtimeHistoryGap ? historyBoundary : null}
-        pathActions={pathMenuActions(pathActions)}
+        pathActions={pathActions ?? []}
         contextSource={{
           identity: JSON.stringify([session.id, session.control]),
           instance: () => terminalRef.current,
@@ -2393,7 +2361,7 @@ function TerminalViewOwner({
             hasSelection: captureMenuSelection(),
             mouseTrackingMode: terminalRef.current?.modes.mouseTrackingMode ?? mouseTrackingMode,
             pathActions: pathMenuActions(resourcePathLink(point && rootRef.current ? terminalPathAtPointer(
-              terminalRef.current, rootRef.current, point.clientX, point.clientY, activeWorkspaceRootRef.current
+              terminalRef.current, rootRef.current, point.clientX, point.clientY, activeWorkspaceRootRef.current, fileContextRef.current.homeDir
             ) : null))
           })
         }}
@@ -2439,17 +2407,18 @@ function TerminalViewOwner({
                 // 需要解释「为什么 Copy 是灰的」的情形，若只在有选区时采样，提示永远不会出现。
                 const mode = terminalRef.current?.modes.mouseTrackingMode
                 if (mode) setMouseTrackingMode(mode)
-                setPathActions(resourcePathLink(terminalPathAtPointer(
+                setPathActions(pathMenuActions(resourcePathLink(terminalPathAtPointer(
                   terminalRef.current,
                   event.currentTarget,
                   event.clientX,
                   event.clientY,
-                  activeWorkspaceRootRef.current
-                )))
+                  activeWorkspaceRootRef.current,
+                  fileContextRef.current.homeDir
+                ))))
               } else {
                 setPathActions(null)
               }
-              linkPressRef.current = { x: event.clientX, y: event.clientY, altKey: event.altKey }
+              linkPressRef.current = { x: event.clientX, y: event.clientY, altKey: event.altKey, fileContext: fileContextRef.current }
               terminalRef.current?.focus()
             }}
           />
