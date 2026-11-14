@@ -6,8 +6,8 @@ import { captureFrame } from "./fixtures/toolkit-frame/capture.mjs";
 const root = fileURLToPath(new URL("../../..", import.meta.url)).replace(/\/$/u, "");
 const [flag, directory, ...remaining] = process.argv.slice(2);
 assert.ok(flag === "--evidence" && directory && isAbsolute(directory),
-  "Usage: node apps/desktop/scripts/capture-toolkit-pending-launch.mjs --evidence /absolute/path [--mutation stop-options]");
-assert.ok(remaining.length === 0 || remaining.length === 2 && remaining[0] === "--mutation" && remaining[1] === "stop-options");
+  "Usage: node apps/desktop/scripts/capture-toolkit-pending-launch.mjs --evidence /absolute/path [--mutation stop-options|release-options]");
+assert.ok(remaining.length === 0 || remaining.length === 2 && remaining[0] === "--mutation" && ["stop-options", "release-options"].includes(remaining[1]));
 const receipt = await captureFrame({ root, evidence: resolve(directory), scope: "pending-launch", mutation: remaining[1] ?? null });
 console.log(JSON.stringify({
   evidence: directory,

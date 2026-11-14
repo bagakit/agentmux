@@ -16,7 +16,8 @@ const sha = (bytes) => createHash("sha256").update(bytes).digest("hex");
 export async function captureFrame({ root, evidence, mutation = null, scope = "all" }) {
   assert.ok(["all", "phone-only", "pending-launch"].includes(scope), "Bounded Toolkit capture scope");
   const pendingLaunch = scope === "pending-launch";
-  assert.ok(scope === "all" || mutation === null || (pendingLaunch && mutation === "stop-options"), "Mutation belongs to the selected frame");
+  const pendingLaunchMutation = pendingLaunch && ["stop-options", "release-options"].includes(mutation);
+  assert.ok(scope === "all" || mutation === null || pendingLaunchMutation, "Mutation belongs to the selected frame");
   const html = pendingLaunch ? "pending-launch.html" : "index.html",
     main = pendingLaunch ? "pending-launch-main.cjs" : "main.cjs",
     entry = pendingLaunch ? "pending-launch-entry.tsx" : "entry.tsx";
@@ -90,13 +91,16 @@ export async function captureFrame({ root, evidence, mutation = null, scope = "a
               const file = workspaceSourceExport(root, id);
               return file ? { path: file } : undefined;
             });
-            if (preloadBundle && mutation === "stop-options") {
+            if (preloadBundle && pendingLaunchMutation) {
               builder.onLoad({ filter: /\/preload\/index\.ts$/ }, async ({ path }) => {
                 if (path !== resolve(root, preload)) return;
                 const original = (await bind(path)).toString();
                 const anchor = "ipcRenderer.invoke('toolkit:stop', toolId, executionId, options)";
                 assert.equal(original.split(anchor).length, 2, "One built preload mutation anchor");
-                const contents = original.replace(anchor, "ipcRenderer.invoke('toolkit:stop', toolId, executionId)");
+                const replacement = mutation === "release-options"
+                  ? "ipcRenderer.invoke('toolkit:stop', toolId, executionId, options && 'releasePendingLaunch' in options ? undefined : options)"
+                  : "ipcRenderer.invoke('toolkit:stop', toolId, executionId)";
+                const contents = original.replace(anchor, replacement);
                 receipt.stopOptionsMutation = { path: preload, source: sha(original), loaded: sha(contents) };
                 return { contents, loader: "ts", resolveDir: resolve(root, "apps/desktop/src/preload") };
               });
@@ -323,10 +327,10 @@ export async function captureFrame({ root, evidence, mutation = null, scope = "a
       if (mutation) {
         assert.ok(receipt.stopOptionsMutation, "Compiled the mutated production preload");
         assert.equal(receipt.scene.failure?.name, "AssertionError");
-        assert.equal(receipt.scene.assertion, "exact-stop-ipc-arguments");
+        assert.equal(receipt.scene.assertion, mutation === "release-options" ? "exact-release-ipc-arguments" : "exact-stop-ipc-arguments");
         receipt.specificAssertionRED = true;
       } else {
-        assert.equal(receipt.frames.length, 6);
+        assert.equal(receipt.frames.length, 10);
       }
     } else if (mutation) {
       assert.equal(receipt.process.exitCode, 1);

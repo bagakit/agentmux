@@ -11,8 +11,8 @@ import "../../../src/renderer/src/styles/index.css";
 
 const inputs: { trusted: boolean; target: string }[] = [];
 document.addEventListener("click", event => {
-  const button = (event.target as Element).closest("button");
-  if (button) inputs.push({ trusted: event.isTrusted, target: button.getAttribute("aria-label") ?? button.textContent?.trim() ?? "" });
+  const control = (event.target as Element).closest("button, summary");
+  if (control) inputs.push({ trusted: event.isTrusted, target: control.getAttribute("aria-label") ?? control.textContent?.trim() ?? "" });
 }, true);
 mountThemeRuntime(window, { appAppearance: "dark" });
 

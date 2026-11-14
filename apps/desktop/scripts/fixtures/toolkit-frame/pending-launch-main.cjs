@@ -18,6 +18,10 @@ const execution = {
   executionId, invocationId, definition, expectedLatestExecutionId: null,
   target: { workspacePath: definition.workspacePath }, run: null, startedAt: 1, text: "",
 };
+const legacyExecution = { ...execution, executionId: "legacy-launch-fixture", invocationId: "legacy-invocation-fixture", startedAt: 3,
+  expectedLatestExecutionId: "older-confirmed-fixture" };
+const olderResult = { ...execution, executionId: legacyExecution.expectedLatestExecutionId, invocationId: "older-invocation-fixture",
+  state: "succeeded", reason: null, endedAt: 2, exitCode: 0, run: { hostId: "local", runId: "older-run-fixture" } };
 const reason = "The original terminal launch receipt is unconfirmed.";
 const base = { schema: "agentmux.toolkit.v1", kind: "script", toolId, definition, consumerCount: 1 };
 let current = {
@@ -49,11 +53,29 @@ const port = {
       return { operation, snapshot: current };
     }
     if (operation === "toolkit.stop") {
+      if (current.pendingLaunch === "retirement-unavailable") {
+        assert.equal(request.executionId, legacyExecution.executionId);
+        assert.equal(request.releasePendingLaunch, true);
+        assert.equal(request.cancelPendingLaunch, undefined);
+        current = { ...base, state: "idle", reason: null, admission: null, sequence: current.sequence + 1,
+          releasedLaunch: current.admission, latestConfirmed: current.latestConfirmed };
+        return { operation, snapshot: current };
+      }
       assert.equal(request.executionId, executionId);
       assert.equal(request.cancelPendingLaunch, true);
       if (++stopCount === 1) throw new Error(ambiguity);
       current = { ...current, pendingLaunch: "retirement-unconfirmed", reason: ambiguity, sequence: 2,
         admission: { ...current.admission, reason: ambiguity } };
+      return { operation, snapshot: current };
+    }
+    if (operation === "toolkit.run" && current.releasedLaunch) {
+      assert.equal(request.input.expectedRevision, definition.revision);
+      assert.equal(request.input.expectedLatestExecutionId, legacyExecution.executionId);
+      assert.notEqual(request.input.invocationId, legacyExecution.invocationId);
+      current = { ...base, state: "pending", reason: null, sequence: current.sequence + 1, latestConfirmed: current.latestConfirmed,
+        admission: { ...execution, state: "pending", reason: null, startedAt: 4, executionId: "new-launch-fixture",
+          invocationId: request.input.invocationId, expectedLatestExecutionId: request.input.expectedLatestExecutionId } };
+      // This is only a DTO consumed by the real IPC contract. No command is run.
       return { operation, snapshot: current };
     }
     throw new Error("Unexpected fixture operation: " + operation);
@@ -63,11 +85,12 @@ const port = {
 const apiButton = text => `[...document.querySelectorAll("button")].find(button => (button.getAttribute("aria-label") ?? button.textContent.trim()) === ${JSON.stringify(text)})`;
 const trigger = `document.querySelector('[data-toolkit-id="${toolId}"]')`;
 const empty = ".toolkit-tui";
-const labels = { check: "Check launch status", end: "End pending launch", retry: "Continue original request", run: "Run saved command" };
+const labels = { check: "Check launch status", end: "End pending launch", retry: "Continue original request", run: "Run saved command", allow: "Allow a new launch" };
 const hasRunIpc = () => receipt.ipc.some(({ channel }) => /^toolkit:(?:run|action|evaluate)$/u.test(channel));
 const stopCalls = () => receipt.ipc.filter(({ channel }) => channel === "toolkit:stop");
 const getCalls = () => receipt.ipc.filter(({ channel }) => channel === "toolkit:get");
 const usefulContent = `document.querySelector("${empty}")?.innerText ?? ""`;
+const launchDetails = 'document.querySelector(".toolkit-tui__recovery-details")';
 const sameDraft = 'document.querySelector("[aria-label=\\"Original draft\\"]")?.value === "Keep the original draft"';
 
 app.whenReady().then(async () => {
@@ -81,6 +104,10 @@ app.whenReady().then(async () => {
     }));
     ipcMain.on("ui:themeBootstrap", event => {
       event.returnValue = { status: "unavailable", message: "The isolated fixture sets the theme before rendering." };
+    });
+    ipcMain.handle("sessions:refresh", (_event, ...args) => {
+      receipt.ipc.push({ channel: "sessions:refresh", args });
+      throw new Error("This fixture has no live terminal to refresh.");
     });
     win = new BrowserWindow({
       width: 1000, height: 600, show: false, useContentSize: true,
@@ -172,12 +199,18 @@ app.whenReady().then(async () => {
     receipt.assertion = "exact-stop-ipc-arguments";
     assert.deepEqual(stopCalls()[0].args, [toolId, executionId, { cancelPendingLaunch: true }]);
     receipt.assertion = "unconfirmed-retirement-retains-original";
-    await until(`(${usefulContent}).includes(${JSON.stringify(ambiguity)})`);
+    await until(`(${usefulContent}).includes("Could not confirm that the original launch ended.")`);
     assert.equal(await read(`Boolean(${apiButton(labels.end)} && !${apiButton(labels.run)})`), true);
     assert.equal(hasRunIpc(), false);
     assert.equal(current.admission.executionId, executionId);
     assert.equal(current.admission.invocationId, invocationId);
     await frame("end-unconfirmed-narrow-light", 380, "light", [labels.check, labels.end]);
+    assert.equal(await read(`(${launchDetails})?.open`), false);
+    await click(`(${launchDetails})?.querySelector("summary")`, "Launch details");
+    await until(`(${launchDetails})?.open && (${usefulContent}).includes(${JSON.stringify(ambiguity)})`);
+    await frame("end-details-narrow-light", 380, "light", [labels.check, labels.end]);
+    await click(`(${launchDetails})?.querySelector("summary")`, "Launch details");
+    await until(`!(${launchDetails})?.open`);
 
     receipt.assertion = "accepted-retirement-awaits-confirmation";
     await click(apiButton(labels.end), labels.end);
@@ -210,6 +243,48 @@ app.whenReady().then(async () => {
     assert.equal(hasRunIpc(), false);
     assert.equal(receipt.requests.filter(({ operation }) => operation === "toolkit.stop").length, 2);
     assert.equal(retirementReads, 2, "Retirement requires an explicit check after the automatic reconciliation read");
+
+    receipt.assertion = "legacy-coverage-prevents-retirement";
+    await click(apiButton("Close " + definition.name), "Close " + definition.name);
+    await until(`!document.querySelector("${empty}")`);
+    await waitFor(() => releaseCount === 2, "The first fixture observation was released before the new scenario");
+    const legacyReason = "The original launch predates the available launch records.";
+    current = { ...base, state: "unknown", pendingLaunch: "retirement-unavailable", reason: legacyReason, sequence: 4,
+      admission: { ...legacyExecution, state: "unknown", reason: legacyReason }, latestConfirmed: olderResult };
+    await click(trigger, definition.name);
+    await until(`Boolean(${apiButton(labels.allow)} && ${apiButton(labels.check)})`);
+    assert.ok((await read(usefulContent)).includes("may already have run"));
+    assert.equal(await read(`Boolean(${apiButton(labels.end)} || ${apiButton(labels.retry)} || ${apiButton(labels.run)})`), false);
+    assert.equal(hasRunIpc(), false);
+    await frame("legacy-fallback-narrow-light", 380, "light", [labels.check, labels.allow]);
+
+    await click(apiButton(labels.allow), labels.allow);
+    await waitFor(() => stopCalls().length === 3, "Allow action reached the original stop channel");
+    receipt.assertion = "exact-release-ipc-arguments";
+    assert.deepEqual(stopCalls()[2].args, [toolId, legacyExecution.executionId, { releasePendingLaunch: true }]);
+    receipt.assertion = "release-preserves-unknown-and-older-result";
+    await until(`Boolean(${apiButton(labels.run)})`);
+    assert.equal(await read(`Boolean(${apiButton(labels.allow)} || ${apiButton(labels.end)} || ${apiButton(labels.retry)})`), false);
+    assert.match(await read(`(${apiButton(labels.run)})?.previousElementSibling?.innerText ?? ""`),
+      /unconfirmed.*may already have run/u, "The prior unknown result and execution risk sit next to the explicit Run action");
+    assert.deepEqual([current.admission, current.releasedLaunch.executionId, current.releasedLaunch.invocationId, current.releasedLaunch.state, current.latestConfirmed],
+      [null, legacyExecution.executionId, legacyExecution.invocationId, "unknown", olderResult]);
+    assert.equal(hasRunIpc(), false, "Allowing a new launch does not start a command");
+    await frame("legacy-released-narrow-light", 380, "light", [labels.run]);
+    await frame("legacy-released-wide-dark", 1000, "dark", [labels.run]);
+
+    receipt.assertion = "explicit-start-uses-released-launch-baseline";
+    await click(apiButton(labels.run), labels.run);
+    await until(`(${usefulContent}).includes("Starting terminal")`);
+    const starts = receipt.requests.filter(({ operation }) => operation === "toolkit.run");
+    assert.equal(starts.length, 1);
+    assert.equal(starts[0].input.expectedLatestExecutionId, legacyExecution.executionId);
+    assert.notEqual(starts[0].input.expectedLatestExecutionId, olderResult.executionId);
+    assert.equal(receipt.ipc.filter(({ channel }) => channel === "toolkit:run").length, 1);
+    assert.equal(receipt.ipc.some(({ channel }) => /^toolkit:(?:action|evaluate)$/u.test(channel) || channel === "sessions:refresh"), false,
+      "No implicit command or attachment from the older result");
+    receipt.legacyFallback = { releasedExecutionId: legacyExecution.executionId, releasedInvocationId: legacyExecution.invocationId,
+      olderConfirmedExecutionId: olderResult.executionId, savedCommandBaseline: starts[0].input.expectedLatestExecutionId, automaticRuns: 0 };
     assert.deepEqual(receipt.errors, []);
     receipt.inputs = await read("pendingLaunchProof.inputs");
     receipt.completed = true;
