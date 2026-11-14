@@ -31,7 +31,7 @@ async function input(window) {
       throw Error(message + ': ' + JSON.stringify(value))
     },
     async key(key) {
-      const [code, windowsVirtualKeyCode] = { Tab: ['Tab', 9], ArrowDown: ['ArrowDown', 40], Escape: ['Escape', 27], Enter: ['Enter', 13], ' ': ['Space', 32] }[key]
+      const [code, windowsVirtualKeyCode] = { Tab: ['Tab', 9], ArrowDown: ['ArrowDown', 40], Escape: ['Escape', 27], ' ': ['Space', 32] }[key]
       for (const type of ['keyDown', 'keyUp']) await port.sendCommand('Input.dispatchKeyEvent', { type, key, code, windowsVirtualKeyCode })
     },
     async click(selector) {
@@ -56,20 +56,29 @@ async function input(window) {
 }
 
 async function locations({ click, key, read, expect, resize, screenshot }, capture) {
-  await expect('document.querySelector("#location-trigger").getAttribute("aria-label").includes("2 open locations")')
-  await click('#location-trigger')
-  const labels = await read('[...document.querySelectorAll("[data-route]")].map(node => node.textContent.trim())')
-  assert.deepEqual(labels, ['Review · Entrance Brief · Working board', 'Review · Entrance Recent · Working board', 'Review · Entrance Logs · Working board'])
   if (capture) {
     resize(360, 650)
     await expect('innerWidth === 360 && document.documentElement.scrollWidth <= innerWidth')
+  }
+  await expect('document.querySelector("#location-trigger").getAttribute("aria-label").includes("2 open locations")')
+  if (capture) {
+    await key('Tab')
+    await expect('document.activeElement?.id === "location-trigger"')
+    await key(' ')
+  } else await click('#location-trigger')
+  await expect('document.activeElement?.matches("#location-chooser [data-route]")')
+  const labels = await read('[...document.querySelectorAll("[data-route]")].map(node => node.textContent.trim())')
+  assert.deepEqual(labels, ['Review · Entrance Brief · Working board', 'Review · Entrance Recent · Working board', 'Review · Entrance Logs · Working board'])
+  if (capture) {
     await expect('[...document.querySelectorAll("[data-route]")].every(node => node.scrollWidth <= node.clientWidth)')
     await screenshot('location-choices-narrow.png')
-    resize(660, 650)
-    await expect('innerWidth === 660')
   }
   await key('Escape')
   await expect('!document.querySelector("#location-chooser") && document.activeElement.id === "location-trigger" && document.querySelector("#destination").value === "original-board"')
+  if (capture) {
+    resize(660, 650)
+    await expect('innerWidth === 660')
+  }
   result.cases.push('same-name-aliases-and-keyboard-cancel')
   const choose = async route => {
     await click('#location-trigger')
@@ -150,7 +159,7 @@ app.whenReady().then(async () => {
       await openBoard(primary)
       await primary.type('Retitled')
       await primary.click('button[type=submit]')
-      await primary.expect(`!${dialog} && document.querySelector('#saved-title').value.includes('Retitled') && ${unlocked}`)
+      await primary.expect(`!${dialog} && document.querySelector('#saved-title').value.includes('Retitled') && document.activeElement?.id === 'open-board' && ${unlocked}`)
       result.cases.push('keyboard-action-shared-overlay-and-form')
     }
     if (variant !== 'scroll') await locations(primary, variant === 'normal')
