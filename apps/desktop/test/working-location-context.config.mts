@@ -9,7 +9,7 @@ const mutation = process.env.WORKING_LOCATION_MUTATION
 const edits: Record<string, [string, string, string]> = {
   'forget-context': ['lib/source-files-workbench.ts', 'const mount = ports.location?.(workspaceId, runtimeId)', 'const mount = undefined'],
   'require-previous-click': ['lib/source-files-workbench.ts', "if (!workspace || registration.hostId !== workspace.hostId)", "if (!original || !workspace || registration.hostId !== workspace.hostId)"],
-  'adopt-late-location': ['lib/source-files-workbench.ts', '(observedLocation === undefined || observedLocation ===', '(true || observedLocation === undefined || observedLocation ==='],
+  'adopt-late-location': ['lib/source-files-workbench.ts', "observedLocation === JSON.stringify(ports.location?.(workspaceId, 'expectedRuntimeId' in input.target ? input.target.expectedRuntimeId : input.target.reference.runtimeId) ?? null)", 'true'],
   'reuse-previous-locator': ['lib/source-files-workbench.ts', 'const selected: SourceFilesInput = { workspace: input.workspace, target: input.target, selection, ...(sameLocation ? { locator: input.locator } : {}) }', 'const selected: SourceFilesInput = { ...input, selection }'],
   'ignore-selected-zone': ['lib/original-space-navigation.ts', 'workspaceId === target.workspaceId ? zones.find(zone => zone.zoneId === target.zoneId) : zones.length === 1 ? zones[0] : undefined', 'zones.length === 1 ? zones[0] : undefined']
 }
