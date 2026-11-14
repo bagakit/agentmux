@@ -106,16 +106,24 @@ export function sessionWorkbenchLocationChoices(tabs: Readonly<Record<string, Wo
   return [...choices.values()]
 }
 /** One structural pass for a roster, independent of Session output and row count. */
-export function sessionWorkbenchLocationCounts(tabs: Readonly<Record<string, WorkbenchTab>>, catalog: AgentMuxSpaceCatalog): ReadonlyMap<string, number> {
-  const positions = new Map<string, Set<string>>()
+export function sessionWorkbenchLocationCounts(tabs: Readonly<Record<string, WorkbenchTab>>, catalog: AgentMuxSpaceCatalog,
+  subjectFor: (sessionId: string) => { hostId: string; agentSessionId: string } | null,
+  executionFor: (reference: { tabId: string; regionId: string; agentSessionId: string }) => { hostId: string } | null): ReadonlyMap<string, number | null> {
+  const positions = new Map<string, Set<string>>(), unconfirmed = new Set<string>()
   for (const location of catalog.locations) {
     const surface = tabs[location.tabId]?.regions[location.regionId]
-    if (!surface || !isSessionSurface(surface)) continue
+    if (surface?.kind !== 'agent') continue
     let occurrences = positions.get(surface.sessionId)
     if (!occurrences) positions.set(surface.sessionId, occurrences = new Set())
-    occurrences.add(JSON.stringify([location.displayWorkspaceId, location.groupId, location.tabId, location.regionId]))
+    const key = JSON.stringify([location.displayWorkspaceId, location.groupId, location.tabId, location.regionId])
+    if (occurrences.has(key)) continue
+    occurrences.add(key)
+    const subject = subjectFor(surface.sessionId)
+    const bound = subject ? executionFor({ tabId: location.tabId, regionId: location.regionId, agentSessionId: subject.agentSessionId }) : null
+    if (!subject || bound?.hostId !== subject.hostId) unconfirmed.add(surface.sessionId)
   }
-  return new Map([...positions].map(([id, references]) => [id, references.size]))
+  // A partial observation cannot claim a complete count, including zero.
+  return new Map([...positions].map(([id, references]) => [id, unconfirmed.has(id) ? null : references.size]))
 }
 
 /** A local focus keeps its explicit parent; an explicit jump can resolve another object. */

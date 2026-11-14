@@ -1,3 +1,4 @@
+import { sessionPresentationById } from '../lib/session-presentation'
 import { useMemo } from 'react'
 import { AgentLocationsButton } from './AgentLocationsButton'
 import { workbenchSelectionCatalog, sessionWorkbenchLocationCounts } from '../lib/desktop-focus-navigation'
@@ -6,7 +7,7 @@ import { scratchTopicsForConfig } from '../lib/scratch-topic-snapshots'
 import * as ContextMenu from '@radix-ui/react-context-menu'
 import * as DropdownMenu from './HoverDropdownMenu'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
-import { agentRegionLocationsKnown, useAppStore } from '../store'
+import { agentRegionExecution, agentRegionLocationBindings, agentRegionLocationsKnown, useAppStore } from '../store'
 import { buildAgentRoster, rowRiskTier, type RosterRow } from '../lib/agent-roster'
 import { buildAgentTree, type AgentTreeFilter } from '../lib/agent-tree'
 import { agentRosterMenuActions } from '../lib/agent-roster-menu'
@@ -156,7 +157,17 @@ function AgentRosterContents() {
   const catalog = useAppStore(workbenchSelectionCatalog)
   const tabs = useAppStore(state => workbenchNavigationTabs(state.tabs))
   const known = useAppStore(agentRegionLocationsKnown)
-  const locationCounts = useMemo(() => sessionWorkbenchLocationCounts(tabs, catalog), [tabs, catalog])
+  const bindings = useAppStore(agentRegionLocationBindings)
+  const subjectKey = sessions.filter(session => session.kind === 'agent').map(session => JSON.stringify([
+    session.id, session.control.hostId, session.control.kind === 'agent' ? session.control.agentSessionId : null
+  ])).sort().join('\n')
+  const locationCounts = useMemo(() => {
+    const subjects = sessionPresentationById(sessions)
+    return sessionWorkbenchLocationCounts(tabs, catalog, id => {
+      const original = subjects.get(id)
+      return original?.control.kind === 'agent' ? original.control : null
+    }, agentRegionExecution)
+  }, [tabs, catalog, bindings, subjectKey])
   const rows = buildAgentRoster({ sessions, providerCatalog })
   return <>
     <div className="agent-roster__heading">
@@ -164,7 +175,10 @@ function AgentRosterContents() {
       <span className="agent-roster__heading-count">{rows.length}</span>
     </div>
     <div className="agent-roster__list">
-      {rows.map((row) => <RosterRowView key={row.sessionId} row={row} onSelect={selectSession} reportError={reportError} locationCount={known ? locationCounts.get(row.sessionId) ?? 0 : undefined} />)}
+      {rows.map(row => {
+        const count = locationCounts.get(row.sessionId)
+        return <RosterRowView key={row.sessionId} row={row} onSelect={selectSession} reportError={reportError} locationCount={known && count !== null ? count ?? 0 : undefined} />
+      })}
     </div>
   </>
 }

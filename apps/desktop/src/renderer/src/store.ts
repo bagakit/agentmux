@@ -4527,6 +4527,11 @@ export type AgentRegionReference = { tabId: string; regionId: string; agentSessi
 /** Availability of the original spatial owner, not Agent or Run health. */
 export function agentRegionLocationsKnown(): boolean { return coreSpatialPersistence?.current !== null && coreSpatialPersistence?.current !== undefined }
 
+/** Immutable accepted Core bindings let structural consumers observe qualification changes. */
+export function agentRegionLocationBindings(): readonly import('@agentmux/core/spatial-graph').AgentMuxSpatialGraph['regions'][number][] | null {
+  return coreSpatialPersistence?.current?.graph.regions ?? null
+}
+
 export function agentRegionExecution(reference: AgentRegionReference) {
   const regions = coreSpatialPersistence?.current?.graph.regions
   if (!regions) return null
