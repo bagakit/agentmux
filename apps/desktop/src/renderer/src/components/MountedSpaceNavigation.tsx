@@ -1,6 +1,6 @@
 import { memo, useMemo } from 'react'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
-import { mountedSpaceTarget, mountedSpaceInputs } from '../lib/space-mount-view'
+import { mountedSpaceTarget, mountedSpaceInputs, sourceFolderProjectEntry } from '../lib/space-mount-view'
 import type { SpaceMountRecord } from '../../../shared/space-mount'
 import { useAppStore } from '../store'
 const FolderIcon = semanticIconComponent('object.folder')
@@ -20,7 +20,7 @@ export function MountedSpaceNavigation({ query }: { query: string }) {
   const entries = useMemo(() => {
     const result: Array<{ key: string; target: SpaceMountRecord }> = []
     try { for (const key of Object.keys(mountedSpaceInputs(inputs))) {
-      try { const target = mountedSpaceTarget(inputs, key); if (target) result.push({ key, target }) } catch { /* Keep future and unreadable fragments with their original user-document owner. */ }
+      try { const target = mountedSpaceTarget(inputs, key); if (target && !sourceFolderProjectEntry(inputs,key)) result.push({ key, target }) } catch { /* Keep future and unreadable fragments with their original user-document owner. */ }
     } } catch { /* The ordinary rail stays available while the original input is retained. */ }
     return result
   }, [inputs])

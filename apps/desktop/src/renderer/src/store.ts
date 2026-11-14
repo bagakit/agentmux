@@ -1,3 +1,4 @@
+import { openSourceFolderInput } from './lib/space-mount-view'
 import { observeMountedSpaceWindow } from './lib/mounted-space-observation'
 import { editMountedAgentOpen, editMountedLauncherSelection, type MountedAgentOpenInput, type MountedLauncherSelection, type MountedLauncherSlot } from './lib/space-mount-launch'
 import { editMountedSpaceInput, editMountedSpaceDraftInput, editMountedRegistration, mountedSpaceInput, mountedSpaceTarget, acceptsMountedSnapshot, type MountedSpaceObservation, type MountedSpaceRegistrationInput } from './lib/space-mount-view'
@@ -1040,6 +1041,7 @@ export type AppState = GitReadingActions & {
   mountedSpaceSessions: Record<string, MountedSessionObservation>
   observeSpaceMountSessions(target: SpaceMountRecord, update: MountedSessionUpdate): void
   mountSpace(target: SpaceMountRecord, reveal?: boolean): void
+  openSourceFolder(target: SpaceMountRecord): void
   retainSpaceMountRegistration(key: string, update: (current: MountedSpaceRegistrationInput | undefined) => MountedSpaceRegistrationInput | undefined): void
   retainSpaceMountAgentOpen(key: string, update: (current: MountedAgentOpenInput | undefined) => MountedAgentOpenInput | undefined): void
   editSpaceMountLauncher(key: string, slot: MountedLauncherSlot, selection: MountedLauncherSelection): void
@@ -5539,6 +5541,10 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       const { kind: _privateInput, ...retained } = current ?? {}
       return { ...retained, target: { ...current?.target, ...target, reference: { ...current?.target.reference, ...target.reference } }, drafts: current?.drafts ?? {} }
     }), ...(reveal ? { selectedSpaceMount: key, mainSurface: 'workbench' as const } : {}) }))
+  },
+  openSourceFolder(target) {
+    const key = spaceMountKey(target.reference)
+    set(state => ({ mountedSpaceInputs: openSourceFolderInput(state.mountedSpaceInputs,target), selectedSpaceMount: key, mainSurface: 'workbench' as const }))
   },
   retainSpaceMountRegistration(key, update) {
     set(state => ({ mountedSpaceInputs: editMountedRegistration(state.mountedSpaceInputs, key, update) }))

@@ -1,3 +1,4 @@
+import { SourceFolderNavigation, useSourceFolderNavigation } from './SourceFolderNavigation'
 import { TextInput } from '@agentmux/client-ui/input'
 import { HostBadge, HostIcon } from './HostBadge'
 import { deviceHomeFailureDetail } from '../lib/device-home-feedback'
@@ -102,6 +103,7 @@ export function WorkspaceSidebar({ visible = true }: { visible?: boolean }) {
     iconInvoker.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
     setIconTarget(target)
   }
+  const sourceFolders = useSourceFolderNavigation(query)
   const filtering = Boolean(query.trim())
   const treeRef = useRef<HTMLDivElement>(null)
   const searchRef = useRef<HTMLInputElement>(null)
@@ -409,14 +411,15 @@ export function WorkspaceSidebar({ visible = true }: { visible?: boolean }) {
         {folderSections.map(section => {
           const foldersCollapsed = !filtering && collapsedProjectGroups[section.key] === true
           return (        <nav className="project-list host-folders" aria-label={`${section.label} Folders · ${section.hostId}`} key={section.hostId} data-folder-host={section.hostId}>
-          <DeviceSectionHeader hostId={section.hostId} label={section.label} navigationId={section.key} count={section.projects.length} icon={section.hostId !== 'local' ? <HostBadge context="Host" compact suppressTooltip host={hostIdentityProjection(section.hostId, config?.hosts.find(host => host.id === section.hostId))} /> : <HostIcon kind="local" size={14} />}
+          <DeviceSectionHeader hostId={section.hostId} label={section.label} navigationId={section.key} count={section.projects.length + (section.hostId === 'local' ? sourceFolders.projects.length : 0)} icon={section.hostId !== 'local' ? <HostBadge context="Host" compact suppressTooltip host={hostIdentityProjection(section.hostId, config?.hosts.find(host => host.id === section.hostId))} /> : <HostIcon kind="local" size={14} />}
             expanded={!foldersCollapsed} filtering={filtering} onToggle={() => toggleProjectGroup(section.key)}
             onOpen={() => void openDeviceHome(section.hostId)} openLabel={`Open ${section.label} home`} opening={homeReads[section.hostId]?.busy === true}
             labelSuffix={<><span className="space-device-home-mark" aria-hidden="true">~</span>{homeReads[section.hostId]?.busy ? <span className="space-device-home-progress" role="status" aria-label={`Opening ${section.label} home`}><ThemeStatusLoadingIcon size={10} animation="spin" /></span> : null}</>}
             createLabel={section.hostId === 'local' ? 'Open Folder' : `Open Folder on ${section.label}`} onCreate={async () => { if (section.hostId === 'local') await chooseFolder(); else setFolderHost({ hostId: section.hostId, label: section.label }) }}
             activity={foldersCollapsed ? <DirectoryActivity workspaces={section.workspaces} visible={visible} /> : undefined} />
           {homeReads[section.hostId]?.error ? <DeviceHomeFailure label={section.label} error={homeReads[section.hostId]!.error} onRetry={() => void openDeviceHome(section.hostId)} /> : null}
-          {filtering && section.groups.length === 0 ? <p className="space-tree-empty" role="status">No matching Folders</p> : null}
+          {!foldersCollapsed && section.hostId === 'local' ? <SourceFolderNavigation navigation={sourceFolders} /> : null}
+          {filtering && section.groups.length === 0 && (section.hostId !== 'local' || sourceFolders.projects.length === 0) ? <p className="space-tree-empty" role="status">No matching Folders</p> : null}
           {foldersCollapsed ? null : section.groups.map((group) => {
             const key = projectGroupKey(group)
             const collapsed = !filtering && key !== null && collapsedProjectGroups[key] === true
@@ -440,7 +443,7 @@ export function WorkspaceSidebar({ visible = true }: { visible?: boolean }) {
               </div>
             )
           })}
-          {section.projects.length === 0 && !filtering && !foldersCollapsed ? (
+          {section.projects.length === 0 && (section.hostId !== 'local' || sourceFolders.projects.length === 0) && !filtering && !foldersCollapsed ? (
             <div className="workspace-list__empty"><span>{section.hostId === 'local' ? 'Open a folder to get started.' : 'No folders registered in this window.'}</span></div>
           ) : null}
         </nav>)

@@ -5,7 +5,7 @@ import { spaceMountKey } from '../../../shared/space-mount'
 import { createWorkspaceLayout, createWorkbenchViewLayout, splitWorkbenchRegion, balanceWorkbenchRegionLayout, addTabOccurrence, groupIds, regionIds, type SplitTreeNode } from '@agentmux/layout'
 
 /** Only this client's reference, composition and unsent input; the source owns membership. */
-export type MountedSpaceInput = { kind?: 'space-member-input'; target: SpaceMountRecord; view?: SpaceMountView; drafts: Record<string, string>; launchers?: unknown; memberInputs?: unknown }
+export type MountedSpaceInput = { kind?: 'space-member-input'; navigation?: 'project'; target: SpaceMountRecord; view?: SpaceMountView; drafts: Record<string, string>; launchers?: unknown; memberInputs?: unknown }
 export type MountedSpaceObservation = { snapshot?: SpaceSnapshot; lastPresentSnapshot?: SpaceSnapshot; error?: string | undefined; reading: boolean }
 export type MountedSpaceRegistrationInput = { kind: 'folder-registration'; hostId: string; registration: FolderSpaceRegistration; submitted: boolean; confirmed?: boolean; issue?: string }
 const object = (value: unknown): value is Record<string, unknown> => Boolean(value && typeof value === 'object' && !Array.isArray(value))
@@ -60,6 +60,19 @@ export function ensureMemberSpaceInput(value: unknown, key: string, target: Spac
   const original = memberSpaceInputTarget(entries, key)
   if (!original || original.reference.runtimeId !== target.reference.runtimeId || original.reference.spaceId !== target.reference.spaceId) return unreadable()
   return entries
+}
+/** Explicit project navigation promotes only this original private entry; reading never writes it. */
+export function openSourceFolderInput(value: unknown, target: SpaceMountRecord): Record<string, unknown> {
+  const key = spaceMountKey(target.reference)
+  return editMountedSpaceInput(value,key,current => {
+    const { kind: _privateMember, ...retained } = current ?? {}
+    return { ...retained, target: { ...current?.target,...target }, drafts: current?.drafts ?? {}, navigation: 'project' }
+  })
+}
+/** Navigation decoration only; the original locator and member authority remain unchanged. */
+export function sourceFolderProjectEntry(value: unknown, key: string): boolean {
+  const entry = mountedSpaceInputs(value)[key]
+  return object(entry) && entry.navigation === 'project' && Boolean(memberSpaceInputTarget(value,key))
 }
 /** Malformed or other-source entries remain opaque; an edit replaces only its exact readable entry. */
 export function editMountedSpaceInput(value: unknown, key: string, edit: (current: MountedSpaceInput | undefined) => MountedSpaceInput): Record<string, unknown> {
