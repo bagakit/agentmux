@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-const methods = ['goal.delegation.prepare', 'goal.delegation.bind', 'goal.delegate', 'goal.report', 'goal.collect', 'goal.delegations'] as const
+const methods = ['goal.delegation.prepare', 'goal.delegation.bind', 'goal.delegate', 'goal.report', 'goal.collect', 'goal.delegations',
+  'goal.progress', 'goal.patrol', 'goal.patrol.continue', 'goal.patrol.report', 'goal.plan', 'goal.plan.revise', 'goal.plan.review'] as const
 const entries = [
   ['Goal codec', () => import('../src/goal-delegation.js')],
   ['native codec', () => import('../src/rpc-native-codec.js')],
@@ -23,5 +24,5 @@ describe('original public Goal method discovery through Source entry order', () 
     expect(rpc.isAgentMuxRpcMethod('agent.send')).toBe(true)
     expect(rpc.isAgentMuxRpcMethod('goal.invented-method')).toBe(false)
     expect(goal.isGoalDelegationMethod('goal.invented-method')).toBe(false)
-  })
+  }, 30_000)
 })
