@@ -300,8 +300,9 @@ describe('Goal plan graph', () => {
     expect(graph()!.querySelector('[data-goal-finish-state="Pending"]')).not.toBeNull()
     const timeline = graph()!.querySelector('[aria-label="Execution timeline"]')!
     expect(timeline, 'The original Goal keeps its timeline even without any time facts').not.toBeNull()
-    expect(timeline.querySelector('.goal-execution-time__axis')?.textContent).toContain('No schedule or execution times')
-    expect(timeline.querySelector('[data-goal-time-row="node:goal"] .goal-execution-time__track--empty')).not.toBeNull()
+    expect(timeline.textContent).toContain('No times recorded')
+    expect(timeline.getAttribute('data-goal-time-row')).toBe('node:goal')
+    expect(timeline.querySelector('.goal-execution-time__axis, .goal-execution-time__track')).toBeNull()
     expect(timeline.querySelector('time, [data-goal-observed-activity], [data-goal-planned-period]')).toBeNull()
     expect(dom.container.querySelector('.goals-detail__main')!.firstElementChild?.contains(graph())).toBe(true)
     const origin = graph()!.querySelector('[data-goal-plan-origin="goal"]')!
@@ -345,7 +346,7 @@ describe('Goal plan graph', () => {
     seed(original)
     await dom.render(<GlobalBoardSurface />)
     const canvas = graph()!.querySelector('[aria-label="Execution graph"]')!
-    expect(dom.container.querySelector('[data-goal-detail-stage]')?.textContent).toBe('Results not verified')
+    expect(dom.container.querySelector('[data-goal-detail-stage]')?.textContent).toBe('Marked done · No verification report')
     expect(canvas.querySelector('[data-goal-plan-boundary="finish"]')?.textContent).toContain('Unverified')
     const root = canvas.querySelector<HTMLButtonElement>('[data-goal-plan-origin] button')!
     await act(async () => root.click())

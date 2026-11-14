@@ -125,3 +125,26 @@ it('draws distinct dependency ports on the original source and target cards', as
     expect(port.y).toBeLessThan(join.bottom - origin.top)
   }
 })
+
+
+it('keeps an unverified original Goal distinct from a successful finish and opens it from the empty timeline', async () => {
+  const { plan: _plan, planState: _planState, ...original } = record
+  const goal: DemandRecord = { ...original, status: 'done', sessionIds: ['recorded-member'] }
+  useAppStore.setState({ demands: { [goal.id]: goal }, selectedDemandId: goal.id, mainSurface: 'board' })
+  await dom.render(<GlobalBoardSurface />)
+  const graph = dom.container.querySelector('[aria-label="Goal plan"]')!
+  const finish = graph.querySelector('[data-goal-finish-state="Unverified"]')!
+  expect(finish.querySelector('svg')?.getAttribute('data-semantic-icon'), 'An unchecked result must use the unverified glyph.').toBe('status.unknown')
+  const card = graph.querySelector('[data-goal-plan-origin]')!
+  expect(card.querySelector('.goal-plan-node__who')?.textContent).toBe('Executor unconfirmed')
+  const timeline = graph.querySelector('[aria-label="Execution timeline"]')!
+  expect(timeline.querySelector('.goal-execution-time__axis')).toBeNull()
+  expect(timeline.textContent).toContain('No times recorded')
+  expect(timeline.querySelector('time, [role="img"]')).toBeNull()
+  const jump = timeline.querySelector('button')!
+  await act(async () => jump.click())
+  expect(graph.querySelector('.goal-plan__reading h3')?.textContent).toBe(goal.title)
+  expect(card.querySelector('button')?.getAttribute('aria-expanded')).toBe('true')
+  await act(async () => graph.querySelector<HTMLButtonElement>('.goal-plan__reading-header button')!.click())
+  expect(document.activeElement).toBe(jump)
+})

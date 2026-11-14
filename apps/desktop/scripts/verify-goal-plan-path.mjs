@@ -15,8 +15,9 @@ function run(mutation) {
   }
 }
 const baseline = run()
-if (baseline.status !== 0 || baseline.report.numPassedTests < 3) throw Error(JSON.stringify(baseline.report.testResults))
+if (baseline.status !== 0 || baseline.report.numPassedTests < 4) throw Error(JSON.stringify(baseline.report.testResults))
 for (const [mutation, assertion] of [
+  ['unchecked-success', 'An unchecked result must use the unverified glyph.'],
   ['collapse-ports', 'Parallel dependencies need distinct ports on their shared task.'],
   ['reverse-child', 'The child must follow the hovered task downstream.'],
   ['wrong-reader', 'The reading pane belongs to the selected task.']

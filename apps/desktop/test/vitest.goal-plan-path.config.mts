@@ -5,6 +5,11 @@ export default defineConfig({
   ...original,
   plugins: [...original.plugins ?? [], {
     name: 'goal-plan-path-mutation', enforce: 'pre', transform(source, id) {
+      if (process.env.GOAL_PLAN_PATH_MUTATION === 'unchecked-success' && id.endsWith('/GoalPlanGraph.tsx')) {
+        const unchecked = "Unverified: semanticIconComponent('status.unknown')"
+        if (source.split(unchecked).length !== 2) throw Error('Expected the unchecked Goal finish glyph.')
+        return source.replace(unchecked, "Unverified: semanticIconComponent('status.completed')")
+      }
       if (process.env.GOAL_PLAN_PATH_MUTATION === 'collapse-ports' && id.endsWith('/goal-plan-routing.ts')) {
         const fanOut = 'edge[side] = center(box) + (index - (edges.length - 1) / 2) * spacing'
         if (source.split(fanOut).length !== 2) throw Error('Expected the task port allocator.')

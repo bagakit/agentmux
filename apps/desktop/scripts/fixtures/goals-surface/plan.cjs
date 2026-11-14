@@ -97,6 +97,10 @@ module.exports = async ({ evaluate, size, click, pointer, capture, waitFor, pain
       await evaluate(`document.querySelector('[data-goal-attempt="previous"]').scrollIntoView({block:'center'})`)
       await click(`document.querySelector('[data-goal-attempt="previous"] .goal-delegation__source summary')`)
       await restOn()
+      const reader = `document.querySelector('[data-goal-attempt="previous"] .goal-request-reader')`
+      await waitFor(`Boolean(${reader}.querySelector('[data-option="execution"]'))`)
+      assert.ok((await evaluate(`${reader}.querySelector('.goal-request-reader__document').textContent`)).includes('Give people a short, practical path back to the same work.'))
+      await click(`${reader}.querySelector('[data-option="execution"]')`)
       const earlier = await evaluate(`document.querySelector('[data-goal-attempt="previous"]').textContent`)
       assert.ok(earlier.includes('Previous attempt') && earlier.includes('Earlier guide author') && earlier.includes('thread:guide') && earlier.includes('request:guide'), 'The original previous worker, source and thread stay readable after reassignment')
       await capture(`${width}-${theme}-previous-attempt`, width)

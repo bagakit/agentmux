@@ -35,7 +35,15 @@ it('the real Start record view keeps qualified receipts distinct and never opens
   expect(dom.container.textContent).toContain('Runtime D'); expect(dom.container.textContent).toContain('Runtime E')
   expect(dom.container.textContent).not.toContain('[object Object]'); expect(dom.container.textContent).toContain('Start observation unknown')
   expect([...dom.container.querySelectorAll('button')].some(button => button.textContent === 'Open original Agent')).toBe(false)
-  expect([...dom.container.querySelectorAll('details code')].map(code => JSON.parse(code.textContent!))).toEqual([ref('D'), ref('E')])
+  for (const runtime of ['D', 'E']) {
+    const reader = dom.container.querySelector<HTMLElement>(`[data-goal-work-operation="Start-${runtime}"] .goal-request-reader`)!
+    await act(async () => reader.querySelector<HTMLElement>('summary')!.click())
+    await vi.waitFor(() => expect(reader.querySelector('[data-option="execution"]')).not.toBeNull())
+    await act(async () => reader.querySelector<HTMLButtonElement>('[data-option="execution"]')!.click())
+    const fields = Object.fromEntries([...reader.querySelectorAll('dt')].map(term => [term.textContent, term.nextElementSibling?.textContent]))
+    expect(fields).toMatchObject({ 'Source Runtime': 'B', Space: 'original-Space', Region: 'Region-' + runtime,
+      Admission: 'creation · C-' + runtime, 'Execution Runtime': runtime, Worker: 'same-SID', 'Original Run': 'Run-' + runtime })
+  }
   expect(openAgent).not.toHaveBeenCalled(); expect(useAppStore.getState().agentComposerDrafts).toBe(drafts)
   const legacy: DemandDispatch = { operationId: 'legacy', hostId: 'original-remote', agentSessionId: 'same-SID', runId: 'legacy-Run', execution: 'finite', prompt: 'Legacy body', preparedAt: 1, stage: 'prepared' }
   await dom.render(<GoalStartWork rows={goalStartRows({ dispatches: [legacy] })} supervisorSessionId={null} active={false} openAgent={openAgent} review={async () => {}} />)

@@ -201,7 +201,7 @@ it('the original role picker saves its exact relationship through the public Hos
     expect(useAppStore.getState().agentComposerDrafts).toBe(before)
     expect(team().querySelectorAll('[data-goal-team-role="supervisor"]')).toHaveLength(1)
     const retained = [...team().querySelectorAll('[data-goal-team-reference]')].find(node => node.getAttribute('data-goal-team-reference') === demandAgentReferenceKey('next-supervisor'))!
-    expect(retained.textContent).toContain('Host not confirmed'); expect(retained.querySelector('.focus-context')).toBeNull()
+    expect(retained.textContent).toContain('Host is not confirmed'); expect(retained.querySelector('.focus-context')).toBeNull()
   } finally { await host.dispose() }
 })
 

@@ -157,8 +157,8 @@ describe('mounted Goals → actual Renderer store → durable Demand owner', () 
   ] as const)('calls a done goal with %s unverified when no report exists', async (_label, alignment, confirmed) => {
     await save(alignment, confirmed); await useAppStore.getState().updateDemand('goal', { status: 'done' }); await mount(); await click('Show finished')
     expect([...container.querySelectorAll('[data-demand-id]')].map(node => node.getAttribute('data-demand-id'))).toEqual(['goal'])
-    expect(next()).toBe('Results not verified')
-    expect(container.querySelector('.goals-no-results')?.textContent).toContain('Marked done, but no report has checked the work against success criteria.')
+    expect(next()).toBe('Marked done · No verification report')
+    expect(container.querySelector(confirmed ? '[data-goal-grounding]' : alignment ? '[data-goal-confirm]' : '[data-goal-grill]')?.classList.contains('primary-button')).toBe(true)
     expect(container.querySelector('[data-goal-accept], [data-goal-accept-gaps]')).toBeNull()
     const restored = (await openDemandStore({ root: temporaryRoot }).get('goal'))!
     expect(restored.status).toBe('done'); expect(restored.grounding).toBeUndefined()
@@ -170,6 +170,8 @@ describe('mounted Goals → actual Renderer store → durable Demand owner', () 
     // Existing incomplete durable record: normal submission requires a goal; reading must still preserve its report.
     const snapshot = await owner.snapshot(); delete snapshot.demands[0]!.alignment
     await writeFile(owner.storePath, JSON.stringify(snapshot)); await useAppStore.getState().refreshDemand('goal'); await mount()
+    await click('Read results')
+    expect(document.activeElement).toBe(container.querySelector('[data-goal-grounding-submission]'))
     expect(container.querySelector('[data-goal-result-summary]')?.textContent).toBe(report().summary)
     expect([...container.querySelectorAll('[data-goal-outcome]')].map(node => node.getAttribute('data-goal-outcome'))).toEqual(['met', 'met'])
     await openReportedEvidence()

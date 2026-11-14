@@ -79,7 +79,7 @@ it('the primary gap completion action preserves the reviewed gap through actual 
 
 it('Done without current acceptance stays in the default list, including when an earlier accepted goal is revised', async () => {
   await demands.update('goal', { status: 'done' }); await publish(); await mount()
-  expect(row()).not.toBeNull(); expect(row()?.textContent).toContain('Results not verified')
+  expect(row()).not.toBeNull(); expect(row()?.textContent).toContain('Marked done · No verification report')
   expect(container.querySelector('[data-goal-accept], [data-goal-finish]')).toBeNull()
   const grounded = await demands.proposeGrounding('goal', report())
   await demands.acceptGrounding('goal', 1, grounded.demand.grounding!.submissionId)

@@ -192,8 +192,16 @@ it('presents a normal confirmed goal without a report as one closed compact read
 it.each(['absent', 'unconfirmed', 'confirmed'] as const)('keeps Done with %s definition and no report visibly unverified', async kind => {
   await seed({ alignment: kind === 'absent' ? null : proposal, confirmed: kind === 'confirmed', done: true }); await mount()
   expect(body().querySelector('.goal-review--compact')).toBeNull()
-  expect(body().querySelector('.goals-no-results strong')?.textContent).toBe('Results not verified')
-  expect(body().querySelector('.goals-no-results')?.closest('details:not([open])')).toBeNull()
+  expect(body().querySelector('[data-goal-detail-stage]')?.textContent).toBe('Marked done · No verification report')
+  expect([...body().querySelectorAll('button')].some(button => button.textContent === 'Read results')).toBe(false)
+  const next = action(kind === 'absent' ? '[data-goal-grill]' : kind === 'unconfirmed' ? '[data-goal-confirm]' : '[data-goal-grounding]')
+  expect(next.classList.contains('primary-button')).toBe(true)
+  expect(next.closest('details:not([open])')).toBeNull()
+  if (kind === 'absent') {
+    expect(next.textContent).toBe('Draft criteria from brief')
+    const brief = body().querySelector('[data-goal-reading-section="overview"]')!
+    expect(brief.compareDocumentPosition(next) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  }
   expect(action('[data-goal-accept], [data-goal-accept-gaps]')).toBeNull()
 })
 

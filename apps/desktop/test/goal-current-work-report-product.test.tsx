@@ -68,7 +68,7 @@ it('the screenshot combination keeps its frozen inspection and origin above expa
   expect(Boolean(origin!.compareDocumentPosition(record!) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true)
   const records = record!.closest('details')!
   expect(records.open).toBe(false)
-  expect(records.querySelector('summary')?.textContent).toBe('1 original execution · 1 need checking')
+  expect(records.querySelector('summary')?.textContent).toBe('1 original execution · 1 to check')
   const inputsBeforeReading = [...f.nativeInputs]
   await act(async () => records.querySelector('summary')!.click())
   expect(records.open).toBe(true)

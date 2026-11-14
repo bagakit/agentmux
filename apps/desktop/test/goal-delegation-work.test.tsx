@@ -93,7 +93,7 @@ describe('original delegation reading facts', () => {
     expect(goalNextStep(record)).toBe('Delegation observation unknown')
     // A Goal marked Done without an accepted report points at the missing verification (behavior SSOT goals-and-demand
     // 「状态、筛选与路由队列」). Status never reads as completion, and the original delegation stays unknown.
-    expect(goalNextStep({ ...record, status: 'done' })).toBe('Results not verified')
+    expect(goalNextStep({ ...record, status: 'done' })).toBe('Marked done · No verification report')
     expect(goalDelegationRows({ ...record, status: 'done' })[0]!.state).toBe('unknown')
     expect(goalDelegationRows({ ...record, delegationObservations: [{ ...observation('exited'), workerRun: { runId: 'replacement-run', state: 'exited' } }] })[0]!.state).toBe('unknown')
     expect(goalNextStep({ ...record, delegationObservations: [observation('exited')] })).toBe('No report · Continue the original Agent')
@@ -272,7 +272,9 @@ describe('mounted original Goal delegation consumer', () => {
     await mount(record, createElement(GoalDelegationWork, { demand: { ...record, sessions: [], workspacePath: null } }))
     expect(read).toHaveBeenCalledWith('goal.delegations', { goalId: record.id })
     expect(container.textContent).toContain('Agent ended · Check Goal results or continue')
-    expect(container.textContent).toContain('Original Start and input')
+    await act(async () => container.querySelector<HTMLElement>('.goal-request-reader > summary')!.click())
+    await vi.waitFor(() => expect(container.querySelector('[data-option="execution"]')).not.toBeNull())
+    await click('Execution details')
     expect(container.textContent).toContain('prompt:original-start')
     expect(container.textContent).not.toContain('Collect report')
     await click('Open original Agent')

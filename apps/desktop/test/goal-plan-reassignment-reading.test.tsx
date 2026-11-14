@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { act } from 'react'
-import { expect, it } from 'vitest'
+import { expect, it, vi } from 'vitest'
 import type { DemandRecord } from '../src/renderer/src/lib/global-demand-board'
 import { GoalDelegationWork } from '../src/renderer/src/components/GoalDelegationWork'
 import { goalPlanProjection } from '../src/renderer/src/components/GoalPlanGraph'
@@ -32,7 +32,9 @@ it('the mounted work reader marks a superseded report as a previous attempt usin
   expect(row).not.toBeNull(); expect(row.textContent).toContain('Previous attempt')
   expect(row.textContent).toContain('A late original result stays readable')
   const disclosure = row.querySelector<HTMLDetailsElement>('.goal-delegation__source')!
-  await act(async () => { disclosure.open = true })
+  await act(async () => disclosure.querySelector<HTMLElement>('summary')!.click())
+  await vi.waitFor(() => expect(disclosure.querySelector('[data-option="execution"]')).not.toBeNull())
+  await act(async () => disclosure.querySelector<HTMLButtonElement>('[data-option="execution"]')!.click())
   expect(disclosure.textContent).toContain('original-source'); expect(disclosure.textContent).toContain('original-thread')
   const { planState: _, ...unavailable } = record
   expect(goalDelegationRows(unavailable)[0]).not.toHaveProperty('previousAttempt')
