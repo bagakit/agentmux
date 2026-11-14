@@ -11,8 +11,9 @@ const LoadingIcon = semanticIconComponent('status.loading')
 const ChevronIcon = semanticIconComponent('navigation.submenu')
 
 /** Presentation only. The caller retains the original page and recovery operation. */
-export function BrowserRecoverySurface({ url, objectLink, title, faviconDataUrl, heading, description, error, busy, restoring,
+export function BrowserRecoverySurface({ visible = true, url, objectLink, title, faviconDataUrl, heading, description, error, busy, restoring,
   preview, retryLabel = 'Retry', onRetry, onEditAddress, onCopy }: {
+  visible?: boolean | undefined
   url: string
   objectLink?: string | undefined
   title: string
@@ -31,6 +32,10 @@ export function BrowserRecoverySurface({ url, objectLink, title, faviconDataUrl,
   const [copyResult, setCopyResult] = useState<{ url: string; successful: boolean } | null>(null)
   const [failedFavicon, setFailedFavicon] = useState<string | null>(null)
   const [failedPreview, setFailedPreview] = useState<string | null>(null)
+  const [presented, setPresented] = useState(visible)
+  // Native ownership stays with BrowserPane; keep this view warm after its first presentation.
+  if (!presented && visible) setPresented(true)
+  if (!presented && !visible) return null
   const previous = preview?.status === 'available' ? preview.preview : null
   const address = objectLink ?? url
   const previousImage = previous?.image.dataUrl

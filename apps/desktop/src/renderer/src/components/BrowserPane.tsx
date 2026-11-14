@@ -1305,7 +1305,7 @@ function BrowserPaneContent({
             onEdited={screenshotEdited}
             onOriginalOpened={() => setScreenshot(current => current ? { kind: 'open', key: current.key } : null)}
             onError={reportError}
-          /> ) : connectionUnavailable ? <BrowserRecoverySurface
+          /> ) : connectionUnavailable ? <BrowserRecoverySurface visible={visible}
           url={tab.url} objectLink={tab.objectLink} title={tab.title} faviconDataUrl={tab.faviconDataUrl}
           preview={currentRecoveryPreview}
           heading={restoring ? 'Restoring browser' : restoreError ? 'Browser connection needs attention' : 'Browser parked'}
@@ -1378,7 +1378,7 @@ function BrowserPaneContent({
             </div>
           </div>
         ) : tab.error ? (
-          <BrowserRecoverySurface url={tab.url} objectLink={tab.objectLink} title={tab.title} faviconDataUrl={tab.faviconDataUrl}
+          <BrowserRecoverySurface visible={visible} url={tab.url} objectLink={tab.objectLink} title={tab.title} faviconDataUrl={tab.faviconDataUrl}
             preview={currentRecoveryPreview}
             heading="Page needs attention"
             description="Your tab and address are kept. Retry, or check the address to continue."
