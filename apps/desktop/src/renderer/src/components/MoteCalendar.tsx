@@ -23,7 +23,7 @@ import { SurfaceModeSwitch } from './SurfaceModeSwitch'
 import { ScheduleArrangementRow, scheduleCalendarLabel, scheduleDisplayTitle, scheduleRuleLabel, scheduleStateLabel } from './ScheduleArrangementRow'
 import { ScheduleCreateForm } from './ScheduleCreateForm'
 import { MoteCalendarTimes } from './MoteCalendarTimes'
-import { MoteScheduleHistory } from './MoteScheduleHistory'
+import { MoteCalendarEvents } from './MoteCalendarEvents'
 
 const ChevronLeft = semanticIconComponent('navigation.back')
 const ChevronRight = semanticIconComponent('navigation.forward')
@@ -203,11 +203,12 @@ export function MoteCalendar({ scope, reference, active, openRequest }: {
   const today = DateTime.fromMillis(now, { zone: timezone }).toISODate()!
   const hourKeyOfSelection = selected + ':' + selectedHour
   const selectedSlot = hourly.get(hourKeyOfSelection)
-  const historyWindow = timed ? hourWindows.get(hourKeyOfSelection) : calendarDayWindow(selectedDate)
-  const showHistory = historyWindow && historyWindow.from <= now
+  const eventWindow = timed ? selectedSlot?.window : calendarDayWindow(selectedDate)
   const selectedGroups = timed ? selectedSlot?.groups ?? [] : days.get(selected) ?? []
   const selectedCount = selectedGroups.reduce((sum, group) => sum + group.planned, 0)
-  const acceptedCount = selectedGroups.filter(group => group.accepted).length
+  const selectedEvents = useMemo(() => eventWindow ? sliceScheduleOccurrences(occurrences, eventWindow) : [],
+    [occurrences, eventWindow?.from, eventWindow?.to])
+  const selectedPlans = useMemo(() => selectedEvents.filter(item => item.kind !== 'last-accepted'), [selectedEvents])
   const ordered = (mode === 'upcoming' && showEnded ? [...source.records] : [
     ...records, ...selectedGroups.filter(group => group.record.status === 'stopped').map(group => group.record)
   ]).sort((a, b) => a.nextCheckAt - b.nextCheckAt || a.loopId.localeCompare(b.loopId))
@@ -253,10 +254,12 @@ export function MoteCalendar({ scope, reference, active, openRequest }: {
     setSelectedSchedule(scheduleId)
     if (focusFrame.current !== undefined) cancelAnimationFrame(focusFrame.current)
     focusFrame.current = requestAnimationFrame(() => {
-      const history = recorded && visible.current ? agenda.current?.querySelector<HTMLElement>('.mote-calendar__recorded h4') : null
-      if (!history) { focusArrangement(agenda.current, scheduleId); return }
-      history.focus({ preventScroll: true })
-      history.scrollIntoView?.({ block: 'nearest' })
+      const event = recorded && visible.current
+        ? Array.from(agenda.current?.querySelectorAll<HTMLButtonElement>('[data-event-schedule]') ?? []).find(item => item.dataset.eventSchedule === scheduleId)
+        : undefined
+      if (!event) { focusArrangement(agenda.current, scheduleId); return }
+      event.focus({ preventScroll: true })
+      event.scrollIntoView?.({ block: 'nearest' })
     })
   }
   function selectHour(date: DateTime, hour: number, focus = false) {
@@ -345,24 +348,21 @@ export function MoteCalendar({ scope, reference, active, openRequest }: {
             })}
           </div></div>)}
         </div></div> : null}
-        <footer className="mote-calendar__legend"><span>{timezone}</span><span>{timed ? 'Plan by hour and latest input' : 'Plan by day and latest input'}</span></footer>
+        <footer className="mote-calendar__legend"><span>{timezone}</span><span>{timed ? 'Events by hour' : 'Events by day'}</span></footer>
       </div>
       <section ref={agenda} className="mote-calendar__day" aria-label="Selected day arrangements">
         <section className="mote-calendar__window-info" aria-label={timed ? 'Selected hour' : 'Selected date'}>
           <header><h4>{timed ? 'Selected hour' : 'Selected date'}</h4><span>{selectedDate.toFormat('LLL d')}{timed ? ' · ' + hourLabel(selectedHour) : ''}</span></header>
-          {showHistory ? <MoteScheduleHistory window={historyWindow} records={source.records} timezone={timezone}
-            active={active && queries.length > 0} selectedSchedule={selectedSchedule} onSelectSchedule={setSelectedSchedule} /> : null}
-          {selectedGroups.length ? <div className="mote-calendar__window-card">
-            <p className="mote-calendar__plan-total">{!selectedCount && acceptedCount ? <><strong>{acceptedCount}</strong> accepted</> : <><strong>{formatCount.format(selectedCount)}</strong> planned</>}</p>
-            <ul aria-label="Planned triggers by arrangement">{selectedGroups.map(group => <li key={group.record.loopId} data-managed={!!group.record.managedSource}>
-              <button type="button" title={scheduleDisplayTitle(group.record)} onClick={() => revealArrangement(group.record.loopId, Boolean(group.accepted))}>{scheduleCalendarLabel(group.record)}</button>
-              <span>{group.planned ? formatCount.format(group.planned) : group.due ? scheduleStateLabel(group.record, now) : '—'}</span>
-              {group.accepted ? <small>✓ {DateTime.fromMillis(group.accepted.at, { zone: timezone }).toFormat('HH:mm')} input accepted</small> : null}
-            </li>)}</ul>
-            {timed && selectedSlot ? <MoteCalendarTimes key={selected + ':' + selectedHour} items={selectedSlot.items} schedules={byId} timezone={timezone} now={now}
+          {source.observed && eventWindow ? <MoteCalendarEvents key={JSON.stringify([queryKey, eventWindow.from, eventWindow.to])}
+            window={eventWindow} schedules={byId} items={selectedEvents} timezone={timezone} now={now}
+            active={active && queries.length > 0} onOpenRule={revealArrangement} onOpenDiscussion={openDiscussion} />
+            : <p className="continuous-progress-control__help">{source.observed ? 'This hour does not exist in the calendar timezone.' : 'Arrangements are unconfirmed.'}</p>}
+          {selectedCount ? <div className="mote-calendar__period-plan">
+            <p className="mote-calendar__plan-total"><strong>{formatCount.format(selectedCount)}</strong> planned</p>
+            {timed && selectedSlot ? <MoteCalendarTimes key={selected + ':' + selectedHour} items={selectedPlans} schedules={byId} timezone={timezone} now={now}
               repeatedHour={selectedSlot.window.to - selectedSlot.window.from > 3_600_000} onOpen={revealArrangement} />
               : <Button type="button" onClick={() => changeMode('day')}>Open day</Button>}
-          </div> : !source.observed || !showHistory && source.records.length > 0 ? <p className="continuous-progress-control__help">{!source.observed ? 'Arrangements are unconfirmed.' : 'No planned triggers in this period.'}</p> : null}
+          </div> : null}
         </section>
         <header><h4>Saved arrangements</h4><span>{source.observed ? ordered.length + ' shown' : 'Unconfirmed'}</span></header>
         {ordered.length ? <ol className="calendar-schedules__list" aria-label="Saved arrangements">{ordered.map(row)}</ol> : null}
