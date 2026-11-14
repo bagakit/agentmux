@@ -6,7 +6,7 @@ import { moteMainCreatedReference, moteMainBindingDefaults } from '@agentmux/cor
 import { createHash } from 'node:crypto'
 import type { ConversationCheckpoint } from '@agentmux/core/mote-dialogue'
 import type { MoteMainTransitionMarker } from '@agentmux/core/mote-preferences'
-import { AgentMuxError, spatialCatalog, type AgentMuxSpatialStateStore } from '@agentmux/core'
+import { AgentMuxError, spatialCatalog, type AgentMuxSpatialStateStore, type DispatchObservation } from '@agentmux/core'
 import { moteMainRoleRevision, observeMoteWorkSource, type MoteMainReader, type MoteMainSnapshot, type MoteSupervisionObservation } from '@agentmux/core/mote-dialogue'
 import type { MotePreferencesTarget } from '@agentmux/core/mote-preferences'
 import type { AgentMuxRpcFilesOwner } from '@agentmux/core/files'
@@ -158,15 +158,21 @@ export function createHostMoteDialogue(options: {
     async supervision(raw, context) {
       const input = parseMoteDialogueParams('space.mote.dialogue.supervision.read', raw)
       const page = await this.read({ ...input, kind: 'work' }, context)
+      const sources = new Map<string, Promise<DispatchObservation>>()
       const observations = await Promise.all(page.links.map(async (link): Promise<MoteSupervisionObservation> => {
         try {
           context?.signal?.throwIfAborted()
           if (link.kind !== 'work') throw new Error('This source is not an original work association.')
           if (context?.caller && !context.readDispatch)
             throw new AgentMuxError('The original authenticated Dispatch reader is unavailable. Retain the source and inspect it through message dispatch read.', 'CONTROL_UNAVAILABLE')
-          const observed = context?.readDispatch
+          const sourceKey = JSON.stringify([link.origin.hostId, link.origin.messageId])
+          const pending = sources.get(sourceKey)
+          const reading = pending ?? (async () => context?.readDispatch
             ? await context.readDispatch(link.origin.hostId, link.origin.messageId)
-            : await (await options.clientForHost(link.origin.hostId)).readDispatch({ sourceMessageId: link.origin.messageId })
+            : await (await options.clientForHost(link.origin.hostId)).readDispatch({ sourceMessageId: link.origin.messageId }))()
+          if (!pending) sources.set(sourceKey, reading)
+          const observed = await reading
+          // Share original reads only in this request; every association keeps its own qualification.
           return observeMoteWorkSource(link, observed)
         } catch (error) {
           context?.signal?.throwIfAborted()
