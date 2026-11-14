@@ -310,8 +310,8 @@ describe('compiled object CLI through a private RPC transport probe', () => {
   })
 
   it('prints the original response then full notifications, preserving bytes/cursors and reader-only cancellation', async () => {
-    // Byte/cursor, progress and snapshot framing representatives. The complete
-    // registration test above routes every stream through the original probe too.
+    // Byte/cursor, progress and snapshot framing representatives. The explicit
+    // argv fixtures above cover only their own registered stream subset.
     const streamMethods = new Set(['agent.output', 'terminal.output', 'browser.follow', 'system.metrics.watch', 'toolkit.watch'])
     const streamEntries = AGENTMUX_CLI_COMMANDS.filter(entry => streamMethods.has(entry.method))
     expect(streamEntries.map(entry => entry.method).sort()).toEqual([...streamMethods].sort())
