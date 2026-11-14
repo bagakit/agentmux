@@ -10,8 +10,16 @@ attempt (delegation operation, source MID and thread) and every unknown reason; 
 instead of deriving state yourself. Goal records carry the same planState with their plan.
 Without planState the owner gave no derivation: node states are unknown to you, while the
 plan and delegations still read as returned.
-goal discuss --goal ID --mode plan --operation-id OP explicitly requests a saved plan in the
-original dedicated discussion. open only navigates. Keep OP after an unknown input result;
+goal discuss --goal ID --mode plan --operation-id OP explicitly asks the current Supervisor
+to save a plan through the original Host request owner. With no Supervisor, choose one
+explicitly before sending; selection itself sends nothing. As the Supervisor, read and
+revise the plan directly instead of requesting it from yourself. Planning waits for eligible
+input, retaining its original request and target. Read goal plan for the saved request and
+its observation: delivered still waits for a saved newer plan revision. A never-attempted
+request may use goal patrol continue after same-Session recovery; a planning request never
+uses goal patrol report. Old frozen or claimed dedicated-discussion requests only reconcile
+their original input, without resending or redirecting. A new explicit operation may ask the
+current Supervisor independently. open only navigates. Keep OP after an unknown input result;
 an acknowledgement or a textual breakdown does not prove that a plan was saved. Read the
 same Goal plan to observe its actual revision and nodes. Planning does not start work,
 enable continuous progress, confirm the Goal or accept results.
