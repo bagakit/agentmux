@@ -132,9 +132,9 @@ describe('dragging a sheet down to close', () => {
     await act(async () => root.render(<section className="mobile-sheet"><MobileSheetHandle onClose={onClose} /></section>))
     return { sheet: node.querySelector<HTMLElement>('.mobile-sheet')!, handle: node.querySelector<HTMLElement>('.mobile-sheet-handle')! }
   }
-  function pointer(type: string, y: number, t: number) {
+  function pointer(type: string, y: number, t: number, id = 1) {
     const event = new MouseEvent(type, { bubbles: true, cancelable: true, clientY: y, button: 0 }) as MouseEvent & { pointerId: number }
-    Object.defineProperty(event, 'pointerId', { value: 1 }); Object.defineProperty(event, 'timeStamp', { value: t })
+    Object.defineProperty(event, 'pointerId', { value: id }); Object.defineProperty(event, 'timeStamp', { value: t })
     return event
   }
   it('moves the sheet with the finger and closes once on a long drag', async () => {
@@ -153,5 +153,25 @@ describe('dragging a sheet down to close', () => {
     await act(async () => { view.handle.dispatchEvent(pointer('pointermove', 540, 900)); view.handle.dispatchEvent(pointer('pointerup', 540, 1400)) })
     expect(close).not.toHaveBeenCalled()
     expect(view.sheet.style.getPropertyValue('--mobile-sheet-drag')).toBe('')
+  })
+
+  it('retains the first finger and returns to rest when only its capture is lost', async () => {
+    const close = vi.fn(), view = await sheet(close)
+    const send = (type: string, y: number, time: number, id: number) => view.handle.dispatchEvent(pointer(type, y, time, id))
+    await act(async () => {
+      send('pointerdown', 500, 0, 1)
+      send('pointermove', 550, 120, 1)
+      send('pointerdown', 500, 150, 2)
+      send('pointermove', 700, 230, 2)
+      send('lostpointercapture', 700, 250, 2)
+    })
+    expect(view.sheet.style.getPropertyValue('--mobile-sheet-drag')).toBe('50px')
+    await act(async () => {
+      send('lostpointercapture', 550, 300, 1)
+      send('pointerup', 660, 400, 1)
+    })
+    expect(view.sheet.dataset.sheetDrag).toBeUndefined()
+    expect(view.sheet.style.getPropertyValue('--mobile-sheet-drag')).toBe('')
+    expect(close).not.toHaveBeenCalled()
   })
 })

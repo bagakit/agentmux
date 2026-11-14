@@ -36,6 +36,8 @@ try {
   } }
   const mutationId = process.argv.find(value => value.startsWith('--mutation='))?.slice('--mutation='.length)
   const variants = {
+    'sheet-close-stays-open': { file: 'apps/mobile/src/navigation/MobileSheetHeader.tsx',
+      before: 'aria-label={closeLabel}', after: 'aria-label={closeLabel} onClick={event => event.preventDefault()}' },
     'tool-format-follows-tail': { file: 'packages/client-ui/src/lib/conversation-body-work.ts', before: '    pauseFollowing()\n    this.anchor = { node: control', after: '    this.anchor = { node: control' },
     'tool-format-drops-state': { file: 'packages/client-ui/src/components/ConversationToolPayload.tsx', before: 'aria-pressed={formatted}', after: 'aria-pressed={false}' },
     'directory-retains-closed-issue': { file: 'apps/mobile/src/navigation/MobileDirectoryNotice.tsx', edits: [

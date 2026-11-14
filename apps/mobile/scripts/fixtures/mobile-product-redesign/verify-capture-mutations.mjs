@@ -7,6 +7,7 @@ import { relative, resolve } from 'node:path'
 // load or timeout failure is not mutation proof. Usage: verify-capture-mutations.mjs --<subset> <id>...
 const root = resolve(import.meta.dirname, '../../../../..'), capture = resolve(import.meta.dirname, 'capture-ui.mjs')
 const bearing = {
+  'sheet-close-stays-open': 'The shared Close control releases the sheet and returns focus to its original trigger',
   'auxiliary-spacing': 'Auxiliary process rows avoid stacked outer margins',
   'auxiliary-touch': 'Auxiliary snapshot keeps a 44px touch target',
   'auxiliary-source-labels': 'Auxiliary collapsed snapshot reserves width for its original summary',

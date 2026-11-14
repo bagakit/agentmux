@@ -41,7 +41,9 @@ module.exports = async ({ win, read, until, resize, tap, button, capture, result
       await capture('directory-notices-technical-details-short-light')
     }
     await button('关闭目录信息', '.mobile-directory-issues')
-    await until('!document.querySelector(".mobile-directory-issues") && document.activeElement===window.directoryNoticeInvoker')
+    const restored = '!document.querySelector(".mobile-directory-issues") && document.activeElement===window.directoryNoticeInvoker'
+    try { await until(restored) }
+    catch { assert.ok(await read(restored), 'The shared Close control releases the sheet and returns focus to its original trigger') }
     assert.equal(await read('mobileProductScene.facts().calls.filter(c=>c.method==="space.ls").length'), reads, 'Disclosure itself adds no directory read')
     result.directoryNotices.push({ width, height, appearance, collapsed, expanded })
   }
