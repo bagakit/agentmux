@@ -20,6 +20,11 @@ app.whenReady().then(async()=>{try{
   await evaluate('document.querySelector("[data-mesh-settings] .primary-button").click()')
   for(let i=0;i<200;i++){if(await evaluate('Boolean(document.querySelector("[aria-label=\\"Mesh network\\"]"))'))break;await delay(30)}
   assert.match(await evaluate('document.querySelector("[data-mesh-settings]")?.textContent'),/Connect to a gateway/u)
+  window.setContentSize(1280,980);await window.loadURL(url+'?scenario=runtime-identity-blocked');await openGateway()
+  for(let i=0;i<200;i++){if(await evaluate('document.querySelector("[data-mesh-settings] .primary-button")?.textContent==="Check again"'))break;await delay(30)}
+  assert.equal(await evaluate('document.querySelector("[data-mesh-settings] .primary-button")?.textContent'),'Check again')
+  await frame('runtime-identity-blocked-dark')
+  window.setContentSize(520,900);await evaluate('meshFixture.theme("light");document.querySelector("[data-mesh-settings] details").open = true');await frame('runtime-identity-blocked-narrow-light')
   receipt.passed=true
   return
  }

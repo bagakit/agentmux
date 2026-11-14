@@ -9,7 +9,8 @@ mkdirSync(evidence, { recursive: true, mode: 0o700 })
 const phases = []
 for (const [label, selected] of [
   ['baseline'], ['main-load-before-recovery', 'actual Main buildWindow'], ['main-load-before-identity', 'actual Main buildWindow'],
-  ['accept-wrong-runtime-binding', 'the App picker'], ['select-only-newest-identity-backup', 'verified earlier backup'],
+  ['accept-wrong-runtime-binding', 'the App picker'], ['keep-stale-healthy-identity', 'Desktop boot restores missing identity'],
+  ['require-readable-auxiliary-signer', 'the App picker'], ['select-only-newest-identity-backup', 'verified earlier backup'],
   ['reuse-completed-identity-receipt', 'verified earlier backup'], ['skip-missing-originals', 'actual startHost'],
   ['unknown-default-write', 'explicitly unused namespace'], ['disconnect-host-source', 'actual startHost'], ['restored']
 ]) {

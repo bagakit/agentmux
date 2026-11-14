@@ -16,7 +16,8 @@ let settings: MeshNetworkSettings = { owner: { runtimeId: 'core-original-review'
 const originalOffer = { v: 2 as const, serverId: target, daemonPublicKeyB64: 'Hx8fHx8fHx8fHx8fHx8fHx8fHx8fHx8fHx8fHx8fHx8=', relay: { endpoint: 'original-edge.local:7443', useTls: true } }
 let state = new URLSearchParams(location.search).get('scenario') ?? 'active'
 if (state === 'initial' || state === 'runtime-identity') settings = { ...settings, configuration: { ...settings.configuration, role: 'disabled', networkId: 'my-devices', listen: undefined, advertisedIngress: [] } }
-api.ui.readLocalRuntimeRecovery = async () => state === 'runtime-identity' ? { state: 'needs-backup', code: 'IDENTITY_SOURCE_MISSING' } : { state: 'unchanged' }
+api.ui.readLocalRuntimeRecovery = async () => state === 'runtime-identity' ? { state: 'needs-backup', code: 'IDENTITY_SOURCE_MISSING' }
+  : state === 'runtime-identity-blocked' ? { state: 'blocked', code: 'IDENTITY_TARGET_UNCONFIRMED' } : { state: 'unchanged' }
 api.ui.restoreLocalRuntimeIdentity = async () => { state = 'initial'; return { state: 'restored' } }
 function observation(): MeshNetworkInspection {
  const record = (originPeerId: string, neighbors: number[], index: number) => ({ version: 1 as const, networkId: 'work-machines', originPeerId, epoch: 3, revision: 8, signature: 'fixture', publishers: index === 2 ? [{ serverId: target, generation: 'generation-original' }] : [], advertisedIngress: [], neighbors: neighbors.map(n => ({ peerId: ids[n]!, peerEpoch: 3, connectionId: `link-${Math.min(index,n)}-${Math.max(index,n)}`, rttMs: 23 })) })
@@ -25,7 +26,7 @@ function observation(): MeshNetworkInspection {
  endpoint: state === 'endpoint' ? { state: 'available', offer: originalOffer } : { state: 'not-provided' }, observedAt: Date.now(), coverage: { configuredOrigins: 3, observedOrigins: 3, complete: true } }
 }
 api.mesh.call = (async (method: string, params: any) => {
- if (state === 'runtime-identity') throw Object.assign(Error('The original Runtime identity is missing.'), { code: 'IDENTITY_SOURCE_MISSING' })
+ if (state === 'runtime-identity' || state === 'runtime-identity-blocked') throw Error('The original Runtime identity is unavailable.')
  if (state === 'unavailable') throw Object.assign(Error('This original Core has no durable Mesh settings owner.'), { code: 'MESH_OWNER_UNAVAILABLE' })
  if (state === 'settings-error' && method === 'settings.mesh.inspect') throw Error('The original settings reader is unavailable. The authenticated network is still observed.')
  if (method === 'mesh.inspect') { const result = observation(); return state === 'initial' ? { ...result, apply: { state: 'disabled' }, gateway: { state: 'disabled' }, network: null, coverage: { configuredOrigins: 0, observedOrigins: 0, complete: true } } : result }

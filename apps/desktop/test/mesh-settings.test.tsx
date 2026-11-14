@@ -56,7 +56,7 @@ it('refreshing Mesh after the offline owner lease releases shows the App recover
     expect(read.mock.calls.length).toBeGreaterThan(1)
   } finally { read.mockRestore(); call.mockRestore() }
 })
-it('Mesh reopens setup when automatic recovery finishes after its refresh already failed', async () => {
+it.each(['restored', 'unchanged'] as const)('Mesh reopens setup when identity resolves to %s after its refresh already failed', async state => {
   let restored = false, finish!: () => void
   const read = vi.spyOn(api.ui, 'readLocalRuntimeRecovery').mockResolvedValue({ state: 'deferred' })
   const call = vi.spyOn(api.mesh, 'call').mockImplementation(async method => {
@@ -67,7 +67,7 @@ it('Mesh reopens setup when automatic recovery finishes after its refresh alread
     await dom.render(<Editor active />)
     await settled(() => dom.container.textContent?.includes('Refresh Mesh') ?? false)
     read.mockImplementation(async () => await new Promise(resolve => {
-      finish = () => { restored = true; resolve({ state: 'restored' }) }
+      finish = () => { restored = true; resolve({ state }) }
     }))
     await dom.click('[data-mesh-settings] .primary-button')
     expect(dom.container.textContent).toContain('Refresh Mesh')
@@ -75,6 +75,20 @@ it('Mesh reopens setup when automatic recovery finishes after its refresh alread
     await ready()
     expect(dom.container.textContent).toContain('Connect to a gateway')
   } finally { read.mockRestore(); call.mockRestore() }
+})
+it('Mesh describes an unconfirmed local identity without asking for a different backup', async () => {
+  const read = vi.spyOn(api.ui, 'readLocalRuntimeRecovery').mockResolvedValue({ state: 'blocked', code: 'IDENTITY_TARGET_UNCONFIRMED' })
+  const pick = vi.spyOn(api.ui, 'restoreLocalRuntimeIdentity')
+  const call = vi.spyOn(api.mesh, 'call').mockRejectedValue(Error('The original Host is unavailable'))
+  try {
+    await dom.render(<Editor active onConnections={vi.fn()} />)
+    await settled(() => dom.container.textContent?.includes('Couldn’t verify this Mac’s identity') ?? false)
+    await dom.click('[data-mesh-settings] .primary-button')
+    expect(read.mock.calls.length).toBeGreaterThan(1)
+    expect(pick).not.toHaveBeenCalled()
+    expect(dom.container.textContent).toContain('Open saved connections')
+    expect(dom.container.textContent).toContain('IDENTITY_TARGET_UNCONFIRMED')
+  } finally { read.mockRestore(); pick.mockRestore(); call.mockRestore() }
 })
 it('the original Settings section exposes Mesh and a real editor; saved connection identities keep their original route', async () => {
   inspectOnly(); expect(hostsSettingsModule.id).toBe('hosts'); expect(hostsSettingsModule.title).toBe('Mesh')

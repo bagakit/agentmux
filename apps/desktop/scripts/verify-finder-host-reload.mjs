@@ -81,13 +81,15 @@ try {
   const wrongStore = { ...service, storePath: join(state, 'unrelated-sessions.json') }
   await assert.rejects(reloadReplacedMacosHost(wrongStore), /not confirmed for this installation and Store/u)
   const identities = ['semantic-runtime.json', 'semantic-runtime.json.original'].map(name => join(state, name))
-  for (const identity of identities) await rename(identity, identity + '.fixture-held')
-  try {
-    await assert.rejects(reloadReplacedMacosHost(service), { code: 'IDENTITY_SOURCE_MISSING' })
-    await connect()
-    assert.equal((await owner()).processId, before.processId, 'A missing recovery identity leaves the live original Host available')
-    await disconnect()
-  } finally { for (const identity of identities) await rename(identity + '.fixture-held', identity) }
+  for (const held of [identities.slice(0, 1), identities]) {
+    for (const identity of held) await rename(identity, identity + '.fixture-held')
+    try {
+      await assert.rejects(reloadReplacedMacosHost(service), { code: 'IDENTITY_SOURCE_MISSING' })
+      await connect()
+      assert.equal((await owner()).processId, before.processId, 'A missing primary leaves the live original Host available')
+      await disconnect()
+    } finally { for (const identity of held) await rename(identity + '.fixture-held', identity) }
+  }
   const wrongRuntime = join(root, 'wrong-runtime')
   await mkdir(wrongRuntime, { mode: 0o700 })
   process.env.AGENTMUX_RUNTIME_DIRECTORY = wrongRuntime

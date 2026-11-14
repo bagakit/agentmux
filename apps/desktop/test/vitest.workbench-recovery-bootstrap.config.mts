@@ -9,6 +9,8 @@ const edits: Record<string, [string, string, string]> = {
   'main-load-before-recovery': ['apps/desktop/src/main/index.ts', '    await recoverWorkbench()', '    void recoverWorkbench()'],
   'main-load-before-identity': ['apps/desktop/src/main/index.ts', '    await runtimeIdentityRecovery.check()', '    void runtimeIdentityRecovery.check()'],
   'accept-wrong-runtime-binding': ['packages/core/src/semantic-runtime-identity.ts', 'value.authority !== authority', 'false'],
+  'keep-stale-healthy-identity': ['apps/desktop/src/main/local-runtime-recovery.ts', 'if (current === result) current = undefined', 'if (false) current = undefined'],
+  'require-readable-auxiliary-signer': ['packages/core/src/immutable-identity-file.ts', "await read(path + '.original').catch(() => null)", "await read(path + '.original')"],
   'select-only-newest-identity-backup': ['packages/core/src/storage-recovery-maintenance.ts', 'of await owner.recovery.list()', 'of (await owner.recovery.list()).slice(0, 1)'],
   'reuse-completed-identity-receipt': ['packages/core/src/storage-recovery-maintenance.ts', "prior?.state === 'complete'; attempt++", 'false; attempt++'],
   'skip-missing-originals': ['apps/desktop/src/main/workbench-recovery-bootstrap.ts', "if (!absent.length) return { state: 'unchanged' }", "if (true) return { state: 'unchanged' }"],
