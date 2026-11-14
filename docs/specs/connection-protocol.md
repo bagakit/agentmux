@@ -46,7 +46,7 @@ Core 不构造平台 adapter，也不保存凭据。宿主通过 `AgentMuxRpcSer
 
 方法：`connection.ls`、`connection.inspect`、`connection.configure`、`connection.test`、`connection.delete`、`connection.delete.inspect`。合同：[connections-contract](../../packages/core/src/connections-contract.ts)、[connection-deletion-contract](../../packages/core/src/connection-deletion-contract.ts)。
 
-- 一个连接的应用身份是平台域名加 App ID（`application.domain`、`application.appId`）和 `adapterId`，保存后不能改；`credentialRef`、`label`、`enabled` 可以在准确修订上修改。配置只保存不透明的 `credentialRef`，从不包含凭据值或路径。
+- 一个连接的应用身份由 `application` 和 `adapterId` 确定，保存后不能改。`application.domain` 标识平台，`application.appId` 保留原生不透明 ID；协议将账号限定在服务实例时，另保留经原认证确认的 `application.issuer`，不得把实例拼入原生 ID 或用连接别名代替。相同原生 ID 在不同实例下是不同应用；未提供实例的原身份保持原范围，不能继承或补填另一实例。`credentialRef`、`label`、`enabled` 可以在准确修订上修改。配置只保存不透明的 `credentialRef`，从不包含凭据值或路径。
 - `connection.inspect --operation-id` 返回原配置回执，同时返回连接的当前记录，因此旧回执不会掩盖之后的凭据轮换。
 - 连接记录中的 `authentication`、`transport`、`intake`、`delivery` 四项观察相互独立。保存配置不触发检查；`connection.test` 是显式检查，结果不能代表更新的配置修订；Host 重启后内存中的观察回到 `unknown`。`connection.test` 只解析凭据并做一次认证检查，返回的记录只更新 `authentication`，接收器的 `transport` 与 `intake` 观察保持原样；它不重建或重连接收器，接收器恢复只经 `connection.receiver.recover`。已停用的连接直接返回当前记录，不做检查。
 - `capabilities` 表示已注册 adapter 实现了群发现、建群、加入链接或接收器恢复，不代表平台权限已经生效；缺失时为未知。`initialSetup` 只投影受管初始化流程的原结果，不代表当前平台就绪。
