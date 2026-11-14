@@ -3,9 +3,9 @@
 Real Workbench File Preview of the root `README.md` and `README.zh-CN.md`, for the independent image
 review required by [Agent visual review](../../../../../docs/guides/agent-visual-e2e-review.md).
 
-- **Current constraints:** [Markdown 的 HTML 子集与 GitHub 提示块](../../../../../docs/design/behavior/files-and-git.md#markdown-的-html-子集与-github-提示块),
+- **Current constraints:** [Markdown 的 HTML 子集与提示块](../../../../../docs/design/behavior/files-and-git.md#markdown-的-html-子集与提示块),
   [Markdown 文档的阅读版式](../../../../../docs/design/behavior/files-and-git.md#markdown-文档的阅读版式) and the
-  [presentation](../../../../../docs/design/presentation/files-and-git.md#markdown-的-html-子集与-github-提示块) topics.
+  [presentation](../../../../../docs/design/presentation/files-and-git.md#markdown-的-html-子集与提示块) topics.
 - **Real path:** production `WorkspaceWorkbench`, store, preload and `WorkspaceFiles` over private copies of both
   READMEs and `docs/assets/readme`; the App theme runtime is mounted like `App.tsx`; reading layout saves go through
   the preload to a fixture Main that merges with `applyConfigEdit` and pushes the committed config back.

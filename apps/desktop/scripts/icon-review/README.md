@@ -8,7 +8,7 @@ pnpm icons:dev
 
 打开输出的 `http://127.0.0.1:4186/` 即可预览当前源码。修改目录、字形、共享呈现或消费源码会自动刷新，沿原语义 ID 恢复草稿；存储失败时保留内存修改并提示先导出。`--open` 可打开系统浏览器，`--port` 可指定端口（占用时不自动漂移），`--context` 仅提供旧注释；`--help` 查看入口。进程停止后该开发 URL 暂不可用，重新运行同一命令即可继续。
 
-页面默认打开「品牌」视图：五个境的 App 图标与实际尺寸、各境在启动和 Launcher／Settings 概览上显示的大图（与产品走同一个 `resolveBrandHero`，借原境的画会标明）、所有境共用的工坊插画、Mote 头像系列和各家 Agent 的标志。条目来自 `packages/client-ui/brand/brand-manifest.json`，页面不维护第二份清单；方向键在各境之间切换。品牌规则见[品牌架构](../../../../docs/design/presentation/brand-identity.md)，素材操作见[品牌素材指南](../../../../docs/guides/brand-assets.md)。
+页面默认打开「品牌」视图。品牌的龙有五个境（realm），每个境是一种渲染语言，对应一款 App 图标，定义见[品牌架构](../../../../docs/design/presentation/brand-identity.md#一条龙五个境)。视图依次展示：五个境的 App 图标与实际尺寸、各境在启动和 Launcher／Settings 概览上显示的大图（与产品走同一个 `resolveBrandHero`，借原境的画会标明）、所有境共用的工坊插画、Mote 头像系列和各家 Agent 的标志。条目来自 `packages/client-ui/brand/brand-manifest.json`，页面不维护第二份清单；方向键在各境之间切换。品牌规则见[品牌架构](../../../../docs/design/presentation/brand-identity.md)，素材操作见[品牌素材指南](../../../../docs/guides/brand-assets.md)。
 
 开发使用和扩展步骤见[语义图标指南](../../../../docs/guides/semantic-icons.md)。`catalog.mjs` 的 `createReviewCatalog` 同时供开发服务和静态构建投影当前共享 owner；Vite 加载原生预览与主题运行时，不维护第二目录。
 
@@ -30,7 +30,7 @@ node apps/desktop/scripts/icon-review/build.mjs --out .local/icon-review/site
 
 可选 `--context <先前 catalog.json>` 只保留同语义 ID 的中文审阅说明；图形、默认映射、目录与当前引用重新取自源码。静态引用是审阅线索，不证明某一 Run 状态或全部动态消费。
 
-页面草稿仍用 `agentmux.icon-review.v1`：修改包保存用途、备注和历史，完整主题导出用于 Settings 导入。预览只作用在演示页，不写入产品配置。
+页面草稿存在浏览器 localStorage 的 `agentmux.icon-review.v1` 键下，导出的修改包也使用这个 schema：修改包保存用途、备注和历史，完整主题导出用于 Settings 导入。预览只作用在演示页，不写入产品配置。
 
 实例模拟提供共享 `animation` 预设与颜色参数，默认静态。它只改变上方样例：基础五组之外，按共享设计补充所选预设的适用用途。目录、标题和历史保持静态；模拟参数不保存进草稿或主题文件。动效样式直接复制共享 owner，遵循系统减少动画设置。
 

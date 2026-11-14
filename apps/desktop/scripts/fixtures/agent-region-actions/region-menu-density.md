@@ -4,7 +4,7 @@ Use this fixture's original `WorkspaceWorkbench`, `SessionPane`, Store and produ
 styles. Load the normal ThemeRuntime for semantic icons and theme tokens; do not
 replace the menu or layout callbacks with a visual replica.
 
-The presentation contract belongs to [Region menu icon rows](../../../../../docs/design/presentation/spaces-and-layout.md#region-菜单的分组图标行).
+The presentation contract belongs to [Region menu icon rows](../../../../../docs/design/presentation/agent-capabilities-and-messaging.md#region-菜单的分组图标行).
 The review procedure belongs to [independent image review](../../../../../docs/guides/agent-visual-e2e-review.md).
 
 Start with two original Regions and the survivor's nonempty draft. Open the

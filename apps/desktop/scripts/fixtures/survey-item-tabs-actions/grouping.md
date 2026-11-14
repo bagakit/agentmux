@@ -2,7 +2,7 @@
 
 Run the existing capture with `--evidence <private directory> --scene grouping`. It compiles one actual App/SurveyItemList/Store consumer with complete CSS and uses the same private Electron, typed preview API, source hashes and paint-leaf isolation as the original T1 scene. It does not rerun or re-sign the original nine T1 frames. The grouping capture refuses to build below 500 MiB free disk.
 
-Contracts: [Survey list scope](../../../../../docs/design/behavior/knowledge-workflows.md#列表与工作面的操作范围), [Survey presentation](../../../../../docs/design/presentation/spaces-and-layout.md#survey-的-zone-工作面与液体玻璃), [independent visual review](../../../../../docs/design/behavior/shared-rules.md#agent-主观审美的端到端验证).
+Contracts: [Survey list scope](../../../../../docs/design/behavior/knowledge-workflows.md#列表与工作面的操作范围), [Survey presentation](../../../../../docs/design/presentation/knowledge-workflows.md#survey-的-zone-工作面与液体玻璃), [independent visual review](../../../../../docs/design/behavior/shared-rules.md#agent-主观审美的端到端验证).
 
 The scene retains the original current research with four Tabs, including a real Agent/File split, and a second research. A third File research adds no Run. The first group includes the current research, the second research and a saved reference with temporarily missing topology; a second explicit group starts empty, and the third research starts ungrouped.
 

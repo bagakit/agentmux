@@ -1,6 +1,6 @@
 # Channel profile reading and management
 
-Owning behavior: [common Conversation protocol](../../../../../docs/design/behavior/conversation-mode.md#共同对话协议与外部交流入口). Presentation: [conversation mode](../../../../../docs/design/presentation/conversation-mode.md).
+Owning behavior: [platform profiles and avatars](../../../../../docs/design/behavior/conversation-channels.md#平台资料与头像), [public author profiles](../../../../../docs/design/behavior/conversation-channels.md#公开作者资料与头像). Presentation: [conversation mode](../../../../../docs/design/presentation/conversation-mode.md).
 
 The mounted native SDK → original Core → public RPC → registered IPC consumer creates the private public-scene input. This preview mounts the actual common message card, speaker resolver, Channel metadata hook, connection header and cache panel with production CSS. Only subsequent typed cache DTOs and metadata notifications are controlled. It does not control a user Session, hold live credentials or certify native account delivery.
 
