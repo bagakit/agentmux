@@ -99,11 +99,12 @@ export async function connectedClient(pending?: AgentMuxInteractionRequest, prov
 /** Real Core Hook completion owner, synthetic authenticated envelope in this unit fixture. */
 export async function completeNativeRequest(client: AgentMuxClient): Promise<void> {
   const request = client.agentSession(AGENT_SESSION_ID).pendingInteraction!.request
+  const providerId = client.agentSession(AGENT_SESSION_ID).providerId
   await (client as unknown as { acceptHookEvent(envelope: import('../../src/types.js').NativeHookEnvelope, signal: AbortSignal): Promise<void> }).acceptHookEvent({
     receiptId: 'lifecycle-completed-' + request.id, agentSessionId: AGENT_SESSION_ID,
-    providerId: client.agentSession(AGENT_SESSION_ID).providerId, runId: RUN_ID,
+    providerId, runId: RUN_ID,
     payload: { session_id: client.agentSession(AGENT_SESSION_ID).nativeHandle?.sessionId, hook_event_name: 'PostToolUse', tool_name: request.kind === 'question' ? 'request_user_input' : 'exec_command',
-      tool_call_id: request.nativeToolCallId }
+      ...(providerId === 'claude' ? { tool_use_id: request.nativeToolCallId } : { tool_call_id: request.nativeToolCallId }) }
   }, new AbortController().signal)
 }
 

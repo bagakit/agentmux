@@ -364,7 +364,7 @@ it.each(['question', 'permission'] as const)('retains a historical synchronous %
   if (kind === 'permission') await completeNativeRequest(f.core)
   else await (f.core as unknown as { acceptHookEvent(envelope: unknown, signal: AbortSignal): Promise<void> }).acceptHookEvent({
     receiptId: 'controlled-sync-completion', agentSessionId: sid, providerId: 'claude', runId: RUN_ID,
-    payload: { session_id: source.nativeSessionId, hook_event_name: 'PostToolUse', tool_name: 'AskUserQuestion', tool_call_id: request.nativeToolCallId }
+    payload: { session_id: source.nativeSessionId, hook_event_name: 'PostToolUse', tool_name: 'AskUserQuestion', tool_use_id: request.nativeToolCallId }
   }, new AbortController().signal)
   await vi.waitFor(() => expect(restored.element.querySelector('[data-request-id]')).toBeNull())
   expect(restored.element.querySelectorAll('[data-original-response]')).toHaveLength(1)
