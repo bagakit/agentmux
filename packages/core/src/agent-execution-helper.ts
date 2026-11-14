@@ -2,6 +2,21 @@ import type { AgentMuxPreparedTerminal } from './terminal-preparation.js'
 import type { AgentLaunchPlan } from './types.js'
 import { AgentMuxError } from './errors.js'
 import { rpcRecord } from './rpc-data.js'
+import { mkdir, open } from 'node:fs/promises'
+import { join } from 'node:path'
+
+/** The helper's stdout is a machine channel. A native launcher can emit stderr
+ * before JavaScript runs, so redirect it before exec, rather than filtering bytes
+ * in the protocol reader. exec retains the original Native PID, PTY and signals. */
+export async function executionHelperTerminalLaunch(plan: AgentExecutionHelperLaunchPlan,
+  context: Pick<AgentExecutionHelperContext, 'journalDirectory' | 'role'>): Promise<Pick<AgentExecutionHelperLaunchPlan, 'command' | 'args' | 'env'>> {
+  await mkdir(context.journalDirectory, { recursive: true, mode: 0o700 })
+  const stderr = join(context.journalDirectory, `helper-${context.role}.stderr.log`)
+  const file = await open(stderr, 'a', 0o600)
+  try { await file.chmod(0o600) } finally { await file.close() }
+  return { command: '/bin/sh', args: ['-c', 'stderr=$1; shift; exec "$@" 2>> "$stderr"',
+    'agentmux-execution-helper', stderr, plan.command, ...plan.args], env: plan.env }
+}
 
 /** Provider-owned informational qualification; never used to decide bridge or Agent health. */
 export interface AgentExecutionNotice {

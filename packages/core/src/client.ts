@@ -25,7 +25,7 @@ import { parseWorkspaceTrustPreparation, type AgentWorkspaceTrustPreparation } f
 import { parseAutomaticInputSource, sameAutomaticInputSource } from './automatic-input-source.js'
 import { decodePreparedRun } from './prepared-run.js'
 import { isTerminalMouseReportPayload } from './terminal-input-protocol.js'
-import { parseAgentExecutionNotices } from './agent-execution-helper.js'
+import { executionHelperTerminalLaunch, parseAgentExecutionNotices } from './agent-execution-helper.js'
 import { AgentExecutionJournal } from './agent-execution-journal.js'
 import { AgentExecutionHelperStore } from './agent-execution-helper-store.js'
 import { parseAgentToolExecutionBinding } from './agent-tool-execution.js'
@@ -4607,8 +4607,9 @@ export class AgentMuxClient {
       }
       const plan = await provider.prepareExecutionHelper!({ ...input, executable: provider.executable, journalDirectory,
         ...(journalIdentity ? { journalIdentity } : {}) })
+      const launch = await executionHelperTerminalLaunch(plan, { journalDirectory, role: input.role })
       const prepared = await this.prepareTerminal({ workspacePath: input.workspacePath, createOperationId: input.createOperationId,
-        command: plan.command, args: plan.args, env: plan.env })
+        command: launch.command, args: launch.args, env: launch.env })
       return { bindingId: input.bindingId, role: input.role, providerId: input.providerId, prepared,
         ...(plan.notices === undefined ? {} : { notices: parseAgentExecutionNotices(plan.notices, { providerId: input.providerId, role: input.role }) }), ...(journalIdentity ? { journalIdentity } : {}) }
     }, write => this.withExecutionDirectoryAdmission(input.workspacePath, write)))
