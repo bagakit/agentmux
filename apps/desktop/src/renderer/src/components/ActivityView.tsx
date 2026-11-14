@@ -804,7 +804,7 @@ export function ActivityView({
         {conversationReading.opened && conversationReading.onClose ? <button ref={returnRef} type="button"
           className="activity-feed__reading-action" aria-label={`Return to ${conversationReading.returnLabel ?? 'Activity'}`}
           onClick={conversationReading.onClose}><ThemeNavigationBackIcon size={12} aria-hidden="true" />Return</button> : null}
-        {readingAction}
+        {!moteConversation ? readingAction : null}
       </div>
     </div>
   ) : null
@@ -858,7 +858,7 @@ export function ActivityView({
       {readingEntry}
       {!rulerContent ? <div className="reading-find__floating-trigger">{tools}</div> : null}
     </div>
-    return moteConversation ? <>{moteInitialReading ? <div className="activity-feed__reading-header" data-mote-initial-reading>{emptyReadStatus}</div> : null}<details className="mote-conversation__reading-tools"><summary>阅读与来源</summary>{header}</details></> : header
+    return moteConversation ? <>{readingAction ? <div className="activity-feed__session-actions" aria-label="原 Agent 会话操作" data-original-session-actions><span>原 Agent 会话</span>{readingAction}</div> : null}{moteInitialReading ? <div className="activity-feed__reading-header" data-mote-initial-reading>{emptyReadStatus}</div> : null}<details className="mote-conversation__reading-tools"><summary>阅读与来源</summary>{header}</details></> : header
   }
 
   const renderSurface = (content: (findTrigger: ReactNode) => JSX.Element): JSX.Element => {

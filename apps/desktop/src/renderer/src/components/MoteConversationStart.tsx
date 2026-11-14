@@ -30,9 +30,9 @@ function desktopFirstMessageStage(result: MoteMainActionResult | null, busy: boo
 }
 
 /** The welcome uses the existing durable Launcher draft and original Main setup admission. */
-export function MoteConversationStart({ scope, active, mode, onConfigure, onOpenMain, onOpenPeriod, automatic, held, onHeldSettled }: {
+export function MoteConversationStart({ scope, active, mode, onConfigure, onOpenMain, onOpenCreated, onOpenPeriod, automatic, held, onHeldSettled }: {
   scope: MoteWorkfaceScope; active: boolean; mode: 'start' | 'new'; onConfigure(invoker?: HTMLElement | null): void
-  onOpenMain(reference: MoteDefaultConversation): void; onOpenPeriod(source: Source): void
+  onOpenMain(reference: MoteDefaultConversation): void; onOpenCreated?(reference: MoteDefaultConversation): void; onOpenPeriod(source: Source): void
   automatic?: MoteRolloverStart | undefined
   /** A message held while the role owner was read; once it confirms no Main, it is this welcome's first message. */
   held?: MoteHeldEntryInput | null | undefined; onHeldSettled?: ((operationId: string, delivered?: boolean) => void) | undefined
@@ -126,7 +126,7 @@ export function MoteConversationStart({ scope, active, mode, onConfigure, onOpen
     finally { if (automaticSettling.current === automatic.query.operationId) automaticSettling.current = null }
   }
 
-  return <MoteMainActions scope={scope} active={active} onConfigure={onConfigure} onRefresh={dialogue?.refresh}
+  return <MoteMainActions scope={scope} active={active} onConfigure={onConfigure} onOpenCreated={onOpenCreated} onRefresh={dialogue?.refresh}
     onResult={(result, mayNavigate) => { void confirmAutomatic(result, mayNavigate); if (submission.current) void confirmed(result, submission.current, mayNavigate) }}
     renderStart={state => <><AutomaticStart automatic={automatic} state={state} active={active} />
       <HeldStart held={held} state={state} active={active && !automatic && mode === 'start' && !persistenceIssue} onStart={query => {
@@ -160,7 +160,12 @@ export function MoteConversationStart({ scope, active, mode, onConfigure, onOpen
           submission.current = query; setSent({ operationId: query.operationId, prompt: query.prompt, key })
           void state.submit({ operationId: query.operationId, prompt: query.prompt, ...(query.focusTask ? { focusTask: query.focusTask } : {}) }, undefined, releaseDraft)
         } } : {})} />}
-      notice={<>{state.issue && <p role="status">{state.issue}
+      notice={<>{mode === 'new' ? <p>新一轮只接收你明确发送的新消息；旧对话和未确认的消息留在原处，不会重发。</p> : null}
+        {state.pending.length ? <div className="mote-main-recovery__actions" data-main-original-request>
+          <span>原开始请求已保留，创建与交接分别核对。</span>
+          {state.pending.map(id => <button key={id} type="button" className="small-button" disabled={state.checking} onClick={() => state.inspect(id)}>核对原开始请求</button>)}
+          {state.openOriginal ? <button type="button" className="small-button" onClick={state.openOriginal}>查看原开始位置</button> : null}
+        </div> : null}{state.issue && <p role="status">{state.issue}
         {state.reading?.preferences.status === 'ready' && !state.reading.executor && (mode === 'new' || !state.reading.dialogue.main.current)
           ? <> <button type="button" className="small-button" onClick={event => onConfigure(event.currentTarget)}>配置 Agent</button></> : null}
       </p>}{notice && <p role="status">{notice}</p>}{persistenceIssue && <p role="status">{persistenceIssue}</p>}

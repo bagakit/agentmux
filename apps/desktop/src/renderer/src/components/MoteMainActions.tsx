@@ -8,7 +8,7 @@ import type { MoteWorkfaceScope } from '../lib/mote-workface'
 import { useMoteDialogueView } from '../lib/mote-dialogue-view'
 import { moteConnectionTarget } from '../lib/mote-connection-default'
 import { createMoteMain, continueMoteMainAction, inspectMoteMainAction, readMoteMainAction,
-  moveMoteMainFirstInputToDraft, originalMainCreationRetainsInput, type MoteMainActionReading, type MoteMainActionResult } from '../lib/mote-main-action'
+  moveMoteMainFirstInputToDraft, originalMainCreationRetainsInput, readMoteMainStartPosition, type MoteMainActionReading, type MoteMainActionResult } from '../lib/mote-main-action'
 import { useAppStore } from '../store'
 import { DocumentOverlayPortal } from './WindowOverlayHost'
 
@@ -18,6 +18,7 @@ const STAGE: Record<string, string> = { confirmed: '已确认', unconfirmed: '�
 export type MoteStartActions = { reading: MoteMainActionReading | null; result: MoteMainActionResult | null; issue: string | null; busy: boolean
   checking?: boolean; ready: boolean; pending: string[];
   retainedInput?: { operationId: string; prompt: string; creationOperationId: string } | undefined;
+  originalPosition?: { operationId:string; reference:MoteDefaultConversation } | null; openOriginal?():void;
   restoringInput?: boolean; restoreInput?(): Promise<boolean>;
   submit(query: MoteMainDeferredInput, rollover?: MoteMainRolloverDecision, onRetained?: (query: MoteMainDeferredInput) => void | Promise<void>): Promise<void>;
   inspect(id: string): void; advance(id: string): void; refresh(): void }
@@ -31,6 +32,7 @@ export function MoteMainActions({ scope, active, entryToken, onConfigure, onCrea
   const model = useMoteDialogueView()
   const [reading, setReading] = useState<MoteMainActionReading | null>(null), [result, setResult] = useState<MoteMainActionResult | null>(null)
   const [issue, setIssue] = useState<string | null>(null), [busy, setBusy] = useState(false), [generation, setGeneration] = useState(0)
+  const [originalPosition, setOriginalPosition] = useState<Awaited<ReturnType<typeof readMoteMainStartPosition>>>(null)
   const [checking, setChecking] = useState(false), inspection = useRef(false)
   const [restoringInput, setRestoringInput] = useState(false), restoring = useRef(false)
   const identity = JSON.stringify(moteConnectionTarget(scope, useAppStore.getState().spaceZoneBindings))
@@ -48,7 +50,7 @@ export function MoteMainActions({ scope, active, entryToken, onConfigure, onCrea
   }, [settingsVersion])
   useEffect(() => {
     const token = {}; lifetime.current = token
-    setReading(null); setResult(null); setIssue(null); setBusy(false)
+    setReading(null); setResult(null); setOriginalPosition(null); setIssue(null); setBusy(false)
     if (!active) return
     void readMoteMainAction(scope).then(async source => {
       if (lifetime.current !== token) return
@@ -106,6 +108,11 @@ export function MoteMainActions({ scope, active, entryToken, onConfigure, onCrea
     inspection.current = true; setChecking(true)
     const token = lifetime.current
     try {
+      // The role journal can wait independently of its already retained spatial position.
+      // This optional read neither gates the original setup inspection nor claims binding.
+      void readMoteMainStartPosition(scope, id).then(position => {
+        if (lifetime.current === token) setOriginalPosition(position)
+      }).catch(cause => { if (lifetime.current === token) setIssue(presentError(cause)) })
       const value = await inspectMoteMainAction(scope, id)
       if (lifetime.current !== token) return
       setResult(value); setIssue(value.issue)
@@ -123,10 +130,11 @@ export function MoteMainActions({ scope, active, entryToken, onConfigure, onCrea
   }
   if (!active) return null
   const pending = [...new Set([...(reading?.pendingStarts ?? []), ...(reading?.pendingOperationId ? [reading.pendingOperationId] : []), ...(result?.binding === 'unconfirmed' ? [result.operationId] : []),
-    ...(retained?.deferredInputIssue ? [retained.operationId] : [])])]
+    ...(retained && (!result || result.operationId !== retained.operationId || result.binding === 'unconfirmed') ? [retained.operationId] : [])])]
   const notice = [issue, retained?.deferredInputIssue].filter(Boolean).join('\n') || null
   const retainedInput = retained?.deferredInput && !originalMainCreationRetainsInput(retained, result) ? { ...retained.deferredInput, creationOperationId: retained.operationId } : undefined
-  if (renderStart) return renderStart({ reading, result, issue: notice, busy, checking, pending, retainedInput, restoringInput, restoreInput, ready: Boolean(reading && !reading.issue && !pending.length),
+  if (renderStart) return renderStart({ reading, result, issue: notice, busy, checking, pending, originalPosition,
+    ...(originalPosition && onOpenCreated ? { openOriginal: () => onOpenCreated(originalPosition.reference) } : {}), retainedInput, restoringInput, restoreInput, ready: Boolean(reading && !reading.issue && !pending.length),
     submit: async (query, rollover, retained) => { if (reading) await run(() => createMoteMain(scope, reading, query, rollover, retained), undefined, false, query) },
     inspect: id => { void inspectOriginal(id) }, advance: id => { void run(() => continueMoteMainAction(scope, id)) }, refresh: () => setGeneration(value => value + 1) })
   const queryOutcome = result?.deferredInput?.input?.status === 'not-applied' ? 'not-applied' : agentPromptSubmissionOutcome(result?.deferredInput?.record ?? null)

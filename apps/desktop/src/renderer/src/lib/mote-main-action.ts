@@ -1,6 +1,6 @@
 import { moteQuickBaseline, parseMotePreferencesReadResult,
   type MoteDefaultConversation, type MoteQuickPreferencesReadResult } from '@agentmux/core/mote-preferences'
-import { moteMainBaseline, pendingMoteMainCreation, spatialAgentOpenRecord } from '@agentmux/core/spatial-graph'
+import { moteMainBaseline, moteMainCreatedReference, pendingMoteMainCreation, spatialAgentOpenRecord } from '@agentmux/core/spatial-graph'
 import { pendingMoteMainStarts, type MoteDialoguePage, type MoteMainSetupResult, type MoteMainDeferredInput, type MoteMainRolloverDecision } from '@agentmux/core/mote-dialogue'
 import type { MoteWorkfaceScope } from './mote-workface'
 import { moteConnectionTarget } from './mote-connection-default'
@@ -111,6 +111,18 @@ export async function createMoteMain(scope: MoteWorkfaceScope, reading: MoteMain
       issue: `Original creation unconfirmed: ${message(cause)}. Inspect this same request; do not create again.` }
   }
   return await continueMoteMainAction(scope, operationId)
+}
+
+/** Read only the original spatial admission. It is not a creation, handover or role-binding ACK. */
+export async function readMoteMainStartPosition(scope: MoteWorkfaceScope, operationId: string) {
+  const originals = Object.values(useAppStore.getState().moteMainCreationReferences).filter(value => value.operationId === operationId)
+  if (originals.length > 1) throw new Error('The original Main request has more than one resource. Its original records are kept.')
+  const target = originals[0]?.target ?? targetOf(scope), state = await api.spatial.read()
+  const record = state && spatialAgentOpenRecord(state.graph, operationId)
+  if (!record) return null
+  if (!record.moteMain || !same(record.moteMain.target, target)) throw new Error('The original Main request belongs to another Mote. No replacement is selected.')
+  const reference = moteMainCreatedReference(record)
+  return reference ? { operationId, reference } : null
 }
 
 /** Reconcile only the original creation and stage keys. No creation, input or stop is replayed. */

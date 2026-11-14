@@ -252,9 +252,12 @@ function MoteWorkfaceBody({ scope, workspaceId, topicId, floating = false, visib
         sharedFrame?.select('discussion')
       }} /> : null}
       {selectedMain && currentMain && readingMain?.sessionId !== currentMain.sessionId ? <div className="mote-workface__handoff" role="status">主 Agent 已更换，原对话和草稿保留。<button type="button" onClick={showDiscussion}>返回当前主对话</button></div> : null}
-      {entryRecovery.issue ? <p role="status" className="mote-conversation__issue">{entryRecovery.issue}{entryRecovery.status === 'unavailable'
-        ? <button type="button" className="small-button" onClick={showNewRound}>开始新一轮</button>
-        : <button type="button" className="small-button" onClick={entryRecovery.inspect}>核对原恢复</button>}</p> : null}
+      {entryRecovery.issue && showOriginal && selectedMain && readingMain?.hostId === currentMain?.hostId && readingMain?.sessionId === currentMain?.sessionId ? <section role="status" className="mote-main-recovery" data-mote-main-recovery>
+        <p>{entryRecovery.issue}</p><div className="mote-main-recovery__actions">
+          {entryRecovery.status !== 'unavailable' ? <button type="button" className="small-button" onClick={entryRecovery.inspect}>核对原恢复</button> : null}
+          <button type="button" className={entryRecovery.status === 'unavailable' ? 'primary-button' : 'small-button'} onClick={showNewRound}>开始新一轮</button>
+          <button type="button" className="small-button" onClick={event => openSettings(event.currentTarget)}>更换主 Agent…</button>
+        </div></section> : null}
       {scope && (floating ? floatingActionsHost : sharedFrame?.actionsHost) ? createPortal(<>
         {!floating && visible ? conversations : null}
         <MoteMainActions scope={scope} active={visible && section === 'discussion' && showOriginal && (!sharedFrame || sharedFrame.section === 'discussion')} entryToken={entryToken} presentation="menu" onConfigure={openSettings} onCreated={openMain} onStartNew={showNewRound} onOpenCreated={created => { showThread(created) }} onOpenWorkspace={() => setLocal(previous => ({ ...previous, owner, original: true }))} onRefresh={dialogue?.refresh} />
@@ -264,7 +267,7 @@ function MoteWorkfaceBody({ scope, workspaceId, topicId, floating = false, visib
       {scope && entry === 'unconfirmed' && !main?.current ? <p role="status" className="mote-conversation__issue">主对话的来源尚未确认，不会当作没有主对话而新建。原对话和草稿仍保留，读取中写下的消息没有发出。<button type="button" className="small-button" onClick={dialogue?.refresh}>重新核对</button><button type="button" className="small-button" onClick={() => showThreads()}>查看 Threads</button></p> : null}
       {scope && entry === 'welcome' ? <MoteConversationStart scope={scope} active={visible} mode={currentLocal.start ? 'new' : 'start'} automatic={currentLocal.rollover}
         held={!currentLocal.start ? entryHold.held : null} onHeldSettled={entryHold.settle}
-        onConfigure={openSettings} onOpenMain={openMain} onOpenPeriod={period => setLocal(previous => ({ ...previous, owner, period, periodOriginal: false }))} /> : null}
+        onConfigure={openSettings} onOpenMain={openMain} onOpenCreated={created => { showThread(created) }} onOpenPeriod={period => setLocal(previous => ({ ...previous, owner, period, periodOriginal: false }))} /> : null}
       {scope && section === 'discussion' && currentLocal.period && !showOriginal ? <div className="mote-workface__period"><button type="button" className="small-button" onClick={() => setLocal(previous => {
         if (previous.periodOriginal) return { ...previous, periodOriginal: false }
         const { period, periodOriginal, ...rest } = previous; return rest
