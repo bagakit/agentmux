@@ -9,7 +9,7 @@ import { classifyExecutable } from '../executable-probe.js'
 import { agentControlFailureCode, registerAgentExecutionInvocation } from '../agent-execution-rpc-relay.js'
 
 import { inspectClaudeHookSettings } from './claude-hook-activation.js'
-import { prepareClaudeExecutionPolicy } from './claude-execution-policy.js'
+import { prepareClaudeExecutionPolicy, proveClaudeExecutionPolicyDirectory } from './claude-execution-policy.js'
 export const CLAUDE_EXECUTION_MCP_SERVER = 'amux_exec'
 import { claudeLaunchValueOptions as valueOptions } from './claude-launch-options.js'
 
@@ -93,8 +93,13 @@ export async function prepareClaudeToolExecutionLaunch(plan: AgentLaunchPlan, co
     if (context.assertWorkspace) await context.assertWorkspace()
     const text = note + '\n\n' + await readFile(resolve(context.launchWorkspacePath, original), 'utf8')
     const file = join(policy, 'context-' + createHash('sha256').update(text).digest('hex') + '.txt')
-    if (context.assertWorkspace) await context.assertWorkspace()
-    await durableWriteFile(file, text, { mode: 0o600 })
+    const policyProof = context.assertWorkspace
+      ? await proveClaudeExecutionPolicyDirectory({ workspacePath: context.launchWorkspacePath, assertWorkspace: context.assertWorkspace }, policy)
+      : undefined
+    await durableWriteFile(file, text, { mode: 0o600,
+      ...(policyProof ? { assertDirectory: async () => {
+        await proveClaudeExecutionPolicyDirectory({ workspacePath: context.launchWorkspacePath, assertWorkspace: context.assertWorkspace! }, policy, policyProof)
+      } } : {}) })
     args.splice(fileAt, equal ? 1 : 2, '--append-system-prompt-file', file)
   } else args.unshift('--append-system-prompt', note)
   return { ...plan, command: executable, args }

@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { mkdir, readFile } from 'node:fs/promises'
+import { mkdir, lstat, readFile, realpath } from 'node:fs/promises'
 import { dirname, isAbsolute, join, relative, sep } from 'node:path'
 import { durableWriteFile } from '../durable-write.js'
 import { AgentMuxError } from '../errors.js'
@@ -117,19 +117,44 @@ export function register(on) {
 `
 }
 
-async function preparePolicyDirectory(input: { workspacePath: string; assertWorkspace?: () => Promise<void> }, parent: string): Promise<void> {
-  if (!input.assertWorkspace) { await mkdir(parent, { recursive: true, mode: 0o700 }); return }
+export type ClaudeExecutionPolicyDirectoryProof = { dev: string; ino: string; realpath: string }
+type PolicyDirectoryInput = { workspacePath: string; assertWorkspace?: () => Promise<void> }
+
+function policyDirectoryEscape(): AgentMuxError {
+  return new AgentMuxError('The generated execution plugin must remain in ordinary directories below the exact validated workspace.', 'EXECUTION_BINDING_CONFLICT')
+}
+
+/** Prove one existing Provider directory and bind subsequent writes to that exact inode. */
+export async function proveClaudeExecutionPolicyDirectory(input: PolicyDirectoryInput, path: string, expected?: ClaudeExecutionPolicyDirectoryProof): Promise<ClaudeExecutionPolicyDirectoryProof> {
+  if (!input.assertWorkspace) throw policyDirectoryEscape()
+  await input.assertWorkspace()
+  const descendant = relative(input.workspacePath, path)
+  if (!descendant || isAbsolute(descendant) || descendant === '..' || descendant.startsWith('..' + sep)) throw policyDirectoryEscape()
+  const [before, workspaceRealpath] = await Promise.all([lstat(path, { bigint: true }), realpath(input.workspacePath)])
+  if (!before.isDirectory()) throw policyDirectoryEscape()
+  const actualRealpath = await realpath(path)
+  const expectedRealpath = expected?.realpath ?? join(workspaceRealpath, descendant)
+  const after = await lstat(path, { bigint: true })
+  const proof = { dev: after.dev.toString(10), ino: after.ino.toString(10), realpath: actualRealpath }
+  if (actualRealpath !== expectedRealpath || before.dev !== after.dev || before.ino !== after.ino ||
+      expected && (expected.dev !== proof.dev || expected.ino !== proof.ino)) throw policyDirectoryEscape()
+  await input.assertWorkspace()
+  return proof
+}
+
+async function preparePolicyDirectory(input: PolicyDirectoryInput, parent: string): Promise<ClaudeExecutionPolicyDirectoryProof | undefined> {
+  if (!input.assertWorkspace) { await mkdir(parent, { recursive: true, mode: 0o700 }); return undefined }
   const descendant = relative(input.workspacePath, parent)
-  if (!descendant || isAbsolute(descendant) || descendant === '..' || descendant.startsWith('..' + sep)) {
-    throw new AgentMuxError('The generated execution plugin must remain below the exact validated workspace.', 'EXECUTION_BINDING_CONFLICT')
-  }
-  let current = input.workspacePath
+  if (!descendant || isAbsolute(descendant) || descendant === '..' || descendant.startsWith('..' + sep)) throw policyDirectoryEscape()
+  let current = input.workspacePath, proof: ClaudeExecutionPolicyDirectoryProof | undefined
   for (const component of descendant.split(sep)) {
-    await input.assertWorkspace()
+    if (proof) await proveClaudeExecutionPolicyDirectory(input, current, proof)
+    else await input.assertWorkspace()
     current = join(current, component)
     try { await mkdir(current, { mode: 0o700 }) } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error }
+    proof = await proveClaudeExecutionPolicyDirectory(input, current)
   }
-  await input.assertWorkspace()
+  return proof
 }
 
 /** Immutable generated inputs keep an active original Run's loaded plugin intact. */
@@ -149,13 +174,13 @@ export async function prepareClaudeExecutionPolicy(input: { workspacePath: strin
   for (const [relativePath, content] of files) {
     const path = join(directory, relativePath)
     const parent = dirname(path)
-    await preparePolicyDirectory(input, parent)
-    if (input.assertWorkspace) await input.assertWorkspace()
+    const proof = await preparePolicyDirectory(input, parent)
+    if (proof) await proveClaudeExecutionPolicyDirectory(input, parent, proof)
     const retained = await readFile(path, 'utf8').catch(error => { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; return undefined })
     if (retained === content) continue
     if (retained !== undefined) throw new AgentMuxError('The generated execution plugin no longer matches its original content. The original Run remains retained.', 'EXECUTION_BINDING_CONFLICT')
-    if (input.assertWorkspace) await input.assertWorkspace()
-    await durableWriteFile(path, content, { mode: 0o600 })
+    await durableWriteFile(path, content, { mode: 0o600,
+      ...(proof ? { assertDirectory: async () => { await proveClaudeExecutionPolicyDirectory(input, parent, proof) } } : {}) })
   }
   return directory
 }
