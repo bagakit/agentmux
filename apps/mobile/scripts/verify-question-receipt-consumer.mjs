@@ -70,9 +70,14 @@ try {
   capture = await run(process.execPath, [resolve(mobile, 'scripts/fixtures/mobile-product-redesign/capture-ui.mjs'), '--question-receipts'], root, process.env)
   await writeFile(resolve(evidence, 'capture.log'), capture.output)
   assert.equal(capture.code, 0, capture.output)
-  const scene = JSON.parse(capture.output.trim().split('\n').at(-1))
-  assert.equal(scene.passed, true)
-  const summary = { schema, passed: true, candidate: head.output.trim(), results, scene }
+  const scene = capture.output.trim().split('\n').at(-1)
+  assert.ok(scene.startsWith('.tmp/mobile-product-redesign/') && scene.endsWith('/receipt.json'), 'The capture returned its exact receipt')
+  const sceneBytes = await readFile(resolve(root, scene)), visual = JSON.parse(sceneBytes)
+  assert.equal(visual.passed, true)
+  assert.equal(visual.captureSubset, 'question-receipts')
+  assert.ok(visual.source['apps/mobile/src/MobileApp.tsx'])
+  assert.ok(Object.keys(visual.images).length >= 7)
+  const summary = { schema, passed: true, candidate: head.output.trim(), results, scene, sceneSHA256: hash(sceneBytes) }
   await writeFile(resolve(evidence, 'receipt.json'), JSON.stringify(summary, null, 2) + '\n')
   console.log(JSON.stringify({ passed: true, evidence: relative(root, resolve(evidence, 'receipt.json')) }))
 } catch (error) {
