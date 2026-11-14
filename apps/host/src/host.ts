@@ -37,6 +37,8 @@ import { connectionLinkUrl, CONNECTION_METADATA_PATH, type ConnectionOffer } fro
 import { createInterfacePortLabels, defaultRouteInterface, mobileLinkCandidates } from './mobile-link-candidates.js'
 import { exportPublicKey } from '@agentmux/relay/e2ee'
 import { loadOrCreateRelayKeyPair } from '@agentmux/core/relay-identity'
+import { attachAgentMuxRpcRelaySocket } from '@agentmux/core/relay-publisher'
+import { createOutboundRelayAccess } from './outbound-relay.js'
 import { MobileAssetsOwner } from './mobile-assets-owner.js'
 import { createDeviceAdministration } from './device-administration.js'
 import { createCapsuleDesktopAdapters } from './capsules.js'
@@ -60,6 +62,9 @@ export type AgentMuxHostOptions = {
   hostConfiguration?: (hostId: string) => import('./host-configuration.js').HostConfig | null
   mobileBuildDirectory?: string
   mobilePort?: number
+  /** Explicit private configuration, read once by this original Host after Core is serving. */
+  outboundRelayConfigurationPath?: string
+  relayGateway?: import('@agentmux/core/relay-gateway').AgentMuxRelayGatewaySource
   fileUploads?: import('@agentmux/core/files').AgentMuxRpcFileUploadsOwner
   inputContextCaptureReader?: import('@agentmux/core').AgentInputContextCaptureReader
   externalInputAuthority?: import('@agentmux/core').AgentExternalInputAuthorityPort
@@ -78,6 +83,7 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
   let authorityOpening: Promise<DeviceAuthority> | undefined, authorityAttempted = false
   let initializingMobile: Promise<void> | undefined, disposal: Promise<void> | undefined
   let relay: RelayTransportController | undefined
+  let outbound: ReturnType<typeof createOutboundRelayAccess> | undefined
   let local: Awaited<ReturnType<typeof startLocalRelay>> | undefined
   let goals: ReturnType<typeof createHostGoals> | undefined
   let motePresence: ReturnType<typeof createHostMotePresence> | undefined
@@ -85,7 +91,7 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
   let tailcat: ReturnType<typeof configuredTailcatListener> | undefined
   const closeResources = async () => {
     const errors: unknown[] = []
-    for (const close of [() => initializingMobile, () => authorityOpening?.catch(() => {}), () => tailcat?.close(), () => relay?.stop(), () => local?.stop(), () => authority?.flush(),
+    for (const close of [() => outbound?.close(), () => initializingMobile, () => authorityOpening?.catch(() => {}), () => tailcat?.close(), () => relay?.stop(), () => local?.stop(), () => authority?.flush(),
       () => mobileIncidents?.flush(), () => motePresence?.dispose(), () => goals?.dispose(), () => connectionOwner?.close(), () => runtime?.stop()]) {
       try { await close() } catch (error) { errors.push(error) }
     }
@@ -113,6 +119,11 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
     }
     return authorityOpening
   }
+  outbound = createOutboundRelayAccess({ ...(options.outboundRelayConfigurationPath ? { configurationPath: options.outboundRelayConfigurationPath } : {}),
+    authority: getAuthority, keyPair: async () => {
+      if (!(options.store instanceof AgentMuxFileAgentSessionStore)) throw new AgentMuxError('Outbound access requires the original durable Host identity.', 'CONTROL_UNAVAILABLE')
+      return await loadOrCreateRelayKeyPair(join(dirname(options.store.path), 'agentmux-relay-keypair.json'))
+    } })
   const desktopClient = async (context: AgentMuxRpcCallContext) => {
     if (context.principal?.kind === 'device' && !context.forwarding) throw new AgentMuxError(
       'The original device forwarding authority is unavailable. Keep this operation and reconnect to its original Host.', 'CONTROL_UNAVAILABLE')
@@ -217,7 +228,8 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
         catch { authority.noteActivityIssue(source.deviceId) }
       }
     },
-    deviceAdministration: createDeviceAdministration(getAuthority, mobileAccessState, address => {
+    deviceAdministration: createDeviceAdministration(getAuthority, mobileAccessState, (address, via) => {
+      if (via === 'gateway') return outbound!.link()
       if (!offerUrl) throw new AgentMuxError(mobileState.message, 'CONTROL_UNAVAILABLE')
       return offerUrl(address)
     }),
@@ -297,28 +309,13 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
         relay = startRelayTransport({ logger, serverId: owner.hostId, daemonKeyPair: keyPair,
           relayEndpoint: `127.0.0.1:${local.port}`, relayUseTls: false, createWebSocket: local.hostWebSocket,
           onState: state => { mobileState = { state, message: state === 'connected' ? '手机连接已就绪' : state === 'starting' ? '正在连接，自动重试中' : '连接中断，自动重连中；原会话保留。' } },
-          attachSocket: async (socket, metadata) => {
-            if (!metadata?.peerPublicKeyB64) throw new AgentMuxError('Encrypted peer identity is unavailable.', 'CONTROL_PERMISSION_DENIED')
-            const publicKey = metadata.peerPublicKeyB64
-            const device = await owner.authorizeKey(publicKey)
-            const author = { deviceId: device.deviceId, createdAt: device.createdAt }
-            const observation = owner.observe(device, local?.connectionInfo(metadata.relayConnectionId))
-            const frames = originalServer.openAuthenticatedFrames({ authorization: { principal: { kind: 'device', id: `${owner.hostId}:${device.deviceId}` }, signal: observation.signal,
-              assertCurrent: () => owner.assertCurrentKey(author, publicKey) },
-              send: async frame => { await socket.send(JSON.stringify(frame)) }, close: () => socket.close() })
-            let queue = Promise.resolve(), queuedBytes = 0, queuedCount = 0
-            socket.on('message', data => {
-              const text = typeof data === 'string' ? data : data instanceof ArrayBuffer ? new TextDecoder('utf-8', { fatal: true }).decode(data) : Buffer.isBuffer(data) ? data.toString('utf8') : String(data)
-              const bytes = Buffer.byteLength(text)
-              if (queuedBytes + bytes > 8 * 1024 * 1024 || queuedCount >= 128) { socket.close(4008, 'Device request budget exceeded'); return }
-              queuedBytes += bytes; queuedCount++
-              queue = queue.then(async () => { await frames.receive(JSON.parse(text)) })
-                .catch(() => { socket.close(4002, 'Invalid RPC frame') })
-                .finally(() => { queuedBytes -= bytes; queuedCount-- })
-            })
-            socket.once('close', () => { frames.dispose(); observation.dispose() })
-            socket.on('error', () => socket.close())
-          } })
+          attachSocket: (socket, metadata) => attachAgentMuxRpcRelaySocket({ socket, ...(metadata ? { metadata } : {}), server: originalServer,
+            authorize: async (publicKey, source) => {
+              const device = await owner.authorizeKey(publicKey)
+              const observation = owner.observe(device, local?.connectionInfo(source.relayConnectionId))
+              return { principal: { kind: 'device', id: `${owner.hostId}:${device.deviceId}` }, signal: observation.signal,
+                assertCurrent: () => owner.assertCurrentKey(device, publicKey), dispose: () => observation.dispose() }
+            } }) })
       } catch (error) {
         await relay?.stop(); await local?.stop(); relay = undefined; local = undefined; offerUrl = undefined
         mobileState = { state: 'unavailable', message: authority
@@ -334,6 +331,7 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
     // is never displaced or adopted by speculative workflow probes.
     const externalInputAuthority = options.externalInputAuthority ?? connectionOwner?.authority
     runtime = await startHeadlessAgentMux({ inputResources: { inspect: identity => fileUploads.inspect(identity), read: (identity, maxBytes) => fileUploads.read?.(identity, maxBytes) ?? Promise.resolve(null) }, ...(options.prepareExecutionEnvironment ? { prepareExecutionEnvironment: options.prepareExecutionEnvironment } : {}), store: options.store, socketPath: path, shutdown: options.shutdown ?? closeResources,
+      ...(options.relayGateway === undefined ? {} : { relayGateway: options.relayGateway }),
       ...(configurationPath ? { sessionExecutorConfiguration: (executorId: string) => readConfiguredExecutor(configurationPath, executorId) } : {}),
       ...(configurationPath ? { ownedWorkspaceRoots: workspacePath => moteOwnedWorkspaceRoots(configurationPath, workspacePath) } : {}),
       ...(configurationPath && content?.files ? { moteInputResolver: createHostMoteInputSource({configurationPath,spatial:spatialState,files:content.files}) } : {}),
@@ -347,6 +345,7 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
       inputContextCaptureReader: options.inputContextCaptureReader ?? createDesktopInputContextCaptureReader({ desktopSocketPath: desktopPath, captureHostId: 'local', executionHostId: 'local' }),
       ...(externalInputAuthority ? { externalInputAuthority } : {}) })
     // The Core endpoint is already serving before this optional listener can accept a peer.
+    void outbound.start(runtime.server)
     void tailcat.start()
     await connectionOwner?.start(runtime)
     await motePresence?.start()

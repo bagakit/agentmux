@@ -352,8 +352,15 @@ export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
     {'--tab':'data','--region':'data','--direction':'value'}, f => ({tabId:id(f,'--tab'),regionId:id(f,'--region'),direction:value(f,'--direction',true)})),
   empty('whoami', 'Read your verified Session, Run, presentation and available capabilities.'),
   empty('device.ls', 'Read original Host devices, authenticated key fingerprints, latest connection times and peer IP/HTTP User-Agent. Unrecorded identification remains unknown.'),
-  command('device.link', '[--address IPV4]', 'Read this authenticated Host’s complete mobile link, page URL, Relay endpoint, connection state and candidate addresses without changing device authorization.',
-    { '--address': 'value' }, f => (f.values.has('--address') ? { address: value(f, '--address', true)! } : {}) satisfies AgentMuxRpcParams<'device.link'>),
+  command('device.link', '[--address IPV4] [--via local|gateway]', 'Read the original Host connection link. Local returns the mobile page; gateway returns an explicit RPC/CLI link and actual outbound carrier state, without granting device access or promising a Mobile page.',
+    { '--address': 'value', '--via': 'value' }, f => {
+      const via = value(f, '--via')
+      if (via !== undefined && via !== 'local' && via !== 'gateway') invalid('Choose --via local|gateway.')
+      if (via === 'gateway' && f.values.has('--address')) invalid('--address applies only to the local listener.')
+      const result: AgentMuxRpcParams<'device.link'> = f.values.has('--address') ? { address: value(f, '--address', true)! } : {}
+      if (via === 'local' || via === 'gateway') result.via = via
+      return result
+    }),
   command('device.hello', '--name NAME', 'Name this authenticated encrypted device.',
     { '--name': 'data' }, f => ({ name: value(f, '--name', true)! } satisfies AgentMuxRpcParams<'device.hello'>)),
   command('device.revoke', '--device ID', 'Revoke the exact device from the local Host.',

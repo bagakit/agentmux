@@ -502,6 +502,10 @@
       "types": "./dist/object-avatar.d.ts",
       "import": "./dist/object-avatar.js"
     },
+    "./relay-publisher": {
+      "types": "./dist/rpc-relay-publisher.d.ts",
+      "import": "./dist/rpc-relay-publisher.js"
+    },
     "./relay-gateway": {
       "types": "./dist/public-rpc-relay-gateway.d.ts",
       "import": "./dist/public-rpc-relay-gateway.js"
