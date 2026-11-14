@@ -13,6 +13,12 @@ the published owner. A responded endpoint certifies that response, not all Hosts
 system doctor/storage/crash-log/metrics keep source identity, observation time and partial
 coverage. Use current help to discover exact reader contracts and authorization.
 
+`system relay inspect` reads the original Core's optional embedded gateway.
+Disabled, starting, listening and unavailable describe this component only.
+Listening does not confirm an edge connection, device permission or successful
+RPC. A gateway failure does not make the original Unix endpoint or Agent
+unavailable. This read never starts or reconnects a gateway.
+
 Read system diagnostics inspect --list to discover the actual client.notifications reader.
 Use system diagnostics inspect --domain client.notifications --host-id local for the
 registered client's current issues and retained activity, even when its panel is closed.
