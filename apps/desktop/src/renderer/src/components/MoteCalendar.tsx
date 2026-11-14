@@ -203,7 +203,7 @@ export function MoteCalendar({ scope, reference, active, openRequest }: {
   const today = DateTime.fromMillis(now, { zone: timezone }).toISODate()!
   const hourKeyOfSelection = selected + ':' + selectedHour
   const selectedSlot = hourly.get(hourKeyOfSelection)
-  const eventWindow = timed ? selectedSlot?.window : calendarDayWindow(selectedDate)
+  const eventWindow = timed ? hourWindows.get(hourKeyOfSelection) : calendarDayWindow(selectedDate)
   const selectedGroups = timed ? selectedSlot?.groups ?? [] : days.get(selected) ?? []
   const selectedCount = selectedGroups.reduce((sum, group) => sum + group.planned, 0)
   const selectedEvents = useMemo(() => eventWindow ? sliceScheduleOccurrences(occurrences, eventWindow) : [],
@@ -353,7 +353,7 @@ export function MoteCalendar({ scope, reference, active, openRequest }: {
       <section ref={agenda} className="mote-calendar__day" aria-label="Selected day arrangements">
         <section className="mote-calendar__window-info" aria-label={timed ? 'Selected hour' : 'Selected date'}>
           <header><h4>{timed ? 'Selected hour' : 'Selected date'}</h4><span>{selectedDate.toFormat('LLL d')}{timed ? ' · ' + hourLabel(selectedHour) : ''}</span></header>
-          {source.observed && eventWindow ? <MoteCalendarEvents key={JSON.stringify([queryKey, eventWindow.from, eventWindow.to])}
+          {source.observed && eventWindow ? <MoteCalendarEvents key={JSON.stringify([retained.current, eventWindow.from, eventWindow.to])}
             window={eventWindow} schedules={byId} items={selectedEvents} timezone={timezone} now={now}
             active={active && queries.length > 0} onOpenRule={revealArrangement} onOpenDiscussion={openDiscussion} />
             : <p className="continuous-progress-control__help">{source.observed ? 'This hour does not exist in the calendar timezone.' : 'Arrangements are unconfirmed.'}</p>}
