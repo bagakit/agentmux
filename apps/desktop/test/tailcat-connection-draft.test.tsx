@@ -94,7 +94,7 @@ it('saved clean listener stops helper I/O while hidden and resumes it on the rea
  await act(async()=>useAppStore.setState({workspaceFileRevisions:{[SCRATCH_WORKSPACE_ID]:1},scratchTopicSnapshots:{[SCRATCH_WORKSPACE_ID]:{scope:JSON.stringify([scratch.hostId,scratch.path]),revision:1,reading:true,error:null,topics:[leader]}}}))
  await mesh('studio')
  await act(async()=>useAppStore.setState({workspaceFileRevisions:{[SCRATCH_WORKSPACE_ID]:2}}))
- await dom.click('.mesh-view-tabs button:first-child')
+ await dom.click('.mesh-editor-navigation button')
  expect(inspect).toHaveBeenCalledTimes(1);expect(listTopics).toHaveBeenCalledTimes(1);expect(readAvatar).toHaveBeenCalledTimes(1)
  await act(async()=>rejectAvatar(new Error('Hidden avatar read failed')))
  expect(report.mock.calls.filter(call=>String(call[0]).includes('Mote avatar'))).toHaveLength(0)
@@ -116,7 +116,7 @@ it('retains an in-flight incoming save and later literal edits across Host, pane
  const retainedIncoming=[...dom.container.querySelectorAll<HTMLElement>('[data-settings-field="incoming"]')]
  expect(retainedIncoming).toHaveLength(1)
  expect(retainedIncoming.every(node=>node.hidden||node.closest('[hidden]')||node.inert||node.closest('[inert]'))).toBe(true)
- await mesh('local');await dom.click('.mesh-view-tabs button:first-child');expect(inspect).toHaveBeenCalledTimes(initialReads)
+ await mesh('local');await dom.click('.mesh-editor-navigation button');expect(inspect).toHaveBeenCalledTimes(initialReads)
  await dom.click('.mesh-view-tabs button:nth-child(2)')
  expect(value('Tailcat allowed clients')).toBe(text);expect(value('Tailcat server key')).toBe('later-server')
  expect(dom.container.querySelector('[data-settings-field="incoming"] [data-settings-save-bar]')?.textContent).toContain('Saving Incoming connections')
