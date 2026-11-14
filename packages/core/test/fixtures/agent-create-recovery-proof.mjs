@@ -333,7 +333,7 @@ if (stage.startsWith('child-')) {
       if (stage === 'dispatch' || stage === 'legacy') await publicConsumers(f, await f.client.inspectAgentCreation(request.agentSessionId))
       await f.client.writeAgent({ agentSessionId: current.agentSessionId, expectedRun: current.run, source: 'user', data: 'independent-new-input' })
       await wait(() => f.client.kernel.status(run.runId), value => value.acceptedInputBytes > 0, 'healthy independent new input remains available')
-      await wait(() => readFile(join(root, 'native-history.log'), 'utf8'), value => value.includes('independent-new-input'), 'the real private CLI receives independent input')
+      await wait(() => readFile(join(root, 'native-history.log'), 'utf8').catch(error => { if (error.code === 'ENOENT') return ''; throw error }), value => value.includes('independent-new-input'), 'the real private CLI receives independent input')
       const again = await f.client.resolveAgentCreation({ createOperationId: request.createOperationId, operationId: 'resolve-original' })
       check(again.kind === 'agent' && again.run.runId === run.runId && starts === 0 && retires === 0, 'repeat retained resolution neither starts nor fences a retained Run')
       parseCreationInspection(resolved, { createOperationId: request.createOperationId, operationId: 'resolve-original' })

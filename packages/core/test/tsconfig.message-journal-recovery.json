@@ -1,0 +1,5 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": { "rootDir": "../../..", "noEmit": true, "incremental": false, "composite": false },
+  "include": ["../src/agent-global-message-queue.ts", "../src/agent-message-journal.ts", "message-journal-namespace.test.ts","message-journal-recovery.test.ts", "agent-global-message-queue.test.ts"]
+}

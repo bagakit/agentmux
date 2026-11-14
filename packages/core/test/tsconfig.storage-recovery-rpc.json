@@ -1,0 +1,5 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": { "rootDir": "../../..", "noEmit": true, "incremental": false, "composite": false },
+  "include": ["../src/storage-recovery-rpc.ts", "../src/public-rpc.ts", "../src/public-rpc-service.ts", "../src/rpc-native-codec.ts", "../src/index.ts", "storage-recovery-rpc.test.ts"]
+}

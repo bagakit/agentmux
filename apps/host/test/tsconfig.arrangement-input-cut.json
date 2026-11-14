@@ -1,0 +1,667 @@
+{
+  "extends": "../../../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "incremental": false,
+    "composite": false,
+    "rootDir": "../../..",
+    "baseUrl": "../../..",
+    "paths": {
+      "@agentmux/core/agent-input-submit": [
+        "packages/core/src/agent-input-submit.ts"
+      ],
+      "@agentmux/core/focus-task-guidance": [
+        "packages/core/src/focus-task-guidance.ts"
+      ],
+      "@agentmux/core/focus-control": [
+        "packages/core/src/focus-control.ts"
+      ],
+      "@agentmux/core/agent-promotion": [
+        "packages/core/src/agent-promotion.ts"
+      ],
+      "@agentmux/core/agent-open-reference": [
+        "packages/core/src/agent-open-reference.ts"
+      ],
+      "@agentmux/core/agent-open-contract": [
+        "packages/core/src/agent-open-contract.ts"
+      ],
+      "@agentmux/core/space-close": [
+        "packages/core/src/space-close.ts"
+      ],
+      "@agentmux/core/space-authority-codec": [
+        "packages/core/src/space-authority-codec.ts"
+      ],
+      "@agentmux/core/remote-transport-observation": [
+        "packages/core/src/remote-transport-observation.ts"
+      ],
+      "@agentmux/core/agent-execution-guide": [
+        "packages/core/src/agent-execution-guide.ts"
+      ],
+      "@agentmux/core/pasted-images": [
+        "packages/core/src/pasted-images.ts"
+      ],
+      "@agentmux/core/agent-learning": [
+        "packages/core/src/agent-learning.ts"
+      ],
+      "@agentmux/core/agent-derived-actions": [
+        "packages/core/src/agent-derived-actions.ts"
+      ],
+      "@agentmux/core/capsule": [
+        "packages/core/src/capsule.ts"
+      ],
+      "@agentmux/core/mote-chat": [
+        "packages/core/src/mote/chat.ts"
+      ],
+      "@agentmux/core/mote-input-source": [
+        "packages/core/src/mote/input-source.ts"
+      ],
+      "@agentmux/core/mote-input-notice": [
+        "packages/core/src/mote/input-notice.ts"
+      ],
+      "@agentmux/core/browser-sdk": [
+        "packages/core/src/browser-sdk.ts"
+      ],
+      "@agentmux/core/browser-viewport": [
+        "packages/core/src/browser-viewport.ts"
+      ],
+      "@agentmux/core/browser-page-capability": [
+        "packages/core/src/browser-page-capability.ts"
+      ],
+      "@agentmux/core/agent-input-context-capture": [
+        "packages/core/src/agent-input-context-capture.ts"
+      ],
+      "@agentmux/core/browser-input-context": [
+        "packages/core/src/browser-input-context.ts"
+      ],
+      "@agentmux/core/application-access": [
+        "packages/core/src/application-access.ts"
+      ],
+      "@agentmux/core/agent-session-record": [
+        "packages/core/src/agent-session-record.ts"
+      ],
+      "@agentmux/core/agent-input-mailbox": [
+        "packages/core/src/agent-input-mailbox-codec.ts"
+      ],
+      "@agentmux/core/note-merge": [
+        "packages/core/src/note-merge.ts"
+      ],
+      "@agentmux/core/note-history": [
+        "packages/core/src/note-history.ts"
+      ],
+      "@agentmux/core/note-provenance": [
+        "packages/core/src/note-provenance.ts"
+      ],
+      "@agentmux/core/note-title": [
+        "packages/core/src/note-title.ts"
+      ],
+      "@agentmux/core/note-format": [
+        "packages/core/src/note-format.ts"
+      ],
+      "@agentmux/core/mote-connections": [
+        "packages/core/src/mote/connections.ts"
+      ],
+      "@agentmux/core/automatic-input-source": [
+        "packages/core/src/automatic-input-source.ts"
+      ],
+      "@agentmux/core/mote-dialogue-store": [
+        "packages/core/src/mote/dialogue-store.ts"
+      ],
+      "@agentmux/core/mote-dialogue": [
+        "packages/core/src/mote/dialogue.ts"
+      ],
+      "@agentmux/core/mote-preferences": [
+        "packages/core/src/mote/preferences.ts"
+      ],
+      "@agentmux/core/session-history-content": [
+        "packages/core/src/session-history-content.ts"
+      ],
+      "@agentmux/core/prompt-preparation": [
+        "packages/core/src/prompt-preparation.ts"
+      ],
+      "@agentmux/core/sharing": [
+        "packages/core/src/sharing.ts"
+      ],
+      "@agentmux/core": [
+        "packages/core/src/index.ts"
+      ],
+      "@agentmux/core/runtime": [
+        "packages/core/src/runtime.ts"
+      ],
+      "@agentmux/core/renderer-trace-bytes": [
+        "packages/core/src/renderer-trace-bytes.ts"
+      ],
+      "@agentmux/core/control": [
+        "packages/core/src/control.ts"
+      ],
+      "@agentmux/core/goal-evidence": [
+        "packages/core/src/goal-evidence.ts"
+      ],
+      "@agentmux/core/files": [
+        "packages/core/src/public-rpc-files.ts"
+      ],
+      "@agentmux/core/schedule": [
+        "packages/core/src/agent-schedule.ts"
+      ],
+      "@agentmux/core/timeline": [
+        "packages/core/src/session-timeline.ts"
+      ],
+      "@agentmux/core/observation-read": [
+        "packages/core/src/observation-read.ts"
+      ],
+      "@agentmux/core/session-user-messages": [
+        "packages/core/src/session-user-messages.ts"
+      ],
+      "@agentmux/core/provider-launch-options": [
+        "packages/core/src/providers/launch-options.ts"
+      ],
+      "@agentmux/core/launch-option": [
+        "packages/core/src/agent-launch-option.ts"
+      ],
+      "@agentmux/core/agent-status": [
+        "packages/core/src/agent-status-freshness.ts"
+      ],
+      "@agentmux/core/agent-message-render": [
+        "packages/core/src/agent-message-render.ts"
+      ],
+      "@agentmux/core/agent-outbound-message": [
+        "packages/core/src/agent-outbound-message.ts"
+      ],
+      "@agentmux/core/agent-session-id": [
+        "packages/core/src/agent-session-id.ts"
+      ],
+      "@agentmux/core/provider-id": [
+        "packages/core/src/agent-provider-id.ts"
+      ],
+      "@agentmux/core/risk-tier": [
+        "packages/core/src/risk-tier.ts"
+      ],
+      "@agentmux/core/run-status": [
+        "packages/core/src/agent-run-status.ts"
+      ],
+      "@agentmux/core/terminal-continuation": [
+        "packages/core/src/terminal-continuation.ts"
+      ],
+      "@agentmux/core/agent-prompt-budget": [
+        "packages/core/src/agent-prompt-budget.ts"
+      ],
+      "@agentmux/core/prompt-condition": [
+        "packages/core/src/agent-prompt-condition.ts"
+      ],
+      "@agentmux/core/agent-input-receipt": [
+        "packages/core/src/agent-input-receipt-codec.ts"
+      ],
+      "@agentmux/core/workbench-layout-preset": [
+        "packages/core/src/workbench-layout-preset.ts"
+      ],
+      "@agentmux/core/bracketed-paste": [
+        "packages/core/src/bracketed-paste.ts"
+      ],
+      "@agentmux/core/continuous-progress": [
+        "packages/core/src/continuous-progress.ts"
+      ],
+      "@agentmux/core/continuous-progress-scheduler": [
+        "packages/core/src/continuous-progress-scheduler.ts"
+      ],
+      "@agentmux/core/agent-interaction-state": [
+        "packages/core/src/agent-interaction-state.ts"
+      ],
+      "@agentmux/core/public-rpc-http": [
+        "packages/core/src/public-rpc-http.ts"
+      ],
+      "@agentmux/core/hosted": [
+        "packages/core/src/hosted.ts"
+      ],
+      "@agentmux/core/spatial-layout": [
+        "packages/core/src/spatial-layout.ts"
+      ],
+      "@agentmux/core/spatial-state": [
+        "packages/core/src/spatial-state.ts"
+      ],
+      "@agentmux/core/spatial-graph": [
+        "packages/core/src/spatial-graph.ts"
+      ],
+      "@agentmux/core/headless-runtime": [
+        "packages/core/src/headless-runtime.ts"
+      ],
+      "@agentmux/core/runtime-client": [
+        "packages/core/src/runtime-client.ts"
+      ],
+      "@agentmux/core/notebook-observation": [
+        "packages/core/src/notebook-observation.ts"
+      ],
+      "@agentmux/core/note-links": [
+        "packages/core/src/note-links.ts"
+      ],
+      "@agentmux/core/notebook-catalog": [
+        "packages/core/src/notebook-catalog.ts"
+      ],
+      "@agentmux/core/notebook-store": [
+        "packages/core/src/notebook-store.ts"
+      ],
+      "@agentmux/core/prompt-reaction": [
+        "packages/core/src/prompt-reaction.ts"
+      ],
+      "@agentmux/core/public-rpc-relay": [
+        "packages/core/src/public-rpc-relay.ts"
+      ],
+      "@agentmux/core/relay-identity": [
+        "packages/core/src/rpc-relay-keypair.ts"
+      ],
+      "@agentmux/core/relay-hosted": [
+        "packages/core/src/relay-hosted.ts"
+      ],
+      "@agentmux/core/delivery-attempt": [
+        "packages/core/src/delivery-attempt.ts"
+      ],
+      "@agentmux/core/object-id": [
+        "packages/core/src/object-id.ts"
+      ],
+      "@agentmux/core/toolkit-result-channel": [
+        "packages/core/src/toolkit-result-channel.ts"
+      ],
+      "@agentmux/core/toolkit-performance-failure": [
+        "packages/core/src/toolkit-performance-failure.ts"
+      ],
+      "@agentmux/core/toolkit": [
+        "packages/core/src/toolkit.ts"
+      ],
+      "@agentmux/core/toolkit-result-document": [
+        "packages/core/src/toolkit-result-document.ts"
+      ],
+      "@agentmux/core/reading-diagnostic": [
+        "packages/core/src/reading-diagnostic.ts"
+      ],
+      "@agentmux/core/reading-diagnostic-recorder": [
+        "packages/core/src/reading-diagnostic-recorder.ts"
+      ],
+      "@agentmux/core/diagnostic-evidence": [
+        "packages/core/src/diagnostic-evidence.ts"
+      ],
+      "@agentmux/core/client-incident": [
+        "packages/core/src/client-incident.ts"
+      ],
+      "@agentmux/core/mote-face": [
+        "packages/core/src/mote/face.ts"
+      ],
+      "@agentmux/core/mote-avatar-series": [
+        "packages/core/src/mote/avatar-series.ts"
+      ],
+      "@agentmux/core/mote-avatar-write": [
+        "packages/core/src/mote/avatar-write.ts"
+      ],
+      "@agentmux/core/goal-delegation": [
+        "packages/core/src/goal-delegation.ts"
+      ],
+      "@agentmux/core/goal-responsibility": [
+        "packages/core/src/goal-responsibility.ts"
+      ],
+      "@agentmux/core/conversation": [
+        "packages/core/src/conversation.ts"
+      ],
+      "@agentmux/core/search": [
+        "packages/core/src/search.ts"
+      ],
+      "@agentmux/core/session-history-query-budget": [
+        "packages/core/src/session-history-query-budget.ts"
+      ],
+      "@agentmux/core/connections": [
+        "packages/core/src/connections.ts"
+      ],
+      "@agentmux/core/goal-patrol": [
+        "packages/core/src/goal-patrol.ts"
+      ],
+      "@agentmux/core/goal-role-guidance": [
+        "packages/core/src/goal-role-guidance.ts"
+      ],
+      "@agentmux/core/note-merge-node": [
+        "packages/core/src/note-merge-node.ts"
+      ],
+      "@agentmux/core/schedule-calendar": [
+        "packages/core/src/schedule-calendar.ts"
+      ],
+      "@agentmux/core/schedule-rpc": [
+        "packages/core/src/public-rpc-schedules.ts"
+      ],
+      "@agentmux/core/agent-session-recovery": [
+        "packages/core/src/agent-session-recovery.ts"
+      ],
+      "@agentmux/core/mobile-web": [
+        "packages/core/src/mobile-web.ts"
+      ],
+      "@agentmux/core/mobile-web-codec": [
+        "packages/core/src/mobile-web-codec.ts"
+      ],
+      "@agentmux/core/agent-automation": [
+        "packages/core/src/agent-automation.ts"
+      ],
+      "@agentmux/core/app-capture": [
+        "packages/core/src/app-capture.ts"
+      ],
+      "@agentmux/core/browser-site-permissions": [
+        "packages/core/src/browser-site-permissions.ts"
+      ],
+      "@agentmux/core/note-format-metadata": [
+        "packages/core/src/note-format-metadata.ts"
+      ],
+      "@agentmux/core/node-locator": [
+        "packages/core/src/node-locator.ts"
+      ],
+      "@agentmux/core/node-publishing": [
+        "packages/core/src/node-publishing.ts"
+      ],
+      "@agentmux/core/executor-contract": [
+        "packages/core/src/executor-contract.ts"
+      ],
+      "@agentmux/core/goal-agent-reference": [
+        "packages/core/src/goal-agent-reference.ts"
+      ],
+      "@agentmux/core/host-route": [
+        "packages/core/src/host-route.ts"
+      ],
+      "@agentmux/core/space-identity": [
+        "packages/core/src/space-identity.ts"
+      ],
+      "@agentmux/core/space-folder-client": [
+        "packages/core/src/space-folder-client.ts"
+      ],
+      "@agentmux/core/space-session-stream": [
+        "packages/core/src/space-session-stream.ts"
+      ],
+      "@agentmux/core/space-sessions": [
+        "packages/core/src/space-sessions.ts"
+      ],
+      "@agentmux/core/space-folder": [
+        "packages/core/src/space-folder.ts"
+      ],
+      "@agentmux/core/name-control": [
+        "packages/core/src/name-control.ts"
+      ],
+      "@agentmux/core/name-control-client": [
+        "packages/core/src/name-control-client.ts"
+      ],
+      "@agentmux/core/space-member": [
+        "packages/core/src/space-member.ts"
+      ],
+      "@agentmux/core/space-member-client": [
+        "packages/core/src/space-member-client.ts"
+      ],
+      "@agentmux/core/space-member-codec": [
+        "packages/core/src/space-member-codec.ts"
+      ],
+      "@agentmux/core/space-folder-resources": [
+        "packages/core/src/space-folder-resources.ts"
+      ],
+      "@agentmux/core/object-avatar": [
+        "packages/core/src/object-avatar.ts"
+      ],
+      "@agentmux/core/relay-publisher": [
+        "packages/core/src/rpc-relay-publisher.ts"
+      ],
+      "@agentmux/core/relay-gateway": [
+        "packages/core/src/public-rpc-relay-gateway.ts"
+      ],
+      "@agentmux/core/mesh-network": [
+        "packages/core/src/mesh-network.ts"
+      ],
+      "@agentmux/core/agent-takeover": [
+        "packages/core/src/agent-takeover.ts"
+      ],
+      "@agentmux/host/object-avatars": [
+        "apps/host/src/object-avatars.ts"
+      ],
+      "@agentmux/host/object-avatar-files": [
+        "apps/host/src/object-avatar-files.ts"
+      ],
+      "@agentmux/host/mote-avatar-state": [
+        "apps/host/src/mote-avatar-state.ts"
+      ],
+      "@agentmux/host/mote-avatar-read": [
+        "apps/host/src/mote-avatar-read.ts"
+      ],
+      "@agentmux/host/file-upload-owner": [
+        "apps/host/src/file-upload-owner.ts"
+      ],
+      "@agentmux/host/host-configuration": [
+        "apps/host/src/host-configuration.ts"
+      ],
+      "@agentmux/host/mote-resources": [
+        "apps/host/src/mote-resources.ts"
+      ],
+      "@agentmux/host/mote-chat-agents": [
+        "apps/host/src/mote-chat-agents.ts"
+      ],
+      "@agentmux/host/mote-membership": [
+        "apps/host/src/mote-membership.ts"
+      ],
+      "@agentmux/host/mote-model": [
+        "apps/host/src/mote-model.ts"
+      ],
+      "@agentmux/host/credential-administration": [
+        "apps/host/src/credential-administration.ts"
+      ],
+      "@agentmux/host/file-resource": [
+        "apps/host/src/file-resource.ts"
+      ],
+      "@agentmux/host/ordinary-files": [
+        "apps/host/src/ordinary-files.ts"
+      ],
+      "@agentmux/host/workspace-file-bytes": [
+        "apps/host/src/workspace-file-bytes.ts"
+      ],
+      "@agentmux/host/mote-connection-preferences": [
+        "apps/host/src/mote-connection-preferences.ts"
+      ],
+      "@agentmux/host/mote-connection-target": [
+        "apps/host/src/mote-connection-target.ts"
+      ],
+      "@agentmux/host/file-resource-model": [
+        "apps/host/src/file-resource-model.ts"
+      ],
+      "@agentmux/host/presentation-configuration": [
+        "apps/host/src/presentation-configuration.ts"
+      ],
+      "@agentmux/host/macos-service": [
+        "apps/host/src/macos-service.ts"
+      ],
+      "@agentmux/host/file-read-owner": [
+        "apps/host/src/file-read-owner.ts"
+      ],
+      "@agentmux/host/topic-knowledge": [
+        "apps/host/src/topic-knowledge.ts"
+      ],
+      "@agentmux/host/topic-spatial-owner": [
+        "apps/host/src/topic-spatial-owner.ts"
+      ],
+      "@agentmux/host/topic-search-history": [
+        "apps/host/src/topic-search-history.ts"
+      ],
+      "@agentmux/host/snapshot-observation": [
+        "apps/host/src/snapshot-observation.ts"
+      ],
+      "@agentmux/host/note-file-writer": [
+        "apps/host/src/note-file-writer.ts"
+      ],
+      "@agentmux/host/note-history-actions": [
+        "apps/host/src/note-history-actions.ts"
+      ],
+      "@agentmux/host/note-title-file-writer": [
+        "apps/host/src/note-title-file-writer.ts"
+      ],
+      "@agentmux/host/note-corpus-reader": [
+        "apps/host/src/note-corpus-reader.ts"
+      ],
+      "@agentmux/host/notebook-observation-owner": [
+        "apps/host/src/notebook-observation-owner.ts"
+      ],
+      "@agentmux/host/note-shared-block-owner": [
+        "apps/host/src/note-shared-block-owner.ts"
+      ],
+      "@agentmux/host/note-shared-undo-owner": [
+        "apps/host/src/note-shared-undo-owner.ts"
+      ],
+      "@agentmux/host/note-shared-file-delete-owner": [
+        "apps/host/src/note-shared-file-delete-owner.ts"
+      ],
+      "@agentmux/host/topic-categories": [
+        "apps/host/src/topic-categories.ts"
+      ],
+      "@agentmux/host/notes-library": [
+        "apps/host/src/notes-library.ts"
+      ],
+      "@agentmux/host/note-resource-write": [
+        "apps/host/src/note-resource-write.ts"
+      ],
+      "@agentmux/host/content-types": [
+        "apps/host/src/content-types.ts"
+      ],
+      "@agentmux/host/content-owner": [
+        "apps/host/src/content-owner.ts"
+      ],
+      "@agentmux/host/settings-resource-read": [
+        "apps/host/src/settings-resource-read.ts"
+      ],
+      "@agentmux/host/theme-observation": [
+        "apps/host/src/theme-observation.ts"
+      ],
+      "@agentmux/host/client-incident-archive": [
+        "apps/host/src/client-incident-archive.ts"
+      ],
+      "@agentmux/host/mobile-web-report-owner": [
+        "apps/host/src/mobile-web-report-owner.ts"
+      ],
+      "@agentmux/host/workspace-projects": [
+        "apps/host/src/workspace-projects.ts"
+      ],
+      "@agentmux/host/goals-preferences": [
+        "apps/host/src/goals-preferences.ts"
+      ],
+      "@agentmux/host/agent-schedule-check-in": [
+        "apps/host/src/agent-schedule-check-in.ts"
+      ],
+      "@agentmux/host/continuous-progress-loop-store": [
+        "apps/host/src/continuous-progress-loop-store.ts"
+      ],
+      "@agentmux/host/continuous-progress-task-source": [
+        "apps/host/src/continuous-progress-task-source.ts"
+      ],
+      "@agentmux/host/goal-delegation-materials": [
+        "apps/host/src/goal-delegation-materials.ts"
+      ],
+      "@agentmux/host/goal-role-input": [
+        "apps/host/src/goal-role-input.ts"
+      ],
+      "@agentmux/host/goal-pmo-origin": [
+        "apps/host/src/goal-pmo-origin.ts"
+      ],
+      "@agentmux/host/demand-participation": [
+        "apps/host/src/demand-participation.ts"
+      ],
+      "@agentmux/host/name-history": [
+        "apps/host/src/name-history.ts"
+      ],
+      "@agentmux/host/goal-project-context": [
+        "apps/host/src/goal-project-context.ts"
+      ],
+      "@agentmux/host/goal-delegation-owner": [
+        "apps/host/src/goal-delegation-owner.ts"
+      ],
+      "@agentmux/host/goal-delegation-attention": [
+        "apps/host/src/goal-delegation-attention.ts"
+      ],
+      "@agentmux/host/goal-start-responsibility": [
+        "apps/host/src/goal-start-responsibility.ts"
+      ],
+      "@agentmux/host/goal-responsibility-owner": [
+        "apps/host/src/goal-responsibility-owner.ts"
+      ],
+      "@agentmux/host/goal-patrol-owner": [
+        "apps/host/src/goal-patrol-owner.ts"
+      ],
+      "@agentmux/host/goal-dispatch-input": [
+        "apps/host/src/goal-dispatch-input.ts"
+      ],
+      "@agentmux/host/continuous-progress-delivery": [
+        "apps/host/src/continuous-progress-delivery.ts"
+      ],
+      "@agentmux/host/goal-runtime": [
+        "apps/host/src/goal-runtime.ts"
+      ],
+      "@agentmux/host/continuous-progress-loop-manager": [
+        "apps/host/src/continuous-progress-loop-manager.ts"
+      ],
+      "@agentmux/host/goal-projection": [
+        "apps/host/src/goal-projection.ts"
+      ],
+      "@agentmux/host/goals": [
+        "apps/host/src/goals.ts"
+      ],
+      "@agentmux/host/goal-discussion-launcher": [
+        "apps/host/src/goal-discussion-launcher.ts"
+      ],
+      "@agentmux/host/goal-discussion-bindings": [
+        "apps/host/src/goal-discussion-bindings.ts"
+      ],
+      "@agentmux/host/author-profile": [
+        "apps/host/src/public-author-profile.ts"
+      ],
+      "@agentmux/demand": [
+        "packages/demand/src/index.ts"
+      ],
+      "@agentmux/demand/store": [
+        "packages/demand/src/demand-store.ts"
+      ],
+      "@agentmux/demand/types": [
+        "packages/demand/src/demand-types.ts"
+      ],
+      "@agentmux/demand/cli": [
+        "packages/demand/src/cli.ts"
+      ],
+      "@agentmux/demand/goals": [
+        "packages/demand/src/goals.ts"
+      ],
+      "@agentmux/demand/delegations": [
+        "packages/demand/src/delegations.ts"
+      ],
+      "@agentmux/demand/goal-plan": [
+        "packages/demand/src/goal-plan.ts"
+      ],
+      "@agentmux/demand/relations": [
+        "packages/demand/src/relations.ts"
+      ],
+      "@agentmux/demand/goal-patrol": [
+        "packages/demand/src/goal-patrol.ts"
+      ],
+      "@agentmux/demand/responsibility": [
+        "packages/demand/src/responsibility.ts"
+      ],
+      "@agentmux/identity": [
+        "packages/identity/src/index.ts"
+      ],
+      "@agentmux/identity/runtime": [
+        "packages/identity/src/runtime-entry.ts"
+      ]
+    },
+    "types": [
+      "node"
+    ],
+    "lib": [
+      "ESNext",
+      "DOM",
+      "DOM.Iterable"
+    ]
+  },
+  "files": [
+    "../../../packages/core/src/agent-progress.ts",
+    "../../../packages/core/src/continuous-progress-scheduler.ts",
+    "../../../packages/core/src/public-rpc-schedules.ts",
+    "../../../packages/core/src/public-rpc-service.ts",
+    "../../../packages/core/src/schedule-cli.ts",
+    "../../../packages/core/src/agentmux-cli-commands.ts",
+    "../../../apps/host/src/continuous-progress-loop-manager.ts",
+    "../../../apps/host/src/continuous-progress-loop-store.ts",
+    "../../../apps/host/src/goal-runtime.ts",
+    "../../../apps/host/src/mote-presence.ts",
+    "../../../apps/host/test/arrangement-input-cut.test.ts"
+  ],
+  "include": []
+}

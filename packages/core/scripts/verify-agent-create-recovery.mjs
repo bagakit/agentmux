@@ -78,7 +78,7 @@ const baseVariants = [
     change('/src/agent-session-recovery/reconciliation.ts', "session.creation?.resolution?.initialInputContinuation !== 'held' && (controlled", '(controlled'),
     change('/src/client.ts', "current.creation?.resolution?.initialInputContinuation === 'held' || !input?.key", '!input?.key'),
     change('/src/client.ts', "current.creation?.resolution?.initialInputContinuation === 'held' || !input?.key", '!input?.key'),
-    change('/src/client.ts', "if ((await this.store.readMetadata(original.agentSessionId))?.creation?.resolution?.initialInputContinuation === 'held') throw refused()", '')
+    change('/src/client.ts', "if (!latest || latest.creation?.resolution?.initialInputContinuation === 'held') throw refused()", 'if (!latest) throw refused()')
   ], assertion: 'resolution does not rewrite old input or ACK' }
 ]
 const variants = baseVariants.flatMap(value => value.mutations ? [value, { name: 'restore-' + value.name, stage: value.stage, restorationOf: value.name }] : [value])
@@ -172,6 +172,7 @@ try {
       assert.ok(result.stderr.includes('AssertionError') && result.stderr.includes('T005: ' + variant.assertion), `Causal assertion ${variant.name}: ${result.stderr}`)
       for (const mutation of variant.mutations) assert.ok(modules.some(row => row.path.endsWith(mutation.path) && row.sourceSHA256 !== row.loadedSHA256), 'Mutated source was loaded: ' + mutation.path)
     } else {
+      if (result.status !== 0) await writeFile(join(evidence, 'agent-create-recovery-incomplete.private.json'), JSON.stringify({ verdict: 'failed', variant: variant.name, status: result.status, stdout: result.stdout, stderr: result.stderr, cleanup, fixtureSHA256: hash(await readFile(fixture)), loaded: modules }, null, 2) + '\n', { mode: 0o600 })
       assert.equal(result.status, 0, result.stderr)
       assert.ok(result.stdout.includes('AMUX_PROOF_JSON:'), 'Nonempty real consumer proof')
     }

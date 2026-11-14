@@ -82,7 +82,7 @@ describe('Core-owned durable A2A global message queue', () => {
     await expect(reopened.preparePrompt(message.messageId, capture)).rejects.toMatchObject({
       code: 'AGENT_PROMPT_INPUT_UNCONFIRMED', detail: 'unknown' })
     expect(capture).not.toHaveBeenCalled()
-    expect(await reopened.readJournal()).toEqual([historical])
+    await expect(reopened.readJournal()).resolves.toEqual([historical])
     expect((await reopened.listAfter())[0]?.envelope).toEqual(message.envelope)
   })
 

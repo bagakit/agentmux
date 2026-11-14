@@ -47,10 +47,10 @@ function summary(value) {
     errors: value.numRuntimeErrorTestSuites ?? 0, failures: assertions.filter(test => test.status === 'failed').map(test => ({
       name: test.fullName, messages: test.failureMessages })) }
 }
-async function vitest(label, pattern) {
+async function vitest(label, pattern, mutant) {
   const results = join(evidence, label + '.private.json'), loads = await save(label + '-source-loads.private.ndjson', '')
   const result = await run(label, ['node_modules/vitest/vitest.mjs', 'run', '--config', config, '--reporter=json', '--outputFile', results,
-    ...(pattern ? ['-t', pattern] : [])], { AGENTMUX_RECEIPT_SOURCE_LOADS: loads, AGENTMUX_TEST_RECEIPT_SOURCE_LOADS: loads })
+    ...(pattern ? ['-t', pattern] : [])], { AGENTMUX_RECEIPT_SOURCE_LOADS: loads, AGENTMUX_TEST_RECEIPT_SOURCE_LOADS: loads, ...(mutant ? { AGENTMUX_RECEIPT_MUTANT: JSON.stringify(mutant) } : {}) })
   await chmod(results, 0o600)
   const parsed = JSON.parse(await readFile(results, 'utf8')), counts = summary(parsed)
   const loaded = (await readFile(loads, 'utf8')).trim().split('\n').filter(Boolean).map(line => JSON.parse(line))
@@ -65,8 +65,8 @@ async function vitest(label, pattern) {
   return { ...result, ...counts, resultPath: results, sourceLoadsPath: loads, loadedCount: loaded.length }
 }
 function assertGreen(result) {
-  if (result.code !== 0 || result.total !== 105 || result.passed !== 105 || result.failed !== 0 || result.suites !== 6 || result.errors)
-    throw Error('Receipt regression gate was not a non-empty 105/105 pass: ' + JSON.stringify({ ...result, output: undefined }))
+  if (result.code !== 0 || result.total !== 109 || result.passed !== 109 || result.failed !== 0 || result.suites !== 6 || result.errors)
+    throw Error('Receipt regression gate was not a non-empty 109/109 pass: ' + JSON.stringify({ ...result, output: undefined }))
 }
 function replace(source, from, to, count = 1) {
   if (source.split(from).length - 1 !== count) throw Error('Mutation anchor changed: ' + from)
@@ -97,29 +97,26 @@ try {
   const types = await run('types', ['node_modules/typescript/bin/tsc', '--project', 'packages/core/test/tsconfig.prompt-receipt-preservation.json', '--pretty', 'false'])
   if (types.code !== 0) throw Error('Narrow Core receipt type check failed.')
   const baseline = await vitest('baseline'); assertGreen(baseline)
-  report.tests.push({ ...baseline, output: undefined }); process.stdout.write('baseline: 105/105, source-bound product chain and cold process passed\n')
+  report.tests.push({ ...baseline, output: undefined }); process.stdout.write('baseline: 109/109, source-bound product chain and cold process passed\n')
   for (const mutation of mutations) {
     const path = join(root, mutation.path), original = originals.get(mutation.path)
     if (await readFile(path, 'utf8') !== original) throw Error('Candidate changed before mutation: ' + path)
-    try {
-      const modified = mutation.edit(original); await writeFile(path, modified)
-      const result = await vitest('mutation-' + mutation.id, mutation.pattern)
-      if (result.code === 0 || result.failed < 1 || result.errors || !result.failures.length ||
-        result.failures.some(failure => !failure.messages.some(message => /AssertionError|expected .*|promise resolved/isu.test(message))))
-        throw Error('Mutation did not fail through a business assertion: ' + mutation.id)
-      report.mutations.push({ id: mutation.id, sourcePath: mutation.path, mutantSHA256: sha(modified), ...result, output: undefined })
-      process.stdout.write('mutation ' + mutation.id + ': business assertion failed as required\n')
-    } finally { await writeFile(path, original) }
+    const modified = mutation.edit(original), file = await save('mutation-' + mutation.id + '.source.private.ts', modified)
+    const result = await vitest('mutation-' + mutation.id, mutation.pattern, { path, file, diskSHA256: sha(original), id: mutation.id })
+    if (result.code === 0 || result.failed < 1 || result.errors || !result.failures.length ||
+      result.failures.some(failure => !failure.messages.some(message => /AssertionError|expected .*|promise resolved/isu.test(message))))
+      throw Error('Mutation did not fail through a business assertion: ' + mutation.id)
+    const loaded = (await readFile(result.sourceLoadsPath, 'utf8')).split('\n').filter(Boolean).map(JSON.parse)
+    if (!loaded.some(value => value.mutation === mutation.id && value.compiledSourceSHA256 === sha(modified))) throw Error('The exact input mutant was not consumed')
+    report.mutations.push({ id: mutation.id, sourcePath: mutation.path, mutantSHA256: sha(modified), ...result, output: undefined })
+    process.stdout.write('mutation ' + mutation.id + ': business assertion failed as required\n')
   }
   const restored = await vitest('restored'); assertGreen(restored); report.tests.push({ ...restored, output: undefined })
   for (const [path, original] of originals) if (await readFile(join(root, path), 'utf8') !== original) throw Error('Source was not restored: ' + path)
-  report.verdict = 'pass'; process.stdout.write('restored: 105/105; all 6 causal mutations rejected\n')
+  report.verdict = 'pass'; process.stdout.write('restored: 109/109; all 6 causal mutations rejected\n')
 } catch (error) { report.verdict = 'fail'; report.failure = error.stack ?? String(error); process.exitCode = 1; console.error(report.failure) }
 finally {
-  for (const path of [storePath, recordPath]) {
-    const original = originals.get(path)
-    if (await readFile(join(root, path), 'utf8') !== original) await writeFile(join(root, path), original)
-  }
+
   if (previousAsset) await writeFile(asset, previousAsset); else await rm(asset, { force: true })
   report.endedAt = new Date().toISOString()
   await save('verification.private.json', JSON.stringify(report, null, 2) + '\n')
