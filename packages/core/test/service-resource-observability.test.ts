@@ -205,14 +205,17 @@ it('serializes the registered owner SDK and exact Host inspection through real R
   cleanup.push(() => hosted.dispose())
   const node = new NodePublishingOwner({ stateDirectory: f.root, runtimeId: identity.runtimeId, ownerInstanceId: identity.ownerInstanceId })
   let configuration = { id: 'selected', kind: 'ssh', label: 'Original fixture', hostname: 'original.invalid' }
+  const sources = vi.fn((hostId?: string) => [{ hostId: 'local', client: source.client }, { hostId: 'selected', client: f.client }]
+    .filter(entry => hostId === undefined || entry.hostId === hostId))
   const server = new AgentMuxControlServer({ socketPath: join(f.root, 'service.sock'), hostedRuntime: () => hosted,
     hostConfiguration: id => id === 'selected' ? configuration : null,
-    nodePublishing: node, coreClients: () => [{ hostId: 'local', client: source.client }, { hostId: 'selected', client: f.client }] })
+    nodePublishing: node, coreClients: sources })
   await server.start(); cleanup.push(() => server.stop())
   const rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: server.path } }); cleanup.push(() => rpc.dispose())
   const consumer = await connectHostedAgentMux({ rpc }); cleanup.push(() => consumer.dispose())
   expect(typeof consumer.agentSessionResourceSnapshot).toBe('function')
   expect(await consumer.agentSessionResourceSnapshot()).toMatchObject({ saved: 1, retired: 0 })
+  sources.mockClear()
   const observed = await rpc.call('settings.hosts.inspect', { hostId: 'selected' })
   expect(observed).toMatchObject({ routeHostId: 'selected', resources: { state: 'available', value: { runningRuns: 6 } } })
   expect(observed).not.toHaveProperty('agents')
@@ -220,6 +223,7 @@ it('serializes the registered owner SDK and exact Host inspection through real R
   expect(records).toMatchObject({ routeHostId: 'selected', kind: 'records', measurement: { state: 'available', value: { saved: 1, retired: 0 } } })
   const running = await rpc.call('settings.hosts.agent-resources', { hostId: 'selected', kind: 'running' })
   expect(running).toMatchObject({ kind: 'running', measurement: { state: 'available', value: { count: 1, nativeInstanceId: 'private-native-instance' } } })
+  expect(sources.mock.calls.map(([hostId]) => hostId)).toEqual(Array(6).fill('selected'))
   expect(parseHostAgentResourceObservation(records, { hostId: 'selected', kind: 'records' })).toEqual(records)
   expect(parseHostRuntimeObservation(observed, 'selected')).toEqual(observed)
   const io = await rpc.call('settings.node.resources', {})

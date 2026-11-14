@@ -58,7 +58,9 @@ async function coreFixture(cleanup: Array<() => unknown | Promise<unknown>>, run
         observedAt: 1, latestOutputBytes: 0, acceptedInputBytes: 0 } } as AgentMuxRuntimeSubject
   })
   const hosted = new AgentMuxHostedRuntimeService(core, null, () => owner); cleanup.push(() => hosted.dispose())
-  const serverOptions = { socketPath: join(root, 'rpc.sock'), spatialState: spatial, coreClients: () => [{ hostId: 'local', client: core }, ...clients()], ...(authoritySocketPath ? { forwardingPeer: { authoritySocketPath } } : {}), hostedRuntime: () => hosted }
+  const coreClients = vi.fn((hostId?: string) => [{ hostId: 'local', client: core }, ...clients()]
+    .filter(source => hostId === undefined || source.hostId === hostId))
+  const serverOptions = { socketPath: join(root, 'rpc.sock'), spatialState: spatial, coreClients, ...(authoritySocketPath ? { forwardingPeer: { authoritySocketPath } } : {}), hostedRuntime: () => hosted }
   let server = new AgentMuxControlServer(serverOptions)
   cleanup.push(() => server.stop()); await server.start()
   const rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: server.path } }); cleanup.push(() => rpc.dispose())
@@ -67,7 +69,7 @@ async function coreFixture(cleanup: Array<() => unknown | Promise<unknown>>, run
       workspacePath, capabilityHash: hashAgentCapability('private-original-capability'), hookBindingId: 'private-binding', hookToken: 'private-token', run: { runId }, retiredRuns: [], createdAt: 1, updatedAt }
     const previous = await core.readAgentSession(id); await inner.registry.put(session, previous?.run); inner.publishSession(session); return session
   }
-  return { root, spatial, core, hosted, rpc, get server() { return server }, owner, inventory, runs, all, put,
+  return { root, spatial, core, coreClients, hosted, rpc, get server() { return server }, owner, inventory, runs, all, put,
     disconnect: async () => { await server.stop() },
     reconnect: async () => { owner.ownerInstanceId += '-renewed'; server = new AgentMuxControlServer(serverOptions); await server.start() } }
 }

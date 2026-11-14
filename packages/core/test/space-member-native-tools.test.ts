@@ -36,6 +36,9 @@ it.each([false, true])('the original member Skills use their native owner with N
     { runtimeFence: { runtimeId: f.b.owner.runtimeId, ownerInstanceId: f.b.owner.ownerInstanceId } })
   expect(result).toMatchObject({ hostId: 'local', agentSessionId: sid, workspacePath,
     skills: [{ name: 'Original exact skill', path: skillPath, source: 'project', version: '2.4.1' }] })
+  owner.coreClients.mockClear()
+  expect(await owner.rpc.call('skill.ls', { hostId: 'local', agentSessionId: sid })).toEqual(result)
+  expect(owner.coreClients.mock.calls.map(([hostId]) => hostId)).toEqual(['local'])
   const readOwner = vi.spyOn(owner.core, 'readAgentSession')
   for (const [runtimeFence, code] of [[{ runtimeId: 'another-execution-Runtime', ownerInstanceId: owner.owner.ownerInstanceId }, 'RUNTIME_OWNER_MISMATCH'],
     [{ runtimeId: owner.owner.runtimeId, ownerInstanceId: 'another-execution-instance' }, 'RUNTIME_OWNER_CHANGED']] as const) {

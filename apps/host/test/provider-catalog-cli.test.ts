@@ -96,15 +96,18 @@ it('compiled CLI follows the actual Host → Desktop → original Host bridge fo
     expect(hostId).toBe('desktop-route'); expect(context.caller).toBeUndefined()
     return await callOriginalDesktopHost(desktopCore, method, params, context)
   })
+  const sources = vi.fn((hostId?: string) => [{ hostId: 'local', client: desktopCore }, { hostId: 'desktop-route', client: desktopCore }]
+    .filter(source => hostId === undefined || source.hostId === hostId))
   const desktop = new core.AgentMuxControlServer({ socketPath: join(f.original.root, 'desktop.sock'), exposedMethods: desktopRpcMethods(),
     forwardingPeer: { authoritySocketPath: join(f.original.root, 'control.sock') },
-    coreClients: () => [{ hostId: 'local', client: desktopCore }, { hostId: 'desktop-route', client: desktopCore }],
+    coreClients: sources,
     callOriginalCore: call as never })
   await desktop.start(); cleanup.push(() => desktop.stop())
   const result = await f.cli(['--host', 'desktop-route'], true)
   expect(result.code, result.stderr).toBe(0)
   expect(JSON.parse(result.stdout).result).toMatchObject({ routeHostId: 'desktop-route', runtimeId: expect.any(String), catalog: f.host.client.catalog() })
   expect(call).toHaveBeenCalledTimes(1); expect(cached).not.toHaveBeenCalled()
+  expect(sources.mock.calls.map(([hostId]) => hostId)).toEqual(['desktop-route', 'desktop-route'])
   for (const probe of f.probes) expect(probe).not.toHaveBeenCalled()
 })
 

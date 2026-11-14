@@ -29,6 +29,12 @@ it('the actual Main settings consumer uses the target registry without opening S
     executors: { claude: { label: 'Local', providerId: 'codex', command: _hygiene_fixturePath("local/codex"), args: [], env: { LOCAL_SECRET: 'local-secret' }, injectAgentMuxGuide: false } },
     workspaces: [], appearance: { terminalTheme: 'graphite' }, browser: {} } as unknown as AppConfig
   controller.commit(await controller.prepare(config))
+  const hosts = (controller as unknown as { hosts: Map<string, unknown> }).hosts
+  const enumerate = vi.spyOn(hosts, Symbol.iterator)
+  expect(controller.rpcClients('remote')).toEqual([{ hostId: 'remote', client: f.client }])
+  expect(controller.rpcClients('unconfigured')).toEqual([])
+  expect(enumerate).not.toHaveBeenCalled()
+  enumerate.mockRestore()
   expect(await controller.discoverExecutors('remote')).toMatchObject({ routeHostId: 'remote', runtimeId: 'target-runtime', executors: [
     expect.objectContaining({ executorId: 'claude', providerId: 'claude', executable: command, availability: 'available' })
   ] })
