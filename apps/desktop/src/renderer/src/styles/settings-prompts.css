@@ -30,6 +30,7 @@
 .prompt-editor { overflow: auto; padding-right: var(--sp-5); scrollbar-gutter: stable; }
 .prompt-editor__heading { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-4); margin-bottom: var(--sp-4); color: var(--text-3); font-size: var(--fs-meta); }
 .prompt-editor__back { display: none; }
+.prompt-editor__revert { margin-block-end: var(--sp-3); }
 .prompt-editor__status { display: inline-flex; align-items: center; gap: var(--sp-2); margin-left: auto; color: var(--text-3); font-size: var(--fs-meta); }
 .prompt-editor__status > svg { flex: none; }
 .prompt-editor__status[data-prompt-status='unsaved'] { color: var(--amber-text); }
