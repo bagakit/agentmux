@@ -2,8 +2,8 @@ import { parseMoteHeartbeatSource, parseMoteHeartbeatReport, parseMoteHeartbeatS
 export * from './heartbeat-report.js'
 import { parseMoteMainPeriod, parseMoteMainRolloverDecision, type MoteMainPeriod, type MoteMainRolloverReading } from './main-period.js'
 import { dequal } from 'dequal'
-import { parseMoteSupervisionObservations, type MoteSupervisionRead, type MoteSupervisionPage } from './supervision.js'
-export type { MoteSupervisionRead, MoteSupervisionPage, MoteSupervisionObservation } from './supervision.js'
+import { parseMoteSupervisionObservations, parseMoteSupervisionArrangements, type MoteSupervisionRead, type MoteSupervisionPage } from './supervision.js'
+export type { MoteSupervisionRead, MoteSupervisionPage, MoteSupervisionObservation, MoteSupervisionArrangements } from './supervision.js'
 import { parseAgentInputSubmit, type AgentInputSubmit } from '../agent-input-submit.js'
 import { validateAgentPromptInputKey, type AgentPromptInputKey } from '../agent-prompt-condition.js'
 import { parseAgentInputSubmissionReceipt } from '../agent-input-receipt-codec.js'
@@ -91,6 +91,7 @@ export type MoteDialogueCallContext = {
   readFile?(input: import('../public-rpc-files.js').FileReadParams): Promise<import('../public-rpc-files.js').FileReadResult>
   readNoteHistory?(input: import('../public-rpc-files.js').FileHistoryParams): Promise<import('../public-rpc-files.js').FileHistoryResult>
   readDispatch?(hostId: string, sourceMessageId: string): Promise<import('../agent-handoff.js').DispatchObservation>
+  readSchedules?(reference: { hostId: string; agentSessionId: string }): Promise<import('../public-rpc-schedules.js').ScheduleResultMap['schedule.list']>
 }
 export interface MoteDialoguePort {
   /** Trusted original MOTE owner for logical-main intake; not a wire-supplied snapshot. */
@@ -202,9 +203,10 @@ export function parseMoteDialogueParams<M extends MoteDialogueMethod>(method:M,v
 }
 export function parseMoteDialogueResult<M extends MoteDialogueMethod>(method:M,value:unknown,input:MoteDialogueParamsMap[M]):MoteDialogueResultMap[M]{
   if (method === 'space.mote.dialogue.supervision.read') {
-    const { observations, ...page } = rpcRecord(value, ['main','links','incarnation','throughSequence','next','coverage','sourceStatus','sourceIssue','observations'], 'CONTROL_PROTOCOL_ERROR')
+    const { observations, arrangements, ...page } = rpcRecord(value, ['main','links','incarnation','throughSequence','next','coverage','sourceStatus','sourceIssue','observations','arrangements'], 'CONTROL_PROTOCOL_ERROR')
     const result = parseMoteDialogueResult('space.mote.dialogue.read', page, { ...input as MoteSupervisionRead, kind: 'work' })
-    return { ...result, observations: parseMoteSupervisionObservations(observations, result.links) } as MoteDialogueResultMap[M]
+    return { ...result, observations: parseMoteSupervisionObservations(observations, result.links),
+      arrangements: parseMoteSupervisionArrangements(arrangements, result, (input as MoteSupervisionRead).limit) } as MoteDialogueResultMap[M]
   }
   if (method === 'space.mote.dialogue.setup.inspect' || method === 'space.mote.dialogue.setup.advance') {
     const code = 'CONTROL_PROTOCOL_ERROR', p = rpcRecord(value, ['operationId','ownerHostId','record','reference','creation','source','binding','issue','bindingReceipt','bindingObserved','deferredInput','handoverInput'], code), query = input as MoteMainSetupRequest

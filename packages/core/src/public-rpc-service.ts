@@ -1422,6 +1422,15 @@ export class AgentMuxRpcService {
         readFile: (request: import('./public-rpc-files.js').FileReadParams) => this.call('file.read', request, context),
         readNoteHistory: (request: import('./public-rpc-files.js').FileHistoryParams) => this.call('file.history', request, context),
         readDispatch: async (hostId: string, sourceMessageId: string) => this.call('message.dispatch.read', { hostId, sourceMessageId }, context),
+        readSchedules: async (reference: { hostId: string; agentSessionId: string }) => {
+          const owners = (await this.clients()).filter(scope => scope.hostId === reference.hostId)
+          if (owners.length !== 1 || this.endpointUnverified(owners[0]!.client)) throw new AgentMuxError('The original Main schedule target is unavailable or ambiguous.', 'CONTROL_UNAVAILABLE')
+          const session = await owners[0]!.client.readAgentSession(reference.agentSessionId)
+          if (!session || session.agentSessionId !== reference.agentSessionId || session.hostId !== 'local' && session.hostId !== reference.hostId)
+            throw new AgentMuxError('The original Main schedule target is unconfirmed.', 'CONTROL_UNAVAILABLE')
+          return await this.call('schedule.list', { target: { hostId: reference.hostId, agentSessionId: session.agentSessionId,
+            providerId: session.providerId, workspacePath: session.workspacePath } }, context)
+        },
         ...(context.signal ? { signal: context.signal } : {}), assertCurrent: async () => {
           context.signal?.throwIfAborted(); await context.assertCurrent?.(); if (caller) {
             const current = await this.authenticated(context)

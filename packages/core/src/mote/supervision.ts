@@ -20,7 +20,42 @@ export type MoteSupervisionObservation = {
   } | null
   issue: string | null
 }
-export type MoteSupervisionPage = MoteDialoguePage & { observations: MoteSupervisionObservation[] }
+/** References at this original schedule owner, never copied prompt/input content. */
+export type MoteSupervisionArrangements = {
+  ownerHostId: string
+  sourceStatus: 'read' | 'unbound' | 'unconfirmed'
+  coverage: 'current-main-schedules'
+  entries: Array<{ scheduleId: string; revision?: number; status: 'active' | 'paused' | 'stopped'; lastOutcome?: 'sent' | 'skipped' | 'unknown' }>
+  hasMore: boolean
+  issue: string | null
+}
+export type MoteSupervisionPage = MoteDialoguePage & { observations: MoteSupervisionObservation[]; arrangements: MoteSupervisionArrangements }
+
+export function parseMoteSupervisionArrangements(value: unknown, page: MoteDialoguePage, limit = 100): MoteSupervisionArrangements {
+  const code = 'CONTROL_PROTOCOL_ERROR'
+  const fail = (): never => { throw new AgentMuxError('The arrangement references do not confirm this original Main and schedule owner.', code) }
+  const p = rpcRecord(value, ['ownerHostId','sourceStatus','coverage','entries','hasMore','issue'], code)
+  if (p.ownerHostId !== page.main.target.expectedResource.hostId || p.coverage !== 'current-main-schedules' ||
+      !Array.isArray(p.entries) || p.entries.length > limit || typeof p.hasMore !== 'boolean' ||
+      !['read','unbound','unconfirmed'].includes(p.sourceStatus as string)) return fail()
+  if (p.hasMore && p.entries.length !== limit) return fail()
+  if (p.sourceStatus === 'unconfirmed') {
+    if (typeof p.issue !== 'string' || !p.issue.trim() || p.entries.length || p.hasMore) return fail()
+  } else {
+    if (p.issue !== null || page.main.status !== 'ready') return fail()
+    if (p.sourceStatus === 'unbound' ? page.main.current !== null || p.entries.length || p.hasMore : !page.main.current) return fail()
+  }
+  const ids = new Set<string>()
+  for (const raw of p.entries) {
+    const row = rpcRecord(raw, ['scheduleId','revision','status','lastOutcome'], code)
+    if (typeof row.scheduleId !== 'string' || !row.scheduleId.trim() || /[\0\r\n]/u.test(row.scheduleId) || ids.has(row.scheduleId) ||
+        !['active','paused','stopped'].includes(row.status as string) ||
+        row.revision !== undefined && (!Number.isSafeInteger(row.revision) || Number(row.revision) < 0) ||
+        row.lastOutcome !== undefined && !['sent','skipped','unknown'].includes(row.lastOutcome as string)) return fail()
+    ids.add(row.scheduleId)
+  }
+  return p as MoteSupervisionArrangements
+}
 
 /** Project only the exact original protocol source; no inferred progress or acceptance. */
 export function observeMoteWorkSource(link: MoteWorkSource, observed: DispatchObservation): MoteSupervisionObservation {

@@ -79,6 +79,7 @@ import { MoteDialogueStore } from '@agentmux/core/mote-dialogue-store'
 import { parseMoteDialogueParams, parseMoteDialogueResult, sameMoteDialogue, type MoteDialoguePort,
   type MoteDialogueCallContext, type MoteDialogueRead, type MoteDialogueWrite, type MoteDialogueLink } from '@agentmux/core/mote-dialogue'
 import type { AgentMuxClient } from '@agentmux/core'
+import { motePresenceSourceId } from './mote-presence.js'
 
 /** Compose original Files/space, source relationships and message owners; never send, restore or assign a role. */
 export function createHostMoteDialogue(options: {
@@ -102,6 +103,29 @@ export function createHostMoteDialogue(options: {
     if (!catalog?.regions.some(region => region.kind === 'agent' && region.agentSessionId === caller.agentSessionId && region.execution?.hostId === caller.hostId &&
       catalog.tabs.some(tab => tab.tabId === region.tabId && tab.zoneId && zones.has(tab.zoneId) && tab.regionIds.includes(region.regionId))))
       throw new AgentMuxError('Only this Mote’s original participants may inspect its dialogue sources. Other conversations remain separate.', 'CONTROL_PERMISSION_DENIED')
+  }
+  async function readArrangements(main: MoteMainSnapshot, limit: number, context?: MoteDialogueCallContext): Promise<import('@agentmux/core/mote-dialogue').MoteSupervisionArrangements> {
+    const base = { ownerHostId: main.target.expectedResource.hostId, coverage: 'current-main-schedules' as const }
+    try {
+      if (main.status !== 'ready' || !main.identity) throw new Error(main.issue ?? 'The original Main role is unconfirmed.')
+      if (!main.current) return { ...base, sourceStatus: 'unbound', entries: [], hasMore: false, issue: null }
+      if (!context?.readSchedules) throw new Error('The original authenticated schedule reader is unavailable.')
+      const source = { hostId: main.current.hostId, agentSessionId: main.current.sessionId }
+      const original = await context.readSchedules(source)
+      await options.main.assertCurrent(main, context.signal)
+      const maintenanceSource = motePresenceSourceId(main.identity)
+      const selected = original.schedules.filter(loop => {
+        if (loop.hostId !== source.hostId || loop.agentSessionId !== source.agentSessionId) throw new Error('The arrangement source returned another original Main target.')
+        return !(loop.managedSource?.sourceId === maintenanceSource && loop.managedSource.revision === main.roleRevision)
+      })
+      return { ...base, sourceStatus: 'read', entries: selected.slice(0, limit).map(loop => ({ scheduleId: loop.loopId,
+        ...(loop.revision === undefined ? {} : { revision: loop.revision }), status: loop.status,
+        ...(loop.lastOutcome === undefined ? {} : { lastOutcome: loop.lastOutcome }) })), hasMore: selected.length > limit, issue: null }
+    } catch (error) {
+      context?.signal?.throwIfAborted()
+      return { ...base, sourceStatus: 'unconfirmed', entries: [], hasMore: false,
+        issue: error instanceof Error && error.message.trim() ? error.message : 'The original Main arrangement read is unconfirmed.' }
+    }
   }
   return {
     mainInput: options.main,
@@ -158,8 +182,9 @@ export function createHostMoteDialogue(options: {
     async supervision(raw, context) {
       const input = parseMoteDialogueParams('space.mote.dialogue.supervision.read', raw)
       const page = await this.read({ ...input, kind: 'work' }, context)
+      const arrangements = readArrangements(page.main, input.limit ?? 100, context)
       const sources = new Map<string, Promise<DispatchObservation>>()
-      const observations = await Promise.all(page.links.map(async (link): Promise<MoteSupervisionObservation> => {
+      const observationsPromise = Promise.all(page.links.map(async (link): Promise<MoteSupervisionObservation> => {
         try {
           context?.signal?.throwIfAborted()
           if (link.kind !== 'work') throw new Error('This source is not an original work association.')
@@ -181,8 +206,9 @@ export function createHostMoteDialogue(options: {
             issue: issue.trim() ? issue : 'The original work source observation is unavailable. Retain its source message and retry this read.' }
         }
       }))
+      const [ownArrangements, observations] = await Promise.all([arrangements, observationsPromise])
       await context?.assertCurrent?.()
-      return parseMoteDialogueResult('space.mote.dialogue.supervision.read', { ...page, observations }, input)
+      return parseMoteDialogueResult('space.mote.dialogue.supervision.read', { ...page, observations, arrangements: ownArrangements }, input)
     },
     async link(raw, context) {
       const input = parseMoteDialogueParams('space.mote.dialogue.link', raw)
