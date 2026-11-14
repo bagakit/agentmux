@@ -359,21 +359,27 @@ it('offscreen original pending cards still show their exact Topic without mounti
   expect(pending.querySelector('strong')?.textContent).toBe('Task a1'); expect(read).not.toHaveBeenCalled()
 })
 
-it('keeps the original Collection mode draft while portaled editing defers a confirmed regroup', async () => {
+it('keeps the original Collection discussion chooser while portaled focus defers a confirmed regroup', async () => {
   await render()
   const research = laneFor('a1'), originalCard = card('a1'), before = useAppStore.getState()
   const trigger = research.querySelector<HTMLButtonElement>('[aria-label="Container preferences · Research"]')!
   expect(trigger).toBeTruthy(); await act(async () => trigger.click()); await settle()
   const panel = document.querySelector<HTMLElement>('[data-focus-project-preferences]')!
-  const sections = panel.querySelector<HTMLButtonElement>('button[data-focus-zone-presentation="sections"]')!
-  expect(sections).toBeTruthy(); await act(async () => { sections.click(); sections.focus() })
+  const chooser = panel.querySelector<HTMLButtonElement>('[aria-label^="Choose recipient:"]')!
+  expect(chooser).toBeTruthy()
+  await act(async () => chooser.dispatchEvent(new PointerEvent('pointerover', { bubbles: true, pointerType: 'mouse' })))
+  const recipient = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(item => item.textContent?.includes('新 Agent'))!
+  expect(recipient).toBeTruthy(); await act(async () => recipient.focus())
+  expect(panel.contains(recipient)).toBe(true) // The submenu keeps this exact discussion host.
+  expect(host.contains(recipient)).toBe(false) // Both original menu surfaces remain outside the board.
   const next = Object.fromEntries(Object.entries(bindings).map(([zone, binding]) => [zone,
     binding.topicId === topicBy('a').id || binding.topicId === topicBy('b').id
       ? { ...binding, relations: { [categories[1]!.spaceId]: true } } : binding]))
   await act(async () => useAppStore.setState({ spaceZoneBindings: next }))
   expect(document.querySelector('[data-focus-project-preferences]')).toBe(panel)
-  expect(panel.querySelector('button[data-focus-zone-presentation="sections"]')?.getAttribute('aria-pressed')).toBe('true')
-  expect(document.activeElement).toBe(sections); expect(card('a1')).toBe(originalCard); expect(laneFor('a1')).toBe(research)
+  expect(panel.querySelector('[aria-label^="Choose recipient:"]')).toBe(chooser)
+  expect(recipient.isConnected).toBe(true)
+  expect(document.activeElement).toBe(recipient); expect(card('a1')).toBe(originalCard); expect(laneFor('a1')).toBe(research)
   expect(research.textContent).toContain('Update pending')
   for (const key of ['sessions', 'tabs', 'layouts', 'agentFocus', 'agentComposerDrafts'] as const) expect(useAppStore.getState()[key]).toBe(before[key])
   const cancel = [...panel.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Cancel')!

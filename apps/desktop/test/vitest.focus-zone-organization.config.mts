@@ -35,7 +35,7 @@ export default defineConfig({ ...source, cacheDir: '.tmp/focus-zone-organization
       JSON.stringify({ path, original_sha256: sha(original), loaded_sha256: sha(code), mutant: code === original ? null : selected }) + '\n')
     return code === original ? undefined : { code, map: null }
   }, buildEnd() { if (selected && !applied) throw Error('The actual Zone mutation consumer was not loaded') } }],
-  test: { ...source.test, include: selected === 'portaled-draft' ? ['apps/desktop/test/focus-collection-layout.test.tsx'] : process.env.AGENTMUX_FOCUS_ZONE_ADJACENT
+  test: { ...source.test, include: selected === 'late-save' ? ['apps/desktop/test/focus-project-preferences-races.test.tsx'] : selected === 'portaled-draft' ? ['apps/desktop/test/focus-collection-layout.test.tsx'] : process.env.AGENTMUX_FOCUS_ZONE_ADJACENT
     ? ['apps/desktop/test/focus-project-preferences-races.test.tsx', 'apps/desktop/test/focus-project-appearance.test.tsx']
     : ['apps/desktop/test/focus-zone-organization.test.tsx', 'apps/desktop/test/focus-zone-organization-control.test.ts'],
     maxWorkers: 1, fileParallelism: false, passWithNoTests: false }
