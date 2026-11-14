@@ -121,7 +121,13 @@ it('keeps the locally selected Topic across a Session round trip after an extern
   await click(topics.querySelector<HTMLButtonElement>('[aria-label="返回分类目录"]')!)
   await click(button(topics, '分类')); await click(button(topics, 'Topic B'))
   expect(topics.querySelector('h1')?.textContent).toBe('Topic B')
-  await click([...topics.querySelectorAll<HTMLButtonElement>('.mobile-topic-workface button')].find(value => value.textContent?.includes('原讨论 Agent'))!)
+  let originalAgent!: HTMLButtonElement
+  await vi.waitFor(async () => {
+    await act(async () => {})
+    originalAgent = [...topics.querySelectorAll<HTMLButtonElement>('.mobile-topic-workface button')].find(value => !value.closest('[hidden]') && value.textContent?.includes('原讨论 Agent'))!
+    expect(originalAgent, 'The exact Topic B discussion row has loaded').toBeDefined()
+  })
+  await click(originalAgent)
   expect(view.element.querySelector('.mobile-conversation-panel')?.hasAttribute('hidden')).toBe(false)
   expect(view.element.querySelector('[data-agent-session-id]')?.getAttribute('data-agent-session-id')).toBe('session-original')
   const input = editor(view.element)

@@ -100,8 +100,11 @@ describe('actual App Knowledge Chat source consumes original Files and Markdown'
     const owner = getDeviceWorkface(), recordId = owner.recordIdentity()
     const { element } = await mount(<MobileApp client={f.client} connection={connected} platform={createBrowserPlatform()} />)
     await openPrimary(element, 'Topics')
-    const topics = element.querySelector<HTMLElement>('section[aria-label="Topics"]')!
-    await waitFor(() => expect(topics.textContent).toContain(categories[1]!.title))
+    let topics!: HTMLElement
+    await waitFor(() => {
+      topics = element.querySelector<HTMLElement>('section[aria-label="Topics"]')!
+      expect(topics?.textContent).toContain(categories[1]!.title)
+    })
     await click(button(topics, categories[1]!.title))
     await waitFor(() => expect(topics.textContent).toContain(knowledgeTopic.title))
     await click(button(topics, knowledgeTopic.title))

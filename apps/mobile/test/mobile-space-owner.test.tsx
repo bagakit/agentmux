@@ -93,7 +93,8 @@ describe('T-007 original Space selected content frame', () => {
     expect(view.changed).toHaveBeenLastCalledWith({ spaceId: view.spaceId, tabId: view.tabId, regionId: 'original-region' })
     const reads = view.fileRead.mock.calls.length
     await view.stepBack(); expect(view.element.querySelector('.mobile-spatial-tab')).not.toBeNull()
-    await view.click('original.md'); expect(view.fileRead).toHaveBeenCalledTimes(reads)
+    await view.click('original.md'); expect(view.fileRead).toHaveBeenCalledTimes(reads + 1)
+    expect(view.fileRead.mock.calls.map(call => call[1])).toEqual(['docs/original.md', 'docs/original.md'])
     view.empty(); await view.click('刷新空间目录')
     expect(view.element.textContent).toContain('这个位置的绑定还没重新确认')
     expect(view.element.querySelector('.mobile-region-content h1')?.textContent).toBe('准确原 Markdown')
@@ -101,7 +102,7 @@ describe('T-007 original Space selected content frame', () => {
     await act(async () => view.element.querySelector<HTMLButtonElement>('.mobile-directory-notice')!.click())
     expect(document.body.querySelector('.mobile-directory-issues')?.textContent).toContain('原目录观察暂缺')
     await act(async () => document.body.querySelector<HTMLButtonElement>('[aria-label="关闭目录信息"]')!.click())
-    expect(view.fileRead).toHaveBeenCalledTimes(reads)
+    expect(view.fileRead).toHaveBeenCalledTimes(reads + 1)
   })
   it('keeps the exact mounted Note editor and unknown save across Region back and a different Browser, without retrying or selecting the first file', async () => {
     const view = await fixture()
@@ -120,7 +121,8 @@ describe('T-007 original Space selected content frame', () => {
     expect(view.element.textContent).toContain('不会控制 Mac 上的浏览器')
     await view.stepBack(); await view.click('original.note.md')
     expect(view.editor()).toBe(originalEditor); expect(view.editor().textContent).toContain('后来编辑不重注册Back')
-    expect(view.fileRead).toHaveBeenCalledTimes(reads); expect(view.fileWrite).toHaveBeenCalledTimes(1)
+    expect(view.fileRead).toHaveBeenCalledTimes(reads + 1); expect(view.fileWrite).toHaveBeenCalledTimes(1)
+    expect(view.fileRead.mock.calls.map(call => call[1])).toEqual(['docs/original.note.md', 'docs/original.note.md'])
     expect(view.element.textContent).toContain('保存回执未知')
     expect(Object.keys(localStorage).filter(key => key.startsWith('agentmux-mobile-note-draft:'))).toHaveLength(1)
     await view.render({ connected: false })
@@ -189,10 +191,11 @@ describe('T-007 original Space selected content frame', () => {
     await view.render({ home: 'space', initialContext: reference })
     expect(view.element.querySelector('.mobile-region-content')).toBe(originalReader)
     expect(originalReader?.closest('[hidden]')).toBeNull()
-    expect(view.fileRead).toHaveBeenCalledTimes(reads)
+    await vi.waitFor(() => expect(view.fileRead).toHaveBeenCalledTimes(reads + 1))
+    expect(view.fileRead.mock.calls.map(call => call[1])).toEqual(['docs/original.md', 'docs/original.md'])
     await view.stepBack(); expect(view.element.querySelector('.mobile-spatial-tab')).not.toBeNull()
   })
-  it('does not apply a late original file read over the later Browser or restart the hidden reader automatically', async () => {
+  it('does not apply a late original file read over the later Browser and resumes only the explicitly reopened original reader', async () => {
     const view = await fixture()
     const normalRpc = view.rpc.getMockImplementation()!
     let release!: () => void, started!: () => void
@@ -214,9 +217,11 @@ describe('T-007 original Space selected content frame', () => {
     expect(view.changed).toHaveBeenLastCalledWith({ spaceId: view.spaceId, tabId: view.tabId, regionId: 'browser-region' })
     const reads = view.fileRead.mock.calls.length
     await view.stepBack(); await view.click('original.md')
-    expect(view.fileRead).toHaveBeenCalledTimes(reads)
-    expect(view.element.querySelector('.mobile-region-content h1')).toBeNull()
-    expect(view.element.textContent).toContain('内容还没确认')
+    expect(view.fileRead).toHaveBeenCalledTimes(reads + 1)
+    expect(view.fileRead.mock.calls.map(call => call[1])).toEqual(['docs/original.md', 'docs/original.md'])
+    expect(view.rpc.mock.calls.filter(([method]) => method === 'file.read').map(([, params]) => params)).toEqual(Array.from({ length: 2 }, () => ({ zoneId: view.zone.zoneId, path: 'docs/original.md', expectedResource: { hostId: 'local', workspaceId: view.workspace.id, workspacePath: view.path } })))
+    expect(view.element.querySelector('.mobile-region-content h1')?.textContent).toBe('准确原 Markdown')
+    expect(view.fileWrite).not.toHaveBeenCalled()
   })
 
 })
