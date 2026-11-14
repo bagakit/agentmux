@@ -6,6 +6,7 @@ import { relative, resolve } from 'node:path'
 import { backpressureMutations } from './backpressure-mutations.mjs'
 
 const root = resolve(import.meta.dirname, '../../..')
+const vitest = resolve(root, 'node_modules/vitest/vitest.mjs')
 const directory = resolve(root, '.tmp/relay-backpressure', randomUUID())
 await mkdir(directory, { recursive: true })
 const sha = bytes => createHash('sha256').update(bytes).digest('hex')
@@ -21,7 +22,7 @@ try {
     delete env.RELAY_BACKPRESSURE_MUTATION
     if (variant) env.RELAY_BACKPRESSURE_MUTATION = name
     const run = await new Promise((resolve, reject) => {
-      const child = spawn('pnpm', ['exec', 'vitest', 'run', '--config', 'packages/relay/test/backpressure-mutant.config.ts',
+      const child = spawn(process.execPath, [vitest, 'run', '--config', 'packages/relay/test/backpressure-mutant.config.ts',
         '--reporter=json', '--outputFile=' + output], { cwd: root, env, stdio: ['ignore', 'pipe', 'pipe'] })
       let log = ''
       child.stdout.on('data', value => { log += value }); child.stderr.on('data', value => { log += value })

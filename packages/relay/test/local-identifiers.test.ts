@@ -10,7 +10,7 @@ async function open(socket: WebSocket) { clean.push(() => socket.terminate()); a
 const text = (socket: WebSocket) => once(socket, 'message').then(([value]) => String(value))
 
 it('local Relay allocates a shared pair ID, requires the original control credential and preserves exact two-way data routing', async () => {
-  const relay = await startLocalRelay({ serverId: 'retained-server', port: 0, route: (_request, response) => response.end('private fixture') })
+  const relay = await startLocalRelay({ serverId: 'retained-server', port: 0, route: (_request, response) => { response.end('private fixture') } })
   clean.push(() => relay.stop())
   const base = 'ws://127.0.0.1:' + relay.port + '/ws?v=2&serverId=retained-server'
   const controlSocket = relay.hostWebSocket(base + '&role=server'), synced = text(controlSocket)
@@ -22,12 +22,12 @@ it('local Relay allocates a shared pair ID, requires the original control creden
   expect(relay.connectionInfo(connectionId)).toMatchObject({ address: '127.0.0.1', userAgent: 'private-original-client' })
   const foreign = new WebSocket(base + '&role=server&connectionId=' + connectionId)
   clean.push(() => foreign.terminate())
-  const refused = await new Promise<number>((resolve, reject) => {
+  const refused = new Promise<number>((resolve, reject) => {
     foreign.once('unexpected-response', (_request, response) => { response.resume(); foreign.terminate(); resolve(response.statusCode!) })
     foreign.once('open', () => reject(new Error('A pair ID cannot authorize a data socket')))
     foreign.on('error', () => {})
   })
-  expect(refused).toBe(403)
+  await expect(refused).resolves.toBe(403)
   const data = await open(relay.hostWebSocket(base + '&role=server&connectionId=' + connectionId))
   const input = text(data); client.send('original-client-frame'); expect(await input).toBe('original-client-frame')
   const output = text(client); data.send('original-server-frame'); expect(await output).toBe('original-server-frame')
