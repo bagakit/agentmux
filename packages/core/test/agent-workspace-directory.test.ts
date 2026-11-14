@@ -1,4 +1,4 @@
-import { lstat, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises'
+import { lstat, mkdir, readFile, rename, rm, symlink, writeFile } from 'node:fs/promises'
 import { createRequire, syncBuiltinESMExports } from 'node:module'
 import { dirname, join } from 'node:path'
 import { afterEach, expect, it, vi } from 'vitest'
@@ -199,6 +199,33 @@ it('retained validation rejects simultaneously replaced root and leaf inodes', a
   const prepareTerminal = vi.spyOn(h.client, 'prepareTerminal')
   await expect(h.client.prepareAgentExecutionHelper(h.input)).rejects.toMatchObject({ code: 'AGENT_WORKSPACE_OWNERSHIP_UNCONFIRMED' })
   expect(prepareTerminal).not.toHaveBeenCalled()
+  expect(await readFile(h.markerPath)).toEqual(before)
+})
+
+it('retained validation rejects root replacement between proofs even when the leaf inode is preserved', async () => {
+  const h = await ownedFixture()
+  await h.client.prepareAgentExecutionHelper(h.input)
+  const before = await readFile(h.markerPath)
+  const root = dirname(h.locator.workspacePath), leafName = h.locator.workspacePath.split('/').at(-1)!
+  const originalLeaf = await lstat(h.locator.workspacePath)
+  const fs = createRequire(import.meta.url)('node:fs/promises') as typeof import('node:fs/promises')
+  const original = fs.lstat.bind(fs)
+  let rootProofs = 0
+  vi.spyOn(fs, 'lstat').mockImplementation((async (path: any, options: any) => {
+    if (String(path) === root && options?.bigint && ++rootProofs === 3) {
+      const retired = join(h.root, 'retired-root-between-proofs')
+      await rename(root, retired)
+      await mkdir(root)
+      await rename(join(retired, leafName), join(root, leafName))
+    }
+    return await original(path, options)
+  }) as any)
+  syncBuiltinESMExports()
+  const prepareTerminal = vi.spyOn(h.client, 'prepareTerminal')
+  await expect(h.client.prepareAgentExecutionHelper(h.input)).rejects.toMatchObject({ code: 'AGENT_WORKSPACE_OWNERSHIP_UNCONFIRMED' })
+  expect(prepareTerminal).not.toHaveBeenCalled()
+  expect(rootProofs).toBeGreaterThanOrEqual(3)
+  expect((await lstat(h.locator.workspacePath)).ino).toBe(originalLeaf.ino)
   expect(await readFile(h.markerPath)).toEqual(before)
 })
 
