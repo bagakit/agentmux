@@ -21,8 +21,11 @@ const modes = {
   },
   '--host-project-unavailable': {
     config: 'apps/desktop/test/ui-host-project-unavailable.config.mts', evidence: 'AGENTMUX_EXECUTOR_EVIDENCE', mutant: 'AGENTMUX_EXECUTOR_MUTANT',
-    mutants: ['unavailable-selected'],
-    expected: { 'unavailable-selected': ['does not re-enable an unavailable saved Executor when connection configuration changes', 'aria-disabled'] },
+    mutants: ['unavailable-selected', 'stale-connection-filter'],
+    expected: {
+      'unavailable-selected': ['does not re-enable an unavailable saved Executor when connection configuration changes', 'aria-disabled'],
+      'stale-connection-filter': ['does not substitute a same-ID executor after the selected connection changes', 'aria-disabled'],
+    },
   },
 }
 const mode = modes[operation]
