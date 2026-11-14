@@ -1,7 +1,7 @@
 .goal-team { display: grid; gap: 12px; min-width: 0; }
 .goal-team__heading { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
 .goal-team__heading h2 { margin: 0; font-size: var(--fs-meta); font-weight: 600; color: var(--text); }
-.goal-team__editors { display: flex; flex-wrap: wrap; gap: 4px; }
+.goal-team__editors { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px; margin-top: var(--sp-3); }
 .goal-team__actors { display: grid; gap: 12px; min-width: 0; }
 .goal-team__actor { min-width: 0; }
 .goal-team__roles { display: flex; flex-wrap: wrap; gap: 4px 8px; margin: 0 8px 2px; color: var(--text-3); font-size: var(--fs-micro); }
@@ -10,3 +10,28 @@
 .goal-team__recommend { margin: 6px 8px 0; }
 .goal-team__reference { display: grid; gap: 5px; }
 .goal-team__reference code { overflow-wrap: anywhere; }
+.goal-team__edit { min-width: 0; max-width: 100%; }
+.goal-team__edit > summary { justify-content: flex-end; color: var(--text-2); font-size: var(--fs-meta); }
+.goal-team__group { display: grid; gap: var(--sp-3); min-width: 0; padding-block: var(--sp-3); }
+.goal-team__group + .goal-team__group { border-top: 1px solid var(--line-soft); }
+.goal-team__retained, .goal-team__unresolved { gap: var(--sp-3); min-width: 0; padding: var(--sp-4); border: 1px solid var(--line-soft); border-radius: var(--radius); background: var(--surface-1); color: var(--text-2); }
+.goal-team__retained { display: grid; }
+.goal-team__retained-content { display: flex; min-width: 0; }
+.goal-team__retained .goal-team__roles { margin: 0; }
+.goal-team__unresolved { display: flex; align-items: flex-start; }
+.goal-team__unresolved > [aria-hidden='true'] { flex: none; color: var(--text-3); margin-top: var(--sp-1); }
+.goal-team__unresolved > div { display: grid; gap: var(--sp-2); min-width: 0; }
+.goal-team__unresolved strong { font-size: var(--fs-body); font-weight: 550; }
+.goal-team__source, .goal-team__unqualified-roles { color: var(--text-3); font-size: var(--fs-meta); line-height: 1.5; overflow-wrap: anywhere; }
+.goal-team__source { min-width: 0; margin: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.goal-team__unqualified-roles { display: grid; justify-items: start; gap: var(--sp-2); padding-inline-start: var(--sp-3); border-inline-start: 2px solid var(--line-soft); }
+.goal-team__identity-details { min-width: 0; color: var(--text-3); font-size: var(--fs-meta); }
+.goal-team__identity-details dl { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: var(--sp-2) var(--sp-3); margin-block: var(--sp-3); }
+.goal-team__identity-details :is(dt, dd) { margin: 0; overflow-wrap: anywhere; }
+.goal-team__identity-details dl > div { display: contents; }
+.goal-team__reference-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); }
+.goal-team__reference-actions > details[open] { flex-basis: 100%; }
+.goal-team__group .goals-service { padding: 0; font-size: var(--fs-meta); }
+.goals-continuation__configure { min-width: 0; }
+.goals-continuation__configure > summary { font-size: var(--fs-meta); }
+.goals-continuation__configure[open] > summary { margin-bottom: var(--sp-4); }
