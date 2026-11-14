@@ -197,8 +197,17 @@ revision and exact Main input/native idle source; heartbeat, UI time and an unav
 are not dialogue idle. Before a new input is admitted, a due result has
 `disposition:'rollover-required'` and the original decision. Keep the Query and reuse that
 decision's exact creation operation in original no-input Main setup. Existing pending input
-routes remain on their original Agent. Unknown policy facts retain the healthy current path
+routes remain on their original Agent. Unknown optional idle/activity facts retain the healthy current path
 and an explicit source issue, without an automatic replacement.
+
+Changing the saved default Executor ID also rotates on the next new logical Main Query,
+including another Executor of the same Provider. It is independent of idle keep-current;
+saving alone never launches or stops an Agent. The Core decision has
+`policy.kind:'executor-change'` and the original `queryInputKey`, not invented idle evidence.
+Creation rechecks that exact Query's producer and original Run before using the frozen
+decision. Already admitted or pending inputs keep their original route. If the Executor
+comparison is unconfirmed, keep that new Query and inspect its original Session; this does
+not disable direct input to a healthy Agent or change old input routes.
 
 <!-- amux:generated command:space.mote.dialogue.recovery.ensure -->
 <!-- amux:generated command:space.mote.dialogue.recovery.inspect -->
