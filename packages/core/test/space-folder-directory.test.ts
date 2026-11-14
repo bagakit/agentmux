@@ -145,6 +145,15 @@ it('ordinary layout saves preserve owned directory facts and unrelated records w
   expect((await f.rpc.call('app.snapshot',{include:['workspaces']})).workspaces).toContainEqual(expect.objectContaining({workspaceId:saved.workspaceId,path:f.directory}))
   expect(current.graph.resources['private-unrelated']).toEqual({draft:'keep exact original bytes'})
 })
+it('the public bulk layout owner preserves a confirmed same-resource Folder identity when an older client projects an unavailable container',async()=>{
+  const f=await fixture(), observed=await f.rpc.call('space.folder.inspect',{runtimeId:f.source.runtimeId,path:f.directory})
+  const saved=await f.rpc.call('space.folder.register',{runtimeId:f.source.runtimeId,directory:observed.resource!}), current=(await f.spatial.read())!
+  const graph=structuredClone(current.graph), folder=graph.spaces.find(space=>space.spaceId===saved.reference.spaceId)!
+  folder.kind='container';folder.projectId=null
+  const result=await f.rpc.call('space.commit',{expectedRevision:current.revision,graph})
+  expect(result.state.graph.spaces.find(space=>space.spaceId===saved.reference.spaceId)).toMatchObject({kind:'folder',projectId:current.graph.spaces[0]!.projectId})
+  expect((await f.rpc.call('app.snapshot',{include:['workspaces']})).workspaces).toContainEqual(expect.objectContaining({workspaceId:saved.workspaceId}))
+})
 
 it.skipIf(!process.env.SPACE_FOLDER_CLI)('the real CLI inspects, explicitly registers and reads back the same Source-owned canonical directory',async()=>{
   const f=await fixture()
