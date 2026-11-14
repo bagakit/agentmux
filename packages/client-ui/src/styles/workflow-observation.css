@@ -20,9 +20,12 @@
 .wf-observation__actions > button:hover, .wf-observed-dock__actions > button:hover, .wf-observed-dock__close:hover { color: var(--text); background: var(--surface-2); }
 .wf-observation__actions > button { min-height: 24px; min-width: 24px; padding-block: 0; }
 .wf-observation__actions > button[aria-pressed='true'] { color: var(--text); background: var(--surface-2); }
+.wf-observation__actions > .conversation-process-pin:is(:hover, [aria-pressed='true']) { background: transparent; }
+@media (hover: hover) and (pointer: fine) {
+  .wf-observation__header:not(:hover, :focus-within) > .wf-observation__actions > .conversation-process-pin[aria-pressed='false'] { opacity: 0; }
+}
 /* A folded loaded interval recedes; original issues and user attention stay explicit. */
 .wf-card--observation:not([data-status='failed'], [data-status='paused'], [data-status='queued']):not(:has(> [role='status'], > [role='alert'])) > .wf-observation__header:not(:hover, :focus-within) > .wf-head[aria-expanded='false'] :is(.wf-observation__label, .log-fold__steps) { color: var(--text-3); opacity: .65; font-weight: 400; }
-.wf-card--observation:not([data-status='failed'], [data-status='paused'], [data-status='queued']):not(:has(> [role='status'], > [role='alert'])) > .wf-observation__header:not(:hover, :focus-within):has(> .wf-head[aria-expanded='false']) > .wf-observation__actions > button:not([aria-pressed='true']) { opacity: .6; }
 .wf-observation__header > .wf-head:focus-visible, .wf-observation__actions > button:focus-visible, .wf-observed-dock button:focus-visible { outline: 1px solid var(--focus-line); outline-offset: 1px; }
 .wf-observation__summary { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-1) var(--sp-3); padding: var(--sp-2) var(--sp-3); color: var(--text-2); font-size: var(--fs-micro); }
 .wf-observation__caption { margin-right: auto; color: var(--text-3); }

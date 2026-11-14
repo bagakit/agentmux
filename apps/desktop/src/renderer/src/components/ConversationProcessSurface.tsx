@@ -69,7 +69,7 @@ export function ConversationProcessObservation({ process, scope, selected, onSel
     : null
   return <>
     <NativeProcessObservation {...process} compact
-      actions={placement && active ? <button ref={pin} type="button" className="small-button"
+      actions={placement && active ? <button ref={pin} type="button" className="conversation-process-pin"
         aria-label={pinned ? '取消固定过程摘要' : '固定过程摘要到输入框上方'} aria-pressed={pinned}
         title={pinned ? '取消固定过程摘要' : '固定过程摘要到输入框上方'}
         onClick={() => { setLocateNotice(null); pinned ? close() : onSelect(key) }}><SemanticIcon name={pinned ? 'action.unpin' : 'action.pin'} size={12} />{pinned ? <span>已固定</span> : null}</button> : undefined}
