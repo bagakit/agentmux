@@ -6,7 +6,7 @@ import { matchesScheduledInputSource, projectContinuousProgressInputFacts } from
 import { agentPromptInputId } from './agent-prompt-condition.js'
 import { AgentMuxError } from './errors.js'
 import { parsePromptSubmissionRecord } from './prompt-submission-record.js'
-import { parseScheduleRpcParams, scheduleEventRecapLimit, scheduleHistoryPageSize, type ScheduleHistoryPage, type ScheduleHistoryQuery } from './public-rpc-schedules.js'
+import { parseScheduleRpcParams, scheduleEventLabelLimit, scheduleEventRecapLimit, scheduleHistoryPageSize, unconfirmedScheduleHistory, type ScheduleHistoryBucket, type ScheduleHistoryReading, type ScheduleHistoryQuery } from './public-rpc-schedules.js'
 import { rpcRecord } from './rpc-data.js'
 import type { AgentFuturePromptIntent, AgentPromptSubmissionRecord } from './types.js'
 
@@ -17,10 +17,9 @@ export type ScheduledPromptHistoryRequest = {
   definitions: { intentId: string; operationId: string }[]
   managedSource?: AutomaticInputSource
 }
-export type ScheduledPromptHistory = Pick<ScheduleHistoryPage, 'coverage' | 'entries' | 'nextCursor'>
+export type ScheduledPromptHistory = ScheduleHistoryReading
 type Position = readonly [occurrenceAt: number, runId: string, recordId: string]
 type Original = { position: Position; readRecord(): unknown }
-const unconfirmed = (): ScheduledPromptHistory => ({ coverage: 'unconfirmed', entries: [], nextCursor: null })
 const invalid = () => new AgentMuxError('Use the original schedule, published definitions and history cursor.', 'INVALID_CONTROL_REQUEST')
 
 function identity(value: unknown): string {
@@ -48,7 +47,7 @@ const comparePosition = (a: Position, b: Position) => a[0] - b[0] || compareText
 /** Read position belongs to the schedule and exact owner, independent of later rule revisions. */
 function readCursor(request: ScheduledPromptHistoryRequest, owner: string) {
   const { query, target, managedSource } = request
-  const scope = createHash('sha256').update(JSON.stringify([owner, target, managedSource, query.scheduleId, query.from, query.to])).digest('base64url')
+  const scope = createHash('sha256').update(JSON.stringify([owner, target, managedSource, query.scheduleId, query.from, query.to, ...(query.bucketStarts ? [query.bucketStarts] : [])])).digest('base64url')
   let before: Position | undefined
   if (query.cursor) {
     try {
@@ -67,7 +66,7 @@ function page(request: ScheduledPromptHistoryRequest, owner: string, session: Ta
   read: (intents: ReadonlySet<string>, before: Position | undefined, limit: number) => Original[]): ScheduledPromptHistory {
   const { target, definitions, managedSource, query } = request
   const cursor = readCursor(request, owner)
-  if (!session || session.agentSessionId !== target.agentSessionId || session.providerId !== target.providerId || session.workspacePath !== target.workspacePath) return unconfirmed()
+  if (!session || session.agentSessionId !== target.agentSessionId || session.providerId !== target.providerId || session.workspacePath !== target.workspacePath) return unconfirmedScheduleHistory(request.query)
   const intents = new Map<string, AgentFuturePromptIntent>()
   for (const definition of definitions) {
     const intent = readIntent(definition.intentId)
@@ -77,6 +76,10 @@ function page(request: ScheduledPromptHistoryRequest, owner: string, session: Ta
   const rows = intents.size ? read(new Set(intents.keys()), cursor.before, limit + 1) : []
   const result: ScheduledPromptHistory = { coverage: intents.size === definitions.length ? 'recorded-inputs' : 'unconfirmed', entries: [],
     nextCursor: rows.length > limit ? cursor.next(rows[limit - 1]!.position) : null }
+  const starts = query.bucketStarts
+  const buckets = new Map<number, ScheduleHistoryBucket>()
+  // Rows descend by original occurrence. Walk the supplied civil boundaries only once.
+  let bucketIndex = (starts?.length ?? 0) - 1
   for (const row of rows.slice(0, limit)) {
     const original = parsePromptSubmissionRecord(row.readRecord())
     const claim = original.admission, key = claim?.inputKey, futureIntent = claim?.futureIntent
@@ -88,13 +91,30 @@ function page(request: ScheduledPromptHistoryRequest, owner: string, session: Ta
       continue
     }
     const { delivery, nativeResult } = projectContinuousProgressInputFacts(original, claim, key)
+    const input = claim.intent?.message?.userContent
+    if (starts) {
+      const originalLabel = input?.trimStart().slice(0, scheduleEventLabelLimit).split(/[\r\n\u2028\u2029]/u, 1)[0]?.trimEnd().replace(/[\uD800-\uDBFF]$/u, '') || null
+      const at = futureIntent.occurrenceAt
+      while (bucketIndex > 0 && at < starts[bucketIndex]!) bucketIndex--
+      const from = starts[bucketIndex]!
+      const bucket: ScheduleHistoryBucket = buckets.get(from) ?? { from, to: starts[bucketIndex + 1] ?? query.to, groups: [] }
+      const group = bucket.groups.find(group => group.delivery === delivery && group.nativeState === nativeResult.state)
+      if (group) {
+        group.count++
+        group.firstAt = at
+        if (group.originalLabel !== originalLabel) group.originalLabel = null
+      }
+      else bucket.groups.push({ delivery, nativeState: nativeResult.state, count: 1, originalLabel, firstAt: at, lastAt: at })
+      buckets.set(from, bucket)
+      continue
+    }
     // Only the original user-facing input belongs in this authorized projection.
     // The current definition, system context and native command are not recap data.
-    const input = claim.intent?.message?.userContent
     const excerpt = input?.slice(0, scheduleEventRecapLimit).replace(/[\uD800-\uDBFF]$/u, '')
     result.entries.push({ operationId: agentPromptInputId(key), occurrenceAt: futureIntent.occurrenceAt, runId: original.run.runId, delivery, nativeResult,
       recap: input && excerpt ? { text: excerpt, truncated: input.length > excerpt.length } : null })
   }
+  if (starts) result.buckets = [...buckets.values()].reverse()
   return result
 }
 
@@ -116,9 +136,9 @@ export function readMemoryScheduledPromptHistory(request: ScheduledPromptHistory
 
 export function readDatabaseScheduledPromptHistory(db: DatabaseSync, request: ScheduledPromptHistoryRequest, session: Target | null,
   readIntent: (intentId: string) => AgentFuturePromptIntent | null, recordId: (record: AgentPromptSubmissionRecord) => string): ScheduledPromptHistory {
-  if (!db.prepare("SELECT 1 FROM sqlite_schema WHERE type='table' AND name='prompt_admissions'").get()) return unconfirmed()
+  if (!db.prepare("SELECT 1 FROM sqlite_schema WHERE type='table' AND name='prompt_admissions'").get()) return unconfirmedScheduleHistory(request.query)
   const owner = db.prepare('SELECT incarnation FROM identity').get()?.incarnation
-  if (typeof owner !== 'string') return unconfirmed()
+  if (typeof owner !== 'string') return unconfirmedScheduleHistory(request.query)
   return page(request, owner, session, recordId, readIntent, (intents, before, limit) => {
     // Each published definition seeks its own range and continuation. Defer loading
     // frozen input bodies until after the bounded merge of original positions.

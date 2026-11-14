@@ -1,5 +1,5 @@
 import { parseContinuousProgressDefinition, parseContinuousProgressGuidanceAdoptions } from './continuous-progress-definition.js'
-import { parseContinuousProgressDelivery, parseContinuousProgressInputReference, parseContinuousProgressInputReading, type ContinuousProgressInputFacts, type ContinuousProgressInputReading } from './continuous-progress-input.js'
+import { parseContinuousProgressOutcome, parseContinuousProgressDelivery, parseContinuousProgressInputReference, parseContinuousProgressInputReading, type ContinuousProgressInputFacts, type ContinuousProgressInputReading } from './continuous-progress-input.js'
 export * from './continuous-progress-input.js'
 import { parseAutomaticInputSource, sameAutomaticInputSource, type AutomaticInputSource } from './automatic-input-source.js'
 import { AgentMuxError } from './errors.js'
@@ -11,19 +11,34 @@ import type { AgentMuxRpcCallContext } from './public-rpc-service.js'
 
 export type ScheduleMutation = { scheduleId: string; expectedRevision: number; operationId: string }
 export type ScheduleScope = Pick<ContinuousProgressTarget, 'hostId' | 'workspacePath'>
-export type ScheduleHistoryQuery = { scheduleId: string; from: number; to: number; limit?: number; cursor?: string }
+export type ScheduleHistoryQuery = { scheduleId: string; from: number; to: number; limit?: number; cursor?: string; bucketStarts?: number[] }
 export const scheduleEventRecapLimit = 800
+export const scheduleEventLabelLimit = 80
 export type ScheduleHistoryEntry = Pick<ContinuousProgressInputFacts, 'delivery' | 'nativeResult'> & {
   operationId: string
   occurrenceAt: number
   runId: string
   recap: Readonly<{ text: string; truncated: boolean }> | null
 }
+export type ScheduleHistoryGroup = {
+  delivery: ScheduleHistoryEntry['delivery']
+  nativeState: ScheduleHistoryEntry['nativeResult']['state']
+  count: number
+  originalLabel: string | null
+  firstAt: number
+  lastAt: number
+}
+export type ScheduleHistoryBucket = { from: number; to: number; groups: ScheduleHistoryGroup[] }
 export type ScheduleHistoryPage = Pick<ScheduleHistoryQuery, 'scheduleId' | 'from' | 'to'> & {
   executionScope: 'connected-host'
   coverage: 'recorded-inputs' | 'unconfirmed'
   entries: ScheduleHistoryEntry[]
   nextCursor: string | null
+  buckets?: ScheduleHistoryBucket[]
+}
+export type ScheduleHistoryReading = Pick<ScheduleHistoryPage, 'coverage' | 'entries' | 'nextCursor' | 'buckets'>
+export function unconfirmedScheduleHistory(query: ScheduleHistoryQuery): ScheduleHistoryReading {
+  return { coverage: 'unconfirmed', entries: [], nextCursor: null, ...(query.bucketStarts ? { buckets: [] } : {}) }
 }
 export type ScheduleParamsMap = {
   'schedule.list': { target?: ContinuousProgressTarget; scope?: never } | { scope: ScheduleScope; target?: never }
@@ -65,27 +80,40 @@ function integer(value: unknown, code: string, min = 0): asserts value is number
   if (!Number.isSafeInteger(value) || (value as number) < min) invalid('Schedule revision or occurrence is invalid.', code)
 }
 const historyMaxMs = 48 * 60 * 60 * 1000
-export const scheduleHistoryPageSize = (query: ScheduleHistoryQuery): number => query.limit ?? 25
-function historyWindow(value: Record<string, unknown>, code: string): Pick<ScheduleHistoryQuery, 'scheduleId' | 'from' | 'to'> {
+const maxSummaryWindowMs = 43 * 24 * 60 * 60 * 1000
+const maxBucketCount = 168
+const summaryPageSize = 256
+export const scheduleHistoryPageSize = (query: ScheduleHistoryQuery): number => query.limit ?? (query.bucketStarts ? summaryPageSize : 25)
+function historyWindow(value: Record<string, unknown>, code: string, maxMs: number): Pick<ScheduleHistoryQuery, 'scheduleId' | 'from' | 'to'> {
   string(value.scheduleId, code)
   integer(value.from, code)
   integer(value.to, code)
-  if (value.to <= value.from || value.to - value.from > historyMaxMs || value.to > 8_640_000_000_000_000)
-    invalid('Choose a nonempty schedule history window of at most 48 hours.', code)
+  if (value.to <= value.from || value.to - value.from > maxMs || value.to > 8_640_000_000_000_000)
+    invalid('Choose a nonempty window within the requested schedule history range.', code)
   return { scheduleId: value.scheduleId, from: value.from, to: value.to }
 }
 function historyCursor(value: unknown, code: string): asserts value is string {
   if (typeof value !== 'string' || !/^[A-Za-z0-9_-]{1,8192}$/u.test(value)) invalid('Use the original schedule history cursor.', code)
 }
 function parseScheduleHistoryQuery(value: unknown): ScheduleHistoryQuery {
-  const code = 'INVALID_CONTROL_REQUEST', p = rpcRecord(value, ['scheduleId', 'from', 'to', 'limit', 'cursor'], code)
-  const window = historyWindow(p, code)
+  const code = 'INVALID_CONTROL_REQUEST', p = rpcRecord(value, ['scheduleId', 'from', 'to', 'limit', 'cursor', 'bucketStarts'], code)
+  const window = historyWindow(p, code, p.bucketStarts === undefined ? historyMaxMs : maxSummaryWindowMs)
+  let bucketStarts: number[] | undefined
+  if (p.bucketStarts !== undefined) {
+    if (!Array.isArray(p.bucketStarts) || !p.bucketStarts.length || p.bucketStarts.length > maxBucketCount || p.bucketStarts[0] !== window.from)
+      invalid('Use the UTC start of each visible bucket, beginning at the window start.', code)
+    bucketStarts = Array.from(p.bucketStarts, (at, i) => {
+      integer(at, code)
+      if (at >= window.to || i > 0 && at <= (p.bucketStarts as number[])[i - 1]!) invalid('Schedule bucket starts must increase inside the requested window.', code)
+      return at
+    })
+  }
   if (p.limit !== undefined) {
     integer(p.limit, code, 1)
-    if (p.limit > 100) invalid('Schedule history page size exceeds 100.', code)
+    if (p.limit > (bucketStarts ? summaryPageSize : 100)) invalid('The schedule history page size exceeds its supported limit.', code)
   }
   if (p.cursor !== undefined) historyCursor(p.cursor, code)
-  return { ...window, ...(p.limit === undefined ? {} : { limit: p.limit }), ...(p.cursor === undefined ? {} : { cursor: p.cursor }) }
+  return { ...window, ...(bucketStarts ? { bucketStarts } : {}), ...(p.limit === undefined ? {} : { limit: p.limit }), ...(p.cursor === undefined ? {} : { cursor: p.cursor }) }
 }
 export function parseScheduleTarget(value: unknown, code = 'INVALID_CONTROL_REQUEST'): ContinuousProgressTarget {
   const p = rpcRecord(value, ['hostId','agentSessionId','providerId','workspacePath'], code)
@@ -232,11 +260,13 @@ export function validateScheduleRpcResult<M extends ScheduleMethod>(method: M, v
 
 function parseScheduleHistoryPage(value: unknown, request?: ScheduleHistoryQuery): ScheduleHistoryPage {
   const code = 'CONTROL_PROTOCOL_ERROR'
-  const p = rpcRecord(value, ['scheduleId', 'from', 'to', 'executionScope', 'coverage', 'entries', 'nextCursor'], code)
-  const window = historyWindow(p, code)
+  const p = rpcRecord(value, ['scheduleId', 'from', 'to', 'executionScope', 'coverage', 'entries', 'nextCursor', 'buckets'], code)
+  const grouped = p.buckets !== undefined
+  const window = historyWindow(p, code, grouped ? maxSummaryWindowMs : historyMaxMs)
   if (p.executionScope !== 'connected-host' || p.coverage !== 'recorded-inputs' && p.coverage !== 'unconfirmed' ||
       request && (request.scheduleId !== window.scheduleId || request.from !== window.from || request.to !== window.to) ||
-      !Array.isArray(p.entries) || p.entries.length > (request ? scheduleHistoryPageSize(request) : 100))
+      request && grouped !== !!request.bucketStarts ||
+      !Array.isArray(p.entries) || (grouped && p.entries.length !== 0) || p.entries.length > (request ? scheduleHistoryPageSize(request) : 100))
     invalid('The schedule history page does not match its requested scope.', code)
   if (p.nextCursor !== null) {
     historyCursor(p.nextCursor, code)
@@ -263,7 +293,40 @@ function parseScheduleHistoryPage(value: unknown, request?: ScheduleHistoryQuery
     return { operationId: original.operationId, occurrenceAt: original.occurrenceAt, runId, recap,
       ...parseContinuousProgressDelivery(original.delivery, original.nativeResult) }
   })
-  return { ...window, executionScope: 'connected-host', coverage: p.coverage, entries, nextCursor: p.nextCursor }
+  const buckets = grouped ? parseHistoryBuckets(p.buckets, window, request) : undefined
+  return { ...window, executionScope: 'connected-host', coverage: p.coverage, entries, nextCursor: p.nextCursor, ...(buckets ? { buckets } : {}) }
+}
+
+function parseHistoryBuckets(value: unknown, window: { from: number; to: number }, request?: ScheduleHistoryQuery): ScheduleHistoryBucket[] {
+  const code = 'CONTROL_PROTOCOL_ERROR'
+  if (!Array.isArray(value) || value.length > maxBucketCount) invalid('Expected bounded groups of recorded schedule inputs.', code)
+  let previousEnd = window.from, total = 0
+  const ends = request?.bucketStarts && new Map(request.bucketStarts.map((at, i, starts) => [at, starts[i + 1] ?? window.to]))
+  return Array.from(value, item => {
+    const bucket = rpcRecord(item, ['from', 'to', 'groups'], code)
+    const { from, to } = bucket
+    integer(from, code); integer(to, code)
+    if (from < previousEnd || to <= from || to > window.to || ends && ends.get(from) !== to ||
+        !Array.isArray(bucket.groups) || !bucket.groups.length || bucket.groups.length > summaryPageSize)
+      invalid('A history bucket does not match the original requested range.', code)
+    previousEnd = to
+    const seen = new Set<string>()
+    const groups = Array.from(bucket.groups, value => {
+      const group = rpcRecord(value, ['delivery', 'nativeState', 'count', 'originalLabel', 'firstAt', 'lastAt'], code)
+      const { count, originalLabel, firstAt, lastAt } = group
+      if (originalLabel !== null && (typeof originalLabel !== 'string' || !originalLabel.length ||
+          originalLabel.length > scheduleEventLabelLimit || /[\r\n\u2028\u2029]/u.test(originalLabel))) invalid('The original schedule event label is invalid.', code)
+      integer(count, code, 1); integer(firstAt, code); integer(lastAt, code)
+      const { delivery, nativeState } = parseContinuousProgressOutcome(group.delivery, group.nativeState)
+      const key = delivery + '/' + nativeState
+      total += count
+      if (seen.has(key) || firstAt < from || lastAt < firstAt || lastAt >= to || count === 1 && firstAt !== lastAt ||
+          total > (request ? scheduleHistoryPageSize(request) : summaryPageSize)) invalid('The history group count or recorded times are invalid.', code)
+      seen.add(key)
+      return { delivery, nativeState, count, originalLabel, firstAt, lastAt }
+    })
+    return { from, to, groups }
+  })
 }
 export function isScheduleRpcResult(method: ScheduleMethod, value: unknown): boolean {
   try { validateScheduleRpcResult(method, value); return true } catch { return false }

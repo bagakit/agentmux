@@ -1,5 +1,5 @@
 import { AgentMuxError, matchesScheduledInputSource, projectContinuousProgressInput, type ContinuousProgressLoop, type ContinuousProgressInputReference,
-  type ContinuousProgressInputReading, type AgentPromptSubmissionRecord, type AgentFuturePromptIntent, type ScheduleHistoryQuery, type ScheduleHistoryPage } from '@agentmux/core'
+  type ContinuousProgressInputReading, type AgentPromptSubmissionRecord, type AgentFuturePromptIntent, type ScheduleHistoryQuery, type ScheduleHistoryReading, unconfirmedScheduleHistory } from '@agentmux/core'
 import { sameAutomaticInputSource } from '@agentmux/core/automatic-input-source'
 import type { GoalExecutionClient } from './goal-runtime.js'
 
@@ -32,14 +32,14 @@ export function assertScheduledInputSource(loop: ContinuousProgressLoop, referen
   }
 }
 
-export async function readOriginalScheduledHistory(loop: ContinuousProgressLoop, query: ScheduleHistoryQuery, client: GoalExecutionClient, signal?: AbortSignal): Promise<Pick<ScheduleHistoryPage, 'coverage' | 'entries' | 'nextCursor'>> {
+export async function readOriginalScheduledHistory(loop: ContinuousProgressLoop, query: ScheduleHistoryQuery, client: GoalExecutionClient, signal?: AbortSignal): Promise<ScheduleHistoryReading> {
   const published = new Map<string, string | null>()
   for (const { intentId, operationId } of publishedScheduleDefinitions(loop)) {
     const current = published.get(intentId)
     published.set(intentId, current === undefined || current === operationId ? operationId : null)
   }
   const definitions = [...published].flatMap(([intentId, operationId]) => operationId === null ? [] : [{ intentId, operationId }])
-  if (!definitions.length) return { coverage: 'unconfirmed' as const, entries: [], nextCursor: null }
+  if (!definitions.length) return unconfirmedScheduleHistory(query)
   const { agentSessionId, providerId, workspacePath, managedSource } = loop
   const result = await client.readScheduledPromptHistory({ query, target: { agentSessionId, providerId, workspacePath }, definitions,
     ...(managedSource ? { managedSource } : {}) }, signal ? { signal } : {})

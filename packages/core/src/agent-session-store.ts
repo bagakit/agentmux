@@ -35,6 +35,7 @@ import { parseAgentMuxCreationOrigin } from './agent-creation-admission.js'
 import { parseAgentSpawnCreator } from './agent-spawn.js'
 import { agentSpawnIndexes, agentSpawnPage, parseAgentSpawnQuery, readAgentSpawnRows,
   type AgentMuxSpawnPage, type AgentMuxSpawnQuery, type AgentMuxSpawnRecord } from './agent-spawn-query.js'
+import { unconfirmedScheduleHistory } from './public-rpc-schedules.js'
 import { readDatabaseScheduledPromptHistory, readMemoryScheduledPromptHistory,
   type ScheduledPromptHistory, type ScheduledPromptHistoryRequest } from './scheduled-prompt-history.js'
 import { assertCurrentAgentCapabilityBinding, type AgentCapabilityBinding } from './agent-capability.js'
@@ -3363,7 +3364,7 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
     return await this.withReadDatabase(db => {
       this.assertRecordReadable(db, id)
       return readDatabaseScheduledPromptHistory(db, request, this.sessionMetadata(db, id), intentId => this.futureIntent(db, id, intentId), promptRecordId)
-    }, () => ({ coverage: 'unconfirmed', entries: [], nextCursor: null }), signal, 'observation')
+    }, () => unconfirmedScheduleHistory(request.query), signal, 'observation')
   }
 
   async settlePromptAdmission(expected: AgentPromptSubmissionRecord, next: AgentPromptSubmissionRecord, signal?: AbortSignal): Promise<void> {

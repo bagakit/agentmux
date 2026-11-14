@@ -95,17 +95,24 @@ export function parseContinuousProgressInputReading(value: unknown, expectedRefe
   return { reference, status: p.status, delivery, nativeResult, ...(returnedIdle ? { returnedIdle } : {}) }
 }
 
-export function parseContinuousProgressDelivery(delivery: unknown, result: unknown): Pick<ContinuousProgressInputFacts, 'delivery' | 'nativeResult'> {
+export function parseContinuousProgressOutcome(delivery: unknown, state: unknown): { delivery: ContinuousProgressInputFacts['delivery']; nativeState: ContinuousProgressInputFacts['nativeResult']['state'] } {
   const code = 'CONTROL_PROTOCOL_ERROR'
   if (delivery !== 'unconfirmed' && delivery !== 'not-applied' && delivery !== 'terminal-confirmed' && delivery !== 'native-admitted') return invalid(code)
+  if (state !== 'unknown' && state !== 'unsupported' &&
+      (delivery !== 'native-admitted' || state !== 'completed' && state !== 'failed' && state !== 'interrupted')) return invalid(code)
+  return { delivery, nativeState: state }
+}
+
+export function parseContinuousProgressDelivery(rawDelivery: unknown, result: unknown): Pick<ContinuousProgressInputFacts, 'delivery' | 'nativeResult'> {
+  const code = 'CONTROL_PROTOCOL_ERROR'
   const native = rpcRecord(result, ['state', 'observedAt', 'nativeObservedAt'], code)
+  const { delivery, nativeState } = parseContinuousProgressOutcome(rawDelivery, native.state)
   let nativeResult: ContinuousProgressInputReading['nativeResult']
-  if (native.state === 'unknown' || native.state === 'unsupported') {
+  if (nativeState === 'unknown' || nativeState === 'unsupported') {
     if (native.observedAt !== undefined || native.nativeObservedAt !== undefined) return invalid(code)
-    nativeResult = native.state === 'unknown' ? { state: 'unknown' } : { state: 'unsupported' }
+    nativeResult = { state: nativeState }
   } else {
-    if (typeof native.state !== 'string' || !['completed', 'failed', 'interrupted'].includes(native.state) || delivery !== 'native-admitted') return invalid(code)
-    nativeResult = { state: native.state as 'completed' | 'failed' | 'interrupted', observedAt: time(native.observedAt, code),
+    nativeResult = { state: nativeState, observedAt: time(native.observedAt, code),
       ...(native.nativeObservedAt === undefined ? {} : { nativeObservedAt: time(native.nativeObservedAt, code) }) }
   }
   return { delivery, nativeResult }

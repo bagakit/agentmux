@@ -5,7 +5,7 @@ import { sameAutomaticInputSource } from '@agentmux/core/automatic-input-source'
 import { isDeepStrictEqual } from 'node:util'
 import { goalRoleGuidance } from '@agentmux/core/goal-role-guidance'
 import { AgentMuxError, AGENTMUX_AGENT_MESSAGING_ENTRY, continuousProgressRequestDigest, ContinuousProgressScheduler, isAgentSchedule, agentPromptCondition, decideContinuousProgress, decideFutureProgress, mintObjectId, type ContinuousProgressLoop, type ContinuousProgressPause, type ContinuousProgressPauseReason, type ContinuousProgressTarget, type ContinuousProgressObservation, type ContinuousProgressTaskSource, type AgentPromptCondition } from '@agentmux/core'
-import { parseScheduleRpcParams, type ScheduleHistoryPage, type ScheduleHistoryQuery, type ScheduleMethod, type ScheduleParamsMap, type ScheduleResultMap, type AgentMuxRpcCallContext } from '@agentmux/core'
+import { parseScheduleRpcParams, unconfirmedScheduleHistory, type ScheduleHistoryReading, type ScheduleHistoryPage, type ScheduleHistoryQuery, type ScheduleMethod, type ScheduleParamsMap, type ScheduleResultMap, type AgentMuxRpcCallContext } from '@agentmux/core'
 import { nextCalendarOccurrence, latestCalendarOccurrence, nextIntervalOccurrence, latestIntervalOccurrence } from '@agentmux/core/schedule-calendar'
 import { readContinuousProgressTaskSource, validateContinuousProgressTaskSource, decideGoalProgressSource, type GoalProgressReader, type GoalProgressRecord, type GoalProgressDecision } from './continuous-progress-task-source.js'
 import type { ContinuousProgressLoopStore } from './continuous-progress-loop-store.js'
@@ -30,7 +30,7 @@ export type FutureProgressInputOwner = {
   inspectFutureIntent?(loop: ContinuousProgressLoop): Promise<{ active: boolean }>
   inspectInput?(loop: ContinuousProgressLoop): Promise<ContinuousProgressInputReading | undefined>
   supersededInputWasUnclaimed?(loop: ContinuousProgressLoop, signal: AbortSignal): Promise<boolean>
-  readHistory?(loop: ContinuousProgressLoop, query: ScheduleHistoryQuery, context?: AgentMuxRpcCallContext): Promise<Pick<ScheduleHistoryPage, 'coverage' | 'entries' | 'nextCursor'>>
+  readHistory?(loop: ContinuousProgressLoop, query: ScheduleHistoryQuery, context?: AgentMuxRpcCallContext): Promise<ScheduleHistoryReading>
   authorizeFutureIntent?(target: ContinuousProgressTarget, context?: AgentMuxRpcCallContext): Promise<void>
   observeCheckIn?(target: ContinuousProgressTarget, now: number, signal: AbortSignal): Promise<CheckInObservation>
 }
@@ -548,7 +548,7 @@ export class ContinuousProgressLoopManager {
     await context.assertCurrent?.()
     signal.throwIfAborted()
     return { scheduleId, from, to, executionScope: 'connected-host',
-      ...(result ?? { coverage: 'unconfirmed', entries: [], nextCursor: null }) }
+      ...(result ?? unconfirmedScheduleHistory(query)) }
   }
   private async callOwned<M extends ScheduleMethod>(method: M, input: ScheduleParamsMap[M], context?: AgentMuxRpcCallContext, assertCurrent?: () => void, pauseReason: ContinuousProgressPauseReason = 'manual'): Promise<ScheduleResultMap[M]> {
     const params = parseScheduleRpcParams(method, input)
