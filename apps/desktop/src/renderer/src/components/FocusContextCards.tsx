@@ -19,10 +19,11 @@ const contextKey = (context: FocusContext) => JSON.stringify([context.hostId, co
 
 /** Slots stay in the natural CSS grid. Actual intersection controls only a
  * body's first creation; visited bodies retain their original React parent. */
-export function FocusContextCards({ contexts, columns, scrollRef, visible, layoutReady = true, replyLines = 2, selectedId, selectedKey, revealRequest, onRevealed, goalLinks, identities, onSelect, topics, sections, visits, activity }: {
+export function FocusContextCards({ contexts, columns, scrollRef, visible, list = false, layoutReady = true, replyLines = 2, selectedId, selectedKey, revealRequest, onRevealed, goalLinks, identities, onSelect, topics, sections, visits, activity }: {
   activity?: ReadonlyMap<string, FocusListActivity> | undefined
   visits?: ReadonlyMap<string, number>
   contexts: readonly FocusContext[]; columns: number; scrollRef: RefObject<HTMLDivElement | null>; visible: boolean
+  list?: boolean
   layoutReady?: boolean
   replyLines?: FocusReplyLines
   selectedKey?: string | undefined
@@ -34,7 +35,7 @@ export function FocusContextCards({ contexts, columns, scrollRef, visible, layou
   sections?: ReadonlyMap<string, FocusTopicHeading> | undefined
 }) {
   const grid = useRef<HTMLDivElement>(null)
-  const cardHeight = focusCardTrackHeight(replyLines), viewportMargin = cardHeight * 2
+  const cardHeight = list ? 34 : focusCardTrackHeight(replyLines), viewportMargin = cardHeight * 2
   const visited = useRef(new Set<string>())
   const [, render] = useReducer(value => value + 1, 0)
   // Live card facts do not change the slots. Keep their observer through those
@@ -124,13 +125,13 @@ export function FocusContextCards({ contexts, columns, scrollRef, visible, layou
     const selected = selectedKey === undefined ? selectedId === context.id : selectedKey === contextKey(context)
     const sourceKey = focusTopicContextKey(context.hostId, context.id), topic = topics?.get(sourceKey), section = sections?.get(sourceKey)
     return <Fragment key={contextKey(context)}>{section ? <div className="focus-topic-section" data-focus-topic-section={section.kind === 'worktree' ? undefined : section.id} aria-label={`${section.kind === 'worktree' ? 'Zone' : 'Topic'} · ${section.name}`} data-focus-zone-section={section.kind === 'worktree' ? section.id : undefined}>{section.content ?? <FocusTopicLabel topic={section} />}</div> : null}
-    <div className="focus-context-card" style={{ display: 'flex', flexDirection: 'column', minHeight: cardHeight + (topic ? 22 : 0) }}
+    <div className="focus-context-card" style={list ? { minHeight: cardHeight } : { display: 'flex', flexDirection: 'column', minHeight: cardHeight + (topic ? 22 : 0) }}
       data-focus-card-key={contextKey(context)} data-focus-card-body={full ? 'mounted' : 'pending'} data-focus-heat={focusContextHeat(context, visits ? focusContextVisit(context, visits) : undefined, Date.now())}
       data-focus-agent-host={context.control?.hostId ?? context.hostId} data-focus-agent-session={context.control?.agentSessionId ?? context.id}
       data-focus-presentation-session={context.id} data-focus-agent-selected={selected ? 'true' : undefined}>
-      {full ? <FocusContextCardBody context={context} summaryActive={visible} goalLinks={goalLinks.get(focusGoalCardKey(context.hostId, context.id))}
+      {full ? <FocusContextCardBody context={context} list={list} summaryActive={visible} goalLinks={goalLinks.get(focusGoalCardKey(context.hostId, context.id))}
         identity={identities.get(focusContextIdentityKey(context.hostId, context.id))} selected={selected} activity={activity?.get(focusListActivityKey(context))} onSelect={onSelect} />
-        : <button type="button" className={`focus-context focus-context--card${selected ? ' is-selected' : ''}`}
+        : <button type="button" className={`focus-context focus-context--card${list ? ' focus-context--list' : ''}${selected ? ' is-selected' : ''}`}
           data-session-id={context.id} data-state={context.state} data-bucket={context.bucket} data-activity={context.activitySemantic}
           aria-pressed={selected} aria-label={`${context.name} · ${context.stateLabel}${context.detailKind === 'service' ? ` · ${context.detail}` : ''}${topic ? ` · ${topic.kind === 'worktree' ? 'Zone' : 'Topic'} · ${topic.name}` : ''}`} aria-description={context.originAddress}
           onMouseDown={event => { if (event.button === 0) event.preventDefault() }}

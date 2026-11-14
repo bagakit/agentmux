@@ -1,0 +1,109 @@
+/* The same task and action hosts form a single scan line. Service details and
+   unresolved actions can extend the line without clipping their controls. */
+[data-task-layout='list'] .focus-context-group__cards {
+  container: focus-task-rows / inline-size;
+  gap: 0;
+}
+[data-task-layout='list'] .focus-context-group__cards > [data-focus-card-key] {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) var(--focus-tag-column, 0px);
+  align-items: start;
+  max-width: none;
+  border-radius: 0;
+  box-shadow: none;
+  outline: 0;
+  background: transparent;
+  contain-intrinsic-block-size: auto 34px;
+}
+[data-task-layout='list'] [data-focus-card-key] + [data-focus-card-key] {
+  border-block-start: 1px solid color-mix(in srgb, var(--line) 65%, transparent);
+}
+[data-task-layout='list'] [data-focus-card-key] > .focus-context-card,
+[data-task-layout='list'] [data-focus-card-key] > button.focus-context {
+  grid-column: 1;
+  grid-row: 1;
+  contain-intrinsic-block-size: auto 34px;
+}
+[data-task-layout='list'] .focus-context-group__cards:has(> [data-focus-card-key] > .focus-zone-footer) {
+  --focus-tag-column: min(20%, 140px);
+}
+[data-task-layout='list'] [data-focus-card-key] > .focus-zone-footer {
+  grid-column: 2;
+  grid-row: 1;
+  align-self: start;
+  margin: 0;
+  padding-block: 6px;
+}
+[data-task-layout='list'] [data-focus-card-key] > .focus-zone-notices { grid-column: 1 / -1; }
+[data-task-layout='list'] .focus-context--list {
+  --focus-time-width: 8ch;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) var(--focus-time-width);
+  gap: var(--sp-2);
+  min-height: 34px;
+  align-items: center;
+  padding: 5px var(--sp-2);
+}
+[data-task-layout='list'] .focus-context--list:has(.focus-goal__space) { padding-inline-end: 34px; }
+[data-task-layout='list'] [data-focus-card-key] .focus-goal__trigger {
+  inset-inline-end: 6px;
+  top: 8px;
+}
+[data-task-layout='list'] .focus-context--list .focus-goal__space { display: none; }
+[data-task-layout='list'] .focus-context--list .focus-context__copy { gap: 1px; }
+[data-task-layout='list'] .focus-context--list .focus-context__identity { gap: 7px; }
+[data-task-layout='list'] .focus-context--list .focus-context__identity > strong { font-weight: 550; }
+[data-task-layout='list'] .focus-context--list .focus-context__state {
+  width: clamp(100px, 22cqi, 148px);
+  min-width: 0;
+  gap: 5px;
+  align-items: center;
+  color: var(--text-2);
+}
+[data-task-layout='list'] .focus-context--list .focus-context__state small {
+  position: static;
+  width: auto;
+  height: auto;
+  clip-path: none;
+  overflow: visible;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  font-size: var(--fs-micro);
+  font-weight: 450;
+  line-height: 1.4;
+}
+[data-task-layout='list'] .focus-context--list[data-bucket='attention'] .focus-context__state { color: var(--amber); }
+[data-task-layout='list'] .focus-context--list .focus-context__detail {
+  padding-inline-start: 25px;
+  color: var(--text-2);
+}
+.focus-task-list__time {
+  align-self: start;
+  line-height: 24px;
+  color: var(--text-3);
+  font-size: var(--fs-micro);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  text-align: end;
+}
+[data-task-layout='list'] .focus-context-group__cards > [data-focus-agent-selected='true'] {
+  background: var(--focus-selected-surface);
+  box-shadow: inset 2px 0 var(--focus-selection-ink, var(--focus-line));
+  outline: 0;
+}
+[data-task-layout='list'] [data-focus-agent-selected='true'] button.focus-context--list { background: transparent; }
+[data-task-layout='list'] button.focus-context--list:focus-visible {
+  outline: 2px solid var(--focus-line);
+  outline-offset: -2px;
+}
+@container focus-task-rows (max-width: 600px) {
+  [data-task-layout='list'] .focus-context--list { grid-template-columns: minmax(0, 1fr); }
+  [data-task-layout='list'] .focus-task-list__time { display: none; }
+  [data-task-layout='list'] .focus-context--list .focus-context__state { width: 148px; max-width: 50%; }
+}
+@media (forced-colors: active) {
+  [data-task-layout='list'] .focus-context-group__cards > [data-focus-agent-selected='true'] {
+    outline: 1px solid Highlight;
+    outline-offset: -1px;
+  }
+}

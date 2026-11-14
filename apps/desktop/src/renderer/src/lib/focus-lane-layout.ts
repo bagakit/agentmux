@@ -17,10 +17,15 @@ const MIN_CARD_WIDTH = 180
 const MAX_CARD_WIDTH = 320
 
 /** One bounded plan owns rows and columns; zero states live only in the title. */
-export function allocateFocusLaneColumns(counts: FocusLaneCounts, metrics: FocusLaneMetrics, previous?: PreviousLayout): FocusLaneLayout {
+export function allocateFocusLaneColumns(counts: FocusLaneCounts, metrics: FocusLaneMetrics, previous?: PreviousLayout, list = false): FocusLaneLayout {
   const indices = counts.flatMap((count, index) => count > 0 ? [index] : [])
   const empty = () => counts.map(() => 0)
   const contentWidth = Math.max(1, metrics.width - metrics.padding)
+  if (list) return {
+    columns: counts.map(count => Number(count > 0)), widths: counts.map(() => contentWidth),
+    rowByBucket: counts.map((_, index) => indices.indexOf(index)), columnStart: empty(),
+    maxRows: Math.max(0, ...counts), slots: indices.length ? 1 : 0,
+  }
   const capacity = (groups: number) => Math.max(0, Math.floor((contentWidth - Math.max(0, groups - 1) * metrics.gap + groups * metrics.cardGap) / (MIN_CARD_WIDTH + metrics.cardGap)))
   const slots = metrics.width > 0 && indices.length ? capacity(indices.length) : 0
   if (!indices.length || metrics.width <= 0) {

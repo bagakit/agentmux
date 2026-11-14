@@ -1351,6 +1351,8 @@ export type AppState = GitReadingActions & {
   demandPmoTabIds: Record<string, string>
   /** Global navigation context. Execution and PMO focus are separate lanes and never overwrite one another. */
   agentFocus: AgentFocusContext
+  focusTaskLayout: 'cards' | 'list'
+  setFocusTaskLayout(layout: AppState['focusTaskLayout']): void
   focusTimelineNameWidth: number
   setFocusTimelineNameWidth(width: number): void
   focusTimelineHeight: number
@@ -4315,6 +4317,7 @@ type PersistedAppState = {
   surveyExplorationNames?: Record<string, string>
   noteBlockSelections?: Record<string, NoteBlockTarget>
   noteCanvasLayouts?: Record<string, NoteCanvasLayout>
+  focusTaskLayout?: AppState['focusTaskLayout']
   focusTimelineNameWidth?: number
   surveySidebarCollapsed?: boolean
   surveySidebarWidth?: number
@@ -4383,6 +4386,7 @@ export type RestoredUiState = Pick<
   | 'gitCommitDrafts'
   | 'projectRailWidth'
   | 'toolDockWidth'
+  | 'focusTaskLayout'
   | 'focusTimelineNameWidth'
   | 'focusTimelineHeight'
   | 'focusTimelineRuler'
@@ -4486,6 +4490,7 @@ export function restorePersistedUiState(
     | 'gitCommitDrafts'
     | 'projectRailWidth'
   | 'toolDockWidth'
+  | 'focusTaskLayout'
   | 'focusTimelineNameWidth'
   | 'focusTimelineHeight'
   | 'focusTimelineRuler'
@@ -4513,6 +4518,7 @@ export function restorePersistedUiState(
     mountedSpaceInputs: persisted.mountedSpaceInputs === undefined ? {} : persisted.mountedSpaceInputs,
     workspaceAgentOrder: restoreWorkspaceAgentOrder(persisted.workspaceAgentOrder),
     workbenchSpaceSelection,
+    focusTaskLayout: persisted.focusTaskLayout === 'list' ? 'list' : 'cards',
     focusTimelineNameWidth: clampFocusTimelineNameWidth(persisted.focusTimelineNameWidth),
     focusTimelineHeight: clampFocusTimelineHeight(persisted.focusTimelineHeight),
     focusTimelineRuler: restoreFocusRuler(persisted.focusTimelineRuler),
@@ -4652,6 +4658,7 @@ function selectPersistedInputs(state: AppState, coreSpatialReady: boolean) {
     surveySidebarCollapsed: state.surveySidebarCollapsed,
     surveySidebarWidth: state.surveySidebarWidth,
     agentFocus: state.agentFocus,
+    focusTaskLayout: state.focusTaskLayout,
     focusTimelineNameWidth: state.focusTimelineNameWidth,
     focusTimelineHeight: state.focusTimelineHeight,
     focusTimelineRuler: state.focusTimelineRuler,
@@ -6727,6 +6734,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   sessionLocationRequest: null,
   focusAgentReveal: null,
   conversationRevealIntent: null,
+  focusTaskLayout: 'cards',
+  setFocusTaskLayout(layout) { if (get().focusTaskLayout !== layout) set({ focusTaskLayout: layout }) },
   focusTimelineNameWidth: FOCUS_TIMELINE_NAME_WIDTH_DEFAULT,
   setFocusTimelineNameWidth(width) {
     const next = clampFocusTimelineNameWidth(width)

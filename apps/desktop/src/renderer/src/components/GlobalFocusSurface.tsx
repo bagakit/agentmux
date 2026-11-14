@@ -38,6 +38,7 @@ import { readSurveyPresentation } from '../lib/mobile-presentation'
 import { focusCardTrackHeight, type FocusLaneMetrics } from '../lib/focus-lane-layout'
 import { resolveFocusReplyLines, resolveFocusTopicPresentation } from '../../../shared/focus-preferences'
 import { focusSelectionStyle } from '../lib/focus-selection-style'
+import { FocusTaskLayoutSwitch } from './FocusTaskLayoutSwitch'
 import { FocusToolbar } from './FocusToolbar'
 import { FocusHistorySearch } from './FocusHistorySearch'
 import { useFocusHistorySearch } from '../lib/use-focus-history-search'
@@ -316,6 +317,8 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
     return () => { stop(); window.removeEventListener('pointermove', onPointerMove); window.removeEventListener('pointerup', stop); window.removeEventListener('pointercancel', stop); window.removeEventListener('blur', stop) }
   }, [visible])
   const { facts, errors: hierarchyErrors, refresh: refreshHierarchy } = useFocusHierarchy(laneContexts, config, visible)
+  const taskLayout = useAppStore(state => state.focusTaskLayout)
+  const list = taskLayout === 'list'
   const boardRowsRef = useRef<HTMLDivElement>(null)
   const [arrangeProjects, setArrangeProjects] = useState(0)
   const separateRevealRef = useRef<HTMLDivElement>(null)
@@ -569,9 +572,9 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
       if (useAppStore.getState().mainSurface === 'agents') searchRef.current?.focus({ preventScroll: true })
     } })
   }
-  const laneRows = (lane: typeof boardLanes[number], heading: ReactNode, compact = false) => <FocusScanLaneContent lane={lane} compact={compact}
+  const laneRows = (lane: typeof boardLanes[number], heading: ReactNode, compact = false) => <FocusScanLaneContent list={list} lane={lane} compact={compact}
     contexts={lane.zones ? [...new Map(lane.zones.flatMap(zone => rowsByLane.get(zone.id) ?? []).map(context => [focusTopicContextKey(context.hostId, context.id), context])).values()] : rowsByLane.get(lane.id) ?? []} heading={heading} metrics={laneMetrics} replyLines={replyLines} topicPresentation={topicPresentation}
-    renderCards={(grouped, columns, topics, sections) => <FocusContextCards contexts={grouped} columns={columns} layoutReady={laneMetrics.measured}
+    renderCards={(grouped, columns, topics, sections) => <FocusContextCards list={list} contexts={grouped} columns={columns} layoutReady={list || laneMetrics.measured}
       replyLines={replyLines} topics={topics} sections={sections} visits={focusVisits} scrollRef={boardRowsRef} visible={!compact && visible && documentActive}
       selectedId={shownSessionId} selectedKey={selectedContextKey} revealRequest={agentReveal} onRevealed={finishReveal}
       goalLinks={goalLinks} identities={contextIdentities} activity={listActivity} onSelect={focusExecutionSession} />} />
@@ -579,7 +582,7 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
       {coordinationResults.length ? <section className="focus-coordination-results" aria-label="Matching Mote coordination contexts">
         <header><strong>Mote coordination</strong><span>{coordinationResults.length}</span><small>Independent coordination focus</small></header>
         <WorkbenchPresentationContext.Provider value={cardPresentation}><div>
-          <FocusContextCards contexts={coordinationResults} columns={1} scrollRef={boardRowsRef} visible={visible && documentActive}
+          <FocusContextCards list={list} contexts={coordinationResults} columns={1} scrollRef={boardRowsRef} visible={visible && documentActive}
             selectedId={selectedMoteId} goalLinks={goalLinks} identities={contextIdentities} activity={listActivity} onSelect={openMoteContext} />
         </div></WorkbenchPresentationContext.Provider>
       </section> : null}
@@ -596,7 +599,7 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
         <Button type="button" onClick={dismissMoteChoices}>Dismiss location choices</Button>
       </div> : null}
   </> : undefined
-  return <SpaceSourceReaders><section className={`global-board-surface global-focus-surface ${showWorkspace ? 'global-board-surface--session-open' : ''}`} aria-label="Focus" data-desktop-focus-view="list" data-focus-reply-lines={replyLines} data-focus-topic-presentation={topicPresentation} hidden={!surfaceVisible} inert={!visible} aria-hidden={!surfaceVisible} style={{ ...focusSelectionStyle(config?.focus), display: surfaceVisible ? undefined : 'none', '--focus-workspace-width': `calc(${workspaceRatio * 100}% - 6px)`, '--focus-reply-lines': replyLines, '--focus-card-track-height': `${focusCardTrackHeight(replyLines)}px` } as CSSProperties}>
+  return <SpaceSourceReaders><section className={`global-board-surface global-focus-surface ${showWorkspace ? 'global-board-surface--session-open' : ''}`} aria-label="Focus" data-desktop-focus-view="list" data-task-layout={taskLayout} data-focus-reply-lines={replyLines} data-focus-topic-presentation={topicPresentation} hidden={!surfaceVisible} inert={!visible} aria-hidden={!surfaceVisible} style={{ ...focusSelectionStyle(config?.focus), display: surfaceVisible ? undefined : 'none', '--focus-workspace-width': `calc(${workspaceRatio * 100}% - 6px)`, '--focus-reply-lines': replyLines, '--focus-card-track-height': `${focusCardTrackHeight(replyLines)}px` } as CSSProperties}>
     <FocusToolbar onOpenCollaboration={!sourceSelection && mapContext?.kind === 'agent' ? () => useAppStore.getState().openCollaborationMap({ kind: 'focus', subject: { hostId: mapContext.control?.hostId ?? mapContext.hostId, agentSessionId: mapContext.control?.agentSessionId ?? mapContext.id }, name: mapContext.name }) : undefined} active={visible} selectedId={sourceSelection?.context.id ?? shownSessionId} selected={selected} tab={sourceSelection ? null : selectedTab} reference={projection?.selection.length === 1 ? projection.selection[0] : undefined} onReview={() => setRequestId(shownSessionId)} onCloseWorkspace={closeWorkspace} regionOnly={regionOnly} onToggleRegion={projection || sourceSelection ? onToggleRegion : undefined}>
       <div className="focus-filters">
         <div className="global-board-toolbar__controls">
@@ -605,7 +608,6 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
           <LocalRetainedInputsPanel />
           <FocusFilters value={filters} onChange={changeFilters} onInspectChange={setInspectingFilters} visible={visible} onClear={clearLocalFilters} onHistory={() => historySearch.start()} historyAvailable={Boolean(trimmedQuery)}
             options={{ projects: projectOptions.map(option => ({ ...option, count: projectCounts.get(option.id) ?? 0 })), states: stateCounts, types: typeCounts }} />
-          <IconButton type="button" aria-label="Arrange projects by recent activity" title="Arrange unpinned projects by recent activity. Otherwise project positions stay fixed." onClick={() => setArrangeProjects(value => value + 1)}><ArrangeProjectsIcon size={13} /></IconButton>
           <FocusSourceStatus sourceError={catalogue.error} loading={catalogue.loading} laneErrors={hierarchyErrors}
             onRetrySources={catalogue.refresh} onRetryLanes={refreshHierarchy} visible={visible && documentActive} />
         </div>
@@ -632,7 +634,7 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
       </div> : null}
       {revealedContext && revealedContext.lane !== 'execution' ? <div className="focus-agent-reveal-card" ref={separateRevealRef} data-focus-reveal-scroll>
         <WorkbenchPresentationContext.Provider value={cardPresentation}>
-          <FocusContextCards contexts={[revealedContext.context]} columns={1} scrollRef={separateRevealRef} visible={visible && documentActive}
+          <FocusContextCards list={list} contexts={[revealedContext.context]} columns={1} scrollRef={separateRevealRef} visible={visible && documentActive}
             selectedId={null} selectedKey={selectedContextKey} revealRequest={agentReveal} onRevealed={finishReveal}
             goalLinks={goalLinks} identities={contextIdentities} activity={listActivity} onSelect={() => {}} />
         </WorkbenchPresentationContext.Provider>
@@ -645,6 +647,11 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
       {pmoAttention.length ? <button type="button" className="focus-pmo-attention" onClick={() => openMoteContext(pmoAttention[0]!)}><span className="focus-pmo-attention__identity"><SpaceObjectIcon kind="mote" name={moteIdentity.name} manualIcon={moteIdentity.icon} avatarWorkspaceId={moteIdentity.avatarWorkspaceId} avatarTopicId={moteIdentity.avatarTopicId} avatarObjectKey={moteIdentity.avatarObjectKey} /><span>Mote</span><strong>{moteIdentity.name}</strong><span>· {pmoAttention.length} to review</span></span><span>Open context</span></button> : null}
       {executionRows.length === 0 && retainedProjects.length === 0 && coordinationContexts.length === 0 && !moteChoices ? <div className="global-agents-empty" role="status"><ThemeObjectTeamIcon size={20} /><strong>No execution contexts yet</strong><span>Open an Agent from a Workspace to make it appear here.</span></div> : <div className="global-board-columns" aria-label="Filtered Focus contexts">
         <FocusSavedHistory catalogue={catalogue} visible={visible && documentActive}><div className="focus-project-board">
+          <div className="focus-task-toolbar">
+            <span>Tasks</span>
+            <IconButton type="button" aria-label="Arrange projects by recent activity" title="Arrange unpinned projects by recent activity. Otherwise project positions stay fixed." onClick={() => setArrangeProjects(value => value + 1)}><ArrangeProjectsIcon size={13} /></IconButton>
+            <FocusTaskLayoutSwitch value={taskLayout} rows={boardRowsRef} />
+          </div>
           <WorkbenchPresentationContext.Provider value={cardPresentation}><div className="focus-project-board__live" data-empty={!hasBoardLanes && !leadingResults || undefined}>
             {hasBoardLanes || leadingResults ? <FocusProjectLanes resourceMenus renderDiscussion={(lane, slot) => <FocusGroupDiscussion lane={lane} contexts={filterContexts} active={slot.active && visible && documentActive} container={slot.container} />} quietLanes={quietLanes} protectedLanes={protectedLanes} forceExpanded={filtering} revealedLaneIds={revealedLaneIds} leading={leadingResults} visible={visible && documentActive} origins={laneOrigins} lanes={boardLanes} boardHistory={boardHistory} revealHistory={Boolean(trimmedQuery)} onRead={readProjectHistory} selectedProjectKey={filters.projects.length === 1 ? filters.projects[0]!.id : 'all'} currentLaneId={displayedCurrentLaneId} revealRequestId={agentReveal?.pending ? agentReveal.requestId : undefined} onSelect={key => setFilters(value => ({ ...value, projects: [{ id: key, name: projectOptions.find(option => option.id === key)?.name ?? key }] }))} renderLane={laneRows} rowsRef={boardRowsRef} /> : null}
             {filtered.length === 0 && filteredRetainedProjects.length === 0 && coordinationResults.length === 0 ? <p className="focus-project-lanes__empty">
