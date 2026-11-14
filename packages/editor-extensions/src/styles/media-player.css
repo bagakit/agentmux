@@ -13,8 +13,9 @@
 
 /* Video stage: neutral letterboxing in both themes, the picture is the main layer. */
 /* The stage takes the picture's own shape once it is known, so the controls always sit on the picture
-   instead of on letterbox black; before that it fills the Region. */
-.media-player__stage { position: relative; width: 100%; flex: 1; min-height: 0; display: grid; place-items: center; overflow: hidden;
+   instead of on letterbox black; before that it fills the Region. Its controls answer to its own width, which a
+   short Region narrows well below the player's. */
+.media-player__stage { position: relative; width: 100%; flex: 1; min-height: 0; display: grid; place-items: center; overflow: hidden; container-type: inline-size;
   border-radius: var(--radius-lg); background: var(--media-backdrop); box-shadow: inset 0 0 0 1px var(--wash-1); }
 /* The frame is the free box; the stage inside it is sized to the picture so the controls sit on it. */
 .media-player__frame { flex: 1; min-height: 0; width: 100%; display: grid; place-items: center; }
