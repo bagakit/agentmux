@@ -104,6 +104,50 @@ for (const count of [1, 32, 100]) it(`production mounted ${count} retained Pane/
   expect([...dom.container.querySelectorAll('.ProseMirror')]).toEqual(editors)
 })
 
+it('an unrelated diagnostic preserves original notices without waking retained Composers', async () => {
+  const ids = Array.from({ length: 32 }, (_, n) => `diagnostic-retained-${n}`)
+  const sessions = ids.map(id => composerSession(id)), target = sessions[0]!
+  const browserTab = createWorkbenchTab('browser-tab', browser)
+  const originalDrafts = Object.fromEntries(ids.map(id => [id, `Original draft ${id}`]))
+  const queued = { operationId: 'original-pending-message', text: 'Original queued message', enqueuedAt: 1,
+    status: 'deferred' as const, awaitingExplicitSend: true, promptCondition: null, runId: target.control.run.runId,
+    origin: 'manual' as const, freshComposerIntent: true }
+  useAppStore.setState({ sessions, agentComposerDrafts: originalDrafts, agentSteerQueues: { [target.id]: [queued] },
+    viewModes: Object.fromEntries(ids.map(id => [id, 'terminal' as const])), tabs: { [browserTab.id]: browserTab },
+    timelines: {}, recoveryCandidates: [], pendingAgentLaunches: {}, scratchTopicSnapshots: {},
+    error: null, lastError: null, errorNoticeContext: null, errorDismissed: false, notificationEvents: [] })
+  const scene = (visible: boolean) => <>{ids.map(id => <SessionPane key={id} sessionId={id} surfaceKind="agent"
+    interactiveResize={false} visible={visible} linkOrigin={{ workspaceId: 'workspace' }} />)}</>
+  await dom.render(scene(true))
+  await dom.render(scene(false))
+  const editors = [...dom.container.querySelectorAll<HTMLElement>('.ProseMirror')]
+  expect(editors).toHaveLength(ids.length)
+  const before = checks()
+  await act(async () => useAppStore.getState().reportError(new Error('An independent source observation failed.')))
+  const state = useAppStore.getState()
+  expect(state.error).toBe('An independent source observation failed.')
+  expect(state.lastError).toBe(state.error)
+  expect(state.errorNoticeContext?.event?.source).toBe('operation')
+  expect(state.notificationEvents).toHaveLength(1)
+  expect(state.notificationEvents[0]).toMatchObject({ message: state.error, context: state.errorNoticeContext })
+  expect(checks()).toEqual(before)
+  expect(state.sessions).toBe(sessions)
+  expect(state.agentComposerDrafts).toEqual(originalDrafts)
+  expect(state.agentSteerQueues[target.id]).toEqual([queued])
+
+  await act(async () => useAppStore.getState().setAgentComposerDraft(target.id, 'Fresh related draft'))
+  expect(editors[0]!.textContent).toBe('Fresh related draft')
+  expect(checks().composer).toBeGreaterThan(before.composer)
+  const beforeQueue = checks()
+  await act(async () => useAppStore.getState().editQueuedAgentSteer(target.id, queued.operationId, queued.text, 'Fresh related queued message'))
+  expect(useAppStore.getState().agentSteerQueues[target.id]?.[0]?.text).toBe('Fresh related queued message')
+  expect(checks().composer).toBeGreaterThan(beforeQueue.composer)
+  expect(checks().commits).toBeGreaterThan(beforeQueue.commits)
+  expect(useAppStore.getState().notificationEvents[0]).toBe(state.notificationEvents[0])
+  expect(useAppStore.getState().sessions).toBe(sessions)
+  expect([...dom.container.querySelectorAll('.ProseMirror')]).toEqual(editors)
+})
+
 it('the original pending Pane keeps exact name metadata live through rename, Host changes and removal', async () => {
   const id = 'pending-original-name'
   const original = { agentSessionId: id, hostId: 'local', providerId: 'codex', executorId: 'codex',
