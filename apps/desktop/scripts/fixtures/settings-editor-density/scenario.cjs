@@ -86,6 +86,19 @@ async function run({ win, read, q, button, until, settle, click, type, scene, ca
   await type(instruction, short)
   result.editors.derived = await measure(instruction)
   compactAndFocused(result.editors.derived, 'Derived action')
+  const nameProblem = `(() => {
+    const editor = document.querySelector('[data-derived-editor]')
+    return document.getElementById(editor.getAttribute('aria-describedby'))?.textContent
+  })()`
+  assert.match(await read(nameProblem), /needs a one-line name/)
+  const instructionHint = await read(`document.getElementById((${instruction}).getAttribute('aria-describedby')).textContent`)
+  assert.doesNotMatch(instructionHint, /one-line name/)
+  const actionName = q('.derived-actions__name input')
+  await click(actionName)
+  await capture('derived-name-error-dark.png', 'The action reports its missing name above the form and keeps the instruction hint')
+  await type(actionName, 'Review original changes')
+  await click(instruction)
+  assert.equal(await read(nameProblem), undefined)
   await capture('derived-action-dark.png', 'Derived action draft uses the same text density and original workbench')
 
   await open('profile')
