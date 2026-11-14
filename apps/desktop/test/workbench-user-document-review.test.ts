@@ -44,7 +44,7 @@ it('hydrates the original native projection without re-encoding it and keeps fra
   const checkpoint = measured()
   parse.mockRestore(); stringify.mockRestore()
 
-  expect({ read, checkpoint }).toEqual({ read: { decoded: 2, encoded: 0 }, checkpoint: { decoded: 2, encoded: 1 } })
+  expect({ read, checkpoint }).toEqual({ read: { decoded: 1, encoded: 0 }, checkpoint: { decoded: 1, encoded: 1 } })
   expect(restored).toEqual({ state, version: 1 })
   expect(readFromOwner).toHaveBeenCalledTimes(1)
   expect(writesDuringRead).toBe(0)
