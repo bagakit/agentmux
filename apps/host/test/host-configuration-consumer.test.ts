@@ -1,10 +1,10 @@
 import { spawn } from 'node:child_process'
-import { appendFile, chmod, mkdir, mkdtemp, readFile, rename, rm, symlink, writeFile } from 'node:fs/promises'
+import { appendFile, chmod, copyFile, mkdir, mkdtemp, readFile, rename, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterAll, afterEach, expect, it, vi } from 'vitest'
 import { AgentMuxFileAgentSessionStore, DurableAgentMuxMessageQueue, connectAgentMuxRpc } from '@agentmux/core'
-import { objectCliEnvironment } from '../../../packages/core/test/helpers/object-cli-rpc.js'
+import { objectCliEnvironment, runCompiledObjectCli } from '../../../packages/core/test/helpers/object-cli-rpc.js'
 import { discordConfig, discordRoomId, discordTransport } from '../../../packages/connectors/test/fixtures/discord.js'
 
 const cleanups: Array<() => void | Promise<void>> = [], facts: unknown[] = []
@@ -19,7 +19,8 @@ const line = (id: string, text: string) => JSON.stringify({ type: 'assistant', s
   message: { role: 'assistant', content: [{ type: 'text', text }] } }) + '\n'
 const local = { id: 'local', kind: 'local', label: 'Original local Host' }
 
-async function fixture(platform = false) {
+/** `isolatedHome` keeps credential files a Host writes, such as Tailcat keys, inside the fixture. */
+async function fixture(platform = false, isolatedHome = false) {
   const directory = await mkdtemp(join(tmpdir(), 'ahc-')); cleanups.push(() => rm(directory, { recursive: true, force: true }))
   const bin = join(directory, 'bin'); await mkdir(bin)
   await symlink(join(root, 'apps/host/test/fixtures/host-configuration-ssh.mjs'), join(bin, 'ssh'))
@@ -45,6 +46,7 @@ async function fixture(platform = false) {
     AGENTMUX_SPATIAL_STATE_STORE: join(directory, 'spatial.json'), AGENTMUX_MOBILE_BUILD_DIRECTORY: join(directory, 'absent-mobile'),
     HOST_INDEX_NATIVE_FACTS: join(directory, 'native-facts.json'), HOST_INDEX_WORKSPACE: directory,
     AGENTMUX_FAKE_SSH_HOME: directory, HOST_CONFIG_SSH_TRACE: sshTrace, HOST_CONFIG_NATIVE_STATE: state,
+    ...(isolatedHome ? { HOME: join(directory, 'home'), XDG_CONFIG_HOME: join(directory, 'home/.config') } : {}),
     ...(wire ? { HOST_INDEX_PLATFORM_ORIGIN: wire.origin } : {}) })
   async function start(mutant = '') {
     const child = spawn(process.execPath, ['--import', preload, entry, '--store', storePath], { env: { ...environment, HOST_CONFIG_MUTANT: mutant }, stdio: ['ignore', 'pipe', 'pipe'] })
@@ -62,6 +64,7 @@ async function fixture(platform = false) {
   const native = async () => { try { return JSON.parse(await readFile(join(directory, 'native-facts.json'), 'utf8')) } catch { return { effects: [], lifecycle: [] } } }
   const ssh = async () => { try { return (await readFile(sshTrace, 'utf8')).trim().split('\n').map(row => JSON.parse(row)) } catch { return [] } }
   return { directory, transcript, store, config, start, wire, native, ssh, state,
+    cli: (args: string[]) => runCompiledObjectCli(['--endpoint', 'unix:' + join(directory, 'control.sock'), ...args], environment),
     remote: (id: string, runtimeId: string, hostname = id) => ({ id, kind: 'ssh', label: id, hostname, remoteCommand: command, remoteSocketPath: join(directory, 'control.sock'), runtimeId }) }
 }
 
@@ -208,4 +211,19 @@ it('the default Host observes its saved local record, so a CLI network read answ
   // A later saved edit is the record the next observation is bound to.
   await f.config([{ ...local, label: 'Renamed local Host', tailcat }])
   await vi.waitFor(async () => expect((await h.rpc.call('settings.hosts.network', { hostId: 'local' })).configuration.label).toBe('Renamed local Host'), { timeout: 15_000 })
+})
+
+it('the default Host prepares this Mac\'s Tailcat keys for its local user through the official CLI and reuses them later', async () => {
+  const f = await fixture(false, true)
+  await copyFile(join(root, 'apps/host/test/fixtures/fake-tailcat.sh'), join(f.directory, 'bin/tailcat')); await chmod(join(f.directory, 'bin/tailcat'), 0o755)
+  const h = await f.start()
+  const publicKey = 'nodekey:' + 'c'.repeat(64)
+  expect(await h.rpc.call('settings.hosts.tailcat-key', { role: 'client' })).toEqual({ role: 'client', key: 'agentmux-client', created: true, publicKey })
+  expect(await h.rpc.call('settings.hosts.tailcat-key', { role: 'client' })).toEqual({ role: 'client', key: 'agentmux-client', created: false, publicKey })
+  const result = await f.cli(['settings', 'hosts', 'tailcat-key', '--role', 'server'])
+  expect(result.code, result.stderr).toBe(0)
+  expect(JSON.parse(result.stdout)).toMatchObject({ ok: true, operation: 'settings.hosts.tailcat-key', result: { role: 'server', key: 'agentmux-server', created: true } })
+  expect(await h.rpc.call('settings.hosts.tailcat-key', { role: 'server' })).toEqual({ role: 'server', key: 'agentmux-server', created: false })
+  const keys = process.platform === 'darwin' ? 'home/Library/Application Support/tailcat/keys' : 'home/.config/tailcat/keys'
+  for (const name of ['agentmux-client', 'agentmux-server']) await expect(readFile(join(f.directory, keys, name + '.private.json'), 'utf8')).resolves.toContain('privkey:')
 })
