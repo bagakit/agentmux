@@ -9,6 +9,7 @@ const root = resolve(import.meta.dirname, '../../..')
 const variants = {
   'first-item': { file: 'apps/desktop/src/renderer/src/store.ts', before: 'reference })\n  },\n  selectSession(id, preferredTabGroupId, options)', after: 'reference: sessionWorkbenchReferences(get().tabs, workbenchSelectionCatalog(get()), request.sessionId)[0] ?? reference })\n  },\n  selectSession(id, preferredTabGroupId, options)' },
   'lose-focus': { file: 'apps/desktop/src/renderer/src/store.ts', before: "const navigation = options?.keepSurface ? {} : { mainSurface: 'workbench' as const }", after: "const navigation = { mainSurface: 'workbench' as const }" },
+  'unqualified-roster': { file: 'apps/desktop/src/renderer/src/lib/desktop-focus-navigation.ts', before: 'if (!subject || bound?.hostId !== subject.hostId)', after: 'if (false && (!subject || bound?.hostId !== subject.hostId))' },
   'drop-membership': { file: 'apps/desktop/src/renderer/src/store.ts', before: 'if (request.subject && execution?.hostId !== request.subject.hostId)', after: 'if (false && request.subject && execution?.hostId !== request.subject.hostId)' }
 } as const
 const mutation = process.env.AGENT_LOCATIONS_MUTANT as keyof typeof variants | undefined

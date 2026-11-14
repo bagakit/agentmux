@@ -16,7 +16,7 @@ import { FocusContextRow } from '../src/renderer/src/components/FocusContextRow'
 import { SurfaceToolDock } from '../src/renderer/src/components/SurfaceToolDock'
 import { QuickSwitcher } from '../src/renderer/src/components/QuickSwitcher'
 import { api } from '../src/renderer/src/lib/api'
-import { useAppStore, agentRegionExecution, agentRegionLocationsKnown } from '../src/renderer/src/store'
+import { useAppStore, agentRegionExecution, agentRegionLocationsKnown, rereadAgentRegionExecution } from '../src/renderer/src/store'
 import { composerConfig, composerSession } from './helpers/composer-dom-fixture'
 import { createWorkbenchTab, addWorkbenchRegion } from '../src/renderer/src/lib/workbench-tabs'
 import { agentContextForSession } from '../src/renderer/src/lib/focus-context'
@@ -61,7 +61,7 @@ function surface(kind: 'focus' | 'space' = 'focus') {
 }
 function disclose() { return document.querySelector('.agent-locations') }
 const lifecycle: Array<{ mock: { calls: unknown[][] } }> = []
-const spatialFixtures: { directory: string; dispose: () => void; pending: Set<Promise<unknown>>; read: typeof api.spatial.read }[] = []
+const spatialFixtures: { directory: string; dispose: () => void; pending: Set<Promise<unknown>>; read: typeof api.spatial.read; holdNotifications(): void }[] = []
 beforeEach(async () => {
   lifecycle.length = 0
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
@@ -79,12 +79,13 @@ beforeEach(async () => {
     void commit.then(() => pending.delete(commit), () => pending.delete(commit))
     return commit
   })
-  vi.spyOn(api.spatial, 'onChange').mockImplementation(listener => store.subscribe(listener))
+  let heldNotifications = false
+  vi.spyOn(api.spatial, 'onChange').mockImplementation(listener => store.subscribe(value => { if (!heldNotifications) listener(value) }))
   vi.spyOn(api.config, 'get').mockResolvedValue(work.config!)
   const snapshot = await api.sessions.snapshot()
   vi.spyOn(api.sessions, 'snapshot').mockResolvedValue({ ...snapshot, sessions: work.sessions })
   useAppStore.setState({ restoredWorkbench: { tabs: work.tabs, layouts: work.layouts } })
-  spatialFixtures.push({ directory, dispose: await useAppStore.getState().initialize(), pending, read: () => store.read() })
+  spatialFixtures.push({ directory, dispose: await useAppStore.getState().initialize(), pending, read: () => store.read(), holdNotifications() { heldNotifications = true } })
   useAppStore.setState({ mainSurface: 'agents', agentComposerDrafts: work.agentComposerDrafts })
   for (const method of ['launchAgent', 'recover', 'resume', 'restart', 'stop', 'submitPrompt'] as const) lifecycle.push(vi.spyOn(api.sessions, method))
   vi.spyOn(api.ui, 'requestStorageFlush').mockResolvedValue(undefined)
@@ -257,4 +258,33 @@ it.each([1, 32, 100])('actual Focus keeps position membership cached across unre
   expect(lookups).not.toHaveBeenCalled()
   expect(document.querySelector('.global-focus-surface .agent-locations')?.getAttribute('aria-label')).toContain('location')
   expect(useAppStore.getState().agentComposerDrafts[id]).toBe('Original unsent draft')
+})
+
+it.each(['missing-execution', 'wrong-canonical', 'wrong-host'] as const)('actual Roster marks a partially unconfirmed Region unknown %s', async mode => {
+  const held = useAppStore.getState(), originalTabs = held.tabs, originalDrafts = held.agentComposerDrafts
+  spatialFixtures[0]!.holdNotifications()
+  const current = (await api.spatial.read())!, graph = structuredClone(current.graph)
+  const region = graph.regions.find(one => one.tabId === 'first' && one.regionId === 'right')!
+  if (mode === 'missing-execution') region.execution = null
+  else if (mode === 'wrong-canonical') region.agentSessionId = 'different-core-agent'
+  else region.execution = { ...region.execution!, hostId: 'unrelated-host' }
+  await api.spatial.commit({ expectedRevision: current.revision, graph })
+  expect(await rereadAgentRegionExecution({ tabId: 'first', regionId: 'right', agentSessionId: id })).not.toMatchObject({ hostId: 'local' })
+  expect(agentRegionLocationsKnown()).toBe(true)
+  expect(useAppStore.getState().tabs).toBe(originalTabs)
+  await dom.render(<><AgentRoster total={1} />{picker}</>)
+  await act(async () => document.querySelector('.agent-roster__trigger')!.dispatchEvent(new PointerEvent('pointerdown', { button: 0, bubbles: true })))
+  const location = document.querySelector('.agent-roster__entry .agent-locations')!
+  expect(location.getAttribute('aria-label')).toContain('locations unconfirmed')
+  expect(location.textContent).toContain('…')
+  expect(location.getAttribute('aria-label')).not.toContain('0 locations')
+  await click(location)
+  expect(document.querySelector('[role="dialog"]')).not.toBeNull()
+  const request = useAppStore.getState().sessionLocationRequest!, before = selected()
+  await act(async () => expect(useAppStore.getState().chooseSessionLocation(request.requestId, { displayWorkspaceId: 'workspace', groupId: 'group-a', tabId: 'first', regionId: 'right' })).toBe(false))
+  expect(selected()).toBe(before); expect(useAppStore.getState().sessionLocationRequest?.issue).toContain('unconfirmed')
+  expect(useAppStore.getState().agentComposerDrafts).toBe(originalDrafts)
+  await click(choices().find(one => one.title.includes('"regionId":"left"')))
+  expect(selected()).toMatchObject({ tabId: 'first', regionId: 'left' })
+  for (const call of lifecycle) expect(call).not.toHaveBeenCalled()
 })

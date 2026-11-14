@@ -32,7 +32,7 @@ function run(name, mutation, bearing) {
   if (mutation) {
     if (result.status === 0 || summary.numFailedTests !== 1 || failures.length !== 1 || !failures[0].fullName.includes(bearing) ||
       !failures[0].failureMessages.some(message => message.includes('AssertionError'))) throw new Error('Mutation did not fail its original behavior assertion: ' + name)
-    if (!proofs.some(proof => proof.file.endsWith('/store.ts') && proof.mutated && proof.originalSHA256 !== proof.loadedSHA256)) throw new Error('Mutated navigation owner was not evaluated: ' + name)
+    if (!proofs.some(proof => proof.mutated && proof.originalSHA256 !== proof.loadedSHA256)) throw new Error('Mutated navigation owner was not evaluated: ' + name)
   } else if (result.status !== 0 || !summary.success || summary.numFailedTests || summary.numPassedTests < 15) throw new Error('Original location consumer gate failed: ' + name)
   unchanged()
   receipt.cases.push({ name, mutation: mutation ?? null, passed: summary.numPassedTests, failed: summary.numFailedTests, bearing: failures.map(test => test.fullName), loaded: relative(root, loaded), report: relative(root, report) })
@@ -43,6 +43,7 @@ try {
   run('first-item', 'first-item', 'Focus explicitly reselects the second Region')
   run('lose-focus', 'lose-focus', 'Focus explicitly reselects the second Region')
   run('drop-membership', 'drop-membership', 'an unknown source stays unknown')
+  run('unqualified-roster', 'unqualified-roster', 'actual Roster marks a partially unconfirmed Region unknown missing-execution')
   run('restored')
   receipt.passed = true
   writeFileSync(resolve(directory, 'receipt.json'), JSON.stringify(receipt, null, 2) + '\n')
