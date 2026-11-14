@@ -18,6 +18,7 @@ import { HostExecutorSettings } from './HostExecutorSettings'
 import { currentExecutorDetection, executorDetectionLabel } from '../../lib/executor-detection'
 import { useResourceDrafts } from './use-resource-drafts'
 import { SettingsResourceLibrary } from './SettingsResourceLibrary'
+import { SelectionField } from '../SelectionField'
 import { ProviderCatalogPane } from './ProviderCatalogPane'
 import { api } from '../../lib/api'
 import { presentError } from '@agentmux/client-ui/error-presentation'
@@ -361,7 +362,7 @@ export function AgentSettingsPane({ config, onSave, executorId, navigationReques
     setPendingEdit({ id, select: true })
   }
 
-  const scopeControl = <label className="settings-compact-field"><span>Configure</span><select aria-label="Executor configuration scope" value={scope} onChange={event => setScope(event.target.value as 'templates' | 'host')}><option value="templates">Global templates</option><option value="host">On a Host</option></select></label>
+  const scopeControl = <label className="settings-compact-field"><span>Configure</span><SelectionField label="Executor configuration scope" value={scope} options={[{ value: 'templates', label: 'Global templates' }, { value: 'host', label: 'On a Host' }]} searchable={false} onValueChange={value => setScope(value as 'templates' | 'host')} /></label>
   const executorCounts = Object.values(drafts).reduce<Record<string, number>>((counts, draft) => {
     counts[draft.providerId] = (counts[draft.providerId] ?? 0) + 1
     return counts
