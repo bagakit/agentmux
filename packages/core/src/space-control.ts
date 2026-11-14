@@ -133,7 +133,7 @@ export type AgentMuxSurveyOrganization = {
   ungrouped: string[]
   groups: { groupId: string; name: string; collapsed: boolean; zoneIds: string[] }[]
 }
-/** Explicit client membership, independent of organization order and Core topology. */
+/** One entry in the ordered client page preference, independent of Zone organization and Core topology. */
 export type AgentMuxSurveyPageReference = { regionId: string; browserId: string }
 /** The Browser remains the page identity; its optional view is one exact original Tab occurrence. */
 export type AgentMuxSurveyPageSelection = { kind: 'page'; presentation?: { kind: 'tab' } &
@@ -145,6 +145,7 @@ export type AgentMuxSurveyPageAdmission = Pick<AgentMuxWorkfaceReport, 'save' | 
   outcome: 'not-requested' | 'registered' | 'partial' | 'unknown'
   reference?: AgentMuxSurveyPageReference
 }
+/** Page arrays are ordered; expectedPageReferences must match the original complete order. */
 export type AgentMuxSurveyCollectionChange = { zoneIds?: string[]; expectedZoneIds?: string[]; pageReferences?: AgentMuxSurveyPageReference[]; expectedPageReferences?: AgentMuxSurveyPageReference[] }
 export type AgentMuxSurveyListReport = AgentMuxWorkfaceReport & {
   scope: 'survey-list'

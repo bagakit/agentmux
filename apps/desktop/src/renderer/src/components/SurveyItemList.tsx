@@ -10,6 +10,8 @@ import { DocumentOverlayPortal } from './WindowOverlayHost'
 import type { SurveyContentDrag, SurveyPageDrop, SurveyContentReference, SurveyCompositionDropTarget } from '../lib/survey-composition-drag'
 import type { SurveyListOrganizationModel } from '../hooks/useSurveyListOrganization'
 import { moveSurveyListItem } from '../lib/survey-list'
+import { reorderSurveyPages, type SurveyPageOrderDrop } from '../lib/survey-page-order'
+import type { AgentMuxSurveyPageReference } from '@agentmux/core/control'
 
 const DragIcon = semanticIconComponent('action.drag')
 const DisclosureIcon = semanticIconComponent('navigation.disclosure')
@@ -21,12 +23,12 @@ const CancelIcon = semanticIconComponent('action.cancel')
 const itemKey = (id: string) => `survey-item:${id}`
 const groupKey = (id: string) => `survey-group:${id}`
 const ungroupedKey = 'survey-ungrouped'
-const listSortingAxis: Modifier = ({ active, transform }) => active?.data.current?.kind === 'item' || active?.data.current?.kind === 'group'
+const listSortingAxis: Modifier = ({ active, transform }) => active?.data.current?.kind === 'item' || active?.data.current?.kind === 'group' || active?.data.current?.kind === 'page-order'
   ? { ...transform, x: 0 } : transform
 
 type Target = { kind: 'item'; zoneId: string; groupId: string | null; index: number } | { kind: 'group'; groupId: string } | { kind: 'ungrouped' }
 type Composition = { start(reference: SurveyContentReference): string | null; canDrop(target: SurveyCompositionDropTarget): boolean; drop(target: SurveyCompositionDropTarget | null): void }
-type DropData = Target | SurveyPageDrop | { kind: 'composition-target'; target: SurveyCompositionDropTarget }
+type DropData = Target | SurveyPageDrop | SurveyPageOrderDrop | { kind: 'composition-target'; target: SurveyCompositionDropTarget }
 const contentTarget = (data: DropData | undefined): SurveyCompositionDropTarget | null => data?.kind === 'item' ? { kind: 'research', zoneId: data.zoneId }
   : data?.kind === 'page-target' ? data.reference : data?.kind === 'composition-target' ? data.target : null
 
@@ -37,7 +39,8 @@ function acceptsContainer(from: Target | undefined, groupId: string | null): boo
 }
 
 /** One sensor routes list sorting and content drops to their respective original owners. */
-export function SurveyItemList({ model, titles, renderItem, visible, selectedZoneId, leading, trailing, pinnedZoneIds = [], pinnedPages, composition }: {
+export function SurveyItemList({ model, titles, renderItem, visible, selectedZoneId, leading, trailing, pinnedZoneIds = [], pinnedPages, composition, pageOrder }: {
+  pageOrder?: { references: readonly AgentMuxSurveyPageReference[]; commit(next: readonly AgentMuxSurveyPageReference[], expected: readonly AgentMuxSurveyPageReference[]): void }
   leading?: ReactNode
   trailing?: ReactNode
   pinnedZoneIds?: readonly string[]
@@ -52,6 +55,7 @@ export function SurveyItemList({ model, titles, renderItem, visible, selectedZon
   const keyboardCoordinates: KeyboardCoordinateGetter = (event, args) => {
     const contentDrag = args.context.active?.data.current?.kind === 'content'
     const groupDrag = args.context.active?.data.current?.kind === 'group'
+    const pageDrag = args.context.active?.data.current?.kind === 'page-order'
     if (contentDrag) {
       const direction = event.code, current = args.context.collisionRect
       if (!current || !['ArrowDown', 'ArrowUp', 'ArrowLeft', 'ArrowRight'].includes(direction)) return
@@ -71,6 +75,8 @@ export function SurveyItemList({ model, titles, renderItem, visible, selectedZon
     const rects = new Map([...args.context.droppableRects].filter(([id]) => {
       const data = args.context.droppableContainers.get(id)?.data.current as DropData | undefined
       if (!data || data.kind === 'composition-target' || data.kind === 'page-target') return false
+      if (pageDrag) return data.kind === 'page-order'
+      if (data.kind === 'page-order') return false
       if (groupDrag) return data.kind === 'group'
       if (data.kind === 'item') return true
       if (data.kind === 'ungrouped') return model.effective.ungrouped.length === 0
@@ -82,6 +88,7 @@ export function SurveyItemList({ model, titles, renderItem, visible, selectedZon
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
     useSensor(KeyboardSensor, { coordinateGetter: keyboardCoordinates }))
   const held = useRef<{ expected: AgentMuxSurveyOrganization; editable: AgentMuxSurveyOrganization } | null>(null)
+  const pageBaseline = useRef<{ expected: readonly AgentMuxSurveyPageReference[]; visible: readonly AgentMuxSurveyPageReference[] } | null>(null)
   const contentLabel = useRef<string | null>(null)
   const contentPresentation = useRef<SurveyContentDrag['presentation']>(undefined)
   const previewBounds = useRef<{ left: number; right: number; width: number } | null>(null)
@@ -90,6 +97,8 @@ export function SurveyItemList({ model, titles, renderItem, visible, selectedZon
   const pinnedSet = new Set(pinnedZoneIds)
   const ids = (values: string[]) => values.filter(id => titles.has(id) && !pinnedSet.has(id))
   function start(event: DragStartEvent) {
+    const page = event.active.data.current as SurveyPageOrderDrop | undefined
+    pageBaseline.current = page?.kind === 'page-order' && pageOrder ? { expected: [...pageOrder.references], visible: [...page.order] } : null
     if (event.active.data.current?.kind === 'content') { held.current = null; contentPresentation.current = (event.active.data.current as SurveyContentDrag).presentation; contentLabel.current = composition?.start((event.active.data.current as SurveyContentDrag).reference) ?? null }
     else { contentLabel.current = null; held.current = { expected: model.stored, editable: model.editable } }
     const origin = event.activatorEvent.target
@@ -99,6 +108,14 @@ export function SurveyItemList({ model, titles, renderItem, visible, selectedZon
   }
   function end({ active, over }: DragEndEvent) {
     const baseline = held.current; held.current = null; setDragging(false)
+    const originalPages = pageBaseline.current; pageBaseline.current = null
+    if (active.data.current?.kind === 'page-order') {
+      const from = active.data.current as SurveyPageOrderDrop, to = over?.data.current as SurveyPageOrderDrop | undefined
+      if (!originalPages || to?.kind !== 'page-order' || !pageOrder) return
+      const next = reorderSurveyPages(originalPages.expected, originalPages.visible, from.reference, to.reference)
+      if (next !== originalPages.expected) pageOrder.commit(next, originalPages.expected)
+      return
+    }
     if (active.data.current?.kind === 'content') {
       composition?.drop(contentTarget(over?.data.current as DropData | undefined))
       return
@@ -149,10 +166,12 @@ export function SurveyItemList({ model, titles, renderItem, visible, selectedZon
       collisionDetection={args => {
         const content = args.active.data.current?.kind === 'content'
         const groupsOnly = args.active.data.current?.kind === 'group'
+        const pagesOnly = args.active.data.current?.kind === 'page-order'
         const droppableContainers = args.droppableContainers.filter(container => {
           const data = container.data.current
           if (content) { const target = contentTarget(data as DropData | undefined); return Boolean(target && composition?.canDrop(target)) }
-          if (data?.kind === 'page-target' || data?.kind === 'composition-target') return false
+          if (pagesOnly) return data?.kind === 'page-order'
+          if (data?.kind === 'page-order' || data?.kind === 'page-target' || data?.kind === 'composition-target') return false
           return groupsOnly ? data?.kind === 'group' : !args.pointerCoordinates || container.id !== args.active.id
         })
         const candidates = { ...args, droppableContainers }

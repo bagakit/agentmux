@@ -67,10 +67,8 @@ export const surveyCollectedZoneIds = (collected: Readonly<Record<string, true>>
 const sameMembers = (left: string[], right: string[]) => { const members = new Set(right); return left.length === members.size && left.every(id => members.has(id)) }
 export const samePage = (a: Page, b: Page) => a.regionId === b.regionId && a.browserId === b.browserId
 const pageKey = (page: Page) => JSON.stringify([page.regionId, page.browserId])
-const samePages = (left: readonly Page[], right: readonly Page[]) => {
-  const members = new Set(right.map(pageKey))
-  return left.length === members.size && left.every(page => members.has(pageKey(page)))
-}
+const samePages = (left: readonly Page[], right: readonly Page[]) =>
+  left.length === right.length && left.every((page, index) => samePage(page, right[index]!))
 
 /** Original references may remain unavailable; only an explicit new member needs a confirmed Zone. */
 export function changeSurveyCollection(before: Record<string, true>, zoneIds: string[], hasZone: Ports['hasZone']): Record<string, true> | null {
@@ -114,7 +112,7 @@ export async function executeSurveyList(ports: Ports, request: Request): Promise
     step: 'target', code: 'SURVEY_LIST_COLLECTION_CONFLICT', message: 'The original explicit Survey membership changed after it was read.',
     recovery: 'Read this same list and review its current members before another change.' }])
   if (collection?.pageReferences !== undefined && !samePages(collection.expectedPageReferences!, state.surveyPageReferences)) return report('refused', [{
-    step: 'target', code: 'SURVEY_LIST_PAGE_CONFLICT', message: 'The exact Survey page membership changed after it was read.',
+    step: 'target', code: 'SURVEY_LIST_PAGE_CONFLICT', message: 'The exact Survey page order or membership changed after it was read.',
     recovery: 'Read this same list before changing the original page references. Its pages remain available.' }])
   const pages = collection?.pageReferences ?? state.surveyPageReferences
   if (collection?.pageReferences !== undefined && unread.length) return report('unknown', unread)

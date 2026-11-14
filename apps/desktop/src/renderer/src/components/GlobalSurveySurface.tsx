@@ -9,7 +9,7 @@ import { spatialCatalog } from '../lib/space-agent-control'
 import { sessionPresentationById } from '../lib/session-presentation'
 import type { AgentMuxSpaceCatalog, AgentMuxZoneFact, TopicKnowledgeSource } from '@agentmux/core/control'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { useStore } from 'zustand'
 import type { SurveyBrowserPreparation } from '../lib/survey-browser-creation'
 import { isSurveyPage, surveyPageOwner, type SurveyPageSelection } from '../lib/survey-page-references'
@@ -24,6 +24,9 @@ import { BrowserToolsPanel } from './BrowserToolsPanel'
 import { SurveyZoneItem, type SurveyItemNameDraft } from './SurveyZoneItem'
 import { SurveyTabColumn } from './SurveyTabColumn'
 import { SurveyPageItem } from './SurveyPageItem'
+import { SortableSurveyPage } from './SortableSurveyPage'
+import { SortableContext, verticalListSortingStrategy } from '@dnd-kit/sortable'
+import { surveyPageOrderKey } from '../lib/survey-page-order'
 import { SurveyPageTabHeader } from './SurveyPageTabHeader'
 import { surveyPinnedReferences, surveyPinKey } from '../lib/survey-pins'
 import type { AgentMuxSurveyPinReference } from '@agentmux/core/control'
@@ -714,13 +717,14 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
       onClosePage: browser ? () => closePage(page) : undefined,
       onRemovePageReference: () => void removePageReference(page) }
   }
-  const pageItems = (references: typeof profileReferences.pages) => references.length ? <div aria-label="Saved Survey pages">{references.map(page => {
+  const pageItems = (references: typeof profileReferences.pages, reorderable = false) => references.length ? <SortableContext items={reorderable ? references.map(surveyPageOrderKey) : []} strategy={verticalListSortingStrategy}><div aria-label="Saved Survey pages">{references.map(page => {
           const owner = surveyPageOwner(tabs, page, catalog), browser = owner?.surface.kind === 'browser' ? owner.surface : null
-          return <SurveyPageItem {...pinOptions({ kind: 'page', ...page })} selection={selectionFor({ kind: 'page', ...page })} key={JSON.stringify(page)} page={page} browser={browser} enabled={visible && !controlsCoverPage}
+          const item = (dragHandle?: ReactNode) => <SurveyPageItem dragHandle={dragHandle} {...pinOptions({ kind: 'page', ...page })} selection={selectionFor({ kind: 'page', ...page })} key={JSON.stringify(page)} page={page} browser={browser} enabled={visible && !controlsCoverPage}
             selected={pageSelection?.regionId === page.regionId && pageSelection.browserId === page.browserId} onSelect={() => setSelection({ kind: 'page', ...page })} onClose={browser ? () => closePage({ kind: 'page', ...page }) : undefined}
             onContextMenu={button => { contextOrigin.current = button; setContextItem({ kind: 'page', ...page }) }}
             actions={<SurveyItemOptions {...pageOptionsFor({ kind: 'page', ...page })} rowAction compact />} />
-        })}</div> : null
+          return reorderable ? <SortableSurveyPage key={JSON.stringify(page)} page={page} order={references} title={browser?.title || 'Retained page'} enabled={visible && !controlsCoverPage}>{item}</SortableSurveyPage> : item()
+        })}</div></SortableContext> : null
   const selectionControls = selectingContent ? <div className="survey-composition-toolbar" role="group" aria-label="Select content to combine">
     {selectingContent ? <><span role="status">{selectedSources.length} selected</span><Menu.Root modal={false}>
       <Menu.Trigger asChild><button type="button" disabled={!selectedSources.length} aria-label="Actions for selected content">Actions</button></Menu.Trigger>
@@ -764,7 +768,14 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
           {unresolvedCompositions.map(operation => <button key={operation.requestId} type="button" onClick={() => setReviewingComposition(operation.requestId)}>Review combination · {operation.sources.length} {operation.sources.every(source => source.kind === 'page') ? 'pages' : 'items'}</button>)}
           {pendingCompositions.length > unresolvedCompositions.length ? <details><summary>A saved combination record could not be read</summary><p>The original record is kept. Other content and combinations remain available.</p><pre>{JSON.stringify(pendingCompositions.filter(entry => !isSurveyCompositionRecovery(entry)), null, 2)}</pre></details> : null}
         </div> : null}
-        <SurveyItemList leading={selectionControls} pinnedZoneIds={pinnedZoneIds} pinnedPages={pageItems(pinnedPages)} trailing={pageItems(ordinaryPages)} composition={{ start: startComposition, canDrop: canCompose, drop: dropComposition }} model={list} titles={itemTitles} selectedZoneId={selection?.zoneId ?? currentPageZoneId ?? undefined} visible={visible && !controlsCoverPage} renderItem={(zoneId, dragHandle, compositionEnabled) => {
+        <SurveyItemList leading={selectionControls} pinnedZoneIds={pinnedZoneIds} pinnedPages={pageItems(pinnedPages)} trailing={pageItems(ordinaryPages, true)} pageOrder={{ references: pageReferences, commit(next, expected) {
+          const requestId = mintObjectId()
+          void useAppStore.getState().executeControl({ schemaVersion: 5, requestId, operation: 'space.survey-list',
+            collection: { pageReferences: [...next], expectedPageReferences: [...expected] } }).then(result => {
+              if (result.operation !== 'space.survey-list') { setError('The original page order returned another result. Its references are kept.'); return }
+              if (result.issues.length) setError(`[${requestId}] ${result.issues.map(issue => issue.message + ' ' + issue.recovery).join(' ')}`)
+            }).catch(cause => setError(`[${requestId}] ${presentError(cause)}`))
+        } }} composition={{ start: startComposition, canDrop: canCompose, drop: dropComposition }} model={list} titles={itemTitles} selectedZoneId={selection?.zoneId ?? currentPageZoneId ?? undefined} visible={visible && !controlsCoverPage} renderItem={(zoneId, dragHandle, compositionEnabled) => {
           const zone = displayedItems.get(zoneId)
           if (!zone) return <div className="survey-item-row" data-survey-zone-id={zoneId} data-selected={selection?.zoneId === zoneId}>
             {dragHandle}<button type="button" className="survey-item" aria-label="Show retained survey item" onClick={() => chooseZone(zoneId)}><ThemeStatusUnknownIcon size={14} /><strong>Retained exploration</strong></button>

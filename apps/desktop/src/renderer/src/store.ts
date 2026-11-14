@@ -6166,7 +6166,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   async setSurveyPageCollected(reference, collected, onApplied) {
     const state = get(), pages = state.surveyPageReferences
     const next = collected
-      ? [...pages.filter(page => page.regionId !== reference.regionId), { ...reference }]
+      ? (pages.some(page => page.regionId === reference.regionId && page.browserId === reference.browserId) ? pages : [...pages.filter(page => page.regionId !== reference.regionId), { ...reference }])
       : pages.filter(page => page.regionId !== reference.regionId || page.browserId !== reference.browserId)
     return executeSurveyList({ get, set: next => { set(next); onApplied?.(next.surveyPageReferences) },
       hasZone: zoneId => confirmedSurveyZones(get())(zoneId),

@@ -12,9 +12,10 @@ const BrowserIcon = semanticIconComponent('object.browser')
 const CloseIcon = semanticIconComponent('action.close')
 const PinIcon = semanticIconComponent('action.pin')
 /** One saved reference, distinct from every sibling in its original project or Tab. */
-export function SurveyPageItem({ page, browser, selected, enabled, actions, onSelect, onClose, selection, pinned, onContextMenu }: {
+export function SurveyPageItem({ page, browser, selected, enabled, actions, onSelect, onClose, selection, pinned, onContextMenu, dragHandle }: {
   pinned?: boolean; onPinChange?(pinned: boolean): void; onClose?: (() => void) | undefined
   selection?: SurveyCompositionSelectionControl | undefined
+  dragHandle?: ReactNode
   onContextMenu?(button: HTMLElement): void
   page: AgentMuxSurveyPageReference; browser: BrowserWorkbenchSurface | null; selected: boolean; enabled: boolean; actions: ReactNode; onSelect(): void
 }) {
@@ -24,7 +25,7 @@ export function SurveyPageItem({ page, browser, selected, enabled, actions, onSe
     data: { kind: 'page-target', reference } satisfies SurveyPageDrop })
   const row = <div ref={drop.setNodeRef} className="survey-item-row" data-survey-page-region-id={page.regionId} data-survey-page-browser-id={page.browserId}
     data-selected={selected} data-selectable={Boolean(selection) || undefined} data-compose-over={drop.isOver || undefined} data-content-dragging={drag.isDragging || undefined}>
-    {selection ? <SurveyCompositionCheckbox selection={selection} label={`Select page: ${title}`} /> : null}
+    {selection ? <SurveyCompositionCheckbox selection={selection} label={`Select page: ${title}`} /> : dragHandle}
     <button ref={drag.setNodeRef} type="button" className="survey-item" {...drag.attributes} {...drag.listeners}
       data-survey-content-key={surveyContentKey(reference)} aria-label={`Show survey page: ${title}`} onClick={onSelect} onKeyDown={event => {
         if (onContextMenu && (event.key === 'ContextMenu' || event.key === 'F10' && event.shiftKey)) {
