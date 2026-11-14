@@ -40,6 +40,33 @@ authenticated person can grant, one direction at a time. amux settings --help de
 reads, exact input fields and authority; amux message --skill explains when a remote reply
 needs message-source trust and how the original sender synchronizes it.
 
+## Focus personal project routes
+
+`settings inspect focus.projects` reads this client's personal project presentation
+preferences; its string value is a complete JSON array, default `[]`.
+`settings set focus.projects '<complete JSON array>'` saves through the original
+ConfigOwner, not an Agent or spatial mutation. Read the current array before editing
+and retain unrelated entries, including references currently unavailable.
+
+Each entry has exactly `{key,pinned,note,color,collapsed}`: `key` is the canonical JSON
+string `[hostId,projectId]` from the original project reference; names, cwd, Session and
+Region are not substitute identities. `pinned` is boolean, `note` is a personal string,
+`color` is `default`, `blue`, `green`, `amber`, `rose` or `violet`, and `collapsed` is
+`true`, `false` or `null`. Array order defines the pinned projects' order; unpinned
+entries still retain their note and color. `collapsed:null` uses first-presentation
+automatic compaction of known cold work; it does not classify unknown observations
+as cold. Explicit search or exact reveal keeps the original target accessible.
+
+For example, one entry is
+`{"key":"[\"HOST\",\"PROJECT\"]","pinned":true,"note":"Main work","color":"blue","collapsed":null}`;
+replace both identity placeholders with the exact original pair and preserve the
+other array entries. Project branches/worktrees share that project's preferences;
+different Hosts remain separate. A setting save is not a project rename, navigation,
+Agent state change or permission grant. After a failed or unknown save keep the
+original input and draft, inspect current values, and explicitly resolve any conflict.
+Current values do not prove a lost save acknowledgement; never automatically replay
+the write or replace a Session/Run to recover a presentation preference.
+
 ## Register and edit a Host
 
 Host commands that require an input or original operation accept a standalone
