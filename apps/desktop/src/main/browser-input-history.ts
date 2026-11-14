@@ -5,13 +5,23 @@ import { join } from 'node:path'
 import { durableWriteFile } from '@agentmux/core'
 import { z } from 'zod'
 import type {
-  BrowserInputHistoryEntry, BrowserInputHistoryRecord,
+  BrowserInputHistoryAppearance, BrowserInputHistoryEntry, BrowserInputHistoryRecord,
   BrowserInputHistoryScope, BrowserInputHistorySnapshot
 } from '../shared/browser-input-history.js'
+import { resolveBrowserInput } from '../shared/browser-address.js'
+import { BROWSER_PAGE_MEMORY_MAX_FAVICON_LENGTH, BROWSER_PAGE_MEMORY_MAX_TITLE_LENGTH,
+  BROWSER_PAGE_MEMORY_MAX_URL_LENGTH } from '../shared/browser-page-memory.js'
 
 export const MAX_BROWSER_INPUT_HISTORY_ENTRIES = 50
 export const MAX_BROWSER_INPUT_HISTORY_TEXT_BYTES = 4096
 export const MAX_BROWSER_INPUT_HISTORY_FILE_BYTES = 256 * 1024
+
+const appearanceSchema = z.object({
+  url: z.string().url().max(BROWSER_PAGE_MEMORY_MAX_URL_LENGTH).refine(url => !hasUrlUserinfo(url)),
+  title: z.string().max(BROWSER_PAGE_MEMORY_MAX_TITLE_LENGTH),
+  faviconDataUrl: z.string().regex(/^data:image\/[a-z0-9.+-]+;base64,[a-z0-9+/]+=*$/iu)
+    .max(BROWSER_PAGE_MEMORY_MAX_FAVICON_LENGTH).optional()
+}).strict()
 
 const scopeSchema = z.object({
   workspaceId: z.string().min(1).max(1024),
@@ -24,7 +34,8 @@ const documentSchema = z.object({
   scope: scopeSchema,
   entries: z.array(z.object({
     text: textSchema,
-    submittedAt: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER)
+    submittedAt: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
+    appearance: appearanceSchema.optional()
   }).strict()).max(MAX_BROWSER_INPUT_HISTORY_ENTRIES)
 }).strict().refine(document => new Set(document.entries.map(entry => entry.text)).size === document.entries.length)
 
@@ -41,6 +52,11 @@ function hasUrlUserinfo(text: string): boolean {
 
 function sameScope(first: BrowserInputHistoryScope, second: BrowserInputHistoryScope): boolean {
   return first.workspaceId === second.workspaceId && first.profileId === second.profileId
+}
+
+function address(text: string): string | undefined {
+  try { const resolved = resolveBrowserInput(text); return resolved.kind === 'address' ? resolved.url : undefined }
+  catch { return undefined } // Unknown optional decoration cannot change the original input's submission.
 }
 
 /** One bounded file per actual scope; no directory scan, cached empty success, or navigation hook. */
@@ -65,12 +81,35 @@ export class BrowserInputHistoryStore {
       if (!text) return { scope: actualScope, entries, outcome: 'empty' }
       textSchema.parse(text)
       if (hasUrlUserinfo(text)) return { scope: actualScope, entries, outcome: 'url-userinfo' }
-      const next = [{ text, submittedAt: Date.now() }, ...entries.filter(entry => entry.text !== text)]
+      const previous = entries.find(entry => entry.text === text)
+      const next: BrowserInputHistoryEntry[] = [{ text, submittedAt: Date.now(), ...(previous?.appearance ? { appearance: previous.appearance } : {}) }, ...entries.filter(entry => entry.text !== text)]
         .slice(0, MAX_BROWSER_INPUT_HISTORY_ENTRIES)
+      let size = this.fitAppearance(actualScope, next)
       // JSON escaping can enlarge a valid UTF-8 input. Bound the actual serialized file as well.
-      while (Buffer.byteLength(this.document(actualScope, next), 'utf8') > MAX_BROWSER_INPUT_HISTORY_FILE_BYTES) next.pop()
+      while (size > MAX_BROWSER_INPUT_HISTORY_FILE_BYTES && next.length) {
+        size -= Buffer.byteLength(JSON.stringify(next.pop())) + (next.length ? 1 : 0)
+      }
       await this.write(actualScope, next)
       return { scope: actualScope, entries: next, outcome: 'recorded' }
+    })
+  }
+
+  /** Patch only existing human inputs; this never admits a visit or changes input identity/order. */
+  decorate(scope: BrowserInputHistoryScope, requestedUrl: string, appearance: BrowserInputHistoryAppearance): Promise<BrowserInputHistorySnapshot> {
+    return this.enqueue(async () => {
+      const actualScope = scopeSchema.parse(scope), entries = await this.read(actualScope)
+      // A bad/large optional icon cannot discard a valid title or human input.
+      const { faviconDataUrl: _icon, ...withoutIcon } = appearance
+      const complete = appearanceSchema.safeParse(appearance)
+      const parsed = complete.success ? complete : appearanceSchema.safeParse(withoutIcon)
+      if (!parsed.success || !address(requestedUrl) || hasUrlUserinfo(requestedUrl)) return { scope: actualScope, entries }
+      const matching = new Set([address(requestedUrl), address(parsed.data.url)])
+      const next = entries.map(entry => matching.has(address(entry.text))
+        ? { ...entry, appearance: parsed.data } : entry)
+      this.fitAppearance(actualScope, next)
+      if (JSON.stringify(next) === JSON.stringify(entries)) return { scope: actualScope, entries }
+      await this.write(actualScope, next)
+      return { scope: actualScope, entries: next }
     })
   }
 
@@ -134,6 +173,28 @@ export class BrowserInputHistoryStore {
 
   private document(scope: BrowserInputHistoryScope, entries: BrowserInputHistoryEntry[]): string {
     return `${JSON.stringify(documentSchema.parse({ version: 1, scope, entries }))}\n`
+  }
+
+  /** Optional artwork gives way before a single original input does, oldest artwork first. */
+  private fitAppearance(scope: BrowserInputHistoryScope, entries: BrowserInputHistoryEntry[]): number {
+    // Count the actual encoding once, then subtract only changed entry deltas. The final write validates once.
+    let size = Buffer.byteLength(JSON.stringify({ version: 1, scope, entries })) + 1
+    const replace = (index: number, next: BrowserInputHistoryEntry) => {
+      size -= Buffer.byteLength(JSON.stringify(entries[index])) - Buffer.byteLength(JSON.stringify(next))
+      entries[index] = next
+    }
+    for (let index = entries.length - 1; index >= 0 && size > MAX_BROWSER_INPUT_HISTORY_FILE_BYTES; index--) {
+      const entry = entries[index]!
+      if (entry.appearance?.faviconDataUrl) {
+        const { faviconDataUrl: _icon, ...appearance } = entry.appearance
+        replace(index, { ...entry, appearance })
+      }
+    }
+    for (let index = entries.length - 1; index >= 0 && size > MAX_BROWSER_INPUT_HISTORY_FILE_BYTES; index--) {
+      const { appearance: _appearance, ...entry } = entries[index]!
+      replace(index, entry)
+    }
+    return size
   }
 
   private async write(scope: BrowserInputHistoryScope, entries: BrowserInputHistoryEntry[]): Promise<void> {

@@ -4,7 +4,9 @@ export type BrowserInputHistoryTarget =
   | { kind: 'workspace'; workspaceId: string }
 
 export type BrowserInputHistoryScope = { workspaceId: string; profileId: string | null }
-export type BrowserInputHistoryEntry = { text: string; submittedAt: number }
+/** Real last-seen document artwork; the original submitted text remains the input identity. */
+export type BrowserInputHistoryAppearance = { url: string; title: string; faviconDataUrl?: string | undefined }
+export type BrowserInputHistoryEntry = { text: string; submittedAt: number; appearance?: BrowserInputHistoryAppearance | undefined }
 export type BrowserInputHistorySnapshot = {
   scope: BrowserInputHistoryScope
   entries: BrowserInputHistoryEntry[]

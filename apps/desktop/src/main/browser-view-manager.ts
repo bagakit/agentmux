@@ -17,7 +17,7 @@ import { BROWSER_FAVICON_TIMEOUT_MS, readBrowserFavicon } from './browser-favico
 import { isCapsuleRemoteSource, type BrowserColdDescriptor } from './browser-cold-descriptor.js'
 import { parseBrowserControlHandoff, type BrowserAgent, type BrowserAgentAuthority } from './browser-agent-authority.js'
 import type { BrowserRecoveryPreviewStore } from './browser-recovery-preview.js'
-import { browserPageMemory } from '../shared/browser-page-memory.js'
+import { browserPageMemory, BROWSER_PAGE_MEMORY_MAX_TITLE_LENGTH } from '../shared/browser-page-memory.js'
 import { installNativeBrowserWindows } from './browser-native-windows.js'
 import { BROWSER_RECOVERY_PREVIEW_JPEG_PREFIX, BROWSER_RECOVERY_PREVIEW_MAX_WIDTH, BROWSER_RECOVERY_PREVIEW_MAX_HEIGHT,
   BROWSER_RECOVERY_PREVIEW_MAX_IMAGE_BYTES, type BrowserRecoveryPreviewScope } from '../shared/browser-recovery-preview.js'
@@ -65,7 +65,7 @@ import { normalizeBrowserBounds } from '../shared/browser-bounds.js'
 import { browserViewportSize, cloneBrowserViewport, isBrowserViewport } from '../shared/browser-viewport.js'
 import { resolveBrowserAddress } from '../shared/browser-address.js'
 import { browserObjectLink } from '../shared/browser-object-link.js'
-import type { BrowserInputHistoryScope } from '../shared/browser-input-history.js'
+import type { BrowserInputHistoryAppearance, BrowserInputHistoryScope } from '../shared/browser-input-history.js'
 import { showBrowserOperationFeedback, type BrowserOperationFeedback } from './browser-operation-feedback.js'
 import { BrowserControlFeedback } from './browser-control-feedback.js'
 import { validateBrowserOperatorAvatarPng } from './browser-operator-avatar.js'
@@ -182,6 +182,12 @@ type BrowserEntry = {
   pageMemoryTimer?: ReturnType<typeof setTimeout> | undefined
   /** The last record this owner confirmed, so repeated identical observations do not rewrite it. */
   pageMemoryRecorded?: string | undefined
+  /** One native request/commit pair, never a URL alias catalogue. */
+  pageAppearanceNavigation?: { navigationId: string; requestedUrl: string; committedUrl?: string; title?: string } | undefined
+  /** Already-confirmed immutable facts survive departure/Close until their coalesced publication. */
+  pageAppearancePending?: { scope: BrowserInputHistoryScope; requestedUrl: string; appearance: BrowserInputHistoryAppearance } | undefined
+  pageAppearancePublished?: string | undefined
+  pageAppearancePublication?: symbol | undefined
   selectionRevision: number
   selectionOperation: number | symbol | null
   annotationRevision: number
@@ -482,6 +488,8 @@ type ProfileNativeObservation = {
 type ProfileNativeMarker = { view: WebContentsView; observation: ProfileNativeObservation; observing: boolean; gap?: BrowserProfileActivityGap }
 
 export class BrowserViewManager {
+  /** Optional decoration of existing human input history; never a navigation prerequisite. */
+  onPageAppearance: ((scope: BrowserInputHistoryScope, requestedUrl: string, appearance: BrowserInputHistoryAppearance) => void | Promise<unknown>) | undefined
   /** Window Chrome listens to the current native owner without a second Browser/input registry. */
   onNativeVisibilityChange: ((visibility: import('../shared/native-overlay.js').NativeBrowserVisibility, window?: BrowserWindow) => void) | undefined
   sitePermissions: BrowserSitePermissions | undefined
@@ -999,6 +1007,14 @@ export class BrowserViewManager {
     if (entry.storage.profileId !== profileId) throw new Error('The Browser Profile changed before input history was requested.')
     if (entry.workspaceId === null) throw new Error('This Browser has no verified Workspace for input history.')
     return { workspaceId: entry.workspaceId, profileId: entry.storage.profileId }
+  }
+
+  /** A just-recorded human input may arrive after the native observation. No page is acquired. */
+  refreshInputHistoryAppearance(id: string, profileId: string | null): void {
+    const entry = this.entries.get(id)
+    if (!entry || entry.storage.profileId !== profileId) return
+    this.capturePageAppearance(entry, entry.view)
+    this.publishPageAppearance(entry, true)
   }
 
   /** Page SDK admission is an observation of this exact native document, never a URL capability. */
@@ -1809,6 +1825,7 @@ export class BrowserViewManager {
     }, 1_000)
     // The destroyed contents can no longer report its entries or Chromium page state.
     const history = nativeHistory(contents)
+    this.flushPageAppearance(entry)
     this.recordPageMemory(entry, contents.getURL(), history)
     const attempt: NonNullable<BrowserEntry['releaseAttempt']> = {
       navigationId, view, history, pending: true, receipt: null, promise,
@@ -2084,6 +2101,7 @@ export class BrowserViewManager {
       }, 1_000)
     })
     if (!existing) {
+      this.flushPageAppearance(entry)
       try { page.close({ waitForBeforeUnload: true }) }
       catch (error) {
         for (const observer of closing.observers) { if (observer.timer) clearTimeout(observer.timer); observer.reject(error instanceof Error ? error : new Error(String(error))) }
@@ -2510,6 +2528,7 @@ export class BrowserViewManager {
       void entry.feedback?.hide()
       void entry.controlFeedback?.hide()
       this.revokePresentationCapture(entry, 'source-replaced')
+      this.flushPageAppearance(entry)
       this.clearFavicon(entry)
       const previousStorage = entry.storage
       const previousPreviewScope = this.recoveryPreviewScope(id)
@@ -2534,6 +2553,7 @@ export class BrowserViewManager {
       entry.requestedUrl = candidate.webContents.getURL() || url
       entry.navigationId = pending.navigationId
       entry.committedNavigationId = null
+      entry.pageAppearanceNavigation = undefined
       entry.selectionOperation = null
       entry.selectionRevision += 1
       entry.annotationRevision += 1
@@ -4571,13 +4591,64 @@ export class BrowserViewManager {
 
   /** Coalesce commits, titles and artwork of the current document into one last-seen page record. */
   private schedulePageMemory(entry: BrowserEntry, view: WebContentsView): void {
-    if (!this.recoveryPreviews || this.presentationDisposed || !this.owns(entry, view)) return
+    if ((!this.recoveryPreviews && !this.onPageAppearance) || this.presentationDisposed || !this.owns(entry, view)) return
+    this.capturePageAppearance(entry, view)
     clearTimeout(entry.pageMemoryTimer)
     entry.pageMemoryTimer = setTimeout(() => {
       entry.pageMemoryTimer = undefined
+      this.publishPageAppearance(entry)
       if (this.owns(entry, view) && !view.webContents.isDestroyed()) this.recordPageMemory(entry, view.webContents.getURL(), nativeHistory(view.webContents))
     }, BROWSER_PAGE_MEMORY_SETTLE_MS)
     entry.pageMemoryTimer.unref?.()
+  }
+
+  private capturePageAppearance(entry: BrowserEntry, view: WebContentsView): void {
+    const request = entry.pageAppearanceNavigation, contents = view.webContents
+    if (!this.onPageAppearance || this.presentationDisposed || !this.owns(entry, view) || contents.isDestroyed() ||
+      entry.storage.mode !== 'normal' || !entry.storage.profileId || !entry.workspaceId || entry.error ||
+      !request || request.navigationId !== entry.navigationId || entry.committedNavigationId !== entry.navigationId ||
+      !request.committedUrl || request.committedUrl !== contents.getURL() || request.committedUrl === 'about:blank') return
+    entry.pageAppearancePending = {
+      scope: { workspaceId: entry.workspaceId, profileId: entry.storage.profileId }, requestedUrl: request.requestedUrl,
+      appearance: { url: request.committedUrl, title: request.title ?? '',
+        ...(entry.faviconDataUrl ? { faviconDataUrl: entry.faviconDataUrl } : {}) }
+    }
+  }
+
+  private publishPageAppearance(entry: BrowserEntry, force = false): void {
+    const observed = entry.pageAppearancePending
+    entry.pageAppearancePending = undefined
+    if (!observed || !this.onPageAppearance) return
+    const key = JSON.stringify(observed)
+    if (!force && entry.pageAppearancePublished === key) return
+    entry.pageAppearancePublished = key
+    const publication = Symbol('page-appearance-publication')
+    entry.pageAppearancePublication = publication
+    const warning = 'Recent-page details could not be saved. Your input and browsing remain available. Reopen the original address to refresh its details.'
+    const failed = (error: unknown) => {
+      if (entry.pageAppearancePublication === publication) entry.pageAppearancePublished = undefined
+      console.warn(warning, error)
+      if (entry.pageAppearancePublication === publication && this.entries.get(entry.id) === entry && !entry.view.webContents.isDestroyed()) {
+        entry.activity = { ...entry.activity, warning: appendWarning(entry.activity.warning, warning) }
+        this.emit(entry)
+      }
+    }
+    const saved = () => {
+      if (entry.pageAppearancePublication !== publication || this.entries.get(entry.id) !== entry || entry.view.webContents.isDestroyed()) return
+      const next = removeWarning(entry.activity.warning, warning)
+      if (next === entry.activity.warning) return
+      const { warning: _warning, ...activity } = entry.activity
+      entry.activity = next ? { ...activity, warning: next } : activity
+      this.emit(entry)
+    }
+    // No liveness check after capture: Close cannot invalidate already-confirmed historical facts.
+    try { void Promise.resolve(this.onPageAppearance(observed.scope, observed.requestedUrl, observed.appearance)).then(saved, failed) }
+    catch (error) { failed(error) }
+  }
+
+  private flushPageAppearance(entry: BrowserEntry): void {
+    this.capturePageAppearance(entry, entry.view)
+    this.publishPageAppearance(entry)
   }
 
   private recordPageMemory(entry: BrowserEntry, url: string, history: BrowserHistory | undefined): void {
@@ -4731,7 +4802,12 @@ export class BrowserViewManager {
   private destroyOwner(id: string): boolean {
     const entry = this.entries.get(id)
     entry?.certificateDecision?.settle(false)
-    if (entry) this.cancelRecoveryPreview(entry)
+    if (entry) {
+      this.flushPageAppearance(entry)
+      clearTimeout(entry.pageMemoryTimer)
+      entry.pageMemoryTimer = undefined
+      this.cancelRecoveryPreview(entry)
+    }
     if (!entry) {
       const released = this.releasedEntries.get(id)
       if (!released) return false
@@ -4786,6 +4862,7 @@ export class BrowserViewManager {
     if (this.profileActivityTimer) clearInterval(this.profileActivityTimer)
     this.profileActivityTimer = undefined
     const previousClosures = this.closingOwners(), cleanupErrors: unknown[] = [], privateClosures = new Set<string>()
+    for (const entry of this.entries.values()) this.flushPageAppearance(entry)
     this.presentationDisposed = true
     this.invalidatePresentationRequester()
     this.disposePresentationRequester?.()
@@ -4839,7 +4916,7 @@ export class BrowserViewManager {
     let pageRequestedClose = false
     // Electron emits CloseContents as `close`; its WebContents typings omit it.
     const nativeEvents: NodeJS.EventEmitter = contents
-    nativeEvents.on('close', () => { if (this.owns(entry, view)) pageRequestedClose = true })
+    nativeEvents.on('close', () => { if (this.owns(entry, view)) { this.flushPageAppearance(entry); pageRequestedClose = true } })
     contents.on('certificate-error', (event, url, error, certificate, callback, isMainFrame) => {
       if (!isMainFrame || !this.owns(entry, view)) return
       event.preventDefault()
@@ -5031,9 +5108,13 @@ export class BrowserViewManager {
         [{ code: buildBrowserAnnotationMarkerScript([], annotationRevision) }]
       ).catch(() => {})
       this.clearFavicon(entry, details.isSameDocument)
+      this.publishPageAppearance(entry)
       entry.requestedUrl = requestedUrl
       const previousNavigationId = entry.navigationId
+      const previousAppearance = entry.pageAppearanceNavigation
       entry.navigationId = mintObjectId()
+      entry.pageAppearanceNavigation = { navigationId: entry.navigationId, requestedUrl,
+        ...(details.isSameDocument && previousAppearance?.title !== undefined ? { title: previousAppearance.title } : {}) }
       if (details.isSameDocument) this.sitePermissions?.rebind(entry.id, contents, origin => this.permissionContext(contents, origin))
       entry.appLinkRequest = null
       entry.appLinkPrompt = null
@@ -5067,6 +5148,9 @@ export class BrowserViewManager {
       // Electron's public loading state has settled, retaining the current page policy.
       this.synchronizeVisiblePage(entry, view)
       this.sampleRecoveryPreview(entry, view)
+      const request = entry.pageAppearanceNavigation
+      if (this.onPageAppearance && request && request.navigationId === entry.committedNavigationId && request.committedUrl === contents.getURL() && !entry.error) request.title = contents.getTitle().slice(0, BROWSER_PAGE_MEMORY_MAX_TITLE_LENGTH)
+      this.schedulePageMemory(entry, view)
       this.emit(entry)
       if ('capsule' in entry.storage && entry.storage.capsule.record.mode === 'injected' && this.isCapsuleDocument(entry, contents.mainFrame)) {
         try { this.capsuleDocumentReady?.(entry.id) }
@@ -5080,6 +5164,7 @@ export class BrowserViewManager {
       const document = entry.initialDocument
       if (document?.view === view && document.navigationId === entry.navigationId) document.committedNavigationId = entry.navigationId
       entry.committedNavigationId = entry.navigationId
+      if (entry.pageAppearanceNavigation?.navigationId === entry.navigationId) entry.pageAppearanceNavigation.committedUrl = url
       entry.resourceDocumentConfirmed = true
       this.releaseUploadFiles(entry)
       entry.requestedUrl = url
@@ -5094,6 +5179,7 @@ export class BrowserViewManager {
       this.indexZoomScope(entry)
       entry.nativeChild?.closing?.settle(false)
       entry.committedNavigationId = entry.navigationId
+      if (entry.pageAppearanceNavigation?.navigationId === entry.navigationId) entry.pageAppearanceNavigation.committedUrl = url
       const reported = this.faviconUrls.get(view)
       if (reported) this.faviconUrls.set(view, { ...reported, documentUrl: url })
       entry.requestedUrl = url
@@ -5105,8 +5191,11 @@ export class BrowserViewManager {
       this.faviconUrls.set(view, { documentUrl: contents.getURL(), navigationId: this.owns(entry, view) ? entry.navigationId : undefined, urls })
       if (this.owns(entry, view)) this.updateFavicon(entry, view)
     })
-    contents.on('page-title-updated', () => {
+    contents.on('page-title-updated', (_event, title) => {
       if (!this.owns(entry, view)) return
+      const request = entry.pageAppearanceNavigation
+      // The native event supplies this document's title; getTitle() alone can still belong to its predecessor.
+      if (this.onPageAppearance && request && request.navigationId === entry.committedNavigationId && request.committedUrl === contents.getURL()) request.title = title.slice(0, BROWSER_PAGE_MEMORY_MAX_TITLE_LENGTH)
       this.schedulePageMemory(entry, view)
       this.emit(entry)
     })
@@ -5132,6 +5221,7 @@ export class BrowserViewManager {
       this.emit(entry)
     })
     contents.once('destroyed', () => {
+      if (this.owns(entry, view)) this.publishPageAppearance(entry)
       this.forgetZoomScope(view)
       this.endProfileActivity(view)
       this.sitePermissions?.cancel(entry.id, contents)

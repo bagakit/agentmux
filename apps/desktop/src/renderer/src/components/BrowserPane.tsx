@@ -1471,7 +1471,7 @@ function BrowserPaneContent({
               <ThemeActionSearchIcon size={19} aria-hidden="true" />
               <BrowserAddressInput ref={startInput} aria-label="Search or enter a web address" placeholder="Search or enter a web address" value={address}
                 onHistoryChange={() => setHistoryRevision(value => value + 1)}
-                historyTarget={{ kind: 'browser', browserId: tab.browserId, profileId: tab.profileId }} description={tab}
+                historyTarget={{ kind: 'browser', browserId: tab.browserId, profileId: tab.profileId }}
                 onValueChange={value => { addressDraftEdited.current = true; addressDraft.current.value = value; addressDraft.current.edited = true; setAddress(value); setAddressError(null) }} onSubmit={navigateAddress} onHistoryNotice={setInputHistoryNotice} onDeferredHistoryFailure={message => useAppStore.getState().reportError(message, { kind: 'process-degraded' })} />
               <button type="submit" aria-label="Search or open page" disabled={busy || !address.trim()}><ThemeActionSubmitIcon size={16} /></button>
             </form>
@@ -1523,7 +1523,7 @@ function BrowserPaneContent({
           <BrowserAddressInput
             onHistoryChange={() => setHistoryRevision(value => value + 1)}
             ref={addressInput} aria-label="Browser address" value={address} placeholder="Search or enter an address"
-            historyTarget={{ kind: 'browser', browserId: tab.browserId, profileId: tab.profileId }} description={tab}
+            historyTarget={{ kind: 'browser', browserId: tab.browserId, profileId: tab.profileId }}
             onValueChange={value => { addressDraftEdited.current = true; addressDraft.current.value = value; addressDraft.current.edited = true; setAddress(value); setAddressError(null) }}
             onSubmit={navigateAddress} onHistoryNotice={setInputHistoryNotice} onDeferredHistoryFailure={message => useAppStore.getState().reportError(message, { kind: 'process-degraded' })}
           />

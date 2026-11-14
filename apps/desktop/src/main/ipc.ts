@@ -605,6 +605,7 @@ export async function registerIpc(args: {
   new BrowserDownloads(join(app.getPath('userData'), 'browser-downloads'), files, id => workspace(config, id)),
   browserUploads, () => resolveBrowserAgentControl(configOwner.current.browser.agentControl), browserRecoveryPreviews,
   {}, browserAgentAuthority(args.runtime), () => configOwner.current.browser.newPagePlacement)
+  browsers.onPageAppearance = (scope, requestedUrl, appearance) => browserInputHistory.decorate(scope, requestedUrl, appearance)
   browsers.sitePermissions = new BrowserSitePermissions(join(app.getPath('userData'), 'browser-site-permissions.json'), id => browsers.refreshSitePermissions(id))
   browserProfiles.cleanupPurgedIdentity = async profileId => {
     let credentialCleanup: 'confirmed' | 'unknown' = 'unknown', permissionCleanup: 'confirmed' | 'unknown' = 'unknown'
@@ -2400,7 +2401,12 @@ export async function registerIpc(args: {
   })
   handleWithEvent('browser:recordInputHistory', async (event, target: BrowserInputHistoryTarget, text: string) => {
     const scope = resolveInputHistoryScope(target)
-    return scope.profileId === null ? { scope, entries: [], outcome: 'private' } : await browserInputHistory.record(scope, text)
+    if (scope.profileId === null) return { scope, entries: [], outcome: 'private' }
+    const result = await browserInputHistory.record(scope, text)
+    // A native commit may precede this write. The same producer can now patch the admitted record;
+    // it observes only the exact existing Browser and never awaits decoration or delays navigation.
+    if (result.outcome === 'recorded' && target.kind === 'browser') browsers.refreshInputHistoryAppearance(target.browserId, scope.profileId)
+    return result
   })
   handleWithEvent('browser:removeInputHistory', async (event, target: BrowserInputHistoryTarget, scope: BrowserInputHistoryScope, text: string) => {
     const actual = requireInputHistoryScope(target, scope)

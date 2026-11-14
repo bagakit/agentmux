@@ -7,7 +7,7 @@ import { api } from '../lib/api'
 import { composerCompositionHandlers, composerRenderValue, type ComposerCompositionState } from '@agentmux/client-ui/composer-composition'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { WindowOverlayPortal } from './WindowOverlayHost'
-import { browserAddressSuggestions, type BrowserAddressDescription } from '../lib/browser-address-suggestions'
+import { browserAddressSuggestions } from '../lib/browser-address-suggestions'
 
 const ThemeActionRemoveIcon = semanticIconComponent('action.remove')
 const SearchIcon = semanticIconComponent('action.search')
@@ -24,13 +24,12 @@ type Props = Omit<ComponentPropsWithoutRef<typeof TextInput>, 'value' | 'onChang
   onDeferredHistoryFailure(notice: string): void
   onHistoryChange?(): void
   historyTarget: BrowserInputHistoryTarget | null
-  description?: BrowserAddressDescription | undefined
   submitDisabled?: boolean
   ref?: Ref<BrowserAddressInputHandle>
 }
 
 /** One human-input consumer; navigation, Profile and durable history remain Main-owned. */
-export function BrowserAddressInput({ value, onValueChange, onSubmit, onHistoryNotice, onDeferredHistoryFailure, onHistoryChange, historyTarget, description, submitDisabled = false, ref, onFocus, onBlur, onKeyDown, onContextMenu, onClick, onSelect, ...props }: Props) {
+export function BrowserAddressInput({ value, onValueChange, onSubmit, onHistoryNotice, onDeferredHistoryFailure, onHistoryChange, historyTarget, submitDisabled = false, ref, onFocus, onBlur, onKeyDown, onContextMenu, onClick, onSelect, ...props }: Props) {
   const input = useRef<HTMLInputElement>(null)
   const panel = useRef<HTMLDivElement>(null)
   const request = useRef(0)
@@ -53,7 +52,7 @@ export function BrowserAddressInput({ value, onValueChange, onSubmit, onHistoryN
   const id = useId()
   useEffect(() => onHistoryNotice(notice), [notice, onHistoryNotice])
   // A current URL is context, not a query. Filter only once the person edits it.
-  const entries = browserAddressSuggestions(history, value, filtering, historyTarget, description)
+  const entries = browserAddressSuggestions(history, value, filtering)
   const live = (key: string, token: number) => targetKey.current === key && request.current === token
   useLayoutEffect(() => {
     const node = input.current
@@ -150,7 +149,7 @@ export function BrowserAddressInput({ value, onValueChange, onSubmit, onHistoryN
         setCompletion(null); setSelected(-1); setFiltering(true); ime.change(next)
         const candidates = native.inputType === 'insertText' && !composing.current && !native.isComposing && next.length > value.length && next.startsWith(value) &&
           event.currentTarget.selectionStart === next.length && event.currentTarget.selectionEnd === next.length
-          ? browserAddressSuggestions(history, next, true, historyTarget, description) : []
+          ? browserAddressSuggestions(history, next, true) : []
         const index = candidates.findIndex(row => row.source === 'history' && row.text.length > next.length && row.text.toLocaleLowerCase().startsWith(next.toLocaleLowerCase()))
         if (index >= 0) { setCompletion({ key: currentTarget, prefix: next, text: candidates[index]!.text }); setSelected(index) }
         if (!open) showSuggestions()
