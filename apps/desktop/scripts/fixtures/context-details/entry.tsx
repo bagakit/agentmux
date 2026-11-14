@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useLayoutEffect, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { fixtureEpoch } from '../../../../../test/fixture-values.mjs'
 import type { AgentTurnUsage } from '@agentmux/core'
@@ -16,20 +16,22 @@ const reported: AgentTurnUsage = { inputTokens: 230, outputTokens: 20, totalToke
 const compacted: AgentTurnUsage = { inputTokens: 80, outputTokens: 20, totalTokens: 100, observedAt: fixtureEpoch(1), context: { usedTokens: 100, capacityTokens: 1000 } }
 const unreported: AgentTurnUsage = { inputTokens: 230, outputTokens: 20, totalTokens: 250, observedAt: fixtureEpoch(1) }
 const pointers: string[] = []
-const controls: Record<string, unknown> = { pointers }
+const layouts: { visible: boolean; chip: string | null }[] = []
+const controls: Record<string, unknown> = { pointers, layouts }
 Object.assign(window, { contextHoverFixture: controls })
 document.addEventListener('pointerover', event => { if ((event.target as Element).closest('.composer__context')) pointers.push(event.pointerType) })
 function Scene() {
   const [theme, setTheme] = useState<'dark' | 'light'>('dark'), [draft, setDraft] = useState('Keep my current draft and input focus.')
-  const [sample, setSample] = useState(reported), [source, setSource] = useState('original-session/run'), [visible, setVisible] = useState(true)
+  const [sample, setSample] = useState(reported), [source, setSource] = useState('original-session/run'), [visible, setVisible] = useState(false)
+  useLayoutEffect(() => { layouts.push({ visible, chip: document.querySelector('#known .composer__context')?.textContent ?? null }) }, [visible, sample])
   Object.assign(controls, { setVisible, compact: () => setSample(compacted), reset: () => setSample(reported), switchSource: () => setSource(value => value === 'original-session/run' ? 'another-session/run' : 'original-session/run') })
   return <ClientUiProvider platform={platform}><main>
     <nav><strong>Context details</strong><span>Provider observations · read without leaving the draft</span><button onClick={() => { const next = theme === 'dark' ? 'light' : 'dark'; setTheme(next); updateThemeSelection({ appAppearance: next }) }}>Toggle theme</button></nav>
     <section id="known"><h2>Current Agent · reported context window</h2><p>Hover to inspect. Click to keep the details open.</p>
-      <AgentComposer value={draft} onChange={setDraft} onSubmit={() => {}} contextUsage={<AgentContextUsage visible={visible} source={source} usage={sample} />} /><output>{draft}</output>
+      <AgentComposer value={draft} onChange={setDraft} onSubmit={() => {}} disabled={false} placeholder="Message" contextUsage={<AgentContextUsage visible={visible} source={source} usage={sample} />} /><output>{draft}</output>
     </section>
     <section id="unreported"><h2>Another Agent · capacity not reported</h2><p>Turn tokens are available; the context window remains unknown.</p>
-      <AgentComposer value="Keep the original Session usable." onChange={() => {}} onSubmit={() => {}} contextUsage={<AgentContextUsage source="unreported-session/run" usage={unreported} />} />
+      <AgentComposer value="Keep the original Session usable." onChange={() => {}} onSubmit={() => {}} disabled={false} placeholder="Message" contextUsage={<AgentContextUsage source="unreported-session/run" usage={unreported} />} />
     </section>
   </main></ClientUiProvider>
 }

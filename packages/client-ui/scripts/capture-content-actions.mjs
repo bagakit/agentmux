@@ -13,7 +13,8 @@ const require = createRequire(resolve(root, 'apps/desktop/package.json'))
 const { build } = await import(pathToFileURL(require.resolve('vite')).href)
 const slice = process.argv[2]
 assert.ok(['image-remove', 'trace-copy', 'context-details'].includes(slice))
-const evidence = resolve(root, '.tmp/conversation-content-actions', slice)
+const demand = slice === 'context-details' && process.argv[3] === 'demand'
+const evidence = resolve(root, '.tmp/conversation-content-actions', demand ? 'context-details-demand' : slice)
 const privateRoot = await mkdtemp(resolve(tmpdir(), 'agentmux-content-actions-'))
 const compiled = resolve(privateRoot, 'compiled')
 const hash = data => createHash('sha256').update(data).digest('hex')
@@ -49,8 +50,13 @@ try {
   })
   await new Promise(done => server.listen(0, '127.0.0.1', done))
   const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE
+  if (demand) {
+    for (const key of Object.keys(env)) if (/^(AGENTMUX|AMUX|CTXMUX|CODEX)_/.test(key)) delete env[key]
+    env.HOME = resolve(privateRoot, 'home'); await mkdir(env.HOME, { recursive: true })
+    receipt.isolation = { privateHome: true, inheritedAgentCapabilitiesRemoved: true, hiddenWindow: true }
+  }
   receipt.process = await runProbeProcess(require('electron'), [resolve(root, 'packages/client-ui/scripts/content-actions-electron.cjs'),
-    `http://127.0.0.1:${server.address().port}/`, privateRoot, evidence, slice],
+    `http://127.0.0.1:${server.address().port}/`, privateRoot, evidence, slice, ...(demand ? ['demand'] : [])],
   { temporaryRoot: privateRoot, cwd: root, env, timeoutMs: 60_000 })
   assert.equal(receipt.process.exitCode, 0, 'Content actions scene failed')
   const actual = JSON.parse(await readFile(resolve(evidence, 'actual.json'), 'utf8'))

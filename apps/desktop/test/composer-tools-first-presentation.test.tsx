@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import type { Editor } from '@tiptap/core'
 import { expandSemanticReferences } from '@agentmux/client-ui/composer-semantic-reference'
-import {act,useEffect}from'react'
+import {act,useEffect,useLayoutEffect}from'react'
 import{expect,it,vi}from'vitest'
 import{appendFileSync}from'node:fs'
 import{createWorkspaceLayout}from'@agentmux/layout'
@@ -12,6 +12,8 @@ import{composerConfig,composerSession}from'./helpers/composer-dom-fixture'
 import{createClientUiRoot}from'./helpers/client-ui-render'
 import{WorkspaceWorkbench}from'../src/renderer/src/components/WorkspaceWorkbench'
 import{AgentComposerTools}from'../src/renderer/src/components/AgentComposerTools'
+import{AgentContextUsage}from'../src/renderer/src/components/AgentContextUsage'
+import{ObservationSurfaceGallery}from'../src/renderer/src/components/ObservationSurfaceGallery'
 import{api}from'../src/renderer/src/lib/api'
 import type{SessionSnapshot}from'../src/shared/contracts'
 const port=vi.hoisted(()=>({mounts:{}as Record<string,number>,retires:{}as Record<string,number>}))
@@ -32,6 +34,7 @@ it('actual Workspace Pane Composer editor and Mailbox stay live while only never
  vi.stubGlobal('matchMedia',()=>({matches:false,addEventListener(){},removeEventListener(){},addListener(){},removeListener(){}}))
  const host=document.body.appendChild(document.createElement('div')),root=createClientUiRoot(host)
  const sessions=['a','b','c'].map(id=>composerSession(id)),b=sessions[1]!
+ b.turnUsage={inputTokens:20,outputTokens:0,totalTokens:20,observedAt:1,context:{usedTokens:20,capacityTokens:100}}
  b.promptInputNotApplied={submissionId:'original-question-op',run:b.control.run}
  const input={source:{providerId:'codex',nativeSessionId:'original-native'},turnId:'original-turn',recordId:'original-question',operationId:'original-question-op',
   expectedRun:b.control.run,afterSubmissionId:null,answers:[{questionId:'q',answer:'Original frozen answer'}]}
@@ -55,11 +58,15 @@ it('actual Workspace Pane Composer editor and Mailbox stay live while only never
   const initialCosts={allTools:host.querySelectorAll('.composer-tools').length,agentTools:['a','b','c'].filter(id=>region(id).querySelector('.composer-tools')).length,
    launcherTools:region('launcher').querySelectorAll('.composer-tools').length,svg:host.querySelectorAll('svg').length,dom:host.querySelectorAll('*').length,
    agentBodies:host.querySelectorAll('.agent-surface').length,richEditors:host.querySelectorAll('[contenteditable="true"]').length,
-   mailbox:host.querySelectorAll('.composer-mailbox').length}
+   mailbox:host.querySelectorAll('.composer-mailbox').length,contextChips:host.querySelectorAll('.composer__context').length,contextCards:host.querySelectorAll('.composer__context-card').length}
+  expect(initialCosts.contextChips,'Actual hidden Composers must not prebuild context chips').toBe(1)
+  expect(initialCosts.contextCards,'Actual hidden Composers must not prebuild context cards').toBe(1)
   expect(useAppStore.getState().questionReplies.b?.[key]?.phase,'Original hidden background reply reconciliation must still execute').toBe('rejected')
   expect(Object.keys(port.mounts)).toEqual(['a','b','c'])
   const bPane=region('b').querySelector('.agent-surface')
   await activate('b')
+  const contextChip=region('b').querySelector('.composer__context'),contextCard=region('b').querySelector('.composer__context-card')
+  expect(contextChip?.textContent).toContain('20%')
   const bInput=region('b').querySelector<HTMLElement & {editor:Editor}>('[contenteditable="true"]')
   expect(bInput).not.toBeNull()
   const tools=region('b').querySelector<HTMLElement>('.composer-tools')!
@@ -79,6 +86,8 @@ it('actual Workspace Pane Composer editor and Mailbox stay live while only never
   })
   expect(document.querySelector('.composer-menu__results')?.textContent).toContain('omega')
   await activate('a');await activate('b')
+  expect(region('b').querySelector('.composer__context'),'Warm Composer retains its context chip').toBe(contextChip)
+  expect(region('b').querySelector('.composer__context-card'),'Warm Composer retains its context reading DOM').toBe(contextCard)
   expect(region('b').querySelector('.composer-tools')).toBe(tools)
   expect(document.querySelector('[aria-label="Find skills"]')).toBe(query)
   expect(query.value).toBe('omega');expect(tools.dataset.mode).toBe('current')
@@ -113,11 +122,49 @@ it('actual Workspace Pane Composer editor and Mailbox stay live while only never
   expect(port.retires).toEqual({})
   expect(initialCosts.launcherTools,'The unchanged default Launcher caller remains eager').toBeGreaterThan(0)
   record({case:'actual-tools-only-dom',initialCosts,afterVisits:{tools:host.querySelectorAll('.composer-tools').length,svg:host.querySelectorAll('svg').length,dom:host.querySelectorAll('*').length},
-   backgroundQuestionRejected:true,actualMailboxNotStubbed:true,allPaneAndComposerEditorsRemain:true,originalDOMAndDraftPreserved:true,
+   backgroundQuestionRejected:true,actualMailboxNotStubbed:true,allPaneAndComposerEditorsRemain:true,originalDOMAndDraftPreserved:true,contextFirstPresentationAndWarmDOM:true,
    skillLoadAndFilteredMenuQueryWarm:true,skillAndCommandInsertUsable:true,selectionWarm:true,nonemptyDeferredQueueAndCurrentSessionRunPreserved:true,noCoreSend:true,layoutPhaseWarm:true,capturePendingAndCompletionWhileHidden:true,defaultLauncherEager:true,
    isolation:'Actual WorkspaceWorkbench/SessionPane/AgentSessionComposer/SessionMailbox/AgentComposerTools and maintained rich editor, no substitutes. Only native terminal port and skill/capture host calls controlled; no live App or allocation-byte claim.'})
   expect(initialCosts.agentTools,'Only never-presented agent Tools DOM should defer; real Pane/editor/mailbox stay mounted').toBe(1)
  }finally{captureDone();await act(async()=>root.unmount());host.remove();document.getElementById('agentmux-window-overlay-host')?.remove();useAppStore.setState(initial,true);vi.restoreAllMocks();vi.unstubAllGlobals()}
+})
+
+it('context first parent-layout contains current hidden updates and retains warm nodes, while the actual Gallery default stays eager',async()=>{
+ const initial=useAppStore.getState()
+ vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT',true)
+ const host=document.body.appendChild(document.createElement('div')),root=createClientUiRoot(host)
+ const frames:{visible:boolean;text:string|null;details:string|null}[]=[]
+ type Usage=Parameters<typeof AgentContextUsage>[0]['usage']
+ function Observed({visible,usage}:{visible:boolean;usage:Usage}){
+  useLayoutEffect(()=>{frames.push({visible,text:host.querySelector('.composer__context')?.textContent??null,details:host.querySelector('.composer__context-card')?.textContent??null})})
+  return <AgentContextUsage visible={visible} source="original-session/run" usage={usage}/>
+ }
+ const sample={inputTokens:25,outputTokens:0,totalTokens:25,observedAt:1,context:{usedTokens:25,capacityTokens:100}}
+ const cases=[{name:'known',usage:{...sample,context:{usedTokens:75,capacityTokens:100}},chip:'75%',body:'25% remaining'},
+  {name:'unknown',usage:{inputTokens:25,outputTokens:0,totalTokens:25,observedAt:1},chip:'—',body:'Used tokens and capacity not reported'},
+  {name:'real-zero',usage:{...sample,context:{usedTokens:0,capacityTokens:100}},chip:'0%',body:'100% remaining'}]
+ try{
+  for(const sampleCase of cases){
+   await act(async()=>root.render(<Observed key={sampleCase.name} visible={false} usage={sample}/>))
+   expect(host.querySelector('.composer__context'),'Never-presented context has no chip DOM').toBeNull()
+   expect(host.querySelector('.composer__context-card'),'Never-presented context has no details DOM').toBeNull()
+   await act(async()=>root.render(<Observed key={sampleCase.name} visible={false} usage={sampleCase.usage}/>))
+   const before=frames.length
+   await act(async()=>root.render(<Observed key={sampleCase.name} visible usage={sampleCase.usage}/>))
+   expect(frames[before]?.text,'First visible parent layout must contain current usage synchronously: '+sampleCase.name).toContain(sampleCase.chip)
+   expect(frames[before]?.details).toContain(sampleCase.body)
+   const chip=host.querySelector('.composer__context'),card=host.querySelector('.composer__context-card'),heading=card?.querySelector('h3')
+   await act(async()=>root.render(<Observed key={sampleCase.name} visible={false} usage={sampleCase.usage}/>))
+   expect(host.querySelector('.composer__context'),'Warm hidden context retains the exact chip').toBe(chip)
+   expect(host.querySelector('.composer__context-card'),'Warm hidden context retains reading DOM').toBe(card)
+   await act(async()=>root.render(<Observed key={sampleCase.name} visible usage={sampleCase.usage}/>))
+   expect(host.querySelector('.composer__context-card h3')).toBe(heading)
+  }
+  useAppStore.setState({config:composerConfig})
+  await act(async()=>root.render(<ObservationSurfaceGallery/>))
+  expect(host.querySelector('.observation-gallery .composer__context')?.textContent,'Actual Gallery omits visible and remains eager').toContain('24%')
+  record({case:'context-first-visible-parent-layout',samples:cases.map(c=>c.name),frames,firstLayoutCurrent:true,warmExactDOM:true,actualGalleryDefaultEager:true})
+ }finally{await act(async()=>root.unmount());host.remove();document.getElementById('agentmux-window-overlay-host')?.remove();useAppStore.setState(initial,true);vi.restoreAllMocks();vi.unstubAllGlobals()}
 })
 
 it('the actual Tools runs hooks while initially inactive, shows on the first true render and leaves the omitted caller eager',async()=>{
