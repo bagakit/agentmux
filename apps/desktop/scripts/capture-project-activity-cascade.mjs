@@ -29,7 +29,7 @@ try {
     builder.onLoad({ filter: /\.[cm]?[jt]sx?$/ }, async ({ path }) => {
       if (!path.startsWith(root + '/') || path.includes('/node_modules/')) return
       const source = await readFile(path, 'utf8'); inputs.set(path, hash(source)); const component = path.slice(path.lastIndexOf('/') + 1)
-      if (mutation === 'branch-protection' && component === 'HoverDropdownMenu.tsx') {
+      if (mutation === 'branch-protection' && relative(root, path) === 'packages/client-ui/src/components/HoverDropdownMenu.tsx') {
         const anchor = 'if (menu.containsBranch(event.target)) event.preventDefault()'
         const count = source.split(anchor).length - 1
         assert.equal(count, 3, 'The actual owning branch interaction/focus guards exist and are nonempty')

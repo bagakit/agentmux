@@ -17,8 +17,8 @@ const mutations = {
   stale: [tools, 'if (request === discovery.current) setSkills(next)', 'setSkills(next)'],
   rejection: [tools, 'if (request !== discovery.current) return', 'if (false) return'],
   session: ['apps/desktop/src/renderer/src/components/AgentSessionComposer.tsx', '<AgentComposer key={sessionId}', '<AgentComposer key="shared"'],
-  hover: ['apps/desktop/src/renderer/src/components/HoverDropdownMenu.tsx', 'if (!event.defaultPrevented) menu.hover.current = false\n      }}\n      onPointerDownOutside', 'if (false) menu.hover.current = false\n      }}\n      onPointerDownOutside'],
-  trigger: ['apps/desktop/src/renderer/src/components/HoverDropdownMenu.tsx', 'menu.hover.current = false\n          menu.content.current?.focus()', 'void 0'],
+  hover: ['packages/client-ui/src/components/HoverDropdownMenu.tsx', 'if (!event.defaultPrevented) menu.hover.current = false\n      }}\n      onPointerDownOutside', 'if (false) menu.hover.current = false\n      }}\n      onPointerDownOutside'],
+  trigger: ['packages/client-ui/src/components/HoverDropdownMenu.tsx', 'menu.hover.current = false\n          menu.content.current?.focus()', 'void 0'],
   disabled: [tools, 'key={command.id ?? command.text} disabled={disabled}', 'key={command.id ?? command.text}']
 } as const
 export default defineConfig({ ...original, esbuild: { jsx: 'automatic' },
