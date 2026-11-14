@@ -2314,11 +2314,14 @@ it('[headerless-drag] Portal menu, close and rename controls retain their own po
 let surveyPageCli: Awaited<ReturnType<typeof prepareSourceCoreCli>> | undefined
 let surveyPageCliBuilding: ReturnType<typeof prepareSourceCoreCli> | undefined
 afterAll(async () => { await surveyPageCli?.cleanup() })
-async function withSurveyPageCli(run: (command: (args: string[]) => Promise<{ code: number | null; receipt: ReturnType<typeof objectCliReceipt> }>) => Promise<void>) {
+async function withSurveyPageCli(run: (command: (args: string[]) => Promise<{ code: number | null; receipt: ReturnType<typeof objectCliReceipt> }>) => Promise<void>,
+  ports?: Omit<NonNullable<ConstructorParameters<typeof AgentMuxControlServer>[0]>, 'socketPath'>) {
   surveyPageCliBuilding ??= prepareSourceCoreCli()
   surveyPageCli = await surveyPageCliBuilding
+  if (process.env.SURVEY_OBSERVATION_CLI) await writeFile(process.env.SURVEY_OBSERVATION_CLI,
+    JSON.stringify({ cli: surveyPageCli.cli, identity: surveyPageCli.identity, sourceRoot: surveyPageCli.sourceRoot }) + '\n')
   const socketDirectory = await mkdtemp('/tmp/asvc-'), socketPath = join(socketDirectory, 'control.sock')
-  const server = new AgentMuxControlServer({ socketPath, execute: request => useAppStore.getState().executeControl(request) })
+  const server = new AgentMuxControlServer({ socketPath, execute: request => useAppStore.getState().executeControl(request), ...ports })
   const command = (args: string[]) => new Promise<{ code: number | null; receipt: ReturnType<typeof objectCliReceipt> }>((accept, reject) => {
     const child = spawn(process.execPath, [surveyPageCli!.cliPath, ...args], { env: privateEnvironment({
       AGENTMUX_RUNTIME_DIRECTORY: socketDirectory, AGENTMUX_STATE_DIRECTORY: join(socketDirectory, 'state'), AGENTMUX_RPC_ENDPOINT: 'unix:' + socketPath }), stdio: ['ignore', 'pipe', 'pipe'] })
@@ -2504,4 +2507,134 @@ it('[survey-cli] selecting a saved single-Profile research reveals its row witho
     expect(useAppStore.getState().tabs[result.region.tabId]!.regions[result.region.regionId]).toMatchObject({ browserId: result.region.browserId, profileId })
   })
   expect(rebind).not.toHaveBeenCalled()
+})
+
+// Exercise the original Main observation adapter as well as the real App and public CLI.
+async function withObservedSurveyCli(run: Parameters<typeof withSurveyPageCli>[0]) {
+  const { connectAgentMuxRpc } = await import('@agentmux/core')
+  const { DesktopControlIpcBridge } = await import('../src/main/control-ipc-bridge')
+  const { inspectDesktopClient } = await import('../src/main/client-observation')
+  const { desktopRpcMethods } = await import('../src/main/desktop-rpc-exposure')
+  const renderer = { kind: 'bundled' as const, id: 'a'.repeat(64), identity: { shell: 'private-source-shell', ctxmux: 'private-source-native' } }
+  const bridge = new DesktopControlIpcBridge({ isAvailable: () => true,
+    sendRequest: request => {
+      if (request.operation !== 'inspect.client' && request.operation !== 'focus' && request.operation !== 'space.ls') throw Error('This private observation scene uses only original read/navigation requests')
+      void useAppStore.getState().executeControl(request).then(result => bridge.accept({ requestId: request.requestId, ok: true, result }), error =>
+        bridge.accept({ requestId: request.requestId, ok: false, error: { code: 'CONTROL_FAILED', message: String(error) } }))
+    }, sendCancellation: () => {} })
+  const hostDirectory = await mkdtemp('/tmp/asvo-'), hostSocket = join(hostDirectory, 'original-core.sock')
+  const originalCore = new AgentMuxControlServer({ socketPath: hostSocket, spatialState: core })
+  let originalRpc: Awaited<ReturnType<typeof connectAgentMuxRpc>> | undefined
+  try {
+    await originalCore.start(); originalRpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: hostSocket } })
+    await withSurveyPageCli(run, { exposedMethods: desktopRpcMethods(), spatialState: core,
+      execute: request => request.operation === 'inspect.client' ? inspectDesktopClient(request, { pid: process.pid, package: null,
+        renderer: () => renderer, generation: () => 1, runtimes: () => [], execute: input => bridge.execute(input) }) : bridge.execute(request),
+      callOriginalCore: (hostId, method, params) => {
+        expect(hostId).toBe('local'); expect(method).toBe('space.ls')
+        // This original service callback has already parsed the method-specific wire parameters.
+        return originalRpc!.call(method, params as import('@agentmux/core').AgentMuxRpcParams<typeof method>)
+      },
+      // These are the original Desktop registerIpc spatialPresentation ports, with the same Core owner.
+      spatialPresentation: async ({ target }) => {
+        if (Object.values(target).some(Boolean)) return {}
+        const observed = await bridge.execute({ schemaVersion: 5, requestId: 'original-private-survey-presentation', operation: 'space.ls', target: {}, presentation: true })
+        if (observed.operation !== 'space.ls' || observed.catalog.survey === undefined) throw Error('The original Survey presentation is unavailable')
+        return { survey: observed.catalog.survey }
+      } })
+  } finally { bridge.dispose(); await originalRpc?.dispose(); await originalCore.stop(); await rm(hostDirectory, { recursive: true, force: true }) }
+}
+
+it('[survey-observation] actual App exact page focus then Main public inspect and space presentation retain one original choice', async () => {
+  const page = await showSurveyCliApp(), before = useAppStore.getState()
+  const create = vi.spyOn(api.browser, 'create'), close = vi.spyOn(api.browser, 'close')
+  await withObservedSurveyCli(async command => {
+    const pending = command(['app', 'focus', '--surface', 'survey', '--browser', page.browserId, '--region', page.regionId])
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 160)) })
+    const focus = await pending
+    expect(focus.receipt.ok, JSON.stringify(focus.receipt)).toBe(true)
+    if (focus.receipt.ok) expect(focus.receipt.result).toMatchObject({ navigation: { state: 'applied' } })
+    expect(useAppStore.getState().surveyZoneSelection).toEqual({ kind: 'page', ...page })
+    const inspected = await command(['app', 'inspect'])
+    expect(inspected.code, JSON.stringify(inspected.receipt)).toBe(0); expect(inspected.receipt.ok).toBe(true)
+    if (!inspected.receipt.ok) throw Error('The original Main observation must remain readable after Survey selection')
+    const observation = (inspected.receipt.result as { observation: import('../src/shared/client-observation').DesktopClientObservation }).observation
+    expect(observation.workbench.desktop.selection.survey).toEqual({ kind: 'page', ...page })
+    expect(observation.workbench.survey!.selection).toEqual(observation.workbench.desktop.selection.survey)
+    expect(JSON.stringify(observation)).not.toContain('Unsent original Agent draft')
+    const presented = await command(['space', 'ls', '--presentation'])
+    expect(presented.code, JSON.stringify(presented.receipt)).toBe(0)
+    if (presented.receipt.ok) expect((presented.receipt.result as { catalog: import('@agentmux/core/control').AgentMuxSpaceCatalog }).catalog.survey!.selection).toEqual({ kind: 'page', ...page })
+  })
+  const current = useAppStore.getState()
+  expect(current.surveyPageReferences).toEqual(before.surveyPageReferences); expect(current.surveyCollectedZones).toEqual(before.surveyCollectedZones)
+  expect(current.workbenchSpaceSelection).toEqual(before.workbenchSpaceSelection); expect(current.agentComposerDrafts).toEqual(before.agentComposerDrafts)
+  expect(create).not.toHaveBeenCalled(); expect(close).not.toHaveBeenCalled()
+})
+
+it('[survey-observation] actual App research and null Survey choices roundtrip through the original Main strict observation', async () => {
+  await showSurveyCliApp()
+  await withObservedSurveyCli(async command => {
+    const pending = command(['app', 'focus', '--surface', 'survey', '--zone', zones.source, '--display-workspace', resource.id,
+      '--group', 'source-group', '--tab', source().id, '--region', 'composition-file'])
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 160)) })
+    const focus = await pending
+    expect(focus.receipt.ok, JSON.stringify(focus.receipt)).toBe(true)
+    const selected = useAppStore.getState().surveyZoneSelection
+    const inspected = await command(['app', 'inspect'])
+    expect(inspected.code, JSON.stringify(inspected.receipt)).toBe(0)
+    if (inspected.receipt.ok) expect((inspected.receipt.result as { observation: import('../src/shared/client-observation').DesktopClientObservation }).observation.workbench.desktop.selection.survey).toEqual(selected)
+    await act(async () => useAppStore.getState().setSurveyZoneSelection(null))
+    const empty = await command(['app', 'inspect'])
+    expect(empty.code, JSON.stringify(empty.receipt)).toBe(0)
+    if (empty.receipt.ok) expect((empty.receipt.result as { observation: import('../src/shared/client-observation').DesktopClientObservation }).observation.workbench.desktop.selection.survey).toBeNull()
+  })
+})
+
+it('[survey-observation] actual expanded page preserves its original four-tuple in both Main observations and the public focus receipt', async () => {
+  const page = await showSurveyCliApp()
+  const selected = { kind: 'page' as const, ...page, presentation: { kind: 'tab' as const, displayWorkspaceId: resource.id,
+    groupId: 'source-group', tabId: source().id, regionId: 'composition-file' } }
+  await act(async () => useAppStore.getState().setSurveyZoneSelection(selected))
+  await withObservedSurveyCli(async command => {
+    const pending = command(['app', 'focus', '--surface', 'survey'])
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 160)) })
+    const focus = await pending
+    expect(focus.receipt.ok, JSON.stringify(focus.receipt)).toBe(true)
+    if (focus.receipt.ok) expect(focus.receipt.result).toMatchObject({ navigation: { selection: { survey: selected } } })
+    const inspected = await command(['app', 'inspect'])
+    expect(inspected.code, JSON.stringify(inspected.receipt)).toBe(0)
+    if (inspected.receipt.ok) {
+      const observation = (inspected.receipt.result as { observation: import('../src/shared/client-observation').DesktopClientObservation }).observation
+      expect(observation.workbench.desktop.selection.survey).toEqual(selected)
+      expect(observation.workbench.survey!.selection).toEqual(selected)
+    }
+    const presented = await command(['space', 'ls', '--presentation'])
+    expect(presented.code, JSON.stringify(presented.receipt)).toBe(0)
+    if (presented.receipt.ok) expect((presented.receipt.result as { catalog: import('@agentmux/core/control').AgentMuxSpaceCatalog }).catalog.survey!.selection).toEqual(selected)
+  })
+})
+
+it('[survey-observation] strict Main observation shares Core selection rules and keeps absent facts absent', async () => {
+  const { desktopWorkbenchObservationSchema } = await import('../src/shared/client-observation')
+  const { parseSurveySelection } = await import('@agentmux/core/control')
+  const page = await showSurveyCliApp()
+  const result = await useAppStore.getState().executeControl({ schemaVersion: 5, requestId: 'original-observation-dto', operation: 'inspect.client' })
+  if (result.operation !== 'inspect.client') throw Error('Original Store observation required')
+  const observed = desktopWorkbenchObservationSchema.parse(result.observation)
+  expect(observed.desktop.selection).not.toHaveProperty('survey')
+  const valid = { kind: 'page' as const, ...page }, reference = { tabId: source().id, regionId: page.regionId }
+  expect(parseSurveySelection(valid)).toEqual(valid)
+  const badSelections = [ { ...valid, extra: true }, { ...valid, browserId: '' }, { ...valid, zoneId: zones.source },
+    { ...valid, presentation: { kind: 'tab', tabId: source().id, regionId: page.regionId } },
+    { zoneId: zones.source, selection: [reference, reference], active: reference },
+    { zoneId: zones.source, selection: [reference], active: { ...reference, extra: true } } ]
+  for (const selection of badSelections) {
+    expect(() => parseSurveySelection(selection)).toThrow()
+    expect(() => desktopWorkbenchObservationSchema.parse({ ...observed,
+      desktop: { ...observed.desktop, selection: { ...observed.desktop.selection, survey: selection } } })).toThrow()
+    expect(() => desktopWorkbenchObservationSchema.parse({ ...observed, survey: { ...observed.survey!, selection } })).toThrow()
+  }
+  expect(() => desktopWorkbenchObservationSchema.parse({ ...observed,
+    desktop: { ...observed.desktop, selection: { ...observed.desktop.selection, foreignField: true } } })).toThrow()
 })
