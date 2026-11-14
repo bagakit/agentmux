@@ -3,7 +3,8 @@ import { submitProfileCreation } from '../../lib/browser-profile-creations'
 import { BrowserProfileCookieFiles } from './BrowserProfileCookieFiles'
 import { BrowserProfileBookmarks } from './BrowserProfileBookmarks'
 import { BrowserProfileExtensions } from './BrowserProfileExtensions'
-import { Switch, TextInput } from '@agentmux/client-ui/input'
+import { Switch, TextInput, Textarea } from '@agentmux/client-ui/input'
+import { isImeOwnedKeyboardEvent } from '@agentmux/client-ui/ime-keyboard-event'
 import * as RovingFocus from '@radix-ui/react-roving-focus'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { describeError, presentError } from '@agentmux/client-ui/error-presentation'
@@ -254,7 +255,10 @@ function ProfileEditor({ active, assignment, profile, revision, uses, busy, run,
   const [saved, setSaved] = useState(false)
   const [confirm, setConfirm] = useState<'delete' | null>(null)
   const recycleRevision = useRef(profile.revision)
-  const nameRevision = useRef(profile.revision), notesRevision = useRef(profile.revision)
+  const nameRevision = useRef(profile.revision)
+  const notesDraft = useRef<{ revision: string; baseline: string; focused: boolean; composing: boolean; deferredBlur: boolean; saving: boolean; saveOnReceipt: boolean } | null>(null)
+  const notesButton = useRef<HTMLButtonElement>(null)
+  const restoreNotesFocus = useRef(false)
   const [baselineRefresh, setBaselineRefresh] = useState(0)
   const nameInput = useRef<HTMLInputElement>(null)
   const markButton = useRef<HTMLButtonElement>(null)
@@ -277,11 +281,19 @@ function ProfileEditor({ active, assignment, profile, revision, uses, busy, run,
   const closeConfirm = () => { setConfirm(null); moreButton.current?.focus() }
   useEffect(() => { if (naming) { nameInput.current?.focus(); nameInput.current?.select() } }, [naming])
   useEffect(() => { if (!naming) setName(profile.label) }, [profile.label])
-  useEffect(() => { if (!noting) setNotes(profile.notes ?? '') }, [profile.notes])
+  useLayoutEffect(() => {
+    if (!noting && restoreNotesFocus.current) {
+      restoreNotesFocus.current = false
+      notesButton.current?.focus({ preventScroll: true })
+    }
+  }, [noting])
   useEffect(() => { if (!saved) return; const timer = setTimeout(() => setSaved(false), 1200); return () => clearTimeout(timer) }, [saved])
 
-  const commit = async (edit: Parameters<typeof api.browser.updateProfile>[1], expectedRevision = profile.revision): Promise<boolean> => {
-    const ok = await run('edit', () => api.browser.updateProfile(profile.id, edit, expectedRevision))
+  const commit = async (edit: Parameters<typeof api.browser.updateProfile>[1], expectedRevision = profile.revision, onConfirmed?: (profile: BrowserProfileSummary) => void): Promise<boolean> => {
+    const ok = await run('edit', async () => {
+      const confirmed = await api.browser.updateProfile(profile.id, edit, expectedRevision)
+      onConfirmed?.(confirmed)
+    })
     if (ok) setSaved(true)
     return ok
   }
@@ -294,13 +306,34 @@ function ProfileEditor({ active, assignment, profile, revision, uses, busy, run,
     if (!await commit({ label: next }, nameRevision.current)) { setName(next); setNaming(true) }
   }
   const nameKeys = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (isImeOwnedKeyboardEvent(event)) { event.stopPropagation(); return }
     if (event.key === 'Enter') { event.preventDefault(); void finishName(true) }
     if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); void finishName(false) }
   }
-  const finishNotes = async () => {
-    const draft = notes
+  const closeNotes = (returnFocus = false) => {
+    notesDraft.current = null
+    restoreNotesFocus.current = returnFocus
     setNoting(false)
-    if (draft.trim() !== (profile.notes ?? '') && !await commit({ notes: draft.trim() }, notesRevision.current)) { setNotes(draft); setNoting(true) }
+  }
+  const finishNotes = async (input: HTMLTextAreaElement) => {
+    const draft = notesDraft.current
+    if (!draft) return
+    if (draft.saving) { draft.saveOnReceipt = true; return }
+    const submitted = input.value
+    const next = submitted.trim()
+    if (next === draft.baseline) { closeNotes(); return }
+    draft.saving = true
+    const ok = await commit({ notes: next }, draft.revision, confirmed => {
+      draft.revision = confirmed.revision
+      draft.baseline = confirmed.notes ?? ''
+    })
+    draft.saving = false
+    const saveOnReceipt = draft.saveOnReceipt
+    draft.saveOnReceipt = false
+    if (!ok || notesDraft.current !== draft || !input.isConnected) return
+    if (draft.focused || draft.composing) return
+    if (input.value === submitted) closeNotes()
+    else if (saveOnReceipt) void finishNotes(input)
   }
   const blockedDelete = profile.isDefault ? 'The default Profile can’t be recycled' : uses.length ? `Used by ${uses.length} Browser${uses.length > 1 ? 's' : ''}` : null
   const open = uses.filter(use => use.state === 'open')
@@ -314,7 +347,7 @@ function ProfileEditor({ active, assignment, profile, revision, uses, busy, run,
           {naming ? <TextInput ref={nameInput} aria-label="Profile name" value={name} maxLength={128}
             onChange={event => setName(event.target.value)} onKeyDown={nameKeys} onBlur={event => { if (!(event.relatedTarget instanceof Element && event.relatedTarget.closest('.browser-profile-editor__error'))) void finishName(true) }} />
             : <h3><button type="button" className="browser-profile-editor__name" onClick={() => { nameRevision.current = profile.revision; setNaming(true) }} title="Rename">{profile.label}</button>
-              {saved ? <span className="browser-profile-editor__saved" role="status"><ThemeStatusSavedIcon size={12} /> Saved</span> : null}</h3>}
+              {saved && !noting ? <span className="browser-profile-editor__saved" role="status"><ThemeStatusSavedIcon size={12} /> Saved</span> : null}</h3>}
           <small>{profile.isDefault ? 'Default for new Browsers · ' : ''}{open.length ? `Open in ${open.length} Browser${open.length > 1 ? 's' : ''}` : 'Not open'}</small>
         </div>
         <button type="button" className="primary-button browser-profile-editor__open" onClick={onOpen}>Open Browser</button>
@@ -325,7 +358,7 @@ function ProfileEditor({ active, assignment, profile, revision, uses, busy, run,
               <Menu.Item className="tab-context-menu__item" disabled={profile.isDefault} onSelect={() => void run('default', () => api.browser.setDefaultProfile(profile.id))}>
                 {profile.isDefault ? 'Default for new Browsers' : 'Make default'}
               </Menu.Item>
-              <Menu.Item className="tab-context-menu__item" onSelect={() => setNaming(true)}>Rename</Menu.Item>
+              <Menu.Item className="tab-context-menu__item" onSelect={() => { nameRevision.current = profile.revision; setNaming(true) }}>Rename</Menu.Item>
               <Menu.Item className="tab-context-menu__item" disabled={busy !== null} onSelect={onCopy}>Copy settings</Menu.Item>
               <Menu.Separator className="tab-context-menu__separator" />
               <Menu.Item className="tab-context-menu__item browser-profile-menu__delete" disabled={blockedDelete !== null} onSelect={() => { recycleRevision.current = profile.revision; setConfirm('delete') }}>
@@ -354,17 +387,53 @@ function ProfileEditor({ active, assignment, profile, revision, uses, busy, run,
         </div>
       </RovingFocus.Root> : null}
 
-      {noting ? <textarea className="browser-profile-editor__notes" aria-label="Notes" autoFocus rows={2} maxLength={2000} value={notes}
-          onChange={event => setNotes(event.target.value)} onBlur={event => { if (!(event.relatedTarget instanceof Element && event.relatedTarget.closest('.browser-profile-editor__error'))) void finishNotes() }}
-          onKeyDown={event => { if (event.key === 'Escape') { event.stopPropagation(); setNotes(profile.notes ?? ''); setNoting(false) } }} />
-        : <button type="button" className="browser-profile-editor__note" data-empty={profile.notes ? undefined : ''} onClick={() => { notesRevision.current = profile.revision; setNoting(true) }}>
+      {noting ? <Textarea className="browser-profile-editor__notes" aria-label="Notes" autoFocus maxLength={2000} value={notes}
+          onChange={event => setNotes(event.currentTarget.value)}
+          onFocus={() => { if (notesDraft.current) notesDraft.current.focused = true }}
+          onCompositionStart={() => { if (notesDraft.current) notesDraft.current.composing = true }}
+          onCompositionEnd={event => {
+            const draft = notesDraft.current
+            if (!draft) return
+            draft.composing = false
+            if (!draft.deferredBlur) return
+            draft.deferredBlur = false
+            const input = event.currentTarget
+            // The native final input may follow compositionend before this blur can commit it.
+            queueMicrotask(() => {
+              if (notesDraft.current === draft && input.isConnected && !draft.focused) void finishNotes(input)
+            })
+          }}
+          onBlur={event => {
+            const draft = notesDraft.current
+            if (!draft) return
+            draft.focused = false
+            if (event.relatedTarget instanceof Element && event.relatedTarget.closest('.browser-profile-editor__error')) return
+            if (draft.composing) { draft.deferredBlur = true; return }
+            void finishNotes(event.currentTarget)
+          }}
+          onKeyDown={event => {
+            if (notesDraft.current?.composing || isImeOwnedKeyboardEvent(event)) { event.stopPropagation(); return }
+            if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); closeNotes(true) }
+          }} />
+        : <button ref={notesButton} type="button" className="browser-profile-editor__note" data-empty={profile.notes ? undefined : ''} onClick={() => {
+          const baseline = profile.notes ?? ''
+          notesDraft.current = { revision: profile.revision, baseline, focused: false, composing: false, deferredBlur: false, saving: false, saveOnReceipt: false }
+          setNotes(baseline); setNoting(true)
+        }}>
           {profile.notes || 'What is this environment for?'}
         </button>}
 
       {error ? <p className="browser-profile-editor__error" role="alert">{error}{errorCode === 'BROWSER_PROFILE_REVISION_CONFLICT' ? <> <button type="button" onMouseDown={event => event.preventDefault()} onClick={() => void (async () => {
         await browserProfiles.refresh()
         const current = browserProfiles.get().profiles?.find(value => value.id === profile.id)
-        if (current) { nameRevision.current = current.revision; notesRevision.current = current.revision; setBaselineRefresh(value => value + 1) }
+        if (current) {
+          nameRevision.current = current.revision
+          if (notesDraft.current) {
+            notesDraft.current.revision = current.revision
+            notesDraft.current.baseline = current.notes ?? ''
+          }
+          setBaselineRefresh(value => value + 1)
+        }
       })()}>Reload</button></> : null}</p> : null}
 
       <BrowserProfileOrganization profile={profile} folders={folders} revision={revision} busy={busy !== null} run={run} onEdit={commit} />
