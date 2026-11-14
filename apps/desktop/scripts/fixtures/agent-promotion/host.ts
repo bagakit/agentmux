@@ -1,10 +1,8 @@
-import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import { syncBuiltinESMExports } from 'node:module'
 import { ScratchTopics } from '@agentmux/host/mote-resources'
 import { AgentMuxControlServer, AgentMuxSpatialStateStore } from '@agentmux/core'
 import { createHostContent } from '@agentmux/host/content-owner'
-import { inspectPromotionAgent } from '../../../../host/src/promotion-agent-inspection.js'
 import { join } from 'node:path'
 import { createHostMoteMainReader } from '../../../../host/src/mote-dialogue.js'
 import { HostMoteQuickPreferences } from '../../../../host/src/mote-quick-preferences.js'
@@ -49,12 +47,9 @@ spatial.commit = async input => {
   return commit(input)
 }
 let server: AgentMuxControlServer
-const content = createHostContent({ configurationPath: join(root, 'config.json'), spatial,
-  inspectPromotionAgent: (target, context) => inspectPromotionAgent(async (_host, params, originalContext) => ({ runtimeId: 'fixture-runtime', inspection: await server.callRpc('agent.inspect', params, originalContext ?? { transport: 'unix' }) }), target, context) })
+const content = createHostContent({ configurationPath: join(root, 'config.json'), spatial })
 const sessions = JSON.parse(await readFile(join(root, 'agents.json'), 'utf8'))
-// An endpoint label cannot certify that its internal query actually selected that original Runtime.
-await assert.rejects(() => inspectPromotionAgent(async () => ({ runtimeId: 'fixture-runtime', inspection: { routeHostId: 'another-owner', session: sessions[0], status: null, displayName: { override: null, source: null, nameRevision: 0, availability: 'observed' }, unavailable: [] } }), { hostId: 'local', agentSessionId: sessions[0].agentSessionId }), { code: 'AGENT_PROMOTION_SOURCE_UNCONFIRMED' })
-// Inject only the Provider/session inspection port; actual filesystem, Core RPC, CLI, spatial owner and restart are production code.
+// The retained record supplies frozen execution facts. Only current metadata for preference choices is a leaf; original Files, Core RPC, CLI, spatial owner and restart are production code.
 const client = { readAgentSessions: async () => sessions, readAgentSession: async (id: string) => sessions.find((s: { agentSessionId: string }) => s.agentSessionId === id), agentSessions: () => sessions, agentSession: (id: string) => sessions.find((session: { agentSessionId: string }) => session.agentSessionId === id),
   statusAgent: async (id: string) => ({ session: sessions.find((session: { agentSessionId: string }) => session.agentSessionId === id), capabilities: {}, observation: { process: 'running', semantic: 'idle', readiness: 'ready', source: 'native-hook', observedAt: Date.now(), stale: false } }) }
 const main = createHostMoteMainReader({ configurationPath: join(root, 'config.json'), spatial, files: content.files! })
