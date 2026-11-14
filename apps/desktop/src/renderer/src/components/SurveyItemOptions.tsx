@@ -2,7 +2,7 @@ import * as Menu from '@radix-ui/react-dropdown-menu'
 import * as ContextMenu from '@radix-ui/react-context-menu'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import type { AgentMuxSpaceFact, AgentMuxZoneFact } from '@agentmux/core/control'
+import type { AgentMuxSpaceFact, AgentMuxZoneFact, AgentMuxSurveyPageReference } from '@agentmux/core/control'
 import type { WorkspaceRecord } from '../../../shared/contracts'
 import { DocumentOverlayPortal } from './WindowOverlayHost'
 import { usePathDisplay } from '../hooks/usePathDisplay'
@@ -31,6 +31,7 @@ export type SurveyItemOptionsProps = {
   visible: boolean
   title: string
   zone: AgentMuxZoneFact | null
+  page?: AgentMuxSurveyPageReference | undefined
   workspace: WorkspaceRecord | null
   collected: boolean
   relatedSpaces: readonly AgentMuxSpaceFact[] | null
@@ -83,7 +84,7 @@ export function SurveyItemContextMenu({ children, returnFocus, ...props }: Surve
     if (open) { pendingAction.current = null; outside.current = false }
   }}>
     {children}
-    {props.visible && props.zone ? <DocumentOverlayPortal component={ContextMenu.Portal}><ContextMenu.Content className="tab-context-menu survey-topic-menu survey-item-menu" data-survey-context-zone-id={props.zone.zoneId} collisionPadding={8}
+    {props.visible && (props.zone || props.page) ? <DocumentOverlayPortal component={ContextMenu.Portal}><ContextMenu.Content className="tab-context-menu survey-topic-menu survey-item-menu" data-survey-context-zone-id={props.zone?.zoneId} data-survey-context-page-region-id={props.page?.regionId} data-survey-context-page-browser-id={props.page?.browserId} collisionPadding={8}
       onPointerDownOutside={event => {
         // A second row's right-click updates this shared menu instead of racing its dismissal.
         if (event.detail.originalEvent.button === 2 && isItemTarget(event.target)) event.preventDefault()

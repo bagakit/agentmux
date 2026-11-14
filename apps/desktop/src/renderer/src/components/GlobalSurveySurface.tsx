@@ -98,8 +98,8 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
   const controlNavigation = useAppStore(state => state.workbenchNavigationInputPolicy !== null)
   const explorationNames = useAppStore(state => state.surveyExplorationNames)
   const contextOrigin = useRef<HTMLElement | null>(null)
-  const [contextZoneId, setContextZoneId] = useState<string | null>(null)
-  const contextZone = useMemo(() => contextZoneId ? catalog?.zones.find(zone => zone.zoneId === contextZoneId) : undefined, [catalog, contextZoneId])
+  const [contextItem, setContextItem] = useState<AgentMuxSurveyPinReference | null>(null)
+  const contextZone = contextItem?.kind === 'zone' ? catalog?.zones.find(zone => zone.zoneId === contextItem.zoneId) : undefined
   const [renamingZoneId, setRenamingZoneId] = useState<string | null>(null)
   const itemNameDraft = useRef<(SurveyItemNameDraft & { zoneId: string }) | null>(null)
   function editItemName(zone: AgentMuxZoneFact, editing: boolean) {
@@ -702,15 +702,24 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
   const pinnedZoneIds = pinReferences.flatMap(reference => reference.kind === 'zone' && itemTitles.has(reference.zoneId) ? [reference.zoneId] : [])
   const pinnedPages = profileReferences.pages.filter(page => pinnedKeys.has(surveyPinKey({ kind: 'page', ...page })))
   const ordinaryPages = profileReferences.pages.filter(page => !pinnedKeys.has(surveyPinKey({ kind: 'page', ...page })))
+  function pageOptionsFor(page: SurveyPageSelection): SurveyItemOptionsProps {
+    const surface = surveyPageOwner(tabs, page, catalog)?.surface, browser = surface?.kind === 'browser' ? surface : null
+    return { ...itemOptionsFor(undefined, browser ? <span>{browser.url}</span> : <span>Original Browser unconfirmed; its exact reference is retained.</span>),
+      ...pinOptions(page), page, title: browser?.title || 'Retained page', workspace: browser ? resourceWorkspaces.get(browser.workspaceId) ?? null : null,
+      onMovePage: () => {
+        const source = catalog && captureSurveyCompositionSource(useAppStore.getState(), catalog, page)
+        if (source) setMovingSources([source])
+        else setError('The original page changed. Its reference is kept; inspect that same Browser before moving it.')
+      },
+      onClosePage: browser ? () => closePage(page) : undefined,
+      onRemovePageReference: () => void removePageReference(page) }
+  }
   const pageItems = (references: typeof profileReferences.pages) => references.length ? <div aria-label="Saved Survey pages">{references.map(page => {
           const owner = surveyPageOwner(tabs, page, catalog), browser = owner?.surface.kind === 'browser' ? owner.surface : null
           return <SurveyPageItem {...pinOptions({ kind: 'page', ...page })} selection={selectionFor({ kind: 'page', ...page })} key={JSON.stringify(page)} page={page} browser={browser} enabled={visible && !controlsCoverPage}
             selected={pageSelection?.regionId === page.regionId && pageSelection.browserId === page.browserId} onSelect={() => setSelection({ kind: 'page', ...page })} onClose={browser ? () => closePage({ kind: 'page', ...page }) : undefined}
-            actions={<SurveyItemOptions {...itemOptionsFor(undefined, browser ? <span>{browser.url}</span> : <span>Original Browser unconfirmed; its exact reference is retained.</span>)}
-              {...pinOptions({ kind: 'page', ...page })} rowAction compact title={browser?.title || 'Retained page'} workspace={browser ? resourceWorkspaces.get(browser.workspaceId) ?? null : null}
-              onMovePage={() => { const source = catalog && captureSurveyCompositionSource(useAppStore.getState(), catalog, { kind: 'page', ...page }); if (source) setMovingSources([source]); else setError('The original page changed. Its reference is kept; inspect that same Browser before moving it.') }}
-              onClosePage={browser ? () => closePage({ kind: 'page', ...page }) : undefined}
-              onRemovePageReference={() => void removePageReference(page)} />} />
+            onContextMenu={button => { contextOrigin.current = button; setContextItem({ kind: 'page', ...page }) }}
+            actions={<SurveyItemOptions {...pageOptionsFor({ kind: 'page', ...page })} rowAction compact />} />
         })}</div> : null
   const selectionControls = selectingContent ? <div className="survey-composition-toolbar" role="group" aria-label="Select content to combine">
     {selectingContent ? <><span role="status">{selectedSources.length} selected</span><Menu.Root modal={false}>
@@ -750,7 +759,7 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
             Read original page references again
           </button>
         </p> : null}
-        <SurveyItemContextMenu returnFocus={() => contextOrigin.current} {...itemOptionsFor(contextZone)} grouping={contextZone ? list.groupingFor(contextZone.zoneId, contextOrganization.current) : undefined}>
+        <SurveyItemContextMenu returnFocus={() => contextOrigin.current} {...(contextItem?.kind === 'page' ? pageOptionsFor(contextItem) : itemOptionsFor(contextZone))} grouping={contextZone ? list.groupingFor(contextZone.zoneId, contextOrganization.current) : undefined}>
         {pendingCompositions.length > 0 ? <div className="survey-composition-recovery" role="status">
           {unresolvedCompositions.map(operation => <button key={operation.requestId} type="button" onClick={() => setReviewingComposition(operation.requestId)}>Review combination · {operation.sources.length} {operation.sources.every(source => source.kind === 'page') ? 'pages' : 'items'}</button>)}
           {pendingCompositions.length > unresolvedCompositions.length ? <details><summary>A saved combination record could not be read</summary><p>The original record is kept. Other content and combinations remain available.</p><pre>{JSON.stringify(pendingCompositions.filter(entry => !isSurveyCompositionRecovery(entry)), null, 2)}</pre></details> : null}
@@ -770,7 +779,7 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
               tabColumns={itemTabs.length > 1 ? <div className="survey-item-tabs" aria-label={`Tabs in ${itemTitle(zone)}`}>{itemTabs.map(tabId => <SurveyTabColumn active={visible && !controlsCoverPage && !sidebarCollapsed} selection={selectionFor({ kind: 'tab', tabId })} compositionEnabled={compositionEnabled} key={tabId} tab={tabs[tabId]!} unconfirmedBrowserRegionIds={unconfirmedBrowserRegionIds} selected={selection?.zoneId === zone.zoneId && selection.active?.tabId === tabId || currentPageOwner?.tab.id === tabId} onSelect={() => chooseTab(zone.zoneId, tabId)} onClose={title => closeItemTab(zone.zoneId, tabId, title)} />)}</div> : null}
               onCloseSingleTab={itemTabs.length === 1 ? () => closeItemTab(zone.zoneId, itemTabs[0]!, itemTitle(zone)) : undefined}
               options={<SurveyItemOptions {...itemOptions} rowAction compact />}
-              onContextMenu={button => { contextOrigin.current = button; contextOrganization.current = list.stored; setContextZoneId(zone.zoneId) }} activity={status.summary} activityDescription={status.description} editing={renamingZoneId === zone.zoneId} nameDraft={itemNameDraft.current?.zoneId === zone.zoneId ? itemNameDraft.current : undefined} onEdit={editing => editItemName(zone, editing)}
+              onContextMenu={button => { contextOrigin.current = button; contextOrganization.current = list.stored; setContextItem({ kind: 'zone', zoneId: zone.zoneId }) }} activity={status.summary} activityDescription={status.description} editing={renamingZoneId === zone.zoneId} nameDraft={itemNameDraft.current?.zoneId === zone.zoneId ? itemNameDraft.current : undefined} onEdit={editing => editItemName(zone, editing)}
               onRename={async (name, revision) => { const applied = await useAppStore.getState().setSurveyExplorationName(zone.zoneId, name, revision); if (!applied) setError('The exploration source or name revision is unconfirmed. Your name draft is kept here.'); return applied }} onSelect={chooseZone} />
         }} />
         </SurveyItemContextMenu>
