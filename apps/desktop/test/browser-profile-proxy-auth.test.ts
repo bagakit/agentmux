@@ -38,6 +38,31 @@ async function setup(options: { available?: boolean } = {}) {
 }
 
 describe('Profile proxy sign-in', () => {
+  it('keeps the endpoint observed at credential admission while its asynchronous save is queued', async () => {
+    const { auth, work, proxies, contents } = await setup()
+    const saved = auth.set('p-work', { username: 'admitted-person', password: SENTINEL })
+    proxies.set('p-work', { host: 'changed-during-save.test', port: 8181 })
+    await saved
+    const callback = vi.fn()
+    expect(await auth.answer(contents(work), { isProxy: true, host: 'changed-during-save.test', port: 8181 }, callback)).toBe(false)
+    expect(callback).not.toHaveBeenCalled()
+    proxies.set('p-work', { host: 'gw.corp.test', port: 3128 })
+    expect(await auth.answer(contents(work), { isProxy: true, host: 'gw.corp.test', port: 3128 }, callback, true)).toBe(true)
+    expect(callback).toHaveBeenCalledWith('admitted-person', SENTINEL)
+  })
+
+  it('keeps a saved proxy password scoped to its original server after an explicit route change', async () => {
+    const { auth, work, proxies, contents, decrypt } = await setup()
+    await auth.set('p-work', { username: 'alice', password: SENTINEL })
+    proxies.set('p-work', { host: 'replacement.test', port: 8123 })
+    const callback = vi.fn()
+    expect(await auth.answer(contents(work), { isProxy: true, host: 'replacement.test', port: 8123 }, callback)).toBe(false)
+    expect(callback).not.toHaveBeenCalled(); expect(decrypt).not.toHaveBeenCalled()
+    proxies.set('p-work', { host: 'gw.corp.test', port: 3128 })
+    expect(await auth.answer(contents(work), { isProxy: true, host: 'gw.corp.test', port: 3128 }, callback, true)).toBe(true)
+    expect(callback).toHaveBeenCalledWith('alice', SENTINEL)
+  })
+
   it('answers a 407 from that Profile’s own proxy, then gives up after one retry with a reason', async () => {
     const logs = [vi.spyOn(console, 'log'), vi.spyOn(console, 'warn'), vi.spyOn(console, 'error'), vi.spyOn(console, 'info'), vi.spyOn(console, 'debug')]
     const { auth, path, work, reports, decrypt, contents } = await setup()

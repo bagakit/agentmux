@@ -304,7 +304,7 @@ describe('BrowserProfileManager', () => {
     store.profiles[0] = { ...store.profiles[0]!, label: 'Renamed elsewhere' }
     await manager.createProfile('Work')
     expect(manager.listProfiles().map(profile => profile.label)).toEqual(['Renamed elsewhere', 'Work'])
-    expect(heard).toEqual([{ revision: 1, sequence: 1, activitySources: {}, defaultProfileId: DEFAULT_ID, folders: [], views: [], profiles: manager.listProfiles() }])
+    expect(heard).toEqual([{ revision: 1, sequence: 1, activitySources: {}, defaultProfileId: DEFAULT_ID, folders: [], views: [], proxyAssets: [], profiles: manager.listProfiles() }])
     heard[0]!.profiles[0]!.label = 'Mutated by a subscriber'
     expect(manager.listProfiles()[0]!.label).toBe('Renamed elsewhere')
 
@@ -381,7 +381,8 @@ describe('BrowserProfileManager', () => {
     order.length = 0
     await expect(manager.updateProfile(DEFAULT_ID, { network: { ...PROXY, server: { ...PROXY.server, host: 'down.corp.test' } } }, manager.listProfiles().find(profile => profile.id === DEFAULT_ID)!.revision))
       .rejects.toMatchObject({ code: 'BROWSER_PROFILE_NETWORK_UNAVAILABLE' })
-    expect(order).toEqual(['apply:proxy'])
+    // A rejected native application is followed by an explicit original-route restoration.
+    expect(order).toEqual(['apply:proxy', 'apply:proxy'])
     expect(manager.listProfiles()[0]!.network).toEqual(PROXY)
   })
 
