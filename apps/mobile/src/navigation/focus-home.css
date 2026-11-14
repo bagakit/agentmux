@@ -51,56 +51,11 @@
 .mobile-focus-project > h2 > span:last-child { margin-left: auto; color: var(--text-3); font-size: var(--fs-micro); font-variant-numeric: tabular-nums; }
 .mobile-focus-project > .mobile-session-list { border-radius: var(--mobile-radius-group); background: var(--mobile-group); overflow: hidden; }
 .mobile-focus-project .mobile-agent-row { position: relative; }
-.mobile-focus-project .mobile-agent-row + .mobile-agent-row::before { content: ''; position: absolute; top: 0; left: 68px; right: 0; height: 1px; background: var(--mobile-hairline); pointer-events: none; }
-.mobile-spatial-panel .mobile-focus-project .mobile-session-list > li > button.mobile-agent-row__open { display: flex; align-items: center; gap: var(--sp-5);
-  min-height: var(--mobile-row); padding: 10px 4px 10px 14px; border-radius: 0; background: transparent;
-  transition: background-color var(--dur-fast) ease; }
-.mobile-spatial-panel .mobile-focus-project .mobile-session-list > li > button.mobile-agent-row__open:active { background: var(--mobile-group-press); }
+.mobile-focus-project .mobile-agent-row + .mobile-agent-row::before { content: ''; position: absolute; top: 0; left: 48px; right: 0; height: 1px; background: var(--mobile-hairline); pointer-events: none; }
 .mobile-focus-project .mobile-agent-row > .mobile-agent-row__more { align-self: center; margin-right: var(--sp-1); color: var(--text-3); }
 
-/* Row anatomy: 40px avatar with a state dot, name + time, coloured state word + recap. */
-.mobile-row-avatar { position: relative; flex: none; display: grid; place-items: center; width: 40px; height: 40px; border-radius: var(--mobile-radius);
-  background: var(--mobile-group-press); }
-.mobile-row-dot { position: absolute; right: -3px; bottom: -3px; width: 13px; height: 13px; border-radius: 50%; background: var(--neutral-2);
-  box-shadow: 0 0 0 2.5px var(--mobile-group); }
-.mobile-row-dot[data-mark='attention'] { background: var(--mobile-attention); animation: mobile-attention-breathe 1.4s ease-in-out infinite; }
-.mobile-row-dot[data-mark='error'] { background: var(--red); }
-.mobile-row-dot[data-mark='working'] { background: var(--green); }
-.mobile-row-dot[data-mark='results'] { background: var(--success); }
-.mobile-row-dot[data-mark='interrupted'], .mobile-row-dot[data-mark='recovery'] { background: var(--amber); opacity: .7; }
-.mobile-row-dot[data-mark='unknown'], .mobile-row-dot[data-mark='idle'] { background: var(--neutral-2); }
-@keyframes mobile-attention-breathe { 0%, 100% { opacity: 1; } 50% { opacity: .62; } }
-.mobile-row-copy { flex: 1; min-width: 0; display: grid; gap: 3px; }
-.mobile-row-title { display: flex; align-items: baseline; gap: var(--sp-4); min-width: 0; }
-.mobile-row-title > strong { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-lead); font-weight: 600; letter-spacing: -.01em; }
-.mobile-agent-row[data-needs-you] .mobile-row-title > strong, .mobile-agent-row[data-unread] .mobile-row-title > strong { font-weight: 700; }
-.mobile-row-title > time { flex: none; color: var(--text-3); font-size: var(--fs-micro); font-variant-numeric: tabular-nums; }
-.mobile-row-detail { display: flex; align-items: baseline; gap: 6px; min-width: 0; color: var(--text-3); font-size: var(--fs-meta); line-height: 1.35; }
-.mobile-row-detail > span:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.mobile-row-state { flex: none; font-weight: 650; }
-.mobile-row-state[data-mark='attention'] { color: var(--mobile-attention); }
-.mobile-row-state[data-mark='error'] { color: var(--red); }
-.mobile-row-state[data-mark='working'] { color: var(--green); }
-.mobile-row-state[data-mark='results'] { color: var(--success); }
-.mobile-row-state[data-mark='interrupted'], .mobile-row-state[data-mark='recovery'] { color: var(--amber-text); }
-.mobile-row-project { flex: none; max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-3); font-size: var(--fs-micro); }
-
-/* The directory stylesheet loads after the shell; row anatomy is scoped under .mobile-app so the
- * older compact-list rules cannot override it. Trees (Space, Mote) share the anatomy at 56px. */
-.mobile-app .mobile-spatial-panel .mobile-session-list > li > button.mobile-agent-row__open { gap: var(--sp-5); min-height: 56px; }
-.mobile-app .mobile-spatial-panel .mobile-focus-project .mobile-session-list > li > button.mobile-agent-row__open { min-height: var(--mobile-row); }
-.mobile-app .mobile-row-copy { display: grid; gap: 3px; min-width: 0; }
-.mobile-app .mobile-row-title > strong { font-size: var(--fs-lead); font-weight: 600; line-height: 1.3; }
-.mobile-app .mobile-agent-row[data-needs-you] .mobile-row-title > strong, .mobile-app .mobile-agent-row[data-unread] .mobile-row-title > strong { font-weight: 700; }
-.mobile-app .mobile-row-detail > .mobile-row-state { display: inline-flex; flex: 0 1 auto; align-items: center; gap: 3px; min-width: 0; max-width: 52%;
-  text-align: left; font-size: var(--fs-meta); line-height: 1.35; }
-.mobile-app .mobile-row-detail > .mobile-row-state:empty, .mobile-app .mobile-row-detail > .mobile-row-state:not(:has(> span[title])) { display: none; }
-.mobile-app .mobile-row-detail > .mobile-row-state > span[title] { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; -webkit-line-clamp: unset; }
-.mobile-app .mobile-row-detail > .mobile-row-state > .focus-state-mark { margin: 0; flex: none; }
-.mobile-app .mobile-row-detail > .mobile-session-recap { flex: 1 1 0; min-width: 0; font-size: var(--fs-meta); line-height: 1.35; }
 
 @media (prefers-reduced-motion: reduce) {
-  .mobile-row-dot[data-mark='attention'] { animation: none; }
   .mobile-ticket-answer { animation: none; }
   .mobile-ticket-answer__choices > button:active:not(:disabled) { transform: none; }
   .mobile-ticket-answer[data-phase='sending'] .mobile-ticket-answer__choices > button[aria-pressed='true'] { animation: none; }

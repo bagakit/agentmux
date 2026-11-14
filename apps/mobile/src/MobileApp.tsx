@@ -13,6 +13,7 @@ import { MobileAgentCreate, type MobileAgentCreateTarget } from './navigation/Mo
 import { MobileAgentActions } from './conversation/MobileAgentActions'
 import { MobileConversationStatusDetails, mobileConversationStatusLabel, type MobileConversationStatus } from './conversation/MobileConversationStatus'
 import { recoverMobileAgent } from './conversation/mobile-agent-recovery'
+import { MobileAgentLocations } from './navigation/MobileAgentLocations'
 import { MobileAgentMenuContext, type MobileAgentMenuTarget } from './navigation/MobileAgentRow'
 import { MobileConversationSurface, type MobileConnection } from './conversation/MobileConversationSurface'
 import { mobileMoteInputSource } from './conversation/mote-input-source'
@@ -267,7 +268,9 @@ function MobileAppContent({ client, connection, platform: basePlatform, native =
   }
   const sessionTitle = objectIdentity?.name ?? null
   const [sheet, updateSheet] = useState<'connection' | 'settings' | 'identity' | 'actions' | 'agent' | 'create' | 'notices' | 'team' | null>(restoreWorkface && initial.current.presentation?.profile ? 'identity' : null)
+  const [positionOverlay, setPositionOverlay] = useState(false)
   const setSheet = useCallback((value: typeof sheet) => {
+    if (value !== 'agent') setPositionOverlay(false)
     if (value !== null) navigationRevision.current += 1
     updateSheet(value)
   }, [])
@@ -354,7 +357,8 @@ function MobileAppContent({ client, connection, platform: basePlatform, native =
   const threadDetail = Boolean(moteSection === 'threads' && moteView && moteView.spaceId === objectIdentity?.mote?.spaceId && moteView.detail)
   const requestBack = useMobileBack(hasBack, () => {
     navigationRevision.current += 1
-    if (sheet !== null) {
+    if (sheet === 'agent' && positionOverlay) setPositionOverlay(false)
+    else if (sheet !== null) {
       if (sheet === 'identity' && profileBack) profileBack()
       else setSheet(null)
     } else if (showSession) {
@@ -527,7 +531,8 @@ function MobileAppContent({ client, connection, platform: basePlatform, native =
   const wideViewport = useWideAgentWorkface()
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [focusTarget, setFocusTarget] = useState<HTMLElement | null>(null)
-  const wideWorkface = wideViewport && workspaceVisible && showSession
+  const wideShell = wideViewport && workspaceVisible
+  const wideWorkface = wideShell && showSession
   const focusRoot = workspaceVisible && !showSession && secondary === null && home === 'focus'
   const focusShown = focusRoot || wideWorkface && !sidebarCollapsed
   const focusVisible = exposed && focusShown
@@ -636,7 +641,7 @@ function MobileAppContent({ client, connection, platform: basePlatform, native =
         {headerContext ? <span className="mobile-session-context">{headerContext}</span> : null}</span></span>
   </>
   const moteContext = workspaceVisible && showSession && teamSpaceId && !workPanel ? moteRoot ? 'main' as const : 'member' as const : null
-  return <MobileLocalDraftsOwner><MobileHeaderMenuContext.Provider value={menuButton}><MobileAgentMenuContext.Provider value={openAgentMenu}><MobileNoticeScope owner={client} identity={[ getDeviceWorkface().recordIdentity()]}><MobileGoalOperationSafety /><div className="mobile-app" data-wide-workface={wideWorkface || undefined} data-sidebar-collapsed={sidebarCollapsed || undefined} data-focus-root={focusRoot || undefined} data-connection={connection.state} data-mobile-workface={moteConversation ? 'mote' : 'workspace'} data-page-header={primaryHeader ? 'inline' : 'shell'}>
+  return <MobileLocalDraftsOwner><MobileHeaderMenuContext.Provider value={menuButton}><MobileAgentMenuContext.Provider value={openAgentMenu}><MobileNoticeScope owner={client} identity={[ getDeviceWorkface().recordIdentity()]}><MobileGoalOperationSafety /><div className="mobile-app" data-wide-shell={wideShell || undefined} data-wide-workface={wideWorkface || undefined} data-sidebar-collapsed={sidebarCollapsed || undefined} data-focus-root={focusRoot || undefined} data-connection={connection.state} data-mobile-workface={moteConversation ? 'mote' : 'workspace'} data-page-header={primaryHeader ? 'inline' : 'shell'}>
     <aside ref={setFocusTarget} className="mobile-focus-pane" role={focusRoot ? 'main' : undefined} aria-label="Focus 会话列表" hidden={!focusShown} />
     <div className="mobile-primary-pane">
     {wideWorkface && <button type="button" className="mobile-sidebar-toggle mobile-icon-button" aria-label={sidebarCollapsed ? '展开会话列表' : '收起会话列表'} aria-expanded={!sidebarCollapsed} onClick={() => setSidebarCollapsed(value => !value)}>{sidebarCollapsed ? <ThemeOpenSidebarIcon size={18} /> : <ThemeCloseSidebarIcon size={18} />}</button>}
@@ -751,7 +756,7 @@ function MobileAppContent({ client, connection, platform: basePlatform, native =
     </div>
     <MobileAgentCreate client={client} connected={connected} visible={sheet === 'create'} target={createTarget} platform={platform} onClose={() => setSheet(null)} openSession={id => openSession(id, { name: 'Agent', project: '项目未确认' })} />
     <Dialog.Root open={sheet !== null && sheet !== 'create'} onOpenChange={open => { if (!open) setSheet(null) }}>
-      <Dialog.Portal container={platform.overlayContainer()}><Dialog.Overlay className={sheet === 'settings' ? 'mobile-drawer-backdrop' : 'mobile-sheet-backdrop'} /><Dialog.Content className={sheet === 'settings' ? 'mobile-drawer' : `mobile-sheet${sheet === 'agent' || sheet === 'actions' ? ' mobile-sheet--agent' : ''}`} aria-describedby="mobile-sheet-description" onCloseAutoFocus={event => {
+      <Dialog.Portal container={platform.overlayContainer()}><Dialog.Overlay className={sheet === 'settings' ? 'mobile-drawer-backdrop' : `mobile-sheet-backdrop${positionOverlay ? ' mobile-sheet-backdrop--underlay' : ''}`} /><Dialog.Content className={sheet === 'settings' ? 'mobile-drawer' : `mobile-sheet${sheet === 'agent' || sheet === 'actions' ? ' mobile-sheet--agent' : ''}${positionOverlay ? ' mobile-sheet--underlay' : ''}`} aria-describedby="mobile-sheet-description" onCloseAutoFocus={event => {
         const original = composeAfterClose.current
         if (!original) return
         composeAfterClose.current = null
@@ -799,6 +804,8 @@ function MobileAppContent({ client, connection, platform: basePlatform, native =
         </> : sheet === 'agent' && menuTarget ? <>
           <Dialog.Description id="mobile-sheet-description">{menuTarget.identity.project}</Dialog.Description>
           {menuIssue && <MobileNotice owner={client} identity={[menuTarget.agentSessionId, menuIssue]} role="status">{menuIssue}</MobileNotice>}
+          {menuTarget.location && <MobileAgentLocations client={client} catalog={menuTarget.location.catalog} locations={menuTarget.location.group} agentSessionId={menuTarget.agentSessionId} name={menuTarget.identity.name} visible={sheet === 'agent'} open={positionOverlay} onOpenChange={setPositionOverlay}
+            beforeChoose={() => validateMenuSource() && (menuTarget.location?.current?.() ?? false)} onChoose={place => { menuTarget.location?.onChoose(place); setSheet(null) }} />}
           <MobileAgentActions key={menuTarget.agentSessionId} client={client} agentSessionId={menuTarget.agentSessionId} connected={connected} copyText={platform.copyText} beforeAction={validateMenuSource} statusSource={menuTarget} />
           <button className="mobile-menu-row" onClick={() => { if (validateMenuSource()) { openSession(menuTarget.agentSessionId, menuTarget.identity); setSheet(null) } }}><ThemeObjectConversationIcon size={18} /><span>打开对话</span></button>
         </> : sheet === 'actions' ? <>

@@ -544,7 +544,8 @@ button:disabled { opacity: .5; cursor: default; }
 .mobile-focus-pane { grid-column: 1; grid-row: 3; min-width: 0; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
 .mobile-app[data-focus-root] > .mobile-primary-pane > .mobile-main { visibility: hidden; pointer-events: none; }
 .mobile-sidebar-toggle { display: none; }
-.mobile-app[data-wide-workface] { max-width: none; grid-template-columns: 272px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); }
+.mobile-app[data-wide-shell] { max-width: none; }
+.mobile-app[data-wide-workface] { grid-template-columns: 272px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); }
 .mobile-app[data-wide-workface] > .mobile-focus-pane { grid-row: 1; border-right: 1px solid var(--line-soft); background: var(--mobile-page); padding-top: env(safe-area-inset-top, 0px); }
 .mobile-app[data-wide-workface] > .mobile-primary-pane { grid-column: 2; min-width: 0; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto minmax(0, 1fr) auto auto; position: relative; }
 .mobile-app[data-wide-workface][data-sidebar-collapsed] { grid-template-columns: minmax(0, 1fr); }
@@ -557,3 +558,9 @@ button:disabled { opacity: .5; cursor: default; }
 .mobile-app[data-wide-workface] .mobile-focus-facet .mobile-row-detail { gap: 2px; }
 .mobile-focus-facet .mobile-agent-row[data-current] { background: var(--mobile-group-press); border-radius: var(--mobile-radius-sm); }
 .mobile-focus-facet .mobile-agent-row__open[aria-current="true"] .mobile-row-title strong { font-weight: 700; }
+
+/* Keep long directory rows readable without shrinking the wide shell and its navigation. */
+.mobile-app[data-wide-shell]:not([data-wide-workface]) .mobile-spatial-panel { width: 100%; max-width: 720px; margin-inline: auto; }
+
+/* The original More owner stays mounted while its position child is in front. */
+.mobile-sheet--underlay, .mobile-sheet-backdrop--underlay { visibility: hidden; pointer-events: none; }

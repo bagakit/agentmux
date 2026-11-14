@@ -1,6 +1,3 @@
-.mobile-agent-row:has(> .mobile-agent-locations-entry) { grid-template-columns: minmax(0, 1fr) auto auto; }
-.mobile-agent-row > .mobile-agent-locations-entry { display: flex; align-items: center; justify-content: center; gap: 3px; min-width: 44px; min-height: 44px; padding: 0 5px; color: var(--text-3); background: transparent; font-size: var(--fs-micro); }
-.mobile-agent-locations-entry:active { background: var(--mobile-group-press); }
 .mobile-agent-locations-sheet { display: flex; flex-direction: column; max-height: min(85dvh, 680px); }
 .mobile-agent-locations-list { min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
 .mobile-agent-location-group + .mobile-agent-location-group { border-top: 1px solid var(--mobile-hairline); margin-top: var(--sp-2); }

@@ -1,26 +1,40 @@
+import './agent-row.css'
+import '@agentmux/client-ui/styles/agent-avatar-face.css'
 import { IconButton } from '@agentmux/client-ui/components/IconButton'
 import { createContext, useContext, useEffect, useRef, type ReactNode } from 'react'
+import { AgentAvatarFace } from '@agentmux/client-ui/components/AgentAvatarFace'
+import { FocusStateMark } from '@agentmux/client-ui/components/FocusStateMark'
+import { agentProviderLabel } from '@agentmux/client-ui/components/AgentProviderIcon'
+import { formatMobileClock } from '../presentation/time'
+import { mobileAgentStateLabel } from './mobile-agent-status'
+import { mobileNeedsYouReason } from './needs-you'
+import type { AgentMuxSpaceAddress, AgentMuxSpaceCatalog } from '@agentmux/core/control'
+import type { MobileAgentLocations } from './mobile-agent-locations'
 import { SemanticIcon } from '@agentmux/client-ui/icons'
 import type { MobileObjectIdentity } from './MobileIdentity'
 import type { MobileAgentPresentation } from './mobile-agent-status'
 
+export type MobileAgentMenuLocation = { catalog: AgentMuxSpaceCatalog | null; group: MobileAgentLocations | undefined;
+  onChoose(place: AgentMuxSpaceAddress): void; current?(): boolean }
 export type MobileAgentMenuTarget = { agentSessionId: string; identity: MobileObjectIdentity; beforeAction?: () => boolean
-  presentation?: MobileAgentPresentation | undefined; refreshStatus?: (() => boolean | void) | undefined }
+  location?: MobileAgentMenuLocation | undefined; presentation?: MobileAgentPresentation | undefined; refreshStatus?: (() => boolean | void) | undefined }
 /** Presentation only. The App owns disclosure; a row never selects or inspects an Agent. */
 export const MobileAgentMenuContext = createContext<((target: MobileAgentMenuTarget) => void) | null>(null)
 
-export function MobileAgentRow({ agentSessionId, identity, presentation, refreshStatus, onOpen, beforeMenu, children, selected = false, className = '' }: MobileAgentMenuTarget & {
+export function MobileAgentRow({ agentSessionId, identity, presentation, refreshStatus, location, onOpen, beforeMenu, children, selected = false, className = '' }: MobileAgentMenuTarget & {
   onOpen(): void; beforeMenu?(): boolean; children: ReactNode; selected?: boolean; className?: string
 }) {
   const showMenu = useContext(MobileAgentMenuContext)
-  const current = useRef({ agentSessionId, identity, presentation, refreshStatus, showMenu, beforeMenu })
-  current.current = { agentSessionId, identity, presentation, refreshStatus, showMenu, beforeMenu }
+  const alive = useRef(true)
+  useEffect(() => { alive.current = true; return () => { alive.current = false } }, [])
+  const current = useRef({ agentSessionId, identity, presentation, refreshStatus, location, showMenu, beforeMenu })
+  current.current = { agentSessionId, identity, presentation, refreshStatus, location, showMenu, beforeMenu }
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const press = useRef<{ id: number; x: number; y: number; type: string } | null>(null)
   const suppressClick = useRef(false)
   const release = useRef<(() => void) | null>(null)
   function cancel() { clearTimeout(timer.current); press.current = null; release.current?.(); release.current = null }
-  function openMenu() { const target = current.current; if (target.beforeMenu && !target.beforeMenu()) return; target.showMenu?.({ agentSessionId: target.agentSessionId, identity: target.identity, ...(target.presentation ? { presentation: target.presentation } : {}), ...(target.refreshStatus ? { refreshStatus: target.refreshStatus } : {}), ...(target.beforeMenu ? { beforeAction: target.beforeMenu } : {}) }) }
+  function openMenu() { const target = current.current; if (target.beforeMenu && !target.beforeMenu()) return; target.showMenu?.({ agentSessionId: target.agentSessionId, identity: target.identity, ...(target.presentation ? { presentation: target.presentation } : {}), ...(target.refreshStatus ? { refreshStatus: target.refreshStatus } : {}), ...(target.beforeMenu ? { beforeAction: target.beforeMenu } : {}), ...(target.location ? { location: { ...target.location, current: () => alive.current && current.current.agentSessionId === target.agentSessionId && current.current.location?.group?.hostId === target.location?.group?.hostId && (target.location?.current?.() ?? true) } } : {}) }) }
   useEffect(() => {
     suppressClick.current = false
     return cancel
@@ -46,5 +60,22 @@ export function MobileAgentRow({ agentSessionId, identity, presentation, refresh
       {children}
     </button>
     {showMenu && <IconButton className="mobile-icon-button mobile-agent-row__more" aria-label={`${identity.name} · 更多操作`} onClick={openMenu}><SemanticIcon name="action.more" size={16} /></IconButton>}
+  </>
+}
+
+/** One presentation for directory and Zone rows; it never reads or qualifies a Session. */
+export function MobileAgentRowContent({ title, presentation, providerId, detail }: { title: string; presentation?: MobileAgentPresentation | undefined; providerId?: string | undefined; detail?: string | undefined }) {
+  const state = presentation?.stateMark ?? 'unknown', label = mobileAgentStateLabel(presentation)
+  const reason = mobileNeedsYouReason(presentation)
+  const summary = reason ? label : presentation?.recap?.text ?? detail ?? ''
+  const clock = formatMobileClock(presentation?.lastActivityAt)
+  return <>
+    <span className="mobile-row-avatar mobile-executor-avatar"><AgentAvatarFace providerId={providerId} appearance={presentation?.avatar} size={24} />
+      <span className="mobile-row-status" title={label}><FocusStateMark kind={state} presenceUnknown={presentation?.presenceUnknown} /></span></span>
+    <span className="mobile-row-copy mobile-session-copy"><span className="mobile-row-title"><strong>{title}</strong></span>
+      <span className="mobile-row-detail"><span className="mobile-session-recap" data-state={reason ?? undefined} title={summary}>{summary}</span>
+        {clock && <time dateTime={new Date(presentation!.lastActivityAt!).toISOString()}>{clock}</time>}</span>
+      <small className="mobile-visually-hidden">{label}{providerId ? ` · ${agentProviderLabel(providerId)}` : ' · 元信息未确认'}</small>
+    </span>
   </>
 }

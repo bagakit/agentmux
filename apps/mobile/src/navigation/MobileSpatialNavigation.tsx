@@ -15,18 +15,15 @@ import '@agentmux/client-ui/styles/agent-avatar-face.css'
 import { FocusStateMark } from '@agentmux/client-ui/components/FocusStateMark'
 import { MobileIdentity, type MobileObjectIdentity } from './MobileIdentity'
 import { MobileRegionContent } from './MobileRegionContent'
-import { MobileAgentLocations } from './MobileAgentLocations'
 import { agentLocationKey, mobileAgentLocations } from './mobile-agent-locations'
 import type { MobileHome } from './home-preference'
 import { MobileSpaceDirectory } from './MobileSpaceDirectory'
 import { MobileDirectoryNotice } from './MobileDirectoryNotice'
-import { MobileAgentRow } from './MobileAgentRow'
+import { MobileAgentRow, MobileAgentRowContent } from './MobileAgentRow'
 import { MobileHeaderMenu } from './MobileHeaderMenu'
-import { mobileAgentStateLabel, ordinaryUnknownAgentStatus, type MobileAgentPresentation } from './mobile-agent-status'
+import type { MobileAgentPresentation } from './mobile-agent-status'
 import { mobileNeedsYouReason, type MobileNeedsYouItem } from './needs-you'
 import { MobileNeedsYouAnswer } from './MobileNeedsYouAnswer'
-import { formatMobileClock } from '../presentation/time'
-import { agentProviderLabel } from '@agentmux/client-ui/components/AgentProviderIcon'
 import './focus-home.css'
 import { useMobileWebCatalogObservation } from '../mobile-web/use-mobile-web-observation'
 import './navigation.css'
@@ -250,39 +247,21 @@ export const MobileSpatialNavigation = memo(function MobileSpatialNavigation({ h
   }
   const name = (session: SessionReference) => identity(session).name
   const sessionRow = (session: SessionReference, key = session.agentSessionId, context?: AgentMuxSpaceAddress | null, tabName?: string | null, places?: AgentMuxSpaceAddress[], hostId?: string | null, focus = false) => {
-    const object = identity(session, context), row = directory.rows.get(session.agentSessionId), status = row?.state ?? 'unknown'
-    const group = locationGroup(session.agentSessionId, hostId ?? row?.projectGroup?.hostId ?? sessionById.get(session.agentSessionId)?.hostId)
+    const object = identity(session, context), row = directory.rows.get(session.agentSessionId)
     const execution = directory.locationIndex.bySession.get(session.agentSessionId)
     const executionHost = execution?.length === 1 ? execution[0]!.hostId : execution ? null : sessionById.get(session.agentSessionId)?.hostId
+    const group = locationGroup(session.agentSessionId, hostId ?? sessionById.get(session.agentSessionId)?.hostId ?? executionHost)
     const isCurrent = focus && focusSelected?.agentSessionId === session.agentSessionId && focusSelected.hostId === executionHost
     const providerId = row?.providerId || session.providerId
-    const stateLabel = row ? mobileAgentStateLabel(row) : '状态未确认'
-    const refreshStatus = () => {
-      const current = directorySource.current
-      if (!directoryMounted.current || current.client !== client || !current.connected || current.home !== home || current.spaceId !== spaceId) return false
-      refresh(count => count + 1)
-    }
-    const mark = row?.stateMark ?? (status === 'working' ? 'working' : status === 'error' ? 'error' : undefined)
+    const currentScope = () => { const current = directorySource.current; return directoryMounted.current && current.client === client && current.connected && current.home === home && current.spaceId === spaceId }
+    const refreshStatus = () => { if (!currentScope()) return false; refresh(count => count + 1) }
     // The shell owns the Hosted pending-interaction read; rows only consume its result.
     const attention = mobileNeedsYouReason(row)
-    const quiet = ordinaryUnknownAgentStatus(row)
-    const shownMark = attention === 'waiting' ? 'attention' : attention === 'error' ? 'error' : quiet ? 'idle' : mark ?? 'idle'
-    const clock = formatMobileClock(row?.lastActivityAt)
     const title = object.name !== '名称未确认' ? object.name : tabName || object.name
-    const showProject = !row?.projectGroup && object.project !== '项目未确认'
     return <li key={key} className="mobile-agent-row" data-current={isCurrent || undefined} {...(attention ? { 'data-needs-you': attention === 'error' ? 'error' : 'waiting' } : {})}
-      {...(row?.group === 'results' ? { 'data-unread': '' } : {})}><MobileAgentRow agentSessionId={session.agentSessionId} identity={object} presentation={row} refreshStatus={refreshStatus} selected={isCurrent} onOpen={() => (focus ? openFocusSession ?? openSession : openSession)(session.agentSessionId, object)}>
-      <span className="mobile-row-avatar mobile-executor-avatar"><AgentAvatarFace providerId={providerId} appearance={row?.avatar} size={24} /><span className="mobile-row-dot" data-mark={shownMark} aria-hidden="true" /></span>
-      <span className="mobile-row-copy mobile-session-copy">
-        <span className="mobile-row-title"><strong>{title}</strong>{clock && <time dateTime={new Date(row!.lastActivityAt!).toISOString()}>{clock}</time>}</span>
-        <span className="mobile-row-detail"><span className="mobile-row-state mobile-session-state" data-state={status} data-mark={shownMark}>
-          {!quiet && <>{row?.stateMark && <FocusStateMark kind={row.stateMark} presenceUnknown={row.presenceUnknown} />}<span title={stateLabel}>{stateLabel}</span></>}
-          <small className="mobile-visually-hidden">{providerId ? agentProviderLabel(providerId) : '元信息未确认'}</small></span>
-          {showProject && <span className="mobile-row-project mobile-session-project">{object.project}</span>}
-          <span className="mobile-session-recap" title={row?.recap ? row.recap.text : row?.detail}>{row?.recap?.text ?? (tabName && tabName !== title ? tabName : providerId ? agentProviderLabel(providerId) : '')}</span></span>
-      </span>
-    </MobileAgentRow><MobileAgentLocations client={client} catalog={catalog} locations={group} agentSessionId={session.agentSessionId} name={title} visible={focus ? focusActive : visible}
-      onChoose={place => (focus ? openFocusSession ?? openSession : openSession)(session.agentSessionId, identity(session, place))} /></li>
+      {...(row?.group === 'results' ? { 'data-unread': '' } : {})}><MobileAgentRow agentSessionId={session.agentSessionId} identity={object} presentation={row} refreshStatus={refreshStatus} selected={isCurrent} location={{ catalog, group, current: currentScope, onChoose: place => (focus ? openFocusSession ?? openSession : openSession)(session.agentSessionId, identity(session, place)) }} onOpen={() => (focus ? openFocusSession ?? openSession : openSession)(session.agentSessionId, object)}>
+      <MobileAgentRowContent title={title} presentation={row} providerId={providerId} detail={tabName && tabName !== title ? tabName : undefined} />
+    </MobileAgentRow></li>
   }
   const rows = catalog?.agentPresentation ?? []
   const focusReady = focusVisited.current
@@ -392,7 +371,7 @@ export const MobileSpatialNavigation = memo(function MobileSpatialNavigation({ h
           const session = reference(item.agentSessionId, true), object = identity(session), row = directory.rows.get(item.agentSessionId)
           return <li key={item.agentSessionId} className="mobile-needs-you-card" data-reason={item.reason}><button type="button" className="mobile-needs-you-ticket" data-reason={item.reason}
             aria-label={`${object.name} · ${item.reason === 'error' ? '出错' : '需要你'} · 打开对话`} onClick={() => (openFocusSession ?? openSession)(item.agentSessionId, object)}>
-            <span className="mobile-row-avatar"><AgentAvatarFace providerId={row?.providerId || session.providerId} appearance={row?.avatar} size={20} /><span className="mobile-row-dot" data-mark={item.reason === 'error' ? 'error' : 'attention'} aria-hidden="true" /></span>
+            <span className="mobile-row-avatar"><AgentAvatarFace providerId={row?.providerId || session.providerId} appearance={row?.avatar} size={20} /><span className="mobile-row-status"><FocusStateMark kind={item.reason === 'error' ? 'error' : 'attention'} /></span></span>
             <span><strong>{object.name}</strong><small>{item.reason === 'error' ? '出错 · 需要处理' : row?.projectGroup?.name ?? object.project}</small></span>
           </button>
           {item.reason === 'waiting' && <MobileNeedsYouAnswer client={client} connected={connected} agentSessionId={item.agentSessionId} identity={object}

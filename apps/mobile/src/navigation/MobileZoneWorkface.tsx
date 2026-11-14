@@ -5,8 +5,7 @@ import type { AgentMuxSpaceCatalog } from '@agentmux/core/control'
 import { SemanticIcon } from '@agentmux/client-ui/icons'
 import { MobileRegionContent } from './MobileRegionContent'
 import type { MobileObjectIdentity } from './MobileIdentity'
-import { MobileAgentRow } from './MobileAgentRow'
-import { MobileAgentLocations } from './MobileAgentLocations'
+import { MobileAgentRow, MobileAgentRowContent } from './MobileAgentRow'
 import { agentLocationKey, mobileAgentLocations } from './mobile-agent-locations'
 
 /** Topic discussions and original content use the same public Zone and Region identities. */
@@ -40,10 +39,9 @@ export function MobileZoneWorkface({ client, zoneId, name, visible, openSession,
         const agent = catalog.agentPresentation?.find(value => value.agentSessionId === region.agentSessionId)
         const occurrences = catalog.locations.filter(place => place.tabId === tab.tabId && place.regionId === region.regionId)
         const identity = (context?: typeof occurrences[number]): MobileObjectIdentity => ({ name: agent?.name ?? tab.name ?? name, project: agent?.project ?? name, ...(context ? { context } : {}) })
-        return region.agentSessionId ? <div key={region.regionId} className="mobile-agent-row"><MobileAgentRow agentSessionId={region.agentSessionId} identity={identity(occurrences.length === 1 ? occurrences[0] : undefined)} className="mobile-menu-row" onOpen={() => openSession(region.agentSessionId!, identity(occurrences.length === 1 ? occurrences[0] : undefined))}>
-          <span>{agent?.name ?? tab.name ?? name}<small>{agent?.recap?.text ?? agent?.detail ?? '打开对话'}</small></span>
-        </MobileAgentRow><MobileAgentLocations client={client} catalog={catalog} locations={locationIndex.byAgent.get(agentLocationKey(region.execution?.hostId ?? null, region.agentSessionId))}
-          agentSessionId={region.agentSessionId} name={agent?.name ?? tab.name ?? name} visible={visible} onChoose={place => openSession(region.agentSessionId!, identity(place))} /></div> : region.kind === 'file' || region.kind === 'browser' ? <MobileRegionContent visible={visible} key={region.regionId} client={client} tabId={tab.tabId} regionId={region.regionId} kind={region.kind} browserId={region.browserId} file={region.file} zoneId={zoneId ?? tab.zoneId} />
+        return region.agentSessionId ? <div key={region.regionId} className="mobile-agent-row"><MobileAgentRow agentSessionId={region.agentSessionId} identity={identity(occurrences.length === 1 ? occurrences[0] : undefined)} presentation={agent} location={{ catalog, group: locationIndex.byAgent.get(agentLocationKey(region.execution?.hostId ?? null, region.agentSessionId)), onChoose: place => openSession(region.agentSessionId!, identity(place)) }} onOpen={() => openSession(region.agentSessionId!, identity(occurrences.length === 1 ? occurrences[0] : undefined))}>
+          <MobileAgentRowContent title={agent?.name ?? tab.name ?? name} presentation={agent} providerId={agent?.providerId} />
+        </MobileAgentRow></div> : region.kind === 'file' || region.kind === 'browser' ? <MobileRegionContent visible={visible} key={region.regionId} client={client} tabId={tab.tabId} regionId={region.regionId} kind={region.kind} browserId={region.browserId} file={region.file} zoneId={zoneId ?? tab.zoneId} />
           : <p key={region.regionId} className="mobile-spatial-notice">{region.kind === 'launcher' ? '此讨论尚未启动 Agent。' : '终端工作面'}</p>
       })}
     </section>)}

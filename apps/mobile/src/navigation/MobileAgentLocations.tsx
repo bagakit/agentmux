@@ -9,18 +9,19 @@ import { confirmsAgentLocation, locationContextKey, type MobileAgentLocations as
 import './agent-locations.css'
 
 /** Two Mobile directory consumers share disclosure, not a navigation or execution owner. */
-export function MobileAgentLocations({ client, catalog, locations, agentSessionId, name, visible, onChoose }: {
+export function MobileAgentLocations({ client, catalog, locations, agentSessionId, name, visible, onChoose, beforeChoose, open, onOpenChange }: {
   client: AgentMuxHostedClient | null; catalog: AgentMuxSpaceCatalog | null; locations: Locations | undefined
-  agentSessionId: string; name: string; visible: boolean; onChoose(place: AgentMuxSpaceAddress): void
+  agentSessionId: string; name: string; visible: boolean; open: boolean; onOpenChange(open: boolean): void; beforeChoose?(): boolean; onChoose(place: AgentMuxSpaceAddress): void
 }) {
-  const [open, setOpen] = useState(false), [issue, setIssue] = useState(''), [pending, setPending] = useState(false)
+  const [issue, setIssue] = useState(''), [pending, setPending] = useState(false)
   const description = useId(), mounted = useRef(false), request = useRef(0)
-  const current = useRef({ client, agentSessionId, hostId: locations?.hostId, visible, open, onChoose })
-  current.current = { client, agentSessionId, hostId: locations?.hostId, visible, open, onChoose }
+  const current = useRef({ client, agentSessionId, hostId: locations?.hostId, visible, open, onChoose, beforeChoose })
+  current.current = { client, agentSessionId, hostId: locations?.hostId, visible, open, onChoose, beforeChoose }
   useEffect(() => {
     request.current++; setPending(false)
     if (current.current.open) setIssue('连接或目标已改变，这次没有打开；请在当前目录重新选择。')
   }, [client, agentSessionId, locations?.hostId, visible])
+  useEffect(() => { if (!open) { request.current++; setPending(false) } }, [open])
   // The callback ref also fences a late response after its row has unmounted.
   const anchor = (node: HTMLButtonElement | null) => { mounted.current = node !== null }
   const known = catalog !== null && Boolean(locations?.hostId)
@@ -42,6 +43,7 @@ export function MobileAgentLocations({ client, catalog, locations, agentSessionI
   for (const group of groups.values()) { const key = `${group.title}\n${group.path}`; headings.set(key, (headings.get(key) ?? 0) + 1) }
   async function choose(place: AgentMuxSpaceAddress) {
     const source = current.current, runtime = client?.runtimeOwnerIdentity(), operation = ++request.current
+    if (source.beforeChoose && !source.beforeChoose()) { setIssue('原菜单或位置已改变，请重新打开。'); return }
     if (!source.client?.forwardRpc || !source.hostId) { setIssue('这个位置还没确认，对话仍可打开。'); return }
     const stillCurrent = () => mounted.current && operation === request.current && current.current.client === source.client &&
       current.current.agentSessionId === source.agentSessionId && current.current.hostId === source.hostId && current.current.open && current.current.visible
@@ -53,13 +55,13 @@ export function MobileAgentLocations({ client, catalog, locations, agentSessionI
       const sameOwner = Boolean(runtime && owner && runtime.runtimeId === owner.runtimeId && runtime.ownerInstanceId === owner.ownerInstanceId)
       if (!mounted.current) return
       if (operation !== request.current) return
-      if (operation !== request.current || now.client !== source.client || now.agentSessionId !== source.agentSessionId || now.hostId !== source.hostId || !sameOwner || !now.visible || !now.open) {
+      if (operation !== request.current || now.client !== source.client || now.agentSessionId !== source.agentSessionId || now.hostId !== source.hostId || !sameOwner || !now.visible || !now.open || now.beforeChoose && !now.beforeChoose()) {
         setIssue('读取期间连接或目标已改变，这次没有打开；请在当前目录重新选择。'); return
       }
       if (!confirmsAgentLocation(value.catalog, source.hostId, source.agentSessionId, place)) {
         setIssue('这个位置已变化或还没确认，这次没有打开；可重新读取此位置。'); return
       }
-      now.onChoose(place); setOpen(false)
+      now.onChoose(place); changeOpen(false)
     } catch (error) {
       const owner = current.current.client?.runtimeOwnerIdentity()
       if (stillCurrent()) setIssue(runtime?.runtimeId !== owner?.runtimeId || runtime?.ownerInstanceId !== owner?.ownerInstanceId
@@ -68,10 +70,11 @@ export function MobileAgentLocations({ client, catalog, locations, agentSessionI
     }
     finally { if (stillCurrent()) setPending(false) }
   }
-  return <Dialog.Root open={open} onOpenChange={value => { request.current++; setPending(false); setOpen(value); if (value) setIssue('') }}><Dialog.Trigger asChild>
-    <button ref={anchor} type="button" className="mobile-agent-locations-entry" aria-label={`${name} · ${label}`} title="查看展示位置"><SemanticIcon name="object.region" size={15} /><span>{known ? locations?.count ?? 0 : '?'}</span></button>
+  const changeOpen = (value: boolean) => { request.current++; setPending(false); if (value) setIssue(''); onOpenChange(value) }
+  return <Dialog.Root open={open} onOpenChange={changeOpen}><Dialog.Trigger asChild>
+    <button ref={anchor} type="button" className="mobile-menu-row mobile-agent-locations-entry" aria-label={`${name} · ${label}`} title="查看展示位置"><SemanticIcon name="object.region" size={15} /><span>查看展示位置<small>{label}</small></span><SemanticIcon name="navigation.disclosure" size={16} /></button>
   </Dialog.Trigger><Dialog.Portal><Dialog.Overlay className="mobile-sheet-backdrop" /><Dialog.Content className="mobile-sheet mobile-agent-locations-sheet" aria-describedby={description}>
-    <MobileSheetHandle onClose={() => setOpen(false)} /><div className="mobile-sheet-title"><Dialog.Title>{name}的位置</Dialog.Title>
+    <MobileSheetHandle onClose={() => changeOpen(false)} /><div className="mobile-sheet-title"><Dialog.Title>{name}的位置</Dialog.Title>
       <Dialog.Close asChild><IconButton className="mobile-icon-button" aria-label="关闭位置选择"><SemanticIcon name="action.close" size={18} /></IconButton></Dialog.Close></div>
     <Dialog.Description id={description}>{label}{locations && locations.addresses.length > locations.count ? `，${locations.addresses.length} 个空间入口。` : ' · 选择要查看的工作面。'}</Dialog.Description>
     {issue && <p role="status" className="mobile-agent-locations-issue">{issue}</p>}
