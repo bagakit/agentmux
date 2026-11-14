@@ -19,6 +19,33 @@ authenticated person can grant, one direction at a time. amux settings --help de
 reads, exact input fields and authority; amux message --skill explains when a remote reply
 needs message-source trust and how the original sender synchronizes it.
 
+## Register and edit a Host
+
+Use settings hosts create <id> --input <file|-> to save a complete new SSH
+record. The command ID and JSON id must match; kind is ssh, with label and hostname.
+Optional user, port and transport retain literal SSH configuration. Omit runtimeId:
+only the authenticated original connection learns that identity. Registration does
+not install Core or mean the connection is ready. No private key is read or copied
+by the configuration command.
+
+Read settings hosts ls before editing. settings hosts configure <id> --input <file|->
+takes {expected:completeSavedRecord,candidate:completeNewRecord}. It preserves the
+Host ID, kind and learned Runtime binding; bound SSH route changes use the original
+same-Runtime confirmation. settings hosts update remains the explicit bound-route
+repair entry. Local label editing does not change local ingress authorization.
+
+settings hosts test <id> checks the exact saved record; --input tests a complete
+draft. settings hosts delete <id> --input <file|-> takes {expected:completeSavedRecord}
+and removes only an unused SSH route. Workspace, durable Session and Run references
+are retained; local cannot be removed. Unavailable reference observation preserves
+the Host and reports the failed step. Never delete configuration files or create a
+new identity to bypass references.
+
+A configuration response confirms the original owner's save and publication.
+After a partial or missing reply retain the original request, then read hosts ls;
+the current value is not the lost operation's receipt. Do not automatically replay
+create, edit or delete.
+
 ## Host home directory
 
 settings hosts home --host HOST reads that exact configured Host's current homeDirectory.
@@ -159,6 +186,39 @@ Reading a declaration does not authenticate its author, execute hints or grant p
 
 [Current protocol-catalog](../../dist/amux-protocol-definition.js "amux:generated protocol-catalog")
 
+
+## Ask a person to review one Core maintenance action
+
+A managed Agent can prepare an exact install or upgrade request after saving the
+Host and reading its original `install-check` or `upgrade-check`. Use
+`settings hosts maintenance-request --input FILE|-` with
+`{action:"install"|"upgrade",id,host,expected,operationId}`. `host` is the complete
+saved Host record from `settings hosts ls`; `expected` is the exact original
+check, including the chosen install keepRunning or the upgrade's reviewed ending
+Runs. Submitting only retains the request. It neither installs nor upgrades.
+The answering service records the authenticated requester Session, source Host,
+known source Runtime and Run; missing Runtime identity remains unknown.
+
+Retain the returned `requestDigest` and original `operationId`. The person/device
+reads `settings hosts maintenance-inspect --operation-id ID`, reviews the exact
+Host, candidate, action, requester and effects, then calls
+`settings hosts maintenance-review --operation-id ID --input FILE|-` with
+`{requestDigest,decision:"approve"|"reject"}` from its authenticated transport.
+An Agent cannot approve, supply a user identity, or acquire a reusable grant.
+Approval executes that one original action through the existing maintenance
+owner; it does not authorize future operations or source trust. A changed Host,
+candidate or expected tuple requires a fresh explicit check and request.
+
+The request, reviewer decision, maintenance receipt and connection adoption are
+separate facts. Request state `finished` means the owner returned a receipt;
+read `result.status` for completed, failed, running or unknown deployment and its
+connectionAdoption for saved connection confirmation. Approval is durably
+recorded before the remote action. After a lost reply, restart, executing or
+unconfirmed result, inspect this same operation. A missing original remote
+receipt is unknown, never permission to execute it again. Repeating review of
+an already decided request only reads its original result. Rejection changes no
+Host, Agent, Run or remote service. Direct install/upgrade commands keep their
+existing transport-approved person/device requirement.
 
 ## First install on a saved Linux SSH Host
 
