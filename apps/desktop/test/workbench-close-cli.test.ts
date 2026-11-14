@@ -263,6 +263,7 @@ it.runIf(business).each(['tab-x', 'focus-menu', 'changed-agent', 'changed-kind']
   const select = document.querySelector<HTMLElement>('[aria-label="Original position"]')!
   await act(async () => select.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })))
   await vi.waitFor(() => expect(document.querySelectorAll('[role="menuitemradio"]:not([data-missing])').length).toBe(2))
+  if (process.env.AGENTMUX_SOURCE_CLOSE_VISUAL_DOM && entry === 'focus-menu') await writeFile(process.env.AGENTMUX_SOURCE_CLOSE_VISUAL_DOM + '-choice-open.html', document.body.innerHTML)
   await act(async () => [...document.querySelectorAll<HTMLElement>('[role="menuitemradio"]:not([data-missing])')].find(option => option.textContent?.includes('otherDisplay'))!.click())
   if (entry.startsWith('changed-')) {
     const execute = f.store.getState().executeWorkbenchClose
@@ -290,6 +291,7 @@ it.runIf(business).each(['tab-x', 'focus-menu', 'changed-agent', 'changed-kind']
     return
   }
   await vi.waitFor(() => expect(document.querySelector('[data-confirm-label="Close"]:not([disabled])')).not.toBeNull())
+  expect(document.querySelector('.confirmation-dialog')?.textContent).toContain('Original position: otherDisplay · other-group')
   if (process.env.AGENTMUX_SOURCE_CLOSE_VISUAL_DOM && entry === 'focus-menu') await writeFile(process.env.AGENTMUX_SOURCE_CLOSE_VISUAL_DOM + '-review.html', document.body.innerHTML)
   await act(async () => document.querySelector<HTMLElement>('[data-confirm-label="Close"]:not([disabled])')!.click())
   await vi.waitFor(() => expect(document.querySelector('.confirmation-dialog')?.textContent).toContain('Original view closed'))
