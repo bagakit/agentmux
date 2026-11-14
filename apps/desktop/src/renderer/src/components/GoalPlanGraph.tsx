@@ -32,6 +32,7 @@ export function goalPlanStateLabel(item: Pick<GoalPlanNodeView, 'state' | 'unkno
 }
 const ThemeObjectWorkflowIcon = semanticIconComponent('object.workflow')
 const ThemeObjectAgentIcon = semanticIconComponent('object.agent')
+const ThemeObjectGoalIcon = semanticIconComponent('object.goal')
 
 /** Columns by dependency depth; within a column the plan order is kept. */
 export function goalPlanColumns(projection: GoalPlanView): GoalPlanNodeView[][] {
@@ -196,10 +197,16 @@ export function GoalPlanGraph({ demand, onOpenDiscussion, onRequestPlan, pending
   if (!projection) return <section className="goal-plan goal-plan--empty" aria-label="Goal plan" data-goal-plan-empty>
     <div className="goals-section-heading"><h2><ThemeObjectWorkflowIcon size={14} aria-hidden="true" /> Execution plan</h2><span className="goals-caption">Tasks and dependencies</span></div>
     {stateService}{issue ? <p className="goals-service" role="status">{issue}</p> : null}
-    <div className="goal-plan__empty-body"><p className="goal-plan__empty-title">No execution plan yet</p>
-      <p className="goals-muted">{demand.alignment ? 'Turn this goal into tasks, dependencies and checks. The saved plan appears here as a dependency graph.' : 'Clarify the outcome and success criteria in the goal discussion, then plan the tasks and dependencies here.'}</p>
+    <div className="goal-plan__origin">
+      <article className="goal-plan__goal" data-goal-plan-origin={demand.id} aria-label="Goal starting point">
+        <span className="goal-plan__goal-icon" aria-hidden="true"><ThemeObjectGoalIcon size={24} /></span>
+        <div className="goal-plan__goal-body"><p className="goal-plan__goal-label">Goal <span>Starting point</span></p><h3>{demand.title}</h3></div>
+      </article>
+      <div className="goal-plan__empty-body"><p className="goal-plan__empty-title">No execution plan yet</p>
+      <p className="goals-muted">{demand.alignment ? 'Shape the work into tasks, dependencies and checks.' : 'Start with the outcome and success criteria, then shape the work into a plan.'}</p>
       <div className="goals-inline-actions">{requestAction}{onOpenDiscussion ? <button type="button" className="small-button" onClick={onOpenDiscussion}>Open goal discussion</button> : null}
-        {onRequestPlan ? <span className="goals-caption">Planning does not start execution.</span> : null}</div>
+      </div>
+      </div>
     </div>
   </section>
   const columns = goalPlanColumns(projection), highlight = goalPlanHighlight(projection)

@@ -50,6 +50,7 @@ export function GoalDetail({ demand, onClose, onOpenMote, onGrill, onGrounding, 
   const recipient = useGoalDiscussionRecipient(demand.id)
   const intent = (lines: number) => <GoalIntent text={description} lines={lines} editor={intentBody} editing={intentEditing || descriptionDirty} onEditingChange={editing => { setIntentEditing(editing); if (!editing && descriptionDirty) void saveGoalDrafts(demand.id, ['description']) }} />
   const draftIssue = Object.values(draft ?? {}).find(entry => entry?.issue)?.issue
+  const saveFeedback = saveError || draftIssue ? <div className="goals-service" role="status">Changes are not saved. Your draft is kept. <span>{saveError ?? draftIssue}</span><button type="button" className="small-button" onClick={() => void retrySave()}>Retry save</button></div> : null
   async function retrySave() {
     await saveGoalDrafts(demand.id)
     if (Object.keys(failedPatch.current).length) await update({ ...failedPatch.current })
@@ -68,17 +69,18 @@ export function GoalDetail({ demand, onClose, onOpenMote, onGrill, onGrounding, 
           {queue && queue.total > 1 ? <span className="goals-detail__queue" data-goal-queue><span>{queue.index} of {queue.total}</span>{queue.nextId ? <button type="button" className="small-button" data-goal-queue-next aria-label={`Next goal that ${QUEUE_NAMES[queue.stage]}`} onClick={() => onOpenGoal?.(queue.nextId!)}>Next<ThemeNavigationForwardIcon size={13} /></button> : null}</span> : null}</div>
         <ComposerTextarea className="goals-title" aria-label="Goal title" value={title} onValueChange={value => editGoalDraft(demand.id, 'title', value)} rows={1} onBlur={() => { if (titleDirty && title.trim()) void saveGoalDrafts(demand.id, ['title']) }} />
         <GoalMeta demand={demand} />
-        {draft && !draftIssue ? <p className="goals-caption">Unsaved edits</p> : null}
+        <p className="goals-detail__edit-status" aria-live="polite">{draft ? draftIssue ? 'Edits kept · Save unconfirmed' : 'Unsaved edits' : null}</p>
       </header>
       <div className="goals-detail__body">
         <div className="goals-detail__main">
-          {demand.plan ? plan : null}
-          {!demand.alignment ? <section className="goals-intent-body goals-intent-body--undefined"><div className="goals-section-heading"><h2><ThemeObjectGoalIcon size={14} aria-hidden="true" /> Goal definition</h2><span className="goals-caption">{descriptionDirty ? 'Your intent · Unsaved draft' : 'Your intent · Not outlined yet'}</span></div>{intent(16)}</section> : null}
-          {saveError || draftIssue ? <div className="goals-service" role="status">Changes are not saved. Your draft is kept. <span>{saveError ?? draftIssue}</span><button type="button" className="small-button" onClick={() => void retrySave()}>Retry save</button></div> : null}
+          {plan}
+          {!demand.alignment ? <section className="goals-intent-body goals-intent-body--undefined"><div className="goals-section-heading"><h2><ThemeObjectGoalIcon size={14} aria-hidden="true" /> Goal definition</h2><span className="goals-caption">{descriptionDirty ? 'Your intent · Unsaved draft' : 'Your intent · Not outlined yet'}</span></div>{intent(6)}</section> : null}
+          {!demand.alignment ? saveFeedback : null}
           {!demand.plan && !finished && !demand.grounding && demand.alignment?.confirmedAt ? <GoalFiniteStartControl key={`start:${demand.id}`} demand={demand} primary={!acknowledgementFeedback.failure} /> : null}
-          <GoalAlignment key={demand.id} feedback={acknowledgementFeedback} onFeedbackChange={onAcknowledgementFeedbackChange} demand={demand} onGrill={onGrill} onGrounding={onGrounding} onOpenMote={onOpenMote} motePending={motePending}>{demand.plan ? null : plan}</GoalAlignment>
+          <GoalAlignment key={demand.id} feedback={acknowledgementFeedback} onFeedbackChange={onAcknowledgementFeedbackChange} demand={demand} onGrill={onGrill} onGrounding={onGrounding} onOpenMote={onOpenMote} motePending={motePending} />
           {demand.plan || finished && !demand.grounding || !demand.alignment?.confirmedAt || demand.grounding && !finished ? <GoalFiniteStartControl key={`start:${demand.id}`} demand={demand} primary={false} /> : null}
           {demand.alignment ? <section className="goals-original-intent goals-intent-body" aria-label="Your original intent"><div className="goals-section-heading"><h2>Your original intent</h2>{descriptionDirty ? <span className="goals-caption">Unsaved draft</span> : null}</div>{intent(8)}</section> : null}
+          {demand.alignment ? saveFeedback : null}
           {moteError ? <div className="goals-service" role="status">{moteError.mode === 'open' ? 'Goal saved. The discussion could not be opened.' : `${moteError.mode === 'plan' ? 'Planning' : moteError.mode === 'grill' ? 'Goal' : 'Check'} request delivery is unconfirmed. Your goal and current work are kept.`} <span>{moteError.message}</span><button type="button" className="small-button" disabled={Boolean(motePending)} onClick={onRetryMote}>{moteError.mode === 'open' ? 'Retry opening discussion' : moteError.mode === 'plan' ? 'Check planning request' : moteError.mode === 'grill' ? 'Retry goal request' : 'Retry check request'}</button></div> : null}
           <GoalDelegationWork demand={demand} />
           <GoalActivity demand={demand} />
