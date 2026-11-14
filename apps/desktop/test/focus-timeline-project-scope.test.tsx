@@ -69,8 +69,9 @@ it('the original ProjectRail click changes scope with no current Region, preserv
 })
 it('explicit Focus project selection wins over the rail and clear restores Follow without changing other local filters', async () => {
   await scene()
-  const beta = dom.container.querySelector<HTMLButtonElement>('[data-project-id="beta"] .focus-project-lanes__axis')!
-  expect(beta).not.toBeNull(); await act(async () => beta.click())
+  const project = [...dom.container.querySelectorAll<HTMLElement>('[data-project-group-key]')].find(node => node.dataset.projectGroupKey === key('beta'))
+  const beta = project?.querySelector<HTMLButtonElement>('.focus-project-frame__heading .focus-project-lanes__axis')!
+  expect(beta).not.toBeNull(); expect(beta?.textContent).toContain('beta'); await act(async () => beta.click())
   expect(scope()).toEqual([key('beta')])
   await act(async () => useAppStore.setState({ activeWorkspaceId: 'empty' }))
   expect(scope()).toEqual([key('beta')])
