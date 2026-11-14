@@ -42,17 +42,22 @@ needs message-source trust and how the original sender synchronizes it.
 
 ## Focus personal project routes
 
-`settings inspect focus.projects` reads this client's personal project presentation
+`settings inspect focus.projects` reads this client's personal Project and Collection presentation
 preferences; its string value is a complete JSON array, default `[]`.
 `settings set focus.projects '<complete JSON array>'` saves through the original
 ConfigOwner, not an Agent or spatial mutation. Read the current array before editing
 and retain unrelated entries, including references currently unavailable.
 
 Each entry has exactly `{key,pinned,note,color,collapsed}`: `key` is the canonical JSON
-string `[hostId,projectId]` from the original project reference; names, cwd, Session and
-Region are not substitute identities. `pinned` is boolean, `note` is a personal string,
+string `[hostId,projectId]` from the original project reference, or
+`["collection",hostId,[categorySpaceId,...]]` from the complete original Collection
+scope. Collection IDs are nonempty, unique and sorted; preserve every confirmed
+Category in a multiple-Collection scope. Names, cwd, Session and Region are not
+substitute identities, and an unconfirmed Collection bucket has no saveable Category
+identity. `pinned` is boolean, `note` is a personal string,
 `color` is `default`, `blue`, `green`, `amber`, `rose` or `violet`, and `collapsed` is
-`true`, `false` or `null`. Array order defines the pinned projects' order; unpinned
+`true`, `false` or `null`. Array order defines one shared order for pinned Projects
+and Collections; unpinned
 entries still retain their note and color. `collapsed:null` uses first-presentation
 automatic compaction of known cold work; it does not classify unknown observations
 as cold. Explicit search or exact reveal keeps the original target accessible.
@@ -60,7 +65,10 @@ as cold. Explicit search or exact reveal keeps the original target accessible.
 For example, one entry is
 `{"key":"[\"HOST\",\"PROJECT\"]","pinned":true,"note":"Main work","color":"blue","collapsed":null}`;
 replace both identity placeholders with the exact original pair and preserve the
-other array entries. Project branches/worktrees share that project's preferences;
+other array entries. Collection Pin entries use the same fields, with empty note,
+`default` color and `null` collapsed value; note, color and collapse editing remain
+Project preferences. Preserve any previously saved fields when changing a Pin.
+Project branches/worktrees share that project's preferences;
 different Hosts remain separate. A setting save is not a project rename, navigation,
 Agent state change or permission grant. After a failed or unknown save keep the
 original input and draft, inspect current values, and explicitly resolve any conflict.
