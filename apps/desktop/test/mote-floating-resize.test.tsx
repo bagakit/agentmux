@@ -8,8 +8,10 @@ import { requestPmoTeamsTopicFloatingClose, requestPmoTeamsTopicFloatingOpen,
 import { createMoteApp, settleMoteApp } from './fixtures/mote-app'
 import { moteTopics } from './fixtures/mote-workface'
 import { useAppStore } from '../src/renderer/src/store'
+import { api } from '../src/renderer/src/lib/api'
 
 const positionedAnchors = vi.hoisted(() => [] as Element[])
+const placement = vi.hoisted(() => ({ block: false, pending: [] as Array<() => void>, active: 0, peak: 0 }))
 
 // happy-dom has no layout. Supply only the available-space boundary while
 // exercising the real App, Panel event handlers and floating persistence owner.
@@ -19,9 +21,12 @@ vi.mock('@floating-ui/dom', async importOriginal => {
     const [reference, floating, options] = args
     if (!floating.hasAttribute('data-pmo-teams-topic-floating')) return actual.computePosition(reference, floating, options)
     positionedAnchors.push(reference as Element)
+    placement.active++; placement.peak = Math.max(placement.peak, placement.active)
+    if (placement.block) await new Promise<void>(resolve => placement.pending.push(resolve))
     for (const middleware of options?.middleware ?? []) if (middleware && middleware.name === 'size')
       middleware.options.apply({ availableWidth: 400, availableHeight: 450 })
-    return { x: 8, y: 8, placement: 'top-start', strategy: 'fixed', middlewareData: {} }
+    placement.active--
+    return { x: 8, y: 458 - Number.parseFloat((floating as HTMLElement).style.height), placement: 'top-start', strategy: 'fixed', middlewareData: {} }
   } }
 })
 
@@ -35,6 +40,7 @@ function Owner() {
 const current = () => JSON.parse(container.querySelector('output')!.textContent!)
 beforeEach(async () => {
   positionedAnchors.length = 0
+  placement.block = false; placement.active = 0; placement.peak = 0; placement.pending.length = 0
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   localStorage.clear(); container = document.createElement('div'); document.body.append(container)
   root = createRoot(container); await act(async () => root.render(createElement(Owner)))
@@ -46,13 +52,15 @@ it('the mounted Panel rebinds the actual footer button replaced by a late Topic 
   let finish!: (topics: typeof moteTopics) => void
   const directory = new Promise<typeof moteTopics>(resolve => { finish = resolve })
   app.listTopics.mockImplementation(() => directory)
+  vi.mocked(api.scratch.readTopic).mockImplementation(async (_workspace, id) => (await directory).find(topic => topic.id === id) ?? null)
   useAppStore.setState({ scratchTopicSnapshots: {} })
   const originalExecution = useAppStore.getState().agentFocus.execution
   const originalRuns = useAppStore.getState().sessions.map(session => ({ id: session.id, control: session.control }))
   expect(originalRuns).toHaveLength(5)
   try {
-    await app.mount(); const originalAnchor = app.entry()
+    await app.mount()
     await act(async () => requestPmoTeamsTopicFloatingOpen()); await settleMoteApp()
+    const originalAnchor = app.entry()
     expect(positionedAnchors.at(-1)).toBe(originalAnchor)
     await act(async () => finish(moteTopics)); await settleMoteApp()
     const currentAnchor = app.entry()
@@ -174,4 +182,87 @@ it.each([
     expect(JSON.parse(localStorage.getItem(key)!).size).toEqual(expected)
     expect(captured.size).toBe(0)
   } finally { await app.dispose() }
+})
+
+it('paints drag frames without another placement and flushes the exact release before asynchronous repositioning', async () => {
+  await act(async () => root.unmount()); root = createRoot(container)
+  const app = createMoteApp()
+  try {
+    await app.mount(); await app.hover(); await act(async () => requestPmoTeamsTopicFloatingOpen())
+    await act(async () => update({ size: { width: 810, height: 650 }, railMode: 'avatars' })); await settleMoteApp()
+    const panel = app.panel(), handle = panel.querySelector<HTMLElement>('[aria-label="Resize Mote window"]')!
+    vi.spyOn(panel, 'getBoundingClientRect').mockReturnValue(new DOMRect(8, 8, 400, 450))
+    let captured = false
+    handle.setPointerCapture = () => { captured = true }; handle.hasPointerCapture = () => captured
+    handle.releasePointerCapture = () => { captured = false }
+    const pointer = (type: string, x: number, y: number) => handle.dispatchEvent(new PointerEvent(type,
+      { bubbles: true, cancelable: true, pointerId: 7, pointerType: 'mouse', button: 0, clientX: x, clientY: y }))
+    await act(async () => { pointer('pointerdown', 400, 8) }); await settleMoteApp()
+    const beforePlacement = positionedAnchors.length, beforeSave = localStorage.getItem(key)
+    await act(async () => { for (let i = 1; i <= 30; i++) pointer('pointermove', 400 - i * 2, 8 + i) })
+    await settleMoteApp()
+    expect(positionedAnchors).toHaveLength(beforePlacement)
+    expect(localStorage.getItem(key)).toBe(beforeSave)
+    expect(panel.style.width).toBe('340px'); expect(panel.style.height).toBe('420px'); expect(panel.style.top).toBe('38px')
+    placement.block = true
+    await act(async () => { pointer('pointerup', 330, 48) })
+    expect(panel.style.width).toBe('330px'); expect(panel.style.height).toBe('410px'); expect(panel.style.top).toBe('48px')
+    expect(panel.style.visibility).toBe('visible'); expect(captured).toBe(false)
+    expect(JSON.parse(localStorage.getItem(key)!).size).toEqual({ width: 330, height: 410 })
+    expect(app.launch).not.toHaveBeenCalled(); expect(app.stop).not.toHaveBeenCalled(); expect(app.send).not.toHaveBeenCalled()
+  } finally { placement.block = false; placement.pending.splice(0).forEach(resolve => resolve()); await settleMoteApp(); await app.dispose() }
+})
+
+it('coalesces new invalidations while the original placement is still reading layout', async () => {
+  await act(async () => root.unmount()); root = createRoot(container)
+  const app = createMoteApp()
+  try {
+    await app.mount(); await app.hover(); await act(async () => requestPmoTeamsTopicFloatingOpen()); await settleMoteApp()
+    placement.peak = 0; placement.block = true
+    await act(async () => { window.dispatchEvent(new Event('resize')) }); await settleMoteApp()
+    expect(placement.pending.length).toBe(1)
+    for (let i = 0; i < 3; i++) {
+      await act(async () => { window.dispatchEvent(new Event('resize')) }); await settleMoteApp()
+    }
+    expect(placement.peak).toBe(1); expect(placement.pending.length).toBe(1)
+    placement.block = false
+    await act(async () => { placement.pending.splice(0).forEach(resolve => resolve()) }); await settleMoteApp(); await settleMoteApp()
+    expect(placement.active).toBe(0); expect(app.panel().style.visibility).toBe('visible')
+    expect(app.launch).not.toHaveBeenCalled(); expect(app.stop).not.toHaveBeenCalled()
+  } finally {
+    placement.block = false; placement.pending.splice(0).forEach(resolve => resolve()); await settleMoteApp(); await app.dispose()
+  }
+})
+
+it('an older pending placement cannot overwrite or reschedule continuous gesture frames', async () => {
+  await act(async () => root.unmount()); root = createRoot(container)
+  const app = createMoteApp()
+  try {
+    await app.mount(); await app.hover(); await act(async () => requestPmoTeamsTopicFloatingOpen())
+    await act(async () => update({ size: { width: 810, height: 650 }, railMode: 'avatars' })); await settleMoteApp()
+    const panel = app.panel(), handle = panel.querySelector<HTMLElement>('[aria-label="Resize Mote window"]')!
+    vi.spyOn(panel, 'getBoundingClientRect').mockReturnValue(new DOMRect(8, 8, 400, 450))
+    let captured = false
+    handle.setPointerCapture = () => { captured = true }; handle.hasPointerCapture = () => captured
+    handle.releasePointerCapture = () => { captured = false }
+    const pointer = (type: string, x: number, y: number) => handle.dispatchEvent(new PointerEvent(type,
+      { bubbles: true, cancelable: true, pointerId: 7, pointerType: 'mouse', button: 0, clientX: x, clientY: y }))
+    placement.block = true
+    await act(async () => { window.dispatchEvent(new Event('resize')) }); await settleMoteApp()
+    expect(placement.pending.length).toBe(1)
+    const started = positionedAnchors.length
+    await act(async () => { pointer('pointerdown', 400, 8) })
+    for (let i = 1; i <= 3; i++) {
+      await act(async () => { pointer('pointermove', 400 - i * 20, 8 + i * 10) }); await settleMoteApp()
+    }
+    placement.block = false
+    await act(async () => { placement.pending.splice(0).forEach(resolve => resolve()) }); await settleMoteApp(); await settleMoteApp()
+    expect(positionedAnchors).toHaveLength(started)
+    expect(panel.style.width).toBe('340px'); expect(panel.style.height).toBe('420px'); expect(panel.style.top).toBe('38px')
+    await act(async () => { pointer('pointerup', 330, 48) }); await settleMoteApp()
+    expect(positionedAnchors.length).toBeGreaterThan(started)
+    expect(panel.style.visibility).toBe('visible'); expect(captured).toBe(false)
+  } finally {
+    placement.block = false; placement.pending.splice(0).forEach(resolve => resolve()); await settleMoteApp(); await app.dispose()
+  }
 })
