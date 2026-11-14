@@ -16,13 +16,16 @@ it('exports the original short discovery rule from one generated shared owner', 
   expect(AGENTMUX_SESSION_NAMING_ENTRY).not.toContain(agentMuxModuleSkill('name')!)
 })
 
-it('the actual runtime bootstrap contains exactly one discovery rule and preserves guide-disabled ordinary creation', () => {
+it('the actual bootstrap includes one naming entry with the full guide enabled or disabled', () => {
   const body = '  Keep <amux> original user bytes & first task.\r\n'
   const launched = composeAgentLaunchPrompt(body, true)
   expect(launched.systemContext!.split(originalRule)).toHaveLength(2)
   expect(launched.text.endsWith('</amux>\n\n' + body)).toBe(true)
   expect(launched.systemContext).not.toContain(body)
-  expect(composeAgentLaunchPrompt(body, false)).toEqual({ text: body })
+  const disabled = composeAgentLaunchPrompt(body, false)
+  expect(disabled.systemContext).toBe('The user request follows.\n\n' + originalRule)
+  expect(disabled.text.endsWith('</amux>\n\n' + body)).toBe(true)
+  expect(disabled.systemContext).not.toContain('AgentMux runtime guide:')
   expect(composeAgentLaunchPrompt(undefined, false)).toEqual({ text: '' })
 })
 
@@ -40,4 +43,18 @@ it('no-task initialization still waits and no-input restoration never creates a 
   expect(waiting.systemContext).toBe('No request yet. Complete any read-only initialization below, then wait for the user.\n\n' + originalRule)
   expect(waiting.systemContext!.split(originalRule)).toHaveLength(2)
   expect(composeAgentResumePrompt(undefined)).toEqual({ text: '' })
+  expect(composeAgentLaunchPrompt(' \n', false, ' \n', [])).toEqual({ text: '' })
+  expect(composeAgentLaunchPrompt(undefined, false, undefined, [{ text: '', omittedText: '' }])).toEqual({ text: '' })
+})
+
+it.each([
+  { kind: 'note', note: 'Original platform note.' },
+  { kind: 'task', task: 'Original authorized platform task.' },
+  { kind: 'optional context', optional: [{ text: 'Original bounded context.', omittedText: 'Read the original context by its retained reference.' }] }
+])('the original $kind packet carries one shortest entry with the broad guide off', ({ note, task, optional }) => {
+  const result = composeAgentLaunchPrompt(undefined, false, note, optional, task)
+  expect(result.systemContext!.split(originalRule)).toHaveLength(2)
+  expect(result.systemContext).toContain(note ?? task ?? optional![0]!.text)
+  expect(result.systemContext).not.toContain('AgentMux runtime guide:')
+  expect(result.systemContext).toContain(task ? 'An explicit AgentMux task follows.' : 'No request yet.')
 })

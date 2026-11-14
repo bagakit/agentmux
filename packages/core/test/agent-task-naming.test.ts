@@ -69,7 +69,10 @@ it('launch bootstrap reveals early self-naming without swallowing the original u
   expect(launch.systemContext).not.toContain('--name-revision')
   expect(launch.text.endsWith('</amux>\n\n' + request)).toBe(true)
   expect(launch.systemContext).not.toContain(request)
-  expect(composeAgentLaunchPrompt(request, false)).toEqual({ text: request })
+  const minimal = composeAgentLaunchPrompt(request, false)
+  expect(minimal.systemContext).toContain('name --skill')
+  expect(minimal.systemContext).not.toContain('AgentMux runtime guide:')
+  expect(minimal.text.endsWith('</amux>\n\n' + request)).toBe(true)
   expect(composeAgentLaunchPrompt(undefined, true).systemContext).toContain('No request yet. Complete any read-only initialization below, then wait for the user.')
 })
 

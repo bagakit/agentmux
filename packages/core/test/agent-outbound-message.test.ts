@@ -128,8 +128,11 @@ describe('启动提示路径经同一出口', () => {
     expect(guide.endsWith(`</amux>\n\n${NASTY_USER}`)).toBe(true)
   })
 
-  it('关闭注入时不加任何 AgentMux 的话，用户原文原样返回', () => {
-    expect(composeAgentLaunchPrompt(NASTY_USER, false).text).toBe(NASTY_USER)
+  it('关闭完整引导时保最短命名发现和用户原文，真正空创建仍无输入', () => {
+    const minimal = composeAgentLaunchPrompt(NASTY_USER, false)
+    expect(minimal.systemContext).toContain('name --skill')
+    expect(minimal.systemContext).not.toContain('AgentMux runtime guide:')
+    expect(minimal.text.endsWith('</amux>\n\n' + NASTY_USER)).toBe(true)
     expect(composeAgentLaunchPrompt(undefined, false).text).toBe('')
   })
 
@@ -196,7 +199,8 @@ describe('启动定向握手：启动提示携带 whoami 指令并署名进信�
 
   it('关闭注入时连握手指令也不出现——它属于运行时引导这一整块', () => {
     const out = composeAgentLaunchPrompt('do the work', false).text
-    expect(out).toBe('do the work')
+    expect(out.endsWith('</amux>\n\ndo the work')).toBe(true)
+    expect(out).toContain('name --skill')
     expect(out).not.toContain(AGENTMUX_SELF_CONTEXT_VERB)
   })
 })
