@@ -104,6 +104,50 @@ it('a delayed firstsave action points to the original generation after explicit 
   expect(f.inner.kernel.input).not.toHaveBeenCalled()
 })
 
+it.each(['retained-hit', 'append-race'] as const)('old custody via %s cannot replace a later generation restrictor, while explicit resubmission remains usable', async route => {
+  const f = await fixture(true), inner = f.inner as any
+  inner.connected = false; inner.kernel.isConnected = () => false
+  const first = await beforeFirstsave(f)
+  let entered!: () => void, release!: () => void
+  const started = new Promise<void>(resolve => { entered = resolve }), paused = new Promise<void>(resolve => { release = resolve })
+  // Pause after the old ensure's early lookup missed, before append can observe
+  // another caller's firstsave. This must use the same scope as retained-hit.
+  if (route === 'append-race') {
+    const original = inner.externalMessageAuthority.bind(f.client)
+    vi.spyOn(inner, 'externalMessageAuthority').mockImplementationOnce(async (...args: unknown[]) => {
+      entered(); await paused; return original(...args)
+    })
+  }
+  const pending = route === 'append-race' ? f.ingress.rejoin(first.request, context) : undefined
+  if (pending) await started
+  const saved = (await f.client.submitAgentMessage(...first.original))!
+  await f.client.stopAgentInputWaiting({ ref: saved.ref, cancelOperationId: 'stop-before-restricted-generation' })
+  let permit = true
+  const current = await f.client.rejoinAgentInputWaiting({ ref: saved.ref }, { ...first.original[1],
+    assertCurrent: async () => { if (!permit) throw new Error('The newer generation restriction was withdrawn') } })
+  expect(current.ref.waitGeneration).toBe(2)
+  await inner.inputWaitingRecipients.get(f.session.agentSessionId)?.pending
+  permit = false; inner.connected = true; inner.kernel.isConnected = () => true
+  inner.publisher.publish({ type: 'connection-state', state: 'restored' })
+  await vi.waitFor(async () => expect((await f.client.inspectAgentInput({ key: saved.key }))?.control.waiting?.reason).toBe('author-authorization-needed'), { timeout: 10000 })
+  expect(inner.kernel.input).not.toHaveBeenCalled()
+  const wake = vi.spyOn(f.client, 'rejoinAgentInputWaiting')
+  release()
+  const result = pending ? await pending : await f.ingress.rejoin(first.request, context)
+  expect(result.action.inputRef).toEqual(saved.ref)
+  // Retained submit returns a receipt before its bounded wake settles. Join
+  // that exact invocation before attributing zero bytes to the old action.
+  await Promise.all(wake.mock.results.filter(result => result.type === 'return').map(result => result.value))
+  await inner.inputWaitingRecipients.get(f.session.agentSessionId)?.pending
+  expect(inner.kernel.input).not.toHaveBeenCalled()
+  expect((await f.client.inspectAgentInput({ key: saved.key }))?.ref).toEqual(current.ref)
+  // This is a new explicit submit, distinct from ensuring the old action.
+  // Its live original author is still authorized; it may wake current gen2.
+  await f.client.submitAgentMessage({ ...first.original[0], scope: undefined }, first.original[1])
+  await vi.waitFor(() => expect(inner.kernel.input).toHaveBeenCalledOnce())
+  expect((await f.client.inspectAgentInput({ key: saved.key }))?.ref).toEqual(current.ref)
+})
+
 it('a delayed received action joins existing work and a reopened owner never wakes the later Core generation', async () => {
   const f = await fixture(), received = await f.receive(), source = (await f.ingress.inspect({ ingressId: received.ingress.ingressId })).rejoinSource!
   expect(source.kind).toBe('received')

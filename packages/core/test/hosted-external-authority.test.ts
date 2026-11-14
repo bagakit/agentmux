@@ -1,5 +1,6 @@
 import { afterEach, expect, it, vi } from 'vitest'
 import { join } from 'node:path'
+import { isDeepStrictEqual } from 'node:util'
 import * as core from '../dist/index.js'
 import { connectHostedAgentMux } from '../dist/hosted.js'
 import { AgentMuxHostedRuntimeService } from '../dist/hosted-runtime-service.js'
@@ -18,11 +19,12 @@ async function fixture() {
     kind: 'external', connectionId: 'original-connection', actor: { application: { domain: 'chat.example', appId: 'original-app' }, idType: 'user_id', userId: 'original-user' },
     externalConversationId: 'original-room', externalMessageId: 'original-external-message', bindingId: 'original-binding', bindingRevision: 1, grantId: 'original-grant', grantRevision: 1
   }
-  const intent: core.AgentExternalInputIntent = { agentSessionId: 'recipient', expectedRun: { runId: 'run-recipient' }, operationId: 'original-operation', messageId: 'original-message', body: 'Original full external body\nSecond line' }
+  const intent: core.AgentExternalInputIntent = { agentSessionId: 'recipient', expectedRun: { runId: 'run-recipient' }, operationId: 'original-operation', messageId: 'original-message', body: 'Original full external body\nSecond line',
+    admissionIntent: { kind: 'manual-actor', expectedRun: { runId: 'run-recipient' } } }
   let current = true
   // This trusted process port models a read from the original claim owner, never wire-supplied permission.
   const assertCurrent = vi.fn(async (actualAuthor, actualIntent) => {
-    if (!current || JSON.stringify(actualAuthor) !== JSON.stringify(author) || JSON.stringify(actualIntent) !== JSON.stringify(intent)) throw new core.AgentMuxError('The original external claim or current authority is unavailable.', 'EXTERNAL_INPUT_AUTHORITY_UNCONFIRMED')
+    if (!current || !isDeepStrictEqual(actualAuthor, author) || !isDeepStrictEqual(actualIntent, intent)) throw new core.AgentMuxError('The original external claim or current authority is unavailable.', 'EXTERNAL_INPUT_AUTHORITY_UNCONFIRMED')
   })
   const service = new AgentMuxHostedRuntimeService(f.client, f.store.path, () => hostedTestOwner(f.client), undefined, { assertCurrent })
   cleanup.push(() => service.dispose())
@@ -87,6 +89,54 @@ it('ordinary Hosted message rejoin remains usable while the connector authority 
   await f.client.rejoinAgentInputWaiting({ ref: receipt!.ref })
   await vi.waitFor(() => expect(f.inner.kernel.input).toHaveBeenCalledOnce())
   expect(f.assertCurrent).not.toHaveBeenCalled(); expect(f.inner.kernel.stop).not.toHaveBeenCalled()
+})
+
+it('Hosted custody scope keeps its original generation without replacing a newer accepted restriction', async () => {
+  const f = await fixture(), inner = f.inner as any
+  inner.connected = false; inner.kernel.isConnected = () => false
+  const first = (await f.client.submitAgentMessage({ ...f.message, scope: 'ensure-custody' }))!
+  await f.client.stopAgentInputWaiting({ ref: first.ref, cancelOperationId: 'hosted-stop-initial' })
+  let permit = true
+  const second = await inner.rejoinAgentInputWaiting({ ref: first.ref }, {
+    externalAuthor: { identity: f.author, assertCurrent: async () => { await f.assertCurrent(f.author, f.intent) } },
+    assertCurrent: async () => { if (!permit) throw new Error('Current generation restriction withdrawn') }
+  })
+  expect(second.ref.waitGeneration).toBe(2)
+  await inner.inputWaitingRecipients.get('recipient')?.pending
+  permit = false; inner.connected = true; inner.kernel.isConnected = () => true
+  inner.publisher.publish({ type: 'connection-state', state: 'restored' })
+  await vi.waitFor(async () => expect((await f.client.inspectAgentInput({ key: first.key }))?.control.waiting?.reason).toBe('author-authorization-needed'), { timeout: 10000 })
+  const wake = vi.spyOn(inner, 'rejoinAgentInputWaiting')
+  expect(await f.client.submitAgentMessage({ ...f.message, scope: 'ensure-custody' })).toMatchObject({ ref: second.ref })
+  expect(wake).toHaveBeenCalledWith(expect.objectContaining({ ref: first.ref, scope: 'wake-only' }), expect.anything())
+  await inner.inputWaitingRecipients.get('recipient')?.pending
+  expect(inner.kernel.input).not.toHaveBeenCalled()
+  await f.client.submitAgentMessage(f.message)
+  await vi.waitFor(() => expect(inner.kernel.input).toHaveBeenCalledOnce())
+  expect((await f.client.inspectAgentInput({ key: first.key }))?.ref).toEqual(second.ref)
+})
+
+it.each(['unsupported', 'conditional'] as const)('Hosted rejects %s custody scope before saving or dispatching a message', async mode => {
+  const f = await fixture()
+  const input = mode === 'unsupported' ? { ...f.message, scope: 'unsupported' }
+    : { ...f.message, scope: 'ensure-custody', admissionIntent: undefined, condition: { expectedRun: f.intent.expectedRun, afterSubmissionId: null } }
+  await expect(f.client.submitAgentMessage(input as never)).rejects.toMatchObject({ code: 'INVALID_AGENT_PROMPT' })
+  expect(await new core.DurableAgentMuxMessageQueue(f.client.agentMessageQueuePath()).listAfter()).toEqual([])
+  expect(f.inner.kernel.input).not.toHaveBeenCalled()
+})
+
+it('managed Inbox intake rejects custody scope before its early append while normal Inbox remains usable', async () => {
+  const f = await fixture(), inner = f.inner as any
+  const inbox = { ...f.message, admissionIntent: undefined, execution: 'default' as const,
+    caller: { agentSessionId: 'recipient', capability: f.capability },
+    envelope: { ...f.message.envelope, sender: { kind: 'agent-session' as const, agentSessionId: 'recipient' },
+      senderSessionId: 'recipient', senderRunId: f.intent.expectedRun.runId } }
+  await expect(inner.submitAgentMessage({ ...inbox, scope: 'ensure-custody' })).rejects.toMatchObject({ code: 'INVALID_AGENT_PROMPT' })
+  const queue = new core.DurableAgentMuxMessageQueue(f.client.agentMessageQueuePath())
+  expect(await queue.listAfter()).toEqual([])
+  await expect(inner.submitAgentMessage(inbox)).resolves.toBeUndefined()
+  expect((await queue.listAfter()).map(message => [message.envelope.messageId, message.deliveryMode])).toEqual([[f.intent.messageId, 'reference']])
+  expect(f.inner.kernel.input).not.toHaveBeenCalled()
 })
 
 it.each(['body', 'operation', 'recipient'] as const)('the original Hosted owner refuses a changed %s before queue or input', async changed => {
