@@ -9,7 +9,7 @@ import { DEFAULT_NOTIFICATION_MODE_ID, DEFAULT_NOTIFICATION_SOUND } from './noti
 import { resolveA2ANotifications } from './a2a-preferences'
 import { DEFAULT_PERFORMANCE_PREFERENCES, DEFAULT_MOBILE_CONNECTION_PREFERENCES } from './toolkit-preferences'
 import { resolveUserProfile, type UserProfile } from '@agentmux/host/mote-model'
-import { resolveFocusRecentActivityHours, resolveFocusTopicPresentation, resolveFocusLinkDestination, resolveFocusReplyLines, resolveFocusPreviewTrigger, resolveFocusRecentInputs, resolveFocusMapMotion } from './focus-preferences'
+import { resolveFocusRecentActivityHours, resolveFocusTopicPresentation, resolveFocusLinkDestination, resolveFocusReplyLines, resolveFocusPreviewTrigger, resolveFocusRecentInputs, resolveFocusMapMotion, resolveFocusSelectionFillPercent, resolveFocusSelectionBorderPercent, resolveFocusSelectionAccent } from './focus-preferences'
 import { resolveFocusMapPreferences, type FocusMapPreferences } from './focus-map-preferences'
 import { resolveGoalsCommonActions, resolveGoalsPreferences, type GoalsPreferences } from '@agentmux/host/goals-preferences'
 import { resolveNotesPreferences, type NotesPreferences } from './notes-preferences'
@@ -51,7 +51,8 @@ const preferenceDomains = new Map<string, PreferenceDomain>(Object.entries({
   focus: { resolve: value => value ?? { recentActivityHours: resolveFocusRecentActivityHours(undefined) }, merge: 'resolved', fields: {
     recentActivityHours: resolveFocusRecentActivityHours, topicPresentation: resolveFocusTopicPresentation,
     linkDestination: resolveFocusLinkDestination, replyLines: resolveFocusReplyLines, previewTrigger: resolveFocusPreviewTrigger,
-    recentInputs: resolveFocusRecentInputs, mapMotion: resolveFocusMapMotion, projects: value => value ?? [], zonePresentations: value => value ?? []
+    recentInputs: resolveFocusRecentInputs, mapMotion: resolveFocusMapMotion, selectionFillPercent: resolveFocusSelectionFillPercent,
+    selectionBorderPercent: resolveFocusSelectionBorderPercent, selectionAccent: resolveFocusSelectionAccent, projects: value => value ?? [], zonePresentations: value => value ?? []
   } },
   'focus.map': { resolve: value => resolveFocusMapPreferences(value as FocusMapPreferences | undefined), merge: 'resolved' },
   notes: { resolve: value => resolveNotesPreferences(value as NotesPreferences | undefined), merge: 'authored' },

@@ -1,6 +1,6 @@
-import { FOCUS_RECENT_ACTIVITY_HOURS, DEFAULT_FOCUS_RECENT_ACTIVITY_HOURS, resolveFocusRecentActivityHours, FOCUS_TOPIC_PRESENTATIONS, resolveFocusTopicPresentation, FOCUS_LINK_DESTINATIONS, DEFAULT_FOCUS_LINK_DESTINATION, resolveFocusLinkDestination, FOCUS_REPLY_LINES, resolveFocusReplyLines, FOCUS_PREVIEW_TRIGGERS, resolveFocusPreviewTrigger, FOCUS_RECENT_INPUTS, resolveFocusRecentInputs, FOCUS_MAP_MOTION, resolveFocusMapMotion } from '../../../shared/focus-preferences.js'
+import { FOCUS_RECENT_ACTIVITY_HOURS, DEFAULT_FOCUS_RECENT_ACTIVITY_HOURS, resolveFocusRecentActivityHours, FOCUS_TOPIC_PRESENTATIONS, resolveFocusTopicPresentation, FOCUS_LINK_DESTINATIONS, DEFAULT_FOCUS_LINK_DESTINATION, resolveFocusLinkDestination, FOCUS_REPLY_LINES, resolveFocusReplyLines, FOCUS_PREVIEW_TRIGGERS, resolveFocusPreviewTrigger, FOCUS_RECENT_INPUTS, resolveFocusRecentInputs, FOCUS_MAP_MOTION, resolveFocusMapMotion, FOCUS_SELECTION_FILL_PERCENT, FOCUS_SELECTION_BORDER_PERCENT, FOCUS_SELECTION_ACCENTS, DEFAULT_FOCUS_SELECTION_ACCENT, resolveFocusSelectionFillPercent, resolveFocusSelectionBorderPercent, resolveFocusSelectionAccent } from '../../../shared/focus-preferences.js'
 import type { AppConfig } from '../../../shared/contracts.js'
-import { enumSetting, invalid, type ScalarSetting } from '../scalar-setting.js'
+import { enumSetting, integerSetting, invalid, type ScalarSetting } from '../scalar-setting.js'
 import { parseFocusProjects } from '../../../shared/focus-project-preferences.js'
 import { parseFocusZonePresentations } from '../../../shared/focus-zone-presentation.js'
 
@@ -51,6 +51,15 @@ export const focusSettings = [
   enumSetting('focus.mapMotion', FOCUS_MAP_MOTION, 'system',
     config => resolveFocusMapMotion(config.focus?.mapMotion),
     (config, mapMotion) => ({ ...config, focus: { recentActivityHours: resolveFocusRecentActivityHours(config.focus?.recentActivityHours), ...config.focus, mapMotion } })),
+  integerSetting('focus.selectionFillPercent', FOCUS_SELECTION_FILL_PERCENT, FOCUS_SELECTION_FILL_PERCENT.default,
+    config => resolveFocusSelectionFillPercent(config.focus?.selectionFillPercent),
+    (config, selectionFillPercent) => ({ ...config, focus: { recentActivityHours: resolveFocusRecentActivityHours(config.focus?.recentActivityHours), ...config.focus, selectionFillPercent } })),
+  integerSetting('focus.selectionBorderPercent', FOCUS_SELECTION_BORDER_PERCENT, FOCUS_SELECTION_BORDER_PERCENT.default,
+    config => resolveFocusSelectionBorderPercent(config.focus?.selectionBorderPercent),
+    (config, selectionBorderPercent) => ({ ...config, focus: { recentActivityHours: resolveFocusRecentActivityHours(config.focus?.recentActivityHours), ...config.focus, selectionBorderPercent } })),
+  enumSetting('focus.selectionAccent', FOCUS_SELECTION_ACCENTS, DEFAULT_FOCUS_SELECTION_ACCENT,
+    config => resolveFocusSelectionAccent(config.focus?.selectionAccent),
+    (config, selectionAccent) => ({ ...config, focus: { recentActivityHours: resolveFocusRecentActivityHours(config.focus?.recentActivityHours), ...config.focus, selectionAccent } })),
   {
     key: 'focus.projects',
     entry(config: AppConfig) { return { key: this.key, kind: 'string' as const, value: JSON.stringify(config.focus?.projects ?? []), default: '[]' } },

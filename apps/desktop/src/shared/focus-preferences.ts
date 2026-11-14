@@ -4,7 +4,7 @@ import type { FocusZonePresentation } from './focus-zone-presentation'
 
 import { resolveFocusRecentActivityHours, type FocusRecentActivityHours } from '@agentmux/client-ui/focus-order'
 export { FOCUS_RECENT_ACTIVITY_HOURS, DEFAULT_FOCUS_RECENT_ACTIVITY_HOURS, resolveFocusRecentActivityHours, type FocusRecentActivityHours } from '@agentmux/client-ui/focus-order'
-export type FocusPreferences = { recentActivityHours: FocusRecentActivityHours; topicPresentation?: FocusTopicPresentation; zonePresentations?: readonly FocusZonePresentation[]; linkDestination?: FocusLinkDestination; replyLines?: FocusReplyLines; previewTrigger?: FocusPreviewTrigger; recentInputs?: FocusRecentInputs; mapMotion?: FocusMapMotion; map?: FocusMapPreferences; projects?: readonly FocusProjectPreference[] }
+export type FocusPreferences = { recentActivityHours: FocusRecentActivityHours; topicPresentation?: FocusTopicPresentation; zonePresentations?: readonly FocusZonePresentation[]; linkDestination?: FocusLinkDestination; replyLines?: FocusReplyLines; previewTrigger?: FocusPreviewTrigger; recentInputs?: FocusRecentInputs; mapMotion?: FocusMapMotion; map?: FocusMapPreferences; projects?: readonly FocusProjectPreference[]; selectionFillPercent?: number; selectionBorderPercent?: number; selectionAccent?: FocusSelectionAccent }
 /** Minimum project visibility guarantee, independent of a shorter sorting preference. */
 export const FOCUS_RECENT_PROJECT_HOURS = 48
 
@@ -45,8 +45,22 @@ export type FocusMapMotion = typeof FOCUS_MAP_MOTION[number]
 export function resolveFocusMapMotion(value: unknown): FocusMapMotion {
   return FOCUS_MAP_MOTION.includes(value as FocusMapMotion) ? value as FocusMapMotion : 'system'
 }
+export const FOCUS_SELECTION_FILL_PERCENT = { min: 0, max: 30, default: 20 } as const
+export const FOCUS_SELECTION_BORDER_PERCENT = { min: 0, max: 100, default: 35 } as const
+export const FOCUS_SELECTION_ACCENTS = ['neutral', 'accent', 'blue', 'purple'] as const
+export type FocusSelectionAccent = typeof FOCUS_SELECTION_ACCENTS[number]
+export const DEFAULT_FOCUS_SELECTION_ACCENT: FocusSelectionAccent = 'neutral'
+function resolveSelectionPercent(value: unknown, range: { min: number; max: number; default: number }): number {
+  return typeof value === 'number' && Number.isInteger(value) && value >= range.min && value <= range.max ? value : range.default
+}
+export function resolveFocusSelectionFillPercent(value: unknown): number { return resolveSelectionPercent(value, FOCUS_SELECTION_FILL_PERCENT) }
+export function resolveFocusSelectionBorderPercent(value: unknown): number { return resolveSelectionPercent(value, FOCUS_SELECTION_BORDER_PERCENT) }
+export function resolveFocusSelectionAccent(value: unknown): FocusSelectionAccent {
+  return FOCUS_SELECTION_ACCENTS.includes(value as FocusSelectionAccent) ? value as FocusSelectionAccent : DEFAULT_FOCUS_SELECTION_ACCENT
+}
 /** General Focus choices do not own personal project notes, pin order or collapse intent. */
 export function resolveFocusPreferences(value: FocusPreferences | undefined): Required<Omit<FocusPreferences, 'projects' | 'zonePresentations'>> {
   return { recentActivityHours: resolveFocusRecentActivityHours(value?.recentActivityHours), topicPresentation: resolveFocusTopicPresentation(value?.topicPresentation), linkDestination: resolveFocusLinkDestination(value?.linkDestination),
-    replyLines: resolveFocusReplyLines(value?.replyLines), previewTrigger: resolveFocusPreviewTrigger(value?.previewTrigger), recentInputs: resolveFocusRecentInputs(value?.recentInputs), mapMotion: resolveFocusMapMotion(value?.mapMotion), map: resolveFocusMapPreferences(value?.map) }
+    replyLines: resolveFocusReplyLines(value?.replyLines), previewTrigger: resolveFocusPreviewTrigger(value?.previewTrigger), recentInputs: resolveFocusRecentInputs(value?.recentInputs), mapMotion: resolveFocusMapMotion(value?.mapMotion), map: resolveFocusMapPreferences(value?.map),
+    selectionFillPercent: resolveFocusSelectionFillPercent(value?.selectionFillPercent), selectionBorderPercent: resolveFocusSelectionBorderPercent(value?.selectionBorderPercent), selectionAccent: resolveFocusSelectionAccent(value?.selectionAccent) }
 }
