@@ -24,7 +24,7 @@ app.whenReady().then(async () => {
       win.webContents.sendInputEvent({ type: 'mouseUp', button: 'left', clickCount: 1, x: Math.round(point.x), y: Math.round(point.y) })
       await settle()
     }
-    const control = label => `[aria-label="${label}"]`
+    const control = label => `.md-conversation-image__lightbox [aria-label="${label}"]`
     const close = async () => {
       win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Escape' }); win.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Escape' })
       await until('!document.querySelector(".md-conversation-image__lightbox")')
@@ -108,6 +108,41 @@ app.whenReady().then(async () => {
     assert.ok(!transformed.startsWith('translate(0px, 0px)'), transformed)
     result.operations.push({ consumer: 'trusted Chromium wheel and pointer drag', transformed })
     await close()
+    await read('document.querySelector("#file").scrollIntoView({block:"center"})')
+    const fileViewport = '#file .image-preview__viewport'
+    const fileZoom = () => read('document.querySelector("#file output").textContent')
+    const centeredImagePoint = () => read(`(() => {
+      const view=document.querySelector(${JSON.stringify(fileViewport)}), image=view.querySelector('img')
+      return [(view.scrollLeft+view.clientWidth/2-image.offsetLeft)/image.width,(view.scrollTop+view.clientHeight/2-image.offsetTop)/image.height]
+    })()`)
+    await until('document.querySelector("#file img")?.naturalWidth === 1440')
+    assert.ok(Number.parseInt(await fileZoom()) < 100)
+    const fittedCenter = await centeredImagePoint()
+    const originalSize = '#file button[title="Original size (1)"]'
+    await click(originalSize)
+    assert.equal(await fileZoom(), '100%')
+    const zoomedCenter = await centeredImagePoint()
+    assert.ok(zoomedCenter.every((value, axis) => Math.abs(value - fittedCenter[axis]) < 0.012), 'The original image point stays centered when changing to actual size')
+    const filePoint = await read(`(() => {const node=document.querySelector(${JSON.stringify(fileViewport)}), r=node.getBoundingClientRect();return{x:Math.round(r.x+r.width/2),y:Math.round(r.y+r.height/2),left:node.scrollLeft};})()`)
+    const nextPoint = { x: filePoint.x - 32, y: filePoint.y - 18 }
+    win.webContents.sendInputEvent({ type: 'mouseDown', button: 'left', clickCount: 1, x: filePoint.x, y: filePoint.y })
+    win.webContents.sendInputEvent({ type: 'mouseMove', button: 'left', ...nextPoint })
+    await until(`document.querySelector(${JSON.stringify(fileViewport)}).hasAttribute('data-dragging')`)
+    assert.ok(await read(`document.querySelector(${JSON.stringify(fileViewport)}).scrollLeft > ${filePoint.left}`))
+    await frame(`${slice}-file-dragging.png`)
+    win.webContents.sendInputEvent({ type: 'mouseUp', button: 'left', clickCount: 1, ...nextPoint })
+    await until(`!document.querySelector(${JSON.stringify(fileViewport)}).hasAttribute('data-dragging')`)
+    win.setContentSize(390, 900); await settle()
+    await click('#file button[title="Fit image (F or 0)"]')
+    assert.ok(Number.parseInt(await fileZoom()) < 100)
+    const fitCenter = await centeredImagePoint()
+    assert.ok(fitCenter.every(value => Math.abs(value - 0.5) < 0.012), 'A fitted image is centered at narrow width')
+    assert.ok(await read(`(() => {
+      const view=document.querySelector(${JSON.stringify(fileViewport)})
+      return view.scrollWidth-view.clientWidth<=1 && view.scrollHeight-view.clientHeight<=1
+    })()`), 'Fitting the original clears both panning axes')
+    await frame(`${slice}-file-fit-390.png`)
+    result.operations.push({ consumer: 'editor-extensions / ImageContent', actualSize: true, panCaptured: true, narrowFit: true })
     assert.deepEqual(result.errors, [])
     result.passed = true
   } catch (error) {
