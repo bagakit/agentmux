@@ -21,6 +21,9 @@ export function observeAgentSession(
       status: session.status,
       retainedStatus: session.semanticStatus,
       currentActivity: session.currentActivity,
+      mainSessionActivity: session.mainSessionActivity,
+      ...(session.nativeSubagents?.providerId === session.providerId && session.nativeSubagents.run.runId === session.control.run.runId && session.nativeSubagents.nativeSessionId === session.nativeSessionId
+        ? { subagentSessions: session.nativeSubagents } : {}),
       timelineCapability: session.capabilities.timeline,
       // 卡在一个待答的 typed 请求上：普通输入此刻送不进去（会被拒或被当成对请求的回答）。
       awaitingRequest: session.pendingInteraction !== undefined,

@@ -954,6 +954,8 @@ export function projectRuntimeEvent(
       interactionResponseUnavailableReason: _interactionResponseUnavailableReason,
       semanticStatus: _semanticStatus,
       currentActivity: _currentActivity,
+      mainSessionActivity: _mainSessionActivity,
+      nativeSubagents: _nativeSubagents,
       terminalFrontend: _terminalFrontend,
       continuity: _continuity,
       continuityOperations: _continuityOperations,
@@ -1009,9 +1011,11 @@ export function projectRuntimeEvent(
       ...(core.session.semanticStatus
         ? { semanticStatus: structuredClone(core.session.semanticStatus) }
         : {}),
+      ...(core.session.mainSessionActivity ? { mainSessionActivity: structuredClone(core.session.mainSessionActivity) } : {}),
       ...(core.session.currentActivity
         ? { currentActivity: structuredClone(core.session.currentActivity) }
         : {}),
+      ...(core.session.nativeSubagents ? { nativeSubagents: structuredClone(core.session.nativeSubagents) } : {}),
       ...(core.session.terminalFrontend ? { terminalFrontend: structuredClone(core.session.terminalFrontend) } : {}),
       ...projectContinuityFacts(core.session, item.hostId === core.session.hostId &&
         item.control.hostId === core.session.hostId ? item : undefined),
