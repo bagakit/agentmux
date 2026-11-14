@@ -77,8 +77,9 @@ export function MobileSurveyCatalog({ client = null, connected = true, visible =
     return () => onBackChange(null)
   }, [visible, onBackChange, activeBack])
   const survey = catalog?.survey, item = survey?.items.find(value => value.zoneId === context.zoneId)
+  const zoneSelection = survey?.selection && 'zoneId' in survey.selection ? survey.selection : null
   const tabs = catalog?.tabs.filter(tab => tab.zoneId === context.zoneId) ?? []
-  const held = survey?.selection?.zoneId === context.zoneId ? survey.selection : null
+  const held = zoneSelection?.zoneId === context.zoneId ? zoneSelection : null
   const relations = catalog?.bindings.filter(binding => binding.zoneId === context.zoneId) ?? []
   const topics = catalog?.spaces.filter(space => space.kind === 'topic' && relations.some(binding => binding.spaceId === space.spaceId)) ?? []
   const relationsUnknown = relations.some(binding => !catalog?.spaces.some(space => space.spaceId === binding.spaceId) || catalog.spaces.find(space => space.spaceId === binding.spaceId)?.issue)
@@ -112,7 +113,7 @@ export function MobileSurveyCatalog({ client = null, connected = true, visible =
     {!context.zoneId ? <><p className="mobile-survey-intro">已收集的研究</p>
       {!survey ? <MobileNotice owner={client}>研究列表还没确认。</MobileNotice> : <nav aria-label="研究列表"><ul>{survey.items.map(value => <li key={value.zoneId}>
         <button className="mobile-menu-row" type="button" onClick={() => { setContext({ zoneId: value.zoneId, tabId: null, regionId: null }); setSelectedKey(null) }}>
-          <span><strong>{value.name || '名称未确认'}</strong>{survey.selection?.zoneId === value.zoneId && <small>当前选择</small>}{value.issue && <small>{value.issue}</small>}</span></button>
+          <span><strong>{value.name || '名称未确认'}</strong>{zoneSelection?.zoneId === value.zoneId && <small>当前选择</small>}{value.issue && <small>{value.issue}</small>}</span></button>
       </li>)}</ul>{!survey.items.length && <p>暂无明确收集的研究。</p>}</nav>}
     </> : <>
       {!catalog?.zones.some(zone => zone.zoneId === context.zoneId) && <MobileNotice>这项研究的位置还没确认，请刷新研究。</MobileNotice>}
