@@ -13,6 +13,13 @@ import { cleanupExecutableNativeFixtures } from '../../../packages/core/test/hel
 
 const fault = vi.hoisted(() => ({ sync: '' }))
 const facts: unknown[] = []
+async function recordConsumerBuild(entry: string) {
+  if (!process.env.AGENTMUX_FILE_PATH_ONCE_EVIDENCE) return
+  const paths = [entry, 'apps/host/src/file-path-mutations.ts', 'packages/core/dist/index.js',
+    'packages/core/dist/public-rpc-service.js', 'packages/core/dist/agentmux.js', helper]
+  facts.push({ case: 'original-consumer-build', cwd: process.cwd(), entry,
+    artifacts: await Promise.all(paths.map(async path => ({ path: resolve(path), sha256: createHash('sha256').update(await readFile(path)).digest('hex') }))) })
+}
 afterAll(async () => { if (process.env.AGENTMUX_FILE_PATH_ONCE_EVIDENCE) await writeFile(process.env.AGENTMUX_FILE_PATH_ONCE_EVIDENCE, JSON.stringify({ schema: 'agentmux.file-path-once-proof.v1', platform: process.platform, facts }, null, 2) + '\n') })
 vi.mock('node:fs/promises', async original => {
   const actual = await original<typeof import('node:fs/promises')>()
@@ -42,6 +49,7 @@ it('a real new Host/Core process observes the original once-admission after targ
   const bundle = resolve('apps/host/.local/file-path-host-reopen-' + process.pid + '.mjs')
   await mkdir(resolve('apps/host/.local'), { recursive: true })
   await build({ stdin: { resolveDir: process.cwd(), contents: "export {startAgentMuxHost} from './apps/host/src/host.ts';export {OrdinaryWorkspaceFiles} from './apps/host/src/ordinary-files.ts';export {AgentMuxClient,AgentMuxFileAgentSessionStore} from '@agentmux/core'" }, outfile: bundle, bundle: true, packages: 'external', platform: 'node', format: 'esm', target: 'node24' })
+  await recordConsumerBuild(bundle)
   cleanup.push(() => rm(bundle, { force: true }))
   const socket = join(f.original.root, 'reopened-new-core.sock'), configuration = join(f.original.root, 'reopened-host.json')
   await writeFile(configuration, JSON.stringify({ entry: bundle, stateDirectory: join(f.original.root, 'state'), runtimeDirectory: f.original.root,
@@ -128,6 +136,7 @@ it('two real Files-owner processes admit only one Native producer for the same o
   const bundle = resolve('apps/host/.local/file-path-admission-race-' + process.pid + '.mjs')
   await mkdir(resolve('apps/host/.local'), { recursive: true })
   await build({ stdin: { resolveDir: process.cwd(), contents: "export {FilePathMutations} from './apps/host/src/file-path-mutations.ts';export {OrdinaryWorkspaceFiles} from './apps/host/src/ordinary-files.ts'" }, outfile: bundle, bundle: true, packages: 'external', platform: 'node', format: 'esm', target: 'node24' })
+  await recordConsumerBuild(bundle)
   cleanup.push(() => rm(bundle, { force: true }))
   const configuration = join(f.original.root, 'admission-race.json')
   await writeFile(configuration, JSON.stringify({ entry: bundle, directory: join(f.original.root, 'file-path-mutations'), helper, workspace: f.workspace, request, actor: agent }))
