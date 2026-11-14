@@ -5,7 +5,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import { createServer } from 'node:http'
 import { mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
-import { join, resolve } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { promisify } from 'node:util'
 import { captureOsWindow } from './browser-window-visual-capture.mjs'
@@ -20,7 +20,9 @@ const repositoryRoot = resolve(import.meta.dirname, '../../..')
 const desktopRoot = join(repositoryRoot, 'apps/desktop')
 const privateCase = process.argv.includes('--case-private')
 const collaborationCase = process.argv.includes('--case-collaboration')
-const ordinaryCase = privateCase || collaborationCase
+const zoomCase = process.argv.includes('--case-zoom')
+const bootstrapCase = collaborationCase || zoomCase
+const ordinaryCase = privateCase || bootstrapCase
 const privateApp = process.env.AGENTMUX_BROWSER_PRIVATE_APP ? resolve(process.env.AGENTMUX_BROWSER_PRIVATE_APP) : null
 assert.ok(!privateApp || privateCase, 'The optional qualification App belongs only to the private Browser case')
 const qualificationRoot = privateApp ? resolve(privateApp, '../../../../..') : repositoryRoot
@@ -75,7 +77,7 @@ assert.ok(!observeNativeBounds || structuredCase, 'Main bounds observation belon
 if(observeRestartLifecycle)receipt.diagnosticMode='passive-original-second-process-lifecycle'
 if(observeStageDelivery)receipt.diagnosticMode='original-stage-conditional-breakpoints'
 if(overlayCase && process.env.AGENTMUX_OVERLAY_OBSERVE_ORIGINAL_PAINT === '1')receipt.diagnosticMode='original-overlay-paint-conditional-breakpoints'
-assert.ok([downloadCase,uploadCase,demonstrationCase,overlayCase,taskAssetsCase,taskDownloadCase,framesCase,localRecoveryCase,browserToolsCase,structuredCase,outcomeCase,continuityCase,privateCase,collaborationCase].filter(Boolean).length<=1,'A product scenario has one owning outcome')
+assert.ok([downloadCase,uploadCase,demonstrationCase,overlayCase,taskAssetsCase,taskDownloadCase,framesCase,localRecoveryCase,browserToolsCase,structuredCase,outcomeCase,continuityCase,zoomCase,privateCase,collaborationCase].filter(Boolean).length<=1,'A product scenario has one owning outcome')
 const downloadPayload = Buffer.from([0,255,128,13,10,1,2,0,254])
 const downloadRequests = []
 if(downloadCase)receipt.case='download'
@@ -90,6 +92,7 @@ if(browserToolsCase)receipt.case='browser-tools'
 if(structuredCase)receipt.case='structured-output'
 if(outcomeCase)receipt.case='outcome'
 if(continuityCase)receipt.case='continuity'
+if(zoomCase)receipt.case='zoom'
 if(privateCase){receipt.case='private';receipt.privateExitKind=privateCrash?'crash':'ordinary'}
 if(collaborationCase)receipt.case='collaboration'
 await mkdir(join(repositoryRoot,'.tmp'),{recursive:true})
@@ -253,6 +256,9 @@ async function identity() {
       'packages/browser/src/browser-outcome-journal.ts','packages/browser/src/model/browser-outcome-criteria.ts',
       'apps/desktop/src/renderer/src/components/BrowserOutcomeCriteria.tsx','apps/desktop/scripts/browser-outcome-probe-scenario.mjs',
       'apps/desktop/scripts/browser-demonstration-probe-scenario.mjs','apps/desktop/scripts/browser-demonstration-probe-diagnostics.mjs'] : []),
+    ...(zoomCase ? ['apps/desktop/scripts/browser-zoom-probe-scenario.mjs','apps/desktop/src/main/zoom-commands.ts',
+      'apps/desktop/src/main/application-menu.ts','apps/desktop/src/shared/browser-zoom.ts','apps/desktop/src/renderer/src/lib/zoom-command.ts',
+      'apps/desktop/src/renderer/src/main.tsx'] : []),
     ...(continuityCase ? ['apps/desktop/scripts/browser-continuity-probe-scenario.mjs','apps/desktop/src/shared/browser-page-memory.ts',
       'apps/desktop/src/main/browser-recovery-preview.ts','apps/desktop/src/renderer/src/lib/browser-last-seen-favicons.ts',
       'apps/desktop/src/renderer/src/components/GlobalSurveySurface.tsx','apps/desktop/src/renderer/src/components/SurveyZoneItem.tsx',
@@ -292,17 +298,17 @@ async function launch(label) {
   for (const name of ['AGENTMUX_DESKTOP_RECOVERY_SEED', 'AGENTMUX_DESKTOP_RECOVERY_REPORT', 'AGENTMUX_DESKTOP_EXIT_AFTER_READY']) assert.equal(process.env[name], undefined, `Ordinary launch inherited ${name}`)
   const readyFile = join(root, `ready-${label}.json`)
   let entryPath = mainPath
-  if (collaborationCase) {
+  if (bootstrapCase) {
     // Configure the private Electron host before importing the unmodified ordinary Main.
     // A sibling entry preserves app.getAppPath(); no source breakpoint or readiness hook is needed.
-    entryPath = join(desktopRoot, 'out/main/private-collaboration-' + label + '.cjs')
-    const bootstrap = `const{app}=require('electron');${[['home', privateHome], ['appData', join(root, 'app-data')], ['userData', userData], ['sessionData', userData]].map(([name, path]) => `app.setPath(${JSON.stringify(name)},${JSON.stringify(path)});`).join('')}globalThis.__amxPrivatePathsConfigured=true;import(${JSON.stringify(pathToFileURL(mainPath).href)}).catch(error=>{console.error(error);app.exit(1)});`
+    entryPath = join(desktopRoot, 'out/main/private-' + receipt.case + '-' + label + '.cjs')
+    const bootstrap = `const{app}=require('electron');${zoomCase ? `app.setAppPath(${JSON.stringify(desktopRoot)});` : ''}${[['home', privateHome], ['appData', join(root, 'app-data')], ['userData', userData], ['sessionData', userData]].map(([name, path]) => `app.setPath(${JSON.stringify(name)},${JSON.stringify(path)});`).join('')}globalThis.__amxPrivatePathsConfigured=true;import(${JSON.stringify(pathToFileURL(mainPath).href)}).catch(error=>{console.error(error);app.exit(1)});`
     await writeFile(entryPath, bootstrap)
     receipt.privateElectronHosts ??= []
     receipt.privateElectronHosts.push({ label, entry: entryPath, source: bootstrap, sha256: digest(bootstrap), main: mainPath,
       mainSha256: digest(await readFile(mainPath)), boundary: 'Electron public path setup only, before importing the complete original ordinary Main; no Runtime owner, saved state seed or readiness hook.' })
   }
-  const child = spawn(appExecutable ?? require('electron'), [collaborationCase ? '--inspect=0' : '--inspect-brk=0', ...(!privateApp ? [entryPath] : []), '--remote-debugging-port=0', `--agentmux-probe-root=${root}`], {
+  const child = spawn(appExecutable ?? require('electron'), [bootstrapCase ? '--inspect=0' : '--inspect-brk=0', ...(!privateApp ? [entryPath] : []), '--remote-debugging-port=0', `--agentmux-probe-root=${root}`], {
     cwd: desktopRoot, detached: true, stdio: ['ignore', 'ignore', 'pipe'],
     env: { ...(ordinaryCase ? Object.fromEntries(Object.entries(process.env).filter(([key])=>!/^(?:AGENTMUX_|CTXMUX_|ELECTRON_)/.test(key))) : process.env), ...fixtureEnvironment,
       ...(!ordinaryCase ? { AGENTMUX_DESKTOP_READY_FILE: readyFile } : {}) }
@@ -322,7 +328,7 @@ async function launch(label) {
   launchedProbes.add(probe)
   await main.call('Runtime.enable')
   let home
-  if (!collaborationCase) {
+  if (!bootstrapCase) {
   // Imports must finish before querying Electron. Pause before the first home-dependent constant;
   // require() during Node's --inspect-brk bootstrap can run an uninitialized module loader.
   await main.call('Debugger.enable')
@@ -373,7 +379,7 @@ async function launch(label) {
   let ready
   try { ready = await waitFor(`${label} ready`, async () => {
     alive()
-    if (ordinaryCase) return main.evaluate(`(()=>{${collaborationCase ? 'if(globalThis.__amxPrivatePathsConfigured!==true)return null;' : ''}const {app,BrowserWindow}=process.getBuiltinModule('module').createRequire(${JSON.stringify(join(desktopRoot,'package.json'))})('electron');
+    if (ordinaryCase) return main.evaluate(`(()=>{${bootstrapCase ? 'if(globalThis.__amxPrivatePathsConfigured!==true)return null;' : ''}const {app,BrowserWindow}=process.getBuiltinModule('module').createRequire(${JSON.stringify(join(desktopRoot,'package.json'))})('electron');
       const windows=BrowserWindow.getAllWindows().filter(window=>!window.isDestroyed()&&window.webContents.getURL().startsWith('file:')&&!window.webContents.isLoadingMainFrame());
       return app.isReady()&&windows.length===1?{pid:process.pid,productName:app.name,version:app.getVersion(),packaged:app.isPackaged,executable:process.execPath,appPath:app.getAppPath(),home:app.getPath('home'),appData:app.getPath('appData'),sessionData:app.getPath('sessionData'),userData:app.getPath('userData')}:null})()`, false)
     try { return JSON.parse(await readFile(readyFile, 'utf8')) } catch (error) { if (error.code === 'ENOENT') return null; throw error }
@@ -420,7 +426,7 @@ async function launch(label) {
     if(collaborationCase){assert.equal(ready.appData,join(root,'app-data'));assert.equal(ready.sessionData,userData)}
     if (privateApp) assert.equal(await realpath(ready.appPath), await realpath(packageRoot))
     const release = JSON.parse(await readFile(join(packageRoot ?? desktopRoot, 'out/renderer/release.json'), 'utf8'))
-    ordinaryInitialization = await waitFor(`${label} ordinary loaded Desktop owner`, async () => {
+    try { ordinaryInitialization = await waitFor(`${label} ordinary loaded Desktop owner`, async () => {
       alive()
       let value
       try { value = (await rpc.call('app.inspect', {})).observation }
@@ -428,10 +434,16 @@ async function launch(label) {
       assert.equal(value.main.pid, child.pid, 'The ordinary public observation must belong to this exact launched Main')
       assert.deepEqual(value.main.renderer, { kind: 'bundled', id: release.id, identity: release.identity }, 'The actual RendererUpdates load owner must confirm the bundled release')
       assert.ok(value.main.storage, 'The original Desktop owner must confirm its actual storage root')
-      assert.equal(await realpath(value.main.storage.userData), await realpath(userData))
+      assert.equal(typeof value.main.storage.userState?.path, 'string', 'The current storage observation names its original user-state file')
+      assert.equal(await realpath(dirname(value.main.storage.userState.path)), await realpath(userData))
       if (privateApp) assert.deepEqual(value.main.package, receipt.qualificationApp.packageIdentity)
+      if(zoomCase)receipt.zoomStartup=value
       return value.workbench.loading ? null : { main: value.main, workbenchLoading: value.workbench.loading }
-    })
+    }) } catch(error) {
+      receipt.ownerStartupFailure={body:await cdp.evaluate('document.body.innerText.slice(-6000)'),logs:{}}
+      for(const name of ['agentmux-host.log','crash-log.ndjson'])try{receipt.ownerStartupFailure.logs[name]=(await readFile(join(userData,name),'utf8')).slice(-16000)}catch(failure){receipt.ownerStartupFailure.logs[name]={code:failure.code??null}}
+      throw error
+    }
   }
   const drainStageDelivery = observeStageDelivery ? await observeOriginalStageDelivery(cdp,desktopRoot) : undefined
   receipt[label] = { pid: child.pid, home, nativeHome, ready, ...(ordinaryInitialization ? { ordinaryInitialization } : {}), origin: await cdp.evaluate('({href:location.href,origin:location.origin})') }
@@ -932,6 +944,7 @@ async function consumeNativeProof(indexPath) {
   process.stdout.write(JSON.stringify({passed:true,completeGate:true,consumedOriginalNativeReceipt:proof.receipt.path})+'\n')
 }
 function lastReceiptPath() {
+  if(zoomCase)return join(repositoryRoot,'.tmp/browser-zoom-restart-last.json')
   if(collaborationCase)return join(repositoryRoot,'.tmp/browser-collaboration-recovery-last.json')
   return join(repositoryRoot,'.tmp',privateCase?(privateCrash?'browser-private-crash-restart-last.json':'browser-private-restart-last.json'):localRecoveryCase?`browser-local-recovery-${localRecoveryKind}-last.json`:framesCase?'browser-frame-observation-last.json':taskDownloadCase?'browser-task-outcome-download-last.json':downloadCase?'browser-files-download-last.json':uploadCase?'browser-files-upload-last.json':demonstrationCase?'browser-demonstration-last.json':overlayCase?'browser-overlay-last.json':taskAssetsCase?'browser-task-assets-last.json':browserToolsCase?'browser-tools-last.json':structuredCase?'browser-structured-output-last.json':outcomeCase?'browser-outcome-last.json':continuityCase?'browser-continuity-last.json':'browser-recovery-restart-last.json')
 }
@@ -951,6 +964,7 @@ try {
   const structured = structuredCase ? await import('./browser-structured-probe-scenario.mjs') : null
   const outcome = outcomeCase ? await import('./browser-outcome-probe-scenario.mjs') : null
   const continuity = continuityCase ? await import('./browser-continuity-probe-scenario.mjs') : null
+  const zoom = zoomCase ? await import('./browser-zoom-probe-scenario.mjs') : null
   const privateScenario = privateCase ? await import('./browser-private-probe-scenario.mjs') : null
   const collaboration = collaborationCase ? await import('./browser-collaboration-probe-scenario.mjs') : null
   const cost = outcomeCase ? await import('./lib/browser-capability-cost-collector.mjs') : null
@@ -1006,6 +1020,8 @@ try {
       state, launch, normalQuit,
       retainSecond: probe => {second=probe},
       crash: async probe => {await signalOwnedProbeProcess(probe.child.pid,root,'SIGKILL');await waitFor('exact crashed private process exits',()=>probe.child.signalCode!==null||probe.child.exitCode!==null);return {exitCode:probe.child.exitCode,signal:probe.child.signalCode}} })
+  } else if(zoom) {
+    await zoom.runZoom({...scenarioContext(first,null,urls[0]),launch,normalQuit,openBrowser,retainSecond:probe=>{second=probe}})
   } else if(continuity) {
     await continuity.runContinuity({...scenarioContext(first,null,urls[0]),launch,normalQuit,retainSecond:probe=>{second=probe}})
   } else {
