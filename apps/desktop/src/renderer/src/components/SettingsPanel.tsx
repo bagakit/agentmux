@@ -1,4 +1,4 @@
-import { TextInput } from '@agentmux/client-ui/input'
+import { SearchInput } from '@agentmux/client-ui/input'
 import { Button } from '@agentmux/client-ui/components/Button'
 import { IconButton } from '@agentmux/client-ui/components/IconButton'
 import * as DropdownMenu from './HoverDropdownMenu'
@@ -18,8 +18,6 @@ import { SettingsSidebarNavigation } from './settings/SettingsSidebarNavigation'
 import { SETTINGS_GROUPS, type SettingsModule } from './settings/settings-catalog'
 import { settingsCatalog, settingsModules, visibleSettingsSections, settingsNavGroups, type SettingsPageId, type SettingsSectionId } from './settings/settings-modules'
 
-const ThemeActionSearchIcon = semanticIconComponent('action.search')
-const ThemeActionClearIcon = semanticIconComponent('action.clear')
 const ThemeNavigationDownIcon = semanticIconComponent('navigation.down')
 const ThemeStatusSelectedIcon = semanticIconComponent('status.selected')
 const ThemeActionCloseIcon = semanticIconComponent('action.close')
@@ -107,7 +105,6 @@ function SettingsPanelView({ onClose, visible = true, initialSection = 'overview
     setShowResults(false)
     setDestination(null)
     setTargetIssue('')
-    searchInput.current?.focus({ preventScroll: true })
   }
 
   function updateQuery(value: string): void {
@@ -222,7 +219,12 @@ function SettingsPanelView({ onClose, visible = true, initialSection = 'overview
     if (!visible) return
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key !== 'Escape' || event.defaultPrevented || isImeOwnedKeyboardEvent(event) || wasWindowOverlayDismissed(event)) return
-      if (query) { event.preventDefault(); clearSearch(); return }
+      if (query) {
+        event.preventDefault()
+        clearSearch()
+        searchInput.current?.focus({ preventScroll: true })
+        return
+      }
       if (event.target instanceof HTMLSelectElement) return
       onClose()
     }
@@ -262,7 +264,8 @@ function SettingsPanelView({ onClose, visible = true, initialSection = 'overview
         <header>
           <div className="settings-sidebar__identity"><BrandIcon size={22} /><strong>Settings</strong></div>
         </header>
-        <label className="settings-search"><ThemeActionSearchIcon size={14} /><TextInput ref={searchInput} aria-label="Search settings" autoFocus={!preserveInput} value={query} onChange={(event) => updateQuery(event.target.value)} placeholder="Search settings" />{query ? <button type="button" aria-label="Clear settings search" onClick={clearSearch}><ThemeActionClearIcon size={12} /></button> : null}</label>
+        <SearchInput className="settings-search" ref={searchInput} aria-label="Search settings" clearLabel="Clear settings search"
+          autoFocus={!preserveInput} value={query} onValueChange={updateQuery} placeholder="Search settings" />
         <DropdownMenu.Root modal={false} open={visible && sectionMenuOpen} onOpenChange={setSectionMenuOpen}>
           <DropdownMenu.Trigger asChild>
             <button type="button" className="settings-section-picker" aria-label="Settings section" disabled={!visibleSections.length}>{visibleSections.length ? subpage?.title ?? section.title : 'No matches'}<ThemeNavigationDownIcon size={13} /></button>
