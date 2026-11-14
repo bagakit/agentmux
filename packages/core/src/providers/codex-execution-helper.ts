@@ -26,7 +26,10 @@ export async function qualifyCodexExecutionExecutable(command: string, options: 
 
 /** Qualifies only this new helper operation; never restarts or replaces an Agent. */
 export async function prepareCodexExecutionHelper(context: AgentExecutionHelperContext): Promise<AgentExecutionHelperLaunchPlan> {
-  const executable = await qualifyCodexExecutionExecutable(context.executable, { workspacePath: context.workspacePath, env: process.env })
+  // The frontend is a Node relay; native CLI qualification belongs to its executor.
+  const executable = context.role === 'executor'
+    ? await qualifyCodexExecutionExecutable(context.executable, { workspacePath: context.workspacePath, env: process.env })
+    : context.executable
   const configuration = { ...context, executable }
   validateCodexExecutionRunConfiguration(configuration)
   return {

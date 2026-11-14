@@ -10,7 +10,9 @@ export function parseClaudeExecutionRunArguments(args: readonly string[]): Agent
   const value = JSON.parse(args[1]!) as AgentExecutionHelperContext
   if (value.providerId !== 'claude' || !['frontend', 'executor'].includes(value.role) ||
       [value.bindingId, value.createOperationId, value.agentSessionId].some(item => typeof item !== 'string' || !item || item.includes('\0')) ||
-      [value.workspacePath, value.journalDirectory, value.executable].some(item => typeof item !== 'string' || !isAbsolute(item))) throw new Error('Invalid fixed Claude execution helper identity')
+      [value.workspacePath, value.journalDirectory].some(item => typeof item !== 'string' || !isAbsolute(item)) ||
+      typeof value.executable !== 'string' || !value.executable || value.executable.includes('\0') ||
+      (value.role === 'executor' && !isAbsolute(value.executable))) throw new Error('Invalid fixed Claude execution helper identity')
   if (value.role === 'executor' && (value.grant?.scope !== 'host-user' || value.grant.bindingId !== value.bindingId || !value.journalIdentity)) throw new Error('Claude tools require the original resource grant and journal')
   return value
 }

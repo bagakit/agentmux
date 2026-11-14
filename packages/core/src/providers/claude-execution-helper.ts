@@ -3,7 +3,10 @@ import type { AgentExecutionHelperContext, AgentExecutionHelperLaunchPlan } from
 import { resolveClaudeExecutionExecutable } from './claude-tool-execution-launch.js'
 
 export async function prepareClaudeExecutionHelper(context: AgentExecutionHelperContext): Promise<AgentExecutionHelperLaunchPlan> {
-  const executable = await resolveClaudeExecutionExecutable(context.executable, { env: process.env, workspacePath: context.workspacePath })
+  // The frontend is a Node relay; only the resource executor launches this CLI.
+  const executable = context.role === 'executor'
+    ? await resolveClaudeExecutionExecutable(context.executable, { env: process.env, workspacePath: context.workspacePath })
+    : context.executable
   return { command: process.execPath,
     args: ['--disable-warning=ExperimentalWarning', fileURLToPath(new URL('./claude-execution-run.js', import.meta.url)), '--agentmux-execution-helper', JSON.stringify({ ...context, executable })],
     env: { ELECTRON_RUN_AS_NODE: '1' },
