@@ -153,6 +153,7 @@ async function authenticatedFixture(request?: AgentMuxInteractionRequest, retain
   })
   // The original Provider catalog owns async reply routing. A history record
   // does not supply a live editor target or an automatic input capability.
+  const submitOriginal = h.client.submitAgentPrompt.bind(h.client)
   const submit = vi.spyOn(h.client, 'submitAgentPrompt'), reply = vi.spyOn(h.client, 'replySessionQuestion')
   const respond = vi.spyOn(h.client, 'respondAgentInteraction'), inspect = vi.spyOn(h.client, 'inspectAgentInteractionOperation')
   const transport = await authenticatedConsumer(h.client, root, sid)
@@ -161,7 +162,7 @@ async function authenticatedFixture(request?: AgentMuxInteractionRequest, retain
     const target = join(process.env.AGENTMUX_MOBILE_PROTOCOL_EVIDENCE, name + '.json')
     await mkdir(process.env.AGENTMUX_MOBILE_PROTOCOL_EVIDENCE, { recursive: true }); await writeFile(target, JSON.stringify(evidence, null, 2) + '\n')
   }
-  return { ...h, ...transport, core: h.client, submit, reply, respond, inspect, recordProof, retainedInput,
+  return { ...h, ...transport, core: h.client, submit, submitOriginal, reply, respond, inspect, recordProof, retainedInput,
     setRecent(value: AgentSessionHistoryPage) { recent = value; cut++ }, setOlder(value: AgentSessionHistoryPage) { older = value },
     invalidate() { for (const observe of observers) observe({ kind: 'invalidated', source }) } }
 }
@@ -262,6 +263,12 @@ it('authenticated Mobile keeps captured original speech readable when the native
 
 it('authenticated Hosted preserves ordinary input and the original terminal route without granting an automatic async reply', async () => {
   const f = await authenticatedFixture(), view = await mount(f.surface())
+  const submitted = deferred<Awaited<ReturnType<typeof f.core.submitAgentPrompt>>>()
+  f.submit.mockImplementation((...args) => {
+    const pending = f.submitOriginal(...args)
+    void pending.then(submitted.resolve, submitted.reject)
+    return pending
+  })
   await vi.waitFor(() => expect(view.element.textContent).toContain('Original asynchronous question'))
   expect(f.client.forwardRpc).toBeUndefined()
   await click(button(view.element, 'Keep original'))
@@ -279,6 +286,9 @@ it('authenticated Hosted preserves ordinary input and the original terminal rout
   await act(async () => { editor(view.element).dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'Enter', isComposing: true, keyCode: 229 })) })
   expect(f.submit).not.toHaveBeenCalled()
   await click(button(view.element, 'Send'))
+  // The click first awaits metadata and device saves. Observe this exact Core
+  // invocation completing before checking its bytes, without changing its result.
+  await act(async () => { await submitted.promise })
   await vi.waitFor(() => expect(f.writes.join(''), view.element.textContent!).toContain('Ordinary original mobile message'))
   await vi.waitFor(() => expect(saved().attempts[0][1].phase).toBe('confirmed'))
   expect(f.submit.mock.calls[0]![0]).toMatchObject({ authorHuman: true, sourceDevice: f.device })
