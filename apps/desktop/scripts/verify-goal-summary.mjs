@@ -28,8 +28,8 @@ const mutations = [
     before: '<span className="goal-patrol__report-summary">{patrol.report.summary}</span>',
     after: '{!compact ? <span className="goal-patrol__report-summary">{patrol.report.summary}</span> : null}' },
   { label: 'compact-manager-recovery-action-disappears', file: patrol,
-    before: '{needsSupervisor ? <button type="button" className="small-button"',
-    after: '{!compact && needsSupervisor ? <button type="button" className="small-button"' }
+    before: '{needsSupervisor && !embedded ? <button type="button"',
+    after: '{needsSupervisor && !embedded && !compact ? <button type="button"' }
 ]
 await verifyRendererSourceMutations({ name, evidenceRoot: evidence, tests: [product], sources: [summary, patrol, helper], mutations })
 let proofPath = join(evidence, name, 'receipt.json')

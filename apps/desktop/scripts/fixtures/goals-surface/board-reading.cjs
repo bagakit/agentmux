@@ -137,6 +137,38 @@ module.exports = async ({ evaluate, size, click, capture, waitFor, paint, result
     await waitFor(q(attention) + '.getAttribute("aria-pressed") === "false"')
     assert.deepEqual(await ids(), visible)
     await open(startGoal)
+    const originalInspection = '.goals-detail__current-work'
+    if (await evaluate(q(originalInspection) + '?.textContent === "View original inspection"')) {
+      await click(q(originalInspection))
+      const inspection = '.goals-detail__side [data-goal-work-kind="patrol"]'
+      await waitFor('document.activeElement === ' + q(inspection))
+      assert.equal(await evaluate('document.querySelectorAll("[data-goal-work-kind=patrol]").length'), 1)
+      assert.equal(await evaluate(q('.goal-work-area .goal-patrol') + ' === null'), true)
+      await take(width + '-' + theme + '-supervisor-inspection', width)
+      if (width === 620) {
+        await click(q('[data-goal-supervisor-toggle]'))
+        await waitFor(q(detail) + '.dataset.goalView === "work"')
+      }
+      const planning = '.goal-supervisor-rail__planning'
+      assert.ok(await evaluate(q(planning + ' [data-goal-plan-request]') + ' && !' + q('.goal-plan [data-goal-plan-request]')))
+      const openPlanning = '[aria-label="Goal plan"] .goal-plan__tools button:last-child'
+      await evaluate(q(openPlanning) + '.scrollIntoView({block: "center"})')
+      await paint()
+      await click(q(openPlanning))
+      await waitFor('document.activeElement === ' + q(planning))
+      await take(width + '-' + theme + '-supervisor-planning', width)
+      if (width === 620) {
+        const progress = '.goal-supervisor-rail__progress > summary'
+        await evaluate(q(progress) + '.scrollIntoView({block: "center"})')
+        await paint()
+        await click(q(progress))
+        await waitFor('Boolean(' + q('.goal-supervisor-rail__progress[open] .goals-continuation') + ')')
+        await take(width + '-' + theme + '-supervisor-progress', width)
+        await click(q(progress))
+        await click(q('[data-goal-supervisor-toggle]'))
+        await waitFor(q(detail) + '.dataset.goalView === "work"')
+      }
+    }
     const records = '[data-goal-other-work]'
     if (await evaluate('Boolean(' + q(records) + ') && !' + q(records) + '.parentElement.open')) await click(q(records))
     await click(q(reader + ' > summary'))

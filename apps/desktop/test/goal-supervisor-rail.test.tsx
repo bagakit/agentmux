@@ -13,6 +13,7 @@ vi.mock('../src/renderer/src/components/GoalContinuationControl', () => ({
   GoalContinuationAgent: ({ agentSessionId, hostId }: { agentSessionId: unknown; hostId?: string }) =>
     <strong data-original-supervisor-host={hostId} data-original-supervisor-reference={JSON.stringify(agentSessionId)}>{hostId === 'source-host' ? 'Original Supervisor name' : 'Other Host name'}</strong>
 }))
+vi.mock('../src/renderer/src/components/GoalPatrolControl', () => ({ GoalPatrolControl: () => null }))
 vi.mock('../src/renderer/src/lib/workbench-presentation', () => ({ useWorkbenchPresentationActive: () => true }))
 vi.mock('../src/renderer/src/lib/goal-discussion-recipient', () => ({ useGoalAgentName: () => null }))
 

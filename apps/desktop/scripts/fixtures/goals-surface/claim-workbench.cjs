@@ -43,6 +43,7 @@ module.exports = async ({ evaluate, size, click, capture, waitFor, paint, result
       assert.equal(await evaluate(`${query('.goals-detail__stage .goals-detail__current-work')}.textContent`), 'View original inspection')
       await click(query('.goals-detail__stage .goals-detail__current-work'))
       assert.equal(await evaluate(`document.activeElement === ${query(target)}`), true, 'Read the exact retained patrol operation')
+      if (width === 620) await click(query('[data-goal-supervisor-toggle]'))
     } else {
       const guide = '[data-goal-plan-node="guide"]'
       assert.equal(await evaluate(`${query(guide + ' [data-claim-open]')}.textContent`), 'Open to claim')

@@ -8,7 +8,7 @@ import type { GoalDelegationResult } from '@agentmux/core/goal-delegation'
 import { AGENTMUX_GOAL_SKILL_ENTRY, goalRoleGuidance } from '@agentmux/core/goal-role-guidance'
 import { GoalDelegationWork } from '../src/renderer/src/components/GoalDelegationWork'
 import { GoalResponsibilitySummary } from '../src/renderer/src/components/GoalResponsibilitySummary'
-import { GoalWorkArea } from '../src/renderer/src/components/GoalWorkArea'
+import { GoalSupervisorRail } from '../src/renderer/src/components/GoalSupervisorRail'
 import { useAppStore } from '../src/renderer/src/store'
 import { api } from '../src/renderer/src/lib/api'
 import { refreshGoalDelegations } from '../src/renderer/src/lib/goal-delegation-work'
@@ -296,7 +296,7 @@ describe('actual original PMO patrol CLI, Core Input and mounted business consum
     expect(await f.demands.snapshot()).toEqual(retained)
     f.patrolState.routeUnavailable = false
     await updated(async () => await refreshGoalDelegations('goal'), () => expect(current().responsibility!.supervisor.state).toBe('available'))
-    await mount(createElement(GoalWorkArea, { demand: { ...current(), workspacePath: null, sessions: [] } }))
+    await mount(createElement(GoalSupervisorRail, { demand: { ...current(), workspacePath: null, sessions: [] }, inspectionIsCurrent: true, onRevealAttempt: () => {} }))
     expect(button('Send first inspection').disabled).toBe(false)
     expect([...container.querySelectorAll('.primary-button')].map(item => item.textContent?.trim())).toEqual(['Send first inspection'])
     expect(patrolAction().classList.contains('primary-button')).toBe(false)

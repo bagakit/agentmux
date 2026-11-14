@@ -70,8 +70,9 @@ describe('Goal plan graph', () => {
     expect(outline.querySelector('[data-goal-destination="activity"]')).toBeNull()
     await pressGoalMenuKey(outline, 'Escape')
     expect(main.querySelector('.goal-collaboration')).toBeNull()
-    const overview = main.querySelector('[aria-label="Goal brief"]')!
+    const overview = main.querySelector('[aria-label="Goal overview"]')!
     expect(overview.parentElement).toBe(main)
+    expect(overview.querySelector('[aria-label="Goal brief"]')).not.toBeNull()
     expect(Boolean(graph()!.compareDocumentPosition(overview) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true)
     const intent = main.querySelector('.goals-detail__brief .goals-intent__reading')!
     expect(intent.textContent).toContain('Original intent')
@@ -312,7 +313,11 @@ describe('Goal plan graph', () => {
     expect(graph()!.querySelector('[data-goal-plan-edge]')).toBeNull()
     expect(graph()!.querySelector('[data-goal-plan-progress]')).toBeNull()
     expect(graph()!.querySelector('h2')!.textContent).toContain('Execution plan')
-    expect(graph()!.querySelector('[data-goal-plan-request]')).not.toBeNull()
+    expect(graph()!.querySelector('[data-goal-plan-request]')).toBeNull()
+    expect(dom.container.querySelector('[data-goal-supervisor-rail] [data-goal-plan-request]')).not.toBeNull()
+    const openPlanning = [...graph()!.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Plan with Supervisor')!
+    await act(async () => { openPlanning.click(); await new Promise<void>(resolve => requestAnimationFrame(() => resolve())) })
+    expect(document.activeElement).toBe(dom.container.querySelector('[aria-label="Planning with Supervisor"]'))
     const open = origin.querySelector<HTMLButtonElement>('button')!
     expect(open.getAttribute('aria-label')).toBe(record.title)
     expect(open.querySelector('.goal-plan-node__who')).not.toBeNull()

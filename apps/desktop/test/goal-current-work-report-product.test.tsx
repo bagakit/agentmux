@@ -59,10 +59,12 @@ it('the screenshot combination keeps its frozen inspection and origin above expa
   await vi.waitFor(async () => expect((await f.demands.get('goal'))!.patrols?.length).toBe(1))
   await f.publish()
   const work = container.querySelector('[data-goal-work-area]')!
-  const check = [...work.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Check original inspection')
+  const rail = container.querySelector('[data-goal-supervisor-rail]')!
+  expect(work.querySelector('.goal-patrol')).toBeNull()
+  const check = [...rail.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Check original inspection')
   expect(check).toBeDefined(); expect(check!.classList.contains('primary-button')).toBe(false)
-  const choose = [...work.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Choose Supervisor')
-  expect(choose).toBeDefined(); expect(choose!.classList.contains('primary-button')).toBe(true)
+  const choose = rail.querySelector<HTMLButtonElement>('.goal-supervisor-rail__assign')!
+  expect(choose.textContent).toMatch(/Change Supervisor|Choose Supervisor/)
   const record = work.querySelector('[data-goal-work-operation="finite-start"][data-goal-work-kind="start"]'), origin = container.querySelector('[data-goal-plan-origin]')
   expect(record).not.toBeNull(); expect(origin).not.toBeNull()
   expect(Boolean(origin!.compareDocumentPosition(record!) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true)
@@ -75,9 +77,12 @@ it('the screenshot combination keeps its frozen inspection and origin above expa
   expect(f.nativeInputs).toEqual(inputsBeforeReading)
   expect(work.querySelectorAll('[data-goal-work-operation="finite-start"]')).toHaveLength(1)
   const manager = useAppStore.getState().demands.goal!.responsibility!.supervisor
-  expect(work.querySelector('.goal-patrol__source')?.textContent, 'The original Supervisor reason remains readable without an extra warning paragraph').toContain(manager.reason)
+  expect(rail.querySelector('.goal-patrol__source')?.textContent, 'The original Supervisor reason remains readable without an extra warning paragraph').toContain(manager.reason)
   expect(container.querySelector('[data-goal-grill]')?.classList.contains('primary-button')).toBe(false)
   const original = (await f.demands.get('goal'))!.patrols![0]!
+  const jump = [...container.querySelectorAll<HTMLButtonElement>('.goals-detail__head button')].find(button => button.textContent === 'View original inspection')!
+  await act(async () => { jump.click(); await new Promise<void>(resolve => requestAnimationFrame(() => resolve())) })
+  expect(document.activeElement).toBe(rail.querySelector(`[data-goal-work-operation="${original.operationId}"]`))
   const before = [...f.nativeInputs], inputAttempts = [...f.attempts]
   const prepareCalls = vi.mocked(api.demands.delegation).mock.calls.filter(([method]) => method === 'goal.patrol').length
   await act(async () => choose!.click())
