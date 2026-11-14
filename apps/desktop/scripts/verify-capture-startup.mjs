@@ -125,6 +125,8 @@ async function electron() {
     execFileSync('git', ['worktree', 'add', '--detach', baselineTree, baseline.ref], { cwd: root, stdio: 'pipe' })
     added = true
     await symlink(join(root, 'node_modules'), join(baselineTree, 'node_modules'), 'dir')
+    for (const directory of ['apps/desktop', 'packages/client-ui', 'packages/core', 'packages/native-desktop', 'packages/identity'])
+      await symlink(join(root, directory, 'node_modules'), join(baselineTree, directory, 'node_modules'), 'dir')
     await copyFile(join(root, fixture), join(baselineTree, fixture))
     const variants = {}
     for (const [variant, tree, ref] of [['baseline', baselineTree, baseline.ref], ['candidate', root, candidateRef]]) {
@@ -137,6 +139,9 @@ async function electron() {
       const registration = ipcSource.slice(ipcSource.indexOf(from), ipcSource.indexOf(until, ipcSource.indexOf(from)))
       const alias = { react: dirname(require.resolve('react/package.json')), 'react-dom': dirname(require.resolve('react-dom/package.json')),
         '@agentmux/client-ui/theme': join(tree, 'packages/client-ui/src/theme/index.ts'), '@agentmux/client-ui/error-presentation': join(tree, 'packages/client-ui/src/lib/error-presentation.ts'),
+        '@agentmux/client-ui/input': join(tree, 'packages/client-ui/src/input/index.ts'), '@agentmux/client-ui/input/styles.css': join(tree, 'packages/client-ui/src/input/input.css'),
+        '@agentmux/client-ui/styles/theme-transition.css': join(tree, 'packages/client-ui/src/styles/theme-transition.css'),
+        '@agentmux/client-ui/styles/semantic-icons.css': join(tree, 'packages/client-ui/src/styles/semantic-icons.css'),
         '@agentmux/native-desktop/image': join(tree, 'packages/native-desktop/src/image.ts'), '@agentmux/core/object-id': join(tree, 'packages/core/src/object-id.ts') }
       const builds = []
       builds.push(await build({ absWorkingDir: root, entryPoints: [join(tree, 'apps/desktop/src/preload/capture-surface.ts')], outfile: join(preloadRoot, 'capture-surface.cjs'), bundle: true, platform: 'node', format: 'cjs', external: ['electron'], alias, metafile: true, logLevel: 'silent' }))
@@ -159,10 +164,16 @@ async function electron() {
             kind ??= 'production'
           }
         } else {
-          const marker = path.lastIndexOf('/node_modules/')
-          assert.ok(marker >= 0, variant + ' input is outside both Git trees and node_modules: ' + path)
-          key = 'dependency/' + path.slice(marker + '/node_modules/'.length)
-          kind ??= 'dependency'
+          const shared = relative(root, path)
+          if (!shared.startsWith('..') && !isAbsolute(shared)) {
+            key = 'shared-workspace/' + shared
+            kind ??= 'shared-workspace-dependency'
+          } else {
+            const marker = path.lastIndexOf('/node_modules/')
+            assert.ok(marker >= 0, variant + ' input is outside both Git trees and declared dependencies: ' + path)
+            key = 'dependency/' + path.slice(marker + '/node_modules/'.length)
+            kind ??= 'dependency'
+          }
         }
         if (consumed[key]) assert.equal(consumed[key].sha256, hash, variant + ' has one identity for ' + key)
         else consumed[key] = { sha256: hash, kind }
