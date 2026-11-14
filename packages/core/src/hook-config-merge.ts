@@ -1,4 +1,5 @@
 import { isDeepStrictEqual } from 'node:util'
+import { basename, dirname, isAbsolute } from 'node:path'
 import { isAlias, isMap, isSeq, parseDocument, visit, YAMLMap, YAMLSeq } from 'yaml'
 import { AgentMuxError } from './errors.js'
 
@@ -305,4 +306,34 @@ export function inspectManagedHookContent(current: string, ownedContent: string,
       return { present: satisfied > 0, current: satisfied === expected.length }
     }
   }
+}
+
+/** Read the former AgentMux command encoding as data. Recognition grants no write authority. */
+export function countLegacyHookDeclarations(content: string, strategy: AgentHookMergeStrategy, providerId: string): number {
+  const prefix = "ELECTRON_RUN_AS_NODE=1 AGENTMUX_HOOK_PROVIDER='" + providerId + "' "
+  function isLegacy(value: unknown): boolean {
+    if (!object(value) || typeof value.command !== 'string') return false
+    const command = value.command.replace(/^\/usr\/bin\/env /u, '')
+    if (!command.startsWith(prefix)) return false
+    const paths = /^'((?:[^']|'\\'')*)' '((?:[^']|'\\'')*)'(?: --event [A-Za-z][A-Za-z0-9_-]*)?$/u.exec(command.slice(prefix.length))
+    if (!paths || !isAbsolute(paths[1]!)) return false
+    const runner = paths[2]!
+    return isAbsolute(runner) && basename(runner) === 'agentmux-hook.js' && basename(dirname(runner)) === 'bin'
+  }
+  let buckets: readonly unknown[]
+  switch (strategy.kind) {
+    case 'json-managed-events': buckets = Object.values(currentHooks(parseCurrentObject(content), strategy.key)); break
+    case 'json-root-managed-events': buckets = Object.values(parseCurrentObject(content)); break
+    case 'yaml-managed-events': buckets = yamlHooks(yamlDocument(content))?.items.map(pair => isSeq(pair.value) ? pair.value.items.map(yamlEntry) : []) ?? []; break
+    default: return 0
+  }
+  let count = 0
+  for (const bucket of buckets) {
+    if (!Array.isArray(bucket)) continue
+    for (const entry of bucket) {
+      if (isLegacy(entry)) count++
+      if (object(entry) && Array.isArray(entry.hooks)) count += entry.hooks.filter(isLegacy).length
+    }
+  }
+  return count
 }

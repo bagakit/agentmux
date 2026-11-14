@@ -1840,6 +1840,8 @@ export async function registerIpc(args: {
   })
   handleWithEvent('executors:unregister', (_event, input: import('@agentmux/core').AgentMuxRpcParams<'settings.executors.unregister'>) =>
     sessionInputOperationResult(() => callUserRpc('settings.executors.unregister', input)))
+  handleWithEvent('executors:hooks', (_event, input: import('@agentmux/core').AgentMuxRpcParams<'settings.executors.hooks-inspect'>, update: unknown) =>
+    sessionInputOperationResult(() => callUserRpc(update === true ? 'settings.executors.hooks-update' : 'settings.executors.hooks-inspect', input)))
   handle('executors:register', async (hostId: string, input: import('@agentmux/core').AgentMuxHostExecutorConfigureInput) => {
     if (typeof hostId !== 'string' || !hostId.length) throw new TypeError('An exact execution Host ID is required.')
     return await args.runtime.configureExecutor(hostId, input)

@@ -12,6 +12,7 @@ import { rpcRecord, rpcString } from './rpc-data.js'
 import type { AgentMuxCreationTrust, AgentMuxCreationAuthorityIdentity } from './agent-creation-admission.js'
 import { parseAgentMuxCreationTrust, parseAgentMuxCreationTrustInput, type AgentMuxCreationTrustInput } from './agent-creation-admission.js'
 import { parseHostExecutorDescriptor, parseHostExecutorInventory, type AgentMuxHostExecutorInventory, type AgentMuxHostExecutorConfiguration, type AgentMuxHostExecutorConfigureInput, type AgentMuxHostExecutorRemoval } from './executor-contract.js'
+import type { AgentHostExecutorHookResult, AgentHostExecutorHookTarget } from './managed-hook-installer.js'
 
 export const AGENTMUX_RPC_HOST_SETTINGS_METHODS = {
   'settings.hosts.home': 'long',
@@ -21,6 +22,8 @@ export const AGENTMUX_RPC_HOST_SETTINGS_METHODS = {
   'settings.executors.discover': 'long',
   'settings.executors.register': 'long',
   'settings.executors.unregister': 'long',
+  'settings.executors.hooks-inspect': 'long',
+  'settings.executors.hooks-update': 'long',
   'settings.hosts.trusted-sources': 'long',
   'settings.hosts.message-trusted-sources': 'long',
   'settings.hosts.trust-message-source': 'long',
@@ -35,6 +38,8 @@ export type HostSettingsParameterMap = {
   'settings.executors.discover': { hostId: string; refresh?: boolean; executorId?: string }
   'settings.executors.unregister': { hostId: string; executorId: string; expectedRegistrationRevision: string }
   'settings.executors.register': { hostId: string; executorId: string; input: Omit<AgentMuxHostExecutorConfigureInput, 'executorId'> }
+  'settings.executors.hooks-inspect': AgentHostExecutorHookTarget & { hostId: string }
+  'settings.executors.hooks-update': AgentHostExecutorHookTarget & { hostId: string }
   'settings.hosts.trusted-sources': { hostId: string }
   'settings.hosts.trust-source': { hostId: string; input: AgentMuxCreationTrustInput }
   'settings.hosts.message-trusted-sources': { hostId: string }
@@ -48,6 +53,8 @@ export type HostSettingsResultMap = {
   'settings.executors.discover': AgentMuxHostExecutorInventory & { routeHostId: string }
   'settings.executors.unregister': AgentMuxHostExecutorRemoval & { routeHostId: string }
   'settings.executors.register': AgentMuxHostExecutorConfiguration & { routeHostId: string }
+  'settings.executors.hooks-inspect': AgentHostExecutorHookResult & { routeHostId: string }
+  'settings.executors.hooks-update': AgentHostExecutorHookResult & { routeHostId: string }
   'settings.hosts.trusted-sources': { routeHostId: string; authority: AgentMuxCreationAuthorityIdentity; sources: AgentMuxCreationTrust[] }
   'settings.hosts.trust-source': { routeHostId: string; authority: AgentMuxCreationAuthorityIdentity; source: AgentMuxCreationTrust }
   'settings.hosts.message-trusted-sources': { routeHostId: string; authority: AgentMuxCreationAuthorityIdentity; sources: AgentMuxMessageTrust[] }
@@ -56,7 +63,19 @@ export type HostSettingsResultMap = {
 export function isHostSettingsMethod(method: unknown): method is HostSettingsMethod {
   return typeof method === 'string' && Object.hasOwn(AGENTMUX_RPC_HOST_SETTINGS_METHODS, method)
 }
+export function isExecutorHookMethod(method: string): method is 'settings.executors.hooks-inspect' | 'settings.executors.hooks-update' {
+  return method === 'settings.executors.hooks-inspect' || method === 'settings.executors.hooks-update'
+}
+export function parseExecutorHookTarget(p: Record<string, unknown>): AgentHostExecutorHookTarget {
+  return { runtimeId: rpcString(p.runtimeId, 'Original Runtime ID'), executorId: rpcString(p.executorId, 'Executor ID'),
+    configRevision: rpcString(p.configRevision, 'Current Executor configuration revision'),
+    workspacePath: rpcString(p.workspacePath, 'Workspace path') }
+}
 export function parseHostSettingsParams<M extends HostSettingsMethod>(method: M, value: unknown): HostSettingsParameterMap[M] {
+  if (isExecutorHookMethod(method)) {
+    const p = rpcRecord(value, ['hostId', 'runtimeId', 'executorId', 'configRevision', 'workspacePath'])
+    return { hostId: rpcString(p.hostId, 'Route Host ID'), ...parseExecutorHookTarget(p) } as HostSettingsParameterMap[M]
+  }
   if (method === 'settings.hosts.agent-resources') {
     const p = rpcRecord(value, ['hostId', 'kind', 'expected', 'expectedRuntimeId'])
     if (p.kind !== 'records' && p.kind !== 'running') throw new AgentMuxError('Choose records or running for this Host observation.', 'INVALID_CONTROL_REQUEST')
@@ -126,6 +145,31 @@ export function parseHostSettingsResult<M extends HostSettingsMethod>(method: M,
     return result as HostSettingsResultMap[M]
   }
   const fail = (): never => { throw new AgentMuxError('Host settings result belongs to another Host or source.', 'CONTROL_PROTOCOL_ERROR') }
+  if (isExecutorHookMethod(method)) {
+    const expected = input as HostSettingsParameterMap['settings.executors.hooks-inspect']
+    const protocol = 'CONTROL_PROTOCOL_ERROR'
+    const p = rpcRecord(value, ['routeHostId', 'runtimeId', 'executorId', 'configRevision', 'workspacePath', 'inspection', 'health', 'canUpdate', 'update'], protocol)
+    if (p.routeHostId !== expected.hostId || p.runtimeId !== expected.runtimeId || p.executorId !== expected.executorId || p.configRevision !== expected.configRevision ||
+        p.workspacePath !== expected.workspacePath || typeof p.canUpdate !== 'boolean' || typeof p.health !== 'string' ||
+        !['current', 'issue', 'unknown', 'not-managed'].includes(p.health)) fail()
+    const inspection = rpcRecord(p.inspection, ['providerId', 'checkedAt', 'status', 'code', 'action', 'targets'], protocol)
+    if (typeof inspection.providerId !== 'string' || typeof inspection.checkedAt !== 'number' || !Number.isFinite(inspection.checkedAt) ||
+      typeof inspection.status !== 'string' || !['installed', 'not_installed', 'partial', 'error', 'skipped'].includes(inspection.status) ||
+      typeof inspection.code !== 'string' || (inspection.action !== null && typeof inspection.action !== 'string') ||
+      !Array.isArray(inspection.targets)) return fail()
+    for (const target of inspection.targets) {
+      const item = rpcRecord(target, ['path', 'status', 'code', 'legacyDeclarations'], protocol)
+      if (typeof item.path !== 'string' || typeof item.status !== 'string' || !['current', 'not_present', 'partial', 'error'].includes(item.status) ||
+        (item.code !== undefined && typeof item.code !== 'string') ||
+        (item.legacyDeclarations !== undefined && (typeof item.legacyDeclarations !== 'number' || !Number.isSafeInteger(item.legacyDeclarations) || item.legacyDeclarations < 1))) fail()
+    }
+    const update = rpcRecord(p.update, ['status', 'receiptId', 'code'], protocol)
+    if (typeof update.status !== 'string' || (method === 'settings.executors.hooks-inspect' ? update.status !== 'not-requested' :
+      !['not-applicable', 'unchanged', 'updated', 'unconfirmed'].includes(update.status))) fail()
+    if (update.status === 'updated' ? typeof update.receiptId !== 'string' || update.code !== undefined :
+      update.receiptId !== undefined || (update.status === 'unconfirmed' ? typeof update.code !== 'string' : update.code !== undefined)) fail()
+    return p as HostSettingsResultMap[M]
+  }
   if (method === 'settings.executors.discover' || method === 'settings.executors.register' || method === 'settings.executors.unregister') {
     const p = rpcRecord(value, method === 'settings.executors.discover' ? ['routeHostId', 'runtimeId', 'executors'] : method === 'settings.executors.unregister' ? ['routeHostId', 'runtimeId', 'executorId', 'removedRegistration', 'registrationRevision', 'effectiveExecutor'] : ['routeHostId', 'runtimeId', 'executor'], 'CONTROL_PROTOCOL_ERROR')
     if (p.routeHostId !== input.hostId || typeof p.runtimeId !== 'string' || !p.runtimeId || /[\0\r\n]/u.test(p.runtimeId)) fail()

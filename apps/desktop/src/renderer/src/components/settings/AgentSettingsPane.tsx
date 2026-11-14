@@ -121,6 +121,7 @@ export function AgentSettingsPane({ config, onSave, executorId, navigationReques
   const consumedNavigation = useRef<SettingsNavigationRequest | string | undefined>(undefined)
   const [hostId] = useState(initialHost)
   const [scope, setScope] = useState<'templates' | 'host'>(navigationRequest?.field === 'host-executors' ? 'host' : 'templates')
+  const [hookNavigation, setHookNavigation] = useState<{ executorId: string }>()
   useEffect(() => { if (navigationRequest?.field === 'host-executors') setScope('host') }, [navigationRequest])
   const resource = useResourceDrafts(Object.fromEntries(Object.entries(config.executors).map(([id, executor]) =>
     [id, toDraft(executor)])))
@@ -374,7 +375,7 @@ export function AgentSettingsPane({ config, onSave, executorId, navigationReques
         {scopeControl}
         <span className="settings-resource-count">{scope === 'templates' ? `${executors.length} global templates` : null}</span>
       </div>
-      <div className="settings-agent-body" data-settings-field="host-executors" hidden={scope !== 'host'}><HostExecutorSettings config={config} active={active && scope === 'host'} requestedHostId={navigationRequest?.field === 'host-executors' ? navigationRequest.hostId : undefined} /></div>
+      <div className="settings-agent-body" data-settings-field="host-executors" hidden={scope !== 'host'}><HostExecutorSettings config={config} active={active && scope === 'host'} requestedHostId={navigationRequest?.field === 'host-executors' ? navigationRequest.hostId : undefined} hookNavigation={hookNavigation} /></div>
       <div hidden={scope !== 'templates'} className="settings-agent-templates">
         <ProviderCatalogPane entries={providerCatalog} read={catalogRead} executorCounts={executorCounts}
           selectedId={providerId} onSelect={selectProvider} onRefresh={() => void refreshProviders()} />
@@ -415,6 +416,7 @@ export function AgentSettingsPane({ config, onSave, executorId, navigationReques
                 <label><span>Arguments <small>shell-style quoting</small></span><ComposerTextarea aria-label="Executor arguments" value={draft.args} onValueChange={(value) => update(id, { args: value })} placeholder={'--model "model name" --effort high'} rows={2} /></label>
                 <ExecutorLaunchPreview command={draft.command} args={draft.args} />
                 <p className="settings-group-note">Used for new sessions. Running agents keep their current configuration. Save changes before checking availability.</p>
+                {Object.hasOwn(resource.expected, id) ? <div><button type="button" className="small-button" onClick={() => { setHookNavigation({ executorId: id }); setScope('host') }}>Manage Hook on Host</button></div> : null}
                 <div className="agent-avatar-settings__row">
                   <span className="agent-avatar-settings__name"><strong>Appearance</strong><small>Recognize this executor across your workspace</small></span>
                   <label>Tint<input type="color" aria-label={`${draft.label} avatar tint`} value={avatar?.tint ?? '#8ab4f8'} onChange={(event) => updateAvatar(id, { ...avatar, tint: event.target.value })} /></label>

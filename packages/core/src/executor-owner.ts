@@ -216,6 +216,17 @@ export class AgentMuxHostExecutorOwner {
       descriptor: { ...this.descriptor(executorId, config, source, state.registrationRevisions[executorId]), ...observation } }
   }
 
+  /** Keep a registered configuration current until its scoped maintenance write completes. */
+  async withCurrentConfiguration<T>(executorId: string, configRevision: string, write: () => Promise<T>): Promise<T> {
+    return await this.serialized(async () => {
+      const inventory = await this.list({ executorId })
+      if (inventory.executors[0]?.configRevision !== configRevision) {
+        throw new AgentMuxError('The selected Host Executor configuration changed. Refresh it before updating its Hook.', 'EXECUTOR_CONFIGURATION_CHANGED')
+      }
+      return await write()
+    })
+  }
+
   async configure(input: AgentMuxHostExecutorConfigureInput): Promise<AgentMuxHostExecutorConfiguration> {
     const executorId = text(input.executorId, 'Executor ID', 512), config = parseConfig(input.config)
     const expectedRevision = input.expectedRevision === undefined ? undefined : text(input.expectedRevision, 'Expected Executor revision', 512)

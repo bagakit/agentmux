@@ -14,7 +14,7 @@ import {
 import { createRequire } from 'node:module'
 import { dirname, isAbsolute, join, resolve, sep } from 'node:path'
 import { AgentMuxError } from './errors.js'
-import { inspectManagedHookContent, prepareMergedHookContent, type AgentHookMergeStrategy } from './hook-config-merge.js'
+import { countLegacyHookDeclarations, inspectManagedHookContent, prepareMergedHookContent, type AgentHookMergeStrategy } from './hook-config-merge.js'
 import type { AgentProviderId } from './types.js'
 
 const MAX_HOOK_FILE_BYTES = 256 * 1024
@@ -46,7 +46,18 @@ export type AgentManagedHookInspection = {
   status: 'installed' | 'not_installed' | 'partial' | 'error' | 'skipped'
   code: string
   action: string | null
-  targets: Array<{ path: string; status: 'current' | 'not_present' | 'partial' | 'error'; code?: string }>
+  targets: Array<{ path: string; status: 'current' | 'not_present' | 'partial' | 'error'; code?: string; legacyDeclarations?: number }>
+}
+
+export type AgentHostExecutorHookTarget = { runtimeId: string; executorId: string; configRevision: string; workspacePath: string }
+export type AgentHostExecutorHookResult = AgentHostExecutorHookTarget & {
+  inspection: AgentManagedHookInspection
+  health: 'current' | 'issue' | 'unknown' | 'not-managed'
+  canUpdate: boolean
+  update:
+    | { status: 'not-requested' | 'not-applicable' | 'unchanged' }
+    | { status: 'updated'; receiptId: string }
+    | { status: 'unconfirmed'; code: string }
 }
 
 export type AgentManagedHookPreview = {
@@ -247,7 +258,10 @@ export class AgentManagedHookInstaller {
               : { present: true, current: content === mutation.content }
           if (!plan.retainPreviousDeclarations && facts.current && mutation.merge && previous?.content &&
               prepareMergedHookContent(content ?? null, mutation.content, mutation.merge, previous.content).content !== content) facts.current = false
-          targets.push({ path: mutation.path, status: facts.current ? 'current' : facts.present ? 'partial' : 'not_present' })
+          const legacyDeclarations = plan.retainPreviousDeclarations && mutation.merge && content !== undefined
+            ? countLegacyHookDeclarations(content, mutation.merge, plan.providerId) : 0
+          targets.push({ path: mutation.path, status: legacyDeclarations ? 'partial' : facts.current ? 'current' : facts.present ? 'partial' : 'not_present',
+            ...(legacyDeclarations ? { legacyDeclarations, code: 'MANAGED_HOOK_LEGACY_CARRIER' } : {}) })
         } catch (error) {
           targets.push({ path: mutation.path, status: 'error', code: inspectionErrorCode(error) })
         }
@@ -259,10 +273,12 @@ export class AgentManagedHookInstaller {
     const status = targets.some(target => target.status === 'error') ? 'error'
       : targets.every(target => target.status === 'current') ? 'installed'
         : targets.every(target => target.status === 'not_present') ? 'not_installed' : 'partial'
+    const legacy = status === 'partial' && targets.some(target => target.legacyDeclarations)
     return { providerId: plan.providerId, checkedAt: Date.now(), status, targets,
       code: status === 'installed' ? 'MANAGED_HOOK_CURRENT' : status === 'not_installed' ? 'MANAGED_HOOK_ABSENT'
-        : status === 'error' ? 'MANAGED_HOOK_CHECK_FAILED' : 'MANAGED_HOOK_INCOMPLETE',
+        : status === 'error' ? 'MANAGED_HOOK_CHECK_FAILED' : legacy ? 'MANAGED_HOOK_LEGACY_CARRIER' : 'MANAGED_HOOK_INCOMPLETE',
       action: status === 'installed' ? null : status === 'error' ? 'Fix the unreadable or invalid scoped Hook target, then inspect again.'
+        : legacy ? 'Older direct runtime declarations are still present. Confirm their original ownership and Run dependencies before removal.'
         : 'Install or repair the managed Hook configuration for this scope, then inspect again.' }
   }
 

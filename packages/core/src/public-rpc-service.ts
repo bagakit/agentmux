@@ -197,7 +197,7 @@ import { observeHostRuntime, parseTailcatListenerObservation } from './host-runt
 import { observeHostAgentResources } from './host-agent-resources.js'
 import { observeRead } from './observation-read.js'
 import { observeHostNetwork } from './host-network-observation.js'
-import { isHostSettingsMethod, parseHostSettingsParams, parseHostSettingsResult, type HostSettingsMethod } from './public-rpc-host-settings.js'
+import { isExecutorHookMethod, isHostSettingsMethod, parseHostSettingsParams, parseHostSettingsResult, type HostSettingsMethod } from './public-rpc-host-settings.js'
 import { AGENTMUX_TAILCAT_DEFAULT_KEYS, isTailcatKeyMethod, parseTailcatKeyParams, parseTailcatKeyResult } from './public-rpc-tailcat-key.js'
 import { isHostMaintenanceMethod, parseHostMaintenanceParams, parseHostMaintenanceResult, type HostMaintenanceActor, type HostMaintenanceParamsMap } from './public-rpc-host-maintenance.js'
 import { AGENTMUX_RPC_CONTROL_METHODS, AGENTMUX_RPC_NATIVE_METHODS, type AgentMuxRpcMethod,
@@ -217,6 +217,7 @@ export type AgentMuxRpcCorePort = import('./agent-execution-coordinator.js').Age
   'ackDeliveryBatch' | 'openDispatch' | 'showDispatch' | 'readMessage' | 'listMessages' | 'listMessageEvents' | 'inspectMessageBroadcast' | 'readDispatch' | 'listDispatches' | 'recordDispatchEvent' |
   'catalog' | 'connect' | 'inspectManagedHooks' | 'probeAgent' | 'probeExecutorAvailability' | 'listHostNativeAgentSessions' | 'readHostNativeAgentHistory' | 'readHostNativeAgentHistoryResource' |
   'readDeliveryAttempt' | 'readReadingDiagnostic' | 'findReadingDiagnostics' | 'readAgentStartupDiagnostic' | 'findAgentStartupDiagnostics' | 'observeRunStorage' | 'runtimeDiagnostics' | 'runtimeResourceSnapshot' | 'runtimeIdentity' | 'agentCreationAuthority' | 'listTrustedCreationSources' | 'trustCreationSource' | 'agentMessageAuthority' | 'listTrustedMessageSources' | 'trustMessageSource' | 'prepareFederatedMessage' | 'intakeFederatedMessage' | 'prepareFederatedRead' | 'exportFederatedThread' | 'readFederatedOutbox' | 'recordFederatedDispatchEvent' | 'intakeFederatedDispatchEvent' | 'recordFederatedInboxReceipt' | 'listHostExecutors' | 'configureHostExecutor' | 'removeHostExecutor' | 'hostEnvironment'> & {
+    maintainHostExecutorHooks?: AgentMuxClient['maintainHostExecutorHooks']
     stopAgent?: AgentMuxClient['stopAgent']
     controlTerminal?: AgentMuxClient['controlTerminal']
     inspectTerminalControl?: AgentMuxClient['inspectTerminalControl']
@@ -2070,6 +2071,9 @@ export class AgentMuxRpcService {
     }
     if (isHostSettingsMethod(method)) {
       const input = parseHostSettingsParams(method, params)
+      if (method === 'settings.executors.hooks-update' && (context.caller !== undefined || context.principal?.kind !== 'user')) {
+        throw new AgentMuxError('Updating a managed Hook requires a transport-approved user.', 'CONTROL_PERMISSION_DENIED')
+      }
       if ((method === 'settings.hosts.inspect' || method === 'settings.hosts.network' || method === 'settings.hosts.home' || method === 'settings.hosts.agent-resources') && !this.ports.coreClients && !this.local) throw new AgentMuxError(
         'No existing Host Runtime client is available to observe. This read did not start a Runtime.', 'CONTROL_UNAVAILABLE')
       if ((method === 'settings.hosts.trust-source' || method === 'settings.hosts.trust-message-source') &&
@@ -2085,6 +2089,14 @@ export class AgentMuxRpcService {
       }
       if (targets.length !== 1) throw new AgentMuxError('The exact route Host is unknown or ambiguous.', targets.length ? 'AMBIGUOUS_AGENT_SESSION' : 'UNKNOWN_HOST')
       const client = targets[0]!.client
+      if (isExecutorHookMethod(method)) {
+        if (!client.maintainHostExecutorHooks) throw new AgentMuxError('This Host does not expose managed Hook maintenance.', 'CONTROL_UNAVAILABLE')
+        const { hostId, ...query } = parseHostSettingsParams(method, params)
+        if (method === 'settings.executors.hooks-update') await context.assertCurrent?.()
+        context.signal?.throwIfAborted()
+        const result = await client.maintainHostExecutorHooks(query, method === 'settings.executors.hooks-update')
+        return parseHostSettingsResult(method, { routeHostId: hostId, ...result }, input) as AgentMuxRpcResult<M>
+      }
       if (method === 'settings.hosts.inspect' || method === 'settings.hosts.network' || method === 'settings.hosts.home' || method === 'settings.hosts.agent-resources') {
         const query = parseHostSettingsParams(method, params)
         const configuration = structuredClone(this.ports.hostConfiguration?.(input.hostId) ?? null)

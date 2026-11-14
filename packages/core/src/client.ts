@@ -31,7 +31,7 @@ import { parseHostEnvironment, parseHostEnvironmentSelector, parseSelectedHostEn
 import { AgentWorkspaceDirectory } from './agent-workspace-directory.js'
 import { homedir } from 'node:os'
 import { existsSync } from 'node:fs'
-import { realpath } from 'node:fs/promises'
+import { realpath, stat } from 'node:fs/promises'
 import { parseWorkspaceTrustPreparation, type AgentWorkspaceTrustPreparation } from './workspace-trust-preparation.js'
 import { parseAutomaticInputSource, sameAutomaticInputSource } from './automatic-input-source.js'
 import { decodePreparedRun } from './prepared-run.js'
@@ -222,7 +222,7 @@ import { type AgentMuxContinuityControlInput, type AgentMuxContinuityControlResu
 import type { AgentMuxContinuityLaunchInput, AgentMuxContinuityMessageInput } from './agent-session-recovery/continuity-contract.js'
 import { normalizePromptInputIntent } from './prompt-submission-record.js'
 import { AgentHookServer, type AgentHookBinding } from './hook-server.js'
-import { AgentManagedHookInstaller, type AgentManagedHookInspection, type AgentManagedHookPlan } from './managed-hook-installer.js'
+import { AgentManagedHookInstaller, type AgentHostExecutorHookTarget, type AgentHostExecutorHookResult, type AgentManagedHookInspection, type AgentManagedHookPlan } from './managed-hook-installer.js'
 import { defaultAgentMuxControlSocketPath, defaultAgentMuxMessageQueuePath, defaultAgentMuxStateDirectory, defaultCtxmuxStateDirectory, resolveCoreBinPath } from './runtime-paths.js'
 import {
   projectAgentMuxRuntimeSubjects,
@@ -659,6 +659,55 @@ export class AgentMuxClient {
     // A calling SDK never adds this contract to another Core's old result.
     return { ...inventory, executors: inventory.executors.map(executor => ({ ...executor,
       ...(input?.executorId === executor.executorId ? { creationContract: { ordinaryLaunch: 1 as const } } : {}) })) }
+  }
+
+  /** Diagnose or explicitly update the selected executing Host's saved configuration. */
+  async maintainHostExecutorHooks(input: AgentHostExecutorHookTarget, update = false): Promise<AgentHostExecutorHookResult> {
+    const owner = this.hostExecutorOwner
+    if (!owner) throw new AgentMuxError('Target Host Executor registry is unavailable.', 'CONTROL_UNAVAILABLE')
+    if (!isAbsolute(input.workspacePath)) throw new AgentMuxError('Choose an absolute workspace path on the original Host.', 'INVALID_CONTROL_REQUEST')
+    if (!(await stat(input.workspacePath).catch(() => null))?.isDirectory()) {
+      throw new AgentMuxError('The selected workspace could not be read as a directory on the original Host.', 'HOOK_WORKSPACE_UNCONFIRMED')
+    }
+    await this.prepareExecutionEnvironment({ refresh: true })
+    const assertRevision = (revision: string | undefined) => {
+      if (revision !== input.configRevision) throw new AgentMuxError('The selected Host Executor configuration changed. Refresh it before checking or updating its Hook.', 'EXECUTOR_CONFIGURATION_CHANGED')
+    }
+    const assertTarget = async () => {
+      const current = await owner.list({ executorId: input.executorId })
+      if (current.runtimeId !== input.runtimeId) throw new AgentMuxError('The original execution Host changed. Refresh the Host inventory.', 'EXECUTOR_HOST_CHANGED')
+      assertRevision(current.executors[0]?.configRevision)
+    }
+    await assertTarget()
+    const { config, descriptor } = await owner.resolve(input.executorId)
+    assertRevision(descriptor.configRevision)
+    const target = { runtimeId: input.runtimeId, executorId: input.executorId, configRevision: input.configRevision, workspacePath: input.workspacePath }
+    const options = { workspacePath: target.workspacePath, env: config.env, command: config.command, args: config.args }
+    const provider = this.providers.get(config.providerId)
+    const strategy = provider.catalog.hookStrategy
+    const canUpdate = strategy.kind === 'native' && strategy.installation === 'explicit-managed'
+    let write: AgentHostExecutorHookResult['update'] = { status: 'not-requested' }
+    if (update) {
+      try {
+        const plan = canUpdate ? this.managedHookPlan(provider, options) : null
+        if (!plan) write = { status: 'not-applicable' }
+        else {
+          const receipt = await owner.withCurrentConfiguration(target.executorId, target.configRevision, () => this.hookInstaller.ensure(plan))
+          write = receipt ? { status: 'updated', receiptId: receipt.id } : { status: 'unchanged' }
+        }
+      } catch (error) {
+        write = { status: 'unconfirmed', code: error instanceof AgentMuxError ? error.code : 'HOOK_INSTALL_FAILED' }
+      }
+    }
+    const { workspacePath: _workspace, ...inspection } = await this.inspectManagedHooks(config.providerId, options)
+    if (!update) await assertTarget()
+    const confirmedIssue = inspection.status === 'not_installed' || inspection.targets.some(target =>
+      target.legacyDeclarations || target.code === 'HOOK_TARGET_UNPARSEABLE' || target.code === 'UNSAFE_HOOK_TARGET') ||
+      ['MANAGED_HOOK_INCOMPLETE', 'HOOK_CONFIGURATION_DISABLED', 'HOOK_NATIVE_DISABLED'].includes(inspection.code)
+    const health = inspection.status === 'installed' ? 'current'
+      : strategy.kind !== 'native' || strategy.installation === 'unmanaged' ? 'not-managed'
+        : confirmedIssue ? 'issue' : 'unknown'
+    return { ...target, inspection, health, canUpdate: canUpdate && inspection.code !== 'HOOK_PLAN_CONTEXT_UNAVAILABLE', update: write }
   }
 
   /** A local Core owns no outgoing remote Runtime RPC carrier. */
