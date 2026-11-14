@@ -5491,6 +5491,9 @@ export class BrowserViewManager {
       back: () => this.back(entry.id),
       forward: () => this.forward(entry.id),
       reload: () => this.contextMenuReload ? this.contextMenuReload(entry.id) : this.reload(entry.id),
+      ...(frame.parent ? { reloadFrame: () => {
+        if (!frame.reload()) throw new Error('The original frame could not be reloaded. Open its menu again to retry.')
+      } } : {}),
       savePage: async () => {
         const title = contents.getTitle().replace(/[\\/:*?"<>|\u0000-\u001f]/gu, '_').trim().slice(0, 96) || 'Page'
         const result = await dialog.showSaveDialog(host, { defaultPath: `${title}.mhtml`, filters: [{ name: 'Web archive', extensions: ['mhtml'] }] })

@@ -18,6 +18,7 @@ export type BrowserMenuCommands = {
   back: Action
   forward: Action
   reload: Action
+  reloadFrame?: Action
   savePage: Action
   print: Action
   inspect: Action
@@ -74,7 +75,10 @@ export function browserPageMenu(contents: WebContents, hit: ContextMenuParams, o
       { label: 'Save Page As…', run: owner.savePage },
       { label: 'Print…', run: owner.print },
       { label: 'Copy Page Address', run: owner.copyAddress(pageURL) },
-      ...(frameURL !== pageURL && canOpen(frameURL) ? [{ label: 'Open Frame in New Tab', run: openInTab(frameURL) }] : [])
+      ...(owner.reloadFrame ? [
+        { label: 'Reload Frame', run: owner.reloadFrame },
+        ...(canOpen(frameURL) ? [{ label: 'Open Frame in New Tab', run: openInTab(frameURL) }] : [])
+      ] : [])
     ])
   }
   function template(item: Item): MenuItemConstructorOptions {
