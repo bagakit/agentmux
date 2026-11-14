@@ -11,10 +11,11 @@ function Stamp({ value }: { value: number }) {
 }
 
 /** A reading of the original Host schedule. Appearance never supplies execution facts. */
-export function MoteHeartbeatStatus({ scope, reading, loading, issue, onRefresh, actions, controls, detailsActions, visible = true, unavailable = false }: {
+export function MoteHeartbeatStatus({ scope, reading, loading, issue, onRefresh, actions, controls, controlsAfterStatus = false, detailsActions, visible = true, unavailable = false }: {
   scope: MoteWorkfaceScope; reading?: MotePresenceReading | undefined; loading?: boolean | undefined; issue?: string | null | undefined
   onRefresh(): void; actions?: import('react').ReactNode; controls?: import('react').ReactNode; detailsActions?: import('react').ReactNode; visible?: boolean
   unavailable?: boolean
+  controlsAfterStatus?: boolean
 }) {
   const bindings = useAppStore(state => state.spaceZoneBindings)
   const target = useMemo(() => topicSpaceIconTarget(scope.workspace, scope.topic, bindings), [scope.workspace, scope.topic, bindings])
@@ -29,7 +30,7 @@ export function MoteHeartbeatStatus({ scope, reading, loading, issue, onRefresh,
       <div><span className="mote-heartbeat__eyebrow">Mote heartbeat</span><h3>{scope.topic.title} keeps an eye on things</h3></div>
     </header>
     <p className="mote-heartbeat__purpose">Checks your work, goals and unfinished commitments. Stays quiet when nothing needs attention.</p>
-    {controls ? <div className="mote-heartbeat__controls">{controls}</div> : null}
+    {controls && !controlsAfterStatus ? <div className="mote-heartbeat__controls">{controls}</div> : null}
     <div className="mote-heartbeat__reading" role="status">
       <strong>{title}</strong>
       {schedule?.status === 'paused' ? <p>{moteHeartbeatPresentation(reading, false).detail}</p> : null}
@@ -43,6 +44,7 @@ export function MoteHeartbeatStatus({ scope, reading, loading, issue, onRefresh,
     </div>
     {issue || !schedule && reading?.issue ? <p className="mote-heartbeat__issue" role="status">{issue ?? reading?.issue}</p> : null}
     <div className="mote-heartbeat__actions">{actions}<button type="button" className="small-button" disabled={loading} onClick={onRefresh}>{loading ? 'Reading…' : 'Refresh actual schedule'}</button></div>
+    {controls && controlsAfterStatus ? <div className="mote-heartbeat__controls">{controls}</div> : null}
     {schedule ? <details className="mote-heartbeat__details"><summary>Original schedule details</summary>
       {schedule.lastDecision ? <p>{schedule.lastDecision}</p> : null}
       {reading?.issue ? <p>{reading.issue}</p> : null}

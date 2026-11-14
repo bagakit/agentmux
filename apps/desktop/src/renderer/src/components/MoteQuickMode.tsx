@@ -94,8 +94,11 @@ export function MoteQuickModeDialog({ scope, reference, onOpenPath, onClose, ret
   const [resuming, setResuming] = useState(false)
   const [inputReading, setInputReading] = useState<{ identity: string; hostId: string; input: AgentInputSubmissionReceipt | null; record: AgentPromptSubmissionRecord | null }>()
   const inputIdentity = (schedule: NonNullable<MotePresenceReading['schedule']>) => JSON.stringify([schedule.loopId, schedule.hostId, schedule.agentSessionId,
+    schedule.providerId, schedule.workspacePath, schedule.revision, schedule.managedSource?.sourceId, schedule.managedSource?.revision, schedule.pause?.episodeId, schedule.lastTickId,
     schedule.pendingCompletion?.operationId ?? null, schedule.pendingCompletion?.condition?.expectedRun.runId ?? null])
   const originalInput = maintenance?.schedule && inputReading?.identity === inputIdentity(maintenance.schedule) ? inputReading : undefined
+  const checkedMissingKey = !originalHeartbeat && originalInput !== undefined && maintenance?.schedule?.status === 'paused' &&
+    maintenance.schedule.lastOutcome === 'unknown' && !maintenance.schedule.pendingCompletion && moteHeartbeatReadingMatchesSource(saved)
   const form = useRef(draft); form.current = draft
   const edited = useRef(Boolean(restored.current)), lifetime = useRef<object>({}), content = useRef<HTMLDivElement>(null), id = useId()
   const latestDraft = useRef({ draft, minutes, rolloverKind, rolloverMinutes, saved, accepted: false })
@@ -162,32 +165,51 @@ export function MoteQuickModeDialog({ scope, reference, onOpenPath, onClose, ret
       record.pendingCompletion?.condition?.expectedRun.runId !== original.pendingCompletion?.condition?.expectedRun.runId ||
       record.managedSource?.sourceId !== original.managedSource?.sourceId || record.managedSource?.revision !== original.managedSource?.revision
   }
+  async function confirmCurrentHeartbeat(schedule: ContinuousProgressLoop, ownerHostId: string) {
+    const current = await readMoteQuickDefaults(scope), record = current.maintenance?.schedule
+    const resource = current.source?.resource, originalResource = saved?.source?.resource
+    if (current.issue || !record || !moteHeartbeatReadingMatchesSource(current) || inputIdentity(record) !== inputIdentity(schedule) ||
+        !resource || !originalResource || resource.hostId !== ownerHostId ||
+        (['hostId', 'workspaceId', 'workspacePath', 'zoneId', 'zonePath', 'path'] as const).some(field => resource[field] !== originalResource[field]))
+      throw Error('This Mote’s main role or original heartbeat changed. Your original input is kept. Refresh the current settings before resuming.')
+  }
   async function resumeHeartbeat() {
     if (resuming) return
     const schedule = saved?.maintenance?.schedule, ownerHostId = saved?.source?.resource?.hostId
     if (!resumeRequest.current && (!schedule || !ownerHostId || !Number.isSafeInteger(schedule.revision))) return
     const existing = resumeRequest.current
     const original = existing ?? { ownerHostId: ownerHostId!, scheduleId: schedule!.loopId, expectedRevision: schedule!.revision!, operationId: crypto.randomUUID() }
-    resumeRequest.current = original
     const epoch = lifetime.current
+    let dispatched = Boolean(existing)
     setResuming(true); setIssue(null)
     try {
+      if (!existing) await confirmCurrentHeartbeat(schedule!, original.ownerHostId)
+      if (lifetime.current !== epoch) return
       const { ownerHostId, ...input } = original
+      resumeRequest.current = original
+      dispatched = true
       const result = existing ? await api.schedule.inspect({ operationId: input.operationId }, ownerHostId) : await api.schedule.resume(input, ownerHostId)
       if (lifetime.current !== epoch) return
       if (!result.schedule || result.schedule.loopId !== original.scheduleId) throw new Error('The original resume is unconfirmed. Its request is kept; inspect it again.')
       resumeRequest.current = null
       setSaved(previous => previous ? { ...previous, maintenance: { status: result.schedule!.status === 'active' ? 'active' : 'paused', schedule: result.schedule, issue: null } } : previous)
-    } catch (cause) { if (lifetime.current === epoch) setIssue(presentError(cause)) }
+    } catch (cause) {
+      if (!dispatched && lifetime.current === epoch) setInputReading(undefined)
+      if (lifetime.current === epoch) setIssue(presentError(cause))
+    }
     finally { if (lifetime.current === epoch) setResuming(false) }
   }
   async function inspectHeartbeat() {
     const schedule = maintenance?.schedule, ownerHostId = originalHeartbeat?.ownerHostId ?? saved?.source?.resource?.hostId, epoch = lifetime.current
     if (!schedule || !ownerHostId || resuming) return
+    if (!originalHeartbeat) setInputReading(undefined)
     setResuming(true); setIssue(null)
     try {
+      if (!originalHeartbeat) await confirmCurrentHeartbeat(schedule, ownerHostId)
+      if (lifetime.current !== epoch) return
       const result = await api.schedule.inspect({ scheduleId: schedule.loopId }, ownerHostId)
       if (!result.schedule || result.schedule.loopId !== schedule.loopId) throw Error('The original schedule is unconfirmed. Its identity and input are kept.')
+      if (!originalHeartbeat && inputIdentity(result.schedule) !== inputIdentity(schedule)) throw Error('The original heartbeat changed during inspection. Refresh its current settings; the earlier input remains kept.')
       const changed = originalHeartbeat ? originalInspectionChanged(result.schedule) : false
       const pending = originalHeartbeat ? originalHeartbeat.schedule.pendingCompletion : result.schedule.pendingCompletion
       const control = pending?.condition ? { kind: 'agent' as const, hostId: schedule.hostId, agentSessionId: schedule.agentSessionId, run: pending.condition.expectedRun } : null
@@ -220,14 +242,17 @@ export function MoteQuickModeDialog({ scope, reference, onOpenPath, onClose, ret
   }
   const heartbeat = (
         <fieldset tabIndex={-1} className="mote-quick-mode__presence mote-quick-mode__heartbeat"><legend><HeartbeatIcon size={14} />Heartbeat</legend>
-          <MoteHeartbeatStatus scope={scope} reading={maintenance} unavailable={originalHeartbeat ? loading || Boolean(issue) : !moteHeartbeatReadingMatchesSource(saved)} loading={loading} onRefresh={() => setAttempt(value => value + 1)}
-            actions={maintenance?.schedule?.lastOutcome === 'unknown' ? <button type="button" className="primary-button" disabled={resuming} onClick={() => void inspectHeartbeat()}>{resuming ? 'Checking…' : 'Check original delivery'}</button>
+          <MoteHeartbeatStatus scope={scope} reading={maintenance} unavailable={originalHeartbeat ? loading || Boolean(issue) : !moteHeartbeatReadingMatchesSource(saved)} loading={loading} onRefresh={() => setAttempt(value => value + 1)} controlsAfterStatus={focusHeartbeat}
+            actions={!originalHeartbeat && resumeRequest.current ? <button type="button" className="small-button" disabled={resuming} onClick={() => void resumeHeartbeat()}>{resuming ? 'Checking original schedule…' : 'Inspect original resume'}</button>
+              : maintenance?.schedule?.lastOutcome === 'unknown' ? <>{!checkedMissingKey ? <button type="button" className="primary-button" disabled={resuming} onClick={() => void inspectHeartbeat()}>{resuming ? 'Checking…' : 'Check original delivery'}</button> : null}
+                {checkedMissingKey ? <div className="mote-heartbeat__issue" role="status"><p>This record has no retained input key. Its earlier delivery remains unknown. Resuming can send a due check immediately.</p>
+                  {presence.enabled ? <button type="button" className="primary-button" disabled={resuming} onClick={() => void resumeHeartbeat()}>Resume future checks</button> : null}</div> : null}</>
               : originalHeartbeat ? <button type="button" className="small-button" disabled={resuming} onClick={() => void inspectHeartbeat()}>Inspect original arrangement</button>
               : resumeRequest.current || maintenance?.schedule?.status === 'paused' && presence.enabled ? <button type="button" className="small-button" disabled={resuming}
                 onClick={() => void resumeHeartbeat()}>{resuming ? 'Checking original schedule…' : resumeRequest.current ? 'Inspect original resume' : 'Resume saved heartbeat'}</button> : null}
             detailsActions={<>{originalInput && !originalInput.input && !originalInput.record ? <p>The original input was not observed in this read. That does not prove it was never sent.</p> : originalInput?.input ? <><p>{originalInputExplanation(originalInput.input.status, originalInput.input.control.waiting).title}</p>{!originalHeartbeat ? <OriginalInputWaitingControl hostId={originalInput.hostId} receipt={originalInput.input} onRefresh={inspectHeartbeat} /> : null}</> : originalInput?.record ? <p>{originalInputExplanation(agentPromptSubmissionOutcome(originalInput.record)).title}</p> : null}
               {originalInput?.record ? <><p>{originalInput.record.semanticIdle ? 'The original native turn ended. Its result remains in the conversation.' : 'Native processing is not confirmed by this receipt.'}</p><pre>{JSON.stringify(originalInput.record, null, 2)}</pre></> : null}
-              {!originalHeartbeat && maintenance?.schedule?.lastOutcome === 'unknown' && presence.enabled ? <><p>Resuming can send a due check immediately. It preserves any retained original input and does not confirm whether an earlier unknown delivery was sent.</p><button type="button" className="small-button" disabled={resuming} onClick={() => void resumeHeartbeat()}>{resumeRequest.current ? 'Inspect original resume' : 'Resume saved heartbeat'}</button></> : null}</>}
+              {!originalHeartbeat && !checkedMissingKey && maintenance?.schedule?.lastOutcome === 'unknown' && presence.enabled ? <><p>Resuming can send a due check immediately. It preserves any retained original input and does not confirm whether an earlier unknown delivery was sent.</p><button type="button" className="small-button" disabled={resuming} onClick={() => void resumeHeartbeat()}>{resumeRequest.current ? 'Inspect original resume' : 'Resume saved heartbeat'}</button></> : null}</>}
             controls={originalHeartbeat ? undefined : <><label><input type="checkbox" aria-label="Enable automatic Mote maintenance" checked={presence.enabled}
             onChange={event => update({ ...form.current, presence: { ...presence, enabled: event.target.checked } })} />Keep an eye on my work</label>
           <div className="mote-quick-mode__interval"><label htmlFor={id + '-interval'}>Check every<small>Minutes · default 30</small></label>
