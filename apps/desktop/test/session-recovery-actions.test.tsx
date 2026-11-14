@@ -22,6 +22,7 @@ import { agentCreationFixture } from './helpers/agent-creation-fixture'
 import { recoveryOperationId, recoveryReferenceNote, createRecoveryAgent, analyzeWithRecoveryMote, inspectRecoveryRequest, rereadUnobservedSession, unobservedRecoveryReference, ownsRecoverySource, type RecoverySource } from '../src/renderer/src/lib/session-recovery-actions'
 import { SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 import type { AgentLaunchInput, AgentLaunchResult, AgentTimelineSnapshot, ScratchTopicSnapshot } from '../src/shared/contracts'
+import type { AgentMuxAgentCreationInspection } from '@agentmux/core'
 import { parseAgentMuxCliInvocation } from '../../../packages/core/src/agentmux-cli-commands.js'
 import { split } from 'shlex'
 import { fixtureEpoch as _historyFixtureEpoch } from '../../../test/fixture-values.mjs'
@@ -305,6 +306,51 @@ function graphFor(original: Awaited<ReturnType<typeof unobservedOriginal>>) {
 }
 
 describe('actual unobserved SessionPane original reference', () => {
+
+  it.each<{ kind: 'prepared-agent-creation' | 'closed-agent-creation'; healthy: boolean }>([
+    { kind: 'prepared-agent-creation', healthy: false }, { kind: 'closed-agent-creation', healthy: false },
+    { kind: 'prepared-agent-creation', healthy: true }, { kind: 'closed-agent-creation', healthy: true }
+  ])('$kind without a confirmed Session Run keeps the original workface and healthy=$healthy projection', async ({ kind, healthy }) => {
+    const original = await unobservedOriginal()
+    const healthySession: typeof original = { ...original, processState: 'running', status: { state: 'waiting', source: 'native-hook', observedAt: 3 } }
+    const created: AgentLaunchResult['created'] = { ...agentCreationFixture(original), creation: { createOperationId: 'original-unobserved-create', initialPrompt: 'unknown' } }
+    const state = useAppStore.getState()
+    useAppStore.setState({ recoveryCandidates: [candidate(original)],
+      sessions: healthy ? [...state.sessions, healthySession] : state.sessions,
+      pendingAgentLaunches: { original: { request: { executorId: 'codex', hostId: original.control.hostId, prompt: 'Original admitted request' }, events: [], overflowed: false, created, projectionFailures: [] } } })
+    const inspection: AgentMuxAgentCreationInspection = { kind, agentSessionId: original.id, hostId: original.control.hostId,
+      providerId: original.providerId, executorId: original.executorId, workspacePath: original.workspacePath,
+      creation: { createOperationId: 'original-unobserved-create', initialPrompt: 'unknown' },
+      observation: { runtimeId: 'original-creation-runtime', retainedRun: original.control.run } }
+    const creation = vi.spyOn(api.sessions, 'creation').mockResolvedValue(inspection), before = useAppStore.getState()
+    if (healthy) await expect(rereadUnobservedSession(identity, () => true)).rejects.toThrow('The original Session Run is not confirmed by this creation observation.')
+    else {
+      await mount(); await button('Check original')
+      expect(dom.container.textContent).toContain('The original Session Run is not confirmed by this creation observation.')
+      expect(dom.container.textContent).not.toContain('The original Session was closed.')
+    }
+    expect(creation).toHaveBeenCalledExactlyOnceWith('exact-original-host', 'original')
+    expect(api.sessions.refresh).not.toHaveBeenCalled()
+    expect(useAppStore.getState().tabs['original-tab']).toBe(before.tabs['original-tab'])
+    expect(useAppStore.getState().layouts).toBe(before.layouts)
+    expect(useAppStore.getState().agentComposerDrafts).toBe(before.agentComposerDrafts)
+    expect(useAppStore.getState().pendingAgentLaunches).toBe(before.pendingAgentLaunches)
+    expect(useAppStore.getState().sessions).toBe(before.sessions)
+    if (healthy) expect(useAppStore.getState().sessions.find(item => item.id === original.id)).toBe(healthySession)
+    noLifecycle()
+  })
+  it('a confirmed Agent creation still reads and adopts its exact original Session Run', async () => {
+    const original = await unobservedOriginal(); useAppStore.setState({ recoveryCandidates: [candidate(original)] })
+    const creation = observe(original), before = useAppStore.getState()
+    await mount(); await button('Check original')
+    expect(creation).toHaveBeenCalledExactlyOnceWith('exact-original-host', 'original')
+    expect(api.sessions.refresh).toHaveBeenCalledExactlyOnceWith(original.control)
+    expect(useAppStore.getState().sessions.find(item => item.id === original.id)).toEqual(original)
+    expect(useAppStore.getState().tabs['original-tab']).toBe(before.tabs['original-tab'])
+    expect(useAppStore.getState().agentComposerDrafts).toBe(before.agentComposerDrafts)
+    noLifecycle()
+  })
+
   it('the retired-history recovery caller opens the same central picker and leaves history and drafts intact on cancel', async () => {
     const state = useAppStore.getState(), originalTab = state.tabs['original-tab'], drafts = state.agentComposerDrafts
     const original = state.sessions.find(item => item.id === 'original')!
@@ -353,14 +399,14 @@ describe('actual unobserved SessionPane original reference', () => {
     const read = vi.mocked(api.spatial.read); read.mockResolvedValue(unknown); await rereadAgentRegionExecution(identity)
     read.mockClear(); read.mockResolvedValue(graph); const state = useAppStore.getState()
     await mount(); expect(dom.container.textContent).toContain('original execution Host is not confirmed'); expect(dom.container.textContent).not.toContain('Take over')
-    await button('Check original identity'); expect(read).toHaveBeenCalledTimes(1); expect(creation).toHaveBeenCalledWith('exact-original-host', 'original')
+    await button('Check original'); expect(read).toHaveBeenCalledTimes(1); expect(creation).toHaveBeenCalledWith('exact-original-host', 'original')
     expect(useAppStore.getState().tabs['original-tab']).toBe(state.tabs['original-tab']); expect(useAppStore.getState().layouts).toBe(state.layouts); expect(useAppStore.getState().agentComposerDrafts).toBe(state.agentComposerDrafts); noLifecycle()
   })
   it('conflicting original Hosts remain unknown and an empty re-read cannot erase the confirmed spatial reference', async () => {
     const original = await unobservedOriginal(), graph = graphFor(original); const read = vi.spyOn(api.spatial, 'read').mockResolvedValue(graph)
     await rereadAgentRegionExecution(identity); useAppStore.setState({ recoveryCandidates: [{ ...candidate(original), hostId: 'other-original-host' }] }); const creation = observe(original)
     read.mockResolvedValue(null); await mount(); expect(dom.container.textContent).toContain('Original Host references conflict'); expect(dom.container.textContent).not.toContain('Take over')
-    await button('Check original identity'); expect(dom.container.textContent).toContain('original Core spatial document was not returned'); expect(agentRegionExecution(identity)?.hostId).toBe('exact-original-host'); expect(creation).not.toHaveBeenCalled(); noLifecycle()
+    await button('Check original'); expect(dom.container.textContent).toContain('original Core spatial document was not returned'); expect(agentRegionExecution(identity)?.hostId).toBe('exact-original-host'); expect(creation).not.toHaveBeenCalled(); noLifecycle()
   })
   it('a failed exact original read retains its real error and both explicit alternatives', async () => {
     const original = await unobservedOriginal(); useAppStore.setState({ recoveryCandidates: [candidate(original)] })
