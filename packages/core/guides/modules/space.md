@@ -76,6 +76,16 @@ private window layout. Metadata missing does not remove a business member. Retai
 the last confirmed view when disconnected, then reopen the same Space reference;
 this read never retries creation or its first input.
 
+Member observations may include source-owned `occurrences`, one for each exact Region.
+Each retains its original creation operation reference, confirmed project/Agent Runtime
+and either the adopted execution chain, confirmed same Runtime or unconfirmed relation.
+Match that Region before presenting a path. The route used by the viewing client to
+reach this Space is a separate access fact; do not append it to the execution chain.
+Several Regions can reference the same Session through different original chains.
+Their paths stay separate; ambiguous metadata authority does not remove those members.
+Old or unreadable admissions remain unconfirmed, never inferred from current Host
+configuration, labels or the available Agent choices. These path facts grant no input.
+
 Read settings hosts ls on the Space authority for its configured Agent choices,
 then use that same authority's settings executors discover for the selected Host.
 Configuration labels and saved Runtime pins are separate from live executor facts.
