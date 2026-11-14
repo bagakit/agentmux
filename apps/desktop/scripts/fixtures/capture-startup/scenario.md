@@ -28,10 +28,12 @@ outlier removal. The candidate's actualShown median must improve by at least 100
 in every cell; a missing cell or a threshold miss fails without cross-cell averaging.
 
 Each actual Native-port invocation constructs a new solid PNG with a per-capture nonce using
-`nativeImage.createFromBitmap/toPNG`, then waits an actual 200 ms. Host opacity is never
-changed by the candidate; baseline behavior is measured, not copied into the candidate.
-No clocks are mocked. Controlled Native delay proves readiness and relative mechanics only,
-never actual OS capture speed.
+`nativeImage.createFromBitmap/toPNG`. Every display has its own real producer delay: 200 ms
+for the first display and 40 ms more for each subsequent display. The candidate's deferred
+response remains gated only while the real pending-switch/output probe runs; no clocks are
+mocked. Host opacity is never changed by the candidate; baseline behavior is measured, not
+copied into the candidate. Controlled Native delay proves readiness and relative mechanics
+only, never actual OS capture speed.
 
 `browser-window-created` records actual shell construction relative to the capture trigger.
 Hidden Renderer startup overlaps the selected exposure. Independent `BrowserWindow.isVisible()`
