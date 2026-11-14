@@ -7,6 +7,15 @@ when: "Discover or explicitly modify current user configuration"
 # settings
 
 <!-- amux:content -->
+settings executors unregister ID --host HOST --registration-revision REV removes only an
+exact registered publication on that executing Host. Read registrationRevision from discover;
+configRevision remains the launch/recovery content digest and is not a deletion witness.
+Retained original Session/history and admitted launch references refuse removal without
+stopping work. The result removedRegistration:true can expose effectiveExecutor with the same
+ID and source:provider-default. Provider defaults cannot be removed. After unknown, discover
+current facts; an absent/changed registration does not prove a lost historical ACK and must
+not trigger automatic replay. No private args/environment are returned.
+
 settings hosts tailcat inspect reads the answering App's local incoming configuration and
 the original Host listener separately. settings hosts tailcat configure --input FILE|-
 accepts {expected,candidate}; null is absent, explicit enabled:false remains saved data.
