@@ -6,9 +6,18 @@ import { homedir } from 'node:os'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { canonicalInstallPath } from './package-identity.mjs'
-import { updateRoute } from '../src/shared/update-policy.ts'
+import { installedUpdateRoute, runtimeReviewMessage } from './local-update-route.mjs'
 
 const installedApp = canonicalInstallPath(homedir())
+const rollback = process.argv.includes('--rollback')
+const source = resolve(import.meta.dirname, '../out/renderer')
+let candidate
+if (!rollback) {
+  candidate = JSON.parse(await readFile(join(source, 'release.json'), 'utf8'))
+  const route = await installedUpdateRoute(installedApp, candidate)
+  if (route === 'runtime-review') throw new Error(runtimeReviewMessage)
+  if (route === 'application') throw new Error('Frontend update requires a matching shell and the installed frontend loader. With application installation authorized, use pnpm package:mac:install --app-only. This installs the App and relaunches the GUI.')
+}
 const { stdout: bundleId } = await promisify(execFile)('/usr/libexec/PlistBuddy', ['-c', 'Print :CFBundleIdentifier', join(installedApp, 'Contents/Info.plist')])
 const directory = join(homedir(), 'Library/Application Support', bundleId.trim(), 'renderer-updates')
 await mkdir(directory, { recursive: true })
@@ -19,14 +28,9 @@ const previous = await readFile(activePath, 'utf8').then(JSON.parse).catch((erro
 })
 const requestedAt = Date.now()
 let next
-if (process.argv.includes('--rollback')) {
+if (rollback) {
   next = { current: previous.previous, previous: previous.current }
 } else {
-  const source = resolve(import.meta.dirname, '../out/renderer')
-  const bundled = join(canonicalInstallPath(homedir()), 'Contents/Resources/app/out/renderer/release.json')
-  const installed = JSON.parse(await readFile(bundled, 'utf8').catch(() => { throw new Error('Install an AgentMux build with frontend-update support first.') }))
-  const candidate = JSON.parse(await readFile(join(source, 'release.json'), 'utf8'))
-  if (updateRoute(installed.identity, candidate.identity) !== 'renderer') throw new Error('Host or runtime changed: use application installation, not frontend update.')
   if (candidate.id === previous.current) { process.stdout.write('frontend_already_active=true\n'); process.exit(0) }
   const staged = join(directory, `.staging-${mintObjectId()}`)
   await cp(source, staged, { recursive: true })

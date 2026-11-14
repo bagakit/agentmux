@@ -107,23 +107,14 @@ async function pathExists(path) {
 }
 
 async function sourceIdentity() {
-  const [commit, tree, status] = await Promise.all([
-    run('git', ['rev-parse', 'HEAD'], { cwd: repositoryRoot, capture: true }),
-    run('git', ['write-tree'], { cwd: repositoryRoot, capture: true }),
-    run('git', ['--no-optional-locks', 'status', '--porcelain=v1', '--untracked-files=all'], {
-      cwd: repositoryRoot,
-      capture: true
+  const [revision, status] = await Promise.all([
+    run('git', ['log', '-1', '--format=%H%n%T', 'HEAD'], { cwd: repositoryRoot, capture: true }),
+    run('git', ['--no-optional-locks', 'status', '--porcelain=v1', '--untracked-files=normal'], {
+      cwd: repositoryRoot, capture: true
     })
   ])
-  const dirtyWorktree = status.stdout
-    .split('\n')
-    .filter((line) => line.length > 0 && (line.startsWith('??') || line[1] !== ' '))
-    .join('\n')
-  return {
-    commit: commit.stdout.trim(),
-    tree: tree.stdout.trim(),
-    status: dirtyWorktree
-  }
+  const [commit, tree] = revision.stdout.trim().split('\n')
+  return { commit, tree, status: status.stdout.trimEnd() }
 }
 
 async function sha256(path) {
@@ -1052,20 +1043,32 @@ export function reportInstallTransaction(result) {
   if (result.native.status === 'deferred') process.stdout.write(`Native update deferred: ${result.native.reason} The existing Runtime and Runs were not replaced.\n`)
 }
 
-async function main() {
-  assert(!process.argv.includes('--ui-only') || installRequested, '--ui-only requires --install.')
-  assert(process.platform === 'darwin', 'macOS packaging must run on macOS.')
-  assert(process.arch === 'arm64', `AgentMux currently packages only darwin-arm64, not darwin-${process.arch}.`)
-  const signingPlan = await preflightMacosSigning()
+async function main({ selectAfterBuild, install = installRequested, onlyApp = appOnly } = {}) {
+  assert(!process.argv.includes('--ui-only') || install, '--ui-only requires --install.')
+  const qualifySigning = () => {
+    assert(process.platform === 'darwin', 'macOS packaging must run on macOS.')
+    assert(process.arch === 'arm64', `AgentMux currently packages only darwin-arm64, not darwin-${process.arch}.`)
+    const argv = process.argv.slice(2)
+    if (install && !argv.includes('--install')) argv.push('--install')
+    return preflightMacosSigning({ argv })
+  }
+  const build = () => run('pnpm', ['--config.enable-pre-post-scripts=true', 'build'], { cwd: desktopRoot })
+  let signingPlan, initialSource
+  if (selectAfterBuild) {
+    // Only an App consumes Git provenance; its snapshot must precede the routing build.
+    const [source] = await Promise.allSettled([sourceIdentity()])
+    await build()
+    if (await selectAfterBuild() === 'renderer') return
+    if (source.status === 'rejected') throw source.reason
+    initialSource = source.value
+  } else {
+    signingPlan = await qualifySigning()
+    initialSource = await sourceIdentity()
+  }
+  assert(initialSource.status === '', `macOS packaging requires a clean source tree, found:\n${initialSource.status}`)
+  signingPlan ??= await qualifySigning()
+  if (!selectAfterBuild) await build()
   if (signingPlan.kind === 'ad-hoc') process.stderr.write('Development ad hoc candidate: permission continuity across updates is unconfirmed. The existing App and Runs remain unchanged during packaging.\n')
-  const initialSource = await sourceIdentity()
-  assert(
-    initialSource.status === '',
-    `macOS packaging requires a clean source tree, found:\n${initialSource.status}`
-  )
-  // Desktop prebuild owns the complete Host/Core/client and native/asset dependency graph.
-  // Explicitly preserve that lifecycle even when a caller disables implicit pre/post hooks.
-  await run('pnpm', ['--config.enable-pre-post-scripts=true', 'build'], { cwd: desktopRoot })
   const { application: electronApp } = await inspectElectronApplication(repositoryRoot)
   const temporaryRoot = await mkdtemp(join(tmpdir(), 'agentmux-macos-package-'))
   let retainedDiagnostics = false
@@ -1095,7 +1098,7 @@ async function main() {
     await verifyNativeDesktopSigning(stagedApp, signingPlan)
     const signedWorkspaceMoveHelperSha256 = await sha256(stagedWorkspaceMoveHelper)
 
-    if (appOnly) {
+    if (onlyApp) {
       await verifyPackagedRuntime(stagedApp, temporaryRoot, initialSource, signedWorkspaceMoveHelperSha256)
       if (signingPlan.kind !== 'ad-hoc') await verifyLaunchServices(stagedApp, temporaryRoot)
     } else {
@@ -1112,25 +1115,25 @@ async function main() {
     await rm(releaseRoot, { recursive: true, force: true })
     await mkdir(releaseRoot, { recursive: true })
     await rename(stagedApp, outputApp)
-    if (!appOnly) await rename(stagedDmg, outputDmg)
-    const qualifiedDmgHash = appOnly ? null : await sha256(outputDmg)
-    if (!appOnly) {
+    if (!onlyApp) await rename(stagedDmg, outputDmg)
+    const qualifiedDmgHash = onlyApp ? null : await sha256(outputDmg)
+    if (!onlyApp) {
       const artifacts = await publishPackageArtifact({ repositoryRoot, target: 'darwin-arm64', archive: outputDmg, sha256: qualifiedDmgHash })
       process.stdout.write(`package_artifact_publication=${JSON.stringify(artifacts.publication)}\n`)
       process.stdout.write(`package_artifact_cleanup=${JSON.stringify(artifacts.cleanup)}\n`)
     }
-    if (installRequested) reportInstallTransaction(await installApplication(outputApp))
-    if (!appOnly) await run(process.execPath, [join(desktopRoot, 'scripts', 'report-desktop-package.mjs')])
+    if (install) reportInstallTransaction(await installApplication(outputApp))
+    if (!onlyApp) await run(process.execPath, [join(desktopRoot, 'scripts', 'report-desktop-package.mjs')])
     const [appHash, dmgHash, appSizeResult, dmgInfo] = await Promise.all([
       sha256(join(outputApp, 'Contents', 'MacOS', PRODUCT_NAME)),
       qualifiedDmgHash,
       run('du', ['-sk', outputApp], { capture: true }),
-      appOnly ? null : stat(outputDmg)
+      onlyApp ? null : stat(outputDmg)
     ])
     const appSize = appSizeResult.stdout.trim().split(/\s+/)[0]
     process.stdout.write([
       `app=${outputApp}`,
-      `dmg=${appOnly ? 'not-requested' : outputDmg}`,
+      `dmg=${onlyApp ? 'not-requested' : outputDmg}`,
       `signature=${signature.kind === 'certificate' ? 'certificate-local-candidate' : 'adhoc-development-candidate'}`,
       `signature_team=${signature.teamId ?? 'none'}`,
       'authorization_continuity=unverified',
@@ -1169,6 +1172,8 @@ async function main() {
     }
   }
 }
+
+export { main as packageMacos }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try { await main() } catch (error) {
