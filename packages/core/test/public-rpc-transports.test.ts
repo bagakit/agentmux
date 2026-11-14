@@ -11,7 +11,7 @@ import { AgentMuxControlServer, agentMuxRpcHttpOptions } from '../src/public-rpc
 import { connectAgentMuxRpc as SourceConnect, agentMuxRpcEndpoint, agentMuxRpcSshArguments } from '../src/public-rpc-client.js'
 import { AgentMuxRpcLines, AgentMuxRpcDispatcher, type AgentMuxRpcConnection } from '../src/public-rpc-wire.js'
 import { AgentMuxRpcService } from '../src/public-rpc-service.js'
-import { AGENTMUX_RPC_MAX_MESSAGE_BYTES } from '../src/public-rpc-frame.js'
+import { AGENTMUX_RPC_MAX_MESSAGE_BYTES, parseRpcOpeningCancel } from '../src/public-rpc-frame.js'
 import { AgentMuxError } from '../src/errors.js'
 import { rpcOwnerFixture } from './helpers/public-rpc-owner.js'
 import type { AgentMuxControlRequest } from '../src/control.js'
@@ -150,6 +150,34 @@ describe('one public JSON-RPC service over bounded transports', () => {
     const batch = await raw(h.path, [{ ...request, id: 32 }, { jsonrpc: '2.0', method: 'space.ls', params: { target: {} } }])
     expect(batch).toHaveLength(1); expect(batch[0].id).toBe(32); expect(seen).toHaveLength(3)
     expect((await stat(h.path)).mode & 0o777).toBe(0o600)
+  })
+  it('validates the internal opening-cancel notification without adding a business method', () => {
+    expect(parseRpcOpeningCancel({ jsonrpc: '2.0', method: 'system.opening.cancel', params: { requestId: 0 } })).toBe(0)
+    expect(parseRpcOpeningCancel({ jsonrpc: '2.0', method: 'system.opening.cancel', params: { requestId: 'original' } })).toBe('original')
+    for (const frame of [
+      { jsonrpc: '2.0', id: 'response-forbidden', method: 'system.opening.cancel', params: { requestId: 'original' } },
+      { jsonrpc: '2.0', method: 'system.opening.cancel', params: { requestId: null } },
+      { jsonrpc: '2.0', method: 'system.opening.cancel', params: { requestId: 'original', extra: true } },
+      { jsonrpc: '2.0', method: 'system.opening.cancel', params: {} },
+    ]) expect(() => parseRpcOpeningCancel(frame)).toThrow(expect.objectContaining({ code: 'CONTROL_PROTOCOL_ERROR' }))
+  })
+  it('treats unknown and settled opening-cancel IDs as no-ops without notification responses', async () => {
+    const h = await endpoint(), socket = createConnection(h.path), lines = new AgentMuxRpcLines(), responses: any[] = []
+    try {
+      socket.on('data', chunk => lines.accept(chunk, value => responses.push(value)))
+      await new Promise<void>((resolve, reject) => { socket.once('connect', resolve); socket.once('error', reject) })
+      socket.write(JSON.stringify({ jsonrpc: '2.0', method: 'system.opening.cancel', params: { requestId: 'unknown' } }) + '\n')
+      socket.write(JSON.stringify({ jsonrpc: '2.0', id: 'after-unknown', method: 'space.ls', params: { target: {} } }) + '\n')
+      await vi.waitFor(() => expect(responses).toHaveLength(1))
+      expect(responses[0]).toMatchObject({ id: 'after-unknown', result: { catalog } })
+      socket.write(JSON.stringify({ jsonrpc: '2.0', method: 'system.opening.cancel', params: { requestId: 'after-unknown' } }) + '\n')
+      socket.write(JSON.stringify({ jsonrpc: '2.0', id: 'after-settled', method: 'system.endpoint', params: {} }) + '\n')
+      await vi.waitFor(() => expect(responses).toHaveLength(2))
+      expect(responses).toEqual([
+        expect.objectContaining({ id: 'after-unknown' }),
+        expect.objectContaining({ id: 'after-settled', result: expect.objectContaining({ endpoint: { transport: 'unix', path: h.path } }) }),
+      ])
+    } finally { socket.destroy() }
   })
   it.each(['agent.open', 'space.mv', 'space.bind'] as const)('validates %s with the actual durable operationId, independent of wire correlation', async method => {
     const save = { layoutApplied: true, clientStateWritten: true, storageFlushRequested: true, diskDurability: 'unconfirmed' as const, reason: null }

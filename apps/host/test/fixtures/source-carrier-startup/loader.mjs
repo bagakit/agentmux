@@ -92,6 +92,32 @@ registerHooks({
           anchor,
       );
     }
+    if (path === "packages/core/src/space-session-client.ts") {
+      const entryAnchor =
+        "    signal.throwIfAborted()\n    const context = { ...ports.context, signal }\n";
+      const returnAnchor =
+        "    try { signal.throwIfAborted(); await client.connect(); signal.throwIfAborted(); return client }\n" +
+        "    catch (error) { await client.dispose().catch(() => {}); throw error }\n" +
+        "  }\n";
+      if (original.split(entryAnchor).length !== 2 || original.split(returnAnchor).length !== 2)
+        throw Error("Summary group witness must bind one direct foreign reader");
+      controlled = original.replace(
+        entryAnchor,
+        "    const summaryReadId = group.adoptedRoute || group.hostId === 'local' ? null : ((globalThis as any).__carrierSummaryReadSequence = ((globalThis as any).__carrierSummaryReadSequence ?? 0) + 1)\n" +
+          "    if (summaryReadId !== null) process.send?.({kind:'carrier-summary-entered',readId:summaryReadId,hostId:group.hostId})\n" +
+          "    try {\n" +
+          entryAnchor,
+      ).replace(
+        returnAnchor,
+        "    try { signal.throwIfAborted(); await client.connect(); signal.throwIfAborted(); if (summaryReadId !== null) process.send?.({kind:'carrier-summary-settled',readId:summaryReadId,status:'fulfilled'}); return client }\n" +
+          "    catch (error) { await client.dispose().catch(() => {}); throw error }\n" +
+          "    } catch (error) {\n" +
+          "      if (summaryReadId !== null) process.send?.({kind:'carrier-summary-settled',readId:summaryReadId,status:'rejected',code:(error as any)?.code})\n" +
+          "      throw error\n" +
+          "    }\n" +
+          "  }\n",
+      );
+    }
     if (path === "packages/core/src/public-rpc-wire.ts") {
       const anchor =
         "          } else result = await this.service.call(method, params as AgentMuxRpcParams<typeof method>, context)\n";
@@ -128,7 +154,10 @@ registerHooks({
       path === "apps/host/src/host.ts"
     ) {
       const anchor =
-        "        if (hostId !== undefined && hostId !== 'local') await options.connections!.clientsReady?.()";
+        "        if (hostId !== undefined && hostId !== 'local') {\n" +
+        "          await observeRead(Promise.resolve().then(() => options.connections!.clientsReady?.()), read?.signal)\n" +
+        "          read?.signal?.throwIfAborted()\n" +
+        "        }";
       if (served.split(anchor).length !== 2)
         throw Error(
           "Readiness mutant must match actual Host bridge exactly once",
@@ -140,14 +169,17 @@ registerHooks({
       path === "apps/host/src/host.ts"
     ) {
       const anchor =
-        "if (hostId !== undefined && hostId !== 'local') await options.connections!.clientsReady?.()";
+        "if (hostId !== undefined && hostId !== 'local') {\n" +
+        "          await observeRead(Promise.resolve().then(() => options.connections!.clientsReady?.()), read?.signal)\n" +
+        "          read?.signal?.throwIfAborted()\n" +
+        "        }";
       if (served.split(anchor).length !== 2)
         throw Error(
           "Global readiness mutant must match original exact selector",
         );
       served = served.replace(
         anchor,
-        "await options.connections!.clientsReady?.()",
+        "await observeRead(Promise.resolve().then(() => options.connections!.clientsReady?.()), read?.signal)\n        read?.signal?.throwIfAborted()",
       );
     }
     if (
@@ -169,6 +201,7 @@ registerHooks({
       memberRequestWitness:
         path === "packages/core/src/space-member-runtime.ts",
       publicWireWitness: path === "packages/core/src/public-rpc-wire.ts",
+      summaryGroupWitness: path === "packages/core/src/space-session-client.ts",
       routeReceiptWitness: path === "packages/core/src/host-route-gateway.ts",
       mutation: served !== controlled ? process.env.CARRIER_MUTATION : null,
     };

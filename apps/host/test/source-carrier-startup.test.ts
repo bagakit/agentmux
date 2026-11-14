@@ -95,6 +95,43 @@ it("actual Host cold source assembly joins early original member reads across pr
         ].includes(phase.managedForeignMemberDenial),
     ),
   ).toBe(true);
+  for (const phase of result.receipt.phases) {
+    expect(phase.configurationReleaseCount).toBe(1);
+    expect(phase.cancellation).toMatchObject({
+      cancelledMemberServerSettlement: { status: "rejected", code: "CONTROL_CANCELLED" },
+      cancelledSummaryServerSettlement: { status: "rejected" },
+      uncancelledMemberServerSettlements: [],
+      primarySummaryServerSettlement: null,
+      primarySummaryPending: true,
+      firstMemberPending: true,
+      configurationReleased: false,
+      sharedSocketHealthy: true,
+    });
+    expect(phase.guards).toEqual(
+      expect.arrayContaining([
+        "member-server-settled",
+        "summary-server-settled",
+        "shared-readiness-retained",
+      ]),
+    );
+    const sourceLoaded = result.loaded.filter(
+      (entry: { pid: number }) => entry.pid === phase.sourcePid,
+    );
+    for (const witness of [
+      "memberRequestWitness",
+      "publicWireWitness",
+      "summaryGroupWitness",
+    ]) {
+      expect(
+        sourceLoaded.some(
+          (entry: Record<string, unknown>) =>
+            entry[witness] === true &&
+            entry.originalSha256 !== entry.controlledSha256,
+        ),
+        `actual Source PID ${phase.sourcePid} must load the ${witness} source witness`,
+      ).toBe(true);
+    }
+  }
   expect(result.receipt.cleanup).toMatchObject({
     remainingOwnedNativeRunPids: [],
     privateRootRemoved: true,

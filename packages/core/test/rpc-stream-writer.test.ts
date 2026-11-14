@@ -4,7 +4,7 @@ import { AgentMuxRpcStreamTransport } from '../src/rpc-stream-transport.js'
 import { AGENTMUX_RPC_MAX_MESSAGE_BYTES } from '../src/public-rpc-frame.js'
 const tick = () => new Promise<void>(resolve => setImmediate(resolve))
 class SlowWriter extends Writable {
-  frames: Array<{ id?: string; method: string }> = []
+  frames: Array<{ id?: string; method: string; params?: { requestId?: string } }> = []
   held: Array<(error?: Error | null) => void> = []
   bufferedBytes: number | undefined
   constructor() { super({ highWaterMark: 1 }) }
@@ -13,14 +13,14 @@ class SlowWriter extends Writable {
   _write(_chunk: Buffer, _encoding: BufferEncoding, done: (error?: Error | null) => void) { this.held.push(done) }
   release() { this.held.shift()?.() }
 }
-function fixture() {
+function fixture(ready?: Promise<void>) {
   const input = new SlowWriter(), output = new PassThrough()
   const dispatched: string[] = [], received: string[] = [], ended: Array<{ id: string; code?: string }> = []
   let closed = 0
-  const channel = new AgentMuxRpcStreamTransport({ input, output, close: () => { closed++; input.destroy(); output.destroy() } }, () => {})
-  const open = (id: string, signal = new AbortController().signal) => channel.open({ jsonrpc: '2.0', id, method: 'system.endpoint', params: {} }, frame => {
+  const channel = new AgentMuxRpcStreamTransport({ input, output, close: () => { closed++; input.destroy(); output.destroy() } }, () => {}, { ready })
+  const open = (id: string, signal = new AbortController().signal, options: { cancelOpening?: boolean } = {}) => channel.open({ jsonrpc: '2.0', id, method: 'system.endpoint', params: {} }, frame => {
     expect((frame as any).id).toBe(id); received.push(id)
-  }, error => ended.push({ id, code: (error as any)?.code }), signal, () => dispatched.push(id))
+  }, error => ended.push({ id, code: (error as any)?.code }), signal, () => dispatched.push(id), options)
   const respond = (id: string) => output.write(JSON.stringify({ jsonrpc: '2.0', id, result: { original: id } }) + '\n')
   return { input, channel, dispatched, received, ended, open, respond, closed: () => closed }
 }
@@ -47,7 +47,7 @@ it('cancelling a queued reader writes no frame or opening deadline and preserves
   const f = fixture(), cancelled = new AbortController(); let cancelledCode: string | undefined
   try {
     await f.open('first')
-    const second = f.open('cancelled', cancelled.signal).catch(error => { cancelledCode = error.code })
+    const second = f.open('cancelled', cancelled.signal, { cancelOpening: true }).catch(error => { cancelledCode = error.code })
     const third = f.open('peer').catch(() => undefined)
     await tick(); cancelled.abort(); await tick()
     expect(cancelledCode).toBe('CONTROL_CANCELLED'); await second
@@ -56,7 +56,45 @@ it('cancelling a queued reader writes no frame or opening deadline and preserves
     f.input.release(); await tick(); await third
     expect(f.dispatched).toEqual(['first', 'peer'])
     expect(f.input.frames.map(frame => frame.id)).toEqual(['first', 'peer'])
+    expect(f.input.frames.map(frame => frame.method)).toEqual(['system.endpoint', 'system.endpoint'])
+    expect(f.input.frames.some(frame => frame.method === 'system.opening.cancel')).toBe(false)
     f.respond('peer'); expect(f.received).toEqual(['first', 'peer']); expect(f.closed()).toBe(0)
+  } finally { f.channel.dispose() }
+})
+it('cancelling before transport readiness writes neither business nor opening-cancel frames', async () => {
+  let establish!: () => void
+  const ready = new Promise<void>(resolve => { establish = resolve }), f = fixture(ready), cancelled = new AbortController()
+  let cancelledCode: string | undefined
+  try {
+    const opening = f.open('undispatched', cancelled.signal, { cancelOpening: true }).catch(error => { cancelledCode = error.code })
+    await tick(); cancelled.abort(); await opening
+    expect(cancelledCode).toBe('CONTROL_CANCELLED')
+    expect(f.input.frames).toEqual([]); expect(f.dispatched).toEqual([]); expect(f.closed()).toBe(0)
+    establish()
+    const peer = await f.open('peer', undefined, { cancelOpening: true })
+    f.respond('peer'); await peer.dispose(); await tick()
+    expect(f.input.frames.map(frame => frame.id)).toEqual(['peer'])
+    expect(f.input.frames.some(frame => frame.method === 'system.opening.cancel')).toBe(false)
+    expect(f.received).toEqual(['peer']); expect(f.closed()).toBe(0)
+  } finally { f.channel.dispose() }
+})
+it('dispatched opening cancellation writes exactly one notification and late disposal writes none', async () => {
+  const f = fixture(), cancelled = new AbortController()
+  try {
+    const reader = await f.open('cancelled', cancelled.signal, { cancelOpening: true })
+    cancelled.abort(); f.input.release(); await tick()
+    expect(f.input.frames).toEqual([
+      { jsonrpc: '2.0', id: 'cancelled', method: 'system.endpoint', params: {} },
+      { jsonrpc: '2.0', method: 'system.opening.cancel', params: { requestId: 'cancelled' } },
+    ])
+    await reader.dispose(); cancelled.abort(); f.respond('cancelled'); await tick()
+    expect(f.input.frames.filter(frame => frame.method === 'system.opening.cancel')).toHaveLength(1)
+    const peerOpening = f.open('peer', undefined, { cancelOpening: true })
+    f.input.release(); await tick(); const peer = await peerOpening
+    f.respond('peer'); await peer.dispose(); await tick()
+    expect(f.input.frames.filter(frame => frame.method === 'system.opening.cancel')).toHaveLength(1)
+    expect(f.received).toEqual(['peer']); expect(f.closed()).toBe(0)
+    expect(f.ended).toEqual([{ id: 'cancelled', code: 'CONTROL_CANCELLED' }])
   } finally { f.channel.dispose() }
 })
 it.each(['close', 'error'] as const)('actual writable %s settles queued openings once and never replays dispatched input', async failure => {

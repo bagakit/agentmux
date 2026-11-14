@@ -170,6 +170,8 @@ async function launch(p, hold = false, mutation = "") {
     memberRequests = 0,
     rpcEntered = [],
     rpcSettled = [],
+    summaryEntered = [],
+    summarySettled = [],
     routeReceipts = [];
   child.stdout.on("data", (v) => {
     stdout += v;
@@ -185,6 +187,8 @@ async function launch(p, hold = false, mutation = "") {
     else if (m.kind === "original-member-carrier-requested") memberRequests++;
     else if (m.kind === "carrier-rpc-entered") rpcEntered.push(m);
     else if (m.kind === "carrier-rpc-settled") rpcSettled.push(m);
+    else if (m.kind === "carrier-summary-entered") summaryEntered.push(m);
+    else if (m.kind === "carrier-summary-settled") summarySettled.push(m);
     else if (m.kind === "carrier-route-receipt") routeReceipts.push(m);
   });
   await wait(
@@ -209,6 +213,8 @@ async function launch(p, hold = false, mutation = "") {
     memberRequests: () => memberRequests,
     rpcEntered: () => rpcEntered.slice(),
     rpcSettled: () => rpcSettled.slice(),
+    summaryEntered: () => summaryEntered.slice(),
+    summarySettled: () => summarySettled.slice(),
     routeReceipts: () => routeReceipts.slice(),
     release: () => child.send({ kind: "release-configuration" }),
   };
@@ -542,6 +548,8 @@ try {
       remoteReceiptBaseline = remoteHost.routeReceipts().length,
       summaryUpdates = [],
       summaryIssues = [];
+    let configurationReleased = false,
+      configurationReleaseCount = 0;
     if (adoptedTarget) {
       const choices = await sourceHost.rpc.call("route.choices", {});
       assert.deepEqual(choices.actor, adoptedActor);
@@ -745,26 +753,149 @@ try {
     await local.stopTerminal({ runId: localRun.runId });
     await local.dispose();
     readers.delete(local);
-    const cancel = new AbortController(),
-      cancelled = sourceHost.rpc.call(
-        "space.member.call",
-        {
-          target,
-          call: {
-            method: "runtime.owner.identity",
-            params: { expectedRuntimeId: remoteRuntime },
+    let cancellationEvidence = null;
+    if (!adoptedTarget) {
+      const summaryEntryBaseline = sourceHost.summaryEntered().length,
+        primarySummaryEntry = sourceHost.summaryEntered()[0];
+      assert.equal(summaryEntryBaseline, 1, "The direct primary summary group read must have a real server witness");
+      const secondarySummaryUpdates = [],
+        secondarySummaryIssues = [],
+        secondarySummary = await core.observeSpaceSessionStates(
+          sourceHost.rpc,
+          { reference },
+          {
+            onObservation: (value) => secondarySummaryUpdates.push(value),
+            onError: (error) => secondarySummaryIssues.push(error.code),
           },
-        },
-        { signal: cancel.signal },
+        );
+      readers.add(secondarySummary);
+      await wait(
+        () => sourceHost.summaryEntered().slice(summaryEntryBaseline),
+        (entries) => entries[0] ?? null,
+        "secondary direct summary group read entered the real Source service",
       );
-    cancelled.catch(() => {});
-    await wait(
-      () => sourceHost.rpcEntered().filter((entry) => entry.method === "space.member.call").length,
-      (count) => count >= 3,
-      "cancellable original lookup",
-    );
-    cancel.abort();
-    await assert.rejects(cancelled);
+      const secondarySummaryEntry = sourceHost.summaryEntered().slice(summaryEntryBaseline)[0];
+      assert(secondarySummaryEntry);
+      const memberEntryBaseline = sourceHost.rpcEntered().filter((entry) => entry.method === "space.member.call").length,
+        memberLookupBaseline = sourceHost.memberRequests(),
+        cancel = new AbortController(),
+        cancelled = sourceHost.rpc.call(
+          "space.member.call",
+          {
+            target,
+            call: {
+              method: "runtime.owner.identity",
+              params: { expectedRuntimeId: remoteRuntime },
+            },
+          },
+          { signal: cancel.signal },
+        ).then(
+          (value) => ({ value, error: null }),
+          (error) => ({ value: null, error }),
+        );
+      await wait(
+        () => sourceHost.rpcEntered().filter((entry) => entry.method === "space.member.call").slice(memberEntryBaseline),
+        (entries) => entries[0] ?? null,
+        "cancellable original lookup with a fresh member-entry baseline",
+      );
+      const cancelledEntry = sourceHost.rpcEntered().filter((entry) => entry.method === "space.member.call").slice(memberEntryBaseline)[0];
+      assert(cancelledEntry);
+      await wait(
+        () => sourceHost.memberRequests(),
+        (count) => count > memberLookupBaseline,
+        "third direct member carrier lookup entered before cancellation",
+      );
+      cancel.abort();
+      const cancelledOutcome = await cancelled;
+      assert.equal(cancelledOutcome.error?.code, "CONTROL_CANCELLED");
+      await secondarySummary.dispose();
+      readers.delete(secondarySummary);
+      const boundedSettlement = async (read, key, requestId, label) => {
+        try {
+          const entries = await wait(
+            read,
+            (values) => values.find((entry) => entry[key] === requestId) ?? null,
+            label,
+            750,
+          );
+          return entries.find((entry) => entry[key] === requestId) ?? null;
+        } catch {
+          return null;
+        }
+      };
+      const [memberServerSettlement, summaryServerSettlement] = await Promise.all([
+        boundedSettlement(
+          () => sourceHost.rpcSettled(),
+          "requestId",
+          cancelledEntry.requestId,
+          "cancelled member server settlement before configuration release",
+        ),
+        boundedSettlement(
+          () => sourceHost.summarySettled(),
+          "readId",
+          secondarySummaryEntry.readId,
+          "disposed secondary summary server settlement before configuration release",
+        ),
+      ]);
+      const sharedIdentity = await sourceHost.rpc.call("runtime.owner.identity", {}),
+        earlyMemberSettlementsAfterCancel = sourceHost.rpcSettled().filter((entry) => earlyMemberIds.includes(entry.requestId)),
+        primarySummarySettlement = sourceHost.summarySettled().find((entry) => entry.readId === primarySummaryEntry.readId) ?? null,
+        terminalSummaryAfterCancel = summaryUpdates.filter((value) =>
+          value.type === "member" &&
+          value.member?.agentSessionId === receipt.original.sid &&
+          ["observed", "unavailable"].includes(value.state?.status),
+        );
+      cancellationEvidence = {
+        cancelledMemberId: cancelledEntry.requestId,
+        cancelledSummaryId: secondarySummaryEntry.readId,
+        cancelledMemberServerSettlement: memberServerSettlement,
+        cancelledSummaryServerSettlement: summaryServerSettlement,
+        uncancelledMemberIds: earlyMemberIds,
+        uncancelledMemberServerSettlements: earlyMemberSettlementsAfterCancel,
+        primarySummaryId: primarySummaryEntry.readId,
+        primarySummaryServerSettlement: primarySummarySettlement,
+        primarySummaryPending: terminalSummaryAfterCancel.length === 0,
+        firstMemberPending: !firstSettled,
+        configurationReleased,
+        sharedSocketHealthy: sharedIdentity.owner.runtimeId === sourceRuntime,
+      };
+      assert(
+        memberServerSettlement && summaryServerSettlement,
+        "Cancelled cold carrier openings must settle on the real Host before configuration release: " +
+          JSON.stringify(cancellationEvidence),
+      );
+      assert.equal(memberServerSettlement.status, "rejected");
+      assert.equal(memberServerSettlement.code, "CONTROL_CANCELLED");
+      assert.equal(summaryServerSettlement.status, "rejected");
+      assert.deepEqual(earlyMemberSettlementsAfterCancel, []);
+      assert.equal(primarySummarySettlement, null);
+      assert.equal(terminalSummaryAfterCancel.length, 0);
+      assert.equal(firstSettled, false);
+      assert.equal(configurationReleased, false);
+      assert.equal(cancellationEvidence.sharedSocketHealthy, true);
+      assert.deepEqual(secondarySummaryIssues, []);
+    } else {
+      const cancel = new AbortController(),
+        cancelled = sourceHost.rpc.call(
+          "space.member.call",
+          {
+            target,
+            call: {
+              method: "runtime.owner.identity",
+              params: { expectedRuntimeId: remoteRuntime },
+            },
+          },
+          { signal: cancel.signal },
+        );
+      cancelled.catch(() => {});
+      await wait(
+        () => sourceHost.rpcEntered().filter((entry) => entry.method === "space.member.call").length,
+        (count) => count >= 3,
+        "cancellable original lookup",
+      );
+      cancel.abort();
+      await assert.rejects(cancelled);
+    }
     const wrongRuntime = await core.connectSpaceMember(sourceHost.rpc, {
       ...target,
       runtimeId: "another-original-runtime",
@@ -860,7 +991,11 @@ try {
           cliStderr: cliState.stderr,
         }),
     );
+    assert.equal(configurationReleased, false);
+    configurationReleaseCount++;
+    configurationReleased = true;
     sourceHost.release();
+    assert.equal(configurationReleaseCount, 1);
     const [a, b] = await Promise.all([first, second]);
     assert.equal(a.sessions[0].agentSessionId, receipt.original.sid);
     assert.equal(b.owner.runtimeId, remoteRuntime);
@@ -880,6 +1015,11 @@ try {
             value.state.status === "observed",
         ),
       "original Source summary reader settles after configuration handles assemble",
+    );
+    if (!adoptedTarget) await wait(
+      () => sourceHost.summarySettled(),
+      (settlements) => settlements.some((entry) => entry.readId === cancellationEvidence.primarySummaryId && entry.status === "fulfilled"),
+      "uncancelled primary summary read fulfilled through shared configuration readiness",
     );
     let verifiedRouteReceipts = [];
     if (adoptedTarget) {
@@ -1044,7 +1184,14 @@ try {
       adoptedRoute: adoptedTarget ? adoptedRoute : null,
       verifiedRouteMethods: verifiedRouteReceipts.map((routeReceipt) => routeReceipt.method),
       originalSummaryAutomaticallyObserved: true,
-      guards: ["wrong-runtime", "wrong-run", "cancelled-original-read"],
+      configurationReleaseCount,
+      cancellation: cancellationEvidence,
+      guards: [
+        "wrong-runtime",
+        "wrong-run",
+        "cancelled-original-read",
+        ...(!adoptedTarget ? ["member-server-settled", "summary-server-settled", "shared-readiness-retained"] : []),
+      ],
     });
     await summary.dispose();
     readers.delete(summary);
