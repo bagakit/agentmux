@@ -83,6 +83,10 @@ it('connects the actual Graph clipped route and endpoint observation without tex
   await settleCollaborationCanvas(() => expect(dom.container.querySelector('.collaboration-edge__packet')).not.toBeNull())
   const route = dom.container.querySelector('.react-flow__edge-path')!
   expect(dom.container.querySelector('.collaboration-edge__packet')?.getAttribute('d')).toBe(route.getAttribute('d'))
+  const caption = dom.container.querySelector('.collaboration-edge__caption')!
+  expect(caption).not.toBeNull()
+  expect(caption.getAttribute('data-detached')).toBe('true')
+  expect(caption.textContent).toBe('Messages')
   expect(dom.container.querySelectorAll('.collaboration-activity')).toHaveLength(2)
   expect(dom.container.querySelector('[data-direction=sent]')?.getAttribute('aria-label')).toContain('source')
   expect(dom.container.querySelector('[data-direction=received]')?.getAttribute('aria-label')).toContain('destination')
