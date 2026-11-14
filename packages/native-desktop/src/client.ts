@@ -76,7 +76,6 @@ export class NativeConnection {
   private sequence = 0
   private pending = new Map<number, Pending>()
   private operations = new Map<string, NativeOperation>()
-  private submittedOperationIds = new Set<string>()
   private resultSizes = new Map<string, number>()
   private resultBytes = 0
   private chunks: Buffer[] = []
@@ -84,13 +83,15 @@ export class NativeConnection {
   private fragmentedReadMs = 0
   private closed = false
   private instance = ''
-  private constructor(private socket: Socket, private options: NativeConnectionOptions) {
+  private constructor(private socket: Socket, private options: NativeConnectionOptions,
+    private readonly submittedOperationIds: Set<string>) {
     socket.on('data', bytes => this.receive(bytes))
     socket.on('error', error => this.fail(error))
     socket.on('close', () => this.fail(new Error('Native connection closed')))
   }
 
-  static async connect(options: NativeConnectionOptions): Promise<NativeConnection> {
+  /** Host reconnects share their original dispatch admission; standalone connections own theirs. */
+  static async connect(options: NativeConnectionOptions, submittedOperationIds = new Set<string>()): Promise<NativeConnection> {
     const info = await lstat(options.socketPath)
     if (!info.isSocket() || info.isSymbolicLink() || info.uid !== process.getuid?.() || (info.mode & 0o077) !== 0) {
       throw new NativeRequestError('unsafe_socket', 'Native socket must be private and owned by the current user')
@@ -101,7 +102,7 @@ export class NativeConnection {
       socket.once('error', failed)
       socket.once('connect', () => { socket.off('error', failed); resolve() })
     })
-    const connection = new NativeConnection(socket, options)
+    const connection = new NativeConnection(socket, options, submittedOperationIds)
     try {
       const hello = await connection.request('handshake', {})
       if (!hello || typeof hello !== 'object' || Array.isArray(hello) || hello.provider !== NATIVE_PROVIDER ||
@@ -285,13 +286,6 @@ export class NativeDesktop {
     }
     const requestOptions: NativeRequestOptions = { ...options, beforeSubmit,
       ...(onTiming ? { onTiming: (timing: NativeTransportTiming) => onTiming({ ...timing, lazyConnectionMs }) } : {}) }
-    if (isNativeMutation(method, params)) {
-      const operationId = options.operationId ?? randomUUID()
-      if (this.submittedOperationIds.has(operationId)) throw new NativeRequestError('duplicate_operation', 'Inspect the original operation; it will not be executed again')
-      if (options.expectedInstanceId !== undefined && options.expectedInstanceId !== connection.instanceId) throw new NativeRequestError('instance_mismatch', 'The original native instance is unavailable')
-      this.submittedOperationIds.add(operationId)
-      return await connection.request(method, params, { ...requestOptions, operationId })
-    }
     return await connection.request(method, params, requestOptions)
   }
 
@@ -486,7 +480,7 @@ export class NativeDesktop {
         if (launchError) throw launchError
         try {
           return await NativeConnection.connect({ socketPath, token,
-            ...(this.options.requestTimeoutMs === undefined ? {} : { requestTimeoutMs: this.options.requestTimeoutMs }) })
+            ...(this.options.requestTimeoutMs === undefined ? {} : { requestTimeoutMs: this.options.requestTimeoutMs }) }, this.submittedOperationIds)
         } catch (error) {
           const code = (error as NodeJS.ErrnoException).code
           if (code !== 'ENOENT' && code !== 'ECONNREFUSED') throw error
