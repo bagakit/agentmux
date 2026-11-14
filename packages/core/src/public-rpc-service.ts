@@ -1664,9 +1664,14 @@ export class AgentMuxRpcService {
       }
       try {
         await current()
-        if (!this.ports.meshNetwork) throw new AgentMuxError('This original Core has no composed Mesh owner. Existing services remain available.', 'MESH_OWNER_UNAVAILABLE')
+        if (!this.ports.callOriginalCore && !this.ports.meshNetwork) throw new AgentMuxError('This original Core has no composed Mesh owner. Existing services remain available.', 'MESH_OWNER_UNAVAILABLE')
       } catch (error) { if (meshMethod === 'settings.mesh.configure') throw meshConfigurationNotApplied(error); throw error }
-      return parseMeshNetworkResult(meshMethod, await this.ports.meshNetwork.call(meshMethod, input, current), input) as AgentMuxRpcResult<M>
+      // Desktop borrows this original Core; its presentation server has no durable
+      // network owner. Keep the original actor/fence and do not reclassify a lost
+      // remote write acknowledgement as a local, pre-dispatch refusal.
+      if (this.ports.callOriginalCore) return parseMeshNetworkResult(meshMethod,
+        await this.ports.callOriginalCore<MeshNetworkMethod>('local', meshMethod, input, context), input) as AgentMuxRpcResult<M>
+      return parseMeshNetworkResult(meshMethod, await this.ports.meshNetwork!.call(meshMethod, input, current), input) as AgentMuxRpcResult<M>
     }
     if (isNodePublishingMethod(method)) {
       const nodeMethod: NodePublishingMethod = method
