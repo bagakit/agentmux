@@ -79,30 +79,34 @@ export class ObjectCliProbe {
 }
 
 /** Argument fixtures are inputs; the command collection comes from actual registration. */
-export function objectCliSeed(method: string, input: string): string[] {
+export function objectCliSeedFixtures(input: string): Record<string, string[]> {
   const ids = { agent: 'SID', region: 'R', zone: 'Z', space: 'S', goal: 'G' }
-  const fixed: Record<string, string[]> = {
+  return {
+    'settings.executors.discover': ['--host', 'local'],
+    'settings.executors.unregister': ['E', '--host', 'local', '--registration-revision', 'registration-original'],
+    'settings.executors.register': ['E', '--host', 'local', '--input', input],
+    'toolkit.install': ['TOOL', '--path', input],
     'settings.channels.header.inspect': [],
     'settings.channels.header.configure': ['--adapter','example','--input','-'],
     'settings.goals.common-actions.inspect': [],
     'settings.goals.common-actions.configure': ['--input','-'],
     'runtime.owner.identity': [],
-    'terminal.input': ['--input', input], 'terminal.interrupt': ['--input', input], 'terminal.stop': ['--input', input],
+    'terminal.input': ['--input', '-'], 'terminal.interrupt': ['--input', '-'], 'terminal.stop': ['--input', '-'],
     'terminal.operation.inspect': ['--host', 'local', '--run', 'RUN', '--operation-id', 'OP'],
     'terminal.ls': ['--host', 'local'],
     'terminal.inspect': ['--host', 'local', '--runtime', 'runtime-original', '--run', 'RUN'],
     'terminal.output': ['--host', 'local', '--runtime', 'runtime-original', '--run', 'RUN'],
     'connection.receiver.recover': ['--input', '-', '--runtime', 'runtime-original'], 'connection.receiver.inspect': ['--operation-id', 'receiver-original', '--runtime', 'runtime-original'],
-    'connection.api.identities': ['--session', 'SID'], 'connection.api.request': ['--input', input], 'connection.api.inspect': ['--operation-id', 'OP'],
+    'connection.api.identities': ['--session', 'SID'], 'connection.api.request': ['--input', '-'], 'connection.api.inspect': ['--operation-id', 'OP'],
     'app.mobile.assets.inspect': ['--input', '-'], 'app.mobile.assets.activate': ['--input', '-'],
     'agent.learning.prepare': ['--input', '-'], 'agent.learning.ls': ['--input', '-'], 'agent.learning.inspect': ['--input', '-'],
     'agent.learning.propose': ['--input', '-'], 'agent.learning.revise': ['--input', '-'], 'agent.learning.continue': ['--input', '-'],
     'system.metrics.host-profile.capture': ['--host', 'local', '--runtime', 'runtime-original', '--owner', 'owner-original', '--pid', '123', '--duration-ms', '1000'],
     'runtime.network.inspect': ['--runtime', 'runtime-original', '--owner', 'owner-original'],
-    'space.mote.connection.create': ['--input', '-'], 'space.mote.connection.sync': ['--input', '-'], 'space.mote.connection.advance': ['--operation-id', 'mote-original'], 'space.mote.connection.inspect': ['--operation-id', 'mote-original'], 'space.mote.connection.ls': ['--input', '-'],
+    'space.mote.connection.create': ['--input', '-'], 'space.mote.connection.sync': ['--input', '-'], 'space.mote.connection.advance': ['--input', '-'], 'space.mote.connection.inspect': ['--operation-id', 'mote-original'], 'space.mote.connection.ls': ['--input', '-'],
     'connection.metadata.get': ['--input', '-'], 'connection.metadata.refresh': ['--input', '-'], 'connection.metadata.clear': ['--input', '-'], 'connection.metadata.ls': ['--connection', 'metadata-connection', '--kind', 'actor'],
     'connection.profile.get': ['--connection', 'profile-connection', '--revision', '1'], 'connection.profile.inspect': ['--operation-id', 'profile-original'], 'connection.profile.ls': ['--connection', 'profile-connection'],
-    'connection.enrollment.begin': ['--input', '-'], 'connection.enrollment.advance': ['--operation-id', 'enroll-original'], 'connection.enrollment.inspect': ['--operation-id', 'enroll-original'], 'connection.enrollment.ls': [],
+    'connection.enrollment.begin': ['--input', '-'], 'connection.enrollment.advance': ['--input', '-'], 'connection.enrollment.inspect': ['--operation-id', 'enroll-original'], 'connection.enrollment.ls': [],
     'connection.setup.begin': ['--input', '-'], 'connection.setup.advance': ['--input', '-'], 'connection.setup.inspect': ['--operation-id', 'setup-original'], 'connection.setup.ls': ['--connection', 'setup-connection'],
     'connection.service.get': [], 'connection.service.configure': ['--input', '-'], 'connection.service.inspect': ['--operation-id', 'service-original'],
     'connection.diagnose': ['--host', 'local', '--session', 'SID'],
@@ -125,7 +129,7 @@ export function objectCliSeed(method: string, input: string): string[] {
     'message.pending.restore': ['--session', ids.agent, '--pending-id', 'PENDING', '--expected-text', 'before'],
     'device.ls': [], 'device.link': [], 'device.hello': ['--name', 'DEVICE'], 'device.revoke': ['--device', 'DEVICE'],
     'agent.open': ['--executor', 'E', '--zone', ids.zone, '--new-tab', '--operation-id', 'BUSINESS'],
-    'agent.rename': ['--session', ids.agent, '--name', '--help'], 'agent.view': ['--session', ids.agent],
+    'agent.rename': ['--session', ids.agent, '--name-revision', '0', '--name', '--help'], 'agent.view': ['--session', ids.agent],
     'agent.reopen': ['--session', ids.agent, '--retired-at', '12', '--operation-id', 'REOPEN'],
     'agent.restart': ['--session', ids.agent, '--run', 'RUN', '--operation-id', 'RESTART'],
     'agent.restart.inspect': ['--session', ids.agent, '--run', 'RUN', '--operation-id', 'RESTART'],
@@ -137,7 +141,7 @@ export function objectCliSeed(method: string, input: string): string[] {
     'agent.role.ls': [], 'agent.role.register': ['--role', 'writer'], 'agent.role.resolve': ['--role', 'writer'],
     'space.state': [], 'space.commit': ['--revision', '0'],
     'space.resolve': ['--tab', 'TAB', '--region', ids.region, '--direction', 'left'],
-    'space.ls': [], 'space.inspect': ['--region', ids.region], 'space.rename': ['--tab', 'TAB', '--clear'],
+    'space.ls': [], 'space.inspect': ['--region', ids.region], 'space.rename': ['--tab', 'TAB', '--name-revision', '0', '--clear'],
     'space.mv': ['--from-region', ids.region, '--expect-session', ids.agent, '--zone', ids.zone, '--new-tab'],
     'space.swap': ['--region', ids.region, '--with', 'R2'],
     'space.bind': ['--zone', ids.zone, '--space', ids.space], 'space.unbind': ['--zone', ids.zone, '--space', ids.space],
@@ -152,9 +156,9 @@ export function objectCliSeed(method: string, input: string): string[] {
     'terminal.open': ['--in-region', ids.region], 'browser.open': ['--url', 'https://example.org', '--in-region', ids.region],
     'browser.targets': [], 'browser.run': ['--browser', 'B', '--operation-id', 'BOP'], 'browser.history': [],
     'browser.task.assets': ['--browser', 'B'], 'browser.task.inspect': ['--browser', 'B', '--run', 'RUN'], 'browser.task.reliability': ['--browser', 'B', '--asset', 'A', '--version', '1'],
-    'browser.task.parallel-continue': ['--browser','B','--operation-id','PARALLEL','--target','TARGET','--input',input],
+    'browser.task.parallel-continue': ['--browser','B','--operation-id','PARALLEL','--target','TARGET','--input','-'],
     'browser.task.parallel-stop': ['--browser','B','--operation-id','PARALLEL'],
-    'browser.task.parallel': ['--browser','B','--asset','A','--version','1','--input',input],
+    'browser.task.parallel': ['--browser','B','--asset','A','--version','1','--input','-'],
     'browser.task.parallel-inspect': ['--browser','B','--operation-id','PARALLEL'], 'browser.task.parallel-list': ['--browser','B'],
     'browser.task.run': ['--browser', 'B', '--asset', 'A', '--version', '1'], 'browser.task.stop': ['--browser', 'B', '--run', 'RUN'],
     'browser.task.batch': ['--browser', 'B', '--asset', 'A', '--version', '1'], 'browser.task.batch-stop': ['--browser', 'B', '--batch', 'BATCH'],
@@ -162,7 +166,7 @@ export function objectCliSeed(method: string, input: string): string[] {
     'browser.follow': ['--operation-id', 'BOP'], 'browser.replay': ['--browser', 'B', '--operation-id', 'BOP', '--preview'],
     'goal.ls': [], 'goal.inspect': ['--goal', ids.goal], 'goal.create': ['--title', 'Task', '--project', 'P', '--risk', 'low', '--confirm', 'user'],
     'goal.update': ['--goal', ids.goal, '--description', '--help'], 'goal.delete': ['--goal', ids.goal, '--confirm', 'delete'],
-    'goal.assign': ['--goal', ids.goal, '--executor', 'E'], 'goal.start': ['--goal', ids.goal], 'goal.handoff': ['--goal', ids.goal],
+    'goal.assign': ['--goal', ids.goal, '--assignees', '["SID"]'], 'goal.start': ['--goal', ids.goal], 'goal.handoff': ['--goal', ids.goal],
     'goal.discuss': ['--goal', ids.goal, '--mode', 'open'], 'goal.confirm': ['--goal', ids.goal, '--revision', '1'], 'goal.accept': ['--goal', ids.goal, '--revision', '1', '--submission', 'report'],
     'goal.focus': ['--goal', ids.goal], 'goal.link-session': ['--goal', ids.goal, '--session', ids.agent],
     'goal.link-project': ['--goal', ids.goal, '--project', 'P'], 'goal.decisions': ['--goal', ids.goal], 'goal.activity': [],
@@ -182,7 +186,9 @@ export function objectCliSeed(method: string, input: string): string[] {
     'system.doctor': [], 'system.endpoint': [], 'system.storage': ['--host', 'local', '--run', 'RUN'], 'system.crash-log.inspect': [], 'system.crash-log.reveal': [],
     'system.metrics.get': [], 'system.metrics.watch': [], 'system.metrics.app-memory.inspect': []
   }
-  const found = fixed[method]
+}
+export function objectCliSeed(method: string, input: string): string[] {
+  const found = objectCliSeedFixtures(input)[method]
   if (found) return found
   if (method.startsWith('capsule.')) return method === 'capsule.ls' || method === 'capsule.config.inspect' ? [] : ['--input', '-']
   if (method.startsWith('settings.executors.') || method.startsWith('settings.prompts.')) {

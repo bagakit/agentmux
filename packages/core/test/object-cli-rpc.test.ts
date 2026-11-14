@@ -1,3 +1,5 @@
+import { apiInput } from './fixtures/connection-api.js'
+import { CLI_SDK_BOUNDARIES } from './helpers/cli-sdk-boundaries.js'
 import { imagePng } from '../../../apps/desktop/test/fixtures/mote-identity-image.js'
 import { fixtureEpoch as reshapeFixtureEpoch } from './helpers/fixture-values.js'
 import { fixturePath } from './helpers/fixture-values.js'
@@ -6,7 +8,7 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { AGENTMUX_CLI_COMMANDS } from '../src/agentmux-cli-commands.js'
 import { AGENTMUX_RPC_CONTROL_METHODS, AGENTMUX_RPC_NATIVE_METHODS } from '../src/public-rpc.js'
-import { ObjectCliProbe, objectCliSeed } from './helpers/object-cli-rpc.js'
+import { ObjectCliProbe, objectCliSeed, objectCliSeedFixtures } from './helpers/object-cli-rpc.js'
 import { parseAgentMuxSpatialGraph } from '../src/spatial-graph.js'
 import { CONNECTION_SETUP_RPC_METHODS } from '../src/connection-setup-codec.js'
 
@@ -17,29 +19,63 @@ async function probe(handle?: ConstructorParameters<typeof ObjectCliProbe>[0]) {
 }
 
 describe('compiled object CLI through a private RPC transport probe', () => {
-  it('routes the nonempty complete registration through canonical methods, independently of wire IDs', async () => {
-    const fixture = await probe()
-    const methods = AGENTMUX_CLI_COMMANDS.filter(entry => !entry.local).map(entry => entry.method)
+  it('maps every registered public method or exact documented SDK boundary', () => {
+    const methods = AGENTMUX_CLI_COMMANDS.filter(entry => !entry.local).map(entry => entry.rpcMethod ?? entry.method)
     // Learning approval belongs to the actual App. Mobile producer writes belong
     // to the authenticated original phone document, never an Agent CLI impersonation.
     const appOnly = new Set(['agent.learning.confirm', 'agent.learning.confirmation', 'app.mobile.assets.loaded', 'app.mobile.report'])
     for (const method of appOnly) { expect(Object.hasOwn(AGENTMUX_RPC_NATIVE_METHODS, method)).toBe(true); expect(methods).not.toContain(method) }
-    const publicMethods = [...Object.keys(AGENTMUX_RPC_CONTROL_METHODS), ...Object.keys(AGENTMUX_RPC_NATIVE_METHODS)]
-      .filter(method => method !== 'system.subscription.cancel' && method !== 'system.endpoint' && !method.startsWith('runtime.') && !appOnly.has(method))
-    // runtime.* is the Host SDK facade; application commands retain complete CLI coverage.
-    const sdkMethods = Object.keys(AGENTMUX_RPC_NATIVE_METHODS).filter(method => method.startsWith('runtime.'))
-    expect(sdkMethods.length).toBeGreaterThan(0)
-    expect(methods.some(method => sdkMethods.includes(method))).toBe(false)
+    const sdkOnly = new Set<string>(Object.keys(CLI_SDK_BOUNDARIES))
+    const registered = [...Object.keys(AGENTMUX_RPC_CONTROL_METHODS), ...Object.keys(AGENTMUX_RPC_NATIVE_METHODS)]
+    expect(sdkOnly.size).toBeGreaterThan(0)
+    for (const method of sdkOnly) { expect(registered).toContain(method); expect(methods).not.toContain(method) }
+    // system.endpoint is a local CLI protocol server. Deliberate SDK omissions
+    // have exact reasons; readable runtime owner/network methods remain public.
+    const publicMethods = registered.filter(method => method !== 'system.endpoint' && !sdkOnly.has(method))
     expect(methods.length).toBeGreaterThan(0)
-    expect(new Set(methods).size).toBe(methods.length)
-    expect([...methods].sort()).toEqual(publicMethods.sort())
-    const ordinary = AGENTMUX_CLI_COMMANDS.filter(entry => !entry.local && !entry.stream)
-    expect(ordinary.length).toBeGreaterThan(0)
+    const names = AGENTMUX_CLI_COMMANDS.filter(entry => !entry.local).map(entry => entry.method)
+    expect(new Set(names).size).toBe(names.length)
+    expect(AGENTMUX_CLI_COMMANDS.filter(entry => entry.rpcMethod).map(entry => [entry.method, entry.rpcMethod])).toEqual([['file.ls', 'file.list'], ['toolkit.install', 'toolkit.create']])
+    expect([...new Set(methods)].sort()).toEqual(publicMethods.sort())
+  })
+
+  it('routes explicit argument fixtures through the compiled CLI and records their exact coverage', async () => {
+    const fixture = await probe()
+    const registeredNames = new Set(AGENTMUX_CLI_COMMANDS.map(entry => entry.method))
+    for (const method of Object.keys(objectCliSeedFixtures(fixture.inputPath))) expect(registeredNames.has(method), method).toBe(true)
+    // Receiver commands first prove original hosting-owner locality. The probe
+    // deliberately stops there; their end-to-end tests own receiver execution.
+    const firstRpc = (entry: typeof AGENTMUX_CLI_COMMANDS[number]) => entry.method.startsWith('connection.receiver.')
+      ? 'connection.owner.inspect' : entry.rpcMethod ?? entry.method
+    const ordinary = AGENTMUX_CLI_COMMANDS.filter(entry => !entry.local).flatMap(entry => {
+      try { return [{ ...entry, argv: objectCliSeed(entry.method, fixture.inputPath) }] }
+      catch (error) {
+        if (error instanceof Error && error.message === `Missing argv input for actual registered command ${entry.method}`) return []
+        throw error
+      }
+    })
+    expect(ordinary.length).toBeGreaterThan(150)
+    for (const method of ['agent.send', 'agent.rename', 'agent.native.confirm', 'space.commit', 'terminal.output', 'terminal.input', 'browser.task.run', 'settings.channels.header.configure', 'settings.goals.common-actions.configure'])
+      expect(ordinary.some(entry => entry.method === method), method).toBe(true)
     const graph = parseAgentMuxSpatialGraph({ spaces: [], zones: [], tabs: [], regions: [], bindings: [], layouts: {}, tabLayouts: {}, resources: {} })
     const nativeSource = { nativeHandle: { kind: 'provider', providerId: 'private', sessionId: 'saved-native',
       transcriptPath: join(fixture.root, 'saved-native.jsonl') }, workspacePath: fixture.root, revision: 'a'.repeat(64) }
     const terminalIntent = { target: { hostId: 'local', runtimeId: 'native-original', run: { runId: 'RUN' } }, operationId: 'original-control', ownerInstanceId: 'native-incarnation' }
     const stdinByMethod: Record<string, string> = {
+      'settings.channels.header.configure': JSON.stringify({ expected: null, visible: true }),
+      'settings.goals.common-actions.configure': JSON.stringify({ expected: null, directory: { items: [], collapsed: false } }),
+      'capsule.asset.read': JSON.stringify({ capsuleId: '123456789ABC', expectedRevision: 1, expectedInstanceId: '23456789ABCD', path: 'index.html', offset: 0, length: 100 }),
+      'capsule.runtime.inspect': '{}',
+      'capsule.runtime.start': JSON.stringify({ operationId: 'capsule-runtime-start', expectedRevision: 0 }),
+      'capsule.runtime.stop': JSON.stringify({ operationId: 'capsule-runtime-stop', expectedRevision: 1, expectedRun: { runId: 'RUN' } }),
+      'agent.interaction.respond': JSON.stringify({ agentSessionId: 'SID', expectedRun: { runId: 'RUN' }, operationId: 'response-original', expectedRequest: {}, response: {} }),
+      'agent.posture.set': JSON.stringify({ target: { hostId: 'local', runtimeId: 'native-original', agentSessionId: 'SID', expectedRun: { runId: 'RUN' }, providerId: 'private' }, operationId: 'posture-original', controlId: 'mode', modeId: 'plan', expectedControlDigest: 'sha256:'+'a'.repeat(64) }),
+      'space.mote.connection.advance': JSON.stringify({ operationId: 'mote-original' }),
+      'browser.task.parallel': JSON.stringify({ operationId: 'parallel-original', targets: [{ id: 'TARGET', browserId: 'B2', profileId: 'PROFILE', parameters: {} }] }),
+      'browser.task.parallel-continue': JSON.stringify({ continuationId: 'continuation-original', expectedRevision: 'a'.repeat(64), parameters: {} }),
+      'connection.api.request': JSON.stringify(apiInput),
+      'connection.enrollment.advance': JSON.stringify({ operationId: 'enroll-original', ownRevision: 1, decision: { actionId: 'decision-original', kind: 'continue-authentication' } }),
+      'connection.receiver.recover': JSON.stringify({ operationId: 'receiver-original', connectionId: 'connection-original', expectedRevision: 1, receiverRef: null }),
       'terminal.input': JSON.stringify({ ...terminalIntent, expectedByte: 0, dataBase64: 'YQ==' }),
       'terminal.interrupt': JSON.stringify(terminalIntent), 'terminal.stop': JSON.stringify(terminalIntent),
       'app.mobile.assets.inspect': JSON.stringify({ hostId: 'local' }),
@@ -71,7 +107,7 @@ describe('compiled object CLI through a private RPC transport probe', () => {
       'connection.metadata.get': JSON.stringify({ connectionId: 'metadata-connection', subject: { kind: 'conversation', externalConversationId: 'original-group' } }),
       'connection.metadata.refresh': JSON.stringify({ connectionId: 'metadata-connection', expectedConnectionRevision: 1, subject: { kind: 'conversation', externalConversationId: 'original-group' } }),
       'connection.metadata.clear': JSON.stringify({ connectionId: 'metadata-connection', expectedConnectionRevision: 1, subject: { kind: 'conversation', externalConversationId: 'original-group' }, expectedCacheRevision: 'cache-revision' }),
-      'connection.enrollment.begin': JSON.stringify({ operationId: 'enroll-original', connectionId: 'connection-new', adapterId: 'sample', domain: 'chat.example', label: 'Team' }),
+      'connection.enrollment.begin': JSON.stringify({ operationId: 'enroll-original', connectionId: 'connection-new', adapterId: 'sample', domain: 'chat.example', label: 'Team', preset: { name: 'Original bot', avatar: { pngDataUrl: 'data:image/png;base64,' + imagePng().toString('base64') } } }),
       'connection.setup.begin': JSON.stringify({ operationId: 'setup-original', connectionId: 'setup-connection', expectedConnectionRevision: 1, goal: { kind: 'agent-conversation', interaction: 'cards' } }),
       'connection.setup.advance': JSON.stringify({ operationId: 'setup-original', expectedRevision: 4, decision: { actionId: 'setup-original-action', value: 'continue' } }),
       'connection.service.configure': JSON.stringify({ operationId: 'service-original', expectedRevision: 0, service: { enabled: false } }),
@@ -87,12 +123,21 @@ describe('compiled object CLI through a private RPC transport probe', () => {
       'browser.task.batch': JSON.stringify({ parameters: { fresh: 'input' }, items: [{ id: 'ITEM', parameters: { fresh: 'item' } }] }),
       'browser.task.run': JSON.stringify({ fresh: 'input' })
     }
+    const routeFailures: Array<{ method: string; code: number | null; stderr: string }> = []
     for (const entry of ordinary) {
-      const result = await fixture.run([...entry.method.split('.'), ...objectCliSeed(entry.method, fixture.inputPath)], stdinByMethod[entry.method] ?? 'return await snapshot()')
-      expect(result.code, entry.method + ': ' + result.stderr).toBe(1)
-      expect(JSON.parse(result.stderr)).toMatchObject({ ok: false, operation: entry.method, error: { code: 'CLI_ROUTE_PROBE' } })
+      const result = await fixture.run([...entry.method.split('.'), ...entry.argv], stdinByMethod[entry.method] ?? 'return await snapshot()')
+      const reply = result.stderr ? JSON.parse(result.stderr) : null
+      if (result.code !== 1 || reply?.ok !== false || reply?.operation !== entry.method || reply?.error?.code !== 'CLI_ROUTE_PROBE')
+        routeFailures.push({ method: entry.method, code: result.code, stderr: result.stderr })
     }
-    expect(fixture.requests.map(request => request.method)).toEqual(ordinary.map(entry => entry.method))
+    expect(routeFailures).toEqual([])
+    expect(fixture.requests.map(request => request.method)).toEqual(ordinary.map(firstRpc))
+    if (process.env.AGENTMUX_CLI_ROUTING_EVIDENCE) await writeFile(process.env.AGENTMUX_CLI_ROUTING_EVIDENCE, JSON.stringify({
+      schema: 'agentmux.cli-routing-coverage.v1',
+      proved: ordinary.map(entry => ({ command: entry.method, canonicalRpcMethod: entry.rpcMethod ?? entry.method, observedRpcMethod: firstRpc(entry), coverage: entry.method.startsWith('connection.receiver.') ? 'hosting-owner-preflight' : 'direct-error-routing' })),
+      notCoveredByThisTransportTest: AGENTMUX_CLI_COMMANDS.filter(entry => !entry.local && !ordinary.some(sample => sample.method === entry.method)).map(entry => entry.method),
+      qualification: 'Private transport/error routing only; not business success, authorization or end-to-end owner proof.'
+    }, null, 2) + '\n')
     for (const request of fixture.requests) {
       expect(request).toMatchObject({ jsonrpc: '2.0', id: expect.anything(), method: expect.any(String), params: expect.any(Object) })
       expect(Object.keys(request).sort()).toEqual(['id', 'jsonrpc', 'method', 'params'])
@@ -159,7 +204,7 @@ describe('compiled object CLI through a private RPC transport probe', () => {
       expect(JSON.parse(reply.stderr).error.code).toBe('CLI_ROUTE_PROBE')
     }
     expect(fixture.requests.map(request => request.params)).toEqual([
-      { operationId: 'M1', target: { kind: 'agent-session', agentSessionId: 'constructor' }, text: '--help' },
+      { operationId: 'M1', sourceChannel: 'cli', target: { kind: 'agent-session', agentSessionId: 'constructor' }, text: '--help' },
       { id: '--help' }, { key: 'client.label', value: '--help' }, { input: { scheme: '' } }, { target: { operationId: 'O1' } },
       { operationId: 'OPEN', content: { kind: 'new-agent', executorId: 'E', prompt: '--help' }, destination: {
         spaceId: 'S', newTab: true, newZone: { kind: 'directory', projectId: 'P', sourceWorkspaceId: 'W', path: ' ' + fixturePath("literal directory") + ' ' }
@@ -204,13 +249,13 @@ describe('compiled object CLI through a private RPC transport probe', () => {
       expect(JSON.parse(result.stderr).error.code).toBe('INVALID_CLI_ARGUMENT')
     }
     expect(fixture.requests).toEqual([])
-  })
+  }, 30_000)
 
   it('preserves authoritative typed error codes, unknown facts and candidate data', async () => {
     const candidates = [{ agentSessionId: 'A', regionIds: ['R1'] }, { agentSessionId: 'B', regionIds: ['R2'] }]
     const fixture = await probe(request => {
       if (request.method === 'agent.send') throw Object.assign(new Error('Target is ambiguous.'), { code: 'MESSAGE_TARGET_NOT_UNIQUE', candidates, details: { availability: 'unknown' } })
-      return { agentSessionId: 'SID', changed: true, outcome: 'partial', override: 'Applied', save: {
+      return { agentSessionId: 'SID', changed: true, outcome: 'partial', override: 'Applied', nameRevision: 1, record: { id: 'original-name', operationId: 'original-name', target: { kind: 'agent-session', id: 'SID' }, before: null, requested: 'Applied', status: 'applied', actual: 'Applied', startedAt: 1, settledAt: 2, reason: null, context: { actor: { kind: 'user', id: 'original-user', verified: true }, source: 'cli', entryPoint: 'agent.rename', transport: 'unix', location: {} } }, save: {
         layoutApplied: true, clientStateWritten: false, storageFlushRequested: false, diskDurability: 'unconfirmed', reason: 'Private save failed.'
       } }
     })
@@ -219,8 +264,9 @@ describe('compiled object CLI through a private RPC transport probe', () => {
     expect(JSON.parse(error.stderr)).toMatchObject({ operation: 'agent.send', error: {
       code: 'MESSAGE_TARGET_NOT_UNIQUE', message: 'Target is ambiguous.', candidates, details: { availability: 'unknown' }
     } })
-    const partial = await fixture.run(['agent', 'rename', '--session', 'SID', '--name', 'Applied'])
+    const partial = await fixture.run(['agent', 'rename', '--session', 'SID', '--name-revision', '0', '--name', 'Applied'])
     expect(partial.code).toBe(1)
+    expect(partial.stdout, partial.stderr).not.toBe('')
     expect(JSON.parse(partial.stdout)).toMatchObject({ ok: true, operation: 'agent.rename', result: {
       outcome: 'partial', override: 'Applied', save: { storageFlushRequested: false, diskDurability: 'unconfirmed' }
     } })
@@ -264,8 +310,11 @@ describe('compiled object CLI through a private RPC transport probe', () => {
   })
 
   it('prints the original response then full notifications, preserving bytes/cursors and reader-only cancellation', async () => {
-    const streamEntries = AGENTMUX_CLI_COMMANDS.filter(entry => entry.stream || entry.method === 'agent.output')
-    expect(streamEntries.map(entry => entry.method)).toEqual(['agent.output', 'browser.follow', 'system.metrics.watch', 'toolkit.watch'])
+    // Byte/cursor, progress and snapshot framing representatives. The complete
+    // registration test above routes every stream through the original probe too.
+    const streamMethods = new Set(['agent.output', 'terminal.output', 'browser.follow', 'system.metrics.watch', 'toolkit.watch'])
+    const streamEntries = AGENTMUX_CLI_COMMANDS.filter(entry => streamMethods.has(entry.method))
+    expect(streamEntries.map(entry => entry.method).sort()).toEqual([...streamMethods].sort())
     const raw = Uint8Array.from([0xe4, 0xb8, 0xad, 0x00, 0xff])
     const pending = { state: 'pending', observedAt: null, lastSuccessAt: null, reason: null, data: null }
     const observation = { schema: 'agentmux.metrics.v1', observedAt: reshapeFixtureEpoch(0, 0, 1),
@@ -276,22 +325,23 @@ describe('compiled object CLI through a private RPC transport probe', () => {
       definition: { id: 'TOOL', revision: 'r', name: 'Fixture', icon: 'terminal', enabled: true,
         statusBar: 'icon', workspacePath: fixturePath("fixture"), script: "console.log('fixture')", args: [], actions: [] },
       state: 'idle', reason: null, admission: null, latestConfirmed: null, consumerCount: 0, sequence: 1 }
-    for (const entry of streamEntries) for (const followed of entry.method === 'agent.output' ? [false, true] : [false]) {
-      const initial = entry.method === 'agent.output'
+    for (const entry of streamEntries) for (const followed of entry.method === 'agent.output' || entry.method === 'terminal.output' ? [false, true] : [false]) {
+      const initial = entry.method === 'terminal.output' ? { target: { hostId: 'local', runtimeId: 'runtime-original', run: { runId: 'RUN' } }, runtime: { runtimeId: 'runtime-original', instanceId: 'instance-original', buildIdentity: 'build-original', protocolVersion: 1 }, run: { runId: 'RUN', kind: 'terminal', providerId: null, executorId: null, agentSessionId: null, workspacePath: fixturePath('fixture'), pid: null, cols: null, rows: null, observedAt: 1, acceptedInputBytes: null, nativeService: null, state: 'running', latestOutputBytes: 10 }, firstAvailableByte: 5, gap: { requestedAfterByte: 0, firstAvailableByte: 5 } } : entry.method === 'agent.output'
         ? { session: { kind: 'agent', agentSessionId: 'SID', providerId: 'codex', executorId: 'codex', hostId: 'local', workspacePath: fixturePath("fixture"),
           run: { runId: 'RUN' }, retiredRuns: [], createdAt: reshapeFixtureEpoch(0, 0, 1), updatedAt: reshapeFixtureEpoch(0, 0, 1) }, run: { runId: 'RUN', state: 'running', latestOutputBytes: 10 },
           terminal: { type: 'not-requested' }, resizeRevision: 0, gap: { requestedAfterByte: 0, firstAvailableByte: 5 } }
         : entry.method === 'browser.follow' ? { runOperation: null, gap: { droppedThrough: 3 } }
         : entry.method === 'toolkit.watch' ? { toolId: 'TOOL' } : { observation }
-      const data = entry.method === 'agent.output'
+      const data = entry.method === 'agent.output' || entry.method === 'terminal.output'
         ? { runId: 'RUN', replay: !followed, startByte: 5, endByte: 10, dataBase64: Buffer.from(raw).toString('base64') }
         : entry.method === 'browser.follow' ? { sequence: 4, event: { kind: 'fixture' } }
         : entry.method === 'toolkit.watch' ? tool : observation
       const fixture = await probe((request, socket) => {
+        if (request.method === 'system.subscription.cancel') return undefined
         setTimeout(() => {
           for (const [index, event] of [
-            { type: entry.method === 'agent.output' ? 'output' : entry.method === 'browser.follow' ? 'progress' : 'snapshot', data },
-            { type: 'end', data: { reason: 'reader-ended' } }
+            { type: entry.method === 'agent.output' || entry.method === 'terminal.output' ? 'output' : entry.method === 'browser.follow' ? 'progress' : 'snapshot', data },
+            { type: 'end', data: entry.method === 'terminal.output' ? { runId: 'RUN', state: 'running', reason: followed ? 'owner-ended' : 'replay-complete' } : { reason: 'reader-ended' } }
           ].entries()) socket.write(JSON.stringify({ jsonrpc: '2.0', method: 'system.subscription.event', params: {
             subscriptionId: 'SUB', method: entry.method, sequence: index + 1, event
           } }) + '\n')
@@ -307,11 +357,12 @@ describe('compiled object CLI through a private RPC transport probe', () => {
         result: { subscriptionId: 'SUB', method: entry.method, initial } })
       expect(frames.slice(1).map(frame => frame.params.sequence)).toEqual([1, 2])
       expect(frames[1].params.event.data).toEqual(data)
-      if (entry.method === 'agent.output') {
+      if (entry.method === 'agent.output' || entry.method === 'terminal.output') {
         expect([...Buffer.from(frames[1].params.event.data.dataBase64, 'base64')]).toEqual([...raw])
         expect(fixture.requests[0]!.params.follow).toBe(followed)
       }
-      expect(fixture.requests.map(request => request.method)).toEqual([entry.method])
+      expect(fixture.requests.map(request => request.method)).toEqual([entry.method, 'system.subscription.cancel'])
+      expect(fixture.requests[1]!.params).toEqual({ subscriptionId: 'SUB' })
     }
   }, 30_000)
 })
