@@ -24,7 +24,7 @@ export function MoteFilesTool({ visible, isScratch, scope, reference, onOpenPath
   }, [originalOpen, presentation?.collapse])
   const [createRequest, setCreateRequest] = useState<{ requestId: number; parentPath: string }>()
   const requestId = useRef(0)
-  return <WorkspaceFilesFrame workspace={scope.workspace} visible={visible} presentation={contentSlotPresentation(isScratch, scope)} title={scope.topic.title}
+  return <WorkspaceFilesFrame workspace={scope.workspace} fileTopic={scope.topic} visible={visible} presentation={contentSlotPresentation(isScratch, scope)} title={scope.topic.title}
     showExplorer={!presentation?.expanded}
     contextPath={scratchTopicPhysicalPath(scope.workspace, scope.topic)}
     explorerKey={scope.workspace.id + scope.topic.id} explorer={{ rootPath: scope.rootPath, rootLabel: scope.topic.title,

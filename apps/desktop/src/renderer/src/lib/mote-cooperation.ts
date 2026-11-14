@@ -1,7 +1,8 @@
 import { parseFileReadResult, type FileReadResult } from '@agentmux/core/files'
 import type { FileDocument } from '@agentmux/core'
-import { directoryIdentity, homeZoneId } from '../../../shared/space-addresses'
-import { MOTE_SOUL_PATH, scratchTopicIdentityPath, parseMoteBehaviorBlock, linkMoteBehaviorFromSoul, moteSoulForBehaviorContext } from '@agentmux/host/mote-model'
+import { topicContentSpaceId } from '@agentmux/host/topic-categories'
+import { topicFilesTarget } from './topic-files-address'
+import { MOTE_SOUL_PATH, parseMoteBehaviorBlock, linkMoteBehaviorFromSoul, moteSoulForBehaviorContext } from '@agentmux/host/mote-model'
 import { api } from './api'
 import { fileExplorerContains } from './file-explorer-scope'
 import type { MoteWorkfaceScope } from './mote-workface'
@@ -109,6 +110,10 @@ export async function prepareMoteCooperationDraft(scope: MoteWorkfaceScope,
   return { selection, sources }
 }
 
+function moteMaterialTarget(scope: MoteWorkfaceScope) {
+  return { ...topicFilesTarget(scope.workspace, scope.topic), spaceId: topicContentSpaceId(scope.workspace, scope.topic) }
+}
+
 /** Only the explicitly inspected original material is read through the public typed file domain. */
 export function readMoteMaterial(scope: MoteWorkfaceScope, path: string): Promise<FileReadResult> {
   if (!fileExplorerContains(scope.rootPath, path) || path === scope.rootPath) throw new Error('Choose a file in this original Mote folder.')
@@ -118,12 +123,6 @@ export function readMoteMaterial(scope: MoteWorkfaceScope, path: string): Promis
 
 export function listMoteMaterials(scope: MoteWorkfaceScope) {
   return api.files.listPublic({ ...moteMaterialTarget(scope), path: '.', mode: 'directory' })
-}
-
-function moteMaterialTarget(scope: MoteWorkfaceScope) {
-  const spaceId = directoryIdentity(scope.workspace.hostId, scratchTopicIdentityPath(scope.workspace, scope.topic))
-  return { zoneId: homeZoneId(spaceId), spaceId,
-    expectedResource: { hostId: scope.workspace.hostId, workspaceId: scope.workspace.id, workspacePath: scope.workspace.path } }
 }
 
 /** One original SOUL staging protocol for explicit preferences and note feedback. */

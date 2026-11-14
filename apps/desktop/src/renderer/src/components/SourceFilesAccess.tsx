@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { WorkspaceRecord } from '../../../shared/contracts'
+import type { FileReadResource } from '@agentmux/core/files'
+import { fileExplorerContains } from '../lib/file-explorer-scope'
 import type { SourceFilesResolution } from '../../../shared/source-files'
 import { useAppStore } from '../store'
 import { usePathDisplay } from '../hooks/usePathDisplay'
@@ -9,10 +11,11 @@ import { SurfaceState } from './SurfaceState'
 const Info = semanticIconComponent('status.info')
 
 /** Selection and retained requests live in UserState; Source facts remain with their original owner. */
-export function SourceFilesAccess({ workspace, visible }: { workspace: WorkspaceRecord; visible: boolean }) {
+export function SourceFilesAccess({ workspace, visible, objectDirectory, objectZone }: { workspace: WorkspaceRecord; visible: boolean; objectDirectory?: string | null; objectZone?: string | undefined }) {
   const displayPath = usePathDisplay()
-  const input = useAppStore(state => state.sourceFilesInputs.selections[workspace.id])
+  const input = useAppStore(state => objectDirectory ? undefined : state.sourceFilesInputs.selections[workspace.id])
   const workLocation = useAppStore(state => {
+    if (objectDirectory) return null
     const choice = state.workbenchSpaceSelection
     return choice?.workspaceId === workspace.id ? JSON.stringify([choice.spaceId, choice.zoneId, choice.sourceRuntimeId ?? null]) : null
   })
@@ -28,12 +31,12 @@ export function SourceFilesAccess({ workspace, visible }: { workspace: Workspace
     finally { setBusy(false) }
   }
   useEffect(() => {
-    if (!visible) return
+    if (!visible || objectDirectory) return
     let active = true
     setResult(null); setIssue(null)
     void useAppStore.getState().resolveFilesSource(workspace.id).then(value => { if (active) setResult(value) }, cause => { if (active) setIssue(cause instanceof Error ? cause.message : String(cause)) })
     return () => { active = false }
-  }, [visible, workspace.id, workspace.hostId, workspace.path, workLocation])
+  }, [visible, workspace.id, workspace.hostId, workspace.path, workLocation, objectDirectory])
   useEffect(() => {
     if (!visible || !input?.locator) return
     let active = true, release: (() => void) | undefined
@@ -41,15 +44,19 @@ export function SourceFilesAccess({ workspace, visible }: { workspace: Workspace
     return () => { active = false; release?.() }
   }, [visible, workspace.id, input?.locator])
   if (!visible) return null
-  const retained = Object.entries(pending).filter(([, request]) => request.workspace.id === workspace.id)
-  const retainedCreations = Object.entries(creations).filter(([, request]) => request.workspace.id === workspace.id)
-  const retainedFolders = Object.entries(folderRequests).filter(([, request]) => request.workspace.id === workspace.id)
+  const owns = (request: { workspace: Pick<WorkspaceRecord, 'id' | 'hostId' | 'path'>; request: { expectedResource: FileReadResource } }) =>
+    request.workspace.id === workspace.id && (!objectDirectory ||
+      request.workspace.hostId === workspace.hostId && request.workspace.path === workspace.path &&
+      request.request.expectedResource.zoneId === objectZone && fileExplorerContains(objectDirectory, request.request.expectedResource.path))
+  const retained = Object.entries(pending).filter(([, request]) => owns(request))
+  const retainedCreations = Object.entries(creations).filter(([, request]) => owns(request))
+  const retainedFolders = objectDirectory ? [] : Object.entries(folderRequests).filter(([, request]) => request.workspace.id === workspace.id)
   const message = issue ?? (result?.status === 'selection-required' ? result.issue?.message : input?.issue ?? (result?.status === 'unconfirmed' ? result.issue.message : null))
   const registrationUnknown = input?.registration && input.registrationStatus !== 'confirmed'
   const registration = result?.status === 'registration-required' && !registrationUnknown ? result.registration : null
-  if (input?.locator && !message && !retained.length && !retainedCreations.length && !retainedFolders.length && !registrationUnknown) return null
+  if ((objectDirectory || input?.locator) && !message && !retained.length && !retainedCreations.length && !retainedFolders.length && !registrationUnknown) return null
   return <div className="file-operation-service" role="status">
-    {registration || registrationUnknown || message ? <SurfaceState layout="inline" className="file-operation-service__source" aria-busy={busy}
+    {!objectDirectory && (registration || registrationUnknown || message) ? <SurfaceState layout="inline" className="file-operation-service__source" aria-busy={busy}
       identity={<Info size={14} aria-hidden="true" />}
       title={registration ? 'Connect this folder to Files' : result?.status === 'unconfirmed' && result.issue.code === 'SPACE_DIRECTORY_CHANGED'
         ? 'Folder identity changed' : registrationUnknown ? 'Folder registration needs checking' : 'Folder access needs checking'}
@@ -83,6 +90,7 @@ export function SourceFilesAccess({ workspace, visible }: { workspace: Workspace
       setBusy(true)
       void useAppStore.getState().selectFilesRegistration(workspace.id, { hostId: workspace.hostId, reference: registration.reference, zoneId: registration.zoneId, workspaceId: registration.workspaceId }).then(value => { setResult(value); setIssue(null) }, cause => setIssue(cause instanceof Error ? cause.message : String(cause))).finally(() => setBusy(false))
     }}>Use this location</button></div>)}</details> : null}
+    {objectDirectory && issue ? <p>{issue}</p> : null}
     {retained.map(([operationId, request]) => <div key={operationId} className="file-operation-service__request">
       <span>{request.action} · {request.request.path}</span><small>{operationId}</small>
       {request.issue ? <p>{request.issue}</p> : null}

@@ -1,3 +1,4 @@
+import { topicFileDirectory } from './lib/topic-files-address'
 import { dequal } from 'dequal'
 import { detachedFileSurface, knowledgeSurfacePresented } from './lib/knowledge-surface-navigation'
 import { isWorkbenchSurfaceDetached, type WorkbenchSurface as KnowledgeSurface } from './lib/workbench-window-registry'
@@ -2609,7 +2610,7 @@ async function readWorkspaceFileDocument(workspaceId: string, path: string, orig
     return observed.result.result.status === 'read' ? { status: 'read', document: { ...observed.result.result.document, path, readSource: originalSource,
       ...(originalMain ? { legacyMainNote: originalMain } : {}) } } : observed.result.result
   }
-  const input = useAppStore.getState().sourceFilesInputs.selections[workspaceId]
+  const input = topicFileDirectory(workspaceId, path) ? undefined : useAppStore.getState().sourceFilesInputs.selections[workspaceId]
   if (input?.locator && sourceFilesWorkspaceMatches(input.workspace, originalSpaceWorkspace(useAppStore.getState(), workspaceId, currentCoreSpatialGraph()))) {
     const read = await api.sourceFiles.call(input.target, 'file.read', sourceFilesQuery(input.locator, path))
     const current = useAppStore.getState().sourceFilesInputs.selections[workspaceId]

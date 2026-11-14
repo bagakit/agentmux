@@ -1,11 +1,13 @@
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useState, type ComponentProps, type ReactNode } from 'react'
 import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels'
-import type { WorkspaceRecord } from '../../../shared/contracts'
+import type { ScratchTopicSnapshot, WorkspaceRecord } from '../../../shared/contracts'
 import { usePathDisplay } from '../hooks/usePathDisplay'
 import { resolveExplorerCollapsed, type ContentSlotPresentation } from '../lib/surface-tool-dock'
 import { useAppStore } from '../store'
 import { FileExplorer } from './FileExplorer'
+import { topicContentZoneId, knownTopicContentSpaceId } from '@agentmux/host/topic-categories'
+import { topicFileDirectory } from '../lib/topic-files-address'
 import { SourceFilesAccess } from './SourceFilesAccess'
 
 const ThemeNavigationDisclosureIcon = semanticIconComponent('navigation.disclosure')
@@ -22,14 +24,16 @@ export type WorkspaceFileActions = {
 
 /** Layout only. Domain owners supply their original file scope, actions and content. */
 export function WorkspaceFilesFrame({ workspace, visible, presentation, title, subtitle, actions,
-  explorer, explorerKey = workspace.id, fileIssue, children, directoryFirst = false, contextPath = workspace.path, showExplorer = true }: {
+  explorer, explorerKey = workspace.id, fileIssue, fileTopic, children, directoryFirst = false, contextPath = workspace.path, showExplorer = true }: {
   workspace: WorkspaceRecord; visible: boolean; presentation: ContentSlotPresentation
   title: string; subtitle?: string | undefined; actions?: ReactNode
   explorer: Omit<ComponentProps<typeof FileExplorer>, 'active' | 'workspaceId' | 'toolbarTarget'>
-  explorerKey?: string; fileIssue?: ReactNode; children: ReactNode
+  explorerKey?: string; fileIssue?: ReactNode; fileTopic?: ScratchTopicSnapshot | undefined; children: ReactNode
   directoryFirst?: boolean; contextPath?: string | undefined; showExplorer?: boolean
 }) {
   const displayPath = usePathDisplay()
+  const directory = topicFileDirectory(workspace.id, explorer.rootPath ?? '')
+  const objectZone = fileTopic && knownTopicContentSpaceId(workspace, fileTopic) ? topicContentZoneId(workspace, fileTopic) : undefined
   const [toolbarTarget, setToolbarTarget] = useState<HTMLDivElement | null>(null)
   const override = useAppStore(state => state.explorerCollapsed[workspace.id])
   const setExplorerCollapsed = useAppStore(state => state.setExplorerCollapsed)
@@ -56,7 +60,7 @@ export function WorkspaceFilesFrame({ workspace, visible, presentation, title, s
   </Panel>
   return <div className={`workspace-tool-explorer${directoryFirst ? ' workspace-tool-explorer--directory-first' : ''}${!showExplorer ? ' workspace-tool-explorer--content-only' : ''}`}>
     <div className="workspace-files-source">
-      <SourceFilesAccess key={JSON.stringify([workspace.id, workspace.hostId, workspace.path])} workspace={workspace} visible={visible && showExplorer} />
+      {fileIssue ? null : <SourceFilesAccess key={JSON.stringify([workspace.id, workspace.hostId, workspace.path, directory])} workspace={workspace} objectDirectory={directory} objectZone={objectZone} visible={visible && showExplorer} />}
       {!directoryFirst ? context : null}
     </div>
     <PanelGroup direction="vertical" className={collapsed ? 'workspace-tools-collapsed' : 'workspace-tools-split'}

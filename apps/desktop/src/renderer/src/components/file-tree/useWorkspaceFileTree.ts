@@ -15,6 +15,7 @@ import {
 } from './file-explorer-stale-dir-cache'
 import type { DirCache, TreeNode } from './file-explorer-types'
 import { fileExplorerContains } from '../../lib/file-explorer-scope'
+import { topicFileDirectory } from '../../lib/topic-files-address'
 import { useWorkspaceResource } from '../../hooks/useWorkspaceResource'
 
 function pathDepth(path: string): number {
@@ -41,8 +42,9 @@ export function flattenFileTree(
 
 export function useWorkspaceFileTree(workspaceId: string, expanded: ReadonlySet<string>, rootPath = '', active = true) {
   const resource = useWorkspaceResource(workspaceId)
-  const source = useAppStore(state => state.sourceFilesInputs.selections[workspaceId])
-  const readSources = useAppStore(state => state.sourceFilesInputs.readSources)
+  const objectDirectory = topicFileDirectory(workspaceId, rootPath)
+  const source = useAppStore(state => objectDirectory ? undefined : state.sourceFilesInputs.selections[workspaceId])
+  const readSources = useAppStore(state => objectDirectory ? undefined : state.sourceFilesInputs.readSources)
   const namespace = useMemo(() => JSON.stringify([rootPath, sourceFilesDiscoveryNamespace(workspaceId, resource, source, readSources)]), [rootPath, workspaceId, resource?.hostId, resource?.path, source?.target, source?.locator, readSources])
   const cachedNamespace = useRef(namespace)
   const [dirCache, setDirCache] = useState<Record<string, DirCache>>({})
@@ -53,9 +55,9 @@ export function useWorkspaceFileTree(workspaceId: string, expanded: ReadonlySet<
   cacheRef.current = dirCache
   const isCurrent = useCallback(() => {
     const state = useAppStore.getState(), current = state.config?.workspaces.find(value => value.id === workspaceId)
-    return state.sourceFilesInputs.selections[workspaceId] === source && state.sourceFilesInputs.readSources === readSources &&
+    return (objectDirectory !== null || state.sourceFilesInputs.selections[workspaceId] === source && state.sourceFilesInputs.readSources === readSources) &&
       current?.hostId === resource?.hostId && current?.path === resource?.path
-  }, [workspaceId, source, readSources, resource?.hostId, resource?.path])
+  }, [workspaceId, objectDirectory, source, readSources, resource?.hostId, resource?.path])
   const assertCurrent = () => { if (!isCurrent()) throw new Error('The original Files Source changed. Its candidates and input are kept; check that original folder before this action.') }
 
   const loadDir = useCallback(

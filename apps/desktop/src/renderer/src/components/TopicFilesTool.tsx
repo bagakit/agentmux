@@ -35,7 +35,7 @@ export function TopicFilesTool({ workspace, visible, isScratch, topicId, onOpenP
   const rootPath = revealRequest?.path ?? (fileTopic && scratch ? scratchTopicLogicalPath(scratch, fileTopic) : null)
   const requestId = useRef(0)
   const presentation = contentSlotPresentation(isScratch)
-  const frame = (content: ReactNode) => <WorkspaceFilesFrame workspace={workspace} visible={visible} presentation={presentation}
+  const frame = (content: ReactNode) => <WorkspaceFilesFrame workspace={workspace} fileTopic={fileTopic} visible={visible} presentation={presentation}
     directoryFirst={presentation.showTopics} title={presentation.showTopics ? 'Files' : fileTopic?.title ?? workspace.name}
     subtitle={presentation.showTopics ? fileTopic?.title ?? workspace.name : workspace.branch}
     contextPath={fileTopic ? scratchTopicPhysicalPath(workspace, fileTopic) : workspace.path}

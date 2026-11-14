@@ -1,5 +1,6 @@
 import type { FileDirectoryListing, FileNameListing } from '@agentmux/core/files'
 import { currentCoreSpatialGraph, type AppState } from '../store'
+import { topicFileDirectory } from './topic-files-address'
 import { api } from './api'
 import { sourceFilesMappingMatches, sourceFilesQuery, sourceFilesWorkspaceMatches } from './source-files-workbench'
 import type { SourceFilesInput, SourceFilesInputs } from './source-files-workbench'
@@ -44,6 +45,7 @@ export async function listWorkspaceFileNames(workspaceId: string, get: () => Sta
   return legacy
 }
 export async function readWorkspaceDirectory(workspaceId: string, path: string, get: () => State): Promise<Pick<FileDirectoryListing, 'entries' | 'complete'>> {
+  if (topicFileDirectory(workspaceId, path)) return { entries: await api.files.readDirectory(workspaceId, path), complete: true }
   const result = await sourceListing(workspaceId, path, 'directory', get)
   if (result) {
     if (result.status !== 'directory-listed') throw sourceUnavailable()

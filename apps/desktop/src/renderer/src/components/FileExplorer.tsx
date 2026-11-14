@@ -1200,7 +1200,7 @@ export function FileExplorer({
           </div>
           {tree.rootError ? (
             <div className="tree-empty tree-empty--error">
-              <strong>Could not read workspace</strong>
+              <strong>{rootPath ? 'Could not read this folder' : 'Could not read workspace'}</strong>
               <span>{tree.rootError}</span>
               <div className="tree-empty__actions">
                 <button className="small-button" onClick={() => void refreshExplorer()}>Retry</button>
