@@ -159,7 +159,7 @@ async function waitOpen(background: CaptureBackground, before: Set<BrowserWindow
       expectedCrop ? 'only the explicit same-capture Retake receives its crop' : 'every fresh capture starts without initialCrop')
     const actualSource = await overlay.webContents.executeJavaScript(`document.querySelector('img').src`)
     assert.ok(actualSource === sources.get(background + ':' + infos[index].displayId)!.dataUrl, 'the actual editor image is the requested frozen source')
-    await overlay.webContents.executeJavaScript("window.proofSnapshots=[]; window.captureSurface.onEvent(event=>{if(event.kind==='snapshot')window.proofSnapshots.push(event)})")
+    await overlay.webContents.executeJavaScript("window.proofSnapshots=[]; window.captureSurface.onEvent(event=>{if(event.kind==='snapshot')window.proofSnapshots.push(event)}); true")
   }
   await waitFor('the alternate producer is held until the selected surface is shown', async () => releaseAlternate)
   releaseAlternate!(); releaseAlternate = null
