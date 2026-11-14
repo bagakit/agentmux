@@ -9,6 +9,7 @@ import type { GoalPlan, GoalPlanNodeInput } from '@agentmux/demand/goal-plan'
 import { goalPlanState, projectGoalPlan } from '@agentmux/demand/goal-plan'
 import { GlobalBoardSurface } from '../src/renderer/src/components/GlobalBoardSurface'
 import { GoalDetail } from '../src/renderer/src/components/GoalDetail'
+import { goalExecutionRows } from '../src/renderer/src/components/GoalExecutionTimeline'
 import { goalPlanColumns, goalPlanEdgePath, goalPlanHighlight, goalPlanProjection } from '../src/renderer/src/components/GoalPlanGraph'
 import { api } from '../src/renderer/src/lib/api'
 import type { DemandRecord } from '../src/renderer/src/lib/global-demand-board'
@@ -57,7 +58,7 @@ describe('Goal plan graph', () => {
     expect(detail.querySelector('[data-goal-meta-plan]')?.textContent).toBe('Plan 1 of 4 done')
     expect(detail.querySelector('.goals-detail__side .goal-collaboration')).not.toBeNull()
     const side = detail.querySelector('.goals-detail__side')!
-    expect(side.firstElementChild).toBe(side.querySelector('.goal-collaboration'))
+    expect(side.firstElementChild).toBe(side.querySelector('.goal-supervisor-rail'))
     expect(side.lastElementChild).toBe(side.querySelector('[aria-label="Goal properties"]'))
     const head = detail.querySelector('.goals-detail__head')!
     expect(head.firstElementChild?.getAttribute('aria-label')).toBe('Goal title')
@@ -75,7 +76,27 @@ describe('Goal plan graph', () => {
     expect(main.querySelector<HTMLTextAreaElement>('[aria-label="Goal description"]')?.value).toBe(record.description)
   })
 
-  it('takes the reader to the original Team region with keyboard focus and keeps one original discussion action', async () => {
+  it('opens the same original attempt from coordination and the time chart', async () => {
+    const first = reported('api')
+    const current = { ...first, operationId: 'd-api-current', sourceMessageId: 'source-current', preparedAt: 5, linkedAt: 6,
+      report: { ...first.report!, operationId: 'r-api-current', replyMessageId: 'reply-current', submittedAt: 7 } }
+    seed(goal({ plan: plan(nodes, [{ ...pass('api'), verdict: 'changes', note: 'Correct the original work' }]), delegations: [first, current] }))
+    await dom.render(<GlobalBoardSurface />)
+    const old = dom.container.querySelector<HTMLButtonElement>('[data-goal-coordination-attempt="d-api"]')!
+    expect(old).not.toBeNull()
+    await act(async () => old.click())
+    const reading = () => graph()!.querySelector('.goal-plan__reading')!
+    expect(reading().querySelector('[data-goal-delivery="d-api"]')).not.toBeNull()
+    expect(reading().querySelector('[aria-label="Independent node review"]')).toBeNull()
+    expect(graph()!.querySelector('[data-goal-time-row="d-api"][data-selected]')).not.toBeNull()
+    expect(graph()!.querySelector('[data-goal-observed-activity]')).toBeNull()
+    expect(graph()!.querySelectorAll('[data-goal-time-event="Original dispatch linked"]')).toHaveLength(2)
+    await act(async () => graph()!.querySelector<HTMLButtonElement>('[data-goal-time-row="d-api-current"] button')!.click())
+    expect(reading().querySelector('[data-goal-delivery="d-api-current"]')).not.toBeNull()
+    expect(reading().querySelector('[aria-label="Independent node review"]')).not.toBeNull()
+  })
+
+  it('takes the reader to the original Supervisor rail with keyboard focus and keeps one original discussion action', async () => {
     seed(goal({}))
     await dom.render(<GlobalBoardSurface />)
     const side = dom.container.querySelector<HTMLElement>('[aria-label="Goal team and properties"]')!
@@ -89,9 +110,10 @@ describe('Goal plan graph', () => {
     vi.spyOn(detail, 'getBoundingClientRect').mockReturnValue({ top: 20 } as DOMRect)
     dom.container.scrollTop = 18
     const team = dom.container.querySelector<HTMLButtonElement>('.goals-detail__team-link')!
-    expect(team.textContent).toBe('Team')
+    expect(team.textContent).toBe('Supervisor')
     await act(async () => team.click())
     expect(scroll).not.toHaveBeenCalled()
+    expect(team.closest('nav')?.querySelector('[aria-current="location"]')).toBe(team)
     expect(detail.scrollTop).toBe(632)
     expect(dom.container.scrollTop).toBe(18)
     expect(document.activeElement).toBe(side)
@@ -253,6 +275,20 @@ describe('Goal plan graph', () => {
 })
 
 describe('plan graph projection helpers', () => {
+  it('uses an exact current activity observation and leaves receipt-only attempts as events', () => {
+    const delegation = attempt('api')
+    const row = { execution: { kind: 'delegation' as const, operationId: delegation.operationId, hostId: 'local',
+      agentSessionId: delegation.workerAgentSessionId, runId: delegation.workerRunId }, binding: 'confirmed' as const, phase: 'executing' as const,
+      reason: 'Observed original work', alert: null, nextOwner: { kind: 'worker' as const, agentSessionId: delegation.workerAgentSessionId, action: 'Continue work' },
+      basis: { stateEnteredAt: 3, activityRevision: null, inputSubmissionId: null }, stateSince: 3,
+      observation: { process: 'running' as const, semantic: 'active' as const, source: 'native-hook' as const, readiness: 'ready' as const, observedAt: 6, stale: false } }
+    const responsibility = { scope: 'goal', observedAt: 7, supervisor: { agentSessionId: null, state: 'missing' as const, reason: 'No Supervisor' }, executions: [row] }
+    const demand = { plan: plan(nodes), delegations: [delegation], responsibility }
+    expect(goalExecutionRows(demand)[0]?.active).toEqual({ from: 3, to: 6 })
+    expect(goalExecutionRows({ ...demand, delegations: [reported('api')] })[0]?.active).toBeUndefined()
+    expect(goalExecutionRows({ ...demand, responsibility: { ...responsibility, executions: [{ ...row, execution: { ...row.execution, runId: 'another-run' } }] } })[0]?.active).toBeUndefined()
+  })
+
   it('derive columns and the highlight from the owner derivation only', () => {
     const projection = goalPlanProjection(goal({ plan: plan(nodes) }))!
     expect(goalPlanColumns(projection).map(column => column.map(item => item.node.id))).toEqual([['api', 'docs'], ['ui'], ['release']])

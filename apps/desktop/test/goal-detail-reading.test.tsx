@@ -8,6 +8,7 @@ import { editGoalDraft } from '../src/renderer/src/lib/goal-edit-drafts'
 import type { DemandRecord } from '../src/renderer/src/lib/global-demand-board'
 import { useAppStore } from '../src/renderer/src/store'
 import { composerDOM } from './helpers/composer-dom-fixture'
+import { chooseField } from './helpers/selection-field'
 
 const dom = composerDOM()
 const record = (): DemandRecord => ({ id: 'detail-reading', title: 'One continuous original Goal', description: 'Keep this original brief.  ', status: 'in_progress', priority: 'normal', projectId: null, projectName: null,
@@ -97,11 +98,7 @@ it('discloses original properties on demand, preserves their nodes, and edits th
   expect(properties.closest('[aria-label="Goal team and properties"]')?.querySelector('.goal-collaboration')).not.toBeNull()
   await act(async () => properties.querySelector('summary')!.click())
   expect(properties.open).toBe(true)
-  await act(async () => { priority.focus(); priority.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })) })
-  await act(async () => { await new Promise(resolve => setTimeout(resolve, 35)) })
-  const high = document.querySelector<HTMLElement>('[role="menuitemradio"][data-value="high"]')!
-  expect(high).toBeDefined()
-  await act(async () => high.click())
+  await chooseField(priority, 'high')
   expect(update).toHaveBeenCalledWith(goal.id, { priority: 'high' }, undefined, undefined, undefined)
   await act(async () => properties.querySelector('summary')!.click())
   expect(properties.open).toBe(false)
