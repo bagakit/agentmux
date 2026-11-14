@@ -40,8 +40,8 @@ export function workspacePresentationLabel(config: Pick<PresentationConfiguratio
 }
 /** The single Provider/Workspace fallback shared by Desktop and the independent Host. */
 export function configuredAgentFallbackLabel(config: Pick<PresentationConfiguration, 'executors' | 'workspaces'>,
-  session: { executorId: string; providerId: string; hostId: string; workspacePath: string }): string {
+  session: { executorId: string; providerId: string; hostId: string; workspacePath: string }, confirmedProjectName?: string): string {
   const executor = Object.hasOwn(config.executors, session.executorId) ? config.executors[session.executorId] : undefined
   const label = executor?.providerId === session.providerId ? executor.label : session.executorId
-  return `${label} · ${workspacePresentationLabel(config, session.hostId, session.workspacePath)}`
+  return `${label} · ${confirmedProjectName ?? workspacePresentationLabel(config, session.hostId, session.workspacePath)}`
 }

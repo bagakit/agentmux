@@ -141,7 +141,7 @@ export function createHostSpatialPresentation(options: { configurationPath?: str
       const avatar = executor?.avatar ?? (original ? configuration.appearance.agentAvatars?.[original.executorId] : undefined)
       const label = names[nameTargetKey({ kind: 'agent-session', id: agentSessionId })]?.value
       const retainedNames = [...new Set(regions.flatMap(region => tabs.get(region.tabId)?.name ? [tabs.get(region.tabId)!.name!] : []))]
-      const fallback = original ? configuredAgentFallbackLabel(configuration, { ...original, hostId: hostId! })
+      const fallback = original ? configuredAgentFallbackLabel(configuration, { ...original, hostId: hostId! }, projectGroup?.name)
         : retainedNames.length === 1 ? retainedNames[0]! : '会话信息未确认'
       return { agentSessionId, name: resolveAgentName({ userName: label, firstPrompt: firstPromptFromTimeline(timeline), fallback }).name,
         project, detail: issue ?? statusFact.detail ?? recap?.text ?? presentation.stateLabel, group: presentation.bucket,
