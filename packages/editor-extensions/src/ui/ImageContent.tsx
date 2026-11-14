@@ -14,6 +14,7 @@ export function ImageContent({ src, name, byteLength, onDecodeError }: {
   src: string; name: string; byteLength?: number; onDecodeError?: () => void
 }) {
   const viewport = useRef<HTMLDivElement>(null)
+  const image = useRef<HTMLImageElement>(null)
   const [natural, setNatural] = useState<{ width: number; height: number } | null>(null)
   const [bounds, setBounds] = useState({ width: 0, height: 0 })
   const [zoom, setZoom] = useState<number | 'fit'>('fit')
@@ -34,18 +35,19 @@ export function ImageContent({ src, name, byteLength, onDecodeError }: {
   useLayoutEffect(() => {
     const offset = zoomOffset.current
     zoomOffset.current = null
-    if (!offset || !viewport.current) return
-    viewport.current.scrollLeft = -offset.x
-    viewport.current.scrollTop = -offset.y
+    if (!offset || !viewport.current || !image.current) return
+    viewport.current.scrollLeft = image.current.offsetLeft - offset.x
+    viewport.current.scrollTop = image.current.offsetTop - offset.y
   }, [zoom])
   const changeZoom = (value: number | 'fit') => {
     end()
     const nextZoom = value === 'fit' ? value : Math.min(20, Math.max(0.1, value))
     if (nextZoom === zoom) return
     const element = viewport.current
+    const picture = image.current
     const nextScale = nextZoom === 'fit' ? fit : nextZoom
-    if (element) zoomOffset.current = imageOffsetAtScale(
-      { x: -element.scrollLeft, y: -element.scrollTop },
+    if (element && picture) zoomOffset.current = imageOffsetAtScale(
+      { x: picture.offsetLeft - element.scrollLeft, y: picture.offsetTop - element.scrollTop },
       { x: element.clientWidth / 2, y: element.clientHeight / 2 }, nextScale / scale,
     )
     setZoom(nextZoom)
@@ -79,7 +81,7 @@ export function ImageContent({ src, name, byteLength, onDecodeError }: {
         {failed ? <div className="file-preview-state" role="alert"><strong>Image could not be decoded</strong><span>The current engine cannot display these bytes. The original file is unchanged.</span></div> : <>
           {!natural ? <div className="file-preview-state" role="status">Decoding image…</div> : null}
           <div className="image-preview__stage" style={natural ? { minWidth: natural.width * scale + 32, minHeight: natural.height * scale + 32 } : undefined}>
-            <img src={src} alt={name} draggable={false} style={natural ? { width: natural.width * scale, height: natural.height * scale } : { maxWidth: '100%', maxHeight: '100%' }}
+            <img ref={image} src={src} alt={name} draggable={false} style={natural ? { width: natural.width * scale, height: natural.height * scale } : { maxWidth: '100%', maxHeight: '100%' }}
               onLoad={event => {
                 const image = event.currentTarget
                 // SVG without intrinsic dimensions has a rendered viewport; do not invent natural pixels.
