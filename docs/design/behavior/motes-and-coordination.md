@@ -105,7 +105,7 @@ Mote 提供可理解、可纠正、接得上工作的长期合作体验。合作
 
 ### 主对话、工作 thread 与事件历史
 
-Promotion 与成员导航中的 Mote Thread 表达一个 Club 内准确 Agent 的对话与长期工作承载，沿原 Session、来源和可恢复工作面关联；它不是团队人格或逻辑 Main。原 Dispatch 的消息 thread 与事情 event 继续表达各自派工通信，同一 Agent 可参与多个原工作 thread，不能用 Agent SID 替换它们，也不因成员晋升复制历史或另建执行会话。晋升、两级建 Club 与转岗的动作合同见[伙伴从哪里来](companions-from-work.md#club-与-thread-的晋升层级)。
+Promotion 与成员导航中的 Mote Thread 表达一个 Club 内准确 Agent 的对话与长期工作承载，沿原 Session、来源和可恢复工作面关联；它不是团队人格或逻辑 Main。原 Dispatch 的消息 thread 与事情 event 继续表达各自派工通信，同一 Agent 可参与多个原工作 thread，不能用 Agent SID 替换它们。导航和成员读取不创建会话；用户明确提交晋升或其他流转时，沿原 Takeover 建立独立新 Agent，保留原 Session、位置和工作来源。晋升、两级建 Club 与转岗的动作合同见[伙伴从哪里来](companions-from-work.md#club-与-thread-的晋升层级)。
 
 浮窗和完整 Space 的“工作／私聊／成员”在顶栏直接可选，沿同一个内容选择与原来源切换，不要求先找 Threads 图标；主对话始终直接可回。三个入口的数量只来自各自原 owner：工作按已关联 event 身份去重，私聊按原 conversation generation 去重，成员按准确 Host／Session 去重。仅已载入的范围不能冒称完整总数，分页、尚未读取、读取失败及未知身份分别可辨；数字不暗示未读、待答或任务完成。切换不创建、恢复、发送或改投输入。
 

@@ -8,9 +8,9 @@
 
 Topic 晋升到 Mote Club 层级，确立原团队的持久合作。Club、全局 Clubs 名册、逻辑 Main 与成员 Thread 的身份分层唯一见[Mote 合同](motes-and-coordination.md#主对话工作-thread-与事件历史)；晋升不把承接者变成团队身份。
 
-Agent 晋升优先进入用户明确选择的已有 Club，成为该 Club 下的 Mote Thread，继续原工作及其准确来源。成员对话与原 Dispatch 工作通信仍按前述身份分层分别保留。
+Agent 晋升优先在用户明确选择的已有 Club，通过原 Takeover 建立承接原工作的 Mote Thread，保留原 Agent 与准确来源。成员对话与原 Dispatch 工作通信仍按前述身份分层分别保留。
 
-Agent 晋升时另建 Club 是两级结果：先建立团队身份，再让原 Agent 作为 Thread 加入。界面应把它和加入已有 Club 清楚区分，由用户明确选择，不默认给每个 Agent 新建团队，也不要求先假加入再转出。两级结果沿同一原操作确认和恢复，不增加多轮组织设置或重复批准。
+Agent 晋升时另建 Club 是两级结果：先建立团队身份，再通过原 Takeover 让新 Agent 作为 Thread 承接。界面应把它和加入已有 Club 清楚区分，由用户明确选择，不默认给每个 Agent 新建团队，也不要求先假加入再转出。两级结果沿同一原操作确认和恢复，不增加多轮组织设置或重复批准。
 
 用户有时已经知道需要怎样的伙伴，可以按专家画像建立 Mote，例如具有明确协调职责的 PMO；也有时只知道有一件新事情值得做，希望先让 Agent 从具体任务开始。产品应同时支持这两条路径，让长期伙伴既可有明确的初始职责，也可随着共同工作逐渐形成。
 
@@ -92,25 +92,17 @@ GUI、Agent 与 CLI 应能发现准确 Topic 及其成员与资料，发起同�
 
 ## 从普通 Agent 建立长期伙伴
 
-用户可以从准确 Agent 的原菜单进入 Promotion。首选路径是选择一个已有 Mote Club，让原 Agent 成为该 Club 的 Thread；选择、打开与检查均不创建团队或启动 Agent。另有明确的「新建 Club 并加入」路径，说明会同时建立团队和原 Agent 的 Thread，不要求先创建 Topic、搬动项目或填写团队分工表。
+用户从准确 Agent 的 Promotion 入口，优先选择一个已有 Mote Club，在新位置通过原 Takeover 让一位新 Agent 承接原工作，成为目标 Club 的 Thread。新旧 Agent 是独立会话，原 Agent、Run、项目位置、输入草稿与未完成工作保留。选择、打开与只读检查均不创建团队或启动 Agent；明确选择接手者并提交后，创建、上下文读取、首条输入及未知结果恢复沿同一个 Takeover owner。
 
-加入已有 Club 保留该 Club 的人格、资料、设置和已确认主角色；它不使新 Thread 接管主对话。另建 Club 时，团队拥有独立资料目录与 home，主对话的确立继续沿原欢迎与主角色 owner，不把原 Agent 自动任命为 Main。Thread 沿用原 Agent 的名称和对话来源；原 Session、Run、执行 cwd、项目 Tab/Region、草稿与合法展示位置继续保留，不把同项目、同 Topic 或同 Zone 的其他 Agent 一并加入。
+另有明确的「新建 Club 并承接」路径，由同一用户意图组合团队建立和新 Thread 接手两级结果。它不要求先假加入再退出，不吞并原 Topic、项目或无关 Agent。团队建立后尚未接手时明确部分结果，保原操作与已建 Club，不因丢回执再建一个。加入已有 Club 保原人格、资料、Main、维护和其他成员；新建 Club 也不自动任命接手者为 Main。主对话沿原欢迎与主角色 owner 确立。
 
-Club 的持久资料继续由原内容 owner 保存，不复制或搬移整个仓库，不覆盖原项目的 AGENTS、知识或已有 Club 资料。晋升不发送输入、不热替换旧上下文、不重启 Agent，也不自动开启心跳、巡查、持续推进或外部连接；保存人格、模型实际读取和后续工作分别成立。
+Club 资料继续由原内容 owner 保存；Takeover 的来源、准确目标、派生关系、上下文承接和执行回执统一沿[Takeover 合同](session-recovery.md#takeover-的流转性质与派生关系)。晋升不另建同名的会话搬迁或输入机制，不复制全部历史、知识或成员名册。新 Thread 未实际读取时，不把文件或创建成功说成已接手原工作。
 
-晋升按原 Host、Session、展示来源与准确目标 Club 核对，不以名字、焦点、列表首项或 cwd 猜对象。Topic 的组织晋升仍从 Topic 发起；加入 Club 不隐含吞并原 Topic。已在 Club 中的 Thread 进入转岗路径，不因再次打开 Promotion 自动把历史已完成回执当成本次成功。读取归属失败保未知、原来源和健康能力，仅本次操作待核实。
+## Takeover 的流转性质
 
-公开 RPC、CLI 与桌面消费同一 Core 合同、Host 内容 owner、空间 owner及原操作记录。未知或部分完成保完整原请求、目标与 operationId，先检查再明确继续，不自动重放或另建 Club。加入已有 Club 的完成只确认原 Thread 的准确关联；两级晋升分别确认团队创建和 Thread 加入，不能用其中一步代签整体。原已完成与未完成操作均保留，重复查看和进程重启不复制团队、对话或 Agent。
+Promotion、Handson 与转岗复用同一个 Takeover 机制，以准确原 Project／Club 来源与去向区分性质。流转判定、持久派生事实、未知范围与 Agent 详情展示唯一见[Takeover 的流转性质与派生关系](session-recovery.md#takeover-的流转性质与派生关系)。
 
-## Agent 转岗
-
-Promotion 同时提供已有 Agent／Thread 的转岗。转岗明确原 Agent、原 Club 和目标 Club，沿原空间与成员 owner 完成准确关系变更；原项目与无关 Agent 不跟随移动，不以新增一个展示副本冒称已离开原岗位。Club 归属变化本身不改变 Session、Run、执行 cwd、原输入、权限或 Provider 历史。
-
-转岗只调整仅含该准确 Agent 的完整源 Tabs 与目标 home 的关联，枚举原 Club 中该 Agent 的全部准确位置；保 Tab／Region 身份、所有物理展示位置、源 Zone 与其他 Tabs。混合 Region、会损及其他组织关系或源集合未确认时，仅拒绝本次调动并说明原空间整理入口，保原工作与健康能力，不拆未知布局。完成须从原成员投影确认已离开源 Club 并加入目标，写入回执不能单独代签。
-
-原派工、Goal 责任、报告、未完成承诺与未知输入保留原来源和目标，转岗不自动结项、重发或转移 Supervisor 权限。涉及 Main 时继续沿原主角色交接合同，不因成员调动默默清除或改写已保存主角色；需要的原职责移交和本次组织关系变化分别确认。局部失败保原工作与可恢复说明，其余健康能力继续可用。
-
-转岗与晋升共用准确对象发现、原操作回执和恢复语言，不新增人员评分、职级、自动升迁、历史复制或第二套成员名册。切换执行项目或目录属于原执行与资源合同，不能隐藏在团队归属变化中。
+这些流转均在新位置沿原 Takeover 承接，原位置和原归属可以保持不动，不要求先从原 Club 离岗。原 Main、派工、Goal 责任、报告、消息受众与未确认输入仍沿各自原 owner；新 Agent 不因性质标签继承它们的授权或验收资格。用户可从新旧 Agent 详情辨认原始来源、准确去向与派生结果，并沿原操作检查部分或未知结果。
 
 ## Promotion 配置与允许开关
 
@@ -118,4 +110,4 @@ Settings 的 Promotion 承载晋升策略与原对象配置发现。`promotion.e
 
 关闭开关不停止 Agent、不删除或降级已有 Mote、不取消原晋升。原操作仍可检查及明确继续，部分结果和未知回执保原操作身份；新操作与原操作的继续不能靠调用方自称区分。配置读取失败只使本次新操作资格未知，不关闭健康 Agent 或原恢复入口。界面在开关关闭时保持可理解的配置状态与说明，原操作恢复不随新入口一起消失。
 
-Promotion 页说明 Topic 到 Club、Agent 到已有 Club 的 Thread、另建 Club 的两级晋升和已有 Thread 转岗。每个 Club 的人格、主 Agent、Executor、维护与连接继续由原 Profile/Quick 配置 owner 持有，Promotion 提供明确原入口，不复制成全局人格或维护设置。晋升不增加自动打分、使用次数阈值、全局团队表单或第二套 Mote 配置。
+Promotion 页说明 Topic 到 Club、Project 到 Club 的 Promotion、Club 到 Project 的 Handson、跨 Project 或 Club 的转岗，以及另建 Club 的两级结果。每个 Club 的人格、主 Agent、Executor、维护与连接继续由原 Profile/Quick 配置 owner 持有，Promotion 提供明确原入口，不复制成全局人格或维护设置。晋升不增加自动打分、使用次数阈值、全局团队表单或第二套 Mote 配置。
