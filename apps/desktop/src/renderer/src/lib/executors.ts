@@ -1,13 +1,14 @@
 import { split } from 'shlex'
 import type { AppConfig } from '../../../shared/contracts'
 import type { ExecutorDetectionState, HostExecutorInventoryState } from '../store'
-import { currentExecutorDetection, executorDetectionKey } from './executor-detection'
+import { currentExecutorDetection, executorDetectionKey, type ExecutorDetectionPresentation } from './executor-detection'
 import { configValuesEqual } from '../../../shared/config-edit'
 
 export type ConfiguredExecutor = AppConfig['executors'][string] & { id: string }
 export type ExecutorChoice = Pick<ConfiguredExecutor, 'id' | 'label' | 'providerId' | 'command'> & {
+  source?: import('@agentmux/core/executor-contract').AgentMuxHostExecutorDescriptor['source']
   executorRevision?: string
-  detection?: ExecutorDetectionState | undefined
+  detection?: ExecutorDetectionPresentation | undefined
 }
 export function hostExecutorInventoryMatches(inventory: HostExecutorInventoryState | undefined, host: AppConfig['hosts'][number] | undefined): inventory is HostExecutorInventoryState {
   return Boolean(host && inventory && configValuesEqual(inventory.input, host))

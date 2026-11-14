@@ -50,6 +50,8 @@
 .agent-catalog[data-overflow-after='true'] { --catalog-fade-bottom: 6px; }
 .agent-picks { position: relative; isolation: isolate; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 108px), 1fr)); gap: var(--sp-2); }
 .agent-picks > :is(.launcher-other-agents, .agent-catalog__empty) { grid-column: 1 / -1; }
+.agent-picks[data-source-catalog] { display: flex; flex-wrap: wrap; }
+.agent-picks[data-source-catalog] > :is(.launcher-other-agents, .agent-catalog__empty) { flex-basis: 100%; }
 .agent-picks > button, .agent-picks > .agent-catalog__empty { position: relative; z-index: 1; }
 .agent-pick { min-width: 0; max-width: 100%; min-height: 32px; display: inline-flex; align-items: center; gap: var(--sp-3); padding: var(--sp-2) var(--sp-4); border: 1px solid transparent; border-radius: var(--radius); color: var(--text-2); background: transparent; font: inherit; cursor: pointer; }
 .agent-pick strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-meta); font-weight: 550; }

@@ -16,7 +16,7 @@ const ThemeNavigationDownIcon = semanticIconComponent('navigation.down')
 
 
 type ExecutorPickerProps = {
-  executors: readonly Pick<ExecutorChoice, 'id' | 'label' | 'providerId' | 'detection'>[]
+  executors: readonly Pick<ExecutorChoice, 'id' | 'label' | 'providerId' | 'detection' | 'source'>[]
   selected: string | null
   onConfigure?: (() => void) | undefined
   onSelect(id: string): void
@@ -31,6 +31,7 @@ export function AgentExecutorPicker(props: ExecutorPickerProps) {
   const { executors, selected, onSelect, active = true, disabled = false, preferred } = props
   const settings = useContext(SettingsNavigation)
   const [showUnavailable, setShowUnavailable] = useState(false)
+  const [showDefaults, setShowDefaults] = useState(false)
   const catalogRef = useRef<HTMLDivElement>(null)
   const [scroll, setScroll] = useState({ before: false, after: false })
   useLayoutEffect(() => {
@@ -47,7 +48,7 @@ export function AgentExecutorPicker(props: ExecutorPickerProps) {
     for (const child of catalog.children) observer.observe(child)
     catalog.addEventListener('scroll', measure, { passive: true })
     return () => { observer.disconnect(); catalog.removeEventListener('scroll', measure) }
-  }, [active, executors, showUnavailable, props.presentation])
+  }, [active, executors, showUnavailable, showDefaults, props.presentation])
   if (props.presentation === 'field') return <SelectionField id={props.id} label={props.label} value={selected ?? ''}
     disabled={disabled} onValueChange={onSelect} options={[
       { value: '', label: props.unsetLabel },
@@ -61,12 +62,14 @@ export function AgentExecutorPicker(props: ExecutorPickerProps) {
   const available = executors.filter(item => item.detection?.state !== 'missing')
     .sort((a, b) => Number(b.id === preferred) - Number(a.id === preferred) || Number(b.detection?.state === 'ready') - Number(a.detection?.state === 'ready'))
   const unavailable = executors.filter(item => item.detection?.state === 'missing')
+  const otherTypes = available.filter(item => item.source === 'provider-default' && item.detection?.state !== 'ready' && item.id !== selected)
+  const visible = available.filter(item => !otherTypes.includes(item) || showDefaults)
   return <div className="agent-catalog-wrapper">
     <div ref={catalogRef} className="agent-catalog" aria-label="Agent executors"
       data-overflow-before={scroll.before} data-overflow-after={scroll.after}>
-    <div className="agent-picks">
+    <div className="agent-picks" data-source-catalog={executors.some(item => item.source !== undefined) || undefined}>
       <LiquidSelectionSurface selected={selected} active={active} targetAttribute="data-executor-id" />
-      {available.map(executor => <button type="button" key={executor.id} data-executor-id={executor.id}
+      {visible.map(executor => <button type="button" key={executor.id} data-executor-id={executor.id}
         aria-pressed={executor.id === selected} disabled={disabled}
         className={`agent-pick ${executor.id === selected ? 'agent-pick--selected' : ''}`}
         title={`${agentProviderLabel(executor.providerId)} · ${executorDetectionLabel(executor.detection)}`}
@@ -80,6 +83,11 @@ export function AgentExecutorPicker(props: ExecutorPickerProps) {
         </span> : null}
         {executor.id === selected ? <ThemeStatusSelectedIcon size={12} className="agent-pick__check" /> : null}
       </button>)}
+      {otherTypes.length ? <button type="button" className="launcher-other-agents" aria-expanded={showDefaults}
+        onClick={() => setShowDefaults(value => !value)}>
+        {showDefaults ? 'Hide other Agent types' : `Other Agent types · ${otherTypes.length}`}<ThemeNavigationDownIcon size={12} />
+      </button> : null}
+      {!visible.length && otherTypes.length ? <div className="agent-catalog__empty">No configured Agent selected. Choose an Agent type above; its availability has not been confirmed.</div> : null}
       {unavailable.length ? <button type="button" className="launcher-other-agents" aria-expanded={showUnavailable}
         onClick={() => setShowUnavailable(value => !value)}>
         {showUnavailable ? 'Hide unavailable' : `Unavailable · ${unavailable.length}`}<ThemeNavigationDownIcon size={12} />

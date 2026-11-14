@@ -19,7 +19,9 @@ export function useSourceLauncher(selection: LauncherSourceExecution | undefined
   const description = contractRead && contractRead.key === sourceKey ? contractRead.value : undefined
   const inventory = inventoryRead && inventoryRead.key === targetScope ? inventoryRead.value : undefined
   const [refresh, setRefresh] = useState(0)
-  const executorId = selection?.executorId ?? inventory?.executors[0]?.executorId
+  const executorId = selection?.executorId
+    ?? inventory?.executors.find(item => item.source !== 'provider-default' && item.availability !== 'missing')?.executorId
+    ?? inventory?.executors.find(item => item.availability === 'available')?.executorId
   const selectedScope = JSON.stringify([targetScope, executorId])
   const selectedInventory = selectedRead && selectedRead.key === selectedScope ? selectedRead.value : undefined
   useEffect(() => {
@@ -69,7 +71,11 @@ export function useSourceLauncher(selection: LauncherSourceExecution | undefined
     // The exact selected read owns its Provider/revision even while the optional
     // catalogue is pending or still shows an earlier registration observation.
     const current = selected ? [selected, ...entries.filter(item => item.executorId !== selected.executorId)] : entries
-    return current.map(item => ({ id: item.executorId, label: item.label, command: item.command, providerId: item.providerId, executorRevision: item.configRevision }))
+    return current.map(item => ({ id: item.executorId, label: item.label, command: item.command, providerId: item.providerId, executorRevision: item.configRevision,
+      source: item.source, detection: {
+        state: item.availability === 'available' ? 'ready' : item.availability === 'missing' ? 'missing' : item.availability === 'check-failed' ? 'error' : 'idle',
+        ...(item.cause ? { cause: item.cause, detail: `${item.cause.code}: ${item.cause.message}` } : {}),
+      } }))
   }, [inventory, selected])
   return { executors, executorId, selected, description, issue: (contractError && contractError.key === sourceKey ? contractError.message : undefined) ?? (selectedError && selectedError.key === selectedScope ? selectedError.message : undefined) ?? (inventoryError && inventoryError.key === targetScope ? inventoryError.message : undefined),
     ready: !!selected && (reach ? description?.contracts.externalAssociation !== null : description?.contracts.ordinaryLaunch !== null) && selected.creationContract?.ordinaryLaunch === 1,

@@ -3,6 +3,8 @@ import type { AgentExecutorConfig, ExecutorDetectionInput, HostConfig } from '..
 import type { ExecutorDetectionState } from '../store'
 
 type ExecutableInput = Pick<AgentExecutorConfig, 'providerId' | 'command'> & Partial<Pick<AgentExecutorConfig, 'env'>>
+/** Safe original Host observations also arrive without a viewer-owned probe input. */
+export type ExecutorDetectionPresentation = ExecutorDetectionState & { cause?: { code: string; message: string } }
 export function executorDetectionKey(hostId: string, executorId: string): string {
   return `${hostId}\0${executorId}`
 }
@@ -35,12 +37,12 @@ export function missingExecutableLabel(cause?: { code: string }): string {
   return cause && cause.code !== 'EXECUTABLE_NOT_FOUND' ? 'Not available' : 'Not found'
 }
 
-export function executorDetectionLabel(check: ExecutorDetectionState | undefined): string {
+export function executorDetectionLabel(check: ExecutorDetectionPresentation | undefined): string {
   switch (check?.state) {
     case 'ready': return 'Available'
     case 'checking': return 'Checking'
     case 'error': return 'Check failed'
-    case 'missing': return missingExecutableLabel(check.result?.availability === 'missing' ? check.result.cause : undefined)
+    case 'missing': return missingExecutableLabel(check.cause ?? (check.result?.availability === 'missing' ? check.result.cause : undefined))
     default: return 'Not checked'
   }
 }
