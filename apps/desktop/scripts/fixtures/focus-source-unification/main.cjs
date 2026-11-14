@@ -15,6 +15,9 @@ app.whenReady().then(async()=>{try{
  const settle=()=>read('new Promise(done=>requestAnimationFrame(()=>requestAnimationFrame(done)))')
  const click=async selector=>{const r=await read(`(()=>{const e=document.querySelector(${JSON.stringify(selector)});if(!e)throw Error('Missing control '+${JSON.stringify(selector)});e.scrollIntoView({block:'nearest'});const r=e.getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2,hit:e.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2))}})()`);assert.equal(r.hit,true,'Actual center hit '+selector);for(const type of ['mousePressed','mouseReleased'])await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent',{type,x:r.x,y:r.y,button:'left',clickCount:1})}
  const captureMember=async(file,label)=>{await settle();await pause(160);await fs.writeFile(path.join(evidence,file),(await win.webContents.capturePage()).toPNG());result.frames.push({file,label,viewport:await read('innerWidth')})}
+ if(mode==='--task-layout'||mode==='--task-layout-restore'){
+  await require('./task-layout-main.cjs')({win,read,until,settle,click,capture:captureMember,result,restoreOnly:mode==='--task-layout-restore'});return
+ }
  if(takeoverFeedback){await require('./feedback-main.cjs')({win,read,until,pause,settle,click,capture:captureMember,captureIntermediate:async(file,label)=>{await fs.writeFile(path.join(evidence,file),(await win.webContents.capturePage()).toPNG());result.frames.push({file,label,viewport:await read('innerWidth'),intermediate:true})},result,privateRoot,restoreOnly:mode==='--takeover-feedback-restore'});return}
  if(mode==='--source-connection'){await require('./connection-main.cjs')({win,read,until,settle,click,capture:captureMember,result});return}
  if(sourceRecovery){

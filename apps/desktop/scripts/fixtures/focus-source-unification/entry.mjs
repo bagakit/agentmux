@@ -4,7 +4,8 @@ import { createWorkspaceLayout } from '@agentmux/layout'
 import { updateThemeSelection } from '@agentmux/client-ui/theme'
 import { App } from '../../../src/renderer/src/App'
 import { api } from '../../../src/renderer/src/lib/api'
-import { useAppStore } from '../../../src/renderer/src/store'
+import { checkpointAgentOperations, restorePersistedUiState, useAppStore } from '../../../src/renderer/src/store'
+import { restorePersistedWorkbench } from '../../../src/renderer/src/lib/workbench-persistence'
 import { createWorkbenchTab } from '../../../src/renderer/src/lib/workbench-tabs'
 import { spaceMountKey } from '../../../src/shared/space-mount'
 import '../../../src/renderer/src/styles/index.css'
@@ -20,6 +21,31 @@ const {pendingInteraction:_pending,...agent}=base,now=Date.now(),path='/original
 const workspace={id:'ordinary-analysis',hostId:'local',kind:'folder',path,name:'业务分析项目'}
 const definitions=[['working','核对发布版本与业务数据','working','running',now],['reading','核查跨版本分析记录','working','running',now-20*60000],['interrupted','继续上次保留的分析任务','disconnected','interrupted',now]]
 const sessions=definitions.map(([id,label,state,processState,at])=>({...agent,id,hostId:'local',workspacePath:path,label,processState,status:{state,source:'native-hook',observedAt:at},semanticStatus:{state:'working',source:'native-hook',observedAt:at,stateEnteredAt:at},control:{...agent.control,hostId:'local',agentSessionId:id,run:{runId:'original-run-'+id}}}))
+if(window.__taskLayoutScene){
+ const scenario=[
+  ['permission','核对付款回执的读取范围','waiting_permission'],
+  ['coverage','补齐周报的渠道覆盖率','working'],
+  ['rollout','确认灰度发布的分组差异','working'],
+  ['audit','整理退款原因和核验材料','done'],
+  ['summary','汇总近七日的异常交易','done'],
+  ['handoff','复查移动端草稿恢复','idle'],
+  ['retention','比较不同版本的留存口径','working'],
+  ['exports','准备导出数据字典','working'],
+  ['charts','校验图表的日期窗口','working'],
+  ['reviews','追踪待核对的退款记录','done'],
+  ['weekly','汇总一周的质量变更','done'],
+  ['mobile','检查移动端转化漏斗','working'],
+  ['slices','复核渠道与地区分组','working'],
+  ['notes','归档本轮业务分析记录','done'],
+ ]
+ for(const [index,[id,label,state]] of scenario.entries()){
+  const observedAt=now-index*40000
+  sessions.push({...sessions[0],id,label,status:{state,source:'native-hook',observedAt},
+   semanticStatus:{state,source:'native-hook',observedAt,stateEnteredAt:observedAt},
+   control:{...sessions[0].control,agentSessionId:id,run:{runId:'original-run-'+id}},
+   ...(state==='waiting_permission'?{pendingInteraction:{id:'payment-read-request',kind:'permission',title:'允许读取付款回执？',operation:'read'}}:{})})
+ }
+}
 const localReply='已核对原始数据与发布记录，接下来定位异常项并给出可验证的结论。'
 const timelines=Object.fromEntries(sessions.map(s=>[s.id,{agentSessionId:s.id,revision:1,items:[{id:'original-answer-'+s.id,agentSessionId:s.id,kind:'assistant_message',title:'Original answer',source:'native-hook',status:'complete',content:s.id==='working'?localReply:'原始分析内容与恢复位置仍然保留。',createdAt:now-30000,updatedAt:now-30000}]}]))
 const tab=createWorkbenchTab('ordinary-tab',{regionId:'ordinary-region',workspaceId:workspace.id,kind:'agent',phase:'attached',sessionId:'working'})
@@ -29,6 +55,7 @@ api.scratch.listTopics=async()=>[]
 const reference={runtimeId:'original-local-runtime',spaceId:'original-project-space'},source={runtimeId:reference.runtimeId,ownerInstanceId:'original-source-instance'},key=spaceMountKey(reference)
 const target={hostId:'local',reference,zoneId:'original-zone',workspaceId:workspace.id}
 const members=[['working',reference.runtimeId,'local'],['interrupted',reference.runtimeId,'local'],['reading',reference.runtimeId,'local'],['working','original-other-runtime','original-agent-device'],['unobserved','unavailable-original-runtime','unavailable-agent-device']]
+if(window.__taskLayoutScene)members[0]=['coverage',reference.runtimeId,'local']
 const sourceTabs=members.map((_,i)=>({tabId:'source-tab-'+i,zoneId:target.zoneId,workspaceId:workspace.id,name:null,regionIds:['source-region-'+i]}))
 const sourceRegions=members.map(([sid,runtimeId,hostId],i)=>({regionId:'source-region-'+i,tabId:'source-tab-'+i,kind:'agent',agentSessionId:sid,runId:'source-run-'+i,creationOperationId:'source-create-'+i,execution:{hostId,runtimeId,cwd:path}}))
 if(unconfirmedMode){
@@ -61,8 +88,23 @@ api.spaceMounts.member=async(input,_listener)=>{
  const session={...sessions[0],id,hostId,label:'Original foreign fallback',creation:{createOperationId:'source-create-3',initialPrompt:'unknown'},control:{kind:'agent',hostId,agentSessionId:input.target.agentSessionId,run:input.target.expectedRun}}
  return{initial:{id,hostId},dispose(){},async call(method,request){memberCalls.push({method,runtimeId:input.target.runtimeId,agentSessionId:input.target.agentSessionId});if(method==='read')return session;if(method==='conversationRead')return structuredClone(window.__originalForeignConversation);if(method==='conversationWatch')return {hostId:'local',agentSessionId:input.target.agentSessionId,sourceHostId:'local',scope:window.__originalForeignConversation.scope,coverage:window.__originalForeignConversation.coverage,readerId:'original-preview-reader'};if(method==='conversationUnwatch')return;if(method==='conversationRelease')return {hostId:'local',agentSessionId:input.target.agentSessionId,sourceHostId:'local',viewId:window.__originalForeignConversation.window.id,released:true};throw Error('Original bounded conversation preview is not configured: '+method)}}
 }
+const restoreLayout = window.__taskLayoutScene && localStorage.getItem('agentmux-workbench-v1') !== null
+const restoreWorkbench = window.__feedbackRestoreSerialized || restoreLayout
 useAppStore.setState({loading:false,initialize:async()=>()=>{},config:{...config,workspaces:[workspace],hosts:[{id:'local',kind:'local',label:'Original local device'}]},sessions,agentNames:Object.fromEntries(sessions.map(s=>[s.id,s.label])),timelines,
- tabs:window.__feedbackRestoreSerialized?{}:{[tab.id]:tab},layouts:window.__feedbackRestoreSerialized?{}:{[workspace.id]:createWorkspaceLayout('ordinary-group',[tab.id])},activeWorkspaceId:workspace.id,mainSurface:'agents',focusView:'list',toolsOpen:false,projectRailOpen:false,agentFocus:{execution:{sessionId:null,history:[]},pmo:{sessionId:null}},agentComposerDrafts:window.__feedbackRestoreSerialized?{}:{working:'原未发送草稿'},mountedSpaceInputs:{[key]:{target,drafts:{}}},mountedSpaceObservations:{},mountedSpaceSessions:{},selectedSpaceMount:null})
+ tabs:restoreWorkbench?{}:{[tab.id]:tab},layouts:restoreWorkbench?{}:{[workspace.id]:createWorkspaceLayout('ordinary-group',[tab.id])},activeWorkspaceId:workspace.id,mainSurface:'agents',focusView:'list',toolsOpen:false,projectRailOpen:false,agentFocus:{execution:{sessionId:null,history:[]},pmo:{sessionId:null}},agentComposerDrafts:restoreWorkbench?{}:{working:'原未发送草稿'},mountedSpaceInputs:{[key]:{target,drafts:{}}},mountedSpaceObservations:{},mountedSpaceSessions:{},selectedSpaceMount:null})
+if(window.__taskLayoutScene){
+
+ api.ui.requestStorageFlush=async()=>{}
+ await useAppStore.persist.rehydrate()
+ if(restoreLayout){
+  const state=useAppStore.getState()
+  const topology=restorePersistedWorkbench({config:state.config,sessions:state.sessions,persisted:state.restoredWorkbench,
+   createTabGroupId:()=>{throw Error('Expected the original persisted Tab Group')},retiredSessionIds:new Set()})
+  useAppStore.setState({...restorePersistedUiState(state.config,state),...topology,restoredWorkbench:null})
+ }
+ globalThis.__taskLayoutAdmitWriter()
+ window.taskLayoutProof={restored:restoreLayout,topology:()=>{const state=useAppStore.getState();return {tabs:state.tabs,layouts:state.layouts,drafts:state.agentComposerDrafts}},checkpoint:async()=>{await checkpointAgentOperations();return JSON.parse(localStorage.getItem('agentmux-workbench-v1')).state.focusTaskLayout}}
+}
 if(window.__sourceConnectionScene)prepareSourceConnection({api,snapshot,opening})
 if(window.__takeoverFeedbackScene)await prepareTakeoverFeedback({api,useAppStore,workspace,sessions,tab})
 createRoot(document.getElementById('root')).render(createElement(App))

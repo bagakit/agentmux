@@ -24,6 +24,13 @@ it('uses a readable full row when narrow and retains the existing cap when wide'
   expect(allocateFocusLaneColumns([0, 1, 0, 0], metrics(2000)).widths).toEqual([0, 320, 0, 0])
 })
 
+it('stacks occupied state groups into full-width single-column task lists', () => {
+  const list = allocateFocusLaneColumns([2, 0, 8, 1], metrics(1000), undefined, true)
+  expect(list.columns).toEqual([1, 0, 1, 1])
+  expect(list.rowByBucket).toEqual([0, -1, 1, 2])
+  expect(list.widths[2]).toBe(996)
+})
+
 it('the mounted layout consumer resizes original card nodes without changing their identity', async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   const container = document.createElement('div'), root = createRoot(container)

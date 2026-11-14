@@ -205,6 +205,7 @@ describe('Renderer persistence boundary', () => {
       toolsOpen: 1 as never,
       workspaceTool: 'old-tool' as never,
       toolDockWidth: Number.POSITIVE_INFINITY,
+      focusTaskLayout: 'unknown' as never,
       // 换行开关和 projectRailOpen/toolsOpen 走同一条 restoredBoolean 校验，所以同样喂坏值：
       // 只把它加进下面的期望值（不喂坏值）等于只守「它在场」，而它自己那条取值校验无人守。
       projectRailWidth: Number.NaN,
@@ -239,6 +240,7 @@ describe('Renderer persistence boundary', () => {
       toolsOpen: true,
       workspaceTool: 'files-branches',
       toolDockWidth: 440,
+      focusTaskLayout: 'cards',
       focusTimelineNameWidth: 112,
       focusTimelineHeight: 96,
       focusTimelineRuler: { mode: 'daily', timeZone: 'system', intervalMinutes: 120, phaseMinutes: 1380 },
@@ -264,6 +266,16 @@ describe('Renderer persistence boundary', () => {
       }
     })
     expect(restored.collapsedProjectGroups).toEqual({ [("[\"local\",\"" + _hygiene_fixturePath("proj/kit") + "\"]")]: true })
+  })
+
+  it('restores the task layout choice and defaults older Focus workspaces to Cards', () => {
+    const original = useAppStore.getState()
+    try {
+      original.setFocusTaskLayout('list')
+      const persisted = useAppStore.persist.getOptions().partialize!(useAppStore.getState())
+      expect(restorePersistedUiState(config, persisted).focusTaskLayout).toBe('list')
+      expect(restorePersistedUiState(config, {}).focusTaskLayout).toBe('cards')
+    } finally { original.setFocusTaskLayout(original.focusTaskLayout) }
   })
 
   it('折叠状态进持久化——折起来的分组重开还在', () => {
