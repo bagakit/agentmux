@@ -76,7 +76,10 @@ Git、配置与空间持久化结果分别成立。失败保原事实和可接�
 - 原 NotesStorage／Notebook owner 的只读路径事实保留当前选定 library 根及祖先、实际 catalog／authority data subtree 与 pending relocation 所需源／已选目标材料；普通 library 内 Note／文件仍可管理，整体迁移沿原 storage owner。Files 在同 Note lease 内、施效前冻结这份原选择和路径来源，再核实际 producer physical locator；不从扩展名或全局隐藏名猜保护范围，也不在 effect await 后换一份选择。独立 leaf symlink 与被原配置依赖的路由 alias／真实 protected ancestor 分开。
 - 平台资格按真实 helper／内核／文件系统能力逐项表达。Linux 使用已有 no-follow fd、statx birth generation 与 renameat2 no-replace；缺少真实代次或原子发布能力时只拒绝相应准确动作，保留 read、原文件和健康 Agent，不用 shell fallback 或 macOS 证明代签 Linux 运行。
 
+- Source 已选择后的 Explorer 与 Quick Open 候选也固定原 Source Runtime／resource mapping，不能继续由 display Workspace 的当前 Main alias 发现。未知时保原窗口／候选并说明失观，不以候选查询失败撤原 body/read/write 能力；未绑定旧 Main 导航保留。默认 `file.list` 保有界递归文件名；明确 directory mode 复用原一级 readDirectory owner，准确保空目录、symlink 和 partial，不从文件名推目录、不逐目录重扫子树。迟到发现结果消费原 selection／Runtime 最终 CAS；候选缓存不是文件身份、保存回执或写入权限。
+
 ### Revision-aware 保存与外部冲突
+
 
 - 正文读取可携 `readIdentity`：entry 来自读取该正文的同一 Native FD，ancestorWitnesses 按 pinned parent 到原 Workspace root 排序并包含 root，均复用完整 FileEntryWitness 与原 birth/statx 算法。前后复核原 FD／scope；不得读取后另 stat 路径贴给旧正文。无预算读取不新增正文上限，byte-range 保原 hash／offset／cost／取消合同。来源元数据有界，超限、缺代次或 scope 失观仅令来源未知，保原 body／read／edit；正常受支持读取须真实给出来源。来源不是 mutation ACK、权限或当前路径存在证明，NoteFileWitness 原五字段历史不变。
 - 原 FileDocument 可以持有读取来源，written 回执不承诺或夹带它。Renderer 唯一采用 written revision 的原 reducer 清旧 readIdentity，包括同正文 hash 的 atomic replacement；只有原完整 body read 和最终 document lifetime／generation CAS 可以装新来源。Core/Main 不以 write 回执或后 stat 补签，旧 spread 不得将旧 inode 来源随新 revision 续回。CLI 复用原 file.read typed 结果与权限，不新增读操作 ID、来源 Store 或 Native Runtime。

@@ -12,6 +12,15 @@ Identify the original Host, Zone/workspace and literal path independently from t
 display Tab/Region. file read/ls access resources; file open/view access presentation. Opening
 does not save or overwrite a file. Inspect the original view and preserve unsaved user drafts.
 
+`file ls` calls the original `file.list` owner. Default mode returns bounded recursive file names
+relative to the requested directory, with Git ignores and explicit complete/partial status.
+Use `--directory` (JSON-RPC/SDK `mode:"directory"`) for the original one-level directory reader:
+it includes empty directories, symlinks and existing entry metadata, with Source Workspace-relative
+entry paths. It never infers directories from recursive names. `--limit` bounds the returned
+projection, not the original reader's enumeration cost. A partial result remains visibly partial.
+Source-bound Explorer and Quick Open use that same exact Source/Runtime mapping; an unavailable
+Source does not authorize discovering names through a replacement Main alias.
+
 Use file stat --input FILE|- to observe one exact entry or absence. JSON is
 {zoneId,path,expectedResource:{hostId,workspaceId,workspacePath},spaceId?,includeRevision?}. It returns the
 complete original resource, root/parent witnesses, entry kind and helper implementation.
