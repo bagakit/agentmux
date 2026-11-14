@@ -2,6 +2,7 @@ import { CaptureSequenceOwner } from './capture-sequence.js'
 import { parseAgentProgressParams, parseSpaceLinkParams, parseSpaceLinkResult } from '@agentmux/core'
 import { registerAgentTakeoverIpc } from './agent-takeover-ipc.js'
 import { registerMeshNetworkIpc } from './mesh-network-ipc.js'
+import { openMeshDeviceWindow } from './mesh-device-window.js'
 import { registerSourceFilesIpc } from './source-files-ipc.js'
 import { SpaceObjectAvatarOwner } from './space-object-avatar.js'
 import { createSpaceObjectAvatarResolver } from './space-object-avatar-target.js'
@@ -1069,6 +1070,7 @@ export async function registerIpc(args: {
   const sourceFileReads = registerSourceFilesIpc({ handle: handleWithEvent, runtime: args.runtime })
   const spaceMountReads = registerSpaceMountIpc({ handle: handleWithEvent, runtime: args.runtime, config: () => configOwner.current })
   const meshReads = registerMeshNetworkIpc({ handle: handleWithEvent, call: callUserRpc })
+  handleWithEvent('mesh:openDevice', (_event, url: string) => openMeshDeviceWindow(url))
   const nodePublishingReads = registerNodePublishingIpc({ handle: handleWithEvent, deviceLocation: readMeshDeviceLocation, call: callUserRpc, owner: (target, method, params, context) => args.runtime.callNodeOwner(target, method, params, context) })
   const hostRouteReads = registerHostRoutesIpc({ handle: handleWithEvent, call: (target, method, params, signal) => args.runtime.callHostRoute(target, method, params, signal) })
   const hostRuntimeReads = registerHostRuntimeObservationIpc({ handle: handleWithEvent,

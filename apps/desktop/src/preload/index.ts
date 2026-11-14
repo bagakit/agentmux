@@ -519,6 +519,7 @@ const api: AgentMuxPreloadApi = {
     restoreLocalRuntimeIdentity: () => ipcRenderer.invoke('ui:restoreLocalRuntimeIdentity'),
     isNewIdentityWindow: process.argv.includes(NEW_IDENTITY_WINDOW_ARGUMENT),
     openLocalIdentitySetup: () => ipcRenderer.invoke('ui:openLocalIdentitySetup'),
+    openMeshDevice: (url: string) => ipcRenderer.invoke('mesh:openDevice', url),
     createStorageBackup: owner => ipcRenderer.invoke('ui:createStorageBackup', owner),
     importWorkbenchState: value => ipcRenderer.invoke('ui:importWorkbenchState', value),
     writeWorkbenchState: async value => {

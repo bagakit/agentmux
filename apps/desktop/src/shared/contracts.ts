@@ -1964,6 +1964,7 @@ export type AgentMuxDesktopApi = {
     restoreLocalRuntimeIdentity(): Promise<import('@agentmux/core').SemanticIdentityRecoveryResult>
     isNewIdentityWindow: boolean
     openLocalIdentitySetup(): Promise<void>
+    openMeshDevice(url: string): Promise<void>
     createStorageBackup(owner: import('@agentmux/core').AgentMuxRuntimeFence): Promise<import('./storage-recovery').DesktopStorageRecoveryRead>
     importWorkbenchState(value: string): Promise<string>
     writeWorkbenchState(value: string): Promise<import('./workbench-user-state').WorkbenchUserStateReceipt | null>

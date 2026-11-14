@@ -35,6 +35,7 @@
     "@agentmux/capsule": "workspace:*",
     "@agentmux/client-ui": "workspace:*",
     "@agentmux/core": "workspace:*",
+    "@agentmux/relay": "workspace:*",
     "@agentmux/demand": "workspace:*",
     "@agentmux/git": "workspace:*",
     "@agentmux/host": "workspace:*",

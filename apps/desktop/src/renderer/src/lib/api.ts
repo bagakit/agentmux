@@ -898,6 +898,7 @@ const mockApi: AgentMuxDesktopApi = {
     restoreLocalRuntimeIdentity: async () => ({ state: 'unchanged' }),
     isNewIdentityWindow: false,
     openLocalIdentitySetup: async () => {},
+    openMeshDevice: async () => { throw new Error('Opening a device workspace requires AgentMux Desktop.') },
     createStorageBackup: async () => { throw new Error('Backup creation requires the original Desktop Host.') },
     importWorkbenchState: async value => value,
     writeWorkbenchState: async () => null,
