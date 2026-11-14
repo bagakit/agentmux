@@ -264,7 +264,7 @@ function Fixture() {
     openToolkit: toolId => { calls.push({ kind: 'settings-toolkit-navigation-request', input: { toolId } }); probe.select('toolkit') },
     openHost: hostId => { calls.push({ kind: 'settings-host-navigation-request', input: { hostId } }); probe.select('hosts') },
     openChannel: origin => { calls.push({ kind: 'settings-channel-navigation-request', input: origin }) },
-    openMoteLark: origin => { calls.push({ kind: 'settings-mote-navigation-request', input: origin }) },
+    openMoteConnection: origin => { calls.push({ kind: 'settings-mote-navigation-request', input: origin }) },
     chooseAgent: () => { calls.push({ kind: 'settings-choose-agent-request' }) },
     channelEntries: [], channelPresentation: () => null
   }}>{opened ? <SettingsPanel key={epoch} initialSection={section} navigationRequest={request}
