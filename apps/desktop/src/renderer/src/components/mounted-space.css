@@ -21,6 +21,11 @@
 .mounted-space-region label { display:grid; gap:6px; font-size:12px; }
 .mounted-space-region textarea { width:100%; min-height:100px; resize:vertical; padding:10px; border:1px solid var(--line-soft); border-radius:6px; background:var(--surface-1); color:var(--text); font:inherit; }
 .mounted-space-region textarea:focus-visible { outline:2px solid var(--focus-line); outline-offset:2px; }
+.mounted-space-region--connecting { display:flex; flex-direction:column; height:100%; padding:0; border:0; gap:0; }
+.mounted-space-region--connecting > .full-page-loading { flex:1; }
+.mounted-space-session-draft { margin-top:var(--sp-7); padding-top:var(--sp-5); border-top:1px solid var(--line-soft); }
+.mounted-space-session-draft > summary { cursor:pointer; }
+.mounted-space-session-draft textarea { min-height:80px; max-height:240px; }
 .mounted-space-retained-input { display:grid; gap:12px; font-size:12px; }
 .mounted-space-retained-input code { overflow-wrap:anywhere; font-size:11px; color:var(--text-3); }
 .mounted-space-retained-input label { display:grid; gap:6px; }

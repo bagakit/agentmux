@@ -11,6 +11,7 @@ import { MountedExecutionRelation } from './MountedExecutionRelation'
 import { MountedSpaceLauncher } from './MountedSpaceLauncher'
 import { WorkbenchTabStrip } from './WorkbenchTabStrip'
 import { SurfaceState } from './SurfaceState'
+import { FullPageLoadingSurface } from './FullPageLoadingSurface'
 import { WorkbenchEmptyState } from './WorkbenchEmptyState'
 import { WorkbenchSplitHandle } from './WorkbenchSplitHandle'
 import { SplitRatioCommitter, synchronizeSplitLayout } from '../lib/split-ratio-commit'
@@ -59,7 +60,7 @@ function MountedSessionMetadata({ current, last, stale, error }: { current?: Mou
     {confirmed ? <details><summary>Session observation</summary><dl><div><dt>Original Core</dt><dd><code>{confirmed.authority.runtimeId}</code></dd></div><div><dt>Original Run</dt><dd><code>{confirmed.session.run.runId}</code></dd></div></dl></details> : null}
   </div>
 }
-function MountedSpaceRegionView({ member, draft, onDraft, session, sessionError, target, mountKey, active, visible }: { visible?: boolean; target?: SpaceMountRecord | undefined; mountKey?: string; active?: boolean; member: MountedSpaceRegion; draft?: string; onDraft?: (value: string) => void; session?: MountedRegionSessionFact | undefined; sessionError?: string | undefined }) {
+function MountedSpaceRegionView({ member, draft, onDraft, session, sessionError, reading, onRefresh, target, mountKey, active, visible }: { visible?: boolean; target?: SpaceMountRecord | undefined; mountKey?: string; active?: boolean; member: MountedSpaceRegion; draft?: string; onDraft?: (value: string) => void; session?: MountedRegionSessionFact | undefined; sessionError?: string | undefined; reading?: boolean; onRefresh?: (() => void) | undefined }) {
   const original = member.region
   const fact = session?.current?.state.status === 'observed' ? session.current : session?.last?.state.status === 'observed' ? session.last : undefined
   const known = fact?.state.status === 'observed' ? fact.state : undefined
@@ -67,18 +68,37 @@ function MountedSpaceRegionView({ member, draft, onDraft, session, sessionError,
   const memberTarget = target && original.agentSessionId && known && runtimeId && known.authority.runtimeId === runtimeId && fact?.member.agentSessionId === original.agentSessionId
     ? { hostId: target.hostId, target: { reference: member.reference, regionId: original.regionId, runtimeId,
       agentSessionId: original.agentSessionId, expectedRun: known.session.run } } : undefined
-  return <section className="mounted-space-region" data-source-region={member.key}>
+  const waiting = Boolean(original.agentSessionId && !memberTarget)
+  const state = session?.current?.state
+  const issue = sessionError ?? (state?.status === 'unknown' || state?.status === 'unavailable' ? state.issue.message : undefined)
+  const checking = !issue && (reading === true || state?.status === 'pending')
+  const draftDetails = useRef<HTMLDetailsElement>(null)
+  useLayoutEffect(() => { if (draft?.length && draftDetails.current) draftDetails.current.open = true }, [draft, waiting])
+  const reference = <dl><div><dt>Source Runtime</dt><dd><code>{member.reference.runtimeId}</code></dd></div>
+    <div><dt>Agent reference</dt><dd><code>{original.agentSessionId ?? 'Not created'}</code></dd></div>
+    <div><dt>Source Host alias</dt><dd>{original.execution?.hostId ?? 'Unconfirmed'}</dd></div>
+    <div><dt>Execution Runtime</dt><dd><code>{original.execution?.runtimeId ?? 'Unconfirmed'}</code></dd></div>
+  </dl>
+  return <section className={`mounted-space-region${waiting ? ' mounted-space-region--connecting' : ''}`} data-source-region={member.key}>
+    {waiting ? <FullPageLoadingSurface scope="region" visible={visible !== false} phase={checking ? 'loading' : 'parked'} eyebrow="Session connection"
+      title={checking ? 'Checking the original session' : state?.status === 'missing' ? 'Original session unavailable' : 'Session connection unconfirmed'}
+      description={checking ? 'Reading this session from its original device.' : state?.status === 'missing'
+        ? 'The original device did not return this session. Its current state is still unknown.'
+        : 'The original session cannot be read through this connection yet.'}
+      detail={checking ? 'Your workspace and draft stay here while the original session is checked.' : 'Check the execution device, then try again. Your workspace and draft are kept.'}
+      actions={onRefresh ? <button type="button" className="primary-button" onClick={onRefresh}>Check again</button> : undefined}
+      details={{ summary: 'Connection details', content: <>{issue ? <p>{issue}</p> : null}{reference}</> }}
+      supplement={onDraft ? <details ref={draftDetails} className="mounted-space-session-draft"><summary>Unsent draft</summary>
+        <label><span>Private task draft</span><textarea aria-label="Mounted Space task draft" value={draft ?? ''} onChange={event => onDraft(event.target.value)} /></label>
+      </details> : undefined} /> : <>
     <header>{original.agentSessionId ? <MountedExecutionRelation member={member} target={target} occurrence={session?.occurrence} /> : <AgentIcon size={14} aria-hidden="true" />}<strong>{original.kind === 'agent' ? 'Original Agent' : original.kind === 'launcher' ? 'New work' : original.kind}</strong></header>
-    <details><summary>Original reference</summary><dl><div><dt>Source Runtime</dt><dd><code>{member.reference.runtimeId}</code></dd></div>
-      <div><dt>Agent reference</dt><dd><code>{original.agentSessionId ?? 'Not created'}</code></dd></div>
-      <div><dt>Source Host alias</dt><dd>{original.execution?.hostId ?? 'Unconfirmed'}</dd></div>
-      <div><dt>Execution Runtime</dt><dd><code>{original.execution?.runtimeId ?? 'Unconfirmed'}</code></dd></div>
-    </dl></details>
+    <details><summary>Original reference</summary>{reference}</details>
     {original.agentSessionId ? <MountedSessionMetadata {...session} error={sessionError} /> : null}
     {!memberTarget ? <p className="settings-group-note" role="status">{original.agentSessionId ? 'Original Session control is unconfirmed. Its identity and your draft are kept.' : 'No Agent is attached to this original Region. Your unsent task stays private.'}</p> : null}
-    {memberTarget && mountKey ? <MountedSpaceAgent target={memberTarget} visible={!!visible} active={!!active} mountKey={mountKey} tabId={member.tab.tabId} /> : null}
+    {memberTarget && mountKey ? <MountedSpaceAgent target={memberTarget} visible={!!visible} active={!!active} mountKey={mountKey} tabId={member.tab.tabId} onRefreshSource={onRefresh} /> : null}
     {onDraft && !memberTarget ? <label><span>Private task draft</span><textarea aria-label="Mounted Space task draft" value={draft ?? ''} onChange={event => onDraft(event.target.value)} /></label> : null}
     {original.kind === 'launcher' && target && mountKey ? <MountedSpaceLauncher target={target} project={member.zone} slot={{ kind: 'region', tabId: member.tab.tabId, regionId: member.region.regionId }} mountKey={mountKey} active={!!active} draft={draft ?? ''} /> : null}
+    </>}
   </section>
 }
 export const MountedSpaceWorkbench = memo(function MountedSpaceWorkbench({ mountKey, visible, projection }: { mountKey: string; visible: boolean; projection?: { tabId: string; regionId: string; regionOnly: boolean } }) {
@@ -114,7 +134,7 @@ export const MountedSpaceWorkbench = memo(function MountedSpaceWorkbench({ mount
       const privateKey = entry && mountedRegionKey(entry.target.reference, tabId, node.regionId), member = privateKey && memberIndex.get(privateKey)
       const changeDraft = (value: string) => useAppStore.getState().editSpaceMountDraft(mountKey, tabId, node.regionId, value, currentView)
       return member ? <div className="mounted-space-region-slot" data-mounted-active={currentView?.selection?.groupId === groupId && currentView.selection.regionId === node.regionId ? 'true' : undefined} onFocusCapture={() => selectTab(groupId, tabId, node.regionId)}>
-        <MountedSpaceRegionView target={target} mountKey={mountKey} visible={visible} active={visible && currentView?.selection?.groupId === groupId && currentView.selection.tabId === tabId && currentView.selection.regionId === node.regionId} member={member} draft={entry?.drafts[member.key] ?? ''} onDraft={changeDraft} session={sessions.get(member.key)} sessionError={sessionObservation?.error} /></div>
+        <MountedSpaceRegionView target={target} mountKey={mountKey} visible={visible} active={visible && currentView?.selection?.groupId === groupId && currentView.selection.tabId === tabId && currentView.selection.regionId === node.regionId} member={member} draft={entry?.drafts[member.key] ?? ''} onDraft={changeDraft} session={sessions.get(member.key)} sessionError={sessionObservation?.error ?? observation?.error} reading={Boolean(observation?.reading || sessionObservation?.reading)} onRefresh={target ? refresh : undefined} /></div>
         : <SurfaceState layout="inline" title="Original Region kept" description="Source observation unavailable. Your unsent task is kept."
           details={{ summary: 'Original reference', content: <code>{entry?.target.reference.runtimeId} / {node.regionId}</code> }}
           body={<div className="mounted-space-retained-input">
@@ -152,7 +172,7 @@ export const MountedSpaceWorkbench = memo(function MountedSpaceWorkbench({ mount
       return group && layout ? <div className="mounted-space-regions">{renderRegion(projection.regionOnly ? { type: 'leaf', regionId: projection.regionId } : layout.root, projection.tabId, group.id)}</div>
         : <SurfaceState title="Original workface retained" description="Its exact Tab and Region are not currently observed. Refresh the original project to check its locations." />
     })() : snapshot || currentView ? <>
-      {!entry && target ? <div className="mounted-space-regions">{members.map(member => <MountedSpaceRegionView key={member.key} visible={visible} target={target} member={member} session={sessions.get(member.key)} sessionError={sessionObservation?.error} />)}</div> : currentView ? <div className="mounted-space-composition">{renderGroup(currentView.composition.root)}</div>
+      {!entry && target ? <div className="mounted-space-regions">{members.map(member => <MountedSpaceRegionView key={member.key} visible={visible} target={target} member={member} session={sessions.get(member.key)} sessionError={sessionObservation?.error ?? observation?.error} reading={Boolean(observation?.reading || sessionObservation?.reading)} onRefresh={target ? refresh : undefined} />)}</div> : currentView ? <div className="mounted-space-composition">{renderGroup(currentView.composition.root)}</div>
         : <WorkbenchEmptyState heading={snapshot?.scope.space ? 'No original member is selected' : 'The original Space is not currently present'} description="The exact source reference and private view are retained." action={null} />}
     </> : <SurfaceState title={observation?.reading ? 'Reading the original Space…' : 'Original Space observation unavailable'} description="Your original workface and this source reference are retained. Refresh its source to try the same reader again." />}
   </section>
