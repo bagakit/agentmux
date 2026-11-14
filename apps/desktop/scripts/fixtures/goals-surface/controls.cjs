@@ -23,18 +23,19 @@ async function inspect(name, projectSource) {
   const facts = await evaluate(`(()=>{
     const group=document.querySelector('.goals-entry__actions'), rect=e=>{const r=e.getBoundingClientRect();return{left:r.left,right:r.right,top:r.top,bottom:r.bottom,width:r.width,height:r.height}}
     if(!group)throw new Error('Missing Goals entry group')
-    return {group:rect(group), buttons:[...group.querySelectorAll('button')].map(button=>{
-      const request=button.querySelector('.goals-entry__request'), strong=request?.querySelector('strong'), project=button.querySelector('small'), arrow=button.querySelector('svg'), copy=button.querySelector('.goals-entry__copy')
+    return {group:rect(group), rowGap:parseFloat(getComputedStyle(group).rowGap), buttons:[...group.querySelectorAll('button')].map(button=>{
+      const request=button.querySelector('.goals-entry__request'), strong=request?.querySelector('strong'), project=button.querySelector('small'), arrow=button.querySelector('svg'), copy=button.querySelector('.goals-common__copy')
       return {id:button.dataset.goalsEntryAction,text:request?.textContent,strong:strong?.textContent,font:parseFloat(getComputedStyle(button).fontSize),weight:strong&&getComputedStyle(strong).fontWeight,rect:rect(button),copy:copy&&rect(copy),arrow:arrow&&rect(arrow),project:project&&{text:project.textContent,title:project.title,rect:rect(project),display:getComputedStyle(project).display,visibility:getComputedStyle(project).visibility,opacity:getComputedStyle(project).opacity},clipped:button.scrollWidth>button.clientWidth,opacity:getComputedStyle(button).opacity}
-    }),list:!!document.querySelector('.goals-collection'),heading:document.querySelector('.goals-entry__heading')?.textContent,appearance:document.documentElement.dataset.appearance}
+    }),list:!!document.querySelector('.goals-collection'),heading:document.querySelector('.goals-common__heading')?.textContent,appearance:document.documentElement.dataset.appearance}
   })()`)
   result.observations.push({ name, ...facts })
-  assert.equal(facts.heading, '从这里开始'); assert.ok(facts.list, 'The CTA is mounted beside its real Goals collection')
+  assert.equal(facts.heading, 'Common actions'); assert.ok(facts.list, 'The CTA is mounted beside its real Goals collection')
   assert.deepEqual(facts.buttons.map(button => button.id), projectSource ? ['understand', 'ideas', 'next'] : ['understand', 'ideas'])
   assert.deepEqual(facts.buttons.slice(0, 2).map(button => button.text), ['我还不知道能做什么，可以了解我并给我建议吗？', '我有一些点子，我们开始尝试一个项目'])
   assert.deepEqual(facts.buttons.slice(0, 2).map(button => button.strong), ['了解我并给我建议吗？', '开始尝试一个项目'])
   assert.ok(facts.group.width > 0 && facts.group.height > 0, 'The real entry surface is visible rather than merely mounted')
-  assert.ok(facts.group.width <= 642, 'The entry group keeps a bounded reading width')
+  assert.equal(facts.rowGap, 8, 'Actions keep the current 8px spacing token')
+  // The current responsive grid owns full available width; per-button clipping checks carry readability.
   for (const button of facts.buttons) {
     assert.ok(button.font >= 13, `Complete request ${button.id} keeps readable prose size`)
     assert.ok(Number(button.weight) >= 550, `Request ${button.id} has inline semantic emphasis`)
@@ -47,12 +48,12 @@ async function inspect(name, projectSource) {
     const next = facts.buttons[2], project = await evaluate('goalsVisual.project()')
     assert.equal(next.text, projectSource === 'recent' ? '根据最近的项目情况，建议我下一步应该做什么' : '根据当前项目的情况，建议我下一步应该做什么')
     assert.equal(next.strong, '建议我下一步应该做什么')
-    assert.equal(next.project?.text, `${projectSource === 'recent' ? '最近项目' : '当前项目'} · ${project.name}`, 'Exact acting Project is visible adjacent to the request')
+    assert.equal(next.project?.text, `${projectSource === 'recent' ? 'Recent project' : 'Current project'} · ${project.name}`, 'Exact acting Project is visible adjacent to the request')
     assert.ok(next.project.rect.width > 0 && next.project.rect.height > 0 && next.project.display !== 'none' && next.project.visibility === 'visible' && next.project.opacity === '1', 'Exact acting Project metadata is actually visible')
-    assert.equal(next.project.title, `${project.id} · ${project.hostId} · ${project.path}`)
+    assert.equal(next.project.title, `${project.hostId} · ${project.path}`)
     assert.ok(next.project.rect.bottom <= next.rect.bottom, 'The complete Project metadata stays inside its action')
   }
-  for (let i = 1; i < facts.buttons.length; i++) assert.ok(Math.abs(facts.buttons[i].rect.top - facts.buttons[i - 1].rect.bottom) < 1, 'Actions form consecutive full rows')
+  for (let i = 1; i < facts.buttons.length; i++) if (facts.buttons[i].rect.top > facts.buttons[i - 1].rect.top) assert.ok(Math.abs(facts.buttons[i].rect.top - facts.buttons[i - 1].rect.bottom - facts.rowGap) < 1, 'Actions form complete rows with the declared spacing token')
 }
 app.whenReady().then(async () => {
   try {
@@ -86,17 +87,13 @@ app.whenReady().then(async () => {
       await pointer('mousePressed'); assert.equal(await evaluate('document.querySelector("[data-goals-entry-action=understand]").matches(":active")'), true); await capture('620-dark-entry-pressed', 620, true)
       await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type: 'mouseReleased', x: 1, y: 1, button: 'left', clickCount: 1 }); await paint()
       await evaluate('goalsVisual.seed("recent");goalsVisual.appearance("dark");goalsVisual.holdPreparation()'); await pointer('mousePressed', '[data-goals-entry-action="next"]'); await pointer('mouseReleased', '[data-goals-entry-action="next"]')
-      await waitFor('!document.querySelector(".goals-entry")')
-      const nav = await evaluate('(()=>{const e=document.querySelector("[aria-label=\\"Goals: show goals and progress\\"]");const r=e.getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2}})()')
-      for (const type of ['mousePressed', 'mouseReleased']) await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type, ...nav, button: 'left', clickCount: 1 })
+      await waitFor('document.querySelector("[data-pmo-teams-topic-floating]")?.dataset.state === "open"')
+      assert.equal(await evaluate('Boolean(document.querySelector(".goals-entry"))'), true, 'Background preparation keeps the original Goals surface')
+      await pointer('mousePressed', '[aria-label="Close Mote"]'); await pointer('mouseReleased', '[aria-label="Close Mote"]')
+      await waitFor('document.querySelector("[data-pmo-teams-topic-floating]")?.dataset.state === "closed"')
       await waitFor('Boolean(document.querySelector(".goals-entry__preparing"))')
-      // Goals navigation may reopen the existing execution's detail. Return through its real control.
-      if (await evaluate('Boolean(document.querySelector("[aria-label=\\"Back to goals\\"]"))')) {
-        await pointer('mousePressed', '[aria-label="Back to goals"]'); await pointer('mouseReleased', '[aria-label="Back to goals"]')
-      }
-      await waitFor('document.querySelector(".goals-entry__actions").getBoundingClientRect().width>0')
       await paint()
-      assert.equal(await evaluate('document.querySelector(".goals-entry__preparing").textContent'), '正在准备对话…')
+      assert.equal(await evaluate('document.querySelector(".goals-entry__preparing").textContent'), 'Preparing discussion…')
       assert.deepEqual(await evaluate('[...document.querySelectorAll("[data-goals-entry-action]")].map(e=>e.disabled)'), [true, true, true])
       await inspect('620-dark-pending', 'recent'); await capture('620-dark-entry-preparing', 620)
       await evaluate('goalsVisual.finishPreparation()'); await waitFor('!document.querySelector(".goals-entry__preparing")')

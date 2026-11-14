@@ -204,7 +204,16 @@ Object.assign(window, { goalsVisual: { seed,
   externalPromptBody: (id: string, body: string) => { flushSync(() => useAppStore.setState(state => ({ config: { ...state.config!, composerShortcuts: state.config!.composerShortcuts!.map(prompt => prompt.id === id ? { ...prompt, body } : prompt) } }))) },
   appearance: (appAppearance: 'dark' | 'light') => { flushSync(() => useAppStore.setState(state => ({ config: { ...state.config!, appearance: { ...state.config!.appearance, appAppearance } } }))) },
   project: () => useAppStore.getState().config!.workspaces.find(workspace => workspace.id === projectWorkspace.id),
-  holdPreparation: () => { api.scratch.ensureMote = (workspace, id) => new Promise(resolve => { finishPreparation = async () => { resolve(await ensureMote(workspace, id)); api.scratch.ensureMote = ensureMote } }) },
+  holdPreparation: () => {
+    const releases: (() => Promise<void>)[] = []
+    api.scratch.ensureMote = (workspace, id) => new Promise(resolve => {
+      releases.push(async () => { resolve(await ensureMote(workspace, id)) })
+    })
+    finishPreparation = async () => {
+      await Promise.all(releases.splice(0).map(release => release()))
+      api.scratch.ensureMote = ensureMote
+    }
+  },
   finishPreparation: async () => { await finishPreparation?.(); finishPreparation = undefined },
   facts: () => { const state = useAppStore.getState(), entries = Object.values(state.demands); return { selected: state.selectedDemandId, ids: Object.keys(state.demands), criteria: entries.reduce((count, goal) => count + (goal.alignment?.criteria.length ?? 0), 0), reports: entries.filter(goal => goal.grounding).length, checks: entries.reduce((count, goal) => count + (goal.grounding?.checks.length ?? 0), 0), runs: state.sessions.filter(session => sessions.some(original => original.id === session.id)).map(session => session.control) } } } })
 
