@@ -40,8 +40,8 @@ app.on('browser-window-created', (_event, window) => {
 async function captureDisplays(input: { includeHostWindows: boolean }) {
   const row = active, startedMs = performance.now() - row.startedAt
   const frames = await native.captureDisplays(input)
-  row.exposures.push({ included: input.includeHostWindows, startedMs, completedMs: performance.now() - row.startedAt,
-    displays: frames.displays.map(frame => ({ displayId: frame.displayId, engine: frame.engine, width: frame.width, height: frame.height })) })
+  row.exposures.push({ included: input.includeHostWindows, startedMs, completedMs: performance.now() - row.startedAt, timing: frames.timing ?? null,
+    displays: frames.displays.map(frame => ({ displayId: frame.displayId, engine: frame.engine, width: frame.width, height: frame.height, timing: frame.timing ?? null })) })
   return frames
 }
 async function capture(number: number, warmup = false) {

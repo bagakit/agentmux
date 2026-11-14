@@ -41,6 +41,7 @@ const mainRoot = execFileSync('git', ['worktree', 'list', '--porcelain'], { cwd:
 const baselineTree = join(mainRoot, '.worktrees', 'capture-real-baseline-' + process.pid)
 const receipt = { schema: 'agentmux.capture-real-startup-proof.v1', passed: false, smoke, candidate: { head }, baseline: { ref: baseline.ref }, productionInputs: {}, samples: [], comparisons: [], cleanup: {}, boundary: 'Real ScreenCaptureKit and actual display topology. Time starts at the registered shortcut callback; physical keydown before it remains unknown.' }
 let added = false
+const temporaryUserData = new Set()
 async function sourceFiles(directory) {
   const files = []
   for (const entry of await readdir(directory, { withFileTypes: true })) {
@@ -109,6 +110,7 @@ try {
     for (const variant of order) {
       const label = [background, iteration, pair, variant, ++index].join('-'), scene = join(out, label), userData = join(out, label + '-user-data')
       await mkdir(scene); await mkdir(userData)
+      temporaryUserData.add(userData)
       const env = { ...process.env, AGENTMUX_CAPTURE_REAL_OUT: scene, AGENTMUX_CAPTURE_REAL_USER_DATA: userData, AGENTMUX_CAPTURE_REAL_EXECUTABLE: variants[variant].executablePath,
         AGENTMUX_CAPTURE_REAL_VARIANT: variant, AGENTMUX_CAPTURE_REAL_BACKGROUND: background, AGENTMUX_CAPTURE_REAL_ITERATION: String(iteration), ELECTRON_RENDERER_URL: '' }
       delete env.ELECTRON_RUN_AS_NODE
@@ -136,6 +138,9 @@ try {
     if (!smoke) assert.ok(gainMs >= (background === 'included' ? 100 : 50) && ratio >= (background === 'included' ? 0.15 : 0.10), 'Real OS threshold not met: ' + JSON.stringify(comparison))
   }
   assert.equal(receipt.samples.length, smoke ? 2 : 24)
+  for (const [variant, tree] of [['baseline', baselineTree], ['candidate', root]]) {
+    for (const [file, hash] of Object.entries(receipt.productionInputs[variant].files)) assert.equal(sha(await readFile(join(tree, file))), hash, variant + ': production input changed during measurement: ' + file)
+  }
   receipt.passed = !smoke; if (smoke) receipt.developmentSmokePassed = true
 } catch (error) {
   receipt.failure = { name: error.name, message: error.message }; process.exitCode = 1
@@ -146,8 +151,9 @@ try {
     execFileSync('git', ['worktree', 'remove', '--force', baselineTree], { cwd: root, stdio: 'pipe', timeout: 120000 })
     receipt.cleanup.baselineWorktreeRemoved = !existsSync(baselineTree)
   }
+  for (const path of temporaryUserData) await rm(path, { recursive: true, force: true })
   for (const name of ['baseline-app', 'candidate-app', 'baseline-native-scratch', 'candidate-native-scratch']) await rm(join(out, name), { recursive: true, force: true })
-  receipt.cleanup.generatedArtifactsRemoved = true
+  receipt.cleanup.generatedArtifactsRemoved = [...temporaryUserData].every(path => !existsSync(path)) && ['baseline-app', 'candidate-app', 'baseline-native-scratch', 'candidate-native-scratch'].every(name => !existsSync(join(out, name)))
   await writeFile(join(out, 'receipt.json'), JSON.stringify(receipt, null, 2))
 }
 process.stdout.write(JSON.stringify({ passed: receipt.passed, developmentSmokePassed: receipt.developmentSmokePassed, failure: receipt.failure, receipt: join(out, 'receipt.json') }) + '\n')
