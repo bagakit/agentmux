@@ -132,8 +132,43 @@ const admitReport = new Function(declaration(harness, 'assertRepresentativeResul
 assert.doesNotThrow(() => admitReport({ representative: { status: 'passed' } }))
 assert.throws(() => admitReport(receipt), /budget-exceeded/u)
 assert.throws(() => admitReport(null), /coverage-missing/u)
+
+const harnessMain = declaration(harness, 'main')
+async function runHarnessMain(source, status) {
+  const receipts = []
+  const noIo = async () => {}
+  const options = {
+    execFileAsync: async () => ({ stdout: 'fixture-source' }),
+    readFile: async () => JSON.stringify({ source: {}, product: {}, support: {}, binaries: [] }),
+    access: noIo, chmod: noIo, mkdir: noIo, writeFile: noIo, rm: noIo, assertProbePathsRemoved: noIo,
+    exerciseReceiptlessDaemonCleanup: noIo, assertRepresentativeResult: admitReport,
+    runStage: async (stage, _identity, run) => {
+      run.report = stage.representative ? { representative: { status } } : { schema: 'diagnostic-report' }
+    },
+    join: (...paths) => paths.join('/'), measuredWorkspaces: [], repositoryRoot: 'root', directory: 'private', userData: 'data',
+    manifestPath: 'manifest', entry: 'entry', runtimeDirectory: 'runtime', representativeRuntime: 'representative-runtime',
+    representativeDirectory: 'representative', reportPath: 'report', representativeReportPath: 'representative-report',
+    process: { platform: 'darwin', arch: 'arm64', stdout: { write: text => receipts.push(JSON.parse(text.split('=')[1])) } }
+  }
+  const execute = new AsyncFunction('options', `const {${Object.keys(options).join(',')}} = options\n${source}\nawait main()`)
+  try { await execute(options) }
+  catch (error) { return { receipts, error } }
+  return { receipts, error: null }
+}
+for (const status of ['passed', 'budget-exceeded', 'coverage-missing']) {
+  const published = await runHarnessMain(harnessMain, status)
+  assert.equal(published.receipts[0]?.representative?.status, status)
+  if (status === 'passed') assert.equal(published.error, null)
+  else assert.equal(published.error?.errors.length, 1, 'The published gate must fail for ' + status)
+}
+const runnerBoundary = 'try { assertRepresentativeResult(representative.report) } catch (error) { failures.push(error) }'
+assert.equal(harnessMain.split(runnerBoundary).length, 2)
+const removedExitGate = await runHarnessMain(harnessMain.replace(runnerBoundary, ''), 'budget-exceeded')
+assert.equal(removedExitGate.receipts[0]?.representative?.status, 'budget-exceeded')
+assert.equal(removedExitGate.error, null, 'Without the source gate, the same failure would exit green')
+
 const root = JSON.parse(await read('../../../package.json'))
 const desktop = JSON.parse(await read('../package.json'))
 assert.match(root.scripts['test:resources'], /measure:desktop/u)
 assert.match(desktop.scripts['measure:desktop'], /measure-desktop-resources\.mjs/u)
-console.log(`Representative resource budget and product wiring passed. ${mutants.length} source mutants were rejected.`)
+console.log(`Representative resource budget and product wiring passed. ${mutants.length + 1} source mutants were rejected.`)
