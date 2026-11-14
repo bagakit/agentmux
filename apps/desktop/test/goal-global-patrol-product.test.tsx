@@ -123,7 +123,7 @@ describe('global PMO inspection uses one public creation/input owner and the ori
     let release!: () => void; const gate = new Promise<void>(resolve => { release = resolve })
     p.launch.mockImplementation(async input => { await gate; return await originalLaunch(input) })
     try {
-      await act(async () => button(container.textContent?.includes('新巡查') ? '新巡查' : '全局巡查').click())
+      await act(async () => button(container.textContent?.includes('New review') ? 'New review' : 'Review all goals').click())
       await act(async () => { await vi.waitFor(() => expect(p.launch).toHaveBeenCalledOnce()) })
       const floating = readPmoTeamsTopicFloatingState(), held = Object.values(useAppStore.getState().spatialRequests)[0]!
       expect(floating?.open).toBe(true); expect(floating?.reference?.tabId).toBe(held.tabId)
@@ -150,7 +150,7 @@ describe('global PMO inspection uses one public creation/input owner and the ori
     expect(await p.f.sessions.readMetadata(input.agentSessionId!)).toMatchObject({ agentSessionId: input.agentSessionId, creation: { createOperationId: input.createOperationId, initialPrompt: 'confirmed' } })
     const tabId = readPmoTeamsTopicFloatingState().reference!.tabId
     await act(async () => requestPmoTeamsTopicFloatingClose())
-    await act(async () => button('检查本次巡查').click()); await settle()
+    await act(async () => button('Check this review').click()); await settle()
     expect(readPmoTeamsTopicFloatingState().reference!.tabId).toBe(tabId)
     expect(p.launch).toHaveBeenCalledOnce(); expect(p.start).toHaveBeenCalledOnce()
     await evidence('global-patrol-gui-original-core-creation-and-first-input', { launches: p.launches, nativeRuns: p.nativeRuns,
@@ -249,7 +249,7 @@ describe('global PMO inspection uses one public creation/input owner and the ori
       expect(readPmoTeamsTopicFloatingState()?.targetTabId).toBe(held.tabId)
       expect(readPmoTeamsTopicFloatingState()?.agentTarget?.agentSessionId).toBe(held.agentSessionId)
       await act(async () => requestPmoTeamsTopicFloatingClose())
-      await act(async () => button('打开巡查对话').click()); await settle()
+      await act(async () => button('Open review discussion').click()); await settle()
       expect(readPmoTeamsTopicFloatingState()?.open).toBe(true)
       expect(readPmoTeamsTopicFloatingState()?.targetTabId).toBe(held.tabId)
       expect(readPmoTeamsTopicFloatingState()?.reference).toMatchObject({ tabId: held.tabId, regionId: held.regionId })

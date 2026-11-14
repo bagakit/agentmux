@@ -106,7 +106,7 @@ describe('Goals one-click requests through the mounted product and original owne
       layouts: { ...useAppStore.getState().layouts, [SCRATCH_WORKSPACE_ID]: createWorkspaceLayout('scratch-group', [custom.id, primaryTab.id]) },
       agentFocus: { ...EMPTY_AGENT_FOCUS, pmo: { sessionId: actual.id } } })
     await mount(); await act(async () => requestPmoTeamsTopicFloatingOpen({ targetTopicId: custom.topicId, targetTabId: custom.id }))
-    expect(action('ideas').textContent).toContain('主 Mote · My main bot')
+    expect(action('ideas').textContent).toContain('Primary Mote · My main bot')
     const createMote = vi.spyOn(useAppStore.getState(), 'createScratchTopic')
     await click('ideas')
     expectOneLaunch({ executorId: 'codex-2', scratchTopicId: PMO_TEAMS_TOPIC_ID, prompt: '我有一些点子，我们开始尝试一个项目' })
@@ -118,7 +118,7 @@ describe('Goals one-click requests through the mounted product and original owne
 
   it('sends in one click with zero Projects and no previous main bot, labelling the launcher choice as initial', async () => {
     useAppStore.setState({ tabs: { [oldTab.id]: oldTab }, sessions: [session('original')], layouts: { ...useAppStore.getState().layouts, [SCRATCH_WORKSPACE_ID]: createWorkspaceLayout('scratch-group') } })
-    await mount(); expect(action('understand').textContent).toContain('首次选择 · Configured Agent')
+    await mount(); expect(action('understand').textContent).toContain('Initial Agent · Configured Agent')
     await click('understand')
     expectOneLaunch({ executorId: 'configured', scratchTopicId: PMO_TEAMS_TOPIC_ID, prompt: '我还不知道能做什么，可以了解我并给我建议吗？' })
     expect(useAppStore.getState().demands).toEqual({}); expect(useAppStore.getState().config?.workspaces).toEqual([scratch])
@@ -127,7 +127,7 @@ describe('Goals one-click requests through the mounted product and original owne
   it.each(['missing-session', 'deleted-config', 'changed-provider'] as const)('retains the primary request instead of using a cold default for %s', async mode => {
     useAppStore.setState({ sessions: mode === 'missing-session' ? [session('original')] : useAppStore.getState().sessions,
       config: { ...config, executors: { another: config.executors.configured!, ...(mode === 'deleted-config' ? {} : { configured: { ...config.executors.configured!, providerId: mode === 'changed-provider' ? 'claude' : 'codex' } }) } } })
-    await mount(); expect(action('understand').textContent).toContain('主 Mote 的 Agent 待确认'); await click('understand')
+    await mount(); expect(action('understand').textContent).toContain('Primary Mote Agent unconfirmed'); await click('understand')
     expect(api.sessions.launchAgent).not.toHaveBeenCalled()
     const tab = createdTab(); expect(tab.regions[tab.layout.activeRegionId]?.kind).toBe('launcher')
     expect(useAppStore.getState().agentComposerDrafts[tab.layout.activeRegionId]).toBe('我还不知道能做什么，可以了解我并给我建议吗？')
@@ -203,7 +203,7 @@ describe('Goals one-click requests through the mounted product and original owne
     await act(async () => root.render(<div />)); await mount()
     expect(action('ideas').disabled).toBe(true)
     expect(container.querySelector('.goals-entry__actions')?.getAttribute('aria-busy')).toBe('true')
-    expect(container.querySelector('.goals-entry__preparing[role="status"]')?.textContent).toBe('正在准备对话…')
+    expect(container.querySelector('.goals-entry__preparing[role="status"]')?.textContent).toBe('Preparing discussion…')
     expect(action('understand').querySelector('.goals-entry__request')?.textContent).toBe('我还不知道能做什么，可以了解我并给我建议吗？')
     await click('ideas'); expect(api.scratch.ensureMote).toHaveBeenCalledTimes(1)
     await act(async () => { useAppStore.getState().renameTab(tab.id, 'My conversation'); useAppStore.setState({ activeWorkspaceId: 'project' }); preparation.resolve(topic(tab.topicId!)) })
@@ -293,7 +293,7 @@ describe('Goals one-click requests through the mounted product and original owne
     expect(action('next').textContent).toContain(text); expect(action('next').querySelector('small')?.title).toBe(("[\"local\",\"" + _hygiene_fixturePath("alpha") + "\"] · local · " + _hygiene_fixturePath("alpha")))
     expect(action('next').querySelector('.goals-entry__request')?.textContent).toBe(text)
     expect(action('next').querySelector('.goals-entry__request strong')?.textContent).toBe('建议我下一步应该做什么')
-    expect(action('next').querySelector('small')?.textContent).toBe(`${source === 'recent' ? '最近项目' : '当前项目'} · Project Alpha`)
+    expect(action('next').querySelector('small')?.textContent).toBe(`${source === 'recent' ? 'Recent project' : 'Current project'} · Project Alpha`)
     await click('next'); const tab = createdTab()
     await act(async () => { useAppStore.setState({ config: { ...config, workspaces: [scratch, { ...project, name: 'Other name', path: _hygiene_fixturePath("other") }] }, activeWorkspaceId: SCRATCH_WORKSPACE_ID }); preparation.resolve(topic(tab.topicId!)) })
     expectOneLaunch({ prompt: `${text}\n\n${projectContext}`, scratchTopicId: tab.topicId })

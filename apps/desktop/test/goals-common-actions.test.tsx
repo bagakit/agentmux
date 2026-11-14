@@ -115,7 +115,7 @@ describe('Goals common actions through the mounted product and durable config ow
     expect(remove.querySelector('svg')?.getAttribute('data-semantic-icon')).toBe('action.remove')
     expect((up as HTMLButtonElement).disabled).toBe(true)
     expect((down as HTMLButtonElement).disabled).toBe(false)
-    const collapse = dom.container.querySelector('[aria-label="收起常用操作"]')!
+    const collapse = dom.container.querySelector('[aria-label="Collapse common actions"]')!
     expect(collapse.querySelector('svg')?.getAttribute('data-semantic-icon')).toBe('navigation.up')
     expect(openTopic).not.toHaveBeenCalled(); expect(createTopic).not.toHaveBeenCalled()
     await dom.click('[aria-label="Move down 了解我并给我建议"]'); await save()
@@ -139,7 +139,7 @@ describe('Goals common actions through the mounted product and durable config ow
     await act(async () => images[1]!.dispatchEvent(new Event('error')))
     expect(images[1]!.hidden).toBe(true)
     expect(action('builtin:ideas')!.querySelector('.goals-entry__request')!.textContent).toBe(requests[1])
-    expect(dom.container.querySelector('.goals-common__heading')!.textContent).toContain('常用操作')
+    expect(dom.container.querySelector('.goals-common__heading')!.textContent).toContain('Common actions')
     expect(dom.container.querySelector('.goals-collection')).not.toBeNull()
     expect(action('builtin:next')).toBeNull()
     await act(async () => action('builtin:ideas')!.click())
@@ -151,7 +151,7 @@ describe('Goals common actions through the mounted product and durable config ow
     await external({ workspaces: [scratch, { id: 'art-project', name: '真实项目', hostId: 'local', path: _hygiene_fixturePath("repo/art-project"), kind: 'folder' }],
       goalsCommonActions: { items: [{ kind: 'builtin', id: 'understand' }, { kind: 'builtin', id: 'ideas' }, { kind: 'builtin', id: 'next' }, { kind: 'prompt', id: 'notes' }], collapsed: false } })
     useAppStore.setState({ activeWorkspaceId: 'art-project' })
-    await mount(); await click('全部操作（4）')
+    await mount(); await click('All actions (4)')
     for (const [key, asset] of [['builtin:understand', 'goal-understand'], ['builtin:ideas', 'goal-ideas'], ['builtin:next', 'goal-next'], ['prompt:notes', 'goal-custom']] as const) {
       expect(action(key)!.querySelector<HTMLImageElement>('.goals-common__art')!.src).toContain(`${asset}.png`)
     }
@@ -167,7 +167,7 @@ describe('Goals common actions through the mounted product and durable config ow
     await mount(); await manage(); await reference(); await closeSettings()
     const node = action('prompt:review')!
     expect(node.querySelector('.goals-entry__request')!.textContent, 'Live prompt body is the complete request').toBe(prompts[0]!.body)
-    expect(node.querySelector('.goals-common__facts')!.textContent, 'The visible target comes from the actual primary Session and configured provider').toBe('主 Mote · Other Claude')
+    expect(node.querySelector('.goals-common__facts')!.textContent, 'The visible target comes from the actual primary Session and configured provider').toBe('Primary Mote · Other Claude')
     expect(node.disabled).toBe(false)
     await act(async () => node.click())
     expect(openTopic, 'Visible body and the actual primary executor reach the original Mote owner').toHaveBeenCalledExactlyOnceWith(PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, { newTab: true, reveal: false, initialRequest: { prompt: prompts[0]!.body, executorId: 'otherClaude' } })
@@ -377,11 +377,11 @@ describe('Goals common actions through the mounted product and durable config ow
     expect((document.activeElement as HTMLElement).dataset.commonSelect).toBe('builtin:understand')
     await dom.click('[aria-label="Remove from Goals 了解我并给我建议"]'); await save()
     expect((document.activeElement as HTMLElement).dataset.commonSelect).toBe('builtin:next')
-    await closeSettings(); await dom.click('[aria-label="收起常用操作"]'); await settled()
+    await closeSettings(); await dom.click('[aria-label="Collapse common actions"]'); await settled()
     expect((await f.disk()).goalsCommonActions!.collapsed).toBe(true)
     expect(dom.container.querySelector('.goals-common__hero')).toBeNull()
     expect(dom.container.querySelector('.goals-collection')).not.toBeNull()
-    await dom.click('[aria-label="展开常用操作"]'); await settled()
+    await dom.click('[aria-label="Expand common actions"]'); await settled()
     expect((await f.disk()).goalsCommonActions!.collapsed).toBe(false)
     expect(createTopic).not.toHaveBeenCalled(); expect(openTopic).not.toHaveBeenCalled()
   })

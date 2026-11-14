@@ -4,12 +4,13 @@ import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-valu
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import { createWorkspaceLayout } from '@agentmux/layout'
-import type { WorkspaceRecord } from '../src/shared/contracts'
+import type { AgentTimelineSnapshot, WorkspaceRecord } from '../src/shared/contracts'
 import * as projectProjection from '../src/renderer/src/lib/workspace-projects'
+import * as goalNavigation from '../src/renderer/src/lib/goal-navigation'
 import { projectWorkspaces } from '../src/renderer/src/lib/workspace-projects'
 import { documentKey, fileTabId } from '../src/renderer/src/lib/workbench-tabs'
 import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
-import { act, useState } from 'react'
+import { act, Profiler, useState } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { DemandRecord } from '../src/renderer/src/lib/global-demand-board'
 import { GlobalBoardSurface } from '../src/renderer/src/components/GlobalBoardSurface'
@@ -25,6 +26,7 @@ import { configOwnerFixture } from './helpers/config-owner-fixture'
 import { openHostGoalTransport, type HostGoalTransport } from './helpers/host-goal-transport'
 
 const dom = composerDOM()
+const retainedStartsSelectorFactory = goalNavigation.createGoalRetainedStartsSelector
 const alignment = { summary: 'Keep the original work recoverable.', criteria: [{ id: 'tabs', text: 'The original tabs and splits remain.' }], openQuestions: [], revision: 1, confirmedAt: null }
 const grounding = { summary: 'The original tab identities match the saved log.', alignmentRevision: 1, submissionId: 'report:current', acceptedAt: null, checks: [{ criterionId: 'tabs', outcome: 'met' as const, note: 'Saved and restored identities agree.', evidence: ['artifacts/recovery.log:18'] }] }
 function goal(id = 'one', patch: Partial<DemandRecord> = {}): DemandRecord { return { id, title: `Recover the work ${id}`, description: 'Keep healthy Agents and existing work.', priority: 'normal', status: 'in_progress', projectId: null, projectName: null, sessionIds: [], createdAt: _reshape_fixtureEpoch(0, 0, 1), updatedAt: _reshape_fixtureEpoch(0, 0, 2), source: 'default-topic', ...patch } }
@@ -59,6 +61,42 @@ async function fill(node: HTMLInputElement | HTMLTextAreaElement, value: string)
 async function select(id = 'one') { await dom.click(`[data-demand-id="${id}"]`) }
 
 describe('Goals whole-page current facts, reading and return through mounted owners', () => {
+  it.each([1, 1000])('keeps the selected compact directory idle through unrelated output with %i Sessions', async count => {
+    let reads = 0, renders = 0, collectionInputReads = 0
+    const metered = new WeakMap<object, ReturnType<typeof useAppStore.getState>['goalFiniteStartIntents']>()
+    vi.spyOn(goalNavigation, 'createGoalRetainedStartsSelector').mockImplementation(goals => {
+      const select = retainedStartsSelectorFactory(goals)
+      return state => {
+        let inputs = metered.get(state.goalFiniteStartIntents)
+        if (!inputs) {
+          inputs = new Proxy(state.goalFiniteStartIntents, { get(target, key, receiver) {
+            if (typeof key === 'string') collectionInputReads++
+            return Reflect.get(target, key, receiver)
+          } })
+          metered.set(state.goalFiniteStartIntents, inputs)
+        }
+        return select(new Proxy(state, { get(target, key, receiver) { return key === 'goalFiniteStartIntents' ? inputs : Reflect.get(target, key, receiver) } }))
+      }
+    })
+    const sessions = new Proxy(Array.from({ length: count }, (_, index) => composerSession(`unrelated-${index}`)), {
+      get(target, key, receiver) { if (typeof key === 'string' && /^\d+$/u.test(key)) reads++; return Reflect.get(target, key, receiver) }
+    })
+    useAppStore.setState({ sessions, selectedDemandId: 'one', demands: { one: goal(), ...Object.fromEntries(Array.from({ length: count - 1 }, (_, index) => {
+      const record = goal(`other-${index}`)
+      return [record.id, record]
+    })) } })
+    await dom.render(<Profiler id="goals-directory" onRender={() => renders++}><GoalsWithSettings /></Profiler>)
+    expect(dom.container.querySelector('[data-demand-id="one"]')?.getAttribute('aria-pressed')).toBe('true')
+    expect(collectionInputReads).toBeGreaterThan(0)
+    reads = renders = collectionInputReads = 0
+    for (let revision = 1; revision <= 4; revision++) await act(async () => useAppStore.setState(state => ({
+      timelines: { ...state.timelines, 'unrelated-output': { agentSessionId: 'unrelated-output', revision, items: [] } as unknown as AgentTimelineSnapshot }
+    })))
+    expect({ reads, renders, collectionInputReads }).toEqual({ reads: 0, renders: 0, collectionInputReads: 0 })
+    expect(useAppStore.getState().selectedDemandId).toBe('one')
+    expect(request).not.toHaveBeenCalled(); expect(createTopic).not.toHaveBeenCalled()
+  })
+
   it('keeps the selected filter and Goal when Escape closes only the current menu', async () => {
     useAppStore.setState({ demands: { one: goal(), blocked: goal('blocked', { status: 'blocked' }) } }); await mount()
     const create = button('New Goal')
@@ -88,6 +126,29 @@ describe('Goals whole-page current facts, reading and return through mounted own
     await fieldOptions(button('Goal work status'))
     expect(useAppStore.getState().selectedDemandId, 'Closing a Goal property menu preserves the original detail').toBe('blocked')
     expect(dom.container.querySelector('[aria-label="Goal title"]')).toBe(originalTitle)
+    expect(request).not.toHaveBeenCalled(); expect(createTopic).not.toHaveBeenCalled()
+  })
+
+  it('uses a compact single-column detail directory and restores the original Board preference on return', async () => {
+    useAppStore.setState({ demands: { one: goal(), blocked: goal('blocked', { status: 'blocked', delegationObservationIssue: 'Retained original observation is unknown.' }) } })
+    await mount(); await click('Board view')
+    expect(dom.container.querySelector('.goals-board')).not.toBeNull()
+    await select('blocked')
+    expect(dom.container.querySelector('.goals-index .goals-board')).toBeNull()
+    expect(dom.container.querySelectorAll('.goals-index .goals-row--compact')).toHaveLength(2)
+    expect(dom.container.querySelector('.goals-index .goal-responsibility')).toBeNull()
+    expect(dom.container.querySelector('[aria-label="Board view"]')).toBeNull()
+    const row = dom.container.querySelector<HTMLElement>('[data-demand-id="one"]')!
+    await act(async () => { row.focus(); row.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })) })
+    expect(document.activeElement?.getAttribute('data-demand-id')).toBe('blocked')
+    const search = dom.container.querySelector<HTMLInputElement>('[aria-label="Search goals"]')!
+    await fill(search, 'blocked')
+    expect(dom.container.querySelectorAll('.goals-index [data-demand-id]')).toHaveLength(1)
+    await click('Back to goals')
+    expect(dom.container.querySelector('.goals-board')).not.toBeNull()
+    expect(button('Board view').getAttribute('aria-selected')).toBe('true')
+    expect(search.value).toBe('blocked')
+    expect(useAppStore.getState().demands.blocked?.id).toBe('blocked')
     expect(request).not.toHaveBeenCalled(); expect(createTopic).not.toHaveBeenCalled()
   })
 
@@ -156,7 +217,7 @@ describe('Goals whole-page current facts, reading and return through mounted own
     expect(content.hidden).toBe(true)
     expect(dom.container.querySelector('[data-prompt-editor] textarea')).toBe(editor)
     expect(editor.closest<HTMLElement>('.settings-page')!.hidden).toBe(true)
-    await click('回到常用操作'); await click('Configure common actions')
+    await click('Back to common actions'); await click('Configure common actions')
     expect(content.hidden).toBe(false); expect(editor.closest<HTMLElement>('.settings-page')!.hidden).toBe(false)
     expect(dom.container.querySelector('[data-prompt-editor] textarea')).toBe(editor)
     expect(editor.value).toBe('A real unsaved instruction.')
@@ -176,7 +237,7 @@ describe('Goals whole-page current facts, reading and return through mounted own
     await vi.waitFor(() => expect(dom.container.querySelector('[data-settings-save-bar] [role="alert"]')!.textContent).toContain('save receipt unconfirmed'))
     expect(useAppStore.getState().selectedDemandId).toBe('one')
     expect(dom.container.querySelector('.goals-common__content')!.hasAttribute('hidden')).toBe(true)
-    await click('回到常用操作'); await click('Configure common actions')
+    await click('Back to common actions'); await click('Configure common actions')
     expect(dom.container.querySelector('[data-prompt-editor] textarea')).toBe(editor)
     expect(editor.value).toBe('Keep the failed body.')
     expect(dom.container.querySelector('[role="alert"]')!.textContent).toContain('save receipt unconfirmed')
@@ -190,7 +251,7 @@ describe('Goals whole-page current facts, reading and return through mounted own
     let reject!: (reason: Error) => void
     f.save.mockImplementationOnce(() => new Promise((_, fail) => { reject = fail }))
     await click('Save prompts'); await click('Close settings'); await select()
-    await click('回到常用操作')
+    await click('Back to common actions')
     expect(button('Configure common actions').disabled).toBe(false)
     await click('Configure common actions')
     expect(editor.value).toBe('An instruction whose save is still pending.')
@@ -206,12 +267,12 @@ describe('Goals whole-page current facts, reading and return through mounted own
     await mount(); await dom.click('[data-common-action="builtin:ideas"]'); await select()
     expect(openTopic).toHaveBeenCalledExactlyOnceWith(PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, { newTab: true, reveal: false, initialRequest: { prompt: '我有一些点子，我们开始尝试一个项目', executorId: 'codex' } })
     expect(createTopic).not.toHaveBeenCalled()
-    expect(dom.container.querySelector('.goals-common__context-feedback')!.textContent).toContain('正在准备对话')
+    expect(dom.container.querySelector('.goals-common__context-feedback')!.textContent).toContain('Preparing discussion')
     await act(async () => reject(new Error('launch receipt unconfirmed')))
-    await vi.waitFor(() => expect(dom.container.querySelector('.goals-common__context-feedback')!.textContent).toContain('对话准备未确认'))
+    await vi.waitFor(() => expect(dom.container.querySelector('.goals-common__context-feedback')!.textContent).toContain('Discussion preparation unconfirmed'))
     expect(useAppStore.getState().selectedDemandId).toBe('one')
     expect(useAppStore.getState().sessions.map(session => session.control)).toEqual([composerSession('healthy').control])
-    await click('回到常用操作')
+    await click('Back to common actions')
     expect(dom.container.querySelector('.goals-common__content')!.hasAttribute('hidden')).toBe(false)
     expect(dom.container.querySelector('.goals-service')!.textContent).toContain('launch receipt unconfirmed')
   })
