@@ -120,6 +120,17 @@ api.schedule.inspect = async params => {
   calls.push({ method: 'schedule.inspect', params: clone(params) })
   return validateScheduleRpcResult('schedule.inspect', { schedule: clone(records.find(item => params.operationId ? item.creationOperationId === params.operationId || item.lastMutation?.operationId === params.operationId : item.loopId === params.scheduleId) ?? null), executionScope: 'connected-host' }, params)
 }
+api.schedule.history = async params => {
+  calls.push({ method: 'schedule.history', params: clone(params) })
+  const record = records.find(item => item.loopId === params.scheduleId)
+  const at = record?.lastOccurrenceAt
+  if (at === undefined || at < params.from || at >= params.to) throw new Error('PRIVATE_FIXTURE_HISTORY_SCOPE_MISMATCH')
+  return validateScheduleRpcResult('schedule.history', {
+    scheduleId: params.scheduleId, from: params.from, to: params.to, executionScope: 'connected-host',
+    coverage: 'recorded-inputs', entries: [{ operationId: 'original-fixture-receipt', occurrenceAt: at,
+      delivery: 'terminal-confirmed', nativeResult: { state: 'unsupported' } }], nextCursor: null
+  }, params)
+}
 const mutate = (action: 'pause' | 'resume' | 'cancel') => async (params: ScheduleParamsMap['schedule.pause']) => {
   calls.push({ method: 'schedule.' + action, params: clone(params) })
   const previous = records.find(item => item.loopId === params.scheduleId)
