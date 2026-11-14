@@ -47,7 +47,7 @@ argv=open(base+'/cmdline','rb').read().decode().rstrip(chr(0)).split(chr(0))
 exe=os.readlink(base+'/exe'); cwd=os.readlink(base+'/cwd')
 if len(argv)!=3 or argv[2]!='serve' or not argv[1].endswith('/dist/headless-runtime-cli.js') or os.path.realpath(argv[0])!=exe:
  raise RuntimeError('This owner has no qualified headless launch identity.')
-if os.path.dirname(worker_argv[1])!=os.path.dirname(argv[1]) or os.readlink(worker_base+'/exe')!=exe:
+if os.path.dirname(os.path.realpath(worker_argv[1]))!=os.path.dirname(os.path.realpath(argv[1])) or os.readlink(worker_base+'/exe')!=exe:
  raise RuntimeError('The listener worker belongs to another program or Node image.')
 if os.stat(base).st_uid != os.getuid(): raise RuntimeError('The semantic owner belongs to another user.')
 allowed={'HOME','PATH','SHELL','CLAUDE_CONFIG_DIR','LANG','LC_ALL','TZ','AGENTMUX_STATE_DIRECTORY','AGENTMUX_RUNTIME_DIRECTORY','AGENTMUX_AGENT_SESSION_STORE','AGENTMUX_HOOK_PORT','AGENTMUX_MESSAGE_QUEUE_PATH'}
@@ -84,7 +84,7 @@ def require_lease(directory,owner_pid,lease):
  if not held: raise RuntimeError('Original process state lease is not verified.')
 for lease in [os.path.join(state,'semantic-owner.lock'),p['socket']+'.owner.lock']:
  require_lease(base,pid,lease)
-root=os.path.dirname(os.path.dirname(argv[1]))
+root=os.path.dirname(os.path.dirname(os.path.realpath(argv[1])))
 if json.loads(text(os.path.join(root,'package.json'))).get('name')!='@agentmux/core': raise RuntimeError('Original program is not Core.')
 deployment_path=os.path.join(root,'deployment.json')
 if not os.path.isfile(deployment_path): raise RuntimeError('Original Core lacks a content-bound deployment inventory; this update is unverified. Existing Runs are retained.')
@@ -159,7 +159,7 @@ print(json.dumps(result))
 export const READ_CORE_MAINTENANCE = String.raw`
 const { mintObjectId } = ${identityRuntimeSource};
 const fs=require('node:fs'),path=require('node:path'),url=require('node:url'),crypto=require('node:crypto'),cp=require('node:child_process'),os=require('node:os');
-const p=JSON.parse(fs.readFileSync(0,'utf8')),launch=p.launch,root=path.dirname(path.dirname(launch.cli));
+const p=JSON.parse(fs.readFileSync(0,'utf8')),launch=p.launch,root=path.dirname(path.dirname(fs.realpathSync(launch.cli)));
 const hash=b=>crypto.createHash('sha256').update(b).digest('hex');
 function source(){
  const deployment=JSON.parse(fs.readFileSync(path.join(root,'deployment.json'),'utf8'));
