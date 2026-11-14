@@ -155,6 +155,20 @@ async function fixture(options: { nodeLocation?: boolean } = {}) {
 }
 type Fixture = Awaited<ReturnType<typeof fixture>>
 
+it('actual registered Main Node owner ingress selects the requested original Host and rejects the Browser document', async () => {
+  const h = await fixture({ nodeLocation: true })
+  const target = { hostId: 'exact-node-carrier', expectedRuntimeId: h.nodeRuntime! }
+  const call = vi.spyOn(h.runtime, 'callNodeOwner').mockImplementation(async (original, method, params) => {
+    expect(original).toEqual(target)
+    return await h.rpc.call(method, params) as never
+  })
+  const current = await h.invoke('nodePublishing:owner', ['node-inspect', target, 'settings.node.inspect', {}]) as import('@agentmux/core/node-publishing').NodeSettings
+  const saved = await h.invoke('nodePublishing:owner', ['node-save', target, 'settings.node.configure', { expectedRevision: current.policyRevision, operationId: 'main-original-node-save', policy: { ...current.policy, shareResources: true } }]) as import('@agentmux/core/node-publishing').NodeSettings
+  expect(saved.node.runtimeId).toBe(target.expectedRuntimeId); expect(saved.policy.shareResources).toBe(true); expect(saved.operation?.operationId).toBe('main-original-node-save')
+  await expect(h.invoke('nodePublishing:owner', ['page-owner', target, 'settings.node.inspect', {}], h.pageSender)).rejects.toThrow('Untrusted application')
+  expect(call).toHaveBeenCalledTimes(2); expect(h.submit).not.toHaveBeenCalled()
+})
+
 it('actual Main link readiness locates a published Node through its configured scope and original private Core', async () => {
   const h = await fixture({ nodeLocation: true })
   const handler = bridge.handlers.get('ui:spatialLinksReady')

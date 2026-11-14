@@ -25,7 +25,7 @@ if (phase) it('Node publication restart phase uses the original native user docu
   await mkdir(nodeState, { recursive: true })
   const node = new NodePublishingOwner({ stateDirectory: nodeState, runtimeId, ownerInstanceId: 'private-' + phase })
   const original = await node.call('settings.node.inspect', {}), calls: Array<{ method: string; input: unknown }> = []
-  const config = { ...composerConfig, hosts: [{ id: 'local', kind: 'local' as const, label: 'Original private node' }], workspaces: [{ id: 'workspace', kind: 'folder' as const, hostId: 'local', name: 'Original workspace', path: directory }] }
+  const config = { ...composerConfig, hosts: [{ id: 'local', kind: 'local' as const, label: 'Original local node' }, { id: 'farm', kind: 'ssh' as const, label: 'Original private remote node', hostname: 'private.invalid', runtimeId }], workspaces: [{ id: 'workspace', kind: 'folder' as const, hostId: 'local', name: 'Original workspace', path: directory }] }
   const session = { ...composerSession(), workspacePath: directory }
   vi.spyOn(api.ui, 'readWorkbenchState').mockImplementation(() => user.read())
   vi.spyOn(api.ui, 'importWorkbenchState').mockImplementation(value => user.importIfAbsent(value))
@@ -42,15 +42,15 @@ if (phase) it('Node publication restart phase uses the original native user docu
   vi.spyOn(api.spatial, 'commit').mockImplementation(value => spatial.commit(value))
   vi.spyOn(api.spatial, 'onChange').mockImplementation(listener => spatial.subscribe(listener))
   vi.spyOn(api.spatial, 'retainLabels').mockImplementation(values => spatial.retainDisplayLabels(values))
-  vi.spyOn(api.nodePublishing, 'call').mockImplementation(async (method, input) => {
-    calls.push({ method, input: structuredClone(input) })
+  vi.spyOn(api.nodePublishing, 'owner').mockImplementation(async (target, method, input) => {
+    expect(target).toEqual({hostId:'farm',expectedRuntimeId:runtimeId}); calls.push({ method, input: structuredClone(input) })
     if (method === 'settings.node.configure') return await new Promise<never>(() => {})
     return await node.call(method, input) as never
   })
   const dispose = await useAppStore.getState().initialize()
   const container = document.createElement('div'); document.body.append(container)
   const root = createClientUiRoot(container)
-  await act(async () => root.render(<NetworkNodeSettingsPane config={config} active onClose={() => {}} onNavigate={() => {}} />))
+  await act(async () => root.render(<NetworkNodeSettingsPane config={config} navigationRequest={{section:'network-node',hostId:'farm'}} active onClose={() => {}} onNavigate={() => {}} />))
   for (let attempt = 0; attempt < 100 && !container.querySelector('[aria-label="Node alias"]'); attempt++) await act(async () => { await pause(10) })
   expect(container.querySelector('[aria-label="Node alias"]'), container.textContent ?? '').not.toBeNull()
   const input = async (label: string, value: string) => act(async () => {

@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { act } from 'react'
-import { afterAll, afterEach, beforeAll, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeAll, beforeEach, expect, it, vi } from 'vitest'
 import type { NodeResources, NodeResourceSample, NodeSettings } from '@agentmux/core/node-publishing'
 import { SettingsPanel } from '../src/renderer/src/components/SettingsPanel'
 import { settingsCatalog } from '../src/renderer/src/components/settings/settings-modules'
@@ -20,10 +20,17 @@ const settings:NodeSettings={node:identity,policyRevision:'policy-1',policy:{ali
 const available=<T,>(value:T)=>({state:'available' as const,value})
 function sample(at=1000):NodeResourceSample{return {node:identity,policyRevision:'policy-1',processId:123,observedAt:at,system:available({platform:'darwin',architecture:'arm64',uptimeSeconds:3600}),cpu:available({logicalCpus:4,userMs:at,systemMs:0,niceMs:0,irqMs:0,idleMs:at*3,loadAverage:[0,0,0]}),memory:available({totalBytes:8*1024**3,freeBytes:2*1024**3}),filesystem:available({root:null,totalBytes:100*1024**3,availableBytes:40*1024**3}),process:available({cpuUserMicros:at*100,cpuSystemMicros:0,rssBytes:128*1024**2,heapUsedBytes:1,heapTotalBytes:2,externalBytes:0,uptimeSeconds:10})}}
 function resources(at=1000):NodeResources{return{node:identity,policyRevision:'policy-1',status:'available',sample:sample(at)}}
+async function readyNode(){for(let i=0;i<100&&!dom.container.querySelector('[aria-label="Node alias"]');i++)await act(async()=>{await new Promise(done=>setTimeout(done,10))});expect(dom.container.querySelector('[aria-label="Node alias"]'),dom.container.textContent??'').not.toBeNull()}
 async function input(label:string,value:string){await act(async()=>{const element=dom.container.querySelector<HTMLInputElement>(`[aria-label="${label}"]`)!;Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(element,value);element.dispatchEvent(new Event('input',{bubbles:true}))})}
 const props=()=>({config:useAppStore.getState().config!,active:true,onClose:vi.fn(),onNavigate:vi.fn()})
 let disposeStore: (() => void) | undefined
 beforeAll(async()=>{disposeStore=await useAppStore.getState().initialize()})
+// Existing component scenarios control the same endpoint-local protocol leaves; new target
+// consumers separately exercise the actual Main/preload/configured transport boundary.
+beforeEach(()=>{
+ vi.spyOn(api.hosts,'inspect').mockResolvedValue({routeHostId:'local',owner:{state:'available',value:identity}} as never)
+ vi.spyOn(api.nodePublishing,'owner').mockImplementation((target,method,input,signal)=>(api.nodePublishing.call as import('@agentmux/core/node-publishing').NodePublishingPort['call'])(method,input,signal))
+})
 afterAll(()=>disposeStore?.())
 afterEach(()=>{vi.useRealTimers();for(const value of Object.values(engine))value.mockClear()})
 it('Node addresses copy only confirmed aliases and exact Runtime identity, independently of unsaved drafts or Host labels',async()=>{
@@ -40,7 +47,7 @@ it('Node addresses copy only confirmed aliases and exact Runtime identity, indep
  await dom.render(<HostPublishedResources host={host} committed={host} active/>);await dom.click('[aria-label="Copy Node address"]')
  expect(copy).toHaveBeenLastCalledWith('amux://host/observed-remote?runtime=remote-original')
  expect(call.mock.calls.filter(row=>row[0]!=='settings.node.inspect'&&row[0]!=='node.inspect')).toHaveLength(0)
- call.mockResolvedValueOnce({...settings,node:{...identity,alias:''},policy:{...settings.policy,alias:''}} as never)
+ call.mockResolvedValue({...settings,node:{...identity,alias:''},policy:{...settings.policy,alias:''}} as never)
  await dom.render(<NetworkNodeSettingsPane key="without-published-alias" {...props()}/>);await input('Node alias','not-yet-published')
  expect(dom.container.querySelector('[aria-label="Copy Node address"]')).toBeNull()
 })
@@ -122,7 +129,7 @@ it('an edit for another original Runtime is retained without applying or saving 
  useAppStore.setState({nodePublicationDrafts:{'other-runtime':foreign}})
  const call=vi.spyOn(api.nodePublishing,'call').mockResolvedValue(structuredClone(settings) as never)
  await dom.render(<NetworkNodeSettingsPane {...props()}/>);expect(dom.container.querySelector<HTMLInputElement>('[aria-label="Node alias"]')!.value).toBe('work-mac')
- expect(useAppStore.getState().nodePublicationDrafts).toEqual({'other-runtime':foreign});expect(call).toHaveBeenCalledTimes(1)
+ expect(useAppStore.getState().nodePublicationDrafts).toEqual({'other-runtime':foreign});expect(call).toHaveBeenCalledTimes(2)
 })
 it.each(['superseded-confirmation','same-value-revision','unrecorded-returned-to-baseline'] as const)('the real Core %s requires saved-publication review before advancing the edited CAS baseline',async scenario=>{
  const{mkdtemp,mkdir,rm}=await import('node:fs/promises'),{join}=await import('node:path'),{NodePublishingOwner}=await import('../../../packages/core/src/node-publishing-owner')
@@ -132,7 +139,8 @@ it.each(['superseded-confirmation','same-value-revision','unrecorded-returned-to
  let loseReply=scenario!=='same-value-revision'
  const call=vi.spyOn(api.nodePublishing,'call').mockImplementation(async(method,input)=>{if(method==='settings.node.configure'&&loseReply&&scenario==='unrecorded-returned-to-baseline'){loseReply=false;throw Error('Original request was not recorded')}const result=await owner.call(method,input);if(method==='settings.node.configure'&&loseReply){loseReply=false;throw Error('Original confirmed reply lost')}return result as never})
  try{
-  await dom.render(<NetworkNodeSettingsPane {...props()}/>);await act(async()=>{for(let i=0;i<80&&!dom.container.querySelector('[aria-label="Node alias"]');i++)await new Promise(done=>setTimeout(done,10))})
+  vi.spyOn(api.hosts,'inspect').mockResolvedValue({routeHostId:'local',owner:{state:'available',value:first.node}} as never)
+  await dom.render(<NetworkNodeSettingsPane {...props()}/>);await readyNode()
   if(scenario!=='same-value-revision'){
    await input('Node alias','first-save');await dom.click('.network-node-save button');await vi.waitFor(()=>expect(dom.container.textContent).toContain('Publication save was not confirmed'))
   }
@@ -172,14 +180,14 @@ it('an unreadable saved edit stays in the original user projection and is never 
  useAppStore.setState({nodePublicationDrafts:raw})
  const call=vi.spyOn(api.nodePublishing,'call').mockResolvedValue(structuredClone(settings) as never)
  await dom.render(<NetworkNodeSettingsPane {...props()}/>);expect(dom.container.textContent).toContain('saved Node publication edit is unreadable')
- expect(useAppStore.getState().nodePublicationDrafts).toBe(raw);expect(call).toHaveBeenCalledTimes(1)
+ expect(useAppStore.getState().nodePublicationDrafts).toBe(raw);expect(call).toHaveBeenCalledTimes(2)
  expect(dom.container.querySelector<HTMLButtonElement>('.network-node-save button')!.disabled).toBe(true)
 })
 it('actual Host consumer uses private owner resources locally, public target resources remotely, and explicit withheld clears retained private values',async()=>{
  vi.useFakeTimers();vi.spyOn(api.hosts,'inspect').mockRejectedValue(Error('independent identity observation failed'))
  const call=vi.spyOn(api.nodePublishing,'call').mockResolvedValue(resources() as never)
  const local=composerConfig.hosts.find(host=>host.kind==='local')!
- await dom.render(<HostRuntimePanel host={local} committed={local} active/>);expect(call.mock.calls[0]!.slice(0,2)).toEqual(['settings.node.resources',{}]);expect(dom.container.textContent).toContain('6 GiB')
+ await dom.render(<HostRuntimePanel host={local} committed={local} ownerTarget={{hostId:local.id,expectedRuntimeId:identity.runtimeId}} active/>);expect(call.mock.calls[0]!.slice(0,2)).toEqual(['settings.node.resources',{}]);expect(dom.container.textContent).toContain('6 GiB')
  const remote={id:'peer',kind:'ssh' as const,label:'Peer',hostname:'peer.invalid',runtimeId:identity.runtimeId}
  await dom.render(<HostRuntimePanel host={remote} committed={remote} active/>);expect(call.mock.calls.at(-1)!.slice(0,2)).toEqual(['node.resources',{hostId:'peer',expectedRuntimeId:identity.runtimeId}])
  call.mockResolvedValueOnce({node:identity,policyRevision:'policy-2',status:'withheld'} as never)
@@ -190,12 +198,12 @@ it('actual Host consumer uses private owner resources locally, public target res
 it('temporary failure keeps last confirmed values, hides the reader without further samples, and never turns gaps into zero CPU',async()=>{
  vi.useFakeTimers();vi.spyOn(api.hosts,'inspect').mockRejectedValue(Error('separate observation failed'))
  const call=vi.spyOn(api.nodePublishing,'call').mockResolvedValue(resources() as never),local=composerConfig.hosts[0]!
- await dom.render(<HostRuntimePanel host={local} committed={local} active/>);call.mockResolvedValueOnce(resources(6000) as never)
+ await dom.render(<HostRuntimePanel host={local} committed={local} ownerTarget={{hostId:local.id,expectedRuntimeId:identity.runtimeId}} active/>);call.mockResolvedValueOnce(resources(6000) as never)
  await act(async()=>{await vi.advanceTimersByTimeAsync(5000)})
  expect(dom.container.textContent).toContain('25.0%');expect(dom.container.textContent).toContain('10.0%')
  call.mockRejectedValueOnce(Error('temporary read loss'));await act(async()=>{await vi.advanceTimersByTimeAsync(5000)})
  expect(dom.container.textContent).toContain('Last confirmed');expect(dom.container.textContent).toContain('6 GiB')
- await dom.render(<HostRuntimePanel host={local} committed={local} active={false}/>);const count=call.mock.calls.length
+ await dom.render(<HostRuntimePanel host={local} committed={local} ownerTarget={{hostId:local.id,expectedRuntimeId:identity.runtimeId}} active={false}/>);const count=call.mock.calls.length
  await act(async()=>{await vi.advanceTimersByTimeAsync(15000)});expect(call).toHaveBeenCalledTimes(count)
  const frames=[{at:1000,sample:sample(1000)},{at:2000,sample:null},{at:3000,sample:sample(3000)}]
  expect(nodeTrendPoints(frames).map(point=>point.hostCpu)).toEqual([null,null,null])
@@ -266,12 +274,14 @@ it('real persisted Core owner → Unix public client → Main bridge → Rendere
  await server.start();const rpc=await connectAgentMuxRpc({endpoint:{transport:'unix',path:server.path}})
  class Sender extends EventEmitter{id=52;isDestroyed(){return false}}
  const sender=new Sender(),handlers=new Map<string,(...args:any[])=>any>()
- const ipc=registerNodePublishingIpc({handle:(name,listener)=>handlers.set(name,listener),call:(method,params,context)=>rpc.call(method,params,context)})
+ const ipc=registerNodePublishingIpc({handle:(name,listener)=>handlers.set(name,listener),call:(method,params,context)=>rpc.call(method,params,context),owner:(target,method,params,context)=>{expect(target).toEqual({hostId:'local',expectedRuntimeId:'original-ui-runtime'});return rpc.call(method,params,context)}})
  let serial=0
- const bridge=createRendererNodePublishing({call:async(method,params,context)=>{const token='ui-'+(++serial),release=context?.onAbort?.(()=>handlers.get('nodePublishing:cancel')!({sender},token));try{return await handlers.get('nodePublishing:call')!({sender},token,method,params)}finally{release?.()}}})
+ const bridge=createRendererNodePublishing({owner:async(target,method,params,context)=>{const token='owner-'+(++serial);return handlers.get('nodePublishing:owner')!({sender},token,target,method,params)},call:async(method,params,context)=>{const token='ui-'+(++serial),release=context?.onAbort?.(()=>handlers.get('nodePublishing:cancel')!({sender},token));try{return await handlers.get('nodePublishing:call')!({sender},token,method,params)}finally{release?.()}}})
  vi.spyOn(api.nodePublishing,'call').mockImplementation(bridge.call)
+ vi.spyOn(api.nodePublishing,'owner').mockImplementation(bridge.owner)
+ vi.spyOn(api.hosts,'inspect').mockResolvedValue({routeHostId:'local',owner:{state:'available',value:{runtimeId:'original-ui-runtime'}}} as never)
  try{
-  await dom.render(<NetworkNodeSettingsPane {...props()}/>);await act(async()=>{for(let i=0;i<80&&!dom.container.querySelector('[aria-label="Node alias"]');i++)await new Promise(resolve=>setTimeout(resolve,10))});await input('Node alias','real-ui-node')
+  await dom.render(<NetworkNodeSettingsPane {...props()}/>);await readyNode();await input('Node alias','real-ui-node')
   for(const[label,value]of[['Shared folders',published],['Excluded paths',denied]]){
    await act(async()=>{const textarea=dom.container.querySelector<HTMLTextAreaElement>(`[aria-label="${label}"]`)!;Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value')!.set!.call(textarea,value!);textarea.dispatchEvent(new Event('input',{bubbles:true}))})
    await act(async()=>dom.container.querySelector<HTMLTextAreaElement>(`[aria-label="${label}"]`)!.dispatchEvent(new FocusEvent('focusout',{bubbles:true})))
@@ -287,7 +297,7 @@ it('real persisted Core owner → Unix public client → Main bridge → Rendere
   await dom.click('li button')
   await act(async()=>{for(let i=0;i<80&&!dom.container.querySelector('pre');i++)await new Promise(resolve=>setTimeout(resolve,10))})
   expect(dom.container.querySelector('pre')?.textContent).toBe('Original published bytes through Core')
-  const privateRead=await bridge.call('settings.node.resources',{}),publicRead=await bridge.call('node.resources',{hostId:local.id,expectedRuntimeId:saved.node.runtimeId})
+  const privateRead=await bridge.owner({hostId:'local',expectedRuntimeId:saved.node.runtimeId},'settings.node.resources',{}),publicRead=await bridge.call('node.resources',{hostId:local.id,expectedRuntimeId:saved.node.runtimeId})
   expect(privateRead.status).toBe('available');expect(publicRead.status).toBe('withheld')
  }finally{await dom.render(<div/>);ipc.dispose();await rpc.dispose();await server.stop();await rm(directory,{recursive:true,force:true})}
 })

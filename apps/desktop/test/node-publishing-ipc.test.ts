@@ -6,7 +6,7 @@ class Sender extends EventEmitter { id=21;isDestroyed(){return false} }
 it('actual registered bridge forwards only fixed Node methods and original roots, cancels exactly its sender reader',async()=>{
  const handlers=new Map<string,(...args:any[])=>any>(),sender=new Sender();let observed!:AbortSignal
  const call=vi.fn(async(_method,_params,{signal})=>{observed=signal;return await observeRead(new Promise<never>(()=>{}),signal)})
- const owner=registerNodePublishingIpc({handle:(name,listener)=>handlers.set(name,listener),call})
+ const owner=registerNodePublishingIpc({handle:(name,listener)=>handlers.set(name,listener),call,owner:vi.fn()})
  const root={runtimeId:'original-runtime',rootId:'original-root',policyRevision:'revision'}
  const pending=handlers.get('nodePublishing:call')!({sender},'token','node.files.read',{hostId:'peer',expectedRuntimeId:'original-runtime',root,path:'note.txt',maxBytes:512})
  expect(call.mock.calls[0]?.slice(0,2)).toEqual(['node.files.read',{hostId:'peer',expectedRuntimeId:'original-runtime',root,path:'note.txt',maxBytes:512}])

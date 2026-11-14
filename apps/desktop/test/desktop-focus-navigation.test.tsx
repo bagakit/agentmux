@@ -1190,6 +1190,32 @@ describe('Settings semantic navigation', () => {
     expect((await readSettings()).overlays.settingsPage).toMatchObject({ hostId: 'second-host' })
     await control({ kind: 'settings', sectionId: null })
   })
+  it('CLI-qualified Node navigation selects the actual saved owner, and the local Incoming link restores the local Node', async () => {
+    const { parseAgentMuxCliInvocation } = await import('../../../packages/core/src/agentmux-cli-commands')
+    const { rpcControlRequest } = await import('../../../packages/core/src/rpc-business-codec')
+    await act(async () => useAppStore.setState(state => ({ config: { ...state.config!, hosts: [...state.config!.hosts,
+      { id: 'remote-node', kind: 'ssh', label: 'Remote Node', hostname: 'private.invalid', runtimeId: 'remote-node-runtime' }] } })))
+    const node = (hostId: string) => ({ runtimeId: hostId === 'remote-node' ? 'remote-node-runtime' : 'local-node-runtime', ownerInstanceId: hostId + '-instance', alias: hostId === 'remote-node' ? 'remote-node' : 'local-node' })
+    vi.spyOn(api.nodePublishing, 'call').mockImplementation(async (method, params) => method === 'node.inspect'
+      ? { node: node(params.hostId), policyRevision: 'node-revision', resourcesShared: false, roots: [], landing: null } as never
+      : { node: node(params.hostId), policyRevision: 'node-revision', status: 'withheld' } as never)
+    vi.spyOn(api.nodePublishing, 'owner').mockImplementation(async (target, method) => method === 'settings.node.resources'
+      ? { node: node(target.hostId), policyRevision: 'node-revision', status: 'unavailable', code: 'FIXTURE_NO_SAMPLE', message: 'Private fixture does not sample resources.' } as never
+      : { node: node(target.hostId), policyRevision: 'node-revision', operation: null, policy: { alias: node(target.hostId).alias, shareResources: false, allowedPaths: [], deniedPaths: [], defaultPath: null } } as never)
+    const invocation = await parseAgentMuxCliInvocation(['app', 'focus', '--settings-section', 'network-node', '--host', 'remote-node'])
+    const request = rpcControlRequest('app.focus', invocation.params)
+    if (request.operation !== 'focus') throw new Error('The original CLI did not produce a focus request')
+    const result = await control(request.target)
+    expect(result.navigation.state).toBe('applied'); expect(result.overlays.settingsPage).toMatchObject({ sectionId: 'network-node', hostId: 'remote-node', visible: true })
+    expect(container.querySelector('[data-settings-pane="network-node"] [data-settings-field="incoming"]')).toBeNull()
+    await control({ kind: 'settings', sectionId: 'hosts', hostId: 'local' })
+    await act(async () => container.querySelector<HTMLButtonElement>('[data-resource-editor="local"] [data-host-panel="connection"]')!.click())
+    const open = [...container.querySelectorAll<HTMLButtonElement>('[data-resource-editor="local"] button')].find(button => button.textContent === 'Open Node')!
+    expect(open).not.toBeNull(); await act(async () => open.click()); await settle()
+    expect((await readSettings()).overlays.settingsPage).toMatchObject({ sectionId: 'network-node', hostId: 'local', visible: true })
+    expect(container.querySelector('[data-settings-pane="network-node"] [data-settings-field="incoming"]')).not.toBeNull()
+    await control({ kind: 'settings', sectionId: null })
+  })
   it('Host-qualified Agent focus checks the original Host before navigation and keeps a healthy same-SID workface', async () => {
     await control({ kind: 'space', regionId: 'source-region' })
     const before = useAppStore.getState(), drafts = before.agentComposerDrafts
