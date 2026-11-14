@@ -1,0 +1,6 @@
+#!/usr/bin/env node
+import { runRelayGatewayCli } from '../dist/gateway-cli.js'
+void runRelayGatewayCli(process.argv.slice(2)).catch(error => {
+  process.stderr.write(JSON.stringify({ error: { code: 'RELAY_FAILED', message: error instanceof Error ? error.message : String(error) } }) + '\n')
+  process.exitCode = 1
+})

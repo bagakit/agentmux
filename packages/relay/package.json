@@ -3,8 +3,11 @@
   "version": "0.1.0",
   "type": "module",
   "license": "Apache-2.0",
+  "bin": { "agentmux-relay": "./bin/agentmux-relay" },
   "files": [
+    "bin",
     "dist",
+    "README.md",
     "LICENSE",
     "NOTICE"
   ],
@@ -28,6 +31,10 @@
     "./endpoint": {
       "types": "./dist/daemon-endpoints.d.ts",
       "import": "./dist/daemon-endpoints.js"
+    },
+    "./gateway": {
+      "types": "./dist/gateway.d.ts",
+      "import": "./dist/gateway.js"
     },
     "./local": {
       "types": "./dist/local-adapter.d.ts",
