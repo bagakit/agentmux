@@ -16,6 +16,7 @@ import { GoalAgentPicker, type GoalRelationSave } from './GoalAgentPicker'
 import { FocusContextCardBody } from './FocusContextCardBody'
 import { GoalTeamReference, goalTeamSourceLabels } from './GoalTeamReference'
 import { useWorkbenchPresentationActive } from '../lib/workbench-presentation'
+import { requestAgentConversationFloatingOpen } from '../lib/pmo-teams-topic-floating'
 import { compactReferenceId } from '@agentmux/client-ui/display-name'
 import '../styles/goal-team.css'
 
@@ -79,13 +80,12 @@ const GoalTeamActorCard = memo(function GoalTeamActorCard({ actor, onRecommend }
   const name = useAppStore(state => state.agentNames[session.id])
   const firstPrompt = useAppStore(useMemo(() => createFirstPromptSelector(session.id), [session.id]))
   const scope = useAppStore(useShallow(state => ({ config: state.config, topics: state.scratchTopicSnapshots })))
-  const selectSession = useAppStore(state => state.selectSession)
   const context = useMemo(() => {
     const topics = scratchTopicsForConfig(scope.config, scope.topics), workspace = workspaceForSession(scope.config, session, topics)
     return { ...agentContextForSession(session, undefined, name, workspace, topicIdForSession(scope.config, session, topics)),
       name: agentDisplayName({ userName: name, firstPrompt, fallbackLabel: session.label, providerLabel: session.providerId }), recap: undefined }
   }, [session, name, firstPrompt, scope])
-  const open = useCallback(() => { selectSession(session.id) }, [selectSession, session.id])
+  const open = useCallback(() => { requestAgentConversationFloatingOpen(session.control.agentSessionId, session.control.hostId) }, [session.control.agentSessionId, session.control.hostId])
   return <div className="goal-team__actor" data-goal-team-actor={actor.key}>
     <div className="goal-team__roles">{actor.roles.length ? actor.roles.map(role => <span key={role} data-goal-team-role={role}>{roleNames[role]}</span>) : goalTeamSourceLabels(actor.identity).map(label => <span key={label}>{label}</span>)}</div>
     <FocusContextCardBody context={context} selected={false} onSelect={open} />

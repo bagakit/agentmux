@@ -376,13 +376,15 @@ function agentConversationSelection(agentSessionId: string | null, hostId?: stri
   const suppliedReference = originalReference ? { displayWorkspaceId: originalReference.displayWorkspaceId, groupId: originalReference.groupId,
     tabId: originalReference.tabId, regionId: originalReference.regionId } : undefined
   const sessions = current.sessions.filter(session => session.kind === 'agent' && session.control.agentSessionId === agentSessionId && (!hostId || session.control.hostId === hostId))
-  const session = sessions.length === 1 ? sessions[0] : undefined
+  const hosts = new Set(sessions.map(session => session.control.hostId))
+  const byId = new Map((hostId || hosts.size === 1 ? sessions : []).map(session => [session.id, session]))
   const candidates = Object.values(current.tabs).flatMap(tab => Object.values(tab.regions).flatMap(region =>
-    session && region.kind === 'agent' && region.sessionId === session.id ? [{ tab, region }] : []))
+    region.kind === 'agent' && byId.has(region.sessionId) ? [{ tab, region, session: byId.get(region.sessionId)! }] : []))
   const sameOriginal = previous.agentTarget?.agentSessionId === agentSessionId && (!hostId || previous.agentTarget.hostId === hostId || previous.targetAgent?.hostId === hostId)
   const previousCandidate = sameOriginal && previous.reference ? candidates.find(item => item.tab.id === previous.reference!.tabId && item.region.regionId === previous.reference!.regionId) : undefined
   const candidate = suppliedReference ? candidates.find(item => item.tab.id === suppliedReference.tabId && item.region.regionId === suppliedReference.regionId)
     : previousCandidate ?? (candidates.length === 1 ? candidates[0] : undefined)
+  const session = candidate?.session ?? (sessions.length === 1 ? sessions[0] : undefined)
   const references = candidate ? Object.entries(current.layouts).flatMap(([displayWorkspaceId, layout]) => layout.groups
     .filter(group => groupIds(layout.root).includes(group.id) && group.tabOrder.includes(candidate.tab.id))
     .map(group => ({ displayWorkspaceId, groupId: group.id, tabId: candidate.tab.id, regionId: candidate.region.regionId }))) : []
