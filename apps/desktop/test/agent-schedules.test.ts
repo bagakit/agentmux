@@ -100,6 +100,42 @@ describe('original schedule owner', () => {
     }
   })
 
+  it('persists a human postponement without the interrupted unsubmitted preparation', async () => {
+    const dispatched = vi.fn(async () => 'sent' as const)
+    const h = await owner(dispatched)
+    h.manager.setMaintenanceOwner({ maintain: async () => {}, qualify: async () => ({ action: 'continue' }) })
+    const { schedule } = await h.manager.call('schedule.create', { target, everyMs: 60_000, prompt: 'next', operationId: 'postpone-create',
+      managedSource: { sourceId: 'original-care', revision: 'original-role' } })
+    h.set({ now: schedule.nextCheckAt })
+    const save = h.store.save.bind(h.store), entered = deferred(), release = deferred()
+    const fault = vi.spyOn(h.store, 'save').mockImplementation(async loops => {
+      await save(loops)
+      if (loops.some(loop => loop.loopId === schedule.loopId && loop.pendingCompletion)) {
+        entered.resolve()
+        await release.promise
+        throw Object.assign(new Error('Original directory sync unconfirmed after replacing the file'), { code: 'ENOSPC' })
+      }
+    })
+    const checking = h.manager.check().catch(error => error)
+    try {
+      await entered.promise
+      const stored = (await h.reload())[0]!
+      expect(stored.pendingCompletion).toBeDefined()
+      const [deferred] = await h.manager.deferManaged([schedule.loopId], 'Original human input postponed care.')
+      expect(deferred).toMatchObject({ status: 'fulfilled' })
+      const after = (await h.reload())[0]!
+      expect(after).toMatchObject({ status: 'active', nextCheckAt: schedule.nextCheckAt + 60_000 })
+      expect(after.pendingCompletion).toBeUndefined()
+      expect(after.lastInputRef).toBeUndefined()
+    } finally {
+      release.resolve()
+      expect(await checking).toMatchObject({ code: 'ENOSPC' })
+      fault.mockRestore()
+    }
+    expect(dispatched).not.toHaveBeenCalled()
+    expect((await h.reload())[0]?.pendingCompletion).toBeUndefined()
+  })
+
   it.each(['occupied','working','permission','missing'] as const)('keeps the occurrence due while %s', async blocked => {
     let calls = 0
     const h = await owner(async () => { calls++; return 'sent' })
