@@ -110,7 +110,7 @@
 .focus-context--compact .focus-context__detail { display: none; }
 .focus-context--compact .focus-context__identity strong { font-size: var(--fs-micro); font-weight: 500; }
 .focus-context:hover, .focus-context.is-menu-open { background: var(--surface-2); color: var(--text); }
-.focus-context.is-selected { background: var(--surface-3); color: var(--text); }
+.focus-context.is-selected { background: var(--surface-3); color: var(--text); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--green) 72%, transparent), inset 3px 0 0 var(--green); }
 .focus-context:focus-visible, .focus-project-lanes__axis:focus-visible { outline: 1px solid var(--green); outline-offset: -1px; }
 .focus-context__avatar { flex: none; display: flex; }
 .focus-context__copy { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
