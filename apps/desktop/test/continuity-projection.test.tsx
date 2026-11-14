@@ -88,6 +88,33 @@ it('same-ID and same-timestamp full body or protocol ACK changes produce isolate
  const{continuity,continuityOperations,...cleared}=f.core;apply(cleared)
  expect(current()).not.toHaveProperty('continuity');expect(current()).not.toHaveProperty('continuityOperations');expect(api.sessions.write).not.toHaveBeenCalled()
 })
+it('changed operation observations retain one shared frozen input body across every retained version without aliasing the source or rewriting older versions',()=>{
+ apply(f.core);const snapshots=[current()]
+ for(let index=0;index<4;index++){
+  const incoming=clone(f.core),observedAt=10+index
+  for(const operation of[incoming.continuity!,incoming.continuityOperations![f.operation.operationId]!]){operation.observedAt=observedAt;operation.supervision={...operation.supervision!,observedAt}}
+  apply(incoming);snapshots.push(current())
+ }
+ expect(new Set(snapshots.map(session=>session.continuity)).size).toBe(5)
+ expect(snapshots.map(session=>session.continuity?.supervision?.observedAt)).toEqual([2,10,11,12,13])
+ expect(new Set(snapshots.map(session=>session.continuity?.messageInput)).size,'Every retained version must share one frozen input body').toBe(1)
+ expect(new Set(snapshots.map(session=>session.continuityOperations?.[f.operation.operationId]?.messageInput)).size).toBe(1)
+ expect(snapshots.at(-1)!.continuity?.messageInput).not.toBe(f.core.continuity?.messageInput)
+ f.core.continuity!.messageInput!.message.userContent='Caller changed its original source after intake'
+ expect(snapshots.every(session=>session.continuity?.messageInput?.message.userContent===generated)).toBe(true)
+ const changed=clone(f.core);changed.continuity!.messageInput!.message.userContent='Changed frozen body';changed.continuityOperations![f.operation.operationId]!.messageInput!.message.userContent='Changed frozen body'
+ apply(changed);expect(current().continuity?.messageInput?.message.userContent).toBe('Changed frozen body');expect(current().continuity?.messageInput?.ref).toBe(snapshots.at(-1)!.continuity?.messageInput?.ref)
+ expect(snapshots.at(-1)!.continuity?.messageInput?.message.userContent===generated).toBe(true)
+ expect(api.sessions.recover).not.toHaveBeenCalled();expect(api.sessions.write).not.toHaveBeenCalled()
+})
+it('a pointer that becomes equal to its map operation again shares that one operation after distinct same-ID facts',()=>{
+ apply(f.core);const distinct=clone(f.core)
+ distinct.continuityOperations![f.operation.operationId]={...distinct.continuityOperations![f.operation.operationId]!,action:'restart',kind:'starting'}
+ apply(distinct);expect(current().continuity).not.toBe(current().continuityOperations?.[f.operation.operationId])
+ apply({...clone(f.core),updatedAt:3})
+ expect(current().continuity,'An equal pointer and map operation must remain one projected operation').toBe(current().continuityOperations?.[f.operation.operationId])
+ expect(current().continuity).toEqual(f.operation)
+})
 it('existing exact Host, Session and stale Run/receipt guards precede graph reuse and same-ID differing pointer/map facts remain distinct',()=>{
  apply(f.core);const accepted=current()
  apply({...clone(f.core),updatedAt:100},'unrelated-host');expect(current()).toBe(accepted)
