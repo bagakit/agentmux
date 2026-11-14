@@ -1,3 +1,4 @@
+import { createPreloadSourceFiles } from './source-files'
 import { unwrapIpcResult } from '../shared/ipc-result'
 import { createPreloadHostRoutes } from './host-routes'
 import { createPreloadSpaceMount } from './space-mount'
@@ -106,6 +107,7 @@ const initialTheme: ThemeBootstrap | null = process.isMainFrame ? (() => {
 projectInitialTheme(initialTheme)
 
 const api: AgentMuxPreloadApi = {
+  sourceFiles: createPreloadSourceFiles(ipcRenderer),
   spaceMounts: createPreloadSpaceMount(ipcRenderer),
   hostRoutes: createPreloadHostRoutes(ipcRenderer),
   clientIncidents: {

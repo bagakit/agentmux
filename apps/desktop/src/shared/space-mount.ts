@@ -1,5 +1,5 @@
 import type { SpaceAuthorityRef, SpaceSnapshot, SpaceApply, SpaceApplyReceipt, SpaceWatch } from '@agentmux/core'
-import type { FolderSpaceRegistration, FolderSpaceReceipt } from '@agentmux/core/space-folder'
+import type { FolderSpaceRegistration, FolderSpaceReceipt, FolderSpaceRegisterInput } from '@agentmux/core/space-folder'
 import type { WorkspaceLayout, WorkbenchViewLayout } from '@agentmux/layout'
 import type { SpaceSessionsOpening, SpaceSessionsObservation } from '@agentmux/core/space-sessions'
 
@@ -23,7 +23,7 @@ export type SpaceMountMethods = {
   describe: { input: SpaceMountSourceTarget; result: import('@agentmux/core/agent-open-contract').AgentOpenDescription }
   routeChoices: { input: SpaceMountSourceTarget; result: import('@agentmux/core/host-route').HostRouteChoices }
   routeExecutors: { input: SpaceMountSourceTarget & { agentTarget: import('@agentmux/core/host-route').HostRouteAgentTarget; executorId?: string }; result: import('@agentmux/core/host-route').HostRouteExecutors }
-  register: { input: { hostId: string; registration: FolderSpaceRegistration }; result: FolderSpaceReceipt }
+  register: { input: { hostId: string; registration: FolderSpaceRegisterInput }; result: FolderSpaceReceipt }
   inspectRegistration: { input: { hostId: string; registration: FolderSpaceRegistration }; result: import('@agentmux/core/space-folder').FolderSpaceRegistrationInspection | null }
   snapshot: { input: SpaceMountTarget; result: SpaceSnapshot }
   apply: { input: SpaceMountTarget & { edit: SpaceApply }; result: SpaceApplyReceipt }

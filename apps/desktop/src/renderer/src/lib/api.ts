@@ -1,3 +1,4 @@
+import { createRendererSourceFiles } from './source-files-api'
 import { createRendererSpaceMount } from './space-mount-api'
 import { createRendererNodePublishing } from './node-publishing-client'
 import { createPreviewWorkbenchClose } from './preview-workbench-close'
@@ -409,6 +410,7 @@ async function mockHistorySources(options?: { observation: true }): Promise<Agen
 }
 
 const mockApi: AgentMuxDesktopApi = {
+  sourceFiles: { resolve: async () => ({ status: 'unconfirmed', issue: { code: 'SOURCE_FILES_UNAVAILABLE', message: 'The original Source Files owner is unavailable in this preview. Existing buffers are retained.' } }), call: async () => { throw new Error('The original Source Files owner is unavailable.') }, watch: async () => { throw new Error('The original Source Files observer is unavailable.') } },
   clientIncidents: { open: async () => null, report: async () => ({ accepted: false }) },
   conversation: {
     readAgentConversation: async () => { throw new Error('Open Desktop to read the original conversation.') },
@@ -1723,6 +1725,7 @@ function requireDesktopApi(): AgentMuxDesktopApi {
     toolkit: createToolkitConfigurationApi(preload.toolkit),
     applications: { call: async (method, params) => unwrapSessionInputOperationResult(await preload.applications.call(method, params)) },
     conversation: createConversationReadApi(preload.conversation),
+    sourceFiles: createRendererSourceFiles(preload.sourceFiles),
     spaceMounts: createRendererSpaceMount(preload.spaceMounts),
     nodePublishing: createRendererNodePublishing(preload.nodePublishing),
     hostRoutes: createRendererHostRoutes(preload.hostRoutes),

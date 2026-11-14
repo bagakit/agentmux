@@ -1691,6 +1691,7 @@ export type AgentMuxDesktopApi = {
   }
   nodePublishing: import('./node-publishing.js').DesktopNodePublishingPort
   hostRoutes: import('./host-routes.js').DesktopHostRoutes
+  sourceFiles: import('./source-files-client.js').SourceFilesApi
   spaceMounts: import('./space-mount.js').SpaceMountPort
   hosts: {
     configureTailcat(input: AgentMuxRpcParams<'settings.hosts.tailcat.configure'>): Promise<AgentMuxRpcResult<'settings.hosts.tailcat.configure'>>
@@ -2308,9 +2309,10 @@ export type AgentMuxDesktopApi = {
   }
 }
 
-export type AgentMuxPreloadApi = Omit<AgentMuxDesktopApi, 'control' | 'sessions' | 'scratch' | 'notebooks' | 'search' | 'browser' | 'hosts' | 'nodePublishing' | 'hostRoutes' | 'spaceMounts' | 'applications' | 'conversation' | 'landmarks' | 'toolkit' | 'workbenchClose'> & {
+export type AgentMuxPreloadApi = Omit<AgentMuxDesktopApi, 'control' | 'sessions' | 'scratch' | 'notebooks' | 'search' | 'browser' | 'hosts' | 'nodePublishing' | 'hostRoutes' | 'spaceMounts' | 'applications' | 'conversation' | 'landmarks' | 'toolkit' | 'workbenchClose' | 'sourceFiles'> & {
   workbenchClose: { call<M extends import('@agentmux/core').SpaceCloseMethod>(method: M, input: import('@agentmux/core').SpaceCloseParams[M]): Promise<import('./session-observation-result').SessionObservationResult<import('@agentmux/core').SpaceCloseResults[M]>> }
   hostRoutes: import('./host-routes.js').PreloadHostRoutes
+  sourceFiles: import('./source-files-client.js').SourceFilesPreloadApi
   spaceMounts: import('./space-mount.js').SpaceMountPreloadApi
   toolkit: Omit<AgentMuxDesktopApi['toolkit'], 'add' | 'update' | 'remove'> & {
     add(...args: Parameters<AgentMuxDesktopApi['toolkit']['add']>): Promise<import('./toolkit-configuration-result').ToolkitConfigurationResult<Awaited<ReturnType<AgentMuxDesktopApi['toolkit']['add']>>>>

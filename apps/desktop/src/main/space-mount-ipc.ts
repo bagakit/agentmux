@@ -3,14 +3,14 @@ import { parseHostRouteAgentTarget } from '@agentmux/core/host-route'
 import { parseNameControlParams } from '@agentmux/core/name-control'
 import type { AppConfig } from '../shared/contracts.js'
 import type { IpcMainInvokeEvent } from 'electron'
-import { parseFolderSpaceRegistration } from '@agentmux/core/space-folder'
+import { parseFolderSpaceRegistration, parseFolderSpaceRegisterInput } from '@agentmux/core/space-folder'
 import { parseSpaceAuthorityRef, parseSpaceAuthorityParams, rpcControlRequest } from '@agentmux/core'
 import type { RuntimeController } from './runtime-controller.js'
 import { SessionHistoryReadOwners } from './session-history-read.js'
 import { sessionInputOperationResult } from '../shared/session-input-result.js'
 import { SPACE_MOUNT_EVENT, SPACE_MOUNT_SESSIONS_EVENT, SPACE_MOUNT_MEMBER_EVENT, type SpaceMountWatch, type SpaceMountMemberSurface, type SpaceMountMemberMethods } from '../shared/space-mount.js'
 
-function fields(input: unknown, allowed: string[]): Record<string, unknown> {
+export function fields(input: unknown, allowed: string[]): Record<string, unknown> {
   if (!input || typeof input !== 'object' || Array.isArray(input) || Object.keys(input).some(key => !allowed.includes(key))) throw new Error('Use the exact original Space mount request.')
   return input as Record<string, unknown>
 }
@@ -18,7 +18,7 @@ function host(value: unknown): string {
   if (typeof value !== 'string' || !value || value.includes('\0')) throw new Error('Choose the original configured Space Host.')
   return value
 }
-function sourceTarget(p: Record<string, unknown>): import('../shared/space-mount.js').SpaceMountSourceTarget {
+export function sourceTarget(p: Record<string, unknown>): import('../shared/space-mount.js').SpaceMountSourceTarget {
   if (p.reference !== undefined && p.expectedRuntimeId !== undefined) throw new Error('Choose one exact original Source address.')
   return p.expectedRuntimeId === undefined ? { hostId: host(p.hostId), reference: parseSpaceAuthorityRef(p.reference) }
     : { hostId: host(p.hostId), expectedRuntimeId: host(p.expectedRuntimeId) }
@@ -51,7 +51,7 @@ export function registerSpaceMountIpc(ports: {
       return method === 'routeChoices' ? await ports.runtime.mountedSpaceRouteChoices(target, signal)
         : await ports.runtime.mountedSpaceRouteExecutors(target, parseHostRouteAgentTarget(p.agentTarget), signal, p.executorId === undefined ? undefined : host(p.executorId))
     }
-    if (method === 'register') { const p = fields(value, ['hostId', 'registration']); return await ports.runtime.registerFolderSpace(host(p.hostId), parseFolderSpaceRegistration(p.registration), signal) }
+    if (method === 'register') { const p = fields(value, ['hostId', 'registration']); return await ports.runtime.registerFolderSpace(host(p.hostId), parseFolderSpaceRegisterInput(p.registration), signal) }
     if (method === 'inspectRegistration') { const p = fields(value, ['hostId', 'registration']); return await ports.runtime.inspectFolderSpace(host(p.hostId), parseFolderSpaceRegistration(p.registration), signal) }
     if (method === 'snapshot' || method === 'apply') {
       const p = fields(value, method === 'snapshot' ? ['hostId', 'reference'] : ['hostId', 'reference', 'edit'])
