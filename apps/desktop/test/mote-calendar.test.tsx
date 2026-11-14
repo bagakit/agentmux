@@ -62,15 +62,16 @@ async function edit(label: string, value: string) {
 async function openForm() { await act(async () => { const element = dom.container.querySelector<HTMLDetailsElement>('.schedule-create')!; element.open = true; element.dispatchEvent(new Event('toggle')) }) }
 
 describe('Mote calendar original schedule consumer', () => {
-  it('only asks the original Host for recorded history of the chosen arrangement and day', async () => {
+  it('keeps an earlier completed receipt visible after the latest input moves to another day', async () => {
     const selectedDate = DateTime.fromMillis(now, { zone: 'UTC' }).minus({ days: 1 })
     const range = calendarDayWindow(selectedDate)
-    const { afterMs: _, ...original } = saved('archived-heartbeat', { status: 'paused', lastOutcome: 'sent', lastOccurrenceAt: range.from + 3600000 })
+    const { afterMs: _, ...original } = saved('archived-heartbeat', { status: 'paused', lastOutcome: 'sent', lastOccurrenceAt: now })
     const other = { ...original, loopId: 'another-arrangement', creationOperationId: 'another-create', futureIntentId: 'another-intent', lastOccurrenceAt: range.from + 7200000 }
     let firstNext = true
     const readHistory = vi.fn<NonNullable<FutureProgressInputOwner['readHistory']>>(async (_loop, query) => {
+      if (query.from !== range.from) return { coverage: 'recorded-inputs', entries: [], nextCursor: null }
       if (!query.cursor) return { coverage: 'recorded-inputs', entries: [{ operationId: 'earlier-original-input', occurrenceAt: range.from + 3600000,
-        delivery: 'terminal-confirmed', nativeResult: { state: 'unsupported' } }], nextCursor: 'original-history-next' }
+        delivery: 'native-admitted', nativeResult: { state: 'completed', observedAt: range.from + 3600001 } }], nextCursor: 'original-history-next' }
       if (firstNext) { firstNext = false; return { coverage: 'unconfirmed', entries: [], nextCursor: null } }
       return { coverage: 'unconfirmed', entries: [{ operationId: 'older-original-input', occurrenceAt: range.from + 60000,
         delivery: 'unconfirmed', nativeResult: { state: 'unknown' } }], nextCursor: null }
@@ -81,34 +82,48 @@ describe('Mote calendar original schedule consumer', () => {
     const before = dom.container.querySelector<HTMLButtonElement>(`[data-mote-date="${selectedDate.toISODate()}"]`)!
     await act(async () => before.click())
     expect(readHistory).not.toHaveBeenCalled()
-    await act(async () => { dom.container.querySelector<HTMLDetailsElement>('.mote-calendar__recorded')!.open = true })
+    expect(before.parentElement?.querySelector('[data-calendar-schedule-id="archived-heartbeat"]')).toBeNull()
+    expect(dom.container.querySelector('section[aria-label="Recorded history"] h4')?.textContent).toBe('Recorded history')
     await act(async () => { dom.container.querySelector<HTMLButtonElement>('[aria-label="Arrangement history"]')!.click() })
     const option = () => document.querySelector<HTMLButtonElement>('[role="option"][data-value="archived-heartbeat"]')
     await vi.waitFor(() => expect(option()).not.toBeNull())
     await act(async () => { option()!.click() })
-    expect(readHistory).not.toHaveBeenCalled()
-    await button('Read history')
-    await vi.waitFor(() => expect(dom.container.querySelector('[aria-label="Recorded input receipts"]')?.textContent).toContain('01:00Sent to terminal'))
+    await vi.waitFor(() => expect(dom.container.querySelector('[aria-label="Recorded input receipts"]')?.textContent ?? '').toContain('01:00Input acceptedAgent turn completed'))
     const query = { scheduleId: original.loopId, ...range }
     expect(calls).toHaveBeenCalledWith('schedule.history', query, expect.objectContaining({ transport: 'unix' }))
     expect(readHistory).toHaveBeenCalledWith(expect.objectContaining({ loopId: original.loopId, agentSessionId: target.agentSessionId }), query, expect.anything())
     await button('Next')
     await vi.waitFor(() => expect(dom.container.textContent).toContain('The previous page is still shown.'))
-    expect(dom.container.querySelector('[aria-label="Recorded input receipts"]')?.textContent).toContain('01:00Sent to terminal')
-    await button('Next')
+    expect(dom.container.querySelector('[aria-label="Recorded input receipts"]')?.textContent).toContain('01:00Input acceptedAgent turn completed')
+    await button('Retry history')
     await vi.waitFor(() => expect(dom.container.querySelector('[aria-label="Recorded input receipts"]')?.textContent).toContain('Delivery unconfirmed'))
     expect(dom.container.textContent).toContain('Some original input records could not be checked.')
     expect(readHistory).toHaveBeenLastCalledWith(expect.objectContaining({ loopId: original.loopId }), { ...query, cursor: 'original-history-next' }, expect.anything())
     await act(async () => { dom.container.querySelector<HTMLButtonElement>('[data-calendar-schedule-id="another-arrangement"]')!.click() })
-    expect(dom.container.querySelector('[aria-label="Recorded input receipts"]')).toBeNull()
-    expect(readHistory).toHaveBeenCalledTimes(3)
-    await button('Read history')
     await vi.waitFor(() => expect(readHistory).toHaveBeenLastCalledWith(expect.objectContaining({ loopId: other.loopId }), { ...range, scheduleId: other.loopId }, expect.anything()))
-    await button('Today')
-    expect(dom.container.querySelector('[aria-label="Arrangement history"]')?.textContent).toContain('Choose an arrangement')
     expect(readHistory).toHaveBeenCalledTimes(4)
+    await button('Today')
+    const today = calendarDayWindow(DateTime.fromMillis(now, { zone: 'UTC' }))
+    await vi.waitFor(() => expect(readHistory).toHaveBeenLastCalledWith(expect.objectContaining({ loopId: other.loopId }), { ...today, scheduleId: other.loopId }, expect.anything()))
+    await vi.waitFor(() => expect(dom.container.textContent).toContain('No recorded inputs in this period.'))
+    expect(dom.container.querySelector('[aria-label="Recorded input receipts"]')).toBeNull()
+    expect(readHistory).toHaveBeenCalledTimes(5)
     expect(calls.mock.calls.every(([method]) => method === 'schedule.list' || method === 'schedule.history')).toBe(true)
     expect((await fixture!.store.load()).find(loop => loop.loopId === original.loopId)).toMatchObject({ status: 'paused', revision: original.revision })
+  })
+
+  it('reads the only arrangement directly while its original period is visible', async () => {
+    const readHistory = vi.fn<NonNullable<FutureProgressInputOwner['readHistory']>>(async () => ({ coverage: 'recorded-inputs', entries: [], nextCursor: null }))
+    const original = saved('only-original-countdown')
+    await owner([original], readHistory)
+    await dom.render(<MoteCalendar scope={scope} reference={reference} active={false} />)
+    expect(readHistory).not.toHaveBeenCalled()
+    await dom.render(<MoteCalendar scope={scope} reference={reference} active />)
+    await vi.waitFor(() => expect(dom.container.querySelector('[aria-label="Recorded history"]')?.textContent).toContain('No recorded inputs in this period.'))
+    expect(dom.container.querySelector('[aria-label="Arrangement history"]')).toBeNull()
+    expect(readHistory).toHaveBeenCalledTimes(1)
+    const query = { scheduleId: original.loopId, ...calendarDayWindow(DateTime.fromMillis(now, { zone: 'UTC' })) }
+    expect(readHistory).toHaveBeenCalledWith(expect.objectContaining({ loopId: original.loopId }), query, expect.anything())
   })
 
   it('groups the actual elapsed hours without duplicating or dropping DST minutes', () => {
@@ -179,7 +194,7 @@ describe('Mote calendar original schedule consumer', () => {
     await vi.waitFor(() => expect(marker()?.getAttribute('aria-label')).toContain('Input accepted'))
     expect(dom.container.querySelector('[data-calendar-schedule-id="cancelled"]')).toBeNull()
     expect(dom.container.textContent).not.toContain('Show ended')
-    expect(dom.container.querySelector('.mote-calendar__reading-note')?.textContent).toContain('latest confirmed input for each arrangement')
+    expect(dom.container.querySelector('.mote-calendar__legend')?.textContent).toContain('latest input')
     await button('Day')
     const hour = dom.container.querySelector<HTMLButtonElement>(`[data-calendar-hour="${accepted.toISODate()}:${accepted.hour}"]`)!
     expect(hour.getAttribute('aria-label')).toContain('0 planned, 1 accepted')

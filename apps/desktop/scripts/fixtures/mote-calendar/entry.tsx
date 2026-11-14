@@ -123,12 +123,17 @@ api.schedule.inspect = async params => {
 api.schedule.history = async params => {
   calls.push({ method: 'schedule.history', params: clone(params) })
   const record = records.find(item => item.loopId === params.scheduleId)
-  const at = record?.lastOccurrenceAt
-  if (at === undefined || at < params.from || at >= params.to) throw new Error('PRIVATE_FIXTURE_HISTORY_SCOPE_MISMATCH')
+  if (!record) throw new Error('PRIVATE_FIXTURE_HISTORY_SCOPE_MISMATCH')
+  const previous = densityProof && record.loopId === 'group-watch'
+  const at = previous ? nine(now - day) + 40 * 60_000 : record.lastOccurrenceAt
+  const entries = at === undefined || at < params.from || at >= params.to ? [] : [{
+    operationId: 'original-fixture-receipt-' + record.loopId, occurrenceAt: at,
+    delivery: previous ? 'native-admitted' : 'terminal-confirmed',
+    nativeResult: previous ? { state: 'completed', observedAt: at + 1_000 } : { state: 'unsupported' }
+  }]
   return validateScheduleRpcResult('schedule.history', {
     scheduleId: params.scheduleId, from: params.from, to: params.to, executionScope: 'connected-host',
-    coverage: 'recorded-inputs', entries: [{ operationId: 'original-fixture-receipt', occurrenceAt: at,
-      delivery: 'terminal-confirmed', nativeResult: { state: 'unsupported' } }], nextCursor: null
+    coverage: 'recorded-inputs', entries, nextCursor: null
   }, params)
 }
 const mutate = (action: 'pause' | 'resume' | 'cancel') => async (params: ScheduleParamsMap['schedule.pause']) => {
