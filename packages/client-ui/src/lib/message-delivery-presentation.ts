@@ -1,5 +1,6 @@
 import { describeError } from './error-presentation.js'
 import type { ClientDeliveryLog } from './delivery-diagnostics.js'
+import { agentPromptInputId } from '@agentmux/core/prompt-condition'
 import { readAgentPromptPreparationWait } from '@agentmux/core/prompt-preparation'
 import type { AgentInputSubmissionReceipt, AgentInputWaitStopReceipt, AgentSessionUserMessage } from '@agentmux/core'
 
@@ -23,6 +24,15 @@ function fields(value: unknown): Record<string, unknown> | undefined {
   return typeof value === 'object' && value !== null ? value as Record<string, unknown> : undefined
 }
 
+/** An exact stop covers one original input and waiting generation. */
+export function isOriginalInputWaitStopped(input: AgentInputSubmissionReceipt | undefined, stop: AgentInputWaitStopReceipt | undefined): boolean {
+  if (!input || stop?.outcome !== 'stopped-before-dispatch' || stop.ref.waitGeneration !== input.ref.waitGeneration ||
+      input.admission !== null || input.control.state === 'dispatch-authorized') return false
+  const key = input.ref.key, stopped = stop.ref.key
+  return stopped.kind === key.kind && stopped.agentSessionId === key.agentSessionId &&
+    stopped.expectedRun.runId === key.expectedRun.runId && agentPromptInputId(stopped) === agentPromptInputId(key)
+}
+
 /** Presentation only: no input admission, error-string protocol interpretation or replay decision. */
 export function presentMessageDeliveryFailure(input: MessageDeliveryDiagnostic) {
   const presented = describeError(input.error)
@@ -40,13 +50,7 @@ export function presentMessageDeliveryFailure(input: MessageDeliveryDiagnostic) 
     state: '原消息已接收；Agent 后续处理尚未确认。', action: '可在原对话查看 Agent 回复。' }
   if (status === 'not-applied') return { kind: 'not-applied', title: '尚未送出',
     state: '这次输入尚未送达，原消息已保留。', action: '可重试这条消息。' }
-  const stop = input.inputStopReceipt
-  const key = receipt?.ref.key, stoppedKey = stop?.ref.key
-  const stopped = stop?.outcome === 'stopped-before-dispatch' && receipt && stop.ref.waitGeneration === receipt.ref.waitGeneration &&
-    stoppedKey?.kind === key?.kind && stoppedKey?.agentSessionId === key?.agentSessionId && stoppedKey?.expectedRun.runId === key?.expectedRun.runId &&
-    (key?.kind === 'prompt' ? stoppedKey?.kind === 'prompt' && stoppedKey.submissionId === key.submissionId
-      : key?.kind === 'message' && stoppedKey?.kind === 'message' && stoppedKey.messageId === key.messageId)
-  if (stopped && receipt.admission === null && receipt.control.state !== 'dispatch-authorized') return { kind: 'stopped', title: '已停止等待',
+  if (isOriginalInputWaitStopped(receipt, input.inputStopReceipt)) return { kind: 'stopped', title: '已停止等待',
     state: 'Core 已确认停止这一代等待，原消息保留。', action: '再次发送会重新确认这条原消息。' }
   const unknown = input.inputUnconfirmed || control?.disposition === 'unknown' ||
     typeof control?.confirmedInputBytes === 'number' && control.confirmedInputBytes > 0 ||
@@ -60,7 +64,7 @@ export function presentMessageDeliveryFailure(input: MessageDeliveryDiagnostic) 
     state: '这条消息此前是否已输入仍待核实，原消息和操作会保留。',
     action: '先查看原对话与投递记录，避免重复发送。' }
   if (receipt) {
-    if (receipt.status === 'stopped' || stopped) return { kind: 'stopped', title: '已停止等待',
+    if (receipt.status === 'stopped') return { kind: 'stopped', title: '已停止等待',
       state: 'Core 已确认停止这一代等待，原消息保留。', action: '再次发送会重新确认这条原消息。' }
     if (receipt.status === 'waiting' && receipt.control.state === 'enabled' && receipt.admission === null) {
       const wait = receipt.control.waiting

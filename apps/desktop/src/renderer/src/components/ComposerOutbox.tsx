@@ -1,5 +1,6 @@
 import type { PromptPreparationRetryProgress } from '../lib/prompt-preparation-retry'
 import type { AgentInputSubmissionReceipt, AgentInputWaitStopReceipt } from '@agentmux/core'
+import { isOriginalInputWaitStopped } from '@agentmux/client-ui/message-delivery-presentation'
 import { MessageDeliveryFailure } from '@agentmux/client-ui/components/MessageDeliveryFailure'
 import { messageDeliveryDiagnostics } from '../lib/message-delivery-diagnostics'
 import { MailboxLocationContext } from './MailboxLocationContext'
@@ -69,7 +70,7 @@ export function queuedMessageState(entry: ComposerQueuedMessage, pendingInteract
     detail: '原终端已确认输入字节；Native 是否采用尚未确认。这不是任务完成回执。归档不撤回输入，不能恢复为待发重投。', busy: false }
   if (entry.inputReceipt && !entry.archived) {
     const input = entry.inputReceipt
-    if (entry.inputStopReceipt?.ref.waitGeneration === input.ref.waitGeneration && entry.inputStopReceipt.outcome === 'stopped-before-dispatch') {
+    if (isOriginalInputWaitStopped(input, entry.inputStopReceipt)) {
       return { label: '已停止等待', detail: 'Core 已确认停止这一代等待，原消息保留。刷新观察失败不会撤销这条停止回执；再次发送会重新确认原消息。', busy: false }
     }
     if (input.status === 'waiting') {
