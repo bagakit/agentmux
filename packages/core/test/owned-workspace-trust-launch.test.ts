@@ -3,6 +3,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AgentMuxClient } from '../src/client.js'
+import { AgentMuxCreationAuthority } from '../src/agent-creation-authority.js'
+import { executionCreationId } from '../src/host-route-execution.js'
 import { AgentMuxFileAgentSessionStore } from '../src/agent-session-store.js'
 import { AgentProviderRegistry, type AgentProvider, type AgentWorkspaceTrustContext, type AgentWorkspaceTrustReceipt } from '../src/agent-provider.js'
 import type { AgentMuxClientEvent, AgentMuxStoredAgentSession } from '../src/types.js'
@@ -52,7 +54,8 @@ beforeEach(async () => {
   const provider: AgentProvider = { ...claude, prepareOwnedWorkspaceTrust: context => trust(context) }
   store = new AgentMuxFileAgentSessionStore(join(root, 'sessions.json'))
   const cursor = new AgentProviderRegistry().get('cursor')
-  client = new AgentMuxClient({ store, providers: [provider, cursor], ownedWorkspaceRoots: () => owned() })
+  client = new AgentMuxClient({ store, providers: [provider, cursor], ownedWorkspaceRoots: () => owned(),
+    creationAuthority: new AgentMuxCreationAuthority({ stateDirectory: root, runtimeId: 'private-runtime' }) })
   const inner = client as unknown as Internals
   await inner.registry.load('local')
   inner.connected = true
@@ -85,6 +88,19 @@ afterEach(async () => {
 
 const create = (workspacePath: string, id = 'private-session', providerId = 'claude') => client.createAgentWithDelivery({ agentSessionId: id, createOperationId: `create-${id}`,
   providerId, executorId: 'private-executor', workspacePath, injectAgentMuxGuide: false })
+
+async function split(id = 'core-owned-session') {
+  const locator = (await client.hostEnvironment({ agentSessionId: id })).agentWorkspace
+  const toolExecution = { bindingId: `binding-${id}`, resourceHostId: 'resource', resourceRuntimeId: 'resource-runtime', workspacePath: project }
+  await client.prepareAgentExecutionHelper({ providerId: 'claude', role: 'frontend', bindingId: toolExecution.bindingId, agentSessionId: id,
+    createOperationId: executionCreationId(toolExecution.bindingId, 'frontend'), workspacePath: locator.workspacePath, toolExecution })
+  const helperRun = run(locator.workspacePath, 'frontend-helper-run')
+  vi.spyOn(client, 'inspectPreparedTerminal').mockResolvedValue((client as any).projectRun(helperRun))
+  vi.spyOn(client as any, 'readExecutionFrontendEndpoint').mockResolvedValue('ws://127.0.0.1:34567/private-capability')
+  const request = { agentSessionId: id, createOperationId: `create-${id}`, providerId: 'claude', executorId: 'private-executor',
+    workspacePath: locator.workspacePath, injectAgentMuxGuide: false, toolExecution }
+  return { locator, toolExecution, request, create: () => client.createAgentWithDelivery(request) }
+}
 
 describe('Core pre-trusts a Host-confirmed home before creating a Provider there', () => {
   it('prepares trust for the confirmed Mote home before the Run starts', async () => {
@@ -168,6 +184,54 @@ describe('Core pre-trusts a Host-confirmed home before creating a Provider there
     expect(start).toHaveBeenCalledTimes(1)
     expect(events).toContainEqual(expect.objectContaining({ type: 'agent-error', code: 'AGENT_WORKSPACE_TRUST_UNCONFIRMED',
       message: expect.stringContaining('configuration unreadable') }))
+  })
+})
+
+describe('Core-owned physical workspace trust', () => {
+  it('trusts only the validated exact leaf and keeps Provider trust-record failure nonblocking', async () => {
+    const ownedSplit = await split()
+    const target = await realpath(ownedSplit.locator.workspacePath)
+    trust.mockRejectedValueOnce(new Error('Provider trust record unavailable'))
+    const created = await ownedSplit.create()
+    expect(owned).not.toHaveBeenCalled()
+    expect(trust).toHaveBeenCalledOnce()
+    expect(trust.mock.calls[0]![0]).toMatchObject({ ownedRoot: target, workspacePath: target })
+    expect(start).toHaveBeenCalledOnce()
+    expect(created.session.creation?.workspaceTrust).toMatchObject({ status: 'unconfirmed', step: 'trust-record', workspacePath: ownedSplit.locator.workspacePath })
+    expect(events).toContainEqual(expect.objectContaining({ type: 'agent-error', code: 'AGENT_WORKSPACE_TRUST_UNCONFIRMED' }))
+  })
+
+  it('hard-rejects physical ownership loss during Hook preparation without converting it to soft trust unconfirmed', async () => {
+    const ownedSplit = await split()
+    owned.mockResolvedValue([ownedSplit.locator.workspacePath])
+    const inner = client as unknown as Internals
+    inner.ensureManagedHooks = async () => { await rm(ownedSplit.locator.workspacePath, { recursive: true }) }
+    await expect(ownedSplit.create()).rejects.toMatchObject({ code: 'AGENT_WORKSPACE_OWNERSHIP_UNCONFIRMED' })
+    expect(trust).not.toHaveBeenCalled()
+    expect(start).not.toHaveBeenCalled()
+    expect(events.some(event => event.type === 'agent-error' && event.code === 'AGENT_WORKSPACE_TRUST_UNCONFIRMED')).toBe(false)
+  })
+
+  it('does not infer Core trust for an exact locator without frontend toolExecution', async () => {
+    const ownedSplit = await split()
+    await create(ownedSplit.locator.workspacePath, 'explicit-no-tool-execution')
+    expect(trust).not.toHaveBeenCalled()
+    expect(start).toHaveBeenCalledOnce()
+  })
+
+  it('does not let a descendant or alias inherit the Core leaf ownedRoot', async () => {
+    const ownedSplit = await split()
+    const descendant = join(ownedSplit.locator.workspacePath, 'nested-project')
+    await mkdir(descendant)
+    owned.mockResolvedValue([ownedSplit.locator.workspacePath])
+    await create(descendant, 'core-leaf-descendant')
+    expect(trust).not.toHaveBeenCalled()
+    owned.mockResolvedValue([home])
+    const alias = join(root, 'core-leaf-alias')
+    await symlink(ownedSplit.locator.workspacePath, alias)
+    start.mockImplementationOnce(async (request: { cwd: string }) => run(request.cwd, 'alias-run'))
+    await create(alias, 'core-leaf-alias')
+    expect(trust).not.toHaveBeenCalled()
   })
 })
 

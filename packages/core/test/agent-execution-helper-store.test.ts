@@ -9,6 +9,7 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { AgentExecutionHelperStore, type AgentExecutionHelperRecord } from '../src/agent-execution-helper-store.js'
 import type { AgentExecutionHelperInput, AgentExecutionHelperPreparation } from '../src/agent-execution-helper.js'
 import * as durable from '../src/durable-write.js'
+import { AgentWorkspaceDirectory } from '../src/agent-workspace-directory.js'
 
 const roots: string[] = []
 afterEach(async () => { vi.restoreAllMocks(); for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true }) })
@@ -36,6 +37,35 @@ it('retains the exact original private preparation across store instances withou
   expect((await stat(path)).mode & 0o777).toBe(0o600)
   expect((await stat(path + '.lock')).mode & 0o777).toBe(0o600)
   expect((await stat(join(f.root, 'execution-helpers'))).mode & 0o777).toBe(0o700)
+})
+
+it('admits retained validation under the original lock before re-ACK without rebuilding', async () => {
+  const f = await fixture(), original = prepared(f.input)
+  const phases: string[] = []
+  const firstAdmit = vi.fn(async (write: () => Promise<AgentExecutionHelperPreparation>, admission?: { phase: 'first' | 'retained' }) => {
+    phases.push(admission?.phase ?? 'missing-first-admission')
+    return await write()
+  })
+  await f.store.prepare(f.input, async () => original, firstAdmit)
+  const path = pathFor(f.root, f.input), before = await readFile(path)
+  const build = vi.fn(async () => prepared(f.input, 'replacement'))
+  const reAck = vi.spyOn(durable, 'durableWriteFile')
+  const retainedAdmit = vi.fn(async (_write: () => Promise<AgentExecutionHelperPreparation>, admission?: { phase: 'first' | 'retained' }) => {
+    phases.push(admission?.phase ?? 'missing-retained-admission')
+    throw new Error('retained physical ownership refused')
+  })
+  const reopened = new AgentExecutionHelperStore(f.root)
+  await expect(reopened.prepare(f.input, build, retainedAdmit)).rejects.toThrow('retained physical ownership refused')
+  expect(phases).toEqual(['first', 'retained'])
+  expect(retainedAdmit).toHaveBeenCalledOnce()
+  expect(build).not.toHaveBeenCalled()
+  expect(reAck).not.toHaveBeenCalled()
+  expect(await readFile(path)).toEqual(before)
+  await expect(reopened.prepare(f.input, build, async (write: () => Promise<AgentExecutionHelperPreparation>, admission: { phase: string }) => {
+    expect(admission.phase).toBe('retained')
+    return await write()
+  })).resolves.toEqual(original)
+  expect(reAck).toHaveBeenCalledOnce()
 })
 
 it('singleflights same-key preparations across instances and preserves independent roles', async () => {
@@ -97,20 +127,27 @@ it('does not acknowledge preparation before durable write, and reuses a record a
   expect(build).not.toHaveBeenCalled()
 })
 
-it('serializes actual independent Node writers with the native file lock', async () => {
-  const f = await fixture(), worker = join(f.root, 'worker.mjs'), counter = join(f.root, 'builds')
+it('serializes actual independent Node writers with the native file lock and one physical workspace', async () => {
+  const f = await fixture(), worker = join(f.root, 'worker.mjs'), counter = join(f.root, 'builds'), phases = join(f.root, 'phases')
+  const owner = new AgentWorkspaceDirectory(join(f.root, 'sessions.json'), 'writer-runtime')
+  const location = owner.locate('original-agent')
+  f.input.agentSessionId = 'original-agent'
+  f.input.workspacePath = location.agentWorkspace.workspacePath
+  f.input.toolExecution = { bindingId: f.input.bindingId, resourceHostId: 'resource', resourceRuntimeId: 'resource-runtime', workspacePath: f.root }
   await symlink(resolve('packages/core/node_modules'), join(f.root, 'node_modules'), 'dir')
   const source = `import {AgentExecutionHelperStore} from ${JSON.stringify(resolve('packages/core/src/agent-execution-helper-store.ts'))};
+import {AgentWorkspaceDirectory} from ${JSON.stringify(resolve('packages/core/src/agent-workspace-directory.ts'))};
 import {appendFile} from 'node:fs/promises'; import {createHash,randomUUID} from 'node:crypto';
 const input=JSON.parse(process.argv[3]), store=new AgentExecutionHelperStore(process.argv[2]);
-const result=await store.prepare(input,async()=>{await appendFile(process.argv[4],'build\\n');await new Promise(r=>setTimeout(r,80));return {bindingId:input.bindingId,role:input.role,providerId:input.providerId,prepared:{createOperationId:input.createOperationId,workspacePath:input.workspacePath,launch:JSON.stringify({createOperationId:input.createOperationId,request:{program:process.execPath,args:[randomUUID()],cwd:input.workspacePath,env:{AGENTMUX_LIFECYCLE_OPERATION_ID:input.createOperationId},initial_size:{cols:80,rows:24},declared_inputs:[]}})}}});
+const owner=new AgentWorkspaceDirectory(process.argv[2]+'/sessions.json','writer-runtime');
+const result=await store.prepare(input,async()=>{await appendFile(process.argv[4],'build\\n');await new Promise(r=>setTimeout(r,80));return {bindingId:input.bindingId,role:input.role,providerId:input.providerId,prepared:{createOperationId:input.createOperationId,workspacePath:input.workspacePath,launch:JSON.stringify({createOperationId:input.createOperationId,request:{program:process.execPath,args:[randomUUID()],cwd:input.workspacePath,env:{AGENTMUX_LIFECYCLE_OPERATION_ID:input.createOperationId},initial_size:{cols:80,rows:24},declared_inputs:[]}})}}},async(write,admission)=>{await appendFile(process.argv[5],admission.phase+'\\n');await owner.admit(input.agentSessionId,input.workspacePath,admission.phase);return await write()});
 process.stdout.write(createHash('sha256').update(result.prepared.launch).digest('hex'));`
   const identityRequire = createRequire(join(await realpath('packages/core/node_modules/@agentmux/identity'), 'package.json'))
   await bundle({ stdin: { contents: source, resolveDir: process.cwd() }, outfile: worker, bundle: true, platform: 'node', format: 'esm', alias: {
     '@agentmux/identity': resolve('packages/identity/src/index.ts'), '@noble/hashes/sha2.js': identityRequire.resolve('@noble/hashes/sha2.js'), '@scure/base': identityRequire.resolve('@scure/base'),
   }, logLevel: 'silent' })
   const run = () => new Promise<string>((resolveRun, reject) => {
-    const child = spawn(process.execPath, [worker, f.root, JSON.stringify(f.input), counter], { stdio: ['ignore', 'pipe', 'pipe'] })
+    const child = spawn(process.execPath, [worker, f.root, JSON.stringify(f.input), counter, phases], { stdio: ['ignore', 'pipe', 'pipe'] })
     let output = '', errors = ''; child.stdout.on('data', bytes => { output += bytes }); child.stderr.on('data', bytes => { errors += bytes })
     child.once('error', reject); child.once('exit', code => code === 0 ? resolveRun(output) : reject(new Error(`Private store worker failed: ${errors}`)))
   })
@@ -118,6 +155,11 @@ process.stdout.write(createHash('sha256').update(result.prepared.launch).digest(
   expect(one).toMatch(/^[a-f0-9]{64}$/u)
   expect(two).toBe(one)
   expect(await readFile(counter, 'utf8')).toBe('build\n')
+  expect((await readFile(phases, 'utf8')).trim().split('\n').sort()).toEqual(['first', 'retained'])
+  const [root, leaf, marker] = await Promise.all([stat(join(f.root, 'agent-workspaces')), stat(location.agentWorkspace.workspacePath), readFile(location.markerPath, 'utf8')])
+  expect(JSON.parse(marker)).toMatchObject({ phase: 'provisioned', runtimeId: 'writer-runtime', agentSessionId: 'original-agent',
+    workspacePath: location.agentWorkspace.workspacePath,
+    root: { dev: String(root.dev), ino: String(root.ino) }, leaf: { dev: String(leaf.dev), ino: String(leaf.ino) } })
 })
 
 it('requires an explicit state root and rejects foreign grants', async () => {

@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process'
 import { once } from 'node:events'
 import { createHash } from 'node:crypto'
 import { createRequire, syncBuiltinESMExports } from 'node:module'
-import { mkdir, mkdtemp, realpath, rm, writeFile, access, readFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, realpath, rm, writeFile, access, readFile, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { afterAll, afterEach, expect, it, vi } from 'vitest'
@@ -18,6 +18,7 @@ import { AgentMuxCreationAuthority } from '../src/agent-creation-authority.js'
 import { AgentMuxHostExecutorOwner } from '../src/executor-owner.js'
 import { hashAgentCapability, issueAgentCapability } from '../src/agent-capability.js'
 import { hostedTestClient } from './helpers/hosted-runtime-port.js'
+import { executionCreationId } from '../src/host-route-execution.js'
 
 const source = { AgentMuxClient, AgentMuxFileAgentSessionStore, defineAgentProvider, AgentMuxError, AgentMuxCreationAuthority, AgentMuxHostExecutorOwner, hashAgentCapability, issueAgentCapability }
 const core: typeof source = process.env.AGENTMUX_TEST_PRE_ADMISSION_ENTRY
@@ -63,7 +64,9 @@ async function fixture(prepareExecutionEnvironment?: () => Promise<void>) {
     readySignal: { kind: 'foreground-process', expectedProcess: 'node' }, hookStrategy: { kind: 'none' },
     resumeStrategy: { kind: 'none' }, acpStrategy: { kind: 'none' },
     capabilities: { terminal: true, timeline: 'unavailable', permission: 'none', providerResume: false, replyCorrelation: 'none' } },
-    buildArgs: (prompt, args) => [...args, prompt], hook: { rules: [] } })
+    buildArgs: (prompt, args) => [...args, prompt], hook: { rules: [] },
+    prepareExecutionHelper: async () => ({ command: process.execPath, args: ['-e', 'setInterval(() => {}, 1000)'], env: {} }),
+    prepareToolExecutionLaunch: async plan => plan })
   const clients: Array<{ client: InstanceType<typeof core.AgentMuxClient>; inner: any; nativeList: () => Promise<any[]>; start: any; stop: any; input: any }> = []
   const storePath = join(root, 'sessions.sqlite')
   const authority = new core.AgentMuxCreationAuthority({ stateDirectory: state, runtimeId: 'pre-admission-target' })
@@ -106,6 +109,19 @@ async function fixture(prepareExecutionEnvironment?: () => Promise<void>) {
   const noReplay = () => { expect(clients.reduce((n, value) => n + value.start.mock.calls.length, 0)).toBe(1)
     for (const value of clients) { expect(value.stop).not.toHaveBeenCalled(); expect(value.input).not.toHaveBeenCalled() } }
   return { ...original, root, sid, request, reader, create, replay, write, noReplay, events, provider, storePath, authority, executorOwner }
+}
+
+async function ownedCreation(f: Awaited<ReturnType<typeof fixture>>) {
+  const locator = (await f.client.hostEnvironment({ agentSessionId: f.sid })).agentWorkspace
+  const toolExecution = { bindingId: 'final-start-binding', resourceHostId: 'resource', resourceRuntimeId: 'resource-runtime', workspacePath: f.root }
+  await f.client.prepareAgentExecutionHelper({ providerId: f.provider.id, role: 'frontend', bindingId: toolExecution.bindingId,
+    agentSessionId: f.sid, createOperationId: executionCreationId(toolExecution.bindingId, 'frontend'), workspacePath: locator.workspacePath, toolExecution })
+  const helper = { nativeService: null, runId: 'controlled-helper-run', lifecycleOperationId: null, program: process.execPath, args: [], workspacePath: locator.workspacePath,
+    pid: 9876, state: { type: 'running' as const }, cols: 80, rows: 24, latestOutputBytes: 0, firstAvailableByte: 0, acceptedInputBytes: 0 }
+  vi.spyOn(f.client, 'inspectPreparedTerminal').mockResolvedValue((f.inner as any).projectRun(helper))
+  vi.spyOn(f.inner as any, 'readExecutionFrontendEndpoint').mockResolvedValue('ws://127.0.0.1:34567/private-capability')
+  const markerPath = join(f.root, 'agent-workspace-identities', locator.workspacePath.split('/').at(-1)! + '.json')
+  return { locator, toolExecution, markerPath }
 }
 
 function errno(code: string) { return Object.assign(new Error(`Controlled storage ${code}`), { code }) }
@@ -189,6 +205,44 @@ it('rechecks the original caller immediately before Start after an admission cap
   await f.store.compareAndSwapMetadata(stored, { ...stored, capabilityHash: core.hashAgentCapability(core.issueAgentCapability()), updatedAt: 2 })
   expect(await pending).toMatchObject({ code: 'AGENT_CAPABILITY_INVALID' })
   expect(f.start).not.toHaveBeenCalled(); expect(await f.store.loadCreationCorrelation(f.sid)).toBeNull()
+})
+
+it('rejects an owned leaf deleted before the first main-create fence without Provider preparation', async () => {
+  const f = await fixture(), owned = await ownedCreation(f)
+  await rm(owned.locator.workspacePath, { recursive: true })
+  const probe = vi.spyOn(f.inner as any, 'probePreparedAgent')
+  const launch = vi.spyOn(f.provider, 'prepareToolExecutionLaunch')
+  await expect(f.create({ workspacePath: owned.locator.workspacePath, toolExecution: owned.toolExecution })).rejects.toMatchObject({ code: 'AGENT_WORKSPACE_OWNERSHIP_UNCONFIRMED' })
+  expect(probe).not.toHaveBeenCalled()
+  expect(launch).not.toHaveBeenCalled()
+  expect(f.start).not.toHaveBeenCalled(); expect(f.input).not.toHaveBeenCalled(); expect(f.stop).not.toHaveBeenCalled()
+  await expect(stat(owned.locator.workspacePath)).rejects.toMatchObject({ code: 'ENOENT' })
+})
+
+it('rechecks the physical leaf after the final prepared-create admission and before real ctxmux Start', async () => {
+  const f = await fixture(), owned = await ownedCreation(f)
+  const prepare = f.inner.registry.prepareCreate.bind(f.inner.registry)
+  let release!: () => void, entered!: () => void
+  const held = new Promise<void>(resolve => { release = resolve })
+  const admission = new Promise<void>(resolve => { entered = resolve })
+  vi.spyOn(f.inner.registry, 'prepareCreate').mockImplementation(async (...args: any[]) => {
+    const result = await prepare(...args)
+    entered(); await held
+    return result
+  })
+  const pending = f.create({ workspacePath: owned.locator.workspacePath, toolExecution: owned.toolExecution }).catch(error => error)
+  await admission
+  const before = await readFile(owned.markerPath)
+  const originalInode = (await stat(owned.locator.workspacePath)).ino
+  await rm(owned.locator.workspacePath, { recursive: true })
+  await mkdir(owned.locator.workspacePath)
+  const replacementInode = (await stat(owned.locator.workspacePath)).ino
+  expect(replacementInode).not.toBe(originalInode)
+  release()
+  expect(await pending).toMatchObject({ code: 'AGENT_WORKSPACE_OWNERSHIP_UNCONFIRMED' })
+  expect(f.start).not.toHaveBeenCalled(); expect(f.input).not.toHaveBeenCalled(); expect(f.stop).not.toHaveBeenCalled()
+  expect((await stat(owned.locator.workspacePath)).ino).toBe(replacementInode)
+  expect(await readFile(owned.markerPath)).toEqual(before)
 })
 
 it('reads the exact original append receipt after ACK loss without changing the message or sending input twice', async () => {

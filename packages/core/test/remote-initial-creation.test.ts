@@ -1,5 +1,5 @@
 import { fixtureEpoch as _tailFixtureEpoch } from "../../../test/fixture-values.mjs"
-import { mkdtemp, rm, symlink } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, stat, symlink } from 'node:fs/promises'
 import { build } from 'esbuild'
 import { spawn } from 'node:child_process'
 import { once } from 'node:events'
@@ -16,6 +16,7 @@ import { DurableAgentMuxMessageQueue } from '../src/agent-global-message-queue.j
 import type { AgentMuxAgentSession, AgentMuxStoredAgentSession } from '../src/types.js'
 import type { CtxmuxAdapterRun } from '../src/ctxmux-run-adapter.js'
 import { hostedTestClient } from './helpers/hosted-runtime-port.js'
+import { executionCreationId } from '../src/host-route-execution.js'
 import { AgentMuxError } from '../src/errors.js'
 
 const AgentMuxClient: typeof DefaultClient = process.env.AGENTMUX_TEST_REMOTE_CLIENT
@@ -63,7 +64,7 @@ async function fixture() {
   inner.hookServer.createBinding = () => ({ bindingId: 'b'.repeat(43), endpoint: { url: 'http://127.0.0.1:0', token: 't'.repeat(43) }, bindRun: async () => {}, close: async () => {} })
   inner.ensureManagedHooks = async () => {}
   inner.ensureTerminalHandshakeOrDegrade = async (session: AgentMuxAgentSession) => session
-  vi.spyOn(target as unknown as { probePreparedAgent: typeof target.probeAgent }, 'probePreparedAgent').mockImplementation(async providerId => ({ providerId, executable: '/bin/sh', installed: true,
+  const probe = vi.spyOn(target as unknown as { probePreparedAgent: typeof target.probeAgent }, 'probePreparedAgent').mockImplementation(async providerId => ({ providerId, executable: '/bin/sh', installed: true,
     capabilities: target.providers.get(providerId).catalog.capabilities }))
   const identity = await source.agentCreationAuthority()
   const targetIdentity = await target.agentCreationAuthority()
@@ -72,10 +73,84 @@ async function fixture() {
     executorId: 'target-executor', executorRevision: registered.executor.configRevision, workspacePath: root, prompt: '  exact first task\n正文  ' }
   const attest = async (value = input) => source.attestAgentCreation({ caller: { agentSessionId: 'source-session', capability },
     target: { runtimeId: 'target-runtime', intentDigest: hostAgentCreationIntent(value) } })
-  return { root, source, target, sourceStore, targetStore, owner, start, stop, input, attest, pin, capability, runs }
+  return { root, source, target, sourceStore, targetStore, owner, start, stop, probe, input, attest, pin, capability, runs }
+}
+
+async function splitFrontend(f: Awaited<ReturnType<typeof fixture>>) {
+  const agentSessionId = f.input.agentSessionId!
+  const locator = (await f.target.hostEnvironment({ agentSessionId })).agentWorkspace
+  const toolExecution = { bindingId: 'split-binding', resourceHostId: 'resource', resourceRuntimeId: 'resource-runtime', workspacePath: f.root }
+  await f.target.prepareAgentExecutionHelper({ providerId: 'claude', role: 'frontend', bindingId: toolExecution.bindingId, agentSessionId,
+    createOperationId: executionCreationId(toolExecution.bindingId, 'frontend'), workspacePath: locator.workspacePath, toolExecution })
+  const request: AgentMuxHostAgentCreateInput = { ...f.input, workspacePath: locator.workspacePath, toolExecution }
+  const markerPath = join(f.root, 'target', 'agent-workspace-identities', locator.workspacePath.split('/').at(-1)! + '.json')
+  return { locator, toolExecution, request, markerPath }
+}
+
+function allowSplitLaunch(f: Awaited<ReturnType<typeof fixture>>, workspacePath: string) {
+  const native: CtxmuxAdapterRun = { nativeService: null, runId: 'frontend-run', lifecycleOperationId: null, program: 'claude', args: [], workspacePath,
+    pid: 4321, state: { type: 'running' }, cols: 80, rows: 24, latestOutputBytes: 0, firstAvailableByte: 0, acceptedInputBytes: 0 }
+  vi.spyOn(f.target, 'inspectPreparedTerminal').mockResolvedValue((f.target as any).projectRun(native))
+  vi.spyOn(f.target as any, 'readExecutionFrontendEndpoint').mockResolvedValue('ws://127.0.0.1:34567/private-capability')
+}
+
+async function createSplit(f: Awaited<ReturnType<typeof fixture>>, request: AgentMuxHostAgentCreateInput) {
+  await f.pin()
+  return await f.target.createHostAgentWithDelivery({ ...request, initialMessageAdmission: await f.attest(request) })
 }
 
 describe('remote initial creation admission', () => {
+  it('rejects a changed launch cwd before Provider probe even when every other frontend binding field matches', async () => {
+    const f = await fixture(), split = await splitFrontend(f)
+    const changed = join(f.root, 'changed-launch-cwd'); await mkdir(changed)
+    allowSplitLaunch(f, split.locator.workspacePath)
+    await expect(createSplit(f, { ...split.request, workspacePath: changed })).rejects.toMatchObject({ code: 'EXECUTION_BINDING_MISMATCH' })
+    expect(f.probe).not.toHaveBeenCalled()
+    expect(f.start).not.toHaveBeenCalled()
+    expect(f.stop).not.toHaveBeenCalled()
+  })
+
+  it('rejects an exact locator without its retained frontend record before Provider probe or Start', async () => {
+    const f = await fixture(), split = await splitFrontend(f)
+    const helperPath = join(f.root, 'target', 'execution-helpers')
+    await rm(helperPath, { recursive: true, force: true })
+    await expect(createSplit(f, split.request)).rejects.toMatchObject({ code: 'EXECUTION_HELPER_UNAVAILABLE' })
+    expect(f.probe).not.toHaveBeenCalled()
+    expect(f.start).not.toHaveBeenCalled()
+    expect(f.stop).not.toHaveBeenCalled()
+  })
+
+  it.each(['deleted', 'replaced'] as const)('refuses a %s provisioned leaf before Provider effects and never rebuilds it', async fault => {
+    const f = await fixture(), split = await splitFrontend(f)
+    const before = await readFile(split.markerPath)
+    const originalLeaf = (await stat(split.locator.workspacePath)).ino
+    await rm(split.locator.workspacePath, { recursive: true })
+    if (fault === 'replaced') await mkdir(split.locator.workspacePath)
+    const input = vi.spyOn((f.target as any).kernel, 'input')
+    await expect(createSplit(f, split.request)).rejects.toMatchObject({ code: 'AGENT_WORKSPACE_OWNERSHIP_UNCONFIRMED' })
+    expect(f.probe).not.toHaveBeenCalled()
+    expect(f.start).not.toHaveBeenCalled()
+    expect(input).not.toHaveBeenCalled()
+    expect(f.stop).not.toHaveBeenCalled()
+    expect(await readFile(split.markerPath)).toEqual(before)
+    if (fault === 'deleted') await expect(stat(split.locator.workspacePath)).rejects.toMatchObject({ code: 'ENOENT' })
+    else expect((await stat(split.locator.workspacePath)).ino).not.toBe(originalLeaf)
+  })
+
+  it('adopts an existing split Session before any physical fence after its leaf disappears', async () => {
+    const f = await fixture(), split = await splitFrontend(f)
+    allowSplitLaunch(f, split.locator.workspacePath)
+    const created = await createSplit(f, split.request)
+    expect(f.start).toHaveBeenCalledOnce()
+    await rm(split.locator.workspacePath, { recursive: true })
+    f.probe.mockClear()
+    const adopted = await createSplit(f, split.request)
+    expect(adopted.session.run).toEqual(created.session.run)
+    expect(f.probe).not.toHaveBeenCalled()
+    expect(f.start).toHaveBeenCalledOnce()
+    expect(f.stop).not.toHaveBeenCalled()
+  })
+
   it('forwards budgeted optional context through hosted signed creation and binds the entire intent', async () => {
     const f = await fixture()
     const source = await hostedTestClient(f.source), target = await hostedTestClient(f.target)
@@ -190,7 +265,7 @@ describe('remote initial creation admission', () => {
       creation: { executorRevision: f.input.executorRevision, initialMessageOrigin: { source: { runtimeId: 'source-runtime', agentSessionId: 'source-session', runId: 'source-run' } } } })
     expect(first.session.forkedFrom).toBeUndefined()
     expect(f.start).toHaveBeenCalledTimes(1)
-    expect(JSON.stringify(f.start.mock.calls[0])).toContain('[Message from Agent source-session]')
+    expect(f.start.mock.calls[0]![0].args[0]).toContain('<amux:a2a from="source-session"')
     expect(JSON.stringify(f.start.mock.calls[0])).not.toContain(f.capability)
     const journal = await new DurableAgentMuxMessageQueue(f.target.agentMessageQueuePath()).listAfter()
     expect(journal).toHaveLength(1)
