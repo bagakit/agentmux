@@ -122,6 +122,13 @@ function selfTest() {
   driverReview.sourceIdentity = driverIdentity
   driverReview.captureReceipt.sha256 = sha(readFileSync(driverReceiptPath))
   assert.throws(() => validate(driverReview, directory, 'settings'), /its own manifest/)
+  const finalReceiptPath = join(directory, 'final-capture.json')
+  const finalSources = { ...driverSources, 'apps/desktop/scripts/fixtures/ui-selection-field/desktop-main.cjs': sha(readFileSync(resolve(root, 'apps/desktop/scripts/fixtures/ui-selection-field/desktop-main.cjs'))) }
+  delete finalSources['apps/desktop/scripts/fixtures/settings-connections/native-input.cjs']
+  const finalIdentity = sourceIdentity(finalSources)
+  writeFileSync(finalReceiptPath, JSON.stringify({ completed: true, execution: { exitCode: 0 }, sourceIdentity: finalIdentity, sources: finalSources, images: [{ path: 'node.png', sha256: sha(readFileSync(image)) }] }))
+  const finalReview = { ...review, sourceIdentity: finalIdentity, sourceHashes: {}, captureReceipt: { path: 'final-capture.json', sha256: sha(readFileSync(finalReceiptPath)) } }
+  assert.throws(() => validate(finalReview, directory, 'final'), /Capture required source/)
   review.actualViews = []
   assert.throws(() => validate(review, directory), /Every declared image must be actually viewed/)
   const nested = join(directory, 'nested')
