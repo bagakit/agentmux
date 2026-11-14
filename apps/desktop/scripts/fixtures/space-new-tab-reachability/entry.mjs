@@ -7,26 +7,43 @@ import { useAppStore } from '../../../src/renderer/src/store'
 import { desktopSpatialGraph, desktopWorkbenchFromSpatial } from '../../../src/renderer/src/lib/desktop-spatial-state'
 import { reducePersistedTab, hydratePersistedTab } from '../../../src/renderer/src/lib/workbench-persistence'
 import { preserveOriginalSourceProjection } from '../../../src/renderer/src/lib/original-space-navigation'
+import { workbenchZoneProjection } from '../../../src/renderer/src/lib/desktop-focus-navigation'
+import { createWorkbenchTab } from '../../../src/renderer/src/lib/workbench-tabs'
 import { spaceNewTabFixture } from '../../../test/fixtures/space-new-tab'
 import '../../../src/renderer/src/styles/index.css'
 
 const root = createRoot(document.getElementById('root'))
 const preview = await api.config.get(), session = (await api.sessions.snapshot()).sessions.find(value => value.kind === 'agent')
-const render = () => root.render(createElement(DesktopClientUiProvider, null,
-  createElement(WorkspaceWorkbench, { workspaceId: useAppStore.getState().activeWorkspaceId })))
-const apply = state => {
+let projectionSelections = 0
+function ProjectedWorkbench() {
+  const choice = useAppStore(state => state.workbenchSpaceSelection)
+  useAppStore(state => state.tabs)
+  useAppStore(state => state.layouts)
+  const projection = workbenchZoneProjection(useAppStore.getState(), choice, [], () => { projectionSelections++ })
+  return createElement(WorkspaceWorkbench, { workspaceId: choice.workspaceId, projection: projection ?? undefined })
+}
+const render = (projected = false) => root.render(createElement(DesktopClientUiProvider, null,
+  projected ? createElement(ProjectedWorkbench) : createElement(WorkspaceWorkbench, { workspaceId: useAppStore.getState().activeWorkspaceId })))
+const apply = (state, projected) => {
   useAppStore.setState({ ...state, loading: false, mainSurface: 'workbench', retainedSpatialFocus: null, scratchTopicSnapshots: {},
     prewarmTerminal: async () => {}, detectExecutors: async () => {}, error: null })
-  render()
+  render(projected)
 }
 window.spaceNewTabProof = {
-  prepare(runtimeId) {
-    const state = spaceNewTabFixture({ ...preview, workspaces: [preview.workspaces[0]] }, session, runtimeId).state
-    apply({ ...state, agentComposerDrafts: { [session.id]: 'Original unsent input' } })
+  prepare(runtimeId, projected = false) {
+    const fixture = spaceNewTabFixture({ ...preview, workspaces: [preview.workspaces[0]] }, session, runtimeId)
+    const state = fixture.state
+    projectionSelections = 0
+    if (projected) {
+      const extra = createWorkbenchTab('original-unplaced-tab', { kind: 'launcher', regionId: 'original-unplaced-region',
+        workspaceId: fixture.tab.workspaceId })
+      state.tabs = { ...state.tabs, [extra.id]: { ...extra, space: fixture.tab.space } }
+    }
+    apply({ ...state, agentComposerDrafts: { [session.id]: 'Original unsent input' } }, projected)
   },
   facts() {
     const state = useAppStore.getState(), selected = state.workbenchSpaceSelection
-    return { tabIds: Object.keys(state.tabs).sort(), selected, layouts: state.layouts, drafts: state.agentComposerDrafts,
+    return { tabIds: Object.keys(state.tabs).sort(), selected, layouts: state.layouts, drafts: state.agentComposerDrafts, projectionSelections,
       original: state.tabs['original-tab'], sessions: state.sessions, error: state.error,
       launcherVisible: [...document.querySelectorAll('.launch-surface')].some(node => node.getBoundingClientRect().height > 0 && !node.closest('[hidden],[inert]')) }
   },

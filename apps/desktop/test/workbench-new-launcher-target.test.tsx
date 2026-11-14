@@ -9,12 +9,14 @@ import { createWorkspaceLayout } from '@agentmux/layout'
 import { WorkspaceWorkbench } from '../src/renderer/src/components/WorkspaceWorkbench'
 import { api } from '../src/renderer/src/lib/api'
 import { workbenchSelectionCatalog } from '../src/renderer/src/lib/desktop-focus-navigation'
+import { resolveWorkbenchZone } from '../src/renderer/src/lib/workbench-projection'
 import { desktopSpatialGraph } from '../src/renderer/src/lib/desktop-spatial-state'
 import { useLauncherState } from '../src/renderer/src/lib/launcher-state'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { workspaceProjectId } from '../src/renderer/src/lib/workspace-projects'
 import { useAppStore } from '../src/renderer/src/store'
 import { workspaceZoneId } from '../src/shared/space-addresses'
+import { spaceMountKey } from '../src/shared/space-mount'
 import { composerConfig, composerDOM, composerSession } from './helpers/composer-dom-fixture'
 import { providerCatalogReader } from './helpers/startup-observation-api-fixture'
 
@@ -102,6 +104,37 @@ it('a missing original Zone resource refuses only the new placement and keeps th
   expect(after.pendingAgentLaunches).toBe(before.pendingAgentLaunches)
   expect(after.sessions).toBe(before.sessions)
   expect(api.sessions.launchAgent).not.toHaveBeenCalled()
+})
+
+it.each([false, true])('Space creates and selects one raw Launcher even beside a registered Source (qualified=%s)', async qualified => {
+  fixture(false)
+  const target = { hostId: project.hostId, reference: { runtimeId: 'original-runtime', spaceId }, zoneId, workspaceId: project.id }
+  const starting = useAppStore.getState().workbenchSpaceSelection!
+  useAppStore.setState({
+    mountedSpaceInputs: { [spaceMountKey(target.reference)]: { target } },
+    workbenchSpaceSelection: qualified ? { ...starting, sourceRuntimeId: target.reference.runtimeId } : starting
+  })
+  const before = useAppStore.getState()
+  const select = vi.fn()
+  const projection = resolveWorkbenchZone(zoneId, workbenchSelectionCatalog(before), before.layouts, before.tabs, 'workbench-tab', [], select)
+  expect(projection).not.toBeNull()
+  await dom.render(<WorkspaceWorkbench workspaceId={project.id} projection={projection!} />)
+  select.mockClear()
+  const plus = dom.container.querySelector<HTMLButtonElement>('[aria-label="New Tab"]')!
+  await act(async () => {
+    plus.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0 }))
+    plus.click()
+  })
+  const current = useAppStore.getState()
+  const added = Object.values(current.tabs).filter(tab => !before.tabs[tab.id])
+  expect(added).toHaveLength(1)
+  const created = added[0]!
+  expect(created.source).toBeUndefined()
+  expect(created.space).toEqual({ spaceId, zoneId })
+  expect(current.workbenchSpaceSelection).toMatchObject({ groupId, tabId: created.id, regionId: created.layout.activeRegionId })
+  expect(current.layouts[project.id]!.groups[0]!.activeTabId).toBe(created.id)
+  expect(select, 'Creation must not navigate through an older projection').not.toHaveBeenCalled()
+  expect(current.agentComposerDrafts).toBe(before.agentComposerDrafts)
 })
 
 it('the actual plus reaches the original spatial writer and a fresh Core owner reads its resource and foreign placement', async () => {

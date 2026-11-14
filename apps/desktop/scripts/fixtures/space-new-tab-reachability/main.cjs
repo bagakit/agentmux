@@ -27,22 +27,47 @@ app.whenReady().then(async () => {
       assert.equal(after.launcherVisible, true, 'Original selected Launcher visible after process restart')
       receipt.restored = after
     } else {
-      for (const runtime of ['same-runtime', 'foreign-runtime']) {
-        await read(`window.spaceNewTabProof.prepare(${JSON.stringify(runtime)})`); await settle()
+      const button = '[data-pane-group-id="original-group"] button[aria-label="New Tab"]'
+      const headerGeometry = () => read(`(() => {
+        const plus = document.querySelector(${JSON.stringify(button)});
+        const bar = plus.closest('header');
+        const center = node => {
+          const r = node.getBoundingClientRect();
+          return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+        };
+        const rect = bar.getBoundingClientRect();
+        return { top: rect.top, height: rect.height, plus: center(plus), tab: center(bar.querySelector('.workbench-tab--active')) };
+      })()`)
+      for (const [runtime, projected] of [['same-runtime', false], ['foreign-runtime', false], ['foreign-runtime', true]]) {
+        await read(`window.spaceNewTabProof.prepare(${JSON.stringify(runtime)}, ${projected})`); await settle()
         const before = await read('window.spaceNewTabProof.facts()')
-        const rect = await read(`(()=>{const b=document.querySelector('button[title="New tab"]'); const r=b.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}})()`)
+        const header = await headerGeometry()
+        const rect = header.plus
         assert.ok(rect.x > 0 && rect.y > 0)
-        for (const type of ['mouseDown', 'mouseUp']) win.webContents.sendInputEvent({ type, button: 'left', clickCount: 1, ...rect })
+        if (projected) await fs.writeFile(path.join(output, 'projected-before.png'), (await win.webContents.capturePage()).toPNG())
+        win.webContents.sendInputEvent({ type: 'mouseDown', button: 'left', clickCount: 1, ...rect })
+        await settle()
+        const pressed = await read('window.spaceNewTabProof.facts()')
+        assert.equal(pressed.projectionSelections, 0, 'Pressing the plus does not select the previous Tab')
+        assert.deepEqual(pressed.selected, before.selected)
+        assert.deepEqual(await headerGeometry(), header)
+        win.webContents.sendInputEvent({ type: 'mouseUp', button: 'left', clickCount: 1, ...rect })
         await settle()
         const after = await read('window.spaceNewTabProof.facts()')
         assert.equal(after.tabIds.length, before.tabIds.length + 1, 'Space plus creates one Tab beside its Source projection')
         assert.equal(after.selected.zoneId, before.selected.zoneId)
         assert.equal(after.selected.groupId, before.selected.groupId)
+        assert.ok(!before.tabIds.includes(after.selected.tabId), 'Space selects the new Launcher through the current owner')
         assert.equal(after.launcherVisible, true)
+        const afterHeader = await headerGeometry()
+        assert.equal(afterHeader.height, header.height, 'Space title bar height stays fixed')
+        assert.equal(afterHeader.top, header.top, 'Space title bar stays on its original row')
+        assert.ok(Math.abs(afterHeader.plus.y - afterHeader.tab.y) <= 1, 'Space plus and selected Tab share one title row')
         for (const key of ['drafts', 'original', 'sessions']) assert.deepEqual(after[key], before[key], 'Kept original ' + key)
-        receipt[runtime] = after
+        receipt[projected ? 'projected' : runtime] = after
+        if (projected) await fs.writeFile(path.join(output, 'projected-after.png'), (await win.webContents.capturePage()).toPNG())
       }
-      await fs.writeFile(path.join(output, 'before.json'), JSON.stringify(receipt['foreign-runtime']))
+      await fs.writeFile(path.join(output, 'before.json'), JSON.stringify(receipt.projected))
       await fs.writeFile(path.join(output, 'saved.json'), JSON.stringify(await read('window.spaceNewTabProof.save()')))
     }
     receipt.passed = true
