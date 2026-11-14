@@ -33,6 +33,7 @@ const ChevronLeft = semanticIconComponent('navigation.back')
 const ChevronRight = semanticIconComponent('navigation.forward')
 const Plus = semanticIconComponent('action.create')
 const Heartbeat = semanticIconComponent('object.heartbeat')
+const Close = semanticIconComponent('action.close')
 type CalendarMode = 'day' | 'three-days' | 'week' | 'month' | 'upcoming'
 const hourLabel = (hour: number) => String(hour).padStart(2, '0') + ':00'
 const hoursOfDay = Array.from({ length: 24 }, (_, hour) => hour)
@@ -69,6 +70,8 @@ export function MoteCalendar({ scope, reference, active, openRequest, onSelectDi
   const [selectedHour, setSelectedHour] = useState(() => DateTime.fromMillis(now, { zone: timezone }).hour)
   const [detailsOpen, setDetailsOpen] = useState(false)
   const detailsInvoker = useRef<HTMLElement | null>(null)
+  const periodReader = useRef<HTMLElement>(null)
+  const periodTitle = useRef<HTMLHeadingElement>(null)
   const [searchOpen, setSearchOpen] = useState(false)
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<ContinuousProgressLoop['status'] | 'all'>('all')
@@ -275,6 +278,12 @@ export function MoteCalendar({ scope, reference, active, openRequest, onSelectDi
   const hourKeyOfSelection = selected + ':' + selectedHour
   const selectedSlot = hourly.get(hourKeyOfSelection)
   const eventWindow = timed ? hourWindows.get(hourKeyOfSelection) : calendarDayWindow(selectedDate)
+  useLayoutEffect(() => {
+    if (periodReader.current) periodReader.current.scrollTop = 0
+  }, [eventWindow?.from, eventWindow?.to])
+  useLayoutEffect(() => {
+    if (detailsOpen) periodTitle.current?.focus({ preventScroll: true })
+  }, [detailsOpen])
   const selectedGroups = timed ? selectedSlot?.groups ?? [] : days.get(selected) ?? []
   const selectedCount = selectedGroups.reduce((sum, group) => sum + group.planned, 0)
   const selectedEvents = useMemo(() => eventWindow ? sliceScheduleOccurrences(occurrences, eventWindow) : [],
@@ -431,19 +440,28 @@ export function MoteCalendar({ scope, reference, active, openRequest, onSelectDi
         </div></div> : null}
         <footer className="mote-calendar__legend"><span>{timezone}</span><span>{timed ? 'Events by hour' : 'Events by day'}</span>{history.partial ? <span role="status">Recorded events partially available <button type="button" onClick={history.retry}>Retry calendar</button></span> : history.busy ? <span role="status">Reading recorded events…</span> : null}</footer>
       </div>
-      {detailsOpen ? <section className="mote-calendar__day" aria-label="Selected day arrangements" onKeyDown={event => { if (event.key === 'Escape') { event.stopPropagation(); closePeriod() } }}>
-        <section className="mote-calendar__window-info" aria-label={timed ? 'Selected hour' : 'Selected date'}>
-          <header><h4>{selectedDate.toFormat('ccc, LLL d')}{timed ? ' · ' + hourLabel(selectedHour) : ''}</h4><button type="button" aria-label="Close period details" onClick={closePeriod}>×</button></header>
-          {source.observed && eventWindow ? <MoteCalendarEvents heartbeatSourceId={heartbeatSourceId} key={JSON.stringify([retained.current, eventWindow.from, eventWindow.to])}
-            window={eventWindow} schedules={byId} items={selectedEvents} timezone={timezone} now={now}
-            active={active && queries.length > 0} onOpenRule={revealArrangement} onOpenDiscussion={openDiscussion} />
-            : <p className="continuous-progress-control__help">{source.observed ? 'This hour does not exist in the calendar timezone.' : 'Arrangements are unconfirmed.'}</p>}
-          {selectedCount ? <div className="mote-calendar__period-plan">
-            <p className="mote-calendar__plan-total"><strong>{formatCount.format(selectedCount)}</strong> planned</p>
-            {timed && selectedSlot ? <MoteCalendarTimes heartbeatSourceId={heartbeatSourceId} key={selected + ':' + selectedHour} items={selectedPlans} schedules={byId} timezone={timezone} now={now}
-              repeatedHour={selectedSlot.window.to - selectedSlot.window.from > 3_600_000} onOpen={revealArrangement} />
-              : <Button type="button" onClick={() => changeMode('day')}>Open day</Button>}
-          </div> : null}
+      {detailsInvoker.current ? <section ref={periodReader} className="mote-calendar__day" hidden={!detailsOpen} inert={!detailsOpen}
+        aria-label={detailsOpen ? 'Selected day arrangements' : undefined} onKeyDown={event => { if (event.key === 'Escape') { event.stopPropagation(); closePeriod() } }}>
+        <header className="mote-calendar__period-heading">
+          <div className="mote-calendar__period-title">
+            <h4 ref={periodTitle} tabIndex={-1}>{selectedDate.toFormat('cccc, LLLL d')}</h4>
+            {timed || selectedCount > 0 ? <div className="mote-calendar__period-meta">
+              {timed ? <span>{hourLabel(selectedHour)}{eventWindow ? '–' + DateTime.fromMillis(eventWindow.to, { zone: timezone }).toFormat('HH:mm') : ''}</span> : null}
+              {selectedCount ? <p className="mote-calendar__plan-total"><strong>{formatCount.format(selectedCount)}</strong> planned</p> : null}
+            </div> : null}
+          </div>
+          {!timed ? <Button type="button" className="mote-calendar__open-day" onClick={() => changeMode('day')}>Open day</Button> : null}
+          <button className="mote-calendar__period-close" type="button" aria-label="Close period details" onClick={closePeriod}><Close size={16} aria-hidden /></button>
+        </header>
+        <section className="mote-calendar__window-info" aria-label={timed ? 'Selected hour' : 'Selected date'}
+          key={selected + ':' + (timed ? selectedHour : 'day')}>
+          {source.observed && eventWindow ? <MoteCalendarEvents heartbeatSourceId={heartbeatSourceId}
+            key={JSON.stringify([retained.current, eventWindow.from, eventWindow.to])} window={eventWindow}
+            schedules={byId} items={selectedEvents} timezone={timezone} now={now}
+            active={active && detailsOpen && queries.length > 0} onOpenRule={revealArrangement} onOpenDiscussion={openDiscussion} />
+            : <p className="mote-calendar__period-empty">{source.observed ? 'This hour does not exist in the calendar timezone.' : 'Arrangements are unconfirmed.'}</p>}
+          {selectedCount && timed && selectedSlot ? <MoteCalendarTimes heartbeatSourceId={heartbeatSourceId} items={selectedPlans}
+            schedules={byId} timezone={timezone} now={now} repeatedHour={selectedSlot.window.to - selectedSlot.window.from > 3_600_000} onOpen={revealArrangement} /> : null}
         </section>
       </section> : null}
     </div>}

@@ -9,7 +9,8 @@ const deliveryLabels: Record<ScheduleHistoryEntry['delivery'], string> = {
 const nativeLabels = { completed: 'Agent turn completed', failed: 'Agent turn failed', interrupted: 'Agent turn interrupted' } as const
 export const deliveryLabel = (delivery: ScheduleHistoryEntry['delivery']) => deliveryLabels[delivery]
 export const turnLabel = (state: ScheduleHistoryGroup['nativeState']) => state === 'unknown' || state === 'unsupported' ? undefined : nativeLabels[state]
-export const needsAttention = (group: ScheduleHistoryGroup) => group.nativeState === 'failed' || group.nativeState === 'interrupted' || group.delivery === 'not-applied' || group.delivery === 'unconfirmed'
+export const needsAttention = (group: Pick<ScheduleHistoryGroup, 'nativeState' | 'delivery'>) =>
+  group.nativeState === 'failed' || group.nativeState === 'interrupted' || group.delivery === 'not-applied' || group.delivery === 'unconfirmed'
 
 export type CalendarSchedule = { record: ContinuousProgressLoop; discussion?: string | undefined }
 
