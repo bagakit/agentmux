@@ -2,6 +2,8 @@ import { chmod } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { terminalEnvironment } from '../src/client.js'
+import { composeAgentResumePrompt } from '../src/agent-outbound-message.js'
+import { agentLifecycleOperationIdentity } from '../src/agent-session-store.js'
 import { classifyExecutable } from '../src/executable-probe.js'
 import { cleanupExecutableNativeFixtures, executableNativeFixture, until } from './helpers/executable-native-fixture.js'
 
@@ -35,7 +37,9 @@ describe('the executable owner uses the actual invocation context', () => {
     const resumed = await pendingResume
     const second = await f.receipt(resumed)
     expect(second).toMatchObject({ cwd: f.root, marker: shape, sid: created.agentSessionId })
-    expect(second.pid).not.toBe(first.pid); expect(second.args).toContain('--resume'); expect(second.args).toContain(first.nativeId); expect(second.args).toContain('resume task')
+    expect(second.pid).not.toBe(first.pid); expect(second.args).toContain('--resume'); expect(second.args).toContain(first.nativeId)
+    expect(second.args).toContain(composeAgentResumePrompt('resume task').text)
+    expect(f.client.agentSession(created.agentSessionId).continuityOperations?.['context-direct-resume']?.launchInput?.message.userContent).toBe('resume task')
     await f.exit(resumed)
     const continuity = await caller.ensureAgentContinuity({ agentSessionId: created.agentSessionId, expectedRun: resumed.run,
       operationId: 'context-continuity', commandOverride: f.command, env: f.env, trigger: 'manual' })
@@ -59,7 +63,8 @@ describe('the executable owner uses the actual invocation context', () => {
     await f.exit(created)
     const resumed = await f.client.resumeAgent({ agentSessionId: created.agentSessionId, operationId: 'provider-plan-resume',
       prompt: 'actual resume plan', commandOverride: 'pre-plan-command', env: { PATH: '' } })
-    expect((await f.receipt(resumed)).args).toContain('actual resume plan')
+    expect((await f.receipt(resumed)).args).toContain(composeAgentResumePrompt('actual resume plan').text)
+    expect(f.client.agentSession(created.agentSessionId).continuityOperations?.['provider-plan-resume']?.launchInput?.message.userContent).toBe('actual resume plan')
     await f.exit(resumed)
     const continuity = await f.client.ensureAgentContinuity({ agentSessionId: created.agentSessionId, expectedRun: resumed.run,
       operationId: 'provider-plan-continuity', commandOverride: 'pre-plan-command', env: { PATH: '' }, trigger: 'manual' })
@@ -82,6 +87,7 @@ describe('the executable owner uses the actual invocation context', () => {
   it.each(['stat', 'access'] as const)('%s observation failure preserves real Native create and original resume', async operation => {
     const f = await executableNativeFixture('configured-path'), caller = await f.hosted()
     const start = vi.spyOn(Reflect.get(f.client, 'kernel'), 'start')
+    const preparedStart = vi.spyOn(Reflect.get(f.client, 'kernel'), 'startPrepared')
     faults.set(f.executable, operation)
     expect(await caller.probeAgent('claude', f.command, { workspacePath: f.root, env: f.env })).toMatchObject({
       installed: false, executableObservation: { executable: f.command, availability: 'check-failed', cause: { code: 'EIO' } } })
@@ -97,15 +103,28 @@ describe('the executable owner uses the actual invocation context', () => {
       commandOverride: f.command, env: f.env, prompt: 'same native task' })
     await expect(resumption).resolves.toMatchObject({ agentSessionId: created.agentSessionId })
     const resumed = await resumption
-    expect((await f.receipt(resumed)).args).toContain(first.nativeId)
+    const second = await f.receipt(resumed)
+    expect(second).toMatchObject({ cwd: f.root, marker: 'configured-path', sid: created.agentSessionId })
+    expect(second.args).toContain(first.nativeId)
     await f.exit(resumed)
     const result = await caller.ensureAgentContinuity({ agentSessionId: created.agentSessionId, expectedRun: resumed.run,
       operationId: 'unconfirmed-continuity', commandOverride: f.command, env: f.env, trigger: operation === 'stat' ? 'manual' : 'input',
       ...(operation === 'access' ? { input: { submissionId: 'original-fresh-input', prompt: 'fresh user task' } } : {}) })
     expect(result.kind).toBe('resumed')
     const current = f.client.agentSession(created.agentSessionId)
-    expect((await f.receipt(current)).args).toContain(first.nativeId)
-    expect(start).toHaveBeenCalledTimes(3)
+    const third = await f.receipt(current)
+    expect(third).toMatchObject({ cwd: f.root, marker: 'configured-path', sid: created.agentSessionId })
+    expect(third.args).toContain(first.nativeId)
+    expect(new Set([created.run.runId, resumed.run.runId, current.run.runId]).size).toBe(3)
+    expect(new Set([first.pid, second.pid, third.pid]).size).toBe(3)
+    const originalResumeKeys = ['unconfirmed-direct', 'unconfirmed-continuity'].map(id => agentLifecycleOperationIdentity('resume', created.agentSessionId, id))
+    const resumedDispatches = preparedStart.mock.calls.filter(([, key]) => originalResumeKeys.includes(key))
+    expect(resumedDispatches.map(([, key]) => key)).toEqual(originalResumeKeys)
+    for (const [spec] of resumedDispatches) {
+      expect(spec).toMatchObject({ cwd: f.root, env: { CONTEXT_MARKER: 'configured-path', AGENTMUX_AGENT_SESSION_ID: created.agentSessionId } })
+      expect(spec.args).toContain(first.nativeId)
+    }
+    expect(start).toHaveBeenCalledTimes(1) // The initial create; both exact resume dispatches are verified above.
     expect(await caller.probeAgent('claude', f.command, { workspacePath: f.root, env: f.env })).toMatchObject({ installed: false })
     faults.clear()
     expect(await caller.probeExecutorAvailability('claude', f.command, { workspacePath: f.root, env: f.env })).toMatchObject({ availability: 'available' })

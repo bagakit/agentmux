@@ -8,6 +8,7 @@ import { NameChangeAudit, nameChangeRequests, desktopNameContext, configNameChan
 import { executeSettingsResourcesControl } from '../src/main/settings-resources-control.js'
 import { AGENTMUX_CONTROL_SCHEMA_VERSION } from '@agentmux/core'
 import { ConfigOwner } from '../src/main/config-owner.js'
+import { DEFAULT_CONFIG } from '../src/main/config-store.js'
 import { ScratchTopics } from '../src/main/scratch-topics.js'
 import { BrowserTaskAssets, type BrowserTaskAssetStore } from '../src/main/browser-task-assets.js'
 import { hostNameHistory } from '@agentmux/host/name-history'
@@ -42,7 +43,7 @@ class Records implements NameChangeRecordPort {
   }
 }
 function config(): AppConfig {
-  return { executors: { worker: { label: 'Worker' } }, composerShortcuts: [{ id: 'prompt', label: 'Prompt' }],
+  return { appearance: structuredClone(DEFAULT_CONFIG.appearance), executors: { worker: { label: 'Worker' } }, composerShortcuts: [{ id: 'prompt', label: 'Prompt' }],
     hosts: [{ id: 'local', kind: 'local', label: 'Local' }], workspaces: [{ id: 'project', name: 'Project' }],
     toolkit: { tools: [{ id: 'script', name: 'Script', actions: [{ id: 'run', label: 'Run' }] }] } } as unknown as AppConfig
 }
