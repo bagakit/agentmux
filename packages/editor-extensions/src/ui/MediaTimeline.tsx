@@ -7,8 +7,11 @@ const TIMELINE_STEPS = 1_000
 const PREVIEW_DWELL_MS = 150
 /** After a pointing ends, the preview decoder stays this long for a quick return; then it lets go of the file. */
 const PREVIEW_RELEASE_MS = 3_000
-/** The least room above the timeline that still fits a readable frame over the time; a shorter player points at the time only. */
-const PREVIEW_MIN_ROOM = 96
+/**
+ * The least room above the timeline that still fits a readable frame over the time; a shorter player points at the time only.
+ * 120 = a 72 px frame, the least where real pictures stay recognisable, plus the 48px media-player.css keeps for the time and gaps.
+ */
+const PREVIEW_MIN_ROOM = 120
 
 /**
  * The pointed spot: the time a press there lands on, and where it sits, as a fraction of the track and in px from the
