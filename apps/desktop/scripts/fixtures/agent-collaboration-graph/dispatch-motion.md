@@ -1,0 +1,27 @@
+# Focus dispatch: bounded native observation
+
+`node apps/desktop/scripts/capture-agent-collaboration-graph.mjs --evidence <empty-directory> --scenario dispatch-motion`
+
+Uses the existing original App → Store → Focus List/Map → reading hook → Worker → Graph production path and original tokens. Only typed platform facts, synthetic Session identities/messages and unrelated PTY/Monaco painting are controlled, as in the parent fixture. No Provider work, live user Run, restart, installation, native terminal output or public CLI navigation is claimed. Public navigation qualification is a separate artifact.
+
+- Normal message and dense sixteen-event observations: start, middle, arrival, recent and static complete native PNGs. Each frame records requested time and actual capture interval; natural animation is never paused or scrubbed.
+- Wide dark/light and narrow dark/light; original supervision update remains undirected. Motion off, system reduce, explicit on under system reduce and system normal are exercised through the original ConfigOwner.
+- Original retained List/Map hiding and actual source BrowserWindow native visibility are separate observations. Native document hiding that cannot be observed is explicitly unknown, never simulated by replacing visibility getters.
+- Eight original catalog members, then 128/384 members plus retained Store workfaces; fixed one-event scope has two repetitions each. Four related events have two repetitions at 384. No full dependency or repository copy, no user process input. Retained Store workfaces do not imply mounted active terminals.
+- Each cost window covers natural motion, remaining original 3200ms event lifetime and static tail. Real CDP text input and wheel commands run while the original graph is active. Complete compressed Chromium traces retain invalidation payloads, Style/Layout/Paint, Layerize/Commit/Intersection and cross-thread composition events. Main-thread task interval union is not CPU time; parent/child inclusive durations are not added.
+
+Set `COLLABORATION_CAPTURE_SOURCE_REF=<baseline-ref>` for the original baseline. Only changed tracked product sources are loaded from immutable Git blob bytes; those bytes, object IDs and SHA-256 digests are retained under `source-overlay/`. No shared product file is overwritten. Both arms compile the same fixture and original candidate-owned dependency aliases. All actually compiled input and output hashes live in the normal receipt; new candidate modules are not reachable from the old baseline imports. Do not compare arms with different fixture hashes or scenario parameters.
+
+Observer and tracing costs are declared, partly measured and never subtracted. Fixed visible-instance equivalence, variance and unrelated-scale increments must be checked from the receipt before drawing a cost conclusion. Collection is not independent aesthetic review or evidence that all GPU work is cheap. Full PNGs and intermediate frames go to the independent reviewer under `docs/guides/agent-visual-e2e-review.md`; rendering boundaries follow `docs/testing/strategy.md#动态视觉的浏览器成本验证`.
+
+## Bounded delivery refresh
+
+`COLLABORATION_CAPTURE_MOTION_REFRESH=1 node apps/desktop/scripts/capture-agent-collaboration-graph.mjs --evidence <new-directory> --scenario dispatch-motion`
+
+The refresh records normal dark/light, dense and narrow dark/light start/middle/arrival frames, one additional actual lower-zoom middle frame through the original Zoom out controls, and the same eight natural cost windows. It does not rerun unchanged policy or undirected-update images. `actual.dispatchMotion.refresh` identifies this smaller matrix; it is not evidence that omitted policies were exercised again. Retain the earlier policy artifact and review the changed-source boundary explicitly. The lower-zoom warmup is declared in the stage events; no source event, camera owner or real Run is replaced.
+
+## Other bounded consumers
+
+- `node apps/desktop/scripts/fixtures/agent-collaboration-graph/capture-dispatch-navigation.mjs <new-directory>` reuses this tool's original App compiler and the original `server-host.mjs`/`runSourceObjectCli` seam for Map → inspect → List → inspect → Map → inspect. It records actual source transport/admission and retained workface facts without the whole readability suite or user Focus.
+- `COLLABORATION_CAPTURE_SOURCE_REF=<baseline-ref> node apps/desktop/scripts/fixtures/agent-collaboration-graph/capture-shared-motion.mjs <new-directory>` and the same command without the source ref compile a small original shared-component scene, not another application. It uses the original Desktop density/motion tokens, shared theme runtime/CSS, Button, ConversationMessage/ToolTrace and native request Card. Original token resolution is a native precondition. Complete native PNG screencast frames observe natural transitions; raw pipeline tracing is separate, without screenshots inside that window.
+- Shared closing-focus guards start inside the original Copy control and, separately, the original request parameter pre with a fixture-only `tabindex=-1`; original state or an exact deferred native completion closes the panel. Native inert/focus handback and subsequent Tab behavior are observed without focus/visibility shims. Typed receipts preserve original operation/request/Session/Run/response; saved, unknown, pending and failed states do not become success. Clipboard and platform facts are declared controlled inputs, not live Provider claims.
