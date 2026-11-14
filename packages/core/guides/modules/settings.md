@@ -279,3 +279,13 @@ original operation and may confirm the original serving process without
 repeating installation or reconnecting. An unknown result never means nothing
 happened. `install-check` retains `latestOperation`; unreadable records retain
 their original IDs in `unreadableOperations` and do not hide another Host.
+
+`settings goals common-actions inspect` discovers the authored directory (null means default),
+effective ordered references, available builtin/Prompt references and unresolved saved references.
+Use `configure --input FILE|-` with `{expected,directory,promptEdits?}`. Both directories are full
+`{items:[{kind:"builtin"|"prompt",id}],collapsed:boolean}` or null. `[]` is an explicit empty list.
+Optional Prompt edits are `{id,expected:<full editable fields>|null,value:<full editable fields>}`
+for currently referenced Prompts, saved in the same ConfigOwner transaction. Ordinary authenticated
+Agents may edit these preferences; this grants no Host trust or maintenance authority. An unchanged
+broken reference stays visible as an issue. After an unknown reply read current values; this read
+does not prove the earlier save acknowledgement and never retries a write.
