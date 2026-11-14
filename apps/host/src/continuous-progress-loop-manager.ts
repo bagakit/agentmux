@@ -4,7 +4,7 @@ import { sameAutomaticInputSource } from '@agentmux/core/automatic-input-source'
 import { isDeepStrictEqual } from 'node:util'
 import { createHash } from 'node:crypto'
 import { goalRoleGuidance } from '@agentmux/core/goal-role-guidance'
-import { AgentMuxError, AGENTMUX_AGENT_MESSAGING_ENTRY, ContinuousProgressScheduler, isAgentSchedule, agentPromptCondition, decideContinuousProgress, decideFutureProgress, mintObjectId, type ContinuousProgressLoop, type ContinuousProgressTarget, type ContinuousProgressObservation, type ContinuousProgressTaskSource, type AgentPromptCondition } from '@agentmux/core'
+import { AgentMuxError, AGENTMUX_AGENT_MESSAGING_ENTRY, ContinuousProgressScheduler, isAgentSchedule, agentPromptCondition, decideContinuousProgress, decideFutureProgress, mintObjectId, type ContinuousProgressLoop, type ContinuousProgressPause, type ContinuousProgressPauseReason, type ContinuousProgressTarget, type ContinuousProgressObservation, type ContinuousProgressTaskSource, type AgentPromptCondition } from '@agentmux/core'
 import { parseScheduleRpcParams, type ScheduleMethod, type ScheduleParamsMap, type ScheduleResultMap, type AgentMuxRpcCallContext } from '@agentmux/core'
 import { nextCalendarOccurrence, latestCalendarOccurrence, nextIntervalOccurrence, latestIntervalOccurrence } from '@agentmux/core/schedule-calendar'
 import { readContinuousProgressTaskSource, validateContinuousProgressTaskSource, decideGoalProgressSource, type GoalProgressReader, type GoalProgressRecord, type GoalProgressDecision } from './continuous-progress-task-source.js'
@@ -40,7 +40,7 @@ export type LoopMutationFence = { prepare(): Promise<void>; assertCurrent(): voi
 // later tick observations do not confer or revoke control authority.
 const actionBasis = (loop: ContinuousProgressLoop) => ({ loopId: loop.loopId, hostId: loop.hostId, agentSessionId: loop.agentSessionId,
   providerId: loop.providerId, workspacePath: loop.workspacePath, intervalMs: loop.intervalMs, prompt: loop.prompt,
-  taskSource: loop.taskSource, creationOperationId: loop.creationOperationId, status: loop.status, revision: loop.revision ?? 0 })
+  taskSource: loop.taskSource, creationOperationId: loop.creationOperationId, status: loop.status, pause: loop.pause, revision: loop.revision ?? 0 })
 
 // Canonicalize the complete original RPC request, including its expected loop.
 const updateDigest = (input: unknown): string => {
@@ -50,7 +50,7 @@ const updateDigest = (input: unknown): string => {
 }
 
 /** A maintenance source's answer for one due occurrence. Only a confirmed change pauses; a gap only defers. */
-export type MaintenanceSourceDecision = { action: 'continue' } | { action: 'pause'; reason: string } | { action: 'defer'; reason: string }
+export type MaintenanceSourceDecision = { action: 'continue' } | { action: 'pause'; reason: string; pauseReason?: ContinuousProgressPauseReason } | { action: 'defer'; reason: string }
 /** The first wait after an unconfirmed source, doubling to the limit. Shared by the scheduler and its maintenance owner. */
 export const MAINTENANCE_RETRY_MS = 1_000, MAINTENANCE_RETRY_LIMIT_MS = 60_000
 /** Background maintenance runs beside due occurrences. Its owner joins only exact in-flight targets; `now` is the scheduler's own clock. */
@@ -100,6 +100,7 @@ export class ContinuousProgressLoopManager {
         // Confirmed original owner updates cancel any in-flight input synchronously.
         const reason = source.action === 'continue' ? 'The original Session association changed; inspect this Goal.' : source.reason
         this.cancelDelivery(loop.loopId, new Error(reason))
+        if (source.action !== 'stop') this.pauseWithReason(loop.loopId, 'source-changed')
         this.patch(loop.loopId, { status: source.action === 'stop' ? 'stopped' : 'paused', lastDecision: reason })
         void this.persist(loop.loopId).catch(() => {})
       }
@@ -116,7 +117,7 @@ export class ContinuousProgressLoopManager {
   }
   private async startOnce(): Promise<void> {
     const loops = (await this.store.load()).map((loop) => loop.pendingCompletion && loop.status === 'active'
-      ? { ...loop, status: 'paused' as const, lastOutcome: 'unknown' as const } : loop)
+      ? { ...loop, status: 'paused' as const, pause: this.pauseFacts(loop, 'input-unconfirmed'), lastOutcome: 'unknown' as const } : loop)
     this.scheduler.restore(loops)
     this.goalLoops.clear()
     for (const loop of loops) this.indexGoalLoop(loop)
@@ -266,8 +267,9 @@ export class ContinuousProgressLoopManager {
           throw new AgentMuxError('The original Goal loop changed during action preparation. Its current state and manual input are retained.', 'CONTROL_REQUEST_CONFLICT')
       }
       if (this.require(loopId).status === 'stopped' && action !== 'stop') throw new AgentMuxError('This original Goal loop was stopped. Its operation and Agent are retained; inspect it before explicitly starting new work.', 'CONTROL_REQUEST_CONFLICT')
+      if (action === 'pause') this.pauseWithReason(loopId, 'manual')
       this.patch(loopId, { ...(!retry ? { revision: expectedRevision + 1, lastMutation: { operationId, action, expectedRevision } } : {}),
-        ...(action === 'pause' ? { status: 'paused' as const, lastDecision: 'Paused by you.' } : action === 'stop' ? { status: 'stopped' as const } : action === 'resume' ? { status: 'active' as const, nextCheckAt: this.now() + loop.intervalMs } : {}) })
+        ...(action === 'pause' ? { lastDecision: 'Explicitly paused.' } : action === 'stop' ? { status: 'stopped' as const } : action === 'resume' ? { status: 'active' as const, nextCheckAt: this.now() + loop.intervalMs } : {}) })
       if (action === 'pause' || action === 'stop') this.cancelDelivery(loopId)
       // Pure state changes and the operation are one durable write. A retry repeats that same state;
       // a check persists its operation before the original scheduler can cross the input boundary.
@@ -340,17 +342,20 @@ export class ContinuousProgressLoopManager {
       default: return decision satisfies never
     }
   }
-  private async pauseForSource(loop: ContinuousProgressLoop, source: { action: 'continue' | 'pause' | 'stop' | 'defer'; reason: string }): Promise<void> {
+  private async pauseForSource(loop: ContinuousProgressLoop, source: { action: 'continue' | 'pause' | 'stop' | 'defer'; reason: string; pauseReason?: ContinuousProgressPauseReason }): Promise<void> {
     if (source.action === 'defer') {
       this.patch(loop.loopId, { lastDecision: source.reason })
       await this.persist(loop.loopId)
       return
     }
-    this.patch(loop.loopId, { status: this.require(loop.loopId).status === 'stopped' || source.action === 'stop' ? 'stopped' : 'paused', lastDecision: source.reason })
+    if (this.require(loop.loopId).status === 'stopped' || source.action === 'stop') this.patch(loop.loopId, { status: 'stopped' })
+    else this.pauseWithReason(loop.loopId, source.pauseReason ?? 'source-changed')
+    this.patch(loop.loopId, { lastDecision: source.reason })
     this.cancelDelivery(loop.loopId)
     await this.persist(loop.loopId)
   }
-  async call<M extends ScheduleMethod>(method: M, input: ScheduleParamsMap[M], context?: AgentMuxRpcCallContext): Promise<ScheduleResultMap[M]> {
+  // The reason is a Host-owner argument, never a public caller assertion about its actor.
+  async call<M extends ScheduleMethod>(method: M, input: ScheduleParamsMap[M], context?: AgentMuxRpcCallContext, pauseReason: ContinuousProgressPauseReason = 'manual'): Promise<ScheduleResultMap[M]> {
     const params = parseScheduleRpcParams(method, input)
     if (method === 'schedule.create' && (params as ScheduleParamsMap['schedule.create']).checkIn &&
         (context?.caller || !context?.principal || !['user','device'].includes(context.principal.kind))) throw new AgentMuxError('Quiet follow-up requires explicit opt-in from the authenticated user or device. Existing arrangements and manual input remain available.', 'SCHEDULE_CHECK_IN_OPT_IN_REQUIRED')
@@ -359,12 +364,12 @@ export class ContinuousProgressLoopManager {
     const key = method === 'schedule.create' ? create.managedSource ? 'managed:' + create.managedSource.sourceId : create.checkIn ? 'checkin:' + JSON.stringify([create.target.hostId, create.target.agentSessionId, create.target.providerId, create.target.workspacePath]) : `create:${create.operationId}` : (params as ScheduleParamsMap['schedule.pause']).scheduleId
     const previous = this.mutations.get(key) ?? Promise.resolve()
     const operation = previous.catch(() => {}).then(() => method === 'schedule.create'
-      ? this.activation(this.targetKey(create.target), assertCurrent => this.callOwned(method, params, context, assertCurrent))
-      : this.callOwned(method, params, context))
+      ? this.activation(this.targetKey(create.target), assertCurrent => this.callOwned(method, params, context, assertCurrent, pauseReason))
+      : this.callOwned(method, params, context, undefined, pauseReason))
     this.mutations.set(key, operation)
     try { return await operation } finally { if (this.mutations.get(key) === operation) this.mutations.delete(key) }
   }
-  private async callOwned<M extends ScheduleMethod>(method: M, input: ScheduleParamsMap[M], context?: AgentMuxRpcCallContext, assertCurrent?: () => void): Promise<ScheduleResultMap[M]> {
+  private async callOwned<M extends ScheduleMethod>(method: M, input: ScheduleParamsMap[M], context?: AgentMuxRpcCallContext, assertCurrent?: () => void, pauseReason: ContinuousProgressPauseReason = 'manual'): Promise<ScheduleResultMap[M]> {
     const params = parseScheduleRpcParams(method, input)
     await this.start()
     const scope = { executionScope: 'connected-host' as const }
@@ -388,11 +393,11 @@ export class ContinuousProgressLoopManager {
         const retryCreation = existing.status === 'paused' && existing.lastOutcome === 'unknown' && !existing.lastTickId && !existing.lastMutation
         try { await this.saveFutureIntent(existing, retryCreation || existing.status === 'active', context); assertCurrent?.() }
         catch (error) {
-          this.patch(existing.loopId, { status: 'paused', lastOutcome: 'unknown', lastDecision: 'The original future-message preparation was cancelled or unconfirmed. Inspect the same operation.' })
+          this.pauseWithReason(existing.loopId, 'preparation'); this.patch(existing.loopId, { lastOutcome: 'unknown', lastDecision: 'The original future-message preparation was cancelled or unconfirmed. Inspect the same operation.' })
           await this.persist(existing.loopId); await this.saveFutureIntent(this.require(existing.loopId), false, context); throw error
         }
         if (retryCreation && this.require(existing.loopId).status !== 'stopped' && !this.require(existing.loopId).lastMutation) {
-          const { lastOutcome: _, lastDecision: __, ...confirmed } = this.require(existing.loopId)
+          const { lastOutcome: _, lastDecision: __, pause: ___, ...confirmed } = this.require(existing.loopId)
           this.scheduler.replace(existing.loopId, { ...confirmed, status: 'active' })
         }
         await this.persist(existing.loopId)
@@ -406,9 +411,9 @@ export class ContinuousProgressLoopManager {
       if (nextDue === null) throw new AgentMuxError('This one-time civil occurrence is past or falls in a skipped DST gap. Choose a valid future time.', 'SCHEDULE_NO_FUTURE_OCCURRENCE')
       assertCurrent?.()
       const loop = this.scheduler.createSchedule({ ...p.target, prompt: p.prompt, nextDue, operationId: p.operationId, ...(p.managedSource ? { managedSource: p.managedSource } : {}), ...(p.calendar ? { calendar: p.calendar, ...(p.checkIn ? { checkIn: p.checkIn } : {}) } : p.afterMs !== undefined ? { afterMs: p.afterMs } : { everyMs: p.everyMs! }) })
-      this.patch(loop.loopId, { status: 'paused' })
+      this.pauseWithReason(loop.loopId, 'preparation')
       try { await this.persist(loop.loopId); assertCurrent?.(); await this.saveFutureIntent(loop, true, context); assertCurrent?.(); this.patch(loop.loopId, { status: 'active' }); await this.persist(loop.loopId) }
-      catch (error) { this.patch(loop.loopId, { status: 'paused', lastOutcome: 'unknown', lastDecision: 'Saving the future-message intent is unconfirmed. Inspect the original operation; manual input remains available. ' + String(error) }); await this.persist(loop.loopId); await this.saveFutureIntent(this.require(loop.loopId), false, context); throw error }
+      catch (error) { this.pauseWithReason(loop.loopId, 'preparation'); this.patch(loop.loopId, { lastOutcome: 'unknown', lastDecision: 'Saving the future-message intent is unconfirmed. Inspect the original operation; manual input remains available. ' + String(error) }); await this.persist(loop.loopId); await this.saveFutureIntent(this.require(loop.loopId), false, context); throw error }
       return { ...scope, schedule: this.require(loop.loopId), diskDurability: 'confirmed' } as ScheduleResultMap[M]
     }
     if (method === 'schedule.update') {
@@ -439,7 +444,7 @@ export class ContinuousProgressLoopManager {
     if (loop.status === 'stopped' && action !== 'cancel') throw new AgentMuxError('An ended arrangement cannot pause or resume. Inspect the original arrangement; save a new one explicitly for new work.', 'SCHEDULE_CANCELLED')
     if (loop.lastMutation?.operationId !== p.operationId) this.patch(loop.loopId, { revision: p.expectedRevision + 1, lastMutation: { operationId: p.operationId, action, expectedRevision: p.expectedRevision } })
     if (action === 'resume') await this.resume(loop.loopId, context)
-    else if (action === 'pause') await this.pause(loop.loopId, 'Paused by you.', context)
+    else if (action === 'pause') await this.pause(loop.loopId, 'Explicitly paused.', context, undefined, pauseReason)
     else await this.stopLoop(loop.loopId, context)
     await this.persist(loop.loopId)
     return { ...scope, schedule: this.require(loop.loopId), diskDurability: 'confirmed' } as ScheduleResultMap[M]
@@ -545,8 +550,8 @@ export class ContinuousProgressLoopManager {
     await this.persist(loop.loopId)
     return loop
   }
-  async pause(loopId: string, reason = 'Paused by you.', context?: AgentMuxRpcCallContext, fence?: LoopMutationFence): Promise<ContinuousProgressLoop> {
-    const [result] = await this.pauseMany([loopId], reason, context, fence)
+  async pause(loopId: string, reason = 'Explicitly paused.', context?: AgentMuxRpcCallContext, fence?: LoopMutationFence, pauseReason: ContinuousProgressPauseReason = 'manual'): Promise<ContinuousProgressLoop> {
+    const [result] = await this.pauseMany([loopId], reason, context, fence, pauseReason)
     if (result!.status === 'rejected') throw result!.reason
     return result!.value
   }
@@ -578,7 +583,7 @@ export class ContinuousProgressLoopManager {
       return { status: 'fulfilled', value: this.require(result.value.loopId) }
     })
   }
-  async pauseMany(loopIds: readonly string[], reason: string, context?: AgentMuxRpcCallContext, fence?: LoopMutationFence): Promise<PromiseSettledResult<ContinuousProgressLoop>[]> {
+  async pauseMany(loopIds: readonly string[], reason: string, context?: AgentMuxRpcCallContext, fence?: LoopMutationFence, pauseReason: ContinuousProgressPauseReason = 'manual'): Promise<PromiseSettledResult<ContinuousProgressLoop>[]> {
     await this.start()
     const prepared = await Promise.allSettled(loopIds.map(async loopId => {
       await fence?.prepare()
@@ -586,7 +591,7 @@ export class ContinuousProgressLoopManager {
       const original = this.require(loopId)
       if (isAgentSchedule(original) && original.status === 'stopped') throw new AgentMuxError('An ended arrangement cannot pause or resume. Save a new arrangement explicitly.', 'SCHEDULE_CANCELLED')
       if (original.taskSource?.kind === 'goal' && original.status === 'stopped') return { loopId, persist: false }
-      this.scheduler.pause(loopId); this.patch(loopId, { lastDecision: reason }); this.cancelDelivery(loopId)
+      this.pauseWithReason(loopId, pauseReason); this.patch(loopId, { lastDecision: reason }); this.cancelDelivery(loopId)
       // Paused memory is not a save receipt. A new explicit operation also
       // persists an already paused loop, confirming a previously failed write.
       return { loopId, persist: true }
@@ -614,7 +619,7 @@ export class ContinuousProgressLoopManager {
     if (before.taskSource?.kind === 'goal') {
       if (before.status === 'stopped') return before
       const source = await this.goalSource(before)
-      if (source.action !== 'continue' || before.initialDelivery?.state !== 'confirmed') { await this.pauseForSource(before, source); throw new AgentMuxError(source.reason || 'Original Goal input receipt is unconfirmed.', 'CONTROL_REQUEST_CONFLICT') }
+      if (source.action !== 'continue' || before.initialDelivery?.state !== 'confirmed') { await this.pauseForSource(before, { ...source, ...(source.action === 'continue' ? { pauseReason: 'preparation' as const } : {}) }); throw new AgentMuxError(source.reason || 'Original Goal input receipt is unconfirmed.', 'CONTROL_REQUEST_CONFLICT') }
     }
     if (isAgentSchedule(before)) await this.saveFutureIntent(before, true, context)
     context?.signal?.throwIfAborted(); await context?.assertCurrent?.()
@@ -626,7 +631,7 @@ export class ContinuousProgressLoopManager {
       if (isAgentSchedule(before)) await this.saveFutureIntent(this.require(loopId), false, context)
       throw new AgentMuxError('The original arrangement changed during resume. Its current state and manual input are retained.', 'CONTROL_REQUEST_CONFLICT')
     }
-    const { lastDecision: _, ...loop } = this.scheduler.resume(loopId)
+    const { lastDecision: _, pause: __, ...loop } = this.scheduler.resume(loopId)
     this.scheduler.replace(loopId, loop)
     await this.persist(loopId)
     return loop
@@ -653,7 +658,7 @@ export class ContinuousProgressLoopManager {
   pauseTarget(target: Pick<ContinuousProgressTarget, 'hostId' | 'agentSessionId'>, reason: string): Promise<void> {
     const changed = this.list(target).filter(loop => !isAgentSchedule(loop) && loop.status === 'active')
     for (const loop of changed) {
-      this.scheduler.pause(loop.loopId); this.patch(loop.loopId, { lastDecision: reason }); this.cancelDelivery(loop.loopId)
+      this.pauseWithReason(loop.loopId, 'manual'); this.patch(loop.loopId, { lastDecision: reason }); this.cancelDelivery(loop.loopId)
     }
     // Cancellation is synchronous. Human input does not wait for a durable loop write.
     return Promise.all(changed.map(loop => this.persist(loop.loopId))).then(() => {})
@@ -678,7 +683,9 @@ export class ContinuousProgressLoopManager {
   }
   private persistenceFailed(loopId: string, error: unknown): void {
     const original = this.require(loopId)
-    this.patch(loopId, { status: original.managedSource && original.status === 'active' && !original.pendingCompletion ? 'active' : original.taskSource?.kind === 'goal' && original.status === 'stopped' ? 'stopped' : 'paused', lastDecision: `Loop persistence is unconfirmed. Manual input remains available. ${error instanceof Error ? error.message : String(error)}` })
+    const status = original.managedSource && original.status === 'active' && !original.pendingCompletion ? 'active' : original.taskSource?.kind === 'goal' && original.status === 'stopped' ? 'stopped' : 'paused'
+    if (status === 'paused' && original.status === 'active') this.pauseWithReason(loopId, 'persistence-unconfirmed')
+    this.patch(loopId, { status, lastDecision: `Loop persistence is unconfirmed. Manual input remains available. ${error instanceof Error ? error.message : String(error)}` })
     for (const listener of this.listeners) listener(this.require(loopId))
   }
   async check(now?: number, onlyLoopId?: string): Promise<void> {
@@ -770,7 +777,9 @@ export class ContinuousProgressLoopManager {
     // Claim and persist before invoking provider code. A crash or unknown callback result cannot replay a tick.
     try { await this.store.save(this.scheduler.list()) }
     catch (error) {
-      this.patch(claim.loop.loopId, { status: claim.loop.managedSource && !claim.loop.pendingCompletion ? this.require(claim.loop.loopId).status : 'paused', lastDecision: `Automatic claim persistence is unconfirmed. Manual input remains available. ${error instanceof Error ? error.message : String(error)}` })
+      const status = claim.loop.managedSource && !claim.loop.pendingCompletion ? this.require(claim.loop.loopId).status : 'paused'
+      if (status === 'paused') this.pauseWithReason(claim.loop.loopId, 'persistence-unconfirmed')
+      this.patch(claim.loop.loopId, { status, lastDecision: `Automatic claim persistence is unconfirmed. Manual input remains available. ${error instanceof Error ? error.message : String(error)}` })
       for (const listener of this.listeners) listener(this.require(claim.loop.loopId))
       throw error
     }
@@ -799,6 +808,7 @@ export class ContinuousProgressLoopManager {
         if (claim.loop.taskSource && claim.loop.taskSource.kind !== 'goal') {
           const source = await awaitUntilCancelled(() => readContinuousProgressTaskSource(claim.loop.taskSource!, controller.signal), controller.signal)
           if (!isCurrent()) break delivery
+          if (source.action === 'pause') this.pauseWithReason(claim.loop.loopId, 'source-changed')
           this.patch(claim.loop.loopId, { lastDecision: source.reason, ...(source.action === 'stop' ? { status: 'stopped' as const, lastOutcome: 'skipped' as const } : source.action === 'pause' ? { status: 'paused' as const, lastOutcome: 'skipped' as const } : {}) })
           if (source.action !== 'continue') { await this.persist(claim.loop.loopId); break delivery }
         }
@@ -854,9 +864,10 @@ export class ContinuousProgressLoopManager {
     } }
     const current = this.scheduler.get(claim.loop.loopId)
     if (current) {
-      if (outcome === 'unknown') this.patch(current.loopId, {
-        ...(current.status === 'active' ? { status: 'paused' } : {}), lastOutcome: 'unknown'
-      })
+      if (outcome === 'unknown') {
+        if (current.status === 'active') this.pauseWithReason(current.loopId, 'input-unconfirmed')
+        this.patch(current.loopId, { lastOutcome: 'unknown' })
+      }
       else {
         const { pendingCompletion: _, ...settled } = current
         if (outcome === 'skipped' && newCheckInClaim && settled.checkInState) {
@@ -871,7 +882,7 @@ export class ContinuousProgressLoopManager {
             const nextDue = current.calendar ? nextCalendarOccurrence(current.calendar, checkAt) : current.everyMs !== undefined ? nextIntervalOccurrence(pending.futureIntent.occurrenceAt, checkAt, current.everyMs) : null
             settled.lastOccurrenceAt = pending.futureIntent.occurrenceAt
             settled.nextCheckAt = nextDue ?? current.nextCheckAt
-            if (nextDue === null && current.everyMs !== undefined) settled.status = 'paused'
+            if (nextDue === null && current.everyMs !== undefined && current.status !== 'stopped') { settled.status = 'paused'; settled.pause = this.pauseFacts(current, 'timing-unrepresentable') }
             else if (nextDue === null) settled.status = 'stopped'
             settled.lastDecision = nextDue === null && current.everyMs !== undefined
               ? 'Host accepted the original message; the next occurrence is unrepresentable. Inspect the original arrangement.'
@@ -888,8 +899,22 @@ export class ContinuousProgressLoopManager {
     this.initialDeliveries.get(loopId)?.abort(reason)
     this.activeDeliveries.get(loopId)?.abort(reason)
   }
+  /** Only a real owner transition creates an onset. An old already-paused record has no invented history. */
+  private pauseFacts(loop: ContinuousProgressLoop, reason: ContinuousProgressPauseReason): ContinuousProgressPause {
+    if (loop.status === 'active') return { reason, episodeId: mintObjectId(), pausedAt: this.now() }
+    if (loop.pause) return reason === 'manual' ? { ...loop.pause, reason } : loop.pause
+    return { reason }
+  }
+  private pauseWithReason(loopId: string, reason: ContinuousProgressPauseReason): void {
+    const loop = this.require(loopId)
+    if (loop.status !== 'stopped') this.patch(loopId, { status: 'paused', pause: this.pauseFacts(loop, reason) })
+  }
   private patch(loopId: string, patch: Partial<ContinuousProgressLoop>): void {
     const loop = this.scheduler.get(loopId)
-    if (loop) this.scheduler.replace(loopId, { ...loop, ...patch, ...(isAgentSchedule(loop) && loop.status === 'stopped' ? { status: 'stopped' as const } : {}) })
+    if (loop) {
+      const next = { ...loop, ...patch, ...(isAgentSchedule(loop) && loop.status === 'stopped' ? { status: 'stopped' as const } : {}) }
+      if (next.status === 'active' && patch.status === 'active') delete next.pause
+      this.scheduler.replace(loopId, next)
+    }
   }
 }

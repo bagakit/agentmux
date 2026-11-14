@@ -57,10 +57,10 @@ export function createHostMotePresence(options: {
     const main = await options.main.readCurrentMoteMain(target)
     if (main.status !== 'ready' || !main.identity) return { action: 'defer', reason: main.issue ?? 'The original main role is unconfirmed.' }
     if (!main.current || main.roleRevision !== loop.managedSource.revision || motePresenceSourceId(main.identity) !== loop.managedSource.sourceId ||
-      main.current.hostId !== loop.hostId || main.current.sessionId !== loop.agentSessionId) return { action: 'pause', reason: 'The original main role changed.' }
+      main.current.hostId !== loop.hostId || main.current.sessionId !== loop.agentSessionId) return { action: 'pause', pauseReason: 'source-changed', reason: 'The original main role changed.' }
     const { mode } = await readMoteQuickModeSource(options.files, target)
     if (mode.status === 'unconfirmed') return { action: 'defer', reason: mode.message }
-    if (!(moteQuickModeDefaults(mode).presence ?? DEFAULT_MOTE_PRESENCE).enabled) return { action: 'pause', reason: 'The original standing maintenance was disabled.' }
+    if (!(moteQuickModeDefaults(mode).presence ?? DEFAULT_MOTE_PRESENCE).enabled) return { action: 'pause', pauseReason: 'source-disabled', reason: 'The original standing maintenance was disabled.' }
     await options.main.assertCurrent(main)
     return { action: 'continue' }
   }
@@ -94,7 +94,7 @@ export function createHostMotePresence(options: {
       for (const loop of arrangements) if (loop.status !== 'stopped' && (loop.managedSource!.revision !== main.roleRevision || !preference.enabled || !main.current)) {
         const method = loop.managedSource!.revision === main.roleRevision && main.current && !preference.enabled ? 'schedule.pause' : 'schedule.cancel'
         if (method === 'schedule.pause' && loop.status === 'paused') continue
-        await options.schedules.call(method, { scheduleId: loop.loopId, expectedRevision: loop.revision!, operationId: 'mote-revoke-' + digest([loop.loopId, loop.revision, main.roleRevision, preference.enabled]) })
+        await options.schedules.call(method, { scheduleId: loop.loopId, expectedRevision: loop.revision!, operationId: 'mote-revoke-' + digest([loop.loopId, loop.revision, main.roleRevision, preference.enabled]) }, undefined, 'source-disabled')
       }
       const current = options.schedules.listManaged(sourceId).filter(value => value.managedSource?.revision === main.roleRevision)
       let loop = current.find(value => value.status !== 'stopped') ?? current[0]
@@ -107,7 +107,7 @@ export function createHostMotePresence(options: {
       const original = await read(() => client.inspectAgentCreation(main.current!.sessionId))
       assertExecutionCurrent()
       if (original.kind !== 'agent') {
-        if (loop?.status === 'active') await options.schedules.call('schedule.pause', { scheduleId: loop.loopId, expectedRevision: loop.revision!, operationId: 'mote-retired-' + digest([loop.loopId, loop.revision]) })
+        if (loop?.status === 'active') await options.schedules.call('schedule.pause', { scheduleId: loop.loopId, expectedRevision: loop.revision!, operationId: 'mote-retired-' + digest([loop.loopId, loop.revision]) }, undefined, 'execution-ended')
         throw new Error('The original main Agent was explicitly retired. Its identity is retained; select or explicitly restore that original role.')
       }
       if (original.agentSessionId !== main.current.sessionId || original.hostId !== 'local' && original.hostId !== main.current.hostId) throw new Error('The original main execution identity changed.')
@@ -127,7 +127,7 @@ export function createHostMotePresence(options: {
       assertExecutionCurrent()
       if (observed.run.state === 'running') return
       if (observed.run.exitCode === 0 || observed.run.exitReason === 'user-stopped' || observed.session.continuity?.supervision?.cancellation) {
-        loop = (await options.schedules.call('schedule.pause', { scheduleId: loop.loopId, expectedRevision: loop.revision!, operationId: 'mote-ended-' + digest([loop.loopId, observed.session.run]) })).schedule
+        loop = (await options.schedules.call('schedule.pause', { scheduleId: loop.loopId, expectedRevision: loop.revision!, operationId: 'mote-ended-' + digest([loop.loopId, observed.session.run]) }, undefined, 'execution-ended')).schedule
         readings.set(id, { status: 'paused', schedule: loop, issue: 'The original Agent exited normally or was cancelled. Resume the original arrangement explicitly.' }); return
       }
       await read(() => options.main.assertCurrent(main)); assertOpen()

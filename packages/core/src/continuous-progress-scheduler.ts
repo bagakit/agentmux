@@ -14,6 +14,27 @@ export type ContinuousProgressTarget = {
 export type ContinuousProgressGoalSource = { kind: 'goal'; goalId: string; alignmentRevision: number }
 export type ContinuousProgressTaskSource = { kind?: 'feature'; root: string; ownerId: string; readerPath: string } | ContinuousProgressGoalSource
 
+/** Facts recorded by the original arrangement owner, never inferred from its explanation. */
+export type ContinuousProgressPauseReason = 'manual' | 'source-disabled' | 'source-changed' | 'execution-ended' |
+  'preparation' | 'input-unconfirmed' | 'persistence-unconfirmed' | 'timing-unrepresentable'
+export type ContinuousProgressPause = {
+  reason: ContinuousProgressPauseReason
+  /** Missing on older, already-paused records whose original transition is unknown. */
+  episodeId?: string
+  pausedAt?: number
+}
+export function validateContinuousProgressPause(value: unknown): asserts value is ContinuousProgressPause {
+  const p = value as ContinuousProgressPause | null
+  if (!p || typeof p !== 'object' || Array.isArray(p) ||
+    Object.keys(p).some(key => !['reason', 'episodeId', 'pausedAt'].includes(key)) ||
+    !['manual', 'source-disabled', 'source-changed', 'execution-ended', 'preparation', 'input-unconfirmed', 'persistence-unconfirmed', 'timing-unrepresentable'].includes(p.reason) ||
+    (p.episodeId === undefined) !== (p.pausedAt === undefined) ||
+    p.episodeId !== undefined && (typeof p.episodeId !== 'string' || !p.episodeId.trim() || /[\0\r\n]/u.test(p.episodeId)) ||
+    p.pausedAt !== undefined && (!Number.isSafeInteger(p.pausedAt) || p.pausedAt < 0 || p.episodeId === undefined)) {
+    throw new AgentMuxError('Original arrangement pause facts are invalid.', 'CONTROL_PROTOCOL_ERROR')
+  }
+}
+
 export type ContinuousProgressLoop = ContinuousProgressTarget & {
   managedSource?: import('./automatic-input-source.js').AutomaticInputSource
   taskSource?: ContinuousProgressTaskSource
@@ -34,6 +55,8 @@ export type ContinuousProgressLoop = ContinuousProgressTarget & {
   prompt: string
   nextCheckAt: number
   status: 'active' | 'paused' | 'stopped'
+  /** Absent means the original pause cause/onset is unknown; reads never backfill it. */
+  pause?: ContinuousProgressPause
   pendingCompletion?: {
     id: string
     operationId: string
@@ -234,5 +257,6 @@ export function parseGoalContinuationLoop(value: unknown): ContinuousProgressLoo
       typeof loop.pendingCompletion.prompt !== 'string' || !validId(loop.pendingCompletion.condition?.expectedRun?.runId) ||
       !Object.hasOwn(loop.pendingCompletion.condition, 'afterSubmissionId') || !(loop.pendingCompletion.condition.afterSubmissionId === null || validId(loop.pendingCompletion.condition.afterSubmissionId)))) throw new Error('Original continuation transaction is unconfirmed.')
   if (loop.lastMutation && (!validId(loop.lastMutation.operationId) || !['pause', 'resume', 'stop', 'check'].includes(loop.lastMutation.action) || !Number.isSafeInteger(loop.lastMutation.expectedRevision))) throw new Error('Original continuation mutation is unconfirmed.')
+  if (loop.pause !== undefined) validateContinuousProgressPause(loop.pause)
   return structuredClone(loop)
 }

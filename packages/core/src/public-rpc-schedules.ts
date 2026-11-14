@@ -3,7 +3,7 @@ import { AgentMuxError } from './errors.js'
 import { rpcRecord } from './rpc-data.js'
 import { parseAgentScheduleCheckIn, parseAgentScheduleTiming, type AgentScheduleTiming } from './agent-schedule.js'
 import { validateAgentPromptCondition } from './agent-prompt-condition.js'
-import { isAgentSchedule, type ContinuousProgressLoop, type ContinuousProgressTarget } from './continuous-progress-scheduler.js'
+import { isAgentSchedule, validateContinuousProgressPause, type ContinuousProgressLoop, type ContinuousProgressTarget } from './continuous-progress-scheduler.js'
 import type { AgentMuxRpcCallContext } from './public-rpc-service.js'
 
 export type ScheduleMutation = { scheduleId: string; expectedRevision: number; operationId: string }
@@ -74,11 +74,12 @@ export function parseScheduleRpcParams<M extends ScheduleMethod>(method: M, valu
 }
 export function parseScheduleRecord(value: unknown): ContinuousProgressLoop {
   const code = 'CONTROL_PROTOCOL_ERROR'
-  const p = rpcRecord(value, ['loopId','hostId','agentSessionId','providerId','workspacePath','calendar','afterMs','everyMs','checkIn','checkInState','revision','creationOperationId','lastMutation','futureIntentId','lastOccurrenceAt','intervalMs','prompt','nextCheckAt','status','pendingCompletion','lastCompletionId','lastTickId','lastOutcome','lastTickAt','lastDecision','taskSource','managedSource'], code)
+  const p = rpcRecord(value, ['loopId','hostId','agentSessionId','providerId','workspacePath','calendar','afterMs','everyMs','checkIn','checkInState','revision','creationOperationId','lastMutation','futureIntentId','lastOccurrenceAt','intervalMs','prompt','nextCheckAt','status','pause','pendingCompletion','lastCompletionId','lastTickId','lastOutcome','lastTickAt','lastDecision','taskSource','managedSource'], code)
   if (p.managedSource !== undefined) parseAutomaticInputSource(p.managedSource)
   parseScheduleTarget({ hostId: p.hostId, agentSessionId: p.agentSessionId, providerId: p.providerId, workspacePath: p.workspacePath }, code)
   string(p.loopId, code); string(p.prompt, code, 64 * 1024); integer(p.intervalMs, code, 1); integer(p.nextCheckAt, code)
   if (!['active','paused','stopped'].includes(p.status as string)) invalid('Schedule state is invalid.', code)
+  if (p.pause !== undefined) validateContinuousProgressPause(p.pause)
   if (p.calendar !== undefined || p.afterMs !== undefined || p.everyMs !== undefined || p.checkIn !== undefined)
     parseAgentScheduleTiming({ calendar: p.calendar, afterMs: p.afterMs, everyMs: p.everyMs, checkIn: p.checkIn }, code)
   if (p.checkIn !== undefined) parseAgentScheduleCheckIn(p.checkIn, code)
