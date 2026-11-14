@@ -37,7 +37,6 @@ it('a real managed caller reads the exact operator policy through two original C
  const cli=await new Promise<{code:number;stdout:string;stderr:string}>(yes=>{const child=execFile(process.execPath,[join(compiled,'dist/agentmux.js'),'--endpoint','unix:'+f.a.socketPath,'settings','node','inspect','--host','remote-b','--expected-runtime',f.b.owner.runtimeId,'--input','-'],{env:{...f.a.env,AGENTMUX_AGENT_SESSION_ID:f.credentials.agentSessionId,AGENTMUX_AGENT_CAPABILITY:f.credentials.capability},encoding:'utf8'},(e,stdout,stderr)=>yes({code:e?1:0,stdout,stderr}));child.stdin!.end(JSON.stringify({operationId:input.operationId}))})
  expect(cli.code,cli.stderr).toBe(0);expect(JSON.parse(cli.stdout).result.policy).toEqual(f.policy)
  const localBefore=await f.a.rpc.call('settings.node.inspect',{})
- expect(await errorCode(f.rpc.call('settings.node.configure',{expectedRevision:localBefore.policyRevision,operationId:'never-write',policy:{...localBefore.policy,shareResources:true}}))).toBe('CONTROL_PERMISSION_DENIED')
  expect(await errorCode(f.rpc.call('settings.node.resources',{}))).toBe('CONTROL_PERMISSION_DENIED')
  expect((await f.b.rpc.call('settings.node.inspect',{})).policyRevision).toBe(f.saved.policyRevision)
  expect((await f.a.rpc.call('settings.node.inspect',{})).policyRevision).toBe(localBefore.policyRevision)
@@ -45,6 +44,44 @@ it('a real managed caller reads the exact operator policy through two original C
  expect(calls.filter(x=>x.method==='settings.node.configure')).toHaveLength(1)
  expect(calls.filter(x=>x.method==='settings.node.inspect'&&x.managed)).toHaveLength(0)
  expect(calls.filter(x=>['runtime.bootstrap','runtime.events'].includes(x.method))).toHaveLength(0)
+},30000)
+it('an authenticated operator Agent saves the exact remote policy through SDK and CLI, retaining its original operation after restart',async()=>{
+ const f=await pair(),localBefore=await f.a.rpc.call('settings.node.inspect',{})
+ const input={target:f.target,expectedRevision:f.saved.policyRevision,operationId:'operator-share-original',policy:{...f.policy,shareResources:true}}
+ const saving=await f.rpc.call('settings.node.configure',input).then(value=>({value}),error=>({value:null,error:{code:error.code,message:error.message}}))
+ expect(saving).toMatchObject({value:{policy:input.policy,operation:{operationId:input.operationId,status:'confirmed'}}})
+ const saved=saving.value!
+ expect(saved).toMatchObject({node:{runtimeId:f.b.owner.runtimeId},policy:input.policy,operation:{operationId:input.operationId,status:'confirmed'}})
+ expect(await f.rpc.call('node.resources',{hostId:'remote-b',expectedRuntimeId:f.b.owner.runtimeId})).toMatchObject({status:'available'})
+ expect(await errorCode(f.rpc.call('settings.node.configure',{...input,operationId:'stale-policy-operation',policy:{...input.policy,alias:'stale'}}))).toBe('NODE_POLICY_CHANGED')
+ const cliInput={expectedRevision:saved.policyRevision,operationId:'operator-cli-original',policy:{...input.policy,alias:'operator-cli'}}
+ const cli=await new Promise<{code:number;stdout:string;stderr:string}>(resolve=>{
+  const child=execFile(process.execPath,[join(compiled,'dist/agentmux.js'),'--endpoint','unix:'+f.a.socketPath,'settings','node','configure','--host','remote-b','--expected-runtime',f.b.owner.runtimeId,'--input','-'],{env:{...f.a.env,AGENTMUX_AGENT_SESSION_ID:f.credentials.agentSessionId,AGENTMUX_AGENT_CAPABILITY:f.credentials.capability},encoding:'utf8'},(error,stdout,stderr)=>resolve({code:error?1:0,stdout,stderr}));child.stdin!.end(JSON.stringify(cliInput))
+ })
+ expect(cli.code,cli.stderr).toBe(0)
+ const result=JSON.parse(cli.stdout).result
+ expect(result).toMatchObject({node:{runtimeId:f.b.owner.runtimeId},policy:cliInput.policy,operation:{operationId:cliInput.operationId,status:'confirmed'}})
+ const previous=f.b.owner;await f.b.restart();await f.a.restart()
+ const reopened=await connectAgentMuxRpc({endpoint:{transport:'unix',path:f.a.socketPath},credentials:f.credentials});cleanup.push(()=>reopened.dispose())
+ const observed=await reopened.call('settings.node.inspect',{target:f.target,operationId:cliInput.operationId})
+ expect(observed.policy).toEqual(cliInput.policy);expect(observed.operation?.operationId).toBe(cliInput.operationId)
+ expect(observed.node.runtimeId).toBe(previous.runtimeId);expect(observed.node.ownerInstanceId).not.toBe(previous.ownerInstanceId)
+ expect((await f.a.rpc.call('settings.node.inspect',{})).policyRevision).toBe(localBefore.policyRevision)
+ const calls=(await readFile(join(f.b.stateDirectory,'calls.jsonl'),'utf8')).trim().split('\n').map(line=>JSON.parse(line))
+ expect(calls.filter(x=>x.method==='settings.node.configure')).toHaveLength(4)
+ expect(calls.filter(x=>x.method==='settings.node.configure'&&x.managed)).toHaveLength(0)
+},30000)
+it('operator publication rejects invalid callers, stale targets and limited carriers before saving',async()=>{
+ const f=await pair(),input={target:f.target,expectedRevision:f.saved.policyRevision,operationId:'original-denied-save',policy:{...f.policy,shareResources:true}}
+ const bad=await connectAgentMuxRpc({endpoint:{transport:'unix',path:f.a.socketPath},credentials:{...f.credentials,capability:issueAgentCapability()}});cleanup.push(()=>bad.dispose())
+ expect(await errorCode(bad.call('settings.node.configure',input))).toBe('AGENT_CAPABILITY_INVALID')
+ expect(await errorCode(f.rpc.call('settings.node.configure',{...input,target:{...f.target,hostId:'not-saved'}}))).toBe('UNKNOWN_HOST')
+ expect(await errorCode(f.rpc.call('settings.node.configure',{...input,target:{...f.target,expectedRuntimeId:'wrong-runtime'}}))).toBe('RUNTIME_OWNER_MISMATCH')
+ expect(await errorCode(f.rpc.call('settings.node.configure',{...input,target:{...f.target,hostId:'public-b'}}))).toBe('CONTROL_PERMISSION_DENIED')
+ const address=JSON.parse(await readFile(join(f.a.stateDirectory,'http.json'),'utf8'))
+ const device=await connectAgentMuxRpc({endpoint:{transport:'http',url:'http://127.0.0.1:'+address.port,token:'private-device-fixture'},credentials:f.credentials});cleanup.push(()=>device.dispose())
+ expect(await errorCode(device.call('settings.node.configure',input))).toBe('CONTROL_PERMISSION_DENIED')
+ expect((await f.b.rpc.call('settings.node.inspect',{})).policyRevision).toBe(f.saved.policyRevision)
 },30000)
 it('invalid caller, unconfigured Host and wrong Runtime cannot borrow operator policy',async()=>{
  const f=await pair()
@@ -79,7 +116,9 @@ it('a same-Runtime Core restart cannot turn a legacy unfenced Node reply into th
  expect(after.runtimeId).toBe(before.runtimeId);expect(after.ownerInstanceId).not.toBe(before.ownerInstanceId)
  await rm(hold)
  expect(await result).toBe('RUNTIME_OWNER_MISMATCH')
- expect((await f.rpc.call('settings.node.inspect',{target:f.target})).policy).toEqual(f.policy)
+ await f.a.restart()
+ const reopened=await connectAgentMuxRpc({endpoint:{transport:'unix',path:f.a.socketPath},credentials:f.credentials});cleanup.push(()=>reopened.dispose())
+ expect((await reopened.call('settings.node.inspect',{target:f.target})).policy).toEqual(f.policy)
  const calls=(await readFile(join(f.b.stateDirectory,'calls.jsonl'),'utf8')).trim().split('\n').map(line=>JSON.parse(line))
  expect(calls.filter(x=>x.method==='settings.node.configure')).toHaveLength(1)
 },30000)

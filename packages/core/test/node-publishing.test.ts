@@ -123,7 +123,7 @@ it('uses two real isolated Core processes and the actual CLI for remote policy, 
     let credential: { agentSessionId: string; capability: string } | undefined;
     while (!credential) { try { credential = JSON.parse(await readFile(credentialFile, 'utf8')); } catch (error) { if (Date.now() > credentialDeadline) throw error; await new Promise(yes => setTimeout(yes, 20)); } }
     await expect(desktop.rpc.call('node.inspect', { hostId: 'remote-b', expectedRuntimeId:b.owner.runtimeId }, { credentials: credential })).resolves.toMatchObject({node:{runtimeId:b.owner.runtimeId}});
-    await expect(desktop.rpc.call('settings.node.configure', { expectedRevision: configured.value.result.policyRevision, operationId: 'managed-self-grant', policy }, { credentials: credential })).rejects.toMatchObject({ code: 'CONTROL_PERMISSION_DENIED' });
+    await expect(desktop.rpc.call('settings.node.configure', { expectedRevision: configured.value.result.policyRevision, operationId: 'another-node-policy-revision', policy }, { credentials: credential })).rejects.toMatchObject({ code: 'NODE_POLICY_CHANGED' });
 
     const run = await sdk.createTerminal({ createOperationId: 'private-node-policy-healthy-run', workspacePath: b.root, command: process.execPath, args: ['-e', 'process.stdin.on("data",b=>process.stdout.write(b))'] });
     cleanups.push(() => sdk.stopTerminal({ runId: run.runId }));

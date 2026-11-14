@@ -77,8 +77,8 @@ it('two original Core owners through registered Main and Renderer edit only the 
   expect(()=>f.handlers.get('nodePublishing:owner')!({...f.event,senderFrame:{...f.sender.mainFrame}},'untrusted',{hostId:'farm',expectedRuntimeId:'farm-runtime'},'settings.node.inspect',{})).toThrow('Untrusted application')
   await expect(f.bridge.owner({hostId:'farm',expectedRuntimeId:'farm-runtime'},'settings.node.inspect',{caller:'self-grant'} as never)).rejects.toThrow()
   const farm=f.cores[1]!,current=await farm.owner.call('settings.node.inspect',{})
-  await expect(farm.rpc.call('settings.node.configure',{expectedRevision:current.policyRevision,operationId:'managed-self-grant',policy:{...current.policy,shareResources:true}},{credentials:farm.issuer.credentials})).rejects.toMatchObject({code:'CONTROL_PERMISSION_DENIED'})
-  expect((await farm.owner.call('settings.node.inspect',{})).policy.shareResources).toBe(false);expect(farm.issuer.inner.kernel.stop).not.toHaveBeenCalled()
+  await expect(farm.rpc.call('settings.node.configure',{expectedRevision:current.policyRevision,operationId:'operator-publication',policy:{...current.policy,shareResources:true}},{credentials:farm.issuer.credentials})).resolves.toMatchObject({policy:{shareResources:true},operation:{operationId:'operator-publication',status:'confirmed'}})
+  expect((await farm.owner.call('settings.node.inspect',{})).policy.shareResources).toBe(true);expect(farm.issuer.inner.kernel.stop).not.toHaveBeenCalled()
  }finally{await f.dispose()}
 })
 it('actual Settings observation reports the Node selected by its original editor rather than the requested Host',async()=>{
@@ -176,4 +176,16 @@ it('the original Main configured-client bridge consumes managed operator policy 
   await expect(f.runtime.callOriginalCore('farm','settings.node.inspect',{}, {runtimeFence:{runtimeId:'another-runtime',ownerInstanceId:'another-instance'}})).rejects.toMatchObject({code:'RUNTIME_OWNER_MISMATCH'})
   expect(farm.calls.some(row=>row.method==='settings.node.configure')).toBe(false)
  }finally{await rpc.dispose();await server.stop();await f.dispose()}
+})
+
+it('the configured Node owner rejects nested configure targets before any forwarded write',async()=>{
+ const f=await fixture(),farm=f.cores[1]!
+ try{
+  const before=await farm.rpc.call('settings.node.inspect',{}),count=farm.calls.length
+  await expect(f.bridge.owner({hostId:'farm',expectedRuntimeId:'farm-runtime'},'settings.node.configure',{
+   target:{hostId:'local',expectedRuntimeId:'farm-runtime'},expectedRevision:before.policyRevision,operationId:'nested-target-must-not-write',policy:{...before.policy,shareResources:true}
+  })).rejects.toMatchObject({code:'INVALID_CONTROL_REQUEST'})
+  expect(farm.calls).toHaveLength(count)
+  expect((await farm.rpc.call('settings.node.inspect',{})).policy).toEqual(before.policy)
+ }finally{await f.dispose()}
 })
