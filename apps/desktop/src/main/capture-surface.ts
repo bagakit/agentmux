@@ -206,7 +206,17 @@ export class CaptureSurface {
     const produce = async (): Promise<NativeDisplayFrames | Error> => {
       if (this.active !== active) return new Error('The original screenshot request is no longer current.')
       try {
-        const result = await this.ports.native().captureDisplays({ includeHostWindows: mode === 'included' })
+        const native = this.ports.native()
+        let result: NativeDisplayFrames | null = null
+        while (result === null && this.active === active) {
+          try { result = await native.captureDisplays({ includeHostWindows: mode === 'included' }) }
+          catch (error) {
+            if ((error as { code?: unknown }).code !== 'capture_busy') throw error
+            // Busy is the lease owner's proof that the old producer is still alive, not a source failure.
+            await new Promise<void>(resolve => setTimeout(resolve, 25))
+          }
+        }
+        if (!result) return new Error('The original screenshot request is no longer current.')
         active[mode === 'included' ? 'nativeIncluded' : 'nativeExcluded'] = { response: result.timing,
           displays: result.displays.map(frame => ({ displayId: frame.displayId, timing: frame.timing })) }
         return result
