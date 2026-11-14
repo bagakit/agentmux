@@ -6,11 +6,11 @@ import { GoalsIntroduction } from './SettingsConceptIntro'
 import '../../styles/settings-workflows.css'
 
 
-export function GoalsSettingsPane({ collapsed, preferences, onSave, onOpenGoals }: {
+export function GoalsSettingsPane({ collapsed, preferences, onSave, onOpenPrompts }: {
   collapsed: boolean | undefined
   preferences?: GoalsPreferences | undefined
   onSave(value: boolean, expected: boolean, preferences: Required<GoalsPreferences>, expectedPreferences: Required<GoalsPreferences>): Promise<void>
-  onOpenGoals(): void
+  onOpenPrompts(): void
 }) {
   const saved = collapsed ?? DEFAULT_GOALS_COMMON_ACTIONS.collapsed
   const draft = useSettingDraft(saved), saveState = useSettingsSave()
@@ -58,8 +58,8 @@ export function GoalsSettingsPane({ collapsed, preferences, onSave, onOpenGoals 
       <label className="browser-automation-toggle"><input type="checkbox" checked={draft.value} onChange={event => draft.setValue(event.target.checked)} aria-label="Collapse common actions" />
         <span><strong>Start with common actions collapsed</strong><small>Keep Goals focused on your work. Expand common actions whenever you need them.</small></span>
       </label>
-      <div className="settings-workflows__inline-action"><p className="settings-workflows__note">Choose, reorder and edit common actions in Goals, using the same Prompts library.</p>
-      <button type="button" className="small-button" onClick={onOpenGoals}>Open Goals</button>
+      <div className="settings-workflows__inline-action"><p className="settings-workflows__note">Choose, reorder and edit common actions in Prompts. Goals and Composer use that same instruction library.</p>
+      <button type="button" className="small-button" onClick={onOpenPrompts}>Open Prompts</button>
       </div>
     </section>
     <SettingsSaveBar save={saveState} dirty={draft.dirty || view.dirty || finished.dirty || supervisor.dirty} resolution={{ useSaved: () => { for (const field of [draft, view, finished, supervisor]) field.useSaved() }, keepMine: () => { for (const field of [draft, view, finished, supervisor]) field.keepMine() } }} onSave={() => void save()} />

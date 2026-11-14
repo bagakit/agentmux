@@ -1,0 +1,16 @@
+.settings-goals-actions { min-width: 0; }
+.settings-goals-actions > summary { display: flex; align-items: baseline; justify-content: space-between; gap: var(--sp-4); cursor: pointer; }
+.settings-goals-actions > summary > span, .settings-goals-actions p, .settings-goals-actions small { color: var(--text-3); font-size: var(--fs-meta); line-height: 1.6; }
+.settings-goals-actions > p { margin: var(--sp-4) 0; }
+.settings-goals-actions__visibility { display: flex; align-items: center; gap: var(--sp-3); color: var(--text-2); font-size: var(--fs-meta); }
+.settings-goals-actions__toolbar { display: flex; flex-wrap: wrap; gap: var(--sp-3); margin: var(--sp-5) 0 var(--sp-3); }
+.settings-goals-actions__directory { max-height: 260px; overflow: auto; }
+.settings-goals-actions__row { display: grid; grid-template-columns: 24px minmax(0, 1fr) auto; gap: var(--sp-2); align-items: center; border-bottom: 1px solid var(--line-soft); padding: var(--sp-2) 0; }
+.settings-goals-actions__name { min-width: 0; padding: var(--sp-3) var(--sp-2); border: 0; background: transparent; text-align: left; color: var(--text); font: inherit; cursor: pointer; }
+.settings-goals-actions__name strong, .settings-goals-actions__name small { display: block; overflow-wrap: anywhere; }
+.settings-goals-actions__name strong { font-size: var(--fs-body); font-weight: 600; }
+.settings-goals-actions__tools { display: flex; align-items: center; gap: var(--sp-1); }
+.settings-goals-actions__available { display: flex; flex-wrap: wrap; gap: var(--sp-3); margin-top: var(--sp-4); }
+.settings-goals-actions__preview { margin-top: var(--sp-4); padding-block: var(--sp-4); border-top: 1px solid var(--line-soft); }
+.settings-goals-actions__preview p { white-space: pre-wrap; overflow-wrap: anywhere; }
+.settings-goals-actions .settings-goals-actions__save-note { margin-bottom: 0; }

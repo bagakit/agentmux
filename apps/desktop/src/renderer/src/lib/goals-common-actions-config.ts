@@ -1,9 +1,9 @@
-import type { AppConfig, ComposerShortcut, GoalsCommonActionsConfig } from '../../../shared/contracts'
+import type { AppConfig, ComposerShortcut } from '../../../shared/contracts'
 import { saveConfigSlice } from '../components/settings/save-config-slice'
 
 /** One original config transaction saves directory references and optional library edits together. */
 export async function saveGoalsCommonActions(input: {
-  directory: GoalsCommonActionsConfig
+  directory: AppConfig['goalsCommonActions']
   expectedDirectory: AppConfig['goalsCommonActions']
   prompts?: { value: ComposerShortcut[]; expected: ComposerShortcut[] }
 }): Promise<AppConfig> {

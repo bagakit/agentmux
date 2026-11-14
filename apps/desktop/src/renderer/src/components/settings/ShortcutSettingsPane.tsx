@@ -5,13 +5,16 @@ import { PromptReactionIconView } from '@agentmux/client-ui/components/Conversat
 import { resolveComposerInputConfig } from '@agentmux/client-ui/composer-input-config'
 import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
 import { BUILT_IN_AGENT_PROVIDER_IDS } from '@agentmux/core/provider-id'
-import type { AppConfig, ComposerShortcut } from '../../../../shared/contracts'
+import type { AppConfig, ComposerShortcut, GoalsCommonActionRef } from '../../../../shared/contracts'
 import { COMPOSER_PROMPT_STATES, resolveComposerShortcuts } from '../../../../shared/composer-shortcut-library'
 import { configValuesEqual } from '../../../../shared/config-edit'
 import { SettingsSaveBar, useSettingsSave } from './SettingsSaveBar'
 import { ComposerTextarea, TextInput } from '@agentmux/client-ui/input'
 import { agentProviderLabel } from '@agentmux/client-ui/components/AgentProviderIcon'
 import { useResourceDrafts } from './use-resource-drafts'
+import { useSettingDraftRecord } from './use-setting-draft'
+import { GoalsCommonActionsSettings } from './GoalsCommonActionsSettings'
+import { createCommonActionPrompt, DEFAULT_GOALS_COMMON_ACTIONS } from '../../lib/goals-common-actions'
 import { LiquidSelectionSurface } from '../LiquidSelectionSurface'
 import { describeAgentDisplayState } from '../../../../shared/agent-state-presentation'
 import { SettingsConceptSummary } from './SettingsConceptSummary'
@@ -46,9 +49,13 @@ const scopeIncludes = (scope: PromptScope, prompt: ComposerShortcut) => scope.ki
 export function ShortcutSettingsPane({ config, active, onSave }: {
   config: AppConfig
   active: boolean
-  onSave: (prompts: ComposerShortcut[], expected: ComposerShortcut[]) => Promise<void>
+  onSave: (prompts: ComposerShortcut[], expected: ComposerShortcut[], directory: AppConfig['goalsCommonActions'], expectedDirectory: AppConfig['goalsCommonActions']) => Promise<void>
 }) {
   const resource = useResourceDrafts(Object.fromEntries(resolveComposerShortcuts(config).map((prompt) => [prompt.id, prompt])))
+  const directory = useSettingDraftRecord({ items: config.goalsCommonActions?.items, collapsed: config.goalsCommonActions?.collapsed }, configValuesEqual)
+  const commonConfig = (value: typeof directory.value): AppConfig['goalsCommonActions'] => value.items === undefined && value.collapsed === undefined ? undefined
+    : { items: value.items ?? DEFAULT_GOALS_COMMON_ACTIONS.items, collapsed: value.collapsed ?? DEFAULT_GOALS_COMMON_ACTIONS.collapsed }
+  const common = commonConfig(directory.value) ?? DEFAULT_GOALS_COMMON_ACTIONS
   const drafts = Object.values(resource.value)
   const [selectedId, setSelectedId] = useState<string | null>(() => drafts[0]?.id ?? null)
   const [query, setQuery] = useState('')
@@ -56,10 +63,13 @@ export function ShortcutSettingsPane({ config, active, onSave }: {
   const [usageOpen, setUsageOpen] = useState<Record<string, boolean>>({})
   const [view, setView] = useState<'library' | 'editor'>('library')
   const [recentDelete, setRecentDelete] = useState<{ prompt: ComposerShortcut } | null>(null)
+  const [commonAutoLabels, setCommonAutoLabels] = useState<ReadonlySet<string>>(() => new Set())
+  const commonDisclosure = useRef<HTMLDetailsElement>(null)
   const nameInput = useRef<HTMLInputElement>(null)
   const searchInput = useRef<HTMLInputElement>(null)
   const library = useRef<HTMLDivElement>(null)
   const focusNewName = useRef(false)
+  const focusCommonBody = useRef(false), promptEditor = useRef<HTMLElement>(null)
   const focusBack = useRef(false)
   const descriptionId = useId()
   const saveState = useSettingsSave()
@@ -109,10 +119,15 @@ export function ShortcutSettingsPane({ config, active, onSave }: {
     setSelectedId(drafts[0]?.id ?? null)
   }, [resource.value, selectedId])
   useEffect(() => {
+    if (focusCommonBody.current) {
+      promptEditor.current?.querySelector<HTMLTextAreaElement>('textarea')?.focus()
+      focusCommonBody.current = false
+      return
+    }
     if (!focusNewName.current || !nameInput.current) return
     nameInput.current.focus()
     focusNewName.current = false
-  }, [selectedId])
+  }, [selectedId, view, scope])
   useLayoutEffect(() => {
     if (!focusBack.current || view !== 'library') return
     const row = Array.from(library.current?.querySelectorAll<HTMLButtonElement>('[data-prompt-id]') ?? [])
@@ -122,6 +137,7 @@ export function ShortcutSettingsPane({ config, active, onSave }: {
   }, [view, selectedId, scope, query])
 
   function update(id: string, patch: Partial<ComposerShortcut>): void {
+    if (Object.hasOwn(patch, 'label')) setCommonAutoLabels(current => { const next = new Set(current); next.delete(id); return next })
     resource.setValue((current) => ({ ...current, [id]: { ...current[id]!, ...patch } }))
   }
   function bindProvider(id: string, providerId: string): void {
@@ -144,7 +160,11 @@ export function ShortcutSettingsPane({ config, active, onSave }: {
     setQuery('')
     open(additions[0]!.id)
   }
-  function open(id: string): void { setSelectedId(id); setView('editor') }
+  function open(id: string): void {
+    if (commonDisclosure.current) commonDisclosure.current.open = false
+    if (!focusNewName.current) focusCommonBody.current = true
+    setSelectedId(id); setView('editor')
+  }
   function add(startingPoint?: Pick<ComposerShortcut, 'keyword' | 'label' | 'body'>): void {
     const id = mintObjectId()
     resource.setValue((current) => ({ ...current, [id]: { id, keyword: '', label: '', body: '', ...startingPoint,
@@ -153,7 +173,19 @@ export function ShortcutSettingsPane({ config, active, onSave }: {
     focusNewName.current = true
     open(id)
   }
+  function editCommon(id: string): void { focusCommonBody.current = true; setScope({ kind: 'all' }); setQuery(''); open(id) }
+  function addCommon(): void {
+    const prompt = createCommonActionPrompt('', drafts)
+    setCommonAutoLabels(current => new Set([...current, prompt.id]))
+    resource.setValue(current => ({ ...current, [prompt.id]: prompt }))
+    directory.setField('items', [...common.items, { kind: 'prompt', id: prompt.id }])
+    editCommon(prompt.id)
+  }
+  function changeCommonItems(items: GoalsCommonActionRef[]): void {
+    directory.setField('items', configValuesEqual(items, directory.expected.items ?? DEFAULT_GOALS_COMMON_ACTIONS.items) ? directory.expected.items : items)
+  }
   function remove(id: string): void {
+    setCommonAutoLabels(current => { const next = new Set(current); next.delete(id); return next })
     if (Object.hasOwn(resource.expected, id) && Object.hasOwn(resource.value, id)) setRecentDelete({ prompt: resource.value[id]! })
     if (selectedId === id) setSelectedId(drafts.find((candidate) => candidate.id !== id)?.id ?? null)
     resource.setValue((current) => {
@@ -161,6 +193,7 @@ export function ShortcutSettingsPane({ config, active, onSave }: {
       delete next[id]
       return next
     })
+    if (!Object.hasOwn(resource.expected, id)) changeCommonItems(common.items.filter(ref => ref.kind !== 'prompt' || ref.id !== id))
     setView('library')
   }
   function undoDelete(): void {
@@ -181,18 +214,34 @@ export function ShortcutSettingsPane({ config, active, onSave }: {
     setView('library')
   }
   async function save(): Promise<void> {
-    const submitted = resource.beginSave()
+    if (saveState.saving || resource.saving) return
     const deletionAtStart = recentDelete
-    const normalized = Object.values(submitted.value).map((candidate) => ({
-      ...candidate, keyword: candidate.keyword.trim(), label: candidate.label.trim() || candidate.keyword.trim(), body: candidate.body
+    const normalized = Object.values(resource.value).map((candidate) => ({
+      ...candidate, keyword: candidate.keyword.trim(), label: commonAutoLabels.has(candidate.id)
+        ? createCommonActionPrompt(candidate.body, [], candidate.id).label : candidate.label.trim() || candidate.keyword.trim(), body: candidate.body
     }))
-    const committed = await saveState.run(() => onSave(normalized, Object.values(submitted.expected)))
+    // Generated names are draft metadata. Capture the version actually submitted,
+    // so a later authored name cannot match an earlier placeholder by accident.
+    const captured = { ...resource.value }
+    for (const candidate of normalized) if (commonAutoLabels.has(candidate.id)) captured[candidate.id] = { ...captured[candidate.id]!, label: candidate.label }
+    resource.setValue(current => {
+      const next = { ...current }
+      for (const id of commonAutoLabels) if (current[id] === resource.value[id] && captured[id]) next[id] = captured[id]!
+      return next
+    })
+    const submitted = resource.beginSave(captured)
+    const submittedDirectory = directory.beginSave()
+    const committed = await saveState.run(() => onSave(normalized, Object.values(submitted.expected), commonConfig(submittedDirectory.value), commonConfig(submittedDirectory.expected)))
     submitted.finish(committed ? Object.fromEntries(normalized.map((candidate) => [candidate.id, candidate])) : undefined)
+    submittedDirectory.finish(committed)
+    if (committed) setCommonAutoLabels(current => new Set([...current].filter(id => !commonAutoLabels.has(id))))
     if (committed) setRecentDelete((current) => current === deletionAtStart && current && Object.hasOwn(submitted.expected, current.prompt.id) && !Object.hasOwn(submitted.value, current.prompt.id) ? null : current)
   }
 
   return (
     <div className="settings-pane-stack prompt-workbench" data-view={view} data-creation-empty={!drafts.length}>
+      <GoalsCommonActionsSettings config={config} prompts={drafts} directory={common} saving={saveState.saving || resource.saving} disclosureRef={commonDisclosure}
+        onItemsChange={changeCommonItems} onCollapsedChange={value => directory.setField('collapsed', value === (directory.expected.collapsed ?? DEFAULT_GOALS_COMMON_ACTIONS.collapsed) ? directory.expected.collapsed : value)} onAdd={addCommon} onEdit={editCommon} />
       <div className="prompt-scope" role="group" aria-label="Prompt authoring scope">
         <button type="button" data-prompt-scope="all" aria-pressed={scope.kind === 'all'} onClick={() => setScope({ kind: 'all' })}>All prompts <span>{drafts.length}</span></button>
         <button type="button" data-prompt-scope="shared" aria-pressed={scope.kind === 'shared'} onClick={() => setScope({ kind: 'shared' })}>Shared <span>{drafts.filter(candidate => candidate.providerId === undefined).length}</span></button>
@@ -228,8 +277,9 @@ export function ShortcutSettingsPane({ config, active, onSave }: {
           </div>
           {!visible.length ? <p className="settings-resource-empty">{drafts.length ? 'No prompts in this view. Your edits are kept.' : 'Keep the instructions you use often here. Add a prompt to get started.'}</p> : null}
         </section>
-        {prompt ? <section className="prompt-settings-card prompt-editor" data-prompt-editor={prompt.id} aria-label={`Edit ${promptName(prompt)}`}>
+        {prompt ? <section ref={promptEditor} className="prompt-settings-card prompt-editor" data-prompt-editor={prompt.id} aria-label={`Edit ${promptName(prompt)}`}>
           <div className="prompt-editor__heading"><button type="button" className="small-button prompt-editor__back" onClick={back}><ThemeNavigationBackIcon size={13} /> Back to prompts</button><span>{providerName(prompt)}</span><span className="prompt-editor__status" data-prompt-status={promptStatus}><SemanticIcon name={`status.prompt-${promptStatus}`} size={4} />{promptStatus === 'invalid' ? 'Needs attention' : promptStatus === 'unsaved' ? 'Unsaved' : 'Saved'}</span></div>
+          {selectedChanged && Object.hasOwn(resource.expected, prompt.id) ? <button type="button" className="small-button prompt-editor__revert" disabled={saveState.saving} onClick={() => resource.setValue(current => ({ ...current, [prompt.id]: resource.expected[prompt.id]! }))}>Cancel edit</button> : null}
           {!visible.some((candidate) => candidate.id === prompt.id) ? <p className="prompt-editor__filtered" role="status">This prompt is outside your search or scope. <button type="button" className="small-button" onClick={showInLibrary}>Show in library</button></p> : null}
           <div className="agent-settings-fields prompt-editor__fields">
             <label className="prompt-editor__name"><span>Name</span><TextInput ref={nameInput} value={prompt.label} onChange={(event) => update(prompt.id, { label: event.target.value })} placeholder="Explain simply" /></label>
@@ -279,8 +329,8 @@ export function ShortcutSettingsPane({ config, active, onSave }: {
       {problems.length ? <div className="prompt-validation" role="status"><strong>Check {problemsById.size} {problemsById.size === 1 ? 'prompt' : 'prompts'} before saving</strong>{problems.map((problem) => <button type="button" key={`${problem.id}-${problem.field}`} onClick={() => open(problem.id)}>{promptName(resource.value[problem.id]!)} · {problem.field}: {problem.message}</button>)}</div> : null}
       {recentDelete ? <div className="prompt-pending-delete" role="status"><span>Recently removed “{promptName(recentDelete.prompt)}”.</span><button type="button" className="small-button" onClick={undoDelete}>Undo</button></div> : null}
       <footer className="prompt-save-footer">
-        <p className="prompt-save-summary" role="status">Saves the whole prompt library.{resource.dirty ? <> {changedCount} changed{deletedCount ? ` · ${deletedCount} pending ${deletedCount === 1 ? 'deletion' : 'deletions'}` : ''}.</> : null}</p>
-        <SettingsSaveBar save={saveState} dirty={resource.dirty} resolution={resource} blocked={problems.length ? `${problems.length === 1 ? 'one prompt needs' : `${problems.length} prompts need`} attention.` : undefined} label="Save prompts" onSave={() => void save()} />
+        <p className="prompt-save-summary" role="status">Saves the whole prompt library.{resource.dirty ? <> {changedCount} changed{deletedCount ? ` · ${deletedCount} pending ${deletedCount === 1 ? 'deletion' : 'deletions'}` : ''}.</> : null}{directory.dirty ? ' Also saves Goals common actions.' : null}</p>
+        <SettingsSaveBar save={saveState} dirty={resource.dirty || directory.dirty} resolution={{ useSaved: () => { resource.useSaved(); directory.useSaved(); setCommonAutoLabels(new Set()) }, keepMine: () => { resource.keepMine(); directory.keepMine() } }} blocked={problems.length ? `${problems.length === 1 ? 'one prompt needs' : `${problems.length} prompts need`} attention.` : undefined} label="Save prompts" onSave={() => void save()} />
       </footer>
     </div>
   )

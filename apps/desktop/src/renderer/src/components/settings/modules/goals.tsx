@@ -1,6 +1,5 @@
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { resolveGoalsCommonActions, resolveGoalsPreferences, type GoalsPreferences } from '@agentmux/host/goals-preferences'
-import { useAppStore } from '../../../store'
 import { GoalsSettingsPane } from '../GoalsSettingsPane'
 import type { SettingsModule } from '../settings-catalog'
 import { saveConfigSlice } from '../save-config-slice'
@@ -26,8 +25,8 @@ export const goalsSettingsModule = {
     { id: 'common-actions', title: 'Common actions', keywords: 'collapsed expanded prompts' },
   ],
   savedSummary: config => { const saved = resolveGoalsPreferences(config.goals); return `${saved.defaultView === 'board' ? 'Board' : 'List'} · ${saved.showFinished ? 'Including finished' : 'Active goals'}` },
-  Pane({ config, onClose }) {
+  Pane({ config, onNavigate }) {
     return <GoalsSettingsPane collapsed={config.goalsCommonActions?.collapsed} preferences={config.goals} onSave={saveGoals}
-      onOpenGoals={() => { onClose(); useAppStore.getState().setMainSurface('board') }} />
+      onOpenPrompts={() => onNavigate('prompts')} />
   }
 } as const satisfies SettingsModule
