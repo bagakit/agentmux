@@ -1,5 +1,4 @@
-import { mintObjectId } from '@agentmux/core/object-id'
-import { parseAgentTakeoverCancellationResult, type AgentTakeoverCancellationResult } from '@agentmux/core/agent-takeover'
+import { parseAgentTakeoverCancellationResult, type AgentTakeoverCancellationInput, type AgentTakeoverCancellationResult } from '@agentmux/core/agent-takeover'
 import { api } from './api'
 import { agentOperationKey, type AgentOperationFeedback, type TakeoverCancellation } from './agent-operation'
 import { checkpointAgentOperations, currentCoreSpatialGraph, useAppStore } from '../store'
@@ -30,6 +29,35 @@ async function saveResult() {
   catch (cause) { useAppStore.getState().reportError(new Error('The original cancellation result is retained; saving this client projection is unconfirmed. ' + String(cause))) }
 }
 
+async function originalCancellationInput(operation: Takeover): Promise<AgentTakeoverCancellationInput> {
+  const request = operation.takeoverSource.coreRequest
+  if (!request || request.operationId !== operation.operationId || request.content.kind !== 'takeover-agent')
+    throw new Error('原接手请求不完整，无法定位取消。可以检查原操作。')
+  const expectedRuntimeId = operation.takeoverSource.coreRuntimeId ?? (await api.spatial.owner()).owner.runtimeId
+  // The persisted original request can find the same cancellation after a failed client save.
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(request.operationId))
+  const operationId = 'cancel-takeover:' + Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('')
+  return { expectedRuntimeId, operationId, request: structuredClone(request) }
+}
+
+/** An explicit Check can locate the same original cancellation even if Desktop did not save its projection. */
+export async function recoverTakeoverCancellation(operation: Takeover): Promise<boolean> {
+  if (!operation.takeoverSource.coreRequest || operation.cancellation) return false
+  try {
+    const input = await originalCancellationInput(operation)
+    const result = parseAgentTakeoverCancellationResult(await api.sessions.takeoverCancelInspect(input), input)
+    // An unrecorded or unqualified read does not create a cancellation locally.
+    if (result.cancellationAdmission !== 'observed' && result.outcome === 'unconfirmed') return false
+    if (current(operation) !== operation) return false
+    retain(operation, { input, dispatch: 'unconfirmed', pending: false, result, issue: result.issue ?? undefined }, result)
+    void saveResult()
+    return true
+  } catch {
+    // Keep the independent original creation check available if cancellation cannot be observed.
+    return false
+  }
+}
+
 /** Reading this exact control never sends cancellation, Start, Stop or input. */
 export async function inspectTakeoverCancellation(operation: Takeover) {
   const held = current(operation), cancellation = held?.cancellation
@@ -40,7 +68,7 @@ export async function inspectTakeoverCancellation(operation: Takeover) {
   } catch (cause) {
     retain(held, { ...cancellation, pending: false, issue: cause instanceof Error ? cause.message : String(cause) })
   }
-  await saveResult()
+  void saveResult()
 }
 
 /** One explicit original intent; an unknown write is inspected rather than replayed. */
@@ -57,26 +85,19 @@ async function cancel(operation: Takeover, continueOriginal: boolean) {
   if (held.cancellation?.dispatch === 'unconfirmed' && !continueOriginal) return inspectTakeoverCancellation(held)
   if (continueOriginal && held.cancellation?.result?.outcome !== 'unconfirmed')
     throw new Error('Inspect this exact cancellation before explicitly continuing its original control.')
-  const request = held.takeoverSource.coreRequest
-  if (!request || request.operationId !== held.operationId || request.content.kind !== 'takeover-agent')
-    throw new Error('The complete original Takeover request is unavailable. Inspect its source; no replacement intent was selected.')
-  const cancellation: TakeoverCancellation = held.cancellation ?? { input: { expectedRuntimeId: held.takeoverSource.coreRuntimeId ?? (await api.spatial.owner()).owner.runtimeId,
-    operationId: 'cancel-takeover:' + mintObjectId(), request: structuredClone(request) }, pending: false, dispatch: 'not-submitted' }
-  // Persist a possibly-dispatched reference before the original owner can receive it.
+  const cancellation: TakeoverCancellation = held.cancellation ?? {
+    input: await originalCancellationInput(held), pending: false, dispatch: 'not-submitted'
+  }
+  // The original Core owns admission. The exact control is recoverable from the original request.
   const pending = { ...cancellation, pending: true, dispatch: 'unconfirmed' as const, issue: undefined }
   retain(held, pending)
-  try { await checkpointAgentOperations() }
-  catch (cause) {
-    retain(held, { ...pending, pending: false, dispatch: cancellation.dispatch, issue: '这次取消尚未提交：原请求的保存未确认。' })
-    throw cause
-  }
   try {
     const result = parseAgentTakeoverCancellationResult(await api.sessions.takeoverCancel(cancellation.input), cancellation.input)
     retain(held, { ...pending, pending: false, result, issue: result.issue ?? undefined }, result)
   } catch (cause) {
     retain(held, { ...pending, pending: false, issue: cause instanceof Error ? cause.message : String(cause) })
   }
-  await saveResult()
+  void saveResult()
 }
 
 /** Navigation and Stop resolve the receipt's exact target, never the source Agent. */

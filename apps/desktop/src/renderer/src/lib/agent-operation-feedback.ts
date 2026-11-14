@@ -107,10 +107,13 @@ export async function inspectAgentOperation(operation: AgentOperationFeedback) {
       return
     }
     if (operation.kind === 'takeover') {
-      if (started.kind === 'takeover' && started.cancellation) {
-        const { inspectTakeoverCancellation } = await import('./session-takeover-cancellation')
-        await inspectTakeoverCancellation(started)
-        return
+      if (started.kind === 'takeover' && (started.cancellation || started.takeoverSource.coreRequest)) {
+        const { inspectTakeoverCancellation, recoverTakeoverCancellation } = await import('./session-takeover-cancellation')
+        if (started.cancellation) {
+          await inspectTakeoverCancellation(started)
+          return
+        }
+        if (await recoverTakeoverCancellation(started) || !stillCurrent()) return
       }
       if (operation.takeoverSource.clubPreparation && !operation.takeoverSource.coreRequest) {
         const { inspectTakeoverClub } = await import('./session-takeover')
