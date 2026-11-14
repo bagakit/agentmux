@@ -21,7 +21,7 @@ const mutations = [
  {id:'hidden-assignee-directory',file:base+'components/GlobalBoardSurface.tsx',before:"if (!filtersOpen && assigneeFilter === 'all') return [] as string[]",after:''},
  {id:'accurate-canonical-id',file:files[4],before:'const id = session.control.agentSessionId',after:'const id = session.id'},
  {id:'participation-priority',file:files[4],before:'(row.related || row.participated) && row.selectable ? 0',after:'row.related && row.selectable ? 0'},
- {id:'original-cas-consumer',file:files[1],before:'await updateDemand(demand.id, patch, undefined, expectedUpdatedAt)',after:'await updateDemand(demand.id, patch)'},
+ {id:'original-cas-consumer',file:files[1],before:'await updateDemand(demand.id, patch, undefined, expectedUpdatedAt, relationAccess)',after:'await updateDemand(demand.id, patch, undefined, undefined, relationAccess)'},
  {id:'slow-create-busy',file:files[0],before:"if (draft?.phase === 'may-have-dispatched' && creating.current !== draft.operationId) void inspectOriginal(draft)",after:"if (draft?.phase === 'may-have-dispatched') void inspectOriginal(draft)"},
  {id:'retained-selection-remount',file:files[0],before:'useAppStore.getState().goalAgentSelectionDrafts[goalCreationDraftKey(demand.id, role)] ??',after:'undefined ??'},
  {id:'unknown-inspect-only',file:files[0],before:"{ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: `goal-agent-inspect-${crypto.randomUUID()}`, operation: 'space.inspect', target: { requestId: original.operationId } }",after:'original.request'},
