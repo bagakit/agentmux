@@ -1,7 +1,7 @@
 import type { RecoveryPromptInput } from './input.js'
 import { type AgentTerminalFrontend } from '../agent-terminal-frontend.js'
 import { type AgentExecutableProbeContext } from '../executable-probe.js'
-import { AgentProviderRegistry, type AgentProvider } from '../agent-provider.js'
+import { AgentProviderRegistry, type AgentProvider, type AgentProviderPromptExecutionContext } from '../agent-provider.js'
 import { type AgentCapabilityBinding } from '../agent-capability.js'
 import { type AgentInputSubmissionReceipt, type AgentInputCallContext, type AgentInputWaitRef } from '../agent-input-wait.js'
 import type { AgentMuxContinuityMessageInput } from './continuity-contract.js'
@@ -48,6 +48,7 @@ export type AgentSessionRecoveryPorts = {
     readonly providers: Pick<AgentProviderRegistry, "get">;
     probeAgent(providerId: AgentProviderId, commandOverride?: string, context?: AgentExecutableProbeContext): Promise<AgentCapabilitySnapshot>;
     providerLaunch(session: AgentMuxAgentSession, run: CtxmuxAdapterRun): { command: string; args: readonly string[] };
+    providerNativeContext(session: AgentMuxAgentSession, run?: CtxmuxAdapterRun): Promise<AgentProviderPromptExecutionContext>;
   };
   executors: {
     prepareToolExecutionLaunch?(provider: AgentProvider, plan: import('../types.js').AgentLaunchPlan, binding: import('../agent-tool-execution.js').AgentToolExecutionBinding, workspacePath: string, agentSessionId: string, invocation?: { lifecycleOperationId: string; capability: string }): Promise<import('../types.js').AgentLaunchPlan>;

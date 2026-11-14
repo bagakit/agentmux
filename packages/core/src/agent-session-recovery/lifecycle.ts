@@ -587,8 +587,12 @@ export class AgentSessionRunLifecycle {
       // transcript has no native completion/abort. Freeze it before the new writer
       // starts; an unknown observation never prevents healthy native restoration.
       const nativePromptEvidence = provider.readPromptExecutionEvidence
-        ? await provider.readPromptExecutionEvidence({ args: oldRun ? this.ports.providers.providerLaunch(current as AgentMuxAgentSession, oldRun).args : [], workspacePath: current.workspacePath,
-          nativeHandle: current.nativeHandle }).catch(error => {
+        ? await (async () => {
+          const context = await this.ports.providers.providerNativeContext(current, oldRun ?? undefined)
+          // Freeze the original machine cut, not the old Run's initial-idle projection.
+          const { nativePromptPredecessor: _previousProjection, ...sourceContext } = context
+          return await provider.readPromptExecutionEvidence!(sourceContext)
+        })().catch(error => {
           this.ports.events.publisher.publish({ type: 'agent-error', agentSessionId: current.agentSessionId,
             code: 'AGENT_NATIVE_SOURCE_UNCONFIRMED',
             message: `The previous native turn could not be observed. Native restoration and ordinary input remain available; immediate input needs current source confirmation. ${error instanceof Error ? error.message : String(error)}`,

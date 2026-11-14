@@ -1009,7 +1009,7 @@ export class ContinuousProgressLoopManager {
               prompt = original.message.userContent
               agentMuxNote = original.message.systemContext
             }
-            pending = { id: futureIntent ? `${futureIntent.intentId}@${futureIntent.occurrenceAt}` : decision.completionId, operationId: claim.tickId,
+            pending = { id: futureIntent ? `${futureIntent.intentId}@${futureIntent.occurrenceAt}` : decision.completionId!, operationId: claim.tickId,
               condition: (()=>{const {inputEpoch:_current,...condition}=agentPromptCondition(observation.session);return {...condition,...optionalInputEpoch(claim.loop.inputEpoch)}})(), inputByte: observation.inputByte,
               prompt, ...(agentMuxNote === undefined ? {} : { agentMuxNote }), ...(futureIntent ? { futureIntent } : {}) }
           }

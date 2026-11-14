@@ -1292,6 +1292,7 @@ export class AgentMuxClient {
       providerArgs: (session, run) => this.providerLaunch(session, run).args,
       providerCommand: (session, run) => this.providerLaunch(session, run).command,
       providerExecutionEnvironment: async session => (await this.sessionExecutorOptions<AgentSessionHistoryPageOptions>(this.requireAgentSession(session.agentSessionId), {}, session.agentSessionId)).env,
+      providerNativeContext: (session, run) => this.providerNativeContext(session, run),
       assertUncontrolledInput: async key => {
         if (await this.messageQueue.inspectInput({ key })) throw new AgentMuxError(
           'The original controlled input requires its original journal gate and intent.', 'AGENT_PROMPT_OPERATION_CONFLICT')
@@ -1321,7 +1322,7 @@ export class AgentMuxClient {
           await this.kernel.stop(operation)
         }
       },
-      providers: { providers: this.providers, probeAgent: (...args) => this.probePreparedAgent(...args), providerLaunch: (...args) => this.providerLaunch(...args) },
+      providers: { providers: this.providers, probeAgent: (...args) => this.probePreparedAgent(...args), providerLaunch: (...args) => this.providerLaunch(...args), providerNativeContext: (...args) => this.providerNativeContext(...args) },
       executors: { prepareToolExecutionLaunch: (...args) => this.prepareToolExecutionLaunch(...args), hostExecutorOwner: this.hostExecutorOwner, sessionExecutorConfiguration: this.sessionExecutorConfiguration,
         sessionExecutorOptions: (...args) => this.sessionExecutorOptions(...args) },
       hooks: {
@@ -8237,7 +8238,8 @@ export class AgentMuxClient {
       const position = this.nativeCurrentActivities.get(current.agentSessionId)
       if (position?.runId !== current.run.runId) return
       const activity = this.projectCurrentActivity(current)
-      if (nativeIdle ? activity?.state === 'active' : !activity || activity.state !== 'idle' || activity.nativeTurnId !== current.semanticStatus?.nativeTurnId) {
+      const initialFutureIdle = input.expectedFutureIntent !== undefined && current.semanticStatus?.state !== 'done' && agentTurnEndEvidence(current) === undefined
+      if (nativeIdle || initialFutureIdle ? activity?.state === 'active' : !activity || activity.state !== 'idle' || activity.nativeTurnId !== current.semanticStatus?.nativeTurnId) {
         throw new AgentMuxError('Current native activity does not confirm the original automatic input boundary. The saved message and manual input remain available.',
           input.expectedCompletionId === undefined ? 'AGENT_TURN_END_UNCONFIRMED' : 'AGENT_COMPLETION_CHANGED')
       }
@@ -11277,27 +11279,33 @@ export class AgentMuxClient {
       : { command: invocation.program ?? this.providers.get(session.providerId).executable, args: invocation.args }
   }
 
-  private async providerNativeContext(session: AgentMuxAgentSession, run: CtxmuxAdapterRun): Promise<AgentProviderPromptExecutionContext> {
+  private async providerNativeContext(session: AgentMuxAgentSession, run?: CtxmuxAdapterRun): Promise<AgentProviderPromptExecutionContext> {
     const stored = await this.store.readMetadata(session.agentSessionId)
     if (!stored || !sameRun(stored.run, session.run)) throw new AgentMuxError('Original initialization source changed.', 'STALE_AGENT_SESSION')
-    let env: Readonly<Record<string, string | undefined>> | undefined
-    const resumed = Object.values(stored.continuityOperations ?? {}).find(operation => operation.kind === 'resumed' && operation.newRun?.runId === run.runId)
-      ?? (stored.continuity?.kind === 'resumed' && stored.continuity.newRun?.runId === run.runId ? stored.continuity : undefined)
+    if (run && !sameRun(session.run, { runId: run.runId })) throw new AgentMuxError('Original native observation names another Run.', 'STALE_AGENT_SESSION')
+    let options: { commandOverride?: string; args?: readonly string[]; env?: Readonly<Record<string, string | undefined>> } | undefined
+    const retained = Object.values(stored.continuityOperations ?? {}).filter(operation => operation.kind === 'resumed' && operation.agentSessionId === stored.agentSessionId && operation.newRun?.runId === session.run.runId)
+    const pointer = stored.continuity?.kind === 'resumed' && stored.continuity.newRun?.runId === session.run.runId ? stored.continuity : undefined
+    if (pointer && !retained.some(operation => operation.operationId === pointer.operationId)) retained.push(pointer)
+    if (retained.length > 1) throw new AgentMuxError('Original native execution source is ambiguous.', 'AGENT_CONTINUITY_EXECUTOR_UNCONFIRMED')
+    const resumed = retained[0]
     const executor = resumed && readContinuityExecutor(stored.continuityExecutors, resumed.intentOperationId ?? resumed.operationId)
-    if (executor?.source === 'sdk') env = executor.options.env
+    if (executor && (executor.providerId !== stored.providerId || executor.executorId !== stored.executorId)) throw new AgentMuxError('Original native executor identity changed.', 'AGENT_CONTINUITY_EXECUTOR_UNCONFIRMED')
+    if (executor?.source === 'sdk') options = executor.options
     else if (!resumed || executor?.source === 'creation') {
       // Current same-named configuration cannot stand in for an original source.
       if (stored.creation?.executorRevision) {
         const original = await this.hostExecutorOwner?.resolve(stored.executorId)
         if (!original || original.descriptor.configRevision !== stored.creation.executorRevision || original.config.providerId !== stored.providerId) throw new AgentMuxError(
           'Original creation environment is unconfirmed.', 'AGENT_CONTINUITY_EXECUTOR_UNCONFIRMED')
-        env = original.config.env
+        options = { ...(original.config.command === undefined ? {} : { commandOverride: original.config.command }), args: original.config.args, env: original.config.env }
       } else if (stored.creation?.executorInvocationDigest) {
-        env = (await this.sessionExecutorOptions<AgentSessionHistoryPageOptions>(stored, {}, stored.agentSessionId)).env
+        options = await this.sessionExecutorOptions<AgentSessionHistoryPageOptions>(stored, {}, stored.agentSessionId)
       }
     }
-    return { ...this.providerLaunch(session, run), ...(env ? { env } : {}), workspacePath: session.workspacePath,
-      ...(session.hostId === 'local' && run.pid !== null ? { processId: run.pid } : {}),
+    const launch = run ? this.providerLaunch(session, run) : { ...(options?.commandOverride ? { command: options.commandOverride } : {}), args: options?.args ?? [] }
+    return { ...launch, ...(options?.env ? { env: options.env } : {}), workspacePath: session.workspacePath,
+      ...(run && session.hostId === 'local' && run.pid !== null ? { processId: run.pid } : {}),
       ...(session.nativeHandle ? { nativeHandle: session.nativeHandle } : {}),
       ...(session.nativePromptPredecessor?.run.runId === session.run.runId &&
         session.retiredRuns.at(-1)?.runId === session.nativePromptPredecessor.previousRun.runId

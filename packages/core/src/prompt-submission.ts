@@ -7,6 +7,7 @@ import { isDeepStrictEqual } from 'node:util'
 import { AgentProviderRegistry, type AgentProviderPromptExecutionContext, type AgentProviderPreparedPromptTransport } from './agent-provider.js'
 import { agentTurnCompletionIdentity, agentTurnEndBoundary, cloneSession, sameNativeHandle, sameRun } from './agent-session-identity.js'
 import { hasCurrentNativeMainBinding, hasSelectedNativeTarget } from './agent-native-source.js'
+import { agentHasActiveSubagents, subagentScopeMatches } from './agent-subagent-state.js'
 import { invalidateAgentIdleEvidence } from './agent-semantic-state.js'
 import { AgentMuxAgentSessionRegistry } from './agent-session-registry.js'
 import type { AgentMuxAgentSessionStore } from './agent-session-store.js'
@@ -209,6 +210,7 @@ type PromptSubmissionDeps = {
   providerArgs?: (session: AgentMuxAgentSession, run: CtxmuxAdapterRun) => readonly string[]
   providerCommand?: (session: AgentMuxAgentSession, run: CtxmuxAdapterRun) => string
   providerExecutionEnvironment?: (session: AgentMuxAgentSession) => Promise<Readonly<Record<string, string | undefined>> | undefined>
+  providerNativeContext?: (session: AgentMuxAgentSession, run: CtxmuxAdapterRun) => Promise<AgentProviderPromptExecutionContext>
   /** Under the original Session input lock, refuse another saved producer contract. */
   assertUncontrolledInput?: (key: AgentPromptInputKey) => Promise<void>
   withUncontrolledInputClaim?: (key: AgentPromptInputKey, claim: () => Promise<AgentMuxStoredAgentSession>, notificationId?: string) => Promise<AgentMuxStoredAgentSession>
@@ -615,7 +617,13 @@ export class AgentPromptSubmissionCoordinator {
       }
       let createsClaim = false
       const claim = () => this.deps.updateExactAgentSession(id, expectedRun, stored => {
-        const next = update(stored)
+        let next: AgentMuxStoredAgentSession
+        try { next = update(stored) }
+        catch (error) {
+          if (expectedFutureIntent && !carrier && !rejoiningFrozenPlan && !newClaim && stored.promptCompletionAdmission?.submissionId !== submissionId &&
+              stored.terminalPromptSubmission?.submissionId !== submissionId) throw promptPreparationFailure(error)
+          throw error
+        }
         // Only the last successful CAS callback can establish this fact. A
         // rejoined claim or a failed/uncertain metadata write never does.
         createsClaim = stored.promptCompletionAdmission?.submissionId !== submissionId &&
@@ -639,6 +647,52 @@ export class AgentPromptSubmissionCoordinator {
       throw new AgentMuxError('This original prompt belongs to the previous native conversation. Its operation and receipt are retained; it will not replay into the current source. Raw Agent input remains available.', 'AGENT_PROMPT_SOURCE_CHANGED')
     }
     let nativeFutureAdmissionReady = false
+    let futureInitialIdle: { sourceId: string; id: string; predecessor: NonNullable<AgentMuxAgentSession['nativePromptPredecessor']>; handle: AgentMuxAgentSession['nativeHandle']; operationId: string; inputByte: number } | undefined
+    const restoredIdleBoundary = (current: AgentMuxStoredAgentSession) => {
+      const predecessor = current.nativePromptPredecessor
+      if (!predecessor || !sameRun(predecessor.run, current.run) || current.retiredRuns.at(-1)?.runId !== predecessor.previousRun.runId ||
+          current.semanticStatus?.state === 'working' ||
+          subagentScopeMatches(current.nativeSubagents, current) && (current.nativeSubagents.unconfirmed || agentHasActiveSubagents(current.nativeSubagents))) return
+      const operations = Object.values(current.continuityOperations ?? {}).filter(operation => operation.agentSessionId === current.agentSessionId &&
+        operation.kind === 'resumed' && operation.newRun?.runId === current.run.runId && operation.previousRun?.runId === predecessor.previousRun.runId)
+      if (operations.length !== 1) return
+      const operation = operations[0]!, byte = operation.resumedInputBoundary?.initialInputByte
+      const retainedInputs = Object.values(current.continuityOperations ?? {}).some(value => value.newRun?.runId === current.run.runId &&
+        (value.launchInput !== undefined || value.messageInput !== undefined || value.recoveryDelivery?.key.expectedRun.runId === current.run.runId &&
+          !['accepted', 'not-applied', 'superseded'].includes(value.recoveryDelivery.phase)))
+      if (byte === undefined || byte !== expectedInputByte || retainedInputs ||
+          current.initialInput?.key?.expectedRun.runId === current.run.runId ||
+          current.initialInput && !current.initialInput.key && current.creation?.createdRun?.runId === current.run.runId ||
+          current.promptCompletionAdmission && current.promptCompletionAdmission.submissionId !== submissionId && !agentPromptNotApplied(current) ||
+          current.terminalPromptSubmission && current.terminalPromptSubmission.submissionId !== submissionId && !agentPromptNotApplied(current)) return
+      return { predecessor, handle: current.nativeHandle, operationId: operation.operationId, inputByte: byte }
+    }
+    const assertFutureInitialIdle = async (): Promise<void> => {
+      if (!expectedFutureIntent) return
+      const current = await refreshSession(session.agentSessionId, session.run)
+      if (!futureInitialIdle && (agentTurnCompletionIdentity(current) !== undefined || agentTurnEndBoundary(current) !== undefined)) return
+      assertInteraction(current)
+      const boundary = restoredIdleBoundary(current)
+      if (!boundary || !futureInitialIdle && (current.promptCompletionAdmission || current.terminalPromptSubmission) && !agentPromptNotApplied(current)) throw new AgentMuxError(
+        'The original restored input boundary is unconfirmed or already has an input. Its future occurrence remains due.', 'AGENT_TURN_END_UNCONFIRMED')
+      if (!this.deps.providerNativeContext) throw new AgentMuxError('The original native execution context is unconfirmed.', 'AGENT_TURN_END_UNCONFIRMED')
+      const context: AgentProviderPromptExecutionContext = { ...await this.deps.providerNativeContext(current, run), ...(signal ? { signal } : {}) }
+      const evidence = await provider.readPromptExecutionEvidence?.(context)
+      if (evidence?.state !== 'idle' || futureInitialIdle && (!isDeepStrictEqual(boundary, {
+        predecessor: futureInitialIdle.predecessor, handle: futureInitialIdle.handle, operationId: futureInitialIdle.operationId, inputByte: futureInitialIdle.inputByte }) ||
+        evidence.sourceId !== futureInitialIdle.sourceId || evidence.id !== futureInitialIdle.id)) throw new AgentMuxError(
+          'The original restored native idle source changed. Its future occurrence remains due.', 'AGENT_TURN_END_UNCONFIRMED')
+      futureInitialIdle ??= { ...boundary, sourceId: evidence.sourceId, id: evidence.id }
+    }
+    const assertFutureClaimCurrent = (current: AgentMuxStoredAgentSession): void => {
+      if (!futureInitialIdle || !expectedFutureIntent) return
+      const saved = current.futurePromptIntents?.[expectedFutureIntent.intentId]
+      if (!isDeepStrictEqual(restoredIdleBoundary(current), { predecessor: futureInitialIdle.predecessor, handle: futureInitialIdle.handle,
+          operationId: futureInitialIdle.operationId, inputByte: futureInitialIdle.inputByte }) ||
+          !saved?.active || saved.prompt !== prompt || promptMessageIdentity(saved.message) !== promptMessageIdentity(message) ||
+          saved.lastOccurrenceAt !== expectedFutureIntent.occurrenceAt || saved.lastOperationId !== submissionId) throw new AgentMuxError(
+        'The original claimed future input or restored idle boundary changed before dispatch.', 'AGENT_COMPLETION_CHANGED')
+    }
     const explicitConversationInput = execution === 'immediate' && inputKey.kind === 'prompt' && message?.authorHuman === true &&
       (admissionIntent?.kind === 'native-conversation' || admissionIntent?.kind === 'session-conversation') &&
       expectedCompletionId === undefined && expectedFutureIntent === undefined && !control?.idleOnly && !control?.nativeIdleOnly
@@ -662,11 +716,13 @@ export class AgentPromptSubmissionCoordinator {
     }
     const beforeInput = control && (async (): Promise<void> => {
       try {
+        if (!inputAttempted) await assertFutureInitialIdle()
         await control.authority?.assertCurrent()
         // Keep the author binding and exact recipient under the existing CAS.
         // No later metadata/read await separates this decision from Runtime input.
         await this.deps.updateExactAgentSession(session.agentSessionId, session.run, stored => {
           assertInteraction(stored)
+          if (!inputAttempted) assertFutureClaimCurrent(stored)
           const admission = stored.promptCompletionAdmission
           if (admission?.transport === 'native' || admission?.transport === 'launch' || admission?.submissionId !== submissionId ||
               !isDeepStrictEqual(admission.inputKey, inputKey)) throw new AgentMuxError(
@@ -729,10 +785,12 @@ export class AgentPromptSubmissionCoordinator {
           throw new AgentMuxError('The saved future-message intent or occurrence no longer authorizes this Input.', 'AGENT_FUTURE_INTENT_CHANGED')
         }
         // A future message may use a consumed, still-idle native boundary; it cannot invent one.
-        if (agentTurnCompletionIdentity(current) === undefined && agentTurnEndBoundary(current) === undefined || current.semanticStatus?.state === 'working') {
+        if (agentTurnCompletionIdentity(current) === undefined && agentTurnEndBoundary(current) === undefined &&
+            (!futureInitialIdle || !isDeepStrictEqual(restoredIdleBoundary(current as AgentMuxStoredAgentSession), {
+              predecessor: futureInitialIdle.predecessor, handle: futureInitialIdle.handle, operationId: futureInitialIdle.operationId, inputByte: futureInitialIdle.inputByte })) || current.semanticStatus?.state === 'working') {
           throw new AgentMuxError('The Agent idle boundary is unconfirmed. The future message remains due.', 'AGENT_TURN_END_UNCONFIRMED')
         }
-        if (current.promptCompletionAdmission?.completionId === agentTurnCompletionIdentity(current) && !nativeFutureAdmissionReady) {
+        if (!futureInitialIdle && current.promptCompletionAdmission?.completionId === agentTurnCompletionIdentity(current) && !nativeFutureAdmissionReady) {
           throw new AgentMuxError('The previous admission consumed this idle boundary; an atomic native idle admission is unconfirmed. The future message remains due and manual input remains available.', 'AGENT_TURN_END_UNCONFIRMED')
         }
       } else if (!control?.idleOnly?.nativeEvidence && (agentTurnCompletionIdentity(current) !== expectedCompletionId || current.promptCompletionAdmission?.completionId === expectedCompletionId && !independentIdleNotification)) {
@@ -765,6 +823,11 @@ export class AgentPromptSubmissionCoordinator {
       const source = { providerId: handle.providerId, nativeSessionId: handle.sessionId }
       if (control?.requiredNativeSource && !isDeepStrictEqual(source, control.requiredNativeSource)) return undefined
       return source
+    }
+    try { await assertFutureInitialIdle() }
+    catch (error) {
+      if (!carrier && !rejoiningFrozenPlan && !newClaim) throw promptPreparationFailure(error)
+      throw error
     }
     const nativeOriginal = carrier?.kind === 'native' || admissionIntent?.kind === 'native-conversation' || defaultSemanticInput
       ? await refreshSession(session.agentSessionId, session.run) : undefined
@@ -854,6 +917,7 @@ export class AgentPromptSubmissionCoordinator {
               source && !isDeepStrictEqual(defaultNativeSource(current), source)) throw new AgentMuxError('The original native input claim changed.', 'STALE_AGENT_SESSION')
           await observeInput(diagnostic, 'provider-verify', () => prepared.assertCurrent())
           await observeInput(diagnostic, 'provider-verify', () => assertNativeIdle())
+          await assertFutureInitialIdle()
           const currentRun = await observeInput(diagnostic, 'current-run', () => this.deps.kernel.status(run.runId))
           this.deps.assertAgentRun(claimed, currentRun)
           if (currentRun.state.type !== 'running' || currentRun.pid !== run.pid) throw new AgentMuxError('The original native Run changed before input.', 'STALE_AGENT_SESSION')
@@ -862,6 +926,11 @@ export class AgentPromptSubmissionCoordinator {
             'The original input fence changed before automatic admission. Ordinary input remains available.', 'AGENT_COMPLETION_CHANGED')
           // Provider/Runtime reads can yield to an accepted recovery cancellation.
           await observeInput(diagnostic, 'input-authority', async () => { await control?.authority?.assertCurrent() })
+          if (futureInitialIdle) await this.deps.updateExactAgentSession(session.agentSessionId, session.run, stored => {
+            assertInteraction(stored); assertFutureClaimCurrent(stored)
+            if (!isDeepStrictEqual(stored.promptCompletionAdmission, record.admission)) throw new AgentMuxError('The original native input claim changed.', 'STALE_AGENT_SESSION')
+            return stored
+          }, expectedFutureIntent?.intentId, control?.authority?.binding)
           dispatchAttempted = true
           result = await observeInput(diagnostic, 'provider-send', () => prepared.send(prompt, frozenPlan))
         } catch (error) { failure = error }

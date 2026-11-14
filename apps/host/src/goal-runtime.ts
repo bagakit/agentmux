@@ -1,4 +1,4 @@
-import { optionalInputEpoch } from '@agentmux/core/prompt-condition'
+import { optionalInputEpoch, agentPromptNotApplied } from '@agentmux/core/prompt-condition'
 import { awaitUntilCancelled } from './await-until-cancelled.js'
 import type { DemandSpaceMemberReference } from '@agentmux/demand/relations'
 import type { GoalQualifiedAccess, GoalInspectionAccess } from '@agentmux/core/control'
@@ -8,7 +8,7 @@ import type { AgentInputSubmissionReceipt, AgentInputWaitRef } from '@agentmux/c
 import { AutomaticInputNotDispatchedError } from './automatic-input-not-dispatched.js'
 import { sameAutomaticInputSource } from '@agentmux/core/automatic-input-source'
 import { MOTE_INPUT_GUIDANCE } from '@agentmux/core/mote-input-source'
-import { AgentMuxError, validateAgentPromptInputBinding, type AgentMuxClient,
+import { AgentMuxError, decideContinuousProgress, validateAgentPromptInputBinding, type AgentMuxClient,
   type AgentMuxAgentSession, type AgentMuxAgentCreationInspection, type AgentMuxAgentRuntimeStatus, type AgentMuxClientEvent,
   type AgentMuxRunRef, type AgentMuxRun, type AgentMuxRpcCallContext, type AgentPromptInputBinding,
   type AgentPromptExecution, type AgentPromptPreparationRetryFence,
@@ -154,9 +154,17 @@ export function createGoalRuntime(options: {
         throw new AgentMuxError('The original Goal target resource changed. Original input remains available.', 'STALE_AGENT_SESSION')
       const inputOccupied = options.inputOccupied ? await options.inputOccupied({ kind: 'agent', hostId: target.hostId, agentSessionId: target.agentSessionId, run: value.session.run }, signal) : undefined
       const saved = target.futureIntentId ? await exact(target.hostId).readAgentFuturePromptIntent(target.agentSessionId, target.futureIntentId) : null
+      const base: ContinuousProgressObservation = { session: value.session, observation: value.observation,
+        inputByte: value.run.acceptedInputBytes, ...(inputOccupied === undefined ? {} : { inputOccupied }), tickId, now }
+      const decision = decideContinuousProgress(base)
+      const needsInitialObservation = target.futureIntentId && decision.kind === 'skip' && decision.reason === 'unknown-status' &&
+        base.inputByte !== null && base.observation.process === 'running' && base.observation.readiness === 'ready' &&
+        (base.session.promptCompletionAdmission === undefined || agentPromptNotApplied(base.session))
+      const futureInputActivity = needsInitialObservation ? await exact(target.hostId).readAgentInputActivity({ kind: 'prompt',
+        agentSessionId: target.agentSessionId, expectedRun: value.session.run, submissionId: tickId }) : undefined
       signal?.throwIfAborted()
-      return { session: target.futureIntentId ? { ...value.session, futurePromptIntents: saved ? { [target.futureIntentId]: saved } : {} } : value.session,
-        observation: value.observation, inputByte: value.run.acceptedInputBytes, ...(inputOccupied === undefined ? {} : { inputOccupied }), tickId, now }
+      return { ...base, session: target.futureIntentId ? { ...value.session, futurePromptIntents: saved ? { [target.futureIntentId]: saved } : {} } : value.session,
+        ...(futureInputActivity === undefined ? {} : { futureInputActivity }), tickId, now }
     },
     submitPrompt: async (control, prompt, operationId, condition, automation, choice, authorHuman, agentMuxNote, sourceChannel = 'message-tool', inputContextCapture, authority) => {
       let dispatchStarted = false

@@ -103,7 +103,7 @@ export const GROK_HOOKS: AgentNativeHookSpecification = {
     { events: ['stop_cancelled'], state: 'unknown', lifecycleEvent: 'turn-end' },
     {
       events: [
-        'session_start', 'user_prompt_submit', 'pre_tool_use', 'post_tool_use',
+        'user_prompt_submit', 'pre_tool_use', 'post_tool_use',
         'post_tool_use_failure', 'subagent_start'
       ],
       state: 'working'

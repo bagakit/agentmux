@@ -1,12 +1,13 @@
 import { agentInteractionActiveRequest } from './agent-interaction-state.js'
 import { agentTurnCompletionIdentity } from './agent-session-identity.js'
+import { agentPromptNotApplied } from './agent-prompt-condition.js'
 import type { AgentObservation } from './agent-status-freshness.js'
 import type { AgentMuxAgentSession } from './types.js'
 import type { AgentFuturePromptOccurrence } from './types.js'
 
 /** The scheduler's deliberately small, provider-neutral observation contract. */
 export type ContinuousProgressObservation = {
-  session: Pick<AgentMuxAgentSession, 'agentSessionId' | 'hostId' | 'providerId' | 'workspacePath' | 'run' | 'semanticStatus' | 'pendingInteraction' | 'promptCompletionAdmission' | 'futurePromptIntents' | 'inputEpoch'>
+  session: Pick<AgentMuxAgentSession, 'agentSessionId' | 'hostId' | 'providerId' | 'workspacePath' | 'run' | 'semanticStatus' | 'pendingInteraction' | 'promptCompletionAdmission' | 'terminalPromptSubmission' | 'futurePromptIntents' | 'inputEpoch'>
   observation: AgentObservation
   tickId: string
   now: number
@@ -16,11 +17,14 @@ export type ContinuousProgressObservation = {
   inputByte: number | null
   /** Optional client-owned veto. Absence does not claim that a client has no draft. */
   inputOccupied?: boolean
+  /** Read-only candidate for this exact future occurrence; Core independently qualifies native idle at claim. */
+  futureInputActivity?: import('./types.js').AgentInputActivity
 }
 
 export type ContinuousProgressDecision =
   | { kind: 'send'; tickId: string; completionId: string }
   | { kind: 'skip'; reason: 'working' | 'stale-working' | 'interaction-pending' | 'readiness-unconfirmed' | 'completion-consumed' | 'duplicate-tick' | 'user-input-changed' | 'unknown-status' }
+export type FutureProgressDecision = ContinuousProgressDecision | { kind: 'send'; tickId: string; completionId?: never }
 
 /**
  * Decide only. It performs no timer work and sends no bytes. The Host calls this
@@ -48,12 +52,19 @@ export function decideContinuousProgress(observation: ContinuousProgressObservat
   return { kind: 'send', tickId: observation.tickId, completionId }
 }
 
-/** Calendar eligibility retains all healthy-input fences; only the old completion-consumed rule differs. */
-export function decideFutureProgress(observation: ContinuousProgressObservation, occurrence: AgentFuturePromptOccurrence): ContinuousProgressDecision {
+/** Calendar eligibility can consider initial native idle without claiming a completed turn. */
+export function decideFutureProgress(observation: ContinuousProgressObservation, occurrence: AgentFuturePromptOccurrence): FutureProgressDecision {
   const saved = observation.session.futurePromptIntents?.[occurrence.intentId]
   if (!saved?.active || saved.lastOccurrenceAt !== undefined && saved.lastOccurrenceAt >= occurrence.occurrenceAt) return { kind: 'skip', reason: 'completion-consumed' }
   const { lastCompletionId: _, ...candidate } = observation
   const { promptCompletionAdmission: _admission, ...session } = observation.session
   const result = decideContinuousProgress({ ...candidate, session })
+  const activity = observation.futureInputActivity
+  if (result.kind === 'skip' && result.reason === 'unknown-status' && activity?.state === 'idle' &&
+      activity.key.agentSessionId === session.agentSessionId && activity.key.expectedRun.runId === session.run.runId &&
+      observation.inputByte !== null && !observation.inputOccupied && observation.observation.process === 'running' &&
+      observation.observation.readiness === 'ready' && !agentInteractionActiveRequest(session.pendingInteraction) &&
+      observation.observation.semantic !== 'active' && observation.observation.semantic !== 'awaiting-input' &&
+      session.semanticStatus?.state !== 'working' && (observation.session.promptCompletionAdmission === undefined || agentPromptNotApplied(observation.session))) return { kind: 'send', tickId: observation.tickId }
   return result
 }
