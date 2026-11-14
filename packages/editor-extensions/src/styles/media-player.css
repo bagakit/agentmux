@@ -93,7 +93,9 @@
 .media-player__timeline { position: relative; padding-inline: var(--sp-2); flex: 1; min-width: 80px; }
 /* The pointed time, and over a single video file the frame there: one unit centred on the pointer. With a frame it
    stops at the player's sides instead of leaving them, and the frame keeps to the room above the timeline. The frame
-   takes the picture's own shape and shows only once decoded; until then it stays out of the layout, unseen. */
+   takes the picture's own shape and shows only once decoded; until then it stays out of the layout, unseen. The 48px
+   taken from the room holds the time and the gaps; PREVIEW_MIN_ROOM in MediaTimeline.tsx is that plus the smallest
+   readable frame, so the two change together. */
 .media-player__preview { position: absolute; bottom: calc(100% + var(--sp-2)); left: var(--media-preview-x, 0); translate: -50% 0;
   display: flex; flex-direction: column; align-items: center; gap: var(--sp-1); pointer-events: none;
   --media-preview-tall: 112px; --media-preview-wide: 176px;
