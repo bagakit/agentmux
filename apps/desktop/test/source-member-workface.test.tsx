@@ -22,7 +22,12 @@ import { promptCarrierWaiting } from './helpers/prompt-carrier-receipt'
 vi.mock('electron', () => ({ app: { getPath: () => tmpdir() } }))
 // Only glyph/DOM measurement and Native leaves are controlled. Production TerminalView,
 // shared synchronizer, Source owner, actual Unix RPC, trusted Main/Preload and rich composer run.
-const paint = vi.hoisted(() => ({ terminals: [] as BrowserTerminal[], grid: { cols: 117, rows: 31 }, observe: [] as Array<() => void> }))
+const paint = vi.hoisted(() => ({ terminals: [] as BrowserTerminal[], grid: { cols: 117, rows: 31 }, observe: [] as Array<() => void>, refresh: null as null | (() => Promise<void>) }))
+vi.mock('../src/renderer/src/components/TerminalView', async () => {
+  const actual = await vi.importActual<typeof import('../src/renderer/src/components/TerminalView')>('../src/renderer/src/components/TerminalView')
+  return { ...actual, TerminalView: (props: import('react').ComponentProps<typeof actual.TerminalView>) =>
+    <actual.TerminalView {...props} onObservationRefresh={refresh => { paint.refresh = refresh; props.onObservationRefresh?.(refresh) }} /> }
+})
 vi.mock('@xterm/xterm', async () => {
   const { Terminal } = await vi.importActual<typeof import('@xterm/xterm')>('@xterm/xterm')
   return { Terminal: class extends Terminal {
@@ -51,7 +56,7 @@ let root: Root, container: HTMLDivElement
 const cleanup: Array<() => unknown | Promise<unknown>> = []
 beforeEach(() => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
-  paint.terminals.length = 0; paint.observe.length = 0; paint.grid = { cols: 117, rows: 31 }
+  paint.terminals.length = 0; paint.observe.length = 0; paint.refresh = null; paint.grid = { cols: 117, rows: 31 }
   vi.stubGlobal('ResizeObserver', class { constructor(cb: () => void) { paint.observe.push(cb) }; observe() {}; disconnect() {} })
   vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
     const width = paint.grid.cols * 8, height = paint.grid.rows * 16
@@ -70,6 +75,11 @@ async function fixture(suffix = 'a') {
   f.d.core.providers.register(new AgentProviderRegistry().get('codex'))
   const original = await f.d.put(sid), admitted = await f.admit('D-in-B', f.d.owner.runtimeId, sid, 'original-creation-' + suffix)
   await f.b.spatial.settleAgentOpen('original-creation-' + suffix, original, { workspaceId: 'original-b-project', phase: 'attached', agentPresentation: { sessionId: sid, agentSessionId: sid, hostId: 'D-in-B', runtimeId: f.d.owner.runtimeId } })
+  // The fixture controls Native connectivity; durable Session facts still come
+  // from the actual original registry when its attachment reader opens.
+  vi.spyOn(f.d.core.metadata, 'resolveRaw').mockImplementation(async id => {
+    const session = await f.d.core.readAgentSession(id); if (!session) throw Error('Original fixture Session is absent'); return session
+  })
   const subject = await f.d.core.runtimeSubject({ kind: 'agent-session', agentSessionId: sid }); if (subject.kind !== 'agent') throw Error('Expected original member')
   const data = 'Original private terminal ' + suffix + '\r\n', dataBytes = new TextEncoder().encode(data)
   const attach = vi.spyOn(f.d.core, 'refreshRunAttachment').mockResolvedValue({ run: subject.run, gap: null, resizeRevision: 0,
@@ -217,7 +227,7 @@ it('a failed conversation read preserves the original Terminal, draft and input 
   expect(local).not.toHaveBeenCalled(); expect(f.writes).not.toHaveBeenCalled(); expect(f.prompt).not.toHaveBeenCalled()
 })
 
-it('actual private Native retains the original Run/PID and receives settled and post-drag dimensions through Source Main and Preload', async () => {
+async function privateNativeFixture() {
   const { spawn } = await import('node:child_process')
   const { mkdir, writeFile } = await import('node:fs/promises'), { join, resolve } = await import('node:path')
   const f = await createSpaceSessionsFixture(cleanup)
@@ -242,13 +252,25 @@ it('actual private Native retains the original Run/PID and receives settled and 
   await (f.d.core as unknown as { registry: import('../../../packages/core/src/agent-session-registry').AgentMuxAgentSessionRegistry }).registry.put(original, original.run)
   const admission = (await f.b.spatial.admitAgentOpen({ request: { schemaVersion: 5, requestId: 'private-native-creation', operation: 'agent.open', content: { kind: 'new-agent', executorId: 'test-executor', agentTarget: { hostId: 'D-in-B', runtimeId: f.d.owner.runtimeId } }, destination: { spaceId: f.reference.spaceId, newTab: true }, focus: false }, agentSessionId: sid,
     execution: { hostId: 'D-in-B', runtimeId: f.d.owner.runtimeId, executorRevision: 'original-executor-revision', workspacePath: f.d.root, workspaceId: null }, placement: { runtimeId: f.b.owner.runtimeId, hostId: 'local', workspacePath: '/b/project', workspaceId: 'original-b-project' }, regionResource: {} })).record
-  const main = spaceMountTransport(cleanup, [{ id: 'private-source-carrier', carrier: { forwardRpc: f.b.rpc.call.bind(f.b.rpc), subscribeRpc: f.b.rpc.subscribe.bind(f.b.rpc) } }], structuredClone(DEFAULT_CONFIG))
+  let metadataUnavailable = false
+  const forward: typeof f.b.rpc.call = (method, input, options) => {
+    if (metadataUnavailable && method === 'space.member.call' && (input as { call?: { method?: string } }).call?.method === 'runtime.bootstrap')
+      return Promise.reject(new Error('Original supplemental metadata unavailable'))
+    return f.b.rpc.call(method, input, options)
+  }
+  const main = spaceMountTransport(cleanup, [{ id: 'private-source-carrier', carrier: { forwardRpc: forward, subscribeRpc: f.b.rpc.subscribe.bind(f.b.rpc) } }], structuredClone(DEFAULT_CONFIG))
   vi.spyOn(api.spaceMounts, 'member').mockImplementation(main.api.member)
   const key = spaceMountKey(f.reference), target = { hostId: 'private-source-carrier', target: { reference: f.reference, regionId: admission.address.regionId, runtimeId: f.d.owner.runtimeId, agentSessionId: sid, expectedRun: original.run } }
   useAppStore.getState().mountSpace({ hostId: target.hostId, reference: f.reference, zoneId: admission.address.zoneId!, workspaceId: 'original-b-project' })
   useAppStore.getState().setAgentComposerDraft(originalSourceInputOwnerKey(f.d.owner.runtimeId, sid), 'Private Native proof draft')
   const sessions = useAppStore.getState().sessions
   const view = (visible = true, interactiveResize = false) => <DesktopClientUiProvider><SpaceMemberWorkface target={target} visible={visible} active={visible} interactiveResize={interactiveResize} sourceTabId={admission.address.tabId!} /></DesktopClientUiProvider>
+  return { ...f, original, run, target, sid, main, sessions, view, daemon, metadataUnavailable: (value: boolean) => { metadataUnavailable = value } }
+}
+
+it('actual private Native retains the original Run/PID and receives settled and post-drag dimensions through Source Main and Preload', async () => {
+  const f = await privateNativeFixture(), { run, sessions, view, original, sid, daemon } = f
+  const { writeFile } = await import('node:fs/promises')
   const facts: unknown[] = []
   async function sameGrid(cols: number, rows: number) {
     await vi.waitFor(async () => {
@@ -396,4 +418,179 @@ it('public view changes the actual ordinary foreign workface without borrowing a
   expect(originalRead).toHaveBeenCalled(); expect(localRead).not.toHaveBeenCalled(); expect(carrierRead).not.toHaveBeenCalled()
   expect(f.writes).not.toHaveBeenCalled(); expect(f.prompt).not.toHaveBeenCalled()
   for (const effect of lifecycle) expect(effect).not.toHaveBeenCalled()
+})
+
+it('keeps the original attached nonempty terminal when supplemental metadata and status fail after the Native receipt', async () => {
+  const f = await privateNativeFixture()
+  // Real private PTY bytes and Core attachment projection; only the later optional
+  // metadata/status failure is injected, not a fabricated attachment or Session.
+  await f.d.core.writeAgent({ agentSessionId: f.sid, expectedRun: f.run, data: 'Original attachment survives\n', source: 'user' })
+  const attach = f.d.core.refreshRunAttachment.bind(f.d.core)
+  let attached = false
+  const status = f.d.core.runtimeSubject.bind(f.d.core)
+  const received = vi.spyOn(f.d.core, 'refreshRunAttachment').mockImplementation(async (...args) => {
+    const result = await attach(...args)
+    expect(result).not.toHaveProperty('agent') // Existing original Core wire shape, no new declaration field.
+    f.metadataUnavailable(true); attached = true
+    return result
+  })
+  vi.spyOn(f.d.core, 'runtimeSubject').mockImplementation((...args) => attached ? Promise.reject(new Error('Independent original status unavailable')) : status(...args))
+  const results: unknown[] = []
+  let initialAttachment: import('../src/shared/contracts').TerminalAttachResult | undefined
+  const open = vi.mocked(api.spaceMounts.member).getMockImplementation()!
+  vi.mocked(api.spaceMounts.member).mockImplementation(async (...args) => {
+    const surface = await open(...args)
+    return { ...surface, call: async (method, input, signal) => {
+      try { const result = await surface.call(method, input, signal); if (method === 'attach') initialAttachment = result as import('../src/shared/contracts').TerminalAttachResult; results.push({method, ok:true}); return result }
+      catch (error) { results.push({method, error:String(error)}); throw error }
+    } }
+  })
+  await act(async () => root.render(f.view()))
+  await vi.waitFor(() => expect(paint.terminals.some(terminal => {
+    const buffer = terminal.buffer.active
+    return Array.from({ length: buffer.length }, (_, index) => buffer.getLine(index)?.translateToString()).join('\n').includes('Original attachment survives')
+  }), JSON.stringify({ text: container.textContent, results, attached: received.mock.calls.length, terminals: paint.terminals.map(t => ({ length: t.buffer.active.length, text: Array.from({length:t.buffer.active.length},(_,i)=>t.buffer.active.getLine(i)?.translateToString()).join('\n') })) })).toBe(true), { timeout: 8000 })
+  expect(received).toHaveBeenCalledTimes(1)
+  expect(container.textContent).toContain('Agent observation unconfirmed')
+  const details = container.querySelector('details')
+  if (details) await act(async () => { details.open = true; details.dispatchEvent(new Event('toggle')) })
+  expect(container.textContent).toContain('unavailable')
+  expect(container.querySelector('[role="textbox"]')?.textContent).toContain('Private Native proof draft')
+  expect(useAppStore.getState().sessions).toBe(f.sessions)
+  expect(Array.from(container.querySelectorAll('button')).some(button => button.textContent === 'Refresh member observation')).toBe(true)
+  await click('Refresh member observation')
+  expect(container.textContent).toContain('Agent observation unconfirmed')
+  expect(paint.terminals).toHaveLength(1)
+  // The same shared TerminalView still sends to this original healthy PTY.
+  await act(async () => paint.terminals[0]!.input('Still available after observation gap\r'))
+  await vi.waitFor(async () => {
+    const replay = await f.d.core.readRunReplay(f.run, 0, 'raw')
+    expect(replay.replay.map(event => event.data).join('')).toContain('Still available after observation gap')
+    expect(replay.run.runId).toBe(f.run.runId); expect(replay.run.pid).toBe(f.run.pid)
+    expect(replay).not.toHaveProperty('agent')
+  })
+  const surface = await vi.mocked(api.spaceMounts.member).mock.results[0]!.value
+  const refreshed = await surface.call('refreshAttachment', { attachmentId: initialAttachment!.attachmentId, afterByte: 0 })
+  expect(refreshed.attachmentId).toBe(initialAttachment!.attachmentId)
+  expect(refreshed.session.control.run).toEqual(f.original.run)
+  expect(refreshed.session.latestOutputBytes).toBeGreaterThan(0)
+})
+
+
+it('keeps raw original replay and attachment available when the Provider declaration is removed', async () => {
+  const f = await privateNativeFixture()
+  await f.d.core.writeAgent({ agentSessionId: f.sid, expectedRun: f.run, data: 'Retained original bytes\n', source: 'user' })
+  await vi.waitFor(async () => expect((await f.d.core.readRunReplay(f.run, 0, 'raw')).replay.map(event => event.data).join('')).toContain('Retained original bytes'))
+  f.d.core.providers.unregister('codex')
+  const replay = await f.d.core.readRunReplay(f.run, 0, 'raw')
+  expect(replay.replay.map(event => event.data).join('')).toContain('Retained original bytes')
+  expect(replay).not.toHaveProperty('agent')
+  const attachment = await f.d.core.refreshRunAttachment(f.run, 0, 'raw')
+  expect(attachment.run).toMatchObject({ runId: f.run.runId, pid: f.run.pid, state: 'running' })
+  expect(attachment).not.toHaveProperty('agent')
+  await act(async () => root.render(f.view()))
+  await vi.waitFor(() => expect(paint.terminals.some(terminal => Array.from({ length: terminal.buffer.active.length }, (_, i) => terminal.buffer.active.getLine(i)?.translateToString()).join('\n').includes('Retained original bytes'))).toBe(true))
+  await vi.waitFor(() => expect(container.textContent).toContain('Agent observation unconfirmed'))
+})
+
+it('rejects a mismatched attachment and wrong admission without stopping the original Run', async () => {
+  const f = await privateNativeFixture(), stop = vi.spyOn(f.d.core, 'stopTerminal')
+  const attach = f.d.core.refreshRunAttachment.bind(f.d.core)
+  const receipt = vi.spyOn(f.d.core, 'refreshRunAttachment').mockImplementation(async (...args) => {
+    const result = await attach(...args)
+    return { ...result, run: { ...result.run, runId: 'unrelated-original-run' } }
+  })
+  const malformed = await f.main.api.member(f.target, () => {})
+  await expect(malformed.call('attach', { afterByte: 0 })).rejects.toMatchObject({ code: 'STALE_AGENT_SESSION_BINDING' })
+  await malformed.dispose()
+  expect((await f.d.core.readRunReplay(f.run, 0, 'raw')).run).toMatchObject({ runId: f.run.runId, pid: f.run.pid, state: 'running' })
+  receipt.mockImplementation(attach); receipt.mockClear()
+  for (const target of [
+    { ...f.target, target: { ...f.target.target, expectedRun: { runId: 'not-the-original-run' } } },
+    { ...f.target, target: { ...f.target.target, expectedAdmission: { kind: 'creation' as const, operationId: 'not-the-original-creation' } } }
+  ]) {
+    const surface = await f.main.api.member(target, () => {})
+    await expect(surface.call('attach', { afterByte: 0 })).rejects.toMatchObject({ code: expect.stringMatching(/STALE_AGENT_SESSION_BINDING|SPACE_MEMBER_ADMISSION_UNCONFIRMED/) })
+    await surface.dispose()
+  }
+  expect(receipt).not.toHaveBeenCalled(); expect(stop).not.toHaveBeenCalled()
+})
+
+it('does not attach Native when only the persistent Activity mode is opened', async () => {
+  const f = await fixture('activity-only')
+  useAppStore.getState().setViewMode(originalSourceInputOwnerKey(f.target.target.runtimeId, f.sid), 'activity', { focus: false })
+  await act(async () => root.render(f.view()))
+  await vi.waitFor(() => expect(container.querySelector('[data-agent-surface-mode="activity"]')).not.toBeNull())
+  // Wait for the original fixed read, not a timer or an empty early assertion.
+  const surface = await vi.mocked(api.spaceMounts.member).mock.results[0]!.value
+  await surface.call('read', {})
+  expect(f.attach).not.toHaveBeenCalled(); expect(paint.terminals).toHaveLength(0)
+})
+
+
+it('refreshes the original terminal from its visible action while supplemental Session details remain unavailable', async () => {
+  const f = await privateNativeFixture()
+  await f.d.core.writeAgent({ agentSessionId: f.sid, expectedRun: f.run, data: 'Original refresh body\n', source: 'user' })
+  const attach = f.d.core.refreshRunAttachment.bind(f.d.core)
+  // The continuation representation is the controlled leaf here; the retained
+  // bytes, original Session/Run, attachment and physical PTY are actual owners.
+  const refresh = vi.spyOn(f.d.core, 'refreshRunAttachment').mockImplementation(async (...args) => {
+    const result = await attach(...args), raw = await f.d.core.readRunReplay(f.run, 0, 'raw')
+    return { ...result, replay: raw.replay, terminal: { type: 'unknown' as const, reason: 'origin_unknown' as const } }
+  })
+  await act(async () => root.render(f.view()))
+  await vi.waitFor(() => expect(container.querySelector('.terminal-service-window')).not.toBeNull())
+  await vi.waitFor(() => expect(paint.terminals[0]?.buffer.active.getLine(0)?.translateToString()).toContain('Original refresh body'))
+  // Join the real shared component's pending acquisition before the visible
+  // action. This callback is an existing product port, not a readiness mock.
+  await vi.waitFor(() => expect(paint.refresh).not.toBeNull())
+  await act(async () => { await paint.refresh!() })
+  const before = refresh.mock.calls.length, terminal = paint.terminals[0]
+  f.metadataUnavailable(true)
+  const button = Array.from(container.querySelectorAll<HTMLButtonElement>('.terminal-service-window button')).find(button => button.textContent === 'Refresh observation')
+  expect(button).toBeDefined(); await act(async () => button!.click())
+  await vi.waitFor(() => expect(refresh, container.textContent ?? '').toHaveBeenCalledTimes(before + 1), { timeout: 8000 })
+  await vi.waitFor(() => expect(container.textContent).toContain('Refreshing Session details'))
+  expect(container.textContent).toContain('Original supplemental metadata unavailable')
+  expect(paint.terminals[0]).toBe(terminal)
+  expect(terminal?.buffer.active.getLine(0)?.translateToString()).toContain('Original refresh body')
+  expect(container.querySelector('[role="textbox"]')?.textContent).toContain('Private Native proof draft')
+  await act(async () => terminal!.input('Input after manual refresh\r'))
+  await vi.waitFor(async () => expect((await f.d.core.readRunReplay(f.run, 0, 'raw')).replay.map(event => event.data).join('')).toContain('Input after manual refresh'))
+})
+
+
+it('requires the original receiver grant before exposing the original attachment to a current viewer', async () => {
+  const source = await createSpaceSessionsFixture(cleanup)
+  source.b.owner.runtimeId = 'runtime-B'
+  const { createHostRouteInventoryFixture } = await import('../../../packages/core/test/helpers/host-route-inventory-fixture')
+  const h = await createHostRouteInventoryFixture(cleanup as Array<() => Promise<void>>, { spatialState: source.b.spatial,
+    hostedRuntime: () => source.b.hosted, coreClients: () => [{ hostId: 'local', client: source.b.core }] })
+  h.native.mockResolvedValue()
+  const session = await h.original.client.readAgentSession('recipient'); if (!session) throw Error('Original recipient absent')
+  const subject = await h.original.client.runtimeSubject({ kind: 'agent-session', agentSessionId: session.agentSessionId })
+  const bytes = new TextEncoder().encode('Original granted output')
+  const native = vi.spyOn(h.original.client, 'refreshRunAttachment').mockResolvedValue({ run: subject.run,
+    gap: null, resizeRevision: 0, terminal: { type: 'unknown', reason: 'origin_unknown' }, replay: [{ type: 'data',
+      runId: session.run.runId, startByte: 0, endByte: bytes.length, data: new TextDecoder().decode(bytes), dataBytes: bytes }] })
+  vi.spyOn(h.original.client, 'releaseRunAttachment').mockResolvedValue()
+  const admission = await source.admit('collision', h.d.identity.runtimeId, session.agentSessionId, 'routed-attachment-C', h.route, h.original.root)
+  const target = { hostId: 'current-viewer-source', target: { reference: { ...source.reference, runtimeId: h.b.identity.runtimeId },
+    regionId: admission.address.regionId, runtimeId: h.d.identity.runtimeId, agentSessionId: session.agentSessionId,
+    expectedRun: session.run, expectedAdmission: { kind: 'creation' as const, operationId: admission.requestId } } }
+  const scopes = ['runtime.owner.identity', 'runtime.attachment-watch', 'runtime.release-consumer']
+  await h.configure(h.b, [{ id: 'collision', route: h.route }], [h.grant('current-viewer-member', h.a.identity, h.b.identity, ['space.member.call', 'space.member.watch'])])
+  await h.configure(h.c, [], [h.grant('source-terminal', h.b.identity, h.d.identity, scopes)])
+  await h.configure(h.d, [], [])
+  const main = spaceMountTransport(cleanup, [{ id: target.hostId, carrier: { forwardRpc: h.rpc.call.bind(h.rpc), subscribeRpc: h.rpc.subscribe.bind(h.rpc) } }], structuredClone(DEFAULT_CONFIG))
+  const surface = await main.api.member(target, () => {}); cleanup.push(() => surface.dispose())
+  await expect(surface.call('attach', { afterByte: 0 })).rejects.toMatchObject({ code: 'HOST_ROUTE_NOT_DELEGATED' })
+  expect(native).not.toHaveBeenCalled()
+  await h.configure(h.d, [], [h.grant('receiver-terminal', h.c.identity, h.d.identity, scopes)])
+  const attached = await surface.call('attach', { afterByte: 0 })
+  expect(attached.session.control).toMatchObject({ agentSessionId: session.agentSessionId, run: session.run })
+  expect(attached.replay.map(event => event.data).join('')).toBe('Original granted output')
+  expect(native).toHaveBeenCalledTimes(1)
+  await surface.call('detach', { attachmentId: attached.attachmentId })
+  await surface.dispose()
 })
