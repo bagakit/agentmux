@@ -1,6 +1,6 @@
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import * as Menu from '@radix-ui/react-dropdown-menu'
-import { useEffect, useRef, useState } from 'react'
+import { useRef, useState } from 'react'
 import { useAppStore } from '../store'
 import type { DemandProjection } from '../lib/global-demand-board'
 import { ComposerTextarea } from '@agentmux/client-ui/input'
@@ -15,6 +15,7 @@ import { GoalExecution } from './GoalExecution'
 import { GoalPlanGraph } from './GoalPlanGraph'
 import { GoalFiniteStartControl } from './GoalFiniteStartControl'
 import { useGoalDiscussionRecipient } from '../lib/goal-discussion-recipient'
+import { editGoalDraft, saveGoalDrafts } from '../lib/goal-edit-drafts'
 import { GoalActivity } from './GoalActivity'
 import { GoalAlignment, type GoalAcknowledgementFeedback } from './GoalAlignment'
 import { goalNextStepFact } from '../lib/goal-presentation'
@@ -30,28 +31,29 @@ const ThemeNavigationForwardIcon = semanticIconComponent('navigation.forward')
 const QUEUE_NAMES: Record<GoalStage, string> = { you: 'needs you', attention: 'needs attention', define: 'needs defining', agents: 'is with agents', unknown: 'is unknown', finished: 'is finished' }
 
 
-export function GoalDetail({ demand, onClose, onOpenMote, onGrill, onGrounding, onPlan, acknowledgementFeedback, onAcknowledgementFeedbackChange, motePending = null, moteError, onRetryMote, draft = {}, onDraftChange, onDraftSaved, queue = null, onOpenGoal }: { queue?: GoalQueuePosition | null; onOpenGoal?: (id: string) => void; draft?: Partial<Record<'title' | 'description', string>>; onDraftChange?: (field: 'title' | 'description', value: string) => void; onDraftSaved?: (field: 'title' | 'description', value: string) => void; demand: DemandProjection; onClose: () => void; onOpenMote: () => void; onGrill: () => void; onGrounding: () => void; onPlan: () => void; acknowledgementFeedback: GoalAcknowledgementFeedback; onAcknowledgementFeedbackChange: (patch: Partial<GoalAcknowledgementFeedback>) => void; motePending?: 'open' | 'grill' | 'grounding' | 'plan' | null; moteError: { message: string; mode: 'open' | 'grill' | 'grounding' | 'plan' } | null; onRetryMote: () => void }) {
+export function GoalDetail({ demand, onClose, onOpenMote, onGrill, onGrounding, onPlan, acknowledgementFeedback, onAcknowledgementFeedbackChange, motePending = null, moteError, onRetryMote, queue = null, onOpenGoal }: { queue?: GoalQueuePosition | null; onOpenGoal?: (id: string) => void; demand: DemandProjection; onClose: () => void; onOpenMote: () => void; onGrill: () => void; onGrounding: () => void; onPlan: () => void; acknowledgementFeedback: GoalAcknowledgementFeedback; onAcknowledgementFeedbackChange: (patch: Partial<GoalAcknowledgementFeedback>) => void; motePending?: 'open' | 'grill' | 'grounding' | 'plan' | null; moteError: { message: string; mode: 'open' | 'grill' | 'grounding' | 'plan' } | null; onRetryMote: () => void }) {
   const updateDemand = useAppStore((state) => state.updateDemand)
   const deleteDemand = useAppStore((state) => state.deleteDemand)
-  const [title, setTitle] = useState(draft.title ?? demand.title)
-  const [description, setDescription] = useState(draft.description ?? demand.description)
-  const draftRef = useRef({ title: draft.title ?? demand.title, description: draft.description ?? demand.description })
-  const [titleDirty, setTitleDirty] = useState(draft.title !== undefined)
-  const [descriptionDirty, setDescriptionDirty] = useState(draft.description !== undefined)
+  const draft = useAppStore(state => state.goalEditDrafts[demand.id])
+  const title = draft?.title?.value ?? demand.title, description = draft?.description?.value ?? demand.description
+  const titleDirty = Boolean(draft?.title), descriptionDirty = Boolean(draft?.description)
   const failedPatch = useRef<Parameters<typeof updateDemand>[1]>({})
-  const [saveError, setSaveError] = useState<string | null>(Object.keys(draft).length ? 'Review the retained draft and retry saving.' : null)
+  const [saveError, setSaveError] = useState<string | null>(null)
   const [deleteRequested, setDeleteRequested] = useState(false)
   const actionsRef = useRef<HTMLButtonElement>(null)
-  const [intentEditing, setIntentEditing] = useState(draft.description !== undefined)
-  useEffect(() => { if (!titleDirty) setTitle(demand.title) }, [demand.title, titleDirty])
-  useEffect(() => { if (!descriptionDirty) setDescription(demand.description) }, [demand.description, descriptionDirty])
+  const [intentEditing, setIntentEditing] = useState(descriptionDirty)
   async function update(patch: Parameters<typeof updateDemand>[1], expectedUpdatedAt?: number): Promise<boolean> {
-    try { await updateDemand(demand.id, patch, undefined, expectedUpdatedAt); for (const key of Object.keys(patch) as Array<keyof typeof patch>) if (failedPatch.current[key] === patch[key]) delete failedPatch.current[key]; if (!Object.keys(failedPatch.current).length) setSaveError(null); if ('title' in patch && draftRef.current.title === patch.title) { setTitleDirty(false); onDraftSaved?.('title', patch.title!) }; if ('description' in patch && draftRef.current.description === patch.description) { setDescriptionDirty(false); onDraftSaved?.('description', patch.description!) }; return true }
+    try { await updateDemand(demand.id, patch, undefined, expectedUpdatedAt); for (const key of Object.keys(patch) as Array<keyof typeof patch>) if (failedPatch.current[key] === patch[key]) delete failedPatch.current[key]; if (!Object.keys(failedPatch.current).length) setSaveError(null); return true }
     catch (error) { if (expectedUpdatedAt !== undefined) return false; failedPatch.current = { ...failedPatch.current, ...patch }; setSaveError(error instanceof Error ? error.message : String(error)); return false }
   }
-  const intentBody = <ComposerTextarea aria-label="Goal description" value={description} onValueChange={(value) => { draftRef.current.description = value; onDraftChange?.('description', value); setDescription(value); setDescriptionDirty(true) }} onBlur={() => { if (descriptionDirty) void update({ description }) }} rows={Math.max(3, Math.min(14, description.split('\n').length + 1))} placeholder="Describe the outcome in your own words…" />
+  const intentBody = <ComposerTextarea aria-label="Goal description" value={description} onValueChange={value => editGoalDraft(demand.id, 'description', value)} onBlur={() => { if (descriptionDirty) void saveGoalDrafts(demand.id, ['description']) }} rows={Math.max(3, Math.min(14, description.split('\n').length + 1))} placeholder="Describe the outcome in your own words…" />
   const recipient = useGoalDiscussionRecipient(demand.id)
-  const intent = (lines: number) => <GoalIntent text={description} lines={lines} editor={intentBody} editing={intentEditing || descriptionDirty} onEditingChange={editing => { setIntentEditing(editing); if (!editing && descriptionDirty) void update({ description }) }} />
+  const intent = (lines: number) => <GoalIntent text={description} lines={lines} editor={intentBody} editing={intentEditing || descriptionDirty} onEditingChange={editing => { setIntentEditing(editing); if (!editing && descriptionDirty) void saveGoalDrafts(demand.id, ['description']) }} />
+  const draftIssue = Object.values(draft ?? {}).find(entry => entry?.issue)?.issue
+  async function retrySave() {
+    await saveGoalDrafts(demand.id)
+    if (Object.keys(failedPatch.current).length) await update({ ...failedPatch.current })
+  }
   const continueInBody = Boolean(demand.alignment?.confirmedAt && !demand.grounding)
   const finished = demand.status === 'done' || demand.status === 'cancelled'
   const plan = <GoalPlanGraph demand={demand} onOpenDiscussion={onOpenMote} {...(finished ? {} : { onRequestPlan: onPlan })} pending={motePending === 'plan'} busy={Boolean(motePending)} />
@@ -64,14 +66,15 @@ export function GoalDetail({ demand, onClose, onOpenMote, onGrill, onGrounding, 
       <header className="goals-detail__head">
         <div className="goals-detail__stage-row"><p className="goals-detail__stage" data-goal-detail-stage><GoalStageMark stage={stage} /><span><strong>{GOAL_GROUP_LABELS[stage]}</strong> · {next}</span></p>
           {queue && queue.total > 1 ? <span className="goals-detail__queue" data-goal-queue><span>{queue.index} of {queue.total}</span>{queue.nextId ? <button type="button" className="small-button" data-goal-queue-next aria-label={`Next goal that ${QUEUE_NAMES[queue.stage]}`} onClick={() => onOpenGoal?.(queue.nextId!)}>Next<ThemeNavigationForwardIcon size={13} /></button> : null}</span> : null}</div>
-        <ComposerTextarea className="goals-title" aria-label="Goal title" value={title} onValueChange={(value) => { draftRef.current.title = value; onDraftChange?.('title', value); setTitle(value); setTitleDirty(true) }} rows={1} onBlur={() => { if (titleDirty && title.trim()) void update({ title }) }} />
+        <ComposerTextarea className="goals-title" aria-label="Goal title" value={title} onValueChange={value => editGoalDraft(demand.id, 'title', value)} rows={1} onBlur={() => { if (titleDirty && title.trim()) void saveGoalDrafts(demand.id, ['title']) }} />
         <GoalMeta demand={demand} />
+        {draft && !draftIssue ? <p className="goals-caption">Unsaved edits</p> : null}
       </header>
       <div className="goals-detail__body">
         <div className="goals-detail__main">
           {demand.plan ? plan : null}
           {!demand.alignment ? <section className="goals-intent-body goals-intent-body--undefined"><div className="goals-section-heading"><h2><ThemeObjectGoalIcon size={14} aria-hidden="true" /> Goal definition</h2><span className="goals-caption">{descriptionDirty ? 'Your intent · Unsaved draft' : 'Your intent · Not outlined yet'}</span></div>{intent(16)}</section> : null}
-          {saveError ? <div className="goals-service" role="status">Changes are not saved. Your draft is kept. <span>{saveError}</span><button type="button" className="small-button" onClick={() => void update({ ...failedPatch.current, ...(titleDirty ? { title } : {}), ...(descriptionDirty ? { description } : {}) })}>Retry save</button></div> : null}
+          {saveError || draftIssue ? <div className="goals-service" role="status">Changes are not saved. Your draft is kept. <span>{saveError ?? draftIssue}</span><button type="button" className="small-button" onClick={() => void retrySave()}>Retry save</button></div> : null}
           {!demand.plan && !finished && !demand.grounding && demand.alignment?.confirmedAt ? <GoalFiniteStartControl key={`start:${demand.id}`} demand={demand} primary={!acknowledgementFeedback.failure} /> : null}
           <GoalAlignment key={demand.id} feedback={acknowledgementFeedback} onFeedbackChange={onAcknowledgementFeedbackChange} demand={demand} onGrill={onGrill} onGrounding={onGrounding} onOpenMote={onOpenMote} motePending={motePending}>{demand.plan ? null : plan}</GoalAlignment>
           {demand.plan || finished && !demand.grounding || !demand.alignment?.confirmedAt || demand.grounding && !finished ? <GoalFiniteStartControl key={`start:${demand.id}`} demand={demand} primary={false} /> : null}

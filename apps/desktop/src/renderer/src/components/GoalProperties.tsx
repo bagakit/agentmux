@@ -1,6 +1,6 @@
 import { civilClock } from "../lib/civil-clock"
 import { TextInput } from '@agentmux/client-ui/input'
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import type { DemandProjection, DemandPriority, DemandStatus } from '../lib/global-demand-board'
 import { DEMAND_STATUS_IDS, DEMAND_STATUS_LABELS } from '../lib/global-demand-board'
@@ -10,6 +10,7 @@ import { projectWorkspaces } from '../lib/workspace-projects'
 import { agentDisplayName } from '../lib/workbench-tabs'
 import { agentSessionPresentationIndex, createFirstPromptSelector } from '../lib/session-presentation'
 import { SelectionField } from './SelectionField'
+import { editGoalDraft, saveGoalDrafts } from '../lib/goal-edit-drafts'
 
 function localDateInput(timestamp: number | null | undefined): string {
   if (timestamp == null) return ''
@@ -36,8 +37,8 @@ export function GoalProperties(props: Props) {
 function GoalMoreProperties({ demand, onUpdate }: Props) {
   // The open parent picker deliberately consumes the Goal inventory; participant names do not.
   const demands = useAppStore(state => state.demands)
-  const [tags, setTags] = useState((demand.tags ?? []).join(', '))
-  useEffect(() => setTags((demand.tags ?? []).join(', ')), [demand.tags])
+  const tagsDraft = useAppStore(state => state.goalEditDrafts[demand.id]?.tags)
+  const tags = tagsDraft?.value ?? (demand.tags ?? []).join(', ')
   return <div className="goals-properties__groups">
     <fieldset><legend>Planning</legend><div className="goals-properties__fields">
       <label>Planned start<TextInput type="date" aria-label="Goal planned start" value={localDateInput(demand.plannedStartAt)} onChange={event => onUpdate({ plannedStartAt: event.target.value ? Date.parse(`${event.target.value}T${civilClock(0, 0, 0)}`) : null })} /></label>
@@ -45,7 +46,7 @@ function GoalMoreProperties({ demand, onUpdate }: Props) {
       <label>Target date<TextInput type="date" aria-label="Goal target date" value={localDateInput(demand.targetAt)} onChange={event => onUpdate({ targetAt: event.target.value ? Date.parse(`${event.target.value}T${civilClock(0, 0, 0)}`) : null })} /></label>
     </div></fieldset>
     <fieldset><legend>Classification</legend><div className="goals-properties__fields">
-      <label>Tags<TextInput aria-label="Goal tags" value={tags} onChange={event => setTags(event.target.value)} onBlur={() => onUpdate({ tags: tags.split(',').map(tag => tag.trim()).filter(Boolean) })} /></label>
+      <label>Tags<TextInput aria-label="Goal tags" value={tags} onChange={event => editGoalDraft(demand.id, 'tags', event.target.value)} onBlur={() => { void saveGoalDrafts(demand.id, ['tags']) }} /></label>
 
     </div></fieldset>
     <fieldset><legend>Relationships</legend><div className="goals-properties__fields">

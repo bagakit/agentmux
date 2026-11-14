@@ -67,7 +67,6 @@ export function GlobalBoardSurface() {
   const searchRef = useRef<HTMLInputElement>(null)
   const selectedRowRef = useRef<HTMLElement | null>(null)
   const surfaceRef = useRef<HTMLElement>(null)
-  const goalDrafts = useRef(new Map<string, Partial<Record<'title' | 'description', string>>>())
   const projectedDemands = useMemo(() => projectDemands(config, [], demands), [demands, config])
   const selectedDemand = projectedDemands.find((demand) => demand.id === selectedDemandId) ?? null
   const projects = useMemo(() => projectWorkspaces((config?.workspaces ?? []).filter((workspace) => workspace.id !== SCRATCH_WORKSPACE_ID)), [config?.workspaces])
@@ -177,9 +176,6 @@ export function GlobalBoardSurface() {
       demand={selectedDemand}
       acknowledgementFeedback={acknowledgementFeedback[selectedDemand.id] ?? EMPTY_GOAL_ACKNOWLEDGEMENT}
       onAcknowledgementFeedbackChange={(patch) => setAcknowledgementFeedback(current => ({ ...current, [selectedDemand.id]: { ...(current[selectedDemand.id] ?? EMPTY_GOAL_ACKNOWLEDGEMENT), ...patch } }))}
-      draft={goalDrafts.current.get(selectedDemand.id) ?? {}}
-      onDraftChange={(field, value) => { const current = goalDrafts.current.get(selectedDemand.id) ?? {}; goalDrafts.current.set(selectedDemand.id, { ...current, [field]: value }) }}
-      onDraftSaved={(field, value) => { const current = goalDrafts.current.get(selectedDemand.id); if (current?.[field] === value) { delete current[field]; if (!Object.keys(current).length) goalDrafts.current.delete(selectedDemand.id) } }}
       onClose={closeDetail}
       onOpenMote={() => void openMote(selectedDemand.id)}
       onGrill={() => void openMote(selectedDemand.id, 'grill')}

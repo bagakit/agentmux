@@ -26,6 +26,7 @@ import { restoreToolkitPresentations, updateToolkitPresentation, type ToolkitPre
 import { isSessionRecoveryReplyUnconfirmed } from '../../shared/session-recovery-result'
 import { handoffSavedGoalDiscussions } from './lib/goal-discussion-handoff'
 import { restoredGoalFiniteStartIntents, type GoalFiniteStartIntent } from './lib/goal-finite-start'
+import type { GoalEditDrafts } from './lib/goal-edit-drafts'
 import { goalDiscussionRequestKey, originalGoalDiscussionRequest, type GoalDiscussionRequest, type GoalDiscussionTaskMode } from './lib/goal-discussion-request'
 import { observeNotifications } from './lib/notification-observation'
 import type { CollaborationMapTarget } from './lib/collaboration-map-navigation'
@@ -1012,6 +1013,7 @@ export type AppState = GitReadingActions & {
   goalFiniteStartIntents: Record<string, GoalFiniteStartIntent>
   sessionRecordDeletionRequests: Record<string, unknown>
   goalDiscussionRequests: Record<string, GoalDiscussionRequest>
+  goalEditDrafts: GoalEditDrafts
   goalAgentCreationDrafts: Record<string, GoalAgentCreationDraft>
   /** Exact logical focus retained when a background move removes the active leaf. */
   retainedSpatialFocus: (AgentMuxSpaceAddress & { topicId?: string }) | null
@@ -3954,6 +3956,7 @@ type PersistedAppState = {
   goalFiniteStartIntents?: Record<string, GoalFiniteStartIntent>
   sessionRecordDeletionRequests?: Record<string, unknown>
   goalDiscussionRequests?: Record<string, GoalDiscussionRequest>
+  goalEditDrafts?: GoalEditDrafts
   goalAgentCreationDrafts?: Record<string, GoalAgentCreationDraft>
   /** Exact logical focus retained when a background move removes the active leaf. */
   retainedSpatialFocus: (AgentMuxSpaceAddress & { topicId?: string }) | null
@@ -4237,6 +4240,7 @@ function selectPersistedInputs(state: AppState, coreSpatialReady: boolean) {
     goalFiniteStartIntents: state.goalFiniteStartIntents,
     sessionRecordDeletionRequests: state.sessionRecordDeletionRequests,
     goalDiscussionRequests: state.goalDiscussionRequests,
+    goalEditDrafts: state.goalEditDrafts,
     goalAgentCreationDrafts: state.goalAgentCreationDrafts,
     retainedSpatialFocus: state.retainedSpatialFocus,
     connectorRoomIntents: state.connectorRoomIntents,
@@ -5406,6 +5410,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   goalFiniteStartIntents: {},
   sessionRecordDeletionRequests: {},
   goalDiscussionRequests: {},
+  goalEditDrafts: {},
   goalAgentCreationDrafts: {},
   connectorRoomIntents: {},
   connectorRoomDrafts: {},
@@ -8393,7 +8398,20 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     refreshKnownGoalResponsibilities([id])
   },
   deleteDemand(id) {
-    void api.goals.execute({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, operation: 'demand.delete', requestId: mintObjectId(), demandId: id, confirmation: 'delete' }).catch((error) => get().reportError(error))
+    const capturedDrafts = get().goalEditDrafts[id]
+    void api.goals.execute({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, operation: 'demand.delete', requestId: mintObjectId(), demandId: id, confirmation: 'delete' }).then(result => {
+      if (result.operation !== 'demand.delete' || result.receipt.demandId !== id) throw controlFailure('CONTROL_PROTOCOL_ERROR', 'The original Goal deletion receipt is unconfirmed. Its editing drafts are retained.')
+      set(state => {
+        const original = state.goalEditDrafts[id]
+        if (!original) return state
+        const next = { ...original }
+        for (const field of ['title', 'description', 'tags'] as const) if (capturedDrafts?.[field] && next[field]?.revision === capturedDrafts[field]?.revision) delete next[field]
+        const goalEditDrafts = { ...state.goalEditDrafts }
+        if (Object.keys(next).length) goalEditDrafts[id] = next
+        else delete goalEditDrafts[id]
+        return { goalEditDrafts }
+      })
+    }).catch((error) => get().reportError(error))
     set((state) => {
       if (!state.demands[id]) return state
       const { [id]: _removed, ...demands } = state.demands
