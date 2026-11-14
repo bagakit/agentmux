@@ -121,7 +121,7 @@ export async function readAgentContext(owner: AgentContextOwner, input: AgentCon
   }
   // The native reader may confirm and save a missing original locator. Bind that
   // durable fact once; later pages reject changes rather than mixing sources.
-  const observedSources = await read('session', () => owner.sessionHistorySources())
+  const observedSources = await read('session', () => owner.sessionHistorySources({ agentSessionId: input.agentSessionId }))
   const current = observedSources === null ? descriptor : observedSources.find(source => source.agentSessionId === input.agentSessionId && source.hostId === input.hostId)
   if (!current) return invalidCursor()
   if (input.cursor && cursor.binding !== binding(current)) invalidCursor()

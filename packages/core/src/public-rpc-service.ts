@@ -2959,11 +2959,15 @@ export class AgentMuxRpcService {
           // Configured Host names are routes on this client. The remote Core owns
           // its local namespace; never pass a Desktop route as native identity.
           const forwarded = forwardAgentContextParams(input)
-          const page = await scope.client.forwardRpc('agent.context', forwarded.params, context)
+          // Authentication stays at ingress; only this exact read borrows the
+          // original configured carrier, as agent.history does. Never export
+          // a source Agent capability as another Runtime's local identity.
+          const { caller: _localCaller, ...readContext } = context
+          const page = await scope.client.forwardRpc('agent.context', forwarded.params, readContext)
           result = forwardAgentContextPage(page, input, forwarded.sourceHostId)
           break
         }
-        const descriptor = (await scope.client.sessionHistorySources()).find(source => source.agentSessionId === input.agentSessionId && source.hostId === input.hostId)
+        const descriptor = (await scope.client.sessionHistorySources({ agentSessionId: input.agentSessionId, ...(context.signal ? { signal: context.signal } : {}) })).find(source => source.agentSessionId === input.agentSessionId && source.hostId === input.hostId)
         if (!descriptor) throw new AgentMuxError(`Session ${JSON.stringify(input.agentSessionId)} is not retained on route Host ${JSON.stringify(input.hostId)}. Rediscover it with agent ls on the same endpoint.`, 'UNKNOWN_AGENT_SESSION')
         context.signal?.throwIfAborted()
         result = await readAgentContext(scope.client, input, descriptor)
