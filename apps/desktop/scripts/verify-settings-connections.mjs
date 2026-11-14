@@ -31,7 +31,7 @@ async function bind(file) {
 }
 async function bindBase() {
   for (const file of [fileURLToPath(import.meta.url), resolve(root, 'apps/desktop/scripts/probe-process.mjs'),
-    ...['settings-connections', 'host-settings-navigation', 'remote-management', 'remote-application-access', 'host-network-settings-consumer'].map(name => resolve(root, `apps/desktop/test/${name}.test.tsx`)), resolve(root, 'apps/desktop/test/host-runtime-observation-ipc.test.ts'), resolve(root, 'vitest.setup.ts'), resolve(root, 'pnpm-lock.yaml'),
+    ...['settings-connections', 'host-settings-navigation', 'remote-management', 'remote-application-access', 'host-network-settings-consumer', 'host-topology-layout'].map(name => resolve(root, `apps/desktop/test/${name}.test.tsx`)), resolve(root, 'apps/desktop/test/host-runtime-observation-ipc.test.ts'), resolve(root, 'vitest.setup.ts'), resolve(root, 'pnpm-lock.yaml'),
     resolve(root, 'apps/desktop/package.json'), resolve(root, 'packages/core/package.json'), resolve(root, 'packages/client-ui/package.json'),
     resolve(root, 'apps/desktop/scripts/fixtures/settings-resource-library/environment.mjs'), ...['environment.mjs', 'vitest.config.mts', 'entry.tsx', 'data.ts', 'main.cjs', 'hosts-main.cjs', 'network-main.cjs', 'native-input.cjs', 'remote-management.md', 'index.html'].map(name => resolve(fixture, name))]) await bind(file)
 }
@@ -43,11 +43,12 @@ async function finalizeInputs() {
   receipt.sourceUnchanged = true
 }
 async function owning() {
-  const variants = operation === '--link-owning' ? ['link-order', 'link-source'] : operation === '--network-owning' ? ['network-target', 'network-late'] : operation === '--applications-owning' ? ['application-save-baseline', 'application-source', 'application-target', 'application-original'] : operation === '--topology-owning' ? ['route', 'graph'] : operation === '--remote-owning' ? ['remote', 'access', 'graph', 'single', 'drafts'] : ['catalog', 'single', 'drafts']
-  const messages = { 'link-order': 'Configured transit order stays on its source', 'link-source': 'Origin interfaces retain their exact source', 'network-target': 'Network target', 'network-late': 'to be null', 'application-save-baseline': 'Later draft uses the confirmed save revision', 'application-source': 'Source context retains the actual registered target', 'application-target': 'Application panel consumes the exact selected Host', 'application-original': 'Original operation ID is preserved', route: 'Configured SSH user stays on its exact Host node', remote: 'Remote group owns exactly environments', access: 'Source trust belongs to the Apps & access facet', graph: 'Topology activation selects its exact Host detail', catalog: 'Conversation Channels owns the original native and external consumers', single: 'Only the selected Host has an editable connection subtree', drafts: 'Submenu selection preserves the original authored Host draft' }
+  const variants = operation === '--link-owning' ? ['link-order', 'link-source'] : operation === '--network-owning' ? ['network-target', 'network-late'] : operation === '--applications-owning' ? ['application-save-baseline', 'application-source', 'application-target', 'application-original'] : operation === '--topology-owning' ? ['route', 'graph', 'hidden-layout', 'hidden-layout-parent'] : operation === '--remote-owning' ? ['remote', 'access', 'graph', 'single', 'drafts'] : ['catalog', 'single', 'drafts']
+  const messages = { 'link-order': 'Configured transit order stays on its source', 'link-source': 'Origin interfaces retain their exact source', 'network-target': 'Network target', 'network-late': 'to be null', 'application-save-baseline': 'Later draft uses the confirmed save revision', 'application-source': 'Source context retains the actual registered target', 'application-target': 'Application panel consumes the exact selected Host', 'application-original': 'Original operation ID is preserved', route: 'Configured SSH user is readable on the exact Host focus', 'hidden-layout': 'to have a length of 1', 'hidden-layout-parent': 'Inactive topology cancels the original layout', remote: 'Remote group owns exactly environments', access: 'Source trust belongs to the Apps & access facet', graph: 'Topology activation selects its exact Host detail', catalog: 'Conversation Channels owns the original native and external consumers', single: 'Only the selected Host has an editable connection subtree', drafts: 'Submenu selection preserves the original authored Host draft' }
   const vitest = desktopRequire.resolve('vitest/vitest.mjs'), config = resolve(fixture, 'vitest.config.mts')
-  const modes = [{ label: 'baseline', mutant: 'baseline', ...(operation === '--link-owning' ? { test: 'console-|network|uses the existing per-sender' } : operation === '--network-owning' ? { test: 'network|uses the existing per-sender' } : {}), ...(operation === '--applications-owning' ? { test: 'application-' } : operation === '--topology-owning' ? { test: 'graph:|route:|provenance:' } : {}) }, ...variants.flatMap(kind => [
-    { label: kind + '-mutant', mutant: kind, test: (kind === 'link-order' ? 'console-order' : kind === 'link-source' ? 'console-source' : kind === 'remote' ? 'catalog' : kind) + ':' }, { label: kind + '-restored', mutant: 'baseline', test: (kind === 'link-order' ? 'console-order' : kind === 'link-source' ? 'console-source' : kind === 'remote' ? 'catalog' : kind) + ':' }
+  const testFor = kind => kind === 'hidden-layout' ? 'cancels hidden layout' : kind === 'hidden-layout-parent' ? 'topology-hidden:' : (kind === 'link-order' ? 'console-order' : kind === 'link-source' ? 'console-source' : kind === 'remote' ? 'catalog' : kind) + ':'
+  const modes = [{ label: 'baseline', mutant: 'baseline', ...(operation === '--link-owning' ? { test: 'console-|network|uses the existing per-sender' } : operation === '--network-owning' ? { test: 'network|uses the existing per-sender' } : {}), ...(operation === '--applications-owning' ? { test: 'application-' } : operation === '--topology-owning' ? { test: 'graph:|route:|provenance:|topology-hidden:|cancels hidden layout' } : {}) }, ...variants.flatMap(kind => [
+    { label: kind + '-mutant', mutant: kind, test: testFor(kind) }, { label: kind + '-restored', mutant: 'baseline', test: testFor(kind) }
   ])]
   for (const mode of modes) {
     const directory = resolve(evidence, mode.label); await mkdir(directory)
@@ -55,7 +56,7 @@ async function owning() {
     const args = [vitest, 'run', ...(['--network-owning', '--link-owning'].includes(operation) ? ['apps/desktop/test/host-network-settings-consumer.test.tsx', 'apps/desktop/test/host-runtime-observation-ipc.test.ts'] : []), '--config', config, '--reporter=json', '--outputFile', output]
     if (mode.test) args.push('--testNamePattern', mode.test)
     const execution = await runProbeProcess(process.execPath, args, { temporaryRoot: directory, cwd: root, timeoutMs: 30_000,
-      env: { ...process.env, AGENTMUX_CONNECTIONS_EVIDENCE: directory, AGENTMUX_CONNECTIONS_MUTANT: mode.mutant }, onLine: line => log.push(line) })
+      env: { ...process.env, AGENTMUX_CONNECTIONS_EVIDENCE: directory, AGENTMUX_CONNECTIONS_MUTANT: mode.mutant, ...(operation === '--topology-owning' ? { AGENTMUX_CONNECTIONS_TOPOLOGY: '1' } : {}) }, onLine: line => log.push(line) })
     await writeFile(resolve(directory, 'process.log'), log.join('\n') + '\n')
     await writeFile(resolve(directory, 'execution.json'), JSON.stringify(execution, null, 2) + '\n')
     const result = JSON.parse(await readFile(output, 'utf8'))
@@ -72,7 +73,7 @@ async function owning() {
     } else {
       assert.equal(execution.exitCode, 0, JSON.stringify(failures.map(test => test.failureMessages)))
       assert.equal(result.success, true); assert.equal(result.numFailedTests, 0)
-      assert.ok(result.numPassedTests >= (mode.label === 'baseline' ? operation === '--link-owning' ? 13 : operation === '--network-owning' ? 9 : operation === '--applications-owning' ? 4 : operation === '--topology-owning' ? 3 : 10 : 1), 'Nonempty complete bounded cases')
+      assert.ok(result.numPassedTests >= (mode.label === 'baseline' ? operation === '--link-owning' ? 13 : operation === '--network-owning' ? 9 : operation === '--applications-owning' ? 4 : operation === '--topology-owning' ? 5 : 10 : 1), 'Nonempty complete bounded cases')
       assert.equal(applied.length, 0); assert.ok(loaded.every(input => input.originalSHA256 === input.consumedSHA256))
     }
     receipt.runs.push({ ...mode, execution, passed: mode.mutant === 'baseline', specificAssertionRED: mode.mutant !== 'baseline',

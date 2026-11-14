@@ -60,10 +60,29 @@ it('graph: an actual topology node selects the exact Host overview without movin
   expect(editor()?.dataset.resourceEditor, 'Topology activation selects its exact Host detail').toBe(J)
   expect(editor().dataset.hostView).toBe('overview')
   expect(dom.container.querySelectorAll('[data-host-node]')).toHaveLength(24)
-  expect(dom.container.querySelector('[data-host-disclosure]')).toBeNull()
+  expect(dom.container.querySelector('[data-host-disclosure]')?.closest('[hidden]')).not.toBeNull()
   expect(dom.container.querySelector('[data-host-name]')).toBeNull()
   expect(document.activeElement, 'Node selection retains the graph keyboard target').toBe(node)
   expect(onSave).not.toHaveBeenCalled()
+})
+
+it('topology-hidden: switching the actual workbench to List cancels layout without restarting it', async () => {
+  const workers: Array<{ terminated: boolean }> = []
+  class WorkerProbe {
+    terminated = false
+    constructor() { workers.push(this) }
+    postMessage() {}
+    terminate() { this.terminated = true }
+  }
+  vi.stubGlobal('Worker', WorkerProbe)
+  try {
+    await show()
+    await vi.waitFor(() => expect(workers).toHaveLength(1))
+    await mode('List')
+    expect(workers[0]!.terminated, 'Inactive topology cancels the original layout').toBe(true)
+    await act(async () => useAppStore.setState({ sessions: [composerSession('unrelated-observation')] }))
+    expect(workers, 'Inactive topology does not restart layout on an unrelated observation').toHaveLength(1)
+  } finally { vi.unstubAllGlobals() }
 })
 
 it('mode changes and same-name Host nodes preserve the original connection draft and explicit edit navigation', async () => {
@@ -79,7 +98,7 @@ it('mode changes and same-name Host nodes preserve the original connection draft
   await leaf(H)
   expect(dom.container.querySelector<HTMLInputElement>('[data-host-name]')!.value).toBe('Authored topology draft')
   expect(document.activeElement).toBe(dom.container.querySelector('[data-host-name]'))
-  expect(dom.container.querySelector('[data-host-node]')).toBeNull()
+  expect(dom.container.querySelector('[data-host-node]')?.closest('[hidden]')).not.toBeNull()
   expect(dom.container.querySelectorAll('[data-resource-editor]')).toHaveLength(1)
   expect(check).not.toHaveBeenCalled()
   expect(onSave).not.toHaveBeenCalled()

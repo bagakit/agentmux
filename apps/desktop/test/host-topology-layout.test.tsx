@@ -51,7 +51,7 @@ it('settles one finite layout and keeps real nodes, positions and viewport mount
 
 it('cancels hidden layout and ignores an old result after an explicit newer arrangement', async () => {
   await show(); const original = LayoutWorker.all[0]!
-  await show(false); expect(original.terminated).toBe(true)
+  await show(false); expect(original.terminated).toBe(true); expect(LayoutWorker.all).toHaveLength(1)
   const held = position('first')
   await act(async () => original.reply(9000))
   expect(position('first')).toBe(held)
