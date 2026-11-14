@@ -2,9 +2,9 @@ import { api } from './api'
 import { checkpointMountedSpaceInputs, fileNavigationSelection, useAppStore } from '../store'
 import { mountedAgentOpenInput, mountedAgentOpenKey, type MountedAgentOpenInput } from './space-mount-launch'
 import { presentError } from '@agentmux/client-ui/error-presentation'
-import { acceptsMountedSnapshot, mountedSpaceInput, mountedSpaceInputs, projectMountedSpaceView } from './space-mount-view'
-import { spaceMountKey } from '../../../shared/space-mount'
+import { acceptsMountedSnapshot, mountedSpaceInputs } from './space-mount-view'
 import { applyOriginalLaunchNames } from './original-launch-names'
+import { originalSpaceResource } from './original-space-navigation'
 
 /** A changed Source carrier/selection never hides this original ordinary slot's request. */
 export function ordinarySourceLauncherRequests(value: unknown, launcherId: string): MountedAgentOpenInput[] {
@@ -58,15 +58,11 @@ export async function openSourceLauncherWork(input: MountedAgentOpenInput, repor
   if (!acceptsMountedSnapshot(input.target, snapshot) || !snapshot.scope.tabs.some(tab => tab.tabId === address.tabId && tab.regionIds.includes(address.regionId)) ||
     !snapshot.scope.regions.some(region => region.regionId === address.regionId && region.creationOperationId === input.request.operationId))
     throw Error('The original Source occurrence is not currently confirmed. Its request and your Launcher remain available.')
-  const store = useAppStore.getState(), key = spaceMountKey(input.target.reference)
-  const view = projectMountedSpaceView(mountedSpaceInput(store.mountedSpaceInputs, key)?.view, snapshot)
-  const group = view.composition.groups.find(group => group.tabOrder.includes(address.tabId)), layout = view.tabLayouts[address.tabId]
-  if (!group || !layout) throw Error('The original Source view could not be restored. Its confirmed request is retained.')
+  if (fileNavigationSelection(useAppStore.getState()) !== navigation) return
+  const store = useAppStore.getState()
   store.mountSpace(input.target, false)
   store.observeSpaceMount(input.target, { snapshot, reading: false })
-  store.editSpaceMountView(key, { ...view, composition: { ...view.composition, activeGroupId: group.id,
-    groups: view.composition.groups.map(item => item.id === group.id ? { ...item, activeTabId: address.tabId } : item) },
-    tabLayouts: { ...view.tabLayouts, [address.tabId]: { ...layout, activeRegionId: address.regionId } },
-    selection: { groupId: group.id, tabId: address.tabId, regionId: address.regionId } })
-  if (fileNavigationSelection(useAppStore.getState()) === navigation) store.selectSpaceMount(key)
+  const resource = originalSpaceResource(useAppStore.getState(), input.target)
+  store.openOriginalSpaceLocation({ target: input.target, resource,
+    occurrence: { tabId: address.tabId, regionId: address.regionId, displayWorkspaceId: address.displayWorkspaceId, groupId: address.groupId } })
 }

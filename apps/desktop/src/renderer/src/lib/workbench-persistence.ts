@@ -159,7 +159,7 @@ export function hydratePersistedTab(tab: PersistedWorkbenchTab): WorkbenchTab {
         regionId,
         surface.kind === 'browser' ? hydratePersistedBrowserSurface(surface) : surface
       ])
-    )
+    ) as WorkbenchTab['regions']
   }
 }
 
@@ -654,7 +654,7 @@ export function restorePersistedWorkbench(input: {
             sessions,
             reconciled,
             input.retiredSessionIds,
-            input.preserveEntityIds?.has(reconciled.id)
+            input.preserveEntityIds?.has(reconciled.id) || Boolean(reconciled.source)
           )
         : null
       const normalized = restored ? normalizePersistedTab(restored) : null

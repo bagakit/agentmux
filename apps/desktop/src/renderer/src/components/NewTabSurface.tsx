@@ -8,7 +8,8 @@ import type { ComposerInsertionHandle } from '@agentmux/client-ui/composer-inser
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { TERMINAL_FONT_SIZE_DEFAULT, isScratchWorkspaceId } from '../../../shared/contracts'
-import { lifecycleNotification, notificationEventIdentity, useAppStore, warmTerminalKey } from '../store'
+import { lifecycleNotification, notificationEventIdentity, useAppStore, warmTerminalKey, currentCoreSpatialGraph } from '../store'
+import { originalSourceEntryForSelection, originalSourceLauncherExecution, originalSpaceWorkspace } from '../lib/original-space-navigation'
 import { useWorkbenchBrowserPresentation, useWorkbenchPresentationActive } from '../lib/workbench-presentation'
 import { mainRegionReference } from '../lib/desktop-focus-navigation'
 import { workbenchTabDisplayWorkspaceId } from '../lib/workbench-resource-display'
@@ -142,13 +143,18 @@ export function NewTabSurface({
   const launcherId = creationTarget && !regionId
     ? `zone:${JSON.stringify([creationTarget.zoneId, creationTarget.displayWorkspaceId, tabGroupId])}`
     : warmLauncherId({ tabGroupId, regionId })
-  const { prompt, setPrompt, names, setName, optionsByProvider, selectOption } = useLauncherInputs(regionId, launcherId)
   const sourceValue = useLauncherState(state => state.drafts[launcherId]?.sourceExecution)
-  let sourceExecution: ReturnType<typeof launcherSourceExecution>, sourceSelectionIssue: string | undefined
-  try { sourceExecution = launcherSourceExecution(sourceValue) } catch (cause) { sourceSelectionIssue = presentError(cause) }
-  const sourceMode = sourceValue !== undefined
-  const sourceLauncher = useSourceLauncher(sourceExecution, motionActive && !moteId)
   const sourceInputs = useAppStore(state => state.mountedSpaceInputs)
+  const implicitSourceKey = useAppStore(state => originalSourceEntryForSelection(state)?.key)
+  const implicitSourceObservation = useAppStore(state => implicitSourceKey ? state.mountedSpaceObservations[implicitSourceKey] : undefined)
+  const implicitSource = useMemo(() => implicitSourceKey ? originalSourceLauncherExecution(useAppStore.getState(), tabId, regionId, currentCoreSpatialGraph()) : undefined,
+    [implicitSourceKey, sourceInputs, implicitSourceObservation, tabId, regionId])
+  let sourceExecution: ReturnType<typeof launcherSourceExecution>, sourceSelectionIssue: string | undefined
+  try { sourceExecution = sourceValue === undefined ? implicitSource : launcherSourceExecution(sourceValue) } catch (cause) { sourceSelectionIssue = presentError(cause) }
+  const sourceMode = sourceValue !== undefined || implicitSource !== undefined
+  const sourceUnavailable = sourceMode ? 'Mote discussion, Terminal, Browser and Note creation through this original Source are unavailable here. No local substitute will be created.' : undefined
+  const sourceLauncher = useSourceLauncher(sourceExecution, motionActive && !moteId)
+  const { prompt, setPrompt, names, setName, optionsByProvider, selectOption } = useLauncherInputs(regionId, launcherId)
   const sourceBusy = useRef(new Map<string, symbol>())
   const retainedSourceRequests = useMemo(() => {
     try { return { inputs: ordinarySourceLauncherRequests(sourceInputs, launcherId), issue: undefined } }
@@ -159,7 +165,10 @@ export function NewTabSurface({
   const [optionsExpanded, setOptionsExpanded] = useState(false)
   const [fileReferencesOpen, setFileReferencesOpen] = useState(false)
   useEffect(() => { if (!motionActive) setOptionsExpanded(false) }, [motionActive])
-  const [busy, setBusy] = useState<'agent' | 'terminal' | 'browser' | 'note' | null>(null)
+  const sourceSlot = tabId && regionId ? { kind: 'region' as const, tabId, regionId } : undefined
+  const operationKey = sourceMode && sourceExecution && sourceSlot ? mountedAgentOpenKey(sourceExecution.target, sourceSlot) : launcherId
+  const [busy, setBusy] = useState<{ kind: 'agent' | 'terminal' | 'browser' | 'note'; key: string } | null>(null)
+  const busyKind = busy?.key === operationKey ? busy.kind : null
   const [executionPreparing, setExecutionPreparing] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const config = useAppStore((state) => state.config)
@@ -203,11 +212,13 @@ export function NewTabSurface({
   )
   // 卡片上写「Start in ⟨谁⟩」的那个 Workspace，与五个启动动作真正落进去的那个，必须是**同一次**
   // 判定（resolveLauncherWorkspaceId）。分开算的症状不是报错：标题写着 A、点下去建到 B。
-  const workspace = config?.workspaces.find((item) => item.id === resolveLauncherWorkspaceId({
+  const resolvedWorkspaceId = resolveLauncherWorkspaceId({
     launcherWorkspaceId,
     launcherTabWorkspaceId: tabWorkspaceId ?? creationTarget?.workspaceId,
     activeWorkspaceId
-  }))
+  })
+  const workspace = useMemo(() => originalSpaceWorkspace(useAppStore.getState(), resolvedWorkspaceId, currentCoreSpatialGraph()),
+    [resolvedWorkspaceId, config, sourceInputs, implicitSourceObservation])
   const host = workspace ? config?.hosts.find((candidate) => candidate.id === workspace.hostId) : undefined
   const splitExecution = agentTarget?.agentWorkspaceId !== undefined
   const agentWorkspace = splitExecution ? config?.workspaces.find(item => item.id === agentTarget.agentWorkspaceId) : workspace
@@ -227,7 +238,7 @@ export function NewTabSurface({
   // Only show a warm shell created for this exact host and working directory.
   // It remains outside the ordinary Session list until the user claims it.
   const warmKey = workspace ? warmTerminalKey(workspace.hostId, workspace.path) : null
-  const warmTerminal = useAppStore(state => warmTerminalForLauncher(
+  const warmTerminal = useAppStore(state => sourceMode ? null : warmTerminalForLauncher(
     warmKey === null ? undefined : state.warmTerminals[warmKey], launcherId))
   // 「这次启动来自哪个 launcher Region」——五个动作共用的同一个实参，只在这里算一次。
   // 手抄五遍时任何一处写成 `regionId ? …`（漏掉 tabId）都会让那一个动作静默丢掉 launcher 上下文，
@@ -306,7 +317,7 @@ export function NewTabSurface({
   const toolsScope = JSON.stringify([regionId, workspace?.id, workspace?.hostId, workspace?.path, selectedProviderId])
   useEffect(() => { setFileReferencesOpen(false) }, [toolsScope, motionActive])
   const feedback = useComposerFeedback(toolsScope)
-  const completion = useComposerCandidates({ scope: toolsScope, active: !sourceMode && motionActive && sections.agents === 'expanded' && busy === null, config, resourceWorkspace: workspace, runtimeWorkspace: agentWorkspace,
+  const completion = useComposerCandidates({ scope: toolsScope, active: !sourceMode && motionActive && sections.agents === 'expanded' && busyKind === null, config, resourceWorkspace: workspace, runtimeWorkspace: agentWorkspace,
     providerId: selectedProviderId, commands: sourceMode ? [] : providerCatalog.find(entry => entry.id === selectedProviderId)?.composer?.commands ?? [], insertion: insertionRef })
   const launchOptions = useMemo(
     () => sourceMode ? sourceLauncher.selected?.launchOptions ?? [] : providerCatalog.find((entry) => entry.id === selectedProviderId)?.launchOptions ?? [],
@@ -321,17 +332,17 @@ export function NewTabSurface({
   useEffect(() => {
     // Acquisition is idempotent for this Launcher. Retaining its original candidate
     // also keeps an unknown request from being retried by ordinary rendering.
-    if (workspace && visible && presentationActive && inputRegionActive && !controlNavigation && sections.terminal === 'expanded') {
+    if (!sourceUnavailable && workspace && visible && presentationActive && inputRegionActive && !controlNavigation && sections.terminal === 'expanded') {
       prewarmTerminal(workspace.id, launcherId)
     }
-  }, [prewarmTerminal, visible, presentationActive, inputRegionActive, controlNavigation, workspace?.id, launcherId, warmSlotHeld, warmTerminal?.session?.id, warmKey, sections.terminal])
+  }, [prewarmTerminal, sourceUnavailable, visible, presentationActive, inputRegionActive, controlNavigation, workspace?.id, launcherId, warmSlotHeld, warmTerminal?.session?.id, warmKey, sections.terminal])
 
   useEffect(() => {
-    if (!workspace || !visible || !presentationActive || sections.terminal !== 'expanded') return
+    if (sourceUnavailable || !workspace || !visible || !presentationActive || sections.terminal !== 'expanded') return
     // Losing input focus leaves the visible preview intact. Only removing its
     // presentation makes this still-unused candidate available to another Launcher.
     return () => releaseWarmTerminal(workspace.id, launcherId)
-  }, [releaseWarmTerminal, workspace?.id, warmKey, launcherId, visible, presentationActive, sections.terminal])
+  }, [releaseWarmTerminal, sourceUnavailable, workspace?.id, warmKey, launcherId, visible, presentationActive, sections.terminal])
 
   useEffect(() => {
     if (sourceMode || sections.agents === 'hidden') return
@@ -354,8 +365,10 @@ export function NewTabSurface({
   }, [executorId, executors, installedExecutors, savedExecutor, moteId, explicitSavedExecutor, moteExecutor, manualChoice, splitExecution, sourceMode, agentTarget?.agentExecutor])
 
   async function run<T>(kind: 'agent' | 'terminal' | 'browser' | 'note', action: () => Promise<T>): Promise<void> {
-    if (busy) return
-    setBusy(kind)
+    if (kind !== 'agent' && sourceUnavailable) { setError(sourceUnavailable); return }
+    const owner = operationKey
+    if (busy?.key === owner) return
+    setBusy({ kind, key: owner })
     setError(null)
     try {
       await action()
@@ -369,19 +382,18 @@ export function NewTabSurface({
         }
       } else setError(presentError(cause))
     } finally {
-      setBusy(null)
+      setBusy(current => current?.key === owner ? null : current)
     }
   }
 
   // 「现在能不能启动」判一次，主按钮的 disabled 与 Cmd/Ctrl+Enter 那条路共用它。手抄两份时两条路会对
   // 同一概念判得不一样，症状是按钮灰着而键盘照旧发车（或反过来）。
-  const sourceSlot = tabId && regionId ? { kind: 'region' as const, tabId, regionId } : undefined
   let sourceOriginal: MountedAgentOpenInput | undefined
   try { if (sourceExecution && sourceSlot) sourceOriginal = mountedAgentOpenInput(sourceInputs, mountedAgentOpenKey(sourceExecution.target, sourceSlot)) }
   catch (cause) { sourceSelectionIssue = presentError(cause) }
   const readiness = {
-    hasWorkspace: sourceMode ? Boolean(sourceExecution && launcherSourceMatches(sourceExecution, workspace) && sourceLauncher.ready && !sourceSelectionIssue) : Boolean(workspace && agentWorkspace && (!splitExecution || splitWorkspaceSupported)),
-    busy: busy !== null || executionPreparing || !!sourceOriginal,
+    hasWorkspace: sourceMode ? Boolean(sourceExecution && sourceExecution.kind !== 'source-coordinator' && launcherSourceMatches(sourceExecution, workspace) && sourceLauncher.ready && !sourceSelectionIssue) : Boolean(workspace && agentWorkspace && (!splitExecution || splitWorkspaceSupported)),
+    busy: busyKind !== null || executionPreparing || !!sourceOriginal,
     installedExecutorCount: sourceMode ? sourceLauncher.selected ? 1 : 0 : splitExecution ? selectedExecutor ? 1 : 0 : primaryBotUnconfirmed && !explicitExecutorChoice ? 0 : installedExecutors.length
   }
   // 启动这一件事也只写一次：按钮的 onClick 与键盘那条路调的是同一个函数。抄两遍时任何一处漏掉
@@ -451,7 +463,7 @@ export function NewTabSurface({
   }
 
   function chooseArrangement(selection: LauncherExecutionSelection): boolean {
-    if (busy || !workspace) return false
+    if (busyKind || !workspace) return false
     try {
       if (sourceValue !== undefined && !sourceExecution) throw Error('The original arrangement is unreadable. Its complete input is retained; no replacement has been applied.')
       if (selection.source) {
@@ -500,7 +512,7 @@ export function NewTabSurface({
       style={{ '--launcher-hero': `url("${launcherHero}")`, ...(regionHeight === null ? {} : { '--launcher-region-height': `${regionHeight}px` }) } as CSSProperties} body={<>
       <LauncherEnvironment workspace={workspace} host={host} check={hostCheck} displayPath={displayPath}
         executionControl={workspace && sections.agents === 'expanded' ? <LauncherAgentDevice key={launcherId} hosts={config?.hosts ?? []} workspace={workspace} agentWorkspace={agentWorkspace}
-          explicitAgentWorkspaceId={agentTarget?.agentWorkspaceId} sourceExecution={sourceExecution} disabled={busy !== null} active={motionActive}
+          explicitAgentWorkspaceId={agentTarget?.agentWorkspaceId} sourceExecution={sourceExecution} disabled={busyKind !== null} active={motionActive}
           onSelect={chooseArrangement} onPreparingChange={setExecutionPreparing}
           onEditArrangement={settings ? () => settings.open('remote-execution') : undefined} /> : undefined} />
       {regionId ? operationHosts.map(hostId => <AgentOperationFeedback key={hostId} compact subject={{ hostId, regionId }} />) : null}
@@ -509,7 +521,7 @@ export function NewTabSurface({
       {sourceMode && sourceSupportIssue ? <div className="launcher-source-contract" role="status"><span>{sourceSupportIssue}</span>
         {settings && workspace ? <button type="button" className="agent-work-text-action" onClick={() => settings.openHost(workspace.hostId)}>{sourceLauncher.description && !sourceLauncher.description.contracts.ordinaryLaunch ? `Open ${host?.label ?? 'project device'} to update Core` : 'Project device settings'}</button> : null}
       </div> : null}
-      {retainedSourceRequests.inputs.map(input => <SourceLauncherRequest key={`${mountedAgentOpenKey(input.target, input.slot)}:${input.request.operationId}`} input={input} busy={busy !== null} active={motionActive && !moteId}
+      {retainedSourceRequests.inputs.map(input => <SourceLauncherRequest key={`${mountedAgentOpenKey(input.target, input.slot)}:${input.request.operationId}`} input={input} busy={busyKind !== null} active={motionActive && !moteId}
         onContinue={original => { if (original.slot.kind === 'region') void run('agent', () => launchAtSource({ tabId: original.slot.kind === 'region' ? original.slot.tabId : '', regionId: original.slot.kind === 'region' ? original.slot.regionId : '' }, original)) }} />)}
       {retainedSourceRequests.issue ? <p role="status">{retainedSourceRequests.issue}</p> : null}
       <SourceCoordinatorRequests active={motionActive && !moteId} origin={{ launcherId }} />
@@ -542,7 +554,7 @@ export function NewTabSurface({
           <AgentAvatar executorId={displayedExecutorId} providerId={selectedProviderId} label={selectedExecutor?.label ?? 'Choose Agent'} size={17} /><span><strong>{selectedExecutor?.label ?? 'Choose Agent'}</strong><small title={promptDisplayText}>{prompt ? promptDisplayText.split('\n')[0] : 'Start a task'}</small></span><ThemeNavigationDisclosureIcon size={14} />
         </button> : <span className="launcher-agents-head__identity"><strong>Agent</strong></span>}
         <span className="launcher-section-actions">
-          {sections.agents === 'collapsed' ? <LauncherResumePicker getTakeoverOrigin={getTakeoverOrigin} workspace={workspace} originalTarget={splitExecution || sourceMode} disabled={busy !== null} /> : null}
+          {sections.agents === 'collapsed' ? <LauncherResumePicker getTakeoverOrigin={getTakeoverOrigin} workspace={workspace} originalTarget={splitExecution || sourceMode} disabled={busyKind !== null} /> : null}
           <button type="button" className="icon-button" aria-label="Refresh agents on this device" title="Refresh agents on this device" disabled={!agentWorkspace || detecting} onClick={() => agentWorkspace && void checkAgents(agentWorkspace.hostId)}>{detecting ? <ThemeStatusLoadingIcon size={13} animation="spin" /> : <ThemeActionRefreshIcon size={13} />}</button>
           {sections.agents === 'expanded' ? <button type="button" className="icon-button" aria-label="Collapse Agents" title="Collapse" onClick={() => setSection('agents', 'collapsed')}><ThemeActionCollapseIcon size={13} /></button> : null}
           <button type="button" className="icon-button" aria-label="Close Agents" title="Close Agents" onClick={() => setSection('agents', 'hidden')}><ThemeActionCloseIcon size={13} /></button>
@@ -558,28 +570,28 @@ export function NewTabSurface({
               ? settings.openHostExecutors(agentWorkspace.hostId) : settings.openHost(agentWorkspace.hostId) : undefined} /></div>}
         <div className="launcher-composer composer" onFocusCapture={attachments.claimScreenshotTarget}><ComposerCompletionEditor completionConfig={completion.completionConfig} commands={completion.commands} skills={completion.skills}
           references={completion.references} promptKeywords={completion.promptKeywords} onCompletionQuery={completion.onCompletionQuery}
-          completionFeedback={completion.completionFeedback} active={visible && presentationActive} aria-label="Agent prompt" disabled={false} readPastedImage={api.ui.readPastedImage} insertionRef={insertionRef}
+          completionFeedback={completion.completionFeedback} active={visible && presentationActive} aria-label={implicitSource ? 'Original Space task draft' : 'Agent prompt'} disabled={false} readPastedImage={api.ui.readPastedImage} insertionRef={insertionRef}
           onPasteImage={attachments.pasteImage} onDropFiles={attachments.dropFiles}
           autoFocus={visible && presentationActive && inputRegionActive && !controlNavigation} value={prompt} onValueChange={setPrompt}
           onKeyDown={event => { if (!launcherKeydownLaunches(event, isMacPlatform(), readiness)) return; event.preventDefault(); launchFromLauncher() }}
           placeholder="What would you like to work on?" /></div>
         <div className="composer__toolbar launcher-tools" onFocusCapture={attachments.claimScreenshotTarget}><div>
-          <AgentComposerTools key={completion.scope} layoutControl={false} disabled={busy !== null || !workspace}
+          <AgentComposerTools key={completion.scope} layoutControl={false} disabled={busyKind !== null || !workspace}
             commands={completion.commands} loadSkills={completion.loadSkills}
             onChooseSkill={skill => { void feedback.run(() => completion.insertCandidate(skillComposerSuggestion(skill))) }}
             onCommand={(_command, candidate) => { void feedback.run(() => completion.insertCandidate(candidate)) }}
-            referenceTools={<ComposerReferenceTool disabled={busy !== null || !workspace} onSelect={() => { void attachments.chooseFiles() }} label="Reference files for the Agent" />}
+            referenceTools={<ComposerReferenceTool disabled={busyKind !== null || !workspace} onSelect={() => { void attachments.chooseFiles() }} label="Reference files for the Agent" />}
             {...(host?.kind === 'local' ? { onCapture: attachments.capture } : {})} runAction={feedback.run} />
         </div><LaunchRefine options={launchOptions} selection={launchOptionSelection} expanded={optionsExpanded} active={motionActive}
-          onToggle={() => setOptionsExpanded(value => !value)} disabled={busy !== null} names={names} onNameChange={setName}
+          onToggle={() => setOptionsExpanded(value => !value)} disabled={busyKind !== null} names={names} onNameChange={setName}
           onReset={() => { if (selectedProviderId) for (const optionId of Object.keys(launchOptionSelection)) selectOption(selectedProviderId, optionId, null) }}
           onSelect={(optionId, choiceId) => { if (selectedProviderId) selectOption(selectedProviderId, optionId, choiceId) }} /></div>
         <ComposerFeedback failure={feedback.failure} onDismiss={feedback.dismiss} />
       </> : null}
       {sections.agents === 'expanded' ? <div className="launch-surface__footer">
-        <LauncherMoteAction workspace={workspace} prompt={prompt} sourceTabId={tabId} sourceRegionId={regionId} disabled={busy !== null || !workspace} />
-        <div className="launcher-primary-actions"><LauncherResumePicker getTakeoverOrigin={getTakeoverOrigin} workspace={workspace} originalTarget={splitExecution || sourceMode} disabled={busy !== null} />
-          <button className="primary-button launcher-launch-button" title={`Launch · ${isMacPlatform() ? '⌘' : 'Ctrl+'}Enter`} disabled={!launcherCanLaunch(readiness)} onClick={launchFromLauncher}>{busy === 'agent' ? <ThemeStatusLoadingIcon size={15} animation="spin" /> : <ThemeActionStartIcon size={15} />}{busy === 'agent' ? 'Launching…' : executionPreparing ? 'Review arrangement…' : 'Launch'}</button>
+        <LauncherMoteAction workspace={workspace} prompt={prompt} sourceTabId={tabId} sourceRegionId={regionId} disabled={busyKind !== null || !workspace || Boolean(sourceUnavailable)} />
+        <div className="launcher-primary-actions"><LauncherResumePicker getTakeoverOrigin={getTakeoverOrigin} workspace={workspace} originalTarget={splitExecution || sourceMode} disabled={busyKind !== null} />
+          <button className="primary-button launcher-launch-button" title={`Launch · ${isMacPlatform() ? '⌘' : 'Ctrl+'}Enter`} disabled={!launcherCanLaunch(readiness)} onClick={launchFromLauncher}>{busyKind === 'agent' ? <ThemeStatusLoadingIcon size={15} animation="spin" /> : <ThemeActionStartIcon size={15} />}{busyKind === 'agent' ? 'Launching…' : executionPreparing ? 'Review arrangement…' : 'Launch'}</button>
         </div>
       </div> : null}
       {sourceMode && !sourceSupportIssue && sections.agents === 'expanded' ? <details className="agent-work-startup launcher-compatibility"><summary>Launch compatibility</summary><p>The project device and selected Agent accept complete launch fields. Native tool qualification is unconfirmed here and checked during Launch preparation.</p></details> : null}
@@ -593,12 +605,13 @@ export function NewTabSurface({
         checking={selectedExecutor?.detection?.state === 'checking'} retrying={retryingAvailability} onCheck={() => { if (agentWorkspace) void checkAgents(agentWorkspace.hostId) }} /> : null}
       {fileReferencesOpen && workspace && motionActive ? <ComposerFileReferences key={toolsScope} workspace={workspace} hostLabel={host?.label}
         onSelect={path => { void attachments.referencePaths([path]) }} onClose={() => setFileReferencesOpen(false)} /> : null}
-      {regionId ? <AgentLifecycleFeedback owner={{ regionId }} visible={visible} busy={busy !== null} retry={launchFromLauncher} /> : null}
+      {regionId ? <AgentLifecycleFeedback owner={{ regionId }} visible={visible} busy={busyKind !== null} retry={launchFromLauncher} /> : null}
       {error ? <div className="surface-inline-error" role="alert">{error}</div> : null}
       <LauncherSecondarySurfaces workspace={workspace} tabGroupId={tabGroupId} launcherRef={launcherRef} launcherId={launcherId}
         materializeLauncher={creationTarget ? materializeLauncher : undefined}
         sections={sections} onSectionChange={setSection} warmPreview={warmPreview}
-        terminalThemeId={terminalThemeId} terminalFontSize={terminalFontSize} visible={visible} busy={busy}
+        terminalThemeId={terminalThemeId} terminalFontSize={terminalFontSize} visible={visible} busy={busyKind}
+        sourceUnavailable={sourceUnavailable}
         onRun={run} />
       {sections.agents === 'hidden' ? <div className="launcher-restores"><button type="button" className="launcher-restore" aria-label="Restore Agents" onClick={() => setSection('agents', 'expanded')}><AgentAvatar executorId={executorId} label={selectedExecutor?.label ?? executorId} providerId={selectedProviderId} size={15} />Agents · {selectedExecutor?.label ?? executorId}<ThemeNavigationDownIcon size={12} /></button></div> : null}
     </>} />

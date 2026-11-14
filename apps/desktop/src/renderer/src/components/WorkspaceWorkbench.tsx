@@ -72,7 +72,11 @@ import { useWorkbenchRetainedRegionId, useWorkbenchBrowserPresentation, focusedP
 import { opensContextMenuFromKeyboard } from '../lib/context-menu-key'
 import { SessionPane } from './SessionPane'
 import { OrdinarySpaceMemberViewport } from './OrdinarySpaceMemberViewport'
-import { SpaceSourceReaders } from './SpaceSourceReaders'
+import { SpaceSourceReaders, useSpaceSourceReader } from './SpaceSourceReaders'
+import { originalSourceEntryForSelection, originalSourceEntryByKey, originalSourceTabProjectionId, originalSourceRegionProjectionId } from '../lib/original-space-navigation'
+import { spaceMountKey } from '../../../shared/space-mount'
+import { mountedRegionKey, mountedSpaceRegions } from '../lib/space-mount-view'
+import { MountedExecutionRelation } from './MountedExecutionRelation'
 import { SessionRegionHost } from './SessionRegionHost'
 import { WorkbenchTabContextMenu } from './WorkbenchTabContextMenu'
 import { tabRenameTargets, useWorkbenchTabRename, WorkbenchTabRenameFeedback } from './WorkbenchTabNaming'
@@ -331,7 +335,13 @@ function SortableWorkbenchTab({
   // second menu infrastructure. `rename` says which name this edit targets so one input serves both.
   const naming = useWorkbenchTabRename({ displayName, targets: tabRenameTargets(tab, sessions, agentNames, timelines),
     revision: target => projectedNameRevision(useAppStore.getState().nameLabels, target.kind, target.id),
-    save: (target, value, revision) => target.kind === 'tab' ? renameTab(target.id, value, revision) : renameAgent(target.id, value, revision) })
+    save: (target, value, revision) => {
+      if (tab.source) {
+        reportError(new Error('The original Source rename action is unavailable here. Use the original Core controls; the local workface was not changed.'))
+        return Promise.resolve(false)
+      }
+      return target.kind === 'tab' ? renameTab(target.id, value, revision) : renameAgent(target.id, value, revision)
+    } })
   const { rename } = naming
   const renameInput = useRef<HTMLInputElement>(null)
   const fullTabTooltip = session ? sessionTabTooltip(session, displayName, regionSummary) : surfaceTabTooltip(displayName, regionSummary)
@@ -343,6 +353,10 @@ function SortableWorkbenchTab({
   }, [rename === null, bindingMenuOpen])
 
   async function requestTabsClose(tabIds: readonly string[]): Promise<void> {
+    if (tab.source) {
+      reportError(new Error('The original Source close action is unavailable here. Use the original Core controls; the local workface was not changed.'))
+      return
+    }
     await tabClose.request({ workspaceId, group, tabIds, subject: displayName })
   }
 
@@ -558,6 +572,8 @@ const SurfaceContentBody = memo(function SurfaceContentBody({
   independentDocument: boolean
   nativeWindowTarget: AppWindowDescriptor['target'] | undefined
 }) {
+  if (surface.kind === 'launcher' && surface.sourceUnavailable) return <SurfaceState title={`Original ${surface.sourceUnavailable.kind} Region unavailable`}
+    description={surface.sourceUnavailable.issue} />
   if (isSessionSurface(surface)) {
     const original = (
       <SessionPane
@@ -791,6 +807,8 @@ function WorkbenchRegionContent({
   const [confirmingClose, setConfirmingClose] = useState<{ confirmation: LastViewCloseConfirmation; record: SpaceCloseReceipt; keep: SpaceCloseReceipt | null } | null>(null)
   const [closingRegion, setClosingRegion] = useState(false)
   const surface = tab.regions[node.regionId]
+  const source = useAppStore(state => surface?.source ? originalSourceEntryByKey(state, spaceMountKey(surface.source.reference)) : undefined)
+  const sourceSnapshot = useAppStore(state => source ? state.mountedSpaceObservations[source.key]?.snapshot : undefined)
   const connector = useAgentConnectorMenu(node.regionId, surface ? addressableAgentSessionId(surface) : null, tab.id)
   const regionCount = Object.keys(tab.regions).length
   // 焦点是**一次**判定，两个消费者：CSS 类名（画环）与原生视图的让位量（browser 那格要按环宽内缩，
@@ -802,6 +820,10 @@ function WorkbenchRegionContent({
 
   // Every close surface reviews the same Main-owned frozen plan as the CLI.
   async function requestRegionClose(): Promise<void> {
+    if (tab.source) {
+      reportError(new Error('The original Source close action is unavailable here. Use the original Core controls; the local workface was not changed.'))
+      return
+    }
     const pinned = browserPresentation.surface === 'mote' ? actualDefaults.conversation : browserPresentation.surface ? undefined : mote?.defaultConversation
     if (pinned && pinned.tabId === tab.id && pinned.regionId === node.regionId && groupId &&
       motePinnedTab(pinned, browserPresentation.reference?.displayWorkspaceId ?? tab.workspaceId, groupId, tab.id)) {
@@ -851,6 +873,8 @@ function WorkbenchRegionContent({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [closeRegionRequest, tab.id, tab.workspaceId, node.regionId, clearCloseRegionRequest])
 
+  const sourceMember = useMemo(() => surface?.source && sourceSnapshot ? mountedSpaceRegions(sourceSnapshot).find(member => member.tab.tabId === surface.source!.tabId && member.region.regionId === surface.source!.regionId) : undefined,
+    [surface?.source, sourceSnapshot])
   if (!surface) return null
 
   // 键盘打开这一格的右键菜单——补的是一个可达性缺口：纯键盘用户够不到右键，而 Radix 的 Trigger 只认
@@ -939,6 +963,7 @@ function WorkbenchRegionContent({
     <section
       className={`${REGION_CLASS} ${focusForPresentation(target).className}`}
       data-workbench-region-id={node.regionId}
+      data-source-region={surface.source ? mountedRegionKey(surface.source.reference, surface.source.tabId, surface.source.regionId) : undefined}
       // tabIndex={-1}：可编程聚焦但不进 Tab 序（理由见 openRegionMenuFromKeyboard 上方注释）。
       tabIndex={-1}
       onKeyDown={openRegionMenuFromKeyboard}
@@ -950,6 +975,8 @@ function WorkbenchRegionContent({
         selectFrameRegion(target, Boolean(event.currentTarget.closest('[data-pmo-teams-topic-floating]')))
       }}
     >
+      {sourceMember && source && surface.kind !== 'agent' ? <header className="ordinary-space-member__header"><MountedExecutionRelation member={sourceMember} target={source.target} />
+        <details className="ordinary-space-member__reference"><summary>Original Source</summary><dl><dt>Source Runtime</dt><dd><code>{sourceMember.reference.runtimeId}</code></dd><dt>Region</dt><dd><code>{sourceMember.region.regionId}</code></dd></dl></details></header> : null}
       {content}
       {canClose && surface.kind !== 'browser' ? (
         <button
@@ -1096,18 +1123,19 @@ function WorkbenchRegionBranch({
 function EmptyWorkbench({ onCreate, visible, tabGroupId, creationTarget }: { onCreate(): void; visible: boolean;
   tabGroupId: string; creationTarget?: { workspaceId: string; displayWorkspaceId: string; zoneId: string } | undefined }) {
   const mote = useContext(MoteWorkfaceContext)
+  const source = useAppStore(state => originalSourceEntryForSelection(state))
   const bindings = useAppStore(state => mote ? state.spaceZoneBindings : null)
   const target = useMemo(() => mote && bindings ? topicSpaceIconTarget(mote.workspace, mote.topic, bindings) : null, [mote, bindings])
   const icon = useAppStore(state => target ? state.spaceObjectIcons[target.key] ?? null : null)
-  if (!mote && creationTarget) return <NewTabSurface key={creationTarget.zoneId} tabGroupId={tabGroupId}
+  if (!mote && !source?.target && creationTarget) return <NewTabSurface key={creationTarget.zoneId} tabGroupId={tabGroupId}
     visible={visible} creationTarget={creationTarget} />
   return <WorkbenchEmptyState name={mote?.topic.title} topicId={mote?.topic.id}
     identity={mote ? <SpaceObjectIcon kind="mote" name={mote.topic.title} manualIcon={icon} avatarObjectKey={target?.key}
       avatarWorkspaceId={mote.workspace.id} avatarTopicId={mote.topic.id} visible={visible} moteAvailability="no-agent" /> : undefined}
-    heading={mote ? 'What’s on your mind?' : 'A fresh space to work'}
-    description={mote ? 'A question, an idea, or your next task.' : 'Open a new Tab to get started.'}
-    action={<button type="button" className="primary-button" aria-label={mote ? 'New discussion' : 'New Tab'}
-      onClick={onCreate}><ThemeActionCreateTabIcon size={15} />{mote ? 'New discussion' : 'New Tab'}</button>} />
+    heading={mote ? 'What’s on your mind?' : source?.target ? 'No original member is selected' : 'A fresh space to work'}
+    description={mote ? 'A question, an idea, or your next task.' : source?.target ? 'Prepare new work in the original project without changing its Tabs or Regions before you start.' : 'Open a new Tab to get started.'}
+    action={<button type="button" className="primary-button" aria-label={mote ? 'New discussion' : source?.target ? 'New work' : 'New Tab'}
+      onClick={onCreate}><ThemeActionCreateTabIcon size={15} />{mote ? 'New discussion' : source?.target ? 'New work' : 'New Tab'}</button>} />
 }
 
 function PaneGroup({
@@ -1775,7 +1803,8 @@ export function WorkspaceWorkbench({
   projection,
   leadingChrome,
   presentationAction,
-  projectionHeader
+  projectionHeader,
+  sourceRegion
 }: {
   workspaceId: string
   interactiveResize?: boolean
@@ -1811,10 +1840,15 @@ export function WorkspaceWorkbench({
   presentationAction?: ReactNode
   /** Optional chrome for an exact Region; its original content slot remains unchanged. */
   projectionHeader?: ReactNode
+  /** Focus's region-only presentation still uses the ordinary Source Region tree. */
+  sourceRegion?: { tabId: string; regionId: string } | undefined
 }) {
   useWorkbenchWindowRevision()
   const moteContext = useContext(MoteWorkfaceContext)
   const visible = requestedVisible && moteContext?.bodyVisible !== false
+  const source = useAppStore(state => originalSourceEntryForSelection(state, workspaceId))
+  const sourceObservation = useAppStore(state => source ? state.mountedSpaceObservations[source.key] : undefined)
+  useSpaceSourceReader(source?.target, visible && Boolean(source))
   const workbenchRef = useRef<HTMLDivElement>(null)
   const retainUnplacedTab = viewOwnership === 'projection' && !projection && Boolean(retainedTabId)
   const bodyScope = JSON.stringify([workspaceId, topicId ?? null])
@@ -1832,18 +1866,19 @@ export function WorkspaceWorkbench({
   const storedLayout = useAppStore((state) => state.layouts[workspaceId])
   const retainedLayout = useRef(storedLayout)
   if (storedLayout) retainedLayout.current = storedLayout
-  const residentLayout = storedLayout ?? retainedLayout.current
-  const objectLayout = useWorkbenchObjectLayout(workspaceId, residentLayout, viewOwnership !== 'projection' && !projection)
+  const ordinaryLayout = storedLayout ?? retainedLayout.current
+  const residentLayout = ordinaryLayout
+  const ordinaryObjectLayout = useWorkbenchObjectLayout(workspaceId, ordinaryLayout, viewOwnership !== 'projection' && !projection)
+  const objectLayout = source ? { layout: ordinaryLayout ?? null, choice: null, confirmed: true, issues: [] } : ordinaryObjectLayout
   const categoryWorkspace = useAppStore(state => viewOwnership === 'owner' && workspaceId === SCRATCH_WORKSPACE_ID && state.workbenchSpaceSelection?.workspaceId === workspaceId && state.workbenchSpaceSelection.zoneId === null && state.workbenchSpaceSelection.topicId === null ? state.config?.workspaces.find(workspace => workspace.id === workspaceId) : undefined)
   const projectedMemberIds = useMemo(() => projection ? workbenchProjectionTabIds(projection) : null, [projection?.entity, projection?.catalog])
   const tabs = useAppStore(useShallow((state) => projection && viewOwnership !== 'owner'
     ? Object.fromEntries([...projectedMemberIds ?? []].flatMap(id => state.tabs[id] ? [[id, state.tabs[id]!]] : []))
     : workbenchDisplayTabs(state.tabs, workspaceId, residentLayout)))
   // Page content keeps full Tab facts; only home references use the structural projection.
-  const homeTabs = useAppStore(useShallow(state =>
-    workbenchDisplayTabs(workbenchNavigationTabs(state.tabs), workspaceId, residentLayout)))
+  const homeTabs = useAppStore(useShallow(state => workbenchDisplayTabs(workbenchNavigationTabs(state.tabs), workspaceId, residentLayout)))
   // Only resource owners decide content repeatability; projected chrome has no mode consumer.
-  const presentedAgentIds = useMemo(() => viewOwnership === 'owner' ? [...new Set(Object.values(tabs).flatMap(tab =>
+  const presentedAgentIds = useMemo(() => viewOwnership === 'owner' && !source ? [...new Set(Object.values(tabs).flatMap(tab =>
     tab.workspaceId === workspaceId ? Object.values(tab.regions).flatMap(region => region.kind === 'agent' ? [region.sessionId] : []) : []))] : [], [tabs, viewOwnership, workspaceId])
   const activityPresentable = useWorkbenchActivityPresentation(presentedAgentIds)
   const ordinaryDisplayIds = useMemo(() => [...new Set(Object.values(tabs).flatMap(tab =>
@@ -1856,8 +1891,8 @@ export function WorkspaceWorkbench({
   const navigationInputPolicy = useAppStore(state => state.workbenchNavigationInputPolicy)
   const requestedInputRegionId = useAppStore(state => state.workbenchNavigationInputPolicy === 'target' ? state.workbenchSpaceSelection?.regionId : undefined)
   const mainSelection = useAppStore(state => state.workbenchSpaceSelection)
-  const zoneLayout = useMemo(() => projection ? projectWorkbenchProjection(projection.composition ?? residentLayout, tabs, projection, projectionActiveGroupId, viewOwnership) : null,
-    [residentLayout, tabs, projection, projectionActiveGroupId, viewOwnership])
+  const zoneLayout = useMemo(() => projection && !source ? projectWorkbenchProjection(projection.composition ?? residentLayout, tabs, projection, projectionActiveGroupId, viewOwnership) : null,
+    [residentLayout, tabs, projection, projectionActiveGroupId, viewOwnership, source])
   const projectionContext = useMemo(() => projection && zoneLayout
     ? { ...projection, unsupportedTabIds: new Set([...zoneLayout.unsupportedTabIds, ...zoneLayout.layout?.groups.flatMap(group => {
         const tabId = group.activeTabId
@@ -1875,6 +1910,7 @@ export function WorkspaceWorkbench({
       } } : null, [projection, zoneLayout, viewTargets, effectiveViewHostPrefix, workspaceId, bodyScope])
   const layout = useMemo(
     () => {
+      if (source) return ordinaryLayout ?? null
       if (zoneLayout) return zoneLayout.layout
       if (viewOwnership === 'projection' && residentLayout) {
         const navigation = layoutForActiveTopic(residentLayout, tabs, topicId ?? null, false, retainedTabId)
@@ -1883,7 +1919,7 @@ export function WorkspaceWorkbench({
       }
       return objectLayout.layout ? layoutForLogicalRegionFocus(objectLayout.layout, tabs, retainedSpatialFocus?.displayWorkspaceId === workspaceId ? retainedSpatialFocus : null) : null
     },
-    [zoneLayout, residentLayout, objectLayout.layout, viewOwnership, tabs, topicId, retainedTabId, retainedSpatialFocus, workspaceId]
+    [zoneLayout, residentLayout, objectLayout.layout, viewOwnership, tabs, topicId, retainedTabId, retainedSpatialFocus, workspaceId, source]
   )
   const lastConfirmedBody = useRef<{ scope: string; layout: WorkspaceLayout; displayWorkspaceId: string;
     renderContext: Omit<NonNullable<typeof projectionContext>, 'onSelect'>; viewHostPrefix: string } | null>(null)
@@ -1934,7 +1970,7 @@ export function WorkspaceWorkbench({
     for (const group of residentLayout?.groups ?? []) for (const id of group.tabOrder) owners.set(id, group.id)
     return owners
   }, [residentLayout?.groups])
-  const homeReferences = useMemo(() => workbenchHomePresentationReferences(storedLayout, workspaceId, homeTabs), [storedLayout, workspaceId, homeTabs])
+  const homeReferences = useMemo(() => workbenchHomePresentationReferences(residentLayout, workspaceId, homeTabs), [residentLayout, workspaceId, homeTabs])
   const retainedOwners = useRef(new Map<string, string>())
   for (const [id, groupId] of ownerByTab) retainedOwners.current.set(id, groupId)
   for (const id of retainedOwners.current.keys()) if (!tabs[id]) retainedOwners.current.delete(id)
@@ -2054,6 +2090,10 @@ export function WorkspaceWorkbench({
   }
 
   function newTab(groupId: string): void {
+    if (source) {
+      useAppStore.getState().openOriginalSpaceLauncher(workspaceId, groupId)
+      return
+    }
     const current = committedPlacement.current
     if ((projection || viewOwnership === 'projection') && (!workbenchRef.current?.isConnected || !current.visible || current.retainUnplacedTab ||
       current.scope !== bodyScope || current.projection !== projection)) { rejectUnconfirmedPlacement(); return }
@@ -2089,12 +2129,33 @@ export function WorkspaceWorkbench({
     if (tabId) onTabSelect?.(tabId, groupId)
   }
 
+  if (source && sourceRegion) {
+    const tabId = originalSourceTabProjectionId(source.target, sourceRegion.tabId), regionId = originalSourceRegionProjectionId(source.target, sourceRegion.regionId)
+    const tab = tabs[tabId], group = residentLayout?.groups.find(group => group.tabOrder.includes(tabId))
+    return <div ref={workbenchRef} className="workspace-workbench workspace-workbench--merged" hidden={!visible}
+      data-original-source-space={source.key} data-source-runtime={source.target.reference.runtimeId}>
+      <div className="pane-body">{tab && group && tab.regions[regionId] ? <WorkbenchRegionTree
+        tab={{ ...tab, layout: { ...tab.layout, root: { type: 'leaf', regionId }, activeRegionId: regionId } }}
+        groupId={group.id} headerPortalTargetId={null} surfaceVisible={visible} nativeSurfacesVisible={visible} interactiveResize={interactiveResize} />
+        : <SurfaceState title="Original Region retained" description="Its exact Source occurrence is not currently confirmed. The original project and private input are kept." />}</div>
+    </div>
+  }
   if (categoryWorkspace) return <div ref={workbenchRef} className="workspace-workbench topic-category-overview">
     {leadingChrome ? <header className="pane-tabbar pane-tabbar--root">{leadingChrome}</header> : null}
     <SurfaceState title="Select a Topic" description="Choose a Topic from the directory to open its discussions." />
   </div>
+  if (source && !residentLayout) {
+    return <div ref={workbenchRef} className="workspace-workbench workspace-workbench--merged" hidden={!visible}
+      data-original-source-space={source.key} data-source-runtime={source.target.reference.runtimeId}>
+      <header className="pane-tabbar pane-tabbar--root">{leadingChrome}</header>
+      <div className="pane-body"><SurfaceState role="status" title="Original Space observation unavailable"
+        description={sourceObservation?.error ?? source.issue ?? 'The original Source is unavailable. Its owning project and private input are retained; refresh its Source to retry.'}
+        details={{ summary: 'Original Source', content: <code>{source.target.reference.runtimeId}</code> }} />
+      </div>
+    </div>
+  }
   const hasContextTabs = Object.values(tabs).some(tab => tab.workspaceId === workspaceId && (!topicId || tab.topicId === topicId))
-  const membersConfirmed = Boolean(storedLayout && storedLayout.groups.every(group => group.tabOrder.every(id => Boolean(tabs[id]))))
+  const membersConfirmed = Boolean(residentLayout && residentLayout.groups.every(group => group.tabOrder.every(id => Boolean(tabs[id]))))
   if (viewOwnership === 'projection' && !retainedTabId && !projection && !hasContextTabs) {
     const confirmedEmpty = membersConfirmed && layout && (topicId ? moteContext && !moteContext.issue : true)
     return <div ref={workbenchRef} className="workspace-workbench" data-workbench-pending-owner>
@@ -2107,16 +2168,16 @@ export function WorkspaceWorkbench({
   const projectedTab = retainedTabId ? tabs[retainedTabId] : undefined
   const original = projectedTab?.workspaceId === workspaceId && (!topicId || projectedTab.topicId === topicId) ? projectedTab : undefined
   const projectedZoneId = projection?.entity.kind === 'zone' ? projection.entity.zoneId : null
-  const emptyZone = projectedZoneId
+  const emptyZone = source ? !hasContextTabs && membersConfirmed : projectedZoneId
     ? Boolean(zoneLayout?.layout && !zoneLayout.issues.length && projection!.selection.length === 0 &&
       !projection!.catalog.tabs.some(tab => tab.zoneId === projectedZoneId))
-    : Boolean(!hasContextTabs && membersConfirmed && !moteContext?.issue && storedLayout && objectLayout.confirmed && objectLayout.choice?.zoneId && objectLayout.choice.tabId === null &&
+    : Boolean(!source && !hasContextTabs && membersConfirmed && !moteContext?.issue && storedLayout && objectLayout.confirmed && objectLayout.choice?.zoneId && objectLayout.choice.tabId === null &&
       objectLayout.layout?.groups.every(group => group.tabOrder.length === 0))
-  const scopeIssues = viewOwnership === 'owner' && !projection ? objectLayout.issues : zoneLayout?.issues ?? []
+  const scopeIssues = source ? (sourceObservation?.error ?? source.issue) ? [sourceObservation?.error ?? source.issue!] : [] : viewOwnership === 'owner' && !projection ? objectLayout.issues : zoneLayout?.issues ?? []
   const projectionIssue: RenderableServiceNotice | null = scopeIssues.length ?
     { kind: 'indeterminate', notice: { step: 'Original work surface retained', mode: scopeIssues.join(' '),
       restore: 'Select a Tab in its Group, or reopen the original work surface in Space.' } }
-    : !storedLayout && residentLayout && !projection ? { kind: 'indeterminate', notice: {
+    : !source && !storedLayout && residentLayout && !projection ? { kind: 'indeterminate', notice: {
       step: 'Original work surface retained', mode: 'Display layout is still restoring. Existing content and drafts are kept.',
       restore: 'Reopen the original work surface in Space to continue recovery.' } } : null
   const projectionNotice = projectionIssue ? <ServiceWindowNotice notice={projectionIssue} /> : null
@@ -2181,8 +2242,9 @@ export function WorkspaceWorkbench({
       }}
       autoScroll={false}
     >
-      <div ref={workbenchRef} className={`workspace-workbench ${rootIsLeaf ? 'workspace-workbench--merged' : ''}`}
-        data-workbench-retained-reference={retainUnplacedTab ? retainedTabId : undefined}>
+      <div ref={workbenchRef} className={`workspace-workbench ${rootIsLeaf ? 'workspace-workbench--merged' : ''}`} hidden={source ? !visible : undefined}
+        data-workbench-retained-reference={retainUnplacedTab ? retainedTabId : undefined}
+        data-original-source-space={source?.key} data-source-runtime={source?.target.reference.runtimeId}>
         {(retainedTabId && showReferenceBody || showUnselectedBody) ? <div className="workbench-reference-body">
           <RetainedWorkbenchTab workspaceId={workspaceId} tabs={tabs} layout={layout ?? undefined}
             original={original} targetTabId={retainedTabId} viewHostPrefix={viewHostPrefix} visible={visible} presentationAction={presentationAction} onRecoverTab={onRecoverTab ?? (id => onTabSelect ? onTabSelect(id) : useAppStore.getState().reportError(new Error('This Tab is retained. Reopen its original location in Space to continue.')))} topicId={topicId} onNewTab={showUnselectedBody ? newTab : undefined} />
@@ -2249,7 +2311,7 @@ export function WorkspaceWorkbench({
         const targetsThisTab = navigationInputPolicy === 'target' && requestedInputRegionId && Object.hasOwn(tab.regions, requestedInputRegionId)
         const projection = repeatableContent && !targetsThisTab && confirmedReferenceGroup(proposedProjection) &&
           committedSecondaryWorkbenchTarget(tab, proposedProjection, homeId, homeReference) ? undefined : proposedProjection
-        const confirmedDisplayGroup = confirmedReferenceGroup(projection)
+        const confirmedDisplayGroup = source ? bodyLayout?.groups.find(group => group.tabOrder.includes(tab.id))?.id : confirmedReferenceGroup(projection)
         if (confirmedDisplayGroup) retainedOwners.current.set(tab.id, confirmedDisplayGroup)
         const originalOwnerId = ownerByTab.get(tab.id) ?? retainedOwners.current.get(tab.id)
         const ownerId = projection?.surface === 'space' && confirmedDisplayGroup ? confirmedDisplayGroup : originalOwnerId ?? confirmedDisplayGroup

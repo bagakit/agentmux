@@ -30,7 +30,8 @@ export function SourceAgentTargetSetup({ config, active, initialSelection, fixed
 }) {
   const [projectId, setProjectId] = useState(fixedResourceWorkspaceId ?? initialSelection?.resourceWorkspaceId ?? '')
   const project = config.workspaces.find(item => item.id === (fixedResourceWorkspaceId ?? projectId))
-  const host = config.hosts.find(item => item.id === project?.hostId)
+  const hostId = project?.hostId ?? initialSelection?.source?.target.hostId
+  const host = config.hosts.find(item => item.id === hostId)
   const [resources, setResources] = useState<SpaceMountResources>(), [choices, setChoices] = useState<SpaceMountHostChoices>()
   const [routes, setRoutes] = useState<HostRouteChoices>(), [description, setDescription] = useState<AgentOpenDescription>()
   const [resourceIssue, setResourceIssue] = useState<string>(), [choiceIssue, setChoiceIssue] = useState<string>(), [routeIssue, setRouteIssue] = useState<string>(), [contractIssue, setContractIssue] = useState<string>()
@@ -40,16 +41,23 @@ export function SourceAgentTargetSetup({ config, active, initialSelection, fixed
   const localHost = config.hosts.find(item => item.kind === 'local')
   const [pending, setPending] = useState(false), [issue, setIssue] = useState<string>(), [refresh, setRefresh] = useState(0)
   const projectAddress = (value: typeof project) => value ? [value.id, value.hostId, value.path, value.repoPath] : null
-  const hostAddress = (value: typeof host) => { if (!value) return null; const { label: _label, ...route } = value; return route }
+  const hostAddress = (value: typeof host) => {
+    if (value) { const { label: _label, ...route } = value; return route }
+    return hostId ? { id: hostId } : null
+  }
   const identity = JSON.stringify([projectAddress(project), hostAddress(host)]), current = useRef({ identity, active }); current.current = { identity, active }
+  const initiallyConfigured = useRef({
+    project: Boolean(useAppStore.getState().config?.workspaces.find(item => item.id === project?.id)),
+    host: Boolean(useAppStore.getState().config?.hosts.find(item => item.id === hostId))
+  })
   const producer = useRef(false)
   useEffect(() => () => { current.current = { ...current.current, active: false } }, [])
   useEffect(() => {
     setResources(undefined); setResourceIssue(undefined); setChoices(undefined); setRoutes(undefined); setDescription(undefined)
     setChoiceIssue(undefined); setRouteIssue(undefined); setContractIssue(undefined)
-    if (!active || !project || !host) return
+    if (!active || !project || !hostId) return
     const controller = new AbortController()
-    void api.spaceMounts.call('resources', { hostId: host.id }, controller.signal).then(reply => {
+    void api.spaceMounts.call('resources', { hostId }, controller.signal).then(reply => {
       if (!controller.signal.aborted) setResources(reply)
     }).catch(cause => { if (!controller.signal.aborted) setResourceIssue(presentError(cause)) })
     return () => controller.abort()
@@ -89,8 +97,8 @@ export function SourceAgentTargetSetup({ config, active, initialSelection, fixed
   const projects = resources?.workspaces.filter(item => item.hostId === 'local' && item.path === project?.path &&
     (item.repoPath ?? item.path) === (project?.repoPath ?? project?.path)) ?? []
   async function prepare() {
-    if (producer.current || !active || disabled || !project || !host || !resources || !target || independent && !coordinator) return
-    const originalProject = project, originalHost = host, originalIdentity = identity, originalTarget = target, originalCoordinator = independent ? coordinator : undefined
+    if (producer.current || !active || disabled || !project || !hostId || !resources || !target || independent && !coordinator) return
+    const originalProject = project, originalHostId = hostId, originalIdentity = identity, originalTarget = target, originalCoordinator = independent ? coordinator : undefined
     producer.current = true; setPending(true); setIssue(undefined)
     try {
       if (projects.length !== 1) throw Error(projects.length ? 'More than one original project matches this folder. Review its original project catalogue; your selection is kept.'
@@ -99,8 +107,8 @@ export function SourceAgentTargetSetup({ config, active, initialSelection, fixed
         expectedResource: { hostId: sourceProject.hostId, workspacePath: sourceProject.path, projectRootPath: sourceProject.repoPath ?? sourceProject.path } }
       // A direct Host with no learned pin gets its Runtime only from its original selected inventory.
       const confirmedTarget = originalCoordinator || originalTarget.runtimeId ? originalTarget : { ...originalTarget,
-        runtimeId: (await api.spaceMounts.call('executors', { hostId: host.id, expectedRuntimeId: resources.runtimeId, agentHostId: originalTarget.hostId })).runtimeId }
-      const input: MountedSpaceRegistrationInput = { kind: 'folder-registration', hostId: host.id, registration, submitted: false }
+        runtimeId: (await api.spaceMounts.call('executors', { hostId: originalHostId, expectedRuntimeId: resources.runtimeId, agentHostId: originalTarget.hostId })).runtimeId }
+      const input: MountedSpaceRegistrationInput = { kind: 'folder-registration', hostId: originalHostId, registration, submitted: false }
       const key = mountedRegistrationKey(input), store = useAppStore.getState()
       const retained = mountedRegistrationInput(useAppStore.getState().mountedSpaceInputs, key)
       // A first explicit preparation uses the original idempotent registration owner.
@@ -123,11 +131,17 @@ export function SourceAgentTargetSetup({ config, active, initialSelection, fixed
       }
       const now = useAppStore.getState().config
       if (!current.current.active || current.current.identity !== originalIdentity) return
-      if (!configValuesEqual(projectAddress(now?.workspaces.find(item => item.id === originalProject.id)), projectAddress(originalProject)) ||
-        !configValuesEqual(hostAddress(now?.hosts.find(item => item.id === originalHost.id)), hostAddress(originalHost))) throw Error('The original project or connection changed. Its confirmed registration and your draft are retained; review the current selection.')
+      const originalSource = initialSelection?.source
+      const unconfiguredSourceProject = !initiallyConfigured.current.project && originalSource &&
+        configValuesEqual(projectAddress(originalSource.project as typeof project), projectAddress(originalProject))
+      const unconfiguredSourceHost = !initiallyConfigured.current.host && originalSource?.target.hostId === originalHostId
+      const currentProject = now?.workspaces.find(item => item.id === originalProject.id) ?? (unconfiguredSourceProject ? originalProject : undefined)
+      const currentHost = now?.hosts.find(item => item.id === originalHostId) ?? (unconfiguredSourceHost ? host : undefined)
+      if (!configValuesEqual(projectAddress(currentProject), projectAddress(originalProject)) ||
+        !configValuesEqual(hostAddress(currentHost), hostAddress(host))) throw Error('The original project or connection changed. Its confirmed registration and your draft are retained; review the current selection.')
       const applied = await onApply({ resourceWorkspaceId: originalProject.id, agentWorkspaceId: null, source: {
         project: { id: project.id, hostId: project.hostId, path: project.path, ...(project.repoPath === undefined ? {} : { repoPath: project.repoPath }) },
-        target: { hostId: host.id, reference: found.reference, zoneId: found.zoneId, workspaceId: found.workspaceId },
+        target: { hostId: originalHostId, reference: found.reference, zoneId: found.zoneId, workspaceId: found.workspaceId },
         ...(originalCoordinator ? { kind: 'source-coordinator' as const, coordinator: originalCoordinator } : { agentTarget: confirmedTarget }) } })
       if (applied === false) throw Error('The original Launcher could not accept this arrangement. Its project and draft are retained.')
     } catch (cause) { if (current.current.active && current.current.identity === originalIdentity) setIssue(presentError(cause)) }
@@ -158,7 +172,7 @@ export function SourceAgentTargetSetup({ config, active, initialSelection, fixed
         else { const host = choices?.hosts.find(item => JSON.stringify(['host', item.hostId]) === value); if (host) setSelected({ hostId: host.hostId, runtimeId: host.runtimeId ?? '' }) }
       }} options={[...(!resources ? [{ value: '', label: project ? 'Reading this project device…' : 'Choose a project first', disabled: true }] : []),
         ...(target && target.adoptedRoute && !routes?.routes.some(route => configValuesEqual(route.agentTarget, target)) ? [{ value: choiceKey, label: `Retained route · ${target.hostId}` }] : []),
-        ...(resources ? [{ value: JSON.stringify(['host', 'local']), label: 'Project device', description: host?.label ?? 'Original project device' }] : []),
+        ...(resources ? [{ value: JSON.stringify(['host', 'local']), label: 'Project device', description: host?.label ?? hostId ?? 'Original project device' }] : []),
         ...(localHost && host?.kind !== 'local' ? [{ value: 'independent-coordinator', label: localHost.label, description: 'Reach · Agent here, files on the project device' }] : []),
         ...(choices?.hosts.filter(host => host.kind !== 'local').map(host => ({ value: JSON.stringify(['host', host.hostId]), label: host.label, description: 'Agent device known by the project device' })) ?? []),
         ...(routes?.routes.map(route => ({ value: JSON.stringify(['route', route.agentTarget]), label: route.id, description: `Saved route · ${route.agentTarget.adoptedRoute.hops.length} hops` })) ?? [])]} />

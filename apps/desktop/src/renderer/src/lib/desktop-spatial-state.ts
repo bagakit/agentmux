@@ -10,6 +10,7 @@ import { reducePersistedTab, type PersistedWorkbench } from './workbench-persist
 import { closeWorktreeGraph } from '../../../shared/worktree-closeout';
 import { sessionPresentationById } from './session-presentation';
 import { desktopAgentExecutionFromSpatial, desktopAgentPresentationFromSpatial } from './desktop-agent-presentation';
+import { isOriginalSourceWorkspaceProjection } from './original-space-navigation';
 /** Host resource descriptors, never a second entity or topology store. */
 const tabKey = (id: string) => 'tab:' + id;
 const regionKey = (id: string) => 'region:' + id;
@@ -21,10 +22,13 @@ export function desktopSpatialGraph(state: SpatialWorkbench, topics: readonly Sc
   // closeWorktreeGraph once so public Files retain their exact original owner.
   const closingZones = new Set(previous?.zones.filter(zone => closingWorkspaces.has(zone.workspaceId)).map(zone => zone.zoneId));
   const categories = [...new Map([...(previous ? categoriesFromSpatial(previous) : []), ...(state.topicCategories ?? [])].map(category => [category.spaceId, category])).values()];
-  const catalog = spatialCatalog({ ...state, topicCategories: categories }, topics);
+  const ordinaryTabs = Object.fromEntries(Object.entries(state.tabs).filter(([, tab]) => !tab.source));
+  const ordinaryLayouts = Object.fromEntries(Object.entries(state.layouts).filter(([workspaceId]) => !isOriginalSourceWorkspaceProjection(workspaceId) &&
+    !Object.values(state.tabs).some(tab => tab.source?.workspaceId && tab.workspaceId === workspaceId)));
+  const catalog = spatialCatalog({ ...state, tabs: ordinaryTabs, layouts: ordinaryLayouts, topicCategories: categories }, topics);
   const { locations: _, ...facts } = catalog;
   if (state.projectGroups === undefined && previous?.projectGroups) facts.projectGroups = previous.projectGroups;
-  const persisted = { tabs: Object.fromEntries(Object.values(state.tabs).map(tab => [tab.id, reducePersistedTab(tab)])), layouts: state.layouts };
+  const persisted = { tabs: Object.fromEntries(Object.values(ordinaryTabs).map(tab => [tab.id, reducePersistedTab(tab)])), layouts: ordinaryLayouts };
   const sessions = sessionPresentationById(state.sessions);
   const regionFacts = new Map(facts.regions.map(region => [region.regionId, region]));
   const originalRegions = new Map(previous?.regions.map(region => [region.regionId, region]));

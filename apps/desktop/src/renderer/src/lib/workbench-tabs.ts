@@ -33,6 +33,18 @@ import {
   type TabAgentMember
 } from '@agentmux/client-ui/display-name'
 
+export type SourceProjectionReference = {
+  reference: { runtimeId: string; spaceId: string }
+  zoneId: string
+  workspaceId: string
+  tabId: string
+}
+export type SourceRegionProjectionReference = SourceProjectionReference & {
+  regionId: string
+  agentSessionId?: string
+  runId?: string
+}
+
 export type AgentWorkbenchSurface = {
   regionId: string
   kind: 'agent'
@@ -81,6 +93,8 @@ export type LauncherWorkbenchSurface = {
   workspaceId: string
   /** Explicit split execution; workspaceId remains the project/tools resource. */
   agentWorkspaceId?: string
+  /** Ephemeral Source projection only; never a durable Launcher kind or local control grant. */
+  sourceUnavailable?: { kind: string; issue: string }
   agentExecutor?: { hostId: string; executorId: string; executorRevision: string }
   /** Explicit future Executor stays with this durable Launcher when its target changes. */
   executorId?: string
@@ -120,7 +134,7 @@ export type BrowserWorkbenchSurface = BrowserSnapshot & {
   bookmarkOrigin?: { path: string; binary: boolean }
 }
 
-export type WorkbenchSurface =
+export type WorkbenchSurface = (
   | AgentWorkbenchSurface
   | TerminalWorkbenchSurface
   | FileWorkbenchSurface
@@ -128,6 +142,9 @@ export type WorkbenchSurface =
   | GitWorkbenchSurface
   | LauncherWorkbenchSurface
   | BrowserWorkbenchSurface
+) & { /** View-only original Source address; never a local execution or graph identity. */
+  source?: SourceRegionProjectionReference
+}
 
 export type WorkbenchTab = {
   id: string
@@ -137,6 +154,8 @@ export type WorkbenchTab = {
   topicPreparation?: 'mote'
   /** Display placement; intentionally independent of a Session's execution directory. */
   space?: { spaceId: string; zoneId: string }
+  /** View-only original Source address; local Core reconciliation must never treat this as its own entity. */
+  source?: SourceProjectionReference
   titleRegionId: string
   layout: WorkbenchViewLayout
   regions: Record<string, WorkbenchSurface>

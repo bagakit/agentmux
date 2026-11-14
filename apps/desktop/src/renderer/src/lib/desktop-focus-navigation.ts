@@ -372,6 +372,10 @@ export function desktopSelection(state: DesktopSelectionState & { focusView: 'li
         regionId: state.tabs[tab.tabId]?.layout.activeRegionId ?? null, topicId: catalog.spaces.find(space => space.spaceId === spaceId)?.topicId ?? null }
     }
   }
+  if ((space as (AgentMuxDesktopSpaceSelection & { sourceRuntimeId?: string }) | null)?.sourceRuntimeId) {
+    const { sourceRuntimeId: _privateRuntime, ...ordinary } = space as AgentMuxDesktopSpaceSelection & { sourceRuntimeId: string }
+    space = ordinary
+  }
   return { surface: desktopSurface[state.mainSurface], mainSurface: state.mainSurface, focusView: state.mainSurface === 'agents' ? state.focusView : null, space, goalId: state.selectedDemandId,
     ...(state.mainSurface === 'survey' ? { survey: surveySelectionPresentation(state.surveyZoneSelection ?? null) } : {}) }
 }
@@ -407,8 +411,9 @@ export function desktopSpaceSelectionAfterClose(choice: AgentMuxDesktopSpaceSele
 export function restoreWorkbenchSpaceSelection(value: unknown): AgentMuxDesktopSpaceSelection | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null
   const source = value as Record<string, unknown>
-  if (Object.keys(source).some(key => !['spaceId', 'zoneId', 'workspaceId', 'tabId', 'groupId', 'regionId', 'topicId'].includes(key))) return null
+  if (Object.keys(source).some(key => !['spaceId', 'zoneId', 'workspaceId', 'tabId', 'groupId', 'regionId', 'topicId', 'sourceRuntimeId'].includes(key))) return null
   if (typeof source.workspaceId !== 'string' || !source.workspaceId) return null
+  if (source.sourceRuntimeId !== undefined && (typeof source.sourceRuntimeId !== 'string' || !source.sourceRuntimeId)) return null
   for (const key of ['spaceId', 'zoneId']) if (source[key] !== null && (typeof source[key] !== 'string' || !source[key])) return null
   for (const key of ['tabId', 'groupId', 'regionId', 'topicId']) if (source[key] !== null && (typeof source[key] !== 'string' || !source[key])) return null
   if ((source.tabId === null) !== (source.groupId === null) || (source.regionId !== null && source.tabId === null)) return null

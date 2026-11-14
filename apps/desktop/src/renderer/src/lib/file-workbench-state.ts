@@ -1,5 +1,6 @@
 import { readNoteMarkdownHeader } from '@agentmux/core/note-format'
 import { fileDocumentConsumerKeys, hasFileDocumentConsumer } from './file-document-consumers'
+import { hasOriginalSourceFileSurface, type OriginalSpaceSelectionState } from './original-space-navigation'
 import { mintObjectId } from '@agentmux/core/object-id'
 import type { FileDocument, WorkspaceFileReadResult } from '../../../shared/contracts'
 import { activateTab, addTab, addTabOccurrence, groupIds, removeTab, type WorkspaceLayout } from '@agentmux/layout'
@@ -326,7 +327,7 @@ export function reduceDocumentAttached(
 ): FileWorkbenchState {
   const key = documentKey(workspaceId, path)
   if (state.documents[key]) return state
-  if (!hasFileDocumentConsumer(key) && !Object.values(state.tabs).some(tab => workbenchSurfaces(tab).some(surface =>
+  if (!hasFileDocumentConsumer(key) && !hasOriginalSourceFileSurface(state as unknown as OriginalSpaceSelectionState, workspaceId, path) && !Object.values(state.tabs).some(tab => workbenchSurfaces(tab).some(surface =>
     surface.kind === 'file' && surface.workspaceId === workspaceId && surface.path === path))) return state
   return {
     ...state,
@@ -363,7 +364,7 @@ export function reduceDocumentLoadFailed(
 ): FileWorkbenchState {
   const key = documentKey(workspaceId, path)
   if (state.documents[key]) return state
-  if (!hasFileDocumentConsumer(key) && !Object.values(state.tabs).some(tab => workbenchSurfaces(tab).some(surface =>
+  if (!hasFileDocumentConsumer(key) && !hasOriginalSourceFileSurface(state as unknown as OriginalSpaceSelectionState, workspaceId, path) && !Object.values(state.tabs).some(tab => workbenchSurfaces(tab).some(surface =>
     surface.kind === 'file' && surface.workspaceId === workspaceId && surface.path === path))) return state
   return { ...state, documentIssues: { ...state.documentIssues, [key]: issue } }
 }

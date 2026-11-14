@@ -1,4 +1,4 @@
-import { SourceFolderNavigation, useSourceFolderNavigation } from './SourceFolderNavigation'
+import { SourceFolderNavigation, useSourceFolderNavigation, sourceFolderMatchesWorkspace } from './SourceFolderNavigation'
 import { TextInput } from '@agentmux/client-ui/input'
 import { HostBadge, HostIcon } from './HostBadge'
 import { deviceHomeFailureDetail } from '../lib/device-home-feedback'
@@ -33,8 +33,8 @@ import {
 } from '../lib/workspace-projects'
 import { rowAttention, rowAttentionLabel } from '../lib/row-attention'
 import { agentActivityCounts } from '../lib/project-board'
-import { useAppStore } from '../store'
-import { MountedSpaceNavigation } from './MountedSpaceNavigation'
+import { currentCoreSpatialGraph, useAppStore } from '../store'
+import { originalSpaceWorkspace } from '../lib/original-space-navigation'
 import { SpaceTopicsTree } from './SpaceTopicsTree'
 import { SpaceCreateMenu } from './SpaceCreateMenu'
 import { SpaceDisclosure, SpaceSectionHeader } from './SpaceSectionHeader'
@@ -67,7 +67,8 @@ export function WorkspaceSidebar({ visible = true }: { visible?: boolean }) {
   const displayPath = usePathDisplay()
   const config = useAppStore((state) => state.config)
   const activeWorkspaceId = useAppStore((state) => state.activeWorkspaceId)
-  const selectedSpaceMount = useAppStore(state => state.selectedSpaceMount)
+  const workbenchSpaceSelection = useAppStore(state => state.workbenchSpaceSelection)
+  const sourceInputs = useAppStore(state => state.mountedSpaceInputs)
   const mainSurface = useAppStore((state) => state.mainSurface)
   const selectWorkspace = useAppStore((state) => state.selectWorkspace)
   const openHostHome = useAppStore(state => state.openHostHome)
@@ -159,7 +160,8 @@ export function WorkspaceSidebar({ visible = true }: { visible?: boolean }) {
     const rolledWorkspaces = new Map(projectNodes.map(({ project }) => [project.id, [project.id, ...descendants.get(project.id)!].flatMap(id => nodes.get(id)!.workspaces)]))
     return { nodes, ancestors, descendants, groupKeys, rolledWorkspaces }
   }, [projectNodes, groups])
-  const activeWorkspace = config?.workspaces.find((workspace) => workspace.id === activeWorkspaceId)
+  const activeWorkspace = useMemo(() => originalSpaceWorkspace(useAppStore.getState(), activeWorkspaceId, currentCoreSpatialGraph()),
+    [config, activeWorkspaceId, workbenchSpaceSelection, sourceInputs])
   // 密度是看法不是数据：缺席即默认档，读处一律 `?? 'default'`，不改树结构/归属/选中/滚动位置。
   const railDensity: ProjectRailDensity = config?.projectRailDensity ?? PROJECT_RAIL_DENSITY_DEFAULT
   const nextDensity: ProjectRailDensity = railDensity === 'default'
@@ -186,7 +188,7 @@ export function WorkspaceSidebar({ visible = true }: { visible?: boolean }) {
       reportError(error)
     }
   }
-  const activeProjectId = selectedSpaceMount === null && activeWorkspace && activeWorkspace.id !== scratch?.id
+  const activeProjectId = activeWorkspace && activeWorkspace.id !== scratch?.id
     ? workspaceProjectId(activeWorkspace)
     : null
 
@@ -294,6 +296,9 @@ export function WorkspaceSidebar({ visible = true }: { visible?: boolean }) {
       // 取被这一行选中的那个 workspace 的 branch，没有就不给这一项。
       const preferredWorkspace = project.workspaces.find((workspace) => workspace.id === preferred)
       const branch = preferredWorkspace?.branch ?? null
+      const sourceFacts = project.workspaces.flatMap(workspace => (sourceFolders.byWorkspace.get(workspace.id) ?? []).filter(fact => sourceFolderMatchesWorkspace(fact, workspace)))
+      const originalSource = sourceFacts.length === 1 ? sourceFacts[0] : undefined
+      const originalSourceHostId = originalSource?.carrierHostId ?? sourceFolders.carrier?.id
       const row = (
         <div className="project-rail-row-shell" style={{ '--rail-depth': depth } as CSSProperties}>
         {hasChildren ? <SpaceDisclosure icon={identity}
@@ -309,6 +314,7 @@ export function WorkspaceSidebar({ visible = true }: { visible?: boolean }) {
           data-space-parent={parentKey}
           data-space-expanded={hasChildren && !filtering ? !collapsed : undefined}
           data-workspace-id={preferred ?? undefined}
+          data-original-source-space={originalSource?.spaceId}
           data-space-icon-target={target.key}
           {...(active ? { 'data-active-workspace-id': activeWorkspaceId } : {})}
           data-focus-project-scope-control
@@ -316,8 +322,14 @@ export function WorkspaceSidebar({ visible = true }: { visible?: boolean }) {
           {...(depth > 0 ? { style: { '--rail-depth': depth } as CSSProperties } : {})}
           {...(activity.working > 0 ? { 'data-running': 'true' } : {})}
           onClick={() => {
-            if (!preferred) return
             const keepBoardOpen = mainSurface === 'board'
+            if (originalSource && originalSourceHostId) {
+              useAppStore.getState().openOriginalSpaceLocation({ target: { hostId: originalSourceHostId,
+                reference: { runtimeId: originalSource.runtimeId, spaceId: originalSource.spaceId }, zoneId: originalSource.zoneId, workspaceId: originalSource.resource.id }, resource: originalSource.resource })
+              if (keepBoardOpen) setMainSurface('board')
+              return
+            }
+            if (!preferred) return
             void selectWorkspace(preferred).then(() => {
               if (keepBoardOpen) setMainSurface('board')
             })
@@ -349,7 +361,20 @@ export function WorkspaceSidebar({ visible = true }: { visible?: boolean }) {
             onChangeIcon={() => changeIcon(target)}
             onGroupProjects={() => setGroupDialog({ seed: project.id })}
           >
-            <div className="project-rail-entry" data-space-entry>{row}{projectSessions.some((session) => session.kind === 'agent') ? <ProjectActivity compact visible={visible} sessions={projectSessions} /> : null}</div>
+            <div className="project-rail-entry" data-space-entry>{row}{sourceFacts.length > 1 ? <div aria-label={`Original Source occurrences for ${project.name}`}>
+              {sourceFacts.map(fact => {
+                const carrierHostId = fact.carrierHostId ?? sourceFolders.carrier?.id
+                return <button type="button" className="project-rail-row" key={JSON.stringify([fact.runtimeId, fact.spaceId, fact.zoneId])}
+                  data-original-source-space={fact.spaceId} data-source-runtime={fact.runtimeId} disabled={!carrierHostId}
+                  onClick={() => {
+                    if (!carrierHostId) return
+                    const keepBoardOpen = mainSurface === 'board'
+                    useAppStore.getState().openOriginalSpaceLocation({ target: { hostId: carrierHostId,
+                      reference: { runtimeId: fact.runtimeId, spaceId: fact.spaceId }, zoneId: fact.zoneId, workspaceId: fact.resource.id }, resource: fact.resource })
+                    if (keepBoardOpen) setMainSurface('board')
+                  }}><span className="project-rail-row__identity"><strong>{fact.resource.name}</strong><small>Source {fact.runtimeId} · Zone {fact.zoneId}</small></span></button>
+              })}
+            </div> : null}{projectSessions.some((session) => session.kind === 'agent') ? <ProjectActivity compact visible={visible} sessions={projectSessions} /> : null}</div>
           </WorkspaceRowContextMenu>
           {/* Branch pins key by workspaceProjectId(workspace) — which is exactly project.id (see
               projectWorkspaces). The pinned branch name labels the row; navigation prefers the
@@ -404,23 +429,23 @@ export function WorkspaceSidebar({ visible = true }: { visible?: boolean }) {
         >{railDensity === 'default' ? <ThemeLayoutRows2Icon size={15} /> : railDensity === 'compact' ? <ThemeLayoutRows3Icon size={15} /> : <ThemeLayoutRows4Icon size={15} />}</button>
       </div>
       <div className="space-tree" ref={treeRef} onKeyDown={navigateSpaceTree}>
-        <MountedSpaceNavigation query={query} />
         {scratch ? <SpaceTopicsTree workspace={scratch} query={query} icons={icons} onChangeIcon={changeIcon} visible={visible} /> : null}
         <ProjectGroupsTree projects={projects} query={query} activeProjectId={activeProjectId}
           visible={visible}
           onCreate={() => setGroupDialog({})} onEdit={editing => setGroupDialog({ editing })} onDissolve={group => { setDissolveIssue(null); setDissolveRequest(group) }} />
         {folderSections.map(section => {
           const foldersCollapsed = !filtering && collapsedProjectGroups[section.key] === true
+          const sourceProjectCount = sourceFolders.forHost(section.hostId).length
           return (        <nav className="project-list host-folders" aria-label={`${section.label} Folders · ${section.hostId}`} key={section.hostId} data-folder-host={section.hostId}>
-          <DeviceSectionHeader hostId={section.hostId} label={section.label} navigationId={section.key} count={section.projects.length + (section.hostId === 'local' ? sourceFolders.projects.length : 0)} icon={section.hostId !== 'local' ? <HostBadge context="Host" compact suppressTooltip host={hostIdentityProjection(section.hostId, config?.hosts.find(host => host.id === section.hostId))} /> : <HostIcon kind="local" size={14} />}
+          <DeviceSectionHeader hostId={section.hostId} label={section.label} navigationId={section.key} count={section.projects.length + sourceProjectCount} icon={section.hostId !== 'local' ? <HostBadge context="Host" compact suppressTooltip host={hostIdentityProjection(section.hostId, config?.hosts.find(host => host.id === section.hostId))} /> : <HostIcon kind="local" size={14} />}
             expanded={!foldersCollapsed} filtering={filtering} onToggle={() => toggleProjectGroup(section.key)}
             onOpen={() => void openDeviceHome(section.hostId)} openLabel={`Open ${section.label} home`} opening={homeReads[section.hostId]?.busy === true}
             labelSuffix={<><span className="space-device-home-mark" aria-hidden="true">~</span>{homeReads[section.hostId]?.busy ? <span className="space-device-home-progress" role="status" aria-label={`Opening ${section.label} home`}><ThemeStatusLoadingIcon size={10} animation="spin" /></span> : null}</>}
             createLabel={section.hostId === 'local' ? 'Open Folder' : `Open Folder on ${section.label}`} onCreate={async () => { if (section.hostId === 'local') await chooseFolder(); else setFolderHost({ hostId: section.hostId, label: section.label }) }}
             activity={foldersCollapsed ? <DirectoryActivity workspaces={section.workspaces} visible={visible} /> : undefined} />
           {homeReads[section.hostId]?.error ? <DeviceHomeFailure label={section.label} error={homeReads[section.hostId]!.error} onRetry={() => void openDeviceHome(section.hostId)} /> : null}
-          {!foldersCollapsed && section.hostId === 'local' ? <SourceFolderNavigation navigation={sourceFolders} /> : null}
-          {filtering && section.groups.length === 0 && (section.hostId !== 'local' || sourceFolders.projects.length === 0) ? <p className="space-tree-empty" role="status">No matching Folders</p> : null}
+          {!foldersCollapsed ? <SourceFolderNavigation navigation={sourceFolders} hostId={section.hostId} /> : null}
+          {filtering && section.groups.length === 0 && sourceProjectCount === 0 ? <p className="space-tree-empty" role="status">No matching Folders</p> : null}
           {foldersCollapsed ? null : section.groups.map((group) => {
             const key = projectGroupKey(group)
             const collapsed = !filtering && key !== null && collapsedProjectGroups[key] === true
@@ -444,7 +469,7 @@ export function WorkspaceSidebar({ visible = true }: { visible?: boolean }) {
               </div>
             )
           })}
-          {section.projects.length === 0 && (section.hostId !== 'local' || sourceFolders.projects.length === 0) && !filtering && !foldersCollapsed ? (
+          {section.projects.length === 0 && sourceProjectCount === 0 && !filtering && !foldersCollapsed ? (
             <div className="workspace-list__empty"><span>{section.hostId === 'local' ? 'Open a folder to get started.' : 'No folders registered in this window.'}</span></div>
           ) : null}
         </nav>)

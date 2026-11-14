@@ -146,7 +146,7 @@ function MountedSpaceLauncherContent({ target, project, slot, mountKey, active, 
     {unreadable || issue || !terminalObservation && original?.issue || inventoryIssue ? <p role="status">{unreadable ?? issue ?? (!terminalObservation ? original?.issue : undefined) ?? inventoryIssue}</p> : null}
     {choicesIssue ? <details><summary>Other Agent devices unavailable</summary><p>{choicesIssue} The project device and existing source work remain available.</p></details> : null}
     {routesIssue ? <details><summary>Saved route observation unavailable</summary><p>{routesIssue} Retained routes are earlier observations. Other devices and existing work remain available.</p></details> : null}
-    {slot.kind === 'new-work' ? <label><span>Private task draft</span><textarea aria-label="New mounted Space task draft" value={prompt} onChange={event => {
+    {slot.kind === 'new-work' ? <label><span>Private task draft</span><textarea aria-label="New original Space task draft" value={prompt} onChange={event => {
       try { useAppStore.getState().editSpaceMountLauncher(mountKey, slot, { agentHostId, agentTarget: routeTarget, executorId, prompt: event.target.value }) } catch (cause) { setIssue(presentError(cause)) }
     }} /></label> : null}
     <div className="mounted-space-launcher__actions">

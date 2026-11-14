@@ -10,6 +10,7 @@ import { createSourceFilesWorkbench, emptySourceFilesInputs, sourceFilesQuery, s
 import { captureFileEffect, applyFileEffect } from './lib/file-mutation-projection'
 import type { SourceFilesLocator, SourceFilesResolution } from '../../shared/source-files'
 import type { FolderDirectoryRegistration } from '@agentmux/core/space-folder'
+import { folderDirectoryFacts } from '@agentmux/core/space-folder-resources'
 import type { FileMutationEffect, FileReadIdentity } from '@agentmux/core/files'
 import { openSourceFolderInput } from './lib/space-mount-view'
 import { observeMountedSpaceWindow } from './lib/mounted-space-observation'
@@ -17,8 +18,9 @@ import { editMountedAgentOpen, editMountedLauncherSelection, type MountedAgentOp
 import { editSourceCoordinatorInput, sourceCoordinatorInputKey, type SourceCoordinatorInput } from './lib/source-coordinator-input'
 import { associateCreatedSourceCoordinator } from './lib/source-coordinator-request'
 import { launcherSourceMatches, type SourceCoordinatorStart } from './lib/launcher-source'
-import { editMountedSpaceInput, editMountedSpaceDraftInput, editMountedRegistration, mountedSpaceInput, mountedSpaceTarget, acceptsMountedSnapshot, type MountedSpaceObservation, type MountedSpaceRegistrationInput } from './lib/space-mount-view'
+import { editMountedSpaceInput, editMountedSpaceDraftInput, editMountedRegistration, mountedSpaceInput, mountedSpaceInputs as mountedSpaceInputEntries, mountedSpaceTarget, acceptsMountedSnapshot, type MountedSpaceObservation, type MountedSpaceRegistrationInput } from './lib/space-mount-view'
 import { ordinarySpaceMember, type OrdinaryMemberReference } from './lib/ordinary-space-member'
+import { originalSourceMember, originalSpaceResource, originalSpaceWorkspace, originalSourceFileSurface, ensureOriginalSourceFilesInput, originalSourceActionUnavailable, isOriginalSourceFileWorkspace, isOriginalSourceWorkspaceProjection, reconcileOriginalSourceProjection, originalSourceScopeFromGraph, preserveOriginalSourceProjection, originalSourceEntryForSelection, originalSourceWorkspaceId, originalSourceLauncherTabId, originalSourceTabProjectionId, originalSourceRegionProjectionId, originalSourceGroupProjectionId, originalSourceLauncherRegionId, type OriginalSpaceLocation } from './lib/original-space-navigation'
 import { observeMountedSessions, type MountedSessionObservation, type MountedSessionUpdate } from './lib/space-mount-sessions'
 import { spaceMountKey, type SpaceMountRecord, type SpaceMountView } from '../../shared/space-mount'
 import type { SpaceSnapshot } from '@agentmux/core'
@@ -329,13 +331,16 @@ import {
 } from './lib/control'
 import {
   activateTab as activateLayoutTab,
+  addTabOccurrence,
   addTabOrThrow,
   addTabPlacement,
+  createWorkbenchViewLayout,
   createWorkspaceLayout,
   groupIds,
   findGroup,
   findGroupForTab,
   focusGroup,
+  focusWorkbenchRegion,
   removeTab as removeLayoutTab,
   moveTab as moveLayoutTab,
   regionIds,
@@ -1066,7 +1071,7 @@ export type AppState = GitReadingActions & {
   goalAgentCreationDrafts: Record<string, unknown>
   /** Exact logical focus retained when a background move removes the active leaf. */
   retainedSpatialFocus: (AgentMuxSpaceAddress & { topicId?: string }) | null
-  workbenchSpaceSelection: AgentMuxDesktopSpaceSelection | null
+  workbenchSpaceSelection: (AgentMuxDesktopSpaceSelection & { sourceRuntimeId?: string }) | null
   /** Original user-document input; foreign business snapshots are never persisted here. */
   mountedSpaceInputs: unknown
   sourceFilesInputs: SourceFilesInputs
@@ -1079,19 +1084,19 @@ export type AppState = GitReadingActions & {
   inspectFilesMutation(operationId: string): Promise<void>
   inspectFileCreation(key: string): Promise<void>
   observeFilesSource(workspaceId: string): Promise<() => void>
-  selectedSpaceMount: unknown
   mountedSpaceObservations: Record<string, MountedSpaceObservation>
   mountedSpaceSessions: Record<string, MountedSessionObservation>
   observeSpaceMountSessions(target: SpaceMountRecord, update: MountedSessionUpdate): void
   mountSpace(target: SpaceMountRecord, reveal?: boolean): void
+  openOriginalSpaceLocation(input: OriginalSpaceLocation): void
+  openOriginalSpaceLauncher(workspaceId: string, tabGroupId: string): { tabId: string; regionId: string } | null
   openSourceFolder(target: SpaceMountRecord): void
   retainSpaceMountRegistration(key: string, update: (current: MountedSpaceRegistrationInput | undefined) => MountedSpaceRegistrationInput | undefined): void
   retainSpaceMountAgentOpen(key: string, update: (current: MountedAgentOpenInput | undefined) => MountedAgentOpenInput | undefined): void
   retainSourceCoordinatorInput(key: string, update: (current: SourceCoordinatorInput | undefined) => SourceCoordinatorInput | undefined): void
   editSpaceMountLauncher(key: string, slot: MountedLauncherSlot, selection: MountedLauncherSelection): void
-  selectSpaceMount(key: string | null): void
   editSpaceMountView(key: string, view: SpaceMountView): void
-  editSpaceMountDraft(key: string, tabId: string, regionId: string, text: string, view?: SpaceMountView): void
+  editSpaceMountDraft(key: string, tabId: string, regionId: string, text: string, view?: SpaceMountView, zoneId?: string): void
   observeSpaceMount(target: SpaceMountRecord, observation: { snapshot?: SpaceSnapshot; error?: string | undefined; reading: boolean }): void
   /** Default CLI navigation suppresses automatic caret until explicit human/keyboard navigation. */
   /** Ephemeral explicit Mote navigation; never persisted or an execution authority. */
@@ -2362,14 +2367,14 @@ async function readNoteHistoryTarget(tabId: string, regionId: string, noteId: st
 }
 
 function noteAttemptResourceCurrent(workspaceId: string, path: string, attempt: NoteFileAttempt): boolean {
-  const current = useAppStore.getState().config?.workspaces.find(workspace => workspace.id === workspaceId)
+  const current = originalSpaceWorkspace(useAppStore.getState(), workspaceId, currentCoreSpatialGraph())
   return attempt.resource.workspaceId === workspaceId && attempt.resource.path === path && current?.hostId === attempt.resource.hostId && current.path === attempt.resource.workspacePath && JSON.stringify(useAppStore.getState().documents[documentKey(workspaceId, path)]?.readSource) === JSON.stringify(attempt.source)
 }
 /** Observe the exact original resource for one in-flight Note operation, including away-and-back changes. */
 function watchNoteResource(workspaceId: string, original: { hostId: string; path: string } | undefined) {
   let changed = !original
   const current = () => {
-    const resource = useAppStore.getState().config?.workspaces.find(workspace => workspace.id === workspaceId)
+    const resource = originalSpaceWorkspace(useAppStore.getState(), workspaceId, currentCoreSpatialGraph())
     return !changed && Boolean(original && resource?.hostId === original.hostId && resource.path === original.path)
   }
   const release = useAppStore.subscribe((state, previous) => {
@@ -2542,30 +2547,29 @@ async function readWorkspaceFileDocument(workspaceId: string, path: string, orig
       ...(originalMain ? { legacyMainNote: originalMain } : {}) } } : observed.result.result
   }
   const input = useAppStore.getState().sourceFilesInputs.selections[workspaceId]
-  if (input?.locator && sourceFilesWorkspaceMatches(input.workspace, useAppStore.getState().config?.workspaces.find(workspace => workspace.id === workspaceId))) {
-    try {
-      const read = await api.sourceFiles.call(input.target, 'file.read', sourceFilesQuery(input.locator, path))
-      const current = useAppStore.getState().sourceFilesInputs.selections[workspaceId]
-      if (current !== input || !read.carrierCurrent || read.result.resource && !sourceFilesMappingMatches(input.locator, read.result.resource, path)) throw new Error('The original Source selection or mapping changed while reading.')
-      if (read.result.result.status === 'read' && read.result.resource) {
-        const prior = useAppStore.getState().documents[documentKey(workspaceId, path)], header = readNoteMarkdownHeader(read.result.result.document.content)
-        let legacy = prior?.legacyMainNote ?? useAppStore.getState().legacyMainNoteReferences[documentKey(workspaceId, path)]
-        if (!legacy && !prior?.readSource && prior?.noteProvenance?.status === 'recorded') legacy = { noteId: prior.noteProvenance.noteId, resource: prior.noteProvenance.resource,
-          provenance: prior.noteProvenance, ...(prior.noteEditing?.attempt?.target && !prior.noteEditing.attempt.target.source ? { target: prior.noteEditing.attempt.target } : {}) }
-        if (!legacy && header.status === 'valid') {
-          const page = useNotebookLibrary.getState().state?.pages[header.noteId], expected = input.workspace
-          if (page && page.resource.hostId === expected.hostId && page.resource.workspaceId === expected.id && page.resource.workspacePath === expected.path && page.resource.path === path) legacy = { noteId: header.noteId, resource: structuredClone(page.resource) }
-        }
-        return { status: 'read', document: { ...read.result.result.document, path,
-          readSource: { target: input.target, resource: read.result.resource, query: sourceFilesQuery(input.locator, path) }, ...(legacy ? { legacyMainNote: legacy } : {}) } }
+  if (input?.locator && sourceFilesWorkspaceMatches(input.workspace, originalSpaceWorkspace(useAppStore.getState(), workspaceId, currentCoreSpatialGraph()))) {
+    const read = await api.sourceFiles.call(input.target, 'file.read', sourceFilesQuery(input.locator, path))
+    const current = useAppStore.getState().sourceFilesInputs.selections[workspaceId]
+    if (current !== input || !read.carrierCurrent || read.result.resource && !sourceFilesMappingMatches(input.locator, read.result.resource, path)) throw new Error('The original Source selection or mapping changed while reading.')
+    if (read.result.result.status === 'read') {
+      if (!read.result.resource) return { status: 'error', code: 'FILE_SOURCE_MAPPING_CHANGED', message: 'The original Source file resource is unconfirmed. No local substitute was read.' }
+      const prior = useAppStore.getState().documents[documentKey(workspaceId, path)], header = readNoteMarkdownHeader(read.result.result.document.content)
+      let legacy = prior?.legacyMainNote ?? useAppStore.getState().legacyMainNoteReferences[documentKey(workspaceId, path)]
+      if (!legacy && !prior?.readSource && prior?.noteProvenance?.status === 'recorded') legacy = { noteId: prior.noteProvenance.noteId, resource: prior.noteProvenance.resource,
+        provenance: prior.noteProvenance, ...(prior.noteEditing?.attempt?.target && !prior.noteEditing.attempt.target.source ? { target: prior.noteEditing.attempt.target } : {}) }
+      if (!legacy && header.status === 'valid') {
+        const page = useNotebookLibrary.getState().state?.pages[header.noteId], expected = input.workspace
+        if (page && page.resource.hostId === expected.hostId && page.resource.workspaceId === expected.id && page.resource.workspacePath === expected.path && page.resource.path === path) legacy = { noteId: header.noteId, resource: structuredClone(page.resource) }
       }
-      if (read.result.result.status !== 'unknown' && read.result.result.status !== 'error') return read.result.result
-    } catch { /* This optional provenance observation cannot remove the existing reader. */ }
-    const legacy = await api.files.read(workspaceId, path)
-    if (originalFileReadSource(useAppStore.getState(), workspaceId, path)) return { status: 'error', code: 'FILE_SOURCE_BINDING_CHANGED',
-      message: 'This File View became Source-bound while its earlier reader was waiting. The original Source body and binding are kept.' }
-    return legacy.status === 'read' ? { ...legacy, document: withoutFileReadIdentity(legacy.document) } : legacy
+      return { status: 'read', document: { ...read.result.result.document, path,
+        readSource: { target: input.target, resource: read.result.resource, query: sourceFilesQuery(input.locator, path) }, ...(legacy ? { legacyMainNote: legacy } : {}) } }
+    }
+    return read.result.result.status === 'unknown' || read.result.result.status === 'error'
+      ? { status: 'error', code: read.result.result.code, message: read.result.result.message }
+      : read.result.result
   }
+  if (isOriginalSourceFileWorkspace(workspaceId)) return { status: 'error', code: 'FILE_SOURCE_UNAVAILABLE',
+    message: 'The original Source file locator is unconfirmed. No local substitute was read.' }
   const legacy = await api.files.read(workspaceId, path)
   if (originalFileReadSource(useAppStore.getState(), workspaceId, path)) return { status: 'error', code: 'FILE_SOURCE_BINDING_CHANGED',
     message: 'This File View became Source-bound while its earlier reader was waiting. The original Source body and binding are kept.' }
@@ -2600,7 +2604,7 @@ async function refreshFileDocument(
   const beforeReadIssue = useAppStore.getState().documentIssues[key]
   const sameDiskObservation = (state: AppState) => (state.documentObservationGenerations[key] ?? 0) === beforeReadObservation && state.documentIssues[key] === beforeReadIssue
   const checkedWrite = beforeReadIssue?.kind === 'write-unknown' ? beforeReadIssue : undefined
-  const noteResource = path.endsWith(NOTE_FILE_EXTENSION) ? watchNoteResource(workspaceId, useAppStore.getState().config?.workspaces.find(workspace => workspace.id === workspaceId)) : null
+  const noteResource = path.endsWith(NOTE_FILE_EXTENSION) ? watchNoteResource(workspaceId, originalSpaceWorkspace(useAppStore.getState(), workspaceId, currentCoreSpatialGraph())) : null
   fileReadInFlightCounts.set(key, (fileReadInFlightCounts.get(key) ?? 0) + 1)
   // Observe only this pending check. A resource changing away and back cannot authorize its result.
   let resourceChanged = false
@@ -2614,7 +2618,7 @@ async function refreshFileDocument(
     let result: import('../../shared/contracts').WorkspaceFileReadResult
     try {
       if (checkedWrite) {
-        const resource = useAppStore.getState().config?.workspaces.find(workspace => workspace.id === workspaceId)
+        const resource = originalSpaceWorkspace(useAppStore.getState(), workspaceId, currentCoreSpatialGraph())
         const original = checkedWrite.attempted.resource
         if (resource?.hostId !== original.hostId || resource.path !== original.path) {
           useAppStore.setState(state => reduceDocumentRead(state, workspaceId, path, {
@@ -2625,7 +2629,7 @@ async function refreshFileDocument(
       }
       result = await readWorkspaceFileDocument(workspaceId, path, checkedWrite?.attempted.source ?? useAppStore.getState().documents[key]?.noteEditing?.attempt?.source)
       if (checkedWrite) {
-        const resource = useAppStore.getState().config?.workspaces.find(workspace => workspace.id === workspaceId)
+        const resource = originalSpaceWorkspace(useAppStore.getState(), workspaceId, currentCoreSpatialGraph())
         const original = checkedWrite.attempted.resource
         if (resourceChanged || resource?.hostId !== original.hostId || resource.path !== original.path) result = {
           status: 'error', code: 'WORKSPACE_FILE_RESOURCE_UNCONFIRMED', message: 'The original workspace resource changed while checking this save. Its outcome remains unconfirmed.'
@@ -2677,7 +2681,7 @@ async function loadPersistedFileDocument(workspaceId: string, path: string, reso
   const key = documentKey(workspaceId, path)
   const state = useAppStore.getState()
   if (state.documents[key] || fileOpenRequests.has(key) || state.documentIssues[key]) return
-  const original = resource ?? state.config?.workspaces.find(workspace => workspace.id === workspaceId)
+  const original = resource ?? originalSpaceWorkspace(useAppStore.getState(), workspaceId, currentCoreSpatialGraph())
   if (!original) {
     useAppStore.setState(state => reduceDocumentLoadFailed(state, workspaceId, path, {
       kind: 'read-error', code: 'WORKSPACE_FILE_RESOURCE_UNAVAILABLE', message: 'The original file Workspace is unavailable.'
@@ -2688,7 +2692,7 @@ async function loadPersistedFileDocument(workspaceId: string, path: string, reso
   let resourceRebound = false, observedConfig = state.config
   let releaseResource = () => {}
   const resourceCurrent = () => {
-    const current = useAppStore.getState().config?.workspaces.find(workspace => workspace.id === workspaceId)
+    const current = originalSpaceWorkspace(useAppStore.getState(), workspaceId, currentCoreSpatialGraph())
     return !resourceRebound && current?.hostId === originalResource.hostId && current.path === originalResource.path
   }
   if (!resourceCurrent()) return
@@ -2707,8 +2711,8 @@ async function loadPersistedFileDocument(workspaceId: string, path: string, reso
       // Invalidation during this read must refresh the attached revision once it has an owner.
       const invalidationSequence = fileInvalidationSequences.get(key) ?? 0
       if (!admitted()) return false
-      observationRequested = true
-      await api.files.observe(workspaceId, path)
+      observationRequested = !isOriginalSourceFileWorkspace(workspaceId)
+      if (observationRequested) await api.files.observe(workspaceId, path)
       if (!admitted()) { await releaseObservation(); return false }
       const result = await readWorkspaceFileDocument(workspaceId, path)
       if (!admitted()) { await releaseObservation(); return false }
@@ -3179,8 +3183,8 @@ async function enqueueFileSave(
   target?: NoteFileTarget
 ): Promise<void> {
   const initialTab = useAppStore.getState().tabs[tabId]
-  const initialSurface = target ?? fileSurface(initialTab, regionId)
-  if (!initialSurface) return
+  const initialSurface = target ?? originalSourceFileSurface(useAppStore.getState(), tabId, regionId) ?? fileSurface(initialTab, regionId)
+  if (!initialSurface || initialSurface.workspaceId === undefined || initialSurface.path === undefined) return
   const key = documentKey(initialSurface.workspaceId, initialSurface.path)
   // An older Main sharing request keeps its own complete recovery packet. It cannot
   // occupy the current Source text-save slot or become that Source's receipt.
@@ -3207,10 +3211,10 @@ async function enqueueFileSave(
     await drainNoteInput(initialSurface.workspaceId, initialSurface.path)
     const state = useAppStore.getState()
     const tab = state.tabs[tabId]
-    const surface = target ?? fileSurface(tab, regionId)
-    if (!surface) return
+    const surface = target ?? originalSourceFileSurface(state, tabId, regionId) ?? fileSurface(tab, regionId)
+    if (!surface || surface.workspaceId === undefined || surface.path === undefined) return
     const currentKey = documentKey(surface.workspaceId, surface.path)
-    const configuredResource = state.config?.workspaces.find(workspace => workspace.id === surface.workspaceId)
+    const configuredResource = originalSpaceWorkspace(state, surface.workspaceId, currentCoreSpatialGraph())
     const targetHeader = readNoteMarkdownHeader(state.documents[currentKey]?.content ?? '')
     if (target && (configuredResource?.hostId !== target.hostId || configuredResource.path !== target.workspacePath || targetHeader.status !== 'valid' || targetHeader.noteId !== target.noteId)) {
       state.reportError(new Error('The original shared file resource or identity changed. Its draft is retained; check that original file before saving.')); return
@@ -3225,7 +3229,7 @@ async function enqueueFileSave(
     const format = workspaceFilePreviewFormat(surface.path)
     if (format && !format.sourceEditable) return
     const document = state.documents[currentKey]
-    const savedResource = state.config?.workspaces.find(workspace => workspace.id === surface.workspaceId)
+    const savedResource = originalSpaceWorkspace(state, surface.workspaceId, currentCoreSpatialGraph())
     const issue = state.documentIssues[currentKey]
     if (document?.noteEditing?.input?.phase === 'conflict' && !overwrite) return
     if (document?.noteEditing?.attempt) { await refreshFileDocument(surface.workspaceId, surface.path, queuedLifetime); return }
@@ -3261,7 +3265,8 @@ async function enqueueFileSave(
       noteAttempt = { operationId: mintObjectId(), noteId: header?.status === 'valid' ? header.noteId : null, content: document.content, expectedRevision, generation,
         resource: { hostId: savedResource.hostId, workspaceId: savedResource.id, workspacePath: savedResource.path, path: surface.path }, phase: 'sending', ...(originalSource ? { source: originalSource } : {}),
         ...(baseContent === undefined ? {} : { baseContent }), ...(enhanced ? { enhanced: true } : {}) }
-      const originalRegion = target ? undefined : fileSurface(tab, regionId)?.regionId
+      const originalRegion = target ? undefined : originalSourceFileSurface(state, tabId, regionId)?.regionId ?? fileSurface(tab, regionId)?.regionId
+      if (!target && originalRegion === undefined) return
       try {
         if (noteAttempt.noteId !== null && originalRegion) noteAttempt.target = (await readNoteHistoryTarget(tabId, originalRegion, noteAttempt.noteId)).target
         else if (noteAttempt.noteId !== null && target) {
@@ -4179,7 +4184,7 @@ type PersistedAppState = {
   legacyMainNoteReferences?: Record<string, NonNullable<FileDocument['legacyMainNote']>>
   selectedSpaceMount?: unknown
   pendingAgentLaunches?: RetainedPendingAgentLaunches
-  workbenchSpaceSelection: AgentMuxDesktopSpaceSelection | null
+  workbenchSpaceSelection: (AgentMuxDesktopSpaceSelection & { sourceRuntimeId?: string }) | null
   projectGroups?: AgentMuxProjectGroupFact[]
   spaceZoneBindings?: SpaceZoneBindings
   spatialRequests: Record<string, SpatialRequestBinding>
@@ -4286,7 +4291,6 @@ export type RestoredUiState = Pick<
   AppState,
   | 'workspaceAgentOrder'
   | 'mountedSpaceInputs'
-  | 'selectedSpaceMount'
   | 'workbenchSpaceSelection'
   | 'activeWorkspaceId'
   | 'mainSurface'
@@ -4391,7 +4395,6 @@ export function restorePersistedUiState(
     PersistedAppState,
     | 'workspaceAgentOrder'
     | 'mountedSpaceInputs'
-    | 'selectedSpaceMount'
     | 'workbenchSpaceSelection'
     | 'activeWorkspaceId'
     | 'mainSurface'
@@ -4437,15 +4440,17 @@ export function restorePersistedUiState(
 ): RestoredUiState {
   const surveyPages = readSurveyPagePreferences(persisted.surveyPageReferences)
   const surveyView = readSurveyProfileView(persisted.surveyProfileView)
+  const workbenchSpaceSelection: AppState['workbenchSpaceSelection'] = restoreWorkbenchSpaceSelection(persisted.workbenchSpaceSelection)
+  const activeWorkspaceId = workbenchSpaceSelection?.sourceRuntimeId && isOriginalSourceWorkspaceProjection(workbenchSpaceSelection.workspaceId)
+    ? workbenchSpaceSelection.workspaceId : reseatActiveWorkspaceId(config, persisted.activeWorkspaceId)
   return {
     mountedSpaceInputs: persisted.mountedSpaceInputs === undefined ? {} : persisted.mountedSpaceInputs,
-    selectedSpaceMount: persisted.selectedSpaceMount === undefined ? null : persisted.selectedSpaceMount,
     workspaceAgentOrder: restoreWorkspaceAgentOrder(persisted.workspaceAgentOrder),
-    workbenchSpaceSelection: restoreWorkbenchSpaceSelection(persisted.workbenchSpaceSelection),
+    workbenchSpaceSelection,
     focusTimelineNameWidth: clampFocusTimelineNameWidth(persisted.focusTimelineNameWidth),
     focusTimelineHeight: clampFocusTimelineHeight(persisted.focusTimelineHeight),
     focusTimelineRuler: restoreFocusRuler(persisted.focusTimelineRuler),
-    activeWorkspaceId: reseatActiveWorkspaceId(config, persisted.activeWorkspaceId),
+    activeWorkspaceId,
     mainSurface: persisted.mainSurface === 'survey' && persisted.surveyNotebookId ? 'recall' : restoredMainSurface(persisted.mainSurface),
     notebookRecoveries: restoreNotebookRecoveries(persisted.notebookRecoveries),
     recallNotebookId: typeof (persisted.recallNotebookId ?? persisted.surveyNotebookId) === 'string' ? (persisted.recallNotebookId ?? persisted.surveyNotebookId)! : null,
@@ -4496,7 +4501,6 @@ function selectPersistedInputs(state: AppState, coreSpatialReady: boolean) {
     sourceFilesInputs: state.sourceFilesInputs,
     legacyMainNoteReferences: state.legacyMainNoteReferences,
     mountedSpaceInputs: state.mountedSpaceInputs,
-    selectedSpaceMount: state.selectedSpaceMount,
     pendingAgentLaunches: retainedPendingAgentLaunches(state.pendingAgentLaunches),
     workbenchSpaceSelection: state.workbenchSpaceSelection,
     projectGroups: coreSpatialReady ? undefined : state.projectGroups,
@@ -4633,7 +4637,7 @@ function partializeAppState(state: AppState): PersistedAppState {
   if (previousPersistedInputs && previousPersistedProjection && previousCoreSpatialReady===coreSpatialReady && shallow(previousPersistedInputs, inputs)) {
     return previousPersistedProjection
   }
-  const { tabs, layouts, readNamespaceTopology: _readNamespaceTopology, projectGroups, spaceZoneBindings, documents, dirtyDocuments, documentIssues, ...presentation } = inputs
+  const { tabs, layouts, readNamespaceTopology, projectGroups, spaceZoneBindings, documents, dirtyDocuments, documentIssues, ...presentation } = inputs
   const legacyMainNoteReferences = { ...state.legacyMainNoteReferences }
   const referenceKeys = new Set<string>()
   let hasSourcePointers = Boolean(Object.keys(state.sourceFilesInputs.readSources ?? {}).length)
@@ -4650,6 +4654,7 @@ function partializeAppState(state: AppState): PersistedAppState {
       (previous?.workspaceId === occurrence.workspaceId && previous.path === occurrence.path ? previous.source : undefined)
     if (source) readSources[occurrence.pointerKey] = { workspaceId: occurrence.workspaceId, path: occurrence.path, source }
   }
+  const hasSourceWorkface = Object.values(readNamespaceTopology).some(tab => tab.source)
   const projection: PersistedAppState = {
     ...presentation,
     sourceFilesInputs: { ...presentation.sourceFilesInputs, readSources },
@@ -4661,8 +4666,8 @@ function partializeAppState(state: AppState): PersistedAppState {
     documents: Object.fromEntries(Object.entries(documents).filter(([key, document]) => dirtyDocuments[key] || hasRecoverableFileBuffer(document, documentIssues[key]) || document.noteConversion || document.noteEditing?.attempt || document.noteEditing?.input || document.noteEditing?.share || document.noteEditing?.shareUndo)),
     documentIssues: Object.fromEntries(Object.entries(documentIssues).filter(([key, issue]) => hasRecoverableFileBuffer(documents[key], issue))),
     dirtyDocuments: Object.fromEntries(Object.entries(dirtyDocuments).filter(([, dirty]) => dirty)),
-    ...(!coreSpatialReady ? { projectGroups: projectGroups!, spaceZoneBindings: spaceZoneBindings!,
-      restoredWorkbench: projectPersistedWorkbench({ tabs: tabs!, layouts: layouts! }) } : {})
+    ...(!coreSpatialReady ? { projectGroups: projectGroups!, spaceZoneBindings: spaceZoneBindings! } : {}),
+    ...(!coreSpatialReady || hasSourceWorkface ? { restoredWorkbench: projectPersistedWorkbench({ tabs: coreSpatialReady ? state.tabs : tabs!, layouts: coreSpatialReady ? state.layouts : layouts! }) } : {})
   }
   if (state.nameAuthorityRevision > 0) {
     // A name document revision confirms its exact targets, not an unrelated startup handoff.
@@ -4687,6 +4692,7 @@ export function currentCoreSpatialGraph() { return coreSpatialPersistence?.curre
 function recordClosedWorkbenchEntities(before: Record<string, WorkbenchTab>, after: Record<string, WorkbenchTab>): void {
   if (before === after) return
   for (const tab of Object.values(before)) {
+    if (tab.source) continue
     const retained = after[tab.id]
     if (!retained) coreSpatialPersistence?.removeEntity(tab.id)
     else for (const regionId of Object.keys(tab.regions)) {
@@ -4694,6 +4700,18 @@ function recordClosedWorkbenchEntities(before: Record<string, WorkbenchTab>, aft
     }
   }
 }
+function sameOrdinaryWorkbench(state: AppState, previous: AppState): boolean {
+  if (state.tabs === previous.tabs && state.layouts === previous.layouts) return true
+  const changed = (next: Record<string, unknown>, prior: Record<string, unknown>, source: (id: string) => boolean) => {
+    const nextKeys = Object.keys(next).filter(id => !source(id)), priorKeys = Object.keys(prior).filter(id => !source(id))
+    return nextKeys.length === priorKeys.length && nextKeys.every(id => prior[id] === next[id])
+  }
+  const sourceTabs = new Set(Object.values(state.tabs).filter(tab => tab.source).map(tab => tab.id))
+  const previousSourceTabs = new Set(Object.values(previous.tabs).filter(tab => tab.source).map(tab => tab.id))
+  return changed(state.tabs, previous.tabs, id => sourceTabs.has(id) || previousSourceTabs.has(id)) &&
+    changed(state.layouts, previous.layouts, isOriginalSourceWorkspaceProjection)
+}
+
 let disposeCoreSpatial:(()=>void)|null=null
 
 /** Capture only durable workface facts through the original Core spatial owner. */
@@ -4747,8 +4765,10 @@ function connectSpatialWorkbench(spatial: DesktopSpatialPersistence): () => void
       }))
       return [id,{...tab,regions}]
     }))}
-    const workbenchSpaceSelection=reconcileWorkbenchSpaceSelection(current.workbenchSpaceSelection,baseline,saved.graph)
-    useAppStore.setState({tabs,layouts:saved.graph.layouts,topicCategories:categoriesFromSpatial(saved.graph),projectGroups:saved.graph.projectGroups ?? [],spaceZoneBindings:desktopBindingsFromSpatial(saved.graph,current.config),workbenchSpaceSelection,
+    const workbenchSpaceSelection = current.workbenchSpaceSelection && 'sourceRuntimeId' in current.workbenchSpaceSelection
+      ? current.workbenchSpaceSelection : reconcileWorkbenchSpaceSelection(current.workbenchSpaceSelection,baseline,saved.graph)
+    const projection = preserveOriginalSourceProjection(current, { tabs, layouts: saved.graph.layouts })
+    useAppStore.setState({tabs: projection.tabs, layouts: projection.layouts, topicCategories:categoriesFromSpatial(saved.graph),projectGroups:saved.graph.projectGroups ?? [],spaceZoneBindings:desktopBindingsFromSpatial(saved.graph,current.config),workbenchSpaceSelection,
       surveyZoneSelection:isSurveyPage(current.surveyZoneSelection)?current.surveyZoneSelection:reconcileResearchCompositionSelection(current.surveyZoneSelection,saved.graph),
       recallZoneSelection:reconcileResearchCompositionSelection(current.recallZoneSelection,saved.graph)})
     applyNameAcknowledgement(saved)
@@ -4757,7 +4777,7 @@ function connectSpatialWorkbench(spatial: DesktopSpatialPersistence): () => void
   const offLocal = useAppStore.subscribe((state, previous) => {
     if (coreSpatialPersistence !== spatial || state.loading ||
       (state.topicCategories === previous.topicCategories && state.projectGroups === previous.projectGroups &&
-       state.tabs === previous.tabs && state.layouts === previous.layouts &&
+       sameOrdinaryWorkbench(state, previous) &&
        state.spaceZoneBindings === previous.spaceZoneBindings && state.config === previous.config)) return
     try { spatial.stage(captureSpatialWorkbench(spatial)) }
     catch (error) { useAppStore.getState().reportWorkbenchSaveFailure(error) }
@@ -4842,7 +4862,9 @@ export function agentRegionLocationsKnown(): boolean { return coreSpatialPersist
 
 /** The accepted Core document locates a foreign occurrence; the member Core still owns access. */
 export function ordinaryAgentSpaceMember(reference: OrdinaryMemberReference) {
-  const state = useAppStore.getState(), locals = state.config?.hosts.filter(host => host.kind === 'local') ?? []
+  const state = useAppStore.getState(), projected = originalSourceMember(state, reference)
+  if (projected) return projected
+  const locals = state.config?.hosts.filter(host => host.kind === 'local') ?? []
   const observed = sessionPresentationById(state.sessions).get(reference.sessionId)
   return ordinarySpaceMember(coreSpatialPersistence?.current?.graph, reference, locals.length === 1 ? locals[0]!.id : undefined,
     observed?.kind === 'agent' ? observed : undefined)
@@ -5693,7 +5715,6 @@ function collaborationMapSpaceTarget(state: AppState): CollaborationMapTarget {
 }
 
 export function fileNavigationSelection(state: AppState): string {
-  if (state.mainSurface === 'workbench' && state.selectedSpaceMount !== null) return JSON.stringify([state.mainSurface, state.selectedSpaceMount])
   // Survey owns its selection; a split changes the underlying Space layout, not user navigation.
   if (state.mainSurface === 'recall') return JSON.stringify([state.mainSurface, state.recallNotebookId, state.recallNoteId, state.recallZoneSelection])
   if (state.mainSurface === 'survey') return JSON.stringify([state.mainSurface, state.activeWorkspaceId, state.surveyZoneSelection, state.workbenchSpaceSelection])
@@ -5864,7 +5885,7 @@ function sourceFilesWorkbenchOwner(): ReturnType<typeof createSourceFilesWorkben
     api: api.sourceFiles,
     get: () => useAppStore.getState().sourceFilesInputs,
     set: update => useAppStore.setState(state => ({ sourceFilesInputs: update(state.sourceFilesInputs) })),
-    workspace: id => useAppStore.getState().config?.workspaces.find(workspace => workspace.id === id),
+    workspace: id => originalSpaceWorkspace(useAppStore.getState(), id, currentCoreSpatialGraph()),
     checkpoint: checkpointMountedSpaceInputs,
     runtime: async hostId => (await api.spaceMounts.call('resources', { hostId })).runtimeId,
     register: (hostId, registration) => api.spaceMounts.call('register', { hostId, registration }),
@@ -5875,7 +5896,7 @@ function sourceFilesWorkbenchOwner(): ReturnType<typeof createSourceFilesWorkben
 /** Only a related file consumer borrows a live Source observer; no global watcher or poll. */
 async function observeSourceFilesWorkspace(workspaceId: string): Promise<() => void> {
   const input = useAppStore.getState().sourceFilesInputs.selections[workspaceId]
-  if (!input?.locator || !sourceFilesWorkspaceMatches(input.workspace, useAppStore.getState().config?.workspaces.find(workspace => workspace.id === workspaceId))) return () => {}
+  if (!input?.locator || !sourceFilesWorkspaceMatches(input.workspace, originalSpaceWorkspace(useAppStore.getState(), workspaceId, currentCoreSpatialGraph()))) return () => {}
   const observer = await api.sourceFiles.watch(input.target, sourceFilesQuery(input.locator, ''), async event => {
     if (event.type === 'effect') await prepareSourceFileEffect(workspaceId, input.locator!)(event.data)
     else if (event.type === 'error' || event.type === 'end') useAppStore.setState(state => {
@@ -5895,7 +5916,7 @@ function prepareSourceFileEffect(workspaceId: string, locator: SourceFilesLocato
   return async (effect: FileMutationEffect) => {
     const owns = () => {
       const state = useAppStore.getState(), selected = state.sourceFilesInputs.selections[workspaceId]
-      return selected === selection && selected?.locator === locator && sourceFilesWorkspaceMatches(selected.workspace, state.config?.workspaces.find(workspace => workspace.id === workspaceId))
+      return selected === selection && selected?.locator === locator && sourceFilesWorkspaceMatches(selected.workspace, originalSpaceWorkspace(state, workspaceId, currentCoreSpatialGraph()))
     }
     if (!owns()) return // The original receipt still settles its request; later Source selection is never rewritten.
     const held = captureFileEffect(before, workspaceId, locator, effect)
@@ -5937,7 +5958,6 @@ function prepareSourceFileEffect(workspaceId: string, locator: SourceFilesLocato
 export const useAppStore = create<AppState>()(persist<AppState, [], [], PersistedAppState>((set, get) => ({
   restoredWorkbench: null,
   mountedSpaceInputs: {},
-  selectedSpaceMount: null,
   mountedSpaceObservations: {},
   mountedSpaceSessions: {},
   observeSpaceMountSessions(target, update) {
@@ -5947,15 +5967,130 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     })
   },
   mountSpace(target, reveal = true) {
-    const key = spaceMountKey(target.reference)
-    set(state => ({ mountedSpaceInputs: editMountedSpaceInput(state.mountedSpaceInputs, key, current => {
-      const { kind: _privateInput, ...retained } = current ?? {}
-      return { ...retained, target: { ...current?.target, ...target, reference: { ...current?.target.reference, ...target.reference } }, drafts: current?.drafts ?? {} }
-    }), ...(reveal ? { selectedSpaceMount: key, mainSurface: 'workbench' as const } : {}) }))
+    if (reveal) { get().openOriginalSpaceLocation({ target }); return }
+    set(state => ({ mountedSpaceInputs: openSourceFolderInput(state.mountedSpaceInputs, target) }))
+  },
+  openOriginalSpaceLocation(input) {
+    const target = input.target, key = spaceMountKey(target.reference)
+    let before = get()
+    let mountedSpaceInputs: unknown
+    try { mountedSpaceInputs = openSourceFolderInput(before.mountedSpaceInputs, target, input.resource) }
+    catch (cause) {
+      // A damaged private view is not a damaged Source or locator. Keep its exact bytes and continue ordinary navigation.
+      if (mountedSpaceTarget(before.mountedSpaceInputs, key)) mountedSpaceInputs = before.mountedSpaceInputs
+      else throw cause
+    }
+    const resource = input.resource ?? originalSpaceResource({ ...before, mountedSpaceInputs }, target, target.workspaceId, currentCoreSpatialGraph())
+    if (resource && resource.id !== target.workspaceId) throw new Error('The original Folder resource does not match its Space Workspace. Existing input is retained.')
+    const catalog = workbenchSelectionCatalog(before), graph = currentCoreSpatialGraph()
+    const localSourceAmbiguous = !graph && target.hostId === 'local' && (() => {
+      try { return Object.keys(mountedSpaceInputEntries(before.mountedSpaceInputs)).some(key => {
+        if (key === spaceMountKey(target.reference)) return false
+        try {
+          const other = mountedSpaceInput(before.mountedSpaceInputs, key)?.target
+          return other?.reference.spaceId === target.reference.spaceId && other.zoneId === target.zoneId && other.workspaceId === target.workspaceId
+        } catch { return false }
+      }) } catch { return true }
+    })()
+    const runtimeConfirmed = target.hostId === 'local' && (graph ? folderDirectoryFacts(graph).folders.some(fact =>
+      fact.runtimeId === target.reference.runtimeId && fact.spaceId === target.reference.spaceId && fact.zoneId === target.zoneId && fact.resource.id === target.workspaceId) : !localSourceAmbiguous)
+    const locations = runtimeConfirmed ? catalog.locations.filter(location => location.spaceId === target.reference.spaceId &&
+      location.zoneId === target.zoneId && location.workspaceId === target.workspaceId) : []
+    const projectionWorkspaceId = originalSourceWorkspaceId(target)
+    const savedView = (mountedSpaceInput(mountedSpaceInputs, key) as (import('./lib/space-mount-view').MountedSpaceInput & { view?: SpaceMountView }) | undefined)?.view
+    const requested = input.occurrence ?? (savedView?.selection ? { tabId: savedView.selection.tabId, regionId: savedView.selection.regionId,
+      displayWorkspaceId: target.workspaceId, groupId: savedView.selection.groupId } : undefined)
+    const candidates = locations.filter(location => !requested || location.tabId === requested.tabId && location.regionId === requested.regionId &&
+      (!requested.displayWorkspaceId || location.displayWorkspaceId === requested.displayWorkspaceId) &&
+      (!input.occurrence?.groupId || location.groupId === input.occurrence.groupId))
+    const selected = candidates.length === 1 ? candidates[0] : !requested && locations.length === 1 ? locations[0] : undefined
+    if (!selected && !before.layouts[projectionWorkspaceId] && savedView) {
+      const restoredScope = graph ? originalSourceScopeFromGraph(target, graph) : undefined
+      if (restoredScope) {
+        const restored = reconcileOriginalSourceProjection({ ...before, mountedSpaceInputs }, target, restoredScope)
+        set(restored)
+        before = get()
+        mountedSpaceInputs = before.mountedSpaceInputs
+      }
+    }
+    const sourceFilesInputs = resource && !before.sourceFilesInputs.selections[projectionWorkspaceId] ? { ...before.sourceFilesInputs,
+      selections: { ...before.sourceFilesInputs.selections, [projectionWorkspaceId]: {
+        workspace: { id: projectionWorkspaceId, hostId: target.hostId, path: resource.path }, target: { hostId: target.hostId, reference: target.reference },
+        selection: { kind: 'directory' as const, path: resource.path, registration: { hostId: target.hostId, reference: target.reference, zoneId: target.zoneId, workspaceId: target.workspaceId } } } } } : before.sourceFilesInputs
+    const reference = selected ? { displayWorkspaceId: selected.displayWorkspaceId, groupId: selected.groupId, tabId: selected.tabId, regionId: selected.regionId } : (() => {
+      if (!requested || requested.displayWorkspaceId && requested.displayWorkspaceId !== target.workspaceId && requested.displayWorkspaceId !== projectionWorkspaceId) return undefined
+      const tabId = originalSourceTabProjectionId(target, requested.tabId)
+      const regionId = originalSourceRegionProjectionId(target, requested.regionId), tab = before.tabs[tabId], region = tab?.regions[regionId]
+      const source = tab?.source, regionSource = region?.source, layout = before.layouts[projectionWorkspaceId]
+      const groups = layout?.groups.filter(group => group.tabOrder.includes(tabId)) ?? []
+      const group = (requested.groupId ? groups.find(group => group.id === originalSourceGroupProjectionId(target, requested.groupId!)) : undefined) ?? (groups.length === 1 ? groups[0] : undefined)
+      if (!group || tab?.workspaceId !== projectionWorkspaceId || !source || !regionSource || source.reference.runtimeId !== target.reference.runtimeId ||
+        source.reference.spaceId !== target.reference.spaceId || source.zoneId !== target.zoneId || source.workspaceId !== target.workspaceId || source.tabId !== requested.tabId ||
+        regionSource.reference.runtimeId !== target.reference.runtimeId || regionSource.reference.spaceId !== target.reference.spaceId ||
+        regionSource.zoneId !== target.zoneId || regionSource.workspaceId !== target.workspaceId || regionSource.tabId !== requested.tabId || regionSource.regionId !== requested.regionId) return undefined
+      return { displayWorkspaceId: projectionWorkspaceId, groupId: group.id, tabId, regionId }
+    })()
+    if (reference) {
+      try {
+        const tab = before.tabs[reference.tabId]!, surface = tab.regions[reference.regionId]
+        const resolved = tab.source ? { spaceId: target.reference.spaceId, zoneId: target.zoneId, workspaceId: reference.displayWorkspaceId,
+          topicId: tab.topicId ?? null, groupId: reference.groupId, tabId: reference.tabId, regionId: reference.regionId } satisfies AgentMuxDesktopSpaceSelection
+          : resolveWorkbenchOccurrenceSelection(before, catalog, { workspaceId: reference.displayWorkspaceId, groupId: reference.groupId,
+            tabId: reference.tabId, regionId: reference.regionId }, 'navigation')
+        const choice = tab.source ? { ...resolved, spaceId: target.reference.spaceId, zoneId: target.zoneId } : resolved
+        const agentFocus = surface && isSessionSurface(surface) ? focusSessionContext(before, surface.sessionId, undefined, reference) : before.agentFocus
+        const nextTab = tab.layout.activeRegionId === reference.regionId ? tab : focusWorkbenchTabRegion(tab, reference.regionId)
+        const layout = before.layouts[reference.displayWorkspaceId]!, group = layout.groups.find(group => group.id === reference.groupId)
+        const nextLayout = layout.activeGroupId === reference.groupId && group?.activeTabId === reference.tabId ? layout : activateLayoutTab(layout, reference.groupId, reference.tabId)
+        set(state => {
+          const next: AppState & { selectedSpaceMount?: unknown } = { ...state, mountedSpaceInputs, sourceFilesInputs, activeWorkspaceId: choice.workspaceId,
+            workbenchSpaceSelection: { ...choice, sourceRuntimeId: target.reference.runtimeId } as AgentMuxDesktopSpaceSelection, agentFocus,
+            tabs: nextTab === tab ? state.tabs : { ...state.tabs, [reference.tabId]: nextTab },
+            layouts: nextLayout === layout ? state.layouts : { ...state.layouts, [reference.displayWorkspaceId]: nextLayout },
+            mainSurface: 'workbench', retainedSpatialFocus: null, workbenchNavigationInputPolicy: null, regionCaretFocus: null }
+          delete next.selectedSpaceMount
+          return next
+        })
+        return
+      } catch { /* A changed ordinary occurrence remains unknown; the original Zone stays selected below. */ }
+    }
+    const workspaceId = projectionWorkspaceId
+    set(state => {
+      const next: AppState & { selectedSpaceMount?: unknown } = { ...state, mountedSpaceInputs, sourceFilesInputs, activeWorkspaceId: workspaceId, mainSurface: 'workbench', retainedSpatialFocus: null,
+        workbenchNavigationInputPolicy: null, regionCaretFocus: null,
+        workbenchSpaceSelection: { spaceId: target.reference.spaceId, zoneId: target.zoneId, workspaceId,
+          topicId: catalog.spaces.find(space => space.spaceId === target.reference.spaceId)?.topicId ?? null, tabId: null, groupId: null, regionId: null,
+          sourceRuntimeId: target.reference.runtimeId } as AgentMuxDesktopSpaceSelection }
+      delete next.selectedSpaceMount
+      return next
+    })
+  },
+  openOriginalSpaceLauncher(workspaceId, tabGroupId) {
+    const entry = originalSourceEntryForSelection(get(), workspaceId)
+    if (!entry) return null
+    const target = entry.target, tabId = originalSourceLauncherTabId(target), regionId = originalSourceRegionProjectionId(target, originalSourceLauncherRegionId)
+    let created = false
+    set(state => {
+      const layout = state.layouts[workspaceId], group = layout?.groups.find(group => group.id === tabGroupId)
+      if (!layout || !group) return state
+      const source = { reference: { ...target.reference }, zoneId: target.zoneId, workspaceId: target.workspaceId, tabId: 'new-work:' + target.zoneId }
+      const existing = state.tabs[tabId]
+      const tab = existing ?? { id: tabId, workspaceId, titleRegionId: regionId, layout: createWorkbenchViewLayout(regionId),
+        regions: { [regionId]: { regionId, kind: 'launcher' as const, workspaceId, source: { ...source, regionId: originalSourceLauncherRegionId } } },
+        source, space: { spaceId: target.reference.spaceId, zoneId: target.zoneId }, name: 'New work' }
+      const composition = addTabOccurrence(layout, tabGroupId, tabId)
+      if (!composition) return state
+      created = true
+      return { tabs: { ...state.tabs, [tabId]: tab }, activeWorkspaceId: workspaceId, mainSurface: 'workbench' as const,
+        layouts: { ...state.layouts, [workspaceId]: { ...composition, activeGroupId: tabGroupId,
+          groups: composition.groups.map(candidate => candidate.id === tabGroupId ? { ...candidate, activeTabId: tabId } : candidate) } },
+        workbenchSpaceSelection: { spaceId: target.reference.spaceId, zoneId: target.zoneId, workspaceId, topicId: null, tabId, groupId: tabGroupId, regionId,
+          sourceRuntimeId: target.reference.runtimeId } as AgentMuxDesktopSpaceSelection }
+    })
+    return created ? { tabId, regionId } : null
   },
   openSourceFolder(target) {
-    const key = spaceMountKey(target.reference)
-    set(state => ({ mountedSpaceInputs: openSourceFolderInput(state.mountedSpaceInputs,target), selectedSpaceMount: key, mainSurface: 'workbench' as const }))
+    get().openOriginalSpaceLocation({ target })
   },
   retainSpaceMountRegistration(key, update) {
     set(state => ({ mountedSpaceInputs: editMountedRegistration(state.mountedSpaceInputs, key, update) }))
@@ -5969,18 +6104,14 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   editSpaceMountLauncher(key, slot, selection) {
     set(state => ({ mountedSpaceInputs: editMountedLauncherSelection(state.mountedSpaceInputs, key, slot, selection) }))
   },
-  selectSpaceMount(key) {
-    if (key !== null && !mountedSpaceTarget(get().mountedSpaceInputs, key)) throw new Error('The original mounted Space reference is unavailable. Other work is kept.')
-    set({ selectedSpaceMount: key, ...(key === null ? {} : { mainSurface: 'workbench' as const }) })
-  },
   editSpaceMountView(key, view) {
     set(state => ({ mountedSpaceInputs: editMountedSpaceInput(state.mountedSpaceInputs, key, current => {
-      if (!current) throw new Error('The original mounted Space reference is unavailable. Its view was not moved.')
+      if (!current) throw new Error('The original Source reference is unavailable. Its view was not moved.')
       return { ...current, view }
     }) }))
   },
-  editSpaceMountDraft(key, tabId, regionId, text, view) {
-    set(state => ({ mountedSpaceInputs: editMountedSpaceDraftInput(state.mountedSpaceInputs,key,tabId,regionId,text,view) }))
+  editSpaceMountDraft(key, tabId, regionId, text, view, zoneId) {
+    set(state => ({ mountedSpaceInputs: editMountedSpaceDraftInput(state.mountedSpaceInputs,key,tabId,regionId,text,view,undefined,zoneId) }))
   },
   observeSpaceMount(target, observation) {
     const key = spaceMountKey(target.reference)
@@ -5988,7 +6119,11 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     set(state => {
       const before = state.mountedSpaceObservations[key], snapshot = observation.snapshot
       if (snapshot && before?.snapshot?.source.ownerInstanceId === snapshot.source.ownerInstanceId && snapshot.revision < before.snapshot.revision) return state
-      return { mountedSpaceObservations: { ...state.mountedSpaceObservations, [key]: { ...before, ...observation,
+      const selectedTab = state.workbenchSpaceSelection?.tabId ? state.tabs[state.workbenchSpaceSelection.tabId] : undefined
+      const ordinaryLocalOccurrence = target.hostId === 'local' && state.activeWorkspaceId === target.workspaceId && selectedTab && !selectedTab.source
+      const reconciled = snapshot?.scope.space ? reconcileOriginalSourceProjection(state, target, snapshot) : {}
+      const projection = ordinaryLocalOccurrence ? { mountedSpaceInputs: reconciled.mountedSpaceInputs } : reconciled
+      return { ...projection, mountedSpaceObservations: { ...state.mountedSpaceObservations, [key]: { ...before, ...observation,
         ...(snapshot?.scope.space ? { lastPresentSnapshot: snapshot } : {}) } } }
     })
   },
@@ -6657,7 +6792,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         coreSpatialPersistence = spatialOwner
         try {
           const spatial=await spatialOwner.read()
-          if(spatial) set({topicCategories:categoriesFromSpatial(spatial.graph),projectGroups:spatial.graph.projectGroups ?? [],restoredWorkbench:desktopWorkbenchFromSpatial(spatial.graph,id=>get().reportWorkbenchSaveFailure(new Error('Host resources are unavailable for saved Tab '+id+'. Its Core identity is retained. Restore the original Host connection.'))),spaceZoneBindings:desktopBindingsFromSpatial(spatial.graph,get().config)})
+          const durableWorkbench = get().restoredWorkbench ?? projectPersistedWorkbench({ tabs: get().tabs, layouts: get().layouts })
+          if(spatial) set({topicCategories:categoriesFromSpatial(spatial.graph),projectGroups:spatial.graph.projectGroups ?? [],restoredWorkbench:preserveOriginalSourceProjection(durableWorkbench,{...desktopWorkbenchFromSpatial(spatial.graph,id=>get().reportWorkbenchSaveFailure(new Error('Host resources are unavailable for saved Tab '+id+'. Its Core identity is retained. Restore the original Host connection.'))),layouts:spatial.graph.layouts}),spaceZoneBindings:desktopBindingsFromSpatial(spatial.graph,get().config)})
         } catch(error) {get().reportWorkbenchSaveFailure(error)}
       } else get().reportWorkbenchSaveFailure(new Error('Core spatial storage API is unavailable. Original work is retained; restore the Host connection to save positions.'))
       // Restored intent is readable evidence. Only an explicit Send can authorize its execution.
@@ -6775,6 +6911,23 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         } : null,
         errorDismissed: false
       })
+      // Legacy Mounted selections are only restored as ordinary original-Space navigation.
+      // The locator and every private input remain in their existing user-document owner.
+      const legacySelectedSpaceMount = (persistedState as PersistedAppState).selectedSpaceMount
+      let restoredSourceTarget = typeof legacySelectedSpaceMount === 'string' ? mountedSpaceTarget(restoredUi.mountedSpaceInputs, legacySelectedSpaceMount) : undefined
+      if (!restoredSourceTarget) {
+        const candidates = Object.keys(mountedSpaceInputEntries(restoredUi.mountedSpaceInputs)).flatMap(key => {
+          try {
+            const input = mountedSpaceInput(restoredUi.mountedSpaceInputs, key) as (import('./lib/space-mount-view').MountedSpaceInput & { view?: SpaceMountView }) | undefined
+            return input?.target.workspaceId === restoredUi.activeWorkspaceId && input.view?.selection ? [input.target] : []
+          } catch { return [] }
+        })
+        if (candidates.length === 1) restoredSourceTarget = candidates[0]
+      }
+      if (restoredSourceTarget) {
+        try { get().openOriginalSpaceLocation({ target: restoredSourceTarget }) }
+        catch (cause) { get().reportError(cause) }
+      }
       // Executable observations continue behind the usable workface. Publication and
       // persistence above depend only on their own durable/configuration boundary.
       if (initialHost) {
@@ -6976,7 +7129,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   },
   async selectWorkspace(id) {
     hostHomeNavigation = undefined
-    set({ selectedSpaceMount: null, workbenchSpaceSelection: null, workbenchNavigationInputPolicy: null, regionCaretFocus: null })
+    set({ workbenchSpaceSelection: null, workbenchNavigationInputPolicy: null, regionCaretFocus: null })
     if (get().retainedSpatialFocus !== null) set({ retainedSpatialFocus: null })
     set({ activeWorkspaceId: id, mainSurface: 'workbench', regionCaretFocus: null, error: null, errorDismissed: true })
     const state = get()
@@ -6993,7 +7146,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       const existingLayout = state.layouts[workspace.id]
       return {
         ...adoptedConfig(state.activeWorkspaceId, result.config),
-        ...(reveal ? { activeWorkspaceId: workspace.id, selectedSpaceMount: null, workbenchSpaceSelection: null, workbenchNavigationInputPolicy: null,
+        ...(reveal ? { activeWorkspaceId: workspace.id, workbenchSpaceSelection: null, workbenchNavigationInputPolicy: null,
           mainSurface: 'workbench' as const, regionCaretFocus: null, error: null, errorDismissed: true } : {}),
         layouts: existingLayout
           ? state.layouts
@@ -7164,6 +7317,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       { workspaceId, groupId: tabGroupId, tabId }, intent) }
     catch (error) { current.reportError(error, { kind: 'indeterminate' }); return }
     const tab = current.tabs[tabId]
+    if (tab?.source) choice = { ...choice, sourceRuntimeId: tab.source.reference.runtimeId } as AgentMuxDesktopSpaceSelection
     const surface = tab ? titleWorkbenchSurface(tab) : null
     const activeRegion = tab?.regions[tab.layout.activeRegionId]
     const focusedSessionId = activeRegion && isSessionSurface(activeRegion) ? activeRegion.sessionId : null
@@ -8476,6 +8630,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     return result
   },
   async setTabDisplayPlacement(tabId, displayWorkspaceId, groupId, present) {
+    const unavailable = originalSourceActionUnavailable(get(), displayWorkspaceId, 'move display placement')
+    if (unavailable) { get().reportError(unavailable); throw unavailable }
     const result = await get().executeControl({ schemaVersion: 5, requestId: `binding:${mintObjectId()}`,
       operation: present ? 'space.bind' : 'space.unbind', binding: { kind: 'tab-group', tabId, displayWorkspaceId, groupId } })
     if (result.operation !== 'space.bind' && result.operation !== 'space.unbind') throw new Error('The binding owner returned a different operation.')
@@ -8550,7 +8706,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       warmLauncherId({ tabGroupId: targetTabGroupId, regionId: tab.layout.activeRegionId }))
     set((state) => ({
       // Only a successful explicit main-surface navigation changes global selection.
-      ...(reveal ? { activeWorkspaceId: displayId, selectedSpaceMount: null, mainSurface: 'workbench' as const, regionCaretFocus: null,
+      ...(reveal ? { activeWorkspaceId: displayId, mainSurface: 'workbench' as const, regionCaretFocus: null,
         workbenchSpaceSelection: selectedObject, workbenchNavigationInputPolicy: null, retainedSpatialFocus: null } : {}),
       tabs: { ...state.tabs, [tab.id]: tab },
       ...(initialInputs ? {
@@ -8588,12 +8744,16 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     return false
   },
   async prepareWorkbenchClose(input) {
+    const unavailable = originalSourceActionUnavailable(get(), input.target.displayWorkspaceId, 'close')
+    if (unavailable) throw unavailable
     const request: SpaceClosePrepare = { ...input, operationId: input.operationId ?? mintObjectId() }
     const result = parseSpaceCloseResult('space.close.prepare', await api.workbenchClose.call('space.close.prepare', request), request)
     if (!result.operation || !__AGENTMUX_WEB_PREVIEW__ && result.operation.diskDurability !== 'confirmed') throw new Error('The original close plan has no confirmed save. Its ID, workface and drafts are retained; inspect the same operation.')
     return result.operation
   },
   async applyWorkbenchClose(record) {
+    const unavailable = originalSourceActionUnavailable(get(), record.plan.target.displayWorkspaceId, 'close')
+    if (unavailable) throw unavailable
     const request = { operationId: record.operationId, expectedPlanDigest: record.planDigest, decisions: spaceCloseDecisions(record.plan) }
     const result = parseSpaceCloseResult('space.close.apply', await api.workbenchClose.call('space.close.apply', request), request).operation!
     if (result.outcome !== 'applied' || result.diskDurability !== 'confirmed') {
@@ -8699,6 +8859,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     } catch (error) { get().reportError(error); return false }
   },
   moveTab(workspaceId, tabId, sourcePaneId, targetPaneId, visibleTargetIndex) {
+    const unavailable = originalSourceActionUnavailable(get(), workspaceId, 'move')
+    if (unavailable) { get().reportError(unavailable); return }
     const current = get()
     if (!workbenchViewCloseAllowsView(current.closingWorkbenchViews, tabId)) return
     const layout = current.layouts[workspaceId]
@@ -8718,6 +8880,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     }))
   },
   moveTabToNewGroup(workspaceId, tabId, sourcePaneId, targetPaneId, direction) {
+    const unavailable = originalSourceActionUnavailable(get(), workspaceId, 'move')
+    if (unavailable) { get().reportError(unavailable); return }
     const current = get()
     if (!workbenchViewCloseAllowsView(current.closingWorkbenchViews, tabId)) return
     const layout = current.layouts[workspaceId]
@@ -8761,6 +8925,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     try { choice = resolveWorkbenchOccurrenceSelection(get(), workbenchSelectionCatalog(get()),
       { workspaceId, groupId: tabGroupId, tabId, regionId }, cause === 'navigation' ? 'navigation' : 'local') }
     catch (error) { get().reportError(error, { kind: 'indeterminate' }); return }
+    if (tab.source) choice = { ...choice, sourceRuntimeId: tab.source.reference.runtimeId } as AgentMuxDesktopSpaceSelection
     set((state) => ({
       workbenchSpaceSelection: choice, activeWorkspaceId: choice.workspaceId, workbenchNavigationInputPolicy: null, retainedSpatialFocus: null,
       recentMoteAgents,
@@ -8802,6 +8967,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     set((state) => (state.regionCaretFocus?.nonce === nonce ? { regionCaretFocus: null } : state))
   },
   moveSessionViewToWorkspace(regionId, targetWorkspaceId) {
+    const unavailable = originalSourceActionUnavailable(get(), targetWorkspaceId, 'move Session view')
+    if (unavailable) { get().reportError(unavailable); return }
     const state = get()
     const owner = findWorkbenchRegion(state.tabs, regionId)
     if (!owner) return
@@ -8838,6 +9005,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     get().focusRegion(result.target.workspaceId, result.target.tabId, result.target.regionId)
   },
   splitRegion(workspaceId, tabId, regionId, direction, initialRequest) {
+    const unavailable = originalSourceActionUnavailable(get(), workspaceId, 'split')
+    if (unavailable) { get().reportError(unavailable); return }
     const current = get()
     if (!workbenchViewCloseAllowsView(current.closingWorkbenchViews, tabId)) return
     const tab = current.tabs[tabId]
@@ -8857,6 +9026,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     return addedRegionId
   },
   arrangeTabRegions(workspaceId, tabId, mode) {
+    const unavailable = originalSourceActionUnavailable(get(), workspaceId, 'arrange')
+    if (unavailable) { get().reportError(unavailable); return }
     const current = get()
     if (!workbenchViewCloseAllowsView(current.closingWorkbenchViews, tabId)) return
     const tab = current.tabs[tabId]
@@ -8877,6 +9048,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     set((state) => ({ tabs: { ...state.tabs, [tabId]: arranged } }))
   },
   swapRegions(workspaceId, tabId, regionIdA, regionIdB) {
+    const unavailable = originalSourceActionUnavailable(get(), workspaceId, 'swap')
+    if (unavailable) { get().reportError(unavailable); return }
     const current = get()
     if (!workbenchViewCloseAllowsView(current.closingWorkbenchViews, tabId)) return
     const tab = current.tabs[tabId]
@@ -8888,6 +9061,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     set((state) => ({ tabs: { ...state.tabs, [tabId]: nextTab } }))
   },
   promoteRegionToTab(workspaceId, tabId, regionId) {
+    const unavailable = originalSourceActionUnavailable(get(), workspaceId, 'promote')
+    if (unavailable) { get().reportError(unavailable); return }
     const current = get()
     if (!workbenchViewCloseAllowsView(current.closingWorkbenchViews, tabId)) return
     // 合法性（Tab 归属、格在场、只剩一格是 no-op）全由 reducePromoteRegionToTab 自己守；促升不成立时
@@ -9138,10 +9313,14 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     })
   },
   async renameAgent(sessionId, name, expectedNameRevision) {
+    const unavailable = get().activeWorkspaceId ? originalSourceActionUnavailable(get(), get().activeWorkspaceId!, 'rename') : undefined
+    if (unavailable) { get().reportError(unavailable); return false }
     try { const result = await commitDisplayName({ kind: 'agent-session', id: sessionId }, name, 'manual', expectedNameRevision); return result.applied && result.diskDurability === 'confirmed' }
     catch { return false }
   },
   async renameTab(tabId, name, expectedNameRevision) {
+    const unavailable = get().activeWorkspaceId ? originalSourceActionUnavailable(get(), get().activeWorkspaceId!, 'rename') : undefined
+    if (unavailable) { get().reportError(unavailable); return false }
     try { const result = await commitDisplayName({ kind: 'tab', id: tabId }, name, 'manual', expectedNameRevision); return result.applied && result.diskDurability === 'confirmed' }
     catch { return false }
   },
@@ -9177,8 +9356,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     catch (error) { state.reportError(error, { kind: 'indeterminate' }); return false }
     const surface = tab.regions[reference.regionId]!
     const agentFocus = isSessionSurface(surface) ? focusSessionContext(state, surface.sessionId, undefined, reference) : state.agentFocus
-    if (!sameSpatialValue(choice, state.workbenchSpaceSelection) || state.activeWorkspaceId !== choice.workspaceId || agentFocus !== state.agentFocus || state.selectedSpaceMount !== null) {
-      set({ selectedSpaceMount: null, workbenchSpaceSelection: choice, activeWorkspaceId: choice.workspaceId, retainedSpatialFocus: null,
+    if (!sameSpatialValue(choice, state.workbenchSpaceSelection) || state.activeWorkspaceId !== choice.workspaceId || agentFocus !== state.agentFocus) {
+      set({ workbenchSpaceSelection: choice, activeWorkspaceId: choice.workspaceId, retainedSpatialFocus: null,
         workbenchNavigationInputPolicy: null, regionCaretFocus: null, agentFocus })
     }
     return true
@@ -10059,6 +10238,11 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     }
   },
   async attachPersistedFileDocument(workspaceId, path) {
+    const sourceFilesInputs = ensureOriginalSourceFilesInput(get(), workspaceId, currentCoreSpatialGraph())
+    if (sourceFilesInputs !== get().sourceFilesInputs) {
+      set({ sourceFilesInputs })
+      await get().resolveFilesSource(workspaceId)
+    }
     await loadPersistedFileDocument(workspaceId, path)
   },
   clearDocumentRevealTarget(key) {
@@ -11068,6 +11252,14 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   },
   updateDocument(tabId, content, regionId) {
     set(state => {
+      const source = originalSourceFileSurface(state, tabId, regionId)
+      if (source) {
+        if (source.workspaceId === undefined || source.path === undefined) return state
+        const key = documentKey(source.workspaceId, source.path), previous = state.documents[key], next = reduceFileDocumentContent(state, source.workspaceId, source.path, content)
+        if (!previous?.noteEditing?.input || previous.content === content) return next
+        return { ...next, documents: { ...next.documents, [key]: { ...next.documents[key]!, noteEditing: { ...next.documents[key]!.noteEditing, input: undefined } } },
+          retainedDocumentDrafts: { ...state.retainedDocumentDrafts, [key]: [...state.retainedDocumentDrafts[key] ?? [], previous] } }
+      }
       const next = reduceDocumentContent(state, tabId, content, regionId), surface = fileSurface(state.tabs[tabId], regionId)
       if (!surface) return next
       const key = documentKey(surface.workspaceId, surface.path), previous = state.documents[key]

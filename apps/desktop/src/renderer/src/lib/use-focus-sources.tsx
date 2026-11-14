@@ -10,7 +10,7 @@ import { spaceMountKey, type SpaceMountMemberSurface, type SpaceMountMemberTarge
 import { api } from './api'
 import { agentRegionLocationBindings, ordinaryAgentSpaceMember, useAppStore } from '../store'
 import { workbenchSelectionCatalog } from './desktop-focus-navigation'
-import { mountedSpaceInput, mountedSpaceInputs, mountedSpaceRegions, mountedSpaceTarget, projectMountedSpaceView, type MountedSpaceRegion } from './space-mount-view'
+import { mountedSpaceInputs, mountedSpaceRegions, mountedSpaceTarget, type MountedSpaceRegion } from './space-mount-view'
 import { mountedSessionFacts } from './space-mount-sessions'
 import { useSpaceSourceReader } from '../components/SpaceSourceReaders'
 import { agentContextForSession, agentContextForConversation, type FocusContext } from './focus-context'
@@ -19,6 +19,7 @@ import { focusContextIdentityKey, type FocusContextIdentity, type FocusContextOc
 import type { WorkbenchProjectionSelection } from './workbench-projection'
 import { focusSourceContextId, focusSourceHostId, focusSourceKey, focusSourceWorkspace, matchingFocusContext, unobservedFocusContext } from './focus-source-model'
 import { readSourceConversationRecap, sourceConversationPort } from './focus-source-conversation'
+import { originalSpaceResource, originalSourceRegionProjectionId, originalSourceTabProjectionId, originalSourceWorkspaceId } from './original-space-navigation'
 
 type Location = FocusContextAccess['locations'][number] & { member: MountedSpaceRegion; snapshot?: SpaceSnapshot }
 type Candidate = { key: string; runtimeId?: string; sid: string; locations: Location[]; target?: SpaceMountMemberTarget; issue?: string }
@@ -139,7 +140,6 @@ function openSourceLocation(location: Location, surface: 'agents' | 'workbench',
     return true
   }
   const state = useAppStore.getState(), key = spaceMountKey(location.source.reference)
-  const input = mountedSpaceInput(state.mountedSpaceInputs, key)
   const original = state.mountedSpaceObservations[key]?.snapshot ?? location.snapshot
   if (original?.scope.space) {
     const member = original.scope.regions.find(region => region.regionId === location.regionId && region.tabId === location.tabId)
@@ -147,15 +147,9 @@ function openSourceLocation(location: Location, surface: 'agents' | 'workbench',
       state.reportError(Error('This original task position changed. Its task and other workfaces are retained; choose a current position.')); return false
     }
   }
-  const view = original ? projectMountedSpaceView(input?.view, original) : input?.view
-  const group = view?.composition.groups.find(group => group.tabOrder.includes(location.tabId))
-  if (!input || !view || !group) {
-    state.reportError(Error('This original task position is unavailable. Its task and the current workface are retained; refresh its source and choose a current position.'))
-    return false
-  }
-  state.editSpaceMountView(key, { ...view, selection: { groupId: group.id, tabId: location.tabId, regionId: location.regionId },
-    composition: { ...view.composition, activeGroupId: group.id, groups: view.composition.groups.map(item => item.id === group.id ? { ...item, activeTabId: location.tabId } : item) } })
-  useAppStore.setState({ selectedSpaceMount: key, mainSurface: surface })
+  state.openOriginalSpaceLocation({ target: location.source, resource: originalSpaceResource(state, location.source),
+    occurrence: { tabId: location.tabId, regionId: location.regionId, displayWorkspaceId: location.source.workspaceId } })
+  useAppStore.setState({ mainSurface: surface })
   return true
 }
 
@@ -165,7 +159,7 @@ export function useFocusSources({ visible, contexts, onSelectLocation, onChooseL
   onFocusContext?: (context: FocusContext) => void }) {
   const inputs = useAppStore(state => state.mountedSpaceInputs), observations = useAppStore(state => state.mountedSpaceObservations)
   const metadata = useAppStore(state => state.mountedSpaceSessions), config = useAppStore(state => state.config)
-  const catalog = useAppStore(workbenchSelectionCatalog), tabs = useAppStore(state => state.tabs), bindings = useAppStore(agentRegionLocationBindings)
+  const catalog = useAppStore(workbenchSelectionCatalog), tabs = useAppStore(state => state.tabs), layouts = useAppStore(state => state.layouts), bindings = useAppStore(agentRegionLocationBindings)
   const [facts, setFacts] = useState(new Map<string, ReadFact>())
   const [witnesses, setWitnesses] = useState(new Map<string, { runtimeId: string; host: HostConfig | undefined }>())
   const runtimes = useMemo(() => new Map([...witnesses].flatMap(([hostId, witness]) =>
@@ -327,13 +321,15 @@ export function useFocusSources({ visible, contexts, onSelectLocation, onChooseL
       })).values()]
       const occurrences: FocusContextOccurrence[] = candidate.locations.flatMap(location => {
         const member = location.member, resource = focusSourceWorkspace(location.source, member, location.snapshot, config, runtimes)
-        const view = (() => { try { return mountedSpaceInput(inputs, spaceMountKey(location.source.reference))?.view } catch { return undefined } })()
-        const group = location.reference?.groupId ?? view?.composition.groups.find(group => group.tabOrder.includes(location.tabId))?.id
+        const displayWorkspaceId = location.reference?.displayWorkspaceId ?? originalSourceWorkspaceId(location.source)
+        const displayTabId = location.reference?.tabId ?? originalSourceTabProjectionId(location.source, location.tabId)
+        const displayRegionId = location.reference?.regionId ?? originalSourceRegionProjectionId(location.source, location.regionId)
+        const group = location.reference?.groupId ?? layouts[displayWorkspaceId]?.groups.find(group => group.tabOrder.includes(displayTabId))?.id
         if (!group) return []
         return [{ source: { spaceId: location.source.reference.spaceId, zoneId: member.tab.zoneId, workspaceId: member.tab.workspaceId,
           hostId: resource?.hostId ?? null, ...(resource ? { resource } : {}) },
-          display: { workspaceId: location.reference?.displayWorkspaceId ?? member.tab.workspaceId, hostId: resource?.hostId ?? null,
-            groupId: group, tabId: location.tabId, regionId: location.regionId } }]
+          display: { workspaceId: displayWorkspaceId, hostId: resource?.hostId ?? null,
+            groupId: group, tabId: displayTabId, regionId: displayRegionId } }]
       })
       if (ordinary) {
         focusedContext = ordinary
@@ -373,6 +369,6 @@ export function useFocusSources({ visible, contexts, onSelectLocation, onChooseL
       readers.push(<MemberReader key={'member:' + candidate.key} candidate={candidate} visible={visible} publish={publish} refresh={refreshes.get(candidate.key) ?? 0} previous={current} />)
     }
     return { contexts: rows, identities, aliases, issues, readers: <Fragment>{readers}</Fragment> }
-  }, [sources, observations, metadata, candidates, contexts, ordinaryContexts, runtimes, facts, refreshes, inputs, config, visible, clock, publish, refresh, onSelectLocation, onChooseLocation, onFocusContext])
+  }, [sources, observations, metadata, candidates, contexts, ordinaryContexts, runtimes, facts, refreshes, inputs, layouts, config, visible, clock, publish, refresh, onSelectLocation, onChooseLocation, onFocusContext])
   return result
 }

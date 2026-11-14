@@ -24,7 +24,8 @@ const ThemeActionCloseIcon = semanticIconComponent('action.close')
 
 
 type UtilityKind = 'terminal' | 'browser' | 'note'
-export function LauncherSecondarySurfaces({ workspace, tabGroupId, launcherRef, launcherId, materializeLauncher, sections, onSectionChange, warmPreview, terminalThemeId, terminalFontSize, visible, busy, onRun }: {
+export function LauncherSecondarySurfaces({ workspace, tabGroupId, launcherRef, launcherId, materializeLauncher, sections, onSectionChange, warmPreview, terminalThemeId, terminalFontSize, visible, busy, onRun, sourceUnavailable }: {
+  sourceUnavailable?: string | undefined
   workspace: WorkspaceRecord | undefined
   tabGroupId: string
   launcherRef: { tabId: string; regionId: string } | undefined
@@ -109,7 +110,7 @@ export function LauncherSecondarySurfaces({ workspace, tabGroupId, launcherRef, 
   }, [visible, presentationActive, sections.browser, browserClosing])
   const [inputHistoryNotice, setInputHistoryNotice] = useState<string | null>(null)
   function setDraft(field: 'browser' | 'note', value: string) { writeDraft(launcherId, field, value) }
-  const disabled = !workspace || busy !== null
+  const disabled = Boolean(sourceUnavailable) || !workspace || busy !== null
   function openTerminal() { void onRun('terminal', async () => {
     const target = materializeLauncher ? materializeLauncher() : launcherRef
     if (materializeLauncher && !target) return
@@ -159,11 +160,15 @@ export function LauncherSecondarySurfaces({ workspace, tabGroupId, launcherRef, 
     </header>
   }
   return <>
+    {sourceUnavailable ? <ServiceWindowNotice title="Original Source utility unavailable" notice={{ kind: 'indeterminate', notice: {
+      step: 'Original Source utility unavailable', mode: sourceUnavailable,
+      restore: 'Use the original Core controls for this utility. The current Launcher and every private draft remain available.'
+    }}} /> : null}
     <div className="launch-surface__alt">
       <div className="launch-surfaces-stack">
         {sections.terminal !== 'hidden' ? <section className="launcher-utility launch-terminal" data-section="terminal" data-mode={sections.terminal}>
           {header('terminal')}
-          {sections.terminal === 'expanded' ? warmSession && terminalThemeId && workspace ? <div className="launch-terminal__body"><TerminalView session={warmSession} themeId={terminalThemeId} fontSize={terminalFontSize} interactiveResize={false} visible={visible} autoFocus={false} linkOrigin={{ workspaceId: workspace.id, tabGroupId }} /></div> : <div className="launcher-terminal-pending">
+          {sections.terminal === 'expanded' ? !sourceUnavailable && warmSession && terminalThemeId && workspace ? <div className="launch-terminal__body"><TerminalView session={warmSession} themeId={terminalThemeId} fontSize={terminalFontSize} interactiveResize={false} visible={visible} autoFocus={false} linkOrigin={{ workspaceId: workspace.id, tabGroupId }} /></div> : <div className="launcher-terminal-pending">
             {warmPreview.creation?.issue ? <ServiceWindowNotice title="Shell connection needs checking" notice={{ kind: 'indeterminate', notice: {
               step: warmPreview.creation.issue.controlFailure.disposition === 'not_applied' ? 'Shell creation was not applied' : 'Shell creation is unconfirmed',
               mode: `${warmPreview.creation.issue.message} ${warmPreview.creation.issue.controlFailure.disposition === 'not_applied' ? 'The Host confirmed this request was not applied.' : 'The original shell may already be running.'} Host · ${warmPreview.creation.request.hostId} · ${warmPreview.creation.request.workspacePath}. Code · ${warmPreview.creation.issue.code}${warmPreview.creation.issue.detail ? ` · ${warmPreview.creation.issue.detail}` : ''}. Request · ${warmPreview.creation.request.createOperationId}.`,

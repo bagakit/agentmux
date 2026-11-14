@@ -1,16 +1,16 @@
 import type { SpaceSnapshot } from '@agentmux/core'
 import type { SpaceMountRecord, SpaceMountView } from '../../../shared/space-mount'
-import type { FolderSpaceRegistration } from '@agentmux/core/space-folder'
+import type { FolderSpaceRegistration, FolderSpaceResource } from '@agentmux/core/space-folder'
 import { spaceMountKey } from '../../../shared/space-mount'
 import { createWorkspaceLayout, createWorkbenchViewLayout, splitWorkbenchRegion, balanceWorkbenchRegionLayout, addTabOccurrence, groupIds, regionIds, type SplitTreeNode } from '@agentmux/layout'
 
 /** Only this client's reference, composition and unsent input; the source owns membership. */
-export type MountedSpaceInput = { kind?: 'space-member-input'; navigation?: 'project'; target: SpaceMountRecord; view?: SpaceMountView; drafts: Record<string, string>; launchers?: unknown; memberInputs?: unknown }
+export type MountedSpaceInput = { kind?: 'space-member-input'; target: SpaceMountRecord; resource?: FolderSpaceResource | undefined; view?: SpaceMountView; drafts: Record<string, string>; launchers?: unknown; memberInputs?: unknown }
 export type MountedSpaceObservation = { snapshot?: SpaceSnapshot; lastPresentSnapshot?: SpaceSnapshot; error?: string | undefined; reading: boolean }
 export type MountedSpaceRegistrationInput = { kind: 'folder-registration'; hostId: string; registration: FolderSpaceRegistration; submitted: boolean; confirmed?: boolean; issue?: string }
 const object = (value: unknown): value is Record<string, unknown> => Boolean(value && typeof value === 'object' && !Array.isArray(value))
 const text = (value: unknown): value is string => typeof value === 'string' && value.length > 0 && !value.includes('\0')
-const unreadable = (): never => { throw Error('The original mounted Space view is unreadable. Its reference and input are retained; other work remains available.') }
+const unreadable = (): never => { throw Error('The original Source view is unreadable. Its reference and input are retained; other work remains available.') }
 export function mountedSpaceInputs(value: unknown): Record<string, unknown> {
   if (value === undefined) return {}
   return object(value) ? value : unreadable()
@@ -61,18 +61,15 @@ export function ensureMemberSpaceInput(value: unknown, key: string, target: Spac
   if (!original || original.reference.runtimeId !== target.reference.runtimeId || original.reference.spaceId !== target.reference.spaceId) return unreadable()
   return entries
 }
-/** Explicit project navigation promotes only this original private entry; reading never writes it. */
-export function openSourceFolderInput(value: unknown, target: SpaceMountRecord): Record<string, unknown> {
+/** Retain only original-workface locator/resource data; it never selects a second navigation destination. */
+export function openSourceFolderInput(value: unknown, target: SpaceMountRecord, resource?: FolderSpaceResource): Record<string, unknown> {
   const key = spaceMountKey(target.reference)
   return editMountedSpaceInput(value,key,current => {
-    const { kind: _privateMember, ...retained } = current ?? {}
-    return { ...retained, target: { ...current?.target,...target }, drafts: current?.drafts ?? {}, navigation: 'project' }
+    const retained = { ...current } as MountedSpaceInput & { navigation?: unknown }
+    delete retained.kind
+    delete retained.navigation
+    return { ...retained, target: { ...current?.target,...target }, resource: resource ?? current?.resource, drafts: current?.drafts ?? {} }
   })
-}
-/** Navigation decoration only; the original locator and member authority remain unchanged. */
-export function sourceFolderProjectEntry(value: unknown, key: string): boolean {
-  const entry = mountedSpaceInputs(value)[key]
-  return object(entry) && entry.navigation === 'project' && Boolean(memberSpaceInputTarget(value,key))
 }
 /** Malformed or other-source entries remain opaque; an edit replaces only its exact readable entry. */
 export function editMountedSpaceInput(value: unknown, key: string, edit: (current: MountedSpaceInput | undefined) => MountedSpaceInput): Record<string, unknown> {
@@ -81,10 +78,10 @@ export function editMountedSpaceInput(value: unknown, key: string, edit: (curren
   return next === current ? original : { ...original, [key]: next }
 }
 /** An unreadable optional window layout cannot prevent an exact member draft edit. */
-export function editMountedSpaceDraftInput(value: unknown, key: string, tabId: string, regionId: string, text: string, selectedView?: SpaceMountView, privateTarget?: SpaceMountRecord): Record<string, unknown> {
+export function editMountedSpaceDraftInput(value: unknown, key: string, tabId: string, regionId: string, text: string, selectedView?: SpaceMountView, privateTarget?: SpaceMountRecord, zoneId?: string): Record<string, unknown> {
   const entries = privateTarget ? ensureMemberSpaceInput(value,key,privateTarget) : mountedSpaceInputs(value), target = memberSpaceInputTarget(entries,key), current = entries[key]
   if (!target || !object(current) || !object(current.drafts)) return unreadable()
-  const draftKey = mountedRegionKey(target.reference,tabId,regionId)
+  const draftKey = mountedRegionKey(target.reference,tabId,regionId,zoneId)
   return current.drafts[draftKey] === text && (!selectedView || current.view === selectedView) ? entries :
     { ...entries, [key]: { ...current, ...(selectedView ? { view: selectedView } : {}), drafts: { ...current.drafts, [draftKey]: text } } }
 }
@@ -111,7 +108,7 @@ export function editMountedRegistration(value: unknown, key: string, edit: (curr
   else delete result[key]
   return result
 }
-export const mountedRegionKey = (reference: SpaceMountRecord['reference'], tabId: string, regionId: string) => JSON.stringify([reference.runtimeId, reference.spaceId, tabId, regionId])
+export const mountedRegionKey = (reference: SpaceMountRecord['reference'], tabId: string, regionId: string, zoneId?: string) => JSON.stringify(zoneId === undefined ? [reference.runtimeId, reference.spaceId, tabId, regionId] : [reference.runtimeId, reference.spaceId, zoneId, tabId, regionId])
 
 /** Default composition is a view only. Never submit it to either Core's spatial graph. */
 export function initialMountedSpaceView(snapshot: SpaceSnapshot): SpaceMountView {

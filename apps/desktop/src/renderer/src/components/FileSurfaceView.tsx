@@ -5,7 +5,8 @@ import { workspaceFileFormat } from '@agentmux/editor-extensions/catalog'
 import { documentKey, type FileWorkbenchSurface } from '../lib/workbench-tabs'
 import { joinWorkspacePath } from '../lib/workspace-paths'
 import { effectiveFileRegionMode } from '../lib/file-region-presentation'
-import { fileNavigationSelection, useAppStore } from '../store'
+import { fileNavigationSelection, useAppStore, currentCoreSpatialGraph } from '../store'
+import { originalSpaceWorkspace, originalSourceFileSurface } from '../lib/original-space-navigation'
 import { resolveWorkbenchOccurrenceSelection, workbenchSelectionCatalog } from '../lib/desktop-focus-navigation'
 import { useWorkbenchBrowserPresentation } from '../lib/workbench-presentation'
 import * as DropdownMenu from './HoverDropdownMenu'
@@ -52,8 +53,8 @@ export function FileSurfaceView({ tabId, surface, released = false, visible = tr
     if (!visible || released) return
     const read = (): FileBuildSource | null => {
       const state = useAppStore.getState(), document = state.documents[key]
-      const region = state.tabs[tabId]?.regions[surface.regionId]
-      const resource = state.config?.workspaces.find(item => item.id === surface.workspaceId)
+      const region = state.tabs[tabId]?.regions[surface.regionId] ?? originalSourceFileSurface(state, tabId, surface.regionId)
+      const resource = originalSpaceWorkspace(state, surface.workspaceId, currentCoreSpatialGraph())
       if (!document || !resource || region?.kind !== 'file' || region.workspaceId !== surface.workspaceId || region.path !== surface.path) return null
       const kind = workspaceFileFormat(surface.path).sourcePreview
       return { workspaceId: surface.workspaceId, path: surface.path, content: document.content, model: document,
@@ -96,7 +97,7 @@ export function FileSurfaceView({ tabId, surface, released = false, visible = tr
   }
   const openReference = (path: string, location?: { line: number; column?: number }) => {
     try {
-      const state = useAppStore.getState(), resource = state.config?.workspaces.find(item => item.id === surface.workspaceId)
+      const state = useAppStore.getState(), resource = originalSpaceWorkspace(state, surface.workspaceId, currentCoreSpatialGraph())
       if (!reference || !resource) throw new Error('The original File display position or resource is unconfirmed. Its content is retained.')
       const choice = resolveWorkbenchOccurrenceSelection(state, workbenchSelectionCatalog(state), {
         workspaceId: reference.displayWorkspaceId, groupId: reference.groupId, tabId, regionId: surface.regionId }, 'navigation')

@@ -59,11 +59,12 @@ export function LauncherAgentDevice({ hosts, workspace, agentWorkspace, explicit
   const placement = launcherWorkPlacement(workspace, selectedAgent,
     isScratchWorkspaceId(workspace.id) ? workReferenceHostId(hosts) : workspace.hostId)
   const target = sourceExecution?.kind === 'source-coordinator' ? sourceExecution.coordinator : sourceExecution?.agentTarget
-  const agentLabel = sourceExecution?.kind === 'source-coordinator' ? workHostLabel(hosts, sourceExecution.coordinator.hostId) : target ? target.runtimeId === sourceExecution?.target.reference.runtimeId
-    ? workHostLabel(hosts, workspace.hostId) : target.hostId : workHostLabel(hosts, placement.agentHostId)
+  const agentLabel = sourceExecution?.kind === 'source-coordinator' ? workHostLabel(hosts, sourceExecution.coordinator.hostId) : target ? target.hostId === 'local' && target.runtimeId === sourceExecution?.target.reference.runtimeId
+    ? workHostLabel(hosts, workspace.hostId) : workHostLabel(hosts, target.hostId) : workHostLabel(hosts, placement.agentHostId)
   if (isScratchWorkspaceId(workspace.id)) return <span className="launcher-work-arrangement" title="This context keeps its original project and Agent. Split tools require registered project folders.">
     <ModeIcon size={12} /><span>{agentWorkModeLabel(placement.mode)}</span>{onEditArrangement ? <button className="agent-work-text-action" type="button" onClick={onEditArrangement}>Remote work</button> : null}
   </span>
+  const arrangementWorkspaces = [workspace, ...workspaces.filter(item => item.id !== workspace.id)]
   return <Dialog.Root modal={false} open={open && active} onOpenChange={setOpen}>
     <span className="launcher-work-arrangement"><Dialog.Trigger asChild><button ref={setAnchor} type="button" className="launcher-work-arrangement__trigger" disabled={disabled || !active}
       aria-label="Agent location" title={sourceExecution ? undefined : `Agent on ${workHostLabel(hosts, placement.agentHostId)} · Project on ${workHostLabel(hosts, placement.projectHostId)}`}>
@@ -74,7 +75,7 @@ export function LauncherAgentDevice({ hosts, workspace, agentWorkspace, explicit
         <div className="agent-work-dialog__header"><Dialog.Title>Choose the Agent’s device</Dialog.Title>
           <button type="button" className="icon-button" aria-label="Close Agent device editor" title="Close Agent device editor" onClick={() => setOpen(false)}><CloseIcon size={14} /></button></div>
         <Dialog.Description className="agent-work-dialog__description">Choose a device to run the Agent for this project. The project and your draft stay here. Apply only changes this Launcher; Launch starts the task.</Dialog.Description>
-        <AgentWorkModeSetup config={{ hosts, workspaces }} active={active && open} allowLocal sourceTargets actionLabel="Apply" disabled={disabled}
+        <AgentWorkModeSetup config={{ hosts, workspaces: arrangementWorkspaces }} active={active && open} allowLocal sourceTargets actionLabel="Apply" disabled={disabled}
           presentation="anchored-editor" menuBoundary={anchor?.closest<HTMLElement>('[data-workbench-region-id]') ?? null}
           fixedResourceWorkspaceId={workspace.id}
           initialSelection={{ resourceWorkspaceId: workspace.id, agentWorkspaceId: explicitAgentWorkspaceId ?? null, ...(sourceExecution ? { source: sourceExecution } : {}) }}

@@ -56,7 +56,12 @@ export function HostOriginalSpaces({ host, active, onClose }: { host: HostConfig
       const reply = await api.spaceMounts.call('register', { hostId: input.hostId, registration: input.registration })
       confirmed = true
       const reveal = current.current.active && configValuesEqual(current.current.host, savedHost)
-      store.mountSpace({ hostId: input.hostId, reference: reply.reference, zoneId: reply.zoneId, workspaceId: reply.workspaceId }, reveal)
+      const project = resources?.workspaces.find(candidate => candidate.workspaceId === reply.workspaceId && candidate.hostId === input.registration.expectedResource.hostId &&
+        candidate.path === input.registration.expectedResource.workspacePath && (candidate.repoPath ?? candidate.path) === input.registration.expectedResource.projectRootPath)
+      const target = { hostId: input.hostId, reference: reply.reference, zoneId: reply.zoneId, workspaceId: reply.workspaceId }
+      if (reveal) store.openOriginalSpaceLocation({ target, resource: project ? { id: project.workspaceId, hostId: project.hostId, path: project.path, name: project.name,
+        kind: project.kind === 'worktree' ? 'worktree' : 'folder', ...(project.repoPath ? { repoPath: project.repoPath } : {}), ...(project.branch ? { branch: project.branch } : {}) } : undefined })
+      else store.mountSpace(target, false)
       store.retainSpaceMountRegistration(key, original => original?.registration === input.registration ? undefined : original)
       if (reveal) onClose?.()
     } catch (cause) {
@@ -91,7 +96,12 @@ export function HostOriginalSpaces({ host, active, onClose }: { host: HostConfig
       {!input.submitted ? <button type="button" className="small-button" disabled={busy} onClick={() => void sendOriginal(key, input)}>Send original registration</button> : null}
       <button type="button" className="small-button" onClick={() => void inspectOriginal(key, input)}>Inspect original registration</button>
       {Object.hasOwn(inspections, key) ? inspections[key] ? <div role="status"><p>The exact original Space is currently registered. This observation does not confirm the original write response.</p>
-        <button type="button" className="small-button" onClick={() => { try { const found = inspections[key]!; useAppStore.getState().mountSpace({ hostId: input.hostId, reference: found.reference, zoneId: found.zoneId, workspaceId: found.workspaceId }); onClose?.() } catch (cause) { setError(presentError(cause)) } }}>Open found original Space</button>
+        <button type="button" className="small-button" onClick={() => { try { const found = inspections[key]!; const expected = input.registration.expectedResource
+          const project = resources?.workspaces.find(candidate => candidate.workspaceId === found.workspaceId && candidate.hostId === expected.hostId && candidate.path === expected.workspacePath)
+          useAppStore.getState().openOriginalSpaceLocation({ target: { hostId: input.hostId, reference: found.reference, zoneId: found.zoneId, workspaceId: found.workspaceId },
+            resource: { id: found.workspaceId, hostId: expected.hostId, path: expected.workspacePath, name: project?.name ?? found.workspaceId,
+              kind: project?.kind === 'worktree' ? 'worktree' : 'folder', ...(expected.projectRootPath !== expected.workspacePath ? { repoPath: expected.projectRootPath } : {}),
+              ...(project?.branch ? { branch: project.branch } : {}) } }); onClose?.() } catch (cause) { setError(presentError(cause)) } }}>Open found original Space</button>
       </div> : <p role="status">The frozen resource's registration was not found in the current source observation. The original request remains unknown and has not been sent again.</p> : null}
       <details><summary>Original request</summary><pre>{JSON.stringify({ hostId: input.hostId, registration: input.registration }, null, 2)}</pre></details>
     </section>)}

@@ -1,7 +1,6 @@
 import type { FocusContextAccess } from '../lib/focus-context-access'
 import { spaceMountKey } from '../../../shared/space-mount'
-import { mountedSpaceInput } from '../lib/space-mount-view'
-import { MountedSpaceWorkbench } from './MountedSpaceWorkbench'
+import { originalSourceEntryForSelection, originalSourceWorkspaceId } from '../lib/original-space-navigation'
 import { useFocusSources } from '../lib/use-focus-sources'
 import { focusContextIdentityKey } from '../lib/focus-context-identity'
 import { SpaceSourceReaders } from './SpaceSourceReaders'
@@ -130,21 +129,23 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
   const sourceFacts = useFocusSources({ visible, contexts: ordinaryRows, onFocusContext: recordSourceFocus, onChooseLocation: chooseSourceLocation, ...(onSelectLocation ? { onSelectLocation } : {}) })
   const executionRows = useMemo(() => [...ordinaryRows, ...sourceFacts.contexts], [ordinaryRows, sourceFacts.contexts])
   const laneContexts = useMemo(() => [...ordinaryLaneContexts, ...sourceFacts.contexts], [ordinaryLaneContexts, sourceFacts.contexts])
-  const selectedSourceKey = useAppStore(state => typeof state.selectedSpaceMount === 'string' ? state.selectedSpaceMount : null)
-  const sourceInputs = useAppStore(state => state.mountedSpaceInputs)
+  const selectedSourceKey = useAppStore(state => {
+    const choice = state.workbenchSpaceSelection, tab = choice?.tabId ? state.tabs[choice.tabId] : undefined
+    return tab && !tab.source ? null : originalSourceEntryForSelection(state)?.key ?? null
+  })
+  const sourceChoice = useAppStore(state => state.workbenchSpaceSelection), tabs = useAppStore(state => state.tabs)
   const sourceSelection = useMemo(() => {
-    if (!selectedSourceKey) return null
-    let view: NonNullable<ReturnType<typeof mountedSpaceInput>>['view']
-    try { view = mountedSpaceInput(sourceInputs, selectedSourceKey)?.view } catch { return null }
-    const selected = view?.selection
-    if (!selected) return null
+    if (!selectedSourceKey || !sourceChoice?.tabId || !sourceChoice.regionId) return null
+    const tab = tabs[sourceChoice.tabId], region = tab?.regions[sourceChoice.regionId], source = tab?.source, regionSource = region?.source
+    if (!source || !regionSource || spaceMountKey(source.reference) !== selectedSourceKey) return null
+    const selected = { tabId: source.tabId, regionId: regionSource.regionId }
     for (const context of executionRows) {
       const access = context.access ?? sourceFacts.aliases.get(focusContextIdentityKey(context.hostId, context.id))
       const location = access?.locations.find(location => spaceMountKey(location.source.reference) === selectedSourceKey && location.tabId === selected.tabId && location.regionId === selected.regionId)
       if (access && location) return { context, access, location }
     }
     return null
-  }, [selectedSourceKey, sourceInputs, executionRows, sourceFacts.aliases])
+  }, [selectedSourceKey, sourceChoice, tabs, executionRows, sourceFacts.aliases])
   const goalLinksSelector = useMemo(createFocusGoalLinksSelector, [])
   const goalLinks = useAppStore(state => goalLinksSelector(state, visible))
   const moteIdentity = useAppStore(useShallow(state => {
@@ -170,7 +171,6 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
   const replyLines = resolveFocusReplyLines(config?.focus?.replyLines)
   const topicPresentation = resolveFocusTopicPresentation(config?.focus?.topicPresentation)
   const topicSnapshots = useAppStore(state => state.scratchTopicSnapshots)
-  const tabs = useAppStore((state) => state.tabs)
   const layouts = useAppStore(state => state.layouts)
   const selectedId = useAppStore((state) => executionFocusSessionId(state.agentFocus))
   const selectedMoteId = useAppStore(state => state.agentFocus.pmo.sessionId)
@@ -221,7 +221,6 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
       return (region?.kind === 'agent' || region?.kind === 'terminal') && region.sessionId === id
     })
     if (!reference && !hasOriginalPosition && aliases) { aliases.select(); return }
-    if (current.selectedSpaceMount) current.selectSpaceMount(null)
     selectOriginalContext(id, reference)
   }, [clearReveal, selectOriginalContext])
   const selectTimelineContext = useCallback((context: import('../lib/focus-context').FocusContext) => {
@@ -287,7 +286,7 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
     setQuery(''); setFilters(EMPTY_FOCUS_FILTERS); setAllTimelineProjects(false)
     searchRef.current?.focus()
   }
-  const closeWorkspace = () => { setSourceChoices(null); if (sourceSelection) useAppStore.getState().selectSpaceMount(null); onCloseWorkspace?.(); searchRef.current?.focus() }
+  const closeWorkspace = () => { setSourceChoices(null); onCloseWorkspace?.(); searchRef.current?.focus() }
   const focusLayoutRef = useRef<HTMLDivElement | null>(null)
   const resizingFocusRef = useRef(false)
   const adjustWorkspaceRatio = (next: number) => setWorkspaceRatio(Math.min(0.76, Math.max(0.38, next)))
@@ -650,7 +649,8 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
         <p>Choose the exact workface for this Agent.</p>{sourceChoices.locations.map(location => <button type="button" className="small-button focus-location-choice" key={JSON.stringify(location)} onClick={() => { sourceChoices.choose(location); setSourceChoices(null) }}><strong>Tab {location.tabId}</strong><small>Region {location.regionId}</small></button>)}
         <button type="button" className="small-button" onClick={() => setSourceChoices(null)}>Dismiss location choices</button>
       </div> : sourceSelection && selectedSourceKey ? <div className="focused-tab-workspace" data-focus-tab-id={sourceSelection.location.tabId}>
-        <MountedSpaceWorkbench mountKey={selectedSourceKey} visible={visible} projection={{ tabId: sourceSelection.location.tabId, regionId: sourceSelection.location.regionId, regionOnly: regionOnly === true }} />
+        <WorkspaceWorkbench workspaceId={originalSourceWorkspaceId(sourceSelection.location.source)} visible={visible}
+          {...(regionOnly ? { sourceRegion: { tabId: sourceSelection.location.tabId, regionId: sourceSelection.location.regionId } } : {})} />
       </div> : projection
         ? <div className="focused-tab-workspace" data-focus-tab-id={selectedTab?.id}
           data-focus-zone-id={projection.entity.kind === 'zone' ? projection.entity.zoneId : undefined}>

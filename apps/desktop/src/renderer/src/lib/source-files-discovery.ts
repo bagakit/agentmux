@@ -3,9 +3,10 @@ import type { AppState } from '../store'
 import { api } from './api'
 import { sourceFilesMappingMatches, sourceFilesQuery, sourceFilesWorkspaceMatches } from './source-files-workbench'
 import type { SourceFilesInput, SourceFilesInputs } from './source-files-workbench'
+import { originalSpaceWorkspace } from './original-space-navigation'
 import type { WorkspaceRecord } from '../../../shared/contracts'
 
-type State = Pick<AppState, 'config' | 'sourceFilesInputs' | 'documents'>
+type State = Pick<AppState, 'config' | 'sourceFilesInputs' | 'documents' | 'mountedSpaceInputs' | 'mountedSpaceObservations' | 'activeWorkspaceId' | 'workbenchSpaceSelection'>
 /** Error/status updates invalidate an in-flight reader but do not change its cached namespace. */
 export function sourceFilesDiscoveryNamespace(workspaceId: string | null, workspace: WorkspaceRecord | undefined,
   source: SourceFilesInput | undefined, pointers: SourceFilesInputs['readSources']): string {
@@ -26,11 +27,11 @@ function hasOriginalSource(state: State, workspaceId: string): boolean {
 async function sourceListing(workspaceId: string, path: string, mode: 'directory' | undefined, get: () => State) {
   const before = get(), input = before.sourceFilesInputs.selections[workspaceId]
   if (!input) { if (hasOriginalSource(before, workspaceId)) throw sourceUnavailable(); return null }
-  if (!input.locator || !sourceFilesWorkspaceMatches(input.workspace, before.config?.workspaces.find(workspace => workspace.id === workspaceId))) throw sourceUnavailable()
+  if (!input.locator || !sourceFilesWorkspaceMatches(input.workspace, originalSpaceWorkspace(before, workspaceId))) throw sourceUnavailable()
   const reply = await api.sourceFiles.call(input.target, 'file.list', { ...sourceFilesQuery(input.locator, path), ...(mode ? { mode } : {}) })
   const after = get()
   if (after.sourceFilesInputs.selections[workspaceId] !== input ||
-      !sourceFilesWorkspaceMatches(input.workspace, after.config?.workspaces.find(workspace => workspace.id === workspaceId)) ||
+      !sourceFilesWorkspaceMatches(input.workspace, originalSpaceWorkspace(after, workspaceId)) ||
       !reply.carrierCurrent || !reply.result.resource || !sourceFilesMappingMatches(input.locator, reply.result.resource, path)) throw sourceUnavailable()
   if (reply.result.result.status === 'unknown') throw new Error(reply.result.result.message)
   return reply.result.result

@@ -35,8 +35,6 @@ import { routeWindowShortcut } from './lib/shortcut-registry'
 import { SurfaceSwitch, TopRowLeadingChrome, WindowSidebarLayoutContext, useWindowSidebarLayout } from './components/TopRowChrome'
 import { GlobalBoardSurface } from './components/GlobalBoardSurface'
 import { GlobalFocusSurface } from './components/GlobalFocusSurface'
-import { MountedSpaceWorkbench } from './components/MountedSpaceWorkbench'
-import { SurfaceState } from './components/SurfaceState'
 import { GlobalRecallSurface } from './components/GlobalRecallSurface'
 import { GlobalSurveySurface } from './components/GlobalSurveySurface'
 import { isSurveyPage, surveyPageOwner, surveyPageProjection, surveySelectionPresentation, type SurveySelection } from './lib/survey-page-references'
@@ -58,7 +56,8 @@ import { WorkspaceWorkbench as WorkspaceWorkbenchView } from './components/Works
 import { executionFocusSessionId } from './lib/agent-focus'
 import { executionFocusPresentation, mainFocusPresentation } from './lib/focus-tab-projection'
 import { api } from './lib/api'
-import { fileNavigationSelection, useAppStore } from './store'
+import { fileNavigationSelection, useAppStore, currentCoreSpatialGraph } from './store'
+import { originalSpaceWorkspace } from './lib/original-space-navigation'
 import { observeRejectedFileExplorerDirectoryLoads } from './components/file-tree/file-explorer-report-probe'
 import { isMacPlatform } from './lib/host-platform'
 import { mountThemeRuntime, updateThemeSelection } from '@agentmux/client-ui/theme'
@@ -176,7 +175,6 @@ function DesktopApp() {
   })
 
   const mainSurface = useAppStore((state) => state.mainSurface)
-  const selectedSpaceMount = useAppStore(state => state.selectedSpaceMount)
   const focusMode = useAppStore(state => state.focusView)
   const mapTarget = useAppStore(state => state.collaborationMapTarget)
   const mapVisible = mainSurface === 'agents' && focusMode === 'map' && !settingsOpen
@@ -533,7 +531,7 @@ function DesktopApp() {
       const targets = ordinaryWorkbenchViewTargets(projected.layout ?? undefined, tabs, ordinaryProjection.displayWorkspaceId, undefined, selected)
       return Object.fromEntries(Object.entries(targets).map(([id, occurrences]) => [id, occurrences.map(target => {
         const reference = projected.selection.find(reference => reference.groupId === target.reference?.groupId && reference.tabId === id) ?? target.reference!
-        return { ...target, reference, visible: target.visible !== false && mainSurface === 'workbench' && selectedSpaceMount === null && !settingsOpen && !spaceContent.expanded, projection: ordinaryProjection,
+        return { ...target, reference, visible: target.visible !== false && mainSurface === 'workbench' && !settingsOpen && !spaceContent.expanded, projection: ordinaryProjection,
           retainedRegionId: reference.regionId, onSelectRegion: (regionId: string) => selectOrdinaryMember({ ...reference, regionId }) }
       })]))
     }
@@ -543,8 +541,8 @@ function DesktopApp() {
     const held = reference?.displayWorkspaceId === activeWorkspaceId ? reference : retainedSpatialFocus?.displayWorkspaceId === activeWorkspaceId ? retainedSpatialFocus : null
     const displayed = layoutForLogicalRegionFocus(layout, tabs, held)
     const targets = ordinaryWorkbenchViewTargets(displayed, tabs, activeWorkspaceId, undefined, held)
-    return Object.fromEntries(Object.entries(targets).map(([id, occurrences]) => [id, occurrences.map(target => ({ ...target, visible: target.visible !== false && mainSurface === 'workbench' && selectedSpaceMount === null && !settingsOpen && !spaceContent.expanded }))]))
-  }, [activeWorkspaceId, ordinaryObject.layout, tabs, mainSurface, selectedSpaceMount, settingsOpen, retainedSpatialFocus, workbenchSpaceSelection, ordinaryProjection, ordinaryLayout, selectOrdinaryMember, spaceContent.expanded]))
+    return Object.fromEntries(Object.entries(targets).map(([id, occurrences]) => [id, occurrences.map(target => ({ ...target, visible: target.visible !== false && mainSurface === 'workbench' && !settingsOpen && !spaceContent.expanded }))]))
+  }, [activeWorkspaceId, ordinaryObject.layout, tabs, mainSurface, settingsOpen, retainedSpatialFocus, workbenchSpaceSelection, ordinaryProjection, ordinaryLayout, selectOrdinaryMember, spaceContent.expanded]))
   const viewTargets = useMemo<WorkbenchViewTargets>(() => {
     const targets: Record<string, readonly WorkbenchViewTarget[]> = { ...ordinaryTargets }
     const append = (tabId: string, target: WorkbenchViewTarget) => { targets[tabId] = [...targets[tabId] ?? [], target] }
@@ -604,7 +602,9 @@ function DesktopApp() {
   const setToolDockWidth = useAppStore((state) => state.setToolDockWidth)
   const executorIdentity = useMemo(() => ({ config }), [config])
   const nativeOverlayWarning = useNativeOverlayChrome()
-  const workspace = config?.workspaces.find((item) => item.id === activeWorkspaceId)
+  const sourceInputs = useAppStore(state => state.mountedSpaceInputs)
+  const workspace = useMemo(() => originalSpaceWorkspace(useAppStore.getState(), activeWorkspaceId, currentCoreSpatialGraph()),
+    [config, activeWorkspaceId, workbenchSpaceSelection, sourceInputs, surveyBindings])
   const gitWorkspace = useAppStore(state => workspace ? workspaceZoneContext(state, workspace).resource : null)
   const initialTheme = api.ui.initialTheme
   useLayoutEffect(() => {
@@ -665,10 +665,14 @@ function DesktopApp() {
   // untouched configured workspace does not allocate a hidden launcher/editor/browser tree at startup.
   // Scratch is a real wiki-first workspace with Topic Tabs and Regions, so it follows the same
   // registry rule as a project instead of being filtered out after a Topic click.
-  const mountedWorkspaces = config?.workspaces.filter((candidate) => (
+  const workspaceCandidates = useMemo(() => {
+    if (!config) return []
+    return workspace && !config.workspaces.some(candidate => candidate.id === workspace.id) ? [...config.workspaces, workspace] : config.workspaces
+  }, [config, workspace])
+  const mountedWorkspaces = workspaceCandidates.filter((candidate) => (
     fileEditingProbe || candidate.id === activeWorkspaceId || resourceWorkspaces.has(candidate.id) || candidate.id === focusTab?.workspaceId || candidate.id === surveyCatalog?.zones.find(zone => zone.zoneId === surveySelection?.zoneId)?.workspaceId || layouts[candidate.id]?.groups.some((group) => group.tabOrder.length > 0)
-  )) ?? []
-  const toolsAvailable = mainSurface === 'workbench' && selectedSpaceMount === null && Boolean(workspace)
+  ))
+  const toolsAvailable = mainSurface === 'workbench' && Boolean(workspace)
   const toolsVisible = toolsAvailable && (toolsOpen || spaceContent.expanded)
   const toolDockMinimumWidth = getToolDockMinimumWidth(projectRailOpen)
   const toolDockMaximumWidth = compactSidebars ? Math.max(toolDockMinimumWidth, Math.min(TOOL_DOCK_MAX_WIDTH, windowWidth - 320)) : TOOL_DOCK_MAX_WIDTH
@@ -676,8 +680,7 @@ function DesktopApp() {
   // MERGE：workbench + workspace 时顶行下沉进 pane（root tabbar / chromeline），
   // 主区不再占用独立 topbar 行；Board 与欢迎页仍走顶栏。
   const mergedTopRow = mainSurface === 'agents' || mainSurface === 'survey' || mainSurface === 'recall' || (mainSurface === 'workbench' && Boolean(workspace))
-  const mountedSpaceVisible = mainSurface === 'workbench' && selectedSpaceMount !== null && !settingsOpen
-  const workbenchVisible = mainSurface === 'workbench' && selectedSpaceMount === null && !settingsOpen
+  const workbenchVisible = mainSurface === 'workbench' && !settingsOpen
   const workfaceVisible = workbenchVisible && !spaceContent.expanded
   const terminalParkingMeasurement = typeof window !== 'undefined' &&
     new URLSearchParams(window.location.search).has('agentmux-resource-probe')
@@ -877,10 +880,7 @@ function DesktopApp() {
               </div>
             <section className="workspace-main-surface" data-desktop-surface={desktopSurface[mainSurface]}
               aria-hidden={spaceContent.expanded || undefined} inert={spaceContent.expanded}>
-              {typeof selectedSpaceMount === 'string' ? <MountedSpaceWorkbench mountKey={selectedSpaceMount} visible={mountedSpaceVisible && !spaceContent.expanded} /> : null}
-              {mountedSpaceVisible && typeof selectedSpaceMount !== 'string' ? <SurfaceState title="The original mounted Space selection is unreadable" description="Its original saved input is kept. Your other work remains available."
-                actions={<button type="button" className="small-button" onClick={() => useAppStore.getState().selectSpaceMount(null)}>Return to local workface</button>} /> : null}
-              {!workspace && mainSurface === 'workbench' && selectedSpaceMount === null ? (
+              {!workspace && mainSurface === 'workbench' ? (
                 <section className="welcome">
                   <span className="brand-mark brand-mark--large"><BrandIcon size={34} /></span>
                   <div className="eyebrow">Terminal-first agent workbench</div>

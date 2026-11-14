@@ -25,7 +25,7 @@ export function useLauncherInputs(regionId: string | undefined, launcherId: stri
   const state = useAppStore.getState()
   return {
     prompt,
-    setPrompt: (value: string) => promptBinding(state).set(value),
+    setPrompt: (value: string) => { promptBinding(state).set(value) },
     names,
     setName: (field: LauncherNameField, value: string) => nameBinding(state).set(field, value),
     optionsByProvider,
