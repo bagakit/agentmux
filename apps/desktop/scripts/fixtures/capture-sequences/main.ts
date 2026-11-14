@@ -9,6 +9,7 @@ import { inspectGif } from '../../../src/shared/gif-metadata'
 import { NativeDesktop } from '@agentmux/native-desktop'
 import { AgentMuxRpcService } from '@agentmux/core'
 
+const automatic = process.env.CAPTURE_AUTO_TEST === '1'
 const live = process.env.CAPTURE_SEQUENCE_LIVE === '1', recorded = process.env.CAPTURE_RECORDED_NATIVE
 let native: NativeDesktop | undefined, sourceWindow: BrowserWindow | undefined, server: { stop(): Promise<void> } | undefined
 const out = process.env.CAPTURE_SEQUENCE_OUT!, mode = process.env.CAPTURE_SEQUENCE_MODE! as 'scroll' | 'gif'
@@ -59,9 +60,15 @@ async function run() {
     const shot = first.screenshot!; initial = { mimeType: 'image/png', dataUrl: 'data:image/png;base64,' + shot.data, width: shot.width, height: shot.height, byteLength: Buffer.byteLength(shot.data, 'base64') }; source.scale = shot.scale
     result.observations.push({ live: true, source: source.rect, scale: shot.scale, helper: process.env.CAPTURE_SEQUENCE_HELPER })
   }
+  if (automatic) { sourceWindow = new BrowserWindow({ width: 240, height: 160, show: true }); await sourceWindow.loadURL('data:text/html,<body>Existing host window</body>') }
   const owner = new CaptureSequenceOwner({ directory: join(out, 'captures'), home: join(out, 'home'), appearance: () => ({ terminalTheme: 'graphite', appAppearance: 'dark' }),
     select: async () => ({ image: initial, source }), native: () => ({ captureScreenshot: async (params: any) => {
-      assert.equal(params.mode, 'rect'); assert.deepEqual(params.rect, source.rect); assert.equal(params.excludeWindowIds.length, 1)
+      assert.equal(params.mode, 'rect'); assert.deepEqual(params.rect, source.rect); assert.equal(params.excludeWindowIds.length, automatic ? 2 : 1, 'the actual excluded background preserves exact host window exclusions')
+      if (automatic) {
+        sampleCount++
+        const next = recorded ? retainedFrames[sampleCount <= 2 ? 0 : 1]! : frame(sampleCount <= 2 ? 0 : 85).image
+        return { state: 'captured' as const, screenshot: { format: 'png' as const, data: next.dataUrl.split(',')[1]!, width: next.width, height: next.height, scale: source.scale }, selectionRect: source.rect }
+      }
       if (mode === 'scroll' && !live && sampleCount === 1) {
         sampleCount++
         const bitmap = Buffer.alloc(initial.width * initial.height * 4)
@@ -102,12 +109,39 @@ async function run() {
   if (mode === 'scroll') {
     let delivered: any = null
     const capture = new ScreenCapture({ home: join(out, 'home'), native: () => ({ captureScreenshot: async () => { throw Error('Wrong source') }, writeClipboardImage: async () => {} }),
-      appActive: () => true, present: async session => { await session.complete(initial, source, 'fixture'); return { state: 'completed' } },
+      appActive: () => true, present: async session => { await session.complete(initial, source, 'fixture', automatic ? 'excluded' : 'included'); return { state: 'completed' } },
       sequence: (kind, selection) => owner.edit(kind, selection), reportIssue: error => { throw error }, edit: async image => { delivered = image } })
     const closed = capture.capture(false, 'scroll')
     window = await until('capture window', () => BrowserWindow.getAllWindows().find(w => w !== sourceWindow))
     if (live) window.setAlwaysOnTop(true, 'floating', 1)
     await until('scrolling controls', async () => await evaluate("document.body.textContent.includes('Capture next')"))
+    if (automatic) {
+      await click('Start scrolling capture')
+      await until('automatic changed frame', async () => await evaluate("document.body.textContent.includes('2 frames')"))
+      assert.ok(sampleCount >= 3, 'unchanged native samples do not grow the captured sequence')
+      const compact = window.getContentBounds()
+      assert.ok(compact.width <= 440 && compact.height <= 360, 'automatic capture uses a compact accessible control window')
+      assert.ok(compact.x >= source.rect.x + source.rect.width || compact.x + compact.width <= source.rect.x || compact.y >= source.rect.y + source.rect.height || compact.y + compact.height <= source.rect.y, 'controls use available space outside the selected source')
+      for (const theme of ['dark', 'light']) {
+        await evaluate(`window.setCaptureFixtureTheme('${theme}')`)
+        await evaluate('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))')
+        const file = `scroll-sampling-${theme}.png`; await writeFile(join(out, file), (await window.webContents.capturePage()).toPNG()); result.screenshots.push(file)
+      }
+      await click('Stop scrolling capture')
+      await until('automatic capture returned to review', async () => await evaluate("document.body.textContent.includes('Start scrolling capture') && !document.querySelector('button.primary-button').disabled"))
+      assert.ok(window.getContentBounds().width > compact.width, 'stop restores review in the same window')
+      const snapshot = await evaluate("window.captureSequence.load()")
+      assert.equal(snapshot.frames.length, 2, 'a stopped automatic sequence retains only its actual changed frames')
+      for (const theme of ['dark', 'light']) for (const width of [860, 440]) {
+        await evaluate(`window.setCaptureFixtureTheme('${theme}')`); window.setContentSize(width, 640)
+        await evaluate('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))')
+        const file = `scroll-auto-review-${theme}-${width}.png`; await writeFile(join(out, file), (await window.webContents.capturePage()).toPNG()); result.screenshots.push(file)
+      }
+      await click('Edit long image'); await closed
+      assert.equal(delivered.height, initial.height + 85 * source.scale, 'automatic deduplication and the actual joined pixels reach the original editor consumer')
+      result.observations.push({ automatic: true, exactBackground: true, nativeSamples: sampleCount, acceptedFrames: 2, outputHeight: delivered.height })
+      result.passed = true; return
+    }
     await click('Capture next'); await until('second frame', async () => await evaluate("document.body.textContent.includes('2 frames') && !document.querySelector('button.primary-button').disabled"))
     if (!live) {
       await click('Capture next')
@@ -141,6 +175,11 @@ async function run() {
     if (live) window.setAlwaysOnTop(true, 'floating', 1)
     await until('recording controls', async () => await evaluate("document.body.textContent.includes('Start recording')"))
     await click('Start recording'); await until('four captured frames', async () => (await service.call('capture.sequence.inspect', { hostId: 'local', operationId: input.operationId }, context)).frameCount >= 4)
+    for (const theme of ['dark', 'light']) {
+      await evaluate(`window.setCaptureFixtureTheme('${theme}')`)
+      await evaluate('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))')
+      const file = `gif-sampling-${theme}.png`; await writeFile(join(out, file), (await window.webContents.capturePage()).toPNG()); result.screenshots.push(file)
+    }
     await service.call('capture.sequence.stop', { hostId: 'local', operationId: input.operationId }, context)
     await until('review controls', async () => await evaluate("document.body.textContent.includes('Mark current frame')"))
     await evaluate("[...document.querySelectorAll('button')].find(b=>b.getAttribute('aria-label')==='Previous frame').click()")

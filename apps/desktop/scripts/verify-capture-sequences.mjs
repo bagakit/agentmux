@@ -7,12 +7,13 @@ import { dirname, join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 const require = createRequire(resolve('apps/desktop/package.json')), { build } = createRequire(require.resolve('vite'))('esbuild')
 const recordedIndex = process.argv.indexOf('--recorded-native'), recorded = recordedIndex < 0 ? '' : resolve(process.argv[recordedIndex + 1])
+const automatic = process.argv.includes('--auto')
 const live = process.argv.includes('--live')
 const mode = process.argv.includes('--scroll') ? 'scroll' : process.argv.includes('--gif') ? 'gif' : null
 assert.ok(mode, 'Use --scroll or --gif to run one bounded capture path.')
 await mkdir(resolve('.local/capture-sequence-proof', mode), { recursive: true })
 const out = await mkdtemp(resolve('.local/capture-sequence-proof', mode, 'run-')), work = await mkdtemp(join(tmpdir(), 'agentmux-capture-sequence-'))
-const receipt = { passed: false, mode, live, recorded, variants: [], inputs: {}, cleanup: false }
+const receipt = { passed: false, mode, live, recorded, automatic, variants: [], inputs: {}, cleanup: false }
 const hash = bytes => createHash('sha256').update(bytes).digest('hex'), inputs = new Map()
 try {
   const app = join(work, 'app'), main = join(app, 'out/main'), preload = join(app, 'out/preload'), renderer = join(app, 'out/renderer/screenshot-editor')
@@ -38,7 +39,7 @@ try {
     await bundle({ entryPoints: ['apps/desktop/src/renderer/screenshot-editor/gif-encode.worker.ts'], outfile: join(renderer, 'gif-encode.worker.js'), platform: 'browser', format: 'esm', plugins: [{ name: 'gif-metadata-candidate', setup(builder) {
       builder.onLoad({ filter: /gif-encode\.worker\.ts$/ }, async args => { const original = await readFile(args.path, 'utf8'); return { contents: mutant && mode === 'gif' ? original.replace('delays: info.delays, keyframes }', 'delays: info.delays, keyframes: [] }') : original, loader: 'ts', resolveDir: dirname(args.path) } })
     } }] })
-    const env = { ...process.env, CAPTURE_SEQUENCE_OUT: scene, CAPTURE_SEQUENCE_MODE: mode, CAPTURE_RECORDED_NATIVE: recorded, CAPTURE_CORE_DIST: resolve('packages/core/dist'), CAPTURE_SEQUENCE_LIVE: live ? '1' : '0', CAPTURE_SEQUENCE_HELPER: resolve('packages/native-desktop/macos/.build/debug/agentmux-native-macos'), ELECTRON_RENDERER_URL: '' }; delete env.ELECTRON_RUN_AS_NODE
+    const env = { ...process.env, CAPTURE_SEQUENCE_OUT: scene, CAPTURE_SEQUENCE_MODE: mode, CAPTURE_AUTO_TEST: automatic ? '1' : '0', CAPTURE_RECORDED_NATIVE: recorded, CAPTURE_CORE_DIST: resolve('packages/core/dist'), CAPTURE_SEQUENCE_LIVE: live ? '1' : '0', CAPTURE_SEQUENCE_HELPER: resolve('packages/native-desktop/macos/.build/debug/agentmux-native-macos'), ELECTRON_RENDERER_URL: '' }; delete env.ELECTRON_RUN_AS_NODE
     const execution = await new Promise((resolve, reject) => {
       const child = spawn(require('electron'), [app], { env, stdio: ['ignore', 'pipe', 'pipe'] }); let log = '', timedOut = false
       child.stdout.on('data', bytes => { log += bytes }); child.stderr.on('data', bytes => { log += bytes })
