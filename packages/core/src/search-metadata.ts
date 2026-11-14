@@ -3,10 +3,10 @@ import type { AgentMuxSpaceCatalog, AgentMuxSpaceLocation } from './space-contro
 import type { AgentMuxSearchTarget } from './search-contract.js'
 import type { AgentSessionHistoryDescriptor } from './types.js'
 
-type Identity = { agent: Set<string>; region: Set<string>; tab: Set<string>; space: Set<string>; zone: Set<string>; capsule: Set<string>; mote: Set<string>; ids: Set<string>; text: string[] }
-const identity = (): Identity => ({ agent: new Set(), region: new Set(), tab: new Set(), space: new Set(), zone: new Set(), capsule: new Set(), mote: new Set(), ids: new Set(), text: [] })
+type Identity = { goal: Set<string>; agent: Set<string>; region: Set<string>; tab: Set<string>; space: Set<string>; zone: Set<string>; capsule: Set<string>; mote: Set<string>; ids: Set<string>; text: string[] }
+const identity = (): Identity => ({ goal: new Set(), agent: new Set(), region: new Set(), tab: new Set(), space: new Set(), zone: new Set(), capsule: new Set(), mote: new Set(), ids: new Set(), text: [] })
 const add = (set: Set<string>, ...values: (string | null | undefined)[]) => { for (const value of values) if (value) set.add(value) }
-const targetId = (target: Exclude<AmuxObjectLinkTarget, { kind: 'host' }>) => target.kind === 'agent' ? target.agentSessionId : target.kind === 'region' ? target.regionId : target.kind === 'tab' ? target.tabId : target.kind === 'space' || target.kind === 'mote' ? target.spaceId : target.kind === 'zone' ? target.zoneId : target.capsuleId
+const targetId = (target: Exclude<AmuxObjectLinkTarget, { kind: 'host' }>) => target.kind === 'goal' ? JSON.stringify([target.runtimeId, target.namespace, target.goalId]) : target.kind === 'agent' ? target.agentSessionId : target.kind === 'region' ? target.regionId : target.kind === 'tab' ? target.tabId : target.kind === 'space' || target.kind === 'mote' ? target.spaceId : target.kind === 'zone' ? target.zoneId : target.capsuleId
 export const agentMuxSearchSessionKey = (hostId: string, sessionId: string, kind: 'agent' | 'terminal' = 'agent') => JSON.stringify([hostId, kind, sessionId])
 export type AgentMuxSearchLocation = { reference: Pick<AgentMuxSpaceLocation, 'displayWorkspaceId' | 'groupId' | 'tabId' | 'regionId'>; name: string; kind: string; address: string; sessionId: string | null }
 
@@ -151,7 +151,7 @@ export function searchAgentMuxMetadata(query: string, input: AgentMuxSearchMetad
   }).map(({hostId, projectId}) => ({hostId, projectId}))
   const objects = (input.objects ?? []).filter(object => {
     const fact = identity(), original = object.target
-    if (original.kind === 'agent' || original.kind === 'region' || original.kind === 'tab' || original.kind === 'space' || original.kind === 'zone' || original.kind === 'capsule') add(fact[original.kind], targetId(original))
+    if (original.kind === 'goal' || original.kind === 'agent' || original.kind === 'region' || original.kind === 'tab' || original.kind === 'space' || original.kind === 'zone' || original.kind === 'capsule') add(fact[original.kind], targetId(original))
     else add(fact.ids, original.kind === 'terminal' ? original.terminalId : original.kind === 'project' ? original.projectId : original.kind === 'workspace' ? original.workspaceId : original.topicId)
     if (original.kind === 'mote') add(fact.mote, ...moteSpacesByTopic.get(JSON.stringify([original.hostId, original.topicId])) ?? [])
     add(fact.ids, original.hostId, ...object.identities); fact.text.push(object.name, ...object.text)

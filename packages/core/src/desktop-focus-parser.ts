@@ -39,12 +39,18 @@ function text(value: unknown, name: string, code: Code): string {
   if (typeof value !== 'string' || Buffer.byteLength(value) > AGENTMUX_CONTROL_MAX_MESSAGE_BYTES) fail(`${name} is invalid.`, code)
   return value as string
 }
+/** Goal IDs are opaque record keys; `self` is not a contextual spatial selector here. */
+function goalId(value: unknown, name: string, code: Code): string {
+  const result = text(value, name, code)
+  if (!result.trim() || Buffer.byteLength(result) > 512 || /[\0\r\n]/u.test(result)) fail(`${name} requires an exact ID.`, code)
+  return result
+}
 function budget(value: unknown, code: Code): void {
   if (Buffer.byteLength(JSON.stringify(value)) > AGENTMUX_CONTROL_MAX_MESSAGE_BYTES) fail('Desktop Control exceeds its byte budget.', code)
 }
 
 function parseDesktopFocusTarget(value: unknown, code: Code): AgentMuxDesktopFocusTarget {
-  const source = fields(value, ['kind', 'spaceId', 'zoneId', 'tabId', 'regionId', 'displayWorkspaceId', 'groupId', 'goalId', 'surface', 'view', 'hostId', 'agentSessionId', 'sectionId', 'eventId'], code)
+  const source = fields(value, ['kind', 'spaceId', 'zoneId', 'tabId', 'regionId', 'displayWorkspaceId', 'groupId', 'goalId', 'surface', 'view', 'hostId', 'agentSessionId', 'sectionId', 'eventId', 'runtimeId', 'namespace', 'section'], code)
   if (source.kind === 'space') {
     fields(source, ['kind', 'spaceId', 'zoneId', 'tabId', 'regionId', 'displayWorkspaceId', 'groupId'], code)
     const { kind: _, ...raw } = source
@@ -65,8 +71,12 @@ function parseDesktopFocusTarget(value: unknown, code: Code): AgentMuxDesktopFoc
       ...(source.hostId === undefined ? {} : { hostId: spaceControlId(source.hostId, 'Settings Host ID', code) }) }
   }
   if (source.kind === 'goal') {
-    fields(source, ['kind', 'goalId'], code)
-    return { kind: 'goal', goalId: spaceControlId(source.goalId, 'Goal ID', code) }
+    fields(source, ['kind', 'goalId', 'runtimeId', 'namespace', 'section'], code)
+    if ((source.runtimeId === undefined) !== (source.namespace === undefined)) fail('Goal reading source requires its original Runtime and namespace together.', code)
+    return { kind: 'goal', goalId: goalId(source.goalId, 'Goal ID', code),
+      ...(source.runtimeId === undefined ? {} : { runtimeId: spaceControlId(source.runtimeId, 'Goal Runtime', code) }),
+      ...(source.namespace === undefined ? {} : { namespace: spaceControlId(source.namespace, 'Goal namespace', code) }),
+      ...(source.section === undefined ? {} : { section: member(source.section, ['plan'] as const, 'Goal reading section', code) }) }
   }
   if (source.kind === 'focus-agent') {
     fields(source, ['kind', 'hostId', 'agentSessionId'], code)
@@ -125,7 +135,7 @@ function selection(value: unknown, code: Code): AgentMuxDesktopSelection {
   if (source.mainSurface !== mainSurfaces[surface]) fail('Public and internal Surface disagree.', code)
   const focusView = surface === 'focus' ? member(source.focusView, ['list', 'map'], 'Focus view', code) : null
   if (surface !== 'focus' && source.focusView !== null) fail('A non-Focus Surface cannot select a Focus view.', code)
-  return { surface, mainSurface: mainSurfaces[surface], focusView, space: spaceSelection(source.space, code), goalId: nullableId(source.goalId, 'Selected Goal', code) }
+  return { surface, mainSurface: mainSurfaces[surface], focusView, space: spaceSelection(source.space, code), goalId: source.goalId === null ? null : goalId(source.goalId, 'Selected Goal', code) }
 }
 function documentIdentity(source: Record<string, unknown>, required: boolean, code: Code): { windowId?: string; documentGeneration?: string } {
   const hasWindow = Object.hasOwn(source, 'windowId'), hasDocument = Object.hasOwn(source, 'documentGeneration')
@@ -142,7 +152,7 @@ function input(value: unknown, code: Code): AgentMuxDesktopInput {
     connected: nullableBoolean(source.connected, 'Input connected', code), visible: nullableBoolean(source.visible, 'Input visible', code), inert: nullableBoolean(source.inert, 'Input inert', code) }
 }
 function presentation(value: unknown, code: Code): AgentMuxDesktopPresentation {
-  const source = fields(value, ['provenance', 'state', 'tabId', 'regionId', 'blockers', 'windowId', 'documentGeneration', 'mote'], code)
+  const source = fields(value, ['provenance', 'state', 'tabId', 'regionId', 'blockers', 'windowId', 'documentGeneration', 'mote', 'goal'], code)
   const mote = Object.hasOwn(source, 'mote') ? (() => {
     const value = fields(source.mote, ['spaceId', 'page', 'eventId'], code)
     const page = member(value.page, ['discussion', 'threads'], 'Mote page', code)
@@ -150,7 +160,12 @@ function presentation(value: unknown, code: Code): AgentMuxDesktopPresentation {
     if (page === 'discussion' ? eventId !== null : eventId === null) fail('Mote page and original event disagree.', code)
     return { spaceId: spaceControlId(value.spaceId, 'Presented Mote Space', code, true), page, eventId }
   })() : undefined
-  const result = { ...(mote ? { mote } : {}), provenance: provenance(source.provenance, code), state: member(source.state, ['main-visible', 'floating', 'window', 'covered', 'pending', 'unknown'], 'Presentation', code),
+  const goal = source.goal === undefined ? undefined : (() => {
+    const value = fields(source.goal, ['goalId', 'runtimeId', 'namespace', 'section'], code)
+    return { goalId: goalId(value.goalId, 'Presented Goal', code), runtimeId: nullableId(value.runtimeId, 'Presented Goal Runtime', code), namespace: nullableId(value.namespace, 'Presented Goal namespace', code),
+      section: member(value.section, ['overview', 'plan', 'activity'] as const, 'Presented Goal section', code) }
+  })()
+  const result = { ...(goal ? { goal } : {}), ...(mote ? { mote } : {}), provenance: provenance(source.provenance, code), state: member(source.state, ['main-visible', 'floating', 'window', 'covered', 'pending', 'unknown'], 'Presentation', code),
     ...documentIdentity(source, source.state === 'window', code),
     tabId: nullableId(source.tabId, 'Presented Tab', code), regionId: nullableId(source.regionId, 'Presented Region', code),
     blockers: list(source.blockers, value => member(value, ['settings', 'quick-switcher'] as const, 'Overlay blocker', code), code) }
@@ -228,7 +243,10 @@ export function parseDesktopFocusSuccessReceipt(value: unknown): AgentMuxControl
       result.overlays.settings !== true || result.overlays.settingsPage?.sectionId !== requested.sectionId || result.overlays.settingsPage.visible !== true ||
       requested.hostId !== undefined && result.overlays.settingsPage.hostId !== requested.hostId))
       fail('Settings receipt is not visibly confirmed for the exact registered page.', code)
-    if (requested.kind === 'goal' && (actual.goalId !== requested.goalId || actual.surface !== 'goals')) fail('Goal receipt target is mismatched.', code)
+    if (requested.kind === 'goal' && (actual.goalId !== requested.goalId || actual.surface !== 'goals' ||
+      result.presentation.goal !== undefined && result.presentation.goal.goalId !== requested.goalId ||
+      requested.runtimeId !== undefined && (result.presentation.goal?.runtimeId !== requested.runtimeId || result.presentation.goal?.namespace !== requested.namespace) ||
+      requested.section !== undefined && result.presentation.goal?.section !== requested.section)) fail('Goal receipt target is mismatched.', code)
     if (requested.kind === 'surface' && (actual.surface !== requested.surface || requested.surface === 'focus' && requested.view !== undefined && actual.focusView !== requested.view)) fail('Surface receipt target is mismatched.', code)
     if (requested.kind === 'mote' && (actual.surface !== 'space' || actual.space?.spaceId !== requested.spaceId ||
       result.presentation.mote?.spaceId !== requested.spaceId || result.presentation.mote.page !== (requested.eventId === undefined ? 'discussion' : 'threads') ||

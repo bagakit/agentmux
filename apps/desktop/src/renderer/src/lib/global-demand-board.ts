@@ -16,6 +16,8 @@ export type DemandArrangement = (typeof DEMAND_ARRANGEMENT_IDS)[number]
 
 export type DemandRecord = {
   id: string
+  address?: import('@agentmux/core/sharing').AmuxGoalAddress
+  addressIssue?: string
   title: string
   description: string
   status: DemandStatus

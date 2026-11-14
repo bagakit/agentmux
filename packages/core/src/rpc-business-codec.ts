@@ -76,9 +76,9 @@ export function rpcControlRequest(method: keyof typeof AGENTMUX_RPC_CONTROL_METH
     body.target = { requestId: rpcString(target.operationId, 'Operation ID') }
   }
   if (method === 'goal.focus') {
-    const p = rpcRecord(source, ['goalId', 'input', 'operationId'])
+    const p = rpcRecord(source, ['goalId', 'runtimeId', 'namespace', 'section', 'input', 'operationId'])
     delete body.demandId; delete body.input
-    body.target = { kind: 'goal', goalId: rpcString(p.goalId, 'Goal ID') }
+    body.target = { kind: 'goal', goalId: rpcString(p.goalId, 'Goal ID'), ...(p.runtimeId === undefined ? {} : { runtimeId: p.runtimeId }), ...(p.namespace === undefined ? {} : { namespace: p.namespace }), ...(p.section === undefined ? {} : { section: p.section }) }; delete body.runtimeId; delete body.namespace; delete body.section
     body.inputPolicy = p.input ?? 'preserve'
   }
   const resource = /^settings\.(executors|prompts|themes|derived-actions)\.(ls|inspect|create|update|delete)$/u.exec(method)
@@ -467,7 +467,7 @@ export function parseRpcControlResult(method: keyof typeof AGENTMUX_RPC_CONTROL_
   if (params !== undefined) {
     // Read-only requests may omit an operation ID; compare write identity only when supplied.
     const p = rpcRecord(params), identity = method.startsWith('goal.') ? goalKeys(p, true) : { ...p }
-    if (method === 'goal.focus') { identity.target = { kind: 'goal', goalId: p.goalId }; identity.inputPolicy = p.input ?? 'preserve' }
+    if (method === 'goal.focus') { identity.target = { kind: 'goal', goalId: p.goalId, ...(p.runtimeId === undefined ? {} : { runtimeId: p.runtimeId }), ...(p.namespace === undefined ? {} : { namespace: p.namespace }), ...(p.section === undefined ? {} : { section: p.section }) }; delete identity.runtimeId; delete identity.namespace; delete identity.section; identity.inputPolicy = p.input ?? 'preserve' }
     if (method === 'space.inspect' && identity.target && Object.hasOwn(identity.target as object, 'operationId')) identity.target = operationKeys(identity.target as Record<string, unknown>, true)
     const resource = /^settings\.(executors|prompts|themes)\./u.exec(method)
     if (resource) identity.resource = resource[1]

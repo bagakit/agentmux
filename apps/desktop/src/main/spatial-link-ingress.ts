@@ -108,6 +108,8 @@ export class SpatialLinkIngress {
       const base = { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: mintObjectId(), operation: 'focus' as const, inputPolicy: 'preserve' as const }
       if (target.kind === 'host') {
         request = { ...base, target: { kind: 'settings', sectionId: 'hosts', hostId: node!.hostId } }
+      } else if (target.kind === 'goal') {
+        request = { ...base, target: { kind: 'goal', goalId: target.goalId, runtimeId: target.runtimeId, namespace: target.namespace, ...(target.section ? { section: target.section } : {}) } }
       } else if (target.kind === 'mote') {
         request = { ...base, target: { kind: 'mote', spaceId: target.spaceId,
           ...(target.eventId === undefined ? {} : { eventId: target.eventId }) } }

@@ -1,3 +1,6 @@
+import { createHash } from 'node:crypto'
+import { realpath } from 'node:fs/promises'
+import { formatGoalAddress } from '@agentmux/core/sharing'
 import { createHostGoalDiscussions } from './goal-discussions.js'
 import { resolveGoalsPreferences, type GoalsPreferences } from './goals-preferences.js'
 import { deriveObjectId } from '@agentmux/core/object-id'
@@ -51,6 +54,22 @@ export function createHostGoals(options: {
 }) {
   const root = dirname(options.configurationPath)
   const demands = openDemandStore({ root: join(root, 'demands') })
+  const projectGoals = async (goals: Demand[]) => {
+    if (!goals.length) return []
+    let step = 'the original semantic Runtime identity'
+    try {
+      const runtimeId = options.runtime().ownerIdentity().runtimeId
+      if (!runtimeId) throw new Error('The original semantic Runtime identity is unavailable.')
+      step = 'the original canonical Goal store'
+      const canonicalRoot = await realpath(demands.root)
+      const namespace = createHash('sha256').update(JSON.stringify(['agentmux.goal-namespace.v1', canonicalRoot])).digest('hex')
+      return goals.map(goal => projectHostGoal(goal, formatGoalAddress(goal.id, runtimeId, namespace)))
+    } catch {
+      return goals.map(goal => ({ ...projectHostGoal(goal), addressIssue: `Goal link source is unconfirmed: ${step} could not be read. The original Goal and work are retained.` }))
+    }
+  }
+  const projectGoal = async (goal: Demand) => (await projectGoals([goal]))[0]!
+
   const inputCancellations = new Set<(control: import('./goal-runtime.js').GoalAgentControl) => void>()
   const clients = () => [{ hostId: 'local', client: options.runtime().client }, ...(options.clients?.() ?? [])]
   const exact = (hostId: string) => {
@@ -161,11 +180,11 @@ export function createHostGoals(options: {
     if (!request.operation.startsWith('demand.')) return undefined
     await current(context)
     const req = request as GoalRequest
-    if (req.operation === 'demand.list') return { operation: req.operation, demands: (await demands.list()).map(projectHostGoal) }
+    if (req.operation === 'demand.list') return { operation: req.operation, demands: await projectGoals(await demands.list()) }
     if (req.operation === 'demand.show') {
       if (req.dispatchOperationId) await dispatch.reconcile({ goalId: req.demandId, operationId: req.dispatchOperationId }, () => current(context))
       const goal = await demands.get(req.demandId)
-      return { operation: req.operation, demand: goal ? projectHostGoal(goal) : null, goalContinuations: await progress.listGoals(req.demandId) }
+      return { operation: req.operation, demand: goal ? await projectGoal(goal) : null, goalContinuations: await progress.listGoals(req.demandId) }
     }
     if (req.operation === 'demand.create') {
       const goalId = req.demandId ?? deriveObjectId('goal-create', req.requestId)
@@ -179,7 +198,7 @@ export function createHostGoals(options: {
         ...(req.supervisorSessionId === undefined ? {} : { supervisorSessionId: req.supervisorSessionId }), ...(req.sessionIds ? { sessionIds: req.sessionIds } : {}), ...(req.tags ? { tags: req.tags } : {}), ...(req.plannedStartAt === undefined ? {} : { plannedStartAt: req.plannedStartAt }), ...(req.targetAt === undefined ? {} : { targetAt: req.targetAt }), ...(req.parentDemandId === undefined ? {} : { parentDemandId: req.parentDemandId }), ...(req.phaseIndex === undefined ? {} : { phaseIndex: req.phaseIndex }),  ...(req.contentRefs ? { contentRefs: req.contentRefs } : {}) },
         { operationId: req.requestId, discussionOperationId: await goalPmoOperation({ goalId, creationOperationId: req.requestId }, 'create'), ...(name ? { context: name } : {}), ...(participation ? { participation } : {}), creationOrigin: { requesterAsSupervisor: resolveGoalsPreferences(preferences as GoalsPreferences).requesterAsSupervisor } })
       if (req.decision) await saveDecision(saved.demand.id, req.decision, req.requestId, context)
-      return { operation: req.operation, demand: projectHostGoal(await get(saved.demand.id)), receipt: { demandId: saved.demand.id, createdAt: saved.demand.createdAt } }
+      return { operation: req.operation, demand: await projectGoal(await get(saved.demand.id)), receipt: { demandId: saved.demand.id, createdAt: saved.demand.createdAt } }
     }
     if (req.operation === 'demand.activity.inspect') {
       const original = await demands.inspectActivity(req.demandId, req.requestId)
@@ -200,19 +219,19 @@ export function createHostGoals(options: {
       for (const [index, message] of (activityLog?.slice(originalLog.length) ?? []).entries()) { await current(context); await demands.addActivity(goal.id, { kind: 'board', message, actorId: name?.actor.id ?? null, operationId: req.requestId + ':activity:' + index }) }
       if (req.decision) await saveDecision(goal.id, req.decision, req.requestId, context)
       const saved = await get(goal.id)
-      return { operation: req.operation, demand: projectHostGoal(saved), receipt: { demandId: goal.id, updatedAt: saved.updatedAt } }
+      return { operation: req.operation, demand: await projectGoal(saved), receipt: { demandId: goal.id, updatedAt: saved.updatedAt } }
     }
     if (req.operation === 'demand.confirm') {
       const saved = await demands.confirmAlignment(goal.id, req.expectedRevision)
-      return { operation: req.operation, demand: projectHostGoal(saved.demand), receipt: { demandId: goal.id, confirmedRevision: saved.demand.alignment!.revision, confirmedAt: saved.demand.alignment!.confirmedAt! } }
+      return { operation: req.operation, demand: await projectGoal(saved.demand), receipt: { demandId: goal.id, confirmedRevision: saved.demand.alignment!.revision, confirmedAt: saved.demand.alignment!.confirmedAt! } }
     }
     if (req.operation === 'demand.accept') {
       const saved = await demands.acceptGrounding(goal.id, req.expectedAlignmentRevision, req.expectedSubmissionId, req.acceptGaps, req.finish)
-      return { operation: req.operation, demand: projectHostGoal(saved.demand), receipt: { demandId: goal.id, alignmentRevision: saved.demand.grounding!.alignmentRevision, submissionId: saved.demand.grounding!.submissionId, acceptedAt: saved.demand.grounding!.acceptedAt!, acceptedWithGaps: saved.demand.grounding!.checks.some(check => check.outcome === 'gap') } }
+      return { operation: req.operation, demand: await projectGoal(saved.demand), receipt: { demandId: goal.id, alignmentRevision: saved.demand.grounding!.alignmentRevision, submissionId: saved.demand.grounding!.submissionId, acceptedAt: saved.demand.grounding!.acceptedAt!, acceptedWithGaps: saved.demand.grounding!.checks.some(check => check.outcome === 'gap') } }
     }
     if (req.operation === 'demand.delete') {
       await demands.delete(goal.id)
-      return { operation: req.operation, demand: projectHostGoal(goal), receipt: { demandId: goal.id, deletedAt: Date.now() } }
+      return { operation: req.operation, demand: await projectGoal(goal), receipt: { demandId: goal.id, deletedAt: Date.now() } }
     }
     if (req.operation === 'demand.activity.append') {
       if (!name?.actor.verified) throw new AgentMuxError('The original Goal activity author is unconfirmed. Manual Agent input remains available.', 'CONTROL_PERMISSION_DENIED')
@@ -220,27 +239,27 @@ export function createHostGoals(options: {
       const saved = await demands.addActivity(goal.id, { kind: req.kind, message: req.message, actorId: name.actor.id, operationId: req.requestId }, participation ? { participation } : {})
       const activity = saved.demand.activities.find(value => value.operationId === req.requestId)
       if (!activity) throw new AgentMuxError('The original Goal activity receipt is unconfirmed. Inspect this exact operation.', 'CONTROL_UNAVAILABLE')
-      return { operation: req.operation, demand: projectHostGoal(saved.demand), activity, receipt: { demandId: goal.id, requestId: req.requestId, activityId: activity.id, diskDurability: 'confirmed', replayed: saved.replayed === true } }
+      return { operation: req.operation, demand: await projectGoal(saved.demand), activity, receipt: { demandId: goal.id, requestId: req.requestId, activityId: activity.id, diskDurability: 'confirmed', replayed: saved.replayed === true } }
     }
     if (req.operation === 'demand.continuation-action') return { operation: req.operation, demandId: goal.id,
       continuation: await progress.goalAction(goal.id, req.loopId, req.action, req.expectedRevision, req.requestId, context), diskDurability: 'confirmed' }
     if (req.operation === 'demand.link-session') {
       await runtime.resolveGoalAgent(req.sessionId); await current(context)
       const saved = await update(goal, { sessionIds: [...new Set([...goal.sessionIds, req.sessionId])] }, req.requestId, name, context)
-      return { operation: req.operation, demand: projectHostGoal(saved.demand), receipt: { demandId: goal.id, sessionId: req.sessionId } }
+      return { operation: req.operation, demand: await projectGoal(saved.demand), receipt: { demandId: goal.id, sessionId: req.sessionId } }
     }
     if (req.operation === 'demand.link-project') {
       const saved = await update(goal, { projectId: req.projectId }, req.requestId, name, context)
-      return { operation: req.operation, demand: projectHostGoal(saved.demand), receipt: { demandId: goal.id, projectId: req.projectId } }
+      return { operation: req.operation, demand: await projectGoal(saved.demand), receipt: { demandId: goal.id, projectId: req.projectId } }
     }
     if (req.operation === 'demand.assign' || req.operation === 'demand.handoff') {
       const saved = await update(goal, { ...(req.assigneeSessionIds ? { assigneeSessionIds: req.assigneeSessionIds } : req.operation === 'demand.handoff' && req.sessionId ? { assigneeSessionIds: [req.sessionId] } : {}),
         ...(req.supervisorSessionId === undefined ? {} : { supervisorSessionId: req.supervisorSessionId }), ...(req.operation === 'demand.assign' && req.projectId !== undefined ? { projectId: req.projectId } : {}) }, req.requestId, name, context, req.expectedUpdatedAt ?? goal.updatedAt)
       if (req.operation === 'demand.assign') {
         if (req.start) await startGoal(saved.demand, req.sessionId, req.requestId, context)
-        return { operation: req.operation, demand: projectHostGoal((await get(goal.id))), receipt: { demandId: goal.id, assignedAt: saved.demand.updatedAt, startRequested: req.start } }
+        return { operation: req.operation, demand: await projectGoal((await get(goal.id))), receipt: { demandId: goal.id, assignedAt: saved.demand.updatedAt, startRequested: req.start } }
       }
-      return { operation: req.operation, demand: projectHostGoal(saved.demand), receipt: { demandId: goal.id, handedOffAt: saved.demand.updatedAt, sessionId: req.sessionId ?? null } }
+      return { operation: req.operation, demand: await projectGoal(saved.demand), receipt: { demandId: goal.id, handedOffAt: saved.demand.updatedAt, sessionId: req.sessionId ?? null } }
     }
     if (req.operation === 'demand.start') return await startGoal(goal, req.sessionId, req.requestId, context, req.continuation, req.expectedUpdatedAt)
     return undefined
@@ -253,7 +272,7 @@ export function createHostGoals(options: {
     if (!selected || !original && !goal.assigneeSessionIds.includes(selected)) throw new AgentMuxError('Choose the exact responsible Agent before starting this Goal. Creation or assignment alone does not start it.', 'INVALID_CONTROL_REQUEST')
     if (original?.stage === 'confirmed') {
       const loop = original.loopId ? (await progress.listGoals(goal.id)).find(value => value.loopId === original.loopId) : undefined
-      return { operation: 'demand.start', demand: projectHostGoal(await get(goal.id)), ...(loop ? { continuation: loop } : {}), receipt: { demandId: goal.id, startedAt: original.preparedAt, sessionId: selected } }
+      return { operation: 'demand.start', demand: await projectGoal(await get(goal.id)), ...(loop ? { continuation: loop } : {}), receipt: { demandId: goal.id, startedAt: original.preparedAt, sessionId: selected } }
     }
     const resolved = original ? { hostId: original.hostId, status: await runtime.observeGoalAgent(original.hostId, selected) } : await runtime.resolveGoalAgent(selected)
     const session = resolved.status.session
@@ -283,7 +302,7 @@ export function createHostGoals(options: {
     }, loop ? { goalId: goal.id, loopId: loop.loopId } : undefined)
     await demands.update(goal.id, { status: 'in_progress' })
     const confirmed = loop ? await progress.initialGoalInput(loop, loop.loopId, operationId, 'confirm') : undefined
-    return { operation: 'demand.start', demand: projectHostGoal(await get(goal.id)), ...(confirmed ? { continuation: confirmed } : {}), receipt: { demandId: goal.id, startedAt: prepared.demand.dispatches!.find(value => value.operationId === operationId)!.preparedAt, sessionId: selected } }
+    return { operation: 'demand.start', demand: await projectGoal(await get(goal.id)), ...(confirmed ? { continuation: confirmed } : {}), receipt: { demandId: goal.id, startedAt: prepared.demand.dispatches!.find(value => value.operationId === operationId)!.preparedAt, sessionId: selected } }
   }
   return { execute, goalChanges: { subscribe: async (listener: (change: import('@agentmux/core').GoalChanges) => void | Promise<void>, _end: (error?: Error) => void | Promise<void>, signal: AbortSignal) => {
       signal.throwIfAborted(); changeReaders.add(listener)
@@ -293,6 +312,6 @@ export function createHostGoals(options: {
       if (!options.spatial) throw new AgentMuxError('The original name history owner is unavailable. Original Goal names are retained.', 'CONTROL_UNAVAILABLE')
       return hostNameHistory(options.spatial, demands, query)
     }, demands, runtime, start,
-    list: async () => (await demands.list()).map(projectHostGoal),
+    list: async () => projectGoals(await demands.list()),
     async dispose() { releaseStoreChanges(); changeReaders.clear(); attention.dispose(); starts.dispose(); responsibility.dispose(); patrol.dispose(); await progress.stop() } }
 }

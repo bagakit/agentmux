@@ -447,6 +447,9 @@ export type AgentMuxDemandPriority = typeof AGENTMUX_DEMAND_PRIORITIES[number]
 export type AgentMuxDemandActivity = Omit<import('@agentmux/demand').DemandActivity, 'nameChange'>
 export type AgentMuxDemand = {
   id: string
+  /** Derived by the original Goal owner; never persisted in the Demand record. */
+  address?: import('./sharing.js').AmuxGoalAddress
+  addressIssue?: string
   title: string
   description: string
   status: AgentMuxDemandStatus

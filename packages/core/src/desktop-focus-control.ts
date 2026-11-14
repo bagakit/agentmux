@@ -8,7 +8,7 @@ export type AgentMuxDesktopFocusTarget =
   | ({ kind: 'space' } & AgentMuxSpaceSelector)
   | { kind: 'mote'; spaceId: string; eventId?: string }
   | { kind: 'settings'; sectionId: string | null; hostId?: string }
-  | { kind: 'goal'; goalId: string }
+  | { kind: 'goal'; goalId: string; runtimeId?: string; namespace?: string; section?: 'plan' }
   | { kind: 'focus-agent'; hostId: string; agentSessionId: string }
   | { kind: 'surface'; surface: 'focus'; view?: AgentMuxDesktopFocusView }
   | { kind: 'surface'; surface: Exclude<AgentMuxDesktopSurface, 'focus'> }
@@ -42,6 +42,7 @@ export type AgentMuxDesktopPresentation = {
   tabId: string | null; regionId: string | null
   blockers: ('settings' | 'quick-switcher')[]
   /** Actual client presentation of one original Mote, distinct from the requested target. */
+  goal?: { goalId: string; runtimeId: string | null; namespace: string | null; section: 'overview' | 'plan' | 'activity' }
   mote?: { spaceId: string; page: 'discussion' | 'threads'; eventId: string | null }
 }
 export type AgentMuxDesktopFloating = {

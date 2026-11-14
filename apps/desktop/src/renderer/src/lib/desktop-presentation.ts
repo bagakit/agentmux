@@ -191,6 +191,31 @@ export function readMoteLinkPresentation(target: { spaceId: string; eventId?: st
   return thread ? { spaceId, page: 'threads', eventId: thread.dataset.moteWorkThread! } : null
 }
 
+
+/** Observe only the original mounted reading section intersecting its actual clipping owners. */
+export function readGoalReadingPresentation(target: { goalId: string; runtimeId?: string; namespace?: string; section?: 'plan' }): AgentMuxDesktopPresentation['goal'] | null {
+  if (typeof document === 'undefined' || appReader?.().overlays.settings || appReader?.().overlays.quickSwitcher) return null
+  const matches = [...document.querySelectorAll<HTMLElement>('[data-goal-reading-section]')].filter(element =>
+    element.dataset.goalReadingId === target.goalId && (target.runtimeId === undefined || element.dataset.goalReadingRuntime === target.runtimeId && element.dataset.goalReadingNamespace === target.namespace) &&
+    (target.section === undefined || element.dataset.goalReadingSection === target.section) && desktopElementVisible(element))
+  const intersects = (element: HTMLElement) => {
+    if (!desktopElementVisible(element)) return false
+    const rect = element.getBoundingClientRect()
+    let top = 0, left = 0, right = document.documentElement.clientWidth, bottom = document.documentElement.clientHeight
+    for (let parent = element.parentElement; parent; parent = parent.parentElement) {
+      const style = getComputedStyle(parent), clip = parent.getBoundingClientRect()
+      if (['auto', 'scroll', 'hidden', 'clip'].includes(style.overflowX)) { left = Math.max(left, clip.left); right = Math.min(right, clip.right) }
+      if (['auto', 'scroll', 'hidden', 'clip'].includes(style.overflowY)) { top = Math.max(top, clip.top); bottom = Math.min(bottom, clip.bottom) }
+    }
+    return right > left && bottom > top && rect.bottom > top && rect.top < bottom && rect.right > left && rect.left < right
+  }
+  const visible = matches.filter(element => intersects(element) && (element.dataset.goalReadingSection !== 'plan' ||
+    [...element.querySelectorAll<HTMLElement>('[data-goal-plan-node], [data-goal-plan-origin]')].some(intersects)))
+  const element = visible[0], section = element?.dataset.goalReadingSection
+  if (!element || !['overview', 'plan', 'activity'].includes(section ?? '') || visible.some(other => other.dataset.goalReadingId !== element.dataset.goalReadingId || other.dataset.goalReadingRuntime !== element.dataset.goalReadingRuntime || other.dataset.goalReadingNamespace !== element.dataset.goalReadingNamespace)) return null
+  return { goalId: target.goalId, runtimeId: element.dataset.goalReadingRuntime || null, namespace: element.dataset.goalReadingNamespace || null, section: section as 'overview' | 'plan' | 'activity' }
+}
+
 /** Only an in-flight cold navigation listens. No steady observer, output scan or polling loop. */
 export async function awaitDesktopPresentation(ready: () => boolean, signal?: AbortSignal): Promise<void> {
   if (signal?.aborted || typeof document === 'undefined' || typeof requestAnimationFrame === 'undefined') return

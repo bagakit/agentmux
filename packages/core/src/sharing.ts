@@ -33,6 +33,7 @@ export type AmuxHostAddress = {
 /** Semantic and spatial identities remain different object kinds. */
 export type AmuxObjectLinkTarget =
   | ({ kind: 'host' } & AmuxHostAddress)
+  | { kind: 'goal'; goalId: string; runtimeId: string; namespace: string; section?: 'plan' }
   | { kind: 'agent'; agentSessionId: string }
   | { kind: 'region'; regionId: string }
   | { kind: 'tab'; tabId: string }
@@ -41,7 +42,18 @@ export type AmuxObjectLinkTarget =
   | { kind: 'capsule'; capsuleId: string }
   | { kind: 'mote'; spaceId: string; eventId?: string }
 
+export type AmuxGoalAddress = { runtimeId: string; namespace: string; goalUrl: string; planUrl: string }
+
+export function formatGoalAddress(goalId: string, runtimeId: string, namespace: string): AmuxGoalAddress {
+  return { runtimeId, namespace, goalUrl: formatAmuxObjectLink({ kind: 'goal', goalId, runtimeId, namespace }),
+    planUrl: formatAmuxObjectLink({ kind: 'goal', goalId, runtimeId, namespace, section: 'plan' }) }
+}
+
 export function formatAmuxObjectLink(target: AmuxObjectLinkTarget): string {
+  if (target.kind === 'goal') {
+    if (typeof target.goalId !== 'string' || !target.goalId || typeof target.runtimeId !== 'string' || !target.runtimeId || typeof target.namespace !== 'string' || !target.namespace || target.section !== undefined && target.section !== 'plan') throw new TypeError('An exact Goal and its original Runtime are required.')
+    return `${AMUX_PROTOCOL_DEFINITIONS.link.tag}goal/${encodeURIComponent(target.goalId)}${target.section === 'plan' ? '/plan' : ''}?runtime=${encodeURIComponent(target.runtimeId)}&namespace=${encodeURIComponent(target.namespace)}`
+  }
   if (target.kind === 'host') {
     const alias = nodeAlias(target.alias)
     if (!alias) throw new TypeError('A published Node alias is required.')
@@ -66,6 +78,12 @@ export function formatAmuxObjectLink(target: AmuxObjectLinkTarget): string {
 /** A Mote thread carries its original event within that exact Mote's stable Space. */
 export function parseAmuxObjectLink(raw: string): AmuxObjectLinkTarget {
   if (typeof raw !== 'string') throw new TypeError('An object link must be text.')
+  const goal = /^amux:\/\/goal\/([^/?#]+)(\/plan)?\?runtime=([^&#?]+)&namespace=([^&#?]+)$/u.exec(raw)
+  if (goal) {
+    const target = { kind: 'goal' as const, goalId: decodeURIComponent(goal[1]!), runtimeId: decodeURIComponent(goal[3]!), namespace: decodeURIComponent(goal[4]!), ...(goal[2] ? { section: 'plan' as const } : {}) }
+    if (formatAmuxObjectLink(target) !== raw) throw new TypeError('The Goal link encoding is not canonical.')
+    return target
+  }
   const host = /^amux:\/\/host\/([^/?#]+)(?:\/(agent|capsule)\/([^/?#]+))?(?:\?runtime=([^&#?]+))?$/u.exec(raw)
   if (host) {
     const target: AmuxObjectLinkTarget = { kind: 'host', alias: host[1]!,

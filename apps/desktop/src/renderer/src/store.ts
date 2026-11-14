@@ -157,7 +157,7 @@ import type { WorkbenchProjectionSelection } from './lib/workbench-projection'
 import type { WorkbenchPresentation } from './lib/workbench-presentation'
 import { mainRegionReference, desktopMainSurface, desktopSelection, desktopSpaceSelectionAfterClose, resolveDesktopSpaceSelection, resolveDesktopMoteSelection, resolveWorkbenchOccurrenceSelection, reconcileWorkbenchSpaceSelection, workbenchSelectionCatalog, sessionWorkbenchReferences, type SessionLocationReference, projectWorkbenchSpaceSelection, workbenchObjectLayout, restoreWorkbenchSpaceSelection, DesktopFocusFailure } from './lib/desktop-focus-navigation'
 import type { FocusAgentReveal, FocusAgentTarget } from './lib/focus-agent-navigation'
-import { captureDesktopInput, readDesktopPresentation, readDesktopOverlays, requestDesktopSettingsNavigation, readFocusAgentPresentation, readMoteLinkPresentation, awaitDesktopPresentation, desktopInputPreserved } from './lib/desktop-presentation'
+import { captureDesktopInput, readDesktopPresentation, readDesktopOverlays, requestDesktopSettingsNavigation, readGoalReadingPresentation, readFocusAgentPresentation, readMoteLinkPresentation, awaitDesktopPresentation, desktopInputPreserved } from './lib/desktop-presentation'
 import { notebookRelocations, refreshNotebookLibrary, recordNotebookChanges, restoreNotebookRecoveries, useNotebookLibrary, type NotebookRecovery } from './lib/notebook-library'
 import type { AgentMuxDesktopSpaceSelection, AgentMuxDesktopFocusResult, AgentMuxSpatialSave, AgentMuxSpatialIssue } from '@agentmux/core/control'
 import type { SpaceZoneBindings, SpatialRequestBinding } from '../../shared/space-addresses'
@@ -208,7 +208,7 @@ import {
   type AgentMuxExecutorAvailability,
   type AgentMuxSpaceAddress, type AgentMuxZoneFact, type AgentMuxSpaceBindingReport
 } from '@agentmux/core/control'
-import type { AgentMuxDemandDecision } from '@agentmux/core/control'
+import type { AgentMuxDemand, AgentMuxDemandDecision } from '@agentmux/core/control'
 import type { AgentCapabilities, AgentCatalogEntry, AgentMuxInteractionResponse } from '@agentmux/core'
 import { EMPTY_LAUNCHER_OPTIONS, updateLauncherOption, type LauncherOptionDrafts, type LauncherProviderOptions } from './lib/launcher-option-draft'
 import { expandSemanticReferences } from '@agentmux/client-ui/composer-semantic-reference'
@@ -1260,6 +1260,8 @@ export type AppState = GitReadingActions & {
   selectMainRegion(reference: WorkbenchProjectionSelection, expected?: AgentMuxDesktopSpaceSelection | null): boolean
   focusPmoSession(id: string | null): void
   selectedDemandId: string | null
+  /** One transient reading intent; neither business state nor a persisted navigation queue. */
+  goalReadingEntry: { goalId: string; runtimeId?: string; namespace?: string; section?: 'plan'; phase: 'pending' | 'ready'; token: string } | null
   demandArrangement: DemandArrangement
   setSelectedDemand(id: string | null): void
   setDemandArrangement(arrangement: DemandArrangement): void
@@ -1873,10 +1875,12 @@ function isGoalBusinessRequest(request: AgentMuxControlRequest): request is Extr
   return request.operation.startsWith('demand.')
 }
 
-function demandRecordFromFilesystem(demand: FilesystemDemand & Pick<DemandRecord, 'planState' | 'planStateIssue'>, retained?: DemandRecord): DemandRecord {
-  if (retained && demand.updatedAt < Math.max(retained.updatedAt, retained.delegationReadCut?.goalUpdatedAt ?? 0)) return retained
+function demandRecordFromFilesystem(demand: FilesystemDemand & Pick<DemandRecord, 'planState' | 'planStateIssue' | 'address' | 'addressIssue'>, retained?: DemandRecord): DemandRecord {
+  if (retained && (!demand.address || !retained.address || demand.address.runtimeId === retained.address.runtimeId && demand.address.namespace === retained.address.namespace) && demand.updatedAt < Math.max(retained.updatedAt, retained.delegationReadCut?.goalUpdatedAt ?? 0)) return retained
   return {
     id: demand.id,
+    ...(demand.address ? { address: demand.address } : {}),
+    ...(demand.addressIssue ? { addressIssue: demand.addressIssue } : {}),
     title: demand.title,
     description: demand.description,
     status: demand.status,
@@ -5958,6 +5962,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     set({ focusTimelineRuler: preferences })
   },
   selectedDemandId: null,
+  goalReadingEntry: null,
   demandArrangement: 'columns',
   projectRailOpen: true,
   collapsedProjectGroups: {},
@@ -7289,8 +7294,22 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       })
       signal?.addEventListener('abort', stopObservingNavigation, { once: true })
       const issues: AgentMuxSpatialIssue[] = []
+      let sourceGoal: AgentMuxDemand | undefined, sourceFailure: unknown, goalReadingToken: string | undefined
+      if (request.target.kind === 'goal' && request.target.runtimeId !== undefined) {
+        goalReadingToken = mintObjectId()
+        set({ goalReadingEntry: { goalId: request.target.goalId, runtimeId: request.target.runtimeId, namespace: request.target.namespace!,
+          ...(request.target.section ? { section: request.target.section } : {}), phase: 'pending', token: goalReadingToken } })
+      }
       let topics: ScratchTopicSnapshot[] = []
-      try { if ((request.target.kind === 'space' || request.target.kind === 'mote') && get().config?.workspaces.some(workspace => workspace.id === SCRATCH_WORKSPACE_ID)) topics = await api.scratch.listTopics(SCRATCH_WORKSPACE_ID) }
+      try {
+        if (request.target.kind === 'goal' && request.target.runtimeId !== undefined) try {
+          const read = await api.goals.execute({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: mintObjectId(), operation: 'demand.show', demandId: request.target.goalId })
+          if (read.operation !== 'demand.show' || read.demand?.id !== request.target.goalId || read.demand.address?.runtimeId !== request.target.runtimeId || read.demand.address.namespace !== request.target.namespace)
+            throw new DesktopFocusFailure({ step: 'target', code: 'GOAL_SOURCE_UNCONFIRMED', message: 'The original Goal owner did not confirm this Runtime and namespace.',
+              recovery: 'Keep the exact original link and current workface. Read that original Goal source; another store with the same Goal ID is not a replacement.' })
+          sourceGoal = read.demand
+        } catch (error) { sourceFailure = error }
+        if ((request.target.kind === 'space' || request.target.kind === 'mote') && get().config?.workspaces.some(workspace => workspace.id === SCRATCH_WORKSPACE_ID)) topics = await api.scratch.listTopics(SCRATCH_WORKSPACE_ID) }
       catch (error) { issues.push({ step: 'discovery', code: 'SPACE_DISCOVERY_UNCONFIRMED', message: presentError(error),
         recovery: 'Existing placement is kept. Inspect the client or retry discovery when its directory owner is available.' }) }
       finally { stopObservingNavigation(); signal?.removeEventListener('abort', stopObservingNavigation) }
@@ -7307,8 +7326,9 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       let moteEntryToken: string | undefined
       try {
         requireActive()
-        if (navigationChanged || fileNavigationSelection(get()) !== originalNavigation) throw new DesktopFocusFailure({ step: 'navigation', code: 'NAVIGATION_CHANGED',
+        if (navigationChanged || fileNavigationSelection(get()) !== originalNavigation || goalReadingToken !== undefined && get().goalReadingEntry?.token !== goalReadingToken) throw new DesktopFocusFailure({ step: 'navigation', code: 'NAVIGATION_CHANGED',
           message: 'A newer navigation happened while the original target was being observed.', recovery: 'The later workface is kept. Inspect the client before explicitly retrying this target.' })
+        if (sourceFailure) throw sourceFailure
         if (request.target.kind === 'settings') {
           const outcome = requestDesktopSettingsNavigation(request.target.sectionId, request.target.hostId)
           if (outcome !== 'requested') throw new DesktopFocusFailure({ step: 'target',
@@ -7317,11 +7337,14 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
             recovery: 'Keep the original page and drafts. Read app inspect overlays.settingsPage.sectionIds before choosing an exact registered section.' })
           if (request.target.sectionId === null ? settingsBefore?.settings === false : settingsBefore?.settingsPage?.visible === true && settingsBefore.settingsPage.sectionId === request.target.sectionId && (request.target.hostId === undefined || settingsBefore.settingsPage.hostId === request.target.hostId)) navigationState = 'unchanged'
         } else if (request.target.kind === 'goal') {
+          if (sourceGoal) { const goal = hostGoalRecord(sourceGoal); set(state => ({ demands: { ...state.demands, [goal.id]: demandRecordFromFilesystem(goal, state.demands[goal.id]) } })) }
           if (!Object.hasOwn(get().demands, request.target.goalId)) throw new DesktopFocusFailure({ step: 'target', code: 'GOAL_UNKNOWN',
             message: 'The exact Goal is not currently in the complete Demand projection.', recovery: 'List Goals and choose an existing Demand ID.' })
           // Viewing a Goal never selects its associated execution workface.
           get().setSelectedDemand(request.target.goalId)
-          set({ mainSurface: 'board', regionCaretFocus: null, workbenchNavigationInputPolicy: request.inputPolicy })
+          goalReadingToken = request.target.section ? goalReadingToken ?? mintObjectId() : undefined
+          set({ mainSurface: 'board', regionCaretFocus: null, workbenchNavigationInputPolicy: request.inputPolicy,
+            goalReadingEntry: request.target.section ? { goalId: request.target.goalId, ...(request.target.runtimeId === undefined ? {} : { runtimeId: request.target.runtimeId, namespace: request.target.namespace! }), section: request.target.section, phase: 'ready', token: goalReadingToken! } : null })
         } else if (request.target.kind === 'mote') {
           const resolved = resolveDesktopMoteSelection(get(), catalog, request.target.spaceId)
           moteEntryToken = mintObjectId()
@@ -7351,6 +7374,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         }
       } catch (error) {
         navigationState = 'rejected'
+        if (goalReadingToken !== undefined && get().goalReadingEntry?.token === goalReadingToken) set({ goalReadingEntry: null })
         const actual = error instanceof DesktopFocusFailure ? error.issue : (error as { issue?: AgentMuxSpatialIssue })?.issue
         issues.push(actual ?? { step: 'navigation', code: signal?.aborted ? 'CONTROL_CANCELLED' : 'NAVIGATION_UNCONFIRMED',
           message: presentError(error), recovery: 'The original workface is kept. Inspect the client before another navigation.' })
@@ -7372,6 +7396,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         if (request.target.kind === 'mote') return get().moteDiscussionEntry?.token !== moteEntryToken ||
           actual.space?.spaceId !== request.target.spaceId || Boolean(readMoteLinkPresentation(request.target))
         if (JSON.stringify(actual) !== JSON.stringify(expected)) return true
+        if (request.target.kind === 'goal' && request.target.section) return get().goalReadingEntry?.token !== goalReadingToken || Boolean(readGoalReadingPresentation(request.target))
         const observed = readDesktopPresentation(actual, get().tabs)
         if (request.target.kind === 'settings') return request.target.sectionId === null ? observed.overlays.settings === false :
           observed.overlays.settingsPage?.sectionId === request.target.sectionId && observed.overlays.settingsPage.visible === true && (request.target.hostId === undefined || observed.overlays.settingsPage.hostId === request.target.hostId)
@@ -7400,6 +7425,14 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         }
       }
       const observed = readDesktopPresentation(selection, get().tabs)
+      const goalPresentation = request.target.kind === 'goal' ? readGoalReadingPresentation(request.target) : null
+      if (goalPresentation) observed.presentation = { ...observed.presentation, goal: goalPresentation }
+      if (navigationState !== 'rejected' && request.target.kind === 'goal' && (request.target.runtimeId !== undefined || request.target.section) &&
+        (!goalPresentation || request.target.section && get().goalReadingEntry?.token !== goalReadingToken)) {
+        navigationState = 'unconfirmed'
+        issues.push({ step: 'presentation', code: 'GOAL_READING_UNCONFIRMED', message: 'The exact original Goal reading position has not been visibly confirmed.',
+          recovery: 'The original link, later selection and drafts are retained. Open that same Goal again when its original source is available.' })
+      }
       const motePresentation = request.target.kind === 'mote' ? readMoteLinkPresentation(request.target) : null
       if (motePresentation) observed.presentation = { ...observed.presentation, mote: motePresentation }
       if (navigationState !== 'rejected' && request.target.kind === 'mote' && !motePresentation) {
@@ -8685,6 +8718,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     const choice = state.workbenchSpaceSelection ?? (mainSurface === 'workbench' && state.activeWorkspaceId
       ? workbenchObjectLayout(state, state.activeWorkspaceId).choice : null)
     set({ mainSurface, workbenchNavigationInputPolicy: null, regionCaretFocus: null,
+      ...(mainSurface === 'board' ? {} : { goalReadingEntry: null }),
       ...(choice && !state.workbenchSpaceSelection ? { workbenchSpaceSelection: choice } : {}) })
   },
   selectMainRegion(reference, expected) {
@@ -8786,7 +8820,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     })
   },
   setSelectedDemand(id) {
-    set({ selectedDemandId: id })
+    set({ selectedDemandId: id, goalReadingEntry: null })
   },
   setDemandArrangement(arrangement) {
     set({ demandArrangement: arrangement })
