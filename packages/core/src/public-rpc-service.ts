@@ -1,3 +1,4 @@
+import { assertTailcatConfigurationWriter, parseTailcatConfigurationParams, parseTailcatConfigurationResult, type TailcatConfigurationMethod, type TailcatConfigurationPort } from './public-rpc-tailcat-configuration.js'
 import { parseGoalActivityHistoryParams, pageGoalActivity } from './goal-activity-history.js'
 import { parseNotesStorageParams, parseNotesStorageInspection, notesStorageOperationInspection, type NotesStorageMethod, type NotesStoragePort } from './public-rpc-notes-storage.js'
 import { parseProviderCatalogQuery, parseProviderCatalogObservation, type ProviderCatalogMethod } from './public-rpc-provider-catalog.js'
@@ -287,6 +288,8 @@ export type AgentMuxRpcServiceOptions = Omit<Partial<AgentMuxControlHost>, 'exec
   hostTailcat?(hostId: string, signal?: AbortSignal): import('./host-runtime-observation.js').TailcatListenerObservation | undefined | Promise<import('./host-runtime-observation.js').TailcatListenerObservation | undefined>
   /** Original configuration owner's exact maintenance requests; this grants no standing Agent authority. */
   hostMaintenance?: import('./public-rpc-host-maintenance.js').HostMaintenanceAdministration
+  /** The answering App’s original ConfigOwner; Host listener adoption stays with the Host. */
+  tailcatConfiguration?: TailcatConfigurationPort
   /** This Host's own saved-key owner: create only a missing key through the official CLI, never overwrite. */
   hostTailcatKey?(input: { role: import('./public-rpc-tailcat-key.js').TailcatKeyRole; key: string }, signal?: AbortSignal): Promise<import('./public-rpc-tailcat-key.js').TailcatKeyPreparation>
   endpoint?: import('./public-rpc.js').AgentMuxRpcEndpoint
@@ -497,7 +500,7 @@ const NATIVE_FIELDS = {
   'goal.activity': ['goalId', 'projectId', 'agentSessionId', 'assigneeSessionId', 'supervisorSessionId', 'status', 'since', 'limit'],
   'system.storage': ['hostId', 'runId'], 'system.doctor': ['workspacePath'], 'system.endpoint': [],
   'system.subscription.cancel': ['subscriptionId']
-} as const satisfies Record<Exclude<keyof typeof AGENTMUX_RPC_NATIVE_METHODS, MoteDialogueMethod | CapsuleRuntimeMethod | CapsuleMethod | AgentLearningMethod | 'capsule.input' | import('./public-rpc-device.js').AgentMuxRpcDeviceMethod | AgentMuxHostedRuntimeMethod | ApplicationAccessMethod | MoteChatMethod | MoteConnectionMethod | MoteAvatarSeriesMethod | MoteAvatarWriteMethod | TopicMethod | ConnectionMethod | NotesStorageMethod | ProviderCatalogMethod | HostSettingsMethod | NodePublishingMethod | NodeLocatorMethod | import('./public-rpc-tailcat-key.js').TailcatKeyMethod | import('./public-rpc-host-maintenance.js').HostMaintenanceMethod | import('./public-rpc-files.js').FileMethod | GitMethod | AppWindowMethod | ScheduleMethod | ImageMethod | NativeDesktopMethod | keyof typeof HOST_ROUTE_METHODS>, readonly string[]>
+} as const satisfies Record<Exclude<keyof typeof AGENTMUX_RPC_NATIVE_METHODS, MoteDialogueMethod | CapsuleRuntimeMethod | CapsuleMethod | AgentLearningMethod | 'capsule.input' | import('./public-rpc-device.js').AgentMuxRpcDeviceMethod | AgentMuxHostedRuntimeMethod | ApplicationAccessMethod | MoteChatMethod | MoteConnectionMethod | MoteAvatarSeriesMethod | MoteAvatarWriteMethod | TopicMethod | ConnectionMethod | TailcatConfigurationMethod | NotesStorageMethod | ProviderCatalogMethod | HostSettingsMethod | NodePublishingMethod | NodeLocatorMethod | import('./public-rpc-tailcat-key.js').TailcatKeyMethod | import('./public-rpc-host-maintenance.js').HostMaintenanceMethod | import('./public-rpc-files.js').FileMethod | GitMethod | AppWindowMethod | ScheduleMethod | ImageMethod | NativeDesktopMethod | keyof typeof HOST_ROUTE_METHODS>, readonly string[]>
 
 /** Home follows an exact execution route; its display name does not identify that route. */
 function homeHostRoute(configuration: import('./control.js').AgentMuxControlSettingsResourceFields | null) {
@@ -1446,6 +1449,17 @@ export class AgentMuxRpcService {
           ? await this.ports.hostMaintenance.review(input as HostMaintenanceParamsMap['settings.hosts.maintenance-review'], actor, assertCurrent)
           : await this.ports.hostMaintenance.inspect(input.operationId, actor)
       return parseHostMaintenanceResult(maintenanceMethod, { record }, input) as AgentMuxRpcResult<M>
+    }
+    if (method === 'settings.hosts.tailcat.inspect' || method === 'settings.hosts.tailcat.configure') {
+      const input = parseTailcatConfigurationParams(method, params)
+      if (method === 'settings.hosts.tailcat.configure') assertTailcatConfigurationWriter(context)
+      if (!this.ports.tailcatConfiguration && !this.ports.forwardControl) throw new AgentMuxError('The answering App has no original Tailcat configuration owner. Existing Host/Agent capabilities remain available.', 'CONTROL_UNAVAILABLE')
+      await this.authenticated(context)
+      context.signal?.throwIfAborted()
+      const result = this.ports.tailcatConfiguration
+        ? await this.ports.tailcatConfiguration.call(method, input, context)
+        : await this.ports.forwardControl!<TailcatConfigurationMethod>(method, input, context)
+      return parseTailcatConfigurationResult(method, result, input) as AgentMuxRpcResult<M>
     }
     if (isTailcatKeyMethod(method)) {
       const input = parseTailcatKeyParams(params)

@@ -1,4 +1,5 @@
 import { parseSettingsPreferenceParams } from './settings-preferences.js'
+import { parseTailcatConfigurationParams } from './public-rpc-tailcat-configuration.js'
 import { expandCliOptionAssignments } from './cli-option-assignments.js'
 import { parseNotesStorageParams } from './public-rpc-notes-storage.js'
 import { SPACE_MEMBER_CLI_COMMANDS } from './space-member-cli.js'
@@ -1264,6 +1265,11 @@ export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
   settings('settings.hosts.configure', '<id> --input <file|->', 'Edit one saved Host with complete expected and candidate records (CAS). Keeps Host identity and learned Runtime binding; bound route changes confirm the same Runtime. After unknown read hosts ls.'),
   settings('settings.hosts.delete', '<id> --input <file|->', 'Remove one SSH Host with its complete expected record (CAS); refuses Workspace, durable Session or Run references. Never deletes referenced work. After unknown read hosts ls.'),
   settings('settings.hosts.update', '<id> --input <file|->', 'Repair a bound SSH Host route with complete expected and candidate records. Confirms the same Runtime; preserves Sessions and Runs. If the reply is unknown, read hosts ls before retrying.'),
+  command('settings.hosts.tailcat.inspect', '', 'Read the answering App’s original local incoming configuration and independent Host listener observation.',
+    {}, () => ({ hostId: 'local' }), 'Saved configuration, listener adoption and remote reachability are separate facts. This query never restarts a listener or reads private keys. local is this answering App; use the original Host route for another App.'),
+  command('settings.hosts.tailcat.configure', '--input FILE|-', 'Save one exact local incoming Tailcat slice with complete expected/candidate CAS; original user only.',
+    { '--input': 'data' }, async f => parseTailcatConfigurationParams('settings.hosts.tailcat.configure', { hostId: 'local', ...await readControlJsonInput(value(f, '--input', true)!, 'Local incoming Tailcat configuration') as Record<string, unknown> }),
+    'Input {expected,candidate} uses null for absent; explicit disabled remains distinct. No private key is accepted or prepared. Requires a transport-approved user with no managed Agent caller; Agents may inspect/prepare the draft. Config save does not promise listener adoption or reachability. After unknown, inspect current facts; they do not prove the lost save ACK. Never automatically replay.'),
   settings('settings.hosts.ls', '', 'List actual configured Hosts.'),
   settings('settings.hosts.test', '<id>|--input <file|->', 'Test an exact saved Host or a complete draft.', 1),
   settings('settings.hosts.message-trusted-sources', '--host <id>', 'Read this Host message authority and independently approved message-purpose source keys.'),

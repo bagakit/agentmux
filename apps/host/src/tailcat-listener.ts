@@ -2,9 +2,8 @@ import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { watch, type FSWatcher } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import { basename, dirname } from 'node:path'
-import { fileURLToPath } from 'node:url'
 import { isDeepStrictEqual } from 'node:util'
-import { isTailcatNodePublicKey, type TailcatListenerObservation } from '@agentmux/core'
+import { isTailcatNodePublicKey, resolveCoreBinPath, type TailcatListenerObservation } from '@agentmux/core'
 import { parseHostConfiguration, type LocalHostConfig, type TailcatListenerConfig } from './host-configuration.js'
 import { tailcatEnvironment, validateServerKey } from './tailcat-key.js'
 
@@ -61,7 +60,7 @@ export class HostTailcatListener {
     }
     if (revision !== this.revision || this.closed) return
     const command = this.options.command ?? { executable: process.execPath,
-      args: [fileURLToPath(new URL('./agentmux.js', import.meta.resolve('@agentmux/core')))] }
+      args: [resolveCoreBinPath('amux')] }
     const args = ['serve', '--key=' + configuration.keyFile, '--allow=' + configuration.allowedClients.join(','), '--json', '--psk',
       'exec', '--', command.executable, ...command.args, '--endpoint', 'unix:' + this.options.socketPath, 'system', 'endpoint', '--stdio']
     const child = spawn('tailcat', args, { stdio: ['pipe', 'pipe', 'pipe'], env: tailcatEnvironment(this.options.environment ?? process.env) })

@@ -1685,6 +1685,7 @@ export type AgentMuxDesktopApi = {
   nodePublishing: import('./node-publishing.js').DesktopNodePublishingPort
   hostRoutes: import('./host-routes.js').DesktopHostRoutes
   hosts: {
+    configureTailcat(input: AgentMuxRpcParams<'settings.hosts.tailcat.configure'>): Promise<AgentMuxRpcResult<'settings.hosts.tailcat.configure'>>
     prepareTailcatKey(input: AgentMuxRpcParams<'settings.hosts.tailcat-key'>): Promise<AgentMuxRpcResult<'settings.hosts.tailcat-key'>>
     home(host: HostConfig, context?: { signal?: AbortSignal }): Promise<AgentMuxRpcResult<'settings.hosts.home'>>
     inspect(host: HostConfig, context?: { signal?: AbortSignal }): Promise<import('@agentmux/core').HostRuntimeObservation>

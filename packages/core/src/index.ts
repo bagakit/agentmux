@@ -274,3 +274,4 @@ export * from './public-rpc-notes-storage.js'
 
 export { GOALS_COMMON_ACTION_IDS, parseGoalsCommonActions, isSettingsPreferenceMethod, parseSettingsPreferenceParams, parseSettingsPreferenceResult } from './settings-preferences.js'
 export type { GoalsCommonActionRef, GoalsCommonActionsConfig, CommonActionsConfigure, CommonActionsObservation, SettingsPreferenceMethod, SettingsPreferenceParams, SettingsPreferenceResults, SettingsPreferenceRequest, SettingsPreferenceResult } from './settings-preferences.js'
+export * from './public-rpc-tailcat-configuration.js'

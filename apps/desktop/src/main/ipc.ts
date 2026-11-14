@@ -1,5 +1,6 @@
 import { configureGoalsCommonActions, executeSettingsPreferencesControl } from './settings-preferences-control.js'
 import { isSettingsPreferenceMethod } from '@agentmux/core'
+import { SettingsTailcatConfiguration } from './settings-tailcat-configuration.js'
 import { notesStorageInspection } from '@agentmux/core'
 import { registerBrowserTaskParallelIpc } from './browser-task-parallel-ipc.js'
 import { createProfileCookieFileIo } from './browser-profile-cookie-file-io.js'
@@ -979,6 +980,8 @@ export async function registerIpc(args: {
   const hostRouteReads = registerHostRoutesIpc({ handle: handleWithEvent, call: (target, method, params, signal) => args.runtime.callHostRoute(target, method, params, signal) })
   const hostRuntimeReads = registerHostRuntimeObservationIpc({ handle: handleWithEvent,
     call: callUserRpc })
+  handleWithEvent('hosts:configureTailcat', (_event, input: import('@agentmux/core').AgentMuxRpcParams<'settings.hosts.tailcat.configure'>) =>
+    sessionInputOperationResult(() => callUserRpc('settings.hosts.tailcat.configure', input)))
   handleWithEvent('hosts:prepareTailcatKey', (_event, input: import('@agentmux/core').AgentMuxRpcParams<'settings.hosts.tailcat-key'>) =>
     sessionInputOperationResult(() => callUserRpc('settings.hosts.tailcat-key', input)))
   handle('hosts:check', async (input: HostConfig) => await checkSettingsHost(input, args.runtime))
@@ -2656,6 +2659,7 @@ export async function registerIpc(args: {
     nodeLocatorHosts: () => configOwner.current.hosts.map(host => host.id),
     hostTailcatKey: (input, signal) => args.runtime.callOriginalCore('local', 'settings.hosts.tailcat-key', input, { transport: 'unix', ...(signal ? { signal } : {}) }),
     hostTailcat: async (hostId, signal) => (await args.runtime.callOriginalCore(hostId, 'settings.hosts.inspect', { hostId: 'local' }, { transport: 'unix', ...(signal ? { signal } : {}) })).tailcat,
+    tailcatConfiguration: new SettingsTailcatConfiguration(configOwner, async signal => (await args.runtime.callOriginalCore('local', 'settings.hosts.inspect', { hostId: 'local' }, { transport: 'unix', ...(signal ? { signal } : {}) })).tailcat),
     notesStorage: notesStorageOwner,
     coreClients: () => args.runtime.rpcClients(),
     callOriginalCore: (hostId, method, params, context) => args.runtime.callOriginalCore(hostId, method, params, context),

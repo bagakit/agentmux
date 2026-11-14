@@ -12,7 +12,6 @@ import { nodePublicationTarget, useNodePublicationReporter } from './NodePublica
 import { NodeShareAddress } from './NodeShareAddress'
 import { useTailcatConnectionDrafts } from './use-tailcat-connection-drafts'
 import { useSettingsSave, SettingsSaveBar } from './SettingsSaveBar'
-import { saveConfigSlice } from './save-config-slice'
 import type { HostConfig } from '../../../../shared/contracts'
 import type { NodeOwnerTarget } from '../../../../shared/node-publishing'
 import type { SettingsPaneProps } from './settings-catalog'
@@ -239,7 +238,7 @@ function LocalIncomingConnections({ config, active, visible }: Pick<SettingsPane
     const submitted = listener.beginSave(), next = localDraft.tailcat, expectedHost = listener.expected[local.id]
     const expected = expectedHost?.kind === 'local' ? expectedHost.tailcat : undefined
     const ok = await listenerSave.run(async () => {
-      await saveConfigSlice((current, tailcat: typeof next) => ({ ...current, hosts: current.hosts.map(host => { if (host.id !== local.id || host.kind !== 'local') return host; if (tailcat) return { ...host, tailcat }; const { tailcat: _previous, ...rest } = host; return rest }) }), next, expected)
+      await api.hosts.configureTailcat({ hostId: 'local', expected: expected ?? null, candidate: next ?? null })
     })
     submitted.finish(ok ? submitted.value : undefined)
   }

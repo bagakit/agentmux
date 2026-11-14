@@ -1,5 +1,6 @@
 /** Original application Host records, shared by client validation and Node consumption. */
-export type TailcatListenerConfig = { enabled: boolean; keyFile: string; allowedClients: string[] }
+import type { TailcatListenerConfig } from '@agentmux/core'
+export type { TailcatListenerConfig } from '@agentmux/core'
 export type TailcatClientConfig = { address: string; keyFile: string }
 export type LocalHostConfig = { id: 'local'; kind: 'local'; label: string; tailcat?: TailcatListenerConfig }
 export type SshHostConfig = {
