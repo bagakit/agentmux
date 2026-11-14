@@ -90,6 +90,10 @@ a missing read is not proof of non-submission. The qualified receipt retains its
 reference and Run instead of a synthetic local Session ID. Input acknowledgement
 is separate from current Run health, Goal completion and human acceptance.
 
+A new qualified Start first saves its immutable business request in the original Demand store. `requested` has the original member, Goal version and body, with no invented Run, note or input receipt. After a connection failure, use `goal inspect --goal ID --dispatch-operation OP` to read that request; choose correct current access and explicitly run `goal start --goal ID --agent-ref ORIGINAL_REF --access CURRENT_ACCESS --operation-id OP --resume-original`. Check never prepares or sends input. A `rejected` request records only an exact original Goal version/assignee refusal and cannot become input; read that rejection before explicitly preparing a new current task with a new OP. Unknown storage/input results never authorize a replacement task. Old Run-bound records retain their original identity and recovery semantics.
+
+These stages are facts returned by the actual serving Goal owner. Method discovery or a client parser does not prove that another owner has adopted them. An unavailable or unrecognized observation keeps the original request unknown; it does not authorize resubmission or replacement.
+
 For an existing original input, an explicit `access.coordinator` selects its independent
 current Runtime reader. For Check, that carrier can stand alone, for example
 `{"coordinator":{"hostId":"ORIGINAL_COORDINATOR"}}`, without inventing Source access.

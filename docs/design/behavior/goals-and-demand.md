@@ -152,6 +152,8 @@ Source-qualified 单次 Start 保留完整业务引用、原执行 Runtime／Ses
 
 GUI 的单次开始复用原项目连接与已保存前缀选择；association 另选独立 Coordinator，关系保存不授输入权限。连接选择和未提交任务沿原工作面私有输入保全，首次实际提交前保存原 operation；原已保存请求的 Check 只读，明确 Continue 才续办同一原 operation。新的连接编辑、不可读的较新私有输入及旧回执分别保留，不能降为本机裸 SID、覆盖后来编辑或重建任务；不可读输入在原工作区给服务窗，隐藏工作面不自动检查。尚未提交的选择可明确放弃；若 Goal 内容已变，先明确采用当前版本，已经保存的输入正文、note 和 Run 仍只由原 owner 冻结。
 
+Source-qualified 新请求在任何连接或 Core 准备前，由同一 Demand 事务保存原 OP、准确成员、Goal 版本与冻结正文；尚无 Run 时只记 requested，不补造 Run、系统 note 或输入回执。首次实际取得 Run 后才一次推进原记录并冻结 Run/note；请求保存不授输入权。原业务事务明确拒绝的版本或负责人请求记 rejected，不冻结未知旧正文，且该 OP 不再转输入；必须读到原明确拒绝后由用户显式准备新当前版本和新 OP。未知写入或 ACK 不开放换 OP。检查 requested/rejected 只读原领域记录，不为它连接 Agent、启动或输入。原四种 Run-bound 记录不迁移、不补造早期请求事实。
+
 原 Goal 先保存同一次提交，再进入 Core 原 controlled intake。submitted 或 unknown 后的普通重入与检查不再提交；用户可明确续办同一原 operation，由 Core 以同一冻结 key、正文、note 与来源仲裁，再沿原 waiting reference 续接。另一个 producer 的同 key 不同内容必须冲突，空读不证明原请求从未进入，未知效果不自动重放；不换 Run、operation 或创建空 Session。只有原 Core canonical admitted／terminal-confirmed 回执才能确认输入，保留回执不表示当前 Run 健康、Goal 已完成或人已接受。Core 继续独占 waiting、gate、attempt 与权限事实，Goal 不保存它们的副本。 已保存输入的检查可明确只填写独立当前 Coordinator 的访问，不要求虚构 Source 通道，按原 Runtime／Session／Run 与 canonical 正文、note、来源读取，不以 Source 暂不可读挡住这条原观察；该通道被拒或身份不符不自动换路，检查不提交或续接，实际 Start 仍核完整原 Source 与当前输入资格。
 
 关键过程记录沿原 Demand activities owner，公共 Core/RPC/对象式 CLI 可追加并检查准确 operation。原 Session 作者由调用认证取得，业务正文不能冒充另一作者；稳定操作重读不重复写，同操作不同内容明确冲突。需求变化、进展、评审/测试证据、main SHA、发布版本、缺口和接手入口分类可读，证据保存路径/SHA 引用，不复制聊天全文或工具逐行输出。GUI 与 CLI 消费同条原活动，工作实现、main 集成、发布安装与人的成果接受分别成立。
