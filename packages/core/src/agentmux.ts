@@ -13,11 +13,12 @@ import { writeCliResourceDocument } from './cli-resource-document.js'
 import process from 'node:process'
 import packageManifest from '../package.json' with { type: 'json' }
 import {
-  connectAgentMuxRpc, agentMuxRpcEndpoint,
+  agentMuxRpcEndpoint,
   type AgentMuxRpcClient, type AgentMuxRpcMethod, type AgentMuxRpcParams,
   type AgentMuxRpcStreamMethod, type AgentMuxRpcStreamParams
 } from './control-host.js'
 import { agentMuxRpcEnvironmentCredentials } from './public-rpc-client.js'
+import { connectAgentMuxCliSource, type AgentMuxCliSource } from './agentmux-cli-source.js'
 import { forwardAgentMuxRpcStdio } from './agentmux-rpc-stdio.js'
 import { isAgentMuxRpcMethod, isAgentMuxRpcStream } from './public-rpc.js'
 import { AgentMuxError } from './errors.js'
@@ -36,7 +37,11 @@ import { prepareConnectionCredentialCli } from './connection-credential-cli.js'
 import { isConnectionReceiverMethod } from './connection-receiver-codec.js'
 import type { AgentMuxRpcCallOptions } from './public-rpc-client.js'
 
+let selectedSource: AgentMuxCliSource | undefined
 function write(value: unknown, stream: NodeJS.WriteStream = process.stdout, boundedReader = false): void {
+  if (selectedSource && value && typeof value === 'object' && !Array.isArray(value) && !Object.hasOwn(value, 'jsonrpc')) {
+    value = { ...value, source: selectedSource }
+  }
   const line = boundedReader ? rpcEncode(value) : JSON.stringify(value) + '\n'
   // Synchronous RPC callbacks cannot await drain. Admit a legal frame even
   // above the pipe highWaterMark; cap actual pending bytes before enqueueing.
@@ -121,7 +126,7 @@ async function readStdin(maxBytes?: number): Promise<string> {
   }
   return Buffer.concat(chunks).toString('utf8')
 }
-async function followSpace(client: AgentMuxRpcClient, input: SpaceWatch, sessions = false): Promise<number> {
+async function followSpace(client: Pick<AgentMuxRpcClient, 'subscribe'>, input: SpaceWatch, sessions = false): Promise<number> {
   const controller = new AbortController()
   let finish!: () => void, failure: Error | undefined, cancelled = false
   const ended = new Promise<void>(yes => { finish = yes })
@@ -154,7 +159,7 @@ async function followSpace(client: AgentMuxRpcClient, input: SpaceWatch, session
     outputClosed.signal.removeEventListener('abort', cancel)
   }
 }
-async function follow(client: AgentMuxRpcClient, method: AgentMuxRpcStreamMethod, params: AgentMuxRpcStreamParams<AgentMuxRpcStreamMethod>): Promise<number> {
+async function follow(client: Pick<AgentMuxRpcClient, 'subscribe'>, method: AgentMuxRpcStreamMethod, params: AgentMuxRpcStreamParams<AgentMuxRpcStreamMethod>): Promise<number> {
   const controller = new AbortController()
   let finish!: () => void
   let streamError: unknown
@@ -167,6 +172,9 @@ async function follow(client: AgentMuxRpcClient, method: AgentMuxRpcStreamMethod
   outputClosed.signal.addEventListener('abort', interrupted, { once: true })
   let opened: { dispose(): Promise<void> } | undefined
   try {
+    // CLI association metadata precedes this reader. Original RPC frames below
+    // stay byte/protocol frames, without added business or routing fields.
+    if (selectedSource) write({ ok: true, operation: method, event: { type: 'source' } }, process.stdout, true)
     opened = await client.subscribe(method, params, {
       signal: controller.signal,
       onInitial: () => {},
@@ -229,6 +237,9 @@ async function main(): Promise<number> {
   const invocation = await parseAgentMuxCliInvocation(process.argv.slice(2))
   operationId = typeof invocation.params.operationId === 'string' ? invocation.params.operationId : undefined
   const { method } = invocation.command
+  if (invocation.sourceHost !== undefined && (method === 'mote.playbook.pmo' || method === 'system.metrics.profile.analyze' || method === 'system.endpoint' && !invocation.params.inspect)) {
+    throw new AgentMuxError('--source-host selects a Source business service. This local/static command uses its original default or explicit endpoint.', 'INVALID_CLI_ARGUMENT')
+  }
   if (method === 'mote.playbook.pmo') {
     write({ ok: true, operation: method, result: agentMuxPmoPlaybook() }); return 0
   }
@@ -254,7 +265,8 @@ async function main(): Promise<number> {
   if (method === 'system.endpoint') invocation.params = {}
   if (!isAgentMuxRpcMethod(method)) throw new AgentMuxError('Command has no public service method.', 'INVALID_CLI_ARGUMENT')
   const credentials = agentMuxRpcEnvironmentCredentials()
-  const client = await connectAgentMuxRpc({ endpoint, ...(credentials ? { credentials } : {}) })
+  const client = await connectAgentMuxCliSource({ endpoint, ...(invocation.sourceHost === undefined ? {} : { sourceHost: invocation.sourceHost }), ...(credentials ? { credentials } : {}) })
+  selectedSource = client.source
   try {
     let callOptions: AgentMuxRpcCallOptions | undefined
     if (isConnectionCredentialMethod(method)) {

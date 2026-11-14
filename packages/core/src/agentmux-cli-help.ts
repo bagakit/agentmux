@@ -27,7 +27,7 @@ const COMMON = /* @__PURE__ */ guideText(guideSharedCommandSafety)
 
 export const AGENTMUX_CLI_HELP = `amux — object-first Agent and Desktop control
 
-Usage: amux [--endpoint <descriptor>] <object> <action> [arguments]
+Usage: amux [--endpoint <descriptor> | --source-host <ID>] <object> <action> [arguments]
        amux whoami
        amux --help [object [action]]
        amux --skill

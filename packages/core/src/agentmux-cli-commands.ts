@@ -108,6 +108,7 @@ export interface AgentMuxCliInvocation {
   command: AgentMuxCliCommand
   params: Record<string, unknown>
   endpoint?: string
+  sourceHost?: string
   output?: string
   hostingRuntimeId?: string
 }
@@ -1468,16 +1469,18 @@ export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
   toolkit('watch', '<id> [--evaluate] [--capture-failure] [--failure-evidence]', 'Follow results; --evaluate evaluates the declared display program once per reader cycle. Tools without display stay passive.')
 ]
 
-export function agentMuxCliArguments(argv: readonly string[]): { args: string[]; endpoint?: string } {
+export function agentMuxCliArguments(argv: readonly string[]): { args: string[]; endpoint?: string; sourceHost?: string } {
   const args = [...argv]
-  let endpoint: string | undefined
-  while (args[0] === '--endpoint' || args[0]?.startsWith('--endpoint=')) {
-    if (endpoint !== undefined) invalid('Duplicate option: --endpoint')
+  let endpoint: string | undefined, sourceHost: string | undefined
+  while (['--endpoint', '--source-host'].some(name => args[0] === name || args[0]?.startsWith(name + '='))) {
     const option = args.shift()!
-    endpoint = option === '--endpoint' ? args.shift() : option.slice('--endpoint='.length)
-    if (!endpoint?.length) invalid('--endpoint requires a descriptor.')
+    const name = option.split('=', 1)[0]!, input = option === name ? args.shift() : option.slice(name.length + 1)
+    if (!input?.length || option === name && input.startsWith('--')) invalid(`${name} requires a value; use ${name}=VALUE for option-looking data.`)
+    if (name === '--endpoint') { if (endpoint !== undefined) invalid('Duplicate option: --endpoint'); endpoint = input }
+    else { if (sourceHost !== undefined) invalid('Duplicate option: --source-host'); sourceHost = input }
   }
-  return { args, ...(endpoint === undefined ? {} : { endpoint }) }
+  if (endpoint !== undefined && sourceHost !== undefined) invalid('--endpoint and --source-host are mutually exclusive.')
+  return { args, ...(endpoint === undefined ? {} : { endpoint }), ...(sourceHost === undefined ? {} : { sourceHost }) }
 }
 export function agentMuxCliMatch(args: readonly string[]): { command: AgentMuxCliCommand; tail: string[] } | null {
   let selected: AgentMuxCliCommand | undefined
@@ -1498,7 +1501,7 @@ export function agentMuxCliRequestsHelp(command: AgentMuxCliCommand, args: reado
     (args[0] === '--help' || args[0] === '-h')
 }
 export async function parseAgentMuxCliInvocation(argv: readonly string[]): Promise<AgentMuxCliInvocation> {
-  const { args, endpoint } = agentMuxCliArguments(argv)
+  const { args, endpoint, sourceHost } = agentMuxCliArguments(argv)
   const match = agentMuxCliMatch(args)
   if (!match) invalid('Unknown command. Run amux --help.')
   const command = match!.command.rpcMethod ? { ...match!.command, method: match!.command.rpcMethod } : match!.command
@@ -1514,5 +1517,5 @@ export async function parseAgentMuxCliInvocation(argv: readonly string[]): Promi
     output = tail[2]; tail = tail.slice(0, 1)
   }
   const hostingRuntimeId = isConnectionReceiverMethod(command.method) ? id(flags(tail, command.flags!), '--runtime', true) : undefined
-  return { command, params: await match!.command.parse(tail), ...(hostingRuntimeId === undefined ? {} : { hostingRuntimeId }), ...(output === undefined ? {} : { output }), ...(endpoint === undefined ? {} : { endpoint }) }
+  return { command, params: await match!.command.parse(tail), ...(hostingRuntimeId === undefined ? {} : { hostingRuntimeId }), ...(output === undefined ? {} : { output }), ...(endpoint === undefined ? {} : { endpoint }), ...(sourceHost === undefined ? {} : { sourceHost }) }
 }

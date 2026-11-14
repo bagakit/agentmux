@@ -5,7 +5,7 @@ import type { ConnectionCredentialMethod } from './connection-credential-contrac
 import { parseConnectionCredentialParams } from './connection-credential-codec.js'
 
 /** Only this stdin boundary consumes plaintext; existing protected transports carry it to the original Host. */
-export async function prepareConnectionCredentialCli(client: AgentMuxRpcClient, method: ConnectionCredentialMethod, params: Record<string, unknown>): Promise<{ params: Record<string, unknown>; options: AgentMuxRpcCallOptions }> {
+export async function prepareConnectionCredentialCli(client: Pick<AgentMuxRpcClient, 'call'>, method: ConnectionCredentialMethod, params: Record<string, unknown>): Promise<{ params: Record<string, unknown>; options: AgentMuxRpcCallOptions }> {
   const { owner } = await client.call('runtime.owner.identity', {})
   const options = { runtimeFence: { runtimeId: owner.runtimeId, ownerInstanceId: owner.ownerInstanceId } }
   if (method !== 'connection.credential.store') return { params, options }
