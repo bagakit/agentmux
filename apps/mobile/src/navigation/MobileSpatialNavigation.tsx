@@ -14,6 +14,8 @@ import '@agentmux/client-ui/styles/agent-avatar-face.css'
 import { FocusStateMark } from '@agentmux/client-ui/components/FocusStateMark'
 import { MobileIdentity, type MobileObjectIdentity } from './MobileIdentity'
 import { MobileRegionContent } from './MobileRegionContent'
+import { MobileAgentLocations } from './MobileAgentLocations'
+import { agentLocationKey, mobileAgentLocations } from './mobile-agent-locations'
 import type { MobileHome } from './home-preference'
 import { MobileSpaceDirectory } from './MobileSpaceDirectory'
 import { MobileDirectoryNotice } from './MobileDirectoryNotice'
@@ -159,8 +161,7 @@ export const MobileSpatialNavigation = memo(function MobileSpatialNavigation({ h
     const tabsByOwner = new Map<string, Catalog['tabs']>()
     const tabsById = new Map<string, Catalog['tabs'][number]>()
     const regionsByTab = new Map<string, Region[]>()
-    const bindings = new Map<string, Set<string>>()
-    const places = new Map<string, AgentMuxSpaceAddress[]>()
+    const locationIndex = mobileAgentLocations(catalog)
     const occurrences = new Map<string, AgentMuxSpaceAddress[]>()
     for (const row of catalog?.agentPresentation ?? []) if (!rows.has(row.agentSessionId)) rows.set(row.agentSessionId, row)
     for (const owner of catalog?.spaces ?? []) if (!owners.has(owner.spaceId)) owners.set(owner.spaceId, owner)
@@ -179,22 +180,15 @@ export const MobileSpatialNavigation = memo(function MobileSpatialNavigation({ h
     for (const region of catalog?.regions ?? []) {
       const values = regionsByTab.get(region.tabId) ?? []; values.push(region); regionsByTab.set(region.tabId, values)
     }
-    for (const region of catalog?.regions ?? []) if (region.agentSessionId) {
-      const key = JSON.stringify([region.tabId, region.regionId]), ids = bindings.get(key) ?? new Set<string>()
-      ids.add(region.agentSessionId); bindings.set(key, ids)
-    }
     for (const location of catalog?.locations ?? []) {
       const key = JSON.stringify([location.spaceId, location.tabId, location.regionId]), addresses = occurrences.get(key) ?? []
       addresses.push(location); occurrences.set(key, addresses)
-      for (const id of bindings.get(JSON.stringify([location.tabId, location.regionId])) ?? []) {
-        const values = places.get(id) ?? []; values.push(location); places.set(id, values)
-      }
     }
     const issues = (catalog?.spaces ?? []).flatMap(owner => {
       const tabIssues = owner.kind === 'mote' ? (tabsByOwner.get(owner.spaceId) ?? []).map(tab => tab.issue) : []
       return [...new Set([owner.issue, motes.get(owner.spaceId)?.issue, appearances.get(owner.spaceId)?.issue, ...tabIssues].filter((value): value is string => Boolean(value)))].map(message => ({ source: owner.name, message, kind: owner.kind }))
     })
-    return { rows, owners, motes, appearances, zonesByOwner, tabsByOwner, tabsById, regionsByTab, places, occurrences, issues }
+    return { rows, owners, motes, appearances, zonesByOwner, tabsByOwner, tabsById, regionsByTab, locationIndex, occurrences, issues }
   }, [catalog])
   const reference = (id: string): SessionReference => {
     const known = sessionById.get(id), row = directory.rows.get(id)
@@ -219,7 +213,11 @@ export const MobileSpatialNavigation = memo(function MobileSpatialNavigation({ h
   const matchingSpaces = spaces.filter(item => item.spaceId === spaceId)
   const space = matchingSpaces.length === 1 ? matchingSpaces[0] : undefined
   const matching = (value: string) => value.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase())
-  const locations = (id: string) => directory.places.get(id) ?? []
+  const locationGroup = (id: string, hostId?: string | null) => {
+    const groups = directory.locationIndex.bySession.get(id) ?? []
+    return hostId ? directory.locationIndex.byAgent.get(agentLocationKey(hostId, id)) ?? { hostId, agentSessionId: id, addresses: [], count: 0 } : groups.length === 1 ? groups[0] : undefined
+  }
+  const locations = (id: string) => locationGroup(id, sessionById.get(id)?.hostId ?? directory.rows.get(id)?.projectGroup?.hostId)?.addresses ?? []
   const moteIdentity = (owner: Catalog['spaces'][number]): NonNullable<MobileObjectIdentity['mote']> => {
     const facts = directory.motes.get(owner.spaceId)
     const main = facts?.quickMode.status === 'saved' ? facts.quickMode.defaults.conversation : undefined
@@ -238,9 +236,9 @@ export const MobileSpatialNavigation = memo(function MobileSpatialNavigation({ h
       ...(context ? { context } : {}), ...(owner?.kind === 'mote' ? { mote: moteIdentity(owner) } : {}) }
   }
   const name = (session: SessionReference) => identity(session).name
-  const sessionRow = (session: SessionReference, key = session.agentSessionId, context?: AgentMuxSpaceAddress | null, tabName?: string | null, places?: AgentMuxSpaceAddress[]) => {
+  const sessionRow = (session: SessionReference, key = session.agentSessionId, context?: AgentMuxSpaceAddress | null, tabName?: string | null, places?: AgentMuxSpaceAddress[], hostId?: string | null) => {
     const object = identity(session, context), row = directory.rows.get(session.agentSessionId), status = row?.state ?? 'unknown'
-    const candidates = places ?? (context === undefined ? locations(session.agentSessionId) : [])
+    const group = locationGroup(session.agentSessionId, hostId ?? row?.projectGroup?.hostId ?? sessionById.get(session.agentSessionId)?.hostId)
     const providerId = row?.providerId || session.providerId
     const stateLabel = row ? mobileAgentStateLabel(row) : '状态未确认'
     const refreshStatus = () => {
@@ -267,9 +265,8 @@ export const MobileSpatialNavigation = memo(function MobileSpatialNavigation({ h
           {showProject && <span className="mobile-row-project mobile-session-project">{object.project}</span>}
           <span className="mobile-session-recap" title={row?.recap ? row.recap.text : row?.detail}>{row?.recap?.text ?? (tabName && tabName !== title ? tabName : providerId ? agentProviderLabel(providerId) : '')}</span></span>
       </span>
-    </MobileAgentRow>{candidates.length > 1 && <details className="mobile-session-locations"><summary>在 {candidates.length} 处打开</summary>{candidates.map(place => <button type="button" key={JSON.stringify(place)} onClick={() => openSession(session.agentSessionId, identity(session, place))}>
-      {(place.spaceId ? directory.owners.get(place.spaceId)?.name : undefined) ?? '空间未确认'} · {directory.tabsById.get(place.tabId)?.name ?? 'Tab'}
-    </button>)}</details>}</li>
+    </MobileAgentRow><MobileAgentLocations client={client} catalog={catalog} locations={group} agentSessionId={session.agentSessionId} name={title} visible={visible}
+      onChoose={place => openSession(session.agentSessionId, identity(session, place))} /></li>
   }
   const rows = catalog?.agentPresentation ?? []
   const projectRows = useMemo(() => {
@@ -324,18 +321,18 @@ export const MobileSpatialNavigation = memo(function MobileSpatialNavigation({ h
     const ownerTabs = directory.tabsByOwner.get(owner.spaceId) ?? []
     if (owner.kind === 'mote') {
       const facts = directory.motes.get(owner.spaceId)
-      const members = new Map<string, { session: SessionReference; places: AgentMuxSpaceAddress[] }>()
+      const members = new Map<string, { session: SessionReference; hostId: string | null; places: AgentMuxSpaceAddress[] }>()
       let unconfirmedAgent = false
       for (const tab of ownerTabs) for (const region of directory.regionsByTab.get(tab.tabId) ?? []) {
         if (region.kind !== 'agent' || !tab.regionIds.includes(region.regionId)) continue
         if (!region.agentSessionId) { unconfirmedAgent = true; continue }
-        const id = region.agentSessionId, member = members.get(id) ?? { session: reference(id), places: [] }
+        const id = region.agentSessionId, key = agentLocationKey(region.execution?.hostId ?? null, id), member = members.get(key) ?? { session: reference(id), hostId: region.execution?.hostId ?? null, places: [] }
         member.places.push(...directory.occurrences.get(JSON.stringify([owner.spaceId, region.tabId, region.regionId])) ?? [])
-        members.set(id, member)
+        members.set(key, member)
       }
       return <div className="mobile-mote-contents">
         <div className="mobile-mote-agents-heading"><h3>Agents</h3>{onCreateAgent && <IconButton className="mobile-icon-button" aria-label={`在 ${owner.name} 新建 Agent`} onClick={() => onCreateAgent({ spaceId: owner.spaceId, ...(facts?.content && ownerZones.has(facts.content.zoneId) ? { zoneId: facts.content.zoneId } : {}) })}><SemanticIcon name="action.create-agent" size={16} /></IconButton>}</div>
-        <ul className="mobile-session-list mobile-mote-agents" aria-label={`${owner.name} 的 Agents`}>{[...members].map(([id, member]) => sessionRow(member.session, id, member.places.length === 1 ? member.places[0] : null, undefined, member.places))}</ul>
+        <ul className="mobile-session-list mobile-mote-agents" aria-label={`${owner.name} 的 Agents`}>{[...members].map(([id, member]) => sessionRow(member.session, id, member.places.length === 1 ? member.places[0] : null, undefined, member.places, member.hostId))}</ul>
         {!members.size && <p className="mobile-spatial-empty">{unconfirmedAgent ? 'Agent 绑定还没确认，主 Agent 入口仍可使用。' : '尚无已绑定 Agent；可从主 Agent 入口设置，或明确新建。'}</p>}
         {facts?.issue && <MobileNotice identity={[owner.spaceId,facts.issue]} className="mobile-spatial-notice" role="status">{facts.issue}</MobileNotice>}
       </div>
@@ -355,7 +352,7 @@ export const MobileSpatialNavigation = memo(function MobileSpatialNavigation({ h
         }).filter(region => region !== undefined).map(region => {
           const session = region.agentSessionId ? reference(region.agentSessionId) : undefined
           const occurrences = catalog?.locations.filter(value => value.spaceId === owner.spaceId && value.tabId === tab.tabId && value.regionId === region.regionId) ?? []
-          return session ? occurrences.length ? occurrences.map(place => sessionRow(session, JSON.stringify(place), place, tab.regionIds.length === 1 ? tab.name : undefined)) : sessionRow(session, region.regionId, null, tab.regionIds.length === 1 ? tab.name : undefined)
+          return session ? sessionRow(session, JSON.stringify([region.execution?.hostId, tab.tabId, region.regionId]), occurrences.length === 1 ? occurrences[0] : null, tab.regionIds.length === 1 ? tab.name : undefined, occurrences, region.execution?.hostId)
             : <li key={region.regionId}>{region.kind === 'launcher' && onCreateAgent ? <button type="button" aria-label="在此启动位新建 Agent" onClick={() => onCreateAgent({ spaceId: owner.spaceId, zoneId, tabId: tab.tabId, regionId: region.regionId })}>
               <SemanticIcon name="object.launcher" size={18} /><span><strong>新建 Agent</strong><small>在此启动位开始</small></span><SemanticIcon name="navigation.disclosure" size={16} /></button>
               : ['file', 'browser'].includes(region.kind) ? <button type="button" onClick={() => openContent(owner, tab, region)}><SemanticIcon name={region.kind === 'file' ? 'object.file' : 'object.browser'} size={18} /><span><strong>{region.kind === 'file' ? region.file?.path.split('/').at(-1) ?? '文件名称未确认' : '查看网页'}</strong><small>{region.kind === 'file' ? region.file?.path.endsWith(NOTE_FILE_EXTENSION) ? '笔记' : '文件' : '网页'}</small></span><SemanticIcon name="navigation.disclosure" size={16} /></button>

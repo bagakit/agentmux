@@ -1,11 +1,13 @@
 import { MobileNotice, MobileNoticeScope } from '../notices/MobileNotice'
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
 import type { AgentMuxSpaceCatalog } from '@agentmux/core/control'
 import { SemanticIcon } from '@agentmux/client-ui/icons'
 import { MobileRegionContent } from './MobileRegionContent'
 import type { MobileObjectIdentity } from './MobileIdentity'
 import { MobileAgentRow } from './MobileAgentRow'
+import { MobileAgentLocations } from './MobileAgentLocations'
+import { agentLocationKey, mobileAgentLocations } from './mobile-agent-locations'
 
 /** Topic discussions and original content use the same public Zone and Region identities. */
 export function MobileZoneWorkface({ client, zoneId, name, visible, openSession, tabId, regionId, expectedAgent, onCreateAgent }: {
@@ -16,6 +18,7 @@ export function MobileZoneWorkface({ client, zoneId, name, visible, openSession,
   const [catalog, setCatalog] = useState<AgentMuxSpaceCatalog | null>(null)
   const [issue, setIssue] = useState('')
   const [revision, refresh] = useState(0)
+  const locationIndex = useMemo(() => mobileAgentLocations(catalog), [catalog])
   useEffect(() => {
     if (!visible || !client?.forwardRpc) return
     let live = true
@@ -39,7 +42,8 @@ export function MobileZoneWorkface({ client, zoneId, name, visible, openSession,
         const identity = (context?: typeof occurrences[number]): MobileObjectIdentity => ({ name: agent?.name ?? tab.name ?? name, project: agent?.project ?? name, ...(context ? { context } : {}) })
         return region.agentSessionId ? <div key={region.regionId} className="mobile-agent-row"><MobileAgentRow agentSessionId={region.agentSessionId} identity={identity(occurrences.length === 1 ? occurrences[0] : undefined)} className="mobile-menu-row" onOpen={() => openSession(region.agentSessionId!, identity(occurrences.length === 1 ? occurrences[0] : undefined))}>
           <span>{agent?.name ?? tab.name ?? name}<small>{agent?.recap?.text ?? agent?.detail ?? '打开对话'}</small></span>
-        </MobileAgentRow>{occurrences.length > 1 && <details className="mobile-session-locations"><summary>{occurrences.length} 个展示位置</summary>{occurrences.map(place => <button type="button" key={JSON.stringify(place)} onClick={() => openSession(region.agentSessionId!, identity(place))}>{catalog.spaces.find(space => space.spaceId === place.spaceId)?.name ?? name} · {place.displayWorkspaceId} / {place.groupId}</button>)}</details>}</div> : region.kind === 'file' || region.kind === 'browser' ? <MobileRegionContent visible={visible} key={region.regionId} client={client} tabId={tab.tabId} regionId={region.regionId} kind={region.kind} browserId={region.browserId} file={region.file} zoneId={zoneId ?? tab.zoneId} />
+        </MobileAgentRow><MobileAgentLocations client={client} catalog={catalog} locations={locationIndex.byAgent.get(agentLocationKey(region.execution?.hostId ?? null, region.agentSessionId))}
+          agentSessionId={region.agentSessionId} name={agent?.name ?? tab.name ?? name} visible={visible} onChoose={place => openSession(region.agentSessionId!, identity(place))} /></div> : region.kind === 'file' || region.kind === 'browser' ? <MobileRegionContent visible={visible} key={region.regionId} client={client} tabId={tab.tabId} regionId={region.regionId} kind={region.kind} browserId={region.browserId} file={region.file} zoneId={zoneId ?? tab.zoneId} />
           : <p key={region.regionId} className="mobile-spatial-notice">{region.kind === 'launcher' ? '此讨论尚未启动 Agent。' : '终端工作面'}</p>
       })}
     </section>)}

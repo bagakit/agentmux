@@ -98,10 +98,6 @@
 .mobile-app .mobile-row-detail > .mobile-row-state > span[title] { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; -webkit-line-clamp: unset; }
 .mobile-app .mobile-row-detail > .mobile-row-state > .focus-state-mark { margin: 0; flex: none; }
 .mobile-app .mobile-row-detail > .mobile-session-recap { flex: 1 1 0; min-width: 0; font-size: var(--fs-meta); line-height: 1.35; }
-.mobile-app .mobile-focus-project .mobile-session-locations { margin-top: -10px; padding: 0 14px 2px 68px; color: var(--text-3); font-size: var(--fs-micro); }
-.mobile-app .mobile-focus-project .mobile-session-locations > summary { display: flex; align-items: center; min-height: 28px; cursor: pointer; list-style: none; }
-.mobile-app .mobile-focus-project .mobile-session-locations > summary::-webkit-details-marker { display: none; }
-.mobile-app .mobile-focus-project .mobile-session-locations > button { display: flex; align-items: center; width: 100%; min-height: 44px; padding: 0; background: transparent; color: var(--text-2); text-align: left; }
 
 @media (prefers-reduced-motion: reduce) {
   .mobile-row-dot[data-mark='attention'] { animation: none; }

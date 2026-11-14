@@ -1,0 +1,16 @@
+.mobile-agent-row:has(> .mobile-agent-locations-entry) { grid-template-columns: minmax(0, 1fr) auto auto; }
+.mobile-agent-row > .mobile-agent-locations-entry { display: flex; align-items: center; justify-content: center; gap: 3px; min-width: 44px; min-height: 44px; padding: 0 5px; color: var(--text-3); background: transparent; font-size: var(--fs-micro); }
+.mobile-agent-locations-entry:active { background: var(--mobile-group-press); }
+.mobile-agent-locations-sheet { display: flex; flex-direction: column; max-height: min(85dvh, 680px); }
+.mobile-agent-locations-list { min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+.mobile-agent-location + .mobile-agent-location { border-top: 1px solid var(--mobile-hairline); }
+.mobile-agent-location > button { width: 100%; min-height: 56px; text-align: left; }
+.mobile-agent-location > button > span { min-width: 0; flex: 1; }
+.mobile-agent-location strong, .mobile-agent-location small { display: block; overflow-wrap: anywhere; }
+.mobile-agent-location small { color: var(--text-3); font-size: var(--fs-micro); }
+.mobile-agent-location > details { padding: 0 var(--sp-4) var(--sp-2); color: var(--text-3); font-size: var(--fs-micro); }
+.mobile-agent-location summary { display: flex; align-items: center; min-height: 44px; cursor: pointer; }
+.mobile-agent-location dl { margin: 0; }
+.mobile-agent-location dl > div { margin: var(--sp-2) 0; }
+.mobile-agent-location dd { margin: 0; overflow-wrap: anywhere; }
+.mobile-agent-locations-issue { color: var(--text-2); font-size: var(--fs-small); }
