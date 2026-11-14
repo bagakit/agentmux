@@ -13,7 +13,7 @@ const fixture = fileURLToPath(new URL('./', import.meta.url)), repo = resolve(fi
 const desktop = join(repo, 'apps/desktop'), core = join(repo, 'packages/core')
 const require = createRequire(join(desktop, 'package.json'))
 const coreRequire = createRequire(join(core, 'package.json'))
-const { assertStopForkScenarios } = createRequire(import.meta.url)('./agent-operations-main.cjs')
+const { assertStopForkScenarios, assertMotionScenarios } = createRequire(import.meta.url)('./agent-operations-main.cjs')
 const hash = bytes => createHash('sha256').update(bytes).digest('hex')
 const delay = ms => new Promise(done => setTimeout(done, ms))
 const nativeMutations = {
@@ -30,6 +30,8 @@ async function artifacts(directory) {
   return files
 }
 export async function runNative(requestedEvidence, options = {}) {
+  assert.ok(!options.motionOnly || options.agentOperations, 'Motion-only requires the original Agent operation consumers')
+  assert.ok(!options.workloadPreflight || options.motionOnly && !options.nativeMutant && !options.preflight, 'Workload preflight uses the unmutated original motion consumers and its own qualification')
   assert.ok(!(options.liveAdoption && options.agentOperations), 'Live adoption and Stop/Fork have distinct native qualifications')
   if (!options.liveAdoption && !options.agentOperations) {
     assert.ok(!options.nativeMutant && !options.preflight && (!options.frameScope || options.frameScope === 'all'),
@@ -43,9 +45,9 @@ export async function runNative(requestedEvidence, options = {}) {
   await mkdir(evidence, { recursive: true })
   const privateRoot = await realpath(await mkdtemp(_hygiene_fixturePath("tmp/amx-takeover-renderer-")))
   const out = join(privateRoot, 'renderer'), sourceBefore = {}, styleBefore = {}, logs = []
-  const receipt = { schema: options.agentOperations ? 'agentmux.stop-fork-feedback-native.v1' : 'agentmux.session-takeover-native.v1', qualification: options.liveAdoption ? 'live-adoption-v1' : options.nativeMutant ? 'stop-fork-feedback-mutation-v1' : 'stop-fork-feedback-v1', sourceMutations: [], passed: false, frames: [], processes: [],
+  const receipt = { schema: options.workloadPreflight ? 'agentmux.agent-operation-workload-preflight-native.v1' : options.motionOnly ? 'agentmux.agent-operation-local-motion-native.v1' : options.agentOperations ? 'agentmux.stop-fork-feedback-native.v1' : 'agentmux.session-takeover-native.v1', qualification: options.workloadPreflight ? 'agent-operation-workload-preflight-v1' : options.motionOnly ? 'agent-operation-local-motion-v1' : options.liveAdoption ? 'live-adoption-v1' : options.nativeMutant ? 'stop-fork-feedback-mutation-v1' : 'stop-fork-feedback-v1', sourceMutations: [], passed: false, frames: [], processes: [],
     userSessionTouched: false, independentVisualReview: 'pending',
-    scope: options.agentOperations
+    scope: options.workloadPreflight ? 'Diagnostic execution of the original matched-work producer and sampler with real cards, input, ordered bytes and Chromium traces. No full local-motion, finite result, visual, restart or user Runtime qualification.' : options.motionOnly ? 'One source-built production Renderer, exact original Stop/Fork controllers and read-only details, local animation and related-consumer cost. Controlled Native transport; no Runtime execution, ordinary restart or vendor/user qualification.' : options.agentOperations
       ? 'Actual production cards, Stop/Fork controllers, SessionPane, xterm, feedback motion and product styles in two ordinary Electron processes. Real public Core spatial file owner and Chromium profile storage. Exact original Stop/Fork references, created partial Fork, sessions, Runs, drafts and workfaces survive restart without replay. Native launch/stop/input/ordered bytes are controlled; this does not qualify public Takeover, live adoption, vendor CLI or ctxmux process execution.'
       : 'Independent original live-adoption fixture with controlled Native reattachment. It does not qualify public Takeover or Stop/Fork feedback.',
     controlledRecovery: 'The same exact Native snapshot owns refresh/recover. For a matching healthy running Host/Session/Run it returns the Core reattachable protocol (packages/core/src/client.ts, recoverAgentSession running branch); the generic apps/desktop/src/renderer/src/lib/api.ts preview recover unconditionally mints a Run and is not the Native owner of this fixture. Per-process nativeReads record request and returned identities; unknown or mismatched targets fail.', }
@@ -113,12 +115,13 @@ export async function runNative(requestedEvidence, options = {}) {
     if (options.agentOperations) {
       for (const path of ['components/FocusContextRow.tsx', 'components/AgentOperationFeedback.tsx', 'components/AgentCurrentForkControls.tsx', 'lib/agent-operation-feedback.ts', 'lib/session-stop-background.ts']) assert.ok(sourceBefore['apps/desktop/src/renderer/src/' + path], 'Agent-operation qualification actually consumes ' + path)
       assert.ok(styleBefore['apps/desktop/src/renderer/src/styles/agent-operation-feedback.css'])
+      assert.ok(sourceBefore['apps/desktop/scripts/fixtures/session-takeover/operation-output-stream.mjs'], 'The actual Renderer consumes the exact controlled output producer')
     }
     if (options.preflight) { receipt.preflight = { compiled: true, finalCandidateExecuted: false }; await writeFile(join(evidence, 'preflight.json'), JSON.stringify(receipt, null, 2)); return receipt }
     const env = Object.fromEntries(Object.entries(process.env).filter(([name]) => name !== 'ELECTRON_RUN_AS_NODE' && !name.startsWith('AGENTMUX_') && !name.startsWith('CTXMUX_')))
-    for (const mode of options.nativeMutant ? ['first'] : ['first', 'second']) {
+    for (const mode of options.nativeMutant || options.motionOnly ? ['first'] : ['first', 'second']) {
       const lines = []
-      const outcome = await runProbeProcess(require('electron'), [join(fixture, 'main.cjs'), join(out, 'index.html'), privateRoot, evidence, mode, spatialModule, options.frameScope ?? 'all', options.liveAdoption ? 'live-adoption' : 'agent-operations', options.nativeMutant ?? ''], {
+      const outcome = await runProbeProcess(require('electron'), [join(fixture, 'main.cjs'), join(out, 'index.html'), privateRoot, evidence, mode, spatialModule, options.frameScope ?? 'all', options.workloadPreflight ? 'operation-workload' : options.motionOnly ? 'operation-motion' : options.liveAdoption ? 'live-adoption' : 'agent-operations', options.nativeMutant ?? ''], {
         temporaryRoot: privateRoot, cwd: repo, env, timeoutMs: 115000, onLine: line => lines.push(line)
       })
       await writeFile(join(evidence, mode + '-process.log'), lines.join('\n'))
@@ -135,9 +138,24 @@ export async function runNative(requestedEvidence, options = {}) {
       assert.equal(receipt.sourceMutations.length, 1, 'Native mutation was consumed by the actual production bundle')
       throw new Error('Native source mutation survived its actual production-consumer oracle')
     }
-    assert.notEqual(receipt.processes[0].rendered.processId, receipt.processes[1].rendered.processId)
-    assert.ok(receipt.processes[1].rendered.restart.noWorkfaceReseed)
-    if (options.liveAdoption) {
+    if (!options.motionOnly) {
+      assert.notEqual(receipt.processes[0].rendered.processId, receipt.processes[1].rendered.processId)
+      assert.ok(receipt.processes[1].rendered.restart.noWorkfaceReseed)
+    }
+    if (options.motionOnly) {
+      assert.equal(receipt.processes.length, 1)
+      const actual = receipt.processes[0].rendered.agentOperations
+      if (options.workloadPreflight) {
+        assert.equal(actual.qualification, 'agent-operation-workload-preflight-v1')
+        assert.deepEqual([...actual.scenarios].sort(), ['production-card-source-identities', 'independent-confirmed-stops', 'native-browser-related-consumer-scale'].sort())
+        assert.equal(actual.costSamples.length, 6)
+        assert.equal(actual.projectionComparison.pairs.length, 3)
+      } else {
+        assert.equal(actual.qualification, 'agent-operation-local-motion-v1')
+        assertMotionScenarios(actual.scenarios)
+        assert.ok(actual.costSamples.length >= 6 && actual.motion.length >= 5)
+      }
+    } else if (options.liveAdoption) {
       assert.equal(receipt.processes[0].rendered.liveReattached.noLaunch, true)
       assert.equal(receipt.processes[1].rendered.restart.noReplay, true)
       assert.equal(receipt.processes[0].rendered.liveReattached.agentSessionId,
@@ -183,6 +201,6 @@ export async function runNative(requestedEvidence, options = {}) {
 }
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   const evidence = process.argv.find(value => value.startsWith('--evidence='))?.slice('--evidence='.length)
-  try { const receipt = await runNative(evidence, { frameScope: process.argv.includes('--terminal-only') ? 'terminal' : 'all', liveAdoption: process.argv.includes('--live-adoption'), agentOperations: process.argv.includes('--agent-operations'), preflight: process.argv.includes('--preflight'), nativeMutant: process.argv.find(value => value.startsWith('--native-mutant='))?.slice('--native-mutant='.length) }); console.log(JSON.stringify({ passed: receipt.passed, frames: receipt.frames.length, processes: receipt.processes.length })) }
+  try { const receipt = await runNative(evidence, { frameScope: process.argv.includes('--terminal-only') ? 'terminal' : 'all', liveAdoption: process.argv.includes('--live-adoption'), agentOperations: process.argv.includes('--agent-operations'), motionOnly: process.argv.includes('--motion-only'), workloadPreflight: process.argv.includes('--workload-preflight'), preflight: process.argv.includes('--preflight'), nativeMutant: process.argv.find(value => value.startsWith('--native-mutant='))?.slice('--native-mutant='.length) }); console.log(JSON.stringify({ passed: receipt.passed, frames: receipt.frames.length, processes: receipt.processes.length })) }
   catch (error) { console.error(error.message); process.exitCode = 1 }
 }

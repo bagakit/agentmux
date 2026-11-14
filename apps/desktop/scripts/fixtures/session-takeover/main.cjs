@@ -110,7 +110,7 @@ app.whenReady().then(async () => {
     win = new BrowserWindow({ width: 940, height: 740, show: false, frame: false,
       webPreferences: { contextIsolation: true, nodeIntegration: false, backgroundThrottling: false, preload: path.join(__dirname, 'preload.cjs') } })
     win.webContents.on('console-message', (_event, level, message) => { if (level >= 2) errors.push(message) })
-    await win.loadFile(html, qualification === 'agent-operations' ? { query: { agentOperations: '1' } } : undefined)
+    await win.loadFile(html, ['agent-operations', 'operation-motion', 'operation-workload'].includes(qualification) ? { query: { agentOperations: '1' } } : undefined)
     win.webContents.debugger.attach('1.3')
     await wait(`Boolean(window.takeoverProbe) && document.documentElement.dataset.takeoverReady`)
     result.nativeDevicePixelRatio = await evaluate('devicePixelRatio')
@@ -119,13 +119,13 @@ app.whenReady().then(async () => {
       await runLiveAdoption({ result, evaluate, wait, click, open, frame, spatial, evidence, mode })
       result.consoleErrors = errors; result.passed = true; return
     }
-    if (qualification === 'agent-operations') {
+    if (['agent-operations', 'operation-motion', 'operation-workload'].includes(qualification)) {
       const { runAgentOperations } = require('./agent-operations-main.cjs')
       // Live ordered output continually renews xterm's scrollbar transitions.
       // Observe painted frames without requiring the healthy terminal to go idle.
       const operationPainted = () => evaluate('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))')
       const operationFrame = async (name, _settle, extra) => { await operationPainted(); return frame(name, false, extra) }
-      await runAgentOperations({ win, result, evaluate, wait, click, key, size, frame: operationFrame, painted: operationPainted, originalTerminalReady, spatial, evidence, mode, nativeMutant })
+      await runAgentOperations({ win, result, evaluate, wait, click, key, size, frame: operationFrame, painted: operationPainted, originalTerminalReady, spatial, evidence, mode, nativeMutant, motionOnly: ['operation-motion', 'operation-workload'].includes(qualification), workloadPreflight: qualification === 'operation-workload' })
       result.consoleErrors = errors; result.passed = true; return
     }
     throw new Error('This native fixture requires explicit live-adoption or agent-operations qualification')

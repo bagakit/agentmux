@@ -1,6 +1,7 @@
 const assert = require('node:assert/strict')
 const fs = require('node:fs/promises')
 const path = require('node:path')
+const { createHash } = require('node:crypto')
 
 const stopForkScenarios = Object.freeze([
   'production-card-source-identities', 'independent-confirmed-stops',
@@ -18,8 +19,80 @@ exports.assertStopForkScenarios = function (scenarios, mode) {
     'The complete actual Stop/Fork scenario set must execute exactly once')
 }
 
+exports.assertMotionScenarios = function (scenarios) {
+  assert.deepEqual([...scenarios].sort(), [...stopForkScenarios.filter(name => !['persistent-original-operation-references', 'partial-result-inspection-without-create'].includes(name)), 'native-short-status-reading', 'finite-success-open-reader'].sort(),
+    'The bounded local-motion scenario set must execute exactly once')
+}
+
+/** Invocation counts compare matched original work, independently of elapsed browser cost. */
+exports.assertProjectionWorkPairs = function (samples, relatedBefore, relatedAfter) {
+  assert.ok(Number.isInteger(relatedBefore) && relatedBefore >= 0 && Number.isInteger(relatedAfter) && relatedAfter > relatedBefore,
+    'Related original operations must exercise the actual projection counter')
+  assert.equal(samples.length, 6, 'Three nonempty original 0/384 work pairs are required')
+  const group = count => samples.filter(sample => sample.unrelated === count)
+  for (const count of [0, 384]) assert.deepEqual(group(count).map(sample => sample.sample).sort(), [0, 1, 2])
+  return { metric: 'projection invocations per matched original input and output workload', relatedBefore, relatedAfter,
+    pairs: group(0).map(small => {
+      const large = group(384).find(candidate => candidate.sample === small.sample)
+      for (const sample of [small, large]) {
+        assert.ok(Number.isInteger(sample.projectionReads) && sample.projectionReads >= 0)
+        assert.ok(Number.isFinite(sample.durationMs) && sample.durationMs > 0)
+        assert.equal(sample.response.after - sample.response.before, 1, 'Each pair sends one original native input')
+        assert.ok(Number.isInteger(sample.streamLines) && sample.streamLines > 0, 'Original concurrent output must be nonempty')
+        assert.ok(Number.isInteger(sample.outputByteDelta) && sample.outputByteDelta > 0, 'Original output bytes must be nonempty')
+        assert.ok(sample.outputSource?.kind === 'agent' && sample.outputSource.hostId && sample.outputSource.agentSessionId && sample.outputSource.run?.runId,
+          'Each work sample keeps a nonempty original output control')
+      }
+      assert.equal(large.streamLines, small.streamLines, 'Each pair exposes the same original ordered output workload')
+      assert.equal(large.outputByteDelta, small.outputByteDelta, 'Each pair exposes the same original output byte workload')
+      assert.deepEqual(large.outputSource, small.outputSource, 'Each pair keeps its exact original output source')
+      assert.ok(large.projectionReads <= small.projectionReads,
+        'Unrelated retained membership does not add projection invocations for matched original work')
+      return { sample: small.sample, inputCount: 1, streamLines: small.streamLines, outputByteDelta: small.outputByteDelta, outputSource: small.outputSource,
+        baselineReads: small.projectionReads, baselineDurationMs: small.durationMs,
+        unrelatedReads: large.projectionReads, unrelatedDurationMs: large.durationMs }
+    }) }
+}
+
+// Fixture output is declared CRLF ASCII, not a Runtime status protocol.
+function controlledOutputTail(output) {
+  return typeof output === 'string' && output.endsWith('\r\n') ? output.split('\r\n').at(-2) : undefined
+}
+function terminalOutputObservation(terminals, regionId, runId, tail) {
+  const matches = terminals.filter(terminal => terminal.regionId === regionId && terminal.viewObservation?.runId === runId)
+  const lineIndex = matches.length === 1 && typeof tail === 'string' && tail.length > 0 ? matches[0].buffer.lines.indexOf(tail) : -1
+  return { regionId, runId, tail, matchingTerminals: matches.length, lineIndex, consumed: lineIndex >= 0 }
+}
+exports.controlledOutputTail = controlledOutputTail
+exports.terminalOutputObservation = terminalOutputObservation
+
+/** UserTiming and X-event timestamps share the trace clock; crossing work edges are clipped. */
+exports.traceWorkMeasures = function (events, startName, endName) {
+  assert.ok(startName && endName && startName !== endName)
+  const mark = name => {
+    const matches = events.filter(event => event.name === name && event.cat?.split(',').includes('blink.user_timing'))
+    assert.equal(matches.length, 1, 'Each real work boundary has one nonempty unique trace mark')
+    assert.ok(Number.isFinite(matches[0].ts) && Number.isInteger(matches[0].pid) && Number.isInteger(matches[0].tid))
+    return matches[0]
+  }
+  const start = mark(startName), end = mark(endName)
+  assert.ok(end.ts > start.ts, 'The real work trace window has positive duration')
+  assert.equal(end.pid, start.pid)
+  assert.equal(end.tid, start.tid)
+  const measure = bounds => Object.fromEntries(Object.entries({ style: ['UpdateLayoutTree', 'RecalculateStyles'], layout: ['Layout'], paint: ['Paint'] }).map(([name, kinds]) => {
+    const values = events.filter(event => kinds.includes(event.name) && event.ph === 'X')
+      .map(event => {
+        assert.ok(Number.isFinite(event.ts) && Number.isFinite(event.dur) && event.dur >= 0)
+        return bounds ? Math.max(0, Math.min(event.ts + event.dur, bounds.end) - Math.max(event.ts, bounds.start)) : event.dur
+      }).filter(duration => duration > 0)
+    return [name, { events: values.length, durationMs: values.reduce((sum, duration) => sum + duration, 0) / 1000 }]
+  }))
+  return { start: { name: startName, ts: start.ts, pid: start.pid, tid: start.tid }, end: { name: endName, ts: end.ts, pid: end.pid, tid: end.tid },
+    durationMs: (end.ts - start.ts) / 1000, measures: measure({ start: start.ts, end: end.ts }), wholeTraceMeasures: measure() }
+}
+
 /** Native driver for mounted production consumers. It never calls a business controller itself. */
-exports.runAgentOperations = async function ({ win, result, evaluate, wait, click, key, size, frame, painted, originalTerminalReady, spatial, evidence, mode, nativeMutant }) {
+exports.runAgentOperations = async function ({ win, result, evaluate, wait, click, key, size, frame, painted, originalTerminalReady, spatial, evidence, mode, nativeMutant, motionOnly = false, workloadPreflight = false }) {
   const delay = ms => new Promise(resolve => setTimeout(resolve, ms))
   const facts = () => evaluate('takeoverProbe.facts()')
   const operationFacts = () => evaluate('takeoverProbe.operations.facts()')
@@ -28,7 +101,7 @@ exports.runAgentOperations = async function ({ win, result, evaluate, wait, clic
   const menuItem = text => `([...document.querySelectorAll('[role="menu"] [role="menuitem"]')].find(node=>node.textContent.trim()===${JSON.stringify(text)}))`
   const feedback = kind => `${cards}.querySelector('.agent-operation-feedback[data-kind="${kind}"]')`
   const reference = (values, kind) => Object.values(values.operations).find(item => item.kind === kind)
-  const own = result.agentOperations = { qualification: 'stop-fork-feedback-v1', scenarios: [], costSamples: [], motion: [],
+  const own = result.agentOperations = { qualification: workloadPreflight ? 'agent-operation-workload-preflight-v1' : motionOnly ? 'agent-operation-local-motion-v1' : 'stop-fork-feedback-v1', scenarios: [], costSamples: [], motion: [],
     nativeBoundary: 'Controlled exact Native launch/stop/ordered-byte/input facts; production card/controller/spatial/persistence consumers. No vendor CLI or real user Session is operated.' }
 
   async function openCard(index, action) {
@@ -93,20 +166,24 @@ exports.runAgentOperations = async function ({ win, result, evaluate, wait, clic
         label:node.querySelector('summary')?.textContent,rect:node.getBoundingClientRect().toJSON(),
         animations:node.getAnimations({subtree:true}).map(animation=>({name:animation.animationName,currentTime:animation.currentTime,playState:animation.playState,duration:animation.effect.getTiming().duration,
           timing:animation.effect.getComputedTiming().progress,target:animation.effect.target?.className})),
-        trail:(()=>{const target=node.querySelector('.agent-operation-feedback__trail');if(!target)return null;const style=getComputedStyle(target,'::after');return {distance:style.offsetDistance,path:style.offsetPath,display:style.display,playState:style.animationPlayState}})()}))}})()`)
+        carriers:[...node.querySelectorAll('.agent-operation-feedback__label > [role="status"]')].map(target=>{const style=getComputedStyle(target,'::after'),item=target.closest('.agent-operation-feedback__item');return {
+          operationId:item.querySelector('.agent-operation-feedback__detail code')?.textContent,phase:item.dataset.phase,text:target.textContent,color:getComputedStyle(target).color,
+          rect:target.getBoundingClientRect().toJSON(),content:style.content,position:style.backgroundPosition,display:style.display,backgroundClip:style.backgroundClip,
+          animationName:style.animationName,durationMs:parseFloat(style.animationDuration)*(style.animationDuration.endsWith('ms')?1:1000),playState:style.animationPlayState,
+          animations:target.getAnimations({subtree:true}).filter(animation=>animation.animationName==='agent-operation-shine').map(animation=>({name:animation.animationName,playState:animation.playState,duration:animation.effect.getTiming().duration,currentTime:animation.currentTime}))}})}))}})()`)
     own.motion.push({ label, ...sample }); return sample
   }
   async function pausedWork(label) {
     const before = await motionSample(label + '-before')
     await delay(120)
     const after = await motionSample(label + '-after')
-    const running = sample => sample.rows.flatMap(row => row.animations).filter(animation => animation.name === 'agent-operation-orbit' && animation.playState === 'running')
-    const moving = before.rows.some((row, index) => row.trail && after.rows[index]?.trail && row.trail.distance !== after.rows[index].trail.distance)
+    const running = sample => sample.rows.flatMap(row => row.animations).filter(animation => animation.name === 'agent-operation-shine' && animation.playState === 'running')
+    const moving = before.rows.some((row, index) => row.carriers.some((carrier, slot) => carrier.display !== 'none' && carrier.position !== after.rows[index]?.carriers[slot]?.position))
     const observation = { label, beforeRunning: running(before).length, afterRunning: running(after).length, moving, before, after }
     own.isolationObservations ??= []; own.isolationObservations.push(observation)
     result.stage = 'agent-operation-visibility-work'
-    assert.equal(observation.beforeRunning + observation.afterRunning, 0, 'Actual ' + label + ' operation edges do zero running animation work')
-    assert.equal(moving, false, 'Actual ' + label + ' operation edge positions stay fixed')
+    assert.equal(observation.beforeRunning + observation.afterRunning, 0, 'Actual ' + label + ' operation statuses do zero running animation work')
+    assert.equal(moving, false, 'Actual ' + label + ' operation status light positions stay fixed')
     return observation
   }
   async function inputAndScroll(label) {
@@ -118,7 +195,7 @@ exports.runAgentOperations = async function ({ win, result, evaluate, wait, clic
     await wait(`takeoverProbe.operations.facts().inputs.length>${before.inputs.length}`, 'Actual xterm keyboard reaches the controlled original Native input port')
     const after = await operationFacts(), inputMs = await evaluate(`performance.now()-${start}`)
     assert.deepEqual(after.inputs.at(-1).control, before.sourceControls[0], 'Input kept the original exact healthy source control')
-    const termBefore = await evaluate('takeoverProbe.terminalFacts().terminals.find(term=>term.viewObservation?.liveReady)')
+    const termBefore = await evaluate('takeoverProbe.terminalFacts().terminals.find(term=>term.regionId===' + JSON.stringify(initial.origins[0].regionId) + '&&term.viewObservation?.runId===' + JSON.stringify(before.sourceControls[0].run.runId) + '&&term.viewObservation.liveReady)')
     assert.ok(termBefore, 'Actual live xterm is present during operation feedback')
     const rect = termBefore.element
     await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type: 'mouseWheel', x: rect.x + Math.min(rect.width / 2, 100), y: rect.y + Math.min(rect.height / 2, 100), deltaY: -240, deltaX: 0 })
@@ -126,12 +203,22 @@ exports.runAgentOperations = async function ({ win, result, evaluate, wait, clic
     const termAfter = await evaluate('takeoverProbe.terminalFacts().terminals.find(term=>term.regionId===' + JSON.stringify(termBefore.regionId) + ')')
     assert.ok(termAfter.buffer.viewportY < termBefore.buffer.viewportY, 'Native mouse wheel scrolls the original live xterm history while cards animate')
     await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type: 'mouseWheel', x: rect.x + Math.min(rect.width / 2, 100), y: rect.y + Math.min(rect.height / 2, 100), deltaY: 10000, deltaX: 0 })
-    return { label, inputMs, before: before.inputs.length, after: after.inputs.length,
+    return { label, inputMs, regionId: termBefore.regionId, runId: termBefore.viewObservation.runId, before: before.inputs.length, after: after.inputs.length,
       viewportBefore: termBefore.buffer.viewportY, viewportAfter: termAfter.buffer.viewportY }
   }
+  async function consumedTail(regionId, runId) {
+    const tail = await evaluate(`(${controlledOutputTail.toString()})(takeoverProbe.operations.state().output[takeoverProbe.operations.facts().originals[0]])`)
+    assert.ok(typeof tail === 'string' && tail.length > 0, 'The original fixture emitted a nonempty complete tail line')
+    const observation = `(${terminalOutputObservation.toString()})(takeoverProbe.terminalFacts().terminals,${JSON.stringify(regionId)},${JSON.stringify(runId)},${JSON.stringify(tail)})`
+    await wait(`${observation}.consumed`, 'The exact original Region/Run xterm actually consumed the last emitted fixture line')
+    return evaluate(observation)
+  }
   async function browserCost(unrelated, sample) {
+    await evaluate('takeoverProbe.operations.stream(false)')
+    const source = (await operationFacts()).sourceControls[0], regionId = initial.origins[0].regionId
+    const previousConsumption = await consumedTail(regionId, source.run.runId)
     await evaluate(`takeoverProbe.operations.unrelated(${unrelated})`); await painted()
-    const before = await operationFacts(), events = []
+    const events = []
     let completed
     const end = new Promise(resolve => { completed = resolve })
     const listener = (_event, method, params) => {
@@ -139,29 +226,71 @@ exports.runAgentOperations = async function ({ win, result, evaluate, wait, clic
       if (method === 'Tracing.tracingComplete') completed()
     }
     win.webContents.debugger.on('message', listener)
-    await win.webContents.debugger.sendCommand('Tracing.start', { categories: 'devtools.timeline', transferMode: 'ReportEvents' })
-    const startedAt = Date.now()
+    await win.webContents.debugger.sendCommand('Tracing.start', { categories: 'devtools.timeline,blink.user_timing', transferMode: 'ReportEvents' })
+    const startName = `operation-work-start-${unrelated}-${sample}`, endName = `operation-work-end-${unrelated}-${sample}`
+    const begin = await evaluate(`(()=>{const at=performance.mark(${JSON.stringify(startName)}).startTime,before=takeoverProbe.operations.facts();takeoverProbe.operations.stream(true,5);return {at,before}})()`)
     const response = await inputAndScroll(`scale-${unrelated}-${sample}`)
-    await delay(650)
+    const before = begin.before
+    assert.equal(response.regionId, regionId)
+    assert.equal(response.runId, source.run.runId)
+    await wait(`takeoverProbe.operations.facts().counters.streamLines===${before.counters.streamLines + 5}&&!takeoverProbe.operations.facts().streaming`,
+      'The original producer completes exactly five real output events within this trace')
+    const consumption = await consumedTail(regionId, source.run.runId)
+    assert.notEqual(consumption.tail, previousConsumption.tail, 'This cohort consumes its unique new final sequence, not the previous batch')
+    await painted()
+    const finish = await evaluate(`(()=>{const after=takeoverProbe.operations.facts(),at=performance.mark(${JSON.stringify(endName)}).startTime;return {at,after}})()`)
+    const exportStartedAt = Date.now()
     await win.webContents.debugger.sendCommand('Tracing.end'); await end
+    const traceExportMs = Date.now() - exportStartedAt
     win.webContents.debugger.removeListener('message', listener)
-    const after = await operationFacts(), durationMs = Date.now() - startedAt
-    const named = names => events.filter(event => names.includes(event.name) && event.ph === 'X')
-    const measures = Object.fromEntries(Object.entries({ style: ['UpdateLayoutTree', 'RecalculateStyles'], layout: ['Layout'], paint: ['Paint'] }).map(([name, kinds]) => {
-      const values = named(kinds); return [name, { events: values.length, durationMs: values.reduce((sum, event) => sum + (event.dur ?? 0), 0) / 1000 }]
-    }))
-    const observed = { unrelated, sample, durationMs, measures, response,
+    const work = exports.traceWorkMeasures(events, startName, endName), after = finish.after
+    const traceFile = `cost-trace-${sample}-${unrelated}.json`
+    const traceBytes = JSON.stringify({ traceEvents: events })
+    await fs.writeFile(path.join(evidence, traceFile), traceBytes)
+    const observed = { unrelated, sample, durationMs: work.durationMs, rendererDurationMs: finish.at - begin.at,
+      measures: work.measures, wholeTraceMeasures: work.wholeTraceMeasures, workWindow: { start: work.start, end: work.end }, traceExportMs, traceFile,
+      traceSha256: createHash('sha256').update(traceBytes).digest('hex'), response, previousConsumption, consumption,
       projectionReads: after.counters.projection - before.counters.projection,
       cardMutations: after.counters.cardMutations - before.counters.cardMutations,
-      streamLines: after.counters.streamLines - before.counters.streamLines, traceEvents: events.length }
+      streamLines: after.counters.streamLines - before.counters.streamLines,
+      outputByteDelta: after.outputBytes[before.originals[0]] - before.outputBytes[before.originals[0]],
+      outputSource: before.sourceControls[0], traceEvents: events.length }
+    assert.equal(observed.streamLines, 5, 'The real output producer and sampled counter share one finite work boundary')
     assert.ok(events.length > 0 && observed.streamLines > 0, 'Native browser cost sample and concurrent ordered output are nonempty')
     own.costSamples.push(observed)
     return observed
   }
 
+  async function measuredCost() {
+    assert.ok((await operationFacts()).counters.projection > initialOperationFacts.counters.projection,
+      'Related original Stops exercise the real projection before unrelated work samples')
+    for (let sample = 0; sample < 3; sample++) for (const unrelated of [0, 384]) await browserCost(unrelated, sample)
+    await evaluate('takeoverProbe.operations.unrelated(0)')
+    const median = values => [...values].sort((a, b) => a - b)[Math.floor(values.length / 2)]
+    const group = count => own.costSamples.filter(sample => sample.unrelated === count)
+    const growth = (384 + 3) / 3
+    // A scale contradiction, not an invented absolute latency budget: unrelated membership
+    // must not turn fixed visible operation work into one pass per retained Session.
+    assert.ok(group(384).every(sample => sample.cardMutations === 0), 'Unrelated retained membership causes no steady-state visible card DOM mutations')
+    own.projectionComparison = exports.assertProjectionWorkPairs(own.costSamples,
+      initialOperationFacts.counters.projection, (await operationFacts()).counters.projection)
+
+    for (const field of ['style', 'layout', 'paint']) {
+      const small = group(0).map(sample => sample.measures[field].durationMs / sample.durationMs)
+      const large = group(384).map(sample => sample.measures[field].durationMs / sample.durationMs)
+      const noise = Math.max(...small) - Math.min(...small)
+      assert.ok(median(large) <= (median(small) + noise + Number.EPSILON) * Math.sqrt(growth), `Native ${field} cost stays sublinear to unrelated retained membership; raw repeated samples are retained`)
+    }
+    const smallInputs = group(0).map(sample => sample.response.inputMs), largeInputs = group(384).map(sample => sample.response.inputMs)
+    assert.ok(median(largeInputs) <= (median(smallInputs) + Math.max(...smallInputs) - Math.min(...smallInputs) + Number.EPSILON) * Math.sqrt(growth), 'Native input latency remains sublinear to unrelated retained membership')
+    own.scenarios.push('native-browser-related-consumer-scale')
+    await evaluate('takeoverProbe.operations.stream(true)')
+  }
+
   await originalTerminalReady()
   await size(1180, 850)
   const initial = await facts()
+  const initialOperationFacts = await operationFacts()
   assert.ok(initial.origins.length >= 2 && await evaluate(`${cards}.querySelectorAll('button[data-session-id]').length>=2`), 'At least two actual projection-driven source cards are mounted')
   if (mode === 'first') {
     own.scenarios.push('production-card-source-identities')
@@ -172,19 +301,75 @@ exports.runAgentOperations = async function ({ win, result, evaluate, wait, clic
     own.scenarios.push('independent-confirmed-stops')
     assert.deepEqual((await facts()).drafts, initial.drafts, 'Multiple confirmed Stops preserve every original unsent draft')
     await frame('ops-02-stop-in-flight-dark')
-    const startMotion = await motionSample('stop-start')
-    const active = startMotion.rows.filter(row => row.phase === 'pending')
-    assert.ok(active.length >= 2 && active.every(row => row.label?.includes('停止中')), 'Real cards use short Stop labels with active feedback')
-    assert.ok(active.some(row => row.animations.some(animation => animation.playState === 'running')), 'The production border actually animates')
-    const duration = Math.max(...active.flatMap(row => row.animations.map(animation => Number(animation.duration))).filter(Number.isFinite))
-    assert.ok(duration > 0, 'A real animation cycle has a known duration')
+    if (workloadPreflight) {
+      await measuredCost()
+      await evaluate('takeoverProbe.operations.stream(false)')
+      own.passed = true
+      return
+    }
+    if (motionOnly) {
+      const status = `${feedback('stop')}.querySelector('summary')`
+      await click(status)
+      assert.equal(await evaluate(`${feedback('stop')}.querySelector('details').open`), true, 'Native status click opens the original operation reader')
+      assert.ok(await evaluate(`${feedback('stop')}.textContent.includes(${JSON.stringify(slow.operationId)}) && ${feedback('stop')}.textContent.includes(${JSON.stringify(slow.control.run.runId)})`), 'Original operation and Run remain readable')
+      await key('Enter', 'Enter', 13)
+      await wait(`!${feedback('stop')}.querySelector('details').open`, 'Native Enter closes the same original reader')
+      await key('Enter', 'Enter', 13)
+      await wait(`${feedback('stop')}.querySelector('details').open`, 'Native Enter reopens the same original reader')
+      assert.equal(await evaluate(`document.activeElement === ${status}`), true, 'Original native status keeps keyboard focus')
+      await frame('ops-status-keyboard-details')
+      await key('Enter', 'Enter', 13)
+      const { root } = await win.webContents.debugger.sendCommand('DOM.getDocument')
+      const { nodeId } = await win.webContents.debugger.sendCommand('DOM.querySelector', { nodeId: root.nodeId, selector: '#agent-operation-cards .agent-operation-feedback summary' })
+      const { node } = await win.webContents.debugger.sendCommand('DOM.describeNode', { nodeId })
+      const ax = await win.webContents.debugger.sendCommand('Accessibility.getFullAXTree')
+      const axRoot = ax.nodes.find(entry => entry.backendDOMNodeId === node.backendNodeId)
+      assert.ok(axRoot, 'The exact original status trigger has an actual accessibility subtree')
+      const byId = new Map(ax.nodes.map(entry => [entry.nodeId, entry])), descendants = []
+      const visit = entry => { descendants.push(entry); for (const id of entry.childIds ?? []) { const child = byId.get(id); assert.ok(child); visit(child) } }
+      visit(axRoot)
+      own.statusAccessibility = descendants
+      const text = await evaluate(`${status}.textContent`)
+      assert.ok(text?.length > 0)
+      assert.equal(descendants.filter(node => node.role?.value === 'status').length, 1, 'Original live status remains present')
+      assert.equal(descendants.filter(node => node.role?.value === 'StaticText' && node.name?.value === text).length, 1, 'Generated light adds no duplicate accessible status text')
+      own.scenarios.push('native-short-status-reading')
+    }
+    const cycle = [await motionSample('stop-start')]
+    const pendingCarrier = (sample, operation) => {
+      const matches = sample.rows.flatMap(row => row.carriers).filter(carrier => carrier.operationId === operation.operationId)
+      assert.equal(matches.length, 1, 'Each exact original operation has one nonempty local carrier')
+      const carrier = matches[0]
+      assert.equal(carrier.phase, 'pending')
+      assert.equal(carrier.text, '停止中')
+      assert.ok(carrier.rect.width > 0 && carrier.rect.height > 0 && carrier.display !== 'none')
+      assert.ok(carrier.content.includes(carrier.text), 'The actual generated light contains the original short text')
+      assert.equal(carrier.backgroundClip, 'text')
+      assert.equal(carrier.animationName, 'agent-operation-shine')
+      assert.equal(carrier.playState, 'running')
+      assert.equal(carrier.animations.length, 1, 'Each carrier owns one actual native shine animation')
+      assert.equal(carrier.animations[0].playState, 'running')
+      assert.equal(carrier.animations[0].duration, carrier.durationMs)
+      assert.ok(Number.isFinite(carrier.durationMs) && carrier.durationMs > 0, 'Each original carrier has a real measured animation cycle')
+      assert.ok(!['transparent', 'rgba(0, 0, 0, 0)'].includes(carrier.color), 'Original status text stays readable beneath the generated light')
+      return carrier
+    }
+    const originals = [slow, fast]
+    const duration = Math.max(...originals.map(operation => pendingCarrier(cycle[0], operation).durationMs))
+    assert.ok(cycle[0].rows.some(row => row.animations.some(animation => animation.name === 'agent-operation-shine' && animation.playState === 'running')), 'Native Chromium reports the actual local animation')
     for (let quarter = 1; quarter <= 4; quarter++) {
-      await delay(duration / 4); await motionSample(`stop-quarter-${quarter}`)
+      await delay(duration / 4); cycle.push(await motionSample(`stop-quarter-${quarter}`))
       if (quarter === 1 || quarter === 3) await frame(`ops-03-stop-motion-${quarter}`, false)
     }
-    const distances = own.motion.slice(0, 5).flatMap(sample => sample.rows.flatMap(row => row.trail?.distance ?? []))
-    assert.ok(new Set(distances).size >= 3, 'The actual edge trace advances over a complete cycle; this does not sign subjective motion quality')
+    own.cycles = originals.map(operation => {
+      const samples = cycle.map(sample => ({ sampledAt: sample.sampledAt, ...pendingCarrier(sample, operation) }))
+      assert.equal(samples.length, 5)
+      assert.ok(samples.at(-1).sampledAt - samples[0].sampledAt >= samples[0].durationMs, 'The same exact carrier is observed through its complete real cycle')
+      assert.ok(new Set(samples.map(sample => sample.position)).size >= 3, 'Each same original carrier actually changes local light position through its cycle')
+      return { operationId: operation.operationId, control: operation.control, samples }
+    })
     assert.ok((await operationFacts()).counters.cardMutations > 0, 'Mounted card observer saw actual nonempty state changes before zero-increment cost checks')
+    assert.ok((await operationFacts()).counters.projection > initialOperationFacts.counters.projection, 'Related original Stop state changes exercised the real projection before steady-state cost checks')
     own.scenarios.push('actual-cycle-ordered-output')
 
     for (const theme of ['dark', 'light']) for (const width of [1180, 620]) {
@@ -196,7 +381,7 @@ exports.runAgentOperations = async function ({ win, result, evaluate, wait, clic
     await delay(100)
     const reduced = await motionSample('reduced-motion')
     assert.equal(await evaluate('matchMedia("(prefers-reduced-motion: reduce)").matches'), true)
-    assert.ok(reduced.rows.every(row => !row.animations.some(animation => animation.playState === 'running')), 'Reduced motion has no running edge animation')
+    assert.ok(reduced.rows.every(row => !row.animations.some(animation => animation.playState === 'running')), 'Reduced motion has no running operation animation')
     await frame('ops-05-reduced-motion')
     await win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia', { features: [] })
     await evaluate('takeoverProbe.operations.showCards(false)'); await delay(150)
@@ -208,23 +393,7 @@ exports.runAgentOperations = async function ({ win, result, evaluate, wait, clic
     if (nativeMutant === 'hidden-motion-runs') { own.mutationSurvived = true; own.passed = true; return }
     result.stage = 'agent-operation-native-cost'
 
-    for (let sample = 0; sample < 3; sample++) for (const unrelated of [0, 384]) await browserCost(unrelated, sample)
-    await evaluate('takeoverProbe.operations.unrelated(0)')
-    const median = values => [...values].sort((a, b) => a - b)[Math.floor(values.length / 2)]
-    const group = count => own.costSamples.filter(sample => sample.unrelated === count)
-    const growth = (384 + 3) / 3
-    // A scale contradiction, not an invented absolute latency budget: unrelated membership
-    // must not turn fixed visible operation work into one pass per retained Session.
-    assert.ok(group(384).every(sample => sample.cardMutations === 0), 'Unrelated retained membership causes no steady-state visible card DOM mutations')
-    for (const field of ['style', 'layout', 'paint']) {
-      const small = group(0).map(sample => sample.measures[field].durationMs / sample.durationMs)
-      const large = group(384).map(sample => sample.measures[field].durationMs / sample.durationMs)
-      const noise = Math.max(...small) - Math.min(...small)
-      assert.ok(median(large) <= (median(small) + noise + Number.EPSILON) * Math.sqrt(growth), `Native ${field} cost stays sublinear to unrelated retained membership; raw repeated samples are retained`)
-    }
-    const smallInputs = group(0).map(sample => sample.response.inputMs), largeInputs = group(384).map(sample => sample.response.inputMs)
-    assert.ok(median(largeInputs) <= (median(smallInputs) + Math.max(...smallInputs) - Math.min(...smallInputs) + Number.EPSILON) * Math.sqrt(growth), 'Native input latency remains sublinear to unrelated retained membership')
-    own.scenarios.push('native-browser-related-consumer-scale')
+    await measuredCost()
 
     await evaluate(`takeoverProbe.operations.resolve(${JSON.stringify(fast.operationId)},'success')`)
     await wait(`!${sourceCard(2)}`, 'Confirmed exact Stop retires only its own card')
@@ -242,6 +411,50 @@ exports.runAgentOperations = async function ({ win, result, evaluate, wait, clic
 
     const fork = await beginFork()
     await frame('ops-09-fork-in-flight')
+    if (motionOnly) {
+      const bound = await evaluate(`(()=>{const label=${feedback('fork')}.querySelector('summary'),item=label.closest('.agent-operation-feedback__item');
+        const observed=window.operationSettleObservation={operationId:item.querySelector('code')?.textContent,open:item.open,events:[]};
+        for(const type of ['animationstart','animationend'])label.addEventListener(type,event=>{
+          if(event.animationName!=='agent-operation-settle')return;
+          observed.events.push({type,trusted:event.isTrusted,operationId:item.querySelector('code')?.textContent,phase:item.dataset.phase,elapsedTime:event.elapsedTime,
+            animations:label.getAnimations().filter(animation=>animation.animationName==='agent-operation-settle').map(animation=>({name:animation.animationName,playState:animation.playState,duration:animation.effect.getTiming().duration,currentTime:animation.currentTime}))});
+        },true);return {operationId:observed.operationId,open:observed.open}})()`)
+      assert.deepEqual(bound, { operationId: fork.operationId, open: false }, 'Finite completion starts on the exact closed original reader')
+      await evaluate(`takeoverProbe.operations.resolve(${JSON.stringify(fork.operationId)},'success')`)
+      await wait(`window.operationSettleObservation.events.some(event=>event.type==='animationend')`, 'Native finite completion emits its real animationend')
+      await wait(`!Object.values(takeoverProbe.operations.facts().operations).some(item=>item.operationId===${JSON.stringify(fork.operationId)})`, 'Native animationend dismisses the confirmed original decoration without a reader close')
+      own.finiteSettle = await evaluate('window.operationSettleObservation')
+      const starts = own.finiteSettle.events.filter(event => event.type === 'animationstart')
+      const ends = own.finiteSettle.events.filter(event => event.type === 'animationend')
+      assert.equal(starts.length, 1)
+      assert.equal(ends.length, 1)
+      assert.ok([...starts, ...ends].every(event => event.trusted && event.operationId === fork.operationId && event.phase === 'succeeded'))
+      assert.equal(starts[0].animations.length, 1, 'The exact original closed label owns a nonempty native settle animation')
+      const settleMs = starts[0].animations[0].duration
+      assert.ok(Number.isFinite(settleMs) && settleMs > 0 && ends[0].elapsedTime > 0)
+      assert.ok(Math.abs(ends[0].elapsedTime * 1000 - settleMs) < 1, 'The original finite cycle reaches native completion')
+      // A second real controller request separately proves open-reader protection;
+      // it does not substitute a synthetic animation event for the closed case.
+      const readingFork = await beginFork()
+      await click(`${feedback('fork')}.querySelector('summary')`)
+      await evaluate(`takeoverProbe.operations.resolve(${JSON.stringify(readingFork.operationId)},'success')`)
+      await wait(`Object.values(takeoverProbe.operations.facts().operations).some(item=>item.operationId===${JSON.stringify(readingFork.operationId)}&&item.phase==='succeeded')`)
+      await delay(settleMs + 50)
+      const completed = reference(await operationFacts(), 'fork')
+      assert.equal(completed.operationId, readingFork.operationId)
+      assert.equal(completed.phase, 'succeeded', 'Exact successful Fork remains available to the original open reader after the finite settle window')
+      assert.ok(completed.report?.agent?.agentSessionId)
+      assert.equal(await evaluate(`${feedback('fork')}.querySelector('details').open`), true, 'Success does not close the original reader')
+      await frame('ops-10-confirmed-open-result')
+      const closeReader = `([...${feedback('fork')}.querySelectorAll('button')].find(button=>button.textContent.trim()==='收起'))`
+      await evaluate(`(()=>{const button=${closeReader};button.addEventListener('click',event=>{window.operationReaderClosure={trusted:event.isTrusted,operationId:button.closest('details').querySelector('.agent-operation-feedback__detail code').textContent,phase:button.closest('details').dataset.phase}},{once:true})})()`)
+      await click(closeReader)
+      await wait(`!Object.values(takeoverProbe.operations.facts().operations).some(item=>item.operationId===${JSON.stringify(readingFork.operationId)})`, 'Closing the last reader dismisses only the confirmed original decoration')
+      const closure = await evaluate('window.operationReaderClosure')
+      assert.deepEqual(closure, { trusted: true, operationId: readingFork.operationId, phase: 'succeeded' }, 'The exact original successful reader receives its native close click')
+      own.readerSettle = { operationId: readingFork.operationId, retainedAfterMs: settleMs + 50, report: completed.report, closedByNativeClick: true, closure }
+      own.scenarios.push('fork-real-original-controller', 'finite-success-open-reader')
+    } else {
     await evaluate(`takeoverProbe.operations.resolve(${JSON.stringify(fork.operationId)},'partial')`)
     await wait(`Object.values(takeoverProbe.operations.facts().operations).some(item=>item.kind==='fork'&&item.phase==='partial')`)
     const forkAfter = await operationFacts(), realFork = reference(forkAfter, 'fork')
@@ -253,11 +466,20 @@ exports.runAgentOperations = async function ({ win, result, evaluate, wait, clic
     assert.equal((await operationFacts()).calls.filter(call => call.kind === 'creation').length, beforeForkCheck, 'Partial creation inspection never creates again')
     await frame('ops-10-partial-real-result')
     own.scenarios.push('fork-real-original-controller', 'partial-result-inspection-without-create')
+    }
     const final = await facts()
     assert.deepEqual(final.drafts, initial.drafts, 'Operation completion and unknown preserve original drafts')
     assert.deepEqual(final.nativeSessions.find(session => session.id === initial.origins[0].sessionId)?.control, initial.sessions.find(session => session.id === initial.origins[0].sessionId)?.control, 'Healthy neighbor keeps its exact Run')
     own.inputAndScroll = await inputAndScroll('after-all-operations')
     await evaluate('takeoverProbe.operations.stream(false)')
+    if (motionOnly) {
+      own.preservation = { drafts: final.drafts, originalHealthyControl: final.nativeSessions.find(session => session.id === initial.origins[0].sessionId)?.control,
+        originalHealthyTab: Object.values(final.tabs).find(tab => Object.values(tab.regions).some(region => region.sessionId === initial.origins[0].sessionId)) }
+      assert.ok(own.preservation.originalHealthyTab, 'The original healthy workface remains mounted after local feedback')
+      exports.assertMotionScenarios(own.scenarios)
+      own.passed = true
+      return
+    }
     await wait('takeoverProbe.saved()', 'Actual production writers saved operation references, original drafts and Core workface')
     const sealed = await evaluate('takeoverProbe.seal()')
     const core = await spatial.read()
