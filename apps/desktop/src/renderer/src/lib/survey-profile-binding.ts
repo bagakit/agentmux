@@ -63,15 +63,17 @@ export async function switchBrowserProfileForSurvey(get: () => AppState, referen
   let browser: BrowserSnapshot
   try { browser = await api.browser.switchProfile(reference.browserId, profileId) }
   catch (error) {
+    // Main's original human-input refusal is a typed, uncommitted result. An
+    // arbitrary transport failure cannot prove that the native switch failed.
+    if (error instanceof Error && 'code' in error && error.code === 'BROWSER_AGENT_CONTROL_ACTIVE') throw error
     const observed = surveyPageOwner(get().tabs, reference)?.surface
-    if (observed?.kind === 'browser' && observed.mode === 'normal' && observed.profileId === profileId) {
-      // The exact Main event confirms current binding, not this missing reply.
-      // A later explicit metadata repair can use it without replaying Native.
-      return { reference: { ...reference }, profileId, navigationId: observed.navigationId, switchOutcome: 'unconfirmed', membership,
-        admission: surveyAdmissionUnknown(reference, 'BROWSER_PROFILE_SWITCH_UNCONFIRMED',
-          'The switch reply is unconfirmed. Main reports this page in the requested environment; check only its Survey reference without switching again.') }
-    }
-    throw error
+    const targetObserved = observed?.kind === 'browser' && observed.mode === 'normal' && observed.profileId === profileId
+    // Retain this operation's original intent/generation in either event order.
+    // A later explicit repair rechecks Main's exact binding without replaying it.
+    return { reference: { ...reference }, profileId, navigationId: targetObserved ? observed.navigationId : originalNavigation,
+      switchOutcome: 'unconfirmed', membership, admission: surveyAdmissionUnknown(reference, 'BROWSER_PROFILE_SWITCH_UNCONFIRMED', targetObserved
+        ? 'The switch reply is unconfirmed. Main reports this page in the requested environment; check only its Survey reference without switching again.'
+        : 'The switch reply and its current environment are unconfirmed. Keep this exact page and request; check its original binding and Survey reference without switching again.') }
   }
   if (browser.id !== reference.browserId || browser.mode !== 'normal' || browser.profileId !== profileId) {
     throw Object.assign(new Error('Main did not confirm this original Browser and requested Profile. Keep its current page and inspect the original binding.'),

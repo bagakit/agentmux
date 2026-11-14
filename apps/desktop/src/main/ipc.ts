@@ -2182,10 +2182,10 @@ export async function registerIpc(args: {
     }))
     return Object.fromEntries(found.flat())
   })
-  handleWithEvent('browser:switchProfile', async (event, id: string, profileId: string) => {
+  handleWithEvent('browser:switchProfile', (event, id: string, profileId: string) => ipcResult(async () => {
     await ensureBrowser(id)
     return await browsers.switchProfile(id, profileId)
-  })
+  }))
   // Every surface renders Main's one committed list; the manager announces each commit once.
   browserProfiles.onChange(({ revision, sequence, profiles, folders, views, proxyAssets }) => {
     if (!contents.isDestroyed()) contents.send('browser:profilesChanged', { revision, sequence, profiles, folders, views, proxies: proxyAssets })

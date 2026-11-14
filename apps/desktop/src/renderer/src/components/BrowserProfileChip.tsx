@@ -37,17 +37,9 @@ export function BrowserProfileChip({ browserId, regionId, profileId, control, no
   const [pending, setPending] = useState<string | null>(null)
   const [failure, setFailure] = useState<{ target: string; message: string } | null>(null)
   const profiles = list.profiles ?? []
-  if (profileId === null) return null
-  // Unknown is said, not hidden: the page still uses a Profile even when the list cannot be read.
-  if (!list.profiles) return list.error ? <span className="browser-profile-chip browser-profile-chip--unknown" role="status"
-    title={`Profile unknown: ${list.error}`} aria-label="Profile unknown">Profile unknown</span> : null
-  if (profiles.length < 2) return null
-  const shown = profiles.find(profile => profile.id === (pending ?? profileId))
   const labelCounts = new Map<string, number>()
   for (const profile of profiles) labelCounts.set(profile.label, (labelCounts.get(profile.label) ?? 0) + 1)
   const label = (profile: (typeof profiles)[number]) => profile.label + ((labelCounts.get(profile.label) ?? 0) > 1 ? ` · ${profile.id.slice(0, 6)}` : '')
-  if (!shown) return <span className="browser-profile-chip browser-profile-chip--unknown" role="status" aria-label="Profile unknown"
-    title="This Browser's Profile is not in the current list.">Profile unknown</span>
   const agentHolds = control?.owner === 'agent'
   const switchTo = async (target: string) => {
     if (target === profileId || pending) return
@@ -59,26 +51,17 @@ export function BrowserProfileChip({ browserId, regionId, profileId, control, no
     } catch (cause) { if (operation.current === token) setFailure({ target, message: presentError(cause) }) }
     finally { if (operation.current === token) setPending(null) }
   }
-  const superseded = registration?.admission.issues.some(issue => issue.code === 'SURVEY_PAGE_MEMBERSHIP_SUPERSEDED')
-  const registrationNotice = registration ? <div data-survey-profile-registration={browserId}>
-    <ServiceWindowNotice notice={{ kind: 'indeterminate', notice: {
-      step: 'Survey registration unconfirmed',
-      mode: registration.switchOutcome === 'unconfirmed' ? 'Switch reply unconfirmed; current environment observed' : 'Environment changed',
-      restore: registration.admission.issues.map(issue => `${issue.message} ${issue.recovery}`).join('\n')
-    } }} summary={{
-      step: superseded ? 'Later Survey choice kept' : 'Survey save unconfirmed',
-      mode: registration.switchOutcome === 'unconfirmed' ? 'Switch reply unconfirmed; current environment observed' : 'Environment changed',
-      restore: superseded ? 'The original page stays available. Its withdrawn reference is not added again.' : 'The page is available. Retry only its Survey reference.'
-    }} actions={!superseded ? <button type="button" className="small-button" disabled={repairing} onClick={() => {
-      const original = registration
-      setRepairing(true)
-      void useAppStore.getState().repairSurveyProfileAdmission(original).then(receipt => {
-        setRegistration(current => current !== original ? current : receipt.admission.issues.length ? receipt : null)
-      }).finally(() => setRepairing(false))
-    }}>{repairing ? 'Saving Survey reference…' : 'Retry Survey registration'}</button> : null} />
-  </div> : null
-  return (
-    <>
+  function identityChip() {
+    if (profileId === null) return null
+    // Directory visibility only controls this identity picker, never a retained
+    // operation's service notice or its metadata-only recovery action.
+    if (!list.profiles) return list.error ? <span className="browser-profile-chip browser-profile-chip--unknown" role="status"
+      title={`Profile unknown: ${list.error}`} aria-label="Profile unknown">Profile unknown</span> : null
+    if (profiles.length < 2) return null
+    const shown = profiles.find(profile => profile.id === (pending ?? profileId))
+    if (!shown) return <span className="browser-profile-chip browser-profile-chip--unknown" role="status" aria-label="Profile unknown"
+      title="This Browser's Profile is not in the current list.">Profile unknown</span>
+    return (
       <Menu.Root>
         <Menu.Trigger asChild>
           <button type="button" className="browser-profile-chip" data-pending={pending ? '' : undefined}
@@ -110,6 +93,29 @@ export function BrowserProfileChip({ browserId, regionId, profileId, control, no
           </Menu.Content>
         </DocumentOverlayPortal>
       </Menu.Root>
+    )
+  }
+  const superseded = registration?.admission.issues.some(issue => issue.code === 'SURVEY_PAGE_MEMBERSHIP_SUPERSEDED')
+  const registrationNotice = registration ? <div data-survey-profile-registration={browserId}>
+    <ServiceWindowNotice notice={{ kind: 'indeterminate', notice: {
+      step: 'Survey registration unconfirmed',
+      mode: registration.switchOutcome === 'unconfirmed' ? 'Switch reply unconfirmed' : 'Environment changed',
+      restore: registration.admission.issues.map(issue => `${issue.message} ${issue.recovery}`).join('\n')
+    } }} summary={{
+      step: superseded ? 'Later Survey choice kept' : 'Survey save unconfirmed',
+      mode: registration.switchOutcome === 'unconfirmed' ? 'Switch reply unconfirmed' : 'Environment changed',
+      restore: superseded ? 'The original page stays available. Its withdrawn reference is not added again.' : 'The page is available. Check only its original binding and Survey reference.'
+    }} actions={!superseded ? <button type="button" className="small-button" disabled={repairing} onClick={() => {
+      const original = registration
+      setRepairing(true)
+      void useAppStore.getState().repairSurveyProfileAdmission(original).then(receipt => {
+        setRegistration(current => current !== original ? current : receipt.admission.issues.length ? receipt : null)
+      }).finally(() => setRepairing(false))
+    }}>{repairing ? 'Saving Survey reference…' : 'Retry Survey registration'}</button> : null} />
+  </div> : null
+  return (
+    <>
+      {identityChip()}
       {noticeHost ? createPortal(registrationNotice, noticeHost) : null}
       {failure ? <span className="browser-profile-chip__failure" role="status" title={failure.message}>
         Couldn’t switch · <button type="button" onClick={() => void switchTo(failure.target)}>Retry</button>
