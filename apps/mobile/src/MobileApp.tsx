@@ -70,7 +70,10 @@ import { useMobileWebAttachmentOwner } from './mobile-web/update-safety'
 import { MobileMoteComposer, mobileSessionComposerSource, mobileWelcomeComposerSource } from './conversation/mote-composer'
 import { useEdgeBack } from './navigation/use-edge-back'
 import { MobileSheetHandle } from './navigation/MobileSheetHandle'
-import { useWideAgentWorkface } from './navigation/use-wide-agent-workface'
+import { useMobileWorkfaceLayout } from './layout/use-mobile-workface-layout'
+import { MobileWorkfaceFrame, MobileWorkfacePane } from './layout/MobileWorkfaceFrame'
+import { workfacePanes } from './layout/workface-presentation'
+import { currentMobileWorkface } from './navigation/current-workface'
 
 const MobileTerminalViewer = deferMobileSurface('终端', async () => ({ default: (await import('./terminal/MobileTerminalViewer')).MobileTerminalViewer }))
 const MobileSpatialNavigation = deferMobileSurface('目录', async () => ({ default: (await import('./navigation/MobileSpatialNavigation')).MobileSpatialNavigation }), { menu: true })
@@ -79,7 +82,7 @@ const MobileSurveySurface = deferMobileSurface('Survey', async () => ({ default:
 const MobileGoalsSurface = deferMobileSurface('Goals', async () => ({ default: (await import('./goals/MobileGoalsSurface')).MobileGoalsSurface }), { menu: true })
 const MobileGoalWork = deferMobileSurface('当前目标', async () => ({ default: (await import('./navigation/MobileGoalWork')).MobileGoalWork }))
 const MobileMoteProfile = deferMobileSurface('Profile', async () => ({ default: (await import('./navigation/MobileMoteProfile')).MobileMoteProfile }))
-const MobileTopicSource = deferMobileSurface('知识来源', async () => ({ default: (await import('./topics/MobileTopicSource')).MobileTopicSource }))
+const MobileTopicSource = deferMobileSurface('知识来源', async () => ({ default: (await import('./topics/MobileTopicSource')).MobileTopicSource }), { menu: true })
 const MobileZoneWorkface = deferMobileSurface('来源工作面', async () => ({ default: (await import('./navigation/MobileZoneWorkface')).MobileZoneWorkface }))
 
 const ThemeNavigationSubmenuIcon = semanticIconComponent('navigation.submenu')
@@ -129,6 +132,7 @@ function MobileAppContent({ client, connection, platform: basePlatform, native =
   const navigationRecord = useRef<{ recordId: string | null } | null>(null)
   navigationRecord.current ??= { recordId: getDeviceWorkface().recordIdentity() }
   const [hasConnected, setHasConnected] = useState(connection.state === 'connected' || initial.current.workface.selectedSessionId !== null || initial.current.presentation !== undefined)
+  const workspaceVisible = connected || hasConnected
   const hostAppearance = useHostAppearance(client, connection.state)
   const platform = useMemo(() => ({ ...basePlatform, conversationDetailLevel: hostAppearance.conversationDetailLevel,
     conversationShowSendReceipts: hostAppearance.conversationShowSendReceipts,
@@ -143,6 +147,7 @@ function MobileAppContent({ client, connection, platform: basePlatform, native =
   const [defaultHome, setDefaultHome] = useState<MobilePrimaryWorkface>(initialHome.current.home)
   const [homeIssue, setHomeIssue] = useState(initialHome.current.issue)
   const [secondary, setSecondary] = useState<'topics' | 'survey' | 'goals' | null>(initialPrimary === 'goals' || initialPrimary === 'topics' || initialPrimary === 'survey' ? initialPrimary : null)
+  const primary = secondary ?? home
   const topicsNavigation = useTopicsNavigation(initial.current.presentation?.topics, client)
   const topicsRoute = topicsNavigation.route
   const [surveyContext, setSurveyContext] = useState<MobileSurveyContext>(initial.current.presentation?.survey
@@ -164,7 +169,7 @@ function MobileAppContent({ client, connection, platform: basePlatform, native =
     if (sourceFrame) topicsNavigation.observe({ type: 'source-content', frameToken: sourceFrame.token, source: sourceFrame.value.source, content })
   }, [topicsNavigation.observe, sourceFrame?.token])
   const leaveSource = useCallback(() => topicsNavigation.send({ type: 'source-leave' }), [topicsNavigation.send])
-  const pageName = secondary === 'topics' ? 'Topics' : secondary === 'survey' ? 'Survey' : secondary === 'goals' ? 'Goals' : home === 'mote' ? 'Mote' : home === 'space' ? 'Space' : 'Focus'
+  const pageName = primary === 'topics' ? 'Topics' : primary === 'survey' ? 'Survey' : primary === 'goals' ? 'Goals' : primary === 'mote' ? 'Mote' : primary === 'space' ? 'Space' : 'Focus'
   const rpc = useCallback<NonNullable<AgentMuxHostedClient['forwardRpc']>>((method, params) => {
     if (!client?.forwardRpc) return Promise.reject(new Error('连接暂不可用，连上 Mac 后可继续。'))
     return client.forwardRpc(method, params)
@@ -337,24 +342,26 @@ function MobileAppContent({ client, connection, platform: basePlatform, native =
   const registerSourceBack = useCallback((back: (() => void) | null) => setSourceBack(() => back), [])
   const registerSurveyBack = useCallback((back: (() => void) | null) => setSurveyBack(() => back), [])
   const registerGoalsBack = useCallback((back: (() => void) | null) => setGoalsBack(() => back), [])
-  const familyBack = secondary === 'topics' ? topicsBack : secondary === 'goals' ? goalsBack : secondary === 'survey' ? surveyBack : spatialBack
-  const hasBack = sheet !== null || showSession || secondary === 'topics' && source !== null || familyBack !== null
-  const moteConversation = Boolean(showSession && objectIdentity?.mote && home === 'mote' && secondary === null)
   const moteSection = moteView && moteView.spaceId === objectIdentity?.mote?.spaceId ? moteView.section : moteDirectAgent ? 'threads' : 'discussion'
   const threadDetail = Boolean(moteSection === 'threads' && moteView && moteView.spaceId === objectIdentity?.mote?.spaceId && moteView.detail)
+  const current = currentMobileWorkface({ primary, showSession, showGoalWork, panel: workface.panel,
+    mote: Boolean(objectIdentity?.mote), section: moteSection, threadDetail, sourceKind: source?.kind })
+  const { moteConversation, moteRoot, workPanel } = current
+  const familyBack = primary === 'topics' ? topicsBack : primary === 'goals' ? goalsBack : primary === 'survey' ? surveyBack : spatialBack
+  const hasBack = sheet !== null || current.session || current.source || familyBack !== null
   const requestBack = useMobileBack(hasBack, () => {
     navigationRevision.current += 1
     if (sheet === 'agent' && positionOverlay) setPositionOverlay(false)
     else if (sheet !== null) {
       if (sheet === 'identity' && profileBack) profileBack()
       else setSheet(null)
-    } else if (showSession) {
-      if (showGoalWork) setShowGoalWork(false)
-      else if (workface.panel === 'terminal') setWorkface(value => ({ ...value, panel: 'conversation' }))
+    } else if (current.session) {
+      if (current.goal) setShowGoalWork(false)
+      else if (current.terminal) setWorkface(value => ({ ...value, panel: 'conversation' }))
       // A thread opened inside Mote returns to its Threads list, one layer up.
-      else if (moteConversation && threadDetail) setMoteView({ spaceId: objectIdentity!.mote!.spaceId, section: 'threads', detail: false })
+      else if (current.kind === 'thread') setMoteView({ spaceId: objectIdentity!.mote!.spaceId, section: 'threads', detail: false })
       else closeSession()
-    } else if (secondary === 'topics' && source) {
+    } else if (current.source && source) {
       if (source.kind === 'topic') topicsBack ? topicsBack() : leaveSource()
       else sourceBack ? sourceBack() : leaveSource()
     }
@@ -457,7 +464,7 @@ function MobileAppContent({ client, connection, platform: basePlatform, native =
   }, [client, native])
   const retainTopics = initial.current.presentation?.topics !== undefined || topicsRoute.context.categoryId !== null || topicsRoute.context.topicId !== null
     || topicsRoute.context.mode !== 'discussion' || topicsRoute.sources.length > 0
-  const presentation: MobilePresentationRoute = { primary: secondary ?? home, showSession, showGoalWork, ...(retainTopics ? { topics: topicsRoute } : {}),
+  const presentation: MobilePresentationRoute = { ...current.route, ...(retainTopics ? { topics: topicsRoute } : {}),
     ...(recentMoteSpaceId ? { recentMoteSpaceId } : {}),
     ...(moteView ? { moteView: { ...moteView, directAgent: moteDirectAgent } } : {}),
     ...(initial.current.presentation?.goals || goalsContext.goalId !== null ? { goals: goalsContext } : {}),
@@ -488,9 +495,8 @@ function MobileAppContent({ client, connection, platform: basePlatform, native =
   }
 
 
-  const workspaceVisible = connected || hasConnected
   const label = connected ? '已连接' : connection.state === 'connecting' ? '连接中' : connection.state === 'disconnected' ? '连接中断' : '尚未连接'
-  const primaryHeader = workspaceVisible && !showSession && !source
+  const primaryHeader = workspaceVisible && current.inlineHeader
   const sessionBackLabel = showGoalWork && workface.panel === 'terminal' ? '返回终端' : showGoalWork || workface.panel === 'terminal' ? '返回对话'
     : moteConversation && threadDetail ? '返回 Threads' : `返回 ${pageName}`
   const menuButton = <button type="button" className="mobile-header-menu mobile-settings-button" onClick={() => setSheet(workspaceVisible ? 'settings' : 'connection')} aria-label={workspaceVisible ? '手机设置与连接' : '连接你的 Mac'}><ThemeActionMenuIcon size={22} /><span className="mobile-status-dot" aria-label={label} /></button>
@@ -502,37 +508,30 @@ function MobileAppContent({ client, connection, platform: basePlatform, native =
   </IconButton>
 
   const exposed = sheet === null
-  const workPanel = showGoalWork || workface.panel === 'terminal'
-  // Mote main discussion and Threads are the Mote entry's root pages; a thread is one layer below.
-  const moteRoot = moteConversation && !threadDetail && !workPanel
-  const rootPage = workspaceVisible && (!showSession || moteRoot)
-  // Depth only orders layers for motion: directory < conversation < thread < goal/terminal.
-  const screenLayer = !showSession ? `directory:${secondary ?? home}` : showGoalWork ? 'goal' : workface.panel === 'terminal' ? 'terminal'
-    : moteConversation && threadDetail ? 'thread' : 'conversation'
-  const sessionDepth = moteConversation && threadDetail ? 2 : 1
-  const screenDepth = !showSession ? 0 : workPanel ? sessionDepth + 1 : sessionDepth
-  const screenMotion = useMobileScreenMotion(screenLayer, screenDepth, navigationRevision.current)
+  const rootPage = workspaceVisible && current.root
+  const screenMotion = useMobileScreenMotion(current.motionLayer, current.depth, navigationRevision.current)
   // The tab bar animates only when an explicit navigation brings it back; restores and automatic entries do not.
   const tabBar = useRef({ root: rootPage, revision: navigationRevision.current, entering: false })
   if (tabBar.current.root !== rootPage) tabBar.current = { root: rootPage, revision: navigationRevision.current, entering: rootPage && tabBar.current.revision !== navigationRevision.current }
-  const wideViewport = useWideAgentWorkface()
+  const layout = useMobileWorkfaceLayout()
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [focusTarget, setFocusTarget] = useState<HTMLElement | null>(null)
-  const wideShell = wideViewport && workspaceVisible
-  const wideWorkface = wideShell && showSession
-  const focusRoot = workspaceVisible && !showSession && secondary === null && home === 'focus'
+  const wideShell = layout.split && workspaceVisible
+  const wideWorkface = wideShell && current.session
+  const focusRoot = workspaceVisible && current.directory === 'focus'
   const focusShown = focusRoot || wideWorkface && !sidebarCollapsed
   const focusVisible = exposed && focusShown
-  const directoryVisible = exposed && !showSession && secondary === null
+  const spatialPresented = current.directory === 'mote' || current.directory === 'space' || current.directory === 'focus'
+  const directoryVisible = exposed && spatialPresented
   const openFocusSession = useCallback((id: string, identity: MobileObjectIdentity) => {
     setHome('focus'); setSecondary(null); openSession(id, identity)
   }, [openSession])
   const focusSelected = useMemo(() => selected ? { hostId: selected.hostId, agentSessionId: selected.agentSessionId } : null, [selected?.hostId, selected?.agentSessionId])
   const attention = useMobileAttentionCatalog(client, connected && workspaceVisible, directoryVisible || focusVisible || !exposed)
   const needsYou = attention.items
-  const needsYouElsewhere = mobileNeedsYouElsewhere(needsYou, showSession ? workface.selectedSessionId : null)
-  const threadsVisible = moteConversation && moteSection === 'threads' && !threadDetail
-  const conversationVisible = workspaceVisible && showSession && !showGoalWork && workface.panel !== 'terminal' && !threadsVisible
+  const needsYouElsewhere = mobileNeedsYouElsewhere(needsYou, current.session ? workface.selectedSessionId : null)
+  const threadsVisible = current.threads
+  const conversationVisible = workspaceVisible && current.conversation
   const moteTitle = objectIdentity?.mote?.name ?? 'Mote 名称未确认'
   const teamSpaceId = identityRecipient === workface.selectedSessionId ? objectIdentity?.mote?.spaceId ?? null : null
   const moteContent = identityRecipient === workface.selectedSessionId ? objectIdentity?.mote?.contentReference ?? objectIdentity?.mote?.facts?.content : undefined
@@ -542,7 +541,7 @@ function MobileAppContent({ client, connection, platform: basePlatform, native =
   const welcomeVisible = Boolean(moteConversation && !moteDirectAgent && (workface.selectedSessionId === null || moteStart?.spaceId === teamSpaceId))
   const historyVisible = Boolean(moteConversation && moteHistory)
   const teamReading = useMobileMoteTeam(client, teamSpaceId, connected,
-    workspaceVisible && showSession && (sheet === null || sheet === 'team'))
+    workspaceVisible && current.session && (sheet === null || sheet === 'team'))
   const readMoteDialogue = useCallback<MoteDialogueReader>(async input => {
     if (!client?.forwardRpc) throw new Error('连接暂不可用，暂时读不到 Mote 对话。')
     return client.forwardRpc('space.mote.dialogue.read', input)
@@ -629,22 +628,24 @@ function MobileAppContent({ client, connection, platform: basePlatform, native =
   </>
   // The source reader stays independent of the deferred directory module, including on cold entry.
   const topicSourceActive = Boolean(source && source.kind !== 'topic')
+  const topicsPresented = workspaceVisible && current.directory === 'topics'
+  const sourcePanes = workfacePanes({ active: exposed && topicsPresented, split: wideShell && topicSourceActive, hasSelection: topicSourceActive })
   const topicsSourceContent = source && source.kind !== 'topic' ? <div className="mobile-topic-source-content">
           {source.kind === 'space' || source.kind === 'survey' ? <>
             <button className="mobile-text-button" onClick={leaveSource}><ThemeNavigationBackIcon size={16} />返回知识</button>
-            <MobileZoneWorkface loadWhen={!showSession && secondary === 'topics'} onLoadReturn={returnToConversation} key={source.zoneId} client={client} zoneId={source.zoneId} name="来源工作面" visible={exposed && !showSession && secondary === 'topics'} tabId={source.tabId} regionId={source.regionId} openSession={openSession} />
-          </> : source.kind === 'file' || source.kind === 'note' || source.kind === 'notebook' ? <MobileTopicSource loadWhen={!showSession && secondary === 'topics'} onLoadReturn={returnToConversation} source={source} rpc={rpc} onBack={leaveSource} openHttpLink={openBrowserHttpLink}
-            visible={exposed && !showSession && secondary === 'topics'} onBackChange={registerSourceBack}
+            <MobileZoneWorkface loadWhen={topicsPresented} onLoadReturn={returnToConversation} key={source.zoneId} client={client} zoneId={source.zoneId} name="来源工作面" visible={sourcePanes.content.observed} tabId={source.tabId} regionId={source.regionId} openSession={openSession} />
+          </> : source.kind === 'file' || source.kind === 'note' || source.kind === 'notebook' ? <MobileTopicSource loadWhen={topicsPresented} onLoadReturn={returnToConversation} source={source} rpc={rpc} onBack={leaveSource} openHttpLink={openBrowserHttpLink}
+            presentation={sourcePanes.content} onBackChange={registerSourceBack}
             {...(sourceReference ? { initialReference: sourceReference } : {})} onReferenceChange={updateSourceReference}
             openScope={scope => { openSource({ kind: 'space', zoneId: scope.zoneId }) }} /> : null}
   </div> : null
-  const moteContext = workspaceVisible && showSession && teamSpaceId && !workPanel ? moteRoot ? 'main' as const : 'member' as const : null
-  return <MobileLocalDraftsOwner><MobileHeaderMenuContext.Provider value={menuButton}><MobileAgentMenuContext.Provider value={openAgentMenu}><MobileNoticeScope owner={client} identity={[ getDeviceWorkface().recordIdentity()]}><MobileGoalOperationSafety /><div className="mobile-app" data-wide-shell={wideShell || undefined} data-wide-workface={wideWorkface || undefined} data-sidebar-collapsed={sidebarCollapsed || undefined} data-focus-root={focusRoot || undefined} data-connection={connection.state} data-mobile-workface={moteConversation ? 'mote' : 'workspace'} data-page-header={primaryHeader ? 'inline' : 'shell'}>
+  const moteContext = workspaceVisible && current.session && teamSpaceId && !workPanel ? moteRoot ? 'main' as const : 'member' as const : null
+  return <MobileLocalDraftsOwner><MobileHeaderMenuContext.Provider value={menuButton}><MobileAgentMenuContext.Provider value={openAgentMenu}><MobileNoticeScope owner={client} identity={[ getDeviceWorkface().recordIdentity()]}><MobileGoalOperationSafety /><div className="mobile-app" data-wide-shell={wideShell || undefined} data-wide-workface={wideWorkface || undefined} data-short={layout.short || undefined} data-sidebar-collapsed={sidebarCollapsed || undefined} data-focus-root={focusRoot || undefined} data-connection={connection.state} data-mobile-workface={moteConversation ? 'mote' : 'workspace'} data-page-header={primaryHeader ? 'inline' : 'shell'}>
     <aside ref={setFocusTarget} className="mobile-focus-pane" role={focusRoot ? 'main' : undefined} aria-label="Focus 会话列表" hidden={!focusShown} />
     <div className="mobile-primary-pane">
     {wideWorkface && <button type="button" className="mobile-sidebar-toggle mobile-icon-button" aria-label={sidebarCollapsed ? '展开会话列表' : '收起会话列表'} aria-expanded={!sidebarCollapsed} onClick={() => setSidebarCollapsed(value => !value)}>{sidebarCollapsed ? <ThemeOpenSidebarIcon size={18} /> : <ThemeCloseSidebarIcon size={18} />}</button>}
-    {!primaryHeader && <header className={`mobile-header${workspaceVisible && showSession ? ' mobile-header--session' : ''}`}>
-      {workspaceVisible && showSession ? <div className="mobile-session-toolbar">
+    {!primaryHeader && <header className={`mobile-header${workspaceVisible && current.session ? ' mobile-header--session' : ''}`}>
+      {workspaceVisible && current.session ? <div className="mobile-session-toolbar">
         <button type="button" className="mobile-session-origin" data-mobile-back aria-label={sessionBackLabel} title={sessionBackLabel} {...(backBadge ? { 'aria-description': attention.unconfirmed ? '需要你列表尚未确认，可打开 Focus 重新读取' : `另有 ${needsYouElsewhere} 个需要你` } : {})} onClick={requestBack}><ThemeNavigationBackIcon size={20} />{backBadge ? <span className="mobile-back-badge" aria-hidden="true" data-count={attention.unconfirmed ? undefined : needsYouElsewhere} data-unconfirmed={attention.unconfirmed || undefined}>{attention.unconfirmed ? '?' : needsYouElsewhere > 99 ? '99+' : needsYouElsewhere}</span> : null}</button>
         {objectIdentity?.mote ? <button type="button" className="mobile-mote-heading mobile-session-identity" aria-label={`${headerName} · 查看身份与状态`} onClick={() => openProfile(objectIdentity)}>{sessionHeading}</button>
           : <div className="mobile-session-identity">{sessionHeading}</div>}
@@ -655,7 +656,7 @@ function MobileAppContent({ client, connection, platform: basePlatform, native =
         {menuButton}
         {showSession && objectIdentity?.mote ? <button className="mobile-mote-heading" aria-label={`${objectIdentity.name} · 查看身份与状态`} onClick={() => openProfile(objectIdentity)}><MobileIdentity identity={objectIdentity} session={selected} client={client} connected={connected} size={38} visible={exposed} /></button>
           : workspaceVisible ? <div className="mobile-brand"><BrandIcon icon={hostAppearance.appIcon} className="mobile-brand-icon" size={24} /><span>AgentMux</span></div> : <span />}
-        {workspaceVisible && showSession ? <div className="mobile-session-header-actions"><div ref={setConversationToolsTarget} className="mobile-session-tool-slot" hidden={!conversationVisible || welcomeVisible || historyVisible} />{terminalToggle}<IconButton className="mobile-icon-button mobile-session-actions" aria-label="当前对话操作" aria-description={conversationStatusLabel ?? undefined} data-conversation-status={conversationStatusMark} ref={sessionActionsButton} onClick={() => setSheet('actions')}><ThemeActionMoreIcon size={20} /></IconButton></div> : <span className="mobile-header-spacer" />}
+        {workspaceVisible && current.session ? <div className="mobile-session-header-actions"><div ref={setConversationToolsTarget} className="mobile-session-tool-slot" hidden={!conversationVisible || welcomeVisible || historyVisible} />{terminalToggle}<IconButton className="mobile-icon-button mobile-session-actions" aria-label="当前对话操作" aria-description={conversationStatusLabel ?? undefined} data-conversation-status={conversationStatusMark} ref={sessionActionsButton} onClick={() => setSheet('actions')}><ThemeActionMoreIcon size={20} /></IconButton></div> : <span className="mobile-header-spacer" />}
       </>}
     </header>}
     {moteContext && teamSpaceId ? <MobileMoteContext variant={moteContext} team={team} issue={teamReading.issue} noticeRef={setMoteNoticeTarget}
@@ -669,20 +670,20 @@ function MobileAppContent({ client, connection, platform: basePlatform, native =
     <main ref={mainRef} aria-hidden={focusRoot || undefined} className="mobile-main" tabIndex={-1} {...(screenMotion ? { 'data-motion': screenMotion.kind, 'data-motion-phase': screenMotion.key % 2 } : {})}>
       {!workspaceVisible && <MobileConnectPage connection={connection} appIcon={hostAppearance.appIcon} panel={connectionPanel} onDetails={() => setSheet('connection')} />}
       {workspaceVisible && <>
-        <div className="mobile-spatial-host" hidden={showSession || secondary !== null}><MobileSpatialNavigation wide={wideShell} loadingLabel={focusShown ? 'Focus' : home === 'mote' ? 'Mote' : home === 'focus' ? 'Focus' : 'Space'} loadWhen={!showSession && secondary === null || focusVisible} focusTarget={focusTarget} fallbackTarget={focusShown ? focusTarget : null} focusVisible={focusVisible} focusSelected={focusSelected} openFocusSession={openFocusSession} onLoadReturn={returnToConversation} onCreateAgent={createAgent} visible={exposed && !showSession && secondary === null} home={home} client={client} connected={connected} openSession={openSession} onPresentation={attention.publish} needsYou={needsYou} openMainAgent={openMainAgent} openProfile={openProfile} onBackChange={registerSpatialBack}
+        <div className="mobile-spatial-host" hidden={!spatialPresented}><MobileSpatialNavigation wide={wideShell} loadingLabel={focusShown ? 'Focus' : home === 'mote' ? 'Mote' : home === 'focus' ? 'Focus' : 'Space'} loadWhen={spatialPresented || focusVisible} focusTarget={focusTarget} fallbackTarget={focusShown ? focusTarget : null} focusVisible={focusVisible} focusSelected={focusSelected} openFocusSession={openFocusSession} onLoadReturn={returnToConversation} onCreateAgent={createAgent} visible={directoryVisible} home={home} client={client} connected={connected} openSession={openSession} onPresentation={attention.publish} needsYou={needsYou} openMainAgent={openMainAgent} openProfile={openProfile} onBackChange={registerSpatialBack}
           recentMoteSpaceId={recentMoteSpaceId} onSelectMote={selectMote}
           initialContext={spatialContext} onContextChange={updateSpatialContext} openHttpLink={openBrowserHttpLink} /></div>
-        <div className="mobile-topics-host" data-wide={wideShell || undefined} data-source-active={topicSourceActive || undefined} hidden={showSession || secondary !== 'topics'}><div className="mobile-topics-directory-host" hidden={topicSourceActive && !wideShell}><MobileTopicsSurface wide={wideShell} navigation={topicsNavigation} loadWhen={!showSession && secondary === 'topics' && (wideShell || !topicSourceActive)} onLoadReturn={returnToConversation} rpc={rpc} visible={exposed && !showSession && secondary === 'topics' && (wideShell || !topicSourceActive)}
+        <MobileWorkfaceFrame className="mobile-topics-host" presentation={sourcePanes} data-source-active={topicSourceActive || undefined} hidden={!topicsPresented}><MobileWorkfacePane className="mobile-topics-directory-host" pane="navigation" presentation={sourcePanes.navigation}><MobileTopicsSurface wide={wideShell} navigation={topicsNavigation} loadWhen={topicsPresented && sourcePanes.navigation.presented} onLoadReturn={returnToConversation} rpc={rpc} visible={sourcePanes.navigation.observed}
           client={client} connected={connected} openSource={openSource} openHttpLink={openBrowserHttpLink} onBackChange={registerTopicsBack}
           renderWorkface={(topic, visible) => <MobileZoneWorkface loadWhen={visible} onLoadReturn={returnToConversation} key={topic.topicId} client={client} zoneId={topic.zoneId} name={topic.title} visible={visible} onCreateAgent={createAgent}
-            {...(source?.kind === 'topic' && source.topicId === topic.topicId ? { tabId: source.chatId, regionId: source.threadId } : {})} openSession={openSession} />} /></div><div className="mobile-source-host" hidden={!topicSourceActive}>{topicsSourceContent}</div></div>
-        <div hidden={showSession || secondary !== 'survey'}><MobileSurveySurface loadWhen={!showSession && secondary === 'survey'} onLoadReturn={returnToConversation} client={client} connected={connected} visible={exposed && !showSession && secondary === 'survey'} openSession={openSession}
+            {...(source?.kind === 'topic' && source.topicId === topic.topicId ? { tabId: source.chatId, regionId: source.threadId } : {})} openSession={openSession} />} /></MobileWorkfacePane><MobileWorkfacePane className="mobile-source-host" pane="content" presentation={sourcePanes.content}>{topicsSourceContent}</MobileWorkfacePane></MobileWorkfaceFrame>
+        <div hidden={current.directory !== 'survey'}><MobileSurveySurface loadWhen={current.directory === 'survey'} onLoadReturn={returnToConversation} client={client} connected={connected} visible={exposed && current.directory === 'survey'} openSession={openSession}
           openTopic={openSurveyTopic} initialContext={surveyContext} onContextChange={updateSurveyContext} onBackChange={registerSurveyBack} openHttpLink={openBrowserHttpLink} /></div>
-        <div className="mobile-goals-host" hidden={showSession || secondary !== 'goals'}><MobileGoalsSurface wide={wideShell} loadWhen={!showSession && secondary === 'goals'} onLoadReturn={returnToConversation} client={client} connected={connected} visible={exposed && !showSession && secondary === 'goals'} openSession={openSession} onBackChange={registerGoalsBack}
+        <div className="mobile-goals-host" hidden={current.directory !== 'goals'}><MobileGoalsSurface wide={wideShell} loadWhen={current.directory === 'goals'} onLoadReturn={returnToConversation} client={client} connected={connected} visible={exposed && current.directory === 'goals'} openSession={openSession} onBackChange={registerGoalsBack}
           context={goalsContext} onContextChange={updateGoalsContext} copyText={platform.copyText} /></div>
       </>}
-      <section className="mobile-goal-panel" hidden={!workspaceVisible || !showSession || !showGoalWork}>
-        <MobileGoalWork loadWhen={workspaceVisible && showSession && showGoalWork} onLoadReturn={returnToConversation} client={client} agentSessionId={workface.selectedSessionId} connected={connected} visible={exposed && workspaceVisible && showSession && showGoalWork} />
+      <section className="mobile-goal-panel" hidden={!workspaceVisible || !current.goal}>
+        <MobileGoalWork loadWhen={workspaceVisible && current.goal} onLoadReturn={returnToConversation} client={client} agentSessionId={workface.selectedSessionId} connected={connected} visible={exposed && workspaceVisible && current.goal} />
       </section>
       <section className="mobile-mote-threads-panel" hidden={!threadsVisible}>
         <MobileMoteThreads client={client} dialogue={moteDialogue} team={team} issue={teamReading.issue} visible={exposed && threadsVisible}
@@ -690,7 +691,7 @@ function MobileAppContent({ client, connection, platform: basePlatform, native =
           onMain={() => returnToMoteMain()} onConfigure={() => { if (objectIdentity) openProfile(objectIdentity) }}
           onRefresh={() => { teamReading.refresh(); moteDialogue.refresh() }} />
       </section>
-      <section className="mobile-conversation-panel" hidden={!workspaceVisible || !showSession || showGoalWork || workface.panel === 'terminal' || threadsVisible}>
+      <section className="mobile-conversation-panel" hidden={!conversationVisible}>
         <MobileMoteComposer client={client} target={moteTarget} platform={platform} enabled={Boolean(moteConversation && !moteDirectAgent && moteTarget)}
           active={exposed && conversationVisible && !historyVisible}
           sourceKey={welcomeVisible ? mobileWelcomeComposerSource(moteStart?.mode ?? 'start')
@@ -731,8 +732,8 @@ function MobileAppContent({ client, connection, platform: basePlatform, native =
             onShowGoals={showConversationGoals} openHttpLink={openBrowserHttpLink} />}
         </div>
         </MobileMoteComposer>
-      </section><section className="mobile-terminal-panel" hidden={!workspaceVisible || !showSession || showGoalWork || workface.panel !== 'terminal'}>
-        <MobileTerminalViewer loadWhen={workspaceVisible && showSession && !showGoalWork && workface.panel === 'terminal'} onLoadReturn={returnToConversation} terminalPalette={hostAppearance.terminalPalette} client={client} agentSessionId={workface.selectedSessionId} connection={connection} platform={platform} {...(sessionTitle ? { displayName: sessionTitle } : {})} inputActive={exposed} visible={workspaceVisible && showSession && !showGoalWork && workface.panel === 'terminal'} />
+      </section><section className="mobile-terminal-panel" hidden={!workspaceVisible || !current.terminal}>
+        <MobileTerminalViewer loadWhen={workspaceVisible && current.terminal} onLoadReturn={returnToConversation} terminalPalette={hostAppearance.terminalPalette} client={client} agentSessionId={workface.selectedSessionId} connection={connection} platform={platform} {...(sessionTitle ? { displayName: sessionTitle } : {})} inputActive={exposed} visible={workspaceVisible && current.terminal} />
       </section>
     </main>
     <div className="mobile-notice-stack">
@@ -744,7 +745,7 @@ function MobileAppContent({ client, connection, platform: basePlatform, native =
       {!primaryHeader && !focusVisible && <MobileAvatarNoticeOutlet />}
       {(serviceNotices.length > 0 || !canPersist) && <MobileNotice owner={client} kind="feedback" identity={[notice,noticeDetail,hostAppearance.issue,connection.issue,connection.state,canPersist]} className="mobile-service-notice"><span className="mobile-notice-mark"><ThemeStatusInfoIcon size={15} /></span><div>{serviceNotices.map(message => <p key={message}>{message}</p>)}{notice && noticeDetail && <details><summary>技术信息</summary><p>{noticeDetail}</p></details>}{!canPersist && <button onClick={restoreNavigationStorage}>用当前工作面替换记录</button>}</div></MobileNotice>}
     </div>
-    {rootPage && <footer className="mobile-navigation-bar" {...(tabBar.current.entering ? { 'data-motion': 'enter' } : {})}><MobilePrimaryNavigation current={secondary === 'survey' ? null : secondary ?? home} onSelect={openPrimaryWorkface} needsYou={needsYou.length} needsYouUnconfirmed={attention.unconfirmed} /></footer>}
+    {rootPage && <footer className="mobile-navigation-bar" {...(tabBar.current.entering ? { 'data-motion': 'enter' } : {})}><MobilePrimaryNavigation current={primary === 'survey' ? null : primary} onSelect={openPrimaryWorkface} needsYou={needsYou.length} needsYouUnconfirmed={attention.unconfirmed} /></footer>}
     </div>
     <MobileAgentCreate client={client} connected={connected} visible={sheet === 'create'} target={createTarget} platform={platform} onClose={() => setSheet(null)} openSession={id => openSession(id, { name: 'Agent', project: '项目未确认' })} />
     <Dialog.Root open={sheet !== null && sheet !== 'create'} onOpenChange={open => { if (!open) setSheet(null) }}>

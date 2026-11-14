@@ -1,3 +1,7 @@
+import { IconButton } from '@agentmux/client-ui/components/IconButton'
+import { SemanticIcon } from '@agentmux/client-ui/icons'
+import { MobileHeaderMenu } from '../navigation/MobileHeaderMenu'
+import type { MobilePanePresentation } from '../layout/workface-presentation'
 import { MobileNotice } from '../notices/MobileNotice'
 import { NOTE_FILE_EXTENSION } from '@agentmux/client-ui/note/note-format'
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
@@ -9,6 +13,7 @@ import { readNoteDocument } from '@agentmux/client-ui/note/note-document'
 import type { TopicsRpc } from './MobileTopicKnowledge'
 import { sameTopicFileResource, sameTopicNoteMapping, type MobileTopicFileReference, type MobileTopicNoteMapping, type MobileTopicSourceContentReference } from './source-reference'
 import './topics.css'
+import './source-reader.css'
 
 type Source = Extract<TopicKnowledgeSource, { kind: 'file' | 'note' | 'notebook' }>
 type Workspace = AgentMuxRpcResult<'app.snapshot'>['workspaces'][number]
@@ -20,7 +25,7 @@ export type MobileTopicSourceScope = { zoneId: string; path: string; workspace: 
 export type MobileTopicSourceProps = { source: Source; rpc: TopicsRpc; onBack(): void;
   openScope(scope: MobileTopicSourceScope): void | Promise<void>;
   displayPath?: (path: string, hostId: string) => string; openHttpLink?: OpenHttpLink;
-  visible?: boolean; onBackChange?(back: (() => void) | null): void; backLabel?: string;
+  presentation: MobilePanePresentation; onBackChange?(back: (() => void) | null): void; backLabel?: string;
   initialReference?: MobileTopicSourceContentReference; onReferenceChange?(reference: MobileTopicSourceContentReference): void }
 type SourceView = { scope: MobileTopicSourceScope; read: Read; listing?: Listing }
 const message = (error: unknown) => error instanceof Error ? error.message : String(error)
@@ -34,13 +39,13 @@ const params = (scope: MobileTopicSourceScope) => ({ zoneId: scope.zoneId, path:
 export function MobileTopicSource(props: MobileTopicSourceProps) {
   return <SourceReader key={JSON.stringify(props.source)} {...props} />
 }
-function SourceReader({ source, rpc, onBack, openScope, displayPath, openHttpLink, onBackChange, initialReference, onReferenceChange, visible = true, backLabel = '返回知识' }: MobileTopicSourceProps) {
+function SourceReader({ source, rpc, onBack, openScope, displayPath, openHttpLink, onBackChange, initialReference, onReferenceChange, presentation, backLabel = '返回知识' }: MobileTopicSourceProps) {
   const reference = useRef<MobileTopicSourceContentReference>(initialReference ?? (source.kind === 'notebook'
     ? { kind: 'notebook', selectedNote: null } : source.kind === 'note' ? { kind: 'note', mapping: null, trail: [] } : { kind: 'file', trail: [] }))
   const selected = reference.current.kind === 'notebook' ? reference.current.selectedNote : null
   const noteReferences = useRef(new Map<string, MobileTopicNoteMapping & { trail: MobileTopicFileReference[] }>(selected ? [[selected.noteId, selected]] : []))
   const reportReference = useRef(onReferenceChange); reportReference.current = onReferenceChange
-  const mounted = useRef(true), visibleRef = useRef(visible); visibleRef.current = visible
+  const mounted = useRef(true), observedRef = useRef(presentation.observed); observedRef.current = presentation.observed
   const restoring = useRef(reference.current.kind !== 'notebook' && reference.current.trail.length > 0)
   const [scopes, setScopes] = useState<MobileTopicSourceScope[]>([]), [pages, setPages] = useState<Page[]>([])
   const [notebookName, setNotebookName] = useState('笔记本'), [selectedPage, setSelectedPage] = useState<string | null>(selected?.noteId ?? null)
@@ -58,7 +63,7 @@ function SourceReader({ source, rpc, onBack, openScope, displayPath, openHttpLin
   const onBackRef = useRef(onBack); onBackRef.current = onBack
   const leaveSource = useCallback(() => { intent.current += 1; onBackRef.current() }, [])
   function publish(next: MobileTopicSourceContentReference) {
-    if (!mounted.current || !visibleRef.current) return
+    if (!mounted.current || !observedRef.current) return
     reference.current = next; reportReference.current?.(next)
   }
   const backToNotebook = useCallback(() => { selectedPageRef.current = null; setSelectedPage(null); publish({ kind: 'notebook', selectedNote: null }) }, [])
@@ -84,17 +89,17 @@ function SourceReader({ source, rpc, onBack, openScope, displayPath, openHttpLin
   const activeBack = selectedPage ? pageBack?.noteId === selectedPage ? pageBack.back : backToNotebook
     : history.length || reference.current.kind !== 'notebook' && reference.current.trail.length > 1 ? backToPrevious : view && scopes.length > 1 ? backToScopes : leaveSource
   useLayoutEffect(() => {
-    if (!visible || !onBackChange) return
+    if (!presentation.observed || !onBackChange) return
     onBackChange(activeBack)
     return () => onBackChange(null)
-  }, [visible, onBackChange, activeBack])
+  }, [presentation.observed, onBackChange, activeBack])
   const pathLabel = (path: string, hostId: string) => displayPath ? displayPath(path, hostId) : path
   const currentFilePath = view?.scope.path ?? (reference.current.kind !== 'notebook' ? reference.current.trail.at(-1)?.target.path : undefined)
     ?? (source.kind === 'file' ? source.path : '')
   useEffect(() => {
-    if (!visible) return
+    if (!presentation.observed) return
     let live = true
-    const active = () => live && mounted.current && visibleRef.current
+    const active = () => live && mounted.current && observedRef.current
     setLoading(true)
     async function discover() {
       if (source.kind === 'notebook') {
@@ -188,9 +193,9 @@ function SourceReader({ source, rpc, onBack, openScope, displayPath, openHttpLin
     } })
       .finally(() => { if (active()) setLoading(false) })
     return () => { live = false; intent.current += 1 }
-  }, [rpc, refresh, visible]) // SourceReader is keyed by the complete original source reference; cached Back never re-discovers.
-  async function read(scope: MobileTopicSourceScope, live: () => boolean = () => mounted.current && visibleRef.current, descend = false, pin?: MobileTopicFileReference): Promise<SourceView | undefined> {
-    if (!visibleRef.current) return
+  }, [rpc, refresh, presentation.observed]) // SourceReader is keyed by the complete original source reference; cached Back never re-discovers.
+  async function read(scope: MobileTopicSourceScope, live: () => boolean = () => mounted.current && observedRef.current, descend = false, pin?: MobileTopicFileReference): Promise<SourceView | undefined> {
+    if (!observedRef.current) return
     const token = ++intent.current
     setRequestedScope(scope)
     try {
@@ -256,27 +261,30 @@ function SourceReader({ source, rpc, onBack, openScope, displayPath, openHttpLin
   function open(scope: MobileTopicSourceScope) {
     void Promise.resolve().then(() => openScope(scope)).catch(error => setReadIssue(`工作面打开失败：${message(error)}。`))
   }
-  return <section className="mobile-topics mobile-topic-source-reader" aria-label="来源阅读" hidden={!visible}>
+  return <section className="mobile-topics mobile-topic-source-reader" aria-label="来源阅读" hidden={!presentation.presented}>
     <div hidden={Boolean(selectedPage)}>
-    <header className="mobile-topics-actions"><button onClick={activeBack}>{history.length ? '返回上层来源' : view && scopes.length > 1 ? '返回来源范围' : backLabel}</button><div className="mobile-topics-heading"><small>{source.kind === 'notebook' ? '笔记本' : '知识来源'}</small><h1>{source.kind === 'notebook' ? notebookName : source.kind === 'note' ? noteName : currentFilePath.split('/').at(-1) || '文件'}</h1></div><button onClick={() => setRefresh(value => value + 1)}>重试读取</button></header>
+    <SourceHeader title={source.kind === 'notebook' ? notebookName : source.kind === 'note' ? noteName : (currentFilePath === '.' && source.kind === 'file' ? source.path : currentFilePath).split('/').at(-1) || '文件'}
+      backLabel={history.length ? '返回上层来源' : view && scopes.length > 1 ? '返回来源范围' : backLabel} onBack={activeBack} onRetry={() => setRefresh(value => value + 1)} />
     {loading && <p role="status">正在读取来源…</p>}
     {issue && <MobileNotice identity={[JSON.stringify(source),issue]} className="mobile-topics-issue" role="status">{issue}</MobileNotice>}
     {queryDiagnostic && <details><summary>上次来源查询诊断</summary><p>{queryDiagnostic}</p></details>}
     {readIssue && <MobileNotice identity={[JSON.stringify(requestedScope),readIssue]} className="mobile-topics-issue" role="status">{readIssue}<button onClick={() => { if (requestedScope && !restoring.current) void read(requestedScope, undefined, Boolean(view && requestedScope.path !== view.scope.path)); else setRefresh(value => value + 1) }}>重试此文件</button></MobileNotice>}
-    <details><summary>来源引用</summary>{source.kind === 'file' ? <p>{pathLabel(source.path, source.hostId)}</p> : <code>{source.kind === 'note' ? source.noteId : source.notebookId}</code>}</details>
+    <details className="mobile-source-location"><summary>来源与位置</summary><dl>
+      <dt>来源引用</dt><dd>{source.kind === 'file' ? pathLabel(source.path, source.hostId) : source.kind === 'note' ? source.noteId : source.notebookId}</dd>
+      {view && <><dt>当前文件位置</dt><dd>{pathLabel(view.scope.directoryPath, view.scope.workspace.hostId)} / {view.scope.path}</dd></>}
+    </dl></details>
     {source.kind === 'notebook' && <ul className="mobile-topics-list">{pages.map(page => <li key={page.noteId}><button onClick={() => selectPage(page)}><strong>{page.title}</strong><small>{pathLabel(page.resource.path, page.resource.hostId)}{page.archivedAt !== undefined ? ' · 已归档' : ''}</small></button></li>)}</ul>}
     {scopes.length === 1 && <div className="mobile-topics-actions"><strong>{scopes[0]!.workspace.name}</strong><button onClick={() => open(view?.scope ?? scopes[0]!)}>打开工作面</button>{view && <button onClick={() => { void read(view.scope) }}>刷新文件</button>}</div>}
     {scopes.length > 1 && <><p>来源有多个位置，请选择：</p><ul className="mobile-topics-list">{scopes.map(scope => <li key={scope.zoneId}><button onClick={() => { void read(scope) }}><strong>{scope.workspace.name}</strong><small>{pathLabel(scope.directoryPath, scope.workspace.hostId)}</small></button><button onClick={() => open(scope)}>打开此工作面</button></li>)}</ul></>}
     {view && <article className="mobile-topic-reading">
       {scopes.length > 1 && <strong>{view.scope.workspace.name}</strong>}
-      <details><summary>当前文件位置</summary><p>{pathLabel(view.scope.directoryPath, view.scope.workspace.hostId)} / {view.scope.path}</p></details>
       {view.read.result.status === 'read' && <>
         {source.kind === 'file' && source.revision && scopes.some(scope => JSON.stringify(params(scope)) === JSON.stringify(params(view.scope))) && source.revision !== view.read.result.document.revision && <MobileNotice identity={[JSON.stringify(source),JSON.stringify(view.scope),view.read.result.document.revision]} role="status">文件在记录之后已修改，下面是当前内容。</MobileNotice>}
         {source.kind === 'note' || view.read.result.document.path.endsWith(NOTE_FILE_EXTENSION)
           ? <MobileNoteFile rpc={rpc} params={params(view.scope)} read={view.read}
-            visible={visible && !selectedPage} {...(source.kind === 'note' && source.blockId ? { target: { noteId: source.noteId, blockId: source.blockId } } : {})} />
+            visible={presentation.observed && !selectedPage} {...(source.kind === 'note' && source.blockId ? { target: { noteId: source.noteId, blockId: source.blockId } } : {})} />
           : <AgentMarkdown content={view.read.result.document.content} workspaceRoot={view.scope.directoryPath} sourcePath={view.scope.path} documentMode
-            openWorkspaceFile={path => { const relative = relativeTo(view.scope.directoryPath, path); if (relative !== null) void read({ ...view.scope, path: relative }, undefined, true) }}
+            openWorkspaceFile={path => { void read({ ...view.scope, path }, undefined, true) }}
             {...(openHttpLink ? { openHttpLink } : {})} />}
       </>}
       {view.read.result.status === 'binary' && <p role="status">这是二进制文件（{view.read.result.byteLength} 字节），这里无法显示；可以打开工作面查看。</p>}
@@ -285,11 +293,20 @@ function SourceReader({ source, rpc, onBack, openScope, displayPath, openHttpLin
         <ul className="mobile-topics-list">{view.listing.result.files.map(path => <li key={path}><button onClick={() => { void read({ ...view.scope, path: view.scope.path === '.' ? path : view.scope.path.replace(/\/+$/u, '') + '/' + path }, undefined, true) }}>{path}</button></li>)}</ul></>}
     </article>}
     </div>
-    {selectedPage && !notebookReady && <section aria-label="笔记页待核实"><button onClick={backToNotebook}>返回笔记本</button><MobileNotice dismissible={Boolean(issue)} kind={issue ? "warning" : "feedback"} identity={[JSON.stringify(source),selectedPage,issue]} role="status">{issue || '正在核对所选笔记页…'}</MobileNotice><button onClick={() => setRefresh(value => value + 1)}>重试读取</button></section>}
-    {visitedPages.map(noteId => <div key={noteId} hidden={selectedPage !== noteId || !notebookReady}><NotebookSourcePage source={{ kind: 'note', noteId, ...(noteReferences.current.get(noteId)!.blockId ? { blockId: noteReferences.current.get(noteId)!.blockId! } : {}) }} noteId={noteId} reportBack={reportPageBack} reportReference={reportNoteReference} rpc={rpc} onBack={backToNotebook} visible={visible && notebookReady && selectedPage === noteId} backLabel="返回笔记本" openScope={openScope}
+    {selectedPage && !notebookReady && <section aria-label="笔记页待核实"><SourceHeader title={pages.find(page => page.noteId === selectedPage)?.title ?? '笔记页'} backLabel="返回笔记本" onBack={backToNotebook} onRetry={() => setRefresh(value => value + 1)} /><MobileNotice dismissible={Boolean(issue)} kind={issue ? "warning" : "feedback"} identity={[JSON.stringify(source),selectedPage,issue]} role="status">{issue || '正在核对所选笔记页…'}</MobileNotice></section>}
+    {visitedPages.map(noteId => <div key={noteId} hidden={selectedPage !== noteId || !notebookReady}><NotebookSourcePage source={{ kind: 'note', noteId, ...(noteReferences.current.get(noteId)!.blockId ? { blockId: noteReferences.current.get(noteId)!.blockId! } : {}) }} noteId={noteId} reportBack={reportPageBack} reportReference={reportNoteReference} rpc={rpc} onBack={backToNotebook} presentation={{ presented: presentation.presented && notebookReady && selectedPage === noteId, observed: presentation.observed && notebookReady && selectedPage === noteId }} backLabel="返回笔记本" openScope={openScope}
       initialReference={{ kind: 'note', mapping: noteMapping(noteReferences.current.get(noteId)!), trail: noteReferences.current.get(noteId)!.trail }}
       {...(displayPath ? { displayPath } : {})} {...(openHttpLink ? { openHttpLink } : {})} /></div>)}
   </section>
+}
+
+function SourceHeader({ title, backLabel, onBack, onRetry }: { title: string; backLabel: string; onBack(): void; onRetry(): void }) {
+  return <header className="mobile-source-header">
+    <MobileHeaderMenu />
+    <IconButton className="mobile-source-action" aria-label={backLabel} onClick={onBack}><SemanticIcon name="navigation.back" size={18} /></IconButton>
+    <h1 className="mobile-source-title">{title}</h1>
+    <IconButton className="mobile-source-action" aria-label="重试读取" onClick={onRetry}><SemanticIcon name="action.refresh" size={18} /></IconButton>
+  </header>
 }
 
 function pageMapping(page: Page, blockId?: string): MobileTopicNoteMapping {

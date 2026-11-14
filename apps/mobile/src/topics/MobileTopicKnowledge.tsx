@@ -8,6 +8,8 @@ import { AgentMarkdown, type OpenHttpLink } from '@agentmux/client-ui/components
 import { getDeviceWorkface } from '../recovery/device-workface'
 import { mobileKnowledgeDraftKey, type MobileKnowledgeDraftScope } from '../recovery/knowledge-drafts'
 import { knowledgePosition, type TopicsNavigationController } from './topics-navigation'
+import { MobileWorkfaceFrame, MobileWorkfacePane } from '../layout/MobileWorkfaceFrame'
+import { workfacePanes } from '../layout/workface-presentation'
 import { mobileKnowledgeDraftSource, useKnowledgeDraft, type MobileKnowledgeEditTarget } from './useKnowledgeDraft'
 
 export type TopicsRpc = NonNullable<AgentMuxHostedClient['forwardRpc']>
@@ -48,8 +50,9 @@ export function MobileTopicKnowledge({ rpc, navigation, scopeTopicId, title, ope
     ...(editor.draftKey ? { draftKey: editor.draftKey } : {}), ...(editor.isNew ? { isNew: true } : {}),
     ...(editorData.current?.entry ? { entry: editorData.current.entry } : {}), scope: editorData.current?.scope ?? null } : null
   const editorKey = editor?.mountKey
-  const directoryVisible = visible && (wide || !selection && !editorVisible) && (wide || !sourceActive)
-  const readingVisible = visible && !sourceActive
+  const panes = workfacePanes({ active: visible, split: wide && !sourceActive, hasSelection: !sourceActive && Boolean(selection || editorVisible) })
+  const directoryVisible = panes.navigation.observed
+  const readingVisible = panes.content.observed
   const readIntent = useRef(0), latestClient = useRef(client), latestConnection = useRef(connected)
   latestClient.current = client; latestConnection.current = connected
   const backToReading = useCallback(() => send({ type: 'knowledge-back', scope: scopeTopicId, to: 'read' }), [send, scopeTopicId])
@@ -105,8 +108,8 @@ export function MobileTopicKnowledge({ rpc, navigation, scopeTopicId, title, ope
     if (editor) observe({ type: 'draft-key', scope: scopeTopicId, editorToken: editor.token, target: editor, draftKey })
   }, [observe, scopeTopicId, editor?.token, editor?.topicId, editor?.entryId])
   const readIssue = connected === false ? '连接中断，知识还没重新读取。' : issue
-  return <section className="mobile-topic-knowledge" data-wide={wide || undefined} aria-label={`${title}知识`}>
-    <div className="mobile-knowledge-directory" aria-label="知识导航" hidden={!directoryVisible}>
+  return <MobileWorkfaceFrame className="mobile-topic-knowledge" presentation={panes} role="region" aria-label={`${title}知识`}>
+    <MobileWorkfacePane className="mobile-knowledge-directory" pane="navigation" presentation={panes.navigation} aria-label="知识导航">
     <form className="mobile-topics-search" onSubmit={event => { event.preventDefault(); send({ type: 'knowledge-search', scope: scopeTopicId }) }}>
       <TextInput aria-label="搜索知识" placeholder={topicId ? '搜索此 Topic 的知识' : '搜索 All Topics'} value={query} onChange={event => send({ type: 'knowledge-query', scope: scopeTopicId, query: event.target.value })} />
       <button type="submit">搜索</button>
@@ -121,8 +124,8 @@ export function MobileTopicKnowledge({ rpc, navigation, scopeTopicId, title, ope
         <small>{'readError' in entry ? entry.readError : certaintyLabels[entry.certainty]}{!topicId ? ` · ${entry.topicId}` : ''}</small></button>
     </li>)}</ul>
     {connected !== false && !entries.length && !loading && <p className="mobile-topics-empty">{!topicId && !search ? '输入关键词，搜索所有 Topic 的已保存知识。' : search ? '当前已确认结果没有匹配项。' : '此 Topic 暂无已确认知识条目。'}</p>}
-    </div>
-    <div className="mobile-knowledge-content" hidden={sourceActive || !selection && !editorVisible}>
+    </MobileWorkfacePane>
+    <MobileWorkfacePane className="mobile-knowledge-content" pane="content" presentation={panes.content}>
     {readIssue && !directoryVisible && <MobileNotice identity={[readIssue]} className="mobile-topics-issue" role="status">{readIssue}</MobileNotice>}
     {selection && <article className="mobile-topic-reading" hidden={editorVisible}>
       <div className="mobile-topics-actions"><button onClick={backToList}>返回知识列表</button>
@@ -142,8 +145,8 @@ export function MobileTopicKnowledge({ rpc, navigation, scopeTopicId, title, ope
         setRefresh(value => value + 1)
         if (editor) send({ type: 'knowledge-saved', scope: scopeTopicId, editorToken: editor.token, keepEditing: Boolean(keepEditing) })
     }} /></div>}
-    </div>
-  </section>
+    </MobileWorkfacePane>
+  </MobileWorkfaceFrame>
 }
 
 export function MobileTopicKnowledgeEditor({ rpc: _rpc, target, onClose, onSaved, client = null, connected = false, onDraftKeyChange }: {

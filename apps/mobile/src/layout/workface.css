@@ -1,6 +1,8 @@
 /* One stable pair of tracks; resize changes geometry without moving an editor's parent. */
+.mobile-app { --mobile-workface-available-width: var(--mobile-viewport-width, 100%); }
+.mobile-workface-frame { --mobile-workface-available-width: 100%; }
+.mobile-app, .mobile-workface-frame { --mobile-workface-navigation-width: clamp(200px, min(calc(var(--mobile-workface-available-width) * .3), calc(var(--mobile-viewport-height, 100dvh) * .6)), 300px); }
 .mobile-workface-frame {
-  --mobile-workface-navigation-width: clamp(200px, min(30%, calc(var(--mobile-viewport-height, 100dvh) * .6)), 300px);
   --mobile-workface-column: 100%;
   --mobile-workface-gap: 0px;
   display: grid; grid-template-columns: minmax(0, var(--mobile-workface-column)) minmax(0, 1fr);

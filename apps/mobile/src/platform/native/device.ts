@@ -174,17 +174,32 @@ export function bindNativeDevice(options: {
 }
 
 export type MobileViewportSnapshot = Readonly<{ width: number; height: number }>
-const viewports = new WeakMap<Window, { snapshot: MobileViewportSnapshot; listeners: Set<() => void> }>()
+const viewports = new WeakMap<Window, { snapshot: MobileViewportSnapshot; listeners: Set<() => void>; bindings: number }>()
+function layoutViewportWidth(window: Window, root: HTMLElement): number {
+  const style = window.getComputedStyle(root)
+  const left = Number.parseFloat(style.getPropertyValue('--mobile-safe-left')) || 0
+  const right = Number.parseFloat(style.getPropertyValue('--mobile-safe-right')) || 0
+  return Math.max(0, window.innerWidth - left - right)
+}
 function viewportState(window: Window) {
   let state = viewports.get(window)
   if (!state) {
-    state = { snapshot: { width: window.innerWidth, height: window.visualViewport?.height ?? window.innerHeight }, listeners: new Set() }
+    state = { snapshot: { width: layoutViewportWidth(window, window.document.documentElement), height: window.visualViewport?.height ?? window.innerHeight }, listeners: new Set(), bindings: 0 }
     viewports.set(window, state)
   }
   return state
 }
 /** Read-only layout facts from the same viewport producer; subscribing adds no OS listeners. */
-export const readMobileViewport = (window: Window): MobileViewportSnapshot => viewportState(window).snapshot
+export function readMobileViewport(window: Window): MobileViewportSnapshot {
+  const state = viewportState(window)
+  // A remount must start with current geometry even if the Window resized while unbound.
+  // Bound consumers use the producer's cached tuple; Session renders do not measure layout.
+  if (state.bindings === 0) {
+    const width = layoutViewportWidth(window, window.document.documentElement), height = window.visualViewport?.height ?? window.innerHeight
+    if (width !== state.snapshot.width || height !== state.snapshot.height) state.snapshot = { width, height }
+  }
+  return state.snapshot
+}
 export function subscribeMobileViewport(window: Window, listener: () => void): () => void {
   const state = viewportState(window); state.listeners.add(listener)
   return () => { state.listeners.delete(listener) }
@@ -194,13 +209,14 @@ export function subscribeMobileViewport(window: Window, listener: () => void): (
 export function bindMobileViewport(window: Window, root: HTMLElement): () => void {
   const viewport = window.visualViewport
   const state = viewportState(window)
+  state.bindings += 1
   let frame: number | undefined
   const update = () => {
     frame = undefined
     if (viewport && viewport.scale !== 1) return
+    const next = { width: layoutViewportWidth(window, root), height: viewport?.height ?? window.innerHeight }
     root.style.setProperty('--mobile-viewport-height', `${viewport?.height ?? window.innerHeight}px`)
     root.style.setProperty('--mobile-viewport-top', `${viewport?.offsetTop ?? 0}px`)
-    const next = { width: window.innerWidth, height: viewport?.height ?? window.innerHeight }
     root.style.setProperty('--mobile-viewport-width', `${next.width}px`)
     if (next.width !== state.snapshot.width || next.height !== state.snapshot.height) {
       state.snapshot = next
@@ -225,5 +241,6 @@ export function bindMobileViewport(window: Window, root: HTMLElement): () => voi
     root.style.removeProperty('--mobile-viewport-height'); root.style.removeProperty('--mobile-viewport-top')
     root.style.removeProperty('--mobile-viewport-width')
     delete root.dataset.browserKeyboard
+    state.bindings -= 1
   }
 }

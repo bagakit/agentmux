@@ -72,24 +72,13 @@
 .mobile-topics .mobile-topics-tabs { gap: 4px; margin: 4px 0; }
 .mobile-topics .mobile-topics-tabs button { border: 0; padding-inline: 14px; }
 
-/* Only the primary Topics workface owns the responsive navigation/content split.
-   Source readers (including nested notebooks) keep their original single column. */
-.mobile-topics-primary { display: flex; flex-direction: column; min-height: 0; }
+/* Topics selects the relevant navigation; the shared Frame only distributes space. */
+.mobile-topics-primary { display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
 .mobile-topics-primary > header, .mobile-topics-primary > .mobile-topics-tabs { flex: none; }
-.mobile-topics-workspace { flex: 1; min-height: 0; min-width: 0; }
-.mobile-topics-directory, .mobile-topics-knowledge-scope, .mobile-knowledge-directory,
-.mobile-knowledge-content { min-width: 0; min-height: 0; }
-.mobile-topics-workspace[data-wide] { display: grid; grid-template-columns: minmax(240px, 30%) minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); column-gap: 16px; overflow: hidden; }
-.mobile-topics-workspace[data-wide] > .mobile-topics-directory { grid-area: 1 / 1; overflow-y: auto; }
-.mobile-topics-workspace[data-wide] > .mobile-topic-workface { grid-area: 1 / 2; overflow: auto; }
-.mobile-topics-workspace[data-wide] > .mobile-topics-knowledge-scope { grid-area: 1 / 1 / 2 / 3; overflow: hidden; }
-.mobile-topics-workspace[data-wide] > .mobile-topics-knowledge-scope > .mobile-topic-knowledge[data-wide] { height: 100%; display: grid; grid-template-columns: minmax(240px, 30%) minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); column-gap: 16px; }
-.mobile-topics-workspace[data-wide] .mobile-knowledge-directory { grid-area: 1 / 1; overflow-y: auto; }
-.mobile-topics-workspace[data-wide] .mobile-knowledge-content { grid-area: 1 / 2; overflow-y: auto; }
-.mobile-topics-workspace[data-wide] .mobile-knowledge-content > .mobile-topic-reading,
-.mobile-topics-workspace[data-wide] .mobile-knowledge-content .mobile-topic-editor { max-width: 720px; margin-inline: auto; }
-.mobile-topics-workspace[data-wide] .mobile-knowledge-content .mobile-topic-editor { border-top: 0; margin-top: 0; padding-top: 0; }
-.mobile-topics-workspace[data-wide] .mobile-topics-tree { margin-top: 0; }
-.mobile-topics-workspace[data-wide][data-source-active],
-.mobile-topics-workspace[data-wide][data-source-active] > .mobile-topics-knowledge-scope > .mobile-topic-knowledge[data-wide] { grid-template-columns: minmax(0, 1fr); }
-.mobile-topics-workspace[data-wide][data-source-active] > .mobile-topics-knowledge-scope { grid-column: 1; }
+.mobile-topics-workspace { flex: 1; height: auto; }
+.mobile-topics-workspace > .mobile-topics-knowledge-scope { grid-area: 1 / 1 / 2 / -1; min-width: 0; min-height: 0; overflow: hidden; }
+.mobile-topics-knowledge-scope > .mobile-topic-knowledge { height: 100%; }
+.mobile-knowledge-content > .mobile-topic-reading,
+.mobile-knowledge-content .mobile-topic-editor { max-width: 720px; margin-inline: auto; }
+.mobile-knowledge-content .mobile-topic-editor { border-top: 0; margin-top: 0; padding-top: 0; }
+.mobile-topics-workspace .mobile-topics-tree { margin-top: 0; }

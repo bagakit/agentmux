@@ -9,6 +9,8 @@ import type { OpenHttpLink } from '@agentmux/client-ui/components/AgentMarkdown'
 import { MobileTopicKnowledge, type TopicsRpc } from './MobileTopicKnowledge'
 import { MobileTopicOrganization } from './MobileTopicOrganization'
 import { knowledgePosition, type TopicsNavigationController } from './topics-navigation'
+import { MobileWorkfaceFrame, MobileWorkfacePane } from '../layout/MobileWorkfaceFrame'
+import { workfacePanes } from '../layout/workface-presentation'
 import './topics.css'
 
 const ThemeNavigationSubmenuIcon = semanticIconComponent('navigation.submenu')
@@ -37,9 +39,10 @@ export function MobileTopicsSurface({ rpc, navigation, client, connected, render
   const [topicIssues, setTopicIssues] = useState<Record<string, string>>({}), [topicLoading, setTopicLoading] = useState<string | null>(null)
   const [categoryIssue, setCategoryIssue] = useState(''), [loading, setLoading] = useState(false), [refresh, setRefresh] = useState(0)
   const [organizationBack, setOrganizationBack] = useState<(() => void) | null>(null)
-  const directoryVisible = visible && !organizationBack && mode === 'topics' && (wide || !inTopic) && (wide || !sourceActive)
+  const panes = workfacePanes({ active: visible && !organizationBack, split: wide && !sourceActive && mode === 'topics', hasSelection: !sourceActive && inTopic || mode === 'knowledge' })
+  const directoryVisible = panes.navigation.observed
   const metadataVisible = visible && (wide || !sourceActive)
-  const readingVisible = visible && !organizationBack && !sourceActive
+  const topicObserved = metadataVisible && !organizationBack && inTopic
   const reportOrganizationBack = useCallback((back: (() => void) | null) => setOrganizationBack(() => back), [])
   const backToDiscussion = useCallback(() => send({ type: 'mode', scope: selectedTopicId, mode: 'discussion' }), [send, selectedTopicId])
   const backToCategory = useCallback(() => send({ type: 'topic-back' }), [send])
@@ -55,7 +58,7 @@ export function MobileTopicsSurface({ rpc, navigation, client, connected, render
   }, [visible, sourceActive, onBackChange, activeBack])
   const [deepLinkIssue, setDeepLinkIssue] = useState(''), [deepLinkRetry, setDeepLinkRetry] = useState(0)
   useEffect(() => {
-    if (!readingVisible || !selectedTopicId || currentTopic && deepLinkRetry === 0) return
+    if (!topicObserved || !selectedTopicId || currentTopic && deepLinkRetry === 0) return
     let live = true
     const target = selectedTopicId
     void rpc('topic.inspect', { topicId: target }).then(result => {
@@ -67,7 +70,7 @@ export function MobileTopicsSurface({ rpc, navigation, client, connected, render
       setDeepLinkIssue(result.unavailable.map(item => `${item.message} ${item.recovery}`).join('\n'))
     }).catch(error => { if (live && contextRef.current.topicId === target) setDeepLinkIssue(`Topic 读取失败：${error instanceof Error ? error.message : String(error)}。可以重试。`) })
     return () => { live = false }
-  }, [rpc, selectedTopicId, readingVisible, deepLinkRetry])
+  }, [rpc, selectedTopicId, topicObserved, deepLinkRetry])
   useEffect(() => {
     if (!metadataVisible) return
     let live = true; setLoading(true)
@@ -97,20 +100,20 @@ export function MobileTopicsSurface({ rpc, navigation, client, connected, render
   const matchesCategory = (value: TopicCategory) => value.title.toLocaleLowerCase().includes(normalizedQuery)
   const matchesTopic = (value: KnowledgeTopic) => `${value.title} ${value.summary}`.toLocaleLowerCase().includes(normalizedQuery)
   const matchingCategories = categories.filter(value => matchesCategory(value) || (topicDirectories[value.categoryId] ?? []).some(matchesTopic))
-  return <MobileNoticeScope owner={client} identity={[categoryId,topicId]}><section className="mobile-topics mobile-topics-primary" aria-label="Topics" hidden={!visible}>
+  return <MobileNoticeScope owner={client} identity={[categoryId,topicId]}><section className="mobile-topics mobile-topics-primary" aria-label="Topics">
     <header className="mobile-topics-actions mobile-page-header">
-      <MobileHeaderMenu hidden={Boolean(inTopic || categoryId)} />
+      <MobileHeaderMenu hidden={Boolean(inTopic || categoryId || sourceActive)} />
       {inTopic ? <button aria-label={topicBackLabel ?? '返回分类目录'} onClick={backToCategory}>{topicBackLabel ?? '返回'}</button>
         : categoryId && <button aria-label="返回所有分类" onClick={backToAllCategories}>返回</button>}
       <div className="mobile-topics-heading">{(inTopic || category) && <small>{category?.title ?? 'Topics'}</small>}<h1>{inTopic ? currentTopic?.title ?? 'Topic 未确认' : 'Topics'}</h1></div>
       {visible && <MobileAvatarNoticeOutlet header />}
     </header>
-    <MobileTopicOrganization rpc={rpc} categories={categories} category={category} topic={currentTopic} visible={visible && !sourceActive} onBackChange={reportOrganizationBack} onRefresh={() => setRefresh(value => value + 1)} onChanged={() => setRefresh(value => value + 1)} />
+    <MobileTopicOrganization rpc={rpc} categories={categories} category={category} topic={currentTopic} visible={!sourceActive} onBackChange={reportOrganizationBack} onRefresh={() => setRefresh(value => value + 1)} onChanged={() => setRefresh(value => value + 1)} />
     {[categoryIssue].filter(Boolean).map((value, index) => <MobileNotice identity={[categoryId,topicId,value]} key={index} className="mobile-topics-issue" role="status">{value}</MobileNotice>)}
     {deepLinkIssue && <MobileNotice identity={[topicId,deepLinkIssue]} className="mobile-topics-issue" role="status">{deepLinkIssue}<button onClick={() => setDeepLinkRetry(value => value + 1)}>重试读取 Topic</button></MobileNotice>}
     <div className="mobile-topics-tabs" hidden={Boolean(organizationBack) || sourceActive && !wide} role="group" aria-label="Topic 内容"><button aria-pressed={mode === 'topics'} onClick={() => send({ type: 'mode', scope: selectedTopicId, mode: 'discussion' })}>{inTopic ? '讨论' : 'Topics'}</button><button aria-pressed={mode === 'knowledge'} onClick={() => send({ type: 'mode', scope: selectedTopicId, mode: 'knowledge' })}>知识</button></div>
-    <div className="mobile-topics-workspace" data-wide={wide || undefined} data-source-active={sourceActive || undefined} hidden={Boolean(organizationBack)}>
-    <div className="mobile-topics-directory" aria-label="Topic 导航" hidden={!directoryVisible}>
+    <MobileWorkfaceFrame className="mobile-topics-workspace" presentation={panes} data-knowledge={mode === 'knowledge' || undefined} data-source-active={sourceActive || undefined} hidden={Boolean(organizationBack)}>
+    <MobileWorkfacePane className="mobile-topics-directory" pane="navigation" presentation={panes.navigation} aria-label="Topic 导航">
       <label className="mobile-topics-search"><TextInput aria-label="查找 Topic 或分类" value={query} placeholder="查找 Topic 或分类" onChange={event => send({ type: 'directory-query', query: event.target.value })} /></label>
       <ul className="mobile-topics-list mobile-topics-tree" aria-label="Topic 分类目录">{matchingCategories.map(value => {
         const expanded = categoryId === value.categoryId
@@ -133,13 +136,12 @@ export function MobileTopicsSurface({ rpc, navigation, client, connected, render
       })}</ul>
       {!loading && !matchingCategories.length && <p className="mobile-topics-empty">{categoryIssue ? '目录还没确认。' : categories.length ? '没有匹配的分类或已读取 Topic。' : '暂无已确认分类。'}</p>}
       {categoryId && !category && !loading && <MobileNotice identity={[categoryId]} className="mobile-topics-issue" role="status">还没确认这个分类。可刷新目录或返回所有分类。</MobileNotice>}
-    </div>
+    </MobileWorkfacePane>
     <div className="mobile-topics-knowledge-scope" hidden={mode !== 'knowledge' || inTopic || sourceActive && !wide}><MobileTopicKnowledge navigation={navigation} scopeTopicId={null} wide={wide} client={client ?? null} {...(connected !== undefined ? { connected } : {})}
       visible={visible && !organizationBack && mode === 'knowledge' && !inTopic} rpc={rpc} title="All Topics" openSource={openSource} {...(openHttpLink ? { openHttpLink } : {})} /></div>
     {topicFacts.filter(value => state.positions.has(value.topicId)).map(value => <div key={value.topicId} className="mobile-topics-knowledge-scope" hidden={mode !== 'knowledge' || selectedTopicId !== value.topicId || sourceActive && !wide}><MobileTopicKnowledge navigation={navigation} scopeTopicId={value.topicId} wide={wide} client={client ?? null} {...(connected !== undefined ? { connected } : {})}
       visible={visible && !organizationBack && mode === 'knowledge' && selectedTopicId === value.topicId} rpc={rpc} title={value.title} openSource={openSource} {...(openHttpLink ? { openHttpLink } : {})} /></div>)}
-    {topicFacts.filter(value => state.positions.has(value.topicId)).map(value => <div key={value.topicId} className="mobile-topic-workface" hidden={selectedTopicId !== value.topicId || mode !== 'topics' || sourceActive}>{renderWorkface(value, readingVisible && selectedTopicId === value.topicId && mode === 'topics')}</div>)}
-    </div>
+    {topicFacts.filter(value => state.positions.has(value.topicId)).map(value => <MobileWorkfacePane key={value.topicId} className="mobile-topic-workface" pane="content" presentation={{ presented: panes.content.presented && selectedTopicId === value.topicId && mode === 'topics' && !sourceActive, observed: panes.content.observed && selectedTopicId === value.topicId && mode === 'topics' && !sourceActive }}>{renderWorkface(value, panes.content.observed && selectedTopicId === value.topicId && mode === 'topics' && !sourceActive)}</MobileWorkfacePane>)}
+    </MobileWorkfaceFrame>
   </section></MobileNoticeScope>
 }
-

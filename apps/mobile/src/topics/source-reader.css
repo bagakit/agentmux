@@ -1,0 +1,40 @@
+.mobile-topic-source-reader .mobile-source-header {
+  position: sticky;
+  top: -4px;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 44px;
+  margin: 0 -4px 4px;
+  padding: env(safe-area-inset-top, 0px) 0 0;
+  background: var(--mobile-page, var(--bg));
+}
+.mobile-topic-source-reader .mobile-source-header > button { flex: none; }
+.mobile-topic-source-reader .mobile-source-header .mobile-source-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  min-width: 44px;
+  height: 44px;
+  min-height: 44px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-2);
+}
+.mobile-topic-source-reader .mobile-source-title {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font-size: var(--fs-body);
+  line-height: 1.35;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.mobile-topic-source-reader .mobile-source-location { margin: 4px 0; }
+.mobile-topic-source-reader .mobile-source-location > summary { min-height: 44px; }
+.mobile-topic-source-reader .mobile-source-location dl { margin: 0 0 8px; font-size: var(--fs-meta); }
+.mobile-topic-source-reader .mobile-source-location dt { margin-top: 6px; color: var(--text-3); }
+.mobile-topic-source-reader .mobile-source-location dd { margin: 2px 0; overflow-wrap: anywhere; }
