@@ -7512,6 +7512,14 @@ export class AgentMuxClient {
   private nativeSessionStarting(session: AgentMuxAgentSession, intent: AgentInputJournalIntent['admissionIntent']): boolean {
     if (intent.kind === 'manual-actor' || intent.kind === 'native-conversation') return false
     const provider = this.providers.get(session.providerId)
+    const original = this.registry.findByRun(session.run)
+    const nativeSubjectDeclared = provider.hook.nativeHandle !== undefined || provider.hook.processNativeIdentity === true
+    const startupSemanticsDeclared = nativeSubjectDeclared || provider.hook.nativeSessionTransition !== undefined ||
+      provider.readInputInitialization !== undefined || provider.prepareNativeInput !== undefined ||
+      original?.agentSessionId === session.agentSessionId && original.nativeActor?.initializationControl === true
+    // A lifecycle receipt locates this Run; it cannot invent a native startup
+    // protocol for a Provider that only contributes the ordinary PTY contract.
+    if (!startupSemanticsDeclared) return false
     const frontend = this.terminalFrontendWatches.get(session.agentSessionId)?.frontend
     if (frontend && sameRun(frontend.run, session.run) && frontend.initialization?.phase === 'ready') return false
     // A later failed history observation cannot revoke this Run's confirmed start.
