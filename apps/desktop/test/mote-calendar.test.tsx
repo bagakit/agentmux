@@ -117,6 +117,36 @@ describe('Mote calendar original schedule consumer', () => {
     expect(dom.container.querySelector('[aria-label="Selected date"]')?.textContent).toContain('input accepted')
     expect(dom.container.querySelectorAll('[data-schedule-id="daily"]')).toHaveLength(1)
   })
+  it('date and hour keep confirmed ended input while Upcoming independently filters ended arrangements', async () => {
+    const acceptedAt = now - 15 * 60_000
+    const accepted = DateTime.fromMillis(acceptedAt, { zone: 'UTC' })
+    const completed = saved('completed', { status: 'stopped', lastOccurrenceAt: acceptedAt, lastOutcome: 'sent', nextCheckAt: acceptedAt })
+    const cancelled = saved('cancelled', { status: 'stopped', lastOutcome: 'unknown', nextCheckAt: now + 3_600_000 })
+    await owner([completed, cancelled])
+    await dom.render(<MoteCalendar scope={scope} reference={reference} active />)
+    const marker = () => dom.container.querySelector('[data-calendar-schedule-id="completed"]')
+    await vi.waitFor(() => expect(marker()?.getAttribute('aria-label')).toContain('Input accepted'))
+    expect(dom.container.querySelector('[data-calendar-schedule-id="cancelled"]')).toBeNull()
+    expect(dom.container.textContent).not.toContain('Show ended')
+    expect(dom.container.querySelector('.mote-calendar__reading-note')?.textContent).toContain('latest confirmed input per arrangement')
+    await button('Day')
+    const hour = dom.container.querySelector<HTMLButtonElement>(`[data-calendar-hour="${accepted.toISODate()}:${accepted.hour}"]`)!
+    expect(hour.getAttribute('aria-label')).toContain('0 planned, 1 accepted')
+    await act(async () => hour.click())
+    expect(dom.container.querySelector('[aria-label="Selected hour"] .mote-calendar__plan-total')?.textContent).toBe('1 accepted')
+    const times = dom.container.querySelector<HTMLDetailsElement>('.mote-calendar__time-details')!
+    await act(async () => { times.open = true; times.dispatchEvent(new Event('toggle')) })
+    expect(times.querySelector('[data-occurrence-kind="last-accepted"]')?.textContent).toContain('Input accepted')
+    await button('Upcoming')
+    expect(dom.container.querySelector('[data-schedule-id="completed"]')).toBeNull()
+    await act(async () => dom.container.querySelector<HTMLInputElement>('.mote-calendar__ended input')!.click())
+    expect(dom.container.querySelector('[data-schedule-id="completed"]')).not.toBeNull()
+    expect(dom.container.querySelector('[data-schedule-id="cancelled"]')).not.toBeNull()
+    await button('Month')
+    expect(marker()).not.toBeNull()
+    expect(dom.container.querySelector('[data-calendar-schedule-id="cancelled"]')).toBeNull()
+    expect(api.schedule.resume).not.toHaveBeenCalled()
+  })
   it('opens the exact original Main Mote discussion through existing spatial navigation without changing the execution lane', async () => {
     await owner([saved('main-discussion')])
     const initial = useAppStore.getState(), execution = initial.agentFocus.execution, sessions = initial.sessions, drafts = initial.agentComposerDrafts
@@ -202,6 +232,7 @@ describe('Mote calendar original schedule consumer', () => {
     // A later authoritative snapshot can finish delivery without a control-revision bump.
     vi.mocked(api.schedule.list).mockResolvedValue({ schedules: [saved('countdown', { status: 'stopped', lastTickAt: now, lastOutcome: 'sent' })], executionScope: 'connected-host' })
     await dom.render(<MoteCalendar scope={scope} reference={reference} active />)
+    await button('Upcoming')
     await vi.waitFor(() => expect(dom.container.textContent).toContain('Show ended (1)'))
     expect(dom.container.querySelector('[data-schedule-id="countdown"]')).toBeNull()
   })

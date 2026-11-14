@@ -75,7 +75,9 @@ function sceneRecords(): ContinuousProgressLoop[] {
     return [make('group-watch', 1, '盯群：检查原群的新消息，重要的内容回原会话。', anchor,
       { calendar: undefined, everyMs: 60_000, lastOccurrenceAt: anchor - 60_000, lastOutcome: 'sent' }),
     make('maintenance', 0, 'Mote main heartbeat.\n\n检查主对话、未完成事项和原安排，继续已授权的工作。', anchor,
-      { calendar: undefined, everyMs: 120_000, lastOccurrenceAt: anchor - 120_000, lastOutcome: 'sent', managedSource: { sourceId: 'mote-main:fixture', revision: 'fixture' } })]
+      { calendar: undefined, everyMs: 120_000, lastOccurrenceAt: anchor - 120_000, lastOutcome: 'sent', managedSource: { sourceId: 'mote-main:fixture', revision: 'fixture' } }),
+    make('completed-timer', 1, 'Research reminder: review the original decision.', nine(now - day),
+      { calendar: undefined, afterMs: 1_200_000, status: 'stopped', lastOccurrenceAt: nine(now - day), lastOutcome: 'sent' })]
   }
   return [make('daily-brief', 0, '早上一起看：项目进展、需要我决定的事情，以及今天最小的一步\n保留原始资料与每个待确认的问题；这段长正文需要完整的阅读宽度。 Compare the original evidence, keep unresolved choices visible, and wait for confirmation before making the next decision.', nextNine),
     make('research-timer', 1, '20 分钟后提醒我回来比较调研结论，不要替我决定或发消息给别人', now + 20 * 60_000, { calendar: undefined, afterMs: 1_200_000 }),
