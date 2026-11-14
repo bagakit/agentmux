@@ -5,23 +5,37 @@ import type { SystemPageOutcome } from '../../../shared/system-web-url'
 import type { SurveyBrowserPreparation } from './survey-browser-creation'
 
 export type SystemPageHost = { get(): AppState; navigation(): string; subscribe(listener: () => void): () => void }
+// Presentation priority only; requests, resource creation and saving keep their original owners.
+const latestPresentation = new WeakMap<SystemPageHost['get'], object>()
 
 /** Both exact native inputs use the original Survey preparation and Core spatial owner. */
 export async function openSystemPageInSurvey(host: SystemPageHost, request: { url: string }, signal: AbortSignal): Promise<SystemPageOutcome> {
   if (signal.aborted) throw new Error('System page opening was not started because its original request is no longer available.')
-  const get = host.get, navigation = host.navigation()
+  const get = host.get
+  const presentation = {}
+  latestPresentation.set(get, presentation)
+  let navigation = host.navigation(), presenting = false
   let navigationChanged = false
-  const unsubscribe = host.subscribe(() => { if (host.navigation() !== navigation) navigationChanged = true })
+  const unsubscribe = host.subscribe(() => { if (!presenting && host.navigation() !== navigation) navigationChanged = true })
   let preparation: SurveyBrowserPreparation | null = null
   const reveal = (prepared: SurveyBrowserPreparation): void => {
-    if (signal.aborted || !prepared.reference || navigationChanged || host.navigation() !== navigation) return
+    if (signal.aborted || latestPresentation.get(get) !== presentation || !prepared.reference || navigationChanged || host.navigation() !== navigation) return
     const browser = get().tabs[prepared.reference.tabId]?.regions[prepared.reference.regionId]
-    if (browser?.kind !== 'browser' || prepared.createdBrowser?.id !== browser.browserId || prepared.admission?.outcome === 'unknown') return
-    get().setSurveyZoneSelection({ kind: 'page', regionId: prepared.reference.regionId, browserId: browser.browserId })
-    get().setMainSurface('survey')
+    if (prepared.admission?.outcome === 'unknown') return
+    const page = browser?.kind === 'browser' && prepared.createdBrowser?.id === browser.browserId
+    const launcher = browser?.kind === 'launcher' && browser === prepared.surface
+    if (!page && !launcher) return
+    presenting = true
+    try {
+      get().setSurveyZoneSelection(page ? { kind: 'page', regionId: prepared.reference.regionId, browserId: browser.browserId }
+        : { zoneId: prepared.zone.zoneId, selection: [{ tabId: prepared.reference.tabId, regionId: prepared.reference.regionId }],
+            active: { tabId: prepared.reference.tabId, regionId: prepared.reference.regionId } })
+      get().setMainSurface('survey')
+      navigation = host.navigation()
+    } finally { presenting = false }
   }
   try {
-    const prepared = await get().createSurveyBrowser({ workspaceId: SCRATCH_WORKSPACE_ID, url: request.url, preparation: null, onPrepared(value) { preparation = value } })
+    const prepared = await get().createSurveyBrowser({ workspaceId: SCRATCH_WORKSPACE_ID, url: request.url, preparation: null, onPrepared(value) { preparation = value; reveal(value) } })
     const browser = get().tabs[prepared.reference.tabId]?.regions[prepared.reference.regionId]
     if (browser?.kind !== 'browser') throw new Error('The original Survey Browser attachment is unconfirmed.')
     reveal(prepared)
@@ -33,5 +47,5 @@ export async function openSystemPageInSurvey(host: SystemPageHost, request: { ur
     const reference = prepared?.reference ?? null, browser = reference ? get().tabs[reference.tabId]?.regions[reference.regionId] : null
     return { state: 'unconfirmed', browserId: browser?.kind === 'browser' ? browser.browserId : null, reference,
       message: `System page opening is unconfirmed. ${error instanceof Error ? error.message : String(error)} ${prepared ? `Original Survey item: ${formatAmuxObjectLink({ kind: 'zone', zoneId: prepared.zone.zoneId })}. ` : ''}The prepared Survey item is kept; inspect it and retry from its original page. Other pages, drafts and healthy Agents are kept.` }
-  } finally { unsubscribe() }
+  } finally { unsubscribe(); if (latestPresentation.get(get) === presentation) latestPresentation.delete(get) }
 }

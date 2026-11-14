@@ -1418,7 +1418,7 @@ export type AppState = GitReadingActions & {
   chooseSessionLocation(requestId: string, reference: SessionLocationReference): boolean
   selectSession(id: string, tabGroupId?: string, options?: { keepSurface?: boolean; reference?: SessionLocationReference }): boolean
   prepareWorkbenchLayout(workspaceId: string): WorkspaceLayout
-  createWorkbenchZone(input: { workspaceId: string; spaceIds: readonly string[] }): Promise<{ zone: AgentMuxZoneFact; save: AgentMuxSpatialSave; issues: AgentMuxSpatialIssue[] }>
+  createWorkbenchZone(input: { workspaceId: string; spaceIds: readonly string[]; onPrepared?(zone: AgentMuxZoneFact): void }): Promise<{ zone: AgentMuxZoneFact; save: AgentMuxSpatialSave; issues: AgentMuxSpatialIssue[] }>
   setZoneSpaceRelation(zoneId: string, spaceId: string, linked: boolean): Promise<AgentMuxSpaceBindingReport>
   setTabDisplayPlacement(tabId: string, displayWorkspaceId: string, groupId: string, present: boolean): Promise<AgentMuxSpaceBindingReport>
   openLauncher(target: { workspaceId: string; displayWorkspaceId?: string; tabGroupId?: string; topicId?: string; zoneId?: string; reveal: boolean;
@@ -4766,7 +4766,7 @@ async function saveSurveyCompositionReferences(get: () => AppState, set: (next: 
     !sourceZoneIds.has(zoneId) || zoneId === retained.target.zoneId || catalog.tabs.some(tab => tab.zoneId === zoneId)), retained.target.zoneId])]
   const pages = current.surveyPageReferences.filter(page => !movedPages.has(JSON.stringify([page.regionId, page.browserId])))
   return executeSurveyList({ get, set, hasZone: confirmedSurveyZones(current), hasPage: page => Boolean(surveyPageOwner(get().tabs, page)),
-    save: () => saveWorkbenchSelection(false, false) }, { schemaVersion: 5, requestId: retained.requestId, operation: 'space.survey-list',
+    save: saveSurveyPreferences }, { schemaVersion: 5, requestId: retained.requestId, operation: 'space.survey-list',
     collection: { zoneIds, expectedZoneIds: surveyCollectedZoneIds(current.surveyCollectedZones), pageReferences: pages, expectedPageReferences: current.surveyPageReferences } })
 }
 
@@ -5107,9 +5107,25 @@ async function checkpointWorkbenchUserState(): Promise<void> {
   if (moteFloatingUnreadEditsPending()) await initializeMoteFloatingPreferences()
   await agentBookmarks.flush()
   if (agentBookmarks.pending()) throw new Error('Current Agent bookmarks are not yet saved. Original reading and current input are retained.')
+  await checkpointWorkbenchUserDocument()
+}
+/** The original shared document writer; unrelated fragment owners retain their own pending edits. */
+async function checkpointWorkbenchUserDocument(): Promise<void> {
   await persistentWorkbenchStorage.checkpoint(WORKBENCH_USER_STATE_KEY, {
     state: partializeAppState(useAppStore.getState()), version: 1
   })
+}
+/** Survey membership does not make unrelated bookmark or Launcher writes a prerequisite. */
+async function saveSurveyPreferences(): Promise<AgentMuxSpatialSave> {
+  let clientStateWritten = false, storageFlushRequested = false, reason: string | null = null
+  try {
+    if (!workbenchWriteFence.isOpen()) throw new Error('The saved Workbench is still being restored.')
+    await checkpointWorkbenchUserDocument()
+    clientStateWritten = true
+    await requestWorkbenchStorageFlush(false)
+    storageFlushRequested = true
+  } catch (error) { reason = presentError(error); useAppStore.getState().reportWorkbenchSaveFailure(error, 'local-storage') }
+  return { layoutApplied: false, clientStateWritten, storageFlushRequested, diskDurability: 'unconfirmed', reason }
 }
 /** Pending edits outside a hydrated fragment are still user data, never an empty save queue. */
 export function auxiliaryUserDataPending(): boolean {
@@ -5703,7 +5719,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   surveyCollectedZones: {},
   surveyOrganization: restoreSurveyOrganization(undefined),
   async setSurveyOrganization(organization, expected) {
-    return await executeSurveyList({ get, set, hasZone: confirmedSurveyZones(get()), hasPage: reference => Boolean(surveyPageOwner(get().tabs,reference)), save: () => saveWorkbenchSelection(false, false) },
+    return await executeSurveyList({ get, set, hasZone: confirmedSurveyZones(get()), hasPage: reference => Boolean(surveyPageOwner(get().tabs,reference)), save: saveSurveyPreferences },
       { schemaVersion: 5, requestId: mintObjectId(), operation: 'space.survey-list', organization, expected })
   },
   surveyExplorationNames: {},
@@ -5739,7 +5755,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     return executeSurveyList({ get, set: next => { set(next); onApplied?.(next.surveyPageReferences) },
       hasZone: zoneId => confirmedSurveyZones(get())(zoneId),
       hasPage: page => Boolean(surveyPageOwner(get().tabs, page)),
-      save: () => saveWorkbenchSelection(false, false)
+      save: saveSurveyPreferences
     }, { schemaVersion: 5, requestId: mintObjectId(), operation: 'space.survey-list',
       collection: { pageReferences: next, expectedPageReferences: pages } })
   },
@@ -5774,7 +5790,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     if (!surveyCollectedZones) return false
     set({ surveyCollectedZones })
     // Membership is a discrete user action, not a drag that can wait for a trailing write.
-    void saveWorkbenchSelection(false, false)
+    void saveSurveyPreferences()
     return true
   },
   setSurveyToolsOpen(surveyToolsOpen) { set({ surveyToolsOpen, workbenchNavigationInputPolicy: null, regionCaretFocus: null }) },
@@ -5798,7 +5814,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       retained = retainSurveyComposition(request, { requestId: request.requestId, targetZoneId: request.target.zoneId, outcome: 'unknown', tabIds,
         issue: 'This original composition has no confirmed completion. Read its current target; never replay it automatically.' })
       set(state => ({ surveyCompositionRecoveries: changeSurveyCompositionRecovery(state.surveyCompositionRecoveries, request.requestId, retained!) }))
-      const intentSave = await saveWorkbenchSelection(false, false)
+      const intentSave = await saveSurveyPreferences()
       if (!intentSave.clientStateWritten) throw new Error('This move’s original request could not be saved. Its content is kept; restore Workbench storage before submitting this same move.')
       // Saving the intent can yield to later user work. Prepare that same complete request
       // against the original owner's current graph before its first (and only) composition CAS.
@@ -5819,11 +5835,11 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         ...(saved.save ? { save: saved.save } : {}) }
       if (!saved.issues.length) {
         set(state => ({ surveyCompositionRecoveries: changeSurveyCompositionRecovery(state.surveyCompositionRecoveries, request.requestId) }))
-        await saveWorkbenchSelection(false, false)
+        await saveSurveyPreferences()
       } else {
         retained = { ...retained!, report }
         set(state => ({ surveyCompositionRecoveries: changeSurveyCompositionRecovery(state.surveyCompositionRecoveries, request.requestId, retained!) }))
-        await saveWorkbenchSelection(false, false)
+        await saveSurveyPreferences()
       }
       return report
     } catch (error) {
@@ -5835,7 +5851,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       if (retained) {
         set(state => ({ surveyCompositionRecoveries: changeSurveyCompositionRecovery(state.surveyCompositionRecoveries, request.requestId,
           refused ? undefined : { ...retained!, report }) }))
-        await saveWorkbenchSelection(false, false)
+        await saveSurveyPreferences()
       }
       get().reportError(new Error(issue), { kind: 'indeterminate' })
       return report
@@ -5856,7 +5872,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       const saved = await saveSurveyCompositionReferences(get, set, retained)
       if (saved.issues.length) return { targetConfirmed: true, referencesRepaired: false, issue: saved.issues.map(issue => issue.message).join(' ') }
       set(state => ({ surveyCompositionRecoveries: changeSurveyCompositionRecovery(state.surveyCompositionRecoveries, requestId) }))
-      const cleared = await saveWorkbenchSelection(false, false)
+      const cleared = await saveSurveyPreferences()
       return { targetConfirmed: true, referencesRepaired: true, issue: 'The current Survey references are repaired. The original acknowledgement is still unconfirmed.' + (cleared.reason ? ' ' + cleared.reason : '') }
     } catch (cause) { return { targetConfirmed: false, referencesRepaired: false,
       issue: 'The current target could not be checked. The original operation and content are kept. ' + presentError(cause) } }
@@ -6715,7 +6731,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       throw Object.assign(new Error('Settings requests belong to the Main configuration owner.'), { code: 'CONTROL_FAILED' })
     }
     if (request.operation === 'space.survey-list') return { operation: request.operation, ...await executeSurveyList({ get,
-      set, hasZone: confirmedSurveyZones(get()), hasPage: reference => Boolean(surveyPageOwner(get().tabs,reference)), save: () => saveWorkbenchSelection(false, false) }, request) }
+      set, hasZone: confirmedSurveyZones(get()), hasPage: reference => Boolean(surveyPageOwner(get().tabs,reference)), save: saveSurveyPreferences }, request) }
     if (request.operation === 'space.agent-order') return { operation: request.operation, ...await executeWorkspaceAgentOrder({ get, resolveExecution: agentRegionExecution,
       set: (id, value) => set(state => ({ workspaceAgentOrder: { ...state.workspaceAgentOrder, [id]: value } })),
       save: () => saveWorkbenchSelection(false, false)
@@ -11733,7 +11749,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           : {})
       }
     })
-    if (surveyChanged) void saveWorkbenchSelection(false, false)
+    if (surveyChanged) void saveSurveyPreferences()
     if (retiredRegions.length) void import('./lib/workbench-windows')
       .then(({ returnClosedWorkbenchWindows }) => returnClosedWorkbenchWindows(retiredRegions)).catch(error => get().reportError(error))
   },

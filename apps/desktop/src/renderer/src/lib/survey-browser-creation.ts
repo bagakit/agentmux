@@ -1,5 +1,5 @@
 import type { AgentMuxSurveyPageAdmission, AgentMuxZoneFact } from '@agentmux/core/control'
-import type { AppState } from '../store'
+import { checkpointSpatialWorkbench, type AppState } from '../store'
 import type { BrowserSnapshot } from '../../../shared/contracts'
 import type { WorkbenchProjectionSelection } from './workbench-projection'
 import type { WorkbenchSurface } from './workbench-tabs'
@@ -38,8 +38,16 @@ export async function createSurveyBrowser(get: () => AppState, input: {
     // Capture before the asynchronous resource creation, including explicit default.
     const mode = input.mode ?? 'normal', profileId = mode === 'private' ? undefined : input.profileId
     const url = input.url, entry = input.entry ?? 'page', membership = before.surveyPageReferences
-    const created = await before.createWorkbenchZone({ workspaceId: input.workspaceId, spaceIds: [] })
-    preparation = { zone: created.zone, mode, ...(profileId === undefined ? {} : { profileId }), url, entry, membership, reference: null, surface: null }
+    // The factory keeps its original save transaction. Its prepared identity can
+    // render immediately; this page separately awaits its exact Launcher graph below.
+    let prepared!: (zone: AgentMuxZoneFact) => void
+    const ready = new Promise<AgentMuxZoneFact>(resolve => { prepared = resolve })
+    const saved = before.createWorkbenchZone({ workspaceId: input.workspaceId, spaceIds: [], onPrepared: prepared })
+    const zone = await Promise.race([ready, saved.then(created => created.zone)])
+    // Keep observing the original save, including auxiliary failures, without
+    // making those other owners prerequisites for this Browser's Native effect.
+    void saved.catch(error => get().reportError(error))
+    preparation = { zone, mode, ...(profileId === undefined ? {} : { profileId }), url, entry, membership, reference: null, surface: null }
     input.onPrepared(preparation)
   }
   if (preparation.entry === 'research' && !preparation.researchCollected) {
@@ -54,6 +62,9 @@ export async function createSurveyBrowser(get: () => AppState, input: {
     preparation.surface = launcher.regions[preparation.reference.regionId]!
     input.onPrepared(preparation)
   }
+  // Confirm the original Zone, Tab, Region and display before sending Native
+  // creation. A fast frame never trades away the durable preparation identity.
+  await checkpointSpatialWorkbench()
   const reference = preparation.reference, tab = get().tabs[reference.tabId], surface = tab?.regions[reference.regionId]
   const attached = surface?.kind === 'browser' && preparation.createdBrowser?.id === surface.browserId && tab?.space?.zoneId === preparation.zone.zoneId
   if (surface?.kind === 'browser' && !attached) {
@@ -79,7 +90,12 @@ export async function createSurveyBrowser(get: () => AppState, input: {
   if (preparation.createdBrowser.mode !== preparation.mode || expectedProfile !== undefined && preparation.createdBrowser.profileId !== expectedProfile) {
     throw new Error('The attached original page did not confirm the frozen environment. It is kept; inspect this same Browser before another action.')
   }
+  input.onPrepared(preparation)
   if (preparation.entry !== 'research') {
+    // This freshly minted page has never been admitted. Another independent
+    // page's completed registration is not a withdrawal of this exact original.
+    // Retry keeps its frozen generation so a later explicit removal stays removed.
+    if (!preparation.admission) preparation.membership = get().surveyPageReferences
     const attempt = await admitPreparedSurveyPage(get, { regionId: reference.regionId, browserId: preparation.createdBrowser.id }, preparation.createdBrowser, preparation.membership)
     preparation.admission = attempt.admission
     preparation.membership = attempt.membership
