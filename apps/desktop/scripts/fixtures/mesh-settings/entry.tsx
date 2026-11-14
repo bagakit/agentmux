@@ -6,6 +6,7 @@ import { useAppStore } from '../../../src/renderer/src/store'
 import { api } from '../../../src/renderer/src/lib/api'
 import { connectionLinkUrl } from '@agentmux/relay/offer'
 import type { MeshNetworkInspection, MeshNetworkSettings } from '@agentmux/core/mesh-network'
+import type { AppConfig } from '../../../src/shared/contracts'
 import '../../../src/renderer/src/styles/index.css'
 const ids = ['aa11cc22dd33ee44'.repeat(4), 'bb22dd33ee44ff55'.repeat(4), 'cc33ee44ff55aa66'.repeat(4)]
 const peer = ids[0]!, target = 'original-mac-publisher-bf8dc3c23ab8'
@@ -34,6 +35,11 @@ api.mesh.call = (async (method: string, params: any) => {
  throw Error('This visual fixture does not simulate access links. Real Core coverage is recorded separately.')
 }) as typeof api.mesh.call
 mountThemeRuntime(window, { appAppearance: 'dark' })
-useAppStore.setState({ config: { version: 9, hosts: [{ id: 'local', kind: 'local', label: 'This Mac' }], executors: {}, workspaces: [], appearance: { terminalTheme: 'graphite' }, browser: { toolbar: {} } } as never, sessions: [], meshSettingsDrafts: {} })
+const savedHosts: AppConfig['hosts'] = [{ id: 'local', kind: 'local', label: 'This Mac' }, { id: 'studio', kind: 'ssh', label: 'Studio', hostname: 'studio.invalid', transport: 'tailcat', tailcat: { address: 'studio-private', keyFile: 'studio-key' } }]
+useAppStore.setState({ config: { version: 9, hosts: savedHosts, executors: {}, workspaces: [], appearance: { terminalTheme: 'graphite' }, browser: { toolbar: {} } } as never, sessions: [], meshSettingsDrafts: {} })
+function showHosts(localOnly: boolean) {
+ const current = useAppStore.getState().config!
+ useAppStore.setState({ config: { ...current, hosts: localOnly ? savedHosts.slice(0, 1) : savedHosts } })
+}
 createRoot(document.getElementById('root')!).render(<DesktopClientUiProvider><div className="mesh-review-shell"><SettingsPanel onClose={() => {}} initialSection="hosts" /><footer className="mesh-review-footer">Visual review fixture · production Settings and theme · controlled network observations</footer></div></DesktopClientUiProvider>)
-Object.assign(window, { meshFixture: { originalOffer, endpoint: () => { state = 'endpoint' }, theme: (mode: 'dark' | 'light') => updateThemeSelection({ appAppearance: mode }), failure: () => { state = 'failure'; settings = { ...settings, revision: 'saved-9' } } } })
+Object.assign(window, { meshFixture: { originalOffer, endpoint: () => { state = 'endpoint' }, localOnly: () => showHosts(true), allHosts: () => showHosts(false), theme: (mode: 'dark' | 'light') => updateThemeSelection({ appAppearance: mode }), failure: () => { state = 'failure'; settings = { ...settings, revision: 'saved-9' } } } })

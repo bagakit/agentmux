@@ -117,6 +117,13 @@ describe('Conversation Channels settings', () => {
     expect(pane().querySelectorAll('[data-host-projects]:not([hidden])')).toHaveLength(1)
     expect(document.activeElement).toBe(editor())
   })
+  it('uses singular Host wording for one connected machine', async () => {
+    const local = config.hosts.find(host => host.kind === 'local')!
+    useAppStore.setState({ config: { ...config, hosts: [local] } })
+    await dom.render(<LiveHost />)
+    expect(pane().querySelector('.remote-management__scope')?.textContent).toBe('1host0 remote')
+    expect(pane().querySelector('.remote-management__scope')?.textContent).not.toContain('1 hosts')
+  })
   it('drafts: same-ID panel switching and B/A keep every authored field and per-ID disclosure', async () => {
     await dom.render(<LiveHost />); await select(H); await toggleAdvanced(true)
     const values = { Name: 'Authored connection', 'Host or SSH alias': 'literal-alias', User: 'authored-user', Port: '2201',
