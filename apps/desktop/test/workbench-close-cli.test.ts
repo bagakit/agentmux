@@ -209,9 +209,17 @@ it.runIf(business)('actual Source Focus prepared close cancels without navigatio
   await sourceViewCloseJourney('focus-cancel')
 })
 
+it.runIf(business)('actual Source Focus location-read failure Done exits without retrying or changing the original workface', async () => {
+  await sourceViewCloseJourney('focus-location-failure')
+})
+
+it.runIf(business)('actual Source Focus last original position disappears after confirmed view-only close', async () => {
+  await sourceViewCloseJourney('focus-last-visible')
+})
+
 async function sourceViewCloseJourney(entry: string) {
   const f = await fixture({ originalSource: true })
-  const inputs = entry === 'focus-cancel' ? (['createAgent', 'resumeAgent', 'restartAgent', 'reopenAgent', 'writeAgent', 'pasteAgent', 'submitAgentPrompt'] as const).map(method => vi.spyOn(f.host.client, method)) : []
+  const inputs = entry === 'focus-cancel' || entry === 'focus-location-failure' ? (['createAgent', 'resumeAgent', 'restartAgent', 'reopenAgent', 'writeAgent', 'pasteAgent', 'submitAgentPrompt'] as const).map(method => vi.spyOn(f.host.client, method)) : []
   if (entry === 'focus-cancel') vi.spyOn(f.host.client, 'runtimeSubject').mockRejectedValue(Error('The original Native observation is unavailable.'))
   const originalTab = entry === 'region-x' ? 'target-tab' : 'healthy-tab', originalRegion = entry === 'region-x' ? 'file-region' : 'healthy-region'
   if (entry !== 'region-x') f.store.setState(state => ({ layouts: { ...state.layouts, otherDisplay: createWorkspaceLayout('other-group', ['healthy-tab']) } }))
@@ -232,6 +240,7 @@ async function sourceViewCloseJourney(entry: string) {
   const restore = installNativePopover(); cleanup.push(async () => restore())
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   const calls = vi.spyOn(api.spaceMounts, 'call').mockImplementation(async (method, input, signal) => {
+    if (entry === 'focus-location-failure' && method === 'closeLocations') throw Error('The original display position observation is unavailable.')
     const result = await bridge.api.call(method, input, signal)
     if (entry === 'lost-ack' && method === 'close' && (input as { method: string }).method === 'space.close.apply') throw Error('Original close acknowledgement unavailable. The original operation is retained; check its original status.')
     return result
@@ -294,6 +303,33 @@ async function sourceViewCloseJourney(entry: string) {
     await act(async () => card!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, button: 2 })))
     await vi.waitFor(() => expect([...document.querySelectorAll('[role="menuitem"]')].some(item => item.textContent === 'Close workface…')).toBe(true))
     await act(async () => [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(item => item.textContent === 'Close workface…')!.click())
+  }
+  if (entry === 'focus-location-failure') {
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      await vi.waitFor(() => expect(document.querySelector('.confirmation-dialog')?.textContent).toContain('The original display position observation is unavailable.'))
+      expect(document.querySelector('.confirmation-dialog')?.textContent).toContain('Original position unavailable')
+      expect(calls.mock.calls.filter(([method]) => method === 'closeLocations')).toHaveLength(attempt)
+      expect(calls.mock.calls.some(([method]) => method === 'close')).toBe(false)
+      await act(async () => document.querySelector<HTMLElement>('[data-confirm-label="Done"]:not([disabled])')!.click())
+      await vi.waitFor(() => expect(document.querySelector('.confirmation-dialog')).toBeNull())
+      expect(observer.getState().mainSurface).toBe(held.mainSurface)
+      expect(observer.getState().workbenchSpaceSelection).toEqual(held.workbenchSpaceSelection)
+      expect(observer.getState().agentComposerDrafts).toEqual(held.agentComposerDrafts)
+      expect(observer.getState().tabs[tabId]).toBeDefined()
+      expect(f.store.getState().tabs[originalTab]?.regions[originalRegion]).toBeDefined()
+      expect(f.store.getState().layouts.otherDisplay!.groups[0]!.tabOrder).toContain(originalTab)
+      expect(f.store.getState().layouts.W!.groups[0]!.tabOrder).toContain(originalTab)
+      expect(f.store.getState().agentComposerDrafts['healthy-region']).toBe('Original unsent Agent draft')
+      expect(localClose).not.toHaveBeenCalled(); expect(f.stops).not.toHaveBeenCalled()
+      for (const input of inputs) expect(input).not.toHaveBeenCalled()
+      if (attempt === 2) break
+      const card = [...node.querySelectorAll<HTMLElement>('.focus-context[data-session-id]')].find(card => card.dataset.sessionId?.includes(f.agent.agentSessionId))!
+      expect(card).toBeDefined()
+      await act(async () => card.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, button: 2 })))
+      await vi.waitFor(() => expect([...document.querySelectorAll('[role="menuitem"]')].some(item => item.textContent === 'Close workface…')).toBe(true))
+      await act(async () => [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(item => item.textContent === 'Close workface…')!.click())
+    }
+    return
   }
   await vi.waitFor(() => expect(document.querySelector('.confirmation-dialog')?.textContent).toContain('Choose the original position'), { timeout: 10000 })
   if (process.env.AGENTMUX_SOURCE_CLOSE_VISUAL_DOM && entry === 'focus-menu') await writeFile(process.env.AGENTMUX_SOURCE_CLOSE_VISUAL_DOM + '-choice.html', document.body.innerHTML)
@@ -367,6 +403,28 @@ async function sourceViewCloseJourney(entry: string) {
   expect(localClose).not.toHaveBeenCalled(); expect(f.stops).not.toHaveBeenCalled()
   expect(calls.mock.calls.filter(([method, input]) => method === 'close' && (input as { method: string }).method === 'space.close.apply')).toHaveLength(1)
   expect((await f.native.client.status(f.other.runId)).state.type).toBe('running')
+  if (entry === 'focus-last-visible') {
+    await act(async () => document.querySelector<HTMLElement>('[data-confirm-label="Done"]')!.click())
+    await vi.waitFor(() => expect(document.querySelector('.confirmation-dialog')).toBeNull())
+    const card = [...node.querySelectorAll<HTMLElement>('.focus-context[data-session-id]')].find(card => card.dataset.sessionId?.includes(f.agent.agentSessionId))!
+    expect(card).toBeDefined()
+    await act(async () => card.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, button: 2 })))
+    await vi.waitFor(() => expect([...document.querySelectorAll('[role="menuitem"]')].some(item => item.textContent === 'Close workface…')).toBe(true))
+    await act(async () => [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(item => item.textContent === 'Close workface…')!.click())
+    await vi.waitFor(() => expect(document.querySelector('[data-confirm-label="Close"]:not([disabled])')).not.toBeNull())
+    await act(async () => document.querySelector<HTMLElement>('[data-confirm-label="Close"]:not([disabled])')!.click())
+    await vi.waitFor(() => expect(document.querySelector('.confirmation-dialog')?.textContent).toContain('Original view closed'))
+    let finalSnapshot!: Core.SpaceSnapshot
+    await act(async () => { finalSnapshot = await bridge.api.call('snapshot', destination) })
+    expect(finalSnapshot.scope.tabs.some(tab => tab.tabId === originalTab)).toBe(false)
+    expect(finalSnapshot.scope.regions.some(region => region.regionId === originalRegion)).toBe(false)
+    await vi.waitFor(async () => { await act(async () => {}); expect(observer.getState().tabs[tabId]).toBeUndefined() })
+    await vi.waitFor(async () => { await act(async () => {}); expect([...node.querySelectorAll<HTMLElement>('.focus-context[data-session-id]')].some(card => card.dataset.sessionId?.includes(f.agent.agentSessionId))).toBe(false) })
+    expect(observer.getState().agentComposerDrafts[f.agent.agentSessionId]).toBe('Observer draft must not approve original close')
+    expect(f.store.getState().agentComposerDrafts['healthy-region']).toBe('Original unsent Agent draft')
+    expect(f.stops).not.toHaveBeenCalled()
+    expect((await f.native.client.status(f.other.runId)).state.type).toBe('running')
+  }
 }
 
 async function sourceCloseFixture(split = false, file = false) {
@@ -996,6 +1054,15 @@ it.runIf(Boolean(restartMode) && process.env.AGENTMUX_SOURCE_CLOSE_RESTART === '
       target: { kind: 'tab-occurrence', displayWorkspaceId: 'W', groupId: 'G', tabId: member.tabId }, keepAgentSessions: true } })).operation!
     const result = (await bridge.api.call('close', { ...destination, method: 'space.close.apply', request: { operationId: record.operationId, expectedPlanDigest: record.planDigest, decisions: core.spaceCloseDecisions(record.plan) } })).operation!
     expect(result.outcome, result.issue).toBe('applied')
+    const lastMember = { tabId: 'healthy-tab', regionId: 'healthy-region', kind: 'agent' as const, agentSessionId: f.agent.agentSessionId, scope: 'tab' as const }
+    const last = (await bridge.api.call('close', { ...destination, method: 'space.close.prepare', member: lastMember, request: { operationId: 'restart-source-last-agent-view',
+      target: { kind: 'tab-occurrence', displayWorkspaceId: 'W', groupId: 'G', tabId: lastMember.tabId }, keepAgentSessions: true } })).operation!
+    expect(last.plan.projection.closesView).toBe(true); expect(last.plan.projection.resources).toHaveLength(0)
+    const lastResult = (await bridge.api.call('close', { ...destination, method: 'space.close.apply', request: { operationId: last.operationId, expectedPlanDigest: last.planDigest, decisions: core.spaceCloseDecisions(last.plan) } })).operation!
+    expect(lastResult).toMatchObject({ outcome: 'applied', diskDurability: 'confirmed' })
+    const closedScope = await bridge.api.call('snapshot', destination)
+    expect(closedScope.scope.tabs.some(tab => tab.tabId === lastMember.tabId)).toBe(false)
+    expect(closedScope.scope.regions.some(region => region.regionId === lastMember.regionId)).toBe(false)
     await prepareRendererUpdate('quit')
     await writeFile(join(f.root, 'source-writer-proof.json'), JSON.stringify({ pid: process.pid, agentSessionId: f.agent.agentSessionId,
       agentRun: f.other.runId, rawRun: f.run.runId, queues: f.store.getState().agentSteerQueues['healthy-region'],
@@ -1009,6 +1076,11 @@ it.runIf(Boolean(restartMode) && process.env.AGENTMUX_SOURCE_CLOSE_RESTART === '
     expect(f.store.getState().documents[f.key]?.content).toBe('Original unsaved content')
     expect(f.store.getState().agentComposerDrafts['healthy-region']).toBe('Original unsent Agent draft')
     expect(f.store.getState().agentSteerQueues['healthy-region']).toEqual(original.queues)
+    expect(f.store.getState().tabs['healthy-tab']).toBeUndefined()
+    const closedScope = await bridge.api.call('snapshot', destination)
+    expect(closedScope.scope.tabs.some(tab => tab.tabId === 'healthy-tab')).toBe(false)
+    expect(closedScope.scope.regions.some(region => region.regionId === 'healthy-region')).toBe(false)
+    expect((await bridge.api.call('close', { ...destination, method: 'space.close.inspect', request: { operationId: 'restart-source-last-agent-view' } })).operation).toMatchObject({ phase: 'settled', outcome: 'applied' })
     const inspected = (await bridge.api.call('close', { ...destination, method: 'space.close.inspect', request: { operationId: 'restart-source-applied' } })).operation!
     expect(inspected).toMatchObject({ phase: 'settled', outcome: 'applied' })
     expect(inspected.plan.projection.source).toBeUndefined()
@@ -1043,11 +1115,11 @@ it.runIf(!nativeBranch)('an applied Source close survives two actual original ow
     })
     expect(result.code, mode + '\n' + result.text).toBe(0); expect(result.text).toMatch(/1 passed/)
     const proof = JSON.parse(await readFile(join(root, index ? `source-reader-${index}.json` : 'source-writer-proof.json'), 'utf8')); pids.push(proof.pid)
-    expect(proof.sourceWriteCalls).toBe(index ? 0 : 1)
+    expect(proof.sourceWriteCalls).toBe(index ? 0 : 2)
   }
   expect(new Set(pids).size).toBe(3)
   if (process.env.AGENTMUX_SOURCE_CLOSE_RESTART_PROOF) await writeFile(process.env.AGENTMUX_SOURCE_CLOSE_RESTART_PROOF, JSON.stringify({ pids, restarts: 2,
-    originalRunPreserved: true, originalInputPreserved: true, unrelatedOccurrencePreserved: true, replayed: false }))
+    originalRunPreserved: true, originalInputPreserved: true, unrelatedOccurrencePreserved: true, lastAgentPositionAbsent: true, replayed: false }))
 }, 280_000)
 
 it.runIf(Boolean(restartMode) && process.env.AGENTMUX_SOURCE_CLOSE_RESTART !== '1')('private restart worker restores the original workface and discovers retained close operations without replay', async () => {

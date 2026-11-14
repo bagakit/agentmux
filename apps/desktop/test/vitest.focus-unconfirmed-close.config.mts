@@ -6,6 +6,7 @@ import assert from 'node:assert/strict'
 import base from './vitest.workbench-close.config.mts'
 const root = resolve(import.meta.dirname, '../../..')
 const mutations: Record<string, [string, string, string]> = {
+  'failure-done': ['apps/desktop/src/renderer/src/hooks/useSourceWorkbenchClose.tsx', '      if (value.issue) finish(false)', '      // Test mutation: failed position lookup cannot dismiss.'],
   'first-position': ['apps/desktop/src/renderer/src/hooks/useSourceWorkbenchClose.tsx', 'value.choices.locations.find(location => choiceKey(location) === value.selected)', 'value.choices.locations[0]'],
   'recovered-member': ['apps/desktop/src/renderer/src/hooks/useSourceWorkbenchClose.tsx', '      accept(value, operation)', '      // Test mutation: recovered member check removed.'],
   'region-scope': ['apps/desktop/src/main/source-workbench-close.ts', "kind: member.scope === 'region' ? 'region' : 'tab-occurrence'", "kind: 'tab-occurrence'"],
