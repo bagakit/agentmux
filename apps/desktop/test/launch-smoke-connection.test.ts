@@ -85,8 +85,9 @@ it('launch smoke waits for the original Hosted background reconnect without repl
   const consumerIds = [...new Set(calls.flatMap(value => value.consumerId ? [value.consumerId] : []))]
   expect(consumerIds).toHaveLength(1)
   expect(calls.filter(value => value.method === 'runtime.events')).toHaveLength(1)
-  expect(events.some(value => value.type === 'connection-state' && value.state === 'lost' && value.observationOrigin.boundary === 'consumer-core')).toBe(true)
-  expect(events.some(value => value.type === 'connection-state' && value.state === 'restored' && value.observationOrigin.boundary === 'consumer-core')).toBe(true)
+  expect(events.some(value => value.type === 'session-observation-state' && value.observation.state === 'unavailable')).toBe(true)
+  expect(events.some(value => value.type === 'session-observation-state' && value.observation.state === 'ready')).toBe(true)
+  expect(events.some(value => value.type === 'connection-state' && value.observationOrigin.boundary === 'consumer-core')).toBe(false)
   expect(disconnect).not.toHaveBeenCalled()
   fact({ phase: 'actual-hosted-reconnect', owner, nativeProcessId: daemon, sessionId: created.agentSessionId, runId: before.run.runId, runProcessId: before.run.pid,
     ownerReads, consumerIds, calls, publicConnectCalls: connect.mock.calls.length, scope: 'SDK background retry invokes its internal connect closure; public connect calls count only smoke confirmation.', metadataRetained: true, sameRun: true, sameNativeProcess: true })

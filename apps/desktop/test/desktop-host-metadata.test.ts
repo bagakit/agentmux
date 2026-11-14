@@ -11,6 +11,7 @@ import { createNameControlClient } from '../../../packages/core/src/name-control
 import { connectDesktopAgentMuxHost, callOriginalDesktopHost } from '../src/main/desktop-host.js'
 import { RuntimeController } from '../src/main/runtime-controller.js'
 import { AgentMuxError } from '../../../packages/core/src/errors.js'
+import { observeRead } from '../../../packages/core/src/observation-read.js'
 
 const platform = vi.hoisted(() => ({ start: vi.fn(async () => { throw Error('A serving private Unix owner must not launch a host') }) }))
 vi.mock('@agentmux/host/macos-service', () => ({ macosHostService: (x: unknown) => x, ensureMacosHostService: platform.start }))
@@ -31,8 +32,13 @@ async function fixture() {
   vi.spyOn(hosted, 'call').mockImplementation(async (method, params, context) => {
     calls.push({ method, ...(method === 'runtime.invoke' ? { invocation: (params as { invocation: { method: string } }).invocation.method } : {}),
       ...(method === 'runtime.owner.identity' ? { expectedRuntimeId: (params as { expectedRuntimeId?: unknown }).expectedRuntimeId } : {}) })
-    if (method === 'runtime.owner.identity' && ++identities === 1) await cold.promise
+    if (method === 'runtime.owner.identity') identities++
     return await originalCall(method, params, context)
+  })
+  const originalSubscribe = hosted.subscribe.bind(hosted)
+  vi.spyOn(hosted, 'subscribe').mockImplementation(async (method, params, emit, context) => {
+    if (method === 'runtime.events') await observeRead(cold.promise, context?.signal)
+    return await originalSubscribe(method, params, emit, context)
   })
   // Native/PTY is not part of this metadata scenario. The original all-Session owner alone fails.
   const inventory = vi.spyOn(f.client, 'readAgentSessions').mockRejectedValue(Error('Unrelated all-Session metadata read unavailable'))
@@ -45,7 +51,8 @@ async function fixture() {
   const client = await connectDesktopAgentMuxHost({ id: 'local', kind: 'local', label: 'Local' }, f.store)
   cleanup.push(async () => { cold.resolve(); await client.dispose() })
   await vi.waitFor(() => expect(identities).toBe(1))
-  expect('runtimeOwnerIdentity' in client && client.runtimeOwnerIdentity()).toBeNull()
+  await vi.waitFor(() => expect('runtimeOwnerIdentity' in client && client.runtimeOwnerIdentity()).toEqual(owner))
+  expect('sessionObservation' in client && client.sessionObservation()).toEqual({ state: 'unconfirmed', hasSnapshot: false })
   const controller = Object.assign(Object.create(RuntimeController.prototype), { hosts: new Map([['local', { client }]]), hostReconfigurationReservations: new Map() }) as RuntimeController
   return { ...f, owner, client, controller, spatial, cold, calls, inventory, native, nameRead }
 }
