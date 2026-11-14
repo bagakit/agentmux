@@ -56,6 +56,10 @@
       "types": "./dist/cursor/launch-options.d.ts",
       "import": "./dist/cursor/launch-options.js"
     },
+    "./cursor/provider": {
+      "types": "./dist/cursor/provider.d.ts",
+      "import": "./dist/cursor/provider.js"
+    },
     "./hermes/launch-options": {
       "types": "./dist/hermes/launch-options.d.ts",
       "import": "./dist/hermes/launch-options.js"

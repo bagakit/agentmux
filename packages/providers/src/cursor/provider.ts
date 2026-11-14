@@ -1,19 +1,11 @@
-import type { ProviderExecutionEnvironment } from './execution-environment.js'
 import { join } from 'node:path'
 import { CURSOR_LAUNCH_OPTIONS } from './launch-options.js'
-import type { AgentProvider, AgentProviderDefinition } from '../agent-provider.js'
-import type { AgentManagedHookPlan } from '../managed-hook-installer.js'
-import { normalizeNativeHook, type AgentNativeHookSpecification } from '../hook-normalizer.js'
-import { formatHookToolOutput } from '../hook-tool-outcome.js'
-import { catalog, hookToolFields, runScopedHookCommand, hookCommandTimeout } from './shared.js'
-import { cursorDataRoot, readCursorSessionHistoryPage, observeCursorSessionHistory } from './cursor-native-history.js'
-import { discoverCursorNativeSession } from './cursor-native-session.js'
-import { cursorPromptPayloadConsumption } from './cursor-payload-consumption.js'
-import { buildPromptInputPayload, sanitizeBracketedPasteText } from '../bracketed-paste.js'
-import { prepareCursorOwnedWorkspaceTrust } from './cursor-workspace-trust.js'
-export { cursorTrustMarkerPath } from './cursor-workspace-trust.js'
+import type { ProviderHookServices } from '../hook-services.js'
 
-type ProviderFactory = (definition: AgentProviderDefinition) => AgentProvider
+type CursorServices = ProviderHookServices<'cursor'> & {
+  buildPromptInputPayload(prompt: string): string
+  sanitizeBracketedPasteText(prompt: string): string
+}
 
 /**
  * 写进 `~/.cursor/hooks.json` 的事件名。
@@ -63,79 +55,77 @@ export const CURSOR_HOOK_EVENTS = [
  * `transcript_path`）送达，故声明 nativeHandle 解析主会话恢复句柄与定位器；同时声明 subagentTracking
  * 隔离子代理事件（`subagentStart`/`subagentStop` 携带 `subagent_id`），防止子代理覆盖主会话句柄。
  */
-export const CURSOR_HOOKS: AgentNativeHookSpecification = {
-  retainedRuntime: true,
-  toolFields(eventName, payload) {
-    if (eventName === 'beforeShellExecution') return hookToolFields(undefined, undefined, payload.tool_use_id)
-    if (!['preToolUse', 'postToolUse', 'postToolUseFailure', 'beforeMCPExecution'].includes(eventName)) return {}
-    return hookToolFields(payload.tool_name, payload.tool_input, payload.tool_use_id)
-  },
-  toolOutcome(eventName, payload) {
-    const failed = eventName === 'postToolUseFailure'
-    const body = failed ? (typeof payload.error_message === 'string' ? payload.error_message : undefined)
-      : eventName === 'postToolUse' ? payload.tool_output : undefined
-    const output = formatHookToolOutput(body)
-    return { failed, ...(output === undefined ? {} : { output }) }
-  },
-  lifecycle: {
-    beforeSubmitPrompt: 'user-prompt-submit',
-    preToolUse: 'tool-use-start',
-    postToolUse: 'tool-use-end',
-    postToolUseFailure: 'tool-use-end',
-  },
-  // 固定第一方版本同时提供 hook_event_name；托管配置继续显式用 --event 传递事件名。
-  eventNameSource: { kind: 'flag' },
-  rules: [
-    // afterAgentResponse carries body content and can arrive after stop(completed).
-    // It grants no new activity; Core preserves the original state for a content-only event.
-    { events: ['stop'], matches: payload => payload.status === 'completed', state: 'done', lifecycleEvent: 'turn-end' },
-    { events: ['stop'], matches: payload => payload.status === 'error', state: 'error', lifecycleEvent: 'turn-end' },
-    { events: ['stop'], matches: payload => payload.status === 'aborted', state: 'unknown', lifecycleEvent: 'turn-end' },
-    { events: ['stop'], state: 'unknown', lifecycleEvent: null },
-    {
-      events: [
-        'beforeSubmitPrompt', 'preToolUse', 'postToolUse', 'postToolUseFailure',
-        'beforeShellExecution', 'beforeMCPExecution'
-      ],
-      state: 'working'
-    }
-  ],
-  subagentTracking: {
-    startEvents: ['subagentStart'], stopEvents: ['subagentStop'], idKeys: ['subagent_id']
-  },
-  nativeHandle: { sessionIdKeys: ['conversation_id'], transcriptPathKeys: ['transcript_path'] }
+function nativeHook({ hookToolFields, formatHookToolOutput }: CursorServices) {
+  return {
+    retainedRuntime: true,
+    toolFields(eventName: string, payload: Readonly<Record<string, unknown>>) {
+      if (eventName === 'beforeShellExecution') return hookToolFields(undefined, undefined, payload.tool_use_id)
+      if (!['preToolUse', 'postToolUse', 'postToolUseFailure', 'beforeMCPExecution'].includes(eventName)) return {}
+      return hookToolFields(payload.tool_name, payload.tool_input, payload.tool_use_id)
+    },
+    toolOutcome(eventName: string, payload: Readonly<Record<string, unknown>>) {
+      const failed = eventName === 'postToolUseFailure'
+      const body = failed ? (typeof payload.error_message === 'string' ? payload.error_message : undefined)
+        : eventName === 'postToolUse' ? payload.tool_output : undefined
+      const output = formatHookToolOutput(body)
+      return { failed, ...(output === undefined ? {} : { output }) }
+    },
+    lifecycle: {
+      beforeSubmitPrompt: 'user-prompt-submit',
+      preToolUse: 'tool-use-start',
+      postToolUse: 'tool-use-end',
+      postToolUseFailure: 'tool-use-end',
+    },
+    // 固定第一方版本同时提供 hook_event_name；托管配置继续显式用 --event 传递事件名。
+    eventNameSource: { kind: 'flag' },
+    rules: [
+      // afterAgentResponse carries body content and can arrive after stop(completed).
+      // It grants no new activity; Core preserves the original state for a content-only event.
+      { events: ['stop'], matches: (payload: Readonly<Record<string, unknown>>) => payload.status === 'completed', state: 'done', lifecycleEvent: 'turn-end' },
+      { events: ['stop'], matches: (payload: Readonly<Record<string, unknown>>) => payload.status === 'error', state: 'error', lifecycleEvent: 'turn-end' },
+      { events: ['stop'], matches: (payload: Readonly<Record<string, unknown>>) => payload.status === 'aborted', state: 'unknown', lifecycleEvent: 'turn-end' },
+      { events: ['stop'], state: 'unknown', lifecycleEvent: null },
+      {
+        events: [
+          'beforeSubmitPrompt', 'preToolUse', 'postToolUse', 'postToolUseFailure',
+          'beforeShellExecution', 'beforeMCPExecution'
+        ],
+        state: 'working'
+      }
+    ],
+    subagentTracking: {
+      startEvents: ['subagentStart'], stopEvents: ['subagentStop'], idKeys: ['subagent_id']
+    },
+    nativeHandle: { sessionIdKeys: ['conversation_id'], transcriptPathKeys: ['transcript_path'] }
+  } as const
 }
 
 /** User-level Hook declarations contain no directory trust authority. */
-export function createCursorManagedHookPlan(
-  workspacePath?: string,
-  env?: ProviderExecutionEnvironment
-): AgentManagedHookPlan {
+function planManagedHooks(dataRoot: string, { runScopedHookCommand, hookCommandTimeout }: CursorServices) {
   const command = runScopedHookCommand('cursor')
   const hooks = Object.fromEntries(CURSOR_HOOK_EVENTS.map((eventName) => [eventName, [
     // 托管脚本的事件名来源保持显式 --event，不猜负载别名。
     { command: `${command} --event ${eventName}`, ...hookCommandTimeout('cursor') }
   ]]))
   return {
-    providerId: 'cursor',
-    retainPreviousDeclarations: true,
+    providerId: 'cursor' as const,
+    retainPreviousDeclarations: true as const,
     mutations: [
       {
-        path: join(cursorDataRoot(workspacePath, env), 'hooks.json'),
+        path: join(dataRoot, 'hooks.json'),
         content: `${JSON.stringify({ version: 1, hooks }, null, 2)}\n`,
         mode: 0o600,
-        merge: { kind: 'json-managed-events' }
+        merge: { kind: 'json-managed-events' as const }
       }
     ]
   }
 }
 
-export function createCursorProvider(defineAgentProvider: ProviderFactory): AgentProvider {
-  const { subagentTracking: _tracking, nativeHandle: _identity, ...observationOnly } = CURSOR_HOOKS
-  const provider = defineAgentProvider({
-    prepareOwnedWorkspaceTrust: prepareCursorOwnedWorkspaceTrust,
-    planManagedHooks: ({ workspacePath, env }) => createCursorManagedHookPlan(workspacePath, env),
-    catalog: catalog({
+export function cursorProvider(services: CursorServices) {
+  const { buildPromptInputPayload, sanitizeBracketedPasteText } = services
+  return {
+    planManagedHooks: (dataRoot: string) => planManagedHooks(dataRoot, services),
+    catalog: {
       id: 'cursor', label: 'Cursor', executable: 'cursor-agent', expectedProcess: 'cursor-agent',
       promptDelivery: 'positional-argv',
       hookStrategy: { kind: 'native', installation: 'explicit-managed' },
@@ -157,51 +147,22 @@ export function createCursorProvider(defineAgentProvider: ProviderFactory): Agen
         // （AgentUsageCapability）只有 native-transcript 一种形状，声明它等于承诺去解析一个
         // Cursor 从不产出的 transcript 文件。这条留给「负载直报 usage」那一类能力单独接。
       }
-    }),
+    } as const,
     launchOptions: CURSOR_LAUNCH_OPTIONS,
-    buildArgs: (prompt, args) => [...args, ...(prompt ? [prompt] : [])],
-    promptPayloadConsumption: cursorPromptPayloadConsumption,
-    planPromptInput: (prompt, context) => {
+    buildArgs: (prompt: string, args: readonly string[]) => [...args, ...(prompt ? [prompt] : [])],
+    planPromptInput: (prompt: string, context?: { currentTerminal?: boolean }) => {
       const payload = buildPromptInputPayload(prompt)
       const payloadText = sanitizeBracketedPasteText(prompt).replace(/\r\n?/gu, '\n').replaceAll('\t', '  ')
       // Native persistence acknowledges only this supported body domain. Explicit
       // current-terminal input retains its ordinary plan before it is frozen;
       // optional native observation cannot take that healthy capability away.
       return context?.currentTerminal !== true && payloadText.length > 800
-        ? { kind: 'payload-then-submit', payload, payloadText, submit: '\u001b[13u', minimumSubmitDelayMs: 35 }
-        : { kind: 'single-phase', data: `${payload}\u001b[13u` }
+        ? { kind: 'payload-then-submit' as const, payload, payloadText, submit: '\u001b[13u', minimumSubmitDelayMs: 35 }
+        : { kind: 'single-phase' as const, data: `${payload}\u001b[13u` }
     },
-    hook: CURSOR_HOOKS,
-    discoverNativeSession: discoverCursorNativeSession,
-    readSessionHistoryPage: readCursorSessionHistoryPage,
-    observeSessionHistory: observeCursorSessionHistory,
-    buildResumeArgs: (sessionId, _transcriptPath, prompt, args) => [
+    hook: nativeHook(services),
+    buildResumeArgs: (sessionId: string, _transcriptPath: string | undefined, prompt: string | undefined, args: readonly string[]) => [
       '--resume', sessionId, ...args, ...(prompt ? [prompt] : [])
     ]
-  })
-  return {
-    ...provider,
-    normalizeHook(envelope, context) {
-      const payload = envelope.payload ?? {}
-      const sessionId = typeof payload.conversation_id === 'string' && payload.conversation_id.trim()
-        ? payload.conversation_id.trim() : undefined
-      const known = context.nativeHandle
-      const foreign = known !== undefined && sessionId !== undefined && sessionId !== known.sessionId
-      // A foreign receipt must not mutate this Run's existing child roster before
-      // its return value is fenced. It contributes only the authenticated raw observation.
-      const normalized = foreign ? normalizeNativeHook({ ...observationOnly, rules: [] }, envelope, context)
-        : provider.normalizeHook(envelope, context)
-      if (!foreign) {
-        // An authenticated first-party receipt establishes birth. A later receipt cannot
-        // replace the durable locator for the same main native Session. Known child
-        // settlement retains the shared roster's proven parent completion contribution.
-        return known && normalized.nativeHandle ? { ...normalized, nativeHandle: known } : normalized
-      }
-      const { nativeHandle: _handle, turnUsage: _usage, interaction: _interaction,
-        interactionCompletion: _completion, ...neutral } = normalized
-      return { ...neutral, mainSubject: false, lifecycleEvent: null, semanticState: 'unknown',
-        status: { ...normalized.status, state: 'running' }, timeline: [] }
-    }
   }
-
 }
