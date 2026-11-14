@@ -1,3 +1,4 @@
+import type { ComposerConnection } from '@agentmux/client-ui/components/ComposerHost'
 import type { WorkbenchProjectionSelection } from './workbench-projection'
 import type { MoteDefaultConversation } from '@agentmux/host/mote-model'
 import { createContext, useMemo, useRef } from 'react'
@@ -20,6 +21,8 @@ export const MoteWorkfaceContext = createContext<(MoteWorkfaceScope & {
   section?: 'discussion' | 'threads'
   bodyVisible?: boolean
   memberIntent?: boolean
+  /** Presentation and draft address only; Core still qualifies the logical Main input. */
+  composer?: { draftKey: string; sourceKey: string; active: boolean; reference: MoteDefaultConversation | null; connection?: ComposerConnection | null | undefined } | undefined
   entryToken?: string | undefined
   showThreads?(): void
   showThread?(reference: WorkbenchProjectionSelection): boolean

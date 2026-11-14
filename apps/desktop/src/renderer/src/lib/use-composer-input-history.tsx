@@ -22,14 +22,14 @@ async function copyRecordedText(text: string): Promise<boolean> {
 }
 
 /** The current editor consumes original history; it owns neither transcripts nor input receipts. */
-export function useComposerInputHistory({ sessionId, control, visible, readOnly, insertion, timeline }: {
-  sessionId: string
+export function useComposerInputHistory({ sessionId, control, visible, readOnly, insertion, timeline, draftOwner }: {
+  sessionId: string; draftOwner?: string | undefined
   control: AgentSessionControl | undefined; visible: boolean; readOnly: boolean
   insertion: RefObject<ComposerInsertionHandle | null>; timeline?: AgentTimelineSnapshot
 }) {
   const [focused, setFocused] = useState(false), [mailboxOpen, setMailboxOpen] = useState(false)
   const sid = control?.agentSessionId ?? sessionId
-  const scope = JSON.stringify([control?.hostId, sid])
+  const scope = JSON.stringify([control?.hostId, sid, draftOwner ?? sid])
   const latest = useRef({ scope, visible, readOnly })
   latest.current = { scope, visible, readOnly }
   const action = useRef<AbortController | null>(null)

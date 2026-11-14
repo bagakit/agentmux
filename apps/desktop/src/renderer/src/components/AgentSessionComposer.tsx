@@ -31,7 +31,10 @@ import { ComposerResubmitGuard } from '../lib/composer-resubmit-guard'
 import { useAppStore, agentSteerCanEdit, agentSteerExecution, type AgentSteerQueueEntry } from '../store'
 import { steerEntryTargetsRun, steerEntryWakesItself, steerQueueCanEverDrain } from '../lib/agent-steer-queue-drain'
 import { copyTextToClipboard } from '../lib/clipboard-copy'
-import { AgentComposer } from '@agentmux/client-ui/components/AgentComposer'
+import { AgentComposer, type AgentComposerProps } from '@agentmux/client-ui/components/AgentComposer'
+import { ComposerSource, type ComposerConnection } from '@agentmux/client-ui/components/ComposerHost'
+import { moteComposerSessionKey } from './MoteComposer'
+import { useLauncherState } from '../lib/launcher-state'
 import { AgentIdentity } from './AgentIdentity'
 import { agentProviderLabel } from '@agentmux/client-ui/components/AgentProviderIcon'
 import { agentDisplayName } from '../lib/workbench-tabs'
@@ -87,6 +90,13 @@ export function agentComposerAvailability(
   return { disabled: !mode.canSubmit, placeholder: mode.placeholder }
 }
 
+/** Direct Session intent keeps its editor; logical Mote intent publishes to its permanent Host. */
+function SessionComposerSurface({ source, ...props }: AgentComposerProps & {
+  source?: { ownerKey: string; sourceKey: string; enabled: boolean; connection?: ComposerConnection | null | undefined } | undefined
+}) {
+  return source ? <ComposerSource {...props} {...source} /> : <AgentComposer {...props} />
+}
+
 export function AgentSessionComposer({
   pendingLayout,
   sessionId,
@@ -126,12 +136,27 @@ export function AgentSessionComposer({
   const insertionRef = useRef<ComposerInsertionHandle>(null)
   useEffect(() => { void reportMessageDeliveryDiagnostics() }, [])
   const feedback = useComposerFeedback(sessionId)
-  const text = useObservedAppStore('composer', visible, consumerScope, (state) => state.agentComposerDrafts[sessionId] ?? '')
-  const historyNavigation = useObservedAppStore('composer', visible, consumerScope, state => state.agentComposerHistoryNavigation[sessionId])
+  const memberInput = motePresentation.moteInputIntent === 'member' || Boolean(moteWorkface?.memberIntent)
+  const moteComposer = !memberInput && moteWorkface?.presentation === 'conversation' && moteWorkface.section === 'discussion' &&
+    moteWorkface.composer?.reference?.sessionId === sessionId ? moteWorkface.composer : undefined
+  const moteDraftKey = moteComposer?.draftKey
+  const draftOwner = moteDraftKey ?? sessionId
+  // The fixed Host observes the Mote text. A Source only supplies actions and never mirrors that text into a Session.
+  const text = useObservedAppStore('composer', visible, consumerScope, state => moteDraftKey ? '' : state.agentComposerDrafts[sessionId] ?? '')
+  const historyNavigation = useObservedAppStore('composer', visible, consumerScope, state => state.agentComposerHistoryNavigation[draftOwner])
   const historyPhase = historyNavigation ? historyNavigation.entries && historyNavigation.cursor < historyNavigation.entries.length
     ? 'browsing' as const : 'restored' as const : undefined
   const setAgentComposerDraft = useAppStore.getState().setAgentComposerDraft
-  const clearAgentComposerDraftIfUnchanged = useAppStore.getState().clearAgentComposerDraftIfUnchanged
+  function readDraft() {
+    const record = moteDraftKey ? useLauncherState.getState().drafts[moteDraftKey] : undefined
+    return { record, text: moteDraftKey ? record?.prompt ?? '' : useAppStore.getState().agentComposerDrafts[sessionId] ?? '' }
+  }
+  function clearDraft(original: ReturnType<typeof readDraft>) {
+    if (moteDraftKey) {
+      if (useLauncherState.getState().drafts[moteDraftKey] === original.record)
+        useAppStore.getState().setAgentComposerDraft(sessionId, '', moteDraftKey)
+    } else useAppStore.getState().clearAgentComposerDraftIfUnchanged(sessionId, original.text)
+  }
   const enqueueAgentSteer = useAppStore.getState().enqueueAgentSteer
   const archiveAgentSteer = useAppStore.getState().archiveAgentSteer
   const moveAgentSteer = useAppStore.getState().moveAgentSteer
@@ -144,13 +169,12 @@ export function AgentSessionComposer({
   const sendingId = useObservedAppStore('composer', visible, consumerScope, (state) => state.agentSteerInFlight?.[sessionId])
   const sendingPhase = useObservedAppStore('composer', visible, consumerScope, (state) => state.agentSteerInFlightPhase?.[sessionId])
   const queuedEntries = useObservedAppStore('composer', visible, consumerScope, (state) => state.agentSteerQueues?.[sessionId] ?? EMPTY_QUEUE)
-  const rolloverHandled = useRef<string | null>(null)
+  const rolloverHandled = useRef<string | null>(null), rolloverChoiceRequired = useRef(false)
   const rollovers = queuedEntries.filter(entry => !entry.archived && entry.mainRollover)
   const rolloverSurface = useRef<HTMLDetailsElement>(null)
   // The existing pending popup must clear the original continuation controls,
   // just as it already clears an interaction card in this workface.
   const deliveryLayout = useMemo(() => rolloverDeliveryLayout(pendingLayout, rolloverSurface), [pendingLayout, rollovers.length > 0])
-  const memberInput = motePresentation.moteInputIntent === 'member' || Boolean(moteWorkface?.memberIntent)
   const openRollover = (entry: AgentSteerQueueEntry) => {
     if (!entry.mainRollover || !moteWorkface?.startRollover) return
     const accepted = moteWorkface.startRollover({ sessionId, decision: entry.mainRollover, query: { operationId: entry.operationId, prompt: entry.text,
@@ -159,7 +183,9 @@ export function AgentSessionComposer({
     else feedback.report('这条输入属于原 Mote，当前页面未接纳。原问题和操作已保留；返回所属 Mote 后继续。')
   }
   useEffect(() => {
-    if (visible && !memberInput && rollovers.length === 1 && rolloverHandled.current !== rollovers[0]!.operationId) openRollover(rollovers[0]!)
+    if (rollovers.length > 1) rolloverChoiceRequired.current = true
+    else if (!rollovers.length) rolloverChoiceRequired.current = false
+    if (visible && !memberInput && !rolloverChoiceRequired.current && rollovers.length === 1 && rolloverHandled.current !== rollovers[0]!.operationId) openRollover(rollovers[0]!)
   }, [visible, queuedEntries, memberInput, moteWorkface?.startRollover])
   const executors = useObservedAppStore('composer', visible, consumerScope, (state) => state.config?.executors)
   const session = useObservedAppStore('composer', visible, consumerScope, (state) => sessionPresentationById(state.sessions).get(sessionId))
@@ -174,7 +200,7 @@ export function AgentSessionComposer({
   const timeline = useObservedAppStore('composer', visible, consumerScope, (state) => state.timelines?.[sessionId])
   // A published preview revision may append to the same original timeline object.
   useObservedAppStore('composer', visible, consumerScope, state => state.timelines?.[sessionId]?.revision)
-  const inputHistory = useComposerInputHistory({ sessionId,
+  const inputHistory = useComposerInputHistory({ sessionId, draftOwner,
     control: session?.kind === 'agent' ? session.control : undefined, visible, readOnly: readOnly || disabled,
     insertion: insertionRef, ...(timeline ? { timeline } : {}) })
   const firstPromptSelector = useMemo(() => createFirstPromptSelector(sessionId), [sessionId])
@@ -213,7 +239,7 @@ export function AgentSessionComposer({
   // type, does the surface permit a submit (true while working — that IS steer), and is the primary button
   // Send or Stop. availability stays for other consumers; this component reads only submitMode.
   const submitMode = composerSubmitMode(session, disabled || readOnly)
-  const completion = useComposerCandidates({ scope: JSON.stringify([sessionId, session?.hostId, workspace?.id, session?.kind === 'agent' ? session.providerId : null]),
+  const completion = useComposerCandidates({ scope: JSON.stringify([draftOwner, sessionId, session?.hostId, workspace?.id, session?.kind === 'agent' ? session.providerId : null]),
     active: visible && submitMode.canType, config, resourceWorkspace: workspace, runtimeWorkspace, resourceIssue: resource.issue, sessionId,
     providerId: session?.kind === 'agent' ? session.providerId : undefined, commands: composerOptions?.commands ?? [], insertion: insertionRef })
   const requestPending = session?.kind === 'agent' && Boolean(session.pendingInteraction)
@@ -240,19 +266,21 @@ export function AgentSessionComposer({
   }
 
   function submit(): void {
-    if (!submitMode.canSubmit || !text.trim() || !acceptsMoteMainInput()) return
-    const { text: value, inputImages } = expandComposerInput(text)
+    const original = readDraft()
+    if (!submitMode.canSubmit || !original.text.trim() || !acceptsMoteMainInput()) return
+    const { text: value, inputImages } = expandComposerInput(original.text)
     if (lastSubmitBySession.isDuplicate(sessionId, value)) return
     if (!send(sessionId, value, feedback.report, 'manual', undefined, { inputImages, moteSource: moteInputSource(sessionId, mailboxOrigin), moteMain })) return
     feedback.dismiss()
-    clearAgentComposerDraftIfUnchanged(sessionId, text)
+    clearDraft(original)
     lastSubmitBySession.record(sessionId, value)
     useAppStore.getState().recordAgentComposerHistory(sessionId, value)
   }
 
   function queue(): void {
     if (!acceptsMoteMainInput()) return
-    const { text: value, inputImages } = expandComposerInput(text)
+    const original = readDraft()
+    const { text: value, inputImages } = expandComposerInput(original.text)
     if (!value.trim()) return
     if (lastSubmitBySession.isDuplicate(sessionId, value)) return
     // Clear the draft only once the queue has actually taken the text. A refused enqueue (oversized)
@@ -260,7 +288,7 @@ export function AgentSessionComposer({
     // the user's message in a banner they cannot copy from.
     if (!enqueueAgentSteer(sessionId, value, feedback.report, undefined, 'manual', undefined, { inputImages, moteSource: moteInputSource(sessionId, mailboxOrigin), moteMain })) return
     feedback.dismiss()
-    clearAgentComposerDraftIfUnchanged(sessionId, text)
+    clearDraft(original)
     void useAppStore.getState().flushAgentSteerQueue(sessionId)
     lastSubmitBySession.record(sessionId, value)
     useAppStore.getState().recordAgentComposerHistory(sessionId, value)
@@ -286,11 +314,11 @@ export function AgentSessionComposer({
   // including a multiline entry whose editor selection is at its end.
   function historyRecall(direction: 'older' | 'newer', draft: string, caret: number): string | null {
     const state = useAppStore.getState()
-    const navigation = state.agentComposerHistoryNavigation[sessionId]
+    const navigation = state.agentComposerHistoryNavigation[draftOwner]
     const browsing = navigation?.entries && navigation.cursor < navigation.entries.length
     if (!browsing && direction === 'older' && !caretAtFirstLine(draft, caret)) return null
     if (!browsing && direction === 'newer' && !caretAtLastLine(draft, caret)) return null
-    return state.recallAgentComposerHistory(sessionId, direction, draft, inputHistory.entries)
+    return state.recallAgentComposerHistory(sessionId, direction, draft, inputHistory.entries, moteDraftKey)
   }
 
 
@@ -298,7 +326,7 @@ export function AgentSessionComposer({
 
   const [fileReferencesOpen, setFileReferencesOpen] = useState(false)
   const onRemoteFiles = useMemo(() => setFileReferencesOpen.bind(null, true), [setFileReferencesOpen])
-  const attachmentScope = JSON.stringify([sessionId, session?.hostId, session?.workspacePath, resource.address, workspace?.id])
+  const attachmentScope = JSON.stringify([draftOwner, sessionId, session?.hostId, session?.workspacePath, resource.address, workspace?.id])
   useEffect(() => { setFileReferencesOpen(false) }, [attachmentScope, visible])
   const attachments = useComposerAttachments({ scope: attachmentScope, sessionControl: session?.kind === 'agent' ? session.control : undefined, hostId: session?.hostId,
     workspacePath: session?.workspacePath,
@@ -319,6 +347,10 @@ export function AgentSessionComposer({
     restore: 'Your draft is kept. You can try the action again.'
   } }, ...(feedback.failure.retry ? { action: { label: 'Retry', run: feedback.failure.retry } } : {}) })
   const inbox = useServiceNotices(sessionId, notices, session?.kind === 'agent')
+
+  const sourceProps = moteComposer ? { ownerKey: moteComposer.draftKey, connection: moteComposer.connection,
+    sourceKey: moteComposerSessionKey(moteComposer.reference!, moteMain?.expectedRoleRevision),
+    enabled: Boolean(visible && moteComposer.active && moteMain && session?.kind === 'agent' && moteComposer.reference?.hostId === session.control.hostId) } : undefined
 
   return (
     <SessionMailbox pendingLayout={deliveryLayout} key={sessionId} inputHistory={inputHistory} historyResourceReader={inputHistory.resourceReader} userMessages={inputHistory.messages} onHistoryVisible={inputHistory.setMailboxOpen} mailboxOrigin={mailboxOrigin} reading={reading} onRevealMessage={onRevealMessage} visible={visible} system={inbox} timeline={timeline}
@@ -362,7 +394,7 @@ export function AgentSessionComposer({
           await feedback.run(async () => { await archiveAgentSteer(sessionId, operationId, expectedText, archived) })
         } } : {})}
         {...(!readOnly && session?.kind === 'agent' ? { onMoveQueuedToDraft: async (operationId: string, expectedText: string) => {
-          await feedback.run(async () => { await useAppStore.getState().moveQueuedAgentSteerToDraft(sessionId, operationId, expectedText, session.control.run.runId) })
+          await feedback.run(async () => { await useAppStore.getState().moveQueuedAgentSteerToDraft(sessionId, operationId, expectedText, session.control.run.runId, moteDraftKey) })
         } } : {})}
         onMoveQueued={(operationId, direction) => moveAgentSteer(sessionId, operationId, direction)}
         sendImmediately={session?.kind === 'agent' && queuedEntries.some(entry => agentSteerExecution(entry, session.capabilities) === 'immediate')}
@@ -377,11 +409,13 @@ export function AgentSessionComposer({
         onCopyQueued={async (text) => { feedback.dismiss(); return copyTextToClipboard(text, feedback.report) }}
     >
     {(mailbox, pending, composerRef) => (
-    <div style={{ display: 'contents' }} onFocusCapture={event => { inputHistory.setFocused(true); attachments.claimScreenshotTarget(event) }}
-      onBlurCapture={event => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) inputHistory.setFocused(false) }}>
+    <>
+    {moteComposer ? aboveInput : null}
     {fileReferencesOpen && workspace && visible ? <ComposerFileReferences key={attachmentScope} workspace={workspace}
       onClose={() => setFileReferencesOpen(false)} onSelect={path => { void attachments.referencePaths([path]) }} /> : null}
-    <AgentComposer surfaceRef={composerRef} key={sessionId} active={visible} aboveInput={<>{aboveInput}{pending}{rollovers.length > 0 && moteWorkface?.startRollover ? <details ref={rolloverSurface} className="mote-conversation__muted" open={rollovers.length === 1}><summary>待承接到新对话的输入</summary>{rollovers.map(entry => <div className="mote-conversation__handoff" data-mote-rollover={entry.operationId} key={entry.operationId}><p style={{ margin: 0, flex: '1 1 12rem' }}>{entry.text.slice(0, 80)}</p><button className="small-button" style={{ flexShrink: 0 }} type="button" onClick={() => openRollover(entry)}>接到新对话</button></div>)}</details> : null}</>} mailbox={mailbox}
+    <SessionComposerSurface source={sourceProps} surfaceRef={composerRef} key={sessionId}
+      onFocusCapture={event => { inputHistory.setFocused(true); attachments.claimScreenshotTarget(event) }}
+      onBlurCapture={event => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) inputHistory.setFocused(false) }} active={visible} aboveInput={<>{!moteComposer ? aboveInput : null}{pending}{rollovers.length > 0 && moteWorkface?.startRollover ? <details ref={rolloverSurface} className="mote-conversation__muted" open={rollovers.length === 1}><summary>待承接到新对话的输入</summary>{rollovers.map(entry => <div className="mote-conversation__handoff" data-mote-rollover={entry.operationId} key={entry.operationId}><p style={{ margin: 0, flex: '1 1 12rem' }}>{entry.text.slice(0, 80)}</p><button className="small-button" style={{ flexShrink: 0 }} type="button" onClick={() => openRollover(entry)}>接到新对话</button></div>)}</details> : null}</>} mailbox={mailbox}
       readPastedImage={api.ui.readPastedImage}
       insertionRef={insertionRef}
       identity={session?.kind === 'agent' && displayName ? <AgentIdentity session={session} name={displayName}
@@ -420,7 +454,7 @@ export function AgentSessionComposer({
       onHistoryRecall={historyRecall}
       {...(historyPhase ? { historyNavigation: historyPhase } : {})}
       {...(activeFile ? { activeFile } : {})}
-      onChange={(value) => setAgentComposerDraft(sessionId, value)}
+      onChange={(value) => setAgentComposerDraft(sessionId, value, moteDraftKey)}
       // Interrupt follows `primaryAction`, never `canSubmit`: composer-submit-mode.ts answers "is a turn in
       // flight" and "may Enter submit" separately, so Stop stays wired whatever the submit axis says,
       // including while a request card is up. Core's interrupt path (client.signalAgent → kernel.interrupt)
@@ -443,11 +477,11 @@ export function AgentSessionComposer({
       {...(postureControl && submitMode.canSubmit && session?.kind === 'agent' && !session.pendingInteraction &&
         session.processState === 'running' && session.status.state !== 'disconnected'
         ? { postureTool: <PosturePicker control={postureControl} disabled={!submitMode.canType} onSet={(modeId: string) => void setPosture(sessionId, modeId)} /> } : {})}
-      {...(session?.kind === 'agent' && text.trim() && (session.pendingInteraction || submitMode.primaryAction === 'stop') ? {
+      {...(session?.kind === 'agent' && (moteDraftKey || text.trim()) && (session.pendingInteraction || submitMode.primaryAction === 'stop') ? {
         onQueue: () => queue()
       } : {})}
     />
-    </div>
+    </>
     )}
     </SessionMailbox>
   )

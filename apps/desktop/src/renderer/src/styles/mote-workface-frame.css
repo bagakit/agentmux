@@ -371,3 +371,26 @@
 .mote-ideas__browser[data-empty="true"] { grid-template-columns: minmax(0, 1fr); }
 .mote-ideas__browser[data-empty="true"] > .mote-ideas__library { max-width: 640px; border: 0; }
 
+
+/* The draft editor stays at one input anchor while only its conversation body changes. */
+.mote-composer-workface { overflow: hidden; }
+.mote-composer-stage { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.mote-composer-stage > .mote-workface__original { height: auto; }
+.mote-composer-workface .mote-start__composer { display: none; }
+.mote-composer-surface { flex: none; min-width: 0; width: 100%; background: var(--surface-0); }
+.mote-composer-surface[hidden] { display: none; }
+.mote-composer-surface > .composer { box-sizing: border-box; }
+.mote-composer-surface > .composer > .composer__toolbar { min-height: calc(var(--sp-8) + var(--sp-2)); }
+/* Loading a Main adds its controls below the full-width input, preserving the first-frame text anchor. */
+.mote-composer-surface > .composer:has(.composer-tools[data-mode='collapsed']) {
+  display: block;
+  --composer-input-pad-top: var(--sp-4);
+  --composer-input-pad-bottom: var(--sp-1);
+}
+.mote-composer-surface > .composer:has(.composer-tools[data-mode='collapsed']) > .composer__toolbar { display: flex; }
+.mote-composer-surface > .composer:has(.composer-tools[data-mode='collapsed']) > .composer__toolbar > div { align-self: auto; padding: 0; }
+.mote-composer-stage[data-phase='conversation'] { animation: mote-body-arrive var(--dur-enter) var(--ease-enter); }
+.mote-composer-stage[data-phase='welcome'] { animation: mote-welcome-arrive var(--dur-enter) var(--ease-enter); }
+@keyframes mote-body-arrive { from { opacity: .3; transform: translateY(3px); } to { opacity: 1; transform: none; } }
+@keyframes mote-welcome-arrive { from { opacity: .3; transform: translateY(3px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .mote-composer-stage[data-phase] { animation: none; } }

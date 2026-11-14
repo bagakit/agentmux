@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { AgentComposer } from '@agentmux/client-ui/components/AgentComposer'
+import { ComposerSource } from '@agentmux/client-ui/components/ComposerHost'
 import { MoteConversationStart as StartScene, MoteConversationHistory } from '@agentmux/client-ui/components/MoteConversationStart'
 import { MoteFirstMessage } from '@agentmux/client-ui/components/MoteFirstMessage'
 import { SpaceObjectIcon } from './SpaceObjectIcon'
@@ -34,7 +34,7 @@ export function MoteEntryReading({ scope, active, held, onHold, onRelease }: {
     drafting={Boolean(draft.trim())}
     held={held ? <MoteFirstMessage messageId={'mote-held:' + held.operationId} prompt={held.prompt} name={scope.topic.title} stage="held"
       action={{ label: '撤回', onClick: onRelease }} /> : undefined}
-    composer={<AgentComposer value={draft} disabled={false} active={active} placeholder={held ? '接着写，下一条在这里' : '写下你想聊的事…'}
+    composer={<ComposerSource ownerKey={key} sourceKey="reading" value={draft} disabled={false} active={active} placeholder={held ? '接着写，下一条在这里' : '写下你想聊的事…'}
       onChange={value => useLauncherState.getState().setDraft(key, 'prompt', value)}
       {...(!held && draft.trim() ? { onSubmit: onHold } : {})} />}
     history={<MoteConversationHistory items={[]} reading onOpen={() => {}} />} />

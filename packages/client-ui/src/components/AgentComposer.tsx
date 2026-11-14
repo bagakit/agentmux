@@ -1,5 +1,5 @@
 import type { ComposerInsertionHandle, ComposerPasteImage, ComposerDropFiles } from '../lib/composer-insertion.js'
-import { type ReactNode, type Ref } from 'react'
+import { type ReactNode, type Ref, type FocusEventHandler } from 'react'
 import { SemanticIcon } from '../theme/icons.js'
 import { matchComposerShortcut } from '../lib/composer-keyboard.js'
 import { ComposerCompletionEditor, type ComposerCompletionProps } from './ComposerCompletionEditor.js'
@@ -10,6 +10,8 @@ import type { ComposerSemanticReference } from '../lib/composer-semantic-referen
 
 export type AgentComposerProps = ComposerCompletionProps & {
   surfaceRef?: Ref<HTMLDivElement>
+  onFocusCapture?: FocusEventHandler<HTMLDivElement>
+  onBlurCapture?: FocusEventHandler<HTMLDivElement>
   active?: boolean
   value: string
   /** The host may own selected content that becomes text when explicitly submitted. */
@@ -49,6 +51,8 @@ export type AgentComposerProps = ComposerCompletionProps & {
 
 export function AgentComposer({
   surfaceRef,
+  onFocusCapture,
+  onBlurCapture,
   active = true,
   value,
   hasPendingContent = false,
@@ -108,7 +112,7 @@ export function AgentComposer({
   return (
     <>
     {aboveInput}
-    <div ref={surfaceRef} className="composer" data-agent-composer="true" data-has-content={hasContent || undefined}>
+    <div ref={surfaceRef} onFocusCapture={onFocusCapture} onBlurCapture={onBlurCapture} className="composer" data-agent-composer="true" data-has-content={hasContent || undefined}>
       {/* The maintained editor owns composition, selection and undo; the host owns the draft. */}
       <ComposerCompletionEditor
         active={active}

@@ -16,11 +16,14 @@ export const DEFAULT_LAUNCHER_SECTIONS: Record<LauncherSection, LauncherSectionM
 }
 export type MoteIdeaDraft = { direction: string; includeDiscussion: boolean; feedback: Record<string, { vote: '' | 'useful' | 'less-useful'; comment: string }>; arrangement?: MoteIdeaSchedulePreparation }
 export type MoteProfileDraft = { source: import('@agentmux/core').FileDocument; name: string; body: string }
+export type QueuedDraftMove = { operationId: string; sessionId: string; runId: string; text: string; body: string }
 export type LauncherDraft = { browser: string; note: string; noteCreation?: NoteCreationReceipt; moteIdea?: MoteIdeaDraft; schedule?: ScheduleDraft;
   moteProfile?: MoteProfileDraft | undefined;
   progressUpdate?: import('../../../shared/continuous-progress').ProgressUpdateRequest | undefined;
   progressDraft?: { interval: string; prompt: string; expectedLoop?: import('@agentmux/core').ContinuousProgressLoop | undefined } | undefined;
   unconfirmedProgressUpdates?: import('../../../shared/continuous-progress').ProgressUpdateRequest[];
+  /** Cross-owner custody until this exact queue archive and destination draft both have storage ACKs. */
+  queuedInputMoves?: Record<string, QueuedDraftMove> | undefined
   prompt?: string; names?: LauncherNames; optionsByProvider?: LauncherProviderOptions
   /** Exact Source selection shares this original private draft; future values remain opaque. */
   sourceExecution?: unknown
@@ -38,6 +41,8 @@ type LauncherState = {
   moteTopicId: string | null
   setSection(workspaceId: string, section: LauncherSection, mode: LauncherSectionMode): boolean
   setDraft(launcherId: string, field: 'browser' | 'note' | 'prompt', value: string): boolean
+  retainQueuedInputInDraft(launcherId: string, source: QueuedDraftMove): boolean
+  clearQueuedInputMove(launcherId: string, source: QueuedDraftMove): boolean
   setBrowserAgentDraft(launcherId: string, patch: { prompt?: string; executorId?: string; split?: SplitDirection; hostId?: string }): boolean
   /** Move the prompt into a held Mote message in one saved write. */
   holdPrompt(launcherId: string, operationId: string, holder: string): boolean
@@ -113,6 +118,28 @@ export const useLauncherState = create<LauncherState>()(persist((save) => {
   setDraft(launcherId, field, value) {
     try { set(state => ({ persistenceIssue: null, drafts: { ...state.drafts, [launcherId]: { ...(state.drafts[launcherId] ?? EMPTY_LAUNCHER_DRAFT), [field]: value } } })); return true }
     catch { reportStorageIssue('Launcher changes could not be saved. Current input remains available.'); return false }
+  },
+  retainQueuedInputInDraft(launcherId, source) {
+    try { set(state => {
+      const draft = state.drafts[launcherId] ?? EMPTY_LAUNCHER_DRAFT, previous = draft.queuedInputMoves?.[source.operationId]
+      if (previous) {
+        if (JSON.stringify(previous) !== JSON.stringify(source)) throw new Error('The original queued input changed. Both original bodies are kept.')
+        return state
+      }
+      return { persistenceIssue: null, drafts: { ...state.drafts, [launcherId]: { ...draft,
+        prompt: `${draft.prompt ?? ''}${draft.prompt ? '\n\n' : ''}${source.body}`,
+        queuedInputMoves: { ...draft.queuedInputMoves, [source.operationId]: source } } } }
+    }); return true }
+    catch { reportStorageIssue('The original queued input and draft are kept; saving this move is unconfirmed.'); return false }
+  },
+  clearQueuedInputMove(launcherId, source) {
+    try { set(state => {
+      const draft = state.drafts[launcherId]
+      if (!draft || JSON.stringify(draft.queuedInputMoves?.[source.operationId]) !== JSON.stringify(source)) return state
+      const { [source.operationId]: _confirmed, ...remaining } = draft.queuedInputMoves!
+      return { drafts: { ...state.drafts, [launcherId]: { ...draft, queuedInputMoves: Object.keys(remaining).length ? remaining : undefined } } }
+    }); return true }
+    catch { reportStorageIssue('The original move is confirmed; its local custody receipt is kept until saving is confirmed.'); return false }
   },
   setBrowserAgentDraft(launcherId, { prompt, ...options }) {
     try { set(state => {

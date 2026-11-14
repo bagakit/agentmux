@@ -3,7 +3,7 @@ import { useMoteMainEntry } from '../lib/mote-main-entry'
 import { MoteDialogueViewProvider, useMoteDialogueView } from '../lib/mote-dialogue-view'
 import { useMoteDefaultConversation } from '../lib/mote-quick-preferences'
 import { useShallow } from 'zustand/react/shallow'
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type ContextType } from 'react'
 import { useAppStore } from '../store'
 import { MoteWorkfaceContext, useMoteWorkfaceScope, type MoteWorkfaceScope, type MoteRolloverStart } from '../lib/mote-workface'
 import { ServiceWindowNotice } from './ServiceWindowNotice'
@@ -32,6 +32,19 @@ import { SurfaceModeSwitch } from './SurfaceModeSwitch'
 import { emptyMoteThreadCounts, moteThreadOptions, type MoteThreadCount, type MoteWorkingMember } from './MoteThreadNavigation'
 import type { MoteThreadView } from '@agentmux/client-ui/components/MoteConversationThreads'
 import { MoteActiveWorkShortcut } from './MoteActiveWorkShortcut'
+import { ComposerSurface, useComposerConnection } from '@agentmux/client-ui/components/ComposerHost'
+import { DesktopMoteComposerHost, moteComposerSessionKey } from './MoteComposer'
+
+/** Use the existing retained-view context bridge; DOM portals do not inherit the floating shell's React context. */
+function MoteComposerPresentation({ value, dialogue, publishKey, children }: {
+  value: ContextType<typeof MoteWorkfaceContext>; dialogue: ReturnType<typeof useMoteDialogueView>
+  publishKey: string | undefined; children: ReactNode
+}) {
+  const connection = useComposerConnection()
+  const connected = useMemo(() => value?.composer ? { ...value, composer: { ...value.composer, connection } } : value, [value, connection])
+  usePublishMotePresentation(publishKey, connected, dialogue)
+  return <MoteWorkfaceContext.Provider value={connected}>{children}</MoteWorkfaceContext.Provider>
+}
 
 type ShownSelection = WorkbenchProjectionSelection | { workspaceId: string; groupId?: string | null | undefined; tabId?: string | null | undefined; regionId?: string | null | undefined }
 function sameSelection(selected: ShownSelection, reference: string): boolean {
@@ -194,13 +207,15 @@ function MoteWorkfaceBody({ scope, workspaceId, topicId, floating = false, visib
   const settleHeldInput = entryHold.settle
   // An unconfirmed role source sends nothing; the held text returns to the editable draft.
   useEffect(() => { if (entry === 'unconfirmed' && entryHold.held) entryHold.release() }, [entry, entryHold.held, entryHold.release])
+  const composerActive = visible && section === 'discussion' && presentation === 'conversation' && !memberIntent && !currentLocal.period
+  const composerSource = readingMain && showOriginal ? moteComposerSessionKey(readingMain, main?.roleRevision) : entry === 'welcome' ? 'welcome' : 'reading'
   const context = useMemo(() => scope ? { ...scope, floating, defaultConversation: defaults.conversation, presentation, section, memberIntent, entryToken, bodyVisible: showOriginal,
+    composer: { draftKey: moteEntryDraftKey(scope), sourceKey: composerSource, active: composerActive, reference: readingMain ?? null },
     showOriginalWorkface: () => setLocal(previous => ({ ...previous, owner, original: true })),
     showConversation: showDiscussion, startRollover, showThreads, showThread, selectReference, heldInput, settleHeldInput,
     selectTab: (tabId: string, groupId: string) => onTabSelect ? onTabSelect(tabId, groupId) : useAppStore.getState().activateTab(workspaceId, groupId, tabId, 'local')
   } : null, [scope, floating, defaults.conversation, presentation, section, memberIntent, entryToken, showOriginal, owner, selectReference, onTabSelect, workspaceId, startRollover,
-    heldInput?.operationId, settleHeldInput])
-  usePublishMotePresentation(floating && visible && scope ? motePresentationContextKey(scope.topic.id, conversationEntry) : undefined, context, dialogue)
+    heldInput?.operationId, settleHeldInput, composerSource, composerActive, readingMain])
   const issue = scope?.issue ?? defaults.issue
   const selectedReference = selected?.groupId && selected.tabId && selected.regionId ? {
     displayWorkspaceId: 'displayWorkspaceId' in selected ? selected.displayWorkspaceId : selected.workspaceId,
@@ -212,13 +227,15 @@ function MoteWorkfaceBody({ scope, workspaceId, topicId, floating = false, visib
     actions={<MoteFirstCooperation scope={scope} reference={selectedReference} disclosure />} /> : null
   const notice = issue ? <ServiceWindowNotice disclosure={{ scope: JSON.stringify(['mote-context', scope?.workspace.hostId, workspaceId, topicId ?? scope?.topic.id]), id: 'mote-context', occurrence: issue, cause: 'mote-context-observation', visible }} notice={{ kind: 'indeterminate', notice: {
     step: 'Mote context read incomplete', mode: issue, restore: 'Retry this Mote context. Its original Agents and drafts remain available.' } }} /> : null
-  return <MoteWorkfaceContext.Provider value={context}>
-    <div className={floating ? 'mote-workface' : 'workbench-context-frame'} data-mote-workface={scope?.topic.id} data-mote-section={section} data-mote-workface-presentation={scope ? presentation : undefined}>
+  const body = <MoteComposerPresentation value={context} dialogue={dialogue}
+    publishKey={floating && visible && scope ? motePresentationContextKey(scope.topic.id, conversationEntry) : undefined}>
+    <div className={`${floating ? 'mote-workface' : 'workbench-context-frame'}${scope ? ' mote-composer-workface' : ''}`} data-mote-workface={scope?.topic.id} data-mote-section={section} data-mote-workface-presentation={scope ? presentation : undefined}>
       {floating && scope ? <header className="mote-workface__navigation"><MoteConversationIdentity scope={scope} visible={visible} />
         <SurfaceModeSwitch<'discussion' | MoteThreadView> className="mote-thread-navigation" value={section === 'threads' ? memberIntent ? 'members' : threadView : 'discussion'} active={visible} ariaLabel="Mote 内容" onChange={next => next === 'discussion' ? showDiscussion() : showThreads(next)} options={[{ value: 'discussion', label: '主对话' }, ...moteThreadOptions(currentThreads.counts)]} />
         {conversations}<span className="mote-main-slot" ref={setFloatingActionsHost} />{navigationActions}</header> : null}
       {scope && visible && section === 'discussion' && presentation === 'conversation' && dialogue?.page ? <MoteActiveWorkShortcut links={dialogue.page.links} members={currentThreads.working} onOpen={eventId => showThreads('work', { eventId, token: crypto.randomUUID() })} /> : null}
       {notice}
+      <div className="mote-composer-stage" data-phase={showOriginal ? 'conversation' : entry === 'welcome' ? 'welcome' : 'reading'}>
       {readingMain && selectedMain && showOriginal && section === 'discussion' && presentation === 'conversation' ? <MoteStartupStatus reference={readingMain} active={visible && (!sharedFrame || sharedFrame.section === 'discussion')} onOpenTerminal={sessionId => {
         if (!selectReference(readingMain, 'main')) return
         useAppStore.getState().setViewMode(sessionId, 'terminal')
@@ -248,7 +265,11 @@ function MoteWorkfaceBody({ scope, workspaceId, topicId, floating = false, visib
       {scope ? <MoteThreadsPanel scope={scope} requestedEvent={sharedFrame ? sharedFrame.threadEvent : currentThreads.event} active={visible && section === 'threads' && !memberIntent && presentation !== 'workface'} observe={visible} view={threadView} onViewChange={showThreads} onCount={reportCount} onSelect={showThread} /> : null}
       {scope && section === 'discussion' && !showOriginal && !currentMain && main?.current ? <p role="status" className="mote-conversation__issue">原主对话的角色或位置尚未确认，原身份、工作和输入仍保留。<button type="button" className="small-button" onClick={dialogue?.refresh}>重新核对</button><button type="button" className="small-button" onClick={() => showThreads()}>查看 Threads</button></p> : null}
       <div className="mote-workface__original" hidden={!showOriginal} inert={!showOriginal}>{children}</div>
+      </div>
+      {scope ? <ComposerSurface className="mote-composer-surface" /> : null}
       {settings && scope ? <MoteQuickModeDialog scope={scope} reference={reference} onOpenPath={path => openMoteMaterial(scope, path)} onClose={() => setSettings(false)} onContinue={showDiscussion} returnFocus={() => settingsInvoker.current?.isConnected ? settingsInvoker.current : null} /> : null}
     </div>
-  </MoteWorkfaceContext.Provider>
+  </MoteComposerPresentation>
+  return scope ? <DesktopMoteComposerHost scope={scope} sourceKey={composerSource} reference={currentMain} active={composerActive}
+    onHold={entry === 'reading' && !entryHold.held ? entryHold.hold : undefined}>{body}</DesktopMoteComposerHost> : body
 }

@@ -892,7 +892,7 @@ function manualComposerBinding(sessionId: string, origin?: 'manual', options?: A
   if (!direct || session?.kind !== 'agent') return
   if (session.pendingInteraction) return interactionNativeComposerBinding(session)
   return initialNativeComposerBinding(session) ??
-    { expectedRun: { ...(recipient ?? session.control).run }, admissionIntent: { kind: 'manual-actor' } }
+    { expectedRun: { ...(recipient ?? session.control).run }, admissionIntent: { kind: options?.moteMain ? 'session-conversation' : 'manual-actor' } }
 }
 
 /** Associate a Core receipt with its original client intent; never infer carriage from a current Run. */
@@ -1737,8 +1737,8 @@ export type AppState = GitReadingActions & {
   deleteBrowserAnnotation(browserId: string, annotationId: string): void
   clearBrowserAnnotations(browserId: string): void
   recordAgentComposerHistory(sessionId: string, text: string): void
-  recallAgentComposerHistory(sessionId: string, direction: 'older' | 'newer', draft: string, entries?: readonly string[]): string | null
-  setAgentComposerDraft(sessionId: string, text: string): void
+  recallAgentComposerHistory(sessionId: string, direction: 'older' | 'newer', draft: string, entries?: readonly string[], moteDraftKey?: string): string | null
+  setAgentComposerDraft(sessionId: string | null, text: string, moteDraftKey?: string): void
   /**
    * 写启动对话框的一格名字。`field` 只有 'agentName' | 'tabName' 两种，两格共用一条 action：
    * 一格一个 setter 会让"启动成功要清掉这个 region 的名字草稿"变成两处要记得改的地方。
@@ -1759,7 +1759,7 @@ export type AppState = GitReadingActions & {
   clearAgentComposerDraftIfUnchanged(sessionId: string, expectedText: string): void
   /** Queue a steer. `false` means it was refused (empty, not an Agent, or over the size budget) and the caller must keep the draft. */
   enqueueAgentSteer(sessionId: string, text: string, onRejected?: (error: unknown) => void, operationId?: string, origin?: 'manual', agentMuxNote?: string, options?: AgentSteerOptions): boolean
-  moveQueuedAgentSteerToDraft(sessionId: string, operationId: string, expectedText: string, expectedRunId: string): Promise<void>
+  moveQueuedAgentSteerToDraft(sessionId: string, operationId: string, expectedText: string, expectedRunId: string, moteDraftKey?: string): Promise<void>
   archiveAgentSteer(sessionId: string, operationId: string, expectedText: string, archived: boolean): Promise<{ changed: boolean; entry: AgentSteerQueueEntry }>
   moveAgentSteer(sessionId: string, operationId: string, direction: 'up' | 'down'): void
   editQueuedAgentSteer(sessionId: string, operationId: string, expectedText: string, nextText: string): void
@@ -12173,27 +12173,36 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       }
     })
   },
-  recallAgentComposerHistory(sessionId, direction, draft, candidates) {
-    const state = get(), navigation = state.agentComposerHistoryNavigation[sessionId]
+  recallAgentComposerHistory(sessionId, direction, draft, candidates, moteDraftKey) {
+    const owner = moteDraftKey ?? sessionId
+    const state = get(), navigation = state.agentComposerHistoryNavigation[owner]
     const browsing = navigation?.entries && navigation.cursor < navigation.entries.length
     const entries = browsing ? navigation.entries! : [...(candidates ?? state.agentComposerHistory[sessionId] ?? [])]
     const result = navigateHistory({ entries, cursor: browsing ? navigation.cursor : entries.length,
       stash: browsing ? navigation.stash : null }, direction, draft)
     if (!result) return null
-    set({ agentComposerDrafts: state.agentComposerDrafts[sessionId] === result.value ? state.agentComposerDrafts
-        : { ...state.agentComposerDrafts, [sessionId]: result.value },
+    if (moteDraftKey) useLauncherState.getState().setDraft(moteDraftKey, 'prompt', result.value)
+    set({ ...(!moteDraftKey ? { agentComposerDrafts: state.agentComposerDrafts[sessionId] === result.value ? state.agentComposerDrafts
+        : { ...state.agentComposerDrafts, [sessionId]: result.value } } : {}),
       agentComposerHistoryNavigation: { ...state.agentComposerHistoryNavigation,
-        [sessionId]: { cursor: result.state.cursor, stash: result.state.stash,
+        [owner]: { cursor: result.state.cursor, stash: result.state.stash,
           ...(result.state.cursor < entries.length ? { entries } : {}) } } })
     return result.value
   },
-  setAgentComposerDraft(sessionId, text) {
-    const state = get(), session = sessionPresentationById(state.sessions).get(sessionId)
-    if (!state.agentComposerDrafts[sessionId]?.trim() && text.trim() && session?.kind === 'agent') {
+  setAgentComposerDraft(sessionId, text, moteDraftKey) {
+    const state = get(), session = sessionId ? sessionPresentationById(state.sessions).get(sessionId) : undefined
+    const owner = moteDraftKey ?? sessionId
+    if (!owner) return
+    const previous = moteDraftKey ? useLauncherState.getState().drafts[moteDraftKey]?.prompt : state.agentComposerDrafts[owner]
+    if (!previous?.trim() && text.trim() && session?.kind === 'agent') {
       void api.continuousProgress.pauseForInput(session.control).catch(error => get().reportError(error))
     }
-    const { [sessionId]: _navigation, ...navigation } = state.agentComposerHistoryNavigation
-    set({ agentComposerDrafts: { ...state.agentComposerDrafts, [sessionId]: text },
+    if (moteDraftKey) {
+      useLauncherState.getState().setDraft(moteDraftKey, 'prompt', text)
+      if (!state.agentComposerHistoryNavigation[owner]) return
+    }
+    const { [owner]: _navigation, ...navigation } = state.agentComposerHistoryNavigation
+    set({ ...(!moteDraftKey ? { agentComposerDrafts: { ...state.agentComposerDrafts, [owner]: text } } : {}),
       agentComposerHistoryNavigation: navigation })
   },
   async prepareAgentHostWorkspace(hostId, context) {
@@ -12422,9 +12431,9 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     const binding = options?.execution === 'immediate' ? manualComposerBinding(sessionId, origin, options) : undefined
     return admitAgentSteer(sessionId, text, onRejected, operationId, origin, agentMuxNote, options, binding) !== false
   },
-  async moveQueuedAgentSteerToDraft(sessionId, operationId, expectedText, expectedRunId) {
+  async moveQueuedAgentSteerToDraft(sessionId, operationId, expectedText, expectedRunId, moteDraftKey) {
     let pause: Extract<SessionSnapshot, { kind: 'agent' }> | undefined
-    set(state => {
+    const readOriginal = (state: ReturnType<typeof get>) => {
       const queue = state.agentSteerQueues[sessionId], entry = queue?.find(item => item.operationId === operationId)
       const session = state.sessions.find(item => item.id === sessionId)
       if (!entry || entry.text !== expectedText || entry.errorCode !== 'AGENT_PROMPT_CONDITION_CHANGED') {
@@ -12433,7 +12442,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       // A repeated activation only retries the save; never append the authored body twice.
       if (entry.movedToDraft && !entry.archived) throw controlFailure('CONTROL_REQUEST_CONFLICT', 'This original body was already moved to its draft. Restoring its archive does not authorize appending it again.')
       if (entry.archived) {
-        if (entry.movedToDraft) return state
+        if (entry.movedToDraft) return { entry, session }
         throw controlFailure('CONTROL_REQUEST_CONFLICT', 'This message was archived without moving its text. Read the original archive before composing another message.')
       }
       if (session?.kind !== 'agent' || session.control.agentSessionId !== sessionId || session.hostId !== session.control.hostId ||
@@ -12444,17 +12453,32 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       if ((entry.inputReceipt?.status === 'admitted' || entry.inputReceipt?.status === 'terminal-confirmed' || entry.inputReceipt?.status === 'launch-carried') || !entry.directInputBinding && confirmedSteerDelivery(state.timelines[sessionId], session.control, operationId)) {
         throw controlFailure('CONTROL_REQUEST_CONFLICT', 'Core confirmed this original input. Read its History before composing another message.')
       }
-      const draft = state.agentComposerDrafts[sessionId] ?? ''
-      if (!draft.trim() && entry.text.trim()) pause = session
+      return { entry, session }
+    }
+    const first = readOriginal(get()), original = first.entry
+    if (moteDraftKey && !useLauncherState.getState().drafts[moteDraftKey]?.prompt?.trim() && original.text.trim() && first.session?.kind === 'agent') pause = first.session
+    const move = { operationId, sessionId, runId: expectedRunId, text: expectedText, body: restoreComposerInput(original.text, original.inputImages) }
+    if (moteDraftKey && !original.archived) {
+      if (!useLauncherState.getState().retainQueuedInputInDraft(moteDraftKey, move)) throw new Error('The original queued input remains available. Saving its destination draft is unconfirmed.')
+      // The destination owns this body before its original queue can archive it. The exact OP receipt makes a lost ACK retry idempotent.
+      await checkpointLauncherState()
+    }
+    set(state => {
+      const { entry, session } = readOriginal(state)
+      if (entry.archived) return state
+      const draft = moteDraftKey ? useLauncherState.getState().drafts[moteDraftKey]?.prompt ?? '' : state.agentComposerDrafts[sessionId] ?? ''
+      if (!draft.trim() && entry.text.trim() && session?.kind === 'agent') pause = session
       return {
-        agentComposerDrafts: { ...state.agentComposerDrafts, [sessionId]: `${draft}${draft ? '\n\n' : ''}${restoreComposerInput(entry.text, entry.inputImages)}` },
-        agentSteerQueues: { ...state.agentSteerQueues, [sessionId]: queue!.map(item => item === entry ? { ...item, archived: true as const, movedToDraft: true as const } : item) }
+        ...(!moteDraftKey ? { agentComposerDrafts: { ...state.agentComposerDrafts, [sessionId]: `${draft}${draft ? '\n\n' : ''}${restoreComposerInput(entry.text, entry.inputImages)}` } } : {}),
+        agentSteerQueues: { ...state.agentSteerQueues, [sessionId]: state.agentSteerQueues[sessionId]!.map(item => item === entry ? { ...item, archived: true as const, movedToDraft: true as const } : item) }
       }
     })
     agentSteerDrains.get(sessionId)?.explicitSteers.delete(operationId)
     if (pause) void api.continuousProgress.pauseForInput(pause.control).catch(error => get().reportError(error))
-    try { await flushMessageWorkbench(false) }
-    catch (error) { get().reportWorkbenchSaveFailure(error); throw error }
+    try {
+      await flushMessageWorkbench(false)
+      if (moteDraftKey) { useLauncherState.getState().clearQueuedInputMove(moteDraftKey, move); await checkpointLauncherState() }
+    } catch (error) { get().reportWorkbenchSaveFailure(error); throw error }
   },
   async archiveAgentSteer(sessionId, operationId, expectedText, archived) {
     const original = get().agentSteerQueues[sessionId]?.find(item => item.operationId === operationId)
@@ -12594,7 +12618,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     const session = get().sessions.find(item => item.id === sessionId)
     if (entry?.freshComposerIntent && !entry.resumeInputIntent && !entry.directInputBinding && !entry.inputIntakeStarted && entry.promptCondition === null &&
         get().agentSteerInFlight[sessionId] !== operationId && !entry.goalContinuation && !entry.goalPmo && !entry.goalDispatch) {
-      const binding = manualComposerBinding(sessionId, 'manual', { ...(entry.execution === undefined ? {} : { execution: entry.execution }), ...(entry.browserInput ? { browserInput: entry.browserInput } : {}), ...(entry.browserRecipient ? { browserRecipient: entry.browserRecipient } : {}) })
+      const binding = manualComposerBinding(sessionId, 'manual', { ...(entry.moteMain ? { moteMain: entry.moteMain } : {}), ...(entry.execution === undefined ? {} : { execution: entry.execution }), ...(entry.browserInput ? { browserInput: entry.browserInput } : {}), ...(entry.browserRecipient ? { browserRecipient: entry.browserRecipient } : {}) })
       if (binding && session?.kind === 'agent') {
         entry = { ...entry, directInputBinding: binding, directInputControl: structuredClone(entry.browserRecipient ?? entry.browserInput?.control ?? session.control), runId: binding.expectedRun.runId, execution: 'immediate' }
         const selected = entry
