@@ -155,6 +155,10 @@
     "./codex/hook-activation": {
       "types": "./dist/codex/hook-activation.d.ts",
       "import": "./dist/codex/hook-activation.js"
+    },
+    "./codex/native-catalog": {
+      "types": "./dist/codex/native-catalog.d.ts",
+      "import": "./dist/codex/native-catalog.js"
     }
   },
   "files": [

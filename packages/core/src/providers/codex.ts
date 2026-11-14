@@ -4,7 +4,9 @@ import { CODEX_USAGE_CAPABILITY } from '@agentmux/providers/codex/usage'
 import { observeCodexTerminalFrontend, reconnectCodexTerminalFrontend } from './codex-managed-frontend.js'
 import { readCodexPromptExecutionEvidence, createCodexPromptExecutionTransportVerifier } from './codex-prompt-execution-evidence.js'
 import { readCodexResumedTurnInterruption } from './codex-resumed-turn-interruption.js'
-import { listCodexNativeSessions, assertCodexNativeResumeSource, codexRecoveryFiles } from './codex-native-catalog.js'
+import { createCodexNativeCatalog } from '@agentmux/providers/codex/native-catalog'
+import { assertNativeCatalogPath, nativeCatalogFiles, nativeCatalogIssue, readNativeCatalogFile } from './native-session-catalog-files.js'
+import { AgentMuxError } from '../errors.js'
 import { createCodexPromptTransportPreparation } from './codex-prompt-transport-preparation.js'
 import { inspectCodexPromptExecution, inspectCodexPromptPreparationWait } from './codex-prompt-execution.js'
 import { observeCodexSessionStatus } from './codex-session-status.js'
@@ -27,6 +29,10 @@ import type { AgentHookToolInvocation, AgentLaunchPlan } from '../types.js'
 import { buildPromptInputPayload, catalog, hookToolFields, sanitizeBracketedPasteText } from './shared.js'
 
 type ProviderFactory = (definition: AgentProviderDefinition) => AgentProvider
+
+const { listCodexNativeSessions, assertCodexNativeResumeSource, codexRecoveryFiles } = createCodexNativeCatalog({
+  AgentMuxError, normalizeNativeSessionId, assertNativeCatalogPath, nativeCatalogFiles, nativeCatalogIssue, readNativeCatalogFile
+})
 
 function codexToolFields(eventName: string, payload: Readonly<Record<string, unknown>>): AgentNativeHookToolFields {
   if (eventName === 'PermissionRequest') return hookToolFields(payload.tool_name, payload.tool_input)
