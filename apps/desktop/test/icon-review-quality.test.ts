@@ -74,7 +74,7 @@ it('the actual workbench finds shared Toolkit mappings and current drawings, com
   click('#view-mote')
   expect(document.querySelectorAll('[data-mote-family]')).toHaveLength(5)
   expect(document.querySelector('[aria-label="Goal 角色造型参照"] img')?.getAttribute('src')).toContain('goal-next')
-  expect(document.querySelector('[data-mote-family="mote-main-session"] h3')?.textContent).toBe('Mote 主对话')
+  expect(document.querySelector('[data-mote-family="mote-main-session"] h3')?.textContent).toBe('Leader')
   expect(document.querySelector('[data-mote-family="agent"] use')?.getAttribute('href')).toBe(semanticIconHref('object.agent'))
   expect(document.querySelector('[data-mote-family="mote"] use')?.getAttribute('href')).toBe(semanticIconHref('object.mote'))
   expect(document.querySelector('[data-mote-family="mote-main-session"]')?.textContent).toContain('待采用候选')
