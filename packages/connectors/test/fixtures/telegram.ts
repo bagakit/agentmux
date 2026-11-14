@@ -58,8 +58,8 @@ export async function telegramTransport() {
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
   const origin = `http://127.0.0.1:${(server.address() as { port: number }).port}`
   return { origin, calls, updates, messages, batchBytes,
-    message(text = 'Original Telegram input', options: { chatId?: number; messageId?: number; updateId?: number; mention?: boolean; unsupported?: boolean; actorId?: number; botId?: number } = {}) {
-      const message: TelegramMessage = { message_id: options.messageId ?? ++messageId, chat: { id: options.chatId ?? -300, type: 'supergroup' }, from: { id: options.actorId ?? 400, is_bot: false, first_name: 'Original person' },
+    message(text = 'Original Telegram input', options: { chatId?: number; chatType?: 'private' | 'supergroup'; messageId?: number; updateId?: number; mention?: boolean; unsupported?: boolean; actorId?: number; botId?: number } = {}) {
+      const message: TelegramMessage = { message_id: options.messageId ?? ++messageId, chat: { id: options.chatId ?? -300, type: options.chatType ?? 'supergroup' }, from: { id: options.actorId ?? 400, is_bot: false, first_name: 'Original person' },
         date: Math.floor(Date.now() / 1000), text: options.mention === false ? text : '@original_bot ' + text, entities: options.mention === false ? [] : [{ type: 'mention', offset: 0, length: 13 }], ...(options.unsupported ? { photo: [{ file_id: 'native-photo' }] } : {}) }
       const update: TelegramUpdate = { update_id: options.updateId ?? ++updateId, message }; updates.push(update); updateOwners.set(update.update_id, options.botId ?? 100)
       for (const flush of [...waiting.values()]) flush()

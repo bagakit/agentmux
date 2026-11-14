@@ -8,7 +8,7 @@ import { afterEach, expect, it, vi } from 'vitest'
 import * as core from '@agentmux/core'
 import { connectionApplicationScope } from '@agentmux/core/connections'
 import { MoteChatStore } from '../../src/mote-chat-store.js'
-import type { ConnectionIngressMessage } from '@agentmux/core/connections'
+import type { ConnectionApplication, ConnectionIngressMessage } from '@agentmux/core/connections'
 import { spatialCatalog } from '@agentmux/core/spatial-state'
 import { createPublicationConversationPort, PublicationHost, type ConnectionAdapter, type MoteChatAgentPort } from '@agentmux/connectors'
 import { rpcOwnerFixture } from '../../../core/test/helpers/public-rpc-owner.js'
@@ -32,12 +32,14 @@ import { feishuConfig } from './feishu.js'
 import { feishuPublicationHttp, type FeishuHttpCall, type FeishuHttpResponse } from './feishu-publication.js'
 import { FeishuAdapter } from '../../src/adapters/feishu/index.js'
 import { signedRoomAdapter, type SignedRoomMessage } from './signed-room-adapter.js'
+import { AgentHookServer } from '../../../core/src/hook-server.js'
+import { moteChatNativeProcess } from './mote-chat-native-process.js'
 
 const cleanup: Array<() => void | Promise<void>> = []
 afterEach(async () => { try { for (const close of cleanup.splice(0).reverse()) await close() } finally { vi.restoreAllMocks(); vi.unstubAllEnvs() } })
 type DirectMessage = SignedRoomMessage & { nativeKind: 'direct' | 'group' }
 
-export async function moteChatJourneyFixture(strangerMessageLimit = 1, conversationIdleMs = 60_000, mode: 'desktop' | 'headless' = 'desktop', nativeAfterInput = false, nativeProvider: 'claude' | 'grok' | 'codex' = 'claude', publicationHttp?: (call: FeishuHttpCall) => FeishuHttpResponse | undefined, mainMode?: 'bound' | 'unbound', publicationMode: 'feishu' | 'signed-room' = 'feishu', execution: 'local' | 'remote' = 'local') {
+export async function moteChatJourneyFixture(strangerMessageLimit = 1, conversationIdleMs = 60_000, mode: 'desktop' | 'headless' = 'desktop', nativeAfterInput = false, nativeProvider: 'claude' | 'grok' | 'codex' = 'claude', publicationHttp?: (call: FeishuHttpCall) => FeishuHttpResponse | undefined, mainMode?: 'bound' | 'unbound', publicationMode: 'feishu' | 'signed-room' = 'feishu', execution: 'local' | 'remote' = 'local', native?: { adapter: ConnectionAdapter; application: ConnectionApplication; credential: string }) {
   const publicationRefresh = vi.spyOn(PublicationHost.prototype, 'refresh')
   class FixtureHostClient extends core.AgentMuxClient {
     constructor(options: core.AgentMuxClientOptions) {
@@ -54,6 +56,8 @@ export async function moteChatJourneyFixture(strangerMessageLimit = 1, conversat
   if (nativeProvider === 'grok') vi.stubEnv('GROK_HOME', grokHome)
   const feishu = nativeProvider !== 'claude' && publicationMode === 'feishu' ? await feishuPublicationHttp(publicationHttp) : undefined
   if (feishu) cleanup.push(feishu.close)
+  const nativeProcesses: Array<Awaited<ReturnType<typeof moteChatNativeProcess>>> = []
+  if (native) cleanup.push(async () => { for (const process of nativeProcesses.splice(0).reverse()) await process.close() })
   cleanup.push(async () => {
     try { await original.close() } catch (error) {
       // Aborted original read observers can finish their owned receipt write after dispose.
@@ -85,19 +89,28 @@ export async function moteChatJourneyFixture(strangerMessageLimit = 1, conversat
   const start = vi.fn(async (input: { operationKey?: string; env?: Record<string, string>; args: string[] }) => {
     const previous = input.operationKey && [...runs.values()].find(run => run.lifecycleOperationId === input.operationKey)
     if (previous) return previous
-    const number = runs.size + 1, runId = `native-run-${number}`, pid = 400_000 + number
+    const number = runs.size + 1, runId = `native-run-${number}`
     const resumeIndex = input.args.indexOf('--resume'), resumed = resumeIndex < 0 ? undefined : [...sources.values()].find(source => source.id === input.args[resumeIndex + 1])
     if (resumeIndex >= 0 && !resumed) throw new Error('Resume must retain an existing original native conversation')
     const id = resumed?.id ?? `native-chat-${number}`
-    const path = resumed?.path ?? (nativeProvider === 'grok'
+    const nativeProcess = native ? await moteChatNativeProcess(id, topic.physicalDirectoryPath!, input.env ?? {}) : undefined
+    if (nativeProcess) nativeProcesses.push(nativeProcess)
+    const pid = nativeProcess?.processId ?? 400_000 + number
+    const path = nativeProcess?.source ?? resumed?.path ?? (nativeProvider === 'grok'
       ? join(grokHome, 'sessions', encodeCwdDirname(topic.physicalDirectoryPath!), id, 'updates.jsonl') : join(original.root, `${id}.jsonl`))
     if (nativeProvider === 'grok' && !resumed) {
       await mkdir(join(path, '..'), { recursive: true })
       await writeFile(join(path, '..', 'summary.json'), JSON.stringify({ info: { id, cwd: topic.physicalDirectoryPath! } }))
     }
-    if (!resumed && !nativeAfterInput) await writeFile(path, JSON.stringify(nativeProvider === 'grok' ? grokUpdate(id, { sessionUpdate: 'current_mode_update', currentModeId: 'chat' }) : { sessionId: id, uuid: 'original-context', type: 'system', message: { role: 'system', content: 'Native system context' } }) + '\n')
+    if (!native && !resumed && !nativeAfterInput) await writeFile(path, JSON.stringify(nativeProvider === 'grok' ? grokUpdate(id, { sessionUpdate: 'current_mode_update', currentModeId: 'chat' }) : { sessionId: id, uuid: 'original-context', type: 'system', message: { role: 'system', content: 'Native system context' } }) + '\n')
     const run = { ...original.run(runId), lifecycleOperationId: input.operationKey ?? null, program: nativeProvider, pid, workspacePath: topic.physicalDirectoryPath! }
-    runs.set(runId, run); sources.set(pid, { id, path }); return run
+    runs.set(runId, run); sources.set(pid, { id, path })
+    if (nativeProvider === 'grok') {
+      void fetch(input.env!.AGENTMUX_HOOK_URL!, { method: 'POST', headers: { authorization: 'Bearer ' + input.env!.AGENTMUX_HOOK_TOKEN!, 'content-type': 'application/json' },
+        body: JSON.stringify({ receiptId: 'native-start-' + runId, eventName: 'session_start', payload: { hookEventName: 'session_start', sessionId: id, cwd: topic.physicalDirectoryPath! } })
+      }).then(response => { if (response.status !== 204) throw Error('Original Grok startup Hook was not accepted') }).catch(error => { hookErrors.push(String(error)) })
+    }
+    return run
   })
   inner.kernel.start = start
   // The durable resume owner consumes a prepared Runtime dispatch, with the
@@ -118,10 +131,22 @@ export async function moteChatJourneyFixture(strangerMessageLimit = 1, conversat
     const receipt = await originalInputLeaf(...args)
     return { ...receipt, run: { ...runs.get(args[0])!, acceptedInputBytes: receipt.run.acceptedInputBytes } }
   })
-  inner.hookServer.isRunning = () => true
-  inner.hookServer.createBinding = (_session: string, _provider: string, bindingId?: string) => ({ bindingId: bindingId ?? 'b'.repeat(43), endpoint: { url: 'http://127.0.0.1:0', token: 't'.repeat(43) }, bindRun: async () => {}, close: async () => {} })
+  const hookErrors: string[] = []
+  if (native || nativeProvider === 'grok') {
+    const hooks = new AgentHookServer((event, signal) => Reflect.get(client, 'acceptHookEvent').call(client, event, signal), 0)
+    await hooks.start(); Reflect.set(client, 'hookServer', hooks)
+    const observeOutput = inner.kernel.observeOutput as (id: string, after: number, listener: unknown) => Promise<Record<string, unknown>>
+    inner.kernel.observeOutput = async (...args: Parameters<typeof observeOutput>) => {
+      const result = await observeOutput(...args), data = client.providers.get(nativeProvider).terminalHandshake!.query
+      return { ...result, replay: [{ type: 'data', runId: args[0], startByte: 0, endByte: Buffer.byteLength(data), data, dataBytes: Buffer.from(data) }] }
+    }
+    inner.kernel.attach = async (id: string, after: number) => await (inner.kernel.observeOutput as typeof observeOutput)(id, after, () => {})
+  } else {
+    inner.hookServer.isRunning = () => true
+    inner.hookServer.createBinding = (_session: string, _provider: string, bindingId?: string) => ({ bindingId: bindingId ?? 'b'.repeat(43), endpoint: { url: 'http://127.0.0.1:0', token: 't'.repeat(43) }, bindRun: async () => {}, close: async () => {} })
+    inner.ensureTerminalHandshakeOrDegrade = async (session: core.AgentMuxAgentSession) => session
+  }
   inner.ensureManagedHooks = async () => {}
-  inner.ensureTerminalHandshakeOrDegrade = async (session: core.AgentMuxAgentSession) => session
   vi.spyOn(client as unknown as { probePreparedAgent: typeof client.probeAgent }, 'probePreparedAgent').mockImplementation(async id => ({ providerId: id, executable: id, installed: true, capabilities: new core.AgentProviderRegistry().get(id).catalog.capabilities }))
   const provider = inner.providers.get(nativeProvider) as core.AgentProvider & Required<Pick<core.AgentProvider, 'discoverNativeSession'>>
   if (nativeProvider === 'claude') {
@@ -130,18 +155,6 @@ export async function moteChatJourneyFixture(strangerMessageLimit = 1, conversat
       const source = sources.get(processId)
       return source && (!nativeAfterInput || inputCreatedSources.has(processId)) ? { handle: { kind: 'provider' as const, providerId: 'claude', sessionId: source.id, transcriptPath: source.path }, assertCurrent: async () => {} } : null
     })
-  } else if (nativeProvider === 'grok') {
-    // Exact Hook/Run identity leaf; the real Grok normalizer supplies the native
-    // handle. No Claude discovery or fake Grok changes method is substituted.
-    inner.ensureTerminalHandshakeOrDegrade = async (session: core.AgentMuxAgentSession) => {
-      const run = runs.get(session.run.runId)!, source = sources.get(run.pid!)!
-      const normalized = provider.normalizeHook({ receiptId: 'synthetic-grok-hook', agentSessionId: session.agentSessionId,
-        runId: run.runId, providerId: 'grok', payload: { hookEventName: 'user_prompt_submit', sessionId: source.id } }, {})
-      expect(normalized.nativeHandle).toEqual({ kind: 'provider', providerId: 'grok', sessionId: source.id })
-      const registry = Reflect.get(client, 'registry') as { update(id: string, run: core.AgentMuxAgentSession['run'], change: (current: core.AgentMuxStoredAgentSession) => core.AgentMuxStoredAgentSession): Promise<unknown> }
-      await registry.update(session.agentSessionId, session.run, current => ({ ...current, nativeHandle: normalized.nativeHandle! }))
-      return { ...session, nativeHandle: normalized.nativeHandle! }
-    }
   }
   const inputCreatedSources = new Set<number>()
   if (nativeAfterInput && nativeProvider !== 'codex') {
@@ -193,11 +206,11 @@ export async function moteChatJourneyFixture(strangerMessageLimit = 1, conversat
   const desktopAgents = mode === 'headless'
     ? createHostMoteChatAgents({ resources: createMoteChatResources({ topics, catalog: async () => spatialCatalog(graph), configuration: target => readMoteResourceConfiguration(configurationPath, target) }), clients })
     : (await import('../../../../apps/desktop/src/main/mote-chat-agents.js')).createMoteChatAgents({ config: () => config, catalog: async () => spatialCatalog(graph), topics, clients })
-  const wire = signedRoomAdapter(nativeProvider !== 'claude' && publicationMode === 'feishu' ? 'feishu' : 'signed-room'), application = { domain: nativeProvider !== 'claude' && publicationMode === 'feishu' ? 'open.feishu.cn' : 'signed.example', appId: nativeProvider !== 'claude' && publicationMode === 'feishu' ? feishuConfig.application.appId : 'original-mote-app' }
+  const wire = signedRoomAdapter(nativeProvider !== 'claude' && publicationMode === 'feishu' ? 'feishu' : 'signed-room'), application = native?.application ?? { domain: nativeProvider !== 'claude' && publicationMode === 'feishu' ? 'open.feishu.cn' : 'signed.example', appId: nativeProvider !== 'claude' && publicationMode === 'feishu' ? feishuConfig.application.appId : 'original-mote-app' }
   const creator = { application, idType: 'email', userId: 'creator@example.test' }, guest = { ...creator, userId: 'guest@example.test' }
   const lanePerson = { ...creator, userId: 'lane-member@example.test' }
   const verify = wire.adapter.ingress!.verify
-  const adapter: ConnectionAdapter = { ...wire.adapter, ...(feishu ? { publication: new FeishuAdapter({ http: feishu.http }).publication, ...(mainMode ? { api: new FeishuAdapter({ http: feishu.http }).api } : {}) } : {}),
+  const adapter: ConnectionAdapter = native?.adapter ?? { ...wire.adapter, ...(feishu ? { publication: new FeishuAdapter({ http: feishu.http }).publication, ...(mainMode ? { api: new FeishuAdapter({ http: feishu.http }).api } : {}) } : {}),
     ingress: { ...wire.adapter.ingress!, verify: async (...args) => {
       const verified = await verify(...args), native = JSON.parse(args[1]) as DirectMessage
       if (!['direct', 'group'].includes(native.nativeKind) || verified.kind === 'action') throw new Error('Missing signed native conversation kind')
@@ -206,7 +219,7 @@ export async function moteChatJourneyFixture(strangerMessageLimit = 1, conversat
     profile: { get: async () => ({ connectionId: 'original-bot', connectionRevision: 1, application, language: null, state: 'observed', profile: null,
       metadata: null, creator: { idType: creator.idType, userId: creator.userId }, botId: null, onlineVersionId: null, reviewingVersionId: null, version: null }) } }
   let connectionOwner: ReturnType<typeof createHostConnectionOwner> | undefined
-  let services: Awaited<ReturnType<typeof createConnectionServices>>, server: core.AgentMuxControlServer, sdk: Awaited<ReturnType<typeof core.connectAgentMuxRpc>>
+  let services!: Awaited<ReturnType<typeof createConnectionServices>>, server: core.AgentMuxControlServer, sdk: Awaited<ReturnType<typeof core.connectAgentMuxRpc>>
   const prepare = vi.fn<MoteChatAgentPort['prepare']>(async input => {
     wire.trace.push('prepare')
     const retained = (await services.ingress!.list({ connectionId: 'original-bot' })).ingresses
@@ -253,7 +266,7 @@ export async function moteChatJourneyFixture(strangerMessageLimit = 1, conversat
   }
   async function close() { await hostingReader?.dispose(); hostingReader = undefined; await sdk?.dispose(); await server?.stop(); if (connectionOwner) await connectionOwner.close(); else await services?.close() }
   await open(); cleanup.push(close)
-  const cliRaw = async (command: 'configure' | 'allocate' | 'history' | 'diagnose' | 'events' | 'review' | 'reply' | 'inspect', input: unknown, credentials?: core.AgentMuxRpcCredentials) => {
+  const cliRaw = async (command: 'configure' | 'allocate' | 'audience' | 'history' | 'diagnose' | 'events' | 'review' | 'reply' | 'inspect', input: unknown, credentials?: core.AgentMuxRpcCredentials) => {
     const overrides = credentials ? { AGENTMUX_AGENT_SESSION_ID: credentials.agentSessionId, AGENTMUX_AGENT_CAPABILITY: credentials.capability } : {}
     return await runCompiledObjectCli(['--endpoint', 'unix:' + server.path, 'space', 'mote', 'chat', command, '--input', '-'], objectCliEnvironment(original.root, overrides), JSON.stringify(input))
   }
@@ -262,12 +275,13 @@ export async function moteChatJourneyFixture(strangerMessageLimit = 1, conversat
     expect(result.code, result.stdout + result.stderr).toBe(0)
     return JSON.parse(result.stdout).result
   }
-  const credential = await services!.secrets.store({ operationId: 'store-original-key', secret: 'fixture-signing-key' })
+  const credential = await services!.secrets.store({ operationId: 'store-original-key', secret: native?.credential ?? 'fixture-signing-key' })
   await sdk!.call('connection.configure', { operationId: 'configure-original-bot', expectedRevision: null,
     connection: { connectionId: 'original-bot', adapterId: adapter.adapterId, application, label: 'Original bot', enabled: true, credentialRef: credential.credentialRef } })
   await cli('configure', { operationId: 'enable-original-chat', target, expectedRevision: null, expectedConnectionRevision: 1,
+    ...(!native ? { refreshCreator: true } : {}),
     values: { enabled: true, connection: { connectionId: 'original-bot', application }, conversationIdleMs, strangerMessageLimit } })
-  await vi.waitFor(() => expect(wire.endpoint).toBeDefined())
+  if (!native) await vi.waitFor(() => expect(wire.endpoint).toBeDefined())
   publicationRefresh.mockClear()
   const submit = client.submitAgentMessage.bind(client)
   const submissionErrors: Array<{ code?: string; message: string }> = []
@@ -275,7 +289,7 @@ export async function moteChatJourneyFixture(strangerMessageLimit = 1, conversat
     try { return await submit(...args) } catch (error) { submissionErrors.push({ code: (error as core.AgentMuxError).code, message: String(error) }); throw error } })
   // Dedicated-lane journeys use an invited member with an existing individual allowance.
   // Creator journeys exercise the actual logical Main path instead of a former routing assumption.
-  if (!mainMode) new MoteChatStore(services.database!).savePerson({ key: JSON.stringify([target.spaceId, connectionApplicationScope(application), application.appId, lanePerson.idType, lanePerson.userId]),
+  if (!mainMode && !native) new MoteChatStore(services.database!).savePerson({ key: JSON.stringify([target.spaceId, connectionApplicationScope(application), application.appId, lanePerson.idType, lanePerson.userId]),
     spaceId: target.spaceId, person: { actor: lanePerson, creator: false, revision: 1, total: Number.MAX_SAFE_INTEGER, used: 0, remaining: Number.MAX_SAFE_INTEGER } })
   const message = (id: string, actor = mainMode ? creator : lanePerson): DirectMessage => ({ deliveryKey: `event/${id}`, recordKey: `message/${id}`, roomKey: `private/${actor.userId}`, person: actor.userId,
     text: `Original external question ${id}`, addressing: 'broadcast', nativeKind: 'direct' })
@@ -309,7 +323,7 @@ export async function moteChatJourneyFixture(strangerMessageLimit = 1, conversat
       const owner = vi.spyOn(executionReader, 'runtimeOwnerIdentity').mockImplementation(() => ready ? originalOwner() : null)
       const read = vi.spyOn(executionReader, 'readAgentSession').mockImplementation(async (...args) => { const session = await originalRead(...args); ready = true; return session })
       return { owner, read }
-    }, replaceHostingOwner() { hostingOwnerInstanceId += '-replacement' }, get executionEndpoint() { return executionEndpoint }, main, bindMain, endRun(runId: string) { const run = runs.get(runId)!; runs.set(runId, { ...run, state: { type: 'exited', code: 0, signal: null } }) }, feishu, agents, config, configurationPath, graph, spatial, workspace, get services() { return services }, get sdk() { return sdk }, get endpoint() { return { transport: 'unix' as const, path: server.path } }, topic, target, creator, lanePerson, guest, wire, message, records, claimed, reply, start, prepare, submission,
+    }, adapter, nativeInputs() { return nativeProcesses.flatMap(process => process.inputs) }, replaceHostingOwner() { hostingOwnerInstanceId += '-replacement' }, get executionEndpoint() { return executionEndpoint }, main, bindMain, endRun(runId: string) { const run = runs.get(runId)!; runs.set(runId, { ...run, state: { type: 'exited', code: 0, signal: null } }) }, feishu, agents, config, configurationPath, graph, spatial, workspace, get services() { return services }, get sdk() { return sdk }, get endpoint() { return { transport: 'unix' as const, path: server.path } }, topic, target, creator, lanePerson, guest, wire, message, records, claimed, reply, start, prepare, submission,
     cli, cliRaw, publicationRefresh, credentials(index: number) { const env = start.mock.calls[index]![0].env!; return { agentSessionId: env.AGENTMUX_AGENT_SESSION_ID!, capability: env.AGENTMUX_AGENT_CAPABILITY! } },
-    submissionErrors, async restart() { await close(); await open(); await vi.waitFor(() => expect(wire.endpoint).toBeDefined()) } }
+    submissionErrors, async restart() { await close(); await open(); if (!native) await vi.waitFor(() => expect(wire.endpoint).toBeDefined()) } }
 }

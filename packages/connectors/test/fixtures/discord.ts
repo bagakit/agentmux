@@ -1,4 +1,5 @@
 import { createServer } from 'node:http'
+import { Readable } from 'node:stream'
 import { WebSocketServer, type WebSocket } from 'ws'
 import type { DiscordHttpOptions } from '../../src/adapters/discord/client.js'
 export { DefaultRestOptions } from '@discordjs/rest'
@@ -103,7 +104,11 @@ export async function discordTransport(nativeFetch: typeof fetch = fetch) {
   const http: DiscordHttpOptions = { makeRequest: async (url, init) => {
     const original = new URL(url)
     if (original.origin !== 'https://discord.com') throw Error('Unexpected native Discord API origin')
-    return await nativeFetch(origin + original.pathname + original.search, init as RequestInit)
+    const response = await nativeFetch(origin + original.pathname + original.search, init as RequestInit)
+    const bytes = await response.arrayBuffer()
+    return { status: response.status, statusText: response.statusText, ok: response.ok, headers: response.headers,
+      body: response.body === null ? null : Readable.from(Buffer.from(bytes)), bodyUsed: false,
+      arrayBuffer: async () => bytes, text: async () => Buffer.from(bytes).toString(), json: async () => JSON.parse(Buffer.from(bytes).toString()) }
   } }
   return { origin, http, calls, sessions, messages, emit, uploads, ownReactions,
     get pausedConnections() { return paused.size },
