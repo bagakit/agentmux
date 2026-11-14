@@ -24,7 +24,7 @@ it('production group prompt reaches the exact original Main public queue and sta
     contextRefs: [{ hostId: reference.hostId, id: reference.sessionId }] } as FocusScanLane
   const task = focusGroupTask('analyze', lane,
     [{ id: 'original-project', hostId: 'local', name: 'Original project', path: session.workspacePath }],
-    { kind: 'mote', topicId: 'launcher:start-fixture' })
+    { kind: 'mote', topicId: 'launcher:start-fixture' }) as Exclude<ReturnType<typeof focusGroupTask>, string>
   const { prompt, focusTask } = task, fixedNote = focusTaskHandoffNote(focusTask!)
   expect(prompt).toContain('从旁分析这个组'); expect(prompt).not.toContain('Group reference data (JSON):')
   expect(prompt).toContain('用户未确认时不得执行这些动作'); expect(prompt).not.toContain(reference.sessionId)
