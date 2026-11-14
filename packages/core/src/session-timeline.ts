@@ -368,7 +368,8 @@ export function normalizeAgentTimeline(
 export function agentTimelineMutationFromAcpEvent(
   agentSessionId: string,
   event: AgentMuxAcpEvent,
-  evidence: AgentMuxEvidence
+  evidence: AgentMuxEvidence,
+  fullObservation = false
 ): AgentTimelineMutation | null {
   if (event.type === 'activity') {
     if (Object.hasOwn(event, 'contentDelta')) {
@@ -379,7 +380,7 @@ export function agentTimelineMutationFromAcpEvent(
     }
     if (event.operation === 'append') {
       return normalizeAgentTimelineMutation({
-        type: 'append',
+        type: fullObservation ? 'upsert' : 'append',
         agentSessionId,
         item: {
           id: acpTimelineItemId(evidence, 'activity', event.activityId),

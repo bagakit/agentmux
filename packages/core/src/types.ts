@@ -1962,9 +1962,12 @@ export type AgentMuxAcpEvent =
       type: 'native-session'
       sessionId: string
     }
+  | { type: 'permission-settled'; requestId: string }
+  | { type: 'observation-gap' }
   | {
       type: 'permission'
       requestId: string
+      nativeToolCallId?: string
       title: string
       options: AgentMuxPermissionOption[]
       toolName?: string

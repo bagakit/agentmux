@@ -23,7 +23,12 @@ export function acpRecord(value: unknown): Record<string, unknown> | undefined {
 }
 
 /** This holds the sole ACP pipes for one original child. Losing a consumer does not close them. */
-export function launchAntigravityAcp({ observeRead, AgentMuxRpcLines, isRpcId, rpcEncode }: AcpWireServices, options: { command: string; args: readonly string[]; cwd: string; env: NodeJS.ProcessEnv }) {
+type NativeFrame = { method: string; params: unknown; id?: JSONRPCID }
+
+export function launchAntigravityAcp({ observeRead, AgentMuxRpcLines, isRpcId, rpcEncode }: AcpWireServices, options: {
+  command: string; args: readonly string[]; cwd: string; env: NodeJS.ProcessEnv
+  onNativeFrame?(frame: NativeFrame): boolean
+}) {
   const child = spawn(options.command, ['acp', ...options.args], {
     cwd: options.cwd, env: { ...options.env, AGY_CLI_DISABLE_AUTO_UPDATE: 'true' }, stdio: ['pipe', 'pipe', 'ignore']
   })
@@ -54,10 +59,10 @@ export function launchAntigravityAcp({ observeRead, AgentMuxRpcLines, isRpcId, r
         const message = acpRecord(value)
         if (!message || message.jsonrpc !== '2.0') throw new AntigravityAcpTransportFailure('invalid-response')
         if (typeof message.method === 'string') {
-          if (Object.hasOwn(message, 'id') && isRpcId(message.id)) {
-            // The initialized capability set grants this client no request callbacks.
-            void write(createJSONRPCErrorResponse(message.id, -32601, 'ACP client method is unavailable.')).catch(unavailable)
-          }
+          if (Object.hasOwn(message, 'id') && !isRpcId(message.id)) throw new AntigravityAcpTransportFailure('invalid-response')
+          const id = isRpcId(message.id) ? message.id : undefined
+          const handled = options.onNativeFrame?.({ method: message.method, params: message.params, ...(id === undefined ? {} : { id }) })
+          if (!handled && id !== undefined) void write(createJSONRPCErrorResponse(id, -32601, 'ACP client method is unavailable.')).catch(unavailable)
           return
         }
         if (!Object.hasOwn(message, 'id') || !isRpcId(message.id) || Object.hasOwn(message, 'result') === Object.hasOwn(message, 'error')) {
@@ -92,8 +97,12 @@ export function launchAntigravityAcp({ observeRead, AgentMuxRpcLines, isRpcId, r
     transport.signal.throwIfAborted()
     await write({ jsonrpc: '2.0', method: 'session/cancel', params: { sessionId } })
   }
+  const respond = async (id: Exclude<JSONRPCID, null>, result: unknown): Promise<void> => {
+    transport.signal.throwIfAborted()
+    await write({ jsonrpc: '2.0', id, result })
+  }
   let shutdown: Promise<void> | undefined
-  return { ready, closed, request, prompt, cancel, close: () => shutdown ??= (async () => {
+  return { ready, closed, request, prompt, cancel, respond, close: () => shutdown ??= (async () => {
     unavailable()
     client.rejectAllPendingRequests('The scoped ACP client has closed.')
     child.stdin.end()

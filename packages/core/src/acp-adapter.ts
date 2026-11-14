@@ -14,7 +14,7 @@ const MAX_ACP_EVENT_BYTES = 128 * 1024
 export type AgentMuxAcpBinding = {
   readonly adapterId: string
   readonly sessionId: string
-  onEvent(listener: (event: AgentMuxAcpEvent) => void): () => void
+  onEvent(listener: (event: AgentMuxAcpEvent, observedAt?: number) => void, onError?: (error: Error) => void): () => void
   respondPermission(
     requestId: string,
     decision: AgentMuxPermissionDecision,
@@ -29,6 +29,7 @@ export type AgentMuxAcpBridgeCallbacks = {
   onNativeHandle(agentSessionId: string, handle: AgentNativeSessionHandle, evidence: AgentMuxEvidence, signal: AbortSignal): void | Promise<void>
   onInteraction(request: AgentMuxPermissionRequest, signal: AbortSignal): void | Promise<void>
   onInteractionSettled(request: AgentMuxPermissionRequest): void | Promise<void>
+  onRetainedPermissionSettled?(agentSessionId: string, requestId: string, evidence: AgentMuxEvidence): void | Promise<void>
   /** Report an exact failed observation or unknown delivery; never closes the binding. */
   onError(agentSessionId: string, error: unknown, evidence: AgentMuxEvidence): void | Promise<void>
 }
@@ -43,6 +44,7 @@ type PendingAcpPermission = {
   ready: boolean
   publicationFailed: boolean
   decision?: AgentMuxPermissionDecision
+  settlement?: Promise<void>
   delivery?: { controller: AbortController; finished: Promise<void> }
 }
 
@@ -54,7 +56,7 @@ type BoundAcpSession = {
   unsubscribe: () => void
   nativeSessionId: string
   nativeProviderId?: string
-  pendingEvents: AgentMuxAcpEvent[] | null
+  pendingEvents: { event: AgentMuxAcpEvent; observedAt?: number }[] | null
   eventTail: Promise<void>
   pendingPermission: PendingAcpPermission | null
   permissionQueue: PendingAcpPermission[]
@@ -99,18 +101,18 @@ export class AgentMuxAcpBridge {
     private readonly callbacks: AgentMuxAcpBridgeCallbacks
   ) {}
 
-  async bind(agentSessionId: string, binding: AgentMuxAcpBinding, run?: Readonly<AgentMuxRunRef>, nativeProviderId?: string): Promise<void> {
+  async bind(agentSessionId: string, binding: AgentMuxAcpBinding, run?: Readonly<AgentMuxRunRef>, managed?: { providerId: string; actorId: string }): Promise<void> {
     if (this.bindings.has(agentSessionId)) {
       throw new AgentMuxError('Agent Session already has an ACP binding.', 'ACP_ALREADY_BOUND')
     }
     const bound: BoundAcpSession = {
-      id: mintObjectId(),
+      id: managed?.actorId ?? mintObjectId(),
       ...(run ? { run: { ...run } } : {}),
       lifetime: new AbortController(),
       binding,
       unsubscribe: () => {},
       nativeSessionId: binding.sessionId,
-      ...(nativeProviderId !== undefined ? { nativeProviderId } : {}),
+      ...(managed ? { nativeProviderId: managed.providerId } : {}),
       pendingEvents: [],
       eventTail: Promise.resolve(),
       pendingPermission: null,
@@ -118,18 +120,22 @@ export class AgentMuxAcpBridge {
     }
     this.bindings.set(agentSessionId, bound)
     try {
-      const unsubscribe = binding.onEvent((event) => {
+      const unsubscribe = binding.onEvent((event, originalObservedAt) => {
+        const observedAt = managed ? originalObservedAt : undefined
         if (bound.pendingEvents) {
           assertBoundedEvent(event)
-          bound.pendingEvents.push(event)
+          bound.pendingEvents.push({ event, ...(observedAt === undefined ? {} : { observedAt }) })
           return
         }
-        this.enqueueEvent(agentSessionId, bound, event)
-      })
+        this.enqueueEvent(agentSessionId, bound, event, observedAt)
+      }, error => { void Promise.resolve().then(() => this.callbacks.onError(agentSessionId, error, this.evidence(bound))).catch(() => {}) })
       bound.unsubscribe = unsubscribe
       await this.callbacks.onNativeHandle(agentSessionId, this.nativeHandle(bound), this.evidence(bound), bound.lifetime.signal)
       const pendingEvents = bound.pendingEvents ?? []
-      while (pendingEvents.length > 0) await this.accept(agentSessionId, bound, pendingEvents.shift()!)
+      while (pendingEvents.length > 0) {
+        const { event, observedAt } = pendingEvents.shift()!
+        await this.accept(agentSessionId, bound, event, observedAt)
+      }
       bound.pendingEvents = null
     } catch (error) {
       bound.lifetime.abort(error)
@@ -148,6 +154,7 @@ export class AgentMuxAcpBridge {
   async unbind(agentSessionId: string): Promise<void> {
     const bound = this.bindings.get(agentSessionId)
     if (!bound) return
+    if (bound.nativeProviderId !== undefined) { await this.detachManaged(agentSessionId, bound); return }
     this.bindings.delete(agentSessionId)
     bound.lifetime.abort(new AgentMuxError('The original ACP binding was explicitly closed.', 'CONTROL_CANCELLED'))
     bound.unsubscribe()
@@ -178,6 +185,20 @@ export class AgentMuxAcpBridge {
     bound.pendingPermission = null
     bound.permissionQueue = []
     if (eventError !== undefined) throw eventError
+  }
+
+  private async detachManaged(agentSessionId: string, bound: BoundAcpSession): Promise<void> {
+    this.bindings.delete(agentSessionId)
+    const detached = new AgentMuxError('The ACP observer detached from its original Run.', 'CONTROL_CANCELLED')
+    bound.lifetime.abort(detached)
+    bound.unsubscribe()
+    const permissions = [bound.pendingPermission, ...bound.permissionQueue]
+    for (const pending of permissions) {
+      pending?.delivery?.controller.abort(detached)
+      pending?.rejectCompletion(detached)
+    }
+    try { await bound.eventTail }
+    finally { await bound.binding.close() }
   }
 
   respondPermission(
@@ -239,7 +260,7 @@ export class AgentMuxAcpBridge {
 
   async dispose(): Promise<void> {
     const ids = [...this.bindings.keys()]
-    const results = await Promise.allSettled(ids.map(async (id) => await this.unbind(id)))
+    const results = await Promise.allSettled(ids.map(id => this.unbind(id)))
     const errors = results.flatMap((result) => result.status === 'rejected' ? [result.reason] : [])
     if (errors.length > 0) throw new AggregateError(errors, 'Failed to close ACP bindings.')
   }
@@ -247,9 +268,10 @@ export class AgentMuxAcpBridge {
   private enqueueEvent(
     agentSessionId: string,
     bound: BoundAcpSession,
-    event: AgentMuxAcpEvent
+    event: AgentMuxAcpEvent,
+    observedAt?: number
   ): void {
-    const accepted = bound.eventTail.catch(() => {}).then(async () => await this.accept(agentSessionId, bound, event))
+    const accepted = bound.eventTail.catch(() => {}).then(async () => await this.accept(agentSessionId, bound, event, observedAt))
     bound.eventTail = accepted.catch(error => this.callbacks.onError(agentSessionId, error, this.evidence(bound)))
     // The required error callback owns diagnostics; a failed callback is retained
     // on eventTail for explicit unbind, without poisoning later observations.
@@ -261,21 +283,39 @@ export class AgentMuxAcpBridge {
       : { kind: 'provider', providerId: bound.nativeProviderId, sessionId: bound.nativeSessionId }
   }
 
-  private evidence(bound: BoundAcpSession): AgentMuxEvidence {
-    return { source: 'acp', observedAt: Date.now(), acpAdapterId: bound.binding.adapterId,
+  private evidence(bound: BoundAcpSession, observedAt = Date.now()): AgentMuxEvidence {
+    return { source: 'acp', observedAt, acpAdapterId: bound.binding.adapterId,
       acpSessionId: bound.nativeSessionId, acpBindingId: bound.id, ...(bound.run ? { run: { ...bound.run } } : {}) }
   }
 
   private async accept(
     agentSessionId: string,
     bound: BoundAcpSession,
-    event: AgentMuxAcpEvent
+    event: AgentMuxAcpEvent,
+    observedAt?: number
   ): Promise<void> {
     if (this.bindings.get(agentSessionId) !== bound) return
     assertBoundedEvent(event)
     const previousNativeSessionId = bound.nativeSessionId
     if (event.type === 'native-session') bound.nativeSessionId = event.sessionId
-    const evidence = this.evidence(bound)
+    const evidence = this.evidence(bound, observedAt)
+    if (event.type === 'observation-gap') {
+      if (bound.nativeProviderId !== undefined) await this.callbacks.onError(agentSessionId,
+        new AgentMuxError('The ACP Activity observation exceeded its retained window.', 'AGENT_ACP_OBSERVATION_GAP'), evidence)
+      return
+    }
+    if (event.type === 'permission-settled') {
+      if (bound.nativeProviderId === undefined) return
+      const pending = bound.pendingPermission
+      if (pending?.request.id === event.requestId) {
+        await this.settlePermission(agentSessionId, bound, pending)
+      } else {
+        const queued = bound.permissionQueue.findIndex(item => item.request.id === event.requestId)
+        if (queued !== -1) bound.permissionQueue.splice(queued, 1)
+        else await this.callbacks.onRetainedPermissionSettled?.(agentSessionId, event.requestId, evidence)
+      }
+      return
+    }
     if (event.type !== 'permission') {
       await this.callbacks.onEvent(agentSessionId, event, evidence, bound.lifetime.signal)
       if (event.type === 'native-session' && event.sessionId !== previousNativeSessionId) {
@@ -284,13 +324,16 @@ export class AgentMuxAcpBridge {
       return
     }
 
+    const managedId = bound.nativeProviderId === undefined ? undefined : event.requestId
+    if (managedId && (bound.pendingPermission?.request.id === managedId || bound.permissionQueue.some(pending => pending.request.id === managedId))) return
     const request: AgentMuxPermissionRequest = {
       kind: 'permission',
-      id: mintObjectId(),
+      id: managedId ?? mintObjectId(),
       agentSessionId,
       title: event.title,
       options: event.options.map((option) => ({ ...option })),
       evidence,
+      ...(event.nativeToolCallId === undefined ? {} : { nativeToolCallId: event.nativeToolCallId }),
       ...(event.toolName !== undefined ? { toolName: event.toolName } : {}),
       ...(event.toolInput !== undefined ? { toolInput: event.toolInput } : {})
     }
@@ -331,27 +374,34 @@ export class AgentMuxAcpBridge {
       })
       try {
         await Promise.race([bound.binding.respondPermission(pending.event.requestId, pending.decision!, controller.signal), cancelled])
-        await this.callbacks.onInteractionSettled(pending.request)
-        pending.resolveCompletion()
-        if (bound.pendingPermission === pending) {
-          const next = bound.permissionQueue.shift()
-          bound.pendingPermission = next ?? null
-          if (next && this.bindings.get(agentSessionId) === bound) {
-            const published = bound.eventTail.catch(() => {}).then(() => this.publishPermission(agentSessionId, bound, next))
-            bound.eventTail = published.catch(error => this.callbacks.onError(agentSessionId, error, next.request.evidence))
-            void bound.eventTail.catch(() => {})
-          }
-        }
+        await this.settlePermission(agentSessionId, bound, pending)
       } catch (error) {
         // The original decision may have applied. Keep its request and unknown
         // completion; neither an observer failure nor another event retries it.
         pending.rejectCompletion(error)
+        if (bound.nativeProviderId !== undefined && bound.lifetime.signal.aborted) return
         await this.callbacks.onError(agentSessionId, error, { ...pending.request.evidence, observedAt: Date.now() })
       } finally {
         controller.signal.removeEventListener('abort', abort)
       }
     })()
     void custody.finished.catch(() => {})
+  }
+
+  private async settlePermission(agentSessionId: string, bound: BoundAcpSession, pending: PendingAcpPermission): Promise<void> {
+    pending.settlement ??= (async () => {
+      await this.callbacks.onInteractionSettled(pending.request)
+      pending.resolveCompletion()
+      if (bound.pendingPermission !== pending) return
+      const next = bound.permissionQueue.shift()
+      bound.pendingPermission = next ?? null
+      if (next && this.bindings.get(agentSessionId) === bound) {
+        const published = bound.eventTail.catch(() => {}).then(() => this.publishPermission(agentSessionId, bound, next))
+        bound.eventTail = published.catch(error => this.callbacks.onError(agentSessionId, error, next.request.evidence))
+        void bound.eventTail.catch(() => {})
+      }
+    })()
+    await pending.settlement
   }
 
   private permissionDecision(

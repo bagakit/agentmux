@@ -1354,13 +1354,11 @@ export class AgentMuxClient {
           signal.throwIfAborted()
           const session = this.registry.get(agentSessionId)
           if (!evidence.run || !sameRun(session.run, evidence.run)) throw new AgentMuxError('The original ACP Run is no longer current.', 'STALE_AGENT_SESSION')
-          // 与 acceptHookEvent 同一条判据、同一份台账：进程已终结的 run 不许再写语义状态、也不许再发状态
-          // 事件。ACP 是喂状态的**第二条**入口，两条路对「进程已死还能不能被点亮」必须判得一样——只修
-          // 一条会留下同形的第二个缺陷。今天没有 Provider 声明 acpStrategy: adapter，所以这条路上还看不
-          // 到那个 bug；接上第一个 ACP Provider 的那天它就会原样复现，届时这里已经站着人了。
+          // As with Hooks, earlier native observations cannot revive an ended Run.
           if (this.endedRuns.has(session.run.runId)) return
           const observed = { ...evidence, run: { ...evidence.run } }
-          const mutation = agentTimelineMutationFromAcpEvent(agentSessionId, event, observed)
+          const mutation = agentTimelineMutationFromAcpEvent(agentSessionId, event, observed,
+            session.nativeActor?.actorId === observed.acpBindingId)
           if (mutation) {
             const result = await this.registry.updateWithTimeline(agentSessionId, evidence.run, current => ({ session: current, mutation }), signal)
             const history = result.timeline
@@ -1392,6 +1390,15 @@ export class AgentMuxClient {
           if (!request.evidence.run) throw new AgentMuxError('The original ACP request omitted its Run.', 'INVALID_AGENT_INTERACTION')
           const next = await this.clearPendingInteraction({ agentSessionId: request.agentSessionId, run: request.evidence.run }, request.id, request)
           this.publishSession(next)
+        },
+        onRetainedPermissionSettled: async (agentSessionId, requestId, evidence) => {
+          if (evidence.source !== 'acp' || !evidence.run) return
+          const session = this.registry.findByRun(evidence.run)
+          const request = session?.pendingInteraction?.request
+          if (!session || session.agentSessionId !== agentSessionId || request?.id !== requestId ||
+              request.evidence.source !== 'acp' || request.evidence.acpBindingId !== evidence.acpBindingId ||
+              request.evidence.acpSessionId !== evidence.acpSessionId) return
+          this.publishSession(await this.clearPendingInteraction(session, requestId, request))
         },
         onError: (agentSessionId, error, evidence) => {
           this.publisher.publish({ type: 'agent-error', agentSessionId, code: 'ACP_OBSERVATION_UNCONFIRMED',
@@ -2989,7 +2996,7 @@ export class AgentMuxClient {
                     throw new AgentMuxError('The ACP observation belongs to a different original actor or native session.', 'AGENT_NATIVE_IDENTITY_CONFLICT')
                   }
                 } catch (error) { await binding.close(); throw error }
-                await this.acp.bind(session.agentSessionId, binding, session.run, provider.id)
+                await this.acp.bind(session.agentSessionId, binding, session.run, { providerId: provider.id, actorId: session.nativeActor.actorId })
                 return this.registry.get(session.agentSessionId)
               }
               return await captureAgentNativeSessionIdentity({ session, provider, registry: this.registry,

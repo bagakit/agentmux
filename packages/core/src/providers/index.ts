@@ -116,7 +116,8 @@ function createAntigravityProvider(defineAgentProvider: ProviderFactory): AgentP
       },
       async attach({ nativeActor, processId, signal, waitForReady }) {
         const { actorId, lifecycleOperationId, token } = nativeActor
-        const observe = () => antigravityAcpActor.inspect({ actorId, lifecycleOperationId, processId }, token, signal)
+        const identity = { actorId, lifecycleOperationId, processId }
+        const observe = () => antigravityAcpActor.inspect(identity, token, signal)
         let snapshot
         for (;;) {
           try { snapshot = await observe() }
@@ -131,10 +132,35 @@ function createAntigravityProvider(defineAgentProvider: ProviderFactory): AgentP
         if (snapshot.state !== 'ready') throw new AgentMuxError(snapshot.state === 'initializing' ? 'The original ACP initialization is still pending.' :
           snapshot.state === 'authentication-required' ? `Antigravity requires authentication at ${snapshot.stage}.` : `The original ACP step ${snapshot.stage} is unconfirmed.`,
           snapshot.state === 'authentication-required' ? 'AGENT_ACP_AUTHENTICATION_REQUIRED' : 'AGENT_ACP_ACTOR_UNCONFIRMED')
-        return { adapterId: 'antigravity', sessionId: snapshot.sessionId,
-          onEvent(listener) { listener({ type: 'native-session', sessionId: snapshot.sessionId }); return () => {} },
-          async respondPermission() { throw new AgentMuxError('This ACP actor has no pending permission request.', 'UNKNOWN_AGENT_INTERACTION') },
-          async close() {} }
+        const sessionId = snapshot.sessionId
+        let close: (() => void) | undefined
+        return { adapterId: 'antigravity', sessionId,
+          onEvent(listener, onError) {
+            listener({ type: 'native-session', sessionId })
+            let disposed = false, timer: ReturnType<typeof setTimeout> | undefined, stop: (() => void) | undefined
+            let delay = 100
+            const start = () => {
+              if (disposed) return
+              stop = antigravityAcpActor.observe(identity, token, sessionId, (event, observedAt) => {
+                delay = 100
+                listener(event, observedAt)
+              }, error => {
+                if (disposed) return
+                if (delay === 100) onError?.(error)
+                timer = setTimeout(start, delay)
+                delay = Math.min(delay * 2, 2000)
+              })
+            }
+            close = () => { disposed = true; clearTimeout(timer); stop?.() }
+            start()
+            return close
+          },
+          async respondPermission(requestId, decision, responseSignal) {
+            await antigravityAcpActor.respondPermission(identity, token, sessionId, requestId, decision,
+              AbortSignal.any([responseSignal, AbortSignal.timeout(5000)]))
+          },
+          async close() { close?.() }
+        }
       }
     },
     planManagedHooks: ({ env, workspacePath }) => planLocalHooks(executionPath(executionHomeDirectory(env), workspacePath)),
