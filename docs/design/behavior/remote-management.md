@@ -1,16 +1,16 @@
 # Remote 管理 PRD
 
-本文是 AgentMux 远程管理的产品需求与行为 SSOT。它回答用户如何理解远端环境、找到正在工作的 Agent、判断观测缺口并完成准确的管理动作；Session 恢复、权限、消息和资源测量仍由各自原 owner 定义。当前源码入口见[公共能力与当前实现基线](#公共能力与当前实现基线)，源码存在不代签安装包或某台远端的运行能力。
+本文是 AgentMux 远程工作与管理的产品需求和行为 SSOT。组网、节点发布、Host 连接与网络观察唯一归 [Mesh](mesh.md)。它回答用户如何理解远端环境、找到正在工作的 Agent、判断观测缺口并完成准确的管理动作；Session 恢复、权限、消息和资源测量仍由各自原 owner 定义。当前源码入口见[公共能力与当前实现基线](#公共能力与当前实现基线)，源码存在不代签安装包或某台远端的运行能力。
 
 [交互合同入口](../agentmux-desktop-interaction.md) · [Remote 呈现](../presentation/settings-and-observation.md#remote-管理拓扑) · [设置共同合同](settings-and-observation.md#设置页的信息架构)
 
 ## 已确认方向与方案范围
 
-Remote 管理是独立、完整的产品主题；设置提供明确入口，以可探索的拓扑改善远端管理与监控的理解，实现时优先复用项目已有的无限画布依赖。用户提供的深色节点拓扑与右侧详情是构图参考，不授予第三方公网入口、代理服务或主动网络扫描资格。网络观察范围由本页的准确来源合同决定。
+Remote 管理是独立、完整的产品主题；设置提供明确入口，以可探索的拓扑改善远端管理与监控的理解，实现时优先复用项目已有的无限画布依赖。用户提供的深色节点拓扑与右侧详情是构图参考，不授予第三方公网入口、代理服务或主动网络扫描资格。网络观察范围由 [Mesh 的准确来源合同](mesh.md#所选-host-的只读网络观察)决定。
 
-本文的观察层级、主流程和信息优先级是据此收敛的产品方案。分期是设计建议，不自动创建执行任务；新增采集、历史保存、通知策略、远端部署和控制能力须在对应 owner 明确合同后安排。已确认的管理范围包括完整管理工作台、所选 Host 的只读运行与网络观察、同身份路由修复，以及用户配置的应用授权同步；长期历史、主动告警、部署和批量运维仍按各自用户任务单独决策。本文定义目标合同，已落地能力另由下文实现基线核对。
+本文的观察层级、主流程和信息优先级是据此收敛的产品方案。分期是设计建议，不自动创建执行任务；新增采集、历史保存、通知策略、远端部署和控制能力须在对应 owner 明确合同后安排。已确认的管理范围包括完整管理工作台、所选 Host 的只读运行观察及 Mesh 中的网络观察和同身份路由修复，以及用户配置的应用授权同步；长期历史、主动告警、部署和批量运维仍按各自用户任务单独决策。本文定义目标合同，已落地能力另由下文实现基线核对。
 
-#原工具绑定中的 `resourceHostId` 属于创建协调端的 Host 命名空间，不能直接当成当前 Desktop 的路由。Desktop 在原 Session 快照、事件、恢复候选与历史描述的投影边界，以原 `resourceRuntimeId` 对照已有认证绑定和缓存的稳定 Runtime 身份，派生当前设备下的 Agent／项目位置；不修改原绑定，不增加探测或持久事实库。模式标签和文件资源上下文消费同一投影。未映射或有歧义时项目 Host 保持未知，仅阻止本次依赖该准确地址的文件操作，保留原 Agent 的输入、控制与恢复入口。
+原工具绑定中的 `resourceHostId` 属于创建协调端的 Host 命名空间，不能直接当成当前 Desktop 的路由。Desktop 在原 Session 快照、事件、恢复候选与历史描述的投影边界，以原 `resourceRuntimeId` 对照已有认证绑定和缓存的稳定 Runtime 身份，派生当前设备下的 Agent／项目位置；不修改原绑定，不增加探测或持久事实库。模式标签和文件资源上下文消费同一投影。未映射或有歧义时项目 Host 保持未知，仅阻止本次依赖该准确地址的文件操作，保留原 Agent 的输入、控制与恢复入口。
 
 ## 远程 Agent 的能力方向
 
@@ -30,46 +30,6 @@ Core 更新后，原失败请求可沿其准确 Coordinator、binding、Session 
 
 发现、创建时的执行选择、工具权限、操作结果与原身份恢复必须通过 Core 公共 API、JSON-RPC／CLI 及真实客户端同源消费，按[公共能力贡献约定](../../guides/public-capability-contributions.md)在同一计划中判断复用与扩展。真实双 Host 验收须分别覆盖两端角色互换后的执行方向，证明各方向准确的文件与命令落点、独立授权边界、错误资源拒绝、回包丢失不重放，以及重启后原身份与工作面恢复；通用机制另用不同原生协议或触发形态验证。性能证据须绑定候选与实际网络条件，分别记录冷启动、复用连接的工具往返、大载荷吞吐、并发干扰和空闲成本，不用本机环回或主观流畅代签真实跨主机性能。本节定义目标，不声明实现或验收已完成；具体方法沿[测试策略](../../testing/strategy.md#任务验收与假绿防护)。
 
-## Tailcat 传输与本机接入
-
-Remote 的同一 Host 可选择 SSH、SSH 优先且 Tailcat 备选、或仅 Tailcat。现有 Host 默认使用 SSH；关闭 Tailcat 不启动其 CLI，不改写 SSH 命令或删除配置。传输选择不改变 Host、Runtime、Session、Run 或工作面身份。备选只用于建立通道，在发送业务请求后失去回执时保留原 operation ID 和未知结果，不能自动改路重放。
-
-Tailcat 通过官方 CLI 的双向 stdio 复用现有 JSON-RPC 和 Runtime 绑定。接收端必须已经安装并运行 AgentMux；本机接入开关只监听并将连接桥接到原 `amux system endpoint --stdio`，不安装远程核心。开关使用已保存的 server key（含 PSK 和固定 DERP region）及明确的非空 client public key allowlist；关闭只停止监听。发送端使用保存的 client key 和对方 `tc…` 地址。地址属于凭据，不进入日志、拓扑标签或公开示例。
-
-CLI 缺失、启动失败和监听观察未知必须可见并可重新检查；进程启动不代签已连接。Tailcat 失败不能撤销健康 SSH、Agent 或 Run。现有 Linux x64 headless Core 升级范围保持不变，Tailcat 接入不授予 Mac 远程安装、主动扫描或绕过安全策略的权限。
-
-### 主动接入与可组合网关
-
-无法被入站连接访问的设备可主动向已配置网关建立加密双向通道，访问方经该网关到达设备原 Core。设备的出站可达性与网关接入授权分别确认，不以 SSH 可用为前提；配对明确准确网关和接入设备，通道标识不替代原 Host／Runtime 身份。网关只持有连接、接入资格和转发状态，AgentSession、Run、项目、资源权限与恢复仍由原 owner 持有。建立连接不授予访问方额外资源权限，不把网关当成所有接入机器的共同本机。
-
-连接组件按网络能力命名并可独立发布；网关、主动接入与边缘转发是组合角色，不固化为机器身份或固定中心拓扑。Core 可直接引用组件形成网关，轻量边缘单元也可独立运行同一组件。独立进程只是其启动装配，不能成为 Core 网关的必需中间服务；两者共用转发、准入和流控机制，借用宿主监听器时仅释放自己的连接与处理器，不关闭宿主服务。转发保持原目标及授权；当前显式路径之外的递归发现、广播和自动选路须有各自合同，不能从节点角色推导。
-
-第一方客户端和 CLI 通过原公共 RPC 消费同一原业务能力。连接配置、发现、当前观察、停止本次接入与恢复入口均须可操作；组件监听、准确设备已接入、目标 RPC 可用与原业务完成分别表达，未连接、身份未知与明确拒绝分别表达。通道中断保留原工作面、Session、未决操作与最后确认事实；重连只恢复传输，不自动重放未知请求或创建替代 Session。单个设备的中断和积压不关闭其他设备或本机健康能力。
-
-### 在 App 中准备 Tailcat 接入
-
-两台都已安装 AgentMux 的机器无需离开 App 运行 `tailcat genkey`。各机器上的人可让本机 Host 经官方 CLI 准备一份已保存密钥（未指定名称时使用固定的 AgentMux 默认名，只接受官方密钥目录中的名称，不接受路径）：接收端为带 PSK、固定 DERP region 的 server key，发起端为 client key，并返回其公开的 client public key 作为本机连接码。自定义名称沿官方 CLI 的原名称精确传递，不按自设字符集或固定长度拒绝，也不修剪或改名；文件系统是否合法由原 Host 与官方 CLI 判定。准备只在该名称的密钥缺失时生成，已存在即原样复用，绝不覆盖、删除或改写任何已有密钥；返回结果区分新生成与复用。私钥只留在原密钥文件，不进入结果、日志或配置；连接码是公钥，可以复制给对方。
-
-准备动作写入本机凭据，只接受传输层认证的本机用户；托管 Agent 不能代为准备或借此取得授权。它只作用于发出请求的 Host 本机，不能替另一台机器生成密钥。CLI 缺失或执行失败如实说明并保留原配置、草稿与健康工作，给出安装与重试入口。
-
-准备失败沿原结构化机器码区分准确服务未提供接口、CLI 明确缺失、已保存密钥不合适及执行尚未确认，不从文案猜测原因。服务接口不可用时说明原服务与下一步，不能用安装 Tailcat 冒充修复；只有原执行 owner 确认 CLI 缺失才提示该依赖未安装。服务未报告方法清单保持未知，不增加版本猜测或关闭健康能力；重新准备仍是人的明确动作。
-
-准备不替人完成授权：发起端的连接码仍由接收端的人填入允许列表，监听开关与保存仍是接收端的明确动作；接收端的私有地址仍经原复制入口交给发起端，由发起端保存并测试同一 Host。两台机器之间只交换这两段文本，不新增无人确认的配对、网络协议或自动加入允许列表。GUI 与 `amux settings hosts tailcat-key` 共用同一 Host 能力。
-
-### 接入失败时交给 Mote
-
-Tailcat 依赖缺失、密钥准备或入站监听失败时，就地说明下一步并保留手动安装入口；用户可选择某个 Mote，交代依赖安装、环境诊断和配置填写准备。任务携带准确的本机执行目标、被配置 Host、接收／发起角色及非敏感字段是否已填写，不把私有地址、私钥或未经筛选的原始错误复制进任务。未保存草稿不能冒充已生效配置。
-
-原失败步骤、已知机器码和所处设置入口以白名单字段加入同一任务上下文，供 Mote 直接消费已确认事实；缺失观察明确未知，不要求重新安装已确认可用的依赖，也不把窗口定位当成业务步骤。帮助入口可在诊断未知时继续使用，不新增求助状态库或借求助取得密钥、允许列表及保存权限。
-
-求助复用原 Mote 目录、逻辑主对话和持久输入队列，沿原角色修订与准确操作回执投递，不按当前活动成员、显示名称或首个 Executor 猜执行者，也不新增专用修复 Agent 或任务状态库。主对话未确认时保原引用和设置草稿，让用户沿所选 Mote 的原开始／恢复入口继续。入队、输入确认、处理完成和连接成功分别表达；未知投递不自动重发。原客户端接入授权、密钥准备和保存权限继续由各自 owner 确认，求助本身不能代批允许列表。
-
-### 当前通信方式
-
-已配置 Remote 的实际通信方式在设备／Host 身份入口可发现，hover 与键盘聚焦可阅读同一事实。当前 SSH 或 Tailcat 只来自观察端维护的原 Host Runtime RPC 通道：真实建连确认、SSH 建连失败后选中 Tailcat、原通道关闭及路由正式采用分别由原传输 owner 提供。已保存偏好与实际采用方式分别标注；候选尚未采用不改变当前投影，断线后最后确认的方式不能继续标为当前已连接。尚未取得事实保持未知，其他独立命令通道、Agent 健康、Tailcat 直连或 DERP 中继路径不由这项观察代签。通道已建立但远端 Core 的 owner 协议明确早于当前合同，须明确提示协议更新要求，不能把它表述成 SSH 不通或 Agent 死亡，也不据此自动升级、重启或降级原 Runtime。
-
-展示消费已有被动状态，不因 hover、focus、节点绘制或筛选发起新连接、探测、诊断／资源读取或轮询。事实附准确 Host／来源与确认时间，经原 SDK、Host inspect RPC／CLI 和 Desktop 状态投影复用；缺失／失败只影响本项观察，原 Host、Session、Run、工作面和恢复动作继续保留。正常提示仅含安全的方式、状态、是否采用备选及来源时间，不回显私有地址、key 路径、命令或原始标准错误。
-
 
 ## 产品目标与主要任务
 
@@ -87,8 +47,8 @@ Remote 管理首先帮助用户回答四个问题：我连接了哪些环境；�
 | 对象 | 在管理台中的含义 | 事实归属与不可混同之处 |
 | --- | --- | --- |
 | 管理入口 / Endpoint | 本客户端正在消费的原业务服务及其能力范围 | 原公共服务与客户端连接事实；CLI 所在机器、接收 Core 的机器和执行机器不混同 |
-| Host | 原 endpoint 范围内的本地或 SSH 稳定路由及连接配置 | 现配置 owner；名称、SSH alias 和地址可编辑，不是跨 endpoint 全局机器 ID，也不证明连接就绪 |
-| Node / 组网节点 | 原 Core 向访问方发布的身份、资源与共享目录边界 | 原语义 Runtime 的持久身份与本机发布配置 owner；不是另一套 Runtime、物理机器 ID、路由或全网名册 |
+| Host | 原工作与资源的准确接入引用 | 网络身份、路由和配置归 [Mesh](mesh.md#对象身份与唯一-owner)，不是跨 endpoint 全局机器 ID |
+| Node | 原 Core 发布给访问方的资源入口 | 发布身份与访问策略归 [Mesh](mesh.md#本节点的发布与访问边界)，不另建 Runtime 或物理机器名册 |
 | ExecutionHost | 该环境上的文件、shell 与目录访问能力 | 原 Host 执行服务；目录可读不代签 Agent Runtime 可用 |
 | 语义 Runtime | 持有 Provider、AgentSession、权限与恢复语义的 Core 服务 | 原执行 Host 上的 Core；持久 Runtime 身份与当前服务进程代次分别表达 |
 | ctxmux Runtime | 服务 PTY、Run、Attachment、ordered bytes、Replay 与 Gap 的运行时 | ctxmux；其身份、物理运行事实和资源读数不由 Desktop 猜测 |
@@ -99,41 +59,23 @@ Remote 管理首先帮助用户回答四个问题：我连接了哪些环境；�
 
 身份、绑定与恢复的完整合同唯一见[联邦 Runtime 与远端恢复边界](session-recovery.md#联邦-runtime-与远端恢复边界)、[Endpoint、Host 路由与源身份](public-control.md#endpointhost-路由与源身份)及[统一概念与空间寻址](spaces-and-layout.md#统一概念与空间寻址)。管理台消费这些事实，不能因需要画图或展示“健康度”增加自己的事实 Store。
 
-## 本节点的发布与访问边界
-
-Settings 的 **Node** 管“所管理节点对外提供什么”，**Hosts** 管“我连接谁、对方允许我看什么”，**Remote** 管“在哪里开始或继续工作”。连接、监控与浏览不以选择或登记项目为前提。Node 默认本机；显式选择已保存 Host 或从该 Host 进入 Node 设置后，页头、观察、草稿与保存均绑定其准确 Core／Runtime，不把远端节点冒充本机。
-
-节点管理沿原 Core 的 owner 接口与传输认证的原 user operator 资格执行。同一 owner 已认证的 managed Agent 可在该原用户管理通道上执行用户授权的准确 Node inspect／configure，入口保留真实 Agent 认证；目标 Core 独立认证原 operator carrier。现有 Node 保存回执记录策略与操作，不另造审核主体。远端只借用已保存且由接收者确认 operator 资格的 carrier，固定 Runtime 与 owner 实例；来源 caller 先在原 Core 认证，其 capability 不成为目标 Core 的本机 Agent 身份。configure 保留完整策略、expectedRevision 和原 operationId，回执未知沿同一操作读取。device、guest、有限发布 scope 与 route delegation 不因 Agent 在场而取得 owner 资格；私有 owner-resources、密钥和来源信任仍按各自权限合同执行。不得剥离 caller 后重试被拒请求，也不把对话文字当作传输 principal。
-
-切换目标只改变管理视图，保留各原 Runtime 的未保存内容和操作；迟到回复不能替另一节点保存、显示其策略或覆盖后续输入。远端不可用或缺少接口时给出准确维护入口，不回退为本机策略。入站 listener 仍由原设备自己的配置 owner 管理，远端发布页不得误挂本机 listener 表单。仅打开系统资源共享时，保留原目录授权；原完整 policy 保存会重新确认目录目标，不把它误报为毫无目录效果的窄开关。
-
-发布配置由原 Core 在自己的持久 Runtime 范围持有，包含规范别名、是否共享系统资源、共享目录白名单、禁止访问的路径以及访客默认进入目录。Desktop 是该公共能力的客户端，不能在 Renderer 配置第二份策略或靠隐藏 UI 实施权限。保存沿准确预期版本与真实持久确认；未知回复先检查原操作，不重放。未保存表单、其原版本基线和待确认操作属于 Desktop 编辑意图，沿[原用户状态持久 owner](persistence.md)保全；恢复只读取原操作，不因重开页面或进程而重新发布，另一 Runtime 不能消费这份意图。发布项失败不关闭健康 Agent、已有连接或原工作面。
-
-别名是便于人使用的可变定位名，不是凭证、全球唯一机器名或持久 Runtime 身份。别名规则只描述可用于 URI 的规范形式，不能拿任意 Host label、SSH alias 或地址替代发布事实。当前入口只在自己已配置且认证的 Host 范围解析发布方；同名、离线与未确认不猜首候选，不自动扫描或取得新信任。需要稳定指向原对象的分享保留发布方 Runtime 身份，不能因别名重新绑定而打开另一个 owner 的同名资源。链接格式归[对象链接协议](../../specs/amux-protocol.md#对象链接)。
-
-共享资源通过原 Core 的窄发布接口读取；所有调用者遵守同一已提交发布策略。系统资源未共享时明确表示未共享，缺测与暂不可读分别说明，不用 0 或连接失败代替。默认进入目录是浏览起点，白名单与黑名单决定实际读取范围：目标须属于允许目录且不属于禁止范围，禁止项优先。共享目录在真实路径解析及底层读取边界执行，不信任客户端的路径、链接或 GUI 过滤，不允许符号链接、父目录和另一入口绕过。对外根引用不泄露未发布的绝对路径；没有发布目录时不猜 `~`、当前项目或整个磁盘。
-
-上述策略约束 AgentMux 发布入口，不是 SSH 账号、独立系统工具或 Agent 任意命令的操作系统沙箱。已有同账号 SSH owner 权力、Device 配对、创建/消息来源信任和单次 Agent 权限继续由原 owner 管理；发布别名或打开 URI 不授予这些能力，也不为实施发布规则追溯撤销已有健康工作。发布接口不得在拒绝后退回宽权限文件、Git、shell 或 `runtime.invoke` 通路。
-
-`amux://host/<别名>` 进入已确认节点的资源工作面；嵌套 Agent 和 Capsule 链接分别定位该发布方的原 Session 与原 Capsule，不创建替代对象。Agent 的当前展示位置、继续资格与权限沿原 owner。远端 Capsule 必须经准确 owner 的授权内容载体及原输入协议建立本机访问视图；不能把远端 loopback URL 当成本机地址，不能放开监听或以转发 HTML 的方式冒充完整交互与授权。
-
 ## 入口与观察范围
 
-Remote 在 Settings 中有可发现的独立管理入口，搜索、Overview、Host 身份入口及原设置深链都能到达准确对象。原连接、项目和信任管理能力沿同一 Host owner 承接，不以增加 Remote 为由出现两套可编辑 Host 清单。Settings 的同一 Cluster 分组依次提供 Node、Hosts 和 Remote；节点发布、访问路由和工作能力的分工见[本节点的发布与访问边界](#本节点的发布与访问边界)。各页均能独立直达，Remote 不复制 Host 编辑器，Host 也不被归为某一种远程工作模式。Host 工作台保留原 `hosts` 对象与准确导航身份。Phone、外部对话应用和全局 Executor 模板继续由原 owner 管理。
+Settings 的网络域、节点发布、接入与路径统一归 [Mesh](mesh.md#mesh-工作面与配置)；Remote 是独立工作入口，不复制连接编辑器、Host 清单或配置 owner。两页保留原 Host 对象、稳定 ID、准确导航、草稿与已访问操作；Phone、外部对话应用和全局 Executor 模板继续由各自 owner 管理。
 
-同一 Host 工作台按总览与监控、项目、应用与访问、连接配置组织任务。切换任务仍持有同一个准确 Host、原草稿与已访问操作，不建立三套选择器、清单或配置副本。总览承接拓扑与分源观察；连接配置承接原编辑、Test 与 Core 维护；应用与访问承接该 Host 的真实执行器盘点及跨 Host 来源核验、真人批准。全局模板不冒充远端已安装应用。
+原 Host 工作台的总览、项目、应用与访问、连接和维护入口继续可达，布局与网络范围见 [Mesh 工作面](mesh.md#原-host-工作台的入口与范围)。Remote 沿同一准确对象提供工作与运行观察，不把全局模板当作该 Host 的实际应用，不新增选择器、名册或配置副本。
 
 应用账户凭证、来源 Core 信任、单次 Agent 权限和 Phone / Device 配对各有不同主体与授权 owner；应用与访问不暗示它们已统一同步。应用账户同步的准确来源、目标、最小材料与目标验真由[Remote 应用授权同步](remote-application-access.md)持有；不复制系统权限或整个用户目录，不以统一登录态代替具体应用协议。
 
-进入后先显示已登记的环境和当前已有事实。查看拓扑不自动部署、升级、恢复全部 Session、运行任意 shell 或扫描网络；网络读取沿[所选 Host 的显式观察范围](#所选-host-的只读网络观察)，需要实际连接才能取得的事实由原服务按准确目标取得。离开页面只释放本页观察，不断开其他消费者或停止健康 Run。
+进入后先显示已登记的环境和当前已有事实。查看拓扑不自动部署、升级、恢复全部 Session、运行任意 shell 或扫描网络；网络读取沿[所选 Host 的显式观察范围](mesh.md#所选-host-的只读网络观察)，需要实际连接才能取得的事实由原服务按准确目标取得。离开页面只释放本页观察，不断开其他消费者或停止健康 Run。
 
-“所有环境”必须说明它是已配置环境，不能冒充扫描发现的全部机器。筛选可按名称、地址、项目和明确的待处理状态收敛；筛选只改变可见范围，摘要说明过滤条件与观测覆盖，不把被过滤或读取失败的对象算成不存在。
+环境范围、筛选和网络观察沿 [Mesh](mesh.md#原-host-工作台的入口与范围)，不把已配置环境冒充扫描发现的全部机器。
 
 设备也可从 Space 的名称入口直接进入其 [home 工作面](spaces-and-layout.md#设备主目录工作面)，无需先手动建立项目；Remote Agents 继续承接下面的双端资源选择。
 
 ## 独立 Remote execution 工作台
 
-用户可见页面名为 **Remote**，稳定模块身份保持原 `remote-execution`。页面目的，是让用户明确“Agent 在哪里运行、项目与工具在哪里、怎样开始或继续这项工作”。它与 Hosts 同层参与 Settings 导航、Overview 和搜索；详情复用原 Host 的准确对象深链，不要求先进入某台 Host 才能找到执行入口。本节持有行为合同；设置、创建与观察的源码入口见[实现基线](#公共能力与当前实现基线)，源码入口不代签特定运行实例或 Provider 资格。
+用户可见页面名为 **Remote**，稳定模块身份保持原 `remote-execution`。页面目的，是让用户明确“Agent 在哪里运行、项目与工具在哪里、怎样开始或继续这项工作”。它与 Mesh 同层参与 Settings 导航、Overview 和搜索；详情复用原 Host 的准确对象深链，不要求先进入某台 Host 才能找到执行入口。本节持有行为合同；设置、创建与观察的源码入口见[实现基线](#公共能力与当前实现基线)，源码入口不代签特定运行实例或 Provider 资格。
 
 首次进入 Remote 先给路线总览；已有任务选择、准确对象和草稿在切换中保留。浏览与配置路线不要求选择项目，明确准备时才沿下述流程选择项目与 Agent。
 
@@ -197,49 +139,13 @@ Provider 可以使用原生执行服务，也可以将原生工具接口连接�
 
 交付需验证从页面进入原创建流程、两个执行方向的准确角色、从原绑定打开持久工作面、未知观察时继续工作及离开后 reader 收敛。源码存在、工具往返或静态介绍均不能代签页面完成；真实调用链、变异、重启与独立视觉验收继续沿原规则。页面不自动扩展跨账号共享、自动选机、运行中切换、批量运维或能力探测范围。
 
-## 拓扑及选择模型
-
-### 真实关系优先
-
-首层拓扑展示“本客户端 / 管理入口 → 原 endpoint 内 Host route → 已核验 Runtime”的逻辑关系。身份沿[Endpoint、Host 路由与源身份](public-control.md#endpointhost-路由与源身份)，不能把接收 Core 中的 `local` 一律画成 CLI 所在电脑；普通 Desktop 只有在原本机身份已确认时才显示 This Mac。Host 节点以原 endpoint 与 Host ID 定位，Runtime 有确认事实后再披露其准确绑定，不新增全局机器 ID。
-
-边表示已保存或本次配置求值得到的逻辑关系，不承诺真实物理网络路由或正在保持的 socket。连接观测有来源时才在边上表达其结论与时间；没有当前观察时仍保留配置边，并明确其未确认性质。
-
-节点邻近的网络信息消费原配置、准确输入上的检查及下节具名网络观察。未取得新观察时，hostname／SSH alias、用户、端口与 Runtime 绑定继续保持其原配置含义；未显式覆盖的值说明沿系统 SSH 配置，不补成已经解析或连接的网络端点。
-
-系统 SSH 在本次读取明确给出的 ProxyJump 顺序可作为该路由的中转关系，标为配置路径；中转项只在原路由范围内辨认，不因此新增可管理 Host、Runtime、云区域或设备身份。SSH alias、内网 IP、相同名称或地理线索不能补出其他跳点；自定义代理只表示路径不透明，不解析命令猜中间设备。
-
-同一 Host 的 Runtime、项目、执行器和 Session 关系放在选中详情或按需展开，不默认把所有资源铺成不可读的大图。多个 Host 是否属于同一物理设备，缺少权威身份就不合并；即使多个 route 已确认为同一 Runtime，也保留各自准确路由，不把连接别名统计成独立 Runtime。Host、Runtime 与会话聚合各保留自己的身份范围和去重口径。
-
-拓扑内提供 Fleet map / Selected link 观察范围，与 Topology / List 呈现方式分开。Fleet map 沿原 Host 库展示环境关系；Selected link 只围绕当前所选 Host 投影同一网络观察中的配置中转与分源接口，不另设 Host 选择、草稿或事实 Store。范围切换不触发读取，不改变原焦点、保存、Session 或工作面；返回 Fleet map 保留原视口。
+## 原对象与准确导航
 
 ### 原调用者域与远端上下文读取
 
 `agent.context` 先由接收请求的 Core 认证原 managed caller；来源 SID／capability 仅属于该 Core 的语义域，不转交另一 Core 作为其本机 Agent 凭据。只有这个准确只读叶可沿既有 history 读取边界使用所选已保存 Host 的原认证载体，目标 Core 独立核验载体接收者资格。原 principal、device forwarding、取消与 Runtime／owner fence 继续生效；没有原权限时明确拒绝，不伪造目标 Actor、不降级身份，不改变通用转发或写入／输入／维护权限。无效来源 caller 在远端读取前拒绝。
 
 配置 Host 是当前客户端的路由名，目标 Session、原 source namespace 与分页游标保持准确绑定；缺失、不可用、同名或换路由不猜首项、不回退本机。来源 caller 认证失败不是目标 Session 状态。来源定位查询使用原 Store 已有的 exact-SID 读取，避免为单会话上下文枚举无关来源，不另建 cache 或策略 owner。只读和取消不创建、续接、重放输入或停止原 Run，保留原工作面与已有能力。
-
-### 所选 Host 的只读网络观察
-
-网络观察回答当前路由如何配置、原服务这次回应花了多久、各来源确认了哪些地址。GUI 与 CLI 经同一 Core 公共服务读取；准确 Host 配置、原客户端与 Runtime 身份仍由原 owner 持有，不在 Renderer 执行 shell 或新增网络事实 Store。
-
-| 来源 | 提供的事实 | 必须保持的范围 |
-| --- | --- | --- |
-| 原 Host 配置 | 原 endpoint 内的 Host、hostname／alias 及显式覆盖 | 保存值不证明已连通，也不因只读观察被改写 |
-| 系统 SSH 本次配置求值 | 目标 hostname、用户、端口、配置中转顺序与保活策略 | 复用原路由参数；当前求值不证明既有连接采用了相同配置。加密协议保活与 TCP 保活分开，策略不证明已收到保活响应 |
-| 原 Owner 的新鲜公共调用 | 已确认 Runtime 身份、本次 Owner RPC 请求耗时及采样来源 | 单调时钟仅包裹这次公开调用；可能包含建连、排队与服务处理，不包含 SSH 配置解析或其他观察的总耗时，不称为纯网络 RTT、ICMP 延迟或逐跳时延 |
-| 发起端与目标服务的网络接口 | 各自进程网络命名空间可见的接口名、地址族、地址、CIDR 与内部接口分类 | 两端各标实际进程来源，不将观察服务一概称为用户电脑；接口存在或名称不证明 VPN／隧道类型、连通性或当前出站接口。网卡地址不证明实际连接使用该 IP、NAT 出口或公网身份，不输出 MAC 或凭据 |
-| 可选的发起端 DNS 读取 | 该观察端解析得到的地址候选 | 不要求首个闭环必须提供；候选不证明连接端点，也不代替跳板远端的解析结果 |
-
-每次读取捕获准确已保存 Host 配置与原客户端，返回前复核两者仍相同；新鲜 Owner 结果通过原 Runtime 及服务代次核验后，才可关联请求耗时与目标接口。缓存身份不能代签这次网络回应。各来源分别带原采样或读取时间及局部失败，当前缺口与最后确认的旧值沿[状态、失败与恢复](#状态失败与恢复)表达，不把旧值刷新为当前正常或把缺测补零。
-
-聚合查询先在原 endpoint 认证调用者；仅准确的网络只读叶借用所选 Host 的已授权传输，不把源端 Agent 凭据当成目标端身份，不放宽 Runtime 域的直接调用权限。无效调用者在网络观察前拒绝；合法 Agent 与用户经同一聚合能力取得具名来源结果。
-
-GUI 只对可见的所选已保存 Host 显式读取或刷新网络，下述本机节点地址除外；CLI 沿同一准确 Host 公开查询，不以 GUI 可见为前置。节点渲染、缩放、筛选或选择全图不触发其他 Host 扫描，不另开定时探测与后台重连循环。SSH 配置求值可能执行用户已有的 Match exec，只在这次准确读取内进行。该求值仅返回上述网络字段，不将代理命令原文、完整命令输出、标准错误或额外私有路径加入观察结果及诊断，也不将解析值导入连接配置；用于原配置核验的 `configuration` 沿已保存 Host 配置合同返回，不属于 SSH 求值新增采集。正常请求可沿原传输的建连路径取得响应，不替换原消费者，不启动 Native、不枚举或恢复 Session，不重放输入；取消只结束本次观察，保留其他消费者和健康 Run。
-
-已确认的本机 Host 节点例外地显示本机局域网地址，帮助用户告诉另一台设备“这台机器是谁”。来源是本机 Owner 在同一网络观察中给出的目标接口；Remote 页面可见时对本机读取一次，本机配置变化时重读，不轮询、不联网、不探测、不读取其他 Host。首选地址取非回环的 IPv4，有线与无线网卡优先，链路本地地址、VPN 与其他隧道接口靠后；其余地址按需展开。读取中、读取失败与本机确无局域网地址分别表达，不以空白或旧值冒充当前；接口地址不证明另一台设备可以到达这台机器。
-
-物理路由器、网关、当前出站接口、实际 SSH 末跳 socket、完整物理路径、各级实际连接 IP、逐跳时延、丢包、公网出口与持续历史未有相应结构化来源时保持未知。链路与接口视图复用已有分源网络结果及原公共查询，不新增网关、socket、MTU 或接口类型采集；本范围不运行 traceroute、不访问外部 IP 服务、不修改保活策略，也不把配置中转节点画成已测得的物理网络。
 
 ### 连续理解与准确导航
 
@@ -259,7 +165,7 @@ GUI 只对可见的所选已保存 Host 显式读取或刷新网络，下述本�
 | 执行与能力 | 在这里能启动或恢复什么 | 原 Host 的执行器清单、Provider、配置来源、可用性、失败原因；全局模板不能冒充该 Host 已安装配置 |
 | Runtime 详情 | Core 与物理 Runtime 各处于何种状态 | 当前可证明的 Runtime / owner / Native 身份、协议、平台与能力；serving 与 bundled 候选明确区分 |
 | 资源详情 | 资源来自哪里，读数有多新 | 原 Runtime 已公开的 Run、Attachment 与保留输出等事实；CPU、内存、磁盘仅在有原 owner 的测量合同时展示 |
-| 网络详情 | 路径、策略与地址分别确认到哪一步 | 沿[只读网络观察](#所选-host-的只读网络观察)分源披露配置路径、保活策略、Owner 请求耗时与接口地址，不压成链路健康分数 |
+| 网络详情 | 路径、策略与地址分别确认到哪一步 | 沿[只读网络观察](mesh.md#所选-host-的只读网络观察)分源披露配置路径、保活策略、Owner 请求耗时与接口地址，不压成链路健康分数 |
 | 诊断与维护 | 失败在哪一步，原动作做到了哪里 | 准确来源、步骤、原因、原 operation 与阶段、下一步；观察当前状态与查询旧操作回执分别表达 |
 
 Session 的工作、等待、权限请求、未知等状态沿[Core 语义与 Provider 事实](agent-capabilities-and-messaging.md)，不能从进程 running、终端文案、输出速率或最新活动时间猜出。离线、尚未测试和不支持必须可辨；没有当前读数时不补零，也不借用本机 CPU、内存或卷容量代替远端。
@@ -274,27 +180,7 @@ Core I/O 消费原进程 resourceUsage 的累计读／写操作次数。Unix 的
 
 本管理台复用当前展开 Host 的顺序读取循环，不因缩放、图布局或节点渲染扫描无关 Session。展开、当前页且文档可见才读，折叠或隐藏取消自己的观察；图表故障不阻断读数与健康工作。近期曲线仅保留本次可见读取所得的有界内存样本，明确窗口、来源、单位与断点；缺测不填零、不平滑跨断线、不重复标旧值为新。长期历史、告警与可用性统计仍须独立采集及留存合同，网络吞吐、温度与逐跳延迟无真实来源时不画图凑数。
 
-## 连接配置与测试
-
-Host 的公共配置链支持按稳定 ID 新增、读取、完整 expected/CAS 编辑与删除，并复用原 ConfigOwner、schema、持久确认与发布。登记未安装或暂不可达的 SSH Host 不要求远端 Core 已就绪；尚无已保存 Runtime 绑定、原已采用身份及本地 Session 投影的连接草案，修正或取消不以旧地址连接成功为前置，这不证明远端没有其他工作；已保存配置与当前连接事实分别表达。新增不能自报 Runtime 身份，已学习的 Runtime binding 不允许清空、改写或复用到另一 Host；已绑定的路由变化沿同身份修复核验。删除不能级联删除项目、Session、Run、草稿或工作面；已退休 Session 的原恢复与历史引用同样受保护，不能仅凭当前活动清单或 Run 为空移除原路由；仍被引用或无法确认可安全移除时保留原对象，给出准确引用与恢复动作。本机 Host 保持原唯一身份，不通过通用增删替换。公共操作沿原服务，不读写客户端私有配置文件；丢回执后先读取原保存事实，读取不能冒充原操作完成，不自动重放。
-
-通用保存、冲突、搜索与草稿规则仍由[设置共同合同](settings-and-observation.md#设置页的信息架构)持有；本节持有 Host 专属要求，页面结构变化不授权另一份配置实现。
-
-- SSH 连接的常用编辑为名称与 hostname／系统 SSH alias；用户、端口、密钥和服务覆盖按需展开，保留已有字面值与只读 Runtime binding；连接编辑不扫描或导入 SSH 配置，不自动部署服务，只读配置求值不回填覆盖字段。空覆盖沿系统 SSH 已有行为；保存连接不等于连接已就绪，Test 仍使用完整当前输入并显示真实结果。连接复用沿原 Workspace→Host 引用，展示选择不为全局 Executor 模板另存一份 Host 绑定；目标 Host 的注册配置与可用性沿[执行器设置 owner](settings-and-observation.md#设置页的信息架构)取得。Session 数只表达实际引用，不冒充运行中数量，原删除和保存保护不在布局调整中放松。 已确认本机 Host 不挂载 SSH 连接字段；其他对象的编辑挂载、精确选择、重复导航、新建聚焦、搜索命中与窄窗返回沿[设置共同合同](settings-and-observation.md#设置页的信息架构)。
-
-- Hosts 的连接编辑区必须允许正常逐位输入 Hostname；首字符与后续内容变化不能自动折叠字段或移走输入焦点。展开/收起属于用户操作，同一 Host 的草稿、检查结果或无关配置更新不能改掉用户的展开选择；新 Host 可直接进入编辑。
-
-- Hosts 编辑同样保留原始字段基线与保存期间后续输入；无关 Host/字段提交只刷新 clean 内容，同字段冲突、准备失败与外部删除保留草稿，不用保存时的新快照消除冲突或静默重建。当前远端准备能力尚不可用时如实说明，不把受控准备条件下的保存成功冒充远端 Runtime 能力，也不打断无关本地健康 Run/Input。说明文字和 Test 反馈须与当前实际能力一致，不先承诺保存或测试可用、再在动作后否认；失败原因完整可读，草稿与健康输入保持。
-
-- Hosts 的 CLI 读取已提交的连接记录；已保存连接按明确稳定身份取得当前已提交对象并测试，草稿才按明确输入测试，不猜默认 Host、焦点或显示名称；测试不改配置、工作面或健康会话。连接就绪、当前能力明确不支持与检查没有取得事实必须区分，不能把检查失败说成目标不可用，也不能把未知说成就绪。测试结果保留原始原因并绑定本次输入，CLI 回执与界面当前结论都不得把同 ID 的旧 Ready 用于后改或并发替换的连接值；新输入未测试时如实说明，不覆盖检查期间的后续编辑；远端尚不支持时如实说明，不用另一条启动路径绕过它。Host 删除、连接重绑与身份复用另有引用完整性合同，不能只凭可见会话或 connected Run 为空放行。
-
-- **同一 Runtime 可以修复接入路由。** 用户明确保存已绑定 SSH Host 的新地址、SSH 用户、端口、密钥或服务入口时，Host ID、类型与已提交的 Runtime 绑定保持不变。候选须经系统 SSH 认证并由新路线上的原 Core 公共身份协议确认；不能只相信表单中的 Runtime ID，不能因旧线路不可达而要求先停止任务。删除 Host、改变类型、未绑定连接或换到另一个 Runtime 不属于这项修复，仍沿原引用与身份合同。
-
-- 路由修复沿原配置 owner 提交准确的预期版本与完整候选输入。候选确认期间保留原可用连接和输入，不预先关闭读者；配置持久保存成功后才采用新路线。保存失败、取消、身份不匹配或并发变更保留原配置与草稿并说明准确失败步骤。GUI、JSON-RPC 与 CLI 共用同一提交，不各自写配置文件；响应未知时先读回原已提交对象核对，不能重放任何运行操作。
-
-- 修复连接不等于重建工作。原 Session、Run、消费者、附件、历史观察与字节游标的保全及恢复资格唯一见[同身份路由修复](session-recovery.md#同身份路由修复)。管理台分别表达“配置已保存”“原 Runtime 身份已确认”与“原读者已恢复”；身份确认不能代签当前 Run 或阅读恢复，局部观察失败不拖垮其他读者和健康环境。不暗中部署、升级、重新授权、自动故障转移或重发未知输入。
-
-- Remote 中的环境库按稳定 Host ID 展开对象子菜单，分别查看连接配置与已登记项目。展开或关闭只改变导航；项目依据原 Workspace 的 `hostId` 投影，不以同名、同路径或当前焦点猜归属，不产生第二个项目编辑器。切换对象、子页和手机设备分区继续保留原全库草稿、按对象持有的高级展开选择、保存期间输入及冲突，窄窗返回准确当前子页入口。
+## 来源核验与业务信任
 
 - **首次跨 Host 来源信任由用户显式批准。** 已保存的目标环境在应用与访问中提供来源核验入口，显示本机来源与目标的 Runtime 身份、公钥指纹和目标已保存的信任事实；仅真实用户核验后明确批准，不自动信任、不替换已绑定公钥。连接、身份或公钥变化使旧核验失效，未知、冲突和保存失败保留真实原因及重新核验路径。该入口复用原 Host 的公开信任能力，Agent 不能借自报身份或界面输入替用户批准；身份与签名合同沿[A2A owner](a2a-collaboration.md#a2a-身份信封与持久化全局消息队列)。
 
@@ -335,7 +221,7 @@ Linux x64 的已保存、尚未绑定 Runtime 身份的 SSH Host 经原探测确
 - **执行顺序。** 执行沿原 `operationId`：原 Core 确认退出后，才向准确原 Native 进程发送停止信号，并按出生身份确认其退出；新 Native 启动前保存原状态目录的完整副本，副本归属该操作，不自动清理；新 Core 在同一状态目录、socket 与命名空间启动新 Native。原 Native 退出后仍存活、已无 Native owner 的原 Run 进程如实列入回执，不由维护操作按旧 PID 发送信号。
 - **失败与回退。** 新 Core 启动前的已确认失败，用原发行与原启动参数拉起原 Core，由它在未改动的状态目录上启动原 Native，并如实说明原运行中 Run 已结束；启动后的不确定结果只读复查，不重放、不自动回滚。回退到旧 Native 只能使用该副本，新 Native 写过的现库不交还旧版本。
 
-来源信任沿本页[连接配置与测试](#连接配置与测试)及其引用的 A2A owner；节点选择、Test 或展示不代签批准。Phone / Devices 仍沿[设备接入合同](public-control.md#手机版-relay-连接)，不把“可信来源能创建 Agent”混写成“此设备有所有远端管理权限”。
+来源信任沿本页[连接配置与测试](mesh.md#连接配置与测试)及其引用的 A2A owner；节点选择、Test 或展示不代签批准。Phone / Devices 仍沿[设备接入合同](public-control.md#手机版-relay-连接)，不把“可信来源能创建 Agent”混写成“此设备有所有远端管理权限”。
 
 安装资格探测与升级 owner 检查使用目标机固定的 `/usr/bin/python3`，标准库调用兼容 Python 3.6；不暗中换用另一解释器或修改宿主 Python。解释器或只读探测不可用时如实保留未确认，不能冒充平台不支持；取得 glibc 等事实后，仍按 App 携带的完整 Linux 制品判定资格，不能仅以 Node 自身的要求代签 Native 也可运行。
 
@@ -359,20 +245,16 @@ GUI、CLI 和其他客户端消费相同业务 owner。已有公开能力足够�
 
 | 已有基础 | 来源 | 已有范围与仍缺的闭环 |
 | --- | --- | --- |
-| 环境配置与管理工作台 | [HostConfig](../../../apps/host/src/host-configuration.ts)、[HostSettingsPane](../../../apps/desktop/src/renderer/src/components/settings/HostSettingsPane.tsx)、[HostTopology](../../../apps/desktop/src/renderer/src/components/settings/HostTopology.tsx) | Remote 入口、拓扑 / 等价列表共用原选择和草稿；本地 / SSH、关联项目、原 Session 导航、执行器、检查及连接管理沿原 owner |
-| Host 读取、Test 与路由修复 | [settings-hosts-control](../../../apps/desktop/src/main/settings-hosts-control.ts)、[公共 RPC](../../../packages/core/src/public-rpc.ts) | 已公开清单、测试及沿同配置 owner 的已绑定 SSH 路由更新；修复范围见本页连接合同。Test 结果为完整输入、outcome 与人读 detail，不能解析 detail 猜结构化版本、PID 或实时连接 |
 | Session 与项目投影 | [SessionSnapshot / WorkspaceRecord](../../../apps/desktop/src/shared/contracts.ts)、[HostProjectsPane](../../../apps/desktop/src/renderer/src/components/settings/HostProjectsPane.tsx) | 原 Host / Session / Workspace 引用与已有状态可复用；引用数量与当前运行数量须分口径，读取缺口不能补成零 |
 | Host 执行器和来源信任 | [public-rpc-host-settings](../../../packages/core/src/public-rpc-host-settings.ts)、[executor-contract](../../../packages/core/src/executor-contract.ts)、[HostCreationTrustPanel](../../../apps/desktop/src/renderer/src/components/settings/HostCreationTrustPanel.tsx) | 已有准确 Host 的发现、注册、可信来源读取与真人批准入口；不由拓扑另建配置或审批系统 |
 | 显式级联路线与安全发现 | [公共路线合同](../../../packages/core/src/host-route.ts)、[原路线 owner](../../../packages/core/src/host-route-gateway.ts)、[同源 CLI 指南](../../../packages/core/guides/modules/route.md) | 原连接承载有限调用与流；每个接收节点独立批准原 actor、前一签名节点、终点与准确用途。安全连接清单不建连，显式 inspect 只读取所选对端身份；读取、保存与授信独立，当前桌面编辑及 Launcher 消费仍需各自闭环 |
 | 原 Space 共享业务状态 | [空间权威合同](../../../packages/core/src/space-authority.ts)、[成员状态](../../../packages/core/src/space-sessions.ts)、[准确成员访问](../../../packages/core/src/space-member.ts) | Runtime 与 Space 限定的快照、watch 和 CAS 修改沿原 owner；远端 Agent 的成员身份与查看者权限分开。公共能力不自动共享窗口焦点、布局或草稿，也不代签完整桌面工作面的呈现与重启恢复 |
 | 应用授权同步 | [应用授权 owner](../../../packages/core/src/application-access-owner.ts)、[Desktop 执行绑定](../../../apps/desktop/src/main/application-access-owner.ts)、[HostApplicationAccessPanel](../../../apps/desktop/src/renderer/src/components/settings/HostApplicationAccessPanel.tsx) | 用户配置连接器，GUI 与 CLI 共用配置、比较、显式执行、目标验真和原操作查询；准确范围与未知恢复归[应用授权同步合同](remote-application-access.md)，不代签任意外部应用支持迁移 |
 | 所选 Host 的只读运行观察 | [分源观察](../../../packages/core/src/host-runtime-observation.ts)、[公共 Host 方法](../../../packages/core/src/public-rpc-host-settings.ts)、[HostRuntimePanel](../../../apps/desktop/src/renderer/src/components/settings/HostRuntimePanel.tsx) | 原 runtimeIdentity、runtimeDiagnostics、runtimeResourceSnapshot 由公共服务按准确 Host 组合；GUI 与 `settings hosts inspect` 消费同一结果。只观察当前已连接来源，缺失按来源报告，不冷启动 Native |
-| 所选 Host 的只读网络观察 | [原 Owner 接口事实](../../../packages/core/src/runtime-network.ts)、[Host 分源组合](../../../packages/core/src/host-network-observation.ts)、[HostNetworkPanel](../../../apps/desktop/src/renderer/src/components/settings/HostNetworkPanel.tsx)、[HostNetworkMap](../../../apps/desktop/src/renderer/src/components/settings/HostNetworkMap.tsx) | 新鲜 Owner 请求耗时、观察进程与目标 Owner 的接口、当前 SSH 保活配置和 ProxyJump 顺序分别读取；GUI 的 Read link / Refresh 与 `settings hosts network` 共用原服务，不轮询。聚合先认证原调用者，固定只读叶借原 Host 传输，不将来源 Agent 凭据当成目标身份；原 runtime 域授权保持不变 |
 | 跨 Host 执行的创建与服务观察 | [Remote Agents 设置页](../../../apps/desktop/src/renderer/src/components/settings/RemoteExecutionSettingsPane.tsx)、[NewTabSurface](../../../apps/desktop/src/renderer/src/components/NewTabSurface.tsx)、[AgentToolExecutionNotice](../../../apps/desktop/src/renderer/src/components/AgentToolExecutionNotice.tsx)、[Core execution coordinator](../../../packages/core/src/agent-execution-coordinator.ts) | 设置页消费原 Launcher 双端选择、当前客户端保留的 Session 绑定与原观察；工具连接和分项 Provider notices 同源呈现，不证明任意 Provider／工作区模式已经支持 |
 | Core 维护与原结果查询 | [remote-core-upgrade](../../../packages/core/src/remote-core-upgrade.ts)、[HostUpgradePanel](../../../apps/desktop/src/renderer/src/components/settings/HostUpgradePanel.tsx) | 管理台复用原检查、升级、operation 查询及诊断，保留已访问维护面及未决回执，不另写流程 |
-| 无限画布 | [Desktop 依赖](../../../apps/desktop/package.json)、[HostTopology](../../../apps/desktop/src/renderer/src/components/settings/HostTopology.tsx) | 复用 `@xyflow/react`，缩放 / 平移仅改变投影；窄窗自动使用同对象列表，不新增持久画布配置 |
 
-公开 Host 清单、测试、同身份路由修复和维护不等于完整配置 CRUD；新增或删除连接仍沿原配置与引用 owner，不把受约束更新扩大成未交付能力。当前网络观察不采集 DNS 候选，配置路径和接口地址也不代签实际连接端点；读取方式见[操作指南](../../guides/remote-network-observation.md)。远端主机 CPU / RSS / 磁盘、实际 socket 与物理跳点、逐跳时延 / 丢包、采集趋势及统一健康监控不能仅凭上述源码声称已有，也不能在 Renderer 私有 shell 探测或借展示解析补齐。
+Host 配置、网络观察与转发组件的源码基线归 [Mesh](mesh.md#公共能力与当前基线)。运行读数只能沿本页已有测量来源，不能由拓扑或 Renderer 私有 shell 探测补齐；源码存在不代签安装、远端支持或完整产品验收。
 
 ## 管理台的完成形态
 
@@ -380,7 +262,7 @@ GUI、CLI 和其他客户端消费相同业务 owner。已有公开能力足够�
 
 运行监控只读取选定的已保存 Host，沿原公共服务提供分源的语义 owner、Native 身份、诊断与 Run／Attachment／保留输出等资源事实。查看状态不冷启动 Native、不自动恢复 Session；当前连接缺失或某个来源读取失败时保留其他事实与原工作能力。观察仅随准确可见消费者存续，切对象、隐藏或取消后收敛，迟到结果不串用。
 
-运行观察复用已有 Runtime 只读方法；网络观察由准确 Host 的公共查询组合本页规定的来源，并接到实际 CLI 与 GUI 消费者，不在 Renderer 另跑 shell 或猜测展示文案。Core 继续与 UI 无关。接口的精确签名与接线由[公共能力源码入口](../../specs/public-capabilities.md)持有；源与回执、权限、恢复及性能边界仍沿本文引用的原 owner，不新增兼容层、旧版实现、迁移或独立监控事实库。
+运行观察复用已有 Runtime 只读方法；网络观察由准确 Host 的公共查询组合 [Mesh 规定的来源](mesh.md#所选-host-的只读网络观察)，并接到实际 CLI 与 GUI 消费者，不在 Renderer 另跑 shell 或猜测展示文案。Core 继续与 UI 无关。接口的精确签名与接线由[公共能力源码入口](../../specs/public-capabilities.md)持有；源与回执、权限、恢复及性能边界仍沿本文引用的原 owner，不新增兼容层、旧版实现、迁移或独立监控事实库。
 
 ## 后续能力与交付判据
 

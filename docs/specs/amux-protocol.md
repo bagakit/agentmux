@@ -213,7 +213,7 @@ Browser 使用同样定界，将首行的 `File` 换成 `Browser`。准确拼接
 
 节点入口为 `amux://host/ALIAS`，原节点资源为 `amux://host/ALIAS/agent/SID` 或 `amux://host/ALIAS/capsule/CID`。ALIAS 使用节点发布接口确认的小写规范别名，SID／CID 仍是单个编码 segment 的原身份。三种节点链接都可在末尾带唯一的 `?runtime=RUNTIME`；RUNTIME 按 `encodeURIComponent` 编码，保留原语义 Runtime 身份。分享时带此身份；匹配的原 Runtime 可在别名改动后继续定位，不能因旧别名指向另一设备而换 owner。裸别名只是当前定位提示，在已配置且认证的 Host 范围内解析；同名、不可观察与缺失须分别说明，不猜首候选或扫描新设备。别名、Runtime pin 和合法链接都不授予访问或输入权限，不自动继承中间节点的连接。
 
-节点入口打开准确 Host 的资源页；嵌套 Agent 导航须同时保留原执行 Host 与 Session 条件，没有确认展示位置时保留工作面并提供原对象检查入口。嵌套 Capsule 使用原 owner 的内容与交互载体，本机视图不改原 Runtime／CID 身份。解析到本机原 Runtime 时仍用本机原存储；远端视图按 Runtime 与 CID 隔离。具体发布与访问边界归[本节点的发布与访问边界](../design/behavior/remote-management.md#本节点的发布与访问边界)，不把定位协议当成组网、信任或操作系统沙箱。
+节点入口打开准确 Host 的资源页；嵌套 Agent 导航须同时保留原执行 Host 与 Session 条件，没有确认展示位置时保留工作面并提供原对象检查入口。嵌套 Capsule 使用原 owner 的内容与交互载体，本机视图不改原 Runtime／CID 身份。解析到本机原 Runtime 时仍用本机原存储；远端视图按 Runtime 与 CID 隔离。具体发布与访问边界归[本节点的发布与访问边界](../design/behavior/mesh.md#本节点的发布与访问边界)，不把定位协议当成组网、信任或操作系统沙箱。
 
 解析必须将 segment 准确解码，并通过同一 formatter 编码为完全相同的原链接；非 canonical 转义、未定义的额外路径或尾斜杠不接受。不进行 URL 路径归一化；编码后的斜杠可以属于 ID，不能因此拆成对象层级。原 ID 的分配规则和耐久身份保全仍归[空间身份 owner](../design/behavior/spaces-and-layout.md#产品实体-id-分配)。
 

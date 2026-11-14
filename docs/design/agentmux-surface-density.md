@@ -33,7 +33,7 @@
 | Capsule 设置、页面身份、待答状态与 Toolkit 成果入口 | [Capsule 的设置、页面与工具结果呈现](presentation/local-page-hosting.md) |
 | Explorer、编辑、分支、差异和留存提示 | [文件与 Git 的呈现](presentation/files-and-git.md) |
 | Settings、状态栏、Activity、通知和工具密度 | [设置与观测的呈现](presentation/settings-and-observation.md) |
-| Remote 拓扑画布、节点、监控摘要与选中详情 | [Remote 管理拓扑](presentation/settings-and-observation.md#remote-管理拓扑) |
+| Mesh 网络画布、节点、链路与 Remote 工作详情 | [Mesh 网络工作面](presentation/settings-and-observation.md#mesh-网络工作面) · [Remote 工作详情](presentation/settings-and-observation.md#remote-管理拓扑) |
 | 手机 Web client 的尺度、控件、文案、状态、动效与采图验收 | [手机客户端的呈现](presentation/mobile-client.md) |
 | 公共控制的原表面 | [公共控制与客户端的呈现](presentation/public-control.md) |
 

@@ -1,6 +1,6 @@
 # 读取远端环境的网络信息
 
-网络观察用于了解一条已保存 Host 路由的当前 SSH 配置、Owner 请求耗时与各来源的接口地址。范围见[Remote 网络观察](../design/behavior/remote-management.md#所选-host-的只读网络观察)，准确结果结构见 [Host 网络公共类型](../../packages/core/src/host-network-observation.ts)；配置解析不能证明实际物理路径。
+网络观察用于了解一条已保存 Host 路由的当前 SSH 配置、Owner 请求耗时与各来源的接口地址。范围见[Mesh 的 Host 网络观察](../design/behavior/mesh.md#所选-host-的只读网络观察)，准确结果结构见 [Host 网络公共类型](../../packages/core/src/host-network-observation.ts)；配置解析不能证明实际物理路径。
 
 ## 选择准确环境
 
@@ -11,7 +11,7 @@ amux settings hosts ls
 amux settings hosts network --host HOST_ID
 ```
 
-`HOST_ID` 要替换成原清单中的 ID。查询使用已保存配置，不能用未提交表单代替；它不会修改路由、保活策略或 Session。GUI 入口为 Settings → Remote → Hosts：选中准确的 Host，在 Overview 的网络观察区点击 Read link，之后用 Refresh 重新读取。网络区手动读取，不自动轮询，与命令消费相同事实。
+`HOST_ID` 要替换成原清单中的 ID。查询使用已保存配置，不能用未提交表单代替；它不会修改路由、保活策略或 Session。Mesh 是目标设置入口，原 Host 公共命令与工作台能力保持；图形名称和入口核对当前构建及[设置目录](../settings-catalog.md#cluster)。在原 Host 工作台中，选中准确的 Host，在 Overview 的网络观察区点击 Read link，之后用 Refresh 重新读取。网络区手动读取，不自动轮询，与命令消费相同事实。
 
 ## 理解来源与缺口
 
