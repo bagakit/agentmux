@@ -904,6 +904,166 @@ it('[drag-composition] a later original split during intent saving survives the 
 })
 
 
+// T7: original App / close owners, with the same typed Native and painted Agent/File leaves as this fixture.
+const horizontalPageClose = () => document.querySelector<HTMLButtonElement>('[data-survey-page-region-id="composition-page"] .survey-item-tab-close')!
+async function confirmHorizontalClose() {
+  await vi.waitFor(() => expect(named('Close')).toBeDefined())
+  await click(named('Close'))
+}
+async function horizontalPages(extra: { regionId: string; browserId: string }[] = []) {
+  const page = { regionId: 'composition-page', browserId: 'composition-page' }
+  useAppStore.setState({ surveyPageReferences: [page, ...extra] })
+  await checkpointSpatialWorkbench()
+  await dom.render(<App />)
+  await vi.waitFor(() => expect(horizontalPageClose(), document.body.textContent ?? '').not.toBeNull())
+  return page
+}
+it('[horizontal-close] background exact page closes only its original Region, removes its reference and keeps unknown references', async () => {
+  const missing = { regionId: 'retained-missing-region', browserId: 'retained-missing-browser' }
+  const page = await horizontalPages([missing]), before = useAppStore.getState(), selected = before.surveyZoneSelection
+  const file = source().regions['composition-file'], agent = source().regions['composition-agent-region'], sessions = before.sessions
+  const close = vi.spyOn(api.browser, 'close').mockResolvedValue(undefined)
+  await click(horizontalPageClose()); await confirmHorizontalClose()
+  await vi.waitFor(() => expect(source().regions[page.regionId]).toBeUndefined())
+  expect(close).toHaveBeenCalledExactlyOnceWith(page.browserId)
+  expect(source().regions['composition-file']).toBe(file); expect(source().regions['composition-agent-region']).toBe(agent)
+  expect(useAppStore.getState().sessions).toBe(sessions)
+  expect(useAppStore.getState().surveyPageReferences).toEqual([missing])
+  expect(useAppStore.getState().surveyZoneSelection).toEqual(selected)
+})
+it('[horizontal-close] closing the current exact page clears only its own page choice', async () => {
+  const page = await horizontalPages()
+  await act(async () => useAppStore.setState({ surveyZoneSelection: { kind: 'page', ...page } }))
+  vi.spyOn(api.browser, 'close').mockResolvedValue(undefined)
+  await click(horizontalPageClose()); await confirmHorizontalClose()
+  await vi.waitFor(() => expect(useAppStore.getState().surveyPageReferences).toEqual([]))
+  expect(useAppStore.getState().surveyZoneSelection).toBeNull()
+})
+it('[horizontal-close] a Native close failure keeps the original Browser, exact reference, selection and sibling input', async () => {
+  const page = await horizontalPages(), before = useAppStore.getState(), browser = source().regions[page.regionId]
+  const file = document.querySelector<HTMLTextAreaElement>('[aria-label="Original file input"]')!; file.value = 'Original unsaved file text'
+  const close = vi.spyOn(api.browser, 'close').mockRejectedValue(new Error('Close receipt unknown'))
+  await click(horizontalPageClose()); await confirmHorizontalClose()
+  await vi.waitFor(() => expect(close).toHaveBeenCalledOnce())
+  expect(source().regions[page.regionId]).toBe(browser); expect(useAppStore.getState().surveyPageReferences).toEqual([page])
+  expect(useAppStore.getState().surveyZoneSelection).toEqual(before.surveyZoneSelection)
+  expect(document.querySelector('[aria-label="Original file input"]')).toBe(file); expect(file.value).toBe('Original unsaved file text')
+})
+it('[horizontal-close] a sole Browser uses the original Tab owner and leaves other Tabs untouched', async () => {
+  const native = await api.browser.create('horizontal-single', 'https://single.example.test/', resource.id)
+  const tab = createWorkbenchTab('horizontal-single-tab', { ...native, kind: 'browser', browserId: native.id, regionId: 'horizontal-single-region', workspaceId: resource.id, title: 'Single page' })
+  const state = useAppStore.getState(), page = { regionId: 'horizontal-single-region', browserId: native.id }
+  useAppStore.setState({ tabs: { ...state.tabs, [tab.id]: tab }, layouts: { ...state.layouts, [resource.id]: addTabOccurrence(state.layouts[resource.id]!, 'source-group', tab.id)! }, surveyPageReferences: [page] })
+  await checkpointSpatialWorkbench(); await dom.render(<App />)
+  const close = vi.spyOn(api.browser, 'close').mockResolvedValue(undefined), original = source()
+  await vi.waitFor(() => expect(named('Close survey page: Single page')).toBeDefined()); await click(named('Close survey page: Single page')); await confirmHorizontalClose()
+  await vi.waitFor(() => expect(useAppStore.getState().tabs[tab.id], JSON.stringify({error:useAppStore.getState().error,dialogs:[...document.querySelectorAll('[role=dialog]')].map(e=>e.textContent)})).toBeUndefined())
+  expect(close).toHaveBeenCalledExactlyOnceWith(native.id); expect(source()).toBe(original)
+  expect(useAppStore.getState().surveyPageReferences).toEqual([])
+})
+it('[horizontal-close] a retained page can remove its exact reference without a source or Native close', async () => {
+  const missing = { regionId: 'retained-page', browserId: 'retained-browser' }; await horizontalPages([missing])
+  const close = vi.spyOn(api.browser, 'close'), before = source()
+  await menu('Options for Retained page'); await click(named('Remove page from Survey'))
+  await vi.waitFor(() => expect(useAppStore.getState().surveyPageReferences).toEqual([{ regionId: 'composition-page', browserId: 'composition-page' }]))
+  expect(close).not.toHaveBeenCalled(); expect(source()).toBe(before)
+})
+it('[horizontal-close] a retained research can remove only its saved reference without inventing a Zone', async () => {
+  const unknown = 'retained-unknown-zone', state = useAppStore.getState()
+  useAppStore.setState({ surveyCollectedZones: { ...state.surveyCollectedZones, [unknown]: true } })
+  await dom.render(<App />); const before = (await core.read())!.graph
+  await vi.waitFor(() => expect(named('Remove retained exploration from Survey')).toBeDefined())
+  await click(named('Remove retained exploration from Survey'))
+  await vi.waitFor(() => expect(useAppStore.getState().surveyCollectedZones[unknown]).toBeUndefined())
+  expect((await core.read())!.graph).toEqual(before)
+})
+it('[horizontal-close] confirmed close preserves unread original page preference bytes', async () => {
+  const page = await horizontalPages(), raw = [page, { unread: 'original bytes kept' }]
+  useAppStore.setState({ surveyPageReadRecovery: { source: raw, issue: 'Original page references partially unread' } })
+  vi.spyOn(api.browser, 'close').mockResolvedValue(undefined)
+  await click(horizontalPageClose()); await confirmHorizontalClose()
+  await vi.waitFor(() => expect(source().regions[page.regionId]).toBeUndefined())
+  expect(useAppStore.getState().surveyPageReadRecovery?.source).toBe(raw)
+  expect(useAppStore.getState().surveyPageReadRecovery?.source).toEqual([page, { unread: 'original bytes kept' }])
+  await prepareRendererUpdate()
+  expect(JSON.parse(localStorage.getItem(WORKBENCH_USER_STATE_KEY)!).state.surveyPageReferences).toEqual(raw)
+})
+
+it('[horizontal-close] canceling the original unknown-Agent close preserves content and does not call Native', async () => {
+  const page = await horizontalPages(), before = useAppStore.getState(), browser = source().regions[page.regionId]
+  const close = vi.spyOn(api.browser, 'close')
+  await click(horizontalPageClose())
+  await vi.waitFor(() => expect(named('Cancel')).toBeDefined())
+  expect(document.body.textContent).toContain('Close without confirming the Agent?')
+  expect(close).not.toHaveBeenCalled(); await click(named('Cancel'))
+  expect(close).not.toHaveBeenCalled(); expect(source().regions[page.regionId]).toBe(browser)
+  expect(useAppStore.getState().surveyPageReferences).toEqual([page]); expect(useAppStore.getState().surveyZoneSelection).toEqual(before.surveyZoneSelection)
+})
+it('[horizontal-close] a sole page with several real display Groups requires an exact choice and only detaches that binding', async () => {
+  const native = await api.browser.create('horizontal-many', 'https://many.example.test/', resource.id)
+  const tab = createWorkbenchTab('horizontal-many-tab', { ...native, kind: 'browser', browserId: native.id, regionId: 'horizontal-many-region', workspaceId: resource.id, title: 'Several positions' })
+  const state = useAppStore.getState(), page = { regionId: 'horizontal-many-region', browserId: native.id }
+  useAppStore.setState({ tabs: { ...state.tabs, [tab.id]: tab }, layouts: { ...state.layouts,
+    [resource.id]: addTabOccurrence(state.layouts[resource.id]!, 'source-group', tab.id)!,
+    [display.id]: addTabOccurrence(state.layouts[display.id]!, 'other-group', tab.id)! }, surveyPageReferences: [page] })
+  await checkpointSpatialWorkbench(); await dom.render(<App />)
+  const close = vi.spyOn(api.browser, 'close')
+  await vi.waitFor(() => expect(named('Close survey page: Several positions')).toBeDefined()); await click(named('Close survey page: Several positions'))
+  await vi.waitFor(() => expect(document.querySelectorAll('[data-survey-panel-reference]')).toHaveLength(2))
+  expect(close).not.toHaveBeenCalled()
+  const chosen = [...document.querySelectorAll<HTMLElement>('[data-survey-panel-reference]')].find(element => JSON.parse(element.dataset.surveyPanelReference!).displayWorkspaceId === display.id)!
+  await click(chosen); await confirmHorizontalClose()
+  await vi.waitFor(() => expect(useAppStore.getState().layouts[display.id]!.groups.find(group => group.id === 'other-group')!.tabOrder).not.toContain(tab.id))
+  expect(useAppStore.getState().layouts[resource.id]!.groups.find(group => group.id === 'source-group')!.tabOrder).toContain(tab.id)
+  expect(useAppStore.getState().tabs[tab.id]!.regions[page.regionId]).toBeDefined()
+  expect(useAppStore.getState().surveyPageReferences).toEqual([page]); expect(close).not.toHaveBeenCalled()
+})
+
+it('[horizontal-close] the page menu closes the same exact Region through the original confirmation owner', async () => {
+  const page = await horizontalPages(), close = vi.spyOn(api.browser, 'close').mockResolvedValue(undefined)
+  const options = document.querySelector<HTMLElement>('[data-survey-page-region-id="composition-page"] .survey-item-options')!
+  await menu(options.getAttribute('aria-label')!); await click(named('Close page')); await confirmHorizontalClose()
+  await vi.waitFor(() => expect(source().regions[page.regionId]).toBeUndefined())
+  expect(close).toHaveBeenCalledExactlyOnceWith(page.browserId)
+  expect(source().regions['composition-file']).toBeDefined(); expect(source().regions['composition-agent-region']).toBeDefined()
+})
+
+it.runIf(Boolean(process.env.HORIZONTAL_CLOSE_RESTART))('[horizontal-restart] a second actual App process restores the surviving workface and exact retained reference after page close', async () => {
+  const path = process.env.SURVEY_COMPOSITION_RESTART_FILE!, missing = { regionId: 'retained-after-restart', browserId: 'retained-browser-after-restart' }
+  if (process.env.SURVEY_COMPOSITION_RESTART_PHASE === 'write') {
+    await mkdir(resource.path, { recursive: true }); await writeFile(join(resource.path, 'draft.txt'), 'Original close-surviving file')
+    const { files } = await originalFilePorts(), opened = await files.read(resource, 'draft.txt')
+    expect(opened.status).toBe('read'); if (opened.status !== 'read') throw new Error('Original close-surviving file missing')
+    useAppStore.setState({ documents: { [documentKey(resource.id, 'draft.txt')]: { ...opened.document, content: 'Unsent close-surviving draft' } }, documentIssues: {}, dirtyDocuments: { [documentKey(resource.id, 'draft.txt')]: true } })
+    await files.dispose()
+    const page = await horizontalPages([missing])
+    await act(async () => useAppStore.setState({ surveyZoneSelection: { kind: 'page', ...page } }))
+    vi.spyOn(api.browser, 'close').mockResolvedValue(undefined)
+    await click(horizontalPageClose()); await confirmHorizontalClose()
+    await vi.waitFor(() => expect(source().regions[page.regionId]).toBeUndefined())
+    await checkpointSpatialWorkbench(); await prepareRendererUpdate()
+    const state = useAppStore.getState()
+    await writeFile(path, JSON.stringify({ pid: process.pid, record: localStorage.getItem(WORKBENCH_USER_STATE_KEY), graph: (await core.read())!.graph,
+      selection: state.surveyZoneSelection, references: state.surveyPageReferences, drafts: state.agentComposerDrafts, documents: state.documents, dirty: state.dirtyDocuments }))
+  } else {
+    const saved = JSON.parse(await readFile(path, 'utf8')), state = useAppStore.getState()
+    expect(saved.pid).not.toBe(process.pid); expect((await core.read())!.graph).toEqual(saved.graph)
+    expect(state.surveyPageReferences).toEqual([missing]); expect(state.surveyZoneSelection).toBeNull()
+    expect(source().regions['composition-page']).toBeUndefined()
+    expect(source().regions['composition-file']).toMatchObject({ kind: 'file', workspaceId: resource.id, path: 'draft.txt' })
+    expect(source().regions['composition-agent-region']).toMatchObject({ kind: 'agent', sessionId: session.id })
+    expect(state.agentComposerDrafts).toEqual(saved.drafts); expect(state.documents).toEqual(saved.documents); expect(state.dirtyDocuments).toEqual(saved.dirty)
+    await dom.render(<App />)
+    await vi.waitFor(() => expect(document.querySelector('[aria-label="Original file input"]')).not.toBeNull())
+    expect(document.querySelector('[aria-label="Original Agent input"]')).not.toBeNull()
+    expect(document.querySelector('[data-survey-page-region-id="composition-page"]')).toBeNull()
+    expect(document.querySelector('[data-survey-page-region-id="retained-after-restart"]')).not.toBeNull()
+    await writeFile(path + '.read-proof.json', JSON.stringify({ pid: process.pid, writerPid: saved.pid, graph: (await core.read())!.graph,
+      references: state.surveyPageReferences, selection: state.surveyZoneSelection, draft: state.agentComposerDrafts[session.id], fileDraft: state.documents[documentKey(resource.id, 'draft.txt')], visibleFile: true, visibleAgent: true }))
+  }
+})
+
+
 it('[drag-intent-split] a sole page split during intent save keeps its reserved identity after a lost composition ACK', async () => {
   const state = useAppStore.getState(), page = source().regions['composition-page']!
   useAppStore.setState({ tabs: { ...state.tabs, 'composition-tab': createWorkbenchTab('composition-tab', page) } })
