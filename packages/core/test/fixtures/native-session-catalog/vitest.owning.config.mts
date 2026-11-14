@@ -14,12 +14,14 @@ const mutants: Record<string, [string, string, string]> = {
   'drop-native-preparation': ['packages/core/src/client.ts', '...(nativeResumeSource ? { nativeHandle: structuredClone(nativeResumeSource.nativeHandle) } : {}), ...(launchOptions ? { launchOptions } : {}) }', '...(launchOptions ? { launchOptions } : {}) }'],
   'skip-source-revalidation': ['packages/core/src/client.ts', 'await assertNativeSource?.()', 'void assertNativeSource'],
   'duplicate-prepared-native': ['packages/core/src/agent-session-store.ts', "if (source?.kind !== 'provider') return", 'if (true) return'],
-  'accept-replaced-codex-file': ['packages/core/src/providers/codex-native-catalog.ts', 'actual.source.revision !== source.revision', 'false'],
+  'accept-replaced-codex-file': ['packages/providers/src/codex/native-catalog.ts', 'actual.source.revision !== source.revision', 'false'],
   'accept-claude-child': ['packages/core/src/providers/claude-native-catalog.ts', 'if (row?.isSidechain === true) return null\n  if (!row || !id || row.isSidechain !== false ||', 'if (!row || !id ||']
 }
-export default defineConfig({ root, plugins: [{ name: 'native-resume-actual-source', enforce: 'pre', transform(source, id) {
+export default defineConfig({ root,
+  resolve: { alias: { '@agentmux/providers/codex/native-catalog': resolve(root, 'packages/providers/src/codex/native-catalog.ts') } },
+  plugins: [{ name: 'native-resume-actual-source', enforce: 'pre', transform(source, id) {
   const path = relative(root, id.split('?')[0]!)
-  if (!path.startsWith('packages/core/src/')) return
+  if (!path.startsWith('packages/core/src/') && !path.startsWith('packages/providers/src/')) return
   let code = source
   const mutation = process.env.AMX_NATIVE_RESUME_MUTATION, change = mutation && mutants[mutation]
   if (mutation && !change) throw new Error('Unknown native resume source mutant')

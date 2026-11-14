@@ -22,7 +22,7 @@ import { AgentMuxStorageRecovery, snapshotRecoveryFile, type RecoverySource } fr
 import { sessionRecoverySource } from '../src/storage-recovery-sources.js'
 import { AgentMuxFileAgentSessionStore, normalizeStoredAgentSession } from '../src/agent-session-store.js'
 import { claudeRecoveryFiles } from '../src/providers/claude-native-catalog.js'
-import { codexRecoveryFiles } from '../src/providers/codex-native-catalog.js'
+import { AgentProviderRegistry } from '../src/agent-provider.js'
 import { grokRecoveryFiles } from '../src/providers/grok-history.js'
 import { recoveryDirectorySource, hashRecoveryFile } from '../src/storage-recovery.js'
 import { semanticRecoverySource } from '../src/storage-recovery-sources.js'
@@ -178,7 +178,7 @@ it('native backup qualification binds exact Provider identity and cwd before and
   await writeFile(codexPath, JSON.stringify({ type: 'session_meta', payload: { id: 'codex-original', cwd: path, source: 'cli' } }) + '\n')
   for (const [providerId, transcriptPath, qualify, env] of [
     ['claude', claudePath, claudeRecoveryFiles, { CLAUDE_CONFIG_DIR: join(path, 'claude') }],
-    ['codex', codexPath, codexRecoveryFiles, { CODEX_HOME: join(path, 'codex') }]
+    ['codex', codexPath, new AgentProviderRegistry().get('codex').recoveryFiles!, { CODEX_HOME: join(path, 'codex') }]
   ] as const) {
     const context = { source: { providerId, nativeSessionId: providerId + '-original' }, transcriptPath, workspacePath: path, env, signal, command: '', args: [], limit: 1 }
     const cohort = await qualify(context); expect(cohort.gaps).toEqual([]); expect(cohort.files).toHaveLength(1)

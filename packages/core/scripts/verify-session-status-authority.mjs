@@ -48,7 +48,7 @@ const providerCases = [
 
 const allCases = [...cases, ...reviewCases, ...providerCases]
 
-const paths = [...new Set(allCases.map(item=>item.path).concat(['packages/core/src/types.ts','packages/core/src/agent-provider.ts','packages/core/src/hook-normalizer.ts','packages/core/src/agent-semantic-state.ts','packages/core/src/providers/codex-native-session.ts','packages/core/test/session-status-authority.test.ts','packages/core/test/agent-semantic-state-entry.test.ts','packages/core/scripts/verify-session-status-authority.mjs']))]
+const paths = [...new Set(allCases.map(item=>item.path).concat(['packages/core/src/types.ts','packages/core/src/agent-provider.ts','packages/core/src/hook-normalizer.ts','packages/core/src/agent-semantic-state.ts','packages/providers/src/app-server/native-session.ts','packages/core/test/session-status-authority.test.ts','packages/core/test/agent-semantic-state-entry.test.ts','packages/core/scripts/verify-session-status-authority.mjs']))]
 const originals = new Map(await Promise.all(paths.map(async path=>[path,await readFile(resolve(root,path))])))
 const sourceHashes = Object.fromEntries([...originals].map(([path,bytes])=>[path,hash(bytes)]))
 const proofPrefix=process.argv.includes('--provider-delta')?'provider-delta-':''

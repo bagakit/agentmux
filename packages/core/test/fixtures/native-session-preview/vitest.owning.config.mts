@@ -4,7 +4,7 @@ import { relative, resolve } from 'node:path'
 import { defineConfig } from 'vitest/config'
 const root = resolve(import.meta.dirname, '../../../../..')
 const mutants: Record<string, [string, string, string]> = {
-  'forget-legacy-main': ['packages/core/src/providers/codex-native-catalog.ts', "const legacyMain = payload!.source === undefined && ['codex_cli_rs', 'codex_vscode'].includes(String(payload!.originator)) &&\n    typeof payload!.cli_version === 'string' && payload!.cli_version.trim().length > 0", 'const legacyMain = false'],
+  'forget-legacy-main': ['packages/providers/src/codex/native-catalog.ts', "const legacyMain = payload!.source === undefined && ['codex_cli_rs', 'codex_vscode'].includes(String(payload!.originator)) &&\n      typeof payload!.cli_version === 'string' && payload!.cli_version.trim().length > 0", 'const legacyMain = false'],
   'skip-preview-precheck': ['packages/core/src/client.ts', 'await read(assertSource())\n      const page = await read(provider.readSessionHistoryPage({ source, limit', 'const page = await read(provider.readSessionHistoryPage({ source, limit'],
   'skip-preview-postcheck': ['packages/core/src/client.ts', 'controller.signal.throwIfAborted()\n      await read(assertSource())\n      return normalizeSessionHistoryPage(source, page, limit)', 'controller.signal.throwIfAborted()\n      return normalizeSessionHistoryPage(source, page, limit)'],
   'drop-private-source-env': ['packages/core/src/client.ts', 'const env = input.env ?? {}, source = { providerId: provider.id, nativeSessionId: native.nativeHandle.sessionId }', 'const env = {}, source = { providerId: provider.id, nativeSessionId: native.nativeHandle.sessionId }'],
@@ -14,9 +14,11 @@ const mutants: Record<string, [string, string, string]> = {
   'accept-unrecorded-image': ['packages/core/src/client.ts', "if (item.id !== request.recordId || request.turnId !== undefined && item.turnId !== request.turnId ||\n        part?.kind !== 'resource' || part.resourceType !== 'image' || part.reference !== request.expectedReference)", 'if (false)'],
   'drop-resource-sid-lock': ['packages/core/src/session-history-content.ts', "(identityRead && (Object.hasOwn(receipt, 'agentSessionId') !== identityPresent || receipt.agentSessionId !== agentSessionId))", 'false']
 }
-export default defineConfig({ root, plugins: [{ name: 'native-preview-actual-source', enforce: 'pre', transform(source, id) {
+export default defineConfig({ root,
+  resolve: { alias: { '@agentmux/providers/codex/native-catalog': resolve(root, 'packages/providers/src/codex/native-catalog.ts') } },
+  plugins: [{ name: 'native-preview-actual-source', enforce: 'pre', transform(source, id) {
   const path = relative(root, id.split('?')[0]!)
-  if (!path.startsWith('packages/core/src/')) return
+  if (!path.startsWith('packages/core/src/') && !path.startsWith('packages/providers/src/')) return
   let code = source
   const mutation = process.env.AMX_NATIVE_PREVIEW_MUTATION, change = mutation && mutants[mutation]
   if (mutation && !change) throw new Error('Unknown native preview mutant')
