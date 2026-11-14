@@ -5,7 +5,7 @@ export type ObservedAgentWorkMode = AgentWorkMode | 'unknown'
 export const AGENT_WORK_MODES = [
   { id: 'local', brand: 'Local', label: 'Local', description: 'Agent and project here.' },
   { id: 'remote-project', brand: 'Reach', label: 'Remote Project', description: 'Agent here · project remotely.' },
-  { id: 'remote-agent', brand: 'Relay', label: 'Remote Agent', description: 'Project here · Agent remotely.' },
+  { id: 'remote-agent', brand: 'Outpost', label: 'Remote Agent', description: 'Project here · Agent remotely.' },
   { id: 'remote-workspace', brand: 'Orbit', label: 'Remote Workspace', description: 'Agent and project remotely.' }
 ] as const satisfies readonly { id: AgentWorkMode; brand: string; label: string; description: string }[]
 
