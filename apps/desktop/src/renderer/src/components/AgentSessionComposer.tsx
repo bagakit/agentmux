@@ -407,7 +407,7 @@ export function AgentSessionComposer({
       commands={completion.commands} skills={completion.skills} references={completion.references}
       promptKeywords={completion.promptKeywords} onCompletionQuery={completion.onCompletionQuery}
       completionFeedback={completion.completionFeedback}
-      tools={(referenceTools) => <AgentComposerTools key={completion.scope} disabled={!submitMode.canType} commands={completion.commands} referenceTools={referenceTools}
+      tools={(referenceTools) => <AgentComposerTools key={completion.scope} active={visible} disabled={!submitMode.canType} commands={completion.commands} referenceTools={referenceTools}
         viewMode={viewMode} onViewModeChange={(mode) => setViewMode(sessionId, mode)}
         loadSkills={completion.loadSkills} onChooseSkill={skill => { void feedback.run(() => completion.insertCandidate(skillComposerSuggestion(skill))) }}
         onCommand={(_command, candidate) => { void feedback.run(() => completion.insertCandidate(candidate)) }}

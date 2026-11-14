@@ -79,7 +79,9 @@ function ComposerChoiceMenu({ label, triggerLabel, icon, disabled, onOpenChange,
   </DropdownMenu.Root>
 }
 
-export function AgentComposerTools({ disabled, commands, loadSkills, onChooseSkill, onCommand, onCapture, runAction, referenceTools, layoutControl = true, viewMode, onViewModeChange }: {
+export function AgentComposerTools({ active = true, disabled, commands, loadSkills, onChooseSkill, onCommand, onCapture, runAction, referenceTools, layoutControl = true, viewMode, onViewModeChange }: {
+  /** Skip only never-presented DOM; hooks and every previously shown tool stay mounted. */
+  active?: boolean
   disabled: boolean
   layoutControl?: boolean
   viewMode?: SessionViewMode
@@ -116,6 +118,10 @@ export function AgentComposerTools({ disabled, commands, loadSkills, onChooseSki
     try { await onCapture?.(mode, options) }
     finally { setCapturing(false) }
   }
+
+  const presented = useRef(false)
+  if (active !== false) presented.current = true
+  if (!presented.current) return null
 
   return <span className="composer-tools" data-mode={mode}>
     {layoutControl || viewMode && onViewModeChange ? <span className="composer-tool-group" role="group" aria-label="View and input layout">
