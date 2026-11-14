@@ -16,6 +16,23 @@ execution, display evaluation, TUI Run binding and each retained invocation befo
 Unknown creation or Run state retains its original identity; never automatically replay it.
 Local package file changes are read on the next explicit execution or source inspection.
 
+For a TUI with `pendingLaunch: "dispatched"`, the user on the original local Host may pass
+`{"executionId":"EXACT_ID","cancelPendingLaunch":true}` to `amux toolkit stop TOOL --input FILE`.
+Core asks the same persistent Runtime to close that original creation key. If the Runtime has
+already retained the original Run, Toolkit reconnects it. Inspect the same Tool after an unknown
+reply. `retirement-unconfirmed` tracks an authorized operation whose receipt or save is pending.
+
+If inspection reports `retirement-unavailable`, the original Runtime observed no Run for that exact key.
+Older Agent records may prevent Core from proving retirement is safe, or the original retirement
+may still lack a Native outcome. The local user may pass
+`{"executionId":"EXACT_ID","releasePendingLaunch":true}` instead. This saves the original
+execution as unknown in `releasedLaunch` and makes a separate manual Run available. Its original
+creation remains inspectable through `terminal creation inspect`. The original may still appear
+later. Both operations preserve the original failure. Neither runs the command or stops a Run.
+After either action settles without a Run, Toolkit waits for a new manual Run, including after restart.
+Use `cancelPendingLaunch` or `releasePendingLaunch` separately. Both require the exact execution ID and
+the original local user on the Unix socket without Agent credentials or route delegation.
+
 For the fixed read-only Performance tool, an unknown creation with no confirmed Run can
 start a separate observation through explicit `amux toolkit run performance --input FILE` containing
 `{invocationId,expectedExecutionId}`. Use the current unknown execution as the expectation
