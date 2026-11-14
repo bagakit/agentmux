@@ -86,7 +86,7 @@ export function FocusProjectPreferences({ projectKey, name, zoneKey, zoneDefault
     finally { inFlight.current = false; setPending(false) }
   }
   return <Popover.Root modal={false} open={open} onOpenChange={begin}>
-    <Popover.Trigger asChild><button ref={trigger} type="button" className="icon-button focus-project-preferences__trigger" aria-label={`${subject} preferences · ${name}`} title={projectKey ? 'Zone layout, pin, note and color' : 'Zone layout'}><SemanticIcon name="action.more" size={13} /></button></Popover.Trigger>
+    <Popover.Trigger asChild><button ref={trigger} type="button" className={`icon-button focus-project-preferences__trigger${open ? ' is-menu-open' : ''}`} aria-label={`${subject} preferences · ${name}`} title={projectKey ? 'Zone layout, pin, note and color' : 'Zone layout'}><SemanticIcon name="action.more" size={13} /></button></Popover.Trigger>
     <DocumentOverlayPortal component={Popover.Portal}><Popover.Content ref={attachPanel} className="focus-project-preferences" data-focus-project-preferences="" data-focus-container-key={zoneKey ?? undefined} aria-describedby={undefined} style={{ position: 'fixed', visibility: 'hidden' }}
       onEscapeKeyDown={() => { escape.current = true }} onCloseAutoFocus={event => { event.preventDefault(); if (escape.current) trigger.current?.focus({ preventScroll: true }); escape.current = false }}>
       <div className="focus-project-preferences__header"><Popover.Title asChild><strong className="focus-project-preferences__name">{name}</strong></Popover.Title>
