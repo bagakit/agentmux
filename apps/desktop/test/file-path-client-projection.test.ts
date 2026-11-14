@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { afterEach, expect, it, vi } from 'vitest'
 import { spawn } from 'node:child_process'
-import { mkdir, readFile, stat, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { webcrypto } from 'node:crypto'
 import { act, createElement } from 'react'
@@ -716,4 +716,57 @@ it.runIf(business)('stable Source body input reuses its topology projection inst
   expect(f.store.getState().tabs).toBe(tabs)
   expect(topologyScans).toBe(0)
   expect(f.store.getState().documents[f.workspace.id + '\0original.txt']?.content).toBe('Source body input 2')
+}, 60000)
+
+it.runIf(business)('a confirmed Source write retains its namespace when its fresh identity read is unavailable', async () => {
+  const f = await fixture(); await connectFolder(f)
+  await f.store.getState().openFile('original.txt', 'file-group', undefined, f.workspace.id)
+  const state = f.store.getState(), key = f.workspace.id + '\0original.txt', original = state.documents[key]!, tab = Object.values(state.tabs).find(tab => Object.values(tab.regions).some(region => region.kind === 'file' && region.path === 'original.txt'))!
+  const mainRead = vi.spyOn(f.api.files, 'read').mockResolvedValue({ status: 'read', document: { path: 'original.txt', content: 'Unrelated Main body', revision: 'unrelated-main-revision' } }), mainWrite = vi.spyOn(f.api.files, 'write')
+  const call = f.bridge.files.call; let written = false
+  vi.mocked(f.api.sourceFiles.call).mockImplementation(async (...args) => {
+    if (written && args[1] === 'file.read') throw Error('Private post-write Source read unavailable')
+    const result = await call(...args); if (args[1] === 'file.write') written = true; return result
+  })
+  f.store.getState().updateDocument(tab.id, 'Confirmed original Source body', Object.values(tab.regions).find(region => region.kind === 'file')!.regionId)
+  await f.store.getState().saveDocument(tab.id)
+  expect(written).toBe(true); expect(await readFile(join(f.source.project, 'original.txt'), 'utf8')).toBe('Confirmed original Source body')
+  expect(f.store.getState().documents[key]?.content).toBe('Confirmed original Source body')
+  expect(f.store.getState().documents[key]?.readSource).toEqual(original.readSource)
+  expect(f.store.getState().documents[key]?.readIdentity).toBeUndefined()
+  expect(mainRead).not.toHaveBeenCalled(); expect(mainWrite).not.toHaveBeenCalled()
+}, 60000)
+
+it.runIf(business).each(['file', 'directory'] as const)('a confirmed delete of a replacement %s cannot consume the old buffer generation', async kind => {
+  const f = await fixture(); await connectFolder(f)
+  const path = kind === 'file' ? 'original.txt' : 'original/child.txt'
+  if (kind === 'directory') { await mkdir(join(f.source.project, 'original')); await writeFile(join(f.source.project, path), 'Original nested bytes') }
+  await f.store.getState().openFile(path, 'file-group', undefined, f.workspace.id)
+  const key = f.workspace.id + '\0' + path, original = f.store.getState().documents[key]!
+  const from = kind === 'file' ? path : 'original'
+  await rename(join(f.source.project, from), join(f.source.project, 'kept-original'))
+  if (kind === 'directory') await mkdir(join(f.source.project, 'original'))
+  await writeFile(join(f.source.project, path), original.content)
+  expect(String((await stat(join(f.source.project, path), { bigint: true })).ino)).not.toBe(original.readIdentity?.entry.inode)
+  await f.store.getState().deletePath(from, f.workspace.id)
+  await expect(readFile(join(f.source.project, path))).rejects.toMatchObject({ code: 'ENOENT' })
+  expect(f.store.getState().documents[key]).toEqual(original)
+  expect(f.store.getState().documentIssues[key]?.kind).not.toBe('deleted')
+  expect(await readFile(join(f.source.project, 'kept-original', ...(kind === 'directory' ? ['child.txt'] : [])), 'utf8')).toBe(original.content)
+}, 60000)
+
+it.runIf(business)('a failed original UserState checkpoint refuses only the unsent Source mutation and keeps its request and draft', async () => {
+  const f = await fixture(); await connectFolder(f)
+  await f.store.getState().openFile('original.txt', 'file-group', undefined, f.workspace.id)
+  const state = f.store.getState(), key = f.workspace.id + '\0original.txt', tab = Object.values(state.tabs).find(tab => Object.values(tab.regions).some(region => region.kind === 'file' && region.path === 'original.txt'))!
+  f.store.getState().updateDocument(tab.id, 'Original unsaved draft during storage failure', Object.values(tab.regions).find(region => region.kind === 'file')!.regionId)
+  vi.mocked(f.api.ui.writeWorkbenchState).mockRejectedValue(Error('Private UserState ACK failure'))
+  const call = f.bridge.files.call, dispatched: string[] = []
+  vi.mocked(f.api.sourceFiles.call).mockImplementation(async (...args) => { if (args[1] === 'file.mkdir') dispatched.push(args[1]); return await call(...args) })
+  await expect(f.store.getState().createPath({ path: 'must-not-be-published', kind: 'directory' }, f.workspace.id)).rejects.toThrow('Private UserState ACK failure')
+  expect(dispatched).toEqual([])
+  await expect(stat(join(f.source.project, 'must-not-be-published'))).rejects.toMatchObject({ code: 'ENOENT' })
+  expect(f.store.getState().documents[key]?.content).toBe('Original unsaved draft during storage failure')
+  expect(Object.values(f.store.getState().sourceFilesInputs.pending)).toHaveLength(1)
+  vi.mocked(f.api.ui.writeWorkbenchState).mockImplementation(value => f.user.write(value))
 }, 60000)
