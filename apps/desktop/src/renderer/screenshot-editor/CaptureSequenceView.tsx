@@ -65,7 +65,8 @@ export function CaptureSequenceView({ input, api }: { input: CaptureSequenceInpu
   const [snapshot, setSnapshot] = useState<SequenceSnapshot>(input), [index, setIndex] = useState(0), [playing, setPlaying] = useState(false)
   const [keyframes, setKeyframes] = useState<GifKeyframe[]>([]), [busy, setBusy] = useState(false), [issue, setIssue] = useState<string | null>(null)
   const [fps, setFps] = useState(5), [progress, setProgress] = useState(0), [longImage, setLongImage] = useState<BrowserPng | null>(null)
-  const wasRecording = useRef(false)
+  const [preparing, setPreparing] = useState(false), [discarding, setDiscarding] = useState(false)
+  const keepReview = useRef<HTMLButtonElement>(null)
   const originalGif = useRef<Uint8Array | null>(null), worker = useRef<Worker | null>(null), current = useRef(snapshot)
   current.current = snapshot
   const recording = snapshot.state === 'recording' || snapshot.state === 'stopping', gif = input.mode === 'gif'
@@ -99,9 +100,15 @@ export function CaptureSequenceView({ input, api }: { input: CaptureSequenceInpu
   }, [playing, index, frames])
   useEffect(() => () => { worker.current?.terminate() }, [])
   useEffect(() => {
-    const ended = wasRecording.current && !recording; wasRecording.current = recording
-    if (ended && !gif && frames.length) void action(async () => { setLongImage(await stitchFrames(frames)) })
-  }, [recording])
+    if (gif || recording) return
+    let disposed = false
+    setPreparing(true); setLongImage(null)
+    void stitchFrames(frames).then(image => { if (!disposed) setLongImage(image) }, error => { if (!disposed) setIssue(error instanceof Error ? error.message : String(error)) })
+      .finally(() => { if (!disposed) setPreparing(false) })
+    return () => { disposed = true }
+  }, [gif, recording, frames])
+  useEffect(() => gif ? undefined : api.onCloseRequested(() => setDiscarding(true)), [api, gif])
+  useEffect(() => { if (discarding) keepReview.current?.focus() }, [discarding])
   async function action(operation: () => Promise<void>) {
     setBusy(true); setIssue(null)
     try { await operation() } catch (error) { setIssue(error instanceof Error ? error.message : String(error)) }
@@ -110,10 +117,7 @@ export function CaptureSequenceView({ input, api }: { input: CaptureSequenceInpu
   async function sample() {
     const next = await api.sample(input.requestId)
     merge(next)
-    // Keep a failed candidate visible and undoable, but never show or export it as a successful join.
-    setLongImage(null)
-    const image = await stitchFrames(next.frames)
-    setLongImage(image); setIndex(next.frames.length - 1)
+    setIndex(next.frames.length - 1)
   }
   async function encode(): Promise<Uint8Array> {
     setPlaying(false)
@@ -143,17 +147,44 @@ export function CaptureSequenceView({ input, api }: { input: CaptureSequenceInpu
     <footer><span role="status">{frames.length} {frames.length === 1 ? 'frame' : 'frames'}</span><button className="primary-button" disabled={snapshot.state === 'stopping'} onClick={() => void action(async () => { merge(await api.stop(input.requestId)) })}>{snapshot.state === 'stopping' ? 'Finishing...' : 'Stop scrolling capture'}</button></footer>
     {issue || snapshot.issue ? <p role="status">{issue ?? snapshot.issue}</p> : null}
   </main>
+  if (!gif) return <main className="capture-sequence capture-sequence--scroll-review" onKeyDown={event => {
+    if (event.key === 'Escape') { event.preventDefault(); setDiscarding(value => !value) }
+  }}>
+    <header className="capture-review__header">
+      <div><h1>Review screenshot</h1><p>{longImage ? `${longImage.width} × ${longImage.height} px` : 'Scrolling screenshot'}<span aria-hidden="true"> · </span>{frames.length} {frames.length === 1 ? 'frame' : 'frames'}</p></div>
+      <button className="capture-review__close" aria-label="Close review" onClick={() => setDiscarding(true)}><svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="m4 4 8 8M12 4l-8 8" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" /></svg></button>
+    </header>
+    <div className="capture-sequence__preview capture-review__canvas" aria-label="Long screenshot preview" aria-busy={preparing}>
+      {longImage ? <img src={longImage.dataUrl} alt="Scrolling capture preview" style={{ maxWidth: longImage.width }} /> : <p role="status">{preparing ? 'Preparing preview…' : 'Preview could not be composed. Adjust the last frame or retake the screenshot.'}</p>}
+    </div>
+    {issue || snapshot.issue ? <p className="capture-sequence__issue" role="status">{issue ?? snapshot.issue}</p> : null}
+    <footer className="capture-review__footer">
+      <div className="capture-review__secondary">
+        <button className="capture-review__text-button" disabled={busy || preparing} onClick={() => void action(() => api.retake(input.requestId))}>Retake</button>
+        <details className="capture-review__adjust"><summary>Adjust frames</summary><div>
+          {snapshot.state === 'ready' ? <button disabled={busy || preparing} onClick={() => void action(async () => { merge(await api.start(input.requestId, 2)) })}>Start scrolling capture</button> : null}
+          <button disabled={busy || preparing} onClick={() => void action(sample)}>Capture next</button>
+          <button disabled={busy || preparing || frames.length < 2} onClick={() => void action(async () => { merge(await api.undo(input.requestId)) })}>Undo last frame</button>
+        </div></details>
+      </div>
+      <button className="primary-button capture-review__confirm" disabled={busy || preparing || !longImage} onClick={() => void action(async () => { await api.finishScroll(input.requestId, longImage!) })}>{busy ? 'Working…' : 'Confirm'}</button>
+    </footer>
+    {discarding ? <section role="alertdialog" aria-labelledby="capture-discard-title" aria-describedby="capture-discard-description" className="capture-review__discard">
+      <h2 id="capture-discard-title">Discard this screenshot?</h2><p id="capture-discard-description">It has not been confirmed yet.</p>
+      <div><button disabled={busy} onClick={() => void action(() => api.cancel(input.requestId))}>Discard</button><button ref={keepReview} onClick={() => setDiscarding(false)}>Continue review</button></div>
+    </section> : null}
+  </main>
   return <main className={`capture-sequence${gif ? ' capture-sequence--gif' : ''}${recording ? ' capture-sequence--recording' : ''}`} >
     <header><div><h1>{gif ? 'Record GIF' : 'Scrolling screenshot'}</h1><p>{gif ? 'Record the selected region, then review and mark keyframes.' : 'Scroll the source yourself, leaving an overlap between captures.'}</p></div>
       <button type="button" onClick={() => void api.cancel(input.requestId)}>Close</button></header>
     <div className="capture-sequence__controls">
-      {gif ? <>{snapshot.state === 'ready' ? <><label>Sampling <select value={fps} disabled={busy} onChange={e => setFps(Number(e.target.value))}>{[2, 5, 10].map(v => <option key={v} value={v}>{v} fps</option>)}</select></label><button className="primary-button" disabled={busy} onClick={() => void action(async () => { originalGif.current = null; setKeyframes([]); setIndex(0); merge(await api.start(input.requestId, fps)) })}>Start recording</button></> : recording ? <button className="primary-button" disabled={snapshot.state === 'stopping'} onClick={() => void action(async () => { merge(await api.stop(input.requestId)); setPlaying(false) })}>{snapshot.state === 'stopping' ? 'Finishing frame…' : 'Stop recording'}</button> : <span>Ready to review</span>}
+      {<>{snapshot.state === 'ready' ? <><label>Sampling <select value={fps} disabled={busy} onChange={e => setFps(Number(e.target.value))}>{[2, 5, 10].map(v => <option key={v} value={v}>{v} fps</option>)}</select></label><button className="primary-button" disabled={busy} onClick={() => void action(async () => { originalGif.current = null; setKeyframes([]); setIndex(0); merge(await api.start(input.requestId, fps)) })}>Start recording</button></> : recording ? <button className="primary-button" disabled={snapshot.state === 'stopping'} onClick={() => void action(async () => { merge(await api.stop(input.requestId)); setPlaying(false) })}>{snapshot.state === 'stopping' ? 'Finishing frame…' : 'Stop recording'}</button> : <span>Ready to review</span>}
         <button disabled={busy || recording} onClick={() => void action(async () => {
           const data = await api.openGif(input.requestId); if (!data) return
           const bytes = Uint8Array.from(data), info = inspectGif(bytes), decoded = await decodeGif(bytes)
           originalGif.current = bytes; setKeyframes(info.metadata?.keyframes ?? []); setIndex(0); setPlaying(false)
           setSnapshot(old => ({ ...old, state: 'review', frames: decoded }))
-        })}>Open GIF…</button></> : <><button className="primary-button" disabled={busy || snapshot.state === 'stopping'} onClick={() => void action(async () => { if (recording) merge(await api.stop(input.requestId)); else { await stitchFrames(frames); setLongImage(null); merge(await api.start(input.requestId, 2)) } })}>{snapshot.state === 'stopping' ? 'Finishing frame...' : recording ? 'Stop scrolling capture' : 'Start scrolling capture'}</button><button disabled={busy || recording} onClick={() => void action(sample)}>Capture next</button><button disabled={busy || recording || frames.length < 2} onClick={() => void action(async () => { const next = await api.undo(input.requestId); merge(next); setLongImage(null); setLongImage(await stitchFrames(next.frames)) })}>Undo last frame</button><button disabled={busy || recording} onClick={() => void action(async () => { const image = await stitchFrames(frames); await api.finishScroll(input.requestId, image) })}>Edit long image</button></>}
+        })}>Open GIF…</button></>}
       <span className="capture-sequence__count" role="status">{recording ? '● ' : ''}{frames.length} {frames.length === 1 ? 'frame' : 'frames'}{busy && progress ? ` · Encoding ${progress}/${frames.length}` : ''}</span>
     </div>
     <div className="capture-sequence__body">

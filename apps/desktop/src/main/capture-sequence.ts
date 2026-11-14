@@ -7,7 +7,7 @@ import { pngBytes } from '@agentmux/native-desktop/image'
 import { AgentMuxError } from '@agentmux/core'
 import type { CaptureSequenceContext, CaptureSequenceMethod, CaptureSequenceParams, CaptureSequenceResult } from '@agentmux/core'
 import type { AppearanceConfig, BrowserPng } from '../shared/contracts'
-import { CAPTURE_SEQUENCE_CHANNEL, type CaptureSequenceInput, type CaptureSequenceMode, type SequenceSnapshot } from '../shared/capture-sequence'
+import { CAPTURE_SEQUENCE_CHANNEL, CAPTURE_SEQUENCE_CLOSE_REQUESTED, type CaptureSequenceInput, type CaptureSequenceMode, type SequenceSnapshot } from '../shared/capture-sequence'
 import type { ScreenshotCaptureSource } from '../shared/system-screenshot-editor'
 import { matchScroll, ScrollOverlapError } from '../shared/scroll-stitch'
 import { inspectGif } from '../shared/gif-metadata'
@@ -17,7 +17,7 @@ import { screenshotFileName, writeScreenshotFile } from './screenshot-files'
 
 type Selection = { image: BrowserPng; source: ScreenshotCaptureSource; background?: import('../shared/capture-surface').CaptureBackground; startImmediately?: boolean }
 type Record = { receipt: CaptureSequenceResult; actor: CaptureSequenceContext['actor']; window?: BrowserWindow; frame?: BrowserWindow; input?: CaptureSequenceInput; baselinePending?: boolean;
-  timer?: ReturnType<typeof setTimeout>; inflight?: Promise<void>; fps: number; artifact?: { sha256: string; bytes: number }; journal?: { frames: unknown[]; source: ScreenshotCaptureSource }; size?: { width: number; height: number }; files?: string[]; persisting?: Promise<void>; resolve?(value: BrowserPng | string | null): void; attached?: string; ending?: boolean }
+  timer?: ReturnType<typeof setTimeout>; inflight?: Promise<void>; fps: number; artifact?: { sha256: string; bytes: number }; journal?: { frames: unknown[]; source: ScreenshotCaptureSource }; size?: { width: number; height: number }; files?: string[]; persisting?: Promise<void>; resolve?(value: BrowserPng | string | null): void; attached?: string; ending?: boolean; retaking?: boolean }
 const MAX_FRAME_BYTES = 64 * 1024 * 1024
 const message = (error: unknown) => error instanceof Error ? error.message : String(error)
 
@@ -25,7 +25,7 @@ const message = (error: unknown) => error instanceof Error ? error.message : Str
 export class CaptureSequenceOwner {
   private records = new Map<string, Record>()
   constructor(private readonly ports: { directory: string; home: string; appearance(): AppearanceConfig;
-    native(): Pick<NativeDesktop, 'captureScreenshot'>; select(): Promise<Selection | null> }) {
+    native(): Pick<NativeDesktop, 'captureScreenshot'>; select(mode: CaptureSequenceMode): Promise<Selection | null> }) {
     ipcMain.handle(CAPTURE_SEQUENCE_CHANNEL, (event, action, input) => this.invoke(event, action, input))
   }
   private directory(id: string) { return join(this.ports.directory, createHash('sha256').update(id).digest('hex')) }
@@ -71,7 +71,7 @@ export class CaptureSequenceOwner {
         // Save admission before opening. Caller disconnect does not cancel or replay this original operation.
         await this.persist(record)
         const original = record
-        void this.ports.select().then(selection => selection ? this.present(original, selection) : this.end(original, 'cancelled')).catch(error => this.fail(original, error))
+        void this.ports.select(mode).then(selection => selection ? this.present(original, selection) : this.end(original, 'cancelled')).catch(error => this.fail(original, error))
       }
     }
     if (!record) return { hostId: input.hostId, operationId: input.operationId, mode: null, state: 'unknown', frameCount: 0, issue: 'The original operation receipt is unavailable. No capture was replayed.' }
@@ -109,13 +109,20 @@ export class CaptureSequenceOwner {
     record.window = window; record.size = { width: image.width, height: image.height }
     record.input = { requestId: record.receipt.operationId, mode: record.receipt.mode!, state: 'ready', source, background,
       theme: themeBootstrap(this.ports.appearance(), nativeTheme.shouldUseDarkColors), frames: [{ image, capturedAt: source.capturedAt, delayMs: 200 }], issue: null }
-    record.receipt.state = 'ready'; record.receipt.frameCount = 1
+    record.receipt.state = 'ready'; record.receipt.frameCount = 1; record.receipt.issue = null
     window.setContentProtection(true)
     window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
     window.webContents.on('will-navigate', event => event.preventDefault())
     window.webContents.on('will-attach-webview', event => event.preventDefault())
     window.once('ready-to-show', () => { if (!window.isDestroyed()) { if (record.receipt.state === 'recording' && record.receipt.mode === 'scroll') window.showInactive(); else window.show() } })
+    window.on('close', event => {
+      if (record.window === window && !record.ending && record.input?.mode === 'scroll' && !['recording', 'stopping'].includes(record.receipt.state)) {
+        event.preventDefault()
+        window.webContents.send(CAPTURE_SEQUENCE_CLOSE_REQUESTED)
+      }
+    })
     window.once('closed', () => {
+      if (record.window !== window) return
       clearTimeout(record.timer); this.closeFrame(record)
       if (record.receipt.state !== 'completed' && record.receipt.state !== 'failed') void this.end(record, 'cancelled')
       record.resolve?.(null); delete record.resolve
@@ -276,6 +283,25 @@ export class CaptureSequenceOwner {
     }
     if (action === 'stop') { this.stop(record, true); return this.snapshot(record) }
     if (action === 'cancel') { await this.end(record, 'cancelled'); record.window.close(); return }
+    if (action === 'retake') {
+      if (record.input.mode !== 'scroll' || record.inflight || record.retaking || !['ready', 'review'].includes(record.receipt.state)) throw new Error('Finish the current sampling step before retaking this screenshot. Your image is kept.')
+      const previous = record.window
+      record.retaking = true
+      // Retake is an explicit new selection. Keep the review and frames until it is accepted.
+      previous.hide()
+      try {
+        const selection = await this.ports.select('scroll')
+        if (selection && !record.ending) {
+          record.baselinePending = true
+          await this.present(record, selection, true)
+          previous.destroy()
+        }
+      } finally {
+        delete record.retaking
+        if (record.window === previous && !record.ending && !previous.isDestroyed()) { previous.show(); previous.focus() }
+      }
+      return
+    }
     if (action === 'start') {
       await this.start(record, input.fps!); return this.snapshot(record)
     }

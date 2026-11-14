@@ -9,8 +9,11 @@ export type GifMetadata = { schema: 'agentmux.gif.v1'; width: number; height: nu
 export type SequenceSnapshot = { requestId: string; mode: CaptureSequenceMode; state: 'ready' | 'recording' | 'stopping' | 'review'; frames: SequenceFrame[]; frameOffset?: number; issue: string | null }
 export type CaptureSequenceInput = SequenceSnapshot & { theme: ThemeBootstrap; background?: import('./capture-surface').CaptureBackground; source: ScreenshotCaptureSource }
 export const CAPTURE_SEQUENCE_CHANNEL = 'capture:sequence'
+export const CAPTURE_SEQUENCE_CLOSE_REQUESTED = 'capture:sequence-close-requested'
 export type CaptureSequenceApi = {
   load(): Promise<CaptureSequenceInput>
+  onCloseRequested(listener: () => void): () => void
+  retake(requestId: string): Promise<void>
   sample(requestId: string): Promise<SequenceSnapshot>
   start(requestId: string, fps: number): Promise<SequenceSnapshot>
   stop(requestId: string): Promise<SequenceSnapshot>

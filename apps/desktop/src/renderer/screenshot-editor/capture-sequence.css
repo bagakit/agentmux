@@ -69,3 +69,39 @@
 .capture-live-controls__preview img { width: 100%; height: auto; display: block; }
 .capture-live-controls footer { flex-wrap: wrap; justify-content: space-between; font-variant-numeric: tabular-nums; }
 .capture-live-controls .primary-button { background: var(--green); color: var(--bg); border-color: transparent; }
+
+/* Completed scrolling screenshots are a review, with one explicit completion action. */
+.capture-sequence--scroll-review { position: relative; gap: 0; padding: 0; font-family: var(--font-sans, system-ui, sans-serif); }
+.capture-review__header { flex: none; align-items: center !important; padding: 16px 20px 14px; -webkit-app-region: drag; }
+.capture-review__header h1 { font-size: 14px; letter-spacing: -.015em; margin: 0 0 3px; }
+.capture-review__header p { font-size: 11px; font-variant-numeric: tabular-nums; }
+.capture-review__header button { -webkit-app-region: no-drag; }
+.capture-sequence .capture-review__close { display: grid; place-items: center; width: 28px; height: 28px; padding: 0; border: 0; background: transparent; color: var(--text-3); }
+.capture-sequence .capture-review__close:hover { background: var(--surface-2); color: var(--text); }
+.capture-review__canvas { flex: 1; margin: 0 12px; padding: 24px; border-radius: 6px; border-color: var(--line); background: var(--surface-1); justify-items: center; }
+.capture-review__canvas img { width: 100%; height: auto; box-shadow: 0 2px 12px #00000020; }
+.capture-review__canvas p { padding: 32px 12px; text-align: center; }
+.capture-sequence .capture-review__footer { flex: none; display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 64px; padding: 12px 20px; }
+.capture-review__secondary { display: flex; align-items: center; gap: 10px; }
+.capture-sequence .capture-review__text-button, .capture-review__adjust summary { border: 0; background: transparent; color: var(--text-3); padding: 6px 0; font-size: 12px; cursor: pointer; }
+.capture-sequence .capture-review__text-button:hover, .capture-review__adjust summary:hover { color: var(--text); }
+.capture-review__adjust { position: relative; }
+.capture-review__adjust summary { list-style: none; }
+.capture-review__adjust summary::-webkit-details-marker { display: none; }
+.capture-review__adjust summary:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
+.capture-review__adjust[open] summary { color: var(--text); }
+.capture-review__adjust > div { position: absolute; z-index: 1; bottom: 32px; left: 0; display: grid; gap: 4px; min-width: 150px; padding: 5px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface-0); box-shadow: var(--elev-2); }
+.capture-review__adjust button { white-space: nowrap; text-align: left; }
+.capture-sequence .capture-review__confirm { min-width: 86px; padding: 7px 16px; }
+.capture-review__discard { position: absolute; z-index: 2; right: 16px; bottom: 72px; width: min(320px, calc(100% - 32px)); padding: 16px; border: 1px solid var(--line); border-radius: 9px; background: var(--surface-0); box-shadow: var(--elev-2); }
+.capture-review__discard h2 { margin: 0 0 5px; }
+.capture-review__discard p { font-size: 12px; }
+.capture-review__discard > div { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+.capture-review__discard button:first-child { background: transparent; color: var(--text-3); }
+.capture-review__discard button:last-child { font-weight: 600; }
+.capture-sequence--scroll-review .capture-sequence__issue { margin: 8px 16px 0; }
+@media (max-width: 480px), (max-height: 460px) {
+  .capture-review__header { padding: 12px 16px; }
+  .capture-review__canvas { margin: 0 8px; padding: 14px; }
+  .capture-sequence .capture-review__footer { min-height: 58px; padding: 10px 16px; }
+}
