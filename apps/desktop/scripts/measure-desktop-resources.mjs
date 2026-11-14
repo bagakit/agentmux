@@ -100,20 +100,24 @@ async function ownedDaemonPids(daemonSocket = socketPath, daemonState = stateDir
 }
 
 async function exerciseReceiptlessDaemonCleanup() {
+  const env = privatePackageSmokeEnvironment(process.env, { userData, runtimeRoot: runtimeDirectory })
+  await Promise.all([stateDirectory, env.HOME, env.TMPDIR].map(path => mkdir(path, { recursive: true, mode: 0o700 })))
   const child = spawn(daemonPath, [
     '--socket', socketPath,
     '--state-dir', stateDirectory,
     '--readiness-fd', '3'
   ], {
-    stdio: ['ignore', 'ignore', 'ignore', 'pipe']
+    env, stdio: ['ignore', 'ignore', 'pipe', 'pipe']
   })
+  let stderr = ''
+  child.stderr.setEncoding('utf8').on('data', chunk => { stderr = (stderr + chunk).slice(-8192) })
   try {
     child.stdio[3]?.resume()
     const deadline = Date.now() + 5_000
     let owned = []
     while (Date.now() <= deadline) {
       if (child.exitCode !== null || child.signalCode !== null) {
-        throw new Error('Receiptless cleanup fixture daemon exited before ownership discovery.')
+        throw new Error(`Receiptless cleanup fixture daemon exited before ownership discovery: ${stderr.trim() || child.exitCode || child.signalCode}.`)
       }
       owned = await ownedDaemonPids()
       if (owned.length > 0) break
