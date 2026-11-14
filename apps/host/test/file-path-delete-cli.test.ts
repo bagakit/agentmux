@@ -214,7 +214,7 @@ it('revision discovery uses the original Native FD, reports N/A explicitly and n
   vi.spyOn(OrdinaryWorkspaceFiles.prototype, 'statPath').mockImplementation(function (workspace, path, includeRevision) {
     return actual.call(new OrdinaryWorkspaceFiles({ helperPath: helper, beforeStatRevision: async () => {
       barriers++
-      // The real readonly Host/CLI call crosses the old 2s timeout budget.
+      // Cross the metadata-only 2s category without inventing a finite-call deadline.
       await new Promise(resolve => setTimeout(resolve, 2300))
       if (!changed) { changed = true; await writeFile(join(f.root, 'source'), Buffer.alloc(bytes.length, 0x62)) }
     } }), workspace, path, includeRevision)
@@ -552,6 +552,43 @@ it('a fresh real owner process retains the prepared original Note body after Nat
   expect(await invoke()).toMatchObject({ publishCalls: 0, result: { result: { filesystem: 'unknown', code: 'FILE_MUTATION_RECORD_UNAVAILABLE' } }, history: { status: 'prepared', beforeContent: body } })
   expect(await readFile(join(f.root, 'note.data'), 'utf8')).toBe('Later independent bytes')
   facts.push({ case: 'fresh-node-note-delete-lost-reply', originalOperation: input.operationId, freshPid: observed.pid, publishCalls: observed.publishCalls, retainedEventId: event.eventId, originalBodyRetained: true })
+}, 30000)
+
+it('original history-only and provenance-only resources keep their externally updated headerless bodies through compiled CLI deletion and a fresh owner', async () => {
+  const f = await hostFixture(), notes = new core.AgentMuxNotebookStore(), creator = { kind: 'user' as const, id: 'metadata-original-creator' }
+  const noteId = 'same-original-note-two-resources', prior = 'Prior original body\n', revision = noteHistoryRevision(prior)
+  await mkdir(join(f.root, 'metadata-only'))
+  const resources = ['history.txt', 'provenance.txt'].map(name => ({ hostId: 'local', workspaceId: f.workspace.id, workspacePath: f.root, path: 'metadata-only/' + name }))
+  const provenance = { noteId, resource: resources[1]!, revision, blocks: { original: { created: { actor: creator, at: 1 }, lastEdited: { actor: creator, at: 1 } } } }
+  await notes.recordHistory({ eventId: 'metadata-only-prior-event', sequence: 0, batchId: 'metadata-only-prior-batch', noteId, resource: resources[0]!, originalResource: resources[0]!, actor: creator, at: 1,
+    operation: 'edit', status: 'committed', requestFingerprint: 'metadata-only-prior-intent', parentEventId: null, beforeContent: null, baseRevision: null, content: prior, revision })
+  await notes.recordProvenance(provenance)
+  expect(Object.keys((await notes.read()).pages)).toEqual([])
+  const bodies = resources.map(resource => 'Current external body for ' + resource.path + '\n\n^original\n')
+  for (const [index, resource] of resources.entries()) await writeFile(join(f.root, resource.path), bodies[index]!)
+  const input = await target(f, 'metadata-only', 'metadata-only-current-body-delete', { recursive: true })
+  const reply = await f.cli(['delete'], input)
+  expect(reply.code, reply.stdout + reply.stderr).toBe(0)
+  expect(reply.body.result.result).toMatchObject({ filesystem: 'deleted', noteHistory: { status: 'recorded' } })
+  const bundle = resolve('apps/host/.local/metadata-only-delete-observer-' + process.pid + '.mjs')
+  const { build } = createRequire(new URL('../package.json', import.meta.url))('esbuild')
+  await mkdir(resolve('apps/host/.local'), { recursive: true })
+  await build({ stdin: { resolveDir: process.cwd(), contents: "export {FilePathMutations} from './apps/host/src/file-path-mutations.ts';export {OrdinaryWorkspaceFiles} from './apps/host/src/ordinary-files.ts'" }, outfile: bundle, bundle: true, packages: 'external', platform: 'node', format: 'esm', target: 'node24' })
+  cleanup.push(() => rm(bundle, { force: true }))
+  const configuration = join(f.original.root, 'metadata-only-observer.json'), observations = []
+  for (const [index, resource] of resources.entries()) {
+    const event = (await notes.readHistory({ noteId, resource })).entries[0]!
+    expect(event, 'Every original metadata-only resource must retain its current body').toBeDefined()
+    await writeFile(configuration, JSON.stringify({ entry: bundle, helper, directory: join(f.original.root, 'file-path-mutations'), workspace: f.workspace, input, context: agent, action: 'delete', historyEventId: event.eventId }))
+    const observed = JSON.parse((await promisify(execFile)(process.execPath, [resolve('apps/host/test/helpers/file-path-operation-observer.mjs'), configuration])).stdout)
+    expect(observed.pid).not.toBe(process.pid)
+    expect(observed).toMatchObject({ publishCalls: 0, history: { operation: 'delete', status: 'committed', noteId, resource, beforeContent: bodies[index], actor: agent.actor } })
+    observations.push({ pid: observed.pid, eventId: event.eventId, resource })
+  }
+  expect(await new core.AgentMuxNotebookStore().readHistoryOperation('metadata-only-prior-event')).toMatchObject({ actor: creator, resource: resources[0], content: prior })
+  expect(await notes.readProvenance({ noteId, resource: resources[1]!, revision, blockIds: ['original'] })).toMatchObject({ blocks: { original: { created: { actor: creator, at: 1 } } } })
+  expect(Object.keys((await notes.read()).pages)).toEqual([])
+  facts.push({ case: 'metadata-only-note-current-bodies', observations, priorEventAndCreatorPreserved: true, automaticallyRegistered: false })
 }, 30000)
 
 
