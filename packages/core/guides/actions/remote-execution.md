@@ -130,6 +130,14 @@ run `amux agent execution continue --input FILE`, with only:
 {"bindingId":"ORIGINAL_BINDING","agentSessionId":"ORIGINAL_SESSION","createOperationId":"ORIGINAL_CREATE"}
 ```
 
+An older Desktop failure may retain its typed request without this formal reference.
+Its visible original workface and Check original read the same Coordinator's stored
+intent using only the frozen Session/create/Host and tool location. A matching existing
+intent can supply its reference; an error message or edited configuration cannot.
+Missing identity stays unknown. This read does not start helpers, continue creation or
+send input; finding an intent does not qualify the current endpoints. Continue remains
+an explicit separate action on the same original request.
+
 Core loads the frozen input; do not supply a new prompt, directory, Executor or grant.
 The original Coordinator and both original Runtime identities must remain the targets.
 A Core restart or upgrade does not clear a Native Start attempt. A missing original
