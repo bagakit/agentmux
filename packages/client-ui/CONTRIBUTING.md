@@ -42,7 +42,7 @@ pnpm test
 
 ## Maintain the portable entries
 
-Add portable entries and their styles to `scripts/supported-entries.mjs`. Run `pnpm run generate:entries` to write the exact workspace exports. The same entry definitions produce the distribution exports for compiled JavaScript, declarations and CSS. Keep workspace-specific entry mappings in the package manifest and preserve their actual callers when changing them.
+Add portable entries and their styles to `scripts/supported-entries.mjs`. Run `pnpm run generate:entries` to write the exact workspace exports. The same entry definitions produce the distribution exports for compiled JavaScript, declarations and CSS. Declare workspace entries in `scripts/workspace-entries.mjs` when a caller needs to import across the package boundary. Check the real callers and document the consumer contract when changing their entry. The generated manifest exposes each named entry and the package-owned artwork directories.
 
 Add a runnable example under `examples/` and link to it from the README. After building, run `node scripts/verify-supported-entries.mjs`. It resolves the examples against source and compiled types, measures the actual browser inputs, and runs their actions with Chromium. The reference browser host supplies one sprite and switches the shared theme. Record licensing and external installation evidence separately for a distribution candidate.
 

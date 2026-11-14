@@ -58,19 +58,19 @@ Node consumers can import the theme model to resolve light and dark tokens witho
 
 ## Workspace modules
 
-Imports in the table use the prefix `@agentmux/client-ui/` unless written in full.
+Imports in the table use the prefix `@agentmux/client-ui/`. The package manifest records the complete workspace export map.
 
 | Module | Import | What it provides |
 | --- | --- | --- |
 | Agent work location | `patterns/agent-work-location` | Location summary trigger, confirmed position count and distinct descriptions for exact routes. [Pattern and example](docs/patterns/agent-work-location.md#react-entry). |
-| Conversation | `@agentmux/client-ui` (`ConversationView`, `ConversationMessage`), `components/ConversationRecordSequence` | Messages, native-history reading, reasoning and tool traces, permission and question cards, recorded images and files |
+| Conversation | `components/ConversationView`, `components/ConversationMessage`, `components/ConversationRecordSequence` | Messages, native-history reading, reasoning and tool traces, permission and question cards, recorded images and files |
 | Composer | `components/AgentComposer`, `components/InlineComposer`, `components/ComposerEditFooter` | Rich message editing and the action row for a compact multiline edit |
-| Terminal | `@agentmux/client-ui/terminal/*` | xterm replay, live output, input encoding and the Unicode width table |
-| Notes | `@agentmux/client-ui/note/*`, `components/NoteReader` | The `.note.md` Markdown codec, wiki links, live three-way merge and a read-only Note reader |
-| Theme and icons | `@agentmux/client-ui/theme`, `@agentmux/client-ui/icons` | Theme catalog and built-in themes, semantic icons and their animations |
+| Terminal | `terminal/replay`, `terminal/live-output`, `terminal/input`, `terminal/unicode` | xterm replay, live output, input encoding and the Unicode width table |
+| Notes | `note/note-document`, `note/note-wikilinks`, `note/note-live-merge`, `components/NoteReader` | The `.note.md` Markdown codec, wiki links, live three-way merge and a read-only Note reader |
+| Theme and icons | `theme`, `icons` | Theme catalog and built-in themes, semantic icons and their animations |
 | Native controls | `components/Button`, `components/IconButton`, `components/FormRow`, `input`, `components/Modal` | Buttons, form rows, text inputs and dialogs with one shared style owner |
 | Menu and avatars | `components/HoverDropdownMenu`, `components/AvatarGroup` | Menu disclosure and keyboard focus in the host document, plus avatar stacking and overflow |
-| Brand assets | `@agentmux/client-ui/brand/*` | App icons, hero art and illustrations ([brand sources](brand/README.md)) |
+| Brand assets | `brand/` resource paths | App icons, hero art and illustrations ([brand sources](brand/README.md)) |
 
 Use the named entry for the control or capability you need. The `components/` entries render UI, and `input` owns native field primitives. Import component CSS or the shared stylesheet. Hosts supply their theme, overlay container and actions.
 
@@ -112,7 +112,7 @@ The optional xterm entries cover replay, output and input.
 
 ## Notes
 
-The `note/*` entries provide the `.note.md` Markdown codec with stable block IDs and wiki links, rich-block validation, draft includes and live three-way merge. Rich validation and merging run in a worker, off the input thread. `NoteReader` renders bytes supplied by the host.
+`note/note-document` reads and writes `.note.md` Markdown with stable block IDs. `note/note-wikilinks` builds wiki-link queries and binds resolved targets. `note/note-draft-includes` matches a host-supplied draft include to its original occurrence. Rich-block validation and three-way merging run in workers. `components/NoteReader` renders bytes supplied by the host.
 
 ## Icons and themes
 
