@@ -1,11 +1,12 @@
 // @vitest-environment happy-dom
-import { act } from 'react'
+import { act, Profiler } from 'react'
 import { expect, it, vi } from 'vitest'
 import { GlobalBoardSurface } from '../src/renderer/src/components/GlobalBoardSurface'
 import { api } from '../src/renderer/src/lib/api'
 import type { DemandRecord } from '../src/renderer/src/lib/global-demand-board'
 import { useAppStore } from '../src/renderer/src/store'
-import { composerConfig, composerDOM } from './helpers/composer-dom-fixture'
+import { composerConfig, composerDOM, composerSession } from './helpers/composer-dom-fixture'
+import { GoalRow } from '../src/renderer/src/components/GoalsCollection'
 
 const dom = composerDOM()
 const originalIssue = 'Invalid Goal responsibility observation. Original Run is unconfirmed; keep the original work and read its receipt.'
@@ -71,4 +72,34 @@ it('List keeps unknown visible and maintains its original grouped reading rather
   await act(async () => useAppStore.setState(state => ({ sessions: state.sessions.map(session => ({ ...session, latestOutputBytes: 6000 })) })))
   expect(dom.container.querySelector('.goals-list')).toBe(list)
   expect(dom.container.querySelector('[data-goal-responsibility-preview="working"] > summary')).toBe(summary)
+})
+
+it('related Agent status never becomes Goal progress and unrelated output does not redraw the row', async () => {
+  const record = goal('attribution', { sessionIds: ['related-agent'], delegationObservationIssue: originalIssue })
+  const related = composerSession('related-agent')
+  useAppStore.setState({ demands: { [record.id]: record }, sessions: [related,
+    ...Array.from({ length: 1000 }, (_, i) => composerSession(`unrelated-${i}`))] })
+  let commits = 0
+  await dom.render(<Profiler id="actual-goal-row" onRender={() => { commits++ }}><GoalRow demand={{ ...record, sessions: [], workspacePath: null }}
+    selected={false} selectedSessionId={null} acknowledgementFailed={false} stageChanged={false} onSelect={() => {}} /></Profiler>)
+  const facts = () => dom.container.querySelector('.goals-row__facts')!.textContent
+  expect(facts()).toContain('1 related Agent')
+  expect(facts()).not.toMatch(/working|error|running/iu)
+  expect(dom.container.querySelector('[data-goal-responsibility-preview]')!.textContent).toContain(originalIssue)
+  const before = commits
+  await act(async () => useAppStore.setState(state => ({ sessions: state.sessions.map(session => session.id === related.id
+    ? { ...session, status: { state: 'error', source: 'run-process', observedAt: 2 } }
+    : { ...session, latestOutputBytes: 20000 }) })))
+  expect(facts()).toBe('1 related Agent')
+  expect(commits).toBe(before)
+})
+
+it.each([1, 2])('canonical and presentation references count one confirmed Actor in the actual Goal row (%s aliases)', async aliases => {
+  const session = { ...composerSession('presentation-alias'), control: { kind: 'agent' as const,
+    hostId: 'local', agentSessionId: 'canonical-actor', run: { runId: 'original-run' } } }
+  const record = goal('deduplicated', { sessionIds: ['canonical-actor', 'presentation-alias'] })
+  useAppStore.setState({ demands: { [record.id]: record }, sessions: aliases === 1 ? [session] : [session, { ...session, id: 'second-alias' }] })
+  await dom.render(<GoalRow demand={{ ...record, sessions: [], workspacePath: null }} selected={false} selectedSessionId={null}
+    acknowledgementFailed={false} stageChanged={false} onSelect={() => {}} />)
+  expect(dom.container.querySelector('.goals-row__facts')!.textContent).toBe('1 related Agent')
 })
