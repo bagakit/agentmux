@@ -7061,7 +7061,11 @@ export class AgentMuxClient {
         !(session.nativeSourceObservation && sameRun(session.nativeSourceObservation.run, session.run))) return false
     return Boolean(provider.hook.nativeSessionTransition ||
       session.creation?.createdRun && sameRun(session.creation.createdRun, session.run) ||
-      session.continuity?.newRun && sameRun(session.continuity.newRun, session.run))
+      session.continuity?.newRun && sameRun(session.continuity.newRun, session.run) ||
+      // A healthy same-Run entry may replace the current pointer with a
+      // reattachment receipt. The original exact resume remains its start fact.
+      Object.values(session.continuityOperations ?? {}).some(operation =>
+        operation.agentSessionId === session.agentSessionId && operation.newRun && sameRun(operation.newRun, session.run)))
   }
 
   private activateHookBinding(runId: string, binding: AgentHookBinding): void {
