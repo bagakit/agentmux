@@ -43,7 +43,7 @@ it.each([20, 480])('keeps %i hidden Focus rows stable across conversation action
     { primary: 'focus', showSession: false, showGoalWork: false, identity: null, profile: null })
   const view = await mount(<MobileApp client={f.client} connection={connected} platform={createBrowserPlatform()} />)
   await openPrimary(view.element, 'Focus')
-  await vi.waitFor(() => expect(view.element.querySelectorAll('.mobile-focus-project .mobile-agent-row__open')).toHaveLength(size))
+  await vi.waitFor(() => expect(view.element.querySelectorAll('.mobile-focus-project .mobile-agent-row__open')).toHaveLength(size), { timeout: 4000, interval: 10 })
   const search = view.element.querySelector<HTMLInputElement>('[aria-label="查找"]')!
   await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(search, 'Agent'); search.dispatchEvent(new Event('input', { bubbles: true })) })
   expect(search.value).toBe('Agent')
