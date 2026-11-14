@@ -51,7 +51,7 @@ function runtimeImports(sf) {
 async function checkDependencyBoundary() {
   const sources = await files(sourceRoot)
   assert.ok(sources.length > 20, 'The real shared source surface must exist')
-  const known = new Set([...sources, ...await files(sourceRoot, /\.css$/)])
+  const known = new Set(await files(sourceRoot, /./))
   const graph = new Map()
   for (const path of sources) {
     const source = await readFile(path, 'utf8')
@@ -62,7 +62,7 @@ async function checkDependencyBoundary() {
       assert.ok(!dependency.includes('desktop') && !dependency.includes('host'), `${relative(root, path)} imports a client implementation`)
       if (dependency === '@agentmux/core') assert.fail(`${relative(root, path)} loads the Node Core barrel at runtime; use type imports or browser-safe pure public leaves`)
       if (dependency.startsWith('.')) {
-        const next = resolve(dirname(path), dependency).replace(/\.js$/, '.ts')
+        const next = resolve(dirname(path), dependency.split('?')[0]).replace(/\.js$/, '.ts')
         assert.ok(known.has(next) || known.has(next + 'x'), `Shared relative import must remain inside this package: ${dependency}`)
       }
     }
