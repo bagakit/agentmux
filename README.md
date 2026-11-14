@@ -131,7 +131,7 @@ The desktop app groups its views into Work (Space, Focus, Goals), Know (Survey, 
 <td width="33%" valign="top">
 <img src="docs/assets/readme/art-goals-companions.webp" alt="Goals" width="100%"><br>
 <b>Goals</b><br>
-<sub>Agree on a goal and its success criteria first (Grill), then check results against evidence one criterion at a time (Grounding). Agents can only propose; only an authenticated person or device confirms a goal or accepts a result.<br><a href="docs/design/behavior/goals-and-demand.md">Goals</a> · <a href="packages/demand/README.md"><code>@agentmux/demand</code></a></sub>
+<sub>Agree on a goal and its success criteria first (Grill), then check results against evidence one criterion at a time (Grounding). Agents can only propose; only an authenticated person or device confirms a goal or accepts a result.<br><a href="docs/design/behavior/goals.md">Goals</a> · <a href="packages/demand/README.md"><code>@agentmux/demand</code></a></sub>
 </td>
 </tr>
 </table>

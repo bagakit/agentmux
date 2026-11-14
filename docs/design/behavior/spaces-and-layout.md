@@ -7,7 +7,7 @@
 | 产品分组 | 面向用户的入口 | 职责与正文 |
 | --- | --- | --- |
 | **Mote** | 独立协调快捷面与持久 Mote 对象 | 人格与协调沿[Mote 合同](motes-and-coordination.md)；Mote 本体可基于 Space，快捷面有自己的选择。 |
-| **Work** | **Space、Focus、Goals** | 工作现场、执行关注与目标闭环；Goal 的持久实体仍为 Demand，见[Goals 合同](goals-and-demand.md)。 |
+| **Work** | **Space、Focus、Goals** | 工作现场、执行关注与目标闭环；Goal 的持久实体仍为 Demand，见[Goals 合同](goals.md)。 |
 | **Know** | **Survey、Recall** | 浏览探索与知识积累；两工作面分别保留导航选择，具体流程见[知识工作流](knowledge-workflows.md)。 |
 
 分组用于表达产品职责，不重新分配实体或内容归属；Mote、Category、Topic 的原工作面仍可在 Space 视图中加载，具体范围沿[实体与展示绑定](#zonetabsregions-的实体与展示绑定)。Settings 是配置动作，沿[设置合同](settings-and-observation.md)，不新增导航上下文。分组与共享空间底座、导航同步范围是不同问题，后者只由[导航上下文](#worksurveyrecall-与-mote-的导航上下文)定义。
@@ -235,7 +235,7 @@ Source 的项目发现、Files 与普通侧栏消费同一资源解析；目录�
 - **Mote** 是固定协调对象的快捷入口：打开或收起同一快捷面，保留当前主工作面的选中状态和执行焦点。Mote 排第一不意味着启动默认进入 Mote；启动仍恢复用户上一次工作面。PMO 是其初始化默认角色之一，产品身份见[《Space、Folder 与 Topic》](#spacefolder-与-topic)。
 - **Space** 是实际工作现场，承载既有 Agent、Terminal、文件、Browser、Tab 与 Region；顶级入口、说明和可访问名称使用 Space。Space 作为共同外层产品对象，其 Folder、Mote 与知识分类的定义见[《Space、Folder 与 Topic》](#spacefolder-与-topic)；Workspace 继续表达底层工作区对象。
 - **Focus** 查看执行状态、最近上下文与需要用户处理的事项；进入已有 Session 时继续复用原 Tab/Region。
-- **Goals** 是全局目标集合，单项显示为 Goal。标题、创建、搜索、详情、清单和统计使用同一名称；显式创建后记录真实 Goal 草稿，待澄清的想法由 Mote 整理目标与完成标准，具体闭环见[《Goals 的 Grill 与 Grounding》](goals-and-demand.md#goals-的-grill-与-grounding)。Goal 沿用原 Demand 的持久身份；原内部类型与存储名称不改变公开 Goal 词汇，Goal 状态与执行 Session 状态独立。
+- **Goals** 是全局目标集合，单项显示为 Goal。标题、创建、搜索、详情、清单和统计使用同一名称；显式创建后记录真实 Goal 草稿，待澄清的想法由 Mote 整理目标与完成标准，具体闭环见[《Goals 的 Grill 与 Grounding》](goals.md#goals-的-grill-与-grounding)。Goal 沿用原 Demand 的持久身份；原内部类型与存储名称不改变公开 Goal 词汇，Goal 状态与执行 Session 状态独立。
 - **Survey** 先提供日常浏览，再承载明确创建的研究及初步成果，向 Recall 和 Topic 显式输送；入口资格、与项目 Browser 的区分及成果流转只见[《Survey、临时 Zone 工作面与知识入口》](knowledge-workflows.md#survey临时-zone-工作面与知识入口)。
 - **Recall** 是积累、组织和回顾知识的独立主工作面，以 Notebook 和页面为入口；与 Survey 并列，不藏在 Survey 左侧顶部切换器内。笔记、来源与块引用沿[《Recall、Notebook 与块知识》](knowledge-workflows.md#recallnotebook-与块知识)，存储沿[《笔记目录、设置与搬迁》](knowledge-workflows.md#笔记目录设置与搬迁)。
 
@@ -260,7 +260,7 @@ Survey、Recall 与 Mote 面板中的局部对象、Tab／Region 选择只更新
 
 `Open Mote Space`、打开来源、从 Focus／Goal 显式打开 Mote 面板中的讨论等跨上下文动作，只在这次明确操作中将准确对象及位置带入目标上下文，来源上下文继续保留自己的选择。动作完成后各自保存后续导航，不建立持续跟随或双向选择同步。未确认准确目标时保留原工作、引用与失败说明；迟到结果不能覆盖后来选择。选择与 DOM 输入焦点分开，输入交接沿[公共导航与对话输入合同](public-control.md#agent-操作桌面主画面与保留对话输入)，较晚主动焦点继续优先。
 
-独立导航不复制实体、内容、布局、Session／Run 或模式事实；这些仍消费各自原 owner，同一实体在多处的合法展示绑定继续保留，见[实体与展示绑定](#zonetabsregions-的实体与展示绑定)。执行与协调 Session 的语义角色不因展示在 Work、Survey、Recall 或 Mote 面板而改变；空间选择不冒充执行聚焦事件，具体语义焦点和历史政策只见[Focus 合同](focus-context.md#执行-agent-焦点历史与-pmo-上下文隔离)。Goal 专属讨论属于主 Mote 的关系继续沿[Goals 合同](goals-and-demand.md#goals-的-grill-与-grounding)，不据此将 Goals 归入 Mote 面板。
+独立导航不复制实体、内容、布局、Session／Run 或模式事实；这些仍消费各自原 owner，同一实体在多处的合法展示绑定继续保留，见[实体与展示绑定](#zonetabsregions-的实体与展示绑定)。执行与协调 Session 的语义角色不因展示在 Work、Survey、Recall 或 Mote 面板而改变；空间选择不冒充执行聚焦事件，具体语义焦点和历史政策只见[Focus 合同](focus-context.md#执行-agent-焦点历史与-pmo-上下文隔离)。Goal 专属讨论属于主 Mote 的关系继续沿[Goals 合同](goals.md#goals-的-grill-与-grounding)，不据此将 Goals 归入 Mote 面板。
 
 ## Space 对象与知识组织
 
@@ -324,7 +324,7 @@ Git 分支比较沿原 Git owner公开准确base／target分支与merge-base／t
 
 #### 工作线的读取与切换
 
-Branch／worktree 与 Topic 的列表沿各自现有资源入口读取，不另设 Workspace 的 Branch／Topic × 状态矩阵。全局目标清单与看板只沿 [Goals 行为合同](goals-and-demand.md)组织，不复制工作线或 Session 状态管线。
+Branch／worktree 与 Topic 的列表沿各自现有资源入口读取，不另设 Workspace 的 Branch／Topic × 状态矩阵。全局目标清单与看板只沿 [Goals 行为合同](goals.md)组织，不复制工作线或 Session 状态管线。
 
 同一列表的行、读取状态和刷新动作来自原请求 owner；刷新更新对应对象，读取失败保留已知内容并如实说明，不能呈现为空项目。切换 Workspace 时不得短暂显示上一个 Workspace 的 Topic，迟到回执不能覆盖当前来源。对象进入原工作面的导航、原身份与恢复路径保持。
 

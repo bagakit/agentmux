@@ -131,7 +131,7 @@ Desktop 把视图分成三组：Work（Space、Focus、Goals）、Know（Survey�
 <td width="33%" valign="top">
 <img src="docs/assets/readme/art-goals-companions.webp" alt="Goals" width="100%"><br>
 <b>Goals</b><br>
-<sub>先对齐目标和成功标准（Grill），再逐条对照证据核对结果（Grounding）。Agent 只能提交提案，确认目标和接受结果只认通过认证的人或设备。<br><a href="docs/design/behavior/goals-and-demand.md">Goals</a> · <a href="packages/demand/README.md"><code>@agentmux/demand</code></a></sub>
+<sub>先对齐目标和成功标准（Grill），再逐条对照证据核对结果（Grounding）。Agent 只能提交提案，确认目标和接受结果只认通过认证的人或设备。<br><a href="docs/design/behavior/goals.md">Goals</a> · <a href="packages/demand/README.md"><code>@agentmux/demand</code></a></sub>
 </td>
 </tr>
 </table>

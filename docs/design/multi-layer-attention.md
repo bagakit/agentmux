@@ -25,7 +25,7 @@ Agent 能独立工作的时间越来越长。一个人同时开五个、十个 A
 | 执行底座 | 毫秒到秒 | 各家 Agent CLI 的原生协议与终端字节 | 进程、语义与输入就绪各自的状态，明确的未知，操作回执 | [Agent 全局状态](behavior/agent-capabilities-and-messaging.md#agent-全局状态唯一事实与投影) · [Terminal、历史与成本](behavior/terminal-reading.md) |
 | Focus | 秒到分钟 | 每个执行 Agent 的状态与待答请求 | Attention、Working、Results、Idle／Recovery 四组与准确计数；转入完成、Needs you 或失败且用户看不到时一次通知 | [Focus 执行上下文](behavior/focus-context.md#focus-执行上下文项目泳道与底部时间音轨) · [跨会话注意力与系统通知](behavior/settings-and-observation.md#跨会话注意力与系统通知) |
 | Space | 分钟到小时 | 全部项目、Tab、Region 与绑定 | 稳定的位置；折叠后卷上来的后代注意力，需要回答与错误同时存在时都保留；重启后原位恢复的工作面 | [对象树与真实注意力](behavior/spaces-and-layout.md#对象树与真实注意力) · [冷启动按需恢复](behavior/session-recovery.md#冷启动按需恢复p0-末位) |
-| Goal | 小时到天 | 多条执行、委派、报告与证据 | 每条执行一个下一步负责人；人给出意图与关键取舍，确认目标、接受结果 | [Goals 与 Demand 闭环](behavior/goals-and-demand.md) |
+| Goal | 小时到天 | 多条执行、委派、报告与证据 | 每条执行一个下一步负责人；人给出意图与关键取舍，确认目标、接受结果 | [Goals](behavior/goals.md) |
 | Mote | 周到月 | 成员的工作与回流、目标与未完成的承诺，以及它所在会话和本地环境里发生的事 | 一位长期搭档、一条主对话；把值得做的事主动转成 Goal、成员工作与回看，有结果或需要人决定时适时找人，没有变化时不出声 | [Mote 与 PMO 协调](behavior/motes-and-coordination.md) · [主动感知与外部沟通](behavior/motes-and-coordination.md#主动感知与外部沟通) |
 | 知识 | 月到年 | 浏览研究、Note 与 Agent 的工作经验 | 显式保存的成果、授权范围内写回的记忆与 Topic 知识、经人确认转正的经验；Mote 与 Topic 的原文件在新 Session 启动时载入 | [Survey／Recall 工作流](behavior/knowledge-workflows.md) · [会话入口与原文件记忆](behavior/motes-and-coordination.md#会话入口与原文件记忆) · [Topics 知识库的层级与沉淀](behavior/spaces-and-layout.md#topics-知识库的层级与沉淀) |
 
@@ -42,8 +42,8 @@ Agent 能独立工作的时间越来越长。一个人同时开五个、十个 A
 
 ### 只让人做必须由人做的事
 
-- Goal 中，整理目标与成功标准由 Agent 承担；人给出意图与关键取舍，确认目标、接受结果，持续推进另需人单独授权。普通接受只面向当前已确认、非空且每条都有当前检查与依据的结果。见[目标确认与结果接受](behavior/goals-and-demand.md#目标确认与结果接受)。
-- 委派报告待回收，或执行 Run 权威退出、中断时，先给准确的 Supervisor 一次提示，不算作人的步骤。任务停滞时，告警指明停滞与准确负责者；人点一次「PMO 巡查」，请求就送到准确的管理 Session。见[委派回报与责任接续](behavior/goals-and-demand.md#委派回报与责任接续)与[执行责任、停滞告警与 PMO 巡查](behavior/goals-and-demand.md#执行责任停滞告警与-pmo-巡查)。
+- Goal 中，整理目标与成功标准由 Agent 承担；人给出意图与关键取舍，确认目标、接受结果，持续推进另需人单独授权。普通接受只面向当前已确认、非空且每条都有当前检查与依据的结果。见[目标确认与结果接受](behavior/goals.md#目标确认与结果接受)。
+- 委派报告待回收，或执行 Run 权威退出、中断时，先给准确的 Supervisor 一次提示，不算作人的步骤。任务停滞时，告警指明停滞与准确负责者；人点一次「PMO 巡查」，请求就送到准确的管理 Session。见[委派回报与责任接续](behavior/goal-execution-and-supervision.md#委派回报与责任接续)与[执行责任、停滞告警与 PMO 巡查](behavior/goal-execution-and-supervision.md#执行责任停滞告警与-pmo-巡查)。
 - Needs you 的集中入口直接显示具体 Session 与请求：有结构化请求时给出可执行的回答，没有时定位原 Session 和真实状态；处理完进入下一项，并能回到原工作面。见[注意力处理与结果审查闭环](behavior/agent-capabilities-and-messaging.md#注意力处理与结果审查闭环)。
 - 人不必在会话、平台和代码托管之间搬运消息、催办或找回上下文：Mote 把跨来源的线索串起来，沿原能力转成 Goal、成员工作与回看。外部消息里的要求只是线索，不构成授权；合入、发布、对外发言、删除或付款等有外部后果的动作，先向创建者说明依据和影响并取得明确确认。见[主动感知与外部沟通](behavior/motes-and-coordination.md#主动感知与外部沟通)。
 - 经验转正由 Agent 从原 Session 提炼候选，人审阅、修订并选定目标 Mote 或 Topic 后，明确确认把这份候选交给这个目标学习；候选或目标一变，旧确认不再授权。见[Agent 工作经验的转正](behavior/knowledge-workflows.md#agent-工作经验的转正)。
@@ -58,14 +58,14 @@ Agent 能独立工作的时间越来越长。一个人同时开五个、十个 A
 ### 成本只随相关对象增长
 
 - 热路径的工作量随真正相关的消费者和事实增长，不因无关 Session 放大。见 AGENTS 的[工作面恢复与终端阅读](../../AGENTS.md#工作面恢复与终端阅读)。
-- Goals 的扫描随可见目标与实际关联的 Session 增长，不为每张卡挂载终端，也不因无关输出重算全部目标。见[目标确认与结果接受](behavior/goals-and-demand.md#目标确认与结果接受)。
+- Goals 的扫描随可见目标与实际关联的 Session 增长，不为每张卡挂载终端，也不因无关输出重算全部目标。见[目标确认与结果接受](behavior/goals.md#目标确认与结果接受)。
 - 长时间隐藏、超出热保留数量的工作面可以冷停，停放有闲置时限、数量上限与冷却期；重新附着从上次读到的位置继续，超出保留范围的部分在终端外明确标为缺口。见[Tabbar 与切换保活](behavior/spaces-and-layout.md#tabbar-与切换保活)与[终端历史读取与投递确认提示](behavior/terminal-reading.md#终端历史读取与投递确认提示)，当前机制见[隐藏工作面与冷停](../architecture/terminal-runtime.md#4-隐藏工作面与冷停cold-park)。
 
 ## 对 Agent 集群调度的意义
 
 说到 Agent 集群调度，常见的对象是推理资源，或一次运行内部的子任务。AgentMux 不调度模型推理，也不接管各 CLI 自己的模型循环与上下文管理（见 [Agent 全局状态](behavior/agent-capabilities-and-messaging.md#agent-全局状态唯一事实与投影)）。它调度两样东西：
 
-- **工作的责任。** Goal 为每条执行指明当前阶段与下一步负责人。负责人身份、进程在运行或界面焦点都不能单独证明谁在执行，执行绑定只来自原 Goal 的开始、原 Core 输入或核对过来源的委派关联。见[执行责任、停滞告警与 PMO 巡查](behavior/goals-and-demand.md#执行责任停滞告警与-pmo-巡查)与[委派回报与责任接续](behavior/goals-and-demand.md#委派回报与责任接续)。Mote 是工作进入这条责任链的入口之一：它把感知到的事转成有负责人的 Goal、成员工作或回看，线索不停在聊天里。
+- **工作的责任。** Goal 为每条执行指明当前阶段与下一步负责人。负责人身份、进程在运行或界面焦点都不能单独证明谁在执行，执行绑定只来自原 Goal 的开始、原 Core 输入或核对过来源的委派关联。见[执行责任、停滞告警与 PMO 巡查](behavior/goal-execution-and-supervision.md#执行责任停滞告警与-pmo-巡查)与[委派回报与责任接续](behavior/goal-execution-and-supervision.md#委派回报与责任接续)。Mote 是工作进入这条责任链的入口之一：它把感知到的事转成有负责人的 Goal、成员工作或回看，线索不停在聊天里。
 - **人的注意力。** 人收到的提醒只随需要人的状态转变增加；同一状态的重复上报、第一次看到的 Session 和用户正在看的那一个都不增加提醒。人只在需要人决定的环节进入责任链；普通接受要求逐条有当前检查和依据，缺项、差距与未知如实交给人判断。
 
 两者相连：下一步能交给执行 Agent 或管理者的越多，需要人处理的就越少。Agent 越多，需要人的转变仍会越多，这部分成本见下文边界。

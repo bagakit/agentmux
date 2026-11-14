@@ -20,7 +20,7 @@
 | Topics 分类与主题树、讨论和知识内容层级 | [Topics 知识库的导航与内容层级](presentation/spaces-and-layout.md#topics-知识库的导航与内容层级) |
 | Mote 身份、快捷面、浮窗及协调控件 | [Mote 与协调面的呈现](presentation/motes-and-coordination.md) |
 | 伙伴诞生的三幕用户故事板与设置教程 Banner | [伙伴故事板](presentation/motes-and-coordination.md#伙伴从哪里来用户故事板与教程-banner) |
-| 目标正文、需求卡片、详情和 Board 密度 | [Goals 与需求面的呈现](presentation/goals-and-demand.md) |
+| 目标正文、需求卡片、详情和 Board 密度 | [Goals 的呈现](presentation/goals.md) |
 | 执行台、焦点历史、泳道和底部音轨 | [Focus 执行台的呈现](presentation/focus-context.md) |
 | Map 层级轮廓、关系绘制、连续 LOD 与交互动效 | [Focus Map 的呈现](presentation/collaboration-map.md) |
 | 连接、恢复、启动、服务窗和版本边界 | [Session 与恢复的呈现](presentation/session-recovery.md) |

@@ -63,7 +63,7 @@ Space 等完整工作面目录中的 Launcher 提供可发现的创建 Agent 入
 
 手机 Space 与 Desktop 共用原项目分组和目录树的呈现规则，沿[《Project 与 Workspace》](spaces-and-layout.md#project-与-workspace)消费原 Project、手动分组与 Host 事实；目录派生分组只表达呈现。Zone／worktree、Tab 和 Region 的归属仍由原资源和绑定确认，不按路径猜 Session 的业务归属或执行资源。目录发现或呈现读取未确认时保留已知目录与原可用工作面，说明失败步骤和观察范围并提供原目标的读取／恢复；折叠说明和改变密度不判定健康、身份或操作资格。
 
-手机消费原 Topic、Survey 与 Goals 的完整工作面及公共 owner，入口位置沿上文一级导航。Topic 保留 Category、Topic、Chat 和知识来源身份；Survey 只显示原明确收集的研究 Zone、原名称和准确 Tab／Region，不能把全量空间当研究或复制内容。Goals 沿原公共目标 owner 保留目标身份、状态、决策和操作回执，不维护手机独立目标系统；目标清单的完整范围与有界读取沿[Goal 的状态、筛选与路由队列](goals-and-demand.md#状态筛选与路由队列)。所选 File Region 以原目录元信息确定准确资源，通过既有 `file.read` 读取原内容与修订；列表不批量读取文件，不凭路径猜内容，不新增另一套文件读取接口。手机 Note 编辑和保存消费原共享 schema 与 revision-aware 文件写入 owner；冲突、未知写入和未保存草稿明确保全，未取得确认不冒充保存成功。正文写入若缺公共入口，在同一交付中暴露原 owner 的最小 RPC／CLI 能力并验证实际手机消费，不停留在只读占位。Browser 沿原 browserId 发现当前网页。原对话、Message Tools 与 Terminal 继续同源，自定义头像和动画保真，失败保留原对象和草稿。
+手机消费原 Topic、Survey 与 Goals 的完整工作面及公共 owner，入口位置沿上文一级导航。Topic 保留 Category、Topic、Chat 和知识来源身份；Survey 只显示原明确收集的研究 Zone、原名称和准确 Tab／Region，不能把全量空间当研究或复制内容。Goals 沿原公共目标 owner 保留目标身份、状态、决策和操作回执，不维护手机独立目标系统；目标清单的完整范围与有界读取沿[Goal 的状态、筛选与路由队列](goals.md#状态筛选与路由队列)。所选 File Region 以原目录元信息确定准确资源，通过既有 `file.read` 读取原内容与修订；列表不批量读取文件，不凭路径猜内容，不新增另一套文件读取接口。手机 Note 编辑和保存消费原共享 schema 与 revision-aware 文件写入 owner；冲突、未知写入和未保存草稿明确保全，未取得确认不冒充保存成功。正文写入若缺公共入口，在同一交付中暴露原 owner 的最小 RPC／CLI 能力并验证实际手机消费，不停留在只读占位。Browser 沿原 browserId 发现当前网页。原对话、Message Tools 与 Terminal 继续同源，自定义头像和动画保真，失败保留原对象和草稿。
 
 ## 对象身份与工作面
 

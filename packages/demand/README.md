@@ -112,4 +112,4 @@ Store methods follow the same pattern: `prepareDelegation`, `preparePatrol`
 and `prepareDispatch` freeze an intent before Core is asked to send anything,
 and the matching `mark…Attempt`, `record…` and `inspect…` methods keep each
 attempt and its outcome. Behavior is defined in
-[Goals and Demand](../../docs/design/behavior/goals-and-demand.md).
+[Goals behavior](../../docs/design/behavior/goals.md).

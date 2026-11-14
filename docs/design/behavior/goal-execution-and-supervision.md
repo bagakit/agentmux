@@ -1,0 +1,114 @@
+# Goal 执行与监督
+
+本文定义 Goal 的负责人、执行输入、委派回报、运行观察、持续推进与 PMO 巡查。目标与人的认可见 [Goals](goals.md)，节点和评审见 [Goal 计划与 Ticket](goal-plans-and-tickets.md)。
+
+- [负责人和开始执行](#负责人相关会话与当前推进)
+- [委派与回收](#委派回报与责任接续)
+- [执行责任与巡查](#执行责任停滞告警与-pmo-巡查)
+- [专属讨论](#goal-的专属-pmo-tab)与[持续推进](#goal-与原持续推进的连接)
+
+## 负责人、相关会话与当前推进
+
+目标卡的 Agents 与超额人数入口可悬停或点击读取完整当前团队；准确 Agent 头像悬停预览、点击或键盘激活进入原 Agent 详情阅读，保留当前 Goal 选择。只有详情中的显式工作面动作才导航原 Session；查看不分配关系、不启动 Agent、不发送输入。未确认引用只读已知角色与来源，不用同名或同 ID 的本机会话代替。
+
+提需参与事实独立记录实际创建、讨论与补充要求的 Agent/PMO/Mote：准确身份、参与时 Session、原来源和时间由真实调用/身份 owner 确认，元信息沿原身份读取，不复制聊天全文。参与不同于负责人、相关会话、Supervisor 或当前执行；Session 退出不删除参与历史，缺少来源不能从关联、名称、焦点或历史末项猜作者。选择器先推荐与该 Goal 相关且可选的 Agent，再排该 Project 的可用 Agent；其他 Mote/Agent 沿原选择规则。不可选的历史参与仍可读、可定位，不伪装成可立即执行。Supervisor 相邻提供有可辨头像/姓名的准确推荐和明确一键指派，推荐不是已经指派。
+
+Goals 的原 Settings owner 保存「让提需 Agent 默认担任 Supervisor」偏好，有效默认开启，GUI 与公开 settings inspect/set 同源。仅新需求首次默认指派沿实际创建/提需链确认的原 PMO/Agent Session；开启时在同 Demand 一次纳入 Supervisor、负责人和相关会话，关闭仍保参与事实及推荐、等待明确指派。该默认不追改旧需求、后来的提需补充、已有人工选择或运行中的 loop；每个 Goal 仍可显式清空/更换。保存绑定不启动 Loop。缺少准确提需 Session 时保选择入口，不猜默认主会话或当前焦点；延后取得新 Goal 原始来源时仍核首次资格及未被人工覆盖。默认绑定直接用真实提需 Session，与手选 Mote 新建 Session 的意图分开。PMO/主对话可以复用服务多个 Goal，不能由当前一目标一新 Session 的实现习惯推断身份；每次操作保明确 Goal/来源及原回执。
+
+负责人、相关会话和 Loop Supervisor 都引用准确的原 Agent Session。负责人可多选，承担该 Goal 的推进；相关会话承担讨论与历史关联，两种职责分别编辑，在同一区域共用 Agent 选择入口。旧 Session 关联及原 Executor 配置保留，不能从 Executor 或历史关联自动推断负责人。负责人同时属于保留的相关 Session 集合，增加负责人原子加入该集合；移出负责人不删除历史。Supervisor 非空时必须属于负责人，移出当前 Supervisor 时明确清空或指定替代，并以同 Goal 的 expectedUpdatedAt 一次保存，冲突先读原记录。旧公开 Executor 负责人写入及所有客户端消费一并撤换，不保留两套负责人权威。Supervisor 由负责人中明确选择一个；保存 Supervisor 不启动循环，更换负责人或 Supervisor 不静默重绑旧 loop、不停止原 Run 或重放未知输入。原 loop 的目标、Session、Run、版本与 operation 独立保留，可检查并控制原操作。Supervisor 资格只约束新 loop；检查或重读原开始先找到同 operation 的冻结 loop，再核原目标，不以新选择拒绝旧回执。旧 loop 未显式停止前不能为该 Goal 另起指向新 Supervisor 的 loop。
+
+选择器可搜索名称、Project 和准确身份，呈现头像、名称、项目与权威可用状态。相关且可选 Agent 优先之后，未绑定 Project 时 Mote 优先；绑定后该项目的可用 Agent 优先，working 不是唯一可选状态。未知、尚未恢复及已保留引用诚实可见，不因列表缺席清空关系。选择 Mote 为该 Goal 建新的 Session，沿该 Mote 原身份与 launch owner；支持启动新的 Agent 作为负责人，Executor 是创建参数。未明确执行位置时选择真实 Project/目录，不从 PMO cwd、显示 Space 或名称猜测。创建、关联及任务投递分别报告；稳定 operation 与原 Session 的检查入口保留，回执未知先检查，不重复创建或发送。 新 Agent 的项目与执行设备复用原 Source 选择和公开 admission；Source 自有创建从原 C 与成员位置取得关系，独立 Coordinator 创建沿原 Main C owner、再以原 L 关联到项目，不能伪造 Launcher 位置。Goal 私有叶保完整原请求，检查只读，明确续办仍用同 C／L，不改为新身份；创建和关联不代发 Goal 正文。首次选择项目访问路径只显式读取该连接原 Core 的已保存前缀，不自动建路由或授信；完整访问选择仍由本次原 owner 核对。
+
+原 Goal 显式开始 owner 在同 Demand 中保存结构化业务 dispatch 记录：准确 Session、稳定 operation、原时间、prepared/submitted/confirmed/unknown 投递阶段及原回执引用；只记录业务提交，不持 Runtime 生命周期。该记录只能由实际开始 owner 建立，普通活动类别不能冒充执行。confirmed 依据才称正在推进，unknown 保留最后事实与原检查入口；多个无法唯一确定的当前依据表达歧义，不猜最近条目。原 Goal 的显式开始、其实际任务提交及已核对来源的委派关联共同提供当前推进依据；负责人、历史关联、Run 活跃或 loop tick 本身不足以证明正在推进。Agent Region 可呈现具有准确执行关系依据的当前 Goal 并导航其详情，多个依据或尚未恢复时明确表达相应事实。导航保持 Agent/Goal 身份、输入草稿和健康 Run，不改 Session/Tab 名称、执行 cwd，不发送 Grill 或隐式消息。关系随原领域事实恢复，未知不冒充完成或终局。
+
+Source-qualified 单次 Start 保留完整业务引用、原执行 Runtime／Session／Run、operation、正文与独立系统 note。creation 由原 Source 的准确 Region／C 成员事实定位；association 先核原 Source 的 L 与资源，再用独立当前通道核原 Coordinator 的 C 和输入资格。关系、标签、当前路径与已保存访问选择不授予输入权；没有该次准确权限时只拒这次动作，不借本机同 SID 或 Source transport 身份，原 Agent 与请求继续保留。旧裸 Session 的单次开始和持续安排仍沿原合同。
+
+GUI 的单次开始复用原项目连接与已保存前缀选择；association 另选独立 Coordinator，关系保存不授输入权限。连接选择和未提交任务沿原工作面私有输入保全，首次实际提交前保存原 operation；原已保存请求的 Check 只读，明确 Continue 才续办同一原 operation。新的连接编辑、不可读的较新私有输入及旧回执分别保留，不能降为本机裸 SID、覆盖后来编辑或重建任务；不可读输入在原工作区给服务窗，隐藏工作面不自动检查。尚未提交的选择可明确放弃；若 Goal 内容已变，先明确采用当前版本，已经保存的输入正文、note 和 Run 仍只由原 owner 冻结。
+
+Source-qualified 新请求在任何连接或 Core 准备前，由同一 Demand 事务保存原 OP、准确成员、Goal 版本与冻结正文；尚无 Run 时只记 requested，不补造 Run、系统 note 或输入回执。首次实际取得 Run 后才一次推进原记录并冻结 Run/note；请求保存不授输入权。原业务事务明确拒绝的版本或负责人请求记 rejected，不冻结未知旧正文，且该 OP 不再转输入；必须读到原明确拒绝后由用户显式准备新当前版本和新 OP。未知写入或 ACK 不开放换 OP。检查 requested/rejected 只读原领域记录，不为它连接 Agent、启动或输入。原四种 Run-bound 记录不迁移、不补造早期请求事实。
+
+原 Goal 先保存同一次提交，再进入 Core 原 controlled intake。submitted 或 unknown 后的普通重入与检查不再提交；用户可明确续办同一原 operation，由 Core 以同一冻结 key、正文、note 与来源仲裁，再沿原 waiting reference 续接。另一个 producer 的同 key 不同内容必须冲突，空读不证明原请求从未进入，未知效果不自动重放；不换 Run、operation 或创建空 Session。只有原 Core canonical admitted／terminal-confirmed 回执才能确认输入，保留回执不表示当前 Run 健康、Goal 已完成或人已接受。Core 继续独占 waiting、gate、attempt 与权限事实，Goal 不保存它们的副本。 已保存输入的检查可明确只填写独立当前 Coordinator 的访问，不要求虚构 Source 通道，按原 Runtime／Session／Run 与 canonical 正文、note、来源读取，不以 Source 暂不可读挡住这条原观察；该通道被拒或身份不符不自动换路，检查不提交或续接，实际 Start 仍核完整原 Source 与当前输入资格。
+
+关键过程记录沿原 Demand activities owner，公共 Core/RPC/对象式 CLI 可追加并检查准确 operation。原 Session 作者由调用认证取得，业务正文不能冒充另一作者；稳定操作重读不重复写，同操作不同内容明确冲突。需求变化、进展、评审/测试证据、main SHA、发布版本、缺口和接手入口分类可读，证据保存路径/SHA 引用，不复制聊天全文或工具逐行输出。GUI 与 CLI 消费同条原活动，工作实现、main 集成、发布安装与人的成果接受分别成立。
+
+## 委派回报与责任接续
+
+Goal 的委派沿 Core 原通信 dispatch 和实际独立 AgentSession，保存原 source message、operation、Host、owner／worker、Run、冻结任务正文及资料来源；Goal 持有业务关联和逐成功标准的报告，Core 持有通信、投递与回复事实。委派不更换 Supervisor，只有显式交接修改责任。Mote 的执行 cwd 与 Goal Project 分别成立，准确发现目标，不从名称、正文或显示位置推定执行身份。
+
+未交付的执行 Agent 退出时，原 Goal、委派、负责人和工作面保留，明确需要原身份接续或处理阻塞。已有真实报告时显示报告待回收，并让 Supervisor 沿原回复核对证据、差距与未知，提交同一 Goal 的结果；回收后显示待人核验或接受。进程退出、idle、投递、ack、worker_done 和报告自称完成均不代签业务完成或人类接受。仅观测未知时说明失败步骤与恢复动作，保健康 Agent 可用，不盲重投。
+
+委派意图、通信提交和报告回收分别沿原 owner 持久化与对账；回执丢失和重启后保持同一 operation／message、冻结正文和原责任。逐标准报告有准确作者、原 reply、证据位置与目标提案版本，重复或迟到回复不制造新工作、不覆盖已回收报告或人的接受。原 Mote 和 Goal 工作入口提供查看来源、回答提问／处理阻塞、回收报告及原 Session 接续的真实动作；不要求用户靠追问发现未收尾。
+
+已有 Core 委派可由原任务 owner 显式关联到同一 Goal，先核对原消息主体、Host、Run、operation、thread 和冻结正文；关联不重发、不改原文，也不追认资料已被采用。旧的 Goal 显式有限开始仍沿原业务 dispatch 与 Core prompt 回执观察，不伪造 A2A 来源或 worker 报告。当前推进须同时核实该开始的准确输入与原 Run；Goal 级结果与该 worker 的关联缺席时保持未知。新开始由原业务 owner 捕获当时的标准和结果基线，旧记录缺失的基线不从当前目标或提示正文补造。原输入未知、退出待接续、已有 Goal 结果待核验分别可读，并可打开原 Agent 或原结果。
+
+原执行 Run 的权威退出／中断或原报告待回收可触发一次给准确 Supervisor 的 AgentMux 提示，沿现有有源输入机制并保冻结操作与原目标；不新增周期 Loop。忙、草稿或观察未知保留准备与服务窗，提交回执未知后仅对账原输入，不自动重投。原 Core 已有明确结构化报告而 Goal 尚未记到时，责任 owner 可核对真实作者、原 source／reply、版本和逐标准证据后恢复报告再显式回收，不冒充 worker 再发消息。
+
+## 执行责任、停滞告警与 PMO 巡查
+
+持久记录中的可缺省输入资格字段沿同一领域合同读取：缺省时保留原记录和未确认资格，字段存在时校验原值与来源；合法的旧责任记录不得因新增可选字段而使整份 Goal 快照不可读。
+
+Goal 的责任回执沿 Core 原观测合同保留主会话与子会话各自的来源和状态；公共查询与 GUI 消费同一校验边界。合法的原观测字段不得造成整份责任读取失败，缺失或未知仍明确保留，不由客户端删字段、改状态或绕过来源校验。
+
+Goal 的执行责任必须在 GUI 中可辨：明确任务对应的实际执行 Agent、管理者、当前业务阶段、最近业务进展与下一步负责人。执行绑定来自原 Goal 开始、原 Core 输入或核对过来源的委派关联；负责人、历史 Session、名称、当前焦点和进程 running 都不能单独证明正在执行。已关联但当前无确认执行、多个依据有歧义、尚未恢复或不可用分别表达，旧 Goal 不因缺少新字段补造绑定。Goal 列表、详情、Mote 当前工作及 Agent 工作面消费同一关系与状态来源，并可定位原 Goal 或准确执行工作面。
+
+未结 Goal 的业务责任与原 Agent 的语义状态、readiness、Run 生命周期及观察新鲜度共同决定待处理事实。任务仍需执行而 Agent 已 idle、输入/运行异常、退出或被明确停止，且尚无报告、交接、已声明的等待或下一步处理时，必须暴露停滞及准确负责者；已有报告未回收、回收后未完成核查或状态回填时，明确由管理者继续处理。Supervisor 自身不可用或缺席也形成可见的监督缺口。正常短暂 idle、已明确等待用户验收或外部条件、完成责任后的空闲分别呈现，不仅凭非终态 Goal 加 idle 就判失败。关闭展示 Tab 与结束执行分别读取，后台健康执行仍可见；unknown、stale 或 unavailable 不冒称死亡，也不隐藏尚未交代的责任。
+
+告警说明发生在何 Goal、原 Agent/Run、哪项责任未衔接、依据与时间范围及下一步入口。idle 持续时间只使用 Core 已确认的状态起点与业务事实；缺少起点如实未知。去抖、宽限和重复提醒根据实际状态与责任变化收敛，具体默认值属于实现选择，须说明依据，不固化成无来源的永久产品门槛。告警不依赖用户展开详情或保留某个 Region；客户端重启、重连和 late event 后，从同一原 Goal、Session、Run 与委派事实重建，不复制 Runtime/任务账本，不为每张卡轮询无关 Session。
+
+告警提供一次点击的「PMO 巡查」：打开左下快捷交流浮窗，切到该 Goal 准确原 Supervisor Agent 的对应对话，并实际向该管理 Session 提交有源请求，携带原 Goal、执行关联、异常、待处理报告和可定位证据。浮窗先展示准确目标与准备状态，不等待慢观察或投递结束才出现。原 Supervisor 的对话与 Goal 专属讨论不是同一关系，不能仅打开专属讨论或泛称 PMO 就宣称已到达管理者。浮窗复用原 Agent、Tab／Region 与准确展示引用，不改变执行 cwd、Mote 成员或管理关系；既有输入与工作保留。原请求已经保存或在途时，仍可再次打开同一准确对话并读取原回执，不重复提交输入。
+
+点击后的目标是让管理者实际开始巡查，但窗口已打开、请求保存、输入投递、Agent 工作和巡查回填各守原事实。工作状态只消费准确 Session／Run 的 Core／Provider 状态，不以导航、按钮或 spinner 代签。缺席、退出、输入忙碌、位置未确认或恢复未知时，仍打开保留原目标的浮窗，就近说明实际步骤、未知事实和准确接续／选择入口；不先显示旧 PMO 或其他 Goal 的对话，不猜当前焦点、不静默改派、恢复、重发或另建重复执行者。明确点击巡查时，已确认原 Run 结束、原身份与原生语义恢复条件成立且没有未知输入的，可沿 Core 可见地恢复同一 Session，再接续从未尝试的原巡查请求；不暗降为新会话或 Level A 重启。已有健康能力继续可用。导航到 PMO 与提交巡查分别留回执；只有导航、入队、delivered/ack 或提示已收到都不表示巡查完成。重复点击、回执丢失与重启沿同一次巡查 operation 和原输入身份对账；在途、已开始、失败或未知的反馈在原 Goal 和本次目标窗口可读。
+
+PMO 巡查沿原授权核对原报告、执行健康与逐成功标准证据，收回实际结果或处理原阻塞，再通过同一 Goal owner 写回当前进度、证据/差距/未知、下一责任人和下一动作；需要更新业务状态时执行有来源的明确更新。告警根据这些新事实重新判定，单次点击或发出提醒不能消警；仍有缺口时保留可接续责任和原因。人的目标确认与结果接受仍由原人类 owner 完成，PMO 不代签。巡查请求本身不扩展原实现、安装或外部动作授权。
+
+执行角色接单时读取该 Goal 与本模块指引，核对实际绑定；关键进展、提问、阻塞和交付及时回报到原任务，结束、交接或暂停时说明结果或未完责任。管理角色负责核查、回收、状态流转和后续安排，不能以派工或 Run 结束收尾。两类职责在注入 prompt、默认上岗手册和 Goal 模块 skill 中可发现，引用本节同一合同；分层和读取入口见[基础 skill、模块发现与渐进加载](public-control.md#基础-skill模块发现与渐进加载)。新会话、复用讨论和原生接续分别保准确资料来源及实际输入，不因更新文件假称现有 live Agent 已重新采用。
+
+## 全局巡查
+
+Goals 提供明确的「全局巡查」入口，一次点击在同一个主 PMO Mote 内新建这次巡查的独立 Tab 与 Agent 上下文，打开左下快捷交流浮窗并实际发送检查请求。主 Mote 身份、目录和原 bot 配置沿[主 Mote 与 Goals 协作](motes-and-coordination.md#主-mote-与-goals-协作)；不创建新 Mote、占位 Goal 或新的目标执行，不改派各 Goal 原 Supervisor，也不借用已有 Goal 的专属讨论承载全局工作。在途、保存或投递未知保持同一创建 operation、Tab／Region、Session 和原请求，不因重复点击、重入或恢复新增讨论、重复发送。
+
+检查范围是本次可发现的全部持久 Demand，包括已结束的目标，不受当前列表的 Project、状态、负责人或搜索筛选限制。PMO 沿原 Goal owner 读取逐目标事实、执行／委派／巡查及可定位证据，核对现状后在这次新对话返回汇总与处理建议。结果保每个 Goal 的准确身份、观察来源及范围，区分已核对、读取失败、信息过期和未知；部分读取失败仍展示已取得的结果和具体缺口，不能静默漏掉目标或把未核对项冒充检查通过。检查、准备、投递和真实工作状态仍分别表达。
+
+汇总应让用户知道哪些目标正常、哪些有未衔接责任或待处理结果、哪些缺少依据，以及建议下一步。可直接处理的建议列明准确目标、具体操作、影响及所需决定，由用户明确确认所选操作或一组操作后，沿原业务 owner 执行并回报实际回执；“一键”不等于默认同意。不能直接处理的事项结构化列出问题、依据、未知、需用户决定的内容和建议下一步，在同一对话继续讨论。对话是本次全局结果和讨论的入口，不复制另一份 Goal 状态或让全局巡查 Session 冒充各 Goal 原管理者的报告作者。
+
+全局巡查本身授权检查、汇总和讨论，不自动执行任意修复、改变目标范围／管理关系、恢复或替换原 Session、安装或进行外部动作，也不代签人的目标确认或成果接受。确认后操作仍守准确原目标与版本、原权限和未知回执边界；范围或事实变化时说明差异，已确认操作的实际成功、失败和未确认结果分别保留。无法准备主 Mote、创建／投递未知或观察暂不可用时，保本次原 Tab、请求与已取得结果，在该对话入口给出具体恢复说明，不以失败关闭无关健康工作面。
+
+## Goal 详情中的 Session 观察投影
+
+从 Goal 团队激活准确 Agent 时，优先在当前 Goal 上就地打开既有原 Agent 对话工作面，保留目标选择、正文位置和草稿；明确进入持久工作面仍沿原空间导航。目标是已确认的 canonical Agent Session 与 Host，有准确 occurrence 时保留原 reference；未知引用只读其原来源，不借本机同 SID。打开只导航，不隐含发送、恢复、改派或目标执行。它复用原对话与输入 owner，和下述只读观察投影分别遵守各自合同。
+
+执行拓扑按需表达准确 Project／资源 Workspace、Topic／Branch、已有 Tab、Region 与 AgentSession；多处合法绑定可辨，不以 Session 数量、当前焦点、最近顺序或终端标题猜位置。没有 Tab、Region 或当前 Agent 时诚实说明。共用原空间与 Session 投影组件，不为每张目标常驻完整终端或另建拓扑账本。
+
+选中目标后，可用原 arrangement 为一个或多个准确 Session 建观察投影；它是详情的临时呈现，不修改原持久工作面的分割，不创建 Session 或第二个进程。Region 复用同一 Session／Run、ordered bytes、Replay、Gap 和 Attachment owner；新观察 lease 不成为 Runtime 真相或另一份缓冲。返回 Goals 保原目标、详情位置与筛选。
+
+观察投影只读状态、输出、Activity 与待处理事实；禁止 PTY 输入、composer 发送、生命周期修改与主动尺寸控制，只禁 resize 不算观察模式。需要输入、编辑、停止 Agent 或调整终端尺寸时，明确进入准确原工作面；已授权的控制仍归原 owner。将来允许投影接管须显式转移唯一输入／尺寸 owner，不能由多 Region 争抢。跳转失败、位置歧义或恢复未知保目标事实、原引用与恢复入口，不清详情。
+
+## Goal 的专属 PMO Tab
+
+New Goal 与已有 Goal 的讨论关系只定义于[显式新建与专属讨论](goals.md#显式新建与专属讨论)：同一个主 Mote 内，每个 Goal 有独立讨论 Tab 与 Agent 上下文；不创建新 Mote，不共享别的目标讨论，也不启动目标执行 Run。Demand 文件保领域事实，准确 Tab／Region、拓扑及绑定持久化归 Core 空间 owner；Client 保呈现与真实输入焦点。
+
+新旧专属讨论共用 Core 空间图中由原领域 owner 维护的唯一绑定，固定原 Goal、Tab、Region、AgentSession 与执行 Host；原 Launcher 明确尚无 Session。Host 解释讨论关系，Core 保护原 owner 的耐久写与整图提交边界，不解释 Goal 领域。陈旧布局或普通资源提交不能伪造、覆盖或丢弃该绑定；Region 后来被替换时保留原目标并说明未知，不随当前内容暗换收件人。创建 operation 只持有原创建幂等与来源，不能成为另一份讨论绑定。
+
+已授权的旧绑定交接仅由原 Desktop 读取自己保存的准确关系，并核对原工作面、Session 与执行 Host 后贡献到同一空间图。Core 确认同一关系已耐久保存后，原保存 owner 才逐项删除重复字段；回执未知、冲突、来源缺失或删除失败均保原字段与工作面，重试核对同一关系，不清空数据或新建替代讨论。空来源不制造关系或多余写入，单个来源的零项观察不代表其他 profile 或尚未保存的状态。待交接原字段只供核对和继续交接，不作为另一套运行时绑定。交接不授予创建、首句输入、参与角色或 Supervisor 来源；后续发送继续核对原 Core 输入及真实调用者与 ACK。
+
+未选 Agent 的原 Launcher 只导航原入口，不自动创建或宣称已发送。之后在同一原 Launcher 显式选择 Agent，须沿真实创建来源证明该次填充：Mobile 核对 Core 公开空间创建的原 operation、位置与真实 Session 回执；Desktop 由认证 Main 在原完整创建调用中捕获准确 Launcher，保留全部启动选项，再核对实际 Core operation、Session 与执行 Host 回执；位置意图的耐久与恢复沿[Durable Runtime 健康](session-recovery.md#durable-runtime-健康)。位置和同一讨论绑定原子耐久保存后才确认收敛，不为统一形式伪造另一条创建记录。当前 Region 的外观或内容变化不足以改绑；观察或绑定保存失败保留实际创建、输入与原工作面，明确局部未确认，不封闭健康 Agent。未知回执沿同一操作确认，不重复创建。
+
+“打开 PMO／继续讨论”定位原 Goal 的准确讨论 Tab；读取、握手或恢复未知不证明 Tab 已关闭，更不授权替换 Session。保原 Goal／Tab／Region／Session 与服务窗，沿同一操作读取或恢复；只有权威确认原 Tab 已明确关闭后，本次显式打开／新建讨论意图才可为该 Goal 建立新专属上下文，保旧关联历史，不另加一次确认。浮窗有明确目标时等待并展示该目标，Agent 尚未挂上不先展示旧 PMO，也不回退另一个 Goal。
+
+请求携带稳定 Goal／Demand ID、当前标题、原意／描述、真实 Project／Workspace／Host 及路由事实；Mote 只整理、组织与跟进，执行分工和既有授权沿[协调合同](motes-and-coordination.md#pmo-teams-topic-名称与职责)。原目标保存未知先读同一对象，准备或投递未知先核原操作，不重复 create／start／发送。
+
+专属讨论创建时为准确 Agent Session 与 Tab 提供可读的主题／协调名，并沿原名称 owner 保存派生来源；不能只设置 Tab 名而使 Session 无名。尚未明确主题时保临时讨论名，明确后沿原协调消息中的命名责任细化。准备失败时保原 launcher、请求和已确认名称；复用已存在的讨论不强改名称或暗送请求。名称不改变持久 Mote、Goal、Session／Run、cwd 或执行授权。
+
+## Goal 与原持续推进的连接
+
+本节是 Goal 持续推进（loop）语义的唯一定义；Mote 中的入口与回访摘要只引用这里。
+
+确认的 Goal 可以由明确指定的单一 Loop Supervisor 持续推进；该准确 Session 必须属于负责人。持续推进是有限开始之外的单独授权，默认不开启。未指定 Supervisor 时详情引导选择，Continue 的启动操作在准确 Supervisor 明确后可用；有多个候选时由用户明确选择，不借最后关联项、背景 Space、名称或当前目录猜测。原 loop 的检查和控制不被新的选择状态遮蔽。原 `goal.start` 通过可选 continuation 授权，绑定原 Goal ID、已确认 alignment revision、Supervisor 的准确 Host／Session／Provider／cwd 与同一业务 operationId；未提供 continuation 仍是原有限开始。一次开始的业务 operationId 与后续每次 tick 各自准确留存，丢失回执按原操作核对，未确认时不重复发送，也不创建替代 Session。原 `goal.inspect` 按该 Goal 投影原续跑 Manager 的准确目标、状态与原操作回执，读不创建调度或复制 Goal 账本。原 `goal.continuation-action` 以准确 Goal/loop、预期 revision 与业务 operationId 沿同一 Manager 执行暂停、恢复、停止或检查；普通日历 `schedule.*` 不承载 interval 续跑。Goal 续跑与日历消息共用同一个持久调度时钟和 Core 输入事务，各自保留业务语义；Goal 生命周期只由 Goal owner 解释，Core 的续跑来源与调度不新增 Mote、Demand 或 UI 依赖。RPC/CLI/GUI 与连接设备对同一操作、版本和结果使用一致语义。
+
+持续执行以原 Host 在线、Supervisor Agent 可用和准确输入条件为前提；关闭当前面板或换设备不改变原执行身份。设备或连接不可达时显示最后已确认的事实与未知状态，不宣称云端全天候保证。应用或连接恢复后保原目标、同一 loop、待核操作与讨论，不追补一串过期 tick。
+
+有限 Goal 开始把已确认的任务正常提交给明确的执行 Session；Provider 具备立即打断能力不等于这次目标开始获得抢占授权。提交方式与同一业务操作在首次入队时保存，重试沿原方式和原回执；已经选择立即打断或方式尚未确认的旧操作，不能被新的有限开始静默改成普通提交。忙碌、待权限、错误 Run 和投递未知仍由原 Core 判定并保留原任务、草稿与健康工作面，不在失败后换方式或换身份重发。用户的显式立即发送与原持续推进保留各自原合同。
+
+Goal 完成/取消仅停止相应 loop，不停止健康 Run、不删除原工作面，也不冒充成果已接受；改名或无关目标变化不停止当前 loop。blocked、待决定、确认失效、原来源不可读或读取结果未知时暂停自动动作并说明原因，保留健康 Agent。继续执行须重新核对当前版本、目标和原输入条件；手动输入、权限请求、运行繁忙和未知投递仍由原 Core 保护，已有可用能力保留。原目标版本失效后，旧 loop 仍可检查或停止，但不能恢复旧授权；新确认的版本由用户先明确停止旧 loop，再以新的开始操作授权，不自动重绑或改写旧的未知事务。loop 与 Goal grounding 的人类接受各自成立，自动推进不替用户确认目标、接受成果或宣告成功。Mote 中的入口与回访摘要见[《目标、持续推进与成果回报》](motes-and-coordination.md#目标持续推进与成果回报)。
+
+已有计划时，生成新的计划管理输入前须核对准确 Goal 当前的 Supervisor 关系。原 owner 已明确撤换或清空该角色时，旧 loop 暂停这类新输入，保留原目标、身份与可见原因，不自动改投或新建 Agent；经原 loop 入口显式处理。已有 pending／unknown 的冻结输入仍沿原 claim、正文与操作核对，不撤回已应用输入或重新构造任务。无计划时已授权的原执行者续跑不因这条管理用途检查而撤销；Goal 读取未知只跳过本次新管理输入并保留恢复，不能猜为角色已被撤销。

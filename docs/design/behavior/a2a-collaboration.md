@@ -73,7 +73,7 @@ Focus Map 的用途、实体、层级地形、通信邻域、阅读稳定、事�
 ## 交出去与派出去
 
 - **Handoff 与 Dispatch 表达协作意图。** Core 用 `originAwaits` 区分交出去（false）与派出去后原协调者仍等待问题、升级和收工（true）。该字段描述本次协作声明，不原子转移外部任务系统的所有权；准确执行与可观察范围见下文，不以普通消息措辞冒结构化事实。
-- **全权交接须有人的明确授权**。用户已授权 Goal 范围内的 Mote 委派与结果回收沿[Goal 委派合同](goals-and-demand.md#委派回报与责任接续)，不因委派暗转业务所有权或扩大授权。handoff 不夹带消息投递：一次调用若同时转移所有权并投递指令，Agent 就能在没有人确认的情况下转手任务并驱动接收方执行，因此两者分开；要送文本走 `send`／`discuss`。
+- **全权交接须有人的明确授权**。用户已授权 Goal 范围内的 Mote 委派与结果回收沿[Goal 委派合同](goal-execution-and-supervision.md#委派回报与责任接续)，不因委派暗转业务所有权或扩大授权。handoff 不夹带消息投递：一次调用若同时转移所有权并投递指令，Agent 就能在没有人确认的情况下转手任务并驱动接收方执行，因此两者分开；要送文本走 `send`／`discuss`。
 - **交接的目标用与位置无关的 Session 身份寻址**。多态寻址（Region/Tab）要过 Control 面解析成 Session，把一个原子动作拆成两跳，还让它依赖 Desktop 活着——而交出所有权不该有这个前提。
 - **交接回执不冒任务所有权记录。** `handOff()` 的本次返回值只表达 `ownerAgentSessionId`／`originAwaits`；准确合同以[Core handoff](../../../packages/core/src/agent-handoff.ts)为准。未取得持久任务 owner 确认时，界面不能从自由 `taskId` 或一次返回值宣称“任务当前归谁”，也不另存无法核对的 owner 字段。外部任务与 Goal/Demand 的实际关系沿其原 owner。
 

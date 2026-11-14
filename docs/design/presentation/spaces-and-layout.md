@@ -85,7 +85,7 @@ Tab 级投影只保当前展示位置的一行身份／操作带，不再套上�
 
 - 窗口只保留一组主导航，位置与分组见[《左下角导航与右下角工具组》](#左下角导航与右下角工具组)；顶行不重复主导航。
 - Focus 泳道沿原注意力分组；Space Agents 的稳定顺序见[列表呈现](#space-的-agent-列表)。Needs you 使用现有琥珀语义，working 使用现有绿色/蓝色语义，结果审查入口使用低对比度次级动作；不为同一状态增加第二枚常驻徽章。
-- Goals 的目标卡片、详情、空详情与执行关联只见[Goals 呈现 owner](goals-and-demand.md#goals-的清单看板与详情)，不在空间页另立 Board／Demand 卡片合同。
+- Goals 的目标卡片、详情、空详情与执行关联只见[Goals 呈现 owner](goals.md#goals-的清单看板与详情)，不在空间页另立 Board／Demand 卡片合同。
 - 只有多个 Region 真实存在时才显示 arrangement 控件。
 
 共同控件层级、类名、工具栏布局和选中语言统一见[《控件语言》](shared-rules.md#控件语言)；这里保留 Space 与 Project Rail 的对象约束。
