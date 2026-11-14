@@ -8,7 +8,7 @@ app.whenReady().then(async () => {
   const window = new BrowserWindow({ show: false, width: 1440, height: 900, webPreferences: { offscreen: true, contextIsolation: true, sandbox: true } })
   const images = []
   try {
-    for (const state of ['choice', 'choice-open', 'review', 'unknown']) {
+    for (const state of ['choice', 'choice-open', 'review', 'changed', 'unknown', 'region']) {
       const body = await readFile(prefix + '-' + state + '.html', 'utf8')
       const path = join(directory, state + '.html')
       await writeFile(path, '<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="./scene.css"></head><body>' + body + (state === 'choice-open' ? '<script type="module" src="./menu.js"></script>' : '') + '</body></html>')

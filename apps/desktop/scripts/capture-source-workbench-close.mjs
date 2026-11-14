@@ -11,7 +11,7 @@ const temporary = await mkdtemp(join(tmpdir(), 'source-close-scene-')), prefix =
 const hash = bytes => createHash('sha256').update(bytes).digest('hex')
 await mkdir(output, { recursive: true })
 try {
-  const tests = spawnSync('pnpm', ['exec', 'vitest', 'run', '--config', 'apps/desktop/test/vitest.workbench-close.config.mts', '-t', 'actual Source (focus-menu|changed-agent)', '--maxWorkers=1', '--testTimeout=90000'], {
+  const tests = spawnSync('pnpm', ['exec', 'vitest', 'run', '--config', 'apps/desktop/test/vitest.workbench-close.config.mts', '-t', 'actual Source (focus-menu|changed-agent|lost-ack|region-x)', '--maxWorkers=1', '--testTimeout=90000'], {
     cwd: root, env: { ...process.env, AGENTMUX_WORKBENCH_CLOSE_NATIVE: '1', AGENTMUX_SOURCE_CLOSE_VISUAL_DOM: prefix }, encoding: 'utf8' })
   await writeFile(join(output, 'actual-consumers.log'), tests.stdout + tests.stderr)
   assert.equal(tests.status, 0, tests.stdout + tests.stderr)
@@ -26,7 +26,7 @@ try {
   await writeFile(join(output, 'paint.log'), logs.join('\n'))
   assert.equal(run.exitCode, 0, logs.join('\n'))
   const { images } = JSON.parse(await readFile(join(output, 'render.json'), 'utf8'))
-  assert.equal(images.length, 16)
+  assert.equal(images.length, 24)
   for (const image of images) image.sha256 = hash(await readFile(join(output, image.file)))
   await writeFile(join(output, 'receipt.json'), JSON.stringify({ completed: true, captureOnly: true, aestheticReview: 'pending',
     boundary: 'Actual Source Focus/Main/Preload/original owner consumer tests produce the original modal DOM. Electron paints that DOM with current production CSS; the expanded shared SelectionField replays those exact choices and measures the actual Electron DOM. These screenshots do not prove physical input, live user installation or Runtime restoration.', sources, images }, null, 2))
