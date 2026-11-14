@@ -87,15 +87,19 @@ it('selected process head protects a contiguous merge that would change its sele
   expect(processNativeRecordIds(selected.group)).toEqual(current.items.map(item => item.id))
 })
 
-it('selected process head uses the next actual record boundary to preserve a separate mounted process card', async () => {
+it('a reading boundary cannot bypass protection for a selected count in the same process', async () => {
   const current = page([activity('current-first'), activity('current-second')])
   await render(current)
   const selected = selectHead(host, true), next = page([activity('older-process'), ...current.items])
   const recordBoundary = { beforeRecordId: current.items[0]!.id }
-  expect(!controller.current!.canPresent(candidate(next), recordBoundary)).toBe(false)
+  expect(!controller.current!.canPresent(candidate(next), recordBoundary)).toBe(true)
   await render(next, recordBoundary.beforeRecordId)
   expectRetained(selected)
-  expect(host.querySelectorAll('.wf-head')).toHaveLength(2)
+  expect(host.querySelectorAll('.wf-head')).toHaveLength(1)
+  expect(host.querySelector('.log-fold__steps')?.textContent).toBe('2 条已加载记录')
+  await act(async () => { getSelection()!.removeAllRanges(); document.dispatchEvent(new Event('selectionchange')) })
+  expect(host.querySelectorAll('.wf-head')).toHaveLength(1)
+  expect(host.querySelector('.log-fold__steps')?.textContent).toBe('3 条已加载记录')
 })
 
 it.each(['clipped', 'changed-record', 'changed-source'] as const)('selected process head still protects %s reading data', async mode => {

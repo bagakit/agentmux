@@ -15,7 +15,7 @@ import { projectConversationRecordSequence, conversationPresentationKey } from '
 const sid = 'original-agent-session'
 const source = { providerId: 'codex', nativeSessionId: 'original-native-source' }
 const copy = vi.fn(async (_text: string, _failed?: (error: unknown) => void) => true)
-const platform: ClientUiPlatform = { copyText: copy, overlayContainer: () => document.body, bindComposerFocus: () => () => {},
+const platform: ClientUiPlatform = { conversationDetailLevel: 'system', copyText: copy, overlayContainer: () => document.body, bindComposerFocus: () => () => {},
   renderMessageAvatar: () => null, renderProjectIcon: () => null, renderProjectLabel: () => null, renderIcon: () => null }
 const closes: Array<() => Promise<unknown>> = []
 afterEach(async () => { getSelection()?.removeAllRanges(); for (const close of closes.splice(0).reverse()) await close(); copy.mockClear(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
@@ -168,8 +168,9 @@ it.each(['user', 'independent-session', 'progress', 'final', 'system', 'interact
 it.each(['report', 'following-step'])('retains the exact reading boundary before the %s', location => {
   const a = record(step('a')), r = record(report('report')), b = record(step('b'))
   const result = sequence([a, r, b], new Map(), conversationPresentationKey(location === 'report' ? r : b))
-  expect(result.rows.filter(row => row.kind === 'boundary')).toHaveLength(1)
-  expect(groups(result).some(group => group.records.includes(a) && group.records.includes(b))).toBe(false)
+  expect(result.rows.filter(row => row.kind === 'boundary')).toHaveLength(0)
+  expect(groups(result)[0]!.entries.filter(entry => entry.kind === 'boundary')).toHaveLength(1)
+  expect(groups(result).some(group => group.records.includes(a) && group.records.includes(b))).toBe(true)
   expect(ids(result)).toEqual(['a', 'report', 'b'])
 })
 
@@ -220,7 +221,7 @@ it('switching the actual source scope drops old parents and disclosure choices w
   expect(host.querySelectorAll('[data-native-record-id="report"]')).toHaveLength(1)
 })
 
-it('late preceding process holds a selected standalone report until the existing presentation release', async () => {
+it('late preceding process leaves a selected standalone report in its original root parent', async () => {
   const { host, draw, click } = surface(), r = report('report'), b = step('after'), a = step('late-before')
   await draw(reading([r, b]))
   await click('[data-native-record-id="report"] .log-turn__collaboration-toggle')
@@ -231,12 +232,13 @@ it('late preceding process holds a selected standalone report until the existing
   await draw(reading([a, r, b]))
   expect(host.querySelector('[data-native-record-id="report"]')).toBe(original)
   expect(original.querySelector('.log-turn__body')).toBe(body); expect(range.startContainer).toBe(text); expect(getSelection()!.toString()).toBe(selected)
-  expect(host.querySelector('[data-conversation-process-members*="late-before"]')).toBeNull()
+  expect(host.querySelector('[data-conversation-process-members*="late-before"]')).not.toBeNull()
+  expect(original.closest('.conversation-record-process')).toBeNull()
   expect(document.activeElement).toBe(focused)
   await act(async () => { getSelection()!.removeAllRanges(); document.dispatchEvent(new Event('selectionchange')) })
-  expect(host.querySelector('[data-conversation-process-members*="late-before"]')).toBeNull()
+  expect(host.querySelector('[data-conversation-process-members*="late-before"]')).not.toBeNull()
   await act(async () => focused.blur())
-  expect(host.querySelectorAll('.conversation-record-process')).toHaveLength(1)
+  expect(host.querySelectorAll('.conversation-record-process')).toHaveLength(2)
   expect(host.querySelector('[data-conversation-process-members*="late-before"]')).not.toBeNull()
   const accepted = host.querySelector('[data-native-record-id="report"]')!
   expect(accepted).not.toBeNull(); expect(accepted.closest('.native-process-observation__step')).toBeNull()
@@ -255,10 +257,10 @@ it('exact original report location opens its body in the accepted interval and r
   expect(reportNode.querySelector('.log-turn__collaboration-toggle')?.getAttribute('aria-expanded')).toBe('true')
   expect(reportNode.querySelector('.log-turn__body')?.textContent).toContain('Original report report.')
   expect(host.querySelectorAll('[data-original-boundary]')).toHaveLength(1)
-  expect(host.querySelectorAll('.conversation-record-process')).toHaveLength(2)
+  expect(host.querySelectorAll('.conversation-record-process')).toHaveLength(1)
   const parent = reportNode.closest('.conversation-record-process')!
   expect(parent).not.toBeNull(); expect(parent.getAttribute('data-conversation-process-members')).toContain('before')
-  expect(parent.getAttribute('data-conversation-process-members')).not.toContain('after')
+  expect(parent.getAttribute('data-conversation-process-members')).toContain('after')
 })
 
 it('report messages never inflate true step count or erase an exact completed operation status', async () => {
