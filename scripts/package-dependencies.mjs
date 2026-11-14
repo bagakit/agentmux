@@ -110,10 +110,10 @@ async function materializeTargetOptional(name, platform, options) {
   return await realpath(extracted)
 }
 
-async function qualifyOptionalForTarget(name, declaredVersion, installed, options) {
+async function qualifyOptionalForTarget(name, declaredVersion, installed, target, options) {
   const platform = await describeOptionalPlatform(name, declaredVersion, installed, options)
   if (!platform || (!platform.os.length && !platform.cpu.length)) return installed
-  if (!matchesPackageTarget(platform, options.target)) return null
+  if (!matchesPackageTarget(platform, target)) return null
   if (installed) return installed
   return await materializeTargetOptional(name, platform, options)
 }
@@ -131,8 +131,11 @@ export async function inspectPackageDependencies(directory, manifest, options = 
     let dependency
     try { dependency = await resolvePackageRoot(sourceDirectory, name) }
     catch (error) { if (!canBeAbsent || error.code !== 'PACKAGE_DEPENDENCY_UNAVAILABLE') throw error }
-    if (options.target && canBeAbsent) {
-      dependency = await qualifyOptionalForTarget(name, optional[name] ?? peers[name], dependency ?? null, options)
+    // A standalone release selects one target. The App keeps its installed
+    // graph and adds missing native optionals for the Core's portable target.
+    const target = options.target ?? (!dependency ? options.additionalTarget : undefined)
+    if (target && canBeAbsent) {
+      dependency = await qualifyOptionalForTarget(name, optional[name] ?? peers[name], dependency ?? null, target, options)
     }
     dependencies.push({ name, optional: canBeAbsent, peer: Object.hasOwn(peers, name), sourceDirectory: dependency ?? null })
   }

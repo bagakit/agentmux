@@ -1,7 +1,8 @@
 import { execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { createReadStream } from 'node:fs'
-import { chmod, cp, lstat, mkdir, readFile, readdir, readlink, stat, symlink, writeFile } from 'node:fs/promises'
+import { chmod, cp, lstat, mkdir, mkdtemp, readFile, readdir, readlink, realpath, rm, stat, symlink, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
 import { dirname, join, resolve, sep } from 'node:path'
 import { promisify } from 'node:util'
 import { resolvePackageRoot, visitRuntimePackageClosure, materializePackageClosure, runtimePackageSelection } from '../../../scripts/package-dependencies.mjs'
@@ -47,14 +48,21 @@ export async function inspectRuntimeApplicationPayload(repositoryRoot) {
   function dependencies(sourceDirectory, target, includeRoot = false) {
     roots.push({ sourceDirectory, target, includeRoot })
   }
-  async function copyDependencies(selections) {
+  async function copyDependencies(selections, options) {
     // One owner decides which files of a dependency ship; workspace sources, tests and
     // development files never enter the App or the remote Core taken from it.
     await visitRuntimePackageClosure(selections, async (source, destination) => {
       if (selections.find(value => value.target === destination)?.includeRoot !== false) {
-        for (const file of await packageFiles(source)) copy(join(source, file), join(destination, file))
+        for (const file of await packageFiles(source)) {
+          const fileSource = join(source, file), target = join(destination, file)
+          // Downloaded optionals belong to this inspection. Keep their
+          // bytes in the same copy/hash plan after removing the scratch tree.
+          if (options && source.startsWith(options.optionalCache + sep)) {
+            generated.push({ target, contents: await readFile(fileSource), mode: (await stat(fileSource)).mode & 0o777 })
+          } else copy(fileSource, target)
+        }
       }
-    })
+    }, options)
   }
   async function dependency(owner, name, target) {
     await dependencies(await resolvePackageRoot(owner, name, repositoryRoot), target, true)
@@ -70,7 +78,12 @@ export async function inspectRuntimeApplicationPayload(repositoryRoot) {
     await dependency(connectors, name, join('node_modules', ...name.split('/')))
   }
   await dependency(core, '@agentmux/relay', 'node_modules/@agentmux/relay')
-  await copyDependencies(coreRoots)
+  const optionalCache = await realpath(await mkdtemp(join(tmpdir(), 'amux-app-target-')))
+  try {
+    await copyDependencies(coreRoots, {
+      additionalTarget: { os: 'linux', cpu: 'x64' }, lockfilePath: join(repositoryRoot, 'pnpm-lock.yaml'), optionalCache,
+    })
+  } finally { await rm(optionalCache, { recursive: true, force: true }) }
   await copyDependencies(roots)
   const avatar = await inspectStaticAvatarRuntime(repositoryRoot)
   copy(avatar.manifest.source, avatar.manifest.target); copy(avatar.icons.source, avatar.icons.target, true)
