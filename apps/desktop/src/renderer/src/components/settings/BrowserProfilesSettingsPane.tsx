@@ -1,3 +1,4 @@
+import { BrowserProfileExtensions } from './BrowserProfileExtensions'
 import { TextInput } from '@agentmux/client-ui/input'
 import * as RovingFocus from '@radix-ui/react-roving-focus'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
@@ -368,6 +369,7 @@ function ProfileEditor({ assignment, profile, revision, uses, busy, run, error, 
       </section>
 
       <ProfileEnvironmentEditor profile={profile} />
+      <BrowserProfileExtensions profile={profile} />
 
       {/* The editor is already keyed by Profile, so each section starts fresh per Profile without a key of its own. */}
       <ProfileNetworkRoute profile={profile} proxy={proxies.find(proxy => proxy.id === profile.proxyBinding?.proxyId)} baselineRefresh={baselineRefresh} openBrowsers={open.length} run={run} />

@@ -1454,6 +1454,11 @@ const mockApi: AgentMuxDesktopApi = {
     assignProxy: async () => { throw new Error('Proxy assignment needs the connected Desktop Profile owner.') },
     listProfiles: async () => structuredClone(mockBrowserProfiles),
     readProfiles: async () => ({ revision: mockBrowserProfileRevision, sequence: mockBrowserProfileRevision, profiles: structuredClone(mockBrowserProfiles), folders: [], views: [] }),
+    listProfileExtensions: async () => { throw new Error('Extension management requires the Desktop Browser host.') },
+    prepareProfileExtension: async () => { throw new Error('Extension management requires the Desktop Browser host.') },
+    applyProfileExtension: async () => { throw new Error('Extension human review requires the Desktop Browser host.') },
+    removeProfileExtension: async () => { throw new Error('Extension human review requires the Desktop Browser host.') },
+    loadProfileExtension: async () => { throw new Error('Extension loading requires the Desktop Browser host.') },
     onProfilesChanged(listener) {
       mockBrowserProfileListeners.add(listener)
       return () => { mockBrowserProfileListeners.delete(listener) }

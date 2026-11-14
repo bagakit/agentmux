@@ -2060,6 +2060,12 @@ export type AgentMuxDesktopApi = {
     listProfiles(): Promise<BrowserProfileSummary[]>
     /** The same list with the revision Main committed; edits must name this revision. */
     readProfiles(): Promise<BrowserProfileList>
+    listProfileExtensions(profileId: string, operationId?: string): Promise<{ profileId: string; profileRevision: string; extensions: import('@agentmux/core/control').BrowserProfileExtension[]; pending: import('@agentmux/core/control').BrowserProfileExtensionPending[]; receipt?: import('@agentmux/core/control').BrowserProfileExtensionReceipt | null }>
+    prepareProfileExtension(profileId: string, expectedRevision: string, operationId: string, sourcePath: string, extensionId?: string): Promise<import('@agentmux/core/control').BrowserProfileExtensionReview>
+    applyProfileExtension(profileId: string, expectedRevision: string, reviewId: string): Promise<{ profileId: string; profileRevision: string; outcome: 'applied' | 'cancelled'; receipt: import('@agentmux/core/control').BrowserProfileExtensionReceipt | null; application?: import('@agentmux/core/control').BrowserProfileExtensionApplication }>
+    removeProfileExtension(profileId: string, expectedRevision: string, extensionId: string, operationId: string): Promise<{ profileId: string; profileRevision: string; outcome: 'applied' | 'cancelled'; receipt: import('@agentmux/core/control').BrowserProfileExtensionReceipt | null; application?: import('@agentmux/core/control').BrowserProfileExtensionApplication }>
+    loadProfileExtension(profileId: string, extensionId: string): Promise<{ profileId: string; extensionId: string; application: import('@agentmux/core/control').BrowserProfileExtensionApplication }>
+
     saveProxy(edit: import('@agentmux/core/control').BrowserProxyEdit, proxyId?: string, expectedRevision?: string): Promise<{ proxy: import('@agentmux/core/control').BrowserProxyAsset; revision: number }>
     deleteProxy(proxyId: string, expectedRevision: string): Promise<{ proxyId: string; revision: number; deleted: true }>
     assignProxy(proxyId: string, expectedRevision: string, items: import('@agentmux/core/control').BrowserProfileSelectionItem[]): Promise<import('@agentmux/core/control').BrowserProfileBulkItemResult[]>

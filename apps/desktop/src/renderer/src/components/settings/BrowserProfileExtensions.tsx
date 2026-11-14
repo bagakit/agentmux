@@ -1,0 +1,98 @@
+import { useEffect, useRef, useState } from 'react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
+import { presentError } from '@agentmux/client-ui/error-presentation'
+import { mintObjectId } from '@agentmux/core/object-id'
+import type { BrowserProfileExtension, BrowserProfileExtensionReview, BrowserProfileExtensionPending } from '@agentmux/core/control'
+import type { BrowserProfileSummary } from '../../../../shared/contracts'
+import { api } from '../../lib/api'
+import { browserProfiles } from '../../lib/browser-profiles'
+import './settings-browser-profile-extensions.css'
+const ExtensionIcon = semanticIconComponent('action.create')
+const RefreshIcon = semanticIconComponent('action.refresh')
+
+/** A view of the original Profile extension owner; only the pending human-readable review is local. */
+export function BrowserProfileExtensions({ profile }: { profile: BrowserProfileSummary }) {
+  const [open, setOpen] = useState(false), [entries, setEntries] = useState<BrowserProfileExtension[]>([]), [review, setReview] = useState<BrowserProfileExtensionReview | null>(null)
+  const [pending, setPending] = useState<BrowserProfileExtensionPending[]>([])
+  const [busy, setBusy] = useState(false), [error, setError] = useState<string | null>(null), [notice, setNotice] = useState<string | null>(null)
+  const revision = useRef(profile.revision), mounted = useRef(true), latest = useRef(profile)
+  latest.current = profile
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
+  const refresh = async () => {
+    const result = await api.browser.listProfileExtensions(profile.id)
+    if (mounted.current && latest.current.id === result.profileId) { setEntries(result.extensions); setPending(result.pending); revision.current = result.profileRevision }
+  }
+  useEffect(() => { if (open) void refresh().catch(cause => { if (mounted.current) setError(presentError(cause)) }) }, [open, profile.id, profile.revision])
+  const run = async (action: () => Promise<void>) => {
+    setBusy(true); setError(null); setNotice(null)
+    try { await action() }
+    catch (cause) { if (mounted.current) setError(presentError(cause)) }
+    finally { if (mounted.current) setBusy(false) }
+  }
+  const choose = async (kind: 'directory' | 'package', extensionId?: string) => {
+    const path = kind === 'directory' ? await api.ui.chooseDirectory() : (await api.ui.chooseFiles())?.[0]
+    if (!path || !mounted.current) return
+    const operationId = mintObjectId()
+    const prepared = await api.browser.prepareProfileExtension(profile.id, revision.current, operationId, path, extensionId)
+    if (mounted.current && latest.current.id === prepared.profileId) setReview(prepared)
+  }
+  const apply = async () => {
+    if (!review) return
+    const result = await api.browser.applyProfileExtension(profile.id, review.expectedRevision, review.reviewId)
+    if (!mounted.current) return
+    if (result.outcome === 'cancelled') { setNotice('Nothing changed. The prepared package remains available for review.'); return }
+    setReview(null); setNotice('Extension saved. Native load is reported separately below.'); await refresh(); await browserProfiles.refresh()
+  }
+  return <section className="browser-profile-editor__section browser-profile-extensions" aria-label="Extensions">
+    <button type="button" className="browser-profile-extensions__heading" aria-expanded={open} onClick={() => setOpen(value => !value)}>
+      <span aria-hidden="true">{open ? '⌄' : '›'}</span><span className="browser-profile-extensions__title">Extensions</span>{open && entries.length ? <span>{entries.length}</span> : null}
+    </button>
+    {open ? <div className="browser-profile-extensions__body">
+      <p className="browser-profile-editor__quiet">Approved packages run only in this Profile. Host support varies; loaded does not mean every Chrome API works.</p>
+      <div className="browser-profile-extensions__actions">
+        <button type="button" disabled={busy} onClick={() => void run(() => choose('package'))}><ExtensionIcon size={13} /> Add package…</button>
+        <button type="button" disabled={busy} onClick={() => void run(() => choose('directory'))}>Unpacked directory…</button>
+        <button type="button" disabled={busy} onClick={() => void run(refresh)} aria-label="Refresh extension load state"><RefreshIcon size={13} /></button>
+      </div>
+      {pending.map(intent => <div key={intent.operationId} className="browser-profile-extensions__issue" role="status"><p>Extension {intent.kind} v{intent.version} remains unconfirmed. Original packages and Profile data are kept.</p><details><summary>Original operation</summary><code>{intent.operationId}</code><p>Inspect this operation before another action. It will not be replayed automatically.</p></details></div>)}
+      {!entries.length && !review && !error ? <p className="browser-profile-editor__quiet">No managed extensions in this Profile.</p> : null}
+      {entries.length ? <ul className="browser-profile-extensions__list">{entries.map(entry => <li key={entry.id}>
+        <div className="browser-profile-extensions__identity"><strong>{entry.name}</strong><span>v{entry.version}</span><span data-state={entry.application.state}>{entry.application.state === 'loaded' ? 'Loaded' : entry.application.state === 'failed' ? 'Load failed' : 'Load unknown'}</span></div>
+        <p className="browser-profile-editor__quiet">{entry.source.label} · {entry.source.kind.toUpperCase()}</p>
+        {entry.application.reason ? <p className="browser-profile-extensions__issue">{entry.application.reason}</p> : null}
+        <div className="browser-profile-extensions__actions">
+          {entry.application.state !== 'loaded' ? <button type="button" disabled={busy} onClick={() => void run(async () => { await api.browser.loadProfileExtension(profile.id, entry.id); await refresh() })}>Load</button> : null}
+          <button type="button" disabled={busy} onClick={() => void run(() => choose('package', entry.id))}>Update package…</button>
+          <button type="button" disabled={busy} onClick={() => void run(() => choose('directory', entry.id))}>Update directory…</button>
+          <button type="button" disabled={busy} onClick={() => void run(async () => {
+            const result = await api.browser.removeProfileExtension(profile.id, revision.current, entry.id, mintObjectId())
+            if (result.outcome === 'applied') { setNotice('Extension removed. Profile sign-ins and site data remain.'); await refresh(); await browserProfiles.refresh() }
+          })}>Remove…</button>
+        </div>
+        <details><summary>Source and permissions</summary><ExtensionScope item={entry} /></details>
+      </li>)}</ul> : null}
+      {review ? <div className="browser-profile-extensions__review" role="region" aria-label="Extension source and permission review">
+        <strong>{review.previousVersion ? 'Review update' : 'Review installation'} · {review.name}</strong>
+        <p>{review.previousVersion ? `v${review.previousVersion} → ` : ''}v{review.version} · {review.source.label}</p>
+        <ExtensionScope item={review} />
+        {review.previousVersion ? <p className="browser-profile-extensions__scope">{review.addedPermissions.length ? `Added scope: ${review.addedPermissions.join(' · ')}` : 'No added permission scope.'}</p> : null}
+        <p className="browser-profile-editor__quiet">The host asks you to confirm these exact bytes and permissions. File access stays off.</p>
+        <div className="browser-profile-extensions__actions"><button type="button" disabled={busy} onClick={() => setReview(null)}>Close review</button>
+          <button type="button" className="browser-profile-extensions__primary" disabled={busy} onClick={() => void run(apply)}>{review.previousVersion ? 'Review and update…' : 'Review and install…'}</button></div>
+      </div> : null}
+      {notice ? <p className="browser-profile-extensions__notice" role="status">{notice}</p> : null}
+      {error ? <p className="browser-profile-extensions__issue" role="alert">{error} <button type="button" disabled={busy} onClick={() => void run(refresh)}>Read current state</button></p> : null}
+    </div> : null}
+  </section>
+}
+function ExtensionScope({ item }: { item: Pick<BrowserProfileExtensionReview, 'source' | 'permissions' | 'sha256'> }) {
+  const rows = [
+    ...item.permissions.api.map(value => ['API', value]), ...item.permissions.hosts.map(value => ['Host', value]),
+    ...item.permissions.contentScripts.map(value => ['Content', value]), ...item.permissions.optional.map(value => ['Optional', value])]
+  return <div className="browser-profile-extensions__scope">
+    <p>{item.source.signature === 'package-verified' ? 'Package signature verified. Publisher trust is not established.' : 'Local source · package signature not verified.'}</p>
+    {item.source.homepage ? <p>Homepage: {item.source.homepage}</p> : null}{item.source.updateUrl ? <p>Declared update source: {item.source.updateUrl}</p> : null}
+    {rows.length ? <dl>{rows.map(([label, value], index) => <div key={index}><dt>{label}</dt><dd>{value}</dd></div>)}</dl> : <p>No declared extension permissions.</p>}
+    <details><summary>Package identity</summary><code>{item.sha256}</code></details>
+  </div>
+}
