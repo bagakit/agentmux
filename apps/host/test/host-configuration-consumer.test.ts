@@ -226,4 +226,12 @@ it('the default Host prepares this Mac\'s Tailcat keys for its local user throug
   expect(await h.rpc.call('settings.hosts.tailcat-key', { role: 'server' })).toEqual({ role: 'server', key: 'agentmux-server', created: false })
   const keys = process.platform === 'darwin' ? 'home/Library/Application Support/tailcat/keys' : 'home/.config/tailcat/keys'
   for (const name of ['agentmux-client', 'agentmux-server']) await expect(readFile(join(f.directory, keys, name + '.private.json'), 'utf8')).resolves.toContain('privkey:')
+  for (const key of ['x'.repeat(65), '.studio', 'office client', '工作站密钥', ' leading and trailing ']) {
+    expect(await h.rpc.call('settings.hosts.tailcat-key', { role: 'client', key })).toEqual({ role: 'client', key, created: true, publicKey })
+    const file = join(f.directory, keys, key + '.private.json'), original = await readFile(file, 'utf8')
+    const reused = await f.cli(['settings', 'hosts', 'tailcat-key', '--role', 'client', '--key', key])
+    expect(reused.code, reused.stderr).toBe(0)
+    expect(JSON.parse(reused.stdout)).toMatchObject({ ok: true, result: { role: 'client', key, created: false, publicKey } })
+    expect(await readFile(file, 'utf8')).toBe(original)
+  }
 })

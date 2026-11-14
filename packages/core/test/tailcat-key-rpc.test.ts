@@ -25,9 +25,14 @@ it('a local user prepares the default key over the real Unix transport; a manage
   await expect(managed.call('settings.hosts.tailcat-key', { role: 'client' })).rejects.toMatchObject({ code: 'CONTROL_PERMISSION_DENIED' })
   expect(hostTailcatKey).not.toHaveBeenCalled()
   expect(await user.call('settings.hosts.tailcat-key', { role: 'server' })).toEqual({ role: 'server', key: 'agentmux-server', created: true })
-  expect(await user.call('settings.hosts.tailcat-key', { role: 'client', key: 'studio.client' }))
-    .toEqual({ role: 'client', key: 'studio.client', created: true, publicKey })
-  expect(hostTailcatKey.mock.calls.map(([input]) => input)).toEqual([{ role: 'server', key: 'agentmux-server' }, { role: 'client', key: 'studio.client' }])
+  const names = ['studio.client', 'x'.repeat(65), '.studio', 'office client', '工作站密钥', ' leading and trailing ']
+  for (const key of names) {
+    expect(await user.call('settings.hosts.tailcat-key', { role: 'client', key }))
+      .toEqual({ role: 'client', key, created: true, publicKey })
+  }
+  expect(hostTailcatKey.mock.calls.map(([input]) => input)).toEqual([
+    { role: 'server', key: 'agentmux-server' }, ...names.map(key => ({ role: 'client', key }))
+  ])
 })
 
 it('device, unauthenticated and self-reported callers are refused, and a Host without the owner says nothing changed', async () => {
@@ -55,7 +60,7 @@ it('revoked users and cancelled reads cannot start a key preparation', async () 
 })
 
 it('names stay inside the official key directory and each role returns only its own facts', () => {
-  for (const key of ['../escape', join(import.meta.dirname, 'key'), 'nested/key', 'new', '.hidden', '', 'x'.repeat(65), 'line\nbreak']) {
+  for (const key of ['../escape', join(import.meta.dirname, 'key'), 'nested/key', 'nested\\key', 'new', '', 'nul\0key', 'line\nbreak', 'line\rbreak']) {
     expect(() => parseTailcatKeyParams({ role: 'server', key })).toThrow()
   }
   expect(() => parseTailcatKeyParams({ role: 'relay' })).toThrow()
