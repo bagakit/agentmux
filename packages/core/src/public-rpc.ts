@@ -1,3 +1,4 @@
+import { CAPTURE_SEQUENCE_METHODS, type CaptureSequenceParams, type CaptureSequenceResults } from './capture-sequence.js'
 import { FOCUS_METHODS, type FocusMethod, type FocusParams, type FocusResults } from './focus-control.js'
 import { AGENT_TAKEOVER_METHODS } from './agent-takeover.js'
 import { SPACE_LINK_METHODS, type SpaceLinkParams, type SpaceLinkResult } from './space-link.js'
@@ -274,7 +275,7 @@ export type AgentMuxRpcOutputInitial = {
   session: ReturnType<AgentMuxClient['agentSession']>
 } & Pick<Awaited<ReturnType<AgentMuxClient['observeAgentOutput']>>['attachment'],
   'run' | 'gap' | 'terminal' | 'resizeRevision'>
-type NativeParams = FocusParams & SpaceLinkParams & MeshNetworkParams & AgentPromotionParamsMap & NameControlParams & AgentOpenParams & import('./space-close.js').SpaceCloseParams & HostRouteParams & SpaceMemberParams & SpaceSessionsParams & SpaceFolderParams & SpaceAuthorityParams & NodeLocatorParamsMap & NodePublishingParams & MoteDialogueParamsMap & { 'capsule.input': import('./capsule-input.js').CapsuleInputRequest } & CapsuleRuntimeParamsMap & CapsuleParamsMap & ApplicationAccessParameterMap & AgentLearningParamsMap & MoteChatParamsMap & MoteConnectionParamsMap & ObjectAvatarParamsMap & GoalDelegationParamsMap & MoteAvatarParameterMap & TopicParameterMap & ConnectionParamsMap & TailcatConfigurationParamsMap & NotesStorageParamsMap & ProviderCatalogParamsMap & HostSettingsParameterMap & TailcatKeyParamsMap & HostMaintenanceParamsMap & FileParameterMap & GitParameterMap & AppWindowParamsMap & AppCaptureParamsMap & ScheduleParamsMap & AgentProgressParams & ImageParamsMap & NativeDesktopParamsMap & AgentMuxRpcDeviceParameterMap & AgentMuxHostedRuntimeParameterMap & {
+type NativeParams = FocusParams & SpaceLinkParams & MeshNetworkParams & AgentPromotionParamsMap & NameControlParams & AgentOpenParams & import('./space-close.js').SpaceCloseParams & HostRouteParams & SpaceMemberParams & SpaceSessionsParams & SpaceFolderParams & SpaceAuthorityParams & NodeLocatorParamsMap & NodePublishingParams & MoteDialogueParamsMap & { 'capsule.input': import('./capsule-input.js').CapsuleInputRequest } & CapsuleRuntimeParamsMap & CapsuleParamsMap & ApplicationAccessParameterMap & AgentLearningParamsMap & MoteChatParamsMap & MoteConnectionParamsMap & ObjectAvatarParamsMap & GoalDelegationParamsMap & MoteAvatarParameterMap & TopicParameterMap & ConnectionParamsMap & TailcatConfigurationParamsMap & NotesStorageParamsMap & ProviderCatalogParamsMap & HostSettingsParameterMap & TailcatKeyParamsMap & HostMaintenanceParamsMap & FileParameterMap & GitParameterMap & AppWindowParamsMap & AppCaptureParamsMap & CaptureSequenceParams & ScheduleParamsMap & AgentProgressParams & ImageParamsMap & NativeDesktopParamsMap & AgentMuxRpcDeviceParameterMap & AgentMuxHostedRuntimeParameterMap & {
   'system.metrics.host-profile.capture': import('./runtime-v8-profile.js').HostV8ProfileInput
   'goal.participation.confirm': import('./goal-participation.js').GoalParticipationConfirm
   'goal.watch': Record<string, never>
@@ -403,7 +404,7 @@ type NativeParams = FocusParams & SpaceLinkParams & MeshNetworkParams & AgentPro
   'system.relay.inspect': Record<string, never>
   'system.subscription.cancel': { subscriptionId: string }
 }
-type NativeResult = FocusResults & SpaceLinkResult & MeshNetworkResults & AgentPromotionResultMap & NameControlResults & AgentOpenResults & import('./space-close.js').SpaceCloseResults & HostRouteResults & SpaceMemberResults & SpaceSessionsResults & SpaceFolderResults & SpaceAuthorityResults & NodeLocatorResultMap & NodePublishingResults & MoteDialogueResultMap & { 'capsule.input': import('./capsule-input.js').CapsuleInputResult } & CapsuleRuntimeResultMap & CapsuleResultMap & ApplicationAccessResultMap & AgentLearningResultMap & MoteChatResultMap & MoteConnectionResultMap & ObjectAvatarResultMap & GoalDelegationResultMap & MoteAvatarResultMap & TopicResultMap & ConnectionResultMap & TailcatConfigurationResultMap & NotesStorageResultMap & ProviderCatalogResultMap & HostSettingsResultMap & TailcatKeyResultMap & HostMaintenanceResultMap & FileResultMap & GitResultMap & AppWindowResultMap & AppCaptureResultMap & ScheduleResultMap & AgentProgressResults & ImageResultMap & NativeDesktopResultMap & AgentMuxRpcDeviceResultMap & AgentMuxHostedRuntimeResultMap & {
+type NativeResult = FocusResults & SpaceLinkResult & MeshNetworkResults & AgentPromotionResultMap & NameControlResults & AgentOpenResults & import('./space-close.js').SpaceCloseResults & HostRouteResults & SpaceMemberResults & SpaceSessionsResults & SpaceFolderResults & SpaceAuthorityResults & NodeLocatorResultMap & NodePublishingResults & MoteDialogueResultMap & { 'capsule.input': import('./capsule-input.js').CapsuleInputResult } & CapsuleRuntimeResultMap & CapsuleResultMap & ApplicationAccessResultMap & AgentLearningResultMap & MoteChatResultMap & MoteConnectionResultMap & ObjectAvatarResultMap & GoalDelegationResultMap & MoteAvatarResultMap & TopicResultMap & ConnectionResultMap & TailcatConfigurationResultMap & NotesStorageResultMap & ProviderCatalogResultMap & HostSettingsResultMap & TailcatKeyResultMap & HostMaintenanceResultMap & FileResultMap & GitResultMap & AppWindowResultMap & AppCaptureResultMap & CaptureSequenceResults & ScheduleResultMap & AgentProgressResults & ImageResultMap & NativeDesktopResultMap & AgentMuxRpcDeviceResultMap & AgentMuxHostedRuntimeResultMap & {
   'system.metrics.host-profile.capture': import('./runtime-v8-profile.js').RuntimeV8ProfileResult
   'goal.participation.confirm': import('./goal-participation.js').GoalParticipationReceipt
   'goal.watch': never
@@ -569,6 +570,7 @@ export const AGENTMUX_RPC_NATIVE_METHODS = {
   ...AGENTMUX_RPC_GIT_METHODS,
   ...AGENTMUX_RPC_WINDOW_METHODS,
   ...APP_CAPTURE_METHODS,
+  ...CAPTURE_SEQUENCE_METHODS,
   ...AGENTMUX_RPC_SCHEDULE_METHODS,
   ...AGENT_PROGRESS_METHODS,
   ...CONNECTION_RPC_METHODS,

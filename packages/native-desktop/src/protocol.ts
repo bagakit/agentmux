@@ -38,7 +38,7 @@ export interface NativeOperation {
 export type CaptureParams =
   | { mode: 'display'; displayId: number }
   | { mode: 'window'; windowId: number; app: string; processStartedAt: number }
-  | { mode: 'rect'; rect: { x: number; y: number; width: number; height: number }; displayId?: number }
+  | { mode: 'rect'; rect: { x: number; y: number; width: number; height: number }; displayId?: number; excludeWindowIds?: number[] }
 export interface CaptureResult {
   state: 'captured' | 'failed'
   screenshot?: { format: 'png'; data: string; width: number; height: number; scale: number }

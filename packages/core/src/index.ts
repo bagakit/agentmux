@@ -292,3 +292,5 @@ export * from './space-link.js'
 
 export type { AgentInputInitializationObservation } from './agent-initialization.js'
 export type { AgentNativeSubagents, AgentSubagentSession } from './agent-subagent-state.js'
+
+export * from './capture-sequence.js'

@@ -1,3 +1,4 @@
+import { isCaptureSequenceMethod, parseCaptureSequenceParams, parseCaptureSequenceResult } from './capture-sequence.js'
 import { FOCUS_METHODS, parseFocusParams, parseFocusResult, type FocusMethod } from './focus-control.js'
 import { parseAgentTakeoverPage, type AgentTakeoverQuery } from './agent-takeover.js'
 import { SPACE_LINK_METHODS, parseSpaceLinkParams, parseSpaceLinkResult, type SpaceLinkMethod } from './space-link.js'
@@ -494,6 +495,7 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
     if (isObjectAvatarMethod(method)) return parseObjectAvatarResult(method, value, parseObjectAvatarParams(method, params)) as unknown as Record<string, unknown>
     if (isMoteAvatarWriteMethod(method)) return parseMoteAvatarWriteResult(method, value, parseMoteAvatarWriteParams(method, params)) as unknown as Record<string, unknown>
     if (isMoteAvatarSeriesMethod(method)) return parseMoteAvatarSeriesResult(method, value, parseMoteAvatarSeriesParams(method, params)) as unknown as Record<string, unknown>
+    if (isCaptureSequenceMethod(method)) return parseCaptureSequenceResult(value, parseCaptureSequenceParams(method, params)) as unknown as Record<string, unknown>
     if (isAppCaptureMethod(method)) return parseAppCaptureResult(method, value, parseAppCaptureParams(method, params)) as unknown as Record<string, unknown>
     if (isAppWindowMethod(method)) return parseAppWindowPage(method, value, parseAppWindowParams(method, params)) as unknown as Record<string, unknown>
     if (isGitMethod(method)) return parseGitResult(method, value, parseGitParams(method, params)) as unknown as Record<string, unknown>

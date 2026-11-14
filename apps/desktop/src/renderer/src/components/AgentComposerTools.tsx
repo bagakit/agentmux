@@ -171,6 +171,9 @@ export function AgentComposerTools({ active = true, disabled, commands, loadSkil
           <DropdownMenu.Separator className="tab-context-menu__separator" />
           <DropdownMenu.Item onSelect={() => { void runAction(() => capture('display')) }}>Entire display…</DropdownMenu.Item>
           <DropdownMenu.Item onSelect={() => { void runAction(() => capture('window')) }}>Application window…</DropdownMenu.Item>
+          <DropdownMenu.Separator className="tab-context-menu__separator" />
+          <DropdownMenu.Item onSelect={() => { void runAction(() => capture('scroll')) }}>Scrolling screenshot…</DropdownMenu.Item>
+          <DropdownMenu.Item onSelect={() => { void runAction(() => capture('gif')) }}>Record GIF…</DropdownMenu.Item>
         </DropdownMenu.Content></DropdownMenu.Portal>
       </DropdownMenu.Root></span> : null}
     </>}

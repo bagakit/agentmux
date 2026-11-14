@@ -20,7 +20,7 @@ export type NativeDesktopAction =
 export type NativeDesktopCapture =
   | { mode: 'selection' }
   | { mode: 'display'; displayId: number }
-  | { mode: 'rect'; rect: { x: number; y: number; width: number; height: number } }
+  | { mode: 'rect'; rect: { x: number; y: number; width: number; height: number }; excludeWindowIds?: number[] }
   | { mode: 'window'; target: NativeDesktopWindowTarget }
 export type NativeDesktopParamsMap = {
   'native.capabilities': { hostId: string }
@@ -139,10 +139,14 @@ export function parseNativeDesktopParams<M extends NativeDesktopMethod>(method: 
   if (method === 'native.capture') {
     const capture = rpcRecord(p.capture, undefined, code)
     if (!['selection', 'display', 'rect', 'window'].includes(capture.mode as string)) invalid('Choose a typed capture mode.', code)
-    rpcRecord(capture, capture.mode === 'selection' ? ['mode'] : capture.mode === 'display' ? ['mode', 'displayId'] : capture.mode === 'window' ? ['mode', 'target'] : ['mode', 'rect'], code)
+    rpcRecord(capture, capture.mode === 'selection' ? ['mode'] : capture.mode === 'display' ? ['mode', 'displayId'] : capture.mode === 'window' ? ['mode', 'target'] : ['mode', 'rect', 'excludeWindowIds'], code)
     if (capture.mode === 'display') integer(capture.displayId, code)
     if (capture.mode === 'window') target(capture.target, true, code)
     if (capture.mode === 'rect') {
+      if (capture.excludeWindowIds !== undefined) {
+        if (!Array.isArray(capture.excludeWindowIds)) invalid('Excluded windows need exact Quartz IDs.', code)
+        for (const id of capture.excludeWindowIds as unknown[]) { integer(id, code); if (Number(id) > 0xffffffff) invalid('Excluded window ID exceeds the Quartz range.', code) }
+      }
       const rect = rpcRecord(capture.rect, ['x', 'y', 'width', 'height'], code)
       number(rect.x, code); number(rect.y, code); number(rect.width, code, true); number(rect.height, code, true)
     }

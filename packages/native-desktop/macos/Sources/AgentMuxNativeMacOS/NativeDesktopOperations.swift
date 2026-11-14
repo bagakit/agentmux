@@ -31,17 +31,25 @@ enum NativeDesktopOperations {
             } else {
                 throw ProviderError.coded("invalid_argument", "mode must be display, rect or window")
             }
-            return try capturedRectangle(rect)
+            var exclusions: Set<CGWindowID> = []
+            if let value = params["excludeWindowIds"] {
+                guard case let .array(ids) = value else { throw ProviderError.coded("invalid_argument", "excludeWindowIds must contain exact window IDs") }
+                for id in ids {
+                    guard let number = id.number, number > 0, number <= Double(UInt32.max), number.rounded() == number else { throw ProviderError.coded("invalid_argument", "excluded window ID is invalid") }
+                    exclusions.insert(CGWindowID(number))
+                }
+            }
+            return try capturedRectangle(rect, excluding: exclusions)
         } catch {
             return ["state": "failed", "error": nativeErrorPayload(error)]
         }
     }
 
-    private static func capturedRectangle(_ rect: CGRect) throws -> [String: Any] {
+    private static func capturedRectangle(_ rect: CGRect, excluding exclusions: Set<CGWindowID> = []) throws -> [String: Any] {
         guard NativeCaptureGeometry.isValid(rect) else {
             throw ProviderError.coded("invalid_argument", "capture rectangle must have finite coordinates and positive dimensions")
         }
-        let capture = try captureRect(rect)
+        let capture = try captureRect(rect, excluding: exclusions)
         return ["state": "captured", "screenshot": try png(capture.image, scale: capture.scale), "engine": capture.engine,
                 "selectionRect": renderRect(rect)]
     }
@@ -390,20 +398,27 @@ enum NativeDesktopOperations {
         return CapturedImage(image: image, engine: "coreGraphics")
     }
 
-    private static func captureRect(_ rect: CGRect) throws -> (image: CGImage, scale: Double, engine: String) {
-        if #available(macOS 14.0, *) { return try captureRectWithScreenCaptureKit(rect) }
+    private static func captureRect(_ rect: CGRect, excluding exclusions: Set<CGWindowID> = []) throws -> (image: CGImage, scale: Double, engine: String) {
+        if #available(macOS 14.0, *) { return try captureRectWithScreenCaptureKit(rect, excluding: exclusions) }
         let scale = displayScale(for: rect)
         guard NativeImageLimits.permits(width: ceil(rect.width * scale), height: ceil(rect.height * scale)) else {
             throw ProviderError.coded("image_too_large", "rectangle pixels exceed the host image allocation limit")
         }
-        guard let image = CGWindowListCreateImage(rect, .optionOnScreenOnly, kCGNullWindowID, [.bestResolution]) else {
+        let image: CGImage?
+        if exclusions.isEmpty { image = CGWindowListCreateImage(rect, .optionOnScreenOnly, kCGNullWindowID, [.bestResolution]) }
+        else {
+            guard let windows = CGWindowListCopyWindowInfo(.optionOnScreenOnly, kCGNullWindowID) as? [[String: Any]] else { throw ProviderError.coded("capture_failed", "window exclusions could not be resolved") }
+            let ids = windows.compactMap { $0[kCGWindowNumber as String] as? NSNumber }.filter { !exclusions.contains($0.uint32Value) }
+            image = CGImage(windowListFromArrayScreenBounds: rect, windowArray: ids as CFArray, imageOption: [.bestResolution])
+        }
+        guard let image else {
             throw ProviderError.coded("capture_failed", "macOS did not return an image for this rectangle")
         }
         return (image, Double(image.width) / rect.width, "coreGraphics")
     }
 
     @available(macOS 14.0, *)
-    private static func captureRectWithScreenCaptureKit(_ rect: CGRect) throws -> (image: CGImage, scale: Double, engine: String) {
+    private static func captureRectWithScreenCaptureKit(_ rect: CGRect, excluding exclusions: Set<CGWindowID>) throws -> (image: CGImage, scale: Double, engine: String) {
         try BlockingAsync.run(timeout: 10) {
             let content = try await SCShareableContent.current
             let displays = content.displays.filter { $0.frame.intersects(rect) }
@@ -419,7 +434,7 @@ enum NativeDesktopOperations {
             }
             for display in displays {
                 let part = display.frame.intersection(rect)
-                let filter = SCContentFilter(display: display, excludingWindows: [])
+                let filter = SCContentFilter(display: display, excludingWindows: content.windows.filter { exclusions.contains($0.windowID) })
                 let configuration = SCStreamConfiguration()
                 configuration.sourceRect = part.offsetBy(dx: -display.frame.minX, dy: -display.frame.minY)
                 configuration.width = Int(ceil(part.width * scale))

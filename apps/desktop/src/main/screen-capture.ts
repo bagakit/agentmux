@@ -16,6 +16,7 @@ type Ports = {
   edit(image: BrowserPng, attachToDraft: boolean, complete: (image: BrowserPng) => Promise<void>, context: ScreenshotEditContext): Promise<void>
   /** The per-display capture surface; selection, marks and the primary delivery happen there. */
   present(session: CaptureSurfaceSession): Promise<CaptureSurfaceOutcome>
+  sequence?(mode: 'scroll' | 'gif', selection: { image: BrowserPng; source: import('../shared/system-screenshot-editor').ScreenshotCaptureSource }): Promise<BrowserPng | string | null>
   reportIssue(error: unknown): void
   chooseSource?(mode: 'display' | 'window'): Promise<CaptureParams | null>
   /** Shows the countdown; resolves false when the user cancelled it. */
@@ -32,7 +33,7 @@ export class ScreenCapture {
     this.busy = true
     timing.screenCaptureMs ??= performance.now() - timing.startedAt
     try {
-      if (!['selection', 'display', 'window'].includes(mode)) throw new Error('Choose a supported screenshot source. Your draft is kept.')
+      if (!['selection', 'display', 'window', 'scroll', 'gif'].includes(mode)) throw new Error('Choose a supported screenshot source. Your draft is kept.')
       if (delaySeconds !== undefined) {
         if (mode !== 'selection' || !SCREENSHOT_DELAYS.includes(delaySeconds)) throw new Error('A delayed capture is a region capture in 3, 5 or 10 seconds. Your draft is kept.')
         if (!this.ports.countdown) throw new Error('Delayed capture is unavailable in this host. Region capture and your draft remain available.')
@@ -41,6 +42,22 @@ export class ScreenCapture {
       // Read after any countdown and before the source picker or selection takes focus: the app in
       // front at that moment is the one the user is capturing and returns to.
       const returnFocus = !this.ports.appActive()
+      if (mode === 'scroll' || mode === 'gif') {
+        if (!this.ports.sequence) throw new Error('Continuous capture is unavailable in this host. Ordinary screenshots remain available.')
+        let selected: { image: BrowserPng; source: import('../shared/system-screenshot-editor').ScreenshotCaptureSource } | null = null
+        await this.ports.present({ attachToDraft: false, expandable: false, returnFocus: false, background, timing,
+          complete: async (image, source) => { selected = { image, source } } })
+        if (!selected) return null
+        const result = await this.ports.sequence(mode, selected)
+        if (typeof result === 'string') return attachToDraft ? result : null
+        if (!result) return null
+        let path: string | null = null
+        await this.ports.edit(result, attachToDraft, async final => {
+          await this.ports.native().writeClipboardImage(final)
+          if (attachToDraft && !path) path = (await savePastedImage(this.ports.home, { bytes: pngBytes(final), extension: 'png' })).path
+        }, { ...(returnFocus ? { returnFocus } : {}) })
+        return path
+      }
       const native = this.ports.native()
       let path: string | null = null
       // This is one capture's destination receipt, never a second image/document store.

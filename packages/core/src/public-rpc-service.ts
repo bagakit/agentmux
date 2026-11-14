@@ -1,3 +1,4 @@
+import { isCaptureSequenceMethod, parseCaptureSequenceParams, parseCaptureSequenceResult, type CaptureSequencePort, type CaptureSequenceMethod } from './capture-sequence.js'
 import { FOCUS_METHODS, parseFocusParams, parseFocusResult, type FocusMethod } from './focus-control.js'
 import { spatialDestination } from './spatial-destination.js'
 import { parseAgentTakeoverProvenance, parseAgentTakeoverQuery, parseAgentTakeoverPage, takeoverDestinationOrganization, qualifyTakeoverOrganization, agentTakeoverNature, type AgentTakeoverPreparation, type AgentTakeoverRecord, type AgentTakeoverPage } from './agent-takeover.js'
@@ -250,6 +251,7 @@ export type AgentMuxRpcServiceOptions = Omit<Partial<AgentMuxControlHost>, 'exec
   inputContextCaptures?: AgentInputContextCaptureReader
   applicationAccess?: ApplicationAccessPort
   windows?: AgentMuxRpcWindowsOwner
+  sequences?: CaptureSequencePort
   captures?: AppCapturePort
   moteDialogue?: MoteDialoguePort
   moteChat?: MoteChatPort
@@ -433,6 +435,7 @@ const NATIVE_FIELDS = {
   'agent.name.inspect': ['runtimeId', 'agentSessionId', 'createOperationId', 'operationId'], 'agent.name.change': ['runtimeId', 'agentSessionId', 'createOperationId', 'change'],
   'space.close.ls': ['limit', 'cursor'],
   'space.close.prepare': ['operationId', 'target', 'keepAgentSessions'], 'space.close.apply': ['operationId', 'expectedPlanDigest', 'decisions'], 'space.close.inspect': ['operationId'],
+  'capture.sequence.open': ['hostId', 'operationId', 'mode'], 'capture.sequence.inspect': ['hostId', 'operationId'], 'capture.sequence.stop': ['hostId', 'operationId'], 'capture.sequence.read': ['hostId', 'operationId', 'offsetBytes', 'maxBytes'],
   'app.capture': ['target'], 'app.record.start': ['operationId', 'target', 'durationMs', 'fps'],
   'app.record.inspect': ['operationId'], 'app.record.stop': ['operationId'], 'app.record.read': ['operationId'],
   'system.metrics.host-profile.capture': ['hostId', 'fence', 'processId', 'durationMs'],
@@ -2232,6 +2235,18 @@ export class AgentMuxRpcService {
           ...(caller ? { hostId: caller.hostId, runId: caller.session.run.runId, ...(runtimeId ? { runtimeId } : {}) } : {}) }), input) as AgentMuxRpcResult<M>
     }
 
+    if (isCaptureSequenceMethod(method)) {
+      const input = parseCaptureSequenceParams(method, params)
+      context.signal?.throwIfAborted(); await context.assertCurrent?.()
+      const actor = caller ? { kind: 'agent' as const, id: caller.agentSessionId }
+        : context.principal && (context.principal.kind === 'user' || context.principal.kind === 'device') ? context.principal : null
+      if (!actor) throw new AgentMuxError('Capture needs its authenticated original actor.', 'CONTROL_PERMISSION_DENIED')
+      if (!this.ports.sequences) {
+        if (!this.ports.forwardControl) throw new AgentMuxError('The Desktop sequence owner is unavailable. Other capture remains available.', 'CONTROL_UNAVAILABLE')
+        return parseCaptureSequenceResult(await this.ports.forwardControl<CaptureSequenceMethod>(method, input, context), input) as AgentMuxRpcResult<M>
+      }
+      return parseCaptureSequenceResult(await this.ports.sequences.call(method, input, { actor, ...(context.signal ? { signal: context.signal } : {}), ...(context.assertCurrent ? { assertCurrent: context.assertCurrent } : {}) }), input) as AgentMuxRpcResult<M>
+    }
     if (isAppCaptureMethod(method)) {
       const input = parseAppCaptureParams(method, params)
       context.signal?.throwIfAborted(); await context.assertCurrent?.()

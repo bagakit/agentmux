@@ -1,3 +1,4 @@
+import { CaptureSequenceOwner } from './capture-sequence.js'
 import { parseSpaceLinkParams, parseSpaceLinkResult } from '@agentmux/core'
 import { registerAgentTakeoverIpc } from './agent-takeover-ipc.js'
 import { registerMeshNetworkIpc } from './mesh-network-ipc.js'
@@ -1727,8 +1728,16 @@ export async function registerIpc(args: {
     if (!BrowserWindow.getFocusedWindow() && Notification.isSupported())
       new Notification({ title: 'Screen capture needs attention', body: message }).show()
   }
+  const captureSequences = new CaptureSequenceOwner({ directory: join(app.getPath('userData'), 'capture-sequences'), home: app.getPath('home'),
+    appearance: () => config.appearance, native: getDesktopNativeUiOwner, select: async () => {
+      let selected: { image: import('../shared/contracts').BrowserPng; source: import('../shared/system-screenshot-editor').ScreenshotCaptureSource } | null = null
+      await captureSurface.present({ attachToDraft: false, expandable: false, returnFocus: false,
+        complete: async (image, source) => { selected = { image, source } } })
+      return selected
+    } })
   const screenCapture = new ScreenCapture({ home: app.getPath('home'), native: getDesktopNativeUiOwner, appActive: () => BrowserWindow.getFocusedWindow() !== null,
     edit: (image, attachToDraft, complete, context) => screenshotEditor.edit(image, attachToDraft, complete, context), present: session => captureSurface.present(session),
+    sequence: (mode, selection) => captureSequences.edit(mode, selection),
     reportIssue: reportScreenshotIssue,
     chooseSource: mode => screenshotSources.choose(mode), countdown: seconds => screenshotCountdown.wait(seconds) })
   const globalScreenshot = new GlobalScreenshot({ contents, focusedWindow: () => BrowserWindow.getFocusedWindow(),
@@ -2707,6 +2716,7 @@ export async function registerIpc(args: {
       { captureSelection: () => captureSurface.captureSelection(BrowserWindow.getFocusedWindow() === null) }),
     images: screenshotPins,
     windows: args.workbenchWindows,
+    sequences: captureSequences,
     captures: createAppCapturePort(appCaptureSource, appRecordings),
     deliveryAttempts,
     ...(args.clientIncidents ? { clientIncidents: () => args.clientIncidents! } : {}),
