@@ -2,13 +2,14 @@ import { useEffect, useState, type MouseEvent } from 'react'
 import { mintObjectId } from '@agentmux/core/object-id'
 import { assertBrowserTaskControlTarget, parseBrowserTaskParallelInspection, parseBrowserTaskParallelList, parseBrowserTaskParallelSummary } from '@agentmux/core/control'
 import type { AgentMuxBrowserTarget, AgentMuxBrowserTargetsResult } from '@agentmux/core'
-import type { AgentMuxBrowserTaskInspection, BrowserTaskInvocationCalls, BrowserTaskParallelInput, BrowserTaskParallelInspection, BrowserTaskParallelList, BrowserTaskParallelSummary } from '@agentmux/core/control'
+import type { AgentMuxBrowserTaskInspection, BrowserTaskInvocationCalls, BrowserTaskParallelInput, BrowserTaskParallelInspection, BrowserTaskParallelList, BrowserTaskParallelSummary, BrowserTaskParallelTargetProgress, BrowserTaskParallelContinuationReceipt } from '@agentmux/core/control'
 import { TextInput } from '@agentmux/client-ui/input'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import type { BrowserTaskAsset, BrowserTaskVersion } from '../../../shared/browser-task-assets'
 import { browserTaskStepParameterKeys } from '../../../shared/browser-task-assets'
 import { browserTaskSegment } from '../../../shared/browser-task-path'
 import { api } from '../lib/api'
+import { BrowserTaskParallelContinue, type ParallelContinueRequest, type ParallelContinueIntent, type ParallelContinueReview } from './BrowserTaskParallelContinue'
 import { BrowserTaskSubflowFields, BrowserTaskSubflowProgress, browserTaskSubflowInputs, clearBrowserTaskSubflowValues } from './BrowserTaskSubflows'
 
 type Choice = { id: string; browserId: string; profileId: string; title: string; profileLabel: string; parameters: Record<string, string>; calls: BrowserTaskInvocationCalls }
@@ -19,9 +20,10 @@ const statusLabel = (status: string) => status === 'completed' ? 'steps complete
 const countLabels = { queued: 'queued', preparing: 'preparing', running: 'running', waitingHuman: 'waiting for you', ready: 'ready', completed: 'steps completed', interrupted: 'interrupted', failed: 'failed', stopped: 'stopped' } as const
 
 /** Invocation values are local and disposable. All progress and history are projections of the original owner. */
-export function BrowserTaskParallel({ asset, version, assets, current, active: observing = true, onStart }: {
+export function BrowserTaskParallel({ asset, version, assets, current, active: observing = true, onStart, onContinue }: {
   asset: BrowserTaskAsset; version: BrowserTaskVersion; assets: BrowserTaskAsset[]; current?: BrowserTaskParallelSummary | null
   active?: boolean
+  onContinue(request: ParallelContinueRequest, event: MouseEvent<HTMLButtonElement>): Promise<BrowserTaskParallelContinuationReceipt>
   onStart(request: Start, event: MouseEvent<HTMLButtonElement>): Promise<BrowserTaskParallelSummary>
 }) {
   const [open, setOpen] = useState(false)
@@ -40,6 +42,9 @@ export function BrowserTaskParallel({ asset, version, assets, current, active: o
   const [refresh, setRefresh] = useState(0)
   const [originalRun, setOriginalRun] = useState<AgentMuxBrowserTaskInspection | null>(null)
   const [runError, setRunError] = useState<string>()
+  const [review, setReview] = useState<ParallelContinueReview | null>(null)
+  const [continuations, setContinuations] = useState<ParallelContinueIntent[]>([])
+  const [stops, setStops] = useState<{ browserId: string; operationId: string; phase: 'dispatching' | 'confirmed' | 'unknown'; warning?: string }[]>([])
   const definitions = assets.filter(value => value.browserId === asset.browserId)
   const definitionKey = JSON.stringify(definitions.map(value => [value.id, value.versions.map(version => version.version)]))
   useEffect(() => {
@@ -128,6 +133,62 @@ export function BrowserTaskParallel({ asset, version, assets, current, active: o
       setOriginalRun(result.inspection); setRunError(undefined)
     } catch (cause) { setRunError(presentError(cause)) }
   }
+  const rememberContinuation = (intent: ParallelContinueIntent) => {
+    setContinuations(previous => [...previous.filter(value => value.browserId !== intent.browserId || value.operationId !== intent.operationId || value.targetId !== intent.targetId), intent])
+    if (intent.phase === 'confirmed') setRefresh(value => value + 1)
+  }
+  async function reviewTarget(group: BrowserTaskParallelSummary, target: BrowserTaskParallelTargetProgress) {
+    if (!target.run) return
+    try {
+      const request = { operation: 'browser.task.inspect' as const, browserId: target.browserId, runId: target.run.id }
+      const result = await api.browser.controlTask(request)
+      assertBrowserTaskControlTarget(request, result)
+      if (result.operation !== 'browser.task.inspect' || !result.inspection || result.inspection.rootRunId !== target.run.id) throw new Error('The original target root run is unavailable. Its Browser is kept.')
+      const root = result.inspection.runs.find(run => run.id === target.run!.id)
+      if (!root || root.assetId !== group.assetId || root.version !== group.version || root.browserId !== target.browserId) throw new Error('The original task version or target run does not match this group. No continuation was submitted.')
+      setReview({ group, target, original: result.inspection, pageAfter: inspection?.run.browserId === group.browserId && inspection.run.operationId === group.operationId ? inspection.page.after : null }); setRunError(undefined)
+    } catch (cause) { setRunError(presentError(cause)) }
+  }
+  async function refreshReviewCursor() {
+    if (!review) return
+    try {
+      const options = { operationId: review.group.operationId, ...(review.pageAfter ? { after: review.pageAfter } : {}), limit: 16 }
+      const raw = await api.browser.inspectTaskParallel(review.group.browserId, options)
+      const result = raw === null ? null : parseBrowserTaskParallelInspection(raw)
+      assertBrowserTaskControlTarget({ operation: 'browser.task.parallel-inspect', browserId: review.group.browserId, ...options }, { operation: 'browser.task.parallel-inspect', inspection: result })
+      if (result && (result.run.assetId !== review.group.assetId || result.run.version !== review.group.version)) throw new Error('The original group definition changed in this reply. Its fixed-version review and fresh input are kept.')
+      const target = result?.targets.find(target => target.id === review.target.id)
+      if (!result || !target || target.browserId !== review.target.browserId || target.run?.id !== review.target.run?.id) throw new Error('The original target cursor could not be confirmed. Its review and fresh inputs are kept.')
+      if (query.browserId === result.run.browserId && query.operationId === result.run.operationId && (after ?? null) === result.page.after) setInspection(result)
+      await reviewTarget(result.run, target)
+    } catch (cause) { setRunError(presentError(cause)) }
+  }
+  async function checkContinuation(intent: ParallelContinueIntent) {
+    try {
+      const options = { operationId: intent.operationId, continuationId: intent.id, limit: 16 }
+      const raw = await api.browser.inspectTaskParallel(intent.browserId, options)
+      const result = raw === null ? null : parseBrowserTaskParallelInspection(raw)
+      assertBrowserTaskControlTarget({ operation: 'browser.task.parallel-inspect', browserId: intent.browserId, ...options }, { operation: 'browser.task.parallel-inspect', inspection: result })
+      if (result?.continuation && result.continuation.targetId !== intent.targetId) throw new Error('The continuation receipt belongs to another original target. Keep the original ID.')
+      const { warning: _previousWarning, ...original } = intent
+      const warning = result?.continuation?.warning ?? (result?.continuation ? undefined : 'No confirmed receipt was read. This does not prove that the original request was refused or never arrived.')
+      rememberContinuation({ ...original, phase: result?.continuation?.admission ?? 'unknown', ...(warning ? { warning } : {}) })
+      if (result && query.browserId === intent.browserId && query.operationId === intent.operationId && !after) setInspection(result)
+    } catch (cause) { rememberContinuation({ ...intent, phase: 'unknown', warning: presentError(cause) }) }
+  }
+  async function stopGroup(group: BrowserTaskParallelSummary) {
+    const pendingStop = { browserId: group.browserId, operationId: group.operationId, phase: 'dispatching' as const }
+    const save = (value: typeof stops[number]) => setStops(previous => [...previous.filter(item => item.operationId !== value.operationId || item.browserId !== value.browserId), value])
+    save(pendingStop)
+    try {
+      const raw = await api.browser.stopTaskParallel(group.browserId, group.operationId)
+      const run = raw === null ? null : parseBrowserTaskParallelSummary(raw)
+      assertBrowserTaskControlTarget({ operation: 'browser.task.parallel-stop', browserId: group.browserId, operationId: group.operationId }, { operation: 'browser.task.parallel-stop', run })
+      save({ ...pendingStop, phase: run ? 'confirmed' : 'unknown', ...(run ? {} : { warning: 'No original group receipt was read. Keep this operation ID and inspect it.' }) })
+      setRefresh(value => value + 1)
+    } catch (cause) { save({ ...pendingStop, phase: 'unknown', warning: presentError(cause) }) }
+  }
+  const stopPanel = (stop: typeof stops[number]) => <aside key={`${stop.browserId}:${stop.operationId}`} className="browser-task-parallel__original" role="status" data-parallel-stop={stop.operationId}><strong>{stop.phase === 'dispatching' ? 'Requesting group stop' : stop.phase === 'confirmed' ? 'Stop request recorded' : 'Group stop is unconfirmed'}</strong><small>Original operation {stop.operationId}</small><p>Completed actions stay done. In-flight or unknown outcomes remain visible; Browsers stay open.</p>{stop.warning ? <p>{stop.warning}</p> : null}<button type="button" className="browser-rsi-button browser-rsi-button--quiet" onClick={() => selectOperation(stop.browserId, stop.operationId)}>Inspect original group after stop</button></aside>
   return <details className="browser-task-parallel" open={open} onToggle={event => setOpen(event.currentTarget.open)}>
     <summary>Parallel Browsers · saved v{version.version}</summary>
     <p>Run this exact saved version across an explicit set of Browsers. Each target keeps its own Profile and fresh inputs.</p>
@@ -164,15 +225,23 @@ export function BrowserTaskParallel({ asset, version, assets, current, active: o
       <p>{inspection.run.targetCount} targets · concurrency {inspection.run.concurrency} / requested {inspection.run.requestedConcurrency} · admission {inspection.run.admission}</p>
       <p>{Object.entries(inspection.run.counts).filter(([, count]) => count > 0).map(([key, count]) => `${count} ${countLabels[key as keyof typeof countLabels]}`).join(' · ')}</p>
       {inspection.run.warning ? <p role="status">{inspection.run.warning}</p> : null}
+      <button type="button" className="browser-rsi-button browser-rsi-button--quiet" disabled={stops.some(stop => stop.operationId === inspection.run.operationId && stop.browserId === inspection.run.browserId && stop.phase === 'dispatching')} onClick={() => void stopGroup(inspection.run)}>Stop original parallel group</button>
+      {stops.filter(stop => stop.operationId === inspection.run.operationId && stop.browserId === inspection.run.browserId).map(stopPanel)}
       <ol>{inspection.targets.map(target => <li key={target.id} data-parallel-target={target.id}>
         <strong>{discovery?.targets.find(candidate => candidate.id === target.browserId)?.title || target.browserId}</strong>
         <small>Browser {target.browserId} · Profile {target.profileId}</small><span>{target.run ? statusLabel(target.run.status) : target.phase}</span>
         {target.waitingForProfile ? <small>Waiting for original Profile owner · {target.waitingForProfile.operationId} / {target.waitingForProfile.targetId}</small> : null}
         {target.error ? <p role="status">{target.error.message}</p> : null}
+        {target.run && (target.run.status === 'ready' || target.run.status === 'waiting-human') ? <button type="button" className="browser-rsi-button browser-rsi-button--primary" onClick={() => void reviewTarget(inspection.run, target)}>Review continue target {target.id} · v{inspection.run.version}</button> : null}
         {target.run ? <button type="button" className="browser-rsi-button browser-rsi-button--quiet" onClick={() => void inspectRun(target.browserId, target.run!.id)}>Inspect original run {target.run.id}</button> : null}
       </li>)}</ol>
       <div className="browser-task-parallel__pagination">{after ? <button type="button" className="browser-rsi-button browser-rsi-button--quiet" onClick={() => setAfter(undefined)}>First targets</button> : null}{inspection.page.nextAfter ? <button type="button" className="browser-rsi-button browser-rsi-button--quiet" onClick={() => { setAfter(inspection.page.nextAfter!); setOriginalRun(null) }}>More targets</button> : null}</div>
     </section> : null}
+    {review ? <BrowserTaskParallelContinue key={`${review.group.browserId}:${review.group.operationId}:${review.target.id}`} review={review} assets={assets} intent={continuations.find(intent => intent.browserId === review.group.browserId && intent.operationId === review.group.operationId && intent.targetId === review.target.id)}
+      onContinue={onContinue} onIntent={rememberContinuation} onCheck={intent => void checkContinuation(intent)} onClose={() => setReview(null)}
+      onRefresh={() => void refreshReviewCursor()} /> : null}
+    {stops.filter(stop => !inspection || stop.operationId !== inspection.run.operationId || stop.browserId !== inspection.run.browserId).slice().reverse().map(stopPanel)}
+    {continuations.filter(intent => !review || review.group.browserId !== intent.browserId || review.group.operationId !== intent.operationId || review.target.id !== intent.targetId).map(intent => <aside key={`${intent.browserId}:${intent.operationId}:${intent.targetId}`} className="browser-task-parallel__original" role="status" data-retained-continuation-id={intent.id}><strong>{intent.phase === 'unknown' ? 'Original continuation is unconfirmed' : intent.phase === 'confirmed' ? 'Continue request recorded' : intent.phase === 'refused' ? 'Continuation was not admitted' : 'Submitting original continuation'}</strong><small>Group {intent.operationId} · Target {intent.targetId} · Run {intent.runId} · v{intent.version}</small><small>Continuation {intent.id}</small>{intent.warning ? <p>{intent.warning}</p> : null}{intent.phase === 'unknown' ? <button type="button" className="browser-rsi-button browser-rsi-button--primary" onClick={() => void checkContinuation(intent)}>Check original continuation</button> : null}</aside>)}
     {runError ? <p role="status">{runError}</p> : null}
     {originalRun ? <details className="browser-task-parallel__original-run" open><summary>Original run {originalRun.rootRunId}</summary>
       {originalRun.runs.map(run => <div key={run.id}><small>Browser {run.browserId} · Run {run.id} · {statusLabel(run.status)} · next step {run.nextStep + 1}</small>{run.warning ? <p>{run.warning}</p> : null}</div>)}

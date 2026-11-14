@@ -98,3 +98,9 @@
 .browser-task-subflow__progress small { color: var(--text-3); }
 .browser-task-subflow__progress li[data-run-status="waiting-human"] > span { color: var(--amber-text); }
 .browser-task-subflow__progress li[data-run-status="failed"] > span { color: var(--red-text); }
+
+.browser-task-parallel__continue { display: grid; gap: 8px; min-width: 0; padding: 10px 0 10px 12px; border-left: 2px solid var(--accent); }
+.browser-task-parallel__continue header { display: grid; gap: 4px; min-width: 0; }
+.browser-task-parallel__continue small, .browser-task-parallel__continue p { overflow-wrap: anywhere; }
+.browser-task-parallel__progress li > span { display: block; margin-block: 4px; }
+.browser-task-parallel__progress li > button { margin: 4px 5px 0 0; }

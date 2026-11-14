@@ -1730,6 +1730,10 @@ function BrowserPaneContent({
             renderParallel={version => {
               const fixed = taskAsset?.versions.find(item => item.version === version)
               return taskAsset && fixed ? <BrowserTaskParallel active={visible} asset={taskAsset} version={fixed} assets={tab.taskAssets?.assets ?? []} current={tab.taskAssets?.parallel ?? null}
+                onContinue={(request, event) => {
+                  if (event.nativeEvent.isTrusted !== true) throw new Error('Continuing this target requires the person using the original Browser. Its original action is kept.')
+                  return api.browser.continueTaskParallelTarget(request.browserId, request.operationId, request.targetId, request.input)
+                }}
                 onStart={(request, event) => {
                   if (event.nativeEvent.isTrusted !== true) throw new Error('Starting a parallel run requires the person using this Browser. The original action is kept.')
                   return api.browser.runTaskParallel(request.browserId, request.assetId, request.version, request.input)
