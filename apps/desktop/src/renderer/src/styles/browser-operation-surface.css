@@ -30,7 +30,7 @@
 .browser-operation-menu__identity { display: grid; gap: var(--sp-1); padding: var(--sp-2) var(--sp-3); color: var(--text-3); font-size: var(--fs-micro); font-weight: 400; }
 .browser-operation-menu__identity strong { color: var(--text-2); font-weight: 650; }
 .browser-operation-menu__identity small { font-size: inherit; overflow-wrap: anywhere; }
-.browser-operation-warning { flex: none; min-width: 0; padding: var(--sp-2) var(--sp-3); border-bottom: 1px solid var(--amber-line); color: var(--amber-text); font-size: var(--fs-micro); line-height: 1.5; }
+.browser-operation-warning { flex: none; min-width: 0; padding: var(--sp-2) var(--sp-3); border-bottom: 1px solid var(--line-soft); color: var(--amber-text); font-size: var(--fs-micro); line-height: 1.5; }
 .browser-rsi-button, .browser-rsi-icon-button { min-height: 25px; display: inline-flex; align-items: center; justify-content: center; gap: var(--sp-2); border: 1px solid transparent; border-radius: var(--radius-sm); color: var(--text-2); background: transparent; font: inherit; font-size: var(--fs-micro); cursor: pointer; }
 .browser-rsi-button { padding: 0 var(--sp-3); white-space: nowrap; }
 .browser-rsi-button--quiet:hover:not(:disabled), .browser-rsi-icon-button:hover:not(:disabled) { color: var(--text); background: var(--surface-3); }

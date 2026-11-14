@@ -88,7 +88,7 @@
 }
 [data-task-layout='list'] .focus-context-group__cards > [data-focus-agent-selected='true'] {
   background: var(--focus-selected-surface);
-  box-shadow: inset 2px 0 var(--focus-selection-ink, var(--focus-line));
+  box-shadow: inset 0 0 0 1px var(--line);
   outline: 0;
 }
 [data-task-layout='list'] [data-focus-agent-selected='true'] button.focus-context--list { background: transparent; }

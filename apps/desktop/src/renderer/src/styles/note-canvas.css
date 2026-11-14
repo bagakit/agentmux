@@ -60,7 +60,7 @@
 .note-canvas-reader .mobile-note-body blockquote { margin-inline: 0; border-left: 2px solid var(--line); padding-left: 10px; color: var(--text-3); }
 .note-canvas-reader .mobile-note-body a { color: var(--blue); }
 .note-canvas-reader [data-block-id]:hover { background: var(--wash-1); border-radius: 2px; }
-.note-canvas-reader .mobile-note-reference { margin-block: 10px; border-left: 2px solid var(--blue); padding: 7px 10px; background: var(--wash-1); font-size: 11px; }
+.note-canvas-reader .mobile-note-reference { margin-block: 10px; border: 1px solid var(--line-soft); border-radius: var(--radius-sm); padding: 7px 10px; background: var(--wash-1); font-size: 11px; }
 .note-canvas-reader .mobile-note-reference details { font-size: 9px; color: var(--text-3); }
 .note-canvas-reader .mobile-note-reference code { overflow-wrap: anywhere; white-space: normal; }
 .note-canvas-open-block { display: inline-flex; align-items: center; gap: 4px; margin-top: 6px; padding: 3px 0; border: 0; background: transparent; color: var(--blue); font-size: 10px !important; }
@@ -186,7 +186,7 @@
 .note-canvas-card[data-kind="shared-block"] { border-color: color-mix(in srgb, var(--green) 36%, var(--line)); }
 .note-canvas-card[data-kind="shared-block"] .note-canvas-book { color: var(--green); }
 .note-canvas-body[data-reading-mode="summary"] { max-height: 280px; }
-.note-canvas-reader .note-include-link { display: flex; align-items: baseline; gap: 6px; margin-block: 10px; padding: 7px 10px; border-left: 2px solid var(--green); background: var(--wash-1); }
+.note-canvas-reader .note-include-link { display: flex; align-items: baseline; gap: 6px; margin-block: 10px; padding: 7px 10px; border: 1px solid var(--line-soft); border-radius: var(--radius-sm); background: var(--wash-1); }
 .note-canvas-reader .note-include-link > svg { flex: none; color: var(--text-3); }
 .note-canvas-reader .note-include-link > button { padding: 0; border: 0; background: transparent; color: var(--green); font-size: 11px; line-height: 1.6; text-align: left; overflow-wrap: anywhere; }
 

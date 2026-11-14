@@ -7,7 +7,7 @@
 .mote-conversation-browser__list li { min-width: 0; }
 .mote-conversation-browser__choice { display: flex; align-items: center; width: 100%; min-height: 58px; padding: var(--sp-3); border: 1px solid transparent; border-radius: var(--radius-sm); background: transparent; color: var(--text); font: inherit; text-align: start; cursor: pointer; }
 .mote-conversation-browser__choice:hover { background: var(--surface-2); }
-.mote-conversation-browser__choice[aria-current="page"] { background: var(--surface-2); border-color: var(--line); box-shadow: inset 2px 0 var(--green); }
+.mote-conversation-browser__choice[aria-current="page"] { background: var(--surface-2); border-color: var(--line); }
 .mote-conversation-browser button:focus-visible { outline: 2px solid var(--focus-line); outline-offset: -2px; }
 .mote-conversation-browser__row { display: flex; align-items: center; gap: var(--sp-3); min-width: 0; width: 100%; }
 .mote-conversation-browser__row > svg { flex: none; color: var(--text-3); }

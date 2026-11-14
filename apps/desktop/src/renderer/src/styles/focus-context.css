@@ -298,7 +298,7 @@
 .focus-location-choice small { color: var(--text-3); font-size: var(--fs-micro); overflow-wrap: anywhere; }
 
 /* A remembered route: tint affects the surface, never text or state contrast. */
-.focus-project-frame { position: relative; isolation: isolate; overflow: clip; background: color-mix(in srgb, var(--focus-project-color) 5%, var(--surface-0)); border-top: 1px solid color-mix(in srgb, var(--focus-project-color) 14%, var(--line-soft)); }
+.focus-project-frame { position: relative; isolation: isolate; overflow: clip; background: color-mix(in srgb, var(--focus-project-color) 5%, var(--surface-0)); border-top: 1px solid var(--line-soft); }
 .focus-project-frame > .focus-project-lanes__row { background: transparent; border-top: 0; }
 .focus-project-frame__heading { flex: 1; min-width: 0; }
 .focus-project-frame__title { display: flex; flex: 1; min-width: 0; }

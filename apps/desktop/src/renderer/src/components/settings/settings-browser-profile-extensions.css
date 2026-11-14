@@ -15,7 +15,7 @@
 .browser-profile-extensions__identity > span { color: var(--text-3); font-size: 11px; }
 .browser-profile-extensions__identity > span[data-state='failed'], .browser-profile-extensions__issue { color: var(--amber-text); }
 .browser-profile-extensions details > summary { cursor: pointer; color: var(--text-3); }
-.browser-profile-extensions__review { display: grid; gap: 8px; padding: 11px 0 11px 12px; border-left: 2px solid var(--accent); min-width: 0; }
+.browser-profile-extensions__review { display: grid; gap: 8px; padding: 11px 12px; border: 1px solid var(--line-soft); border-radius: var(--radius-sm); min-width: 0; }
 .browser-profile-extensions__scope { color: var(--text-3); font-size: 11px; overflow-wrap: anywhere; min-width: 0; }
 .browser-profile-extensions__scope p { margin-block: 5px; }
 .browser-profile-extensions__scope dl { display: grid; gap: 4px; margin: 7px 0; }

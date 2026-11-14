@@ -33,4 +33,4 @@
 .agent-current-fork__cancel:hover { background: var(--surface-3); color: var(--text); }
 .agent-current-fork__cancel:focus-visible { outline: 1px solid var(--focus-line); outline-offset: 1px; }
 /* A fork-based derived action shows the exact first message it sends to the forked conversation. */
-.agent-current-fork__instruction { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; padding-left: 8px; border-left: 2px solid color-mix(in srgb, var(--green) 55%, transparent); color: var(--text-2); white-space: pre-wrap; }
+.agent-current-fork__instruction { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; padding-inline: 8px; border: 1px solid var(--line-soft); border-radius: var(--radius-sm); background: var(--surface-1); color: var(--text-2); white-space: pre-wrap; }

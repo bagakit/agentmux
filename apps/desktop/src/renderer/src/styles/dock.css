@@ -25,7 +25,7 @@
   background: var(--surface-1);
   box-shadow: 10px 0 28px var(--scrim-1), inset -1px 0 var(--line-soft);
 }
-.surface-tool-dock--resizing { box-shadow: 12px 0 34px var(--scrim-2), inset -1px 0 var(--green-2); }
+.surface-tool-dock--resizing { box-shadow: 12px 0 34px var(--scrim-2), inset -1px 0 var(--line); }
 .surface-tool-width-handle {
   width: 8px;
   position: absolute;

@@ -41,14 +41,13 @@
 .mote-threads__search > svg { flex-shrink: 0; }
 .mote-threads__search input, .mote-threads__search input:focus-visible { flex: 1; min-width: 0; min-height: var(--mote-thread-control-height, 30px); border: 0; border-radius: 0; background: transparent; outline: 0; padding: 4px 0; font-size: var(--mote-thread-input-font, var(--fs-meta, 12px)); }
 .mote-threads__search:focus-within { outline: 0; box-shadow: inset 0 0 0 1px var(--focus-line); }
-/* Primary view switch: 工作 | 成员. Underline tabs, so they read above the softer status pills. */
-.mote-threads__views { display: inline-flex; gap: 14px; margin-inline-end: 4px; }
-.mote-threads__views button { appearance: none; position: relative; display: inline-flex; align-items: center; gap: 5px; min-height: var(--mote-thread-control-height, 30px); padding: 0 1px; border: 0; background: transparent; color: var(--text-3); font: inherit; font-size: var(--fs-body, 13px); font-weight: 550; cursor: pointer; transition: color var(--dur-fast, 120ms) ease; }
+/* Primary view switch: 工作 | 成员. */
+.mote-threads__views { display: inline-flex; gap: 8px; margin-inline-end: 4px; }
+.mote-threads__views button { appearance: none; position: relative; display: inline-flex; align-items: center; gap: 5px; min-height: var(--mote-thread-control-height, 30px); padding-inline: 6px; border: 1px solid transparent; border-radius: var(--radius-sm); background: transparent; color: var(--text-3); font: inherit; font-size: var(--fs-body, 13px); font-weight: 550; cursor: pointer; transition: color var(--dur-fast, 120ms) ease; }
 .mote-threads__views button > span { color: var(--text-3); font-size: var(--fs-micro, 11px); font-weight: 500; font-variant-numeric: tabular-nums; }
 .mote-threads__views button:hover, .mote-threads__views button[aria-selected="true"] { color: var(--text); }
-.mote-threads__views button::after { content: ''; position: absolute; inset-inline: 0; bottom: -9px; height: 2px; border-radius: 2px; background: var(--green); transform: scaleX(0); transition: transform var(--dur-enter, 160ms) var(--ease-enter, ease-out); }
-.mote-threads__views button[aria-selected="true"]::after { transform: scaleX(1); }
-.mote-threads__views button[data-attention]::before { content: ''; position: absolute; inset-inline-end: -7px; top: 6px; width: 6px; height: 6px; border-radius: 50%; background: var(--amber, #d9a441); }
+.mote-threads__views button[aria-selected="true"] { background: var(--surface-2); border-color: var(--line-soft); }
+.mote-threads__views button[data-attention]::before { content: ''; position: absolute; inset-inline-end: -3px; top: 4px; width: 6px; height: 6px; border-radius: 50%; background: var(--amber, #d9a441); }
 .mote-threads__views button:focus-visible { outline: 2px solid var(--focus-line); outline-offset: 2px; border-radius: 4px; }
 .mote-threads__toolbar [hidden], .mote-threads__work[hidden], .mote-threads__members[hidden], .mote-threads__private[hidden] { display: none; }
 .mote-threads__members, .mote-threads__private { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
@@ -95,7 +94,7 @@
 .mote-work-event__actions { display: flex; flex-wrap: wrap; gap: 6px; margin-block: 4px 12px; }
 .mote-work-event__actions button { min-height: 30px; padding-inline: 12px; border: 0; background: var(--surface-2); box-shadow: inset 0 0 0 1px var(--line-soft); color: var(--text); }
 .mote-work-event__actions button:hover { background: var(--surface-3); }
-.mote-work-event__assignment { margin: 0 0 14px; padding: 8px 12px; border-radius: 0 var(--radius-sm, 8px) var(--radius-sm, 8px) 0; border-inline-start: 2px solid color-mix(in srgb, var(--green) 55%, transparent); background: color-mix(in srgb, var(--text) 4%, transparent); color: var(--text-2); }
+.mote-work-event__assignment { margin: 0 0 14px; padding: 8px 12px; border: 1px solid var(--line-soft); border-radius: var(--radius-sm, 8px); background: color-mix(in srgb, var(--text) 4%, transparent); color: var(--text-2); }
 .mote-work-event__assignment > small { display: block; margin-block-end: 4px; color: var(--text-3); font-size: var(--fs-meta, 12px); }
 .mote-work-event__replies { margin: 0; padding: 0 0 0 14px; list-style: none; border-inline-start: 1px solid var(--line-soft); }
 .mote-work-event__reply { position: relative; padding-block: 8px; border-top: 0; }
@@ -114,7 +113,7 @@
   .mote-threads__list { padding-inline-end: 12px; }
   .mote-threads__pane { min-height: 240px; padding: 4px 4px 20px 20px; border-inline-start: 1px solid var(--line-soft); }
   .mote-threads__pane > .mote-work-event__thread { position: sticky; top: 60px; padding: 0; }
-  .mote-threads__list > li[data-selected] > .mote-work-event > .mote-work-event__summary { background: var(--surface-2); box-shadow: inset 2px 0 0 var(--green); }
+  .mote-threads__list > li[data-selected] > .mote-work-event > .mote-work-event__summary { background: var(--surface-2); box-shadow: inset 0 0 0 1px var(--line); }
 }
 @container mote-threads (max-width: 639.98px) {
   .mote-threads__back { display: inline-flex; align-items: center; gap: 4px; min-height: var(--mote-thread-control-height, 32px); margin-block-end: 6px; padding: 0 8px 0 4px; border: 0; border-radius: var(--radius-sm, 6px); background: transparent; color: var(--text-2); font: inherit; font-size: var(--fs-meta, 12px); cursor: pointer; }

@@ -27,8 +27,8 @@
 .remote-management .host-card__icon { align-self: flex-start; margin-top: 5px; }
 .remote-management .settings-resource-editor__header .check-pill { font-size: 10px; }
 .remote-detail-tabs { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-4); margin: var(--sp-2) 0 var(--sp-6); border-bottom: 1px solid var(--line-soft); }
-.remote-detail-tabs button { flex: none; min-height: 34px; padding: var(--sp-2) 0; color: var(--text-3); font: var(--fs-meta)/1.5 var(--font-sans); border: 0; border-bottom: 2px solid transparent; background: transparent; cursor: pointer; }
-.remote-detail-tabs button[aria-current='page'] { color: var(--text); border-bottom-color: var(--green); font-weight: 550; }
+.remote-detail-tabs button { flex: none; min-height: 34px; padding: var(--sp-2) var(--sp-3); color: var(--text-3); font: var(--fs-meta)/1.5 var(--font-sans); border: 1px solid transparent; border-radius: var(--radius-sm); background: transparent; cursor: pointer; }
+.remote-detail-tabs button[aria-current='page'] { color: var(--text); background: var(--surface-3); border-color: var(--line-soft); font-weight: 550; }
 .remote-overview { display: grid; gap: var(--sp-6); }
 .remote-overview__facts { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-5); margin: 0; }
 .remote-overview__facts dt, .remote-overview__identity > span { color: var(--text-3); font-size: var(--fs-meta); }
@@ -89,7 +89,7 @@ button.remote-work__row:focus-visible { outline: 1px solid var(--focus-line); ou
 .application-access__rules { display: grid; gap: var(--sp-2); }
 .application-access__rule { display: grid; gap: var(--sp-1); width: 100%; min-width: 0; padding: var(--sp-3) var(--sp-4); border: 1px solid var(--line-soft); border-radius: var(--radius); background: var(--surface-1); color: var(--text); text-align: left; cursor: pointer; }
 .application-access__rule span, .application-access__rule small { color: var(--text-3); overflow-wrap: anywhere; }
-.application-access__rule[aria-pressed='true'] { border-color: var(--green); background: color-mix(in srgb, var(--green) 8%, var(--surface-1)); box-shadow: inset 3px 0 var(--green); }
+.application-access__rule[aria-pressed='true'] { border-color: var(--line); background: var(--surface-2); }
 .application-access__rule:focus-visible, .application-access__operation-link:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
 .application-access__actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); }
 .application-access__editor { display: grid; gap: var(--sp-4); min-width: 0; padding: var(--sp-4); border: 1px solid var(--line-soft); border-radius: var(--radius); background: var(--surface-1); }
@@ -116,7 +116,7 @@ button.remote-work__row:focus-visible { outline: 1px solid var(--focus-line); ou
 .application-access__operations { display: grid; gap: var(--sp-2); min-width: 0; }
 .application-access__operations > strong { color: var(--text-3); font-size: var(--fs-meta); font-weight: 500; }
 .application-access__operation-link { display: flex; justify-content: space-between; flex-wrap: wrap; gap: var(--sp-2); width: 100%; padding: var(--sp-2) 0; border: 0; border-bottom: 1px solid var(--line-soft); background: transparent; color: var(--text-2); font-size: var(--fs-meta); text-align: left; cursor: pointer; }
-.application-access__operation-link[aria-pressed='true'] { padding-inline: var(--sp-3); border-radius: var(--radius); background: var(--surface-1); color: var(--green); box-shadow: inset 3px 0 var(--green); }
+.application-access__operation-link[aria-pressed='true'] { padding-inline: var(--sp-3); border-radius: var(--radius); background: var(--surface-2); color: var(--text); box-shadow: inset 0 0 0 1px var(--line); }
 .application-access__operation-link span { overflow-wrap: anywhere; }
 .application-access__result time, .application-access__plan time { color: var(--text-3); font: 11px var(--font-mono); }
 .application-access__result .small-button, .application-access__plan .primary-button { justify-self: start; }
