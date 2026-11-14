@@ -1455,6 +1455,7 @@ const mockApi: AgentMuxDesktopApi = {
     exportProfileBookmarks: async () => { throw new Error('Bookmarks require the connected Desktop Profile owner.') },
     openProfileBookmark: async () => { throw new Error('Bookmarks require the connected Desktop Profile owner.') },
     listProfileExtensions: async () => { throw new Error('Extension management requires the Desktop Browser host.') },
+    checkProfileExtensionUpdate: async () => { throw new Error('Extension management requires the Desktop Browser host.') },
     prepareProfileExtension: async () => { throw new Error('Extension management requires the Desktop Browser host.') },
     applyProfileExtension: async () => { throw new Error('Extension human review requires the Desktop Browser host.') },
     removeProfileExtension: async () => { throw new Error('Extension human review requires the Desktop Browser host.') },

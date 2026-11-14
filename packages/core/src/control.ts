@@ -1277,7 +1277,7 @@ const OPERATION_BUDGET: Record<AgentMuxControlRequest['operation'], 'long' | 'sh
   'browser.profile.storage.inspect': 'long', 'browser.profile.storage.clear': 'long',
   'browser.profile.cookie-file.prepare-import': 'long', 'browser.profile.cookie-file.import': 'long', 'browser.profile.cookie-file.export': 'long', 'browser.profile.cookie-file.inspect': 'short', 'browser.profile.cookie-file.discard': 'long', 'browser.profile.cookie-file.reveal': 'short',
   'browser.profile.bookmark.ls': 'short', 'browser.profile.bookmark.edit': 'long', 'browser.profile.bookmark.import': 'long', 'browser.profile.bookmark.export': 'long', 'browser.profile.bookmark.open': 'long',
-  'browser.profile.extension.ls': 'short', 'browser.profile.extension.prepare': 'long', 'browser.profile.extension.apply': 'long', 'browser.profile.extension.remove': 'long', 'browser.profile.extension.load': 'long',
+  'browser.profile.extension.ls': 'short', 'browser.profile.extension.check': 'long', 'browser.profile.extension.prepare': 'long', 'browser.profile.extension.apply': 'long', 'browser.profile.extension.remove': 'long', 'browser.profile.extension.load': 'long',
   'browser.task.export': 'short', 'browser.task.import': 'long', 'browser.task.import-inspect': 'short',
   'browser.task.source': 'short',
   'browser.task.draft': 'short',

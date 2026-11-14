@@ -101,7 +101,7 @@ export const AGENTMUX_RPC_CONTROL_METHODS = {
   'browser.profile.cookie-file.prepare-import': 'browser.profile.cookie-file.prepare-import', 'browser.profile.cookie-file.import': 'browser.profile.cookie-file.import', 'browser.profile.cookie-file.export': 'browser.profile.cookie-file.export', 'browser.profile.cookie-file.inspect': 'browser.profile.cookie-file.inspect', 'browser.profile.cookie-file.discard': 'browser.profile.cookie-file.discard', 'browser.profile.cookie-file.reveal': 'browser.profile.cookie-file.reveal',
   'browser.profile.bookmark.ls': 'browser.profile.bookmark.ls', 'browser.profile.bookmark.edit': 'browser.profile.bookmark.edit',
   'browser.profile.bookmark.import': 'browser.profile.bookmark.import', 'browser.profile.bookmark.export': 'browser.profile.bookmark.export', 'browser.profile.bookmark.open': 'browser.profile.bookmark.open',
-  'browser.profile.extension.ls': 'browser.profile.extension.ls', 'browser.profile.extension.prepare': 'browser.profile.extension.prepare',
+  'browser.profile.extension.ls': 'browser.profile.extension.ls', 'browser.profile.extension.check': 'browser.profile.extension.check', 'browser.profile.extension.prepare': 'browser.profile.extension.prepare',
   'browser.profile.extension.apply': 'browser.profile.extension.apply', 'browser.profile.extension.remove': 'browser.profile.extension.remove', 'browser.profile.extension.load': 'browser.profile.extension.load',
   // Stopping an active external-tab operation also ends only its original sharing
   // grant. Finished operations return their retained state without revoking sharing.

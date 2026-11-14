@@ -32,8 +32,13 @@ function latest(candidates: Candidate[]): Candidate {
   if (compared.length > 1 && compared[0]!.parts.every((part, i) => part === compared[1]!.parts[i])) return invalid('The update manifest has ambiguous packages for the same version.')
   return compared[0]!.candidate
 }
+export function compareExtensionVersions(left: string, right: string): number {
+  const a = version(left), b = version(right)
+  for (let i = 0; i < 4; i++) if (a[i] !== b[i]) return a[i]! < b[i]! ? -1 : 1
+  return 0
+}
 /** Parse existing Chromium XML and WebExtensions JSON formats. Neither document grants consent. */
-export function extensionManifestCandidate(bytes: Buffer, base: string, addonId: string): Candidate {
+export function extensionManifestCandidate(bytes: Buffer, base: string, addonId: string): Candidate | null {
   const text = bytes.toString('utf8').trim()
   if (text.startsWith('<')) {
     try {
@@ -43,6 +48,11 @@ export function extensionManifestCandidate(bytes: Buffer, base: string, addonId:
       const apps = Array.from(root.getElementsByTagNameNS(namespace, 'app')).filter(app => app.parentNode === root && app.getAttribute('appid') === addonId)
       if (apps.length !== 1) throw Error('Unconfirmed identity')
       const checks = Array.from(apps[0]!.getElementsByTagNameNS(namespace, 'updatecheck')).filter(check => check.parentNode === apps[0])
+      if (checks.length === 1 && checks[0]!.getAttribute('status') === 'noupdate') {
+        if (checks[0]!.hasAttribute('codebase') || checks[0]!.hasAttribute('version')) throw Error('Conflicting no-update response')
+        return null
+      }
+      if (checks.length === 1 && checks[0]!.getAttribute('status') && checks[0]!.getAttribute('status') !== 'ok') throw Error('Unconfirmed update status')
       if (checks.length !== 1 || !checks[0]!.getAttribute('codebase') || !checks[0]!.getAttribute('version')) throw Error('No candidate')
       return latest([{ url: address(checks[0]!.getAttribute('codebase')!, base), version: checks[0]!.getAttribute('version')!, format: 'chromium-xml' }])
     } catch { return invalid('The Chromium update manifest does not provide one valid package for the exact add-on ID.') }
@@ -50,6 +60,7 @@ export function extensionManifestCandidate(bytes: Buffer, base: string, addonId:
   let parsed: any
   try { parsed = JSON.parse(text) } catch { return invalid('The WebExtensions update manifest is invalid JSON.') }
   if (!parsed || typeof parsed !== 'object' || !parsed.addons || !Object.hasOwn(parsed.addons, addonId) || !Array.isArray(parsed.addons[addonId]?.updates)) return invalid('The WebExtensions update manifest has no exact add-on ID and update list.')
+  if (!parsed.addons[addonId].updates.length) return null
   return latest(parsed.addons[addonId].updates.map((entry: any): Candidate => {
     if (!entry || typeof entry.update_link !== 'string' || typeof entry.version !== 'string') return invalid('The update manifest candidate needs a package address and version.')
     let hash: Candidate['hash']
@@ -97,6 +108,11 @@ async function manifest(url: string): Promise<{ bytes: Buffer; url: string }> {
     return { bytes: Buffer.concat(chunks), url: result.url }
   } finally { result.body.destroy() }
 }
+/** Read a declared manifest only; no staging, package request, consent or native Session. */
+export async function inspectOnlineExtensionUpdate(source: Extract<OnlineSource, { kind: 'update-manifest' }>) {
+  const read = await manifest(source.url)
+  return { candidate: extensionManifestCandidate(read.bytes, read.url, source.addonId), origin: new URL(read.url).origin }
+}
 async function download(url: string, path: string): Promise<{ sha256: string; sha512: string; url: string }> {
   const result = await response(url); let file: Awaited<ReturnType<typeof open>> | undefined
   const sha256 = createHash('sha256'), sha512 = createHash('sha512')
@@ -115,7 +131,8 @@ export async function prepareOnlineExtension(source: OnlineSource, staging: stri
   try {
     if (source.kind === 'update-manifest') {
       const read = await manifest(source.url); manifestSha256 = createHash('sha256').update(read.bytes).digest('hex')
-      candidate = extensionManifestCandidate(read.bytes, read.url, source.addonId)
+      candidate = extensionManifestCandidate(read.bytes, read.url, source.addonId) ?? undefined
+      if (!candidate) return invalid('The update manifest reports no package candidate. Nothing was prepared or installed.')
     }
     const acquired = await download(candidate?.url ?? source.url, snapshot)
     if (candidate?.hash && acquired[candidate.hash.algorithm] !== candidate.hash.value) return invalid('The downloaded package does not match the update manifest hash. Nothing was installed.')

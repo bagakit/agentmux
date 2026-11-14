@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { mintObjectId } from '@agentmux/core/object-id'
-import type { BrowserProfileExtension, BrowserProfileExtensionReview, BrowserProfileExtensionPending, BrowserProfileExtensionInputSource } from '@agentmux/core/control'
+import type { BrowserProfileExtension, BrowserProfileExtensionReview, BrowserProfileExtensionPending, BrowserProfileExtensionInputSource, BrowserProfileExtensionUpdateCheck } from '@agentmux/core/control'
 import type { BrowserProfileSummary } from '../../../../shared/contracts'
 import { api } from '../../lib/api'
 import { browserProfiles } from '../../lib/browser-profiles'
@@ -15,6 +15,8 @@ export function BrowserProfileExtensions({ profile }: { profile: BrowserProfileS
   const [open, setOpen] = useState(false), [entries, setEntries] = useState<BrowserProfileExtension[]>([]), [review, setReview] = useState<BrowserProfileExtensionReview | null>(null)
   const [online, setOnline] = useState(false), [onlineKind, setOnlineKind] = useState<'package-url' | 'update-manifest'>('package-url')
   const [onlineUrl, setOnlineUrl] = useState(''), [addonId, setAddonId] = useState('')
+  const [onlineExtensionId, setOnlineExtensionId] = useState<string | undefined>()
+  const [updates, setUpdates] = useState<Record<string, BrowserProfileExtensionUpdateCheck>>({})
   const [pending, setPending] = useState<BrowserProfileExtensionPending[]>([])
   const [busy, setBusy] = useState(false), [error, setError] = useState<string | null>(null), [notice, setNotice] = useState<string | null>(null)
   const revision = useRef(profile.revision), mounted = useRef(true), latest = useRef(profile)
@@ -22,7 +24,10 @@ export function BrowserProfileExtensions({ profile }: { profile: BrowserProfileS
   useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
   const refresh = async () => {
     const result = await api.browser.listProfileExtensions(profile.id)
-    if (mounted.current && latest.current.id === result.profileId) { setEntries(result.extensions); setPending(result.pending); revision.current = result.profileRevision }
+    if (mounted.current && latest.current.id === result.profileId) {
+      setEntries(result.extensions); setPending(result.pending); revision.current = result.profileRevision
+      setUpdates(current => Object.fromEntries(Object.entries(current).filter(([id, check]) => check.profileRevision === result.profileRevision && !result.pending.some(intent => intent.extensionId === id) && result.extensions.some(entry => entry.id === id && entry.version === check.currentVersion))))
+    }
   }
   useEffect(() => { if (open) void refresh().catch(cause => { if (mounted.current) setError(presentError(cause)) }) }, [open, profile.id, profile.revision])
   const run = async (action: () => Promise<void>) => {
@@ -40,8 +45,16 @@ export function BrowserProfileExtensions({ profile }: { profile: BrowserProfileS
   }
   const prepareOnline = async () => {
     const source: BrowserProfileExtensionInputSource = onlineKind === 'package-url' ? { kind: onlineKind, url: onlineUrl.trim() } : { kind: onlineKind, url: onlineUrl.trim(), addonId: addonId.trim() }
-    const prepared = await api.browser.prepareProfileExtension(profile.id, revision.current, mintObjectId(), source)
+    const prepared = await api.browser.prepareProfileExtension(profile.id, revision.current, mintObjectId(), source, onlineExtensionId)
     if (mounted.current && latest.current.id === prepared.profileId) { setReview(prepared); setOnline(false) }
+  }
+  const checkUpdate = async (extensionId: string) => {
+    const check = await api.browser.checkProfileExtensionUpdate(profile.id, extensionId)
+    if (mounted.current && latest.current.id === check.profileId) setUpdates(current => ({ ...current, [extensionId]: check }))
+  }
+  const prepareUpdate = async (check: BrowserProfileExtensionUpdateCheck) => {
+    const prepared = await api.browser.prepareProfileExtension(profile.id, check.profileRevision, mintObjectId(), { kind: 'installed-update' }, check.extensionId)
+    if (mounted.current && latest.current.id === prepared.profileId) setReview(prepared)
   }
   const apply = async () => {
     if (!review) return
@@ -58,11 +71,12 @@ export function BrowserProfileExtensions({ profile }: { profile: BrowserProfileS
       <p className="browser-profile-editor__quiet">Approved packages run only in this Profile. Host support varies; loaded does not mean every Chrome API works.</p>
       <div className="browser-profile-extensions__actions">
         <button type="button" disabled={busy} onClick={() => void run(() => choose('package'))}><ExtensionIcon size={13} /> Add package…</button>
-        <button type="button" disabled={busy} onClick={() => setOnline(value => !value)} aria-expanded={online}>From URL…</button>
+        <button type="button" disabled={busy} onClick={() => { setOnlineExtensionId(undefined); setOnline(value => !value) }} aria-expanded={online}>From URL…</button>
         <button type="button" disabled={busy} onClick={() => void run(() => choose('directory'))}>Unpacked directory…</button>
         <button type="button" disabled={busy} onClick={() => void run(refresh)} aria-label="Refresh extension load state"><RefreshIcon size={13} /></button>
       </div>
       {online ? <form className="browser-profile-extensions__online" aria-label="Prepare online extension" onSubmit={event => { event.preventDefault(); void run(prepareOnline) }}>
+        {onlineExtensionId ? <strong>Update the selected extension</strong> : null}
         <label>Source<select aria-label="Online extension source" disabled={busy} value={onlineKind} onChange={event => setOnlineKind(event.target.value as typeof onlineKind)}><option value="package-url">Package URL</option><option value="update-manifest">Update manifest</option></select></label>
         <label>HTTPS address<input type="url" autoComplete="off" spellCheck={false} required disabled={busy} value={onlineUrl} onChange={event => setOnlineUrl(event.target.value)} placeholder="https://…" /></label>
         {onlineKind === 'update-manifest' ? <label>Add-on ID<input required autoComplete="off" spellCheck={false} disabled={busy} value={addonId} onChange={event => setAddonId(event.target.value)} /></label> : null}
@@ -77,6 +91,8 @@ export function BrowserProfileExtensions({ profile }: { profile: BrowserProfileS
         {entry.application.reason ? <p className="browser-profile-extensions__issue">{entry.application.reason}</p> : null}
         <div className="browser-profile-extensions__actions">
           {entry.application.state !== 'loaded' ? <button type="button" disabled={busy} onClick={() => void run(async () => { await api.browser.loadProfileExtension(profile.id, entry.id); await refresh() })}>Load</button> : null}
+          <button type="button" disabled={busy} onClick={() => void run(() => checkUpdate(entry.id))}>Check for updates</button>
+          <button type="button" disabled={busy} onClick={() => { setOnlineExtensionId(entry.id); setOnlineKind('update-manifest'); setOnlineUrl(''); setAddonId(entry.nativeId); setOnline(true) }}>Choose update source…</button>
           <button type="button" disabled={busy} onClick={() => void run(() => choose('package', entry.id))}>Update package…</button>
           <button type="button" disabled={busy} onClick={() => void run(() => choose('directory', entry.id))}>Update directory…</button>
           <button type="button" disabled={busy} onClick={() => void run(async () => {
@@ -84,6 +100,7 @@ export function BrowserProfileExtensions({ profile }: { profile: BrowserProfileS
             if (result.outcome === 'applied') { setNotice('Extension removed. Profile sign-ins and site data remain.'); await refresh(); await browserProfiles.refresh() }
           })}>Remove…</button>
         </div>
+        <ExtensionUpdateStatus check={updates[entry.id]} busy={busy} onPrepare={check => void run(() => prepareUpdate(check))} />
         <details><summary>Source and permissions</summary><ExtensionScope item={entry} /></details>
       </li>)}</ul> : null}
       {review ? <div className="browser-profile-extensions__review" role="region" aria-label="Extension source and permission review">
@@ -99,6 +116,15 @@ export function BrowserProfileExtensions({ profile }: { profile: BrowserProfileS
       {error ? <p className="browser-profile-extensions__issue" role="alert">{error} <button type="button" disabled={busy} onClick={() => void run(refresh)}>Read current state</button></p> : null}
     </div> : null}
   </section>
+}
+function ExtensionUpdateStatus({ check, busy, onPrepare }: { check: BrowserProfileExtensionUpdateCheck | undefined; busy: boolean; onPrepare(check: BrowserProfileExtensionUpdateCheck): void }) {
+  if (!check) return null
+  return <div className="browser-profile-extensions__update" role="status" data-extension-update={check.status}>
+    <p>{check.status === 'update-available' ? `Update available · v${check.currentVersion} → v${check.candidateVersion}` : check.status === 'current' ? 'No newer version reported by the original manifest.' : check.status === 'manual' ? 'Choose an update source' : 'Update check unavailable'}</p>
+    {check.source ? <small>{check.source.origin} · {check.source.format === 'chromium-xml' ? 'Chromium update manifest' : 'WebExtensions update manifest'}</small> : null}
+    {check.reason ? <small>{check.reason}</small> : null}
+    {check.status === 'update-available' ? <div className="browser-profile-extensions__actions"><button type="button" disabled={busy} onClick={() => onPrepare(check)}>Prepare update for review</button></div> : null}
+  </div>
 }
 function ExtensionScope({ item }: { item: Pick<BrowserProfileExtensionReview, 'source' | 'permissions' | 'sha256'> }) {
   const rows = [

@@ -863,6 +863,7 @@ const api: AgentMuxPreloadApi = {
     exportProfileBookmarks: (id, folderId, revision, operationId, destinationPath) => ipcRenderer.invoke('browser:exportProfileBookmarks', id, folderId, revision, operationId, destinationPath),
     openProfileBookmark: (id, bookmarkId, browserId, revision, operationId) => ipcRenderer.invoke('browser:openProfileBookmark', id, bookmarkId, browserId, revision, operationId),
     listProfileExtensions: (id, operationId) => ipcRenderer.invoke('browser:listProfileExtensions', id, operationId),
+    checkProfileExtensionUpdate: (id, extensionId) => ipcRenderer.invoke('browser:checkProfileExtensionUpdate', id, extensionId),
     prepareProfileExtension: (id, revision, operationId, source, extensionId) => ipcRenderer.invoke('browser:prepareProfileExtension', id, revision, operationId, source, extensionId),
     applyProfileExtension: (id, revision, reviewId) => ipcRenderer.invoke('browser:applyProfileExtension', id, revision, reviewId),
     removeProfileExtension: (id, revision, extensionId, operationId) => ipcRenderer.invoke('browser:removeProfileExtension', id, revision, extensionId, operationId),

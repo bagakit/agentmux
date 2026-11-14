@@ -2,10 +2,10 @@ import { mkdir, rename, rm } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import type { Session } from 'electron'
 import { AgentMuxError } from '@agentmux/core'
-import { parseBrowserProfileExtensionInputSource } from '@agentmux/core/control'
-import { prepareOnlineExtension } from './browser-profile-extension-online.js'
+import { parseBrowserProfileExtensionPreparationSource } from '@agentmux/core/control'
+import { compareExtensionVersions, inspectOnlineExtensionUpdate, prepareOnlineExtension } from './browser-profile-extension-online.js'
 import { mintObjectId } from '@agentmux/core/object-id'
-import type { BrowserProfileExtension, BrowserProfileExtensionReview, BrowserProfileExtensionReceipt, BrowserProfileExtensionApplication, BrowserProfileExtensionPending, BrowserProfileExtensionInputSource } from '@agentmux/core/control'
+import type { BrowserProfileExtension, BrowserProfileExtensionReview, BrowserProfileExtensionReceipt, BrowserProfileExtensionApplication, BrowserProfileExtensionPending, BrowserProfileExtensionInputSource, BrowserProfileExtensionPreparationSource, BrowserProfileExtensionUpdateCheck } from '@agentmux/core/control'
 import type { BrowserProfileExtensionRecord } from './browser-profile-extension-record.js'
 import { prepareExtensionPackage, hashExtensionDirectory, BrowserProfileExtensionPackageError, type PreparedExtensionPackage } from './browser-profile-extension-package.js'
 
@@ -21,7 +21,7 @@ export type BrowserProfileExtensionPorts = {
   session(profileId: string): Session
   existingSession(profileId: string): Session | undefined
 }
-type Preparation = { review: BrowserProfileExtensionReview; package: PreparedExtensionPackage; source: BrowserProfileExtensionInputSource }
+type Preparation = { review: BrowserProfileExtensionReview; package: PreparedExtensionPackage; source: BrowserProfileExtensionInputSource; requestedSource: BrowserProfileExtensionPreparationSource }
 const unavailable = (message: string, code = 'BROWSER_PROFILE_EXTENSION_UNAVAILABLE', detail?: unknown): never => {
   throw new AgentMuxError(message, code, detail === undefined ? undefined : JSON.stringify(detail))
 }
@@ -64,6 +64,29 @@ export class BrowserProfileExtensions {
     return { profileId, profileRevision: current.profileRevision, extensions: current.records.map(record => this.present(profileId, record)), pending: structuredClone(current.pending.filter(intent => operationId === undefined || intent.operationId === operationId)),
       ...(operationId === undefined ? {} : { receipt: current.receipts.find(receipt => receipt.operationId === operationId) ?? null }) }
   }
+  async check(profileId: string, extensionId: string): Promise<BrowserProfileExtensionUpdateCheck> {
+    const current = await this.ports.read(profileId), record = current.records.find(record => record.id === extensionId)
+    if (!record) return unavailable('The exact installed extension is unavailable in this Profile.')
+    const original = { profileId, profileRevision: current.profileRevision, extensionId, currentVersion: record.version }
+    if (current.pending.some(intent => intent.extensionId === extensionId)) return { ...original, status: 'unknown', reason: 'The original extension change remains unconfirmed. Inspect its original operation; a manifest check cannot confirm which native version is active.' }
+    // Public updateUrl is display metadata with private URL components removed.
+    // Only a retained exact manifest acquisition is an address for this explicit check.
+    if (record.acquisition?.kind !== 'update-manifest') return { ...original, status: 'manual', reason: 'This installation has no retained update manifest. Choose an explicit manifest or package to prepare an update.' }
+    try {
+      const observed = await inspectOnlineExtensionUpdate(record.acquisition)
+      const latest = await this.ports.read(profileId)
+      const same = latest.records.find(item => item.id === extensionId)
+      if (latest.pending.some(intent => intent.extensionId === extensionId)) return { ...original, status: 'unknown', reason: 'The original extension change remains unconfirmed. Inspect its original operation; a manifest check cannot confirm which native version is active.' }
+      if (latest.profileRevision !== current.profileRevision || !same || same.key !== record.key || same.sha256 !== record.sha256 || JSON.stringify(same.acquisition) !== JSON.stringify(record.acquisition)) {
+        return { ...original, status: 'unknown', reason: 'The original Profile or extension changed during the check. Read its current settings before checking or preparing again.' }
+      }
+      if (!observed.candidate) return { ...original, status: 'current' }
+      return { ...original, status: compareExtensionVersions(observed.candidate.version, record.version) > 0 ? 'update-available' : 'current',
+        candidateVersion: observed.candidate.version, source: { origin: observed.origin, format: observed.candidate.format } }
+    } catch {
+      return { ...original, status: 'unknown', reason: 'The original update manifest could not be checked. The installed extension and Profile remain; use Check explicitly to retry.' }
+    }
+  }
   /** Boot/loading facts are independent from the Browser's own network and page readiness. */
   prepare(profileId: string): Promise<void> | undefined {
     const records = this.definitions[profileId] ?? []
@@ -98,8 +121,8 @@ export class BrowserProfileExtensions {
       return this.remember(profileId, record.id, { state: 'loaded' })
     } catch { return this.remember(profileId, record.id, { state: 'failed', reason: 'The host could not load this approved package. Its original files and Profile data remain; use Load to retry.' }) }
   }
-  async review(profileId: string, expectedRevision: string, operationId: string, source: BrowserProfileExtensionInputSource, extensionId?: string): Promise<BrowserProfileExtensionReview> {
-    source = parseBrowserProfileExtensionInputSource(source)
+  async review(profileId: string, expectedRevision: string, operationId: string, source: BrowserProfileExtensionPreparationSource, extensionId?: string): Promise<BrowserProfileExtensionReview> {
+    source = parseBrowserProfileExtensionPreparationSource(source)
     const fingerprint = JSON.stringify({ profileId, expectedRevision, source, extensionId }), existing = this.preparing.get(operationId)
     if (existing) {
       if (existing.fingerprint !== fingerprint) return unavailable('This original review identity belongs to a different request.')
@@ -110,23 +133,26 @@ export class BrowserProfileExtensions {
     try { return await preparation.promise }
     finally { if (this.preparing.get(operationId) === preparation) this.preparing.delete(operationId) }
   }
-  private async prepareReview(profileId: string, expectedRevision: string, operationId: string, source: BrowserProfileExtensionInputSource, extensionId?: string): Promise<BrowserProfileExtensionReview> {
-    type Admission = { kind: 'ready'; review: BrowserProfileExtensionReview } | { kind: 'acquire'; id: string; previous?: BrowserProfileExtensionRecord }
+  private async prepareReview(profileId: string, expectedRevision: string, operationId: string, requestedSource: BrowserProfileExtensionPreparationSource, extensionId?: string): Promise<BrowserProfileExtensionReview> {
+    type Admission = { kind: 'ready'; review: BrowserProfileExtensionReview } | { kind: 'acquire'; id: string; source: BrowserProfileExtensionInputSource; previous?: BrowserProfileExtensionRecord }
     const admitted = await this.ports.change<Admission>(profileId, async () => {
       const current = await this.ports.read(profileId)
       if (current.profileRevision !== expectedRevision) return unavailable('The Profile settings changed. Read the original Profile before preparing this extension again.', 'BROWSER_PROFILE_CONFIGURATION_CONFLICT')
       const previous = extensionId ? current.records.find(record => record.id === extensionId) : undefined
       if (extensionId && !previous) return unavailable('The extension to update is unavailable in this Profile.')
+      const source = requestedSource.kind === 'installed-update' ? previous?.acquisition : requestedSource
+      if (!source || requestedSource.kind === 'installed-update' && source.kind !== 'update-manifest') return unavailable('This exact installation has no retained update manifest. Choose an explicit source; no package was acquired.')
       if (current.pending.some(intent => intent.operationId === operationId)) return unavailable('This original extension operation has a durable pending intent. Inspect it before preparing another action; it was not replayed.', 'BROWSER_PROFILE_EXTENSION_UNCONFIRMED')
       const existing = this.prepared.get(operationId)
       if (existing) {
-        if (JSON.stringify(existing.source) !== JSON.stringify(source) || existing.review.profileId !== profileId || existing.review.expectedRevision !== expectedRevision || existing.review.extensionId !== (extensionId ?? existing.review.extensionId)) return unavailable('This original review identity belongs to a different request.')
+        if (JSON.stringify(existing.requestedSource) !== JSON.stringify(requestedSource) || existing.review.profileId !== profileId || existing.review.expectedRevision !== expectedRevision || existing.review.extensionId !== (extensionId ?? existing.review.extensionId)) return unavailable('This original review identity belongs to a different request.')
         return { kind: 'ready', review: structuredClone(existing.review) }
       }
       if (current.receipts.some(receipt => receipt.operationId === operationId)) return unavailable('This original extension operation already has a durable receipt. Inspect that operation before preparing a new one.')
-      return { kind: 'acquire', id: previous?.id ?? mintObjectId(), ...(previous ? { previous: structuredClone(previous) } : {}) }
+      return { kind: 'acquire', id: previous?.id ?? mintObjectId(), source: structuredClone(source), ...(previous ? { previous: structuredClone(previous) } : {}) }
     })
     if (admitted.kind === 'ready') return admitted.review
+    const source = admitted.source
     const stagingRoot = join(this.ports.root(profileId), '.staging'), staging = join(stagingRoot, mintObjectId())
     let published = false, failure: unknown
     try {
@@ -140,11 +166,12 @@ export class BrowserProfileExtensions {
         if (current.pending.some(intent => intent.operationId === operationId)) return unavailable('This original extension operation now has an unconfirmed native intent. It was not replayed.', 'BROWSER_PROFILE_EXTENSION_UNCONFIRMED')
         if (current.receipts.some(receipt => receipt.operationId === operationId)) return unavailable('This original operation already has a durable receipt. Inspect the same operation.')
         if (current.records.some(record => record.id !== admitted.id && record.key === pkg.key)) return unavailable('This native extension identity is already installed in the Profile. Update that exact installed item instead.')
+        if (requestedSource.kind === 'installed-update' && (!previous || compareExtensionVersions(pkg.version, previous.version) <= 0)) return unavailable('This manifest has no newer version for the exact installed extension. Nothing was loaded.')
         const oldPermissions = new Set(previous ? permissionSet(previous.permissions) : [])
         const review: BrowserProfileExtensionReview = { reviewId: operationId, profileId, expectedRevision, extensionId: admitted.id, name: pkg.name, version: pkg.version,
           sha256: pkg.sha256, source: pkg.source, permissions: pkg.permissions, addedPermissions: permissionSet(pkg.permissions).filter(permission => !oldPermissions.has(permission)),
           ...(previous ? { previousVersion: previous.version } : {}) }
-        this.prepared.set(operationId, { review, package: pkg, source: structuredClone(source) }); published = true
+        this.prepared.set(operationId, { review, package: pkg, source: structuredClone(source), requestedSource: structuredClone(requestedSource) }); published = true
         return structuredClone(review)
       })
     } catch (error) { failure = error; throw error }
