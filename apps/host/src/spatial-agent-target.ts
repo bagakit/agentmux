@@ -78,7 +78,7 @@ export async function openSpatialAgentTarget(options: {
     if (!previous && !retained && (Object.keys(launch).length || Boolean(note)) && matches![0]!.creationContract?.ordinaryLaunch !== 1) throw new AgentMuxError(
       'The selected execution Core has no confirmed handler for this complete launch input. Keep this request and update or confirm that Core; no Agent or helper was started.', 'AGENT_OPEN_CONTRACT_UNCONFIRMED')
     const execution = previous?.execution ?? { hostId: sameRuntime ? 'local' : target.hostId, runtimeId: host.runtimeId,
-      workspacePath: originalAgent ? originalAgent.workspacePath : sameRuntime ? placement.workspacePath : (await host.client.hostEnvironment()).homeDirectory,
+      workspacePath: originalAgent ? originalAgent.workspacePath : sameRuntime ? placement.workspacePath : (await host.client.hostEnvironment({ agentSessionId })).agentWorkspace.workspacePath,
       workspaceId: sameRuntime ? placement.workspaceId : null, executorRevision: originalAgent?.executorRevision ?? matches![0]!.configRevision,
       ...(adoptedRoute ? { adoptedRoute } : {}) }
     if (!execution.runtimeId || !execution.executorRevision) throw new AgentMuxError('The original target admission has no confirmed execution identity. Keep its request; no new target was chosen.', 'SPATIAL_CREATION_UNCONFIRMED')
