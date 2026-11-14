@@ -39,11 +39,19 @@ function validate(review, directory, mode) {
   const actual = [...review.actualViews].sort()
   const declared = review.images.map(image => image.path).sort()
   assert.deepEqual(actual, declared, 'Every declared image must be actually viewed, with no extras')
-  const captured = (capture.images ?? []).map(image => image.path ?? image.image).filter(Boolean).sort()
+  const capturedImages = new Map()
+  for (const image of capture.images ?? []) {
+    const path = image.path ?? image.image
+    assert.ok(path, 'Every capture image needs a path')
+    assert.equal(capturedImages.has(path), false, `Capture image paths must be unique: ${path}`)
+    capturedImages.set(path, image.sha256)
+  }
+  const captured = [...capturedImages.keys()].sort()
   assert.ok(captured.length > 0, 'Capture must declare its actual image set')
   if (mode === 'desktop' || mode === 'final') assert.deepEqual(captured, desktopImages, 'Desktop capture must contain the exact complete scene set')
   assert.deepEqual(declared, captured, 'Review must cover exactly every captured image and no unrelated file')
   for (const image of review.images) {
+    assert.equal(capturedImages.get(image.path), image.sha256, `Capture PNG must match review: ${image.path}`)
     const path = resolve(receiptDirectory, image.path)
     assert.equal(sha(readFileSync(path)), image.sha256, `Reviewed PNG must be unchanged: ${image.path}`)
     assert.ok(image.conclusion, `Every image needs a concrete conclusion: ${image.path}`)
@@ -60,7 +68,7 @@ function selfTest() {
   const source = { [relative(root, sourceFile)]: sha(readFileSync(sourceFile)) }
   const sourceIdentity = sha(JSON.stringify(source))
   const receiptPath = join(directory, 'capture.json')
-  writeFileSync(receiptPath, JSON.stringify({ completed: true, execution: { exitCode: 0 }, sourceIdentity, sources: source, images: [{ path: 'node.png' }] }))
+  writeFileSync(receiptPath, JSON.stringify({ completed: true, execution: { exitCode: 0 }, sourceIdentity, sources: source, images: [{ path: 'node.png', sha256: sha(readFileSync(image)) }] }))
   const receiptSHA = sha(readFileSync(receiptPath))
   const review = {
     schema: 'agentmux.ui-selection-visual-review.v1', reviewer: 'independent-ui-reviewer', verdict: 'approved', mustFix: [], unconfirmed: ['controlled fixture only'],
@@ -77,6 +85,11 @@ function selfTest() {
   writeFileSync(image, Buffer.from('changed-image'))
   assert.throws(() => validate(review, directory), /PNG must be unchanged/)
   writeFileSync(image, Buffer.from('controlled-png-content'))
+  writeFileSync(image, Buffer.from('changed-image'))
+  review.images[0].sha256 = sha(readFileSync(image))
+  assert.throws(() => validate(review, directory), /Capture PNG must match review/)
+  writeFileSync(image, Buffer.from('controlled-png-content'))
+  review.images[0].sha256 = sha(readFileSync(image))
   review.actualViews = []
   assert.throws(() => validate(review, directory), /Every declared image must be actually viewed/)
   const nested = join(directory, 'nested')
@@ -84,7 +97,7 @@ function selfTest() {
   const nestedImage = join(nested, 'node.png')
   writeFileSync(nestedImage, Buffer.from('controlled-png-content'))
   const nestedReceiptPath = join(nested, 'capture.json')
-  writeFileSync(nestedReceiptPath, JSON.stringify({ completed: true, execution: { exitCode: 0 }, sourceIdentity, sources: source, images: [{ path: 'node.png' }] }))
+  writeFileSync(nestedReceiptPath, JSON.stringify({ completed: true, execution: { exitCode: 0 }, sourceIdentity, sources: source, images: [{ path: 'node.png', sha256: sha(readFileSync(nestedImage)) }] }))
   const nestedReview = { ...review, actualViews: ['node.png'], captureReceipt: { path: 'nested/capture.json', sha256: sha(readFileSync(nestedReceiptPath)) }, images: [{ path: 'node.png', sha256: sha(readFileSync(nestedImage)), conclusion: 'Nested receipt owns its image root' }] }
   assert.deepEqual(validate(nestedReview, directory), { reviewer: 'independent-ui-reviewer', images: 1, sourceIdentity })
   return { selfTest: 'passed', directory: relative(root, directory) }
