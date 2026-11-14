@@ -172,7 +172,8 @@ describe('Hermes provider', () => {
         approvals: Array<{ event: string }>
       }
       for (const eventName of ['pre_approval_request', 'post_approval_response']) {
-        expect(config.hooks[eventName]?.[0]?.command).toContain('agentmux-hook.js')
+        expect(config.hooks[eventName]?.[0]?.command).toContain('/bin/sh -c ')
+        expect(config.hooks[eventName]?.[0]?.command).toContain('$AGENTMUX_HOOK_RUNNER')
         expect(allowlist.approvals.some((entry) => entry.event === eventName)).toBe(true)
       }
     })
@@ -229,23 +230,20 @@ describe('Hermes provider', () => {
       expect(hook('on_session_end', { completed: true }).semanticState).toBe('done')
     })
 
-    for (const shape of ['extra', 'flat'] as const) {
-      it(`明确子 Agent 的 ${shape} 负载不贡献主会话状态或生命周期`, () => {
-        const events = ['on_session_start', 'on_session_end', 'pre_approval_request', 'pre_tool_call']
-        expect(events).toHaveLength(4)
-        for (const eventName of events) {
-          const fields = { platform: 'subagent', completed: true, interrupted: false, failed: false }
-          const observed = shape === 'extra'
-            ? hook(eventName, fields, { session_id: 'native-delegate' })
-            : hook(eventName, {}, { session_id: 'native-delegate', ...fields })
-          expect(observed.semanticState).toBe('unknown')
-          expect(observed.lifecycleEvent).toBeNull()
-          expect(observed.nativeHandle).toBeUndefined()
-          expect(observed.interaction).toBeUndefined()
-          expect(observed.timeline.length).toBeGreaterThan(0)
-        }
-      })
-    }
+    it('明确子 Agent 的原生 extra 负载不贡献主会话状态或生命周期', () => {
+      const events = ['on_session_start', 'on_session_end', 'pre_approval_request', 'pre_tool_call']
+      expect(events).toHaveLength(4)
+      for (const eventName of events) {
+        const fields = { platform: 'subagent', completed: true, interrupted: false, failed: false }
+        // Native _serialize_payload always places platform in extra.
+        const observed = hook(eventName, fields, { session_id: 'native-delegate' })
+        expect(observed.semanticState).toBe('unknown')
+        expect(observed.lifecycleEvent).toBeNull()
+        expect(observed.nativeHandle).toBeUndefined()
+        expect(observed.interaction).toBeUndefined()
+        expect(observed.timeline.length).toBeGreaterThan(0)
+      }
+    })
 
     it('未装的事件到达时保持可诊断，绝不伪造状态', () => {
       for (const eventName of ['transform_llm_output', 'pre_verify', 'kanban_task_claimed', 'subagent_start']) {
@@ -283,6 +281,7 @@ describe('Hermes provider', () => {
       )
       expect(configCommands.size).toBe(1)
       expect(new Set(allowlist.approvals.map((entry) => entry.command))).toEqual(configCommands)
+      expect(plan?.retainPreviousDeclarations).toBe(true)
     })
 
     it('不装那些会改写内容或跑在别的进程里的事件', () => {
@@ -308,6 +307,8 @@ describe('Hermes provider', () => {
       expect(hermes.catalog.capabilities.providerResume).toBe(false)
       // approval 事件是 observers only（Hermes 明说返回值被忽略），故只观察不应答。
       expect(hermes.catalog.capabilities.permission).toBe('observe')
+      expect(HERMES_HOOKS.retainedRuntime).toBe(true)
+      expect(HERMES_HOOKS.permissionDecision).toBeUndefined()
       expect(hermes.catalog.capabilities.usage).toBeUndefined()
     })
   })

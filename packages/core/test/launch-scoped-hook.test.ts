@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
-import { launchScopedHookCommand } from '../src/providers/shared.js'
+import { runScopedHookCommand } from '../src/providers/shared.js'
 
 const runner = fileURLToPath(new URL('../bin/agentmux-hook.js', import.meta.url))
 
@@ -58,7 +58,7 @@ const payload = JSON.stringify({ hook_event_name: 'Stop', session_id: 'private-o
 describe('launch-scoped Hooks through the real Hook entry', () => {
   it('runs the generated launch command through its env-located runner, including paths with shell characters', async () => {
     await withCapture(async (env, bodies) => {
-      const result = await invoke('/bin/sh', ['-c', launchScopedHookCommand('claude')],
+      const result = await invoke('/bin/sh', ['-c', runScopedHookCommand('claude')],
         { ...env, AGENTMUX_HOOK_LAUNCH_SCOPED: '1' }, payload)
       expect(result).toEqual({ code: 0, signal: null, stdout: '{}\n', stderr: '' })
       expect(bodies).toHaveLength(1)
@@ -86,7 +86,7 @@ describe('launch-scoped Hooks through the real Hook entry', () => {
 
   it('keeps a launch declaration passive outside a Run whose Core provides its runner', async () => {
     await withCapture(async (env, bodies) => {
-      const result = await invoke('/bin/sh', ['-c', launchScopedHookCommand('claude')], {
+      const result = await invoke('/bin/sh', ['-c', runScopedHookCommand('claude')], {
         PATH: env.PATH, HOME: env.HOME, AGENTMUX_STATE_DIRECTORY: env.AGENTMUX_STATE_DIRECTORY
       }, payload)
       expect(result).toEqual({ code: 0, signal: null, stdout: '{}\n', stderr: '' })

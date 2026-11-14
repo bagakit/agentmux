@@ -11,7 +11,7 @@ const changes: Record<string, [string, string, string]> = {
     '|| [ "\\${AGENTMUX_PROVIDER_ID-}" != ${shellQuote(providerId)} ]', ''],
   'persist-installation-path': ['packages/core/src/providers/shared.ts',
     'return `/bin/sh -c ${shellQuote(script)} amux-hook`',
-    'return `ELECTRON_RUN_AS_NODE=1 AGENTMUX_HOOK_PROVIDER=${shellQuote(providerId)} ${shellQuote(process.execPath)} ${shellQuote(resolveCoreBinPath("agentmux-hook.js"))}`'],
+    'return `ELECTRON_RUN_AS_NODE=1 AGENTMUX_HOOK_PROVIDER=${shellQuote(providerId)} ${shellQuote(process.execPath)} ${shellQuote("/private/volatile-install/agentmux-hook.js")}`'],
   'retire-live-callback': ['packages/core/src/managed-hook-installer.ts',
     'prior?.owner?.content, plan.retainPreviousDeclarations)', 'prior?.owner?.content, false)'],
   'forget-owned-callback': ['packages/core/src/managed-hook-installer.ts',

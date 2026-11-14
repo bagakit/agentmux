@@ -33,6 +33,7 @@ describe('Hook admission, receipt and observation recovery', () => {
         { status: attempts.length === 1 ? 429 : 204, headers: { 'retry-after': '0.25' } })
     }) as typeof fetch
     process.env.AGENTMUX_HOOK_URL = 'http://127.0.0.1/isolated'; process.env.AGENTMUX_HOOK_TOKEN = 'isolated-token'
+    vi.stubEnv('AGENTMUX_ENV', '1'); vi.stubEnv('AGENTMUX_PROVIDER_ID', provider)
     try {
       if (provider === 'pi') {
         const handlers = new Map<string, (event: unknown, ctx: unknown) => void>()
@@ -229,8 +230,7 @@ describe('Hook admission, receipt and observation recovery', () => {
       expect(published).toEqual([expect.objectContaining({ session: expect.objectContaining({ agentSessionId: 'sdk-session', hookDeliveryObservation: delivery }) })])
       expect(client.agentSession('sdk-session').hookDeliveryObservation).toEqual(delivery)
       expect((await client.statusAgent('sdk-session')).session.hookDeliveryObservation).toEqual(delivery)
-      await vi.waitFor(() => expect(rpcEvents).toHaveLength(2), { timeout: 1_000, interval: 5 })
-      expect(rpcEvents).toEqual(events)
+      await vi.waitFor(() => expect(rpcEvents).toEqual(events), { timeout: 1_000, interval: 5 })
       expect(await store.load()).toEqual([expect.objectContaining({ agentSessionId: 'sdk-session', run: { runId: 'run-sdk-session' } })])
       expect(JSON.stringify(await store.load())).not.toContain('hookDeliveryObservation')
       expect(h.inner.kernel.stop).not.toHaveBeenCalled()

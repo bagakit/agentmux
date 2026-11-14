@@ -309,7 +309,7 @@ describe('Cursor provider', () => {
         // Cursor 的负载里**没有** hook_event_name（那个键只在它自己的遥测标签里）。少了这个旗标，
         // 每条事件到 Core 都会读成 'unknown'——状态与时间轴双双失效。
         expect(definitions[0]!.command).toContain(`--event ${eventName}`)
-        expect(definitions[0]!.command).toContain('agentmux-hook.js')
+        expect(definitions[0]!.command).toContain('$AGENTMUX_HOOK_RUNNER')
       }
     })
 
@@ -346,7 +346,7 @@ describe('Cursor provider', () => {
       expect(merged.version).toBe(1)
       // 用户自己在同一事件上的 hook 留着，且排在我们前面。
       expect(merged.hooks.stop![0]!.command).toBe(fixturePath("usr/local/bin/my-own-notify.sh"))
-      expect(merged.hooks.stop!.some((entry) => entry.command.includes('agentmux-hook.js'))).toBe(true)
+      expect(merged.hooks.stop!.some((entry) => entry.command.includes('$AGENTMUX_HOOK_RUNNER'))).toBe(true)
       // 我们没接的事件桶原样保留。
       expect(merged.hooks.afterFileEdit![0]!.command).toBe(fixturePath("usr/local/bin/format.sh"))
     })

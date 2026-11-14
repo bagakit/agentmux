@@ -83,7 +83,7 @@ describe('Droid provider', () => {
       for (const eventName of DROID_HOOK_EVENTS) {
         const entry = config[eventName]![0]!
         expect(entry.hooks[0]!.type).toBe('command')
-        expect(entry.hooks[0]!.command).toContain('agentmux-hook.js')
+        expect(entry.hooks[0]!.command).toContain('$AGENTMUX_HOOK_RUNNER')
         // 从 SSOT 常量派生，不再手抄一份 `10`——bump 常量不该把这条无辜打红（那正是「编码了漂移」的旧写法）。
         // 值仍流经 provider 代码→JSON→parse→这里，所以 provider 里写死错值或丢掉 timeout 照样红。
         expect(entry.hooks[0]!.timeout).toBe(HOOK_COMMAND_TIMEOUT_SECONDS)
@@ -119,7 +119,7 @@ describe('Droid provider', () => {
       expect(merged.PreToolUse[0].hooks[0].command).toBe(fixturePath("home/me/audit.sh"))
       expect(merged.hooksDisabled).toBe(false)
       expect(merged).not.toHaveProperty('hooks')
-      expect(merged.Stop[0].hooks[0].command).toContain('agentmux-hook.js')
+      expect(merged.Stop[0].hooks[0].command).toContain('$AGENTMUX_HOOK_RUNNER')
       expect(mutation.merge).toEqual({ kind: 'json-root-managed-events' })
     })
 

@@ -660,7 +660,7 @@ describe('built-in agent providers', () => {
     expect(bundle['PreToolUse']?.[0]?.matcher).toBe('*')
     expect(bundle['PreToolUse']?.[0]?.hooks?.[0]).toMatchObject({ type: 'command' })
     // The shared ~/.gemini file must be merged, not overwritten — AgentMux owns only its bundle key.
-    expect(mutation?.merge).toEqual({ kind: 'json-owned-key', key: 'agentmux-status' })
+    expect(mutation?.merge).toEqual({ kind: 'json-managed-events', key: 'agentmux-status' })
   })
 
   it('declares Codex Hooks on the launch, without a workspace config plan', () => {
@@ -743,22 +743,23 @@ describe('built-in agent providers', () => {
       }
     )['agentmux-status']['PreInvocation']?.[0]?.command ?? ''
     expect(antigravityCommand).toContain('ELECTRON_RUN_AS_NODE=1')
-    expect(antigravityCommand).toContain("AGENTMUX_HOOK_PROVIDER='antigravity'")
+    expect(antigravityCommand).toContain('AGENTMUX_HOOK_PROVIDER=')
+    expect(antigravityCommand).toContain('antigravity')
+    expect(antigravityCommand).not.toContain(process.execPath)
   })
 
-  it('prefixes /usr/bin/env for hermes so the env assignments survive shlex.split under shell=False', () => {
-    // hermes execs a shell hook as `subprocess.run(shlex.split(command), shell=False)`, so the bare
-    // `VAR=val exec …` prefix the other providers use would make `ELECTRON_RUN_AS_NODE=1` argv[0].
-    // `/usr/bin/env` parses the NAME=value operands itself, then execs the interpreter with them applied.
+  it('declares an explicit interpreter argv for Hermes shell=False and the same exact native approval pair', () => {
     const command = (
       JSON.parse((new AgentProviderRegistry().get("hermes").planManagedHooks!({ workspacePath: fixturePath("unused-workspace"), env: { HERMES_HOME: fixturePath("tmp/fake-home") } })!).mutations[0]?.content ?? '{}') as {
         hooks: Record<string, Array<{ command?: string }>>
       }
     ).hooks['pre_tool_call']?.[0]?.command ?? ''
-    expect(command.startsWith('/usr/bin/env ')).toBe(true)
+    expect(command.startsWith('/bin/sh -c ')).toBe(true)
     expect(command).toContain('ELECTRON_RUN_AS_NODE=1')
-    expect(command).toContain("AGENTMUX_HOOK_PROVIDER='hermes'")
-    expect(command).toContain('agentmux-hook.js')
+    expect(command).toContain('AGENTMUX_HOOK_PROVIDER=')
+    expect(command).toContain('hermes')
+    expect(command).toContain('$AGENTMUX_HOOK_NODE')
+    expect(command).not.toContain('agentmux-hook.js')
     // The allowlist approval must gate the SAME command string, byte-for-byte — hermes matches (event,
     // command) exactly, so any divergence would leave the hook un-approved and silently skipped.
     const approvals = (

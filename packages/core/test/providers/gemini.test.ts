@@ -179,7 +179,7 @@ describe('Gemini provider', () => {
       // 用户自己在同一事件上的 hook 必须留着，且排在我们前面。
       const afterAgent = merged.hooks.AfterAgent as Array<{ hooks: Array<{ command: string }> }>
       expect(afterAgent[0]!.hooks[0]!.command).toBe(fixturePath("usr/local/bin/my-own-notify.sh"))
-      expect(afterAgent.some((d) => d.hooks.some((h) => h.command.includes('agentmux-hook.js')))).toBe(true)
+      expect(afterAgent.some((d) => d.hooks.some((h) => h.command.includes('$AGENTMUX_HOOK_RUNNER')))).toBe(true)
       // 我们没接的事件桶原样保留。
       expect(merged.hooks.PreCompress[0].hooks[0].command).toBe(fixturePath("usr/local/bin/archive.sh"))
     })

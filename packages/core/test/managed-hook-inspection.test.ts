@@ -36,7 +36,7 @@ describe('fresh managed Hook disk observations', () => {
   it('observes every existing managed Provider plan and every companion without a second path registry', async () => {
     const providers = BUILT_IN_AGENT_PROVIDERS.filter(provider => provider.catalog.hookStrategy.kind === 'native' && provider.catalog.hookStrategy.installation === 'explicit-managed')
     expect(providers.length).toBeGreaterThan(0)
-    const plans = providers.map(provider => (new AgentProviderRegistry().get(provider.id).planManagedHooks?.({ workspacePath: root, env: {}, endpoint: { url: 'http://127.0.0.1:65535/hook', token: 'private-fixture-token' } }) ?? null)!)
+    const plans = providers.map(provider => (new AgentProviderRegistry().get(provider.id).planManagedHooks?.({ workspacePath: root, env: { HOME: root }, endpoint: { url: 'http://127.0.0.1:65535/hook', token: 'private-fixture-token' } }) ?? null)!)
     expect(plans.length).toBe(providers.length)
     for (const resolved of plans) {
       expect(resolved).not.toBeNull()
@@ -86,7 +86,7 @@ describe('fresh managed Hook disk observations', () => {
   })
 
   it('observes multi-file companion loss without creating any missing target, directory or receipt', async () => {
-    const resolved = (new AgentProviderRegistry().get('hermes').planManagedHooks?.({ workspacePath: root, env: {} }) ?? null)!
+    const resolved = (new AgentProviderRegistry().get('hermes').planManagedHooks?.({ workspacePath: root, env: { HOME: root } }) ?? null)!
     expect(resolved.mutations.length).toBe(2)
     for (let i = 0; i < 6; i++) expect((await installer.inspect(resolved)).status).toBe('not_installed')
     expect(await readdir(root)).toEqual([])
@@ -124,7 +124,7 @@ describe('fresh managed Hook disk observations', () => {
       : value && typeof value === 'object' ? Object.fromEntries(Object.entries(value).reverse().map(([key, entry]) => [key, reverse(entry)])) : value
     await writeFile(jsonPlan.mutations[0]!.path, JSON.stringify(reverse(JSON.parse(jsonPlan.mutations[0]!.content))))
     expect((await installer.inspect(jsonPlan)).status).toBe('installed')
-    const hermes = (new AgentProviderRegistry().get('hermes').planManagedHooks?.({ workspacePath: root, env: {} }) ?? null)!
+    const hermes = (new AgentProviderRegistry().get('hermes').planManagedHooks?.({ workspacePath: root, env: { HOME: root } }) ?? null)!
     await installer.ensure(hermes)
     const yaml = parseDocument(await readFile(hermes.mutations[0]!.path, 'utf8'))
     yaml.commentBefore = ' user comment'

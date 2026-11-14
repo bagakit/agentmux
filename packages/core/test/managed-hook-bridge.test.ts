@@ -5,13 +5,14 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { runScopedHookCommand, managedHookCommand } from '../src/providers/shared.js'
+import { runScopedHookCommand } from '../src/providers/shared.js'
 import { hookResponseFor } from '../src/hook-passive-response.js'
 import { AgentManagedHookInstaller } from '../src/managed-hook-installer.js'
 import { createGrokManagedHookPlan } from '../src/providers/grok.js'
 
 const worker = fileURLToPath(new URL('../dist/agentmux-hook.mjs', import.meta.url))
 const roots: string[] = []
+const historicalCommand = "ELECTRON_RUN_AS_NODE=1 AGENTMUX_HOOK_PROVIDER='grok' '/private/retired-app/node' '/private/retired-app/agentmux-hook.js'"
 afterEach(async () => { for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true }); vi.restoreAllMocks() })
 type Body = { receiptId: string; eventName: string; payload: Record<string, unknown> }
 async function sink(mode: 'observer' | 'decision' | 'disconnect' = 'observer', decision: Record<string, unknown> = {}) {
@@ -137,7 +138,7 @@ describe('stable native Hook bridge and original Run environment', () => {
     const mutation = plan.mutations[0]!
     const initial = JSON.parse(mutation.content)
     for (const definitions of Object.values(initial.hooks) as Array<Array<{ hooks: Array<{ command: string }> }>>) {
-      for (const definition of definitions) for (const hook of definition.hooks) hook.command = managedHookCommand('grok')
+      for (const definition of definitions) for (const hook of definition.hooks) hook.command = historicalCommand
     }
     const original = new AgentManagedHookInstaller(join(root, 'owner-a'))
     await original.ensure({ providerId: 'grok', mutations: [{ ...mutation, content: JSON.stringify(initial) }] })
@@ -151,7 +152,7 @@ describe('stable native Hook bridge and original Run environment', () => {
     expect(Object.keys(retainedOwnership.hooks).length).toBeGreaterThan(0)
     for (const definitions of Object.values(retainedOwnership.hooks) as Array<Array<{ hooks: Array<{ command: string }> }>>) {
       expect(definitions.flatMap(definition => definition.hooks.map(hook => hook.command))).toEqual([
-        managedHookCommand('grok'), runScopedHookCommand('grok')
+        historicalCommand, runScopedHookCommand('grok')
       ])
     }
     const second = new AgentManagedHookInstaller(join(root, 'owner-b'))
@@ -166,7 +167,7 @@ describe('stable native Hook bridge and original Run environment', () => {
     expect(Object.keys(actual.hooks).length).toBeGreaterThan(0)
     for (const definitions of Object.values(actual.hooks) as Array<Array<{ hooks: Array<{ command: string }> }>>) {
       expect(definitions.flatMap(definition => definition.hooks.map(hook => hook.command))).toEqual([
-        managedHookCommand('grok'), runScopedHookCommand('grok')
+        historicalCommand, runScopedHookCommand('grok')
       ])
     }
   })

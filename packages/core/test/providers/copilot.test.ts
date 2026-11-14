@@ -90,7 +90,7 @@ describe('Copilot provider', () => {
       for (const eventName of COPILOT_HOOK_EVENTS) {
         const entry = config.hooks[eventName]![0]!
         expect(entry.hooks[0]!.type).toBe('command')
-        expect(entry.hooks[0]!.command).toContain('agentmux-hook.js')
+        expect(entry.hooks[0]!.command).toContain('$AGENTMUX_HOOK_RUNNER')
         // 从 SSOT 常量派生，不再手抄 `10`——bump 常量不该把这条无辜打红。值仍流经 provider→JSON→parse，
         // 故 provider 里写死错值或丢 timeoutSec 照样红。字段名仍断言是 timeoutSec（下一行守它不被抄成 timeout）。
         expect(entry.hooks[0]!.timeoutSec).toBe(HOOK_COMMAND_TIMEOUT_SECONDS)
@@ -127,7 +127,7 @@ describe('Copilot provider', () => {
       expect(mutation!.path).not.toContain('config.json')
       expect(mutation!.path).not.toContain('.github')
       // 独占文件 => 无合并策略。有了它反而说明有人以为这份文件是共享的。
-      expect(mutation!.merge).toBeUndefined()
+      expect(mutation!.merge).toEqual({ kind: 'json-managed-events' })
     })
 
     it('COPILOT_HOME 被尊重，空串等于没设', () => {

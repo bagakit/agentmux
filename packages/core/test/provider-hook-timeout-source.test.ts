@@ -185,6 +185,12 @@ function originalSymbol(checker: ts.TypeChecker, symbol: ts.Symbol | undefined):
   return symbol && symbol.flags & ts.SymbolFlags.Alias ? checker.getAliasedSymbol(symbol) : symbol
 }
 
+function referencesSymbol(checker: ts.TypeChecker, node: ts.Node, target: ts.Symbol | undefined): boolean {
+  if (!target) return false
+  if (originalSymbol(checker, checker.getSymbolAtLocation(node)) === target) return true
+  return node.getChildren().some(child => referencesSymbol(checker, child, target))
+}
+
 /** 建一个覆盖 shared.ts 的真 Program。可选地在内存里替换它的源码，用来跑「注入变异」自检。 */
 function programForShared(sourceOverride?: string): CheckerCtx {
   const configPath = ts.findConfigFile(join(here, '..'), ts.sys.fileExists, 'tsconfig.json')
@@ -242,8 +248,7 @@ function analyzeHelper(ctx: CheckerCtx): {
         for (const prop of obj.properties) {
           if (ts.isPropertyAssignment(prop)) {
             result.valueKind = ts.SyntaxKind[prop.initializer.kind]
-            const valueSymbol = originalSymbol(checker, checker.getSymbolAtLocation(prop.initializer))
-            result.valueIsTargetSymbol = !!valueSymbol && !!targetSymbol && valueSymbol === targetSymbol
+            result.valueIsTargetSymbol = referencesSymbol(checker, prop.initializer, targetSymbol)
             if (ts.isComputedPropertyName(prop.name) && ts.isElementAccessExpression(prop.name.expression)) {
               const base = prop.name.expression.expression
               result.keyIndexesFieldMap = ts.isIdentifier(base) && base.text === FIELD_MAP_NAME
@@ -330,8 +335,7 @@ function badComputedKeyTimeoutSites(overrides?: ReadonlyMap<string, string>): {
       if (ts.isPropertyAssignment(node) && ts.isComputedPropertyName(node.name)) {
         if (keyTypeIsForbidden(checker, node.name.expression)) {
           total += 1
-          const valueSymbol = originalSymbol(checker, checker.getSymbolAtLocation(node.initializer))
-          const valueIsSSOT = !!valueSymbol && !!targetSymbol && valueSymbol === targetSymbol
+          const valueIsSSOT = referencesSymbol(checker, node.initializer, targetSymbol)
           if (!valueIsSSOT) {
             offenders.push({
               file: path.split('/').slice(-1)[0]!,
@@ -469,7 +473,7 @@ describe('受管 Hook 超时只有一个 SSOT——值与键都是（F6）', () 
     const geminiPath = join(providersDir, 'gemini.ts')
     const original = readFileSync(geminiPath, 'utf8')
     const mutated = `import { ${FIELD_MAP_NAME} } from './shared.js'\n` + original
-      .replace(`...${HELPER_NAME}('gemini')`, `[${FIELD_MAP_NAME}['gemini']]: 10`)
+      .replace(`...${HELPER_NAME}('gemini', 'milliseconds')`, `[${FIELD_MAP_NAME}['gemini']]: 10`)
     expect(mutated, '注入替换没生效——被测锚点文本变了').not.toBe(original)
     // 判据 A 的 AST 扫描对这种非字面量计算键失明（这正是需要判据 A2 的原因）：
     expect(forbiddenKeyValues(parse(geminiPath, mutated), geminiPath), '判据 A 本不该看见非字面量计算键').toEqual([])
@@ -484,10 +488,10 @@ describe('受管 Hook 超时只有一个 SSOT——值与键都是（F6）', () 
     const original = readFileSync(geminiPath, 'utf8')
     const mutated = original
       .replace(
-        `  const command = managedHookCommand('gemini')`,
-        `  const command = managedHookCommand('gemini')\n  const GEMINI_TIMEOUT_KEY: 'timeout' = 'timeout'`
+        `  const command = runScopedHookCommand('gemini')`,
+        `  const command = runScopedHookCommand('gemini')\n  const GEMINI_TIMEOUT_KEY: 'timeout' = 'timeout'`
       )
-      .replace(`...${HELPER_NAME}('gemini')`, `[GEMINI_TIMEOUT_KEY]: 10`)
+      .replace(`...${HELPER_NAME}('gemini', 'milliseconds')`, `[GEMINI_TIMEOUT_KEY]: 10`)
     expect(mutated, '注入替换没生效——被测锚点文本变了').not.toBe(original)
     expect(forbiddenKeyValues(parse(geminiPath, mutated), geminiPath), '判据 A 本不该看见非字面量计算键').toEqual([])
     const { offenders } = badComputedKeyTimeoutSites(new Map([[geminiPath, mutated]]))
@@ -513,7 +517,7 @@ describe('受管 Hook 超时只有一个 SSOT——值与键都是（F6）', () 
 
   it('自检 B2：把 helper 的值内联成字面量 10，判据 B 必红（行为等价挡不住、类型检查器挡得住）', () => {
     const original = readFileSync(sharedTsPath, 'utf8')
-    const anchor = `{ [${FIELD_MAP_NAME}[providerId]]: ${CONST_NAME} }`
+    const anchor = `{ [${FIELD_MAP_NAME}[providerId]]: unit === 'milliseconds' ? ${CONST_NAME} * 1_000 : ${CONST_NAME} }`
     const mutated = original.replace(anchor, `{ [${FIELD_MAP_NAME}[providerId]]: 10 }`)
     expect(mutated, `注入替换没生效——helper 返回式的锚点文本变了（找的是 \`${anchor}\`）`).not.toBe(original)
     const ctx = programForShared(mutated)
@@ -562,6 +566,7 @@ describe('受管 Hook 超时只有一个 SSOT——值与键都是（F6）', () 
     expect(hookCommandTimeout('copilot')).toEqual({ timeoutSec: HOOK_COMMAND_TIMEOUT_SECONDS })
     expect(hookCommandTimeout('claude')).toEqual({ timeout: HOOK_COMMAND_TIMEOUT_SECONDS })
     expect(hookCommandTimeout('cursor')).toEqual({ timeout: HOOK_COMMAND_TIMEOUT_SECONDS })
+    expect(hookCommandTimeout('gemini', 'milliseconds')).toEqual({ timeout: HOOK_COMMAND_TIMEOUT_SECONDS * 1_000 })
     // copilot 的键确实与其余家不同——这道分歧是被保留的正当差异，不是漂移。
     expect(Object.keys(hookCommandTimeout('copilot'))).not.toEqual(Object.keys(hookCommandTimeout('claude')))
   })
@@ -671,6 +676,7 @@ function planCommandObjects(providerId: string): {
       continue
     }
     collectCommandBearing(document, providerId, mutation.path, parsed)
+    if (providerId === 'gemini') for (const entry of parsed) entry.nativeTimeout = HOOK_COMMAND_TIMEOUT_SECONDS * 1_000
     if (mutation.path === 'native-session-flags') {
       const hooks = (document as { hooks: Record<string, unknown> }).hooks
       for (const [event, definitions] of Object.entries(hooks)) {
