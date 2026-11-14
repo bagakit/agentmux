@@ -53,6 +53,7 @@ async function until<T>(label: string, read: () => Promise<T> | T, budgetMs = 20
   throw new Error('Timed out: ' + label)
 }
 function check(name: string, value: unknown, details: Record<string, unknown> = {}): asserts value {
+  process.stdout.write('capture-live check: ' + name + '\n')
   receipt.checks.push({ name, passed: Boolean(value), ...details })
   assert.ok(value, name)
 }
@@ -162,8 +163,11 @@ async function openCapture(background: CaptureBackground, phase: string) {
 }
 async function cancelCapture(capture: { outcome: Promise<any>; overlays: BrowserWindow[]; inputs: CaptureSurfaceInput[] }): Promise<void> {
   const target = capture.overlays[0]!, input = capture.inputs[0]!
-  await target.webContents.executeJavaScript(`window.captureSurface.cancel(${JSON.stringify(input.requestId)})`)
-    .catch(error => { if (!target.isDestroyed()) throw error })
+  process.stdout.write('capture-live stage: preload cancel begin\n')
+  // Destroying this exact Renderer is the expected cancellation; only Main's outcome is the operation receipt.
+  await Promise.race([capture.outcome, target.webContents.executeJavaScript(`window.captureSurface.cancel(${JSON.stringify(input.requestId)})`)
+    .catch(error => { if (!target.isDestroyed()) throw error })])
+  process.stdout.write('capture-live stage: preload cancel settled\n')
   assert.deepEqual(await capture.outcome, { state: 'cancelled' })
   check('cancellation destroys every real overlay', capture.overlays.every(window => window.isDestroyed()))
   await until('the original visible host regains real focus', () => host!.isFocused() && app.isActive())
@@ -209,7 +213,9 @@ async function run(): Promise<void> {
   for (const overlay of initial.overlays) {
     await overlay.webContents.executeJavaScript(`(()=>{const marker=document.createElement('div');marker.id='capture-live-overlay-marker';marker.style='position:fixed;left:20px;top:20px;width:96px;height:96px;background:#00ff9d;pointer-events:none;z-index:2147483647';document.body.append(marker);return true})()`)
     await painted(overlay)
+    process.stdout.write('capture-live stage: capture protected overlay begin\n')
     const own = (await overlay.webContents.capturePage()).toPNG().toString('base64')
+    process.stdout.write('capture-live stage: capture protected overlay end\n')
     const image = nativeImage.createFromBuffer(Buffer.from(own, 'base64')), size = image.getSize()
     const marker = colorPixels(own, { x: 0, y: 0, width: size.width, height: size.height }, 'overlay-marker')
     check('the unique overlay marker actually painted in its real Renderer', marker.matches > 100, marker)
@@ -217,7 +223,9 @@ async function run(): Promise<void> {
   await host.webContents.executeJavaScript(`document.body.style.background='#00c8ff'`)
   await painted(host)
   await wait(150)
+  process.stdout.write('capture-live stage: probe included after overlay paint\n')
   const visibleIncluded = await native.captureDisplays({ includeHostWindows: true })
+  process.stdout.write('capture-live stage: probe excluded after overlay paint\n')
   const visibleExcluded = await native.captureDisplays({ includeHostWindows: false })
   for (const [label, frames] of [['included', visibleIncluded], ['excluded', visibleExcluded]] as const) {
     for (const frame of frames.displays) {
@@ -239,10 +247,12 @@ async function run(): Promise<void> {
   check('background probes do not request new CaptureSurface exposures', nativeResults.length === 2)
   check('all real hosts remain untouched after background probes', exactHostOpacity())
   await cancelCapture(initial)
+  process.stdout.write('capture-live stage: initial lifecycle cancelled\n')
   receipt.cases.push({ label: 'lifecycle', displays: initial.overlays.length, initialIncluded, initialExcluded,
     changedIncluded, recursiveIncluded, changedExcluded, recursiveExcluded })
 
   currentPhase = 'cancelled-old'
+  process.stdout.write('capture-live stage: begin cancelled old request\n')
   created = []
   let captureError: unknown
   const oldOutcome = surface.present({ background: 'included', attachToDraft: false, expandable: false, returnFocus: false,
@@ -258,6 +268,7 @@ async function run(): Promise<void> {
   assert.deepEqual(await oldOutcome, { state: 'cancelled' })
   check('early cancellation destroys every old real overlay', oldOverlays.every(window => window.isDestroyed()))
   const replacement = await openCapture('included', 'replacement')
+  process.stdout.write('capture-live stage: replacement opened; release old result\n')
   const requestIds = replacement.inputs.map(input => input.requestId)
   const callsBeforeLateRelease = receipt.nativeCalls.length
   releaseHeld?.(); releaseHeld = undefined
