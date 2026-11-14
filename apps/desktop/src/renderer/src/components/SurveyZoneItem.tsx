@@ -14,12 +14,13 @@ const ThemeObjectAgentIcon = semanticIconComponent('object.agent')
 const ThemeActionAddIcon = semanticIconComponent('action.create')
 const ThemeObjectBrowserIcon = semanticIconComponent('object.browser')
 const ThemeObjectLauncherIcon = semanticIconComponent('object.launcher')
+const ThemeActionCloseIcon = semanticIconComponent('action.close')
 
 
 export type SurveyItemNameDraft = { value: string; focusOnMount: boolean; revision: { revision: number }; selection: { start: number; end: number; direction: 'forward' | 'backward' | 'none' } | null }
 
 /** Both navigation and shortcuts address this row’s original Zone. */
-export function SurveyZoneItem({ zone, title, glyph, selected, activity, editing = false, visible = true, tabColumns, options, dragHandle, nameDraft, onRename, onEdit, onSelect, onNewNote, onNewAgent, onNewBrowser, onNewTab, onContextMenu }: {
+export function SurveyZoneItem({ zone, title, glyph, selected, activity, editing = false, visible = true, showTitle = true, tabColumns, options, dragHandle, nameDraft, onRename, onEdit, onSelect, onNewNote, onNewAgent, onNewBrowser, onNewTab, onCloseSingleTab, onContextMenu }: {
   zone: AgentMuxZoneFact
   title: string
   glyph: ReactNode
@@ -27,6 +28,7 @@ export function SurveyZoneItem({ zone, title, glyph, selected, activity, editing
   activity: ReactNode
   editing?: boolean
   visible?: boolean
+  showTitle?: boolean
   tabColumns?: ReactNode
   options?: ReactNode
   dragHandle?: ReactNode
@@ -37,6 +39,7 @@ export function SurveyZoneItem({ zone, title, glyph, selected, activity, editing
   onNewAgent?(zoneId: string): void
   onNewBrowser?(zoneId: string): void
   onNewTab?(zoneId: string): void
+  onCloseSingleTab?: (() => void) | undefined
   onContextMenu?(button: HTMLElement): void
   onSelect(zoneId: string): void
 }) {
@@ -63,7 +66,18 @@ export function SurveyZoneItem({ zone, title, glyph, selected, activity, editing
       <strong>{title}</strong>
       <span className="survey-item-meta"><span className="survey-item-activity" aria-label={`Activity in ${title}`}>{activity}</span></span>
     </button>
-  const row = <div className="survey-item-row" data-survey-zone-id={zone.zoneId} data-selected={selected}>
+  const compact = !showTitle && Boolean(tabColumns) && !editing
+  const row = <div className="survey-item-row" data-survey-zone-id={zone.zoneId} data-selected={selected} data-headerless={compact}
+    role={compact ? 'group' : undefined} aria-label={compact ? title : undefined}
+    onClick={event => { if (compact && event.target === event.currentTarget) onSelect(zone.zoneId) }} onKeyDown={event => {
+      if (!compact) return
+      if (event.key === 'F2' && onRename) { event.preventDefault(); beginEdit() }
+      if (onContextMenu && (event.key === 'ContextMenu' || event.key === 'F10' && event.shiftKey)) {
+        event.preventDefault()
+        const target = event.target as HTMLElement, rect = target.getBoundingClientRect()
+        target.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2, clientX: rect.left, clientY: rect.bottom }))
+      }
+    }}>
     {!editing ? dragHandle : null}
     {editing ? <form className="survey-item-name" onSubmit={async event => { event.preventDefault(); if (saving.current) return; saving.current = true; const generation = editGeneration.current, baseline = draft.revision; try { if (await onRename?.(draft.value, baseline.revision) && draft.revision === baseline) { ++baseline.revision; if (generation === editGeneration.current) { ++editGeneration.current; onEdit?.(false) } } } finally { saving.current = false } }}>
       <TextInput autoFocus={nameDraft?.focusOnMount ?? true} aria-label="Exploration name" value={draft.value} placeholder="Name this exploration" onChange={event => { ++editGeneration.current; setDraft(event.target.value) }} onFocus={event => {
@@ -78,8 +92,9 @@ export function SurveyZoneItem({ zone, title, glyph, selected, activity, editing
         onKeyDown={event => { if (event.key === 'Escape') { event.preventDefault(); ++editGeneration.current; onEdit?.(false) } }} />
       <button type="submit" aria-label="Save exploration name"><ThemeActionConfirmIcon size={12} /></button>
       <button type="button" aria-label="Cancel rename" onClick={() => { ++editGeneration.current; onEdit?.(false) }}><ThemeActionCancelIcon size={12} /></button>
-    </form> : item}
+    </form> : compact ? null : item}
     {!editing ? tabColumns : null}
+    {compact ? <span className="survey-item-compact-activity survey-item-activity" aria-label={`Activity in ${title}`}>{activity}</span> : null}
     {!editing ? <div className="survey-item-shortcuts" aria-label={`Create from ${title}`}>
       <Menu.Root modal={false} open={visible && createOpen} onOpenChange={setCreateOpen}>
         <Menu.Trigger asChild><button type="button" aria-label={`Add to ${title}`} title="Add to exploration"><ThemeActionAddIcon size={14} /></button></Menu.Trigger>
@@ -91,10 +106,11 @@ export function SurveyZoneItem({ zone, title, glyph, selected, activity, editing
         </Menu.Content></DocumentOverlayPortal>
       </Menu.Root>
       {options}
+      {onCloseSingleTab ? <button type="button" className="survey-item-tab-close" aria-label={`Close survey tab: ${title}`} title={`Close ${title}`} onClick={onCloseSingleTab}><ThemeActionCloseIcon size={12} /></button> : null}
     </div> : null}
   </div>
   return onContextMenu && !editing ? <ContextMenu.Trigger asChild onContextMenu={event => {
-    const origin = (event.target as Element).closest<HTMLElement>('button') ?? event.currentTarget.querySelector<HTMLElement>('.survey-item')!
+    const origin = (event.target as Element).closest<HTMLElement>('button') ?? event.currentTarget.querySelector<HTMLElement>('.survey-item, .survey-tab-column')!
     origin.focus(); onContextMenu(origin)
   }}>{row}</ContextMenu.Trigger> : row
 }

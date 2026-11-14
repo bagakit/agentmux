@@ -42,6 +42,7 @@ import { isMacPlatform } from '../lib/host-platform'
 import { api } from '../lib/api'
 import { useLauncherState } from '../lib/launcher-state'
 import { directoryIdentity } from '../../../shared/space-addresses'
+import { useWorkbenchTabsClose } from '../hooks/useWorkbenchTabsClose'
 
 const ThemeStatusUnknownIcon = semanticIconComponent('status.unknown')
 const ThemeObjectAgentIcon = semanticIconComponent('object.agent')
@@ -127,7 +128,8 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
   const [creationNotice, setCreationNotice] = useState<string | null>(null)
   const [capture, setCapture] = useState<{ title: string; sources: TopicKnowledgeSource[]; noteIds: string[] } | null>(null)
   const [recallCapture, setRecallCapture] = useState<RecallCaptureTarget | null>(null)
-  const [locationChoice, setLocationChoice] = useState<{ kind: 'note' | 'agent' | 'browser' | 'tab'; zoneId: string; choices: WorkbenchProjectionSelection[] } | null>(null)
+  const [locationChoice, setLocationChoice] = useState<{ kind: 'note' | 'agent' | 'browser' | 'tab'; zoneId: string; choices: WorkbenchProjectionSelection[] } | { kind: 'close'; zoneId: string; subject: string; choices: WorkbenchProjectionSelection[] } | null>(null)
+  const tabClose = useWorkbenchTabsClose()
   const [toolsVisited, setToolsVisited] = useState(toolsOpen)
   const surfaceRef = useRef<HTMLElement>(null)
   const managementRef = useRef<HTMLElement>(null)
@@ -317,6 +319,21 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
     if (useAppStore.getState().surveyZoneSelection?.zoneId === zoneId) setSelection(null)
   }
 
+  function closeItemTab(zoneId: string, tabId: string, subject: string, chosen?: WorkbenchProjectionSelection) {
+    const state = useAppStore.getState(), tab = state.tabs[tabId]
+    const choices = itemReferences(zoneId).filter(reference => reference.tabId === tabId && reference.regionId === tab?.layout.activeRegionId)
+    const active = state.surveyZoneSelection?.zoneId === zoneId ? state.surveyZoneSelection.active : null
+    const shown = active?.tabId === tabId ? projection?.selection.filter(reference => reference.tabId === tabId && reference.regionId === active.regionId) ?? [] : []
+    const reference = chosen ?? (shown.length === 1 ? choices.find(choice => choice.displayWorkspaceId === shown[0]!.displayWorkspaceId && choice.groupId === shown[0]!.groupId) : undefined)
+      ?? (choices.length === 1 ? choices[0] : undefined)
+    if (!reference && choices.length > 1) { setLocationChoice({ kind: 'close', zoneId, subject, choices }); return }
+    const group = reference && itemProjection(zoneId)?.composition?.groups.find(group => group.id === reference.groupId && group.tabOrder.includes(tabId))
+    if (!reference || !group) { setError('This original Tab is still restoring. Its content and reference are kept.'); return }
+    setLocationChoice(null)
+    intent.current += 1
+    void tabClose.request({ workspaceId: reference.displayWorkspaceId, group, tabIds: [tabId], subject })
+  }
+
   function newItemNote(zoneId: string, chosen?: WorkbenchProjectionSelection) {
     const state = useAppStore.getState()
     const candidates = itemReferences(zoneId).filter(reference => state.tabs[reference.tabId]?.regions[reference.regionId]?.kind === 'browser')
@@ -455,7 +472,9 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
             const itemOptions = itemOptionsFor(zone, status.details)
             return <SurveyZoneItem dragHandle={dragHandle} key={zone.zoneId} zone={zone} title={itemTitle(zone)} glyph={itemGlyph(zone)} selected={selection?.zoneId === zone.zoneId}
               visible={visible && !controlsCoverPage}
-              tabColumns={itemTabs.length > 1 ? <div className="survey-item-tabs" aria-label={`Tabs in ${itemTitle(zone)}`}>{itemTabs.map(tabId => <SurveyTabColumn key={tabId} tab={tabs[tabId]!} selected={selection?.zoneId === zone.zoneId && selection.active?.tabId === tabId} onSelect={() => chooseTab(zone.zoneId, tabId)} />)}</div> : null}
+              showTitle={sidebarCollapsed || itemTabs.length < 2 || Boolean(explorationNames[zone.zoneId]?.trim())}
+              tabColumns={itemTabs.length > 1 ? <div className="survey-item-tabs" aria-label={`Tabs in ${itemTitle(zone)}`}>{itemTabs.map(tabId => <SurveyTabColumn key={tabId} tab={tabs[tabId]!} selected={selection?.zoneId === zone.zoneId && selection.active?.tabId === tabId} onSelect={() => chooseTab(zone.zoneId, tabId)} onClose={title => closeItemTab(zone.zoneId, tabId, title)} />)}</div> : null}
+              onCloseSingleTab={itemTabs.length === 1 ? () => closeItemTab(zone.zoneId, itemTabs[0]!, itemTitle(zone)) : undefined}
               options={<SurveyItemOptions {...itemOptions} rowAction compact />}
               onNewBrowser={zoneId => { void newItemTab(zoneId, 'browser') }} onNewTab={zoneId => { void newItemTab(zoneId, 'tab') }}
               onContextMenu={button => { contextOrigin.current = button; contextOrganization.current = list.stored; setContextZoneId(zone.zoneId) }} onNewNote={newItemNote} onNewAgent={newItemAgent} activity={status.summary} editing={renamingZoneId === zone.zoneId} nameDraft={itemNameDraft.current?.zoneId === zone.zoneId ? itemNameDraft.current : undefined} onEdit={editing => editItemName(zone, editing)}
@@ -464,7 +483,8 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
         </SurveyItemContextMenu>
       </aside>
       {locationChoice ? <SurveyPanelChoices mode="button" open visible={visible && !controlsCoverPage} choices={locationChoice.choices} facts={useAppStore.getState()}
-        onOpenChange={open => { if (!open) setLocationChoice(null) }} onSelect={reference => locationChoice.kind === 'note' ? newItemNote(locationChoice.zoneId, reference) : void newItemTab(locationChoice.zoneId, locationChoice.kind, reference)} /> : null}
+        onOpenChange={open => { if (!open) setLocationChoice(null) }} onSelect={reference => locationChoice.kind === 'close' ? closeItemTab(locationChoice.zoneId, reference.tabId, locationChoice.subject, reference) : locationChoice.kind === 'note' ? newItemNote(locationChoice.zoneId, reference) : void newItemTab(locationChoice.zoneId, locationChoice.kind, reference)} /> : null}
+      {tabClose.dialog}
       <div className="survey-sidebar-actions"><button type="button" className="survey-new-page" aria-label="New webpage" title="New browser" disabled={opening} onClick={() => void openBrowser('about:blank', true)}><ThemeActionCreateBrowserIcon size={16} /><span>New browser</span></button>
         <Menu.Root modal={false} open={visible && !controlsCoverPage && createMenuOpen} onOpenChange={setCreateMenuOpen}>
           <Menu.Trigger asChild><button type="button" className="survey-icon-button" aria-label="New browser options" title="New browser options" disabled={opening}><ThemeNavigationDisclosureIcon size={12} /></button></Menu.Trigger>
