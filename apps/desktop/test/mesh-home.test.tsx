@@ -292,6 +292,8 @@ it('fills only the local Mac map draft after an explicit OS location read and sa
 it('automatically plots the local public egress estimate and lets a manual pin take precedence', async () => {
   const estimate = vi.fn(async () => ({ source: 'public-egress' as const, label: 'Example region', latitude: 31, longitude: 121, accuracyKm: 120 }))
   const locate = vi.fn()
+  const locations = vi.spyOn(api.nodePublishing, 'call')
+  const remoteReads = () => locations.mock.calls.filter(([method, params]) => method === 'node.location' && 'hostId' in params && params.hostId === 'selected-farm')
   api.ui.estimateLocalMapLocation = estimate
   api.ui.requestMacMapLocation = locate
   vi.spyOn(api.config, 'save').mockImplementation(async next => next)
@@ -310,6 +312,11 @@ it('automatically plots the local public egress estimate and lets a manual pin t
     await vi.waitFor(() => expect(localPin()?.querySelector('circle')?.getAttribute('cx')).toBe('250'))
     expect(localPin()?.hasAttribute('data-approximate')).toBe(false)
     expect(estimate).toHaveBeenCalledTimes(1)
+    expect(remoteReads(), 'remote location reads after saving this device').toHaveLength(1)
+    await input(dom.container.querySelector<HTMLInputElement>('[aria-label="Latitude, longitude"]')!, '')
+    await dom.click('.mesh-locations-panel [data-settings-save-bar] button')
+    await vi.waitFor(() => expect(localPin()?.hasAttribute('data-approximate')).toBe(true))
+    expect(remoteReads(), 'remote location reads after clearing this device').toHaveLength(1)
   } finally {
     delete api.ui.estimateLocalMapLocation
     delete api.ui.requestMacMapLocation
@@ -328,6 +335,34 @@ it('uses a published local location without asking for an IP estimate', async ()
   } finally {
     publishing.mockRestore()
     delete api.ui.estimateLocalMapLocation
+  }
+})
+
+it('keeps the confirmed local position until its own refresh replies', async () => {
+  const node = { runtimeId: 'local-original', ownerInstanceId: 'local-owner', alias: 'desktop' }
+  const position = { source: 'node', label: 'Office', latitude: 0, longitude: 45 }
+  const pending = Promise.withResolvers<{ node: typeof node; location: typeof position }>()
+  let refresh = false
+  let remoteReads = 0
+  const publishing = vi.spyOn(api.nodePublishing, 'call').mockImplementation(async (method, params) => {
+    if (method === 'node.location' && 'hostId' in params && params.hostId === 'local') {
+      return (refresh ? await pending.promise : { node, location: position }) as never
+    }
+    if (method === 'node.location' && 'hostId' in params && params.hostId === 'selected-farm') remoteReads++
+    return { node, location: null } as never
+  })
+  const pin = () => dom.container.querySelector('[data-geographic-point="saved:client"] circle')
+  try {
+    await dom.render(<SettingsPanel initialSection="hosts" onClose={vi.fn()} />)
+    await vi.waitFor(() => expect(pin()?.getAttribute('cx')).toBe('625'))
+    refresh = true
+    await dom.click('.mesh-explorer__header > button:last-of-type')
+    await vi.waitFor(() => expect(remoteReads).toBe(2))
+    expect(pin()?.getAttribute('cx'), 'last local point while its own read is pending').toBe('625')
+    await act(async () => pending.resolve({ node, location: { ...position, longitude: 90 } }))
+    await vi.waitFor(() => expect(pin()?.getAttribute('cx')).toBe('750'))
+  } finally {
+    publishing.mockRestore()
   }
 })
 
