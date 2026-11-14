@@ -1,22 +1,19 @@
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { createRequire } from 'node:module'
-import { execFileSync } from 'node:child_process'
 import { mkdtemp, mkdir, readFile, writeFile, rm } from 'node:fs/promises'
-import { dirname, join, resolve, relative } from 'node:path'
+import { tmpdir } from 'node:os'
+import { join, resolve, relative } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { currentWorkspaceAliases } from './fixtures/session-takeover/workspace-aliases.mjs'
 import { runProbeProcess } from './probe-process.mjs'
 const root = resolve(import.meta.dirname, '../../..'), require = createRequire(join(root, 'apps/desktop/package.json'))
-const common = execFileSync('git', ['rev-parse', '--path-format=absolute', '--git-common-dir'], { cwd: root, encoding: 'utf8' }).trim()
-const evidence = join(dirname(common), '.local/reliability-fixes/desktop/goal-input-birth/visual')
+const evidence = resolve(root, process.env.AGENTMUX_GOAL_INPUT_EVIDENCE ?? '.local/goal-input-birth/visual')
 await mkdir(evidence, { recursive: true, mode: 0o700 })
-const temporary = await mkdtemp('/tmp/amux-goal-input-'), fixture = join(root, 'apps/desktop/scripts/fixtures/goal-input-birth')
+const temporary = await mkdtemp(join(tmpdir(), 'amux-goal-input-')), fixture = join(root, 'apps/desktop/scripts/fixtures/goal-input-birth')
 const inputs = {}, hash = bytes => createHash('sha256').update(bytes).digest('hex')
 try {
   const { aliases } = await currentWorkspaceAliases(root)
-  const owner = process.env.AGENTMUX_GOAL_INPUT_OWNER_ROOT ?? dirname(common)
-  for (const alias of aliases) if (typeof alias.replacement === 'string' && ['packages/core/', 'packages/demand/', 'apps/host/'].some(folder => alias.replacement.startsWith(join(root, folder)))) alias.replacement = resolve(owner, relative(root, alias.replacement))
   aliases.unshift({ find: /^react-dom\/server$/, replacement: join(root, 'apps/desktop/node_modules/react-dom/server.browser.js') })
   aliases.push(...['react', 'react-dom'].map(find => ({ find, replacement: join(root, 'apps/desktop/node_modules', find) })))
   const { build } = await import(pathToFileURL(require.resolve('vite')).href)
@@ -24,9 +21,10 @@ try {
     esbuild: { jsx: 'automatic' }, worker: { format: 'es' }, define: { __AGENTMUX_WEB_PREVIEW__: 'true', __TERMINAL_WHEEL_UMD_URL__: '"unused"', 'process.env.NODE_ENV': '"production"' },
     plugins: [{ name: 'current-goal-input-consumer', enforce: 'pre', transform(source, id) {
       const path = id.split('?')[0]
-      const code = source
-      if ((path.startsWith(root + '/') || path.startsWith(owner + '/')) && !path.includes('/node_modules/')) inputs[relative(root, path)] = { sourceSHA256: hash(source), loadedSHA256: hash(code) }
-      return source === code ? undefined : { code, map: null }
+      if (path.startsWith(root + '/') && !path.includes('/node_modules/')) {
+        const digest = hash(source)
+        inputs[relative(root, path)] = { sourceSHA256: digest, loadedSHA256: digest }
+      }
     } }], build: { target: 'esnext', outDir: join(temporary, 'renderer'), emptyOutDir: true, minify: false, reportCompressedSize: false } })
   for (const file of ['GoalFiniteStartControl.tsx', 'goal-finite-start.ts', 'GoalRelationAccessFields.tsx'])
     assert.ok(Object.keys(inputs).some(path => path.endsWith('/' + file)), 'Actual Goal source loaded: ' + file)
