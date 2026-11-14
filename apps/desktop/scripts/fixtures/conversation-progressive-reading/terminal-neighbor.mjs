@@ -89,31 +89,6 @@ export async function exerciseTerminalNeighbor({ win, read, ready, until, click,
   assert.equal(up.color, 2, 'The original ANSI green is retained in the actual xterm cells')
   assert.match((await scroll(-240)).buffer.top, /^private-history-/u)
   const older = await inspect()
-  const reading = await visiblePoint(readerSelector)
-  const readerBefore = await read('readingProof.events.filter(event=>event.type==="wheel").length')
-  await wheel(reading, -250)
-  await ready(`readingProof.events.slice(${readerBefore}).some(event=>event.type==='wheel' && event.detail.trusted && event.detail.deltaY===-250)`)
-  const cut = await ready('readingProof.nativeCut()')
-  const recordId = await append()
-  const accepted = await ready(`readingProof.appendDisposition(${JSON.stringify(cut)},${JSON.stringify(recordId)},false)`)
-  await read(twoFrames)
-  const duringReader = await inspect()
-  sameHistory(older, duringReader)
-  assert.ok(duringReader.focused, 'Passive adjacent reading and append preserve terminal focus')
-  assert.deepEqual([duringReader.buffer.x, duringReader.buffer.y], [older.buffer.x, older.buffer.y])
-
-  const flow = await read(`(()=>{const button=[...document.querySelectorAll(${JSON.stringify(readerSelector + ' .wf-head[aria-expanded="false"]')})]
-    .find(node=>node.getClientRects().length);if(!button)return false;button.dataset.proofTerminalAdjacent='true';return true})()`)
-  assert.equal(flow, true, 'The original adjacent Reader offers a collapsible process')
-  const detail = "document.querySelector('[data-proof-terminal-adjacent]')"
-  await click(detail)
-  await ready(detail + '?.getAttribute("aria-expanded")==="true"')
-  await click(detail)
-  await ready(detail + '?.getAttribute("aria-expanded")==="false"')
-  sameHistory(older, await inspect())
-  await click(`document.querySelector(${JSON.stringify(terminalSelector)})`)
-  await ready('liveTerminalProof().focused')
-
   const bytesFor = (snapshot, runId, field) => snapshot[field]
     .filter(event => event.run === runId).reduce((total, event) => total + event.bytes, 0)
   const oneOutputWindow = async (phase, trigger) => {
@@ -143,7 +118,11 @@ export async function exerciseTerminalNeighbor({ win, read, ready, until, click,
     return sample.replay.some(chunk => chunk.data.includes('private-live-ready')) && sample
   }, 'the unrelated original CLI has installed its bounded output source')
   const cursorBefore = readyOther.run.latestOutputBytes
-  const shared = await oneOutputWindow('with', () => Promise.all([privateTerminal.emit('with'), unrelated.emit('unrelated')]))
+  const shared = await oneOutputWindow('with', async () => {
+    await Promise.all([privateTerminal.emit('with'), unrelated.emit('unrelated')])
+    const received = await ready(`(()=>{const state=liveTerminalProof();return state.ingress.some(event=>event.run===${JSON.stringify(unrelated.reference.runId)}) && state})()`)
+    assert.ok(received.events.every(event => event.subscriber === event.run), 'No unrelated Run may reach a scoped renderer consumer')
+  })
   const otherReplay = await until(async () => {
     const sample = await core.readRunReplay(unrelated.control.run, cursorBefore, 'raw')
     return sample.replay.some(chunk => chunk.data.includes('private-unrelated-burst-24')) && sample
@@ -157,6 +136,31 @@ export async function exerciseTerminalNeighbor({ win, read, ready, until, click,
   assert.ok(unrelatedBytes > 0, 'The unrelated native Run reached the original Renderer transport')
   assert.ok(duringNative.events.every(event => event.subscriber === event.run), 'No unrelated Run may reach a scoped renderer consumer')
   await runtime.detachSession(win.webContents.id, other.attachmentId)
+
+  const reading = await visiblePoint(readerSelector)
+  const readerBefore = await read('readingProof.events.filter(event=>event.type==="wheel").length')
+  await wheel(reading, -250)
+  await ready(`readingProof.events.slice(${readerBefore}).some(event=>event.type==='wheel' && event.detail.trusted && event.detail.deltaY===-250)`)
+  const cut = await ready('readingProof.nativeCut()')
+  const recordId = await append()
+  const accepted = await ready(`readingProof.appendDisposition(${JSON.stringify(cut)},${JSON.stringify(recordId)},false)`)
+  await read(twoFrames)
+  const duringReader = await inspect()
+  sameHistory(older, duringReader)
+  assert.ok(duringReader.focused, 'Passive adjacent reading and append preserve terminal focus')
+  assert.deepEqual([duringReader.buffer.x, duringReader.buffer.y], [older.buffer.x, older.buffer.y])
+
+  const flow = await read(`(()=>{const button=[...document.querySelectorAll(${JSON.stringify(readerSelector + ' .wf-head[aria-expanded="false"]')})]
+    .find(node=>node.getClientRects().length);if(!button)return false;button.dataset.proofTerminalAdjacent='true';return true})()`)
+  assert.equal(flow, true, 'The original adjacent Reader offers a collapsible process')
+  const detail = "document.querySelector('[data-proof-terminal-adjacent]')"
+  await click(detail)
+  await ready(detail + '?.getAttribute("aria-expanded")==="true"')
+  await click(detail)
+  await ready(detail + '?.getAttribute("aria-expanded")==="false"')
+  sameHistory(older, await inspect())
+  await click(`document.querySelector(${JSON.stringify(terminalSelector)})`)
+  await ready('liveTerminalProof().focused')
 
   const back = await scroll(4800)
   assert.equal(back.buffer.viewport, back.buffer.base)
