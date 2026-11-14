@@ -541,7 +541,7 @@ describe('shared surface tool dock resize', () => {
     // 行为本身由 topic-rename.test.tsx 守。
     expect(topicsPanelSource).toContain('handleTopicRenameKeyDown(event, { cancel: cancelRename })')
     expect(fileExplorerSource).toContain('scratchTopicIdFromDirectoryName(node.path) !== null')
-    expect(fileExplorerSource).toContain('canRename={canRenameFileExplorerNode(workspaceId, node)}')
+    expect(fileExplorerSource).toContain('canRename={canRename(workspaceId, node)}')
     const topicDirectory = {
       name: 'topic--view--stable',
       path: 'topic--view--stable',

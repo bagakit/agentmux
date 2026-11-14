@@ -4,7 +4,7 @@ const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await
 import { testAppDocumentSources } from "./helpers/app-document-fixture"
 import { localRuntimeConnector } from './helpers/local-runtime-connector.js'
 import { EventEmitter } from 'node:events'
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, realpath, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { URL as SourceURL } from 'node:url'
@@ -20,7 +20,7 @@ vi.mock('electron', () => ({ nativeTheme: { shouldUseDarkColors: true, on: vi.fn
   globalShortcut: { register: () => true, unregister: vi.fn(), isRegistered: () => false },
   ipcMain: { handle: (channel: string, handler: (event: IpcMainInvokeEvent, ...values: unknown[]) => unknown) => ipc.handlers.set(channel, handler),
     removeHandler: (channel: string) => ipc.handlers.delete(channel), on: vi.fn(), off: vi.fn(), removeListener: vi.fn() },
-  clipboard: {}, dialog: { showOpenDialog: ipc.choose }, nativeImage: {}, shell: {} }))
+  clipboard: {}, dialog: { showOpenDialog: ipc.choose }, nativeImage: {}, shell: { showItemInFolder: vi.fn() } }))
 vi.mock('@agentmux/core', async original => ({ ...await original<typeof import('@agentmux/core')>(),
   AgentMuxControlServer: class { constructor(options: { execute: typeof ipc.execute }) { ipc.execute = options.execute } async start() {} async stop() {} } }))
 vi.mock('@agentmux/demand', () => ({ openDemandStore: () => ({}) }))
@@ -40,6 +40,9 @@ vi.mock('../src/main/browser-view-manager.js', async original => {
 vi.mock('../src/main/notes-storage-owner.js', () => ({ NotesStorageOwner: class { constructor(_config: unknown, _spatial: unknown, _publish: unknown, readonly storage: unknown) {} async initialize() {} } }))
 vi.mock('../src/main/agent-notifier.js', () => ({ createAgentNotifier: () => ({ dispose() {} }) }))
 import { AgentMuxMemoryAgentSessionStore, AGENTMUX_CONTROL_SCHEMA_VERSION, LocalExecutionHost } from '@agentmux/core'
+import { WorkspaceFiles } from '../src/main/workspace-files.js'
+import { sourceTreeFileLocation } from '../src/shared/source-files.js'
+import { shell } from 'electron'
 import { ConfigStore, DEFAULT_CONFIG, createWorkspaceInputSchema } from '../src/main/config-store.js'
 import { RuntimeController, type RuntimePreparation } from '../src/main/runtime-controller.js'
 import { ContinuousProgressLoopManager } from '@agentmux/host/continuous-progress-loop-manager'
@@ -51,7 +54,7 @@ import { configOwnerFixture, deferred } from './helpers/config-owner-fixture.js'
 
 const directories: string[] = []
 const envelope = { requestId: 'owned-workspace-add', schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION } as const
-async function fixture() {
+async function fixture(files = settingsWorkspaceFiles()) {
   const root = await mkdtemp(join(tmpdir(), 'amux-workspace-add-'));directories.push(root);ipc.root=root
   await prepareSettingsIpcDirectory(root)
   const store = new ConfigStore(join(root, 'config.json'))
@@ -71,7 +74,7 @@ async function fixture() {
   const window={setBackgroundColor:vi.fn(),isDestroyed:()=>false,webContents:sender} as unknown as BrowserWindow
   ipc.handlers.clear();ipc.execute=undefined
   const dispose=await registerIpc({ workbenchUserState: testWorkbenchUserState(), appDocumentSources: testAppDocumentSources(sender), initialConfig: await store.get(),window,
-    configStore:store,runtime,applicationAccess:{} as never,workbenchWindows:settingsWorkbenchWindows(window),scratchTopics:settingsScratchTopics(),workspaceFiles:settingsWorkspaceFiles()})
+    configStore:store,runtime,applicationAccess:{} as never,workbenchWindows:settingsWorkbenchWindows(window),scratchTopics:settingsScratchTopics(),workspaceFiles:files})
   prepare.mockClear();const save=vi.spyOn(store,'save')
   const invoke=async<T>(channel:string,...values:unknown[])=>{
     const handler=ipc.handlers.get(channel);expect(handler).toBeTypeOf('function')
@@ -289,4 +292,53 @@ describe('survey-directory: Main actual registration recovery fence',()=>{
    expect((await f.current()).workspaces.some(item=>item.id===written.id)).toBe(true)
   }finally{ipc.browserSource=null;await f.dispose()}
  })
+})
+
+it('keeps Finder and project registration on the original Source across a late carrier replacement', async () => {
+  const files = new WorkspaceFiles(() => new LocalExecutionHost()), f = await fixture(files)
+  try {
+    const sourceRoot = await realpath(f.root), folder = 'original-folder', path = join(sourceRoot, folder)
+    await mkdir(path)
+    const zoneId = 'original-zone', reference = { runtimeId: 'original-runtime', spaceId: 'original-space' }
+    const resource = { hostId: 'local', workspaceId: 'source-workspace', workspacePath: sourceRoot, zoneId, zonePath: sourceRoot, path: '.' }
+    const mount = { hostId: 'local', reference, zoneId, workspaceId: resource.workspaceId }
+    const location = sourceTreeFileLocation({ mount, resource }, folder)
+    const witness = { device: '1', inode: '2', size: '1', ctimeNs: '1', mtimeNs: '1', birthtimeNs: null }
+    const observed = { resource: location.resource, result: { status: 'observed' as const, observation: { root: witness, parent: witness,
+      parentPath: '.', entry: { kind: 'directory' as const, witness }, implementation: { platform: 'darwin' as const, stat: 'native' as const, mkdir: 'native-no-replace' as const } } } }
+    const reply = { carrierCurrent: true, result: observed }
+    const stat = vi.spyOn(f.runtime, 'sourceFilesCall').mockResolvedValue(reply)
+    vi.mocked(shell.showItemInFolder).mockClear()
+    await f.invoke('files:reveal', '__scratch__', folder, location)
+    expect(shell.showItemInFolder).toHaveBeenCalledExactlyOnceWith(path)
+    expect(stat).toHaveBeenCalledExactlyOnceWith(location.target, 'file.stat', location.query)
+    const removed = sourceTreeFileLocation({ mount, resource }, folder + '/deleted')
+    stat.mockResolvedValueOnce({ carrierCurrent: true, result: { resource: removed.resource, result: {
+      ...observed.result, observation: { ...observed.result.observation, entry: { kind: 'absent' } } } } })
+    await f.invoke('files:reveal', '__scratch__', removed.query.path, removed)
+    expect(shell.showItemInFolder).toHaveBeenNthCalledWith(2, path)
+    stat.mockResolvedValueOnce({ carrierCurrent: true, result: { ...observed, resource: { ...observed.resource, zonePath: join(path, 'different') } } })
+    await expect(f.invoke('files:reveal', '__scratch__', folder, location)).rejects.toThrow('original Source file location')
+    await expect(f.invoke('files:reveal', '__scratch__', folder, { ...location, target: { ...location.target, hostId: 'another-host' } })).rejects.toThrow('local file manager')
+    expect(shell.showItemInFolder).toHaveBeenCalledTimes(2)
+    const input = { name: folder, hostId: 'local', path, expectedHost: DEFAULT_CONFIG.hosts[0]! }
+    const before = await f.bytes()
+    stat.mockImplementationOnce(async () => {
+      f.executionHost.mockReturnValue(new LocalExecutionHost())
+      return reply
+    })
+    await expect(f.invoke('workspaces:add', input, location)).rejects.toThrow()
+    expect(await f.bytes()).toBe(before)
+    const symlink = { carrierCurrent: true, result: { ...observed, result: { ...observed.result, observation: {
+      ...observed.result.observation, entry: { kind: 'symlink' as const, witness } } } } }
+    stat.mockResolvedValueOnce(symlink).mockResolvedValueOnce({ carrierCurrent: true, result: { resource: location.resource,
+      result: { status: 'unknown', code: 'NOT_A_DIRECTORY', message: 'The original link does not open a directory.' } } })
+    await expect(f.invoke('workspaces:add', input, location)).rejects.toThrow('confirmed directory')
+    expect(await f.bytes()).toBe(before)
+    stat.mockResolvedValueOnce(symlink).mockResolvedValueOnce({ carrierCurrent: true, result: { resource: location.resource,
+      result: { status: 'directory-listed', entries: [], complete: true, partialReason: null } } })
+    const project = await f.invoke<WorkspaceRecord>('workspaces:add', input, location)
+    expect(stat).toHaveBeenLastCalledWith(location.target, 'file.list', { ...location.query, mode: 'directory', limit: 1 })
+    expect(project).toMatchObject({ name: folder, path, hostId: 'local' })
+  } finally { await f.dispose(); await files.dispose() }
 })

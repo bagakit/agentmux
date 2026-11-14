@@ -1,6 +1,9 @@
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 // @vitest-environment happy-dom
 import { act } from 'react'
+import { sourceTreeFileLocation } from '../src/shared/source-files'
+import { createWorkspaceLayout } from '@agentmux/layout'
+import { revealInFileManagerLabel } from '../src/renderer/src/lib/host-platform'
 import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest'
 vi.hoisted(() => vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true))
 import { FileExplorer } from '../src/renderer/src/components/FileExplorer'
@@ -134,5 +137,108 @@ describe('actual FileExplorer Scratch physical hover and clipboard admission', (
     expect(clipboard).toHaveBeenCalledExactlyOnceWith(`${physical}/first.md`)
     expect(read).toHaveBeenCalledTimes(2)
     expect(report).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('native file gestures follow the Source that listed the directory', () => {
+  function connect(carrier = 'local', current = true, name = logical) {
+    const resource = { workspaceId: workspace.id, workspacePath: workspace.path,
+      hostId: 'local', zoneId: 'selected-zone', zonePath: workspace.path + '/nested', path: 'nested' }
+    const mount = { hostId: carrier, reference: { runtimeId: 'selected-runtime', spaceId: 'selected-space' }, zoneId: resource.zoneId, workspaceId: resource.workspaceId }
+    const target = { hostId: carrier, reference: mount.reference }
+    const locator = { mount, resource }, input = { workspace, target, locator, selection: { kind: 'mount' as const, mount } }
+    const witness = { device: '1', inode: '2', size: '1', ctimeNs: '1', mtimeNs: '1', birthtimeNs: null }
+    const rpc = vi.spyOn(api.sourceFiles, 'call').mockImplementation(async (called, method, query) => {
+      expect(called).toEqual(target)
+      if (!('path' in query)) throw new Error('A file gesture requires its original path')
+      const path = query.path === '.' ? resource.path : resource.path + '/' + query.path
+      if (method === 'file.list') return { carrierCurrent: true, result: { resource: { ...resource, path }, result: {
+        status: 'directory-listed', complete: true, omitted: 'none', partialReason: null,
+        entries: [{ path: path + '/' + name, name, isDirectory: true, isSymlink: false }] } } }
+      expect(method).toBe('file.stat')
+      expect(query).toEqual({ zoneId: resource.zoneId, spaceId: mount.reference.spaceId, path: logical,
+        expectedResource: { hostId: 'local', workspaceId: workspace.id, workspacePath: workspace.path } })
+      return { carrierCurrent: current, result: { resource: { ...resource, path }, result: {
+        status: 'observed', observation: { root: witness, parent: witness, parentPath: resource.path,
+          entry: { kind: 'directory', witness }, implementation: { platform: 'darwin', stat: 'native', mkdir: 'native-no-replace' } } } } }
+    })
+    const launchTerminal = vi.fn(async () => {}), selectWorkspace = vi.fn(async () => {})
+    const project = vi.spyOn(api.workspaces, 'add').mockImplementation(async () => { if (!current) throw new Error('Source directory is unavailable'); return workspace })
+    const reveal = vi.spyOn(api.files, 'reveal').mockResolvedValue(undefined)
+    useAppStore.setState(state => ({ config: { ...state.config!, hosts: [...composerConfig.hosts, { id: 'original-host', kind: 'ssh', hostname: 'original.invalid', label: 'Remote' }] }, layouts: { [workspace.id]: createWorkspaceLayout('files') },
+      sourceFilesInputs: { selections: { [workspace.id]: input }, pending: {}, creations: {}, folderRequests: {} },
+      launchTerminal, selectWorkspace }))
+    return { rpc, locator, project, reveal, launchTerminal, selectWorkspace }
+  }
+  it('copies, reveals, opens a project and starts a terminal at the original nested Zone even when Scratch has a same-named Topic', async () => {
+    const { locator, rpc, reveal, launchTerminal, project, selectWorkspace } = connect()
+    const path = locator.resource.zonePath + '/' + logical
+    await dom.render(<FileExplorer />)
+    expect(row(logical).title).toBe('~/scratch/nested/' + logical)
+    await openMenu(logical)
+    expect([...document.querySelectorAll('[role="menuitem"] span')].some(item => item.textContent === 'Rename')).toBe(true)
+    await chooseCopy('Copy Path')
+    expect(clipboard).toHaveBeenCalledExactlyOnceWith('~/scratch/nested/' + logical)
+    await openMenu(logical); await chooseCopy(revealInFileManagerLabel())
+    expect(reveal).toHaveBeenCalledExactlyOnceWith(workspace.id, logical, sourceTreeFileLocation(locator, logical))
+    await openMenu(logical); await chooseCopy('Open in Terminal')
+    expect(launchTerminal).toHaveBeenCalledExactlyOnceWith('files', undefined, path)
+    await openMenu(logical); await chooseCopy('Open as Project')
+    expect(project).toHaveBeenCalledExactlyOnceWith({ name: logical, path, hostId: 'local', expectedHost: composerConfig.hosts[0] }, sourceTreeFileLocation(locator, logical))
+    expect(selectWorkspace).toHaveBeenCalledExactlyOnceWith(workspace.id)
+    expect(rpc.mock.calls.map(([,method]) => method)).toEqual(['file.list','file.stat'])
+    expect(read).not.toHaveBeenCalled()
+    expect(report).not.toHaveBeenCalled()
+  })
+  it('keeps a POSIX backslash in a file name in a mounted Source and the original Topic', async () => {
+    const name = String.raw`notes\draft`
+    connect('local', true, name)
+    await dom.render(<FileExplorer />)
+    function literalRow(path: string) {
+      const result = [...dom.container.querySelectorAll<HTMLElement>('[data-tree-path]')].find(row => row.dataset.treePath === path)
+      expect(result).toBeDefined()
+      return result!
+    }
+    expect(literalRow(name).title).toBe('~/scratch/nested/' + name)
+    read.mockResolvedValue([{ name, path: logical + '/' + name, isDirectory: false, isSymlink: false }])
+    await dom.render(<FileExplorer rootPath={logical} objectDirectory={logical} />)
+    const document = { path: logical + '/' + name, content: 'Original Topic document', revision: 'original' }
+    const readDocument = vi.mocked(api.files.read).mockResolvedValue({ status: 'read', document })
+    const file = literalRow(document.path)
+    await act(async () => file.querySelector<HTMLElement>('.tree-row__label')!.click())
+    expect(readDocument.mock.calls.some(([id, path]) => id === workspace.id && path === document.path)).toBe(true)
+    expect(file.title).toBe('~/topics/confirmed-original/' + name)
+    await act(async () => {
+      file.focus()
+      file.dispatchEvent(new KeyboardEvent('keydown', { key: 'F10', shiftKey: true, bubbles: true, cancelable: true }))
+    })
+    await chooseCopy('Copy Path')
+    expect(clipboard).toHaveBeenCalledExactlyOnceWith('~/topics/confirmed-original/' + name)
+  })
+  it('keeps a remote Source path absolute and opens its project through the actual carrier', async () => {
+    const { locator, project, reveal } = connect('original-host')
+    await dom.render(<FileExplorer />)
+    const path = locator.resource.zonePath + '/' + logical
+    expect(row(logical).title).toBe(path)
+    await openMenu(logical)
+    const labels = [...document.querySelectorAll('[role="menuitem"] span')].map(item => item.textContent)
+    expect(labels).not.toContain(revealInFileManagerLabel())
+    expect(labels).not.toContain('Open in Terminal')
+    await chooseCopy('Copy Path')
+    expect(clipboard).toHaveBeenCalledExactlyOnceWith(path)
+    await openMenu(logical); await chooseCopy('Open as Project')
+    expect(project).toHaveBeenCalledExactlyOnceWith({ name: logical, path, hostId: 'original-host', expectedHost: expect.objectContaining({ hostname: 'original.invalid' }) }, sourceTreeFileLocation(locator, logical))
+    expect(reveal).not.toHaveBeenCalled()
+    expect(report).not.toHaveBeenCalled()
+  })
+  it('keeps the original tree when a native gesture can no longer confirm its carrier', async () => {
+    const { launchTerminal, project } = connect('local', false)
+    await dom.render(<FileExplorer />)
+    await openMenu(logical); await chooseCopy('Open in Terminal')
+    await openMenu(logical); await chooseCopy('Open as Project')
+    expect(launchTerminal).not.toHaveBeenCalled()
+    expect(project).toHaveBeenCalledOnce()
+    expect(report).toHaveBeenCalledTimes(2)
+    expect(row(logical).title).toBe('~/scratch/nested/' + logical)
   })
 })

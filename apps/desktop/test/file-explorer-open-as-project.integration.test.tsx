@@ -32,6 +32,7 @@ vi.mock('../src/renderer/src/hooks/useGitStatus.js', () => ({
 vi.mock('../src/renderer/src/components/file-tree/useWorkspaceFileTree.js', () => ({
   flattenFileTree: (children: readonly unknown[]) => children,
   useWorkspaceFileTree: () => ({
+    assertCurrent: vi.fn(),
     dirCache: tree.dirCache,
     rootCache: {
       // 目录节点在前、文件节点在后：flattenFileTree 直通保序，(a) 依赖目录行仍是第一行。
@@ -115,7 +116,7 @@ describe('FileExplorer directory context menu', () => {
     const destination = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(el => el.textContent === 'dir-0')
     expect(destination, 'open Move submenu must contain actual indexed destinations').toBeDefined()
     await act(async () => destination!.click())
-    expect(rename).toHaveBeenCalledExactlyOnceWith('file-100.txt', 'dir-0/file-100.txt', workspace.id)
+    expect(rename).toHaveBeenCalledExactlyOnceWith('file-100.txt', 'dir-0/file-100.txt', workspace.id, undefined)
     expect(useAppStore.getState().sessions).toBe(before.sessions)
     expect(useAppStore.getState().tabs).toBe(before.tabs)
     expect(useAppStore.getState().agentComposerDrafts).toBe(drafts)
