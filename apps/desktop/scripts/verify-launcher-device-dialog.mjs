@@ -24,6 +24,11 @@ const ORACLE_FILES = [
   'apps/desktop/scripts/radix-overlay-aliases.ts',
   'apps/desktop/scripts/lib/fixture-values.mjs',
   'apps/desktop/test/helpers/client-ui-render.tsx',
+  'packages/core/package.json',
+  'packages/demand/package.json',
+  'packages/layout/package.json',
+  'packages/client-ui/package.json',
+  'apps/host/package.json',
 ]
 const receipt = { schema: 'agentmux.launcher-device-dialog-verification.v2', passed: false,
   gate: 'Only this independent device-dialog gate proves this slice; the generic Launcher receipt does not cover it.',

@@ -58,7 +58,9 @@ try {
     } }] : [] } },
     plugins: [{ name: 'source-bound-space-launcher', enforce: 'pre', transform(source, id) {
       const file = id.split('?')[0]
-      if (!file.startsWith(join(repository, 'apps/desktop/src/renderer/src/'))) return
+      const workspaceSource = file.startsWith(join(repository, 'apps/desktop/src/renderer/src/'))
+        || file.startsWith(join(repository, 'packages/')) || file.startsWith(join(repository, 'apps/host/'))
+      if (!workspaceSource || file.includes('/node_modules/')) return
       const relative = file.slice(repository.length + 1)
       if (file.endsWith('.css')) styles[relative] = hash(source)
       else if (!id.includes('?')) sources[relative] = hash(source)
@@ -76,6 +78,8 @@ try {
       }
     } }], build: { outDir: join(temporaryRoot, 'renderer'), emptyOutDir: true } })
   if (mutation) assert.equal(mutationHits.length, 1, 'The actual mutated product module must be compiled')
+  for (const name of ['core', 'layout'])
+    assert.ok(Object.keys(sources).some(file => file.startsWith(`packages/${name}/src/`)), `Actual aliased ${name} workspace sources are bound`)
   for (const name of ['WorkspaceWorkbench', 'NewTabSurface', 'SurfaceState', 'LauncherMoteAction', 'AgentExecutorPicker'])
     assert.ok(sources[`apps/desktop/src/renderer/src/components/${name}.tsx`], 'Actual compiled consumer: ' + name)
   for (const name of ['launcher', 'surface-state', 'workbench', 'tokens', 'base']) {

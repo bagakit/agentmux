@@ -209,6 +209,8 @@ it('default startup details retain block flow while only the anchored variant ow
   expect(base).not.toContain('gap: 10px')
   expect(anchored).toContain('display: grid')
   expect(anchored).toContain('gap: 10px')
+  expect(css).toMatch(/\.agent-work-setup\[data-presentation='anchored-editor'\] \.agent-work-startup \.agent-work-setup__note \{ margin-top: 0; \}/)
+  expect(css).toMatch(/\.agent-work-setup\[data-presentation='anchored-editor'\]\[data-fixed-project\] \.agent-work-startup\[open\] \.agent-work-setup__host-links \{ margin-top: 0; \}/)
 })
 
 it('the real shared selector names each family and places its Agent and Project in the stated location', async () => {

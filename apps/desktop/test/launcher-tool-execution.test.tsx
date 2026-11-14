@@ -1,5 +1,7 @@
 // @vitest-environment happy-dom
 import { act, type ContextType } from 'react'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { expect, it, vi } from 'vitest'
 vi.mock('../src/renderer/src/components/TerminalView', () => ({ TerminalView: () => <div data-warm-run /> }))
 import { NewTabSurface } from '../src/renderer/src/components/NewTabSurface'
@@ -185,6 +187,13 @@ it('explains unsupported Mote dual execution while retaining normal launch, all 
   expect(useAppStore.getState().agentComposerDrafts.input).toBe('Keep complete request')
 })
 
+
+it('schedules Source/Legacy focus handoff in the owning document window', () => {
+  const source = readFileSync(resolve('apps/desktop/src/renderer/src/components/AgentWorkModeSetup.tsx'), 'utf8')
+  expect(source).toContain('const ownerWindow = ownerDocument?.defaultView ?? window')
+  expect(source).toContain('const frame = ownerWindow.requestAnimationFrame')
+  expect(source).toContain('ownerWindow.cancelAnimationFrame(frame)')
+})
 
 it('the Source/Legacy focus handoff yields to a newer user focus', async () => {
   await mount()

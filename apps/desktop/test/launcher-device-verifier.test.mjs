@@ -105,5 +105,10 @@ it('binds direct probe, fixture and alias inputs into the oracle manifest', () =
     'apps/desktop/scripts/fixtures/bookmark-local-link/vitest.owning.config.mts',
     'apps/desktop/scripts/lib/fixture-values.mjs',
     'apps/desktop/test/helpers/client-ui-render.tsx',
+    'packages/core/package.json',
+    'packages/demand/package.json',
+    'packages/layout/package.json',
+    'packages/client-ui/package.json',
+    'apps/host/package.json',
   ]) expect(script).toContain(`'${file}'`)
 })
