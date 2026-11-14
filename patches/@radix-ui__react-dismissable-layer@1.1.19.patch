@@ -1,5 +1,5 @@
 diff --git a/dist/index.js b/dist/index.js
-index 3fef516c8d5679d16fe2e004e8d98ff24c0fb45b..fe0b5409a0dce253d26e830d7456fd7bd2b1d7cb 100644
+index 3fef516c8d5679d16fe2e004e8d98ff24c0fb45b..1033aee94ce6aa798d3901ae76eb58647672042a 100644
 --- a/dist/index.js
 +++ b/dist/index.js
 @@ -50,18 +50,16 @@ var import_jsx_runtime = require("react/jsx-runtime");
@@ -52,7 +52,26 @@ index 3fef516c8d5679d16fe2e004e8d98ff24c0fb45b..fe0b5409a0dce253d26e830d7456fd7b
                return false;
              }
              const isPointerDownOnBranch = [...context.branches].some(
-@@ -147,18 +146,18 @@ var DismissableLayer = /* @__PURE__ */ React.forwardRef(
+@@ -125,7 +124,7 @@ var DismissableLayer = /* @__PURE__ */ React.forwardRef(
+       onInteractOutside?.(event);
+       if (!event.defaultPrevented) onDismiss?.();
+     }, ownerDocument);
+-    const isHighestLayer = node ? index === layers.length - 1 : false;
++    const isHighestLayer = index >= 0 && index === layers.length - 1;
+     const handleKeyDown = (0, import_react_use_callback_ref.useCallbackRef)((event) => {
+       if (event.key !== "Escape") {
+         return;
+@@ -143,22 +142,28 @@ var DismissableLayer = /* @__PURE__ */ React.forwardRef(
+       ownerDocument.addEventListener("keydown", handleKeyDown, { capture: true });
+       return () => ownerDocument.removeEventListener("keydown", handleKeyDown, { capture: true });
+     }, [ownerDocument, isHighestLayer, handleKeyDown]);
++    // Listen before registering into a new document so the new top layer sees its own update.
++    React.useEffect(() => {
++      const handleUpdate = /* @__PURE__ */ __name(() => force({}), "handleUpdate");
++      ownerDocument.addEventListener(CONTEXT_UPDATE, handleUpdate);
++      return () => ownerDocument.removeEventListener(CONTEXT_UPDATE, handleUpdate);
++    }, [ownerDocument]);
+     React.useEffect(() => {
        if (!node) return;
        if (disableOutsidePointerEvents) {
          if (context.layersWithOutsidePointerEventsDisabled.size === 0) {
@@ -74,7 +93,7 @@ index 3fef516c8d5679d16fe2e004e8d98ff24c0fb45b..fe0b5409a0dce253d26e830d7456fd7b
            }
          }
        };
-@@ -168,14 +167,14 @@ var DismissableLayer = /* @__PURE__ */ React.forwardRef(
+@@ -168,14 +173,9 @@ var DismissableLayer = /* @__PURE__ */ React.forwardRef(
          if (!node) return;
          context.layers.delete(node);
          context.layersWithOutsidePointerEventsDisabled.delete(node);
@@ -82,18 +101,15 @@ index 3fef516c8d5679d16fe2e004e8d98ff24c0fb45b..fe0b5409a0dce253d26e830d7456fd7b
 +        dispatchUpdate(ownerDocument);
        };
      }, [node, context]);
-     React.useEffect(() => {
-       const handleUpdate = /* @__PURE__ */ __name(() => force({}), "handleUpdate");
+-    React.useEffect(() => {
+-      const handleUpdate = /* @__PURE__ */ __name(() => force({}), "handleUpdate");
 -      document.addEventListener(CONTEXT_UPDATE, handleUpdate);
 -      return () => document.removeEventListener(CONTEXT_UPDATE, handleUpdate);
 -    }, []);
-+      ownerDocument.addEventListener(CONTEXT_UPDATE, handleUpdate);
-+      return () => ownerDocument.removeEventListener(CONTEXT_UPDATE, handleUpdate);
-+    }, [ownerDocument]);
      return /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
        import_react_primitive.Primitive.div,
        {
-@@ -196,23 +195,26 @@ var DismissableLayer = /* @__PURE__ */ React.forwardRef(
+@@ -196,23 +196,26 @@ var DismissableLayer = /* @__PURE__ */ React.forwardRef(
    }, "DismissableLayer")
  );
  var DismissableLayerBranch = /* @__PURE__ */ React.forwardRef(/* @__PURE__ */ __name(function DismissableLayerBranch2(props, forwardedRef) {
@@ -126,7 +142,7 @@ index 3fef516c8d5679d16fe2e004e8d98ff24c0fb45b..fe0b5409a0dce253d26e830d7456fd7b
    React.useEffect(() => {
      if (!node) {
        return;
-@@ -256,12 +258,12 @@ function usePointerDownOutside(onPointerDownOutside, args) {
+@@ -256,12 +259,12 @@ function usePointerDownOutside(onPointerDownOutside, args) {
          return;
        }
        const target = event.target;
@@ -141,7 +157,7 @@ index 3fef516c8d5679d16fe2e004e8d98ff24c0fb45b..fe0b5409a0dce253d26e830d7456fd7b
            if (isPointerDownOutsideRef.current) {
              handleClickRef.current();
            }
-@@ -327,11 +329,11 @@ function usePointerDownOutside(onPointerDownOutside, args) {
+@@ -327,11 +330,11 @@ function usePointerDownOutside(onPointerDownOutside, args) {
        ownerDocument.addEventListener(eventName, handleInteractionCapture, true);
        ownerDocument.addEventListener(eventName, handleInteractionBubble);
      }
@@ -155,7 +171,7 @@ index 3fef516c8d5679d16fe2e004e8d98ff24c0fb45b..fe0b5409a0dce253d26e830d7456fd7b
        ownerDocument.removeEventListener("pointerdown", handlePointerDown);
        ownerDocument.removeEventListener("click", handleClickRef.current);
        for (const eventName of outsideInteractionEvents) {
-@@ -374,14 +376,16 @@ function useFocusOutside(onFocusOutside, ownerDocument = globalThis?.document) {
+@@ -374,14 +377,16 @@ function useFocusOutside(onFocusOutside, ownerDocument = globalThis?.document) {
    };
  }
  __name(useFocusOutside, "useFocusOutside");
@@ -177,7 +193,7 @@ index 3fef516c8d5679d16fe2e004e8d98ff24c0fb45b..fe0b5409a0dce253d26e830d7456fd7b
    if (discrete) {
      (0, import_react_primitive.dispatchDiscreteCustomEvent)(target, event);
 diff --git a/dist/index.mjs b/dist/index.mjs
-index b30bb957ec4911a88217d130af18fa7ca290c408..6378598550b716ae02bce0ba7ee032d65d5706c1 100644
+index b30bb957ec4911a88217d130af18fa7ca290c408..837d7f6472f0a85f05475e5bde1fe88afbdc46a0 100644
 --- a/dist/index.mjs
 +++ b/dist/index.mjs
 @@ -12,18 +12,16 @@ import { jsx } from "react/jsx-runtime";
@@ -230,7 +246,26 @@ index b30bb957ec4911a88217d130af18fa7ca290c408..6378598550b716ae02bce0ba7ee032d6
                return false;
              }
              const isPointerDownOnBranch = [...context.branches].some(
-@@ -109,18 +108,18 @@ var DismissableLayer = /* @__PURE__ */ React.forwardRef(
+@@ -87,7 +86,7 @@ var DismissableLayer = /* @__PURE__ */ React.forwardRef(
+       onInteractOutside?.(event);
+       if (!event.defaultPrevented) onDismiss?.();
+     }, ownerDocument);
+-    const isHighestLayer = node ? index === layers.length - 1 : false;
++    const isHighestLayer = index >= 0 && index === layers.length - 1;
+     const handleKeyDown = useCallbackRef((event) => {
+       if (event.key !== "Escape") {
+         return;
+@@ -105,22 +104,28 @@ var DismissableLayer = /* @__PURE__ */ React.forwardRef(
+       ownerDocument.addEventListener("keydown", handleKeyDown, { capture: true });
+       return () => ownerDocument.removeEventListener("keydown", handleKeyDown, { capture: true });
+     }, [ownerDocument, isHighestLayer, handleKeyDown]);
++    // Listen before registering into a new document so the new top layer sees its own update.
++    React.useEffect(() => {
++      const handleUpdate = /* @__PURE__ */ __name(() => force({}), "handleUpdate");
++      ownerDocument.addEventListener(CONTEXT_UPDATE, handleUpdate);
++      return () => ownerDocument.removeEventListener(CONTEXT_UPDATE, handleUpdate);
++    }, [ownerDocument]);
+     React.useEffect(() => {
        if (!node) return;
        if (disableOutsidePointerEvents) {
          if (context.layersWithOutsidePointerEventsDisabled.size === 0) {
@@ -252,7 +287,7 @@ index b30bb957ec4911a88217d130af18fa7ca290c408..6378598550b716ae02bce0ba7ee032d6
            }
          }
        };
-@@ -130,14 +129,14 @@ var DismissableLayer = /* @__PURE__ */ React.forwardRef(
+@@ -130,14 +135,9 @@ var DismissableLayer = /* @__PURE__ */ React.forwardRef(
          if (!node) return;
          context.layers.delete(node);
          context.layersWithOutsidePointerEventsDisabled.delete(node);
@@ -260,18 +295,15 @@ index b30bb957ec4911a88217d130af18fa7ca290c408..6378598550b716ae02bce0ba7ee032d6
 +        dispatchUpdate(ownerDocument);
        };
      }, [node, context]);
-     React.useEffect(() => {
-       const handleUpdate = /* @__PURE__ */ __name(() => force({}), "handleUpdate");
+-    React.useEffect(() => {
+-      const handleUpdate = /* @__PURE__ */ __name(() => force({}), "handleUpdate");
 -      document.addEventListener(CONTEXT_UPDATE, handleUpdate);
 -      return () => document.removeEventListener(CONTEXT_UPDATE, handleUpdate);
 -    }, []);
-+      ownerDocument.addEventListener(CONTEXT_UPDATE, handleUpdate);
-+      return () => ownerDocument.removeEventListener(CONTEXT_UPDATE, handleUpdate);
-+    }, [ownerDocument]);
      return /* @__PURE__ */ jsx(
        Primitive.div,
        {
-@@ -158,23 +157,26 @@ var DismissableLayer = /* @__PURE__ */ React.forwardRef(
+@@ -158,23 +158,26 @@ var DismissableLayer = /* @__PURE__ */ React.forwardRef(
    }, "DismissableLayer")
  );
  var DismissableLayerBranch = /* @__PURE__ */ React.forwardRef(/* @__PURE__ */ __name(function DismissableLayerBranch2(props, forwardedRef) {
@@ -304,7 +336,7 @@ index b30bb957ec4911a88217d130af18fa7ca290c408..6378598550b716ae02bce0ba7ee032d6
    React.useEffect(() => {
      if (!node) {
        return;
-@@ -218,12 +220,12 @@ function usePointerDownOutside(onPointerDownOutside, args) {
+@@ -218,12 +221,12 @@ function usePointerDownOutside(onPointerDownOutside, args) {
          return;
        }
        const target = event.target;
@@ -319,7 +351,7 @@ index b30bb957ec4911a88217d130af18fa7ca290c408..6378598550b716ae02bce0ba7ee032d6
            if (isPointerDownOutsideRef.current) {
              handleClickRef.current();
            }
-@@ -289,11 +291,11 @@ function usePointerDownOutside(onPointerDownOutside, args) {
+@@ -289,11 +292,11 @@ function usePointerDownOutside(onPointerDownOutside, args) {
        ownerDocument.addEventListener(eventName, handleInteractionCapture, true);
        ownerDocument.addEventListener(eventName, handleInteractionBubble);
      }
@@ -333,7 +365,7 @@ index b30bb957ec4911a88217d130af18fa7ca290c408..6378598550b716ae02bce0ba7ee032d6
        ownerDocument.removeEventListener("pointerdown", handlePointerDown);
        ownerDocument.removeEventListener("click", handleClickRef.current);
        for (const eventName of outsideInteractionEvents) {
-@@ -336,14 +338,16 @@ function useFocusOutside(onFocusOutside, ownerDocument = globalThis?.document) {
+@@ -336,14 +339,16 @@ function useFocusOutside(onFocusOutside, ownerDocument = globalThis?.document) {
    };
  }
  __name(useFocusOutside, "useFocusOutside");

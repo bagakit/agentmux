@@ -9,7 +9,7 @@ overrides:
 
 patchedDependencies:
   '@larksuiteoapi/node-sdk@1.76.0': cfd5047ae249ab02400b3e0e081cde147e74f361fac2ffba4807488a47d1ae30
-  '@radix-ui/react-dismissable-layer@1.1.19': 64bab6ea14515676c9233cc8160d4b9a928b71ee1810d040d46c0f48c46c1203
+  '@radix-ui/react-dismissable-layer@1.1.19': b6b5973b3794636833fb8f6d26b5e3e549fa8a118f64279508dbe91c1c3bbb0b
   '@radix-ui/react-focus-scope@1.1.16': e0267ec927a56db8a9d1340ad85cd3d87f24611bd244067deb5e2bedd8254cab
   '@radix-ui/react-menu@2.1.20': b38917d70564a14d4b518a3a2f1253c8743abeb4d382065963e71534e3f6f9f3
   '@radix-ui/react-popper@1.3.3': c893aa4622f277bfa0926b32dd9c74deaa7cb198b9c2af9e784cf9f9c2545dcf
@@ -502,7 +502,7 @@ importers:
         version: 1.1.23(@types/react-dom@19.2.4(@types/react@19.2.18))(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
       '@radix-ui/react-dismissable-layer':
         specifier: 1.1.19
-        version: 1.1.19(patch_hash=64bab6ea14515676c9233cc8160d4b9a928b71ee1810d040d46c0f48c46c1203)(@types/react-dom@19.2.4(@types/react@19.2.18))(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+        version: 1.1.19(patch_hash=b6b5973b3794636833fb8f6d26b5e3e549fa8a118f64279508dbe91c1c3bbb0b)(@types/react-dom@19.2.4(@types/react@19.2.18))(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
       '@radix-ui/react-dropdown-menu':
         specifier: 2.1.20
         version: 2.1.20(@types/react-dom@19.2.4(@types/react@19.2.18))(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
@@ -6473,7 +6473,7 @@ snapshots:
       '@radix-ui/primitive': 1.1.7
       '@radix-ui/react-compose-refs': 1.1.5(@types/react@19.2.18)(react@19.2.8)
       '@radix-ui/react-context': 1.2.2(@types/react@19.2.18)(react@19.2.8)
-      '@radix-ui/react-dismissable-layer': 1.1.19(patch_hash=64bab6ea14515676c9233cc8160d4b9a928b71ee1810d040d46c0f48c46c1203)(@types/react-dom@19.2.4(@types/react@19.2.18))(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
+      '@radix-ui/react-dismissable-layer': 1.1.19(patch_hash=b6b5973b3794636833fb8f6d26b5e3e549fa8a118f64279508dbe91c1c3bbb0b)(@types/react-dom@19.2.4(@types/react@19.2.18))(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
       '@radix-ui/react-focus-guards': 1.1.6(@types/react@19.2.18)(react@19.2.8)
       '@radix-ui/react-focus-scope': 1.1.16(patch_hash=e0267ec927a56db8a9d1340ad85cd3d87f24611bd244067deb5e2bedd8254cab)(@types/react-dom@19.2.4(@types/react@19.2.18))(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
       '@radix-ui/react-id': 1.1.4(@types/react@19.2.18)(react@19.2.8)
@@ -6515,7 +6515,7 @@ snapshots:
       '@types/react': 19.2.18
       '@types/react-dom': 19.2.4(@types/react@19.2.18)
 
-  '@radix-ui/react-dismissable-layer@1.1.19(patch_hash=64bab6ea14515676c9233cc8160d4b9a928b71ee1810d040d46c0f48c46c1203)(@types/react-dom@19.2.4(@types/react@19.2.18))(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)':
+  '@radix-ui/react-dismissable-layer@1.1.19(patch_hash=b6b5973b3794636833fb8f6d26b5e3e549fa8a118f64279508dbe91c1c3bbb0b)(@types/react-dom@19.2.4(@types/react@19.2.18))(@types/react@19.2.18)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)':
     dependencies:
       '@radix-ui/primitive': 1.1.7
       '@radix-ui/react-compose-refs': 1.1.5(@types/react@19.2.18)(react@19.2.8)
