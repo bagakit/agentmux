@@ -70,6 +70,10 @@ export async function openWorkbenchWindow(target: AppWindowTarget, options: { fo
     await readWindowPage(operationId, () => api.ui.workbenchWindows.call('app.window.open', { operationId, target, ...(options.focus === undefined ? {} : { focus: options.focus }) }))
   } catch (error) { publishIssue(error) }
 }
+export function workbenchFocusUnavailable(surface: WorkbenchSurface): false {
+  publishIssue(`The original ${surface === 'survey' ? 'Survey' : 'Recall'} window could not confirm focus. Its selection is kept. Show the window again to bring it forward.`)
+  return false
+}
 export async function focusWorkbenchWindow(identity: WorkbenchWindowDocument): Promise<boolean> {
   try {
     const operationId = mintObjectId()

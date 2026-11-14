@@ -1,3 +1,5 @@
+import { presentKnowledgeSurface, sameKnowledgeSelections } from '../lib/knowledge-surface-navigation'
+import { useWorkbenchDocument } from '../lib/workbench-document'
 import { TextInput } from '@agentmux/client-ui/input'
 import * as Menu from '@radix-ui/react-dropdown-menu'
 import { useEffect, useMemo, useRef, useState } from 'react'
@@ -41,6 +43,7 @@ export function NotebookPageDetails({ page, sourceTitle, sourceDirty = false, sa
   savedEditors?: NoteSavedEditors
   onCheckOriginal?: () => void
 }) {
+  const sourceDocument = useWorkbenchDocument()
   const visible = useWorkbenchPresentationActive()
   const [menuOpen, setMenuOpen] = useState(false)
   useEffect(() => { if (!visible) setMenuOpen(false) }, [visible])
@@ -90,7 +93,7 @@ export function NotebookPageDetails({ page, sourceTitle, sourceDirty = false, sa
     })
   }
   async function openSource(source: NotebookPage['sources'][number]) {
-    const before = useAppStore.getState(), heldSelection = before.recallZoneSelection
+    const before = useAppStore.getState()
     if (sourceCreation.current && sourceCreation.current.sourceId !== source.sourceId) { setSourceIssue('The previous source page is still opening. Retry that same source; your Note and links are kept.'); return }
     sourceCreation.current ??= { sourceId: source.sourceId, prepared: null }; setSourceIssue(null)
     try {
@@ -98,8 +101,9 @@ export function NotebookPageDetails({ page, sourceTitle, sourceDirty = false, sa
         onPrepared(prepared) { sourceCreation.current = { sourceId: source.sourceId, prepared } } })
       sourceCreation.current = null
       const now = useAppStore.getState()
-      if (now.mainSurface !== before.mainSurface || now.recallZoneSelection !== heldSelection || now.recallNoteId !== before.recallNoteId) return
-      now.setMainSurface('survey'); now.setSurveyZoneSelection({ zoneId: created.zone.zoneId, selection: [created.reference], active: created.reference })
+      if (now.mainSurface !== before.mainSurface || !sameKnowledgeSelections(before, now)) return
+      now.setSurveyZoneSelection({ zoneId: created.zone.zoneId, selection: [created.reference], active: created.reference })
+      void presentKnowledgeSurface('survey', now.setMainSurface, { inputPolicy: 'target', sourceDocument })
     } catch (error) { setSourceIssue(presentError(error)) }
   }
   const archiveRoot = library ? notebookPageArchiveRoot(library.pages, page.noteId) : undefined
@@ -124,7 +128,7 @@ export function NotebookPageDetails({ page, sourceTitle, sourceDirty = false, sa
   }
   const panelHeading = (title: string) => <div className="notebook-page-panel-heading"><h3>{title}</h3><button type="button" className="note-text-button" aria-label={`Close ${title.toLowerCase()}`} onClick={closePanel}>Close</button></div>
   return <header className="notebook-page-heading" aria-label="Page details">
-    <div className="notebook-page-topline"><button className="notebook-breadcrumb" title={book?.name ?? page.notebookId} onClick={() => { const state = useAppStore.getState(); state.setRecallNotebook(page.notebookId); state.setRecallZoneSelection(null); state.setMainSurface('recall') }}><span>{book?.name ?? page.notebookId}</span><ThemeNavigationDisclosureIcon size={12} /></button>
+    <div className="notebook-page-topline"><button className="notebook-breadcrumb" title={book?.name ?? page.notebookId} onClick={() => { const state = useAppStore.getState(); state.setRecallNotebook(page.notebookId); state.setRecallZoneSelection(null); void presentKnowledgeSurface('recall', state.setMainSurface, { inputPolicy: 'target', sourceDocument }) }}><span>{book?.name ?? page.notebookId}</span><ThemeNavigationDisclosureIcon size={12} /></button>
     <div className="notebook-page-actions">
       <Menu.Root modal={false} open={visible && menuOpen} onOpenChange={setMenuOpen}><Menu.Trigger asChild><button ref={optionsTrigger} type="button" className="note-text-button" aria-label="Page options" title="Page options"><ThemeActionMoreIcon size={15} /></button></Menu.Trigger>
         <DocumentOverlayPortal component={Menu.Portal}><Menu.Content className="tab-context-menu" align="end" sideOffset={4} collisionPadding={8} onCloseAutoFocus={event => { if (!visible) event.preventDefault() }}>

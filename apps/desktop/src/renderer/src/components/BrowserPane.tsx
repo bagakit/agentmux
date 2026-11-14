@@ -1,3 +1,4 @@
+import { presentKnowledgeSurface } from '../lib/knowledge-surface-navigation'
 import { SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 import { BrowserSitePermissions } from './BrowserSitePermissions'
 import { mintObjectId } from '@agentmux/core/object-id'
@@ -548,7 +549,7 @@ function BrowserPaneContent({
   const [managementVisited, setManagementVisited] = useState(false)
   const research = useRef<{ url: string; mode: BrowserSnapshot['mode']; preparation: SurveyBrowserPreparation | null } | null>(null)
   const privateCreation = useRef<{ source: WorkbenchProjectionSelection; reference: WorkbenchProjectionSelection; zoneId: string; launcher: WorkbenchSurface } | null>(null)
-  async function startResearch(): Promise<void> {
+  async function startResearch(sourceDocument: Document): Promise<void> {
     if (busy) return
     const before = useAppStore.getState()
     if (!research.current) research.current = { url: tab.url, mode: tab.mode, preparation: null }
@@ -568,7 +569,7 @@ function BrowserPaneContent({
         current.workbenchSpaceSelection === before.workbenchSpaceSelection && current.surveyZoneSelection === before.surveyZoneSelection &&
         currentLayout?.activeGroupId === previousLayout?.activeGroupId && currentGroup?.activeTabId === previousGroup?.activeTabId) {
         current.setSurveyZoneSelection({ zoneId: created.zone.zoneId, selection: [created.reference], active: created.reference })
-        current.setMainSurface('survey')
+        void presentKnowledgeSurface('survey', current.setMainSurface, { inputPolicy: 'target', sourceDocument })
       }
     } catch (cause) { setAddressError(`Research could not open: ${presentError(cause)}. The original page and research target are kept; retry here.`) }
     finally { setBusy(false) }
@@ -1583,7 +1584,7 @@ function BrowserPaneContent({
                 <DropdownMenu.Item className="browser-menu__item" aria-label="Browser tools" onSelect={() => { setManagementVisited(true); setManagementOpen(true) }}>
                   <ThemeActionAdjustIcon size={12} /><span>Browser tools…</span>
                 </DropdownMenu.Item>
-                <DropdownMenu.Item className="browser-menu__item" aria-label="Research in Survey" disabled={busy} onSelect={() => void startResearch()}>
+                <DropdownMenu.Item className="browser-menu__item" aria-label="Research in Survey" disabled={busy} onSelect={event => void startResearch((event.target as Element).ownerDocument)}>
                   <ThemeObjectBrowserIcon size={12} /><span>{research.current ? 'Resume research creation' : 'Research in Survey…'}</span>
                 </DropdownMenu.Item>
               </DropdownMenu.Content>
@@ -1613,7 +1614,7 @@ function BrowserPaneContent({
       {currentUnconfirmedBookmarks.length ? <p className="browser-bookmark-result">
         <button type="button" className="small-button" disabled={pageToolDisabled || bookmarkSaving} onClick={saveBookmark}>Save another copy</button>
       </p> : null}
-      {addressError ? <p className="browser-address-error" role="alert">{addressError}{research.current ? <button type="button" className="small-button" disabled={busy} onClick={() => void startResearch()}>Retry same research</button> : null}{privateCreation.current ? <button type="button" className="small-button" disabled={busy} onClick={() => void startPrivatePage()}>Retry same private page</button> : null}</p> : null}
+      {addressError ? <p className="browser-address-error" role="alert">{addressError}{research.current ? <button type="button" className="small-button" disabled={busy} onClick={event => void startResearch(event.currentTarget.ownerDocument)}>Retry same research</button> : null}{privateCreation.current ? <button type="button" className="small-button" disabled={busy} onClick={() => void startPrivatePage()}>Retry same private page</button> : null}</p> : null}
       {inputHistoryNotice ? <p className="browser-address-error" role="status">{inputHistoryNotice}</p> : null}
       <BrowserOperationWarning key={tab.profileId ?? tab.browserId} activity={browserActivity} />
       <BrowserSitePermissions key={`${tab.browserId}:${tab.navigationId}`} state={tab.sitePermissions}

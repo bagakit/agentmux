@@ -5,7 +5,7 @@ import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useAppStore } from '../store'
 import { SurfaceWindowMenu } from './KnowledgeSurfaceWindow'
 import { isWorkbenchSurfaceDetached } from '../lib/workbench-window-registry'
-import { openWorkbenchWindow } from '../lib/workbench-windows'
+import { presentKnowledgeSurface } from '../lib/knowledge-surface-navigation'
 import { FocusNavigationButton } from './FocusNavigationButton'
 import { SettingsNavigation } from './SettingsNavigation'
 import { FocusNavigationPreview } from './FocusNavigationPreview'
@@ -275,7 +275,7 @@ export function SurfaceSwitch({ settingsOpen = false, onCloseSettings }: {
         onClick={(event) => {
           if (knowledgeSurface && isWorkbenchSurfaceDetached(knowledgeSurface)) {
             hideTooltip(plugin.id)
-            void openWorkbenchWindow({ kind: 'surface', surface: knowledgeSurface })
+            void presentKnowledgeSurface(knowledgeSurface, setMainSurface, { inputPolicy: 'target', sourceDocument: event.currentTarget.ownerDocument })
             return
           }
           const start = performance.now()

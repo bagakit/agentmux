@@ -1,3 +1,5 @@
+import { presentKnowledgeSurface } from '../lib/knowledge-surface-navigation'
+import { useWorkbenchDocument } from '../lib/workbench-document'
 import { NoteFileContext, NoteFileLinkContext, useNoteFileResource } from '@agentmux/client-ui/components/NoteFileContext'
 import { useDesktopNoteLinkOpener } from '../lib/note-file-link'
 import { useCallback, useContext, useEffect, useLayoutEffect, useMemo, useState, type ReactNode } from 'react'
@@ -46,6 +48,7 @@ export function NoteFileView({ document, knowledge, onChange, onSave, onOpen, re
   onSnapshotIssue?: (displayedRaw: string, incomingRaw: string, reason: string) => void
   onKeepDisplayedDraft?: (displayedRaw: string, incomingRaw: string) => void
 }) {
+  const sourceDocument = useWorkbenchDocument()
   const catalog = useNotebookLibrary(state => state.state)
   const presentation = useWorkbenchBrowserPresentation()
   const openAttachment = useDesktopNoteLinkOpener()
@@ -99,18 +102,20 @@ export function NoteFileView({ document, knowledge, onChange, onSave, onOpen, re
   useEffect(() => {
     if (!handle || focusRequest === undefined) return
     const editor = handle.editor
+    if (editor.isDestroyed) return
+    const owner = editor.view.dom.ownerDocument
     const attempt = () => {
       if (editor.isDestroyed || !canFocus?.()) return
       if (!desktopElementVisible(editor.view.dom)) return
       editor.view.focus()
-      if (editor.view.dom === window.document.activeElement || editor.view.dom.contains(window.document.activeElement)) onFocused?.(focusRequest)
+      if (editor.view.dom.contains(owner.activeElement)) onFocused?.(focusRequest)
     }
     attempt()
     if (!canFocus?.()) return
-    const observer = new MutationObserver(() => { attempt(); if (!canFocus?.()) observer.disconnect() })
-    observer.observe(window.document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['inert', 'hidden', 'aria-hidden'] })
+    const observer = new (owner.defaultView?.MutationObserver ?? MutationObserver)(() => { attempt(); if (!canFocus?.()) observer.disconnect() })
+    observer.observe(owner.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['inert', 'hidden', 'aria-hidden'] })
     return () => observer.disconnect()
-  }, [handle, focusRequest, canFocus, onFocused, read, restoredBlock, revealBlock])
+  }, [handle, focusRequest, canFocus, onFocused, read, restoredBlock, revealBlock, sourceDocument])
   useLayoutEffect(() => {
     if (!presentation.active || !pendingBlock || !handle || revealBlock) return
     if (read.status !== 'valid' || read.note.noteId !== pendingBlock.noteId || sourceIdentity !== pendingBlock.sourceIdentity) {
@@ -137,7 +142,7 @@ export function NoteFileView({ document, knowledge, onChange, onSave, onOpen, re
       if (onOpenPage) { await onOpenPage(page, blockId, signal); return }
       const state = useAppStore.getState()
       state.setRecallNotebook(page.notebookId, page.noteId)
-      state.setMainSurface('recall')
+      void presentKnowledgeSurface('recall', state.setMainSurface, { inputPolicy: 'target', sourceDocument })
       await openNotebookPage(page, presentation.projection?.onSelect, presentation.reference,
         blockId ? { noteId: page.noteId, blockId } : undefined, undefined, signal)
     } catch (error) { setIssue(presentError(error)); useAppStore.getState().reportError(error) }

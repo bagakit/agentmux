@@ -1,3 +1,4 @@
+import { presentKnowledgeSurface } from './knowledge-surface-navigation'
 import { mintObjectId } from '@agentmux/core/object-id'
 import { NOTE_FILE_EXTENSION } from '@agentmux/client-ui/note/note-format'
 import { scratchWorkspaceFilePath, scratchTopicLogicalPath, scratchTopicPhysicalPath, SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
@@ -39,7 +40,7 @@ export function selectedKnowledgeSources(workspaceId: string): { title: string; 
     return { title: tab.name ?? 'Discussion', sources: [{ kind: 'topic', topicId: origin.topicId, chatId: tab.id, threadId: surface.regionId }] }
   return tab.space?.zoneId ? { title: tab.name ?? 'Current work', sources: [{ kind: 'space', zoneId: tab.space.zoneId, tabId: tab.id, regionId: surface.regionId }] } : null
 }
-export async function openKnowledgeSource(source: TopicKnowledgeSource): Promise<void> {
+export async function openKnowledgeSource(source: TopicKnowledgeSource, sourceDocument?: Document): Promise<void> {
   const state = useAppStore.getState()
   if (source.kind === 'notebook') {
     const library = await api.notebooks.read()
@@ -48,7 +49,7 @@ export async function openKnowledgeSource(source: TopicKnowledgeSource): Promise
     if (current.mainSurface !== state.mainSurface || current.recallNotebookId !== state.recallNotebookId || current.recallNoteId !== state.recallNoteId || current.recallZoneSelection !== state.recallZoneSelection || current.workbenchSpaceSelection !== state.workbenchSpaceSelection) return
     useAppStore.getState().setRecallZoneSelection(null)
     useAppStore.getState().setRecallNotebook(source.notebookId)
-    useAppStore.getState().setMainSurface('recall')
+    await presentKnowledgeSurface('recall', current.setMainSurface, { inputPolicy: 'target', ...(sourceDocument ? { sourceDocument } : {}) })
     return
   }
   if (source.kind === 'url') return api.ui.openExternal(source.url)

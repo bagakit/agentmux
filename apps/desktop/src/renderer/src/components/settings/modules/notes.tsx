@@ -1,3 +1,4 @@
+import { presentKnowledgeSurface } from '../../../lib/knowledge-surface-navigation'
 import { DEFAULT_NOTEBOOK_ID } from '@agentmux/core/notebook-catalog'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useAppStore } from '../../../store'
@@ -30,7 +31,7 @@ export const notesSettingsModule = {
         const state = useAppStore.getState()
         state.setRecallNotebook(DEFAULT_NOTEBOOK_ID)
         state.setRecallZoneSelection(null)
-        state.setMainSurface('recall')
+        void presentKnowledgeSurface('recall', state.setMainSurface, { inputPolicy: 'target' })
       }} />
   }
 } as const satisfies SettingsModule

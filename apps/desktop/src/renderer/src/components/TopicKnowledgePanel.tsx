@@ -184,7 +184,7 @@ export function TopicKnowledgePanel({ workspace, topic, topics = [], active = tr
         sourcePath: rootPath + '/knowledge/' + selected.entryId + '.json',
         openWorkspaceFile: (path: string) => { void useAppStore.getState().openFile(path, undefined, undefined, workspace.id).catch(cause => setError(presentError(cause))) }
       } : {})} />
-      {selected.sources.length ? <details className="topic-knowledge-sources" open><summary>Sources</summary>{selected.sources.map((source, index) => { const SourceIcon = KNOWLEDGE_SOURCE_ICONS[source.kind]; return <button type="button" className="topic-knowledge-source" key={index} title={knowledgeSourceLabel(source)} onClick={() => { void openKnowledgeSource(source).catch(cause => setError(presentError(cause))) }}><SourceIcon size={12} /><span>{knowledgeSourceLabel(source)}</span></button> })}</details> : null}
+      {selected.sources.length ? <details className="topic-knowledge-sources" open><summary>Sources</summary>{selected.sources.map((source, index) => { const SourceIcon = KNOWLEDGE_SOURCE_ICONS[source.kind]; return <button type="button" className="topic-knowledge-source" key={index} title={knowledgeSourceLabel(source)} onClick={event => { void openKnowledgeSource(source, event.currentTarget.ownerDocument).catch(cause => setError(presentError(cause))) }}><SourceIcon size={12} /><span>{knowledgeSourceLabel(source)}</span></button> })}</details> : null}
       </div>
     </article> : null}
     {selectedDocument ? <TopicKnowledgeDocumentReader key={JSON.stringify(selectedDocument.target)} document={selectedDocument} refresh={attempt} onClose={closeDetail} /> : null}

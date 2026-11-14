@@ -1,3 +1,4 @@
+import { presentKnowledgeSurface } from '../../../lib/knowledge-surface-navigation'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useAppStore } from '../../../store'
 import { BrowserStartPageSettings } from '../BrowserStartPageSettings'
@@ -33,7 +34,7 @@ export const surveySettingsModule = {
   Pane({ config, onClose, active }) {
     const sidebarWidth = useAppStore(state => state.surveySidebarWidth)
     return <><BrowserStartPageSettings config={config.browser.startPage} onSave={saveStartPage}
-      onOpen={() => { onClose(); useAppStore.getState().setMainSurface('survey') }}><DefaultBrowserSetting active={active} /></BrowserStartPageSettings>
+      onOpen={() => { onClose(); void presentKnowledgeSurface('survey', useAppStore.getState().setMainSurface, { inputPolicy: 'target' }) }}><DefaultBrowserSetting active={active} /></BrowserStartPageSettings>
       <SurveyThumbnailSettings preferences={config.browser.surveyThumbnails} navigationWidth={clampSurveySidebarWidth(sidebarWidth)} onSave={saveThumbnails} /></>
   }
 } as const satisfies SettingsModule

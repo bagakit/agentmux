@@ -1,3 +1,5 @@
+import { presentKnowledgeSurface, sameKnowledgeSelections } from '../lib/knowledge-surface-navigation'
+import { useWorkbenchDocument } from '../lib/workbench-document'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useIconFeedback } from '../lib/use-icon-feedback'
 import { useWorkbenchPresentationActive } from '../lib/workbench-presentation'
@@ -17,6 +19,7 @@ const ThemeObjectSurveyIcon = semanticIconComponent('object.survey')
 
 /** A result destination, separate from Survey's browser navigation and Recall's directory. */
 export function SurveyRecallCapture({ target, onClose }: { target: CaptureTarget | null; onClose(): void }) {
+  const sourceDocument = useWorkbenchDocument()
   const library = useNotebookLibrary(state => state.state)
   const libraryIssue = useNotebookLibrary(state => state.issue)
   const draft = useLauncherState(state => target ? state.drafts[target.draftId] ?? EMPTY_LAUNCHER_DRAFT : EMPTY_LAUNCHER_DRAFT)
@@ -57,14 +60,14 @@ export function SurveyRecallCapture({ target, onClose }: { target: CaptureTarget
   }
   async function openSaved() {
     if (!receipt?.notebookRegistered || busy) return
-    const captured = target, navigation = fileNavigationSelection(useAppStore.getState())
+    const captured = target, before = useAppStore.getState(), navigation = fileNavigationSelection(before)
     setBusy(true); setError(null)
     try {
       const saved = await refreshNotebookLibrary(), page = saved.pages[receipt.noteId]
       if (!page) throw new Error('The saved page is not confirmed in its Notebook. Your file and capture receipt are kept; check this same page again.')
-      if (current.current !== captured || fileNavigationSelection(useAppStore.getState()) !== navigation) return
       const state = useAppStore.getState()
-      state.setRecallNotebook(page.notebookId, page.noteId); state.setMainSurface('recall')
+      if (current.current !== captured || !sameKnowledgeSelections(before, state) || fileNavigationSelection(state) !== navigation) return
+      state.setRecallNotebook(page.notebookId, page.noteId); void presentKnowledgeSurface('recall', state.setMainSurface, { inputPolicy: 'target', sourceDocument })
       if (await openNotebookPage(page)) onClose()
     } catch (cause) { setError(presentError(cause)) }
     finally { setBusy(false) }

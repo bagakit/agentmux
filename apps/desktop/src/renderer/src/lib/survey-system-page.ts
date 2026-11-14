@@ -1,3 +1,4 @@
+import { presentKnowledgeSurface } from './knowledge-surface-navigation'
 import { formatAmuxObjectLink } from '@agentmux/core/sharing'
 import type { AppState } from '../store'
 import { SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
@@ -5,7 +6,7 @@ import type { SystemPageOutcome } from '../../../shared/system-web-url'
 import type { SurveyBrowserPreparation } from './survey-browser-creation'
 
 export type SystemPageState = Pick<AppState,
-  'tabs' | 'createSurveyBrowser' | 'setSurveyZoneSelection' | 'setMainSurface'>
+  'tabs' | 'createSurveyBrowser' | 'surveyProfileView' | 'surveyZoneSelection' | 'setSurveyZoneSelection' | 'setMainSurface'>
 export type SystemPageHost = { get(): SystemPageState; navigation(): string; subscribe(listener: () => void): () => void }
 // Presentation priority only; requests, resource creation and saving keep their original owners.
 const latestPresentation = new WeakMap<SystemPageHost['get'], object>()
@@ -17,11 +18,14 @@ export async function openSystemPageInSurvey(host: SystemPageHost, request: { ur
   const presentation = {}
   latestPresentation.set(get, presentation)
   let navigation = host.navigation(), presenting = false
+  let surveySelection = get().surveyZoneSelection, profile = get().surveyProfileView
+  const current = () => host.navigation() === navigation && get().surveyZoneSelection === surveySelection && get().surveyProfileView === profile
   let navigationChanged = false
-  const unsubscribe = host.subscribe(() => { if (!presenting && host.navigation() !== navigation) navigationChanged = true })
+  let focus: Promise<boolean> | undefined
+  const unsubscribe = host.subscribe(() => { if (!presenting && !current()) navigationChanged = true })
   let preparation: SurveyBrowserPreparation | null = null
   const reveal = (prepared: SurveyBrowserPreparation): void => {
-    if (signal.aborted || latestPresentation.get(get) !== presentation || !prepared.reference || navigationChanged || host.navigation() !== navigation) return
+    if (signal.aborted || latestPresentation.get(get) !== presentation || !prepared.reference || navigationChanged || !current()) return
     const browser = get().tabs[prepared.reference.tabId]?.regions[prepared.reference.regionId]
     if (prepared.admission?.outcome === 'unknown') return
     const page = browser?.kind === 'browser' && prepared.createdBrowser?.id === browser.browserId
@@ -32,8 +36,8 @@ export async function openSystemPageInSurvey(host: SystemPageHost, request: { ur
       get().setSurveyZoneSelection(page ? { kind: 'page', regionId: prepared.reference.regionId, browserId: browser.browserId }
         : { zoneId: prepared.zone.zoneId, selection: [{ tabId: prepared.reference.tabId, regionId: prepared.reference.regionId }],
             active: { tabId: prepared.reference.tabId, regionId: prepared.reference.regionId } })
-      get().setMainSurface('survey')
-      navigation = host.navigation()
+      focus ??= presentKnowledgeSurface('survey', get().setMainSurface, { inputPolicy: 'target' })
+      navigation = host.navigation(); surveySelection = get().surveyZoneSelection; profile = get().surveyProfileView
     } finally { presenting = false }
   }
   try {
@@ -41,6 +45,8 @@ export async function openSystemPageInSurvey(host: SystemPageHost, request: { ur
     const browser = get().tabs[prepared.reference.tabId]?.regions[prepared.reference.regionId]
     if (browser?.kind !== 'browser') throw new Error('The original Survey Browser attachment is unconfirmed.')
     reveal(prepared)
+    if (focus && !await focus) return { state: 'unconfirmed', browserId: browser.browserId, reference: prepared.reference,
+      message: 'The original page is available in Survey. Bringing its window forward was unconfirmed. Show the Survey window to view the page.' }
     if (prepared.admission?.issues.length) return { state: 'unconfirmed', browserId: browser.browserId, reference: prepared.reference, message: 'The page is available. ' + prepared.admission.issues.map(issue => issue.message).join(' ') }
     return { state: 'opened', browserId: browser.browserId, reference: prepared.reference }
   } catch (error) {
