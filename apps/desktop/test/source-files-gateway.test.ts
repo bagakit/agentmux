@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from 'vitest'
-import { access, readFile, rename, writeFile } from 'node:fs/promises'
+import { access, mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { AgentMuxControlServer, AgentMuxSpatialStateStore, connectAgentMuxRpc, readSpaceSnapshot } from '@agentmux/core'
 import { sourceFilesHosts } from './helpers/source-files-hosts.js'
@@ -46,7 +46,7 @@ it('actual Main uses Source directory registration and Native Files without an A
   expect((await a!.rpc.call('app.snapshot', { include: ['spaces'] })).spaces).toEqual([])
   expect(await readFile(join(a!.project, 'original.txt'), 'utf8')).toBe('source-a original body')
   await expect(f.runtime.sourceFilesCall({ ...target, expectedRuntimeId: a!.identity.runtimeId }, 'file.stat', { zoneId: mount.zoneId, path: '.', expectedResource: { hostId: 'local', workspaceId: mount.workspaceId, workspacePath: b!.project } })).rejects.toMatchObject({ code: 'RUNTIME_OWNER_MISMATCH' })
-  await expect(f.runtime.sourceFilesCall(target, 'space.commit' as never, {} as never)).rejects.toMatchObject({ code: 'INVALID_CONTROL_REQUEST' })
+  await expect(f.runtime.sourceFilesCall(target, 'app.snapshot' as never, { include: ['workspaces'] } as never)).rejects.toMatchObject({ code: 'INVALID_CONTROL_REQUEST' })
 })
 
 it('actual Source Native mkdir ACK survives a late carrier replacement and old OP inspect does not require its live directory', async () => {
@@ -93,6 +93,35 @@ it('a positive original folder registration is retained after carrier replacemen
   const recovered = await f.runtime.resolveSourceFiles(target, { kind: 'directory', path: b.project })
   expect(recovered).toMatchObject({ status: 'located', locator: { mount: { reference: receipt.reference, zoneId: receipt.zoneId, workspaceId: receipt.workspaceId } } })
   expect(register).toHaveBeenCalledTimes(1)
+})
+
+it('a registration result interrupted after the original durable write is recovered by readonly observation without another register', async () => {
+  const f = await sourceFilesHosts(cleanup), b = f.sources[1]!, target = { hostId: b.id, expectedRuntimeId: b.identity.runtimeId }
+  const real = AgentMuxSpatialStateStore.prototype.registerDirectory
+  const register = vi.spyOn(AgentMuxSpatialStateStore.prototype, 'registerDirectory').mockImplementation(async function (...args) {
+    await real.call(this, ...args)
+    throw Error('Original registration result interrupted after the durable write')
+  })
+  const found = await f.runtime.resolveSourceFiles(target, { kind: 'directory', path: b.project })
+  if (found.status !== 'registration-required') throw Error('No original registration packet')
+  await expect(f.runtime.registerFolderSpace(b.id, found.registration)).rejects.toThrow('interrupted after the durable write')
+  const recovered = await f.runtime.resolveSourceFiles(target, { kind: 'directory', path: b.project })
+  expect(recovered.status).toBe('located')
+  expect(JSON.stringify(recovered)).not.toContain('diskDurability')
+  expect(register).toHaveBeenCalledTimes(1)
+  expect(await readFile(join(b.project, 'original.txt'), 'utf8')).toBe('source-b original body')
+})
+
+it('the frozen Source directory packet never adopts a replacement inode or registers it on reconnect', async () => {
+  const f = await sourceFilesHosts(cleanup), b = f.sources[1]!, target = { hostId: b.id, expectedRuntimeId: b.identity.runtimeId }
+  const found = await f.runtime.resolveSourceFiles(target, { kind: 'directory', path: b.project })
+  if (found.status !== 'registration-required') throw Error('No exact original directory witness')
+  await rename(b.project, b.project + '-retained'); await mkdir(b.project)
+  const register = vi.spyOn(AgentMuxSpatialStateStore.prototype, 'registerDirectory')
+  await expect(f.runtime.registerFolderSpace(b.id, found.registration)).rejects.toMatchObject({ code: 'SPACE_DIRECTORY_CHANGED' })
+  expect(register).not.toHaveBeenCalled()
+  expect((await b.rpc.call('app.snapshot', { include: ['spaces'] })).spaces).toEqual([])
+  expect(await readFile(join(b.project + '-retained', 'original.txt'), 'utf8')).toBe('source-b original body')
 })
 
 it('production-shaped client server borrows the real Core fence with no hostedRuntime and rejects wrong R or new I before Files', async () => {
