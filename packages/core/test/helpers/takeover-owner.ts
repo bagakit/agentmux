@@ -10,9 +10,9 @@ import { AgentMuxCreationAuthority } from '../../src/agent-creation-authority.js
 import { creationInputOwner } from './creation-input-owner.js'
 
 /** Real original Core/Host admission and first input with an isolated deterministic Native port. */
-export async function createTakeoverOwnerFixture(cleanup: Array<() => unknown | Promise<unknown>>, options: { authoritySocketPath?: string } = {}) {
-  const h = await creationInputOwner(); cleanup.push(() => h.close())
-  const runtimeId = 'original-takeover-core', owner = { runtimeId, ownerInstanceId: 'original-takeover-instance', protocolVersion: 2 as const, processId: process.pid, ctxmux: null, availability: 'connected' as const }
+export async function createTakeoverOwnerFixture(cleanup: Array<() => unknown | Promise<unknown>>, options: { authoritySocketPath?: string; postLaunch?: boolean; runtimeId?: string } = {}) {
+  const h = await creationInputOwner(options.postLaunch); cleanup.push(() => h.close())
+  const runtimeId = options.runtimeId ?? 'original-takeover-core', owner = { runtimeId, ownerInstanceId: 'original-takeover-instance', protocolVersion: 2 as const, processId: process.pid, ctxmux: null, availability: 'connected' as const }
   h.inner.creationAuthority = new AgentMuxCreationAuthority({ stateDirectory: join(h.root, 'creation-authority'), runtimeId })
   const executors = new AgentMuxHostExecutorOwner({ path: join(h.root, 'executors.json'), runtimeId, catalog: () => h.client.catalog() })
   await executors.configure({ executorId: 'codex', config: { label: 'Original executor', providerId: 'codex', command: 'codex', args: [], env: {}, injectAgentMuxGuide: false } }); h.inner.hostExecutorOwner = executors

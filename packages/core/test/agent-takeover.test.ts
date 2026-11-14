@@ -197,6 +197,8 @@ it('a separate execution Core consumes the original binding through Hosted, whil
   // Only the Native helper transport is a leaf. The remote Hosted codec, configured
   // creation, File Session store, first-input owner and original C remain real.
   d.inner.prepareToolExecutionLaunch = async (_provider: unknown, plan: unknown) => plan
+  // The bridge/workspace leaf is deterministic here; actual owned workspace qualification has separate Native coverage.
+  d.inner.validateOwnedAgentCreation = async () => undefined
   const { hostedTestClient } = await import('./helpers/hosted-runtime-port.js'), remote = await hostedTestClient(d.client); cleanup.push(() => remote.dispose())
   expect('createSpatialHostAgentWithDelivery' in remote.sdk).toBe(false)
   f.extraClients.push({ hostId: 'execution-in-source', client: remote.sdk })

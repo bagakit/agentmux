@@ -1,3 +1,4 @@
+import { defineRun } from '@ctxmux/sdk'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { AgentMuxClient, AgentMuxFileAgentSessionStore, AgentMuxSpatialStateStore, AgentMuxControlServer, connectAgentMuxRpc } from '@agentmux/core'
@@ -24,8 +25,12 @@ Object.assign(client.kernel, { isConnected: () => true, connect: async () => {},
   start: async spec => { const runId = 'restarted-takeover-run'; starts.push(spec); return run(runId, spec) },
   list: async () => starts.map(spec => run('restarted-takeover-run', spec)), status: async id => run(id, starts[0]),
   input: async () => { inputs++; throw Error('Continuation cannot replay input.') }, stop: async () => { stops++; throw Error('Continuation cannot stop an Agent.') } })
+client.kernel.creationRuntimeIdentity = () => ({ runtimeId: 'original-fixture-native', instanceId: 'fixture-runtime', protocolVersion: 1, buildIdentity: 'fixture' })
+client.kernel.prepareStart = ({ program, args, cwd, env, cols, rows }) => defineRun(program, { args, cwd, env, initialSize: { cols: cols ?? 80, rows: rows ?? 24 } })
+client.kernel.startPrepared = (request, operationKey) => client.kernel.start({ ...request, operationKey })
+client.kernel.inspectPreparedStart = async (_request, operationKey) => (await client.kernel.list()).find(run => run.lifecycleOperationId === operationKey) ?? null
 client.hookServer.isRunning = () => true
-client.hookServer.createBinding = () => ({ bindingId: 'b'.repeat(43), endpoint: { url: 'http://127.0.0.1:0', token: 't'.repeat(43) }, bindRun: async () => {}, close: async () => {} })
+client.hookServer.createBinding = (_sid, _provider, bindingId) => ({ bindingId, endpoint: { url: 'http://127.0.0.1:0', token: 't'.repeat(43) }, bindRun: async () => {}, close: async () => {} })
 client.ensureManagedHooks = async () => {}; client.ensureTerminalHandshakeOrDegrade = async value => value
 client.screenEvidence.wait = async () => 0
 client.probePreparedAgent = async () => ({ providerId: 'codex', executable: 'codex', installed: true, capabilities: provider.catalog.capabilities })
