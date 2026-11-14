@@ -16,13 +16,13 @@ export const { cursorPromptPayloadConsumption }: { cursorPromptPayloadConsumptio
   })
 
 export function createCursorProvider(defineAgentProvider: (definition: AgentProviderDefinition) => AgentProvider): AgentProvider {
-  const { catalog: seed, planManagedHooks, hook, ...cursor } = cursorProvider({
+  const { catalog: seed, planHooks, hook, ...cursor } = cursorProvider({
     hookToolFields, formatHookToolOutput, runScopedHookCommand, hookCommandTimeout, buildPromptInputPayload, sanitizeBracketedPasteText
   })
   const { subagentTracking: _tracking, nativeHandle: _identity, ...observationOnly } = hook
   const provider = defineAgentProvider({
     ...cursor, hook, catalog: catalog(seed),
-    planManagedHooks: ({ workspacePath, env }) => planManagedHooks(cursorDataRoot(workspacePath, env)),
+    planManagedHooks: ({ workspacePath, env }) => planHooks(cursorDataRoot(workspacePath, env)),
     prepareOwnedWorkspaceTrust: prepareCursorOwnedWorkspaceTrust,
     promptPayloadConsumption: cursorPromptPayloadConsumption,
     discoverNativeSession: discoverCursorNativeSession,

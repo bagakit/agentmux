@@ -124,7 +124,7 @@ function planManagedHooks(dataRoot: string, { runScopedHookCommand, hookCommandT
 export function cursorProvider(services: CursorServices) {
   const { buildPromptInputPayload, sanitizeBracketedPasteText } = services
   return {
-    planManagedHooks: (dataRoot: string) => planManagedHooks(dataRoot, services),
+    planHooks: (dataRoot: string) => planManagedHooks(dataRoot, services),
     catalog: {
       id: 'cursor', label: 'Cursor', executable: 'cursor-agent', expectedProcess: 'cursor-agent',
       promptDelivery: 'positional-argv',
