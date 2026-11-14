@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url'
 
 const semanticIcons = './styles/semantic-icons.css'
 const fieldStyles = './input/styles.css'
+const actionStyles = './styles/buttons.css'
 
 // Public names stay the same in the workspace and in a compiled distribution.
 // Workspace-only entries remain in the package manifest until their consumers move.
@@ -14,7 +15,7 @@ export const supportedExamples = {
       './components/Button': 'components/Button.tsx',
       './components/IconButton': 'components/IconButton.tsx'
     },
-    styles: ['./styles/buttons.css']
+    styles: [actionStyles]
   },
   fields: {
     entries: {
@@ -29,7 +30,7 @@ export const supportedExamples = {
       './components/HoverDropdownMenu': 'components/HoverDropdownMenu.tsx',
       './overlay-host': 'overlay-host.tsx'
     },
-    styles: ['./styles/overlays.css']
+    styles: [fieldStyles, actionStyles, './styles/overlays.css']
   },
   feedback: {
     entries: { './components/InlineRenameField': 'components/InlineRenameField.tsx' },
