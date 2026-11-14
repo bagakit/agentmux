@@ -714,6 +714,9 @@ export class BrowserViewManager {
     return [...live, ...released]
   }
   private readonly entries = new Map<string, BrowserEntry>()
+  /** Derived native sharing scopes; Chromium remains the only zoom setting owner. */
+  private readonly zoomScopes = new Map<Session, Map<string, Set<WebContentsView>>>()
+  private readonly zoomScopeByView = new WeakMap<WebContentsView, { session: Session; key: string; views: Set<WebContentsView> }>()
   private readonly inputSurfaces = new Map<WebContentsView, NativeBrowserInputSurface>()
   private readonly inputSurfaceCleanup = new Map<string, Set<NativeBrowserInputSurface>>()
   /** Native-handle index only; entries and its exact current view remain the sole owner facts. */
@@ -2162,6 +2165,7 @@ export class BrowserViewManager {
       this.beginProfileActivity(storage, view)
       return entry
     } catch (error) {
+      this.forgetZoomScope(view)
       this.entries.delete(id)
       this.notifyNativeVisibility(this.windowForView(view))
       const cleanupErrors: unknown[] = []
@@ -2477,6 +2481,8 @@ export class BrowserViewManager {
       this.sitePermissions?.cancel(entry.id, authoritativeView.webContents)
       entry.view = candidate
       entry.zoomFactor = candidate.webContents.getZoomFactor()
+      this.forgetZoomScope(authoritativeView)
+      this.indexZoomScope(entry)
       this.clearNativeChildWarning(entry, 'placementWarning')
       entry.controlFeedback = candidateControlFeedback
       // Candidate preparation predates current-owner input/media observation. Do not inherit
@@ -2584,8 +2590,43 @@ export class BrowserViewManager {
     if (!entry) throw new Error('This page is not open, so its zoom is unchanged.')
     const contents = entry.view.webContents
     contents.setZoomFactor(steppedBrowserZoom(contents.getZoomFactor(), step))
-    for (const page of this.entries.values()) if (page.zoomFactor !== undefined) this.observeZoom(page)
+    this.observeZoom(entry)
+    for (const view of this.zoomScopeByView.get(entry.view)?.views ?? []) {
+      if (view === entry.view) continue
+      const page = this.entriesByContents.get(view.webContents)
+      if (page && this.owns(page, view) && page.zoomFactor !== undefined) this.observeZoom(page)
+    }
     return this.snapshot(entry)
+  }
+
+  private forgetZoomScope(view: WebContentsView): void {
+    const scope = this.zoomScopeByView.get(view)
+    if (!scope) return
+    scope.views.delete(view)
+    const sites = this.zoomScopes.get(scope.session)
+    if (!scope.views.size) sites?.delete(scope.key)
+    if (!sites?.size) this.zoomScopes.delete(scope.session)
+    this.zoomScopeByView.delete(view)
+  }
+
+  private indexZoomScope(entry: BrowserEntry): void {
+    const view = entry.view, contents = view.webContents
+    if (!this.owns(entry, view) || contents.isDestroyed()) return
+    const nativeUrl = contents.getURL(), parsed = URL.parse(nativeUrl)
+    // Chromium's HostZoomMap uses the host, or the full hostless URL without
+    // its fragment. Scheme and port do not split one host's zoom in a Session.
+    const key = parsed?.hostname || nativeUrl.split('#', 1)[0]
+    const previous = this.zoomScopeByView.get(view)
+    if (previous?.session === contents.session && previous.key === key) return
+    this.forgetZoomScope(view)
+    // An uncommitted URL grants no shared scope; the exact page still zooms.
+    if (!key) return
+    let sites = this.zoomScopes.get(contents.session)
+    if (!sites) this.zoomScopes.set(contents.session, sites = new Map())
+    let views = sites.get(key)
+    if (!views) sites.set(key, views = new Set())
+    views.add(view)
+    this.zoomScopeByView.set(view, { session: contents.session, key, views })
   }
 
   /** The Browser showing this page now; a page being replaced or already released belongs to none. */
@@ -2599,6 +2640,7 @@ export class BrowserViewManager {
   /** Publishes a changed zoom of this page's site and refits its fixed viewport; called once Chromium has applied it. */
   private observeZoom(entry: BrowserEntry): void {
     if (entry.view.webContents.isDestroyed()) return
+    this.indexZoomScope(entry)
     const zoomFactor = entry.view.webContents.getZoomFactor(), previous = entry.zoomFactor
     if (zoomFactor === previous) return
     entry.zoomFactor = zoomFactor
@@ -4598,6 +4640,7 @@ export class BrowserViewManager {
     // this exact storage object; a newly created Browser with the same id remains independent.
     if (this.entries.get(id)?.storage === storage) {
       if (entry) this.retainClosedInputShield(entry)
+      if (entry) this.forgetZoomScope(entry.view)
       this.entries.delete(id)
     }
     // destroyOwner can remove the map entry before native close throws. Keep using the captured
@@ -4689,6 +4732,7 @@ export class BrowserViewManager {
     }
     this.clearFavicon(entry)
     this.retainClosedInputShield(entry)
+    this.forgetZoomScope(entry.view)
     this.entries.delete(id)
     this.notifyNativeVisibility(this.windowForView(entry.view))
     if (!this.window.isDestroyed()) {
@@ -4724,6 +4768,7 @@ export class BrowserViewManager {
     try { this.retryClosingViews(previousClosures.filter(owner => !privateClosures.has(owner.id))) } catch (error) { cleanupErrors.push(error) }
     for (const unsubscribe of this.webAuthnSessions.values()) unsubscribe()
     this.webAuthnSessions.clear()
+    this.zoomScopes.clear()
     this.sitePermissions?.dispose()
     for (const session of this.capsuleResponseSessions) {
       session.webRequest.onBeforeRequest(null)
@@ -4982,6 +5027,7 @@ export class BrowserViewManager {
     })
     contents.on('did-navigate', (_event, url) => {
       if (!this.owns(entry, view)) return
+      this.indexZoomScope(entry)
       entry.nativeChild?.closing?.settle(false)
       const document = entry.initialDocument
       if (document?.view === view && document.navigationId === entry.navigationId) document.committedNavigationId = entry.navigationId
@@ -4997,6 +5043,7 @@ export class BrowserViewManager {
     })
     contents.on('did-navigate-in-page', (_event, url, isMainFrame) => {
       if (!isMainFrame || !this.owns(entry, view)) return
+      this.indexZoomScope(entry)
       entry.nativeChild?.closing?.settle(false)
       entry.committedNavigationId = entry.navigationId
       const reported = this.faviconUrls.get(view)
@@ -5037,6 +5084,7 @@ export class BrowserViewManager {
       this.emit(entry)
     })
     contents.once('destroyed', () => {
+      this.forgetZoomScope(view)
       this.endProfileActivity(view)
       this.sitePermissions?.cancel(entry.id, contents)
       if (entry.view === view) entry.certificateDecision?.settle(false)
