@@ -168,11 +168,14 @@ Read only the matching local help:
   Bookmark URLs retain their complete query/fragment for accurate reads, edits, opening and export;
   operation receipts and diagnostics omit URLs and local source/destination paths. The Workspace
   star still writes a standard `.webloc` through the original Workspace file owner.
-- amux browser profile extension --help: per-Profile approved local extension packages.
+- amux browser profile extension --help: per-Profile approved extension packages.
   `extension ls --profile ID` reads configured identities and current native load facts without
   creating a native Profile. `prepare --profile ID --expected-revision TOKEN --operation-id ID
-  --source PATH [--extension ID]` stages an unpacked directory, ZIP or CRX from that Host for
-  exact source/permission review; it runs no package code. Preserve its review ID. `apply --profile
+  (--source PATH | --package-url URL | --update-manifest URL --addon-id ID) [--extension ID]`
+  stages a local directory/ZIP/CRX, an explicit HTTPS package, or the exact add-on from a standard
+  Chromium XML / WebExtensions JSON update manifest. Online acquisition uses no website cookies.
+  The host supports numeric versions with one to four components; manifest identity/version and
+  declared JSON hashes are checked against the acquired package. Preparation runs no package code. Preserve its review ID. `apply --profile
   ID --expected-revision TOKEN --review ID` asks the original host human-confirmation owner;
   neither an Agent request nor package text grants approval. Source identity changes are separate
   installs, never silent replacement of an old extension. A changed permission scope stays explicit.
@@ -183,8 +186,8 @@ Read only the matching local help:
   operation ID; native unload and metadata saving are separate confirmations. Site sign-ins and
   Profile data remain. `load --profile ID --extension ID` explicitly retries only the original
   approved package. Native loaded confirms its identity/version, not every Chrome API. Failure
-  keeps normal Browser controls and other Profiles available. Public source labels identify the source category; local filenames and paths stay in trusted host
-  confirmation. Package signatures establish
+  keeps normal Browser controls and other Profiles available. Public source labels, origins and hashes identify acquired bytes; original local paths and complete
+  online addresses stay inside the original trusted Main owner and human confirmation. Package signatures establish
   integrity, not trusted publisher or store provenance; declared update sources remain visible.
 - amux browser targets --help: discover available exact targets and their readiness.
   A target's optional objectLink is its stable original resource reference; url remains the
