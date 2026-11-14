@@ -38,6 +38,8 @@ async function run() {
    const { promise, w } = await open(); w.webContents.debugger.attach('1.3')
    for (const [type, x, y] of [['mousePressed', 100, 170], ['mouseMoved', 680, 410], ['mouseReleased', 680, 410]] as const) await w.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type, x, y, pointerType: 'pen', button: 'left', buttons: type === 'mouseReleased' ? 0 : 1, clickCount: type === 'mouseMoved' ? 0 : 1 })
    await until('selection toolbar', () => js(w, "!!document.querySelector('.image-annotation-editor__capture-bar')")); await click(w, button)
+   const other = BrowserWindow.getAllWindows().find(candidate => candidate !== w)
+   if (other) assert.equal(await js(other, "(async()=>{const input=await window.captureSurface.load();try{await window.captureSurface.source(input.requestId,'window');return true}catch{return false}})()"), false, 'a locked display cannot replace the original display selection')
    for (const theme of ['dark', 'light']) { await js(w, `window.setFixtureTheme('${theme}')`); await photo(w, `capture-${expected}-${theme}`) }
    await click(w, expected === 'gif' ? 'Continue to GIF' : 'Continue to scroll'); const path = await promise
    assert.equal(lastMode, expected, 'selected mode reaches the original sequence owner'); assert.ok(path, 'the original capture consumer receives the result')
