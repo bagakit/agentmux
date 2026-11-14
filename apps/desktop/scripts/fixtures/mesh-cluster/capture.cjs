@@ -25,15 +25,26 @@ app.whenReady().then(async()=>{try{
   const canvas = document.querySelector('.mesh-explorer__canvas')
   const paths = kind => [...canvas.querySelectorAll('.mesh-explorer-edge--' + kind + ' .react-flow__edge-path')]
   const saved = paths('saved'), relay = paths('relay')
+  const touchesLocal = path => path.closest('[data-testid^="rf__edge-"]').getAttribute('aria-label').split(' ').includes('saved:client')
   return { graphs: canvas.querySelectorAll('.react-flow').length, hosts: canvas.querySelectorAll('[data-host-node]').length, saved: saved.length, relay: relay.length,
+    sharedLocal: canvas.querySelectorAll('[data-id="saved:client"] [data-shared-local]').length,
+    savedAtLocal: saved.filter(touchesLocal).length, relayAtLocal: relay.filter(touchesLocal).length,
+    outline: getComputedStyle(canvas.querySelector('.mesh-explorer__map-outline')).maskImage.includes('mesh-world'),
     savedDashed: saved.every(path => getComputedStyle(path).strokeDasharray !== 'none'),
     relaySolid: relay.every(path => getComputedStyle(path).strokeDasharray === 'none') }
  })()`)
  receipt.mixed = await graphFacts()
- assert.deepEqual(receipt.mixed,{graphs:1,hosts:5,saved:5,relay:5,savedDashed:true,relaySolid:true})
+ assert.deepEqual(receipt.mixed,{graphs:1,hosts:5,saved:5,relay:5,sharedLocal:1,savedAtLocal:5,relayAtLocal:2,outline:true,savedDashed:true,relaySolid:true})
  for(let i=0;i<150;i++){if(await evaluate('document.querySelector(".cluster-machines-coverage").textContent.includes("4 / 6")'))break;await delay(50)}
  await frame('overview-dark')
  window.setContentSize(560,930);await frame('mixed-narrow-dark')
+ receipt.narrowType = await evaluate(`(() => {
+  const card = document.querySelector('[data-shared-local]')
+  const scale = card.getBoundingClientRect().width / card.offsetWidth
+  const size = selector => parseFloat(getComputedStyle(card.querySelector(selector)).fontSize) * scale
+  return { name: size('strong'), state: size('.mesh-explorer-node__state') }
+ })()`)
+ assert.ok(receipt.narrowType.name >= 10 && receipt.narrowType.state >= 7.5, 'narrow layout keeps the main node label and status legible at its default zoom')
  await evaluate('meshFixture.theme("light")');await frame('mixed-narrow-light')
  window.setContentSize(1440,1050)
  await evaluate('meshFixture.theme("light")');await frame('overview-light');await evaluate('meshFixture.theme("dark")')
@@ -57,8 +68,12 @@ app.whenReady().then(async()=>{try{
  await click('[aria-label="Rearrange observed topology"]');await delay(550)
  await click('.mesh-explorer__categories button:nth-child(2)');await click('[data-mesh-object=route]');await frame('endpoint-dark');await pathVisibility('available-route')
  await click('[aria-label="Network scope"] button:nth-child(2)');await frame('selected-path-dark')
- assert.equal((await graphFacts()).hosts,0,'focus keeps the selected Relay path')
- await click('[aria-label="Network scope"] button:first-child');assert.equal((await graphFacts()).hosts,5,'returning to the full map restores all saved routes')
+ receipt.focused = await graphFacts()
+ assert.deepEqual(receipt.focused,receipt.mixed,'focusing the Relay path retains the same nodes, edge sources and line styles')
+ assert.equal(await evaluate("document.querySelectorAll('.mesh-explorer-edge--saved.mesh-explorer-edge--muted').length"),5)
+ assert.equal(await evaluate("document.querySelectorAll('.mesh-explorer-edge--relay.mesh-explorer-edge--selected').length"),2)
+ await click('[aria-label="Network scope"] button:first-child')
+ assert.equal(await evaluate("document.querySelectorAll('.mesh-explorer-edge--muted').length"),0,'returning to the full map restores link emphasis')
  await click('[aria-label="Network scope"] button:nth-child(2)')
  await click('.mesh-explorer__categories button:nth-child(3)');await click('[data-mesh-object=circuit]');await frame('adopted-circuit-dark');await pathVisibility('adopted-circuit')
  await evaluate('meshFixture.theme("light")');await click('[aria-label="Network view"] button:nth-child(2)');await frame('list-light');await evaluate('meshFixture.theme("dark")');await frame('list-dark');await evaluate('meshFixture.theme("light")')
@@ -99,7 +114,7 @@ app.whenReady().then(async()=>{try{
  window.setContentSize(560,930);await frame('mesh-disabled-narrow-light')
  await evaluate('meshFixture.theme("dark")');await frame('mesh-disabled-narrow-dark')
  receipt.savedOnly = await graphFacts()
- assert.deepEqual(receipt.savedOnly,{graphs:1,hosts:8,saved:8,relay:0,savedDashed:true,relaySolid:true})
+ assert.deepEqual(receipt.savedOnly,{graphs:1,hosts:8,saved:8,relay:0,sharedLocal:0,savedAtLocal:8,relayAtLocal:0,outline:true,savedDashed:true,relaySolid:true})
  window.setContentSize(1440,950)
  await window.loadURL(url+'?scenario=empty');await wait('.mesh-explorer__no-connections')
  await frame('no-connections-dark')

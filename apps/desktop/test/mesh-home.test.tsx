@@ -187,7 +187,7 @@ it('selects an exact saved Host from the diagram and shows its channel independe
   expect(save).not.toHaveBeenCalled()
 })
 
-it('shows saved Hosts and observed Relay peers together, then keeps saved Hosts after Relay is turned off', async () => {
+it('shares the local map anchor and keeps saved Hosts during path focus, failed reads and Relay shutdown', async () => {
   const identity = { peerId: 'this-core', publicKey: 'fixture', epoch: 1 }
   let next = { ...observed, identity, apply: { state: 'active' }, network: {
     protocol: 1, networkId: 'fixture-network', state: 'active', identity,
@@ -205,13 +205,17 @@ it('shows saved Hosts and observed Relay peers together, then keeps saved Hosts 
     expect(canvas()?.querySelector('[data-host-node="selected-farm"]')).not.toBeNull()
     expect(canvas()?.querySelector('[data-id="relay:distant-gateway"]')).not.toBeNull()
     expect(canvas()?.querySelectorAll('.react-flow')).toHaveLength(1)
+    expect(canvas()?.querySelector('[data-id="saved:client"] [data-shared-local]')).not.toBeNull()
+    expect(canvas()?.querySelector('[data-id="relay:this-core"]')).toBeNull()
   })
+  expect(canvas()?.querySelector('.mesh-explorer__map-outline')).not.toBeNull()
+  expect(dom.container.querySelector('.mesh-explorer__map-key')?.textContent).toContain('Device locations unknown')
   expect(dom.container.querySelector('[aria-label="Map source"]')).toBeNull()
   await dom.click('[data-id="relay:distant-gateway"] button')
   await dom.click('[aria-label="Network scope"] button:last-of-type')
-  expect(canvas()?.querySelector('[data-host-node="selected-farm"]')).toBeNull()
+  expect(canvas()?.querySelector('[data-host-node="selected-farm"][data-dimmed]')).not.toBeNull()
   await dom.click('[aria-label="Network scope"] button:first-of-type')
-  expect(canvas()?.querySelector('[data-host-node="selected-farm"]')).not.toBeNull()
+  expect(canvas()?.querySelector('[data-host-node="selected-farm"]:not([data-dimmed])')).not.toBeNull()
   const refresh = '.mesh-explorer__header > button:last-child'
   rejectObservation = true
   await dom.click(refresh)
@@ -223,8 +227,25 @@ it('shows saved Hosts and observed Relay peers together, then keeps saved Hosts 
   await dom.click(refresh)
   expect(canvas()?.querySelector('[data-id="relay:distant-gateway"]')).toBeNull()
   expect(canvas()?.querySelector('[data-host-node="selected-farm"]')).not.toBeNull()
+  expect(canvas()?.querySelector('[data-id="saved:client"] .mesh-saved-client')).not.toBeNull()
   expect(dom.container.querySelector('[aria-label="Selected saved connection"]')?.textContent).toContain('neighbor.internal')
   expect(dom.container.querySelector('.mesh-explorer__heading')?.textContent).toContain('Mesh Relay is off on this Core')
+})
+
+it('keeps observed Relay peers separate when the local peer identity is unavailable', async () => {
+  const unconfirmed: MeshNetworkInspection = { ...observed, apply: { state: 'active' }, network: {
+    protocol: 1, networkId: 'fixture-network', state: 'active', identity: null,
+    peers: [{ peerId: 'selected-farm', state: 'connected', connectionId: 'mesh-fixture-link', rttMs: 11 }],
+    records: [], routes: [], circuits: [],
+  } }
+  vi.mocked(api.mesh.call).mockImplementation(async method => structuredClone(method === 'mesh.inspect' ? unconfirmed : saved) as never)
+  await dom.render(<SettingsPanel initialSection="hosts" onClose={vi.fn()} />)
+  await vi.waitFor(() => {
+    expect(dom.container.querySelector('[data-id="relay:selected-farm"]')).not.toBeNull()
+    expect(dom.container.querySelector('[data-id="saved:host:selected-farm"]')).not.toBeNull()
+    expect(dom.container.querySelector('[data-id="saved:client"] .mesh-saved-client')).not.toBeNull()
+    expect(dom.container.querySelector('[data-shared-local]')).toBeNull()
+  })
 })
 
 it('continues to show saved routes when Mesh has only a local peer', async () => {

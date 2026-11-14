@@ -10,7 +10,7 @@ const mutations: Record<string, [string, string, string]> = {
   'one-sided-link': ['mesh-topology.ts', 'other.epoch !== neighbor.peerEpoch || back.peerEpoch !== record.epoch || back.connectionId !== neighbor.connectionId || ', ''],
   'circuit-as-route': ['mesh-topology.ts', "if (selected?.kind === 'circuit') return model.circuits.find(circuit => circuit.circuitId === selected.id)?.path ?? []", "if (selected?.kind === 'circuit') return model.routes[0]?.path ?? []"],
   'foreign-selection': ['MeshNetworkMap.tsx', 'key={meshTopologySource(snapshot)}', 'key="shared-source"'],
-  'poll-relayout': ['MeshNetworkMap.tsx', '[active, view, topologyKey, arrangeAttempt, fit, setNodes, mixed, hasRelayPeers, relayOffsetX, peerSize]', '[active, view, topologyKey, arrangeAttempt, fit, setNodes, mixed, hasRelayPeers, relayOffsetX, peerSize, snapshot]'],
+  'poll-relayout': ['MeshNetworkMap.tsx', '[active, view, topologyKey, arrangeAttempt, fit, setNodes, hasRelayPeers, portrait, positions]', '[active, view, topologyKey, arrangeAttempt, fit, setNodes, hasRelayPeers, portrait, positions, snapshot]'],
   'lost-selection-fit': ['MeshNetworkMap.tsx', 'setFocusRequest(value => value + 1)', 'setFocusRequest(value => value)'],
   'poll-focus': ['MeshNetworkMap.tsx', 'focusRequest === focusedRequest.current', 'false'],
   'separate-list-inspector': ['MeshNetworkMap.tsx', "!onGateway || view === 'list' ? inspector : null", "!onGateway ? inspector : null"],
@@ -27,7 +27,7 @@ export default defineConfig({ root, define: { __AGENTMUX_WEB_PREVIEW__: 'true' }
     if (input.split(from).length !== 2) throw Error('Topology mutation must bind once in actual loaded source')
     let output = input.replace(from, to)
     if (mutant === 'poll-relayout') {
-      const guard = 'if (!force && ids.every(id => positions.current.has(peerNodeId(id)))) return'
+      const guard = 'if (!force && ids.every(id => positions.has(id))) return'
       if (output.split(guard).length !== 2) throw Error('Poll relayout mutation guard must bind once')
       output = output.replace(guard, 'if (false) return')
     }

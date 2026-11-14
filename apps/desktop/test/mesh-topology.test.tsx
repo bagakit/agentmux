@@ -26,7 +26,7 @@ class LayoutWorker {
   onmessage: ((event: { data: unknown }) => void) | null = null
   onerror: (() => void) | null = null
   terminated = false
-  input: { id: string; input: { nodes: { id: string }[] } } | undefined
+  input: { id: string; input: { nodes: { id: string }[]; edges: { source: string; target: string }[] } } | undefined
   constructor() { LayoutWorker.instances.push(this) }
   postMessage(input: LayoutWorker['input']) { this.input = input }
   terminate() { this.terminated = true }
@@ -129,7 +129,7 @@ it('a disappeared selected circuit remains an explicitly unobserved identity rat
   expect(container.querySelector('[aria-label="Selected endpoint network path"]')).toBeNull()
 })
 
-it('an actual original Core mesh observation reaches the production explorer and selects an authenticated peer', async () => {
+it('an actual original Core mesh observation shares the local anchor with saved links and selects an authenticated peer', async () => {
   const { createRequire } = await import('node:module'), { resolve } = await import('node:path'), { writeFile, access, readFile } = await import('node:fs/promises'), { createHash } = await import('node:crypto')
   const { privateCore } = createRequire(import.meta.url)(resolve('apps/desktop/scripts/fixtures/mesh-settings/private-core.mjs'))
   const cores: any[] = [], evidence = resolve(process.env.AGENTMUX_MESH_TOPOLOGY_EVIDENCE ?? '.local/state/mesh-topology-interaction/tests')
@@ -143,11 +143,16 @@ it('an actual original Core mesh observation reaches the production explorer and
     const listener = await wait(() => a.client.call('mesh.inspect', {}), value => value.gateway.state === 'listening')
     await b.client.call('settings.mesh.configure', { operationId: 'topology-original-participant', expectedRevision: savedB.revision, configuration: { ...savedB.configuration, networkId: configuration.networkId, role: 'participant', members, peers: [{ peerId: savedA.identity.peerId, endpoints: [{ endpoint: '127.0.0.1:'+listener.gateway.listener.port, useTls: false }] }] } })
     const actual = await wait(() => a.client.call('mesh.inspect', {}), value => value.network?.peers.some((peer:any)=>peer.state==='connected') && meshTopologyModel(value).edges.length === 1)
-    await render(actual)
+    await act(async () => root.render(<MeshNetworkMap snapshot={actual} localClient
+      hosts={[{ id: 'configured-route', kind: 'ssh', hostname: 'configured.internal', label: 'Configured device' }]} />))
     expect(container.querySelector('.mesh-explorer__header')?.textContent).toContain('original-topology-consumer')
     expect(container.querySelector('.mesh-explorer__header')?.textContent).toContain('1 reciprocal link')
-    await click('[data-mesh-object="peer"]:not([aria-pressed=true])')
-    await click('.mesh-peer-list li:nth-child(2) button')
+    expect(container.querySelector('[data-id="saved:client"] [data-shared-local]')).not.toBeNull()
+    const layout = LayoutWorker.instances[0]?.input?.input
+    expect(layout?.nodes.map(node => node.id).sort()).toEqual([`relay:${savedB.identity.peerId}`, 'saved:client', 'saved:host:configured-route'].sort())
+    const localDestinations = layout?.edges.map(edge => edge.source === 'saved:client' ? edge.target : edge.target === 'saved:client' ? edge.source : null)
+    expect(localDestinations?.sort()).toEqual([`relay:${savedB.identity.peerId}`, 'saved:host:configured-route'].sort())
+    await click(`[data-id="relay:${savedB.identity.peerId}"] button`)
     await click('.mesh-explorer__identity summary')
     expect(container.querySelector<HTMLDetailsElement>('.mesh-explorer__identity')?.open).toBe(true)
     expect(container.querySelector('[aria-label="Selected network object"]')?.textContent).toContain(savedB.identity.peerId)
@@ -155,7 +160,7 @@ it('an actual original Core mesh observation reaches the production explorer and
     expect(container.textContent).toContain(actual.owner.runtimeId)
     const digest = async(path:string)=>createHash('sha256').update(await readFile(path)).digest('hex')
     const files = ['apps/desktop/src/renderer/src/components/settings/MeshNetworkMap.tsx','apps/desktop/src/renderer/src/components/settings/mesh-topology.ts','packages/core/dist/public-rpc-client.js','packages/core/dist/public-rpc-relay-gateway.js','packages/core/dist/headless-runtime-cli.js','packages/relay/dist/mesh-network.js']
-    await writeFile(resolve(evidence,'actual-core-consumer.json'),JSON.stringify({passed:true,boundary:'Current production explorer source consumes actual original Core processes and official private Native via public Unix client; Core processes use exact existing dist recorded here, not a new build or Farm deployment.',owners:[savedA.owner,savedB.owner],peerIds:[savedA.identity.peerId,savedB.identity.peerId],networkId:actual.network.networkId,reciprocalLinks:meshTopologyModel(actual).edges.length,pids:cores.flatMap(c=>c.pids),directories:cores.map(c=>c.directory),hashes:Object.fromEntries(await Promise.all(files.map(async path=>[path,await digest(path)])))},null,2))
+    await writeFile(resolve(evidence,'actual-core-consumer.json'),JSON.stringify({passed:true,boundary:'Current production explorer source consumes actual original Core processes and official private Native via public Unix client; Core processes use exact existing dist recorded here, not a new build or Farm deployment.',owners:[savedA.owner,savedB.owner],peerIds:[savedA.identity.peerId,savedB.identity.peerId],networkId:actual.network.networkId,reciprocalLinks:meshTopologyModel(actual).edges.length,localDestinations,pids:cores.flatMap(c=>c.pids),directories:cores.map(c=>c.directory),hashes:Object.fromEntries(await Promise.all(files.map(async path=>[path,await digest(path)])))},null,2))
   } finally {
     await act(async () => root.render(<div />));for(const core of cores.reverse())await core.close()
     const directories=await Promise.all(cores.map(async c=>({path:c.directory,absent:await access(c.directory).then(()=>false,()=>true)}))),pids=cores.flatMap(c=>c.pids).map(pid=>{let exited=false;try{process.kill(pid,0)}catch(error){exited=(error as NodeJS.ErrnoException).code==='ESRCH'}return{pid,exited}})
