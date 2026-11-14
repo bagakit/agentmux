@@ -1,4 +1,6 @@
-import { folderSpaceFacts, type FolderSpaceResource } from './space-folder.js'
+import { folderSpaceFacts, folderResourceIdentity, type FolderSpaceResource, type FolderDirectoryResource } from './space-folder.js';
+import { folderDirectoryResourceKey } from './space-folder-resources.js';
+import { mintObjectId } from './object-id.js';
 import { watch, type FSWatcher } from 'node:fs';
 import { createRequire } from 'node:module';
 import { mkdir, open, readFile, type FileHandle } from 'node:fs/promises';
@@ -283,6 +285,52 @@ export class AgentMuxSpatialStateStore {
       if (!binding) graph.bindings.push({ spaceId: space.spaceId, zoneId: zone.zoneId });
       const state = await this.writeLocked(current, parseAgentMuxSpatialGraph(graph));
       return { state: projectSpatialState(state), spaceId: space.spaceId, zoneId: zone.zoneId, created: true };
+    });
+  }
+  /** A new explicit Source directory shares the original graph and lock, never the client config writer. */
+  async registerDirectory(input: { runtimeId: string; directory: FolderDirectoryResource; workspaceId?: string },
+    configured: (graph: AgentMuxSpatialGraph) => Promise<readonly FolderSpaceResource[]>, assertCurrent: () => Promise<void>) {
+    return this.locked(async () => {
+      const current = await this.read();
+      const graph: AgentMuxSpatialGraph = current ? structuredClone(current.graph) : { spaces: [], zones: [], tabs: [], regions: [], bindings: [], layouts: {}, tabLayouts: {}, resources: {} };
+      const expected = input.directory;
+      const matches = (r: FolderSpaceResource) => { const actual = folderResourceIdentity(r); return actual.hostId === expected.hostId && actual.workspacePath === expected.workspacePath && actual.projectRootPath === expected.projectRootPath; };
+      const configuredResources = await configured(graph);
+      const registered = configuredResources.filter(r => matches(r) && (input.workspaceId === undefined || input.workspaceId === r.id));
+      const originals = graph.bindings.flatMap(binding => {
+        const space = graph.spaces.find(s => s.spaceId === binding.spaceId), zone = graph.zones.find(z => z.zoneId === binding.zoneId);
+        return space?.kind === 'folder' && space.hostId === expected.hostId && space.directoryPath === expected.projectRootPath &&
+          zone?.hostId === expected.hostId && zone.directoryPath === expected.workspacePath && ['directory','worktree'].includes(zone.kind) &&
+          (input.workspaceId === undefined || zone.workspaceId === input.workspaceId) ? [{ space, zone }] : [];
+      });
+      const ids = new Set([...registered.map(r => r.id), ...originals.map(r => r.zone.workspaceId)]);
+      if (ids.size > 1 || originals.length > 1 || registered.length > 1) throw new AgentMuxError('Several original Folder resources match this directory. Inspect them and choose an exact original Workspace or Space; no identity was selected.', 'SPACE_REGISTRATION_AMBIGUOUS');
+      if (input.workspaceId !== undefined && !ids.has(input.workspaceId)) throw new AgentMuxError('The selected Workspace is not an original candidate for this directory.', 'SPACE_RESOURCE_CHANGED');
+      const original = originals[0], id = ids.size ? [...ids][0]! : mintObjectId();
+      if (configuredResources.some(r => r.id === id && !matches(r))) throw new AgentMuxError('The original Workspace ID now describes another configured resource. Keep both original records and inspect the Source.', 'SPACE_RESOURCE_CHANGED');
+      const resource: FolderSpaceResource = registered[0] ?? { id, hostId: expected.hostId, path: expected.workspacePath,
+        name: original?.space.name ?? basename(expected.workspacePath), kind: original?.zone.kind === 'worktree' ? 'worktree' : 'folder',
+        ...(expected.projectRootPath === expected.workspacePath ? {} : { repoPath: expected.projectRootPath }),
+        ...(original?.zone.branch ? { branch: original.zone.branch } : {}) };
+      const facts = folderSpaceFacts(resource), space = original?.space ?? facts.space, zone = original?.zone ?? facts.zone;
+      const existingSpace = graph.spaces.find(s => s.spaceId === space.spaceId), existingZone = graph.zones.find(z => z.zoneId === zone.zoneId);
+      if (existingSpace && (existingSpace.kind !== 'folder' || existingSpace.hostId !== expected.hostId || existingSpace.directoryPath !== expected.projectRootPath) ||
+          existingZone && (existingZone.workspaceId !== id || existingZone.hostId !== expected.hostId || existingZone.directoryPath !== expected.workspacePath)) throw new AgentMuxError('The original Folder identity names another resource. Existing work is retained.', 'SPACE_RESOURCE_CHANGED');
+      const bound = graph.bindings.some(b => b.spaceId === space.spaceId && b.zoneId === zone.zoneId);
+      let changed = !existingSpace || !existingZone || !bound;
+      if (!existingSpace) graph.spaces.push(space);
+      if (!existingZone) graph.zones.push(zone);
+      if (!bound) graph.bindings.push({ spaceId: space.spaceId, zoneId: zone.zoneId });
+      // Configured resources keep their original owner. Only a Core-owned directory adds this fact.
+      const key = folderDirectoryResourceKey(id);
+      if (!registered.length || Object.hasOwn(graph.resources,key)) {
+        const fact = { runtimeId: input.runtimeId, resource, directory: input.directory, spaceId: space.spaceId, zoneId: zone.zoneId };
+        if (!isDeepStrictEqual(graph.resources[key],fact)) { graph.resources[key] = fact; changed = true; }
+      }
+      await assertCurrent();
+      if (!changed) return { state: projectSpatialState(current!), spaceId: space.spaceId, zoneId: zone.zoneId, workspaceId: id, created: false };
+      const state = await this.writeLocked(current, parseAgentMuxSpatialGraph(graph));
+      return { state: projectSpatialState(state), spaceId: space.spaceId, zoneId: zone.zoneId, workspaceId: id, created: true };
     });
   }
   async admitAgentOpen(input: Parameters<typeof admitSpatialAgentOpen>[1]) {

@@ -130,6 +130,7 @@ export * from './hosted-client.js'
 export { probeSocketLiveness } from './socket-liveness.js'
 
 export * from './space-identity.js'
+export * from './space-folder-resources.js'
 export * from './space-folder.js'
 export * from './space-folder-client.js'
 export * from './space-sessions.js'

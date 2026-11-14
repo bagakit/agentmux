@@ -8,7 +8,7 @@ import { parseSpaceMemberParams } from './space-member-codec.js'
 import { spaceMemberRuntime } from './space-member-runtime.js'
 import { HOST_ROUTE_METHODS, parseHostRouteParams } from './host-route.js'
 import { assertHostRouteDispatch, delegatedHostRouteActor, hostRouteActorScope, type HostRouteGateway, type VerifiedHostRouteDelegation } from './host-route-gateway.js'
-import { parseFolderSpaceRegistration, folderResourceIdentity, type FolderSpaceResource } from './space-folder.js'
+import { parseFolderSpaceRegisterInput, parseFolderDirectoryInspectInput, folderResourceIdentity, type FolderSpaceResource } from './space-folder.js'
 import { observeSpaceSessions } from './space-session-owner.js'
 import { readSpaceSessionSources } from './space-session-sources.js'
 import { createSpaceSessionObserver } from './space-session-client.js'
@@ -273,10 +273,13 @@ export type AgentMuxRpcServiceOptions = Omit<Partial<AgentMuxControlHost>, 'exec
     originalContext?: AgentMuxRpcCallContext): Promise<AgentMuxControlResult | undefined>
   nativeDesktop?: AgentMuxRpcNativeDesktopOwner
   images?: AgentMuxRpcImageOwner
-  spatialFolderResource?(workspaceId: string): Promise<FolderSpaceResource>
   spatialState?: AgentMuxSpatialStateStore
   /** Original configuration reader; callers cannot supply another path or Host here. */
   spatialFolderResource?(workspaceId: string): Promise<FolderSpaceResource>
+  spatialFolderDirectory?: {
+    inspect(input: import('./space-folder.js').FolderDirectoryInspectInput, source: import('./space-authority.js').SpaceAuthoritySource, context: AgentMuxRpcCallContext): Promise<import('./space-folder.js').FolderDirectoryInspection>
+    register(input: import('./space-folder.js').FolderDirectoryRegistration, source: import('./space-authority.js').SpaceAuthoritySource, context: AgentMuxRpcCallContext): Promise<import('./space-folder.js').FolderSpaceReceipt>
+  }
   /** Original Host policy over Core-owned spatial creation associations, without a screen. */
   spatialAgentControl?(request: AgentMuxControlRequest, context: AgentMuxRpcCallContext): Promise<AgentMuxControlResult | undefined>
   /** Read only original host metadata; topology and execution remain with their Core owners. */
@@ -408,7 +411,8 @@ const NATIVE_FIELDS = {
   'settings.appearance.watch': [],
   'notebook.scan': ['workspaceId','path','maxFiles','maxDirectories','maxBytes','query','limit'],
   'notebook.ls': [], 'notebook.inspect': ['notebookId','noteId','operationId','content','maxBytes'], 'notebook.graph': ['notebookId','noteId','maxBytes'], 'notebook.resolve': ['mode','query','limit','text','select','maxBytes'], 'notebook.apply': ['expectedRevision','operationId','change'],
-  'space.folder.register': ['runtimeId','workspaceId','expectedResource'],
+  'space.folder.register': ['runtimeId','workspaceId','expectedResource','directory'],
+  'space.folder.inspect': ['runtimeId','path','expectedResource'],
   'space.member.call': ['target','call'], 'space.member.watch': ['target','call'],
   'space.sessions.watch': ['reference'],
   'space.snapshot': ['reference'], 'space.apply': ['reference','expectedRevision','changes'], 'space.watch': ['reference','after'],
@@ -621,6 +625,12 @@ export class AgentMuxRpcService {
     ;(await this.ports.hostedRuntime()).assertFence(context.runtimeFence)
   }
 
+  private folderDirectoryContext(source: import('./space-authority.js').SpaceAuthoritySource, context: AgentMuxRpcCallContext): AgentMuxRpcCallContext {
+    const runtimeFence = { runtimeId: source.runtimeId, ownerInstanceId: source.ownerInstanceId }
+    return { ...context, runtimeFence, assertCurrent: async () => {
+      context.signal?.throwIfAborted(); await context.assertCurrent?.(); await this.assertRuntimeFence({ ...context,runtimeFence })
+    } }
+  }
   private async clients(): Promise<readonly AgentMuxRpcCoreClient[]> {
     if (this.ports.coreClients) return await this.ports.coreClients()
     this.local ??= import('./runtime-client.js').then(({ connectLocalAgentMux }) => connectLocalAgentMux())
@@ -848,16 +858,31 @@ export class AgentMuxRpcService {
       if (method === 'route.watch' || method === 'route.receive-watch') throw new AgentMuxError('Use the original route subscription transport.', 'INVALID_CONTROL_REQUEST')
       return await routes.call(input as import('./host-route.js').HostRouteParams['route.call'] | import('./host-route.js').HostRouteParams['route.receive'], context, method === 'route.receive') as AgentMuxRpcResult<M>
     }
+    if (method === 'space.folder.inspect') {
+      const input = parseFolderDirectoryInspectInput(params), caller = await this.authenticated(context)
+      if (caller || context.caller || context.routeDelegation || !context.principal || !['user','device'].includes(context.principal.kind)) throw new AgentMuxError('A new Source directory requires its original transport-approved owner or device. Published reads do not grant resource registration.', 'CONTROL_PERMISSION_DENIED')
+      context.signal?.throwIfAborted(); await context.assertCurrent?.(); await this.assertRuntimeFence(context)
+      if (this.ports.callOriginalCore) return await this.ports.callOriginalCore('local', 'space.folder.inspect', input, context) as AgentMuxRpcResult<M>
+      const endpoint = await this.ports.hostedRuntime?.(), directory = this.ports.spatialFolderDirectory
+      if (!endpoint || !directory) throw new AgentMuxError('The original Source directory owner is unavailable. Existing resources and Agents remain available.', 'SPACE_RESOURCE_UNAVAILABLE')
+      const { owner } = await endpoint.call('runtime.owner.identity', { expectedRuntimeId: input.runtimeId })
+      if (owner.runtimeId !== input.runtimeId) throw new AgentMuxError('This directory belongs to another original Source Runtime.', 'RUNTIME_OWNER_MISMATCH')
+      return await directory.inspect(input, { runtimeId: owner.runtimeId, ownerInstanceId: owner.ownerInstanceId }, this.folderDirectoryContext(owner,context)) as AgentMuxRpcResult<M>
+    }
     if (method === 'space.folder.register') {
-      const input = parseFolderSpaceRegistration(params)
-      await this.authenticated(context)
+      const input = parseFolderSpaceRegisterInput(params), caller = await this.authenticated(context)
+      if ('directory' in input && (caller || context.caller || context.routeDelegation || !context.principal || !['user','device'].includes(context.principal.kind))) throw new AgentMuxError('A new Source directory requires its original transport-approved owner or device. Published reads do not grant resource registration.', 'CONTROL_PERMISSION_DENIED')
       context.signal?.throwIfAborted(); await context.assertCurrent?.(); await this.assertRuntimeFence(context)
       if (this.ports.callOriginalCore) return await this.ports.callOriginalCore('local', 'space.folder.register', input, context) as AgentMuxRpcResult<M>
       const endpoint = await this.ports.hostedRuntime?.()
-      if (!endpoint || !this.ports.spatialFolderResource) throw new AgentMuxError('This original Host cannot read its registered Folder resource. Its existing Spaces and Agents remain available.', 'SPACE_RESOURCE_UNAVAILABLE')
+      if (!endpoint || !('directory' in input) && !this.ports.spatialFolderResource) throw new AgentMuxError('This original Host cannot read its registered Folder resource. Its existing Spaces and Agents remain available.', 'SPACE_RESOURCE_UNAVAILABLE')
       const { owner } = await endpoint.call('runtime.owner.identity', { expectedRuntimeId: input.runtimeId })
       if (owner.runtimeId !== input.runtimeId) throw new AgentMuxError('The selected Folder belongs to another Runtime. No local Space was substituted.', 'RUNTIME_OWNER_MISMATCH')
-      const resource = await this.ports.spatialFolderResource(input.workspaceId), actual = folderResourceIdentity(resource)
+      if ('directory' in input) {
+        if (!this.ports.spatialFolderDirectory) throw new AgentMuxError('The original Source directory owner is unavailable. Existing resources and Agents remain available.', 'SPACE_RESOURCE_UNAVAILABLE')
+        return await this.ports.spatialFolderDirectory.register(input, { runtimeId: owner.runtimeId, ownerInstanceId: owner.ownerInstanceId }, this.folderDirectoryContext(owner,context)) as AgentMuxRpcResult<M>
+      }
+      const resource = await this.ports.spatialFolderResource!(input.workspaceId), actual = folderResourceIdentity(resource)
       if (resource.id !== input.workspaceId || actual.hostId !== input.expectedResource.hostId || actual.workspacePath !== input.expectedResource.workspacePath || actual.projectRootPath !== input.expectedResource.projectRootPath) {
         throw new AgentMuxError('The original registered Workspace resource changed. Keep the selected intent and inspect its original Folder; no new directory was substituted.', 'SPACE_RESOURCE_CHANGED')
       }

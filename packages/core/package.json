@@ -469,6 +469,10 @@
     "./space-member-codec": {
       "types": "./dist/space-member-codec.d.ts",
       "import": "./dist/space-member-codec.js"
+    },
+    "./space-folder-resources": {
+      "types": "./dist/space-folder-resources.d.ts",
+      "import": "./dist/space-folder-resources.js"
     }
   },
   "bin": {

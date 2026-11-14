@@ -10,7 +10,7 @@ import { parseSpaceMemberParams } from './space-member-codec.js'
 import { parseHostedRuntimeOwnerIdentity } from './hosted-value.js'
 import { hostedSessionProjection, hostedSessionIds } from './hosted-session-summary.js'
 import { HOST_ROUTE_METHODS, parseHostRouteResult } from './host-route.js'
-import { parseFolderSpaceRegistration, parseFolderSpaceReceipt } from './space-folder.js'
+import { parseFolderSpaceRegisterInput, parseFolderSpaceReceipt, parseFolderDirectoryInspectInput, parseFolderDirectoryInspection } from './space-folder.js'
 import { parseAgentExecutionReference } from './errors.js'
 import { isSpaceAuthorityMethod, parseSpaceAuthorityParams, parseSpaceSnapshot } from './space-authority.js'
 import { parseNodeLocateParams, parseNodeLocateResult } from './node-locator.js'
@@ -488,7 +488,8 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
     if (method === 'notebook.storage.inspect' || method === 'notebook.storage.change') return parseNotesStorageInspection(value, parseNotesStorageParams(method, params).operationId) as unknown as Record<string, unknown>
     if (method === 'agent.provider.ls') return parseProviderCatalogObservation(value, parseProviderCatalogQuery(params)) as unknown as Record<string, unknown>
     if (isHostSettingsMethod(method)) return parseHostSettingsResult(method, value, parseHostSettingsParams(method, params)) as unknown as Record<string, unknown>
-    if (method === 'space.folder.register') return parseFolderSpaceReceipt(value, parseFolderSpaceRegistration(params)) as unknown as Record<string, unknown>
+    if (method === 'space.folder.inspect') return parseFolderDirectoryInspection(value, parseFolderDirectoryInspectInput(params)) as unknown as Record<string, unknown>
+    if (method === 'space.folder.register') return parseFolderSpaceReceipt(value, parseFolderSpaceRegisterInput(params)) as unknown as Record<string, unknown>
     if (isSpaceAuthorityMethod(method)) {
       const input = parseSpaceAuthorityParams(method, params)
       if (method === 'space.apply') {

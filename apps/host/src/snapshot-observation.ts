@@ -1,3 +1,4 @@
+import type { HostWorkspaceResources } from './workspace-resources.js'
 import type { AgentMuxClient, AgentMuxRpcServiceOptions, AgentMuxRpcSnapshot, AgentMuxRpcSnapshotParams, AgentMuxRpcTopic } from '@agentmux/core'
 import type { WorkspaceRecord } from './content-types.js'
 import { readPresentationConfiguration } from './presentation-configuration.js'
@@ -68,15 +69,20 @@ export async function observeClientRpcSnapshot(configuration: { workspaces: read
 
 /** The Host reads directories from its original configuration and Core Runtime owners. */
 export function createHostSnapshotObservation(configurationPath: string | undefined,
-  clients: () => readonly { hostId: string; client: Pick<AgentMuxClient, 'runtimeProjection'> }[]): NonNullable<AgentMuxRpcServiceOptions['snapshot']> {
+  clients: () => readonly { hostId: string; client: Pick<AgentMuxClient, 'runtimeProjection'> }[], resources?: HostWorkspaceResources): NonNullable<AgentMuxRpcServiceOptions['snapshot']> {
   const topics = new ScratchTopics()
   return async params => {
     const wanted = (source: NonNullable<AgentMuxRpcSnapshotParams['include']>[number]) => !params.include || params.include.includes(source)
     if (params.include && !params.include.some(source => ['projects', 'executors', 'workspaces', 'topics', 'motes'].includes(source))) return { unavailable: [] }
     if (!configurationPath) throw new Error('The original configuration metadata is unavailable. Original spatial positions and Agent input remain available.')
-    const configuration = await readPresentationConfiguration(configurationPath)
+    const original = resources ? await resources.read() : undefined
+    const configuration = original ? { workspaces: original.workspaces, executors: {}, appearance: {} } : await readPresentationConfiguration(configurationPath)
     const result = await observeClientRpcSnapshot(configuration, topics, params)
-    if (wanted('executors')) result.executors = Object.entries(configuration.executors)
+    if (original) for (const issue of original.issues) if (wanted('workspaces')) result.unavailable!.push({ source: 'workspaces', ...issue, recovery: 'Read this original Source resource again. Existing Projects, input and Agents are retained.' })
+    let executors: Awaited<ReturnType<typeof readPresentationConfiguration>>['executors'] = configuration.executors
+    if (original && wanted('executors')) try { executors = (await readPresentationConfiguration(configurationPath)).executors }
+    catch (cause) { result.unavailable!.push({ source: 'executors', code: 'EXECUTOR_CONFIGURATION_UNAVAILABLE', message: cause instanceof Error ? cause.message : String(cause), recovery: 'Restore the original executor metadata; Projects and Agents remain available.' }) }
+    if (wanted('executors')) result.executors = Object.entries(executors)
       .filter(([executorId]) => !params.executorId || executorId === params.executorId)
       .map(([executorId, executor]) => ({ executorId, label: executor.label, providerId: executor.providerId, availability: 'unknown' }))
     if (wanted('projects')) {

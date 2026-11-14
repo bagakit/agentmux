@@ -1,3 +1,5 @@
+import { createHostWorkspaceResources } from './workspace-resources.js'
+import { createHostFolderDirectoryOwner } from './folder-directory-owner.js'
 import { createHostFolderSpaceResource } from './folder-space-resource.js'
 import { createHostMoteMainReader, createHostMoteDialogue } from './mote-dialogue.js'
 import { MoteDialogueStore } from '@agentmux/core/mote-dialogue-store'
@@ -142,7 +144,8 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
     catch { return { ...mobileState, state: 'unavailable', message: '当前没有可用的局域网地址；连接记录和 Agent 会话保留。' } }
   }
   const spatialState = connectionOwner?.spatial ?? new AgentMuxSpatialStateStore()
-  const content = configurationPath ? createHostContent({ configurationPath, spatial: spatialState }) : undefined
+  const workspaceResources = configurationPath ? createHostWorkspaceResources(configurationPath,spatialState,()=>originalRuntime().ownerIdentity().runtimeId) : undefined
+  const content = configurationPath ? createHostContent({ configurationPath, spatial: spatialState, ...(workspaceResources ? { resources: workspaceResources } : {}) }) : undefined
   const originalRuntime = () => {
     if (!runtime) throw new AgentMuxError('The original Host is not yet available. Original operations and healthy Agents are retained.', 'CONTROL_UNAVAILABLE')
     return runtime
@@ -179,20 +182,20 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
     ...(motePresence ? { maintenance: motePresence.read, changed: motePresence.invalidate } : {}) }) : undefined
   const service = {
     spatialState,
-    ...(configurationPath ? { spatialFolderResource: createHostFolderSpaceResource(configurationPath) } : {}),
+    ...(workspaceResources ? { spatialFolderDirectory: createHostFolderDirectoryOwner(workspaceResources,spatialState) } : {}),
+    ...(configurationPath ? { spatialFolderResource: createHostFolderSpaceResource(configurationPath,workspaceResources) } : {}),
     hostTailcat: (hostId: string) => hostId === 'local' ? tailcat!.inspect() : undefined,
     hostTailcatKey: (input: Parameters<typeof prepareTailcatKey>[0], signal?: AbortSignal) => prepareTailcatKey(input, { ...(signal ? { signal } : {}),
       ...(options.prepareExecutionEnvironment ? { prepareEnvironment: options.prepareExecutionEnvironment } : {}) }),
     ...(options.hostConfiguration ? { hostConfiguration: options.hostConfiguration } : {}),
     ...(moteDialogue ? { moteDialogue } : {}),
     ...(moteQuickPreferences ? { moteQuickPreferences } : {}),
-    ...(configurationPath ? { spatialFolderResource: createHostFolderSpaceResource(configurationPath) } : {}),
     ...(configurationPath ? { spatialAgentControl: createHostSpatialAgentControl({ configurationPath, spatial: spatialState, runtime: originalRuntime, agentMuxContext: async request => await goals?.contextForSpatialOpen(request) }) } : {}),
     ...(mobileIncidents ? { clientIncidents: mobileIncidents.clientIncidents, mobileWebReports: mobileIncidents.mobileWebReports } : {}),
     ...(configurationPath ? { settingsResources: createHostSettingsResourceRead(configurationPath), appearance: createHostAppearanceObservation(configurationPath) } : {}),
     ...content,
     ...(goals ? { goalControl: goals.execute, goalParticipation: goals.participation, nameHistory: goals.nameHistory, goalChanges: goals.goalChanges, progress: goals.progress, schedules: goals.schedules, goalDelegations: goals.goalDelegations, automaticInput: goals.automaticInput } : {}),
-    snapshot: createHostSnapshotObservation(configurationPath, () => [...(runtime ? [{ hostId: 'local', client: runtime.client }] : []), ...(options.connections?.clients?.() ?? [])]),
+    snapshot: createHostSnapshotObservation(configurationPath, () => [...(runtime ? [{ hostId: 'local', client: runtime.client }] : []), ...(options.connections?.clients?.() ?? [])],workspaceResources),
     spatialPresentation: createHostSpatialPresentation({ ...(configurationPath ? { configurationPath } : {}), clients: () => [...(runtime ? [{ hostId: 'local', client: runtime.client }] : []), ...(options.connections?.clients?.() ?? [])] }),
     mobileAssets,
     fileUploads,

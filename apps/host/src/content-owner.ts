@@ -2,6 +2,7 @@ import { dirname, join } from 'node:path'
 import { AgentMuxError, spatialCatalog, type AgentMuxSpatialStateStore, type AgentMuxRpcServiceOptions, type AgentMuxRpcFilesOwner, type NotebookObservationPort } from '@agentmux/core'
 import { AgentMuxNotebookStore, AgentMuxNotesStorage } from '@agentmux/core/notebook-store'
 import type { NoteResource } from '@agentmux/core/notebook-catalog'
+import { createHostWorkspaceResources, type HostWorkspaceResources } from './workspace-resources.js'
 import { OrdinaryWorkspaceFiles } from './ordinary-files.js'
 import type { WorkspaceRecord, WorkspaceFiles } from './content-types.js'
 import { FileReadOwner } from './file-read-owner.js'
@@ -27,27 +28,14 @@ export function createHostContent(options: {
   spatial: AgentMuxSpatialStateStore
   storage?: AgentMuxNotesStorage
   files?: OrdinaryWorkspaceFiles
+  resources?: HostWorkspaceResources
 }): ContentPorts {
   const storage = options.storage ?? new AgentMuxNotesStorage()
   const ordinary = options.files ?? new OrdinaryWorkspaceFiles()
   const scratch = new ScratchTopics({ files: ordinary })
   const history = new TopicSearchHistoryOwner(join(dirname(options.configurationPath), 'topic-search-history.json'))
-  const configuration = async (): Promise<{ workspaces: WorkspaceRecord[]; complete: boolean }> => {
-    const raw = await readOriginalMoteConfiguration(options.configurationPath)
-    if (!raw || typeof raw !== 'object' || !Array.isArray((raw as Record<string, unknown>).workspaces)) throw new AgentMuxError('The original Workspace resources are unconfirmed. Original files, references and Agents are retained.', 'FILE_WORKSPACE_UNAVAILABLE')
-    const workspaces = ((raw as { workspaces: unknown[] }).workspaces).flatMap(value => {
-      if (!value || typeof value !== 'object' || Array.isArray(value)) return []
-      const record = value as Record<string, unknown>
-      if (typeof record.id !== 'string' || typeof record.hostId !== 'string' || typeof record.path !== 'string') return []
-      const closeout = record.closeout as { targetWorkspaceId?: unknown } | undefined
-      return [{ id: record.id, hostId: record.hostId, path: record.path,
-        ...(typeof record.name === 'string' ? { name: record.name } : {}),
-        ...(typeof record.kind === 'string' ? { kind: record.kind } : {}),
-        ...(typeof record.repoPath === 'string' ? { repoPath: record.repoPath } : {}),
-        ...(closeout && typeof closeout.targetWorkspaceId === 'string' ? { closeout: { targetWorkspaceId: closeout.targetWorkspaceId } } : {}) }]
-    })
-    return { workspaces, complete: workspaces.length === (raw as { workspaces: unknown[] }).workspaces.length }
-  }
+  const resources = options.resources ?? createHostWorkspaceResources(options.configurationPath,options.spatial)
+  const configuration = resources.read
   const titleWorkspace = async (resource: NoteResource): Promise<WorkspaceRecord | undefined> => {
     const matches = (await configuration()).workspaces.filter(workspace => workspace.id === resource.workspaceId)
     const current = matches.length === 1 ? matches[0] : undefined
