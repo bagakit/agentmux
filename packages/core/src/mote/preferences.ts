@@ -1,4 +1,4 @@
-import { isDeepStrictEqual } from 'node:util'
+import { dequal } from 'dequal'
 import { parseContinuousProgressDefinitionReference, parseContinuousProgressDefinition, parseContinuousProgressGuidanceAdoption, parseContinuousProgressGuidanceAdoptions, type ContinuousProgressDefinitionReference, type ContinuousProgressDefinition, type ContinuousProgressGuidanceAdoption } from '../continuous-progress-definition.js'
 import { sameConnectionApplication } from '../connections-contract.js'
 import { parseConnectionApplication } from '../room-binding-codec.js'
@@ -340,7 +340,7 @@ export function parseMotePreferencesSaveResult(value: unknown, params?: MotePref
   if (maintenanceAdoption && p.status === 'saved') fail('Guidance adoption cannot report a File write.', code)
   if (params?.kind === 'quick') {
     const action = params.action
-    if (action && confirmed && !isDeepStrictEqual(source, params.baseline)) fail('Guidance adoption cannot change the original File baseline.', code)
+    if (action && confirmed && !dequal(source, params.baseline)) fail('Guidance adoption cannot change the original File baseline.', code)
     if (!action && maintenanceAdoption || action && (p.status === 'saved' || confirmed && !maintenanceAdoption)) fail('Guidance adoption requires its separate original receipt and unchanged File.', code)
     if (action && maintenanceAdoption && (maintenanceAdoption.loopId !== action.expectedSchedule.loopId || maintenanceAdoption.expectedRevision !== action.expectedSchedule.revision ||
       maintenanceAdoption.oldDefinition.intentId !== action.expectedDefinition.intentId || maintenanceAdoption.oldDefinition.operationId !== action.expectedDefinition.operationId || maintenanceAdoption.newDefinition.guidanceRevision !== action.guidanceRevision)) fail('Guidance adoption receipt belongs to another original request.', code)
