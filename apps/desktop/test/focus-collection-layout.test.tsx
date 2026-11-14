@@ -502,27 +502,66 @@ it('actual Global shares Collection and Project pin order and keyboard movement 
   for (const field of ['tabs', 'layouts', 'sessions', 'agentComposerDrafts', 'agentFocus'] as const) expect(useAppStore.getState()[field]).toBe(before[field])
 })
 
-it('Collection Pin save failure retains its exact draft and Project preferences for explicit retry', async () => {
-  const { firstProject } = await independentContainerScene()
-  const projectPin = { key: focusProjectKey('local', firstProject.id), pinned: true, note: 'Keep this route', color: 'green' as const, collapsed: false }
-  await act(async () => useAppStore.setState(state => ({ config: { ...state.config!, focus: { ...state.config!.focus!, projects: [projectPin] } } })))
+it('a Collection appearance draft survives failure and reopens on its exact group beside a namesake', async () => {
+  const { firstProject, before } = await independentContainerScene()
+  const projectPreference = { key: focusProjectKey('local', firstProject.id), pinned: true, note: 'Keep this route', color: 'green' as const, collapsed: false }
+  const siblingPreference = { key: focusCollectionPreferenceKey('local', [categories[1]!.spaceId]), pinned: false, note: 'Other team', color: 'blue' as const, collapsed: null }
+  const original = [projectPreference, siblingPreference]
+  await act(async () => useAppStore.setState(state => ({
+    config: { ...state.config!, focus: { ...state.config!.focus!, projects: original } },
+    topicCategories: categories.map(item => item.spaceId === categories[1]!.spaceId ? { ...item, title: 'Research' } : item),
+  })))
+  let savedConfig = useAppStore.getState().config!
   const save = vi.spyOn(api.config, 'save').mockRejectedValueOnce(Error('Original configuration disk failed'))
-    .mockImplementation(async (next, expected) => applyConfigEdit(useAppStore.getState().config!, expected!, next))
-  async function press(label: string) {
-    const button = document.querySelector<HTMLButtonElement>(`[aria-label="${label}"]`)!
-    expect(button, label).not.toBeNull(); await act(async () => button.click())
+    .mockImplementation(async (next, expected) => (savedConfig = applyConfigEdit(savedConfig, expected!, next)))
+  async function press(label: string, scope: ParentNode = document) {
+    const button = scope.querySelector<HTMLButtonElement>(`[aria-label="${label}"]`)
+    expect(button, label).not.toBeNull()
+    await act(async () => button!.click())
   }
-  await press('Collection preferences · Research'); await press('Collection appearance')
-  const checkbox = document.querySelector<HTMLInputElement>('[aria-label="Pin collection"]')!
-  expect(checkbox).not.toBeNull(); await act(async () => checkbox.click())
-  expect(document.querySelector('[aria-label="Project note"]')).toBeNull()
+  async function openOriginal() {
+    await press('Collection preferences · Research', laneFor('hot-topic'))
+    await press('Collection appearance')
+  }
+  const noteInput = () => document.querySelector<HTMLInputElement>('[aria-label="Collection note"]')!
+  const pinInput = () => document.querySelector<HTMLInputElement>('[aria-label="Pin collection"]')!
+  const amber = () => document.querySelector('[aria-label="Collection color · amber"]')
+  expect(document.querySelectorAll('[aria-label="Collection preferences · Research"]')).toHaveLength(2)
+  await openOriginal()
+  await press('Pin collection')
+  expect(noteInput()).not.toBeNull()
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(noteInput(), 'Review every Friday')
+    noteInput().dispatchEvent(new Event('input', { bubbles: true }))
+  })
+  await press('Collection color · amber')
   await press('Save collection preferences')
   expect(document.querySelector('[data-focus-project-preferences]')?.textContent).toContain('Original configuration disk failed')
-  expect(checkbox.checked).toBe(true); expect(useAppStore.getState().config?.focus?.projects).toEqual([projectPin])
+  expect(pinInput().checked).toBe(true)
+  expect(noteInput().value).toBe('Review every Friday')
+  expect(amber()?.getAttribute('aria-pressed')).toBe('true')
+  expect(useAppStore.getState().config?.focus?.projects).toEqual(original)
+
   await press('Save collection preferences')
   expect(save).toHaveBeenCalledTimes(2)
-  expect(useAppStore.getState().config?.focus?.projects).toEqual([projectPin, { key: focusCollectionPreferenceKey('local', [categories[0]!.spaceId]), pinned: true, note: '', color: 'default', collapsed: null }])
+  expect(savedConfig.focus?.projects).toEqual([...original, {
+    key: focusCollectionPreferenceKey('local', [categories[0]!.spaceId]), pinned: true, note: 'Review every Friday', color: 'amber', collapsed: null,
+  }])
   expect(document.querySelector('[data-focus-project-preferences]')).toBeNull()
+  for (const key of ['sessions', 'tabs', 'layouts', 'agentFocus', 'agentComposerDrafts'] as const) expect(useAppStore.getState()[key]).toBe(before[key])
+
+  await act(async () => { root.render(null) })
+  useAppStore.setState({ config: structuredClone(savedConfig) })
+  await render()
+  for (const [task, color, note] of [['hot-topic', 'amber', 'Review every Friday'], ['cold-topic', 'blue', 'Other team'], ['project', 'green', 'Keep this route']] as const) {
+    const frame = laneFor(task)?.closest<HTMLElement>('.focus-project-frame')
+    expect(frame?.dataset.focusProjectColor, task).toBe(color)
+    expect(frame?.querySelector('[data-focus-project-note]')?.textContent, task).toBe(note)
+  }
+  await openOriginal()
+  expect(pinInput().checked).toBe(true)
+  expect(noteInput().value).toBe('Review every Friday')
+  expect(amber()?.getAttribute('aria-pressed')).toBe('true')
 })
 
 it('Collection preference identity retains complete canonical membership and legacy authored values', () => {
