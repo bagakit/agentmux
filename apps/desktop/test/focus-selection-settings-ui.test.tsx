@@ -85,6 +85,7 @@ function retained(before: Awaited<ReturnType<typeof setup>>['before']) {
 it('previews authored choices locally, then saves through the original module into the actual Global selected-card consumer', async () => {
   const f = await setup()
   expect(style(global())).toEqual(['var(--text)', '20%', '35%'])
+  expect(preview().querySelector('[data-example-agent]')?.getAttribute('aria-pressed'), 'The first rendered board example must initially show the selected appearance').toBe('true')
   await emphasis('Background emphasis', 28); await emphasis('Fine-edge emphasis', 70)
   await dom.click('[data-settings-field="selection-accent"] input[value="blue"]')
   expect(style(preview())).toEqual(['var(--blue)', '28%', '70%'])

@@ -5,7 +5,7 @@ import { defineConfig } from 'vitest/config'
 import source from './vitest.mote-context.config.mts'
 
 const mutation = process.env.AGENTMUX_SELECTION_UI_MUTANT, trace = process.env.AGENTMUX_SELECTION_UI_LOADED
-if (mutation && mutation !== 'disconnect-global') throw Error('Unknown selection UI inverse')
+if (mutation && !['disconnect-global', 'initial-selection'].includes(mutation)) throw Error('Unknown selection UI inverse')
 if (mutation && !trace) throw Error('The selection UI inverse needs a real loaded-source trace')
 const owners = new Set(['apps/desktop/src/renderer/src/components/GlobalFocusSurface.tsx',
   'apps/desktop/src/renderer/src/components/settings/FocusSettingsPane.tsx', 'apps/desktop/src/renderer/src/components/settings/FocusSettingsPreview.tsx',
@@ -18,10 +18,15 @@ export default defineConfig({ ...source, cacheDir: '.tmp/focus-selection-setting
     const file = id.split('?')[0]!, path = relative(process.cwd(), file)
     if (!owners.has(path)) return
     let code = original
-    if (mutation && path.endsWith('/GlobalFocusSurface.tsx')) {
+    if (mutation === 'disconnect-global' && path.endsWith('/GlobalFocusSurface.tsx')) {
       const anchor = '...focusSelectionStyle(config?.focus)'
       if (code.split(anchor).length !== 2) throw Error('The actual Global consumer inverse must match exactly once')
       code = code.replace(anchor, '...focusSelectionStyle(undefined)'); applied = true
+    }
+    if (mutation === 'initial-selection' && path.endsWith('/FocusSettingsPreview.tsx')) {
+      const anchor = 'useState(() => lanes[0]!.contextRefs[0]!.id)'
+      if (code.split(anchor).length !== 2) throw Error('The initial selected example inverse must match exactly once')
+      code = code.replace(anchor, 'useState(contexts[0]!.id)'); applied = true
     }
     const record = { path, original_sha256: sha(readFileSync(file, 'utf8')), loaded_sha256: sha(code), applied: code !== original, mutation: code !== original ? mutation : null }
     if (trace) appendFileSync(trace, JSON.stringify({ phase: 'loaded', ...record }) + '\n')
