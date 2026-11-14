@@ -9,7 +9,7 @@ import { api } from '../src/renderer/src/lib/api'
 import { MoteWorkface } from '../src/renderer/src/components/MoteWorkface'
 import { DesktopClientUiProvider } from '../src/renderer/src/components/DesktopClientUiProvider'
 import { topicSpaceIconTarget } from '../src/renderer/src/lib/space-object-appearance'
-import * as motion from '../src/renderer/src/lib/mote-face-motion'
+import * as motion from '@agentmux/client-ui/mote-face-motion'
 
 let app: MoteAppFixture
 const topic = moteTopics[0]!

@@ -3,7 +3,7 @@ import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { WorkbenchTabStrip } from '../src/renderer/src/components/WorkbenchTabStrip'
-import { observeMoteMotion } from '../src/renderer/src/lib/mote-face-motion'
+import { observeMoteMotion } from '@agentmux/client-ui/mote-face-motion'
 import { observeNativeOverlayRegions } from '../src/renderer/src/lib/native-overlay-regions'
 let root: Root | undefined, host: HTMLElement, frame: FrameRequestCallback | undefined
 let resizeCallbacks: ResizeObserverCallback[], resized: Set<Element>

@@ -6,7 +6,7 @@ import {
   initFollowState,
   onScroll,
   shouldShowJumpToLatest
-} from '../src/renderer/src/lib/activity-autoscroll.js'
+} from '@agentmux/client-ui/activity-autoscroll'
 
 describe('Message Tools bottom reveal', () => {
   it('hides the control at the bottom and shows it only after an upward scroll leaves the bottom band', () => {

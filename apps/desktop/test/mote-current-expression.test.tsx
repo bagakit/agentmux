@@ -12,7 +12,7 @@ import { currentMote } from './fixtures/mote-current-expression'
 import * as authority from '../src/renderer/src/lib/mote-expression'
 import { fixtureEpoch as _historyFixtureEpoch } from '../../../test/fixture-values.mjs'
 
-vi.mock('../src/renderer/src/lib/mote-face-motion', () => ({ observeMoteMotion: () => ({ update() {}, dispose() {} }) }))
+vi.mock('@agentmux/client-ui/mote-face-motion', () => ({ observeMoteMotion: () => ({ update() {}, dispose() {} }) }))
 const baseline = useAppStore.getState()
 let root: Root, host: HTMLDivElement
 beforeEach(() => {

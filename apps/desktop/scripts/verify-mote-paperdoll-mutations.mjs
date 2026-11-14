@@ -39,12 +39,12 @@ const variants = [
   ['save-invisible-alternative', 'apps/desktop/src/renderer/src/components/SpaceIconPicker.tsx', avatar, 'opens Make a face first', s => s.replace('let choice = draft', 'let choice = alternativeDraft')],
   ['source-switch-publishes-draft', 'apps/desktop/src/renderer/src/components/SpaceIconPicker.tsx', avatar, 'opens Make a face first', s => s.replace('setDraft(face ? faceDraft : alternativeDraft)', 'setDraft(face ? faceDraft : alternativeDraft); if(target) void useAppStore.getState().setSpaceObjectIcon(target.key, face ? faceDraft : alternativeDraft)')],
   ['avatar-liquid-ignores-x', 'apps/desktop/src/renderer/src/components/LiquidSelectionSurface.tsx', motion, 'same connected liquid', s => s.replace('const horizontal = Math.abs(next.x - from.x) > Math.abs(next.y - from.y)', 'const horizontal = false')],
-  ['face-gaze-is-disconnected', 'apps/desktop/src/renderer/src/lib/mote-face-motion.ts', motion, 'connected static face rig', s => s.replace("setProperty('--mote-gaze-x'", "setProperty('--unused-gaze-x'")],
+  ['face-gaze-is-disconnected', 'packages/client-ui/src/lib/mote-face-motion.ts', motion, 'connected static face rig', s => s.replace("setProperty('--mote-gaze-x'", "setProperty('--unused-gaze-x'")],
   ['saved-face-never-joins-motion', 'apps/desktop/src/renderer/src/components/MoteIdentityMotion.tsx', motion, 'a saved face joins', s => s.replace('[expression, visible, children]', '[expression, visible]')],
   ['sessionless-face-subscribes-to-store', 'apps/desktop/src/renderer/src/components/MoteIdentityMotion.tsx', motion, 'identities without a Session', s => s.replace('return !props.moteSessionId', 'return false')],
-  ['hidden-face-does-work', 'apps/desktop/src/renderer/src/lib/mote-face-motion.ts', motion, 'eighty hidden faces', s => s.replace('identity.visible && identity.inView &&', '')],
-  ['reduced-face-does-work', 'apps/desktop/src/renderer/src/lib/mote-face-motion.ts', motion, 'eighty hidden faces', s => s.replace('&& !reduced.matches', '')],
-  ['offscreen-face-does-work', 'apps/desktop/src/renderer/src/lib/mote-face-motion.ts', motion, 'eighty hidden faces', s => s.replace('identity.inView && ', '')],
+  ['hidden-face-does-work', 'packages/client-ui/src/lib/mote-face-motion.ts', motion, 'eighty hidden faces', s => s.replace('identity.visible && identity.inView &&', '')],
+  ['reduced-face-does-work', 'packages/client-ui/src/lib/mote-face-motion.ts', motion, 'eighty hidden faces', s => s.replace('&& !reduced.matches', '')],
+  ['offscreen-face-does-work', 'packages/client-ui/src/lib/mote-face-motion.ts', motion, 'eighty hidden faces', s => s.replace('identity.inView && ', '')],
   ['confirm-before-publish', 'apps/desktop/src/renderer/src/store.ts', avatar, 'failed confirmation', s => s.replace('      writeChoice(choice(get().spaceObjectIcons))\n      await requestWorkbenchStorageFlush()', '      set(state => ({ spaceObjectIcons: choice(state.spaceObjectIcons) }))\n      writeChoice(choice(get().spaceObjectIcons))\n      await requestWorkbenchStorageFlush()')],
   ['cancel-writes-face', 'apps/desktop/src/renderer/src/components/SpaceIconPicker.tsx', avatar, 'Cancel and Escape', s => s.replace('disabled={busy} onClick={onClose}', 'disabled={busy} onClick={() => { if(target) void useAppStore.getState().setSpaceObjectIcon(target.key, draft); onClose() }}')],
   ['disconnect-real-face-consumer', 'apps/desktop/src/renderer/src/components/SpaceObjectIcon.tsx', avatar, 'real primary and custom editor', s => s.replace('<MoteFace face={manualIcon} expression={expression} />', '<NotebookText size={14} />')],
@@ -66,8 +66,8 @@ const variants = [
   ['current-history-gap-keeps-fake-live-tool', 'apps/desktop/src/renderer/src/lib/session-state.ts', state, 'a current history revision gap', s => s.replace('state: currentGap ?', "state: currentGap && core.mutation.type === 'update' ?")],
   ['old-epoch-gap-stops-current-tool', 'apps/desktop/src/renderer/src/lib/session-state.ts', state, 'a current history revision gap', s => s.replace('evidence.observedAt >= epoch && evidence.observedAt >= observedAt &&', '')],
   ['old-item-gap-stops-current-tool', 'apps/desktop/src/renderer/src/lib/session-state.ts', state, 'a current history revision gap', s => s.replace("(mutation.type === 'update' || mutation.item.createdAt >= epoch)", 'true')],
-  ['offscreen-keeps-moving', 'apps/desktop/src/renderer/src/lib/mote-face-motion.ts', state, 'offscreen, hidden', s => s.replace('identity.inView && ', '')],
-  ['reduced-motion-keeps-moving', 'apps/desktop/src/renderer/src/lib/mote-face-motion.ts', state, 'offscreen, hidden', s => s.replace('&& !reduced.matches', '')]
+  ['offscreen-keeps-moving', 'packages/client-ui/src/lib/mote-face-motion.ts', state, 'offscreen, hidden', s => s.replace('identity.inView && ', '')],
+  ['reduced-motion-keeps-moving', 'packages/client-ui/src/lib/mote-face-motion.ts', state, 'offscreen, hidden', s => s.replace('&& !reduced.matches', '')]
 ]
 const requested = process.argv.slice(2)
 assert.equal(new Set(requested).size, requested.length, 'Each requested mutation is distinct')
@@ -76,19 +76,21 @@ const selected = requested.length ? variants.filter(row => requested.includes(ro
 assert.ok(selected.length > 0, 'Nonempty actual mutation set')
 result.selected = selected.map(row => row[0])
 try {
-  for (const directory of ['apps/desktop/src', 'apps/desktop/test', 'apps/desktop/resources', 'packages/core/src', 'packages/demand', 'packages/layout/src']) {
+  for (const directory of ['apps/desktop/src', 'apps/desktop/test', 'apps/desktop/resources', 'apps/mobile/src', 'packages/core/src', 'packages/demand', 'packages/layout/src',
+    'packages/client-ui/src', 'packages/client-ui/brand', 'packages/identity/src', 'apps/host/src']) {
     await cp(join(repository, directory), join(clone, directory), { recursive: true, filter: file => !file.includes('/node_modules') && !file.includes('/dist') && !file.includes('/.tmp') })
   }
-  for (const file of ['package.json', 'tsconfig.base.json', 'vitest.setup.ts', 'apps/desktop/package.json', 'apps/desktop/tsconfig.json', 'apps/desktop/tsconfig.test.json', 'packages/core/package.json', 'packages/layout/package.json', 'apps/desktop/scripts/fixtures/mote-navigation-footer/vitest.owning.config.mts', 'apps/desktop/scripts/fixtures/mote-navigation-footer/paperdoll.html']) {
+  for (const file of ['package.json', 'tsconfig.base.json', 'vitest.setup.ts', 'test/fixture-values.mjs', 'apps/desktop/scripts/lib/fixture-values.mjs', 'apps/desktop/package.json', 'apps/desktop/tsconfig.json', 'apps/desktop/tsconfig.test.json', 'packages/core/package.json', 'packages/layout/package.json', 'packages/client-ui/package.json', 'packages/identity/package.json', 'apps/host/package.json', 'apps/desktop/scripts/fixtures/mote-navigation-footer/vitest.owning.config.mts', 'apps/desktop/scripts/fixtures/mote-navigation-footer/paperdoll.html']) {
     await mkdir(resolve(clone, file, '..'), { recursive: true }); await cp(join(repository, file), join(clone, file))
   }
-  for (const directory of ['node_modules', 'apps/desktop/node_modules', 'packages/core/node_modules', 'packages/demand/node_modules', 'packages/layout/node_modules']) {
+  for (const directory of ['node_modules', 'apps/desktop/node_modules', 'apps/mobile/node_modules', 'packages/core/node_modules', 'packages/demand/node_modules', 'packages/layout/node_modules',
+    'packages/client-ui/node_modules', 'packages/identity/node_modules', 'apps/host/node_modules']) {
     await mkdir(resolve(clone, directory, '..'), { recursive: true }); await symlink(join(repository, directory), join(clone, directory), 'dir')
   }
   const sourceFiles = await files(join(repository, 'apps/desktop/src')); assert.ok(sourceFiles.length > 0)
   for (const [symbol, definition, pattern] of [
     ['SpaceObjectIcon identity', 'apps/desktop/src/renderer/src/components/SpaceObjectIcon.tsx', /<SpaceObjectIcon\s/],
-    ['observeMoteMotion', 'apps/desktop/src/renderer/src/lib/mote-face-motion.ts', /\bobserveMoteMotion\(/],
+    ['observeMoteMotion', 'packages/client-ui/src/lib/mote-face-motion.ts', /\bobserveMoteMotion\(/],
     ['LiquidSelectionSurface', 'apps/desktop/src/renderer/src/components/LiquidSelectionSurface.tsx', /<LiquidSelectionSurface\s/],
     ['MoteFace', 'packages/client-ui/src/components/MoteFace.tsx', /<MoteFace\s/],
     ['MoteFaceEditor', 'apps/desktop/src/renderer/src/components/MoteFaceEditor.tsx', /<MoteFaceEditor\s/],

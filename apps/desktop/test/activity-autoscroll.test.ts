@@ -9,7 +9,7 @@ import {
   type ContentSignature,
   type FollowState,
   type ScrollGeometry
-} from '../src/renderer/src/lib/activity-autoscroll.js'
+} from '@agentmux/client-ui/activity-autoscroll'
 
 // The whole point of this module is that "the distance to the bottom grew" is NOT enough to know the
 // user scrolled away. While an agent streams, content grows below the fold and the distance grows with
