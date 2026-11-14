@@ -3,6 +3,7 @@ import { spawn, spawnSync, execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { cp, mkdir, open, readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
+import { activityTestFiles } from './typecheck-activity-tests.mjs'
 
 const root = path.resolve(import.meta.dirname, '../../..')
 const directory = path.join(root, '.tmp/agent-locations/candidate')
@@ -11,10 +12,11 @@ const sha = bytes => createHash('sha256').update(bytes).digest('hex')
 async function unchangedActivityBaseline(logPath) {
   const baseline = path.join(root, '.tmp/agent-locations/before/activity-baseline')
   const files = JSON.parse(await readFile(path.join(baseline, 'files.json'), 'utf8'))
-  assert.equal(Object.keys(files).length, 4)
+  assert.equal(Object.keys(files).length, 5)
   for (const [file, digest] of Object.entries(files)) assert.equal(sha(await readFile(path.join(baseline, file))), digest)
   const control = JSON.parse(await readFile(path.join(baseline, 'receipt.json'), 'utf8'))
   const prior = JSON.parse(await readFile(path.join(baseline, 'diagnostics.json'), 'utf8'))
+  const callers = JSON.parse(await readFile(path.join(baseline, 'activity-callers.json'), 'utf8'))
   assert.equal(control.sourceAliasesRequested, false); assert.equal(control.mutationsRequested, false)
   assert.equal(control.finalStatus, '')
   assert.equal(control.commands.find(command => command.name === 'desktop-dependency-build')?.exitCode, 0)
@@ -26,6 +28,10 @@ async function unchangedActivityBaseline(logPath) {
   const parsed = spawnSync('python3', [path.join(baseline, 'normalize.py'), logPath, '--repo', root, '--previous-log', path.join(baseline, 'desktop-typecheck.log'), '--previous-repo', control.worktree, '--output', output], { encoding: 'utf8' })
   assert.equal(parsed.status, 0, parsed.stderr)
   const result = JSON.parse(await readFile(output, 'utf8'))
+  for (const footer of [prior.checkerFooter, result.checkerFooter]) for (const field of ['testRoots', 'sourceFiles', 'firstPartyExports', 'manifests', 'diagnostics']) assert.ok(Number.isInteger(footer?.[field]) && footer[field] > 0, `Incomplete original checker footer: ${field}`)
+  assert.ok(Array.isArray(callers) && callers.length === prior.checkerFooter.testRoots && new Set(callers).size === callers.length)
+  const currentCallers = new Set(activityTestFiles(root).map(file => path.relative(root, file)))
+  for (const file of callers) assert.ok(currentCallers.has(file), `Original Activity caller disappeared: ${file}`)
   assert.ok(prior.totalDiagnostics > 0 && prior.checkerFooter.testRoots > 0)
   assert.ok(result.checkerFooter?.testRoots >= prior.checkerFooter.testRoots, 'Original Activity callers cannot disappear')
   assert.equal(result.comparison?.exactNormalizedMultisetEqual, true, 'Type errors changed from the committed-main control')
