@@ -174,6 +174,9 @@ async function managedFixture(initialSaveBusy=false, retainedPrompt?: string, re
 it('a supervision heartbeat freezes the exact original Mote input and shares the Main duties at the actual future-intent owner',async()=>{
   const f=await managedFixture(), loop=f.loop()
   expect(loop.prompt).toContain(MOTE_SUPERVISION_GUIDANCE)
+  expect(loop.prompt).toContain('space mote dialogue heartbeat report')
+  expect(loop.prompt).toContain('lastInputRef')
+  expect(loop.prompt).toContain('later Agent statement, not proof')
   expect(JSON.parse(loop.prompt.slice(loop.prompt.lastIndexOf('\n')+1))).toEqual({target:f.target})
   const original=await f.f.client.readAgentFuturePromptIntent('main',loop.futureIntentId!)
   expect(original).toMatchObject({operationId:loop.creationOperationId,prompt:loop.prompt,continuitySource:loop.managedSource})
