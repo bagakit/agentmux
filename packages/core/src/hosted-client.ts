@@ -491,7 +491,9 @@ export async function connectHostedAgentMux<P extends AgentMuxHostedSessionProje
                 if (options.expectedStorePath !== undefined && observed.storePath !== options.expectedStorePath) throw new AgentMuxError('This Host owns a different durable Session Store. The original workbench is retained.', 'CONTROL_OWNER_BUSY')
                 bootstrap = structuredClone(observed); initialSeen = true
                 acceptOwner(observed.owner)
-                for (const retained of bootstrap.sessions) emit({ type: 'agent-session', session: structuredClone(retained) })
+                // The complete validated snapshot already owns this cache. Publish
+                // its original order without feeding each entry back into that array.
+                for (const retained of bootstrap.sessions) publisher.publish({ type: 'agent-session', session: structuredClone(retained) })
                 if (bootstrap.connection) emit(structuredClone(bootstrap.connection))
                 resolveInitial()
               } else if (received.kind === 'event') {
