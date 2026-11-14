@@ -323,7 +323,7 @@ Hosted Client 已通过所选连接绑定 semantic Host，读取中的 `hostId: 
 - Provider 的准备结果在认领前与派发前各重核一次来源；Core 的 CAS 重核前序、来源与私有 actor 快照，不要求 Provider 所选通道与平台私有 actor 同形。
 - 冻结后不升级旧的 PTY 计划，不重发未知的原生请求。Provider planner 与采用校验复用同一个机器来源 tuple，精确条件不改写成另一种调用者意图。公共 RPC／CLI 复用消息入口，不另增 reader、journal 或客户端 matcher。
 
-Codex 的受管 actor 写通道由 [`codex-native-input`](../../packages/core/src/providers/codex-native-input.ts) 在 executable probe 之后、Runtime prepare 之前，为 create 与带明确 UUID 的有限 resume 形状选择受管启动：
+Codex 的受管 actor 写通道由 [Core 的 actor 装配](../../packages/core/src/providers/codex-native-input.ts) 在 executable probe 之后、Runtime prepare 之前选定。它复用 [Provider 的原生调用／输入协议](../../packages/providers/src/codex/input-protocol.ts) 解释 create 与带明确 UUID 的有限 resume 形状：
 
 - ctxmux Run 内的 [helper](../../packages/core/src/providers/codex-managed-run.ts) 启动同一个认证 app-server。create 时由 TUI 创建初始 thread；resume 时由同一 actor 的生命周期准备先向原 thread 发出原生恢复请求，核对实际生效的 sandbox／approval 与明确的 model／cwd 后，再让 TUI 接回这个已加载的会话。
 - 订阅保持到后台 Run 结束；前台退出不停止仍健康的 actor。Provider 的私有认证控制通道报告前台代次，Core 把安全的 `terminalFrontend` 事实投影到 Session。明确的 Resume 沿同一 actor／Run／原生 thread 重开前台，用 Run 的有序输出观察确认新的握手，不释放客户端已有的 Attachment。只有首次恢复的启动输入由该次 TUI 携带，前台接回不重放它；消息 writer 不承担恢复。相对 cwd 在 Run 内解析。
