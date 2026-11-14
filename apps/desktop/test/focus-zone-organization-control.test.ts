@@ -33,3 +33,13 @@ it('ConfigOwner merges different container deltas and rejects a conflicting same
  await expect(f.owner.edit(authored,{...authored,focus:{...authored.focus!,zonePresentations:[{key:collection,presentation:'sections'}]}})).rejects.toMatchObject({code:'CONFIG_CONFLICT'})
  expect(f.owner.current.focus?.zonePresentations?.[0]?.presentation).toBe('sections')
 })
+
+it('public Topic discovery shares the implicit sections default and preserves an authored cards choice after durable reload',async()=>{
+ const f=await configOwnerFixture(), before=await f.bytes()
+ const inspectTopic=()=>executeSettingsControl({schemaVersion:5,requestId:'inspect-topic-default',operation:'settings.get',target:'focus.topicPresentation'},f.owner)
+ expect(await inspectTopic()).toMatchObject({entries:[{key:'focus.topicPresentation',value:'sections',default:'sections'}]})
+ expect(await f.bytes()).toBe(before); expect(f.owner.current.focus?.topicPresentation).toBeUndefined()
+ await executeSettingsControl({schemaVersion:5,requestId:'author-topic-tags',operation:'settings.set',key:'focus.topicPresentation',value:'cards'},f.owner)
+ expect(await inspectTopic()).toMatchObject({entries:[{key:'focus.topicPresentation',value:'cards',default:'sections'}]})
+ expect((await new ConfigStore(f.store.filePath).get()).focus?.topicPresentation).toBe('cards')
+})

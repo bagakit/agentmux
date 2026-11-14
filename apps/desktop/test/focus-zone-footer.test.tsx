@@ -68,7 +68,7 @@ it('actual Global Collection Topic tags use the same footer instead of the Agent
   const bindings = Object.fromEntries(topics.map(topic => { const spaceId = directoryIdentity('local', topic.directoryPath); return [homeZoneId(spaceId),
     { spaceId, workspaceId: scratchWorkspace.id, topicId: topic.id, directoryPath: topic.directoryPath, contentKind: 'topic' as const, relations: { [category.spaceId]: true }, resource: { kind: 'home' as const, hostId: 'local', directoryPath: topic.directoryPath, branch: null } }] }))
   const sessions = topics.map((topic, index) => ({ ...composerSession('topic-task-' + index), label: 'Topic task ' + index, workspacePath: topic.directoryPath, status: { state: 'working' as const, source: 'native-hook' as const, observedAt: Date.now() } }))
-  useAppStore.setState({ config: { ...composerConfig, workspaces: [scratchWorkspace], focus: { recentActivityHours: 48 } }, sessions, tabs: {}, layouts: {},
+  useAppStore.setState({ config: { ...composerConfig, workspaces: [scratchWorkspace], focus: { recentActivityHours: 48, topicPresentation: 'cards' } }, sessions, tabs: {}, layouts: {},
     scratchTopicSnapshots: { [scratchWorkspace.id]: { scope: scratchTopicsScope(scratchWorkspace), revision: 1, topics, error: null, reading: false } },
     spaceZoneBindings: bindings, topicCategories: [category], timelines: {}, agentNames: {}, mainSurface: 'agents', agentFocus: { execution: { sessionId: null, history: [] }, pmo: { sessionId: null } } })
   vi.spyOn(api.scratch, 'listTopics').mockResolvedValue(topics)
@@ -108,7 +108,7 @@ it('two exact Zone footer actions and mandatory recovery stay available for one 
 })
 it('the actual static Settings example shares the footer and keeps original section headings on selection', async () => {
   const values = resolveFocusPreferences(undefined)
-  await dom.render(<FocusSettingsPreview values={values} active scene="board" onScene={() => {}} />)
+  await dom.render(<FocusSettingsPreview values={{ ...values, topicPresentation: 'cards' }} active scene="board" onScene={() => {}} />)
   const collection = dom.container.querySelector('[data-focus-collection]')!
   const wrappers = [...collection.querySelectorAll<HTMLElement>('[data-example-card]')]
   expect(wrappers.length).toBeGreaterThan(1)
