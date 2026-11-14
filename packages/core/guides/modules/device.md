@@ -37,5 +37,13 @@ one device, not a general user approval. Read device ls before administering an 
 Pairing changes connectivity and does not create an Agent or accept a Goal. Retain the complete
 returned offer and exact deviceId. Current discovery cannot certify an earlier lost revocation.
 
+Durable headless Core uses the same original device authority, daemon key and
+revocation records as Host. It exposes `device ls`, encrypted `device hello` and
+local-user `device revoke`; it does not host a mobile page, so `device link`
+reports that page unavailable. Use `mesh inspect` for the original endpoint offer
+and the chosen gateway's `mesh link` for its explicitly advertised client ingress.
+Network member keys and the separately allowed RPC client keys grant different
+permissions. Device admission never grants local-user administration.
+
 Read amux device --help for the pairing, identity and revocation contract; use the exact
 action's help before changing it.

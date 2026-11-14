@@ -62,7 +62,7 @@ Cluster 分组以 Node、Mesh、Remote 分别承接对外发布、网络接入�
 
 配置读取失败、网络观察失败和真实空网络分别表达。配置不可用时说明当前受影响的配置读取、可检查的原 Core 与显式重读入口；原错误可展开核对，不直接将内部 owner 术语当成引导。独立可用的网络观察和原已保存连接仍可访问，不因配置观察失败显示虚构空拓扑、永久加载或要求停止健康 Run。保留原草稿与未知操作，已有设置可读时局部错误不折叠正在编辑的字段。
 
-Mesh 配置经原 Core 公共 owner 完整 CAS 保存，保留 expected revision 和原 operation ID；原 managed caller 的认证与准确 Runtime／owner fence 在持久写入前仍须成立。复用原 Node operator 资格；Device、guest、有限发布访问或 route delegation 不因此取得配置管理权。未知保存先查询原操作，不能用读到相同值伪造历史持久 ACK，不能换 ID 重发。
+Mesh 配置经原 Core 公共 owner 完整 CAS 保存，保留 expected revision 和原 operation ID；原 managed caller 的认证与准确 Runtime／owner fence 在持久写入前仍须成立。复用原 Node operator 资格；Device、guest、有限发布访问或 route delegation 不因此取得配置管理权。未知保存先查询原操作，不能用读到相同值伪造历史持久 ACK，不能换 ID 重发。 显式管理已保存远端 Core 时，入口验证原本地 caller，冻结准确 Host／预期 Runtime 与原 operator carrier；接收 Core 独立核原 operator 权限和 Runtime／instance，不把入口 Agent 当作远端 Session。该有限路由复用原 Node operator 选择边界，不提供任意 RPC 转发；已取得的原保存 ACK 不被随后观察路由变化覆盖。
 
 持久保存与当前应用分开表达：期望配置、已采用修订、应用中／失败、监听和当前网络观察各自可核对。热更新保留未改变的 peer、健康 circuit 和原对象；新配置、监听或应用失败保留原可用路径与健康 Core，不以关闭整个 Runtime 或强制重启应用配置。运行网络与监听器的寿命分开，允许仅主动出站的参与者；借用 listener 时只释放自己的资源。
 
@@ -98,7 +98,7 @@ Mesh 在 Settings 中有可发现的独立网络入口，搜索、Overview、Hos
 
 人在原 Host 上保存 participant 配置后，该 Host 沿同一网关 runtime 自动发布自己的原 Core endpoint，不再要求另行填写未公开的出站文件。复用原 serverId、daemon key、DeviceAuthority 与已认证 framed dispatcher；网络成员公钥只批准 peer，原用户还须明确批准 endpoint 的 client 公钥，先核对允许列表再进入原设备登记。两种 key 和原 Runtime 身份分别呈现，入网不自动批准设备或提升为本地用户。
 
-原 Host endpoint 通过惰性、可取消的宿主端口提供，内部 publisher 使用自有的私有 loopback attachment，不开放公网 Core RPC。停止和撤销只释放相关载体与观察，不停止 Native Run；迟到初始化不能重建已停止资源，停止不能无限等待可选初始化。纯 Core 或独立 relay 未提供该 Host 端口时，如实报告 endpoint 未提供，不伪造可访问的原 Core。原已公开的独立出站组件继续保持自己的明确用途，不作为 Mesh 设置的隐藏前提。
+原 endpoint 的设备身份、daemon key 与授权由 Core 唯一拥有；持久化 headless 入口和 Host 共用这套实现、原 schema 与原 File Store 旁的文件，不另造身份或权限。端点通过惰性、可取消的端口提供，内部 publisher 使用自有的私有 loopback attachment，不开放公网 Core RPC。网络配置与转发不等待可选端点初始化；端点身份损坏或仍未取得时，持续报告端点未知／不可用，原 Unix、已可用 Mesh 转发和健康 Native Run 保持可用。停止和撤销只释放相关载体与观察，不停止 Native Run；迟到初始化不能重建已停止资源，停止不能无限等待可选初始化。显式传入的端点仍沿其原 owner；内存 Store 或未提供端点的独立控制服务如实报告 endpoint 未提供，不伪造持久身份。headless 不伪造手机网页，以原 Mesh offer 和所选网关的显式 ingress 供访问。原已公开的独立出站组件继续保持自己的明确用途，不作为 Mesh 设置的隐藏前提。
 
 ## Tailcat 传输与本机接入
 

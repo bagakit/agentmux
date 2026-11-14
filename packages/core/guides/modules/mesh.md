@@ -23,6 +23,19 @@ The reply’s `diskDurability` describes only that original save. Keep its opera
 after an unknown reply and use `settings mesh inspect --operation-id ID`; inspection
 may confirm the same already saved bytes, without replaying an old configuration.
 
+To manage one saved remote Core, keep the CLI connected to your original entry
+Core and add `--host HOST --expected-runtime RUNTIME` to these four Mesh commands.
+JSON-RPC accepts the same optional `target:{hostId,expectedRuntimeId}`; CLI JSON
+can contain it instead of those two flags, never both. The entry authenticates
+its real local caller and freezes that saved operator route. The receiving Core
+independently authorizes the operator carrier and its exact Runtime/instance;
+your Agent capability is never presented as a Session on that other Core.
+Device, guest or delegated access cannot borrow this management route.
+An obtained original save ACK stays with its owner/revision/operation even if the
+observing route later changes; lost transport results remain unknown. Inspect the
+same original operation without replay. Leading `--source-host` instead selects
+another endpoint and retains your caller; it is not this operator route.
+
 Read `mesh inspect` for `desiredRevision`, `activeRevision` and `apply`. Settings
 are adopted live. A failed new listener keeps the prior active listener and network
 paths. Other Core services and original Sessions remain usable. The existing explicit
@@ -56,7 +69,7 @@ and the independently authored client `advertisedIngress:[{endpoint:"gateway.exa
 The externally terminated TLS ingress need not equal the private bind endpoint.
 An explicit external publisher admission is `{serverId,tokenHash}` in `publishers`;
 the token hash uses the Relay package's `hashPublisherToken` and never the token itself.
-Automatic Host publication needs no such manual entry. `endpointAccess.allowedClientKeys`
+Automatic Core endpoint publication needs no such manual entry. `endpointAccess.allowedClientKeys`
 contains independent RPC client's canonical public keys, never network member keys.
 
 A first explicit managed save takes over the complete existing startup configuration
@@ -68,15 +81,21 @@ TLS configuration names original absolute `keyPath` and `certPath` files; privat
 network keys never appear in public results. The original network identity and
 monotonic boot epoch survive Core restart. Corrupt keys are retained as unavailable.
 
-A Host participant automatically publishes its original endpoint through the same
-network owner. Configure `endpointAccess.allowedClientKeys` explicitly; member keys
+A durable headless Core or Host participant automatically publishes its original
+endpoint through the same network owner. Configure `endpointAccess.allowedClientKeys` explicitly; member keys
 are network keys, not device client keys. The endpoint checks that exact client pin
 before its original DeviceAuthority authorization. Removing a pin releases only its
 related device readers, preserving the original Agent and Run. This needs no separate explicit
 outbound configuration file. `mesh.inspect.endpoint` reports the real original
 complete offer or its unavailable/not-provided state. Its private loopback ingress
 is an original endpoint descriptor for `mesh.link`, not an externally reachable URL.
-A pure Core without a Host endpoint port truthfully reports `not-provided`.
+The original device authority and daemon key stay beside the original File Store,
+using the same identity and revocation records in headless and Host deployments.
+An unavailable or still initializing endpoint does not block network forwarding,
+Unix Core access or healthy Native Runs. Restore its original files, then make an
+explicit Mesh settings save to retry that endpoint; never replace its identity.
+An explicit endpoint source remains authoritative. A memory Store or standalone
+control server without an endpoint source truthfully reports `not-provided`.
 
 Network inspection is passive. Its producer identifies the original Core and the
 independent network peer. Coverage counts only configured origin advertisements;
