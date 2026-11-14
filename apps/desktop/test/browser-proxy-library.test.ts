@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile, rename } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -119,6 +119,20 @@ describe('stable proxy assets on the original Profile and native route owners', 
     expect(manager.listProfiles()[0]!.networkApplication?.status).toBe('applied')
     expect(native.get(id)!.setProxy).toHaveBeenCalledTimes(1)
     expect(store.updateProfile).toHaveBeenCalledTimes(1)
+  })
+
+  it('never initializes a missing original catalog while reconciling an unconfirmed proxy write', async () => {
+    const { manager, store, path, native, id } = await fixture(), { proxy } = await manager.saveProxy(edit)
+    const original = await readFile(path)
+    vi.spyOn(store, 'saveProxy').mockImplementationOnce(async () => { await rename(path, path + '.held'); throw new Error('Original proxy write acknowledgement unavailable') })
+    await expect(manager.saveProxy({ ...edit, label: 'Unconfirmed edit' })).rejects.toMatchObject({ code: 'BROWSER_PROFILE_WRITE_UNCONFIRMED' })
+    await expect(readFile(path)).rejects.toMatchObject({ code: 'ENOENT' })
+    expect(manager.listProfiles()[0]!.id).toBe(id); expect(manager.listProxies()).toEqual([proxy]); expect(native.size).toBe(0)
+    expect(await readFile(path + '.held')).toEqual(original)
+    await rename(path + '.held', path)
+    const repaired = await store.saveProxy({ ...edit, label: 'Explicitly repaired original asset' }, proxy.id, proxy.revision)
+    const reply = await executeBrowserProfileControl({ operation: 'browser.profile.proxy.ls' }, { profiles: manager, usage: {} as never, network: {} as never }, undefined)
+    expect(reply).toMatchObject({ proxies: [repaired.proxy] }); expect(manager.listProxies()).toEqual([repaired.proxy])
   })
 
   it('pins an older credential to the original endpoint before the actual Profile owner applies another asset', async () => {

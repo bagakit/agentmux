@@ -85,15 +85,15 @@ describe('Browser Profile identity edits', () => {
     // Moving the default names its target only; an older list cannot make it conflict.
     await store.updateProfile(WORK_ID, { label: 'Work client' }, (await store.inspectProfile(WORK_ID)).profile.revision)
     const moved = await store.setDefaultProfile(WORK_ID)
-    expect(moved).toEqual({ revision: 2, sequence: 2, activitySources: {}, defaultProfileId: WORK_ID, folders: [], views: [], proxyAssets: [], profiles: (await store.list()).profiles })
+    expect(moved).toEqual({ revision: 2, sequence: 2, activitySources: {}, defaultProfileId: WORK_ID, folders: [], views: [], proxyAssets: [], trash: [], legacyPendingDeletes: [], profiles: (await store.list()).profiles })
     expect(moved.profiles.map(p => [p.id, p.label, p.isDefault])).toEqual([[DEFAULT_ID, 'Default', false], [WORK_ID, 'Work client', true]])
     const created = await store.createProfile('Third')
     expect(created.snapshot.revision).toBe(3)
     expect(created.snapshot.profiles.map(p => p.id)).toEqual([DEFAULT_ID, WORK_ID, created.profile.id])
-    const deleted = await store.deleteProfile(DEFAULT_ID)
-    expect(deleted).toEqual(await store.list())
-    expect(deleted.revision).toBe(4)
-    await expect(store.deleteProfile(WORK_ID)).rejects.toThrow('default Browser Profile cannot be deleted')
+    const archived = await store.archiveProfile(DEFAULT_ID, (await store.inspectProfile(DEFAULT_ID)).profile.revision, { partition: browserProfilePartition(DEFAULT_ID), relativePath: `Partitions/${DEFAULT_ID}` })
+    expect(archived.snapshot).toEqual(await store.list())
+    expect(archived.snapshot.revision).toBe(4)
+    await expect(store.archiveProfile(WORK_ID, (await store.inspectProfile(WORK_ID)).profile.revision, { partition: browserProfilePartition(WORK_ID), relativePath: `Partitions/${WORK_ID}` })).rejects.toThrow('default Browser Profile cannot be recycled')
     await expect(store.setDefaultProfile('33333333-3333-4333-8333-333333333333')).rejects.toThrow('Unknown Browser Profile')
     expect((await store.list()).revision).toBe(4)
   })
@@ -137,11 +137,12 @@ describe('Main Browser Profile owner', () => {
     await manager.setDefaultProfile(WORK_ID)
     const created = await manager.createProfile('Fresh')
     await expect(manager.updateProfile(WORK_ID, { label: 'Late' }, 'stale-profile-token')).rejects.toMatchObject({ code: 'BROWSER_PROFILE_REVISION_CONFLICT' })
-    await manager.deleteProfile(created.id, { kind: 'user-confirmed', operation: 'delete-profile', scope: 'profile', profileId: created.id })
+    // Full native recycle publication is exercised by the original T014 Native/IPC consumers.
+    await manager.updateProfile(created.id, { notes: 'Original identity retained' }, created.revision)
 
     expect(heard.map(snapshot => snapshot.revision)).toEqual([1, 2, 3, 4])
     // Each announcement is the whole committed list, exactly what a fresh read returns at that revision.
-    expect(heard[1]).toEqual({ revision: 2, sequence: 2, activitySources: {}, defaultProfileId: WORK_ID, folders: [], views: [], proxyAssets: [], profiles: [
+    expect(heard[1]).toEqual({ revision: 2, sequence: 2, activitySources: {}, defaultProfileId: WORK_ID, folders: [], views: [], proxyAssets: [], trash: [], legacyPendingDeletes: [], profiles: [
       expect.objectContaining({ id: DEFAULT_ID, label: 'Default', isDefault: false }),
       expect.objectContaining({ id: WORK_ID, label: 'Northwind client', isDefault: true })] })
     expect(heard[2]!.profiles.map(p => p.id)).toEqual([DEFAULT_ID, WORK_ID, created.id])

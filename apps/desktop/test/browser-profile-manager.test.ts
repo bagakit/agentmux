@@ -147,6 +147,7 @@ class FakeStore {
   commit() { this.revision += 1; return this.snapshot() }
   async listProfiles() { return structuredClone(this.profiles) }
   async list() { return this.snapshot() }
+  async read() { return this.snapshot() }
   async inspectProfile(id: string) { return { snapshot: this.snapshot(), profile: structuredClone(this.profiles.find(value => value.id === id)!) } }
   async listPendingImports() { return structuredClone(this.pending) }
   async createProfile(label: string) {

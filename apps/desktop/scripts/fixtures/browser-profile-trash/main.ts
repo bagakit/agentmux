@@ -1,3 +1,4 @@
+import { WorkbenchUserStateStore } from '../../../src/main/workbench-user-state'
 import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
@@ -98,7 +99,7 @@ app.whenReady().then(async () => {
   if (!await privateNotes.hasLocation()) await writeFile(privateNotes.locatorPath, JSON.stringify({ schemaVersion: 1, directory: join(home, 'notes'), operations: {}, pending: null }))
   assert.ok((await privateNotes.inspect()).directory.startsWith(home + '/'), 'All optional Notes storage stays inside this private fixture')
   stage('private Notes locator ready')
-  dispose = await registerIpc({ appDocumentSources: () => ({ current: { mode: 'prod', filePath: html }, loading: null }), window: win, workbenchWindows: windows, runtime, configStore, initialConfig: config,
+  dispose = await registerIpc({ workbenchUserState: new WorkbenchUserStateStore(join(home, 'workbench-user-state.json')), appDocumentSources: () => ({ current: { mode: 'prod', filePath: html }, loading: null }), window: win, workbenchWindows: windows, runtime, configStore, initialConfig: config,
     scratchTopics, applicationAccess: access, progressLoops: progress })
   stage('production IPC ready')
   await win.loadFile(html); await until(() => evaluate('Boolean(globalThis.trashProof)'), 'production Renderer entry')
