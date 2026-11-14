@@ -14,6 +14,8 @@ export const AGENTMUX_RPC_HOST_MAINTENANCE_METHODS = {
 } as const
 export type HostMaintenanceMethod = keyof typeof AGENTMUX_RPC_HOST_MAINTENANCE_METHODS
 export type HostMaintenanceActor = { kind: 'agent' | 'user' | 'device'; id: string; hostId?: string; runtimeId?: string; runId?: string }
+export const sameHostMaintenanceActor = (a: HostMaintenanceActor, b: HostMaintenanceActor): boolean =>
+  a.kind === b.kind && a.id === b.id && a.hostId === b.hostId && (!a.runtimeId || !b.runtimeId || a.runtimeId === b.runtimeId)
 export type HostMaintenanceRequest = { id: string; host: RemoteCoreUpgradeHost; operationId: string } & (
   | { action: 'install'; expected: RemoteCoreInstallExpected }
   | { action: 'upgrade'; expected: RemoteCoreUpgradeExpected }
@@ -94,7 +96,7 @@ export function parseHostMaintenanceRecord(value: unknown): HostMaintenanceRecor
   let review: HostMaintenanceRecord['review']
   if (p.review !== undefined) {
     const r = rpcRecord(p.review, ['actor', 'decision', 'reviewedAt'], 'CONTROL_PROTOCOL_ERROR'), reviewer = actor(r.actor)
-    if (reviewer.kind === 'agent' || r.decision !== 'approve' && r.decision !== 'reject') fail()
+    if (reviewer.kind === 'agent' && !sameHostMaintenanceActor(requester, reviewer) || r.decision !== 'approve' && r.decision !== 'reject') fail()
     review = { actor: reviewer, decision: r.decision as 'approve' | 'reject', reviewedAt: timestamp(r.reviewedAt) }
   }
   if (p.state === 'pending' ? review !== undefined : review === undefined) fail()

@@ -1580,8 +1580,9 @@ export class AgentMuxRpcService {
       const maintenanceMethod: import('./public-rpc-host-maintenance.js').HostMaintenanceMethod = method
       const input = parseHostMaintenanceParams(maintenanceMethod, params)
       const caller = await this.authenticated(context)
-      if (method === 'settings.hosts.maintenance-review' && context.caller !== undefined) throw new AgentMuxError(
-        'Maintenance review requires a transport-approved person or device without a managed Agent caller. The request and healthy Runs remain available.', 'CONTROL_PERMISSION_DENIED')
+      if (method === 'settings.hosts.maintenance-review' && caller &&
+          (context.principal?.kind !== 'user' || caller.hostId !== 'local' || context.routeDelegation)) throw new AgentMuxError(
+        'Agent maintenance requires its original user operator transport and local authenticated identity.', 'CONTROL_PERMISSION_DENIED')
       if (!caller && (!context.principal || !['user', 'device'].includes(context.principal.kind))) throw new AgentMuxError(
         'Maintenance requests require their original authenticated actor.', 'CONTROL_PERMISSION_DENIED')
       const sourceRuntimeId = caller?.client.runtimeOwnerIdentity?.()?.runtimeId
@@ -2552,9 +2553,9 @@ export class AgentMuxRpcService {
           'BROWSER_PROFILE_DELETE_REQUIRES_PERSON')
       }
       if ((method === 'settings.hosts.install' || method === 'settings.hosts.upgrade' || method === 'settings.hosts.upgrade-reconnect') &&
-          (context.caller !== undefined || !context.principal || !['user', 'device'].includes(context.principal.kind) ||
+          (caller && (context.principal?.kind !== 'user' || caller.hostId !== 'local') || context.routeDelegation || !context.principal || !['user', 'device'].includes(context.principal.kind) ||
             typeof context.principal.id !== 'string' || !context.principal.id.trim() || context.principal.id.includes('\0'))) {
-        throw new AgentMuxError('Core maintenance writes require a transport-approved user or device without a managed Agent caller. Original operations, read-only diagnostics and Runs were retained.', 'CONTROL_PERMISSION_DENIED')
+        throw new AgentMuxError('Core maintenance requires its original operator transport and authenticated local Agent, user or device.', 'CONTROL_PERMISSION_DENIED')
       }
       const internalCaller: AgentMuxControlCaller | undefined = caller
         ? { agentSessionId: caller.agentSessionId, capability: caller.capability } : undefined

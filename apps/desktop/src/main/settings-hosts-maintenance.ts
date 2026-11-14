@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 import { mkdir, open, readFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
-import { durableWriteFile, hostMaintenanceRequestDigest, parseHostMaintenanceRecord, parseHostMaintenanceParams,
+import { durableWriteFile, hostMaintenanceRequestDigest, parseHostMaintenanceRecord, parseHostMaintenanceParams, sameHostMaintenanceActor,
   type HostMaintenanceActor, type HostMaintenanceAdministration, type HostMaintenanceRecord, type HostMaintenanceRequest, type HostMaintenanceReview } from '@agentmux/core'
 import { configValuesEqual } from '../shared/config-edit.js'
 import { hostSchema } from './config-store.js'
@@ -12,11 +12,7 @@ import type { SettingsHostsUpgradeOwner } from './settings-hosts-upgrade.js'
 const fail = (message: string, code: string): never => { throw Object.assign(new Error(message), { code }) }
 // The exact SID and source route are already authenticated by Core. Missing live
 // Runtime observation cannot revoke access to that retained identity's request.
-const sameActor = (a: HostMaintenanceActor, b: HostMaintenanceActor) => a.kind === b.kind && a.id === b.id && a.hostId === b.hostId &&
-  (!a.runtimeId || !b.runtimeId || a.runtimeId === b.runtimeId)
-
-/** One exact request is approved and executed by the original person/device. No
- * transferable grant is minted and no maintenance authority is given to an Agent. */
+/** The original authenticated operator reviews one exact request before execution. */
 export class SettingsHostsMaintenanceOwner implements HostMaintenanceAdministration {
   private tail: Promise<void> = Promise.resolve()
   constructor(private readonly directory: string, private readonly config: ConfigOwner,
@@ -48,7 +44,7 @@ export class SettingsHostsMaintenanceOwner implements HostMaintenanceAdministrat
     await durableWriteFile(this.path(record.request.operationId), JSON.stringify(record) + '\n', { requireDirectorySync: true })
   }
   private authorize(record: HostMaintenanceRecord, actor: HostMaintenanceActor): void {
-    if (actor.kind === 'agent' && !sameActor(record.requester, actor)) fail('A managed Agent may inspect only its original maintenance requests.', 'CONTROL_PERMISSION_DENIED')
+    if (actor.kind === 'agent' && !sameHostMaintenanceActor(record.requester, actor)) fail('A managed Agent may operate only its original maintenance requests.', 'CONTROL_PERMISSION_DENIED')
   }
   private async saved(input: HostMaintenanceRequest): Promise<void> {
     const parsed = hostSchema.safeParse(input.host)
@@ -64,7 +60,7 @@ export class SettingsHostsMaintenanceOwner implements HostMaintenanceAdministrat
       await assertCurrent()
       const existing = await this.read(input.operationId)
       if (existing) {
-        if (!sameActor(existing.requester, actor) || !configValuesEqual(existing.request, input)) fail('This operation ID already identifies another original request. Inspect that operation; do not replay it.', 'HOST_MAINTENANCE_REQUEST_CONFLICT')
+        if (!sameHostMaintenanceActor(existing.requester, actor) || !configValuesEqual(existing.request, input)) fail('This operation ID already identifies another original request. Inspect that operation; do not replay it.', 'HOST_MAINTENANCE_REQUEST_CONFLICT')
         return existing
       }
       await this.saved(input)
@@ -97,11 +93,11 @@ export class SettingsHostsMaintenanceOwner implements HostMaintenanceAdministrat
   }
   async review(value: HostMaintenanceReview, actor: HostMaintenanceActor, assertCurrent: () => Promise<void>): Promise<HostMaintenanceRecord> {
     const input = parseHostMaintenanceParams('settings.hosts.maintenance-review', value)
-    if (actor.kind === 'agent') fail('Only the transport-approved person or device can review maintenance. The original request and healthy Runs are retained.', 'CONTROL_PERMISSION_DENIED')
     const claimed = await this.enqueue(async () => {
       await assertCurrent()
       const record = await this.read(input.operationId)
       if (!record) return fail('The original maintenance request was not found.', 'HOST_MAINTENANCE_REQUEST_NOT_FOUND')
+      this.authorize(record, actor)
       if (record.requestDigest !== input.requestDigest) fail('Review the original exact maintenance request digest before deciding.', 'CONFIG_CONFLICT')
       if (record.state !== 'pending') {
         if (record.review?.decision !== input.decision) fail('This original request already has a different decision. Its execution will not be changed or replayed.', 'HOST_MAINTENANCE_REQUEST_CONFLICT')
