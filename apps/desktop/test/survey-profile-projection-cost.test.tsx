@@ -43,7 +43,7 @@ import { config, agent } from './helpers/workface-control-fixture'
 import { surveyPageProjection } from '../src/renderer/src/lib/survey-page-references'
 import { createWorkspaceLayout } from '@agentmux/layout'
 import { WorkspaceWorkbench } from '../src/renderer/src/components/WorkspaceWorkbench'
-import { workbenchRegionProjectionSlotId } from '../src/renderer/src/lib/workbench-projection'
+import { workbenchProjectionSlotId, workbenchRegionProjectionSlotId } from '../src/renderer/src/lib/workbench-projection'
 import type { AgentMuxSpaceCatalog } from '@agentmux/core/control'
 const initial = useAppStore.getState(), profileId = 'related-profile'
 const page = { regionId: 'survey-one-region', browserId: 'survey-one-browser' }
@@ -166,9 +166,13 @@ it('measures the real GlobalSurveySurface after one original Store Browser updat
   vi.stubGlobal('IntersectionObserver', class { observe() {} disconnect() {} unobserve() {} })
   vi.stubGlobal('requestAnimationFrame', (fn: FrameRequestCallback) => setTimeout(() => fn(0), 0))
   vi.stubGlobal('cancelAnimationFrame', clearTimeout)
-  try { for (const unrelatedTabs of [0, 16, 64]) {
+  const selectedCases = (['region', 'tab'] as const).flatMap(kind => [0, 16, 64].map(unrelatedTabs => ({ kind, unrelatedTabs })))
+  try { for (const { kind, unrelatedTabs } of selectedCases) {
     browserProfiles.reset()
-    const f = fixture(unrelatedTabs), selected = { kind: 'page' as const, ...page }
+    const f = fixture(unrelatedTabs)
+    const location = { displayWorkspaceId: 'resource', groupId: 'original-group', tabId: 'survey-one-tab', regionId: page.regionId }
+    const selected = { kind: 'page' as const, ...page, ...(kind === 'tab' ? { presentation: { kind, ...location } } : {}) }
+    const slotId = kind === 'tab' ? workbenchProjectionSlotId : workbenchRegionProjectionSlotId
     useAppStore.setState({ config, tabs: f.tabs, sessions: f.sessions,
       layouts: { resource: createWorkspaceLayout('original-group', Object.keys(f.tabs)) }, activeWorkspaceId: 'resource',
       surveyProfileView: { kind: 'profile', profileId }, surveyProfileViewReadRecovery: null,
@@ -182,19 +186,19 @@ it('measures the real GlobalSurveySurface after one original Store Browser updat
       finally { meter.inProjection = before }
     }
     const render = (projection: NonNullable<ReturnType<typeof surveyPageProjection>>) => {
-      const reference = projection.selection[0]!, hostId = workbenchRegionProjectionSlotId('survey-workbench-slot', reference)
+      const reference = projection.selection[0]!, hostId = slotId('survey-workbench-slot', reference)
       const targets = { 'survey-one-tab': [{ hostId, surface: 'survey' as const, visible: true, active: true, reference, projection }] }
       return <><GlobalSurveySurface visible catalog={f.catalog as never} projection={projection} selection={null} pageSelection={selected} viewTargets={targets} />
         <WorkspaceWorkbench workspaceId="resource" viewTargets={targets} visible={false} /></>
     }
     try {
       const projection = project()
-      expect(projection?.entity).toEqual({ kind: 'region', regionId: page.regionId })
+      expect(projection?.entity).toEqual(kind === 'tab' ? { kind, tabId: location.tabId } : { kind, regionId: page.regionId })
       expect(projection.selection).toHaveLength(1)
       await act(async () => root.render(render(projection)))
       await act(async () => new Promise(resolve => setTimeout(resolve, 40)))
       expect(element.querySelectorAll('[data-original-browser-pane="survey-one-browser"]')).toHaveLength(1)
-      const originalHostId = workbenchRegionProjectionSlotId('survey-workbench-slot', projection.selection[0]!)
+      const originalHostId = slotId('survey-workbench-slot', projection.selection[0]!)
       expect(document.getElementById(originalHostId)?.querySelectorAll('[data-original-browser-pane="survey-one-browser"]')).toHaveLength(1)
       expect(element.querySelector('[data-survey-page-browser-id="survey-one-browser"]')?.getAttribute('data-selected')).toBe('true')
       expect(element.textContent).not.toContain('The original Browser Region is not confirmed')
@@ -204,7 +208,7 @@ it('measures the real GlobalSurveySurface after one original Store Browser updat
         // App.tsx's surveyProjection useMemo calls this exact production function when tabs changes.
         root.render(render(project()))
       })
-      receipts.push({ phase: 'selected-exact-page-related-browser-updated', unrelatedTabs, pages: 1, research: 0, ...sample() })
+      receipts.push({ phase: 'selected-exact-page-related-browser-updated', kind, unrelatedTabs, pages: 1, research: 0, ...sample() })
       expect(useAppStore.getState().surveyZoneSelection).toEqual(selected)
       expect(element.querySelectorAll('[data-original-browser-pane="survey-one-browser"]')).toHaveLength(1)
       expect(document.getElementById(originalHostId)?.querySelectorAll('[data-original-browser-pane="survey-one-browser"]')).toHaveLength(1)
@@ -228,14 +232,15 @@ it('measures the real GlobalSurveySurface after one original Store Browser updat
   for (const key of ['tabs', 'regions', 'zones']) expect(active.map(r => r.catalogRecords[key])).toEqual([0, 0, 0])
   for (const key of ['tabs', 'regions', 'zones']) expect(active.map(r => r.catalogRecordFieldReads[key])).toEqual([0, 0, 0])
   const selected = receipts.filter((r: any) => r.phase === 'selected-exact-page-related-browser-updated') as any[]
-  expect(selected).toHaveLength(3)
-  for (const key of ['tabs', 'regions', 'zones']) {
-    expect(selected.map(r => r.globalCatalogRecords[key])).toEqual([0, 0, 0])
-    expect(selected.map(r => r.projectionCatalogRecords[key])).toEqual([0, 0, 0])
-    expect(selected.map(r => r.catalogRecordFieldReads[key])).toEqual([0, 0, 0])
+  expect(selected).toHaveLength(selectedCases.length)
+  for (const result of selected) {
+    const label = `${result.kind}, ${result.unrelatedTabs} unrelated Tabs`
+    expect(result.projectionCatalogRecords, label).toEqual({ tabs: 0, regions: 0, zones: 0 })
+    expect(result.globalCatalogRecords, label).toEqual({ tabs: 0, regions: 0, zones: 0 })
+    expect(result.catalogRecordFieldReads, label).toEqual({ tabs: 0, regions: 0, zones: 0 })
+    expect(result.globalTabEntries, label).toBe(0)
+    expect(result.projectionTabEntries, label).toBe(0)
   }
-  expect(selected.map(r => r.globalTabEntries)).toEqual([0, 0, 0])
-  expect(selected.map(r => r.projectionTabEntries)).toEqual([0, 0, 0])
 })
 
 it('caches only immutable catalog structure, reads current Profile facts and invalidates on the original new topology snapshot', () => {
