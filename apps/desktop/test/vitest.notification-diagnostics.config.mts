@@ -8,8 +8,8 @@ const inheritedAliases = source.resolve?.alias
 const aliases = Array.isArray(inheritedAliases) ? inheritedAliases
   : Object.entries(inheritedAliases ?? {}).map(([find, replacement]) => ({ find, replacement }))
 // Main imports these packages too; shared node_modules may point at another worktree's build.
-const mainAliases = ['core', 'connectors', 'git', 'layout'].flatMap(name => {
-  const directory = resolve(root, 'packages', name)
+const mainAliases = ['core', 'connectors', 'git', 'layout', 'capsule', 'host', 'native-desktop'].flatMap(name => {
+  const directory = resolve(root, name === 'host' ? 'apps' : 'packages', name)
   const manifest = JSON.parse(readFileSync(resolve(directory, 'package.json'), 'utf8'))
   return Object.entries<{ types?: string; import?: string }>(manifest.exports).map(([entry, value]) => {
     const target = value.types ?? value.import
@@ -23,7 +23,9 @@ const mainAliases = ['core', 'connectors', 'git', 'layout'].flatMap(name => {
 const changes: Record<string, string> = process.env.AGENTMUX_NOTIFICATION_DIAGNOSTICS_SOURCES
   ? JSON.parse(readFileSync(process.env.AGENTMUX_NOTIFICATION_DIAGNOSTICS_SOURCES, 'utf8')) : {}
 export default defineConfig({ ...source, cacheDir: resolve(root, '.tmp/notification-diagnostics-vitest-cache'),
-  resolve: { ...source.resolve, alias: [...mainAliases, ...aliases] },
+  resolve: { ...source.resolve, alias: [...mainAliases,
+    { find: /^@agentmux\/browser$/u, replacement: resolve(root, 'packages/browser/src/index.ts') },
+    { find: /^@agentmux\/browser\/(.+)$/u, replacement: resolve(root, 'packages/browser/src/$1.ts') }, ...aliases] },
   ssr: { ...source.ssr, noExternal: [/^@agentmux\//] },
   plugins: [{ name: 'actual-notification-diagnostic-source', enforce: 'pre',
   resolveId(specifier) {
