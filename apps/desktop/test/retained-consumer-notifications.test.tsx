@@ -360,3 +360,46 @@ it('a retained Pane preserves the original first recovery observation and refres
   expect(dom.draft(session.id)).toBe('Original retained input')
   expect(controls.map(control => control.mock.calls.length)).toEqual([0, 0, 0, 0])
 })
+
+it('a retained Pane ignores unused timeline snapshot metadata while its Composer keeps live input facts', async () => {
+  const session = composerSession('snapshot-metadata-own')
+  const item = { id: 'original-input', agentSessionId: session.id, kind: 'user_message' as const,
+    source: 'user' as const, status: 'complete' as const, title: 'Original input', content: 'Original recorded prompt',
+    createdAt: _tailFixtureEpoch(0, 0, 1), updatedAt: _tailFixtureEpoch(0, 0, 1) }
+  const timeline = { agentSessionId: session.id, revision: 1, items: [item] }
+  const queue = [{ operationId: 'original-held-input', text: 'Original queued input', status: 'failed' as const, enqueuedAt: 1 }]
+  useAppStore.setState({ sessions: [session], timelines: { [session.id]: timeline }, viewModes: { [session.id]: 'terminal' },
+    agentComposerDrafts: { [session.id]: 'Original draft' }, agentSteerQueues: { [session.id]: queue },
+    pendingAgentLaunches: {}, recoveryCandidates: [] })
+  const pane = (visible: boolean) => <SessionPane sessionId={session.id} surfaceKind="agent"
+    interactiveResize={false} visible={visible} linkOrigin={{ workspaceId: 'workspace' }} />
+  await dom.render(pane(true))
+  const editor = dom.container.querySelector<HTMLElement>('.ProseMirror')!, terminal = dom.container.querySelector('[data-pty-paint]')
+  expect(editor).not.toBeNull(); expect(terminal).not.toBeNull()
+  await dom.render(pane(false))
+  const before = rendererPerformance.snapshot().consumers
+  // A publication can replace its metadata envelope without changing any consumed item.
+  // Keep the exact nonempty items and original Session/Run, not an empty mock selector.
+  await act(async () => useAppStore.setState({ timelines: { [session.id]: { ...timeline, sourceHostId: 'local' } } }))
+  const after = rendererPerformance.snapshot().consumers
+  expect(useAppStore.getState().timelines[session.id]!.items).toBe(timeline.items)
+  expect(useAppStore.getState().sessions[0]).toBe(session)
+  expect(after.sessionPane.hidden.commits).toBe(before.sessionPane.hidden.commits)
+  // Composer owns its real timeline/history/receipt consumer independently of the Pane.
+  expect(after.composer.hidden.commits).toBeGreaterThan(before.composer.hidden.commits)
+  expect(dom.container.querySelector('.ProseMirror')).toBe(editor)
+  expect(dom.container.querySelector('[data-pty-paint]')).toBe(terminal)
+  expect(useAppStore.getState().agentSteerQueues[session.id]).toBe(queue)
+  await act(async () => useAppStore.getState().setAgentComposerDraft(session.id, 'Fresh hidden draft'))
+  await act(async () => useAppStore.getState().applyEvent({ type: 'core', hostId: session.control.hostId, event: {
+    type: 'agent-status', agentSessionId: session.control.agentSessionId, state: 'working',
+    evidence: { source: 'native-hook', observedAt: Date.now() + 1 }
+  } }))
+  expect(editor.textContent).toBe('Fresh hidden draft')
+  expect(editor.getAttribute('contenteditable')).toBe('true')
+  expect(dom.container.querySelector('button[aria-label="Interrupt the current turn"]')).not.toBeNull()
+  await dom.render(pane(true))
+  expect(dom.container.querySelector('.ProseMirror')).toBe(editor)
+  expect(dom.container.querySelector('[data-pty-paint]')).toBe(terminal)
+  expect(useAppStore.getState().sessions[0]?.control).toBe(session.control)
+})
