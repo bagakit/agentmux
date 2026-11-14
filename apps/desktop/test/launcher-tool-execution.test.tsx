@@ -44,6 +44,10 @@ const editor = () => document.querySelector<HTMLElement>('.launcher-work-arrange
 async function openEditor() {
   if (!editor()) await dom.click('[aria-label="Agent location"]')
   expect(editor()).not.toBeNull()
+  // These cases exercise the retained explicit startup-directory contract.
+  // The default project-device/Source-route selector has its own real consumers.
+  const custom = [...editor().querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Choose a custom startup directory')
+  if (custom) await act(async () => custom.click())
 }
 async function editorMode(value: string) {
   const state = useAppStore.getState(), region = state.tabs.launch!.regions.input
