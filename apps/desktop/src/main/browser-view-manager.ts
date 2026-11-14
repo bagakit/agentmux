@@ -3274,8 +3274,8 @@ export class BrowserViewManager {
     })
   }
 
-  async listOperationHistory(): Promise<BrowserOperation[]> {
-    return this.operationJournal ? await this.operationJournal.list() : []
+  async listOperationHistory(browserId?: string): Promise<BrowserOperation[]> {
+    return this.operationJournal ? await this.operationJournal.list(browserId) : []
   }
 
   async runReplay(id: string, plan: BrowserReplayPlan, operator?: BrowserOperator, caller?: Pick<import('@agentmux/core').AgentMuxControlCaller, 'agentSessionId'>): Promise<BrowserScriptRunReport> {

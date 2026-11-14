@@ -2545,8 +2545,8 @@ export async function registerIpc(args: {
     await ensureBrowser(id)
     return await browsers.verifyOutcome(id, operationId)
   })
-  handleWithEvent('browser:listOperationHistory', async (event) => {
-    return await browsers.listOperationHistory()
+  handleWithEvent('browser:listOperationHistory', async (event, browserId?: string) => {
+    return await browsers.listOperationHistory(browserId)
   })
   handleWithEvent('browser:getOperation', async (event, operationId: string) => {
     return await browsers.getOperation(operationId)

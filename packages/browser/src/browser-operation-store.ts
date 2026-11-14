@@ -30,6 +30,9 @@ export interface BrowserOperationJournalStore {
   /** Optional for a full in-memory store; windowed storage retains exact original identity and detail. */
   hasLoadedOperation?(operationId: string): boolean
   readOperation?(operationId: string, loadedIds: readonly string[]): { operation: BrowserOperation; beforeId: string | null } | null
+  /** Windowed stores retain the original order for scoped history even when the operation bodies are cold. */
+  loadedBrowserOperations?(browserId: string): readonly string[]
+  readOperations?(operationIds: readonly string[]): BrowserOperation[]
   /** Only immutable facts changed by this save; there is no full-snapshot write path. */
   save(changes: BrowserOperationJournalChanges): Promise<void>
 }
@@ -42,6 +45,7 @@ export class BrowserOperationFileStore implements BrowserOperationJournalStore {
   private existed = false
   // Only immutable identities/coordinates observed at load. New live identities stay in Journal's original map.
   private readonly positions = new Map<string, number>()
+  private readonly browserOperations = new Map<string, string[]>()
 
   constructor(private readonly path: string) {}
 
@@ -61,9 +65,16 @@ export class BrowserOperationFileStore implements BrowserOperationJournalStore {
           // Identity coordinates, body window, steps and events belong to one read snapshot.
           database.exec('BEGIN')
           if (window !== undefined) {
-            const positions = database.prepare('SELECT id, ordinal FROM operations ORDER BY ordinal').all()
+            const positions = database.prepare("SELECT id, ordinal, json_extract(metadata, '$.browserId') AS browser_id FROM operations ORDER BY ordinal").all()
             this.positions.clear()
-            for (const row of positions) this.positions.set(String(row.id), Number(row.ordinal))
+            this.browserOperations.clear()
+            for (const row of positions) {
+              const id = String(row.id), browserId = String(row.browser_id)
+              this.positions.set(id, Number(row.ordinal))
+              const operations = this.browserOperations.get(browserId)
+              if (operations) operations.push(id)
+              else this.browserOperations.set(browserId, [id])
+            }
           }
           const protectedPhases = window ? JSON.stringify(window.protectedPhases) : ''
           const operations = database.prepare(window === undefined ? 'SELECT metadata FROM operations ORDER BY ordinal' : `SELECT metadata FROM operations
@@ -114,25 +125,38 @@ export class BrowserOperationFileStore implements BrowserOperationJournalStore {
 
   hasLoadedOperation(operationId: string): boolean { return this.positions.has(operationId) }
 
+  loadedBrowserOperations(browserId: string): readonly string[] { return this.browserOperations.get(browserId) ?? [] }
+
   /** Synchronous after load: a cold miss never yields between original identity admission and dispatch. */
   readOperation(operationId: string, loadedIds: readonly string[]): { operation: BrowserOperation; beforeId: string | null } | null {
     const ordinal = this.positions.get(operationId)
     if (ordinal === undefined) return null
+    const [operation] = this.readOperations([operationId])
+    let beforeId: string | null = null, beforeOrdinal = Infinity
+    for (const id of loadedIds) {
+      const position = this.positions.get(id)
+      if (position === undefined) { beforeId ??= id; continue }
+      if (position > ordinal && position < beforeOrdinal) { beforeId = id; beforeOrdinal = position }
+    }
+    return { operation: operation!, beforeId }
+  }
+
+  /** Read only the selected cold bodies and their steps, from one SQLite snapshot. */
+  readOperations(operationIds: readonly string[]): BrowserOperation[] {
     const database = this.database(this.path, true)
     try {
       database.exec('BEGIN')
-      const row = database.prepare('SELECT metadata FROM operations WHERE id = ?').get(operationId)
-      if (!row) throw new Error('The original Browser operation is temporarily unavailable; its identity is retained.')
-      const operation = { ...JSON.parse(String(row.metadata)), steps: database.prepare('SELECT body FROM steps WHERE operation_id = ? ORDER BY sequence').all(operationId).map(step => JSON.parse(String(step.body))) } as BrowserOperation
-      if (operation.id !== operationId) throw new Error('Stored Browser operation identity does not match its original ID.')
+      const readMetadata = database.prepare('SELECT metadata FROM operations WHERE id = ?')
+      const readSteps = database.prepare('SELECT body FROM steps WHERE operation_id = ? ORDER BY sequence')
+      const operations = operationIds.map(operationId => {
+        const row = readMetadata.get(operationId)
+        if (!row) throw new Error('The original Browser operation is temporarily unavailable; its identity is retained.')
+        const operation = { ...JSON.parse(String(row.metadata)), steps: readSteps.all(operationId).map(step => JSON.parse(String(step.body))) } as BrowserOperation
+        if (operation.id !== operationId) throw new Error('Stored Browser operation identity does not match its original ID.')
+        return operation
+      })
       database.exec('COMMIT')
-      let beforeId: string | null = null, beforeOrdinal = Infinity
-      for (const id of loadedIds) {
-        const position = this.positions.get(id)
-        if (position === undefined) { beforeId ??= id; continue }
-        if (position > ordinal && position < beforeOrdinal) { beforeId = id; beforeOrdinal = position }
-      }
-      return { operation, beforeId }
+      return operations
     } finally { database.close() }
   }
 

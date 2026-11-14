@@ -358,9 +358,33 @@ export class BrowserOperationJournal {
     return operation ? cloneOperation(operation) : null
   }
 
-  async list(): Promise<BrowserOperation[]> {
+  async list(browserId?: string): Promise<BrowserOperation[]> {
     await this.ready()
-    return historyWindow(this.document.operations, this.maxOperations).map(cloneOperation)
+    if (browserId === undefined) return historyWindow(this.document.operations, this.maxOperations, protectedInHistory).map(cloneOperation)
+    if (this.loadWarning) {
+      throw new Error('Original Browser history could not be loaded. Restore its storage and reopen the journal; live Browser work remains available.')
+    }
+
+    const resident = this.document.operations.filter(operation => operation.browserId === browserId)
+    const originalIds = this.saveStore.loadedBrowserOperations?.(browserId)
+    if (!originalIds?.length) return historyWindow(resident, this.maxOperations, protectedInHistory).map(cloneOperation)
+
+    // Every original active or indeterminate operation is already resident. A cold
+    // ID therefore occupies a terminal slot, without needing to read its body.
+    const entries = originalIds.map(id => ({ id, operation: this.operations.get(id) }))
+    for (const operation of resident) {
+      if (!this.saveStore.hasLoadedOperation?.(operation.id)) entries.push({ id: operation.id, operation })
+    }
+    const selected = historyWindow(entries, this.maxOperations, entry => entry.operation !== undefined && protectedInHistory(entry.operation))
+    const coldIds = selected.filter(entry => entry.operation === undefined).map(entry => entry.id)
+    const cold = coldIds.length ? this.saveStore.readOperations?.(coldIds) ?? [] : []
+    const restored = new Map(cold.map(operation => [operation.id, operation]))
+    return selected.map(({ id, operation }) => {
+      if (operation) return cloneOperation(operation)
+      const original = restored.get(id)
+      if (!original || original.browserId !== browserId) throw new Error('The original Browser history is temporarily unavailable; its identity is retained.')
+      return sanitizeOperation(original)
+    })
   }
 
   async events(operationId?: string): Promise<BrowserOperationEvent[]> {
@@ -792,13 +816,19 @@ function clickReplayOptions(value: unknown): { button?: 'left' | 'middle' | 'rig
   return { ...(button === undefined ? {} : { button }), ...(count === undefined ? {} : { count }) } as { button?: 'left' | 'middle' | 'right'; count?: 1 | 2 }
 }
 
-function historyWindow(operations: BrowserOperation[], maxOperations: number): BrowserOperation[] {
-  const terminal = operations.filter(operation => !ACTIVE_PHASES.has(operation.phase) && operation.phase !== 'indeterminate')
-  const keepIds = new Set([
-    ...operations.filter(operation => ACTIVE_PHASES.has(operation.phase) || operation.phase === 'indeterminate').map(operation => operation.id),
-    ...terminal.slice(-maxOperations).map(operation => operation.id)
-  ])
-  return operations.filter(operation => keepIds.has(operation.id))
+function protectedInHistory(operation: BrowserOperation): boolean {
+  return ACTIVE_PHASES.has(operation.phase) || operation.phase === 'indeterminate'
+}
+
+function historyWindow<T>(operations: readonly T[], maxOperations: number, isProtected: (operation: T) => boolean): T[] {
+  const selected: T[] = []
+  let remaining = maxOperations
+  for (let index = operations.length - 1; index >= 0; index--) {
+    const operation = operations[index]!
+    if (isProtected(operation)) selected.push(operation)
+    else if (remaining > 0) { selected.push(operation); remaining-- }
+  }
+  return selected.reverse()
 }
 
 /** Old retained tails have real missing facts. Never invent those steps or replay only the tail. */

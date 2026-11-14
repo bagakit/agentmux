@@ -315,7 +315,7 @@ export class StandaloneBrowserHost {
       case 'browser.targets': return { operation: request.operation, ...await this.targets(), ...(request.workspaceId ? { targets: [] } : {}) }
       case 'browser.run': if (!this.browser && this.engine) await this.reobserveOriginalEngine(); return { operation: request.operation, ...await this.programs.runScript(request.browserId, request.code, undefined, request.operationId) }
       case 'browser.stop': return { operation: request.operation, runOperation: await this.programs.stopOperationById(request.operationId) ?? await this.journal.get(request.operationId) }
-      case 'browser.history': return { operation: request.operation, operations: (await this.journal.list()).filter(op => !request.browserId || op.browserId === request.browserId) }
+      case 'browser.history': return { operation: request.operation, operations: await this.journal.list(request.browserId) }
       case 'browser.operation': return request.resultRead
         ? { operation: request.operation, ...await readBrowserOperationResult(request.operationId, request.resultRead, {
           getOperation: id => this.journal.get(id),

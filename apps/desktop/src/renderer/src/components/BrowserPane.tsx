@@ -1735,8 +1735,8 @@ function BrowserPaneContent({
             onStop={(runId, event) => { if (event.nativeEvent.isTrusted !== true) return; void api.browser.stopTaskAsset(tab.browserId, runId).catch(reportError) }}
             onVerify={async (runId, event) => {
               const result = await taskAction(event, async () => {
-                const operations = await api.browser.listOperationHistory()
-                const matches = operations.filter(operation => operation.browserId === tab.browserId && operation.outcome?.registration.assetRun?.runId === runId &&
+                const operations = await api.browser.listOperationHistory(tab.browserId)
+                const matches = operations.filter(operation => operation.outcome?.registration.assetRun?.runId === runId &&
                   operation.outcome.registration.assetRun.assetId === taskAsset?.id && operation.outcome.registration.assetRun.version === taskRun?.version)
                 if (matches.length !== 1) throw new Error('The declared producer is unavailable. Existing work remains; no action was repeated.')
                 const result = await api.browser.verifyOutcome(tab.browserId, matches[0]!.id)

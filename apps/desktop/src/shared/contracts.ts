@@ -2312,7 +2312,7 @@ export type AgentMuxDesktopApi = {
     setOperatorAvatar(input: { browserId: string; operationId: string; operatorId: string; png: string }): Promise<boolean>
     checkOutcomeFields(id: string, input: BrowserOutcomeFieldRunInput): Promise<BrowserOutcomeEvaluation>
     verifyOutcome(id: string, operationId: string): Promise<BrowserOutcomeEvaluation>
-    listOperationHistory(): Promise<BrowserOperation[]>
+    listOperationHistory(browserId?: string): Promise<BrowserOperation[]>
     /**
      * 读一条操作的当下事实，凭 operationId。
      *

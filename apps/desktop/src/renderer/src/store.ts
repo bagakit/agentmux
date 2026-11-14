@@ -8376,10 +8376,9 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     }
     if (request.operation === 'browser.history') {
       requireActive()
-      const operations = await api.browser.listOperationHistory()
       return {
         operation: request.operation,
-        operations: request.browserId ? operations.filter((operation) => operation.browserId === request.browserId) : operations
+        operations: await api.browser.listOperationHistory(request.browserId)
       }
     }
     // browser.stop / browser.operation 这两条在这一层是**纯转发**，不在 Renderer 维护第二份状态机。
