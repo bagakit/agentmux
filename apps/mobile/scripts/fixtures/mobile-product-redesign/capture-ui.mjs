@@ -73,6 +73,12 @@ try {
       { before: '.mobile-app .mobile-mote-context .mobile-mote-source-status__subject, .mobile-app .mobile-mote-context .mobile-mote-source-status__chevron { display: none; }', after: '.mobile-app .mobile-mote-context .mobile-mote-source-status__chevron { display: none; }' }
     ] },
     'mote-title-squeeze': { file: 'apps/mobile/src/conversation/chrome.css', before: '.mobile-session-toolbar > .mobile-session-identity::after { display: none; }', after: '.mobile-session-toolbar > .mobile-session-identity::after { }' },
+    'actions-always-visible': { file: 'apps/mobile/src/conversation/chrome.css', before: '.mobile-app .mobile-conversation .log-turn:not([data-actions-revealed],', after: '.mobile-app .mobile-conversation .log-turn[data-mutation-never]:not([data-actions-revealed],' },
+    'human-bubble-icons': { file: 'apps/mobile/src/conversation/chrome.css', edits: [
+      { before: '.mobile-app .mobile-conversation .log-turn:not([data-actions-revealed],', after: ".mobile-app .mobile-conversation .log-turn:not([data-speaker-role='human'], [data-actions-revealed]," },
+      { before: "[data-speaker-role='external']):not([data-actions-revealed],", after: "[data-speaker-role='external'])[data-mutation-never]:not([data-actions-revealed]," }
+    ] },
+    'dismiss-small-hit': { file: 'apps/mobile/src/conversation/chrome.css', before: '.agent-interaction__actions > .agent-interaction__dismiss { order: 1; flex: 1 0 100%; margin: 0;', after: '.agent-interaction__actions > .agent-interaction__dismiss { order: 1; flex: 0 0 auto; margin: 0; min-height: 28px; height: 28px;' },
     'mote-team-label-hidden': { file: 'apps/mobile/src/conversation/chrome.css', before: '  .mobile-app .mobile-mote-context .mobile-mote-source-status__count { display: none; }',
       after: '  .mobile-app .mobile-mote-team-button__label, .mobile-app .mobile-mote-context .mobile-mote-source-status__count { display: none; }' }
   }

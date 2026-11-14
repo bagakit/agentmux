@@ -104,17 +104,78 @@ module.exports = async ({ win, read, until, resize, tap, button, capture, result
   for (const turn of reading.turns) assert.ok(turn.rect.left >= 15 && turn.rect.right <= 390 - 15, `Every message keeps the 16px gutter: ${JSON.stringify(turn.rect)}`)
   assert.ok((reading.card ? reading.card.top : reading.composer.top) - reading.lastBottom <= 48, 'Short conversation rests on the decision card and composer')
   assert.ok(!reading.who.includes('You'), 'The person reads as 我')
-  const overlap = await read(`(()=>{const n=[...document.querySelectorAll('.mobile-conversation .log-turn[data-message-bubble="true"][data-speaker-role="human"]')].at(-1);if(!n)return null
-    const body=n.querySelector('.log-turn__body').getBoundingClientRect(),actions=[...n.querySelectorAll('.log-turn__head button')].map(b=>b.getBoundingClientRect())
-    const head=n.querySelector('.log-turn__head').getBoundingClientRect()
-    return {hit:actions.some(a=>a.top<body.bottom-2&&a.bottom>body.top+2&&a.left<body.right-2&&a.right>body.left+2),body:body.toJSON(),head:head.toJSON(),actions:actions.map(a=>a.toJSON()),
-      rows:getComputedStyle(n).gridTemplateRows,bodyRow:getComputedStyle(n.querySelector('.log-turn__body')).gridRowStart,headRow:getComputedStyle(n.querySelector('.log-turn__head')).gridRowStart}})()`)
-  result.matureBubble = overlap
-  assert.equal(overlap.hit, false, "Copy and details never cover the person's text")
   result.matureReading = { bodies, reading }
+  // Touch has no hover: copy and details stay out of the reading until a message is chosen.
+  const messageControls = () => read(`(()=>{const r=n=>n.getBoundingClientRect(),hit=n=>{const q=r(n);if(!q.width||!q.height)return false;const t=document.elementFromPoint(q.x+q.width/2,q.y+q.height/2);return t===n||n.contains(t)}
+    const turns=[...document.querySelectorAll('.mobile-conversation-panel:not([hidden]) .log-turn[data-message-bubble="true"]')]
+    return {hoverNone:matchMedia('(hover: none)').matches,turns:turns.map(n=>{const controls=[...n.querySelectorAll(':scope > .log-turn__head :is(.log-turn__action, .conversation-input-details__toggle)')],body=n.querySelector(':scope > .log-turn__body'),b=r(body)
+      return {role:n.dataset.speakerRole,target:n.dataset.captureTarget??null,revealed:n.hasAttribute('data-actions-revealed'),copyState:n.querySelector(':scope > .log-turn__head .log-turn__actions')?.dataset.copyState??null,
+        controls:controls.length,shown:controls.filter(hit).length,focusable:controls.every(c=>c.tabIndex===0&&!c.disabled),rect:r(n).toJSON(),body:b.toJSON(),
+        covered:controls.filter(hit).some(c=>{const a=r(c);return a.top<b.bottom-2&&a.bottom>b.top+2&&a.left<b.right-2&&a.right>b.left+2})}})}})()`)
+  const person = turn => turn.role === 'human' || turn.role === 'external'
+  const rest = await messageControls()
+  assert.equal(rest.hoverNone, true, 'CDP touch emulation makes the page a no-hover device')
+  assert.ok(rest.turns.some(person) && rest.turns.some(turn => !person(turn) && turn.controls > 0), 'The reading has both a person bubble and an Agent message with controls')
+  for (const turn of rest.turns.filter(person)) {
+    assert.equal(turn.shown, 0, "The person's bubble carries no icon row at rest")
+    assert.ok(turn.rect.height - turn.body.height <= 22, "The person's bubble keeps no empty icon row at rest")
+  }
+  for (const turn of rest.turns) {
+    assert.equal(turn.shown, 0, `An unchosen message shows no copy or details icons on touch: ${JSON.stringify(turn)}`)
+    assert.equal(turn.focusable, true, 'Hidden copy and details stay in the keyboard order')
+  }
+  const decision = await read(`(()=>{const r=n=>n.getBoundingClientRect().toJSON(),actions=document.querySelector('[data-request-id=request-next] .agent-interaction__actions'),dismiss=actions.querySelector('.agent-interaction__dismiss')
+    const status=[...document.querySelectorAll('.mobile-conversation-panel:not([hidden]) .mobile-send-status[data-original-response]')].filter(n=>!n.closest('.agent-interaction')).at(-1),line=status?.querySelector('.mobile-send-status__line')
+    return {dismiss:{rect:r(dismiss),background:getComputedStyle(dismiss).backgroundColor},verdicts:[...actions.querySelectorAll(':scope > button:not(.agent-interaction__dismiss)')].map(b=>({primary:b.classList.contains('is-primary'),rect:r(b)})),
+      status:status&&line?{rect:r(status),line:r(line),text:line.textContent,truncated:line.scrollWidth>line.clientWidth}:null}})()`)
+  result.matureDecision = decision
+  assert.ok(decision.verdicts.length >= 2, 'The request card offers its verdicts')
+  const verdictsByPlace = [...decision.verdicts].sort((a, b) => a.rect.left - b.rect.left)
+  assert.equal(verdictsByPlace[0].primary, true, 'The main verdict leads the row as Primary')
+  for (const verdict of decision.verdicts) {
+    assert.ok(verdict.rect.height >= 44, 'Verdicts are thumb-sized')
+    assert.ok(Math.abs(verdict.rect.top - decision.verdicts[0].rect.top) <= 1, 'Verdicts share one row')
+  }
+  assert.ok(decision.dismiss.rect.height >= 44, 'Dismiss keeps a 44px touch target')
+  assert.ok(decision.dismiss.rect.top >= Math.max(...decision.verdicts.map(verdict => verdict.rect.bottom)), 'Dismiss sits apart from the verdicts, on its own row')
+  assert.equal(decision.dismiss.background, 'rgba(0, 0, 0, 0)', 'Dismiss reads as a text action, not a third verdict')
+  assert.ok(decision.status, 'The answered request keeps its reply status in the conversation')
+  const gutter = Math.min(...reading.turns.map(turn => turn.rect.left))
+  assert.ok(decision.status.rect.height <= 48 && decision.status.truncated === false, `The kept reply status is one complete line: ${JSON.stringify(decision.status)}`)
+  assert.ok(Math.abs(decision.status.line.left - gutter) <= 1, 'The kept reply status starts on the reading gutter')
   await capture('mature-request-390-dark')
   await read('mobileProductScene.setAppearance("light")'); await capture('mature-request-390-light')
   await read('mobileProductScene.setAppearance("dark")')
+  // Choosing a message by tap, keyboard focus, an open details panel or a copy result shows its controls.
+  await read(`(()=>{const turns=[...document.querySelectorAll('.mobile-conversation-panel:not([hidden]) .log-turn[data-message-bubble="true"]')]
+    turns.findLast(n=>n.dataset.speakerRole==='human').dataset.captureTarget='person';const agent=turns.findLast(n=>n.dataset.speakerRole==='agent');agent.dataset.captureTarget='agent'
+    agent.querySelector(':scope > .log-turn__head .log-turn__action').dataset.captureControl='agent-copy';agent.querySelector(':scope > .log-turn__head .conversation-input-details__toggle').dataset.captureControl='agent-details'})()`)
+  const chosen = async target => (await messageControls()).turns.find(turn => turn.target === target)
+  await tap('[data-capture-target=person]', "Choose the person's message")
+  const personChosen = await chosen('person')
+  assert.ok(personChosen.revealed && personChosen.shown > 0, "A tap shows the person's copy and details")
+  assert.equal(personChosen.covered, false, "Copy and details never cover the person's text")
+  assert.ok(personChosen.rect.right <= 390 - 15, "The chosen person's bubble keeps the 16px gutter")
+  await tap('[data-capture-target=agent]', 'Choose the Agent message')
+  assert.equal((await chosen('person')).shown, 0, 'Choosing another message hides the previous controls')
+  assert.ok((await chosen('agent')).shown > 0, 'The chosen Agent message shows its controls')
+  await tap('[data-capture-control=agent-copy]', 'Copy the Agent message')
+  await tap('[data-capture-target=person]', "Choose the person's message while copy reports")
+  const copying = await chosen('agent')
+  assert.ok(copying.copyState !== 'idle' && copying.shown > 0, `A copy result stays visible after choosing elsewhere: ${copying.copyState}`)
+  await until(`document.querySelector('[data-capture-control=agent-copy]').closest('.log-turn__actions').dataset.copyState==='idle'`)
+  assert.equal((await chosen('agent')).shown, 0, 'Controls leave once the copy result ends')
+  await tap('[data-capture-target=agent]', 'Choose the Agent message again')
+  await tap('[data-capture-control=agent-details]', 'Open the Agent message details')
+  await tap('[data-capture-target=person]', "Choose the person's message with details open")
+  assert.ok((await chosen('agent')).shown > 0, 'Open details keep their toggle visible')
+  await capture('mature-reading-chosen-390-dark')
+  await tap('[data-capture-control=agent-details]', 'Close the Agent message details')
+  await tap('[data-capture-target=person]', "Put the person's message down")
+  const keyboardFocus = await read(`(()=>{const c=document.querySelector('[data-capture-control=agent-copy]');c.focus();const q=c.getBoundingClientRect(),t=document.elementFromPoint(q.x+q.width/2,q.y+q.height/2);const facts={focused:document.activeElement===c,shown:t===c||c.contains(t)};c.blur();return facts})()`)
+  assert.deepEqual(keyboardFocus, { focused: true, shown: true }, 'Keyboard focus reaches and shows the hidden copy action')
+  for (const turn of (await messageControls()).turns) assert.equal(turn.shown, 0, 'Every message returns to rest')
+  result.matureMessageControls = { rest, personChosen, copying, keyboardFocus }
   await tap('.mobile-header .mobile-session-view-toggle', 'Terminal toggle')
   await until('!!document.querySelector(".mobile-terminal-panel:not([hidden])")')
   await read('new Promise(resolve=>setTimeout(resolve,300))')
