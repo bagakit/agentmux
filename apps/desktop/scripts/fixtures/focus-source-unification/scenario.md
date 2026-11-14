@@ -2,6 +2,8 @@
 
 Run `node apps/desktop/scripts/capture-focus-source-unification.mjs --evidence .tmp/unified-focus/visual` from the repository root after the original Core build is current.
 
+Use `--unconfirmed` to capture two original positions with the same Agent reference but no confirmed execution identity in the common list, at wide and narrow sizes in both themes. Their identifiers are source references, not recovered names or proof of Runtime ownership.
+
 This scene mounts the actual App, GlobalFocusSurface, unified source adapter, normal project lanes, shared Context cards, menu, Reader, filters and Store. Only original authority/Native IO and unused terminal/editor paint are controlled typed preview leaves. It does not start a real CLI, install the app, mutate a user workspace, or prove native recovery. The companion `focus-source-unification.test.tsx` uses actual Core B/D/Space/Name and Unix→Main→Preload→Renderer source transport for product behavior.
 
 Three original local tasks have authoritative names, recaps and working/stale/interrupted states. Their explicit Source Tab names are null. The same original Runtime/SID is reachable through ordinary and saved Source paths and must still have one normal Context. Another observed Runtime deliberately uses the same raw SID, has its own name and reading source, and cannot borrow the local recap. One additional original execution source is unavailable; it stays an unknown normal Context. Browser/Launcher Regions remain in the original Space but do not enter the task scanning list.
