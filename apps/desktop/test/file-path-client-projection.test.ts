@@ -4,7 +4,7 @@ import { spawn } from 'node:child_process'
 import { mkdir, readFile, rename, stat, symlink, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { webcrypto } from 'node:crypto'
-import { act, createElement } from 'react'
+import { act, createElement, Fragment, useLayoutEffect } from 'react'
 import { createRoot } from 'react-dom/client'
 import { createWorkspaceLayout } from '@agentmux/layout'
 import { AgentMuxSpatialStateStore } from '@agentmux/core/spatial-state'
@@ -16,6 +16,7 @@ import { WorkbenchUserStateStore } from '../src/main/workbench-user-state.js'
 import { OrdinaryWorkspaceFiles } from '../../host/src/ordinary-files.js'
 import { sourceFilesHosts } from './helpers/source-files-hosts.js'
 import { sourceFilesIpcBridge } from './helpers/source-files-ipc-bridge.js'
+import { installFileTreeGeometry } from './helpers/file-tree-geometry.js'
 import { providerCatalogReader, historySourcesReader } from './helpers/startup-observation-api-fixture.js'
 import { objectCliEnvironment, runCompiledObjectCli } from '../../../packages/core/test/helpers/object-cli-rpc.js'
 import type { AppConfig } from '../src/shared/contracts.js'
@@ -227,6 +228,10 @@ it.runIf(business)('Source Explorer and Quick Open discover original Native cand
   vi.mocked(f.api.sourceFiles.call).mockImplementation(async (...args) => { if (args[1] === 'file.list') throw new Error('Original Source discovery unavailable'); return call(...args) })
   await act(async () => { await tree.refreshDir('') })
   expect(tree.rootCache?.children.some(entry => entry.name === 'empty-source-folder')).toBe(true); expect(tree.rootError).toContain('unavailable')
+  await act(async () => f.store.setState(state => ({ sourceFilesInputs: { ...state.sourceFilesInputs, selections: { ...state.sourceFilesInputs.selections,
+    [f.workspace.id]: { ...state.sourceFilesInputs.selections[f.workspace.id]!, issue: 'Original Source live observation ended' } } } })))
+  await vi.waitFor(() => expect(element.textContent).toContain('Original Source discovery unavailable'))
+  expect(element.textContent).toContain('source-only.txt'); expect(tree.rootCache?.children.some(entry => entry.name === 'empty-source-folder')).toBe(true)
   expect(mainDirectories).not.toHaveBeenCalled(); expect(mainNames).not.toHaveBeenCalled()
 }, 60000)
 
@@ -242,6 +247,46 @@ it.runIf(business)('a late Source candidate reply cannot survive a new original 
   await held
   expect((await f.store.getState().resolveFilesSource(f.workspace.id)).status).toBe('located')
   release(); await refused; expect(main).not.toHaveBeenCalled()
+}, 60000)
+
+it.runIf(business)('Source candidate scopes change during render before passive cleanup and stale clicks cannot open another actual Source', async () => {
+  const f = await fixture({ sharedProject: true }); await connectFolder(f)
+  installFileTreeGeometry()
+  await writeFile(join(f.source.project, 'original-candidate.txt'), 'Shared physical bytes, original Source namespace')
+  const a = f.sources[0]!, target = { hostId: a.id, expectedRuntimeId: a.identity.runtimeId }, selection = { kind: 'directory' as const, path: a.project }
+  const needed = await f.runtime.resolveSourceFiles(target, selection)
+  if (needed.status !== 'registration-required') throw new Error('The independent Source must require its own original registration')
+  await f.runtime.registerFolderSpace(a.id, needed.registration)
+  const resolved = await f.runtime.resolveSourceFiles(target, selection)
+  if (resolved.status !== 'located') throw new Error('The actual independent Source locator is required')
+  const { QuickOpenFiles } = await import('../src/renderer/src/components/QuickOpenFiles.js')
+  const { FileExplorer } = await import('../src/renderer/src/components/FileExplorer.js')
+  const opened = vi.spyOn(f.store.getState(), 'openFileAndReveal').mockResolvedValue(true), frames: FrameRequestCallback[] = []
+  vi.spyOn(window, 'requestAnimationFrame').mockImplementation(callback => { frames.push(callback); return frames.length })
+  const element = document.createElement('div'), root = createRoot(element); document.body.append(element)
+  cleanup.push(async () => { await act(async () => root.unmount()); element.remove() })
+  let changedLayout = false
+  function Probe() {
+    const input = f.store(state => state.sourceFilesInputs.selections[f.workspace.id])
+    useLayoutEffect(() => {
+      if (input?.target.hostId !== a.id) return
+      changedLayout = true
+      expect([...element.querySelectorAll('[role="option"], .tree-row__label')].some(node => node.textContent?.includes('original-candidate.txt'))).toBe(false)
+      element.querySelector('[aria-label="Find project files"]')?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+    }, [input])
+    return createElement(Fragment, null, createElement(QuickOpenFiles, { onClose() {} }), createElement(FileExplorer, { workspaceId: f.workspace.id }))
+  }
+  await act(async () => root.render(createElement(Probe)))
+  await vi.waitFor(() => expect([...element.querySelectorAll('[role="option"]')].some(node => node.textContent?.includes('original-candidate.txt'))).toBe(true))
+  await vi.waitFor(() => expect([...element.querySelectorAll('.tree-row__label')].some(node => node.textContent?.includes('original-candidate.txt'))).toBe(true))
+  await act(async () => (element.querySelector('[role="option"]') as HTMLButtonElement).click())
+  expect(frames.length).toBeGreaterThan(0)
+  const nextWorkspace = { ...f.workspace, hostId: a.id, path: a.project }
+  await act(async () => f.store.setState(state => ({ config: { ...state.config!, workspaces: [nextWorkspace] }, sourceFilesInputs: { ...state.sourceFilesInputs,
+    selections: { ...state.sourceFilesInputs.selections, [f.workspace.id]: { workspace: nextWorkspace, target, selection, locator: resolved.locator } } } })))
+  expect(changedLayout).toBe(true)
+  await act(async () => { frames.splice(0).forEach(callback => callback(0)) })
+  expect(opened).not.toHaveBeenCalled()
 }, 60000)
 
 it.runIf(business)('original GUI mkdir, file creation, directory move and delete consume Source receipts once while keeping the same draft and View identities', async () => {
