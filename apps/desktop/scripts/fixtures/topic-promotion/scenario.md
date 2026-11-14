@@ -1,4 +1,4 @@
-# Topic 晋升为 Mote：真实 Renderer 场景
+# Topic 晋升为 Mote Club：真实 Renderer 场景
 
 来源：[伙伴从哪里来](../../../../../docs/design/behavior/companions-from-work.md)、[Mote 晋升呈现](../../../../../docs/design/presentation/motes-and-coordination.md)。
 
@@ -27,3 +27,5 @@
 - 无延迟的完成回执，在正常渲染后直接显示原条目旁提示，不为播放过程延迟。投影刷新暂留时，真实完成仍须立即停止写入动效并显示原组提示。
 
 `capture.mjs --motion --mutant=motion` 只在私有编译中关闭生产等待能量层的动画。相同的初始过渡后时间取样必须在“实际几何或透明度变化”断言失败，不能用动画声明存在、超时或编译失败替代。基准时间序列由独立 Agent 逐张看图评审。
+
+`--club-surfaces` 只采本轮受影响的原 Topic 菜单、确认、部分结果、写入中间帧和原分类完成反馈。它不包含随后进入 Club Knowledge 页的独立投影步骤；完整默认场景仍保留该步骤和对应失败，不能用局部呈现通过代替 Core 空间持久化或 Knowledge 消费证明。
