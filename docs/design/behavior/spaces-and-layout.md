@@ -76,7 +76,7 @@ flowchart LR
 
 Agent 列表与 Focus 的位置入口消费同一空间事实：同一准确 Host／Session 的“打开位置数”按显示 Workspace／Group／Tab／Region 去重，同一物理位置的多个 Space 上下文不重复计数，但各准确上下文仍可辨认和选择。零个、一个、多个及来源未知分别表达；读取缺口不冒充零处，也不以 cwd、名称或 Run 状态推算位置。
 
-Desktop 的 Agent 行与 Focus 卡片提供就近的主动位置入口，复用原位置选择与导航 owner；已持有位置仍可明确重选，原主动作和当前 Work／Focus 意图保留。Mobile 沿原手机会话和空间上下文打开准确目标，不借选择位置遥控 Desktop 焦点。两端打开或取消选择都不恢复、创建、停止 Session／Run，激活前的原成员关系核对沿上述规则。
+Desktop 的打开位置属于低频信息，数量与选择入口放入已有 Agent 详情，不在 Agent 行或 Focus／Space 卡片上常驻。详情复用原位置选择与导航 owner；已持有位置仍可明确重选，原主动作和当前 Work／Focus 意图保留。Mobile 沿原手机会话和空间上下文打开准确目标，不借选择位置遥控 Desktop 焦点。两端打开或取消选择都不恢复、创建、停止 Session／Run，激活前的原成员关系核对沿上述规则。
 
 普通 Topic 对应原 Zone，Category 对应 Space；该知识层级及本地承接只见[《Topics 知识库的层级与沉淀》](#topics-知识库的层级与沉淀)。公共发现、目标语法及实施边界见[《公共控制与跨客户端接入》](public-control.md)，本节不代签 CUI、实际工作面或迁移验收。既有 Renderer 文案与视觉不作全仓机械改名，原实体、目录和合法绑定继续保全。
 
