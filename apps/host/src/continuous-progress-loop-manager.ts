@@ -1,3 +1,4 @@
+import { formatAmuxTriggerNote } from '@agentmux/core/agent-outbound-message'
 import { optionalInputEpoch } from '@agentmux/core/prompt-condition'
 import { awaitUntilCancelled } from './await-until-cancelled.js'
 import { AutomaticInputNotDispatchedError } from './automatic-input-not-dispatched.js'
@@ -23,6 +24,8 @@ export type GoalProgressOwner = {
   subscribe?(listener: (changes: ReadonlyMap<string, GoalProgressRecord | null>, revision: number, goals: readonly GoalProgressRecord[]) => void): () => void
   inspectInitial(loop: ContinuousProgressLoop): Promise<'confirmed' | 'pending' | 'unconfirmed'>
 }
+/** In-process producer context for the original managed schedule. Public schedule.create cannot set it. */
+type ScheduleOwnerContext = AgentMuxRpcCallContext & { managedScheduleNote?: string }
 export type GoalProgressStart = ContinuousProgressTarget & { goalId: string; alignmentRevision: number; intervalMs: number; operationId: string; prompt: string; inputEpoch?:string }
 
 export type FutureProgressInputOwner = {
@@ -510,7 +513,7 @@ export class ContinuousProgressLoopManager {
     await this.persist(loop.loopId)
   }
   // The reason is a Host-owner argument, never a public caller assertion about its actor.
-  async call<M extends ScheduleMethod>(method: M, input: ScheduleParamsMap[M], context?: AgentMuxRpcCallContext, pauseReason: ContinuousProgressPauseReason = 'manual'): Promise<ScheduleResultMap[M]> {
+  async call<M extends ScheduleMethod>(method: M, input: ScheduleParamsMap[M], context?: ScheduleOwnerContext, pauseReason: ContinuousProgressPauseReason = 'manual'): Promise<ScheduleResultMap[M]> {
     const params = parseScheduleRpcParams(method, input)
     if (method === 'schedule.history') return await this.readHistory(params as ScheduleHistoryQuery, context) as ScheduleResultMap[M]
     if (method === 'schedule.create' && (params as ScheduleParamsMap['schedule.create']).checkIn &&
@@ -550,7 +553,7 @@ export class ContinuousProgressLoopManager {
     return { scheduleId, from, to, executionScope: 'connected-host',
       ...(result ?? unconfirmedScheduleHistory(query)) }
   }
-  private async callOwned<M extends ScheduleMethod>(method: M, input: ScheduleParamsMap[M], context?: AgentMuxRpcCallContext, assertCurrent?: () => void, pauseReason: ContinuousProgressPauseReason = 'manual'): Promise<ScheduleResultMap[M]> {
+  private async callOwned<M extends ScheduleMethod>(method: M, input: ScheduleParamsMap[M], context?: ScheduleOwnerContext, assertCurrent?: () => void, pauseReason: ContinuousProgressPauseReason = 'manual'): Promise<ScheduleResultMap[M]> {
     const params = parseScheduleRpcParams(method, input)
     await this.start()
     const scope = { executionScope: 'connected-host' as const }
@@ -599,7 +602,7 @@ export class ContinuousProgressLoopManager {
       if (nextDue !== null && (!Number.isSafeInteger(nextDue) || nextDue < 0 || p.everyMs !== undefined && !Number.isFinite(new Date(nextDue).getTime()))) throw new AgentMuxError('The requested delay exceeds the safe absolute schedule clock. Choose a representable delay; the Agent and manual input remain available.', 'INVALID_CONTROL_REQUEST')
       if (nextDue === null) throw new AgentMuxError('This one-time civil occurrence is past or falls in a skipped DST gap. Choose a valid future time.', 'SCHEDULE_NO_FUTURE_OCCURRENCE')
       assertCurrent?.()
-      const loop = this.scheduler.createSchedule({ ...p.target,...optionalInputEpoch(p.inputEpoch), prompt: p.prompt, nextDue, operationId: p.operationId, ...(p.managedSource ? { managedSource: p.managedSource } : {}), ...(p.calendar ? { calendar: p.calendar, ...(p.checkIn ? { checkIn: p.checkIn } : {}) } : p.afterMs !== undefined ? { afterMs: p.afterMs } : { everyMs: p.everyMs! }) })
+      const loop = this.scheduler.createSchedule({ ...p.target,...optionalInputEpoch(p.inputEpoch), prompt: p.prompt, nextDue, operationId: p.operationId, ...(p.managedSource && context?.managedScheduleNote ? { managedScheduleNote: context.managedScheduleNote } : {}), ...(p.managedSource ? { managedSource: p.managedSource } : {}), ...(p.calendar ? { calendar: p.calendar, ...(p.checkIn ? { checkIn: p.checkIn } : {}) } : p.afterMs !== undefined ? { afterMs: p.afterMs } : { everyMs: p.everyMs! }) })
       this.pauseWithReason(loop.loopId, 'preparation')
       try { await this.persist(loop.loopId); assertCurrent?.(); await this.saveFutureIntent(loop, true, context); assertCurrent?.(); this.patch(loop.loopId, { status: 'active' }); await this.persist(loop.loopId) }
       catch (error) { this.pauseWithReason(loop.loopId, 'preparation'); this.patch(loop.loopId, { lastOutcome: 'unknown', lastDecision: 'Saving the future-message intent is unconfirmed. Inspect the original operation; manual input remains available. ' + String(error) }); await this.persist(loop.loopId); await this.saveFutureIntent(this.require(loop.loopId), false, context); throw error }
@@ -1085,8 +1088,9 @@ export class ContinuousProgressLoopManager {
           // If the observed completion changed, the old claim has no authority to send.
           if (!pending) {
             let prompt = goalContinuation ?? claim.loop.prompt
-            let agentMuxNote: string | undefined = AGENTMUX_AGENT_MESSAGING_ENTRY + (claim.loop.checkIn ? '\n\n' + AGENT_SCHEDULE_CHECK_IN_GUIDANCE : '') + (claim.loop.taskSource?.kind === 'goal' ? '\n\n' + goalRoleGuidance({ role: goalContinuation ? 'manager' : 'executor', goalId: claim.loop.taskSource.goalId, agentSessionId: claim.loop.agentSessionId, runId: observation.session.run.runId, source: { kind: 'goal-native-continuation', operationId: claim.tickId } }) : '')
-            if (futureIntent) {
+            let agentMuxNote: string | undefined
+            if (!futureIntent) agentMuxNote = formatAmuxTriggerNote('automation', AGENTMUX_AGENT_MESSAGING_ENTRY + (claim.loop.checkIn ? '\n\n' + AGENT_SCHEDULE_CHECK_IN_GUIDANCE : '') + (claim.loop.taskSource?.kind === 'goal' ? '\n\n' + goalRoleGuidance({ role: goalContinuation ? 'manager' : 'executor', goalId: claim.loop.taskSource.goalId, agentSessionId: claim.loop.agentSessionId, runId: observation.session.run.runId, source: { kind: 'goal-native-continuation', operationId: claim.tickId } }) : ''))
+            else {
               const original = observation.session.futurePromptIntents?.[futureIntent.intentId]
               if (!original || original.operationId !== (claim.loop.currentDefinition?.operationId ?? claim.loop.creationOperationId) || original.message?.userContent !== prompt) {
                 throw new AgentMuxError('The original future-message operation or content is unconfirmed. Inspect the saved arrangement before retrying; manual input remains available.', 'AGENT_FUTURE_INTENT_CHANGED')

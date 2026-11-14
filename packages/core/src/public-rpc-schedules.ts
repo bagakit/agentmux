@@ -146,9 +146,10 @@ export function parseScheduleRpcParams<M extends ScheduleMethod>(method: M, valu
 }
 export function parseScheduleRecord(value: unknown): ContinuousProgressLoop {
   const code = 'CONTROL_PROTOCOL_ERROR'
-  const p = rpcRecord(value, ['inputEpoch','loopId','hostId','agentSessionId','providerId','workspacePath','calendar','afterMs','everyMs','checkIn','checkInState','revision','creationOperationId','lastMutation','futureIntentId','lastOccurrenceAt','intervalMs','prompt','nextCheckAt','status','pause','pendingCompletion','lastCompletionId','lastTickId','lastOutcome','lastTickAt','lastDecision','taskSource','managedSource','currentDefinition','guidanceAdoptions','lastInputRef'], code)
+  const p = rpcRecord(value, ['inputEpoch','loopId','hostId','agentSessionId','providerId','workspacePath','calendar','afterMs','everyMs','checkIn','checkInState','revision','creationOperationId','lastMutation','futureIntentId','lastOccurrenceAt','intervalMs','prompt','nextCheckAt','status','pause','pendingCompletion','lastCompletionId','lastTickId','lastOutcome','lastTickAt','lastDecision','taskSource','managedSource','managedScheduleNote','currentDefinition','guidanceAdoptions','lastInputRef'], code)
   optionalInputEpoch(p.inputEpoch)
   if (p.managedSource !== undefined) parseAutomaticInputSource(p.managedSource)
+  if (p.managedScheduleNote !== undefined) string(p.managedScheduleNote, code, 64 * 1024)
   if (p.currentDefinition !== undefined) parseContinuousProgressDefinition(p.currentDefinition)
   if (p.guidanceAdoptions !== undefined) parseContinuousProgressGuidanceAdoptions(p.guidanceAdoptions)
   if (p.lastInputRef !== undefined) {

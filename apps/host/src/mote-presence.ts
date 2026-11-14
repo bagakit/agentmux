@@ -1,3 +1,4 @@
+import { formatAmuxTriggerNote } from '@agentmux/core/agent-outbound-message'
 import { optionalInputEpoch } from '@agentmux/core/prompt-condition'
 import { awaitUntilCancelled } from './await-until-cancelled.js'
 import { createHash } from 'node:crypto'
@@ -20,9 +21,10 @@ import { SCRATCH_WORKSPACE_ID } from './mote-topic-model.js'
 import { homeZoneId } from './mote-model.js'
 
 const digest = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex')
-const heartbeat = (target: MotePreferencesTarget) => 'Mote main heartbeat.\n\n' + MOTE_SUPERVISION_GUIDANCE +
-  '\n\nRead the original supervision page with this exact input:\n' + JSON.stringify({ target })
-export const moteGuidanceRevision = () => 'sha256:' + digest(MOTE_SUPERVISION_GUIDANCE)
+const heartbeat = 'Review outstanding commitments, take one useful authorized action, and verify the result.'
+const supervisionRead = 'Read the original work and reports with amux space mote dialogue supervision read --input - using this JSON:'
+const heartbeatNote = (target: MotePreferencesTarget) => formatAmuxTriggerNote('heartbeat', MOTE_SUPERVISION_GUIDANCE + '\n' + supervisionRead + '\n' + JSON.stringify({ target }))
+export const moteGuidanceRevision = () => 'sha256:' + digest([MOTE_SUPERVISION_GUIDANCE, supervisionRead])
 const key = (target: MotePreferencesTarget) => JSON.stringify(target)
 
 /** Mote policy adapts original files/roles to the one Host scheduler. No timer or input queue lives here. */
@@ -89,7 +91,7 @@ export function createHostMotePresence(options: {
       expectedDefinition: action.expectedDefinition, operationId: input.operationId, requestDigest: digest({ input, actor }), actor,
       ...(mode?.reconcilePublished ? { publishedOnly: true as const } : {}),
       guidanceRevision: action.guidanceRevision,
-      guidance: 'The original person or device explicitly adopted this current application guidance for future Mote heartbeats. Current user corrections and authorization limits continue to govern this same task.\n\n' + MOTE_SUPERVISION_GUIDANCE + '\n\nRead the original supervision page with this exact input:\n' + JSON.stringify({ target: input.target }) },
+      guidance: heartbeatNote(input.target) },
       qualify, { principal: actor, ...(context.signal ? { signal: context.signal } : {}), ...(context.assertCurrent ? { assertCurrent: context.assertCurrent } : {}) })
   }
   async function discover(signal?: AbortSignal) {
@@ -163,7 +165,7 @@ export function createHostMotePresence(options: {
       }
       if (original.agentSessionId !== main.current.sessionId || original.hostId !== 'local' && original.hostId !== main.current.hostId) throw new Error('The original main execution identity changed.')
       await read(() => options.main.assertCurrent(main)); assertOpen()
-      if (!loop) loop = (await options.schedules.call('schedule.create', { ...optionalInputEpoch(original.creation?.inputEpoch),target: { hostId: main.current.hostId, agentSessionId: original.agentSessionId, providerId: original.providerId, workspacePath: original.workspacePath }, everyMs: preference.intervalMs, prompt: heartbeat(target), managedSource: { sourceId, revision: main.roleRevision }, operationId: 'mote-presence-' + digest([sourceId, main.roleRevision]) })).schedule
+      if (!loop) loop = (await options.schedules.call('schedule.create', { ...optionalInputEpoch(original.creation?.inputEpoch),target: { hostId: main.current.hostId, agentSessionId: original.agentSessionId, providerId: original.providerId, workspacePath: original.workspacePath }, everyMs: preference.intervalMs, prompt: heartbeat, managedSource: { sourceId, revision: main.roleRevision }, operationId: 'mote-presence-' + digest([sourceId, main.roleRevision]) }, { managedScheduleNote: heartbeatNote(target) })).schedule
       else if (loop.status === 'paused' && loop.lastOutcome === 'unknown' && !loop.lastTickId && !loop.pendingCompletion && !loop.lastMutation) {
         // This is the original unconfirmed configuration write, not an unknown input.
         // Reuse its complete immutable request; the original scheduler converges the same Future Intent.
