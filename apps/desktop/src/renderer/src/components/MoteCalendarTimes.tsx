@@ -9,7 +9,7 @@ const pageSize = 12
 
 export function MoteCalendarTimes({ items, schedules, timezone, now, repeatedHour, onOpen }: {
   items: readonly ScheduleOccurrence[]; schedules: ReadonlyMap<string, CalendarSchedule>
-  timezone: string; now: number; repeatedHour: boolean; onOpen(scheduleId: string): void
+  timezone: string; now: number; repeatedHour: boolean; onOpen(scheduleId: string, recorded: boolean): void
 }) {
   const [expanded, setExpanded] = useState(false)
   const [requestedPage, setPage] = useState(0)
@@ -45,7 +45,7 @@ export function MoteCalendarTimes({ items, schedules, timezone, now, repeatedHou
         const state = item.kind === 'last-accepted' ? 'Input accepted' : item.kind === 'projected' ? 'Planned' : status === 'Active' ? 'Next planned' : status
         return <li key={JSON.stringify([item.scheduleId, item.at])} data-occurrence-kind={item.kind}>
           <time dateTime={new Date(item.at).toISOString()}>{local.toFormat(repeatedHour ? 'HH:mm ZZ' : 'HH:mm')}</time>
-          <button type="button" title={scheduleDisplayTitle(saved.record)} onClick={() => onOpen(item.scheduleId)}>{scheduleCalendarLabel(saved.record)}</button>
+          <button type="button" title={scheduleDisplayTitle(saved.record)} onClick={() => onOpen(item.scheduleId, item.kind === 'last-accepted')}>{scheduleCalendarLabel(saved.record)}</button>
           <small>{state}</small>
         </li>
       })}</ol>
