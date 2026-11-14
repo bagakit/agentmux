@@ -13,7 +13,7 @@ import { publicGoalRecord } from '../../host/src/goal-projection'
 import type { DemandDelegationIntent } from '@agentmux/demand/delegations'
 import type { GoalPlanNodeInput } from '@agentmux/demand/goal-plan'
 import { GoalPlanGraph } from '../src/renderer/src/components/GoalPlanGraph'
-import { useAppStore } from '../src/renderer/src/store'
+import { prepareRendererUpdate, useAppStore } from '../src/renderer/src/store'
 import { api } from '../src/renderer/src/lib/api'
 import { applyGoalDelegationResult } from '../src/renderer/src/lib/goal-delegation-work'
 import { editGoalDraft, goalPlanReviewDraftKey } from '../src/renderer/src/lib/goal-edit-drafts'
@@ -52,6 +52,7 @@ async function fixture() {
   vi.spyOn(api.ui, 'requestStorageFlush').mockResolvedValue(undefined)
   const closeHydration = await useAppStore.getState().initialize()
   closeHydration()
+  cleanup.push(() => prepareRendererUpdate())
   let fault: 'none' | 'lost' | 'wrong-attempt' = 'none'
   const delivery = vi.spyOn(api.demands, 'delegation').mockImplementation(async (method, input) => {
     const result = await bridge.api!.demands.delegation(method, input)
@@ -77,7 +78,7 @@ async function fixture() {
 const button = (text: string) => [...dom.container.querySelectorAll<HTMLButtonElement>('button')].find(node => node.textContent === text)!
 async function openDelivery() {
   const entry = dom.container.querySelector<HTMLButtonElement>('[data-goal-review-delivery="api"]')!
-  expect(entry).not.toBeNull(); expect(entry.getAttribute('aria-expanded')).toBe('false')
+  expect(entry).not.toBeNull()
   await act(async () => entry.click())
   expect(entry.getAttribute('aria-expanded')).toBe('true')
   expect(document.getElementById(entry.getAttribute('aria-controls')!)).toBe(dom.container.querySelector('.goal-plan__reading'))
@@ -96,6 +97,8 @@ const stateOf = (id: string) => dom.container.querySelector(`[data-goal-plan-nod
 it('a person requests changes then passes the new exact delivery through the original owner, unlocking only its dependent node', async () => {
   const f = await fixture(); expect(stateOf('consumer')).toBe('waiting')
   const entry = dom.container.querySelector<HTMLButtonElement>('[data-goal-review-delivery="api"]')!
+  expect(entry.getAttribute('aria-expanded')).toBe('true')
+  expect(dom.container.querySelector('[data-goal-delivery="delegation-1"]')).not.toBeNull()
   await openDelivery()
   await act(async () => button('Back to node').click())
   expect(document.activeElement).toBe(entry)
@@ -171,6 +174,7 @@ it('sends one frozen review on a rapid double click and does not open an origina
   await vi.waitFor(() => expect(stateOf('api')).toBe('done'))
   expect(f.delivery.mock.calls.filter(([method]) => method === 'goal.plan.review')).toHaveLength(1)
   expect((await f.store.get(goalId))!.plan!.reviews).toHaveLength(1)
+  await act(async () => dom.container.querySelector<HTMLElement>('.goal-delivery__source > summary')!.click())
   await act(async () => button('Read original thread').click())
   await vi.waitFor(() => expect(dom.container.textContent).toContain('original discussion is temporarily unavailable'))
   expect(thread).toHaveBeenCalledExactlyOnceWith({ hostId: 'local', agentSessionId: 'supervisor' }, 'source-1')

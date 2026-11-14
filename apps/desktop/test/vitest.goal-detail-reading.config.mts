@@ -16,7 +16,7 @@ const sha = (source: string) => createHash('sha256').update(source).digest('hex'
 const segments: Record<string, [string, string]> = {
   'apps/desktop/src/renderer/src/components/GlobalBoardSurface.tsx': ['{selectedDemand ? <GoalDetail', '/> : selectedDemandId'],
   'apps/desktop/src/renderer/src/components/GoalWorkArea.tsx': ['    <GoalDelegationWork', 'onRevealResults={onRevealResults} />'],
-  'apps/desktop/src/renderer/src/components/GoalDelegationWork.tsx': ['const overviewPanel = <div key="goal-overview"', '{overview}{plan}</div>']
+  'apps/desktop/src/renderer/src/components/GoalDelegationWork.tsx': ['const recordNodes = embedded ?', 'className="goal-work-area__overview">{overview}</div>']
 }
 const full = [owner, 'apps/desktop/src/renderer/src/components/GoalProperties.tsx', 'apps/desktop/src/renderer/src/lib/goal-edit-drafts.ts', 'apps/desktop/src/renderer/src/styles/goal-reading.css']
 export default { ...original, plugins: [...original.plugins ?? [], {

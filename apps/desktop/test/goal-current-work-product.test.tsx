@@ -51,9 +51,9 @@ it('original ended finite work dominates clarification in the actual Goal detail
   expect(responsibility).toBeDefined()
   expect(currentRecord.querySelector('.goal-work__responsibility details')?.textContent, 'Full original responsibility remains readable in its own source disclosure').toContain(responsibility.reason)
   expect(currentRecord.querySelector('.goal-work__responsibility > p')?.textContent, 'The visible state stays concise rather than repeating the technical reason').not.toContain(responsibility.reason)
-  const origin = container.querySelector('[data-goal-work-area] [data-goal-plan-origin]')!
+  const origin = container.querySelector('[aria-label="Execution graph"] [data-goal-plan-origin]')!
   expect(origin).not.toBeNull()
-  expect(Boolean(currentRecord.compareDocumentPosition(origin) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true)
+  expect(Boolean(origin.compareDocumentPosition(currentRecord) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true)
   await act(async () => origin.querySelector('button')!.click())
   const planReading = container.querySelector(`[data-goal-plan-detail="${goalId}"]`)!
   await act(async () => planReading.querySelector('button')!.click())
@@ -96,8 +96,8 @@ it('a fresh Goal keeps the actual origin plan before its finite entry and never 
   await mount('fresh-origin')
   const work = container.querySelector('[data-goal-work-area]')!
   expect(work.getAttribute('data-goal-work-context')).toBe('fresh')
-  expect(work.querySelector('[data-goal-plan-origin]')).not.toBeNull()
-  const plan = work.querySelector('[data-goal-plan-origin]')!, finite = work.querySelector('[data-goal-finite-start]')!
+  expect(container.querySelector('[data-goal-plan-origin]')).not.toBeNull()
+  const plan = container.querySelector('[data-goal-plan-origin]')!, finite = work.querySelector('[data-goal-finite-start]')!
   expect(Boolean(plan.compareDocumentPosition(finite) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true)
   expect(work.textContent).not.toContain('Refresh reports')
   expect(work.querySelector('[aria-label="Delegated work"]')).toBeNull()

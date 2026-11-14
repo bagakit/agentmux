@@ -61,14 +61,15 @@ describe('Goal plan graph', () => {
     expect(side.firstElementChild).toBe(side.querySelector('.goal-supervisor-rail'))
     expect(side.lastElementChild).toBe(side.querySelector('[aria-label="Goal properties"]'))
     const head = detail.querySelector('.goals-detail__head')!
-    expect(head.firstElementChild?.getAttribute('aria-label')).toBe('Goal title')
+    expect(head.querySelector('[aria-label="Goal title"]')).not.toBeNull()
+    expect(detail.querySelector('.goals-detail__reading-nav [aria-current]')?.textContent).toBe('Plan')
     expect(head.querySelector('[data-goal-detail-stage] strong')?.textContent).toBeTruthy()
     expect(detail.querySelector('[data-goal-reading-section="activity"]')).toBeNull()
     expect([...detail.querySelectorAll('.goals-detail__reading-nav button')].some(button => button.textContent === 'Activity')).toBe(false)
     expect(main.querySelector('.goal-collaboration')).toBeNull()
     const overview = main.querySelector('.goal-work-area__overview')!
     expect(overview.firstElementChild).toBe(main.querySelector('[aria-label="Goal brief"]'))
-    expect(overview.lastElementChild?.contains(graph())).toBe(true)
+    expect(Boolean(graph()!.compareDocumentPosition(overview) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true)
     const intent = main.querySelector('.goals-detail__brief .goals-intent__reading')!
     expect(intent.textContent).toContain('Original intent')
     expect(intent.textContent).not.toContain('# Original intent')
@@ -107,16 +108,13 @@ describe('Goal plan graph', () => {
     side.scrollIntoView = scroll
     const detail = dom.container.querySelector<HTMLElement>('.goals-detail')!
     detail.scrollTop = 100
-    side.style.scrollMarginTop = '48px'
-    vi.spyOn(side, 'getBoundingClientRect').mockReturnValue({ top: 600 } as DOMRect)
-    vi.spyOn(detail, 'getBoundingClientRect').mockReturnValue({ top: 20 } as DOMRect)
     dom.container.scrollTop = 18
     const team = dom.container.querySelector<HTMLButtonElement>('.goals-detail__team-link')!
     expect(team.textContent).toBe('Supervisor')
     await act(async () => team.click())
     expect(scroll).not.toHaveBeenCalled()
     expect(team.closest('nav')?.querySelector('[aria-current="location"]')).toBe(team)
-    expect(detail.scrollTop).toBe(632)
+    expect(detail.scrollTop).toBe(0)
     expect(dom.container.scrollTop).toBe(18)
     expect(document.activeElement).toBe(side)
     expect(dom.container.querySelectorAll('[aria-label="Open discussion for Ship the plan"]')).toHaveLength(1)
@@ -129,10 +127,19 @@ describe('Goal plan graph', () => {
     const columns = [...graph()!.querySelectorAll<HTMLElement>('[data-goal-plan-column]')]
       .map(column => [...column.querySelectorAll<HTMLElement>('[data-goal-plan-node]')].map(item => `${item.dataset.goalPlanNode}:${item.dataset.goalPlanState}`))
     expect(columns).toEqual([['api:review', 'docs:ready'], ['ui:waiting'], ['release:waiting']])
-    expect(graph()!.querySelector('[data-goal-plan-progress]')!.textContent).toBe('0 of 4 done · revision 2')
+    expect(dom.container.querySelector('[data-goal-meta-plan]')?.textContent).toBe('Plan 0 of 4 done')
     expect(graph()!.querySelector('[data-goal-plan-node="ui"] .goal-plan-node__state')!.textContent).toBe('Waiting on dependencies')
     expect(graph()!.querySelector('[data-goal-plan-node="ui"] .goal-plan-node__depends')!.textContent).toBe('Depends on · Node api')
     expect(graph()!.querySelector('[aria-label="Execution graph"]')?.getAttribute('tabindex')).toBe('0')
+    const delivery = graph()!.querySelector('[data-goal-delivery="d-api"]')!
+    expect(delivery, 'The first Plan paint shows the original current delivery').not.toBeNull()
+    expect(delivery.closest('.goal-plan__stage')?.parentElement?.querySelector('[aria-label="Task assignments"] [aria-current] strong')?.textContent).toBe('Node api')
+    expect(graph()!.querySelector('[data-goal-time-row="d-api"][data-selected]')).not.toBeNull()
+    expect(document.activeElement).not.toBe(graph()!.querySelector('.goal-plan__reading h3'))
+    const view = [...dom.container.querySelectorAll('button')].find(button => button.textContent === 'View delivery')!
+    await act(async () => view.click())
+    expect(document.activeElement).toBe(graph()!.querySelector('.goal-plan__reading h3'))
+    expect(graph()!.querySelector('[data-goal-delivery="d-api"]')).toBe(delivery)
   })
 
   it('highlights exactly one next step: requested changes first, then the first ready node', async () => {
@@ -141,7 +148,7 @@ describe('Goal plan graph', () => {
     const highlighted = () => [...graph()!.querySelectorAll<HTMLElement>('.goal-plan-node--next')].map(item => item.dataset.goalPlanNode)
     // docs and ui are both ready; docs comes first in plan order.
     expect(highlighted()).toEqual(['docs'])
-    expect(graph()!.querySelector('[data-goal-plan-progress]')!.textContent).toBe('1 of 4 done · revision 2')
+    expect(dom.container.querySelector('[data-goal-meta-plan]')?.textContent).toBe('Plan 1 of 4 done')
     // ui is reworked after review; docs is still ready and earlier in order, yet the rework wins.
     const changes = { ...pass('ui'), verdict: 'changes' as const, note: 'The graph misses cancelled nodes' }
     await act(async () => useAppStore.setState(state => ({ demands: { goal: owned({ ...state.demands.goal!, delegations: [reported('api'), reported('ui')], plan: plan(nodes, [pass('api'), changes]) }) } })))
@@ -173,7 +180,7 @@ describe('Goal plan graph', () => {
     seed(goal({ plan: plan([node('api'), node('docs'), node('gone', [], { cancelled: true })]), delegations: [prepared as DemandDelegation] }))
     await dom.render(<GlobalBoardSurface />)
     expect(graph()!.querySelector<HTMLElement>('[data-goal-plan-node="docs"]')!.textContent).toContain('Delivery unconfirmed')
-    expect(graph()!.querySelector('[data-goal-plan-progress]')!.textContent).toBe('0 of 2 done · revision 2')
+    expect(dom.container.querySelector('[data-goal-meta-plan]')?.textContent).toBe('Plan 0 of 2 done')
     expect(graph()!.querySelector<HTMLElement>('[data-goal-plan-node="gone"]')!.dataset.goalPlanState).toBe('cancelled')
   })
 
@@ -203,7 +210,7 @@ describe('Goal plan graph', () => {
     await dom.render(<GlobalBoardSurface />)
     expect(graph()!.querySelector<HTMLElement>('[data-goal-plan-node="api"]')!.dataset.goalPlanState).toBe('done')
     expect(graph()!.querySelector('[data-goal-plan-node="api"] .goal-plan-node__state')!.textContent).toBe('Done')
-    expect(graph()!.querySelector('[data-goal-plan-progress]')!.textContent).toBe('1 of 4 done · revision 2')
+    expect(dom.container.querySelector('[data-goal-meta-plan]')?.textContent).toBe('Plan 1 of 4 done')
   })
 
   it('reads every node state as unavailable when the owner returned no derivation, and never guesses one', async () => {
@@ -215,7 +222,7 @@ describe('Goal plan graph', () => {
     expect(states).toEqual(['api', 'docs', 'ui', 'release'].map(id => [id, 'unavailable', 'State unavailable']))
     expect(graph()!.querySelectorAll('[data-goal-plan-column]')).toHaveLength(1)
     expect(graph()!.querySelector('.goal-plan-node--next')).toBeNull()
-    expect(graph()!.querySelector('[data-goal-plan-progress]')!.textContent).toBe('revision 2')
+    expect(graph()!.querySelector('[data-goal-plan-progress]')!.textContent).toBe('Revision 2')
     expect(graph()!.querySelector('.goal-plan__progress')).toBeNull()
     expect(graph()!.classList.contains('goal-plan--unavailable')).toBe(true)
     expect(graph()!.querySelector('[data-goal-plan-node="release"] .goal-plan-node__depends')!.textContent).toBe('Depends on · Node ui, Node docs')
@@ -235,8 +242,7 @@ describe('Goal plan graph', () => {
     expect(dom.container.querySelector('.goals-detail')).not.toBeNull()
     expect(graph()).not.toBeNull()
     expect(graph()!.querySelectorAll('[data-goal-plan-node]')).toHaveLength(1)
-    if (alignment) expect(dom.container.querySelector('.goals-detail__main')!.firstElementChild?.contains(graph())).toBe(true)
-    else expect(Boolean(dom.container.querySelector('[data-goal-grill]')!.compareDocumentPosition(graph()!) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true)
+    expect(dom.container.querySelector('.goals-detail__main')!.firstElementChild?.contains(graph())).toBe(true)
     const origin = graph()!.querySelector('[data-goal-plan-origin="goal"]')!
     expect(origin).not.toBeNull()
     expect(origin.closest('[aria-label="Execution graph"]')).not.toBeNull()
@@ -283,7 +289,7 @@ describe('Goal plan graph', () => {
     const firstCheck = dom.container.querySelector('[data-goal-outcome]')!
     expect(finish).not.toBeNull()
     expect(Boolean(firstCheck.compareDocumentPosition(finish) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true)
-    expect(Boolean(finish.compareDocumentPosition(graph()!) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true)
+    expect(Boolean(graph()!.compareDocumentPosition(finish) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true)
     expect(graph()!.querySelector('[aria-label="Execution graph"] [data-goal-plan-origin="goal"]')).not.toBeNull()
     expect(dom.container.querySelector('[data-goal-work-area]')!.textContent).not.toContain('Ready when you are')
   })
@@ -342,7 +348,7 @@ describe('plan graph navigation and list progress', () => {
       useAppStore.setState({ config: { ...prior.config, hosts: [...prior.config.hosts, { id: 'worker-host', kind: 'ssh', label: 'Recovery worker', hostname: 'worker.invalid' }] },
         sessions: [{ ...source, id: 'remote-worker', hostId: 'worker-host', control: { ...source.control, hostId: 'worker-host', agentSessionId: 'worker-api' } }] })
       await dom.render(<GlobalBoardSurface />)
-      const who = graph()!.querySelector('[data-goal-plan-node="api"] .goal-plan-node__who')!
+      const who = graph()!.querySelector('[data-goal-plan-detail="api"] .goal-delivery__byline .goal-plan-node__who')!
       expect(who.textContent).toContain('Remote · Recovery worker')
       expect(who.getAttribute('title')).toContain('worker-host')
     } finally { await act(async () => useAppStore.setState({ config: prior.config, sessions: prior.sessions })) }
@@ -409,7 +415,8 @@ describe('plan graph navigation and list progress', () => {
       { ...original, id: 'other-presentation', hostId: 'another-host', control: { ...original.control, hostId: 'another-host', agentSessionId: 'worker-api' } }
     ], agentNames: { 'local-presentation': 'Exact execution lead', 'other-presentation': 'Another Agent' } })
     await dom.render(<GlobalBoardSurface />)
-    const who = graph()!.querySelector('[data-goal-plan-node="api"] .goal-plan-node__who')!
+    await act(async () => graph()!.querySelector<HTMLButtonElement>('[data-goal-plan-node="api"] .goal-plan-node__head')!.click())
+    const who = graph()!.querySelector('[data-goal-plan-detail="api"] .goal-delivery__byline .goal-plan-node__who')!
     expect(who.textContent).toContain('Exact execution lead')
     expect(who.textContent).toContain('Tools · tool-host')
     expect(who.textContent).not.toContain('Another Agent')

@@ -129,23 +129,25 @@ describe('Goals whole-page current facts, reading and return through mounted own
     expect(request).not.toHaveBeenCalled(); expect(createTopic).not.toHaveBeenCalled()
   })
 
-  it('uses a compact single-column detail directory and restores the original Board preference on return', async () => {
+  it('keeps the original filtered Board mounted while reading a focused Goal', async () => {
     useAppStore.setState({ demands: { one: goal(), blocked: goal('blocked', { status: 'blocked', delegationObservationIssue: 'Retained original observation is unknown.' }) } })
     await mount(); await click('Board view')
-    expect(dom.container.querySelector('.goals-board')).not.toBeNull()
-    await select('blocked')
-    expect(dom.container.querySelector('.goals-index .goals-board')).toBeNull()
-    expect(dom.container.querySelectorAll('.goals-index .goals-row--compact')).toHaveLength(2)
-    expect(dom.container.querySelector('.goals-index .goal-responsibility')).toBeNull()
-    expect(dom.container.querySelector('[aria-label="Board view"]')).toBeNull()
+    const board = dom.container.querySelector('.goals-index .goals-board')!
+    expect(board).not.toBeNull()
     const row = dom.container.querySelector<HTMLElement>('[data-demand-id="one"]')!
     await act(async () => { row.focus(); row.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })) })
     expect(document.activeElement?.getAttribute('data-demand-id')).toBe('blocked')
     const search = dom.container.querySelector<HTMLInputElement>('[aria-label="Search goals"]')!
     await fill(search, 'blocked')
     expect(dom.container.querySelectorAll('.goals-index [data-demand-id]')).toHaveLength(1)
+    const original = dom.container.querySelector<HTMLElement>('[data-demand-id="blocked"]')!
+    await act(async () => original.focus())
+    await select('blocked')
+    expect(dom.container.querySelector('.goals-index .goals-board')).toBe(board)
+    expect(dom.container.querySelector('[aria-label="Goal reading sections"] [aria-current]')?.textContent).toBe('Plan')
     await click('Back to goals')
-    expect(dom.container.querySelector('.goals-board')).not.toBeNull()
+    expect(dom.container.querySelector('.goals-board')).toBe(board)
+    expect(document.activeElement).toBe(original)
     expect(button('Board view').getAttribute('aria-selected')).toBe('true')
     expect(search.value).toBe('blocked')
     expect(useAppStore.getState().demands.blocked?.id).toBe('blocked')

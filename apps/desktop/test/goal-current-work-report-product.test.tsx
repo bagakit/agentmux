@@ -63,7 +63,7 @@ it('the screenshot combination keeps its frozen inspection and origin above expa
   expect(check).toBeDefined(); expect(check!.classList.contains('primary-button')).toBe(false)
   const choose = [...work.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Choose Supervisor')
   expect(choose).toBeDefined(); expect(choose!.classList.contains('primary-button')).toBe(true)
-  const record = work.querySelector('[data-goal-work-operation="finite-start"][data-goal-work-kind="start"]'), origin = work.querySelector('[data-goal-plan-origin]')
+  const record = work.querySelector('[data-goal-work-operation="finite-start"][data-goal-work-kind="start"]'), origin = container.querySelector('[data-goal-plan-origin]')
   expect(record).not.toBeNull(); expect(origin).not.toBeNull()
   expect(Boolean(origin!.compareDocumentPosition(record!) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true)
   const records = record!.closest('details')!

@@ -132,7 +132,8 @@ async function expectSavedGraph() {
     expect([...container.querySelectorAll<HTMLElement>('[data-goal-plan-edge]')].map(edge => edge.dataset.goalPlanEdge)).toEqual(['inspect>preserve'])
     // States and progress are the Host owner's derivation returned with the record.
     expect(renderedStates()).toEqual([['inspect', 'ready'], ['preserve', 'waiting']])
-    expect(container.querySelector('[data-goal-plan-progress]')?.textContent).toBe('0 of 2 done · revision 1')
+    expect(container.querySelector('[data-goal-meta-plan]')?.textContent).toBe('Plan 0 of 2 done')
+    expect(container.querySelector('[data-goal-plan-progress]')?.textContent).toBe('Revision 1')
   })
   const goal = (await fixture.host.demands.get('discovery'))!
   expect(goal.plan?.nodes.map(node => [node.id, node.dependsOn])).toEqual([['inspect', []], ['preserve', ['inspect']]])
@@ -235,6 +236,7 @@ it('only the Supervisor’s saved public plan replaces the single Goal node with
   expect(JSON.parse(saved.stdout).result.plan.history[0].author).toMatchObject({ kind: 'agent', id: fixture.primary.agentSessionId })
   await expectSavedGraph()
   expect(container.querySelector('[aria-label="Execution graph"]')).toBe(originalCanvas)
+  await vi.waitFor(() => expect(container.querySelector<HTMLDetailsElement>('.goal-plan__request > details')?.open).toBe(false))
   const listed = await cli(['goal', 'ls', '--goal', 'discovery'])
   expect(listed.code, listed.stderr).toBe(0)
   const [record] = JSON.parse(listed.stdout).result.goals as Array<{ id: string; planState?: GoalPlanState }>

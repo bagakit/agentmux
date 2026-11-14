@@ -24,7 +24,7 @@ const button = (text: string) => [...dom.container.querySelectorAll<HTMLButtonEl
 const selected = () => dom.container.querySelector('[aria-label="Goal reading sections"] [aria-current="location"]')?.textContent
 
 /** These measured positions stand in for layout only; the original scroll consumer and editors are mounted. */
-function measure(positions = { overview: 200, plan: 900, activity: 1800 }, total = 2400) {
+function measure(positions = { overview: 900, plan: 200, activity: 1800 }, total = 2400) {
   const detail = dom.container.querySelector<HTMLElement>('.goals-detail')!
   vi.spyOn(detail, 'getBoundingClientRect').mockImplementation(() => ({ top: 20, bottom: 620, height: 600 } as DOMRect))
   Object.defineProperty(detail, 'clientHeight', { configurable: true, value: 600 })
@@ -48,16 +48,16 @@ it('the mounted workspace tracks explicit reading and manual scroll without repl
   const detail = measure()
   const indicator = detail.querySelector('.goals-detail__reading-nav > .selection-indicator')
   expect(indicator?.getAttribute('aria-hidden')).toBe('true')
-  expect(selected()).toBe('Overview')
+  expect(selected()).toBe('Plan')
   await act(async () => button('Plan').click())
-  expect(selected()).toBe('Plan'); expect(detail.scrollTop).toBe(848); expect(document.activeElement).toBe(plan)
+  expect(selected()).toBe('Plan'); expect(detail.scrollTop).toBe(148); expect(document.activeElement).toBe(plan)
   expect(detail.querySelector('.goals-detail__reading-nav > .selection-indicator')).toBe(indicator)
   await scroll(detail, 1800)
   expect(selected()).toBe('Activity')
   await scroll(detail, 1000)
-  expect(selected()).toBe('Plan')
-  await scroll(detail, 0)
   expect(selected()).toBe('Overview')
+  await scroll(detail, 0)
+  expect(selected()).toBe('Plan')
   expect(dom.container.querySelector('[aria-label="Goal description"]')).toBe(editor)
   expect(dom.container.querySelector('[data-goal-reading-section="plan"]')).toBe(plan)
   expect(useAppStore.getState().goalEditDrafts[goal.id]?.description?.value).toBe('Keep the unsaved original draft.  ')
@@ -73,7 +73,7 @@ it('keeps a chosen plan current when brief and plan share a row and marks a visi
   await scroll(detail, 800)
   expect(selected()).toBe('Activity')
   await scroll(detail, 0)
-  expect(selected()).toBe('Overview')
+  expect(selected()).toBe('Plan')
 })
 
 it('the exact original plan entry sets the reading signal without moving focus, and copying keeps owner addresses', async () => {
