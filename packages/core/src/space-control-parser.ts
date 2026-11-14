@@ -14,7 +14,7 @@ import { parseNameChangeRecord } from './display-label.js'
 import { settingsResourceEnvelope } from './settings-resource-json.js'
 import { SPLIT_DIRECTIONS, isSplitDirection } from './split-direction-ssot.js'
 import { parseAgentMuxCreationOrigin } from './agent-creation-admission.js'
-import { parseMoteDefaultConversation, parseMotePreferencesReadInput, parseMotePreferencesSaveInput,
+import { parseMoteQuickDefaults, parseMoteDefaultConversation, parseMotePreferencesReadInput, parseMotePreferencesSaveInput,
   parseMotePreferencesReadResult, parseMotePreferencesSaveResult } from './mote-preferences.js'
 import type {
   AgentMuxSpaceAddress, AgentMuxSpaceCatalog, AgentMuxSpaceControlRequest, AgentMuxSpaceControlResult,
@@ -399,11 +399,8 @@ function catalog(value: unknown, code: Code): AgentMuxSpaceCatalog {
     let quickMode: AgentMuxMotePresentation['quickMode']
     if (raw.status === 'saved') {
       fields(raw, ['status', 'defaults', 'version'], code)
-      const defaults = fields(raw.defaults, ['executorId', 'conversation', 'recovery'], code)
-      quickMode = { status: 'saved', version: string(raw.version, 'Mote preferences version', code), defaults: {
-        ...(Object.hasOwn(defaults, 'executorId') ? { executorId: spaceControlId(defaults.executorId, 'Mote default Executor', code) } : {}),
-        ...(Object.hasOwn(defaults, 'conversation') ? { conversation: moteConversation(defaults.conversation) } : {}),
-        ...(Object.hasOwn(defaults, 'recovery') ? { recovery: member(defaults.recovery, ['startup', 'on-open'], 'Mote recovery timing', code) } : {}) } }
+      quickMode = { status: 'saved', version: string(raw.version, 'Mote preferences version', code),
+        defaults: parseMoteQuickDefaults(raw.defaults, code) }
     } else if (raw.status === 'missing') {
       fields(raw, ['status'], code); quickMode = { status: 'missing' }
     } else if (raw.status === 'unconfirmed') {

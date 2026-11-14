@@ -121,7 +121,7 @@ export type AgentMuxMotePresentation = {
   /** The Mote's own files scope, independent of its member Zones and execution cwd. */
   content: { zoneId: string; hostId: string; workspaceId: string; workspacePath: string } | null
   quickMode:
-    | { status: 'saved'; version: string; defaults: { executorId?: string; conversation?: AgentMuxMoteConversationReference; recovery?: 'startup' | 'on-open' } }
+    | { status: 'saved'; version: string; defaults: import('./mote-preferences.js').MoteQuickDefaults }
     | { status: 'missing' }
     | { status: 'unconfirmed'; message: string }
   /** The original owner's confirmed occurrence; an unavailable one remains in quickMode. */
