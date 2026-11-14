@@ -84,11 +84,11 @@ async function save(alignment = true, supervisor: string | null = fixture.primar
   if (alignment) await useAppStore.getState().updateDemand('discovery', { alignment: proposal })
   useAppStore.setState({ selectedDemandId: 'discovery' }); fixture.host.clear(); await mount()
   expect((await fixture.host.demands.get('discovery'))?.plan).toBeUndefined()
-  expect(container.querySelectorAll('[data-goal-plan-node]')).toHaveLength(0)
+  expect(renderedStates()).toEqual([['discovery', 'goal']])
 }
 async function requestPlan() {
   const button = container.querySelector<HTMLButtonElement>('[data-goal-plan-request]')
-  expect(button, 'The real empty Goal exposes its planning action').not.toBeNull()
+  expect(button, 'The single Goal node exposes its split action').not.toBeNull()
   await act(async () => { button!.click(); await fixture.host.settle() })
   await vi.waitFor(async () => { await act(async () => {}); expect(button!.isConnected && button!.disabled).toBe(false) }, { timeout: 10_000 })
   const request = fixture.host.executed('demand.discuss').at(-1)!
@@ -209,9 +209,11 @@ function planningRequest() {
   return (useAppStore.getState().demands.discovery?.patrols ?? []).find(item => item.purpose === 'plan')!
 }
 
-it('a planning input reaches the Supervisor and only its saved public plan replaces the real empty Goal with the owner DAG', async () => {
+it('only the Supervisor’s saved public plan replaces the single Goal node with the owner DAG', async () => {
   await save(); await nativeState('done')
   const before = (await fixture.host.demands.get('discovery'))!, starts = fixture.core.start.mock.calls.length
+  const originalCanvas = container.querySelector('[aria-label="Execution graph"]')
+  expect(originalCanvas).not.toBeNull()
   const request = await requestPlan(), original = planningRequest()
   expect(original, 'The new planning request belongs to the Supervisor request owner').toBeDefined()
   const attempt = original.attempts[0]!
@@ -227,11 +229,12 @@ it('a planning input reaches the Supervisor and only its saved public plan repla
   expect(fixture.core.start.mock.calls.length).toBe(starts)
   expect((await fixture.host.demands.get('discovery'))!.discussionIntent).toBeUndefined()
   expect((await fixture.host.demands.get('discovery'))!.discussionOperationId).toBe(before.discussionOperationId)
-  expect(container.querySelectorAll('[data-goal-plan-node]')).toHaveLength(0)
+  expect(renderedStates()).toEqual([['discovery', 'goal']])
   const saved = await cli(['goal', 'plan', 'revise', '--input', '-'], { goalId: 'discovery', revision: revision() }, supervisorCredentials())
   expect(saved.code, saved.stderr).toBe(0)
   expect(JSON.parse(saved.stdout).result.plan.history[0].author).toMatchObject({ kind: 'agent', id: fixture.primary.agentSessionId })
   await expectSavedGraph()
+  expect(container.querySelector('[aria-label="Execution graph"]')).toBe(originalCanvas)
   const listed = await cli(['goal', 'ls', '--goal', 'discovery'])
   expect(listed.code, listed.stderr).toBe(0)
   const [record] = JSON.parse(listed.stdout).result.goals as Array<{ id: string; planState?: GoalPlanState }>
@@ -251,7 +254,7 @@ it('without a Supervisor the original action is saved before the picker and only
   await act(async () => { [...document.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Cancel')!.click() })
   await act(async () => useAppStore.getState().updateDemand('discovery', { supervisorSessionId: fixture.primary.agentSessionId, assigneeSessionIds: [fixture.primary.agentSessionId] }))
   expect(fixture.host.executed('demand.discuss')).toEqual([])
-  expect(container.querySelector('[data-goal-plan-request]')?.textContent).toBe('Ask Planning Supervisor to plan')
+  expect(container.querySelector('[data-goal-plan-request]')?.textContent).toBe('Ask Planning Supervisor to split work')
   await nativeState('done'); const request = await requestPlan()
   expect(request.requestId).toBe(reference.requestId)
   expect(planningRequest().supervisorAgentSessionId).toBe(fixture.primary.agentSessionId)
@@ -265,7 +268,7 @@ it('missing alignment keeps its real gap in the Supervisor request and refuses a
   expect(attempt.agentMuxNote).toContain('If the proposal is missing')
   const rejected = await cli(['goal', 'plan', 'revise', '--input', '-'], { goalId: 'discovery', revision: revision() }, supervisorCredentials())
   expect(rejected.code).toBe(1); expect(rejected.stderr).toContain('current Goal proposal version')
-  expect(container.querySelectorAll('[data-goal-plan-node]')).toHaveLength(0)
+  expect(renderedStates()).toEqual([['discovery', 'goal']])
 })
 
 it('lost planning receipt retains the original request through Renderer rehydrate without repeating input', async () => {
@@ -286,7 +289,7 @@ it('lost planning receipt retains the original request through Renderer rehydrat
   expect(fixture.core.writes).toEqual(accepted)
   expect(planningRequest().operationId).toBe(original.operationId)
   expect((await fixture.host.demands.get('discovery'))!.plan).toBeUndefined()
-  expect(container.querySelectorAll('[data-goal-plan-node]')).toHaveLength(0)
+  expect(renderedStates()).toEqual([['discovery', 'goal']])
 })
 
 it('a failed native planning-reference save sends no Host request and retry keeps the original reference', async () => {
@@ -469,7 +472,7 @@ it('a bare current Supervisor never borrows a foreign Open target and the same u
   const floating = await import('../src/renderer/src/lib/pmo-teams-topic-floating')
   const open = () => [...container.querySelectorAll<HTMLButtonElement>('.goal-plan__request button')].find(button => button.textContent?.trim().endsWith('conversation'))!
   expect(container.querySelector('.goal-plan__request')?.textContent).not.toContain('Foreign namesake')
-  expect(container.querySelector('[data-goal-plan-request]')?.textContent).toBe('Ask Supervisor to plan')
+  expect(container.querySelector('[data-goal-plan-request]')?.textContent).toBe('Ask Supervisor to split work')
   await act(async () => open().click())
   expect(floating.readPmoTeamsTopicFloatingState()).toMatchObject({ agentTarget: { agentSessionId: null }, targetTabId: null })
   expect(floating.readPmoTeamsTopicFloatingState()?.targetAgent).toBeUndefined()

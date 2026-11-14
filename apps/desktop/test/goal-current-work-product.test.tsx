@@ -54,11 +54,16 @@ it('original ended finite work dominates clarification in the actual Goal detail
   const origin = container.querySelector('[data-goal-work-area] [data-goal-plan-origin]')!
   expect(origin).not.toBeNull()
   expect(Boolean(currentRecord.compareDocumentPosition(origin) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true)
+  await act(async () => origin.querySelector('button')!.click())
+  const planReading = container.querySelector(`[data-goal-plan-detail="${goalId}"]`)!
+  await act(async () => planReading.querySelector('button')!.click())
+  expect(document.activeElement).toBe(currentRecord)
   expect(container.querySelector('.goal-finite-start')?.textContent).not.toContain('View original work')
   expect([...container.querySelectorAll('h2')].some(heading => heading.textContent === 'Task execution')).toBe(false)
   expect(writes).toEqual(acceptedWrites)
   expect(useAppStore.getState().agentComposerDrafts[session.agentSessionId]).toBe('Keep my original draft')
   expect((await demands.get(goalId))!.dispatches).toEqual([original])
+  expect((await demands.get(goalId))!.plan).toBeUndefined()
 })
 
 it('a restored unknown Start keeps its exact operation and recipient through reassignment and actual inspection with no replay', async () => {

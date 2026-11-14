@@ -41,11 +41,11 @@ beforeEach(() => {
 it('bare planning Supervisor keeps its actual Open destination unknown and its original request enabled despite a unique foreign namesake', async () => {
   const request = await plan(goal())
   expect(dom.container.textContent).not.toContain('Foreign namesake')
-  expect(button('Ask Supervisor to plan').disabled).toBe(false)
+  expect(button('Ask Supervisor to split work').disabled).toBe(false)
   await act(async () => button('Open Supervisor conversation').click())
   expect(readPmoTeamsTopicFloatingState()).toMatchObject({ open: true, agentTarget: { agentSessionId: null }, targetTabId: null })
   expect(readPmoTeamsTopicFloatingState()?.targetAgent).toBeUndefined()
-  await act(async () => button('Ask Supervisor to plan').click())
+  await act(async () => button('Ask Supervisor to split work').click())
   expect(request).toHaveBeenCalledOnce()
   expect(useAppStore.getState().agentComposerDrafts.original).toBe('Keep this draft')
 })

@@ -1568,7 +1568,7 @@ it('copied Goal plan links and the real CLI reveal the original graph without cr
     const original = useAppStore.getState()
     await ingress.receive(writes.mock.calls[0]![0])
     expect(issues).not.toHaveBeenCalled()
-    expect(container.querySelector('[data-goal-plan-empty]')).not.toBeNull()
+    expect(container.querySelector('[aria-label="Execution graph"] [data-goal-plan-origin]')).not.toBeNull()
     expect(container.querySelector<HTMLElement>('.goals-detail')!.scrollTop).toBeGreaterThan(0)
     expect(document.activeElement).toBe(outside); expect(outside.value).toBe('Original unsent draft')
     expect([outside.selectionStart, outside.selectionEnd]).toEqual([2, 7])

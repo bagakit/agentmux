@@ -157,7 +157,7 @@ async function captureMatrix() {
     await capture(scene, width, 900, theme)
     assert.equal(facts.theme, theme); assert.equal(facts.overflow, false)
     assert.ok(facts.state.selected, 'The actual Goal selection is nonempty')
-    if (scene === 'fresh') { assert.equal(facts.nodes.length, 0); assert.deepEqual(facts.origin, [facts.state.goal.id]) }
+    if (scene === 'fresh') { assert.deepEqual(facts.nodes, [facts.state.goal.id]); assert.deepEqual(facts.origin, facts.nodes) }
     if (['fresh','pending','ack'].includes(scene)) {const primary=facts.primary.filter(e=>e.painted&&!e.disabled);assert.equal(primary.length,1,'One original current primary action');assert.ok(primary[0].top>=facts.toolbarBottom&&primary[0].bottom<=facts.footerTop&&primary[0].hit,'The complete original current action is inside the usable viewport and receives pointer hits')}
     if (scene === 'saved-plan') assert.equal(facts.nodes.length, 7)
     if (scene === 'multi-host') assert.equal(facts.actors,1,'The exact recorded Supervisor uses the real shared live card while the bare multiHost reference stays unconfirmed')
@@ -211,7 +211,7 @@ app.whenReady().then(async () => {
       if(scope==='real-a-team'){assert.ok(dom.toolbar.top>=dom.windowHeader.bottom,'Team navigation keeps the complete original toolbar below global chrome');assert.ok(dom.team.top>=dom.toolbar.bottom,'The Team destination starts below its original toolbar');assert.equal(dom.scrollAncestors.find(e=>e.className==='workspace-main-surface').scrollTop,0,'The outer work surface is not scrolled by a Goal-local jump')}
       assert.equal(dom.overflow, false, 'The full App has no horizontal overflow')
       assert.deepEqual(dom.origin.map(item => item.id), [captured.goal.id], 'The no-plan real Goal still has its one genuine origin')
-      assert.equal(dom.tasks, 0, 'No fake Task is added to the original no-plan Goal')
+      assert.equal(dom.tasks, 1, 'The original Goal is the only node')
     }
     assert.equal(result.frames.length, scope==='real-a-team'?1:3)
     result.passed = true

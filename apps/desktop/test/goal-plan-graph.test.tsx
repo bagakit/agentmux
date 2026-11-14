@@ -227,27 +227,52 @@ describe('Goal plan graph', () => {
     expect(dom.container.querySelector('[data-demand-id="goal"] [data-goal-plan-ring]')).toBeNull()
   })
 
-  it.each([alignment, undefined])('leads with the real Goal starting point without inventing task nodes (alignment %s)', async (alignment) => {
+  it.each([alignment, undefined])('reads the whole Goal in the ordinary graph and assignments (alignment %s)', async (alignment) => {
     const record = goal({ description: '# The original outcome\n\nKeep the same goal and original words.' })
     if (!alignment) delete record.alignment
     seed(record)
     await dom.render(<GlobalBoardSurface />)
     expect(dom.container.querySelector('.goals-detail')).not.toBeNull()
     expect(graph()).not.toBeNull()
-    expect(graph()!.querySelector('[data-goal-plan-node]')).toBeNull()
+    expect(graph()!.querySelectorAll('[data-goal-plan-node]')).toHaveLength(1)
     if (alignment) expect(dom.container.querySelector('.goals-detail__main')!.firstElementChild?.contains(graph())).toBe(true)
     else expect(Boolean(dom.container.querySelector('[data-goal-grill]')!.compareDocumentPosition(graph()!) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true)
     const origin = graph()!.querySelector('[data-goal-plan-origin="goal"]')!
     expect(origin).not.toBeNull()
-    expect(origin.getAttribute('aria-label')).toBe('Goal starting point')
-    expect(origin.textContent).toContain('Ship the plan')
+    expect(origin.closest('[aria-label="Execution graph"]')).not.toBeNull()
+    expect(graph()!.querySelector('[aria-label="Task assignments"] button strong')?.textContent).toBe(record.title)
+    expect(graph()!.querySelector('[data-goal-plan-edge]')).toBeNull()
     expect(graph()!.querySelector('[data-goal-plan-progress]')).toBeNull()
-    expect([...graph()!.querySelectorAll('button')].map(button => button.textContent)).toEqual(['Choose Supervisor to plan'])
     expect(graph()!.querySelector('h2')!.textContent).toContain('Execution plan')
-    expect(graph()!.textContent).toContain('Starting point')
-    expect(graph()!.textContent).toContain('Not saved yet')
-    expect(origin.querySelector('h3')!.getAttribute('title')).toBe('Ship the plan')
     expect(graph()!.querySelector('[data-goal-plan-request]')).not.toBeNull()
+    const open = origin.querySelector<HTMLButtonElement>('button')!
+    expect(open.textContent).toBe(record.title)
+    await act(async () => open.click())
+    const reading = graph()!.querySelector('[data-goal-plan-detail="goal"]')!
+    expect(reading.textContent).toContain(alignment ? alignment.summary : 'Keep the same goal and original words.')
+    expect(reading.querySelectorAll('li')).toHaveLength(alignment?.criteria.length ?? 0)
+    expect(reading.querySelector('[aria-label="Independent node review"]')).toBeNull()
+    expect(useAppStore.getState().demands.goal).not.toHaveProperty('plan')
+    const back = [...graph()!.querySelectorAll('button')].find(button => button.textContent === 'Back to node')!
+    await act(async () => back.click())
+    expect(document.activeElement).toBe(open)
+  })
+
+  it('uses the same canvas when the owner saves a split and keeps an old Done Goal unverified', async () => {
+    const original = goal({ status: 'done' })
+    seed(original)
+    await dom.render(<GlobalBoardSurface />)
+    const canvas = graph()!.querySelector('[aria-label="Execution graph"]')!
+    expect(canvas.textContent).toContain('Results not verified')
+    const root = canvas.querySelector<HTMLButtonElement>('[data-goal-plan-origin] button')!
+    await act(async () => root.click())
+    expect(graph()!.querySelector('[data-goal-plan-detail="goal"]')).not.toBeNull()
+    await act(async () => seed(owned({ ...original, plan: plan([node('goal'), node('followup', ['goal'])]) })))
+    expect(graph()!.querySelector('[aria-label="Execution graph"]')).toBe(canvas)
+    expect(canvas.querySelector('[data-goal-plan-origin]')).toBeNull()
+    expect(canvas.querySelectorAll('[data-goal-plan-node]')).toHaveLength(2)
+    expect(canvas.querySelector('[data-goal-plan-depends="goal"]')).not.toBeNull()
+    expect(graph()!.querySelector('[data-goal-plan-detail="goal"]')).toBeNull()
   })
 
   it('reads the actual report and its criteria before planning another execution', async () => {
@@ -259,7 +284,7 @@ describe('Goal plan graph', () => {
     expect(finish).not.toBeNull()
     expect(Boolean(firstCheck.compareDocumentPosition(finish) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true)
     expect(Boolean(finish.compareDocumentPosition(graph()!) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true)
-    expect(graph()!.classList.contains('goal-plan--compact')).toBe(true)
+    expect(graph()!.querySelector('[aria-label="Execution graph"] [data-goal-plan-origin="goal"]')).not.toBeNull()
     expect(dom.container.querySelector('[data-goal-work-area]')!.textContent).not.toContain('Ready when you are')
   })
 
