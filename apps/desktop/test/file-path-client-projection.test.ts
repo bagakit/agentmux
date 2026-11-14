@@ -678,3 +678,42 @@ it.runIf(business)('late input after a real Native move keeps its old workface a
   expect(f.store.getState().tabs[tab.id]?.regions).toEqual(tab.regions)
   expect(f.store.getState().documentIssues[key]).toMatchObject({ kind: 'read-error', code: 'FILE_EFFECT_PROJECTION_CHANGED', message: expect.stringContaining('Check original operation') })
 }, 60000)
+
+it.runIf(business)('Core-owned topology-only File View changes add and prune original Source pointers without copying clean bodies', async () => {
+  const f = await fixture(); await connectFolder(f)
+  await f.store.getState().openFile('original.txt', 'file-group', undefined, f.workspace.id)
+  const { prepareRendererUpdate } = await import('../src/renderer/src/store.js')
+  const { addWorkbenchRegion, removeWorkbenchRegion } = await import('../src/renderer/src/lib/workbench-tabs.js')
+  await prepareRendererUpdate('reload')
+  const state = f.store.getState(), key = f.workspace.id + '\0original.txt', tab = Object.values(state.tabs).find(tab => Object.values(tab.regions).some(region => region.kind === 'file' && region.path === 'original.txt'))!
+  const originalRegion = Object.values(tab.regions).find(region => region.kind === 'file')!.regionId
+  const pointer = tab.id + '\0source-pointer-clone'
+  const cloned = addWorkbenchRegion(tab, originalRegion, 'right', { kind: 'file', workspaceId: f.workspace.id, path: 'original.txt', regionId: 'source-pointer-clone' })!
+  f.store.setState({ tabs: { ...state.tabs, [tab.id]: cloned } })
+  expect(f.store.getState().documents).toBe(state.documents); expect(f.store.getState().sourceFilesInputs).toBe(state.sourceFilesInputs)
+  await prepareRendererUpdate('reload')
+  let saved = JSON.parse((await f.user.read())!).state
+  expect(saved.restoredWorkbench).toBeUndefined(); expect(saved.documents[key]).toBeUndefined()
+  expect(saved.sourceFilesInputs.readSources[pointer]?.source).toEqual(state.documents[key]!.readSource)
+  const current = f.store.getState(), reduced = removeWorkbenchRegion(current.tabs[tab.id]!, 'source-pointer-clone')!
+  f.store.setState({ tabs: { ...current.tabs, [tab.id]: reduced } })
+  await prepareRendererUpdate('reload')
+  saved = JSON.parse((await f.user.read())!).state
+  expect(saved.sourceFilesInputs.readSources[pointer]).toBeUndefined()
+  expect(saved.sourceFilesInputs.readSources[tab.id + '\0' + originalRegion]?.source).toEqual(state.documents[key]!.readSource)
+}, 60000)
+
+it.runIf(business)('stable Source body input reuses its topology projection instead of rescanning unrelated Tabs', async () => {
+  const f = await fixture(); await connectFolder(f)
+  await f.store.getState().openFile('original.txt', 'file-group', undefined, f.workspace.id)
+  const state = f.store.getState(), tab = Object.values(state.tabs).find(tab => Object.values(tab.regions).some(region => region.kind === 'file' && region.path === 'original.txt'))!
+  let topologyScans = 0
+  const tabs = new Proxy(state.tabs, { ownKeys(value) { topologyScans++; return Reflect.ownKeys(value) } })
+  f.store.setState({ tabs })
+  topologyScans = 0
+  const regionId = Object.values(tab.regions).find(region => region.kind === 'file')!.regionId
+  for (let index = 0; index < 3; index++) f.store.getState().updateDocument(tab.id, 'Source body input ' + index, regionId)
+  expect(f.store.getState().tabs).toBe(tabs)
+  expect(topologyScans).toBe(0)
+  expect(f.store.getState().documents[f.workspace.id + '\0original.txt']?.content).toBe('Source body input 2')
+}, 60000)
