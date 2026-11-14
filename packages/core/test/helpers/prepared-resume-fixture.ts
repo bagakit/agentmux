@@ -28,7 +28,7 @@ afterEach(async () => {
   vi.restoreAllMocks(); vi.unstubAllEnvs()
   if (errors.length) throw new AggregateError(errors, 'Private resume fixture cleanup failed')
 })
-export async function fixture(delivery: 'positional-argv' | 'post-launch-only' = 'positional-argv', fatal = false, owner: 'file' | 'memory' = 'file') {
+export async function fixture(delivery: 'positional-argv' | 'post-launch-only' = 'positional-argv', fatal = false, owner: 'file' | 'memory' = 'file', providerId = 'resume-process') {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'adr-')))
   for (const key of Object.keys(process.env)) if (/^(AGENTMUX_|CTXMUX_)/u.test(key) && !key.startsWith('AGENTMUX_TEST_')) vi.stubEnv(key, undefined)
   const runtime = join(root, 'r'), state = join(root, 's')
@@ -43,7 +43,7 @@ export async function fixture(delivery: 'positional-argv' | 'post-launch-only' =
     await rm(root, { recursive: true, force: true, maxRetries: 3, retryDelay: 10 })
   })
   await Promise.race([once(daemon.stdio[3]!, 'data'), once(daemon, 'exit').then(() => { throw new Error(daemonError) })])
-  const provider = core.defineAgentProvider({ catalog: { id: 'resume-process', label: 'Controlled resume process', executable: process.execPath,
+  const provider = core.defineAgentProvider({ catalog: { id: providerId, label: 'Controlled resume process', executable: process.execPath,
     expectedProcess: 'node', promptDelivery: delivery, readySignal: { kind: 'foreground-process', expectedProcess: 'node' },
     hookStrategy: { kind: 'none' }, resumeStrategy: { kind: 'provider-native', locator: 'session-id' }, acpStrategy: { kind: 'none' },
     capabilities: { terminal: true, timeline: 'unavailable', permission: 'none', providerResume: true, replyCorrelation: 'none' } },
