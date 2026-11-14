@@ -86,8 +86,9 @@ export class ScreenCapture {
         const surface = async (retaking: boolean): Promise<CaptureSurfaceOutcome['state']> => {
           // Once the original draft has its image, a retaken surface and its editor only copy; the draft is never attached twice.
           const attaching = attachToDraft && !originalDelivered
-          timing.presentMs ??= performance.now() - timing.startedAt
-          const outcome = await this.ports.present({ attachToDraft: attaching, expandable: true, returnFocus: returnFocus && !retaking, complete, background, timing,
+          const surfaceTiming = retaking ? startCaptureRequestTiming() : timing
+          surfaceTiming.presentMs ??= performance.now() - surfaceTiming.startedAt
+          const outcome = await this.ports.present({ attachToDraft: attaching, expandable: true, returnFocus: returnFocus && !retaking, complete, background, timing: surfaceTiming,
             ...(retaking && continuation ? { continuation } : {}) })
           if (outcome.state !== 'expanded') return outcome.state
           // Only the confirmed independent-editor Copy creates a continuation; shapes and Undo stay in that editor.
