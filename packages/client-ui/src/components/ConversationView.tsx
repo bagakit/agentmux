@@ -1,5 +1,5 @@
 import { ConversationRetainedDetails } from './ConversationRetainedDetails.js'
-import { NativeProcessStep } from './NativeProcessObservation.js'
+import { NativeProcessObservation, NativeProcessStep } from './NativeProcessObservation.js'
 import { DeferredConversationProcess } from './DeferredConversationProcess.js'
 import type { ConversationProcessDetailReader } from '../lib/read-conversation-process-detail.js'
 import { projectConversationWindow } from '../lib/conversation-records.js'
@@ -325,7 +325,7 @@ export const ConversationView = memo(function ConversationView({
       locatedRecordId={locatedRecord ? locatedRecord.presentationKey ?? locatedRecord.id : undefined}
       {...(page ? { nativeSourceKey: JSON.stringify([page.source.providerId, page.source.nativeSessionId]) } : {})}
       {...(insertions ? { insertions } : {})}
-      renderRecord={renderRecord} {...(renderProcess ? { renderProcess } : {})} {...(recordBoundary ? { recordBoundary } : {})} />
+      renderRecord={renderRecord} renderProcess={renderProcess ?? (props => <NativeProcessObservation {...props} compact />)} {...(recordBoundary ? { recordBoundary } : {})} />
   </section></ConversationReadingCommit></ConversationBodyWorkContext.Provider>
 })
 

@@ -20,7 +20,7 @@ export type ConversationRecordRenderer = (record: ConversationRecord, wrapBody?:
   disclosure?: NonNullable<ConversationProcessProps['disclosure']>) => ReactNode
 export type ConversationProcessProps = {
   id: string
-  /** Initial disclosure of the latest loaded process; never a live execution state. */
+  /** Explicit host disclosure; record position never implies a live execution state. */
   initiallyExpanded?: boolean
   records: readonly ConversationRecord[]
   /** Presentation only: original records, parents, keys and metrics remain intact. */
@@ -109,8 +109,6 @@ export function ConversationRecordSequence({ records, sequence, sourceKey, rende
   const anchors = new Map(insertions.map(entry => [entry.key, entry]))
   const renderAnchor = (key: string) => <div key={JSON.stringify(['anchor', key])} data-conversation-layout-key={JSON.stringify(['anchor', key])}>{anchors.get(key)?.content}</div>
   const renderBoundary = () => <div key={JSON.stringify([sourceKey, 'boundary'])} data-conversation-layout-key={JSON.stringify(['anchor', 'history-boundary'])}>{recordBoundary?.content}</div>
-  let latestProcessId: string | undefined
-  for (const row of sequence.rows) if (row.kind === 'process' && row.records.some(record => !conversationProcessPeer(record) && isRecordVisible?.(record) !== false)) latestProcessId = row.id
   return <>{sequence.rows.map(row => {
     if (row.kind === 'record') return renderOne(row.record)
     if (row.kind === 'anchor') return renderAnchor(row.insertion.key)
@@ -128,7 +126,7 @@ export function ConversationRecordSequence({ records, sequence, sourceKey, rende
           : entry.kind === 'boundary' ? renderBoundary() : renderAnchor(entry.insertion.key))
         const observed = row.records.flatMap(record => !conversationProcessPeer(record) && record.source.kind === 'native' && metrics.has(record.rawId) ? [metrics.get(record.rawId)!] : [])
         const summary = observed.length === 1 && row.records.every(record => record.source.kind === 'native') ? observed[0] : undefined
-        return renderProcess({ id: row.id, records: row.records, ...(row.id === latestProcessId ? { initiallyExpanded: true } : {}),
+        return renderProcess({ id: row.id, records: row.records,
           ...(isRecordVisible ? { isRecordVisible } : {}),
           renderRecord: (record, wrapBody, stepDisclosure) => renderOne(record, wrapBody, stepDisclosure ?? disclosure, conversationProcessPeer(record), !summary || conversationProcessPeer(record)),
           entries: row.entries.map(entry => {
