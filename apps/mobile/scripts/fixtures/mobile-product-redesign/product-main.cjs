@@ -302,6 +302,9 @@ app.whenReady().then(async () => {
     await require('./conversation-density-hit.cjs')({ win, read, until, resize, tap, button, capture, result })
     result.passed = true; return
   }
+  if (mode === 'auxiliary-density') {
+    await require('./auxiliary-density.cjs')({ win, read, until, resize, tap, button, capture, result }); result.passed = true; return
+  }
   if (mode === 'conversation-density') {
     await require('./conversation-density.cjs')({ win, read, until, resize, tap, button, capture, result })
     result.passed = true; return

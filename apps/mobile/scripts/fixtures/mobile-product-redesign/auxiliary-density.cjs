@@ -1,0 +1,73 @@
+const assert = require('node:assert/strict')
+
+/** Actual MobileApp and original mixed Core reading; no fixture CSS or presentation DOM. */
+module.exports = async ({ win, read, until, resize, tap, button, capture, result }) => {
+  await read('mobileProductScene.prepareAuxiliaryDensity()')
+  await button('Focus', '.mobile-navigation')
+  await button('日常协作', '.mobile-focus-project')
+  try { await until('document.querySelectorAll(".conversation-reply-observation").length===3') } catch (error) { result.auxiliaryBootstrapFailure=await read("({facts:mobileProductScene.facts(),text:document.querySelector('.mobile-app').innerText,reading:document.querySelector('.mobile-conversation__reading')?.outerHTML})"); throw error }
+  const editor = '.mobile-conversation-panel:not([hidden]) .composer [contenteditable=true]'
+  const draft = '保留辅助历史阅读前的原草稿，不发送。'
+  await tap(editor, 'Retain the original draft before reading auxiliary records')
+  win.webContents.insertText(draft)
+  await until(`document.querySelector(${JSON.stringify(editor)}).textContent===${JSON.stringify(draft)}`)
+  await until(`mobileProductScene.facts().record.conversation.drafts.some(([,text])=>text===${JSON.stringify(draft)})`)
+  const original = await read(`(()=>{window.originalCaptureEditor=document.querySelector(${JSON.stringify(editor)});window.originalAuxiliaryReader=document.querySelector('.mobile-conversation__reading');const f=mobileProductScene.facts();return{sid:f.record.selectedSessionId,identity:f.record.presentation.identity,run:f.sessionIds.find(v=>v.sessionId===f.record.selectedSessionId),conversation:f.record.conversation,bodyFont:getComputedStyle(document.querySelector('.mobile-app')).getPropertyValue('--fs-body').trim(),preferences:Object.fromEntries(Object.entries(localStorage).filter(([key])=>/conversation|detail|reading/i.test(key))),calls:f.calls.length}})()`)
+  const settle = () => read('new Promise(done=>requestAnimationFrame(()=>requestAnimationFrame(done)))')
+  const visibleAdditional = await read(`(()=>{const b=document.querySelector('.conversation-detail-summary > button');return b&&b.getAttribute('aria-expanded')==='false'})()`)
+  if (visibleAdditional) await tap('.conversation-detail-summary > button', 'Read the already loaded additional records without changing saved detail level')
+  await until('document.querySelectorAll(".native-process-observation > .wf-card--observation").length===3')
+  await until('document.querySelectorAll(".conversation-send-receipt[data-receipt-attention=true]").length===3')
+  const projection = await read(`(()=>{const s=[...document.querySelectorAll('.native-process-observation,.conversation-reply-observation,.conversation-send-receipt')].filter(n=>!n.closest('[hidden]'));return s.map(n=>({kind:n.matches('.native-process-observation')?'process':n.matches('.conversation-reply-observation')?'snapshot':'input',source:n.dataset.capturedReplyObservation||n.dataset.messageSourceKey||null,text:n.innerText}))})()`)
+  assert.deepEqual(projection.map(row=>row.kind),['process','snapshot','input','process','snapshot','input','process','snapshot','input'],'The original Core projection keeps all three process/snapshot/submission groups')
+  assert.ok(await read("[...document.querySelectorAll('.native-process-observation__issue')].some(node=>node.getClientRects().length&&node.innerText.includes('标记为失败'))"),'Recorded tool failure remains visible beside its original process')
+  assert.ok(projection.filter(row=>row.kind==='input').every(row=>row.text.includes('Agent 接收待核实')),'Every original terminal receipt retains its unconfirmed Agent acceptance')
+  result.auxiliaryDensity = { original, projection, cases: [] }
+  const firstSnapshot = '[data-captured-reply-observation="auxiliary-1-snapshot"]'
+  for (const [width,height] of [[320,760],[390,760],[390,540]]) for (const appearance of ['dark','light']) {
+    await resize(width,height);await read(`mobileProductScene.setAppearance(${JSON.stringify(appearance)})`)
+    await settle()
+    await read('document.querySelector(".mobile-conversation__reading").scrollTop=0')
+    const geometry = await read(`(()=>{const r=n=>n.getBoundingClientRect().toJSON(),style=n=>getComputedStyle(n),feed=document.querySelector('.mobile-conversation__reading');return{width:innerWidth,height:innerHeight,documentWidth:document.documentElement.scrollWidth,reading:r(feed),sameEditor:document.querySelector(${JSON.stringify(editor)})===window.originalCaptureEditor,sameReader:feed===window.originalAuxiliaryReader,draft:document.querySelector(${JSON.stringify(editor)}).textContent,editorFont:style(document.querySelector(${JSON.stringify(editor)})).fontSize,process:[...feed.querySelectorAll('.native-process-observation > .wf-card--observation')].map(n=>({rect:r(n),marginStart:parseFloat(style(n).marginBlockStart),marginEnd:parseFloat(style(n).marginBlockEnd),head:r(n.querySelector('.wf-head'))})),snapshots:[...feed.querySelectorAll('.conversation-reply-observation')].map(n=>{const toggle=n.querySelector('.conversation-reply-observation__toggle'),preview=toggle.querySelector('.conversation-reply-observation__preview');return{id:n.dataset.capturedReplyObservation,toggle:r(toggle),preview:preview?r(preview):null,category:toggle.querySelector('[data-conversation-source-role=reply-observation]')?.textContent,ordinarySourceLabels:toggle.querySelectorAll('[data-conversation-source]').length,time:toggle.querySelector('time')?.textContent,expanded:toggle.getAttribute('aria-expanded')}}),auxiliaryActions:[...feed.querySelectorAll('.mobile-reading-action,.conversation-coverage > summary,.conversation-detail-summary > button,.conversation-send-receipt > .message-disclosure > summary')].filter(n=>n.getClientRects().length&&!n.closest('[hidden]')).map(n=>({label:n.textContent,rect:r(n)}))}})()`)
+    assert.equal(geometry.documentWidth,geometry.width,'Auxiliary mixed history has no horizontal overflow')
+    assert.ok(geometry.process.length===3&&geometry.process.every(row=>row.marginStart===0&&row.marginEnd===0),'Auxiliary process rows avoid stacked outer margins')
+    assert.ok(geometry.snapshots.length===3&&geometry.snapshots.every(row=>row.toggle.width>=44&&row.toggle.height>=44),'Auxiliary snapshot keeps a 44px touch target')
+    assert.ok(geometry.snapshots.every(row=>row.ordinarySourceLabels===0&&row.preview&&row.preview.width>=width*.3),'Auxiliary collapsed snapshot reserves width for its original summary')
+    assert.ok(geometry.snapshots.every(row=>row.category==='回复快照'&&row.time&&row.expanded==='false'),'The original snapshot category, time and collapsed original remain discoverable')
+    assert.ok(geometry.process.every(row=>row.head.height>=44)&&geometry.auxiliaryActions.every(row=>row.rect.height>=44),'All original auxiliary reading actions keep their 44px touch height')
+    assert.equal(geometry.sameEditor,true);assert.equal(geometry.sameReader,true);assert.equal(geometry.draft,draft);assert.equal(geometry.editorFont,'16px')
+    result.auxiliaryDensity.cases.push({width,height,appearance,...geometry})
+    await capture(`auxiliary-${width}-${height}-${appearance}-mixed`)
+    await tap(firstSnapshot+' .conversation-reply-observation__toggle','Expand the exact original captured reply')
+    await until(`document.querySelector(${JSON.stringify(firstSnapshot+' .conversation-reply-observation__body')})?.innerText.includes('完整原文段落 1')`)
+    const originalBody=await read(`(()=>{const n=document.querySelector(${JSON.stringify(firstSnapshot+' .conversation-reply-observation__body')}),p=n.querySelector('.md');return{text:n.innerText,font:p?getComputedStyle(p).fontSize:null,id:n.id,hidden:n.hidden}})()`)
+    assert.ok(originalBody.text.includes('不能当作身份或任务完成证明。')&&!originalBody.hidden,'The full exact captured original is readable after touch expansion')
+    assert.equal(originalBody.font,original.bodyFont,'The original shared reading body type is not shrunk for auxiliary density')
+    await tap(firstSnapshot+' .log-turn','Reveal the original touch message actions')
+    await tap(firstSnapshot+' .conversation-input-details__toggle','Read the original captured source in its existing Info')
+    await until(`document.querySelector(${JSON.stringify(firstSnapshot+' .conversation-input-details__body')})?.innerText.includes('native.reply')`)
+    const source=await read(`document.querySelector(${JSON.stringify(firstSnapshot+' .conversation-input-details__body')}).innerText`)
+    assert.ok(source.includes('native-hook')&&source.includes('auxiliary-1-snapshot')&&source.includes('CLI 事件回报'),'Original captured provenance remains readable in the exact Info')
+    await capture(`auxiliary-${width}-${height}-${appearance}-original-source`)
+    await tap(firstSnapshot+' .conversation-input-details__toggle','Close the same original Info')
+    await tap(firstSnapshot+' .conversation-reply-observation__toggle','Close the same original captured reply')
+  }
+  await read("document.querySelector('.native-process-observation > .wf-card--observation .wf-head').setAttribute('data-capture-process', 'original')")
+  const process='[data-capture-process=original]'
+  await tap(process,'Expand the original process records')
+  await until('document.querySelector(".native-process-observation .native-process-observation__step")?.innerText.includes("核对第 1 组原材料")')
+  await read("document.querySelector('.native-process-observation .wf-tool-row--observation[data-expandable]').setAttribute('data-capture-original-tool', 'first')")
+  await tap('[data-capture-original-tool=first]', 'Read the exact original process input and output')
+  await until('document.querySelector(".native-process-observation").innerText.includes("第 1 组原工具输出，完整依据未删。")')
+  assert.ok(await read(`document.querySelector('.native-process-observation').innerText.includes('original/group-1-1.md')`),'The original process expands without replacing its records')
+  await capture('auxiliary-process-original-390-short-light')
+  const final=await read(`(()=>{const f=mobileProductScene.facts();return{...f,sameEditor:document.querySelector(${JSON.stringify(editor)})===window.originalCaptureEditor,sameReader:document.querySelector('.mobile-conversation__reading')===window.originalAuxiliaryReader,preferences:Object.fromEntries(Object.entries(localStorage).filter(([key])=>/conversation|detail|reading/i.test(key)))}})()`)
+  assert.equal(final.record.selectedSessionId,original.sid);assert.deepEqual(final.record.presentation.identity,original.identity)
+  assert.deepEqual(final.sessionIds.find(value=>value.sessionId===original.sid),original.run)
+  assert.equal(final.sameEditor,true);assert.equal(final.sameReader,true)
+  assert.deepEqual(final.record.conversation,original.conversation,'Reading auxiliary records preserves the complete saved draft/attempt/response owner')
+  assert.deepEqual(final.preferences,original.preferences,'Local auxiliary disclosures do not change saved reading detail preferences')
+  assert.equal(final.calls.slice(original.calls).filter(call=>['sdk.submitAgentPrompt','sdk.respondAgentInteraction','sdk.ensureAgentContinuity','agent.open','sdk.writeAgent','sdk.stopAgent','sdk.restartAgent','sdk.recoverAgent'].includes(call.method)).length,0,'Auxiliary reading never dispatches input, permission or recovery')
+  assert.deepEqual(result.errors,[])
+  result.auxiliaryDensity.final={sid:final.record.selectedSessionId,run:original.run,draft,sameEditor:final.sameEditor,sameReader:final.sameReader,sourceRecords:final.auxiliaryRecords}
+}

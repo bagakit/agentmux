@@ -13,6 +13,7 @@ import { moteNoticeCaptureFixture } from '../../../../../packages/client-ui/test
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
 import { PMO_TEAMS_TOPIC_ID } from '@agentmux/core/mote-preferences'
 import { MobileApp } from '../../../src/MobileApp'
+import { auxiliaryDensityTimeline } from './auxiliary-density-fixture'
 import { createMoteDialogueCapture } from './mote-dialogue-fixture'
 import { MobileWebUpdateSafetyProvider } from '../../../src/mobile-web/update-safety'
 import type { MobileWebPageObservation } from '../../../src/mobile-web/use-mobile-web-observation'
@@ -103,7 +104,7 @@ let releaseFileUpload: (() => void) | null = null
 let directoryComparisons = 0, inspectFails = false
 let directoryReadFails = false, missingSessionMetadata = false
 let conversationStatusScene: 'active' | 'retired' | 'retired-reading' | 'unconfirmed' | 'parallel' = 'active'
-let agentMenuScene = false, densityScene = false, copyFails = false
+let agentMenuScene = false, densityScene = false, copyFails = false, auxiliaryDensityScene = false
 let creationUpdateScene = false, rejectUpdatePreflight: (() => void) | null = null
 const copiedTexts: string[] = []
 const menuAgentName = '讨论布局与原始资料核对的协作 Agent'
@@ -169,7 +170,7 @@ const client = {
     record('sdk.ensureAgentContinuity', input)
     return { kind: 'reattachable', agentSessionId: input.agentSessionId, previousRun: input.expectedRun }
   },
-  sessionHistoryPage: async (id: string) => { record('sdk.sessionHistoryPage', { id }); return { agentSessionId: id, source: { providerId: densityScene ? main.providerId : 'codex', nativeSessionId: `native-${id}${agentMenuScene ? '-original-source-reference'.repeat(6) : ''}` }, nextCursor: null,
+  sessionHistoryPage: async (id: string) => { record('sdk.sessionHistoryPage', { id }); if (auxiliaryDensityScene && id === main.agentSessionId) return { agentSessionId: id, source: { providerId: main.providerId, nativeSessionId: 'native-' + id }, nextCursor: 'auxiliary-earlier-records', items: [] }; return { agentSessionId: id, source: { providerId: densityScene ? main.providerId : 'codex', nativeSessionId: `native-${id}${agentMenuScene ? '-original-source-reference'.repeat(6) : ''}` }, nextCursor: null,
     items: [...(moteDialogueCapture ? [{ id: `${id}-user-original`, kind: 'user-message' as const, contentParts: [{ kind: 'text' as const, text: id === main.agentSessionId ? '先比较两个方向，今天从哪一步开始？' : '沿着原目标，继续之前的讨论。' }] }, { id: `${id}-answer-original`, kind: 'assistant-message' as const, contentParts: [{ kind: 'text' as const, text: id === main.agentSessionId ? '先保留两份依据。我请资料整理核对样本，再一起决定第一步。' : '我接着原目标继续：方案 A 可以先做小实验，原依据与未完成的问题都保留。' }] }] : [...(agentMenuScene && id === main.agentSessionId ? [
       { id: `${id}-user-short`, kind: 'user-message' as const, startedAt: _tailRefreshFixtureEpoch(0, 1), contentParts: [{ kind: 'text' as const, text: '可以，继续。' }] }
     ] : []), { id: `${id}-user-original`, kind: 'user-message', ...(agentMenuScene ? { startedAt: _tailRefreshFixtureEpoch(0, 2) } : {}), contentParts: [{ kind: 'text', text: agentMenuScene
@@ -207,7 +208,7 @@ const client = {
       kind: 'user-message', userMessages: messages, scan: { examined: input.cursor ? 32 : 200, complete: nextCursor === null },
       ...(input.source === 'native' ? { nativeSource: { providerId: 'codex', nativeSessionId: 'native-' + input.agentSessionId } } : {}) }
   },
-  sessionTimeline: async (id: string) => { record('sdk.sessionTimeline', { id }); return { agentSessionId: id, revision: joinedNotice && id === main.agentSessionId ? 2 : 1, items: joinedNotice && id === main.agentSessionId ? [joinedNotice.item] : [] } },
+  sessionTimeline: async (id: string) => { record('sdk.sessionTimeline', { id }); if (auxiliaryDensityScene && id === main.agentSessionId) return { agentSessionId: id, revision: 1, items: auxiliaryDensityTimeline(main) }; return { agentSessionId: id, revision: joinedNotice && id === main.agentSessionId ? 2 : 1, items: joinedNotice && id === main.agentSessionId ? [joinedNotice.item] : [] } },
   inspectMoteInput: async (input: Parameters<AgentMuxHostedClient['inspectMoteInput']>[0]) => {
     record('sdk.inspectMoteInput', input)
     if (!joinedNotice || input.agentSessionId !== waiting.agentSessionId || input.observationId !== joinedNotice.observation.id) throw Error('Wrong original member observation read')
@@ -224,15 +225,18 @@ const client = {
     const timeline = projectConversationTimeline({ agentSessionId: input.agentSessionId, executionHostId: sourceHostId,
       historyPage: { ...historyPage, sourceHostId }, timeline: { ...captured, sourceHostId,
         stream: { epoch: 'original-mobile-stream', sequence: captured.items.length, revision: captured.revision, origin: 'beginning', gaps: [], positions: captured.items.map((item, index) => ({ id: item.id, firstSequence: index + 1, sequence: index + 1, revision: conversationRevision(item) })) } } })
+    if (auxiliaryDensityScene) record('sdk.auxiliaryProjection', { input, events: timeline.events.map(event => ({ id: event.id, recordIds: event.recordIds })), records: timeline.records.map(record => ({ id: record.id, role: record.role })) })
     const reference = { hostId: input.hostId, agentSessionId: input.agentSessionId }
     const checkpoint = { ...reference, sourceHostId, frontier: { ...reference, scope: timeline.scope, cuts: [] } }
-    return { ...reference, sourceHostId, scope: timeline.scope, coverage: timeline.coverage,
-      order: { ...timeline.order, direction: 'newest-first' }, budgetBytes: input.maxBytes ?? 128 * 1024, nextCursor: null,
+    const page = { ...reference, sourceHostId, scope: timeline.scope, coverage: timeline.coverage,
+      order: { ...timeline.order, direction: 'newest-first' }, budgetBytes: input.maxBytes ?? (auxiliaryDensityScene ? 64 : 128) * 1024, nextCursor: null,
+      ...(auxiliaryDensityScene && input.processDetails ? { processDetails: input.processDetails } : {}),
       items: [...timeline.events].reverse().map(event => ({ kind: 'item', item: { event,
         records: timeline.records.filter(recordEntry => event.recordIds.includes(recordEntry.id)) } })),
       window: { id: 'original-mobile-window', revision: captured.revision, itemCount: timeline.events.length, complete: true,
         view: 'original-mobile-view', replay: 'original-mobile-replay-' + captured.revision, checkpoint,
-        outside: { older: null, newer: null }, navigation: { older: null, newer: null } } } satisfies AgentConversationReadPage
+        outside: { older: null, newer: null }, navigation: { older: auxiliaryDensityScene ? historyPage.nextCursor : null, newer: null } } } satisfies AgentConversationReadPage
+    return page
   },
   readConversationChanges: async (input: Parameters<AgentMuxHostedClient['readConversationChanges']>[0]) => ({ ...await client.readAgentConversation(input), checkpoint: input.checkpoint, more: false }),
   observeConversation: async (input: Parameters<AgentMuxHostedClient['observeConversation']>[0]) => {
@@ -518,6 +522,7 @@ function Scene() {
       publishClientEvent({ type: 'connection-state', state: 'restored', observationOrigin: { kind: 'runtime-connection', boundary: 'consumer-core' } } as AgentMuxClientEvent)
     },
     prepareAgentMenu: () => { agentMenuScene = true; catalog.agentPresentation![0]!.name = menuAgentName },
+    prepareAuxiliaryDensity: () => { auxiliaryDensityScene = true; agentMenuScene = true },
     prepareDensity: () => {
       densityScene = true; agentMenuScene = true
       const provider = __AGENTMUX_MOBILE_PROVIDER_CATALOG__.find(value => value.postureControl)
@@ -627,7 +632,7 @@ function Scene() {
     appearanceReady: () => Boolean(appearanceSubscriber),
     facts: () => ({ calls, dialogue: moteDialogueCapture?.facts(), record: getDeviceWorkface().snapshot().record, directoryComparisons, directoryFacts: catalog.regions.length + catalog.locations.length + catalog.spaces.length,
       directoryScope: { sessions: sessions.length, regions: catalog.regions.length, locations: catalog.locations.length, spaces: catalog.spaces.length, motes: catalog.spaces.filter(owner => owner.kind === 'mote').length },
-      menuAgentName, expectedReply: ordinaryReply, copiedTexts, joinedNotice, controlledCopy: agentMenuScene || joinedNotice !== null, controlledSdk: true, physicalPhone: false,
+      menuAgentName, expectedReply: ordinaryReply, auxiliaryRecords: auxiliaryDensityScene ? auxiliaryDensityTimeline(main) : null, copiedTexts, joinedNotice, controlledCopy: agentMenuScene || joinedNotice !== null, controlledSdk: true, physicalPhone: false,
       intendedOccurrence: catalog.locations.find(location => location.regionId === 'region-mote'), sessionIds: sessions.map(session => ({ sessionId: session.agentSessionId, runId: session.run.runId })) })
   } })
   if (connectScene) return <MobileApp key={'connect-' + connectScene.state + String(connectScene.paired)} client={null} connection={connectScene} platform={platform}

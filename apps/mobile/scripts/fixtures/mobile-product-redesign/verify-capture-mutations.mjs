@@ -7,6 +7,9 @@ import { relative, resolve } from 'node:path'
 // load or timeout failure is not mutation proof. Usage: verify-capture-mutations.mjs --<subset> <id>...
 const root = resolve(import.meta.dirname, '../../../../..'), capture = resolve(import.meta.dirname, 'capture-ui.mjs')
 const bearing = {
+  'auxiliary-spacing': 'Auxiliary process rows avoid stacked outer margins',
+  'auxiliary-touch': 'Auxiliary snapshot keeps a 44px touch target',
+  'auxiliary-source-labels': 'Auxiliary collapsed snapshot reserves width for its original summary',
   'connection-inline-notice': 'Connection diagnostics never insert a row above the original reader',
   'metadata-bottom-notice': 'Metadata diagnostics never insert a bottom service row',
   'focus-attention-rail': 'Focus attention cards have no decorative side rail',
