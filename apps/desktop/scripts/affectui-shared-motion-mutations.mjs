@@ -3,6 +3,8 @@ const interaction = `${components}AgentInteractionCard.tsx`
 const disclosure = `${components}ConversationDisclosure.tsx`
 
 export const sharedMotionMutations = {
+  workspacePackages: ['packages/core', 'packages/client-ui'],
+  desktopSources: false,
   owningConfig: 'packages/client-ui/vitest.config.ts',
   tests: ['packages/client-ui/test/affectui-motion-consumers.test.tsx'],
   sources: [interaction, disclosure, `${components}Button.tsx`, `${components}ConversationToolTrace.tsx`,
