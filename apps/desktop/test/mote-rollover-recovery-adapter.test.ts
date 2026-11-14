@@ -9,6 +9,7 @@ import { once } from 'node:events'
 import { createServer } from 'node:net'
 import { RuntimeController } from '../src/main/runtime-controller'
 import { AgentMuxError, connectAgentMuxRpc } from '@agentmux/core'
+import { DEFAULT_AGENT_CONTINUITY_POLICY } from '@agentmux/core/agent-session-recovery'
 import { parseMoteDialogueParams, parseMoteDialogueResult, type MoteMainRolloverDecision } from '@agentmux/core/mote-dialogue'
 import { sessionRecoveryOperationResult } from '../src/main/session-recovery-operation'
 import { createRendererSessionRecovery } from '../src/renderer/src/lib/session-recovery-api'
@@ -116,6 +117,31 @@ it.each([null, { kind: 'pending', reason: 'operation-unconfirmed', operationId: 
   const error = await catchError(() => bridge(f.runtime)(control, undefined, recoveryId, request))
   expect(error.code).toBe('MOTE_MAIN_INPUT_UNCONFIRMED'); expect(error.moteMainRollover).toBeUndefined(); expect(originalMoteRollover(error, entry, control)).toBeNull()
   expect(f.sessionByTarget).not.toHaveBeenCalled(); expect(f.wire).toHaveBeenCalledOnce()
+})
+
+it.each(['prepared', 'unknown'] as const)('the recovery bridge preserves the input boundary for an ended Main with %s input', async state => {
+  const f = fixture(() => ({
+    route: { identity: { hostId: 'local', moteId: 'original-mote' }, operationId: queryId, roleRevision: role, reference,
+      key: decision.queryInputKey, runtimeId: null, intentDigest: 'a'.repeat(64), admittedAt: 1, recoveryOperationId: recoveryId },
+    record: null, input: null,
+    recovery: { operationId: recoveryId, agentSessionId: control.agentSessionId, trigger: 'input',
+      policy: DEFAULT_AGENT_CONTINUITY_POLICY, previousRun: control.run, admittedAt: 1, observedAt: 2, rechecks: 0,
+      kind: 'unavailable', reason: 'native-handle-unavailable', evidence: { kind: 'run-ended', state: 'exited', observedAt: 2 },
+      launchInput: { input: request.input, prompt: request.input.prompt, message: { prompt: request.input.prompt },
+        digest: 'original-input-digest', delivery: 'post-launch', lifecycleOperationId: recoveryId, state } }
+  }))
+  const error = await catchError(() => bridge(f.runtime)(control, undefined, recoveryId, request))
+  if (state === 'prepared') {
+    expect(error).toMatchObject({ code: 'AGENT_NATIVE_IDENTITY_UNCONFIRMED', message: expect.stringContaining('原生续接标识尚未确认'),
+      controlFailure: { disposition: 'not_applied', confirmedInputBytes: 0 } })
+  } else {
+    expect(error.code).toBe('MOTE_MAIN_INPUT_UNCONFIRMED')
+    expect(error).not.toHaveProperty('controlFailure')
+  }
+  expect(isSessionRecoveryReplyUnconfirmed(error)).toBe(false)
+  expect(f.wire).toHaveBeenCalledOnce()
+  expect(f.sessionByTarget).not.toHaveBeenCalled()
+  expect(f.client.submitAgentPrompt).not.toHaveBeenCalled()
 })
 
 it('an ordinary resumed receipt still projects only its exact original new Run', async () => {

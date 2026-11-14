@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
 export const mutations = {
+ 'ignore-known-main-recovery-failure':['apps/desktop/src/main/runtime-controller.ts',"recovery.launchInput?.state === 'prepared'","recovery.launchInput?.state === 'terminal-confirmed'",'^the recovery bridge preserves the input boundary'],
  'recovery-handoff-removed':['apps/desktop/src/main/runtime-controller.ts','      this.handoffMoteMainRollover(result)\n      const recovery = result.recovery','      const recovery = result.recovery','^actual Main recovery'],
  'recovery-ipc-carrier-removed':['apps/desktop/src/main/session-recovery-operation.ts',"...(reply === 'received' && source?.moteMainRollover ? { moteMainRollover: source.moteMainRollover } : {})",'', '^registered recovery IPC|^the received recovery serializer']
 }
