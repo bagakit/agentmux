@@ -1,5 +1,6 @@
-import { link, mkdir, open, unlink } from 'node:fs/promises'
+import { link, mkdir, open, stat, unlink } from 'node:fs/promises'
 import { join } from 'node:path'
+import type { DatabaseSync } from 'node:sqlite'
 import { isDeepStrictEqual } from 'node:util'
 import { durableWriteFile, DurableWriteError } from './durable-write.js'
 import { AgentMuxError } from './errors.js'
@@ -7,11 +8,18 @@ import { deliveryFailure, parseDeliveryAttempt, validateDeliveryLogId, type Deli
 import { isObjectId, mintObjectId } from './object-id.js'
 import type { AgentMuxDiagnosticAuthorityObservation } from './diagnostic-evidence.js'
 
+const MAX_RECORD_BYTES = 64 * 1024
+const MAX_RECORDS = 512
+const MAX_BYTES = 8 * 1024 * 1024
+const MAX_PENDING = 8
+const MAX_MEMORY = 32
+const RETENTION_ISSUE = 'No retained record matches this ID. The recent diagnostic window has rotated; earlier coverage is incomplete.'
+
 /** Immutable diagnostic records. No retry queue, Input authority or Runtime cache. */
 export class DeliveryAttemptStore {
   private readonly reading = new Map<string, Promise<DeliveryAttemptLookup>>()
   private readonly memory = new Map<string, DeliveryAttemptLookup>()
-  private readonly writing = new Map<string, Promise<DeliveryAttemptLookup>>()
+  private readonly writing = new Map<string, { record: DeliveryAttempt; operation: Promise<DeliveryAttemptLookup> }>()
   private identityRead: Promise<AgentMuxDiagnosticAuthorityObservation> | null = null
   private identityWrite: Promise<void> | null = null
   constructor(readonly directory: string, private readonly options: { clientJournal?: true } = {}) {
@@ -73,30 +81,35 @@ export class DeliveryAttemptStore {
 
   async read(logId: string): Promise<DeliveryAttemptLookup> {
     validateDeliveryLogId(logId)
-    const known = this.memory.get(logId)
-    if (known) return structuredClone(known)
     let operation = this.reading.get(logId)
     if (!operation) {
-      if (this.reading.size >= 8) return { logId, availability: 'unavailable', record: null, persistence: null, issue: 'The original diagnostic reader is busy.' }
-      operation = this.readDisk(logId)
+      if (this.reading.size >= MAX_PENDING) return { logId, availability: 'unavailable', record: null, persistence: null, issue: 'The original diagnostic reader is busy.' }
+      operation = this.readDisk(logId).then(({ lookup }) => {
+        const known = this.memory.get(logId)
+        // The cache can acknowledge a still-retained exact record or keep an
+        // unresolved writer's evidence. It cannot revive a rotated record.
+        if (known && (lookup.record && isDeepStrictEqual(known.record, lookup.record) && known.persistence === 'confirmed' ||
+            !lookup.record && known.persistence === 'unconfirmed')) return structuredClone(known)
+        return lookup
+      })
       this.reading.set(logId, operation)
       void operation.finally(() => { if (this.reading.get(logId) === operation) this.reading.delete(logId) }).catch(() => {})
     }
     return await this.finite(operation, () => ({ logId, availability: 'unavailable', record: null, persistence: null, issue: 'The original diagnostic file read is still pending.' }))
   }
 
-  private async readDisk(logId: string): Promise<DeliveryAttemptLookup> {
+  private get databasePath(): string { return join(this.directory, 'recent.sqlite') }
+
+  private async readLegacy(logId: string): Promise<DeliveryAttemptLookup> {
     try {
       const handle = await open(join(this.directory, `${logId}.json`), 'r')
       let content: Buffer
       try {
-        if ((await handle.stat()).size > 64 * 1024) throw new AgentMuxError('Delivery log exceeds its record budget.', 'DELIVERY_LOG_CORRUPT')
-        const bytes = Buffer.alloc(64 * 1024 + 1), { bytesRead } = await handle.read(bytes, 0, bytes.length, 0)
+        if ((await handle.stat()).size > MAX_RECORD_BYTES) throw new AgentMuxError('Delivery log exceeds its record budget.', 'DELIVERY_LOG_CORRUPT')
+        const bytes = Buffer.alloc(MAX_RECORD_BYTES + 1), { bytesRead } = await handle.read(bytes, 0, bytes.length, 0)
         content = bytes.subarray(0, bytesRead)
       } finally { await handle.close() }
-      if (content.byteLength > 64 * 1024) throw new AgentMuxError('Delivery log exceeds its record budget.', 'DELIVERY_LOG_CORRUPT')
-      const record = parseDeliveryAttempt(JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(content)))
-      if (record.logId !== logId) throw new AgentMuxError('Delivery log identity changed.', 'DELIVERY_LOG_CORRUPT')
+      const record = this.parseRetained(new TextDecoder('utf-8', { fatal: true }).decode(content), logId)
       return { logId, availability: 'found', record, persistence: 'observed', issue: null }
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { logId, availability: 'not-found', record: null, persistence: null, issue: null }
@@ -104,22 +117,103 @@ export class DeliveryAttemptStore {
     }
   }
 
+  private async readDisk(logId: string, writing = false): Promise<{ lookup: DeliveryAttemptLookup; path: string }> {
+    const legacy = await this.readLegacy(logId)
+    if (legacy.availability !== 'not-found') return { lookup: legacy, path: join(this.directory, `${logId}.json`) }
+    const path = this.databasePath
+    let db: DatabaseSync | undefined
+    try {
+      if ((await stat(path)).size === 0 && writing) return { path, lookup: legacy }
+      const { DatabaseSync } = await import('node:sqlite')
+      db = new DatabaseSync(path, { readOnly: true })
+      const row = db.prepare('SELECT content FROM attempt WHERE log_id = ?').get(logId)
+      if (row) return { path, lookup: { logId, availability: 'found',
+        record: this.parseRetained(row.content, logId), persistence: 'observed', issue: null } }
+      const coverage = db.prepare('SELECT rotated FROM retention WHERE id = 1').get()
+      return { path, lookup: { ...legacy, issue: coverage?.rotated ? RETENTION_ISSUE : null } }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { path, lookup: legacy }
+      return { path, lookup: { logId, availability: 'unavailable', record: null, persistence: null,
+        issue: error instanceof Error ? error.message : String(error) } }
+    } finally { db?.close() }
+  }
+
+  private parseRetained(value: unknown, logId: string): DeliveryAttempt {
+    if (typeof value !== 'string' || Buffer.byteLength(value) > MAX_RECORD_BYTES) throw new AgentMuxError(
+      'Delivery log exceeds its record budget.', 'DELIVERY_LOG_CORRUPT')
+    const record = parseDeliveryAttempt(JSON.parse(value))
+    if (record.logId !== logId) throw new AgentMuxError('Delivery log identity changed.', 'DELIVERY_LOG_CORRUPT')
+    return record
+  }
+
+  private async publish(record: DeliveryAttempt, content: string): Promise<DeliveryAttempt> {
+    const path = this.databasePath
+    await mkdir(this.directory, { recursive: true, mode: 0o700 })
+    // Reserve with the same private mode as the previous files. Neither old
+    // records nor the new journal are replaced if another writer wins the race.
+    const file = await open(path, 'a', 0o600)
+    await file.close()
+    const { DatabaseSync } = await import('node:sqlite')
+    const db = new DatabaseSync(path)
+    try {
+      db.exec(`PRAGMA page_size = 4096; PRAGMA journal_mode = DELETE; PRAGMA synchronous = EXTRA; PRAGMA max_page_count = 8192;
+        BEGIN IMMEDIATE;
+        CREATE TABLE IF NOT EXISTS attempt (
+          seq INTEGER PRIMARY KEY, log_id TEXT NOT NULL UNIQUE, bytes INTEGER NOT NULL, content TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS retention (
+          id INTEGER PRIMARY KEY CHECK (id = 1), records INTEGER NOT NULL, bytes INTEGER NOT NULL, rotated INTEGER NOT NULL
+        );
+        INSERT OR IGNORE INTO retention VALUES (1, 0, 0, 0);`)
+      const existing = db.prepare('SELECT content FROM attempt WHERE log_id = ?').get(record.logId)
+      if (existing) {
+        const first = this.parseRetained(existing.content, record.logId)
+        this.sameAttempt(first, record)
+        db.exec('COMMIT')
+        return first
+      }
+      const { records, bytes, rotated } = db.prepare('SELECT records, bytes, rotated FROM retention WHERE id = 1').get()!
+      let retainedRecords = Number(records), retainedBytes = Number(bytes)
+      const contentBytes = Buffer.byteLength(content)
+      const evict = db.prepare('DELETE FROM attempt WHERE seq = (SELECT min(seq) FROM attempt) RETURNING bytes')
+      while (retainedRecords >= MAX_RECORDS || retainedBytes + contentBytes > MAX_BYTES) {
+        const oldest = evict.get()
+        if (!oldest) throw new AgentMuxError('Delivery diagnostic retention counters diverged.', 'DELIVERY_LOG_CORRUPT')
+        retainedRecords--
+        retainedBytes -= Number(oldest.bytes)
+      }
+      db.prepare('INSERT INTO attempt (log_id, bytes, content) VALUES (?, ?, ?)').run(record.logId, contentBytes, content)
+      db.prepare('UPDATE retention SET records = ?, bytes = ?, rotated = ? WHERE id = 1').run(
+        retainedRecords + 1, retainedBytes + contentBytes, Number(rotated) || Number(retainedRecords !== records))
+      db.exec('COMMIT')
+      return record
+    } finally { db.close() } // Closing rolls back any uncommitted insertion and eviction together.
+  }
+
   async record(input: DeliveryAttempt): Promise<DeliveryAttemptLookup> {
     if (this.options.clientJournal) void this.ensureJournalIdentity()
     const record = structuredClone(parseDeliveryAttempt(input)), logId = record.logId
     const active = this.writing.get(logId)
-    if (active) return await this.finite(active.then(() => this.record(record)), () => ({
-      logId, availability: 'unavailable', record: null, persistence: null, issue: 'The original immutable report write is still pending.' }))
-    const operation = this.write(record)
-    this.writing.set(logId, operation)
+    if (active) this.sameAttempt(active.record, record)
+    if (!active && this.writing.size >= MAX_PENDING) return { logId, availability: 'unavailable', record: null,
+      persistence: null, issue: 'The diagnostic writer is at capacity; this attempt was not persisted by this call.' }
+    const operation = active?.operation ?? this.write(record)
+    if (!active) this.writing.set(logId, { record, operation })
     // Finite feedback does not cancel a possibly publishing write or create another one.
     // Late completion belongs to this exact immutable record and updates only its journal.
-    void operation.finally(() => { if (this.writing.get(logId) === operation) this.writing.delete(logId) }).catch(() => {})
+    if (!active) void operation.finally(() => { this.writing.delete(logId) }).catch(() => {})
     return await this.finite(operation, () => {
       const known = this.memory.get(logId)
       return known ? { ...structuredClone(known), issue: 'Diagnostic persistence is still pending; the current owner retains its record in memory.' }
         : { logId, availability: 'unavailable', record: null, persistence: null, issue: 'Diagnostic publication is still pending; this ID is not yet confirmed readable.' }
     })
+  }
+
+  private remember(result: DeliveryAttemptLookup): void {
+    if (Buffer.byteLength(JSON.stringify(result.record)) > MAX_RECORD_BYTES) return
+    this.memory.delete(result.logId)
+    this.memory.set(result.logId, structuredClone(result))
+    if (this.memory.size > MAX_MEMORY) this.memory.delete(this.memory.keys().next().value!)
   }
 
   private async finite(operation: Promise<DeliveryAttemptLookup>, pending: () => DeliveryAttemptLookup): Promise<DeliveryAttemptLookup> {
@@ -135,8 +229,7 @@ export class DeliveryAttemptStore {
     if (!isDeepStrictEqual(payload(original), payload(incoming))) throw new AgentMuxError('This log ID already records a different attempt.', 'DELIVERY_LOG_CONFLICT')
   }
 
-  private async confirm(logId: string): Promise<void> {
-    const path = join(this.directory, `${logId}.json`)
+  private async confirm(path: string): Promise<void> {
     // The original file is already published; this retry only confirms durability.
     for (const [target, cleanup] of [[path, 'file-close'], [this.directory, 'directory-close']] as const) {
       const handle = await open(target, 'r')
@@ -157,57 +250,36 @@ export class DeliveryAttemptStore {
     const logId = incoming.logId, known = this.memory.get(logId)
     if (known?.availability === 'found') {
       this.sameAttempt(known.record!, incoming)
-      if (known.persistence === 'confirmed') return structuredClone(known)
     }
     // An unconfirmed in-memory record is retryable. Recheck the immutable disk
     // original rather than letting that cache permanently hide storage recovery.
-    const disk = await this.finite(this.readDisk(logId), () => ({ logId, availability: 'unavailable', record: null,
-      persistence: null, issue: 'The original diagnostic file read is still pending.' }))
+    const { lookup: disk, path } = await this.readDisk(logId, true)
     if (disk.availability === 'found') {
-      this.memory.set(logId, structuredClone(disk))
       this.sameAttempt(disk.record!, incoming)
+      if (known?.persistence === 'confirmed' && isDeepStrictEqual(known.record, disk.record)) return structuredClone(known)
     }
     if (disk.availability === 'unavailable' && !known && incoming.source === 'client') throw new AgentMuxError(
       disk.issue ?? 'The original diagnostic record is unavailable.', 'DELIVERY_LOG_UNAVAILABLE')
     const record = disk.record ?? known?.record ?? incoming
     const result: DeliveryAttemptLookup = { logId, availability: 'found', record, persistence: 'unconfirmed', issue: null }
-    this.memory.set(logId, structuredClone(result))
+    this.remember(result)
     try {
       if (disk.availability === 'unavailable') throw new AgentMuxError(disk.issue ?? 'The diagnostic directory is unavailable.', 'DELIVERY_LOG_UNAVAILABLE')
-      if (disk.availability === 'found') {
-        // Readable bytes are not an acknowledged file + directory durability fence.
-        await this.confirm(logId)
-      } else {
-        const content = JSON.stringify(record) + '\n'
-        if (Buffer.byteLength(content) > 64 * 1024) throw new AgentMuxError('Delivery log exceeds its record budget.', 'DELIVERY_LOG_CORRUPT')
-        await mkdir(this.directory, { recursive: true, mode: 0o700 })
-        // Publish without replacement: simultaneous reporters cannot overwrite an
-        // existing immutable attempt, even across independent Host processes.
-        const temporary = join(this.directory, `${logId}.${mintObjectId()}.candidate`)
-        try {
-          await durableWriteFile(temporary, content, { mode: 0o600, requireDirectorySync: true })
-          try { await link(temporary, join(this.directory, `${logId}.json`)) }
-          catch (error) {
-            if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
-            const existing = await this.readDisk(logId)
-            if (existing.availability !== 'found') {
-              this.memory.delete(logId)
-              return existing
-            }
-            this.memory.set(logId, structuredClone(existing))
-            this.sameAttempt(existing.record!, incoming)
-            result.record = existing.record
-          }
-          await this.confirm(logId)
-        } finally { await unlink(temporary).catch(() => {}) }
+      if (disk.record === null) {
+        const content = JSON.stringify(record)
+        if (Buffer.byteLength(content) > MAX_RECORD_BYTES) throw new AgentMuxError(
+          'Delivery log exceeds its record budget.', 'DELIVERY_LOG_CORRUPT')
+        result.record = await this.publish(record, content)
       }
+      // Readable bytes are not an acknowledged file + directory durability fence.
+      await this.confirm(path)
       result.persistence = 'confirmed'
     } catch (error) {
       if (error instanceof AgentMuxError && error.code === 'DELIVERY_LOG_CONFLICT') throw error
       const failure = deliveryFailure(error)
       result.issue = `Diagnostic persistence is unconfirmed: ${failure.code ? `[${failure.code}] ` : ''}${failure.message.slice(0, 2048)}${failure.detail ? `; ${failure.detail.slice(0, 4096)}` : ''}`
     }
-    this.memory.set(logId, structuredClone(result))
+    this.remember(result)
     return structuredClone(result)
   }
 }

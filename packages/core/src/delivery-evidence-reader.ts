@@ -69,6 +69,7 @@ export function deliveryEvidenceReader(options: {
     const record = lookup.record
     if (lookup.availability !== 'found' || !record) return { ...unavailable(target, 'DIAGNOSTIC_EVIDENCE_SOURCE_UNAVAILABLE', readAt),
       availability: lookup.availability, readAuthority: identity.authority, authorityStatus: identity.status,
+      completeness: lookup.availability === 'not-found' && lookup.issue !== null ? 'partial' : 'unknown',
       issue: lookup.availability === 'not-found' ? null : { code: 'DIAGNOSTIC_EVIDENCE_SOURCE_UNAVAILABLE', stage: 'read', causeCode: null } }
     if (record.source !== (target.domain === 'delivery.client' ? 'client' : 'core') || record.logId !== target.logId) {
       return { ...unavailable(target, 'DIAGNOSTIC_EVIDENCE_SOURCE_CORRUPT', readAt), availability: 'corrupt' }

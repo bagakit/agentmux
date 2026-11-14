@@ -3398,6 +3398,7 @@ export class AgentMuxRpcService {
           throw new AgentMuxError('This diagnostic ID has more than one original record owner.', 'DELIVERY_LOG_CONFLICT')
         }
         result = found[0] ?? observations.find(value => value.availability === 'unavailable') ??
+          observations.find(value => value.availability === 'not-found' && value.issue !== null) ??
           (observations.length ? { logId, availability: 'not-found', record: null, persistence: null, issue: null }
             : { logId, availability: 'unavailable', record: null, persistence: null, issue: 'The original diagnostic Host is unavailable.' })
         break
