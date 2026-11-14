@@ -87,6 +87,22 @@ Read only the matching local help:
   A missing result remains unconfirmed. History updates do not invalidate settings
   drafts, change native routes or close healthy pages; the original exit check remains
   available independently of diagnostic history storage.
+- amux browser profile extension --help: per-Profile approved local extension packages.
+  `extension ls --profile ID` reads configured identities and current native load facts without
+  creating a native Profile. `prepare --profile ID --expected-revision TOKEN --operation-id ID
+  --source PATH [--extension ID]` stages an unpacked directory, ZIP or CRX from that Host for
+  exact source/permission review; it runs no package code. Preserve its review ID. `apply --profile
+  ID --expected-revision TOKEN --review ID` asks the original host human-confirmation owner;
+  neither an Agent request nor package text grants approval. Source identity changes are separate
+  installs, never silent replacement of an old extension. A changed permission scope stays explicit.
+  After a missing apply reply, `extension ls --profile ID --operation-id REVIEW` reads that original
+  durable change receipt. A null receipt does not prove that no native code ran. Unknown changes
+  are never automatically replayed. `remove` uses an exact extension, Profile token and original
+  operation ID; native unload and metadata saving are separate confirmations. Site sign-ins and
+  Profile data remain. `load --profile ID --extension ID` explicitly retries only the original
+  approved package. Native loaded confirms its identity/version, not every Chrome API. Failure
+  keeps normal Browser controls and other Profiles available. Package signatures establish
+  integrity, not trusted publisher or store provenance; declared update sources remain visible.
 - amux browser targets --help: discover available exact targets and their readiness.
   A target's optional objectLink is its stable original resource reference; url remains the
   actual document loading address, including its route. Neither grants input permission.
