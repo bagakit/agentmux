@@ -36,6 +36,7 @@ export function SourceFilesAccess({ workspace, visible }: { workspace: Workspace
     void useAppStore.getState().observeFilesSource(workspace.id).then(dispose => { if (active) release = dispose; else dispose() }, cause => { if (active) setIssue(cause instanceof Error ? cause.message : String(cause)) })
     return () => { active = false; release?.() }
   }, [visible, workspace.id, input?.locator])
+  if (!visible) return null
   const retained = Object.entries(pending).filter(([, request]) => request.workspace.id === workspace.id)
   const retainedCreations = Object.entries(creations).filter(([, request]) => request.workspace.id === workspace.id)
   const retainedFolders = Object.entries(folderRequests).filter(([, request]) => request.workspace.id === workspace.id)
