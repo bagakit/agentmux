@@ -1,4 +1,5 @@
 import { parseSpaceLinkParams, parseSpaceLinkResult } from '@agentmux/core'
+import { registerAgentTakeoverIpc } from './agent-takeover-ipc.js'
 import { registerMeshNetworkIpc } from './mesh-network-ipc.js'
 import { registerSourceFilesIpc } from './source-files-ipc.js'
 import { SpaceObjectAvatarOwner } from './space-object-avatar.js'
@@ -325,9 +326,14 @@ import { executeSettingsWorkspaceAddControl, registerWorkspace } from './setting
 import { GitService } from './git-service.js'
 import { GhService } from './gh-service.js'
 
-function workspace(config: AppConfig, id: string): WorkspaceRecord {
+function workspace(config: AppConfig, id: string, expectedResource?: import('@agentmux/core/mote-preferences').MotePreferencesTarget['expectedResource']): WorkspaceRecord {
   const item = config.workspaces.find((entry) => entry.id === id)
   if (!item) throw new Error(`Unknown workspace: ${id}`)
+  if (expectedResource !== undefined) {
+    const expected = expectedResource
+    if (!expected || expected.hostId !== item.hostId || expected.workspaceId !== item.id || expected.workspacePath !== item.path)
+      throw new Error('The original Club resource changed. Keep its existing preparation and work; no replacement directory was selected.')
+  }
   return item
 }
 
@@ -1380,8 +1386,8 @@ export async function registerIpc(args: {
   handle('files:reveal', async (workspaceId: string, path: string) => {
     shell.showItemInFolder(await files.localPathForReveal(workspace(config, workspaceId), path))
   })
-  handle('scratch:readTopic', async (workspaceId: string, topicId: string) =>
-    await args.scratchTopics.read(workspace(config, workspaceId), topicId)
+  handle('scratch:readTopic', async (workspaceId: string, topicId: string, expectedResource?: import('@agentmux/core/mote-preferences').MotePreferencesTarget['expectedResource']) =>
+    await args.scratchTopics.read(workspace(config, workspaceId, expectedResource), topicId)
   )
   handle('scratch:listTopics', async (workspaceId: string) => {
     const topics = await args.scratchTopics.list(workspace(config, workspaceId))
@@ -1390,8 +1396,8 @@ export async function registerIpc(args: {
   handle('scratch:ensureTopic', async (workspaceId: string, topicId: string) =>
     await args.scratchTopics.ensure(workspace(config, workspaceId), topicId)
   )
-  handle('scratch:ensureMote', async (workspaceId: string, topicId: string) =>
-    await args.scratchTopics.ensureMote(workspace(config, workspaceId), topicId)
+  handle('scratch:ensureMote', async (workspaceId: string, topicId: string, expectedResource?: import('@agentmux/core/mote-preferences').MotePreferencesTarget['expectedResource']) =>
+    await args.scratchTopics.ensureMote(workspace(config, workspaceId, expectedResource), topicId)
   )
   handle('scratch:setMoteArchived', async (workspaceId: string, topicId: string, archived: boolean, objectKey: string, expectedVersion: string) =>
     await args.scratchTopics.setMoteArchived(workspace(config, workspaceId), topicId, archived, objectKey, expectedVersion))
@@ -1566,8 +1572,12 @@ export async function registerIpc(args: {
     return result
   })
   handleWithEvent('spatial:read',async event=>{return spatialState.readForLayout()})
+  handleWithEvent('spatial:owner', async () => await callUserRpc('runtime.owner.identity', {}))
   handleWithEvent('spatial:openAgent', async (event, input: import('@agentmux/core').AgentMuxRpcParams<'agent.open'>) => {
     return await callUserRpc('agent.open', input)
+  })
+  handleWithEvent('spatial:inspectOperation', async (event, input: import('@agentmux/core').AgentMuxRpcParams<'space.inspect'>) => {
+    return await callUserRpc('space.inspect', input)
   })
   handleWithEvent('spatial:commit',async (event,input:import('@agentmux/core/spatial-graph').AgentMuxSpatialCommit)=>{return spatialState.commit(input)})
   handleWithEvent('spatial:renameLabel', async (event, input: import('@agentmux/core/spatial-graph').AgentMuxDisplayLabelMutation) => {
@@ -1872,6 +1882,7 @@ export async function registerIpc(args: {
     return await args.runtime.sessionSpawns(session, options)
   })
   handle('sessions:creation', async (hostId: string, agentSessionId: string) => await args.runtime.agentCreation(hostId, agentSessionId))
+  registerAgentTakeoverIpc({ handleWithEvent, call: callUserRpc, runtime: args.runtime })
   handleWithEvent('sessions:continueCreation', async (event, input: import('@agentmux/core').AgentMuxCreationContinueParams) => {
     return await args.runtime.continueAgentCreation(input)
   })

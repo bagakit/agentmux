@@ -2666,6 +2666,8 @@ export class RuntimeController {
     const originalParams = (method === 'message.read' || method === 'message.dispatch.read') && 'forwardRpc' in client
       ? { ...params, hostId: 'local' } as AgentMuxRpcParams<M> : params
     const result = await callOriginalDesktopHost(client, method, originalParams, context, context.runtimeFence)
+    if (method === 'runtime.owner.identity' && this.configuredClient(hostId) !== client) throw new AgentMuxError(
+      'The original Runtime carrier changed during its identity read. Its Agent and work remain available.', 'RUNTIME_OWNER_MISMATCH')
     return (method === 'message.read' || method === 'message.dispatch.read') ? { ...result, hostId } as AgentMuxRpcResult<M> : result
   }
 

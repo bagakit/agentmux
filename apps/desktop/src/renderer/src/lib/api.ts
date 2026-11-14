@@ -495,7 +495,7 @@ const mockApi: AgentMuxDesktopApi = {
         reason: 'Git repository sources cannot be observed in the web preview.' }
     }
   },
-  spatial:{ensureLink:async()=>{throw new Error('Public Mote addresses require the original Core spatial owner.')},openAgent:async()=>{throw new Error('Agent creation requires the original semantic Host.')},read:async()=>structuredClone(mockSpatialState),commit:async input=>{
+  spatial:{owner:async()=>{throw new Error('The original spatial Core identity is unavailable in this web preview.')},inspectOperation:async()=>{throw new Error('Inspect the original spatial operation in the Desktop with its original Core owner.')},ensureLink:async()=>{throw new Error('Public Mote addresses require the original Core spatial owner.')},openAgent:async()=>{throw new Error('Agent creation requires the original semantic Host.')},read:async()=>structuredClone(mockSpatialState),commit:async input=>{
     if((mockSpatialState?.revision??0)!==input.expectedRevision) throw new Error('Spatial state changed.')
     mockSpatialState={schemaVersion:1,revision:input.expectedRevision+1,graph:structuredClone(input.graph)}
     for(const listener of mockSpatialListeners)listener(structuredClone(mockSpatialState));return structuredClone(mockSpatialState)
@@ -1000,6 +1000,8 @@ const mockApi: AgentMuxDesktopApi = {
     cancel: async () => { throw new Error('Cancelling an arrangement requires the connected background Host. Its state is unconfirmed.') }
   },
   sessions: {
+    owner: async () => { throw new Error('The original Agent Runtime identity requires its connected desktop Host. Its existing work remains available.') },
+    takeovers: async () => { throw new Error('Recorded Takeover destinations require the original desktop Core. The Agent and its source remain available.') },
     dispatches: async () => { throw new Error('Original supervised collaboration records require the connected desktop Host. The Session and existing records remain available.') },
     dispatch: async () => { throw new Error('Original collaboration message details require the connected desktop Host. The selected source is retained.') },
     listMessages: async () => { throw new Error('Original A2A messages require their connected Host. The current reading window is retained.') },

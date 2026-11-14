@@ -1689,8 +1689,10 @@ export type AgentMuxDesktopApi = {
   notebooks: import('@agentmux/core/notebook-catalog').NotebookApi & import('./notebook-observation').NotebookObservationApi
   notesStorage: import('@agentmux/core/notebook-store').NotesStorageApi
   spatial: {
+    owner(): Promise<AgentMuxRpcResult<'runtime.owner.identity'>>
     ensureLink(input: {spaceId:string;eventId?:string;operationId:string}): Promise<import('@agentmux/core').SpaceLinkResult['space.link.ensure']>
     openAgent(input: AgentMuxRpcParams<'agent.open'>): Promise<AgentMuxRpcResult<'agent.open'>>
+    inspectOperation(input: AgentMuxRpcParams<'space.inspect'>): Promise<AgentMuxRpcResult<'space.inspect'>>
     read(): Promise<import('@agentmux/core/spatial-graph').AgentMuxSpatialState | null>
     commit(input:import('@agentmux/core/spatial-graph').AgentMuxSpatialCommit): Promise<import('@agentmux/core/spatial-graph').AgentMuxSpatialState>
     renameLabel(input:import('@agentmux/core/spatial-graph').AgentMuxDisplayLabelMutation): Promise<import('@agentmux/core/spatial-graph').AgentMuxDisplayLabelResult>
@@ -1873,9 +1875,9 @@ export type AgentMuxDesktopApi = {
     saveMoteAvatar(workspaceId: string, topicId: string, input: MoteAvatarInput, objectKey: string): Promise<MoteAvatarRef>
     readMoteAvatar(workspaceId: string, topicId: string, ref: MoteAvatarRef, objectKey: string): Promise<MoteAvatarImage>
     listTopics(workspaceId: string): Promise<import('@agentmux/host/mote-model').ScratchTopicList>
-    readTopic(workspaceId: string, topicId: string): Promise<ScratchTopicSnapshot | null>
+    readTopic(workspaceId: string, topicId: string, expectedResource?: import('@agentmux/core/mote-preferences').MotePreferencesTarget['expectedResource']): Promise<ScratchTopicSnapshot | null>
     ensureTopic(workspaceId: string, topicId: string): Promise<ScratchTopicSnapshot>
-    ensureMote(workspaceId: string, topicId: string): Promise<ScratchTopicSnapshot>
+    ensureMote(workspaceId: string, topicId: string, expectedResource?: import('@agentmux/core/mote-preferences').MotePreferencesTarget['expectedResource']): Promise<ScratchTopicSnapshot>
     renameTitle(workspaceId: string, topicId: string, title: string): Promise<ScratchTopicSnapshot>
     setWikiEnabled(workspaceId: string, topicId: string, enabled: boolean): Promise<ScratchTopicSnapshot>
     resetWiki(workspaceId: string, topicId: string): Promise<ScratchTopicSnapshot>
@@ -2043,6 +2045,8 @@ export type AgentMuxDesktopApi = {
     launchAgent(input: AgentLaunchInput, goalPmo?: import('@agentmux/host/goal-pmo-origin').GoalPmoIntent): Promise<AgentLaunchResult>
     resolveCreationSessionId(hostId: string, createOperationId: string): Promise<string>
     creation(hostId: string, agentSessionId: string): Promise<AgentMuxAgentCreationInspection>
+    owner(hostId: string, expectedRuntimeId?: string): Promise<AgentMuxRpcResult<'runtime.owner.identity'>>
+    takeovers(input: import('@agentmux/core/agent-takeover').AgentTakeoverQuery): Promise<import('@agentmux/core/agent-takeover').AgentTakeoverPage>
     continueCreation(input: import('@agentmux/core').AgentMuxCreationContinueParams): Promise<import('@agentmux/core').AgentMuxCreationContinueResult>
     launchTerminal(input: TerminalLaunchInput): Promise<SessionSnapshot>
     historySource(reference: SessionHistorySourceReference): Promise<SessionHistorySourceObservation>

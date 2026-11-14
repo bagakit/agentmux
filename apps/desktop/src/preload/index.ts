@@ -180,8 +180,10 @@ const api: AgentMuxPreloadApi = {
     }
   },
   spatial: {
+    owner: () => ipcRenderer.invoke('spatial:owner'),
     ensureLink: input => ipcRenderer.invoke('spatial:ensureLink',input),
     openAgent: input => ipcRenderer.invoke('spatial:openAgent', input),
+    inspectOperation: input => ipcRenderer.invoke('spatial:inspectOperation', input),
     read:()=>ipcRenderer.invoke('spatial:read'),
     commit:input=>ipcRenderer.invoke('spatial:commit',input),
     renameLabel:input=>ipcRenderer.invoke('spatial:renameLabel',input),
@@ -425,10 +427,10 @@ const api: AgentMuxPreloadApi = {
     saveMoteAvatar: (workspaceId: string, topicId: string, input: MoteAvatarInput, objectKey: string) => ipcRenderer.invoke('scratch:saveMoteAvatar', workspaceId, topicId, input, objectKey),
     readMoteAvatar: (workspaceId: string, topicId: string, ref: MoteAvatarRef, objectKey: string) => ipcRenderer.invoke('scratch:readMoteAvatar', workspaceId, topicId, ref, objectKey),
     listTopics: (workspaceId: string) => ipcRenderer.invoke('scratch:listTopics', workspaceId),
-    readTopic: (workspaceId: string, topicId: string) =>
-      ipcRenderer.invoke('scratch:readTopic', workspaceId, topicId),
-    ensureMote: (workspaceId: string, topicId: string) =>
-      ipcRenderer.invoke('scratch:ensureMote', workspaceId, topicId),
+    readTopic: (workspaceId: string, topicId: string, expectedResource?: import('@agentmux/core/mote-preferences').MotePreferencesTarget['expectedResource']) =>
+      ipcRenderer.invoke('scratch:readTopic', workspaceId, topicId, expectedResource),
+    ensureMote: (workspaceId: string, topicId: string, expectedResource?: import('@agentmux/core/mote-preferences').MotePreferencesTarget['expectedResource']) =>
+      ipcRenderer.invoke('scratch:ensureMote', workspaceId, topicId, expectedResource),
     ensureTopic: (workspaceId: string, topicId: string) =>
       ipcRenderer.invoke('scratch:ensureTopic', workspaceId, topicId),
     renameTitle: (workspaceId: string, topicId: string, title: string) =>
@@ -632,6 +634,8 @@ const api: AgentMuxPreloadApi = {
   },
   sessions: {
     creation: (hostId: string, agentSessionId: string) => ipcRenderer.invoke('sessions:creation', hostId, agentSessionId),
+    owner: (hostId, expectedRuntimeId) => ipcRenderer.invoke('sessions:owner', hostId, expectedRuntimeId),
+    takeovers: input => ipcRenderer.invoke('sessions:takeovers', input),
     continueCreation: input => ipcRenderer.invoke('sessions:continueCreation', input),
     resolveCreationSessionId: (hostId, createOperationId) => ipcRenderer.invoke('sessions:resolveCreationSessionId', hostId, createOperationId),
     snapshot: () => ipcRenderer.invoke('sessions:snapshot'),
