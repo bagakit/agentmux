@@ -5,8 +5,9 @@ import { ClientUiProvider, type ClientUiPlatform } from '../../../src/platform.j
 import { ConversationMessage } from '../../../src/components/ConversationMessage.js'
 import { InlineComposer } from '../../../src/components/InlineComposer.js'
 import { ConversationView } from '../../../src/components/ConversationView.js'
+import { projectConversationReading } from '../../../src/lib/conversation-records.js'
 import { mountThemeRuntime, updateThemeSelection } from '../../../src/theme/runtime.js'
-import type { AgentSessionHistoryResourceRequest, AgentSessionHistoryResourceReadResult } from '@agentmux/core'
+import type { AgentSessionHistoryPage, AgentSessionHistoryResourceRequest, AgentSessionHistoryResourceReadResult } from '@agentmux/core'
 import '../../../src/styles/index.css'
 import '../../../../../apps/desktop/src/renderer/src/styles/tokens.css'
 import './fixture.css'
@@ -43,6 +44,11 @@ const nativeRead = async (input: AgentSessionHistoryResourceRequest): Promise<Ag
   agentSessionId: 'fixture-session', source: input.source, recordId: input.recordId, turnId: input.turnId, partIndex: input.partIndex,
   reference: input.expectedReference, result: { status: 'read', mimeType: 'image/png', dataBase64: images[0]!.dataUrl.split(',')[1]!, byteLength: atob(images[0]!.dataUrl.split(',')[1]!).length }
 })
+const nativePage: AgentSessionHistoryPage = {
+  agentSessionId: 'fixture-session', source: { providerId: 'codex', nativeSessionId: 'fixture-native' }, nextCursor: null,
+  items: [{ id: 'record-original', kind: 'user-message', contentParts: [{ kind: 'resource', resourceType: 'image', reference: 'recorded-image', label: 'Recorded design' }] }]
+}
+const nativeReading = projectConversationReading({ agentSessionId: nativePage.agentSessionId, executionHostId: 'local', historyPage: nativePage })
 const platform: ClientUiPlatform = { copyText: async () => true, overlayContainer: () => document.body, bindComposerFocus: () => () => {},
   renderMessageAvatar: () => null, renderProjectIcon: () => null, renderProjectLabel: () => null, renderIcon: () => null }
 Object.assign(window, { imageViewerFixture: { calls, paths, armFailure: () => { failNext = true } } })
@@ -55,8 +61,8 @@ function Scene() {
     <section id="message"><ConversationMessage messageId="image-message" speaker={{ role: 'agent', id: 'fixture-agent' }} name="Assistant" status="complete"
       content={`Inspect the original design and compare the second view.\n\n@${paths[0]}\n\n@${paths[1]}`} readPastedImage={readImage} /></section>
     <section id="draft"><h2>Original editable draft</h2><InlineComposer value={draft} onValueChange={setDraft} disabled={false} placeholder="Message" aria-label="Image draft" readPastedImage={readImage} onKeyDown={() => {}} /></section>
-    <section id="native"><ConversationView sessionId="fixture-session" readHistoryResource={nativeRead} page={{ agentSessionId: 'fixture-session', source: { providerId: 'codex', nativeSessionId: 'fixture-native' }, nextCursor: null,
-      items: [{ id: 'record-original', kind: 'user-message', contentParts: [{ kind: 'resource', resourceType: 'image', reference: 'recorded-image', label: 'Recorded design' }] }] }} /></section>
+    <section id="native"><ConversationView sessionId={nativePage.agentSessionId} executionHostId="local" readHistoryResource={nativeRead}
+      page={nativePage} records={nativeReading.records} originalRecords={nativeReading.originalRecords} coverage={nativeReading.timeline.coverage} /></section>
   </main></ClientUiProvider>
 }
 createRoot(document.getElementById('root')!).render(<Scene />)
