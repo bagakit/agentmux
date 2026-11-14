@@ -1092,6 +1092,7 @@ async function privateFileFixture(cleanup: Array<() => unknown | Promise<unknown
 
 async function runPrivateFileTest(name: string): Promise<void> {
     // The original minimal file mocks stay isolated from the actual Source owners.
+    await mkdir(resolve('.local'), { recursive: true })
     const directory = await mkdtemp(join(resolve('.local'), 'save-source-test-'))
     const config = join(directory, 'vitest.config.mts')
     await writeFile(config, `import original from ${JSON.stringify(resolve('apps/desktop/test/vitest.file-path-client.config.mts'))}; export default {...original,test:{...original.test,environment:'happy-dom',include:['apps/desktop/test/file-save-store.test.ts'],passWithNoTests:false,hookTimeout:60000}}`)
