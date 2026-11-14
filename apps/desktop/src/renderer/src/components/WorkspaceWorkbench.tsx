@@ -1,3 +1,4 @@
+import { useWorkbenchTabsClose } from '../hooks/useWorkbenchTabsClose'
 import { AgentWorkModeBadge } from './AgentWorkModeBadge'
 import { agentWorkPlacement, workReferenceHostId } from '../lib/agent-work-mode'
 import { useWorkbenchNameTooltip } from './WorkbenchNameTooltip'
@@ -101,7 +102,7 @@ import {
   type WorkbenchTab
 } from '../lib/workbench-tabs'
 import { assertUnreachableSurface, isSessionSurface } from '../lib/workbench-surface-kinds'
-import { closingWorkbenchRegion, closingWorkbenchTabs } from '../lib/workbench-view-close'
+import { closingWorkbenchRegion } from '../lib/workbench-view-close'
 import {
   lastViewCloseConfirmation,
   lastViewCloseCopy,
@@ -193,7 +194,6 @@ function SortableWorkbenchTab({
   const timelines = useWorkbenchTabRecord('timelines', tab)
   const dirtyDocuments = useAppStore((state) => state.dirtyDocuments)
   const activateTab = useAppStore.getState().activateTab
-  const closeTab = useAppStore.getState().closeTab
   const renameTab = useAppStore.getState().renameTab
   const renameAgent = useAppStore.getState().renameAgent
   const moveTabToNewGroup = useAppStore.getState().moveTabToNewGroup
@@ -276,11 +276,12 @@ function SortableWorkbenchTab({
   useLayoutEffect(() => {
     if (visible && group.activeTabId === tab.id) tabSwitchObservation.selected(switchTarget, 'layout-effect')
   }, [visible, group.activeTabId, tab.id, switchTarget])
-  const [pendingClose, setPendingClose] = useState<{
-    tabIds: string[]
-    confirmation: LastViewCloseConfirmation
-  } | null>(null)
-  const [closing, setClosing] = useState(false)
+  const tabClose = useWorkbenchTabsClose((request, tabId) => {
+    if (!motePinnedTab(mote?.defaultConversation, request.workspaceId, request.group.id, tabId)) return true
+    useAppStore.getState().reportError(new Error('The main Agent conversation stays open here. Unset it in this Mote’s Profile → Quick mode to close it; its Agent is unchanged.'), { kind: 'indeterminate' })
+    return false
+  })
+  const { closing } = tabClose
   const [displayTargets, setDisplayTargets] = useState<{
     displayWorkspaceId: string; groupId: string; label: string; linked: boolean
   }[]>([])
@@ -334,53 +335,8 @@ function SortableWorkbenchTab({
     renameInput.current?.focus(); renameInput.current?.select()
   }, [rename === null, bindingMenuOpen])
 
-  async function closeTabs(
-    tabIds: readonly string[],
-    keepAgentSessions = false
-  ): Promise<boolean> {
-    for (const tabId of tabIds) {
-      if (!await closeTab(workspaceId, group.id, tabId, { keepAgentSessions })) return false
-    }
-    return true
-  }
-
   async function requestTabsClose(tabIds: readonly string[]): Promise<void> {
-    const tabsById = useAppStore.getState().tabs
-    const currentTabIds = tabIds.filter((tabId) => group.tabOrder.includes(tabId) &&
-      !motePinnedTab(mote?.defaultConversation, workspaceId, group.id, tabId))
-    if (currentTabIds.length !== tabIds.length && tabIds.some(tabId => motePinnedTab(mote?.defaultConversation, workspaceId, group.id, tabId)))
-      useAppStore.getState().reportError(new Error('The main Agent conversation stays open here. Unset it in this Mote’s Profile → Quick mode to close it; its Agent is unchanged.'), { kind: 'indeterminate' })
-    if (currentTabIds.length === 0 || closing) return
-    const dirtyCount = new Set(currentTabIds.flatMap((tabId) => {
-      const candidate = tabsById[tabId]
-      if (!candidate) return []
-      return workbenchSurfaces(candidate).flatMap((candidateSurface) => (
-        candidateSurface.kind === 'file' && dirtyDocuments[
-          documentKey(candidateSurface.workspaceId, candidateSurface.path)
-        ]
-          ? [documentKey(candidateSurface.workspaceId, candidateSurface.path)]
-          : []
-      ))
-    })).size
-    const { sessions: currentSessions, timelines: currentTimelines, agentNames: currentAgentNames } = useAppStore.getState()
-    const confirmation = lastViewCloseConfirmation({
-      tabs: tabsById,
-      sessions: currentSessions,
-      timelines: currentTimelines,
-      agentNames: currentAgentNames,
-      isClosing: closingWorkbenchTabs(currentTabIds),
-      dirtyCount
-    })
-    if (confirmation) {
-      setPendingClose({ tabIds: currentTabIds, confirmation })
-      return
-    }
-    setClosing(true)
-    try {
-      await closeTabs(currentTabIds)
-    } finally {
-      setClosing(false)
-    }
+    await tabClose.request({ workspaceId, group, tabIds, subject: displayName })
   }
 
   async function requestClose(event: React.MouseEvent): Promise<void> {
@@ -404,22 +360,6 @@ function SortableWorkbenchTab({
     // requestTabsClose 是每次渲染新建的闭包，不进依赖；只由意图对象驱动。
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [closeTabRequest, tab.id, workspaceId, group.id, clearCloseTabRequest])
-
-  const pendingCloseCopy = pendingClose
-    ? lastViewCloseCopy(pendingClose.confirmation, pendingClose.tabIds.length > 1 ? 'tabs' : 'tab')
-    : null
-
-  async function confirmClose(keepAgentSessions = false): Promise<void> {
-    if (closing || !pendingClose) return
-    const original = pendingClose
-    if (!keepAgentSessions && lastViewCloseStops(original.confirmation)) setPendingClose(null)
-    setClosing(true)
-    try {
-      if (await closeTabs(original.tabIds, keepAgentSessions)) setPendingClose(current => current === original ? null : current)
-    } finally {
-      setClosing(false)
-    }
-  }
 
   const tabIndex = group.tabOrder.indexOf(tab.id)
 
@@ -539,25 +479,7 @@ function SortableWorkbenchTab({
       <WorkbenchTabRenameFeedback anchor={renameInput} notice={visible ? rename?.incomplete ?? null : null}>
         <ServiceWindowNotice notice={rename?.incomplete ?? null} />
       </WorkbenchTabRenameFeedback>
-      <ConfirmationDialog
-        open={pendingClose !== null}
-        title={pendingCloseCopy?.title ?? ''}
-        description={pendingCloseCopy?.description ?? ''}
-        subject={pendingClose && pendingClose.tabIds.length > 1
-          ? [
-              `${pendingClose.tabIds.length} tabs`,
-              pendingClose.confirmation.agents.length ? `${pendingClose.confirmation.agents.length} Agent Sessions` : null,
-              pendingClose.confirmation.dirtyCount ? `${pendingClose.confirmation.dirtyCount} unsaved` : null
-            ].filter(Boolean).join(' · ')
-          : displayName}
-        confirmLabel={pendingCloseCopy?.confirmLabel ?? 'Close'}
-        {...(pendingCloseCopy?.secondaryLabel
-          ? { secondaryLabel: pendingCloseCopy.secondaryLabel, onSecondary: () => void confirmClose(true) }
-          : {})}
-        busy={closing}
-        onCancel={() => !closing && setPendingClose(null)}
-        onConfirm={() => void confirmClose()}
-      />
+      {tabClose.dialog}
     </>
   )
 }
