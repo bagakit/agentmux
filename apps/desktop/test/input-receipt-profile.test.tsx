@@ -34,6 +34,7 @@ afterAll(async () => {
 })
 const reading = process.env.AMX_RECEIPT_PHASE === 'read'
 const check = reading ? it.skip : it
+const archivedObservationId = 'synthetic-original-observation'
 const cleanups: Array<() => void | Promise<void>> = []
 afterEach(async () => { for (const cleanup of cleanups.splice(0).reverse()) await cleanup(); vi.restoreAllMocks() })
 const writeEvidence = (name: string, value: unknown) => {
@@ -78,9 +79,19 @@ async function desktop(seed: boolean) {
     text: 'Synthetic queue body', runId: 'profile-run', status: 'deferred', archived: true, inputReceipt: raw,
     directInputBinding: { expectedRun: { runId: 'profile-run' }, admissionIntent: { kind: 'manual-actor' } },
     directInputControl: { kind: 'agent', hostId: 'local', agentSessionId: 'profile-session', run: { runId: 'profile-run' } } }
-  if (seed) await user.write(JSON.stringify({ state: { agentSteerQueues: { 'profile-session': [entry] },
-    agentComposerDrafts: { 'profile-region': 'Synthetic unsent draft' } }, version: 1,
-    desktopFragments: { compactedTestUnknown: { keep: 'Synthetic untouched fragment' } } }))
+  if (seed) {
+    const archived = Object.fromEntries(Array.from({ length: 184 }, (_, owner) => [
+      `synthetic-queue-${owner}`, Array.from({ length: 9 }, (_, index): AgentSteerQueueEntry => {
+        const inputReceipt = withoutProfile(profileReceipt(`synthetic-input-${owner}-${index}`))
+        const intent = inputReceipt.admission!.admission!.intent!
+        intent.prompt = 'a'.repeat(4000)
+        return { ...entry, operationId: `synthetic-input-${owner}-${index}`, inputReceipt }
+      })
+    ]))
+    await user.write(JSON.stringify({ state: { agentSteerQueues: { ...archived, 'profile-session': [entry] },
+      agentComposerDrafts: { 'profile-region': 'Synthetic unsent draft' } }, version: 1,
+      desktopFragments: { compactedTestUnknown: { keep: 'Synthetic untouched fragment' } } }))
+  }
   const { useAppStore: store, prepareRendererUpdate } = await import('../src/renderer/src/store')
   const { api } = await import('../src/renderer/src/lib/api')
   const { AgentMuxSpatialStateStore } = await import('@agentmux/core/spatial-state')
@@ -171,19 +182,44 @@ check('Desktop cold profile removal reaches original native save without losing 
   expect(f.raw).toEqual(f.rawBefore)
   expect(f.api.sessions.submitPrompt).not.toHaveBeenCalled()
   expect(f.api.sessions.stop).not.toHaveBeenCalled()
+  const observe = (receipt: AgentInputSubmissionReceipt) =>
+    f.store.getState().applyEvent({ hostId: 'local', event: { type: 'agent-input', receipt } })
+  f.store.getState().applyEvent({ hostId: 'another-host', event: { type: 'agent-input', receipt: f.raw } })
+  expect(f.store.getState().agentSteerQueues).toBe(queues)
+  const older = structuredClone(f.raw)
+  older.ref.waitGeneration--
+  observe(older)
+  await new Promise(done => setTimeout(done, 500))
+  const regressiveWrites = vi.mocked(f.api.ui.writeWorkbenchState).mock.calls.length
+  vi.mocked(f.api.ui.writeWorkbenchState).mockClear()
+  for (let n = 0; n < 12; n++) observe(structuredClone(f.raw))
+  await new Promise(done => setTimeout(done, 500))
+  const duplicateWrites = vi.mocked(f.api.ui.writeWorkbenchState).mock.calls.length
+  writeEvidence('receipt-write-cost', { documentBytes: nativeWrite?.sizeBytes, regressiveWrites, duplicateWrites })
+  expect({ regressiveWrites, duplicateWrites }).toEqual({ regressiveWrites: 0, duplicateWrites: 0 })
+  expect(f.store.getState().agentSteerQueues).toBe(queues)
+
+  observe({ ...f.raw, moteObservationId: archivedObservationId })
+  await vi.waitFor(async () => expect(JSON.parse(await readFile(f.user.path, 'utf8'))
+    .state.agentSteerQueues['profile-session'][0].inputReceipt.moteObservationId).toBe(archivedObservationId))
+  expect(f.api.ui.writeWorkbenchState).toHaveBeenCalledTimes(1)
+  expect(f.store.getState().agentSteerQueues['synthetic-queue-0']).toBe(queues['synthetic-queue-0'])
+  expect(f.store.getState().agentComposerDrafts['profile-region']).toBe('Synthetic unsent draft')
   writeEvidence('desktop-persistence', { beforeReceiptBytes: Buffer.byteLength(JSON.stringify(f.raw)),
-    afterReceiptBytes: Buffer.byteLength(JSON.stringify(old)), queueCount: 1, sends: 0, diskDurability: nativeWrite!.diskDurability })
+    afterReceiptBytes: Buffer.byteLength(JSON.stringify(old)), queueCount: Object.keys(queues).length, sends: 0, diskDurability: nativeWrite!.diskDurability })
 }, 30_000)
 
 ;(reading ? it : it.skip)('fresh process reads original saved projection without reseeding or dispatch', async () => {
   const before = await readFile(join(root!, 'workbench-user-state.json'), 'utf8')
-  expect(JSON.parse(before).state.agentSteerQueues['profile-session'][0].inputReceipt).toEqual(withoutProfile(profileReceipt()))
+  const expected = { ...withoutProfile(profileReceipt()), moteObservationId: archivedObservationId }
+  expect(JSON.parse(before).state.agentSteerQueues['profile-session'][0].inputReceipt).toEqual(expected)
   const f = await desktop(false)
-  expect(f.store.getState().agentSteerQueues['profile-session']![0]!.inputReceipt).toEqual(withoutProfile(f.raw))
+  expect(f.store.getState().agentSteerQueues['profile-session']![0]!.inputReceipt).toEqual(expected)
+  expect(f.store.getState().agentSteerQueues['synthetic-queue-0']).toHaveLength(9)
   expect(f.store.getState().agentComposerDrafts['profile-region']).toBe('Synthetic unsent draft')
   expect(f.api.sessions.submitPrompt).not.toHaveBeenCalled()
   expect(f.api.sessions.stop).not.toHaveBeenCalled()
-  writeEvidence('fresh-process', { reseeded: false, queueCount: 1, draftPreserved: true, sends: 0 })
+  writeEvidence('fresh-process', { reseeded: false, queueCount: Object.keys(f.store.getState().agentSteerQueues).length, draftPreserved: true, sends: 0 })
 })
 
 check('Mobile real hot observer stores slim receipt and cold draft omits Core authority', async () => {
