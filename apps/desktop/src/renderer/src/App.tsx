@@ -54,6 +54,7 @@ import { SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 import { ProjectRail } from './components/ProjectRail'
 import { SurfaceToolDock } from './components/SurfaceToolDock'
 import { WorkspaceWorkbench as WorkspaceWorkbenchView } from './components/WorkspaceWorkbench'
+import { WorkbenchCloseRequests } from './hooks/useWorkbenchTabsClose'
 import { executionFocusSessionId } from './lib/agent-focus'
 import { executionFocusPresentation, mainFocusPresentation } from './lib/focus-tab-projection'
 import { api } from './lib/api'
@@ -772,6 +773,7 @@ function DesktopApp() {
         surfaceOwnsChord: surfaceOwnsChord(element, event)
       })
       const handlers = windowShortcutHandlers(useAppStore.getState(), {
+        ...(sourceDocument === document ? {} : { originWindow: workbenchDocumentIdentity(sourceDocument) }),
         onWorkfaceNavigation: reference => {
           const choice = useAppStore.getState().workbenchSpaceSelection
           if (choice && sameWorkbenchProjectionSelection(mainRegionReference(choice), reference)) requestDesktopFocusWorkfaceReveal(choice)
@@ -1002,7 +1004,7 @@ function DesktopApp() {
         return null
       }} />
       </div>
-      <WindowOverlayHost><AgentInformationPreviewHost /></WindowOverlayHost>
+      <WindowOverlayHost><WorkbenchCloseRequests /><AgentInformationPreviewHost /></WindowOverlayHost>
       </RendererResourceOwners>
     </ExecutorIdentityContext.Provider>
     </WindowSidebarLayoutContext.Provider>

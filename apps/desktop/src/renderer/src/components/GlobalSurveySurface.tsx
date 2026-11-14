@@ -535,10 +535,6 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
   function closePage(page: SurveyPageSelection, chosen?: WorkbenchProjectionSelection) {
     const state = useAppStore.getState(), owner = surveyPageOwner(state.tabs, page, catalog)
     if (!owner || owner.surface.kind !== 'browser') { setError('The original Browser is unconfirmed. You can remove this exact Survey reference from its menu.'); return }
-    if (workbenchSurfaces(owner.tab).length > 1) {
-      state.requestCloseRegion(owner.tab.workspaceId, owner.tab.id, page.regionId)
-      return
-    }
     const choices = (catalog?.locations ?? []).filter(location => location.tabId === owner.tab.id && location.regionId === page.regionId &&
       state.layouts[location.displayWorkspaceId]?.groups.some(group => group.id === location.groupId && group.tabOrder.includes(owner.tab.id)) &&
       groupIds(state.layouts[location.displayWorkspaceId]!.root).includes(location.groupId))
@@ -550,6 +546,10 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
     const group = reference && state.layouts[reference.displayWorkspaceId]?.groups.find(group => group.id === reference.groupId && group.tabOrder.includes(owner.tab.id))
     if (!reference || !group) { setError('The original page location is unconfirmed. Its content and exact reference are kept; choose its current location.'); return }
     setLocationChoice(null)
+    if (workbenchSurfaces(owner.tab).length > 1) {
+      state.requestCloseRegion(reference.displayWorkspaceId, owner.tab.id, page.regionId, reference.groupId)
+      return
+    }
     void tabClose.request({ workspaceId: reference.displayWorkspaceId, group, tabIds: [owner.tab.id], subject: owner.surface.title || 'Page' })
   }
 

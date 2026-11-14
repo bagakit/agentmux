@@ -16,6 +16,7 @@ import {
   type WorkspaceLayout
 } from '@agentmux/layout'
 import type { SessionSnapshot } from '../../../shared/contracts'
+import type { WorkbenchWindowDocument } from '../../../shared/workbench-windows'
 import type { WorkbenchTab } from './workbench-tabs'
 import { activeWorkbenchSurface } from './workbench-tabs'
 import { isSessionSurface } from './workbench-surface-kinds'
@@ -208,13 +209,9 @@ export type WorkbenchShortcutStore = Partial<Pick<NavigationState, 'config' | 's
   // 测试要能断言「键盘路没有裸调 closeRegion」——删掉它 vitest 只转译不查类型，回退到裸调时运行期照样
   // 静默丢改动而不报错，那条守卫就抓不住了。
   closeRegion(workspaceId: string, tabId: string, regionId: string): void | Promise<void>
-  // 关整张 Tab（含未保存/在跑 Agent 的确认）走的是这条「意图」而不是 store.closeTab：那份确认只活在
-  // 组件里（requestTabsClose→ConfirmationDialog），裸调 store.closeTab 会静默弃掉未存改动、停掉在跑的
-  // Agent——鼠标点 X 都不会那样。所以键盘关 Tab 只投一个意图，交给活动 Tab 组件用它既有的确认流处理。
-  requestCloseTab(workspaceId: string, tabGroupId: string, tabId: string): void
-  // 关某一格 Region 同理：那格的未保存确认（dirty→对话框）只活在承载它的组件里，与鼠标点这一格的 X 是
-  // 同一个决定出口。键盘裸调 closeRegion 会静默弃掉未存改动，所以多格时也只投意图、由那一格消费。
-  requestCloseRegion(workspaceId: string, tabId: string, regionId: string): void
+  // Exact close intents reach the stable App confirmation, using the same Main plan as X.
+  requestCloseTab(workspaceId: string, tabGroupId: string, tabId: string, originWindow?: WorkbenchWindowDocument | null): void
+  requestCloseRegion(workspaceId: string, tabId: string, regionId: string, groupId?: string, originWindow?: WorkbenchWindowDocument | null): void
   splitRegion(workspaceId: string, tabId: string, regionId: string, direction: SplitDirection): void
   // 键盘导航搬焦点时**必须**连带把 DOM caret 搬进目标格（cause 'keyboard'）——这是本层存在的头号
   // 诉求之一：只改 activeRegionId（绿环）而不搬 caret，用户按 Cmd+Alt+方向切过去接着打字，字却全进了
@@ -249,7 +246,8 @@ function visibleShortcutLayout(store: WorkbenchShortcutStore, workspaceId: strin
 export function dispatchWorkbenchCommand(
   command: WorkbenchShortcutCommand,
   store: WorkbenchShortcutStore,
-  onSelected?: (reference: WorkbenchProjectionSelection) => void
+  onSelected?: (reference: WorkbenchProjectionSelection) => void,
+  originWindow?: WorkbenchWindowDocument | null
 ): boolean {
   // 快捷键只作用于 Workbench 面；Board 等其他主面不接管这些键。
   if (store.mainSurface !== 'workbench') return false
@@ -311,7 +309,7 @@ export function dispatchWorkbenchCommand(
     // 无论单格还是分屏都关整张 Tab——这正是与 close-region 的区别：close-region 只在单格时才回退到关 Tab，
     // 分屏时它关的是活动那一格。同样走确认流意图、不裸调 store.closeTab（见 requestCloseTab 注释）：
     // 裸调会静默弃掉未保存改动、停掉在跑的 Agent，而鼠标点 X 不会那样。
-    store.requestCloseTab(workspaceId, group.id, tabId)
+    store.requestCloseTab(workspaceId, group.id, tabId, originWindow)
     return true
   }
 
@@ -321,13 +319,13 @@ export function dispatchWorkbenchCommand(
     // 头号诉求「关不掉」的常见现场——对齐 iTerm/VS Code「最后一格时 Cmd+W 关 Tab」，回退到关整张 Tab。
     // 关 Tab 必须走确认流（见 requestCloseTab 注释），不能裸调 closeRegion 或 store.closeTab。
     if (regionIds(tab.layout.root).length <= 1) {
-      store.requestCloseTab(workspaceId, group.id, tabId)
+      store.requestCloseTab(workspaceId, group.id, tabId, originWindow)
       return true
     }
     // 多格：关的是活动那一格。同样只投意图、不裸调 closeRegion——那一格若有未保存的编辑器改动，裸调会
     // 静默弃掉，而鼠标点这一格的 X 会先弹「未保存确认」。同一个「关这一格」的概念必须只有一个决定出口，
     // 于是键盘也走意图，由承载该格的组件跑与 X 相同的 dirty→确认→closeRegion。
-    store.requestCloseRegion(workspaceId, tabId, activeRegionId)
+    store.requestCloseRegion(workspaceId, tabId, activeRegionId, group.id, originWindow)
     return true
   }
   if (command.kind === 'split') {
@@ -413,7 +411,7 @@ export function dispatchNextAttention(store: WorkbenchShortcutStore): boolean {
  */
 export function windowShortcutHandlers(
   store: WorkbenchShortcutStore,
-  actions: { toggleQuickSwitch: () => void; openShortcuts: () => void; onWorkfaceNavigation?: (reference: WorkbenchProjectionSelection) => void }
+  actions: { toggleQuickSwitch: () => void; openShortcuts: () => void; onWorkfaceNavigation?: (reference: WorkbenchProjectionSelection) => void; originWindow?: WorkbenchWindowDocument | null }
 ): Record<string, () => boolean> {
   const handlers: Record<string, () => boolean> = {
     'quick-switch.toggle': () => {
@@ -431,7 +429,7 @@ export function windowShortcutHandlers(
   for (const id of workbenchWindowBindingIds()) {
     handlers[id] = () => {
       const command = commandForWorkbenchId(id)
-      return command ? dispatchWorkbenchCommand(command, store, actions.onWorkfaceNavigation) : false
+      return command ? dispatchWorkbenchCommand(command, store, actions.onWorkfaceNavigation, actions.originWindow) : false
     }
   }
   return handlers

@@ -226,11 +226,6 @@ function SortableWorkbenchTab({
   const config = useAppStore((state) => state.config)
   const localHome = useAppStore((state) => state.localHome)
   const moveSessionViewToWorkspace = useAppStore.getState().moveSessionViewToWorkspace
-  // 键盘 Cmd+W 在单 Region Tab 上关整张 Tab 的意图：窗口监听够不着这里的确认流，所以它只投一个意图，
-  // 由目标 Tab（intent 的 tabId 命中自己）跑既有的 requestTabsClose——与鼠标点 X 同一条路，含未保存/在跑
-  // Agent 的确认。跑完清掉意图。
-  const closeTabRequest = useAppStore((state) => state.closeTabRequest)
-  const clearCloseTabRequest = useAppStore.getState().clearCloseTabRequest
   const reportError = useAppStore.getState().reportError
   const surface = titleWorkbenchSurface(tab)
   const session = isSessionSurface(surface)
@@ -371,22 +366,6 @@ function SortableWorkbenchTab({
     await requestTabsClose([tab.id])
   }
 
-  // 消费键盘关 Tab 意图：只有意图点名的这张 Tab 才响应，跑既有的确认流，然后清掉意图。effect 里读 store
-  // 派发出的意图对象；本仓库 renderToStaticMarkup 不跑 effect，所以这条接线的断言在 store 层（意图被投出/
-  // 清除）与判定层（dispatchWorkbenchCommand 单格时调 requestCloseTab）各自守，见对应测试。
-  useEffect(() => {
-    if (
-      !closeTabRequest ||
-      closeTabRequest.tabId !== tab.id ||
-      closeTabRequest.workspaceId !== workspaceId ||
-      closeTabRequest.tabGroupId !== group.id
-    ) return
-    const nonce = closeTabRequest.nonce
-    clearCloseTabRequest(nonce)
-    void requestTabsClose([tab.id])
-    // requestTabsClose 是每次渲染新建的闭包，不进依赖；只由意图对象驱动。
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [closeTabRequest, tab.id, workspaceId, group.id, clearCloseTabRequest])
 
   const tabIndex = group.tabOrder.indexOf(tab.id)
 
@@ -808,8 +787,6 @@ function WorkbenchRegionContent({
   const arrangeTabRegions = useAppStore.getState().arrangeTabRegions
   const swapRegions = useAppStore.getState().swapRegions
   const promoteRegionToTab = useAppStore.getState().promoteRegionToTab
-  const closeRegionRequest = useAppStore((state) => state.closeRegionRequest)
-  const clearCloseRegionRequest = useAppStore.getState().clearCloseRegionRequest
   const reportError = useAppStore.getState().reportError
   const [confirmingClose, setConfirmingClose] = useState<{ confirmation: LastViewCloseConfirmation; record: SpaceCloseReceipt; keep: SpaceCloseReceipt | null } | null>(null)
   const [closingRegion, setClosingRegion] = useState(false)
@@ -866,22 +843,6 @@ function WorkbenchRegionContent({
   }
   const regionCloseCopy = confirmingClose ? lastViewCloseCopy(confirmingClose.confirmation, 'split') : null
 
-  // 消费键盘关格意图：只有意图点名的这张 Tab 的这一格才响应，跑与 X 相同的决定，然后清掉意图。本仓库
-  // renderToStaticMarkup 不跑 effect，所以这条接线的断言在 store 层（意图投出/清除）与判定层
-  // （dispatchWorkbenchCommand 多格时调 requestCloseRegion）各自守，见对应测试。
-  useEffect(() => {
-    if (
-      !closeRegionRequest ||
-      closeRegionRequest.tabId !== tab.id ||
-      closeRegionRequest.workspaceId !== (browserPresentation.reference?.displayWorkspaceId ?? tab.workspaceId) ||
-      closeRegionRequest.groupId !== undefined && closeRegionRequest.groupId !== groupId ||
-      closeRegionRequest.regionId !== node.regionId
-    ) return
-    clearCloseRegionRequest(closeRegionRequest.nonce)
-    requestRegionClose()
-    // requestRegionClose 每次渲染新建，不进依赖；只由意图对象驱动。
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [closeRegionRequest, tab.id, tab.workspaceId, node.regionId, clearCloseRegionRequest])
 
   const sourceMember = useMemo(() => projectionSource && sourceSnapshot ? mountedSpaceRegions(sourceSnapshot).find(member => member.tab.tabId === projectionSource.tabId && member.region.regionId === projectionSource.regionId) : undefined,
     [projectionSource, sourceSnapshot])

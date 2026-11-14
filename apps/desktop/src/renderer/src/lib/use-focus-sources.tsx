@@ -8,7 +8,7 @@ import type { ConversationReadApi } from '../../../shared/conversation-read'
 import type { HostConfig, SessionSnapshot } from '../../../shared/contracts'
 import { spaceMountKey, type SpaceMountMemberSurface, type SpaceMountMemberTarget, type SpaceMountRecord } from '../../../shared/space-mount'
 import { api } from './api'
-import { agentDisplayName } from './workbench-tabs'
+import { agentDisplayName, sourceRegionProjectionReference } from './workbench-tabs'
 import { requestWorkbenchReferenceClose } from './workbench-close-request'
 import { requestDesktopFocusWorkfaceReveal } from './desktop-presentation'
 import { agentRegionLocationBindings, ordinaryAgentSpaceMember, useAppStore } from '../store'
@@ -307,22 +307,46 @@ export function useFocusSources({ visible, contexts, onSelectLocation, onChooseL
       const first = candidate.locations[0]!, workspace = focusSourceWorkspace(first.source, first.member, first.snapshot, config, runtimes)
       let focusedContext: FocusContext | undefined
       const navigate = (surface: 'agents' | 'workbench' | 'close', requested?: FocusContextAccess['locations'][number]) => {
+        // Closing addresses an existing display occurrence; it never opens a Source to create one.
+        const locations = surface !== 'close' ? candidate.locations : candidate.locations.flatMap(location => {
+          if (location.reference) return [location]
+          const positions = catalog.locations.filter(reference => {
+            const source = sourceRegionProjectionReference(tabs[reference.tabId]?.regions[reference.regionId])
+            return source && spaceMountKey(source.reference) === spaceMountKey(location.source.reference) &&
+              source.tabId === location.tabId && source.regionId === location.regionId && source.agentSessionId === candidate.sid
+          })
+          return positions.length ? positions.map(reference => ({ ...location, reference: { displayWorkspaceId: reference.displayWorkspaceId,
+            groupId: reference.groupId, tabId: reference.tabId, regionId: reference.regionId } })) : [location]
+        })
         const choose = (request: FocusContextAccess['locations'][number]) => {
-          const location = candidate.locations.find(location => JSON.stringify([location.source.reference, location.tabId, location.regionId, location.reference]) ===
+          const location = locations.find(location => JSON.stringify([location.source.reference, location.tabId, location.regionId, location.reference]) ===
             JSON.stringify([request.source.reference, request.tabId, request.regionId, request.reference]))
           if (location) {
-            const selected = openSourceLocation(location, surface === 'close' ? 'workbench' : surface, onSelectLocation)
-            if (selected && surface === 'close') {
-              const reference = location.reference ?? useAppStore.getState().workbenchSpaceSelection
-              if (reference?.tabId && reference.regionId && reference.groupId) requestWorkbenchReferenceClose({ displayWorkspaceId: 'displayWorkspaceId' in reference ? reference.displayWorkspaceId : reference.workspaceId, groupId: reference.groupId, tabId: reference.tabId, regionId: reference.regionId })
+            if (surface === 'close') {
+              const state = useAppStore.getState(), reference = location.reference
+              const current = reference && state.tabs[reference.tabId]?.regions[reference.regionId], source = sourceRegionProjectionReference(current)
+              const member = !source && reference && current?.kind === 'agent' ? ordinaryAgentSpaceMember({ tabId: reference.tabId, regionId: reference.regionId, sessionId: current.sessionId }) : undefined
+              const original = source ? spaceMountKey(source.reference) === spaceMountKey(location.source.reference) &&
+                source.tabId === location.tabId && source.regionId === location.regionId && source.agentSessionId === candidate.sid
+                : member?.kind === 'foreign' && spaceMountKey(member.source.reference) === spaceMountKey(location.source.reference) &&
+                  member.presentation.tab.tabId === location.tabId && member.presentation.region.regionId === location.regionId &&
+                  member.metadataMember.runtimeId === candidate.runtimeId && member.metadataMember.agentSessionId === candidate.sid
+              if (!reference || !original) {
+                state.reportError(Error('This original workface position is unconfirmed or changed. Its Agent and inputs are retained; choose its current exact position before closing.'))
+                return
+              }
+              requestWorkbenchReferenceClose(reference)
+              return
             }
+            const selected = openSourceLocation(location, surface, onSelectLocation)
             if (selected && surface === 'agents' && !location.reference && focusedContext) onFocusContext?.(focusedContext)
           }
           else useAppStore.getState().reportError(Error('This position belongs to another original task. The current task and workface are retained.'))
         }
-        if (requested) choose(requested)
-        else if (candidate.locations.length === 1) choose(first)
-        else if (onChooseLocation) onChooseLocation({ locations: candidate.locations, choose })
+        const choices = requested ? locations.filter(location => JSON.stringify([location.source.reference, location.tabId, location.regionId]) ===
+          JSON.stringify([requested.source.reference, requested.tabId, requested.regionId]) && (!requested.reference || JSON.stringify(location.reference) === JSON.stringify(requested.reference))) : locations
+        if (choices.length === 1) choose(choices[0]!)
+        else if (choices.length && onChooseLocation) onChooseLocation({ locations: choices, choose })
         else useAppStore.getState().reportError(Error('This task has several original positions. Choose an exact position before opening it.'))
       }
       const refreshCandidate = () => {
@@ -393,6 +417,6 @@ export function useFocusSources({ visible, contexts, onSelectLocation, onChooseL
       readers.push(<MemberReader key={'member:' + candidate.key} candidate={candidate} visible={visible} publish={publish} refresh={refreshes.get(candidate.key) ?? 0}  />)
     }
     return { contexts: rows, identities, aliases, issues, readers: <Fragment>{readers}</Fragment> }
-  }, [sources, observations, metadata, candidates, contexts, ordinaryContexts, runtimes, facts, historyNames, refreshes, inputs, layouts, config, visible, clock, publish, refresh, onSelectLocation, onChooseLocation, onFocusContext])
+  }, [sources, observations, metadata, candidates, contexts, ordinaryContexts, runtimes, facts, historyNames, refreshes, inputs, layouts, catalog, tabs, config, visible, clock, publish, refresh, onSelectLocation, onChooseLocation, onFocusContext])
   return result
 }

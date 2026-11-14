@@ -170,8 +170,6 @@ function LocalFocusContextMenu({ open, context, children, onOpenChange, onRename
                 const surface = state.tabs[reference.tabId]?.regions[reference.regionId]
                 if (surface?.kind !== 'agent' || surface.sessionId !== context.id) throw Error('This Agent workface changed. Choose its current exact position before closing.')
                 actionOwnsFocus.current = true
-                state.selectMainRegion(reference)
-                useAppStore.setState({ mainSurface: 'workbench' })
                 requestWorkbenchReferenceClose(reference)
               } catch (error) { useAppStore.getState().reportError(error) }
             } : undefined}

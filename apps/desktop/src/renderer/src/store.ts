@@ -4,6 +4,7 @@ import { agentInputGuidance } from '@agentmux/core/agent-input-submit'
 import { readFocusGroups } from './lib/focus-read-projection'
 import { finishNativeBrowserOpening } from './lib/browser-native-opening'
 import type { GoalRelationAccess } from '@agentmux/core/control'
+import type { WorkbenchWindowDocument } from '../../shared/workbench-windows'
 import { demandAgentReferenceKey } from '@agentmux/demand/relations'
 import { noteHistoryCoreTarget, readNoteFileHistory } from './lib/note-history-source'
 import { createSourceFilesWorkbench, emptySourceFilesInputs, sourceFilesQuery, sourceFilesMappingMatches, sourceFilesWorkspaceMatches, type SourceFilesInputs } from './lib/source-files-workbench'
@@ -1181,15 +1182,10 @@ export type AppState = GitReadingActions & {
   tabs: Record<string, WorkbenchTab>
   layouts: Record<string, WorkspaceLayout>
   closingWorkbenchViews: Record<string, WorkbenchViewCloseReservation>
-  // 键盘请求关整张 Tab 的「意图」——键盘层够不着组件里的确认流（未保存/在跑 Agent 的对话框只活在
-  // WorkspaceWorkbench），所以窗口监听只投一个意图，活动 Tab 组件读到它就跑自己既有的 requestTabsClose
-  // （与鼠标点 X 同一条路），跑完清掉。同 documentRevealTargets 的 consume-and-clear 套路。
-  closeTabRequest: { workspaceId: string; tabGroupId: string; tabId: string; nonce: number } | null
-  // 键盘请求关某一格 Region 的「意图」——理由同 closeTabRequest：那格的未保存确认（dirty→确认对话框）
-  // 只活在承载它的 WorkbenchRegionNode 里，与鼠标点这一格的 X 是同一个决定出口。键盘层够不着那份状态，
-  // 于是窗口监听只投意图，命中的那一格读到就跑自己既有的确认流，跑完清掉。裸调 closeRegion 会静默弃掉
-  // 未存改动——鼠标点 X 不会那样。
-  closeRegionRequest: { workspaceId: string; groupId?: string; tabId: string; regionId: string; nonce: number } | null
+  // Transient view intents; the stable App consumer presents the same Main-owned close plan.
+  // originWindow only locates this confirmation. These intents are never persisted or control authority.
+  closeTabRequest: { workspaceId: string; tabGroupId: string; tabId: string; nonce: number; originWindow?: WorkbenchWindowDocument | null } | null
+  closeRegionRequest: { workspaceId: string; groupId?: string; tabId: string; regionId: string; nonce: number; originWindow?: WorkbenchWindowDocument | null } | null
   // 「把打字光标（DOM caret）搬进这一格」的一次性意图，按 regionId 定位——同 closeRegionRequest 的
   // consume-and-clear 套路。存在的理由：键盘方向导航搬焦点时只改 activeRegionId（绿环），而看不见的
   // DOM 焦点仍停在上一格的 xterm/Monaco 上，敲的字全进了上一格。承载被点名那格的表面（TerminalView /
@@ -1603,10 +1599,10 @@ export type AppState = GitReadingActions & {
   // Closing an Agent's last View stops its Run unless `keepAgentSessions`; the Region confirmation asks first.
   closeRegion(workspaceId: string, tabId: string, regionId: string, options?: { keepAgentSessions?: boolean; approved?: SpaceCloseReceipt }): Promise<void>
   // 键盘关 Tab 的入口：只投意图，真正的关闭（含确认）由活动 Tab 组件消费。见 closeTabRequest 状态注释。
-  requestCloseTab(workspaceId: string, tabGroupId: string, tabId: string): void
+  requestCloseTab(workspaceId: string, tabGroupId: string, tabId: string, originWindow?: WorkbenchWindowDocument | null): void
   clearCloseTabRequest(nonce: number): void
   // 键盘关某一格的入口：只投意图，含未保存确认的真正关闭由承载该格的组件消费。见 closeRegionRequest 注释。
-  requestCloseRegion(workspaceId: string, tabId: string, regionId: string, groupId?: string): void
+  requestCloseRegion(workspaceId: string, tabId: string, regionId: string, groupId?: string, originWindow?: WorkbenchWindowDocument | null): void
   clearCloseRegionRequest(nonce: number): void
   updateRegionSplitRatio(workspaceId: string, tabId: string, nodePath: string, ratio: number): void
   updateSplitRatio(workspaceId: string, nodePath: string, ratio: number): void
@@ -9255,24 +9251,26 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       await get().applyWorkbenchClose(record)
     } catch (error) { get().reportError(error) }
   },
-  requestCloseTab(workspaceId, tabGroupId, tabId) {
+  requestCloseTab(workspaceId, tabGroupId, tabId, originWindow) {
     // 只投意图，不在这里关：真正的关闭要经组件的 requestTabsClose（未保存/在跑 Agent 的确认对话框只活在
     // 组件里）。nonce 让「连按两次 Cmd+W 关同一张 Tab」也能各触发一次——同一 tabId 重复投递不会因对象
     // 相等而被 selector 忽略。
     set((state) => ({
-      closeTabRequest: { workspaceId, tabGroupId, tabId, nonce: (state.closeTabRequest?.nonce ?? 0) + 1 }
+      closeTabRequest: { workspaceId, tabGroupId, tabId, nonce: (state.closeTabRequest?.nonce ?? 0) + 1,
+        ...(originWindow === undefined ? {} : { originWindow: originWindow && { windowId: originWindow.windowId, documentGeneration: originWindow.documentGeneration } }) }
     }))
   },
   clearCloseTabRequest(nonce) {
     // 只清掉自己消费的那一条：若清的瞬间已被更晚一次按键覆盖成新 nonce，别把新意图也抹掉。
     set((state) => (state.closeTabRequest?.nonce === nonce ? { closeTabRequest: null } : state))
   },
-  requestCloseRegion(workspaceId, tabId, regionId, groupId) {
+  requestCloseRegion(workspaceId, tabId, regionId, groupId, originWindow) {
     // 只投意图，不在这里关：真正的关闭（含未保存确认）在承载该格的组件里，与鼠标点这一格的 X 同一条路。
     // nonce 让「连按两次 Cmd+W 关同一格」也能各触发一次——同一 regionId 重复投递不会因对象相等被 selector 忽略。
     set((state) => ({
       closeRegionRequest: {
         ...(groupId ? { groupId } : {}),
+        ...(originWindow === undefined ? {} : { originWindow: originWindow && { windowId: originWindow.windowId, documentGeneration: originWindow.documentGeneration } }),
         workspaceId,
         tabId,
         regionId,

@@ -40,6 +40,10 @@ export function originalWorkbenchHost(target: AppWindowTarget): WorkbenchHost | 
 export function workbenchWindowPlacement(target: AppWindowTarget | null): WorkbenchWindowPlacement | null {
   return target ? placements.get(workbenchTargetKey(target)) ?? null : null
 }
+/** Remaining exact placements keep their original window's presentation in place. */
+export function workbenchDocumentHasPlacement(doc: Document): boolean {
+  return [...placements.values()].some(placement => placement.destination.ownerDocument === doc)
+}
 export async function placeWorkbenchWindow(target: AppWindowTarget, placement: WorkbenchWindowPlacement | null): Promise<void> {
   const entry = originalWorkbenchHost(target)
   if (!entry) throw new Error('The original workface host is not yet available. Its original Session and saved layout remain.')
