@@ -15,6 +15,7 @@ import { AgentMuxRpcDispatcher, AgentMuxRpcLines, rpcEncode, AGENTMUX_RPC_MAX_ME
   parseRpcRequest, rpcRecord, rpcFailure, type AgentMuxRpcFrame, type AgentMuxRpcConnection } from './public-rpc-wire.js'
 import type { AgentMuxRpcStreamMethod, AgentMuxRpcPrincipal } from './public-rpc.js'
 import { RPC_FORWARD, RpcForwardingAuthority, receiveForwardedCall, type RpcForwardingPeer } from './rpc-forwarding.js'
+import { CoreRelayGateway, type AgentMuxRelayGatewaySource } from './public-rpc-relay-gateway.js'
 
 /** One physical writer. Pending producers retain their original frames, not encoded copies. */
 function rpcWritableSender(output: Writable, encode: (frame: AgentMuxRpcFrame) => string, failed: () => void) {
@@ -89,6 +90,7 @@ export type AgentMuxControlServerOptions = AgentMuxRpcServiceOptions & {
   onControlEndpointState?(state: AgentMuxControlEndpointState): void
   /** HTTP is absent by default. Binding and authorization must both be explicit. */
   http?: AgentMuxRpcHttpOptions
+  relayGateway?: AgentMuxRelayGatewaySource
   /** One explicit original local peer. Request bodies cannot select an authority endpoint. */
   forwardingPeer?: RpcForwardingPeer
 }
@@ -116,12 +118,14 @@ export class AgentMuxControlServer {
   private readonly dispatcher: AgentMuxRpcDispatcher
   private readonly forwarding = new RpcForwardingAuthority()
   private httpFailure: AgentMuxError | null = null
+  private readonly relayGateway: CoreRelayGateway
   private readonly localPrincipal: AgentMuxRpcPrincipal = { kind: 'user', id: `local-user:${process.getuid?.() ?? 'current'}` }
   readonly path: string
   constructor(private readonly options: AgentMuxControlServerOptions = {}, path?: string) {
+    this.relayGateway = new CoreRelayGateway(options.relayGateway)
     this.path = path ?? options.socketPath ?? defaultAgentMuxControlSocketPath()
     this.publication = new ControlEndpointPublication(this.path, socket => this.accept(socket), options.onControlEndpointState)
-    this.service = new AgentMuxRpcService({ ...options, endpoint: { transport: 'unix', path: this.path }, endpointPublication: () => this.publication.state() })
+    this.service = new AgentMuxRpcService({ ...options, endpoint: { transport: 'unix', path: this.path }, endpointPublication: () => this.publication.state(), relayInspection: () => this.relayGateway.inspect() })
     this.dispatcher = new AgentMuxRpcDispatcher(this.service)
     if (options.http && (!options.http.host || !Number.isInteger(options.http.port) || options.http.port < 0 || options.http.port > 65535 ||
       (!options.http.authorize && (typeof options.http.token !== 'string' || !options.http.token || /[\r\n]/u.test(options.http.token))) ||
@@ -170,9 +174,12 @@ export class AgentMuxControlServer {
           'CONTROL_UNAVAILABLE', error instanceof Error ? error.message : String(error))
       }
     }
+    this.relayGateway.start(this.httpServer ? { server: this.httpServer, tls: this.options.http?.tls !== undefined } : undefined)
   }
+  relayInspection(): import('./public-rpc-relay-gateway.js').AgentMuxRelayInspection { return this.relayGateway.inspect() }
   async stop(): Promise<void> {
     this.stopped = true
+    await this.relayGateway.stop()
     const http = this.httpServer; this.started = false; this.httpServer = undefined
     for (const socket of this.sockets) socket.destroy()
     await this.publication.stop()

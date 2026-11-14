@@ -30,6 +30,7 @@ export type AgentMuxHeadlessRuntimeOptions = AgentMuxClientOptions & {
   socketPath?: string
   stateDirectory?: string
   http?: AgentMuxRpcHttpOptions
+  relayGateway?: import('./public-rpc-relay-gateway.js').AgentMuxRelayGatewaySource
   forwardingPeer?: AgentMuxControlServerOptions['forwardingPeer']
   /** Existing client-owned business ports mounted on this one public endpoint. */
   service?: Omit<AgentMuxRpcServiceOptions, 'coreClients' | 'hostedRuntime' | 'endpoint'>
@@ -215,6 +216,7 @@ export async function startHeadlessAgentMux(options: AgentMuxHeadlessRuntimeOpti
         ...(host.adoptedRoute ? { adoptedRoute: host.adoptedRoute } : {}), ...(host.dispose ? { dispose: host.dispose } : {}) } }
     })
     server = new AgentMuxControlServer({ ...options.service, socketPath, ...(options.http ? { http: options.http } : {}),
+      ...(options.relayGateway === undefined ? {} : { relayGateway: options.relayGateway }),
       ...(options.forwardingPeer ? { forwardingPeer: options.forwardingPeer } : {}),
       capsules: options.service?.capsules ?? capsules,
       executionBindings: options.service?.executionBindings ?? executionBindings!,

@@ -1,3 +1,4 @@
+import { isAbsolute } from 'node:path'
 import { AgentMuxError } from './errors.js'
 import { agentMuxRpcEndpoint, connectAgentMuxRpc } from './public-rpc-client.js'
 import { forwardAgentMuxRpcStdio } from './agentmux-rpc-stdio.js'
@@ -11,12 +12,12 @@ async function main(args: string[]): Promise<void> {
     await forwardAgentMuxRpcStdio({ endpoint: agentMuxRpcEndpoint(endpoint), input: process.stdin, output: process.stdout }); return
   }
   if (!operation || operation === '--help') {
-    process.stdout.write('agentmux-runtime serve | status | shutdown\n  --endpoint unix:<SOCKET_PATH> (status/shutdown)\n  serve uses AGENTMUX_STATE_DIRECTORY and AGENTMUX_RUNTIME_DIRECTORY.\n'); return
+    process.stdout.write('agentmux-runtime serve [--gateway-config FILE] | status | shutdown\n  --endpoint unix:<SOCKET_PATH> (status/shutdown)\n  serve uses AGENTMUX_STATE_DIRECTORY and AGENTMUX_RUNTIME_DIRECTORY.\n  gateway-config is read once; its optional failure leaves the original Unix Core available.\n'); return
   }
-  if (tail.length || !['serve', 'status', 'shutdown'].includes(operation)) throw new AgentMuxError('Expected serve, status or shutdown.', 'INVALID_CLI_ARGUMENT')
+  if (!['serve', 'status', 'shutdown'].includes(operation) || tail.length && (operation !== 'serve' || tail.length !== 2 || tail[0] !== '--gateway-config' || !tail[1] || !isAbsolute(tail[1]))) throw new AgentMuxError('Expected serve [--gateway-config FILE], status or shutdown.', 'INVALID_CLI_ARGUMENT')
   if (operation === 'serve') {
     if (endpoint) throw new AgentMuxError('Serve binds the configured local owner; endpoint selection belongs to clients.', 'INVALID_CLI_ARGUMENT')
-    const owner = await startHeadlessAgentMux()
+    const owner = await startHeadlessAgentMux({ ...(tail[1] ? { relayGateway: { configurationPath: tail[1] } } : {}) })
     process.stdout.write(JSON.stringify({ operation: 'serve', owner: owner.ownerIdentity(), socketPath: owner.socketPath }) + '\n')
     // This entry owns this process. After the semantic owner has flushed and detached,
     // an unacknowledged SDK read wire must not retain it; admitted Native Runs survive.

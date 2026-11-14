@@ -392,6 +392,7 @@ type NativeParams = NameControlParams & AgentOpenParams & import('./space-close.
   'system.storage': { hostId: string; runId: string }
   'system.doctor': { workspacePath?: string }
   'system.endpoint': Record<string, never>
+  'system.relay.inspect': Record<string, never>
   'system.subscription.cancel': { subscriptionId: string }
 }
 type NativeResult = NameControlResults & AgentOpenResults & import('./space-close.js').SpaceCloseResults & HostRouteResults & SpaceMemberResults & SpaceSessionsResults & SpaceFolderResults & SpaceAuthorityResults & NodeLocatorResultMap & NodePublishingResults & MoteDialogueResultMap & { 'capsule.input': import('./capsule-input.js').CapsuleInputResult } & CapsuleRuntimeResultMap & CapsuleResultMap & ApplicationAccessResultMap & AgentLearningResultMap & MoteChatResultMap & MoteConnectionResultMap & ObjectAvatarResultMap & GoalDelegationResultMap & MoteAvatarResultMap & TopicResultMap & ConnectionResultMap & TailcatConfigurationResultMap & NotesStorageResultMap & ProviderCatalogResultMap & HostSettingsResultMap & TailcatKeyResultMap & HostMaintenanceResultMap & FileResultMap & GitResultMap & AppWindowResultMap & AppCaptureResultMap & ScheduleResultMap & AgentProgressResults & ImageResultMap & NativeDesktopResultMap & AgentMuxRpcDeviceResultMap & AgentMuxHostedRuntimeResultMap & {
@@ -515,6 +516,7 @@ type NativeResult = NameControlResults & AgentOpenResults & import('./space-clos
   'system.storage': import('./run-storage-observation.js').AgentMuxRunStorageObservation
   'system.doctor': AgentMuxDoctorReport
   'system.endpoint': { protocol: 'jsonrpc-2.0'; framing: 'json-lines'; endpoint: AgentMuxRpcEndpoint; connection: 'responded'; publication: import('./control-endpoint-state.js').AgentMuxControlEndpointState | null; methods?: AgentMuxRpcMethod[] }
+  'system.relay.inspect': import('./public-rpc-relay-gateway.js').AgentMuxRelayInspection
   'system.subscription.cancel': { disposed: boolean }
 }
 export type AgentMuxRpcMethod = ControlMethod | keyof NativeParams
@@ -592,7 +594,7 @@ export const AGENTMUX_RPC_NATIVE_METHODS = {
   'message.federation.dispatch-intake': 'long', 'message.federation.intake': 'long', 'message.federation.export': 'long', 'message.dispatch.sync': 'long', 'message.dispatch.open': 'long', 'message.dispatch.inspect': 'short', 'message.dispatch.report': 'long',
   'message.notify': 'long', 'message.notify.inspect': 'short', 'message.read': 'short', 'message.ls': 'short', 'message.events': 'short', 'message.dispatch.read': 'short', 'message.dispatch.ls': 'short',
   'app.search': 'long', 'app.snapshot': 'long', 'goal.activity': 'short', 'goal.activity.history': 'short', 'system.doctor': 'long', 'system.storage': 'short',
-  'system.endpoint': 'short', 'system.subscription.cancel': 'short', 'terminal.recover': 'long', 'agent.posture.inspect': 'short', 'agent.posture.set': 'long', 'terminal.input': 'long', 'terminal.interrupt': 'long', 'terminal.stop': 'long', 'terminal.operation.inspect': 'short', 'terminal.creation.retire': 'long', 'terminal.creation.inspect': 'short', 'terminal.ls': 'short', 'terminal.inspect': 'short', 'terminal.output': 'long'
+  'system.endpoint': 'short', 'system.relay.inspect': 'short', 'system.subscription.cancel': 'short', 'terminal.recover': 'long', 'agent.posture.inspect': 'short', 'agent.posture.set': 'long', 'terminal.input': 'long', 'terminal.interrupt': 'long', 'terminal.stop': 'long', 'terminal.operation.inspect': 'short', 'terminal.creation.retire': 'long', 'terminal.creation.inspect': 'short', 'terminal.ls': 'short', 'terminal.inspect': 'short', 'terminal.output': 'long'
 } as const satisfies Record<keyof NativeParams, 'short' | 'long'>
 
 export type AgentMuxRpcStreamMethod = 'file.mutation.watch' | 'space.member.watch' | import('./host-route.js').HostRouteStreamMethod | 'space.sessions.watch' | 'space.snapshot' | 'space.watch' | 'goal.watch' | 'agent.conversation.watch' | 'agent.output' | 'terminal.output' | 'browser.follow' | 'toolkit.watch' | 'system.metrics.watch' | 'settings.appearance.watch' | 'connection.metadata.watch' |

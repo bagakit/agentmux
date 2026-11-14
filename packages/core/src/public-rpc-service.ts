@@ -1,4 +1,5 @@
 import { isNameControlMethod, parseNameControlParams, parseNameControlResult, type NameControlParams } from './name-control.js'
+import { parseAgentMuxRelayInspection, type AgentMuxRelayInspection } from './public-rpc-relay-gateway.js'
 import { inspectOwnedName, changeOwnedName, sourceMemberName } from './name-control-owner.js'
 import { AGENT_OPEN_LAUNCH_FIELDS, parseAgentOpenDescribe, parseAgentOpenDescription } from './agent-open-contract.js'
 import { parseTerminalCreationRetire, parseTerminalCreationInspect, parseTerminalCreationInspection } from './terminal-creation.js'
@@ -315,6 +316,8 @@ export type AgentMuxRpcServiceOptions = Omit<Partial<AgentMuxControlHost>, 'exec
   hostTailcatKey?(input: { role: import('./public-rpc-tailcat-key.js').TailcatKeyRole; key: string }, signal?: AbortSignal): Promise<import('./public-rpc-tailcat-key.js').TailcatKeyPreparation>
   endpoint?: import('./public-rpc.js').AgentMuxRpcEndpoint
   endpointPublication?(): import('./control-endpoint-state.js').AgentMuxControlEndpointState
+  /** Passive facts from this original Core's optional Relay gateway transport owner. */
+  relayInspection?(): AgentMuxRelayInspection
   /** Borrow existing SDK clients. Their lifecycle remains with their host. */
   nodePublishing?: NodePublishingPort
   /** Complete configured locator scope, including routes without a prepared client. Never starts a client. */
@@ -528,7 +531,7 @@ const NATIVE_FIELDS = {
   'app.snapshot': ['projectId', 'workspaceId', 'topicId', 'agentSessionId', 'goalId', 'executorId', 'assigneeSessionId', 'supervisorSessionId', 'status', 'since', 'limit', 'include'],
   'goal.activity.history': ['goalId', 'limit', 'cursor'],
   'goal.activity': ['goalId', 'projectId', 'agentSessionId', 'assigneeSessionId', 'supervisorSessionId', 'status', 'since', 'limit'],
-  'system.storage': ['hostId', 'runId'], 'system.doctor': ['workspacePath'], 'system.endpoint': [],
+  'system.storage': ['hostId', 'runId'], 'system.doctor': ['workspacePath'], 'system.endpoint': [], 'system.relay.inspect': [],
   'system.subscription.cancel': ['subscriptionId']
 } as const satisfies Record<Exclude<keyof typeof AGENTMUX_RPC_NATIVE_METHODS, MoteDialogueMethod | CapsuleRuntimeMethod | CapsuleMethod | AgentLearningMethod | 'capsule.input' | import('./public-rpc-device.js').AgentMuxRpcDeviceMethod | AgentMuxHostedRuntimeMethod | ApplicationAccessMethod | MoteChatMethod | MoteConnectionMethod | MoteAvatarSeriesMethod | MoteAvatarWriteMethod | TopicMethod | ConnectionMethod | ObjectAvatarMethod | TailcatConfigurationMethod | NotesStorageMethod | ProviderCatalogMethod | HostSettingsMethod | NodePublishingMethod | NodeLocatorMethod | import('./public-rpc-tailcat-key.js').TailcatKeyMethod | import('./public-rpc-host-maintenance.js').HostMaintenanceMethod | import('./public-rpc-files.js').FileMethod | GitMethod | AppWindowMethod | ScheduleMethod | ImageMethod | NativeDesktopMethod | keyof typeof HOST_ROUTE_METHODS>, readonly string[]>
 
@@ -2880,6 +2883,8 @@ export class AgentMuxRpcService {
       }
       case 'system.endpoint': result = { protocol: 'jsonrpc-2.0', framing: 'json-lines', connection: 'responded',
         endpoint: this.ports.endpoint ?? { transport: 'unix', path: defaultAgentMuxControlSocketPath() }, publication: this.ports.endpointPublication?.() ?? null, ...(this.ports.exposedMethods ? { methods: [...this.ports.exposedMethods] } : {}) }; break
+      case 'system.relay.inspect': result = parseAgentMuxRelayInspection(this.ports.relayInspection?.() ?? { gateway: { state: 'unavailable', issue: {
+        code: 'RELAY_GATEWAY_OBSERVATION_UNAVAILABLE', message: 'The original Relay gateway observation owner is unavailable. Existing Core services and Sessions are retained.' } } }); break
       case 'system.storage': {
         const hostId = rpcString(p.hostId, 'Host ID'), runId = rpcString(p.runId, 'Run ID')
         const owner = (await this.clients()).find(entry => entry.hostId === hostId)

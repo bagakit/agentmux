@@ -501,6 +501,10 @@
     "./object-avatar": {
       "types": "./dist/object-avatar.d.ts",
       "import": "./dist/object-avatar.js"
+    },
+    "./relay-gateway": {
+      "types": "./dist/public-rpc-relay-gateway.d.ts",
+      "import": "./dist/public-rpc-relay-gateway.js"
     }
   },
   "bin": {

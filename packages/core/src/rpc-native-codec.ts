@@ -1,4 +1,5 @@
 import { isNameControlMethod, parseNameControlParams, parseNameControlResult } from './name-control.js'
+import { parseAgentMuxRelayInspection } from './public-rpc-relay-gateway.js'
 import { parseAgentOpenDescribe, parseAgentOpenDescription } from './agent-open-contract.js'
 import { parseTerminalCreationRetire, parseTerminalCreationInspect, parseTerminalCreationInspection } from './terminal-creation.js'
 import { isObjectAvatarMethod, parseObjectAvatarParams, parseObjectAvatarResult } from './object-avatar.js'
@@ -1235,6 +1236,7 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
         const endpoint = record(p.endpoint); member(endpoint.transport, ['unix', 'http', 'ssh', 'tailcat', 'relay']); if (endpoint.transport === 'relay') { parseConnectionOffer(endpoint.offer) }
         else if (endpoint.transport === 'tailcat') { string(endpoint.address); string(endpoint.keyFile) }
         else string(endpoint.transport === 'unix' ? endpoint.path : endpoint.transport === 'http' ? endpoint.url : endpoint.host); break }
+      case 'system.relay.inspect': parseAgentMuxRelayInspection(value); break
       case 'system.subscription.cancel': record(p, ['disposed']); bool(p.disposed); break
       case 'system.storage': {
         const p = record(value, ['status', 'run', 'runtime', 'observedAt', 'storage', 'message'])
