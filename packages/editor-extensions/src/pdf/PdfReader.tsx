@@ -1,3 +1,5 @@
+import '@agentmux/client-ui/input/styles.css'
+import '@agentmux/client-ui/styles/buttons.css'
 import { TextInput } from '@agentmux/client-ui/input'
 import { useEffect, useRef, useState } from 'react'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'

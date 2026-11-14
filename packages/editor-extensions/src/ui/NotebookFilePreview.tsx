@@ -1,3 +1,4 @@
+import '@agentmux/client-ui/styles/markdown.css'
 import '../styles/preview-common.css'
 import { createNotebookWorker } from '../engines/worker-clients'
 import { useEffect, useMemo, useRef, useState } from 'react'
