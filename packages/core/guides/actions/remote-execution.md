@@ -121,6 +121,16 @@ helper role and step in `error.executionFailure`. This does not stop existing Ag
 An optional upgrade observation is advice; updating Core does not itself prove that
 preparation, creation or the first input succeeded.
 
+New Source split work first obtains a durable complete-intent ACK from its original
+Core, then reserves the workface and explicitly advances that same reference.
+`amux agent execution admit --input FILE` accepts the same complete packet as
+create but only authorizes and freezes it; it performs no endpoint preparation,
+helper Start, Agent creation or input. The reply contains only the original reference.
+A lost ACK never permits replacing the frozen contribution with today's note or
+configuration. The association witness may expose safe original launch coordinates
+and its Source request digest. Missing or mismatched original facts stay unknown;
+older incomplete requests are retained rather than reconstructed.
+
 Use `amux agent execution binding --input FILE` at the original Coordinator to read
 its retained `continuation` reference and `helperStarts`. Start facts describe submission
 and acknowledgement, not current Run health. After fixing the exact endpoint, explicitly
