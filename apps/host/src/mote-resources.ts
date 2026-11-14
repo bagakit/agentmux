@@ -1,5 +1,5 @@
 import { migrateTopicDirectories } from './mote-directory-maintenance.mjs'
-import { mintObjectId } from '@agentmux/core/object-id'
+import { isObjectId, mintObjectId } from '@agentmux/core/object-id'
 import { topicPublicCopy } from './mote-topic-model.js'
 import { MOTE_QUICK_MODE_PATH, parseMoteQuickMode, type MoteQuickMode } from './mote-quick-mode.js'
 import { directoryIdentity, homeZoneId } from './mote-model.js'
@@ -320,7 +320,7 @@ export class ScratchTopics {
       try { content = await readRegularFile(join(directory, MOTE_STATE_PATH)) }
       catch (error) { if (errorCode(error) === 'ENOENT') return absent; throw error }
       const value = JSON.parse(content)
-      if (typeof value.archived !== 'boolean' || typeof value.version !== 'string' || !/^[0-9a-f-]{36}$/.test(value.version))
+      if (typeof value.archived !== 'boolean' || !(isObjectId(value.version) || typeof value.version === 'string' && /^[0-9a-f-]{36}$/.test(value.version)))
         throw new Error('Mote archive metadata is invalid.')
       if (topicId === PMO_TEAMS_TOPIC_ID && value.archived) throw new Error('The primary Mote cannot be archived. Its existing work remains available; repair its archive metadata and retry the directory read.')
       return { state: value.archived ? 'archived' : 'active', version: value.version }
