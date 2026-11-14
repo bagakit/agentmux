@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import * as Dialog from '@agentmux/client-ui/components/Modal'
 import { SemanticIcon, semanticIconComponent } from '@agentmux/client-ui/icons'
@@ -10,26 +10,11 @@ import { agentOperationKey, dismissAgentOperation, inspectAgentOperation, type A
 import { stopSessionInBackground } from '../lib/session-stop-background'
 import { agentOperationsForSubject } from '../lib/agent-operation'
 import { DocumentOverlayPortal } from './WindowOverlayHost'
-import type { FocusListActivity } from '../lib/focus-list-activity'
 
 const CheckIcon = semanticIconComponent('action.refresh')
 const StopIcon = semanticIconComponent('action.stop')
 const CloseIcon = semanticIconComponent('action.close')
 const titles = { stop: '停止', takeover: '接手', fork: 'Fork' }
-const activityLabels = { sent: '观察到发送', received: '观察到接收', self: '观察到自发自收', updated: '派发记录更新' }
-
-export const FocusCommunicationFeedback = memo(function FocusCommunicationFeedback({ activity }: { activity: FocusListActivity }) {
-  const active = useWorkbenchPresentationActive()
-  const { ref, visible } = useVisibleWork<HTMLDivElement>(active)
-  const delay = useMemo(() => Math.min(0, activity.pulse.startedAt - Date.now()), [activity.pulse, visible])
-  return <div ref={ref} className="focus-communication-feedback" role="status" data-activity-id={activity.pulse.id}
-    data-kind={activity.pulse.kind} data-direction={activity.direction} data-motion-active={visible}
-    style={{ '--activity-delay': `${delay}ms` } as CSSProperties}>
-    <span key={`${activity.pulse.id}:${visible}`} className="focus-communication-feedback__mark" aria-hidden="true">
-      <SemanticIcon name={activity.direction === 'updated' ? 'action.refresh' : activity.direction === 'received' ? 'navigation.back' : 'action.send'} size={12} />
-    </span><span>{activityLabels[activity.direction]}</span>
-  </div>
-})
 // One original result can be read in a card and Header at once. Decoration in
 // either projection must not remove the other projection's open reading surface.
 const readers = new Map<string, Set<object>>()

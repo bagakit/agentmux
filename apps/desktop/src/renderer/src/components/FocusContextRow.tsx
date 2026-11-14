@@ -1,4 +1,5 @@
-import { AgentOperationFeedback, FocusCommunicationFeedback } from './AgentOperationFeedback'
+import { AgentOperationFeedback } from './AgentOperationFeedback'
+import { FocusCommunicationFeedback } from './FocusCommunicationFeedback'
 import type { FocusListActivity } from '../lib/focus-list-activity'
 import { TextInput } from '@agentmux/client-ui/input'
 import { memo, useCallback, useEffect, useRef, useState } from 'react'
