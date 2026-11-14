@@ -64,7 +64,7 @@ describe('actual phone primary workfaces', () => {
       expect(menu).not.toBeNull()
       expect(headings[0]!.firstElementChild).toBe(menu)
       await click(menu!)
-      expect(document.querySelector('.mobile-drawer')?.textContent).toContain('连接与设备')
+      expect(document.querySelector<HTMLButtonElement>('.mobile-drawer button[aria-label^="连接与设备 ·"]')?.classList.contains('mobile-drawer-connection')).toBe(true)
       await click(document.querySelector('[aria-label="关闭面板"]')!)
       expect(current(view.element)).toBe(label)
       const refresh = headings[0]!.querySelector('[aria-label^="刷新"]')

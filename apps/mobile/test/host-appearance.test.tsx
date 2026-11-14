@@ -224,10 +224,10 @@ it('the actual MobileApp owns one root and consumes committed theme and semantic
   expect(subscribeRpc).toHaveBeenCalledExactlyOnceWith('settings.appearance.watch', {}, expect.any(Object))
 })
 
-it('the actual disconnected MobileApp renders the shared default brand in its header and connection page', async () => {
+it('the actual disconnected MobileApp renders one shared default brand on the connection page', async () => {
   await act(async () => root.render(<MobileApp client={null} connection={{ state: 'disconnected', message: 'Private disconnected device' }}
     platform={createBrowserPlatform({ overlayContainer: () => container })} />))
-  expect(container.querySelector('.mobile-brand [data-app-icon]')?.getAttribute('data-app-icon')).toBe('qingzhuan')
+  expect(container.querySelectorAll('[data-app-icon]')).toHaveLength(1)
   expect(container.querySelector('.mobile-connect-page [data-app-icon]')?.getAttribute('data-app-icon')).toBe('qingzhuan')
 })
 

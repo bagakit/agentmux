@@ -340,13 +340,13 @@ it('unrelated same-record conversation/navigation edits preserve the normal orig
 
 it('cold remount restores unknown creation from durable device bytes and reads its original ID without creating', async () => {
   vi.mocked(hostGoals.demands.create).mockImplementationOnce(async input => { await owner.create(input); throw new Error('Durable creation ACK unknown') })
-  const first = await mount(); await first.click('新建目标'); await first.wait('Durable creation ACK unknown')
+  const first = await mount(); await first.click('新建目标'); await first.click('创建目标'); await first.wait('Durable creation ACK unknown')
   const input = first.forwardRpc.mock.calls.find(([method]) => method === 'goal.create')![1]
   const bytes = localStorage.getItem(DEVICE_WORKFACE_KEY)!
   expect(new DeviceWorkfaceStore(() => localStorage).snapshot().record.goalIntents).toMatchObject([{ goalId: input.goalId, operationId: input.operationId, kind: 'create', phase: 'unknown' }])
   await unmount(first)
   const restored = await mount(); await restored.wait('还不确定目标是否已创建')
-  expect(restored.element.textContent).toContain(input.goalId); expect(restored.buttons('新建目标')[0]!.disabled).toBe(true)
+  expect(restored.element.textContent).toContain(input.goalId); await restored.click('新建目标'); expect(restored.buttons('创建目标')[0]!.disabled).toBe(true)
   expect(restored.forwardRpc.mock.calls.some(([method]) => method === 'goal.create')).toBe(false)
   expect(localStorage.getItem(DEVICE_WORKFACE_KEY)).toBe(bytes)
   await restored.click('读取同一目标核对'); await restored.wait(discussionName)
@@ -386,7 +386,7 @@ it('late creation completion after leaving Goals never selects or presents the o
   vi.mocked(hostGoals.demands.create).mockImplementationOnce(async input => {
     const receipt = await owner.create(input); return await new Promise(resolve => { settle = () => resolve(receipt) })
   })
-  const view = await mount(); await view.click('新建目标'); await vi.waitFor(() => expect(settle).toBeTypeOf('function'), { timeout: 5000 })
+  const view = await mount(); await view.click('新建目标'); await view.click('创建目标'); await vi.waitFor(() => expect(settle).toBeTypeOf('function'), { timeout: 5000 })
   await view.render(false); await view.render(true); await act(async () => settle())
   await vi.waitFor(() => expect(view.forwardRpc.mock.calls.some(([method]) => method === 'goal.discuss')).toBe(true))
   await act(async () => {}); await view.render(true)
@@ -415,7 +415,7 @@ it('late old acknowledgement-recovery read never replaces a newer displayed prop
 it('device intent I/O failure preserves prior bytes and memory without gating healthy creation', async () => {
   const view = await mount(), before = localStorage.getItem(DEVICE_WORKFACE_KEY)
   const set = vi.spyOn(localStorage, 'setItem').mockImplementation(() => { throw new Error('Device write failed') })
-  await view.click('新建目标'); await view.wait(discussionName)
+  await view.click('新建目标'); await view.click('创建目标'); await view.wait(discussionName)
   expect(set).toHaveBeenCalled(); expect(localStorage.getItem(DEVICE_WORKFACE_KEY)).toBe(before)
   expect(view.forwardRpc.mock.calls.filter(([method]) => method === 'goal.create')).toHaveLength(1); expect(await owner.list()).toHaveLength(1)
   expect(view.element.textContent).toContain('刷新保障不足'); expect(getDeviceWorkface().exportBackup()).toContain('goalIntents')
@@ -437,8 +437,8 @@ it('device intent I/O failure keeps human acknowledgement and its unknown recove
   expect(localStorage.getItem(DEVICE_WORKFACE_KEY)).toBe(before); set.mockRestore(); await getDeviceWorkface().replaceUnreadableWithCurrent()
 })
 
-it('one click uses the current Host domain and strict public service to save one pending ID and present its exact discussion receipt', async () => {
-  const view = await mount(); await view.click('新建目标'); await view.wait(discussionName)
+it('explicit creation uses the current Host domain and strict public service to save one pending ID and present its exact discussion receipt', async () => {
+  const view = await mount(); await view.click('新建目标'); await view.click('创建目标'); await view.wait(discussionName)
   const input = view.forwardRpc.mock.calls.find(([method]) => method === 'goal.create')![1]
   expect(input).toMatchObject({ goalId: expect.stringMatching(/^[1-9A-HJ-NP-Za-km-z]{12}$/), title: 'Untitled goal', description: '', status: 'backlog' })
   expect(input).not.toHaveProperty('projectId')
@@ -455,9 +455,9 @@ it('one click uses the current Host domain and strict public service to save one
 
 it('unknown save reads the held ID against the real owner before discussion and never creates again across hide/show', async () => {
   vi.mocked(hostGoals.demands.create).mockImplementationOnce(async input => { await owner.create(input); throw new Error('Creation ACK lost') })
-  const view = await mount(); await view.click('新建目标'); await view.wait('Creation ACK lost')
+  const view = await mount(); await view.click('新建目标'); await view.click('创建目标'); await view.wait('Creation ACK lost')
   const input = view.forwardRpc.mock.calls.find(([method]) => method === 'goal.create')![1]
-  await view.render(false); await view.render(true); await view.click('新建目标')
+  await view.render(false); await view.render(true); expect(view.buttons('创建目标')[0]!.disabled).toBe(true); await view.click('创建目标')
   expect(view.forwardRpc.mock.calls.filter(([method]) => method === 'goal.create')).toHaveLength(1)
   expect(view.forwardRpc.mock.calls.some(([method]) => method === 'goal.discuss')).toBe(false)
   await view.click('读取同一目标核对'); await view.wait(discussionName)
@@ -468,7 +468,7 @@ it('unknown save reads the held ID against the real owner before discussion and 
 
 it('owner-confirmed absence only allows explicit saving of the same original ID', async () => {
   vi.mocked(hostGoals.demands.create).mockRejectedValueOnce(new Error('No save acknowledgement'))
-  const view = await mount(); await view.click('新建目标'); await view.wait('No save acknowledgement')
+  const view = await mount(); await view.click('新建目标'); await view.click('创建目标'); await view.wait('No save acknowledgement')
   const input = view.forwardRpc.mock.calls.find(([method]) => method === 'goal.create')![1]
   await view.click('读取同一目标核对'); await view.wait('Mac 上还没有这个目标')
   expect(view.forwardRpc.mock.calls.filter(([method]) => method === 'goal.create')).toHaveLength(1)
@@ -480,7 +480,7 @@ it('owner-confirmed absence only allows explicit saving of the same original ID'
 
 it('an unavailable discussion owner retains the saved goal and explicit reopening uses its original ID without recreating', async () => {
   discussionUnavailable = true
-  const view = await mount(); await view.click('新建目标'); await view.wait('Original discussion owner is unavailable')
+  const view = await mount(); await view.click('新建目标'); await view.click('创建目标'); await view.wait('Original discussion owner is unavailable')
   const input = view.forwardRpc.mock.calls.find(([method]) => method === 'goal.create')![1]
   expect(await owner.get(input.goalId)).not.toBeNull(); expect(view.element.textContent).toContain('目标已保存，讨论还没确认')
   discussionUnavailable = false
@@ -555,7 +555,7 @@ it('current human stage action follows evidence before secondary discussion and 
 it('late original creation recovery read cannot replace another Goal selected while reading', async () => {
   await owner.create({ id: 'goal-b', title: 'Selected later Goal B' })
   vi.mocked(hostGoals.demands.create).mockImplementationOnce(async input => { await owner.create(input); throw new Error('Create A unknown') })
-  const view = await mount(); await view.wait('Selected later Goal B'); await view.click('新建目标'); await view.wait('Create A unknown')
+  const view = await mount(); await view.wait('Selected later Goal B'); await view.click('新建目标'); await view.click('创建目标'); await view.wait('Create A unknown')
   const input = view.forwardRpc.mock.calls.find(([method]) => method === 'goal.create')![1], forward = view.forwardRpc.getMockImplementation()!
   let settle!: () => void
   view.forwardRpc.mockImplementation((method, params) => method === 'goal.inspect' && params.goalId === input.goalId ? forward(method, params).then(result => new Promise(resolve => { settle = () => resolve(result) })) : forward(method, params))
