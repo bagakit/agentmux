@@ -46,8 +46,15 @@ beforeEach(() => {
 })
 afterEach(async () => { await app.dispose() })
 
-async function openOriginalWork() {
+async function openOriginalWork(collapseFocus = false) {
   await app.mount()
+  if (collapseFocus) {
+    await act(async () => useAppStore.getState().setMainSurface('agents'))
+    const close = app.container.querySelector<HTMLButtonElement>('[aria-label="Close Focus workspace"]')
+    expect(close).not.toBeNull()
+    await act(async () => close!.click())
+    expect(app.container.querySelector('aside[aria-label="Focus workspace"]')).toBeNull()
+  }
   await act(async () => requestPmoTeamsTopicFloatingOpen({ targetTopicId: moteTopics[0]!.id }))
   await settleMoteApp()
   await moteClick(button(app.panel(), '工作'))
@@ -59,12 +66,13 @@ async function openOriginalWork() {
 it('the actual Club workface opens an original worker occurrence after that Thread belongs to another Club', async () => {
   const identities = () => useAppStore.getState().sessions.map(session => ({ id: session.id, control: session.control, workspacePath: session.workspacePath }))
   const sessions = identities(), drafts = useAppStore.getState().agentComposerDrafts
-  await openOriginalWork()
+  await openOriginalWork(true)
   await moteClick(button(workPanel(), '继续原工作'))
   const state = useAppStore.getState()
   expect(state.workbenchSpaceSelection).toMatchObject({ workspaceId: scratchWorkspace.id, groupId: 'mote-group',
     tabId: customTab.id, regionId: customTab.layout.activeRegionId })
   expect(state.mainSurface).toBe('agents')
+  expect(app.container.querySelector('aside[aria-label="Focus workspace"]')).not.toBeNull()
   expect(readPmoTeamsTopicFloatingState().open).toBe(false)
   await vi.waitFor(() => expect(app.container.querySelector('.global-focus-surface:not([hidden]) [data-activity-session="' + customAgent.id + '"]')).not.toBeNull())
   expect(identities()).toEqual(sessions); expect(state.agentComposerDrafts).toEqual(drafts)

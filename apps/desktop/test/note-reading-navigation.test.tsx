@@ -13,6 +13,7 @@ import { WorkspaceFiles } from '../src/main/workspace-files'
 import { NoteReadingReturn } from '../src/renderer/src/components/NoteReadingReturn'
 import { NoteFileSurfaceView } from '../src/renderer/src/components/NoteFileSurfaceView'
 import { api } from '../src/renderer/src/lib/api'
+import { installDesktopPresentationOwner } from '../src/renderer/src/lib/desktop-presentation'
 import { rememberNoteReadingReturn, clearNoteReadingReturn, useNoteReadingReturn, type NoteReadingReturn as Journey } from '../src/renderer/src/lib/note-reading-return'
 import { WorkbenchPresentationContext } from '../src/renderer/src/lib/workbench-presentation'
 import { useNoteLinkNavigation } from '../src/renderer/src/lib/use-note-link-navigation'
@@ -44,9 +45,9 @@ function resetJourney() {
   const reset = { from: { ...from, tabId: 'reset-' + crypto.randomUUID() }, to: { ...to, tabId: 'reset-' + crypto.randomUUID() }, original, title: 'reset', surface: 'recall' as const }
   rememberNoteReadingReturn(reset); clearNoteReadingReturn(reset); latest = null
 }
-function ReturnSurface({ reference = to, onSelect = (selected: Reference) => useAppStore.getState().setRecallZoneSelection({ zoneId: 'reading-zone', selection: [selected], active: selected }) }: { reference?: Reference; onSelect?: (selected: Reference) => void }) {
+function ReturnSurface({ reference = to, presentationId = 'recall-workbench', onSelect = (selected: Reference) => useAppStore.getState().setRecallZoneSelection({ zoneId: 'reading-zone', selection: [selected], active: selected }) }: { reference?: Reference; presentationId?: string; onSelect?: (selected: Reference) => void }) {
   latest = useNoteReadingReturn(reference, useAppStore(state => state.mainSurface))
-  const projection = { entity: { kind: 'zone' as const, zoneId: 'reading-zone' }, presentationId: 'recall-workbench', displayWorkspaceId: workspace.id,
+  const projection = { entity: { kind: 'zone' as const, zoneId: 'reading-zone' }, presentationId, displayWorkspaceId: workspace.id,
     catalog: spatialCatalog(useAppStore.getState(), []), selection: [reference], onSelect }
   return <WorkbenchPresentationContext.Provider value={{ active: true, retainedRegionId: null, reference, projection }}><NoteReadingReturn /></WorkbenchPresentationContext.Provider>
 }
@@ -146,6 +147,26 @@ it('returns by selecting the retained exact occurrence without opening, revealin
   expect(useAppStore.getState().documents).toBe(before.documents); expect(useAppStore.getState().documentRevealTargets).toBe(reveals)
   expect(useAppStore.getState().dirtyDocuments[documentKey(workspace.id, original.path)]).toBe(true)
   expect(open).not.toHaveBeenCalled(); expect(read).not.toHaveBeenCalled(); expect(write).not.toHaveBeenCalled()
+})
+
+it('an accepted Space Note return contributes exact Work reveal without a pointer selection', async () => {
+  useAppStore.setState({ mainSurface: 'workbench' })
+  expect(useAppStore.getState().selectMainRegion(to)).toBe(true)
+  const reveal = vi.fn(() => true), release = installDesktopPresentationOwner(() => ({ loading: false,
+    overlays: { settings: false, quickSwitcher: false }, floating: null, focusWorkface: { reveal } }))
+  try {
+    rememberNoteReadingReturn({ from, to, original, title: 'Original reading', surface: 'workbench' })
+    const before = useAppStore.getState()
+    await dom.render(<ReturnSurface presentationId="space-workbench" onSelect={reference => { useAppStore.getState().selectMainRegion(reference) }} />)
+    const button = dom.container.querySelector<HTMLButtonElement>('.note-reading-return button')
+    expect(button).not.toBeNull()
+    // Native button activation can come from the keyboard, with no Workbench pointerdown.
+    await act(async () => button!.click())
+    expect(reveal).toHaveBeenCalledExactlyOnceWith(useAppStore.getState().workbenchSpaceSelection, 'selection')
+    expect(useAppStore.getState().workbenchSpaceSelection).toMatchObject({ tabId: from.tabId, regionId: from.regionId, groupId: from.groupId })
+    expect(useAppStore.getState().documents).toBe(before.documents)
+    expect(useAppStore.getState().dirtyDocuments).toBe(before.dirtyDocuments)
+  } finally { release() }
 })
 
 it.each(['host', 'workspace', 'note', 'selection'] as const)('retains the return target when the original %s is unconfirmed and can retry the same origin', async fault => {

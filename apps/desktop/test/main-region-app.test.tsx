@@ -3,6 +3,7 @@ const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await
 import { mkdtemp, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { AgentMuxControlServer, connectAgentMuxRpc } from '@agentmux/core'
+import { DesktopControlIpcBridge } from '../src/main/control-ipc-bridge'
 import { initializeSpatialControlFixture } from './helpers/spatial-control-owner-fixture'
 import { seedMoteWorkface, defaultAgent, executionAgent, moteTopics } from './fixtures/mote-workface'
 import { createRequire } from 'node:module'
@@ -162,9 +163,10 @@ it('closing Focus only hides its projection and choosing the same Context reveal
   } finally { await f.close() }
 })
 
-it('a new explicit Space Region selection reveals the closed Focus projection without changing execution MRU', async () => {
+it.each([false, true])('an explicit Space Region selection reveals closed Focus without changing execution MRU; same target=%s', async sameTarget => {
   const f = await fixture()
   try {
+    if (sameTarget) await f.chooseFile()
     const before = useAppStore.getState()
     await act(async () => f.container.querySelector<HTMLButtonElement>('button[aria-label="Close Focus workspace"]')!.click())
     expect(f.container.querySelector('.focused-tab-workspace')).toBeNull()
@@ -213,32 +215,135 @@ it('actual App retains Work Mote in Focus and presents only an explicit exact Su
     useLauncherState.setState(initialLauncher, true); vi.restoreAllMocks(); vi.unstubAllGlobals(); window.localStorage.clear()
   }
 })
-it('typed public private-Unix app.focus and app.inspect consume the original common address and actual App', async () => {
+async function publicFocusFixture() {
   const f = await fixture(), directory = await mkdtemp(_hygiene_fixturePath("tmp/amx-main-region-"))
-  const seen: string[] = [], server = new AgentMuxControlServer({ execute(request) { seen.push(request.operation); return useAppStore.getState().executeControl(request) } }, join(directory, 'control.sock'))
+  let holdReply = false, releaseReply: (() => void) | undefined
+  const seen: string[] = [], bridge = new DesktopControlIpcBridge({ isAvailable: () => true,
+    sendRequest(request) {
+      if (request.operation !== 'focus' && request.operation !== 'inspect.client') throw new Error('This fixture carries only the original public navigation and inspection.')
+      void useAppStore.getState().executeControl(request).then(result => {
+        const accept = () => bridge.accept({ requestId: request.requestId, ok: true, result })
+        if (holdReply && request.operation === 'focus') releaseReply = accept
+        else accept()
+      },
+        error => bridge.accept({ requestId: request.requestId, ok: false, error: { code: 'CONTROL_FAILED', message: String(error) } }))
+    }, sendCancellation() {} })
+  const server = new AgentMuxControlServer({ execute(request, _name, context) { seen.push(request.operation); return bridge.execute(request, context?.signal) } }, join(directory, 'control.sock'))
   let rpc: Awaited<ReturnType<typeof connectAgentMuxRpc>> | undefined
   try {
+    const unique = createWorkbenchTab('public-unique-agent-tab', { regionId: 'public-unique-agent-region', workspaceId: f.resource.id,
+      kind: 'agent', phase: 'attached', sessionId: f.other.id })
+    useAppStore.setState(state => ({ tabs: { ...state.tabs, [unique.id]: unique }, layouts: { ...state.layouts,
+      [f.resource.id]: { ...state.layouts[f.resource.id]!, groups: state.layouts[f.resource.id]!.groups.map(group =>
+        group.id === 'resource-home-group' ? { ...group, tabOrder: [...group.tabOrder, unique.id] } : group) } } }))
     // Admit original spatial persistence through the existing Store initializer.
     useAppStore.setState({ initialize: initial.initialize })
     await initializeSpatialControlFixture()
     useAppStore.setState({ initialize: async () => () => {} })
     await server.start(); rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: server.path } })
-    let pending!: ReturnType<typeof rpc.call<'app.focus'>>
-    await act(async () => { pending = rpc!.call('app.focus', { target: { kind: 'space', displayWorkspaceId: f.file.displayWorkspaceId, groupId: f.file.groupId, tabId: f.file.tabId, regionId: f.file.regionId }, inputPolicy: 'preserve' }); await new Promise(resolve => setTimeout(resolve, 30)) })
-    const result = await pending
-    expect(result.navigation.selection.space).toMatchObject({ workspaceId: f.file.displayWorkspaceId, groupId: f.file.groupId, tabId: f.file.tabId, regionId: f.file.regionId })
+    const client = rpc
+    async function beginFocus(target: import('@agentmux/core/control').AgentMuxDesktopFocusTarget, expectedAgentSessionId?: string) {
+      let pending!: ReturnType<typeof client.call<'app.focus'>>
+      await act(async () => {
+        pending = client.call('app.focus', { target, inputPolicy: 'preserve', ...(expectedAgentSessionId ? { expectedAgentSessionId } : {}) })
+        await new Promise(resolve => setTimeout(resolve, 30))
+      })
+      return { pending }
+    }
+    return { ...f, unique, seen, rpc: client, exactTarget: { kind: 'space' as const, displayWorkspaceId: f.file.displayWorkspaceId,
+      groupId: f.file.groupId, tabId: f.file.tabId, regionId: f.file.regionId }, beginFocus,
+      async focus(target: import('@agentmux/core/control').AgentMuxDesktopFocusTarget, expectedAgentSessionId?: string) {
+        return (await beginFocus(target, expectedAgentSessionId)).pending
+      },
+      holdNextReply() { holdReply = true },
+      async releaseReply() { await vi.waitFor(() => expect(releaseReply).toBeDefined()); holdReply = false; releaseReply!() },
+      async close() { await rpc?.dispose(); await server.stop(); bridge.dispose(); await rm(directory, { recursive: true, force: true }); await f.close() }
+    }
+  } catch (error) { await rpc?.dispose(); await server.stop(); bridge.dispose(); await rm(directory, { recursive: true, force: true }); await f.close(); throw error }
+}
+
+it('typed public private-Unix app.focus and app.inspect retain the original common address through every surface', async () => {
+  const f = await publicFocusFixture()
+  try {
+    await f.chooseFile()
+    const result = await f.focus(f.exactTarget)
+    expect(result.navigation.selection.space).toMatchObject({ workspaceId: f.file.displayWorkspaceId, groupId: f.file.groupId,
+      tabId: f.file.tabId, regionId: f.file.regionId })
     expect(result.navigation.state).toMatch(/applied|unchanged/)
     for (const surface of ['focus', 'survey', 'goals', 'space'] as const) {
-      let changed!: ReturnType<typeof rpc.call<'app.focus'>>
-      await act(async () => { changed = rpc!.call('app.focus', { target: { kind: 'surface', surface }, inputPolicy: 'preserve' }); await new Promise(resolve => setTimeout(resolve, 30)) })
-      expect((await changed).navigation.selection.space).toEqual(result.navigation.selection.space)
-      const inspected = await rpc.call('app.inspect', {})
-      expect((inspected.observation as { desktop: { selection: { space: unknown; surface: string } } }).desktop.selection.space).toEqual(result.navigation.selection.space)
-      expect((inspected.observation as { desktop: { selection: { space: unknown; surface: string } } }).desktop.selection.surface).toBe(surface)
+      expect((await f.focus({ kind: 'surface', surface })).navigation.selection.space).toEqual(result.navigation.selection.space)
+      const inspected = await f.rpc!.call('app.inspect', {})
+      expect((inspected.observation as { desktop: { selection: { space: unknown; surface: string } } }).desktop.selection).toMatchObject({ space: result.navigation.selection.space, surface })
+      if (surface === 'focus') expect(f.container.querySelector('aside[aria-label="Focus workspace"]')).not.toBeNull()
     }
-    expect(seen.filter(value => value === 'focus')).toHaveLength(5)
-    expect(seen.filter(value => value === 'inspect.client')).toHaveLength(4)
-  } finally { await rpc?.dispose(); await server.stop(); await rm(directory, { recursive: true, force: true }); await f.close() }
+    expect(f.seen.filter(value => value === 'focus')).toHaveLength(5)
+    expect(f.seen.filter(value => value === 'inspect.client')).toHaveLength(4)
+  } finally { await f.close() }
+})
+
+it('same-target public exact navigation explicitly reopens a collapsed Focus workface', async () => {
+  const f = await publicFocusFixture()
+  try {
+    await f.chooseFile(); const held = useAppStore.getState().workbenchSpaceSelection
+    await collapseFocus(f)
+    expect((await f.focus(f.exactTarget)).navigation.selection.space).toEqual(held)
+    await f.focus({ kind: 'surface', surface: 'focus' })
+    expect(f.container.querySelector('aside[aria-label="Focus workspace"]')).not.toBeNull()
+    expect(useAppStore.getState().workbenchSpaceSelection).toEqual(held)
+  } finally { await f.close() }
+})
+
+it('surface-only public Focus navigation preserves a collapsed workface', async () => {
+  const f = await publicFocusFixture()
+  try {
+    await f.chooseFile(); const held = useAppStore.getState().workbenchSpaceSelection
+    await collapseFocus(f)
+    await f.focus({ kind: 'surface', surface: 'focus' })
+    expect(f.container.querySelector('aside[aria-label="Focus workspace"]')).toBeNull()
+    expect(useAppStore.getState().workbenchSpaceSelection).toEqual(held)
+  } finally { await f.close() }
+})
+
+it('a delayed public navigation ACK cannot replay reveal after a later local collapse', async () => {
+  const f = await publicFocusFixture()
+  try {
+    await f.chooseFile(); await collapseFocus(f)
+    f.holdNextReply()
+    const { pending } = await f.beginFocus(f.exactTarget)
+    await act(async () => useAppStore.getState().setMainSurface('agents'))
+    await collapseFocus(f)
+    await f.releaseReply(); await pending
+    expect(f.container.querySelector('aside[aria-label="Focus workspace"]')).toBeNull()
+  } finally { await f.close() }
+})
+
+it('a rejected public original Agent qualifier cannot reveal the retained File workface', async () => {
+  const f = await publicFocusFixture()
+  try {
+    await f.chooseFile(); await collapseFocus(f)
+    expect((await f.focus(f.exactTarget, f.session.id)).navigation.state).toBe('rejected')
+    expect(f.container.querySelector('aside[aria-label="Focus workspace"]')).toBeNull()
+  } finally { await f.close() }
+})
+
+it.each(['multiple', 'unique'] as const)('public focus-agent preserves its %s-location card semantics without guessing a Work target', async occurrence => {
+  const f = await publicFocusFixture()
+  try {
+    await f.chooseFile(); const held = useAppStore.getState().workbenchSpaceSelection
+    await collapseFocus(f)
+    const session = occurrence === 'multiple' ? f.session : f.other
+    expect((await f.focus({ kind: 'focus-agent', hostId: session.control.hostId, agentSessionId: session.id })).focus.agent?.agentSessionId).toBe(session.id)
+    expect(useAppStore.getState().workbenchSpaceSelection).toEqual(held)
+    expect(f.container.querySelector('aside[aria-label="Focus workspace"]')).toBeNull()
+    if (occurrence === 'unique') {
+      const card = f.container.querySelector<HTMLButtonElement>(`.focus-context[data-session-id="${session.id}"]`)
+      expect(card).not.toBeNull()
+      await act(async () => card!.click())
+      expect(f.container.querySelector('.focused-tab-workspace')?.getAttribute('data-focus-tab-id')).toBe(f.unique.id)
+      expect(useAppStore.getState().workbenchSpaceSelection?.regionId).toBe('public-unique-agent-region')
+    }
+    expect(useAppStore.getState().agentComposerDrafts[f.session.id]).toBe('Original unsent draft')
+  } finally { await f.close() }
 })
 
 it('actual App Attention opens Mote, selects another discussion locally, then closes without changing the main File', async () => {
@@ -290,6 +395,9 @@ it('a new unplaced Agent is explicitly unconfirmed and never borrows the held Fi
     expect(useAppStore.getState().workbenchSpaceSelection).toEqual(choice)
     expect(f.container.querySelector('.focused-tab-workspace')).toBeNull()
     expect(f.container.querySelector('.focus-location-recovery')?.textContent).toContain('No work surface occurrence')
+    await act(async () => useAppStore.getState().setMainSurface('agents'))
+    expect(f.container.querySelector('.focused-tab-workspace')).toBeNull()
+    expect(f.container.querySelector('.focus-location-recovery')?.textContent).toContain('No work surface occurrence')
     await act(async () => useAppStore.getState().setMainSurface('workbench'))
     await act(async () => useAppStore.getState().setMainSurface('agents'))
     expect(f.container.querySelector('.focused-tab-workspace [data-workbench-region-id="exact-r1"]')).not.toBeNull()
@@ -314,5 +422,217 @@ it('actual File Markdown navigation consumes its exact foreign display occurrenc
     expect(open.mock.calls[0]!.slice(0,4)).toEqual(['next-reference.md', f.file.groupId, undefined, f.resource.id])
     expect(open.mock.calls[0]![5]).toMatchObject({ displayWorkspaceId: f.display.id, resource: { hostId: f.resource.hostId, path: f.resource.path } })
     expect(useAppStore.getState().agentFocus.execution).toBe(held.agentFocus.execution)
+  } finally { await f.close() }
+})
+
+async function focusIntentSourceFixture(kind: 'agent' | 'launcher' = 'agent') {
+  const f = await fixture(), cleanup: Array<() => unknown | Promise<unknown>> = []
+  try {
+  const { createSpaceSessionsFixture } = await import('../../../packages/core/test/helpers/space-session-fixture')
+  const { AgentProviderRegistry } = await import('../../../packages/core/src/agent-provider')
+  const { spaceMountTransport } = await import('./helpers/space-mount-fixture')
+  const source = await createSpaceSessionsFixture(cleanup), sid = 'original-focus-intent-source', creation = 'original-focus-intent-creation'
+  const physicalReads: Promise<unknown>[] = []
+  for (const owner of [source.b, source.d]) {
+    const read = owner.core.readSessionHistoryPage.bind(owner.core)
+    vi.spyOn(owner.core, 'readSessionHistoryPage').mockImplementation((...args) => {
+      const pending = read(...args); physicalReads.push(pending); return pending
+    })
+  }
+  // Unmount closes logical subscribers; finish their own physical reads before
+  // disposing these original owners and removing the fixture's private roots.
+  cleanup.push(async () => { await Promise.allSettled(physicalReads) })
+  source.d.core.providers.register(new AgentProviderRegistry().get('codex'))
+  const original = await source.d.put(sid)
+  const stored = { ...original, creation: { createOperationId: creation, initialPrompt: 'unknown' as const } }
+  const registry = Reflect.get(source.d.core, 'registry') as { put(value: typeof stored, expected: typeof stored.run): Promise<void> }
+  await registry.put(stored, original.run)
+  const admitted = await source.admit('D-in-B', source.d.owner.runtimeId, sid, creation)
+  const target = { hostId: 'focus-intent-source', reference: source.reference,
+    zoneId: admitted.address.zoneId!, workspaceId: admitted.address.workspaceId! }
+  const main = spaceMountTransport(cleanup, [{ id: target.hostId, carrier: {
+    forwardRpc: source.b.rpc.call.bind(source.b.rpc), subscribeRpc: source.b.rpc.subscribe.bind(source.b.rpc)
+  } }], useAppStore.getState().config!)
+  vi.spyOn(api.spaceMounts, 'call').mockImplementation(main.api.call)
+  vi.spyOn(api.spaceMounts, 'watch').mockImplementation(main.api.watch)
+  vi.spyOn(api.spaceMounts, 'sessions').mockImplementation(main.api.sessions)
+  vi.spyOn(api.spaceMounts, 'member').mockImplementation(main.api.member)
+  vi.spyOn(api.spaceMounts, 'reading').mockImplementation(main.api.reading)
+  let snapshot = await main.api.call('snapshot', { hostId: target.hostId, reference: target.reference })
+  const selectedTabId = kind === 'launcher' ? 'original-source-launcher-tab' : admitted.address.tabId!
+  const selectedRegionId = kind === 'launcher' ? 'original-source-launcher-position' : admitted.address.regionId!
+  if (kind === 'launcher') {
+    const tab = snapshot.scope.tabs.find(tab => tab.tabId === admitted.address.tabId)!
+    await main.api.call('apply', { hostId: target.hostId, reference: target.reference, edit: { reference: target.reference,
+      expectedRevision: snapshot.revision, changes: { tabs: [{ ...tab, tabId: selectedTabId, name: 'Original Source Launcher', regionIds: [selectedRegionId] }],
+        regions: [{ regionId: selectedRegionId, tabId: selectedTabId, kind: 'launcher', agentSessionId: null, runId: null,
+          execution: { hostId: 'local', cwd: '/b/project', runtimeId: source.b.owner.runtimeId } }] } } })
+    snapshot = await main.api.call('snapshot', { hostId: target.hostId, reference: target.reference })
+  }
+  const { originalSourceInputOwnerKey } = await import('../src/renderer/src/lib/original-space-navigation')
+  const owner = originalSourceInputOwnerKey(source.d.owner.runtimeId, sid), draft = 'Original Source draft remains unsent'
+  await act(async () => {
+    useAppStore.getState().mountSpace(target, false)
+    useAppStore.getState().observeSpaceMount(target, { snapshot, reading: false })
+    useAppStore.getState().setAgentComposerDraft(owner, draft)
+    useAppStore.getState().openOriginalSpaceLocation({ target, occurrence: {
+      tabId: selectedTabId, regionId: selectedRegionId, displayWorkspaceId: target.workspaceId
+    } }, false)
+  })
+  await vi.waitFor(() => expect(f.container.querySelector('.focused-tab-workspace')).not.toBeNull())
+  // The original navigation owner supplies its qualified choice after the first
+  // presentation has mounted; do not patch a Runtime qualifier into test state.
+  await act(async () => useAppStore.getState().openOriginalSpaceLocation({ target, occurrence: {
+    tabId: selectedTabId, regionId: selectedRegionId, displayWorkspaceId: target.workspaceId
+  } }, false))
+  expect(useAppStore.getState().workbenchSpaceSelection?.sourceRuntimeId).toBe(target.reference.runtimeId)
+  return { ...f, source, main, target, snapshot, admitted, selectedTabId, selectedRegionId, sid, owner, draft, original,
+    async close() { await f.close(); for (const close of cleanup.reverse()) await close() }
+  }
+  } catch (error) { await f.close(); for (const close of cleanup.reverse()) await close(); throw error }
+}
+async function collapseFocus(f: Awaited<ReturnType<typeof fixture>>) {
+  const close = f.container.querySelector<HTMLButtonElement>('[aria-label="Close Focus workspace"]')
+  expect(close).not.toBeNull()
+  await act(async () => close!.click())
+  expect(f.container.querySelector('aside[aria-label="Focus workspace"]')).toBeNull()
+}
+
+it.each(['agent', 'launcher'] as const)('background Source %s snapshots keep Focus collapsed through actual owner changes', async kind => {
+  const f = await focusIntentSourceFixture(kind)
+  try {
+    await collapseFocus(f)
+    const before = useAppStore.getState(), held = before.workbenchSpaceSelection
+    await act(async () => useAppStore.getState().observeSpaceMount(f.target, { snapshot: f.snapshot, reading: false }))
+    expect(f.container.querySelector('aside[aria-label="Focus workspace"]')).toBeNull()
+    // Both shapes receive a real Source owner change. Only the Agent case
+    // unbinds its original sole occurrence, proving a genuine address change.
+    const selectedTab = f.snapshot.scope.tabs.find(tab => tab.tabId === f.selectedTabId)!
+    await f.main.api.call('apply', { hostId: f.target.hostId, reference: f.target.reference, edit: {
+      reference: f.target.reference, expectedRevision: f.snapshot.revision,
+      changes: kind === 'agent' ? { remove: { tabs: [f.selectedTabId], regions: f.snapshot.scope.regions.filter(region => region.tabId === f.selectedTabId).map(region => region.regionId) } }
+        : { tabs: [{ ...selectedTab, tabId: 'background-source-tab', name: 'Another original Source Tab', regionIds: ['background-source-launcher'] }],
+          regions: [{ regionId: 'background-source-launcher', tabId: 'background-source-tab', kind: 'launcher', agentSessionId: null, runId: null,
+            execution: { hostId: 'local', cwd: '/b/project', runtimeId: f.source.b.owner.runtimeId } }] }
+    } })
+    const changed = await f.main.api.call('snapshot', { hostId: f.target.hostId, reference: f.target.reference })
+    await act(async () => useAppStore.getState().observeSpaceMount(f.target, { snapshot: changed, reading: false }))
+    const after = useAppStore.getState()
+    if (kind === 'agent') {
+      expect(after.workbenchSpaceSelection).not.toEqual(held)
+      expect(after.workbenchSpaceSelection).toMatchObject({ spaceId: f.target.reference.spaceId, zoneId: f.target.zoneId,
+        tabId: null, regionId: null, groupId: null })
+    } else expect(after.workbenchSpaceSelection).toEqual(held)
+    expect(f.container.querySelector('aside[aria-label="Focus workspace"]')).toBeNull()
+    expect(after.agentComposerDrafts[f.owner]).toBe(f.draft)
+    expect((await f.source.d.core.readAgentSession(f.sid))!.run).toEqual(f.original.run)
+    expect(after.sessions).toBe(before.sessions)
+  } finally { await f.close() }
+})
+
+it('reselecting the same ordinary Context after collapse opens its exact retained workface', async () => {
+  const f = await fixture()
+  try {
+    const held = useAppStore.getState().workbenchSpaceSelection
+    await collapseFocus(f)
+    const card = f.container.querySelector<HTMLButtonElement>(`.focus-context[data-session-id="${f.session.id}"]`)
+    expect(card).not.toBeNull()
+    await act(async () => card!.click())
+    expect(f.container.querySelector('aside[aria-label="Focus workspace"]')).not.toBeNull()
+    expect(useAppStore.getState().workbenchSpaceSelection).toEqual(held)
+    expect(useAppStore.getState().agentComposerDrafts[f.session.id]).toBe('Original unsent draft')
+  } finally { await f.close() }
+})
+
+it('reselecting the same original Source Context after collapse opens its exact workface without borrowing local identity', async () => {
+  const f = await focusIntentSourceFixture()
+  try {
+    const { focusSourceContextId } = await import('../src/renderer/src/lib/focus-source-model')
+    const id = focusSourceContextId(f.source.d.owner.runtimeId, f.sid)
+    let card: HTMLButtonElement | null = null
+    await vi.waitFor(() => { card = f.container.querySelector<HTMLButtonElement>(`.focus-context[data-session-id='${id}']`); expect(card).not.toBeNull() })
+    const held = useAppStore.getState().workbenchSpaceSelection
+    await collapseFocus(f)
+    await act(async () => card!.click())
+    expect(f.container.querySelector('aside[aria-label="Focus workspace"]')).not.toBeNull()
+    expect(useAppStore.getState().workbenchSpaceSelection).toEqual(held)
+    expect(useAppStore.getState().agentComposerDrafts[f.owner]).toBe(f.draft)
+    expect((await f.source.d.core.readAgentSession(f.sid))!.run).toEqual(f.original.run)
+    expect(useAppStore.getState().sessions.some(session => session.id === f.sid)).toBe(false)
+  } finally { await f.close() }
+})
+
+it('the real window keyboard navigation explicitly reopens the selected original Region in Focus', async () => {
+  vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue('Macintosh')
+  const f = await fixture()
+  try {
+    await f.chooseFile()
+    await collapseFocus(f)
+    await act(async () => useAppStore.getState().setMainSurface('workbench'))
+    const event = new KeyboardEvent('keydown', { key: 'ArrowLeft', metaKey: true, altKey: true, bubbles: true, cancelable: true })
+    await act(async () => f.container.querySelector('main')!.dispatchEvent(event))
+    expect(event.defaultPrevented).toBe(true)
+    expect(useAppStore.getState().workbenchSpaceSelection?.regionId).toBe(f.file.regionId)
+    await act(async () => useAppStore.getState().setMainSurface('agents'))
+    expect(f.container.querySelector('.focused-tab-workspace')?.getAttribute('data-focus-tab-id')).toBe(f.exact.id)
+    expect(useAppStore.getState().agentComposerDrafts[f.session.id]).toBe('Original unsent draft')
+  } finally { await f.close() }
+})
+
+it('the real resource-only Source Folder row never borrows the previously selected workface', async () => {
+  const f = await focusIntentSourceFixture(), navigationContainer = document.createElement('div'), root = createRoot(navigationContainer)
+  document.body.append(navigationContainer)
+  try {
+    const { SourceFolderNavigation, useSourceFolderNavigation } = await import('../src/renderer/src/components/SourceFolderNavigation')
+    const { originalSpaceResource } = await import('../src/renderer/src/lib/original-space-navigation')
+    const state = useAppStore.getState(), resource = originalSpaceResource(state, f.target, f.target.workspaceId)
+    expect(resource).toBeDefined()
+    await collapseFocus(f)
+    await act(async () => useAppStore.getState().openOriginalSpaceLocation({ target: f.target, resource }, false))
+    function Navigation() { return createElement(SourceFolderNavigation, { navigation: useSourceFolderNavigation(''), hostId: f.target.hostId }) }
+    await act(async () => root.render(createElement(Navigation)))
+    const row = navigationContainer.querySelector<HTMLButtonElement>('button[data-space-entry]')
+    expect(row).not.toBeNull()
+    expect(f.container.querySelector('aside[aria-label="Focus workspace"]')).toBeNull()
+    await act(async () => row!.click())
+    expect(useAppStore.getState().mainSurface).toBe('workbench')
+    expect(useAppStore.getState().workbenchSpaceSelection).toMatchObject({ sourceRuntimeId: f.target.reference.runtimeId,
+      spaceId: f.target.reference.spaceId, zoneId: f.target.zoneId, tabId: null, groupId: null, regionId: null })
+    await act(async () => useAppStore.getState().setMainSurface('agents'))
+    expect(f.container.querySelector('aside[aria-label="Focus workspace"]')).toBeNull()
+    expect(useAppStore.getState().agentComposerDrafts[f.owner]).toBe(f.draft)
+  } finally { await act(async () => root.unmount()); navigationContainer.remove(); await f.close() }
+})
+
+it.each([false, true])('explicit Launcher reveal contributes only an accepted foreground navigation: reveal=%s', async reveal => {
+  const f = await fixture()
+  try {
+    const before = useAppStore.getState()
+    await collapseFocus(f)
+    await act(async () => useAppStore.getState().openLauncher({ workspaceId: f.resource.id, tabGroupId: 'resource-home-group', reveal }))
+    await act(async () => useAppStore.getState().setMainSurface('agents'))
+    if (reveal) {
+      expect(useAppStore.getState().workbenchSpaceSelection).not.toEqual(before.workbenchSpaceSelection)
+      expect(f.container.querySelector('aside[aria-label="Focus workspace"]')).not.toBeNull()
+    } else {
+      expect(useAppStore.getState().workbenchSpaceSelection).toEqual(before.workbenchSpaceSelection)
+      expect(f.container.querySelector('aside[aria-label="Focus workspace"]')).toBeNull()
+    }
+    expect(useAppStore.getState().agentComposerDrafts[f.session.id]).toBe('Original unsent draft')
+  } finally { await f.close() }
+})
+
+
+it('an explicit complete original Source location reveals its accepted workface', async () => {
+  const f = await focusIntentSourceFixture()
+  try {
+    const held = useAppStore.getState().workbenchSpaceSelection
+    await collapseFocus(f)
+    await act(async () => useAppStore.getState().openOriginalSpaceLocation({ target: f.target, occurrence: {
+      tabId: f.selectedTabId, regionId: f.selectedRegionId, displayWorkspaceId: f.target.workspaceId } }))
+    expect(useAppStore.getState().workbenchSpaceSelection).toEqual(held)
+    await act(async () => useAppStore.getState().setMainSurface('agents'))
+    expect(f.container.querySelector('aside[aria-label="Focus workspace"]')).not.toBeNull()
+    expect(useAppStore.getState().agentComposerDrafts[f.owner]).toBe(f.draft)
   } finally { await f.close() }
 })
