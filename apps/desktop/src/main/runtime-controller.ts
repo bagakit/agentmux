@@ -1187,11 +1187,26 @@ export class RuntimeController {
           const bindingId = createHash('sha256').update(JSON.stringify([
             request.hostId, hostIntent.agentSessionId, hostIntent.createOperationId
           ])).digest('hex')
-          const created = await executionBindings!.create({ bindingId,
+          // This reference observation never gates healthy creation. Main, not the
+          // Renderer, identifies the original local public Coordinator route.
+          const coordinator = this.executionCoordinatorTarget().catch(error => {
+            this.endpointWarnings.set('local', endpointWarning('local', 'Reading execution coordinator identity', error))
+            return undefined
+          })
+          let created: Awaited<ReturnType<AgentExecutionBindingService['create']>>
+          try { created = await executionBindings!.create({ bindingId,
             agentHostId: request.hostId, agentRuntimeId: inventory!.runtimeId,
             resourceHostId: resource.hostId, resourceRuntimeId: resourceHost.runtimeId, resourceWorkspacePath: resource.path,
             resourceGrant: { scope: 'host-user', bindingId },
-            agent: { ...hostIntent, agentSessionId: hostIntent.agentSessionId!, createOperationId: hostIntent.createOperationId! } })
+            agent: { ...hostIntent, agentSessionId: hostIntent.agentSessionId!, createOperationId: hostIntent.createOperationId! } }) }
+          catch (error) {
+            const target = await coordinator
+            if (target && error instanceof AgentMuxError && error.executionFailure?.reference.bindingId === bindingId &&
+              error.executionFailure.reference.agentSessionId === hostIntent.agentSessionId && error.executionFailure.reference.createOperationId === hostIntent.createOperationId) {
+              Object.assign(error, { executionRecovery: { coordinator: target, reference: error.executionFailure.reference, failure: error.executionFailure } })
+            }
+            throw error
+          }
           return { session: created.session, creation: created.session.creation! }
         } : undefined
         const receipt = boundCreation ? await boundCreation() : hostIntent ? await client.createHostAgentWithDelivery(hostIntent) : await client.createAgentWithDelivery({
@@ -1230,7 +1245,14 @@ export class RuntimeController {
         }
         throw error
       }
-      const result: AgentLaunchResult = { created, creation, projectionFailures: [] }
+      return await this.projectAgentCreation(request.hostId, created, config, creation)
+    })
+  }
+
+  /** Presentation of an already-confirmed original creation; never starts a Session. */
+  async projectAgentCreation(hostId: string, original: AgentLaunchResult['created'], config: AppConfig, creation = original.creation): Promise<AgentLaunchResult> {
+      const client = this.configuredClient(hostId), created = { ...original, hostId }
+      const result: AgentLaunchResult = { created, ...(creation ? { creation } : {}), projectionFailures: [] }
       try {
         const session = await this.sessionByTarget(
           client,
@@ -1255,7 +1277,22 @@ export class RuntimeController {
         result.projectionFailures.push({ step: 'timeline', message: error instanceof Error ? error.message : String(error) })
       }
       return result
-    })
+  }
+
+  async executionCoordinatorTarget(): Promise<{ hostId: string; runtimeId: string }> {
+    const client = this.configuredClient('local')
+    const known = runtimeOwner(client)
+    const owner = known ?? (await callOriginalDesktopHost(client, 'runtime.owner.identity', {}, {})).owner
+    if (this.configuredClient('local') !== client) throw new AgentMuxError('The original Coordinator route changed. Its intent is retained.', 'RUNTIME_OWNER_MISMATCH')
+    return { hostId: 'local', runtimeId: owner.runtimeId }
+  }
+
+  async assertExecutionCoordinator(target: { hostId: string; runtimeId: string }): Promise<void> {
+    if (target.hostId !== 'local') throw new AgentMuxError('This original Coordinator is not this Desktop owner.', 'RUNTIME_OWNER_MISMATCH')
+    const client = this.configuredClient('local')
+    const { owner } = await callOriginalDesktopHost(client, 'runtime.owner.identity', { expectedRuntimeId: target.runtimeId }, {})
+    if (this.configuredClient('local') !== client || owner.runtimeId !== target.runtimeId)
+      throw new AgentMuxError('The original execution Coordinator Runtime does not match. Its request was not rerouted.', 'RUNTIME_OWNER_MISMATCH')
   }
 
   /**

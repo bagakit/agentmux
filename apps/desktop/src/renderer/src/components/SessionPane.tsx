@@ -43,6 +43,7 @@ import type { ConversationAnnotation } from '@agentmux/client-ui/components/Conv
 import { ConversationAnnotationNote, type ConversationAnnotationNoteHandle } from './ConversationAnnotationNote'
 import { formatConversationAnnotation } from '../lib/conversation-annotation-delivery'
 import { SessionConnectingSurface } from './SessionConnectingSurface'
+import { ExecutionConnectingSurface } from './PendingExecutionRecovery'
 import { ServiceWindowNotice } from './ServiceWindowNotice'
 import { ContinuitySupervisionNotice } from './ContinuitySupervisionNotice'
 import { SessionRecoveryActions } from './SessionRecoveryActions'
@@ -1056,7 +1057,9 @@ export function SessionPane({
   // A launching Region exists before Core returns its Session snapshot. Keep that handoff
   // neutral; interrupted and exited Sessions use the explicit recovery banners below.
   if (!session || !terminalThemeId) {
-    const connectingSurface = <SessionConnectingSurface key={`connecting:${sessionId}`}
+    const recovery = pendingLaunch?.requestIssue?.executionRecovery
+    const connectingSurface = <ExecutionConnectingSurface key={`connecting:${sessionId}`}
+          {...(recovery && mailboxOrigin.tabId && mailboxOrigin.regionId ? { recovery, origin: { tabId: mailboxOrigin.tabId!, regionId: mailboxOrigin.regionId!, agentSessionId: sessionId } } : {})}
           phase={pendingLaunch ? 'launch' : recoveryCandidate && !unobservedIdentity ? 'restore' : 'connect'}
           unknownTerminalCreation={!session && pendingTerminal}
           creationRecovery={storageDiagnostic ? { waiting: creationWaiting, description: <>

@@ -1137,7 +1137,15 @@ export type SessionInputOperationResult<T> = { ok: true; value: T } | { ok: fals
 export type SessionAgentLaunchResult = { ok: true; result: AgentLaunchResult } | { ok: false; error: {
   code: string; message: string; detail?: string; controlFailure: AgentMuxControlFailure
   agentSessionId?: string; createOperationId?: string
+  executionRecovery?: AgentExecutionRecoveryReference
 } }
+
+/** Main's exact original Coordinator, plus Core's acknowledged immutable intent locator. */
+export type AgentExecutionRecoveryReference = {
+  coordinator: { hostId: string; runtimeId: string }
+  reference: import('@agentmux/core').AgentExecutionReference
+  failure?: import('@agentmux/core').AgentExecutionFailure
+}
 
 /** Reading identity only: `active` is a durable record state, never a process observation. */
 export type AgentSessionNameMetadata = {
@@ -1967,9 +1975,10 @@ export type AgentMuxDesktopApi = {
     snapshot(): Promise<RuntimeSnapshot>
     /** Current Desktop connection observations; never waits for Session membership. */
     endpointWarnings(): Promise<RuntimeEndpointWarning[]>
-    executionBinding(bindingId: string): Promise<import('@agentmux/core').AgentExecutionInspection | null>
+    executionBinding(bindingId: string | AgentExecutionRecoveryReference): Promise<import('@agentmux/core').AgentExecutionInspection | null>
     rejoinExecutionBinding(bindingId: string): Promise<import('@agentmux/core').AgentExecutionInspection>
-    observeExecutionBinding(bindingId: string, listener: (value: import('@agentmux/core').AgentExecutionInspection | null) => void, onError: (message: string) => void): () => void
+    observeExecutionBinding(bindingId: string | AgentExecutionRecoveryReference, listener: (value: import('@agentmux/core').AgentExecutionInspection | null) => void, onError: (message: string) => void): () => void
+    continueExecution(input: AgentExecutionRecoveryReference): Promise<AgentLaunchResult>
     notifyInputOccupation(control: AgentSessionControl): Promise<void>
     nativeSessions(input: NativeAgentSessionsInput): Promise<NativeAgentSessionsResult>
     nativeHistoryPage(input: NativeAgentHistoryInput): Promise<NativeAgentHistoryResult>

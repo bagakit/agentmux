@@ -6782,7 +6782,9 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
             const failure = error as { controlFailure?: import('@agentmux/core').AgentMuxControlFailure; code?: unknown } | null
             if (failure?.controlFailure?.disposition !== 'not_applied') set(current => reducePendingAgentLaunchIssue(current, input.agentSessionId,
               { hostId: input.hostId, createOperationId: input.createOperationId },
-              { message: presentError(error), code: typeof failure?.code === 'string' ? failure.code : null }))
+              { message: presentError(error), code: typeof failure?.code === 'string' ? failure.code : null,
+                ...((error as { executionRecovery?: import('../../shared/contracts').AgentExecutionRecoveryReference })?.executionRecovery
+                  ? { executionRecovery: (error as { executionRecovery: import('../../shared/contracts').AgentExecutionRecoveryReference }).executionRecovery } : {}) }))
             throw error
           })
         },
@@ -10901,7 +10903,9 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
             controlFailure: ownerFailure?.controlFailure?.disposition === 'unknown' ? ownerFailure.controlFailure
               : { disposition: 'unknown' as const, confirmedInputBytes: null } })
         set(current => reducePendingAgentLaunchIssue(current, sessionId, { hostId: workspace.hostId, createOperationId },
-          { message: presentError(error), code: typeof retained.code === 'string' ? retained.code : null }))
+          { message: presentError(error), code: typeof retained.code === 'string' ? retained.code : null,
+            ...((error as { executionRecovery?: import('../../shared/contracts').AgentExecutionRecoveryReference })?.executionRecovery
+              ? { executionRecovery: (error as { executionRecovery: import('../../shared/contracts').AgentExecutionRecoveryReference }).executionRecovery } : {}) }))
         get().reportError(retained, { kind: 'indeterminate', lifecycle: { step: 'launch', regionId, tabId } })
         throw retained
       }

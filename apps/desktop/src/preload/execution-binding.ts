@@ -1,11 +1,19 @@
 import type { IpcRenderer, IpcRendererEvent } from 'electron'
 import type { AgentExecutionInspection } from '@agentmux/core'
 import { mintObjectId } from '@agentmux/identity'
+import type { AgentExecutionRecoveryReference, SessionAgentLaunchResult } from '../shared/contracts'
+import { unwrapSessionAgentLaunchResult, unconfirmedSessionAgentLaunch } from '../shared/session-agent-launch-result'
 export function createExecutionBindingApi(ipc: Pick<IpcRenderer, 'invoke' | 'on' | 'off'>) {
   return {
-    executionBinding: (bindingId: string): Promise<AgentExecutionInspection | null> => ipc.invoke('sessions:executionBinding', bindingId),
+    executionBinding: (bindingId: string | AgentExecutionRecoveryReference): Promise<AgentExecutionInspection | null> => ipc.invoke('sessions:executionBinding', bindingId),
     rejoinExecutionBinding: (bindingId: string): Promise<AgentExecutionInspection> => ipc.invoke('sessions:rejoinExecutionBinding', bindingId),
-    observeExecutionBinding(bindingId: string, listener: (value: AgentExecutionInspection | null) => void, onError: (error: string) => void) {
+    async continueExecution(input: AgentExecutionRecoveryReference) {
+      let result: SessionAgentLaunchResult
+      try { result = await ipc.invoke('sessions:continueExecution', input) }
+      catch (error) { throw unconfirmedSessionAgentLaunch(input.reference, error) }
+      return unwrapSessionAgentLaunchResult(result)
+    },
+    observeExecutionBinding(bindingId: string | AgentExecutionRecoveryReference, listener: (value: AgentExecutionInspection | null) => void, onError: (error: string) => void) {
       const watchId = mintObjectId()
       let closed = false
       const changed = (_event: IpcRendererEvent, value: { watchId: string; inspection: AgentExecutionInspection | null }) => {

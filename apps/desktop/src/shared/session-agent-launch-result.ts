@@ -10,6 +10,7 @@ function failure(input: Identity, error: unknown, transport = false): Failure {
     code: transport ? 'AGENT_CREATION_UNCONFIRMED' : source?.code ?? 'AGENT_CREATION_UNCONFIRMED',
     message: source?.message ?? String(error),
     ...(source?.detail === undefined ? {} : { detail: source.detail }),
+    ...(!transport && source?.executionRecovery ? { executionRecovery: source.executionRecovery } : {}),
     // A channel rejection may happen after start; only the structured owner outcome can be certain.
     controlFailure: !transport && source?.controlFailure ? source.controlFailure : { disposition: 'unknown', confirmedInputBytes: null },
     ...(agentSessionId === undefined ? {} : { agentSessionId }),

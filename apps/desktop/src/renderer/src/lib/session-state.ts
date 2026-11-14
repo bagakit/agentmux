@@ -115,7 +115,7 @@ export type PendingAgentLaunch = {
   /** Exact submitted request, captured before launch; never reconstructed from an editable draft. */
   request?: { launcher?: import('../../../shared/contracts').AgentLaunchInput['launcher']; toolWorkspace?: import('../../../shared/contracts').AgentLaunchInput['toolWorkspace']; executionWorkspaceId?: string; executorRevision?: string; executorId: string; hostId?: string; workspacePath?: string; createOperationId?: string; prompt?: string; launchOptions?: import('../../../shared/contracts').AgentLaunchInput['launchOptions']; agentMuxNote?: string; goalPmo?: import('@agentmux/host/goal-pmo-origin').GoalPmoIntent }
   /** This exact invocation rejected. It does not establish a Core creation or Run outcome. */
-  requestIssue?: { message: string; code: string | null }
+  requestIssue?: { message: string; code: string | null; executionRecovery?: import('../../../shared/contracts').AgentExecutionRecoveryReference }
   events: RuntimeEvent[]
   overflowed: boolean
   /** Accepted Core identity while optional display reads are unavailable. */

@@ -2597,7 +2597,9 @@ export async function registerIpc(args: {
     onObservation: inspection => executionBindingReaders.publish(inspection),
     resolveHost: hostId => args.runtime.executionBindingHost(hostId)
   })
-  registerExecutionBindingIpc({ handle: handleWithEvent, bindings: executionBindings, readers: executionBindingReaders })
+  registerExecutionBindingIpc({ handle: handleWithEvent, bindings: executionBindings, readers: executionBindingReaders,
+    coordinator: target => args.runtime.assertExecutionCoordinator(target),
+    project: (hostId, session) => args.runtime.projectAgentCreation(hostId, session, config) })
   // Rejoin only retained tool readers. Startup never creates or restores an Agent.
   void executionBindings.restoreReaders().catch(error => console.warn('Original tool execution observation is unavailable:', error))
   const control = new AgentMuxControlServer({
