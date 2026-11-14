@@ -59,6 +59,7 @@ import {
 } from '../lib/region-focus'
 import { layoutForActiveTopic } from '../lib/scratch-topic-layout'
 import { useWorkbenchObjectLayout } from '../hooks/useWorkbenchObjectLayout'
+import { workbenchSelectionCatalog } from '../lib/desktop-focus-navigation'
 import { projectWorkbenchProjection, workbenchZoneUnplacedGroupId, selectWorkbenchProjectionTab, sameWorkbenchProjectionSelection, workbenchProjectionMatches, workbenchProjectionSlotId, workbenchRegionProjectionSlotId, workbenchProjectionTabIds, workbenchProjectionZone, WorkbenchProjectionContext, type WorkbenchProjection } from '../lib/workbench-projection'
 import { StableWorkbenchView } from './StableWorkbenchView'
 import { workbenchDisplayTabs, workbenchDisplayReferenceMatches, workbenchDisplayOccurrenceAmbiguous, workbenchDisplayGroupMatches, workbenchProjectionSplitPath } from '../lib/workbench-resource-display'
@@ -2045,7 +2046,10 @@ export function WorkspaceWorkbench({
       return
     }
     const choice = objectLayout.choice
-    const tabId = openLauncher({ workspaceId, ...(groupId ? { tabGroupId: groupId } : {}),
+    const zone = choice?.zoneId ? workbenchSelectionCatalog(useAppStore.getState()).zones.find(item => item.zoneId === choice.zoneId) : undefined
+    if (choice?.zoneId && !zone) { rejectUnconfirmedPlacement(); return }
+    const resourceWorkspaceId = zone?.workspaceId ?? workspaceId
+    const tabId = openLauncher({ workspaceId: resourceWorkspaceId, displayWorkspaceId: workspaceId, ...(groupId ? { tabGroupId: groupId } : {}),
       ...(choice?.zoneId ? { zoneId: choice.zoneId } : topicId ? { topicId } : {}), reveal: viewOwnership === 'owner' })
     if (tabId) onTabSelect?.(tabId, groupId)
   }
