@@ -5,6 +5,8 @@ import { defineConfig } from 'vitest/config'
 import source from './vitest.focus-zone-organization.config.mts'
 const root=resolve(import.meta.dirname,'../../..')
 const mutations={
+ 'lose-hidden-draft':['renderer/src/components/FocusProjectPreferences.tsx','if (!resumeDraft.current)','if (true)'],
+ 'leave-open':['renderer/src/components/FocusProjectPreferences.tsx','if (!active && open)','if (false)'],
  'wrong-container':['renderer/src/components/FocusZoneLayoutToggle.tsx','key: intent.key, presentation: intent.presentation','key: intent.key + ":wrong", presentation: intent.presentation'],
  'late-scope':['renderer/src/components/FocusZoneLayoutToggle.tsx','if (live.current && scope.current === intent.key && generation.current === token) setAttempt({ intent, token, pending: false','if (live.current) setAttempt({ intent, token, pending: false'],
  'lost-slot':['renderer/src/components/FocusProjectPreferences.tsx','discussionVisited ? discussion?.','open ? discussion?.'],

@@ -81,3 +81,32 @@ it('discussion owners mount only after opening, retain their receipt while close
  await act(async()=>useAppStore.setState({config:{...useAppStore.getState().config!}}));expect(activeReads).toHaveBeenCalledTimes(reads)
  await click('Project preferences · One');expect(mounts).toBe(1);expect(button('Original request queued')).not.toBeNull()
 })
+
+it('leaving Focus closes the actual panel without reviving it on return or losing the retained discussion receipt',async()=>{
+ setup();let mounts=0,unmounts=0
+ function Discussion({active,container}:FocusDiscussionSlot){
+  const [receipt,setReceipt]=useState('Not submitted')
+  useEffect(()=>{++mounts;return()=>{++unmounts}},[])
+  return active&&container?createPortal(<button onClick={()=>setReceipt('Original request queued')}>{receipt}</button>,container):null
+ }
+ const render=(active:boolean)=>dom.render(<FocusProjectPreferences active={active} projectKey={project.key} name="One" discussion={slot=><Discussion {...slot}/>}/>)
+ await render(true);await click('Project preferences · One')
+ const note=document.querySelector<HTMLInputElement>('[aria-label="Project note"]')!
+ await act(async()=>{Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(note,'Unsubmitted project note');note.dispatchEvent(new Event('input',{bubbles:true}))})
+ await click('Not submitted');expect(mounts).toBe(1)
+ const later=document.createElement('button');later.textContent='Original project Launcher';document.body.appendChild(later)
+ try{
+  await render(false)
+  expect(document.querySelector('[data-focus-project-preferences]')).toBeNull()
+  expect(document.querySelector('[data-focus-group-discussion-host]')).toBeNull()
+  await act(async()=>later.focus());expect(document.activeElement).toBe(later);expect(unmounts).toBe(0)
+  await render(true)
+  expect(document.querySelector('[data-focus-project-preferences]')).toBeNull()
+  expect(document.activeElement).toBe(later);expect(mounts).toBe(1)
+  await click('Project preferences · One');expect(button('Original request queued')).not.toBeNull();expect(mounts).toBe(1)
+  expect(document.querySelector<HTMLInputElement>('[aria-label="Project note"]')?.value).toBe('Unsubmitted project note')
+  await click('Cancel');await click('Project preferences · One')
+  expect(document.querySelector<HTMLInputElement>('[aria-label="Project note"]')?.value).toBe('Original note')
+  expect(button('Original request queued')).not.toBeNull();expect(mounts).toBe(1)
+ }finally{later.remove()}
+})
