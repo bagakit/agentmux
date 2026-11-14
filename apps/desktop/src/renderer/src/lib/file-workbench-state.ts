@@ -527,8 +527,8 @@ export function reduceDocumentRead(
     return {
       ...state,
       documentObservationGenerations,
-      ...(matchesCurrentContent || sameSourceBaseline
-        ? { ...(matchesCurrentContent ? { dirtyDocuments: { ...state.dirtyDocuments, [key]: false } } : {}),
+      ...(matchesCurrentContent
+        ? { dirtyDocuments: { ...state.dirtyDocuments, [key]: false },
           documents: { ...state.documents, [key]: { ...withoutFileReadIdentity(current),
             ...(result.document.readSource ? { readSource: result.document.readSource } : {}),
             ...(result.document.legacyMainNote ? { legacyMainNote: result.document.legacyMainNote } : {}),
@@ -537,7 +537,8 @@ export function reduceDocumentRead(
             // A read may reconcile an existing write receipt, but cannot invent one.
             ...(current.noteWriteAttribution?.status === 'unconfirmed' && result.document.noteProvenance.status === 'recorded'
               ? { noteWriteAttribution: { status: 'recorded' as const } } : {}) } : {}) } } }
-        : {}),
+        : sameSourceBaseline ? { documents: { ...state.documents, [key]: { ...withoutFileReadIdentity(current),
+          ...(result.document.readIdentity ? { readIdentity: result.document.readIdentity } : {}) } } } : {}),
       ...(clearsIssue ? { documentIssues: withoutIssue(state.documentIssues, key) } : {})
     }
   }
