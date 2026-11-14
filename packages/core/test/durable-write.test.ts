@@ -291,15 +291,17 @@ describe('descriptor-relative durable writes', () => {
 })
 
 /**
- * 覆盖性契约：会话存储、时间轴快照、三个桌面侧存储这五个 sink 必须都走 durableWriteFile，
+ * 覆盖性契约：会话文档、三个桌面侧存储这四个 file-based sink 必须都走 durableWriteFile，
  * 且不能残留 rename()/裸 writeFile() 的老原子写代码。
+ * Timeline 的 SQLite 事务与重启持久化由 agent-session-store.test.ts 和 captured-history-*.test.ts
+ * 的行为用例验收，不能把它反向要求成这个文件写入 helper 的第二个调用点。
  * 事实从源码反推（grep 真实文件），并自证扫描非空——扫到空集是这类测试的典型假绿。
  */
 const repoRoot = fileURLToPath(new URL('../../../', import.meta.url))
 
 const REQUIRED_DURABLE_SINKS = [
-  // 一个文件里两个 sink：会话文档 + 时间轴快照。
-  { file: 'packages/core/src/agent-session-store.ts', minCalls: 2 },
+  // 一个文件里一个 file-based sink：会话文档；Timeline 由其 SQLite owner 单独验收。
+  { file: 'packages/core/src/agent-session-store.ts', minCalls: 1 },
   { file: 'apps/desktop/src/main/config-store.ts', minCalls: 1 },
   { file: 'apps/desktop/src/main/window-geometry-store.ts', minCalls: 1 },
   { file: 'apps/desktop/src/main/browser-profile-store.ts', minCalls: 1 }
@@ -313,8 +315,8 @@ function countMatches(source: string, pattern: RegExp): number {
   return source.match(pattern)?.length ?? 0
 }
 
-describe('持久化写入的覆盖性与不遗漏', () => {
-  it('五个 sink 都调用 durableWriteFile（自证扫描非空）', async () => {
+describe('file-based 持久化写入的覆盖性与不遗漏', () => {
+  it('四个 file-based sink 都调用 durableWriteFile（自证扫描非空）', async () => {
     expect(REQUIRED_DURABLE_SINKS.length).toBeGreaterThan(0)
     let totalCalls = 0
     for (const sink of REQUIRED_DURABLE_SINKS) {
