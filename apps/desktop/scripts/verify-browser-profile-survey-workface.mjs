@@ -17,15 +17,18 @@ const { build: viteBuild } = require('vite')
 const args = process.argv.slice(2), outputIndex = args.indexOf('--output'), caseIndex = args.indexOf('--case'), mutationIndex = args.indexOf('--mutation')
 const selectedCase = caseIndex < 0 ? 'complete' : args[caseIndex + 1]
 assert.ok(['admission', 'profile-switch', 'settings', 'complete'].includes(selectedCase), 'Choose an exact Profile Survey case')
-assert.ok(['admission', 'settings'].includes(selectedCase), 'The profile-switch/complete cases have no dedicated business oracle yet; they cannot qualify through admission')
+assert.ok(['admission', 'profile-switch', 'settings'].includes(selectedCase), 'The complete case has no dedicated T004 business oracle yet; it cannot qualify through admission/profile-switch')
 const mutation = mutationIndex < 0 ? null : args[mutationIndex + 1]
-const mutations = {
+const mutationCases = { admission: {
   'omit-explicit-admission': { file: 'apps/desktop/src/renderer/src/store.ts', before: 'if (request.profileId !== undefined) {', after: 'if (false && request.profileId !== undefined) {' },
   'project-whole-task': { file: 'apps/desktop/src/renderer/src/lib/survey-page-references.ts', before: "entity: { kind: 'region', regionId: page.regionId }", after: "entity: { kind: 'tab', tabId: owner.tab.id }" },
   'duplicate-region-host': { file: 'apps/desktop/src/renderer/src/components/WorkspaceWorkbench.tsx', before: 'const nativeRegionTarget = projectedSurface\n', after: "const nativeRegionTarget = projectedSurface && projectedSurface.kind !== 'browser'\n" },
   'close-on-weak-save': { file: 'apps/desktop/src/renderer/src/store.ts', before: 'try { survey = await get().registerSurveyBrowserPage(reference, browser.profileId!) }', after: "try { survey = await get().registerSurveyBrowserPage(reference, browser.profileId!); if (survey.outcome !== 'registered') await api.browser.close(browserId) }" }
-}
-assert.ok(mutation === null || selectedCase === 'admission' && Object.hasOwn(mutations, mutation), 'Only an exact admission production mutation is supported')
+}, 'profile-switch': {
+  'steal-environment-keyboard-focus': { file: 'apps/desktop/src/renderer/src/components/GlobalSurveySurface.tsx', before: 'if (!toolsOpen && !selection && focused instanceof HTMLElement && surface?.contains(focused) &&', after: 'if (false && !toolsOpen && !selection && focused instanceof HTMLElement && surface?.contains(focused) &&' }
+} }
+const mutations = mutationCases[selectedCase] ?? {}
+assert.ok(mutation === null || Object.hasOwn(mutations, mutation), 'Only an exact production mutation for the selected case is supported')
 assert.ok(args.every((arg, index) => ['--case', '--output', '--mutation'].includes(arg) || index === outputIndex + 1 && outputIndex >= 0 || index === caseIndex + 1 && caseIndex >= 0 || index === mutationIndex + 1 && mutationIndex >= 0), 'Only --case, --output and --mutation are supported')
 const hash = bytes => createHash('sha256').update(bytes).digest('hex')
 const output = resolve(outputIndex < 0 ? join(root, '.tmp/browser-profile-survey-workface', randomUUID()) : args[outputIndex + 1])
@@ -210,6 +213,7 @@ try {
   const first = await execute('first'), restart = await execute('restart')
   assert.notEqual(first.pid, restart.pid, 'Recovery uses a second physical process')
   assert.equal(first.businessPassed, true, 'Boot or gallery rendering cannot qualify admission'); assert.equal(restart.businessPassed, true); assert.deepEqual(restart.recoveredIdentity, first.savedIdentity, 'Second PID must read original Profile/Browser/Region/Survey and mixed Task data without reseeding')
+  if(selectedCase==='profile-switch')for(const phase of [first,restart]){assert.equal(phase.profileSwitch?.completed,true);assert.ok(phase.cases.some(item=>item.kind==='profile-switch-dedicated-oracle'&&item.passed),'No admission fallthrough can qualify profile-switch')}
   for (const [file, digest] of sources) assert.equal(hash(await readFile(resolve(root, file))), digest, 'Qualification candidate remained unchanged: ' + file)
   for(const [file,binding] of artifacts)assert.equal(hash(await readFile(join(directory,file))),binding.sha256,'The exact loaded native artifact remained unchanged: '+file)
   receipt.passed = true; await save()

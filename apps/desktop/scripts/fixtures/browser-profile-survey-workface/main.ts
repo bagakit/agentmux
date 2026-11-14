@@ -2,6 +2,8 @@ import assert from 'node:assert/strict'
 import { startAgentMuxHost } from '../../../../../apps/host/src/host'
 import { persistentTask } from './persistent-task'
 import { admissionGeometry } from './admission-geometry'
+import { profileSwitchPorts } from './profile-switch-ports'
+import { profileSwitchCase } from './profile-switch-case'
 import { browserProfilePartition } from '../../../src/main/browser-profile-store'
 import { settingsCase } from './settings-case'
 import { spawn } from 'node:child_process'
@@ -68,11 +70,12 @@ function nativePage(window: BrowserWindow, url: string, profileId: string) {
 async function result(args: string[], input = '') { const value = await cli(args,input); assert.equal(value.code,0,JSON.stringify(value.value)); assert.equal(value.value.ok,true); return value.value.result }
 async function run() {
  await app.whenReady()
- if (phase === 'first') { await mkdir(join(directory,'state'),{recursive:true}); await mkdir(join(directory,'workspace'),{recursive:true}); await mkdir(join(directory,'legacy-workspace'),{recursive:true}); await writeFile(join(directory,'workspace/original.txt'),'Original authorized Workspace file.'); await writeFile(join(directory,'state/notes-location.json'),JSON.stringify({schemaVersion:1,directory:join(directory,'notes'),operations:{},pending:null})) }
+ if (phase === 'first') { await mkdir(join(directory,'state'),{recursive:true}); await mkdir(join(directory,'workspace'),{recursive:true}); await mkdir(join(directory,'legacy-workspace'),{recursive:true}); if(selectedCase==='profile-switch'){await mkdir(join(directory,'notes'),{recursive:true});await writeFile(join(directory,'legacy-workspace/original.txt'),'Original complete research input.')} await writeFile(join(directory,'workspace/original.txt'),'Original authorized Workspace file.'); await writeFile(join(directory,'state/notes-location.json'),JSON.stringify({schemaVersion:1,directory:join(directory,'notes'),operations:{},pending:null})) }
  const store = new AgentMuxFileAgentSessionStore(join(directory,'sessions.json'))
  const configStore=new ConfigStore(join(directory,'config.json'))
  const initial={...structuredClone(DEFAULT_CONFIG),hosts:[{id:'local',kind:'local',label:'Private Profile Survey proof'}],workspaces:[{id:workspaceId,name:'Private mixed task',kind:'folder',hostId:'local',path:join(directory,'workspace')},{id:legacyWorkspaceId,name:'Original whole-Zone exploration',kind:'folder',hostId:'local',path:join(directory,'legacy-workspace')}],executors:{proof:{providerId:'codex',label:'Private synthetic Provider',command:join(source,'packages/core/test/fixtures/fake-codex-cli.mjs'),args:[],injectAgentMuxGuide:false,env:{AGENTMUX_FAKE_READY_MODE:'before',AGENTMUX_FAKE_NATIVE_RECORD:'1',AGENTMUX_FAKE_NATIVE_RECORD_DIRECTORY:join(directory,'native-records')}}},browser:{...DEFAULT_CONFIG.browser,agentAutomation:true},notifications:{mode:'off'}}
- const config=phase==='first'?await configStore.save(initial as any):await configStore.get()
+ let config=phase==='first'?await configStore.save(initial as any):await configStore.get()
+ if(selectedCase==='profile-switch')config=await configStore.get()
  privateHost=await startAgentMuxHost({store,socketPath:join(directory,'semantic.sock'),desktopSocketPath:desktopBusinessSocketPath(),configurationPath:configStore.filePath,mobilePort:0,mobileBuildDirectory:join(directory,'no-mobile-assets')})
  core=privateHost.client;hosted=privateHost.hosted;hostServer=privateHost.server
  rpc=await connectAgentMuxRpc({endpoint:{transport:'unix',path:join(directory,'semantic.sock')}})
@@ -83,18 +86,19 @@ async function run() {
  const contents=window.webContents; contents.on('console-message',(event:any)=>{if(event.level==='error')console.error('Profile Survey Renderer:',event.message)})
  windows=new WorkbenchWindows(window,new WorkbenchWindowStore(join(directory,'windows.json')),()=>[{x:0,y:0,width:1600,height:1000}])
  access=createDesktopApplicationAccessOwner(runtime,join(directory,'application-access.sqlite'))
- let rejectSurveyWrites=false, rejectedWrites=0, rejectedSurveyBrowserId:string|null=null, loseProfileDirectoryAck=false
+ let rejectSurveyWrites=false, rejectedWrites=0, rejectedSurveyBrowserId:string|null=null, loseProfileDirectoryAck=selectedCase==='profile-switch'&&phase==='first'
+ const switchPorts=selectedCase==='profile-switch'?profileSwitchPorts(window,receipt,enabled=>{loseProfileDirectoryAck=enabled},browserId=>{rejectSurveyWrites=browserId!==null;rejectedSurveyBrowserId=browserId},()=>{rejectSurveyWrites=true;rejectedSurveyBrowserId=null}):null
  let holdProbeAck=false, releaseProbeAck: ((lose:boolean)=>void)|undefined
  const probeAck={hold(){holdProbeAck=true},release(lose:boolean){releaseProbeAck?.(lose)}}
- releaseObservationFaults=()=>{rejectSurveyWrites=false;loseProfileDirectoryAck=false;probeAck.release(false)}
- const userState=new WorkbenchUserStateStore(join(directory,'workbench-user-state.json'),{write:async(path,value,options)=>{const parsed=JSON.parse(String(value));if(rejectSurveyWrites&&path.endsWith('workbench-user-state.json')&&parsed.state?.surveyPageReferences?.some((page:any)=>page.browserId===rejectedSurveyBrowserId)){rejectedWrites++;throw Object.assign(new Error('Private fixture original preference writer unavailable'),{code:'EIO'})}return durableWriteFile(path,value,options)}})
- const originalSend=contents.send.bind(contents);contents.send=(channel,...args)=>{if(loseProfileDirectoryAck&&channel==='browser:profilesChanged'){receipt.droppedProfileListPushes=(receipt.droppedProfileListPushes??0)+1;return}originalSend(channel,...args)}
+ releaseObservationFaults=()=>{switchPorts?.dispose();rejectSurveyWrites=false;loseProfileDirectoryAck=false;probeAck.release(false)}
+ const userState=new WorkbenchUserStateStore(join(directory,'workbench-user-state.json'),{write:async(path,value,options)=>{const parsed=JSON.parse(String(value));if(rejectSurveyWrites&&path.endsWith('workbench-user-state.json')&&parsed.state?.surveyPageReferences?.some((page:any)=>page.browserId===rejectedSurveyBrowserId)){rejectedWrites++;if(selectedCase==='profile-switch')(receipt.profileSwitchPreferenceFailures??=[]).push({browserId:rejectedSurveyBrowserId});throw Object.assign(new Error('Private fixture original preference writer unavailable'),{code:'EIO'})}return durableWriteFile(path,value,options)}})
+ const originalSend=contents.send.bind(contents);contents.send=(channel,...args)=>{if(loseProfileDirectoryAck&&channel==='browser:profilesChanged'){receipt.droppedProfileListPushes=(receipt.droppedProfileListPushes??0)+1;return}if(switchPorts?.observeSend(channel,args,originalSend))return;originalSend(channel,...args)}
  const originalHandle=ipcMain.handle.bind(ipcMain);ipcMain.handle=(channel,handler)=>originalHandle(channel,async(event,...args)=>{
   if(channel.startsWith('browser:')||channel==='ui:writeWorkbenchState')receipt.ipc.push({channel,exactSender:event.sender===contents,exactFrame:event.senderFrame===contents.mainFrame})
   const close=channel==='browser:close'?{browserId:args[0],ack:'pending'}:null
   if(close)receipt.closeCalls.push(close)
   let observed
-  try{observed=await handler(event,...args);if(close)close.ack='confirmed'}catch(error){if(close)close.ack='failed';throw error}
+  try{observed=await(switchPorts?switchPorts.observe(channel,args,async()=>handler(event,...args)):handler(event,...args));if(close)close.ack='confirmed'}catch(error){if(close)close.ack='failed';throw error}
   if(channel==='browser:create'&&rejectSurveyWrites)rejectedSurveyBrowserId=observed.id
   if(['browser:listProfiles','browser:readProfiles'].includes(channel)&&loseProfileDirectoryAck)throw new Error('Private fixture lost the original Profile directory read ACK')
   if(channel==='browser:probeProfileNetwork'&&holdProbeAck){receipt.originalProbeReply=observed;const lose=await new Promise<boolean>(resolve=>{releaseProbeAck=resolve});holdProbeAck=false;if(lose)throw new Error('Private fixture lost the original probe ACK; inspect the same operation')}
@@ -110,6 +114,12 @@ async function run() {
  receipt.initial=await facts()
  assert.ok(await evaluate('Boolean(document.querySelector(".surface-navigation"))'),'Full production App must mount')
  if(selectedCase==='settings'){await settingsCase({phase,directory,window,evaluate,result,receipt,probeAck});receipt.businessPassed=true;receipt.passed=true;return}
+ if(selectedCase==='profile-switch'){
+  assert.ok(switchPorts)
+  await profileSwitchCase({phase,directory,window,core,evaluate,result,cli,receipt,ports:switchPorts,taskWorkspaceId:workspaceId,legacyWorkspaceId,pageUrl})
+  assert.equal(receipt.profileSwitch.completed,true,'Only the complete dedicated Profile workface oracle can qualify T002')
+  receipt.businessPassed=true;receipt.passed=true;return
+ }
  if(selectedCase!=='admission')throw new Error('This case awaits its own nonempty business oracle; admission cannot qualify T002/T004')
  contents.debugger.attach('1.3')
  if(phase==='first'){

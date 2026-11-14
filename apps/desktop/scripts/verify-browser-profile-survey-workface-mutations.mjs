@@ -7,24 +7,30 @@ import { join, resolve } from 'node:path'
 // Change loaded production bytes, never the shared worktree. A compile error,
 // timeout, cleanup failure or source drift cannot count as a killed mutation.
 const root = resolve(import.meta.dirname, '../../..')
-const args=process.argv.slice(2), onlyIndex=args.indexOf('--only'), only=onlyIndex<0?null:args[onlyIndex+1], redOnly=args.includes('--red-only')
-assert.ok(args.every((value,index)=>value==='--only'||value==='--red-only'||onlyIndex>=0&&index===onlyIndex+1),'Only --only NAME and --red-only are supported')
+const args=process.argv.slice(2), onlyIndex=args.indexOf('--only'), caseIndex=args.indexOf('--case'), only=onlyIndex<0?null:args[onlyIndex+1], redOnly=args.includes('--red-only')
+const selectedCase=caseIndex<0?'admission':args[caseIndex+1]
+assert.ok(['admission','profile-switch'].includes(selectedCase),'Choose an implemented exact business case')
+assert.ok(args.every((value,index)=>value==='--only'||value==='--red-only'||value==='--case'||onlyIndex>=0&&index===onlyIndex+1||caseIndex>=0&&index===caseIndex+1),'Only --case CASE, --only NAME and --red-only are supported')
 const output = join(root, '.tmp/browser-profile-survey-workface-mutations', randomUUID())
 const script = join(root, 'apps/desktop/scripts/verify-browser-profile-survey-workface.mjs')
 await mkdir(output, { recursive: true })
-const receipt = { passed: false, redPassed: false, productionMutations: [], restored: null }
+const receipt = { selectedCase, passed: false, redPassed: false, productionMutations: [], restored: null }
 const save = () => writeFile(join(output, 'receipt.json'), JSON.stringify(receipt, null, 2))
 const digest = bytes => createHash('sha256').update(bytes).digest('hex')
-const rules = [
+const caseRules = { admission: [
   ['omit-explicit-admission', 'registered', native => native.cases.some(value => value.kind === 'explicit-CLI-profile-open' && value.created.survey.outcome === 'not-requested')],
   ['project-whole-task', 'Exact Survey projection cannot include mixed Task siblings', native => Boolean(native.nativePage)],
   ['duplicate-region-host', 'Exact Region presentation fills the original Survey stage', native => Boolean(native.nativePage)],
   ['close-on-weak-save', 'Weak Survey failure must preserve the Main-created Browser', native => ['partial', 'unknown'].includes(native.weak?.survey.outcome)]
-]
+], 'profile-switch': [
+  ['steal-environment-keyboard-focus', 'Changing the Survey environment keeps keyboard focus', native=>native.profileSwitch.cases.some(value=>value.kind==='default-no-custom-shared-native-sign-in')&&native.profileSwitch.input.some(value=>value.kind==='keyboard-select'&&value.steps.some(step=>step.changes?.some(change=>change.trusted)))]
+] }
+const rules=caseRules[selectedCase]
+assert.ok(rules.length>0,'An implemented case must have nonempty production mutation rules')
 assert.ok(only===null||rules.some(([name])=>name===only),'Choose an exact production mutation')
 async function run(name) {
   const destination = join(output, name ?? 'restored')
-  const args = [script, '--case', 'admission', '--output', destination, ...(name ? ['--mutation', name] : [])]
+  const args = [script, '--case', selectedCase, '--output', destination, ...(name ? ['--mutation', name] : [])]
   const code = await new Promise((resolveRun, reject) => {
     const child = spawn(process.execPath, args, { cwd: root, stdio: ['ignore', 'pipe', 'pipe'] })
     let log = ''
@@ -59,6 +65,8 @@ try {
     receipt.productionMutations.push({ name, killed: true, destination, mutation, failure: native.failure.message })
     await save()
   }
+  assert.ok(receipt.productionMutations.length>0,'An empty run cannot qualify production mutation evidence')
+  assert.equal(receipt.productionMutations.length,only===null?rules.length:1)
   receipt.redPassed=true
   if(redOnly){
     process.stdout.write('Profile Survey native mutation RED confirmed; restored dual-PID proof remains for the official task gate\n'+join(output,'receipt.json')+'\n')
