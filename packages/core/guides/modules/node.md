@@ -46,7 +46,10 @@ and latitude/longitude and save the publication. Read it with
 `amux node location --host ID [--expected-runtime RT]`. The result identifies the
 original Node and includes either `location:null` or latitude, longitude, label and
 source. `meshPeer`, when present, links that same runtime to its current network and
-peer ID. A private pin in the viewer's map is a separate annotation.
+peer ID. A private pin in the viewer's map is a separate annotation. A saved device link
+can also supply its own location while its authorized workface is connected. Open
+the device and refresh the map to read it. Reading the map never starts a closed
+workspace or borrows the gateway’s position for the device.
 
 The original Node uses the following sources in order.
 
