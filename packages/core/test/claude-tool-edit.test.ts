@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest'
 import { capturedToolEdit } from '../src/conversation.js'
-import { claudeToolEdit } from '../src/providers/claude-tool-edit.js'
+import { claudeToolEdit } from '@agentmux/providers/claude/tool-edit'
 import { recordedToolEdit } from './fixtures/recorded-tool-edits.js'
 
 it('reads requested edits from the exact Provider-normalized original input', () => {

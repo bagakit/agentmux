@@ -7,7 +7,7 @@ import { createInterface } from 'node:readline'
 import { createAgentExecutionExecutor } from '../src/agent-execution-executor.js'
 import { AgentExecutionJournal } from '../src/agent-execution-journal.js'
 import { createClaudeExecutionOperations } from '../src/providers/claude-execution-operations.js'
-import { parseClaudeExecutionMessage, parseClaudeExecutionServerMessage, projectClaudeExecutionResponse } from '../src/providers/claude-execution-protocol.js'
+import { parseClaudeExecutionMessage, parseClaudeExecutionServerMessage, projectClaudeExecutionResponse } from '@agentmux/providers/claude/execution-protocol'
 
 const cleanups: (() => Promise<void>)[] = []
 afterEach(async () => { for (const cleanup of cleanups.splice(0).reverse()) await cleanup(); vi.restoreAllMocks(); vi.unstubAllEnvs() })

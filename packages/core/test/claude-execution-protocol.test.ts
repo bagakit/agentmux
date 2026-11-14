@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { buildClaudeNativeExecutorLaunchSpec, CLAUDE_EXECUTION_TOOL_NAMES, parseClaudeExecutionMessage,
-  parseClaudeExecutionServerMessage, projectClaudeExecutionResponse } from '../src/providers/claude-execution-protocol.js'
+  parseClaudeExecutionServerMessage, projectClaudeExecutionResponse } from '@agentmux/providers/claude/execution-protocol'
 
 const initialize = { jsonrpc: '2.0', id: 0, method: 'initialize', params: { protocolVersion: '2025-11-25', capabilities: {}, clientInfo: { name: 'fixture', version: '1' } } }
 function request(method: string, params: Record<string, unknown>, id: number | string = 1) {
