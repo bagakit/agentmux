@@ -44,21 +44,25 @@ export function RemoteExecutionSettingsPane({ config, active, onClose, onNavigat
   const referenceHostId = workReferenceHostId(config.hosts)
   const initialProject = config.workspaces.find(project => project.id === activeWorkspaceId && !isScratchWorkspaceId(project.id))
   const initialSelection = initialProject ? { resourceWorkspaceId: initialProject.id, agentWorkspaceId: null } : undefined
+  const work = useMemo(() => sessions.flatMap(session => {
+    if (session.kind !== 'agent') return []
+    const placement = agentWorkPlacement(session, referenceHostId)
+    return placement.mode === 'local' ? [] : [{ session, placement, name: resolveAgentName({ userName: names[session.id], fallback: session.label }).name }]
+  }), [sessions, names, referenceHostId])
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [view, setView] = useState<'library' | 'detail'>('library')
   const requestedTask = navigationRequest?.field === 'prepare' ? 'start' : navigationRequest?.field === 'routes' ? 'routes' : 'existing'
-  const [chosenTask, setTask] = useState<RemoteTask>(() => navigationRequest?.field ? requestedTask : 'routes')
-  const appliedNavigation = useRef(navigationRequest)
+  const [chosenTask, setTask] = useState<RemoteTask | null>(null)
+  const appliedNavigation = useRef<SettingsPaneProps['navigationRequest']>(undefined)
   const pendingNavigation = appliedNavigation.current !== navigationRequest
-  const task = active && pendingNavigation && navigationRequest?.field ? requestedTask : chosenTask
-  const [routesVisited, setRoutesVisited] = useState(true)
+  const task = active && pendingNavigation && navigationRequest?.field ? requestedTask : chosenTask ?? (work.length ? 'existing' : 'start')
+  const [routesVisited, setRoutesVisited] = useState(false)
   const [prepareVisited, setPrepareVisited] = useState(false)
   const taskId = useId()
   useLayoutEffect(() => {
     if (!active) return
     appliedNavigation.current = navigationRequest
-    if (!navigationRequest?.field) return
-    const next = navigationRequest.field === 'prepare' ? 'start' : navigationRequest.field === 'routes' ? 'routes' : 'existing'
+    const next = navigationRequest?.field ? requestedTask : task
     setTask(next)
     if (next === 'start') setPrepareVisited(true)
     if (next === 'routes') setRoutesVisited(true)
@@ -78,11 +82,6 @@ export function RemoteExecutionSettingsPane({ config, active, onClose, onNavigat
     if (active && task === 'existing' && narrow && view === 'detail') detailHeading.current?.focus({ preventScroll: true })
   }, [active, task, narrow, view, selectedId])
   const [query, setQuery] = useState(''), [actionError, setActionError] = useState<string | null>(null)
-  const work = useMemo(() => sessions.flatMap(session => {
-    if (session.kind !== 'agent') return []
-    const placement = agentWorkPlacement(session, referenceHostId)
-    return placement.mode === 'local' ? [] : [{ session, placement, name: resolveAgentName({ userName: names[session.id], fallback: session.label }).name }]
-  }), [sessions, names, referenceHostId])
   const observedSelected = work.find(item => item.session.id === selectedId)
   // Hiding the retained pane releases its reader, without discarding the original selected reference.
   const retainedSelected = useRef<WorkItem | undefined>(undefined)
@@ -118,7 +117,7 @@ export function RemoteExecutionSettingsPane({ config, active, onClose, onNavigat
   }
   function changeTask(next: RemoteTask) { setTask(next); if (next === 'start') setPrepareVisited(true); if (next === 'routes') setRoutesVisited(true); setActionError(null) }
   return <div ref={container} className="settings-pane-stack remote-execution-settings">
-    <header className="remote-work-header"><div><span>SPACE × AGENT</span><h3>Work across your machines</h3><p>Connect machines in Hosts. Choose their role here.</p></div><button type="button" className="remote-work-hosts" onClick={() => onNavigate('hosts')}>Manage Hosts</button></header>
+    <header className="remote-work-header"><div><span>SPACE × AGENT</span><h3>Work across your machines</h3><p>Start work on a connected machine or return to its original Agent.</p></div><button type="button" className="remote-work-hosts" onClick={() => onNavigate('hosts')}>Manage connections</button></header>
     <div className="remote-work-toolbar">
       <Tabs as="nav" className="remote-work-tasks remote-work-tasks--primary" aria-label="Remote work task"
         value={task} onValueChange={changeTask} options={remoteTasks.map(({ value, Icon, title, description }) => ({
