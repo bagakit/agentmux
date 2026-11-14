@@ -4,11 +4,11 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { AgentMuxControlServer } from '../../../packages/core/src/public-rpc-server'
+import { AgentMuxControlServer } from '@agentmux/core'
 import { formatGoalAddress } from '@agentmux/core/sharing'
-import { openDemandStore } from '../../../packages/demand/src/demand-store'
+import { openDemandStore } from '@agentmux/demand'
 import { GoalDelegationOwner } from '../../host/src/goal-delegation-owner'
-import { publicGoalRecord } from '../../host/src/goal-projection'
+import { projectHostGoal } from '../../host/src/goal-projection'
 import { bridge, owningBridge } from './helpers/first-execution-ipc-bridge'
 import { WorkbenchUserStateStore } from '../src/main/workbench-user-state'
 import { createWorkbenchUserDocument } from '../src/renderer/src/lib/workbench-user-storage'
@@ -59,7 +59,7 @@ async function workbench() {
     return result
   })
   const { plan, planState } = await bridge.api!.demands.delegation('goal.plan', { goalId, expectedOwner })
-  const demand = { ...publicGoalRecord((await store.get(goalId))!), address, plan: plan!, planState: planState! }
+  const demand = { ...projectHostGoal((await store.get(goalId))!, address), plan: plan!, planState: planState! }
   const worker = composerSession('worker'), remote = { ...worker, id: 'remote-occurrence', hostId: 'remote', control: { ...worker.control, hostId: 'remote' } }
   useAppStore.setState({ demands: { [goalId]: demand }, selectedDemandId: goalId, mainSurface: 'board',
     sessions: [worker, remote], agentNames: { worker: 'Release engineer', 'remote-occurrence': 'Remote engineer' }, goalEditDrafts: {} })
@@ -122,7 +122,7 @@ it('retains a lost receipt and an unrelated draft through a cold user-document r
   const reopened = new WorkbenchUserStateStore(f.userDocument.path)
   const cold = createWorkbenchUserDocument({ readWorkbenchState: () => reopened.read(), importWorkbenchState: value => reopened.importIfAbsent(value),
     writeWorkbenchState: value => reopened.write(value) }, () => window.localStorage)
-  const read = vi.spyOn(cold.persistent.storage, 'getItem')
+  const read = vi.fn(cold.persistent.storage.getItem as typeof previous.getItem)
   try {
     // A new renderer starts with blank memory. Keep this reset out of the original file.
     useAppStore.persist.setOptions({ storage: { ...previous, getItem: read, setItem: () => {} } })
