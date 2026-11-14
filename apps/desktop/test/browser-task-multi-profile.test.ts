@@ -33,7 +33,7 @@ class MemoryStore implements BrowserTaskAssetStore {
   }
 }
 const target = (id: string, profileId = id) => ({ id, browserId: `browser-${id}`, profileId, parameters: { entry: `fresh-${id}` } })
-async function fixture(capacity = 2) {
+async function fixture(capacity = 2, checkpoint = false) {
   const store = new MemoryStore(); let sequence = 0
   const options = { id: () => `id-${++sequence}`, parallelCapacity: () => capacity }
   let owner = new BrowserTaskAssets(store, options)
@@ -65,7 +65,7 @@ async function fixture(capacity = 2) {
   const publish = async () => {
     const asset = await importTaskRecording(owner, { id: `recording-${++sequence}`, browserId: source, revision: 1, navigationId: 'recorded', url, status: 'stopped', startedAt: 1, updatedAt: 2, steps: [] })
     const edited = await owner.edit(asset.id, asset.revision, { name: 'Submit', url, parameters: [{ key: 'entry', label: 'Entry', secret: true }],
-      steps: [{ id: 'original-fill', kind: 'fill', url, reviewed: true, target: { role: 'textbox', name: 'Entry', ordinal: 1, count: 1 }, parameterKey: 'entry' }] })
+      steps: [{ id: 'original-fill', kind: 'fill', url, reviewed: true, target: { role: 'textbox', name: 'Entry', ordinal: 1, count: 1 }, parameterKey: 'entry' }, ...(checkpoint ? [{ id: 'review', kind: 'checkpoint', url, reviewed: true }] : [])] })
     return owner.saveVersion(edited.id, edited.revision)
   }
   const asset = await publish()
@@ -171,6 +171,17 @@ describe('original task orchestration over explicit Browser/Profile targets', ()
     expect(() => parseBrowserTaskParallelInput({ operationId: 'bad', targets: [target('a'), target('a')] })).toThrow()
     const inspected = (await f.inspect('set'))!
     expect(() => parseBrowserTaskParallelInspection({ ...inspected, targets: [{ ...inspected.targets[0], run: undefined }] })).toThrow()
+  })
+
+  it('projects a later original run stop in an already waiting parallel result', async () => {
+    const f = await fixture(1, true)
+    await f.start('waiting-set')
+    await vi.waitFor(async () => expect((await f.inspect('waiting-set'))?.run.status).toBe('waiting-human'))
+    const runId = (await f.inspect('waiting-set'))!.targets[0]!.run!.id
+    await f.owner().stop(runId)
+    await vi.waitFor(async () => expect((await f.inspect('waiting-set'))?.run).toMatchObject({ status: 'stopped', counts: { stopped: 1 } }))
+    expect(await f.owner().profileReferences('a')).toEqual([])
+    expect(f.actions).toHaveLength(1)
   })
 
   it('protects cold pending Profile references through the original recycle and purge guard', async () => {
