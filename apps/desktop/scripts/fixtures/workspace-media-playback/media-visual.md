@@ -14,11 +14,11 @@
 | `preview-first-dark` | 一次新指向的最初时刻，指向帧尚未解码 | 只有时间，没有空框或旧帧 |
 | `drag-held-dark` | 播放中按住进度条拖动 32 步后保持按住 | 主画面跟手、没有播放圆盘、按住时不显示指向帧 |
 | `preview-reduced-dark` | 模拟减少动态与减少透明度后指向 | 结束态仍显示帧与时间 |
-| `preview-short-dark` | 窗口压矮到进度条上方只剩 96–100 px，刚过显示画面的门槛 | 规则允许的最小画面（约 48–52 px 高）仍能辨认，并在画面以内；看不清就提高门槛 |
-| `preview-too-short-dark` | 再压矮到不足 96 px | 只显示时间 |
+| `preview-short-dark` | 窗口压矮到进度条上方只剩 120–124 px，刚过显示画面的门槛 | 规则允许的最小画面（约 72–76 px 高）仍能辨认，在画面以内，不压住主播放圆盘；看不清就提高门槛 |
+| `preview-too-short-dark` | 再压矮到不足 120 px，指向进度条末端 | 只显示时间，时间停在画面右侧以内 |
 | `video-narrow-dark` | 右侧并排 `notes.md`，视频 Region 约 34% 宽 | 窄 Region 中保留的播放、静音、时间与全屏 |
-| `preview-narrow-dark` | 同一窄 Region 指向 55% 处 | 窄宽度下的帧尺寸与边界 |
-| `preview-edge-dark` | 同一窄 Region 指向进度条末端，此处以指针为中心的帧会越过画面右侧 | 帧停在画面两侧以内并留出间距 |
+| `preview-narrow-dark` | 同一窄 Region 指向 55% 处 | 窄宽度下的帧尺寸与边界，主播放圆盘不被压住 |
+| `preview-edge-dark` | 同一窄 Region 指向进度条末端，此处以指针为中心的帧会越过画面右侧，并落在主播放圆盘上 | 帧停在画面两侧以内并留出间距，圆盘让位 |
 | `audio-card-dark` / `-light` / `-narrow-dark` | 打开 `tone.m4a`，再并排到约 30% 宽 | 音频卡片、主绿走带控件、窄宽度下的收起 |
 | `hls-vod-dark` | 打开本地 HLS 点播 `hls/index.m3u8` | 列表播放与点播时长 |
 | `live-dark` / `-light` | ffmpeg 正在写入的 `live/live.m3u8`，播放超过 2 秒后再观察 15 秒 | LIVE 标记、无伪造总时长、明暗主题 |
