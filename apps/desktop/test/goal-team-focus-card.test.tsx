@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 import { act, Profiler } from 'react'
+import { demandAgentReferenceKey } from '@agentmux/demand/relations'
 import { beforeEach, expect, it, vi } from 'vitest'
 import { createWorkspaceLayout } from '@agentmux/layout'
 import { AGENTMUX_CONTROL_SCHEMA_VERSION } from '@agentmux/core/control'
@@ -87,10 +88,12 @@ it('different Hosts or Runs keep the exact bare reference unknown without a firs
   const select = vi.spyOn(useAppStore.getState(), 'selectSession')
   await dom.render(<GlobalBoardSurface />)
   expect(cards()).toHaveLength(1); expect(cards()[0]!.dataset.sessionId).toBe('healthy-view')
-  const unknown = team().querySelector<HTMLElement>(`[data-goal-team-unconfirmed="${actorId}"]`)!
+  const unknown = [...team().querySelectorAll<HTMLElement>('[data-goal-team-unconfirmed]')].find(node => node.getAttribute('data-goal-team-unconfirmed') === demandAgentReferenceKey(actorId))!
+  expect(unknown).toBeDefined()
   expect(unknown.textContent).toContain(actorId); expect(unknown.textContent).toContain('Host is not confirmed')
   expect(unknown.querySelector('.focus-context')).toBeNull(); expect(unknown.querySelector('[data-session-id]')).toBeNull()
-  expect(team().querySelector('[data-goal-team-unconfirmed="unobserved-original"]')!.textContent).toContain('reference')
+  const retained = [...team().querySelectorAll<HTMLElement>('[data-goal-team-unconfirmed]')].find(node => node.getAttribute('data-goal-team-unconfirmed') === demandAgentReferenceKey('unobserved-original'))
+  expect(retained).toBeDefined(); expect(retained?.textContent).toContain('reference')
   await act(async () => cards()[0]!.click())
   expect(select).toHaveBeenCalledWith('healthy-view')
   expect(select).not.toHaveBeenCalledWith('host-a-view'); expect(select).not.toHaveBeenCalledWith('host-b-view')
@@ -128,7 +131,7 @@ it('the original role picker saves its exact relationship through the public Hos
     expect(await host.demands.get(saved.id)).toMatchObject({ supervisorSessionId: 'next-supervisor', assigneeSessionIds: saved.assigneeSessionIds, sessionIds: saved.sessionIds })
     expect(useAppStore.getState().agentComposerDrafts).toBe(before)
     expect(team().querySelectorAll('[data-goal-team-role="supervisor"]')).toHaveLength(1)
-    const retained = team().querySelector('[data-goal-team-reference="next-supervisor"]')!
+    const retained = [...team().querySelectorAll('[data-goal-team-reference]')].find(node => node.getAttribute('data-goal-team-reference') === demandAgentReferenceKey('next-supervisor'))!
     expect(retained.textContent).toContain('Host not confirmed'); expect(retained.querySelector('.focus-context')).toBeNull()
   } finally { await host.dispose() }
 })

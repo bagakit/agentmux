@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AppConfig, SessionSnapshot } from '../src/shared/contracts'
 vi.hoisted(() => vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true))
 import { chooseField } from './helpers/selection-field'
+import { demandAgentReferenceKey } from '@agentmux/demand/relations'
 import { workspaceProjectId } from '../src/renderer/src/lib/workspace-projects'
 import { GlobalBoardSurface } from '../src/renderer/src/components/GlobalBoardSurface'
 import { useAppStore, currentCoreSpatialGraph } from '../src/renderer/src/store'
@@ -264,7 +265,7 @@ describe('Goals direct PMO creation and reading surface', () => {
 
   it('clears only conditions that would hide the newly created Goal', async () => {
     await mount(); await click('Goal filters')
-    for (const [label, value] of [['Filter work status', 'done'], ['Filter routing', 'assigned'], ['Filter assignee', 'healthy']]) await chooseField(container.querySelector<HTMLElement>(`[aria-label="${label}"]`)!, value!)
+    for (const [label, value] of [['Filter work status', 'done'], ['Filter routing', 'assigned'], ['Filter assignee', demandAgentReferenceKey('healthy')]]) await chooseField(container.querySelector<HTMLElement>(`[aria-label="${label}"]`)!, value!)
     await edit('Search goals', 'a different outcome'); await click('New Goal'); await eventually(() => expect(directGoalRequest()).toBeNull())
     const saved = (await owner.list())[0]!
     expect((container.querySelector('[aria-label="Search goals"]') as HTMLInputElement).value).toBe('')

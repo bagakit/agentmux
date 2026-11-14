@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 import { act, Profiler } from 'react'
+import { demandAgentReferenceKey } from '@agentmux/demand/relations'
 import { beforeEach, expect, it, vi } from 'vitest'
 import type { AgentSessionHistoryDescriptor } from '@agentmux/core'
 import type { DemandProjection } from '../src/renderer/src/lib/global-demand-board'
@@ -43,7 +44,8 @@ it('the actual Team uses the shared worker Host instead of its delegation owner 
   expect(read.mock.calls.map(([reference]) => reference)).toEqual([
     { hostId: 'owner-host', agentSessionId: 'original-owner' }, { hostId, agentSessionId: sid }
   ])
-  expect(dom.container.querySelector('[data-goal-team-reference="original-retained-worker"] [data-role-host="unconfirmed"]')).not.toBeNull()
+  const retained = [...dom.container.querySelectorAll('[data-goal-team-reference]')].find(node => node.getAttribute('data-goal-team-reference') === demandAgentReferenceKey('original-retained-worker'))
+  expect(retained).toBeDefined(); expect(retained?.querySelector('[data-role-host="unconfirmed"]')).not.toBeNull()
 })
 
 it('the Team shares only original Supervisor witnesses with the Host and does not promote an old discussion', async () => {
@@ -66,7 +68,7 @@ it('the mounted Team reads only its exact retained source without assigning a Ho
   expect(row()?.textContent).toContain('Retired'); expect(row()?.textContent).toContain('original-configuration')
   expect(row()?.textContent).toContain('Current Run is unconfirmed')
   expect(row()?.querySelector('.focus-context')).toBeNull(); expect(row()?.querySelector('[data-session-id]')).toBeNull()
-  expect(dom.container.querySelector('[data-goal-team-unconfirmed="bare-without-host"]')).not.toBeNull()
+  expect([...dom.container.querySelectorAll('[data-goal-team-unconfirmed]')].find(node => node.getAttribute('data-goal-team-unconfirmed') === demandAgentReferenceKey('bare-without-host'))).toBeDefined()
   expect(dom.container.querySelectorAll('button.focus-context')).toHaveLength(1)
   for (const control of forbidden) expect(control).not.toHaveBeenCalled()
   expect(useAppStore.getState().agentComposerDrafts).toBe(before)

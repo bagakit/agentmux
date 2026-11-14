@@ -1413,7 +1413,7 @@ it('Demand picker: common properties and accurate names are in the actual body; 
   const demand = { ...useAppStore.getState().demands.goal!, sessions: [], workspacePath: null, projectId: workspaceProjectId(workspace), sessionIds: [], assigneeSessionIds: [], supervisorSessionId: null,
     participations: [{ id: 'source-record', operationId: 'origin-op', recordedAt: _reshape_fixtureEpoch(0, 0, 1), kind: 'create' as const, agentSessionId: 'accurate-source', hostId: 'local', entryPoint: 'goal.create' }] }
   const rows = goalAgentRows({ ...useAppStore.getState(), config: { ...config, workspaces: [...config.workspaces, workspace] }, sessions: [project, source], agentNames: { 'source-view': 'Named requester' } }, demand, ['unavailable-original'])
-  expect(rows.map(row => row.id)).toEqual(['accurate-source', 'project-agent', 'unavailable-original'])
+  expect(rows.map(row => row.reference)).toEqual(['accurate-source', 'project-agent', 'unavailable-original'])
   expect(rows[0]).toMatchObject({ name: 'Named requester', participated: true, related: false, selectable: true }); expect(demand.sessionIds).toEqual([])
   useAppStore.setState({ sessions: useAppStore.getState().sessions.map(item => item.id === session.agentSessionId ? { ...item, id: 'local:original-presentation' } : item), agentNames: { 'local:original-presentation': 'Named original colleague' } })
   await act(async () => root.render(<PickerDetail />))
@@ -1436,7 +1436,7 @@ it('Demand picker: retained multiselect and opening CAS survive remount and conf
   await act(async () => root.render(<PickerDetail />)); await pickerButton('Choose Goal assignees')
   const opening = (await demands.get('goal'))!.updatedAt
   await act(async () => document.querySelector<HTMLInputElement>(`[data-session-id="${second.agentSessionId}"] input`)!.click())
-  expect(useAppStore.getState().goalAgentSelectionDrafts[goalCreationDraftKey('goal', 'assignees')]!.selected).toEqual([session.agentSessionId, second.agentSessionId])
+  expect(useAppStore.getState().goalAgentSelectionDrafts[goalCreationDraftKey('goal', 'assignees')]).toMatchObject({selected:[session.agentSessionId, second.agentSessionId]})
   await pickerButton('Cancel'); await pickerButton('Choose Goal assignees')
   for (const id of [session.agentSessionId, second.agentSessionId]) expect(document.querySelector<HTMLInputElement>(`[data-session-id="${id}"] input`)!.checked).toBe(true)
   await act(async () => document.querySelector<HTMLInputElement>(`[data-session-id="${second.agentSessionId}"] input`)!.click())
