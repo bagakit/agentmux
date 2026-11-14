@@ -28,6 +28,12 @@ export function MobileGoalAlignment({ client, goal, updated, openDiscussion, beg
   const alignment = goal.alignment, grounding = goal.grounding
   const confirmIssue = alignmentConfirmationIssue(alignment)
   const acceptIssue = groundingAcceptanceIssue(alignment, grounding), gapIssue = groundingAcceptanceIssue(alignment, grounding, true)
+  // This summary explains observed Goal facts. The original domain issues still
+  // decide eligibility and stay available in full; display copy grants no action.
+  const acceptanceSummary = !alignment ? '请先提出目标与成功标准，再核对结果。'
+    : alignment.confirmedAt === null ? '请先确认当前目标，再接受结果。'
+    : grounding?.alignmentRevision !== alignment.revision ? '结果报告对应旧版目标，请核对当前目标与结果。'
+    : '当前结果还不满足接受条件，请查看核对原因。'
   const accepted = isCurrentGroundingAccepted(alignment, grounding)
   const humanPending = pending.some(method => method === 'goal.confirm' || method === 'goal.accept') || !!retained && owner.goalIntentRunning(retained.operationId)
   const start = (method: string) => { flights.current.add(method); setPending([...flights.current]) }
@@ -105,7 +111,7 @@ export function MobileGoalAlignment({ client, goal, updated, openDiscussion, beg
     {accepted && <p>{goal.status === 'done' ? '已验收，目标已结束。' : '已验收，目标仍开放。'}</p>}
     {!accepted && alignment && grounding && !acceptIssue && acknowledgementAvailable && <Button type="button" onClick={() => void invoke('goal.accept', { goalId: goal.id, expectedAlignmentRevision: alignment.revision, expectedSubmissionId: grounding.submissionId, acceptGaps: false })}>接受当前结果</Button>}
     {!accepted && alignment && grounding && acceptIssue && gapIssue === null && acknowledgementAvailable && <Button type="button" onClick={() => void invoke('goal.accept', { goalId: goal.id, expectedAlignmentRevision: alignment.revision, expectedSubmissionId: grounding.submissionId, acceptGaps: true })}>接受结果并保留差距</Button>}
-    {acceptIssue && grounding && !accepted && <p>结果待核对：{acceptIssue}</p>}
+    {acceptIssue && grounding && !accepted && <><p>结果待核对：{acceptanceSummary}</p><details><summary>查看核对原因</summary><p>{acceptIssue}</p></details></>}
     {humanPending && <p role="status">正在等待 Mac 确认…</p>}{issue && <MobileNotice identity={[goal.id,issue,deviceIssue]} role="status">{issue}</MobileNotice>}{deviceIssue && <MobileNotice identity={[goal.id,issue,deviceIssue]} role="status">{deviceIssue}</MobileNotice>}
     {retained && !humanPending && <MobileNotice identity={[retained?.operationId]} role="status">还不确定你的确认是否已生效；请先读取当前提案与报告。</MobileNotice>}
     <div className="mobile-goal-discussion-heading">{visible && <img src={dialogueArt} alt="" width="64" height="46" loading="lazy" decoding="async" />}<div><h3>和 Mote 一起想清楚</h3><p>讨论目标，也核对做成的结果。</p></div></div>
