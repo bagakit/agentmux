@@ -130,8 +130,8 @@ describe('actual public task control consumes the original Main task owner', () 
 
 let directory: string, runtimeRoot: string, cli: string
 beforeAll(async () => {
-  await mkdir(resolve('.tmp'), { recursive: true }); directory = await mkdtemp(resolve('.tmp/browser-task-control-source-')); runtimeRoot = await mkdtemp(join(tmpdir(), 'amx-task-control-')); cli = join(directory, 'source-cli.mjs')
-  await build({ configFile: false, logLevel: 'silent', plugins: [{ name: 'actual-task-cli-source', enforce: 'pre', transform(source, id) {
+  await mkdir(resolve('packages/core/.tmp'), { recursive: true }); directory = await mkdtemp(resolve('packages/core/.tmp/browser-task-control-source-')); runtimeRoot = await mkdtemp(join(tmpdir(), 'amx-task-control-')); cli = join(directory, 'source-cli.mjs')
+  await build({ configFile: false, logLevel: 'silent', ssr: { external: ['ws'] }, plugins: [{ name: 'actual-task-cli-source', enforce: 'pre', transform(source, id) {
     const path = id.split('?')[0]!
     let code = source
     if (process.env.AGENTMUX_BROWSER_TASK_MUTATION === 'cli-drops-fresh-parameters' && path === resolve('packages/core/src/agentmux.ts')) {
@@ -155,7 +155,7 @@ beforeAll(async () => {
     return code === source ? undefined : { code, map: null }
   } }], build: { ssr: true, minify: false, emptyOutDir: false, outDir: directory,
     rollupOptions: { input: resolve('packages/core/src/agentmux.ts'), output: { format: 'es', entryFileNames: 'source-cli.mjs' } } } })
-})
+}, 120_000)
 afterAll(async () => { if (directory) await rm(directory, { recursive: true }); if (runtimeRoot) await rm(runtimeRoot, { recursive: true }) })
 async function cliRun(args: string[], input = '') {
   return await new Promise<{ code: number; stdout: string; stderr: string }>((accept, reject) => {

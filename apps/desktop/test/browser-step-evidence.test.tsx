@@ -79,6 +79,74 @@ function response(operationId: string, sequence: number, text: string): BrowserS
 }
 
 describe('selected step evidence in the production component', () => {
+  it('reveals the requested original evidence after its asynchronous read, and only again on another explicit reveal', async () => {
+    let finish!: (value: BrowserStepEvidenceRead) => void
+    bridge.get.mockReset().mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+    bridge.read.mockClear()
+    const scroll = vi.fn(), originalScroll = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'scrollIntoView')
+    Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: scroll })
+    const host = document.createElement('div'), trigger = document.createElement('button'), outside = document.createElement('button'), root = createRoot(host)
+    document.body.append(host, trigger, outside)
+    const render = (request: number) => root.render(createElement(BrowserStepEvidence, { operation: operation('op-a'), step: step(1), revealRequest: request, revealTrigger: trigger }))
+    try {
+      trigger.focus()
+      await act(async () => render(1))
+      expect(scroll).not.toHaveBeenCalled()
+      expect(document.activeElement).toBe(trigger)
+      await act(async () => finish(response('op-a', 1, 'original saved evidence')))
+      const panel = host.querySelector('section')!
+      expect(panel.textContent).toContain('original saved evidence')
+      expect(document.activeElement).toBe(panel)
+      expect(scroll).toHaveBeenCalledTimes(1)
+      expect(scroll.mock.contexts[0]).toBe(panel)
+      outside.focus()
+      await act(async () => render(1))
+      expect(document.activeElement).toBe(outside)
+      expect(scroll).toHaveBeenCalledTimes(1)
+      trigger.focus()
+      await act(async () => render(2))
+      expect(document.activeElement).toBe(panel)
+      expect(scroll).toHaveBeenCalledTimes(2)
+      expect(bridge.get.mock.calls).toEqual([['op-a', 1]])
+      expect(bridge.read).not.toHaveBeenCalled()
+    } finally {
+      await act(async () => root.unmount()); host.remove(); trigger.remove(); outside.remove()
+      if (originalScroll) Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', originalScroll)
+      else Reflect.deleteProperty(HTMLElement.prototype, 'scrollIntoView')
+    }
+  })
+
+  it('keeps a newly edited Agent draft focused when the earlier requested evidence finishes reading', async () => {
+    let finish!: (value: BrowserStepEvidenceRead) => void
+    bridge.get.mockReset().mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+    bridge.read.mockClear()
+    const scroll = vi.fn(), originalScroll = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'scrollIntoView')
+    Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: scroll })
+    const host = document.createElement('div'), trigger = document.createElement('button'), draft = document.createElement('textarea'), root = createRoot(host)
+    draft.setAttribute('aria-label', 'Message Agent'); draft.value = 'original unsent draft bytes'
+    document.body.append(host, trigger, draft)
+    try {
+      trigger.focus()
+      await act(async () => root.render(createElement(BrowserStepEvidence, { operation: operation('op-a'), step: step(1), revealRequest: 1, revealTrigger: trigger })))
+      expect(document.activeElement).toBe(trigger)
+      draft.focus(); draft.setSelectionRange(9, 15)
+      await act(async () => finish(response('op-a', 1, 'original saved evidence')))
+      const panel = host.querySelector('section')!
+      expect(panel.textContent).toContain('original saved evidence')
+      expect(document.activeElement).toBe(draft)
+      expect(draft.value).toBe('original unsent draft bytes')
+      expect([draft.selectionStart, draft.selectionEnd]).toEqual([9, 15])
+      expect(scroll).toHaveBeenCalledTimes(1)
+      expect(scroll.mock.contexts[0]).toBe(panel)
+      expect(bridge.get.mock.calls).toEqual([['op-a', 1]])
+      expect(bridge.read).not.toHaveBeenCalled()
+    } finally {
+      await act(async () => root.unmount()); host.remove(); trigger.remove(); draft.remove()
+      if (originalScroll) Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', originalScroll)
+      else Reflect.deleteProperty(HTMLElement.prototype, 'scrollIntoView')
+    }
+  })
+
   it('mounts saved structured fields and reads their JSON only on demand through the actual step identity', async () => {
     const bytes = Buffer.from(JSON.stringify({ zero: 0, empty: '', flag: false }))
     const artifact = { kind: 'browser-result-artifact' as const, id: 'structured-result', format: 'json' as const,

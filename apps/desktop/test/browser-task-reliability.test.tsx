@@ -200,7 +200,8 @@ describe('actual version UI and async public-read ownership', () => {
   it('projects the older Main-selected ready run rather than a newer terminal run in the real operation control', async () => {
     const a = asset(), older = run('older', { status: 'ready', startedAt: 5 }), newer = run('newer', { startedAt: 30 })
     const mounted = await mount(createElement(BrowserOperationStatus, { browserId: 'browser', activity: { operation: null, control: 'human' },
-      taskAssets: { assets: [a], runs: [older, newer], selectedRunId: 'older' } }))
+      taskAssets: { assets: [a], runs: [older, newer], selectedRunId: 'older' },
+      control: { owner: 'human', agent: null, activeOperationId: null, revision: 1, inputIsolation: 'inactive' } }))
     expect(mounted.container.querySelector('[data-task-run-id="older"]')).not.toBeNull()
     await mounted.dispose()
   })
