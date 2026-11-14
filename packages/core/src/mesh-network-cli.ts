@@ -4,7 +4,7 @@ import { readControlJsonInput } from './cli-json-input.js'
 import { parseMeshNetworkParams, type MeshNetworkMethod } from './mesh-network.js'
 import type { AgentMuxCliCommand } from './agentmux-cli-commands.js'
 
-export const MESH_NETWORK_CLI_COMMANDS: readonly AgentMuxCliCommand[] = ([
+const meshCommands: readonly AgentMuxCliCommand[] = ([
   ['settings.mesh.inspect', '[--operation-id ID] [--input FILE|-]', 'Read this original Core’s private Mesh configuration and original save receipt.'],
   ['settings.mesh.configure', '--input FILE|-', 'Compare and durably save this Core’s Mesh configuration; inspect live adoption separately.'],
   ['mesh.inspect', '[--input FILE|-]', 'Read this Core’s actual network producer, listener, authenticated peers, advertisements and paths.'],
@@ -12,7 +12,7 @@ export const MESH_NETWORK_CLI_COMMANDS: readonly AgentMuxCliCommand[] = ([
 ] as const).map(([method, usage, summary]) => ({
   method, usage: '[--host ID --expected-runtime ID] ' + usage, summary,
   flags: { '--host': 'value', '--expected-runtime': 'value', '--input': 'data', ...(method === 'settings.mesh.inspect' ? { '--operation-id': 'data' as const } : {}) },
-  details: 'All JSON inputs accept optional target:{hostId,expectedRuntimeId}. Select a saved operator Host with paired --host/--expected-runtime or JSON target, never both. The entry validates its original caller; the selected Core independently authorizes its saved operator carrier. Device/delegated access grants no remote operator permission. ' + (method === 'mesh.link' ? 'JSON input: {offer: ORIGINAL_CONNECTION_OFFER}. The complete returned offer/url keeps the original serverId and daemonPublicKeyB64. Consume it with the existing --endpoint CLI or directly authorized device SDK. A path is no business or owner grant. Read amux mesh --skill.' :
+  details: 'All JSON inputs accept optional target:{hostId,expectedRuntimeId}. Select a saved operator Host with paired --host/--expected-runtime or JSON target, never both. The entry validates its original caller; the selected Core independently authorizes its saved operator carrier. Device/delegated access grants no remote operator permission. ' + (method === 'mesh.link' ? 'JSON input: {offer: ORIGINAL_CONNECTION_OFFER, ingress?: {endpoint,useTls}}. Select an address explicitly advertised by this gateway. The complete returned offer/url keeps the original serverId and daemonPublicKeyB64. Consume it with the existing --endpoint CLI or directly authorized device SDK. A path is no business or owner grant. Read amux mesh --skill.' :
     'Configure JSON: {expectedRevision,operationId,configuration:{role:"disabled"|"participant"|"gateway",networkId,members:[{peerId,publicKey}],peers:[{peerId,endpoints:[{endpoint:"host:port",useTls:boolean}]}],endpointAccess:{allowedClientKeys:[BASE64_RPC_CLIENT_PUBLIC_KEY]},publishers:[{serverId,tokenHash}],advertisedIngress?:[{endpoint,useTls}],listen?:{host,port,tls?:{keyPath,certPath}}}}. Start by copying settings.mesh.inspect.configuration and revision. For a minimal participant, keep peers/publishers/allowedClientKeys/advertisedIngress empty and add this response identity as the sole member; choose role=participant and a networkId. Gateway role borrows explicitly configured HTTP when listen is absent; otherwise configure listen, and set explicit advertisedIngress separately. Core supplies the private network key/epoch. Automatic Host publication uses its original device identity, and endpointAccess pins its independently generated RPC client public keys before authorization. Keep the original operation ID after an unknown save and inspect it; never replay it. Network identity and Core Runtime identity are separate. Active adoption is mesh.inspect, independently from disk acknowledgement. Read amux mesh --skill.'),
   parse: async (original: readonly string[]) => {
     const args = expandCliOptionAssignments(original)
@@ -33,3 +33,16 @@ export const MESH_NETWORK_CLI_COMMANDS: readonly AgentMuxCliCommand[] = ([
     return parseMeshNetworkParams(method as MeshNetworkMethod, input) as unknown as Record<string, unknown>
   },
 }))
+
+const settingsInspect = meshCommands.find(command => command.method === 'settings.mesh.inspect')!
+export const MESH_NETWORK_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
+  ...meshCommands,
+  { ...settingsInspect, method: 'mesh.code', rpcMethod: settingsInspect.method, summary: 'Copy this Core’s public network pairing code.',
+    details: 'Read the selected operator Core’s saved network name, peer identity and advertised addresses. Share result.code with a device joining this network.' },
+  { method: 'mesh.code.read', local: true, usage: 'CODE', positionalData: 1, summary: 'Preview a Mesh pairing code offline.',
+    details: 'Show the network name, peer identity and advertised addresses before adding the peer.',
+    parse: async args => {
+      if (args.length !== 1 || !args[0]?.startsWith('amux-mesh:')) throw new AgentMuxError('Use mesh code read CODE with a complete Mesh pairing code.', 'INVALID_CLI_ARGUMENT')
+      return { code: args[0] }
+    } }
+]

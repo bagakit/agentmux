@@ -546,6 +546,10 @@
       "types": "./dist/public-rpc-relay-gateway.d.ts",
       "import": "./dist/public-rpc-relay-gateway.js"
     },
+    "./mesh-peer-code": {
+      "types": "./dist/mesh-peer-code.d.ts",
+      "import": "./dist/mesh-peer-code.js"
+    },
     "./mesh-network": {
       "types": "./dist/mesh-network.d.ts",
       "import": "./dist/mesh-network.js"

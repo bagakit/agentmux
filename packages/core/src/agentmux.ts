@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+import { meshPeerCode, decodeMeshPeerCode } from './mesh-peer-code.js'
+import type { MeshNetworkSettings } from './mesh-network.js'
 import { readSpaceSnapshot, observeSpace } from './space-authority-stream.js'
 import { observeSpaceSessionStates } from './space-session-stream.js'
 import type { SpaceAuthorityRef, SpaceWatch } from './space-authority.js'
@@ -239,8 +241,11 @@ async function main(): Promise<number> {
   const invocation = await parseAgentMuxCliInvocation(process.argv.slice(2))
   operationId = typeof invocation.params.operationId === 'string' ? invocation.params.operationId : undefined
   const { method } = invocation.command
-  if (invocation.sourceHost !== undefined && (method === 'mote.playbook.pmo' || method === 'system.metrics.profile.analyze' || method === 'system.endpoint' && !invocation.params.inspect)) {
+  if (invocation.sourceHost !== undefined && (method === 'mesh.code.read' || method === 'mote.playbook.pmo' || method === 'system.metrics.profile.analyze' || method === 'system.endpoint' && !invocation.params.inspect)) {
     throw new AgentMuxError('--source-host selects a Source business service. This local/static command uses its original default or explicit endpoint.', 'INVALID_CLI_ARGUMENT')
+  }
+  if (method === 'mesh.code.read') {
+    write({ ok: true, operation: method, result: decodeMeshPeerCode(String(invocation.params.code)) }); return 0
   }
   if (method === 'mote.playbook.pmo') {
     write({ ok: true, operation: method, result: agentMuxPmoPlaybook() }); return 0
@@ -321,6 +326,10 @@ async function main(): Promise<number> {
       return await follow(client, method, invocation.params as AgentMuxRpcStreamParams<typeof method>)
     }
     const result = await client.call(method, invocation.params as AgentMuxRpcParams<AgentMuxRpcMethod>, callOptions)
+    if (match?.command.method === 'mesh.code') {
+      const settings = result as MeshNetworkSettings
+      write({ ok: true, operation: 'mesh.code', result: { owner: settings.owner, code: meshPeerCode(settings) } }); return 0
+    }
     let captureResult: unknown = result
     let output: { path: string } | undefined
     try {
