@@ -1,6 +1,6 @@
 import type { AgentMuxRpcParams } from '@agentmux/core'
 import { AGENTMUX_DEMAND_PRIORITIES, AGENTMUX_DEMAND_STATUSES } from '@agentmux/core/control'
-import { isLocalNetworkHost } from '@agentmux/relay/offer'
+import { isWorkfaceOrigin } from './workface-origin'
 
 /** Text and exact requests only. Goal facts remain with the original Host. */
 export type MobileGoalDraftScope = { origin: string; runtimeId: string; deviceHostId: string | null }
@@ -28,17 +28,9 @@ function object(value: unknown, keys: string[]): Record<string, unknown> {
 function id(value: unknown): value is string { return typeof value === 'string' && value.length > 0 && value.length <= 256 }
 function text(value: unknown): value is string { return typeof value === 'string' && bytes(value) <= 65536 }
 function timestamp(value: unknown): value is number { return Number.isSafeInteger(value) && Number(value) >= 0 }
-function origin(value: unknown): value is string {
-  if (typeof value !== 'string' || value.length > 2048) return false
-  try {
-    const url = new URL(value)
-    return (url.protocol === 'https:' || url.protocol === 'http:' && isLocalNetworkHost(url.hostname))
-      && url.origin === value && !url.username && !url.password && !url.search && !url.hash && url.pathname === '/'
-  } catch { return false }
-}
 export function parseMobileGoalDraftScope(value: unknown): MobileGoalDraftScope {
   const v = object(value, ['origin', 'runtimeId', 'deviceHostId'])
-  if (!origin(v.origin) || !id(v.runtimeId) || !(v.deviceHostId === null || id(v.deviceHostId))) invalid()
+  if (!isWorkfaceOrigin(v.origin) || !id(v.runtimeId) || !(v.deviceHostId === null || id(v.deviceHostId))) invalid()
   return structuredClone(value) as MobileGoalDraftScope
 }
 export function sameMobileGoalDraftScope(a: MobileGoalDraftScope, b: MobileGoalDraftScope): boolean {

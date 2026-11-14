@@ -1,5 +1,5 @@
 import { parseTopicParams, type TopicKnowledge, type TopicKnowledgeSource, type TopicKnowledgeWrite } from '@agentmux/core/control'
-import { isLocalNetworkHost } from '@agentmux/relay/offer'
+import { isWorkfaceOrigin } from './workface-origin'
 
 /** Device text and original requests; Knowledge facts remain with the Host. */
 export type MobileKnowledgeDraftScope = { origin: string; runtimeId: string; deviceHostId: string | null }
@@ -27,12 +27,7 @@ const id = (value: unknown): value is string => typeof value === 'string' && val
 const text = (value: unknown): value is string => typeof value === 'string' && new TextEncoder().encode(value).byteLength <= 65536
 export function parseMobileKnowledgeDraftScope(value: unknown): MobileKnowledgeDraftScope {
   const v = object(value, ['origin', 'runtimeId', 'deviceHostId'])
-  if (typeof v.origin !== 'string' || v.origin.length > 2048 || !id(v.runtimeId) || !(v.deviceHostId === null || id(v.deviceHostId))) invalid()
-  try {
-    const url = new URL(v.origin)
-    if (!(url.protocol === 'https:' || url.protocol === 'http:' && isLocalNetworkHost(url.hostname))
-      || url.origin !== v.origin || url.username || url.password || url.search || url.hash || url.pathname !== '/') invalid()
-  } catch { invalid() }
+  if (!isWorkfaceOrigin(v.origin) || !id(v.runtimeId) || !(v.deviceHostId === null || id(v.deviceHostId))) invalid()
   return structuredClone(value) as MobileKnowledgeDraftScope
 }
 export function sameMobileKnowledgeDraftScope(a: MobileKnowledgeDraftScope, b: MobileKnowledgeDraftScope): boolean {

@@ -1,7 +1,7 @@
 import { moteMinutesToMs, parseMotePreferencesTarget, parseMoteQuickDefaults, parseMoteQuickBaseline, parseMotePreferencesSaveParams,
   parseMotePreferencesSaveResult, sameMotePreferencesTarget, type MotePreferencesTarget, type MoteQuickDefaults,
   type MoteQuickBaseline, type MoteQuickPreferencesSaveParams, type MoteQuickPreferencesSaveResult } from '@agentmux/core/mote-preferences'
-import { isLocalNetworkHost } from '@agentmux/relay/offer'
+import { isWorkfaceOrigin } from './workface-origin'
 import { parseScheduleRpcParams, validateScheduleRpcResult, type ScheduleMutation, type ScheduleReceipt, type ScheduleResultMap } from '@agentmux/core/schedule-rpc'
 
 export type MoteQuickScope = { origin: string; runtimeId: string; deviceHostId: string | null; target: MotePreferencesTarget }
@@ -21,11 +21,8 @@ function object(value: unknown, keys: string[]) {
 const identity = (value: unknown): value is string => typeof value === 'string' && value.length > 0
 export function parseMoteQuickScope(value: unknown): MoteQuickScope {
   const v = object(value, ['origin', 'runtimeId', 'deviceHostId', 'target'])
-  if (!identity(v.origin) || !identity(v.runtimeId) || !(v.deviceHostId === null || identity(v.deviceHostId))) invalid()
+  if (!isWorkfaceOrigin(v.origin) || !identity(v.runtimeId) || !(v.deviceHostId === null || identity(v.deviceHostId))) invalid()
   try {
-    const url = new URL(v.origin as string)
-    if (url.origin !== v.origin || url.username || url.password || url.pathname !== '/' || url.hash || url.search ||
-      !(url.protocol === 'https:' || url.protocol === 'http:' && isLocalNetworkHost(url.hostname))) invalid()
     parseMotePreferencesTarget(v.target)
   } catch { invalid() }
   return structuredClone(value) as MoteQuickScope

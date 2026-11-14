@@ -11,7 +11,7 @@ import { withDeviceStorageLock, DEVICE_WORKFACE_KEY } from './device-storage-loc
 import { parseMobileGoalOperationRecord, type MobileGoalOperationRecord } from './goal-operation-record'
 import { validateDeliveryLogId } from '@agentmux/core/delivery-attempt'
 import { validateAgentPromptCondition, validateAgentPromptInputBinding, validateAgentPromptInputKey } from '@agentmux/core/prompt-condition'
-import { isLocalNetworkHost } from '@agentmux/relay/offer'
+import { isWorkfaceOrigin } from './workface-origin'
 import type { PromptAttempt, ResponseAttempt } from '../conversation/local-drafts'
 import { parseMobileFileUpload, type MobileFileUpload } from '../conversation/attachments'
 import { parsePresentationRoute, type MobilePresentationRoute } from './presentation-route'
@@ -106,11 +106,6 @@ function entries(value: unknown): Array<[string, unknown]> {
   return value
 }
 function body(value: unknown): value is string { return typeof value === 'string' && new TextEncoder().encode(value).byteLength <= 65536 }
-function origin(value: unknown): value is string {
-  if (typeof value !== 'string' || value.length > 2048) return false
-  try { const url = new URL(value); return (url.protocol === 'https:' || url.protocol === 'http:' && isLocalNetworkHost(url.hostname)) && url.origin === value
-    && !url.username && !url.password && !url.search && !url.hash && url.pathname === '/' } catch { return false }
-}
 export function parseDraftRecord(value: unknown): DraftRecord {
   const v = record(value, ['version', 'drafts', 'attempts', 'responses', ...['conflicts', 'questions', 'questionDrafts', 'moteTextSources'].filter(key => Object.hasOwn(value ?? {}, key))])
   if (v.version !== 1) throw invalid()
@@ -269,11 +264,11 @@ export function parseDeviceWorkface(value: unknown): DeviceWorkface {
   }
   if (v.recordId !== undefined && !id(v.recordId)) throw invalid()
   if (v.version !== 1 || !(v.selectedSessionId === null || id(v.selectedSessionId))
-    || !(v.hostUrl === '' || origin(v.hostUrl))
+    || !(v.hostUrl === '' || isWorkfaceOrigin(v.hostUrl))
     || !(v.panel === 'conversation' || v.panel === 'sessions' || v.panel === 'terminal')) throw invalid()
   if (v.host !== null) {
     const host = record(v.host, ['origin', 'hostId'])
-    if (!origin(host.origin) || !id(host.hostId)) throw invalid()
+    if (!isWorkfaceOrigin(host.origin) || !id(host.hostId)) throw invalid()
   }
   parseDraftRecord(v.conversation)
   if (v.goalDrafts !== undefined) parseMobileGoalDrafts(v.goalDrafts)
@@ -815,7 +810,7 @@ export class DeviceWorkfaceStore {
   }
   confirmHost(host: NonNullable<DeviceWorkface['host']>): Promise<void> {
     return this.update(value => {
-      if (!origin(host.origin) || !id(host.hostId)) throw invalid()
+      if (!isWorkfaceOrigin(host.origin) || !id(host.hostId)) throw invalid()
       if (value.host && (value.host.hostId !== host.hostId)) {
         throw new DeviceHostMismatchError('当前连接的 Mac 和保存工作面的 Mac 不同。请连回之前那台 Mac，或另建一份工作面。')
       }

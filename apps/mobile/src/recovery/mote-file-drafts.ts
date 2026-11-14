@@ -1,6 +1,6 @@
 import { parseFileReadParams, parseFileReadResult, parseFileWriteParams, parseFileCreateParams,
   type FileReadResource, type FileReadResult, type FileWriteParams, type FileCreateParams } from '@agentmux/core/files'
-import { isLocalNetworkHost } from '@agentmux/relay/offer'
+import { isWorkfaceOrigin } from './workface-origin'
 
 export const moteFileSources = [
   { path: 'MOTE.md', label: 'MOTE.md' }, { path: 'BEHAVIOR.md', label: '合作方式 · BEHAVIOR.md' },
@@ -45,11 +45,8 @@ export function sameMoteFileResource(a: FileReadResource, b: FileReadResource): 
 }
 export function parseMoteFileDraftScope(value: unknown): MoteFileDraftScope {
   const v = object(value, ['origin', 'runtimeId', 'deviceHostId', 'spaceId', 'path', 'resource'])
-  if (typeof v.origin !== 'string' || !runtimeIdentity(v.runtimeId) || !(v.deviceHostId === null || id(v.deviceHostId)) || !isMoteFilePath(v.path)) invalid()
+  if (!isWorkfaceOrigin(v.origin) || !runtimeIdentity(v.runtimeId) || !(v.deviceHostId === null || id(v.deviceHostId)) || !isMoteFilePath(v.path)) invalid()
   try {
-    const url = new URL(v.origin)
-    if (!(url.protocol === 'https:' || url.protocol === 'http:' && isLocalNetworkHost(url.hostname))
-      || url.origin !== v.origin || url.username || url.password || url.search || url.hash || url.pathname !== '/') invalid()
     const scope = v as unknown as MoteFileDraftScope, params = parseFileReadParams(moteFileReadParams(scope))
     const result = parseFileReadResult({ resource: v.resource, result: { status: 'directory' } }, params)
     if (!result.resource) invalid()
