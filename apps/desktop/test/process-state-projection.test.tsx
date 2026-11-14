@@ -3,6 +3,8 @@ import { act, createElement, type ComponentProps } from 'react'
 import type { Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { RuntimeEvent, SessionSnapshot } from '../src/shared/contracts'
+import { conversationRevision } from '@agentmux/core/conversation'
+import { applyAgentTimelineMutation } from '@agentmux/core/timeline'
 import { createClientUiRoot } from './helpers/client-ui-render'
 import { composerSession, composerConfig } from './helpers/composer-dom-fixture'
 import { useAppStore } from '../src/renderer/src/store'
@@ -82,6 +84,37 @@ it('a fresh same-state process observation reaches the original mounted consumer
   expect(Reflect.get(current(), 'completedInteractionResponse')).toBe(session.completedInteractionResponse)
   const accepted = useAppStore.getState(); await act(async () => apply({ evidence: { source: 'run-process', observedAt: 2, run: session.control.run } }))
   expect(useAppStore.getState()).toBe(accepted)
+})
+it('publishes accepted history independently of an equal, stale or advancing Session clock', async () => {
+  await mount()
+  const initial = useAppStore.getState().sessions
+  for (const [index, observedAt] of [session.updatedAt, session.updatedAt - 1, session.updatedAt + 1].entries()) {
+    const revision = index + 1
+    const item = { id: `assistant-${revision}`, agentSessionId: session.id, kind: 'assistant_message' as const,
+      source: 'native-hook' as const, status: 'complete' as const, title: 'Reply', content: 'Original assistant reply',
+      createdAt: revision, updatedAt: revision }
+    const mutation = { type: 'append' as const, agentSessionId: session.id, item }
+    const [normalized] = applyAgentTimelineMutation([], mutation)
+    await act(async () => useAppStore.getState().applyEvent({ type: 'core', hostId: session.hostId, event: {
+      type: 'agent-timeline', agentSessionId: session.id, sourceHostId: session.hostId, revision, mutation,
+      stream: { epoch: 'original-history', revision, sequence: revision, origin: 'beginning', gaps: [] },
+      position: { id: item.id, firstSequence: revision, sequence: revision, revision: conversationRevision(normalized!) },
+      evidence: { source: 'native-hook', observedAt, run: session.control.run }
+    } }))
+    const state = useAppStore.getState()
+    expect(state.timelines[session.id]?.items.map(entry => entry.id)).toEqual(Array.from({ length: revision }, (_, n) => `assistant-${n + 1}`))
+    if (observedAt <= session.updatedAt) {
+      expect(state.sessions).toBe(initial)
+      expect(current()).toBe(session)
+    } else {
+      expect(current()).not.toBe(session)
+      expect(current().updatedAt).toBe(observedAt)
+    }
+    expect(current().control).toBe(session.control)
+    expect(state.sessions[1]).toBe(other)
+    expect(Reflect.get(current(), 'completedInteractionResponse')).toBe(session.completedInteractionResponse)
+    expect(host.querySelector('[data-draft]')?.textContent).toBe(draft)
+  }
 })
 it.each(['working', 'waiting', 'blocked', 'done'] as const)('fresh running evidence preserves authoritative native %s while updating its clock', state => {
   const status = { state, source: 'native-hook' as const, observedAt: 1, detail: 'Original native fact' }
