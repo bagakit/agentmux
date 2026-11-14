@@ -468,6 +468,36 @@ describe('original native opening completion', () => {
       ...sourceLocation, regionId: snapshot.id } })
     expect(windows.open).not.toHaveBeenCalled()
   })
+  it('keeps the explicit Profile child in Work when its exact Survey reference save is unconfirmed', async () => {
+    useAppStore.setState({ mainSurface: 'workbench', workbenchSpaceSelection: {
+      workspaceId: sourceLocation.displayWorkspaceId, groupId: sourceLocation.groupId, tabId: sourceLocation.tabId,
+      regionId: sourceLocation.regionId, spaceId: null, zoneId: 'original-zone', topicId: null } })
+    const before = useAppStore.getState()
+    const save = vi.spyOn(before, 'setSurveyPageCollected').mockRejectedValue(new Error('Fixture preference write failed'))
+    disposers.push(() => save.mockRestore())
+    const opening: typeof event = { ...event, browser: { ...event.browser, profileId: 'chosen-profile' }, opening: {
+      context: { surface: 'space', reference: sourceLocation, view: 'tab' }, destination: 'tab', foreground: true, collectInSurvey: true } }
+    before.applyBrowserEvent(opening)
+    await flush()
+    const current = useAppStore.getState(), reference = { regionId: snapshot.id, browserId: snapshot.id }
+    const tab = Object.values(current.tabs).find(tab => tab.regions[reference.regionId])!
+    expect(tab.id).not.toBe(sourceLocation.tabId)
+    expect(tab.space).toEqual(before.tabs[sourceLocation.tabId]!.space)
+    expect(childSurface()).toMatchObject({ ...reference, profileId: 'chosen-profile' })
+    expect(current.tabs[sourceLocation.tabId]).toBe(before.tabs[sourceLocation.tabId])
+    expect(current.documents).toBe(before.documents)
+    expect(current.surveyCollectedZones).toBe(before.surveyCollectedZones)
+    expect(current.mainSurface).toBe('workbench')
+    expect(save).toHaveBeenCalledExactlyOnceWith(reference, true, expect.any(Function))
+    expect(current.notificationEvents.some(event => event.message.includes('retry only this reference change'))).toBe(true)
+    expect(windows.reveal).toHaveBeenCalledExactlyOnceWith({ surface: 'space', view: 'tab', reference: {
+      ...sourceLocation, tabId: tab.id, regionId: reference.regionId } })
+    before.applyBrowserEvent(opening)
+    await flush()
+    expect(save).toHaveBeenCalledOnce()
+    expect(windows.reveal).toHaveBeenCalledOnce()
+    expect(windows.open).not.toHaveBeenCalled()
+  })
   it('Survey split expands the same page anchor and preserves the original caret for a background request', async () => {
     const page = { kind: 'page' as const, regionId: sourceLocation.regionId, browserId: source.browserId }
     useAppStore.setState({ mainSurface: 'survey', surveyZoneSelection: page })

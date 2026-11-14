@@ -295,13 +295,14 @@ describe('actual definition-external consumers', () => {
     expect(projections()).toHaveLength(1)
     expect(projections()[0]).toMatchObject({ opening: { destination: 'region' }, browser: { url: linkURL, profileId: 'source', source: { browserId: 'source' } } })
     expect(projections()[0].browser.agent).toBeUndefined()
+    expect(projections()[0].opening.collectInSurvey).toBeUndefined()
 
     const profileMenu = await openHit({ linkURL })
     const submenu = profileMenu.items.find((item: any) => item.label === 'Open Link as').submenu
     expect(submenu.map((item: any) => item.label)).toEqual(['Work'])
     submenu[0].click(); await flush()
     expect(projections()).toHaveLength(2)
-    expect(projections()[1]).toMatchObject({ opening: { destination: 'tab' }, browser: { profileId: 'work', url: linkURL } })
+    expect(projections()[1]).toMatchObject({ opening: { destination: 'tab', foreground: true, collectInSurvey: true }, browser: { profileId: 'work', url: linkURL } })
     expect(resolvePartition).toHaveBeenCalledWith('work')
     expect(contents.getURL()).toBe(pageURL)
 
