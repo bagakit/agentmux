@@ -687,7 +687,7 @@ function Scene() {
     },
     prepareAgentMenu: () => { agentMenuScene = true; catalog.agentPresentation![0]!.name = menuAgentName },
     prepareAuxiliaryDensity: () => { auxiliaryDensityScene = true; agentMenuScene = true },
-    preparePostureControls: () => {
+    prepareLocalConversationControls: () => {
       // Permission control belongs to the connected original Runtime. The
       // general directory fixture also includes foreign, read-only members.
       for (const session of [main, result]) {

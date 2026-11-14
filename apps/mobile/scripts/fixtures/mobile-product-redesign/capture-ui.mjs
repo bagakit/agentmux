@@ -36,6 +36,12 @@ try {
   } }
   const mutationId = process.argv.find(value => value.startsWith('--mutation='))?.slice('--mutation='.length)
   const variants = {
+    'directory-retains-closed-issue': { file: 'apps/mobile/src/navigation/MobileDirectoryNotice.tsx', edits: [
+      { before: 'return props.issues.length ? <DirectoryIssueDialog {...props} /> : null',
+        after: 'return <DirectoryIssueDialog {...props} />' },
+      { before: '  const [open, setOpen] = useState(false)',
+        after: '  const [open, setOpen] = useState(false)\n  if (!issues.length) return null' }
+    ] },
     'posture-menu-no-return-focus': { file: 'packages/client-ui/src/components/HoverDropdownMenu.tsx',
       before: 'if (menu.hover.current) event.preventDefault()\n        onCloseAutoFocus?.(event)',
       after: 'event.preventDefault()\n        onCloseAutoFocus?.(event)' },

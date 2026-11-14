@@ -1,14 +1,17 @@
 const assert = require('node:assert/strict')
-module.exports = async ({ win, read, until, resize, tap, button, capture, result, openMote }) => {
-  await openMote()
+module.exports = async ({ win, read, until, resize, tap, button, capture, result }) => {
+  await read('mobileProductScene.prepareLocalConversationControls()')
+  await button('Focus', '.mobile-navigation')
+  await button('日常协作', '.mobile-focus-project')
+  await until('!!document.querySelector(".mobile-conversation-panel:not([hidden]) [contenteditable=true]")')
   await read(`window.originalCaptureEditor=document.querySelector('.mobile-conversation-panel:not([hidden]) [contenteditable=true]');originalCaptureEditor.focus()`)
   await win.webContents.insertText('核对目录后，继续这段未发送的讨论。')
   await until('mobileProductScene.facts().record.conversation.drafts.some(([,text])=>text.includes("核对目录后"))')
   await read('mobileProductScene.prepareDirectoryNotices();mobileProductScene.unconfirmSelectedMetadata()')
-  await until('document.querySelector(".mobile-service-notice")?.textContent.includes("对话信息还没确认")')
+  await until('!!document.querySelector(".mobile-session-actions[data-conversation-status=issue]")')
   await button('Focus', '.mobile-navigation')
   await until('!!document.querySelector(".mobile-spatial-panel .mobile-directory-notice")')
-  assert.equal(await read('document.querySelector(".mobile-service-notice")?.textContent.includes("对话信息还没确认")||false'), false)
+  assert.equal(await read('Boolean(document.querySelector(".mobile-session-actions[data-conversation-status=issue]")?.getClientRects().length)'), false)
   const original = await read('mobileProductScene.facts().record.conversation')
   result.directoryNotices = []
   for (const [width, height] of [[390, 844], [320, 760], [390, 480]]) for (const appearance of ['dark', 'light']) {
@@ -21,6 +24,7 @@ module.exports = async ({ win, read, until, resize, tap, button, capture, result
     assert.equal(collapsed.text.includes('SOURCE_UNAVAILABLE'), false, 'Collapsed directory keeps technical reasons out of the reading area')
     await capture(`directory-notices-${width}x${height}-${appearance}-collapsed`)
     const reads = await read('mobileProductScene.facts().calls.filter(c=>c.method==="space.ls").length')
+    await read('window.directoryNoticeInvoker=document.querySelector(".mobile-spatial-panel .mobile-directory-notice")')
     await tap('.mobile-spatial-panel .mobile-directory-notice', '目录信息')
     await until('!!document.querySelector(".mobile-directory-issues")')
     await read('Promise.all(document.querySelector(".mobile-directory-issues").getAnimations().map(animation=>animation.finished))')
@@ -37,6 +41,7 @@ module.exports = async ({ win, read, until, resize, tap, button, capture, result
       await capture('directory-notices-technical-details-short-light')
     }
     await button('关闭目录信息', '.mobile-directory-issues')
+    await until('!document.querySelector(".mobile-directory-issues") && document.activeElement===window.directoryNoticeInvoker')
     assert.equal(await read('mobileProductScene.facts().calls.filter(c=>c.method==="space.ls").length'), reads, 'Disclosure itself adds no directory read')
     result.directoryNotices.push({ width, height, appearance, collapsed, expanded })
   }
@@ -55,9 +60,11 @@ module.exports = async ({ win, read, until, resize, tap, button, capture, result
   await until('!!document.querySelector(".mobile-session-diagnostic")')
   assert.ok(await read('document.querySelector(".mobile-session-diagnostic").textContent.includes("session-mote")'), 'Fixed diagnostics retain the same hidden Session problem')
   await capture('directory-notices-original-session-diagnostic')
-  await button('返回这段对话', '.mobile-session-diagnostic')
+  await button('返回这段对话', '[role=dialog]')
   await until('!!document.querySelector(".mobile-conversation-panel:not([hidden]) [contenteditable=true]")')
   assert.equal(await read('document.querySelector(".mobile-conversation-panel:not([hidden]) [contenteditable=true]")===originalCaptureEditor'), true)
+  await tap('.mobile-conversation-panel:not([hidden]) [contenteditable=true]', 'Touch original composer after closing service sheets')
+  assert.equal(await read('document.activeElement===originalCaptureEditor'), true, 'Closed sheets must release pointer and focus to the original composer')
   assert.equal(await read('originalCaptureEditor.textContent'), '核对目录后，继续这段未发送的讨论。')
   assert.deepEqual(await read('mobileProductScene.facts().record.conversation'), original)
   const effects = await read('mobileProductScene.facts().calls.filter(c=>["sdk.submitAgentPrompt","sdk.ensureAgentContinuity","agent.open","file.upload"].includes(c.method))')

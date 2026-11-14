@@ -29,7 +29,7 @@ module.exports = async ({ win, read, until, resize, tap, button, capture, openGo
   }
   const visiblePanel = kind => read(`!!document.querySelector('.mobile-${kind}-panel:not([hidden])')`)
   const declaration = await read('mobileProductScene.prepareDensity()')
-  await read('mobileProductScene.preparePostureControls()')
+  await read('mobileProductScene.prepareLocalConversationControls()')
   assert.ok(declaration?.modes.length >= 2, 'At least two original Provider actions must be available')
   result.controls = []
   for (const context of ['mote','ordinary']) {
