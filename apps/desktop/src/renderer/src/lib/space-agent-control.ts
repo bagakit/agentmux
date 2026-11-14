@@ -455,6 +455,7 @@ export async function executeSpatialControl(ports: SpatialControlPorts,
   signal?: AbortSignal, options?: SpatialControlOptions): Promise<AgentMuxSpaceControlResult> {
   // Only the Core service expands a saved derived action; this owner admits the resulting content and touches nothing first.
   if (request.operation === 'agent.open' && request.content.kind === 'derived-action') failure('INVALID_CONTROL_REQUEST', 'A derived action must be expanded by the Core service before admission. Nothing was opened.')
+  if (request.operation === 'agent.open' && request.content.kind === 'takeover-agent') failure('INVALID_CONTROL_REQUEST', 'A new Takeover must be admitted through the original public Core agent.open owner. Nothing was opened.')
   let topics: readonly ScratchTopicSnapshot[] = []
   try { topics = await ports.topics() } catch { /* durable bindings remain discoverable with an explicit issue */ }
   let catalog = spatialCatalog(ports.get(), topics)
