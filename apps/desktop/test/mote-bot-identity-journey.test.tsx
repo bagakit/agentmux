@@ -259,7 +259,7 @@ it('keeps the original Mote Profile caller and source preview while leaving the 
   expect(useAppStore.getState().agentComposerDrafts).toBe(before.agentComposerDrafts)
   expect(f.beginCount).toBe(0)
   await f.click('Manage bots')
-  expect(f.navigation.openMoteLark).toHaveBeenCalledWith({ target: f.target(), topicId: f.scopes[0]!.topic.id, moteName: f.scopes[0]!.topic.title })
+  expect(f.navigation.openMoteLark).toHaveBeenCalledWith({ target: f.target(), topicId: f.scopes[0]!.topic.id, moteName: f.scopes[0]!.topic.title, hostingTarget: f.hostingTarget })
 })
 
 it('retains a known not-dispatched request when local persistence is unavailable and explicitly continues that same request after recovery', async () => {
