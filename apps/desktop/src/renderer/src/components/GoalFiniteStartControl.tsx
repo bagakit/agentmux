@@ -4,6 +4,7 @@ import type { GoalInspectionAccess } from '@agentmux/core/goal-agent-reference'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { mintObjectId } from '@agentmux/core/object-id'
+import { AGENTMUX_CONTROL_SCHEMA_VERSION } from '@agentmux/core/control'
 import { clearGoalFiniteStartIntent, retainGoalFiniteStartIntent, useAppStore } from '../store'
 import { api } from '../lib/api'
 import type { DemandRecord } from '../lib/global-demand-board'
@@ -36,8 +37,9 @@ function GoalFiniteStartWorkface({ demand, primary = false, embedded = false, co
   const [busyScope, setBusyScope] = useState<string | null>(null), [message, setMessage] = useState<string | null>(null)
   const flight = useRef<{ scope: string; token: symbol } | null>(null)
   const target = rows.find(row => row.id === (selected ?? (rows.length === 1 ? rows[0]!.id : null)))
-  const pending = intent ?? demand.dispatches?.find(item => item.execution === 'finite' && item.stage !== 'confirmed')
+  const pending = intent ?? demand.dispatches?.find(item => item.execution === 'finite' && item.stage !== 'confirmed' && item.stage !== 'rejected')
   const originalDispatch = intent && demand.dispatches?.find(item => item.operationId === intent.operationId)
+  const rejected = originalDispatch?.stage === 'rejected' ? originalDispatch : undefined
   const attempted = intent?.phase === 'may-have-dispatched' || Boolean(originalDispatch)
   const originalMember = intent ? intent.agentReference : pending && 'target' in pending ? pending.target : undefined
   const chosen = target && goalAgentRowReference(target)
@@ -70,7 +72,9 @@ function GoalFiniteStartWorkface({ demand, primary = false, embedded = false, co
     if (original?.stage === 'confirmed') {
       await clearGoalFiniteStartIntent(goalId, operationId, expected)
       if (scope.current === inputScope) setMessage('Task delivered. Follow its original work record below.')
-    } else if (scope.current === inputScope) setMessage(original ? 'Delivery is unconfirmed. Inspect this request in the original Agent’s input queue.' : 'The original Start record is not yet observed. Its outcome remains unknown; keep checking the same request.')
+    } else if (original?.stage === 'requested' && scope.current === inputScope) setMessage('The original task is saved before input preparation. Choose current access and explicitly continue this same operation.')
+    else if (original?.stage === 'rejected' && scope.current === inputScope) setMessage('The original business request was rejected. Review the rejection before explicitly preparing a current task.')
+    else if (scope.current === inputScope) setMessage(original ? 'Delivery is unconfirmed. Inspect this request in the original Agent’s input queue.' : 'The original Start record is not yet observed. Its outcome remains unknown; keep checking the same request.')
   }
   async function run(action: () => Promise<void>) {
     if (flight.current?.scope === inputScope) return
@@ -89,8 +93,8 @@ function GoalFiniteStartWorkface({ demand, primary = false, embedded = false, co
     if (!saved) return
     if (attempted) { await inspect(saved.operationId); return }
     if (saved.agentReference && saved.expectedUpdatedAt !== demand.updatedAt) { setMessage('The Goal changed after this task selection. Review it and choose the current Goal version before submitting.'); return }
-    if (saved.agentReference && !goalFiniteStartAccess(saved).source) { setMessage('Choose current project access before submitting this task. Your selection is retained.'); return }
-    if (saved.agentReference && saved.agentReference.source.admission.kind === 'association' && !goalFiniteStartAccess(saved).coordinator) { setMessage('Choose independent current Coordinator access for this original association. Project membership does not grant input access.'); return }
+    if (saved.agentReference && !goalFiniteStartAccess(saved)?.source) { setMessage('Choose current project access before submitting this task. Your selection is retained.'); return }
+    if (saved.agentReference && saved.agentReference.source.admission.kind === 'association' && !goalFiniteStartAccess(saved)?.coordinator) { setMessage('Choose independent current Coordinator access for this original association. Project membership does not grant input access.'); return }
     let persistence = await retainGoalFiniteStartIntent(saved, rawIntent)
     if (!persistence.clientStateWritten) { setMessage('The task has not been submitted. Its selection is retained; restore workface saving before submitting.'); return }
     const dispatching = { ...saved, phase: 'may-have-dispatched' as const }
@@ -101,19 +105,12 @@ function GoalFiniteStartWorkface({ demand, primary = false, embedded = false, co
       await inspect(saved.operationId, dispatching, dispatching)
     } catch (error) {
       const failure = error as { controlFailure?: { disposition?: string } }
-      if (failure.controlFailure?.disposition === 'not_applied') {
-        if (saved.agentReference) {
-          const state = useAppStore.getState(), latestRaw = state.goalFiniteStartIntents[saved.goalId]
-          const latest = readGoalFiniteStartIntent(latestRaw, saved.goalId)
-          if (latest?.agentReference && latest.operationId === saved.operationId &&
-              demandAgentReferenceKey(latest.agentReference) === demandAgentReferenceKey(saved.agentReference) &&
-              JSON.stringify(latest.access) === JSON.stringify(saved.access) && latest.expectedUpdatedAt === saved.expectedUpdatedAt &&
-              !state.demands[saved.goalId]?.dispatches?.some(item => item.operationId === saved.operationId))
-            await retainGoalFiniteStartIntent({ ...latest, phase: 'not-attempted' }, latestRaw)
-        }
-        else await clearGoalFiniteStartIntent(saved.goalId, saved.operationId, dispatching)
+      if (failure.controlFailure?.disposition === 'not_applied' && !saved.agentReference) {
+        await clearGoalFiniteStartIntent(saved.goalId, saved.operationId, dispatching)
         await useAppStore.getState().refreshDemand(saved.goalId)
       }
+      // A qualified business OP may already be reserved by another Host. Only
+      // its confirmed Domain rejection permits preparing a replacement task.
       throw error
     }
   }
@@ -121,17 +118,38 @@ function GoalFiniteStartWorkface({ demand, primary = false, embedded = false, co
     if (!member || rawIntent !== undefined && !intent) return
     const next: GoalFiniteStartIntent = intent?.agentReference ? { ...intent, accessDraft: value }
       : { goalId: demand.id, operationId: pending?.operationId ?? mintObjectId(), agentReference: member, access: value,
-        expectedUpdatedAt: demand.updatedAt, phase: pending ? 'may-have-dispatched' : 'not-attempted' }
+        expectedUpdatedAt: pending && 'stage' in pending && pending.stage === 'requested' ? pending.request.goalUpdatedAt : demand.updatedAt,
+        phase: pending ? 'may-have-dispatched' : 'not-attempted' }
     try {
       const saved = await retainGoalFiniteStartIntent(next, rawIntent)
       setMessage(saved.clientStateWritten ? null : 'This access selection is retained in this view; saving it is unconfirmed. The original operation and Agent are retained.')
     } catch (error) { setMessage(error instanceof Error ? error.message : String(error)) }
   }
+  async function prepareCurrentTask() {
+    if (!intent?.agentReference || !rejected) return
+    const result = await useAppStore.getState().executeControl({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: rejected.operationId,
+      operation: 'demand.show', demandId: demand.id, dispatchOperationId: rejected.operationId })
+    if (result.operation !== 'demand.show' || result.demand?.id !== demand.id) throw Error('The original rejection is not confirmed. Keep this same task and inspect it.')
+    const original = result.demand.dispatches?.find(value => value.operationId === rejected.operationId)
+    if (original?.stage !== 'rejected' || original.expectedUpdatedAt !== intent.expectedUpdatedAt || demandAgentReferenceKey(original.target) !== demandAgentReferenceKey(intent.agentReference))
+      throw Error('The exact original business rejection is not confirmed. No replacement task was prepared.')
+    const selectedReference = target && goalAgentRowReference(target)
+    if (!selectedReference || !result.demand.assigneeSessionIds?.some(value => demandAgentReferenceKey(value) === demandAgentReferenceKey(selectedReference))) {
+      setPicker(true); setMessage('Choose a current assignee before preparing a new task. The original rejection is retained.'); return
+    }
+    const base = { goalId: demand.id, operationId: mintObjectId(), expectedUpdatedAt: result.demand.updatedAt, phase: 'not-attempted' as const }
+    const sameTargetAccess = demandAgentReferenceKey(selectedReference) === demandAgentReferenceKey(original.target) ? goalFiniteStartAccess(intent) : undefined
+    const next: GoalFiniteStartIntent = typeof selectedReference === 'string' ? { ...base, sessionId: selectedReference }
+      : { ...base, agentReference: selectedReference, ...(sameTargetAccess === undefined ? {} : { access: sameTargetAccess }) }
+    const saved = await retainGoalFiniteStartIntent(next, rawIntent)
+    setMessage(saved.clientStateWritten ? 'Current task prepared. Review it and explicitly submit; the original rejection remains in its Goal record.'
+      : 'The current task selection is retained here; saving is unconfirmed and no input was submitted.')
+  }
   async function resumeOriginal() {
-    if (!intent?.agentReference || !attempted) return
+    if (!intent?.agentReference || !attempted || rejected) return
     if (useAppStore.getState().goalFiniteStartIntents[demand.id] !== rawIntent) { setMessage('The original Start input changed. Your newer private input is retained; review it before continuing.'); return }
-    if (!goalFiniteStartAccess(intent).source) { setMessage('Choose current project access before continuing this original Start. Independent Coordinator access remains available for Check.'); return }
-    if (intent.agentReference.source.admission.kind === 'association' && !goalFiniteStartAccess(intent).coordinator) { setMessage('Choose independent current Coordinator access for this original association. Project membership does not grant input access.'); return }
+    if (!goalFiniteStartAccess(intent)?.source) { setMessage('Choose current project access before continuing this original Start. Independent Coordinator access remains available for Check.'); return }
+    if (intent.agentReference.source.admission.kind === 'association' && !goalFiniteStartAccess(intent)?.coordinator) { setMessage('Choose independent current Coordinator access for this original association. Project membership does not grant input access.'); return }
     await useAppStore.getState().executeControl(goalFiniteStartSubmission(intent, undefined, true))
     await inspect(intent.operationId)
   }
@@ -147,14 +165,16 @@ function GoalFiniteStartWorkface({ demand, primary = false, embedded = false, co
   }
   const connections = member && !(rawIntent !== undefined && !intent) ? <GoalRelationAccessFields purpose="input" reference={member} hosts={useAppStore.getState().config?.hosts ?? []}
     access={access} original={Boolean(pending && (!intent || attempted))} disabled={false} onChange={value => void selectAccess(value)} /> : null
-  const newTask = <>{rows.length > 1 && !target ? <p className="goals-caption">Choose who receives this task.</p> : null}<div className="goal-finite-start__recipients" role="radiogroup" aria-label="Agent for this task">{rows.map(row => <label className="goal-collaboration__member" key={row.id} data-selected={target?.id === row.id}><input type="radio" name={`goal-task-recipient-${demand.id}`} checked={target?.id === row.id} onChange={() => setSelected(row.id)} /><GoalAgentFace row={row} /><span>{row.name}<small>{row.context}</small></span></label>)}</div>{connections}
+  const recipients = <>{rows.length > 1 && !target ? <p className="goals-caption">Choose who receives this task.</p> : null}<div className="goal-finite-start__recipients" role="radiogroup" aria-label="Agent for this task">{rows.map(row => <label className="goal-collaboration__member" key={row.id} data-selected={target?.id === row.id}><input type="radio" name={`goal-task-recipient-${demand.id}`} checked={target?.id === row.id} onChange={() => setSelected(row.id)} /><GoalAgentFace row={row} /><span>{row.name}<small>{row.context}</small></span></label>)}</div></>
+  const newTask = <>{recipients}{connections}
     <div className="goals-inline-actions"><button type="button" className={primary && !hasOriginalTask ? 'primary-button' : 'small-button'} disabled={busy || rows.length > 0 && !target} onClick={() => { if (!rows.length) setPicker(true); else void run(start) }}>{busy ? 'Submitting…' : target ? `Start with ${target.name}` : rows.length ? 'Choose an Agent for this task' : 'Choose execution Agent'}</button>
       {rows.length ? <button type="button" className="small-button" onClick={() => setPicker(true)}>Manage assignees</button> : null}</div></>
   return <section className="goal-finite-start" data-goal-finite-start={demand.id} aria-label="One-time Goal execution">
     {!embedded ? <div className="goals-section-heading"><h2>{hasOriginalTask ? 'Task execution' : 'Execute task'}</h2><span className="goals-caption">One-time task</span></div> : null}
     {pending ? connections : null}
+    {rejected ? recipients : null}
     {intent?.agentReference && !attempted && intent.expectedUpdatedAt !== demand.updatedAt ? <p className="goals-service" role="status">The Goal changed after this task selection. Review its current content.<button className="small-button" type="button" disabled={busy} onClick={() => void run(updateVersion)}>Use current Goal version for this task</button></p> : null}
-    {rawIntent !== undefined && !intent ? <p className="goals-service" role="status">Original Start input is retained but cannot be read. It has not been replaced or submitted again. The Agent and its original work record are retained.</p> : pending ? <div className="goals-inline-actions"><span className="goals-caption" data-goal-current-conclusion={conclusion ? true : undefined} data-goal-current-source={conclusion ? 'start' : undefined}>{conclusion ?? 'Original request retained'}</span><button className={primary ? 'primary-button' : 'small-button'} type="button" disabled={busy} onClick={() => void run(() => intent && !attempted ? start() : inspect(pending.operationId))}>{busy ? 'Checking…' : intent && !attempted ? 'Submit retained task' : 'Inspect original Start'}</button>{intent?.agentReference && attempted ? <button className="small-button" type="button" disabled={busy} onClick={() => void run(resumeOriginal)}>Continue original Start</button> : intent && !attempted ? <button className="small-button" type="button" disabled={busy} onClick={() => void run(discardUnsent)}>Discard unsent selection</button> : null}</div>
+    {rawIntent !== undefined && !intent ? <p className="goals-service" role="status">Original Start input is retained but cannot be read. It has not been replaced or submitted again. The Agent and its original work record are retained.</p> : pending ? <div className="goals-inline-actions"><span className="goals-caption" data-goal-current-conclusion={conclusion ? true : undefined} data-goal-current-source={conclusion ? 'start' : undefined}>{conclusion ?? 'Original request retained'}</span><button className={primary ? 'primary-button' : 'small-button'} type="button" disabled={busy} onClick={() => void run(() => intent && !attempted ? start() : inspect(pending.operationId))}>{busy ? 'Checking…' : intent && !attempted ? 'Submit retained task' : 'Inspect original Start'}</button>{intent?.agentReference && rejected ? <button className="small-button" type="button" disabled={busy} onClick={() => void run(prepareCurrentTask)}>Prepare current task</button> : intent?.agentReference && attempted ? <button className="small-button" type="button" disabled={busy} onClick={() => void run(resumeOriginal)}>Continue original Start</button> : intent && !attempted ? <button className="small-button" type="button" disabled={busy} onClick={() => void run(discardUnsent)}>Discard unsent selection</button> : null}</div>
       : hasOriginalTask ? <>{!embedded ? <a className="small-button" href={`#goal-work-${demand.id}`}>View original work</a> : null}<details className="goal-finite-start__another"><summary>Start another one-time task</summary>{newTask}</details></> : newTask}
     {message ? <p className="goals-service" role="status">{message}</p> : null}
     {picker ? <GoalAgentPicker demand={demand} role="assignees" onSave={async (patch, expectedUpdatedAt, relationAccess) => { await useAppStore.getState().updateDemand(demand.id, patch, undefined, expectedUpdatedAt, relationAccess); return true }} onClose={() => setPicker(false)} /> : null}

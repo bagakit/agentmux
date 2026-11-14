@@ -36,6 +36,7 @@ function project(goal: Goal): Map<string, CurrentGoalFact> {
       ...(row ? { phase: row.phase, nextAction: row.nextOwner.action } : {}) })
   }
   for (const dispatch of goal.dispatches ?? []) {
+    if (dispatch.stage === 'requested' || dispatch.stage === 'rejected') continue // Business intent is not current execution.
     const confirmed = dispatch.stage === 'confirmed' && dispatch.receipt?.kind === 'core-prompt' &&
       dispatch.receipt.itemId === `prompt:${dispatch.operationId}` && Number.isSafeInteger(dispatch.receipt.createdAt) && dispatch.receipt.createdAt > 0
     const targetKey = 'target' in dispatch ? currentQualifiedDemandKey(dispatch.target) : currentDemandKey(dispatch.hostId, dispatch.agentSessionId)

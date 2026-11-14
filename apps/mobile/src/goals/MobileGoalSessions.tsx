@@ -75,18 +75,18 @@ export function MobileGoalSessions({ client, sessionIds, visible, openSession, g
     {!sessionIds.length && <p>暂无关联会话。</p>}
   </section>
   if (!goal) return sessions
-  const stages = { prepared: '已准备，尚未提交', submitted: '已提交，确认未到', unknown: '输入未确认', confirmed: '输入已确认' }
+  const stages = { requested: '业务请求已保存，输入未准备', rejected: '业务请求已拒绝', prepared: '已准备，尚未提交', submitted: '已提交，确认未到', unknown: '输入未确认', confirmed: '输入已确认' }
   const dispatches = goal.dispatches ?? []
   return <section aria-label="目标协作与输入记录"><h3>协作与推进依据</h3>
     <p>负责人：{goal.assigneeSessionIds?.length ? goal.assigneeSessionIds.map(name).join('、') : '未分配'}</p>
     <p>Supervisor：{goal.supervisorSessionId ? name(goal.supervisorSessionId) : '未指定'}</p>
     {!dispatches.length ? <p>尚无公开输入记录。工作状态、关联历史与 Agent 活跃不证明目标已开始推进。</p>
-      : <><p>{dispatches.length} 条输入记录 · {dispatches.filter(value => value.stage === 'confirmed').length} 条已确认</p>
+      : <><p>{dispatches.length} 条开始请求 · {dispatches.filter(value => value.stage === 'confirmed').length} 条输入已确认</p>
         <p>输入确认不代表工作完成或结果接受。多条记录分别保留，不推断唯一当前执行。</p>
         {dispatches.filter(value => value.stage !== 'confirmed').map(value => <MobileNotice kind={value.stage === "unknown" || value.issue ? "warning" : "feedback"} dismissible={value.stage === "unknown" || Boolean(value.issue)} identity={[value.operationId,value.stage,value.issue]} key={value.operationId} role="status">{name('target' in value ? value.target : value.agentSessionId)} · {stages[value.stage]}{value.issue ? `：${value.issue}` : ''}</MobileNotice>)}
         <details><summary>全部输入与确认依据</summary>{dispatches.map(value => <div key={value.operationId}>
           <p>{name('target' in value ? value.target : value.agentSessionId)} · {stages[value.stage]} · {value.execution === 'continue' ? '续跑输入' : '单次输入'}</p>
-          <p className="mobile-goals-body">{value.prompt}</p><pre>{JSON.stringify(value, null, 2)}</pre>
+          {value.stage === 'rejected' ? <p>{value.rejection.kind === 'goal-start-version-conflict' ? 'Goal 内容已变更，请审阅当前版本后准备新任务。' : '当时未分配该 Agent，请先审阅负责人。'}尚未冻结输入正文。</p> : <p className="mobile-goals-body">{value.prompt}</p>}<pre>{JSON.stringify(value, null, 2)}</pre>
         </div>)}</details></>}
     <details><summary>负责人身份与参与来源</summary><dl><dt>负责人会话</dt><dd>{goal.assigneeSessionIds?.map(demandAgentReferenceLabel).join('、') || '未分配'}</dd>
       <dt>Supervisor 会话</dt><dd>{goal.supervisorSessionId ? demandAgentReferenceLabel(goal.supervisorSessionId) : '未指定'}</dd></dl>

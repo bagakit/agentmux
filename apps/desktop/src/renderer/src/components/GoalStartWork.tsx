@@ -35,11 +35,11 @@ export function GoalStartWork({ rows, supervisorSessionId, active, openAgent, re
     <details className="goal-delegation__source"><summary>Original Start and input</summary>
       {embedded && issue && issue !== responsibilities?.get(`start:${start.operationId}`)?.reason && issue !== observation?.attention?.reason ? <p>{issue}</p> : null}
       {embedded && observation?.attention ? <p>Supervisor reminder {observation.attention.state}. {observation.attention.reason} Reminder receipt does not accept this Goal.</p> : null}
-      <dl>{embedded ? <><dt>Follow-up</dt><dd>{supervisorSessionId ? demandAgentReferenceLabel(supervisorSessionId) : 'Needs an assigned Supervisor'}</dd></> : null}{'target' in start ? <><dt>Source member</dt><dd><code>{JSON.stringify(start.target)}</code></dd></> : <><dt>Host</dt><dd>{start.hostId}</dd><dt>Worker</dt><dd>{start.agentSessionId}</dd></>}<dt>Original Run</dt><dd>{start.runId}</dd>
+      <dl>{embedded ? <><dt>Follow-up</dt><dd>{supervisorSessionId ? demandAgentReferenceLabel(supervisorSessionId) : 'Needs an assigned Supervisor'}</dd></> : null}{'target' in start ? <><dt>Source member</dt><dd><code>{JSON.stringify(start.target)}</code></dd></> : <><dt>Host</dt><dd>{start.hostId}</dd><dt>Worker</dt><dd>{start.agentSessionId}</dd></>}<dt>Original Run</dt><dd>{start.runId ?? 'Not prepared'}</dd>
         <dt>Start operation</dt><dd>{start.operationId}</dd><dt>Input observation</dt><dd>{observation?.input.state ?? 'unknown'}</dd>
         {start.receipt ? <><dt>Retained Core receipt</dt><dd>{start.receipt.kind === 'core-input' ? start.receipt.inputKey.submissionId : start.receipt.itemId}</dd></> : null}
         <dt>Result basis</dt><dd>{start.resultBasis ? 'Captured at this Start' : 'Unknown for this original Start'}</dd></dl>
-      <pre>{start.prompt}</pre>
+      {start.stage === 'rejected' ? <p>{start.rejection.kind === 'goal-start-version-conflict' ? 'The Goal content changed before this task was accepted.' : 'This Agent was not assigned when the task was requested.'} No historical input body was frozen.</p> : <pre>{start.prompt}</pre>}
       {observation?.goalResult ? <div className="goal-delegation__checks"><p>{observation.goalResult.grounding.summary}</p>
         {observation.goalResult.grounding.checks.map(check => <div key={check.criterionId}><strong>{check.criterionId} · {check.outcome}</strong>
           {check.note ? <p>{check.note}</p> : null}<GoalEvidence evidence={check.evidence} criterion={check.criterionId} /></div>)}

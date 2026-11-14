@@ -14,7 +14,7 @@ export type LegacyGoalFiniteStartIntent = GoalFiniteStartBase & { sessionId: str
  * The first private selection remains when a later action chooses another carrier. */
 export type QualifiedGoalFiniteStartIntent = GoalFiniteStartBase & {
   agentReference: DemandSpaceMemberReference
-  access: GoalInspectionAccess
+  access?: GoalInspectionAccess
   accessDraft?: GoalInspectionAccess
   sessionId?: never
 }
@@ -38,17 +38,22 @@ export function readGoalFiniteStartIntent(value: unknown, goalId: string): GoalF
   try {
     const agentReference = parseGoalAgentReference(value.agentReference)
     if (typeof agentReference === 'string') return
-    return { goalId, operationId: value.operationId, agentReference, access: parseGoalInspectionAccess(value.access),
-      ...(value.accessDraft === undefined ? {} : { accessDraft: parseGoalInspectionAccess(value.accessDraft) }), expectedUpdatedAt: value.expectedUpdatedAt as number, phase }
+    // A new private task may have no connection selected yet. The public
+    // access validator remains unchanged, and a submitted empty input stays opaque.
+    const access = value.access === undefined ? undefined : parseGoalInspectionAccess(value.access)
+    const accessDraft = value.accessDraft === undefined ? undefined : parseGoalInspectionAccess(value.accessDraft)
+    if (phase === 'may-have-dispatched' && !accessDraft && !access) return
+    return { goalId, operationId: value.operationId, agentReference,
+      ...(access === undefined ? {} : { access }), ...(accessDraft === undefined ? {} : { accessDraft }), expectedUpdatedAt: value.expectedUpdatedAt as number, phase }
   } catch { return } // Parsing a current view does not own future or damaged private input.
 }
 
-export function goalFiniteStartAccess(intent: QualifiedGoalFiniteStartIntent): GoalInspectionAccess {
+export function goalFiniteStartAccess(intent: QualifiedGoalFiniteStartIntent): GoalInspectionAccess | undefined {
   return intent.accessDraft ?? intent.access
 }
 
-export function goalFiniteStartInspection(goalId: string, operationId: string, access: GoalInspectionAccess): Extract<AgentMuxControlRequest, { operation: 'demand.show' }> {
-  return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: operationId, operation: 'demand.show', demandId: goalId, dispatchOperationId: operationId, access }
+export function goalFiniteStartInspection(goalId: string, operationId: string, access: GoalInspectionAccess | undefined): Extract<AgentMuxControlRequest, { operation: 'demand.show' }> {
+  return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: operationId, operation: 'demand.show', demandId: goalId, dispatchOperationId: operationId, ...(access === undefined ? {} : { access }) }
 }
 
 export function goalFiniteStartSubmission(intent: GoalFiniteStartIntent, access?: GoalInspectionAccess, resumeOriginal = false): Extract<AgentMuxControlRequest, { operation: 'demand.start' }> {

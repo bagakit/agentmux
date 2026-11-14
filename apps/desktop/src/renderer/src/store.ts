@@ -1,4 +1,5 @@
 import type { GoalRelationAccess } from '@agentmux/core/control'
+import { demandAgentReferenceKey } from '@agentmux/demand/relations'
 import { noteHistoryCoreTarget, readNoteFileHistory } from './lib/note-history-source'
 import { createSourceFilesWorkbench, emptySourceFilesInputs, sourceFilesQuery, sourceFilesMappingMatches, sourceFilesWorkspaceMatches, type SourceFilesInputs } from './lib/source-files-workbench'
 import { captureFileEffect, applyFileEffect } from './lib/file-mutation-projection'
@@ -5281,7 +5282,15 @@ export async function clearGoalAgentSelectionDraft(goalId: string, role: GoalAge
 export async function retainGoalFiniteStartIntent(intent: GoalFiniteStartIntent, expected: unknown): Promise<AgentMuxSpatialSave> {
   const raw = useAppStore.getState().goalFiniteStartIntents[intent.goalId], original = readGoalFiniteStartIntent(raw, intent.goalId)
   if (raw !== expected && raw !== intent) throw new Error('The original Goal Start input changed. Your newer private input is retained.')
-  if (!readGoalFiniteStartIntent(intent, intent.goalId) || raw !== undefined && (!original ||
+  const goal = useAppStore.getState().demands[intent.goalId]
+  const rejected = original && goal?.dispatches?.find(value => value.operationId === original.operationId && value.stage === 'rejected')
+  const nextReference = intent.agentReference ?? intent.sessionId
+  const replacesRejection = original?.agentReference && nextReference && rejected?.stage === 'rejected' &&
+    raw === expected && original.operationId !== intent.operationId && intent.phase === 'not-attempted' && intent.expectedUpdatedAt === goal?.updatedAt &&
+    rejected.expectedUpdatedAt === original.expectedUpdatedAt &&
+    demandAgentReferenceKey(rejected.target) === demandAgentReferenceKey(original.agentReference) &&
+    goal?.assigneeSessionIds?.some(value => demandAgentReferenceKey(value) === demandAgentReferenceKey(nextReference))
+  if (!readGoalFiniteStartIntent(intent, intent.goalId) || raw !== undefined && !replacesRejection && (!original ||
       JSON.stringify([original.operationId, original.agentReference ?? original.sessionId, original.access]) !==
       JSON.stringify([intent.operationId, intent.agentReference ?? intent.sessionId, intent.access]) ||
       original.expectedUpdatedAt !== intent.expectedUpdatedAt && (original.phase !== 'not-attempted' || intent.phase !== 'not-attempted')))

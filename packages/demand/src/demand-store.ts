@@ -1,7 +1,7 @@
 import { parseDemandAgentReference, parseDemandAgentReferences, demandAgentReferenceKey, mergeDemandAgentReferences, type DemandAgentReference } from './agent-reference.js'
 import { parseDemandDiscussionIntent, type DemandDiscussionIntent } from './discussion.js'
 import { demandPatrolScope, completedGoalPlanRequest, assertPatrolExecutions, parseDemandPatrols, parseDemandPatrolAttempt, parseDemandPatrolReportInput, type DemandPatrolPreparation, type DemandPatrolAttempt, type DemandPatrolReportInput } from './goal-patrol.js'
-import { parseDemandDispatch, parseDemandDispatchIntent, parseDemandDispatches, qualifiedDemandDispatch, sameDemandDispatchIntent, type DemandDispatch, type DemandDispatchIntent } from './dispatch.js'
+import { parseDemandDispatch, parseDemandDispatchIntent, parseDemandDispatchRequest, parseDemandDispatches, qualifiedDemandDispatch, runBoundDemandDispatch, sameDemandDispatchIntent, type DemandDispatch, type DemandDispatchIntent, type DemandDispatchRequest, type DemandDispatchRejection } from './dispatch.js'
 import { parseDemandDelegationRuntimeIdentity, type DemandDelegationRuntimeIdentity, parseDemandDelegationIntent, parseDemandDelegations, parseDemandDelegationReportInput, parseDemandDelegationCollectionInput, parseDemandDelegationCollector, sameDemandDelegationIntent, validateDemandDelegationReport,
   parseDemandDelegationAttentionInput, sameDemandDelegationAttention, delegationWorkerHostId,
   type DemandDelegation, type DemandDelegationIntent, type DemandDelegationReportInput, type DemandDelegationCollectionInput, type DemandDelegationCollector, type DemandDelegationAttentionInput } from './delegations.js'
@@ -238,7 +238,7 @@ function parseDemand(value: unknown, label: string): Demand {
     ...(record.discussionOperationId === undefined ? {} : { discussionOperationId: nonEmptyString(record.discussionOperationId, `${label}.discussionOperationId`) }),
     ...(record.discussionIntent === undefined ? {} : { discussionIntent: parseDemandDiscussionIntent(record.discussionIntent) }),
     ...(record.contentRefs === undefined ? {} : { contentRefs: parseDemandContentReferences(record.contentRefs) }),
-    dispatches: parseDemandDispatches(record.dispatches ?? []),
+    dispatches: parseDemandDispatches(record.dispatches ?? [], nonEmptyString(record.id, `${label}.id`)),
     ...(record.delegations === undefined ? {} : { delegations: parseDemandDelegations(record.delegations) }),
     ...(record.progressUpdates === undefined ? {} : { progressUpdates: parseDemandProgressUpdates(record.progressUpdates) }),
     ...(record.patrols === undefined ? {} : { patrols: parseDemandPatrols(record.patrols) }),
@@ -633,6 +633,37 @@ export class DemandStore {
     }, undefined, report.operationId)
   }
 
+  /** Reserve the original business request before fallible execution preparation.
+   * The existing kernel writer lock owns first acceptance across Host processes. */
+  async requestDispatch(id: string, input: DemandDispatchRequest, expectedUpdatedAt?: number): Promise<DemandReceipt> {
+    const request = parseDemandDispatchRequest(input)
+    if (expectedUpdatedAt !== undefined && (!Number.isSafeInteger(expectedUpdatedAt) || expectedUpdatedAt < 0))
+      throw new DemandStoreError('INVALID_INPUT', 'validate', this.storePath, 'Expected Goal version is invalid.')
+    return this.mutate('dispatch.request', snapshot => {
+      const demand = findDemand(snapshot, id, this.storePath)
+      const owner = snapshot.demands.find(item => item.dispatches?.some(dispatch => dispatch.operationId === request.operationId))
+      const original = owner?.dispatches?.find(dispatch => dispatch.operationId === request.operationId)
+      if (original) {
+        if (owner!.id !== id || !qualifiedDemandDispatch(original) || demandAgentReferenceKey(original.target) !== demandAgentReferenceKey(request.target))
+          throw new DemandStoreError('INVALID_INPUT', 'validate', this.storePath, 'The original Start operation belongs to another Goal or member. Inspect it without replacing it.')
+        return { unchanged: demand }
+      }
+      const requestedAt = Date.now(), goalUpdatedAt = demand.updatedAt
+      const rejection: DemandDispatchRejection | undefined = !demand.assigneeSessionIds.some(value => demandAgentReferenceKey(value) === demandAgentReferenceKey(request.target))
+        ? { kind: 'goal-start-assignee-conflict', goalId: id, operationId: request.operationId, currentUpdatedAt: goalUpdatedAt, target: request.target }
+        : expectedUpdatedAt !== undefined && expectedUpdatedAt !== goalUpdatedAt
+          ? { kind: 'goal-start-version-conflict', goalId: id, operationId: request.operationId, currentUpdatedAt: goalUpdatedAt } : undefined
+      const saved: DemandDispatch = rejection ? { ...request, execution: 'finite', stage: 'rejected', requestedAt, observedGoalUpdatedAt: goalUpdatedAt,
+        ...(expectedUpdatedAt === undefined ? {} : { expectedUpdatedAt }), rejection }
+        : { ...request, execution: 'finite', stage: 'requested', prompt: demand.description.trim() || demand.title,
+          request: { requestedAt, goalUpdatedAt }, resultBasis: { alignmentRevision: demand.alignment?.revision ?? null,
+            criteria: clone(demand.alignment?.criteria ?? []), groundingSubmissionId: demand.grounding?.submissionId ?? null } }
+      demand.dispatches = [...(demand.dispatches ?? []), saved]
+      demand.updatedAt = Math.max(requestedAt, demand.updatedAt + 1)
+      return demand
+    }, undefined, request.operationId)
+  }
+
   /** Only the explicit business Start owner calls this; ordinary updates cannot write it. */
   async prepareDispatch(id: string, input: DemandDispatchIntent, expectedUpdatedAt?: number): Promise<DemandReceipt> {
     const intent = parseDemandDispatchIntent(input)
@@ -641,7 +672,14 @@ export class DemandStore {
       const owner = snapshot.demands.find(item => item.dispatches?.some(dispatch => dispatch.operationId === intent.operationId))
       const original = owner?.dispatches?.find(dispatch => dispatch.operationId === intent.operationId)
       if (original) {
-        if (owner!.id !== id || !sameDemandDispatchIntent(original, intent)) throw new DemandStoreError('INVALID_INPUT', 'validate', this.storePath, 'The original Start operation belongs to another Goal, Session, Run or input. Inspect it without resending.')
+        if (owner!.id === id && original.stage === 'requested' && qualifiedDemandDispatch(intent) &&
+            demandAgentReferenceKey(original.target) === demandAgentReferenceKey(intent.target) && original.prompt === intent.prompt) {
+          demand.dispatches = demand.dispatches!.map(value => value.operationId === intent.operationId
+            ? { ...intent, stage: 'prepared', preparedAt: Date.now(), request: original.request, resultBasis: original.resultBasis } : value)
+          demand.updatedAt = Math.max(Date.now(), demand.updatedAt + 1)
+          return demand
+        }
+        if (owner!.id !== id || !runBoundDemandDispatch(original) || !sameDemandDispatchIntent(original, intent)) throw new DemandStoreError('INVALID_INPUT', 'validate', this.storePath, 'The original Start operation belongs to another Goal, Session, Run or input. Inspect it without resending.')
         return { unchanged: demand }
       }
       if (expectedUpdatedAt !== undefined && (!Number.isSafeInteger(expectedUpdatedAt) || expectedUpdatedAt < 0 || demand.updatedAt !== expectedUpdatedAt)) {
@@ -672,6 +710,7 @@ export class DemandStore {
       const demand = findDemand(snapshot, id, this.storePath)
       const dispatches = demand.dispatches ?? [], index = dispatches.findIndex(dispatch => dispatch.operationId === operationId), original = dispatches[index]
       if (!original) throw new DemandStoreError('INVALID_INPUT', 'validate', this.storePath, 'The original Start has not been prepared. Preserve the Agent and inspect its exact operation.')
+      if (!runBoundDemandDispatch(original)) throw new DemandStoreError('INVALID_INPUT', 'validate', this.storePath, 'This business request has no prepared input. Inspect its original request before an explicit continuation.')
       if (original.stage === 'confirmed') return { unchanged: demand }
       const { issue: _issue, ...frozen } = original
       const next = parseDemandDispatch({ ...frozen, stage: phase.stage, submittedAt: original.submittedAt ?? Date.now(), ...(phase.stage === 'confirmed' ? { receipt: phase.receipt } : phase.issue ? { issue: phase.issue } : {}) })

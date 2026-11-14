@@ -1,7 +1,7 @@
 import type { Demand } from './demand-types.js'
 import { delegationWorkerHostId } from './delegations.js'
 import { demandAgentReferenceKey, parseDemandAgentReference, type DemandSpaceMemberReference } from './agent-reference.js'
-import { qualifiedDemandDispatch } from './dispatch.js'
+import { qualifiedDemandDispatch, runBoundDemandDispatch } from './dispatch.js'
 
 /** Business responsibility references original execution; it never owns Runtime state. */
 export type DemandLegacyExecutionReference = {
@@ -107,7 +107,7 @@ export function parseDemandProgressUpdates(value: unknown): DemandProgress[] {
 }
 export function demandExecutionReferences(goal: Pick<Demand, 'dispatches' | 'delegations'>): DemandExecutionReference[] {
   return [
-    ...(goal.dispatches ?? []).filter(item => item.execution === 'finite').map(item => qualifiedDemandDispatch(item)
+    ...(goal.dispatches ?? []).filter(runBoundDemandDispatch).filter(item => item.execution === 'finite').map(item => qualifiedDemandDispatch(item)
       ? { kind: 'start' as const, operationId: item.operationId, target: item.target, runId: item.runId }
       : { kind: 'start' as const, operationId: item.operationId, hostId: item.hostId, agentSessionId: item.agentSessionId, runId: item.runId }),
     ...(goal.delegations ?? []).map(item => ({ kind: 'delegation' as const, operationId: item.operationId,
@@ -159,7 +159,7 @@ export function demandHandoffDestinations(goal: Pick<Demand, 'dispatches' | 'del
 export function demandResponsibilityScope(goal: Pick<Demand, 'id' | 'status' | 'supervisorSessionId' | 'alignment' | 'grounding' | 'dispatches' | 'delegations' | 'progressUpdates'>): string {
   return JSON.stringify({ id: goal.id, status: goal.status, supervisor: goal.supervisorSessionId,
     alignment: goal.alignment?.revision ?? null, confirmedAt: goal.alignment?.confirmedAt ?? null, grounding: goal.grounding?.submissionId ?? null, acceptedAt: goal.grounding?.acceptedAt ?? null,
-    starts: (goal.dispatches ?? []).filter(item => item.execution === 'finite').map(item => qualifiedDemandDispatch(item)
+    starts: (goal.dispatches ?? []).filter(runBoundDemandDispatch).filter(item => item.execution === 'finite').map(item => qualifiedDemandDispatch(item)
       ? [item.operationId, item.target, item.runId, item.stage, item.receipt ?? null]
       : [item.operationId, item.hostId, item.agentSessionId, item.runId, item.stage, item.receipt ?? null]),
     delegations: (goal.delegations ?? []).map(item => [item.operationId, item.hostId, delegationWorkerHostId(item), item.workerAgentSessionId, item.workerRunId, item.linkedAt ?? null, item.report?.operationId ?? null, item.collection?.operationId ?? null]),

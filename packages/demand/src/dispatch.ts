@@ -26,6 +26,26 @@ export type DemandLegacyDispatchReceipt = { kind: 'core-prompt'; itemId: string;
 export type DemandQualifiedDispatchReceipt = { kind: 'core-input'; inputKey: {
   kind: 'prompt'; agentSessionId: string; expectedRun: { runId: string }; submissionId: string
 }; outcome: 'admitted' | 'terminal-confirmed'; observedAt: number }
+export type DemandDispatchRequest = { operationId: string; target: DemandSpaceMemberReference }
+export type DemandDispatchRequestOrigin = { requestedAt: number; goalUpdatedAt: number }
+export type DemandDispatchResultBasis = { alignmentRevision: number | null; criteria: DemandCriterion[]; groundingSubmissionId: string | null }
+type QualifiedBusinessRequest = DemandDispatchRequest & {
+  execution: 'finite'
+  runId?: never; preparedAt?: never; submittedAt?: never; agentMuxNote?: never
+  receipt?: never; attention?: never; issue?: never
+}
+export type DemandQualifiedRequested = QualifiedBusinessRequest & {
+  stage: 'requested'; prompt: string; request: DemandDispatchRequestOrigin; resultBasis: DemandDispatchResultBasis
+}
+export type DemandDispatchRejection = {
+  kind: 'goal-start-version-conflict'; goalId: string; operationId: string; currentUpdatedAt: number
+} | {
+  kind: 'goal-start-assignee-conflict'; goalId: string; operationId: string; currentUpdatedAt: number; target: DemandSpaceMemberReference
+}
+export type DemandQualifiedRejected = QualifiedBusinessRequest & {
+  stage: 'rejected'; requestedAt: number; expectedUpdatedAt?: number; observedGoalUpdatedAt: number; rejection: DemandDispatchRejection
+  prompt?: never; resultBasis?: never; request?: never
+}
 type DispatchState<Receipt> = {
   stage: 'prepared' | 'submitted' | 'confirmed' | 'unknown'
   preparedAt: number
@@ -34,13 +54,16 @@ type DispatchState<Receipt> = {
   receipt?: Receipt
   issue?: string
   /** Captured by the original business owner, never declared by a Start client. */
-  resultBasis?: { alignmentRevision: number | null; criteria: DemandCriterion[]; groundingSubmissionId: string | null }
+  resultBasis?: DemandDispatchResultBasis
   /** Reference to an existing Core Supervisor input; not an A2A message or queue. */
   attention?: DemandDelegationAttention
 }
-export type DemandDispatch = (DemandLegacyDispatchIntent & DispatchState<DemandLegacyDispatchReceipt>) |
-  (DemandQualifiedDispatchIntent & DispatchState<DemandQualifiedDispatchReceipt>)
-export function qualifiedDemandDispatch(value: DemandDispatchIntent): value is DemandQualifiedDispatchIntent { return 'target' in value }
+export type DemandRunBoundDispatch = (DemandLegacyDispatchIntent & DispatchState<DemandLegacyDispatchReceipt>) |
+  (DemandQualifiedDispatchIntent & DispatchState<DemandQualifiedDispatchReceipt> & { request?: DemandDispatchRequestOrigin })
+export type DemandDispatch = DemandRunBoundDispatch | DemandQualifiedRequested | DemandQualifiedRejected
+export function qualifiedDemandDispatch(value: DemandDispatchIntent | DemandDispatch): value is DemandQualifiedDispatchIntent | DemandQualifiedRequested | DemandQualifiedRejected { return 'target' in value }
+/** A saved business request or refusal does not supply a Runtime input identity. */
+export function runBoundDemandDispatch(value: DemandDispatch): value is DemandRunBoundDispatch { return value.stage !== 'requested' && value.stage !== 'rejected' }
 
 export type GoalStartObservation = {
   operationId: string
@@ -69,6 +92,31 @@ function time(value: unknown, label: string): number {
 }
 const intentKeys = ['operationId', 'agentSessionId', 'hostId', 'runId', 'execution', 'prompt', 'loopId', 'alignmentRevision']
 const qualifiedIntentKeys = ['operationId', 'target', 'runId', 'execution', 'prompt', 'agentMuxNote']
+export function parseDemandDispatchRequest(value: unknown): DemandDispatchRequest {
+  const input = record(value, 'dispatch request')
+  if (Object.keys(input).some(key => key !== 'operationId' && key !== 'target')) throw new Error('dispatch request has unknown fields')
+  const target = parseDemandAgentReference(input.target)
+  if (typeof target === 'string') throw new Error('dispatch request requires its exact Source member')
+  return { operationId: text(input.operationId, 'dispatch.operationId'), target }
+}
+function version(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) throw new Error('dispatch Goal version is invalid')
+  return value
+}
+function requestOrigin(value: unknown): DemandDispatchRequestOrigin {
+  const input = record(value, 'dispatch.request')
+  if (Object.keys(input).some(key => key !== 'requestedAt' && key !== 'goalUpdatedAt')) throw new Error('dispatch.request has unknown fields')
+  return { requestedAt: time(input.requestedAt, 'dispatch.requestedAt'), goalUpdatedAt: version(input.goalUpdatedAt) }
+}
+function parseResultBasis(value: unknown): DemandDispatchResultBasis {
+  const basis = record(value, 'dispatch.resultBasis')
+  if (Object.keys(basis).some(key => !['alignmentRevision', 'criteria', 'groundingSubmissionId'].includes(key)) ||
+      basis.alignmentRevision !== null && (typeof basis.alignmentRevision !== 'number' || !Number.isSafeInteger(basis.alignmentRevision) || basis.alignmentRevision < 1)) throw new Error('dispatch result basis is invalid')
+  const criteria = parseAlignmentProposal({ summary: 'Original Start criteria', criteria: basis.criteria, openQuestions: [] }).criteria
+  if (basis.alignmentRevision === null && criteria.length) throw new Error('dispatch result basis has no original alignment')
+  return { alignmentRevision: basis.alignmentRevision as number | null, criteria,
+    groundingSubmissionId: basis.groundingSubmissionId === null ? null : text(basis.groundingSubmissionId, 'dispatch.resultBasis.groundingSubmissionId') }
+}
 export function parseDemandDispatchIntent(value: unknown): DemandDispatchIntent {
   const input = record(value, 'dispatch')
   if (Object.hasOwn(input, 'target')) {
@@ -87,10 +135,34 @@ export function parseDemandDispatchIntent(value: unknown): DemandDispatchIntent 
     prompt: text(input.prompt, 'dispatch.prompt'), ...(input.loopId === undefined ? {} : { loopId: text(input.loopId, 'dispatch.loopId') }),
     ...(input.alignmentRevision === undefined ? {} : { alignmentRevision: input.alignmentRevision as number }) }
 }
-export function parseDemandDispatch(value: unknown): DemandDispatch {
+export function parseDemandDispatch(value: unknown, goalId?: string): DemandDispatch {
   const input = record(value, 'dispatch')
+  if (input.stage === 'requested' || input.stage === 'rejected') {
+    const base = parseDemandDispatchRequest({ operationId: input.operationId, target: input.target })
+    if (input.execution !== 'finite') throw new Error('dispatch request requires finite execution')
+    if (input.stage === 'requested') {
+      if (Object.keys(input).some(key => !['stage', 'operationId', 'target', 'execution', 'prompt', 'request', 'resultBasis'].includes(key))) throw new Error('requested dispatch has unknown fields')
+      return { ...base, execution: 'finite', stage: 'requested', prompt: text(input.prompt, 'dispatch.prompt'), request: requestOrigin(input.request), resultBasis: parseResultBasis(input.resultBasis) }
+    }
+    if (Object.keys(input).some(key => !['stage', 'operationId', 'target', 'execution', 'requestedAt', 'expectedUpdatedAt', 'observedGoalUpdatedAt', 'rejection'].includes(key))) throw new Error('rejected dispatch has unknown fields')
+    const observed = version(input.observedGoalUpdatedAt), expected = input.expectedUpdatedAt === undefined ? undefined : version(input.expectedUpdatedAt)
+    const refusal = record(input.rejection, 'dispatch.rejection'), owner = text(refusal.goalId, 'dispatch.rejection.goalId')
+    if (goalId !== undefined && owner !== goalId || refusal.operationId !== base.operationId || version(refusal.currentUpdatedAt) !== observed) throw new Error('dispatch rejection belongs to another original Goal, OP or version')
+    let rejection: DemandDispatchRejection
+    if (refusal.kind === 'goal-start-version-conflict') {
+      if (Object.keys(refusal).some(key => !['kind', 'goalId', 'operationId', 'currentUpdatedAt'].includes(key)) || expected === undefined || expected === observed) throw new Error('dispatch version rejection is inconsistent')
+      rejection = { kind: refusal.kind, goalId: owner, operationId: base.operationId, currentUpdatedAt: observed }
+    } else if (refusal.kind === 'goal-start-assignee-conflict') {
+      if (Object.keys(refusal).some(key => !['kind', 'goalId', 'operationId', 'currentUpdatedAt', 'target'].includes(key))) throw new Error('dispatch assignee rejection has unknown fields')
+      const target = parseDemandAgentReference(refusal.target)
+      if (typeof target === 'string' || demandAgentReferenceKey(target) !== demandAgentReferenceKey(base.target)) throw new Error('dispatch rejection names another original member')
+      rejection = { kind: refusal.kind, goalId: owner, operationId: base.operationId, currentUpdatedAt: observed, target }
+    } else throw new Error('dispatch rejection kind is invalid')
+    return { ...base, execution: 'finite', stage: 'rejected', requestedAt: time(input.requestedAt, 'dispatch.requestedAt'), observedGoalUpdatedAt: observed,
+      ...(expected === undefined ? {} : { expectedUpdatedAt: expected }), rejection }
+  }
   const keys = Object.hasOwn(input, 'target') ? qualifiedIntentKeys : intentKeys
-  if (Object.keys(input).some(key => ![...keys, 'stage', 'preparedAt', 'submittedAt', 'receipt', 'issue', 'resultBasis', 'attention'].includes(key))) throw new Error('dispatch has unknown fields')
+  if (Object.keys(input).some(key => ![...keys, 'stage', 'preparedAt', 'submittedAt', 'receipt', 'issue', 'resultBasis', 'attention', ...(Object.hasOwn(input, 'target') ? ['request'] : [])].includes(key))) throw new Error('dispatch has unknown fields')
   const intent = parseDemandDispatchIntent(Object.fromEntries(keys.filter(key => input[key] !== undefined).map(key => [key, input[key]])))
   if (!['prepared', 'submitted', 'confirmed', 'unknown'].includes(String(input.stage))) throw new Error('dispatch stage is invalid')
   if ((input.stage === 'confirmed') !== (input.receipt !== undefined) || (input.stage !== 'prepared' && input.submittedAt === undefined)) throw new Error('dispatch stage lacks its original evidence')
@@ -111,16 +183,7 @@ export function parseDemandDispatch(value: unknown): DemandDispatch {
     }
   }
   let resultBasis: DemandDispatch['resultBasis'], attention: DemandDispatch['attention']
-  if (input.resultBasis !== undefined) {
-    const basis = record(input.resultBasis, 'dispatch.resultBasis')
-    if (Object.keys(basis).some(key => !['alignmentRevision', 'criteria', 'groundingSubmissionId'].includes(key)) ||
-      basis.alignmentRevision !== null && (typeof basis.alignmentRevision !== 'number' || !Number.isSafeInteger(basis.alignmentRevision) || basis.alignmentRevision < 1))
-      throw new Error('dispatch result basis is invalid')
-    const criteria = parseAlignmentProposal({ summary: 'Original Start criteria', criteria: basis.criteria, openQuestions: [] }).criteria
-    if (basis.alignmentRevision === null && criteria.length) throw new Error('dispatch result basis has no original alignment')
-    resultBasis = { alignmentRevision: basis.alignmentRevision as number | null, criteria,
-      groundingSubmissionId: basis.groundingSubmissionId === null ? null : text(basis.groundingSubmissionId, 'dispatch.resultBasis.groundingSubmissionId') }
-  }
+  if (input.resultBasis !== undefined) resultBasis = parseResultBasis(input.resultBasis)
   if (input.attention !== undefined) {
     if (qualifiedDemandDispatch(intent)) throw new Error('Source-qualified finite input does not grant automatic Supervisor attention')
     const notice = record(input.attention, 'dispatch.attention'), { preparedAt, attemptedAt, ...attentionIntent } = notice
@@ -128,20 +191,20 @@ export function parseDemandDispatch(value: unknown): DemandDispatch {
       ...(attemptedAt === undefined ? {} : { attemptedAt: time(attemptedAt, 'dispatch.attention.attemptedAt') }) }
     if (input.execution !== 'finite' || attention.hostId !== input.hostId) throw new Error('dispatch attention belongs to another Start or Host')
   }
-  const state = { stage: input.stage as DemandDispatch['stage'], preparedAt: time(input.preparedAt, 'dispatch.preparedAt'),
+  const state = { stage: input.stage as DemandRunBoundDispatch['stage'], preparedAt: time(input.preparedAt, 'dispatch.preparedAt'),
     ...(input.submittedAt === undefined ? {} : { submittedAt: time(input.submittedAt, 'dispatch.submittedAt') }),
     ...(input.issue === undefined ? {} : { issue: text(input.issue, 'dispatch.issue') }),
     ...(resultBasis === undefined ? {} : { resultBasis }), ...(attention === undefined ? {} : { attention }) }
   if (qualifiedDemandDispatch(intent)) {
     if (receipt && receipt.kind !== 'core-input') throw new Error('Source-qualified receipt kind changed')
-    return { ...intent, ...state, ...(receipt ? { receipt } : {}) }
+    return { ...intent, ...state, ...(receipt ? { receipt } : {}), ...(input.request === undefined ? {} : { request: requestOrigin(input.request) }) }
   }
   if (receipt && receipt.kind !== 'core-prompt') throw new Error('Original legacy receipt kind changed')
   return { ...intent, ...state, ...(receipt ? { receipt } : {}) }
 }
-export function parseDemandDispatches(value: unknown): DemandDispatch[] {
+export function parseDemandDispatches(value: unknown, goalId?: string): DemandDispatch[] {
   if (!Array.isArray(value)) throw new Error('dispatches must be an array')
-  const dispatches = value.map(parseDemandDispatch)
+  const dispatches = value.map(item => parseDemandDispatch(item, goalId))
   if (new Set(dispatches.map(item => item.operationId)).size !== dispatches.length) throw new Error('dispatches contain duplicate original operations')
   const notices = dispatches.flatMap(item => item.attention ? [item.attention] : [])
   if (new Set(notices.map(item => item.operationId)).size !== notices.length || new Set(notices.map(item => item.intentId)).size !== notices.length)

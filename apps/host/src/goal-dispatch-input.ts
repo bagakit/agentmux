@@ -1,5 +1,5 @@
 import { AgentMuxError, type AgentInputSubmissionReceipt, type AgentTimelineItem } from '@agentmux/core'
-import type { DemandDispatch, DemandQualifiedDispatchIntent, DemandQualifiedDispatchReceipt, DemandStore } from '@agentmux/demand'
+import { runBoundDemandDispatch, type DemandDispatch, type DemandQualifiedDispatchIntent, type DemandQualifiedDispatchReceipt, type DemandStore } from '@agentmux/demand'
 import type { GoalAgentControl as AgentSessionControl } from './goal-runtime.js'
 import type { GoalDispatchReference } from './goal-runtime.js'
 import type { GoalRuntimePort } from './goal-runtime.js'
@@ -81,6 +81,7 @@ export class GoalDispatchInputOwner {
   async reconcileQualified(reference: GoalDispatchReference, port: Pick<GoalFiniteInputPort, 'inspectOriginal'>, assertCurrent?: () => Promise<void>) {
     const original = await this.original(reference)
     if (!('target' in original)) throw new AgentMuxError('The original Start is a legacy operation. Its original carrier remains available.', 'CONTROL_REQUEST_CONFLICT')
+    if (!runBoundDemandDispatch(original)) throw new AgentMuxError('This business request has no prepared input. Inspect it and explicitly continue the original request before reading a Core input key.', 'CONTROL_UNAVAILABLE')
     if (original.stage === 'confirmed') return await this.demands.recordDispatchPhase(reference.goalId, reference.operationId, { stage: 'confirmed', receipt: original.receipt! })
     const receipt = qualifiedReceiptFor(original, await port.inspectOriginal(original))
     if (!receipt) throw new AgentMuxError('This original Goal input is not confirmed by its Core owner. Check it, or explicitly continue this same operation; no input was resent.', 'CONTROL_UNAVAILABLE')
@@ -91,6 +92,7 @@ export class GoalDispatchInputOwner {
   async submitQualified(reference: GoalDispatchReference, port: GoalFiniteInputPort, resumeOriginal: boolean, assertCurrent?: () => Promise<void>): Promise<void> {
     const original = await this.original(reference)
     if (!('target' in original)) throw new AgentMuxError('The original Start is a legacy operation. Its original carrier remains available.', 'CONTROL_REQUEST_CONFLICT')
+    if (!runBoundDemandDispatch(original)) throw new AgentMuxError('This business request has no prepared input. Inspect it and explicitly continue the original request before reading a Core input key.', 'CONTROL_UNAVAILABLE')
     if (original.stage === 'confirmed') return
     if (original.stage !== 'prepared' && !resumeOriginal) { await this.reconcileQualified(reference, port, assertCurrent); return }
     await assertCurrent?.()

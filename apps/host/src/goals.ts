@@ -13,7 +13,7 @@ import { AgentMuxError, agentPromptCondition, type AgentMuxHeadlessRuntime, type
   type AgentMuxSpatialStateStore, type AgentMuxRpcMethod, type AgentMuxRpcParams, type AgentMuxRpcResult } from '@agentmux/core'
 import type { AgentMuxControlRequest, AgentMuxControlResult } from '@agentmux/core/control'
 import type { AgentMuxNameContext } from '@agentmux/core/spatial-graph'
-import { isDemandStoreError, openDemandStore, type Demand, type DemandParticipationSource, type DemandStore } from '@agentmux/demand'
+import { isDemandStoreError, openDemandStore, runBoundDemandDispatch, type Demand, type DemandParticipationSource, type DemandStore, type DemandReceipt } from '@agentmux/demand'
 import type { GoalDelegationCorePort, GoalDelegationCoreMethod } from './goal-delegation-owner.js'
 import { GoalDelegationOwner } from './goal-delegation-owner.js'
 import { GoalDelegationAttentionOwner } from './goal-delegation-attention.js'
@@ -39,6 +39,11 @@ import type { FileReadParams, FileReadResult } from '@agentmux/core/files'
 type GoalRequest = Extract<AgentMuxControlRequest, { operation: `demand.${string}` }>
 const person = { kind: 'user' as const, id: `local-user:${process.getuid?.() ?? 'current'}` }
 const record = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value)
+const preparedStart = (receipt: DemandReceipt, operationId: string) => {
+  const original = receipt.demand.dispatches?.find(value => value.operationId === operationId)
+  if (!original || !runBoundDemandDispatch(original)) throw new AgentMuxError('The original Goal writer has not returned a prepared input. Its business request remains retained.', 'CONTROL_PROTOCOL_ERROR')
+  return original
+}
 
 /** One original Demand store and automatic input owner, independent of every presentation client. */
 export function createHostGoals(options: {
@@ -190,6 +195,10 @@ export function createHostGoals(options: {
     if (req.operation === 'demand.show') {
       if (req.dispatchOperationId) {
         const reference = { goalId: req.demandId, operationId: req.dispatchOperationId }, original = await dispatch.original(reference)
+        if (!runBoundDemandDispatch(original)) {
+          // This cut has only a business request/refusal, not a Core input key.
+          return { operation: req.operation, demand: await projectGoal(await get(req.demandId)), goalContinuations: await progress.listGoals(req.demandId) }
+        }
         if ('target' in original) {
           if (!req.access) throw new AgentMuxError('Choose current access to read this exact original qualified Goal input. The Goal and request remain retained.', 'CONTROL_UNAVAILABLE')
           const port = await runtime.openFiniteInspection({ reference: original.target, access: req.access, originalRunId: original.runId }, context)
@@ -277,7 +286,7 @@ export function createHostGoals(options: {
       return { operation: req.operation, demand: await projectGoal(saved.demand), receipt: { demandId: goal.id, handedOffAt: saved.demand.updatedAt, sessionId: req.sessionId ?? null } }
     }
     if (req.operation === 'demand.start') return req.agentReference
-      ? await startQualifiedGoal(goal, req, context)
+      ? await startQualifiedGoal(goal, req, context, name)
       : await startGoal(goal, req.sessionId, req.requestId, context, req.continuation, req.expectedUpdatedAt)
     return undefined
   }
@@ -309,10 +318,11 @@ export function createHostGoals(options: {
           throw new AgentMuxError(error.message, 'CONTROL_REQUEST_CONFLICT', undefined, { disposition: 'not_applied', confirmedInputBytes: 0 })
         throw error
       })
+    const savedStart = preparedStart(prepared, operationId)
     const condition = loop?.initialDelivery?.condition ?? agentPromptCondition(session)
     const control = { kind: 'agent' as const, hostId: resolved.hostId, agentSessionId: selected, run: session.run }
     const note = goalRoleInputNote(undefined, { role: 'executor', goalId: goal.id, agentSessionId: selected, runId: session.run.runId,
-      source: { kind: loop ? 'goal-native-continuation' : 'goal-start', operationId } }, await runtime.inspectGoalStart(prepared.demand.dispatches!.find(value => value.operationId === operationId)!))
+      source: { kind: loop ? 'goal-native-continuation' : 'goal-start', operationId } }, await runtime.inspectGoalStart(savedStart))
     await dispatch.submit({ goalId: goal.id, operationId }, control, operationId, prompt, async () => {
       await current(context)
       if (loop) await progress.submitGoalInitial(control, goal.id, loop.loopId, operationId, prompt, condition,
@@ -321,34 +331,53 @@ export function createHostGoals(options: {
     }, loop ? { goalId: goal.id, loopId: loop.loopId } : undefined)
     await demands.update(goal.id, { status: 'in_progress' })
     const confirmed = loop ? await progress.initialGoalInput(loop, loop.loopId, operationId, 'confirm') : undefined
-    return { operation: 'demand.start', demand: await projectGoal(await get(goal.id)), ...(confirmed ? { continuation: confirmed } : {}), receipt: { demandId: goal.id, startedAt: prepared.demand.dispatches!.find(value => value.operationId === operationId)!.preparedAt, sessionId: selected } }
+    return { operation: 'demand.start', demand: await projectGoal(await get(goal.id)), ...(confirmed ? { continuation: confirmed } : {}), receipt: { demandId: goal.id, startedAt: savedStart.preparedAt, sessionId: selected } }
   }
   const startQualifiedGoal = async (goal: Demand, request: Extract<Extract<AgentMuxControlRequest, { operation: 'demand.start' }>, { agentReference: DemandSpaceMemberReference }>,
-    context: AgentMuxRpcCallContext): Promise<Extract<AgentMuxControlResult, { operation: 'demand.start' }>> => {
-    const reference = { goalId: goal.id, operationId: request.requestId }, original = await demands.inspectDispatch(goal.id, request.requestId)
-    if (request.resumeOriginal && !original) throw new AgentMuxError('This original Goal Start has no saved intent yet. No replacement operation or input was created.', 'CONTROL_REQUEST_CONFLICT')
-    if (original && (!('target' in original) || demandAgentReferenceKey(original.target) !== demandAgentReferenceKey(request.agentReference)))
+    context: AgentMuxRpcCallContext, name: AgentMuxNameContext | undefined): Promise<Extract<AgentMuxControlResult, { operation: 'demand.start' }>> => {
+    const reference = { goalId: goal.id, operationId: request.requestId }
+    let original: Awaited<ReturnType<typeof demands.inspectDispatch>>, fresh = false
+    if (request.resumeOriginal) {
+      original = await demands.inspectDispatch(goal.id, request.requestId)
+      if (!original) throw new AgentMuxError('This original Goal Start has no saved intent yet. No replacement operation or input was created.', 'CONTROL_REQUEST_CONFLICT')
+    } else {
+      const actor = name?.actor
+      if (!actor?.verified || !actor.id?.trim() || actor.id.includes('\0') ||
+          (actor.kind === 'agent' ? !context.caller : actor.kind !== 'user' && actor.kind !== 'device'))
+        throw new AgentMuxError('Saving a Goal Start request requires its original authenticated business author. The Agent and private request remain retained.', 'CONTROL_PERMISSION_DENIED')
+      await current(context)
+      const receipt = await demands.requestDispatch(goal.id, { operationId: request.requestId, target: request.agentReference }, request.expectedUpdatedAt)
+      original = receipt.demand.dispatches?.find(item => item.operationId === request.requestId) ?? null
+      fresh = receipt.replayed !== true
+    }
+    if (!original || !('target' in original) || demandAgentReferenceKey(original.target) !== demandAgentReferenceKey(request.agentReference))
       throw new AgentMuxError('The original Goal Start names another source or execution member. Its frozen operation was retained.', 'CONTROL_REQUEST_CONFLICT')
-    if (!original && !goal.assigneeSessionIds.some(value => demandAgentReferenceKey(value) === demandAgentReferenceKey(request.agentReference)))
-      throw new AgentMuxError('Choose this exact responsible Source member before starting the Goal.', 'INVALID_CONTROL_REQUEST')
-    if (original?.stage === 'confirmed') return { operation: 'demand.start', demand: await projectGoal(await get(goal.id)), receipt: {
-      demandId: goal.id, startedAt: original.preparedAt, agentReference: request.agentReference, run: { runId: original.runId } } }
-    const port = await runtime.openFinite({ reference: request.agentReference, access: request.access, ...(original ? { originalRunId: original.runId } : {}) }, context)
+    if (original.stage === 'rejected') throw new AgentMuxError(original.rejection.kind === 'goal-start-version-conflict'
+      ? 'The Goal changed before this task was accepted. Check the original rejection, then explicitly prepare a new task from the current version.'
+      : 'This task did not name a current responsible Agent. Check the original rejection, review assignees and explicitly prepare a new task.',
+      original.rejection.kind === 'goal-start-version-conflict' ? 'CONTROL_REQUEST_CONFLICT' : 'INVALID_CONTROL_REQUEST')
+    if (original.stage === 'requested' && !fresh && !request.resumeOriginal)
+      throw new AgentMuxError('This original task is saved before input preparation. Check it and explicitly continue the same operation using current access.', 'CONTROL_REQUEST_CONFLICT')
+    if (original.stage === 'confirmed') return { operation: 'demand.start', demand: await projectGoal(await get(goal.id)), receipt: {
+      demandId: goal.id, startedAt: original.preparedAt, agentReference: original.target, run: { runId: original.runId } } }
+    const port = await runtime.openFinite({ reference: original.target, access: request.access,
+      ...(runBoundDemandDispatch(original) ? { originalRunId: original.runId } : {}) }, context)
     try {
-      const runId = original?.runId ?? (await port.readCurrent()).runId
-      const prompt = original?.prompt ?? (goal.description.trim() || goal.title)
-      const agentMuxNote = original ? original.agentMuxNote : goalRoleInputNote('Source member: ' + JSON.stringify(request.agentReference), {
-        role: 'executor', goalId: goal.id, agentSessionId: request.agentReference.execution.agentSessionId, runId,
+      const runId = runBoundDemandDispatch(original) ? original.runId : (await port.readCurrent()).runId
+      const prompt = original.prompt
+      const agentMuxNote = runBoundDemandDispatch(original) ? original.agentMuxNote : goalRoleInputNote('Source member: ' + JSON.stringify(original.target), {
+        role: 'executor', goalId: goal.id, agentSessionId: original.target.execution.agentSessionId, runId,
         source: { kind: 'goal-start', operationId: request.requestId } }, null)
       await current(context)
-      const prepared = await demands.prepareDispatch(goal.id, { operationId: request.requestId, target: request.agentReference, runId,
-        execution: 'finite', prompt, ...(agentMuxNote === undefined ? {} : { agentMuxNote }) }, original ? undefined : request.expectedUpdatedAt ?? goal.updatedAt)
+      const prepared = await demands.prepareDispatch(goal.id, { operationId: request.requestId, target: original.target, runId,
+        execution: 'finite', prompt, ...(agentMuxNote === undefined ? {} : { agentMuxNote }) })
+      const savedStart = preparedStart(prepared, request.requestId)
       await dispatch.submitQualified(reference, port, request.resumeOriginal === true, () => current(context))
       const latest = await get(goal.id)
       if (latest.status === goal.status && latest.status !== 'done' && latest.status !== 'cancelled')
         await demands.update(goal.id, { status: 'in_progress' }, { expectedUpdatedAt: latest.updatedAt })
       return { operation: 'demand.start', demand: await projectGoal(await get(goal.id)), receipt: { demandId: goal.id,
-        startedAt: prepared.demand.dispatches!.find(item => item.operationId === request.requestId)!.preparedAt, agentReference: request.agentReference, run: { runId } } }
+        startedAt: savedStart.preparedAt, agentReference: original.target, run: { runId } } }
     } finally { await port.dispose().catch(error => { console.warn('Closing this exact Goal input reader was unconfirmed.', error) }) }
   }
   return { execute, goalChanges: { subscribe: async (listener: (change: import('@agentmux/core').GoalChanges) => void | Promise<void>, _end: (error?: Error) => void | Promise<void>, signal: AbortSignal) => {

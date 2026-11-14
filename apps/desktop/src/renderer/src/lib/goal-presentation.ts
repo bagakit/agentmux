@@ -1,3 +1,4 @@
+import { demandAgentReferenceKey } from '@agentmux/demand/relations'
 import type { DemandSpaceMemberReference } from '@agentmux/demand/relations'
 import { alignmentConfirmationIssue, groundingAcceptanceIssue, isDemandEvidenceReference, isCurrentGroundingAccepted } from '@agentmux/demand/goals'
 import { delegationWorkerHostId } from '@agentmux/demand/delegations'
@@ -33,7 +34,7 @@ const DELEGATION_STAGE: Record<GoalDelegationRow['state'], GoalStage> = {
   report: 'agents', collected: 'agents', working: 'agents', accepted: 'finished',
   question: 'attention', exited: 'attention', unknown: 'unknown'
 }
-const START_STAGE: Record<GoalStartRow['state'], GoalStage> = { review: 'attention', continuation: 'attention', working: 'agents', unknown: 'unknown' }
+const START_STAGE: Record<GoalStartRow['state'], GoalStage> = { review: 'attention', continuation: 'attention', working: 'agents', unknown: 'unknown', requested: 'attention', rejected: 'attention' }
 function retainedGoalInputHere(value: unknown, goalId: string): boolean {
   if (value === undefined) return false
   if (value && typeof value === 'object' && 'goalId' in value && typeof value.goalId === 'string' && value.goalId !== goalId &&
@@ -65,7 +66,17 @@ export function goalNextStepFact(demand: GoalNextStepInput, retainedInput?: unkn
   if (demand.status === 'done' && !grounding) return { stage: 'attention', text: 'Results not verified', source: resultSource }
   if (demand.status !== 'done') {
     if (retainedGoalInputHere(retainedInput, demand.id) && !retainedStart) return { stage: 'unknown', text: 'Original task input unreadable · Retained', source: { kind: 'goal' } }
-    if (retainedStart && retainedStart.goalId === demand.id && !demand.dispatches?.some(start => start.operationId === retainedStart.operationId && start.stage === 'confirmed'))
+    const currentStart = goalStartNextRow(demand)
+    const retainedReference = retainedStart?.agentReference
+    const retainedRecord = retainedReference && demand.dispatches?.find(value => value.operationId === retainedStart?.operationId &&
+      'target' in value && demandAgentReferenceKey(value.target) === demandAgentReferenceKey(retainedReference))
+    const businessRequest = retainedRecord?.stage === 'requested' && retainedRecord.request.goalUpdatedAt === retainedStart?.expectedUpdatedAt
+    const businessRejection = retainedRecord?.stage === 'rejected' && retainedRecord.expectedUpdatedAt === retainedStart?.expectedUpdatedAt
+    const historicalRejection = businessRejection && currentStart?.start.operationId !== retainedRecord.operationId
+    if ((businessRequest || businessRejection && !historicalRejection) && retainedStart?.agentReference)
+      return { stage: 'attention', text: businessRequest ? 'Task saved before input preparation · Continue the original request' : 'Task request rejected · Review before preparing a current task',
+        source: { kind: 'start', operationId: retainedStart.operationId, agentReference: retainedStart.agentReference } }
+    if (retainedStart && !historicalRejection && retainedStart.goalId === demand.id && !demand.dispatches?.some(start => start.operationId === retainedStart.operationId && start.stage === 'confirmed'))
       return { stage: retainedStart.phase === 'not-attempted' ? 'attention' : 'unknown',
         text: retainedStart.phase === 'not-attempted' ? 'Original task retained · Not submitted' : 'Original task input unconfirmed',
         source: { kind: 'start', operationId: retainedStart.operationId, ...(retainedStart.agentReference ? { agentReference: retainedStart.agentReference } : { agentSessionId: retainedStart.sessionId }) } }
@@ -79,8 +90,8 @@ export function goalNextStepFact(demand: GoalNextStepInput, retainedInput?: unkn
     }
     const delegated = goalDelegationNextRow(demand)
     if (delegated) return { stage: DELEGATION_STAGE[delegated.state], text: delegated.next, source: { kind: 'delegation', operationId: delegated.delegation.operationId, sourceMessageId: delegated.delegation.sourceMessageId, hostId: delegationWorkerHostId(delegated.delegation), agentSessionId: delegated.delegation.workerAgentSessionId, runId: delegated.delegation.workerRunId, ...(delegated.replyMessageId ? { replyMessageId: delegated.replyMessageId } : {}) } }
-    const start = goalStartNextRow(demand)
-    if (start) return { stage: START_STAGE[start.state], text: start.next, source: { kind: 'start', operationId: start.start.operationId, ...('target' in start.start ? { agentReference: start.start.target } : { hostId: start.start.hostId, agentSessionId: start.start.agentSessionId }), runId: start.start.runId } }
+    const start = currentStart
+    if (start) return { stage: START_STAGE[start.state], text: start.next, source: { kind: 'start', operationId: start.start.operationId, ...('target' in start.start ? { agentReference: start.start.target } : { hostId: start.start.hostId, agentSessionId: start.start.agentSessionId }), ...(start.start.runId === undefined ? {} : { runId: start.start.runId }) } }
   }
   if (!alignment) return { stage: 'define', text: 'Goal needs an outline', source: definitionSource }
   if (alignmentConfirmationIssue(alignment)) return { stage: 'define', text: alignment.openQuestions.length ? 'Decision needed' : 'Success criteria needed', source: definitionSource }

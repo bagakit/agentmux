@@ -4,7 +4,7 @@ import { parseGoalPatrolObservations, type GoalPatrolObservation } from './goal-
 import { type GoalDelegationMethod } from './goal-delegation-methods.js'
 export { GOAL_DELEGATION_METHODS, isGoalDelegationMethod, type GoalDelegationMethod } from './goal-delegation-methods.js'
 import { validateAgentPromptInputKey } from './agent-prompt-condition.js'
-import { parseDemandDispatch, parseDemandDispatches, type DemandDispatch, type GoalStartObservation } from '@agentmux/demand'
+import { parseDemandDispatch, parseDemandDispatches, runBoundDemandDispatch, type DemandDispatch, type GoalStartObservation } from '@agentmux/demand'
 import { parseFileReadParams, type FileReadParams } from './public-rpc-files.js'
 import { parseDemandDelegationIntent, parseDemandDelegations, parseDemandDelegationReportInput, parseDemandDelegationCollectionInput, validateDemandDelegationReport } from '@agentmux/demand/delegations'
 import { parseAlignment, parseGrounding } from '@agentmux/demand/goals'
@@ -120,7 +120,7 @@ export function parseGoalDelegationResult(value: unknown, input: { goalId: strin
   const delegations = parseDemandDelegations(p.delegations)
   const plan = p.plan === undefined ? undefined : (() => { try { return parseGoalPlan(p.plan) } catch (error) { throw new AgentMuxError(error instanceof Error ? error.message : String(error), 'CONTROL_PROTOCOL_ERROR') } })()
   const planStateRead = parseOwnerGoalPlanState(p.planState, plan, delegations, p.planStateIssue)
-  const dispatches = p.dispatches === undefined ? undefined : parseDemandDispatches(p.dispatches)
+  const dispatches = p.dispatches === undefined ? undefined : parseDemandDispatches(p.dispatches, id(p.goalId))
   const startObservations = p.startObservations === undefined ? undefined : parseGoalStartObservations(p.startObservations, dispatches ?? [], p.grounding)
   const progressUpdates = p.progressUpdates === undefined ? undefined : parseDemandProgressUpdates(p.progressUpdates)
   const responsibility = p.responsibility === undefined ? undefined : parseGoalResponsibility(p.responsibility, demandExecutionReferences({ ...(dispatches ? { dispatches } : {}), delegations }))
@@ -229,6 +229,13 @@ export function parseGoalStartObservations(value: unknown, starts: readonly Dema
     seen.add(operationId)
     const input = record(item.input, ['state', 'reason', 'retainedReceipt', 'proof'])
     if (!['confirmed', 'unknown'].includes(String(input.state))) throw new AgentMuxError('Start input state is invalid.', 'CONTROL_PROTOCOL_ERROR')
+    if (!runBoundDemandDispatch(start)) {
+      if (input.state !== 'unknown' || input.retainedReceipt !== undefined || input.proof !== undefined ||
+          item.originalRun !== undefined || item.goalResult !== undefined || item.supervisor !== undefined || item.attention !== undefined || item.responsibility !== 'observation-unknown')
+        throw new AgentMuxError('A business request without a prepared Run cannot prove Runtime input or execution.', 'CONTROL_PROTOCOL_ERROR')
+      return { operationId, input: { state: 'unknown' as const, ...(input.reason === undefined ? {} : { reason: id(input.reason) }) },
+        responsibility: 'observation-unknown' as const, ...(item.unknown === undefined ? {} : { unknown: id(item.unknown) }) }
+    }
     if (input.retainedReceipt !== undefined) {
       if ('target' in start) {
         if (!start.receipt) throw new AgentMuxError('The original qualified Start has no retained input receipt.', 'CONTROL_PROTOCOL_ERROR')

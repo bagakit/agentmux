@@ -163,6 +163,11 @@ export class GoalStartResponsibilityOwner {
   }
   async observe(goal: Demand, start: DemandDispatch): Promise<GoalStartObservation> {
     const value: GoalStartObservation = { operationId: start.operationId, input: { state: 'unknown', ...(start.receipt ? { retainedReceipt: start.receipt } : {}) }, responsibility: 'observation-unknown' }
+    if (start.stage === 'requested' || start.stage === 'rejected') {
+      value.input.reason = start.stage === 'requested' ? 'The original business task is saved; this cut has no prepared Run or input. Explicitly continue this request using current access.'
+        : 'The original business task was rejected before input preparation. Review its exact rejection before explicitly preparing a new task.'
+      return value
+    }
     if ('target' in start) {
       value.input.reason = 'Current Source access is required to read this original input. Its saved admission receipt and existing Agent remain retained.'
       return value

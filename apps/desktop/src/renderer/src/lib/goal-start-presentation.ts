@@ -4,7 +4,7 @@ import type { DemandRecord } from './global-demand-board'
 export type GoalStartRow = {
   start: DemandDispatch
   observation?: GoalStartObservation
-  state: 'review' | 'continuation' | 'working' | 'unknown'
+  state: 'review' | 'continuation' | 'working' | 'unknown' | 'requested' | 'rejected'
   next: string
   issue?: string
 }
@@ -16,6 +16,8 @@ export function goalStartRows(goal: Pick<DemandRecord, 'dispatches' | 'startObse
     const observation = observed.get(start.operationId)
     const issue = goal.delegationObservationIssue ?? observation?.unknown ?? observation?.input.reason
     const row = { start, ...(observation ? { observation } : {}), ...(issue ? { issue } : {}) }
+    if (start.stage === 'requested' || start.stage === 'rejected') return { ...row, state: start.stage, next: start.stage === 'requested'
+      ? 'Task saved before input preparation · Continue the original request' : 'Task request rejected · Review before preparing a current task' }
     const run = observation?.originalRun?.runId === start.runId ? observation.originalRun : undefined
     if (observation?.goalResult?.changedSinceStart === true)
       return { ...row, state: 'review', next: 'Goal results need review · Start association unknown' }
@@ -35,7 +37,7 @@ export function goalStartNextStep(goal: Parameters<typeof goalStartRows>[0]): st
 /** The same priority as the visible next step, keeping the row state for reading projections. */
 export function goalStartNextRow(goal: Parameters<typeof goalStartRows>[0]): GoalStartRow | null {
   const rows = goalStartRows(goal)
-  for (const state of ['review', 'continuation', 'unknown', 'working'] as const) {
+  for (const state of ['review', 'continuation', 'requested', 'unknown', 'working', 'rejected'] as const) {
     const row = rows.find(item => item.state === state)
     if (row) return row
   }

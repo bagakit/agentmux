@@ -1067,7 +1067,7 @@ function parseDemand(value: unknown): AgentMuxDemand {
     if (creationOrigin?.requesterParticipationId && !participations.some(item => item.id === creationOrigin!.requesterParticipationId)) throw new Error('Control Goal original requester is absent.')
     goalFacts = {
       ...(source.delegations === undefined ? {} : { delegations: parseDemandDelegations(source.delegations) }),
-      ...(source.dispatches === undefined ? {} : { dispatches: parseDemandDispatches(source.dispatches) }),
+      ...(source.dispatches === undefined ? {} : { dispatches: parseDemandDispatches(source.dispatches, id(source.id, 'Control demand id is invalid.', 'CONTROL_PROTOCOL_ERROR')) }),
       ...(source.progressUpdates === undefined ? {} : { progressUpdates: parseDemandProgressUpdates(source.progressUpdates) }),
       ...(source.patrols === undefined ? {} : { patrols: parseDemandPatrols(source.patrols) }),
       ...(source.plan === undefined ? {} : { plan: parseGoalPlan(source.plan) }),
