@@ -22,6 +22,7 @@ export function MeshNetworkSettings({ active, onConnections, showTopology = true
   const [saving, setSaving] = useState(false), [reading, setReading] = useState(false), [newer, setNewer] = useState<MeshNetworkSettings>()
   const [link, setLink] = useState<MeshNetworkLink>(), [linkIssue, setLinkIssue] = useState('')
   const [copyFeedback, setCopyFeedback] = useState(''), [linking, setLinking] = useState(false)
+  const [openingIdentity, setOpeningIdentity] = useState(false), [identitySetupIssue, setIdentitySetupIssue] = useState('')
   const edits = useAppStore(state => state.meshSettingsDrafts)
   const current = useRef(settings); current.current = settings
   const linkRequest = useRef<{ input: string; owner: MeshNetworkSettings['owner']; controller: AbortController } | undefined>(undefined)
@@ -150,11 +151,37 @@ export function MeshNetworkSettings({ active, onConnections, showTopology = true
   const hasTopology = Boolean(network && (network.peers.length || network.records.length || network.routes.length))
   const identityRecovery = useLocalRuntimeRecovery(active && !settings, () => { void inspect() })
   const refresh = () => { if (!settings) identityRecovery.refresh(); void inspect() }
-  return <div className="mesh-network-settings" data-mesh-settings>
-    <header className="mesh-network-heading"><MeshConnectionIntro />{!identityRecovery.notice && (settings || !issue) ? <button className="small-button" onClick={refresh} disabled={reading || saving}>{reading ? 'Reading…' : 'Refresh'}</button> : null}</header>
-    {identityRecovery.notice ? <div>
-      <ServiceWindowNotice layout="surface" notice={identityRecovery.notice.notice}
-        actions={<><button className="primary-button" disabled={identityRecovery.restoring} onClick={identityRecovery.notice.action?.run}>{identityRecovery.notice.action?.label}</button>{onConnections ? <button className="small-button" onClick={onConnections}>Open saved connections</button> : null}</>} />
+  const newIdentityWindow = api.ui.isNewIdentityWindow
+  async function openIdentitySetup() {
+    setOpeningIdentity(true); setIdentitySetupIssue('')
+    try { await api.ui.openLocalIdentitySetup() }
+    catch (cause) { setIdentitySetupIssue(message(cause)) }
+    finally { setOpeningIdentity(false) }
+  }
+  const identitySetupAction = newIdentityWindow ? null : <button
+    className={identityRecovery.notice ? 'primary-button' : 'small-button'} type="button"
+    disabled={openingIdentity || identityRecovery.restoring} onClick={() => void openIdentitySetup()}>
+    {openingIdentity ? 'Opening setup…' : 'Set up a new identity…'}
+  </button>
+  const identitySetupError = identitySetupIssue ? <p className="settings-inline-error" role="alert">{identitySetupIssue}</p> : null
+  const recoveryNotice = identityRecovery.notice?.notice
+  return <div className="mesh-network-settings" data-mesh-settings data-settings-field="mesh-configuration">
+    {!identityRecovery.notice ? <header className="mesh-network-heading">
+      {newIdentityWindow ? <div className="mesh-connection-intro"><div><h3>New identity setup</h3><p>Pair this window with your gateway. Your original work stays in its own window.</p></div></div> : <MeshConnectionIntro />}
+      {settings || !issue ? <button className="small-button" onClick={refresh} disabled={reading || saving}>{reading ? 'Reading…' : 'Refresh'}</button> : null}
+    </header> : null}
+    {identityRecovery.notice ? <div className="mesh-identity-recovery">
+      <ServiceWindowNotice notice={recoveryNotice && identitySetupAction
+        ? { ...recoveryNotice, notice: { ...recoveryNotice.notice,
+          restore: `${recoveryNotice.notice.restore} A new identity opens in a separate window.` } }
+        : recoveryNotice ?? null}
+        actions={<div className="mesh-recovery-actions">
+          {identitySetupAction}
+          <button className="small-button" type="button" onClick={refresh} disabled={identityRecovery.restoring}>Check again</button>
+          {identityRecovery.canImport ? <button className="small-button" type="button" disabled={identityRecovery.restoring} onClick={identityRecovery.notice.action?.run}>{identityRecovery.notice.action?.label}</button> : null}
+          {onConnections ? <button className="small-button" type="button" onClick={onConnections}>Open saved connections</button> : null}
+        </div>} />
+      {identitySetupError}
       <details className="mesh-advanced"><summary>Technical details</summary><p>{identityRecovery.notice.detail}</p></details>
     </div>
     : !settings ? <section className="mesh-availability" role={issue ? 'alert' : 'status'}>
@@ -169,7 +196,7 @@ export function MeshNetworkSettings({ active, onConnections, showTopology = true
     {showTopology ? <>{hasTopology ? <MeshNetworkMap snapshot={snapshot} /> : null}</> : null}
     {form && saved ? <>
       {snapshot?.source === 'static' ? <p className="mesh-network-note">A startup gateway configuration is active. Saving these complete Mesh settings replaces that configuration and its publisher admissions; the original file is kept.</p> : null}
-      {editIssue ? <p role="alert" className="settings-inline-error">{editIssue}</p> : <section className="mesh-network-section" data-settings-field="mesh-configuration">
+      {editIssue ? <p role="alert" className="settings-inline-error">{editIssue}</p> : <section className="mesh-network-section">
         <header><h4>Connection setup</h4>{form.role !== 'disabled' ? <button className="small-button" onClick={() => change({ role: 'disabled' })}>Disable participation</button> : null}</header>
         <div className="mesh-task-options" role="group" aria-label="Connection mode">
           <button type="button" aria-pressed={form.role === 'participant'} onClick={() => change({ role: 'participant' })}><span className="mesh-task-label"><strong>Connect to a gateway</strong><span aria-hidden="true">{form.role === 'participant' ? '✓' : '→'}</span></span><span>Join through a device you can reach. No incoming port needed.</span></button>
@@ -194,6 +221,11 @@ export function MeshNetworkSettings({ active, onConnections, showTopology = true
     {settings ? <details className="mesh-advanced mesh-access-links"><summary>Access links and endpoint details</summary>
       {endpointOffer ? <section className="mesh-network-section"><header><h4>This Core’s endpoint</h4><button className="small-button" onClick={() => void copy(JSON.stringify(endpointOffer))}>Copy endpoint offer</button></header><p className="field-hint">Use this offer at a reachable gateway to create a network access link.</p><code>{endpointOffer.serverId}</code></section> : snapshot?.endpoint.state === 'not-provided' ? <p className="field-hint">This deployment provides network forwarding without a Host endpoint.</p> : null}
       <section className="mesh-network-section" data-settings-field="mesh-link"><header><h4>Create an access link</h4></header><p className="field-hint">For a connected node: paste its complete endpoint offer. The link keeps that node’s identity and device permissions.</p><label className="mesh-form-field"><span>Node endpoint offer</span><textarea aria-label="Original Mesh endpoint offer" value={originalOffer} onChange={event => { const text = event.target.value; linkRequest.current?.controller.abort(); linkRequest.current = undefined; setLinking(false); if (saved && form) void updateMeshSettingsDraft(saved.owner.runtimeId, value => retained({ ...value, baseline: value?.baseline ?? saved, form: value?.form ?? form, linkInput: text })).catch(cause => setLinkIssue(message(cause))); setLink(undefined) }} rows={3} placeholder="Paste the complete endpoint offer" /></label><button className="small-button" disabled={linking || !originalOffer || !settings} onClick={() => void createLink()}>{linking ? 'Reading route…' : 'Create access link'}</button>{linkIssue ? <p role="alert" className="settings-inline-error">{linkIssue}</p> : null}{link ? <div className="mesh-link-result"><span>{link.observation.route.hops} network hop{link.observation.route.hops === 1 ? '' : 's'} · endpoint {link.offer.serverId}</span><TextInput aria-label="Mesh access link" value={link.url} readOnly /><button className="small-button" onClick={() => void copy(link.url)}>Copy access link</button><details><summary>Original endpoint identity</summary><dl><dt>Server</dt><dd><code>{link.offer.serverId}</code></dd><dt>Encryption public key</dt><dd><code>{link.offer.daemonPublicKeyB64}</code></dd></dl><button className="small-button" onClick={() => void copy(link.offer.daemonPublicKeyB64)}>Copy original encryption key</button></details><small>Use the complete link with amux --endpoint. Device admission and Core permissions still apply.</small></div> : null}</section>
+    </details> : null}
+    {settings && identitySetupAction ? <details className="mesh-advanced">
+      <summary>Separate identity setup</summary>
+      <p>Open the separate setup again, or start it and pair a new identity with your gateway.</p>
+      {identitySetupAction}{identitySetupError}
     </details> : null}
     {copyFeedback ? <p role="status" className="mesh-copy-feedback">{copyFeedback}</p> : null}
   </div>

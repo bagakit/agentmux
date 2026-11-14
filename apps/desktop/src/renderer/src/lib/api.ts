@@ -896,6 +896,8 @@ const mockApi: AgentMuxDesktopApi = {
     readStorageRecovery: async () => { throw new Error('Storage recovery status requires the original Desktop Host.') },
     readLocalRuntimeRecovery: async () => ({ state: 'unchanged' }),
     restoreLocalRuntimeIdentity: async () => ({ state: 'unchanged' }),
+    isNewIdentityWindow: false,
+    openLocalIdentitySetup: async () => {},
     createStorageBackup: async () => { throw new Error('Backup creation requires the original Desktop Host.') },
     importWorkbenchState: async value => value,
     writeWorkbenchState: async () => null,

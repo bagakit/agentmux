@@ -21,10 +21,11 @@ import { WorkbenchCloseOwner } from './workbench-close-owner.js'
 import { DesktopStorageRecoveryExports } from './storage-recovery-exports.js'
 import { recoverWorkbenchBeforeLoad } from './workbench-recovery-bootstrap.js'
 import { localRuntimeRecovery } from './local-runtime-recovery.js'
+import { openNewIdentityWindow } from './local-identity-setup.js'
 import { applicationMenuTemplate } from './application-menu.js'
 import { ZoomCommands } from './zoom-commands.js'
 import { installTextEditContextMenu } from './text-edit-context-menu.js'
-import { isScratchWorkspaceId } from '../shared/contracts.js'
+import { isScratchWorkspaceId, NEW_IDENTITY_WINDOW_ARGUMENT } from '../shared/contracts.js'
 import { desktopAgentSessionStorePath } from './agent-session-store-path.js'
 import { offerSessionDatabaseMigration } from './session-database-migration-prompt.js'
 import { CrashLog } from './crash-log.js'
@@ -61,6 +62,7 @@ import { installRecoverySeedBeforeLoad, summarizeRecoverySessionStore, summarize
 
 const startupAttemptId = mintObjectId()
 const packagedUserDataPath = join(app.getPath('appData'), 'dev.agentmux.desktop')
+const newIdentityWindow = process.env.AGENTMUX_DESKTOP_NEW_IDENTITY === '1'
 
 // Development launches and packaged launches must address the same durable user-data root. Electron's
 // default path is derived from the app name and differs between a Vite dev process and the signed App;
@@ -100,6 +102,17 @@ if (instanceRoleFromLock(app.requestSingleInstanceLock()).role === 'secondary') 
  * 都不会构造。运行时 owner、窗口、IPC、崩溃后的清理全在这个闭包里，第二实例一样都碰不到。
  */
 function startPrimaryInstance(): void {
+  const openIdentitySetup = newIdentityWindow ? undefined : singleFlight(async (window: BrowserWindow, assertCurrent: () => void) => {
+    const answer = await dialog.showMessageBox(window, {
+      type: 'question', title: 'Set up a new identity', message: 'Open a separate identity setup?',
+      detail: 'Your sessions, drafts, and approvals stay with the original identity. You’ll pair with your gateway again in the new window.',
+      buttons: ['Cancel', 'Open setup'], defaultId: 1, cancelId: 0
+    })
+    if (answer.response !== 1) return
+    assertCurrent()
+    await openNewIdentityWindow({ userData: app.getPath('userData'), executable: process.execPath,
+      ...(app.isPackaged ? {} : { application: app.getAppPath() }) })
+  })
   const spatialLinks = new SpatialLinkIngress(), webLinks = new WebUrlIngress(), webFiles = new WebFileIngress()
   registerSystemWebFileEvents(app, webFiles, () => { void app.whenReady().then(async () => {
     const window = workbenchWindow
@@ -231,7 +244,7 @@ function startPrimaryInstance(): void {
       icon: appIconPath(initialConfig.appearance.appIcon),
       titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
       backgroundColor: resolveTheme(initialConfig.appearance, nativeTheme.shouldUseDarkColors).variant.colors.background,
-      webPreferences: windowSecurityWebPreferences(join(import.meta.dirname, '../preload/index.cjs'))
+      webPreferences: windowSecurityWebPreferences(join(import.meta.dirname, '../preload/index.cjs'), newIdentityWindow ? NEW_IDENTITY_WINDOW_ARGUMENT : undefined)
     })
     workbenchWindow = window
     const windows = new WorkbenchWindows(window, workbenchWindowStore, liveVisibleAreas)
@@ -308,6 +321,7 @@ function startPrimaryInstance(): void {
     window.once('closed', () => startupCapture.dispose())
     reportStartupStage('before-ipc')
     disposeIpc = await registerIpc({ window, appDocumentSources: () => appDocuments.read(), workbenchWindows: windows, configStore, initialConfig, runtime, applicationAccess, workbenchUserState, workbenchCloseOwner, storageRecoveryExports, runtimeIdentityRecovery, scratchTopics, workspaceFiles, spatialLinks, webLinks, webFiles, zoomCommands,
+      ...(openIdentitySetup ? { openIdentitySetup } : {}),
       performanceScene, appMemory, performanceHeap, clientIncidents, loadedAppVersion: app.getVersion(), loadedPackage: packageIdentity, loadedRenderer: () => rendererUpdates?.loadedRenderer() ?? null,
       onRendererStartupFailure: failure => startupCapture.recordRenderer(failure),
       onRendererUpdateReady: (token) => { if (updateReady?.token === token) { startupCapture.ready(token); updateReady.resolve() } }, environmentWarning: () => environmentWarning })

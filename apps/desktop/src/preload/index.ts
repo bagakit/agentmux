@@ -12,7 +12,7 @@ import { createPreloadNotebookObservation } from './notebook-observation'
 import { readInputObservation } from '@agentmux/core/control'
 import type { BrowserResultArtifactChunk, BrowserResultReadOptions } from '@agentmux/browser/model/browser-result-artifact'
 import type { BrowserTaskAssetRunInput, BrowserTaskContent, BrowserTaskBatchInput } from '../shared/browser-task-assets'
-import { NATIVE_BROWSER_VISIBILITY_CHANNEL, NATIVE_BROWSER_INPUT_CHANNEL, NATIVE_OVERLAY_WARNING_CHANNEL } from '../shared/contracts'
+import { NATIVE_BROWSER_VISIBILITY_CHANNEL, NATIVE_BROWSER_INPUT_CHANNEL, NATIVE_OVERLAY_WARNING_CHANNEL, NEW_IDENTITY_WINDOW_ARGUMENT } from '../shared/contracts'
 import type { ContinuousProgressLoop, ContinuousProgressTarget } from '@agentmux/core'
 import type { DesktopControlRequest } from '../shared/contracts'
 import { contextBridge, ipcRenderer, webFrame, webUtils } from 'electron'
@@ -513,6 +513,8 @@ const api: AgentMuxPreloadApi = {
     readStorageRecovery: () => ipcRenderer.invoke('ui:readStorageRecovery'),
     readLocalRuntimeRecovery: () => ipcRenderer.invoke('ui:readLocalRuntimeRecovery'),
     restoreLocalRuntimeIdentity: () => ipcRenderer.invoke('ui:restoreLocalRuntimeIdentity'),
+    isNewIdentityWindow: process.argv.includes(NEW_IDENTITY_WINDOW_ARGUMENT),
+    openLocalIdentitySetup: () => ipcRenderer.invoke('ui:openLocalIdentitySetup'),
     createStorageBackup: owner => ipcRenderer.invoke('ui:createStorageBackup', owner),
     importWorkbenchState: value => ipcRenderer.invoke('ui:importWorkbenchState', value),
     writeWorkbenchState: async value => {

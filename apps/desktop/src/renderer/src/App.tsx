@@ -125,8 +125,9 @@ const desktopSettingsSectionIds = ['overview', ...settingsModules.map(module => 
 
 function DesktopApp() {
   const documentation = useDocumentationOwner()
-  const [settingsRoute, setSettingsRoute] = useState<SettingsNavigationRequest | null>(null)
-  const [settingsOpen, setSettingsOpen] = useState(false)
+  const [settingsRoute, setSettingsRoute] = useState<SettingsNavigationRequest | null>(
+    () => api.ui.isNewIdentityWindow ? { section: 'hosts', field: 'mesh-configuration' } : null)
+  const [settingsOpen, setSettingsOpen] = useState(api.ui.isNewIdentityWindow)
   const [settingsInputPolicy, setSettingsInputPolicy] = useState<'preserve' | 'target'>('target')
   const settingsObservation = useRef<{ sectionId: string; visible: boolean; hostId?: string | null } | null>(null)
   const navigateSettings = useCallback((request: SettingsNavigationRequest, inputPolicy: 'preserve' | 'target' = 'target'): void => {

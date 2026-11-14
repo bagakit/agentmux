@@ -30,6 +30,7 @@ export interface WindowSecurityWebPreferences {
   readonly sandbox: boolean
   readonly nodeIntegration: boolean
   readonly webSecurity?: boolean
+  readonly additionalArguments?: string[]
 }
 
 /**
@@ -37,12 +38,13 @@ export interface WindowSecurityWebPreferences {
  * import.meta.dirname，不能落在这个纯文件里）。返回的对象**就是** BrowserWindow 要用的那份取值——
  * index.ts 不许另手抄一份对象字面量（接线守卫会红）。
  */
-export function windowSecurityWebPreferences(preloadPath: string): WindowSecurityWebPreferences {
+export function windowSecurityWebPreferences(preloadPath: string, additionalArgument?: string): WindowSecurityWebPreferences {
   return {
     preload: preloadPath,
     contextIsolation: true,
     sandbox: true,
-    nodeIntegration: false
+    nodeIntegration: false,
+    ...(additionalArgument === undefined ? {} : { additionalArguments: [additionalArgument] })
   }
 }
 

@@ -554,7 +554,9 @@ export const DEFAULT_CONFIG: AppConfig = {
  * subdirectory of home keeps it out of the way (vs. exposing the whole home to the file
  * explorer) while giving terminals/agents a real, stable cwd.
  */
-const SCRATCH_BACKING_PATH = join(app.getPath('home'), '.agentmux', 'scratch')
+const SCRATCH_BACKING_PATH = process.env.AGENTMUX_DESKTOP_NEW_IDENTITY === '1'
+  ? join(process.env.AGENTMUX_DESKTOP_USER_DATA!, 'scratch')
+  : join(app.getPath('home'), '.agentmux', 'scratch')
 
 function normalizedLocalPath(path: string): string {
   return normalizeLocalPath(join(path, '.'))

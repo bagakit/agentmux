@@ -363,6 +363,7 @@ export async function registerIpc(args: {
   workbenchCloseOwner?: WorkbenchCloseOwner
   storageRecoveryExports?: DesktopStorageRecoveryExports
   runtimeIdentityRecovery?: ReturnType<typeof import('./local-runtime-recovery.js').localRuntimeRecovery>
+  openIdentitySetup?: (window: BrowserWindow, assertCurrent: () => void) => Promise<void>
 
   workspaceFiles?: WorkspaceFiles
   scratchTopics: ScratchTopics
@@ -1670,6 +1671,10 @@ export async function registerIpc(args: {
     assertAppDocumentSender(event, contents, args.appDocumentSources())
     return choice.canceled ? null : choice.filePaths[0] ?? null
   }) ?? { state: 'unchanged' })
+  handleWithEvent('ui:openLocalIdentitySetup', async event => {
+    const assertCurrent = () => assertAppDocumentSender(event, contents, args.appDocumentSources())
+    await args.openIdentitySetup?.(args.window, assertCurrent)
+  })
   handleWithEvent('ui:createStorageBackup', (_event, owner: import('@agentmux/core').AgentMuxRuntimeFence) => args.runtime.createStorageBackup(owner))
   handleWithEvent('ui:importWorkbenchState', (_event, value: string) => workbenchUserState.importIfAbsent(value))
   handleWithEvent('ui:writeWorkbenchState', (event, request: import('../shared/workbench-user-state').WorkbenchUserStateWrite) =>

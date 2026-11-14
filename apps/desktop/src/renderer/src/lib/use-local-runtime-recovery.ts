@@ -51,20 +51,20 @@ export function useLocalRuntimeRecovery(active: boolean, onRestored?: () => void
   }, [active, result, onRestored])
   if (!active || result?.state !== 'needs-backup' && result?.state !== 'blocked') return { notice: null, restoring, refresh: observe }
   const blocked = result.state === 'blocked'
-  const guidance = blocked ? 'Your current records are kept. View the details or check again.'
+  const guidance = blocked ? 'The current identity records were kept. Check again if they have been restored.'
     : result.code === 'IDENTITY_BACKUP_UNVERIFIED' ? 'That file couldn’t confirm this Mac’s original identity. Choose another backup.'
-      : 'Choose a backup of this Mac’s original Runtime identity.'
+      : 'AgentMux checked its local recovery points. You can import a backup if you already have one.'
   const notice: ServiceNoticeItem = {
     id: 'local-runtime-identity', cause: result.code,
     notice: { kind: 'indeterminate', notice: {
-      step: blocked ? 'Couldn’t verify this Mac’s identity' : 'Restore this Mac’s identity',
+      step: 'Couldn’t verify this Mac’s identity',
       mode: blocked ? 'The background service needs an identity it can verify. Your saved work is still in place.'
         : 'The background service needs its original identity to reconnect. Your saved work is still in place.',
       restore: guidance
     } },
     detail: result.code,
     action: blocked ? { label: 'Check again', run: observe }
-      : { label: restoring ? 'Restoring…' : 'Restore from backup…', run: () => { void choose() } }
+      : { label: restoring ? 'Importing…' : 'Import original backup…', run: () => { void choose() } }
   }
-  return { notice, restoring, refresh: observe }
+  return { notice, restoring, refresh: observe, canImport: !blocked }
 }
