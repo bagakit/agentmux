@@ -43,7 +43,7 @@ function bridge() {
   const inspect = vi.fn(async () => observation()), continuation = vi.fn(async () => ({ session: created, execution: observation() }))
   const readers = new ExecutionBindingReaders(inspect), owner = vi.fn(async (value: typeof coordinator) => { if (value.hostId !== coordinator.hostId || value.runtimeId !== coordinator.runtimeId) throw Error('Original Coordinator Runtime mismatch') })
   registerExecutionBindingIpc({ handle: (channel, handler) => { handlers.set(channel, (...values) => handler({ sender } as never, ...values)) },
-    bindings: { inspect, rejoin: async () => observation(), continueOriginal: continuation }, readers, coordinator: owner, project: async () => result })
+    bindings: { inspect, rejoin: async () => observation(), continueOriginal: continuation }, readers, coordinatorTarget: async () => coordinator, coordinator: owner, project: async () => result })
   const ipc = { invoke: vi.fn(async (channel: string, ...values: unknown[]) => structuredClone(await handlers.get(channel)!(...values))), on: vi.fn(), off: vi.fn() }
   ipc.on.mockImplementation((channel, listener) => { bus.on(channel, listener) }); ipc.off.mockImplementation((channel, listener) => { bus.off(channel, listener) })
   const apiBridge = createExecutionBindingApi(ipc)

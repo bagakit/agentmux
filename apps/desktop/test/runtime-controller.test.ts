@@ -3574,6 +3574,18 @@ describe('tool execution Desktop boundary', () => {
     return { controller, config, request, create, clients, launch, resource }
   }
 
+  it('does not hash or submit a bound creation without its original Session identity', async () => {
+    const f = await fixture('local')
+    f.clients.local!.resolveAgentCreationSessionId.mockResolvedValue(undefined as never)
+    try {
+      const outcome = await f.controller.launchAgent(f.request, f.config, undefined, { create: f.create }).then(value => ({ value }), error => ({ error }))
+      expect(f.create).not.toHaveBeenCalled()
+      expect(f.clients.local!.createHostAgentWithDelivery).not.toHaveBeenCalled()
+      expect(outcome).toMatchObject({ error: { code: 'EXECUTION_INTENT_UNCONFIRMED' } })
+      for (const client of Object.values(f.clients)) { expect(client.stopAgent).not.toHaveBeenCalled(); expect(client.stopTerminal).not.toHaveBeenCalled() }
+    } finally { await f.controller.dispose() }
+  })
+
   it.each(['local', 'remote'])('creates on the exact %s Hosted owner while general observation rejects', async hostId => {
     const f = await fixture(hostId)
     const request = { ...f.request, agentSessionId: 'original-targeted-session' }
