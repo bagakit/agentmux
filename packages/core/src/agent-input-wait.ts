@@ -126,11 +126,14 @@ export type AgentInputSubmissionReceipt = {
   key: AgentPromptInputKey
   ref: AgentInputWaitRef
   originalControlOperationId?: string
-  persistence: 'confirmed'
+  /** A read can see the saved record even when the original durability fence cannot complete. */
+  persistence: 'confirmed' | 'observed'
   control: AgentInputWaitControl
   admission: AgentPromptSubmissionRecord | null
   status: 'waiting' | 'stopped' | 'terminal-confirmed' | 'admitted' | 'launch-carried' | 'not-applied' | 'unknown'
   observation: 'owned' | 'rejoin-needed' | 'closed'
+  /** Explicitly continue this original reference through Core. It grants no new authority. */
+  continuation?: 'rejoin-wait' | 'continue-handoff'
 }
 /** Interpret the original owner receipt once for SDK and strict wire decoding.
  * A linked terminal ACK confirms ordered input bytes, never Native acceptance. */

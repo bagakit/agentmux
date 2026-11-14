@@ -390,13 +390,12 @@ export async function captureMessageJournalRecovery(path: string, directory: str
 }
 
 /** Open only while holding the original writer mutex; a reader must not race a DELETE-mode commit. */
-export async function openMessageJournalSnapshot(path: string): Promise<DatabaseSync> {
+export async function openMessageJournalSnapshot(path: string, mutex: DatabaseSync): Promise<DatabaseSync> {
   const { DatabaseSync } = await import('node:sqlite')
   const db = new DatabaseSync(path, { readOnly: true })
   try {
     db.exec('PRAGMA busy_timeout = 0; BEGIN')
-    if (db.prepare('PRAGMA application_id').get()?.application_id !== applicationId ||
-        ![1,2].includes(Number(db.prepare('PRAGMA user_version').get()?.user_version))) throw new Error('The original AgentMux message journal is unconfirmed.')
+    validateMessageJournalIdentity(db, recoveryMutexIdentity(mutex))
     return db
   } catch (error) { db.close(); throw error }
 }
@@ -489,11 +488,12 @@ async function hasOriginalMessageArchive(path:string):Promise<boolean>{
 }
 
 /** Open the original lock without SQLite implicit CREATE. Fresh creation is an exclusive original-owner fact. */
-export async function openMessageJournalMutex(path:string):Promise<{mutex:DatabaseSync;fresh:boolean;identity:string}>{
+export async function openMessageJournalMutex(path:string, existingOnly = false):Promise<{mutex:DatabaseSync;fresh:boolean;identity:string}>{
  const mutexPath=path+'.mutex.sqlite'
  let observed:Awaited<ReturnType<typeof lstat>>,fresh=false
  try{observed=await lstat(mutexPath)}catch(error){
   if((error as NodeJS.ErrnoException).code!=='ENOENT')throw error
+  if(existingOnly)throw error
   if((await header(path))?.equals(sqliteHeader)||await hasOriginalMessageArchive(path))throw new Error('The original SQLite message mutex is missing. Keep its journal and original writer; no replacement lock was created.')
   try{const handle=await open(mutexPath,'wx',0o600);try{observed=await handle.stat();fresh=true}finally{await handle.close()}}
   catch(error){if((error as NodeJS.ErrnoException).code!=='EEXIST')throw error;observed=await lstat(mutexPath)}

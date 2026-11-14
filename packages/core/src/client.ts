@@ -309,6 +309,16 @@ export function hostAgentCreationIntent(input: AgentMuxHostAgentCreateInput): st
   return agentCreationIntentDigest(intent)
 }
 
+const INPUT_STORAGE_RETRY_DELAYS = [150, 600, 2_400, 9_600] as const
+function isInputStorageFailure(error: unknown, depth = 0): boolean {
+  if (depth > 4 || typeof error !== 'object' || error === null) return false
+  const { code, cause } = error as { code?: unknown; cause?: unknown }
+  return code === 'MESSAGE_QUEUE_UNAVAILABLE' || code === 'MESSAGE_QUEUE_BACKPRESSURE' ||
+    code === 'AGENT_SESSION_STORE_UNAVAILABLE' || code === 'AGENT_SESSION_STORE_DURABILITY_UNCONFIRMED' ||
+    code === 'AGENT_SESSION_STORE_BUSY' || code === 'AGENT_SESSION_STORE_LIMIT' ||
+    isInputStorageFailure(cause, depth + 1)
+}
+
 function creationIntentDigest(input: Pick<AgentMuxAgentCreateInput, 'creationCaller' | 'initialMessage'> & object, agentSessionId: string, executorId: string, createOperationId: string,
   author?: AgentMuxStoredAgentSession, creator?: AgentMuxStoredAgentSession): string {
   const { initialMessage, creationCaller, ...intent } = input
@@ -465,6 +475,25 @@ type TerminalFrontendWatch = {
 }
 
 type RawInputCall = { signal: AbortSignal; check(): void; author?: () => void | Promise<void> }
+
+type InputWaitingContext = {
+  ref: AgentInputWaitRef
+  input: AgentMuxAgentPromptInput
+  producer: 'prompt' | 'message'
+  authorAgentSessionId?: string
+  authority?: import('./prompt-submission.js').AgentPromptInputAuthority
+  recipientContinuation?: boolean
+  continueGate?: true
+  controller: AbortController
+  runtimeWake: boolean
+  sessionWake: boolean
+  observedTarget?: string
+  requested: boolean
+  active: boolean
+  sequence: number
+  storageRetries?: number
+  storageRetry?: ReturnType<typeof setTimeout> | undefined
+}
 
 export class AgentMuxClient {
   private readonly hostExecutorOwner: AgentMuxHostExecutorOwner | undefined
@@ -978,15 +1007,12 @@ export class AgentMuxClient {
   private readonly nativeSessionCatalogReads = new WeakMap<AgentProvider, Map<string, Promise<Omit<AgentNativeSessionCatalog, 'capabilities'>>>>()
   private readonly messageQueue: DurableAgentMuxMessageQueue
   /** Only the original live caller context; credentials are never journaled. */
-  private readonly inputWaitingContexts = new Map<string, {
-    ref: AgentInputWaitRef; input: AgentMuxAgentPromptInput; producer: 'prompt' | 'message';
-    authorAgentSessionId?: string; authority?: import('./prompt-submission.js').AgentPromptInputAuthority;
-    recipientContinuation?: boolean;
-    controller: AbortController; runtimeWake: boolean; sessionWake: boolean; observedTarget?: string; requested: boolean; active: boolean; sequence: number
-  }>()
+  private readonly inputWaitingContexts = new Map<string, InputWaitingContext>()
   private readonly inputWaitingByRecipient = new Map<string, Set<string>>()
   private inputWaitingRestore: Promise<void> | undefined
   private inputWaitingRestored = false
+  private inputWaitingRestoreRetries = 0
+  private inputWaitingRestoreRetry: ReturnType<typeof setTimeout> | undefined
   private readonly inputWaitingRecipients = new Map<string, { pending: Promise<void>; again: boolean }>()
   private readonly inputConversationTails = new Map<string, Promise<import('./agent-input-conversation.js').AgentInputJournalCut>>()
   private readonly inputConversationRecovered = new Set<string>()
@@ -1188,7 +1214,7 @@ export class AgentMuxClient {
           let requested = false
           for (const id of ids) {
             const value = this.inputWaitingContexts.get(id)
-            if (value && (value.runtimeWake || value.sessionWake)) { value.requested = true; requested = true }
+            if (value && !value.storageRetry && (value.runtimeWake || value.sessionWake)) { value.requested = true; requested = true }
           }
           if (requested) void this.scheduleInputWaiting(recipient)
         }
@@ -1206,7 +1232,7 @@ export class AgentMuxClient {
         let requested = false
         for (const id of ids) {
           const value = this.inputWaitingContexts.get(id)
-          if (value?.sessionWake && value.observedTarget !== target) {
+          if (value?.sessionWake && !value.storageRetry && value.observedTarget !== target) {
             value.observedTarget = target; value.requested = true; requested = true
           }
         }
@@ -2329,6 +2355,7 @@ export class AgentMuxClient {
     this.messageObservationDisposed = true; this.messageObservation?.dispose(); this.messageObservation = undefined
     await this.recovery.dispose()
     this.inputWaitingDisposed = true
+    clearTimeout(this.inputWaitingRestoreRetry)
     this.inputWaitingUnsubscribe()
     for (const value of this.inputWaitingContexts.values()) value.controller.abort()
     this.inputWaitingContexts.clear()
@@ -7486,9 +7513,9 @@ export class AgentMuxClient {
 
   /** Same original journal/key selector. Inspect never constructs a new waiting generation. */
   async inspectAgentInput(selector: AgentInputSelector, caller?: { agentSessionId: string; capability: string }): Promise<AgentInputSubmissionReceipt | null> {
-    const saved = await this.messageQueue.inspectInput('key' in selector
-      ? { key: await this.messageQueue.resolveInputOwnerKey(selector.key) } : selector)
-    if (!saved) return null
+    const observed = await this.messageQueue.observeInput(selector)
+    if (!observed) return null
+    const { entry: saved, persistence, restorationHeld } = observed
     return await this.withSessionRecordRead(saved.intent.key.agentSessionId, async () => {
       if (caller) {
         if (caller.agentSessionId === saved.intent.key.agentSessionId) await this.authorizeAgentCaller(caller.capability, caller.agentSessionId)
@@ -7496,9 +7523,13 @@ export class AgentMuxClient {
       }
       const admission = await this.inspectAgentPromptSubmission(agentInputDeliveryKey(saved.control))
       const status = agentInputSubmissionStatus(saved.control, admission)
+      const owned = this.inputWaitingContexts.has(agentInputJournalKey(saved.intent.key))
+      const observation = restorationHeld || saved.control.state !== 'enabled' || admission ? 'closed' : owned ? 'owned' : 'rejoin-needed'
+      const continuation = persistence === 'confirmed' && !restorationHeld && !admission && !owned
+        ? observation === 'rejoin-needed' ? 'rejoin-wait' : saved.control.handoff ? 'continue-handoff' : undefined
+        : undefined
       const receipt: AgentInputSubmissionReceipt = { key: saved.intent.key, ref: saved.control.ref, control: saved.control,
-        persistence: 'confirmed', status, admission, observation: saved.control.state !== 'enabled' || admission ? 'closed'
-          : this.inputWaitingContexts.has(agentInputJournalKey(saved.intent.key)) ? 'owned' : 'rejoin-needed',
+        persistence, status, admission, observation, ...(continuation === undefined ? {} : { continuation }),
         ...(saved.intent.source.kind === 'message' ? { originalControlOperationId: saved.intent.source.originalControlOperationId } : {}) }
       try {
         const observation = await this.messageQueue.readMoteInputObservation(moteInputObservationId({kind:'prompt',key:saved.intent.key}))
@@ -7790,6 +7821,8 @@ export class AgentMuxClient {
   private restoreInputWaiting(): Promise<void> {
     if (this.inputWaitingDisposed || this.inputWaitingRestored) return Promise.resolve()
     if (this.inputWaitingRestore) return this.inputWaitingRestore
+    if (this.inputWaitingRestoreRetry) return Promise.resolve()
+    let storageFailure = false
     const work = Promise.resolve().then(async () => {
       let after = 0, complete = true
       for (;;) {
@@ -7803,6 +7836,7 @@ export class AgentMuxClient {
             await this.acceptInputWaiting(saved.control.ref, prompt.input, 'prompt', undefined, prompt.authority)
           } catch (error) {
             complete = false
+            storageFailure ||= isInputStorageFailure(error)
             this.publisher.publish({ type: 'agent-error', agentSessionId: saved.intent.key.agentSessionId, code: 'AGENT_INPUT_WAIT_RECOVERY_UNCONFIRMED',
               message: `The saved input is retained; its waiting recovery is unconfirmed. Reconnect or rejoin this original input. ${error instanceof Error ? error.message : String(error)}`,
               failure: deliveryFailure(error), evidence: { source: 'agentmux', observedAt: Date.now(), run: saved.intent.key.expectedRun } })
@@ -7812,10 +7846,23 @@ export class AgentMuxClient {
       }
       this.inputWaitingRestored = complete
     }).catch(error => {
+      storageFailure = isInputStorageFailure(error)
       this.publisher.publish({ type: 'agent-error', code: 'AGENT_INPUT_WAIT_RECOVERY_UNCONFIRMED',
         message: `Saved inputs are retained; waiting recovery is unconfirmed. Reconnect or rejoin the original input. ${error instanceof Error ? error.message : String(error)}`,
         failure: deliveryFailure(error), evidence: { source: 'agentmux', observedAt: Date.now() } })
-    }).finally(() => { if (this.inputWaitingRestore === work) this.inputWaitingRestore = undefined })
+    }).finally(() => {
+      if (this.inputWaitingRestore === work) this.inputWaitingRestore = undefined
+      const delay = INPUT_STORAGE_RETRY_DELAYS[this.inputWaitingRestoreRetries]
+      if (storageFailure && delay !== undefined && !this.inputWaitingDisposed) {
+        this.inputWaitingRestoreRetries++
+        this.inputWaitingRestoreRetry = setTimeout(() => {
+          this.inputWaitingRestoreRetry = undefined
+          void this.restoreInputWaiting()
+        }, delay).unref()
+      } else {
+        this.inputWaitingRestoreRetries = 0
+      }
+    })
     this.inputWaitingRestore = work
     return work
   }
@@ -7932,7 +7979,13 @@ export class AgentMuxClient {
       if (!saved) throw new AgentMuxError('Original input persistence is unconfirmed.', 'AGENT_INPUT_NOT_FOUND')
       if (isDeepStrictEqual(saved.control.ref, ref) && (saved.control.state === 'enabled' || continueGate && saved.control.state === 'dispatch-authorized' && saved.control.handoff) && !await this.inspectAgentPromptSubmission(agentInputDeliveryKey(saved.control)) && !this.inputWaitingDisposed) {
         const id = agentInputJournalKey(ref.key)
-        if (!this.inputWaitingContexts.has(id)) {
+        const previous = this.inputWaitingContexts.get(id)
+        if (previous?.storageRetry && isDeepStrictEqual(previous.ref, ref)) {
+          clearTimeout(previous.storageRetry)
+          previous.storageRetry = undefined
+          previous.requested = true
+        }
+        if (!previous) {
           // Only this original durable input can receive the live restrictions.
           // Completed RPC readers and persisted attribution are not grant owners.
           const accepted = authority?.retainForAcceptedInput ? await authority.retainForAcceptedInput(ref.key) : undefined
@@ -7943,18 +7996,22 @@ export class AgentMuxClient {
           else {
             const ownedAuthority = authority && { ...authority, ...(accepted ? { assertCurrent: accepted.assertCurrent } : {}) }
             if (ownedAuthority) delete ownedAuthority.retainForAcceptedInput
-            const controller = new AbortController(), context = { ref, input, producer, recipientContinuation, ...(continueGate ? { continueGate: true as const } : {}),
+            const controller = new AbortController(), context: InputWaitingContext = { ref, input, producer, recipientContinuation, ...(continueGate ? { continueGate: true as const } : {}),
               controller, runtimeWake: true, sessionWake: this.isRetainedHumanInput(saved.intent) || recipientContinuation, requested: true, active: false, sequence: saved.sequence,
               ...(authorAgentSessionId ? { authorAgentSessionId } : {}), ...(ownedAuthority ? { authority: ownedAuthority } : {}) }
             this.inputWaitingContexts.set(id, context)
             const ids = this.inputWaitingByRecipient.get(ref.key.agentSessionId) ?? new Set<string>()
             ids.add(id); this.inputWaitingByRecipient.set(ref.key.agentSessionId, ids)
             controller.signal.addEventListener('abort', () => {
+              const interruptedRecheck = context.storageRetry !== undefined
+              clearTimeout(context.storageRetry)
+              context.storageRetry = undefined
               accepted?.release()
               if (this.inputWaitingContexts.get(id) === context) this.inputWaitingContexts.delete(id)
               const ids = this.inputWaitingByRecipient.get(ref.key.agentSessionId)
               ids?.delete(id)
               if (!ids?.size) this.inputWaitingByRecipient.delete(ref.key.agentSessionId)
+              else if (interruptedRecheck && !this.inputWaitingDisposed) void this.scheduleInputWaiting(ref.key.agentSessionId)
             }, { once: true })
             if (input.signal?.aborted) controller.abort(input.signal.reason)
             else input.signal?.addEventListener('abort', () => controller.abort(input.signal!.reason), { once: true, signal: controller.signal })
@@ -7989,14 +8046,39 @@ export class AgentMuxClient {
         state.again = false
         const relevant = [...(this.inputWaitingByRecipient.get(recipient) ?? [])].flatMap(id => {
           const value = this.inputWaitingContexts.get(id)
-          return value?.requested ? [value] : []
+          return value && (value.requested || value.storageRetry) ? [value] : []
         })
           .sort((a, b) => a.sequence - b.sequence)
         for (const context of relevant) {
+          if (context.controller.signal.aborted) continue
+          if (context.storageRetry) break
           context.requested = false
-          if (!context.controller.signal.aborted) {
-            context.active = true
-            try { await this.advanceInputWaiting(context) } finally { context.active = false }
+          context.active = true
+          try {
+            await this.advanceInputWaiting(context)
+            context.storageRetries = 0
+          } catch (error) {
+            if (context.controller.signal.aborted) continue
+            this.publisher.publish({ type: 'agent-error', agentSessionId: recipient, code: 'AGENT_INPUT_WAIT_OBSERVATION_UNCONFIRMED',
+              message: error instanceof Error ? error.message : String(error), failure: deliveryFailure(error),
+              evidence: { source: 'agentmux', observedAt: Date.now(), run: context.ref.key.expectedRun } })
+            const retries = context.storageRetries ?? 0, delay = INPUT_STORAGE_RETRY_DELAYS[retries]
+            if (!context.continueGate && isInputStorageFailure(error) && delay !== undefined) {
+              context.storageRetries = retries + 1
+              context.storageRetry = setTimeout(() => {
+                context.storageRetry = undefined
+                context.requested = true
+                void this.scheduleInputWaiting(recipient)
+              }, delay).unref()
+              break
+            }
+            context.controller.abort()
+            // Keep the durable ref. An explicit rejoin can rebuild its
+            // observation without holding a stalled live grant.
+            const receipt = await this.inspectAgentInput({ key: context.ref.key }).catch(() => null)
+            if (receipt) await this.publishInputReceipt(receipt)
+          } finally {
+            context.active = false
           }
         }
       } while (state.again && !this.inputWaitingDisposed)
@@ -8008,16 +8090,19 @@ export class AgentMuxClient {
     return state.pending
   }
 
-  private async advanceInputWaiting(context: {
-    ref: AgentInputWaitRef; input: AgentMuxAgentPromptInput; producer: 'prompt' | 'message'; authorAgentSessionId?: string;
-    recipientContinuation?: boolean; continueGate?: true;
-    authority?: import('./prompt-submission.js').AgentPromptInputAuthority; controller: AbortController; runtimeWake: boolean; sessionWake: boolean; observedTarget?: string; requested: boolean
-  }): Promise<void> {
+  private async advanceInputWaiting(context: InputWaitingContext): Promise<void> {
     const key = context.ref.key
     const release = () => { context.controller.abort() }
     const saved = await this.messageQueue.inspectInput({ key })
     if (!saved || !isDeepStrictEqual(saved.control.ref, context.ref) || saved.control.state !== 'enabled' && !(context.continueGate && saved.control.state === 'dispatch-authorized' && saved.control.handoff) ||
-        await this.inspectAgentPromptSubmission(agentInputDeliveryKey(saved.control))) { release(); return }
+        await this.inspectAgentPromptSubmission(agentInputDeliveryKey(saved.control))) {
+      // Reconcile a settled or frozen original after storage recovers without
+      // retrying its delivery. The gate can have committed before its sync failed.
+      release()
+      const receipt = context.storageRetries && saved ? await this.inspectAgentInput({ key }).catch(() => null) : null
+      if (receipt) await this.publishInputReceipt(receipt)
+      return
+    }
     const continuation = this.isRetainedHumanInput(saved.intent) || context.recipientContinuation === true
     const waiting = async (reason: import('./agent-input-wait.js').AgentInputWaitReason) => {
       context.runtimeWake = reason.wake === 'runtime-restored'
@@ -8119,7 +8204,9 @@ export class AgentMuxClient {
             message: error instanceof Error ? error.message : String(error), failure: deliveryFailure(error),
             evidence: { source: 'agentmux', observedAt: Date.now(), run: key.expectedRun } })
         }
-        else {
+        else if (isInputStorageFailure(error)) {
+          throw error
+        } else {
           let targetReadFailure: ReturnType<typeof deliveryFailure> | undefined
           if (continuation && !context.controller.signal.aborted && !authorizationFailed) {
             // Preparation can fail before assertTarget runs. Recheck the exact

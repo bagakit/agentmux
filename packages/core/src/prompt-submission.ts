@@ -70,8 +70,10 @@ export function promptPreparationFailure(error: unknown): AgentMuxError {
     ? 'The Agent is compacting its context. The original message is kept; retry shortly after compaction finishes.'
     : wait?.reason === 'native-busy' ? 'The Agent is temporarily preparing its native input. The original message is kept; retry shortly.'
     : 'This call ended during read-only preparation before attempting input. The original operation and healthy terminal are kept.'
-  return new AgentMuxError(message,
+  const failure = new AgentMuxError(message,
     'AGENT_PROMPT_PREPARATION_FAILED', promptFailureCauseDetail(error), { disposition: 'not_applied', confirmedInputBytes: 0 })
+  Object.defineProperty(failure, 'cause', { value: error, configurable: true })
+  return failure
 }
 
 /** One original pre-input observation, not durable authorization or another submission owner. */

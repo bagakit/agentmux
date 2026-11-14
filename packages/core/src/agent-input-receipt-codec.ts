@@ -13,10 +13,11 @@ function wireString(value: unknown): void { if (typeof value !== 'string' || !va
 function wireTimestamp(value: unknown): void { if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) wireFail() }
 function wireMember(value: unknown, fields: readonly unknown[]): void { if (!fields.includes(value)) wireFail() }
 export function parseAgentInputSubmissionReceipt(value: unknown): AgentInputSubmissionReceipt {
-  const p = wireRecord(value, ['key', 'ref', 'originalControlOperationId', 'persistence', 'control', 'admission', 'status', 'observation', 'moteObservationId'])
+  const p = wireRecord(value, ['key', 'ref', 'originalControlOperationId', 'persistence', 'control', 'admission', 'status', 'observation', 'moteObservationId', 'continuation'])
   if (p.moteObservationId !== undefined) wireString(p.moteObservationId)
   const key = validateAgentPromptInputKey(p.key), ref = validateAgentInputWaitRef(p.ref)
-  if (!dequal(key, ref.key) || p.persistence !== 'confirmed') wireFail()
+  if (!dequal(key, ref.key)) wireFail()
+  wireMember(p.persistence, ['confirmed', 'observed'])
   wireMember(p.observation, ['owned', 'rejoin-needed', 'closed'])
   if (p.originalControlOperationId !== undefined) wireString(p.originalControlOperationId)
   const control = wireRecord(p.control, ['ref', 'state', 'at', 'waiting', 'gateId', 'deliveryKey', 'retry', 'handoff'])
@@ -65,5 +66,12 @@ export function parseAgentInputSubmissionReceipt(value: unknown): AgentInputSubm
       (admission.admission?.submissionId ?? admission.terminalPromptSubmission?.submissionId ?? admission.admission?.operationId) !== agentPromptInputId(deliveryKey))) wireFail()
   const status = agentInputSubmissionStatus(control as AgentInputSubmissionReceipt['control'], admission)
   if (p.status !== status) wireFail()
+  if (p.continuation !== undefined) {
+    if (p.persistence !== 'confirmed' || admission !== null) wireFail()
+    if (p.continuation === 'rejoin-wait') {
+      if (status !== 'waiting' || p.observation !== 'rejoin-needed') wireFail()
+    } else if (p.continuation !== 'continue-handoff' || status !== 'unknown' || p.observation !== 'closed' ||
+        control.state !== 'dispatch-authorized' || control.handoff === undefined) wireFail()
+  }
   return value as AgentInputSubmissionReceipt
 }

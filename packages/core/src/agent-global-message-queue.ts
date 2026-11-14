@@ -382,7 +382,7 @@ export class DurableAgentMuxMessageQueue {
     let stage = 'journal-directory'
     try {
       transaction.signal?.throwIfAborted()
-      await mkdir(dirname(this.path), { recursive: true, mode: 0o700 })
+      if (!transaction.snapshot) await mkdir(dirname(this.path), { recursive: true, mode: 0o700 })
       // Loading the queue's validator or CLI help must not initialize SQLite or put an
       // experimental-module warning in the machine-readable error receipt stream.
       // Only lock acquisition waits. No operation/body has run, so this never resends an effect.
@@ -390,10 +390,11 @@ export class DurableAgentMuxMessageQueue {
       for (let attempt = 0; ; attempt++) {
         transaction.signal?.throwIfAborted()
         try {
-          stage = 'mutex-open'; const opened=await openMessageJournalMutex(this.path);mutex=opened.mutex
+          stage = 'mutex-open'; const opened=await openMessageJournalMutex(this.path, transaction.snapshot);mutex=opened.mutex
           if(mutexIdentity!==undefined&&mutexIdentity!==opened.identity)throw new Error('The original message mutex changed while waiting for its lock.')
           mutexIdentity=opened.identity;freshMutex ||= opened.fresh
-          stage = 'mutex-configure'; await chmod(mutexPath, 0o600); configureMessageJournal(mutex)
+          if (!transaction.snapshot) { stage = 'mutex-configure'; await chmod(mutexPath, 0o600); configureMessageJournal(mutex) }
+          else mutex.exec('PRAGMA busy_timeout = 0')
           // A failed IMMEDIATE attempt can retain a SHARED read lease and block the holder's
           // commit. Exclusive acquisition + closing each failed handle keeps waiters harmless.
           stage = 'mutex-acquire'; mutex.exec('BEGIN EXCLUSIVE'); acquired = true; break
@@ -405,7 +406,7 @@ export class DurableAgentMuxMessageQueue {
         }
       }
       stage = 'journal-open'
-      if (transaction.snapshot) this.database = await openMessageJournalSnapshot(this.path)
+      if (transaction.snapshot) this.database = await openMessageJournalSnapshot(this.path, mutex)
       else {
         this.database = await openMessageJournal(this.path, mutex, (db, record) => {
           this.database = db
@@ -1062,16 +1063,39 @@ export class DurableAgentMuxMessageQueue {
     }, true)
   }
 
+  private selectedInput(selector: AgentInputSelector, followOwner = false): AgentInputJournalEntry | null {
+    if ('key' in selector) {
+      const key = validateAgentPromptInputKey(selector.key)
+      return this.input(followOwner ? this.inputOwnerKey(key) : key) ?? null
+    }
+    const messageId = this.operationMessageId(validateAgentInputControlId(selector.originalControlOperationId))
+    if (!messageId) return null
+    const message = this.message(messageId)!
+    if (!message.envelope.recipientSessionId || !message.envelope.recipientRunId) return null
+    return this.input({ kind: 'message', agentSessionId: message.envelope.recipientSessionId,
+      expectedRun: { runId: message.envelope.recipientRunId }, messageId }) ?? null
+  }
+
   async inspectInput(selector: AgentInputSelector): Promise<AgentInputJournalEntry | null> {
-    return this.withLock(async () => {
-      if ('key' in selector) return this.input(validateAgentPromptInputKey(selector.key)) ?? null
-      const messageId = this.operationMessageId(validateAgentInputControlId(selector.originalControlOperationId))
-      if (!messageId) return null
-      const message = this.message(messageId)!
-      if (!message.envelope.recipientSessionId || !message.envelope.recipientRunId) return null
-      return this.input({ kind: 'message', agentSessionId: message.envelope.recipientSessionId,
-        expectedRun: { runId: message.envelope.recipientRunId }, messageId }) ?? null
-    }, true)
+    return this.withLock(async () => this.selectedInput(selector), true)
+  }
+
+  /** A readable original record outlives a failed durability fence. A later missing
+   * observation cannot replace the original failure with an authoritative absence. */
+  async observeInput(selector: AgentInputSelector): Promise<{ entry: AgentInputJournalEntry; persistence: 'confirmed' | 'observed'; restorationHeld: boolean } | null> {
+    const read = async () => {
+      const entry = this.selectedInput(selector, true)
+      return entry && { entry, restorationHeld: this.inputRestorationHeld(entry.intent.key) }
+    }
+    try {
+      const original = await this.withLock(read, true)
+      return original ? { ...original, persistence: 'confirmed' } : null
+    } catch (error) {
+      if (!(error instanceof AgentMuxError) || error.code !== 'MESSAGE_QUEUE_UNAVAILABLE') throw error
+      const original = await this.withLock(read, false, { snapshot: true }).catch(() => null)
+      if (!original) throw error
+      return { ...original, persistence: 'observed' }
+    }
   }
 
   async recordInputWaiting(refValue: AgentInputWaitRef, waiting: AgentInputWaitReason): Promise<boolean> {
