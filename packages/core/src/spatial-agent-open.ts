@@ -48,7 +48,7 @@ function spatialAgentOpenDestination(graph: AgentMuxSpatialGraph, request: Agent
 }
 /** Admission and topology are one graph mutation; no Runtime operation occurs here. */
 export function admitSpatialAgentOpen(graph: AgentMuxSpatialGraph, input: { request: AgentMuxSpatialAgentOpenRequest;
-  agentSessionId: string; takeover?: { preparation: AgentTakeoverPreparation; requestDigest: string; sourceAgentMuxNote?: string }; execution: AgentMuxSpatialAgentOpenRecord['execution']; placement?: AgentMuxSpatialAgentOpenRecord['placement'];
+  agentSessionId: string; takeover?: { preparation: AgentTakeoverPreparation; requestDigest: string; sourceAgentMuxNote?: string; optionalContext?: AgentMuxSpatialAgentOpenRecord['takeoverOptionalContext'] }; execution: AgentMuxSpatialAgentOpenRecord['execution']; placement?: AgentMuxSpatialAgentOpenRecord['placement'];
   executionBinding?: AgentMuxSpatialAgentOpenRecord['executionBinding']; regionResource: SpatialJson }) {
   if (spatialAgentAssociationRecord(graph, input.request.requestId)) throw new AgentMuxError('This operation already belongs to an external association, not an Agent creation.', 'SPACE_REQUEST_CONFLICT')
   if (input.request.moteMain) {
@@ -100,7 +100,7 @@ export function admitSpatialAgentOpen(graph: AgentMuxSpatialGraph, input: { requ
       ...(input.execution.runtimeId ? { runtimeId: input.execution.runtimeId } : {}) } })
   next.resources['region:' + address.regionId] = structuredClone(input.regionResource)
   const record: AgentMuxSpatialAgentOpenRecord = { executorId: input.request.content.executorId, requestId: input.request.requestId, digest, agentSessionId: input.agentSessionId,
-    address, execution: structuredClone(input.execution), ...(input.takeover ? { takeover: parseAgentTakeoverProvenance({ ...input.takeover.preparation, destination: { ...input.takeover.preparation.destination, address } }), takeoverRequestDigest: input.takeover.requestDigest, takeoverContent: structuredClone(input.request.content), ...(input.takeover.sourceAgentMuxNote === undefined ? {} : { takeoverSourceAgentMuxNote: input.takeover.sourceAgentMuxNote }) } : {}), ...(input.placement ? { placement: structuredClone(input.placement) } : {}),
+    address, execution: structuredClone(input.execution), ...(input.takeover ? { takeover: parseAgentTakeoverProvenance({ ...input.takeover.preparation, destination: { ...input.takeover.preparation.destination, address } }), takeoverRequestDigest: input.takeover.requestDigest, takeoverContent: structuredClone(input.request.content), ...(input.takeover.sourceAgentMuxNote === undefined ? {} : { takeoverSourceAgentMuxNote: input.takeover.sourceAgentMuxNote }), ...(input.takeover.optionalContext === undefined ? {} : { takeoverOptionalContext: structuredClone(input.takeover.optionalContext) }) } : {}), ...(input.placement ? { placement: structuredClone(input.placement) } : {}),
     ...(input.executionBinding ? { executionBinding: structuredClone(input.executionBinding) } : {}),
     ...(input.request.moteMain ? { moteMain: structuredClone(input.request.moteMain) } : {}) }
   const original = spatialAgentOpenDocument(next); original.requests = Object.fromEntries([...Object.entries(original.requests), [record.requestId, record]])

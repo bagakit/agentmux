@@ -24,6 +24,19 @@ const regionDescriptor = (record: Pick<AgentMuxSpatialAgentOpenRecord, 'agentSes
 export function createHostSpatialAgentControl(options: { configurationPath: string; spatial: AgentMuxSpatialStateStore; runtime(): AgentMuxHeadlessRuntime;
   agentMuxContext?(request: AgentMuxSpatialAgentOpenRequest): Promise<string | undefined> }): NonNullable<AgentMuxRpcServiceOptions['spatialAgentControl']> {
   const topics = new ScratchTopics()
+  async function createOriginalLocalTakeover(record: AgentMuxSpatialAgentOpenRecord, request: AgentMuxSpatialAgentOpenRequest) {
+    const content = record.takeoverContent
+    if (!content || typeof record.takeoverSourceAgentMuxNote !== 'string' || !record.execution.executorRevision || !record.execution.workspaceId) throw new AgentMuxError(
+      'The original complete Takeover invocation is unconfirmed. Keep its Session and inspect the original operation.', 'AGENT_TAKEOVER_ADMISSION_UNCONFIRMED')
+    const create: AgentMuxHostAgentCreateInput = { executorId: record.executorId, executorRevision: record.execution.executorRevision,
+      agentSessionId: record.agentSessionId, createOperationId: record.requestId, workspacePath: record.execution.workspacePath,
+      spatialIntent: { tabId: record.address.tabId, regionId: record.address.regionId, executionWorkspaceId: record.execution.workspaceId },
+      ...parseAgentOpenLaunchFields(content), sourceAgentMuxNote: record.takeoverSourceAgentMuxNote,
+      ...(record.takeoverOptionalContext === undefined ? {} : { optionalContext: record.takeoverOptionalContext }),
+      ...(content.prompt === undefined ? {} : { prompt: content.prompt }) }
+    await options.runtime().client.createSpatialHostAgentWithDelivery(create, options.spatial,
+      request.caller ? { agentSessionId: request.caller.agentSessionId, capability: request.caller.capability ?? '' } : undefined)
+  }
   function associationReport(record: AgentMuxSpatialAgentAssociationRecord, graph: NonNullable<Awaited<ReturnType<AgentMuxSpatialStateStore['read']>>>['graph'], acknowledgedWrite = false): AgentMuxSpaceMutationReport {
     const region = graph.regions.find(region => region.tabId === record.address.tabId && region.regionId === record.address.regionId)
     const zone = graph.zones.find(zone => zone.zoneId === record.address.zoneId)
@@ -155,7 +168,18 @@ export function createHostSpatialAgentControl(options: { configurationPath: stri
       const previous = state ? spatialAgentOpenRecord(state.graph, request.requestId) : null
       if (previous) {
         if (!previous.takeover || previous.takeoverRequestDigest !== spatialAgentOpenDigest(request)) throw new AgentMuxError('This operation belongs to another original Takeover.', 'SPACE_REQUEST_CONFLICT')
-        if (!previous.executionBinding || !previous.takeoverContent?.agentTarget) return { operation: 'agent.open', ...await reconcile(previous, context) }
+        if (!previous.executionBinding) {
+          // C is the frozen invocation, not evidence that Native creation is absent.
+          // Only an explicit continuation enters Core's original same-operation claim.
+          const observed = await reconcile(previous, context)
+          if (observed.agent || observed.outcome === 'retired' || previous.execution.hostId !== 'local' || typeof previous.takeoverSourceAgentMuxNote !== 'string') return { operation: 'agent.open', ...observed }
+          try {
+            context.signal?.throwIfAborted(); await context.assertCurrent?.()
+            await createOriginalLocalTakeover(previous, request)
+            return { operation: 'agent.open', ...await reconcile(previous, context) }
+          } catch (error) { return { operation: 'agent.open', ...await reconcile(previous, context, error) } }
+        }
+        if (!previous.takeoverContent?.agentTarget) return { operation: 'agent.open', ...await reconcile(previous, context) }
         request = { ...request, content: previous.takeoverContent }
         return await openSpatialAgentTarget({ ...options, reconcile, descriptor: regionDescriptor }, request as Parameters<typeof openSpatialAgentTarget>[1], state!, context)
       }
@@ -228,11 +252,8 @@ export function createHostSpatialAgentControl(options: { configurationPath: stri
     try { raw = await readOriginalMoteConfiguration(options.configurationPath) } catch (error) { configurationIssue = error }
     if (!object(raw)) configurationIssue ??= new AgentMuxError('The original Profile and Topic directory configuration is unconfirmed.', 'EXECUTOR_CONFIGURATION_UNAVAILABLE')
     const platformContext = await options.agentMuxContext?.(request)
-    context.signal?.throwIfAborted(); await context.assertCurrent?.()
-    const admission = await options.spatial.admitAgentOpen({ request, agentSessionId, ...(takeover ? { takeover: { preparation: takeover.preparation, requestDigest: takeover.requestDigest } } : {}), execution: frozenExecution, regionResource: regionDescriptor({ agentSessionId, execution: frozenExecution }, 'launching') }, assertTakeover)
-    try {
-      context.signal?.throwIfAborted(); await context.assertCurrent?.()
-      let prepared: Awaited<ReturnType<ScratchTopics['prepareAgent']>> | undefined
+    let prepared: Awaited<ReturnType<ScratchTopics['prepareAgent']>> | undefined, note = ''
+    const prepareContext = async () => {
       if (zone.kind === 'home' && zone.workspaceId === SCRATCH_WORKSPACE_ID) {
         const workspaces = object(raw) && Array.isArray(raw.workspaces) ? raw.workspaces.filter(value => object(value) && value.id === SCRATCH_WORKSPACE_ID) : []
         const workspace = workspaces.length === 1 ? workspaces[0] : null
@@ -242,17 +263,26 @@ export function createHostSpatialAgentControl(options: { configurationPath: stri
         prepared = await topics.prepareAgent({ id: SCRATCH_WORKSPACE_ID, hostId: 'local', path: workspace.path }, original.id, { providerId: executor.providerId, sessionId: agentSessionId })
         if (prepared.absolutePath !== execution.workspacePath) throw new AgentMuxError('The original Topic directory changed. Its admitted identity is retained.', 'SPACE_RESOURCE_UNKNOWN')
       }
-      const note = [prepared?.prompt, platformContext, configuredProfileAgentContext(object(raw) ? raw.profile : undefined)].filter(Boolean).join('\n\n')
+      note = [prepared?.prompt, platformContext, configuredProfileAgentContext(object(raw) ? raw.profile : undefined)].filter(Boolean).join('\n\n')
+    }
+    if (takeover) await prepareContext()
+    context.signal?.throwIfAborted(); await context.assertCurrent?.()
+    const admission = await options.spatial.admitAgentOpen({ request, agentSessionId, ...(takeover ? { takeover: { preparation: takeover.preparation, requestDigest: takeover.requestDigest, sourceAgentMuxNote: note, ...(prepared ? { optionalContext: prepared.optionalContext } : {}) } } : {}), execution: frozenExecution, regionResource: regionDescriptor({ agentSessionId, execution: frozenExecution }, 'launching') }, assertTakeover)
+    try {
       context.signal?.throwIfAborted(); await context.assertCurrent?.()
-      const create: AgentMuxHostAgentCreateInput = { executorId: request.content.executorId, executorRevision: executor.configRevision,
-        agentSessionId, createOperationId: request.requestId, workspacePath: execution.workspacePath,
-        spatialIntent: { tabId: admission.record.address.tabId, regionId: admission.record.address.regionId, executionWorkspaceId: execution.workspaceId },
-        ...parseAgentOpenLaunchFields(request.content),
-        ...(note ? { sourceAgentMuxNote: note } : {}), ...(prepared ? { optionalContext: prepared.optionalContext } : {}),
-        ...(request.content.prompt === undefined ? {} : { prompt: request.content.prompt }) }
-      if (request.caller) await client.createLocalHostAgentWithDelivery(create, { agentSessionId: request.caller.agentSessionId, capability: request.caller.capability ?? '' })
-      else if (admission.record.takeover) await client.createSpatialHostAgentWithDelivery(create, options.spatial)
-      else await client.createHostAgentWithDelivery(create)
+      if (!takeover) await prepareContext()
+      context.signal?.throwIfAborted(); await context.assertCurrent?.()
+      if (admission.record.takeover) await createOriginalLocalTakeover(admission.record, request)
+      else {
+        const create: AgentMuxHostAgentCreateInput = { executorId: request.content.executorId, executorRevision: executor.configRevision,
+          agentSessionId, createOperationId: request.requestId, workspacePath: execution.workspacePath,
+          spatialIntent: { tabId: admission.record.address.tabId, regionId: admission.record.address.regionId, executionWorkspaceId: execution.workspaceId },
+          ...parseAgentOpenLaunchFields(request.content),
+          ...(note ? { sourceAgentMuxNote: note } : {}), ...(prepared ? { optionalContext: prepared.optionalContext } : {}),
+          ...(request.content.prompt === undefined ? {} : { prompt: request.content.prompt }) }
+        if (request.caller) await client.createLocalHostAgentWithDelivery(create, { agentSessionId: request.caller.agentSessionId, capability: request.caller.capability ?? '' })
+        else await client.createHostAgentWithDelivery(create)
+      }
       const observed = await reconcile(admission.record, context)
       if (configurationIssue) {
         observed.issues.push({ step: 'context', code: 'EXECUTOR_CONFIGURATION_UNAVAILABLE', message: 'The original Profile configuration could not be confirmed. The registered Executor and its original Run remain available.', recovery: 'Check the original Host configuration; no replacement settings were selected.' })

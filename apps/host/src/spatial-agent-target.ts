@@ -72,7 +72,9 @@ export async function openSpatialAgentTarget(options: {
     if (inventory && inventory.runtimeId !== host.runtimeId) throw new AgentMuxError('The executor inventory belongs to another original Agent Core.', 'RUNTIME_OWNER_MISMATCH')
     const matches = inventory?.executors.filter(executor => executor.executorId === request.content.executorId)
     if (matches && matches.length !== 1) throw new AgentMuxError('Choose an executor registered on the original Agent Core.', 'UNKNOWN_EXECUTOR')
-    const launch = parseAgentOpenLaunchFields(request.content), note = previous?.takeover ? previous.takeoverSourceAgentMuxNote : !previous && !retained ? await options.agentMuxContext?.(request) : undefined
+    const launch = parseAgentOpenLaunchFields(request.content)
+    const preparedNote = previous?.takeover ? previous.takeoverSourceAgentMuxNote : !previous && !retained ? await options.agentMuxContext?.(request) : undefined
+    const note = context.agentTakeover && sameRuntime ? preparedNote ?? '' : preparedNote
     if (!previous && !retained && (Object.keys(launch).length || Boolean(note)) && matches![0]!.creationContract?.ordinaryLaunch !== 1) throw new AgentMuxError(
       'The selected execution Core has no confirmed handler for this complete launch input. Keep this request and update or confirm that Core; no Agent or helper was started.', 'AGENT_OPEN_CONTRACT_UNCONFIRMED')
     const execution = previous?.execution ?? { hostId: sameRuntime ? 'local' : target.hostId, runtimeId: host.runtimeId,
@@ -111,11 +113,11 @@ export async function openSpatialAgentTarget(options: {
       context.signal?.throwIfAborted(); await context.assertCurrent?.()
       if (binding) await runtime.executionBindings.continueOriginal(binding, context)
       else {
-        const sourceNote = previous ? await options.agentMuxContext?.(request) : note
+        const sourceNote = admission.record.takeover ? admission.record.takeoverSourceAgentMuxNote : previous ? await options.agentMuxContext?.(request) : note
         const agent = { agentSessionId, createOperationId: request.requestId, executorId: request.content.executorId,
           executorRevision: execution.executorRevision, workspacePath: execution.workspacePath,
           ...launch,
-          ...(request.content.prompt === undefined ? {} : { prompt: request.content.prompt }), ...(sourceNote ? { sourceAgentMuxNote: sourceNote } : {}) }
+          ...(request.content.prompt === undefined ? {} : { prompt: request.content.prompt }), ...(sourceNote === undefined ? {} : { sourceAgentMuxNote: sourceNote }) }
         context.signal?.throwIfAborted(); await context.assertCurrent?.()
         const create = { ...agent, spatialIntent: { tabId: admission.record.address.tabId, regionId: admission.record.address.regionId, executionWorkspaceId: placement.workspaceId } }
         if (admission.record.takeover) await runtime.client.createSpatialHostAgentWithDelivery(create, options.spatial)

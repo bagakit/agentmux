@@ -800,17 +800,21 @@ export class AgentMuxClient {
 
   /** In-process original spatial-owner composition. This method is not a Hosted/RPC operation.
    * It reads provenance from the admitted C rather than accepting a caller-authored fact. */
-  async createSpatialHostAgentWithDelivery(input: AgentMuxHostAgentCreateInput, spatial: import('./spatial-state.js').AgentMuxSpatialStateStore) {
+  async createSpatialHostAgentWithDelivery(input: AgentMuxHostAgentCreateInput, spatial: import('./spatial-state.js').AgentMuxSpatialStateStore,
+    caller?: NonNullable<AgentMuxAgentCreateInput['creationCaller']>) {
     if ('takeover' in input) throw new AgentMuxError('Takeover provenance cannot be supplied as creation JSON.', 'INVALID_CONTROL_REQUEST')
+    if (caller && (typeof caller.agentSessionId !== 'string' || typeof caller.capability !== 'string')) throw new AgentMuxError('A local Takeover requires its original authenticated caller.', 'INVALID_CONTROL_REQUEST')
     const { spatialAgentOpenRecord } = await import('./spatial-agent-open-contract.js')
     const state = await spatial.read(), original = state && input.createOperationId ? spatialAgentOpenRecord(state.graph, input.createOperationId) : null
     const identity = await this.agentCreationAuthority()
     if (!original?.takeover || original.agentSessionId !== input.agentSessionId || original.executorId !== input.executorId ||
       original.execution.hostId !== 'local' || original.execution.runtimeId !== identity.runtimeId || original.execution.workspacePath !== input.workspacePath || input.executorRevision !== original.execution.executorRevision ||
       !original.takeoverContent || input.prompt !== original.takeoverContent.prompt || !isDeepStrictEqual(parseAgentOpenLaunchFields(input), parseAgentOpenLaunchFields(original.takeoverContent)) || input.nativeResumeSource !== undefined ||
-      original.takeover.destination.owner.runtimeId !== identity.runtimeId || input.spatialIntent?.tabId !== original.address.tabId || input.spatialIntent.regionId !== original.address.regionId)
+      typeof original.takeoverSourceAgentMuxNote !== 'string' || input.sourceAgentMuxNote !== original.takeoverSourceAgentMuxNote || !isDeepStrictEqual(input.optionalContext, original.takeoverOptionalContext) ||
+      input.agentMuxTask !== undefined || input.toolExecution !== undefined || input.initialMessageAdmission !== undefined || input.threadId !== undefined ||
+      original.takeover.destination.owner.runtimeId !== identity.runtimeId || !isDeepStrictEqual(input.spatialIntent, { tabId: original.address.tabId, regionId: original.address.regionId, executionWorkspaceId: original.execution.workspaceId }))
       throw new AgentMuxError('The original Core Takeover admission and creation target are unconfirmed.', 'AGENT_TAKEOVER_ADMISSION_UNCONFIRMED')
-    return await this.createConfiguredHostAgentWithDelivery({ ...input, takeover: original.takeover })
+    return await this.createConfiguredHostAgentWithDelivery({ ...input, takeover: original.takeover }, caller)
   }
 
   /** Same-Core caller credentials never enter the Hosted or JSON-RPC SDK surface. */

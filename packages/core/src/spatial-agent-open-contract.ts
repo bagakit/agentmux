@@ -94,6 +94,7 @@ export type AgentMuxSpatialAgentOpenRecord = {
   takeoverRequestDigest?: string
   /** Private frozen invocation. Public relation reads expose only the qualified facts. */
   takeoverSourceAgentMuxNote?: string
+  takeoverOptionalContext?: readonly import('./agent-outbound-message.js').AgentMuxOptionalContext[]
   takeoverContent?: Extract<AgentMuxSpatialAgentOpenRequest['content'], {kind:'new-agent'}>
   requestId: string; digest: string; agentSessionId: string; executorId: string; address: AgentMuxSpaceAddress
   execution: { hostId: string; workspacePath: string; workspaceId: string | null; runtimeId?: string; executorRevision?: string; adoptedRoute?: import('./host-route.js').AdoptedHostRoute }
@@ -220,6 +221,13 @@ export function spatialAgentOpenRecord(graph: AgentMuxSpatialGraph, requestId: s
         original.executionBinding.createOperationId !== original.requestId || !original.executionBinding.bindingId)) throw new AgentMuxError(
     'The original split execution reference is unconfirmed. Keep its Session, placement and operation.', 'SPATIAL_CREATION_UNCONFIRMED')
   if (original.takeover) { parseAgentTakeoverProvenance(original.takeover); if (original.takeoverSourceAgentMuxNote !== undefined && typeof original.takeoverSourceAgentMuxNote !== 'string' || !original.takeoverContent || original.takeoverContent.kind !== 'new-agent' || original.takeoverContent.executorId !== original.executorId) throw new AgentMuxError('The original frozen Takeover invocation is unconfirmed.', 'SPATIAL_CREATION_UNCONFIRMED'); if (typeof original.takeoverRequestDigest !== 'string' || !/^[a-f0-9]{64}$/u.test(original.takeoverRequestDigest)) throw new AgentMuxError('The original Takeover request digest is unconfirmed.', 'SPATIAL_CREATION_UNCONFIRMED') }
+  if (original.takeoverOptionalContext !== undefined) {
+    if (!original.takeover || typeof original.takeoverSourceAgentMuxNote !== 'string' || !Array.isArray(original.takeoverOptionalContext)) throw new AgentMuxError('The original frozen Takeover context is unconfirmed.', 'SPATIAL_CREATION_UNCONFIRMED')
+    for (const source of original.takeoverOptionalContext) {
+      const context = rpcRecord(source, ['text', 'omittedText'], 'SPATIAL_CREATION_UNCONFIRMED')
+      if (typeof context.text !== 'string' || typeof context.omittedText !== 'string') throw new AgentMuxError('The original frozen Takeover context is unconfirmed.', 'SPATIAL_CREATION_UNCONFIRMED')
+    }
+  }
   if (original.moteMain) parseMoteMainCreationIntent(original.moteMain, 'CONTROL_PROTOCOL_ERROR')
   if (original.moteMainFollowUps && Object.entries(original.moteMainFollowUps).some(([key,value]) => !['sourceStarted','bindStarted','bindingReceipt','refusedBeforeBinding','bindingObserved','deferredInputKey','handoverInputKey','deferredInputObserved'].includes(key) || !['bindingReceipt','refusedBeforeBinding','bindingObserved','deferredInputKey','handoverInputKey','deferredInputObserved'].includes(key) && value !== true))
     throw new AgentMuxError('The original Main follow-up admission is unreadable.', 'SPATIAL_CREATION_UNCONFIRMED')
