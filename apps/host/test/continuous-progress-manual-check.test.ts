@@ -136,21 +136,19 @@ it('concurrent public checks each evaluate their own exact target after an older
   expect(new Set(f.submitted.map(value => value.operationId)).size).toBe(3)
 })
 
-it.each(['check', 'resume'] as const)('queued public %s cannot cross a newer input cancellation even after a later explicit activation', async action => {
-  const f = await fixture([record('old', { nextCheckAt: 0 }), record('original', { status: action === 'resume' ? 'paused' : 'active' })])
-  const gate = f.hold('old'), old = f.manager.check(100, 'old'); await gate.entered.promise
-  const entered = deferred(), originalCheck = f.manager.checkNow.bind(f.manager)
-  vi.spyOn(f.manager, 'checkNow').mockImplementation((loopId, assertCurrent) => { const result = originalCheck(loopId, assertCurrent); entered.resolve(); return result })
+it.each(['check', 'resume'] as const)('preparing public %s cannot cross a newer input cancellation even after a later explicit activation', async action => {
+  const f = await fixture([record('original', { status: action === 'resume' ? 'paused' : 'active' })])
+  const gate = f.hold('original')
   const pending = f.action('original', action, 'original-action').then(value => ({ value }), error => ({ error }))
-  await entered.promise
+  await gate.entered.promise
   f.manager.cancelTarget({ hostId: 'local', agentSessionId: 'original' })
   await f.manager.pause('original', 'Newer explicit input')
   await f.manager.resume('original')
-  gate.release.resolve(); await old
+  gate.release.resolve()
   expect(await pending).toMatchObject({ error: { code: 'CONTROL_REQUEST_CONFLICT' } })
   expect(f.exact('original')).toMatchObject({ status: 'active' })
   expect(f.exact('original').lastTickId).toBeUndefined()
-  expect(f.submitted.map(value => value.loop.loopId)).toEqual(['old'])
+  expect(f.submitted.map(value => value.loop.loopId)).toEqual([])
 })
 
 it('a failed unrelated claim does not reject an explicit check of another healthy target', async () => {
@@ -179,7 +177,7 @@ it('paused check stays explicit and shared resume does not change Goal or schedu
   expect(f.observed).toEqual([]); expect(f.submitted).toEqual([])
 })
 
-it('a queued Goal check retains its original activation fence and Goal resume keeps its interval', async () => {
+it('a preparing Goal check retains its original activation fence and Goal resume keeps its interval', async () => {
   const goalLoop = record('goal', { revision: 1, taskSource: { kind: 'goal', goalId: 'goal', alignmentRevision: 1 } })
   goalLoop.initialDelivery = { operationId: 'original-start', prompt: goalLoop.prompt, condition: agentPromptCondition(observation(goalLoop, 'initial').session), state: 'confirmed', startedAt: 0 }
   const goals: GoalProgressOwner = { inspectInitial: async () => 'confirmed', read: async () => ({ id: 'goal', title: 'Original goal', description: 'Original scope', status: 'in_progress', sessionIds: ['goal'], assigneeSessionIds: ['goal'], supervisorSessionId: null, alignment: { revision: 1, confirmedAt: 1, criteria: [] } }) }
@@ -187,15 +185,13 @@ it('a queued Goal check retains its original activation fence and Goal resume ke
   await f.manager.pause('goal')
   const resumed = await f.manager.goalAction('goal', 'goal', 'resume', 1, 'goal-resume', person)
   expect(resumed).toMatchObject({ status: 'active', nextCheckAt: 60_100, revision: 2 }); expect(f.submitted).toEqual([])
-  const gate = f.hold('old'), old = f.manager.check(100, 'old'); await gate.entered.promise
-  const entered = deferred(), originalCheck = f.manager.checkNow.bind(f.manager)
-  vi.spyOn(f.manager, 'checkNow').mockImplementation((loopId, assertCurrent) => { const result = originalCheck(loopId, assertCurrent); entered.resolve(); return result })
+  const gate = f.hold('goal')
   const pending = f.manager.goalAction('goal', 'goal', 'check', 2, 'goal-check', person).then(value => ({ value }), error => ({ error }))
-  await entered.promise
+  await gate.entered.promise
   f.manager.cancelTarget({ hostId: 'local', agentSessionId: 'goal' })
   await f.manager.pause('goal'); await f.manager.resume('goal')
-  gate.release.resolve(); await old
+  gate.release.resolve()
   expect(await pending).toMatchObject({ error: { code: 'CONTROL_REQUEST_CONFLICT' } })
   expect(f.exact('goal').lastTickId).toBeUndefined()
-  expect(f.submitted.map(value => value.loop.loopId)).toEqual(['old'])
+  expect(f.submitted.map(value => value.loop.loopId)).toEqual([])
 })

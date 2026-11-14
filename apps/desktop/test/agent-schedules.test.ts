@@ -459,7 +459,7 @@ describe('due busy schedule pre-observation', () => {
     expect(calls).toBe(2); expect(sent).toBe(0)
     expect(h.manager.list()[0]).toMatchObject({ status: 'active', nextCheckAt: created.schedule.nextCheckAt, lastDecision: 'user-input-changed' })
   })
-  it('keeps the original failure and unknown state if the pre-observation fails', async () => {
+  it('keeps the original failure and due eligibility if the pre-observation fails', async () => {
     let sent = 0
     const h = await owner(async () => { sent++; return 'sent' })
     const created = await h.manager.call('schedule.create', { target, afterMs: 60_000, prompt: 'original', operationId: 'observation-failed' })
@@ -467,7 +467,7 @@ describe('due busy schedule pre-observation', () => {
     ports.observe = async () => { throw new Error('original observation unavailable') }
     h.set({ now: created.schedule.nextCheckAt }); await h.manager.check()
     expect(sent).toBe(0)
-    expect(h.manager.list()[0]).toMatchObject({ loopId: created.schedule.loopId, status: 'paused', lastOutcome: 'unknown', lastDecision: 'original observation unavailable' })
+    expect(h.manager.list()[0]).toMatchObject({ loopId: created.schedule.loopId, status: 'active', lastOutcome: 'skipped', nextCheckAt: created.schedule.nextCheckAt, lastDecision: 'original observation unavailable' })
     expect(await h.reload()).toEqual(h.manager.list())
   })
   it('restores the same due schedule after Host restart and delivers when the Agent is idle', async () => {
@@ -487,8 +487,8 @@ describe('due busy schedule pre-observation', () => {
   })
 })
 
-describe('ordered due targets', () => {
-  it('delivers ready A before observing a later blocked B', async () => {
+describe('independent due targets', () => {
+  it('delivers ready A while a later B observation remains blocked', async () => {
     const sent: string[] = [], entered = deferred(), release = deferred()
     const h = await owner(async loop => { sent.push(loop.agentSessionId); return 'sent' })
     const a = () => h.manager.call('schedule.create', { target, afterMs: 60_000, prompt: 'A', operationId: 'counter-a' })
@@ -498,9 +498,10 @@ describe('ordered due targets', () => {
     ports.observe = async (...args) => { if (args[0].agentSessionId === 'other') { entered.resolve(); await release.promise }; return await original(...args) }
     h.set({ now: first.schedule.nextCheckAt })
     const checking = h.manager.check()
-    await entered.promise; const sentBeforeB = sent.includes(target.agentSessionId)
-    release.resolve(); await checking
-    expect(sentBeforeB).toBe(true)
+    try {
+      await entered.promise
+      await vi.waitFor(() => expect(sent).toContain(target.agentSessionId))
+    } finally { release.resolve(); await checking }
     expect(sent).toContain(target.agentSessionId)
   })
 })

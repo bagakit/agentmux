@@ -5,6 +5,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { transformSync } from 'esbuild'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { instrumentPresence } from './mote-presence-mutations.mjs'
+import { instrumentReliability } from './mote-reliability-mutations.mjs'
 const root = resolve(import.meta.dirname, '../../..')
 registerHooks({ resolve(specifier, context, next) {
   if (specifier.startsWith('@agentmux/client-ui/components/')) return next(pathToFileURL(resolve(root,'packages/client-ui/src/components',specifier.slice('@agentmux/client-ui/components/'.length)+'.tsx')).href,context)
@@ -19,7 +20,7 @@ registerHooks({ resolve(specifier, context, next) {
   const result = next(url, context)
   if (!url.startsWith('file:') || result.source == null) return result
   const source = String(result.source)
-  let loaded = instrumentPresence(source, relative(root, fileURLToPath(url)), 'node')
+  let loaded = instrumentReliability(instrumentPresence(source, relative(root, fileURLToPath(url)), 'node'), relative(root, fileURLToPath(url)), 'node')
   if (process.env.MOTE_PRESENCE_DROP_ACK === '1' && url.endsWith('/apps/host/src/ordinary-files.ts')) loaded += `
 const __presenceWrite = OrdinaryWorkspaceFiles.prototype.write;
 OrdinaryWorkspaceFiles.prototype.write = async function(...args) {

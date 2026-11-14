@@ -25,7 +25,7 @@ afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await c
 const loader = resolve(import.meta.dirname, 'mote-presence-node-loader.mjs')
 async function cli(f: Awaited<ReturnType<typeof headlessFixture>>, method: string[], input: unknown) {
   return await new Promise<any>((yes, no) => {
-    const child = spawn(process.execPath, ['--experimental-transform-types','--import',loader, resolve(import.meta.dirname,'../../../packages/core/src/agentmux.ts'),'--endpoint','unix:'+f.socketPath,...method,'--input','-'], { env: f.env, stdio:['pipe','pipe','pipe'] })
+    const child = spawn(process.execPath, ['--experimental-transform-types','--import',loader, resolve(import.meta.dirname,'../../../packages/core/src/agentmux.ts'),'--endpoint','unix:'+f.socketPath,...method,method[0]==='schedule'?'--data':'--input','-'], { env: f.env, stdio:['pipe','pipe','pipe'] })
     let out='',err='';child.stdout.on('data',value=>out+=value);child.stderr.on('data',value=>err+=value);child.once('error',no);child.once('close',code=>code===0 ? yes(JSON.parse(out).result) : no(new Error(err)));child.stdin.end(JSON.stringify(input))
   })
 }
@@ -107,9 +107,20 @@ it('actual headless Host and CLI save original preferences, share one schedule, 
   const refusedLegacy=await cli(f,['space','mote','preferences','save'],{kind:'quick',target,baseline:moteQuickBaseline(retainedLegacy),values:{...retainedLegacy.defaults,recovery:'startup'},destination:{kind:'occurrence',displayWorkspaceId:workspace.id,groupId,tabId,regionId},operationId:'no-legacy-recovery-writer'})
   expect(refusedLegacy.status).toBe('refused-before-write')
   process.stderr.write('[presence-stage] same schedule updated\n')
+  // Exercise the actual Host cadence and its unchanged delivery port, not an onTick stub.
+  const dueMessage = 'Private exact due heartbeat consumer witness'
+  const scheduled = await cli(f,['schedule','create'],{target:{hostId:'local',agentSessionId:sid,providerId:original.session.providerId,workspacePath:original.session.workspacePath},afterMs:50,prompt:dueMessage,operationId:'private-due-consumer'})
+  // This private terminal executable has no native queue. Only the original Core claim owner
+  // can confirm that its preparation failed before claiming input; the Host keeps it due.
+  const attempted = await until(()=>rpc.call('schedule.inspect',{scheduleId:scheduled.schedule.loopId}),value=>value.schedule?.lastOutcome==='skipped','actual Host due input reached original Core preparation',10000)
+  expect(attempted.schedule).toMatchObject({status:'active',nextCheckAt:scheduled.schedule.nextCheckAt,lastDecision:expect.stringContaining('native queue source is unconfirmed')})
+  expect(attempted.schedule!.pendingCompletion).toBeUndefined()
+  expect((await client.statusAgent(sid)).run.acceptedInputBytes).toBe(original.run.acceptedInputBytes)
+  expect((await cli(f,['schedule','list'],{})).schedules.find((value:any)=>value.loopId===scheduled.schedule.loopId)).toMatchObject({status:'active',lastOutcome:'skipped'})
+  await rpc.call('schedule.cancel',{scheduleId:scheduled.schedule.loopId,expectedRevision:attempted.schedule!.revision!,operationId:'close-private-due-probe'})
   process.kill(original.run.pid!, 'SIGKILL')
-  let nativeObserved:any
-  const recovered=await until(async()=>{nativeObserved=await client.statusAgent(sid);return nativeObserved},value=>value.run.state==='running'&&value.session.run.runId!==original.session.run.runId&&value.observation.readiness==='ready','same Session restored by standing maintenance',30000).catch(async error=>{throw new Error(String(error)+' '+JSON.stringify({run:nativeObserved?.run,continuity:nativeObserved?.session.continuity,observation:nativeObserved?.observation,maintenance:(await rpc.call('space.mote.preferences.read',{kind:'quick',target})).maintenance}))})
+  let nativeObserved:any=original
+  const recovered=await until(async()=>{try{nativeObserved=await client.statusAgent(sid)}catch(error){if(!(error instanceof core.AgentMuxError)||error.code!=='STALE_AGENT_SESSION')throw error}return nativeObserved},value=>value.run.state==='running'&&value.session.run.runId!==original.session.run.runId&&value.observation.readiness==='ready','same Session restored by standing maintenance',30000).catch(async error=>{throw new Error(String(error)+' '+JSON.stringify({run:nativeObserved?.run,continuity:nativeObserved?.session.continuity,observation:nativeObserved?.observation,maintenance:(await rpc.call('space.mote.preferences.read',{kind:'quick',target})).maintenance}))})
   expect(recovered.session.nativeHandle).toEqual(original.session.nativeHandle)
   expect(recovered.session.continuity).toMatchObject({kind:'resumed',reason:'standing-intent',standingIntent:{revision:saved.source.defaults.conversationRevision}})
   const replay=await until(async()=>(await client.readRunReplay(recovered.session.run)).replay.map(value=>value.data).join(''),value=>value.includes('codex-restored-context:'),'original native context replay',10000)
@@ -131,12 +142,13 @@ it('actual headless Host and CLI save original preferences, share one schedule, 
   process.stderr.write('[presence-stage] Host restarted same Run\n')
   const retained=await until(()=>fresh.call('space.mote.preferences.read',{kind:'quick',target}),value=>value.maintenance?.status==='paused','manual pause retained')
   expect(retained.maintenance!.schedule!.loopId).toBe(schedule.loopId)
+  expect((await fresh.call('schedule.inspect',{scheduleId:scheduled.schedule.loopId})).schedule).toMatchObject({status:'stopped',lastMutation:{operationId:'close-private-due-probe',action:'cancel'}})
   expect(await readFile(join(topic.physicalDirectoryPath!,'MOTE.md'),'utf8')).toContain('Keep original user notes.')
   expect(await readFile(join(topic.physicalDirectoryPath!,'MOTE.md'),'utf8')).toContain('recovery: on-open')
 }, 120_000)
 
-async function managedFixture() {
-  const f=await rpcOwnerFixture(['main'],core);cleanup.push(f.close)
+async function managedFixture(initialSaveBusy=false) {
+  const f=await rpcOwnerFixture(['main','other'],core);cleanup.push(f.close)
   const configurationPath=join(f.root,'config.json');await writeFile(configurationPath,JSON.stringify({workspaces:[{id:SCRATCH_WORKSPACE_ID,hostId:'local',path:f.root}]}))
   const target={spaceId:'private-mote-space',zoneId:homeZoneId('private-mote-space'),expectedResource:{hostId:'local',workspaceId:SCRATCH_WORKSPACE_ID,workspacePath:f.root}}
   const spatial=new core.AgentMuxSpatialStateStore(join(f.root,'spatial.json'))
@@ -149,11 +161,11 @@ async function managedFixture() {
   const files:any={read:async()=>{if(!available)throw new Error('Original private MOTE source unavailable');return {resource,result:{status:'read',document:{path:'MOTE.md',revision:'sha256:'+'0'.repeat(64),content:'---\nversion: 1\ndefaults:\n  presence:\n    enabled: '+enabled+'\n    intervalMs: 60000\n---\n'}}}}}
   let clock=100000,busy=false,outcome:'sent'|'unknown'='sent';const sent:any[]=[]
   const store=new ContinuousProgressLoopStore(join(f.root,'loops.json'))
-  const make=()=>new ContinuousProgressLoopManager(store,async(loop,operationId)=>{sent.push({loop:structuredClone(loop),operationId});return outcome},()=>clock,async(loop,tickId)=>({session:{...f.client.agentSession('main'),semanticStatus:{state:busy?'working':'done',source:'native-hook',observedAt:clock,stateEnteredAt:clock},futurePromptIntents:{[loop.futureIntentId!]:await f.client.readAgentFuturePromptIntent('main',loop.futureIntentId!)}},observation:{process:'running',semantic:busy?'active':'idle',readiness:'ready',stale:false},inputByte:0,tickId,now:clock}) as any,{saveFutureIntent:async(loop,active)=>{await f.client.saveAgentFuturePromptIntent({agentSessionId:'main',expectedRun:f.client.agentSession('main').run,intentId:loop.futureIntentId!,operationId:loop.creationOperationId!,prompt:loop.prompt,active,continuitySource:loop.managedSource})}})
+  const make=()=>new ContinuousProgressLoopManager(store,async(loop,operationId)=>{sent.push({loop:structuredClone(loop),operationId});return outcome},()=>clock,async(loop,tickId)=>({session:{...f.client.agentSession(loop.agentSessionId),semanticStatus:{state:busy?'working':'done',source:'native-hook',observedAt:clock,stateEnteredAt:clock},futurePromptIntents:{[loop.futureIntentId!]:await f.client.readAgentFuturePromptIntent(loop.agentSessionId,loop.futureIntentId!)}},observation:{process:'running',semantic:busy?'active':'idle',readiness:'ready',stale:false},inputByte:0,tickId,now:clock}) as any,{saveFutureIntent:async(loop,active)=>{if(initialSaveBusy&&active)throw new core.AgentMuxError('The original Future Intent owner is busy with a person input.','AGENT_PROMPT_SUBMISSION_BUSY');await f.client.saveAgentFuturePromptIntent({agentSessionId:loop.agentSessionId,expectedRun:f.client.agentSession(loop.agentSessionId).run,intentId:loop.futureIntentId!,operationId:loop.creationOperationId!,prompt:loop.prompt,active,continuitySource:loop.managedSource})}})
   let manager=make(),presence=createHostMotePresence({configurationPath,spatial,files,main,schedules:manager,clients:f.coreClients})
   cleanup.push(async()=>{presence.dispose();await manager.stop()})
   await manager.start();await manager.check(clock);await manager.check(clock)
-  return {f,snapshot,files,sent,target,get presence(){return presence},get manager(){return manager},loop:()=>manager.list()[0]!,advance:()=>clock+=60000,at:(value:number)=>clock=value,filesAvailable:(value:boolean,notify=true)=>{available=value;if(notify)presence.invalidate(target)},enabled:(value:boolean)=>{enabled=value;presence.invalidate(target)},busy:(value:boolean)=>busy=value,outcome:(value:typeof outcome)=>outcome=value,async restart(){presence.dispose();await manager.stop();manager=make();presence=createHostMotePresence({configurationPath,spatial,files,main,schedules:manager,clients:f.coreClients});await manager.start();await manager.check(clock)}}
+  return {f,snapshot,files,sent,target,main,saveBusy:(value:boolean)=>initialSaveBusy=value,get presence(){return presence},get manager(){return manager},loop:()=>manager.list()[0]!,advance:()=>clock+=60000,at:(value:number)=>clock=value,filesAvailable:(value:boolean,notify=true)=>{available=value;if(notify)presence.invalidate(target)},enabled:(value:boolean)=>{enabled=value;presence.invalidate(target)},busy:(value:boolean)=>busy=value,outcome:(value:typeof outcome)=>outcome=value,async restart(){presence.dispose();await manager.stop();manager=make();presence=createHostMotePresence({configurationPath,spatial,files,main,schedules:manager,clients:f.coreClients});await manager.start();await manager.check(clock)}}
 }
 it('an unavailable original source is reobserved without a page open, file rewrite or new automatic operation',async()=>{
   const f=await managedFixture(), id=f.loop().loopId, operation=f.loop().creationOperationId
@@ -304,4 +316,40 @@ it('a new Mote without MOTE.md is a ready empty role for every Host reader, and 
   expect(presence.read(target)).toMatchObject({status:'unconfirmed',issue:expect.stringContaining('MOTE.md could not be read')})
   expect(await quick.read({kind:'quick',target})).toMatchObject({status:'unconfirmed',defaults:null})
   expect(await connection.read({kind:'connection',target})).toMatchObject({status:'unconfirmed',values:null})
+})
+
+it('a held main observation cannot hold another Mote on the current or later maintenance cadence',async()=>{
+  const f=await managedFixture(),second={...f.target,spaceId:'private-second-mote',zoneId:'private-second-home'}
+  const snapshot={...structuredClone(f.snapshot),target:second,identity:{hostId:'local',moteId:'second-mote'},resource:{...f.snapshot.resource,zoneId:second.zoneId},current:{...f.snapshot.current,sessionId:'other'}}
+  vi.spyOn(f.main,'readCurrentMoteMain').mockImplementation(async target=>structuredClone(target.spaceId===second.spaceId?snapshot:f.snapshot))
+  vi.spyOn(f.main,'assertCurrent').mockResolvedValue(undefined)
+  const readFile=f.files.read.bind(f.files)
+  vi.spyOn(f.files,'read').mockImplementation(async(input:any)=>{const value=await readFile(input);return {...value,resource:{...value.resource,zoneId:input.zoneId}}})
+  const original=await f.f.client.statusAgent('main'),read=f.f.client.statusAgent.bind(f.f.client)
+  const entered=Promise.withResolvers<void>(),release=Promise.withResolvers<void>()
+  const status=vi.spyOn(f.f.client,'statusAgent').mockImplementation(async sid=>{if(sid==='main'){entered.resolve();await release.promise;return original}return read(sid)})
+  f.presence.invalidate(second)
+  const checking=f.manager.check(100001);await entered.promise
+  try {
+    await vi.waitFor(()=>expect(f.presence.read(second),JSON.stringify(f.presence.read(second))).toMatchObject({status:'active',schedule:{agentSessionId:'other'}}))
+    const previous=status.mock.calls.filter(([sid])=>sid==='other').length
+    await f.manager.check(100002)
+    expect(status.mock.calls.filter(([sid])=>sid==='other').length).toBeGreaterThan(previous)
+    expect(status.mock.calls.filter(([sid])=>sid==='main')).toHaveLength(1)
+  } finally {release.resolve();await checking}
+})
+
+it.each([false,true])('an unconfirmed standing configuration converges its original creation without resuming a user pause (paused=%s)',async paused=>{
+  const f=await managedFixture(true),original=structuredClone(f.loop())
+  expect(original).toMatchObject({status:'paused',lastOutcome:'unknown'})
+  expect(original.pendingCompletion).toBeUndefined();expect(original.lastTickId).toBeUndefined()
+  if(paused)await f.manager.call('schedule.pause',{scheduleId:original.loopId,expectedRevision:original.revision!,operationId:'explicit-pause-original-creation'})
+  f.saveBusy(false);await f.manager.check(f.at(101000))
+  expect(f.loop()).toMatchObject({loopId:original.loopId,creationOperationId:original.creationOperationId,status:paused?'paused':'active'})
+  expect(f.manager.listManaged(original.managedSource!.sourceId)).toHaveLength(1)
+  expect(f.sent).toHaveLength(0);expect(f.f.rawInput).not.toHaveBeenCalled();expect(f.f.inner.kernel.input).not.toHaveBeenCalled()
+  if(!paused){
+    expect(f.loop().lastOutcome).toBeUndefined()
+    expect(await f.f.client.readAgentFuturePromptIntent(original.agentSessionId,original.futureIntentId!)).toMatchObject({operationId:original.creationOperationId,active:true})
+  }
 })

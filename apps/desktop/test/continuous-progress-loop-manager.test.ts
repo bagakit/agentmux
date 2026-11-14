@@ -233,7 +233,7 @@ it('cancels original Goal initial admission when its real source owner becomes b
         expect(isCurrent()).toBe(false)
         signal.throwIfAborted()
       })
-    await expect(sending).rejects.toMatchObject({ name: 'AbortError' })
+    await expect(sending).rejects.toMatchObject({ message: expect.stringContaining('blocked') })
     expect(entered).toBe(true)
     expect(await manager.listGoals('original-goal')).toMatchObject([{ loopId: prepared.loopId, hostId: 'local', agentSessionId: 'a', status: 'paused', initialDelivery: { operationId: 'original-start', state: 'unknown' } }])
     expect((await goals.get('original-goal'))?.sessionIds).toEqual(['a'])
