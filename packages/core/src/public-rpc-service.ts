@@ -1,4 +1,5 @@
 import { AGENT_OPEN_LAUNCH_FIELDS, parseAgentOpenDescribe, parseAgentOpenDescription } from './agent-open-contract.js'
+import { parseTerminalCreationRetire, parseTerminalCreationInspect, parseTerminalCreationInspection } from './terminal-creation.js'
 import { avatarActorIdentity, isObjectAvatarMethod, parseObjectAvatarParams, parseObjectAvatarResult, parseAvatarActor, type AvatarExecutionContext, type ObjectAvatarMethod, type ObjectAvatarPort } from './object-avatar.js'
 import { SPACE_CLOSE_METHODS, parseSpaceCloseParams, parseSpaceCloseResult, type SpaceCloseMethod, type SpaceCloseActor } from './space-close.js'
 import { assertTailcatConfigurationWriter, parseTailcatConfigurationParams, parseTailcatConfigurationResult, type TailcatConfigurationMethod, type TailcatConfigurationPort } from './public-rpc-tailcat-configuration.js'
@@ -201,6 +202,8 @@ export type AgentMuxRpcCorePort = import('./agent-execution-coordinator.js').Age
     stopAgent?: AgentMuxClient['stopAgent']
     controlTerminal?: AgentMuxClient['controlTerminal']
     inspectTerminalControl?: AgentMuxClient['inspectTerminalControl']
+    retireTerminalCreation?: AgentMuxClient['retireTerminalCreation']
+    inspectTerminalCreation?: AgentMuxClient['inspectTerminalCreation']
     inspectAgentPosture?: AgentMuxClient['inspectAgentPosture']
     setAgentPosture?: AgentMuxClient['setAgentPosture']
     listTerminals?: AgentMuxClient['listTerminals']
@@ -441,6 +444,8 @@ const NATIVE_FIELDS = {
   'agent.execution.rejoin': ['bindingId'],
   'terminal.input': ['target', 'operationId', 'ownerInstanceId', 'expectedByte', 'dataBase64'], 'terminal.interrupt': ['target', 'operationId', 'ownerInstanceId'], 'terminal.stop': ['target', 'operationId', 'ownerInstanceId'], 'terminal.operation.inspect': ['hostId', 'run', 'operationId', 'runtimeId'],
   'agent.posture.set': ['target', 'operationId', 'controlId', 'modeId', 'expectedControlDigest'], 'agent.posture.inspect': ['hostId', 'agentSessionId', 'expectedRun', 'operationId'],
+  'terminal.creation.retire': ['hostId', 'operationId', 'runtimeId'],
+  'terminal.creation.inspect': ['hostId', 'operationId', 'runtimeId'],
   'terminal.ls': ['hostId', 'cursor', 'limit'], 'terminal.inspect': ['target'], 'terminal.output': ['target', 'afterByte', 'follow'],
   'terminal.recover': ['hostId', 'expectedRun', 'runtimeId', 'workspacePath', 'operationId', 'action'],
   'skill.ls': ['hostId', 'agentSessionId'],
@@ -3087,6 +3092,22 @@ export class AgentMuxRpcService {
           }
           result = parseTerminalControlResult({ ...value, target: { ...value.target, hostId } }, request)
         }
+        break
+      }
+      case 'terminal.creation.retire':
+      case 'terminal.creation.inspect': {
+        if (caller || !context.principal || !['user', 'device'].includes(context.principal.kind))
+          throw new AgentMuxError('Original raw Terminal creation reads require the transport-approved person or device, without a managed Agent caller.', 'CONTROL_PERMISSION_DENIED')
+        const retiring=method==='terminal.creation.retire'
+        const input = retiring?parseTerminalCreationRetire(p):parseTerminalCreationInspect(p), scopes = (await this.clients()).filter(scope => scope.hostId === input.hostId)
+        if (scopes.length !== 1) throw new AgentMuxError('The exact original Terminal creation Host is unavailable or ambiguous.', 'CONTROL_UNAVAILABLE')
+        const scope = scopes[0]!, original = { ...input, hostId: 'local' }
+        const observed = scope.client.forwardRpc
+          ? parseTerminalCreationInspection(await scope.client.forwardRpc(retiring?'terminal.creation.retire':'terminal.creation.inspect', original, await this.inputForwardContext(context)), original)
+          : retiring && scope.client.retireTerminalCreation ? parseTerminalCreationInspection(await scope.client.retireTerminalCreation(parseTerminalCreationRetire(original)),original)
+          : !retiring && scope.client.inspectTerminalCreation ? parseTerminalCreationInspection(await scope.client.inspectTerminalCreation(original), original)
+            : (() => { throw new AgentMuxError('The original Terminal creation owner is unavailable.', 'CONTROL_UNAVAILABLE') })()
+        result = parseTerminalCreationInspection({ ...observed, hostId: input.hostId }, input)
         break
       }
       case 'terminal.ls': {

@@ -87,7 +87,8 @@ export class AgentMuxAgentSessionRegistry {
   private readonly unconfirmedDurability = new Set<string>()
 
   constructor(private readonly store: AgentMuxAgentSessionStore,
-    private readonly onDurabilityChange?: (session: AgentMuxStoredAgentSession, error: AgentMuxSessionDurabilityError | null) => void) {}
+    private readonly onDurabilityChange?: (session: AgentMuxStoredAgentSession, error: AgentMuxSessionDurabilityError | null) => void,
+    private readonly withNativeCreationAdmission: <T>(reservation: AgentMuxLifecycleReservation, write: () => Promise<T>) => Promise<T> = (_reservation, write) => write()) {}
 
   isDurabilityUnconfirmed(agentSessionId: string): boolean {
     return this.unconfirmedDurability.has(agentSessionId)
@@ -280,7 +281,7 @@ export class AgentMuxAgentSessionRegistry {
       agentSessionId, operationId, expiresAt: Date.now() + AgentMuxAgentSessionRegistry.lifecycleLeaseMs,
       kind: 'reopen', expectedRetirement: structuredClone(retirement), callerOperationId
     }
-    await this.store.reserveLifecycle(reservation)
+    await this.withNativeCreationAdmission(reservation,()=>this.store.reserveLifecycle(reservation))
     return reservation
   }
 
@@ -344,7 +345,7 @@ export class AgentMuxAgentSessionRegistry {
       reservationId: mintObjectId(), ownerId: this.lifecycleOwnerId, ownerPid: process.pid, agentSessionId,
       operationId, expectedRun: { ...expectedRun }, kind: 'resume', restart: structuredClone(restart),
       expiresAt: Date.now() + AgentMuxAgentSessionRegistry.lifecycleLeaseMs }
-    await this.store.reserveLifecycle(reservation)
+    await this.withNativeCreationAdmission(reservation,()=>this.store.reserveLifecycle(reservation))
     return reservation
   }
 
@@ -373,7 +374,7 @@ export class AgentMuxAgentSessionRegistry {
     const successor: Extract<AgentMuxLifecycleReservation, { kind: 'resume' }> = { kind: 'resume', reservationId: mintObjectId(),
       ownerId: this.lifecycleOwnerId, ownerPid: process.pid, expiresAt: Date.now() + AgentMuxAgentSessionRegistry.lifecycleLeaseMs,
       agentSessionId: original.agentSessionId, expectedRun: { ...original.expectedRun }, operationId: dispatch.prepared.createOperationId }
-    const reservation = await this.store.handoffResumeResolution(original, successor, session, dispatch, retirement)
+    const reservation = await this.withNativeCreationAdmission(successor,()=>this.store.handoffResumeResolution(original, successor, session, dispatch, retirement))
     await this.refresh(original.agentSessionId, original.expectedRun)
     return reservation
   }
@@ -752,7 +753,7 @@ export class AgentMuxAgentSessionRegistry {
             ...(input.progress ? { progress: structuredClone(input.progress) } : {}),
             ...(input.supersededResume ? { supersededResume: structuredClone(input.supersededResume) } : {})
           }
-    await this.store.reserveLifecycle(reservation)
+    await (reservation.kind==='stop' ? this.store.reserveLifecycle(reservation) : this.withNativeCreationAdmission(reservation,()=>this.store.reserveLifecycle(reservation)))
     return reservation
   }
 

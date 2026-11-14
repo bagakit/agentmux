@@ -1,3 +1,4 @@
+import { parseTerminalCreationRetire, parseTerminalCreationInspect, parseTerminalCreationInspection } from './terminal-creation.js'
 import { parseAgentSessionRecordInspection, parseAgentSessionRecordReceipt, parseAgentSessionRecordDeletionEvent, type AgentSessionRecordInput, type AgentSessionRecordDeleteInput } from './agent-session-record.js'
 import { parseAgentSessionUsagePage, type AgentSessionUsageInput } from './agent-session-usage.js'
 import { parseCreationContinueInput, parseCreationContinueReceipt } from './agent-creation-continue.js'
@@ -285,6 +286,8 @@ export async function connectHostedAgentMux<P extends AgentMuxHostedSessionProje
     if (method === 'hostEnvironment') return parseHostEnvironment(decoded)
     if (method === 'readAgentMessageQueuePath') return parseHostedMessageQueuePath(decoded)
     if (method === 'continueAgentCreation') return parseCreationContinueReceipt(decoded, parseCreationContinueInput(wireArgs[0]))
+    if (method === 'retireTerminalCreation') return parseTerminalCreationInspection(decoded,parseTerminalCreationRetire(wireArgs[0]))
+    if (method === 'inspectTerminalCreation') return parseTerminalCreationInspection(decoded, parseTerminalCreationInspect(wireArgs[0]))
     if (method === 'recoverTerminal') return parseTerminalRecoveryResult(decoded, parseTerminalRecoveryInput(wireArgs[0]))
     if (method === 'findAgentStartupDiagnostics') return parseStartupDiagnosticRead(decoded, wireArgs[0] as AgentStartupDiagnosticRecentTarget)
     if (method === 'readAgentStartupDiagnostic') {

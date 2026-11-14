@@ -1336,6 +1336,21 @@ export class CtxmuxRunAdapter {
     } catch (error) { throw translateCtxmuxError(error) }
   }
 
+  /** Private initial-owner seam. The caller supplies only a previously admitted key, not a launch. */
+  async retireOriginalCreationKey(operationKey: string, expected: AgentMuxCreationRuntime): Promise<
+    {runtime:AgentMuxCreationRuntime}&({outcome:'retired'}|{outcome:'retained';prepared:PreparedRun;run:CtxmuxAdapterRun})> {
+    const client=this.requireClient(), source=this.creationRuntimeIdentity()
+    if(!isDeepStrictEqual(parseCreationRuntime(expected),source)) throw new AgentMuxError('The selected retirement owner changed before dispatch.','TERMINAL_CREATION_RUNTIME_MISMATCH')
+    try {
+      const {runtime,retirement}=await client.retireCreation(createOperationKey(operationKey))
+      if(runtime.runtimeId!==expected.runtimeId) throw new AgentMuxError('The retirement answers another persistent Runtime.','TERMINAL_CREATION_RUNTIME_MISMATCH')
+      const identity={runtimeId:runtime.runtimeId,instanceId:runtime.daemonInstanceId,buildIdentity:runtime.buildId,protocolVersion:runtime.protocolGeneration}
+      if(retirement.outcome==='retired') return {runtime:identity,outcome:'retired'}
+      const {prepared}=decodePreparedRun({createOperationId:operationKey,workspacePath:retirement.run.spec?.cwd,launch:JSON.stringify({createOperationId:operationKey,request:retirement.run.spec})})
+      return {runtime:identity,outcome:'retained',prepared,run:this.projectRun(retirement.run)}
+    } catch(error) {throw translateCtxmuxError(error)}
+  }
+
   /** Read an existing fence across owner replacement, without repeating the retirement action. */
   async observePreparedStartRetirement(operationKey: string, expected: AgentMuxCreationRuntime): Promise<{
     runtime: AgentMuxCreationRuntime; outcome: 'retired' | 'not_retired'

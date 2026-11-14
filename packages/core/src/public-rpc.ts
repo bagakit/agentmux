@@ -299,6 +299,8 @@ type NativeParams = AgentOpenParams & import('./space-close.js').SpaceCloseParam
   'terminal.interrupt': import('./terminal-control.js').TerminalControlIntent
   'terminal.stop': import('./terminal-control.js').TerminalControlIntent
   'terminal.operation.inspect': import('./terminal-control.js').TerminalControlInspect
+  'terminal.creation.retire': import('./terminal-creation.js').TerminalCreationRetire
+  'terminal.creation.inspect': import('./terminal-creation.js').TerminalCreationInspect
   'terminal.ls': import('./terminal-observation.js').TerminalListParams
   'terminal.inspect': { target: import('./terminal-observation.js').TerminalTarget }
   'terminal.output': import('./terminal-observation.js').TerminalOutputParams
@@ -423,6 +425,8 @@ type NativeResult = AgentOpenResults & import('./space-close.js').SpaceCloseResu
   'terminal.interrupt': import('./terminal-control.js').TerminalControlReceipt
   'terminal.stop': import('./terminal-control.js').TerminalControlReceipt
   'terminal.operation.inspect': { hostId: string; run: { runId: string }; operationId: string; operation: import('./terminal-control.js').TerminalControlReceipt | null }
+  'terminal.creation.retire': import('./terminal-creation.js').TerminalCreationInspection
+  'terminal.creation.inspect': import('./terminal-creation.js').TerminalCreationInspection
   'terminal.ls': import('./terminal-observation.js').TerminalListResult
   'terminal.inspect': import('./terminal-observation.js').TerminalInspectResult
   'terminal.output': import('./terminal-observation.js').TerminalOutputInitial
@@ -587,7 +591,7 @@ export const AGENTMUX_RPC_NATIVE_METHODS = {
   'message.federation.dispatch-intake': 'long', 'message.federation.intake': 'long', 'message.federation.export': 'long', 'message.dispatch.sync': 'long', 'message.dispatch.open': 'long', 'message.dispatch.inspect': 'short', 'message.dispatch.report': 'long',
   'message.notify': 'long', 'message.notify.inspect': 'short', 'message.read': 'short', 'message.ls': 'short', 'message.events': 'short', 'message.dispatch.read': 'short', 'message.dispatch.ls': 'short',
   'app.search': 'long', 'app.snapshot': 'long', 'goal.activity': 'short', 'goal.activity.history': 'short', 'system.doctor': 'long', 'system.storage': 'short',
-  'system.endpoint': 'short', 'system.subscription.cancel': 'short', 'terminal.recover': 'long', 'agent.posture.inspect': 'short', 'agent.posture.set': 'long', 'terminal.input': 'long', 'terminal.interrupt': 'long', 'terminal.stop': 'long', 'terminal.operation.inspect': 'short', 'terminal.ls': 'short', 'terminal.inspect': 'short', 'terminal.output': 'long'
+  'system.endpoint': 'short', 'system.subscription.cancel': 'short', 'terminal.recover': 'long', 'agent.posture.inspect': 'short', 'agent.posture.set': 'long', 'terminal.input': 'long', 'terminal.interrupt': 'long', 'terminal.stop': 'long', 'terminal.operation.inspect': 'short', 'terminal.creation.retire': 'long', 'terminal.creation.inspect': 'short', 'terminal.ls': 'short', 'terminal.inspect': 'short', 'terminal.output': 'long'
 } as const satisfies Record<keyof NativeParams, 'short' | 'long'>
 
 export type AgentMuxRpcStreamMethod = 'space.member.watch' | import('./host-route.js').HostRouteStreamMethod | 'space.sessions.watch' | 'space.snapshot' | 'space.watch' | 'goal.watch' | 'agent.conversation.watch' | 'agent.output' | 'terminal.output' | 'browser.follow' | 'toolkit.watch' | 'system.metrics.watch' | 'settings.appearance.watch' | 'connection.metadata.watch' |

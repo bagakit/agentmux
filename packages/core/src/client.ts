@@ -1,10 +1,12 @@
+import { NativeCreationAdmission } from './native-creation-admission.js'
+import { parseTerminalCreationRetire, parseTerminalCreationInspect, type TerminalCreationInspect, type TerminalCreationInspection } from './terminal-creation.js'
 import { parseTerminalControl, parseTerminalControlInspect, parseTerminalControlResult, terminalInputBytes, type TerminalControlRequest, type TerminalControlReceipt, type TerminalControlInspect, type TerminalStopResult } from './terminal-control.js'
 import { parseRunControlActor, type RunControlContext } from './run-control-context.js'
 import { captureExecutorInvocation, readExecutorInvocation } from './agent-executor-invocation.js'
 import { RunControlOperations } from './run-control-operations.js'
 import { parsePostureSet, parsePostureInspect, postureControlDigest, type PostureInspect, type PostureInspection, type PostureReceipt } from './agent-posture.js'
 import type { AgentMuxAgentCreateInput, AgentMuxHostAgentCreateInput, AgentMuxTerminalCreateInput, AgentMuxAgentPromptInput, AgentMuxSessionQuestionReplyInput, AgentMuxAgentMessageInput, AgentMuxAgentInteractionInput, AgentMuxAgentPostureInput, AgentMuxAgentRespawnInput, AgentMuxAgentAttachment, AgentMuxClientOptions, AgentMuxAgentRuntimeStatus } from './client-contract.js'
-import { agentSessionRetirementRevision } from './agent-session-store.js'
+import { agentSessionHasCreationKey, agentSessionRetirementRevision } from './agent-session-store.js'
 import { nativeSnapshotSigningKey } from './native-snapshot-key.js'
 import { decodeNativeSnapshotCursor } from './native-snapshot-cursor.js'
 import { NativeSourceSnapshots } from './native-source-snapshot.js'
@@ -707,7 +709,7 @@ export class AgentMuxClient {
         if (!this.store.retainedExecutionDirectories) throw new AgentMuxError('The original execution directory reference owner is unavailable. Existing work remains available.', 'EXECUTION_DIRECTORY_REFERENCES_UNCONFIRMED')
         const paths = new Set([...admitted, ...await this.store.retainedExecutionDirectories('local')])
         for (const cwd of await this.executionHelperStore().retainedExecutionDirectories()) paths.add(cwd)
-        for (const cwd of await this.terminalRecoveryOwner().retainedExecutionDirectories()) paths.add(cwd)
+        for (const cwd of await this.terminalRecoveryOwner().retainedExecutionDirectories(isRelated)) paths.add(cwd)
         const services = await this.retainedServiceExecutionDirectories?.() ?? []
         for (const service of services) if (await isRelated(service.workspacePath)) {
           if (!service.runtimeId || service.runtimeId !== (await this.terminalCreationRuntimeIdentity()).runtimeId) throw new AgentMuxError('The original service execution Runtime reference is unconfirmed.', 'EXECUTION_DIRECTORY_REFERENCES_UNCONFIRMED')
@@ -847,6 +849,7 @@ export class AgentMuxClient {
 
   readonly providers: AgentProviderRegistry
   private readonly recovery: AgentSessionRecoveryService
+  private terminalRecoveryOwnerInstance: TerminalRecoveryOwner | undefined
   private readonly kernel: CtxmuxRunAdapter
   private readonly controlSocketPath: string
   private readonly registry: AgentMuxAgentSessionRegistry
@@ -1104,7 +1107,21 @@ export class AgentMuxClient {
         message: 'The original Session is readable, but its durable save is unconfirmed. The Agent and input are kept. Refresh this Session to retry the durable save.',
         evidence: { source: 'agentmux', run: { ...session.run }, observedAt: Date.now() } })
       else this.publishSession(session)
-    })
+    }, (reservation,write)=>this.nativeCreationAdmission().locked(reservation.operationId,async()=>{
+      if(await this.nativeCreationAdmission().hasRetirement(reservation.operationId)||await this.terminalRecoveryOwner().knownRetiredInitial(reservation.operationId)) {
+        const old = this.store.agentCreationKeyRole ? await this.store.agentCreationKeyRole(reservation.operationId,reservation.agentSessionId)==='agent' :
+          await (async()=>{
+            const r=await this.store.readLifecycleReservation(reservation.agentSessionId)
+            if(r && r.kind!=='stop' && r.operationId===reservation.operationId)return true
+            const current=await this.store.readMetadata(reservation.agentSessionId)
+            if(current&&agentSessionHasCreationKey(current,reservation.operationId))return true
+            const retired=await this.store.readRetiredAgentSession(reservation.agentSessionId)
+            return !!retired?.history&&agentSessionHasCreationKey({...retired.history,agentSessionId:retired.agentSessionId},reservation.operationId)
+          })()
+        if(!old) throw new AgentMuxError('This new Native key already has an original retirement admission. Existing Agent Runs and input are retained.','NATIVE_CREATION_KEY_RETIRED')
+      }
+      return await write()
+    }))
     this.kernel = new CtxmuxRunAdapter()
     this.hookServer = new AgentHookServer(
       async (event, signal) => {
@@ -2433,7 +2450,7 @@ export class AgentMuxClient {
       if (createOperationId !== undefined && retired.history.creation.createOperationId !== createOperationId) throw new AgentMuxError(
         'This retired Session belongs to another original creation operation. Keep both identities and inspect the original operation.',
         'AGENT_CREATION_OPERATION_CONFLICT', undefined, { disposition: 'not_applied', confirmedInputBytes: null })
-      const { executorInvocation: _invocation, ...publicRetirement } = retired
+      const { nativeCreationKeys: _privateCreationKeys, executorInvocation: _invocation, ...publicRetirement } = retired
       return { kind: 'retired-agent', ...publicRetirement }
     }
     if (durable) return this.projectSession(durable)
@@ -4609,12 +4626,28 @@ export class AgentMuxClient {
     return await this.retainExecutionDirectoryIntent(input.workspacePath, () => owner.recover(input))
   }
 
+  private nativeCreationAdmissionInstance: NativeCreationAdmission | undefined
+  private nativeCreationAdmission(): NativeCreationAdmission {
+    return this.nativeCreationAdmissionInstance ??= new NativeCreationAdmission(this.agentSessionStorePath() ? dirname(this.agentSessionStorePath()!) : this.kernel.stateDirectory)
+  }
   private terminalRecoveryOwner(): TerminalRecoveryOwner {
-    const rawOwnership = (ref: AgentMuxRunRef) => this.assertRawTerminal(ref)
-
-    return new TerminalRecoveryOwner(join(this.agentSessionStorePath() ? dirname(this.agentSessionStorePath()!) : this.kernel.stateDirectory, 'terminal-recoveries'), {
+    if (this.terminalRecoveryOwnerInstance) return this.terminalRecoveryOwnerInstance
+    const rawOwnership = (ref: AgentMuxRunRef) => this.assertRawTerminal({ runId: ref.runId })
+    const owner = new TerminalRecoveryOwner(join(this.agentSessionStorePath() ? dirname(this.agentSessionStorePath()!) : this.kernel.stateDirectory, 'terminal-recoveries'), {
       directoryAdmission: (cwd, write) => this.withExecutionDirectoryAdmission(cwd, write),
       runtime: () => this.terminalCreationRuntimeIdentity(),
+      assertNoAgentKey: async (key,rawRetained)=>{
+        if(!this.store.agentCreationKeyRole)throw new AgentMuxError('Original Agent creation-key reads are unsupported; no retirement was submitted.','AGENT_CREATION_ROLE_UNCONFIRMED')
+        const role=await this.store.agentCreationKeyRole(key)
+        if(role==='agent'||role==='unknown'&&!rawRetained) throw new AgentMuxError('This original creation key is Agent-owned or its role is unconfirmed. The Agent and reservation are retained.','RUN_KIND_MISMATCH')
+      },
+      retireKey: async (key,runtime)=>{
+        const value=await this.kernel.retireOriginalCreationKey(key,runtime)
+        if(value.outcome==='retired')return value
+        await rawOwnership(value.run)
+        return {...value,run:this.projectRun(value.run)}
+      },
+      observeRetirementKey: (key,runtime)=>this.kernel.observePreparedStartRetirement(key,runtime),
       original: async request => {
         await rawOwnership(request.expectedRun)
         let run: CtxmuxAdapterRun
@@ -4625,18 +4658,49 @@ export class AgentMuxClient {
         return this.projectRun(run)
       },
       prepare: async (createOperationId, workspacePath) => await this.prepareTerminal({ createOperationId, workspacePath }),
-      start: prepared => this.createPreparedTerminal(prepared),
-      inspect: async (prepared, ref) => { const run = await this.inspectPreparedTerminal(prepared, ref); if (run) await rawOwnership(run); return run },
-      retire: (prepared, runtime) => this.retirePreparedTerminalCreation(prepared, runtime),
-      observeRetirement: (prepared, runtime) => this.observePreparedTerminalCreationRetirement(prepared, runtime)
-    })
+      start: (prepared, runtime) => this.startPreparedTerminalNative(prepared, runtime),
+      inspectCreation: async operationId => {
+        const observed = await this.kernel.inspectRetainedStart(operationId)
+        if (!observed) return null
+        await rawOwnership(observed.run)
+        return { ...observed, run: this.projectRun(observed.run) }
+      },
+      notice: (operationId, run, observedAt, stage) => this.publisher.publish({ type: 'agent-error', code: 'TERMINAL_CREATION_SAVE_UNCONFIRMED',
+        message: `At ${new Date(observedAt).toISOString()}, this ${stage === 'retirement' ? 'creation retirement receipt' : 'creation handoff'} save observation was unconfirmed. The original Run was obtained and remains usable. Read its current result with terminal creation inspect; original operation ID (data): ${JSON.stringify(operationId)}.`,
+        evidence: { source: 'agentmux', observedAt, run: { runId: run.runId } } }),
+      inspect: async (prepared, ref) => { const run = await this.inspectPreparedTerminalNative(prepared, ref); if (run) await rawOwnership(run); return run },
+      retire: (prepared, runtime) => this.retirePreparedTerminalCreationNative(prepared, runtime),
+      observeRetirement: (prepared, runtime) => this.observePreparedTerminalCreationRetirementNative(prepared, runtime)
+    }, this.nativeCreationAdmission())
+    this.terminalRecoveryOwnerInstance = owner
+    return owner
   }
 
   async createPreparedTerminal(input: AgentMuxPreparedTerminal): Promise<AgentMuxRun> {
+    const prepared = parsePreparedTerminal(input)
+    this.requireConnected()
+    // Retain the direct SDK intent before the initial owner's durable admission awaits.
+    return await this.withExecutionDirectoryAdmission(prepared.workspacePath, () => this.terminalRecoveryOwner().createInitial(prepared))
+  }
+
+  async retireTerminalCreation(value: import('./terminal-creation.js').TerminalCreationRetire): Promise<TerminalCreationInspection> {
+    const input=parseTerminalCreationRetire(value)
+    if(input.hostId!=='local') throw new AgentMuxError('Use the original Terminal execution Host.','INVALID_CONTROL_REQUEST')
+    return await this.terminalRecoveryOwner().retireInitial(input.operationId,input.runtimeId)
+  }
+
+  async inspectTerminalCreation(value: TerminalCreationInspect): Promise<TerminalCreationInspection> {
+    const input = parseTerminalCreationInspect(value)
+    if (input.hostId !== 'local') throw new AgentMuxError('Read this creation at its original execution Core.', 'INVALID_CONTROL_REQUEST')
+    return await this.terminalRecoveryOwner().inspectInitial(input.operationId, input.runtimeId)
+  }
+
+  private async startPreparedTerminalNative(input: AgentMuxPreparedTerminal, initialRuntime?: AgentMuxCreationRuntime): Promise<AgentMuxRun> {
     const { prepared, request } = decodePreparedRun(input, 'INVALID_TERMINAL_PREPARATION')
     this.requireConnected()
     return await this.withExecutionDirectoryAdmission(prepared.workspacePath, async () => {
-      const run = await this.kernel.startPrepared(request, prepared.createOperationId)
+      if (initialRuntime && !isDeepStrictEqual(this.terminalCreationRuntimeIdentity(), initialRuntime)) throw new AgentMuxError('The original initial Start owner changed during admission. Its key remains unconfirmed; no Start was submitted.', 'TERMINAL_INITIAL_RUNTIME_CHANGED')
+      const run = await (initialRuntime ? this.kernel.startPrepared(request, prepared.createOperationId, initialRuntime) : this.kernel.startPrepared(request, prepared.createOperationId))
       this.runPids.set(run.runId, run.pid)
       const projected = this.projectRun(run)
       this.publisher.publishRunState(projected)
@@ -4646,6 +4710,10 @@ export class AgentMuxClient {
 
   /** Without an exact ref, null means unconfirmed. With a ref, null confirms that original Run is absent. Never submits Start. */
   async inspectPreparedTerminal(input: AgentMuxPreparedTerminal, ref?: AgentMuxRunRef): Promise<AgentMuxRun | null> {
+    return await this.terminalRecoveryOwner().inspectInitialPrepared(input, ref)
+  }
+
+  private async inspectPreparedTerminalNative(input: AgentMuxPreparedTerminal, ref?: AgentMuxRunRef): Promise<AgentMuxRun | null> {
     const { prepared, request } = decodePreparedRun(input, 'INVALID_TERMINAL_PREPARATION')
     this.requireConnected()
     const run = await this.kernel.inspectPreparedStart(request, prepared.createOperationId, ref?.runId)
@@ -4658,6 +4726,10 @@ export class AgentMuxClient {
   terminalCreationRuntimeIdentity(): AgentMuxCreationRuntime { this.requireConnected(); return this.kernel.creationRuntimeIdentity() }
 
   async retirePreparedTerminalCreation(input: AgentMuxPreparedTerminal, runtime: AgentMuxCreationRuntime): Promise<AgentMuxTerminalCreationRetirement> {
+    return await this.terminalRecoveryOwner().retireInitialPrepared(input, runtime)
+  }
+
+  private async retirePreparedTerminalCreationNative(input: AgentMuxPreparedTerminal, runtime: AgentMuxCreationRuntime): Promise<AgentMuxTerminalCreationRetirement> {
     const { prepared, request } = decodePreparedRun(input, 'INVALID_TERMINAL_PREPARATION')
     this.requireConnected()
     const result = await this.kernel.retirePreparedStart(request, prepared.createOperationId, runtime)
@@ -4668,6 +4740,10 @@ export class AgentMuxClient {
   }
 
   async observePreparedTerminalCreationRetirement(input: AgentMuxPreparedTerminal, runtime: AgentMuxCreationRuntime): Promise<AgentMuxTerminalCreationRetirementObservation> {
+    return await this.terminalRecoveryOwner().observeInitialRetirement(input, runtime)
+  }
+
+  private async observePreparedTerminalCreationRetirementNative(input: AgentMuxPreparedTerminal, runtime: AgentMuxCreationRuntime): Promise<AgentMuxTerminalCreationRetirementObservation> {
     const { prepared } = decodePreparedRun(input, 'INVALID_TERMINAL_PREPARATION')
     this.requireConnected()
     return await this.kernel.observePreparedStartRetirement(prepared.createOperationId, runtime)

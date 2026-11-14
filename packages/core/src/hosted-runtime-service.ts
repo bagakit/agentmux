@@ -1,3 +1,4 @@
+import { parseTerminalCreationRetire, parseTerminalCreationInspect } from './terminal-creation.js'
 import { HostedSessionReaders } from './hosted-session-readers.js'
 import { parseCreationContinueInput, parseCreationContinueReceipt } from './agent-creation-continue.js'
 import { parseAgentInputResourceRead } from './agent-input-resource.js'
@@ -285,6 +286,11 @@ export class AgentMuxHostedRuntimeService {
     }
     if (invocation.method === 'readAgentMessageQueuePath' && invocation.args.length !== 0)
       throw new AgentMuxError('Message namespace reading accepts no arguments.', 'INVALID_CONTROL_REQUEST')
+    if (invocation.method === 'inspectTerminalCreation' || invocation.method === 'retireTerminalCreation') {
+      if (context.caller || !context.principal || !['user', 'device'].includes(context.principal.kind)) throw new AgentMuxError('Raw Terminal creation reads require their original transport-approved person/device.', 'CONTROL_PERMISSION_DENIED')
+      if (invocation.args.length !== 1) throw new AgentMuxError('Read one exact original Terminal creation.', 'INVALID_CONTROL_REQUEST')
+      invocation.args[0] = invocation.method==='retireTerminalCreation'?parseTerminalCreationRetire(invocation.args[0]):parseTerminalCreationInspect(invocation.args[0])
+    }
     if (invocation.method === 'recoverTerminal') {
       if (invocation.args.length !== 1) throw new AgentMuxError('Terminal recovery accepts one exact original intent.', 'INVALID_CONTROL_REQUEST')
       parseTerminalRecoveryInput(invocation.args[0])

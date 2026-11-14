@@ -1271,7 +1271,7 @@ export type AgentLaunchPromptInputPlan = Readonly<{
 
 /** Original creation facts survive explicit retirement without becoming an active Session. */
 export type AgentMuxAgentCreationInspection = AgentMuxAgentSession |
-  ({ kind: 'retired-agent' } & Omit<import('./agent-session-store.js').AgentMuxRetiredAgentSession, 'executorInvocation'>)
+  ({ kind: 'retired-agent' } & Omit<import('./agent-session-store.js').AgentMuxRetiredAgentSession, 'executorInvocation' | 'nativeCreationKeys'>)
 
 export type AgentMuxAgentSession = {
   toolExecution?: import('./agent-tool-execution.js').AgentToolExecutionBinding
@@ -1632,7 +1632,11 @@ export type AgentHookDeliveryObservation = {
 
 /** This is the complete persistent semantic/control record. It deliberately has no
  * PTY, process, replay, terminal snapshot, terminal output bytes or ephemeral Hook observation. */
+export type AgentMuxNativeCreationKeys = { keys: readonly string[]; coverage: 'complete' | 'partial' }
+
 export type AgentMuxStoredAgentSession = Omit<AgentMuxAgentSession, 'hookIngressObservation' | 'hookDeliveryObservation' | 'nativeHandlePersistence' | 'currentActivity' | 'terminalFrontend'> & {
+  /** Private original adopted machine keys, not Native liveness or a public role catalog. */
+  nativeCreationKeys?: AgentMuxNativeCreationKeys
   /** Original creation input frozen before Start; only its key is public. */
   initialInput?: import('./agent-session-recovery/continuity-contract.js').AgentMuxContinuityLaunchInput
   /** Retained original-Run recovery evidence; never a live activity or input-authorization projection. */

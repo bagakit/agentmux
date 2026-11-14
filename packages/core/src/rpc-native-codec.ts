@@ -1,4 +1,5 @@
 import { parseAgentOpenDescribe, parseAgentOpenDescription } from './agent-open-contract.js'
+import { parseTerminalCreationRetire, parseTerminalCreationInspect, parseTerminalCreationInspection } from './terminal-creation.js'
 import { isObjectAvatarMethod, parseObjectAvatarParams, parseObjectAvatarResult } from './object-avatar.js'
 import { SPACE_CLOSE_METHODS, parseSpaceCloseParams, parseSpaceCloseResult, type SpaceCloseMethod } from './space-close.js'
 import { parseTailcatConfigurationParams, parseTailcatConfigurationResult } from './public-rpc-tailcat-configuration.js'
@@ -686,6 +687,8 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
         if (result.state === 'active') parseRpcAgentSession(result.session)
         return result as unknown as Record<string, unknown>
       }
+      case 'terminal.creation.retire': return parseTerminalCreationInspection(value,parseTerminalCreationRetire(input)) as unknown as Record<string,unknown>
+      case 'terminal.creation.inspect': return parseTerminalCreationInspection(value, parseTerminalCreationInspect(input)) as unknown as Record<string, unknown>
       case 'terminal.ls': return parseTerminalListResult(value, parseTerminalListParams(input)) as unknown as Record<string, unknown>
       case 'terminal.inspect': return parseTerminalInspection(value, parseTerminalTarget(input.target)) as unknown as Record<string, unknown>
       case 'terminal.output': fail() // Ordered subscription only.

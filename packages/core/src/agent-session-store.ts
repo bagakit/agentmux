@@ -123,6 +123,7 @@ type AgentMuxLifecycleReservationBase = {
   agentSessionId: string
   operationId: string
   expiresAt: number
+  nativeCreationKeys?: import('./types.js').AgentMuxNativeCreationKeys
 }
 
 /** Prepared before start; no Run or input is invented for this durable creation seed. */
@@ -172,6 +173,8 @@ export type AgentMuxLifecycleClaim = {
 }
 
 export type AgentMuxRetiredAgentSession = {
+  /** Private key-only lifecycle provenance; excluded from public history/snapshots. */
+  nativeCreationKeys?: import('./types.js').AgentMuxNativeCreationKeys
   /** Explicit deletion is terminal for this identity; its original correlations remain. */
   recordDeletion?: import('./agent-session-record.js').AgentSessionRecordDeletion
   continuityControlReceipts?: Record<string, AgentMuxContinuityControlReceipt>
@@ -247,6 +250,8 @@ export type AgentMuxAgentSessionStore = {
   /** Cold Files mutation admission; distinct paths from the original metadata owner. */
   retainedExecutionDirectories?(hostId: string): Promise<readonly string[]>
 
+  /** Cold exact Native creation role read; never hydrates Sessions or repairs history. */
+  agentCreationKeyRole?(key: string, agentSessionId?: string): Promise<'agent' | 'unclaimed' | 'unknown'>
   /** Exact executing-Host dependency, including durable no-Run creation seeds. */
   hostExecutorReferenced?(hostId: string, executorId: string): Promise<boolean>
   /** Optional read-only observation. Missing support never triggers Session hydration or repair. */
@@ -567,6 +572,39 @@ function recoverableStopOperation(value: unknown): AgentMuxRecoverableStopOperat
   }
 }
 
+type NativeCreationKeys = NonNullable<AgentMuxStoredAgentSession['nativeCreationKeys']>
+function strictNativeCreationKeys(value: unknown): NativeCreationKeys {
+  const r=record(value,'private Native creation keys')
+  if(Object.keys(r).some(k=>k!=='keys'&&k!=='coverage')||!Array.isArray(r.keys)||r.keys.some(k=>typeof k!=='string'||!k||k.includes('\0'))||new Set(r.keys).size!==r.keys.length||!['complete','partial'].includes(String(r.coverage)))throw new AgentMuxError('Original Native creation-key facts are invalid.','INVALID_AGENT_SESSION_STORE')
+  return {keys:[...r.keys] as string[],coverage:r.coverage as NativeCreationKeys['coverage']}
+}
+function nativeCreationKeys(value: unknown): NativeCreationKeys {
+  try{return strictNativeCreationKeys(value)}catch{
+    // A malformed packet cannot launder even matching strings into role authority.
+    return {keys:[],coverage:'partial'}
+  }
+}
+function roleNativeCreationKeys(value:unknown):NativeCreationKeys {
+  try{return strictNativeCreationKeys(value)}catch{throw new AgentMuxError('Original private Agent creation-key facts are unconfirmed. Existing Session, Run, input and Stop are retained.','AGENT_CREATION_ROLE_UNCONFIRMED')}
+}
+function appendNativeCreationKeys(prior: NativeCreationKeys | undefined, keys: readonly string[], firstCreate=false): NativeCreationKeys {
+  return strictNativeCreationKeys({keys:[...new Set([...(prior?.keys??[]),...keys])],coverage:prior?.coverage??(firstCreate?'complete':'partial')})
+}
+function mergeNativeCreationKeys(left:NativeCreationKeys|undefined,right:NativeCreationKeys|undefined):NativeCreationKeys {
+  return {keys:[...new Set([...(left?.keys??[]),...(right?.keys??[])])],coverage:left?.coverage==='complete'&&right?.coverage==='complete'?'complete':'partial'}
+}
+function reservationNativeCreationKeys(reservation: AgentMuxLifecycleReservation, current?:AgentMuxStoredAgentSession|null, pending?:AgentMuxLifecycleReservation): NativeCreationKeys {
+  let prior=reservation.kind==='reopen'?reservation.expectedRetirement.nativeCreationKeys:current?.nativeCreationKeys
+  if(pending)prior=mergeNativeCreationKeys(prior,pending.nativeCreationKeys)
+  return appendNativeCreationKeys(prior,reservation.kind==='stop'?(reservation.supersededResume?[reservation.supersededResume.lifecycleOperationId]:[]):[reservation.operationId],reservation.kind==='create')
+}
+function ordinaryNativeCreationKeys(current:AgentMuxStoredAgentSession|null|undefined,next:AgentMuxStoredAgentSession):AgentMuxStoredAgentSession {
+  const {nativeCreationKeys:_untrusted,...rest}=next
+  return {...rest,...(current?.nativeCreationKeys?{nativeCreationKeys:current.nativeCreationKeys}:{})}
+}
+function committedNativeCreationKeys(reservation:AgentMuxLifecycleReservation,current?:AgentMuxStoredAgentSession):NativeCreationKeys {
+  return reservation.nativeCreationKeys??appendNativeCreationKeys({keys:current?.nativeCreationKeys?.keys??[],coverage:'partial'},reservation.kind==='stop'?(reservation.supersededResume?[reservation.supersededResume.lifecycleOperationId]:[]):[reservation.operationId])
+}
 function lifecycleReservation(value: unknown): AgentMuxLifecycleReservation {
   const source = record(value, 'lifecycle reservation')
   if (source.kind !== 'create' && source.kind !== 'resume' && source.kind !== 'stop' && source.kind !== 'reopen') {
@@ -596,7 +634,8 @@ function lifecycleReservation(value: unknown): AgentMuxLifecycleReservation {
     ownerPid: positiveInteger(source.ownerPid, 'ownerPid'),
     agentSessionId: string(source.agentSessionId, 'agentSessionId'),
     operationId: string(source.operationId, 'operationId'),
-    expiresAt: timestamp(source.expiresAt, 'expiresAt')
+    expiresAt: timestamp(source.expiresAt, 'expiresAt'),
+    ...(source.nativeCreationKeys===undefined?{}:{nativeCreationKeys:nativeCreationKeys(source.nativeCreationKeys)})
   }
   if (source.kind === 'reopen') {
     const retirement = retiredAgentSession(source.expectedRetirement)
@@ -665,8 +704,8 @@ function sameSession(
   right: AgentMuxStoredAgentSession | null
 ): boolean {
   return isDeepStrictEqual(
-    left === null ? null : normalizeStoredAgentSession(left),
-    right === null ? null : normalizeStoredAgentSession(right)
+    left === null ? null : normalizeStoredAgentSession(ordinaryNativeCreationKeys(null,left)),
+    right === null ? null : normalizeStoredAgentSession(ordinaryNativeCreationKeys(null,right))
   )
 }
 
@@ -851,6 +890,7 @@ function retiredAgentSession(value: unknown): AgentMuxRetiredAgentSession {
   }
   return {
     agentSessionId: string(source.agentSessionId, 'retiredAgentSession.agentSessionId'),
+    ...(source.nativeCreationKeys===undefined?{}:{nativeCreationKeys:nativeCreationKeys(source.nativeCreationKeys)}),
     hostId: string(source.hostId, 'retiredAgentSession.hostId'),
     run: runRef(source.run),
     source: 'user',
@@ -2152,6 +2192,7 @@ export function normalizeStoredAgentSession(value: unknown): AgentMuxStoredAgent
   if (initialInput && (!initialInput.key || !isDeepStrictEqual(initialInput.key, session.creation?.initialInputKey) ||
       ![session.run, ...session.retiredRuns].some(run => run.runId === initialInput.key!.expectedRun.runId))) throw new AgentMuxError('Initial input lost its original creation Run.', 'INVALID_AGENT_SESSION_STORE')
   return { ...session,
+    ...(source.nativeCreationKeys===undefined?{}:{nativeCreationKeys:nativeCreationKeys(source.nativeCreationKeys)}),
     ...(initialInput ? { initialInput } : {}),
     ...(source.recoveryActivity === undefined ? {} : { recoveryActivity: recoveryActivity(source.recoveryActivity, session) }),
     ...(source.nativeActor === undefined ? {} : { nativeActor: normalizePrivateNativeActor(source.nativeActor) }),
@@ -2581,9 +2622,11 @@ function handedOffResumeResolution(current: AgentMuxLifecycleReservation | undef
   const continuity = { ...session.continuity, resolution: receipt }
   const operations = { ...canonical.continuityOperations, [receipt.originalOperationId]: { ...original, resolution: receipt }, [receipt.operationId]: continuity }
   const prepared = normalizeStoredAgentSession({ ...session, continuity, continuityOperations: operations })
-  const reservation = preparedResumeReservation(successor, successor, prepared, dispatch)
+  const successorFacts=appendNativeCreationKeys(mergeNativeCreationKeys(canonical.nativeCreationKeys,current.nativeCreationKeys),[current.operationId,successor.operationId])
+  const ownedSuccessor={...successor,nativeCreationKeys:successorFacts}
+  const reservation = preparedResumeReservation(ownedSuccessor, ownedSuccessor, prepared, dispatch)
   const pending = { ...continuity, kind: 'pending' as const, reason: 'operation-unconfirmed' }
-  const next = normalizeStoredAgentSession({ ...canonical, continuity: pending,
+  const next = normalizeStoredAgentSession({ ...canonical, nativeCreationKeys:successorFacts, continuity: pending,
     continuityOperations: { ...operations, [receipt.operationId]: pending }, updatedAt: Math.max(canonical.updatedAt + 1, Date.now()) })
   return { reservation, session: next }
 }
@@ -2739,7 +2782,7 @@ function assertLifecycleCommit(
     throw new AgentMuxError('Lifecycle commit does not match its Agent Session.', 'INVALID_AGENT_SESSION_STORE')
   }
   if (reservation.kind === 'create' && reservation.preparedCreation) {
-    const { run, retiredRuns, creation, terminalPromptReadiness, initialInput, ...actual } = next
+    const { nativeCreationKeys: _privateNativeKeys, run, retiredRuns, creation, terminalPromptReadiness, initialInput, ...actual } = next
     const { creation: intended, initialInput: preparedInput, ...prepared } = reservation.preparedCreation
     const { createdRun, initialInputKey, ...creationIntent } = creation!
     const { key: _key, receipt: _receipt, state: _state, ...boundInput } = initialInput ?? {}
@@ -2817,6 +2860,15 @@ function spawnRecord(phase: AgentMuxSpawnRecord['phase'], value: unknown): Agent
     createdAt: session.createdAt, creation: { ...creation, createdBy: creation.createdBy } } : null
 }
 
+export function agentSessionHasCreationKey(session: Pick<AgentMuxStoredAgentSession, 'agentSessionId' | 'creation' | 'continuity' | 'continuityOperations' | 'nativeActor' | 'nativeCreationKeys'>, key: string): boolean {
+  if(session.nativeActor?.lifecycleOperationId===key)return true
+  if (session.creation && agentLifecycleOperationIdentity('create',session.agentSessionId,session.creation.createOperationId)===key) return true
+  const applied=[session.continuity,...Object.values(session.continuityOperations??{})].some(value=>value && (
+    value.launchInput?.lifecycleOperationId===key || value.resolution?.originalCreationKey===key || value.resolution?.continuedBy?.creationKey===key ||
+    value.newRun && value.previousRun && value.newRun.runId!==value.previousRun.runId && agentLifecycleOperationIdentity(value.action==='restart'?'restart':'resume',session.agentSessionId,value.operationId)===key))
+  return applied || session.nativeCreationKeys!==undefined&&roleNativeCreationKeys(session.nativeCreationKeys).keys.includes(key)
+}
+
 type MemoryCapturedHistory = { stream: AgentCapturedTimelinePage['stream'];
   heads: Map<string, Extract<AgentCapturedTimelinePage['records'][number], { item: AgentTimelineItem }>>;
   versions: AgentCapturedTimelinePage['records']; retirementAfterSequence?: number }
@@ -2828,6 +2880,36 @@ export class AgentMuxMemoryAgentSessionStore implements AgentMuxAgentSessionStor
   async hasAgentRun(value: AgentMuxRunRef): Promise<boolean> {
     const run = runRef(value)
     return this.sessionRunIds.has(run.runId) || this.retiredRunIds.has(run.runId)
+  }
+  async agentCreationKeyRole(key: string, agentSessionId?: string): Promise<'agent'|'unclaimed'|'unknown'> {
+    let incomplete=false
+    for(const r of this.reservations.values())if(!agentSessionId||r.agentSessionId===agentSessionId) {
+      if(r.kind!=='stop'&&r.operationId===key||r.kind==='stop'&&r.supersededResume?.lifecycleOperationId===key)return 'agent'
+      if(r.nativeCreationKeys!==undefined&&roleNativeCreationKeys(r.nativeCreationKeys).keys.includes(key))return 'agent'
+      if(r.nativeCreationKeys?.coverage!=='complete')incomplete=true
+    }
+    for(const r of this.sessions.values())if(!agentSessionId||r.agentSessionId===agentSessionId) {
+      const {nativeCreationKeys:privateKeys,...independent}=r
+      if(agentSessionHasCreationKey(independent,key))return 'agent'
+      if(privateKeys!==undefined&&roleNativeCreationKeys(privateKeys).keys.includes(key))return 'agent'
+      if(r.nativeCreationKeys?.coverage!=='complete')incomplete=true
+    }
+    for(const r of this.retiredAgentSessions)if(!agentSessionId||r.agentSessionId===agentSessionId) {
+      if(r.stop?.supersededResume?.lifecycleOperationId===key||r.history&&agentSessionHasCreationKey({...r.history,agentSessionId:r.agentSessionId},key))return 'agent'
+      if(r.nativeCreationKeys!==undefined&&roleNativeCreationKeys(r.nativeCreationKeys).keys.includes(key))return 'agent'
+      if(r.nativeCreationKeys?.coverage!=='complete')incomplete=true
+    }
+    if(incomplete)return 'unknown'
+    if(!agentSessionId) {
+      const coveredRetirements=new Set<string>()
+      for(const retired of this.retiredAgentSessions) {
+        coveredRetirements.add(retired.run.runId)
+        for(const run of reopenedPriorRuns(retired))coveredRetirements.add(run.runId)
+        if(retired.stop?.supersededResume?.retainedRun)coveredRetirements.add(retired.stop.supersededResume.retainedRun.runId)
+      }
+      if(this.retiredRuns.some(run=>!this.sessionRunIds.has(run.runId)&&!coveredRetirements.has(run.runId)))return 'unknown'
+    }
+    return 'unclaimed'
   }
   async agentSessionResourceCounts(hostId: string, signal?: AbortSignal): Promise<{ saved: number; retired: number }> {
     signal?.throwIfAborted()
@@ -3039,7 +3121,7 @@ export class AgentMuxMemoryAgentSessionStore implements AgentMuxAgentSessionStor
     if (reservation && (!next || !expected || next.run.runId !== expected.run.runId)) throw new AgentMuxError('Agent Session has a lifecycle operation in progress.', 'AGENT_SESSION_BUSY')
     assertLifecycleReceiptFence(reservation, current, next)
     if (!next) return this.stageSession(id, null)
-    const normalized = normalizeStoredAgentSession(agentSessionMetadata(next))
+    const normalized = normalizeStoredAgentSession(ordinaryNativeCreationKeys(current,agentSessionMetadata(next)))
     assertInitialInputWrite(current, normalized)
     const values = [...this.sessions.values()].filter(session => session.agentSessionId !== id).map(agentSessionMetadata)
     const all = normalizeAgentSessions([...values, normalized])
@@ -3160,7 +3242,7 @@ export class AgentMuxMemoryAgentSessionStore implements AgentMuxAgentSessionStor
     }
     assertLifecycleReceiptFence(reservation, current, next)
     if (next) {
-      const normalized = normalizeStoredAgentSession(next)
+      const normalized = normalizeStoredAgentSession(ordinaryNativeCreationKeys(current,next))
       const values = [...this.sessions.values()].filter((session) => session.agentSessionId !== agentSessionId)
       const sessions = normalizeAgentSessions([...values, normalized])
       assertUnboundRetiredRuns(sessions, this.retiredRuns)
@@ -3172,7 +3254,7 @@ export class AgentMuxMemoryAgentSessionStore implements AgentMuxAgentSessionStor
   }
 
   async reserveLifecycle(value: AgentMuxLifecycleReservation): Promise<void> {
-    const reservation = lifecycleReservation(value)
+    const parsed=lifecycleReservation(value),reservation={...parsed,nativeCreationKeys:reservationNativeCreationKeys(parsed,this.sessions.get(parsed.agentSessionId),this.reservations.get(parsed.agentSessionId))}
     const current = this.reservations.get(reservation.agentSessionId)
     if (current && !canSupersedeRestartWithStop(current, reservation) && !canSupersedePreparedResumeWithStop(current, reservation)) {
       throw new AgentMuxError('Agent Session already has a lifecycle operation in progress.', 'AGENT_SESSION_BUSY')
@@ -3350,6 +3432,8 @@ export class AgentMuxMemoryAgentSessionStore implements AgentMuxAgentSessionStor
     this.retiredRuns = merged
     this.retiredRunIds = new Set(merged.map(run => run.runId))
     this.retiredAgentSessions = retainedSessions
+    const owner=this.sessions.get(reservation.agentSessionId)
+    if(owner)this.setSession(owner.agentSessionId,{...owner,nativeCreationKeys:mergeNativeCreationKeys(owner.nativeCreationKeys,current.nativeCreationKeys)})
     this.reservations.delete(reservation.agentSessionId)
   }
 
@@ -3390,7 +3474,7 @@ export class AgentMuxMemoryAgentSessionStore implements AgentMuxAgentSessionStor
       this.retiredAgentSessions
     )
     const previous = this.sessions.get(reservation.agentSessionId)
-    const normalized = next ? normalizeStoredAgentSession(preserveContinuityOperations(previous, next, currentReservation.kind === 'resume' ? currentReservation.resolution?.receipt.originalOperationId : undefined)) : null
+    const normalized = next ? normalizeStoredAgentSession({...preserveContinuityOperations(previous, next, currentReservation.kind === 'resume' ? currentReservation.resolution?.receipt.originalOperationId : undefined),nativeCreationKeys:committedNativeCreationKeys(currentReservation,previous)}) : null
     assertLifecycleReceiptFence(currentReservation, previous ?? null, normalized, true)
     assertLifecycleCommit(currentReservation, normalized)
     const values = [...this.sessions.values()].filter(
@@ -3412,6 +3496,7 @@ export class AgentMuxMemoryAgentSessionStore implements AgentMuxAgentSessionStor
             source: 'user',
             observedAt: Date.now(),
             history: sessionHistoryMetadata(previous),
+            nativeCreationKeys:committedNativeCreationKeys(currentReservation,previous),
             ...(previous.executorInvocation === undefined ? {} : { executorInvocation: structuredClone(previous.executorInvocation) }),
             continuityControlReceipts: continuityControlReceipts(previous),
             ...(previous.activityCommit ? { activityCommit: previous.activityCommit } : {}),
@@ -3679,6 +3764,49 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
     return await this.withReadDatabase(db => !!db.prepare('SELECT 1 FROM run_bindings WHERE run_id=?').get(id), () => {
       throw new AgentMuxError('Original Run ownership is unconfirmed. Keep the Run and inspect its original Store.', 'AGENT_SESSION_STORE_READ_UNCONFIRMED')
     }, undefined, this.database ? false : 'observation')
+  }
+  async agentCreationKeyRole(key: string, agentSessionId?: string): Promise<'agent'|'unclaimed'|'unknown'> {
+    // Called before enqueueing a new adoption, never from within this writer queue.
+    try {await this.tail
+    return await this.withReadDatabase(db=>{
+      if(db.prepare("SELECT 1 FROM retired_sessions WHERE json_extract(json,'$.stop.supersededResume.lifecycleOperationId')=? AND (? IS NULL OR id=?) LIMIT 1").get(key,agentSessionId??null,agentSessionId??null))return 'agent'
+      if(db.prepare("SELECT 1 FROM reservations WHERE ((json_extract(json,'$.kind')<>'stop' AND json_extract(json,'$.operationId')=?) OR json_extract(json,'$.supersededResume.lifecycleOperationId')=?) AND (? IS NULL OR id=?) LIMIT 1").get(key,key,agentSessionId??null,agentSessionId??null)) return 'agent'
+      for(const [table,prefix] of [['sessions','$'],['retired_sessions','$.history']] as const) {
+        if(table==='sessions'&&db.prepare(`SELECT 1 FROM ${table} WHERE json_extract(json,'${prefix}.nativeActor.lifecycleOperationId')=? AND (? IS NULL OR id=?) LIMIT 1`).get(key,agentSessionId??null,agentSessionId??null))return 'agent'
+        for(const row of db.prepare(`SELECT id,json_extract(json,'${prefix}.creation.createOperationId') AS op FROM ${table} WHERE (? IS NULL OR id=?)`).iterate(agentSessionId??null,agentSessionId??null)) {
+          if(typeof row.op==='string' && agentLifecycleOperationIdentity('create',String(row.id),row.op)===key) return 'agent'
+        }
+        if(table!=='sessions')continue // Public history has no continuity/native-actor contract.
+        const paths=['operationId','action','launchInput.lifecycleOperationId','resolution.originalCreationKey','resolution.continuedBy.creationKey','newRun.runId','previousRun.runId']
+        const names=['op','action','native_key','original_key','successor_key','new_run','previous_run']
+        const selected=(source:string,path:string)=>paths.map((field,index)=>`json_extract(${source},'${path}.${field}') AS ${names[index]}`).join(',')
+        const query=`SELECT s.id,${selected('value','$')} FROM sessions s,json_each(s.json,'$.continuityOperations') WHERE (? IS NULL OR s.id=?) UNION ALL SELECT id,${selected('json','$.continuity')} FROM sessions WHERE (? IS NULL OR id=?)`
+        for(const row of db.prepare(query).iterate(agentSessionId??null,agentSessionId??null,agentSessionId??null,agentSessionId??null)) if(row.native_key===key || row.original_key===key || row.successor_key===key || typeof row.new_run==='string' && typeof row.previous_run==='string' && row.new_run!==row.previous_run && typeof row.op==='string' &&
+          agentLifecycleOperationIdentity(row.action==='restart'?'restart':'resume',String(row.id),row.op)===key) return 'agent'
+      }
+      let incomplete=false
+      for(const table of ['sessions','retired_sessions','reservations']) for(const row of db.prepare(`SELECT json_type(json,'$.nativeCreationKeys') AS fact_type,json_extract(json,'$.nativeCreationKeys') AS facts FROM ${table} WHERE (? IS NULL OR id=?)`).iterate(agentSessionId??null,agentSessionId??null)) {
+        if(row.fact_type===null){incomplete=true;continue}
+        let fact:unknown;try{fact=JSON.parse(String(row.facts))}catch{throw new AgentMuxError('Original private Agent key facts cannot be read.','AGENT_CREATION_ROLE_UNCONFIRMED')}
+        const validated=roleNativeCreationKeys(fact)
+        if(validated.keys.includes(key))return 'agent'
+        if(validated.coverage!=='complete')incomplete=true
+      }
+      if(incomplete)return 'unknown'
+      if(!agentSessionId && db.prepare(`SELECT id FROM retired_runs
+        EXCEPT SELECT json_extract(json,'$.run.runId') FROM sessions
+        EXCEPT SELECT json_extract(value,'$.runId') FROM sessions,json_each(sessions.json,'$.retiredRuns')
+        EXCEPT SELECT json_extract(json,'$.run.runId') FROM retired_sessions
+        EXCEPT SELECT json_extract(json,'$.history.creation.createdRun.runId') FROM retired_sessions
+        EXCEPT SELECT json_extract(json,'$.history.creation.initialInputKey.expectedRun.runId') FROM retired_sessions
+        EXCEPT SELECT json_extract(json,'$.stop.supersededResume.retainedRun.runId') FROM retired_sessions LIMIT 1`).get())return 'unknown'
+      return 'unclaimed'
+    },()=>{throw new AgentMuxError('Original Agent creation-key ownership is unconfirmed.','AGENT_SESSION_STORE_READ_UNCONFIRMED')},undefined,this.database?false:'observation')
+    } catch(error) {
+      if(error instanceof AgentMuxError && error.code==='AGENT_CREATION_ROLE_UNCONFIRMED')throw error
+      const failure=new AgentMuxError('Original Agent creation-key facts could not be observed. Existing Agents and Runs are retained.','AGENT_CREATION_ROLE_UNCONFIRMED')
+      Object.defineProperty(failure,'cause',{value:error});throw failure
+    }
   }
   async agentSessionResourceCounts(hostId: string, signal?: AbortSignal): Promise<{ saved: number; retired: number }> {
     return await this.withReadDatabase(db => ({
@@ -4160,7 +4288,7 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
     assertLifecycleReceiptFence(reservation, current, next)
     if (future && !isDeepStrictEqual(this.futureIntent(this.db, id, future.intentId), future.expected)) throw new AgentMuxError('The exact future intent changed before admission.', 'AGENT_FUTURE_INTENT_CHANGED')
     if (next) {
-      const normalized = normalizeStoredAgentSession(complete ? next : agentSessionMetadata(next))
+      const normalized = normalizeStoredAgentSession(ordinaryNativeCreationKeys(current,complete ? next : agentSessionMetadata(next)))
       assertInitialInputWrite(current, normalized)
       this.saveSession(this.db, normalized, complete)
     }
@@ -4170,9 +4298,10 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
   }
 
   async reserveLifecycle(value: AgentMuxLifecycleReservation): Promise<void> {
-    const reservation = lifecycleReservation(value)
+    let reservation = lifecycleReservation(value)
     let admissionChecked = false
     try { await this.enqueue(async () => {
+      reservation={...reservation,nativeCreationKeys:reservationNativeCreationKeys(reservation,this.sessionMetadata(this.db,reservation.agentSessionId),this.reservationRow(this.db,reservation.agentSessionId))}
       if (reservation.kind === 'resume' && reservation.restart) {
         const row = this.db.prepare('SELECT json FROM reservations WHERE id=?').get(reservation.agentSessionId)
         if (row) throw new AgentMuxError('Agent Session already has a lifecycle operation in progress.', 'AGENT_SESSION_BUSY')
@@ -4434,6 +4563,8 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
         throw new AgentMuxError('Lifecycle reservation belongs to another owner.', 'AGENT_SESSION_BUSY')
       }
       this.retireRunRows(this.db, retiredRuns)
+      const owner=this.sessionMetadata(this.db,reservation.agentSessionId)
+      if(owner)this.saveSession(this.db,{...owner,nativeCreationKeys:mergeNativeCreationKeys(owner.nativeCreationKeys,current.nativeCreationKeys)},false)
       this.db.prepare('DELETE FROM reservations WHERE id=?').run(reservation.agentSessionId)
       this.dirty = true
     }, undefined, CROSS_SESSION_WRITE))
@@ -4483,8 +4614,8 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
     }
     const target = this.lifecycleTarget(db, id), previous = target.session ?? undefined
     assertReservationPrecondition(reservation, target.sessions, target.retired)
-    const normalized = next ? normalizeStoredAgentSession(preserveContinuityOperations(previous, next,
-      current.kind === 'resume' ? current.resolution?.receipt.originalOperationId : undefined)) : null
+    const normalized = next ? normalizeStoredAgentSession({...preserveContinuityOperations(previous, next,
+      current.kind === 'resume' ? current.resolution?.receipt.originalOperationId : undefined),nativeCreationKeys:committedNativeCreationKeys(current,previous)}) : null
     assertLifecycleReceiptFence(current, previous ?? null, normalized, true)
     assertLifecycleCommit(current, normalized)
     if (reservation.kind === 'reopen') {
@@ -4541,6 +4672,7 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
       source: 'user',
       observedAt: Date.now(),
       history: sessionHistoryMetadata(previous),
+      nativeCreationKeys:committedNativeCreationKeys(current,previous),
             ...(previous.executorInvocation === undefined ? {} : { executorInvocation: structuredClone(previous.executorInvocation) }),
       continuityControlReceipts: continuityControlReceipts(previous),
       ...(previous.activityCommit ? { activityCommit: previous.activityCommit } : {}),

@@ -94,19 +94,26 @@ export function parseTerminalOutputParams(value: unknown): TerminalOutputParams 
     throw new AgentMuxError('Terminal output needs a nonnegative byte cursor and boolean follow.', 'INVALID_CONTROL_REQUEST')
   return { ...r, target } as TerminalOutputParams
 }
-export function parseTerminalInspection(value: unknown, target: TerminalTarget, output?: { afterByte?: number }): TerminalInspectResult | TerminalOutputInitial {
-  const r = rpcRecord(value, output ? ['target', 'runtime', 'run', 'firstAvailableByte', 'gap'] : ['target', 'runtime', 'run', 'firstAvailableByte'], 'CONTROL_PROTOCOL_ERROR')
-  const actual = parseTerminalTarget(r.target), runtime = parseCreationRuntime(r.runtime)
-  if (actual.hostId !== target.hostId || actual.runtimeId !== target.runtimeId || actual.run.runId !== target.run.runId || runtime.runtimeId !== target.runtimeId) fail()
-  const run = rpcRecord(r.run, ['runId', 'kind', 'providerId', 'executorId', 'agentSessionId', 'workspacePath', 'pid', 'state', 'cols', 'rows', 'observedAt', 'latestOutputBytes', 'acceptedInputBytes', 'nativeService', 'exitCode', 'exitSignal', 'exitReason', 'interruptionReason'], 'CONTROL_PROTOCOL_ERROR')
-  if (run.runId !== target.run.runId || run.kind !== 'terminal' || run.agentSessionId !== null || run.providerId !== null || run.executorId !== null ||
+/** The same public raw Run validation for current observations and original creation ACKs. */
+export function parseRawTerminalRun(value: unknown, runId: string): AgentMuxRun {
+  if (!id(runId)) fail()
+  const run = rpcRecord(value, ['runId', 'kind', 'providerId', 'executorId', 'agentSessionId', 'workspacePath', 'pid', 'state', 'cols', 'rows', 'observedAt', 'latestOutputBytes', 'acceptedInputBytes', 'nativeService', 'exitCode', 'exitSignal', 'exitReason', 'interruptionReason'], 'CONTROL_PROTOCOL_ERROR')
+  if (run.runId !== runId || run.kind !== 'terminal' || run.agentSessionId !== null || run.providerId !== null || run.executorId !== null ||
     typeof run.workspacePath !== 'string' || !['running', 'exited', 'interrupted'].includes(String(run.state)) || !count(run.latestOutputBytes) ||
-    !count(r.firstAvailableByte) || Number(r.firstAvailableByte) > Number(run.latestOutputBytes) || !count(run.observedAt) ||
+    !count(run.observedAt) ||
     run.acceptedInputBytes !== null && !count(run.acceptedInputBytes) ||
     [run.pid, run.cols, run.rows].some(v => v !== null && (!Number.isSafeInteger(v) || Number(v) < 1))) fail()
   service(run.nativeService)
   if (run.exitCode !== undefined && !Number.isSafeInteger(run.exitCode) ||
     [run.exitSignal, run.interruptionReason].some(v => v !== undefined && typeof v !== 'string')) fail()
+  return structuredClone(run) as AgentMuxRun
+}
+export function parseTerminalInspection(value: unknown, target: TerminalTarget, output?: { afterByte?: number }): TerminalInspectResult | TerminalOutputInitial {
+  const r = rpcRecord(value, output ? ['target', 'runtime', 'run', 'firstAvailableByte', 'gap'] : ['target', 'runtime', 'run', 'firstAvailableByte'], 'CONTROL_PROTOCOL_ERROR')
+  const actual = parseTerminalTarget(r.target), runtime = parseCreationRuntime(r.runtime)
+  if (actual.hostId !== target.hostId || actual.runtimeId !== target.runtimeId || actual.run.runId !== target.run.runId || runtime.runtimeId !== target.runtimeId) fail()
+  const run = parseRawTerminalRun(r.run, target.run.runId)
+  if (!count(r.firstAvailableByte) || Number(r.firstAvailableByte) > run.latestOutputBytes) fail()
   if (output) {
     if (r.gap !== null) {
       const gap = rpcRecord(r.gap, ['requestedAfterByte', 'firstAvailableByte'], 'CONTROL_PROTOCOL_ERROR')
