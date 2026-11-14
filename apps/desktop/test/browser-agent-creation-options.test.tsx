@@ -19,13 +19,15 @@ afterEach(async () => {
   for (const cleanup of cleanups.splice(0)) await cleanup()
   useAppStore.setState(initial, true); useLauncherState.setState(originalLauncher, true); vi.restoreAllMocks()
 })
-const config = { hosts: [{ id: 'local', kind: 'local', label: 'This Mac' }],
-  workspaces: [{ id: 'workspace', hostId: 'local', path: '/actual/project', label: 'Project' }],
-  executors: { codex: { providerId: 'codex', command: 'codex', label: 'Codex' }, claude: { providerId: 'claude', command: 'claude', label: 'Claude' } },
-  browser: { agentAutomation: true }, appearance: {} } as AppConfig
+const config: AppConfig = { version: 9, hosts: [{ id: 'local', kind: 'local', label: 'This Mac' }],
+  workspaces: [{ id: 'workspace', hostId: 'local', path: '/actual/project', name: 'Project', kind: 'folder' }],
+  executors: { codex: { providerId: 'codex', command: 'codex', label: 'Codex', args: [], env: {}, injectAgentMuxGuide: true },
+    claude: { providerId: 'claude', command: 'claude', label: 'Claude', args: [], env: {}, injectAgentMuxGuide: true } },
+  browser: { agentAutomation: true, toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, saveBookmark: true, more: true } },
+  appearance: { terminalTheme: 'graphite' } }
 const source = { tabId: 'tab', regionId: 'region', displayWorkspaceId: 'workspace', groupId: 'group' }
 function seed() {
-  const browser: BrowserWorkbenchSurface = { kind: 'browser', regionId: 'region', browserId: 'browser', workspaceId: 'workspace',
+  const browser: BrowserWorkbenchSurface = { kind: 'browser', id: 'browser', regionId: 'region', browserId: 'browser', workspaceId: 'workspace',
     mode: 'normal', navigationId: 'page', profileId: 'profile', url: 'https://example.test/', title: 'Page',
     driving: false, loading: false, canGoBack: false, canGoForward: false, viewport: 'responsive', error: null, appLinkPrompt: null,
     control: { owner: 'human', agent: null, revision: 3, activeOperationId: null, inputIsolation: 'inactive' } }
@@ -166,5 +168,25 @@ describe('Browser creation options use the existing utility draft owner', () => 
     const option = Array.from(menu.querySelectorAll<HTMLElement>('[role="menuitem"]')).find(item => item.textContent === 'New Agent options…')!
     await act(async () => option.click()); expect(configure).toHaveBeenCalledOnce()
     expect(view.host.querySelector<HTMLButtonElement>('[aria-label="在右侧创建 Agent"]')!.disabled).toBe(false)
+  })
+})
+
+
+describe('survey-directory: creation options keep task editing during preparation failure', () => {
+  it('shows an unconfirmed directory while keeping the original draft, Executor and Create retry reachable', async () => {
+    seed()
+    const key=browserAgentCreationDraftKey('browser'), create=vi.fn(async()=> 'Original Host directory is still unconfirmed')
+    useLauncherState.getState().setBrowserAgentDraft(key,{prompt:'Keep my research task',executorId:'claude',split:'right',hostId:'local'})
+    await mount(createElement(BrowserAgentCreationOptionsDialog,{browserId:'browser',context:context(),hostLabel:'This Mac',ownerDocument:document,
+      preparationIssue:'Directory registration ACK unconfirmed',onCreate:create,onClose:vi.fn()}))
+    const dialog=document.querySelector<HTMLElement>('[role="dialog"]')!
+    expect(dialog.textContent).toContain('Execution directory unconfirmed')
+    expect(dialog.textContent).not.toContain('/actual/project')
+    const task=dialog.querySelector<HTMLTextAreaElement>('[aria-label="Task for new Browser Agent"]')!
+    expect(task.value).toBe('Keep my research task');expect(task.disabled).toBe(false)
+    expect(dialog.querySelector<HTMLButtonElement>('[type="submit"]')!.disabled).toBe(false)
+    await act(async()=>dialog.querySelector('form')!.dispatchEvent(new Event('submit',{bubbles:true,cancelable:true})))
+    expect(create).toHaveBeenCalledExactlyOnceWith({executorId:'claude',split:'right',task:'Keep my research task'})
+    expect(useLauncherState.getState().drafts[key]?.prompt).toBe('Keep my research task')
   })
 })

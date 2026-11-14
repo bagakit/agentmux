@@ -7,13 +7,15 @@ import { EventEmitter } from 'node:events'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { URL as SourceURL } from 'node:url'
 import ts from 'typescript'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { BrowserWindow, IpcMainInvokeEvent } from 'electron'
 import type { AgentMuxControlRequest, AgentMuxControlResult, ExecutionHost } from '@agentmux/core'
 const ipc = vi.hoisted(() => ({ root: '', handlers: new Map<string, (event: IpcMainInvokeEvent, ...values: unknown[]) => unknown>(),
   execute: undefined as ((request: AgentMuxControlRequest) => Promise<AgentMuxControlResult>) | undefined,
-  choose: vi.fn() }))
+  choose: vi.fn(), browserSource: null as import('@agentmux/core/control').BrowserAgentWorkspaceSource | null,
+  profileOwner: undefined as import('./helpers/settings-ipc-fixture.js').SettingsBrowserProfiles | undefined }))
 vi.mock('electron', () => ({ nativeTheme: { shouldUseDarkColors: true, on: vi.fn(), off: vi.fn(), removeListener: vi.fn() }, app: { getPath: () => ipc.root || tmpdir(), getAppPath: () => process.cwd() + '/apps/desktop', on: vi.fn(), off: vi.fn(), removeListener: vi.fn(), once: vi.fn() },
   globalShortcut: { register: () => true, unregister: vi.fn(), isRegistered: () => false },
   ipcMain: { handle: (channel: string, handler: (event: IpcMainInvokeEvent, ...values: unknown[]) => unknown) => ipc.handlers.set(channel, handler),
@@ -25,10 +27,19 @@ vi.mock('@agentmux/demand', () => ({ openDemandStore: () => ({}) }))
 vi.mock('../src/main/browser-profile-manager.js', async () => ({ BrowserProfileManager: (await import('./helpers/settings-ipc-fixture.js')).SettingsBrowserProfiles }))
 vi.mock('@agentmux/browser/browser-operation-journal', () => ({ BROWSER_OPERATION_JOURNAL_FILE: 'owned.json', BrowserOperationFileStore: class {}, BrowserOperationJournal: class { async ready() {} } }))
 vi.mock('@agentmux/browser/browser-ref-ledger-store', () => ({ BrowserRefLedgerStore: class {} }))
-vi.mock('../src/main/browser-view-manager.js', () => ({ BrowserViewManager: class { setPresentationWindowOwner() {} async release() {} dispose() {} } }))
+vi.mock('../src/main/browser-view-manager.js', async original => {
+ const { BrowserViewManager } = await original<typeof import('../src/main/browser-view-manager.js')>()
+ return { BrowserViewManager: class {
+  constructor(_window: unknown, readonly profiles: import('./helpers/settings-ipc-fixture.js').SettingsBrowserProfiles) { ipc.profileOwner = profiles }
+  setPresentationWindowOwner() {} async release() {} async flushProfileActivity() {} dispose() {}
+  agentWorkspaceSource(id: string) { return ipc.browserSource?.browserId === id ? ipc.browserSource : null }
+  // The real label owner handles unread display metadata; Native page creation stays isolated.
+  profileLabel(id: string) { return BrowserViewManager.prototype.profileLabel.call(this as unknown as InstanceType<typeof BrowserViewManager>, id) }
+ } }
+})
 vi.mock('../src/main/notes-storage-owner.js', () => ({ NotesStorageOwner: class { constructor(_config: unknown, _spatial: unknown, _publish: unknown, readonly storage: unknown) {} async initialize() {} } }))
 vi.mock('../src/main/agent-notifier.js', () => ({ createAgentNotifier: () => ({ dispose() {} }) }))
-import { AgentMuxMemoryAgentSessionStore, AGENTMUX_CONTROL_SCHEMA_VERSION } from '@agentmux/core'
+import { AgentMuxMemoryAgentSessionStore, AGENTMUX_CONTROL_SCHEMA_VERSION, LocalExecutionHost } from '@agentmux/core'
 import { ConfigStore, DEFAULT_CONFIG, createWorkspaceInputSchema } from '../src/main/config-store.js'
 import { RuntimeController, type RuntimePreparation } from '../src/main/runtime-controller.js'
 import { ContinuousProgressLoopManager } from '@agentmux/host/continuous-progress-loop-manager'
@@ -60,7 +71,7 @@ async function fixture() {
   const window={setBackgroundColor:vi.fn(),isDestroyed:()=>false,webContents:sender} as unknown as BrowserWindow
   ipc.handlers.clear();ipc.execute=undefined
   const dispose=await registerIpc({ workbenchUserState: testWorkbenchUserState(), appDocumentSources: testAppDocumentSources(sender), initialConfig: await store.get(),window,
-    configStore:store,runtime,progressLoops,workbenchWindows:settingsWorkbenchWindows(window),scratchTopics:settingsScratchTopics(),workspaceFiles:settingsWorkspaceFiles()})
+    configStore:store,runtime,applicationAccess:{} as never,workbenchWindows:settingsWorkbenchWindows(window),scratchTopics:settingsScratchTopics(),workspaceFiles:settingsWorkspaceFiles()})
   prepare.mockClear();const save=vi.spyOn(store,'save')
   const invoke=async<T>(channel:string,...values:unknown[])=>{
     const handler=ipc.handlers.get(channel);expect(handler).toBeTypeOf('function')
@@ -80,13 +91,13 @@ afterEach(async()=>{vi.restoreAllMocks();await Promise.all(directories.splice(0)
 
 describe('Workspace registration owns current Main facts for UI and public CLI',()=>{
  it('derives a nonempty strict input contract from the actual shared type and Settings add fields',async()=>{
-  const contract=ts.createSourceFile('contracts.ts',await readFile(new URL('../src/shared/contracts.ts',import.meta.url),'utf8'),ts.ScriptTarget.Latest,true)
+  const contract=ts.createSourceFile('contracts.ts',await readFile(new SourceURL('../src/shared/contracts.ts',import.meta.url),'utf8'),ts.ScriptTarget.Latest,true)
   const type=contract.statements.find(node=>ts.isTypeAliasDeclaration(node)&&node.name.text==='CreateWorkspaceInput')
   expect(type).toBeDefined();if(!type||!ts.isTypeAliasDeclaration(type)||!ts.isTypeLiteralNode(type.type))throw new Error('CreateWorkspaceInput anchor missing')
   const fields=type.type.members.filter(ts.isPropertySignature).map(node=>node.name.getText(contract))
   expect(fields.length).toBeGreaterThan(0)
   expect(Object.keys(createWorkspaceInputSchema.shape).sort()).toEqual(fields.sort())
-  const source=ts.createSourceFile('HostProjectsPane.tsx',await readFile(new URL('../src/renderer/src/components/settings/HostProjectsPane.tsx',import.meta.url),'utf8'),ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX)
+  const source=ts.createSourceFile('HostProjectsPane.tsx',await readFile(new SourceURL('../src/renderer/src/components/settings/HostProjectsPane.tsx',import.meta.url),'utf8'),ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX)
   const calls:ts.CallExpression[]=[]
   const visit=(node:ts.Node)=>{if(ts.isCallExpression(node)&&node.expression.getText(source)==='api.workspaces.add')calls.push(node);ts.forEachChild(node,visit)}
   visit(source);expect(calls).toHaveLength(1)
@@ -173,5 +184,70 @@ describe('Workspace registration owns current Main facts for UI and public CLI',
   const bytes=await f.bytes()
   await rejected
   expect(executionHost).not.toHaveBeenCalled();expect(await f.bytes()).toBe(bytes);expect(f.publish).toHaveBeenCalledTimes(1)
+ })
+})
+
+
+describe('survey-directory: actual Main IPC registration', () => {
+ it.each(['survey', 'project'] as const)('keeps %s preparation ready through Main GUI/public consumers when Profile labels cannot be read', async scope => {
+  const f = await fixture()
+  f.executionHost.mockReturnValue(new LocalExecutionHost())
+  const profileId = '11111111-1111-4111-8111-111111111111'
+  const resource = scope === 'project' ? await f.invoke<WorkspaceRecord>('workspaces:add', { hostId: 'local', path: join(f.root, 'original-project') }) : (await f.current()).workspaces[0]!
+  ipc.browserSource = { browserId: 'owned-page', workspaceId: resource.id, mode: 'normal', profileId }
+  const source = { ...ipc.browserSource }, expectedPath = scope === 'survey' ? join(f.root, '.agentmux', 'survey', profileId) : resource.path
+  const labels = ipc.profileOwner!.listProfiles.mockImplementation(() => { throw new Error('Profile display metadata is unread') })
+  try {
+   const [gui, result] = await Promise.all([
+    f.invoke<import('@agentmux/core/control').BrowserAgentWorkspaceResult>('browser:prepareAgentWorkspace', { browserId: 'owned-page' }),
+    ipc.execute!({ ...envelope, operation: 'browser.agent-workspace.prepare', browserId: 'owned-page' })
+   ].map(operation => operation.catch(error => ({ error }))))
+   const ready = { outcome: 'ready', source, scope: scope === 'survey' ? 'survey-profile' : 'existing', directory: { hostId: 'local', path: expectedPath }, workspace: { hostId: 'local', path: expectedPath } }
+   expect(gui).toMatchObject(ready); expect(result).toMatchObject({ operation: 'browser.agent-workspace.prepare', ...ready })
+   expect(gui).not.toHaveProperty('profileLabel'); expect(result).not.toHaveProperty('profileLabel')
+   expect(labels).toHaveBeenCalledTimes(2); expect(ipc.browserSource).toEqual(source)
+   expect(JSON.parse(await f.bytes()).workspaces.filter((item: WorkspaceRecord) => item.path === expectedPath)).toHaveLength(1)
+  } finally { ipc.browserSource = null; await f.dispose() }
+ })
+ it('prepares a Survey Agent directory through the actual Main IPC and public dispatch owner', async () => {
+  const f=await fixture()
+  f.executionHost.mockReturnValue(new LocalExecutionHost())
+  ipc.browserSource={browserId:'owned-page',workspaceId:'__scratch__',mode:'normal',profileId:'11111111-1111-4111-8111-111111111111'}
+  try {
+   const gui=await f.invoke<import('@agentmux/core/control').BrowserAgentWorkspaceResult>('browser:prepareAgentWorkspace',{browserId:'owned-page'})
+   expect(gui.outcome).toBe('ready')
+   expect(gui.directory.path).toBe(join(f.root,'.agentmux','survey',ipc.browserSource.profileId!))
+   expect(gui.workspace?.id).not.toBe('__scratch__')
+   const api=await ipc.execute!({...envelope,operation:'browser.agent-workspace.prepare',browserId:'owned-page'})
+   expect(api).toMatchObject({operation:'browser.agent-workspace.prepare',outcome:'ready',workspace:gui.workspace})
+   expect((await f.current()).workspaces.filter(item=>item.id===gui.workspace!.id)).toHaveLength(1)
+   expect(JSON.parse(await f.bytes()).workspaces.some((item:WorkspaceRecord)=>item.id===gui.workspace!.id&&item.path===gui.directory.path)).toBe(true)
+   expect(f.publications.some(config=>config.workspaces.some(item=>item.id===gui.workspace!.id))).toBe(true)
+  } finally {ipc.browserSource=null;await f.dispose()}
+ })
+})
+
+
+describe('survey-directory: Main actual registration recovery fence',()=>{
+ it('confirms the original file and Runtime before publishing a lost-ACK folder without another save',async()=>{
+  const f=await fixture(), persist=ConfigStore.prototype.save.bind(f.store)
+  f.executionHost.mockReturnValue(new LocalExecutionHost())
+  ipc.browserSource={browserId:'owned-page',workspaceId:'__scratch__',mode:'normal',profileId:'11111111-1111-4111-8111-111111111111'}
+  const events:string[]=[], reserve=f.runtime.reserveExecutorConfigEdit.bind(f.runtime)
+  vi.spyOn(f.runtime,'reserveExecutorConfigEdit').mockImplementation(async(...args)=>{const release=await reserve(...args);events.push('reserved');return()=>{events.push('released');release()}})
+  const confirm=vi.spyOn(f.store,'confirmSaved').mockImplementation(async value=>{events.push('confirm');await ConfigStore.prototype.confirmSaved.call(f.store,value)})
+  const commit=f.runtime.commit.bind(f.runtime)
+  vi.spyOn(f.runtime,'commit').mockImplementation(value=>{events.push('commit');commit(value)})
+  f.save.mockImplementationOnce(async next=>{await persist(next);throw new Error('Original config write applied; ACK lost')})
+  try{
+   const first=await f.invoke<import('@agentmux/core/control').BrowserAgentWorkspaceResult>('browser:prepareAgentWorkspace',{browserId:'owned-page'})
+   expect(first.registration).toBe('unconfirmed')
+   const written=JSON.parse(await f.bytes()).workspaces.find((item:WorkspaceRecord)=>item.path===first.directory.path)
+   const next=await f.invoke<import('@agentmux/core/control').BrowserAgentWorkspaceResult>('browser:prepareAgentWorkspace',{browserId:'owned-page'})
+   expect(next.workspace?.id).toBe(written.id);expect(next.outcome).toBe('ready')
+   expect(f.save).toHaveBeenCalledOnce();expect(confirm).toHaveBeenCalledOnce()
+   expect(events).toEqual(['reserved','released','reserved','confirm','commit','released'])
+   expect((await f.current()).workspaces.some(item=>item.id===written.id)).toBe(true)
+  }finally{ipc.browserSource=null;await f.dispose()}
  })
 })

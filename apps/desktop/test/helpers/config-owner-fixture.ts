@@ -5,7 +5,7 @@ import { afterEach, vi } from 'vitest'
 import type { AppConfig } from '../../src/shared/contracts.js'
 import { ConfigStore, DEFAULT_CONFIG } from '../../src/main/config-store.js'
 import { ConfigOwner } from '../../src/main/config-owner.js'
-import { saveRuntimeConfig } from '../../src/main/runtime-config-transaction.js'
+import { confirmRuntimeConfig, saveRuntimeConfig } from '../../src/main/runtime-config-transaction.js'
 import type { RuntimeController, RuntimePreparation } from '../../src/main/runtime-controller.js'
 
 vi.mock('electron', () => ({ app: { getPath: () => tmpdir() } }))
@@ -27,7 +27,8 @@ export async function configOwnerFixture(overrides: Partial<AppConfig> = {}) {
   const save = vi.fn(async (next: AppConfig) => await saveRuntimeConfig({
     runtime, configWriter: store, next: store.validate(next)
   }))
-  const owner = new ConfigOwner({ read: () => current, save, publish })
+  const owner = new ConfigOwner({ read: () => current, save, publish,
+    recoverSaved: async () => await confirmRuntimeConfig({ runtime, configWriter: store, saved: await store.readSaved() }) })
   return { owner, store, save, publish, runtime, bytes: () => readFile(store.filePath, 'utf8'),
     disk: async () => JSON.parse(await readFile(store.filePath, 'utf8')) as AppConfig }
 }
