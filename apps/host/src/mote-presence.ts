@@ -4,7 +4,7 @@ import { watch, type FSWatcher } from 'node:fs'
 import { dirname, basename } from 'node:path'
 import { spatialCatalog, AgentMuxError, type AgentMuxSpatialStateStore } from '@agentmux/core'
 import { DEFAULT_MOTE_PRESENCE, type MotePreferencesTarget, type MotePresenceReading } from '@agentmux/core/mote-preferences'
-import type { MoteMainReader, MoteMainSnapshot } from '@agentmux/core/mote-dialogue'
+import { MOTE_SUPERVISION_GUIDANCE, type MoteMainReader, type MoteMainSnapshot } from '@agentmux/core/mote-dialogue'
 import type { AgentMuxRpcFilesOwner } from '@agentmux/core/files'
 import type { ContinuousProgressLoop } from '@agentmux/core'
 import type { GoalExecutionClient } from './goal-runtime.js'
@@ -15,7 +15,8 @@ import { SCRATCH_WORKSPACE_ID } from './mote-topic-model.js'
 import { homeZoneId } from './mote-model.js'
 
 const digest = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex')
-const heartbeat = 'Check the current main conversation, its work threads, goals, constraints, decisions and unfinished commitments. Preserve the same Mote identity and task. Continue only useful already-authorized work; if nothing changed, stay quiet. This internal heartbeat grants no new permission and authorizes no external message.'
+const heartbeat = (target: MotePreferencesTarget) => 'Mote main heartbeat.\n\n' + MOTE_SUPERVISION_GUIDANCE +
+  '\n\nRead the original supervision page with this exact input:\n' + JSON.stringify({ target })
 const key = (target: MotePreferencesTarget) => JSON.stringify(target)
 export const motePresenceSourceId = (identity: NonNullable<MoteMainSnapshot['identity']>) => 'mote-main:' + digest(identity)
 
@@ -112,7 +113,7 @@ export function createHostMotePresence(options: {
       }
       if (original.agentSessionId !== main.current.sessionId || original.hostId !== 'local' && original.hostId !== main.current.hostId) throw new Error('The original main execution identity changed.')
       await read(() => options.main.assertCurrent(main)); assertOpen()
-      if (!loop) loop = (await options.schedules.call('schedule.create', { target: { hostId: main.current.hostId, agentSessionId: original.agentSessionId, providerId: original.providerId, workspacePath: original.workspacePath }, everyMs: preference.intervalMs, prompt: heartbeat, managedSource: { sourceId, revision: main.roleRevision }, operationId: 'mote-presence-' + digest([sourceId, main.roleRevision]) })).schedule
+      if (!loop) loop = (await options.schedules.call('schedule.create', { target: { hostId: main.current.hostId, agentSessionId: original.agentSessionId, providerId: original.providerId, workspacePath: original.workspacePath }, everyMs: preference.intervalMs, prompt: heartbeat(target), managedSource: { sourceId, revision: main.roleRevision }, operationId: 'mote-presence-' + digest([sourceId, main.roleRevision]) })).schedule
       else if (loop.status === 'paused' && loop.lastOutcome === 'unknown' && !loop.lastTickId && !loop.pendingCompletion && !loop.lastMutation) {
         // This is the original unconfirmed configuration write, not an unknown input.
         // Reuse its complete immutable request; the original scheduler converges the same Future Intent.
