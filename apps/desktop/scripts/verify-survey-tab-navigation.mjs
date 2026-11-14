@@ -20,7 +20,7 @@ const digest = bytes => createHash('sha256').update(bytes).digest('hex')
 const hashes = async () => Object.fromEntries(await Promise.all(inputs.map(async file => [file, digest(await readFile(join(root, file)))])))
 const mutations = [
   { label: 'prepare-original-occurrence', file: renderer + 'App.tsx',
-    before: 'for (const window of workbenchWindows) {', after: 'for (const window of [] as typeof workbenchWindows) {' },
+    before: 'windowTargets={workbenchWindows}', after: 'windowTargets={[]}' },
   { label: 'register-original-physical-host', file: renderer + 'components/StableWorkbenchView.tsx',
     before: 'frozenTarget.current ?? windowTarget ?? (reference', after: 'frozenTarget.current ?? (reference' },
   { label: 'publish-target-before-prepare', file: 'apps/desktop/src/main/workbench-windows.ts',

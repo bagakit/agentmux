@@ -104,6 +104,39 @@ function snapshot(f: Awaited<ReturnType<typeof fixture>>): WorkbenchWindowSnapsh
 }
 
 describe('original workface native presentation owner', () => {
+  it.each(['applied', 'rejected'] as const)('[window-return-receipt] retains one timed-out handoff and consumes its exact late result: %s', async outcome => {
+    const f = await fixture(), identity = await opened(f), accept = f.owner.accept.bind(f.owner)
+    let delayed: Parameters<WorkbenchWindows['accept']> | undefined
+    vi.spyOn(f.owner, 'accept').mockImplementation((event, response) => {
+      const request = f.main.webContents.send.mock.calls.find(([channel, value]) => channel === WORKBENCH_WINDOW_REQUEST && value.requestId === response.requestId)?.[1]
+      if (request?.action === 'return' && !delayed) {
+        delayed = [event, { ...response, outcome, message: outcome === 'rejected' ? 'Original placement refused' : null }]
+        accept(event, { ...response, outcome: 'pending', stage: 'placement' })
+      } else accept(event, response)
+    })
+    const input = { operationId: 'exact-slow-return', ...identity }
+    vi.useFakeTimers()
+    try {
+      const returning = f.owner.call('app.window.return', input, context)
+      await vi.waitFor(() => expect(delayed).toBeDefined())
+      expect((await f.owner.call('app.window.return', { ...input, operationId: 'while-returning' }, context)).recordedOperation?.state).toBe('rejected')
+      await vi.advanceTimersByTimeAsync(15_000)
+      const unknown = (await returning).recordedOperation!
+      expect(unknown.state).toBe('unknown')
+      expect(unknown.message).toContain('original content placement to commit')
+    } finally { vi.useRealTimers() }
+    expect(f.children[0]!.destroyed).toBe(false)
+    const before = f.main.webContents.send.mock.calls.filter(([channel, request]) => channel === WORKBENCH_WINDOW_REQUEST && request.action === 'return').length
+    expect((await f.owner.call('app.window.return', input, context)).recordedOperation?.state).toBe('unknown')
+    expect((await f.owner.call('app.window.return', { ...input, operationId: 'different-return' }, context)).recordedOperation?.state).toBe('rejected')
+    expect(f.main.webContents.send.mock.calls.filter(([channel, request]) => channel === WORKBENCH_WINDOW_REQUEST && request.action === 'return')).toHaveLength(before)
+    accept(...delayed!)
+    await vi.waitFor(async () => expect((await f.owner.call('app.window.ls', { operationId: input.operationId }, context)).recordedOperation?.state).toBe(outcome === 'applied' ? 'confirmed' : 'rejected'))
+    expect(f.children[0]!.destroyed).toBe(outcome === 'applied')
+    expect(snapshot(f).recordedOperation).toMatchObject({ input, state: outcome === 'applied' ? 'confirmed' : 'rejected' })
+    expect(f.nativeReturns).toHaveBeenCalledTimes(outcome === 'applied' ? 1 : 0)
+    expect((await f.store.load()).state.windows).toHaveLength(outcome === 'applied' ? 0 : 1)
+  })
   it('shows new and existing background shells without changing native input focus; explicit focus remains available', async () => {
     const f = await fixture(); f.main.focused = true
     const input = { operationId: 'background-shell', target, focus: false }
@@ -445,6 +478,13 @@ it('[window-return] unknown origin leaves the healthy window open and does not g
   const open = f.main.webContents.send.mock.calls.find(([channel, request]) => channel === WORKBENCH_WINDOW_REQUEST && request.action === 'open')![1]
   expect(open.returnContext).toBeNull()
   expect(snapshot(f).issue).toContain('return context remains unconfirmed')
+  const second = await f.owner.call('app.window.open', { operationId: 'another-unknown-origin', target: { ...target, tabId: 'another-tab' } }, context)
+  const first = await f.owner.call('app.window.ls', { operationId: 'unknown-origin' }, context)
+  await f.owner.call('app.window.return', { operationId: 'return-first-unknown-origin', windowId: first.recordedOperation!.windowId!, documentGeneration: first.recordedOperation!.documentGeneration! }, context)
+  expect(snapshot(f).issue).toContain(second.recordedOperation!.windowId!)
+  expect(snapshot(f).issue).not.toContain(first.recordedOperation!.windowId!)
+  await f.owner.call('app.window.return', { operationId: 'return-second-unknown-origin', windowId: second.recordedOperation!.windowId!, documentGeneration: second.recordedOperation!.documentGeneration! }, context)
+  expect(snapshot(f).issue).toBeNull()
 })
 it('[window-return] recovery keeps original stored context without automatic navigation', async () => {
   const first = await fixture()
@@ -473,4 +513,65 @@ it.each([null, { surface: 'unread-original', original: ['keep', 'these', 'bytes'
   expect(snapshot(restored).issue).toContain('return context remains unconfirmed')
   await restored.owner.prepareQuit()
   expect((await first.store.load()).state.windows[0]!.returnContext).toEqual(raw)
+})
+
+it('[window-return-receipt] an old return ACK cannot close a reopened native document', async () => {
+  const f = await fixture(), original = await opened(f), accept = f.owner.accept.bind(f.owner)
+  const oldOperation = 'return-before-document-retirement'
+  let delayed: Parameters<WorkbenchWindows['accept']> | undefined
+  vi.spyOn(f.owner, 'accept').mockImplementation((event, response) => {
+    const request = f.main.webContents.send.mock.calls.find(([channel, value]) => channel === WORKBENCH_WINDOW_REQUEST && value.requestId === response.requestId)?.[1]
+    if (request?.action === 'return' && request.operationId === oldOperation) delayed = [event, response]
+    else accept(event, response)
+  })
+  vi.useFakeTimers()
+  try {
+    const returning = f.owner.call('app.window.return', { operationId: oldOperation, ...original }, context)
+    await vi.waitFor(() => expect(delayed).toBeDefined())
+    await vi.advanceTimersByTimeAsync(15_000)
+    expect((await returning).recordedOperation?.state).toBe('unknown')
+  } finally { vi.useRealTimers() }
+  f.children[0]!.webContents.emit('render-process-gone')
+  await vi.waitFor(() => expect(f.children[0]!.destroyed).toBe(true))
+  const reopened = await f.owner.call('app.window.open', { operationId: 'reopen-after-old-return', target }, context)
+  expect(reopened.recordedOperation?.state).toBe('confirmed')
+  expect(reopened.recordedOperation?.windowId).toBe(original.windowId)
+  expect(reopened.recordedOperation?.documentGeneration).not.toBe(original.documentGeneration)
+  const current = f.children[1]!, nativeReturns = f.nativeReturns.mock.calls.length
+  accept(...delayed!)
+  await f.store.flush()
+  await new Promise<void>(resolve => setImmediate(resolve))
+  expect(f.nativeReturns).toHaveBeenCalledTimes(nativeReturns)
+  expect(current.destroyed).toBe(false)
+  const page = await f.owner.call('app.window.ls', { operationId: oldOperation }, context)
+  expect(page.recordedOperation?.state).toBe('unknown')
+  expect(page.windows.find(window => window.windowId === original.windowId)).toMatchObject({
+    documentGeneration: reopened.recordedOperation!.documentGeneration, presentation: 'visible'
+  })
+  expect((await f.store.load()).state.windows).toHaveLength(1)
+})
+
+it('[window-return-receipt] a document retired during native handoff cannot remove its replacement', async () => {
+  const f = await fixture(), original = await opened(f)
+  let release!: () => void
+  f.nativeReturns.mockImplementationOnce(() => new Promise<void>(resolve => { release = resolve }))
+  const returning = f.owner.call('app.window.return', { operationId: 'native-handoff-before-retirement', ...original }, context)
+  await vi.waitFor(() => expect(release).toBeDefined())
+  const duplicate = await f.owner.call('app.window.return', { operationId: 'duplicate-while-native-handoff', ...original }, context)
+  expect(duplicate.recordedOperation?.state).toBe('rejected')
+  expect(f.nativeReturns).toHaveBeenCalledTimes(1)
+  f.children[0]!.webContents.emit('render-process-gone')
+  await vi.waitFor(() => expect(f.children[0]!.destroyed).toBe(true))
+  const reopened = await f.owner.call('app.window.open', { operationId: 'reopen-during-native-handoff', target }, context)
+  expect(reopened.recordedOperation?.state).toBe('confirmed')
+  expect(reopened.recordedOperation?.windowId).toBe(original.windowId)
+  expect(reopened.recordedOperation?.documentGeneration).not.toBe(original.documentGeneration)
+  release()
+  expect((await returning).recordedOperation?.state).toBe('unknown')
+  expect(f.children[1]!.destroyed).toBe(false)
+  const page = await f.owner.call('app.window.ls', {}, context)
+  expect(page.windows.find(window => window.windowId === original.windowId)).toMatchObject({
+    documentGeneration: reopened.recordedOperation!.documentGeneration, presentation: 'visible'
+  })
+  expect((await f.store.load()).state.windows).toHaveLength(1)
 })
