@@ -99,6 +99,37 @@ function watchedEventPort(service: AgentMuxHostedRuntimeService) {
 }
 
 describe('Hosted invocation Session observations', () => {
+  it('constructs an on-demand reader without a general observation and isolates exact same-Run leases', async () => {
+    const f = fixture(), a = rpcPort(f.service), b = rpcPort(f.service)
+    const first = await connectHostedAgentMux({ rpc: a.port, connectOnDemand: true })
+    const second = await connectHostedAgentMux({ rpc: b.port, connectOnDemand: true })
+    const events: AgentMuxClientEvent[] = []
+    try {
+      first.onRunEvent('original-run', () => {}, { observeMessages: false })
+      second.onRunEvent('original-run', event => { events.push(event) }, { observeMessages: false })
+      expect(a.calls.concat(b.calls)).toEqual([])
+      expect(a.connections.concat(b.connections)).toEqual([])
+      await first.attachTerminal('original-run', 0, 'raw')
+      await second.attachTerminal('original-run', 0, 'raw')
+      await first.releaseRunAttachment({ runId: 'original-run' })
+      await first.releaseRunAttachment({ runId: 'never-acquired-run' })
+      expect(f.core.releaseRunAttachment).not.toHaveBeenCalled()
+      f.output('original-run')
+      await vi.waitFor(() => expect(events.some(event => event.type === 'terminal-output')).toBe(true))
+      expect(a.connections.concat(b.connections).map(value => value.method)).toEqual(['runtime.attachment-watch', 'runtime.attachment-watch'])
+      expect(a.calls.concat(b.calls).every(value => value.method === 'runtime.owner.identity')).toBe(true)
+      expect(f.core.refreshRunAttachment).toHaveBeenCalledTimes(1)
+      expect(f.core.stopTerminal).not.toHaveBeenCalled()
+      await second.releaseRunAttachment({ runId: 'original-run' })
+      expect(f.core.releaseRunAttachment).toHaveBeenCalledExactlyOnceWith({ runId: 'original-run' })
+    } finally { await first.dispose(); await second.dispose(); await f.service.dispose() }
+  })
+  it('keeps the existing eager whole-Host connection when on-demand construction is omitted', async () => {
+    const f = fixture(), bridge = rpcPort(f.service)
+    const client = await connectHostedAgentMux({ rpc: bridge.port })
+    try { expect(bridge.connections.map(value => value.method)).toEqual(['runtime.events']) }
+    finally { await client.dispose(); await f.service.dispose() }
+  })
   async function observationFixture(shape: 'direct' | 'nested') {
     const f = fixture()
     const original: AgentMuxAgentSession = { kind: 'agent', agentSessionId: 'a123456789012345', providerId: 'codex', executorId: 'fixture',
