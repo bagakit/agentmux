@@ -14,7 +14,7 @@ import { projectConversationRecords } from '../../../client-ui/src/lib/conversat
 import type { CtxmuxRunAdapter } from '../../src/ctxmux-run-adapter.js'
 import { observeCursorSessionHistory, readCursorSessionHistoryPage, resolveCursorStorePath } from '../../src/providers/cursor-native-history.js'
 import { discoverCursorNativeSession } from '../../src/providers/cursor-native-session.js'
-import { createCursorProvider } from '../../src/providers/cursor.js'
+import { createCursorProvider } from '../../src/providers/cursor-adapter.js'
 import { defineAgentProvider } from '../../src/agent-provider.js'
 import fixture from '../fixtures/cursor-canonical-history.json' with { type: 'json' }
 

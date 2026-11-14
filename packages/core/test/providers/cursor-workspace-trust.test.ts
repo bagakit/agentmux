@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, expect, it } from 'vitest'
 import { AgentProviderRegistry } from '../../src/agent-provider.js'
-import { cursorTrustMarkerPath } from '../../src/providers/cursor.js'
+import { cursorTrustMarkerPath } from '../../src/providers/cursor-workspace-trust.js'
 
 let root: string, home: string, data: string
 const cursor = new AgentProviderRegistry().get('cursor')

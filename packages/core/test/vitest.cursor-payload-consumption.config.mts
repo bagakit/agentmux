@@ -4,11 +4,13 @@ import { appendFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { relative, resolve } from 'node:path'
 const root = resolve(import.meta.dirname, '../../..')
-export default defineConfig({ ...source, plugins: [...(source.plugins ?? []), { name: 'native-payload-actual-source-mutation', enforce: 'pre', transform(code, id) {
+export default defineConfig({ ...source, plugins: [...(source.plugins ?? []), { name: 'native-payload-actual-source-mutation', enforce: 'pre',
+  resolveId(specifier) { if (specifier === '@agentmux/providers/cursor/provider') return resolve(root, 'packages/providers/src/cursor/provider.ts') },
+  transform(code, id) {
   const mutation = process.env.AGENTMUX_CURSOR_PAYLOAD_MUTATION
   if (!mutation) return
   const anchors: Record<string, [string, string, string]> = {
-    'legacy-single-phase': ['packages/core/src/providers/cursor.ts', "? { kind: 'payload-then-submit', payload, payloadText, submit: '\\u001b[13u', minimumSubmitDelayMs: 35 }", "? { kind: 'single-phase', data: `${payload}\\u001b[13u` }"],
+    'legacy-single-phase': ['packages/providers/src/cursor/provider.ts', "? { kind: 'payload-then-submit' as const, payload, payloadText, submit: '\\u001b[13u', minimumSubmitDelayMs: 35 }", "? { kind: 'single-phase', data: `${payload}\\u001b[13u` }"],
     'drop-original-env': ['packages/core/src/client.ts', 'providerExecutionEnvironment: async session => (await this.sessionExecutorOptions<AgentSessionHistoryPageOptions>(this.requireAgentSession(session.agentSessionId), {}, session.agentSessionId)).env,', 'providerExecutionEnvironment: async () => undefined,'],
     'unqualified-writer': ['packages/core/src/providers/cursor-payload-protocol.ts', "createHash('sha256').update(data).digest('hex') !== hash", 'false'],
     'drop-manual-terminal-plan': ['packages/core/src/client.ts', "admissionIntent.kind === 'manual-actor' ? { currentTerminal: true } :", "admissionIntent.kind === 'manual-actor' ? undefined :"],
@@ -18,7 +20,7 @@ export default defineConfig({ ...source, plugins: [...(source.plugins ?? []), { 
     'skip-native-consumption': ['packages/core/src/prompt-submission.ts', 'await this.confirmPayloadConsumption(session, submissionId, submission, plan, nativeContext, renderSignal)', 'await Promise.resolve()'],
     'old-content-qualifies': ['packages/core/src/providers/cursor-payload-consumption.ts', 'id > Number(original.baselineId) && body === text', 'body === text'],
     'wrong-source-qualifies': ['packages/core/src/providers/cursor-payload-consumption.ts', 'path, handle.sessionId, String(db.dev), String(db.ino), String(directory.dev), String(directory.ino)', "path, handle.sessionId, 'unqualified', 'unqualified', String(directory.dev), String(directory.ino)"],
-    'skip-native-interval': ['packages/core/src/providers/cursor.ts', 'minimumSubmitDelayMs: 35', 'minimumSubmitDelayMs: 0']
+    'skip-native-interval': ['packages/providers/src/cursor/provider.ts', 'minimumSubmitDelayMs: 35', 'minimumSubmitDelayMs: 0']
   }
   const anchor = anchors[mutation]; if (!anchor) throw new Error('Unknown native payload source mutation')
   const path = relative(root, id.split('?')[0]!)

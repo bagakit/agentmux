@@ -22,9 +22,9 @@ const definitions = {
   environment: { config: 'vitest.hook-environment.config.mts', env: 'AGENTMUX_HOOK_ENVIRONMENT_MUTATION',
     owners: ['providers/execution-environment.ts', 'packages/providers/src/grok/provider.ts', 'client.ts', 'packages/providers/src/gemini/provider.ts', 'providers/claude-hook-activation.ts', 'providers/claude-workspace-trust.ts', 'providers/opencode.ts'],
     inputs: ['agent-provider.ts', 'client.ts', 'providers/execution-environment.ts', 'providers/shared.ts',
-      ...['claude', 'claude-hook-activation', 'claude-workspace-trust', 'cursor', 'cursor-native-history',
+      ...['claude', 'claude-hook-activation', 'claude-workspace-trust', 'cursor-adapter', 'cursor-native-history',
         'hermes', 'opencode', 'pi'].map(name => 'providers/' + name + '.ts')].map(source)
-      .concat(['antigravity', 'copilot', 'gemini', 'droid', 'grok'].map(name => 'packages/providers/src/' + name + '/provider.ts')),
+      .concat(['antigravity', 'copilot', 'gemini', 'droid', 'grok', 'cursor'].map(name => 'packages/providers/src/' + name + '/provider.ts')),
     tests: ['provider-hook-environment.test.ts', 'claude-hook-activation.test.ts'],
     mutants: ['ignore-home', 'inherit-unset', 'drop-provider-env', 'core-cwd-relative', 'ignore-gemini-home', 'drop-inspect-unset',
       'ignore-claude-inspection-home', 'ignore-claude-trust-env', 'ignore-grok-home', 'trim-opencode-override'] },

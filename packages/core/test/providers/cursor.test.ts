@@ -10,11 +10,8 @@ import { fixturePath } from '../helpers/fixture-values.js'
 import { join, sep } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { AgentProviderRegistry } from '../../src/agent-provider.js'
-import {
-  CURSOR_HOOK_EVENTS,
-  createCursorManagedHookPlan,
-  cursorTrustMarkerPath
-} from '../../src/providers/cursor.js'
+import { CURSOR_HOOK_EVENTS } from '@agentmux/providers/cursor/provider'
+import { cursorTrustMarkerPath } from '../../src/providers/cursor-workspace-trust.js'
 import { canonicalHookLifecycleEvent as declaredHookLifecycleEvent } from '../../src/agent-hook-event.js'
 import { hookResponseFor } from '../../src/agent-hook-command.js'
 import { renderMergedHookContent } from '../../src/hook-config-merge.js'
@@ -323,7 +320,7 @@ describe('Cursor provider', () => {
     })
 
     it('CURSOR_DATA_DIR 覆盖被尊重——忽略它会写出一个 Cursor 永远不读的 marker', () => {
-      const overridden = createCursorManagedHookPlan(fixturePath("repo/app"), { CURSOR_DATA_DIR: fixturePath("tmp/cursor-data") })
+      const overridden = cursor.planManagedHooks!({ workspacePath: fixturePath("repo/app"), env: { CURSOR_DATA_DIR: fixturePath("tmp/cursor-data") } })!
       expect(overridden.mutations[0]!.path).toBe(fixturePath("tmp/cursor-data/hooks.json"))
     })
 
