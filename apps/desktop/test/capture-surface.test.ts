@@ -665,7 +665,7 @@ it('a failed requested exposure preserves the original mode and offers the other
   await vi.advanceTimersByTimeAsync(0)
   expect(electron.windows, 'the healthy exposure still opens its overlays').toHaveLength(2)
   const window = electron.windows[0]!, event = { sender: window.webContents, senderFrame: window.webContents.mainFrame }
-  const input = await electron.handlers.get(CAPTURE_SURFACE_CHANNEL)!(event, 'load')
+  const input = await expect(electron.handlers.get(CAPTURE_SURFACE_CHANNEL)!(event, 'load'), 'the healthy exposure keeps its original overlays loadable').resolves.toMatchObject({ background: 'included' })
   expect(input.background, 'a failed source never silently replaces the requested exposure').toBe('included')
   expect(await electron.handlers.get(CAPTURE_SURFACE_CHANNEL)!(event, 'select', { requestId: input.requestId })).toBe(false)
   await electron.handlers.get(CAPTURE_SURFACE_CHANNEL)!(event, 'switch-background', { requestId: input.requestId, background: 'excluded' })
