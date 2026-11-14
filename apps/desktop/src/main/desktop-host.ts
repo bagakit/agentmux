@@ -115,7 +115,7 @@ async function connectOriginalDesktopHost(config: HostConfig, store: AgentMuxAge
   const originalOwner = async (signal?: AbortSignal) => {
     signal?.throwIfAborted()
     const owner = client.runtimeOwnerIdentity()
-    if (!owner || owner.availability !== 'connected') await client.readAgentSessions()
+    if (!owner || owner.availability !== 'connected') await client.readRuntimeOwnerIdentity(signal ? { signal } : undefined)
     const confirmed = client.runtimeOwnerIdentity()
     if (!confirmed || confirmed.availability !== 'connected') throw new AgentMuxError('The original semantic Host identity is unconfirmed. Its Runs and frozen input remain available.', 'CONTROL_UNAVAILABLE')
     return { runtimeId: confirmed.runtimeId, ownerInstanceId: confirmed.ownerInstanceId }
@@ -124,9 +124,9 @@ async function connectOriginalDesktopHost(config: HostConfig, store: AgentMuxAge
     call: async (method, params, context, expectedOwner) => {
       if (context.principal?.kind === 'device' && !context.forwarding) throw new AgentMuxError(
         'The original device forwarding authority is unavailable. Its saved input and Sessions are retained.', 'CONTROL_UNAVAILABLE')
-      // This fixed declaration read needs only the original transport. Acquiring a
-      // Session observation to fence it would start Native and turn unknown identity
-      // into a false empty/unavailable catalog. All execution keeps its normal fence.
+      // Provider declarations use only the original transport. Other calls retain
+      // the original Core Runtime/instance fence, confirmed through the control-only
+      // owner read above without requiring Session inventory.
       const confirmed = method === 'agent.provider.ls' ? undefined : await originalOwner(context.signal)
       const fence = expectedOwner ?? confirmed
       return await rpc.call(method, params, { ...(context.signal ? { signal: context.signal } : {}),
