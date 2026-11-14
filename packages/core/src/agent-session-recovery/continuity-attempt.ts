@@ -518,6 +518,8 @@ export async function performAgentContinuity(
           receipt.rechecks < policy.recheckMaxAttempts ? now + policy.recheckIntervalMs : undefined)
       }
     }
+    // Eligibility consumes the retained native fact. A missing live observer may make the public
+    // projection unknown after restart, but cannot erase this ended Run's original activity.
     const lastActivityAt = agentContinuityLastActivityAt(current)
     if (receipt.intentOperationId) {
       const root = current.continuityOperations?.[receipt.intentOperationId]
@@ -529,7 +531,7 @@ export async function performAgentContinuity(
     } else if (standing) {
       assertStanding(await ports.sessions.store.readFuturePromptIntent(current.agentSessionId, standing.intentId), current)
       admission = nativeConversationAbsent ? undefined : { kind: 'resume', reason: 'standing-intent', interruptedWorking: false }
-    } else if (!nativeConversationAbsent) admission = agentContinuityAdmission({ session: ports.events.projectSession(current), trigger: receipt.trigger, policy,
+    } else if (!nativeConversationAbsent) admission = agentContinuityAdmission({ session: current, trigger: receipt.trigger, policy,
       admittedAt: receipt.admittedAt, now, ...(receipt.timingOverride ? { timingOverride: receipt.timingOverride } : {}),
       ...(lastActivityAt === undefined ? {} : { lastActivityAt }) })
     if (admission?.kind === 'pending') return pending(admission.reason, evidence, admission.nextActionAt)
