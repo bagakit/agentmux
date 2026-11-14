@@ -1,6 +1,6 @@
 import { mintObjectId } from '@agentmux/core/object-id'
 import { createHash } from 'node:crypto'
-import { mkdir, readFile } from 'node:fs/promises'
+import { mkdir, open, readFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { durableWriteFile } from '@agentmux/core'
 import { parseAppWindowOperation, parseAppWindowTarget, type AppWindowOperation, type AppWindowTarget } from '@agentmux/core/control'
@@ -89,8 +89,19 @@ export class WorkbenchWindowStore {
 
   private async enqueue(path: string, value: unknown): Promise<void> {
     const operation = this.tail.catch(() => {}).then(async () => {
-      await mkdir(dirname(path), { recursive: true })
-      await durableWriteFile(path, JSON.stringify(value) + '\n')
+      const created = await mkdir(dirname(path), { recursive: true })
+      // The operation namespace entry belongs to the original window directory.
+      // Confirm it on retries too: mkdir returning undefined is not a prior ACK.
+      const directories = new Set([dirname(path), dirname(this.path)])
+      if (created) for (let directory = dirname(path);; directory = dirname(directory)) {
+        directories.add(directory)
+        if (directory === dirname(created)) break
+      }
+      for (const directory of directories) {
+        const handle = await open(directory, 'r')
+        try { await handle.sync() } finally { await handle.close() }
+      }
+      await durableWriteFile(path, JSON.stringify(value) + '\n', { requireDirectorySync: true })
     })
     this.tail = operation
     await operation

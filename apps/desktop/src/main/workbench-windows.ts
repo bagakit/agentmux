@@ -309,10 +309,14 @@ export class WorkbenchWindows implements AgentMuxRpcWindowsOwner {
   }
 
   async prepareQuit(): Promise<void> {
-    this.quitting = true
+    await this.ready
+    // Unread original arrangement, with no new native window, is not permission to overwrite it.
+    if (!this.storageWritable && ![...this.windows.values()].some(record => record.native && !record.native.isDestroyed())) return
     for (const record of this.windows.values()) if (record.native && !record.native.isDestroyed()) record.geometry = this.geometry(record.native)
-    await this.persistWindows()
-    await this.store.flush().catch(error => this.warn(String(error)))
+    if (!await this.persistWindows()) throw new Error('The original window arrangement is not yet durable. Current windows are retained; retry saving before Quit.')
+    for (const operation of this.operations.values()) if (!await this.persistOperation(operation)) throw new Error('The original window operation receipt is not yet durable. Keep its original operation and retry saving before Quit.')
+    await this.store.flush()
+    this.quitting = true
   }
 
   dispose(): void {

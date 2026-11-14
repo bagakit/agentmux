@@ -541,11 +541,10 @@ function startPrimaryInstance(): void {
 
   const prepareQuit = singleFlight(async () => {
     const window = workbenchWindow
-    if (window) {
-      try { await prepareWindowWorkbenchForQuit(window) }
-      catch (error) { quitRequested = false; reportWorkbenchQuitFailure(window, error); return }
-    }
-    await workbenchWindows?.prepareQuit()
+    try {
+      if (window) await prepareWindowWorkbenchForQuit(window)
+      await workbenchWindows?.prepareQuit()
+    } catch (error) { quitRequested = false; if (window) reportWorkbenchQuitFailure(window, error); return }
     try { await disposeOwners() }
     catch (error) {
       reportQuitDisposalFailure(error, {

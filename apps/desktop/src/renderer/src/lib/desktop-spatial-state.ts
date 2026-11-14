@@ -396,6 +396,7 @@ export class DesktopSpatialPersistence {
   async bootstrap(graph: AgentMuxSpatialGraph): Promise<void> {
     if (this.ready) return;
     this.startup ??= { baseline: graph, graph };
+    this.markPending();
     if (!this.readConfirmed)
       throw new Error('The Core spatial document has not been read. Original work is retained.');
     await this.flush();
@@ -405,18 +406,24 @@ export class DesktopSpatialPersistence {
     if (!startup)
       throw new Error('The original workbench is still loading. Retry saving when it is ready.');
     // A failed read is unknown, never an absent document. Read again before any write.
-    const remote = await this.port.read();
+    const remote = await this.awaitReply(this.port.read());
     if (remote) {
-      const merged = reconcileSpatialGraphs(startup.baseline, startup.graph, remote.graph);
+      const uncertain = this.unconfirmed;
+      const carried = uncertain && reconcileSpatialGraphs(uncertain.input, startup.graph, uncertain.graph);
+      const merged = uncertain && carried
+        ? withConflicts(reconcileSpatialGraphs(uncertain.baseline.graph, carried.graph, remote.graph, uncertain.graph), carried.conflicts)
+        : reconcileSpatialGraphs(startup.baseline, startup.graph, remote.graph);
       this.state = remote;
       this.readConfirmed = true;
       this.startup = null;
       this.retain(merged.conflicts);
-      if (sameSpatialValue(merged.graph, remote.graph)) this.publish(remote, startup.graph);
+      if (sameSpatialValue(merged.graph, remote.graph) && !uncertain) this.publish(remote, startup.graph);
       else this.pending = { baseline: remote, graph: merged.graph };
     } else {
       const graph = startup.graph;
-      const next = await this.port.commit({ expectedRevision: 0, graph });
+      this.unconfirmed = { baseline: { schemaVersion: 1, revision: 0, graph: startup.baseline }, input: graph, graph };
+      const next = await this.awaitReply(this.port.commit({ expectedRevision: 0, graph }));
+      this.unconfirmed = null;
       this.state = next;
       this.readConfirmed = true;
       this.startup = null;

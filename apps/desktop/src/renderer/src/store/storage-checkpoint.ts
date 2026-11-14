@@ -4,9 +4,8 @@
  * runs, and the first failure is the result.
  */
 export async function runIndependentCheckpoints(steps: readonly (() => void | Promise<void>)[]): Promise<void> {
-  let failure: { error: unknown } | null = null
-  for (const step of steps) {
-    try { await step() } catch (error) { failure ??= { error } }
-  }
-  if (failure) throw failure.error
+  // Each owner starts even if another never replies. Preserve deterministic failure ordering.
+  const results = await Promise.allSettled(steps.map(step => Promise.resolve().then(step)))
+  const failure = results.find(result => result.status === 'rejected')
+  if (failure?.status === 'rejected') throw failure.reason
 }
