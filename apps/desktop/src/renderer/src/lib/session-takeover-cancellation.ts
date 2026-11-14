@@ -29,11 +29,19 @@ async function saveResult() {
   catch (cause) { useAppStore.getState().reportError(new Error('The original cancellation result is retained; saving this client projection is unconfirmed. ' + String(cause))) }
 }
 
+export class TakeoverCancellationOwnerUnconfirmed extends Error {
+  constructor(cause: unknown) {
+    super(cause instanceof Error ? cause.message : String(cause), { cause })
+  }
+}
+
 async function originalCancellationInput(operation: Takeover): Promise<AgentTakeoverCancellationInput> {
   const request = operation.takeoverSource.coreRequest
   if (!request || request.operationId !== operation.operationId || request.content.kind !== 'takeover-agent')
     throw new Error('原接手请求不完整，无法定位取消。可以检查原操作。')
-  const expectedRuntimeId = operation.takeoverSource.coreRuntimeId ?? (await api.spatial.owner()).owner.runtimeId
+  const expectedRuntimeId = operation.takeoverSource.coreRuntimeId ?? await api.spatial.owner()
+    .then(({ owner }) => owner.runtimeId)
+    .catch(cause => { throw new TakeoverCancellationOwnerUnconfirmed(cause) })
   // The persisted original request can find the same cancellation after a failed client save.
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(request.operationId))
   const operationId = 'cancel-takeover:' + Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('')

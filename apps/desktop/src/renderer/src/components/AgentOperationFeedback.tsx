@@ -13,7 +13,7 @@ import { DocumentOverlayPortal } from './WindowOverlayHost'
 import { ContentCopyButton } from '@agentmux/client-ui/components/ContentCopyButton'
 import { useSessionStop } from './SessionStop'
 import { Button } from '@agentmux/client-ui/components/Button'
-import { cancelledTakeoverStopTarget, cancelTakeoverOperation, openCancelledTakeoverTarget } from '../lib/session-takeover-cancellation'
+import { cancelledTakeoverStopTarget, cancelTakeoverOperation, openCancelledTakeoverTarget, TakeoverCancellationOwnerUnconfirmed } from '../lib/session-takeover-cancellation'
 
 const CheckIcon = semanticIconComponent('action.refresh')
 const StopIcon = semanticIconComponent('action.stop')
@@ -79,7 +79,7 @@ function OperationFeedbackItem({ operation, compact, active, visible }: { operat
   const [checking, setChecking] = useState(false)
   const [continuing, setContinuing] = useState(false)
   const [preparingCancel, setPreparingCancel] = useState(false)
-  const [cancelIssue, setCancelIssue] = useState<string | null>(null)
+  const [cancelIssue, setCancelIssue] = useState<Error | null>(null)
   const stop = useSessionStop(active)
   const reader = useRef({}), latest = useRef(operation)
   const trigger = useRef<HTMLElement>(null), content = useRef<HTMLDivElement>(null)
@@ -92,6 +92,12 @@ function OperationFeedbackItem({ operation, compact, active, visible }: { operat
   const takeover = operation.kind === 'takeover' ? operation : null
   const request = takeover?.takeoverSource.coreRequest
   const hasRequest = request?.operationId === operation.operationId && request?.content.kind === 'takeover-agent'
+  const canCancel = hasRequest && !['succeeded', 'retired', 'cancelled'].includes(operation.phase) &&
+    (!cancellation || cancellation.dispatch === 'not-submitted')
+  const retainedOnly = Boolean(takeover && !hasRequest && !cancellation && ['unconfirmed', 'failed', 'partial'].includes(phase))
+  const cancelPreparationIssue = canCancel && !cancellation ? cancelIssue : null
+  const cancelPreparationReason = cancelPreparationIssue instanceof TakeoverCancellationOwnerUnconfirmed
+    ? '未能确认原工作区。' : '未能准备取消请求。'
   const showSaveGap = cancellation?.result?.outcome !== 'unconfirmed' && cancellation?.result?.diskDurability === 'unconfirmed'
   function changeOpen(next: boolean) {
     if (!next && !compact && content.current?.contains(content.current.ownerDocument.activeElement)) trigger.current?.focus({ preventScroll: true })
@@ -104,7 +110,7 @@ function OperationFeedbackItem({ operation, compact, active, visible }: { operat
   // Offscreen completion needs no decorative wait; open readers and unresolved references remain.
   useEffect(() => { if (!visible) dismissDecoration(operation) }, [operation, visible])
   const statusText = cancellation?.pending ? label(operation) : preparingCancel ? '正在提交取消'
-    : checking ? '正在检查' : continuing ? '正在继续接手' : cancelIssue && !cancellation ? '取消未提交' : label(operation)
+    : checking ? '正在检查' : continuing ? '正在继续接手' : cancelPreparationIssue ? '取消未提交' : label(operation)
   const busy = preparingCancel || checking || continuing || phase === 'pending'
   const status = <><SemanticIcon name={busy ? 'status.loading' : created || phase === 'succeeded' || phase === 'cancelled' ? 'action.confirm' : phase === 'failed' ? 'status.failed' : 'status.unknown'}
     size={12} {...(visible && busy ? { animation: 'spin' as const } : {})} aria-hidden="true" /><span role="status" data-text={statusText}>{statusText}</span></>
@@ -112,7 +118,6 @@ function OperationFeedbackItem({ operation, compact, active, visible }: { operat
     if (event.animationName === 'agent-operation-settle') dismissDecoration(operation)
   }
   function check() {
-    setCancelIssue(null)
     setChecking(true)
     void inspectAgentOperation(operation).finally(() => setChecking(false))
   }
@@ -121,11 +126,9 @@ function OperationFeedbackItem({ operation, compact, active, visible }: { operat
     setCancelIssue(null)
     setPreparingCancel(true)
     void cancelTakeoverOperation(takeover, { continueOriginal })
-      .catch(cause => setCancelIssue(cause instanceof Error ? cause.message : String(cause)))
+      .catch(cause => setCancelIssue(cause instanceof Error ? cause : new Error(String(cause))))
       .finally(() => setPreparingCancel(false))
   }
-  const canCancel = hasRequest && !['succeeded', 'retired', 'cancelled'].includes(operation.phase) &&
-    (!cancellation || cancellation.dispatch === 'not-submitted')
   const canContinueCancel = cancellation?.result?.outcome === 'unconfirmed' && !cancellation.pending
   const quickActions = takeover ? <>
     {created ? <Button data-operation-action="view" onClick={() => {
@@ -136,7 +139,7 @@ function OperationFeedbackItem({ operation, compact, active, visible }: { operat
     {canCancel || canContinueCancel || cancellation?.pending ? <Button data-operation-action="cancel"
       disabled={preparingCancel || cancellation?.pending} aria-busy={preparingCancel || cancellation?.pending}
       onClick={() => cancel(Boolean(canContinueCancel))}>
-      {canContinueCancel ? '继续取消' : cancelIssue || cancellation?.dispatch === 'not-submitted' ? '重试取消' : '取消接手'}
+      {canContinueCancel ? '继续取消' : cancelPreparationIssue || cancellation?.dispatch === 'not-submitted' ? '重试取消' : '取消接手'}
     </Button> : null}
   </> : null
   const detail = <div ref={content} id={panelId} className="agent-operation-feedback__detail" inert={!open} aria-hidden={!open}>
@@ -146,10 +149,10 @@ function OperationFeedbackItem({ operation, compact, active, visible }: { operat
       : cancellation ? '取消结果仍待确认。可以检查原请求。'
       : hasRequest ? '取消会撤销尚未执行的接手步骤，原会话和草稿会保留。' : '旧记录缺少完整请求，只能检查结果。'}</p>
       : operation.message ? <p>{operation.message}</p> : null}
-    {cancelIssue ? <p className="agent-operation-feedback__action-note" role="status">{cancelIssue}</p> : null}
+    {cancelPreparationIssue ? <p className="agent-operation-feedback__action-note" role="status">{cancelPreparationIssue.message}</p> : null}
     {showSaveGap ? <p className="agent-operation-feedback__save-notice">取消结果已核对，原保存回执待确认。</p> : null}
     <div className="agent-operation-feedback__actions">
-      {takeover ? compact ? quickActions : null : <Button disabled={checking} aria-busy={checking} onClick={check}><CheckIcon size={12} />核对原操作</Button>}
+      {takeover ? compact || retainedOnly ? quickActions : null : <Button disabled={checking} aria-busy={checking} onClick={check}><CheckIcon size={12} />核对原操作</Button>}
       {operation.kind === 'stop' && operation.canContinue && operation.phase !== 'succeeded' ? <Button onClick={() => {
         void stopSessionInBackground({ control: operation.control, operationId: operation.operationId }, { continueOriginal: true })
       }}><StopIcon size={12} />继续同次停止</Button> : null}
@@ -184,17 +187,15 @@ function OperationFeedbackItem({ operation, compact, active, visible }: { operat
     <div className={`agent-operation-feedback__item${!compact ? ' agent-operation-feedback__takeover' : ''}`}
       data-kind={operation.kind} data-phase={phase} data-detail-open={open} data-takeover-created={created || undefined}>
       <div className="agent-operation-feedback__rail">
-        {!compact ? <span className="agent-operation-feedback__label agent-operation-feedback__readout" onAnimationEnd={onAnimationEnd}>{status}</span> : null}
+        {!compact && !retainedOnly ? <span className="agent-operation-feedback__label agent-operation-feedback__readout" onAnimationEnd={onAnimationEnd}>{status}</span> : null}
         <div className="agent-operation-feedback__quick-actions">
-          {!compact ? quickActions : null}
+          {!compact && !retainedOnly ? quickActions : null}
           <CompactOperationDetail operation={operation} active={active} open={open} onOpenChange={changeOpen} status={status}
-            iconOnly={!compact} onAnimationEnd={onAnimationEnd}>{detail}</CompactOperationDetail>
+            iconOnly={!compact} retainedOnly={retainedOnly} onAnimationEnd={onAnimationEnd}>{detail}</CompactOperationDetail>
         </div>
       </div>
-      {!compact && !hasRequest && !cancellation && !['succeeded', 'retired'].includes(operation.phase) ?
-        <span className="agent-operation-feedback__action-note">缺少原请求，只能检查</span> : null}
-      {!compact && (cancelIssue || showSaveGap) ? <span className="agent-operation-feedback__action-note" role="status">
-        {cancelIssue ? '取消未提交，可重试或查看详情' : '原保存回执待确认'}
+      {!compact && (cancelPreparationIssue || showSaveGap) ? <span className="agent-operation-feedback__action-note" role="status">
+        {cancelPreparationIssue ? cancelPreparationReason : '原保存回执待确认'}
       </span> : null}
     </div>
     {stop.dialog}
@@ -206,9 +207,9 @@ function OperationFeedbackItem({ operation, compact, active, visible }: { operat
   </details>{stop.dialog}</>
 }
 
-function CompactOperationDetail({ operation, active, open, onOpenChange, status, iconOnly, onAnimationEnd, children }: {
+function CompactOperationDetail({ operation, active, open, onOpenChange, status, iconOnly, retainedOnly, onAnimationEnd, children }: {
   operation: Operation; active: boolean; open: boolean; onOpenChange(open: boolean): void; status: ReactNode;
-  iconOnly: boolean; onAnimationEnd(event: { animationName: string }): void; children: ReactNode
+  iconOnly: boolean; retainedOnly: boolean; onAnimationEnd(event: { animationName: string }): void; children: ReactNode
 }) {
   const [anchor, setAnchor] = useState<HTMLButtonElement | null>(null)
   const [content, setContent] = useState<HTMLDivElement | null>(null)
@@ -238,8 +239,10 @@ function CompactOperationDetail({ operation, active, open, onOpenChange, status,
   }, [open, active, anchor, content])
   return <Dialog.Root modal={false} open={open && active} onOpenChange={next => { focusOnPlace.current = next; onOpenChange(next) }}>
       <Dialog.Trigger asChild><button ref={setAnchor} type="button" data-operation-action="details"
-        className={iconOnly ? 'icon-button agent-operation-feedback__more' : 'agent-operation-feedback__label'} onAnimationEnd={onAnimationEnd}
-        aria-label={`${label(operation)}，查看操作详情`} title={iconOnly ? '操作详情' : undefined}>{iconOnly ? <MoreIcon size={14} /> : status}</button></Dialog.Trigger>
+        className={retainedOnly ? 'agent-button' : iconOnly ? 'icon-button agent-operation-feedback__more' : 'agent-operation-feedback__label'} onAnimationEnd={onAnimationEnd}
+        aria-label={retainedOnly ? '查看原接手记录' : `${label(operation)}，查看操作详情`} title={iconOnly && !retainedOnly ? '操作详情' : undefined}>
+        {retainedOnly ? '查看原接手记录' : iconOnly ? <MoreIcon size={14} /> : status}
+      </button></Dialog.Trigger>
       <DocumentOverlayPortal component={Dialog.Portal}>
         <Dialog.Content ref={attach} className="agent-operation-feedback__popover" data-kind={operation.kind} data-phase={feedbackPhase(operation)}
           style={{ visibility: 'hidden' }} aria-describedby={undefined} tabIndex={-1}
@@ -249,9 +252,10 @@ function CompactOperationDetail({ operation, active, open, onOpenChange, status,
             if (focused && focused !== owner?.body && focused !== anchor && !surface.current?.contains(focused)) event.preventDefault()
           }}>
           <div className="agent-operation-feedback__popover-header">
-            <Dialog.Title className="agent-operation-feedback__popover-title">{titles[operation.kind]}操作详情</Dialog.Title>
+            <Dialog.Title className="agent-operation-feedback__popover-title">{retainedOnly ? '原接手记录' : `${titles[operation.kind]}操作详情`}</Dialog.Title>
             <Dialog.Close className="icon-button" aria-label="关闭操作详情"><CloseIcon size={14} /></Dialog.Close>
           </div>
+          {retainedOnly && <p className="agent-operation-feedback__summary">{status}</p>}
           {children}
         </Dialog.Content>
       </DocumentOverlayPortal>
