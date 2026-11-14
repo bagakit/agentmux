@@ -123,6 +123,32 @@ it.each(['file', 'symlink', 'nonempty'] as const)('pending reentry preserves and
   if (occupant === 'nonempty') expect(await readFile(join(h.locator.workspacePath, 'unknown'), 'utf8')).toBe('retained')
 })
 
+it('pending publication rejects a nonempty replacement introduced after the emptiness read', async () => {
+  const h = await ownedFixture()
+  const before = await seedPending(h, 'empty')
+  const leaf = h.locator.workspacePath
+  const fs = createRequire(import.meta.url)('node:fs/promises') as typeof import('node:fs/promises')
+  const original = fs.readdir.bind(fs)
+  let replaced = false
+  vi.spyOn(fs, 'readdir').mockImplementation((async (path: any, options: any) => {
+    const entries = await original(path, options)
+    if (String(path) === leaf && !replaced) {
+      replaced = true
+      const retired = join(h.root, 'retired-empty-leaf')
+      await rename(leaf, retired)
+      await mkdir(leaf)
+      await writeFile(join(leaf, 'unknown'), 'must not be provisioned')
+    }
+    return entries
+  }) as any)
+  syncBuiltinESMExports()
+  const prepareTerminal = vi.spyOn(h.client, 'prepareTerminal')
+  await expect(h.client.prepareAgentExecutionHelper(h.input)).rejects.toMatchObject({ code: 'AGENT_WORKSPACE_OWNERSHIP_UNCONFIRMED' })
+  expect(prepareTerminal).not.toHaveBeenCalled()
+  expect(await readFile(h.markerPath)).toEqual(before)
+  expect(await readFile(join(leaf, 'unknown'), 'utf8')).toBe('must not be provisioned')
+})
+
 it('rejects a wrong-UID pending occupant without changing the reservation', async () => {
   const h = await ownedFixture()
   const before = await seedPending(h, 'empty')
