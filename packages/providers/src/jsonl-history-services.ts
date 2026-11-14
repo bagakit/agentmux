@@ -1,3 +1,5 @@
+import type { NativeProviderError } from './provider-error.js'
+
 /* Native protocol readers project records through the original Core's JSONL source and materializer. */
 export type NativeHistoryTarget = { source: { providerId: string; nativeSessionId: string }; signal: AbortSignal }
 export type NativeHistoryReadBudget = { bytesRead: number; startedAt: number }
@@ -44,7 +46,7 @@ export type NativeJsonlHistoryReader<Text, Item> = {
 }
 
 export type NativeJsonlHistoryServices<Text, Context, Item> = {
-  AgentMuxError: new (message: string, code: string, detail?: string) => Error & { code: string }
+  AgentMuxError: NativeProviderError
   NativeJsonlHistoryReader: { open(context: NativeHistoryReaderContext<Context>, budget?: NativeHistoryReadBudget): Promise<NativeJsonlHistoryReader<Text, Item>> }
   isNativeText(value: unknown): value is NativeHistoryText<Text>
   nativeJsonStringify(value: unknown, replacer?: null, space?: number): NativeHistoryText<Text>

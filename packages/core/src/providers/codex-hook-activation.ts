@@ -1,6 +1,6 @@
 import { AgentMuxError } from '../errors.js'
 import type { AgentProviderHookActivation, AgentProviderHookActivationContext } from '../agent-provider.js'
-import { withAppServerNativeRead } from './app-server-native-read.js'
+import { withAppServerNativeRead } from './app-server.js'
 import { CODEX_HOOK_SOURCE_PATH, codexHookTrustBypassed, codexManagedHooks, withCodexLaunchHooks } from './codex-launch-hooks.js'
 
 function object(value: unknown): Record<string, unknown> {

@@ -99,6 +99,26 @@
     "./kimi/provider": {
       "types": "./dist/kimi/provider.d.ts",
       "import": "./dist/kimi/provider.js"
+    },
+    "./codex/question": {
+      "types": "./dist/codex/question.d.ts",
+      "import": "./dist/codex/question.js"
+    },
+    "./app-server/native-read": {
+      "types": "./dist/app-server/native-read.d.ts",
+      "import": "./dist/app-server/native-read.js"
+    },
+    "./app-server/native-session": {
+      "types": "./dist/app-server/native-session.d.ts",
+      "import": "./dist/app-server/native-session.js"
+    },
+    "./app-server/native-history": {
+      "types": "./dist/app-server/native-history.d.ts",
+      "import": "./dist/app-server/native-history.js"
+    },
+    "./traex/provider": {
+      "types": "./dist/traex/provider.d.ts",
+      "import": "./dist/traex/provider.js"
     }
   },
   "files": [

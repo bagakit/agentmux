@@ -10,7 +10,7 @@ import type { AgentProvider } from '../agent-provider.js'
 import { nativeProcessBirth, nativeProcessExecutable, nativeProcessFiles, type NativeProcessFile } from '../agent-native-process.js'
 import { AgentMuxError } from '../errors.js'
 import { nativeInputSourceId } from '../native-input-correlation.js'
-import { locateAppServerNativeSession } from './app-server-native-session.js'
+import { locateAppServerNativeSession } from './app-server.js'
 import { codexMainNativeRecord } from './codex-native-record-role.js'
 
 // Frozen claims retain this original wire identity. Qualification comes from the

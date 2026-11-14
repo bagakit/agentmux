@@ -32,7 +32,8 @@ import { kimiProvider } from '@agentmux/providers/kimi/provider'
 import { kimiNativeHistory } from '@agentmux/providers/kimi/native-history'
 import { createOpenCodeProvider } from './opencode.js'
 import { createPiProvider } from './pi.js'
-import { createTraexProvider } from './traex.js'
+import { traexProvider } from '@agentmux/providers/traex/provider'
+import { discoverAppServerNativeSession, readAppServerSessionHistoryPage } from './app-server.js'
 
 export type ProviderFactory = (definition: AgentProviderDefinition) => AgentProvider
 
@@ -81,7 +82,9 @@ export function createBuiltInAgentProviders(defineAgentProvider: ProviderFactory
   return [
     createCodexProvider(defineAgentProvider),
     createClaudeProvider(defineAgentProvider),
-    createTraexProvider(defineAgentProvider),
+    defineAgentProvider({ ...traexProvider, catalog: catalog(traexProvider.catalog),
+      discoverNativeSession: context => discoverAppServerNativeSession(context, 'traex'),
+      readSessionHistoryPage: readAppServerSessionHistoryPage, observeSessionHistory: observeNativeJsonlHistory }),
     createHermesProvider(defineAgentProvider),
     createPiProvider(defineAgentProvider),
     defineAgentProvider({ ...grok, catalog: catalog(grok.catalog),
@@ -111,4 +114,3 @@ export { createCursorProvider } from './cursor.js'
 export { createHermesProvider } from './hermes.js'
 export { createOpenCodeProvider } from './opencode.js'
 export { createPiProvider } from './pi.js'
-export { createTraexProvider } from './traex.js'

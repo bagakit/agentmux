@@ -6,7 +6,7 @@ import { NativeJsonlHistoryReader, readNativeConversationChanges, NATIVE_CONVERS
 import { normalizeSessionHistoryMetrics, SESSION_HISTORY_MAX_PAGE_BYTES } from '../session-history.js'
 import { isNativeText, nativeJsonStringify, nativeTextConcat, nativeTextStartsWith, type NativeHistoryContentPart, type NativeHistoryItem } from '../native-history-value.js'
 import { codexTurnOutcome, codexTurnRecordId } from './codex-turn-outcome.js'
-import { codexQuestionAnswers, codexQuestionRequest } from './codex-question.js'
+import { codexQuestionAnswers, codexQuestionRequest } from './app-server.js'
 import type { AgentProviderSessionHistoryContext, AgentProviderSessionHistoryPage,
   AgentProviderSessionHistoryRecordContext, AgentSessionHistoryItem } from '../types.js'
 
