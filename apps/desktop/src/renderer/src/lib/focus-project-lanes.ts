@@ -50,7 +50,8 @@ export type FocusProjectLane = {
   activeAgentRefs: FocusContextReference[]; contextRefs: FocusContextReference[]
   lastActivityAt?: number | null
 }
-const activityKey = (lane: FocusProjectLane) => lane.topicId ? lane.id : focusProjectKey(lane.hostId, lane.projectId)
+/** Topic containers stay independent; only ordinary project checkouts share a rank. */
+export const focusLaneOrderKey = (lane: FocusProjectLane) => lane.topicId ? lane.id : focusProjectKey(lane.hostId, lane.projectId)
 /** Preserve the last observed branch/path association when Git confirms its checkout was removed. */
 export function retainedWorktreeFacts(previous: readonly FocusWorktreeFact[], snapshot: WorkspaceBranchesSnapshot): FocusWorktreeFact[] {
   if (snapshot.kind !== 'git-repository') return [...previous]
@@ -121,7 +122,7 @@ export function deriveFocusProjectLanes(rows: readonly FocusContext[], config: P
         lane.contextRefs.push(reference); included.add(key); members.set(id, included)
       }
       lanes.set(id, lane)
-      const projectKey = activityKey(lane)
+      const projectKey = focusLaneOrderKey(lane)
       if (!groupRanks.has(projectKey)) groupRanks.set(projectKey, groupRanks.size)
       const at = row.lastActivityAt
       if (at != null && Number.isFinite(at) && at > 0 && at <= now) activity.set(projectKey, Math.max(activity.get(projectKey) ?? 0, at))
@@ -129,9 +130,9 @@ export function deriveFocusProjectLanes(rows: readonly FocusContext[], config: P
       priorities.set(projectKey, Math.min(priorities.get(projectKey) ?? priority, priority))
     }
   }
-  for (const lane of lanes.values()) lane.lastActivityAt = activity.get(activityKey(lane)) ?? null
+  for (const lane of lanes.values()) lane.lastActivityAt = activity.get(focusLaneOrderKey(lane)) ?? null
   return [...lanes.values()].sort((a, b) => {
-    const first = activityKey(a), second = activityKey(b)
+    const first = focusLaneOrderKey(a), second = focusLaneOrderKey(b)
     return compareFocusWork({ priority: priorities.get(first)!, lastActivityAt: a.lastActivityAt }, { priority: priorities.get(second)!, lastActivityAt: b.lastActivityAt })
       || groupRanks.get(first)! - groupRanks.get(second)!
   })

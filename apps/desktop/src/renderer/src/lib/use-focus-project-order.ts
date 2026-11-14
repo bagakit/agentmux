@@ -1,5 +1,5 @@
 import { useEffect, useRef, type RefObject } from 'react'
-import { focusLaneProjectKey, type FocusProjectLane } from './focus-project-lanes'
+import { focusLaneOrderKey, type FocusProjectLane } from './focus-project-lanes'
 import { EMPTY_FOCUS_PROJECTS, type FocusProjectPreference } from '../../../shared/focus-project-preferences'
 
 /** Identity is the route. Activity stays live; only an explicit arrangement replaces that route. */
@@ -10,7 +10,7 @@ export function useFocusProjectOrder(lanes: readonly FocusProjectLane[], visible
   const projectRanks = new Map(route.current.projects.map((id, index) => [id, index]))
   const laneRanks = new Map(route.current.lanes.map((id, index) => [id, index]))
   for (const lane of lanes) {
-    const project = focusLaneProjectKey(lane)
+    const project = focusLaneOrderKey(lane)
     if (!projectRanks.has(project)) { projectRanks.set(project, projectRanks.size); route.current.projects.push(project) }
     if (!laneRanks.has(lane.id)) { laneRanks.set(lane.id, laneRanks.size); route.current.lanes.push(lane.id) }
   }
@@ -29,7 +29,7 @@ export function useFocusProjectOrder(lanes: readonly FocusProjectLane[], visible
     }
   }, [visible, rows, interaction])
   const pins = new Map(preferences.filter(item => item.pinned).map((item, index) => [item.key, index]))
-  return [...lanes].sort((a, b) => (pins.get(focusLaneProjectKey(a)) ?? pins.size) - (pins.get(focusLaneProjectKey(b)) ?? pins.size)
-    || projectRanks.get(focusLaneProjectKey(a))! - projectRanks.get(focusLaneProjectKey(b))!
+  return [...lanes].sort((a, b) => (pins.get(focusLaneOrderKey(a)) ?? pins.size) - (pins.get(focusLaneOrderKey(b)) ?? pins.size)
+    || projectRanks.get(focusLaneOrderKey(a))! - projectRanks.get(focusLaneOrderKey(b))!
     || laneRanks.get(a.id)! - laneRanks.get(b.id)!)
 }
