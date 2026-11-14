@@ -19,7 +19,7 @@
   gap: var(--sp-3);
 }
 .provider-comparison__toolbar > label { min-width: 0; }
-.provider-comparison__toolbar select { min-width: 0; max-width: min(42vw, 19rem); }
+.provider-comparison__toolbar > label > select { min-inline-size: min(120px, 42vw); max-inline-size: min(42vw, 19rem); }
 .provider-comparison__search { flex: 0 1 17rem; min-width: 0; margin-inline-start: auto; }
 .provider-comparison__matrix { display: grid; gap: var(--sp-3); min-width: 0; }
 .provider-comparison__matrix-head {
