@@ -222,8 +222,9 @@ it('[terminal recovery] Core rejects wrong cwd and Agent ownership before any pr
     startPrepared: async () => ({ ...run(), state: { type: 'running' } }) }
   const prepare = vi.spyOn(core, 'prepareTerminal')
   await expect(core.recoverTerminal(input)).rejects.toMatchObject({ code: 'TERMINAL_RECOVERY_TARGET_MISMATCH' })
-  vi.spyOn(store, 'loadRetiredAgentSessions').mockResolvedValue([{ agentSessionId: 'original-agent', hostId: 'local', run: input.expectedRun, source: 'user', observedAt: 1 }])
+  await store.retireRuns([input.expectedRun])
   await expect(core.recoverTerminal(input)).rejects.toMatchObject({ code: 'RUN_KIND_MISMATCH' })
+  expect(actual.kernel.status).toHaveBeenCalledOnce()
   expect(prepare).not.toHaveBeenCalled()
 })
 it('[terminal recovery] CLI and strict public service reach the same exact Core owner and preserve canonical receipt', async () => {
