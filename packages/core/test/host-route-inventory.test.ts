@@ -1,3 +1,5 @@
+import { parseHostSettingsResult } from '../src/public-rpc-host-settings.js'
+import { parseHostExecutorInventory } from '../src/executor-contract.js'
 import { afterEach, expect, test, vi } from 'vitest'
 import { runSourceObjectCli } from './helpers/source-object-cli.js'
 import { objectCliEnvironment } from './helpers/object-cli-rpc.js'
@@ -112,4 +114,18 @@ test('the actual CLI reads the same original route choices and executor owner', 
     inventory: { runtimeId: 'runtime-D', executors: [{ executorId: 'same-executor', availability: 'unknown' }] } })
   expect(f.inventory).toHaveBeenCalledExactlyOnceWith({ refresh: false, executorId: 'same-executor' })
   expect(f.native).not.toHaveBeenCalled(); expect(f.creation).not.toHaveBeenCalled()
+})
+
+test('Settings and route inventory share the same exact registered publication witness codec', () => {
+  const descriptor = { executorId: 'original', label: 'Original', providerId: 'claude', command: '/original/command', source: 'registered', configRevision: 'content-revision', registrationRevision: 'original-publication', availability: 'unknown' }
+  const read = (executor: unknown) => parseHostSettingsResult('settings.executors.discover', { routeHostId: 'local', runtimeId: 'original-runtime', executors: [executor] }, { hostId: 'local' })
+  expect(read(descriptor).executors[0]).toEqual(descriptor)
+  expect(parseHostExecutorInventory({ runtimeId: 'original-runtime', executors: [descriptor] }).executors[0]).toEqual(descriptor)
+  for (const registrationRevision of [null, '', 'wrong\npublication', 1, {}]) {
+    expect(() => read({ ...descriptor, registrationRevision })).toThrow()
+    expect(() => parseHostExecutorInventory({ runtimeId: 'original-runtime', executors: [{ ...descriptor, registrationRevision }] })).toThrow()
+  }
+  expect(() => read({ ...descriptor, source: 'provider-default' })).toThrow()
+  const { registrationRevision: _generation, ...unconfirmed } = descriptor
+  expect(read(unconfirmed).executors[0]).toEqual(unconfirmed)
 })
