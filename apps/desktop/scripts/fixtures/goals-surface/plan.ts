@@ -1,9 +1,11 @@
 import { flushSync } from 'react-dom'
+import { parseDemandDispatch } from '../../../../../packages/demand/src/dispatch'
 import { parseDemandDelegations, type DemandDelegation } from '@agentmux/demand/delegations'
 import { parseGoalPlan, type GoalPlan, type GoalPlanNodeInput } from '@agentmux/demand/goal-plan'
 import { demandExecutionReferences, demandResponsibilityScope } from '../../../../../packages/demand/src/responsibility'
 import type { GoalResponsibilityObservation } from '@agentmux/core/goal-responsibility'
 import { parseDemandPatrols, demandPatrolScope } from '../../../../../packages/demand/src/goal-patrol'
+import { formatGoalAddress } from '@agentmux/core/sharing'
 import { parseGoalPatrolObservations } from '@agentmux/core/goal-patrol'
 import { hostGoalPlan } from '@agentmux/host/goal-projection'
 import { api } from '../../../src/renderer/src/lib/api'
@@ -14,7 +16,7 @@ export function goalPlanPreview(seed: (mode: string) => void, render: () => void
   const originalDelegation = api.demands.delegation
   return {
     /** `withoutDerivation` previews a Host that returns the plan without node states, as an older version does. */
-    seed(withoutDerivation = false) {
+    seed(withoutDerivation = false, openGuide = false) {
       seed('confirmed')
       const state = useAppStore.getState(), goal = state.demands[state.selectedDemandId!]!
       const agents = state.sessions.filter(session => session.kind === 'agent')
@@ -39,15 +41,21 @@ export function goalPlanPreview(seed: (mode: string) => void, render: () => void
         node('reconnect', 'Reconnect the remote Agent', ['outline'], 'Reattach the original remote Agent and retain its input.'),
         node('verify', 'Review the complete recovery', ['workspace', 'drafts', 'history', 'reconnect', 'guide'], 'Verify the complete workface and leave inspectable evidence.')
       ]
+      if (openGuide) {
+        const guide = nodes.find(item => item.id === 'guide')!
+        guide.executor = null
+        guide.claimOpen = true
+      }
+      const at = (minute: number) => openGuide ? goal.createdAt + minute * 60_000 : minute
       const attempt = (nodeId: string, reported: boolean, linked = true): DemandDelegation => ({
         operationId: `attempt:${nodeId}`, sourceMessageId: `request:${nodeId}`, hostId: owner.control.hostId, workerHostId: executor.hostId,
         ownerAgentSessionId: owner.control.agentSessionId, workerAgentSessionId: executor.agentSessionId,
         ownerRunId: owner.control.run.runId, workerRunId: worker.control.run.runId, threadId: `thread:${nodeId}`,
         text: nodes.find(item => item.id === nodeId)!.outcome, alignmentRevision: goal.alignment!.revision,
-        criterionIds: [criterion.id], capturedCriteria: [criterion], planNodeId: nodeId, preparedAt: 1,
-        ...(linked ? { linkedAt: 2 } : {}),
+        criterionIds: [criterion.id], capturedCriteria: [criterion], planNodeId: nodeId, preparedAt: at(1),
+        ...(linked ? { linkedAt: at(2) } : {}),
         ...(reported ? { report: { operationId: `report:${nodeId}`, replyMessageId: `reply:${nodeId}`,
-          authorAgentSessionId: executor.agentSessionId, submittedAt: 3,
+          authorAgentSessionId: executor.agentSessionId, submittedAt: at(3),
           grounding: { alignmentRevision: goal.alignment!.revision, summary: nodeId === 'history' ? 'The draft survives; the reading anchor still moves during live output.' : 'The original identities and saved content match the recovery log.',
             checks: [{ criterionId: criterion.id, outcome: 'met' as const, evidence: [`artifacts/recovery/${nodeId}.log`], note: '' }] } } } : {})
       })
@@ -55,24 +63,24 @@ export function goalPlanPreview(seed: (mode: string) => void, render: () => void
         operationId: `review:${nodeId}`, nodeId, delegationOperationId: `attempt:${nodeId}`, verdict,
         check: { command: `pnpm test -- ${nodeId}`, result: '12 checks passed', evidence: [`artifacts/recovery/${nodeId}-review.log`] },
         note: verdict === 'changes' ? 'Keep the original reading anchor while output continues, then repeat the live-session check.' : '',
-        reviewer: { kind: 'agent', id: owner.control.agentSessionId }, reviewedAt: 4
+        reviewer: { kind: 'agent', id: owner.control.agentSessionId }, reviewedAt: at(4)
       })
       const plan = parseGoalPlan({ revision: 2, alignmentRevision: goal.alignment!.revision, nodes,
         reviews: [review('outline', 'pass'), review('history', 'changes')],
-        history: [1, 2].map(revision => ({ operationId: `plan:revision-${revision}`, revision, author: { kind: 'agent', id: owner.control.agentSessionId }, revisedAt: revision })) })
+        history: [1, 2].map(revision => ({ operationId: `plan:revision-${revision}`, revision, author: { kind: 'agent', id: owner.control.agentSessionId }, revisedAt: at(revision) })) })
       const previousGuide = attempt('guide', true)
       previousGuide.workerAgentSessionId = previousWorker.control.agentSessionId
       previousGuide.workerRunId = previousWorker.control.run.runId
       previousGuide.report = { ...previousGuide.report!, authorAgentSessionId: previousWorker.control.agentSessionId,
         grounding: { ...previousGuide.report!.grounding, summary: 'The earlier guide result is retained after reassignment.' } }
-      const next = { ...goal, title: 'Return to the same work, without rebuilding it', plan,
+      const next = { ...goal, ...(openGuide ? { address: formatGoalAddress(goal.id, 'workbench-preview-runtime', 'workspace-recovery') } : {}), title: 'Return to the same work, without rebuilding it', plan,
         activities: Array.from({ length: 8 }, (_, index) => ({ id: `original-note:${index}`, kind: 'Progress',
           message: index === 7 ? 'The original checks are ready for independent review.' : 'Kept the original workspace and recorded the recovery evidence.',
           createdAt: goal.createdAt + index * 60000, actorId: worker.control.agentSessionId })),
         decisions: [{ id: 'original-decision', question: 'Which work should the next check use?', decision: 'Continue from the same original workspace.',
           rationale: 'The existing Sessions, reading anchors and unsent drafts belong to this work.', actorId: owner.control.agentSessionId, createdAt: goal.createdAt + 9 * 60000 }],
         supervisorSessionId: owner.control.agentSessionId, sessionIds: [...new Set([...goal.sessionIds, executor.agentSessionId, previousWorker.control.agentSessionId])], assigneeSessionIds: [owner.control.agentSessionId, executor.agentSessionId],
-        delegations: parseDemandDelegations([attempt('outline', true), attempt('workspace', false), attempt('drafts', true), attempt('history', true), attempt('reconnect', false, false), previousGuide]) }
+        delegations: parseDemandDelegations([attempt('outline', true), attempt('workspace', false), attempt('drafts', true), attempt('history', true), attempt('reconnect', false, false), ...(openGuide ? [] : [previousGuide])]) }
       const references = demandExecutionReferences(next)
       // The private Electron probe validates these DTOs with the production parser outside the browser.
       const responsibility: GoalResponsibilityObservation = { scope: demandResponsibilityScope(next), observedAt: next.updatedAt,
@@ -102,6 +110,28 @@ export function goalPlanPreview(seed: (mode: string) => void, render: () => void
           agentNames: { ...state.agentNames, [worker.id]: 'Atlas · Recovery engineer', [owner.id]: 'Mira · Independent review', [previousWorker.id]: 'Earlier guide author' } })
         render()
       })
+    },
+    inspection() {
+      seed('confirmed')
+      const store = useAppStore.getState(), original = store.demands[store.selectedDemandId!]!
+      const worker = store.sessions.find(session => session.kind === 'agent')!
+      const dispatches = [parseDemandDispatch({ operationId: 'workspace-check', execution: 'finite', stage: 'prepared',
+        agentSessionId: worker.control.agentSessionId, hostId: worker.control.hostId, runId: worker.control.run.runId,
+        prompt: 'Check the recovery state of the original workspace.', preparedAt: original.updatedAt - 90_000 })]
+      const goal = { ...original, dispatches, title: 'Restore the original workspace', supervisorSessionId: null, assigneeSessionIds: [],
+        description: 'Recover the same workspace with every tab, agent session and unsent draft intact.' }
+      const at = goal.updatedAt, operationId = 'inspection:workspace/original'
+      const request = { expectedScope: demandPatrolScope(goal), supervisorAgentSessionId: null, executions: demandExecutionReferences(goal), context: goal.description,
+        requestedBy: { kind: 'user', id: 'workspace-owner' }, attempts: [] }
+      const patrols = parseDemandPatrols([
+        { ...request, operationId: 'inspection:workspace/earlier', requestedAt: at - 60000 },
+        { ...request, operationId, requestedAt: at },
+      ])
+      const patrolObservations = parseGoalPatrolObservations([{ operationId, state: 'missing', reason: 'Original inspection retained. Supervisor delivery has not been confirmed.' }], patrols.map(item => item.operationId))
+      api.demands.delegation = async (operation, input) => input.goalId === goal.id && operation === 'goal.delegations'
+        ? { goalId: goal.id, goalUpdatedAt: goal.updatedAt, diskDurability: 'confirmed', delegations: [], dispatches, patrols, patrolObservations }
+        : originalDelegation(operation, input)
+      flushSync(() => { useAppStore.setState({ demands: { [goal.id]: { ...goal, patrols, patrolObservations } } }); render() })
     },
     request(state: 'none' | 'prepared' | 'delivered' | 'missing' | 'unknown' | 'stale') {
       seed('confirmed')
