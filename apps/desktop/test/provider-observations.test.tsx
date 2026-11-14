@@ -21,7 +21,7 @@ function executorInventory(host: typeof primary | typeof secondary, providers: s
   })) }
 }
 
-function measure(host: HostConfig, kind: HostAgentResourceObservation['kind'], count: number): HostAgentResourceObservation {
+function measure(host: HostConfig, kind: HostAgentResourceObservation['kind'], count: number, observedAt = sampleAt): HostAgentResourceObservation {
   const base = { routeHostId: host.id, requestedAt: sampleAt, completedAt: sampleAt,
     owner: { state: 'available' as const, readAt: sampleAt, value: {
       runtimeId: host.kind === 'ssh' ? host.runtimeId ?? 'runtime-unpinned' : 'runtime-local',
@@ -29,9 +29,9 @@ function measure(host: HostConfig, kind: HostAgentResourceObservation['kind'], c
       ctxmux: { hostId: 'local', processId: 101, instanceId: 'original-native', buildIdentity: 'fixture', protocolVersion: 18 }
     } } }
   return kind === 'records' ? { ...base, kind, measurement: { state: 'available', readAt: sampleAt,
-    value: { saved: count, retired: 0, observedAt: sampleAt } } } :
+    value: { saved: count, retired: 0, observedAt } } } :
     { ...base, kind, measurement: { state: 'available', readAt: sampleAt,
-      value: { count, nativeInstanceId: 'original-native', observedAt: sampleAt, nativeObservedAt: sampleAt - 1 } } }
+      value: { count, nativeInstanceId: 'original-native', observedAt, nativeObservedAt: observedAt - 1 } } }
 }
 
 function defer<T>() {
@@ -136,4 +136,13 @@ it('keeps missing observations distinct from a confirmed zero', async () => {
   expect(container.querySelector('[aria-label="Executor entries"]')?.getAttribute('data-reading')).toBe('unavailable')
   const sessionBars = [...container.querySelectorAll<HTMLElement>('[aria-label="Session states"] .provider-observation__bar > span')]
   expect(sessionBars.map(bar => bar.style.width)).toEqual(['0%'])
+})
+
+it('retains confirmed counts when a source time falls outside the renderer date range', async () => {
+  discover.mockResolvedValue(executorInventory(primary, ['shared-provider']))
+  agentResources.mockImplementation((host, kind) => Promise.resolve(measure(host, kind, 1, Number.MAX_SAFE_INTEGER)))
+  await render(primary)
+  expect(values()).toEqual(['1', '1', '0'])
+  expect(executorTotal()).toBe('1')
+  expect(container.querySelector('[aria-label="Session states"]')?.textContent).toContain('Unknown time')
 })
