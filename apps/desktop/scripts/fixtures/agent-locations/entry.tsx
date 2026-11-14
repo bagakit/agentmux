@@ -4,7 +4,7 @@ import { flushSync } from 'react-dom'
 import { createWorkspaceLayout } from '@agentmux/layout'
 import { mountThemeRuntime, updateThemeSelection } from '@agentmux/client-ui/theme'
 import { api } from '../../../src/renderer/src/lib/api'
-import { useAppStore, agentRegionExecution, agentRegionLocationsKnown } from '../../../src/renderer/src/store'
+import { useAppStore, agentRegionExecution, agentRegionLocationsKnown, rereadAgentRegionExecution } from '../../../src/renderer/src/store'
 import { desktopSpatialGraph } from '../../../src/renderer/src/lib/desktop-spatial-state'
 import { createWorkbenchTab, addWorkbenchRegion } from '../../../src/renderer/src/lib/workbench-tabs'
 import { directoryIdentity, workspaceZoneId } from '../../../src/shared/space-addresses'
@@ -15,6 +15,9 @@ import { DesktopClientUiProvider } from '../../../src/renderer/src/components/De
 import { ExecutorIdentityContext } from '../../../src/renderer/src/components/AgentAvatar'
 import { GlobalFocusSurface } from '../../../src/renderer/src/components/GlobalFocusSurface'
 import { WorkspaceAgentRow } from '../../../src/renderer/src/components/WorkspaceAgentRow'
+import { AgentInformationPreviewHost } from '../../../src/renderer/src/components/AgentInformationPreview'
+import { agentInformationPreview } from '../../../src/renderer/src/lib/agent-information-preview'
+import { registerWorkbenchDocument } from '../../../src/renderer/src/lib/workbench-window-registry'
 import { AgentRoster } from '../../../src/renderer/src/components/AgentRoster'
 import { QuickSwitcher } from '../../../src/renderer/src/components/QuickSwitcher'
 import '../../../src/renderer/src/styles/index.css'
@@ -50,6 +53,11 @@ api.scratch.listTopics = async () => []
 mountThemeRuntime(window, { ...config.appearance, appAppearance: 'dark' })
 useAppStore.setState({ config: originalConfig, sessions, loading: false, activeWorkspaceId: workspace.id, mainSurface: 'agents', focusView: 'list', tabs, layouts, spaceZoneBindings,
   agentFocus: { execution: { sessionId: null, reference: null, history: [] }, pmo: { sessionId: null } }, agentNames: Object.fromEntries(ids.map((id, i) => [id, names[i]])), agentComposerDrafts: draft, timelines, providerCatalog: [], scratchTopicSnapshots: {} } as never)
+// The unknown frame withholds one spatial notification while the original exact
+// read still reaches that owner, matching a retained workface with an unread binding.
+let holdSpatialNotifications = false
+const observeSpatial = api.spatial.onChange
+api.spatial.onChange = listener => observeSpatial(value => { if (!holdSpatialNotifications) listener(value) })
 // Use the maintained typed preview owner and the real initialization/projector.
 // No boolean or resolver is replaced to pretend spatial facts are confirmed.
 await api.spatial.commit({ expectedRevision: 0, graph: desktopSpatialGraph({ ...useAppStore.getState(), tabs: {}, layouts: {} }, []) })
@@ -78,10 +86,13 @@ function Scene() {
     <footer className="agent-status-bar" style={{ height: 56, padding: '8px 16px', display: 'flex', alignItems: 'center', gap: 16 }}><AgentRoster total={sessions.length} /><input aria-label="Original private draft" defaultValue={draft[ids[0]!]} style={{ flex: 1, minWidth: 0 }} /></footer>
     <QuickSwitcher open={false} onClose={() => {}} /></>
 }
-flushSync(() => createRoot(document.getElementById('root')!).render(<ExecutorIdentityContext.Provider value={{ config: originalConfig }}><DesktopClientUiProvider><Scene /></DesktopClientUiProvider></ExecutorIdentityContext.Provider>))
+registerWorkbenchDocument(document, { windowId: 'location-capture-window', documentGeneration: 'location-capture-document' })
+flushSync(() => createRoot(document.getElementById('root')!).render(<ExecutorIdentityContext.Provider value={{ config: originalConfig }}><DesktopClientUiProvider><AgentInformationPreviewHost /><Scene /></DesktopClientUiProvider></ExecutorIdentityContext.Provider>))
 Object.assign(window, { agentLocationsScene: {
   ready: true,
   async reset(mode: 'dark' | 'light', space = false) {
+    holdSpatialNotifications = false
+    agentInformationPreview.detach()
     updateThemeSelection({ ...config.appearance, appAppearance: mode })
     await useAppStore.getState().retryWorkbenchSave()
     const observed = await api.spatial.read()
@@ -96,6 +107,16 @@ Object.assign(window, { agentLocationsScene: {
     const tab = state.tabs[second.id]!, surface = tab.regions['second-region']!
     const rebound = { ...state.tabs, [second.id]: { ...tab, regions: { ...tab.regions, 'second-region': { ...surface, sessionId: ids[1]! } } } }
     await api.spatial.commit({ expectedRevision: observed.revision, graph: desktopSpatialGraph({ ...state, tabs: rebound }, []) })
+  },
+  async unknown() {
+    await useAppStore.getState().retryWorkbenchSave()
+    const observed = await api.spatial.read()
+    if (!observed) throw Error('The original preview owner is unavailable')
+    const graph = structuredClone(observed.graph)
+    graph.regions.find(region => region.tabId === first.id && region.regionId === 'right-region')!.execution = null
+    holdSpatialNotifications = true
+    await api.spatial.commit({ expectedRevision: observed.revision, graph })
+    await rereadAgentRegionExecution({ tabId: first.id, regionId: 'right-region', agentSessionId: ids[0]! })
   },
   facts() { const state = useAppStore.getState(); return { controls, known: agentRegionLocationsKnown(), draftsPreserved: state.agentComposerDrafts === draft, sessionsPreserved: state.sessions === originalSessions, runIds: state.sessions.map(session => session.control.kind === 'agent' ? session.control.run.runId : null), draft: (document.querySelector('[aria-label="Original private draft"]') as HTMLInputElement)?.value, request: state.sessionLocationRequest, selection: state.workbenchSpaceSelection } }
 } })

@@ -12,6 +12,7 @@ import { runProbeProcess, listProbeProcesses } from '../../probe-process.mjs'
 import { radixOverlayAliases } from '../../radix-overlay-aliases.ts'
 
 const root = resolve(import.meta.dirname, '../../../../..'), desktop = join(root, 'apps/desktop'), fixture = join(desktop, 'scripts/fixtures/agent-locations')
+const detailsOnly = process.argv.includes('--details')
 const evidence = process.env.AGENTMUX_EVIDENCE_ROOT ?? join(root, '.tmp/agent-locations/desktop')
 const directory = join(evidence, 'visual-' + randomUUID()), temporary = await mkdtemp(join(tmpdir(), 'amux-agent-locations-')), output = join(temporary, 'compiled')
 await mkdir(directory, { recursive: true }); await mkdir(output, { recursive: true })
@@ -21,7 +22,7 @@ const fixtureInputs = Object.fromEntries(await Promise.all(['entry.tsx', 'main.c
 const config = (await loadConfigFromFile({ command: 'build', mode: 'production' }, join(desktop, 'test/vitest.ui-controls-owning.config.mts'))).config
 const aliases = [{ find: 'react-dom/server', replacement: require.resolve('react-dom/server.browser') },
   ...Object.entries(radixOverlayAliases).map(([find, replacement]) => ({ find, replacement })), ...config.resolve.alias.filter(alias => alias.find !== 'react' && alias.find !== 'react-dom')]
-const receipt = { passed: false, loaded, styles, transformations, fixtureInputs, captureOnly: true, aestheticReview: 'not-performed', userRunTouched: false, sourceCommit: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim(), boundary: 'Actual GlobalFocusSurface, WorkspaceAgentRow, AgentRoster, Store and QuickSwitcher with maintained typed preview external facts. No user Session, Run or native lifecycle operation. Real installed App restart/preservation is verified separately by the delivery consumer.' }
+const receipt = { passed: false, loaded, styles, transformations, fixtureInputs, detailsOnly, captureOnly: true, aestheticReview: 'not-performed', userRunTouched: false, sourceCommit: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim(), boundary: 'Actual GlobalFocusSurface/WorkspaceAgentRow → original AgentInformationPreviewHost/Reader footer/Source → Store/QuickSwitcher; AgentRoster without persistent counts with maintained typed preview external facts. No user Session, Run or native lifecycle operation. Real installed App restart/preservation is verified separately by the delivery consumer.' }
 try {
   const source = { name: 'quick-switch-actual-source', setup(builder) {
     builder.onResolve({ filter: /monaco-editor.*\?worker$/ }, async args => {
@@ -53,7 +54,7 @@ try {
   await build({ entryPoints: [join(fixture, 'entry.tsx')], outfile: join(output, 'app.js'), bundle: true, platform: 'browser', conditions: ['browser', 'production'], format: 'esm', target: 'es2022', jsx: 'automatic', minify: true,
     plugins: [source], logLevel: 'silent', define: { __AGENTMUX_WEB_PREVIEW__: 'true', 'process.env.NODE_ENV': '"production"' },
     loader: { '.png': 'file', '.gif': 'file', '.jpg': 'file', '.jpeg': 'file', '.webp': 'file', '.avif': 'file', '.svg': 'file', '.woff2': 'file', '.woff': 'file', '.ttf': 'file' } })
-  for (const file of ['components/QuickSwitcher.tsx', 'components/AgentLocationsButton.tsx', 'components/FocusContextRow.tsx', 'components/GlobalFocusSurface.tsx', 'components/WorkspaceAgentRow.tsx', 'components/AgentRoster.tsx', 'lib/desktop-focus-navigation.ts', 'lib/focus-context-identity.ts', 'lib/quick-switch.ts', 'store.ts']) {
+  for (const file of ['components/QuickSwitcher.tsx', 'components/AgentLocationsButton.tsx', 'components/AgentInformationPreview.tsx', 'components/AgentInformationReader.tsx', 'components/AgentInformationDetails.tsx', 'components/FocusContextRow.tsx', 'components/GlobalFocusSurface.tsx', 'components/WorkspaceAgentRow.tsx', 'components/AgentRoster.tsx', 'lib/desktop-focus-navigation.ts', 'lib/focus-context-identity.ts', 'lib/quick-switch.ts', 'store.ts']) {
     const path = 'apps/desktop/src/renderer/src/' + file; assert.equal(loaded[path], hash(await readFile(join(root, path))), 'Actual production module consumed: ' + path)
   }
   assert.equal(styles['apps/desktop/src/renderer/src/styles/overlays.css'], hash(await readFile(join(desktop, 'src/renderer/src/styles/overlays.css'))))
@@ -63,12 +64,12 @@ try {
   await writeFile(join(directory, 'compiled-source.json'), JSON.stringify({ loaded, styles, transformations, compiled: receipt.compiled }, null, 2))
   const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE
   const electron = await prepareElectronApplication(root)
-  receipt.process = await runProbeProcess(electron.executable, [join(fixture, 'main.cjs'), html, temporary, directory],
+  receipt.process = await runProbeProcess(electron.executable, [join(fixture, 'main.cjs'), html, temporary, directory, ...(detailsOnly ? ['--details'] : [])],
     { temporaryRoot: temporary, cwd: root, env, timeoutMs: 120000, onLine: line => logs.push(line) })
   receipt.actual = JSON.parse(await readFile(join(directory, 'render.json'), 'utf8'))
   assert.equal(receipt.process.exitCode, 0, receipt.actual.failure?.message); assert.equal(receipt.actual.passed, true)
   receipt.frames = await Promise.all(receipt.actual.frames.map(async frame => ({ ...frame, sha256: hash(await readFile(join(directory, frame.file))) })))
-  assert.equal(receipt.frames.length, 14, 'All affected full-frame scenarios must exist')
+  assert.equal(receipt.frames.length, detailsOnly ? 6 : 14, 'All affected full-frame scenarios must exist')
   for (const [file, digest] of Object.entries(fixtureInputs)) assert.equal(hash(await readFile(join(fixture, file))), digest, 'Capture fixture retained: ' + file)
   receipt.passed = true
 } catch (error) { receipt.failure = { name: error.name, message: error.message, stack: error.stack }; process.exitCode = 1 }

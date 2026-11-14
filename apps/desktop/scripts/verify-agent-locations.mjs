@@ -2,19 +2,19 @@ import { readFileSync, mkdirSync, writeFileSync } from 'node:fs'
 import { resolve, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createHash, randomUUID } from 'node:crypto'
-import { spawnSync } from 'node:child_process'
+import { spawnSync, execFileSync } from 'node:child_process'
 
 const root = resolve(fileURLToPath(new URL('../../..', import.meta.url)))
 const directory = resolve(root, '.tmp/agent-locations', 'run-' + randomUUID())
 mkdirSync(directory, { recursive: true })
-const sourceFiles = ['store.ts', 'components/AgentLocationsButton.tsx', 'components/AgentRoster.tsx', 'components/FocusContextRow.tsx', 'components/WorkspaceAgentRow.tsx',
+const sourceFiles = ['store.ts', 'components/AgentLocationsButton.tsx', 'components/AgentInformationPreview.tsx', 'components/AgentInformationReader.tsx', 'components/AgentInformationDetails.tsx', 'components/AgentRoster.tsx', 'components/FocusContextRow.tsx', 'components/WorkspaceAgentRow.tsx',
   'components/QuickSwitcher.tsx', 'components/GlobalFocusSurface.tsx', 'components/SurfaceToolDock.tsx', 'lib/desktop-focus-navigation.ts', 'lib/focus-context-identity.ts',
   'lib/quick-switch.ts', 'lib/desktop-spatial-state.ts', 'lib/workbench-navigation-catalog.ts'].map(file => 'apps/desktop/src/renderer/src/' + file)
 sourceFiles.push('packages/core/src/spatial-state.ts', 'apps/desktop/test/agent-locations.test.tsx', 'apps/desktop/test/quick-switch.test.ts', 'apps/desktop/test/quick-switch-demand.test.tsx', 'apps/desktop/test/agent-locations.config.mts', 'apps/desktop/scripts/verify-agent-locations.mjs')
 const sha = path => createHash('sha256').update(readFileSync(resolve(root, path))).digest('hex')
 const original = Object.fromEntries(sourceFiles.map(path => [path, sha(path)]))
-const receipt = { schema: 'agentmux.desktop-agent-locations.v1', passed: false, sourceSHA256: original, cases: [],
-  boundary: 'Actual Desktop Roster/GlobalFocus/Space cards → existing Store/QuickSwitcher → original Core spatial file owner; native API transport leaves only. No live user Session or Run.' }
+const receipt = { sourceCommit: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim(), schema: 'agentmux.desktop-agent-locations.v1', passed: false, sourceSHA256: original, cases: [],
+  boundary: 'Actual Desktop Focus/Space cards → original AgentInformationPreviewHost/Reader footer/Source → existing Store/QuickSwitcher → original Core spatial file owner. Roster/cards retain no persistent count work. Native API transport leaves only; no live user Session or Run.' }
 function unchanged() { for (const [file, digest] of Object.entries(original)) if (sha(file) !== digest) throw new Error('Source changed during Agent location verification: ' + file) }
 function run(name, mutation, bearing) {
   unchanged()
@@ -35,10 +35,10 @@ function run(name, mutation, bearing) {
     if (!proofs.some(proof => proof.mutated && proof.originalSHA256 !== proof.loadedSHA256)) throw new Error('Mutated navigation owner was not evaluated: ' + name)
   } else {
     const owned = summary.testResults.find(file => file.name.endsWith('/test/agent-locations.test.tsx'))
-    if (result.status !== 0 || !summary.success || summary.numFailedTests || !owned || owned.assertionResults.filter(test => test.status === 'passed').length < 15) throw new Error('Original location consumer gate failed: ' + name)
+    if (result.status !== 0 || !summary.success || summary.numFailedTests || !owned || owned.assertionResults.filter(test => test.status === 'passed').length < 23) throw new Error('Original location consumer gate failed: ' + name)
   }
   unchanged()
-  receipt.cases.push({ name, mutation: mutation ?? null, passed: summary.numPassedTests, failed: summary.numFailedTests, bearing: failures.map(test => test.fullName), loaded: relative(root, loaded), report: relative(root, report) })
+  receipt.cases.push({ name, mutation: mutation ?? null, passed: summary.numPassedTests, failed: summary.numFailedTests, bearing: failures.map(test => test.fullName), discovered: summary.numTotalTests, files: summary.testResults.map(file => ({ file: relative(root, file.name), discovered: file.assertionResults.length, passed: file.assertionResults.filter(test => test.status === 'passed').length, failed: file.assertionResults.filter(test => test.status === 'failed').length, skipped: file.assertionResults.filter(test => test.status === 'pending').length })), loaded: relative(root, loaded), report: relative(root, report) })
   writeFileSync(resolve(directory, 'receipt.json'), JSON.stringify(receipt, null, 2) + '\n')
 }
 try {
@@ -46,8 +46,11 @@ try {
   run('first-item', 'first-item', 'Focus explicitly reselects the second Region')
   run('lose-focus', 'lose-focus', 'Focus explicitly reselects the second Region')
   run('drop-membership', 'drop-membership', 'an unknown source stays unknown')
-  run('unqualified-roster', 'unqualified-roster', 'actual Roster marks a partially unconfirmed Region unknown missing-execution')
+  run('unqualified-details', 'unqualified-details', 'actual details mark a partially unconfirmed Region unknown missing-execution')
   run('label-collisions', 'label-collisions', 'Focus explicitly reselects the second Region')
+  run('persistent-card-action', 'persistent-card-action', 'Focus explicitly reselects the second Region')
+  run('missing-details-action', 'missing-details-action', 'Focus explicitly reselects the second Region')
+  run('admission-bypass', 'admission-bypass', 'held Source refuses a changed host under the same Renderer id')
   run('restored')
   receipt.passed = true
   writeFileSync(resolve(directory, 'receipt.json'), JSON.stringify(receipt, null, 2) + '\n')
