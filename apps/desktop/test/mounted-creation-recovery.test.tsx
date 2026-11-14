@@ -47,7 +47,7 @@ async function fixture(strict = false) {
   const target: SpaceMountRecord = { hostId: 'source-route', reference: { runtimeId: 'runtime-b', spaceId: source.folder.spaceId }, workspaceId: admitted.to!.workspaceId, zoneId: source.folder.zoneId }
   const snapshot = await transport.api.call('snapshot', { hostId: target.hostId, reference: target.reference }), member = mountedSpaceRegions(snapshot)[0]!, key = spaceMountKey(target.reference)
   useAppStore.getState().mountSpace(target)
-  useAppStore.getState().editSpaceMountDraft(key, member.tab.tabId, member.region.regionId, 'Keep this private unsent task')
+  useAppStore.getState().setAgentComposerDraft(JSON.stringify([member.region.execution!.runtimeId!, member.region.agentSessionId!]), 'Keep this private unsent task')
   const sessions = useAppStore.getState().sessions
   const surface = <SourceWorkbench mountKey={key} visible />
   await dom.render(strict ? <StrictMode>{surface}</StrictMode> : surface)
@@ -108,7 +108,7 @@ test('a read arriving after this Region has been rebound cannot publish its old 
   const state = (await f.source.spatial.read())!
   await f.source.spatial.commit({ expectedRevision: state.revision, graph: { ...state.graph, regions: state.graph.regions.map(region => ({ ...region, agentSessionId: 'new-original-session', creationOperationId: 'new-original-creation' })) } })
   await vi.waitFor(() => expect(dom.container.textContent).toContain('new-original-session'))
-  await act(async () => { useAppStore.getState().editSpaceMountDraft(f.key, f.member.tab.tabId, f.member.region.regionId, 'New private draft'); release() })
+  await act(async () => { useAppStore.getState().setAgentComposerDraft(JSON.stringify([f.member.region.execution!.runtimeId!, f.member.region.agentSessionId!]), 'New private draft'); release() })
   await vi.waitFor(() => expect(dom.container.textContent).toContain('The Source has not returned this original creation.'))
   expect(button('Continue original request')).toBeUndefined()
   expect(dom.container.querySelector<HTMLTextAreaElement>('textarea')!.value).toBe('New private draft')
@@ -153,7 +153,7 @@ test('a completed continuation arriving after Region rebinding cannot refresh or
   const state = (await f.source.spatial.read())!
   await f.source.spatial.commit({ expectedRevision: state.revision, graph: { ...state.graph, regions: state.graph.regions.map(region => ({ ...region, agentSessionId: 'new-original-session', creationOperationId: 'new-original-creation' })) } })
   await vi.waitFor(() => expect(dom.container.textContent).toContain('new-original-session'))
-  await act(async () => { useAppStore.getState().editSpaceMountDraft(f.key, f.member.tab.tabId, f.member.region.regionId, 'Later private task'); release() })
+  await act(async () => { useAppStore.getState().setAgentComposerDraft(JSON.stringify([f.member.region.execution!.runtimeId!, f.member.region.agentSessionId!]), 'Later private task'); release() })
   await vi.waitFor(() => expect(button('Continue original request')).toBeUndefined())
   expect(dom.container.textContent).not.toContain('The original creation was confirmed.')
   expect(dom.container.querySelector<HTMLTextAreaElement>('textarea')!.value).toBe('Later private task')

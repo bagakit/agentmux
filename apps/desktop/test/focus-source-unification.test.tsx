@@ -20,7 +20,8 @@ import { useAppStore } from '../src/renderer/src/store'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { createWorkspaceLayout, splitWorkbenchRegion } from '@agentmux/layout'
 import { spaceMountKey } from '../src/shared/space-mount'
-import { originalSourceRegionProjectionId, originalSourceTabProjectionId, originalSourceWorkspaceId } from '../src/renderer/src/lib/original-space-navigation'
+import { originalSourceInputOwnerKey, originalSourceRegionProjectionId, originalSourceTabProjectionId, originalSourceWorkspaceId } from '../src/renderer/src/lib/original-space-navigation'
+import { mountedRegionKey, mountedSpaceInput } from '../src/renderer/src/lib/space-mount-view'
 import { DEFAULT_CONFIG } from '../src/main/config-store'
 import { composerDOM, composerSession } from './helpers/composer-dom-fixture'
 import { spaceMountTransport } from './helpers/space-mount-fixture'
@@ -50,8 +51,10 @@ async function fixture(options: { foreign?: boolean; unavailable?: boolean; mult
   for (const source of [original.b, original.d]) source.core.providers.register(new AgentProviderRegistry().get('codex'))
   const physicalReads: Promise<unknown>[] = []
   for (const source of [original.b, original.d]) {
-    const read = source.core.readSessionHistoryPage.bind(source.core)
-    vi.spyOn(source.core, 'readSessionHistoryPage').mockImplementation((...args) => { const pending = read(...args); physicalReads.push(pending); return pending })
+    // Disposal instrumentation observes physical work below the cancellable public reader.
+    const history = source.core as unknown as { readSessionHistoryPage(...args: unknown[]): Promise<unknown> }
+    const read = history.readSessionHistoryPage.bind(source.core)
+    vi.spyOn(history, 'readSessionHistoryPage').mockImplementation((...args) => { const pending = read(...args); physicalReads.push(pending); return pending })
   }
   // A cancelled logical Reader can settle before its physical Provider file read.
   // Drain exactly those owned reads before the fixture removes its private roots.
@@ -399,7 +402,22 @@ it('an original missing Session opens the common parked stage and rechecks the s
   await act(async () => f.emitMetadataError())
   expect(region().querySelector('[data-fixture-original-terminal]')).toBe(terminal)
   expect(region().querySelector('.full-page-loading')).toBeNull()
-  expect(Object.values(useAppStore.getState().mountedSpaceInputs[f.key]!.drafts)).toContain(heldDraft)
+  const originalDraftKey = mountedRegionKey(f.target.reference, f.admitted.address.tabId, f.admitted.address.regionId)
+  const ownerKey = originalSourceInputOwnerKey(f.d.owner.runtimeId, SID), legacyDraft = 'Legacy Mounted bytes must remain opaque'
+  await act(async () => useAppStore.setState(state => { const entries = state.mountedSpaceInputs as Record<string, { drafts: Record<string, string> }>; return { mountedSpaceInputs: { ...entries, [f.key]: { ...entries[f.key], drafts: { ...entries[f.key]!.drafts, [originalDraftKey]: legacyDraft } } } } }))
+  const mountedBefore = structuredClone(useAppStore.getState().mountedSpaceInputs), canonicalBefore = structuredClone(useAppStore.getState().agentComposerDrafts)
+  expect(mountedSpaceInput(useAppStore.getState().mountedSpaceInputs, f.key)!.drafts[originalDraftKey]).toBe(legacyDraft)
+  const composerSelector = '[data-agent-composer="true"] [aria-label="Message Agent"]'
+  const composer = region().querySelector<HTMLElement & { editor?: import('@tiptap/core').Editor }>(composerSelector)
+  await vi.waitFor(() => {
+    const field = region().querySelector<HTMLElement & { editor?: import('@tiptap/core').Editor }>(composerSelector)
+    expect(field?.editor, 'The recovered original Session must mount the shared Message Tool').toBeDefined()
+    expect(field!.editor!.getText({ blockSeparator: '\n' })).toBe(heldDraft)
+  })
+  const nextDraft = heldDraft + '\n恢复后继续编辑，仍只写 canonical owner。'
+  await act(async () => composer!.editor!.commands.setContent({ type: 'doc', content: nextDraft.split('\n').map(line => ({ type: 'paragraph', ...(line ? { content: [{ type: 'text', text: line }] } : {}) })) }))
+  expect(useAppStore.getState().agentComposerDrafts).toEqual({ ...canonicalBefore, [ownerKey]: nextDraft })
+  expect(useAppStore.getState().mountedSpaceInputs).toEqual(mountedBefore)
   expect(useAppStore.getState().sessions).toHaveLength(1)
   expect(useAppStore.getState().agentComposerDrafts[SID]).toBe('Keep this original local draft')
   expect((await f.b.spatial.read())!.graph).toEqual(originalSpatial!.graph)

@@ -7,25 +7,26 @@ import { useAppStore } from '../src/renderer/src/store'
 import { WorkspaceWorkbench } from '../src/renderer/src/components/WorkspaceWorkbench'
 import { HostOriginalSpaces } from '../src/renderer/src/components/settings/HostOriginalSpaces'
 import * as storeModule from '../src/renderer/src/store'
-import { acceptsMountedSnapshot, initialMountedSpaceView, mountedRegionKey, mountedSpaceInput, mountedSpaceTarget, projectMountedSpaceView } from '../src/renderer/src/lib/space-mount-view'
+import { acceptsMountedSnapshot, initialMountedSpaceView, mountedRegionKey, mountedSpaceInput, mountedSpaceTarget } from '../src/renderer/src/lib/space-mount-view'
 import { createWorkspaceLayout, setWorkbenchRegionSplitRatio, splitWorkbenchRegion } from '@agentmux/layout'
 import { dispatchWorkbenchCommand } from '../src/renderer/src/lib/workbench-shortcuts'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { spaceMountKey, type SpaceMountRecord } from '../src/shared/space-mount'
+import { originalSourceRegionProjectionId, originalSourceTabProjectionId, originalSourceWorkspaceId } from '../src/renderer/src/lib/original-space-navigation'
 import { mountedAgentOpenInput, mountedAgentOpenKey, type MountedAgentOpenInput } from '../src/renderer/src/lib/space-mount-launch'
 import { useLauncherState } from '../src/renderer/src/lib/launcher-state'
-import { composerConfig, composerDOM } from './helpers/composer-dom-fixture'
+import { composerDOM } from './helpers/composer-dom-fixture'
 import { spaceMountFixture } from './helpers/space-mount-fixture'
 
 const dom = composerDOM(), cleanup: Array<() => unknown | Promise<unknown>> = []
 beforeEach(() => { useLauncherState.setState({ sections: {}, drafts: {}, executors: {}, moteTopicId: null, persistenceIssue: null }) })
 function SourceWorkbench({ mountKey, visible }: { mountKey: string; visible: boolean }) {
-  const workspaceId = useAppStore(state => mountedSpaceTarget(state.mountedSpaceInputs, mountKey)?.workspaceId)
-  return workspaceId ? <WorkspaceWorkbench workspaceId={workspaceId} visible={visible} /> : null
+  const target = useAppStore(state => mountedSpaceTarget(state.mountedSpaceInputs, mountKey))
+  return target ? <WorkspaceWorkbench workspaceId={originalSourceWorkspaceId(target)} visible={visible} /> : null
 }
 function observationState(inputs: unknown, target?: SpaceMountRecord) {
-  return { config: null, activeWorkspaceId: target?.workspaceId ?? null, mountedSpaceInputs: inputs, mountedSpaceObservations: {},
-    workbenchSpaceSelection: target ? { spaceId: target.reference.spaceId, zoneId: target.zoneId, workspaceId: target.workspaceId, topicId: null, tabId: null, groupId: null, regionId: null } : null }
+  return { config: null, activeWorkspaceId: target ? originalSourceWorkspaceId(target) : null, mountedSpaceInputs: inputs, mountedSpaceObservations: {},
+    workbenchSpaceSelection: target ? { spaceId: target.reference.spaceId, zoneId: target.zoneId, workspaceId: originalSourceWorkspaceId(target), topicId: null, tabId: null, groupId: null, regionId: null } : null }
 }
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close() })
 async function mountedFixture() {
@@ -55,9 +56,12 @@ it('the original Window Store and view consume a registered B Space through real
   expect(originalRegion.querySelector('[aria-label="Original member workface"]')).toBeNull()
   expect(mountedTaskField().editor, 'The original Launcher remains editable without an attached Agent').toBeDefined()
   await setMountedTaskDraft('Keep B task without starting an Agent')
-  const state = useAppStore.getState(), held = mountedSpaceInput(state.mountedSpaceInputs, f.key)!
-  expect(held.drafts[mountedRegionKey(f.target.reference, f.tabId, f.regionId)]).toBe('Keep B task without starting an Agent')
-  expect(state.tabs).toBe(tabs); expect(state.layouts).toBe(layouts)
+  const state = useAppStore.getState()
+  expect(state.agentComposerDrafts[originalSourceRegionProjectionId(f.target, f.regionId)]).toBe('Keep B task without starting an Agent')
+  expect(state.tabs[originalSourceTabProjectionId(f.target, f.tabId)]).toBeDefined()
+  expect(state.layouts[originalSourceWorkspaceId(f.target)]).toBeDefined()
+  for (const [id, tab] of Object.entries(tabs)) expect(state.tabs[id]).toBe(tab)
+  for (const [id, layout] of Object.entries(layouts)) expect(state.layouts[id]).toBe(layout)
   expect(await f.cores[0]!.store.read()).toBeNull()
   expect((await f.b.store.read())!.graph.regions[0]!.execution?.runtimeId).toBe(f.b.identity.runtimeId)
   const frozenInputs = state.mountedSpaceInputs
@@ -68,31 +72,34 @@ it('the original Window Store and view consume a registered B Space through real
     await vi.waitFor(() => expect(useAppStore.getState().mountedSpaceObservations[f.key]?.snapshot?.revision).toBeGreaterThan(snapshot.revision))
   })
   expect(useAppStore.getState().mountedSpaceInputs).toBe(frozenInputs)
-  expect(useAppStore.getState().tabs).toBe(tabs)
+  for (const [id, tab] of Object.entries(tabs)) expect(useAppStore.getState().tabs[id]).toBe(tab)
 })
 
-it('source observations reuse the original native projection while private focus, ratios and drafts survive membership additions', async () => {
+it('source observations preserve ordinary private focus, ratios and drafts through membership additions', async () => {
   const f = await mountedFixture(), snapshot = await f.api.call('snapshot', { hostId: f.target.hostId, reference: f.target.reference })
   useAppStore.getState().mountSpace(f.target)
   const view = initialMountedSpaceView(snapshot), original = view.tabLayouts[f.tabId]!
   view.tabLayouts[f.tabId] = setWorkbenchRegionSplitRatio(splitWorkbenchRegion(original, original.activeRegionId, 'right', 'private-retained-region'), '', .32)
   useAppStore.getState().editSpaceMountView(f.key, view)
-  useAppStore.getState().editSpaceMountDraft(f.key, f.tabId, f.regionId, 'Retain the original B draft')
-  const partialize = useAppStore.persist.getOptions().partialize!, projection = partialize(useAppStore.getState())
-  expect(projection).toMatchObject({ mountedSpaceInputs: useAppStore.getState().mountedSpaceInputs })
-  expect(projection).not.toHaveProperty('selectedSpaceMount')
+  const draftRegionId = originalSourceRegionProjectionId(f.target, f.regionId)
+  useAppStore.setState(state => ({ agentComposerDrafts: { ...state.agentComposerDrafts, [draftRegionId]: 'Retain the original B draft' } }))
   useAppStore.getState().observeSpaceMount(f.target, { snapshot, reading: false })
-  expect(partialize(useAppStore.getState())).toBe(projection)
+  const workspaceId = originalSourceWorkspaceId(f.target), tabId = originalSourceTabProjectionId(f.target, f.tabId)
+  expect(useAppStore.getState().tabs[tabId]?.layout.root).toMatchObject({ type: 'split', ratio: .32 })
+  expect(mountedSpaceInput(useAppStore.getState().mountedSpaceInputs, f.key)!.view).toBeUndefined()
   const next = { ...snapshot, revision: snapshot.revision + 1, scope: { ...snapshot.scope,
     tabs: snapshot.scope.tabs.map(tab => ({ ...tab, regionIds: [...tab.regionIds, 'new-B-region'] })),
     regions: [...snapshot.scope.regions, { ...snapshot.scope.regions[0]!, regionId: 'new-B-region' }] } }
   useAppStore.getState().observeSpaceMount(f.target, { snapshot: next, reading: false })
-  const projected = projectMountedSpaceView(mountedSpaceInput(useAppStore.getState().mountedSpaceInputs, f.key)!.view, next)
-  expect(projected.selection).toEqual(view.selection)
-  expect(projected.tabLayouts[f.tabId]!.root).toMatchObject({ type: 'split', ratio: .32 })
-  expect(mountedSpaceInput(useAppStore.getState().mountedSpaceInputs, f.key)!.view).toBe(view)
-  expect(partialize(useAppStore.getState())).toBe(projection)
-  expect(mountedSpaceInput(useAppStore.getState().mountedSpaceInputs, f.key)!.drafts[mountedRegionKey(f.target.reference, f.tabId, f.regionId)]).toBe('Retain the original B draft')
+  const current = useAppStore.getState()
+  expect(current.tabs[tabId]?.layout.root).toMatchObject({ type: 'split', ratio: .32 })
+  expect(current.tabs[tabId]?.regions[originalSourceRegionProjectionId(f.target, 'new-B-region')]).toBeDefined()
+  expect(mountedSpaceInput(current.mountedSpaceInputs, f.key)!.view).toBeUndefined()
+  expect(current.agentComposerDrafts[draftRegionId]).toBe('Retain the original B draft')
+  expect(mountedSpaceInput(current.mountedSpaceInputs, f.key)!.drafts).toEqual({})
+  const partialize = useAppStore.persist.getOptions().partialize!(current)
+  expect(partialize.restoredWorkbench?.layouts[workspaceId]).toBeDefined()
+  expect(partialize).not.toHaveProperty('selectedSpaceMount')
 })
 
 it('hidden Window readers cancel only their source lease and keep the private input and last confirmed source', async () => {
@@ -112,11 +119,9 @@ it('hidden Window readers cancel only their source lease and keep the private in
 
 it('same raw IDs remain source qualified and malformed or other Runtime private input stays opaque', async () => {
   const f = await mountedFixture(), snapshot = await f.api.call('snapshot', { hostId: f.target.hostId, reference: f.target.reference })
-  const other = { unknownFutureInput: ['retain', { exact: 'bytes' }] }, inputs = { [f.key]: { target: f.target, drafts: {} }, foreign: other }
+  const other = { unknownFutureInput: ['retain', { exact: 'bytes' }] }, inputs = { [f.key]: { target: f.target, drafts: { [mountedRegionKey(f.target.reference, f.tabId, f.regionId)]: 'exact B input' } }, foreign: other }
   useAppStore.setState({ mountedSpaceInputs: inputs })
-  useAppStore.getState().editSpaceMountDraft(f.key, f.tabId, f.regionId, 'exact B input')
   expect((useAppStore.getState().mountedSpaceInputs as Record<string, unknown>).foreign).toBe(other)
-  expect(() => useAppStore.getState().editSpaceMountDraft('foreign', f.tabId, f.regionId, 'overwrite')).toThrow('unreadable')
   expect(acceptsMountedSnapshot(f.target, { ...snapshot, source: { ...snapshot.source, runtimeId: 'A-runtime' } })).toBe(false)
   expect(() => useAppStore.getState().observeSpaceMount(f.target, { snapshot: { ...snapshot, reference: { ...snapshot.reference, runtimeId: 'A-runtime' } }, reading: false })).toThrow('another original source')
   expect(mountedRegionKey(f.target.reference, f.tabId, f.regionId)).not.toBe(mountedRegionKey({ ...f.target.reference, runtimeId: 'A-runtime' }, f.tabId, f.regionId))
@@ -137,10 +142,11 @@ it('the actual Host entry freezes the answering Core project and registers B bef
   await act(async () => { open.click(); await vi.waitFor(() => expect(onClose).toHaveBeenCalledOnce()) })
   expect(checkpoint).toHaveBeenCalledOnce()
   const graph = (await b.store.read())!.graph, key = spaceMountKey({ runtimeId: b.identity.runtimeId, spaceId: graph.spaces[0]!.spaceId })
-  expect(useAppStore.getState().activeWorkspaceId).toBe(b.workspace.id)
-  expect(useAppStore.getState().workbenchSpaceSelection).toMatchObject({ spaceId: graph.spaces[0]!.spaceId, zoneId: graph.zones[0]!.zoneId, workspaceId: b.workspace.id })
-  expect(mountedSpaceInput(useAppStore.getState().mountedSpaceInputs, key)!.target).toEqual({ hostId: b.id, reference: { runtimeId: b.identity.runtimeId, spaceId: graph.spaces[0]!.spaceId }, workspaceId: b.workspace.id, zoneId: graph.zones[0]!.zoneId })
-  expect(useAppStore.getState().tabs).toBe(localTabs)
+  const target = { hostId: b.id, reference: { runtimeId: b.identity.runtimeId, spaceId: graph.spaces[0]!.spaceId }, workspaceId: b.workspace.id, zoneId: graph.zones[0]!.zoneId }
+  expect(useAppStore.getState().activeWorkspaceId).toBe(originalSourceWorkspaceId(target))
+  expect(useAppStore.getState().workbenchSpaceSelection).toMatchObject({ spaceId: graph.spaces[0]!.spaceId, zoneId: graph.zones[0]!.zoneId, workspaceId: originalSourceWorkspaceId(target) })
+  expect(mountedSpaceInput(useAppStore.getState().mountedSpaceInputs, key)!.target).toEqual(target)
+  for (const [id, tab] of Object.entries(localTabs)) expect(useAppStore.getState().tabs[id]).toBe(tab)
   expect(await f.cores[0]!.store.read()).toBeNull()
 })
 
@@ -191,34 +197,44 @@ it('an unknown original registration is inspected without replay and a current e
   expect(calls.filter(method => method === 'register')).toHaveLength(1)
   expect(calls).toContain('inspectRegistration')
   const graph = (await b.store.read())!.graph
-  expect(useAppStore.getState().workbenchSpaceSelection).toMatchObject({ spaceId: graph.spaces[0]!.spaceId, zoneId: graph.zones[0]!.zoneId, workspaceId: b.workspace.id })
+  const foundTarget = { hostId: retained.hostId, reference: { runtimeId: retained.registration.runtimeId, spaceId: graph.spaces[0]!.spaceId }, workspaceId: retained.registration.workspaceId, zoneId: graph.zones[0]!.zoneId }
+  expect(useAppStore.getState().workbenchSpaceSelection).toMatchObject({ spaceId: graph.spaces[0]!.spaceId, zoneId: graph.zones[0]!.zoneId, workspaceId: originalSourceWorkspaceId(foundTarget) })
   expect(Object.values(useAppStore.getState().mountedSpaceInputs as Record<string, unknown>)).toContainEqual(expect.objectContaining({ submitted: true, kind: 'folder-registration' }))
 })
 
-it('a cold unavailable source keeps its exact private positions and editable unsent input without inventing a Session', async () => {
-  const f = await mountedFixture()
+it('an unavailable source keeps its last confirmed ordinary positions and editable unsent Launcher input without inventing a Session', async () => {
+  const f = await mountedFixture(), sessions = useAppStore.getState().sessions
   useAppStore.getState().mountSpace(f.target)
   await dom.render(<SourceWorkbench mountKey={f.key} visible />)
   await act(async () => { await vi.waitFor(() => expect(dom.container.textContent).toContain('Original B tab')) })
   await setMountedTaskDraft('Unsent B original draft')
   const held = mountedSpaceInput(useAppStore.getState().mountedSpaceInputs, f.key)!
-  expect(held.view).toBeTruthy()
+  expect(held.view).toBeUndefined()
+  const projectionRegionId = originalSourceRegionProjectionId(f.target, f.regionId)
+  expect(useAppStore.getState().agentComposerDrafts[projectionRegionId]).toBe('Unsent B original draft')
+  const confirmed = useAppStore.getState(), tabs = confirmed.tabs, layouts = confirmed.layouts
   await dom.render(null)
   vi.mocked(api.spaceMounts.watch).mockRejectedValue(new Error('Original source is unavailable'))
   useAppStore.setState({ mountedSpaceObservations: {} })
   await dom.render(<SourceWorkbench mountKey={f.key} visible />)
-  expect(dom.container.textContent).toContain('Original Space observation unavailable')
-  expect(dom.container.textContent).toContain('same-region')
+  await vi.waitFor(async () => { await act(async () => {}); expect(dom.container.textContent).toContain('Original source is unavailable') })
+  expect(dom.container.textContent).toContain('Original B tab')
   expect(mountedTaskDraft()).toBe('Unsent B original draft')
-  expect(dom.container.textContent).toContain(f.b.identity.runtimeId)
+  expect(useAppStore.getState().tabs).toBe(tabs)
+  expect(useAppStore.getState().layouts).toBe(layouts)
+  expect(useAppStore.getState().agentComposerDrafts[projectionRegionId]).toBe('Unsent B original draft')
+  expect(useAppStore.getState().sessions).toBe(sessions)
+  expect(dom.container.querySelector('[data-original-source-space]')?.getAttribute('data-source-runtime')).toBe(f.b.identity.runtimeId)
   expect(dom.container.textContent).not.toContain('Original Agent')
 })
 
-it('source absence keeps the last confirmed members and private input, independently of the current missing observation', async () => {
+it('source absence keeps the last confirmed ordinary members and private input, independently of the current missing observation', async () => {
   const f = await mountedFixture()
   useAppStore.getState().mountSpace(f.target)
   await dom.render(<SourceWorkbench mountKey={f.key} visible />)
   await act(async () => { await vi.waitFor(() => expect(dom.container.textContent).toContain('Original B tab')) })
+  await setMountedTaskDraft('Retain this Launcher draft while B is absent')
+  const confirmed = useAppStore.getState(), tabs = confirmed.tabs, layouts = confirmed.layouts, inputs = confirmed.mountedSpaceInputs
   const before = (await f.b.store.read())!, graph = structuredClone(before.graph)
   graph.spaces = []; graph.zones = []; graph.tabs = []; graph.regions = []; graph.bindings = []
   await act(async () => {
@@ -226,23 +242,35 @@ it('source absence keeps the last confirmed members and private input, independe
     await vi.waitFor(() => expect(useAppStore.getState().mountedSpaceObservations[f.key]?.snapshot?.scope.space).toBeNull())
   })
   expect(dom.container.textContent).toContain('Original B tab')
-  expect(dom.container.textContent).toContain('last confirmed members and private input are kept')
-  expect(useAppStore.getState().mountedSpaceObservations[f.key]!.lastPresentSnapshot!.scope.regions[0]!.regionId).toBe(f.regionId)
+  expect(mountedTaskDraft()).toBe('Retain this Launcher draft while B is absent')
+  const current = useAppStore.getState()
+  expect(current.tabs).toBe(tabs)
+  expect(current.layouts).toBe(layouts)
+  expect(current.mountedSpaceInputs).toBe(inputs)
+  expect(current.tabs[originalSourceTabProjectionId(f.target, f.tabId)]?.source).toMatchObject({ reference: f.target.reference, tabId: f.tabId })
+  expect(current.mountedSpaceObservations[f.key]!.lastPresentSnapshot!.scope.regions[0]!.regionId).toBe(f.regionId)
 })
 
-it('the actual window shortcut owner selects only the qualified private view and never falls back to the parked A Launcher', async () => {
+it('the actual window shortcut owner selects only the qualified ordinary Source view and never falls back to the parked A Launcher', async () => {
   const f = await mountedFixture(), snapshot = await f.api.call('snapshot', { hostId: f.target.hostId, reference: f.target.reference })
   const localTab = createWorkbenchTab('local-tab', { kind: 'launcher', regionId: 'local-region', workspaceId: 'workspace' })
   const layouts = { workspace: createWorkspaceLayout('local-group', ['local-tab']) }, tabs = { [localTab.id]: localTab }
   useAppStore.setState({ tabs, layouts, activeWorkspaceId: 'workspace' })
   useAppStore.getState().mountSpace(f.target)
   useAppStore.getState().observeSpaceMount(f.target, { snapshot, reading: false })
-  const open = vi.spyOn(useAppStore.getState(), 'openLauncher')
-  expect(dispatchWorkbenchCommand({ kind: 'new-tab' }, useAppStore.getState())).toBe(false)
+  const open = vi.spyOn(useAppStore.getState(), 'openLauncher'), openSource = vi.spyOn(useAppStore.getState(), 'openOriginalSpaceLauncher')
+  const workspaceId = originalSourceWorkspaceId(f.target)
+  expect(dispatchWorkbenchCommand({ kind: 'new-tab' }, useAppStore.getState())).toBe(true)
   expect(open).not.toHaveBeenCalled()
+  expect(openSource).toHaveBeenCalledWith(workspaceId, expect.any(String))
+  expect(useAppStore.getState().workbenchSpaceSelection).toMatchObject({ workspaceId, tabId: expect.stringContaining('new-work'), regionId: originalSourceRegionProjectionId(f.target, 'new-work') })
   expect(dispatchWorkbenchCommand({ kind: 'select-tab', ordinal: 1 }, useAppStore.getState())).toBe(true)
-  expect(mountedSpaceInput(useAppStore.getState().mountedSpaceInputs, f.key)!.view!.selection).toMatchObject({ tabId: f.tabId, regionId: f.regionId })
-  expect(useAppStore.getState().tabs).toBe(tabs); expect(useAppStore.getState().layouts).toBe(layouts)
+  expect(useAppStore.getState().workbenchSpaceSelection).toMatchObject({ workspaceId,
+    tabId: originalSourceTabProjectionId(f.target, f.tabId), regionId: originalSourceRegionProjectionId(f.target, f.regionId) })
+  const current = useAppStore.getState()
+  expect(current.tabs['local-tab']).toBe(localTab)
+  expect(current.layouts.workspace).toBe(layouts.workspace)
+  expect(current.tabs[originalSourceTabProjectionId(f.target, f.tabId)]?.source).toMatchObject({ reference: f.target.reference, tabId: f.tabId })
 })
 
 it('an unreadable private layout cannot take away a healthy original source read or overwrite that private input', async () => {
@@ -383,7 +411,9 @@ it.each(['unknown', 'check-failed'] as const)('mounted new work uses the origina
   expect(calls.find(call => call.method === 'executors')?.input).toEqual({ hostId: f.target.hostId, expectedRuntimeId: f.target.reference.runtimeId, agentHostId: 'local' })
   expect(calls.find(call => call.method === 'open')?.input).toMatchObject({ hostId: f.target.hostId, reference: f.target.reference,
     request: { content: { executorId: 'only-b', agentTarget: { hostId: 'local', runtimeId: f.b.identity.runtimeId }, prompt: 'Submit this exact private B task' }, destination: { spaceId: f.target.reference.spaceId, zoneId: f.target.zoneId, newTab: true } } })
-  expect(useAppStore.getState().tabs).toBe(sourceTabs)
+  const current = useAppStore.getState()
+  for (const [id, tab] of Object.entries(sourceTabs)) expect(current.tabs[id]).toBe(tab)
+  expect(current.tabs[originalSourceTabProjectionId(f.target, f.tabId)]?.source).toMatchObject({ reference: f.target.reference, tabId: f.tabId })
   expect(await f.cores[0]!.store.read()).toBeNull()
 })
 
@@ -429,7 +459,7 @@ it('unknown mounted creation retains its original request and later draft; remou
   expect(opened).toHaveLength(1)
   expect(original.content).toMatchObject({ prompt: 'Original frozen task', agentTarget: { hostId: f.b.id + '-original-remote', runtimeId: f.b.id + '-remote-runtime' } })
   expect(mountedTaskDraft()).toBe('Later unsent task must stay')
-  expect(useAppStore.getState().workbenchSpaceSelection).toMatchObject({ spaceId: f.target.reference.spaceId, zoneId: f.target.zoneId, workspaceId: f.target.workspaceId })
+  expect(useAppStore.getState().workbenchSpaceSelection).toMatchObject({ spaceId: f.target.reference.spaceId, zoneId: f.target.zoneId, workspaceId: originalSourceWorkspaceId(f.target) })
 })
 
 it('an empty original Folder can prepare new work privately without manufacturing a source Tab or Region', async () => {
@@ -530,7 +560,8 @@ it('the real inspect.client and strict observation schema report the original So
   const value = desktopWorkbenchObservationSchema.parse(result.observation)
   expect(value.mountedSpace).toMatchObject({ target: { hostId: f.target.hostId, reference: f.target.reference },
     selection: { tabId: f.tabId, regionId: f.regionId }, presentation: 'visible', input: { kind: 'content-editable', connected: true, visible: true, inert: false } })
-  expect(value.desktop.selection.space).toMatchObject({ spaceId: f.target.reference.spaceId, zoneId: f.target.zoneId, workspaceId: f.target.workspaceId })
+  expect(value.desktop.selection.space).toMatchObject({ spaceId: f.target.reference.spaceId, zoneId: f.target.zoneId, workspaceId: originalSourceWorkspaceId(f.target) })
+  expect(Object.hasOwn(useAppStore.getState(), 'selectedSpaceMount')).toBe(false)
   expect(JSON.stringify(value.mountedSpace)).not.toContain('PRIVATE_TEXT_MUST_NOT_ENTER_THE_DISPLAY_OBSERVATION')
   const { mountedSpace, ...legacy } = value
   expect(desktopWorkbenchObservationSchema.parse(legacy).mountedSpace).toBeUndefined()
@@ -556,51 +587,75 @@ it('mounted display observation keeps source identity unknown instead of borrowi
   expect(() => desktopWorkbenchObservationSchema.parse({ ...original.observation, mountedSpace: { ...value, prompt: 'must not enter the observation' } })).toThrow()
 })
 
-it.each(['source','slot'] as const)('a pending original open cannot swallow an explicit Start after changing the exact %s',async change=>{
- const {NewTabSurface}=await import('../src/renderer/src/components/NewTabSurface')
- const {mountedAgentOpenKey,mountedAgentOpenInput}=await import('../src/renderer/src/lib/space-mount-launch')
- const f=await mountedFixture(),firstSnapshot=await f.api.call('snapshot',{hostId:f.target.hostId,reference:f.target.reference}),firstProject=firstSnapshot.scope.zones[0]!
- const resources=await f.api.call('resources',{hostId:'local'}),resource=resources.workspaces[0]!
- const registered=await f.api.call('register',{hostId:'local',registration:{runtimeId:resources.runtimeId,workspaceId:resource.workspaceId,expectedResource:{hostId:resource.hostId,workspacePath:resource.path,projectRootPath:resource.repoPath??resource.path}}})
- const other={hostId:'local',reference:registered.reference,zoneId:registered.zoneId,workspaceId:registered.workspaceId},otherSnapshot=await f.api.call('snapshot',{hostId:'local',reference:other.reference})
- useAppStore.getState().mountSpace(f.target);useAppStore.getState().mountSpace(other,false)
- const firstSlot={kind:'region' as const,tabId:'first-original-launcher',regionId:'first-original-region'},secondTarget=change==='source'?other:f.target
- const secondSlot=change==='source'?firstSlot:{kind:'region' as const,tabId:'second-original-launcher',regionId:'second-original-region'}
- const secondProject=change==='source'?otherSnapshot.scope.zones[0]!:firstProject
- const requests:Array<import('../src/shared/space-mount').SpaceMountMethods['open']['input']>=[];let failOriginal:(reason:Error)=>void=()=>{}
- const inspected:unknown[]=[]
- vi.mocked(api.spaceMounts.call).mockImplementation(async(method,input,signal)=>{
-  if(method==='describe')return{contracts:{ordinaryLaunch:true,externalAssociation:true}}as never
-  if(method==='executors'){const p=input as import('../src/shared/space-mount').SpaceMountMethods['executors']['input'];return{routeHostId:p.agentHostId,runtimeId:p.hostId==='local'?resources.runtimeId:f.b.identity.runtimeId,executors:[{executorId:'exact-only',label:'Exact source configuration',providerId:'codex',command:'/private/exact-cli',source:'registered',configRevision:'exact-source-revision',creationContract:{ordinaryLaunch:1},availability:'unknown'}]}as never}
-  if(method==='open'){const p=input as import('../src/shared/space-mount').SpaceMountMethods['open']['input'];requests.push(p);if(requests.length===1)return await new Promise<never>((_,reject)=>{failOriginal=reject});return{operationId:p.request.operationId,outcome:'unknown',from:null,to:null,agent:null,resource:null,save:{layoutApplied:false,clientStateWritten:false,storageFlushRequested:false,diskDurability:'unconfirmed',reason:null},issues:[]}as never}
-  if(method==='inspect')inspected.push(input)
-  return await f.api.call(method,input,signal)
- })
- vi.spyOn(storeModule,'checkpointMountedSpaceInputs').mockResolvedValue()
- async function prepare(target:SpaceMountRecord,slot:Extract<import('../src/renderer/src/lib/space-mount-launch').MountedLauncherSlot,{kind:'region'}>,project:typeof firstProject){
-  expect(project.directoryPath).toBeTypeOf('string')
-  const workspace={id:target.workspaceId,name:'Original Source project',hostId:target.hostId,path:project.directoryPath!,kind:'folder' as const}
-  const tab=createWorkbenchTab(slot.tabId,{kind:'launcher',regionId:slot.regionId,workspaceId:workspace.id})
-  useAppStore.setState({config:{...composerConfig,hosts:[...composerConfig.hosts,...(target.hostId==='local'?[]:[{id:target.hostId,kind:'ssh' as const,label:'Original Source Host',hostname:'private-source.invalid'}])],workspaces:[workspace]},
-    tabs:{[tab.id]:tab},layouts:{[workspace.id]:createWorkspaceLayout('source-launch-group',[tab.id])},activeWorkspaceId:workspace.id,agentComposerDrafts:{[slot.regionId]:'Second exact task'}})
-  useLauncherState.setState({sections:{},executors:{},drafts:{['region:'+slot.regionId]:{browser:'',note:'',sourceExecution:{project:{id:workspace.id,hostId:workspace.hostId,path:workspace.path},target,
-    agentTarget:{hostId:'local',runtimeId:target.hostId==='local'?resources.runtimeId:f.b.identity.runtimeId},executorId:'exact-only'}}}})
-  await dom.render(<NewTabSurface tabGroupId="source-launch-group" tabId={slot.tabId} regionId={slot.regionId} visible />)
-  await chooseSourceExecutor('exact-only','Exact source configuration')
- }
- async function start(){const button=originalLaunchButton();expect(button.disabled,dom.container.textContent??'').toBe(false);await act(async()=>button.click())}
- await prepare(f.target,firstSlot,firstProject);await start();await vi.waitFor(()=>expect(requests).toHaveLength(1))
- const first=requests[0]!,firstKey=mountedAgentOpenKey(f.target,firstSlot)
- await prepare(secondTarget,secondSlot,secondProject);await start();await vi.waitFor(()=>expect(requests).toHaveLength(2))
- expect(requests[1]).toMatchObject({hostId:secondTarget.hostId,reference:secondTarget.reference,request:{destination:{spaceId:secondTarget.reference.spaceId,zoneId:secondTarget.zoneId}}})
- expect(requests[1]!.request.operationId).not.toBe(first.request.operationId)
- await act(async()=>failOriginal(Error('First original open reply lost')))
- await vi.waitFor(()=>expect(mountedAgentOpenInput(useAppStore.getState().mountedSpaceInputs,firstKey)?.issue).toContain('First original open reply lost'))
- expect(mountedAgentOpenInput(useAppStore.getState().mountedSpaceInputs,firstKey)?.request).toBe(first.request)
- await prepare(f.target,firstSlot,firstProject)
- const check=Array.from(dom.container.querySelectorAll<HTMLButtonElement>('button')).find(x=>x.textContent==='Check original task')!
- await act(async()=>check.click());await vi.waitFor(()=>expect(inspected).toHaveLength(1))
- expect(inspected[0]).toEqual({hostId:f.target.hostId,reference:f.target.reference,requestId:first.request.operationId});expect(requests).toHaveLength(2)
+it.each(['source','slot'] as const)('a pending original open cannot swallow an explicit Start after changing the exact %s', async change => {
+  const { NewTabSurface } = await import('../src/renderer/src/components/NewTabSurface')
+  const f = await mountedFixture(), firstSnapshot = await f.api.call('snapshot', { hostId: f.target.hostId, reference: f.target.reference })
+  const resources = await f.api.call('resources', { hostId: 'local' }), resource = resources.workspaces[0]!
+  const registered = await f.api.call('register', { hostId: 'local', registration: { runtimeId: resources.runtimeId, workspaceId: resource.workspaceId,
+    expectedResource: { hostId: resource.hostId, workspacePath: resource.path, projectRootPath: resource.repoPath ?? resource.path } } })
+  const other: SpaceMountRecord = { hostId: 'local', reference: registered.reference, zoneId: registered.zoneId, workspaceId: registered.workspaceId }
+  const otherSnapshot = await f.api.call('snapshot', { hostId: 'local', reference: other.reference })
+  const firstSlot = { kind: 'region' as const, tabId: f.tabId, regionId: f.regionId }, secondTarget = change === 'source' ? other : f.target
+  const secondSlot = change === 'source' ? firstSlot : { kind: 'region' as const, tabId: 'second-original-launcher', regionId: 'second-original-region' }
+  const secondSnapshot = change === 'source' ? otherSnapshot : firstSnapshot, secondProject = secondSnapshot.scope.zones[0]!
+  expect(secondProject.directoryPath).toBeTypeOf('string')
+  await f.api.call('apply', { hostId: secondTarget.hostId, reference: secondTarget.reference, edit: { reference: secondTarget.reference, expectedRevision: secondSnapshot.revision, changes: {
+    tabs: [{ tabId: secondSlot.tabId, zoneId: secondTarget.zoneId, workspaceId: secondTarget.workspaceId, name: 'Second original Launcher', regionIds: [secondSlot.regionId] }],
+    regions: [{ regionId: secondSlot.regionId, tabId: secondSlot.tabId, kind: 'launcher', agentSessionId: null, runId: null,
+      execution: { hostId: 'local', cwd: secondProject.directoryPath!, runtimeId: secondTarget.reference.runtimeId } }]
+  } } })
+  useAppStore.getState().mountSpace(f.target); useAppStore.getState().mountSpace(other, false)
+  const requests: Array<import('../src/shared/space-mount').SpaceMountMethods['open']['input']> = []
+  let failOriginal: (reason: Error) => void = () => {}
+  const inspected: unknown[] = []
+  vi.mocked(api.spaceMounts.call).mockImplementation(async (method, input, signal) => {
+    if (method === 'describe') return { contracts: { ordinaryLaunch: true, externalAssociation: true } } as never
+    if (method === 'executors') {
+      const p = input as import('../src/shared/space-mount').SpaceMountMethods['executors']['input']
+      return { routeHostId: p.agentHostId, runtimeId: p.hostId === 'local' ? resources.runtimeId : f.b.identity.runtimeId,
+        executors: [{ executorId: 'exact-only', label: 'Exact source configuration', providerId: 'codex', command: '/private/exact-cli', source: 'registered', configRevision: 'exact-source-revision', creationContract: { ordinaryLaunch: 1 }, availability: 'unknown' }] } as never
+    }
+    if (method === 'open') {
+      const p = input as import('../src/shared/space-mount').SpaceMountMethods['open']['input']; requests.push(p)
+      if (requests.length === 1) return await new Promise<never>((_, reject) => { failOriginal = reject })
+      return { operationId: p.request.operationId, outcome: 'unknown', from: null, to: null, agent: null, resource: null,
+        save: { layoutApplied: false, clientStateWritten: false, storageFlushRequested: false, diskDurability: 'unconfirmed', reason: null }, issues: [] } as never
+    }
+    if (method === 'inspect') inspected.push(input)
+    return await f.api.call(method, input, signal)
+  })
+  vi.spyOn(storeModule, 'checkpointMountedSpaceInputs').mockResolvedValue()
+  async function prepare(target: SpaceMountRecord, slot: typeof firstSlot) {
+    const snapshot = await f.api.call('snapshot', { hostId: target.hostId, reference: target.reference })
+    useAppStore.getState().observeSpaceMount(target, { snapshot, reading: false })
+    useAppStore.getState().openOriginalSpaceLocation({ target, occurrence: { tabId: slot.tabId, regionId: slot.regionId } })
+    const tabId = originalSourceTabProjectionId(target, slot.tabId), regionId = originalSourceRegionProjectionId(target, slot.regionId)
+    const selection = useAppStore.getState().workbenchSpaceSelection
+    expect(selection).toMatchObject({ workspaceId: originalSourceWorkspaceId(target), tabId, regionId })
+    useAppStore.setState(state => ({ agentComposerDrafts: { ...state.agentComposerDrafts, [regionId]: 'Second exact task' } }))
+    useLauncherState.setState({ sections: {}, executors: {}, drafts: {}, moteTopicId: null, persistenceIssue: null })
+    await dom.render(<NewTabSurface tabGroupId={selection!.groupId!} tabId={tabId} regionId={regionId} visible />)
+    await chooseSourceExecutor('exact-only', 'Exact source configuration')
+    return { kind: 'region' as const, tabId, regionId }
+  }
+  async function start() {
+    const button = originalLaunchButton(); expect(button.disabled, dom.container.textContent ?? '').toBe(false)
+    await act(async () => button.click())
+  }
+  const firstProjectedSlot = await prepare(f.target, firstSlot); await start(); await vi.waitFor(() => expect(requests).toHaveLength(1))
+  const first = requests[0]!, firstKey = mountedAgentOpenKey(f.target, firstProjectedSlot)
+  expect(first.request.content).toMatchObject({ prompt: 'Second exact task' })
+  const secondProjectedSlot = await prepare(secondTarget, secondSlot); await start(); await vi.waitFor(() => expect(requests).toHaveLength(2))
+  expect(mountedAgentOpenKey(secondTarget, secondProjectedSlot)).not.toBe(firstKey)
+  expect(requests[1]).toMatchObject({ hostId: secondTarget.hostId, reference: secondTarget.reference, request: { destination: { spaceId: secondTarget.reference.spaceId, zoneId: secondTarget.zoneId } } })
+  expect(requests[1]!.request.operationId).not.toBe(first.request.operationId)
+  await act(async () => failOriginal(Error('First original open reply lost')))
+  await vi.waitFor(() => expect(mountedAgentOpenInput(useAppStore.getState().mountedSpaceInputs, firstKey)?.issue).toContain('First original open reply lost'))
+  expect(mountedAgentOpenInput(useAppStore.getState().mountedSpaceInputs, firstKey)?.request).toBe(first.request)
+  await prepare(f.target, firstSlot)
+  const check = Array.from(dom.container.querySelectorAll<HTMLButtonElement>('button')).find(x => x.textContent === 'Check original task')!
+  await act(async () => check.click()); await vi.waitFor(() => expect(inspected).toHaveLength(1))
+  expect(inspected[0]).toEqual({ hostId: f.target.hostId, reference: f.target.reference, requestId: first.request.operationId }); expect(requests).toHaveLength(2)
 })
 
 it('the real Window Store keeps healthy members and private workface when a future association has no execution identity', async () => {
@@ -615,8 +670,7 @@ it('the real Window Store keeps healthy members and private workface when a futu
   useAppStore.setState({ tabs, layouts, activeWorkspaceId: 'workspace' })
   useAppStore.getState().mountSpace(f.target)
   useAppStore.getState().observeSpaceMount(f.target, { snapshot, reading: false })
-  useAppStore.getState().editSpaceMountView(f.key, initialMountedSpaceView(snapshot))
-  useAppStore.getState().editSpaceMountDraft(f.key, f.tabId, f.regionId, 'Keep the original unsent draft')
+  useAppStore.getState().setAgentComposerDraft(JSON.stringify([f.target.reference.runtimeId, 'original-healthy-SID']), 'Keep the original unsent draft')
   const slot = { kind: 'region' as const, tabId: f.tabId, regionId: f.regionId }, requestKey = mountedAgentOpenKey(f.target, slot)
   const pending: MountedAgentOpenInput = { kind: 'agent-open', target: f.target, slot, submitted: true, request: {
     operationId: 'original-pending-OP', content: { kind: 'new-agent', executorId: 'codex' },
@@ -652,9 +706,11 @@ it('the real Window Store keeps healthy members and private workface when a futu
     expect(after.mountedSpaceInputs).toBe(before.mountedSpaceInputs)
     expect(mountedAgentOpenInput(after.mountedSpaceInputs, requestKey)).toBe(pending)
     expect((after.mountedSpaceInputs as Record<string, unknown>)['opaque-neighbor']).toBe(opaque)
-    expect(mountedSpaceInput(after.mountedSpaceInputs, f.key)!.view).toBe(mountedSpaceInput(before.mountedSpaceInputs, f.key)!.view)
-    expect(mountedSpaceInput(after.mountedSpaceInputs, f.key)!.drafts[mountedRegionKey(f.target.reference, f.tabId, f.regionId)]).toBe('Keep the original unsent draft')
-    expect(after.tabs).toBe(tabs); expect(after.layouts).toBe(layouts)
+    expect(mountedSpaceInput(after.mountedSpaceInputs, f.key)!.view).toBeUndefined()
+    expect(after.agentComposerDrafts[JSON.stringify([f.target.reference.runtimeId, 'original-healthy-SID'])]).toBe('Keep the original unsent draft')
+    expect(after.tabs['original-local-tab']).toBe(localTab)
+    expect(after.layouts.workspace).toBe(layouts.workspace)
+    expect(after.tabs[originalSourceTabProjectionId(f.target, f.tabId)]?.source).toMatchObject({ reference: f.target.reference, tabId: f.tabId })
     expect(after.sessions).toBe(before.sessions); expect(Object.hasOwn(after,'selectedSpaceMount')).toBe(false)
   }
 })

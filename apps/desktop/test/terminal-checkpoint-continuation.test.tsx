@@ -17,6 +17,7 @@ import { TERMINAL_REPLAY_BATCH_BYTES } from '@agentmux/client-ui/terminal/replay
 import { rendererPerformance } from '../src/renderer/src/lib/renderer-performance'
 import { parseRendererPerformanceSnapshot } from '@agentmux/core/control'
 import { readTerminalViewObservation } from '../src/renderer/src/lib/terminal-view-observation'
+import { RuntimeController } from '../src/main/runtime-controller'
 
 vi.mock('electron', () => ({ app: { getPath: () => tmpdir() } }))
 vi.mock('react-resizable-panels', async () => {
@@ -835,7 +836,7 @@ it('the mounted Agent workface consumes the real member handle for original Term
     vi.spyOn(f.d.core,'refreshRunAttachment').mockResolvedValue({run:subject.run,gap:null,resizeRevision:0,terminal:{type:'unknown',reason:'origin_unknown'},replay:[{type:'data',runId:original.run.runId,startByte:0,endByte:dataBytes.length,data,dataBytes}]})
     const release=vi.spyOn(f.d.core,'releaseRunAttachment').mockResolvedValue()
     const bytes=vi.spyOn(f.d.core,'writeAgent').mockResolvedValue({runId:original.run.runId,appliedByteRange:null,acceptedThroughByte:1})
-    const prompt=vi.spyOn(f.d.core,'submitAgentPrompt').mockResolvedValue(undefined)
+    const prompt=vi.spyOn(f.d.core,'submitAgentPrompt')
     const main=spaceMountTransport(cleanup,[{id:'original-B-carrier',carrier:{forwardRpc:f.b.rpc.call.bind(f.b.rpc),subscribeRpc:f.b.rpc.subscribe.bind(f.b.rpc)}}],structuredClone(DEFAULT_CONFIG))
     let memberToken:unknown
     const originalMemberOpen=main.handlers.get('spaceMounts:member')!
@@ -843,25 +844,29 @@ it('the mounted Agent workface consumes the real member handle for original Term
     let deliver:Parameters<typeof api.spaceMounts.member>[1]=()=>{}
     // Only the general session event delivery is unavailable; the original fixed read/IO remain real.
     vi.spyOn(api.spaceMounts,'member').mockImplementation((input,listener,signal)=>{deliver=listener;listener({type:'observation-error',error:{code:'PRIVATE_UPDATES_UNAVAILABLE',message:'Private session updates unavailable'}});return main.api.member(input,event=>{if(event.type!=='session')listener(event)},signal)})
-    const target={hostId:'original-B-carrier',target:{reference:f.reference,regionId:admitted.address.regionId,runtimeId:f.d.owner.runtimeId,agentSessionId:sid,expectedRun:original.run}},key=spaceMountKey(f.reference)
+    const target={hostId:'original-B-carrier',target:{reference:f.reference,regionId:admitted.address.regionId,runtimeId:f.d.owner.runtimeId,agentSessionId:sid,expectedRun:original.run,expectedAdmission:{kind:'creation' as const,operationId:'visible-member-creation'}}}
+    const runtime=Object.assign(Object.create(RuntimeController.prototype),{hosts:new Map([['original-B-carrier',{client:{forwardRpc:f.b.rpc.call.bind(f.b.rpc),subscribeRpc:f.b.rpc.subscribe.bind(f.b.rpc)}}]]),hostOperations:new Map(),hostReconfigurationReservations:new Set()}) as RuntimeController
+    vi.spyOn(api.sessions,'submitPrompt').mockImplementation((route,text,operationId,condition,choice,human,note,channel,_continuation,_pmo,_dispatch,capture,images)=>runtime.submitPrompt(route,text,operationId,condition,undefined,choice,human,note,channel,capture,images))
+    vi.spyOn(api.sessions,'inspectInput').mockImplementation((route,input)=>runtime.inspectInput(route,input))
+    cleanup.push(await useAppStore.getState().initialize())
     useAppStore.getState().mountSpace({hostId:target.hostId,reference:f.reference,zoneId,workspaceId:'original-b-project'})
-    useAppStore.getState().editSpaceMountDraft(key,tabId,admitted.address.regionId,'Original visible rich message')
+    useAppStore.getState().setAgentComposerDraft(JSON.stringify([target.target.runtimeId, sid]),'Original visible rich message')
     const checkpoint=vi.spyOn(store,'checkpointMountedSpaceInputs').mockResolvedValue()
     const sessions=useAppStore.getState().sessions
-    const view=(visible:boolean)=><DesktopClientUiProvider><MountedSpaceAgent target={target} visible={visible} active={visible} mountKey={key} tabId={tabId}/></DesktopClientUiProvider>
+    const view=(visible:boolean)=><DesktopClientUiProvider><MountedSpaceAgent target={target} visible={visible} active={visible} sourceTabId={tabId}/></DesktopClientUiProvider>
     await act(async()=>root.render(view(true)))
-    await vi.waitFor(async()=>{await act(async()=>{});expect(container.querySelector('[aria-label="Send new message"]')).not.toBeNull();expect(fixture.terminals,container.textContent??'').toHaveLength(1);expect(contents(fixture.terminals[0]!)).toContain('The original D terminal')})
+    await vi.waitFor(async()=>{await act(async()=>{});expect(container.querySelector('.composer-send')).not.toBeNull();expect(fixture.terminals,container.textContent??'').toHaveLength(1);expect(contents(fixture.terminals[0]!)).toContain('The original D terminal')})
     expect(container.textContent).toContain('Private session updates unavailable')
     fixture.terminals[0]!.input('x');await vi.waitFor(()=>expect(bytes).toHaveBeenCalledOnce())
-    await act(async()=>container.querySelector<HTMLButtonElement>('[aria-label="Send new message"]')!.click())
+    await act(async()=>container.querySelector<HTMLButtonElement>('.composer-send')!.click())
     await vi.waitFor(()=>expect(prompt).toHaveBeenCalledOnce())
     expect(prompt.mock.calls[0]![0]).toMatchObject({agentSessionId:sid,expectedRun:original.run,prompt:'Original visible rich message'})
-    expect(checkpoint).toHaveBeenCalledOnce();expect(useAppStore.getState().sessions).toBe(sessions)
+    expect(checkpoint).not.toHaveBeenCalled();expect(useAppStore.getState().sessions).toBe(sessions)
     expect(attach).not.toHaveBeenCalled();expect(write).not.toHaveBeenCalled()
     expect(container.textContent).not.toContain('Stop Agent');expect(container.textContent).not.toContain('Approve')
     const handle=await vi.mocked(api.spaceMounts.member).mock.results[0]!.value,confirmed=await handle.call('read',{})
     await act(async()=>deliver({type:'session',session:confirmed}))
-    expect(container.textContent).not.toContain('Private session updates unavailable')
+    expect(container.textContent).toContain('Private session updates unavailable')
     expect(typeof memberToken).toBe('string')
     await act(async()=>{expect(()=>main.renderer.emit('spaceMounts:memberEvent',{}, {token:memberToken,observation:{type:'error',error:{code:'PRIVATE_READER_CLOSED',message:'Private member reader closed'}}})).not.toThrow()})
     await vi.waitFor(()=>expect(release).toHaveBeenCalledOnce())
@@ -869,7 +874,8 @@ it('the mounted Agent workface consumes the real member handle for original Term
     const rich=container.querySelector<HTMLElement & {editor:import('@tiptap/core').Editor}>('[role="textbox"]')!
     expect(rich).not.toBeNull()
     await act(async()=>{rich.editor.commands.setContent({type:'doc',content:[{type:'paragraph',content:[{type:'text',text:'Explicit message after observer closed'}]}]})})
-    await act(async()=>container.querySelector<HTMLButtonElement>('[aria-label="Send new message"]')!.click())
+    await vi.waitFor(()=>expect(useAppStore.getState().agentSteerInFlight[JSON.stringify([target.target.runtimeId,sid])]).toBeUndefined())
+    await act(async()=>container.querySelector<HTMLButtonElement>('.composer-send')!.click())
     await vi.waitFor(()=>expect(prompt).toHaveBeenCalledTimes(2))
     expect(prompt.mock.calls[1]![0]).toMatchObject({agentSessionId:sid,expectedRun:original.run,prompt:'Explicit message after observer closed'})
     expect(useAppStore.getState().sessions).toBe(sessions);expect(bytes).toHaveBeenCalledOnce()
@@ -887,7 +893,7 @@ it('the ordinary Workbench consumes its original foreign Region through real Cor
   const { DesktopClientUiProvider } = await import('../src/renderer/src/components/DesktopClientUiProvider')
   const { ordinaryAgentSpaceMember } = await import('../src/renderer/src/store')
   const store = await import('../src/renderer/src/store')
-  const { mountedMemberDraft } = await import('../src/renderer/src/lib/space-member-input')
+  const { originalSourceInputOwnerKey } = await import('../src/renderer/src/lib/original-space-navigation')
   const { spaceMountKey } = await import('../src/shared/space-mount')
   const cleanup: Array<() => unknown | Promise<unknown>> = []
   try {
@@ -906,11 +912,14 @@ it('the ordinary Workbench consumes its original foreign Region through real Cor
       replay: [{ type: 'data', runId: original.run.runId, startByte: 0, endByte: dataBytes.length, data, dataBytes }] })
     const release = vi.spyOn(f.d.core, 'releaseRunAttachment').mockResolvedValue()
     const raw = vi.spyOn(f.d.core, 'writeAgent').mockResolvedValue({ runId: original.run.runId, appliedByteRange: null, acceptedThroughByte: 1 })
-    const submit = vi.spyOn(f.d.core, 'submitAgentPrompt').mockResolvedValue(undefined)
+    const submit = vi.spyOn(f.d.core, 'submitAgentPrompt')
     const checkpoint = vi.spyOn(store, 'checkpointMountedSpaceInputs').mockResolvedValue()
     const config: AppConfig = { ...configuration, hosts: [{ id: 'local', kind: 'local', label: 'Original B device' }],
       workspaces: [{ id: 'original-b-project', hostId: 'local', path: '/b/project', name: 'Existing B project', kind: 'folder' }] }
     const main = spaceMountTransport(cleanup, [{ id: 'local', carrier: { forwardRpc: f.b.rpc.call.bind(f.b.rpc), subscribeRpc: f.b.rpc.subscribe.bind(f.b.rpc) } }], config)
+    const runtime=Object.assign(Object.create(RuntimeController.prototype),{hosts:new Map([['local',{client:{forwardRpc:f.b.rpc.call.bind(f.b.rpc),subscribeRpc:f.b.rpc.subscribe.bind(f.b.rpc)}}]]),hostOperations:new Map(),hostReconfigurationReservations:new Set()}) as RuntimeController
+    vi.spyOn(api.sessions,'submitPrompt').mockImplementation((route,text,operationId,condition,choice,human,note,channel,_continuation,_pmo,_dispatch,capture,images)=>runtime.submitPrompt(route,text,operationId,condition,undefined,choice,human,note,channel,capture,images))
+    vi.spyOn(api.sessions,'inspectInput').mockImplementation((route,input)=>runtime.inspectInput(route,input))
     const member = vi.spyOn(api.spaceMounts, 'member').mockImplementation(main.api.member)
     const metadata = vi.spyOn(api.spaceMounts, 'sessions').mockImplementation(main.api.sessions)
     const business = vi.spyOn(api.spaceMounts, 'watch').mockImplementation(main.api.watch)
@@ -919,7 +928,7 @@ it('the ordinary Workbench consumes its original foreign Region through real Cor
     const originalSnapshot = await api.sessions.snapshot()
     vi.spyOn(api.config, 'get').mockResolvedValue(config)
     const sameSidLocal = { ...session, id: sid, control: { ...session.control, agentSessionId: sid } }
-    vi.spyOn(api.sessions, 'snapshot').mockResolvedValue({ ...originalSnapshot, config, sessions: [sameSidLocal] })
+    vi.spyOn(api.sessions, 'snapshot').mockResolvedValue({ ...originalSnapshot, sessions: [sameSidLocal] })
     vi.spyOn(api.spatial, 'read').mockImplementation(() => f.b.spatial.readForLayout())
     vi.spyOn(api.spatial, 'commit').mockImplementation(input => f.b.spatial.commit(input))
     const dispose = await useAppStore.getState().initialize(); cleanup.push(dispose)
@@ -944,23 +953,23 @@ it('the ordinary Workbench consumes its original foreign Region through real Cor
     expect(useAppStore.getState().mountedSpaceInputs).toBe(inputBefore)
     expect(Object.hasOwn(useAppStore.getState(),'selectedSpaceMount')).toBe(false)
     expect(useAppStore.getState().sessions).toContainEqual(sameSidLocal)
-    expect(container.querySelector('[aria-label="Send new message"]')).not.toBeNull()
+    expect(container.querySelector('.composer-send')).not.toBeNull()
     const rich = container.querySelector<HTMLElement & { editor: import('@tiptap/core').Editor }>('[role="textbox"]')!
     await act(async () => rich.editor.commands.setContent({ type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Only the original D member draft' }] }] }))
-    expect(mountedMemberDraft(useAppStore.getState().mountedSpaceInputs, spaceMountKey(f.reference), tabId, occurrence.member)).toBe('Only the original D member draft')
+    expect(useAppStore.getState().agentComposerDrafts[originalSourceInputOwnerKey(f.d.owner.runtimeId, sid)]).toBe('Only the original D member draft')
     expect(useAppStore.getState().agentComposerDrafts[sid]).toBe('Unrelated local same-SID draft')
     expect(Object.hasOwn(useAppStore.getState(),'selectedSpaceMount')).toBe(false)
     fixture.terminals[0]!.input('x'); await vi.waitFor(() => expect(raw).toHaveBeenCalledOnce())
     expect(raw.mock.calls[0]![0]).toMatchObject({ agentSessionId: sid, expectedRun: original.run, data: 'x' })
-    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Send new message"]')!.click())
+    await act(async () => container.querySelector<HTMLButtonElement>('.composer-send')!.click())
     await vi.waitFor(() => expect(submit).toHaveBeenCalledOnce())
-    expect(checkpoint).toHaveBeenCalledOnce()
+    expect(checkpoint).not.toHaveBeenCalled()
     expect(submit.mock.calls[0]![0]).toMatchObject({ agentSessionId: sid, expectedRun: original.run, prompt: 'Only the original D member draft' })
     const persisted = useAppStore.persist.getOptions().partialize!(useAppStore.getState())
     const restored = JSON.parse(JSON.stringify(persisted))
     expect(restored.mountedSpaceInputs).toEqual(useAppStore.getState().mountedSpaceInputs)
-    expect(restored.mountedSpaceInputs[spaceMountKey(f.reference)].kind).toBe('space-member-input')
-    expect(JSON.stringify(restored.mountedSpaceInputs)).toContain('Only the original D member draft')
+    expect(restored.agentSteerQueues[originalSourceInputOwnerKey(f.d.owner.runtimeId,sid)][0]).toMatchObject({text:'Only the original D member draft',originalMember:occurrence.member})
+    expect(restored.mountedSpaceInputs).toEqual(inputBefore)
     expect(useAppStore.getState().agentComposerDrafts[sid]).toBe('Unrelated local same-SID draft')
     expect(attach).not.toHaveBeenCalled(); expect(write).not.toHaveBeenCalled()
     expect(useAppStore.getState().layouts['original-b-project']).toBe(layout)
@@ -998,7 +1007,7 @@ it('the ordinary Workbench consumes its original foreign Region through real Cor
     const newRun = await f.d.put(sid, 2, 'original-D-continued-run')
     await vi.waitFor(() => expect(Object.values(useAppStore.getState().mountedSpaceSessions[spaceMountKey(f.reference)]!.members)
       .some(fact => fact.state.status === 'observed' && fact.state.session.agentSessionId === sid && fact.state.session.run?.runId === newRun.run.runId)).toBe(true))
-    expect((await f.b.spatial.readForLayout()).graph.regions.find(region => region.regionId === regionId)!.runId).toBe(original.run.runId)
+    expect((await f.b.spatial.readForLayout())!.graph.regions.find(region => region.regionId === regionId)!.runId).toBe(original.run.runId)
     const currentSubject = await f.d.core.runtimeSubject({ kind: 'agent-session', agentSessionId: sid })
     if (currentSubject.kind !== 'agent') throw Error('Expected the same original Agent in its current Run')
     const continuedData = 'Same original D Session, current Run\r\n', continuedBytes = new TextEncoder().encode(continuedData)
@@ -1019,7 +1028,7 @@ it('the ordinary Workbench consumes its original foreign Region through real Cor
     await act(async () => useAppStore.setState({ mountedSpaceSessions: {} }))
     expect(member).toHaveBeenCalledTimes(handlesBeforeGap)
     expect(contents(fixture.terminals.at(-1)!)).toContain('Same original D Session, current Run')
-    const retainedInputs = JSON.stringify(useAppStore.getState().mountedSpaceInputs)
+    const retainedInputs = JSON.stringify(useAppStore.getState().agentSteerQueues[originalSourceInputOwnerKey(f.d.owner.runtimeId,sid)])
     expect(retainedInputs).toContain(original.run.runId)
     expect(retainedInputs).toContain('Only the original D member draft')
     expect(submit).toHaveBeenCalledOnce(); expect(raw).toHaveBeenCalledOnce()
@@ -1075,14 +1084,14 @@ it('the ordinary Region viewer does not inherit A grants and a denied foreign me
     vi.spyOn(api.spaceMounts, 'member').mockImplementation(main.api.member)
     const snapshot = await api.sessions.snapshot()
     vi.spyOn(api.config, 'get').mockResolvedValue(config)
-    vi.spyOn(api.sessions, 'snapshot').mockResolvedValue({ ...snapshot, config, sessions: [session] })
+    vi.spyOn(api.sessions, 'snapshot').mockResolvedValue({ ...snapshot, sessions: [session] })
     vi.spyOn(api.spatial, 'read').mockImplementation(() => f.b.spatial.readForLayout())
     vi.spyOn(api.spatial, 'commit').mockImplementation(input => f.b.spatial.commit(input))
     const dispose = await useAppStore.getState().initialize(); cleanup.push(dispose)
     useAppStore.setState({ sessions: [session], agentComposerDrafts: { [session.id]: 'Healthy local input' } })
     await act(async () => root.render(<DesktopClientUiProvider>
       <OrdinarySpaceMemberViewport tabId={admission.address.tabId!} regionId={admission.address.regionId} sessionId={sid} visible active><div>Must not borrow a local Session</div></OrdinarySpaceMemberViewport>
-      <SessionPane sessionId={session.id} surfaceKind="agent" linkOrigin={origin} visible />
+      <SessionPane sessionId={session.id} surfaceKind="agent" interactiveResize={false} linkOrigin={origin} visible />
     </DesktopClientUiProvider>))
     await vi.waitFor(async () => { await act(async () => {}); expect(container.textContent).toContain('has not delegated'); expect(fixture.terminals).toHaveLength(1) })
     fixture.terminals[0]!.input('healthy-local')
@@ -1108,6 +1117,7 @@ it.each(['missing-admission', 'old-optional-fields'] as const)('an already obser
     await f.b.spatial.settleAgentOpen(admission.requestId, original, { workspaceId: 'original-b-project', phase: 'attached',
       agentPresentation: { sessionId: sid, agentSessionId: sid, hostId: 'D-in-B', runtimeId: f.d.owner.runtimeId } })
     const legacy = await f.b.spatial.readForLayout()
+    if (!legacy) throw Error('Expected the original legacy spatial document')
     // Original pre-admission Desktop delivery is the explicit leaf: it has the exact
     // remote Host/SID/control/descriptor, but no new source-qualified admission witness.
     const legacyRegion = legacy.graph.regions.find(region => region.regionId === admission.address.regionId)!
@@ -1126,7 +1136,7 @@ it.each(['missing-admission', 'old-optional-fields'] as const)('an already obser
       workspaces: [{ id: 'original-b-project', hostId: 'local', path: '/b/project', kind: 'folder', name: 'B project' }] }
     const snapshot = await api.sessions.snapshot()
     vi.spyOn(api.config, 'get').mockResolvedValue(config)
-    vi.spyOn(api.sessions, 'snapshot').mockResolvedValue({ ...snapshot, config, sessions: [remote] })
+    vi.spyOn(api.sessions, 'snapshot').mockResolvedValue({ ...snapshot, sessions: [remote] })
     vi.spyOn(api.spatial, 'read').mockResolvedValue(legacy)
     const dispose = await useAppStore.getState().initialize(); cleanup.push(dispose)
     useAppStore.setState({ sessions: [remote], agentComposerDrafts: { [sid]: 'Original remote unsent draft' } })
@@ -1134,7 +1144,7 @@ it.each(['missing-admission', 'old-optional-fields'] as const)('an already obser
     const member = vi.spyOn(api.spaceMounts, 'member')
     const linkOrigin = { workspaceId: 'original-b-project', tabId: admission.address.tabId!, regionId: admission.address.regionId }
     const view = <DesktopClientUiProvider><OrdinarySpaceMemberViewport {...linkOrigin} sessionId={sid} visible active>
-      <SessionPane sessionId={sid} surfaceKind="agent" linkOrigin={linkOrigin} visible />
+      <SessionPane sessionId={sid} surfaceKind="agent" interactiveResize={false} linkOrigin={linkOrigin} visible />
     </OrdinarySpaceMemberViewport></DesktopClientUiProvider>
     await act(async () => root.render(view))
     await vi.waitFor(async () => { await act(async () => {}); expect(fixture.terminals).toHaveLength(1) })
@@ -1189,7 +1199,7 @@ it('an association placeholder stays unconfirmed in the actual ordinary Workbenc
     await act(async () => root.render(<DesktopClientUiProvider><WorkspaceWorkbench workspaceId={origin.workspaceId} visible />
       <SessionPane sessionId={session.id} surfaceKind="agent" interactiveResize={false} linkOrigin={origin} visible />
     </DesktopClientUiProvider>))
-    await vi.waitFor(async () => { await act(async () => {}); expect(container.textContent).toContain('Original Agent reference unconfirmed'); expect(fixture.terminals).toHaveLength(1) })
+    await vi.waitFor(async () => { await act(async () => {}); expect(container.textContent).toContain('The original execution Host is not confirmed.'); expect(fixture.terminals).toHaveLength(1) })
     expect(member).not.toHaveBeenCalled(); expect(attach).toHaveBeenCalledOnce(); expect(attach.mock.calls[0]![0]).toEqual(session.control)
     fixture.terminals[0]!.input('still-healthy-local')
     await vi.waitFor(() => expect(write).toHaveBeenCalledOnce())

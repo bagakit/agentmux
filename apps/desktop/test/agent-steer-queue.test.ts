@@ -3,6 +3,7 @@ vi.hoisted(() => { vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true) })
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
 import { promptCarrierWaiting } from './helpers/prompt-carrier-receipt'
+import { originalSourceInputOwnerKey } from '../src/renderer/src/lib/original-space-navigation'
 
 /**
  * T-008: a retry of the SAME prompt must reach Core with the SAME `operationId`, so the idempotent
@@ -215,8 +216,28 @@ describe('explicit Session admission', () => {
       operationId: 'queued-original-op', directInputControl: original.control, runId: 'original-run'
     }))
   })
-})
+  it('routes an original member through its frozen creation and raw Session identity', async () => {
+    const original = { ...runningAgent(), hostId: 'origin',
+      control: { kind: 'agent', hostId: 'origin', agentSessionId: 's', run: { runId: 'original-run' } } }
+    const originalMember = { hostId: 'origin', target: { reference: { runtimeId: 'original-runtime', spaceId: 'original-space' }, regionId: 'original-region',
+      runtimeId: 'original-runtime', agentSessionId: 's', expectedRun: original.control.run,
+      expectedAdmission: { kind: 'creation' as const, operationId: 'original-create' } } }
+    const owner = originalSourceInputOwnerKey(originalMember.target.runtimeId, originalMember.target.agentSessionId)
+    useAppStore.setState({ sessions: [] })
+    expect(useAppStore.getState().enqueueAgentSteer(owner, 'Source original', undefined, 'source-op', 'manual', undefined,
+      { execution: 'immediate', originalMember, originalSession: original as never })).toBe(true)
+    const inspect = vi.spyOn(api.sessions, 'inspectInput').mockResolvedValue(null)
+    const submit = vi.spyOn(api.sessions, 'submitPrompt').mockImplementation(async (_control, _text, operationId) =>
+      promptCarrierWaiting('s', 'original-run', operationId!))
+    await useAppStore.getState().sendQueuedAgentSteer(owner, 'source-op')
 
+    const route = { kind: 'space-member-target', target: originalMember }
+    expect(inspect).toHaveBeenCalledWith(route, { kind: 'prompt', agentSessionId: 's', expectedRun: original.control.run, submissionId: 'source-op' })
+    expect(submit.mock.calls[0]?.slice(0, 4)).toEqual([route, 'Source original', 'source-op',
+      { expectedRun: original.control.run, admissionIntent: { kind: 'manual-actor' } }])
+    expect(useAppStore.getState().agentSteerQueues[owner]![0]).toMatchObject({ originalMember, inputIntakeStarted: true })
+  })
+})
 describe('complete inputs use the actual Core carrier boundary', () => {
   const original = '  完整引用 \"保留\" \n'.repeat(7000)
 

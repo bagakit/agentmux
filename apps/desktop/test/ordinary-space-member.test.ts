@@ -2,8 +2,9 @@ import { afterEach, expect, it } from 'vitest'
 import { createSpaceSessionsFixture } from '../../../packages/core/test/helpers/space-session-fixture'
 import { observeMountedSessions } from '../src/renderer/src/lib/space-mount-sessions'
 import { ordinarySpaceMember, ordinaryMemberRouteOccurrence } from '../src/renderer/src/lib/ordinary-space-member'
-import { editMountedSpaceDraftInput, memberSpaceInputTarget, mountedRegionKey, mountedSpaceTarget } from '../src/renderer/src/lib/space-mount-view'
-import { mountedMemberDraft, mountedMemberRequestBuckets } from '../src/renderer/src/lib/space-member-input'
+import { mountedRegionKey } from '../src/renderer/src/lib/space-mount-view'
+import { sourceInputRecoveryRows } from '../src/renderer/src/lib/source-composer-handoff'
+import { originalSourceInputOwnerKey } from '../src/renderer/src/lib/original-space-navigation'
 import { spaceMountKey } from '../src/shared/space-mount'
 import { useAppStore } from '../src/renderer/src/store'
 
@@ -16,6 +17,7 @@ async function originalOccurrence() {
   await f.b.spatial.settleAgentOpen(admission.requestId, original, { workspaceId: 'original-b-project', phase: 'attached',
     agentPresentation: { sessionId: sid, agentSessionId: sid, hostId: 'D-in-B', runtimeId: f.d.owner.runtimeId } })
   const document = await f.b.spatial.readForLayout()
+  if (!document) throw Error('Expected the original spatial document')
   const reference = { tabId: admission.address.tabId!, regionId: admission.address.regionId, sessionId: sid }
   return { f, original, admission, document, reference }
 }
@@ -68,34 +70,22 @@ it('the original Core admission locates a foreign ordinary Region without borrow
   expect(ordinarySpaceMember(document.graph, reference, undefined).kind).toBe('unconfirmed')
 })
 
-it('ordinary member input reuses the original user-document leaf without mounting navigation or adopting raw-SID drafts', async () => {
-  const { document, reference } = await originalOccurrence()
-  const fact = ordinarySpaceMember(document.graph, reference, 'local')
+it('ordinary member drafts use canonical execution identity while old position-only bytes stay recoverable', async () => {
+  const { document, reference } = await originalOccurrence(), fact = ordinarySpaceMember(document.graph, reference, 'local')
   if (fact.kind !== 'foreign') throw Error('Expected the actual original foreign admission')
-  const key = spaceMountKey(fact.source.reference), before = useAppStore.getState()
-  const originalInputs = { opaque: { future: ['original bytes'] } }
+  const key = spaceMountKey(fact.source.reference), before = useAppStore.getState(), oldText = 'Unsent position-only input'
+  const originalInputs = { [key]: { target: fact.source, drafts: { [mountedRegionKey(fact.source.reference, reference.tabId, reference.regionId)]: oldText } },
+    opaque: { future: ['original bytes'] } }
   useAppStore.setState({ mountedSpaceInputs: originalInputs, agentComposerDrafts: { [reference.sessionId]: 'Other local raw-SID input' } })
   try {
-    expect(mountedMemberDraft(originalInputs, key, reference.tabId, fact.member, fact.source)).toBe('')
-    expect(mountedMemberRequestBuckets(originalInputs, key, fact.member, fact.source)).toEqual({})
-    expect(useAppStore.getState().mountedSpaceInputs).toBe(originalInputs)
-    const input = editMountedSpaceDraftInput(originalInputs, key, reference.tabId, reference.regionId, 'Unsent source-qualified input', undefined, fact.source)
-    useAppStore.setState({ mountedSpaceInputs: input })
-    expect(mountedSpaceTarget(input, key)).toBeUndefined()
-    expect(memberSpaceInputTarget(input, key)).toEqual(fact.source)
-    expect(mountedMemberDraft(input, key, reference.tabId, fact.member)).toBe('Unsent source-qualified input')
-    expect(input.opaque).toBe(originalInputs.opaque)
-    expect(Object.hasOwn(useAppStore.getState(),'selectedSpaceMount')).toBe(false)
+    const rows = sourceInputRecoveryRows(originalInputs, fact.member, reference.tabId)
+    expect(rows).toContainEqual(expect.objectContaining({ text: oldText }))
+    const owner = originalSourceInputOwnerKey(fact.member.target.runtimeId, reference.sessionId)
+    expect(useAppStore.getState().agentComposerDrafts[owner]).toBeUndefined()
+    useAppStore.getState().appendAgentComposerDraft(owner, oldText)
+    expect(useAppStore.getState().agentComposerDrafts[owner]).toBe(oldText)
     expect(useAppStore.getState().agentComposerDrafts[reference.sessionId]).toBe('Other local raw-SID input')
-    useAppStore.getState().mountSpace(fact.source)
-    const promoted = useAppStore.getState().mountedSpaceInputs
-    expect(mountedSpaceTarget(promoted, key)).toEqual(fact.source)
-    expect(mountedMemberDraft(promoted, key, reference.tabId, fact.member)).toBe('Unsent source-qualified input')
-    expect((promoted as Record<string, { drafts: Record<string, string> }>)[key]!.drafts[mountedRegionKey(fact.source.reference, reference.tabId, reference.regionId)]).toBe('Unsent source-qualified input')
-    const future = { [key]: { kind: 'future-owner', target: fact.source, drafts: { original: 'Keep opaque' } } }
-    const bytes = JSON.stringify(future)
-    expect(() => editMountedSpaceDraftInput(future, key, reference.tabId, reference.regionId, 'Must not overwrite', undefined, fact.source)).toThrow('unreadable')
-    expect(JSON.stringify(future)).toBe(bytes)
-    expect(() => mountedMemberDraft({}, 'wrong-key', reference.tabId, fact.member, fact.source)).toThrow('unreadable')
+    expect(useAppStore.getState().mountedSpaceInputs).toBe(originalInputs)
+    expect(Object.hasOwn(useAppStore.getState(),'selectedSpaceMount')).toBe(false)
   } finally { useAppStore.setState(before, true) }
 })
