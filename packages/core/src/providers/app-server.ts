@@ -16,7 +16,8 @@ export const withAppServerNativeRead = createAppServerNativeRead({
   AgentMuxError, SESSION_HISTORY_MAX_PAGE_BYTES, SESSION_HISTORY_TIMEOUT_MS
 })
 export const { locateAppServerNativeSession, discoverAppServerNativeSession } = createAppServerNativeSession({
-  AgentMuxError, normalizeNativeSessionId, nativeProcessFiles
+  AgentMuxError, normalizeNativeSessionId,
+  nativeProcessFiles: (processId, signal, scope) => nativeProcessFiles(processId, signal, scope)
 })
 export const { readAppServerSessionHistoryPage, readAppServerSessionHistoryRecord }: {
   readAppServerSessionHistoryPage(context: AgentProviderSessionHistoryContext): Promise<AgentProviderSessionHistoryPage>

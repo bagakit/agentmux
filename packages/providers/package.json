@@ -275,6 +275,10 @@
     "./claude/provider": {
       "types": "./dist/claude/provider.d.ts",
       "import": "./dist/claude/provider.js"
+    },
+    "./codex/native-queue": {
+      "types": "./dist/codex/native-queue.d.ts",
+      "import": "./dist/codex/native-queue.js"
     }
   },
   "files": [
