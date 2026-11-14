@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from 'node:util'
 import { browserProfileBookmarksSchema, emptyBookmarks, type BrowserProfileBookmarksState } from './browser-profile-bookmark-record.js'
 import { browserProfileExtensionRecordSchema, browserProfileExtensionReceiptSchema, browserProfileExtensionPendingSchema, type BrowserProfileExtensionPending, type BrowserProfileExtensionRecord, type BrowserProfileExtensionReceipt } from './browser-profile-extension-record.js'
 import { parseBrowserProxyEdit, parseBrowserProxyAsset, type BrowserProxyAsset, type BrowserProxyEdit, type BrowserProxyBinding, parseBrowserProfileQuery, parseBrowserProfileView, type BrowserProfileView, type BrowserProfileQuery, parseBrowserProfileEnvironment, normalizeBrowserProfileTags, type BrowserProfileEnvironment } from '@agentmux/core/control'
