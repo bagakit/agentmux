@@ -56,6 +56,32 @@ async function endpoint(options: AgentMuxControlServerOptions = {}) {
   await owner.start()
   return { owner, path, url: () => `http://127.0.0.1:${owner.httpAddress!.port}/` }
 }
+it('an explicit wire fence binds an early Hosted identity call while an unfenced bootstrap can observe the new instance', async () => {
+  const f = await hostedFixture(), h = await endpoint({ coreClients: f.coreClients, hostedRuntime: () => f.hosted })
+  const rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: h.path } }); cleanups.push(() => rpc.dispose())
+  const initial = await rpc.call('runtime.owner.identity', {}, { runtimeFence: f.fence })
+  expect(initial.owner.ownerInstanceId).toBe(f.fence.ownerInstanceId)
+  f.owner.ownerInstanceId = 'replacement-hosted-instance'
+  await expect(rpc.call('runtime.owner.identity', {}, { runtimeFence: f.fence })).rejects.toMatchObject({ code: 'RUNTIME_OWNER_CHANGED' })
+  await expect(rpc.call('runtime.owner.identity', {}, { runtimeFence: { ...f.fence, runtimeId: 'another-runtime' } })).rejects.toMatchObject({ code: 'RUNTIME_OWNER_MISMATCH' })
+  const current = await rpc.call('runtime.owner.identity', { expectedRuntimeId: f.owner.runtimeId })
+  expect(current.owner.ownerInstanceId).toBe(f.owner.ownerInstanceId)
+  await expect(rpc.call('runtime.owner.identity', {}, { runtimeFence: { runtimeId: current.owner.runtimeId, ownerInstanceId: current.owner.ownerInstanceId } })).resolves.toEqual(current)
+  await expect(rpc.call('runtime.owner.identity', {}, { credentials: f.credentials, runtimeFence: f.fence })).rejects.toMatchObject({ code: 'AGENT_CAPABILITY_INVALID' })
+  expect(f.inner.kernel.stop).not.toHaveBeenCalled(); expect(f.inner.kernel.input).not.toHaveBeenCalled()
+})
+it('an explicit wire fence is checked before an early Hosted subscription even when its inner business fence is current', async () => {
+  const f = await hostedFixture(), h = await endpoint({ coreClients: f.coreClients, hostedRuntime: () => f.hosted })
+  const rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: h.path } }); cleanups.push(() => rpc.dispose())
+  const subscribe = vi.spyOn(f.hosted, 'subscribe'), handlers = { onInitial: vi.fn(), onEvent: vi.fn() }
+  await expect(rpc.subscribe('runtime.events', { consumerId: 'original-consumer', fence: f.fence },
+    { ...handlers, runtimeFence: { ...f.fence, ownerInstanceId: 'another-instance' } })).rejects.toMatchObject({ code: 'RUNTIME_OWNER_CHANGED' })
+  expect(subscribe).not.toHaveBeenCalled()
+  const reader = await rpc.subscribe('runtime.events', { consumerId: 'original-consumer', fence: f.fence }, { ...handlers, runtimeFence: f.fence })
+  expect(subscribe).toHaveBeenCalledTimes(1); expect(handlers.onInitial).toHaveBeenCalledTimes(1)
+  await reader.dispose()
+  expect(f.inner.kernel.stop).not.toHaveBeenCalled(); expect(f.inner.kernel.input).not.toHaveBeenCalled()
+})
 describe('one public service borrowed by a long-lived Runtime Host', () => {
   it('carries durable Dispatch notifications and exact source reads through the original Hosted consumer', async () => {
     const f = await hostedFixture()
