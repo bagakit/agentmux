@@ -12,3 +12,9 @@
 @media (max-width: 560px) {
   .settings-topic-default__choices, .settings-topic-configuration dl { grid-template-columns: minmax(0, 1fr); }
 }
+
+.settings-promotion-policy__toggle { display: flex; align-items: center; gap: var(--sp-5); margin: var(--sp-4) 0; cursor: pointer; }
+.settings-promotion-policy__toggle > span { flex: 1; min-width: 0; display: grid; gap: var(--sp-2); }
+.settings-promotion-policy__toggle strong { color: var(--text); font-size: var(--fs-body); font-weight: 550; }
+.settings-promotion-policy__toggle small { color: var(--text-3); font-size: var(--fs-meta); line-height: 1.6; }
+.settings-promotion-policy__toggle input { flex: none; accent-color: var(--green); }

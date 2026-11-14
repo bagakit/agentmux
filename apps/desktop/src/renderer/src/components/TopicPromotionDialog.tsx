@@ -3,7 +3,7 @@ import { presentError } from '@agentmux/client-ui/error-presentation'
 import { mintObjectId } from '@agentmux/core/object-id'
 import type { TopicPromotionReceipt } from '@agentmux/core/control'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
-import { useEffect, useRef, useState } from 'react'
+import { useContext, useEffect, useRef, useState } from 'react'
 import { api } from '../lib/api'
 import { refreshTopicSpatial } from '../lib/topic-knowledge-actions'
 import { useAppStore } from '../store'
@@ -12,6 +12,7 @@ import topicArt from '@agentmux/client-ui/brand/illustrations/mote-origin/topic-
 import moteArt from '@agentmux/client-ui/brand/illustrations/mote-origin/grown-team.png'
 import { DocumentOverlayPortal } from './WindowOverlayHost'
 import { MoteIcon } from '@agentmux/client-ui/components/MoteIcon'
+import { SettingsNavigation } from './SettingsNavigation'
 
 const LoadingIcon = semanticIconComponent('status.loading')
 
@@ -24,6 +25,8 @@ export function TopicPromotionDialog({ target, ...props }: Props) {
 
 /** The Host keeps the operation. Dismissing this view never cancels or replays a write. */
 function Promotion({ target, onClose, onPromoted }: Props & { target: TopicPromotionTarget }) {
+  const settings = useContext(SettingsNavigation)
+  const allowed = useAppStore(state => state.config ? state.config.promotion?.enabled !== false : null)
   const [receipt, setReceipt] = useState<TopicPromotionReceipt | null>(null)
   const [phase, setPhase] = useState<'reading' | 'ready' | 'writing' | 'unknown'>('reading')
   const [error, setError] = useState<string | null>(null)
@@ -68,7 +71,7 @@ function Promotion({ target, onClose, onPromoted }: Props & { target: TopicPromo
   }
 
   async function promote() {
-    if (writing.current || phase !== 'ready') return
+    if (writing.current || phase !== 'ready' || !receipt && allowed !== true) return
     writing.current = true; setPhase('writing'); setError(null)
     try {
       const result = await api.topics.call('topic.promote.apply', { topicId: target.topicId, operationId: operation.current })
@@ -84,6 +87,7 @@ function Promotion({ target, onClose, onPromoted }: Props & { target: TopicPromo
   }
 
   const busy = phase === 'writing', reading = phase === 'reading', partial = receipt?.state === 'partial'
+  const blocked = !receipt && allowed !== true
   return <Dialog.Root open onOpenChange={open => { if (!open) onClose() }}>
     <DocumentOverlayPortal component={Dialog.Portal}>
       <Dialog.Overlay className="confirmation-dialog__overlay dialog-scrim topic-promotion-scrim" />
@@ -107,6 +111,11 @@ function Promotion({ target, onClose, onPromoted }: Props & { target: TopicPromo
           <Dialog.Title className="topic-promotion__title">{target.title}</Dialog.Title>
           <p className="topic-promotion__invitation">让这个方向，成为有自己人格的伙伴。</p>
           <Dialog.Description className="topic-promotion__continuity">原来的 Agent、对话和资料都会保留。</Dialog.Description>
+          {blocked && !reading && phase !== 'unknown' ? <div className="topic-promotion__recovery" role="status">
+            <strong>{allowed === false ? 'Promotion 已关闭' : '晋升设置待确认'}</strong>
+            <p>新的晋升暂未开始。已有伙伴与未完成的晋升仍然保留。</p>
+            {settings ? <button type="button" className="small-button" onClick={() => { onClose(); settings.open('mote-promotion', undefined, 'promotion.enabled') }}>打开 Promotion 设置</button> : null}
+          </div> : null}
           {!busy && (partial || error) ? <div className="topic-promotion__recovery" role="status">
             <strong>{partial ? '晋升尚未完成' : '结果待确认'}</strong>
             <p>原来的工作仍可继续。{partial ? '可以接着完成这次晋升。' : '先查看这次操作的结果。'}</p>
@@ -115,7 +124,7 @@ function Promotion({ target, onClose, onPromoted }: Props & { target: TopicPromo
           <footer className="topic-promotion__actions">
             <button type="button" className="small-button topic-promotion__cancel" onClick={onClose}>{busy || partial || phase === 'unknown' ? '稍后查看' : '暂时不用'}</button>
             {phase === 'unknown' ? <button type="button" className="primary-button topic-promotion__submit" onClick={() => void observe()}>查看结果</button>
-              : <button type="button" className="primary-button topic-promotion__submit" disabled={busy || reading} onClick={() => void promote()}>
+              : <button type="button" className="primary-button topic-promotion__submit" disabled={busy || reading || blocked} onClick={() => void promote()}>
                 {busy ? <LoadingIcon size={15} animation="spin" aria-hidden="true" /> : <MoteIcon size={17} />}{busy ? '正在晋升…' : reading ? '正在读取…' : partial ? '继续晋升' : '晋升为 Mote'}
               </button>}
           </footer>

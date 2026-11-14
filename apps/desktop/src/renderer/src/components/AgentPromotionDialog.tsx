@@ -1,0 +1,115 @@
+import * as Dialog from '@agentmux/client-ui/components/Modal'
+import { presentError } from '@agentmux/client-ui/error-presentation'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
+import { MoteIcon } from '@agentmux/client-ui/components/MoteIcon'
+import { mintObjectId } from '@agentmux/core/object-id'
+import type { AgentPromotionApply, AgentPromotionReceipt } from '@agentmux/core/agent-promotion'
+import { useContext, useEffect, useRef, useState } from 'react'
+import { SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
+import { api } from '../lib/api'
+import { useAppStore } from '../store'
+import { DocumentOverlayPortal } from './WindowOverlayHost'
+import { SettingsNavigation } from './SettingsNavigation'
+import agentArt from '@agentmux/client-ui/brand/illustrations/mote-origin/topic-work.png'
+import moteArt from '@agentmux/client-ui/brand/illustrations/mote-origin/grown-team.png'
+
+const LoadingIcon = semanticIconComponent('status.loading')
+export type AgentPromotionSelection = Omit<AgentPromotionApply, 'operationId'>
+
+/** Only the original Host can establish the Mote; dismissal keeps its operation. */
+export function AgentPromotionDialog({ selection, onClose, onPromoted }: {
+  selection: AgentPromotionSelection; onClose(): void; onPromoted(receipt: AgentPromotionReceipt): void
+}) {
+  const settings = useContext(SettingsNavigation)
+  const allowed = useAppStore(state => state.config ? state.config.promotion?.enabled !== false : null)
+  const [receipt, setReceipt] = useState<AgentPromotionReceipt | null>(null)
+  const [phase, setPhase] = useState<'reading' | 'ready' | 'writing' | 'unknown'>('reading')
+  const [error, setError] = useState<string | null>(null)
+  const intent = useRef<AgentPromotionApply>({ ...selection, operationId: mintObjectId() })
+  const alive = useRef(true), writing = useRef(false), content = useRef<HTMLDivElement>(null)
+  const invoker = useRef(document.activeElement instanceof HTMLElement ? document.activeElement : null)
+
+  async function complete(result: AgentPromotionReceipt) {
+    onPromoted(result)
+    if (alive.current) onClose()
+    try {
+      await useAppStore.getState().refreshSpatialState()
+      await useAppStore.getState().refreshScratchTopics(SCRATCH_WORKSPACE_ID, true, result.topicId)
+    } catch (cause) {
+      useAppStore.getState().reportError(new Error(`晋升已经保存，界面尚未刷新。${presentError(cause)}`))
+    }
+  }
+  async function observe() {
+    setPhase('reading'); setError(null)
+    try {
+      const result = await api.agentPromotions.call('agent.promote.inspect', { target: selection.target })
+      if (!alive.current) return
+      if (result.promotion) {
+        const original = result.promotion
+        intent.current = { target: original.target, source: original.source, title: original.title, operationId: original.operationId }
+      }
+      setReceipt(result.promotion); setPhase('ready')
+      if (result.promotion?.state === 'complete') await complete(result.promotion)
+    } catch (cause) { if (alive.current) { setError(presentError(cause)); setPhase('unknown') } }
+  }
+  useEffect(() => {
+    alive.current = true
+    void observe()
+    return () => { alive.current = false }
+  }, [])
+  async function promote() {
+    if (writing.current || phase !== 'ready' || !receipt && allowed !== true) return
+    writing.current = true; setPhase('writing'); setError(null)
+    try {
+      const result = await api.agentPromotions.call('agent.promote.apply', intent.current)
+      if (result.promotion?.state === 'complete') await complete(result.promotion)
+      else if (alive.current) {
+        setReceipt(result.promotion); setPhase('ready')
+      }
+    } catch (cause) { if (alive.current) { setError(presentError(cause)); setPhase('unknown') } }
+    finally { writing.current = false }
+  }
+  const busy = phase === 'writing', reading = phase === 'reading', partial = receipt?.state === 'partial'
+  const blocked = !receipt && allowed !== true
+  return <Dialog.Root open onOpenChange={open => { if (!open) onClose() }}>
+    <DocumentOverlayPortal component={Dialog.Portal}>
+      <Dialog.Overlay className="confirmation-dialog__overlay dialog-scrim topic-promotion-scrim" />
+      <Dialog.Content ref={content} className="confirmation-dialog dialog-surface topic-promotion-dialog agent-promotion-dialog" data-phase={phase}
+        onCloseAutoFocus={event => {
+          event.preventDefault()
+          const active = document.activeElement
+          if (active === document.body || active === null || content.current?.contains(active)) invoker.current?.isConnected && invoker.current.focus()
+        }}>
+        <div className="topic-promotion__scene" aria-hidden="true">
+          <img className="topic-promotion__art topic-promotion__art--before" src={agentArt} alt="" draggable={false} />
+          <img className="topic-promotion__art topic-promotion__art--after" src={moteArt} alt="" draggable={false} />
+          {busy ? <div className="topic-promotion__energy"><span className="topic-promotion__halo" />{Array.from({ length: 6 }, (_, index) => <span key={index} className="topic-promotion__particle" />)}</div> : null}
+          <span className="topic-promotion__journey"><span>AGENT</span><span className="topic-promotion__line" /><MoteIcon size={15} /><span>MOTE</span></span>
+        </div>
+        <div className="topic-promotion__body">
+          <span className="topic-promotion__eyebrow">从一起做事，到长期相伴</span>
+          <Dialog.Title className="topic-promotion__title">{selection.title}</Dialog.Title>
+          <p className="topic-promotion__invitation">让熟悉的 Agent，成为有自己空间的伙伴。</p>
+          <Dialog.Description className="topic-promotion__continuity">继续同一个 Agent 和原来的对话。项目、工作目录和正在做的事都会保留。</Dialog.Description>
+          {blocked && !reading && phase !== 'unknown' ? <div className="topic-promotion__recovery" role="status">
+            <strong>{allowed === false ? 'Promotion 已关闭' : '晋升设置待确认'}</strong>
+            <p>新的晋升暂未开始。已有伙伴与未完成的晋升仍然保留。</p>
+            {settings ? <button type="button" className="small-button" onClick={() => { onClose(); settings.open('mote-promotion', undefined, 'promotion.enabled') }}>打开 Promotion 设置</button> : null}
+          </div> : null}
+          {!busy && (partial || error) ? <div className="topic-promotion__recovery" role="status">
+            <strong>{partial ? '晋升尚未完成' : '结果待确认'}</strong><p>原来的工作仍可继续。{partial ? '可以接着完成这次晋升。' : '先查看这次操作的结果。'}</p>
+            <details><summary>查看详情</summary><p>{error ?? receipt?.unavailable.map(issue => issue.message).join(' ')}</p></details>
+          </div> : null}
+          <footer className="topic-promotion__actions">
+            <button type="button" className="small-button topic-promotion__cancel" onClick={onClose}>{busy || partial || phase === 'unknown' ? '稍后查看' : '暂时不用'}</button>
+            {phase === 'unknown' ? <button type="button" className="primary-button topic-promotion__submit" onClick={() => void observe()}>查看结果</button>
+              : <button type="button" className="primary-button topic-promotion__submit" disabled={busy || reading || blocked} onClick={() => void promote()}>
+                {busy ? <LoadingIcon size={15} animation="spin" aria-hidden="true" /> : <MoteIcon size={17} />}{busy ? '正在晋升…' : reading ? '正在读取…' : partial ? '继续晋升' : '晋升为 Mote'}
+              </button>}
+          </footer>
+          {busy ? <p className="topic-promotion__progress" role="status">正在建立独立的伙伴空间。关闭后也可回来查看。</p> : null}
+        </div>
+      </Dialog.Content>
+    </DocumentOverlayPortal>
+  </Dialog.Root>
+}

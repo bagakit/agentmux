@@ -397,6 +397,7 @@ const configSchema = z
     projectRailDensity: z.enum(PROJECT_RAIL_DENSITY_IDS).optional(),
     gitHistoryShowTime: z.boolean().optional(),
     moteDirectoryView: z.enum(MOTE_DIRECTORY_VIEW_IDS).optional(),
+    promotion: z.object({ enabled: z.boolean() }).strict().optional(),
     topicDirectoryInitialView: z.enum(TOPIC_DIRECTORY_INITIAL_VIEW_IDS).optional(),
     moteDirectoryAvatarSize: z.number().int().min(MOTE_DIRECTORY_AVATAR_SIZE_MIN).max(MOTE_DIRECTORY_AVATAR_SIZE_MAX).optional(),
     // 复制路径给绝对地址还是缩写 `~`。`.optional()` 同 `appLinkSchemes`（后加字段，既有磁盘 config

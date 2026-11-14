@@ -28,6 +28,7 @@ import { useSessionStop } from './SessionStop'
 import { useSessionRestart } from './SessionRestart'
 import { useWorkbenchPresentationActive } from '../lib/workbench-presentation'
 import { useAgentConnectorMenu } from '../lib/use-agent-connector-menu'
+import { useAgentPromotion } from '../lib/use-agent-promotion'
 
 const ThemeActionEditIcon = semanticIconComponent('action.edit')
 const AgentIcon = semanticIconComponent('object.agent')
@@ -66,6 +67,7 @@ export function FocusContextMenu({ open, context, children, onOpenChange, onRena
   const facts = useSyncExternalStore(subscribe, readFacts, readFacts)
   const { session, host, executor } = facts ?? {}
   const location = useMemo(() => open && facts ? focusAgentMenuLocation(facts, context) : null, [open, facts, context])
+  const promotion = useAgentPromotion(session, context.name, location?.reference)
   const [reading, setReading] = useState<{ mode: 'history' | 'learn'; source: { hostId: string; agentSessionId: string }; label: string } | null>(null)
   const [takeover, setTakeover] = useState<TakeoverSource | null>(null)
   const forkOrigin = location?.reference ? { workspaceId: location.reference.displayWorkspaceId, tabGroupId: location.reference.groupId,
@@ -146,6 +148,7 @@ export function FocusContextMenu({ open, context, children, onOpenChange, onRena
             links={<AgentMenuIdentityActions links={[...actions.map(action => ({ ...action, icon: <AgentIcon size={16} /> })), ...regionLinks]}
               session={session ?? null} providerId={session?.providerId ?? context.providerId ?? undefined} executorId={context.executorId}
               executorLabel={executor?.label ?? context.providerId ?? 'Executor unknown'} Item={ContextMenu.Item} Group={ContextMenu.Group} Label={ContextMenu.Label} />}
+            onPromote={promotion.open ? () => { actionOwnsFocus.current = true; promotion.open?.() } : undefined}
             onHistory={context.control ? () => openReading('history') : undefined}
             onLearn={context.control ? () => openReading('learn') : undefined}
             onTakeOver={session ? () => openTakeover() : undefined}
@@ -165,7 +168,7 @@ export function FocusContextMenu({ open, context, children, onOpenChange, onRena
         </WorkbenchMenuSubmit.Provider></WorkbenchMenuScope.Provider>
       </ContextMenu.Content>
     </DocumentOverlayPortal> : null}
-  </ContextMenu.Root>{active ? <>{restart.dialog}{stop.dialog}{connector.dialog}{reading?.mode === 'history' ? <AgentSessionReadingSurface source={reading.source} label={reading.label} returnTrigger={origin.current} onClose={() => setReading(null)} /> : null}
+  </ContextMenu.Root>{promotion.feedback}{active ? <>{promotion.dialog}{restart.dialog}{stop.dialog}{connector.dialog}{reading?.mode === 'history' ? <AgentSessionReadingSurface source={reading.source} label={reading.label} returnTrigger={origin.current} onClose={() => setReading(null)} /> : null}
     {reading?.mode === 'learn' ? <FocusWorkspaceStage><SessionLearningSurface source={reading.source} label={reading.label} active returnTrigger={origin.current as HTMLButtonElement | null} onClose={() => setReading(null)} /></FocusWorkspaceStage> : null}
     {takeover ? <FocusWorkspaceStage><SessionTakeoverSurface source={takeover} active returnTrigger={origin.current as HTMLButtonElement | null} onClose={() => setTakeover(null)} /></FocusWorkspaceStage> : null}</> : null}</>
 }

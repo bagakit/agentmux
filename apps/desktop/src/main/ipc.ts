@@ -1541,6 +1541,10 @@ export async function registerIpc(args: {
   })
   handleWithEvent('spaceObjects:readAvatar', async (event, target: SpaceObjectImageTarget, ref: ObjectAvatarRef) => { return spaceObjectImages.read(target, ref)
   })
+  handleWithEvent('agentPromotions:call', async (_event, method: import('@agentmux/core/agent-promotion').AgentPromotionMethod, params: import('@agentmux/core/agent-promotion').AgentPromotionParams<import('@agentmux/core/agent-promotion').AgentPromotionMethod>) => {
+    if (method !== 'agent.promote.inspect' && method !== 'agent.promote.apply') throw new Error('Choose an exact Agent promotion operation.')
+    return sessionInputOperationResult(() => callUserRpc(method, params))
+  })
   handleWithEvent('topics:call', async (event, method: import('@agentmux/core').TopicMethod, params: import('@agentmux/core').TopicParams<import('@agentmux/core').TopicMethod>) => {
     return args.runtime.callOriginalCore('local', method, params as never, { transport: 'unix' })
   })

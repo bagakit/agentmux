@@ -515,6 +515,7 @@ export type AppConfig = {
   moteDirectoryView?: MoteDirectoryView
   moteDirectoryAvatarSize?: number
   /** Absent means Topics; changing this does not retarget an already mounted directory panel. */
+  promotion?: { enabled: boolean }
   topicDirectoryInitialView?: TopicDirectoryInitialView
   /**
    * 复制路径时是否给绝对地址。默认（缺席 / `false`）把当前用户家目录缩写成 `~`；`true` 是用户主动
@@ -1847,6 +1848,9 @@ export type AgentMuxDesktopApi = {
     revealSeries(params: import('@agentmux/core/mote-avatar-series').MoteAvatarSeriesRevealParams): Promise<import('@agentmux/core/mote-avatar-series').MoteAvatarSeriesRevealResult>
     read(params: import('@agentmux/core/mote-avatar-write').MoteAvatarWriteParameterMap['space.mote.avatar.read']): Promise<import('@agentmux/core/mote-avatar-write').MoteAvatarRead>
     save(params: import('@agentmux/core/mote-avatar-write').MoteAvatarSave): Promise<import('@agentmux/core/mote-avatar-write').MoteAvatarSaveResult>
+  }
+  agentPromotions: {
+    call<M extends import('@agentmux/core/agent-promotion').AgentPromotionMethod>(method: M, params: import('@agentmux/core/agent-promotion').AgentPromotionParams<M>): Promise<import('@agentmux/core/agent-promotion').AgentPromotionResult<M>>
   }
   topics: {
     call<M extends import('@agentmux/core').TopicMethod>(method: M, params: import('@agentmux/core').TopicParams<M>): Promise<import('@agentmux/core').TopicResult<M>>

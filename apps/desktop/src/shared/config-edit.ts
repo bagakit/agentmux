@@ -57,6 +57,7 @@ const preferenceDomains = new Map<string, PreferenceDomain>(Object.entries({
   notes: { resolve: value => resolveNotesPreferences(value as NotesPreferences | undefined), merge: 'authored' },
   markdown: { resolve: value => resolveMarkdownPreferences(value as MarkdownPreferences | undefined), merge: 'authored' },
   goals: { resolve: value => resolveGoalsPreferences(value as GoalsPreferences | undefined), merge: 'authored' },
+  promotion: { resolve: value => value ?? { enabled: true }, merge: 'authored' },
   messageToolCompletion: { resolve: value => resolveComposerInputConfig(value as ComposerInputConfig | undefined), merge: 'resolved',
     // null is an authored disabled prefix, not a missing preference.
     field: (_key, value, fallback) => value === undefined ? fallback : value },

@@ -400,6 +400,9 @@ const api: AgentMuxPreloadApi = {
     read: async params => unwrapSessionInputOperationResult(await ipcRenderer.invoke('moteAvatars:read', params)),
     save: async params => unwrapSessionInputOperationResult(await ipcRenderer.invoke('moteAvatars:save', params))
   },
+  agentPromotions: {
+    call: async (method, params) => unwrapSessionInputOperationResult(await ipcRenderer.invoke('agentPromotions:call', method, params))
+  },
   topics: {
     call: (method, params) => ipcRenderer.invoke('topics:call', method, params)
   },

@@ -35,7 +35,27 @@ function TopicInitialViewSettings({ config }: Pick<SettingsPaneProps, 'config'>)
   </section>
 }
 
-/** Global initial-view preference only; content and promotion keep their original owners. */
+function PromotionSettings({ config }: Pick<SettingsPaneProps, 'config'>) {
+  const saved = config.promotion?.enabled ?? true
+  const draft = useSettingDraft(saved), save = useSettingsSave()
+  async function commit(): Promise<void> {
+    const submitted = draft.beginSave()
+    submitted.finish(await save.run(async () => {
+      await saveConfigSlice((current, enabled: boolean) => ({ ...current, promotion: { ...current.promotion, enabled } }), submitted.value, submitted.expected)
+    }))
+  }
+  return <section className="settings-group settings-promotion-policy" data-settings-field="promotion.enabled">
+    <header><span>Promotion</span><small>Saved: {saved ? 'Allowed' : 'Off'}</small></header>
+    <label className="settings-promotion-policy__toggle">
+      <span><strong>Allow promotion</strong><small>Let an Agent or Topic become a lasting Mote with its own space.</small></span>
+      <input type="checkbox" role="switch" aria-label="Allow promotion" checked={draft.value} onChange={event => draft.setValue(event.target.checked)} />
+    </label>
+    <p className="settings-workflows__note">Turning this off prevents new promotions. Existing Motes and unfinished promotions remain available, and Agents keep working.</p>
+    <SettingsSaveBar save={save} dirty={draft.dirty} resolution={draft} label="Save Promotion settings" onSave={() => void commit()} />
+  </section>
+}
+
+/** Each preference saves through the original ConfigOwner; per-Mote files remain in Club. */
 export function TopicDirectorySettingsPane({ config, onClose, promotion = false }: Pick<SettingsPaneProps, 'config' | 'onClose'> & { promotion?: boolean }) {
   const workspace = config.workspaces.find(item => item.id === SCRATCH_WORKSPACE_ID)
   return <div className="settings-pane-stack">
@@ -43,12 +63,16 @@ export function TopicDirectorySettingsPane({ config, onClose, promotion = false 
       <div className="settings-concept-intro__copy">
         <h3 className="settings-concept-intro__title">{promotion ? 'Let important work become a lasting collaborator.' : 'Build knowledge around a Topic.'}</h3>
         <p className="settings-concept-intro__description">{promotion
-          ? 'Start with a Topic. Keep its discussions, knowledge and Agents while developing a shared Mote identity and roles.'
+          ? 'Start with an Agent you trust or a Topic you return to. Keep the original work and give your Mote a space of its own.'
           : 'Bring related discussions, sources and discoveries into one Topic, with context you can return to.'}</p>
       </div>
       <div className="settings-concept-intro__art" aria-hidden="true"><img src={promotion ? promotionArt : topicArt} alt="" loading="lazy" decoding="async" draggable={false} /></div>
     </section>
-    {!promotion ? <TopicInitialViewSettings config={config} /> : null}
+    {promotion ? <PromotionSettings config={config} /> : <TopicInitialViewSettings config={config} />}
+    {promotion ? <section className="settings-group" data-settings-field="agent-promotion">
+      <header><span>Promote from an Agent</span></header>
+      <p className="settings-workflows__note">Choose “晋升为 Mote…” from that Agent’s menu. The same Agent and conversation continue in a Mote with its own space; its project and working directory stay in place.</p>
+    </section> : null}
     <section className="settings-group" data-settings-field="topic-directory">
       <header><span>{promotion ? 'Promote from a Topic' : 'Topic directory'}</span></header>
       <p className="settings-workflows__note">{promotion
@@ -64,10 +88,10 @@ export function TopicDirectorySettingsPane({ config, onClose, promotion = false 
     </section>
     {promotion ? <section className="settings-group settings-topic-configuration" data-settings-field="mote-configuration">
       <header><span>Configure each Mote</span><small>Per Mote</small></header>
-      <p className="settings-workflows__note">Promotion keeps the same Topic, Agents, conversations and knowledge. Choose that Mote in Club to edit its own settings.</p>
+      <p className="settings-workflows__note">Your original Agent or Topic keeps its conversations and work. Choose that Mote in Club to edit its own settings.</p>
       <dl>
         <div><dt>Profile</dt><dd>Name, role, appearance, personality and connected application.</dd></div>
-        <div><dt>Quick mode</dt><dd>Main Agent, Executor for new chats and when to reconnect.</dd></div>
+        <div><dt>Quick mode</dt><dd>Main Agent, Executor for new chats and automatic maintenance.</dd></div>
       </dl>
       <div className="settings-workflows__inline-action">
         <p className="settings-workflows__note">Settings apply to the selected Mote.</p>

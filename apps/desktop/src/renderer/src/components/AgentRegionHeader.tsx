@@ -14,7 +14,8 @@ import { RegionCopyLinkRow, regionCopyLinkActions, RegionMenuEntryView, useRegio
 import { AgentMenuContent } from './AgentMenuContent'
 import { AgentMenuIdentityActions } from './AgentMenuIdentityActions'
 import { useSessionStop } from './SessionStop'
-import { useWorkbenchPresentationActive } from '../lib/workbench-presentation'
+import { useWorkbenchPresentationActive, WorkbenchPresentationContext } from '../lib/workbench-presentation'
+import { useAgentPromotion } from '../lib/use-agent-promotion'
 import { WorkbenchMenuScope, WorkbenchMenuSubmit } from './WorkbenchMenuScope'
 import * as ContextMenu from '@radix-ui/react-context-menu'
 import { DocumentOverlayPortal } from './WindowOverlayHost'
@@ -53,6 +54,8 @@ export function AgentRegionHeader({ name, executorLabel, sessionId, sessionKind,
     const session = sessionKind === 'agent' ? sessionPresentationById(state.sessions).get(sessionId) : undefined
     return session?.kind === 'agent' ? session : undefined
   })
+  const presentation = useContext(WorkbenchPresentationContext)
+  const promotion = useAgentPromotion(readOnly ? null : connectorSession, name, presentation.reference && regionId ? { ...presentation.reference, regionId } : undefined, regionId)
   const entries = useRegionMenuEntries()
   const active = useWorkbenchPresentationActive()
   const stop = useSessionStop(active)
@@ -105,6 +108,7 @@ export function AgentRegionHeader({ name, executorLabel, sessionId, sessionKind,
       executorLabel={executorLabel} Item={Menu.Item} Group={Menu.Group} Label={Menu.Label} />
       : entries.some(entry => entry.kind === 'action') ? <RegionCopyLinkRow entries={entries}
         Item={Menu.Item} Group={Menu.Group} Label={Menu.Label} labelPresentation="tooltip" /> : null}
+    onPromote={promotion.open ? () => { handoffFocus.current = true; promotion.open?.() } : undefined}
     onRestart={entries.find(entry => entry.kind === 'restart')?.onSelect}
     onStop={sessionKind === 'agent' && !readOnly ? () => {
       stop.requestStop(nativeSession ? { id: nativeSession.id, hostId: nativeSession.control.hostId, control: nativeSession.control } : null, name, moreTrigger.current)
@@ -144,6 +148,7 @@ export function AgentRegionHeader({ name, executorLabel, sessionId, sessionKind,
     })} /> : <HostBadge host={executionHost} />}
     {connectorSession?.kind === 'agent' ? <AgentOperationFeedback compact subject={{ hostId: connectorSession.control.hostId, agentSessionId: connectorSession.control.agentSessionId, regionId }} /> : null}
     {readOnly ? <span className="agent-region-header__mode">Read-only</span> : null}
+    {promotion.feedback}
     {recordDetails}
     {resultReview}
     {!readOnly && connectorSession?.kind === 'agent' ? <AgentConnections session={connectorSession} regionId={regionId} visible={active} /> : null}
@@ -173,5 +178,5 @@ export function AgentRegionHeader({ name, executorLabel, sessionId, sessionKind,
       </ContextMenu.Content>
     </DocumentOverlayPortal> : null}
   </header>
-  return <>{host ? <><div ref={home} className="agent-region-header-home" />{createPortal(header, host)}</> : header}{active ? stop.dialog : null}</>
+  return <>{host ? <><div ref={home} className="agent-region-header-home" />{createPortal(header, host)}</> : header}{active ? <>{stop.dialog}{promotion.dialog}</> : null}</>
 }

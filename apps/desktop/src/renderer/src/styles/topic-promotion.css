@@ -75,3 +75,6 @@
   .topic-promotion-dialog[data-phase='writing'] .topic-promotion__line::before,
   .topic-promotion-notice__seal::before { display: none; }
 }
+
+.agent-promotion-feedback { display: inline-flex; align-items: center; gap: var(--sp-2); color: var(--text-2); font-size: var(--fs-meta); }
+.agent-promotion-feedback button { flex: none; }

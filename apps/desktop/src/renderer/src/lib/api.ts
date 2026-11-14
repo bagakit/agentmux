@@ -468,6 +468,7 @@ const mockApi: AgentMuxDesktopApi = {
     read: async () => { throw new Error('Open Desktop to read the original saved avatar.') },
     save: async () => { throw new Error('Open Desktop to save through its original avatar owner. Your draft is retained.') }
   },
+  agentPromotions: { call: async () => { throw new Error('The original Agent promotion owner is unavailable in the web preview. Open the Desktop to inspect or continue promotion.') } },
   topics: { call: async () => { throw new Error('The original Topic filesystem owner is unavailable in the web preview. Open the Desktop to read or save Topic content.') } },
   notebooks: {
     resolve: async () => { throw new Error('The original Host Note resolver is unavailable in web preview. Your query and editing remain available; retry after reconnecting.') },

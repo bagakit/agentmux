@@ -16,6 +16,7 @@ const Restart = semanticIconComponent('action.restart-session')
 const Stop = semanticIconComponent('action.stop')
 const Refresh = semanticIconComponent('action.refresh')
 const Connections = semanticIconComponent('object.conversations')
+const Promotion = semanticIconComponent('object.promotion')
 
 /** Slots contain already-targeted actions. They never resolve a Session or grant control. */
 export type AgentMenuExtensions = {
@@ -32,7 +33,7 @@ export type AgentMenuExtensions = {
 
 /** One Agent menu body for cards, Region context menus and Header More. */
 export function AgentMenuContent({ name, executorLabel, sessionId, sessionKind = 'agent', executionHost, readOnly = false,
-  links, onHistory, onTakeOver, onLearn, onDerived, onCustomize, onRestart, onStop, onRefreshObservation, refreshing = false,
+  links, onHistory, onTakeOver, onLearn, onDerived, onCustomize, onPromote, onRestart, onStop, onRefreshObservation, refreshing = false,
   nativeSourceDetails, nativeSourceCheck, extensions = {} }: {
   name: string; executorLabel: string; sessionId: string | undefined; sessionKind?: 'agent' | 'terminal'
   executionHost: RegionExecutionHost; readOnly?: boolean
@@ -40,6 +41,7 @@ export function AgentMenuContent({ name, executorLabel, sessionId, sessionKind =
   onHistory?: (() => void) | undefined; onTakeOver?: (() => void) | undefined; onLearn?: (() => void) | undefined
   /** Starts one user-defined derived action from this exact Agent; absent where none can start here. */
   onDerived?: ((action: AgentDerivedAction) => void) | undefined
+  onPromote?: (() => void) | undefined
   onCustomize?: (() => void) | undefined
   onRestart?: (() => void) | undefined; onStop?: (() => void) | undefined
   onRefreshObservation?: (() => void) | undefined; refreshing?: boolean
@@ -73,6 +75,7 @@ export function AgentMenuContent({ name, executorLabel, sessionId, sessionKind =
     {links ? <Menu.Separator className="tab-context-menu__separator" /> : null}
     <Menu.Group aria-label="Conversation">
       {extensions.identityActions}
+      {canControl && onPromote ? <Menu.Item className="tab-context-menu__item" data-agent-promotion onSelect={onPromote}><Promotion size={14} /><span>晋升为 Mote…</span></Menu.Item> : null}
       {onHistory ? <Menu.Item className="tab-context-menu__item" onSelect={onHistory}><History size={14} /><span>Conversation history</span></Menu.Item> : null}
       <WorkbenchMenuSubmenu label={sessionKind === 'agent' ? 'Session details' : 'Terminal details'} icon={<Information size={14} />}
         Sub={Menu.Sub} SubTrigger={Menu.SubTrigger} SubContent={Menu.SubContent} Portal={Menu.Portal}
