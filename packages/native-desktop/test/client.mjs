@@ -440,7 +440,8 @@ test('display capture waits past the default request timeout for slow grabs', as
     const desktop = new NativeDesktop({})
     desktop.launch = async () => connection
     const actual = await desktop.captureDisplays()
-    assert.equal(actual.timing.requestMs >= 1200 && actual.timing.requestMs <= 150_000, true)
+    // The scheduled 1200 ms response is not a precise clock; crossing the fixture's 1000 ms default timeout is the behavior.
+    assert.equal(actual.timing.requestMs >= 1000 && actual.timing.requestMs <= 150_000, true)
     assert.equal(Number.isFinite(actual.timing.validationMs) && actual.timing.validationMs >= 0, true)
     for (const key of ['lazyConnectionMs', 'socketReadMs', 'jsonParseMs']) {
       assert.equal(Number.isFinite(actual.timing[key]) && actual.timing[key] >= 0 && actual.timing[key] <= 150_000, true)
