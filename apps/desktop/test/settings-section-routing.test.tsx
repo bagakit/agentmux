@@ -110,7 +110,7 @@ it.each([{ start: 'fresh' }, { start: 'gateway' }] as const)('search reveals and
   const initial = start === 'gateway' ? { section: 'hosts', field: 'mesh-configuration' } as const : undefined
   await dom.render(<SettingsPanel onClose={() => {}} initialSection={initial?.section ?? 'overview'} navigationRequest={initial} />)
   await settle()
-  if (start === 'gateway') expect(dom.container.querySelector('.mesh-view-tabs [aria-current="page"]')?.textContent).toBe('Gateway')
+  if (start === 'gateway') expect(pane('hosts')!.querySelector('[data-mesh-home-view]')?.getAttribute('data-mesh-home-view')).toBe('network')
   await act(async () => {
     const search = dom.container.querySelector<HTMLInputElement>('[aria-label="Search settings"]')!
     Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(search, 'Incoming connections and client keys')
@@ -136,10 +136,10 @@ it.each([{ start: 'fresh' }, { start: 'gateway' }] as const)('search reveals and
     Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(allowed, 'nodekey:authored-draft\n  ')
     allowed.dispatchEvent(new Event('input', { bubbles: true }))
   })
-  const gateway = [...mesh.querySelectorAll<HTMLButtonElement>('.mesh-view-tabs button')].find(button => button.textContent === 'Gateway')!
-  await act(async () => gateway.click())
+  const back = mesh.querySelector<HTMLButtonElement>('.mesh-editor-navigation button')!
+  await act(async () => back.click())
   expect(connections.hidden).toBe(true)
-  const reconnect = [...mesh.querySelectorAll<HTMLButtonElement>('.mesh-view-tabs button')].find(button => button.textContent === 'Connections')!
+  const reconnect = [...mesh.querySelectorAll<HTMLButtonElement>('.mesh-overview-actions button')].find(button => button.textContent === 'Manage devices')!
   await act(async () => reconnect.click())
   expect(connections.querySelector('[data-settings-field="incoming"]')).toBe(visible[0])
   expect(allowed.value).toBe('nodekey:authored-draft\n  ')

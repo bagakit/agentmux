@@ -273,7 +273,7 @@ it('every production static target reaches its connected original Pane location 
   await dom.click('[data-settings-target="network-node"]')
   await vi.waitFor(() => expect(connected('[data-settings-pane="network-node"] [data-settings-field="publishing"]')).toBeTruthy())
   await dom.click('[data-settings-target="hosts"]')
-  await act(async () => [...dom.container.querySelectorAll<HTMLButtonElement>('.mesh-view-tabs button')].find(button => button.textContent === 'Gateway')!.click())
+  await act(async () => [...dom.container.querySelectorAll<HTMLButtonElement>('.mesh-overview-actions button')].find(button => button.textContent === 'Gateway')!.click())
   await vi.waitFor(() => expect(connected('[data-settings-pane="hosts"] [data-settings-field="mesh-configuration"]')).toBeTruthy())
   await dom.click('[data-settings-target="overview"]')
   const contributions = settingsModules.filter(module => (module as SettingsModule).id !== 'fixture')
