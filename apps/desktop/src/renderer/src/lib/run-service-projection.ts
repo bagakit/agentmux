@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useSyncExternalStore } from 'react'
 import type { AgentMuxEvidence, AgentMuxNativeService } from '@agentmux/core'
-import type { RuntimeEvent, SessionSnapshot } from '../../../shared/contracts'
+import type { RuntimeEvent, TerminalSessionSnapshot } from '../../../shared/contracts'
 
 type Listener = () => void
 type Entry = { service: AgentMuxNativeService | null; evidence: AgentMuxEvidence | null; health: string; version: number }
-function targetKey(session: SessionSnapshot): string {
+function targetKey(session: TerminalSessionSnapshot): string {
   return JSON.stringify([session.hostId, session.control.hostId, session.kind === 'agent' ? session.control.agentSessionId : null, session.control.run.runId])
 }
 function serviceHealth(service: AgentMuxNativeService | null): string {
@@ -50,12 +50,12 @@ export function createRunServiceProjection() {
     }
   }
   return {
-    observeSnapshot(session: SessionSnapshot): void {
+    observeSnapshot(session: TerminalSessionSnapshot): void {
       if (session.hostId !== session.control.hostId) return
       const key = targetKey(session)
       if (entries.has(key)) update(key, session.nativeService ?? null)
     },
-    reconcile(sessions: readonly SessionSnapshot[]): void {
+    reconcile(sessions: readonly TerminalSessionSnapshot[]): void {
       const retained = new Set<string>()
       for (const session of sessions) {
         if (session.hostId !== session.control.hostId) continue
@@ -77,20 +77,20 @@ export function createRunServiceProjection() {
       update(key, core.nativeService, core.evidence)
       return true
     },
-    read(session: SessionSnapshot): AgentMuxNativeService | null {
+    read(session: TerminalSessionSnapshot): AgentMuxNativeService | null {
       return entries.get(targetKey(session))?.service ?? null
     },
-    evidence(session: SessionSnapshot): AgentMuxEvidence | null {
+    evidence(session: TerminalSessionSnapshot): AgentMuxEvidence | null {
       return entries.get(targetKey(session))?.evidence ?? null
     },
-    healthVersion(session?: SessionSnapshot): number {
+    healthVersion(session?: TerminalSessionSnapshot): number {
       return healthVersion(session ? targetKey(session) : null)
     },
     globalVersion: (): number => version,
-    subscribe(session: SessionSnapshot | undefined, listener: Listener): () => void {
+    subscribe(session: TerminalSessionSnapshot | undefined, listener: Listener): () => void {
       return subscribe(session && session.hostId === session.control.hostId ? targetKey(session) : null, session?.nativeService ?? null, listener)
     },
-    reader(session: SessionSnapshot | undefined) {
+    reader(session: TerminalSessionSnapshot | undefined) {
       const key = session ? targetKey(session) : null
       // Stable hook callbacks retain only this exact key and its original seed.
       // A callback handed to the previous Run must never target a later Run.
@@ -114,7 +114,7 @@ export const runServiceProjection = createRunServiceProjection()
 
 export type RunServiceProjection = ReturnType<typeof createRunServiceProjection>
 
-export function useRunService(session: SessionSnapshot | undefined, projection: RunServiceProjection = runServiceProjection): AgentMuxNativeService | null {
+export function useRunService(session: TerminalSessionSnapshot | undefined, projection: RunServiceProjection = runServiceProjection): AgentMuxNativeService | null {
   const key = session ? targetKey(session) : null
   const reader = useMemo(() => projection.reader(session), [key, projection])
   useSyncExternalStore(reader.subscribe, reader.snapshot)

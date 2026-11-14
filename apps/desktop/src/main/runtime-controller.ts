@@ -1,3 +1,4 @@
+import type { TerminalSessionSnapshot } from '../shared/contracts'
 import { parseFocusTaskReference } from '@agentmux/core/focus-control'
 import { createSpaceMemberSurface } from './space-member-surface.js'
 import { connectSpaceMember, type SpaceMemberClient } from '@agentmux/core/space-member-client'
@@ -240,20 +241,18 @@ function providerCapabilitiesFrom(
 
 type WorkPlacementProjection = (agentHostId: string, binding: import('@agentmux/core').AgentMuxAgentSession['toolExecution']) => { workPlacement?: AgentWorkPlacement }
 
+function projectSession(subject: AgentMuxRuntimeSubject, config: AppConfig,
+  capabilitiesFor: (providerId: AgentProviderId) => AgentCapabilities, workPlacementFor: WorkPlacementProjection): SessionSnapshot
+function projectSession(subject: AgentMuxRuntimeSubject, config: AppConfig,
+  capabilitiesFor: undefined, workPlacementFor: WorkPlacementProjection): TerminalSessionSnapshot
 function projectSession(
   subject: AgentMuxRuntimeSubject,
   config: AppConfig,
-  // 「这个 Provider 声明了什么能力」的取值口。收成一个 resolver 而不是一个可选的 `capabilities` 值：
-  // 可选值那种写法要求每个调用方自己写 `kind === 'agent' ? 查一下 : undefined`，于是同一句查询在两个
-  // 调用点各抄一份，而 terminal 分支传的 undefined 又逼这里留一份手写的兜底 capabilities 字面量。
-  // 那份字面量对 agent 恒不可达（两个调用点都传真 catalog），却是全仓第三份手抄的 `AgentCapabilities`
-  // ——实测把它四个取值全改，runtime-controller 那 42 条与整套 desktop 测试都全绿。
-  //
-  // 换成 resolver 之后：agent 分支必须调它才拿得到能力（拿不到就是 UNKNOWN_PROVIDER 响亮地抛，不是
-  // 静默退化成一份"什么都不支持"的假声明），terminal 分支根本不调，于是兜底字面量没有存在的理由。
-  capabilitiesFor: (providerId: AgentProviderId) => AgentCapabilities,
+  // Full semantic snapshots require original Provider declarations. An exact
+  // terminal attachment projects only its existing Session and Run facts.
+  capabilitiesFor: ((providerId: AgentProviderId) => AgentCapabilities) | undefined,
   workPlacementFor: WorkPlacementProjection
-): SessionSnapshot {
+): SessionSnapshot | TerminalSessionSnapshot {
   const run = subject.run
   const observedAt = run.observedAt
   // 「进程事实 → 界面那一行状态」只有一个答案，走 Core 的共享投影。这里只负责把快照的字段形状取出来。
@@ -300,7 +299,7 @@ function projectSession(
       ...(subject.agentSession.nativeHandle
         ? { nativeSessionId: subject.agentSession.nativeHandle.sessionId }
         : {}),
-      capabilities: capabilitiesFor(subject.providerId),
+      ...(capabilitiesFor ? { capabilities: capabilitiesFor(subject.providerId) } : {}),
       ...(semanticFacts ? { semanticStatus: structuredClone(semanticFacts) } : {}),
       ...(subject.agentSession.mainSessionActivity ? { mainSessionActivity: structuredClone(subject.agentSession.mainSessionActivity) } : {}),
       ...(subject.agentSession.currentActivity ? { currentActivity: structuredClone(subject.agentSession.currentActivity) } : {}),
@@ -2843,13 +2842,11 @@ export class RuntimeController {
   async openMountedSpaceMember(input: import('../shared/space-mount.js').SpaceMountMemberRoute, config: AppConfig,
     listener: (event: import('../shared/space-mount.js').SpaceMountMemberEvent) => void, signal: AbortSignal) {
     const carrier = this.spaceMountHost(input.hostId)
+    const workPlacement: WorkPlacementProjection = (agentHostId, binding) => ({ workPlacement: {
+      agentHostId, resourceHostId: binding?.resourceRuntimeId === input.target.reference.runtimeId ? input.hostId : null } })
     return await createSpaceMemberSurface(input, { ...carrier,
-      project: (subject, catalog) => projectSession(subject, config, providerId => {
-        const provider = catalog.find(entry => entry.id === providerId)
-        if (!provider) throw new AgentMuxError('The original member Provider declarations are unavailable. Its Agent and input are retained.', 'UNKNOWN_PROVIDER')
-        return provider.capabilities
-      },
-        (_hostId, binding) => ({ workPlacement: { agentHostId: subject.hostId, resourceHostId: binding?.resourceRuntimeId === input.target.reference.runtimeId ? input.hostId : null } })) }, listener, signal)
+      project: (subject, capabilities) => projectSession(subject, config, () => capabilities, workPlacement),
+      projectTerminal: subject => projectSession(subject, config, undefined, workPlacement) }, listener, signal)
   }
   async mountedSpaceHostChoices(target: SpaceMountSourceTarget, signal?: AbortSignal): Promise<import('../shared/space-mount.js').SpaceMountHostChoices> {
     const { rpc, context } = await this.mountedSpaceControl(target, signal)

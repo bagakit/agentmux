@@ -421,7 +421,7 @@ export function documentKey(workspaceId: string, path: string): string {
   return `${workspaceId}\0${path}`
 }
 
-export function workspaceForSession(config: AppConfig | null, session: SessionSnapshot, topics?: readonly import('@agentmux/host/mote-model').ScratchTopicSnapshot[] | null) {
+export function workspaceForSession(config: AppConfig | null, session: Pick<SessionSnapshot, 'hostId' | 'workspacePath'>, topics?: readonly import('@agentmux/host/mote-model').ScratchTopicSnapshot[] | null) {
   return config?.workspaces.find((workspace) => workspaceOwnsSessionPath(workspace, session, topics))
 }
 
@@ -442,7 +442,7 @@ export function workspaceForSession(config: AppConfig | null, session: SessionSn
  *
  * 认不出仍然返回 undefined：宁可不缩短，也不拿一个凑合的根去剥。
  */
-export function workspaceRootForPath(config: AppConfig | null, session: SessionSnapshot): string | undefined {
+export function workspaceRootForPath(config: AppConfig | null, session: Pick<SessionSnapshot, 'hostId' | 'workspacePath'>): string | undefined {
   const owner = workspaceForSession(config, session)
   if (owner) return owner.path
   let best: string | undefined

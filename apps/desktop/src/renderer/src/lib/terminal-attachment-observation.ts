@@ -1,4 +1,4 @@
-import type { SessionAttachResult } from '../../../shared/contracts'
+import type { TerminalAttachResult } from '../../../shared/contracts'
 import { api } from './api'
 
 async function releaseLateAttachment(attachmentId: string, detach: (id: string) => Promise<void>): Promise<void> {
@@ -7,8 +7,8 @@ async function releaseLateAttachment(attachmentId: string, detach: (id: string) 
 }
 
 /** Retire only this view's reader. A late acquired lease still belongs to its original reply. */
-export function observeTerminalAttachment(request: Promise<SessionAttachResult>, signal: AbortSignal,
-  retainedAttachmentId: string | null, detach: (id: string) => Promise<void> = id => api.sessions.detach(id)): Promise<SessionAttachResult> {
+export function observeTerminalAttachment(request: Promise<TerminalAttachResult>, signal: AbortSignal,
+  retainedAttachmentId: string | null, detach: (id: string) => Promise<void> = id => api.sessions.detach(id)): Promise<TerminalAttachResult> {
   // These callbacks live outside the TerminalView effect: an original request may outlive
   // the reader, but must not retain its terminal, replay queue or component callbacks.
   return new Promise((resolve, reject) => {

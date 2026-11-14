@@ -978,7 +978,9 @@ export async function connectHostedAgentMux<P extends AgentMuxHostedSessionProje
       const runId = (args[0] as AgentMuxRunRef).runId, reading = attached.get(runId)
       attached.delete(runId); openingReaders.delete(runId); await reading?.stream.dispose(); return
     }
-    if (method === 'reattachAgent') return await watchAttachment({ kind: 'agent-session', agentSessionId: args[0] as string }, (args[1] as number | undefined) ?? 0, (args[2] as 'raw' | 'terminal' | undefined) ?? 'raw')
+    // Match the local Core's explicit reattach: refresh the original reader and
+    // preserve the agent-session target in the existing wrapped attachment receipt.
+    if (method === 'reattachAgent') return await watchAttachment({ kind: 'agent-session', agentSessionId: args[0] as string }, (args[1] as number | undefined) ?? 0, (args[2] as 'raw' | 'terminal' | undefined) ?? 'raw', true)
     if (method === 'attachTerminal') return await watchAttachment({ kind: 'terminal-run', runId: args[0] as string }, (args[1] as number | undefined) ?? 0, (args[2] as 'raw' | 'terminal' | undefined) ?? 'raw')
     if (method === 'refreshRunAttachment') {
       const value = await watchAttachment({ kind: 'terminal-run', runId: (args[0] as AgentMuxRunRef).runId }, (args[1] as number | undefined) ?? 0,

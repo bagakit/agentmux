@@ -6,7 +6,8 @@ import type { TerminalSessionSource } from './terminal-session-source'
 
 /** Adapts one fixed Main member handle to the existing Terminal reader; no global lookup. */
 export function spaceMemberTerminalSource(surface: SpaceMountMemberSurface, target: SpaceMemberTarget,
-  subscribe: (listener: (event: RuntimeEvent) => void) => () => void): TerminalSessionSource {
+  subscribe: (listener: (event: RuntimeEvent) => void) => () => void,
+  initialAttachment?: Awaited<ReturnType<TerminalSessionSource['sessions']['attach']>>): TerminalSessionSource {
   const expected = { hostId: surface.initial.hostId, agentSessionId: target.agentSessionId, runId: target.expectedRun.runId }
   const assertControl = (control: SessionControl | undefined) => {
     if (control?.kind !== 'agent' || control.hostId !== expected.hostId || control.agentSessionId !== expected.agentSessionId || control.run.runId !== expected.runId)
@@ -16,7 +17,13 @@ export function spaceMemberTerminalSource(surface: SpaceMountMemberSurface, targ
     services: createRunServiceProjection(),
     refresh: async control => { assertControl(control); return await surface.call('read', {}) },
     sessions: {
-      attach: async (control, afterByte) => { assertControl(control); return await surface.call('attach', { afterByte: afterByte ?? 0 }) },
+      attach: async (control, afterByte) => {
+        assertControl(control)
+        const initial = initialAttachment; initialAttachment = undefined
+        if (initial && (afterByte ?? 0) === 0) return initial
+        if (initial) await surface.call('detach', { attachmentId: initial.attachmentId })
+        return await surface.call('attach', { afterByte: afterByte ?? 0 })
+      },
       refreshAttachment: async (control, attachmentId, afterByte) => { assertControl(control); return await surface.call('refreshAttachment', { attachmentId, afterByte }) },
       replay: (attachmentId, afterByte) => surface.call('replay', { attachmentId, afterByte }),
       detach: attachmentId => surface.call('detach', { attachmentId }),

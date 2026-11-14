@@ -1,3 +1,4 @@
+import type { TerminalSessionSnapshot } from '../../../shared/contracts'
 import { observeResolvedTheme } from '@agentmux/client-ui/theme'
 import { TextInput } from '@agentmux/client-ui/input'
 import { presentError } from '@agentmux/client-ui/error-presentation'
@@ -186,7 +187,7 @@ export function dismissTerminalLinkRequest<T extends OpenDestinationRequest>(
   return dismissOpenDestinationRequest(current, requestId)
 }
 
-function outputForSession(event: RuntimeEvent, session: SessionSnapshot) {
+function outputForSession(event: RuntimeEvent, session: TerminalSessionSnapshot) {
   const core = event.event
   if (
     event.hostId !== session.hostId ||
@@ -199,7 +200,7 @@ function outputForSession(event: RuntimeEvent, session: SessionSnapshot) {
 const UNCONFIRMED_SOURCE_FILES: SessionProjectFileContext = { kind: 'unconfirmed', workspaceRoot: '', homeDir: '', issue: 'File navigation for this original source is not confirmed.' }
 
 type TerminalViewProps = {
-  session: SessionSnapshot
+  session: TerminalSessionSnapshot
   themeId: TerminalThemeId
   // The terminal font size in CSS pixels. Absent falls back to the shipped default (a caller that has
   // not yet read config renders at the same size the terminal always used). A change reaches an already
@@ -220,18 +221,13 @@ type TerminalViewProps = {
   onRefreshSession?(control: SessionSnapshot['control']): Promise<SessionSnapshot>
 }
 
-type TerminalCommonFacts = Pick<SessionSnapshot,
+type TerminalSessionFacts = TerminalSessionSnapshot
+type TerminalCommonFacts = Pick<TerminalSessionSnapshot,
   'id' | 'hostId' | 'workspacePath' | 'label' | 'createdAt' | 'updatedAt' |
   'processState' | 'status' | 'latestOutputBytes' | 'nativeService' | 'runUnobserved' | 'interruptionReason'>
-type TerminalSessionFacts = TerminalCommonFacts & (
-  | Pick<Extract<SessionSnapshot, { kind: 'agent' }>,
-    'kind' | 'providerId' | 'executorId' | 'capabilities' | 'agentSessionUpdatedAt' | 'control' |
-    'terminalCapability' | 'terminalOutputChannel' | 'hookIngressObservation' | 'hookDeliveryObservation'>
-  | Pick<Extract<SessionSnapshot, { kind: 'terminal' }>, 'kind' | 'providerId' | 'control'>
-)
 
 /** The terminal lifetime needs these facts, never the Session's retained input/body graphs. */
-function terminalSessionFacts(session: SessionSnapshot): TerminalSessionFacts {
+function terminalSessionFacts(session: TerminalSessionSnapshot): TerminalSessionFacts {
   const common: TerminalCommonFacts = {
     id: session.id, hostId: session.hostId, workspacePath: session.workspacePath, label: session.label,
     createdAt: session.createdAt, updatedAt: session.updatedAt, processState: session.processState,
@@ -243,7 +239,7 @@ function terminalSessionFacts(session: SessionSnapshot): TerminalSessionFacts {
   if (session.kind === 'terminal') return { ...common, kind: session.kind, providerId: session.providerId, control: session.control }
   return {
     ...common, kind: session.kind, providerId: session.providerId, executorId: session.executorId,
-    capabilities: session.capabilities, agentSessionUpdatedAt: session.agentSessionUpdatedAt, control: session.control,
+    agentSessionUpdatedAt: session.agentSessionUpdatedAt, control: session.control,
     ...(session.terminalCapability !== undefined ? { terminalCapability: session.terminalCapability } : {}),
     ...(session.terminalOutputChannel !== undefined ? { terminalOutputChannel: session.terminalOutputChannel } : {}),
     ...(session.hookIngressObservation !== undefined ? { hookIngressObservation: session.hookIngressObservation } : {}),
@@ -375,6 +371,7 @@ function TerminalViewOwner({
     if (switchTarget) tabSwitchObservation.observe(switchTarget)
   }, [switchTarget, visible, hydrating, liveOutputReady, readOnly, canControlRun])
   const [attachFailed, setAttachFailed] = useState(false)
+  const [sessionRefreshFailure, setSessionRefreshFailure] = useState<string | null>(null)
   const [attachmentFailure, setAttachmentFailure] = useState<{ step: string; message: string } | null>(null)
   const writeObservationScope = JSON.stringify([session.control.hostId, session.id, session.control.run.runId])
   const [writeObservationFailure, setWriteObservationFailure] = useState<{ scope: string; step: string; message: string } | null>(null)
@@ -676,6 +673,7 @@ function TerminalViewOwner({
     setLiveOutputReady(false)
     setAttachFailed(false)
     setAttachmentFailure(null)
+    setSessionRefreshFailure(null)
     setWriteObservationFailure(null)
     setRefreshingObservation(false)
     setHasOutput(false)
@@ -1019,7 +1017,7 @@ function TerminalViewOwner({
     webglVisibilityRef.current = synchronizeWebglVisibility
     synchronizeWebglVisibility(visibleRef.current)
 
-    let disposed = false
+    let disposed = false, sessionRefreshRevision = 0
     const observationLifetime = new AbortController()
     let observedOutput = false
     let attachmentId: string | null = null
@@ -1899,11 +1897,18 @@ function TerminalViewOwner({
       let readingMarker: ReturnType<Terminal['registerMarker']> | undefined
       try {
         if (refresh && !automatic) {
-          const metadata = await observeRead(refreshSessionRef.current ? refreshSessionRef.current(session.control) : refreshSession(session.id), observationLifetime.signal)
-          if (disposed) return
-          if (!metadata || metadata.control.hostId !== session.control.hostId || metadata.control.run.runId !== session.control.run.runId) {
-            throw new Error('Session facts did not confirm this original Run. The original Region is kept.')
-          }
+          // Refresh supplemental Session facts independently. The attachment below
+          // carries its own exact original identity and authoritative Run receipt.
+          const revision = ++sessionRefreshRevision
+          void observeRead(refreshSessionRef.current ? refreshSessionRef.current(session.control) : refreshSession(session.id), observationLifetime.signal).then(metadata => {
+            if (disposed || revision !== sessionRefreshRevision) return
+            if (!metadata || metadata.control.hostId !== session.control.hostId || metadata.control.run.runId !== session.control.run.runId) {
+              throw new Error('Session facts did not confirm this original Run. The original Region is kept.')
+            }
+            setSessionRefreshFailure(null)
+          }).catch(error => {
+            if (!disposed && revision === sessionRefreshRevision) setSessionRefreshFailure(error instanceof Error ? error.message : String(error))
+          })
         }
         await observeRead(outputTail, observationLifetime.signal)
         if (disposed) return
@@ -2321,6 +2326,10 @@ function TerminalViewOwner({
   const hookIngressNotice = serviceNoticeToRender(classifyServiceNotice(hookIngressServiceOutcome(session), observationAvailable))
   const hookDeliveryNotice = serviceNoticeToRender(classifyServiceNotice(hookDeliveryServiceOutcome(session), observationAvailable))
   const connectionObservations = terminalConnectionNotices(session, connectionWarnings, nativeService, services.evidence(session))
+  const sessionRefreshNotice = sessionRefreshFailure ? { kind: 'indeterminate' as const, notice: {
+    step: 'Refreshing Session details', mode: sessionRefreshFailure,
+    restore: 'Refresh observation to reread these details. Original terminal output and input keep their own confirmed state; no input is replayed.'
+  } } : null
   const attachmentNotice = attachmentFailure ? { kind: 'indeterminate' as const, notice: {
     step: attachmentFailure.step,
     mode: `${attachmentFailure.message} The original Run was last observed ${session.processState}. This read does not determine current Run availability or input delivery. Your Session, history and draft are kept.`,
@@ -2478,6 +2487,7 @@ function TerminalViewOwner({
             reveal={revealNotice} replayGeometry={replayGeometryNotice}
             viewportSync={viewportSyncNotice} continuation={continuationNotice}
             causes={{
+              sessionRefresh: sessionRefreshFailure ? errorIdentity(sessionRefreshFailure) : '',
               attachment: JSON.stringify([attachmentFailure?.step, attachmentFailure ? errorIdentity(attachmentFailure.message) : null]),
               writeObservation: JSON.stringify([writeObservationFailure?.scope, writeObservationFailure?.step,
                 writeObservationFailure ? errorIdentity(writeObservationFailure.message) : null]),
@@ -2489,7 +2499,7 @@ function TerminalViewOwner({
               reveal: 'restoration-deadline', replayGeometry: 'retained-size-unknown', viewportSync: 'viewport-sync-failed',
               continuation: JSON.stringify([continuationAbsence?.type, continuationAbsence?.reason])
             }}
-            attachment={attachmentNotice} writeObservation={writeObservationNotice} sessionObservation={sessionObservationNotice} hookIngress={hookIngressNotice} hookDelivery={hookDeliveryNotice}
+            sessionRefresh={sessionRefreshNotice} attachment={attachmentNotice} writeObservation={writeObservationNotice} sessionObservation={sessionObservationNotice} hookIngress={hookIngressNotice} hookDelivery={hookDeliveryNotice}
             refreshingObservation={refreshingObservation}
             connectionObservations={connectionObservations}
             storageControl={session.control} continuationReason={continuationAbsence?.reason}

@@ -1283,6 +1283,17 @@ export type AgentLaunchResult = {
   projectionFailures: Array<{ step: 'session' | 'timeline'; message: string }>
 }
 
+/** Facts needed by the common terminal reader, independent of Provider declarations. */
+export type TerminalSessionSnapshot = Pick<SessionSnapshot,
+  'id' | 'hostId' | 'workspacePath' | 'label' | 'createdAt' | 'updatedAt' |
+  'processState' | 'status' | 'latestOutputBytes' | 'nativeService' | 'runUnobserved' | 'interruptionReason'> & (
+  | Pick<Extract<SessionSnapshot, { kind: 'agent' }>,
+    'kind' | 'providerId' | 'executorId' | 'agentSessionUpdatedAt' | 'control' |
+    'terminalCapability' | 'terminalOutputChannel' | 'hookIngressObservation' | 'hookDeliveryObservation'>
+  | Pick<Extract<SessionSnapshot, { kind: 'terminal' }>, 'kind' | 'providerId' | 'control'>
+)
+export type TerminalAttachResult = Omit<SessionAttachResult, 'session'> & { session: TerminalSessionSnapshot }
+
 export type SessionAttachResult = {
   attachmentId: string
   session: SessionSnapshot

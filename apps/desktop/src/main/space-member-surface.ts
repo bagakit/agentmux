@@ -1,11 +1,12 @@
-import { AgentMuxError, type AgentMuxRuntimeSubject } from '@agentmux/core'
+import { AgentMuxError, type AgentMuxRuntimeSubject, type AgentCapabilities } from '@agentmux/core'
 import { connectSpaceMember, type SpaceMemberClient } from '@agentmux/core/space-member-client'
+import { projectAgentMuxRuntimeSubjects } from '@agentmux/core/runtime'
 import { mintObjectId } from '@agentmux/core/object-id'
 import { isSpaceMemberNativeWrite, SPACE_MEMBER_NATIVE_SESSION_CALLS, SPACE_MEMBER_NATIVE_MAIL_CALLS, type SpaceMemberNativeCall } from '@agentmux/core/space-member'
 import { fileUploadRevision, parseFileUploadIdentity, parseFileUploadResult } from '@agentmux/core/files'
 import { spaceMountMemberCallHasReceipt } from '../shared/space-mount.js'
 import type { AgentMuxRpcClient } from '@agentmux/core'
-import type { SessionSnapshot } from '../shared/contracts.js'
+import type { SessionSnapshot, TerminalSessionSnapshot } from '../shared/contracts.js'
 import type { SpaceMountMemberRoute, SpaceMountMemberSurface, SpaceMountMemberEvent, SpaceMountMemberMethods } from '../shared/space-mount.js'
 
 type Actions = { [M in keyof SpaceMountMemberMethods]: (input: SpaceMountMemberMethods[M]['input'], signal?: AbortSignal) => Promise<SpaceMountMemberMethods[M]['result']> }
@@ -13,7 +14,8 @@ type Actions = { [M in keyof SpaceMountMemberMethods]: (input: SpaceMountMemberM
 export async function createSpaceMemberSurface(input: SpaceMountMemberRoute, ports: {
   rpc: Pick<AgentMuxRpcClient, 'call' | 'subscribe'>; assertCurrent(): void
   retainedRpc?: Pick<AgentMuxRpcClient, 'call' | 'subscribe'>
-  project(subject: AgentMuxRuntimeSubject, catalog: import('@agentmux/core').AgentCatalogEntry[]): SessionSnapshot
+  project(subject: AgentMuxRuntimeSubject, capabilities: AgentCapabilities): SessionSnapshot
+  projectTerminal(subject: AgentMuxRuntimeSubject): TerminalSessionSnapshot
 }, emit: (event: SpaceMountMemberEvent) => void, signal: AbortSignal): Promise<SpaceMountMemberSurface & { start(): void }> {
   // Reads still check this view after awaiting. An obtained effect ACK belongs
   // to its original operation even when this carrier changes before adoption.
@@ -36,15 +38,18 @@ export async function createSpaceMemberSurface(input: SpaceMountMemberRoute, por
     return value
   }
   const check = () => { signal.throwIfAborted(); ports.assertCurrent(); if (closed) throw new AgentMuxError('This original member view closed. Its Agent remains available.', 'CONTROL_CANCELLED') }
+  const project = <T extends TerminalSessionSnapshot>(projected: T): T => {
+    if (projected.kind !== 'agent' || projected.control.agentSessionId !== input.target.agentSessionId || projected.control.run.runId !== originalRun().runId) throw new AgentMuxError('This member now refers to another Run. The original input is retained.', 'STALE_AGENT_SESSION_BINDING')
+    return { ...projected, id: initial.id, hostId: initial.hostId, control: { kind: 'agent' as const, hostId: initial.hostId, agentSessionId: input.target.agentSessionId, run: originalRun() } }
+  }
   const read = async () => {
     check()
     const metadata = await client.metadata()
     const subject = await client.runtimeSubject({ kind: 'agent-session', agentSessionId: input.target.agentSessionId })
     check()
-    if (subject.kind !== 'agent' || subject.agentSession.agentSessionId !== input.target.agentSessionId || subject.run.runId !== originalRun().runId) throw new AgentMuxError('This member now refers to another Run. The original input is retained.', 'STALE_AGENT_SESSION_BINDING')
-    const projected = ports.project({ ...subject, hostId: initial.hostId }, metadata.catalog)
-    if (projected.kind !== 'agent') throw new AgentMuxError('The original member projector returned another object kind.', 'SPACE_MEMBER_TARGET_MISMATCH')
-    return { ...projected, id: initial.id, hostId: initial.hostId, control: { kind: 'agent' as const, hostId: initial.hostId, agentSessionId: input.target.agentSessionId, run: originalRun() } }
+    const provider = metadata.catalog.find(entry => entry.id === (subject.kind === 'agent' ? subject.providerId : null))
+    if (!provider) throw new AgentMuxError('The original member Provider declarations are unavailable. Its Agent and input are retained.', 'UNKNOWN_PROVIDER')
+    return project(ports.project({ ...subject, hostId: initial.hostId }, provider.capabilities))
   }
   const report = (cause: unknown) => { if (!closed) emit({ type: 'observation-error', error: { code: cause instanceof AgentMuxError ? cause.code : 'SPACE_MEMBER_OBSERVATION_UNAVAILABLE', message: cause instanceof Error ? cause.message : String(cause) } }) }
   const refresh = () => {
@@ -66,12 +71,14 @@ export async function createSpaceMemberSurface(input: SpaceMountMemberRoute, por
   const requireLease = (id: string) => { if (!leases.has(id)) throw new AgentMuxError('This attachment belongs to another original member view.', 'INVALID_ATTACHMENT') }
   const attach = async (afterByte: number, previous?: string | null) => {
     check(); if (previous) requireLease(previous)
-    const attached = previous !== undefined ? await client.refreshRunAttachment(originalRun(), afterByte, 'terminal')
-      : leases.size ? await client.readRunReplay(originalRun(), afterByte, 'terminal')
-      : await client.attachTerminal(originalRun().runId, afterByte, 'terminal')
+    // The existing agent-session stream already carries the original Session and
+    // attachment together. No catalog/bootstrap/status read follows this receipt.
+    const { session: originalSession, attachment: attached } = await client.reattachAgent(input.target.agentSessionId, afterByte, 'terminal')
     try {
       check(); if (attached.run.runId !== originalRun().runId) throw new AgentMuxError('The original attachment belongs to another Run.', 'STALE_AGENT_SESSION_BINDING')
-      const session = await read(), attachmentId = previous ?? mintObjectId(); leases.add(attachmentId)
+      const [subject] = projectAgentMuxRuntimeSubjects('local', [attached.run], [originalSession])
+      if (!subject) throw new AgentMuxError('The original attachment Session projection is unavailable. Its Run remains available.', 'SPACE_MEMBER_OBSERVATION_UNAVAILABLE')
+      const session = project(ports.projectTerminal({ ...subject, hostId: initial.hostId })), attachmentId = previous ?? mintObjectId(); leases.add(attachmentId)
       return { attachmentId, session, currentSize: attached.run.cols === null || attached.run.rows === null ? null : { cols: attached.run.cols, rows: attached.run.rows },
         replay: attached.replay, gap: attached.gap, terminal: attached.terminal, resizeRevision: attached.resizeRevision }
     } catch (cause) { if (!leases.size) await client.releaseRunAttachment(originalRun()).catch(report); throw cause }

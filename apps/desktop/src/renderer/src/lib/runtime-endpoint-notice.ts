@@ -1,5 +1,5 @@
 import type { RuntimeEndpointWarning } from '../../../shared/contracts'
-import type { SessionSnapshot } from '../../../shared/contracts'
+import type { TerminalSessionSnapshot } from '../../../shared/contracts'
 import type { AgentMuxEvidence, AgentMuxNativeService } from '@agentmux/core'
 import type { ServiceNoticeItem } from './use-service-notices'
 
@@ -34,7 +34,7 @@ export function runtimeEndpointNotice(warning: RuntimeEndpointWarning, label: st
 }
 
 /** The Region consumes its original Host's observation, not a second health detector. */
-export function terminalConnectionNotices(session: SessionSnapshot, warnings: readonly RuntimeEndpointWarning[],
+export function terminalConnectionNotices(session: TerminalSessionSnapshot, warnings: readonly RuntimeEndpointWarning[],
   service: AgentMuxNativeService | null, evidence: AgentMuxEvidence | null): ServiceNoticeItem[] {
   return warnings.filter(warning => warning.hostId === session.control.hostId && warning.observationOrigin !== undefined)
     .map(warning => ({

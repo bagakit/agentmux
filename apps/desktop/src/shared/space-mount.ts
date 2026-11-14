@@ -92,8 +92,8 @@ export type SpaceMountMemberMethods = {
   conversationRelease: { input: { view: string }; result: import('@agentmux/core/conversation').ConversationViewReleaseResult }
   conversationWatch: { input: { view?: string }; result: import('@agentmux/core/conversation').ConversationWatchOpening & { readerId: string } }
   conversationUnwatch: { input: { readerId: string }; result: void }
-  attach: { input: { afterByte: number }; result: import('./contracts').SessionAttachResult }
-  refreshAttachment: { input: { attachmentId: string | null; afterByte: number }; result: import('./contracts').SessionAttachResult }
+  attach: { input: { afterByte: number }; result: import('./contracts').TerminalAttachResult }
+  refreshAttachment: { input: { attachmentId: string | null; afterByte: number }; result: import('./contracts').TerminalAttachResult }
   replay: { input: { attachmentId: string; afterByte: number }; result: import('./contracts').SessionReplayResult }
   detach: { input: { attachmentId: string }; result: void }
   resize: { input: { attachmentId: string; cols: number; rows: number }; result: { cols: number; rows: number } | null }

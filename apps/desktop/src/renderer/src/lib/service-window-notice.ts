@@ -1,5 +1,5 @@
 import type { AgentMuxRunState } from '@agentmux/core'
-import type { SessionSnapshot } from '../../../shared/contracts'
+import type { SessionSnapshot, TerminalSessionSnapshot } from '../../../shared/contracts'
 import { CONNECTION_UNRECOVERABLE_DETAIL, CONNECTION_RETRYING_DETAIL } from './session-state'
 import { runEndedByRuntimeRestart } from './session-recovery-banner'
 
@@ -179,11 +179,11 @@ export function serviceNoticeAriaLive(kind: ServiceNoticeClass['kind']): Service
  * 「重启后会话恢复」是唯一还没接线的消费者：它落地后会在这里多加一个自己的 marker 分支，共用同一存活判定。
  */
 /** Revisions and byte counters are diagnostics, not a new notice cause. */
-export function nativeSessionServiceCause(session: SessionSnapshot, service = session.nativeService): string {
+export function nativeSessionServiceCause(session: TerminalSessionSnapshot, service = session.nativeService): string {
   return JSON.stringify([service?.owner, service?.output, service?.input.phase, service?.terminalFault?.stage])
 }
 
-export function nativeSessionServiceOutcome(session: SessionSnapshot, service = session.nativeService, observationAvailable = true): StepOutcome {
+export function nativeSessionServiceOutcome(session: TerminalSessionSnapshot, service = session.nativeService, observationAvailable = true): StepOutcome {
   if (!service) return { completed: true }
   const unavailable = [
     service.owner.type === 'stopped' && service.owner.reason !== 'historical' ? 'owner stopped' : null,
@@ -206,7 +206,7 @@ export function nativeSessionServiceOutcome(session: SessionSnapshot, service = 
   } }
 }
 
-export function hookIngressServiceOutcome(session: SessionSnapshot): StepOutcome {
+export function hookIngressServiceOutcome(session: TerminalSessionSnapshot): StepOutcome {
   const failure = session.kind === 'agent' ? session.hookIngressObservation : undefined
   if (!failure || failure.run.runId !== session.control.run.runId) return { completed: true }
   return { completed: false, agentViability: agentViabilityFromProcessState(session.processState, session.status.state !== 'disconnected'), step: {
@@ -221,7 +221,7 @@ export function hookIngressServiceOutcome(session: SessionSnapshot): StepOutcome
  * what is uncertain, then how it resolves. It resolves by itself: the Agent's next delivered Hook
  * observation clears it, so there is nothing for the person to retry or resend.
  */
-export function hookDeliveryServiceOutcome(session: SessionSnapshot): StepOutcome {
+export function hookDeliveryServiceOutcome(session: TerminalSessionSnapshot): StepOutcome {
   const loss = session.kind === 'agent' ? session.hookDeliveryObservation : undefined
   if (!loss || loss.run.runId !== session.control.run.runId) return { completed: true }
   // This owner knows only that observations were lost; the Run state and input keep their own owners.
@@ -234,7 +234,7 @@ export function hookDeliveryServiceOutcome(session: SessionSnapshot): StepOutcom
   } }
 }
 
-export function agentSessionServiceOutcome(session: SessionSnapshot | undefined): StepOutcome {
+export function agentSessionServiceOutcome(session: TerminalSessionSnapshot | undefined): StepOutcome {
   if (!session || session.kind !== 'agent') return { completed: true }
   // Recovery owns a confirmed ended Run; reconnecting that old Run cannot succeed.
   if (runEndedByRuntimeRestart(session)) return { completed: true }

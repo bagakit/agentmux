@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import type { RuntimeEvent, SessionSnapshot } from '../../../shared/contracts'
+import type { RuntimeEvent, SessionSnapshot, TerminalSessionSnapshot } from '../../../shared/contracts'
 import type { SpaceMountMemberSurface, SpaceMountMemberTarget, SpaceMountReadingSurface, SpaceMountReadingTarget, SpaceMountRecord } from '../../../shared/space-mount'
 import { spaceMountKey } from '../../../shared/space-mount'
 import type { ConversationObservation } from '@agentmux/core/conversation'
@@ -25,6 +25,9 @@ export function SpaceMemberWorkface({ target, visible, active, interactiveResize
   const ownerKey = originalSourceInputOwnerKey(target.target.runtimeId, target.target.agentSessionId)
   const viewModeSelector = useMemo(() => createSessionViewModeSelector(ownerKey), [ownerKey])
   const mode = useAppStore(viewModeSelector)
+  const terminalOpened = useRef<string | null>(null)
+  if (mode === 'terminal') terminalOpened.current = key
+  const terminalRequested = terminalOpened.current === key
   const activityOpened = useRef(false)
   if (mode === 'activity') activityOpened.current = true
   const readingTarget = useMemo<SpaceMountReadingTarget | undefined>(() => {
@@ -45,7 +48,7 @@ export function SpaceMemberWorkface({ target, visible, active, interactiveResize
   useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
   const [read, setRead] = useState<{ key: string; session?: SessionSnapshot; readIssue?: string | undefined; watchIssue?: string | undefined; inputIssue?: string | undefined }>({ key })
   const [attempt, setAttempt] = useState(0)
-  const [reader, setReader] = useState<{ key: string; surface: SpaceMountMemberSurface; source: ReturnType<typeof spaceMemberTerminalSource>; conversation: ReturnType<typeof sourceConversationPort> }>()
+  const [reader, setReader] = useState<{ key: string; surface: SpaceMountMemberSurface; source: ReturnType<typeof spaceMemberTerminalSource>; terminal?: TerminalSessionSnapshot; conversation: ReturnType<typeof sourceConversationPort> }>()
   const [conversationReader, setConversationReader] = useState<{ key: string; surface: SpaceMountReadingSurface; port: ReturnType<typeof sourceConversationPort> }>()
   const [readingIssue, setReadingIssue] = useState<{ key: string; message: string }>()
   const [readingAttempt, retryReading] = useState(0)
@@ -107,12 +110,10 @@ export function SpaceMemberWorkface({ target, visible, active, interactiveResize
       else if (event.session.kind === 'agent' && event.session.control.agentSessionId === target.target.agentSessionId && event.session.control.run.runId === target.target.expectedRun.runId)
         setRead(prior => ({ ...(prior.key === key ? prior : {}), key, session: event.session }))
       else issue(new Error('The member observation belongs to another original Session or Run. Its reference is kept.'), 'watchIssue')
-    }, controller.signal).then(surface => {
+    }, controller.signal).then(async surface => {
       if (controller.signal.aborted || currentKey.current !== key) { release(surface); return }
       acquired = surface
-      const source = spaceMemberTerminalSource(surface, target.target, subscribe)
       const conversation = sourceConversationPort(surface, target.target.agentSessionId, conversations, controller.signal)
-      setReader({ key, surface, source, conversation })
       // The original fixed read is independent of the optional general-event opening.
       void surface.call('read', {}).then(session => {
         if (controller.signal.aborted || currentKey.current !== key) return
@@ -123,9 +124,15 @@ export function SpaceMemberWorkface({ target, visible, active, interactiveResize
         }
         else issue(new Error('The member observation belongs to another original Session or Run. Its reference is kept.'))
       }).catch(issue)
+      // The terminal starts from its exact Core attachment receipt. Supplemental
+      // Session/event observation must not gate the already readable original Run.
+      const attached = terminalRequested ? await surface.call('attach', { afterByte: 0 }) : undefined
+      if (controller.signal.aborted || currentKey.current !== key) return
+      const source = spaceMemberTerminalSource(surface, target.target, subscribe, attached)
+      setReader({ key, surface, source, conversation, ...(attached ? { terminal: attached.session } : {}) })
     }).catch(issue)
     return () => { controller.abort(); if (acquired) release(acquired) }
-  }, [key, visible, listeners, attempt, subscribe])
+  }, [key, visible, listeners, attempt, subscribe, terminalRequested])
   const observed = read.key === key ? read : undefined, original = reader?.key === key ? reader : undefined
   async function refresh() {
     onRefreshSource?.()
@@ -145,6 +152,7 @@ export function SpaceMemberWorkface({ target, visible, active, interactiveResize
   }
   const hasIssue = observed?.watchIssue || observed?.readIssue
   const session = observed?.session
+  const terminalSession = original?.terminal ? session ?? original.terminal : undefined
   const originalReading = conversationReader?.key === readingKey ? conversationReader : undefined
   // Legacy full members retain their original reader; they do not acquire a
   // conversation-only grant by inventing a missing C/L.
@@ -166,7 +174,7 @@ export function SpaceMemberWorkface({ target, visible, active, interactiveResize
         step: 'Agent observation unconfirmed',
         mode: [observed?.watchIssue ? `Updates: ${observed.watchIssue}` : undefined,
           observed?.readIssue && observed.readIssue !== observed.watchIssue ? `Session read: ${observed.readIssue}` : undefined,
-          session ? `Last confirmed: ${sessionStatusLabel(session)}.` : 'The current Session and Run state are unknown.',
+          session ? `Last confirmed: ${sessionStatusLabel(session)}.` : terminalSession ? `Last confirmed terminal: ${terminalSession.processState}. Session details are unconfirmed.` : 'The current Session and Run state are unknown.',
           'Original conversation reading is separate. Your draft is kept.'].filter(Boolean).join(' '),
         restore: 'Refresh this observation, or check the original terminal for startup and permission questions.'
       } }} actions={<button type="button" className="small-button" onClick={() => void refresh()}>Refresh member observation</button>} /> : null}
@@ -182,8 +190,8 @@ export function SpaceMemberWorkface({ target, visible, active, interactiveResize
         restore: 'The last readable original records are kept. Retry reading from the same original source.' } }}
       actions={<button type="button" className="small-button" onClick={() => retryReading(value => value + 1)}>Retry original reading</button>} /> : null}
     <div ref={bodyRef} className="agent-body" data-observation-surface={mode === 'activity' ? 'workflow' : undefined}><div className="agent-terminal-stage">
-      {session && original ?
-        <div className="mounted-space-agent__terminal" hidden={mode !== 'terminal'}><TerminalView session={session} sessionSource={original.source}
+      {terminalSession && original ?
+        <div className="mounted-space-agent__terminal" hidden={mode !== 'terminal'}><TerminalView session={terminalSession} sessionSource={original.source}
           themeId={appearance?.terminalTheme ?? 'graphite'} {...(appearance?.terminalFontSize === undefined ? {} : { fontSize: appearance.terminalFontSize })}
           interactiveResize={interactiveResize} visible={visible && mode === 'terminal'} autoFocus={active && mode === 'terminal'} /></div>
         : mode === 'terminal' ? runtimeRecovery?.('surface') ?? <FullPageLoadingSurface scope="region" visible={visible}
