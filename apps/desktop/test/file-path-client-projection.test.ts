@@ -4,7 +4,7 @@ import { spawn } from 'node:child_process'
 import { mkdir, readFile, rename, stat, symlink, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { webcrypto } from 'node:crypto'
-import { act, createElement, Fragment, useLayoutEffect } from 'react'
+import { act, createElement, Fragment, useLayoutEffect, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { createWorkspaceLayout } from '@agentmux/layout'
 import { AgentMuxSpatialStateStore } from '@agentmux/core/spatial-state'
@@ -195,6 +195,42 @@ async function connectFolder(f: Awaited<ReturnType<typeof fixture>>) {
   if (original.status !== 'registration-required') throw new Error('Original directory packet required')
   expect((await f.store.getState().useFilesSourceFolder(f.workspace.id, original.registration)).status).toBe('located')
 }
+
+it.runIf(business)('same-Source copies replace pending directory readers and a new tree root recomputes depth', async () => {
+  const f = await fixture(); await connectFolder(f)
+  await mkdir(join(f.source.project, 'child')); await writeFile(join(f.source.project, 'child', 'nested.txt'), 'Original nested candidate')
+  const { useWorkspaceFileTree } = await import('../src/renderer/src/components/file-tree/useWorkspaceFileTree.js')
+  const call = f.bridge.files.call, expanded = new Set<string>(), held: Array<() => void> = []
+  let block = true, requests = 0, tree!: ReturnType<typeof useWorkspaceFileTree>, setRoot!: (value: string) => void
+  cleanup.push(() => held.splice(0).forEach(release => release()))
+  vi.mocked(f.api.sourceFiles.call).mockImplementation(async (...args) => { const reply = await call(...args); if (args[1] === 'file.list') {
+    ++requests
+    if (block) { block = false; await new Promise<void>(resolve => held.push(resolve)) }
+  } return reply })
+  const element = document.createElement('div'), root = createRoot(element); document.body.append(element)
+  cleanup.push(async () => { await act(async () => root.unmount()); element.remove() })
+  function Probe() { const [path, update] = useState(''); setRoot = update; tree = useWorkspaceFileTree(f.workspace.id, expanded, path); return null }
+  const copyStatus = () => f.store.setState(state => ({ sourceFilesInputs: { ...state.sourceFilesInputs, selections: { ...state.sourceFilesInputs.selections,
+    [f.workspace.id]: { ...state.sourceFilesInputs.selections[f.workspace.id]!, issue: 'Original Source observation ended' } } } }))
+  await act(async () => root.render(createElement(Probe)))
+  await vi.waitFor(() => expect(held.length).toBe(1))
+  await act(async () => copyStatus())
+  await vi.waitFor(() => expect(tree.rootCache?.loading).toBe(false))
+  expect(tree.rootCache?.children.some(entry => entry.name === 'child')).toBe(true); expect(requests).toBe(2)
+  held.splice(0).forEach(release => release())
+  block = true
+  let refreshing!: Promise<boolean>
+  await act(async () => { refreshing = tree.refreshDir('') })
+  await vi.waitFor(() => expect(held.length).toBe(1))
+  await act(async () => copyStatus())
+  await vi.waitFor(() => expect(tree.rootCache?.loading).toBe(false))
+  expect(tree.rootCache?.children.some(entry => entry.name === 'child')).toBe(true)
+  held.splice(0).forEach(release => release()); await refreshing
+  await act(async () => { await tree.loadDir('child', { force: true }) })
+  expect(tree.dirCache.child?.children[0]?.depth).toBe(1)
+  await act(async () => setRoot('child'))
+  await vi.waitFor(() => expect(tree.rootCache?.children[0]?.depth).toBe(0))
+}, 60000)
 
 it.runIf(business)('Source Explorer and Quick Open discover original Native candidates including empty directories without a Main alias', async () => {
   const f = await fixture(); await connectFolder(f)
