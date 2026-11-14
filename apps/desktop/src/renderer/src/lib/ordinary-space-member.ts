@@ -28,7 +28,10 @@ export function ordinarySpaceMember(graph: AgentMuxSpatialGraph | null | undefin
   if (prior) return prior
   const project = (): OrdinarySpaceMember => {
     const region = index.regions.get(JSON.stringify([reference.tabId, reference.regionId]))
-    if (!region || region.kind !== 'agent' || !region.execution) return existing
+    if (!region || region.kind !== 'agent') return existing
+    // Core's association placeholder is not a local Session or execution.
+    if ('association' in region && region.association !== undefined) return unknown()
+    if (!region.execution) return existing
     // Core's local selector is local to this original source, not a display label.
     const foreignSelector = region.execution.hostId !== 'local'
     const presentation = desktopAgentPresentationFromSpatial(graph, region)

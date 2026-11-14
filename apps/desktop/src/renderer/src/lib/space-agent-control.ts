@@ -562,7 +562,10 @@ export async function executeSpatialControl(ports: SpatialControlPorts,
         selfMove = true
       }
     } else {
-      sessionId = request.content.kind === 'agent-session' ? request.content.agentSessionId : mintObjectId()
+      sessionId = request.content.kind === 'agent-session'
+        ? request.content.agentSessionId ?? failure('AGENT_OPEN_CONTRACT_UNCONFIRMED',
+          'This original Agent reference requires its Core owner. No local Session was selected; the original workface is retained.')
+        : mintObjectId()
       if (request.content.kind === 'new-agent') {
         executorId = request.content.executorId
         const toolWorkspaceId = request.content.toolWorkspaceId
