@@ -60,6 +60,7 @@ import { parseRuntimeV8ProfileInput, parseRuntimeV8ProfileResult, type HostV8Pro
 import { parseRendererV8ProfileResult } from './renderer-v8-profile.js'
 import { parseRendererCacheResult } from './renderer-cache.js'
 import { parseRendererMemoryResult } from './renderer-memory.js'
+import { parseRendererWorkerMemoryResult } from './renderer-worker-memory.js'
 import { parseAppMemoryEvidence } from './app-memory-evidence.js'
 import { parseRendererHeapSnapshotResult, parseRendererHeapSnapshotInspection } from './renderer-heap-snapshot.js'
 import { parseRendererAnimationsResult } from './renderer-animations.js'
@@ -2285,6 +2286,7 @@ export class AgentMuxRpcService {
         : request.operation === 'metrics.animations.inspect' ? { operation: 'metrics.animations.inspect', observation: await this.inspectAnimations({ target: request.target }, context.signal) }
         : request.operation === 'metrics.cache.inspect' ? { operation: 'metrics.cache.inspect', observation: await this.rendererCache({ target: request.target }, 'inspect', context.signal) }
         : request.operation === 'metrics.cache.reclaim' ? { operation: 'metrics.cache.reclaim', observation: await this.rendererCache({ target: request.target }, 'reclaim', context.signal) }
+        : request.operation === 'metrics.memory.workers.inspect' ? { operation: 'metrics.memory.workers.inspect', observation: await this.inspectWorkers({ target: request.target }, context.signal) }
         : request.operation === 'metrics.memory.inspect' ? { operation: 'metrics.memory.inspect', observation: await this.inspectMemory({ target: request.target }, context.signal) }
         : request.operation === 'metrics.heap.capture' ? { operation: 'metrics.heap.capture', capture: await this.captureHeapSnapshot({ target: request.target, captureId: request.captureId }, context.signal) }
         : request.operation === 'metrics.heap.inspect' ? { operation: 'metrics.heap.inspect', inspection: await this.inspectHeapSnapshot(request.captureId === undefined ? {} : { captureId: request.captureId }, context.signal) }
@@ -3162,6 +3164,10 @@ export class AgentMuxRpcService {
     const owner = this.ports.metrics, call = action === 'inspect' ? owner?.inspectCache : owner?.reclaimCache
     if (!call) throw new AgentMuxError('Renderer platform cache operation is unavailable on the original metrics owner.', 'METRICS_UNSUPPORTED')
     return parseRendererCacheResult(await call.call(owner, input, signal), input, action)
+  }
+  private async inspectWorkers(input: import('./renderer-worker-memory.js').RendererWorkerMemoryInput, signal?: AbortSignal) {
+    if (!this.ports.metrics?.inspectWorkers) throw new AgentMuxError('Related Worker memory observations are unavailable on the original metrics owner.', 'METRICS_UNSUPPORTED')
+    return parseRendererWorkerMemoryResult(await this.ports.metrics.inspectWorkers(input, signal), input)
   }
   private async inspectMemory(input: import('./renderer-memory.js').RendererMemoryInput, signal?: AbortSignal) {
     if (!this.ports.metrics?.inspectMemory) throw new AgentMuxError('Renderer memory details are unavailable on the original metrics owner.', 'METRICS_UNSUPPORTED')

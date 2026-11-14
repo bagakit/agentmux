@@ -31,6 +31,7 @@ export * from './browser-task-control.js'
 import type { RendererV8ProfileInput, RendererV8ProfileResult } from './renderer-v8-profile.js'
 import type { RendererCacheInput, RendererCacheResult } from './renderer-cache.js'
 import type { RendererMemoryInput, RendererMemoryResult } from './renderer-memory.js'
+import type { RendererWorkerMemoryInput, RendererWorkerMemoryResult } from './renderer-worker-memory.js'
 import type { RendererHeapSnapshotInput, RendererHeapSnapshotResult, RendererHeapSnapshotInspectInput, RendererHeapSnapshotInspection } from './renderer-heap-snapshot.js'
 import type { RendererAnimationsInput, RendererAnimationsResult } from './renderer-animations.js'
 import type { RendererTraceInput, RendererTraceResult } from './renderer-trace.js'
@@ -292,7 +293,7 @@ export type AgentMuxArrangeMode =
   | { kind: 'active-first' }
 
 type RequestBase = { schemaVersion: typeof AGENTMUX_CONTROL_SCHEMA_VERSION; requestId: string }
-export type AgentMuxControlMetricsRequest = RequestBase & ({ operation: 'metrics.get' } | { operation: 'metrics.watch' } | { operation: 'metrics.app-memory.inspect' } | ({ operation: 'metrics.scene.capture' } & RendererSceneCaptureInput) | ({ operation: 'metrics.scene.inspect' } & RendererSceneInspectInput) | ({ operation: 'metrics.allocations.capture' } & RendererAllocationsInput) | ({ operation: 'metrics.cache.inspect' } & RendererCacheInput) | ({ operation: 'metrics.cache.reclaim' } & RendererCacheInput) | ({ operation: 'metrics.memory.inspect' } & RendererMemoryInput) | ({ operation: 'metrics.heap.capture' } & RendererHeapSnapshotInput) | ({ operation: 'metrics.heap.inspect' } & RendererHeapSnapshotInspectInput) | ({ operation: 'metrics.animations.inspect' } & RendererAnimationsInput) | ({ operation: 'metrics.profile.capture' } & RendererV8ProfileInput) | ({ operation: 'metrics.trace.capture' } & RendererTraceInput))
+export type AgentMuxControlMetricsRequest = RequestBase & ({ operation: 'metrics.get' } | { operation: 'metrics.watch' } | { operation: 'metrics.app-memory.inspect' } | ({ operation: 'metrics.scene.capture' } & RendererSceneCaptureInput) | ({ operation: 'metrics.scene.inspect' } & RendererSceneInspectInput) | ({ operation: 'metrics.allocations.capture' } & RendererAllocationsInput) | ({ operation: 'metrics.cache.inspect' } & RendererCacheInput) | ({ operation: 'metrics.cache.reclaim' } & RendererCacheInput) | ({ operation: 'metrics.memory.inspect' } & RendererMemoryInput) | ({ operation: 'metrics.memory.workers.inspect' } & RendererWorkerMemoryInput) | ({ operation: 'metrics.heap.capture' } & RendererHeapSnapshotInput) | ({ operation: 'metrics.heap.inspect' } & RendererHeapSnapshotInspectInput) | ({ operation: 'metrics.animations.inspect' } & RendererAnimationsInput) | ({ operation: 'metrics.profile.capture' } & RendererV8ProfileInput) | ({ operation: 'metrics.trace.capture' } & RendererTraceInput))
 /** A host-owned, content-free client observation; the host owns its concrete schema. */
 export type AgentMuxControlInspectClientRequest = RequestBase & { operation: 'inspect.client'; conversation?: ConversationConsumerQuery }
 export type AgentMuxControlInspectMoteContextRequest = RequestBase & {
@@ -860,6 +861,7 @@ export type AgentMuxControlResult =
   | { operation: 'metrics.cache.inspect'; observation: RendererCacheResult }
   | { operation: 'metrics.cache.reclaim'; observation: RendererCacheResult }
   | { operation: 'metrics.memory.inspect'; observation: RendererMemoryResult }
+  | { operation: 'metrics.memory.workers.inspect'; observation: RendererWorkerMemoryResult }
   | { operation: 'metrics.heap.capture'; capture: RendererHeapSnapshotResult }
   | { operation: 'metrics.heap.inspect'; inspection: RendererHeapSnapshotInspection }
   | { operation: 'metrics.animations.inspect'; observation: RendererAnimationsResult }
@@ -1137,6 +1139,7 @@ const OPERATION_BUDGET: Record<AgentMuxControlRequest['operation'], 'long' | 'sh
   'metrics.cache.inspect': 'short',
   'metrics.cache.reclaim': 'short',
   'metrics.memory.inspect': 'short',
+  'metrics.memory.workers.inspect': 'short',
   'metrics.heap.capture': 'long',
   'metrics.heap.inspect': 'long',
   'metrics.animations.inspect': 'short',

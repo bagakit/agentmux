@@ -140,6 +140,7 @@ export const AGENTMUX_RPC_CONTROL_METHODS = {
   'system.metrics.cache.inspect': 'metrics.cache.inspect',
   'system.metrics.cache.reclaim': 'metrics.cache.reclaim',
   'system.metrics.memory.inspect': 'metrics.memory.inspect',
+  'system.metrics.memory.workers.inspect': 'metrics.memory.workers.inspect',
   'system.metrics.heap.capture': 'metrics.heap.capture',
   'system.metrics.heap.inspect': 'metrics.heap.inspect',
   'system.metrics.animations.inspect': 'metrics.animations.inspect',

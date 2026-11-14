@@ -7,6 +7,7 @@ import { parseRendererSceneCaptureResult, parseRendererSceneInspection } from '.
 import { parseRendererV8ProfileResult } from './renderer-v8-profile.js'
 import { parseRendererCacheResult } from './renderer-cache.js'
 import { parseRendererMemoryResult } from './renderer-memory.js'
+import { parseRendererWorkerMemoryResult } from './renderer-worker-memory.js'
 import { parseRendererHeapSnapshotResult, parseRendererHeapSnapshotInspection } from './renderer-heap-snapshot.js'
 import { parseRendererAnimationsResult } from './renderer-animations.js'
 import { parseRendererTraceResult } from './renderer-trace.js'
@@ -391,6 +392,9 @@ export function assertControlResultTarget(request: AgentMuxControlRequest, resul
     case 'metrics.cache.inspect':
     case 'metrics.cache.reclaim':
       parseRendererCacheResult(actual.observation, request, request.operation === 'metrics.cache.inspect' ? 'inspect' : 'reclaim')
+      break
+    case 'metrics.memory.workers.inspect':
+      parseRendererWorkerMemoryResult(actual.observation, request)
       break
     case 'metrics.memory.inspect':
       parseRendererMemoryResult(actual.observation, request)

@@ -10,6 +10,7 @@ export * from './v8-profile.js'
 export * from './renderer-v8-profile.js'
 export * from './renderer-trace.js'
 export * from './renderer-memory.js'
+export * from './renderer-worker-memory.js'
 export * from './renderer-cache.js'
 import type { RendererCacheInput, RendererCacheResult } from './renderer-cache.js'
 export * from './renderer-animations.js'
@@ -17,6 +18,7 @@ export * from './app-memory-evidence.js'
 import type { AppMemoryEvidence } from './app-memory-evidence.js'
 import type { RendererAnimationsInput, RendererAnimationsResult } from './renderer-animations.js'
 import type { RendererMemoryInput, RendererMemoryResult } from './renderer-memory.js'
+import type { RendererWorkerMemoryInput, RendererWorkerMemoryResult } from './renderer-worker-memory.js'
 import type { RendererTraceInput, RendererTraceResult } from './renderer-trace.js'
 import type { RendererV8ProfileInput, RendererV8ProfileResult } from './renderer-v8-profile.js'
 import { readInputObservation, INPUT_PERFORMANCE_STAGES, INPUT_PERFORMANCE_WORK } from './performance-diagnostics.js'
@@ -124,6 +126,7 @@ export interface AgentMuxMetricsPort {
   captureScene?(input: RendererSceneCaptureInput, signal?: AbortSignal): Promise<RendererSceneCaptureResult>
   inspectScene?(input: RendererSceneInspectInput, signal?: AbortSignal): Promise<RendererSceneInspection>
   inspectMemory?(input: RendererMemoryInput, signal?: AbortSignal): Promise<RendererMemoryResult>
+  inspectWorkers?(input: RendererWorkerMemoryInput, signal?: AbortSignal): Promise<RendererWorkerMemoryResult>
   captureTrace?(input: RendererTraceInput, signal?: AbortSignal): Promise<RendererTraceResult>
   captureProfile?(input: RendererV8ProfileInput, signal?: AbortSignal): Promise<RendererV8ProfileResult>
   subscribe(onSnapshot: (value: MetricsObservation) => void, onEnd: (error?: Error) => void,

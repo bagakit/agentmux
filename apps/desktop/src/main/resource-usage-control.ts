@@ -26,7 +26,7 @@ export function createResourceMetricsPort(args: {
   scene?: { owner: PerformanceSceneOwner; currentTarget(): RendererV8ProfileTarget | null; loaded(): RendererSceneLoaded }
   heap?: { owner: RendererHeapSnapshotOwner; dependencies: RendererHeapSnapshotDependencies }
   profiler?: { capture: NonNullable<AgentMuxMetricsPort['captureProfile']>; dispose(): void }
-  memory?: { inspect: NonNullable<AgentMuxMetricsPort['inspectMemory']>; dispose(): void }
+  memory?: { inspect: NonNullable<AgentMuxMetricsPort['inspectMemory']>; inspectWorkers?: NonNullable<AgentMuxMetricsPort['inspectWorkers']>; dispose(): void }
   animations?: { inspect: NonNullable<AgentMuxMetricsPort['inspectAnimations']>; dispose(): void }
   tracer?: { capture: NonNullable<AgentMuxMetricsPort['captureTrace']>; dispose(): void }
 }): AgentMuxMetricsPort & { dispose(): void } {
@@ -62,6 +62,11 @@ export function createResourceMetricsPort(args: {
       args.heap?.owner.assertDebuggerAvailable()
       return args.allocations!.capture(input, signal)
     }) satisfies NonNullable<AgentMuxMetricsPort['captureAllocations']> } : {}),
+    ...(args.memory?.inspectWorkers ? { inspectWorkers: (async (input, signal) => {
+      if (disposed) throw new AgentMuxError('Metrics Main owner was disposed.', 'CONTROL_UNAVAILABLE')
+      args.heap?.owner.assertDebuggerAvailable()
+      return args.memory!.inspectWorkers!(input, signal)
+    }) satisfies NonNullable<AgentMuxMetricsPort['inspectWorkers']> } : {}),
     ...(args.memory ? { inspectMemory: (async (input, signal) => {
       if (disposed) throw new AgentMuxError('Metrics Main owner was disposed.', 'CONTROL_UNAVAILABLE')
       args.heap?.owner.assertDebuggerAvailable()

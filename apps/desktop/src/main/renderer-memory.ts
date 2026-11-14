@@ -1,6 +1,7 @@
 import type { WebContents } from 'electron'
+import { readRendererWorkerMemory } from './renderer-worker-memory.js'
 import { AgentMuxError, agentMuxControlTimeoutMs, parseRendererMemoryInput, parseRendererMemoryResult, parseRendererHeapUsage,
-  sameRendererV8ProfileTarget, type RendererMemoryInput, type RendererMemoryResult,
+  sameRendererV8ProfileTarget, parseRendererWorkerMemoryInput, type RendererWorkerMemoryInput, type RendererWorkerMemoryResult, type RendererMemoryInput, type RendererMemoryResult,
   type RendererV8ProfileTarget } from '@agentmux/core/control'
 
 /** One explicit counter read; no Runtime.enable, evaluation, object enumeration or GC command. */
@@ -11,6 +12,22 @@ export class RendererMemoryInspector {
   dispose(): void {
     this.disposed = true
     this.active?.abort(new AgentMuxError('Renderer memory owner ended.', 'CONTROL_OWNER_LOST'))
+  }
+  async inspectWorkers(raw: RendererWorkerMemoryInput, signal?: AbortSignal): Promise<RendererWorkerMemoryResult> {
+    const input = { target: { ...parseRendererWorkerMemoryInput(raw).target } }
+    const verify = () => {
+      const current = this.currentTarget()
+      if (!current || !sameRendererV8ProfileTarget(current, input.target))
+        throw new AgentMuxError('The exact Worker memory root is no longer current. Original pages and Workers remain available.', 'CONTROL_OWNER_LOST')
+    }
+    signal?.throwIfAborted(); verify()
+    if (this.disposed || this.active || this.contents.isDevToolsOpened() || this.contents.debugger.isAttached())
+      throw new AgentMuxError('This memory debugger is unavailable or already owned. Only the exact query was refused.', 'CONTROL_UNAVAILABLE')
+    const controller = new AbortController(), abort = () => controller.abort(signal?.reason)
+    this.active = controller; signal?.addEventListener('abort', abort, { once: true })
+    if (signal?.aborted) abort()
+    try { return await readRendererWorkerMemory(this.contents, input, controller, verify) }
+    finally { signal?.removeEventListener('abort', abort); this.active = null }
   }
   async inspect(raw: RendererMemoryInput, signal?: AbortSignal): Promise<RendererMemoryResult> {
     const input = { target: { ...parseRendererMemoryInput(raw).target } }
