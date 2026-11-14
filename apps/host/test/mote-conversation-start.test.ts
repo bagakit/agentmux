@@ -19,24 +19,24 @@ import {directoryIdentity,homeZoneId,serializeMoteQuickMode} from '../src/mote-m
 const closes:Array<()=>unknown|Promise<unknown>>=[]
 afterEach(async()=>{for(const close of closes.splice(0).reverse())await close();vi.restoreAllMocks();vi.unstubAllEnvs()})
 import {createMoteConversationStartFixture} from './helpers/mote-conversation-start-fixture.js'
-async function fixture(){const f=await createMoteConversationStartFixture();closes.push(f.close);return f}
+async function fixture(){const f=await createMoteConversationStartFixture({providerId:'claude'});closes.push(f.close);return f}
 it('actual Host no-input creation retains and submits one frozen Query only after original binding',async()=>{
  const f=await fixture(),before=(await f.spatial.read())!,query='Original first Query with commitments'
  const opened=await f.start('first-start',query)
  expect(opened.outcome).toBe('opened');expect(f.h.started).toHaveLength(1);const bootstrapWrites=f.h.inner.kernel.input.mock.calls.length;expect(JSON.stringify(f.h.started)).not.toContain(query);expect(JSON.stringify(f.h.inner.kernel.input.mock.calls)).not.toContain(query)
  const retained=spatialAgentOpenRecord((await f.spatial.read())!.graph,'first-start')!;expect(retained.moteMain?.deferredInput?.prompt).toBe(query)
- expect((await f.setup('first-start',false)).deferredInput?.route??null).toBeNull();expect(f.h.inner.kernel.input).toHaveBeenCalledTimes(bootstrapWrites)
- const bound=await f.setup('first-start');expect(bound.binding,bound.issue??'').toBe('confirmed')
+ expect((await f.settledSetup('first-start',false)).deferredInput?.route??null).toBeNull();expect(f.h.inner.kernel.input).toHaveBeenCalledTimes(bootstrapWrites)
+ const bound=await f.settledSetup('first-start');expect(bound.binding,bound.issue??'').toBe('confirmed')
  expect(agentPromptSubmissionOutcome(bound.deferredInput?.record),bound.issue??JSON.stringify(bound)).toBe('terminal-confirmed')
  const count=f.h.inner.kernel.input.mock.calls.length;expect(count).toBeGreaterThan(0)
  expect(JSON.stringify(bound.deferredInput?.record)).toContain(query)
- expect(await f.setup('first-start')).toEqual(bound);expect(f.h.inner.kernel.input).toHaveBeenCalledTimes(count)
+ expect(await f.settledSetup('first-start')).toEqual(bound);expect(f.h.inner.kernel.input).toHaveBeenCalledTimes(count)
  expect((await f.spatial.read())!.graph.regions).toContainEqual(before.graph.regions[0]);expect(f.h.inner.kernel.stop).not.toHaveBeenCalled()
  expect(await readFile(f.path,'utf8')).toContain('Keep original cooperation notes.')
 },45000)
 it('original writer records separate role periods and keeps old unknown history factual',async()=>{
- const f=await fixture();await f.start('period-a');await f.setup('period-a');const a=await f.main.readCurrentMoteMain(f.target)
- await f.start('period-b',undefined,true);const b=await f.setup('period-b');expect(b.binding,b.issue??'').toBe('confirmed')
+ const f=await fixture();await f.start('period-a');await f.settledSetup('period-a');const a=await f.main.readCurrentMoteMain(f.target)
+ await f.start('period-b',undefined,true);const b=await f.settledSetup('period-b');expect(b.binding,b.issue??'').toBe('confirmed')
  const page=await f.rpc.call('space.mote.dialogue.read',{target:f.target,kind:'main'})
  const periods=page.links.flatMap(link=>link.kind==='main'&&link.period?[link.period]:[])
  expect(new Set(periods.map(p=>p.id)).size).toBe(2)
@@ -45,7 +45,7 @@ it('original writer records separate role periods and keeps old unknown history 
  expect(f.h.inner.kernel.stop).not.toHaveBeenCalled()
 },45000)
 it('compiled CLI consumes actual Host period and setup results without performing a second input',async()=>{
- const f=await fixture();await f.start('cli-start');await f.setup('cli-start')
+ const f=await fixture();await f.start('cli-start');await f.settledSetup('cli-start')
  const count=f.h.inner.kernel.input.mock.calls.length
  const result=await runCompiledObjectCli(['--endpoint','unix:'+f.server.path,'space','mote','dialogue','read','--input','-'],objectCliEnvironment(f.h.root),JSON.stringify({target:f.target,kind:'main'}),45000)
  expect(result.code,result.stderr).toBe(0);const page=JSON.parse(result.stdout).result
@@ -77,20 +77,20 @@ it('a fresh Host owner recovers the original frozen start and input key from dur
 it('a saved CAS with an unavailable source journal keeps healthy input and reconciles only the original source',async()=>{
  const f=await fixture();await f.start('partial-source','Query remains usable despite optional history failure')
  const fail=vi.spyOn(f.store,'confirmTransition').mockRejectedValue(Error('Original journal fsync ACK unavailable'))
- const first=await f.setup('partial-source')
+ const first=await f.settledSetup('partial-source')
  expect(first.binding).toBe('confirmed');expect(agentPromptSubmissionOutcome(first.deferredInput?.record)).toBe('terminal-confirmed');expect(first.issue).toContain('unconfirmed')
  const count=f.h.inner.kernel.input.mock.calls.length,graph=(await f.spatial.read())!
  const unknown=await f.rpc.call('space.mote.dialogue.read',{target:f.target,kind:'main'})
  expect(unknown.main.current).toEqual(first.reference);expect(unknown.sourceStatus).toBe('unconfirmed')
  fail.mockRestore()
- const inspected=await f.setup('partial-source',false);expect(inspected.binding).toBe('confirmed');expect((await f.spatial.read())!.revision).toBe(graph.revision)
- const fixed=await f.setup('partial-source'),page=await f.rpc.call('space.mote.dialogue.read',{target:f.target,kind:'main'})
+ const inspected=await f.settledSetup('partial-source',false);expect(inspected.binding).toBe('confirmed');expect((await f.spatial.read())!.revision).toBe(graph.revision)
+ const fixed=await f.settledSetup('partial-source'),page=await f.rpc.call('space.mote.dialogue.read',{target:f.target,kind:'main'})
  expect(fixed.binding).toBe('confirmed');expect(page.sourceStatus).toBe('read');expect(page.links.some(l=>l.kind==='main'&&l.period?.startedAt!==null)).toBe(true)
  expect(f.h.inner.kernel.input).toHaveBeenCalledTimes(count);expect(f.h.started).toHaveLength(1);expect(f.h.inner.kernel.stop).not.toHaveBeenCalled()
 },45000)
 
 it('A to B to the same A Session keeps three role identities and an honest reused-source gap',async()=>{
- const f=await fixture();await f.start('same-a');const a=await f.setup('same-a');await f.start('same-b');await f.setup('same-b')
+ const f=await fixture();await f.start('same-a');const a=await f.settledSetup('same-a');await f.start('same-b');await f.settledSetup('same-b')
  const saved=await f.quick.read({kind:'quick',target:f.target}),baseline=moteQuickBaseline(saved)!
  const reference=a.reference!
  const changed=await f.rpc.call('space.mote.preferences.save',{kind:'quick',target:f.target,operationId:'same-a-again',baseline,values:{...baseline.defaults,conversation:reference},destination:{kind:'occurrence',displayWorkspaceId:reference.displayWorkspaceId,groupId:reference.groupId,tabId:reference.tabId,regionId:reference.regionId}})
@@ -107,7 +107,7 @@ it('a known refused binding is retained for review and stops blocking a new expl
  const f=await fixture();await f.start('refused-start','Retained refused Query')
  const saved=await f.quick.read({kind:'quick',target:f.target}),baseline=moteQuickBaseline(saved)!
  await f.quick.save({kind:'quick',target:f.target,operationId:'changed-before-bind',baseline,values:{...baseline.defaults,presence:{enabled:false,intervalMs:60000}},destination:{kind:'occurrence',displayWorkspaceId:'__scratch__',groupId:'group',tabId:'old-tab',regionId:'old-region'}})
- const refused=await f.setup('refused-start');expect(refused.binding).toBe('refused')
+ const refused=await f.settledSetup('refused-start');expect(refused.binding).toBe('refused')
  const graph=(await f.spatial.read())!.graph
  expect(pendingMoteMainStarts(graph,f.target)).toEqual([])
  expect(retainedMoteMainStarts(graph,f.target).map(r=>r.moteMain?.deferredInput?.prompt)).toContain('Retained refused Query')
@@ -117,7 +117,7 @@ it('a known refused binding is retained for review and stops blocking a new expl
 
 it('actual native human input idle produces a lazy rollover decision through the same public owner',async()=>{
  const f=await createMoteConversationStartFixture({providerId:'claude'});closes.push(f.close)
- await f.start('idle-start','First human Query before native idle');const started=await f.setup('idle-start')
+ await f.start('idle-start','First human Query before native idle');const started=await f.settledSetup('idle-start')
  expect(agentPromptSubmissionOutcome(started.deferredInput?.record),started.issue??'').toBe('terminal-confirmed')
  const idle=await f.qualifyMainIdle(1),main=idle.snapshot,reference=main.current!,session=idle.session!
  const before=f.h.inner.kernel.input.mock.calls.length
@@ -132,7 +132,7 @@ it('actual native human input idle produces a lazy rollover decision through the
 
 it('lazy rollover freezes one exact Query, preserves older input and records the automatic cause',async()=>{
  const f=await createMoteConversationStartFixture({providerId:'claude'});closes.push(f.close)
- await f.start('automatic_old','Original human input');const old=await f.setup('automatic_old')
+ await f.start('automatic_old','Original human input');const old=await f.settledSetup('automatic_old')
  const idle=await f.qualifyMainIdle(1),main=idle.snapshot,reference=main.current!,session=idle.session!
  const originalIdle=old.deferredInput!.route!.key
  const firstIdle=(await f.rpc.call('agent.input.inspect',{key:originalIdle,activity:true})).record!.semanticIdle!
@@ -148,7 +148,7 @@ it('lazy rollover freezes one exact Query, preserves older input and records the
  const decision=due.rollover!.decision!,preferences=await f.rpc.call('space.mote.preferences.read',{kind:'quick',target:f.target}),baseline=moteMainBaseline(moteQuickBaseline(preferences)!)
  const opened=await f.rpc.call('agent.open',{operationId:decision.creationOperationId,content:{kind:'new-agent',executorId:'saved'},destination:{spaceId:f.target.spaceId,zoneId:f.target.zoneId,newTab:true},focus:false,moteMain:{target:f.target,baseline,expectedRoleRevision:main.roleRevision,sourceOperationId:decision.creationOperationId+':source',bindOperationId:decision.creationOperationId+':bind',rollover:decision,deferredInput:{operationId:input.operationId,prompt:input.prompt}}})
  expect(opened.outcome).toBe('opened')
- const next=await f.setup(decision.creationOperationId);expect(next.binding,next.issue??'').toBe('confirmed');expect(next.deferredInput!.route!.key.submissionId).toBe(input.operationId)
+ const next=await f.settledSetup(decision.creationOperationId);expect(next.binding,next.issue??'').toBe('confirmed');expect(next.deferredInput!.route!.key.submissionId).toBe(input.operationId)
  expect(next.deferredInput!.route!.key.agentSessionId).not.toBe(reference.sessionId)
  const count=f.h.inner.kernel.input.mock.calls.length
  const retained=await f.rpc.call('space.mote.dialogue.input.inspect',{target:f.target,operationId:'automatic_old_query'})
@@ -160,7 +160,7 @@ it('lazy rollover freezes one exact Query, preserves older input and records the
 
 it('changed policy refuses only a stale automatic creation and keeps the original healthy Main',async()=>{
  const f=await createMoteConversationStartFixture({providerId:'claude'});closes.push(f.close)
- await f.start('stale_start','Original human Query');await f.setup('stale_start');const {snapshot,session}=await f.qualifyMainIdle(1)
+ await f.start('stale_start','Original human Query');await f.settledSetup('stale_start');const {snapshot,session}=await f.qualifyMainIdle(1)
  const input={agentSessionId:snapshot.current!.sessionId,operationId:'stale_next_query',prompt:'Retained Query',expectedRun:session!.run,admissionIntent:{kind:'manual-actor' as const},execution:'immediate' as const}
  const due=await f.rpc.call('space.mote.dialogue.input.submit',{target:f.target,expectedRoleRevision:snapshot.roleRevision!,input});const decision=due.rollover!.decision!
  const before=await f.quick.read({kind:'quick',target:f.target}),baseline=moteQuickBaseline(before)!,ref=snapshot.current!
@@ -174,7 +174,7 @@ it('changed policy refuses only a stale automatic creation and keeps the origina
 
 it('unknown activity preserves the exact healthy input instead of manufacturing expiry',async()=>{
  const f=await createMoteConversationStartFixture({providerId:'claude'});closes.push(f.close)
- await f.start('unknown_activity','Original human Query');await f.setup('unknown_activity');const {snapshot,session}=await f.qualifyMainIdle(1)
+ await f.start('unknown_activity','Original human Query');await f.settledSetup('unknown_activity');const {snapshot,session}=await f.qualifyMainIdle(1)
  vi.spyOn(f.h.client,'readAgentInputActivity').mockResolvedValue({key:{kind:'prompt',agentSessionId:snapshot.current!.sessionId,expectedRun:session!.run,submissionId:'unknown_activity_query'},state:'unconfirmed',source:'unconfirmed',sourceId:null,sourceNow:Date.now(),issue:'Native source temporarily unreadable'})
  const available=await f.rpc.call('space.mote.dialogue.input.submit',{target:f.target,expectedRoleRevision:snapshot.roleRevision!,input:{agentSessionId:snapshot.current!.sessionId,operationId:'healthy_unknown_query',prompt:'Existing ability is healthy',expectedRun:session!.run,admissionIntent:{kind:'manual-actor'},execution:'immediate'}})
  expect(available.rollover?.status).toBe('unconfirmed');expect(available.route?.reference).toEqual(snapshot.current);expect(agentPromptSubmissionOutcome(available.record)).toBe('terminal-confirmed');expect(f.h.started).toHaveLength(1);expect(f.h.inner.kernel.stop).not.toHaveBeenCalled()
@@ -205,7 +205,7 @@ it('original native-status end retains per-input idle across later platform turn
 },45000)
 
 it('independent input-journal cuts exclude an old Query captured late and a new Query beyond the upper bound',async()=>{
- const f=await fixture();await f.start('input_cut_start');await f.setup('input_cut_start')
+ const f=await fixture();await f.start('input_cut_start');await f.settledSetup('input_cut_start')
  const main=await f.main.readCurrentMoteMain(f.target),reference=main.current!,session=(await f.h.client.readAgentSession(reference.sessionId))!
  const submit=(operationId:string,prompt:string)=>f.rpc.call('space.mote.dialogue.input.submit',{target:f.target,expectedRoleRevision:main.roleRevision!,input:{agentSessionId:reference.sessionId,operationId,prompt,expectedRun:session.run,admissionIntent:{kind:'manual-actor'},execution:'immediate'}})
  const projection=vi.spyOn(f.h.client as any,'writeInputConversation').mockRejectedValue(Error('Temporary capture failure; original input journal remains'))
@@ -264,7 +264,7 @@ async function handoverSnapshotFixture(unavailable=false,corrupt=false) {
  const reads:any[]=[]
  const forward=vi.fn(async(method:any,params:any)=>{const page=await oldRpc.call(method,params);if(method==='agent.context'){reads.push(page);if(corrupt)return {...page as any,session:{...(page as any).session,agentSessionId:'WRONG_CONTEXT_SUBJECT'}}}return page})
  const remote=new Proxy(old.client,{get(target,key){if(key==='forwardRpc')return forward;const value=Reflect.get(target,key,target);return typeof value==='function'?value.bind(target):value}})
- const f=await createMoteConversationStartFixture({extraClients:[{hostId:'old-route',client:remote as any}]});closes.push(f.close)
+ const f=await createMoteConversationStartFixture({providerId:'claude',extraClients:[{hostId:'old-route',client:remote as any}]});closes.push(f.close)
  await f.h.store.applyTimelineMutation({type:'append',agentSessionId:'source',item:{id:'new-collision',agentSessionId:'source',kind:'user_message',source:'user',status:'complete',createdAt:Date.now(),updatedAt:Date.now(),content:'NEW_CORE_COLLISION_NEVER_READ',title:'Another Core same SID'}})
  const state=(await f.spatial.read())!,graph=structuredClone(state.graph),region=graph.regions.find(r=>r.regionId==='old-region')!
  Object.assign(region,{execution:{hostId:'old-route',cwd:old.root}});await f.spatial.commit({expectedRevision:state.revision,graph})
@@ -280,7 +280,7 @@ function handoverText(result:Awaited<ReturnType<Awaited<ReturnType<typeof create
 it('handover carries the original public context page across Core namespaces without a same-SID alias collision',async()=>{
  const {f,old,forward,reads}=await handoverSnapshotFixture()
  await f.start('cross_core_handover','Independent original Query',true)
- const result=await f.setup('cross_core_handover'),text=handoverText(result)
+ const result=await f.settledSetup('cross_core_handover'),text=handoverText(result)
  expect(result.binding,result.issue??'').toBe('confirmed');expect(text).toContain('OLD_OWNER_FACT_30');expect(text).not.toContain('NEW_CORE_COLLISION_NEVER_READ')
  expect(text).not.toContain('agent context --host');expect(text).not.toContain('on the original execution Host');expect(text).toContain('not complete history')
  expect(text).toContain('<amux-original-context-page>')
@@ -290,28 +290,28 @@ it('handover carries the original public context page across Core namespaces wit
  expect(forward.mock.calls.filter(([method])=>method==='agent.context')[0]?.[1]).toMatchObject({hostId:'local',agentSessionId:'source',limit:30})
  expect(agentPromptSubmissionOutcome(result.deferredInput?.record)).toBe('terminal-confirmed')
  const originalContextCalls=forward.mock.calls.filter(([method])=>method==='agent.context').length,count=f.h.inner.kernel.input.mock.calls.length
- await f.setup('cross_core_handover',false);await f.setup('cross_core_handover')
+ await f.settledSetup('cross_core_handover',false);await f.settledSetup('cross_core_handover')
  expect(forward.mock.calls.filter(([method])=>method==='agent.context')).toHaveLength(originalContextCalls);expect(f.h.inner.kernel.input).toHaveBeenCalledTimes(count)
  expect(old.inner.kernel.input).not.toHaveBeenCalled();expect(old.inner.kernel.stop).not.toHaveBeenCalled();expect(f.h.inner.kernel.stop).not.toHaveBeenCalled()
 },45000)
 it('unavailable original context keeps its exact Host and SID while the independent Query reaches the new Main',async()=>{
  const {f,old,reference}=await handoverSnapshotFixture(true)
  await f.start('unknown_core_handover','Healthy independent Query',true)
- const result=await f.setup('unknown_core_handover'),text=handoverText(result)
+ const result=await f.settledSetup('unknown_core_handover'),text=handoverText(result)
  expect(result.issue).toContain('original handover context read is unconfirmed');expect(text).toContain('"hostId":"old-route"');expect(text).toContain('"agentSessionId":"source"')
  expect(text).not.toContain('agent context --host');expect(text).not.toContain('<amux-original-context-page>');expect(text).toContain('Original old-Core source temporarily unreadable')
  expect(agentPromptSubmissionOutcome(result.deferredInput?.record)).toBe('terminal-confirmed');expect(result.deferredInput?.route?.reference.hostId).toBe('local');expect(result.deferredInput?.route?.reference.sessionId).not.toBe(reference.sessionId)
  expect(old.inner.kernel.input).not.toHaveBeenCalled();expect(old.inner.kernel.stop).not.toHaveBeenCalled();expect(f.h.inner.kernel.stop).not.toHaveBeenCalled()
 },45000)
 it('same original Core grants only its local context route and generic handover states no execution-Host claim',async()=>{
- const f=await fixture();await f.start('same_core_old');await f.setup('same_core_old');await f.start('same_core_new',undefined,true)
- const result=await f.setup('same_core_new'),text=handoverText(result)
+ const f=await fixture();await f.start('same_core_old');await f.settledSetup('same_core_old');await f.start('same_core_new',undefined,true)
+ const result=await f.settledSetup('same_core_new'),text=handoverText(result)
  expect(text).toContain("agent context --host 'local'");expect(text).not.toContain('on the original execution Host');expect(text).toContain('<amux-original-context-page>')
  expect(agentPromptSubmissionOutcome(result.handoverInput?.record)).toBe('terminal-confirmed');expect(f.h.inner.kernel.stop).not.toHaveBeenCalled()
 },45000)
 
 it('two route aliases for the same confirmed Core owner grant its local context command',async()=>{
- const extra:any[]=[],f=await createMoteConversationStartFixture({extraClients:extra});closes.push(f.close)
+ const extra:any[]=[],f=await createMoteConversationStartFixture({providerId:'claude',extraClients:extra});closes.push(f.close)
  const {hostedTestOwner}=await import('../../../packages/core/test/helpers/hosted-runtime-port.js')
  const owner=hostedTestOwner(f.h.client)
  Object.defineProperty(f.h.client,'runtimeOwnerIdentity',{value:()=>structuredClone(owner),configurable:true})
@@ -323,7 +323,7 @@ it('two route aliases for the same confirmed Core owner grant its local context 
  const baseline=moteQuickBaseline(await f.quick.read({kind:'quick',target:f.target}))!,reference={hostId:'same-core-alias',sessionId:'source',displayWorkspaceId:'__scratch__',groupId:'group',tabId:'old-tab',regionId:'old-region'}
  const selected=await f.rpc.call('space.mote.preferences.save',{kind:'quick',target:f.target,operationId:'select_same_core_alias',baseline,values:{...baseline.defaults,conversation:reference},destination:{kind:'occurrence',displayWorkspaceId:'__scratch__',groupId:'group',tabId:'old-tab',regionId:'old-region'}})
  expect(selected.status,selected.message??'').toBe('saved')
- await f.start('same_core_alias_new',undefined,true);const result=await f.setup('same_core_alias_new'),text=handoverText(result)
+ await f.start('same_core_alias_new',undefined,true);const result=await f.settledSetup('same_core_alias_new'),text=handoverText(result)
  expect(text).toContain("agent context --host 'local'");expect(text).not.toContain("agent context --host 'same-core-alias'");expect(text).toContain('<amux-original-context-page>')
  expect(agentPromptSubmissionOutcome(result.handoverInput?.record)).toBe('terminal-confirmed')
 },45000)
@@ -333,13 +333,13 @@ it('a matching durable runtime ID with a different Core instance never grants a 
  const newOwner=hostedTestOwner(f.h.client),oldOwner={...hostedTestOwner(old.client),ownerInstanceId:'another-original-core-instance'}
  Object.defineProperty(f.h.client,'runtimeOwnerIdentity',{value:()=>structuredClone(newOwner),configurable:true})
  Object.defineProperty(old.client,'runtimeOwnerIdentity',{value:()=>structuredClone(oldOwner),configurable:true})
- await f.start('different_core_instance',undefined,true);const result=await f.setup('different_core_instance'),text=handoverText(result)
+ await f.start('different_core_instance',undefined,true);const result=await f.settledSetup('different_core_instance'),text=handoverText(result)
  expect(text).toContain('OLD_OWNER_FACT_30');expect(text).not.toContain('agent context --host');expect(text).toContain('route has not been confirmed')
  expect(agentPromptSubmissionOutcome(result.handoverInput?.record)).toBe('terminal-confirmed');expect(old.inner.kernel.stop).not.toHaveBeenCalled()
 },45000)
 it('a malformed direct context port cannot embed another subject and does not block the independent Query',async()=>{
  const {f,old}=await handoverSnapshotFixture(false,true)
- await f.start('malformed_context','Original Query remains eligible',true);const result=await f.setup('malformed_context'),text=handoverText(result)
+ await f.start('malformed_context','Original Query remains eligible',true);const result=await f.settledSetup('malformed_context'),text=handoverText(result)
  expect(agentPromptSubmissionOutcome(result.deferredInput?.record)).toBe('terminal-confirmed');expect(result.issue).toContain('original handover context read is unconfirmed')
  expect(text).not.toContain('<amux-original-context-page>');expect(text).not.toContain('WRONG_CONTEXT_SUBJECT');expect(text).toContain('"hostId":"old-route"');expect(text).toContain('"agentSessionId":"source"')
  expect(old.inner.kernel.input).not.toHaveBeenCalled();expect(old.inner.kernel.stop).not.toHaveBeenCalled()

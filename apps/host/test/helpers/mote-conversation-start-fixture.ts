@@ -17,13 +17,22 @@ import {createHostSpatialAgentControl} from '../../src/spatial-agent-control.js'
 import {ScratchTopics,readConfiguredExecutorChoices} from '../../src/mote-resources.js'
 import {directoryIdentity,homeZoneId,serializeMoteQuickMode} from '../../src/mote-model.js'
 import {fixtureHostExecutorOptions} from './configured-executor-owner.js'
-export async function createMoteConversationStartFixture(input:{providerId?:'codex'|'claude';extraClients?:import('../../../../packages/core/src/public-rpc-service.js').AgentMuxRpcCoreClient[]}={}){
+export async function createMoteConversationStartFixture(input:{providerId?:'codex'|'claude'|'grok';extraClients?:import('../../../../packages/core/src/public-rpc-service.js').AgentMuxRpcCoreClient[]}={}){
  const closes:Array<()=>unknown|Promise<unknown>>=[]
  let configurationPath=''
  const h=await creationInputOwner(true,fixtureHostExecutorOptions(()=>configurationPath));closes.push(h.close)
  const providerId=input.providerId??'codex'
+ if(providerId==='grok'){
+  const provider=h.client.providers.get('grok')
+  h.probe.mockResolvedValue({providerId:'grok',executable:'grok',installed:true,capabilities:provider.catalog.capabilities})
+ }
  if(providerId==='claude'){
   const provider=h.client.providers.get('claude')
+  // This Runtime port models the supported current-terminal launch, with a native
+  // process witness/Hook but no independent native socket. Do not advertise a
+  // machine channel that its synthetic PID does not implement.
+  const {prepareNativeInput:_nativeInput,...terminalProvider}=provider
+  const {nativeConversationInput:_nativeInputCatalog,asyncQuestionReply:_nativeQuestionCatalog,...terminalCapabilities}=provider.catalog.capabilities
   // This deterministic Runtime must supply the same original process witness
   // that native Hook and conversation consumers now qualify through the Provider.
   const runtimeStatus=h.inner.kernel.status
@@ -36,7 +45,7 @@ export async function createMoteConversationStartFixture(input:{providerId?:'cod
     expect(run.pid).toBe(context.processId);expect(run.state.type).toBe('running')
    }}
   }
-  h.client.providers.replace({...provider,discoverNativeSession,catalog:{...provider.catalog,promptDelivery:'post-launch-only'},prepareManagedLaunch:async(plan:any)=>({plan}),planPromptInput:(prompt:string)=>({kind:'single-phase',data:prompt+'\r'}),readPromptExecutionEvidence:async()=>({state:'idle',id:'fixture-execution-idle',sourceId:'fixture-native-execution'}),verifyPromptExecutionTransport:async()=>true})
+  h.client.providers.replace({...terminalProvider,discoverNativeSession,catalog:{...provider.catalog,capabilities:terminalCapabilities,promptDelivery:'post-launch-only'},prepareManagedLaunch:async(plan:any)=>({plan}),planPromptInput:(prompt:string)=>({kind:'single-phase',data:prompt+'\r'}),readPromptExecutionEvidence:async()=>({state:'idle',id:'fixture-execution-idle',sourceId:'fixture-native-execution'}),verifyPromptExecutionTransport:async()=>true})
   h.probe.mockResolvedValue({providerId:'claude',executable:'claude',installed:true,capabilities:provider.catalog.capabilities})
  }
  const workspace={id:'__scratch__',hostId:'local',path:join(h.root,'scratch'),name:'Original'};await mkdir(workspace.path)
@@ -88,5 +97,18 @@ export async function createMoteConversationStartFixture(input:{providerId?:'cod
   return {snapshot:await main.readCurrentMoteMain(target),session:await h.client.readAgentSession(reference.sessionId),hook}
  }
  const setup=(operationId:string,advance=true)=>rpc.call(advance?'space.mote.dialogue.setup.advance':'space.mote.dialogue.setup.inspect',{target,creation:{hostId:'local',operationId}})
- return {h,spatial,store,main,dialogue,quick,quickPorts,options,server,rpc,target,path,start,setup,qualifyMainIdle,close:async()=>{for(const close of closes.splice(0).reverse())await close()}}
+ const settledSetup=async(operationId:string,advance=true)=>{
+  let result=await setup(operationId,advance)
+  // The real controlled input returns its durable receipt before its worker
+  // settles. Await that original worker in positive protocol fixtures only;
+  // a genuine initialization wait or unknown receipt is returned unchanged.
+  if(advance&&providerId==='claude')await vi.waitFor(async()=>{
+   const inFlight=[result.deferredInput,result.handoverInput].some(value=>value?.input?.status==='waiting'&&!value.input.control.waiting)
+   if(!inFlight)return
+   result=await rpc.call('space.mote.dialogue.setup.inspect',{target,creation:{hostId:'local',operationId}})
+   expect([result.deferredInput,result.handoverInput].some(value=>value?.input?.status==='waiting'&&!value.input.control.waiting)).toBe(false)
+  },{timeout:5000})
+  return result
+ }
+ return {h,spatial,store,main,dialogue,quick,quickPorts,options,server,rpc,target,path,start,setup,settledSetup,qualifyMainIdle,close:async()=>{for(const close of closes.splice(0).reverse())await close()}}
 }
