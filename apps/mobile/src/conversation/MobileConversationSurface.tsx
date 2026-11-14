@@ -619,8 +619,10 @@ export function MobileConversationSurface({ client, agentSessionId, draftScope, 
       {request && requestKey ? <div className="mobile-conversation__interaction">
         <AgentInteractionCard key={requestKey} request={request} labels={mobileInteractionLabels} disabled={responseDisabled}
           getMoteSource={() => moteSource}
-          {...(responseAttempt?.phase === 'unknown' ? { responseUnavailableReason: responseAttempt.message } : responseUnavailableReason ? { responseUnavailableReason } : {})}
+          responseUnavailableReason={responseUnavailableReason}
           responseStatus={responseAttempt?.original ? responseStatus(responseEntry![0], responseAttempt) : undefined}
+          observedResponse={responseAttempt?.original && responseAttempt.receipt
+            ? { input: responseAttempt.original.input, receipt: responseAttempt.receipt } : undefined}
           {...(onShowTerminal ? { onOpenTerminal: onShowTerminal } : {})}
           onRespond={respond} />
       </div> : null}

@@ -1,6 +1,6 @@
 import type { MobileQuestionReplyAttempt } from './question-replies'
 import type { MobileMoteMainInput } from './mote-main-input'
-import type { AgentInputMoteSource, AgentInputSubmissionReceipt, AgentInputWaitRef, AgentInputWaitStopReceipt, AgentSessionHistoryQuestionAnswer, AgentMuxAgentInteractionInput, AgentPromptSubmissionRecord } from '@agentmux/core'
+import type { AgentInputMoteSource, AgentInputSubmissionReceipt, AgentInputWaitRef, AgentInputWaitStopReceipt, AgentSessionHistoryQuestionAnswer, AgentMuxAgentInteractionInput, AgentMuxInteractionOperationReceipt, AgentPromptSubmissionRecord } from '@agentmux/core'
 import type { AgentPromptCondition } from '@agentmux/core/prompt-condition'
 import { DeviceWorkfaceRecordChangedError, getDeviceWorkface, type ConversationBucket, type ConversationCommit, type ConversationConflict, type ConversationEdit, type ConversationValue, type DraftRecord, type DeviceWorkface, type UnstoredConversationDraft } from '../recovery/device-workface'
 
@@ -36,6 +36,8 @@ export type PromptAttempt = {
   logId?: string
 }
 export type ResponseAttempt = { phase: PromptAttempt['phase']; message: string;
+  /** Live Core evidence. Cold readers inspect the original intent again. */
+  receipt?: AgentMuxInteractionOperationReceipt;
   /** Frozen device intent only. Cold readers query Core; they never restore dispatch authority. */
   original?: { input: AgentMuxAgentInteractionInput; hostId: string; runtimeId: string | null } }
 function restoredMessage(value: PromptAttempt['phase'], interaction = false): string {

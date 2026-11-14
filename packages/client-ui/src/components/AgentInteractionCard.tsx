@@ -3,6 +3,7 @@ import { SemanticIcon } from '../theme/icons.js'
 import { useLayoutEffect, useId, useRef, useState, type ReactNode, type Ref } from 'react'
 import { agentInteractionOperationReceiptMatches, agentInteractionRequestsMatch } from '@agentmux/core/agent-interaction-state'
 import type {
+  AgentMuxAgentInteractionInput,
   AgentMuxInteractionRequest,
   AgentMuxInteractionResponse,
   AgentMuxInteractionOperationIntent,
@@ -12,6 +13,7 @@ import { isAffirmative, permissionPlan, permissionTierClassName, questionPlan } 
 import { AgentQuestionChoices } from './AgentQuestionChoices.js'
 import { presentError } from '../lib/error-presentation.js'
 import { ConversationDisclosure } from './ConversationDisclosure.js'
+import { interactionReceiptPhase } from '../lib/interaction-receipt-presentation.js'
 
 const defaultLabels = {
   readOnly: 'Read-only · Answer in the original Session', sending: 'Sending answer…',
@@ -32,10 +34,6 @@ type InteractionObservation = {
   failure: string | null
   receiptUnconfirmed: boolean
 }
-function hasNativeCompletion(receipt: AgentMuxInteractionOperationReceipt | null) {
-  return Boolean(receipt?.nativeCompleted) && receipt!.delivery !== 'saved' && receipt!.delivery !== 'unknown'
-}
-
 /** The single typed plan owns answer semantics; this card owns presentation and submission state. */
 export function AgentInteractionCard({
   request,
@@ -45,6 +43,7 @@ export function AgentInteractionCard({
   readOnly = false,
   responseUnavailableReason,
   responseStatus,
+  observedResponse,
   sourceNotice,
   onOpenTerminal,
   onInspect,
@@ -61,6 +60,8 @@ export function AgentInteractionCard({
   responseUnavailableReason?: string | undefined
   /** Presentation of a caller's retained original receipt; input ownership stays unchanged. */
   responseStatus?: ReactNode
+  /** Existing host-owned original intent and its live Core observation. */
+  observedResponse?: { input: AgentMuxAgentInteractionInput; receipt: AgentMuxInteractionOperationReceipt } | undefined
   sourceNotice?: string | undefined
   getMoteSource?(): import('@agentmux/core').AgentInputMoteSource | undefined
   renderReceipt?(receipt: AgentMuxInteractionOperationReceipt): ReactNode
@@ -90,15 +91,15 @@ export function AgentInteractionCard({
     return operation.current === original && agentInteractionRequestsMatch(currentRequest.current, original.expectedRequest)
   }
   function matches(original: AgentMuxInteractionOperationIntent, value: AgentMuxInteractionOperationReceipt) {
-    return originalResponse.current !== null && agentInteractionOperationReceiptMatches({ ...original,
-      agentSessionId: original.expectedRequest.agentSessionId,
-      expectedRun: original.expectedRequest.evidence.run ?? value.run, response: originalResponse.current }, value)
+    const expectedRun = original.expectedRequest.evidence.run
+    return expectedRun !== undefined && originalResponse.current !== null && agentInteractionOperationReceiptMatches({ ...original,
+      agentSessionId: original.expectedRequest.agentSessionId, expectedRun, response: originalResponse.current }, value)
   }
   function observeReceipt(original: AgentMuxInteractionOperationIntent, value: AgentMuxInteractionOperationReceipt | null) {
     if (!isCurrent(original)) return
     const matched = value !== null && matches(original, value)
     setObservation(current => {
-      if (hasNativeCompletion(current.receipt)) return current
+      if (interactionReceiptPhase(current.receipt) === 'completed') return current
       return { receipt: matched ? value : current.receipt, failure: null, receiptUnconfirmed: !matched }
     })
   }
@@ -108,7 +109,7 @@ export function AgentInteractionCard({
       observeReceipt(original, await onInspect(original.operationId))
     } catch (error) {
       if (!isCurrent(original)) return
-      setObservation(current => hasNativeCompletion(current.receipt) ? current : { ...current, failure: presentError(error) })
+      setObservation(current => interactionReceiptPhase(current.receipt) === 'completed' ? current : { ...current, failure: presentError(error) })
     }
   }
   const unavailable = readOnly || disabled || phase !== 'idle' || Boolean(responseUnavailableReason)
@@ -130,7 +131,7 @@ export function AgentInteractionCard({
       originalResponse.current = response
       const result = await onRespond(response, original)
       if (!isCurrent(original)) return
-      if (result) observeReceipt(original, result)
+      observeReceipt(original, result ?? null)
       setPhase('awaiting')
     } catch (error) {
       if (original ? !isCurrent(original) : currentRequest.current !== request) return
@@ -140,26 +141,30 @@ export function AgentInteractionCard({
     }
   }
 
-  const completed = phase === 'awaiting' && hasNativeCompletion(receipt) &&
-    agentInteractionRequestsMatch(request, receipt!.expectedRequest)
+  const retainedReceipt = observedResponse && agentInteractionRequestsMatch(request, observedResponse.input.expectedRequest) &&
+    agentInteractionOperationReceiptMatches(observedResponse.input, observedResponse.receipt) ? observedResponse.receipt : null
+  const activeReceipt = retainedReceipt ?? (receiptUnconfirmed ? null : receipt)
+  const receiptPhase = interactionReceiptPhase(activeReceipt)
+  const completed = activeReceipt !== null && receiptPhase === 'completed' && agentInteractionRequestsMatch(request, activeReceipt.expectedRequest)
+  const awaitingReceipt = phase === 'awaiting' || retainedReceipt !== null
   const reason = responseUnavailableReason ?? (request.kind === 'question' ? request.responseUnavailableReason : undefined)
   const status = readOnly ? labels.readOnly
     : phase === 'sending' ? labels.sending
-    : phase === 'awaiting' ? completed ? labels.completed
-      : receiptUnconfirmed || receipt?.delivery === 'unknown' ? labels.unknown
-      : receipt?.delivery === 'saved' ? labels.saved
+    : awaitingReceipt ? completed ? labels.completed
+      : receiptPhase === 'unknown' ? labels.unknown
+      : receiptPhase === 'saved' ? labels.saved
       : labels.awaiting
     : reason ? labels.pending
     : disabled ? labels.unavailable
     : labels.needed
-  const needsInspection = phase === 'awaiting' && !completed && operation.current !== null &&
-    (receiptUnconfirmed || receipt?.delivery === 'unknown' || receipt?.delivery === 'saved')
+  const needsInspection = retainedReceipt === null && phase === 'awaiting' && !completed && operation.current !== null &&
+    (receiptPhase === 'unknown' || receiptPhase === 'saved')
   const requestStatus = <>
     {responseStatus ?? <div>
       <p className="agent-interaction__status" role="status" aria-live="polite">{status}</p>
-      {receipt && renderReceipt ? renderReceipt(receipt) : null}
+      {activeReceipt && renderReceipt ? renderReceipt(activeReceipt) : null}
     </div>}
-    {receiptUnconfirmed ? <p className="agent-interaction__error" role="status" aria-live="polite">{labels.receiptUnconfirmed ?? defaultRecoveryLabels.receiptUnconfirmed}</p> : null}
+    {retainedReceipt === null && receiptUnconfirmed ? <p className="agent-interaction__error" role="status" aria-live="polite">{labels.receiptUnconfirmed ?? defaultRecoveryLabels.receiptUnconfirmed}</p> : null}
     {failure ? <p className="agent-interaction__error" role="status" aria-live="polite">{failure} {phase === 'idle' ? labels.retry : null}</p> : null}
     {needsInspection ? <div className="agent-interaction__actions">
       {onInspect ? <button type="button" onClick={() => void inspect(operation.current!)}>{labels.inspect}</button>

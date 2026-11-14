@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { mobileCapability, type MobileConversationClient } from './mobile-conversation-client'
 import type { AgentMuxAgentSession, AgentMuxInteractionOperationIntent, AgentMuxInteractionOperationReceipt, AgentMuxInteractionRequest, AgentMuxInteractionResponse } from '@agentmux/core'
 import { agentInteractionActiveRequest, agentInteractionResponseUnavailableReason, agentInteractionOperationReceiptMatches, agentInteractionRequestsMatch } from '@agentmux/core/agent-interaction-state'
+import { interactionReceiptPhase } from '@agentmux/client-ui/interaction-receipt-presentation'
 import { deliveryOutcome, errorMessage } from './delivery'
 import type { createLocalDrafts, ResponseAttempt } from './local-drafts'
 
@@ -77,10 +78,13 @@ export function useMobileInteractionController({ local, client, agentSessionId, 
   function adoptResponseReceipt(attempt: ResponseAttempt, receipt: AgentMuxInteractionOperationReceipt) {
     const input = attempt.original!.input
     if (!agentInteractionOperationReceiptMatches(input, receipt)) throw new Error('确认结果不属于这条答复，没有采用。')
-    attempt.phase = receipt.delivery === 'unknown' || receipt.delivery === 'saved' ? 'unknown' : 'confirmed'
-    attempt.message = receipt.nativeCompleted ? '这个请求已完成。'
-      : receipt.delivery === 'saved' ? '答复已保存；是否送达尚未确认。'
-      : receipt.delivery === 'unknown' ? '还没确认答复是否送达，可以查询结果。' : '答复已送达，Agent 是否采用待查看。'
+    if (interactionReceiptPhase(attempt.receipt) === 'completed') return
+    attempt.receipt = receipt
+    const phase = interactionReceiptPhase(receipt)
+    attempt.phase = phase === 'unknown' || phase === 'saved' ? 'unknown' : 'confirmed'
+    attempt.message = phase === 'completed' ? '这个请求已完成。'
+      : phase === 'saved' ? '答复已保存；是否送达尚未确认。'
+      : phase === 'unknown' ? '还没确认答复是否送达，可以查询结果。' : '答复已送达，Agent 是否采用待查看。'
   }
   async function inspectResponse(key: string, attempt: ResponseAttempt): Promise<AgentMuxInteractionOperationReceipt | null> {
     if (!client || !attempt.original) return null
@@ -91,11 +95,13 @@ export function useMobileInteractionController({ local, client, agentSessionId, 
       const receipt = await mobileCapability(client, 'inspectAgentInteractionOperation')({ agentSessionId: original.input.agentSessionId, operationId: original.input.operationId })
       if (responses.current.get(key) !== attempt) return receipt
       if (receipt) adoptResponseReceipt(attempt, receipt)
-      else attempt.message = '还没查到确认结果，答复是否送达仍未知。'
+      else if (!attempt.receipt) attempt.message = '还没查到确认结果，答复是否送达仍未知。'
       await local.save()
       return receipt
     } catch (error) {
-      if (responses.current.get(key) === attempt) attempt.message = `没有查到答复结果。${errorMessage(error)}`
+      if (responses.current.get(key) === attempt && interactionReceiptPhase(attempt.receipt) !== 'completed') {
+        attempt.message = `没有查到答复结果。${errorMessage(error)}`
+      }
       throw error
     } finally { if (mounted.current) redraw(value => value + 1) }
   }

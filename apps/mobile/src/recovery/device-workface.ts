@@ -29,10 +29,10 @@ export type DraftRecord = { version: 1; drafts: Array<[string, string]>;
   /** Exact Mote text addresses in this Device/Host record, independent of late Runtime discovery. */
   moteTextSources?: Array<[string, string]>;
   attempts: Array<[string, Omit<PromptAttempt, 'message'>]>;
-  responses: Array<[string, Omit<ResponseAttempt, 'message'>]>; questions?: Array<[string, MobileQuestionReplyAttempt]>;
+  responses: Array<[string, Omit<ResponseAttempt, 'message' | 'receipt'>]>; questions?: Array<[string, MobileQuestionReplyAttempt]>;
   questionDrafts?: Array<[string, AgentSessionHistoryQuestionAnswer[]]>; conflicts?: ConversationConflict[] }
 export type ConversationBucket = 'drafts' | 'attempts' | 'responses' | 'questions' | 'questionDrafts' | 'moteTextSources'
-export type ConversationValue = string | Omit<PromptAttempt, 'message'> | Omit<ResponseAttempt, 'message'> | MobileQuestionReplyAttempt | AgentSessionHistoryQuestionAnswer[]
+export type ConversationValue = string | Omit<PromptAttempt, 'message'> | Omit<ResponseAttempt, 'message' | 'receipt'> | MobileQuestionReplyAttempt | AgentSessionHistoryQuestionAnswer[]
 export type ConversationEdit = { bucket: ConversationBucket; key: string; expected?: ConversationValue | undefined; next?: ConversationValue | undefined }
 /** Only unsaved draft text can follow an explicit device-record replacement. */
 export type UnstoredConversationDraft = { key: string; expected: string | undefined; next: string }
