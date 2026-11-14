@@ -1,6 +1,6 @@
 # @agentmux/client-ui
 
-`@agentmux/client-ui` holds the React UI that AgentMux Desktop and Mobile share. It owns presentation and editing only: Core and the Host keep every Agent, Session and Run fact, and the package contains no conversation log, Runtime client, Provider adapter or Session store. Core does not depend on it.
+`@agentmux/client-ui` holds the React UI and document-format helpers that AgentMux clients share. It owns presentation, editing and shared Note syntax: Core and the Host keep every Agent, Session and Run fact, and the package contains no conversation log, Runtime client, Provider adapter or Session store. Core does not depend on it.
 
 | Module | Import | What it provides |
 | --- | --- | --- |
@@ -18,7 +18,17 @@ Product requirements are defined by the [conversation behavior SSOT](../../docs/
 
 Applications wrap their view in `ClientUiProvider` with an explicit `ClientUiPlatform`. The adapter supplies clipboard error reporting, the overlay target, editor focus registration and identity and icon rendering. File opening, HTTP navigation, pasted-image IO, send / queue / interrupt and permission responses are typed component props. `DescribeSpeaker` may supply an already rendered avatar; Mote and project discovery stay in Desktop.
 
-The package builds ESM JavaScript for Node consumers, and its `browser` export condition gives browser bundlers the TypeScript source. Node callers use the pure `pasted-images` and `terminal-path-link` modules, whose import graphs contain no React, Tiptap or DOM runtime.
+## Node consumers
+
+The package builds ESM JavaScript for Node consumers, and its `browser` export condition gives browser bundlers the TypeScript source. Node support belongs to the selected entry and its purpose:
+
+| Entry | Node responsibility and dependencies |
+| --- | --- |
+| `pasted-images`, `terminal-path-link` | Pure value helpers; their import graphs contain no React, Tiptap or DOM runtime. |
+| `agent-avatar-svg`, `mote-avatar-svg` and their static artwork dependencies | Shared static avatar rendering, including React and `react-dom/server` where needed. The Host supplies saved appearance and owned raster resources; rendering does not mount an editor or browser DOM. |
+| `note/*` document codecs, merge and provenance helpers, including `note-content-schema` | Read and serialize the shared Note format and validate it with the same Tiptap schema as the editor. The Host's [Note writer](../../apps/host/src/note-file-writer.ts) uses these without creating an editor DOM; the original Files owner keeps IO, revision checks, CAS and write receipts. |
+
+These entries do not make the package root, interactive components or every wildcard export suitable for Node. Host code imports the required entry directly; Core remains independent of `client-ui` and its UI dependencies.
 
 ## Conversation reading
 

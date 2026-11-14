@@ -16,7 +16,7 @@ AgentMux 的优先目标是可独立消费的本地 Agent Core；Desktop 是它�
 | 独立 Host | 组合唯一 Core 语义 owner，提供 Relay／设备、原文件／Note／Topic、Goal 领域组合与后台安排、资源配置读取与观察；不持有真实屏幕焦点 | [Host](../../apps/host/src/host.ts)、[内容 owner](../../apps/host/src/content-owner.ts)、[平台服务](../../apps/host/src/macos-service.ts) |
 | Desktop Main | 宿主配置写入、原生文件适配／Git、Browser 与 Toolkit；连接原 Host 并通过 Core 公共 API 管理 Agent | [RuntimeController](../../apps/desktop/src/main/runtime-controller.ts)、[IPC 接线](../../apps/desktop/src/main/ipc.ts)、[ConfigOwner](../../apps/desktop/src/main/config-owner.ts) |
 | Desktop Renderer | 消费 Core 的拓扑与绑定；持有屏幕投影、焦点、草稿与客户端资源元数据 | [Store](../../apps/desktop/src/renderer/src/store.ts)、[空间状态机制](spatial-state.md) |
-| `@agentmux/client-ui` | 消息、原生历史、Trace、结构化请求卡片与 Composer 的共享 React 呈现和编辑；宿主能力经平台适配器与 typed props 注入 | [包说明](../../packages/client-ui/README.md)、[导出入口](../../packages/client-ui/src/index.ts)、[`ClientUiPlatform`](../../packages/client-ui/src/platform.tsx) |
+| `@agentmux/client-ui` | 消息、原生历史、Trace、结构化请求卡片与 Composer 的共享呈现和编辑，以及共享 Note 格式工具；宿主能力经平台适配器与 typed props 注入 | [包说明及 Node 入口职责](../../packages/client-ui/README.md#node-consumers)、[导出入口](../../packages/client-ui/src/index.ts)、[`ClientUiPlatform`](../../packages/client-ui/src/platform.tsx) |
 | Core `spatial-layout` / `@agentmux/layout` | Core 持有分屏树结构、比例、几何寻址与布局 reducer 的纯代数；`@agentmux/layout` 仅重导出该公共能力，不另持有空间状态或 Session 生命周期 | [Core 代数](../../packages/core/src/spatial-layout.ts)、[重导出入口](../../packages/layout/src/index.ts) |
 | `@agentmux/demand` | Demand／Goal 的 durable 文件事实、关联、决策、目标确认和结果接受的状态 | [包说明](../../packages/demand/README.md)、[Store](../../packages/demand/src/demand-store.ts)、[Goal 类型与规则](../../packages/demand/src/goals.ts) |
 
@@ -38,7 +38,7 @@ Desktop 二级内容由 [`WorkspaceFilesTool`](../../apps/desktop/src/renderer/s
 
 | 职责 | 当前来源与扩展方式 |
 | --- | --- |
-| 轻量格式能力 | [`workspace-file-format.ts`](../../apps/desktop/src/shared/workspace-file-format.ts) 集中后缀、复合后缀、语言、MIME、预览、格式化和默认模式；查询不导入引擎。二进制格式继续消费原 `workspace-file-preview` 元数据。 |
+| 轻量格式能力 | [`editor-extensions/catalog`](../../packages/editor-extensions/src/catalog.ts) 集中后缀、复合后缀、语言、MIME、预览、格式化和默认模式；查询不导入引擎。二进制格式继续消费原 `workspace-file-preview` 元数据。 |
 | 原工作面与正文 | [`FileSurfaceView`](../../apps/desktop/src/renderer/src/components/FileSurfaceView.tsx) 保有原 Region／正文／模式上下文；[`SourceFilePreview`](../../apps/desktop/src/renderer/src/components/file-preview/SourceFilePreview.tsx) 只选择当前可见格式的 lazy 组件。 |
 | 格式实现 | [`components/file-preview/`](../../apps/desktop/src/renderer/src/components/file-preview/) 放呈现与临时资源生命周期，[`lib/file-formats/`](../../apps/desktop/src/renderer/src/lib/file-formats/) 放解析、诊断、Worker 和引擎适配；类型模块不加载重依赖。 |
 | 源码着色与格式化 | [`register-file-formats`](../../apps/desktop/src/renderer/src/lib/monaco-languages/register-file-formats.ts) 注册轻量语言规则；[`format-file-region`](../../apps/desktop/src/renderer/src/lib/file-formats/format-file-region.ts) 经原 Monaco adapter 对同一草稿作一次可撤销编辑，显式 Worker 才导入格式化器。 |
@@ -95,7 +95,7 @@ Agent 生命周期由 Host 的 Core owner 持有；Main 的 `RuntimeController` 
 | 宿主配置、Executor 与 Workspace 配置 | [ConfigOwner](../../apps/desktop/src/main/config-owner.ts) 串行提交，[config-store.ts](../../apps/desktop/src/main/config-store.ts) 保存 |
 | Tab／Region／布局及展示偏好 | [Core Spatial owner](../../packages/core/src/spatial-state.ts) 持有身份与布局；Renderer Store 的 `initialize` / `projectPersistedWorkbench` / `restorePersistedWorkbench` 读取并投影，偏好和草稿归 client |
 | Goal／Demand 内容与确认记录 | [Demand Store](../../packages/demand/src/demand-store.ts)；宿主提供明确 root，读取失败不替换成空 Store |
-| Note 正文与稳定块／引用 | 原 Files owner 的 `.note.md`；共享 [Markdown codec](../../packages/client-ui/src/note/note-markdown.ts) 供 Desktop／Mobile 编辑和读取，Core [轻量格式入口](../../packages/core/src/note-format.ts) 只解释身份头 |
+| Note 正文与稳定块／引用 | 原 Files owner 的 `.note.md`；共享 [Markdown codec](../../packages/client-ui/src/note/note-markdown.ts) 供 Desktop／Mobile 编辑和读取、Host 处理同一格式，写入与 CAS 仍归原 Files owner；Core [轻量格式入口](../../packages/core/src/note-format.ts) 只解释身份头 |
 | Notebook 目录、关注、操作轨迹、块归因与历史 | 原 [NotebookStore](../../packages/core/src/notebook-store.ts)／[本地文件后端](../../packages/core/src/notebook-files.ts)；[NotesStorage](../../packages/core/src/notes-storage.ts) 持有目录搬迁与显式转换 journal；[Desktop Main 的 NotesStorageOwner](../../apps/desktop/src/main/notes-storage-owner.ts) 组织原资源确认。文件组织见 [Note Markdown](../specs/note-markdown.md#元数据与公共消费) |
 
 Note 的内存编辑树不另行存为正文。共享的原 NoteFileWriter 在 Files CAS 成功后将可信 actor 的块归因绑定到同一正文 revision；
