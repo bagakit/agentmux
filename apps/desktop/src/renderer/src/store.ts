@@ -6440,12 +6440,20 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       if (disposeCoreSpatial === dispose) disposeCoreSpatial = null
       ownedSpatial?.dispose()
     }
-    const a2aNotifications = createA2AMessageNotifier(async input => {
-      const delivery = await api.ui.notifyAgentAttention(input)
-      const notice = notificationDeliveryNotice(delivery)
-      if (notice) get().reportError(notice.message, notice.context)
-    })
     const visibleA2ARecipients = createVisibleSessionIdsSelector()
+    const a2aNotifications = createA2AMessageNotifier({
+      listMessages: (reference, options) => api.sessions.listMessages(reference, options),
+      snapshot: () => {
+        const state = get()
+        return { config: state.config, sessions: state.sessions, agentNames: state.agentNames, timelines: state.timelines,
+          ready: !booting && observing, windowFocused: document.hasFocus(), visibleSessionIds: visibleA2ARecipients(state) }
+      },
+      notify: async input => {
+        const delivery = await api.ui.notifyAgentAttention(input)
+        const notice = notificationDeliveryNotice(delivery)
+        if (notice) get().reportError(notice.message, notice.context)
+      }
+    })
     const availabilityEpoch = ++startupAvailabilityEpoch
     let disposeStartupProgress = () => {}
     let pendingNotesStorage: NotesStorageInspection | null = null
@@ -6457,9 +6465,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     })
     const disposeSessions = api.sessions.onEvent((event) => {
       if (event.event.type === 'agent-message-changed') {
-        const state = get()
-        void a2aNotifications.observe({ event, config: state.config, sessions: state.sessions, ready: !booting && observing,
-          windowFocused: document.hasFocus(), visibleSessionIds: visibleA2ARecipients(state) }).catch(error => get().reportError(error))
+        void a2aNotifications.observe(event).catch(error => get().reportError(error))
       }
       if (booting) {
         enqueueSessionMembershipEvent(pendingSessionEvents, event)
