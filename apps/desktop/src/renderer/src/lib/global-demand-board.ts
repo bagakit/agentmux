@@ -30,6 +30,7 @@ export type DemandRecord = {
   plannedStartAt?: number | null
   targetAt?: number | null
   parentDemandId?: string | null
+  phaseIndex?: number | null
   activityLog?: string[]
   sessionIds: string[]
   contentRefs?: DemandContentReference[]

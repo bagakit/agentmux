@@ -129,6 +129,12 @@ function stringArray(value: unknown, label: string): string[] {
   return result
 }
 
+function phaseIndex(value: unknown, label: string): number | null {
+  if (value === null || value === undefined) return null
+  if (!Number.isSafeInteger(value) || (value as number) < 0) throw new Error(`${label} must be a non-negative integer or null`)
+  return value as number
+}
+
 function parseActivity(value: unknown, label: string): DemandActivity {
   const record = object(value, label)
   exactKeys(record, ['id', 'kind', 'message', 'createdAt', 'actorId', 'operationId', 'nameChangeId'], label, ['operationId', 'nameChangeId'])
@@ -223,7 +229,7 @@ function parseDemand(value: unknown, label: string): Demand {
     tags,
     plannedStartAt,
     targetAt,
-    parentDemandId,
+    parentDemandId, phaseIndex: phaseIndex(record.phaseIndex, `${label}.phaseIndex`),
     sessionIds, assigneeSessionIds, supervisorSessionId, participations,
     ...(creationOrigin === undefined ? {} : { creationOrigin }),
     ...(record.discussionOperationId === undefined ? {} : { discussionOperationId: nonEmptyString(record.discussionOperationId, `${label}.discussionOperationId`) }),
@@ -422,7 +428,7 @@ export class DemandStore {
         const expected = { title, description: input.description ?? '', projectId: input.projectId ?? null, priority: input.priority ?? 'normal', status: input.status ?? 'backlog',
           assigneeSessionIds: [...(input.assigneeSessionIds ?? [])], supervisorSessionId: input.supervisorSessionId ?? null,
           sessionIds: [...new Set([...(input.sessionIds ?? []), ...(input.assigneeSessionIds ?? [])])], tags: [...(input.tags ?? [])],
-          plannedStartAt: input.plannedStartAt ?? null, targetAt: input.targetAt ?? null, parentDemandId: input.parentDemandId ?? null, contentRefs: input.contentRefs }
+          plannedStartAt: input.plannedStartAt ?? null, targetAt: input.targetAt ?? null, parentDemandId: input.parentDemandId ?? null, phaseIndex: phaseIndex(input.phaseIndex, 'phaseIndex'), contentRefs: input.contentRefs }
         if (Object.entries(expected).some(([key, value]) => JSON.stringify(original[key as keyof Demand]) !== JSON.stringify(value)))
           throw new DemandStoreError('INVALID_INPUT', 'validate', this.storePath, 'The original Goal creation is retained but its current content differs. Inspect that same Goal without creating another.')
         return { unchanged: original }
@@ -444,6 +450,7 @@ export class DemandStore {
         plannedStartAt: input.plannedStartAt ?? null,
         targetAt: input.targetAt ?? null,
         parentDemandId: input.parentDemandId ?? null,
+        phaseIndex: phaseIndex(input.phaseIndex, 'phaseIndex'),
         sessionIds: [...new Set([...(input.sessionIds ?? []), ...(input.assigneeSessionIds ?? [])])],
         assigneeSessionIds: [...(input.assigneeSessionIds ?? [])],
         supervisorSessionId: input.supervisorSessionId ?? null,
@@ -1002,6 +1009,7 @@ export class DemandStore {
       if (patch.plannedStartAt !== undefined) demand.plannedStartAt = patch.plannedStartAt
       if (patch.targetAt !== undefined) demand.targetAt = patch.targetAt
       if (patch.parentDemandId !== undefined) demand.parentDemandId = patch.parentDemandId
+      if (patch.phaseIndex !== undefined) demand.phaseIndex = phaseIndex(patch.phaseIndex, 'phaseIndex')
       try {
         if (patch.alignment !== undefined) {
           const proposal = parseAlignmentProposal(patch.alignment)

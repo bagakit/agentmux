@@ -95,6 +95,8 @@ export type Demand = {
   plannedStartAt: number | null
   targetAt: number | null
   parentDemandId: string | null
+  /** Human planning order; never execution authority. */
+  phaseIndex?: number | null
   sessionIds: string[]
   assigneeSessionIds: string[]
   supervisorSessionId: string | null
@@ -143,6 +145,7 @@ export type CreateDemandInput = {
   plannedStartAt?: number | null
   targetAt?: number | null
   parentDemandId?: string | null
+  phaseIndex?: number | null
   sessionIds?: readonly string[]
   assigneeSessionIds?: readonly string[]
   supervisorSessionId?: string | null
@@ -151,7 +154,7 @@ export type CreateDemandInput = {
 
 export type UpdateDemandInput = Partial<Pick<
   Demand,
-  'title' | 'description' | 'status' | 'priority' | 'projectId' | 'projectName' | 'assigneeSessionIds' | 'supervisorSessionId' | 'sessionIds' | 'tags' | 'plannedStartAt' | 'targetAt' | 'parentDemandId' | 'contentRefs'
+  'title' | 'description' | 'status' | 'priority' | 'projectId' | 'projectName' | 'assigneeSessionIds' | 'supervisorSessionId' | 'sessionIds' | 'tags' | 'plannedStartAt' | 'targetAt' | 'parentDemandId' | 'phaseIndex' | 'contentRefs'
 >> & { alignment?: DemandAlignmentProposal; grounding?: DemandGroundingProposal }
 
 export type DemandCreateOptions = {

@@ -41,6 +41,7 @@ function GoalMoreProperties({ demand, onUpdate }: Props) {
   return <div className="goals-properties__groups">
     <fieldset><legend>Planning</legend><div className="goals-properties__fields">
       <label>Planned start<TextInput type="date" aria-label="Goal planned start" value={localDateInput(demand.plannedStartAt)} onChange={event => onUpdate({ plannedStartAt: event.target.value ? Date.parse(`${event.target.value}T${civilClock(0, 0, 0)}`) : null })} /></label>
+      <label>Batch<TextInput type="number" min={0} step={1} aria-label="Goal batch" value={demand.phaseIndex ?? ''} onChange={event => { const value = event.target.value; if (value === '' || Number.isSafeInteger(Number(value)) && Number(value) >= 0) onUpdate({ phaseIndex: value === '' ? null : Number(value) }) }} /></label>
       <label>Target date<TextInput type="date" aria-label="Goal target date" value={localDateInput(demand.targetAt)} onChange={event => onUpdate({ targetAt: event.target.value ? Date.parse(`${event.target.value}T${civilClock(0, 0, 0)}`) : null })} /></label>
     </div></fieldset>
     <fieldset><legend>Classification</legend><div className="goals-properties__fields">

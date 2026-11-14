@@ -14,7 +14,7 @@ export function projectHostGoal(goal: Demand): AgentMuxDemand {
     supervisorSessionId: goal.supervisorSessionId, participations: [...goal.participations],
     ...(goal.creationOrigin ? { creationOrigin: goal.creationOrigin } : {}),
     ...(goal.discussionOperationId ? { discussionOperationId: goal.discussionOperationId } : {}), tags: [...goal.tags],
-    plannedStartAt: goal.plannedStartAt, targetAt: goal.targetAt, parentDemandId: goal.parentDemandId,
+    plannedStartAt: goal.plannedStartAt, targetAt: goal.targetAt, parentDemandId: goal.parentDemandId, phaseIndex: goal.phaseIndex ?? null,
     decisions: goal.decisions, activityLog: goal.activities.map(activity => `${activity.kind}: ${activity.message}`), activities: goal.activities,
     ...(goal.delegations ? { delegations: goal.delegations } : {}), ...(goal.dispatches ? { dispatches: goal.dispatches } : {}),
     ...(goal.progressUpdates ? { progressUpdates: goal.progressUpdates } : {}), ...(goal.patrols ? { patrols: goal.patrols } : {}), ...hostGoalPlan(goal),
