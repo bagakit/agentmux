@@ -119,6 +119,10 @@ async function painted(window: BrowserWindow): Promise<void> {
 }
 async function captureForSurface(options: { includeHostWindows?: boolean } = {}): Promise<any> {
   const includeHostWindows = options.includeHostWindows === true
+  if (deferredAlternate?.phase === currentPhase && includeHostWindows !== (deferredAlternate.background === 'included')) {
+    deferredAlternate.waiting = true
+    await deferredAlternate.promise
+  }
   const result = await native!.captureDisplays({ includeHostWindows })
   receipt.nativeCalls.push({ phase: currentPhase, includeHostWindows, capturedAt: result.capturedAt })
   nativeResults.push({ phase: currentPhase, includeHostWindows, result })
@@ -129,9 +133,14 @@ async function captureForSurface(options: { includeHostWindows?: boolean } = {})
   return result
 }
 let heldNativeResult = false
+let deferredAlternate: { phase: string; background: CaptureBackground; waiting: boolean; promise: Promise<void>; release(): void } | null = null
 
-async function openCapture(background: CaptureBackground, phase: string) {
+async function openCapture(background: CaptureBackground, phase: string, deferAlternate = false) {
   currentPhase = phase
+  if (deferAlternate) {
+    let release!: () => void
+    deferredAlternate = { phase, background, waiting: false, promise: new Promise<void>(resolve => { release = resolve }), release: () => release() }
+  }
   const firstResult = nativeResults.length, displays = screen.getAllDisplays()
   created = []
   let captureError: unknown
@@ -145,7 +154,7 @@ async function openCapture(background: CaptureBackground, phase: string) {
   created = null
   const inputs: CaptureSurfaceInput[] = []
   for (const overlay of overlays) {
-    await until('real overlay shown with its decoded frozen frame', async () => {
+    await until('real overlay shown with its decoded selected frozen frame', async () => {
       if (captureError) throw captureError
       try {
         return overlay.isVisible() && await overlay.webContents.executeJavaScript(`document.querySelector('img')?.naturalWidth>0&&document.querySelector('canvas')?.width>0`)
@@ -163,18 +172,51 @@ async function openCapture(background: CaptureBackground, phase: string) {
     const shows = events.filter(event => event.kind === 'show' || event.kind === 'showInactive')
     check('every observed real show was protected', shows.length > 0 && shows.every(event => event.protected === true))
   }
-  const exposures = nativeResults.slice(firstResult)
-  check('a visible host produces exact included then excluded native exposures', exposures.length === 2
-    && exposures[0]?.includeHostWindows === true && exposures[1]?.includeHostWindows === false)
-  for (const input of inputs) for (const background of ['included', 'excluded'] as const) {
-    const exposure = exposures.find(row => row.includeHostWindows === (background === 'included'))!
+  const capture = Object.assign({ outcome, overlays, inputs, exposures: nativeResults.slice(firstResult) }, { settleAlternate: async () => {} })
+  if (deferAlternate) {
+    check('the selected real exposure leads and the alternate remains pending', capture.exposures.length === 1
+      && capture.exposures[0]?.includeHostWindows === (background === 'included')
+      && inputs.every(input => input.backgrounds[background].status === 'ready' && input.backgrounds[background === 'included' ? 'excluded' : 'included'].status === 'pending'))
+    capture.settleAlternate = async () => {
+      check('the deferred real native invocation is waiting behind the first shown overlay', deferredAlternate?.waiting === true)
+      deferredAlternate?.release()
+      await until('the deferred real exposure completes', () => nativeResults.length - firstResult === 2)
+      capture.exposures = nativeResults.slice(firstResult)
+      capture.inputs = await latestReadyInputs(overlays, background)
+      validateReadyCapture(capture, background)
+      deferredAlternate = null
+    }
+    return capture
+  }
+  await until('the alternate real exposure completes', () => nativeResults.length - firstResult === 2)
+  capture.exposures = nativeResults.slice(firstResult)
+  capture.inputs = await latestReadyInputs(overlays, background)
+  validateReadyCapture(capture, background)
+  return capture
+}
+async function latestReadyInputs(overlays: BrowserWindow[], background: CaptureBackground): Promise<CaptureSurfaceInput[]> {
+  const latest: CaptureSurfaceInput[] = []
+  for (const overlay of overlays) {
+    const input = await until('real preload returns the latest ready snapshot', async () => {
+      const value = await overlay.webContents.executeJavaScript('window.captureSurface.load()') as CaptureSurfaceInput
+      return value.revision === 2 && value.backgrounds.included.status === 'ready' && value.backgrounds.excluded.status === 'ready' ? value : null
+    })
+    check('ready deferred delivery never auto-switches the requested background', input.background === background)
+    latest.push(input)
+  }
+  return latest
+}
+function validateReadyCapture(capture: { inputs: CaptureSurfaceInput[]; exposures: Array<{ includeHostWindows: boolean; result: any }> }, background: CaptureBackground): void {
+  check('a visible host produces exact selected then alternate native exposures', capture.exposures.length === 2
+    && capture.exposures[0]?.includeHostWindows === (background === 'included') && capture.exposures[1]?.includeHostWindows !== (background === 'included'))
+  for (const input of capture.inputs) for (const mode of ['included', 'excluded'] as const) {
+    const exposure = capture.exposures.find(row => row.includeHostWindows === (mode === 'included'))!
     const frame = frameFor(exposure.result, input.displayId)
-    check('the real preload receives the exact native ' + background + ' background', input.backgrounds[background].image?.dataUrl === 'data:image/png;base64,' + frame.png)
-    check('the real background keeps native capturedAt and engine', input.backgrounds[background].capturedAt === exposure.result.capturedAt
-      && input.backgrounds[background].engine === frame.engine)
+    check('the real preload receives the exact native ' + mode + ' background', input.backgrounds[mode].image?.dataUrl === 'data:image/png;base64,' + frame.png)
+    check('the real background keeps native capturedAt and engine', input.backgrounds[mode].capturedAt === exposure.result.capturedAt
+      && input.backgrounds[mode].engine === frame.engine)
   }
   check('all real hosts keep exact opacity after opening', exactHostOpacity())
-  return { outcome, overlays, inputs, exposures }
 }
 async function cancelCapture(capture: { outcome: Promise<any>; overlays: BrowserWindow[]; inputs: CaptureSurfaceInput[] }): Promise<void> {
   const target = capture.overlays[0]!, input = capture.inputs[0]!
@@ -228,16 +270,14 @@ async function run(): Promise<void> {
   host.moveTop()
   const hostColor = await host.webContents.executeJavaScript('getComputedStyle(document.body).backgroundColor')
   check('the real host body uses its controlled color', hostColor === 'rgb(255, 0, 200)', { hostColor })
-  const initial = await openCapture('included', 'initial')
+  const initial = await openCapture('included', 'initial', true)
   const hostContent = host.getContentBounds(), hostDisplay = screen.getDisplayMatching(hostContent)
-  const includedFrame = frameFor(initial.exposures[0]!.result, hostDisplay.id), excludedFrame = frameFor(initial.exposures[1]!.result, hostDisplay.id)
+  const includedFrame = frameFor(initial.exposures[0]!.result, hostDisplay.id)
   const initialIncluded = colorPixels(includedFrame.png, hostRegion(includedFrame, hostContent), 'host-initial')
-  const initialExcluded = colorPixels(excludedFrame.png, hostRegion(excludedFrame, hostContent), 'host-initial')
   const initialDetails = initialIncluded.matches <= initialIncluded.area * 0.8
     ? { ...initialIncluded, hostContent, nativeFrame: includedFrame.frame, region: hostRegion(includedFrame, hostContent), channels: regionChannels(includedFrame.png, hostRegion(includedFrame, hostContent)) }
     : initialIncluded
   check('initial included SCK pixels contain the untouched host', initialIncluded.area > 100 && initialIncluded.matches > initialIncluded.area * 0.8, initialDetails)
-  check('initial excluded SCK pixels omit the untouched host', negligibleColorNoise(initialExcluded), initialExcluded)
 
   for (const overlay of initial.overlays) {
     await overlay.webContents.executeJavaScript(`(()=>{const marker=document.createElement('div');marker.id='capture-live-overlay-marker';marker.style='position:fixed;left:20px;top:20px;width:96px;height:96px;background:#00ff9d;pointer-events:none;z-index:2147483647';document.body.append(marker);return true})()`)
@@ -253,6 +293,15 @@ async function run(): Promise<void> {
   host.moveTop()
   await painted(host)
   await wait(150)
+  await initial.settleAlternate()
+  const excludedFrame = frameFor(initial.exposures[1]!.result, hostDisplay.id)
+  const initialExcluded = colorPixels(excludedFrame.png, hostRegion(excludedFrame, hostContent), 'host-initial')
+  const changedExcludedDuringAlternate = colorPixels(excludedFrame.png, hostRegion(excludedFrame, hostContent), 'host-changed')
+  check('deferred excluded SCK pixels omit both host colors', initialExcluded.area > 100 && negligibleColorNoise(initialExcluded) && negligibleColorNoise(changedExcludedDuringAlternate), { initialExcluded, changedExcludedDuringAlternate })
+  for (const frame of initial.exposures[1]!.result.displays) {
+    const marker = colorPixels(frame.png, { x: 0, y: 0, width: frame.width, height: frame.height }, 'overlay-marker')
+    check('the deferred included-first alternate was captured after overlay show without recursion', negligibleColorNoise(marker), { displayId: frame.displayId, matches: marker.matches, area: marker.area })
+  }
   process.stdout.write('capture-live stage: probe included after overlay paint\n')
   const visibleIncluded = await native.captureDisplays({ includeHostWindows: true })
   process.stdout.write('capture-live stage: probe excluded after overlay paint\n')
@@ -284,6 +333,27 @@ async function run(): Promise<void> {
   process.stdout.write('capture-live stage: initial lifecycle cancelled\n')
   receipt.cases.push({ label: 'lifecycle', displays: initial.overlays.length, initialIncluded, initialExcluded,
     changedIncluded, recursiveIncluded, changedExcluded, recursiveExcluded })
+
+  const excludedFirst = await openCapture('excluded', 'excluded-first', true)
+  const firstExcludedFrame = frameFor(excludedFirst.exposures[0]!.result, hostDisplay.id)
+  const selectedExcluded = colorPixels(firstExcludedFrame.png, hostRegion(firstExcludedFrame, hostContent), 'host-changed')
+  check('excluded-first selected pixels omit the changed host', selectedExcluded.matches === 0, selectedExcluded)
+  for (const overlay of excludedFirst.overlays) {
+    await overlay.webContents.executeJavaScript(`(()=>{const marker=document.createElement('div');marker.id='capture-live-overlay-marker';marker.style='position:fixed;left:20px;top:20px;width:96px;height:96px;background:#00ff9d;pointer-events:none;z-index:2147483647';document.body.append(marker);return true})()`)
+    await painted(overlay)
+  }
+  await excludedFirst.settleAlternate()
+  const deferredIncludedFrame = frameFor(excludedFirst.exposures[1]!.result, hostDisplay.id)
+  const deferredIncluded = colorPixels(deferredIncludedFrame.png, hostRegion(deferredIncludedFrame, hostContent), 'host-changed')
+  check('deferred excluded-first included pixels retain the real changed host', deferredIncluded.matches > deferredIncluded.area * 0.8, deferredIncluded)
+  for (const frame of excludedFirst.exposures[1]!.result.displays) {
+    const marker = colorPixels(frame.png, { x: 0, y: 0, width: frame.width, height: frame.height }, 'overlay-marker')
+    check('the deferred excluded-first alternate was captured after overlay show without recursion', marker.matches === 0, { displayId: frame.displayId, matches: marker.matches })
+  }
+  check('every real display keeps its own native stage timing', excludedFirst.exposures.every(exposure => exposure.result.displays.every((frame: any) => Number.isFinite(frame.timing.totalMs))))
+  await cancelCapture(excludedFirst)
+  receipt.cases.push({ label: 'excluded-first-deferred', displays: excludedFirst.overlays.length, selectedExcluded, deferredIncluded,
+    nativeDisplayTimings: excludedFirst.exposures.map(exposure => exposure.result.displays.map((frame: any) => ({ displayId: frame.displayId, timing: frame.timing }))) })
 
   currentPhase = 'cancelled-old'
   process.stdout.write('capture-live stage: begin cancelled old request\n')
@@ -328,6 +398,7 @@ void run().catch(error => {
   receipt.failure = { name: error instanceof Error ? error.name : 'Error', message: error instanceof Error ? error.message : String(error), stack: error instanceof Error ? error.stack : undefined }
 }).finally(async () => {
   releaseHeld?.()
+  deferredAlternate?.release()
   try { surface?.dispose() } catch {}
   try { await native?.dispose(); receipt.cleanup.nativeDisposed = true } catch (error) { receipt.cleanup.nativeDisposeError = String(error) }
   for (const window of BrowserWindow.getAllWindows()) if (!window.isDestroyed()) window.destroy()
