@@ -393,6 +393,7 @@ function Scene() {
   const [webUpdateScene, setWebUpdateScene] = useState(false)
   const [connectScene, setConnectScene] = useState<MobileConnection | null>(null)
   Object.assign(window, { mobileProductScene: {
+    prepareWideWorkface: () => { for (const row of catalog.agentPresentation ?? []) if (row.projectGroup) row.projectGroup.hostId = 'host-original' },
     prepareAgentLocations: (scene: 'multi' | 'zero' | 'one' | 'unknown' | 'long') => {
       Object.assign(catalog, structuredClone(agentLocationsOriginal))
       for (const row of catalog.agentPresentation ?? []) if (row.projectGroup) row.projectGroup.hostId = 'host-original'

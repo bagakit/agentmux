@@ -88,6 +88,9 @@ app.whenReady().then(async () => {
     await until('!!document.querySelector(".mobile-conversation-panel:not([hidden]) [contenteditable=true]")')
     assert.equal(await read('mobileProductScene.facts().record.selectedSessionId'), 'session-mote')
   }
+  if (mode === 'wide-agent-workface') {
+    await require('./wide-agent-workface.cjs')({ win, read, until, resize, tap, button, capture, result, evidence, phase, openGoal }); result.passed = true; return
+  }
   if (mode === 'mote-main-retention') {
     await require('./mote-main-retention.cjs')({ win, read, until, resize, tap, button, capture, result }); result.passed = true; return
   }
