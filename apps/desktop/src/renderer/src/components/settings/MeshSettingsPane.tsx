@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { mintObjectId } from '@agentmux/core/object-id'
+import { Button } from '@agentmux/client-ui/components/Button'
 import { MeshNetworkSettings } from './MeshNetworkSettings'
 import { HostSettingsPane, type HostAddRequest } from './HostSettingsPane'
 import { MeshPathsPane } from './MeshPathsPane'
@@ -43,7 +44,7 @@ export function MeshSettingsPane({ onSubpageChange, ...props }: React.ComponentP
     if (observing && observationScroll.current) observationScroll.current.scrollTop = scrollPositions.current[view]
   }, [view, observing])
   return <div className="mesh-settings-pane" data-mesh-home-view={view}>
-    {editing ? <header className="mesh-editor-navigation"><button type="button" className="small-button" onClick={() => choose('paths')}>← Mesh overview</button></header> : null}
+    {editing ? <header className="mesh-editor-navigation"><Button type="button" onClick={() => choose('paths')}>← Mesh overview</Button></header> : null}
     <div ref={observationScroll} data-mesh-view={view === 'machines' ? 'machines' : 'paths'} hidden={!observing}
       onScroll={event => { if (view === 'paths' || view === 'machines') scrollPositions.current[view] = event.currentTarget.scrollTop }}>
       <div hidden={view !== 'paths'}>{mounted('paths') ? <MeshPathsPane active={props.active && view === 'paths'} hosts={props.config.hosts} locations={props.config.meshMapLocations} onDevice={openConnection} onGateway={() => choose('network')} /> : null}</div>

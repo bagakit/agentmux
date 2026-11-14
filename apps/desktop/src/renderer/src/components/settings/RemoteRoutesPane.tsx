@@ -4,6 +4,7 @@ import { ContentCopyButton } from '@agentmux/client-ui/components/ContentCopyBut
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { parseAdoptedHostRoute, type HostRouteActor, type HostRouteEdges, type HostRouteIdentity } from '@agentmux/core/host-route'
+import { Button } from '@agentmux/client-ui/components/Button'
 import type { AppConfig, HostConfig } from '../../../../shared/contracts'
 import type { DesktopHostRouteTarget } from '../../../../shared/host-routes'
 import { configValuesEqual as equal } from '../../../../shared/config-edit'
@@ -38,7 +39,7 @@ export function RemoteRoutesPane({ config, active }: { config: AppConfig; active
     <div className="remote-work-intro"><h3>Routes between devices</h3><p>Follow saved connections directly or through other nodes. Each device controls who can pass through it.</p></div>
     <label className="host-route-owner"><span>Manage routes on</span><SelectionField label="Route policy device" menuClassName="host-route-owner__menu" value={hostId} options={config.hosts.map(item => ({ value: item.id, label: `${item.label} · ${item.kind === 'local' ? 'This device' : item.id}` }))} missingOptionLabel="Original saved device unavailable" missingOptionDescription={hostId} onValueChange={setHostId} /></label>
     {host && current?.value ? <RoutePolicyEditor key={carrierKey + current.value.runtimeId} host={host} identity={current.value} active={active} />
-      : <div className="remote-routes-empty"><HostIcon size={24} aria-hidden="true" /><p role="status">{current?.issue ?? (host ? 'Reading this device’s route owner…' : 'Select its saved Host connection. Existing routes and edits are retained.')}</p><button type="button" className="small-button" onClick={() => setRefresh(value => value + 1)}>Read route owner</button></div>}
+      : <div className="remote-routes-empty"><HostIcon size={24} aria-hidden="true" /><p role="status">{current?.issue ?? (host ? 'Reading this device’s route owner…' : 'Select its saved Host connection. Existing routes and edits are retained.')}</p><Button type="button" onClick={() => setRefresh(value => value + 1)}>Read route owner</Button></div>}
   </div>
 }
 
@@ -106,29 +107,29 @@ function RoutePolicyEditor({ host, identity, active }: { host: HostConfig; ident
     <div className="host-route-toolbar"><div className="remote-work-tasks" role="group" aria-label="Route policy task">
       <button type="button" aria-pressed={tab === 'paths'} onClick={() => setTab('paths')}>Outgoing routes <span>{edit?.configuration.routes.length ?? '—'}</span></button>
       <button type="button" aria-pressed={tab === 'access'} onClick={() => setTab('access')}>Incoming access <span>{edit?.configuration.grants.length ?? '—'}</span></button>
-    </div><button type="button" className="small-button" onClick={() => void policy.inspect()}>Read saved policy</button></div>
+    </div><Button type="button" onClick={() => void policy.inspect()}>Read saved policy</Button></div>
     {policy.issue ? <p className="settings-inline-error" role="status">{policy.issue}</p> : null}
     {!edit ? <p>Reading the saved policy. Existing work stays available.</p> : <>
       {tab === 'paths' ? <div className="host-route-layout" data-empty-routes={edit.configuration.routes.length === 0}>
         <div className="host-route-library" hidden={edit.configuration.routes.length === 0}><SettingsResourceLibrary label="Saved and draft routes" selectedId={selected === null ? null : String(selected)} focusRequest={null}
           onSelect={value => { setSelected(Number(value)); setActionIssue(''); setEdgeIssue('') }} items={edit.configuration.routes.map((value, index) => ({ id: String(index), name: value.id || 'Unnamed route',
             detail: `${value.route.hops.length === 1 ? 'Direct' : `${value.route.hops.length} hops`} · ${observed?.routes.some(saved => equal(saved, value)) ? 'Saved configuration' : 'Unsaved edit'}`, mark: <HostIcon size={18} /> }))} />
-          <button type="button" className="small-button" onClick={() => { setSelected(null); setActionIssue(''); setEdgeIssue('') }}>New route</button>
+          <Button type="button" onClick={() => { setSelected(null); setActionIssue(''); setEdgeIssue('') }}>New route</Button>
         </div>
         <div className="host-route-detail">
           {row ? <>
             <label className="host-route-field"><span>Route name</span><TextInput aria-label="Route name" value={row.id} placeholder="A short, memorable name" onChange={event => changeRoute(value => ({ ...value, id: event.target.value }))} /></label>
             <HostRoutePath route={row.route} sourceLabel={host.label} />
             <p className="host-route-caption">{savedPrefix ? 'Saved path' : 'Draft path'} · {row.route.hops.length === 1 ? 'direct' : `${row.route.hops.length} logical hops`}. Access is checked by each node when used.</p>
-            <div className="host-route-inline-actions"><button type="button" className="small-button" onClick={() => {
+            <div className="host-route-inline-actions"><Button type="button" onClick={() => {
               if (row.route.hops.length > 1) changeRoute(value => ({ ...value, route: { ...value.route, hops: value.route.hops.slice(0, -1) } }))
               else report(() => { policy.change(current => ({ ...current, configuration: { ...current.configuration, routes: current.configuration.routes.filter((_, index) => index !== selected) } })); setSelected(null) })
-            }}>{row.route.hops.length > 1 ? 'Remove last node' : 'Remove route'}</button>
-              <button type="button" className="small-button" onClick={() => void readEdges()}>Explore next node</button></div>
+            }}>{row.route.hops.length > 1 ? 'Remove last node' : 'Remove route'}</Button>
+              <Button type="button" onClick={() => void readEdges()}>Explore next node</Button></div>
             {!savedPrefix ? <p className="settings-group-note">Save this path before exploring further. Browsing never saves or grants access.</p> : null}
           </> : <div className="host-route-new"><HostIcon size={28} aria-hidden="true" /><h4>Choose the first connection</h4><p>Start from a saved Host on {host.label}. Inspecting its identity does not trust it or start an Agent.</p></div>}
-          <div className="host-route-edge-picker"><label className="host-route-field"><span>{row ? 'Next saved connection' : 'Saved connection'}</span><SelectionField label="Next saved route connection" value={edgeId} options={[{ value: '', label: readingEdge ? 'Reading this node…' : options.length ? 'Choose a connection' : 'Read this node’s connections' }, ...options.map(edge => ({ value: edge.edgeId, label: `${edge.label} · ${edge.edgeId}` }))]} onValueChange={id => setEdgeSelection({ key: pathKey, id })} /></label><button type="button" className="small-button" disabled={!selectedEdge || readingEdge} onClick={() => void appendEdge()}>Inspect &amp; add</button>
-            {!row ? <button type="button" className="small-button" onClick={() => void readEdges()}>Read connections</button> : null}</div>
+          <div className="host-route-edge-picker"><label className="host-route-field"><span>{row ? 'Next saved connection' : 'Saved connection'}</span><SelectionField label="Next saved route connection" value={edgeId} options={[{ value: '', label: readingEdge ? 'Reading this node…' : options.length ? 'Choose a connection' : 'Read this node’s connections' }, ...options.map(edge => ({ value: edge.edgeId, label: `${edge.label} · ${edge.edgeId}` }))]} onValueChange={id => setEdgeSelection({ key: pathKey, id })} /></label><Button type="button" disabled={!selectedEdge || readingEdge} onClick={() => void appendEdge()}>Inspect &amp; add</Button>
+            {!row ? <Button type="button" onClick={() => void readEdges()}>Read connections</Button> : null}</div>
           {edgeIssue ? <p className="settings-inline-error" role="status">{edgeIssue} Your path is retained.</p> : null}
           {request ? <details className="host-route-access-request"><summary>Request access along this route</summary><p>Each receiving device approves the original actor and purpose. Send this public request to its owner; copying it changes no policy.</p>
             <label className="host-route-field"><span>Purpose</span><SelectionField label="Route access purpose" value={scope} options={[{ value: 'discover', label: 'Discover saved next connections' }, { value: 'work', label: 'Agent work, Space, terminal and input' }]} searchable={false} onValueChange={value => setScope(value as typeof scope)} /></label>
@@ -139,16 +140,16 @@ function RoutePolicyEditor({ host, identity, active }: { host: HostConfig; ident
       </div> : <div className="host-route-access">
         <h4>Who may pass through {host.label}?</h4><p>A Host connection does not grant transit. These permissions apply only at this node.</p>
         {edit.configuration.grants.map(grant => <div className="host-route-grant" key={grant.id}><div><strong>{equal(grant.scopes, ROUTE_DISCOVERY_SCOPES) ? 'Connection discovery' : equal(grant.scopes, ROUTE_WORK_SCOPES) ? 'Agent and project work' : 'Custom access'}</strong><small>{grant.actor.kind} · {grant.actor.id}</small><details><summary>Identities and {grant.scopes.length} exact permissions</summary><p>Permission <code>{grant.id}</code><br />Via <code>{grant.delegator.runtimeId}</code><br />To <code>{grant.destination.runtimeId}</code><br />Original actor Core <code>{grant.actor.source.runtimeId}</code></p><ul>{grant.scopes.map(value => <li key={value}>{value}</li>)}</ul></details></div>
-          <button type="button" className="small-button" onClick={() => report(() => policy.change(current => ({ ...current, configuration: { ...current.configuration, grants: current.configuration.grants.filter(value => value.id !== grant.id) } })))} >Remove permission</button></div>)}
+          <Button type="button" onClick={() => report(() => policy.change(current => ({ ...current, configuration: { ...current.configuration, grants: current.configuration.grants.filter(value => value.id !== grant.id) } })))} >Remove permission</Button></div>)}
         {!edit.configuration.grants.length ? <p className="host-route-caption">No transit permissions saved in this edit.</p> : null}
         <label className="host-route-field"><span>Public access request</span><textarea aria-label="Public route access request" rows={5} value={edit.grantRequestText ?? ''} placeholder="Paste the request copied from the source route" onChange={event => report(() => policy.change(current => ({ ...current, grantRequestText: event.target.value })))} /></label>
-        <button type="button" className="small-button" onClick={() => report(() => { const request = parseHostRouteGrantRequest(JSON.parse(edit.grantRequestText ?? ''))
+        <Button type="button" onClick={() => report(() => { const request = parseHostRouteGrantRequest(JSON.parse(edit.grantRequestText ?? ''))
           const grant = grantForRouteReceiver(request, identity, 'access-' + crypto.randomUUID())
           policy.change(current => ({ ...current, configuration: { ...current.configuration, grants: [...current.configuration.grants, grant] } }))
-        })}>Add to this node’s edit</button><p className="settings-group-note">Review the identities and permissions above, then Save policy to approve them.</p>
+        })}>Add to this node’s edit</Button><p className="settings-group-note">Review the identities and permissions above, then Save policy to approve them.</p>
       </div>}
       {actionIssue ? <p className="settings-inline-error" role="status">{actionIssue}</p> : null}
-      {conflict ? <div className="host-route-conflict" role="status"><p>The saved policy changed since this edit began. Both versions are retained.</p><button type="button" className="small-button" onClick={() => policy.rebase(true)}>Use saved policy</button><button type="button" className="small-button" onClick={() => policy.rebase(false)}>Keep edits over saved policy</button></div> : null}
+      {conflict ? <div className="host-route-conflict" role="status"><p>The saved policy changed since this edit began. Both versions are retained.</p><Button type="button" onClick={() => policy.rebase(true)}>Use saved policy</Button><Button type="button" onClick={() => policy.rebase(false)}>Keep edits over saved policy</Button></div> : null}
       <SettingsSaveBar dirty={dirty} scopeLabel="Route policy" label="Save policy" onSave={() => void policy.save()}
         save={{ state: policy.busy ? 'saving' : 'idle', saving: policy.busy, error: '' }} />
       {edit.retainedSaves.length ? <details className="host-route-original-saves"><summary>{edit.retainedSaves.length} retained save {edit.retainedSaves.length === 1 ? 'request' : 'requests'}</summary>

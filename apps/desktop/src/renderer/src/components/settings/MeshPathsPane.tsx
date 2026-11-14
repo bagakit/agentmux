@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { MeshNetworkInspection, MeshNetworkSettings } from '@agentmux/core/mesh-network'
+import { Button } from '@agentmux/client-ui/components/Button'
 import type { HostConfig } from '../../../../shared/contracts'
 import type { MeshMapLocations } from '../../../../shared/mesh-map-locations'
 import { api } from '../../lib/api'
@@ -46,8 +47,8 @@ export function MeshPathsPane({ active, hosts, locations, onGateway, onDevice }:
   const savedTargets = sameOwner ? settings?.configuration.peers : undefined
   const savedIssue = settingsIssue || (settings && !sameOwner ? 'The saved settings belong to another Core instance.' : '')
   const savedHosts = useMemo(() => hosts.filter(host => host.kind === 'ssh'), [hosts])
-  const actions = <><button type="button" className="small-button" aria-expanded={editingLocation !== undefined} onClick={() => editLocation('local')}>Device locations</button>
-    <button type="button" className="small-button" disabled={busy} onClick={() => setRevision(value => value + 1)}>{busy ? 'Reading…' : 'Refresh network'}</button></>
+  const actions = <><Button type="button" aria-expanded={editingLocation !== undefined} onClick={() => editLocation('local')}>Device locations</Button>
+    <Button type="button" disabled={busy} onClick={() => setRevision(value => value + 1)}>{busy ? 'Reading…' : 'Refresh network'}</Button></>
   return <section className="mesh-paths-pane" aria-label="Mesh network overview" data-settings-field="mesh-paths">
     {issue ? <div className="mesh-paths-issue" role="status"><strong>Network observation unavailable.</strong><p>{snapshot ? 'Showing the last confirmed network.' : 'Current network state is unknown.'}</p><details><summary>Read details</summary><p>{issue}</p></details></div> : null}
     <div ref={locationEditor} hidden={editingLocation === undefined}>

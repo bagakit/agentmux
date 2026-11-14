@@ -1,5 +1,6 @@
 import { useMemo } from 'react'
 import { TextInput } from '@agentmux/client-ui/input'
+import { Button } from '@agentmux/client-ui/components/Button'
 import { SelectionField } from '../SelectionField'
 import type { HostConfig } from '../../../../shared/contracts'
 import { meshLocationValue, readMeshLocation, type MeshMapLocations } from '../../../../shared/mesh-map-locations'
@@ -39,7 +40,7 @@ export function MeshLocationsPanel({ hosts, locations, editing, onEdit }: {
   }
 
   return <section hidden={editing === undefined} className="mesh-locations-panel" aria-label="Device map locations" data-settings-field="mesh-locations">
-    <header><h3>Device locations</h3><button type="button" className="small-button" onClick={() => onEdit(undefined)}>Close</button></header>
+    <header><h3>Device locations</h3><Button type="button" onClick={() => onEdit(undefined)}>Close</Button></header>
     <div className="mesh-locations-panel__fields">
       <label><span>Device</span><SelectionField label="Map device" value={current?.id ?? ''} options={hosts.map(host => ({ value: host.id, label: host.label }))}
         onValueChange={onEdit} /></label>

@@ -1,6 +1,7 @@
 import { mintObjectId } from '@agentmux/core/object-id'
 import type { RemoteCoreInstallCheck, RemoteCoreInstallReceipt, RemoteCoreKeepRunning } from '@agentmux/core'
 import { useEffect, useRef, useState } from 'react'
+import { Button } from '@agentmux/client-ui/components/Button'
 import type { SshHostConfig } from '../../../../shared/contracts'
 import { configValuesEqual } from '../../../../shared/config-edit'
 import { api } from '../../lib/api'
@@ -114,8 +115,8 @@ export function HostInstallPanel({ maintenance }: { maintenance: ReturnType<type
     </header>
     <p className="host-install__intro">{operation ? 'The original installation and its result are retained.' : 'No Core is installed at the checked location. Review how it stays running, then install.'}</p>
     {!operation && <div className="host-install__actions">
-      <button className="small-button" type="button" data-install-check disabled={!saved || !active || busy} onClick={() => void checkMachine()}>
-        {state?.busy === 'check' ? 'Checking machine…' : check ? 'Check again' : 'Check installation'}</button>
+      <Button type="button" data-install-check disabled={!saved || !active || busy} onClick={() => void checkMachine()}>
+        {state?.busy === 'check' ? 'Checking machine…' : check ? 'Check again' : 'Check installation'}</Button>
       {!saved && <span>Save this Host before checking.</span>}
     </div>}
     {state?.error && <p role="status" className="host-install__notice">{state.error}</p>}
@@ -143,7 +144,7 @@ export function HostInstallPanel({ maintenance }: { maintenance: ReturnType<type
           </label>
         </div>
         <div className="host-install__confirm"><span>Core {check.candidate?.version ?? 'version unknown'} · {check.candidate?.sourceCommit ? 'Source ' + check.candidate.sourceCommit.slice(0, 10) : 'Bundled candidate'}</span>
-          <button type="button" className="primary-button" data-install-confirm disabled={!ready || !check.keepRunning?.some(option => option.mode === mode && option.available)} onClick={() => void confirm()}>Install on {host.label}</button></div>
+          <Button type="button" variant="primary" data-install-confirm disabled={!ready || !check.keepRunning?.some(option => option.mode === mode && option.available)} onClick={() => void confirm()}>Install on {host.label}</Button></div>
       </div>}
     </>}
     {operation && <div className="host-install__operation">
@@ -161,7 +162,7 @@ export function HostInstallPanel({ maintenance }: { maintenance: ReturnType<type
         <div><dt>Runtime</dt><dd><code>{receipt.installed.runtimeId}</code></dd></div>
         <div><dt>Service entry</dt><dd><code>{receipt.installed.remoteCommand}</code></dd></div>
         <div><dt>Start script</dt><dd><code>{receipt.installed.startScript}</code></dd></div></dl></details>}
-      {receipt?.status === 'completed' && <button type="button" className="primary-button" data-install-connect disabled={!active || !saved || busy} onClick={() => {
+      {receipt?.status === 'completed' && <Button type="button" variant="primary" data-install-connect disabled={!active || !saved || busy} onClick={() => {
         const original = operation
         update(original.input, entry => ({ ...entry, busy: 'connect' }))
         connectionFeedback('Checking the saved connection…')
@@ -177,13 +178,13 @@ export function HostInstallPanel({ maintenance }: { maintenance: ReturnType<type
           }
         }
         void connect().catch(error => connectionFeedback(message(error))).finally(() => update(original.input, entry => ({ ...entry, busy: undefined })))
-      }}>Connect to this Host</button>}
+      }}>Connect to this Host</Button>}
       {connection && matches(connection.input, host) && <p role="status">{connection.detail}</p>}
-      {receipt?.status === 'completed' && onManageUpdates && <button type="button" className="small-button" data-install-updates
-        disabled={!saved || !active || busy || matches(operation.input, host)} onClick={onManageUpdates}>Manage updates</button>}
+      {receipt?.status === 'completed' && onManageUpdates && <Button type="button" data-install-updates
+        disabled={!saved || !active || busy || matches(operation.input, host)} onClick={onManageUpdates}>Manage updates</Button>}
       <details><summary>Original operation</summary><code>{operation.id}</code></details>
-      {receipt?.status === 'failed' && <button type="button" className="small-button" data-install-recheck disabled={busy || !saved || !active} onClick={() => void checkMachine()}>Check installation again</button>}
-      <button type="button" className="small-button" data-install-inspect disabled={busy || !active} onClick={() => void inspect(operation, true)}>Check original install</button>
+      {receipt?.status === 'failed' && <Button type="button" data-install-recheck disabled={busy || !saved || !active} onClick={() => void checkMachine()}>Check installation again</Button>}
+      <Button type="button" data-install-inspect disabled={busy || !active} onClick={() => void inspect(operation, true)}>Check original install</Button>
     </div>}
   </section>
 }
@@ -195,6 +196,6 @@ export function HostInstallRecords({ maintenance }: { maintenance: ReturnType<ty
       <h4>Original install on {entry.input.hostname}</h4>
       <p>{entry.operation!.receipt?.detail ?? 'The original installation outcome is not confirmed.'}</p>
       <code>{entry.operation!.id}</code>
-      <button type="button" className="small-button" disabled={!active} onClick={() => void inspect(entry.operation!, true)}>Check this original install</button>
+      <Button type="button" disabled={!active} onClick={() => void inspect(entry.operation!, true)}>Check this original install</Button>
     </aside>)}</>
 }

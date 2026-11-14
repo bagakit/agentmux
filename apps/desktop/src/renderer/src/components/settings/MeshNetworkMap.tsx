@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { BaseEdge, Position, ReactFlow, useNodesState, type Edge, type EdgeProps, type Node, type NodeProps, type ReactFlowInstance, type XYPosition } from '@xyflow/react'
+import { Button } from '@agentmux/client-ui/components/Button'
 import type { HostConfig } from '../../../../shared/contracts'
 import { meshLocationValue, readMeshLocation, type MeshMapLocations } from '../../../../shared/mesh-map-locations'
 import { hostConnectionSummary } from '../../lib/host-transport'
@@ -59,7 +60,7 @@ function MeshGateways({ snapshot, peers, selected, stale, savedTargets, savedIss
   })
   const state = gateway ? { disabled: 'Off', starting: 'Starting', listening: 'Listening', unavailable: 'Unavailable' }[gateway.state] : 'Unknown'
   return <section className="mesh-gateways" aria-label="Gateways">
-    <header><h4>Gateways</h4><button type="button" className="small-button" onClick={onGateway}>Configure</button></header>
+    <header><h4>Gateways</h4><Button type="button" onClick={onGateway}>Configure</Button></header>
     <div className="mesh-gateways__local"><span><strong>Local listener</strong>{listener ? <code>{listener.host}:{listener.port}</code> : null}</span>
       <span data-listening={!stale && gateway?.state === 'listening' || undefined}>{stale ? 'Last confirmed · ' : ''}{state}</span></div>
     {gateway?.issue ? <p className="mesh-gateways__issue">{gateway.issue.message}</p> : null}
@@ -289,9 +290,9 @@ function MeshTopologyExplorer({ snapshot, active, actions, hosts, onDevice, loca
   const inspector = selectedHost ? <SavedConnectionDetails host={selectedHost} onDevice={onDevice} onLocation={onLocation}
     location={meshLocationValue(locations, selectedHost.id)} onClear={() => selectHost(undefined)} />
     : selected ? <aside className="mesh-explorer__detail" aria-label="Selected network object">
-        <header><span className="mesh-explorer__eyebrow">{selected.kind === 'peer' ? 'NETWORK PEER' : selected.kind === 'route' ? 'AVAILABLE ROUTE' : 'ADOPTED CIRCUIT'}</span><button type="button" className="small-button" onClick={() => select(undefined)}>Clear</button></header>
+        <header><span className="mesh-explorer__eyebrow">{selected.kind === 'peer' ? 'NETWORK PEER' : selected.kind === 'route' ? 'AVAILABLE ROUTE' : 'ADOPTED CIRCUIT'}</span><Button type="button" onClick={() => select(undefined)}>Clear</Button></header>
         <h4>{currentPeer ? meshPeerLabel(currentPeer) : shortMeshIdentity(currentRoute?.serverId ?? currentCircuit?.serverId ?? selected.id)}</h4>
-        {currentPeer?.own && currentPeer.id === sharedPeerId && onLocation ? <button type="button" className="small-button" onClick={() => onLocation('local')}>Edit map location</button> : null}
+        {currentPeer?.own && currentPeer.id === sharedPeerId && onLocation ? <Button type="button" onClick={() => onLocation('local')}>Edit map location</Button> : null}
         {selectionMissing ? <p role="status">This object is no longer in the current observation. Its selected identity is retained; choose another object to inspect the current network.</p> : null}
         {currentPeer ? <section><h5>Reciprocal neighbors · {currentPeer.neighbors.length}</h5>{currentPeer.neighbors.length ? <ul>{currentPeer.neighbors.map(id => <li key={id}><button type="button" onClick={() => showPeer(id)}>{byId.get(id) ? meshPeerLabel(byId.get(id)!) : shortMeshIdentity(id)}</button></li>)}</ul> : <p>No reciprocal link observed.</p>}</section> : null}
         {path.length > 1 ? <section className="mesh-explorer__path"><h5>{selected.kind === 'circuit' ? 'Adopted path' : 'Available path'} · {path.length - 1} network hops</h5><ol aria-label="Selected endpoint network path">{path.map((id, index) => <li key={index + ':' + id}><span>{index + 1}</span><button type="button" onClick={() => showPeer(id)}><strong>{byId.get(id) ? meshPeerLabel(byId.get(id)!) : shortMeshIdentity(id)}</strong><code>{shortMeshIdentity(id)}</code></button></li>)}</ol><p>{selected.kind === 'circuit' ? 'The circuit keeps this adopted path. A newer available route may differ.' : 'This route is available for new circuits. It does not prove a completed Core operation.'}</p></section> : null}
@@ -333,7 +334,7 @@ function MeshTopologyExplorer({ snapshot, active, actions, hosts, onDevice, loca
           onMoveStart={event => { if (event) viewportTouched.current = true }} fitView={!geographic} fitViewOptions={{ padding: fitPadding, maxZoom: 1 }} minZoom={.15} maxZoom={2} nodesDraggable={!geographic} nodesConnectable={false} nodesFocusable={false} edgesFocusable={false} edgesReconnectable={false} elementsSelectable={false} deleteKeyCode={null} zoomOnScroll={false} proOptions={{ hideAttribution: true }}>
           {geography ? <MeshGeography {...geography} /> : null}
           </ReactFlow></div>
-        <div className="mesh-explorer__canvas-tools"><span>{selected?.kind === 'circuit' ? 'Adopted circuit selected' : selected?.kind === 'route' ? 'Available route selected' : ''}</span><button type="button" className="small-button" aria-label="Fit observed topology" onClick={fit}>Fit</button>{hasRelayPeers && !geographic ? <button type="button" className="small-button" aria-label="Rearrange observed topology" onClick={() => { cancelLayout.current?.(); viewportTouched.current = false; arrange(value => value + 1) }}>{arranging ? 'Arranging…' : 'Arrange'}</button> : null}<button type="button" className="small-button" aria-label="Zoom in network" onClick={() => void instance.current?.zoomIn()}>+</button><button type="button" className="small-button" aria-label="Zoom out network" onClick={() => void instance.current?.zoomOut()}>−</button></div>
+        <div className="mesh-explorer__canvas-tools"><span>{selected?.kind === 'circuit' ? 'Adopted circuit selected' : selected?.kind === 'route' ? 'Available route selected' : ''}</span><Button type="button" aria-label="Fit observed topology" onClick={fit}>Fit</Button>{hasRelayPeers && !geographic ? <Button type="button" aria-label="Rearrange observed topology" onClick={() => { cancelLayout.current?.(); viewportTouched.current = false; arrange(value => value + 1) }}>{arranging ? 'Arranging…' : 'Arrange'}</Button> : null}<Button type="button" aria-label="Zoom in network" onClick={() => void instance.current?.zoomIn()}>+</Button><Button type="button" aria-label="Zoom out network" onClick={() => void instance.current?.zoomOut()}>−</Button></div>
         {layoutIssue ? <p className="mesh-explorer__layout-issue" role="status">{layoutIssue}</p> : null}
       </div> : <div className="mesh-explorer__empty mesh-explorer__no-connections" role="status">
         <strong>{reading ? 'Reading connections…' : 'No connections to show'}</strong>

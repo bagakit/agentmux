@@ -1,4 +1,5 @@
 import { sameConnectionApplication } from '@agentmux/core/connections'
+import { Button } from '@agentmux/client-ui/components/Button'
 import { manualConnectionPlatform, manualConnectionPlatforms } from '../../lib/manual-connection-platforms'
 import { mintObjectId } from '@agentmux/core/object-id'
 import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
@@ -292,7 +293,7 @@ export function ExternalConnectionsSettings({ active, onClose, navigationRequest
   </section>
   const listFeedback = listIssue ? <div className="connector-list-feedback" data-connection-list-issue>
     <p role="status" className="connector-check-feedback">Saved bots could not be refreshed. Existing bots and setup results are kept.</p>
-    <button type="button" className="small-button" onClick={() => void read()}><RefreshIcon size={14} />Refresh bot list</button>
+    <Button type="button" onClick={() => void read()}><RefreshIcon size={14} />Refresh bot list</Button>
     <details className="connector-diagnostics"><summary>List error details</summary><p className="connector-enrollment__technical">{listIssue}</p></details>
   </div> : null
   return <div ref={pane} className="settings-pane-stack connector-onboarding" data-connector-settings>
@@ -300,16 +301,16 @@ export function ExternalConnectionsSettings({ active, onClose, navigationRequest
       <button className="small-button" onClick={() => void read()}>Read requested application again</button></div> : null}
     {view === 'loading' ? <section className="connector-setup">
       <p className="settings-group-note" role="status">Reading saved bots…</p>
-      <div className="connector-editor-actions"><button type="button" className="primary-button" onClick={manualOnly ? existing : startEnrollment}>{manualOnly ? 'Connect a bot' : 'Set up a bot'}</button><button type="button" className="small-button" onClick={existing}>Connect an existing bot</button></div>
+      <div className="connector-editor-actions"><Button type="button" variant="primary" onClick={manualOnly ? existing : startEnrollment}>{manualOnly ? 'Connect a bot' : 'Set up a bot'}</Button><Button type="button" onClick={existing}>Connect an existing bot</Button></div>
     </section> : null}
     {view === 'mote' && moteSelection ? <section className="connector-mote-detail" data-connector-mote-detail>
-      <button type="button" className="connector-back small-button" onClick={library}><BackIcon size={14} />Back to Motes</button>
+      <Button type="button" className="connector-back" onClick={library}><BackIcon size={14} />Back to Motes</Button>
       <header><h3>Bot for {moteSelection.origin.moteName}</h3><p>This bot represents your Mote in group conversations.</p></header>
       <MoteConnectionPanel key={JSON.stringify([moteSelection.origin.target, moteSelection.origin.topicId])} {...moteSelection.origin} active={active} createOnOpen={moteSelection.create} hostingTarget={hostingTarget} inSettings onContinueSetup={continueMoteSetup}
         onRead={() => {}} onCreateIntentConsumed={() => setMoteSelection(current => current?.origin === moteSelection.origin ? { ...current, create: false } : current)} onManageConnection={(record, original) => { if (JSON.stringify(original) === ownerKey) { edit(record); setView('saved') } else void manageOriginal(record, original) }} />
       {continuation ? <p role="status" className="connector-check-feedback">{management.catalog?.issue || (management.catalog?.value && !canContinueEnrollment ? 'The saved sign-in cannot be handed off here. Open this bot’s management to continue; the original setup is kept.' : 'Reading this bot’s setup options…')}</p> : null}
     </section> : null}
-    {view === 'enrollment' ? <><button type="button" className="connector-back small-button" onClick={library}><BackIcon size={14} />Back to bots</button><div className="connector-generic-context"><strong>Create a bot</strong><p className="settings-group-note">Use it with any Agent or choose it for a Mote.</p></div><BotEnrollmentPane enrollment={enrollment} onExisting={existing} onSaved={record => void manageOriginal(record, enrollment.originalTarget)} onContinue={canContinueEnrollment ? record => {
+    {view === 'enrollment' ? <><Button type="button" className="connector-back" onClick={library}><BackIcon size={14} />Back to bots</Button><div className="connector-generic-context"><strong>Create a bot</strong><p className="settings-group-note">Use it with any Agent or choose it for a Mote.</p></div><BotEnrollmentPane enrollment={enrollment} onExisting={existing} onSaved={record => void manageOriginal(record, enrollment.originalTarget)} onContinue={canContinueEnrollment ? record => {
       const operation = enrollment.operation
       if (!operation?.configured || operation.configured.connection.config.connectionId !== record.config.connectionId) return
       management.handoff({ kind: 'enrollment', operationId: operation.operationId, expectedRevision: operation.revision })
@@ -331,21 +332,21 @@ export function ExternalConnectionsSettings({ active, onClose, navigationRequest
       }} /> : null}
     </section> : null}
     {view === 'motes' ? <section className="connector-mote-directory">
-      <button type="button" className="connector-back small-button" onClick={library}><BackIcon size={14} />Back to bots</button>
+      <Button type="button" className="connector-back" onClick={library}><BackIcon size={14} />Back to bots</Button>
       <MoteIdentityCards readings={identities} records={records} recordsIssue={listIssue} onOpen={openMote} />
     </section> : null}
     {view === 'management' && !current && restoration ? <section className="connector-setup" data-management-restoring>
-      <button type="button" className="connector-back small-button" onClick={library}><BackIcon size={14} />Back to bots</button>
+      <Button type="button" className="connector-back" onClick={library}><BackIcon size={14} />Back to bots</Button>
       <header><h3>Original bot setup</h3><p>Read the saved application and its selected original request.</p></header>
       <dl className="connector-identity"><div><dt>App ID</dt><dd><code>{restoration.scope.appId}</code></dd></div><div><dt>Original request</dt><dd><code>{restoration.operationId}</code></dd></div></dl>
       {restoreReading.pending ? <p role="status" data-management-activity aria-busy="true"><LoadingIcon size={14} animation="spin" /> Reading the original saved application…</p> : <><p role="status" className="connector-check-feedback">{restoreReading.issue}</p>{restoration.hostingTarget && JSON.stringify(restoration.hostingTarget) === ownerKey ? <button className="small-button" onClick={() => setRestoreAttempt(value => value + 1)}>Read original application again</button> : null}</>}
       <ConnectionRequestTrace hostingTarget={restoration.hostingTarget} source={{ kind: 'setup', operationId: restoration.operationId }} />
     </section> : null}
     {view === 'management' && current ? <ConnectionManagementSetup record={current} model={management} platformLabel={platform(current.config.application.domain)} onBack={() => { setView('saved'); setIssue('') }} onLibrary={library} onConsole={() => openConsole(current.config.application.domain)} /> : editing || view === 'saved' && current ? <section className="connector-setup" data-connection-editor>
-      {!pending ? <button type="button" className="connector-back small-button" onClick={() => { moteSelection ? setView('mote') : library(); setIssue('') }}><BackIcon size={14} />{moteSelection ? 'Back to Mote bot' : 'Back to bots'}</button> : null}
+      {!pending ? <Button type="button" className="connector-back" onClick={() => { moteSelection ? setView('mote') : library(); setIssue('') }}><BackIcon size={14} />{moteSelection ? 'Back to Mote bot' : 'Back to bots'}</Button> : null}
       {editing ? <>
         <header className="connector-setup__heading"><span className="connector-setup__mark"><GroupIcon size={22} /></span><div><h3 className="connector-editor-title">{selected ? 'Edit bot connection' : 'Connect an existing bot'}</h3><p>{selected ? 'Update the local name, credential or connection preference.' : manualOnly ? 'Save its credentials, then check the connection and choose an Agent’s channel.' : 'Save its credentials, then check the connection and choose an Agent’s group.'}</p></div></header>
-        {!selected ? <div className="connector-credentials-source"><div>{manual ? <><p>{manual.credentialHint}</p><p className="settings-group-note">{manual.createHint}</p></> : <><p>Find App ID and App Secret in <strong>Credentials & Basic Info</strong>.</p><details className="connector-first-bot"><summary>Don’t have a bot yet?</summary><p>Create a custom app in the developer console and add the Bot capability. Then return here with its credentials.</p></details></>}</div><button type="button" className="small-button" onClick={() => void openConsole()}>Open {platform(domain)} console <LinkIcon size={12} /></button></div> : null}
+        {!selected ? <div className="connector-credentials-source"><div>{manual ? <><p>{manual.credentialHint}</p><p className="settings-group-note">{manual.createHint}</p></> : <><p>Find App ID and App Secret in <strong>Credentials & Basic Info</strong>.</p><details className="connector-first-bot"><summary>Don’t have a bot yet?</summary><p>Create a custom app in the developer console and add the Bot capability. Then return here with its credentials.</p></details></>}</div><Button type="button" onClick={() => void openConsole()}>Open {platform(domain)} console <LinkIcon size={12} /></Button></div> : null}
         <div className="connector-setup__fields">
           {selected ? <dl className="connector-identity" aria-label="Saved application identity"><div><dt>Platform</dt><dd>{platform(domain)}</dd></div><div><dt>App ID</dt><dd><code>{appId}</code></dd></div></dl> : manualOnly ? null : <label className="settings-field connector-platform"><span>Platform</span><select aria-label="Connection platform" value={domain} disabled={!!pending} onChange={event => setDomain(event.target.value)}><option value="open.feishu.cn">Feishu · 飞书</option><option value="open.larksuite.com">Lark</option></select></label>}
           {!selected ? <label className="settings-field"><span>{manual?.appIdLabel ?? 'App ID'}</span><TextInput aria-label="Connection app ID" placeholder={manual?.appIdPlaceholder ?? 'cli_…'} spellCheck={false} autoCapitalize="none" autoComplete="off" value={appId} disabled={!!pending} onChange={event => setAppId(event.target.value)} /></label> : null}

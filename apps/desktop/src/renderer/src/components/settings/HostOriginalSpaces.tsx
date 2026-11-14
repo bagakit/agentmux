@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { presentError } from '@agentmux/client-ui/error-presentation'
+import { Button } from '@agentmux/client-ui/components/Button'
 import type { HostConfig } from '../../../../shared/contracts'
 import type { SpaceMountResources } from '../../../../shared/space-mount'
 import type { FolderSpaceRegistrationInspection } from '@agentmux/core/space-folder'
@@ -82,26 +83,26 @@ export function HostOriginalSpaces({ host, active, onClose }: { host: HostConfig
   }
   return <section className="host-original-spaces" aria-label={`Original Spaces on ${host.label}`}>
     <header><div><strong>Spaces on {host.label}</strong><small>Shared membership · private window and task drafts</small></div>
-      <button type="button" className="small-button" onClick={() => setRefresh(value => value + 1)}>Refresh Spaces</button></header>
+      <Button type="button" onClick={() => setRefresh(value => value + 1)}>Refresh Spaces</Button></header>
     <p className="settings-group-note">Open a project registered by this Host's own Core. It keeps the same original Space and Agents in each window.</p>
     {error ? <p role="status" className="mounted-space-issue">{error}</p> : null}
     {resources ? resources.workspaces.length ? <ul>{resources.workspaces.map(project => <li key={project.workspaceId}>
       <div><strong>{project.name}</strong><code>{project.path}</code><small>Project device: {project.hostId} · Source {resources.runtimeId}</small></div>
-      <button type="button" className="small-button" disabled={busy || retained.some(entry => entry.input.registration.runtimeId === resources.runtimeId && entry.input.registration.workspaceId === project.workspaceId)} onClick={() => void register(project)}>Open original Space</button>
+      <Button type="button" disabled={busy || retained.some(entry => entry.input.registration.runtimeId === resources.runtimeId && entry.input.registration.workspaceId === project.workspaceId)} onClick={() => void register(project)}>Open original Space</Button>
     </li>)}</ul> : <p className="settings-group-note">This Core has no registered project. Add a folder in its original configuration before mounting its Space.</p>
       : !error ? <p role="status" className="settings-group-note">Reading the original project catalogue…</p> : null}
     {retained.map(({ key, input }) => <section key={key} className="host-original-spaces__retained" aria-label="Original Space registration request">
       <strong>{input.confirmed ? 'Original registration confirmed' : input.submitted ? 'Original registration result unknown' : 'Registration not sent'}</strong><code>{input.registration.expectedResource.workspacePath}</code>
       <p>{input.issue ?? 'The frozen original request is retained. Inspect its source before taking another action.'}</p>
-      {!input.submitted ? <button type="button" className="small-button" disabled={busy} onClick={() => void sendOriginal(key, input)}>Send original registration</button> : null}
-      <button type="button" className="small-button" onClick={() => void inspectOriginal(key, input)}>Inspect original registration</button>
+      {!input.submitted ? <Button type="button" disabled={busy} onClick={() => void sendOriginal(key, input)}>Send original registration</Button> : null}
+      <Button type="button" onClick={() => void inspectOriginal(key, input)}>Inspect original registration</Button>
       {Object.hasOwn(inspections, key) ? inspections[key] ? <div role="status"><p>The exact original Space is currently registered. This observation does not confirm the original write response.</p>
-        <button type="button" className="small-button" onClick={() => { try { const found = inspections[key]!; const expected = input.registration.expectedResource
+        <Button type="button" onClick={() => { try { const found = inspections[key]!; const expected = input.registration.expectedResource
           const project = resources?.workspaces.find(candidate => candidate.workspaceId === found.workspaceId && candidate.hostId === expected.hostId && candidate.path === expected.workspacePath)
           useAppStore.getState().openOriginalSpaceLocation({ target: { hostId: input.hostId, reference: found.reference, zoneId: found.zoneId, workspaceId: found.workspaceId },
             resource: { id: found.workspaceId, hostId: expected.hostId, path: expected.workspacePath, name: project?.name ?? found.workspaceId,
               kind: project?.kind === 'worktree' ? 'worktree' : 'folder', ...(expected.projectRootPath !== expected.workspacePath ? { repoPath: expected.projectRootPath } : {}),
-              ...(project?.branch ? { branch: project.branch } : {}) } }); onClose?.() } catch (cause) { setError(presentError(cause)) } }}>Open found original Space</button>
+              ...(project?.branch ? { branch: project.branch } : {}) } }); onClose?.() } catch (cause) { setError(presentError(cause)) } }}>Open found original Space</Button>
       </div> : <p role="status">The frozen resource's registration was not found in the current source observation. The original request remains unknown and has not been sent again.</p> : null}
       <details><summary>Original request</summary><pre>{JSON.stringify({ hostId: input.hostId, registration: input.registration }, null, 2)}</pre></details>
     </section>)}

@@ -1,5 +1,6 @@
 import type { HostRuntimeSource, NetworkInterfaceAddress } from '@agentmux/core'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
+import { Button } from '@agentmux/client-ui/components/Button'
 import type { HostConfig } from '../../../../shared/contracts'
 import { configValuesEqual } from '../../../../shared/config-edit'
 import { currentHostNetwork, type HostNetworkRead } from './use-host-network-observation'
@@ -17,8 +18,8 @@ export function SourceIssue({ source }: { source?: HostRuntimeSource<unknown> | 
 /** Mirrored read actions share the original target, eligibility and request owner. */
 export function NetworkReadButton({ host, committed, active, visible, state, onRead, label = 'Read network details' }: HostNetworkViewProps & { label?: string }) {
   const held = currentHostNetwork(state, host), saved = committed !== undefined && configValuesEqual(host, committed)
-  return <button type="button" className="small-button" disabled={!saved || !active || !visible || held?.busy === true}
-    onClick={() => { if (committed) void onRead(committed) }} aria-label={label}><ReadIcon size={13} />{held?.busy ? 'Reading…' : held?.latest ? 'Refresh' : 'Read link'}</button>
+  return <Button type="button" disabled={!saved || !active || !visible || held?.busy === true}
+    onClick={() => { if (committed) void onRead(committed) }} aria-label={label}><ReadIcon size={13} />{held?.busy ? 'Reading…' : held?.latest ? 'Refresh' : 'Read link'}</Button>
 }
 export function NetworkInterfaces({ title, source, current, addresses, identity, sampledAt }: { title: string; source: HostRuntimeSource<unknown>; current?: HostRuntimeSource<unknown> | undefined; addresses: NetworkInterfaceAddress[]; identity: string; sampledAt: number }) {
   const groups = new Map<string, NetworkInterfaceAddress[]>()

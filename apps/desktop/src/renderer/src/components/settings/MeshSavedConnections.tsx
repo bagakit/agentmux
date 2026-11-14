@@ -1,4 +1,5 @@
 import { Handle, Position, type Node, type NodeProps } from '@xyflow/react'
+import { Button } from '@agentmux/client-ui/components/Button'
 import type { HostConfig } from '../../../../shared/contracts'
 import { currentHostCheck, hostCheckLabel } from '../../lib/host-check'
 import { hostConnectionSummary, hostTransportLabel } from '../../lib/host-transport'
@@ -63,14 +64,14 @@ export function SavedConnectionDetails({ host, onDevice, onLocation, location, o
   const check = currentHostCheck(authoredCheck, host)
   const testedAt = check?.observedAt
   return <aside className="mesh-explorer__detail mesh-saved-connections__details" aria-label="Selected saved connection">
-    <header><span className="mesh-explorer__eyebrow">SAVED CONNECTION</span><button type="button" className="small-button" onClick={onClear}>Clear</button></header>
+    <header><span className="mesh-explorer__eyebrow">SAVED CONNECTION</span><Button type="button" onClick={onClear}>Clear</Button></header>
     <h4>{host.label}</h4>
     <p>{hostConnectionSummary(host)}<br />{connection.summary}</p>
     {check && check.state !== 'idle' ? <p>Connection test · {hostCheckLabel(check)}{testedAt !== undefined ? ` · ${new Date(testedAt).toLocaleString()}` : ''}</p> : null}
     {onLocation ? <p>{location || 'Location unknown'}</p> : null}
     <div className="mesh-explorer__detail-actions">
-      {onLocation ? <button type="button" className="small-button" onClick={() => onLocation(host.id)}>{location ? 'Edit map location' : 'Set map location'}</button> : null}
-      {onDevice ? <button type="button" className="small-button" onClick={() => onDevice(host.id)}>Manage connection</button> : null}
+      {onLocation ? <Button type="button" onClick={() => onLocation(host.id)}>{location ? 'Edit map location' : 'Set map location'}</Button> : null}
+      {onDevice ? <Button type="button" onClick={() => onDevice(host.id)}>Manage connection</Button> : null}
     </div>
   </aside>
 }

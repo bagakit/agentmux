@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { presentError } from '@agentmux/client-ui/error-presentation'
+import { Button } from '@agentmux/client-ui/components/Button'
 import type { ConnectionHostingTarget } from '../../../../shared/contracts'
 import type { SettingsNavigationRequest } from '../SettingsNavigation'
 import { selectManualConnectionOwner, useAppStore } from '../../store'
@@ -66,7 +67,7 @@ export function ConnectionHostingSettings(props: { active: boolean; platform: { 
       }}>{item.target ? 'Resume original save' : 'Review original save'} · {item.target ? hosts?.find(host => host.id === item.target!.hostId)?.label ?? item.target.hostId : 'Host not recorded'}</button>)}
       {target ? <details className="connector-diagnostics"><summary>Hosting details</summary><p className="settings-group-note">This Host runs your bots in the background and stores their credentials and profiles. Your Agents can run elsewhere.</p><p><code>{target.hostId}</code> · <code>{target.runtimeId}</code></p></details> : null}
       {reading ? <p role="status" aria-busy="true">Reading the original Host identity…</p> : issue ? <p role="status" className="connector-issue">{issue}</p> : null}
-      {target === undefined && !reading ? <button type="button" className="small-button" onClick={() => setRequest('local')}>Read background Host</button> : null}
+      {target === undefined && !reading ? <Button type="button" onClick={() => setRequest('local')}>Read background Host</Button> : null}
     </section>
     {target !== undefined ? <div className="channel-environment__policy">
       <ConnectorServiceControl active={props.active} hostingTarget={target} platform={props.platform} />

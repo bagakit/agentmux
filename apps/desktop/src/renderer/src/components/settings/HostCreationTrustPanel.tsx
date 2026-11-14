@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
+import { Button } from '@agentmux/client-ui/components/Button'
 import type { HostCreationTrustSnapshot, SshHostConfig } from '../../../../shared/contracts'
 import { configValuesEqual } from '../../../../shared/config-edit'
 import { api } from '../../lib/api'
@@ -82,8 +83,8 @@ export function HostCreationTrustPanel({ host, committed, active }: {
     {unconfirmedApproval ? <p className="field-error" role="alert">Approval result unconfirmed. Review the saved trust before trying again. {unconfirmedApproval.message}</p> : null}
     {error ? <p className="field-error" role="alert">{error.message}</p> : null}
     <div className="host-creation-trust__actions">
-      <button type="button" className="small-button" disabled={!saved || busy} onClick={() => void refresh()}>{busy ? <ThemeStatusLoadingIcon animation="spin" size={13} /> : null} Review source trust</button>
-      {snapshot && !pin && !error && !unconfirmedApproval ? <button type="button" className="primary-button" disabled={!verified || busy} onClick={() => void refresh(true)}>Trust this computer</button> : null}
+      <Button type="button" disabled={!saved || busy} onClick={() => void refresh()}>{busy ? <ThemeStatusLoadingIcon animation="spin" size={13} /> : null} Review source trust</Button>
+      {snapshot && !pin && !error && !unconfirmedApproval ? <Button type="button" variant="primary" disabled={!verified || busy} onClick={() => void refresh(true)}>Trust this computer</Button> : null}
     </div>
   </section>
 }

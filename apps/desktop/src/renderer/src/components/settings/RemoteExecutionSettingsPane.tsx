@@ -1,3 +1,4 @@
+import { Button } from '@agentmux/client-ui/components/Button'
 import { useLauncherState } from '../../lib/launcher-state'
 import { warmLauncherId } from '../../lib/warm-terminal-preview'
 import { useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
@@ -127,8 +128,8 @@ export function RemoteExecutionSettingsPane({ config, active, onClose, onNavigat
     {actionError ? <p className="remote-execution-feedback" role="status">{actionError}</p> : null}
     <section hidden={task !== 'existing'} id={`${taskId}-existing`} role="tabpanel" aria-labelledby={`${taskId}-existing-tab`} className="remote-execution-bindings" data-settings-field="bindings">
       <p className="remote-work-scope">Continue work in its original workspace. Connecting to or browsing a Host does not require a project.</p>
-      {narrow && view === 'detail' ? <button type="button" className="small-button remote-execution-back" onClick={() => { setView('library'); setReturnFocus({ id: selectedId }) }}><BackIcon size={14} />Back to work</button> : null}
-      {!work.length && !selectedId ? <div className="remote-execution-empty"><AgentIcon size={24} aria-hidden="true" /><h3>No remote work yet</h3><p>Connect a Host to find its existing work, or choose where a new Agent and its files will run.</p><button type="button" className="small-button" onClick={() => changeTask('start')}>Set up new work</button></div> : <div className="remote-execution-bindings__body">
+      {narrow && view === 'detail' ? <Button type="button" className="remote-execution-back" onClick={() => { setView('library'); setReturnFocus({ id: selectedId }) }}><BackIcon size={14} />Back to work</Button> : null}
+      {!work.length && !selectedId ? <div className="remote-execution-empty"><AgentIcon size={24} aria-hidden="true" /><h3>No remote work yet</h3><p>Connect a Host to find its existing work, or choose where a new Agent and its files will run.</p><Button type="button" onClick={() => changeTask('start')}>Set up new work</Button></div> : <div className="remote-execution-bindings__body">
         <div hidden={narrow && view === 'detail'} className="remote-execution-library">
           <SettingsResourceLibrary label="Remote work" query={query} onQuery={setQuery} selectedId={selectedId} focusRequest={returnFocus}
             onSelect={id => { setSelectedId(id); setView('detail'); setActionError(null) }} items={rows.map(item => ({ id: item.session.id, name: item.name,
@@ -137,7 +138,7 @@ export function RemoteExecutionSettingsPane({ config, active, onClose, onNavigat
               mark: <ResolvedAgentAvatar label={item.name} providerId={item.session.providerId} executorId={item.session.executorId} state={item.session.status.state} size={26} /> }))} />
         </div>
         {selected ? <div hidden={!detailVisible} className="remote-execution-detail" data-remote-session={selected.session.id} data-remote-binding={selected.session.toolExecution?.bindingId}>
-          <header><div><h3 ref={detailHeading} tabIndex={-1}>{selected.name}</h3><AgentWorkModeBadge source={selected.session} hosts={config.hosts} /><span>{sessionStatusLabel(selected.session)}</span></div><button type="button" className="small-button" data-remote-open onClick={() => openOriginal(selected.session)}>Open original work</button></header>
+          <header><div><h3 ref={detailHeading} tabIndex={-1}>{selected.name}</h3><AgentWorkModeBadge source={selected.session} hosts={config.hosts} /><span>{sessionStatusLabel(selected.session)}</span></div><Button type="button" data-remote-open onClick={() => openOriginal(selected.session)}>Open original work</Button></header>
           <dl className="remote-execution-endpoints">
             <div><dt><AgentIcon size={16} />Agent runs on</dt><dd><button type="button" onClick={() => openHost(selected.placement.agentHostId)}>{hostName(selected.placement.agentHostId)}</button><span>{selected.placement.agentPath}</span></dd></div>
             <div><dt><ToolsIcon size={16} />Project &amp; tools</dt><dd><button type="button" disabled={!selected.placement.projectHostId} onClick={() => openHost(selected.placement.projectHostId)}>{hostName(selected.placement.projectHostId)}</button><span>{selected.placement.projectPath}</span></dd></div>

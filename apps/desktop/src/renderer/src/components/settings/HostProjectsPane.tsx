@@ -2,6 +2,7 @@ import { TextInput } from '@agentmux/client-ui/input'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { memo, useEffect, useRef, useState } from 'react'
 import { presentError } from '@agentmux/client-ui/error-presentation'
+import { Button } from '@agentmux/client-ui/components/Button'
 import type { AppConfig } from '../../../../shared/contracts'
 import { usePathDisplay } from '../../hooks/usePathDisplay'
 import { api } from '../../lib/api'
@@ -140,9 +141,9 @@ export const HostProjectsPane = memo(function HostProjectsPane({ config, hostId,
     {host ? <HostOriginalSpaces key={host.id} host={host} active={active && !hidden} onClose={onClose} /> : null}
     <header className="host-projects__heading">
       <div><strong>Projects</strong><small>{projects.length} {projects.length === 1 ? 'project' : 'projects'} on this environment</small></div>
-      <button type="button" className="small-button" disabled={!host} onClick={() => setAdding(current => !current)}>
+      <Button type="button" disabled={!host} onClick={() => setAdding(current => !current)}>
         <ThemeActionCreateFolderIcon size={13} />{adding ? 'Close folder form' : 'Add folder'}
-      </button>
+      </Button>
     </header>
     {!host ? <p role="status" className="settings-group-note">Save this connection before registering a folder on it.</p>
       : <p className="settings-group-note">Folders belong to the saved {host.label} connection{host.kind === 'ssh' ? ` (${host.hostname})` : ''}.
@@ -158,21 +159,21 @@ export const HostProjectsPane = memo(function HostProjectsPane({ config, hostId,
           ? `Agent discovery did not complete. ${inventory.detail ?? 'The connection result is unknown.'} Saved choices remain available.`
           : inventoryMatches && inventory.state === 'checking' ? 'Checking Agents on this connection…'
             : executors.length ? 'Agent choices belong to this saved connection.' : 'No launchable Agents are confirmed. Configure Agents for this connection, or open without an Agent.'}</p>
-        <button type="button" className="small-button" data-refresh-executors disabled={inventoryMatches && inventory.state === 'checking'}
-          onClick={() => void discover(host.id)}>Refresh Agents</button>
+        <Button type="button" data-refresh-executors disabled={inventoryMatches && inventory.state === 'checking'}
+          onClick={() => void discover(host.id)}>Refresh Agents</Button>
       </div> : null}
       <footer className="host-projects__actions">
-        <button type="button" className="small-button" data-register-folder disabled={!host || !path.trim() || busy} onClick={() => void register(false)}>Register folder</button>
-        <button type="submit" className="primary-button" data-open-folder disabled={!host || !path.trim() || busy}>
+        <Button type="button" data-register-folder disabled={!host || !path.trim() || busy} onClick={() => void register(false)}>Register folder</Button>
+        <Button type="submit" variant="primary" data-open-folder disabled={!host || !path.trim() || busy}>
           {busy ? <ThemeStatusLoadingIcon size={13} animation="spin" /> : <ThemeObjectFolderOpenIcon size={13} />}{executorId ? 'Open Agent Launcher' : 'Open folder'}
-        </button>
+        </Button>
       </footer>
     </form>
     {error ? <p role="alert" className="dialog-error">{error}</p> : null}
     {progress ? <div className="host-projects__progress" role={progress.error ? 'alert' : 'status'} data-folder-stage={progress.stage}>
       <strong>{progress.message}</strong>{progress.error ? <p>{progress.error}</p> : null}
-      {progress.error && progress.workspace ? <button type="button" className="small-button" disabled={busy}
-        onClick={() => void openRegistered(progress.workspace!)}>Open registered folder</button> : null}
+      {progress.error && progress.workspace ? <Button type="button" disabled={busy}
+        onClick={() => void openRegistered(progress.workspace!)}>Open registered folder</Button> : null}
     </div> : null}
     {projects.length > 0 ? <>
       <label className="settings-resource-search"><ThemeActionSearchIcon size={14} aria-hidden="true" /><TextInput type="search" aria-label={`Find a project on ${host?.label ?? hostId}`}
@@ -184,7 +185,7 @@ export const HostProjectsPane = memo(function HostProjectsPane({ config, hostId,
           {workspace.kind === 'worktree' ? <ThemeObjectBranchIcon size={14} aria-hidden="true" /> : <ThemeObjectFolderOpenIcon size={14} aria-hidden="true" />}
           <div><strong>{workspace.name}</strong><small>{workspace.kind === 'worktree' ? `Worktree · ${workspace.branch ?? 'branch unconfirmed'}` : 'Folder'}</small>
             <code title={workspace.path}>{displayPath(workspace.path, workspace.hostId)}</code></div>
-          <button type="button" className="small-button" disabled={busy} aria-label={`Open ${workspace.name}`} onClick={() => void openRegistered(workspace)}>Open</button>
+          <Button type="button" disabled={busy} aria-label={`Open ${workspace.name}`} onClick={() => void openRegistered(workspace)}>Open</Button>
         </li>)}</ul>
       </section>)}</div>
       {matches.length === 0 ? <p role="status" className="settings-resource-empty">No projects match “{query}”.</p> : null}

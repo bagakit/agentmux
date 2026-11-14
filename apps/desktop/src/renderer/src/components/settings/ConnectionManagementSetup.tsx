@@ -1,3 +1,4 @@
+import { Button } from '@agentmux/client-ui/components/Button'
 import { ConnectorAccountSummary } from '../ConnectorEntityIdentity'
 import { useState } from 'react'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
@@ -27,7 +28,7 @@ export function ConnectionManagementSetup({ record, model, platformLabel, onBack
   const { reading, view, observedView, busy, choices } = model
   const [managementOpen, setManagementOpen] = useState(false)
   if (model.originalOwnerIssue) return <section className="connector-setup connector-management" data-management-setup={record.config.connectionId} data-management-owner-unconfirmed>
-    <button type="button" className="connector-back small-button" data-management-back onClick={onBack}><BackIcon size={14} />Back to bot</button>
+    <Button type="button" className="connector-back" data-management-back onClick={onBack}><BackIcon size={14} />Back to bot</Button>
     <h3 className="connector-editor-title">Original setup kept</h3><p role="status" className="settings-group-note">{model.originalOwnerIssue}</p>{model.selectedId ? <code>{model.selectedId}</code> : null}
     {model.canStartAnother ? <button className="small-button" data-management-another onClick={model.another}>Open a separate sign-in</button> : null}
   </section>
@@ -47,7 +48,7 @@ export function ConnectionManagementSetup({ record, model, platformLabel, onBack
   const hasConfigurationActivity = !!view?.applicationInspection?.selected || !!view?.applicationConfiguration?.selected || !!view?.applicationInspection?.observations.length || !!view?.applicationConfiguration?.effects.length || !!view?.applicationConfiguration?.unresolved
   const setupGuide = <BotSetupGuide stage={guideStage} confirmedSteps={[1, ...((view ?? observedView)?.continuation?.stage === 'confirmed' ? [2] : [])]} existingApplication currentStep={stage === 'checking' && !view ? null : configuration || hasConfigurationActivity || observedView?.continuation?.stage === 'confirmed' ? 4 : 2} />
   return <section className="connector-setup connector-management" data-management-setup={record.config.connectionId} data-management-stage={stage}>
-    <button type="button" className="connector-back small-button" data-management-back onClick={onBack}><BackIcon size={14} />Back to bot</button>
+    <Button type="button" className="connector-back" data-management-back onClick={onBack}><BackIcon size={14} />Back to bot</Button>
     {!configuration ? setupGuide : null}
     <header className="connector-enrollment__heading bot-task-heading">
       <p className="connector-management__context">{record.config.label} · {platformLabel}</p>

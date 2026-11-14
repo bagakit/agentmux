@@ -1,5 +1,6 @@
 import { mintObjectId } from '@agentmux/core/object-id'
 import { parseHostConfigurations } from '@agentmux/host/host-configuration'
+import { Button } from '@agentmux/client-ui/components/Button'
 import { HostTailcatClientFields } from './HostTailcatClientFields'
 import { LocalIncomingConnections } from './LocalIncomingConnections'
 import { hostConnectionSummary } from '../../lib/host-transport'
@@ -273,9 +274,9 @@ export function HostSettingsPane({ config, onSave, active, onClose, navigationRe
   return (
     <div ref={container} className="settings-pane-stack settings-resource-workbench remote-management" data-resource-view={view} data-remote-mode={showTopology ? 'topology' : 'list'} data-remote-wide={wide}
       data-settings-host={active && view === 'editor' && !pendingHostNavigation && hosts.some(host => host.id === selectedId) ? selectedId ?? undefined : undefined}>
-      <div className="remote-foundation"><div><strong>Your connected machines</strong><p>Select a Host to see its service, resources and access. Use Remote to choose where work runs.</p></div>{onRemoteWork ? <button type="button" className="small-button" onClick={onRemoteWork}>Remote work</button> : null}</div>
+      <div className="remote-foundation"><div><strong>Your connected machines</strong><p>Select a Host to see its service, resources and access. Use Remote to choose where work runs.</p></div>{onRemoteWork ? <Button type="button" onClick={onRemoteWork}>Remote work</Button> : null}</div>
       <div className="settings-pane-toolbar remote-management__toolbar">
-        {view === 'editor' && <button type="button" className="settings-resource-back small-button" onClick={backToLibrary}><ThemeNavigationBackIcon size={14} /> All hosts</button>}
+        {view === 'editor' && <Button type="button" className="settings-resource-back" onClick={backToLibrary}><ThemeNavigationBackIcon size={14} /> All hosts</Button>}
         <div className="remote-management__scope"><strong>{hosts.length}</strong><span>{hosts.length === 1 ? 'host' : 'hosts'}</span><small>{hosts.filter(host => host.kind === 'ssh').length} remote</small></div>
         {showTopology ? <label className="settings-resource-search remote-management__search"><ThemeActionSearchIcon size={14} aria-hidden="true" /><TextInput type="search" aria-label="Filter hosts" placeholder="Find a host or project…" value={filter.query} onChange={event => filterHosts(event.target.value)} /></label> : null}
         {wide ? <div className="remote-management__modes" aria-label="Host view">
@@ -328,11 +329,11 @@ export function HostSettingsPane({ config, onSave, active, onClose, navigationRe
                   {title}</button>)}
               </nav>
               {panel === 'overview' ? <div className="remote-overview">
-                <div className="remote-overview__actions"><button type="button" className="small-button" onClick={() => selectHostPanel(host.id, 'connection')}>Connection settings</button><button type="button" className="small-button" onClick={() => selectHostPanel(host.id, 'projects')}>View projects</button></div>
+                <div className="remote-overview__actions"><Button type="button" onClick={() => selectHostPanel(host.id, 'connection')}>Connection settings</Button><Button type="button" onClick={() => selectHostPanel(host.id, 'projects')}>View projects</Button></div>
                 <p className="remote-overview__counts">{projectFacts.get(host.id)?.count ?? 0} registered projects <span aria-hidden="true">·</span> {sessionCount} Session references</p>
                 <div className="remote-overview__identity"><span>Last connection test</span><strong>{hostCheckLabel(check ?? { state: 'idle' })}</strong>
                   {check?.observedAt ? <time dateTime={new Date(check.observedAt).toISOString()}>{new Date(check.observedAt).toLocaleString()}</time> : null}
-                  {check?.state === 'error' ? <button type="button" className="small-button remote-overview__connection-action" onClick={() => selectHostPanel(host.id, 'connection')}>Review connection</button> : null}
+                  {check?.state === 'error' ? <Button type="button" className="remote-overview__connection-action" onClick={() => selectHostPanel(host.id, 'connection')}>Review connection</Button> : null}
                   {check?.detail && check.state === 'error' ? <details className="remote-overview__check-details"><summary>Connection test details</summary><p>{check.detail}</p></details> : null}</div>
                 <details className="remote-host-section" open={sectionsOpen[sectionKey(host.id, 'service')] ?? true} onToggle={event => toggleSection(host.id, 'service', event.currentTarget.open)}>
                   <summary>Service<span>Live metrics and runtime</span></summary>
@@ -366,7 +367,7 @@ export function HostSettingsPane({ config, onSave, active, onClose, navigationRe
                   onChange={(patch) => update(host.id, patch)}
                   onClear={(field) => clear(host.id, field)}
                 />
-              ) : <div className="settings-local-host"><strong>This device’s node</strong><p>Publishing and shared folders are managed in Node.</p><button type="button" className="small-button" onClick={() => settingsNavigation?.open('network-node', undefined, 'publishing', host.id)}>Open Node publishing</button></div> : null}
+              ) : <div className="settings-local-host"><strong>This device’s node</strong><p>Publishing and shared folders are managed in Node.</p><Button type="button" onClick={() => settingsNavigation?.open('network-node', undefined, 'publishing', host.id)}>Open Node publishing</Button></div> : null}
               {panel === 'connection' && sessionCount > 0 ? <p className="field-hint">{sessionCount} Session reference{sessionCount === 1 ? '' : 's'}. Removal is protected while this connection is referenced.</p> : null}
             </section>
           )

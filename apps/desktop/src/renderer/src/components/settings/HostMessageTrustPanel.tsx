@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
+import { Button } from '@agentmux/client-ui/components/Button'
 import type { HostMessageTrustDirection, HostMessageTrustSnapshot, SshHostConfig } from '../../../../shared/contracts'
 import { configValuesEqual } from '../../../../shared/config-edit'
 import { api } from '../../lib/api'
@@ -66,13 +67,13 @@ export function HostMessageTrustPanel({ host, committed, active }: {
           <p role="status" className={conflict ? 'host-creation-trust__conflict' : 'field-hint'}>{conflict ? 'A different source key is saved. The original trust is retained.' : pin ? <><CompletedIcon size={13} /> Messages from this source are trusted.</> : 'Message source approval required.'}</p>
           {!pin && !state.unconfirmed ? <>
             <label className="host-creation-trust__verify"><input type="checkbox" checked={verified[direction] === true} disabled={busy} onChange={event => setVerified(previous => ({ ...previous, [direction]: event.target.checked }))} />I verified both fingerprints for this direction.</label>
-            <div className="host-creation-trust__actions"><button type="button" className="small-button" disabled={!verified[direction] || busy || Boolean(state.error)} onClick={() => void refresh(direction)}>Allow messages to {to}</button></div>
+            <div className="host-creation-trust__actions"><Button type="button" disabled={!verified[direction] || busy || Boolean(state.error)} onClick={() => void refresh(direction)}>Allow messages to {to}</Button></div>
           </> : null}
         </div>
       })}
     </> : null}
     {applicable && state.unconfirmed ? <p className="field-error" role="alert">Approval result unconfirmed. Read saved trust before trying again. {state.unconfirmed}</p> : null}
     {applicable && state.error ? <p className="field-error" role="alert">{state.error}</p> : null}
-    <div className="host-creation-trust__actions"><button type="button" className="small-button" disabled={!saved || busy} onClick={() => void refresh()}>{busy ? <LoadingIcon animation="spin" size={13} /> : null} Review message trust</button></div>
+    <div className="host-creation-trust__actions"><Button type="button" disabled={!saved || busy} onClick={() => void refresh()}>{busy ? <LoadingIcon animation="spin" size={13} /> : null} Review message trust</Button></div>
   </section>
 }

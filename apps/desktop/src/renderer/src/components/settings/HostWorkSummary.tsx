@@ -1,5 +1,6 @@
 import { useContext, useEffect } from 'react'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
+import { Button } from '@agentmux/client-ui/components/Button'
 import type { AppConfig, HostConfig, SessionSnapshot } from '../../../../shared/contracts'
 import { configValuesEqual } from '../../../../shared/config-edit'
 import { useAppStore } from '../../store'
@@ -54,8 +55,8 @@ export function HostExecutorsSummary({ config, host, active }: { config: AppConf
     if (active && saved && !current) void refresh(host.id)
   }, [active, saved, current, host.id, refresh])
   return <section className="remote-work" aria-label="Executors on this environment">
-    <header><strong>Agent configurations</strong><button type="button" className="small-button" disabled={!saved || checking}
-      onClick={() => void refresh(host.id)}><RefreshIcon size={13} />Refresh</button></header>
+    <header><strong>Agent configurations</strong><Button type="button" disabled={!saved || checking}
+      onClick={() => void refresh(host.id)}><RefreshIcon size={13} />Refresh</Button></header>
     <p className="settings-group-note">{host.kind === 'local' ? 'Saved local launch configurations. Availability is checked separately.' : 'Configurations registered on this saved environment. Discovery does not install software.'}</p>
     {!saved ? <p role="status">Save this connection before reading its Agent configurations.</p> : null}
     {current && inventory.state === 'error' ? <p role="status" className="remote-work__notice">{inventory.detail ?? 'The current inventory could not be confirmed.'} Existing Sessions remain available.</p> : null}
@@ -64,6 +65,6 @@ export function HostExecutorsSummary({ config, host, active }: { config: AppConf
       <span><strong>{choice.label}</strong><small>{agentProviderLabel(choice.providerId)}</small><code>{choice.command}</code></span>
       <span className="remote-work__state">{executorDetectionLabel(choice.detection)}</span>
     </div>)}</div> : saved ? <p className="remote-work__empty" role="status">{checking ? 'Reading configurations…' : 'No configurations have been confirmed for this environment.'}</p> : null}
-    {navigation ? <button type="button" className="small-button" onClick={() => navigation.open('agents')}>Manage Agent configurations</button> : null}
+    {navigation ? <Button type="button" onClick={() => navigation.open('agents')}>Manage Agent configurations</Button> : null}
   </section>
 }

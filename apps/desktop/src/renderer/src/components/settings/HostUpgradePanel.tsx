@@ -2,6 +2,7 @@ import { mintObjectId } from '@agentmux/core/object-id'
 import { useEffect, useRef, useState } from 'react'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { RemoteCoreUpgradeCheck, RemoteCoreUpgradeReceipt } from '@agentmux/core'
+import { Button } from '@agentmux/client-ui/components/Button'
 import type { SshHostConfig } from '../../../../shared/contracts'
 import { configValuesEqual } from '../../../../shared/config-edit'
 import { api } from '../../lib/api'
@@ -63,7 +64,7 @@ function NativeReplacementReview({ review, busy, onConfirm, onCancel }: { review
     </dl> : <p data-upgrade-ending>No processes are running on {label}, so nothing ends. Sessions, their history and the Runtime identity are kept.</p>}
     <p>A copy of the Native state is saved on {label} before the restart.</p>
     <div className="host-upgrade__actions">
-      <button ref={cancel} type="button" className="small-button" data-upgrade-cancel disabled={busy} onClick={onCancel}>Cancel</button>
+      <Button ref={cancel} type="button" data-upgrade-cancel disabled={busy} onClick={onCancel}>Cancel</Button>
       <button type="button" className={ending ? 'danger-button' : 'primary-button'} data-upgrade-confirm disabled={busy} onClick={onConfirm}>
         {ending ? `Upgrade and end ${plural(ending, 'process', 'processes')}` : 'Upgrade Core and Native Runtime'}</button>
     </div>
@@ -251,9 +252,9 @@ export function HostUpgradePanel({ maintenance, onCheck, installationDetail, che
       <button type="button" data-upgrade-action className={state?.busy === 'upgrading' || ready && !unresolved ? 'primary-button' : 'small-button'} disabled={busy || !saved} onClick={() => void (unresolved ? readOriginal() : ready ? beginReview() : adoptionNeeded ? readOriginal(true) : onCheck())}>
         {busy ? checkingInstallation || state?.busy === 'checking' ? 'Checking…' : state?.busy === 'inspecting' ? 'Checking original result…' : state?.busy === 'reconnecting' ? 'Reconnecting…' : 'Upgrading…' : unresolved ? 'Check original result' : ready ? replacement ? 'Review update' : 'Update Core' : adoptionNeeded ? operation && otherOperationHost ? `Reconnect ${operation.input.label}` : 'Reconnect to updated Core' : 'Check Core'}
       </button>
-      {check && !unresolved && !adoptionNeeded && ready ? <button type="button" className="small-button" data-upgrade-refresh disabled={busy || !saved} onClick={() => void onCheck()}>Check again</button> : null}
-      {ready && !unresolved && adoptionNeeded ? <button type="button" className="small-button" data-upgrade-reconnect disabled={busy || !saved} onClick={() => void readOriginal(true)}>Reconnect original update{operation && otherOperationHost ? ` · ${operation.input.label}` : ''}</button> : null}
-      {!ready && !unresolved && adoptionNeeded ? <button type="button" className="small-button" data-upgrade-refresh disabled={busy || !saved} onClick={() => void onCheck()}>Check Core</button> : null}
+      {check && !unresolved && !adoptionNeeded && ready ? <Button type="button" data-upgrade-refresh disabled={busy || !saved} onClick={() => void onCheck()}>Check again</Button> : null}
+      {ready && !unresolved && adoptionNeeded ? <Button type="button" data-upgrade-reconnect disabled={busy || !saved} onClick={() => void readOriginal(true)}>Reconnect original update{operation && otherOperationHost ? ` · ${operation.input.label}` : ''}</Button> : null}
+      {!ready && !unresolved && adoptionNeeded ? <Button type="button" data-upgrade-refresh disabled={busy || !saved} onClick={() => void onCheck()}>Check Core</Button> : null}
     </div>}
     {unreadable ? <p className="field-hint host-upgrade__next-step" data-upgrade-unreadable-records>Could not read update record {unreadable}. Its Host and result are unknown, and it will not run again. To report it, copy diagnostics from Technical details.</p> : null}
     {runtimeBlocked ? <p className="field-hint host-upgrade__next-step">Share the diagnostics with this host’s maintainer to arrange a supported Native Runtime update.</p> : null}
@@ -268,7 +269,7 @@ export function HostUpgradePanel({ maintenance, onCheck, installationDetail, che
         {receipt?.nativeReplacement?.stateCopy ? <div><dt>Native state copy</dt><dd><code>{receipt.nativeReplacement.stateCopy}</code></dd></div> : null}
         {operation ? <><div><dt>Original operation</dt><dd><code>{operation.id}</code></dd></div><div><dt>Original upgrade candidate version</dt><dd>{version(operation.candidate?.version)}</dd></div><div><dt>Original upgrade candidate digest</dt><dd><code>{operation.receipt?.expected.candidateDigest ?? operation.candidate?.digest ?? 'Unknown'}</code></dd></div></> : null}
         {unreadable ? <div><dt>Unreadable update records</dt><dd><code>{unreadable}</code></dd></div> : null}
-      </dl><button type="button" className="small-button" data-copy-upgrade-diagnostics disabled={copy?.status === 'copying'} onClick={() => void copyDiagnostics()}><CopyIcon size={13} />{copy?.status === 'copying' ? 'Copying…' : copy?.status === 'copied' ? 'Copied' : 'Copy diagnostics'}</button>
+      </dl><Button type="button" data-copy-upgrade-diagnostics disabled={copy?.status === 'copying'} onClick={() => void copyDiagnostics()}><CopyIcon size={13} />{copy?.status === 'copying' ? 'Copying…' : copy?.status === 'copied' ? 'Copied' : 'Copy diagnostics'}</Button>
     </div></details> : null}
     {copy?.status === 'copied' ? <p className="host-upgrade__copy-feedback" role="status">Diagnostics copied.</p> : copy?.status === 'failed' ? <p className="host-upgrade__copy-feedback host-upgrade__copy-feedback--error" role="alert">Could not copy diagnostics. Try again.{copy.error ? ` ${copy.error}` : ''}</p> : null}
   </section>

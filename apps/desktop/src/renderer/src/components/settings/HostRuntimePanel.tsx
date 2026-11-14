@@ -1,3 +1,4 @@
+import { Button } from '@agentmux/client-ui/components/Button'
 import type { NodeOwnerTarget } from '../../../../shared/node-publishing'
 import type { NodeResources } from '@agentmux/core/node-publishing'
 import { appendNodeSample, type NodeSampleFrame } from './node-resource-view'
@@ -155,7 +156,7 @@ export function HostRuntimePanel({ host, committed, active, ownerTarget }: { hos
     <header className="host-runtime__header"><div><strong>Service status <span className="host-runtime__target">{host.label}</span></strong><span>{!saved ? 'Save this connection to read its service status.' :
       !current ? busy ? 'Reading this environment…' : 'No confirmed observation yet' :
       `${partial || failed ? 'Some observations unavailable' : 'Observed'} · ${time(current.completedAt)}`}</span></div>
-      <button type="button" className="small-button" disabled={!saved || !active || busy || !visible} onClick={() => setRevision(previous => previous + 1)} aria-label="Refresh Runtime observation"><RefreshIcon size={13} />{busy ? 'Reading…' : 'Refresh'}</button>
+      <Button type="button" disabled={!saved || !active || busy || !visible} onClick={() => setRevision(previous => previous + 1)} aria-label="Refresh Runtime observation"><RefreshIcon size={13} />{busy ? 'Reading…' : 'Refresh'}</Button>
     </header>
     {failed ? <p className="host-runtime__issue" role="status" data-diagnostics><InfoIcon size={13} /><span>{failed} {retained ? 'Last confirmed values are kept below.' : 'Refresh to read this original connection again.'}</span></p> : null}
     {saved ? <>

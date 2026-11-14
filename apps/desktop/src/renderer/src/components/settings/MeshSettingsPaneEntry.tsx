@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useState, type ComponentProps } from 'react'
+import { Button } from '@agentmux/client-ui/components/Button'
 import type { MeshSettingsPane as LoadedMeshSettingsPane } from './MeshSettingsPane'
 import { FullPageLoadingSurface } from '../FullPageLoadingSurface'
 import { desktopPresentationCommitted } from '../../lib/desktop-presentation'
@@ -26,7 +27,7 @@ export function MeshSettingsPane({ onBack, ...props }: ComponentProps<typeof Loa
     <FullPageLoadingSurface scope="region" phase={failed ? 'failed' : 'loading'} eyebrow="Mesh settings"
       title={failed ? 'Could not open Mesh settings' : 'Opening Mesh settings'}
       detail={failed ? 'The editor could not be loaded. Other settings remain available.' : 'Preparing device and network settings.'}
-      actions={<button type="button" className="small-button" onClick={onBack}>Back to Overview</button>}
+      actions={<Button type="button" onClick={onBack}>Back to Overview</Button>}
       {...(failed ? { details: { summary: 'Load details', content: entry.error instanceof Error ? entry.error.message : String(entry.error) } } : {})} />
   </section>
 }
