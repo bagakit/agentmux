@@ -10,7 +10,7 @@ import { HostTailcatListenerFields } from './HostTailcatListenerFields'
 import { HostRuntimePanel } from './HostRuntimePanel'
 import { nodePublicationTarget, useNodePublicationReporter } from './NodePublicationObservation'
 import { NodeShareAddress } from './NodeShareAddress'
-import { useResourceDrafts } from './use-resource-drafts'
+import { useTailcatConnectionDrafts } from './use-tailcat-connection-drafts'
 import { useSettingsSave, SettingsSaveBar } from './SettingsSaveBar'
 import { saveConfigSlice } from './save-config-slice'
 import type { HostConfig } from '../../../../shared/contracts'
@@ -232,11 +232,12 @@ function NodePublicationEditor({ host, target, active }: { host: HostConfig; tar
 
 function LocalIncomingConnections({ config, active, visible }: Pick<SettingsPaneProps, 'config' | 'active'> & { visible: boolean }) {
   const local = config.hosts.find(host => host.kind === 'local')
-  const listener = useResourceDrafts(Object.fromEntries(local ? [[local.id, local]] : [])), listenerSave = useSettingsSave()
+  const listener = useTailcatConnectionDrafts(Object.fromEntries(local ? [[local.id, local]] : []), 'incoming'), listenerSave = useSettingsSave()
   const localDraft = local ? listener.value[local.id] : undefined
   async function saveListener() {
     if (!local || localDraft?.kind !== 'local') return
-    const submitted = listener.beginSave(), next = localDraft.tailcat, expected = listener.expected[local.id]?.tailcat
+    const submitted = listener.beginSave(), next = localDraft.tailcat, expectedHost = listener.expected[local.id]
+    const expected = expectedHost?.kind === 'local' ? expectedHost.tailcat : undefined
     const ok = await listenerSave.run(async () => {
       await saveConfigSlice((current, tailcat: typeof next) => ({ ...current, hosts: current.hosts.map(host => { if (host.id !== local.id || host.kind !== 'local') return host; if (tailcat) return { ...host, tailcat }; const { tailcat: _previous, ...rest } = host; return rest }) }), next, expected)
     })
@@ -244,6 +245,6 @@ function LocalIncomingConnections({ config, active, visible }: Pick<SettingsPane
   }
   if (!visible) return null
   return <>
-    {local && localDraft?.kind === 'local' ? <section className="network-node-section" data-settings-field="incoming"><header><div><h3>Incoming connections</h3><p>Let an approved client reach this running service. Connection keys do not grant Agent creation or message trust.</p></div></header><HostTailcatListenerFields host={localDraft} committed={local} active={active} saveLabel="Save incoming connections" onChange={tailcat => listener.setValue(current => ({ ...current, [local.id]: { ...localDraft, tailcat } }))} /><SettingsSaveBar save={listenerSave} dirty={listener.dirty} resolution={listener} scopeLabel="Incoming connections" label="Save incoming connections" onSave={() => void saveListener()} /></section> : null}
+    {local && localDraft?.kind === 'local' ? <section className="network-node-section" data-settings-field="incoming"><header><div><h3>Incoming connections</h3><p>Let an approved client reach this running service. Connection keys do not grant Agent creation or message trust.</p></div></header>{listener.retained}<HostTailcatListenerFields allowedClientsText={listener.allowedText[local.id]} onAllowedClientsTextChange={text => listener.setAllowedText(local.id, text)} host={localDraft} committed={local} active={active} saveLabel="Save incoming connections" onChange={tailcat => listener.setValue(current => ({ ...current, [local.id]: { ...localDraft, tailcat } }))} /><SettingsSaveBar save={listenerSave} dirty={listener.dirty} resolution={listener} scopeLabel="Incoming connections" label="Save incoming connections" onSave={() => void saveListener()} /></section> : null}
   </>
 }

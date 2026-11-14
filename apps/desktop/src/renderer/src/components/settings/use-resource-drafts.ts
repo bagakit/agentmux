@@ -14,8 +14,8 @@ function withField<T extends object>(record: T, key: string, value: unknown): T 
 }
 
 /** The two resource editors retain authored field expectations, including additions and deletions. */
-export function useResourceDrafts<T extends object>(saved: Records<T>) {
-  const [draft, setDraft] = useState({ value: saved, expected: saved, saving: false })
+export function useResourceDrafts<T extends object>(saved: Records<T>, initial?: { value: Records<T>; expected: Records<T> }) {
+  const [draft, setDraft] = useState(() => ({ value: initial?.value ?? saved, expected: initial?.expected ?? saved, saving: false }))
   useEffect(() => {
     setDraft((current) => {
       if (current.saving) return current

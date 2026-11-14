@@ -6,7 +6,7 @@ import { TextInput } from '@agentmux/client-ui/input'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { HostIcon } from '../HostBadge'
 import { useContext, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { useResourceDrafts } from './use-resource-drafts'
+import { useTailcatConnectionDrafts } from './use-tailcat-connection-drafts'
 import { HostConnectionLibrary, HOST_PANELS, type HostConnectionPanel } from './HostConnectionLibrary'
 import { HostProjectsPane } from './HostProjectsPane'
 import type { AppConfig, HostConfig, SessionSnapshot, SshHostConfig, WorkspaceRecord } from '../../../../shared/contracts'
@@ -57,7 +57,7 @@ export function HostSettingsPane({ config, onSave, active, onClose, navigationRe
   onSave: (hosts: HostConfig[], workspaces: WorkspaceRecord[], expected: Pick<AppConfig, 'hosts' | 'workspaces'>) => Promise<void>
 }) {
   const settingsNavigation = useContext(SettingsNavigation)
-  const resource = useResourceDrafts(Object.fromEntries(config.hosts.map((host) => [host.id, host])))
+  const resource = useTailcatConnectionDrafts(Object.fromEntries(config.hosts.map((host) => [host.id, host])), 'hosts')
   // Host order belongs to the existing config array; a record's integer-like keys must not reorder it.
   function orderedHosts(records: Record<string, HostConfig>): HostConfig[] {
     const ids = new Set([...config.hosts.map((host) => host.id), ...Object.keys(records)])
@@ -382,6 +382,7 @@ export function HostSettingsPane({ config, onSave, active, onClose, navigationRe
           {!hosts.some((host) => host.id === selectedId) ? <div className="settings-resource-editor__empty" role="status"><ThemeObjectHostIcon size={28} aria-hidden="true" /><strong>{requestedHost !== null ? 'Connection no longer available' : 'Connect your hosts'}</strong><p>{requestedHost !== null ? `The requested connection (${requestedHost}) is no longer in these settings. Choose another connection to review it.` : 'Choose a connection, or add a remote host to reuse across your projects.'}</p></div> : null}
         </div>
       </div>
+      {resource.retained}
       <SettingsSaveBar save={saveState} dirty={dirty} resolution={resource} label="Save hosts" onSave={() => void save()} />
       <ConfirmationDialog
         open={active && removeRequest !== null}

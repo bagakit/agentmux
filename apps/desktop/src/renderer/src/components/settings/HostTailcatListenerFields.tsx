@@ -12,19 +12,23 @@ import { TailcatSetupFlow } from './TailcatSetupFlow'
 type Listener = HostRuntimeObservation['tailcat']
 
 /** Draft editing never starts a listener; the original Host applies saved configuration. */
-export function HostTailcatListenerFields({ host, committed, active, onChange, saveLabel = 'Save hosts' }: {
+export function HostTailcatListenerFields({ host, committed, active, onChange, allowedClientsText, onAllowedClientsTextChange, saveLabel = 'Save hosts' }: {
   host: LocalHostConfig
   committed?: HostConfig | undefined
   active: boolean
   saveLabel?: string
   onChange: (config: TailcatListenerConfig) => void
+  allowedClientsText?: string | undefined
+  onAllowedClientsTextChange?: ((text: string) => void) | undefined
 }) {
   const configuration = host.tailcat ?? { enabled: false, keyFile: '', allowedClients: [] }
   const latest = useRef(configuration); latest.current = configuration
   const visible = useRef(active); visible.current = active
   const allowedInput = useRef<HTMLTextAreaElement>(null)
   const [clientText, setClientText] = useState({ text: configuration.allowedClients.join('\n'), keys: configuration.allowedClients })
-  const allowedText = configValuesEqual(clientText.keys, configuration.allowedClients) ? clientText.text : configuration.allowedClients.join('\n')
+  const retainedKeys = allowedClientsText?.split('\n').map(key => key.trim()).filter(Boolean)
+  const allowedText = retainedKeys && configValuesEqual(retainedKeys, configuration.allowedClients) ? allowedClientsText!
+    : configValuesEqual(clientText.keys, configuration.allowedClients) ? clientText.text : configuration.allowedClients.join('\n')
   const target = JSON.stringify(committed)
   const saved = committed !== undefined && configValuesEqual(host, committed)
   const [revision, setRevision] = useState(0)
@@ -64,7 +68,7 @@ export function HostTailcatListenerFields({ host, committed, active, onChange, s
       <label className="host-edit-grid__wide"><span>Allowed client public keys <small>one per line</small></span><textarea ref={allowedInput} aria-label="Tailcat allowed clients" value={allowedText} rows={3} spellCheck={false}
         onChange={event => {
           const text = event.target.value, keys = text.split('\n').map(key => key.trim()).filter(Boolean)
-          setClientText({ text, keys }); onChange({ ...configuration, allowedClients: keys })
+          setClientText({ text, keys }); onAllowedClientsTextChange?.(text); onChange({ ...configuration, allowedClients: keys })
         }} placeholder="nodekey:…" /></label>
     </div>
     <label className="host-tailcat-toggle"><input type="checkbox" role="switch" aria-label="Allow Tailcat connections" checked={configuration.enabled}

@@ -1133,6 +1133,7 @@ export type AppState = GitReadingActions & {
   agentLearningReviewDrafts: Record<string, AgentLearningReviewDraft>
   /** Opaque unrelated/invalid records stay in the original user document until explicitly resolved. */
   nodePublicationDrafts: unknown
+  tailcatConnectionDrafts: unknown
   capsuleQuestionEditors: Record<string, CapsuleQuestionEditor>
   browserOpinionDrafts: Record<string, BrowserOpinionDraft>
   agentComposerHistory: Record<string, readonly string[]>
@@ -4011,6 +4012,7 @@ type PersistedAppState = {
   agentComposerDrafts?: Record<string, string>
   agentLearningReviewDrafts?: Record<string, AgentLearningReviewDraft>
   nodePublicationDrafts?: unknown
+  tailcatConnectionDrafts?: unknown
   capsuleQuestionEditors?: Record<string, CapsuleQuestionEditor>
   browserOpinionDrafts?: Record<string, BrowserOpinionDraft>
   agentComposerHistory?: Record<string, readonly string[]>
@@ -4310,6 +4312,7 @@ function selectPersistedInputs(state: AppState, coreSpatialReady: boolean) {
     agentComposerDrafts: state.agentComposerDrafts,
     agentLearningReviewDrafts: state.agentLearningReviewDrafts,
     nodePublicationDrafts: state.nodePublicationDrafts,
+    tailcatConnectionDrafts: state.tailcatConnectionDrafts,
     capsuleQuestionEditors: state.capsuleQuestionEditors,
     browserOpinionDrafts: state.browserOpinionDrafts,
     agentComposerHistory: state.agentComposerHistory,
@@ -5599,6 +5602,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   agentComposerDrafts: {},
   agentLearningReviewDrafts: {},
   nodePublicationDrafts: {},
+  tailcatConnectionDrafts: {},
   capsuleQuestionEditors: {},
   browserOpinionDrafts: {},
   agentComposerHistory: {},
