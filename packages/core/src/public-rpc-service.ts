@@ -2103,7 +2103,8 @@ export class AgentMuxRpcService {
       // A declaration read never creates the service's lazy SDK/Native connection, including caller admission.
       if (!this.ports.coreClients && !this.local) throw new AgentMuxError('The original Provider source is unavailable. No Runtime was started.', 'CONTROL_UNAVAILABLE')
       await this.authenticated(context)
-      const targets = (await this.clients()).filter(entry => entry.hostId === query.hostId)
+      const source = async () => (await this.clients(query.hostId, { signal: context.signal })).filter(entry => entry.hostId === query.hostId)
+      const targets = await source()
       context.signal?.throwIfAborted()
       if (!targets.length && this.ports.forwardControl) {
         return parseProviderCatalogObservation(await this.ports.forwardControl<'agent.provider.ls'>('agent.provider.ls', query, context), query) as AgentMuxRpcResult<M>
@@ -2128,7 +2129,7 @@ export class AgentMuxRpcService {
         } catch { context.signal?.throwIfAborted() /* Owner observation is optional for pure declarations. */ }
         result = { routeHostId: query.hostId, runtimeId, observedAt: Date.now(), catalog }
       }
-      const current = (await this.clients()).filter(entry => entry.hostId === query.hostId)
+      const current = await source()
       if (current.length !== 1 || current[0]!.client !== client) throw new AgentMuxError('The Provider source Host changed during this read. Refresh the exact Host.', 'HOST_CONFIGURATION_CHANGED')
       context.signal?.throwIfAborted()
       return parseProviderCatalogObservation(result, query) as AgentMuxRpcResult<M>
@@ -2145,7 +2146,8 @@ export class AgentMuxRpcService {
         throw new AgentMuxError('Creation-source trust requires a transport-approved user without a managed Agent caller.', 'CONTROL_PERMISSION_DENIED')
       }
       await this.authenticated(context)
-      const targets = (await this.clients()).filter(entry => entry.hostId === input.hostId)
+      const source = async () => (await this.clients(input.hostId, { signal: context.signal })).filter(entry => entry.hostId === input.hostId)
+      const targets = await source()
       context.signal?.throwIfAborted()
       if (!targets.length && this.ports.forwardControl) {
         const result = await this.ports.forwardControl<HostSettingsMethod>(method, input, context)
@@ -2174,7 +2176,7 @@ export class AgentMuxRpcService {
             ? client.hostEnvironment()
             : client.hostEnvironment({ agentSessionId: homeInput.agentSessionId })), context.signal)
           const result = { routeHostId: input.hostId, ...environment }
-          const current = (await this.clients()).filter(entry => entry.hostId === input.hostId)
+          const current = await source()
           if (current.length !== 1 || current[0]!.client !== client || !isDeepStrictEqual(homeHostRoute(configuration), homeHostRoute(this.ports.hostConfiguration?.(input.hostId) ?? null))) throw new AgentMuxError(
             'The original Host route changed during its home read. Read the current saved Host again.', 'HOST_CONFIGURATION_CHANGED')
           return parseHostSettingsResult(method, result, input) as AgentMuxRpcResult<M>
@@ -2210,7 +2212,7 @@ export class AgentMuxRpcService {
           }
           ;(result as import('./host-runtime-observation.js').HostRuntimeObservation).completedAt = Date.now()
         }
-        const current = (await this.clients()).filter(entry => entry.hostId === input.hostId)
+        const current = await source()
         if (current.length !== 1 || current[0]!.client !== client || !isDeepStrictEqual(configuration, this.ports.hostConfiguration?.(input.hostId) ?? null)) throw new AgentMuxError(
           'The original Host route changed during this observation. Read the current saved connection again.', 'HOST_CONFIGURATION_CHANGED')
         return parseHostSettingsResult(method, result, input) as AgentMuxRpcResult<M>
@@ -3525,7 +3527,7 @@ export class AgentMuxRpcService {
       }
       case 'skill.ls': {
         const hostId = rpcString(p.hostId, 'Original route Host'), agentSessionId = rpcString(p.agentSessionId, 'Complete original Session ID')
-        const scopes = (await this.clients()).filter(scope => scope.hostId === hostId)
+        const scopes = (await this.clients(hostId, { signal: context.signal })).filter(scope => scope.hostId === hostId)
         if (scopes.length !== 1) throw new AgentMuxError('The original skill discovery Host is unconfirmed. Select its exact configured route.', 'UNKNOWN_HOST')
         const { client } = scopes[0]!
         context.signal?.throwIfAborted(); await context.assertCurrent?.()

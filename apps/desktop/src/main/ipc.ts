@@ -2851,7 +2851,7 @@ export async function registerIpc(args: {
     hostTailcat: async (hostId, signal) => (await args.runtime.callOriginalCore(hostId, 'settings.hosts.inspect', { hostId: 'local' }, { transport: 'unix', ...(signal ? { signal } : {}) })).tailcat,
     tailcatConfiguration: new SettingsTailcatConfiguration(configOwner, async signal => (await args.runtime.callOriginalCore('local', 'settings.hosts.inspect', { hostId: 'local' }, { transport: 'unix', ...(signal ? { signal } : {}) })).tailcat),
     notesStorage: notesStorageOwner,
-    coreClients: () => args.runtime.rpcClients(),
+    coreClients: hostId => args.runtime.rpcClients(hostId),
     callOriginalCore: (hostId, method, params, context) => args.runtime.callOriginalCore(hostId, method, params, context),
     snapshot: params => observeClientRpcSnapshot(config, args.scratchTopics, params),
     nativeAgentSessions: params => args.runtime.nativeAgentSessions({ hostId: params.hostId, executorId: params.executorId,

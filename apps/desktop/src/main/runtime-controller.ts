@@ -3266,7 +3266,11 @@ export class RuntimeController {
       agentSessionId: input.supervisorAgentSessionId, expectedRun: { runId: input.supervisorRunId }, submissionId: input.operationId })
   }
 
-  rpcClients(): readonly { hostId: string; client: AgentMuxClient }[] {
+  rpcClients(hostId?: string): readonly { hostId: string; client: AgentMuxClient }[] {
+    if (hostId !== undefined) {
+      const host = this.hosts.get(hostId)
+      return host ? [{ hostId, client: host.client }] : []
+    }
     return [...this.hosts].map(([hostId, host]) => ({ hostId, client: host.client }))
   }
 
