@@ -14,8 +14,8 @@ export function isBrowserProfileControlRequest(request: AgentMuxControlRequest):
 }
 
 export type BrowserProfileControlPorts = {
-  profiles: Pick<BrowserProfileManager, 'networkHistory' | 'listProxies' | 'saveProxy' | 'deleteProxy' | 'assignProxy' | 'initialize' | 'listProfiles' | 'listRevision' | 'listSequence' | 'createProfile' | 'copyProfile' | 'updateProfile' | 'listViews' | 'saveView' | 'deleteView' | 'bulkUpdate' | 'listFolders' | 'createFolder' | 'renameFolder' | 'deleteFolder' | 'setDefaultProfile' | 'refresh' | 'listTrash' | 'listLegacyPendingDeletes' | 'restoreProfile'>
-  usage: Pick<BrowserProfileUsageOwner, 'usage' | 'deleteProfile'>
+  profiles: Pick<BrowserProfileManager, 'networkHistory' | 'listProxies' | 'saveProxy' | 'deleteProxy' | 'assignProxy' | 'initialize' | 'listProfiles' | 'listRevision' | 'listSequence' | 'createProfile' | 'copyProfile' | 'updateProfile' | 'listViews' | 'saveView' | 'deleteView' | 'bulkUpdate' | 'listFolders' | 'createFolder' | 'renameFolder' | 'deleteFolder' | 'setDefaultProfile' | 'refresh' | 'listTrash' | 'listLegacyPendingDeletes' | 'restoreProfile' | 'setTrashRetention' | 'purgeProfile' | 'inspectTrashPurge'>
+  usage: Pick<BrowserProfileUsageOwner, 'usage' | 'deleteProfile' | 'assertUnused'>
   network: BrowserProfileNetworkControl
 }
 
@@ -112,6 +112,13 @@ export async function executeBrowserProfileControl(request: ProfileRequest, port
     case 'browser.profile.trash.ls':
       return { operation: request.operation, revision: ports.profiles.listRevision(), sequence: ports.profiles.listSequence(),
         entries: ports.profiles.listTrash(), legacyPendingDeletes: ports.profiles.listLegacyPendingDeletes() }
+    case 'browser.profile.trash.inspect': return { operation: request.operation, revision: ports.profiles.listRevision(), purge: await ports.profiles.inspectTrashPurge(request.purgeId) }
+    case 'browser.profile.trash.retention': case 'browser.profile.trash.purge': {
+      if (!actor?.verified || (actor.kind !== 'user' && actor.kind !== 'device')) throw new AgentMuxError('Permanent deletion and retention approval require the person or their device. The original Profile and data remain available.', 'BROWSER_PROFILE_DELETE_REQUIRES_PERSON')
+      return request.operation === 'browser.profile.trash.retention'
+        ? { operation: request.operation, ...await owned(() => ports.profiles.setTrashRetention(request.archiveId, request.expectedRevision, request.purgeId, request.deleteAfter)) }
+        : { operation: request.operation, ...await owned(() => ports.profiles.purgeProfile(request.archiveId, request.expectedRevision, request.purgeId, profileId => ports.usage.assertUnused(profileId))) }
+    }
     case 'browser.profile.trash.restore': {
       if (!actor?.verified || (actor.kind !== 'user' && actor.kind !== 'device')) {
         throw new AgentMuxError('Restoring a Browser Profile requires a person or device. Its original data is kept; ask the person to restore it.', 'BROWSER_PROFILE_RESTORE_REQUIRES_PERSON')

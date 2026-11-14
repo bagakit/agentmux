@@ -2065,6 +2065,9 @@ export type AgentMuxDesktopApi = {
     assignProxy(proxyId: string, expectedRevision: string, items: import('@agentmux/core/control').BrowserProfileSelectionItem[]): Promise<import('@agentmux/core/control').BrowserProfileBulkItemResult[]>
     readProfileTrash(): Promise<BrowserProfileTrashList>
     restoreProfile(archiveId: string, expectedRevision: string, folderId?: string | null): Promise<import('@agentmux/core/control').BrowserProfileRestoreReceipt>
+    setProfileTrashRetention(archiveId: string, expectedRevision: string, purgeId: string, deleteAfter: number | null): Promise<import('@agentmux/core/control').BrowserProfileRecycleReceipt>
+    purgeProfile(archiveId: string, expectedRevision: string, purgeId: string): Promise<import('@agentmux/core/control').BrowserProfilePurgeResult>
+    inspectProfilePurge(purgeId: string): Promise<import('@agentmux/core/control').BrowserProfilePurgeReceipt | null>
     /** Main publishes the whole list after every committed change, in revision order. */
     onProfilesChanged(listener: (list: BrowserProfileList) => void): () => void
     updateProfile(profileId: string, edit: BrowserProfileEdit, expectedRevision: string): Promise<BrowserProfileSummary>

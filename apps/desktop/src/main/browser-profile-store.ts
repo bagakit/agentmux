@@ -119,8 +119,14 @@ const retainedPartitionSchema = z.object({
   relativePath: z.string().min(1).refine(value => !isAbsolute(value) && !value.split(/[\\/]/u).some(part => !part || part === '..' || part === '.'), 'Retained data must stay inside its original session root')
 }).strict()
 export type BrowserProfileRetainedPartition = z.infer<typeof retainedPartitionSchema>
+const purgeReceiptSchema = z.object({ purgeId: folderIdSchema, archiveId: folderIdSchema, profileId: profileIdSchema,
+  status: z.enum(['waiting-for-restart', 'preparing', 'deleting-data', 'erasing-backup', 'failed', 'unknown', 'deleted', 'restored']),
+  requestedAt: nonNegativeSafeIntegerSchema, updatedAt: nonNegativeSafeIntegerSchema, warning: z.string().optional(),
+  credentialCleanup: z.enum(['pending', 'confirmed', 'unknown']).optional(), permissionCleanup: z.enum(['pending', 'confirmed', 'unknown']).optional() }).strict()
+const retentionSchema = z.object({ purgeId: folderIdSchema, deleteAfter: nonNegativeSafeIntegerSchema, approvedAt: nonNegativeSafeIntegerSchema }).strict()
+const safetyCopySchema = z.object({ relativePath: retainedPartitionSchema.shape.relativePath, sha256: z.string().regex(/^[a-f0-9]{64}$/u) }).strict()
 const trashRecordSchema = z.object({ id: folderIdSchema, revision: z.string().min(1), archivedAt: nonNegativeSafeIntegerSchema,
-  profile: profileRecordSchema, data: retainedPartitionSchema }).strict()
+  profile: profileRecordSchema, data: retainedPartitionSchema, retention: retentionSchema.optional(), purge: purgeReceiptSchema.optional(), safetyCopy: safetyCopySchema.optional() }).strict()
 export type BrowserProfileTrashRecord = z.infer<typeof trashRecordSchema>
 
 // JSON object key order is not a persistence contract. Parse the same view semantics as public input.
@@ -146,6 +152,8 @@ const metadataSchema = z
       catch { context.addIssue({ code: 'custom', message: 'Stored network diagnostic is invalid' }); return z.NEVER }
     })).optional(),
     trash: z.array(trashRecordSchema).optional(),
+    /** Completed original purge receipts; they retain no Profile settings or filesystem paths. */
+    purgeReceipts: z.array(purgeReceiptSchema.extend({ safetyCopy: safetyCopySchema.optional() }).strict()).optional(),
     pendingImports: z.array(pendingImportSchema),
     /** Profiles already removed from the list whose site data is not confirmed cleared yet. */
     pendingDeletes: z.array(profileIdSchema).optional()
@@ -196,7 +204,11 @@ const metadataSchema = z
         context.addIssue({ code: 'custom', path: ['trash', index], message: 'Archived Profile identity or original data ownership conflicts' })
       }
       archiveIds.add(archive.id); archiveIds.add(archive.profile.id)
+      if (archive.purge && (archive.purge.archiveId !== archive.id || archive.purge.profileId !== archive.profile.id || archive.purge.status === 'deleted')) context.addIssue({ code: 'custom', path: ['trash', index, 'purge'], message: 'Purge belongs to another archive' })
+      if (archive.safetyCopy && !archive.purge) context.addIssue({ code: 'custom', path: ['trash', index, 'safetyCopy'], message: 'Safety copy needs its original purge intent' })
     }
+    const purges = [...(metadata.trash ?? []).flatMap(entry => entry.purge ? [entry.purge] : []), ...(metadata.purgeReceipts ?? [])]
+    if (new Set(purges.map(value => value.purgeId)).size !== purges.length || (metadata.purgeReceipts ?? []).some(value => value.status !== 'deleted' && value.status !== 'restored')) context.addIssue({ code: 'custom', path: ['purgeReceipts'], message: 'Purge identities conflict' })
     const pendingIds = new Set<string>()
     for (const [index, pending] of metadata.pendingImports.entries()) {
       if (profileIds.has(pending.profileId) || archiveIds.has(pending.profileId)) {
@@ -229,7 +241,7 @@ export type BrowserProfileRecord = z.infer<typeof profileRecordSchema>
 export type PendingBrowserProfileImport = z.infer<typeof pendingImportSchema>
 
 /** The whole committed list after one write; the manager replaces its cache with it. */
-export type BrowserProfileSnapshot = { proxyAssets?: BrowserProxyAsset[]; revision: number; sequence: number; profiles: BrowserProfileSummary[]; defaultProfileId: string; folders: BrowserProfileFolder[]; views: BrowserProfileView[]; trash: BrowserProfileTrashRecord[]; legacyPendingDeletes: string[]; activitySources: Record<string, string> }
+export type BrowserProfileSnapshot = { proxyAssets?: BrowserProxyAsset[]; revision: number; sequence: number; profiles: BrowserProfileSummary[]; defaultProfileId: string; folders: BrowserProfileFolder[]; views: BrowserProfileView[]; trash: BrowserProfileTrashRecord[]; purgeReceipts?: import('@agentmux/core/control').BrowserProfilePurgeReceipt[]; legacyPendingDeletes: string[]; activitySources: Record<string, string> }
 
 function cloneImportedSource(source: z.infer<typeof importedSourceSchema> | null): BrowserProfileImportedSource | null {
   if (source === null) return null
@@ -238,7 +250,7 @@ function cloneImportedSource(source: z.infer<typeof importedSourceSchema> | null
 }
 
 function snapshotOf(metadata: BrowserProfileMetadata): BrowserProfileSnapshot {
-  return { proxyAssets: structuredClone(metadata.proxyAssets ?? []), legacyPendingDeletes: [...(metadata.pendingDeletes ?? [])], trash: structuredClone(metadata.trash ?? []), activitySources: Object.fromEntries([...metadata.profiles, ...(metadata.trash ?? []).map(entry => entry.profile)].filter(profile => profile.activity).map(profile => [profile.id, profile.activity!.checkpoint.observerId])),
+  return { purgeReceipts: structuredClone(metadata.purgeReceipts ?? []), proxyAssets: structuredClone(metadata.proxyAssets ?? []), legacyPendingDeletes: [...(metadata.pendingDeletes ?? [])], trash: structuredClone(metadata.trash ?? []), activitySources: Object.fromEntries([...metadata.profiles, ...(metadata.trash ?? []).map(entry => entry.profile)].filter(profile => profile.activity).map(profile => [profile.id, profile.activity!.checkpoint.observerId])),
     views: structuredClone(metadata.views ?? []), revision: metadata.revision ?? 0, sequence: metadata.sequence ?? metadata.revision ?? 0, defaultProfileId: metadata.defaultProfileId, folders: (metadata.folders ?? []).map(folder => ({ ...folder })),
     profiles: metadata.profiles.map((profile) => profileSummary(profile, metadata.defaultProfileId)) }
 }
@@ -305,7 +317,7 @@ export function browserProfilePartition(profileId: string): string {
 /** A replacement/readback is not a directory-durability ACK. Snapshot stays inside Main. */
 export class BrowserProfileWriteUnconfirmed extends Error {
   readonly code = 'BROWSER_PROFILE_WRITE_UNCONFIRMED'
-  constructor(operation: 'recycle' | 'restore', profileId: string, readonly currentSnapshot: BrowserProfileSnapshot | null, cause: unknown) {
+  constructor(operation: 'recycle' | 'restore' | 'purge' | 'retention', profileId: string, readonly currentSnapshot: BrowserProfileSnapshot | null, cause: unknown) {
     super(`The ${operation} of Profile ${profileId} could not be confirmed. ${cause instanceof DurableWriteError ? cause.phase === 'after-replace' ? 'The metadata replacement applied, but its durable confirmation is missing.' : 'This attempt did not replace the metadata.' : 'The write may already have applied.'} Original data is kept. Read Profiles and Recycled Profiles to confirm the exact identity before explicitly retrying.`, { cause })
   }
 }
@@ -630,6 +642,87 @@ export class BrowserProfileStore {
     })
   }
 
+  setArchiveRetention(archiveId: string, expectedRevision: string, retention: BrowserProfileTrashRecord['retention']): Promise<{ snapshot: BrowserProfileSnapshot; archive: BrowserProfileTrashRecord }> {
+    return this.enqueue(async () => {
+      const metadata = await this.readMetadata(), archive = metadata.trash?.find(value => value.id === archiveId)
+      if (!archive) throw new Error('The exact recycled Profile is unavailable.')
+      if (archive.revision !== expectedRevision) throw new BrowserProfileConfigurationConflict(archive.revision)
+      if (archive.purge) throw new Error('This entry already has an original deletion intent. Inspect it or restore this Profile before choosing a new retention period.')
+      if (retention && (metadata.trash?.some(value => value.id !== archiveId && (value.purge?.purgeId === retention.purgeId || value.retention?.purgeId === retention.purgeId)) || metadata.purgeReceipts?.some(value => value.purgeId === retention.purgeId))) throw new Error('This deletion ID already belongs to another original action.')
+      if (retention) archive.retention = retentionSchema.parse(retention)
+      else delete archive.retention
+      archive.revision = mintObjectId()
+      const snapshot = await this.commit(metadata, true, { operation: 'retention', profileId: archive.profile.id })
+      return { snapshot, archive: structuredClone(archive) }
+    })
+  }
+
+  beginArchivePurge(archiveId: string, expectedRevision: string, purgeId: string, now: number): Promise<{ snapshot: BrowserProfileSnapshot; archive: BrowserProfileTrashRecord }> {
+    return this.enqueue(async () => {
+      const metadata = await this.readMetadata(), archive = metadata.trash?.find(value => value.id === archiveId)
+      if (!archive) throw new Error('The exact recycled Profile is unavailable. Inspect the original purge ID; no deletion was replayed.')
+      if (archive.purge) {
+        if (archive.purge.purgeId !== purgeId) throw new Error('This entry already has a deletion intent. Keep and inspect its original purge ID.')
+        return { snapshot: snapshotOf(metadata), archive: structuredClone(archive) }
+      }
+      if (archive.revision !== expectedRevision) throw new BrowserProfileConfigurationConflict(archive.revision)
+      if (metadata.trash?.some(value => value.id !== archiveId && (value.purge?.purgeId === purgeId || value.retention?.purgeId === purgeId)) || metadata.purgeReceipts?.some(value => value.purgeId === purgeId)) throw new Error('This purge ID already belongs to another original action.')
+      archive.purge = purgeReceiptSchema.parse({ purgeId, archiveId, profileId: archive.profile.id, status: 'waiting-for-restart', requestedAt: now, updatedAt: now })
+      archive.revision = mintObjectId()
+      const snapshot = await this.commit(metadata, true, { operation: 'purge', profileId: archive.profile.id })
+      return { snapshot, archive: structuredClone(archive) }
+    })
+  }
+
+  updateArchivePurge(archiveId: string, purgeId: string, status: import('@agentmux/core/control').BrowserProfilePurgeStatus, now: number,
+    extra: { warning?: string; safetyCopy?: BrowserProfileTrashRecord['safetyCopy'] } = {}): Promise<{ snapshot: BrowserProfileSnapshot; archive: BrowserProfileTrashRecord }> {
+    return this.enqueue(async () => {
+      const metadata = await this.readMetadata(), archive = metadata.trash?.find(value => value.id === archiveId)
+      if (!archive?.purge || archive.purge.purgeId !== purgeId) throw new Error('The original deletion intent changed. No further cleanup was sent.')
+      archive.purge = purgeReceiptSchema.parse({ ...archive.purge, status, updatedAt: now, ...(extra.warning ? { warning: extra.warning } : {}) })
+      if (extra.safetyCopy) archive.safetyCopy = safetyCopySchema.parse(extra.safetyCopy)
+      archive.revision = mintObjectId()
+      const snapshot = await this.commit(metadata, true, { operation: 'purge', profileId: archive.profile.id })
+      return { snapshot, archive: structuredClone(archive) }
+    })
+  }
+
+  completeArchivePurge(archiveId: string, purgeId: string, now: number): Promise<{ snapshot: BrowserProfileSnapshot; purge: import('@agentmux/core/control').BrowserProfilePurgeReceipt }> {
+    return this.enqueue(async () => {
+      const metadata = await this.readMetadata(), archive = metadata.trash?.find(value => value.id === archiveId)
+      if (!archive?.purge || archive.purge.purgeId !== purgeId || archive.purge.status !== 'erasing-backup') throw new Error('The original purge has no confirmed final cleanup stage.')
+      const purge = purgeReceiptSchema.parse({ ...archive.purge, status: 'deleted', updatedAt: now, credentialCleanup: 'pending', permissionCleanup: 'pending' })
+      delete purge.warning
+      const prior = (metadata.purgeReceipts ?? []).map(receipt => { if (receipt.profileId !== archive.profile.id) return receipt; const { safetyCopy: _held, ...history } = receipt; return history })
+      const snapshot = await this.commit({ ...metadata, trash: metadata.trash!.filter(value => value.id !== archiveId), purgeReceipts: [...prior, purge] }, true, { operation: 'purge', profileId: archive.profile.id })
+      return { snapshot, purge }
+    })
+  }
+
+  inspectPurge(purgeId: string): Promise<import('@agentmux/core/control').BrowserProfilePurgeReceipt | null> {
+    return this.enqueue(async () => {
+      const metadata = await this.readMetadata()
+      const result = metadata.trash?.find(value => value.purge?.purgeId === purgeId)?.purge ?? metadata.purgeReceipts?.find(value => value.purgeId === purgeId) ?? null
+      if (!result) return null
+      const { safetyCopy: _held, ...receipt } = result as typeof result & { safetyCopy?: unknown }
+      return purgeReceiptSchema.parse(receipt)
+    })
+  }
+
+  updatePurgeOwners(purgeId: string, owners: { credentialCleanup: 'confirmed' | 'unknown'; permissionCleanup: 'confirmed' | 'unknown' }): Promise<import('@agentmux/core/control').BrowserProfilePurgeReceipt> {
+    return this.enqueue(async () => {
+      const metadata = await this.readMetadata(), receipt = metadata.purgeReceipts?.find(value => value.purgeId === purgeId && value.status === 'deleted')
+      if (!receipt) throw new Error('The original completed purge receipt is unavailable. Other cleanup was not repeated.')
+      Object.assign(receipt, owners)
+      await this.commit(metadata, false, { operation: 'purge', profileId: receipt.profileId })
+      return purgeReceiptSchema.parse(receipt)
+    })
+  }
+
+  priorPurgeCopies(profileId: string): Promise<{ archiveId: string; purgeId: string }[]> {
+    return this.enqueue(async () => (await this.readMetadata()).purgeReceipts?.filter(value => value.profileId === profileId && value.status === 'restored').map(value => ({ archiveId: value.archiveId, purgeId: value.purgeId })) ?? [])
+  }
+
   restoreProfile(archiveId: string, expectedRevision: string, folderOverride?: string | null): Promise<{ snapshot: BrowserProfileSnapshot; profile: BrowserProfileSummary }> {
     return this.enqueue(async () => {
       const id = folderIdSchema.parse(archiveId), metadata = await this.readMetadata(), archive = metadata.trash?.find(value => value.id === id)
@@ -640,7 +733,9 @@ export class BrowserProfileStore {
       if (folderOverride === null) delete profile.folderId
       else if (folderOverride !== undefined) profile.folderId = folderIdSchema.parse(folderOverride)
       if (profile.folderId !== undefined && !(metadata.folders ?? []).some(folder => folder.id === profile.folderId)) throw Object.assign(new Error('The original folder is unavailable. Explicitly choose a current folder or restore unfiled; the archive is kept.'), { code: 'BROWSER_PROFILE_RESTORE_FOLDER_CONFLICT' })
-      const snapshot = await this.commit({ ...metadata, profiles: [...metadata.profiles, profile], trash: metadata.trash!.filter(value => value.id !== id) }, true, { operation: 'restore', profileId: archive.profile.id })
+      const retainedCopy = archive.purge ? { ...archive.purge, status: 'restored' as const, updatedAt: Date.now(), ...(archive.safetyCopy ? { safetyCopy: archive.safetyCopy } : {}) } : undefined
+      const snapshot = await this.commit({ ...metadata, profiles: [...metadata.profiles, profile], trash: metadata.trash!.filter(value => value.id !== id),
+        ...(retainedCopy ? { purgeReceipts: [...(metadata.purgeReceipts ?? []), retainedCopy] } : {}) }, true, { operation: 'restore', profileId: archive.profile.id })
       return { snapshot, profile: profileSummary(profile, metadata.defaultProfileId) }
     })
   }
@@ -739,7 +834,7 @@ export class BrowserProfileStore {
   }
 
   /** Every commit advances sequence; configuration writes also advance collection CAS. */
-  private async commit(metadata: BrowserProfileMetadata, configuration = true, retirement?: { operation: 'recycle' | 'restore'; profileId: string }): Promise<BrowserProfileSnapshot> {
+  private async commit(metadata: BrowserProfileMetadata, configuration = true, retirement?: { operation: 'recycle' | 'restore' | 'purge' | 'retention'; profileId: string }): Promise<BrowserProfileSnapshot> {
     const next = metadataSchema.parse({ ...metadata, revision: (metadata.revision ?? 0) + (configuration ? 1 : 0), sequence: (metadata.sequence ?? metadata.revision ?? 0) + 1 })
     try { await this.writeMetadata(next, retirement !== undefined) }
     catch (cause) {
@@ -759,7 +854,7 @@ export class BrowserProfileStore {
     do { id = mintObjectId() } while (
       metadata.profiles.some((profile) => profile.id === id) ||
       metadata.pendingImports.some((pending) => pending.profileId === id) ||
-      (metadata.proxyAssets ?? []).some(proxy => proxy.id === id) || (metadata.pendingDeletes ?? []).includes(id) || (metadata.trash ?? []).some(entry => entry.id === id || entry.profile.id === id) || (metadata.views ?? []).some(view => view.id === id) || (metadata.folders ?? []).some(folder => folder.id === id)
+      (metadata.proxyAssets ?? []).some(proxy => proxy.id === id) || (metadata.pendingDeletes ?? []).includes(id) || (metadata.trash ?? []).some(entry => entry.id === id || entry.profile.id === id) || (metadata.purgeReceipts ?? []).some(value => value.profileId === id || value.archiveId === id || value.purgeId === id) || (metadata.views ?? []).some(view => view.id === id) || (metadata.folders ?? []).some(folder => folder.id === id)
     )
     return id
   }

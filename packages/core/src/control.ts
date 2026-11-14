@@ -1205,6 +1205,7 @@ const OPERATION_BUDGET: Record<AgentMuxControlRequest['operation'], 'long' | 'sh
   // Writes wait for the durable metadata write; delete also clears the Profile's website data.
   'browser.profile.trash.ls': 'short',
   'browser.profile.trash.restore': 'long',
+  'browser.profile.trash.retention': 'long', 'browser.profile.trash.purge': 'long', 'browser.profile.trash.inspect': 'short',
   'browser.profile.view.create': 'long',
   'browser.profile.view.update': 'long',
   'browser.profile.view.delete': 'long',

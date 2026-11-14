@@ -105,6 +105,8 @@ export function createBrowserProfileSessions(ports: BrowserProfileSessionPorts) 
   }
 
   return {
+    /** Session has no destroy API. Idle counts cannot replace this process-lifetime admission fact. */
+    nativeSessionAdmitted(profileId: string): boolean { return nativeProfileSessions.has(profileId) },
     nativeSession(profileId: string): Session { return ownedSession(profileId) },
     retainedSession(profileId: string): Session { return ownedSession(profileId, true) },
     profileOfSession(target: Session): string | null { return nativeSessionObservations.get(target)?.profileId ?? null },

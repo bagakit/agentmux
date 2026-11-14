@@ -94,6 +94,21 @@ export class BrowserSitePermissions {
     await run
   }
 
+  /** Called only after the exact Profile's permanent removal; other Profile policies stay unchanged. */
+  async forgetProfile(profileId: string): Promise<void> {
+    const run = this.writes.then(async () => {
+      await this.load()
+      if (!this.readable) throw new Error('Remembered site permissions could not be read. Their original bytes are kept.')
+      const policies = this.policies.filter(value => value.profileId !== profileId)
+      if (policies.length === this.policies.length) return
+      await mkdir(dirname(this.path), { recursive: true })
+      await durableWriteFile(this.path, JSON.stringify({ version: 1, policies }, null, 2) + '\n')
+      this.policies = policies
+    })
+    this.writes = run.catch(() => {})
+    await run
+  }
+
   private choice(context: BrowserPermissionContext, value: BrowserSitePermission): boolean | undefined {
     const local = this.choices.get(context.browserId)
     const localValue = local && sameDocument(local.context, context) ? local.decisions.get(key({ ...context, permission: value })) : undefined

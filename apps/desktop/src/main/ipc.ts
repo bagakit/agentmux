@@ -559,6 +559,12 @@ export async function registerIpc(args: {
   browserUploads, () => resolveBrowserAgentControl(configOwner.current.browser.agentControl), browserRecoveryPreviews,
   {}, browserAgentAuthority(args.runtime))
   browsers.sitePermissions = new BrowserSitePermissions(join(app.getPath('userData'), 'browser-site-permissions.json'), id => browsers.refreshSitePermissions(id))
+  browserProfiles.cleanupPurgedIdentity = async profileId => {
+    let credentialCleanup: 'confirmed' | 'unknown' = 'unknown', permissionCleanup: 'confirmed' | 'unknown' = 'unknown'
+    try { await profileProxyAuth.clear(profileId); credentialCleanup = 'confirmed' } catch { /* Its original encrypted owner retains its bytes and reports this independent unknown. */ }
+    try { await browsers.sitePermissions!.forgetProfile(profileId); permissionCleanup = 'confirmed' } catch { /* Keep the original permission owner's bytes when its cleanup is unavailable. */ }
+    return { credentialCleanup, permissionCleanup }
+  }
   browsers.profileProxySignInIssue = profileId => profileProxyAuth.issue(profileId)
   const releaseRetiredBrowserAgents = releaseBrowserAgentsOnRetirement(args.runtime, browsers)
   const disposeBrowserFeedbackPreferences = configOwner.subscribe((saved, previous) => {
@@ -2178,6 +2184,22 @@ export async function registerIpc(args: {
     nativeUse: profileId => browserProfiles.nativeUse(profileId),
     deleteProfile: (profileId, approval, expectedRevision, assertUnused) => browserProfiles.deleteProfile(profileId, approval, expectedRevision, assertUnused)
   })
+  handleWithEvent('browser:setProfileTrashRetention', (_event, archiveId: string, expectedRevision: string, purgeId: string, deleteAfter: number | null) =>
+    ipcResult(() => browserProfiles.setTrashRetention(archiveId, expectedRevision, purgeId, deleteAfter)))
+  handleWithEvent('browser:purgeProfile', (_event, archiveId: string, expectedRevision: string, purgeId: string) =>
+    ipcResult(() => browserProfiles.purgeProfile(archiveId, expectedRevision, purgeId, profileId => profileUsage.assertUnused(profileId))))
+  handleWithEvent('browser:inspectProfilePurge', (_event, purgeId: string) => ipcResult(() => browserProfiles.inspectTrashPurge(purgeId)))
+  let cleanupProfileTrashRunning = false
+  const cleanupProfileTrash = async () => {
+    if (cleanupProfileTrashRunning) return
+    cleanupProfileTrashRunning = true
+    try { await browserProfiles.initialize(); await browserProfiles.cleanupApprovedTrash(profileId => profileUsage.assertUnused(profileId)) }
+    catch (cause) { console.warn('Retained Profile cleanup is unavailable. Original entries and operations are kept.', cause instanceof Error ? cause.message : String(cause)) }
+    finally { cleanupProfileTrashRunning = false }
+  }
+  const profileTrashTimer = setInterval(() => { void cleanupProfileTrash() }, 60_000)
+  profileTrashTimer.unref()
+  void cleanupProfileTrash()
   handleWithEvent('browser:deleteProfile', (event, profileId: string, approval: BrowserProfileDeleteApproval, expectedRevision: string) =>
     ipcResult(() => profileUsage.deleteProfile(profileId, approval, expectedRevision)))
   // Site data is cleared inside the Profile's own session, which only a confirmed Profile resolves to.
@@ -2590,6 +2612,7 @@ export async function registerIpc(args: {
   })
   return async () => {
     acceptingControl = false
+    clearInterval(profileTrashTimer)
     await runOwnerDisposals([
       { owner: 'app-recordings', dispose: () => appRecordings.dispose() },
       { owner: 'screenshot-shortcut', dispose: () => screenshotShortcut.dispose() },

@@ -1,6 +1,6 @@
 import { parseBrowserProxyProbe, type BrowserProxyProbeReceipt, type BrowserProxyProbeHistory } from './browser-proxy-probe.js'
 import { parseBrowserProxyEdit, parseBrowserProxyAsset, parseBrowserProxyBinding, parseBrowserProfileNetworkApplication, type BrowserProxyEdit, type BrowserProxyAsset, type BrowserProxyBinding, type BrowserProfileNetworkApplication } from './browser-proxy-library.js'
-import type { BrowserProfileTrashEntry, BrowserProfileNativeUse, BrowserProfileRecycleReceipt, BrowserProfileRestoreReceipt } from './browser-profile-trash.js'
+import type { BrowserProfileTrashEntry, BrowserProfileNativeUse, BrowserProfileRecycleReceipt, BrowserProfileRestoreReceipt, BrowserProfilePurgeReceipt, BrowserProfilePurgeResult } from './browser-profile-trash.js'
 import { AgentMuxError } from './errors.js'
 import { parseBrowserProfileQuery, parseBrowserProfileView, parseBrowserProfileSelection, parseBrowserProfileBulkAction, type BrowserProfileQuery, type BrowserProfileView, type BrowserProfileSelectionItem, type BrowserProfileBulkAction, type BrowserProfileBulkItemResult } from './browser-profile-library.js'
 
@@ -12,7 +12,7 @@ import { parseBrowserProfileQuery, parseBrowserProfileView, parseBrowserProfileS
 export const BROWSER_PROFILE_CONTROL_OPERATIONS = ['browser.profile.proxy.ls', 'browser.profile.proxy.create', 'browser.profile.proxy.update', 'browser.profile.proxy.delete', 'browser.profile.proxy.assign', 'browser.profile.ls', 'browser.profile.inspect', 'browser.profile.create',
   'browser.profile.folder.create', 'browser.profile.folder.rename', 'browser.profile.folder.delete',
   'browser.profile.view.create', 'browser.profile.view.update', 'browser.profile.view.delete', 'browser.profile.bulk-update',
-  'browser.profile.trash.ls', 'browser.profile.trash.restore',
+  'browser.profile.trash.ls', 'browser.profile.trash.restore', 'browser.profile.trash.retention', 'browser.profile.trash.purge', 'browser.profile.trash.inspect',
   'browser.profile.copy', 'browser.profile.update', 'browser.profile.set-default', 'browser.profile.delete',
   'browser.profile.proxy-sign-in.set', 'browser.profile.proxy-sign-in.clear', 'browser.profile.network.check', 'browser.profile.network.probe', 'browser.profile.network.history'] as const
 export type BrowserProfileControlOperation = typeof BROWSER_PROFILE_CONTROL_OPERATIONS[number]
@@ -49,6 +49,9 @@ export type BrowserProfileControlPayload =
   | { operation: 'browser.profile.delete'; profileId: string; expectedRevision: string }
   | { operation: 'browser.profile.trash.ls' }
   | { operation: 'browser.profile.trash.restore'; archiveId: string; expectedRevision: string; folderId?: string | null }
+  | { operation: 'browser.profile.trash.retention'; archiveId: string; expectedRevision: string; purgeId: string; deleteAfter: number | null }
+  | { operation: 'browser.profile.trash.purge'; archiveId: string; expectedRevision: string; purgeId: string }
+  | { operation: 'browser.profile.trash.inspect'; purgeId: string }
   | { operation: 'browser.profile.proxy-sign-in.set'; profileId: string; signIn: BrowserProfileProxySignIn }
   | { operation: 'browser.profile.proxy-sign-in.clear'; profileId: string }
   | { operation: 'browser.profile.network.check'; profileId: string }
@@ -401,6 +404,9 @@ export type BrowserProfileControlResult =
   | ({ operation: 'browser.profile.delete' } & BrowserProfileRecycleReceipt)
   | { operation: 'browser.profile.trash.ls'; revision: number; sequence: number; entries: BrowserProfileTrashEntry[]; legacyPendingDeletes: string[] }
   | ({ operation: 'browser.profile.trash.restore' } & BrowserProfileRestoreReceipt)
+  | ({ operation: 'browser.profile.trash.retention' } & BrowserProfileRecycleReceipt)
+  | ({ operation: 'browser.profile.trash.purge' } & BrowserProfilePurgeResult)
+  | { operation: 'browser.profile.trash.inspect'; revision: number; purge: BrowserProfilePurgeReceipt | null }
   | { operation: 'browser.profile.proxy-sign-in.set'; profileId: string; saved: true; reconnected: boolean }
   | { operation: 'browser.profile.proxy-sign-in.clear'; profileId: string; cleared: true; reconnected: boolean }
   | { operation: 'browser.profile.network.check'; profileId: string; check: BrowserProfileNetworkCheck }
@@ -473,6 +479,7 @@ export function parseBrowserProfileControlPayload(source: Record<string, unknown
     'browser.profile.view.create': ['label', 'query', 'expectedRevision'], 'browser.profile.view.update': ['viewId', 'label', 'query', 'expectedRevision'], 'browser.profile.view.delete': ['viewId', 'expectedRevision'], 'browser.profile.bulk-update': ['items', 'action'], 'browser.profile.folder.create': ['label', 'expectedRevision'],
     'browser.profile.folder.rename': ['folderId', 'label', 'expectedRevision'], 'browser.profile.folder.delete': ['folderId', 'expectedRevision'], 'browser.profile.inspect': ['profileId'], 'browser.profile.create': ['label'], 'browser.profile.copy': ['profileId', 'expectedRevision', 'label'],
     'browser.profile.update': ['profileId', 'expectedRevision', 'edit'], 'browser.profile.set-default': ['profileId'], 'browser.profile.delete': ['profileId', 'expectedRevision'], 'browser.profile.trash.ls': [], 'browser.profile.trash.restore': ['archiveId', 'expectedRevision', 'folderId'],
+    'browser.profile.trash.retention': ['archiveId', 'expectedRevision', 'purgeId', 'deleteAfter'], 'browser.profile.trash.purge': ['archiveId', 'expectedRevision', 'purgeId'], 'browser.profile.trash.inspect': ['purgeId'],
     'browser.profile.proxy-sign-in.set': ['profileId', 'signIn'], 'browser.profile.proxy-sign-in.clear': ['profileId'], 'browser.profile.network.check': ['profileId'], 'browser.profile.network.probe': ['profileId', 'operationId'], 'browser.profile.network.history': ['profileId', 'operationId', 'before']
   }
   record(source, [...envelope, ...fields[operation]], code, 'Browser Profile request')
@@ -489,6 +496,11 @@ export function parseBrowserProfileControlPayload(source: Record<string, unknown
     case 'browser.profile.proxy.assign': return { operation, proxyId: identity(source.proxyId, code, 'Proxy ID'), expectedRevision: identity(source.expectedRevision, code, 'Proxy configuration token'), items: parseBrowserProfileSelection(source.items) }
     case 'browser.profile.delete': return { operation, profileId: identity(source.profileId, code, 'Profile ID'), expectedRevision: identity(source.expectedRevision, code, 'Expected Profile configuration revision') }
     case 'browser.profile.trash.ls': return { operation }
+    case 'browser.profile.trash.inspect': return { operation, purgeId: identity(source.purgeId, code, 'Original purge ID') }
+    case 'browser.profile.trash.purge': case 'browser.profile.trash.retention': {
+      const target = { archiveId: identity(source.archiveId, code, 'Archive ID'), expectedRevision: identity(source.expectedRevision, code, 'Archive revision'), purgeId: identity(source.purgeId, code, 'Original purge ID') }
+      return operation === 'browser.profile.trash.purge' ? { operation, ...target } : { operation, ...target, deleteAfter: source.deleteAfter === null ? null : count(source.deleteAfter, code, 'Retention deadline') }
+    }
     case 'browser.profile.trash.restore': return { operation, archiveId: identity(source.archiveId, code, 'Archived entry ID'), expectedRevision: identity(source.expectedRevision, code, 'Expected archive revision'),
       ...(source.folderId === undefined ? {} : { folderId: source.folderId === null ? null : identity(source.folderId, code, 'Restored folder ID') }) }
     case 'browser.profile.proxy-sign-in.set': return { operation, profileId: identity(source.profileId, code, 'Browser Profile ID'), signIn: parseBrowserProfileProxySignIn(source.signIn) }
@@ -622,11 +634,28 @@ function nativeUse(value: unknown, code: string): BrowserProfileNativeUse {
   return { status: row.status as BrowserProfileNativeUse['status'], pages, workers, requests, downloads,
     ...(row.reason === undefined ? {} : { reason: text(row.reason, code, 'Native usage reason') }) }
 }
+function retention(value: unknown, code: string): NonNullable<BrowserProfileTrashEntry['retention']> {
+  const row = record(value, ['purgeId', 'deleteAfter', 'approvedAt'], code, 'Approved retention')
+  const approvedAt = count(row.approvedAt, code, 'Retention approval time'), deleteAfter = count(row.deleteAfter, code, 'Retention deadline')
+  if (deleteAfter <= approvedAt) fail(code, 'Retention deadline must follow its approval.')
+  return { purgeId: identity(row.purgeId, code, 'Retention purge ID'), approvedAt, deleteAfter }
+}
+function purgeReceipt(value: unknown, code: string): BrowserProfilePurgeReceipt {
+  const row = record(value, ['purgeId', 'archiveId', 'profileId', 'status', 'requestedAt', 'updatedAt', 'warning', 'credentialCleanup', 'permissionCleanup'], code, 'Original purge receipt')
+  if (!['waiting-for-restart', 'preparing', 'deleting-data', 'erasing-backup', 'failed', 'unknown', 'deleted', 'restored'].includes(row.status as string)) fail(code, 'Purge stage is invalid.')
+  for (const key of ['credentialCleanup', 'permissionCleanup'] as const) if (row[key] !== undefined && !['pending', 'confirmed', 'unknown'].includes(row[key] as string)) fail(code, 'Independent cleanup receipt is invalid.')
+  return { purgeId: identity(row.purgeId, code, 'Original purge ID'), archiveId: identity(row.archiveId, code, 'Archive ID'), profileId: identity(row.profileId, code, 'Profile ID'), status: row.status as BrowserProfilePurgeReceipt['status'],
+    requestedAt: count(row.requestedAt, code, 'Purge request time'), updatedAt: count(row.updatedAt, code, 'Purge observation time'), ...(row.warning === undefined ? {} : { warning: text(row.warning, code, 'Purge warning') }), ...(row.credentialCleanup === undefined ? {} : { credentialCleanup: row.credentialCleanup as NonNullable<BrowserProfilePurgeReceipt['credentialCleanup']> }), ...(row.permissionCleanup === undefined ? {} : { permissionCleanup: row.permissionCleanup as NonNullable<BrowserProfilePurgeReceipt['permissionCleanup']> }) }
+}
+
 function archived(value: unknown, code: string): BrowserProfileTrashEntry {
-  const row = record(value, ['id', 'revision', 'archivedAt', 'profile', 'dataOwner'], code, 'Archived Profile')
+  const row = record(value, ['id', 'revision', 'archivedAt', 'profile', 'dataOwner', 'retention', 'purge'], code, 'Archived Profile')
   const original = profile(row.profile, code)
   if (row.dataOwner !== 'original-partition' || original.isDefault || row.id === original.id) fail(code, 'Archived Profile data owner or identity is invalid.')
-  return { id: identity(row.id, code, 'Archive entry ID'), revision: identity(row.revision, code, 'Archive revision'), archivedAt: count(row.archivedAt, code, 'Archive time'), profile: original, dataOwner: 'original-partition' }
+  const purge = row.purge === undefined ? undefined : purgeReceipt(row.purge, code)
+  if (purge && (purge.archiveId !== row.id || purge.profileId !== original.id || purge.status === 'deleted' || purge.status === 'restored')) fail(code, 'Purge belongs to another archived identity or a completed action.')
+  return { id: identity(row.id, code, 'Archive entry ID'), revision: identity(row.revision, code, 'Archive revision'), archivedAt: count(row.archivedAt, code, 'Archive time'), profile: original, dataOwner: 'original-partition',
+    ...(row.retention === undefined ? {} : { retention: retention(row.retention, code) }), ...(purge === undefined ? {} : { purge }) }
 }
 
 function folder(value: unknown, code: string): BrowserProfileFolder {
@@ -649,6 +678,7 @@ export function parseBrowserProfileControlResult(operation: BrowserProfileContro
     'browser.profile.folder.delete': ['revision', 'folderId', 'deleted', 'unassignedProfileIds'], 'browser.profile.inspect': ['revision', 'sequence', 'profile', 'usage'],
     'browser.profile.create': ['revision', 'profile'], 'browser.profile.copy': ['revision', 'sourceProfileId', 'profile'], 'browser.profile.update': ['revision', 'profile'],
     'browser.profile.set-default': ['revision', 'profileId'], 'browser.profile.delete': ['revision', 'archive'], 'browser.profile.trash.ls': ['revision', 'sequence', 'entries', 'legacyPendingDeletes'], 'browser.profile.trash.restore': ['revision', 'archiveId', 'profile'],
+    'browser.profile.trash.retention': ['revision', 'archive'], 'browser.profile.trash.purge': ['revision', 'purge'], 'browser.profile.trash.inspect': ['revision', 'purge'],
     'browser.profile.proxy-sign-in.set': ['profileId', 'saved', 'reconnected'], 'browser.profile.proxy-sign-in.clear': ['profileId', 'cleared', 'reconnected'],
     'browser.profile.network.check': ['profileId', 'check'], 'browser.profile.network.probe': ['profileId', 'diagnostic', 'historySaved'], 'browser.profile.network.history': ['profileId', 'diagnostics', 'nextCursor']
   }
@@ -759,6 +789,9 @@ export function parseBrowserProfileControlResult(operation: BrowserProfileContro
     case 'browser.profile.create': case 'browser.profile.update': return { revision, profile: profile(row.profile, code) }
     case 'browser.profile.set-default': return { revision, profileId: identity(row.profileId, code, 'Browser Profile ID') }
     case 'browser.profile.delete': return { revision, archive: archived(row.archive, code) }
+    case 'browser.profile.trash.retention': return { revision, archive: archived(row.archive, code) }
+    case 'browser.profile.trash.purge': return { revision, purge: purgeReceipt(row.purge, code) }
+    case 'browser.profile.trash.inspect': return { revision, purge: row.purge === null ? null : purgeReceipt(row.purge, code) }
     case 'browser.profile.trash.restore': return { revision, archiveId: identity(row.archiveId, code, 'Archive entry ID'), profile: profile(row.profile, code) }
     case 'browser.profile.trash.ls': {
       if (!Array.isArray(row.entries)) fail(code, 'Archived Profile list is invalid.')
@@ -797,6 +830,14 @@ export function assertBrowserProfileControlTarget(request: BrowserProfileControl
   }
   if (request.operation === 'browser.profile.delete') {
     if (result.operation !== request.operation || result.archive.profile.id !== request.profileId || result.archive.profile.revision !== request.expectedRevision) fail('CONTROL_PROTOCOL_ERROR', 'Recycle receipt does not retain this exact original Profile configuration.')
+    return
+  }
+  if (request.operation === 'browser.profile.trash.purge' || request.operation === 'browser.profile.trash.inspect') {
+    if (result.operation !== request.operation || !('purge' in result) || result.purge && (result.purge.purgeId !== request.purgeId || request.operation === 'browser.profile.trash.purge' && result.purge.archiveId !== request.archiveId)) fail('CONTROL_PROTOCOL_ERROR', 'Purge receipt belongs to another original action.')
+    return
+  }
+  if (request.operation === 'browser.profile.trash.retention') {
+    if (result.operation !== request.operation || !('archive' in result) || result.archive.id !== request.archiveId || (request.deleteAfter === null ? result.archive.retention !== undefined : result.archive.retention?.deleteAfter !== request.deleteAfter || result.archive.retention.purgeId !== request.purgeId)) fail('CONTROL_PROTOCOL_ERROR', 'Retention receipt belongs to another entry or deadline.')
     return
   }
   if (request.operation === 'browser.profile.trash.restore') {

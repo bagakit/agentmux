@@ -54,7 +54,38 @@ function savedUses(graph: AgentMuxSpatialGraph, profileId: string, open: Readonl
 
 /** The one owner of "who uses this Profile" and of deleting it; GUI and public control both call these. */
 export function createBrowserProfileUsage(ports: BrowserProfileUsagePorts) {
+  const assertUnused = async (profileId: string): Promise<void> => {
+    let saved: { graph: AgentMuxSpatialGraph } | null
+    try { saved = await ports.readSaved() }
+    catch (cause) {
+      throw profileError('Saved Tabs could not be read, so it is unknown whether a Browser still needs this Profile. Its original data is kept; try again.',
+        'BROWSER_PROFILE_USAGE_UNKNOWN', {}, cause)
+    }
+    // Read current native owners after the saved read, including candidates and closing pages.
+    const open = openUses(ports, profileId)
+    const ids = new Set(open.map(use => use.browserId))
+    const savedList = saved ? savedUses(saved.graph, profileId, ids) : []
+    const browsers = [...open, ...savedList]
+    if (open.length) {
+      throw profileError('Browser Profile is still used by an open Browser', 'BROWSER_PROFILE_IN_USE', { details: { browsers } })
+    }
+    if (savedList.length) {
+      const name = savedList[0]!.title || savedList[0]!.url
+      throw profileError(`Browser Profile is still used by the saved Browser "${name}"${savedList.length > 1 ? ` and ${savedList.length - 1} more` : ''}. Open it and switch it to another Profile, or close it, then delete again.`,
+        'BROWSER_PROFILE_IN_USE', { details: { browsers } })
+    }
+    const native = ports.nativeUse(profileId)
+    if (native.status === 'unknown') {
+      throw profileError('Native Profile use could not be confirmed. Original Profile data is kept; retry after its workers, requests and downloads can be read.',
+        'BROWSER_PROFILE_USAGE_UNKNOWN', { details: { native } })
+    }
+    if (native.status !== 'idle') {
+      throw profileError('This Profile still has native workers, requests or downloads. Let them finish before recycling; their existing work remains available.',
+        'BROWSER_PROFILE_IN_USE', { details: { native } })
+    }
+  }
   return {
+    assertUnused,
     async usage(profileId: string): Promise<BrowserProfileUsage> {
       let saved: { graph: AgentMuxSpatialGraph } | null, complete = true
       try { saved = await ports.readSaved() } catch { saved = null; complete = false }
@@ -68,34 +99,7 @@ export function createBrowserProfileUsage(ports: BrowserProfileUsagePorts) {
       // The manager invokes this guard inside the same per-Profile configuration queue and again
       // after source IO, while new native admission is fenced. Nothing is removed before commit.
       return ports.deleteProfile(profileId, approval, expectedRevision, async () => {
-      let saved: { graph: AgentMuxSpatialGraph } | null
-      try { saved = await ports.readSaved() }
-      catch (cause) {
-        throw profileError('Saved Tabs could not be read, so it is unknown whether a Browser still needs this Profile. Its original data is kept; try again.',
-          'BROWSER_PROFILE_USAGE_UNKNOWN', {}, cause)
-      }
-      // Read current native owners after the saved read, including candidates and closing pages.
-      const open = openUses(ports, profileId)
-      const ids = new Set(open.map(use => use.browserId))
-      const savedList = saved ? savedUses(saved.graph, profileId, ids) : []
-      const browsers = [...open, ...savedList]
-      if (open.length) {
-        throw profileError('Browser Profile is still used by an open Browser', 'BROWSER_PROFILE_IN_USE', { details: { browsers } })
-      }
-      if (savedList.length) {
-        const name = savedList[0]!.title || savedList[0]!.url
-        throw profileError(`Browser Profile is still used by the saved Browser "${name}"${savedList.length > 1 ? ` and ${savedList.length - 1} more` : ''}. Open it and switch it to another Profile, or close it, then delete again.`,
-          'BROWSER_PROFILE_IN_USE', { details: { browsers } })
-      }
-      const native = ports.nativeUse(profileId)
-      if (native.status === 'unknown') {
-        throw profileError('Native Profile use could not be confirmed. Original Profile data is kept; retry after its workers, requests and downloads can be read.',
-          'BROWSER_PROFILE_USAGE_UNKNOWN', { details: { native } })
-      }
-      if (native.status !== 'idle') {
-        throw profileError('This Profile still has native workers, requests or downloads. Let them finish before recycling; their existing work remains available.',
-          'BROWSER_PROFILE_IN_USE', { details: { native } })
-      }
+        await assertUnused(profileId)
       })
     }
   }

@@ -798,6 +798,9 @@ const api: AgentMuxPreloadApi = {
     assignProxy: (proxyId, expectedRevision, items) => ipcRenderer.invoke('browser:assignProxy', proxyId, expectedRevision, items),
     readProfileTrash: () => ipcRenderer.invoke('browser:readProfileTrash'),
     restoreProfile: (archiveId, expectedRevision, folderId) => ipcRenderer.invoke('browser:restoreProfile', archiveId, expectedRevision, folderId),
+    setProfileTrashRetention: (archiveId, expectedRevision, purgeId, deleteAfter) => ipcRenderer.invoke('browser:setProfileTrashRetention', archiveId, expectedRevision, purgeId, deleteAfter),
+    purgeProfile: (archiveId, expectedRevision, purgeId) => ipcRenderer.invoke('browser:purgeProfile', archiveId, expectedRevision, purgeId),
+    inspectProfilePurge: purgeId => ipcRenderer.invoke('browser:inspectProfilePurge', purgeId),
     onProfilesChanged(listener) {
       const wrapped = (_event: unknown, list: Parameters<typeof listener>[0]): void => listener(list)
       ipcRenderer.on('browser:profilesChanged', wrapped)

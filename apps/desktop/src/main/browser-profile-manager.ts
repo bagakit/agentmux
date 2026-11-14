@@ -1,6 +1,8 @@
 import type { BrowserProfileTrashEntry, BrowserProfileNativeUse, BrowserProfileRecycleReceipt, BrowserProfileRestoreReceipt } from '@agentmux/core/control'
 import { describeRetainedPartition, inspectRetainedPartition, retainedPartitionPath, BrowserProfileDataUnavailable } from './browser-profile-retained-data.js'
 import { resolve } from 'node:path'
+import { realpath } from 'node:fs/promises'
+import { createProfileSafetyCopy, verifyProfileSafetyCopy, restoreProfileSafetyCopy, removeOriginalProfileData, eraseProfileSafetyCopy, eraseHistoricalProfilePurge } from './browser-profile-purge-data.js'
 import { type BrowserProxyAsset, type BrowserProxyEdit, type BrowserProxyBinding, parseBrowserProfileQuery, parseBrowserProfileSelection, parseBrowserProfileBulkAction, type BrowserProfileQuery, type BrowserProfileView, type BrowserProfileViewSaveReceipt, type BrowserProfileBulkAction, type BrowserProfileSelectionItem, type BrowserProfileBulkItemResult } from '@agentmux/core/control'
 import { mintCapabilityToken, mintObjectId } from '@agentmux/core/object-id'
 import { app, BrowserWindow, session, webContents, type Session } from 'electron'
@@ -79,6 +81,8 @@ export class BrowserProfileManager implements BrowserProfileResolver {
   readonly activityObserverId = mintObjectId()
   /** Original encrypted credential owner pins its current endpoint before this Profile changes routes. */
   bindProxyCredentialsBeforeNetworkChange?: (profileId: string) => Promise<void>
+  /** Exact original credential and remembered-permission owners return their own cleanup receipts. */
+  cleanupPurgedIdentity?: (profileId: string) => Promise<{ credentialCleanup: 'confirmed' | 'unknown'; permissionCleanup: 'confirmed' | 'unknown' }>
   private readonly configurationTails = new Map<string, Promise<unknown>>()
   private initialization: Promise<void> | null = null
   private initializationError: Error | null = null
@@ -88,7 +92,8 @@ export class BrowserProfileManager implements BrowserProfileResolver {
   /** Applies each Profile's route to its own session; the view manager awaits it before any page opens. */
   readonly sessions: BrowserProfileSessions
 
-  constructor(private readonly store = new BrowserProfileStore(), sessions?: BrowserProfileSessions, private readonly sessionRoot: () => string = () => app.getPath('sessionData')) {
+  constructor(private readonly store = new BrowserProfileStore(), sessions?: BrowserProfileSessions, private readonly sessionRoot: () => string = () => app.getPath('sessionData'),
+    private readonly purgeOptions: { now?: () => number; assertExclusiveDataOwner?: () => Promise<void> } = {}) {
     this.sessions = sessions ?? createBrowserProfileSessions({
       session: profileId => session.fromPartition(this.resolvePartition(profileId)),
       retainedSession: profileId => {
@@ -198,7 +203,8 @@ export class BrowserProfileManager implements BrowserProfileResolver {
 
   private archiveSummary(entry: BrowserProfileTrashRecord): BrowserProfileTrashEntry {
     return { id: entry.id, revision: entry.revision, archivedAt: entry.archivedAt,
-      profile: this.presentProfile(profileSummary(entry.profile, this.defaultId!), false), dataOwner: 'original-partition' }
+      profile: this.presentProfile(profileSummary(entry.profile, this.defaultId!), false), dataOwner: 'original-partition',
+      ...(entry.retention ? { retention: structuredClone(entry.retention) } : {}), ...(entry.purge ? { purge: structuredClone(entry.purge) } : {}) }
   }
 
   listTrash(): BrowserProfileTrashEntry[] { this.assertInitialized(); return [...this.archivedProfiles.values()].map(entry => this.archiveSummary(entry)) }
@@ -456,6 +462,11 @@ export class BrowserProfileManager implements BrowserProfileResolver {
       if (archive.revision !== expectedRevision) throw new BrowserProfileConfigurationConflict(archive.revision)
       this.retiring.add(profileId)
       try {
+        if (archive.safetyCopy && archive.purge?.status !== 'failed' && archive.purge?.status !== 'preparing') {
+          await this.assertPurgeDataOwner(profileId)
+          this.assertSafetyCopyIdentity(archive)
+          await restoreProfileSafetyCopy(this.sessionRoot(), archive.data, archive.safetyCopy)
+        }
         // Check the held original directory before a native factory could create an empty replacement.
         await inspectRetainedPartition(this.sessionRoot(), archive.data)
         const target = this.sessions.retainedSession?.(profileId)
@@ -468,6 +479,135 @@ export class BrowserProfileManager implements BrowserProfileResolver {
         throw cause
       } finally { this.retiring.delete(profileId) }
     })
+  }
+
+  private purgeNow(): number {
+    const now = (this.purgeOptions.now ?? Date.now)()
+    if (!Number.isSafeInteger(now) || now < 0) throw new Error('The current time is unknown. The retained Profile was not cleaned.')
+    return now
+  }
+
+  private async assertPurgeDataOwner(profileId: string): Promise<void> {
+    if (this.sessions.nativeSessionAdmitted?.(profileId) !== false) throw new Error('This Profile may still have an open native storage owner. Its deletion intent is kept; cleanup can proceed after the App restarts without opening this Profile.')
+    if (this.purgeOptions.assertExclusiveDataOwner) await this.purgeOptions.assertExclusiveDataOwner()
+    else if (!app.hasSingleInstanceLock() || await realpath(this.sessionRoot()) !== await realpath(app.getPath('userData'))) {
+      throw new Error('Exclusive ownership of the original Profile storage root is unconfirmed. Its data is kept; restore the App data connection before cleanup.')
+    }
+  }
+
+  private assertSafetyCopyIdentity(archive: BrowserProfileTrashRecord): void {
+    if (!archive.purge || archive.safetyCopy?.relativePath !== `.agentmux-profile-purge/${archive.id}/${archive.purge.purgeId}/profile.tar`) throw new BrowserProfileDataUnavailable()
+  }
+
+  async setTrashRetention(archiveId: string, expectedRevision: string, purgeId: string, deleteAfter: number | null): Promise<BrowserProfileRecycleReceipt> {
+    this.assertInitialized()
+    const first = await this.store.inspectArchive(archiveId)
+    return this.configuration(first.archive.profile.id, async () => {
+      const now = this.purgeNow()
+      if (deleteAfter !== null && (!Number.isSafeInteger(deleteAfter) || deleteAfter <= now)) throw new Error('Choose a future retention deadline. Existing data is kept.')
+      const result = await this.store.setArchiveRetention(archiveId, expectedRevision, deleteAfter === null ? undefined : { purgeId, approvedAt: now, deleteAfter })
+      this.adopt(result.snapshot)
+      return { revision: result.snapshot.revision, archive: this.archiveSummary(result.archive) }
+    })
+  }
+
+  inspectTrashPurge(purgeId: string): Promise<import('@agentmux/core/control').BrowserProfilePurgeReceipt | null> { return this.store.inspectPurge(purgeId) }
+
+  async purgeProfile(archiveId: string, expectedRevision: string, purgeId: string, assertUnused: (profileId: string) => Promise<void>): Promise<import('@agentmux/core/control').BrowserProfilePurgeResult> {
+    this.assertInitialized()
+    const prior = await this.store.inspectPurge(purgeId)
+    if (prior) {
+      if (prior.archiveId !== archiveId) throw new Error('This purge ID belongs to another archive. The deletion was not repeated.')
+      return { revision: this.revision, purge: prior }
+    }
+    const first = await this.store.inspectArchive(archiveId)
+    return this.configuration(first.archive.profile.id, async () => {
+      const now = this.purgeNow()
+      if (now < first.archive.archivedAt) throw new Error('The current retention clock precedes this archive. Its data was not cleaned.')
+      const started = await this.store.beginArchivePurge(archiveId, expectedRevision, purgeId, now)
+      this.adopt(started.snapshot)
+      return await this.executePurge(started.archive, () => assertUnused(first.archive.profile.id))
+    })
+  }
+
+  /** Only explicit stored expiry/purge intents are eligible. Reads and restarts never replay an uncertain cleanup stage. */
+  async cleanupApprovedTrash(assertUnused: (profileId: string) => Promise<void>): Promise<void> {
+    this.assertInitialized()
+    await this.refresh()
+    const now = this.purgeNow()
+    for (const entry of [...this.archivedProfiles.values()]) {
+      if (entry.purge && (entry.purge.status !== 'waiting-for-restart' || now < entry.purge.requestedAt || now < entry.archivedAt)) continue
+      if (!entry.purge && (!entry.retention || now < entry.retention.approvedAt || now < entry.retention.deleteAfter)) continue
+      await this.configuration(entry.profile.id, async () => {
+        const current = (await this.store.inspectArchive(entry.id)).archive
+        if (current.purge && current.purge.status !== 'waiting-for-restart') return
+        let archive = current
+        if (!archive.purge) {
+          if (!archive.retention || now < archive.retention.approvedAt || now < archive.retention.deleteAfter) return
+          const result = await this.store.beginArchivePurge(archive.id, archive.revision, archive.retention.purgeId, now)
+          this.adopt(result.snapshot); archive = result.archive
+        }
+        await this.executePurge(archive, () => assertUnused(archive.profile.id))
+      })
+    }
+  }
+
+  private async executePurge(initial: BrowserProfileTrashRecord, assertUnused: () => Promise<void>): Promise<import('@agentmux/core/control').BrowserProfilePurgeResult> {
+    const profileId = initial.profile.id, purgeId = initial.purge!.purgeId
+    let archive = initial
+    const save = async (status: import('@agentmux/core/control').BrowserProfilePurgeStatus, extra: { warning?: string; safetyCopy?: BrowserProfileTrashRecord['safetyCopy'] } = {}) => {
+      const result = await this.store.updateArchivePurge(archive.id, purgeId, status, this.purgeNow(), extra)
+      archive = result.archive; this.adopt(result.snapshot)
+    }
+    const qualify = async () => {
+      if (this.purgeNow() < archive.purge!.requestedAt || this.purgeNow() < archive.archivedAt) throw new Error('The original deletion clock is unknown. Its data is kept until time can be confirmed.')
+      await this.assertPurgeDataOwner(profileId); await assertUnused(); await this.assertPurgeDataOwner(profileId)
+    }
+    this.retiring.add(profileId)
+    try {
+      try { await qualify() }
+      catch (cause) {
+        const warning = cause instanceof Error ? cause.message : 'Profile cleanup qualification is unknown; original data is kept.'
+        if (archive.purge?.warning !== warning) await save('waiting-for-restart', { warning })
+        return { revision: this.revision, purge: structuredClone(archive.purge!) }
+      }
+      await save('preparing')
+      const copy = await createProfileSafetyCopy(this.sessionRoot(), archive.id, purgeId, archive.data)
+      await verifyProfileSafetyCopy(this.sessionRoot(), copy)
+      await save('preparing', { safetyCopy: copy })
+      await qualify()
+      // This exact whole copy and its digest must be durably confirmed before touching the partition.
+      await save('deleting-data', { safetyCopy: copy })
+      this.assertSafetyCopyIdentity(archive)
+      await qualify()
+      await removeOriginalProfileData(this.sessionRoot(), archive.data)
+      await qualify()
+      await save('erasing-backup')
+      for (const prior of await this.store.priorPurgeCopies(profileId)) await eraseHistoricalProfilePurge(this.sessionRoot(), prior)
+      await eraseProfileSafetyCopy(this.sessionRoot(), copy)
+      const result = await this.store.completeArchivePurge(archive.id, purgeId, this.purgeNow())
+      this.adopt(result.snapshot)
+      let purge = result.purge
+      if (this.cleanupPurgedIdentity) {
+        try { purge = await this.store.updatePurgeOwners(purgeId, await this.cleanupPurgedIdentity(profileId)) }
+        catch { purge = { ...purge, warning: 'Profile metadata and retained data were removed. Credential or permission cleanup confirmation remains unavailable; inspect this original action before another operation.' } }
+      }
+      return { revision: result.snapshot.revision, purge }
+    } catch (cause) {
+      if (cause instanceof BrowserProfileWriteUnconfirmed) {
+        if (cause.currentSnapshot) this.adopt(cause.currentSnapshot)
+        throw cause
+      }
+      let restored = false
+      if (archive.safetyCopy) {
+        try { await this.assertPurgeDataOwner(profileId); await restoreProfileSafetyCopy(this.sessionRoot(), archive.data, archive.safetyCopy); restored = true } catch { /* The whole original safety copy and operation remain the recovery source. */ }
+      }
+      const warning = archive.safetyCopy
+        ? restored ? 'Cleanup failed. The complete original partition was restored; the retained entry and safety copy remain. Restore it or inspect this original purge ID.' : 'Cleanup did not confirm its result. The original purge and safety-copy identity are retained; inspect them before another action. No cleanup will be repeated automatically.'
+        : 'The complete safety copy could not be confirmed. The original partition was not removed; restore source access before trying again.'
+      await save(archive.safetyCopy && !restored ? 'unknown' : 'failed', { warning })
+      return { revision: this.revision, purge: structuredClone(archive.purge!) }
+    } finally { this.retiring.delete(profileId) }
   }
 
   async detectImportSources(): Promise<BrowserProfileImportSourceSummary[]> {

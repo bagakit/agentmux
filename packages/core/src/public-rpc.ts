@@ -62,6 +62,7 @@ export const AGENTMUX_RPC_CONTROL_METHODS = {
   'browser.profile.ls': 'browser.profile.ls', 'browser.profile.inspect': 'browser.profile.inspect',
   'browser.profile.folder.create': 'browser.profile.folder.create', 'browser.profile.folder.rename': 'browser.profile.folder.rename', 'browser.profile.folder.delete': 'browser.profile.folder.delete',
   'browser.profile.trash.ls': 'browser.profile.trash.ls', 'browser.profile.trash.restore': 'browser.profile.trash.restore',
+  'browser.profile.trash.retention': 'browser.profile.trash.retention', 'browser.profile.trash.purge': 'browser.profile.trash.purge', 'browser.profile.trash.inspect': 'browser.profile.trash.inspect',
   'browser.profile.view.create': 'browser.profile.view.create', 'browser.profile.view.update': 'browser.profile.view.update', 'browser.profile.view.delete': 'browser.profile.view.delete', 'browser.profile.bulk-update': 'browser.profile.bulk-update',
   'browser.profile.create': 'browser.profile.create', 'browser.profile.copy': 'browser.profile.copy', 'browser.profile.update': 'browser.profile.update',
   'browser.profile.set-default': 'browser.profile.set-default', 'browser.profile.delete': 'browser.profile.delete',
