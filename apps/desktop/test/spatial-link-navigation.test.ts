@@ -15,6 +15,7 @@ import { useAppStore } from '../src/renderer/src/store'
 import { spatialCatalog } from '../src/renderer/src/lib/space-agent-control'
 import { DesktopFocusFailure, resolveDesktopSpaceSelection } from '../src/renderer/src/lib/desktop-focus-navigation'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
+import { moteAgent } from './fixtures/mote-workface'
 import { SpatialLinkIngress } from '../src/main/spatial-link-ingress'
 import { SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
 
@@ -224,20 +225,19 @@ it.each([false, true])('opens an Agent URI via the original service/Store and gu
 }, 30_000)
 
 it('routes an Agent link through the real Main ingress and Store without invoking lifecycle actions', async () => {
-  const { state } = arrange(1)
+  arrange(1)
+  useAppStore.setState({sessions:[{...moteAgent('healthy:view:one',null),workspacePath:topics[0]!.directoryPath}]})
+  const state=useAppStore.getState()
   const ingress = new SpatialLinkIngress(), seen: string[] = [], reports: string[] = []
-  let settled!: () => void
-  const completed = new Promise<void>(resolve => { settled = resolve })
-  ingress.receive('amux://agent/healthy%3Aview%3Aone')
+  const opening = ingress.receive('amux://agent/healthy%3Aview%3Aone')
   ingress.ready(async (request, signal) => {
     seen.push(request.operation)
     const result = await useAppStore.getState().executeControl(request, signal)
-    if (request.operation === 'focus') settled()
     return result
   }, message => reports.push(message))
-  await completed
+  await opening
   await new Promise(resolve => setImmediate(resolve))
-  expect(seen).toEqual(['space.ls', 'focus'])
+  expect(seen,reports.join('\n')).toEqual(['space.ls', 'focus'])
   expect(useAppStore.getState().workbenchSpaceSelection).toMatchObject({ tabId: 'chat:view:one', regionId: 'region:view:one' })
   expect(useAppStore.getState().tabs).toEqual(state.tabs)
   expect(useAppStore.getState().sessions).toBe(state.sessions)

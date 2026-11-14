@@ -1,11 +1,15 @@
 import { readFile, writeFile } from 'node:fs/promises'
+import { AsyncLocalStorage } from 'node:async_hooks'
 import { deepStrictEqual } from 'node:assert/strict'
+import { execFile } from 'node:child_process'
+import { promisify } from 'node:util'
+import { join, dirname, resolve } from 'node:path'
 import { Window } from 'happy-dom'
 
 // Browser and IPC boundaries only. Both processes load the real renderer owners
 // after installing their browser storage, and share the real Core document.
 const [phase, spatialPath, storagePath, mode = 'agent'] = process.argv.slice(2)
-const moteMode = mode !== 'agent'
+const moteMode = mode !== 'agent', publicMode = mode === 'mote-public'
 const stages: string[] = []
 const stage = (name: string) => { stages.push(name); process.stderr.write('process-restore:' + mode + ':' + phase + ':' + name + '\n') }
 stage('environment')
@@ -13,7 +17,7 @@ const browser = new Window({ url: 'http://navigation-restore.test' })
 // A real desktop shell owns the event loop; this Node worker retains it while its browser/Store flushes settle.
 const shellLease = setInterval(() => {}, 1000)
 for (const [key, value] of Object.entries({
-  self: browser, window: browser, document: browser.document, navigator: browser.navigator,
+  self: browser, window: browser, document: browser.document, navigator: browser.navigator, localStorage: browser.localStorage,
   CSS: browser.CSS, HTMLElement: browser.HTMLElement, Element: browser.Element, Node: browser.Node,
   requestAnimationFrame: browser.requestAnimationFrame.bind(browser),
   cancelAnimationFrame: browser.cancelAnimationFrame.bind(browser)
@@ -53,8 +57,16 @@ const { desktopSpatialGraph } = await import('../../src/renderer/src/lib/desktop
 const { spatialCatalog } = await import('../../src/renderer/src/lib/space-agent-control')
 const { workbenchObjectLayout } = await import('../../src/renderer/src/lib/desktop-focus-navigation')
 const fixture = await import('./mote-workface')
+const { useLauncherState } = await import('../../src/renderer/src/lib/launcher-state')
+const { moteEntryDraftKey } = await import('../../src/renderer/src/lib/mote-entry-hold')
+const { scratchTopicLogicalPath } = await import('@agentmux/host/mote-model')
 const { scratchTopicsScope } = await import('../../src/renderer/src/lib/scratch-topic-snapshots')
 const owner = new AgentMuxSpatialStateStore(spatialPath!)
+const resolvingAddress=new AsyncLocalStorage<boolean>(),resolveWitness={reads:0,writeAttempts:0}
+const originalResolve=owner.resolveSpaceLink.bind(owner),originalSpatialWrite=(owner as any).writeLocked.bind(owner)
+owner.resolveSpaceLink=address=>resolvingAddress.run(true,()=>{resolveWitness.reads++;return originalResolve(address)})
+;(owner as any).writeLocked=(...args:unknown[])=>{if(resolvingAddress.getStore()){resolveWitness.writeAttempts++;throw Error('A public address read attempted an original spatial write')}return originalSpatialWrite(...args)}
+
 const current = { hostId: 'local', sessionId: fixture.defaultAgent.id, displayWorkspaceId: fixture.scratchWorkspace.id,
   groupId: 'mote-group', tabId: fixture.defaultTab.id, regionId: fixture.defaultTab.layout.activeRegionId }
 const topics = moteMode ? fixture.moteTopics.map((topic, index) => index ? topic : { ...topic,
@@ -144,14 +156,37 @@ if (moteMode) {
   stage('mounted-app')
   unmount = async () => { root.unmount(); restorePopover(); await new Promise(resolve => setImmediate(resolve)) }
 }
+let publicLink: Record<string,unknown>|undefined, publicRpc: import('@agentmux/core').AgentMuxRpcClient|undefined, publicOwner: import('@agentmux/core').AgentMuxControlServer|undefined
+const publicCli:unknown[]=[], publicFocusRequests:unknown[]=[]
+const publicTarget={runtimeId:'OriginalPrivateRuntime',spaceId:spatialCatalog(useAppStore.getState(),topics).spaces.find(space=>space.kind==='mote'&&space.topicId===fixture.moteTopics[0]!.id)!.spaceId}
+const publicCommand=async(args:string[])=>{
+ let stdout:string,exitCode=0
+ try{({stdout}=await promisify(execFile)(process.execPath,['--experimental-transform-types','--import',resolve('apps/desktop/test/mote-object-links-node-loader.mjs'),resolve('packages/core/src/agentmux.ts'),'--endpoint','unix:'+publicOwner!.path,...args],{env:process.env,maxBuffer:8*1024*1024,timeout:20000}))}
+ catch(error){const failure=error as {code?:number;stdout?:string};if(failure.code!==1||!failure.stdout)throw error;stdout=failure.stdout;exitCode=1}
+ const value=JSON.parse(stdout);if(value.ok!==true||exitCode!==0&&(args[0]!=='app'||value.result?.partial!==true))throw Error('Original public CLI failed: '+stdout);publicCli.push({exitCode,raw:stdout,envelope:value});return value.result
+}
+if(publicMode){
+ const {AgentMuxControlServer,connectAgentMuxRpc}=await import('@agentmux/core')
+ publicOwner=new AgentMuxControlServer({socketPath:join(dirname(spatialPath!),'links.sock'),spatialState:owner,coreClients:()=>[],hostedRuntime:()=>({call:async(method:string)=>{if(method!=='runtime.owner.identity')throw Error('Unrelated Runtime observation');return{owner:{runtimeId:publicTarget.runtimeId,ownerInstanceId:'private-owner-'+process.pid}}},assertFence:()=>{}}) as never,execute:request=>{publicFocusRequests.push(structuredClone(request));return useAppStore.getState().executeControl(request)}})
+ await publicOwner.start();publicRpc=await connectAgentMuxRpc({endpoint:{transport:'unix',path:publicOwner.path}})
+}
 const { SpatialLinkIngress } = await import('../../src/main/spatial-link-ingress')
 const { formatSessionAddress, formatMoteAddress, parseAmuxObjectLink } = await import('@agentmux/core/sharing')
 const moteSpace = spatialCatalog(useAppStore.getState(), topics).spaces.find(space => space.kind === 'mote' && space.topicId === fixture.moteTopics[0]!.id)
-const raw = moteMode ? formatMoteAddress({ spaceId: moteSpace!.spaceId, ...(mode === 'mote-thread' ? { eventId: originalEvent } : {}) }) : formatSessionAddress(fixture.executionAgent.id)
+let raw = moteMode ? formatMoteAddress({ spaceId: moteSpace!.spaceId, ...(mode === 'mote-thread' ? { eventId: originalEvent } : {}) }) : formatSessionAddress(fixture.executionAgent.id)
+if(publicMode){
+ if(phase==='save'){const issued=await publicCommand(['space','link','ensure','--runtime',publicTarget.runtimeId,'--space',publicTarget.spaceId,'--operation-id','private-original-publication']);raw=issued.url;await writeFile(storagePath!+'.link',JSON.stringify(issued))}
+ else raw=JSON.parse(await readFile(storagePath!+'.link','utf8')).url
+ const before=await readFile(spatialPath!,'utf8'),resolved=await publicCommand(['space','link','resolve','--url',raw]),after=await readFile(spatialPath!,'utf8');deepStrictEqual(resolved.target,publicTarget)
+ const addressNamespaceUnchanged=JSON.stringify(JSON.parse(before).graph.resources['owned:space-object-links'])===JSON.stringify(JSON.parse(after).graph.resources['owned:space-object-links'])
+ publicLink={runtimeId:publicTarget.runtimeId,target:publicTarget,resolved,alias:parseAmuxObjectLink(raw),cli:publicCli,focusRequests:publicFocusRequests,resolveWitness,addressNamespaceUnchanged,fileBytesUnchanged:before===after,addressReadOnly:resolveWitness.writeAttempts===0&&addressNamespaceUnchanged}
+}
 const requests: string[] = [], issues: string[] = []
+const hydratedLauncherDrafts=structuredClone(useLauncherState.getState().drafts)
 const beforeReopen = moteMode ? { work: useAppStore.getState().workbenchSpaceSelection, visible: Boolean(browser.document.querySelector('[data-mote-space-id]')), page: browser.document.querySelector<HTMLElement>('[data-mote-space-id]')?.dataset.motePage } : undefined
-if (phase === 'save' || moteMode && mode === 'mote-thread') {
+if (phase === 'save' || moteMode && (mode === 'mote-thread' || publicMode)) {
   if (phase === 'save') useAppStore.getState().focusRegion('project', 'work-tab', 'work-file', 'navigation', 'work-group')
+  if (phase === 'save' && publicMode) { const scope={workspace:fixture.scratchWorkspace,topic:topics[0]!,rootPath:scratchTopicLogicalPath(fixture.scratchWorkspace,topics[0]!)!};useLauncherState.getState().setDraft(moteEntryDraftKey(scope),'prompt','Original Mote unsent '+crypto.randomUUID()) }
   if (phase === 'save') useAppStore.setState({ agentComposerDrafts: moteMode ? { [fixture.defaultAgent.id]: 'Unsent Mote main draft', [fixture.neighborAgent.id]: 'Unsent Mote member draft', [fixture.executionAgent.id]: 'Unsent original draft' } : { [fixture.executionAgent.id]: 'Unsent original draft' } })
   const before = useAppStore.getState()
   const ingress = new SpatialLinkIngress()
@@ -161,13 +196,14 @@ if (phase === 'save' || moteMode && mode === 'mote-thread') {
   ingress.ready(async request => {
     requests.push(request.operation)
     return await useAppStore.getState().executeControl(request)
-  }, message => issues.push(message))
+  }, message => issues.push(message), undefined, publicMode ? {focusMote:async(request,signal)=>({operation:'focus',...await publicRpc!.call('app.focus',{target:request.target,inputPolicy:request.inputPolicy,operationId:request.requestId},{signal})}),locate:async()=>{throw Error('No new route')},openCapsule:async()=>{throw Error('No Capsule')}}:undefined)
   await opening
   stage('opened-uri')
   await new Promise(resolve => setImmediate(resolve))
   deepStrictEqual(useAppStore.getState().sessions, before.sessions, 'Link must retain original Sessions')
   deepStrictEqual(useAppStore.getState().agentComposerDrafts, before.agentComposerDrafts, 'Link must retain original draft')
 }
+if(publicMode){const focus=await publicCommand(['app','focus','--mote',raw]);deepStrictEqual(focus.navigation.moteLink?.target,publicTarget);deepStrictEqual(focus.navigation.requested,parseAmuxObjectLink(raw));if(!['applied','unchanged'].includes(focus.navigation.state))throw Error('Original Mote was not confirmed: '+JSON.stringify(focus))}
 stage('flush')
 await prepareRendererUpdate()
 stage('flushed')
@@ -178,8 +214,10 @@ const storage = Object.fromEntries(Array.from({ length: browser.localStorage.len
 }))
 if (phase === 'save') await writeFile(storagePath!, JSON.stringify(storage))
 const moteFrame = moteMode ? browser.document.querySelector<HTMLElement>('[data-mote-space-id]') : null
-const proof = { pid: process.pid, stages, raw, target: parseAmuxObjectLink(raw), work: state.workbenchSpaceSelection,
-  ...(moteMode ? { beforeReopen, mote: { spaceId: moteFrame?.dataset.moteSpaceId, topicId: moteFrame?.dataset.moteSpace,
+const composer=moteFrame?.querySelector<HTMLElement>('[aria-label="Message Agent"]')
+const composerFacts={present:Boolean(composer),visible:Boolean(composer&&!composer.closest('[hidden],[inert]')&&browser.getComputedStyle(composer).display!=='none'&&browser.getComputedStyle(composer).visibility!=='hidden'),text:composer?.textContent,sessionId:composer?.closest<HTMLElement>('[data-workbench-session-id]')?.dataset.workbenchSessionId}
+const proof = { ...(publicMode?{publicLink,launcherDrafts:useLauncherState.getState().drafts,hydratedLauncherDrafts}:{}), pid: process.pid, stages, raw, target: parseAmuxObjectLink(raw), work: state.workbenchSpaceSelection,
+  ...(moteMode ? { beforeReopen, mote: { composer:composerFacts,spaceId: moteFrame?.dataset.moteSpaceId, topicId: moteFrame?.dataset.moteSpace,
     visible: Boolean(moteFrame && !moteFrame.closest('[hidden], [inert]')), page: moteFrame?.dataset.motePage,
     eventId: moteFrame?.querySelector<HTMLElement>('[data-mote-work-thread]')?.dataset.moteWorkThread,
     threadBody: [...moteFrame?.querySelectorAll<HTMLElement>('[data-mote-work-thread] blockquote') ?? []].some(body => body.textContent?.includes('Retained work assignment') && !body.closest('[hidden], [inert]') && browser.getComputedStyle(body).display !== 'none' && browser.getComputedStyle(body).visibility !== 'hidden'),
@@ -189,6 +227,7 @@ const proof = { pid: process.pid, stages, raw, target: parseAmuxObjectLink(raw),
   graph: (await owner.read())!.graph, requests, issues, lifecycleCalls, continuityRequests }
 await unmount?.()
 dispose?.()
+await publicRpc?.dispose();await publicOwner?.stop()
 await browser.happyDOM.abort()
 clearInterval(shellLease)
 await new Promise<void>(resolve => process.stdout.write(JSON.stringify(proof), () => resolve()))
