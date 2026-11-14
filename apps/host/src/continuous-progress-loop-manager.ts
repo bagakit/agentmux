@@ -89,11 +89,12 @@ export class ContinuousProgressLoopManager {
       for (const [goalId, goal] of records) for (const loopId of this.goalLoops.get(goalId) ?? []) {
         const loop = this.require(loopId)
         if (loop.status === 'stopped' || loop.taskSource?.kind !== 'goal') continue
-        const source = decideGoalProgressSource(loop.taskSource, goal)
+        const source = this.goalDecision(loop, goal)
         if (source.action === 'continue' && goal?.sessionIds.includes(loop.agentSessionId)) continue
         // Confirmed original owner updates cancel any in-flight input synchronously.
-        this.cancelDelivery(loop.loopId)
-        this.patch(loop.loopId, { status: source.action === 'stop' ? 'stopped' : 'paused', lastDecision: source.action === 'continue' ? 'The original Session association changed; inspect this Goal.' : source.reason })
+        const reason = source.action === 'continue' ? 'The original Session association changed; inspect this Goal.' : source.reason
+        this.cancelDelivery(loop.loopId, new Error(reason))
+        this.patch(loop.loopId, { status: source.action === 'stop' ? 'stopped' : 'paused', lastDecision: reason })
         void this.persist(loop.loopId).catch(() => {})
       }
     })
@@ -297,7 +298,15 @@ export class ContinuousProgressLoopManager {
       goal = await this.goals.read(loop.taskSource.goalId)
     } catch (error) { return { action: 'defer', reason: 'Reading the original Goal is unconfirmed. This occurrence is skipped; the original arrangement and manual input are kept for the next source check. ' + (error instanceof Error ? error.message : String(error)) } }
     if (goal && !goal.sessionIds.includes(loop.agentSessionId)) return { action: 'pause', reason: 'The exact Session is no longer associated with this Goal. Original input and Agent are retained.' }
-    return decideGoalProgressSource(loop.taskSource, goal)
+    return this.goalDecision(loop, goal)
+  }
+  private goalDecision(loop: ContinuousProgressLoop, goal: GoalProgressRecord | null | undefined): GoalProgressDecision {
+    if (loop.taskSource?.kind !== 'goal') return { action: 'continue', reason: '' }
+    const source = decideGoalProgressSource(loop.taskSource, goal)
+    // This qualifies only a new plan-management input, never an already frozen claim.
+    if (source.action === 'continue' && goal?.plan && !loop.pendingCompletion && goal.supervisorSessionId !== loop.agentSessionId)
+      return { action: 'pause', reason: 'The original loop Agent is no longer this plan’s current Supervisor. New management input is paused. Explicitly stop this loop before starting the current Supervisor; the original Agent and manual input remain available.' }
+    return source
   }
   /**
    * Ask the maintenance source whether this due occurrence may run. A confirmed change pauses the arrangement.
@@ -842,10 +851,10 @@ export class ContinuousProgressLoopManager {
       await this.persist(claim.loop.loopId)
     }
   }
-  private cancelDelivery(loopId: string): void {
-    for (const controller of this.activations.get(loopId) ?? []) controller.abort()
-    this.initialDeliveries.get(loopId)?.abort()
-    if (this.activeDelivery?.loopId === loopId) this.activeDelivery.controller.abort()
+  private cancelDelivery(loopId: string, reason?: Error): void {
+    for (const controller of this.activations.get(loopId) ?? []) controller.abort(reason)
+    this.initialDeliveries.get(loopId)?.abort(reason)
+    if (this.activeDelivery?.loopId === loopId) this.activeDelivery.controller.abort(reason)
   }
   private patch(loopId: string, patch: Partial<ContinuousProgressLoop>): void {
     const loop = this.scheduler.get(loopId)
