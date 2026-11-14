@@ -2,6 +2,7 @@ import { fileURLToPath } from 'node:url'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { join } from 'node:path'
+import currentSources from '../../../test/vitest.mote-context.config.mts'
 const rootUrl = new URL('../../../../../', import.meta.url)
 const root = fileURLToPath(rootUrl)
 const inputs = new Map<string, { path: string; loadedPath: string; sha256: string; bytes: number }>()
@@ -19,7 +20,7 @@ export default {
       return code
     }
   }],
-  resolve: { alias: [{ find: /^@agentmux\/core$/, replacement: fileURLToPath(new URL('packages/core/src/index.ts', rootUrl)) }] },
+  resolve: currentSources.resolve,
   test: { include: ['apps/desktop/test/text-edit-context-menu.test.ts'], maxWorkers: 1, cache: false,
     setupFiles: [fileURLToPath(new URL('vitest.setup.ts', rootUrl))] }
 }
