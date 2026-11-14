@@ -24,6 +24,9 @@ import { activeTopicIdFromLayout, layoutForActiveTopic } from './scratch-topic-l
 import { SHORTCUT_BINDINGS } from './shortcut-registry'
 import { logicalRegionId, layoutForLogicalRegionFocus, type RegionFocusCause } from './region-focus'
 import { workbenchObjectLayout, type NavigationState } from './desktop-focus-navigation'
+import { dispatchMountedSpaceCommand } from './mounted-space-shortcuts'
+import type { SpaceMountView } from '../../../shared/space-mount'
+import type { MountedSpaceObservation } from './space-mount-view'
 
 /**
  * 一次按键解析出的命令——已经定到「哪个动作、往哪个方向、第几张」，但**落点（哪个 Workspace/Tab/
@@ -185,6 +188,10 @@ export function adjacentRegionId(
 
 /** 落点解析 + 转发所需的最小 store 切片。App 直接把 store 快照传进来（它是这个类型的超集）。 */
 export type WorkbenchShortcutStore = Partial<Pick<NavigationState, 'config' | 'spaceZoneBindings' | 'spatialRequests' | 'scratchTopicSnapshots' | 'topicCategories' | 'workbenchSpaceSelection'>> & {
+  selectedSpaceMount?: unknown
+  mountedSpaceInputs?: unknown
+  mountedSpaceObservations?: Record<string, MountedSpaceObservation>
+  editSpaceMountView?(key: string, view: SpaceMountView): void
   retainedSpatialFocus?: { regionId: string; tabId: string; workspaceId: string; topicId?: string } | null
   mainSurface: string
   activeWorkspaceId: string | null
@@ -249,6 +256,7 @@ export function dispatchWorkbenchCommand(
 ): boolean {
   // 快捷键只作用于 Workbench 面；Board 等其他主面不接管这些键。
   if (store.mainSurface !== 'workbench') return false
+  if (store.selectedSpaceMount !== undefined && store.selectedSpaceMount !== null) return dispatchMountedSpaceCommand(command, store)
   const workspaceId = store.activeWorkspaceId
   const storedLayout = workspaceId ? store.layouts[workspaceId] : undefined
   if (!workspaceId || !storedLayout) return false

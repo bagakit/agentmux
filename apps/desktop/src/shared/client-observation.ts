@@ -95,6 +95,15 @@ export const desktopWorkbenchObservationSchema = z.object({
       stalled: z.boolean().optional(), lastFailureCode: z.string().max(128).nullable().optional(),
       conflicts: z.number().int().nonnegative().optional() }).strict() }).strict().optional(),
   desktop: desktopObservationSchema,
+  // Client-private source display, separate from the answering Core's local selection.
+  // Missing on older producers means unknown; DOM input facts confer no Session authority.
+  mountedSpace: z.object({
+    target: z.object({ hostId: id, reference: z.object({ runtimeId: id, spaceId: id }).strict() }).strict().nullable(),
+    selection: z.object({ groupId: id, tabId: id, regionId: id }).strict().nullable(),
+    presentation: z.enum(['visible', 'hidden', 'pending', 'unknown']),
+    input: z.object({ kind: z.enum(['textarea', 'input', 'content-editable', 'other', 'none', 'unknown']),
+      connected: z.boolean().optional(), visible: z.boolean().optional(), inert: z.boolean().optional() }).strict()
+  }).strict().nullable().optional(),
   tabs: z.array(z.object({ id, workspaceId: id, topicId: id.optional(), titleRegionId: id, name: z.string().optional(),
     layout: z.object({ root: regionTree, activeRegionId: id }).strict(), regions: z.array(region) }).strict()),
   layouts: z.record(z.string(), z.object({ root: groupTree, activeGroupId: id, groups: z.array(z.object({

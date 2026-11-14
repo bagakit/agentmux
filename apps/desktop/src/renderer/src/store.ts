@@ -1,3 +1,9 @@
+import { observeMountedSpaceWindow } from './lib/mounted-space-observation'
+import { editMountedAgentOpen, editMountedLauncherSelection, type MountedAgentOpenInput, type MountedLauncherSelection, type MountedLauncherSlot } from './lib/space-mount-launch'
+import { editMountedSpaceInput, editMountedSpaceDraftInput, editMountedRegistration, mountedSpaceInput, mountedSpaceTarget, acceptsMountedSnapshot, type MountedSpaceObservation, type MountedSpaceRegistrationInput } from './lib/space-mount-view'
+import { observeMountedSessions, type MountedSessionObservation, type MountedSessionUpdate } from './lib/space-mount-sessions'
+import { spaceMountKey, type SpaceMountRecord, type SpaceMountView } from '../../shared/space-mount'
+import type { SpaceSnapshot } from '@agentmux/core'
 import { refreshGoalDelegations } from './lib/goal-delegation-work'
 import { bindAgentConversationFloatingTarget, requestAgentConversationFloatingOpen } from './lib/pmo-teams-topic-floating'
 import { retainedSessionRecordDelete, sessionRecordDeleteKey, sameSessionRecordDelete } from './lib/session-record-delete'
@@ -1037,6 +1043,20 @@ export type AppState = GitReadingActions & {
   /** Exact logical focus retained when a background move removes the active leaf. */
   retainedSpatialFocus: (AgentMuxSpaceAddress & { topicId?: string }) | null
   workbenchSpaceSelection: AgentMuxDesktopSpaceSelection | null
+  /** Original user-document input; foreign business snapshots are never persisted here. */
+  mountedSpaceInputs: unknown
+  selectedSpaceMount: unknown
+  mountedSpaceObservations: Record<string, MountedSpaceObservation>
+  mountedSpaceSessions: Record<string, MountedSessionObservation>
+  observeSpaceMountSessions(target: SpaceMountRecord, update: MountedSessionUpdate): void
+  mountSpace(target: SpaceMountRecord, reveal?: boolean): void
+  retainSpaceMountRegistration(key: string, update: (current: MountedSpaceRegistrationInput | undefined) => MountedSpaceRegistrationInput | undefined): void
+  retainSpaceMountAgentOpen(key: string, update: (current: MountedAgentOpenInput | undefined) => MountedAgentOpenInput | undefined): void
+  editSpaceMountLauncher(key: string, slot: MountedLauncherSlot, selection: MountedLauncherSelection): void
+  selectSpaceMount(key: string | null): void
+  editSpaceMountView(key: string, view: SpaceMountView): void
+  editSpaceMountDraft(key: string, tabId: string, regionId: string, text: string, view?: SpaceMountView): void
+  observeSpaceMount(target: SpaceMountRecord, observation: { snapshot?: SpaceSnapshot; error?: string | undefined; reading: boolean }): void
   /** Default CLI navigation suppresses automatic caret until explicit human/keyboard navigation. */
   /** Ephemeral explicit Mote navigation; never persisted or an execution authority. */
   moteDiscussionEntry: { workspaceId: string; topicId: string; token: string; memberReference?: WorkbenchProjectionSelection; eventId?: string } | null
@@ -3989,6 +4009,8 @@ function retainLayoutSelection(layout: WorkspaceLayout, next: WorkspaceLayout): 
 }
 
 type PersistedAppState = {
+  mountedSpaceInputs?: unknown
+  selectedSpaceMount?: unknown
   pendingAgentLaunches?: RetainedPendingAgentLaunches
   workbenchSpaceSelection: AgentMuxDesktopSpaceSelection | null
   projectGroups?: AgentMuxProjectGroupFact[]
@@ -4094,6 +4116,8 @@ type PersistedAppState = {
 export type RestoredUiState = Pick<
   AppState,
   | 'workspaceAgentOrder'
+  | 'mountedSpaceInputs'
+  | 'selectedSpaceMount'
   | 'workbenchSpaceSelection'
   | 'activeWorkspaceId'
   | 'mainSurface'
@@ -4197,6 +4221,8 @@ export function restorePersistedUiState(
   persisted: Pick<
     PersistedAppState,
     | 'workspaceAgentOrder'
+    | 'mountedSpaceInputs'
+    | 'selectedSpaceMount'
     | 'workbenchSpaceSelection'
     | 'activeWorkspaceId'
     | 'mainSurface'
@@ -4243,6 +4269,8 @@ export function restorePersistedUiState(
   const surveyPages = readSurveyPagePreferences(persisted.surveyPageReferences)
   const surveyView = readSurveyProfileView(persisted.surveyProfileView)
   return {
+    mountedSpaceInputs: persisted.mountedSpaceInputs === undefined ? {} : persisted.mountedSpaceInputs,
+    selectedSpaceMount: persisted.selectedSpaceMount === undefined ? null : persisted.selectedSpaceMount,
     workspaceAgentOrder: restoreWorkspaceAgentOrder(persisted.workspaceAgentOrder),
     workbenchSpaceSelection: restoreWorkbenchSpaceSelection(persisted.workbenchSpaceSelection),
     focusTimelineNameWidth: clampFocusTimelineNameWidth(persisted.focusTimelineNameWidth),
@@ -4296,6 +4324,8 @@ export function restorePersistedUiState(
 // references, so they can reuse the projection without visiting unrelated workbench / file content.
 function selectPersistedInputs(state: AppState, coreSpatialReady: boolean) {
   return {
+    mountedSpaceInputs: state.mountedSpaceInputs,
+    selectedSpaceMount: state.selectedSpaceMount,
     pendingAgentLaunches: retainedPendingAgentLaunches(state.pendingAgentLaunches),
     workbenchSpaceSelection: state.workbenchSpaceSelection,
     projectGroups: coreSpatialReady ? undefined : state.projectGroups,
@@ -5147,6 +5177,13 @@ async function saveSurveyPreferences(): Promise<AgentMuxSpatialSave> {
 export function auxiliaryUserDataPending(): boolean {
   return launcherUnreadEditsPending() || moteFloatingUnreadEditsPending() || agentBookmarks.pending()
 }
+/** Admission ACK for this exact original registration input; no other settings save is required. */
+export async function checkpointMountedSpaceInputs(): Promise<void> {
+  try {
+    if (!workbenchWriteFence.isOpen()) throw new Error('The original Desktop user document is still being restored. This Space request is kept in memory and has not been sent.')
+    await persistentWorkbenchStorage.checkpoint(WORKBENCH_USER_STATE_KEY, { state: partializeAppState(useAppStore.getState()), version: 1 })
+  } catch (cause) { useAppStore.getState().reportWorkbenchSaveFailure(cause, 'local-storage'); throw cause }
+}
 function requestWorkbenchStorageCommit(): void {
   workbenchStorageCommit = requestWorkbenchStorageFlush(false)
   void workbenchStorageCommit.catch(() => {})
@@ -5391,6 +5428,7 @@ function collaborationMapSpaceTarget(state: AppState): CollaborationMapTarget {
 }
 
 export function fileNavigationSelection(state: AppState): string {
+  if (state.mainSurface === 'workbench' && state.selectedSpaceMount !== null) return JSON.stringify([state.mainSurface, state.selectedSpaceMount])
   // Survey owns its selection; a split changes the underlying Space layout, not user navigation.
   if (state.mainSurface === 'recall') return JSON.stringify([state.mainSurface, state.recallNotebookId, state.recallNoteId, state.recallZoneSelection])
   if (state.mainSurface === 'survey') return JSON.stringify([state.mainSurface, state.activeWorkspaceId, state.surveyZoneSelection, state.workbenchSpaceSelection])
@@ -5557,6 +5595,52 @@ let hostHomeNavigation: object | undefined
 
 export const useAppStore = create<AppState>()(persist<AppState, [], [], PersistedAppState>((set, get) => ({
   restoredWorkbench: null,
+  mountedSpaceInputs: {},
+  selectedSpaceMount: null,
+  mountedSpaceObservations: {},
+  mountedSpaceSessions: {},
+  observeSpaceMountSessions(target, update) {
+    const key = spaceMountKey(target.reference)
+    set(state => { const before = state.mountedSpaceSessions[key], next = observeMountedSessions(target, before, update)
+      return before === next ? state : { mountedSpaceSessions: { ...state.mountedSpaceSessions, [key]: next } }
+    })
+  },
+  mountSpace(target, reveal = true) {
+    const key = spaceMountKey(target.reference)
+    set(state => ({ mountedSpaceInputs: editMountedSpaceInput(state.mountedSpaceInputs, key, current => ({ ...current, target: { ...current?.target, ...target, reference: { ...current?.target.reference, ...target.reference } }, drafts: current?.drafts ?? {} })), ...(reveal ? { selectedSpaceMount: key, mainSurface: 'workbench' as const } : {}) }))
+  },
+  retainSpaceMountRegistration(key, update) {
+    set(state => ({ mountedSpaceInputs: editMountedRegistration(state.mountedSpaceInputs, key, update) }))
+  },
+  retainSpaceMountAgentOpen(key, update) {
+    set(state => ({ mountedSpaceInputs: editMountedAgentOpen(state.mountedSpaceInputs, key, update) }))
+  },
+  editSpaceMountLauncher(key, slot, selection) {
+    set(state => ({ mountedSpaceInputs: editMountedLauncherSelection(state.mountedSpaceInputs, key, slot, selection) }))
+  },
+  selectSpaceMount(key) {
+    if (key !== null && !mountedSpaceTarget(get().mountedSpaceInputs, key)) throw new Error('The original mounted Space reference is unavailable. Other work is kept.')
+    set({ selectedSpaceMount: key, ...(key === null ? {} : { mainSurface: 'workbench' as const }) })
+  },
+  editSpaceMountView(key, view) {
+    set(state => ({ mountedSpaceInputs: editMountedSpaceInput(state.mountedSpaceInputs, key, current => {
+      if (!current) throw new Error('The original mounted Space reference is unavailable. Its view was not moved.')
+      return { ...current, view }
+    }) }))
+  },
+  editSpaceMountDraft(key, tabId, regionId, text, view) {
+    set(state => ({ mountedSpaceInputs: editMountedSpaceDraftInput(state.mountedSpaceInputs,key,tabId,regionId,text,view) }))
+  },
+  observeSpaceMount(target, observation) {
+    const key = spaceMountKey(target.reference)
+    if (observation.snapshot && !acceptsMountedSnapshot(target, observation.snapshot)) throw new Error('The Space observation belongs to another original source. Existing work is retained.')
+    set(state => {
+      const before = state.mountedSpaceObservations[key], snapshot = observation.snapshot
+      if (snapshot && before?.snapshot?.source.ownerInstanceId === snapshot.source.ownerInstanceId && snapshot.revision < before.snapshot.revision) return state
+      return { mountedSpaceObservations: { ...state.mountedSpaceObservations, [key]: { ...before, ...observation,
+        ...(snapshot?.scope.space ? { lastPresentSnapshot: snapshot } : {}) } } }
+    })
+  },
   workbenchSpaceSelection: null,
   moteDiscussionEntry: null,
   workbenchNavigationInputPolicy: null,
@@ -6510,7 +6594,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   },
   async selectWorkspace(id) {
     hostHomeNavigation = undefined
-    set({ workbenchSpaceSelection: null, workbenchNavigationInputPolicy: null, regionCaretFocus: null })
+    set({ selectedSpaceMount: null, workbenchSpaceSelection: null, workbenchNavigationInputPolicy: null, regionCaretFocus: null })
     if (get().retainedSpatialFocus !== null) set({ retainedSpatialFocus: null })
     set({ activeWorkspaceId: id, mainSurface: 'workbench', regionCaretFocus: null, error: null, errorDismissed: true })
     const state = get()
@@ -6527,7 +6611,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       const existingLayout = state.layouts[workspace.id]
       return {
         ...adoptedConfig(state.activeWorkspaceId, result.config),
-        ...(reveal ? { activeWorkspaceId: workspace.id, workbenchSpaceSelection: null, workbenchNavigationInputPolicy: null,
+        ...(reveal ? { activeWorkspaceId: workspace.id, selectedSpaceMount: null, workbenchSpaceSelection: null, workbenchNavigationInputPolicy: null,
           mainSurface: 'workbench' as const, regionCaretFocus: null, error: null, errorDismissed: true } : {}),
         layouts: existingLayout
           ? state.layouts
@@ -7080,6 +7164,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
             ...(coreSpatialPersistence ? coreSpatialPersistence.saveObservation : {}) } },
         desktop: { selection, ...presentation,
           focus: { executionSessionId: state.agentFocus.execution.sessionId, pmoSessionId: state.agentFocus.pmo.sessionId, agent: readFocusAgentPresentation(state.focusAgentReveal) } },
+        mountedSpace: observeMountedSpaceWindow(state),
         layouts: state.layouts,
         tabs: Object.values(state.tabs).map(tab => ({
           id: tab.id, workspaceId: tab.workspaceId, titleRegionId: tab.titleRegionId,
@@ -8021,7 +8106,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       warmLauncherId({ tabGroupId: targetTabGroupId, regionId: tab.layout.activeRegionId }))
     set((state) => ({
       // Only a successful explicit main-surface navigation changes global selection.
-      ...(reveal ? { activeWorkspaceId: displayId, mainSurface: 'workbench' as const, regionCaretFocus: null,
+      ...(reveal ? { activeWorkspaceId: displayId, selectedSpaceMount: null, mainSurface: 'workbench' as const, regionCaretFocus: null,
         workbenchSpaceSelection: selectedObject, workbenchNavigationInputPolicy: null, retainedSpatialFocus: null } : {}),
       tabs: { ...state.tabs, [tab.id]: tab },
       ...(initialInputs ? {
@@ -8719,8 +8804,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     catch (error) { state.reportError(error, { kind: 'indeterminate' }); return false }
     const surface = tab.regions[reference.regionId]!
     const agentFocus = isSessionSurface(surface) ? focusSessionContext(state, surface.sessionId, undefined, reference) : state.agentFocus
-    if (!sameSpatialValue(choice, state.workbenchSpaceSelection) || state.activeWorkspaceId !== choice.workspaceId || agentFocus !== state.agentFocus) {
-      set({ workbenchSpaceSelection: choice, activeWorkspaceId: choice.workspaceId, retainedSpatialFocus: null,
+    if (!sameSpatialValue(choice, state.workbenchSpaceSelection) || state.activeWorkspaceId !== choice.workspaceId || agentFocus !== state.agentFocus || state.selectedSpaceMount !== null) {
+      set({ selectedSpaceMount: null, workbenchSpaceSelection: choice, activeWorkspaceId: choice.workspaceId, retainedSpatialFocus: null,
         workbenchNavigationInputPolicy: null, regionCaretFocus: null, agentFocus })
     }
     return true
@@ -13714,6 +13799,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     const state = { ...current, ...persisted as Partial<AppState> }
     state.pendingAgentLaunches = { ...restoredPendingAgentLaunches(local.pendingAgentLaunches), ...current.pendingAgentLaunches }
     state.nodePublicationDrafts = restoredNodePublicationDrafts(state.nodePublicationDrafts)
+    state.mountedSpaceObservations = current.mountedSpaceObservations
+    state.mountedSpaceSessions = current.mountedSpaceSessions
     if (state.agentSteerQueues) {
       let changed = false
       const queues = Object.entries(state.agentSteerQueues).map(([sessionId, entries]) => {
