@@ -18,6 +18,7 @@ async function original(command: string | ((root: string) => Promise<string>) = 
     initialPrompt: 'not-requested', intentDigest: 'b'.repeat(64), executorInvocationDigest: source.digest }, executorInvocation: source.value })
   await inner.registry.refresh('recipient', run)
   inner.kernel.status = vi.fn(async (id: string) => ({ ...f.run(id), pid: 1234, program: executable }))
+  inner.kernel.readRunEnvironment = vi.fn(async (runId: string) => runId === run.runId ? { HOME: f.root, GROK_HOME: f.root } : undefined)
   const key = { kind: 'prompt' as const, agentSessionId: 'recipient', expectedRun: run, submissionId: 'original-diagnostic-Q' }
   const ready = () => inner.acceptHookEvent({ agentSessionId: 'recipient', providerId: 'grok', runId: run.runId, receiptId: 'original-start-ready',
     eventName: 'session_start', payload: { hookEventName: 'session_start', sessionId: 'original-native', cwd: f.root } }, AbortSignal.timeout(5000))
@@ -41,7 +42,7 @@ it('current native qualification releases an uncooperative optional diagnostic a
   await vi.waitFor(async () => expect((await f.client.inspectAgentInput({ key: f.key }))?.status).toBe('terminal-confirmed'), { timeout: 5000 })
   expect(signal?.aborted).toBe(true); expect(f.inner.kernel.input).toHaveBeenCalledTimes(1)
   const before = structuredClone((await f.client.inspectAgentInput({ key: f.key }))!.admission)
-  release({ state: 'pending', reason: 'directory-trust' }); await pending; await Promise.resolve()
+  release({ state: 'pending', reason: 'directory-trust', source: 'native-protocol', scope: 'prerequisite' }); await pending; await Promise.resolve()
   expect((await f.client.inspectAgentInput({ key: f.key }))!.admission).toEqual(before)
   expect((await f.client.inspectAgentInput({ key: f.key }))!.status).toBe('terminal-confirmed')
   expect(read).toHaveBeenCalledTimes(1); expect(f.inner.kernel.input).toHaveBeenCalledTimes(1); expect(f.inner.kernel.stop).not.toHaveBeenCalled()

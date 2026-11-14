@@ -64,7 +64,7 @@ describe('三条轴不折叠成一个 busy', () => {
     // 这三个不同的值就再也分不出来。
     const pending = observe({ process: 'running', source: 'run-process', awaitingRequest: true })
     expect(pending.process).toBe('running')   // 进程 alive
-    expect(pending.semantic).toBe('unknown')     // 没有活动声明 = 语义 unknown，不能推定 idle/active
+    expect(pending.semantic).toBe('awaiting-input') // 已确认待答请求独立于进程活动声明
     expect(pending.readiness).toBe('pending') // 卡在待答请求 = 就绪 pending
 
     // 同一进程状态下，语义与就绪各自能独立取到别的值——证明它们不是同一个布尔的三个别名。

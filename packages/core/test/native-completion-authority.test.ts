@@ -3,18 +3,14 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { AgentMuxClient, AgentMuxMemoryAgentSessionStore, AgentProviderRegistry, defineAgentProvider } from '../dist/index.js'
-import { agentTurnCompletionIdentity, agentTurnEndBoundary } from '../dist/agent-session-identity.js'
-import { releaseSubagentRoster } from '../dist/hook-normalizer.js'
+import { AgentMuxClient, AgentMuxMemoryAgentSessionStore, AgentProviderRegistry, defineAgentProvider } from '../src/index.js'
+import { agentTurnCompletionIdentity, agentTurnEndBoundary } from '../src/agent-session-identity.js'
 import type { AgentNativeHookSpecification } from '../src/hook-normalizer.js'
 import type { AgentProviderSessionStatusObservationContext } from '../src/agent-provider.js'
 import type { AgentMuxClientEvent, AgentMuxStoredAgentSession, AgentProviderId } from '../src/types.js'
-import { AgentMuxControlServer } from '../dist/public-rpc-server.js'
-import { agentPromptCondition } from '../dist/agent-prompt-condition.js'
+import { AgentMuxControlServer } from '../src/public-rpc-server.js'
+import { agentPromptCondition } from '../src/agent-prompt-condition.js'
 import { objectCliEnvironment, runCompiledObjectCli } from './helpers/object-cli-rpc.js'
-import { RuntimeController } from '../../../apps/desktop/src/main/runtime-controller.js'
-import { projectRuntimeEvent } from '../../../apps/desktop/src/renderer/src/lib/session-state.js'
-import { agentContextForSession } from '../../../apps/desktop/src/renderer/src/lib/focus-context.js'
 import type { AppConfig } from '../../../apps/desktop/src/shared/contracts.js'
 
 vi.mock('electron', () => ({ app: { isPackaged: false } }))
@@ -22,9 +18,13 @@ vi.mock('electron', () => ({ app: { isPackaged: false } }))
 const cleanup: Array<() => Promise<void>> = []
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); vi.restoreAllMocks(); vi.unstubAllEnvs() })
 const native = new AgentProviderRegistry()
+function mainActivityFact(session: AgentMuxStoredAgentSession) {
+  const { currentActivityRevision: _projectionRevision, ...fact } = session.semanticStatus!
+  return fact
+}
 const generic: AgentNativeHookSpecification = {
   nativeHandle: { sessionIdKeys: ['session_id'] },
-  subagentTracking: { startEvents: ['child-begin'], stopEvents: ['child-settled'], mainStopEvents: ['parent-settled'], idKeys: ['workerId'] },
+  subagentTracking: { startEvents: ['child-begin'], stopEvents: ['child-settled'], idKeys: ['workerId'] },
   rules: [
     { events: ['begin'], state: 'working', lifecycleEvent: 'turn-start' },
     { events: ['parent-settled'], state: 'done', lifecycleEvent: 'turn-end' },
@@ -32,7 +32,7 @@ const generic: AgentNativeHookSpecification = {
   ]
 }
 
-// Controlled SDK/native observations are the fixture boundary. Actual built Core owns the bound
+// Controlled SDK/native observations are the fixture boundary. Actual candidate Core owns the bound
 // HTTP ingress, normalization, registry, public status, event reader, native observer and raw input.
 // Built-in declarations are exercised below; this does not claim that a real vendor emitted them.
 async function fixture(providerId: AgentProviderId, hook = native.get(providerId).hook, observeNative = false) {
@@ -45,7 +45,7 @@ async function fixture(providerId: AgentProviderId, hook = native.get(providerId
     id: providerId, label: 'Private native completion fixture', executable: 'private-agent', expectedProcess: 'private-agent',
     promptDelivery: 'positional-argv', readySignal: { kind: 'foreground-process', expectedProcess: 'private-agent' },
     hookStrategy: { kind: 'native', installation: 'unmanaged' }, resumeStrategy: { kind: 'none' }, acpStrategy: { kind: 'none' },
-    capabilities: { terminal: true, timeline: 'complete-events', permission: 'respond', providerResume: false, replyCorrelation: 'none' }
+    capabilities: { terminal: true, timeline: 'complete-events', permission: 'observe', providerResume: false, replyCorrelation: 'none' }
   }, buildArgs: (_prompt, args) => [...args], hook,
     ...(observeNative ? { observeSessionStatus: async (context: AgentProviderSessionStatusObservationContext) => {
       nativeObserver = context; return { dispose() {} }
@@ -76,6 +76,14 @@ async function fixture(providerId: AgentProviderId, hook = native.get(providerId
         receipt: { start_byte, end_byte: accepted, data: input.data } }
     } }
   inner.kernel.runtime = { daemonInstanceId: 'private-daemon' }
+  inner.kernel.openInput = async (runId: string) => {
+    expect(runId).toBe(original.run.runId)
+    return { run: run(), waitWritable: async () => {}, input: async (data: string | Uint8Array) => {
+      const startByte = accepted
+      accepted += typeof data === 'string' ? Buffer.byteLength(data) : data.byteLength
+      return { appliedByteRange: { startByte, endByte: accepted } }
+    } }
+  }
   vi.spyOn(inner.promptSubmission, 'observeReadiness').mockImplementation(() => {})
   const events: AgentMuxClientEvent[] = []; client.onEvent(event => events.push(event))
   Object.defineProperty(inner.hookServer, 'port', { value: 0 }); await inner.hookServer.start()
@@ -87,7 +95,7 @@ async function fixture(providerId: AgentProviderId, hook = native.get(providerId
     const body = await response.text(); expect(response.status, body).toBe(204)
   }
   const saved = async () => (await store.load() as readonly AgentMuxStoredAgentSession[])[0]!
-  cleanup.push(async () => { await client.dispose(); releaseSubagentRoster(original.run.runId)
+  cleanup.push(async () => { await client.dispose(); 
     expect(inner.kernel.start).not.toHaveBeenCalled(); expect(inner.kernel.stop).not.toHaveBeenCalled(); await rm(root, { recursive: true, force: true }) })
   return { client, events, feed, saved, original, root, store,
     rawInput: () => client.writeAgent({ agentSessionId: original.agentSessionId, expectedRun: original.run, source: 'user', data: 'private raw input\r' }),
@@ -124,11 +132,16 @@ describe('native completion authority through actual Core consumers', () => {
   })
 
   it('semantic admission still consumes completion and native events update Main Renderer and Focus in order', async () => {
+    const [{ RuntimeController }, { projectRuntimeEvent }, { agentContextForSession }, { observeAgentSession }] = await Promise.all([
+      import('../../../apps/desktop/src/main/runtime-controller.js'), import('../../../apps/desktop/src/renderer/src/lib/session-state.js'),
+      import('../../../apps/desktop/src/renderer/src/lib/focus-context.js'), import('../../../apps/desktop/src/renderer/src/lib/agent-observation.js')
+    ])
     const h = await fixture('synthetic-raw-consumers', { ...generic,
       resolveSubject: payload => payload.workerId === 'real-child'
         ? { kind: 'child', basis: 'provider-protocol', reason: 'fixture-confirmed-child', nativeSessionId: 'real-child' }
         : { kind: 'main', basis: 'provider-protocol', reason: 'fixture-confirmed-main', nativeSessionId: 'original-native' }
     }, true)
+    await h.feed('begin', { session_id: 'original-native' })
     const observer = await h.observer()
     observer.onStatus({ recordId: 'first-complete', nativeTurnId: 'first-turn', state: 'done', endReason: 'completed', sequence: 1 })
     await vi.waitFor(async () => expect((await h.saved()).semanticStatus?.state).toBe('done'))
@@ -150,18 +163,19 @@ describe('native completion authority through actual Core consumers', () => {
     expect((await controller.snapshot(config)).sessions[0]?.status.state).toBe('done')
     await h.feed('child-begin', { workerId: 'real-child' })
     const child = await project()
-    expect(view.sessions[0]?.status.state).toBe('working')
+    expect(view.sessions[0]?.status.state).toBe('done')
+    expect(observeAgentSession(view.sessions[0] as Extract<typeof view.sessions[number], { kind: 'agent' }>, Date.now()).semantic).toBe('active')
     await h.rawInput()
     expect((await project()).semanticStatus).toEqual(child.semanticStatus)
     await h.client.submitAgentPrompt({ ...agentPromptCondition(h.client.agentSession(h.original.agentSessionId)),
-      agentSessionId: h.original.agentSessionId, operationId: 'next-submission', prompt: 'new semantic task' })
+      agentSessionId: h.original.agentSessionId, operationId: 'next-submission', prompt: 'new semantic task', execution: 'immediate' })
     expect((await h.saved()).promptCompletionAdmission).toMatchObject({ submissionId: 'next-submission', intent: { plan: { kind: 'single-phase' } } })
     const consumed = await project()
     expect(consumed.semanticStatus?.idleEvidenceConsumed).toBe(true)
     expect(consumed.semanticStatus?.currentActivityRevision).toBeGreaterThan(child.semanticStatus!.currentActivityRevision!)
     expect(view.sessions[0]?.status.state).toBe('running')
     expect((await controller.snapshot(config)).sessions[0]?.status.state).toBe('running')
-    expect(agentContextForSession(view.sessions[0]!, undefined, undefined, undefined, null).stateLabel).toBe('Activity unknown')
+    expect(agentContextForSession(view.sessions[0]!, undefined, undefined, undefined, null).bucket).toBe('working')
     expect(projectRuntimeEvent(view, { type: 'core', hostId: 'local', event: { type: 'agent-session', session: child } }).state).toBe(view)
     observer.onStatus({ recordId: 'next-start', nativeTurnId: 'next-turn', state: 'working', sequence: 2 })
     await vi.waitFor(async () => expect((await h.saved()).semanticStatus?.state).toBe('working'))
@@ -207,21 +221,21 @@ describe('native completion authority through actual Core consumers', () => {
     const source = native.get(providerId).hook, tracking = source.subagentTracking!
     const hook = { ...source, rules: [...source.rules,
       { events: ['proven-main-end'], state: 'done' as const, lifecycleEvent: 'turn-end' as const }],
-      subagentTracking: { ...tracking, mainStopEvents: ['proven-main-end'], stopEvents: ['proven-child-end'] } }
+      subagentTracking: { ...tracking, stopEvents: ['proven-child-end'] } }
     // These two final facts are synthetic additions to the protocol, not actual vendor Hook claims.
     const h = await fixture(providerId, hook)
     if (providerId === 'copilot') {
       await h.feed('subagentStart', { sessionId: 'original-native', agentName: 'same' })
       await h.feed('subagentStart', { sessionId: 'original-native', agentName: 'same' })
       await h.feed('proven-main-end', { sessionId: 'original-native' })
-      expect((await h.saved()).semanticStatus?.state).toBe('running')
+      expect((await h.saved()).semanticStatus?.state).toBe('done')
       await h.feed('proven-child-end', { sessionId: 'original-native', agentId: 'first', agentName: 'same' })
       expect(agentTurnCompletionIdentity(await h.saved())).toBeUndefined()
     } else {
       for (const sessionId of ['one', 'two']) await h.feed('subagent_start', { sessionId, subagentType: 'same' })
       await h.feed('proven-main-end', { sessionId: 'original-native' })
       await h.feed('proven-child-end', { sessionId: 'one', subagentType: 'same' })
-      expect((await h.saved()).semanticStatus?.state).toBe('working')
+      expect((await h.saved()).semanticStatus?.state).toBe('done')
       expect(agentTurnCompletionIdentity(await h.saved())).toBeUndefined()
       await h.feed('proven-child-end', { sessionId: 'two', subagentType: 'same' })
       expect((await h.saved()).semanticStatus?.state).toBe('done')
@@ -253,20 +267,27 @@ describe('native completion authority through actual Core consumers', () => {
     expect((await h.rawInput()).appliedByteRange).not.toBeNull()
   })
 
-  it('unique machine IDs survive same labels and types in the shared roster', async () => {
+  it('unique machine IDs retain separate child observations and the original main result', async () => {
     const h = await fixture('synthetic-roster', generic); await h.feed('begin', { session_id: 'original-native' })
     for (const workerId of ['first', 'second']) await h.feed('child-begin', { workerId, name: 'reviewer', type: 'reviewer' })
-    await h.feed('parent-settled', {}); expect((await h.saved()).semanticStatus?.state).toBe('working')
+    await h.feed('parent-settled', {})
+    const endedMain = await h.saved()
+    expect(endedMain.semanticStatus?.state).toBe('done')
+    expect(endedMain.nativeSubagents?.sessions.map(child => child.nativeAgentId)).toEqual(['first', 'second'])
+    expect((await h.client.statusAgent(h.original.agentSessionId)).observation).toMatchObject({ semantic: 'active', mainSession: { semantic: 'idle' } })
     await h.feed('child-settled', { workerId: 'first', name: 'reviewer', type: 'reviewer' })
     expect(agentTurnCompletionIdentity(await h.saved())).toBeUndefined()
     await h.feed('child-settled', { workerId: 'second', name: 'reviewer', type: 'reviewer' })
-    expect((await h.saved()).semanticStatus?.state).toBe('done'); expect(agentTurnCompletionIdentity(await h.saved())).toBeDefined()
+    expect(mainActivityFact(await h.saved())).toEqual(mainActivityFact(endedMain))
+    expect((await h.client.statusAgent(h.original.agentSessionId)).observation.semantic).toBe('idle')
+    expect(agentTurnCompletionIdentity(await h.saved())).toBeDefined()
   })
 
   it('missing unique child identity produces unknown aggregate instead of success or permanent working', async () => {
     const h = await fixture('synthetic-roster', generic); await h.feed('begin', {})
     await h.feed('child-begin', { name: 'reviewer' }); await h.feed('parent-settled', {})
-    const unknown = await h.saved(); expect(unknown.semanticStatus?.state).toBe('running')
+    const unknown = await h.saved(); expect(unknown.semanticStatus?.state).toBe('done')
+    expect(unknown.nativeSubagents).toMatchObject({ unconfirmed: true, sessions: [] })
     expect(agentTurnCompletionIdentity(unknown)).toBeUndefined()
     expect((await h.client.statusAgent(h.original.agentSessionId)).observation.semantic).toBe('unknown')
     await h.feed('child-settled', { workerId: 'invented', name: 'reviewer' })
@@ -274,7 +295,7 @@ describe('native completion authority through actual Core consumers', () => {
     expect((await h.rawInput()).appliedByteRange).not.toBeNull()
   })
 
-  it('generic unknown preserves child scope and continued tool activity; explicit cancellation ends that scope', async () => {
+  it('generic unknown preserves child scope and main cancellation leaves children independent', async () => {
     const hook = { ...generic, rules: [...generic.rules, { events: ['tool-continued'], state: 'working' as const, lifecycleEvent: 'tool-use-end' as const }] }
     const h = await fixture('synthetic-unknown', hook, true)
     await h.feed('begin', {}); await h.feed('child-begin', { workerId: 'still-live' })
@@ -290,7 +311,8 @@ describe('native completion authority through actual Core consumers', () => {
     expect(agentTurnCompletionIdentity(await h.saved())).toBeUndefined()
     observer.onStatus({ recordId: 'exact-cancelled', nativeTurnId: 'original-turn', state: 'unknown', endReason: 'interrupted', sequence: 2 })
     await vi.waitFor(async () => expect((await h.saved()).semanticStatus?.state).toBe('running'))
-    expect(releaseSubagentRoster(h.original.run.runId)).toBe(false)
+    expect((await h.saved()).nativeSubagents).toEqual(beforeUnknown.nativeSubagents)
+    expect((await h.client.statusAgent(h.original.agentSessionId)).observation.semantic).toBe('active')
     expect((await h.rawInput()).appliedByteRange).not.toBeNull()
   })
 
@@ -300,28 +322,34 @@ describe('native completion authority through actual Core consumers', () => {
     const observer = await h.observer()
     observer.onStatus({ recordId: 'actual-main-end', nativeTurnId: 'original-turn', state: 'done', endReason: 'completed', sequence: 1 })
     await vi.waitFor(() => expect(h.events.some(e => e.type === 'agent-status' && e.evidence?.source === 'native-transcript')).toBe(true))
-    expect((await h.saved()).semanticStatus?.state).toBe('working')
+    const endedMain = await h.saved()
+    expect(endedMain.semanticStatus?.state).toBe('done')
+    expect((await h.client.statusAgent(h.original.agentSessionId)).observation).toMatchObject({ semantic: 'active', mainSession: { semantic: 'idle' } })
     expect(agentTurnCompletionIdentity(await h.saved())).toBeUndefined()
     expect((await h.rawInput()).appliedByteRange).not.toBeNull()
     await h.feed('child-settled', { workerId: 'first' })
-    expect((await h.saved()).semanticStatus?.state).toBe('working')
+    expect(mainActivityFact(await h.saved())).toEqual(mainActivityFact(endedMain))
+    expect((await h.client.statusAgent(h.original.agentSessionId)).observation.semantic).toBe('active')
     await h.feed('child-settled', { workerId: 'second' })
-    expect((await h.saved()).semanticStatus?.state).toBe('done')
+    expect(mainActivityFact(await h.saved())).toEqual(mainActivityFact(endedMain))
+    expect((await h.client.statusAgent(h.original.agentSessionId)).observation.semantic).toBe('idle')
     expect(agentTurnCompletionIdentity(await h.saved())).toBeDefined()
   })
 
-  it('actual original native outcome settles unresolved children and releases the existing roster', async () => {
+  it('actual original native outcomes retain independent unresolved child observations', async () => {
     const h = await fixture('synthetic-outcome', generic, true); await h.feed('begin', {})
     await h.feed('child-begin', { name: 'same-label' }); await h.feed('child-begin', { workerId: 'known' })
-    const observer = await h.observer()
+    const observer = await h.observer(), children = (await h.saved()).nativeSubagents
     for (const [sequence, state] of [[1, 'error'], [2, 'unknown'], [3, 'done']] as const) {
       observer.onStatus({ recordId: `native-result-${sequence}`, nativeTurnId: 'original-turn', state, sequence, ...(state === 'unknown' ? { endReason: 'interrupted' as const } : {}) })
       await vi.waitFor(async () => expect((await h.saved()).semanticStatus?.nativeTurnId).toBe('original-turn'))
       await vi.waitFor(async () => expect((await h.saved()).semanticStatus?.state).toBe(state === 'unknown' ? 'running' : state))
       expect((await h.client.statusAgent(h.original.agentSessionId)).session.nativeHandle).toEqual(h.original.nativeHandle)
+      expect((await h.saved()).nativeSubagents).toEqual(children)
+      expect((await h.client.statusAgent(h.original.agentSessionId)).observation.semantic).toBe('active')
+      expect(agentTurnCompletionIdentity(await h.saved())).toBeUndefined()
     }
     expect(h.events.filter(e => e.type === 'agent-status' && e.evidence?.source === 'native-transcript').map(e => e.state)).toEqual(['error', 'unknown', 'done'])
-    expect(releaseSubagentRoster(h.original.run.runId)).toBe(false)
   })
 })
 
@@ -334,5 +362,5 @@ it('Codex Stop and SubagentStop remain pre-veto even with confirmed original pro
     { nativeHandle: main, processNativeHandle: main, processNativeChildSessionIds: ['child-native'] })
     expect(normalized.semanticState).toBe('unknown'); expect(normalized.lifecycleEvent).toBeNull()
   }
-  releaseSubagentRoster('codex-private-run')
+  
 })

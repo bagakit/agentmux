@@ -16,7 +16,7 @@ import type { OutputChunk, RunEvent } from '@ctxmux/sdk'
 import { AgentProviderRegistry, defineAgentProvider } from '../../src/agent-provider.js'
 import { CLAUDE_HOOK_EVENTS, CLAUDE_HOOKS, createClaudeManagedHookPlan, createClaudeProvider } from '../../src/providers/claude.js'
 import { canonicalHookLifecycleEvent as declaredHookLifecycleEvent } from '../../src/agent-hook-event.js'
-import { agentHasActiveSubagents, releaseSubagentRoster } from '../../src/hook-normalizer.js'
+import { agentHasActiveSubagents, type AgentNativeSubagents } from '../../src/agent-subagent-state.js'
 import { AgentMuxClient } from '../../src/client.js'
 import { agentPromptCondition } from '../../src/agent-prompt-condition.js'
 import { AgentMuxFileAgentSessionStore, normalizeStoredAgentSession } from '../../src/agent-session-store.js'
@@ -139,11 +139,12 @@ describe('Claude native mod activity', () => {
       receiptId: `native-${eventName}`, agentSessionId: 'core-A', runId: 'run-A', providerId: 'claude',
       eventName, payload: { ...payload, ...extra }
     }, {})
-    expect(event('turn.start').currentActivity).toEqual({ state: 'active', nativeSessionId: 'native-A',
+    expect(event('turn.start').currentActivity).toEqual({ state: 'active', mainState: 'active', nativeSessionId: 'native-A',
       sourceId: 'observer-A', sequence: 1, nativeTurnId: 'native-turn-A' })
     for (const reason of ['answer', 'error', 'refusal', 'aborted']) {
       const end = event('turn.complete', { reason, isAborted: reason === 'aborted' })
       expect(end.currentActivity?.state).toBe(reason === 'answer' ? 'idle' : 'unknown')
+      expect(end.currentActivity?.mainState).toBe('idle')
       expect(end.semanticState).toBe(reason === 'error' ? 'error' : 'unknown')
       expect(end.lifecycleEvent).toBe(reason === 'error' ? 'turn-end' : null)
       expect(end.status.detail).toBe(reason === 'error'
@@ -174,22 +175,22 @@ describe('Claude native mod activity', () => {
   it('a resumed child keeps its current native turn when the prior turn end arrives late', () => {
     const provider = new AgentProviderRegistry().get('claude')
     const runId = 'run-native-child-resume'
-    const child = (eventName: string, turnId: string, sequence: number) => provider.normalizeHook({
-      receiptId: `child-${sequence}`, agentSessionId: 'core-child', runId, providerId: 'claude', eventName,
-      payload: { session_id: 'native-main', agent_id: 'same-child', sourceId: 'same-observer', sequence,
-        turnId, ...(eventName === 'turn.complete' ? { reason: 'answer', isAborted: false } : {}) }
-    }, {})
-    try {
-      child('SubagentStart', 'not-a-native-turn', 1)
-      expect(agentHasActiveSubagents(runId)).toBe(false)
-      child('turn.start', 'old-turn', 2)
-      child('turn.start', 'resumed-turn', 3)
-      expect(agentHasActiveSubagents(runId)).toBe(true)
-      child('turn.complete', 'old-turn', 4)
-      expect(agentHasActiveSubagents(runId)).toBe(true)
-      child('turn.complete', 'resumed-turn', 5)
-      expect(agentHasActiveSubagents(runId)).toBe(false)
-    } finally { releaseSubagentRoster(runId) }
+    let nativeSubagents: AgentNativeSubagents | undefined
+    const child = (eventName: string, turnId: string, sequence: number) => {
+      const next = provider.normalizeHook({ receiptId: `child-${sequence}`, agentSessionId: 'core-child', runId, providerId: 'claude', eventName,
+        payload: { session_id: 'native-main', agent_id: 'same-child', sourceId: 'same-observer', sequence, turnId,
+          ...(eventName === 'turn.complete' ? { reason: 'answer', isAborted: false } : {}) }
+      }, { nativeHandle: { kind: 'provider', providerId: 'claude', sessionId: 'native-main' }, ...(nativeSubagents ? { nativeSubagents } : {}) })
+      if (next.subagentSessions) nativeSubagents = next.subagentSessions
+    }
+    child('SubagentStart', 'not-a-native-turn', 1)
+    expect(agentHasActiveSubagents(nativeSubagents)).toBe(false)
+    child('turn.start', 'old-turn', 2); child('turn.start', 'resumed-turn', 3)
+    expect(agentHasActiveSubagents(nativeSubagents)).toBe(true)
+    child('turn.complete', 'old-turn', 4)
+    expect(agentHasActiveSubagents(nativeSubagents)).toBe(true)
+    child('turn.complete', 'resumed-turn', 5)
+    expect(agentHasActiveSubagents(nativeSubagents)).toBe(false)
   })
 
   it.each(['throws', 'empty'])('a %s original actor capture reports a diagnostic without claiming or rebinding an actor', async failure => {
@@ -573,7 +574,7 @@ describe('Claude provider', () => {
       for (const rule of CLAUDE_HOOKS.rules) for (const eventName of rule.events) referenced.add(eventName)
       const tracking = CLAUDE_HOOKS.subagentTracking
       for (const eventName of [
-        ...(tracking?.startEvents ?? []), ...(tracking?.stopEvents ?? []), ...(tracking?.mainStopEvents ?? [])
+        ...(tracking?.startEvents ?? []), ...(tracking?.stopEvents ?? [])
       ]) referenced.add(eventName)
 
       // Classic Hooks plus every event the managed module itself sends.

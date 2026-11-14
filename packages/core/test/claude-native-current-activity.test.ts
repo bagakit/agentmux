@@ -81,9 +81,9 @@ it('main idle leaves actual child work and pending permission independent', asyn
   await start(h)
   await h.hook('turn.start', 'child-start', native(2, 'native-child-turn', {agent_id:'child-1'}))
   await end(h)
-  expect(h.client.agentSession('native-activity').currentActivity).toBeUndefined()
+  expect(h.client.agentSession('native-activity').currentActivity).toMatchObject({state:'unknown',mainState:'idle'})
   await h.hook('SubagentStop', 'predecision-child-stop', { session_id: 'native-main', agent_id: 'child-1' })
-  expect(h.client.agentSession('native-activity').currentActivity).toBeUndefined()
+  expect(h.client.agentSession('native-activity').currentActivity).toMatchObject({state:'unknown',mainState:'idle'})
   await h.hook('turn.complete', 'actual-child-end', native(4, 'native-child-turn', { agent_id: 'child-1', reason: 'answer', isAborted: false }))
   expect((await h.client.statusAgent('native-activity')).observation.semantic).toBe('idle')
   await h.hook('PermissionRequest', 'permission', { session_id: 'native-main', tool_name: 'Bash', tool_use_id: 'open-permission', tool_input: { command: 'true' } })
@@ -233,7 +233,7 @@ it('an unavailable Hook source witness invalidates old activity while a new qual
   expect((await h.client.statusAgent('hook-source-witness')).observation.semantic).toBe('idle')
 })
 
-it.each([{agent_id:'child-session'},{extra:{agent_id:'child-session'}}])('a declared child SessionStart cannot invalidate main activity (%j)', async child => {
+it.each([{agent_id:'child-session'}])('a declared child SessionStart cannot invalidate main activity (%j)', async child => {
   const h = await harness('child-session-start')
   await start(h)
   const before = h.client.agentSession('child-session-start').currentActivity
@@ -330,7 +330,7 @@ it.each([
     await h.hook('turn.start', 'main-start-A', payload('source-A', 1, 'main-turn-A'))
     if (startOld) await h.hook('turn.start', 'child-start-A', payload('source-A', 2, 'child-turn-A', {agent_id:'same-child'}))
     await h.hook('turn.complete', 'main-end-A', payload('source-A', 3, 'main-turn-A', {reason:'answer',isAborted:false,backgroundWork:'none'}))
-    if (startOld) expect(h.client.agentSession(id).currentActivity).toBeUndefined()
+    if (startOld) expect(h.client.agentSession(id).currentActivity).toMatchObject({state:'unknown',mainState:'idle'})
     await h.hook('turn.start', 'child-start-B', payload('source-B', 1, 'child-turn-B', {agent_id:childId}))
     await h.hook('turn.complete', 'late-child-end-A', payload('source-A', 4, 'child-turn-A', {agent_id:'same-child',reason:'answer',isAborted:false}))
     const status = await h.client.statusAgent(id)

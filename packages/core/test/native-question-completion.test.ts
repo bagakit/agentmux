@@ -12,7 +12,6 @@ import { AgentMuxFileAgentSessionStore } from '../src/agent-session-store.js'
 import { AgentHookServer } from '../src/hook-server.js'
 import { AgentProviderRegistry, defineAgentProvider, type AgentProvider } from '../src/agent-provider.js'
 import { createNumberedTerminalInteractionProtocol } from '../src/agent-interaction.js'
-import { releaseSubagentRoster } from '../src/hook-normalizer.js'
 import type { AgentMuxClientEvent, AgentMuxStoredAgentSession, NativeHookEnvelope } from '../src/types.js'
 
 const agentSessionId = 'native-question-agent', runId = 'native-question-run'
@@ -84,7 +83,7 @@ async function harness(providerId: string, provider?: AgentProvider) {
   }
   return { client, owner, store, path, events, writes, feed, stored,
     pauseAck: (wait: () => Promise<void>) => { beforeAck = wait },
-    close: async () => { await server.stop(); releaseSubagentRoster(runId); await client.dispose(); await rm(root, { recursive: true, force: true }) } }
+    close: async () => { await server.stop();  await client.dispose(); await rm(root, { recursive: true, force: true }) } }
 }
 
 describe('native successful question completion owns only an exact unclaimed question', () => {
@@ -336,7 +335,7 @@ describe('native successful question completion owns only an exact unclaimed que
       catalog: { ...base.catalog, capabilities, id: 'generic-question', executable: 'synthetic', hookStrategy: { kind: 'native', installation: 'unmanaged' } },
       buildArgs: (_prompt, args) => [...args],
       hook: { rules: [{ events: ['before_question'], state: 'waiting', toolNames: ['ask_generic'] }, { events: ['after_question'], state: 'working' }],
-        subagentTracking: { startEvents: ['child_start'], stopEvents: ['child_stop'], mainStopEvents: ['main_stop'] } },
+        subagentTracking: { startEvents: ['child_start'], stopEvents: ['child_stop'], } },
       interaction: createNumberedTerminalInteractionProtocol({ questionEvents: ['before_question'], questionTools: ['ask_generic'],
         questionCompletionEvents: ['after_question'], permissionOptions: [
           { id: 'allow', label: 'Allow', kind: 'allow-once', input: '1' }, { id: 'deny', label: 'Deny', kind: 'reject-once', input: '\x1b' }

@@ -12,7 +12,6 @@ import { agentTurnCompletionIdentity, agentTurnEndBoundary } from '../dist/agent
 import { normalizeStoredAgentSession } from '../dist/agent-session-store.js'
 import type { CtxmuxRunAdapter } from '../src/ctxmux-run-adapter.js'
 import { defaultAgentMuxHookPort } from '../dist/runtime-paths.js'
-import { releaseSubagentRoster } from '../dist/hook-normalizer.js'
 import { HOOK_PAYLOAD_USAGE_KEY, parseTurnUsage } from '../dist/agent-usage-transcript.js'
 import type { AgentMuxClientEvent, AgentMuxStoredAgentSession, AgentTurnUsage } from '../src/types.js'
 
@@ -101,7 +100,7 @@ async function harness(mode: Mode, shape: Shape, tracking = false) {
       subagentSubject: p => typeof p.agent_name === 'string' || (p.extra as Payload | undefined)?.scope === 'child',
       nativeHandle: { sessionIdKeys: ['session_id'], transcriptPathKeys: ['transcript_path'] },
       ...(tracking ? { subagentTracking: { startEvents: ['child_open'], stopEvents: ['child_close'],
-        mainStopEvents: ['finish'], idKeys: ['agent_name'] } } : {}),
+        idKeys: ['agent_name'] } } : {}),
       rules: [
       { events: ['notice'], state: 'unknown', matches: p => p.reason === 'cancelled', lifecycleEvent: 'turn-end' },
       { events: ['signal'], state: 'unknown', matches: p => (p.extra as Payload | undefined)?.category === 'turn' && (p.extra as Payload | undefined)?.reason === 'halt', lifecycleEvent: 'turn-end' },
@@ -239,7 +238,7 @@ async function harness(mode: Mode, shape: Shape, tracking = false) {
     } finally {
       for (const c of clients) await c.dispose()
       for (const stream of streams) stream.close()
-      releaseSubagentRoster(runId)
+      
       await rm(root, { recursive: true, force: true, maxRetries: 3, retryDelay: 20 })
     }
   }

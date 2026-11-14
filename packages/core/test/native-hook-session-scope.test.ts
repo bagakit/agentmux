@@ -67,7 +67,7 @@ describe('Provider Native Hook Session Scope & Subject Contract', () => {
     const agentSessionId = 'unit-session-1'
 
     afterEach(() => {
-      releaseSubagentRoster(runId)
+      
     })
 
     it('evaluates matchesNativeSession predicate at most once with unflattened raw payload, resolved eventName, and context', () => {
@@ -232,7 +232,7 @@ describe('Provider Native Hook Session Scope & Subject Contract', () => {
         subagentTracking: {
           startEvents: ['ChildStart'],
           stopEvents: ['ChildStop'],
-          mainStopEvents: ['Stop'],
+          
           idKeys: ['agent_id']
         },
         nativeHandle: { sessionIdKeys: ['session_id'] }
@@ -377,7 +377,7 @@ describe('Provider Native Hook Session Scope & Subject Contract', () => {
         subagentTracking: {
           startEvents: ['ChildStart'],
           stopEvents: ['ChildStop'],
-          mainStopEvents: ['turn_end'],
+          
           idKeys: ['agent_id']
         },
         nativeHandle: {
@@ -520,7 +520,7 @@ describe('Provider Native Hook Session Scope & Subject Contract', () => {
         expect(s3.turnUsage).toEqual({ inputTokens: 500, outputTokens: 250, totalTokens: 750, observedAt: 100 })
         expect(s3.terminalPromptReadiness).toBeUndefined()
       } finally {
-        releaseSubagentRoster(h.runId)
+        
       }
     })
 
@@ -543,7 +543,7 @@ describe('Provider Native Hook Session Scope & Subject Contract', () => {
         const s = await h.stored()
         expect(s.semanticStatus?.state).toBe('done')
       } finally {
-        releaseSubagentRoster(h.runId)
+        
       }
     })
 
@@ -608,7 +608,7 @@ describe('Provider Native Hook Session Scope & Subject Contract', () => {
         // Child resolution of parent turn-end preserved real parent usage!
         expect(s.turnUsage).toMatchObject({ inputTokens: 600, outputTokens: 300, totalTokens: 900 })
       } finally {
-        releaseSubagentRoster(h.runId)
+        
       }
     })
   })

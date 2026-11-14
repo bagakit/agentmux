@@ -26,7 +26,8 @@ const mutations: Record<string, [string, string]> = {
   'repeat-unknown-resume': ['error instanceof JSONRPCErrorException && [-32600, -32602].includes(error.code)', 'error instanceof Error'],
   'accept-old-frontend': ['frontend.frontendId === expectedId', 'true'],
   'carry-input': ["['resume', target.sessionId, ...plan.frontendArgs], frontendId", "['resume', target.sessionId, ...plan.frontendArgs, 'UNAUTHORIZED_INITIAL_INPUT'], frontendId"],
-  'ignore-native-policy': ['expected.approvalPolicy !== undefined && prepared.approvalPolicy !== expected.approvalPolicy ||', '']
+  'ignore-native-policy': ['expected.approvalPolicy !== undefined && prepared.approvalPolicy !== expected.approvalPolicy ||', ''],
+  'drop-authentication-blocker': ['if (account?.requiresOpenaiAuth === true && account.account === null) initializationBlocker = {', 'if (false) initializationBlocker = {']
 }
 const rpcMutations: Record<string, [string, string]> = {
   'deadline-initialize': ['options?.retainPendingInitialization ? { retainPending: true } : undefined', 'undefined']
@@ -64,12 +65,12 @@ afterEach(async () => {
 afterAll(async () => { if (root) await rm(root, { recursive: true, force: true }) })
 async function rows(path: string): Promise<any[]> { return await readFile(path, 'utf8').then(text => text.trim().split('\n').filter(Boolean).map(line => JSON.parse(line)), () => []) }
 
-async function fixture(options: { accountFailure?: boolean; readGate?: 'initialize' | 'account/read'; nativeGate?: boolean; nativeError?: boolean;
+async function fixture(options: { accountFailure?: boolean; authRequired?: boolean; readGate?: 'initialize' | 'account/read'; nativeGate?: boolean; nativeError?: boolean;
   settledError?: -32600 | -32602; postLoad?: boolean; transportClose?: boolean; wrongPolicy?: boolean; wrongTarget?: boolean; malformed?: boolean; resume?: boolean } = {}) {
   const directory = await realpath(await mkdtemp(join(root, 'case-')))
   const executable = join(directory, 'native'), log = join(directory, 'rpc.jsonl'), events = join(directory, 'frontends.jsonl'), heartbeat = join(directory, 'heartbeat.json')
   const fail = join(directory, 'account-failure'), gate = join(directory, 'native-gate'), readGate = join(directory, 'read-gate'), rejected = join(directory, 'native-rejected'), loaded = join(directory, 'loaded.json')
-  if (options.accountFailure) await writeFile(fail, 'private preflight error')
+  if (options.accountFailure || options.authRequired) await writeFile(fail, 'private preflight error')
   if (options.nativeGate) await writeFile(gate, 'hold original response')
   if (options.readGate) await writeFile(readGate, 'hold original read response')
   if (options.settledError) await writeFile(rejected, 'settled original response error')
@@ -86,7 +87,10 @@ if(args.includes('app-server')){
  const error=(code,message)=>socket.send(JSON.stringify({jsonrpc:'2.0',id:r.id,error:{code,message}}));
  if(r.method===${JSON.stringify(options.readGate ?? '')})while(existsSync(${JSON.stringify(readGate)}))await new Promise(resolve=>setTimeout(resolve,10));
  if(r.method==='initialize')return reply({});
- if(r.method==='account/read')return existsSync(${JSON.stringify(fail)})?error(-32041,'Private original account routing failure'):reply({account:null,requiresOpenaiAuth:false});
+ if(r.method==='account/read'){
+  if(${Boolean(options.authRequired)})return reply({account:existsSync(${JSON.stringify(fail)})?null:{type:'apiKey'},requiresOpenaiAuth:true});
+  return existsSync(${JSON.stringify(fail)})?error(-32041,'Private original account routing failure'):reply({account:null,requiresOpenaiAuth:false});
+ }
  if(r.method==='thread/start'||r.method==='thread/resume'){
   while(existsSync(${JSON.stringify(gate)}))await new Promise(resolve=>setTimeout(resolve,10));
   if(${Boolean(options.transportClose)})return socket.close();
@@ -190,6 +194,36 @@ it.runIf(process.platform === 'darwin')('retains the original running backend af
   expect((await f.methods()).filter(method => method === 'thread/start')).toHaveLength(1)
   expect((await rows(f.events)).map(row => row.args.slice(4))).toEqual([['resume', sid, '--no-alt-screen']])
   expect((await f.methods()).some(method => ['turn/start', 'turn/steer', 'thread/queue/add'].includes(method))).toBe(false)
+})
+
+it.runIf(process.platform === 'darwin')('reports a native authentication prerequisite and retries the original initialization without any Prompt or duplicate thread', async () => {
+  // The installed native GetAccountResponse schema permits account:null before
+  // authentication and the tagged {type:'apiKey'} Account after it. Neither is
+  // inferred from a native error message or terminal presentation.
+  const f = await fixture({ authRequired: true })
+  const original = await f.wait(value => value.initialization?.phase === 'failed')
+  expect(original.state).toBe('starting'); expect(original.backendState).toBe('running')
+  expect(original.initialization).toMatchObject({ lifecycleOperationId: 'original-lifecycle', phase: 'failed',
+    native: { state: 'not-created' }, failure: { step: 'preflight' },
+    blocker: { state: 'pending', reason: 'authentication', source: 'native-protocol', scope: 'prerequisite' } })
+  expect(parseTerminalFrontendObservation(original).initialization?.blocker).toEqual(original.initialization?.blocker)
+  expect((await f.methods()).filter(method => method === 'thread/start')).toHaveLength(0)
+  expect(await rows(f.events)).toHaveLength(0)
+  const backend = JSON.parse(await readFile(f.heartbeat, 'utf8'))
+  const request = { operationId: 'continue-original-authentication', expectedFrontendId: original.frontendId,
+    target: { kind: 'initialization' as const, lifecycleOperationId: 'original-lifecycle' } }
+  expect((await reconnectCodexTerminalFrontend(f.context, request)).initialization?.blocker).toEqual(original.initialization?.blocker)
+  await rm(f.fail)
+  const ready = await reconnectCodexTerminalFrontend(f.context, request)
+  expect(ready.initialization).toEqual({ lifecycleOperationId: 'original-lifecycle', phase: 'ready', native: { state: 'confirmed', sessionId: sid } })
+  await f.wait(value => value.state === 'detached')
+  await reconnectCodexTerminalFrontend(f.context, request)
+  expect((await f.methods()).filter(method => method === 'account/read')).toHaveLength(3)
+  expect((await f.methods()).filter(method => method === 'thread/start')).toHaveLength(1)
+  expect((await f.methods()).some(method => ['turn/start', 'turn/steer', 'thread/queue/add'].includes(method))).toBe(false)
+  expect((await rows(f.events)).map(row => row.args.slice(4))).toEqual([['resume', sid, '--no-alt-screen']])
+  expect(JSON.parse(await readFile(f.heartbeat, 'utf8')).pid).toBe(backend.pid)
+  expect(f.child.exitCode).toBeNull(); expect(f.child.signalCode).toBeNull()
 })
 
 it.runIf(process.platform === 'darwin').each([false, true])('keeps one original native request pending through reader timeouts and accepts its late exact response without resending (resume=%s)', async resume => {

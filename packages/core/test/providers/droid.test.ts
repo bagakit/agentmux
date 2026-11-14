@@ -252,7 +252,7 @@ describe('Droid provider', () => {
       for (const rule of DROID_HOOKS.rules) for (const eventName of rule.events) referenced.add(eventName)
       const tracking = DROID_HOOKS.subagentTracking
       for (const eventName of [
-        ...(tracking?.startEvents ?? []), ...(tracking?.stopEvents ?? []), ...(tracking?.mainStopEvents ?? [])
+        ...(tracking?.startEvents ?? []), ...(tracking?.stopEvents ?? [])
       ]) referenced.add(eventName)
       const installed = new Set<string>(DROID_HOOK_EVENTS)
       expect([...referenced].filter((eventName) => !installed.has(eventName))).toEqual([])

@@ -6,10 +6,24 @@ import { dirname, resolve } from 'node:path'
 import { relative } from 'node:path'
 import { instrumentInitialization } from './platform-initialization-mutations.mjs'
 const root = resolve(import.meta.dirname, '../../../..')
+const compiled = process.env.AMX_SESSION_STATE_COMPILED
+function compiledCore(file) {
+  if (!compiled) return
+  for (const directory of ['src', 'dist']) {
+    const prefix = resolve(root, 'packages/core', directory) + '/'
+    if (file.startsWith(prefix)) {
+      const target = resolve(compiled, file.slice(prefix.length).replace(/\.ts$/u, '.js'))
+      if (!existsSync(target)) throw new Error('The exact private compiled Core input is missing: ' + relative(compiled, target))
+      return target
+    }
+  }
+}
 registerHooks({ resolve(specifier, context, next) {
   const file = specifier.startsWith('file:') ? fileURLToPath(specifier)
     : specifier.startsWith('.') && context.parentURL?.startsWith('file:')
       ? resolve(dirname(fileURLToPath(context.parentURL)), specifier) : specifier
+  const exact = compiledCore(file)
+  if (exact) return next(pathToFileURL(exact).href, context)
   for (const packageName of ['core', 'connectors']) {
     const prefix = resolve(root, 'packages', packageName, 'dist') + '/'
     if (file.startsWith(prefix) && file.endsWith('.js')) {
@@ -17,7 +31,9 @@ registerHooks({ resolve(specifier, context, next) {
       if (existsSync(source)) return next(pathToFileURL(source).href, context)
     }
   }
-  return next(specifier, context)
+  const result = next(specifier, context)
+  const target = result.url.startsWith('file:') ? compiledCore(fileURLToPath(result.url)) : undefined
+  return target ? next(pathToFileURL(target).href, context) : result
 }, load(url, context, next) {
   const result = next(url, context)
   if (!url.startsWith('file:') || result.source == null) return result

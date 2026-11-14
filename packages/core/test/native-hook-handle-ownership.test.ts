@@ -7,7 +7,7 @@ import { describe, expect, it } from 'vitest'
 import { AgentMuxClient } from '../src/client.js'
 import { AgentProviderRegistry, type AgentProvider } from '../src/agent-provider.js'
 import { AgentMuxFileAgentSessionStore } from '../src/agent-session-store.js'
-import { normalizeNativeHook, releaseSubagentRoster } from '../src/hook-normalizer.js'
+import { normalizeNativeHook } from '../src/hook-normalizer.js'
 import type {
   AgentMuxClientEvent,
   AgentMuxStoredAgentSession,
@@ -77,7 +77,7 @@ async function withSession(
       events
     })
   } finally {
-    releaseSubagentRoster(runId)
+    
     await client.dispose()
     await rm(root, { recursive: true, force: true })
   }
@@ -165,7 +165,7 @@ describe('Provider Hook native handle belongs to the main subject', () => {
     const specification = {
       rules: [{ events: ['Work', 'ChildBorn'], state: 'working' as const }],
       subagentTracking: { startEvents: ['ChildBorn'], stopEvents: ['ChildFinished'],
-        mainStopEvents: ['MainDone'], idKeys: ['worker_key'] },
+        idKeys: ['worker_key'] },
       nativeHandle: { sessionIdKeys: ['native_id'], transcriptPathKeys: ['record_path'] }
     }
     const normalize = (eventName: string, payload: Record<string, unknown> = {}) => normalizeNativeHook(specification, {
@@ -178,7 +178,7 @@ describe('Provider Hook native handle belongs to the main subject', () => {
       expect(normalize('ChildFinished', { record_path: childPath }).nativeHandle).toBeUndefined()
       expect(normalize('Work', { agent_id: 'undeclared-field' }).nativeHandle).toMatchObject({ transcriptPath: mainPath })
     } finally {
-      releaseSubagentRoster(runId)
+      
     }
   })
 
@@ -196,7 +196,7 @@ describe('Provider Hook native handle belongs to the main subject', () => {
     const base = new AgentProviderRegistry().get('codex')
     const specification = {
       ...base.hook,
-      subagentTracking: { startEvents: ['ChildBorn'], stopEvents: ['ChildFinished'], mainStopEvents: ['Stop'], idKeys: [idKey] }
+      subagentTracking: { startEvents: ['ChildBorn'], stopEvents: ['ChildFinished'], idKeys: [idKey] }
     }
     const provider: AgentProvider = { ...base, hook: specification,
       normalizeHook: (envelope) => normalizeNativeHook(specification, envelope, {}) }

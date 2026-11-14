@@ -1,6 +1,5 @@
 import { expect, it } from 'vitest'
 import { AgentProviderRegistry } from '../dist/index.js'
-import { releaseSubagentRoster } from '../dist/hook-normalizer.js'
 
 const providers = new AgentProviderRegistry()
 const main = { kind: 'provider' as const, providerId: 'codex', sessionId: 'original-native' }
@@ -17,5 +16,5 @@ it('records a reply snapshot only for the confirmed main Agent, never for a chil
   expect(child.mainSubject).toBe(false)
   expect(kinds(child)).not.toContain('assistant_message')
   expect(JSON.stringify(child.timeline)).not.toContain('CHILD FINAL')
-  releaseSubagentRoster('codex-snapshot-run')
+  
 })

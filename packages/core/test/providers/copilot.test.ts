@@ -11,7 +11,6 @@ import { AgentProviderRegistry } from '../../src/agent-provider.js'
 import { COPILOT_HOOK_EVENTS, COPILOT_HOOKS, createCopilotManagedHookPlan } from '../../src/providers/copilot.js'
 import { HOOK_COMMAND_TIMEOUT_SECONDS } from '../../src/providers/shared.js'
 import { canonicalHookLifecycleEvent as declaredHookLifecycleEvent } from '../../src/agent-hook-event.js'
-import { releaseSubagentRoster } from '../../src/hook-normalizer.js'
 import type { AgentSemanticState } from '../../src/types.js'
 
 /**
@@ -243,13 +242,13 @@ describe('Copilot provider', () => {
   describe('子代理身份缺口', () => {
     it('只接受唯一 agentId，名称不合并主体，未确认 stop 不收敛主轮', () => {
       expect(COPILOT_HOOKS.subagentTracking).toEqual({ startEvents: ['subagentStart'],
-        stopEvents: [], mainStopEvents: [], idKeys: ['agentId'] })
-      const runId = 'run-subagent'; releaseSubagentRoster(runId)
+        stopEvents: [], idKeys: ['agentId'] })
+      const runId = 'run-subagent'; 
       const hook = hookIn(runId)
       expect(hook('subagentStart', { agentName: 'reviewer' }).semanticState).toBe('unknown')
       expect(hook('agentStop', { stopReason: 'end_turn' }).semanticState).toBe('unknown')
       expect(hook('subagentStop', { agentName: 'reviewer', agentId: 'ag-1' }).semanticState).toBe('unknown')
-      releaseSubagentRoster(runId)
+      
     })
   })
 
@@ -281,7 +280,7 @@ describe('Copilot provider', () => {
       for (const rule of COPILOT_HOOKS.rules) for (const eventName of rule.events) referenced.add(eventName)
       const tracking = COPILOT_HOOKS.subagentTracking
       for (const eventName of [
-        ...(tracking?.startEvents ?? []), ...(tracking?.stopEvents ?? []), ...(tracking?.mainStopEvents ?? [])
+        ...(tracking?.startEvents ?? []), ...(tracking?.stopEvents ?? [])
       ]) referenced.add(eventName)
       const installed = new Set<string>(COPILOT_HOOK_EVENTS)
       expect([...referenced].filter((eventName) => !installed.has(eventName))).toEqual([])

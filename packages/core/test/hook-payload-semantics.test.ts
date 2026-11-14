@@ -13,7 +13,7 @@ import { AgentMuxFileAgentSessionStore, normalizeStoredAgentSession } from '../s
 import type { CtxmuxRunAdapter } from '../src/ctxmux-run-adapter.js'
 import { defaultAgentMuxHookPort } from '../src/runtime-paths.js'
 import {
-  nativeHookHasSubagentSubject, normalizeNativeHook, releaseSubagentRoster,
+  nativeHookHasSubagentSubject, normalizeNativeHook,
   type AgentNativeHookSpecification
 } from '../src/hook-normalizer.js'
 import type { AgentMuxClientEvent, AgentMuxStoredAgentSession, NativeHookEnvelope } from '../src/types.js'
@@ -183,7 +183,7 @@ async function harness(profile: Profile) {
     },
     close: async () => {
       for (const c of clients) await c.dispose()
-      releaseSubagentRoster(runId)
+      
       await rm(root, { recursive: true, force: true })
     } }
 }
@@ -292,7 +292,6 @@ describe('payload-dependent Hook contributions', () => {
       expect((await h.stored()).nativeHandle).toEqual(handle)
       expect(nativeHookHasSubagentSubject(spec, 'SessionStart', profile.child)).toBe(true)
       expect(nativeHookHasSubagentSubject(spec, 'SessionStart', { tool_input: profile.child })).toBe(false)
-      expect(releaseSubagentRoster(runId)).toBe(false)
       await h.reopen()
       expect(h.client.agentSession(agentSessionId).nativeHandle).toEqual(handle)
       expect(h.client.agentSession(agentSessionId).pendingInteraction).toBeUndefined()
