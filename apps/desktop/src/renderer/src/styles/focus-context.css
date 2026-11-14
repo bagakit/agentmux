@@ -281,15 +281,16 @@
 .focus-project-pin-handle:hover, .focus-project-pin-handle:focus-visible { background: var(--surface-2); color: var(--text); }
 .focus-project-lanes__personal-note { max-width: 180px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-micro); color: var(--text-2); }
 .focus-project-preferences__trigger { flex: none; width: 22px; height: 22px; margin-inline-start: auto; }
-.focus-project-preferences { z-index: 200; display: flex; flex-direction: column; gap: 12px; width: min(280px, calc(100vw - 24px)); padding: 14px; border: 1px solid var(--line); border-radius: 8px; color: var(--text); background: var(--surface-1); box-shadow: 0 8px 30px #0003; font-size: var(--fs-small); }
-.focus-project-preferences__name { overflow-wrap: anywhere; font-size: var(--fs-body); }
-.focus-project-preferences__pin { display: flex; align-items: center; gap: 7px; }
-.focus-project-preferences__note { display: flex; flex-direction: column; gap: 5px; color: var(--text-2); }
-.focus-project-preferences__note input { width: 100%; box-sizing: border-box; padding: 6px 8px; color: var(--text); background: var(--surface-0); border: 1px solid var(--line); border-radius: 4px; }
-.focus-project-preferences fieldset { margin: 0; padding: 0; border: 0; }
-.focus-project-preferences legend { margin-bottom: 6px; color: var(--text-2); }
-.focus-project-preferences__colors { display: flex; gap: 7px; }
-.focus-project-preferences__colors button { display: grid; place-items: center; width: 28px; height: 26px; border: 1px solid var(--line); border-radius: 5px; color: var(--text); cursor: pointer; }
+.focus-project-preferences { z-index: 200; display: flex; flex-direction: column; gap: 8px; box-sizing: border-box; width: min(248px, calc(100vw - 16px)); max-height: calc(100vh - 16px); overflow: auto; padding: 9px; border: 1px solid var(--line); border-radius: 6px; color: var(--text); background: var(--surface-1); box-shadow: 0 5px 18px #0003; font-size: var(--fs-small); }
+.focus-project-preferences__header { display: flex; align-items: center; gap: 10px; }
+.focus-project-preferences__name { flex: 1; min-width: 0; overflow-wrap: anywhere; font-size: inherit; }
+.focus-project-preferences__pin { display: inline-flex; flex: none; align-items: center; gap: 4px; }
+.focus-project-preferences__pin input { margin: 0; }
+.focus-project-preferences__note { display: grid; grid-template-columns: 36px minmax(0, 1fr); align-items: center; gap: 6px; color: var(--text-2); }
+.focus-project-preferences__note input { width: 100%; min-width: 0; box-sizing: border-box; padding: 4px 6px; font: inherit; color: var(--text); background: var(--surface-0); border: 1px solid var(--line); border-radius: 4px; }
+.focus-project-preferences__color-row { display: grid; grid-template-columns: 36px minmax(0, 1fr); align-items: center; gap: 6px; color: var(--text-2); }
+.focus-project-preferences__colors { display: flex; flex-wrap: wrap; gap: 5px; padding: 2px; }
+.focus-project-preferences__colors button { display: grid; place-items: center; width: 22px; height: 22px; padding: 0; border: 1px solid var(--line); border-radius: 4px; color: var(--text); cursor: pointer; }
 .focus-project-preferences__colors button[aria-pressed='true'] { outline: 1px solid var(--text-2); outline-offset: 2px; }
 .focus-project-preferences__actions { display: flex; justify-content: flex-end; gap: 8px; }
 .focus-project-preferences__error, .focus-project-order-error { margin: 0; color: var(--amber); font-size: var(--fs-small); overflow-wrap: anywhere; }
