@@ -19,7 +19,7 @@ type Lease = { snapshot(value: ToolkitSnapshot): void; end(error?: Error): void;
 type Tool = { id: string; loading: Promise<void> | null; latest: ToolkitConfirmedResult | null; admission: ToolkitAdmission | null
   error: string | null; sourceError: string | null; definition: ToolkitToolDefinition | null; sequence: number; leases: Set<Lease>; live: Execution | null
   parent: Tool | null; display: Tool | null; displayReaders: number; saving: Promise<void>; successful: ToolkitConfirmedResult | null
-  evaluationRequest: Promise<ToolkitSnapshot> | null; createIntent: unknown; loadError: string | null }
+  evaluationRequest: Promise<ToolkitSnapshot> | null; createIntent: unknown; loadError: string | null; launchSaveError: string | null }
 type Execution = { capture: CapturedToolkitPackage | null; snapshotRoot: string | null; tool: Tool; admission: ToolkitAdmission; port: ToolkitRunPort | null; cursor: number; rawBytes: number
   decoder: TextDecoder; replayText: string | null; failure: string | null; creating: boolean; attaching: boolean; ended: boolean; stopRequested: boolean
   terminalHint: boolean; uncertain: boolean; done: Promise<void>; complete(): void
@@ -44,6 +44,7 @@ export class CustomToolkitOwner {
   private loadWork: Promise<void> = Promise.resolve()
   private closed = false
   constructor(private readonly args: { config: ConfigOwner; receipts: Pick<ToolkitReceiptStore, 'read' | 'save'>
+    inspectTuiCreation?(prepared: AgentMuxPreparedTerminal): Promise<AgentMuxRun | null>
     openRunPort(): Promise<ToolkitRunPort>; runner: string; env: Record<string, string>; snapshotRoot?: string; bundled?: () => ToolkitToolDefinition[]; now?: () => number }) {}
   private now() { return (this.args.now ?? Date.now)() }
   private configurations() { return [...(this.args.bundled?.() ?? []), ...toolkitTools(this.args.config.current)] }
@@ -53,7 +54,7 @@ export class CustomToolkitOwner {
   }
   private newTool(id: string, parent: Tool | null = null): Tool {
     return { id, parent, display: null, displayReaders: 0, saving: Promise.resolve(), successful: null, evaluationRequest: null, loading: null,
-      latest: null, admission: null, error: null, sourceError: null, definition: null, sequence: 0, leases: new Set(), live: null, createIntent: undefined, loadError: null }
+      latest: null, admission: null, error: null, sourceError: null, definition: null, sequence: 0, leases: new Set(), live: null, createIntent: undefined, loadError: null, launchSaveError: null }
   }
   private displayTool(tool: Tool): Tool { return tool.display ??= this.newTool(tool.id, tool) }
   private state(tool: Tool, definition: ToolkitToolDefinition) {
@@ -67,9 +68,10 @@ export class CustomToolkitOwner {
   private scriptSnapshot(tool: Tool, definition: ToolkitToolDefinition): ToolkitScriptSnapshot {
     const display = definition.display || tool.display?.admission || tool.display?.latest || tool.display?.error
       ? this.displaySnapshot(this.displayTool(tool), definition) : undefined
+    const reason = tool.error ?? tool.loadError ?? (tool.admission ?? tool.latest)?.reason ?? null
     return structuredClone({ schema: 'agentmux.toolkit.v1', kind: 'script', toolId: tool.id, definition,
       state: this.state(tool, definition),
-      reason: tool.error ?? tool.loadError ?? (tool.admission ?? tool.latest)?.reason ?? null, admission: tool.admission,
+      reason: tool.launchSaveError ? [reason, tool.launchSaveError].filter(Boolean).join(' ') : reason, admission: tool.admission,
       latestConfirmed: tool.latest, consumerCount: tool.leases.size, sequence: tool.sequence, ...(display ? { display } : {}) })
   }
   /** Output publication consumes captured facts, never the live filesystem. */
@@ -132,6 +134,10 @@ export class CustomToolkitOwner {
         if (tool.error || this.closed) return
         if (tool.live?.starting) { await tool.live.starting; return }
         if (tool.admission) {
+          if (!tool.admission.run && tool.admission.definition.mode === 'tui') {
+            await this.observeOriginalExecution(tool)
+            return
+          }
           if (tool.admission.run && !tool.live) await this.recover(tool)
           if (tool.admission) return
         }
@@ -221,7 +227,8 @@ export class CustomToolkitOwner {
         value.latest = parsed.latestConfirmed; value.admission = parsed.admission
         // Launch material is private and consumed only by an explicit original create continuation.
         value.createIntent = saved.createIntent
-        if (value.admission) value.admission = { ...value.admission, state: 'unknown', reason: value.admission.document === null
+        if (value.admission) value.admission = { ...value.admission, state: 'unknown', reason: value.admission.definition.mode === 'tui' && value.admission.state === 'unknown' && value.admission.reason
+          ? value.admission.reason : value.admission.document === null
           ? value.admission.reason ?? 'Original machine document is unavailable; exact Run outcome needs confirmation.' : 'Execution restored; exact Run outcome needs confirmation.' }
         if (parsed.display) {
           const display = this.displayTool(value)
@@ -245,11 +252,7 @@ export class CustomToolkitOwner {
   }
   async get(id: string): Promise<ToolkitSnapshot> {
     const tool = await this.load(id)
-    if (!tool.error && tool.admission?.run && !tool.live && !this.closed) await this.recover(tool)
-    else if (!this.closed && tool.live?.admission.definition.mode === 'tui') {
-      if (tool.live.starting) await tool.live.starting
-      else { this.observeTui(tool.live); await this.checkTui(tool.live) }
-    }
+    await this.observeOriginalExecution(tool)
     if (tool.display?.admission?.run && !tool.display.live && !this.closed) await this.recover(tool.display)
     await this.resolve(tool).catch(() => {})
     return this.current(tool)
@@ -562,6 +565,27 @@ export class CustomToolkitOwner {
       await this.closeChannel(execution).catch(failure => this.unknown(execution, 'Tool channel cleanup is unconfirmed: ' + message(failure)))
     }
   }
+  private tuiPreparation(execution: Execution): AgentMuxPreparedTerminal {
+    const saved = execution.tool.createIntent as { hostId?: unknown; prepared?: unknown } | undefined
+    if (!saved || saved.hostId !== 'local' || Object.keys(saved).some(key => !['hostId', 'prepared'].includes(key))) {
+      throw new AgentMuxError('Original TUI preparation is missing. The original request and outcome remain unconfirmed.', 'CONTROL_PROTOCOL_ERROR')
+    }
+    const prepared = parsePreparedTerminal(saved.prepared)
+    if (prepared.createOperationId !== execution.admission.executionId || prepared.workspacePath !== execution.admission.target.workspacePath) {
+      throw new AgentMuxError('Original TUI preparation belongs to another operation or directory; the receipt is retained.', 'CONTROL_PROTOCOL_ERROR')
+    }
+    return prepared
+  }
+  private async saveTuiLaunchFailure(execution: Execution): Promise<void> {
+    const tool = execution.tool
+    let issue: string | null = null
+    try { await this.save(tool) }
+    catch (error) { issue = 'Saving the original launch failure is unconfirmed: ' + message(error) }
+    if (tool.live === execution && tool.launchSaveError !== issue) {
+      tool.launchSaveError = issue
+      this.publish(tool)
+    }
+  }
   private async startTui(execution: Execution, retained: boolean): Promise<void> {
     try {
       execution.port = await this.args.openRunPort()
@@ -573,21 +597,12 @@ export class CustomToolkitOwner {
       const env = { ...this.args.env }
       delete env.ELECTRON_RUN_AS_NODE
       delete env.AGENTMUX_TOOLKIT_RESULT_PATH; delete env.AGENTMUX_TOOLKIT_RESULT_TOKEN
-      const saved = execution.tool.createIntent as { hostId?: unknown; prepared?: unknown } | undefined
-      let prepared: AgentMuxPreparedTerminal
-      if (retained) {
-        if (!saved || saved.hostId !== 'local' || Object.keys(saved).some(key => !['hostId', 'prepared'].includes(key))) {
-          throw new AgentMuxError('Original TUI preparation is missing. The original request and outcome remain unconfirmed.', 'CONTROL_PROTOCOL_ERROR')
-        }
-        prepared = parsePreparedTerminal(saved.prepared)
-      } else {
-        prepared = await execution.port.prepare({ createOperationId: execution.admission.executionId,
+      const prepared = retained ? this.tuiPreparation(execution) : await execution.port.prepare({ createOperationId: execution.admission.executionId,
           workspacePath: definition.workspacePath,
           ...(definition.script.trim()
             ? { command: '/bin/sh', args: ['-lc', definition.script, 'agentmux-toolkit', ...definition.args] }
             : { args: definition.args }),
           env, cols: 80, rows: 24 })
-      }
       if (prepared.createOperationId !== execution.admission.executionId || prepared.workspacePath !== execution.admission.target.workspacePath) {
         throw new AgentMuxError('Original TUI preparation belongs to another operation or directory; the receipt is retained.', 'CONTROL_PROTOCOL_ERROR')
       }
@@ -602,8 +617,10 @@ export class CustomToolkitOwner {
       this.observeTui(execution)
       await this.checkTui(execution)
     } catch (error) {
-      if (retained || execution.creating || execution.admission.run) this.unknown(execution, error)
-      else await this.confirm(execution, 'failed', 'TUI preparation failed: ' + message(error), null)
+      if (retained || execution.creating || execution.admission.run) {
+        this.unknown(execution, error)
+        if (!execution.admission.run) await this.saveTuiLaunchFailure(execution)
+      } else await this.confirm(execution, 'failed', 'TUI preparation failed: ' + message(error), null)
     }
   }
   /** Lifecycle facts are sufficient here; terminal bytes belong to the original Attachment owner. */
@@ -638,7 +655,7 @@ export class CustomToolkitOwner {
           if (execution.admission.state !== state || execution.admission.reason !== reason || execution.uncertain || execution.tool.loadError) {
             execution.admission.state = state; execution.admission.reason = reason
             await this.save(execution.tool)
-            execution.uncertain = false; execution.tool.loadError = null
+            execution.uncertain = false; execution.tool.loadError = null; execution.tool.launchSaveError = null
             this.publish(execution.tool)
           }
         } while (execution.statusAgain && !this.closed)
@@ -657,21 +674,57 @@ export class CustomToolkitOwner {
     const reason = state === 'stopped' ? 'Stopped explicitly.' : state === 'succeeded' ? null : 'The TUI Run ended without a successful exit.'
     await this.confirm(execution, state, reason, run.exitCode ?? null)
   }
+  private async observeOriginalExecution(tool: Tool): Promise<void> {
+    if (this.closed || tool.error || !tool.admission) return
+    const tui = tool.admission.definition.mode === 'tui'
+    if (tui && tool.live?.starting) { await tool.live.starting; return }
+    if (!tool.admission.run) {
+      if (tui && (tool.launchSaveError || tool.createIntent !== undefined && this.args.inspectTuiCreation)) await this.recover(tool)
+      return
+    }
+    if (!tool.live) await this.recover(tool)
+    else if (tui) { this.observeTui(tool.live); await this.checkTui(tool.live) }
+  }
   private async recover(tool: Tool): Promise<void> {
     const execution = this.execution(tool, tool.admission!); tool.live = execution
     if (execution.admission.definition.mode === 'tui') {
-      execution.starting = (async () => {
+      execution.starting = Promise.resolve().then(async () => {
         try {
+          if (!execution.admission.run) {
+            if (tool.launchSaveError) await this.saveTuiLaunchFailure(execution)
+            if (tool.createIntent === undefined || !this.args.inspectTuiCreation || this.closed || tool.live !== execution) return
+            const original = await this.args.inspectTuiCreation(this.tuiPreparation(execution))
+            if (this.closed || tool.live !== execution) return
+            if (!original) {
+              if (tool.loadError) { tool.loadError = null; this.publish(tool) }
+              return
+            }
+            if (original.kind !== 'terminal' || original.workspacePath !== execution.admission.target.workspacePath) {
+              throw new AgentMuxError('The launch observation belongs to another Tool Run.', 'CONTROL_PROTOCOL_ERROR')
+            }
+            execution.admission.run = { hostId: 'local', runId: original.runId }
+            tool.loadError = null
+            if (original.state !== 'running') { await this.confirmTuiRun(execution, original); return }
+            await this.save(tool)
+            tool.launchSaveError = null
+          }
+          if (this.closed || tool.live !== execution) return
+          // Only a confirmed original Run may use the existing connection and lifecycle path.
           execution.port = await this.args.openRunPort()
           this.observeTui(execution)
           await this.checkTui(execution)
         } catch (error) {
-          this.unknown(execution, error)
-          // A failed acquisition owns no observation. Keep the original admission
-          // available for the next reader to reconnect to that same Run.
+          if (this.closed || tool.live !== execution) return
+          if (execution.admission.run) this.unknown(execution, error)
+          else {
+            const reason = `${execution.admission.reason ?? 'Original launch outcome is unconfirmed.'} Receipt check: ${message(error)}`.slice(0, 512)
+            if (tool.loadError !== reason) { tool.loadError = reason; this.publish(tool) }
+          }
+        } finally {
+          // A failed or empty observation remains eligible for the next exact read.
           if (!execution.port && tool.live === execution) tool.live = null
         }
-      })().finally(() => { execution.starting = null })
+      }).finally(() => { execution.starting = null })
       await execution.starting
       return
     }
@@ -827,6 +880,7 @@ export class CustomToolkitOwner {
       try {
         await this.save(tool, { latestConfirmed: confirmed, admission: null }, () => {
           tool.latest = confirmed; tool.admission = null; tool.live = null; tool.createIntent = undefined; tool.loadError = null
+          tool.launchSaveError = null
           execution.ended = true; execution.complete()
         })
         execution.releaseLifecycle?.(); execution.releaseLifecycle = null
@@ -924,11 +978,7 @@ export class CustomToolkitOwner {
   async subscribe(id: string, snapshot: Lease['snapshot'], end: Lease['end'], signal: AbortSignal, options?: { evaluateOnDisplay?: boolean }) {
     if (signal.aborted || this.closed) throw new AgentMuxError('Tool reader cancelled or closed.', 'CONTROL_CANCELLED')
     const tool = await this.load(id)
-    if (!tool.error && tool.admission?.run && !tool.live && !this.closed) await this.recover(tool)
-    else if (tool.live?.admission.definition.mode === 'tui') {
-      if (tool.live.starting) await tool.live.starting
-      else { this.observeTui(tool.live); await this.checkTui(tool.live) }
-    }
+    await this.observeOriginalExecution(tool)
     const resolved = await this.resolve(tool).catch(() => null)
     if (signal.aborted || this.closed) throw new AgentMuxError('Tool reader cancelled or closed during establishment.', 'CONTROL_CANCELLED')
     let released = false

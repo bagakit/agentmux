@@ -1689,6 +1689,21 @@ export class RuntimeController {
     } catch (error) { dispose(); throw error }
   }
 
+  async inspectToolkitTuiCreation(prepared: import('@agentmux/core').AgentMuxPreparedTerminal): Promise<AgentMuxRun | null> {
+    const client = this.configuredClient('local')
+    // This Hosted method is owner-only and does not start an unavailable Native Runtime.
+    const receipt = await client.inspectTerminalCreation({ hostId: 'local', operationId: prepared.createOperationId })
+    if (this.configuredClient('local') !== client) throw new AgentMuxError('The original Toolkit Host changed during the launch check.', 'RUNTIME_OWNER_MISMATCH')
+    if (receipt.hostId !== 'local' || receipt.operationId !== prepared.createOperationId || receipt.admission && receipt.admission.workspacePath !== prepared.workspacePath) {
+      throw new AgentMuxError('The launch observation belongs to another Tool request.', 'CONTROL_PROTOCOL_ERROR')
+    }
+    const admission = receipt.admission
+    if (admission?.observation.availability === 'retained') return admission.run
+    if (admission?.startFailure) throw new AgentMuxError(admission.issue ?? 'Core retained the original Start failure.', admission.startFailure.code)
+    if (admission?.issue) throw new AgentMuxError(admission.issue, 'CONTROL_UNAVAILABLE')
+    return null
+  }
+
   async toolkitRunPort(): Promise<ToolkitRunPort> {
     const hostId = 'local'
     const client = await this.connectedClient(hostId, 'runtime')

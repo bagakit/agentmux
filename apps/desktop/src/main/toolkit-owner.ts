@@ -661,11 +661,13 @@ export class ToolkitOwner implements AgentMuxToolkitPort {
   private readonly performance: PerformanceToolkitOwner
   private readonly custom: CustomToolkitOwner
   constructor(private readonly args: { openRunPort(): Promise<ToolkitRunPort>; launch(): PerformanceLaunch
+    inspectTuiCreation?(prepared: import('@agentmux/core').AgentMuxPreparedTerminal): Promise<import('@agentmux/core').AgentMuxRun | null>
     enabled(): boolean; config: ConfigOwner; receiptPath: string; mainPid?: number; now?: () => number }) {
     const receipts = new ToolkitReceiptStore(args.receiptPath, () => ['performance', ...bundledToolkitTools(args.launch(), args.config.current).map(tool => tool.id), ...toolkitTools(args.config.current).map(tool => tool.id)])
     this.performance = new PerformanceToolkitOwner({ ...args, receipts, failures: new PerformanceFailureStore(join(dirname(args.receiptPath), 'toolkit-performance-failure.json')) })
     const launch = args.launch()
     this.custom = new CustomToolkitOwner({ config: args.config, openRunPort: args.openRunPort,
+      ...(args.inspectTuiCreation ? { inspectTuiCreation: args.inspectTuiCreation } : {}),
       runner: launch.runner, env: launch.env, snapshotRoot: join(dirname(args.receiptPath), 'toolkit-snapshots'), bundled: () => bundledToolkitTools(args.launch(), args.config.current), ...(args.now ? { now: args.now } : {}),
       receipts })
   }

@@ -476,6 +476,7 @@ export async function registerIpc(args: {
   }), configOwner, args.runtime, join(app.getPath('userData'), 'remote-core-install-adoptions.json'))
   const hostMaintenance = new SettingsHostsMaintenanceOwner(join(app.getPath('userData'), 'host-maintenance-requests'), configOwner, hostInstalls, hostUpgrades)
   toolkit = new ToolkitOwner({ openRunPort: () => args.runtime.toolkitRunPort(), launch: performanceLaunch,
+    inspectTuiCreation: prepared => args.runtime.inspectToolkitTuiCreation(prepared),
     config: configOwner, receiptPath: join(app.getPath('userData'), 'toolkit-receipts.json'),
     enabled: () => resolvePerformancePreferences(configOwner.current).enabled })
   void toolkit.load().catch(error => process.stderr.write('Toolkit loading remains unconfirmed: ' + String(error) + '\n'))
