@@ -25,6 +25,7 @@ The private LaunchServices verification in `package-macos.mjs` gives launch, the
 
 [The installer](../../apps/desktop/scripts/package-macos.mjs) creates an exclusive stage and records its object identity. On copy/signature/pre-cutover failure it reclaims that object only while the original signed source still matches its package, executable and signature seals. Cleanup observations do not qualify installation. Explicitly adopted stages and candidates retained after cutover or rollback remain available for continuation; diagnostics preserve the original operation result.
 
+[The repository packaging publisher](../../scripts/package-artifact-publisher.mjs) owns completed archive generations consumed by the Mac DMG entry and Linux CLI entry; reusable Linux build calls keep their caller-supplied output boundary. It returns a structured publication/cleanup result; each entry owns its output format, including the Linux CLI's single JSON document. It publishes an immutable generation before retention and checks the original receipt and payload identity again after occupancy observation. Mounted DMG and open-file observations concern only deletion candidates; an observation hang ends as unknown, retaining the archive. These observations never terminate an App, Agent or Runtime. Artifact receipts do not authorize deletion of user data, worktrees or old application bundles. Retention and operational steps live only in the [packaging guide](../guides/macos-packaging.md#产物的自动收尾).
 
 ## Signing identity
 

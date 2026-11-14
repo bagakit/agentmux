@@ -293,7 +293,7 @@ amux space unbind --zone ZONE_ID --space SPACE_ID
 
 ### 免装 Node 的 Linux x64 发布包
 
-`node scripts/linux-release/build.mjs --out DIR` 在已构建的 Core 上产出 `agentmux-core-<version>-linux-x64.tar.gz` 及其 `.sha256`。包里是校验过的官方 Node 24、与 Desktop 远端升级相同的可移植 Core 产物，以及 `install.sh`。目标机只需要 Linux x64 与 glibc 2.34 以上，不需要 Node、npm、编译器或外网。可移植产物只带各依赖声明的发布文件，不含 TypeScript 源码、测试、源映射、类型声明和其他平台的原生产物；发出的 JavaScript 仍然可读，不能当作代码保密手段。
+`node scripts/linux-release/build.mjs --out DIR` 在已构建的 Core 上产出 `agentmux-core-<version>-linux-x64.tar.gz` 及其 `.sha256`。CLI 的单份 JSON 结果在 `artifacts` 字段提供共享仓库分发归档与收尾回执；直接交付其中准确路径，留存规则见[产物的自动收尾](../../docs/guides/macos-packaging.md#产物的自动收尾)。导出的 `buildLinuxRelease()` 仍只写调用者指定输出，不触发公共归档留存。包里是校验过的官方 Node 24、与 Desktop 远端升级相同的可移植 Core 产物，以及 `install.sh`。目标机只需要 Linux x64 与 glibc 2.34 以上，不需要 Node、npm、编译器或外网。可移植产物只带各依赖声明的发布文件，不含 TypeScript 源码、测试、源映射、类型声明和其他平台的原生产物；发出的 JavaScript 仍然可读，不能当作代码保密手段。
 
 ```sh
 tar -xzf agentmux-core-<version>-linux-x64.tar.gz
