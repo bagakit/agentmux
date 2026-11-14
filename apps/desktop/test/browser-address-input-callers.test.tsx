@@ -21,7 +21,7 @@ import { composerConfig } from './helpers/composer-dom-fixture'
 
 const workspace = composerConfig.workspaces[0]!
 const tab = { id: 'page', browserId: 'page', regionId: 'page', kind: 'browser' as const, workspaceId: workspace.id,
-  profileId: 'confirmed-profile', navigationId: 'nav', url: 'https://example.test/original', title: 'Original page',
+  mode: 'normal' as const, profileId: 'confirmed-profile', navigationId: 'nav', url: 'https://example.test/original', title: 'Original page',
   loading: false, canGoBack: false, canGoForward: false, viewport: 'responsive' as const, driving: false, appLinkPrompt: null, error: null }
 const snapshot = { scope: { workspaceId: workspace.id, profileId: tab.profileId }, entries: [{ text: 'original search', submittedAt: 1 }] }
 const initial = useAppStore.getState(), launcherInitial = useLauncherState.getState()
@@ -52,7 +52,7 @@ async function submit() {
 async function inspectInputContextMenu() {
   const input = container.querySelector<HTMLInputElement>('input[role="combobox"]'); expect(input).not.toBeNull()
   const readsBeforeFocus = vi.mocked(api.browser.listInputHistory).mock.calls.length
-  await act(async () => input!.focus())
+  await act(async () => { input!.focus(); input!.click() })
   expect(api.browser.listInputHistory).toHaveBeenCalledTimes(readsBeforeFocus + 1)
   // React delegates at this root; test the original event above that boundary.
   const bubbled = vi.fn(); document.body.addEventListener('contextmenu', bubbled)
@@ -97,20 +97,14 @@ it('the actual Launcher input shares resource history and right-click without wa
   expect(container.textContent).toContain('history unavailable')
 })
 
-it('the actual Global Survey start form records only the human submission and preserves its original creation path', async () => {
+it('the actual Global Survey start form records one human submission and dispatches the original page-creation request', async () => {
   const scratch = { ...workspace, id: SCRATCH_WORKSPACE_ID }
-  useAppStore.setState({ config: { ...composerConfig, workspaces: [scratch] }, layouts: { [scratch.id]: createWorkspaceLayout('group') } })
-  const zone = { zoneId: 'zone', workspaceId: scratch.id, spaceIds: [] }, region = 'region'
-  const launcher = createWorkbenchTab('launcher', { kind: 'launcher', workspaceId: scratch.id, regionId: region })
-  const create = vi.fn(async () => {
-    useAppStore.setState({ tabs: { launcher: createWorkbenchTab('launcher', { ...tab, workspaceId: scratch.id, browserId: region, regionId: region }) } })
-  })
-  useAppStore.setState({ createWorkbenchZone: vi.fn(async () => ({ zone, save: { clientStateWritten: true, storageFlushRequested: true }, issues: [] })) as never,
-    openLauncher: vi.fn(() => { useAppStore.setState({ tabs: { launcher } }); return launcher.id }), createBrowser: create })
+  const create = vi.fn(async () => { throw new Error('Original page-creation owner is unavailable in this entry-point fixture') })
+  useAppStore.setState({ config: { ...composerConfig, workspaces: [scratch] }, layouts: { [scratch.id]: createWorkspaceLayout('group') }, createSurveyBrowser: create })
   await act(async () => root.render(<GlobalSurveySurface catalog={null} projection={null} selection={null} />))
   await inspectInputContextMenu(); expect(api.browser.listInputHistory).toHaveBeenCalledWith({ kind: 'workspace', workspaceId: scratch.id })
   await fill('human survey search'); expect(api.browser.recordInputHistory).not.toHaveBeenCalled(); await submit()
-  expect(create).toHaveBeenCalledExactlyOnceWith('group', { tabId: 'launcher', regionId: region }, 'human survey search', undefined, scratch.id)
+  expect(create).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ workspaceId: scratch.id, url: 'human survey search' }))
   expect(api.browser.recordInputHistory).toHaveBeenCalledExactlyOnceWith({ kind: 'workspace', workspaceId: scratch.id }, 'human survey search')
 })
 

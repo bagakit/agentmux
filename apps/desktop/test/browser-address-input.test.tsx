@@ -21,18 +21,19 @@ function deferred<T>() {
   const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no })
   return { promise, resolve, reject }
 }
-function Input({ scope = target, initial = '' }: { scope?: BrowserInputHistoryTarget | null; initial?: string }) {
+function Input({ scope = target, initial = '', description }: { scope?: BrowserInputHistoryTarget | null; initial?: string; description?: import('../src/renderer/src/lib/browser-address-suggestions').BrowserAddressDescription | undefined }) {
   const [value, setValue] = useState(initial), ref = useRef<BrowserAddressInputHandle>(null)
   return <div onContextMenu={regionContextMenu}><form onSubmit={event => { event.preventDefault(); ref.current?.submit() }}>
-    <BrowserAddressInput ref={ref} aria-label="Address" value={value} historyTarget={scope} onValueChange={setValue}
+    <BrowserAddressInput ref={ref} aria-label="Address" value={value} historyTarget={scope} description={description} onValueChange={setValue}
       onSubmit={submitted} onHistoryNotice={notice} onDeferredHistoryFailure={deferredFailure} />
-    <button type="submit">Navigate</button></form><button id="outside">Outside</button></div>
+    <button type="submit">Navigate</button><output data-draft>{value}</output></form><button id="outside">Outside</button></div>
 }
-async function mount(scope: BrowserInputHistoryTarget | null = target, initial = '') { await act(async () => root.render(<Input scope={scope} initial={initial} />)) }
+async function mount(scope: BrowserInputHistoryTarget | null = target, initial = '', description?: import('../src/renderer/src/lib/browser-address-suggestions').BrowserAddressDescription) { await act(async () => root.render(<Input scope={scope} initial={initial} description={description} />)) }
 function field() { const result = container.querySelector<HTMLInputElement>('input'); expect(result).not.toBeNull(); return result! }
 async function activate() { await act(async () => { field().focus(); field().click() }) }
 async function key(key: string, extra: KeyboardEventInit = {}) { await act(async () => field().dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...extra }))) }
 async function fill(value: string) { await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(field(), value); field().dispatchEvent(new Event('input', { bubbles: true })) }) }
+function historyTexts() { return [...document.querySelectorAll<HTMLButtonElement>('.browser-address-history__delete')].map(button => button.getAttribute('aria-label')!.slice('Remove input '.length)) }
 function popup() { return document.querySelector<HTMLElement>('[aria-label="Browser input history"]') }
 async function click(selector: string) { const element = document.querySelector<HTMLButtonElement>(selector); expect(element).not.toBeNull(); await act(async () => element!.click()) }
 beforeEach(() => {
@@ -79,7 +80,7 @@ it('uses the actual Main list, portal and keyboard selection to submit the origi
   await mount(); await activate()
   expect(api.browser.listInputHistory).toHaveBeenCalledExactlyOnceWith(target)
   expect(popup()?.closest('[data-overlay-host]')).not.toBeNull()
-  expect([...document.querySelectorAll('[role="option"]')].map(row => row.textContent)).toEqual(snapshot.entries.map(entry => entry.text))
+  expect(historyTexts()).toEqual(snapshot.entries.map(entry => entry.text))
   await key('ArrowDown'); await key('Enter')
   expect(field().value).toBe(snapshot.entries[0]!.text)
   expect(submitted).toHaveBeenCalledExactlyOnceWith(snapshot.entries[0]!.text)
@@ -89,7 +90,7 @@ it('uses the actual Main list, portal and keyboard selection to submit the origi
 
 it('mouse selection submits the original search and ArrowUp initially selects the final result', async () => {
   await mount(); await activate(); await key('ArrowUp')
-  expect(document.querySelector('[role="option"][aria-selected="true"]')?.textContent).toBe('original search')
+  expect(document.querySelector('[role="option"][aria-selected="true"] .browser-address-history__choose')?.getAttribute('aria-label')).toBe('Open recent input original search')
   const choices = [...document.querySelectorAll<HTMLButtonElement>('.browser-address-history__choose')]
   expect(choices).toHaveLength(2); await act(async () => choices[1]!.click())
   expect(submitted).toHaveBeenCalledExactlyOnceWith('original search')
@@ -114,7 +115,7 @@ it('opens on explicit activation before history settles, offers recent input bes
   expect(field().value).toBe('https://different.test/current')
   expect(submitted).not.toHaveBeenCalled(); expect(api.browser.recordInputHistory).not.toHaveBeenCalled()
   await fill('original search')
-  expect([...document.querySelectorAll('[role="option"]')].map(row => row.textContent)).toEqual(['original search'])
+  expect(historyTexts()).toEqual(['original search'])
 })
 
 it('clicking the already focused field reopens suggestions after Escape and shows failures without blocking navigation', async () => {
@@ -133,7 +134,7 @@ it('keeps filtering an edited draft after focus leaves and returns', async () =>
   expect(popup()).toBeNull()
   await activate()
   expect(field().value).toBe('original search')
-  expect([...document.querySelectorAll('[role="option"]')].map(row => row.textContent)).toEqual(['original search'])
+  expect(historyTexts()).toEqual(['original search'])
   expect(submitted).not.toHaveBeenCalled(); expect(api.browser.recordInputHistory).not.toHaveBeenCalled()
 })
 
@@ -144,7 +145,7 @@ it('typing during a real deferred suggestion read keeps the draft and selection 
   expect(popup()?.textContent).not.toContain('No saved input yet')
   await act(async () => pending.resolve(snapshot))
   expect(field().value).toBe('original'); expect([field().selectionStart, field().selectionEnd]).toEqual([2, 4])
-  expect([...document.querySelectorAll('[role="option"]')].map(row => row.textContent)).toEqual(snapshot.entries.map(entry => entry.text))
+  expect(historyTexts()).toEqual(['original search', snapshot.entries[0]!.text])
   expect(popup()?.textContent).not.toContain('No saved input yet'); expect(document.activeElement).toBe(field())
 })
 
@@ -170,10 +171,10 @@ it('focus may enter deletion controls, then leaving the portal closes it without
 
 it('single and all deletion use the exact Main-confirmed scope and keep the current draft', async () => {
   await mount(); await activate(); await fill('original')
-  await click('.browser-address-history__delete')
+  await act(async () => [...document.querySelectorAll<HTMLButtonElement>('.browser-address-history__delete')].find(button => button.getAttribute('aria-label') === 'Remove input ' + snapshot.entries[0]!.text)!.click())
   expect(api.browser.removeInputHistory).toHaveBeenCalledExactlyOnceWith(target, snapshot.scope, snapshot.entries[0]!.text)
   expect(field().value).toBe('original')
-  expect([...document.querySelectorAll('[role="option"]')].map(row => row.textContent)).toEqual(['original search'])
+  expect(historyTexts()).toEqual(['original search'])
   await click('.browser-address-history header button')
   expect(api.browser.clearInputHistory).toHaveBeenCalledExactlyOnceWith(target, snapshot.scope)
   expect(popup()?.textContent).toContain('No saved input yet'); expect(field().value).toBe('original'); expect(submitted).not.toHaveBeenCalled()
@@ -207,7 +208,7 @@ it('read and deletion failures retain data and draft with a persistent local war
   vi.mocked(api.browser.removeInputHistory).mockRejectedValueOnce(new Error('delete unavailable'))
   await click('.browser-address-history__delete')
   expect(popup()?.textContent).toContain('delete unavailable')
-  expect(document.querySelectorAll('[role="option"]')).toHaveLength(2); expect(field().value).toBe('original')
+  expect(historyTexts()).toHaveLength(2); expect(field().value).toBe('original')
 })
 
 it('userinfo rejection is announced while original input navigates; no draft-only input is recorded', async () => {
@@ -246,4 +247,108 @@ it('the actual nonempty popup rules style its mounted portal with an opaque prod
     const surface = [...tokens.matchAll(/--surface-2:\s*(#[0-9a-f]{6});/gi)]
     expect(surface.length).toBeGreaterThan(0)
   } finally { style.remove() }
+})
+
+async function nativeEdit(text: string, inputType = 'insertText') {
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(field(), text)
+    field().setSelectionRange(text.length, text.length)
+    field().dispatchEvent(new InputEvent('input', { bubbles: true, inputType, data: text.slice(-1) }))
+  })
+}
+const description = { browserId: 'page', workspaceId: 'resource', profileId: 'profile', mode: 'normal' as const,
+  url: snapshot.entries[0]!.text, title: 'Reference notes', faviconDataUrl: 'data:image/png;base64,aGVsbG8=' }
+
+it('[address-suggestions] selected suffix is not the human draft and Enter adopts the exact original input once', async () => {
+  await mount(); await activate(); await nativeEdit('https://ex')
+  expect(field().value).toBe(snapshot.entries[0]!.text)
+  expect([field().selectionStart, field().selectionEnd]).toEqual([10, snapshot.entries[0]!.text.length])
+  expect(container.querySelector('output')!.textContent).toBe('https://ex')
+  expect(submitted).not.toHaveBeenCalled(); expect(api.browser.recordInputHistory).not.toHaveBeenCalled()
+  await key('Enter')
+  expect(submitted).toHaveBeenCalledExactlyOnceWith(snapshot.entries[0]!.text)
+  expect(api.browser.recordInputHistory).toHaveBeenCalledExactlyOnceWith(target, snapshot.entries[0]!.text)
+})
+
+it.each(['Escape', 'Tab', 'ArrowRight', 'End'])('[address-suggestions] %s keeps its native editing meaning without navigating', async action => {
+  await mount(); await activate(); await nativeEdit('https://ex')
+  const event = new KeyboardEvent('keydown', { key: action, bubbles: true, cancelable: true })
+  await act(async () => field().dispatchEvent(event))
+  const accepted = action === 'ArrowRight' || action === 'End'
+  expect(field().value).toBe(accepted ? snapshot.entries[0]!.text : 'https://ex')
+  expect(container.querySelector('output')!.textContent).toBe(field().value)
+  if (action === 'Tab') expect(event.defaultPrevented).toBe(false)
+  expect(submitted).not.toHaveBeenCalled(); expect(api.browser.recordInputHistory).not.toHaveBeenCalled()
+})
+
+it.each(['deleteContentBackward', 'insertFromPaste', 'historyUndo'])('[address-suggestions] %s withdraws completion without immediately reinserting it', async inputType => {
+  await mount(); await activate(); await nativeEdit('https://ex')
+  await nativeEdit('https://ex', inputType)
+  expect(field().value).toBe('https://ex'); expect(container.querySelector('output')!.textContent).toBe('https://ex')
+  expect(submitted).not.toHaveBeenCalled()
+})
+
+it('[address-suggestions] arbitrary selection edits dismiss the suffix while retaining the human selection', async () => {
+  await mount(); await activate(); await nativeEdit('https://ex')
+  await act(async () => { field().setSelectionRange(2, 4); document.dispatchEvent(new Event('selectionchange', { bubbles: true })) })
+  expect(field().value).toBe('https://ex'); expect([field().selectionStart, field().selectionEnd]).toEqual([2, 4])
+})
+
+it('[address-suggestions] composition replaces a selected suffix with the actual IME value and never submits preedit', async () => {
+  await mount(); await activate(); await nativeEdit('https://ex')
+  await act(async () => field().dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true })))
+  await nativeEdit('https://ex中文', 'insertCompositionText'); await key('Enter', { isComposing: true })
+  expect(submitted).not.toHaveBeenCalled(); expect(popup()).toBeNull()
+  await act(async () => field().dispatchEvent(new CompositionEvent('compositionend', { bubbles: true, data: '中文' })))
+  await key('Enter'); expect(submitted).toHaveBeenCalledExactlyOnceWith('https://ex中文')
+})
+
+it('[address-suggestions] exact caller artwork gives a real title, URL and visible match without querying pages', async () => {
+  const inspect = vi.spyOn(api.browser, 'listTargets'), capture = vi.spyOn(api.browser, 'getRecoveryPreview')
+  await mount(target, '', description); await activate(); await fill('Reference')
+  expect(popup()!.textContent).toContain('Reference notes'); expect(popup()!.textContent).toContain(description.url)
+  expect(popup()!.querySelector('mark')?.textContent).toBe('Reference')
+  expect(popup()!.querySelector('img')?.getAttribute('src')).toBe(description.faviconDataUrl)
+  expect(inspect).not.toHaveBeenCalled(); expect(capture).not.toHaveBeenCalled()
+  await nativeEdit('R'); await nativeEdit('Re'); await nativeEdit('Ref')
+  expect(api.browser.listInputHistory).toHaveBeenCalledTimes(1)
+})
+
+it.each([{ profileId: 'foreign' }, { workspaceId: 'display-only' }, { mode: 'private' as const }, { url: 'https://example.test/another' }, { browserId: 'different' }])('[address-suggestions] foreign caller metadata %j never decorates original history', async changed => {
+  await mount(target, '', { ...description, ...changed }); await activate()
+  expect(popup()!.textContent).not.toContain(description.title); expect(popup()!.querySelector('img')).toBeNull()
+  expect(historyTexts()).toEqual(snapshot.entries.map(entry => entry.text))
+})
+
+it('[address-suggestions] malformed explicit input remains available as its original submission, with no fake search or deletion', async () => {
+  await mount(); await activate(); await fill('https://')
+  const action = [...document.querySelectorAll('[role="option"]')].find(row => !row.querySelector('.browser-address-history__delete'))!
+  expect(action.textContent).toContain('Open address'); expect(action.textContent).not.toContain('Search the web')
+  await act(async () => action.querySelector<HTMLButtonElement>('button')!.click())
+  expect(submitted).toHaveBeenCalledExactlyOnceWith('https://')
+})
+
+it('[address-suggestions] keyboard removal targets only the selected original history, preserving the unaccepted query', async () => {
+  await mount(); await activate(); await nativeEdit('https://ex')
+  await key('Delete', { shiftKey: true })
+  expect(api.browser.removeInputHistory).toHaveBeenCalledExactlyOnceWith(target, snapshot.scope, snapshot.entries[0]!.text)
+  expect(field().value).toBe('https://ex'); expect(submitted).not.toHaveBeenCalled()
+  await fill('a new query'); await key('ArrowDown'); await key('Delete', { shiftKey: true })
+  expect(api.browser.removeInputHistory).toHaveBeenCalledTimes(1)
+})
+
+it('[address-suggestions] a later exact favicon replaces a failed image without inheriting its hidden state', async () => {
+  await mount(target, '', description); await activate()
+  const failed = popup()!.querySelector<HTMLImageElement>('img')!
+  await act(async () => failed.dispatchEvent(new Event('error'))); expect(failed.hidden).toBe(true)
+  await mount(target, '', { ...description, faviconDataUrl: 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg"/>' })
+  const updated = popup()!.querySelector<HTMLImageElement>('img')!
+  expect(updated).not.toBe(failed); expect(updated.hidden).toBe(false)
+  expect(api.browser.listInputHistory).toHaveBeenCalledTimes(1)
+})
+
+it('[address-suggestions] selecting the last history and removing it never targets the first original entry', async () => {
+  await mount(); await activate(); await key('ArrowUp'); await key('Delete', { shiftKey: true })
+  expect(api.browser.removeInputHistory).toHaveBeenCalledExactlyOnceWith(target, snapshot.scope, 'original search')
+  expect(submitted).not.toHaveBeenCalled(); expect(field().value).toBe('')
 })

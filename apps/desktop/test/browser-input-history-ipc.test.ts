@@ -16,15 +16,16 @@ type TestOwner = { workspaceId: string | null; storage: { mode: 'normal' | 'priv
 const bridge = vi.hoisted(() => ({
   root: '', api: null as AgentMuxPreloadApi | null,
   handlers: new Map<string, (event: IpcMainInvokeEvent, ...values: unknown[]) => unknown>(),
-  invoke: vi.fn(), owners: new Map<string, TestOwner>(), defaultProfile: () => '',
+  invoke: vi.fn(), owners: new Map<string, TestOwner>(), defaultProfile: (): string => '', profiles: null as import('../src/main/browser-profile-manager.js').BrowserProfileManager | null,
   navigate: vi.fn(), manager: null as unknown
 }))
-vi.mock('electron', () => ({ nativeTheme: { shouldUseDarkColors: true, on: vi.fn(), off: vi.fn() },
-  app: { getPath: () => bridge.root || tmpdir(), getAppPath: () => process.cwd(), isPackaged: false },
+vi.mock('electron', () => ({ nativeTheme: { shouldUseDarkColors: true, on: vi.fn(), off: vi.fn(), removeListener: vi.fn() },
+  app: { on: vi.fn(), off: vi.fn(), once: vi.fn(), getPath: () => bridge.root || tmpdir(), getAppPath: () => process.cwd(), isPackaged: false },
   ipcMain: { handle: (channel: string, listener: (event: IpcMainInvokeEvent, ...values: unknown[]) => unknown) => bridge.handlers.set(channel, listener),
     removeHandler: (channel: string) => bridge.handlers.delete(channel), on: vi.fn(), off: vi.fn(), removeListener: vi.fn() },
   contextBridge: { exposeInMainWorld: (_name: string, api: AgentMuxPreloadApi) => { bridge.api = api } },
   ipcRenderer: { invoke: bridge.invoke, on: vi.fn(), off: vi.fn(), send: vi.fn(), removeListener: vi.fn() },
+  globalShortcut: { register: vi.fn(() => true), unregister: vi.fn(), isRegistered: vi.fn(() => false) },
   webFrame: { getZoomFactor: () => 1 }, clipboard: {}, dialog: {}, nativeImage: {}, shell: {}, session: {}, safeStorage: {}
 }))
 vi.mock('@agentmux/core', async original => ({ ...await original<typeof import('@agentmux/core')>(),
@@ -41,6 +42,7 @@ vi.mock('../src/main/browser-view-manager.js', async original => {
       super(...args)
       bridge.manager = this
       bridge.defaultProfile = () => args[1].defaultProfileId()
+      bridge.profiles = args[1] as import('../src/main/browser-profile-manager.js').BrowserProfileManager
       // Only the native page substrate is a Source double. The production scope getter below stays real.
       ;(this as unknown as { entries: Map<string, TestOwner> }).entries = bridge.owners
     }
@@ -51,12 +53,14 @@ vi.mock('../src/main/browser-view-manager.js', async original => {
       owner.url = text
       return { id, mode: owner.storage.mode, profileId: owner.storage.profileId, url: text } as import('../src/shared/contracts.js').BrowserSnapshot
     }
+    async restore(id: string) { const owner = bridge.owners.get(id); if (!owner) throw new Error('Unknown test native page'); return { id, mode: owner.storage.mode, profileId: owner.storage.profileId, url: owner.url } as import('../src/shared/contracts.js').BrowserSnapshot }
     dispose() { bridge.owners.clear(); super.dispose() }
   } }
 })
 
 import { AgentMuxMemoryAgentSessionStore } from '@agentmux/core'
 import { RuntimeController } from '../src/main/runtime-controller.js'
+import { WorkspaceFiles } from '../src/main/workspace-files.js'
 import { ScratchTopics } from '../src/main/scratch-topics.js'
 import { DEFAULT_CONFIG } from '../src/main/config-store.js'
 import { registerIpc } from '../src/main/ipc.js'
@@ -81,10 +85,10 @@ async function fixture() {
   vi.spyOn(runtime, 'prepare').mockResolvedValue({ hosts: [], removedHostIds: [], hostSignatures: new Map(), reservedHostIds: [] })
   const sender = Object.assign(new EventEmitter(), { id: 732, isDestroyed: () => false, send: vi.fn(), mainFrame: { framesInSubtree: [] } })
   const dispose = await registerIpc({ workbenchUserState: testWorkbenchUserState(), appDocumentSources: testAppDocumentSources(sender), initialConfig: config, window: { setBackgroundColor: vi.fn(), isDestroyed: () => false, webContents: sender } as unknown as BrowserWindow,
-    runtime, configStore: { get: async () => config, validate: (value: unknown) => value, save: async (value: unknown) => value } as never, progressLoops: { subscribe: () => () => {} } as never,
+    runtime, applicationAccess: {} as never, configStore: { get: async () => config, validate: (value: unknown) => value, save: async (value: unknown) => value } as never,
     // History requests do not create a native workface window; retain the original IPC owner port.
-    workbenchWindows: { setNativeOwner: () => () => {} } as Parameters<typeof registerIpc>[0]['workbenchWindows'],
-    scratchTopics: new ScratchTopics(), workspaceFiles: { listFiles: async () => [], dispose: async () => {} } as never })
+    workbenchWindows: { setNativeOwner: () => () => {} } as unknown as Parameters<typeof registerIpc>[0]['workbenchWindows'],
+    scratchTopics: new ScratchTopics(), workspaceFiles: new WorkspaceFiles(id => runtime.executionHost(id)) })
   const invoke = async (channel: string, values: unknown[], actualSender: unknown = sender) => {
     const handler = bridge.handlers.get(channel)
     expect(handler, `Actual registered channel missing: ${channel}`).toBeTypeOf('function')
@@ -152,7 +156,7 @@ describe('actual preload and registered Main input-history path', () => {
     try {
       const launcher = { kind: 'workspace', workspaceId: 'resource-workspace' } as const
       expect((await f.api.recordInputHistory(launcher, 'before create search')).scope).toEqual(f.scope)
-      const profile: BrowserProfileSummary = await f.api.createProfile('Other History Profile')
+      const profile: BrowserProfileSummary = await bridge.profiles!.createProfile('Other History Profile', 'other-history-profile', { kind: 'user', id: 'history-fixture-user', verified: true })
       expect(profile.id).not.toBe(f.scope.profileId)
       bridge.owners.get('history-page')!.storage.profileId = profile.id
       await expect(f.api.listInputHistory(f.target)).rejects.toThrow('Profile changed')
@@ -183,7 +187,8 @@ describe('actual preload and registered Main input-history path', () => {
         await expect(Promise.resolve().then(() => f.invoke(channel, values[index]!, foreign))).rejects.toThrow("Untrusted application")
       }
       expect(await f.api.listInputHistory(f.target)).toEqual({ scope: f.scope, entries: [] })
-      await f.invoke('browser:navigate', ['history-page', 'agent page navigation'], foreign)
+      await expect(f.invoke('browser:navigate', ['history-page', 'agent page navigation'], foreign)).rejects.toThrow('Untrusted application')
+      await f.invoke('browser:navigate', ['history-page', 'agent page navigation'])
       expect(bridge.navigate).toHaveBeenCalledExactlyOnceWith('history-page', 'agent page navigation')
       expect(await f.api.listInputHistory(f.target)).toEqual({ scope: f.scope, entries: [] })
       await expect(readdir(join(f.root, 'browser-input-history'))).rejects.toMatchObject({ code: 'ENOENT' })
