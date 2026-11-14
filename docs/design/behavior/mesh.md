@@ -62,7 +62,7 @@ Cluster 分组以 Node、Mesh、Remote 分别承接对外发布、网络接入�
 
 配置读取失败、网络观察失败和真实空网络分别表达。配置不可用时说明当前受影响的配置读取、可检查的原 Core 与显式重读入口；原错误可展开核对，不直接将内部 owner 术语当成引导。独立可用的网络观察和原已保存连接仍可访问，不因配置观察失败显示虚构空拓扑、永久加载或要求停止健康 Run。保留原草稿与未知操作，已有设置可读时局部错误不折叠正在编辑的字段。
 
-Mesh 配置经原 Core 公共 owner 完整 CAS 保存，保留 expected revision 和原 operation ID；原 managed caller 的认证与准确 Runtime／owner fence 在持久写入前仍须成立。复用原 Node operator 资格；Device、guest、有限发布访问或 route delegation 不因此取得配置管理权。未知保存先查询原操作，不能用读到相同值伪造历史持久 ACK，不能换 ID 重发。 显式管理已保存远端 Core 时，入口验证原本地 caller，冻结准确 Host／预期 Runtime 与原 operator carrier；接收 Core 独立核原 operator 权限和 Runtime／instance，不把入口 Agent 当作远端 Session。该有限路由复用原 Node operator 选择边界，不提供任意 RPC 转发；已取得的原保存 ACK 不被随后观察路由变化覆盖。
+Mesh 配置经原 Core 公共 owner 完整 CAS 保存，保留 expected revision 和原 operation ID；原 managed caller 的认证与准确 Runtime／owner fence 在持久写入前仍须成立。复用原 Node operator 资格；Device、guest、有限发布访问或 route delegation 不因此取得配置管理权。未知保存先查询原操作，不能用读到相同值伪造历史持久 ACK，不能换 ID 重发。 显式管理已保存远端 Core 时，入口验证原本地 caller，冻结准确 Host／预期 Runtime 与原 operator carrier；接收 Core 独立核原 operator 权限和 Runtime／instance，不把入口 Agent 当作远端 Session。该有限路由复用原 Node operator 选择边界，不提供任意 RPC 转发；原配置和确认回执写入后，保存直接返回本次修订与操作回执。后续配置读取或路由观察独立报告结果。
 
 持久保存与当前应用分开表达：期望配置、已采用修订、应用中／失败、监听和当前网络观察各自可核对。热更新保留未改变的 peer、健康 circuit 和原对象；新配置、监听或应用失败保留原可用路径与健康 Core，不以关闭整个 Runtime 或强制重启应用配置。运行网络与监听器的寿命分开，允许仅主动出站的参与者；借用 listener 时只释放自己的资源。
 
