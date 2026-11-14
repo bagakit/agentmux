@@ -175,14 +175,27 @@ export function GoalPlanGraph({ demand, onOpenDiscussion, onRequestPlan, pending
   const projection = useMemo(() => goalPlanProjection(demand), [demand.plan, demand.planState, demand.delegations])
   const [open, setOpen] = useState<string | null>(null)
   const [issue, setIssue] = useState<string | null>(null)
+  const [readingState, setReadingState] = useState(false)
   const canvas = useRef<HTMLDivElement>(null)
   const reading = useRef<HTMLDivElement>(null), readingId = useId()
   const empty: GoalPlanView = { revision: 0, nodes: [], next: [], progress: null }
   const { edges, width, height } = useEdges(canvas, projection ?? empty, open ?? '')
   useLayoutEffect(() => { if (open) reading.current?.scrollIntoView?.({ block: 'nearest' }) }, [open])
   const requestAction = onRequestPlan ? <GoalPlanRequest demand={demand} onRequest={onRequestPlan} pending={pending} busy={busy} /> : null
+  async function readState() {
+    setReadingState(true); setIssue(null)
+    try { await useAppStore.getState().refreshDemand(demand.id) }
+    catch (error) { setIssue(error instanceof Error ? error.message : String(error)) }
+    finally { setReadingState(false) }
+  }
+  const stateIssue = demand.planStateIssue ?? (projection && !projection.progress
+    ? "Node states are unavailable: this Goal's Host returned the plan without them. Read this Goal again; update that Host if the state remains unavailable. The plan itself is unchanged." : undefined)
+  const stateService = stateIssue ? <p className="goals-service" role="status" data-goal-plan-states-unavailable>{stateIssue}{' '}
+    <button type="button" className="small-button" disabled={readingState} onClick={() => void readState()}>{readingState ? 'Reading Goal…' : 'Read Goal again'}</button>
+  </p> : null
   if (!projection) return <section className="goal-plan goal-plan--empty" aria-label="Goal plan" data-goal-plan-empty>
     <div className="goals-section-heading"><h2><ThemeObjectWorkflowIcon size={14} aria-hidden="true" /> Execution plan</h2><span className="goals-caption">Tasks and dependencies</span></div>
+    {stateService}{issue ? <p className="goals-service" role="status">{issue}</p> : null}
     <div className="goal-plan__empty-body"><p className="goal-plan__empty-title">No execution plan yet</p>
       <p className="goals-muted">{demand.alignment ? 'Turn this goal into tasks, dependencies and checks. The saved plan appears here as a dependency graph.' : 'Clarify the outcome and success criteria in the goal discussion, then plan the tasks and dependencies here.'}</p>
       <div className="goals-inline-actions">{requestAction}{onOpenDiscussion ? <button type="button" className="small-button" onClick={onOpenDiscussion}>Open goal discussion</button> : null}
@@ -199,8 +212,7 @@ export function GoalPlanGraph({ demand, onOpenDiscussion, onRequestPlan, pending
       <span className="goals-caption" data-goal-plan-progress>{progress ? `${progress.done} of ${progress.total} done · ` : ''}revision {projection.revision}</span>
     </div>
     {requestAction ? <div className="goals-inline-actions goal-plan__revise">{requestAction}</div> : null}
-    {progress ? <div className="goal-plan__progress" aria-hidden="true"><span style={{ transform: `scaleX(${ratio})` }} /></div>
-      : <p className="goals-service" data-goal-plan-states-unavailable>Node states are unavailable: this Goal's Host returned the plan without them, as older Host versions do. The plan itself is unchanged; update that Host to see each node's state.</p>}
+    {progress ? <div className="goal-plan__progress" aria-hidden="true"><span style={{ transform: `scaleX(${ratio})` }} /></div> : stateService}
     {issue ? <p className="goals-service" role="status">{issue}</p> : null}
     <div className="goal-plan__canvas" ref={canvas}>
       <svg className="goal-plan__edges" width={width} height={height} aria-hidden="true">

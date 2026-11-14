@@ -1005,9 +1005,9 @@ function parseDemand(value: unknown): AgentMuxDemand {
   } catch (error) {
     throw new AgentMuxError(error instanceof Error ? error.message : 'Control Goal facts are invalid.', 'CONTROL_PROTOCOL_ERROR')
   }
-  const planState = parseOwnerGoalPlanState(source.planState, goalFacts.plan, goalFacts.delegations ?? [])
+  const planStateRead = parseOwnerGoalPlanState(source.planState, goalFacts.plan, goalFacts.delegations ?? [], source.planStateIssue)
   return {
-    ...goalFacts, ...(planState ? { planState } : {}),
+    ...goalFacts, ...planStateRead,
     id: id(source.id, 'Control demand id is invalid.', 'CONTROL_PROTOCOL_ERROR'),
     title: text(source.title, 'Control demand title', 'CONTROL_PROTOCOL_ERROR'),
     description: text(source.description, 'Control demand description', 'CONTROL_PROTOCOL_ERROR'),

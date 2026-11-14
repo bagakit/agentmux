@@ -19,12 +19,12 @@ export function applyGoalDelegationResult(result: GoalDelegationResult, request 
     const retainedCut = original.delegationReadCut
     if (result.goalUpdatedAt < Math.max(original.updatedAt, retainedCut?.goalUpdatedAt ?? 0) ||
       result.goalUpdatedAt === retainedCut?.goalUpdatedAt && request < retainedCut.request) return state
-    const { delegationObservationIssue: _issue, planState: _previousDerivation, ...retained } = original
+    const { delegationObservationIssue: _issue, planState: _previousDerivation, planStateIssue: _previousStateIssue, ...retained } = original
     const demands = { ...state.demands, [result.goalId]: { ...retained, ...(result.goalState ? result.goalState : {}), updatedAt: Math.max(original.updatedAt, result.goalUpdatedAt), delegations: result.delegations,
       delegationReadCut: { goalUpdatedAt: result.goalUpdatedAt, request },
       delegationObservations: result.observations ?? [], ...(result.dispatches ? { dispatches: result.dispatches } : {}),
       ...(result.progressUpdates ? { progressUpdates: result.progressUpdates } : {}),
-      ...(result.plan ? { plan: result.plan, ...(result.planState ? { planState: result.planState } : {}) } : {}), ...(result.patrols ? { patrols: result.patrols } : {}), ...(result.patrolObservations ? { patrolObservations: result.patrolObservations } : {}), ...(result.responsibility ? { responsibility: result.responsibility } : {}),
+      ...(result.plan ? { plan: result.plan, ...(result.planState ? { planState: result.planState } : {}) } : {}), ...(result.planStateIssue ? { planStateIssue: result.planStateIssue } : {}), ...(result.patrols ? { patrols: result.patrols } : {}), ...(result.patrolObservations ? { patrolObservations: result.patrolObservations } : {}), ...(result.responsibility ? { responsibility: result.responsibility } : {}),
       ...(result.startObservations ? { startObservations: result.startObservations } : {}), ...(result.grounding ? { grounding: result.grounding } : {}) } }
     updateCurrentDemandIndex(state.demands, demands, [result.goalId])
     return { demands }

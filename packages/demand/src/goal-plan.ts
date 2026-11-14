@@ -255,16 +255,15 @@ export function projectGoalPlan(plan: GoalPlan, delegations: readonly DemandDele
     next: nodes.filter(item => item.state === 'ready' || item.state === 'changes').map(item => item.node.id) }
 }
 
-/** The current attempt by its original identities; its thread and report stay with the delegation owner. */
-export type GoalPlanStateAttempt = { delegationOperationId: string; sourceMessageId: string; threadId: string; workerHostId: string; workerAgentSessionId: string; reported: boolean }
+/** A reference to the same response's original delegation; all participant and thread facts stay there. */
+export type GoalPlanStateAttempt = { delegationOperationId: string; reported: boolean }
 export type GoalPlanStateNode = { id: string; state: GoalPlanNodeState; column: number; attempts: number; staleCriteria: string[]; unknown: GoalPlanUnknownReason[]; attempt: GoalPlanStateAttempt | null }
 /** The read-only form of the derivation that the Goal owner returns with its plan. */
 export type GoalPlanState = { revision: number; done: number; total: number; next: string[]; nodes: GoalPlanStateNode[] }
 export function goalPlanState(projection: GoalPlanProjection): GoalPlanState {
   return { revision: projection.revision, done: projection.done, total: projection.total, next: projection.next,
     nodes: projection.nodes.map(item => ({ id: item.node.id, state: item.state, column: item.column, attempts: item.attempts, staleCriteria: item.staleCriteria, unknown: item.unknown,
-      attempt: item.delegation ? { delegationOperationId: item.delegation.operationId, sourceMessageId: item.delegation.sourceMessageId, threadId: item.delegation.threadId,
-        workerHostId: delegationWorkerHostId(item.delegation), workerAgentSessionId: item.delegation.workerAgentSessionId, reported: Boolean(item.delegation.report) } : null })) }
+      attempt: item.delegation ? { delegationOperationId: item.delegation.operationId, reported: Boolean(item.delegation.report) } : null })) }
 }
 
 /**
@@ -288,12 +287,10 @@ export function parseGoalPlanState(value: unknown, plan: GoalPlan, delegations: 
     const attempts = count(item.attempts, `${label} attempts`)
     if (attempts > delegations.filter(entry => entry.planNodeId === id).length) throw new Error(`${label} counts attempts beyond its delegations`)
     const attempt = item.attempt === null ? null : (() => {
-      const named = object(item.attempt, `${label} attempt`, ['delegationOperationId', 'sourceMessageId', 'threadId', 'workerHostId', 'workerAgentSessionId', 'reported'])
+      const named = object(item.attempt, `${label} attempt`, ['delegationOperationId', 'reported'])
       const delegation = delegations.find(entry => entry.planNodeId === id && entry.operationId === named.delegationOperationId)
-      if (!delegation || named.sourceMessageId !== delegation.sourceMessageId || named.threadId !== delegation.threadId || named.workerHostId !== delegationWorkerHostId(delegation)
-        || named.workerAgentSessionId !== delegation.workerAgentSessionId || typeof named.reported !== 'boolean') throw new Error(`${label} attempt is not one of its delegations`)
-      return { delegationOperationId: delegation.operationId, sourceMessageId: delegation.sourceMessageId, threadId: delegation.threadId,
-        workerHostId: delegationWorkerHostId(delegation), workerAgentSessionId: delegation.workerAgentSessionId, reported: named.reported }
+      if (!delegation || typeof named.reported !== 'boolean') throw new Error(`${label} attempt is not one of its delegations`)
+      return { delegationOperationId: delegation.operationId, reported: named.reported }
     })()
     if (attempt && attempts === 0) throw new Error(`${label} names a current attempt without attempts`)
     return { id, state, column: count(item.column, `${label} column`), attempts, staleCriteria: identities(item.staleCriteria, `${label} staleCriteria`), unknown, attempt }

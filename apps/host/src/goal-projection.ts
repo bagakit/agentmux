@@ -24,7 +24,7 @@ export function projectHostGoal(goal: Demand): AgentMuxDemand {
 }
 
 /** Original board facts; private Host launch context is not a client-owned fact. */
-export function hostGoalRecord(goal: AgentMuxDemand): Demand & Pick<AgentMuxDemand, 'planState'> {
+export function hostGoalRecord(goal: AgentMuxDemand): Demand & Pick<AgentMuxDemand, 'planState' | 'planStateIssue'> {
   if (!goal.activities || !goal.decisions || !goal.tags || goal.executorId === undefined || goal.plannedStartAt === undefined ||
       goal.targetAt === undefined || goal.parentDemandId === undefined)
     throw new Error('The original Host did not return the complete Goal record. Its retained view remains available.')

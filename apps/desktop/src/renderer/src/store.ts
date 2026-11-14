@@ -1880,7 +1880,7 @@ function isGoalBusinessRequest(request: AgentMuxControlRequest): request is Extr
   return request.operation.startsWith('demand.')
 }
 
-function demandRecordFromFilesystem(demand: FilesystemDemand & Pick<DemandRecord, 'planState'>, retained?: DemandRecord): DemandRecord {
+function demandRecordFromFilesystem(demand: FilesystemDemand & Pick<DemandRecord, 'planState' | 'planStateIssue'>, retained?: DemandRecord): DemandRecord {
   if (retained?.delegationReadCut && demand.updatedAt < retained.delegationReadCut.goalUpdatedAt) return retained
   return {
     id: demand.id,
@@ -1908,6 +1908,7 @@ function demandRecordFromFilesystem(demand: FilesystemDemand & Pick<DemandRecord
     ...(demand.progressUpdates ? { progressUpdates: demand.progressUpdates } : {}),
     ...(demand.patrols ? { patrols: demand.patrols } : {}),
     ...(demand.plan ? { plan: demand.plan, ...(demand.planState ? { planState: demand.planState } : {}) } : {}),
+    ...(demand.planStateIssue ? { planStateIssue: demand.planStateIssue } : {}),
     ...(retained?.patrolObservations ? { patrolObservations: retained.patrolObservations } : {}),
     dispatches: [...(demand.dispatches ?? [])],
     activities: demand.activities,

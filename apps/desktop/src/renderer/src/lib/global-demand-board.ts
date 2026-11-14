@@ -50,6 +50,8 @@ export type DemandRecord = {
   plan?: import('@agentmux/demand/goal-plan').GoalPlan
   /** The Goal owner's derivation of `plan` and `delegations`, from the same read; absent when the owner returned none. */
   planState?: import('@agentmux/demand/goal-plan').GoalPlanState
+  /** Transient reading issue; the original plan and operations remain available. */
+  planStateIssue?: string
   patrolObservations?: import('@agentmux/core/goal-patrol').GoalPatrolObservation[]
   responsibility?: import('@agentmux/core/goal-responsibility').GoalResponsibilityObservation
   activities?: DemandActivity[]

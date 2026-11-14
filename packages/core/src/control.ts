@@ -468,6 +468,8 @@ export type AgentMuxDemand = {
   plan?: import('@agentmux/demand/goal-plan').GoalPlan
   /** The Goal owner's derivation of `plan`; absent when the owner returned none. */
   planState?: import('@agentmux/demand/goal-plan').GoalPlanState
+  /** Transient read diagnostic for this Goal's unavailable derivation; it does not change saved facts. */
+  planStateIssue?: string
   activities?: AgentMuxDemandActivity[]
   decisions?: import('@agentmux/demand').DemandDecision[]
   participations: import('@agentmux/demand').DemandParticipation[]
