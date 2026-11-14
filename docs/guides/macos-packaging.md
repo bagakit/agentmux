@@ -24,7 +24,7 @@
 | `pnpm update:renderer:rollback` | 撤回上一次前端更新 | 同一动作也在应用菜单 View > Revert frontend update |
 | `pnpm package:mac:report` | 读取本次真实构建输出，列出 canonical App、`/Applications`、开发缓存 App 与当前运行实例中发现的同名副本及其身份，并标出与候选身份不符的副本 | 候选缺失或输出不完整时只给一条诊断，说明缺少的路径；只告警，不删除任何副本或用户数据 |
 
-`apps/desktop/out`、DMG 挂载目录和任意临时或旧的 `.app` 都不能安装；只有同一次 clean build 产生的 `release/mac/AgentMux.app` 能进入安装动作。候选在签名、身份核对或安装前启动验证的任一步失败时，入口保留现有 canonical 安装并报告失败阶段，不能把旧包或半成品报告为新版本。已安装的旧副本只移入 Trash 或经用户确认清理；可再生的私有暂存沿下文 owner 自动收尾，不删除 Application Support、Session、Run 或工作区数据。两条安装路线的机制见 [Desktop 更新架构](../architecture/desktop-updates.md)。
+`apps/desktop/out`、DMG 挂载目录和任意临时或旧的 `.app` 都不能安装；只有同一次 clean build 产生的 `release/mac/AgentMux.app` 能进入安装动作。远端机器安装可以传输这份同批已签候选及准确安装源码／运行依赖闭包，保持 `release/mac/AgentMux.app` 的构建来源、签名与传输完整性，再调用原 `installApplication`；传输不产生第二候选或第二安装器，也不能把任意 DMG 提取副本当作已核候选。候选在签名、身份核对或安装前启动验证的任一步失败时，入口保留现有 canonical 安装并报告失败阶段，不能把旧包或半成品报告为新版本。已安装的旧副本只移入 Trash 或经用户确认清理；可再生的私有暂存沿下文 owner 自动收尾，不删除 Application Support、Session、Run 或工作区数据。两条安装路线的机制见 [Desktop 更新架构](../architecture/desktop-updates.md)。
 
 ### 产物的自动收尾
 
