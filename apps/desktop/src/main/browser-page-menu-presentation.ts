@@ -22,7 +22,8 @@ export class BrowserPageMenuPresentation {
     const items = (rows: BrowserPageMenuTemplate[]): BrowserPageMenuItem[] => rows.flatMap((row): BrowserPageMenuItem[] => {
       if (row.type === 'separator') return [{ kind: 'separator' }]
       if (!row.label) return []
-      if (row.submenu) return [{ kind: 'submenu', label: row.label, items: items(row.submenu) }]
+      if (row.submenu) return [{ kind: 'submenu', label: row.label, items: items(row.submenu),
+        ...(row.submenuNote ? { note: row.submenuNote } : {}) }]
       const enabled = row.enabled !== false
       const bind = (choose?: () => boolean | void) => actions.push({ enabled, choose }) - 1
       const split = row.chooseSplit

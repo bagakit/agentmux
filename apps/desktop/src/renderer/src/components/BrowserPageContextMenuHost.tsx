@@ -1,6 +1,6 @@
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import type { BrowserPageMenuChoice, BrowserPageMenuEvent, BrowserPageMenuItem } from '../../../shared/browser-page-menu'
 import { api } from '../lib/api'
@@ -19,15 +19,21 @@ function inMenu(target: EventTarget | null, id: string): boolean {
 }
 
 function Rows({ menuId, items, choose }: { menuId: string; items: BrowserPageMenuItem[]; choose(input: BrowserPageMenuChoice): void }) {
+  const [openSubmenu, setOpenSubmenu] = useState<number | null>(null)
+  const labelId = useId()
   return items.map((item, index) => {
     if (item.kind === 'separator') return <DropdownMenu.Separator key={`row-${index}`} className="tab-context-menu__separator" />
-    if (item.kind === 'submenu') return <DropdownMenu.Sub key={`row-${index}`}>
-      <DropdownMenu.SubTrigger className="tab-context-menu__item">
+    if (item.kind === 'submenu') return <DropdownMenu.Sub key={`row-${index}`} open={openSubmenu === index}
+      onOpenChange={open => setOpenSubmenu(current => open ? index : current === index ? null : current)}>
+      <DropdownMenu.SubTrigger className="tab-context-menu__item browser-page-menu__submenu-trigger">
         <span>{item.label}</span><span className="tab-context-menu__chevron"><SubmenuIcon size={12} /></span>
       </DropdownMenu.SubTrigger>
       <DocumentOverlayPortal component={DropdownMenu.Portal}>
-        <DropdownMenu.SubContent className="tab-context-menu" data-browser-page-menu-id={menuId} collisionPadding={8} sideOffset={4}
-          onFocusOutside={event => { if (inMenu(event.detail.originalEvent.target, menuId)) event.preventDefault() }}>
+        <DropdownMenu.SubContent className="tab-context-menu browser-page-menu browser-page-menu__submenu" data-browser-page-menu-id={menuId}
+          aria-describedby={item.note ? `${labelId}-${index}` : undefined} collisionPadding={8} sideOffset={4}
+          onFocusOutside={event => { if (inMenu(event.detail.originalEvent.target, menuId)) event.preventDefault() }}
+          onEscapeKeyDown={event => { event.preventDefault(); choose({ kind: 'dismiss', restorePageFocus: true }) }}>
+          {item.note ? <DropdownMenu.Label id={`${labelId}-${index}`} className="browser-page-menu__submenu-note">{item.note}</DropdownMenu.Label> : null}
           <Rows menuId={menuId} items={item.items} choose={choose} />
         </DropdownMenu.SubContent>
       </DocumentOverlayPortal>
@@ -82,7 +88,7 @@ export function BrowserPageContextMenuHost() {
           <span tabIndex={-1} style={{ position: 'fixed', left: request.x / zoom, top: request.y / zoom, pointerEvents: 'none' }} />
         </DropdownMenu.Trigger>, host)}
       <DocumentOverlayPortal component={DropdownMenu.Portal}>
-        <DropdownMenu.Content className="tab-context-menu" data-browser-page-menu-id={request.id}
+        <DropdownMenu.Content className="tab-context-menu browser-page-menu" data-browser-page-menu-id={request.id}
           aria-label="Browser page menu" align="start" collisionPadding={8}
           onInteractOutside={event => { if (inMenu(event.detail.originalEvent.target, request.id)) event.preventDefault() }}
           onCloseAutoFocus={event => event.preventDefault()}

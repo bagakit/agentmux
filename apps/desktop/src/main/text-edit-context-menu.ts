@@ -63,7 +63,7 @@ export function installTextEditContextMenu(contents: WebContents, host: BrowserW
             ? [...(params.dictionarySuggestions ?? []).map(suggestion => ({ run: () => contents.replaceMisspelling(suggestion), label: suggestion, enabled: true })),
                 { run: () => contents.session.addWordToSpellCheckerDictionary(params.misspelledWord), label: 'Add to Dictionary', enabled: true }] : [])]
       : params.selectionText.length > 0 && flags.canCopy
-        ? [{ run: () => contents.copy(), label: 'Copy', enabled: true },
+        ? [{ run: () => contents.copy(), label: commands ? 'Copy Text' : 'Copy', enabled: true },
             ...(commands && process.platform === 'darwin' && params.selectionText.trim()
               ? [{ run: () => contents.showDefinitionForSelection(), label: 'Look Up', enabled: true }] : [])] : []
     if (actions.length === 0 && !commands) return
