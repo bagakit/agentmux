@@ -528,24 +528,9 @@ function DesktopApp() {
         onSelectRegion: regionId => selectFocusReference({ ...reference, regionId })
       })
     }
-    // A pending native window needs its original host even when its exact
-    // display occurrence is outside the current main surface or resource home.
-    for (const window of workbenchWindows) {
-      const target = window.target
-      if (!target) continue
-      const tab = tabs[target.tabId]
-      const regionId = target.kind === 'region' ? target.regionId : tab?.layout.activeRegionId
-      if (!tab || !regionId || !Object.hasOwn(tab.regions, regionId)) continue
-      const reference = { displayWorkspaceId: target.displayWorkspaceId, groupId: target.groupId, tabId: target.tabId, regionId }
-      if (!workbenchDisplayReferenceMatches(layouts[target.displayWorkspaceId], reference)) continue
-      const existing = targets[tab.id]?.find(existing => !existing.windowTarget && existing.reference?.displayWorkspaceId === reference.displayWorkspaceId &&
-        existing.reference.groupId === reference.groupId && (existing.projection?.entity.kind !== 'region' || existing.reference.regionId === regionId))
-      if (existing) targets[tab.id] = targets[tab.id]!.map(value => value === existing ? { ...value, windowTarget: target } : value)
-      else append(tab.id, { hostId: `workbench-window-host:${window.windowId}`, active: false, visible: false, surface: 'space', reference, windowTarget: target })
-    }
     return targets
   }, [config?.browser.startPage, moteViewTargets, surveyVisible, surveyProjection, surveySelection, surveyCurrentSelection, layouts, tabs, surveyToolsOpen, narrowControls, selectSurveyReference,
-    focusVisible, focusProjection, focusTab, selectFocusReference, ordinaryTargets, recallVisible, recallProjection, recallCurrentSelection, selectRecallReference, workbenchWindows])
+    focusVisible, focusProjection, focusTab, selectFocusReference, ordinaryTargets, recallVisible, recallProjection, recallCurrentSelection, selectRecallReference])
   const [recallVisited, setRecallVisited] = useState(mainSurface === 'recall')
   useEffect(() => { if (mainSurface === 'recall') setRecallVisited(true) }, [mainSurface])
   const [surveyVisited, setSurveyVisited] = useState(mainSurface === 'survey')
@@ -781,7 +766,7 @@ function DesktopApp() {
   }
 
   return (
-    <GitHistoryProvider workspace={gitWorkspace}><WorkbenchWindowNotices />
+    <GitHistoryProvider workspace={gitWorkspace}>
     <SettingsNavigation.Provider value={settingsNavigation}>
     <DocumentationNavigation.Provider value={documentation.navigation}>
     <SpaceContentPresentationContext.Provider value={spaceContent}>
@@ -886,6 +871,7 @@ function DesktopApp() {
                             ? { topicId: workbenchSpaceSelection.topicId, topicIsolation: 'bound-only' as const } : {})}
                           visible={visible}
                           viewTargets={viewTargets}
+                          windowTargets={workbenchWindows}
                           onBrowserControlConfirmation={onBrowserControlConfirmation}
                           interactiveResize={windowResizeActive || isResizing}
                         />
@@ -917,6 +903,7 @@ function DesktopApp() {
       <footer className="window-status-bar">
         <div className="window-status-bar__surface-switch"><SurfaceSwitch settingsOpen={settingsOpen} onCloseSettings={closeSettings} /></div>
         <div className="window-status-bar__right">
+          <WorkbenchWindowNotices />
           <GlobalSystemNotices nativeOverlayWarning={nativeOverlayWarning} />
           <WindowUtilityBar toolkit={<ToolkitStatusBar />} />
         </div>

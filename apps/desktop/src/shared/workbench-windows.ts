@@ -1,8 +1,12 @@
-import { parseAppWindowTarget, parseSurveyPageSelection, type AppWindowDescriptor, type AppWindowTarget, type AgentMuxSurveyPresentation } from '@agentmux/core/control'
+import { parseAppWindowTarget, parseSurveyPageSelection, type AppWindowDescriptor, type AppWindowOperation, type AppWindowTarget, type AgentMuxSurveyPresentation } from '@agentmux/core/control'
 
 export const WORKBENCH_WINDOW_REQUEST = 'workbenchWindows:request'
 export const WORKBENCH_WINDOW_RESPONSE = 'workbenchWindows:response'
 export const WORKBENCH_WINDOW_CHANGED = 'workbenchWindows:changed'
+
+/** Progress belongs to the exact Renderer request; it is never an application receipt. */
+export const WORKBENCH_WINDOW_STAGES = ['host', 'composition', 'shell', 'placement'] as const
+export type WorkbenchWindowStage = typeof WORKBENCH_WINDOW_STAGES[number]
 
 export type WorkbenchWindowRequest = {
   requestId: string
@@ -13,20 +17,23 @@ export type WorkbenchWindowRequest = {
 } & (
   | { action: 'prepare'; operationId?: string }
   | { action: 'open'; url: string; frameName: string }
-  | { action: 'return'; navigate?: boolean }
+  | { action: 'return'; navigate?: boolean; operationId?: string }
   | { action: 'focus' }
 )
 export type WorkbenchWindowResponse = {
   requestId: string
   windowId: string
   documentGeneration: string
-  outcome: 'applied' | 'rejected' | 'unconfirmed'
+  outcome: 'pending' | 'applied' | 'rejected' | 'unconfirmed'
+  stage?: WorkbenchWindowStage
   message: string | null
   returnContext?: WorkbenchReturnContext | null
 }
 export type WorkbenchWindowSnapshot = {
   windows: AppWindowDescriptor[]
   issue: string | null
+  /** A changed receipt, including late completion, from the original Main owner. */
+  recordedOperation?: AppWindowOperation
 }
 
 export type WorkbenchWindowDocument = { windowId: string; documentGeneration: string }

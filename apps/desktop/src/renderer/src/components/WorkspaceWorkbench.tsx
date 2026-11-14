@@ -1,3 +1,4 @@
+import type { AppWindowDescriptor } from '@agentmux/core/control'
 import { workbenchReturnContext } from '../lib/workbench-return-context'
 import type { SpaceCloseReceipt } from '@agentmux/core'
 import { samePreparedCloseReview } from '../lib/workbench-close-owner'
@@ -41,7 +42,7 @@ import {
 } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import { createPortal } from 'react-dom'
-import { lazy, memo, Suspense, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { createContext, lazy, memo, Suspense, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { effectiveSessionViewMode, sessionPresentationById } from '../lib/session-presentation'
 import { useWorkbenchActivityPresentation, useWorkbenchRegionLabels, useWorkbenchTabRecord, useWorkbenchTabNameMetadata, useWorkbenchTabSessions } from '../lib/workbench-session-subscriptions'
@@ -160,6 +161,10 @@ type DragTabData = { kind: 'tab'; tabId: string; groupId: string }
 type DropData = DragTabData | { kind: 'pane'; groupId: string }
 type SplitTarget = { groupId: string; direction: SplitDirection }
 const EMPTY_VIEW_TARGETS: readonly WorkbenchViewTarget[] = []
+type WorkbenchWindowTarget = Pick<AppWindowDescriptor, 'windowId' | 'target'>
+const EMPTY_WINDOW_TARGETS: readonly WorkbenchWindowTarget[] = []
+// Presentation requests keep exact original hosts alive; they never invent a DOM destination.
+const WorkbenchWindowTargetsContext = createContext(EMPTY_WINDOW_TARGETS)
 
 function useTabNoteName(tab: WorkbenchTab) {
   const surface = titleWorkbenchSurface(tab)
@@ -697,9 +702,9 @@ function WorkbenchRegionSlot({ regionId }: { regionId: string }) {
 }
 function WorkbenchRegionLeaf({ regionTarget, ...props }: WorkbenchRegionLeafProps) {
   useWorkbenchWindowRevision()
-  const targets = useContext(WorkbenchBrowserTargetsContext)
-  const windowTarget = targets.find(target => target.windowTarget?.kind === 'region' &&
-    target.windowTarget.tabId === props.tab.id && target.windowTarget.regionId === props.node.regionId)?.windowTarget
+  const windowTargets = useContext(WorkbenchWindowTargetsContext)
+  const windowTarget = windowTargets.find(({ target }) => target?.kind === 'region' &&
+    target.tabId === props.tab.id && target.regionId === props.node.regionId)?.target ?? undefined
   const independentDocument = useWorkbenchDocument() !== document
   const parent = useWorkbenchBrowserPresentation()
   const target = confirmedRegionTarget(regionTarget, props.tab.id, props.node.regionId)
@@ -1679,6 +1684,7 @@ const WorkbenchContentHost = memo(function WorkbenchContentHost({ workspaceId, t
   tabProjection, regionTarget, nativeRegionHostId, reference, retainedRegionId, groupId, tabVisible,
   nativeSurfacesVisible, interactiveResize, showBorrowedNotice, missingPlacement, onBrowserControlConfirmation
 }: WorkbenchContentHostProps) {
+  const windowTargets = useContext(WorkbenchWindowTargetsContext)
   const primaryHostId = targetId ?? homeId
   return <WorkbenchBrowserTargetsContext.Provider value={targets}>
         {targets.filter(target => target.hostId !== primaryHostId && target.hostId !== nativeRegionHostId && target.reference).map(target =>
@@ -1686,7 +1692,7 @@ const WorkbenchContentHost = memo(function WorkbenchContentHost({ workspaceId, t
             <WorkbenchBrowserPresentationSlots tab={tab} target={target} node={target.projection?.entity.kind === 'region' ? { type: 'leaf', regionId: target.projection.entity.regionId } : tab.layout.root} />
           </WorkbenchSecondaryView>)}
         <StableWorkbenchView homeId={homeId} targetId={targetId} primaryTabId={tab.id}
-          windowTarget={targets.find(target => target.windowTarget?.kind === 'tab' && target.windowTarget.tabId === tab.id)?.windowTarget}
+          windowTarget={windowTargets.find(({ target }) => target?.kind === 'tab' && target.tabId === tab.id)?.target ?? undefined}
           active={tabProjection?.active ?? true}
           visible={tabVisible}
           surface={tabProjection?.surface} returnSelection={tabProjection?.returnSelection} moteInputIntent={tabProjection?.moteInputIntent} moteContextKey={tabProjection?.moteContextKey}
@@ -1737,6 +1743,7 @@ export function WorkspaceWorkbench({
   viewOwnership = 'owner',
   viewHostPrefix = 'workbench-tab-slot',
   viewTargets,
+  windowTargets = EMPTY_WINDOW_TARGETS,
   onBrowserControlConfirmation,
   retainedTabId,
   onTabSelect,
@@ -1763,6 +1770,8 @@ export function WorkspaceWorkbench({
   viewHostPrefix?: string
   /** Explicit visible destinations move existing Tab contents without mounting another tree. */
   viewTargets?: WorkbenchViewTargets | undefined
+  /** Native window intent retains the original content without claiming a main-surface slot. */
+  windowTargets?: readonly WorkbenchWindowTarget[] | undefined
   onBrowserControlConfirmation?: BrowserControlConfirmation | undefined
   /** Select within projection chrome without changing the durable main workface. */
   retainedTabId?: string | undefined
@@ -2234,7 +2243,7 @@ export function WorkspaceWorkbench({
         const primaryReference = targetId === null ? homeReferences.get(tab.id) : tabProjection?.reference
         const retainedHere = primaryReference && retainedSpatialFocus?.tabId === tab.id &&
           primaryReference.displayWorkspaceId === retainedSpatialFocus.displayWorkspaceId && primaryReference.groupId === retainedSpatialFocus.groupId
-        const windowTarget = targets.find(target => target.windowTarget?.kind === 'tab' && target.windowTarget.tabId === tab.id)?.windowTarget
+        const windowTarget = windowTargets.find(({ target }) => target?.kind === 'tab' && target.tabId === tab.id)?.target ?? undefined
         const detached = workbenchWindowPlacement(windowTarget ?? (primaryReference
           ? { kind: 'tab', displayWorkspaceId: primaryReference.displayWorkspaceId, groupId: primaryReference.groupId, tabId: tab.id } : null))
         const tabVisible = Boolean(detached) || (targetId !== null && (tabProjection?.surface ? tabProjection.visible === true : true)) || (targetId === null && visible && projectedGroup?.activeTabId === tab.id)
@@ -2255,5 +2264,5 @@ export function WorkspaceWorkbench({
     </DndContext>
     </WorkbenchProjectionContext.Provider>
   )
-  return <SpaceSourceReaders>{workbench}</SpaceSourceReaders>
+  return <WorkbenchWindowTargetsContext.Provider value={windowTargets}><SpaceSourceReaders>{workbench}</SpaceSourceReaders></WorkbenchWindowTargetsContext.Provider>
 }

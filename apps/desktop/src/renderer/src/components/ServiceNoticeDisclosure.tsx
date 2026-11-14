@@ -76,11 +76,15 @@ export function ServiceNoticeDisclosure({ scope, notices, available = true, comp
         bottom = Math.min(document.documentElement.clientHeight || window.innerHeight, bounds.bottom) - 8
       }
     }
-    details.style.left = `${bounds.left + 8}px`
+    const width = Math.max(0, Math.min(440, bounds.width - 16))
+    // Window-level readers stay beside their original chrome control.
+    details.style.left = `${surface === document.documentElement
+      ? Math.max(bounds.left + 8, Math.min(button.getBoundingClientRect().left, bounds.right - width - 8))
+      : bounds.left + 8}px`
     details.style.top = bottomAnchor === null ? `${top}px` : 'auto'
     details.style.bottom = bottomAnchor === null ? 'auto' : `${(document.documentElement.clientHeight || window.innerHeight) - bottomAnchor}px`
-    details.style.width = `${Math.max(0, Math.min(440, bounds.width - 16))}px`
-    details.style.maxHeight = `${Math.max(0, bottom - top - 8)}px`
+    details.style.width = `${width}px`
+    details.style.setProperty('--service-disclosure-available-height', `${Math.max(0, bottom - top - 8)}px`)
   }
   useEffect(() => {
     if (!open) return

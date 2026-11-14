@@ -4,12 +4,13 @@ import { updateIconSprite, removeIconSprite } from '@agentmux/client-ui/icons'
 import { useNativeOverlayChrome } from '../hooks/useNativeOverlayChrome'
 import { useEffect, useLayoutEffect, useRef, useSyncExternalStore } from 'react'
 import { createPortal } from 'react-dom'
-import type { AppWindowDescriptor, AppWindowTarget, AppWindowOperation } from '@agentmux/core/control'
-import { readWorkbenchReturnContext, workbenchReturnLabel, type WorkbenchReturnContext, type WorkbenchWindowRequest, type WorkbenchWindowDocument } from '../../../shared/workbench-windows'
+import type { AppWindowDescriptor, AppWindowTarget, AppWindowOperation, AppWindowPage } from '@agentmux/core/control'
+import { readWorkbenchReturnContext, workbenchReturnLabel, type WorkbenchReturnContext, type WorkbenchWindowRequest, type WorkbenchWindowDocument, type WorkbenchWindowStage } from '../../../shared/workbench-windows'
 import { api } from './api'
 import { useAppStore } from '../store'
 import { awaitOriginalWorkbenchHost, originalWorkbenchHost, placeWorkbenchWindow, registerWorkbenchDocument, workbenchTargetKey, workbenchDocumentReturning, observeWorkbenchNativeVisibility, registerWorkbenchNavigationStamp, workbenchNavigationStamp } from './workbench-window-registry'
 import { ServiceWindowNotice } from '../components/ServiceWindowNotice'
+import { WorkbenchWindowNotice } from '../components/WorkbenchWindowNotice'
 
 type OpenWindow = { window: Window; document: Document; identity: WorkbenchWindowDocument; target: AppWindowTarget; returnContext: WorkbenchReturnContext | null; slot: HTMLElement; returned: boolean; dispose(): void }
 const opened = new Map<string, OpenWindow>()
@@ -19,7 +20,32 @@ function settleOpeningContext(operation: AppWindowOperation | null): void {
   if (operation?.method === 'app.window.open' && (operation.state === 'confirmed' || operation.state === 'rejected')) openingContexts.delete(operation.input.operationId)
 }
 const listeners = new Set<() => void>()
-let snapshot: { windows: AppWindowDescriptor[]; issue: string | null; operation: AppWindowOperation | null } = { windows: [], issue: null, operation: null }
+let snapshot: { windows: AppWindowDescriptor[]; issue: string | null; operations: AppWindowOperation[] } = { windows: [], issue: null, operations: [] }
+/** Unresolved receipts retain their original identity; unrelated success cannot settle them. */
+function observeOperation(operation: AppWindowOperation | null | undefined): void {
+  if (!operation) return
+  settleOpeningContext(operation)
+  const operations = snapshot.operations.filter(original => original.input.operationId !== operation.input.operationId)
+  if (operation.state === 'unknown' || operation.state === 'pending') operations.push(operation)
+  if (operation.state === 'rejected') useAppStore.getState().reportError(operation.message ?? 'The original window action was refused.', {
+    kind: 'indeterminate', summary: 'Window action refused', event: { source: 'workbench-window', key: operation.input.operationId }
+  })
+  snapshot = { ...snapshot, operations }
+}
+// Request-local observations prevent an older invoke/read response from undoing
+// a newer push receipt. They are released with the request, not kept as history.
+const reads = new Set<{ operationId: string; receipt?: AppWindowOperation }>()
+async function readWindowPage(operationId: string, call: () => Promise<AppWindowPage>): Promise<AppWindowPage> {
+  const request = { operationId } as { operationId: string; receipt?: AppWindowOperation }, windows = snapshot.windows
+  reads.add(request)
+  try {
+    const page = await call()
+    if (!request.receipt) observeOperation(page.recordedOperation)
+    if (snapshot.windows === windows) snapshot = { ...snapshot, windows: page.windows }
+    notify()
+    return { ...page, windows: snapshot.windows, recordedOperation: request.receipt ?? page.recordedOperation }
+  } finally { reads.delete(request) }
+}
 type WindowTarget = Pick<AppWindowDescriptor, 'windowId' | 'target'>
 let windowTargets: readonly WindowTarget[] = []
 const notify = () => {
@@ -41,25 +67,20 @@ export async function openWorkbenchWindow(target: AppWindowTarget, options: { fo
   const operationId = mintObjectId(), context = readWorkbenchReturnContext(options.returnContext, target)
   if (Object.hasOwn(options, 'returnContext')) openingContexts.set(operationId, { target: structuredClone(target), context })
   try {
-    const page = await api.ui.workbenchWindows.call('app.window.open', { operationId, target, ...(options.focus === undefined ? {} : { focus: options.focus }) })
-    settleOpeningContext(page.recordedOperation)
-    snapshot = { ...snapshot, windows: page.windows, operation: page.recordedOperation }; notify()
-    if (page.recordedOperation?.state !== 'confirmed') publishIssue(page.recordedOperation?.message ?? 'Original window presentation is unconfirmed. Original work remains.')
+    await readWindowPage(operationId, () => api.ui.workbenchWindows.call('app.window.open', { operationId, target, ...(options.focus === undefined ? {} : { focus: options.focus }) }))
   } catch (error) { publishIssue(error) }
 }
 export async function focusWorkbenchWindow(identity: WorkbenchWindowDocument): Promise<boolean> {
   try {
-    const page = await api.ui.workbenchWindows.call('app.window.focus', { operationId: mintObjectId(), ...identity })
-    snapshot = { ...snapshot, windows: page.windows, operation: page.recordedOperation }; notify()
-    if (page.recordedOperation?.state !== 'confirmed') publishIssue(page.recordedOperation?.message ?? 'Original window focus is unconfirmed.')
+    const operationId = mintObjectId()
+    const page = await readWindowPage(operationId, () => api.ui.workbenchWindows.call('app.window.focus', { operationId, ...identity }))
     return page.recordedOperation?.state === 'confirmed'
   } catch (error) { publishIssue(error); return false }
 }
 export async function returnWorkbenchWindow(identity: WorkbenchWindowDocument): Promise<void> {
   try {
-    const page = await api.ui.workbenchWindows.call('app.window.return', { operationId: mintObjectId(), ...identity })
-    snapshot = { ...snapshot, windows: page.windows, operation: page.recordedOperation }; notify()
-    if (page.recordedOperation?.state !== 'confirmed') publishIssue(page.recordedOperation?.message ?? 'Returning the original workface is unconfirmed. Original work remains.')
+    const operationId = mintObjectId()
+    await readWindowPage(operationId, () => api.ui.workbenchWindows.call('app.window.return', { operationId, ...identity }))
   } catch (error) { publishIssue(error) }
 }
 /** Native page destruction has already retired these Regions; close only their borrowed shells. */
@@ -134,6 +155,8 @@ function returnNavigationStamp(): string {
   return JSON.stringify([state.mainSurface, state.activeWorkspaceId, state.workbenchSpaceSelection, state.surveyZoneSelection, state.focusView])
 }
 async function apply(request: WorkbenchWindowRequest, signal: AbortSignal, onReturn?: (context: WorkbenchReturnContext) => void): Promise<WorkbenchReturnContext | null | void> {
+  const progress = (stage: WorkbenchWindowStage) => api.ui.workbenchWindows.respond({ requestId: request.requestId,
+    windowId: request.windowId, documentGeneration: request.documentGeneration, outcome: 'pending', stage, message: null })
   const navigationAtStart = returnNavigationStamp(), localNavigationAtStart = workbenchNavigationStamp()
   if (request.action === 'return' && !originalWorkbenchHost(request.target)) {
     const record = opened.get(request.windowId)
@@ -142,13 +165,13 @@ async function apply(request: WorkbenchWindowRequest, signal: AbortSignal, onRet
     if (!tab || request.target.kind === 'region' && !Object.hasOwn(tab.regions, request.target.regionId)) { record.returned = true; notify(); return }
   }
   validateTarget(request.target)
+  progress('host')
   const host = await awaitOriginalWorkbenchHost(request.target, signal)
   if (request.action === 'prepare') {
     try {
       const retained = request.operationId ? openingContexts.get(request.operationId) : undefined
       const context = readWorkbenchReturnContext(retained && workbenchTargetKey(retained.target) === workbenchTargetKey(request.target)
         ? retained.context : host.getReturnContext?.(), request.target)
-      if (!context) publishIssue('The original return context is unconfirmed. Opening remains available; returning will preserve current navigation.')
       return context
     } catch (error) { publishIssue('Original return-context observation failed. The original window remains available. ' + String(error)); return null }
   }
@@ -159,9 +182,11 @@ async function apply(request: WorkbenchWindowRequest, signal: AbortSignal, onRet
       if (existing.identity.documentGeneration !== request.documentGeneration || workbenchTargetKey(existing.target) !== workbenchTargetKey(request.target)) throw new Error('Original window document identity has changed.')
       return
     }
+    progress('composition')
     await awaitComposition(host.host, signal)
     const child = window.open(request.url, request.frameName)
     if (!child) throw new Error('The exact native workface window was refused. Original content remains.')
+    progress('shell')
     const slot = await shellLoaded(child, signal)
     slot.id = 'workbench-window-' + request.windowId
     slot.dataset.workbenchDocumentRoot = ''
@@ -169,8 +194,8 @@ async function apply(request: WorkbenchWindowRequest, signal: AbortSignal, onRet
     const disposeStyle = mirrorStyles(child.document), disposeDocument = registerWorkbenchDocument(child.document, identity), disposeEvents = documentEvents(child.document)
     const record: OpenWindow = { window: child, document: child.document, identity, target: request.target, returnContext: readWorkbenchReturnContext(request.returnContext, request.target), slot, returned: false, dispose: () => { disposeStyle(); disposeDocument(); disposeEvents() } }
     opened.set(request.windowId, record); child.addEventListener('unload', () => { if (opened.get(request.windowId) === record) { record.dispose(); notify() } }, { once: true }); notify()
-    try { await placeWorkbenchWindow(request.target, { destination: slot, window: identity, returnContext: record.returnContext }) }
-    catch (error) { publishIssue(error); throw error }
+    progress('placement')
+    await placeWorkbenchWindow(request.target, { destination: slot, window: identity, returnContext: record.returnContext })
     return
   }
   const record = opened.get(request.windowId)
@@ -181,6 +206,7 @@ async function apply(request: WorkbenchWindowRequest, signal: AbortSignal, onRet
     return
   }
   if (!record.returned) {
+    progress('composition')
     await awaitComposition(host.host, signal)
     // Explicit Return owns its original scene; a delayed/automatic return never supersedes later navigation.
     const context = readWorkbenchReturnContext(request.returnContext, request.target)
@@ -188,6 +214,7 @@ async function apply(request: WorkbenchWindowRequest, signal: AbortSignal, onRet
       if (onReturn) onReturn(context)
       else publishIssue('The original workface is returning. Its navigation owner is unavailable; current navigation is kept.')
     }
+    progress('placement')
     await placeWorkbenchWindow(request.target, null)
     workbenchDocumentReturning(record.document, document); record.returned = true; notify()
   }
@@ -212,10 +239,12 @@ export function useWorkbenchWindows(ready: boolean, onReturn?: (context: Workben
     const stopRequests = api.ui.workbenchWindows.onRequest(request => {
       void apply(request, abort.signal, navigate).then(returnContext => api.ui.workbenchWindows.respond({ requestId: request.requestId, windowId: request.windowId, documentGeneration: request.documentGeneration, outcome: 'applied', message: null,
         ...(request.action === 'prepare' ? { returnContext: returnContext ?? null } : {}) }),
-        error => { publishIssue(error); api.ui.workbenchWindows.respond({ requestId: request.requestId, windowId: request.windowId, documentGeneration: request.documentGeneration, outcome: 'rejected', message: String(error) }) })
+        error => { api.ui.workbenchWindows.respond({ requestId: request.requestId, windowId: request.windowId, documentGeneration: request.documentGeneration, outcome: 'rejected', message: String(error) }) })
     })
     const stopChanges = api.ui.workbenchWindows.onChanged(value => {
-      snapshot = { ...snapshot, ...value }; observeWorkbenchNativeVisibility(value.windows)
+      if (value.recordedOperation) for (const request of reads) if (request.operationId === value.recordedOperation.input.operationId) request.receipt = value.recordedOperation
+      observeOperation(value.recordedOperation)
+      snapshot = { ...snapshot, windows: value.windows, issue: value.issue }; observeWorkbenchNativeVisibility(value.windows)
       for (const [id, record] of opened) if (record.returned && (!value.windows.some(window => window.windowId === id) || record.window.closed)) { record.dispose(); opened.delete(id) }
       notify()
     })
@@ -232,14 +261,20 @@ export function WorkbenchWindowNotices() {
   const state = useSyncExternalStore(subscribe, () => snapshot)
   // React portals keep the original event/context owner in each empty native shell.
   const windows = [...opened.values()].filter(record => !record.returned)
-  const inspect = async (operationId = state.operation?.input.operationId) => {
+  const inspect = async (operationId: string) => {
     if (!operationId) return
-    try { const page = await api.ui.workbenchWindows.call('app.window.ls', { operationId }); settleOpeningContext(page.recordedOperation); snapshot = { ...snapshot, windows: page.windows, operation: page.recordedOperation }; notify() } catch (error) { publishIssue(error) }
+    try { await readWindowPage(operationId, () => api.ui.workbenchWindows.call('app.window.ls', { operationId })) } catch (error) { publishIssue(error) }
   }
-  return <>{state.issue ? <ServiceWindowNotice notice={{ kind: 'indeterminate', notice: { step: 'Workbench window presentation needs attention', mode: state.issue, restore: 'Keep using the original workface. Inspect its window or return it before a new move.' } }} actions={state.operation || openingContexts.size ? <details><summary>Window action details</summary>
-      {state.operation ? <><pre>{JSON.stringify(state.operation, null, 2)}</pre><button className="small-button" onClick={() => void inspect()}>Inspect original action</button></> : null}
+  return <><WorkbenchWindowNotice issue={state.issue} operations={state.operations}>
+    {state.operations.map(operation => <details key={operation.input.operationId} className="workbench-window-notice__technical">
+      <summary>Window action details · {operation.windowId ?? operation.input.operationId}</summary>
+      <pre>{JSON.stringify(operation, null, 2)}</pre>
+      <button className="small-button" onClick={() => void inspect(operation.input.operationId)}>Inspect original action</button>
+    </details>)}
+    {openingContexts.size ? <details className="workbench-window-notice__technical"><summary>Original opening context</summary>
       {[...openingContexts].map(([operationId, original]) => <div key={operationId}><pre>{JSON.stringify({ operationId, target: original.target, returnContext: original.context }, null, 2)}</pre>
         <button className="small-button" onClick={() => void inspect(operationId)}>Inspect original open</button></div>)}
-    </details> : undefined} /> : null}
+    </details> : null}
+    </WorkbenchWindowNotice>
     {windows.map(record => createPortal(<WorkbenchWindowToolbar record={record} />, record.document.body, record.identity.windowId))}</>
 }

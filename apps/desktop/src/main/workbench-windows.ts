@@ -7,8 +7,8 @@ import {
   type AppWindowDescriptor, type AppWindowMethod, type AppWindowOperation, type AppWindowPage,
   type AppWindowParamsMap, type AppWindowResultMap, type AppWindowTarget, type AppWindowWriteMethod
 } from '@agentmux/core/control'
-import { readWorkbenchReturnContext, WORKBENCH_WINDOW_CHANGED, WORKBENCH_WINDOW_REQUEST, type WorkbenchWindowDocument,
-  type WorkbenchWindowRequest, type WorkbenchWindowResponse } from '../shared/workbench-windows.js'
+import { readWorkbenchReturnContext, WORKBENCH_WINDOW_CHANGED, WORKBENCH_WINDOW_REQUEST, WORKBENCH_WINDOW_STAGES, type WorkbenchWindowDocument,
+  type WorkbenchWindowRequest, type WorkbenchWindowResponse, type WorkbenchWindowStage } from '../shared/workbench-windows.js'
 import { clampGeometryToVisibleArea, geometryFromWindowState, type VisibleArea, type WindowGeometry } from './window-geometry.js'
 import { WorkbenchWindowStore, type StoredWorkbenchWindow } from './workbench-window-store.js'
 import { windowOpenOutcome } from './window-security.js'
@@ -26,6 +26,7 @@ type RendererPending = {
   request: WorkbenchWindowRequest
   resolve(response: WorkbenchWindowResponse): void
   observed: boolean
+  stage?: WorkbenchWindowStage
   timer: ReturnType<typeof setTimeout>
   late?: (response: WorkbenchWindowResponse) => void | Promise<void>
 }
@@ -247,7 +248,11 @@ export class WorkbenchWindows implements AgentMuxRpcWindowsOwner {
     if (!value || typeof value.requestId !== 'string') return
     const pending = this.pending.get(value.requestId)
     if (!pending || value.windowId !== pending.request.windowId || value.documentGeneration !== pending.request.documentGeneration ||
-        !['applied', 'rejected', 'unconfirmed'].includes(value.outcome) || value.message !== null && typeof value.message !== 'string') return
+        !['pending', 'applied', 'rejected', 'unconfirmed'].includes(value.outcome) || value.message !== null && typeof value.message !== 'string') return
+    if (value.outcome === 'pending') {
+      if (value.stage && WORKBENCH_WINDOW_STAGES.includes(value.stage)) pending.stage = value.stage
+      return
+    }
     if (pending.request.action === 'prepare') value = { ...value, returnContext: readWorkbenchReturnContext(value.returnContext, pending.request.target) }
     this.pending.delete(value.requestId)
     clearTimeout(pending.timer)
@@ -411,42 +416,56 @@ export class WorkbenchWindows implements AgentMuxRpcWindowsOwner {
   }
 
   private async returnWindow(record: ManagedWindow, operation: AppWindowOperation): Promise<AppWindowPage> {
-    if (record.phase === 'returning') return this.finish(operation, 'unknown', 'This original window is already returning. Reconcile its original operation.')
-    for (const [id, pending] of this.pending) if (pending.request.windowId === record.windowId && pending.request.action === 'return' && !pending.observed) { clearTimeout(pending.timer); this.pending.delete(id) }
+    if (record.phase === 'returning') return this.finish(operation, 'rejected', 'This original window is already returning. No second return was started; inspect the original operation.')
+    // An observer timeout does not cancel the original DOM handoff. Keep its
+    // late receipt instead of dispatching a second move and discarding the first.
+    const outstanding = [...this.pending.values()].find(pending => pending.request.windowId === record.windowId && pending.request.action === 'return')
+    if (outstanding) {
+      if (outstanding.request.action === 'return' && outstanding.request.operationId === operation.input.operationId) return this.page(operation)
+      return this.finish(operation, 'rejected', 'The original window return is still in progress. Inspect its original operation; no second return was started.')
+    }
+    const generation = record.generation, originalNative = record.native
+    const isOriginal = () => this.windows.get(record.windowId) === record && record.generation === generation && record.native === originalNative
+    const changedDocument = () => this.finish(operation, 'unknown', 'The original window document changed before its return was confirmed. Its later window and original work are retained; inspect the original operation.')
     record.phase = 'returning'
     const complete = async (response: WorkbenchWindowResponse): Promise<void> => {
-      if (response.outcome !== 'applied' || this.windows.get(record.windowId) !== record) return
+      if (!isOriginal()) { await changedDocument(); return }
+      if (response.outcome !== 'applied') {
+        record.phase = 'unknown'
+        await this.finish(operation, response.outcome === 'rejected' ? 'rejected' : 'unknown', response.message)
+        return
+      }
+      record.phase = 'returning'
       try {
         const native = record.native, wasFocused = native?.isFocused() === true
         if (native) await this.returnNative(native)
-        if (!await this.persistWindows(record.windowId)) { record.phase = 'unknown'; await this.finish(operation, 'unknown', 'The original content has returned, but the closed window arrangement is not durable. The shell remains available; return it again to reconcile.'); return }
+        if (!isOriginal()) { await changedDocument(); return }
+        const persisted = await this.persistWindows(record.windowId)
+        if (!isOriginal()) { await changedDocument(); return }
+        if (!persisted) { record.phase = 'unknown'; await this.finish(operation, 'unknown', 'The original content has returned, but the closed window arrangement is not durable. The shell remains available; return it again to reconcile.'); return }
         this.remove(record)
         if (native && !native.isDestroyed()) { this.mayClose.add(native.id); native.close() }
         if (wasFocused || !this.main.isVisible() && ![...this.windows.values()].some(record => record.native?.isVisible())) this.focusNative(this.main)
         await this.finish(operation, 'confirmed', null)
-      } catch (error) { record.phase = 'unknown'; await this.finish(operation, 'unknown', String(error)) }
+      } catch (error) { if (isOriginal()) record.phase = 'unknown'; await this.finish(operation, 'unknown', String(error)) }
     }
-    const response = await this.request(record, { action: 'return', navigate: true }, complete)
+    const response = await this.request(record, { action: 'return', navigate: true, operationId: operation.input.operationId }, complete)
     if (response.outcome === 'applied') await complete(response)
-    else { record.phase = 'unknown'; await this.finish(operation, response.outcome === 'rejected' ? 'rejected' : 'unknown', response.message) }
+    else { if (isOriginal()) record.phase = 'unknown'; await this.finish(operation, response.outcome === 'rejected' ? 'rejected' : 'unknown', response.message) }
     return this.page(operation)
   }
 
-  private request(record: ManagedWindow, action: { action: 'prepare'; operationId?: string } | { action: 'focus' } | { action: 'return'; navigate?: boolean } | { action: 'open'; url: string; frameName: string }, late?: RendererPending['late']): Promise<WorkbenchWindowResponse> {
+  private request(record: ManagedWindow, action: { action: 'prepare'; operationId?: string } | { action: 'focus' } | { action: 'return'; navigate?: boolean; operationId?: string } | { action: 'open'; url: string; frameName: string }, late?: RendererPending['late']): Promise<WorkbenchWindowResponse> {
     const returnContext = readWorkbenchReturnContext(record.returnContext, record.target)
-    if ((action.action === 'open' || action.action === 'return') && !returnContext) {
-      // A persisted observation gap remains visible after restart; raw provenance
-      // stays untouched, and this notice never rejects the healthy original window.
-      this.warn('The original return context remains unconfirmed. The window and Browser remain usable; Return preserves current navigation.')
-    }
     const request = { requestId: mintObjectId(), windowId: record.windowId, documentGeneration: record.generation, target: record.target,
       returnContext, ...action } as WorkbenchWindowRequest
     return new Promise(resolve => {
       const timer = setTimeout(() => {
         const pending = this.pending.get(request.requestId)
         if (pending) { pending.observed = false; if (!pending.late) this.pending.delete(request.requestId) }
+        const step = pending?.stage ? ` Waiting for ${pending.stage === 'host' ? 'the original workface host' : pending.stage === 'composition' ? 'the original input composition to finish' : pending.stage === 'shell' ? 'the original window document to load' : 'the original content placement to commit'}.` : ' No Renderer progress has been received.'
         resolve({ requestId: request.requestId, windowId: record.windowId, documentGeneration: record.generation,
-          outcome: 'unconfirmed', message: 'The original interface has not confirmed this exact presentation action. Original work remains; reconcile the same operation.' })
+          outcome: 'unconfirmed', message: 'The original interface has not confirmed this exact presentation action.' + step + ' Original work remains; inspect the same operation.' })
       }, 15_000)
       this.pending.set(request.requestId, { request, resolve, observed: true, timer, ...(late ? { late } : {}) })
       if (!this.main.isDestroyed() && !this.main.webContents.isDestroyed()) this.main.webContents.send(WORKBENCH_WINDOW_REQUEST, request)
@@ -542,7 +561,7 @@ export class WorkbenchWindows implements AgentMuxRpcWindowsOwner {
   private async readOperation(id: string): Promise<AppWindowOperation | null> { return this.operations.get(id) ?? await this.store.operation(id) }
   private async finish(operation: AppWindowOperation, state: AppWindowOperation['state'], message: string | null): Promise<AppWindowPage> {
     operation.state = state; operation.message = message
-    const persisted = await this.persistOperation(operation); this.changed()
+    const persisted = await this.persistOperation(operation); this.changed(operation)
     if (persisted) this.operations.delete(operation.input.operationId)
     return this.page(operation)
   }
@@ -555,7 +574,6 @@ export class WorkbenchWindows implements AgentMuxRpcWindowsOwner {
     // Keep unread persisted data; never recapture a later surface over the original.
     if (prepared.outcome !== 'applied' || Object.hasOwn(record, 'returnContext')) return
     record.returnContext = readWorkbenchReturnContext(prepared.returnContext, record.target)
-    if (!record.returnContext) this.warn('The original return context is unconfirmed. The window and Browser remain usable; returning will preserve the current navigation.')
   }
   private async persistWindows(excludeWindowId?: string): Promise<boolean> {
     if (!this.storageWritable) { this.changed(); return false }
@@ -577,9 +595,11 @@ export class WorkbenchWindows implements AgentMuxRpcWindowsOwner {
     return true
   }
   private warn(issue: string, focus?: WorkbenchWindowDocument): void { this.issue = issue; this.focusIssue = focus ? { ...focus } : null; this.changed() }
-  private changed(): void {
+  private changed(operation?: AppWindowOperation): void {
     if (!this.disposed && this.rendererAvailable && !this.main.isDestroyed() && !this.main.webContents.isDestroyed()) {
-      try { this.main.webContents.send(WORKBENCH_WINDOW_CHANGED, { windows: this.descriptors(), issue: this.issue }) }
+      const unknownOrigins = [...this.windows.values()].filter(record => record.durable && !readWorkbenchReturnContext(record.returnContext, record.target))
+      const issue = this.issue ?? (unknownOrigins.length ? `The original return context remains unconfirmed for window ${unknownOrigins.map(record => record.windowId).join(', ')}. The window and Browser remain usable; Return preserves current navigation.` : null)
+      try { this.main.webContents.send(WORKBENCH_WINDOW_CHANGED, { windows: this.descriptors(), issue, ...(operation ? { recordedOperation: structuredClone(operation) } : {}) }) }
       catch { this.focusIssue = null; this.issue = 'The original interface document changed before the window observation arrived. Original workfaces and Agents remain.' }
     }
   }
