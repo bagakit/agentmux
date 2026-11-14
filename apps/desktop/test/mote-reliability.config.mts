@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto'
 import original from './mote-initialization.config.mts'
 
 const mutations: Record<string, { file: string; before: string; after: string }> = {
+  'heartbeat-looks-like-run': { file: 'MoteHeartbeatGlyph.tsx', before: "active: 'object.heartbeat'", after: "active: 'status.running'" },
   'saved-as-active': { file: 'MoteHeartbeatStatus.tsx', before: "reading?.status ?? (loading ? 'unread' : 'unconfirmed')", after: "'active'" },
   'accepted-as-complete': { file: 'MoteHeartbeatStatus.tsx', before: 'Host accepted input · progress is in the conversation', after: 'Work completed' },
   'stale-run-trust': { file: 'MoteStartupStatus.tsx', before: "session.creation?.createdRun?.runId === runId ? session.creation.workspaceTrust : undefined", after: 'true ? session.creation?.workspaceTrust : undefined' },

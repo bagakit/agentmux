@@ -44,6 +44,24 @@ app.whenReady().then(async () => {
     }
     const profile = async () => { await click(button('Profile', 'document.querySelector(".mote-space-frame__header")')); await until('document.querySelector("[data-mote-page=profile]")') }
     const refresh = async () => { await click(button('Refresh actual schedule', 'document.querySelector(".mote-quick-mode")')) }
+    if (process.env.MOTE_HEARTBEAT_ICON === '1') {
+      for (const [theme, width, facts, state, icon] of [
+        ['dark', 1180, 'active', 'active', 'object.heartbeat'],
+        ['light', 420, 'active', 'active', 'object.heartbeat'],
+        ['light', 1180, 'manual', 'paused', 'status.paused'],
+        ['dark', 1180, 'paused', 'attention', 'status.warning'],
+      ]) {
+        win.setContentSize(width, width > 600 ? 820 : 740)
+        await read(`window.moteInit.theme(${JSON.stringify(theme)});window.moteReliability.variant(${JSON.stringify(facts)})`)
+        await profile(); await refresh()
+        await click(button('Discussion', 'document.querySelector(".mote-space-frame__header")'))
+        const mark = `[data-mote-care="${state}"] svg[data-semantic-icon="${icon}"]`
+        for (const surface of ['.mote-heartbeat-entry', '.mote-space-frame__header .mote-heartbeat-lamp'])
+          await until(`document.querySelector(${JSON.stringify(surface + mark)})?.getBoundingClientRect().width === 12`)
+        await capture('heartbeat-icon-' + state + '-' + theme)
+      }
+      result.passed = true; return
+    }
     const checkedRecovery = async () => {
       result.checkedLegacyRecovery = []
       for (const [theme, width, height] of [['dark', 1180, 820], ['dark', 420, 740], ['light', 1180, 820], ['light', 420, 740]]) {

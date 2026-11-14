@@ -43,9 +43,18 @@ beforeEach(() => {
     budgetBytes: options?.maxBytes ?? 65536, items: [], nextCursor: null, coverage: { kind: 'recorded-inputs', unrecorded: 'unconfirmed' } }))
   vi.spyOn(api.sessions, 'inspectSubmission').mockResolvedValue(null)
   vi.spyOn(api.schedule, 'list').mockImplementation(async input => { parseScheduleRpcParams('schedule.list', input); return { schedules: maintenance.schedule ? [maintenance.schedule] : [], executionScope: 'connected-host' } })
-  vi.spyOn(api.motePreferences, 'read').mockImplementation(async params => ({ ...params, kind: 'quick', status: 'ready', main: true, issue: null, defaults,
-    source: { resource: { ...params.target.expectedResource, zoneId: params.target.zoneId, zonePath: topic.directoryPath, path: topic.directoryPath.slice(scratchWorkspace.path.length + 1) + '/MOTE.md' }, result: { status: 'deleted' } },
-    choices: { executors: [{ id: 'fixture', name: 'Fixture', providerId: 'fixture' }], conversations: [], destinations: [] }, maintenance }))
+  vi.spyOn(api.schedule, 'inspect').mockImplementation(async input => {
+    parseScheduleRpcParams('schedule.inspect', input)
+    return { schedule: input.scheduleId === maintenance.schedule?.loopId ? maintenance.schedule : null, executionScope: 'connected-host' }
+  })
+  vi.spyOn(api.motePreferences, 'read').mockImplementation(async params => {
+    if (params.kind !== 'quick') throw Error('Expected the original quick preference read')
+    const { target, includeChoices } = params
+    return { target, kind: 'quick', status: 'ready', main: true, issue: null, defaults,
+      source: { resource: { ...target.expectedResource, zoneId: target.zoneId, zonePath: topic.directoryPath, path: topic.directoryPath.slice(scratchWorkspace.path.length + 1) + '/MOTE.md' }, result: { status: 'deleted' } },
+      choices: includeChoices === false ? null : { executors: includeChoices === 'locations' ? null : [{ id: 'fixture', name: 'Fixture', providerId: 'fixture' }],
+        conversations: includeChoices === 'executors' ? null : [], destinations: includeChoices === 'executors' ? null : [] }, maintenance }
+  })
   vi.spyOn(api.moteDialogue, 'read').mockImplementation(async ({ target }): Promise<MoteDialoguePage> => ({ main: { target,
     identity: { hostId: 'local', moteId: topic.id }, status: 'ready', resource: null, documentRevision: 'original-settings', roleRevision: 'original-role', current: reference, issue: null },
     links: [], incarnation: 'original-links', throughSequence: 0, next: null, coverage: 'linked-sources-only', sourceStatus: 'read', sourceIssue: null }))
@@ -69,6 +78,29 @@ it('actual Profile reads the original schedule: enabled preferences cannot masqu
   expect(dialog.querySelector('[aria-label="Enable automatic Mote maintenance"]')?.closest('details')).toBeNull()
   expect(dialog.querySelector('[aria-label="Mote heartbeat"]')?.textContent).toContain('Delivery unconfirmed')
   await moteClick(button('Cancel', dialog)); expect(resume).not.toHaveBeenCalled(); retained()
+})
+it.each([
+  ['active', 'object.heartbeat', 'Care on'],
+  ['paused', 'status.paused', 'Care paused'],
+  ['attention', 'status.warning', 'Check delivery'],
+  ['unknown', 'status.unknown', 'Care unconfirmed'],
+  ['off', 'status.heartbeat-off', 'Care off'],
+] as const)('uses the same semantic heartbeat mark for %s in the launcher and the conversation', async (state, icon, label) => {
+  if (state === 'active') maintenance = { status: 'active', schedule: { ...loop(), status: 'active', lastOutcome: 'sent' }, issue: null }
+  if (state === 'paused' || state === 'attention') maintenance.schedule!.pause = {
+    reason: state === 'paused' ? 'manual' : 'input-unconfirmed', episodeId: 'current-pause', pausedAt: 1794210000500,
+  }
+  if (state === 'unknown' || state === 'off') maintenance = { status: state === 'off' ? 'disabled' : 'unconfirmed', schedule: null, issue: null }
+  await app.mount()
+  await vi.waitFor(() => {
+    const lamp = document.querySelector('.mote-space-frame__header .mote-heartbeat-lamp')
+    const badge = document.querySelector('.mote-heartbeat-entry')
+    expect(lamp?.getAttribute('aria-label')).toContain(label)
+    expect(lamp?.querySelector('[data-semantic-icon]')?.getAttribute('data-semantic-icon')).toBe(icon)
+    expect(badge?.getAttribute('data-mote-care')).toBe(state)
+    expect(badge?.querySelector('[data-semantic-icon]')?.getAttribute('data-semantic-icon')).toBe(icon)
+  })
+  retained()
 })
 it('the real conversation and daily entry share one original reading while Profile is closed, and inspect without resuming', async () => {
   maintenance.schedule!.pause = { reason: 'input-unconfirmed', episodeId: 'original-pause', pausedAt: 1794210000500 }
