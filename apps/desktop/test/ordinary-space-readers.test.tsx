@@ -7,7 +7,7 @@ import { spaceMountTransport } from './helpers/space-mount-fixture'
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
 import { SpaceSourceReaders, useSpaceSourceReader } from '../src/renderer/src/components/SpaceSourceReaders'
-import { MountedSpaceFocus } from '../src/renderer/src/components/MountedSpaceFocus'
+import { useFocusSources } from '../src/renderer/src/lib/use-focus-sources'
 import { spaceMountKey } from '../src/shared/space-mount'
 import type { SpaceMountRecord } from '../src/shared/space-mount'
 
@@ -23,6 +23,7 @@ function VisibleConsumer({ target, visible, label }: { target: SpaceMountRecord;
   const refresh = useSpaceSourceReader(target, visible)
   return visible ? <button onClick={refresh}>{label}</button> : null
 }
+function FocusReaders({ visible }: { visible: boolean }) { return useFocusSources({ visible, contexts: [] }).readers }
 it('ordinary source readers share the existing real Main/Core scope and only the last visible consumer releases it', async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   const f = await createSpaceSessionsFixture(cleanup)
@@ -34,7 +35,7 @@ it('ordinary source readers share the existing real Main/Core scope and only the
   const state = useAppStore.getState()
   const node = document.createElement('div'); document.body.append(node); root = createRoot(node)
   const view = (first: boolean, second: boolean, mounted = false) => <SpaceSourceReaders>
-    <MountedSpaceFocus visible={mounted} query="" />
+    <FocusReaders visible={mounted} />
     <VisibleConsumer target={target} visible={first} label="First Region" />
     <VisibleConsumer target={target} visible={second} label="Second Region" />
   </SpaceSourceReaders>

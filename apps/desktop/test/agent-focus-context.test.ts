@@ -79,3 +79,15 @@ describe('Agent focus context', () => {
     expect(focusLaneForSession(null, [topic])).toBe('execution')
   })
 })
+
+it('retains original source identity in the one execution focus history without fabricating a Session', () => {
+  const source = { runtimeId: 'original-runtime', agentSessionId: 'original-agent' }
+  const context = focusExecution(EMPTY_AGENT_FOCUS, 'source-presentation', 100, { name: 'Original source task', kind: 'agent', providerId: 'codex', hostId: 'source-scope', workspacePath: '/original/project', source })
+  expect(context.execution.sessionId).toBe('source-presentation')
+  expect(context.execution.history[0]?.identity?.source).toEqual(source)
+  expect(restoreAgentFocus(JSON.parse(JSON.stringify(context)))).toEqual(context)
+  const text = executionFocusContextText(context, [{ id: 'source-presentation', label: 'Wrong local task', workspacePath: '/local', status: { state: 'working' } } as never])
+  expect(text).toContain('Original source task (original-agent)')
+  expect(text).toContain('Original Runtime: original-runtime')
+  expect(text).not.toContain('Wrong local task')
+})

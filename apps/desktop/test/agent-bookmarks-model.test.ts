@@ -129,3 +129,12 @@ it('stopping an unattached lifecycle flushes its timer without discarding prefer
   expect(f.writes).toHaveLength(1); await vi.advanceTimersByTimeAsync(250); expect(f.writes).toHaveLength(1)
   expect(f.owner.get().bookmarks).toEqual([entry()]); await f.owner.flush()
 })
+
+it('persists an original Runtime-qualified source snapshot without treating its route as a local Host', async () => {
+  const f = fixture(), source = { ...original, hostId: JSON.stringify(['source-runtime', 'runtime-B']), sourceRuntimeId: 'runtime-B', presentationId: JSON.stringify(['source-agent', 'runtime-B', original.agentSessionId]) }
+  f.owner.pin(source); await f.owner.flush()
+  const restored = fixture(f.read()!).owner.get().bookmarks
+  expect(restored).toHaveLength(1)
+  expect(restored[0]).toMatchObject({ sourceRuntimeId: 'runtime-B', hostId: source.hostId, agentSessionId: original.agentSessionId, excerpt: original.excerpt, presentationId: source.presentationId })
+  expect(restored[0]!.key).not.toBe(agentBookmarkKey(original.hostId, original.agentSessionId))
+})

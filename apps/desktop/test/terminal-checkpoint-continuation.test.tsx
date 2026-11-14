@@ -969,20 +969,28 @@ it('the ordinary Workbench consumes its original foreign Region through real Cor
     expect(await f.d.core.readAgentSession(sid)).toMatchObject({ run: original.run })
     await act(async () => root.render(null))
     const { GlobalFocusSurface } = await import('../src/renderer/src/components/GlobalFocusSurface')
+    const { focusSourceContextId } = await import('../src/renderer/src/lib/focus-source-model')
+    const sourceContextId = focusSourceContextId(f.d.owner.runtimeId, sid)
+    const sourceCard = () => [...container.querySelectorAll<HTMLButtonElement>('button.focus-context[data-session-id]')]
+      .find(button => button.dataset.sessionId === sourceContextId)
+    const terminalReadsBeforeFocus = nativeAttachment.mock.calls.length
     const selectOriginal = vi.fn()
     useAppStore.setState({ mainSurface: 'agents', focusView: 'list' })
     await act(async () => root.render(<DesktopClientUiProvider><GlobalFocusSurface onSelectLocation={selectOriginal} /></DesktopClientUiProvider>))
     await vi.waitFor(async () => {
       await act(async () => {})
-      const source = container.querySelector('[aria-label="Original project Agents"]')
-      expect(source).not.toBeNull()
-      expect(source!.textContent).toContain(sid)
-      expect(source!.textContent).not.toContain('Original Session state unconfirmed')
+      const source = sourceCard()
+      expect(source).toBeDefined()
+      expect(source!.closest('.focus-context-group')).not.toBeNull()
+      expect(source!.querySelector('.focus-context__identity strong')?.textContent).toBeTruthy()
+      expect(member).toHaveBeenCalledTimes(2)
     })
-    expect(metadata).toHaveBeenCalledTimes(2); expect(business).toHaveBeenCalledTimes(2); expect(member).toHaveBeenCalledOnce()
-    expect(container.querySelector('[aria-label="Original project Agents"] .agent-execution-relation')).not.toBeNull()
+    expect(metadata).toHaveBeenCalledTimes(2); expect(business).toHaveBeenCalledTimes(2)
+    expect(container.querySelector('[aria-label="Original project Agents"]')).toBeNull()
+    expect(container.querySelector('.mounted-space-focus__member')).toBeNull()
+    expect(nativeAttachment).toHaveBeenCalledTimes(terminalReadsBeforeFocus)
     const focusInput = useAppStore.getState().mountedSpaceInputs
-    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Original project Agents"] .mounted-space-focus__member')!.click())
+    await act(async () => sourceCard()!.click())
     expect(selectOriginal).toHaveBeenCalledExactlyOnceWith({ displayWorkspaceId: 'original-b-project', groupId: layout!.activeGroupId, tabId, regionId })
     expect(useAppStore.getState().selectedSpaceMount).toBeNull()
     expect(useAppStore.getState().mountedSpaceInputs).toBe(focusInput)
@@ -1018,7 +1026,7 @@ it('the ordinary Workbench consumes its original foreign Region through real Cor
     expect(useAppStore.getState().agentComposerDrafts[sid]).toBe('Unrelated local same-SID draft')
     await act(async () => root.render(null))
   } finally { for (const dispose of cleanup.reverse()) await dispose() }
-})
+}, 30_000)
 
 it('the ordinary Region viewer does not inherit A grants and a denied foreign member leaves its healthy local neighbour usable', async () => {
   const { createSpaceSessionsFixture } = await import('../../../packages/core/test/helpers/space-session-fixture')

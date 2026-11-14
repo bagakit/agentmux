@@ -11,15 +11,28 @@ const draws = vi.hoisted(() => ({ counts: {} as Record<string, number>, consumer
 vi.mock('../src/renderer/src/components/AgentAvatar', () => ({ AgentAvatar: ({ sessionId, size }: { sessionId: string; size: number }) => { draws.counts[sessionId] = (draws.counts[sessionId] ?? 0) + 1; const consumer = `${sessionId}:${size}`; draws.consumers[consumer] = (draws.consumers[consumer] ?? 0) + 1; return createElement('span', { 'data-avatar': sessionId, 'data-avatar-size': size }) } }))
 vi.mock('../src/renderer/src/components/SessionPane', () => ({ SessionPane: () => null }))
 import { GlobalFocusSurface } from '../src/renderer/src/components/GlobalFocusSurface'
+import { agentContextForSession } from '../src/renderer/src/lib/focus-context'
 const baseline = useAppStore.getState()
 let root: Root, container: HTMLDivElement
-function event(id: string, kind: AgentTimelineItem['kind'], content: string, status: AgentTimelineItem['status'] = 'complete'): AgentTimelineItem { return { id, agentSessionId: 'a', kind, status, source: 'native-hook', createdAt: Number(id), updatedAt: Number(id), title: kind === 'tool_call' ? content : kind, content } }
+function event(id: string, kind: AgentTimelineItem['kind'], content: string, status: AgentTimelineItem['status'] = 'complete', agentSessionId = 'a'): AgentTimelineItem { return { id, agentSessionId, kind, status, source: 'native-hook', createdAt: Number(id), updatedAt: Number(id), title: kind === 'tool_call' ? content : kind, content } }
 function timeline(id: string, items: AgentTimelineItem[]): AgentTimelineSnapshot { return { agentSessionId: id, revision: items.length, items } }
 beforeEach(async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true); draws.counts = {}; draws.consumers = {}
   container = document.createElement('div'); document.body.append(container); root = createRoot(container)
-  const config = await api.config.get(), { sessions } = await api.sessions.snapshot(), base = sessions[0]!
-  useAppStore.setState({ config, sessions: ['a', 'b', 'c', 'd', 'e'].map((id, i) => ({ ...base, id, label: 'Codex · demo', status: { source: base.status.source, state: (['done', 'working', 'running', 'waiting', 'error'] as const)[i]!, observedAt: 1 } })), timelines: { a: timeline('a', [event('1', 'user_message', 'Repair scrolling'), event('2', 'assistant_message', 'Scrolling repaired and checked')]), b: timeline('b', [event('3', 'user_message', 'Measure frame latency')]) }, agentNames: {}, tabs: {}, providerCatalog: [], agentFocus: { execution: { sessionId: null, history: [] }, pmo: { sessionId: null } } })
+  const config = await api.config.get(), snapshot = await api.sessions.snapshot()
+  const original = snapshot.sessions.find(session => session.kind === 'agent')
+  if (!original) throw Error('A real typed preview Agent is required')
+  // Each row supplies its own coherent Native observation. Preview currentActivity
+  // and pending requests belong to another Session and must not leak into this scene.
+  const { currentActivity: _activity, pendingInteraction: _pending, ...base } = original
+  const now = Date.now()
+  useAppStore.setState({ config, mainSurface: 'agents', focusView: 'list', sessions: ['a', 'b', 'c', 'd', 'e'].map((id, i) => ({ ...base, id,
+    processState: 'running', control: { ...base.control, agentSessionId: id, run: { runId: `readability-original-run-${id}` } },
+    semanticStatus: { state: (['done', 'working', 'unknown', 'waiting', 'error'] as const)[i]!, source: 'native-hook', observedAt: now }, label: 'Codex · demo',
+    status: { source: 'native-hook', state: (['done', 'working', 'running', 'waiting', 'error'] as const)[i]!, observedAt: now } })),
+    timelines: { a: timeline('a', [event('1', 'user_message', 'Repair scrolling'), event('2', 'assistant_message', 'Scrolling repaired and checked')]),
+      b: timeline('b', [event('3', 'user_message', 'Measure frame latency', 'complete', 'b')]) },
+    agentNames: {}, tabs: {}, providerCatalog: [], agentFocus: { execution: { sessionId: null, history: [] }, pmo: { sessionId: null } } })
   await act(async () => root.render(createElement(GlobalFocusSurface)))
 })
 afterEach(async () => { await act(async () => root.unmount()); container.remove(); useAppStore.setState(baseline, true); vi.restoreAllMocks() })
@@ -27,24 +40,26 @@ const row = (id: string) => container.querySelector<HTMLButtonElement>(`button[d
 it('shows distinguishable task names, real result content and explicit idle/unknown states in compact project groups', () => {
   expect(row('a').textContent).toContain('Repair scrolling'); expect(row('a').textContent).toContain('Scrolling repaired and checked'); expect(row('a').dataset.bucket).toBe('results')
   expect(row('b').textContent).toContain('Measure frame latency'); expect(row('b').dataset.bucket).toBe('working')
-  expect(row('c').textContent).toContain('Status unknown'); expect(row('c').dataset.bucket).toBe('idle')
+  expect(row('c').dataset.activity).toBe('unknown'); expect(row('c').dataset.bucket).toBe('idle')
   expect(row('d').dataset.bucket).toBe('attention'); expect(row('e').dataset.bucket).toBe('attention'); expect(row('e').textContent).toContain('Failed')
   expect(container.querySelectorAll('.focus-context')).toHaveLength(5)
   expect(row('a').textContent).not.toContain(useAppStore.getState().sessions[0]!.workspacePath)
   expect(container.textContent).not.toContain('PMO context is isolated'); expect(container.querySelector('.global-board-toolbar__scope')).toBeNull(); expect(container.querySelector('.focus-project-lanes__header')).toBeNull(); expect(container.querySelector('.global-board-footer')).toBeNull()
 })
-it('invalidates a completed result on a new prompt and authoritative working state, while retaining the Run', async () => {
+it('invalidates a completed result on a new prompt and authoritative working state, while retaining the Run and original reply context', async () => {
   const run = useAppStore.getState().sessions[0]!.control.run
   await act(async () => useAppStore.setState(state => ({ timelines: { ...state.timelines, a: timeline('a', [...state.timelines.a!.items, event('4', 'user_message', 'Now inspect loading')]) } })))
-  expect(row('a').dataset.bucket).toBe('idle'); expect(row('a').textContent).toContain('Prompt · Now inspect loading')
-  await act(async () => useAppStore.setState(state => ({ sessions: state.sessions.map(s => s.id === 'a' ? { ...s, status: { ...s.status, state: 'working' } } : s) })))
+  // The last confirmed reply remains reading context. A newer prompt invalidates
+  // its current Results qualification; it does not rewrite the original excerpt.
+  expect(row('a').dataset.bucket).toBe('idle'); expect(row('a').textContent).toContain('Scrolling repaired and checked')
+  await act(async () => useAppStore.setState(state => ({ sessions: state.sessions.map(s => s.id === 'a' ? { ...s, semanticStatus: { state: 'working', source: 'native-hook', observedAt: Date.now() }, status: { ...s.status, state: 'working' } } : s) })))
   expect(row('a').dataset.bucket).toBe('working'); expect(useAppStore.getState().sessions[0]!.control.run).toBe(run)
 })
 it('does not redraw neighbouring task rows when one Session receives facts', async () => {
   const counts = { ...draws.counts }, consumers = { ...draws.consumers }; expect(Object.keys(counts).sort()).toEqual(['a', 'b', 'c', 'd', 'e'])
   await act(async () => useAppStore.setState(state => ({ sessions: state.sessions.map(s => s.id === 'b' ? { ...s, latestOutputBytes: s.latestOutputBytes + 10 } : s) })))
   expect(draws.counts).toEqual(counts); expect(draws.consumers).toEqual(consumers)
-  await act(async () => useAppStore.setState(state => ({ timelines: { ...state.timelines, b: timeline('b', [event('3', 'user_message', 'Measure frame latency'), event('5', 'tool_call', 'Read profile')]) } })))
+  await act(async () => useAppStore.setState(state => ({ timelines: { ...state.timelines, b: timeline('b', [event('3', 'user_message', 'Measure frame latency', 'complete', 'b'), event('5', 'tool_call', 'Read profile', 'complete', 'b')]) } })))
   // This contract concerns the actual left task rows. Recent Focus is a separate consumer;
   // its already-existing all-track repaint is retained as a full-Focus performance counterexample.
   const leftKeys = [...container.querySelectorAll<HTMLElement>('.focus-context [data-avatar]')].map(node => `${node.dataset.avatar}:${node.dataset.avatarSize}`)
@@ -57,7 +72,9 @@ it('does not redraw neighbouring task rows when one Session receives facts', asy
   const trackKey = `${relatedTrack!.dataset.avatar}:${relatedTrack!.dataset.avatarSize}`
   expect(consumers[trackKey]).toBeGreaterThan(0)
   expect(draws.consumers[trackKey]).toBe(consumers[trackKey]! + 1)
-  expect(row('b').textContent).toContain('Read profile')
+  expect(row('b').textContent).toContain('Measure frame latency')
+  const current = useAppStore.getState(), original = current.sessions.find(session => session.id === 'b')!
+  expect(agentContextForSession(original, current.timelines.b, current.agentNames.b, undefined, null).detail).toContain('Read profile')
 })
 
 it('keeps empty categories discoverable in the shared filter without repeating project empties', async () => {
@@ -65,6 +82,8 @@ it('keeps empty categories discoverable in the shared filter without repeating p
   await chooseFocusFilter(container, 'state', 'results')
   expect([...container.querySelectorAll<HTMLElement>('.focus-context')].map(context => context.dataset.sessionId)).toEqual(['a'])
   expect([...container.querySelectorAll<HTMLElement>('.focus-context-group')].map(group => [group.dataset.bucket, group.dataset.empty ?? 'false'])).toEqual([['results', 'false']])
-  expect([...container.querySelectorAll<HTMLElement>('.focus-project-lanes__status-rail [data-bucket]')].map(group=>group.dataset.bucket)).toEqual(['attention','working','idle'])
+  expect([...container.querySelectorAll<HTMLElement>('.focus-project-lanes__status-rail [data-bucket]')].map(group=>group.dataset.bucket)).toEqual(['attention','working','results','idle'])
+  expect(container.querySelector('.focus-project-lanes__status-rail [data-bucket=results]')?.getAttribute('aria-label')).toBe('Results · 1')
+  for (const bucket of ['attention', 'working', 'idle']) expect(container.querySelector(`.focus-project-lanes__status-rail [data-bucket=${bucket}]`)?.getAttribute('aria-label')).toMatch(/ · 0$/)
   expect(container.textContent).not.toContain('Nothing here')
 })

@@ -4,7 +4,6 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
 import { MountedSpaceWorkbench } from '../src/renderer/src/components/MountedSpaceWorkbench'
-import { MountedSpaceFocus } from '../src/renderer/src/components/MountedSpaceFocus'
 import { HostOriginalSpaces } from '../src/renderer/src/components/settings/HostOriginalSpaces'
 import * as storeModule from '../src/renderer/src/store'
 import { acceptsMountedSnapshot, initialMountedSpaceView, mountedRegionKey, mountedSpaceInput, projectMountedSpaceView } from '../src/renderer/src/lib/space-mount-view'
@@ -111,21 +110,6 @@ it('same raw IDs remain source qualified and malformed or other Runtime private 
   expect(acceptsMountedSnapshot(f.target, { ...snapshot, source: { ...snapshot.source, runtimeId: 'A-runtime' } })).toBe(false)
   expect(() => useAppStore.getState().observeSpaceMount(f.target, { snapshot: { ...snapshot, reference: { ...snapshot.reference, runtimeId: 'A-runtime' } }, reading: false })).toThrow('another original source')
   expect(mountedRegionKey(f.target.reference, f.tabId, f.regionId)).not.toBe(mountedRegionKey({ ...f.target.reference, runtimeId: 'A-runtime' }, f.tabId, f.regionId))
-})
-
-it('the real Focus consumer uses the same original membership and returns to its exact private Space view', async () => {
-  const f = await mountedFixture(), originalSessions = useAppStore.getState().sessions
-  useAppStore.getState().mountSpace(f.target, false)
-  await dom.render(<MountedSpaceFocus visible query="" />)
-  await act(async () => { await vi.waitFor(() => expect(dom.container.querySelector('[data-mounted-focus-source]')?.textContent).toContain('Original B tab')) })
-  expect(dom.container.textContent).toContain(f.b.identity.runtimeId)
-  await act(async () => { dom.container.querySelector<HTMLDetailsElement>('.mounted-space-focus__resources')!.open = true })
-  await dom.click('.mounted-space-focus__resource')
-  const state = useAppStore.getState()
-  expect(state.selectedSpaceMount).toBe(f.key)
-  expect(mountedSpaceInput(state.mountedSpaceInputs, f.key)!.view?.selection).toMatchObject({ tabId: f.tabId, regionId: f.regionId })
-  expect(state.sessions).toBe(originalSessions)
-  expect(await f.cores[0]!.store.read()).toBeNull()
 })
 
 it('the actual Host entry freezes the answering Core project and registers B before opening its exact Space', async () => {
@@ -260,9 +244,6 @@ it('an unreadable private layout cannot take away a healthy original source read
   expect(dom.container.textContent).toContain(f.b.identity.runtimeId)
   expect(dom.container.querySelector('textarea')).toBeNull()
   expect((useAppStore.getState().mountedSpaceInputs as Record<string, unknown>)[f.key]).toBe(malformed)
-  await dom.render(<MountedSpaceFocus visible query="" />)
-  await act(async () => { await vi.waitFor(() => expect(dom.container.textContent).toContain('Original B tab')) })
-  expect(dom.container.textContent).toContain('unreadable')
   expect(await f.cores[0]!.store.read()).toBeNull()
 })
 

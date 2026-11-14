@@ -8,7 +8,6 @@ import { mountedSessionFacts, observeMountedSessions } from '../src/renderer/src
 import { mountedSpaceRegions } from '../src/renderer/src/lib/space-mount-view'
 import { MountedExecutionRelation } from '../src/renderer/src/components/MountedExecutionRelation'
 import { MountedSpaceWorkbench } from '../src/renderer/src/components/MountedSpaceWorkbench'
-import { MountedSpaceFocus } from '../src/renderer/src/components/MountedSpaceFocus'
 import { spaceMountKey, type SpaceMountRecord } from '../src/shared/space-mount'
 import { composerDOM } from './helpers/composer-dom-fixture'
 import { spaceMountFixture } from './helpers/space-mount-fixture'
@@ -46,7 +45,7 @@ async function fixture() {
   return { f, target, snapshot, member, event, occurrence, metadata, key: spaceMountKey(target.reference) }
 }
 
-test('the real Workbench and Focus badges share the source execution chain and exclude the observer access hop', async () => {
+test('the real Workbench badge retains the source execution chain and exclude the observer access hop', async () => {
   const f = await fixture(), originalSessions = useAppStore.getState().sessions
   vi.spyOn(api.spaceMounts, 'sessions').mockImplementation(async (_target, emit) => {
     queueMicrotask(() => emit({ type: 'observation', observation: f.event }))
@@ -58,8 +57,6 @@ test('the real Workbench and Focus badges share the source execution chain and e
   const badge = dom.container.querySelector('.agent-work-mode-badge')!
   expect(badge.getAttribute('aria-label')).toContain(`\n${f.target.reference.runtimeId} → runtime-C → runtime-D\nAccess to source`)
   expect(badge.querySelectorAll('[data-local]')).toHaveLength(0)
-  await dom.render(<MountedSpaceFocus visible query="" />)
-  await vi.waitFor(() => expect(dom.container.querySelector('[data-path-state="cascade"]')?.textContent).toBe('2'))
   expect(useAppStore.getState().sessions).toBe(originalSessions)
 })
 
@@ -95,22 +92,22 @@ test('the exact Region and creation identity choose the relation for a repeated 
 })
 
 
-test('a completed metadata-only source cut keeps the same Workbench and Focus path without another Agent observation', async () => {
+test('a completed metadata-only source cut keeps the same Workbench path without another Agent observation', async () => {
   const f = await fixture(), listeners = new Set<(value: Parameters<Parameters<typeof api.spaceMounts.sessions>[1]>[0]) => void>()
   vi.spyOn(api.spaceMounts, 'sessions').mockImplementation(async (_target, emit) => {
     listeners.add(emit); queueMicrotask(() => emit({ type: 'observation', observation: f.event }))
     return { initial: { reference: f.event.reference, source: f.event.source, revision: f.event.revision }, dispose() { listeners.delete(emit) } }
   })
   useAppStore.getState().mountSpace(f.target)
-  await dom.render(<><MountedSpaceWorkbench mountKey={f.key} visible /><MountedSpaceFocus visible query="" /></>)
-  await vi.waitFor(() => expect(dom.container.querySelectorAll('[data-path-state="cascade"]')).toHaveLength(2))
+  await dom.render(<MountedSpaceWorkbench mountKey={f.key} visible />)
+  await vi.waitFor(() => expect(dom.container.querySelectorAll('[data-path-state="cascade"]')).toHaveLength(1))
   const metadata = useAppStore.getState().mountedSpaceSessions[f.key]!, prior = Object.values(metadata.members)[0]!
   const changed = await f.f.api.call('apply', { hostId: f.target.hostId, reference: f.target.reference, edit: { reference: f.target.reference, expectedRevision: f.snapshot.revision,
     changes: { zones: [{ ...f.snapshot.scope.zones[0]!, branch: 'updated-source-view' }] } } })
   await vi.waitFor(() => expect(useAppStore.getState().mountedSpaceObservations[f.key]?.snapshot?.revision).toBe(changed.revision))
-  expect(dom.container.querySelectorAll('[data-path-state="unconfirmed"]')).toHaveLength(2)
+  expect(dom.container.querySelectorAll('[data-path-state="unconfirmed"]')).toHaveLength(1)
   await act(async () => { for (const emit of listeners) emit({ type: 'observation', observation: { type: 'membership-complete', reference: f.snapshot.reference, source: f.snapshot.source, revision: changed.revision } }) })
-  await vi.waitFor(() => expect(dom.container.querySelectorAll('[data-path-state="cascade"]')).toHaveLength(2))
+  await vi.waitFor(() => expect(dom.container.querySelectorAll('[data-path-state="cascade"]')).toHaveLength(1))
   const current = Object.values(useAppStore.getState().mountedSpaceSessions[f.key]!.members)[0]!
   expect(current.state).toBe(prior.state)
   expect(current.member).toBe(prior.member)
