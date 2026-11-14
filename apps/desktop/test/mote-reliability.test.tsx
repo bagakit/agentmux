@@ -102,6 +102,48 @@ it.each([
   })
   retained()
 })
+it('plays the heartbeat delivery cue once for a newly confirmed input in the original arrangement', async () => {
+  type CareInput = NonNullable<MotePresenceReading['input']>
+  const schedule: ContinuousProgressLoop = { ...loop(), status: 'active', lastOutcome: 'sent' }
+  const received = (occurrenceAt: number, delivery: CareInput['delivery']): CareInput => ({
+    reference: { inputKey: { kind: 'prompt', agentSessionId: defaultAgent.id, expectedRun: defaultAgent.control.run, submissionId: `care-${occurrenceAt}` },
+      futureIntent: { intentId: schedule.futureIntentId!, occurrenceAt }, definitionOperationId: schedule.creationOperationId!, preparedAt: occurrenceAt },
+    status: 'confirmed', delivery, nativeResult: { state: 'unsupported' },
+  })
+  let receipt = received(1794210000000, 'terminal-confirmed')
+  const inspect = vi.mocked(api.schedule.inspect)
+  inspect.mockImplementation(async () => ({ schedule: { ...schedule, lastInputRef: receipt.reference }, input: receipt, executionScope: 'connected-host' }))
+  maintenance = { status: 'active', schedule: { ...schedule, lastInputRef: receipt.reference }, issue: null }
+  let readings: readonly MoteHeartbeatNoticeReading[] = []
+  function Probe() { readings = useMoteHeartbeatNoticeReadings(); return null }
+  const cues = () => [...document.querySelectorAll('.mote-heartbeat-entry [data-icon-animation="feedback"], .mote-space-frame__header .mote-heartbeat-lamp__signal [data-icon-animation="feedback"]')]
+  await app.mount(createElement(Probe))
+  expect(readings[0]?.saved?.maintenance?.input?.reference).toEqual(receipt.reference)
+  expect(cues()).toHaveLength(0)
+  const update = async (next: CareInput) => {
+    receipt = next
+    await act(async () => readings[0]!.refresh())
+    expect(readings[0]?.saved?.maintenance?.input).toEqual(receipt)
+  }
+  await update(received(1794211800000, 'unconfirmed'))
+  expect(cues()).toHaveLength(0)
+  await update(received(1794211800000, 'terminal-confirmed'))
+  const first = cues()
+  expect(first).toHaveLength(2)
+  await update(receipt)
+  expect(cues()[0]).toBe(first[0])
+  expect(cues()[1]).toBe(first[1])
+  await update(received(1794213600000, 'native-admitted'))
+  expect(cues()).toHaveLength(2)
+  expect(cues()[0]).not.toBe(first[0])
+  receipt = received(1794215400000, 'terminal-confirmed')
+  await act(async () => { document.dispatchEvent(new Event('visibilitychange')) })
+  expect(readings[0]?.saved?.maintenance?.input).toEqual(receipt)
+  expect(cues()).toHaveLength(0)
+  await app.remount()
+  expect(document.querySelector('.mote-heartbeat-lamp[data-mote-care="active"]')).not.toBeNull()
+  expect(cues()).toHaveLength(0); retained()
+})
 it('the real conversation and daily entry share one original reading while Profile is closed, and inspect without resuming', async () => {
   maintenance.schedule!.pause = { reason: 'input-unconfirmed', episodeId: 'original-pause', pausedAt: 1794210000500 }
   const inspect = vi.spyOn(api.schedule, 'inspect').mockResolvedValue({ schedule: maintenance.schedule, executionScope: 'connected-host' })

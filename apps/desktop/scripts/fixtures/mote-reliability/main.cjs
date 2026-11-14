@@ -12,7 +12,7 @@ app.whenReady().then(async () => {
     Menu.setApplicationMenu(null)
     win = new BrowserWindow({ width: 1180, height: 820, useContentSize: true, show: false, webPreferences: { contextIsolation: true, sandbox: true, nodeIntegration: false, backgroundThrottling: false } })
     win.webContents.on('console-message', (_event, level, message) => { if (level >= 2) result.errors.push(String(message)) })
-    await win.loadFile(html, { query: { phase: 'initialization-' + phase, ...(process.env.MOTE_HEARTBEAT_SURFACE === '1' ? { 'heartbeat-surface': '1' } : {}), ...(process.env.MOTE_MAIN_RECOVERY_ESCAPE === '1' ? { 'main-recovery-escape':'1' } : {}), ...(process.env.MOTE_MAIN_POLICY_SERVICE === '1' ? {'main-policy-service':'1'} : {}) } })
+    await win.loadFile(html, { query: { phase: 'initialization-' + phase, ...(process.env.MOTE_HEARTBEAT_ICON === '1' ? { 'heartbeat-icon': '1' } : {}), ...(process.env.MOTE_HEARTBEAT_SURFACE === '1' ? { 'heartbeat-surface': '1' } : {}), ...(process.env.MOTE_MAIN_RECOVERY_ESCAPE === '1' ? { 'main-recovery-escape':'1' } : {}), ...(process.env.MOTE_MAIN_POLICY_SERVICE === '1' ? {'main-policy-service':'1'} : {}) } })
     const read = expression => win.webContents.executeJavaScript(expression)
     const until = async expression => {
       const end = Date.now() + 15000
@@ -45,6 +45,9 @@ app.whenReady().then(async () => {
     const profile = async () => { await click(button('Profile', 'document.querySelector(".mote-space-frame__header")')); await until('document.querySelector("[data-mote-page=profile]")') }
     const refresh = async () => { await click(button('Refresh actual schedule', 'document.querySelector(".mote-quick-mode")')) }
     if (process.env.MOTE_HEARTBEAT_ICON === '1') {
+      const cues = 'document.querySelectorAll(\'.mote-heartbeat-entry [data-icon-animation="feedback"], .mote-space-frame__header .mote-heartbeat-lamp__signal [data-icon-animation="feedback"]\')'
+      const sprite = 'document.getElementById("agentmux-icon-object.heartbeat")'
+      assert.equal(await read(`${sprite}.querySelectorAll('[data-semantic-icon-part="heartbeat-curve"]').length`), 1)
       for (const [theme, width, facts, state, icon] of [
         ['dark', 1180, 'active', 'active', 'object.heartbeat'],
         ['light', 420, 'active', 'active', 'object.heartbeat'],
@@ -58,8 +61,38 @@ app.whenReady().then(async () => {
         const mark = `[data-mote-care="${state}"] svg[data-semantic-icon="${icon}"]`
         for (const surface of ['.mote-heartbeat-entry', '.mote-space-frame__header .mote-heartbeat-lamp'])
           await until(`document.querySelector(${JSON.stringify(surface + mark)})?.getBoundingClientRect().width === 12`)
+        assert.equal(await read(`${cues}.length`), 0)
         await capture('heartbeat-icon-' + state + '-' + theme)
       }
+      win.setContentSize(680, 740)
+      await read('window.moteReliability.variant("active")'); await profile(); await refresh()
+      await click(button('Discussion', 'document.querySelector(".mote-space-frame__header")'))
+      await until('document.querySelector(".mote-space-frame__header .mote-heartbeat-lamp[data-mote-care=active]")')
+      const beats = []
+      win.webContents.debugger.on('message', (_event, method, packet) => {
+        if (method === 'Animation.animationStarted' && packet.animation.name === 'semantic-icon-heartbeat-once') beats.push(packet.animation)
+      })
+      await input('Animation.enable')
+      await capture('heartbeat-motion-rest')
+      await input('Animation.setPlaybackRate', { playbackRate: 0.1 })
+      await read('window.moteReliability.advanceHeartbeatIcon()')
+      await until(`${cues}.length === 2`)
+      assert.equal(beats.length, 2, 'Each original icon plays its authored middle once')
+      assert.ok(beats.every(beat => beat.source.iterations === 1 && beat.source.duration === 240), 'One finite authored motion')
+      const animations = beats.map(beat => beat.id)
+      await input('Animation.setPaused', { animations, paused: true })
+      await input('Animation.seekAnimations', { animations, currentTime: 91 })
+      await capture('heartbeat-motion-crest')
+      await input('Animation.setPlaybackRate', { playbackRate: 1 })
+      await input('Animation.setPaused', { animations, paused: false })
+      await capture('heartbeat-motion-settled', 280)
+      await input('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] })
+      await read(`window.previousHeartbeatCue = ${cues}[0]; window.moteReliability.advanceHeartbeatIcon()`)
+      await until(`${cues}.length === 2 && ${cues}[0] !== window.previousHeartbeatCue`)
+      assert.equal(await read(`getComputedStyle(${cues}[0]).getPropertyValue('--icon-feedback-heartbeat').trim()`), 'none')
+      await capture('heartbeat-motion-reduced')
+      assert.equal(beats.length, 2, 'Reduced motion does not start a new drawing animation')
+      result.heartbeatMotion = { carriers: beats.length, durationMs: beats[0].source.duration, iterations: beats[0].source.iterations, reducedMotionStarted: 0 }
       result.passed = true; return
     }
     const checkedRecovery = async () => {

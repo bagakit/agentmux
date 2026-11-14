@@ -49,6 +49,8 @@ if (currentDocument.status !== 'read') throw Error('Current original Mote file r
 const roleRevision = moteMainRoleRevision({ conversation: reference }, currentDocument.document.revision)
 const heartbeatReads = []
 let variant = 'paused'
+const heartbeatIconPreview = new URLSearchParams(location.search).has('heartbeat-icon')
+let heartbeatIconOccurrence = 1000
 const schedule = () => ({ loopId: 'original-mote-heartbeat', hostId: reference.hostId, agentSessionId: reference.sessionId, providerId: session.providerId, workspacePath: session.workspacePath,
   managedSource: { sourceId: 'mote-main:private-original', revision: roleRevision },
   everyMs: 1800000, intervalMs: 1800000, revision: variant === 'active' ? 5 : 4, creationOperationId: 'original-mote-heartbeat-creation', futureIntentId: 'original-mote-heartbeat-standing-intent', prompt: 'Check current work and unfinished commitments.',
@@ -66,7 +68,15 @@ api.schedule.list = async input => { parseScheduleRpcParams('schedule.list', inp
 api.schedule.inspect = async input => {
   parseScheduleRpcParams('schedule.inspect', input); heartbeatReads.push({ method: 'inspect', scheduleId: input.scheduleId })
   if (variant === 'unavailable') throw Error('The original heartbeat observation is unavailable.')
-  return { schedule: input.scheduleId === 'original-mote-heartbeat' ? schedule() : null, executionScope: 'connected-host' }
+  const record = input.scheduleId === 'original-mote-heartbeat' ? schedule() : null
+  const receipt = record && heartbeatIconPreview && variant === 'active' ? {
+    inputKey: { kind: 'prompt', agentSessionId: reference.sessionId, expectedRun: session.control.run, submissionId: 'care-' + heartbeatIconOccurrence },
+    futureIntent: { intentId: record.futureIntentId, occurrenceAt: heartbeatIconOccurrence },
+    definitionOperationId: record.creationOperationId, managedSource: record.managedSource, preparedAt: heartbeatIconOccurrence,
+  } : null
+  return receipt ? { schedule: { ...record, lastInputRef: receipt }, executionScope: 'connected-host',
+    input: { reference: receipt, status: 'confirmed', delivery: 'terminal-confirmed', nativeResult: { state: 'unsupported' } } }
+    : { schedule: record, executionScope: 'connected-host' }
 }
 bindMotePreferenceReader()
 await useAppStore.getState().refreshScratchTopics(SCRATCH_WORKSPACE_ID, true, PMO_TEAMS_TOPIC_ID)
@@ -94,6 +104,7 @@ window.moteReliability = { ready: true, reference,
       target: { domain: 'client.notifications', hostId: 'local', list: { section: 'current', category: 'operations', limit: 32 } }, includeRaw: true, maxBytes: 65536 }) }),
   persistedCare: async () => { const raw = await api.ui.readWorkbenchState(); return raw ? JSON.parse(raw).state?.noticeReadReceipts ?? null : null },
   variant(value) { variant = value },
+  advanceHeartbeatIcon() { heartbeatIconOccurrence++ },
   startup() {
     originalCreation = { createOperationId: 'original-start-operation', initialPrompt: 'unconfirmed', createdRun: session.control.run,
       workspaceTrust: { lifecycleOperationId: 'original-start-operation', workspacePath: session.workspacePath, status: 'unconfirmed', step: 'trust-record', trustKey: null,
