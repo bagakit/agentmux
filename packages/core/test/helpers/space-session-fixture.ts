@@ -1,4 +1,5 @@
 import { vi } from 'vitest'
+import type { AdoptedHostRoute } from '../../src/host-route.js'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
@@ -58,11 +59,11 @@ export async function createSpaceSessionsFixture(cleanup: Array<() => unknown | 
   remotes.push({ hostId: 'D-in-B', client: { forwardRpc: d.rpc.call.bind(d.rpc), subscribeRpc: d.rpc.subscribe.bind(d.rpc) } } as AgentMuxRpcCoreClient)
   const folder = await b.spatial.registerFolder({ id: 'original-b-project', hostId: 'local', name: 'B project', path: '/b/project' })
   const reference = { runtimeId: b.owner.runtimeId, spaceId: folder.spaceId }
-  const admit = async (hostId: string, runtimeId: string, sid: string, operationId: string) => {
+  const admit = async (hostId: string, runtimeId: string, sid: string, operationId: string, adoptedRoute?: AdoptedHostRoute) => {
     const admitted = await b.spatial.admitAgentOpen({ request: { schemaVersion: 5, requestId: operationId, operation: 'agent.open',
-      content: { kind: 'new-agent', executorId: 'test-executor', ...(hostId === 'local' ? {} : { agentTarget: { hostId, runtimeId } }) },
+      content: { kind: 'new-agent', executorId: 'test-executor', ...(hostId === 'local' ? {} : { agentTarget: { hostId, runtimeId, ...(adoptedRoute ? { adoptedRoute } : {}) } }) },
       destination: { spaceId: folder.spaceId, zoneId: folder.zoneId, newTab: true }, focus: false }, agentSessionId: sid,
-      execution: { hostId, runtimeId, executorRevision: 'original-executor-revision', workspacePath: hostId === 'local' ? '/b/project' : '/runtime-d/home', workspaceId: hostId === 'local' ? 'original-b-project' : null },
+      execution: { hostId, runtimeId, ...(adoptedRoute ? { adoptedRoute } : {}), executorRevision: 'original-executor-revision', workspacePath: hostId === 'local' ? '/b/project' : '/runtime-d/home', workspaceId: hostId === 'local' ? 'original-b-project' : null },
       ...(hostId === 'local' ? {} : { placement: { runtimeId: b.owner.runtimeId, hostId: 'local', workspacePath: '/b/project', workspaceId: 'original-b-project' } }), regionResource: {} })
     return admitted.record
   }
