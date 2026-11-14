@@ -51,7 +51,7 @@ export function useObjectAvatarSave(target: SpaceObjectImageTarget | undefined) 
           if (observed.operation?.phase === 'published' && observed.operation.durability === 'confirmed' && await matches(kept, observed)) {
             await api.ui.retireObjectAvatarRequest(kept)
             requests.delete(kept.operationId)
-          } else unresolved.push({ request: kept, issue: observed.operation?.phase === 'published' && observed.operation.durability === 'confirmed' ? 'This historical publication does not confirm this submission’s original actor and bytes. The kept request is retained.' : observed.operation?.issue ?? 'The original save is still unconfirmed. Reading current values does not confirm that save.' })
+          } else unresolved.push({ request: kept, issue: observed.operation?.phase === 'published' && observed.operation.durability === 'confirmed' ? 'This record does not confirm your pending save. Your image and request are kept.' : observed.operation?.issue ?? 'The original save is still unconfirmed. Reading current values does not confirm that save.' })
         } catch (error) { unresolved.push({ request: kept, issue: presentError(error) }) }
       }
       if (current()) {

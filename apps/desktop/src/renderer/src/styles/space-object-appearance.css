@@ -164,7 +164,8 @@
 @media (max-width: 420px) {
   .space-icon-picker--avatar { padding: var(--sp-4); }
   .mote-avatar-stage { grid-template-columns: 1fr; justify-items: center; }
-  .mote-avatar-crop__stage, .mote-face-editor__preview, .mote-avatar-preview, .mote-avatar-stage__aside, .mote-avatar-crop__controls { grid-column: 1; grid-row: auto; width: 100%; }
+  .mote-avatar-crop__stage, .mote-face-editor__preview, .mote-avatar-preview, .mote-avatar-stage__aside, .mote-avatar-crop__controls { grid-column: 1; grid-row: auto; }
+  .mote-avatar-stage__aside, .mote-avatar-crop__controls { width: 100%; }
   .mote-face-editor fieldset { grid-template-columns: 40px 1fr; column-gap: var(--sp-2); }
   .mote-face-editor fieldset button { flex-direction: column; gap: 0; padding-inline: var(--sp-1); }
   .mote-face-editor__sample { width: 24px; height: 20px; }
