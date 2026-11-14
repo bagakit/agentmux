@@ -3,7 +3,7 @@ import { AgentMuxError } from './errors.js'
 import { rpcRecord } from './rpc-data.js'
 import { parseConnectionActor } from './room-binding-codec.js'
 import type { ConnectionActor } from './connections-contract.js'
-import type { AgentMuxAgentInteractionInput, AgentMuxSessionQuestionReplyInput } from './client.js'
+import type { AgentMuxAgentInteractionInput, AgentMuxSessionQuestionReplyInput } from "./client-contract.js";
 import { sha256 } from '@noble/hashes/sha2.js'
 import { agentInteractionRequestTarget } from './agent-interaction-state.js'
 

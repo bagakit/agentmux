@@ -11,8 +11,8 @@ export type AgentInputCallContext = Readonly<{
   requestSignal?: AbortSignal
   /** Trusted Host author owner; identity is attribution, while this callback checks current authority. */
   externalAuthor?: { identity: import('./external-author.js').AgentExternalMessageAuthor; assertCurrent(intent: import('./external-author.js').AgentExternalInputIntent): void | Promise<void> }
-  externalAction?: { identity: import('./external-author.js').AgentExternalInteractionAuthor; assertCurrent(intent: import('./client.js').AgentMuxAgentInteractionInput): void | Promise<void> }
-  externalQuestion?: { identity: import('./external-author.js').AgentExternalInteractionAuthor; assertCurrent(intent: import('./client.js').AgentMuxSessionQuestionReplyInput): void | Promise<void> }
+  externalAction?: { identity: import('./external-author.js').AgentExternalInteractionAuthor; assertCurrent(intent: import("./client-contract.js").AgentMuxAgentInteractionInput): void | Promise<void> }
+  externalQuestion?: { identity: import('./external-author.js').AgentExternalInteractionAuthor; assertCurrent(intent: import("./client-contract.js").AgentMuxSessionQuestionReplyInput): void | Promise<void> }
   /** Restricts the original action using its current author owner; cannot mint authority. */
   assertCurrent?(): void | Promise<void>
   /** Automatic producers may forbid steering; this restriction grants no input authority. */

@@ -5,7 +5,8 @@ import { AGENTMUX_RUNTIME_OWNER_PROTOCOL_VERSION } from './runtime-owner-protoco
 import { chmod, mkdir, open, readFile, type FileHandle } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { dirname, join } from 'node:path'
-import { AgentMuxClient, type AgentMuxClientOptions } from './client.js'
+import { AgentMuxClient } from './client.js';
+import type { AgentMuxClientOptions } from "./client-contract.js";
 import { AgentMuxFileAgentSessionStore, defaultAgentMuxAgentSessionStorePath } from './agent-session-store.js'
 import { AgentMuxError } from './errors.js'
 import { DeliveryAttemptStore } from './delivery-attempt-store.js'

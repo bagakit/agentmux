@@ -1,4 +1,4 @@
-import type { AgentMuxAgentRuntimeStatus } from './client.js'
+import type { AgentMuxAgentRuntimeStatus } from "./client-contract.js";
 
 /** The original process observation is the sole status axis for public Session discovery. */
 export function agentSessionStatus(session: AgentMuxAgentRuntimeStatus): string {

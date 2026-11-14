@@ -2,7 +2,8 @@ import { createHash } from 'node:crypto'
 import { AgentMuxError } from './errors.js'
 import { rpcCount, rpcRecord, rpcString } from './rpc-business-codec.js'
 import { currentAgentSemanticStatus, isAgentActivityStatusSource, type AgentObservation } from './agent-status-freshness.js'
-import type { AgentMuxClient, AgentMuxAgentRuntimeStatus } from './client.js'
+import type { AgentMuxClient } from './client.js';
+import type { AgentMuxAgentRuntimeStatus } from "./client-contract.js";
 import type { AgentMuxAgentSession, AgentSessionHistoryDescriptor, AgentStatus } from './types.js'
 
 export type AgentDiscoveryFilters = {

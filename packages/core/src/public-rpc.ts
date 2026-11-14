@@ -276,9 +276,9 @@ type NativeParams = MoteDialogueParamsMap & { 'capsule.input': import('./capsule
   'agent.native.history': import('./public-rpc-native-history.js').AgentMuxRpcNativeHistoryParams
   'agent.native.history.resource': import('./public-rpc-native-history.js').AgentMuxRpcNativeHistoryResourceParams
   'agent.context': import('./agent-context.js').AgentContextParams
-  'agent.interaction.respond': Omit<import('./client.js').AgentMuxAgentInteractionInput,'authorHuman'>
+  'agent.interaction.respond': Omit<import("./client-contract.js").AgentMuxAgentInteractionInput,'authorHuman'>
   'agent.interaction.inspect': { agentSessionId: string; operationId: string }
-  'agent.question.reply': Omit<import('./client.js').AgentMuxSessionQuestionReplyInput, 'authorHuman' | 'sourceDevice' | 'signal' | 'commandOverride' | 'args' | 'env'>
+  'agent.question.reply': Omit<import("./client-contract.js").AgentMuxSessionQuestionReplyInput, 'authorHuman' | 'sourceDevice' | 'signal' | 'commandOverride' | 'args' | 'env'>
   'agent.history.usage': import('./agent-session-usage.js').AgentSessionUsageInput
   'agent.history.record.inspect': import('./agent-session-record.js').AgentSessionRecordInput
   'agent.history.record.delete': import('./agent-session-record.js').AgentSessionRecordDeleteInput

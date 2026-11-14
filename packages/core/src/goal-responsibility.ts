@@ -1,7 +1,7 @@
 import { isDemandEvidenceReference } from '@agentmux/demand/goals'
 import { demandExecutionKey, demandHandoffDestinations, demandProgressBusinessCurrent, latestDemandProgress, sameDemandExecution, type Demand, type DemandExecutionReference,
   type DemandProgress, type DemandResponsibilityBasis } from '@agentmux/demand'
-import type { AgentMuxAgentRuntimeStatus } from './client.js'
+import type { AgentMuxAgentRuntimeStatus } from "./client-contract.js";
 import { currentAgentSemanticStatus } from './agent-status-freshness.js'
 import type { AgentObservation } from './agent-status-freshness.js'
 import { AgentMuxError } from './errors.js'

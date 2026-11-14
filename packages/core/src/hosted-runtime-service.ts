@@ -404,13 +404,13 @@ export class AgentMuxHostedRuntimeService {
       const externalAction = action === undefined ? undefined : (() => {
         const identity = parseAgentExternalInteractionAuthor(action), port = this.externalInputAuthority
         if (!port?.assertInteractionCurrent) throw new AgentMuxError('The original external interaction authority is unavailable. Retain its original operation; local responses remain available.', 'EXTERNAL_INTERACTION_AUTHORITY_UNCONFIRMED')
-        return { identity, assertCurrent: (intent: import('./client.js').AgentMuxAgentInteractionInput) => port.assertInteractionCurrent!(structuredClone(identity), structuredClone(intent)) }
+        return { identity, assertCurrent: (intent: import("./client-contract.js").AgentMuxAgentInteractionInput) => port.assertInteractionCurrent!(structuredClone(identity), structuredClone(intent)) }
       })()
       const question = invocation.method === 'replySessionQuestion' ? invocation.args[0].externalAction : undefined
       const externalQuestion = question === undefined ? undefined : (() => {
         const identity = parseAgentExternalInteractionAuthor(question), port = this.externalInputAuthority
         if (!port?.assertQuestionCurrent) throw new AgentMuxError('The original external question authority is unavailable. Retain its original operation; local answers remain available.', 'EXTERNAL_INTERACTION_AUTHORITY_UNCONFIRMED')
-        return { identity, assertCurrent: (intent: import('./client.js').AgentMuxSessionQuestionReplyInput) => port.assertQuestionCurrent!(structuredClone(identity), structuredClone(intent)) }
+        return { identity, assertCurrent: (intent: import("./client-contract.js").AgentMuxSessionQuestionReplyInput) => port.assertQuestionCurrent!(structuredClone(identity), structuredClone(intent)) }
       })()
 
       const rawContext: import('./agent-input-wait.js').AgentRawInputCallContext = {

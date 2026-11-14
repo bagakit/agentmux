@@ -5,7 +5,8 @@ import { join, isAbsolute, dirname } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { isDeepStrictEqual } from 'node:util'
 import { AgentExecutionBridge, type AgentExecutionBridgeState, type AgentExecutionBridgePort, type AgentExecutionBridgeSide, type AgentExecutionBridgeConnection } from './agent-execution-bridge.js'
-import type { AgentMuxClient, AgentMuxHostAgentCreateInput } from './client.js'
+import type { AgentMuxClient } from './client.js';
+import type { AgentMuxHostAgentCreateInput } from "./client-contract.js";
 import type { AgentMuxAgentSession } from './types.js'
 import { AgentMuxError } from './errors.js'
 import { parseAgentExecutionNotices, type AgentExecutionNotice } from './agent-execution-helper.js'

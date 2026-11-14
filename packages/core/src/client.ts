@@ -1,3 +1,4 @@
+import type { AgentMuxAgentCreateInput, AgentMuxHostAgentCreateInput, AgentMuxTerminalCreateInput, AgentMuxAgentPromptInput, AgentMuxSessionQuestionReplyInput, AgentMuxAgentMessageInput, AgentMuxAgentInteractionInput, AgentMuxAgentPostureInput, AgentMuxAgentRespawnInput, AgentMuxAgentAttachment, AgentMuxClientOptions, AgentMuxAgentRuntimeStatus } from './client-contract.js'
 import { agentSessionRetirementRevision } from './agent-session-store.js'
 import { nativeSnapshotSigningKey } from './native-snapshot-key.js'
 import { decodeNativeSnapshotCursor } from './native-snapshot-cursor.js'
@@ -21,7 +22,7 @@ import { parseAgentToolExecutionBinding } from './agent-tool-execution.js'
 import { parsePreparedAuthorProfile, publicAuthorProfile } from './author-profile.js'
 import { parseAgentInputChangesRead, type AgentInputChangesRead, type AgentInputChangesPage } from './agent-input-changes.js'
 import { imageBytes } from './session-history-resource.js'
-import { resolveAgentInputImages, parseAgentInputResourceRead, inputImageMatches, type AgentInputImageReference, type AgentInputResourceOwner, type AgentInputResourceRead, type AgentInputResourceResult } from './agent-input-resource.js'
+import { resolveAgentInputImages, parseAgentInputResourceRead, inputImageMatches, type AgentInputResourceOwner, type AgentInputResourceRead, type AgentInputResourceResult } from './agent-input-resource.js';
 import { originalMessageInputKey } from './agent-message-query.js'
 import { validateMessageFieldRead } from './agent-message-field.js'
 import { readMessageField } from './agent-message-field-reader.js'
@@ -41,13 +42,13 @@ import { mintObjectId } from './object-id.js'
 import type { ReadingDiagnosticRecord, ReadingDiagnosticReason } from './reading-diagnostic.js'
 import { CoreReadingDiagnosticSource } from './reading-diagnostic-source.js'
 import { CoreStartupDiagnosticJournal } from './startup-diagnostic-journal.js'
-import { parseStartupDiagnosticTarget, type AgentStartupDiagnosticOwner, type AgentStartupDiagnosticExactTarget, type AgentStartupDiagnosticRecentTarget } from './startup-diagnostic.js'
+import { parseStartupDiagnosticTarget, type AgentStartupDiagnosticExactTarget, type AgentStartupDiagnosticRecentTarget } from './startup-diagnostic.js';
 import { unavailableDiagnosticEvidence } from '@agentmux/diagnostic-evidence'
 import type { ReadingDiagnosticExactTarget, ReadingDiagnosticFindParams, ReadingDiagnosticFindResult } from './reading-diagnostic-query.js'
 import { runAgentMessageBroadcast, type AgentMuxMessageBroadcastInput, type AgentMuxMessageBroadcastReceipt } from './agent-message-broadcast.js'
 import { AgentMuxMessageNotifications, automaticNotification } from './agent-message-notifications.js'
 import { MoteInputOwner, type AutomaticInputOpportunity } from './mote-input-owner.js'
-import { moteInputObservationId, moteInputMember, type MoteInputOrigin, type MoteInputInspection, type AgentInputMoteResolver } from './mote-input.js'
+import { moteInputObservationId, moteInputMember, type MoteInputOrigin, type MoteInputInspection } from './mote-input.js';
 import type { AgentMuxMessageNotification, AgentMuxMessageNotificationStatus } from './agent-message-notification.js'
 import { isMessageNotificationInput } from './agent-message-notification.js'
 import { parseTerminalFrontendObservation, type AgentTerminalFrontend } from './agent-terminal-frontend.js'
@@ -86,12 +87,9 @@ import { parseAgentNativeSessionConfirmation } from './agent-native-session-conf
 import { parseAgentNativeResumeSource } from './agent-native-sessions.js'
 import { nativeCatalogIssue } from './providers/native-session-catalog-files.js'
 import { launchScopedHookEnvironment } from './providers/shared.js'
-import { agentForkIdentityReminder, assertAgentForkSource, parseAgentForkSource, type AgentMuxAgentForkSource } from './agent-fork.js'
+import { agentForkIdentityReminder, assertAgentForkSource, parseAgentForkSource } from './agent-fork.js';
 import { agentInteractionActiveRequest, agentInteractionResponseUnavailableReason, agentInteractionResponseSettled, agentInteractionRequestTarget } from './agent-interaction-state.js'
-import {
-  normalizeLaunchOptionSelection,
-  type LaunchOptionSelection
-} from './agent-launch-option.js'
+import { normalizeLaunchOptionSelection } from './agent-launch-option.js';
 import {
   AgentProviderRegistry,
   resolveAgentExecutable,
@@ -101,7 +99,7 @@ import {
   type AgentProviderHookNormalizationContext,
   type AgentProviderPromptExecutionContext
 } from './agent-provider.js'
-import { createDefaultAgentMuxPluginRegistry, type AgentMuxPlugin } from './agent-plugin.js'
+import { createDefaultAgentMuxPluginRegistry } from './agent-plugin.js';
 import { normalizeNativeHook, releaseSubagentRoster, agentHasActiveSubagents, agentSubagentActivityUnconfirmed, observeSubagentMainEnd, nativeHookToolCallId, projectNativeHookToolInvocation, nativeHookHasSubagentSubject } from './hook-normalizer.js'
 import { eventNamesCanReopenTurn, resolveHookEventName } from './agent-hook-event.js'
 import { classifyRunExit, type AgentMuxRunExitReason } from './agent-run-exit.js'
@@ -116,7 +114,7 @@ import { AgentSessionObservationRetries, sessionObservationSource,
   type SessionObservationKind, type SessionObservationTarget } from './session-observation-retry.js'
 import { normalizeMessageChannel } from './message-origin.js'
 import { normalizeOperationDevice } from './operation-device.js'
-import { composeAgentLaunchPrompt, composeAgentPrompt, type AgentMuxOptionalContext } from './agent-outbound-message.js'
+import { composeAgentLaunchPrompt, composeAgentPrompt } from './agent-outbound-message.js';
 import { parseBrowserInputContext, parseBrowserInputContextSource } from './browser-input-context.js'
 import { parseAgentInputContextCaptureReference, type AgentInputContextCaptureProof } from './agent-input-context-capture.js'
 import { resolveAgentInputContextCapture } from './agent-input-context-capture-resolve.js'
@@ -160,11 +158,10 @@ import { advanceDelivery, type AgentThread } from './agent-message.js'
 import type { AgentMuxExecutorProbeResult } from './control.js'
 import { AgentMuxClientEventPublisher } from './client-event-publisher.js'
 import { observeMessageJournal } from './agent-message-observer.js'
-import { agentPromptCondition, agentPromptInputId, agentPromptNotApplied, validateAgentPromptAdmissionIntent, validateAgentPromptCondition, validateAgentPromptInputKey,
-  type AgentPromptAdmissionIntent, type AgentPromptInputKey, type AgentPromptCondition } from './agent-prompt-condition.js'
+import { agentPromptCondition, agentPromptInputId, agentPromptNotApplied, validateAgentPromptAdmissionIntent, validateAgentPromptCondition, validateAgentPromptInputKey, type AgentPromptAdmissionIntent, type AgentPromptInputKey } from './agent-prompt-condition.js';
 import { agentTurnCompletionIdentity, agentTurnEndEvidence, agentNativeTurnEnd, nativeTurnEndScopeMatches, agentNativeInteractionEnd, nativeInteractionEndScopeMatches, cloneSession, sameNativeHandle, sameRun } from './agent-session-identity.js'
 import { transitionAgentSemanticStatus } from './agent-semantic-state.js'
-import { observeAgent, currentAgentSemanticStatus, type AgentObservation } from './agent-status-freshness.js'
+import { observeAgent, currentAgentSemanticStatus } from './agent-status-freshness.js';
 import { runDisplayState } from './agent-run-status.js'
 import { AgentScreenEvidenceStore } from './screen-evidence.js'
 import {
@@ -221,14 +218,14 @@ import {
 } from './runtime.js'
 import { agentTimelineMutationFromAcpEvent } from './session-timeline.js'
 import { acceptsAgentActivityState, advanceAgentActivityCommit, agentActivityTimelineItem } from './agent-activity-state.js'
-import type { AgentActivityObservation, AgentSemanticState, AgentActivityState, AgentCapabilitySnapshot, AgentCatalogEntry, AgentExecutorId, AgentProviderId, AgentMuxAgentPasteInput, AgentMuxAgentWriteInput, AgentMuxAgentSession, AgentMuxAgentCreationInspection, AgentNativeActivityEvent, AgentCurrentActivity, AgentMuxNativeSessionConfirmationInput, AgentMuxNativeSessionConfirmation, AgentPromptMessageContent, AgentMuxClientEvent, AgentMuxClientEventListener, AgentMuxClientEventListenerOptions, AgentMuxObservationOrigin, AgentMuxInteractionRequest, AgentMuxInteractionResponse, AgentMuxInteractionOperationReceipt, AgentMuxInteractionOperationIntent, AgentMuxRun, AgentMuxRunAppliedSize, AgentMuxRunAttachment, AgentMuxRunAttachmentView, AgentMuxRunDataEvent, AgentMuxRunInputAck, AgentMuxRunInputData, AgentMuxRunInputOperation, AgentMuxRunRef, AgentMuxStoredAgentSession, AgentMuxRuntimeDiagnostics, AgentMuxRuntimeIdentity, AgentMuxRuntimeResourceSnapshot, AgentNativeSessionHandle, AgentNativeResumeSource, AgentNativeSessionCatalog, AgentNativeSessionCandidate, AgentNativeHistoryReadOptions, AgentProviderSessionHistoryPage, AgentNativeHistoryResourceReadOptions, AgentProviderSessionHistoryResourceReadResult, AgentSessionHistoryMetadata, AgentSessionHistoryPage, AgentSessionHistoryPageOptions, AgentSessionHistoryResourceReadOptions, AgentSessionHistoryResourceReadResult, AgentSessionQuestionReplyReceipt, AgentSessionHistoryQuestionAnswer, AgentSessionHistorySource, AgentSessionHistoryDescriptor, AgentSessionHistoryObservation, AgentSessionHistoryObservationOptions, AgentSessionHistoryObservationHandle, AgentTerminalCapabilityState, AgentTerminalOutputChannelState, AgentTimelineItem, AgentTimelineMutation, AgentTimelineSnapshot, AgentStatus, NativeHookEnvelope } from './types.js'
+import type { AgentActivityObservation, AgentSemanticState, AgentActivityState, AgentCapabilitySnapshot, AgentCatalogEntry, AgentExecutorId, AgentProviderId, AgentMuxAgentPasteInput, AgentMuxAgentWriteInput, AgentMuxAgentSession, AgentMuxAgentCreationInspection, AgentNativeActivityEvent, AgentCurrentActivity, AgentMuxNativeSessionConfirmationInput, AgentMuxNativeSessionConfirmation, AgentPromptMessageContent, AgentMuxClientEvent, AgentMuxClientEventListener, AgentMuxClientEventListenerOptions, AgentMuxObservationOrigin, AgentMuxInteractionRequest, AgentMuxInteractionResponse, AgentMuxInteractionOperationReceipt, AgentMuxRun, AgentMuxRunAppliedSize, AgentMuxRunAttachment, AgentMuxRunAttachmentView, AgentMuxRunDataEvent, AgentMuxRunInputAck, AgentMuxRunInputData, AgentMuxRunInputOperation, AgentMuxRunRef, AgentMuxStoredAgentSession, AgentMuxRuntimeDiagnostics, AgentMuxRuntimeIdentity, AgentMuxRuntimeResourceSnapshot, AgentNativeSessionHandle, AgentNativeResumeSource, AgentNativeSessionCatalog, AgentNativeSessionCandidate, AgentNativeHistoryReadOptions, AgentProviderSessionHistoryPage, AgentNativeHistoryResourceReadOptions, AgentProviderSessionHistoryResourceReadResult, AgentSessionHistoryMetadata, AgentSessionHistoryPage, AgentSessionHistoryPageOptions, AgentSessionHistoryResourceReadOptions, AgentSessionHistoryResourceReadResult, AgentSessionQuestionReplyReceipt, AgentSessionHistorySource, AgentSessionHistoryDescriptor, AgentSessionHistoryObservation, AgentSessionHistoryObservationOptions, AgentSessionHistoryObservationHandle, AgentTerminalCapabilityState, AgentTerminalOutputChannelState, AgentTimelineItem, AgentTimelineMutation, AgentTimelineSnapshot, AgentStatus, NativeHookEnvelope } from './types.js';
 import { normalizeSessionHistoryPage, SESSION_HISTORY_TIMEOUT_MS, watchSessionHistoryProgress } from './session-history.js'
 import { AgentMuxCreationAuthority, agentCreationIntentDigest } from './agent-creation-authority.js'
 import { messagePacketDigest, parseSignedMessage, parseMessageReadAuthority, parseFederatedThread, parseSignedDispatchEvent, dispatchEventDigest,
   type AgentMuxSignedMessage, type AgentMuxMessageParticipant, type AgentMuxMessageReadAuthority, type AgentMuxFederatedThread,
   type AgentMuxSignedDispatchEvent, type AgentMuxDispatchEventSubmission, type AgentMuxRecipientInboxReceipt } from './agent-message-federation.js'
 import type { AgentMuxMessageApplication } from './agent-message-envelope.js'
-import type { AgentMuxCreationAdmission, AgentMuxCreationOrigin } from './agent-creation-admission.js'
+import type { AgentMuxCreationOrigin } from './agent-creation-admission.js';
 import type { AgentMuxHostExecutorOwner } from './executor-owner.js'
 import type { AgentExecutorConfig } from './types.js'
 import type { AgentMuxHostExecutorConfigureInput } from './executor-contract.js'
@@ -266,57 +263,6 @@ type NativeHistoryObservationResource = { controller: AbortController; binding: 
 
 const PROVIDER_READ_MAX_CONCURRENT = 4
 const AGENTMUX_CLI_PATH = resolveCoreBinPath('amux')
-
-export type AgentMuxAgentCreateInput = {
-  toolExecution?: import('./agent-tool-execution.js').AgentToolExecutionBinding
-  agentSessionId?: string
-  createOperationId?: string
-  /** Original requested position only; it grants no placement, role or caller authority. */
-  spatialIntent?: import('./types.js').AgentMuxAgentCreationSpatialIntent
-  /** Native context copy into this new Session; the source retains its original Run. */
-  forkSource?: AgentMuxAgentForkSource
-  /** Continue an exact persisted Provider conversation that has no existing Core owner. */
-  nativeResumeSource?: AgentNativeResumeSource
-  providerId: AgentProviderId
-  executorId: AgentExecutorId
-  workspacePath: string
-  injectAgentMuxGuide: boolean
-  prompt?: string
-  /** Authenticated author of this creation's original prompt; Core owns its durable message. */
-  initialMessage?: { callerAgentSessionId: string; capability: string; threadId?: string }
-  /** Authenticated creation caller, independent of whether an initial message is requested. */
-  creationCaller?: { agentSessionId: string; capability: string }
-  /**
-   * AgentMux 自己要对 Agent 说的额外上下文（如 Scratch Topic 说明），署名进出站信封而非混进用户段。
-   * 与 `prompt`（用户/发起者的原话，逐字节透传）分层：调用方分开传，信封组装由 Core 的出口负责。
-   */
-  agentMuxNote?: string
-  /** Explicit non-human platform task; kept in generated context rather than the original request body. */
-  agentMuxTask?: string
-  /** Whole optional platform sources, selected against the final launch wire budget. */
-  optionalContext?: readonly AgentMuxOptionalContext[]
-  args?: readonly string[]
-  /**
-   * Chosen ids for the sealed launch options this Provider declares (see agent-launch-option.ts). The
-   * argv each choice contributes is resolved core-side and appended at spawn; an option or choice the
-   * Provider does not declare fails closed rather than launching an un-offered posture.
-   */
-  launchOptions?: LaunchOptionSelection
-  env?: Readonly<Record<string, string>>
-  commandOverride?: string
-  cols?: number
-  rows?: number
-}
-
-/** Target-owned configuration, with a frozen revision; no source machine argv or environment. */
-export type AgentMuxHostAgentCreateInput = Pick<AgentMuxAgentCreateInput,
-  'toolExecution' | 'agentSessionId' | 'createOperationId' | 'executorId' | 'workspacePath' | 'prompt' | 'agentMuxNote' | 'agentMuxTask' | 'optionalContext' |
-  'launchOptions' | 'cols' | 'rows' | 'nativeResumeSource' | 'spatialIntent'> & {
-  executorRevision: string
-  /** Existing signed creation intent admission; an initial body is optional. */
-  initialMessageAdmission?: AgentMuxCreationAdmission
-  threadId?: string
-}
 
 type AgentCreationAdmission = { intentDigest: string; origin?: AgentMuxCreationOrigin; threadId?: string; executorRevision?: string }
 type AgentCreationExecution = AgentCreationResourceContext & {
@@ -372,112 +318,6 @@ function bindInitialInput(input: AgentMuxContinuityLaunchInput | undefined, agen
       receipt: { kind: 'runtime-launch' as const, operationId: input.lifecycleOperationId, run: { ...run }, observedAt: Date.now() } } : {}) }
 }
 
-export type AgentMuxTerminalCreateInput = {
-  createOperationId?: string
-  workspacePath: string
-  command?: string
-  args?: readonly string[]
-  cols?: number
-  rows?: number
-  env?: Readonly<Record<string, string>>
-}
-
-type AgentMuxAgentPromptContent = {
-  authorProfile?: import('./author-profile.js').AgentPreparedAuthorProfile
-  inputImages?: readonly AgentInputImageReference[]
-  /** Resolves only through a trusted non-wire Host reader; mutually exclusive with inputContext. */
-  inputContextCapture?: import('./agent-input-context-capture.js').AgentInputContextCaptureReference
-  inputContext?: import('./browser-input-context.js').BrowserInputContext
-  /** Explicit choice for this message only: the previous turn may still be running. */
-  allowUncertainTurn?: boolean
-  execution?: import('./types.js').AgentPromptExecution
-  /** A finite explicit preparation retry retains the original source/input fence. */
-  preparationRetry?: import('./prompt-preparation.js').AgentPromptPreparationRetryFence
-  /** Conditional automation: abandon if this Run/turn completion no longer applies. */
-  expectedCompletionId?: string
-  /** Exact saved future-message intent; never authorizes interruption or uncertain turns. */
-  expectedFutureIntent?: import('./types.js').AgentFuturePromptOccurrence
-  /** New automatic admission only: final Native cursor must equal this observed input fence. */
-  expectedInputByte?: number
-  /** Cancellation before admission; an already claimed input transaction finishes or reconciles. */
-  signal?: AbortSignal
-  agentSessionId: string
-  operationId: string
-  /** Explicit manual origin attributed by trusted host. */
-  authorHuman?: boolean
-  /** Original selected Mote workface; the Host verifies its primary and membership. */
-  moteSource?: import('./mote-input.js').AgentInputMoteSource
-  sourceDevice?: import('./types.js').AgentOperationDevice
-  sourceChannel?: import('./types.js').AgentMessageChannel
-  /** Explicit host-generated context; a tag inside prompt cannot supply this fact. */
-  agentMuxNote?: string
-  prompt: string
-}
-
-export type AgentMuxAgentPromptInput = AgentMuxAgentPromptContent & (
-  (AgentPromptCondition & { admissionIntent?: never }) |
-  { expectedRun: AgentMuxRunRef; afterSubmissionId?: never;
-    admissionIntent: import('./agent-prompt-condition.js').AgentDirectedPromptTarget; execution: 'immediate'; expectedCompletionId?: never;
-    expectedFutureIntent?: never; expectedInputByte?: never; preparationRetry?: never }
-)
-
-/** Explicit manual answer to an exact Provider-owned asynchronous question record. */
-export type AgentMuxSessionQuestionReplyInput = AgentPromptCondition & Omit<AgentMuxAgentPromptContent,
-  'prompt' | 'agentMuxNote' | 'inputContext' | 'inputContextCapture' | 'execution' | 'expectedCompletionId' | 'expectedInputByte' | 'expectedFutureIntent'> & {
-  source: AgentSessionHistorySource
-  turnId: string
-  recordId: string
-  answers: AgentSessionHistoryQuestionAnswer[]
-  /** Original authenticated channel action; the executing Host must restore its authority. */
-  externalAction?: import('./external-author.js').AgentExternalInteractionAuthor
-  /** Configured native invocation, just as for the existing public history reader. */
-  commandOverride?: string
-  args?: readonly string[]
-  env?: Readonly<Record<string, string | undefined>>
-}
-
-export type AgentMuxAgentMessageSubmission = {
-  envelope: AgentMuxMessageEnvelope
-  sourceDevice?: import('./types.js').AgentOperationDevice
-  sourceChannel?: import('./types.js').AgentMessageChannel
-  execution?: import('./types.js').AgentPromptExecution
-  caller?: { agentSessionId: string; capability: string }
-  /** The external chat's original conversation kind; it only selects the reply note of a new input, never authorship, permission or input eligibility. */
-  conversationKind?: import('./ingress-contract.js').ConnectionIngressMessage['conversationKind']
-} & ({ condition?: never; admissionIntent?: never; execution?: 'default' } |
-  { condition: AgentPromptCondition; admissionIntent?: never } |
-  { condition?: never; admissionIntent: Exclude<AgentPromptAdmissionIntent, { kind: 'exact-condition' }>; execution: 'immediate' })
-
-export type AgentMuxAgentMessageInput = AgentMuxAgentMessageSubmission & { agentSessionId: string }
-
-export type AgentMuxAgentInteractionInput = AgentMuxInteractionOperationIntent & {
-  /** Trusted Host attribution, not an unmanaged RPC argument. */
-  authorHuman?: true
-  moteSource?: import('./mote-input.js').AgentInputMoteSource
-  agentSessionId: string
-  expectedRun: AgentMuxRunRef
-  response: AgentMuxInteractionResponse
-}
-
-export type AgentMuxAgentPostureInput = {
-  agentSessionId: string
-  expectedRun: AgentMuxRunRef
-  modeId: string
-}
-
-export type AgentMuxAgentRespawnInput = Omit<
-  AgentMuxAgentCreateInput,
-  'providerId' | 'executorId' | 'workspacePath' | 'agentSessionId'
-> & {
-  previousAgentSessionId: string
-  agentSessionId?: string
-}
-
-export type AgentMuxAgentAttachment = {
-  session: AgentMuxAgentSession
-  attachment: AgentMuxRunAttachment
-}
-
 /** Byte syntax only: neither the entry kind nor a mouse encoding authenticates a human action. */
 function rawInputBytePattern(data: AgentMuxRunInputData, byteLength: number): 'mouse-sgr' | 'mouse-legacy' | 'other' {
   if (byteLength > 48) return 'other'
@@ -500,51 +340,6 @@ function rawInputCancellationDetail(session: AgentMuxAgentSession, data: AgentMu
     byteLength, bytePattern: rawInputBytePattern(data, byteLength), phase: 'before-input-lane' as const,
     expectedByte: null, acknowledgementAtCancellation: 'not-attempted' as const,
     confirmedInputBytesAtCancellation: 0, eventualOutcome: 'unknown' as const })
-}
-
-export type AgentMuxClientOptions = {
-  moteInputResolver?: AgentInputMoteResolver
-  inputResources?: AgentInputResourceOwner
-  /** Complete Host exports before freezing a new execution; original reads and healthy Runs stay available. */
-  prepareExecutionEnvironment?: () => Promise<void>
-  /** Original semantic owner identity, supplied by the Host; never inferred from a path or Run. */
-  diagnosticOwner?: AgentStartupDiagnosticOwner
-  externalConversationAuthority?: AgentExternalConversationAuthorityPort
-  hostExecutorOwner?: AgentMuxHostExecutorOwner
-  /** Read original local Session configuration on its semantic Host; never overrides target-owned or explicit SDK execution. */
-  sessionExecutorConfiguration?(executorId: string): Promise<AgentExecutorConfig>
-  creationAuthority?: AgentMuxCreationAuthority
-  /** Exact local public owner endpoint inherited by managed CLI callers. */
-  controlSocketPath?: string
-  providers?: readonly AgentProvider[]
-  /** Optional plugin contributions. When providers are omitted, built-ins and these plugins share one registry. */
-  plugins?: readonly AgentMuxPlugin[]
-  store?: AgentMuxAgentSessionStore
-  /**
-   * Installs the provider's managed Hook config before its first launch. Defaults to a `hooks`
-   * subdirectory of the ctxmux state directory so backups live beside the rest of the runtime state.
-   * Tests inject one over an isolated state directory to keep hook writes out of the real `$HOME`.
-   */
-  hookInstaller?: AgentManagedHookInstaller
-  /**
-   * Directories this Host itself creates and owns (Mote and Topic homes). A Provider that asks for
-   * folder trust is pre-trusted only inside them; user Projects keep their native prompt.
-   */
-  ownedWorkspaceRoots?: () => Promise<readonly string[]>
-}
-
-export type AgentMuxAgentRuntimeStatus = {
-  session: AgentMuxAgentSession
-  run: AgentMuxRun
-  capabilities: AgentCapabilitySnapshot['capabilities']
-  /**
-   * 三条不折叠的观察轴（进程活性 / 语义活性 / 就绪性），从 Session 现在的三条事实经 {@link observeAgent}
-   * 收敛而来——**唯一**的观察合同投影。CLI（list.sessions / whoami）与渲染层读的是同一个函数的结果，
-   * 谁也不再各拼一份塌成 busy 的逻辑。
-   */
-  observation: AgentObservation
-  /** Read projection of the original pending tuple, never a durable status or a global input gate. */
-  interactionResponseUnavailableReason?: string
 }
 
 /**

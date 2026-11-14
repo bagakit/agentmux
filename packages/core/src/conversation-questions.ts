@@ -1,4 +1,4 @@
-import type { AgentMuxSessionQuestionReplyInput } from './client.js'
+import type { AgentMuxSessionQuestionReplyInput } from "./client-contract.js";
 import type { AgentSessionHistoryItem, AgentSessionHistoryPage, AgentSessionHistoryQuestion, AgentSessionHistoryQuestionAnswer, AgentSessionHistoryQuestionRequest, AgentSessionHistorySource, AgentSessionQuestionReplyReceipt } from './types.js'
 
 export type ConversationQuestionTarget = Pick<AgentMuxSessionQuestionReplyInput, 'source' | 'turnId' | 'recordId'>

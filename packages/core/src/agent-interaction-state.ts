@@ -1,5 +1,5 @@
 import { dequal } from 'dequal'
-import type { AgentMuxAgentInteractionInput } from './client.js'
+import type { AgentMuxAgentInteractionInput } from "./client-contract.js";
 import type { AgentMuxInteractionOperationReceipt, AgentMuxInteractionRequest, AgentMuxPendingInteraction } from './types.js'
 
 /** Mutable dispatch observations never change the original request's semantic identity. */
