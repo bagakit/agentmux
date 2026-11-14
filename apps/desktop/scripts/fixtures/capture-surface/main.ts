@@ -377,7 +377,7 @@ async function run() {
   surface.dispose(); editor.dispose(); host.destroy()
   assert.equal(BrowserWindow.getAllWindows().length, 0)
   assert.equal(receipt.timings.length, 8)
-  assert.ok(receipt.timings.every((timing: any) => timing.framesMs>=0&&timing.shownMs>=timing.framesMs&&timing.presentedMs.length===2&&timing.presentedMs.every((value: any) => typeof value==='number'&&value>=0)))
+  assert.ok(receipt.timings.every((timing: any) => timing.framesMs>=0&&timing.shownMs>=timing.framesMs&&timing.presentedMs.length===2&&timing.presentedMs.every((value: any) => value === null ? timing.shownMs >= 1500 : typeof value==='number'&&value>=0&&value<=timing.shownMs)))
   receipt.passed = true
 }
 void run().catch(async error => {
