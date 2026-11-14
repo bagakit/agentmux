@@ -33,6 +33,7 @@ export const presenceMutants = {
   'startup-hard-failure': ['apps/host/src/mote-presence.ts', "} catch (error) { serviceIssue = 'Starting original Mote maintenance", "} catch (error) { throw error; serviceIssue = 'Starting original Mote maintenance"],
   'source-isolation': ['packages/core/src/continuous-progress-scheduler.ts', "return [...(this.sourceLoops.get(sourceId) ?? [])].sort((a,b) => a[1]-b[1]).map(([id]) => structuredClone(this.loops.get(id)!))", 'return this.list()'],
   'headless-observation': ['apps/host/src/mote-presence.ts', "if (loop?.status === 'active' && !dirty.has(id)) {", 'if (false) {'],
+  'storage-fault-fences-main': ['apps/host/src/mote-presence.ts', "if (loop.status !== 'active' && !moteHeartbeatFaultPause(loop)) return", "if (loop.status !== 'active') return"],
   'source-reobservation': ['apps/host/src/mote-presence.ts', "if (reading?.status === 'unconfirmed' && now >= (retries.get(id)?.at ?? now)) dirty.add(id)", "if (false) dirty.add(id)"],
   'disabled-resume': ['apps/host/src/mote-presence.ts', "const method = loop.managedSource!.revision === main.roleRevision && main.current && !preference.enabled ? 'schedule.pause' : 'schedule.cancel'", "const method = 'schedule.cancel'"],
   'role-fence': ['apps/host/src/mote-presence.ts', 'main.roleRevision !== loop.managedSource.revision', 'false'],

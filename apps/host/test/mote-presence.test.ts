@@ -169,7 +169,7 @@ async function managedFixture(initialSaveBusy=false, retainedPrompt?: string, re
   let presence=createHostMotePresence({configurationPath,spatial,files,main,schedules:manager,clients:f.coreClients})
   cleanup.push(async()=>{presence.dispose();await manager.stop()})
   await manager.check(clock);await manager.check(clock)
-  return {f,snapshot,files,sent,target,main,saveBusy:(value:boolean)=>initialSaveBusy=value,get presence(){return presence},get manager(){return manager},loop:()=>manager.list()[0]!,advance:()=>clock+=60000,at:(value:number)=>clock=value,filesAvailable:(value:boolean,notify=true)=>{available=value;if(notify)presence.invalidate(target)},enabled:(value:boolean)=>{enabled=value;presence.invalidate(target)},busy:(value:boolean)=>busy=value,outcome:(value:typeof outcome)=>outcome=value,async restart(){presence.dispose();await manager.stop();manager=make();presence=createHostMotePresence({configurationPath,spatial,files,main,schedules:manager,clients:f.coreClients});await manager.start();await manager.check(clock)}}
+  return {f,snapshot,files,store,sent,target,main,saveBusy:(value:boolean)=>initialSaveBusy=value,get presence(){return presence},get manager(){return manager},loop:()=>manager.list()[0]!,advance:()=>clock+=60000,at:(value:number)=>clock=value,filesAvailable:(value:boolean,notify=true)=>{available=value;if(notify)presence.invalidate(target)},enabled:(value:boolean)=>{enabled=value;presence.invalidate(target)},busy:(value:boolean)=>busy=value,outcome:(value:typeof outcome)=>outcome=value,async restart(){presence.dispose();await manager.stop();manager=make();presence=createHostMotePresence({configurationPath,spatial,files,main,schedules:manager,clients:f.coreClients});await manager.start();await manager.check(clock)}}
 }
 it('a supervision heartbeat freezes the exact original Mote input and shares the Main duties at the actual future-intent owner',async()=>{
   const f=await managedFixture(), loop=f.loop()
@@ -244,6 +244,33 @@ it('a source gap at a due occurrence keeps the heartbeat active and the next occ
   expect(f.sent).toHaveLength(0)
   f.filesAvailable(true,false);await f.manager.check(f.at(due+60000))
   expect(f.loop()).toMatchObject({loopId:id,status:'active'});expect(f.sent).toHaveLength(1)
+})
+it('storage recovery admits the original interrupted Main while a heartbeat input remains held', async () => {
+  const f = await managedFixture(), original = await f.f.client.statusAgent('main')
+  const save = f.store.save.bind(f.store)
+  let diskFull = true
+  vi.spyOn(f.store, 'save').mockImplementation(async records => {
+    if (diskFull && records.some(record => record.lastOutcome === 'unknown')) throw Error('ENOSPC')
+    await save(records)
+  })
+  f.outcome('unknown')
+  await expect(f.manager.check(f.advance())).rejects.toThrow('ENOSPC')
+  const held = f.loop()
+  expect(held).toMatchObject({ status: 'paused', pause: { reason: 'input-unconfirmed' }, lastOutcome: 'unknown' })
+  expect(held.pendingCompletion?.operationId).toBe(f.sent[0]?.operationId)
+  diskFull = false
+  vi.spyOn(f.f.client, 'statusAgent').mockResolvedValueOnce({ ...original, run: { ...original.run, state: 'interrupted' } })
+  const recover = vi.spyOn(f.f.client, 'ensureAgentContinuity').mockResolvedValue({ kind: 'resumed' } as any)
+  await f.restart()
+  expect(recover).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ agentSessionId: 'main', expectedRun: original.session.run,
+    trigger: 'standing-maintenance', policy: { continuationEnabled: false, reminderMode: 'off' },
+    standingIntent: { ...held.managedSource, intentId: held.futureIntentId, operationId: held.creationOperationId } }))
+  expect(recover.mock.calls[0]?.[0]).not.toHaveProperty('input')
+  expect(f.loop()).toEqual(held)
+  expect((await f.manager.call('schedule.inspect', { scheduleId: held.loopId })).input).toMatchObject({ delivery: 'unconfirmed' })
+  await f.manager.check(f.advance())
+  expect(f.sent).toHaveLength(1)
+  expect(recover).toHaveBeenCalledTimes(1)
 })
 it('an unconfirmed source is read again after growing waits, not on every tick',async()=>{
   const f=await managedFixture(), due=f.loop().nextCheckAt

@@ -641,6 +641,18 @@ it('explicit main entry records an exited Main with no native conversation as un
 
 // An unconfirmed maintenance reading still names its last schedule. An explicit pause there is the
 // person's own decision and fences the open; only the observation gap stops counting as a refusal.
+it.each(['input-unconfirmed', 'persistence-unconfirmed'] as const)('explicit main entry recovers without input during a %s heartbeat pause', async reason => {
+  const f = await fixture(), main = await f.main.readCurrentMoteMain(f.target), runtime = endedMainRuntime(f)
+  const request = mainEntry(main, 'entry-with-heartbeat-fault'), read = f.quick.read.bind(f.quick)
+  const schedule = { loopId: 'original-maintenance', status: 'paused', pause: { reason } } as const
+  vi.spyOn(f.quick, 'read').mockImplementation(async input => ({ ...await read(input), maintenance: { status: 'paused', schedule: schedule as never, issue: null } }))
+  const result = await f.rpc.call('space.mote.dialogue.recovery.ensure', request)
+  expect(result.operation).toMatchObject({ kind: 'resumed', agentSessionId: main.current!.sessionId, previousRun: request.expectedRun, newRun: runtime.recovered })
+  expect(result.operation?.launchInput).toBeUndefined()
+  expect(schedule).toMatchObject({ status: 'paused', pause: { reason } })
+  expect(f.writes).toEqual([])
+})
+
 it('explicit main entry keeps a paused schedule fenced while its maintenance reading is unconfirmed',async()=>{
   const f=await fixture(),main=await f.main.readCurrentMoteMain(f.target),request=mainEntry(main,'entry-paused-unconfirmed'),runtime=endedMainRuntime(f)
   const read=f.quick.read.bind(f.quick)

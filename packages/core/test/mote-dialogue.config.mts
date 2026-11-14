@@ -21,6 +21,7 @@ const variants = {
   'recovery-replay': ['packages/core/src/public-rpc-service.ts', 'if (submit && (firstIntake || recovery?.reconcile === true))', 'if (submit)'],
   'recovery-wrong-carrier': ['packages/core/src/public-rpc-service.ts', 'const key = retained?.launchInput?.key', 'const key = route.key'],
   'recovery-reconcile-missing': ['packages/core/src/public-rpc-service.ts', 'firstIntake || recovery?.reconcile === true', 'firstIntake'],
+  'heartbeat-fault-fences-main': ['packages/core/src/public-rpc-service.ts', ' && !moteHeartbeatFaultPause(schedule)', ''],
   'recovery-drop-source-fence': ['packages/core/src/mote/dialogue-contract.ts', "input.admissionIntent?.kind !== 'manual-actor' || input.execution !== 'immediate'", 'false'],
   'record-payload-only': ['packages/core/src/agent-input-wait.ts', 'phases.payload.acknowledged && phases.submit.acknowledged', 'phases.payload.acknowledged'],
   'record-launch-as-native': ['packages/core/src/agent-input-wait.ts', "? 'launch-carried' : 'unknown'", "? 'admitted' : 'unknown'"],
