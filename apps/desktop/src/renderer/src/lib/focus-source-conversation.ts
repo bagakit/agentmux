@@ -75,7 +75,7 @@ export async function readSourceConversationRecap(port: ConversationReadApi, age
       signal.throwIfAborted()
       const page = await port.readAgentConversation({ hostId: 'local', agentSessionId, limit: 3, maxBytes: 64 * 1024, processDetails: 'deferred',
         ...(cursor ? { cursor } : {}) }, { signal })
-      view = page.window.view ?? view
+      view = page.window.view ?? page.window.replay ?? view
       const consumed = consumeConversationWindowPage(page, pending)
       if (consumed.kind === 'complete') return projectConversationWindow(consumed.snapshot)
       pending = consumed.pending; cursor = page.nextCursor ?? undefined
