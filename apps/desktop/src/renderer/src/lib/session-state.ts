@@ -1102,11 +1102,12 @@ export function projectRuntimeEvent(
     }
     if (applied.snapshot === state.timelines[session.id]) return { state }
     const liveTool = projectLiveTool(previous, session, event as AgentTimelineRuntimeEvent)
+    const updatedAt = Math.max(session.updatedAt, core.evidence.observedAt)
+    const sessions = updatedAt === session.updatedAt ? state.sessions : state.sessions.map(item =>
+      item === session ? { ...item, updatedAt } : item)
     return { state: {
       ...state,
-      sessions: state.sessions.map((item) => item === session
-        ? { ...item, updatedAt: Math.max(item.updatedAt, core.evidence.observedAt) }
-        : item),
+      sessions,
       timelines: {
         ...state.timelines,
         [session.id]: { ...applied.snapshot, ...(liveTool ? { liveTool } : {}) }
