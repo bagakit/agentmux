@@ -18,13 +18,14 @@ import type { ConversationRef } from '@agentmux/core/conversation'
 import type { DescribeSpeaker } from '../lib/conversation-speaker.js'
 
 export function ConversationResourceText({ sources, active = true, part, partIndex, record, readResource, workspaceRoot = '', homeDir = '', inputMode = false,
-  contentBoundary = 'wire', a2aNotificationId, a2aReferenceScope, describeSpeaker, inputContext, inputContextSource, openWorkspaceFile, readPastedImage, openHttpLink, embedIdentity }: {
+  contentBoundary = 'wire', declaredTrigger, a2aNotificationId, a2aReferenceScope, describeSpeaker, inputContext, inputContextSource, openWorkspaceFile, readPastedImage, openHttpLink, embedIdentity }: {
   sources?: ConversationSourceDisplay | undefined
   active?: boolean
   part: Extract<AgentSessionHistoryContentPart, { kind: 'resource' }>; partIndex: number
   record: ConversationNativeResourceRecord; readResource: ConversationHistoryResourceReader
   workspaceRoot?: string; homeDir?: string; inputMode?: boolean
   contentBoundary?: ConversationContentBoundary
+  declaredTrigger?: AgentSessionUserMessage['declaredTrigger']
   embedIdentity?: string | undefined
   a2aNotificationId?: string
   a2aReferenceScope?: ConversationRef | undefined
@@ -77,7 +78,7 @@ export function ConversationResourceText({ sources, active = true, part, partInd
     {error ? <p className="conversation-resource-text__error" role="alert">{error}</p> : null}
     {content?.kind === 'text' ? <div className="log-turn__text">
       {prefix?.sourceLabel ? <span className="log-turn__declared-source">Message header: {prefix.sourceLabel}</span> : null}
-      <ConversationInputText visible={active} text={text} prefix={prefix} inputMode={inputMode} workspaceRoot={workspaceRoot} homeDir={homeDir}
+      <ConversationInputText visible={active} text={text} prefix={prefix} declaredTrigger={declaredTrigger} inputMode={inputMode} workspaceRoot={workspaceRoot} homeDir={homeDir}
         embedIdentity={embedIdentity}
         a2aReferenceScope={a2aReferenceScope} a2aNotificationId={a2aNotificationId} describeSpeaker={describeSpeaker}
         inputContext={inputContext} inputContextSource={inputContextSource}

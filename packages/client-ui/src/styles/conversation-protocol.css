@@ -24,8 +24,18 @@
 .conversation-protocol__original > summary:focus-visible { outline: 1px solid var(--focus-line); outline-offset: 2px; border-radius: var(--radius-sm); }
 .conversation-protocol__original[open] > summary > svg { transform: rotate(90deg); }
 .conversation-protocol__original > pre { margin: var(--sp-2) 0 0; color: var(--text-2); font-family: var(--font-mono); font-size: var(--fs-micro); white-space: pre-wrap; overflow-wrap: anywhere; }
-.conversation-protocol[data-protocol-kind='a2a'] { border-inline-start-width: 2px; }
-.conversation-protocol[data-protocol-kind='a2a-reference'] { background: var(--surface-2); }
+.conversation-protocol:is([data-protocol-kind='a2a'], [data-protocol-kind='a2a-reference'], [data-protocol-kind='heartbeat'], [data-protocol-kind='calendar'], [data-protocol-kind='automation']) {
+  padding: var(--sp-3) var(--sp-4);
+  border: 0;
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--event-ink, var(--text-2)) 7%, var(--surface-1));
+}
+.conversation-protocol[data-protocol-kind='heartbeat'] { --event-ink: var(--green-2); }
+.conversation-protocol[data-protocol-kind='calendar'] { --event-ink: var(--blue); }
+.conversation-protocol[data-protocol-kind='automation'] { --event-ink: var(--amber); }
+.conversation-protocol:where([data-protocol-kind='heartbeat'], [data-protocol-kind='calendar'], [data-protocol-kind='automation']) .conversation-protocol__header > svg {
+  color: var(--event-ink);
+}
 .conversation-protocol[data-protocol-kind='continue'], .conversation-protocol[data-protocol-kind='reaction'] { padding-block: var(--sp-2); }
 .conversation-capsule-answer__question { margin: var(--sp-2) 0 var(--sp-1); color: var(--text-3); font-size: var(--fs-meta); line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
 .conversation-capsule-answer__answer { margin: 0; color: var(--text); font-size: var(--fs-body); line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }

@@ -101,6 +101,7 @@ export type ConversationMessageProps = {
   itemRef?: ConversationItemRef
   inputSource?: AgentSessionUserMessageSource
   publicContent?: AgentSessionUserMessage['publicContent']
+  declaredTrigger?: AgentSessionUserMessage['declaredTrigger']
   /** Original Core observation and producer, independent of the recorded message author. */
   inputContext?: AgentSessionUserMessage['inputContext']
   inputContextSource?: AgentSessionUserMessage['inputContextSource']
@@ -206,7 +207,7 @@ function ConversationCollaborationOriginal({ parts, identity, hasResources }: {
  * resolution, timeline ordering, file destinations and continuation; this component owns display. */
 export function ConversationMessage({
   active = true, sendReceipt = false, compact = false, processContent = false, continuation = false, expandedContent = false, bodyExpanded, onBodyExpandedChange, expandedOriginals, onOriginalExpandedChange, detailsOnlyMetadata = false, sourceLabelsInDetails = false, recordTitle, messagePhase, recordedIdentity = false, nativeCollaboration: explicitNativeCollaboration, messageDetails, messageStatus, renderSubmissionOriginal, messageActions, located = false, copyText, onCopy, copyInParent = false,
-  speaker: recordedSpeaker, conversationEvent, sources, conversationSessionId, itemRef, inputSource, publicContent, inputContext, inputContextSource, showInputSource = true, executionHostId, describeSpeaker, name, providerId, content, contentBoundary = 'wire', a2aNotificationId, notificationRecords, locatedSourceKey, messageTiming, contextInDetails, questionAnswers, questionDiagnostic, status, createdAt, timeFormatter, origin, workspaceRoot = '', homeDir = '', messageId = '',
+  speaker: recordedSpeaker, conversationEvent, sources, conversationSessionId, itemRef, inputSource, publicContent, declaredTrigger, inputContext, inputContextSource, showInputSource = true, executionHostId, describeSpeaker, name, providerId, content, contentBoundary = 'wire', a2aNotificationId, notificationRecords, locatedSourceKey, messageTiming, contextInDetails, questionAnswers, questionDiagnostic, status, createdAt, timeFormatter, origin, workspaceRoot = '', homeDir = '', messageId = '',
   openWorkspaceFile, readPastedImage, readHistoryResource, nativeResourceRecord, openHttpLink, onContinue, onSelectAnnotation, expandedTraces: controlledTraces, onToggleTrace: controlledToggle, traceDisclosure
 }: ConversationMessageProps) {
   const nativeCollaboration = explicitNativeCollaboration ?? recordedSpeaker?.nativeCollaboration
@@ -239,7 +240,8 @@ export function ConversationMessage({
   const hasCopyContent = copyText === undefined ? parts.some((part) => partText(part).length > 0) : copyText.length > 0
   const isTraceOnly = !hasQuestionAnswers && parts.length > 0 && parts.every((part) =>
     part.kind === 'text' ? part.text.trim().length === 0 : !(part.kind === 'resource' && part.resourceType === 'text' && part.content?.kind === 'text'))
-  const speaker = recordedSpeaker ? recordedIdentity ? recordedSpeaker : speakerForDisplay(recordedSpeaker) : undefined
+  const automaticOrigin = declaredTrigger !== undefined && (!recordedSpeaker || recordedSpeaker.role === 'unknown')
+  const speaker = recordedSpeaker ? recordedIdentity || automaticOrigin ? recordedSpeaker : speakerForDisplay(recordedSpeaker) : undefined
   const isPeerAgent = speaker?.role === 'agent' && speaker.id.length > 0 &&
     conversationSessionId !== undefined && conversationSessionId.length > 0 && speaker.id !== conversationSessionId
   const inputOrigin = speaker?.role === 'external' && speaker.external
@@ -276,7 +278,7 @@ export function ConversationMessage({
   const displayProvider = recordedUnknown ? undefined : agentReference
     ? described?.providerId ?? (!agentReference.declared && agentReference.speaker.id === conversationSessionId ? providerId : undefined)
     : providerId
-  const displayName = recordedSpeaker?.role === 'unknown'
+  const displayName = automaticOrigin ? '自动触发' : recordedSpeaker?.role === 'unknown'
     ? recordedIdentity ? conversationEvent?.role === 'observation' ? '作者未记录' : 'Author unknown' : selfLabel
     : speaker?.role === 'external' ? described?.name ?? externalSpeakerLabel(speaker)
     : described?.name ?? name ?? (speaker?.role === 'human' ? selfLabel : isPeerAgent ? speaker.id : isSystemContext ? 'AgentMux' : speaker ? 'Assistant' : 'Activity')
@@ -380,10 +382,10 @@ export function ConversationMessage({
         {prefix?.packet && (!isDeclaredSender || !agentReference) ? <span className="log-turn__packet-declaration" title={`Declared profile: ${prefix.packet.profile} · Declared time: ${prefix.packet.time}; recorded authorship and time are unchanged`}>From {prefix.packet.name}</span> : null}
       </div> : null
 
-  const recordedTime = messageTiming ?? (createdAt === undefined ? null : <span className="log-turn__time" title={origin === undefined
+  const recordedTime = createdAt === undefined ? null : <span className="log-turn__time" title={origin === undefined
     ? renderClock(createdAt) : `${renderClock(createdAt)} · ${formatOffset(createdAt, origin)} from start`}>
     {renderClock(createdAt)}
-  </span>)
+  </span>
   const card = {
     avatar: nativeCollaboration ? null : described?.channelProfile?.profile?.avatarUrl ? <ChannelProfileAvatar key={JSON.stringify([avatarSpeaker?.id, described.channelProfile.checkedAt])} url={described.channelProfile.profile.avatarUrl}>{platform.renderMessageAvatar({ speaker: avatarSpeaker!, name: displayName })}</ChannelProfileAvatar>
       : avatarSpeaker ? described?.avatar ?? platform.renderMessageAvatar({ speaker: avatarSpeaker, name: recordedUnknown ? displayName : agentReference ? senderName : isDeclaredSender ? prefix.sourceLabel : displayName, project: described?.project, providerId: displayProvider }) : platform.renderIcon('neutral', 12),
@@ -395,7 +397,7 @@ export function ConversationMessage({
       {status === 'failed' ? <span className="log-row__chip log-row__chip--failed" role="status">{platform.renderIcon('failed', 12)}Failed</span> : null}
       {status === 'unverified' ? <span className="log-row__chip log-row__chip--unverified" role="status">{platform.renderIcon('neutral', 12)}Unverified</span> : null}
     </>,
-    time: processContent ? null : recordedTime,
+    time: processContent || messageTiming ? null : recordedTime,
     actions: hasCopyContent && !copyInParent || messageActions ? <span className="log-turn__actions" data-copy-state={copyState}>
       {messageActions}
       {hasCopyContent && !copyInParent ? <button type="button" className="log-turn__action" onClick={() => { void copyMessage() }} title="Copy message" aria-label={copyState === 'copied' ? 'Message copied' : 'Copy message'}>
@@ -465,6 +467,7 @@ export function ConversationMessage({
           <span className="log-turn__who">{recordedUnknown ? displayName : agentReference ? senderName : isDeclaredSender ? prefix.packet?.name ?? prefix.sourceLabel : displayName}</span>
           {!detailsOnlyMetadata ? senderIdentity : null}
         </>} />}
+      {messageTiming}
       {a2aNotificationId ? <ConversationNotificationDetails key={JSON.stringify([recordSourceKey, a2aNotificationId])} notificationId={a2aNotificationId} protocol={firstText}
         records={notificationRecords} locatedSourceKey={locatedSourceKey}>
         {primaryNotice || moteNotice ? <>{createdAt === undefined ? null : <p>通知记录时间 · {renderClock(createdAt)}</p>}{metadata}{messageDetails}{card.actions}{card.feedback}</> : null}
@@ -487,7 +490,7 @@ export function ConversationMessage({
               answers={questionAnswers!} originalText={part.text} inputMode={inputMarkdown} workspaceRoot={workspaceRoot} homeDir={homeDir}
               {...(openWorkspaceFile ? { openWorkspaceFile } : {})} {...(readPastedImage ? { readPastedImage } : {})} {...(openHttpLink ? { openHttpLink } : {})} />
             : part.kind === 'text' ? <div key={key} className="log-turn__text" tabIndex={-1}>
-              <ConversationInputText visible={active} reveal={located} text={sessionHistoryTextForReading(part)} prefix={index === 0 ? prefix : null}
+              <ConversationInputText visible={active} reveal={located} text={sessionHistoryTextForReading(part)} prefix={index === 0 ? prefix : null} declaredTrigger={index === 0 ? declaredTrigger : undefined}
                 embedIdentity={messageId && (conversationSessionId || itemRef || nativeResourceRecord) ? JSON.stringify([executionHostId, conversationSessionId, recordSourceKey, messageId, index]) : undefined}
                 a2aReferenceScope={a2aReferenceScope} a2aNotificationId={a2aNotificationId} describeSpeaker={describeSpeaker}
                 inputContext={index === contextPartIndex ? inputContext : undefined} inputContextSource={inputContextSource}
@@ -526,7 +529,7 @@ export function ConversationMessage({
                 {...(openHttpLink ? { openHttpLink } : {})}
               />
             ) : part.resourceType === 'text' && readHistoryResource && nativeResourceRecord ? (
-              <ConversationResourceText sources={sources?.parts[index]} active={active} key={key} part={part} partIndex={index} record={nativeResourceRecord} readResource={readHistoryResource} workspaceRoot={workspaceRoot} homeDir={homeDir} inputMode={inputMarkdown} contentBoundary={hasQuestionAnswers ? 'body' : contentBoundary} {...(a2aNotificationId ? { a2aNotificationId } : {})}
+              <ConversationResourceText sources={sources?.parts[index]} active={active} key={key} part={part} partIndex={index} record={nativeResourceRecord} readResource={readHistoryResource} workspaceRoot={workspaceRoot} homeDir={homeDir} inputMode={inputMarkdown} declaredTrigger={index === 0 ? declaredTrigger : undefined} contentBoundary={hasQuestionAnswers ? 'body' : contentBoundary} {...(a2aNotificationId ? { a2aNotificationId } : {})}
                 embedIdentity={messageId ? JSON.stringify([executionHostId, conversationSessionId, recordSourceKey, messageId, index]) : undefined}
                 a2aReferenceScope={a2aReferenceScope} describeSpeaker={describeSpeaker}
                 inputContext={index === contextPartIndex ? inputContext : undefined} inputContextSource={inputContextSource}

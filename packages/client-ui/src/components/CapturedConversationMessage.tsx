@@ -42,6 +42,7 @@ export function CapturedConversationMessage({ item, record, replyObservation, in
   const a2aNotificationId = conversationA2ANotificationId({ original: { kind: 'captured', item } })
   const input = record?.input ?? item
   const message = <ConversationMessage {...props} sendReceipt={Boolean(sendReceipt)} {...(record?.executionHostId ? { executionHostId: record.executionHostId } : {})} sources={record?.sources ?? props.sources} {...(record?.role === 'observation' ? { recordedIdentity: true } : {})} {...(record?.event ? { conversationEvent: record.event } : {})} {...(itemRef ? { itemRef } : {})} {...(record?.input ? { inputSource: record.input.source, publicContent: record.input.publicContent } : {})} messageId={record?.input?.id ?? item.id} content={record?.contentParts ?? item.content ?? ''} status={item.inputSubmission ? item.status : record?.input?.deliveryStatus ?? item.status} createdAt={item.createdAt}
+    declaredTrigger={item.kind === 'user_message' ? input.declaredTrigger ?? item.declaredTrigger : undefined}
     {...(input.inputContext ? { inputContext: input.inputContext, inputContextSource: input.inputContextSource } : {})}
     a2aNotificationId={a2aNotificationId} notificationRecords={record?.records} contentBoundary={a2aNotificationId ? 'wire'
       : conversationInputTextBoundary(input.inputRef, item.kind === 'user_message' && input.publicContent === 'confirmed', item.authorExternal !== undefined, props.contentBoundary)}

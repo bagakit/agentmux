@@ -6,20 +6,21 @@ import { useObjectLinkRenderer } from '../platform.js'
 import { objectLinkReference } from '../lib/object-link-reference.js'
 
 /** A reading surface inside the original message. It owns no business actions or author facts. */
-export function ConversationProtocolCard({ title, tag, kind, icon = 'file.code', raw, children }: {
+export function ConversationProtocolCard({ title, tag, kind, icon = 'file.code', raw, sourceFacts, children }: {
   title: string
-  tag: string
+  tag?: string
   kind: string
   icon?: ComponentProps<typeof SemanticIcon>['name']
+  sourceFacts?: ReactNode
   raw?: string | undefined
   children?: ReactNode
 }) {
   return <section className="conversation-protocol" data-protocol-kind={kind} aria-label={title}>
     <header className="conversation-protocol__header"><SemanticIcon name={icon} size={14} aria-hidden="true" />
-      <span className="conversation-protocol__title">{title}</span><code>{tag}</code></header>
+      <span className="conversation-protocol__title">{title}</span>{tag ? <code>{tag}</code> : null}</header>
     {children}
     {raw === undefined ? null : <details className="conversation-protocol__original">
-      <summary><SemanticIcon name="navigation.disclosure" size={12} aria-hidden="true" />Original protocol</summary><pre>{raw}</pre>
+      <summary><SemanticIcon name="navigation.disclosure" size={12} aria-hidden="true" />Original protocol</summary>{sourceFacts}<pre>{raw}</pre>
     </details>}
   </section>
 }

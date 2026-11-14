@@ -12,14 +12,15 @@
   max-width: max-content;
 }
 .conversation-a2a-timing {
-  grid-column: 1 / -1;
-  grid-row: auto;
+  grid-column: 2;
+  grid-row: 4;
+  margin-block-start: var(--sp-2);
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
   gap: var(--sp-1) var(--sp-3);
   min-width: 0;
-  color: var(--text-3);
+  color: var(--text-2);
   font-size: var(--fs-micro);
   line-height: 1.5;
 }

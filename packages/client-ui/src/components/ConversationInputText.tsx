@@ -1,4 +1,4 @@
-import { AMUX_PROTOCOL_DEFINITIONS, type AgentMuxMessagePrefix } from '@agentmux/core/agent-message-render'
+import { AMUX_PROTOCOL_DEFINITIONS, type AgentMuxMessagePrefix, type AmuxTriggerKind } from '@agentmux/core/agent-message-render'
 import { browserInputContextJson, type BrowserInputContext, type BrowserInputContextSource } from '@agentmux/core/browser-input-context'
 import { memo, type ComponentProps } from 'react'
 import { SemanticIcon } from '../theme/icons.js'
@@ -11,6 +11,11 @@ import type { ConversationRef } from '@agentmux/core/conversation'
 import type { DescribeSpeaker } from '../lib/conversation-speaker.js'
 import { useA2AMessageReader } from '../platform.js'
 
+const triggerAppearance = {
+  heartbeat: { title: 'Mote 心跳', icon: 'object.heartbeat' },
+  calendar: { title: '日历安排', icon: 'object.schedule' },
+  automation: { title: '自动继续', icon: 'object.automation' }
+} as const
 const Markdown = memo(AgentMarkdown)
 type MarkdownProps = Omit<ComponentProps<typeof AgentMarkdown>, 'content' | 'className'>
 
@@ -18,9 +23,10 @@ type MarkdownProps = Omit<ComponentProps<typeof AgentMarkdown>, 'content' | 'cla
  * Core owns parsing; these spans are declarations and never establish authorship.
  * Full Copy continues to use the original content, independently of this face.
  */
-export function ConversationInputText({ text, prefix, inputContext, inputContextSource, a2aReferenceScope, a2aNotificationId, describeSpeaker, ...markdown }: MarkdownProps & {
+export function ConversationInputText({ text, prefix, declaredTrigger, inputContext, inputContextSource, a2aReferenceScope, a2aNotificationId, describeSpeaker, ...markdown }: MarkdownProps & {
   text: string
   prefix?: AgentMuxMessagePrefix | null
+  declaredTrigger?: AmuxTriggerKind | undefined
   inputContext?: BrowserInputContext | undefined
   inputContextSource?: BrowserInputContextSource | undefined
   a2aReferenceScope?: ConversationRef | undefined
@@ -58,23 +64,24 @@ export function ConversationInputText({ text, prefix, inputContext, inputContext
       <p>{prefix.reminder.text}</p>
     </details> : null
   const a2a = prefix?.kind === 'references' || prefix?.declaredMessageId !== undefined
+  const trigger = !a2a && (declaredTrigger ?? prefix?.declaredTrigger)
   const browserImages = { visible: markdown.visible ?? true, readOnly: markdown.readOnly ?? false, readOnlyImages: markdown.readOnlyImages ?? false }
   return <>
     {prefix?.declaredChannelQuote ? <ConversationChannelQuote quote={prefix.declaredChannelQuote.quote} raw={prefix.declaredChannelQuote.raw} /> : null}
     {inputContext && matching < 0 ? <ConversationBrowserContext {...browserImages} context={inputContext} source={inputContextSource} /> : null}
     {prefix?.declaredContexts?.map((context, index) => context.inputContext
       ? <ConversationBrowserContext {...browserImages} key={index} context={context.inputContext} source={index === matching ? inputContextSource ?? 'caller-declared' : 'caller-declared'} raw={context.raw} />
-      : <details key={index} className="log-turn__declared-context">
+      : trigger ? null : <details key={index} className="log-turn__declared-context">
       <summary><SemanticIcon name="navigation.disclosure" size={12} aria-hidden="true" />{AMUX_PROTOCOL_DEFINITIONS.context.title}{prefix.declaredContexts!.length > 1 ? ` ${index + 1}` : ''}</summary>
       <pre>{context.raw}</pre>
     </details>)}
-    {originals ? <>{originals}{reminder}<details className="conversation-protocol__original"><summary>Original protocol</summary><pre>{text}</pre></details></> : a2a ? <ConversationProtocolCard title={prefix.kind === 'references' ? AMUX_PROTOCOL_DEFINITIONS['a2a-reference'].title : AMUX_PROTOCOL_DEFINITIONS.a2a.title}
-      kind={prefix.kind === 'references' ? 'a2a-reference' : 'a2a'} tag={AMUX_PROTOCOL_DEFINITIONS.a2a.tag} icon="conversation.incoming" raw={text}>
-      {prefix.kind === 'content' ? <dl className="conversation-protocol__attributes">
-        <div><dt>Declared source</dt><dd>{prefix.declaredAgentSessionId}</dd></div>
-        <div><dt>Message</dt><dd>{prefix.declaredMessageId}</dd></div>
-      </dl> : null}
-      {reading}{reminder}
-    </ConversationProtocolCard> : <>{reading}{reminder}</>}
+    {originals ? <>{originals}{reminder}<details className="conversation-protocol__original"><summary>Original protocol</summary><pre>{text}</pre></details></>
+      : a2a ? <ConversationProtocolCard title={prefix.kind === 'references' ? 'Agent 来信引用' : 'Agent 来信'} kind={prefix.kind === 'references' ? 'a2a-reference' : 'a2a'}
+        icon="conversation.incoming" raw={text} sourceFacts={prefix.kind === 'content' ? <dl className="conversation-protocol__attributes">
+          <div><dt>Declared source</dt><dd>{prefix.declaredAgentSessionId}</dd></div><div><dt>Message</dt><dd>{prefix.declaredMessageId}</dd></div>
+        </dl> : undefined}>{reading}{reminder}</ConversationProtocolCard>
+      : trigger ? <ConversationProtocolCard title={triggerAppearance[trigger].title} kind={trigger} icon={triggerAppearance[trigger].icon} raw={prefix?.declaredTrigger ? text : undefined}>
+        {reading}{reminder}
+      </ConversationProtocolCard> : <>{reading}{reminder}</>}
   </>
 }
