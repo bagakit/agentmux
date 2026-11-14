@@ -312,6 +312,30 @@ it('retained validation rejects a missing provisioned marker without republishin
   expect((await lstat(h.locator.workspacePath)).isDirectory()).toBe(true)
 })
 
+it('first pending reentry re-acknowledges the marker file and parent before leaf mkdir', async () => {
+  const h = await ownedFixture()
+  await seedPending(h)
+  const fs = createRequire(import.meta.url)('node:fs/promises') as typeof import('node:fs/promises')
+  const originalOpen = fs.open.bind(fs), originalMkdir = fs.mkdir.bind(fs), events: string[] = []
+  vi.spyOn(fs, 'open').mockImplementation((async (path: any, flags: any, mode?: any) => {
+    const handle = await originalOpen(path, flags, mode)
+    if (String(path) === h.markerPath) { const sync = handle.sync.bind(handle); vi.spyOn(handle, 'sync').mockImplementation(async () => { events.push('marker-sync'); await sync() }) }
+    if (String(path) === dirname(h.markerPath) && flags === 'r') { const sync = handle.sync.bind(handle); vi.spyOn(handle, 'sync').mockImplementation(async () => { events.push('parent-sync'); await sync() }) }
+    return handle
+  }) as any)
+  vi.spyOn(fs, 'mkdir').mockImplementation((async (path: any, options: any) => {
+    if (String(path) === h.locator.workspacePath) events.push('leaf-mkdir')
+    return await originalMkdir(path, options)
+  }) as any)
+  syncBuiltinESMExports()
+  await h.client.prepareAgentExecutionHelper(h.input)
+  expect(events.indexOf('marker-sync')).toBeGreaterThanOrEqual(0)
+  expect(events.indexOf('parent-sync')).toBeGreaterThanOrEqual(0)
+  expect(events.indexOf('leaf-mkdir')).toBeGreaterThanOrEqual(0)
+  expect(events.indexOf('marker-sync')).toBeLessThan(events.indexOf('leaf-mkdir'))
+  expect(events.indexOf('parent-sync')).toBeLessThan(events.indexOf('leaf-mkdir'))
+})
+
 it('retries a before-replace publication interruption through first admission only', async () => {
   const h = await ownedFixture()
   vi.spyOn(durable, 'durableWriteFile').mockImplementationOnce(async () => { throw new Error('before-replace publication interrupted') })
@@ -323,17 +347,42 @@ it('retries a before-replace publication interruption through first admission on
   expect(JSON.parse(await readFile(h.markerPath, 'utf8')).phase).toBe('provisioned')
 })
 
-it('recovers an after-replace lost ACK by validating the same leaf before the first Provider build', async () => {
+it('re-acknowledges a provisioned rename after a real parent fsync failure before Provider build', async () => {
   const h = await ownedFixture()
-  const write = durable.durableWriteFile
-  vi.spyOn(durable, 'durableWriteFile').mockImplementationOnce(async (...args) => { await write(...args); throw new Error('after-replace ACK lost') })
+  const fs = createRequire(import.meta.url)('node:fs/promises') as typeof import('node:fs/promises')
+  const original = fs.open.bind(fs), events: string[] = []
+  let lostAck = false
+  vi.spyOn(fs, 'open').mockImplementation((async (path: any, flags: any, mode?: any) => {
+    const handle = await original(path, flags, mode)
+    if (String(path) === h.markerPath) {
+      const sync = handle.sync.bind(handle)
+      vi.spyOn(handle, 'sync').mockImplementation(async () => { events.push('marker-sync'); await sync() })
+    }
+    if (String(path) === dirname(h.markerPath) && flags === 'r') {
+      const phase = await readFile(h.markerPath, 'utf8').then(raw => JSON.parse(raw).phase).catch(() => null)
+      if (phase === 'provisioned' && !lostAck) {
+        lostAck = true
+        vi.spyOn(handle, 'sync').mockRejectedValueOnce(new Error('real after-replace parent ACK failure'))
+      } else if (phase === 'provisioned') {
+        const sync = handle.sync.bind(handle)
+        vi.spyOn(handle, 'sync').mockImplementation(async () => { events.push('parent-sync'); await sync() })
+      }
+    }
+    return handle
+  }) as any)
+  syncBuiltinESMExports()
+  const prepare = h.client.prepareTerminal.bind(h.client)
+  vi.spyOn(h.client, 'prepareTerminal').mockImplementation(async input => { events.push('provider-build'); return await prepare(input) })
   await expect(h.client.prepareAgentExecutionHelper(h.input)).rejects.toMatchObject({ code: 'AGENT_WORKSPACE_OWNERSHIP_UNCONFIRMED' })
+  expect(lostAck).toBe(true)
   expect(JSON.parse(await readFile(h.markerPath, 'utf8')).phase).toBe('provisioned')
   const before = await lstat(h.locator.workspacePath)
-  const prepareTerminal = vi.spyOn(h.client, 'prepareTerminal')
   await h.client.prepareAgentExecutionHelper(h.input)
-  expect(prepareTerminal).toHaveBeenCalledOnce()
   expect((await lstat(h.locator.workspacePath)).ino).toBe(before.ino)
+  for (const event of ['marker-sync', 'parent-sync']) {
+    expect(events.indexOf(event)).toBeGreaterThanOrEqual(0)
+    expect(events.indexOf(event)).toBeLessThan(events.indexOf('provider-build'))
+  }
 })
 
 it('retained validate-only performs no additional state-directory fsync after the helper lock barrier', async () => {
