@@ -1,6 +1,6 @@
 import { createSpaceMemberSurface } from './space-member-surface.js'
 import { readSpaceSnapshot, observeSpace, type AgentMuxRpcClient } from '@agentmux/core'
-import type { SpaceMountTarget, SpaceMountResources, SpaceMountWatch, SpaceMountEvent } from '../shared/space-mount.js'
+import type { SpaceMountSourceTarget, SpaceMountTarget, SpaceMountResources, SpaceMountWatch, SpaceMountEvent } from '../shared/space-mount.js'
 import { originalExecutionBindingId } from './execution-binding-reference'
 import { callDesktopHostRoute } from './host-routes-client'
 import type { DesktopHostRouteMethod, DesktopHostRouteTarget } from '../shared/host-routes'
@@ -2678,13 +2678,14 @@ export class RuntimeController {
       },
         (_hostId, binding) => ({ workPlacement: { agentHostId: subject.hostId, resourceHostId: binding?.resourceRuntimeId === input.target.reference.runtimeId ? input.hostId : null } })) }, listener, signal)
   }
-  async mountedSpaceHostChoices(target: SpaceMountTarget, signal?: AbortSignal): Promise<import('../shared/space-mount.js').SpaceMountHostChoices> {
+  async mountedSpaceHostChoices(target: SpaceMountSourceTarget, signal?: AbortSignal): Promise<import('../shared/space-mount.js').SpaceMountHostChoices> {
     const { rpc, context } = await this.mountedSpaceControl(target, signal)
     const result = await rpc.call('settings.hosts.ls', {}, context)
     const parsed = parseHostConfigurations(result.hosts)
     if (!parsed.success) throw new AgentMuxError('The original Host choices are unreadable. No observer-local configuration was substituted.', 'CONTROL_PROTOCOL_ERROR')
-    return { runtimeId: target.reference.runtimeId, hosts: parsed.data.map(host => ({ hostId: host.id, label: host.label, kind: host.kind,
-      runtimeId: host.kind === 'local' ? target.reference.runtimeId : host.runtimeId ?? null })) }
+    const runtimeId = 'expectedRuntimeId' in target ? target.expectedRuntimeId : target.reference.runtimeId
+    return { runtimeId, hosts: parsed.data.map(host => ({ hostId: host.id, label: host.label, kind: host.kind,
+      runtimeId: host.kind === 'local' ? runtimeId : host.runtimeId ?? null })) }
   }
 
   async registerFolderSpace(hostId: string, registration: import('@agentmux/core/space-folder').FolderSpaceRegistration, signal?: AbortSignal) {
@@ -2703,23 +2704,28 @@ export class RuntimeController {
       'This edit belongs to another original Space. Both inputs are retained.', 'RUNTIME_OWNER_MISMATCH')
     return await this.spaceMountHost(target.hostId).rpc.call('space.apply', edit, signal ? { signal } : {})
   }
-  private async mountedSpaceControl(target: SpaceMountTarget, signal?: AbortSignal) {
+  private async mountedSpaceControl(target: SpaceMountSourceTarget, signal?: AbortSignal) {
     const carrier = this.spaceMountHost(target.hostId)
-    const { owner } = await carrier.rpc.call('runtime.owner.identity', { expectedRuntimeId: target.reference.runtimeId }, signal ? { signal } : {})
-    if (owner.runtimeId !== target.reference.runtimeId) throw new AgentMuxError('The mounted Space belongs to another original Runtime.', 'RUNTIME_OWNER_MISMATCH')
+    const expectedRuntimeId = 'expectedRuntimeId' in target ? target.expectedRuntimeId : target.reference.runtimeId
+    const { owner } = await carrier.rpc.call('runtime.owner.identity', { expectedRuntimeId }, signal ? { signal } : {})
+    if (owner.runtimeId !== expectedRuntimeId) throw new AgentMuxError('The mounted Space belongs to another original Runtime.', 'RUNTIME_OWNER_MISMATCH')
     return { rpc: carrier.rpc, context: { ...(signal ? { signal } : {}), runtimeFence: { runtimeId: owner.runtimeId, ownerInstanceId: owner.ownerInstanceId } } }
   }
-  async mountedSpaceExecutors(target: SpaceMountTarget, agentHostId: string, signal?: AbortSignal) {
+  async describeMountedSpace(target: SpaceMountSourceTarget, signal?: AbortSignal) {
     const { rpc, context } = await this.mountedSpaceControl(target, signal)
-    return await rpc.call('settings.executors.discover', { hostId: agentHostId, refresh: false }, context)
+    return await rpc.call('agent.open.describe', { expectedRuntimeId: 'expectedRuntimeId' in target ? target.expectedRuntimeId : target.reference.runtimeId }, context)
   }
-  async mountedSpaceRouteChoices(target: SpaceMountTarget, signal?: AbortSignal) {
+  async mountedSpaceExecutors(target: SpaceMountSourceTarget, agentHostId: string, signal?: AbortSignal, executorId?: string) {
+    const { rpc, context } = await this.mountedSpaceControl(target, signal)
+    return await rpc.call('settings.executors.discover', { hostId: agentHostId, ...(executorId === undefined ? {} : { executorId }), refresh: false }, context)
+  }
+  async mountedSpaceRouteChoices(target: SpaceMountSourceTarget, signal?: AbortSignal) {
     const { rpc, context } = await this.mountedSpaceControl(target, signal)
     return await rpc.call('route.choices', {}, context)
   }
-  async mountedSpaceRouteExecutors(target: SpaceMountTarget, agentTarget: import('@agentmux/core/host-route').HostRouteAgentTarget, signal?: AbortSignal) {
+  async mountedSpaceRouteExecutors(target: SpaceMountSourceTarget, agentTarget: import('@agentmux/core/host-route').HostRouteAgentTarget, signal?: AbortSignal, executorId?: string) {
     const { rpc, context } = await this.mountedSpaceControl(target, signal)
-    return await rpc.call('route.executors', { agentTarget, refresh: false }, context)
+    return await rpc.call('route.executors', { agentTarget, ...(executorId === undefined ? {} : { executorId }), refresh: false }, context)
   }
   async openMountedSpace(target: SpaceMountTarget, request: import('@agentmux/core').AgentMuxRpcParams<'agent.open'>, signal?: AbortSignal) {
     if (request.destination.spaceId !== target.reference.spaceId) throw new AgentMuxError('This creation belongs to another original Space. Keep both requests.', 'SPACE_PARENT_MISMATCH')

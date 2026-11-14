@@ -17,22 +17,28 @@ function host(value: unknown): string {
   if (typeof value !== 'string' || !value || value.includes('\0')) throw new Error('Choose the original configured Space Host.')
   return value
 }
+function sourceTarget(p: Record<string, unknown>): import('../shared/space-mount.js').SpaceMountSourceTarget {
+  if (p.reference !== undefined && p.expectedRuntimeId !== undefined) throw new Error('Choose one exact original Source address.')
+  return p.expectedRuntimeId === undefined ? { hostId: host(p.hostId), reference: parseSpaceAuthorityRef(p.reference) }
+    : { hostId: host(p.hostId), expectedRuntimeId: host(p.expectedRuntimeId) }
+}
 /** Trusted App frame and reader custody only; all business writes return to the original Core. */
 export function registerSpaceMountIpc(ports: {
   handle<T extends unknown[], R>(channel: string, listener: (event: IpcMainInvokeEvent, ...values: T) => R | Promise<R>): void
   config?(): AppConfig
-  runtime: Pick<RuntimeController, 'openMountedSpaceMember' | 'spaceMountResources' | 'mountedSpaceHostChoices' | 'mountedSpaceRouteChoices' | 'mountedSpaceRouteExecutors' | 'registerFolderSpace' | 'inspectFolderSpace' | 'readMountedSpace' | 'applyMountedSpace' | 'watchMountedSpace' | 'mountedSpaceExecutors' | 'openMountedSpace' | 'inspectMountedSpaceRequest' | 'watchMountedSpaceSessions'>
+  runtime: Pick<RuntimeController, 'openMountedSpaceMember' | 'spaceMountResources' | 'describeMountedSpace' | 'mountedSpaceHostChoices' | 'mountedSpaceRouteChoices' | 'mountedSpaceRouteExecutors' | 'registerFolderSpace' | 'inspectFolderSpace' | 'readMountedSpace' | 'applyMountedSpace' | 'watchMountedSpace' | 'mountedSpaceExecutors' | 'openMountedSpace' | 'inspectMountedSpaceRequest' | 'watchMountedSpaceSessions'>
 }) {
   const reads = new SessionHistoryReadOwners()
   const members = new Map<string, SpaceMountMemberSurface>()
   ports.handle('spaceMounts:call', (event, token: string, method: unknown, value: unknown) => sessionInputOperationResult(() => reads.read(event.sender, token, async signal => {
     if (method === 'resources') { const p = fields(value, ['hostId']); return await ports.runtime.spaceMountResources(host(p.hostId), signal) }
-    if (method === 'hostChoices') { const p = fields(value, ['hostId', 'reference']); return await ports.runtime.mountedSpaceHostChoices({ hostId:host(p.hostId),reference:parseSpaceAuthorityRef(p.reference) },signal) }
+    if (method === 'describe') { const p = fields(value, ['hostId', 'reference', 'expectedRuntimeId']); return await ports.runtime.describeMountedSpace(sourceTarget(p), signal) }
+    if (method === 'hostChoices') { const p = fields(value, ['hostId', 'reference', 'expectedRuntimeId']); return await ports.runtime.mountedSpaceHostChoices(sourceTarget(p),signal) }
     if (method === 'routeChoices' || method === 'routeExecutors') {
-      const p = fields(value, ['hostId', 'reference', ...(method === 'routeExecutors' ? ['agentTarget'] : [])])
-      const target = { hostId: host(p.hostId), reference: parseSpaceAuthorityRef(p.reference) }
+      const p = fields(value, ['hostId', 'reference', 'expectedRuntimeId', ...(method === 'routeExecutors' ? ['agentTarget', 'executorId'] : [])])
+      const target = sourceTarget(p)
       return method === 'routeChoices' ? await ports.runtime.mountedSpaceRouteChoices(target, signal)
-        : await ports.runtime.mountedSpaceRouteExecutors(target, parseHostRouteAgentTarget(p.agentTarget), signal)
+        : await ports.runtime.mountedSpaceRouteExecutors(target, parseHostRouteAgentTarget(p.agentTarget), signal, p.executorId === undefined ? undefined : host(p.executorId))
     }
     if (method === 'register') { const p = fields(value, ['hostId', 'registration']); return await ports.runtime.registerFolderSpace(host(p.hostId), parseFolderSpaceRegistration(p.registration), signal) }
     if (method === 'inspectRegistration') { const p = fields(value, ['hostId', 'registration']); return await ports.runtime.inspectFolderSpace(host(p.hostId), parseFolderSpaceRegistration(p.registration), signal) }
@@ -42,10 +48,11 @@ export function registerSpaceMountIpc(ports: {
       return method === 'snapshot' ? await ports.runtime.readMountedSpace(target, signal)
         : await ports.runtime.applyMountedSpace(target, parseSpaceAuthorityParams('space.apply', p.edit), signal)
     }
-    if (method === 'executors' || method === 'open' || method === 'inspect') {
-      const p = fields(value, ['hostId', 'reference', ...(method === 'executors' ? ['agentHostId'] : method === 'open' ? ['request'] : ['requestId'])])
+    if (method === 'executors') { const p = fields(value, ['hostId', 'reference', 'expectedRuntimeId', 'agentHostId', 'executorId']);
+      return await ports.runtime.mountedSpaceExecutors(sourceTarget(p), host(p.agentHostId), signal, p.executorId === undefined ? undefined : host(p.executorId)) }
+    if (method === 'open' || method === 'inspect') {
+      const p = fields(value, ['hostId', 'reference', ...(method === 'open' ? ['request'] : ['requestId'])])
       const target = { hostId: host(p.hostId), reference: parseSpaceAuthorityRef(p.reference) }
-      if (method === 'executors') return await ports.runtime.mountedSpaceExecutors(target, host(p.agentHostId), signal)
       if (method === 'inspect') return await ports.runtime.inspectMountedSpaceRequest(target, host(p.requestId), signal)
       const parsed = rpcControlRequest('agent.open', p.request)
       if (parsed.operation !== 'agent.open') throw new Error('Use the original Agent creation request.')

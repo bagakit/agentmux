@@ -4,6 +4,7 @@ import type { WorkspaceLayout, WorkbenchViewLayout } from '@agentmux/layout'
 import type { SpaceSessionsOpening, SpaceSessionsObservation } from '@agentmux/core/space-sessions'
 
 /** Host ID is only this client's carrier. Every inner entity ID belongs to reference.runtimeId. */
+export type SpaceMountSourceTarget = { hostId: string; expectedRuntimeId: string } | SpaceMountTarget
 export type SpaceMountTarget = { hostId: string; reference: SpaceAuthorityRef }
 export type SpaceMountRecord = SpaceMountTarget & { zoneId: string; workspaceId: string }
 /** This client's presentation only; never included in source apply or local spatial commits. */
@@ -18,14 +19,15 @@ export type SpaceMountResources = {
 export type SpaceMountHostChoices = { runtimeId: string; hosts: Array<{ hostId: string; label: string; kind: 'local' | 'ssh'; runtimeId: string | null }> }
 export type SpaceMountMethods = {
   resources: { input: { hostId: string }; result: SpaceMountResources }
-  hostChoices: { input: SpaceMountTarget; result: SpaceMountHostChoices }
-  routeChoices: { input: SpaceMountTarget; result: import('@agentmux/core/host-route').HostRouteChoices }
-  routeExecutors: { input: SpaceMountTarget & { agentTarget: import('@agentmux/core/host-route').HostRouteAgentTarget }; result: import('@agentmux/core/host-route').HostRouteExecutors }
+  hostChoices: { input: SpaceMountSourceTarget; result: SpaceMountHostChoices }
+  describe: { input: SpaceMountSourceTarget; result: import('@agentmux/core/agent-open-contract').AgentOpenDescription }
+  routeChoices: { input: SpaceMountSourceTarget; result: import('@agentmux/core/host-route').HostRouteChoices }
+  routeExecutors: { input: SpaceMountSourceTarget & { agentTarget: import('@agentmux/core/host-route').HostRouteAgentTarget; executorId?: string }; result: import('@agentmux/core/host-route').HostRouteExecutors }
   register: { input: { hostId: string; registration: FolderSpaceRegistration }; result: FolderSpaceReceipt }
   inspectRegistration: { input: { hostId: string; registration: FolderSpaceRegistration }; result: import('@agentmux/core/space-folder').FolderSpaceRegistrationInspection | null }
   snapshot: { input: SpaceMountTarget; result: SpaceSnapshot }
   apply: { input: SpaceMountTarget & { edit: SpaceApply }; result: SpaceApplyReceipt }
-  executors: { input: SpaceMountTarget & { agentHostId: string }; result: import('@agentmux/core').AgentMuxRpcResult<'settings.executors.discover'> }
+  executors: { input: SpaceMountSourceTarget & { agentHostId: string; executorId?: string }; result: import('@agentmux/core').AgentMuxRpcResult<'settings.executors.discover'> }
   open: { input: SpaceMountTarget & { request: import('@agentmux/core').AgentMuxRpcParams<'agent.open'> }; result: import('@agentmux/core').AgentMuxRpcResult<'agent.open'> }
   inspect: { input: SpaceMountTarget & { requestId: string }; result: import('@agentmux/core').AgentMuxRpcResult<'space.inspect'> }
 }
