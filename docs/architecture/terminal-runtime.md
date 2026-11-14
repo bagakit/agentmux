@@ -218,19 +218,18 @@ Tab 切换不卸载工作面。[WorkspaceWorkbench](../../apps/desktop/src/rende
 - `inert` 让隐藏格退出可交互树：Tab 键走不到，页内搜索也不会命中。
 - 切换显示 Workspace 同样只隐藏不卸载：[App.tsx](../../apps/desktop/src/renderer/src/App.tsx) 给非当前的工作面槽加 `.workspace-workbench-slot--parked`（整个工作面区域不可见时给外层加 `.workspace-workbench-registry--parked`），并设 `aria-hidden` 与 `inert`；[workbench-tabs.css](../../apps/desktop/src/renderer/src/styles/workbench-tabs.css) 让它们 `visibility: hidden` 并绝对定位叠放。这些停放槽与非活动 Region 一起使用 `clip-path: inset(50%)` 与 `content-visibility: hidden`（workbench.css），保留 DOM 与可测量的盒子，浏览器可跳过其后代的布局与绘制，后代动画暂停。
 
-长期隐藏的重资源由两套独立策略决定何时释放，二者都只选择可释放的 Region owner，不改动 Session、Run、Region、文档或 Browser 身份：
+隐藏终端保留同一个 xterm、Attachment 和读位，继续按序消费原 Run 的字节。[TerminalView](../../apps/desktop/src/renderer/src/components/TerminalView.tsx) 在隐藏时释放 WebGL，重新显示时装回，切换不触发终端重放。搜索资源的生命周期见[《Terminal 连续向上阅读历史》](../design/behavior/terminal-reading.md#terminal-连续向上阅读历史)。有界回放能恢复的内容见本页 [Attachment 回放](#5-attachment-回放历史只读与尺寸同步)。
+
+[Surface memory budget](../../apps/desktop/src/renderer/src/lib/surface-memory-budget.ts) 只管理 Monaco 与 Browser 各自可重建的资源。两者各自计额，释放时保留 Region 及其内容身份。
 
 | 策略 | 释放延迟 | 热保留 | 资格条件 |
 | --- | --- | --- | --- |
-| Terminal（[terminal-cold-parking-policy.ts](../../apps/desktop/src/renderer/src/lib/terminal-cold-parking-policy.ts)） | 隐藏满 30 秒才可冷停 | 隐藏 5 分钟内的最多 6 个保持 warm | 不可见、属于当前 Workspace／Topic 导航上下文、已 attached、Core 可重新附着并 replay、没有 pending interaction |
-| Monaco（[surface-memory-budget.ts](../../apps/desktop/src/renderer/src/lib/surface-memory-budget.ts)） | 60 秒 | 5 分钟内最多 4 个 | 不可见、属于当前导航上下文、native owner 存在、可重建、没有未保存或待处理的原生工作 |
-| Browser（同一文件） | 90 秒 | 5 分钟内最多 3 个 | 不可见、native owner 存在、可重建、未受保护；覆盖全部导航位置（规则见[闲置回收覆盖全部导航位置](../design/behavior/browser-workface.md#browser-工作面-1)）；用户关闭 `browser.automaticMemoryRelease` 时不自动释放 |
+| Monaco | 60 秒 | 5 分钟内最多 4 个 | 不可见、属于当前导航上下文、native owner 存在、可重建、没有未保存或待处理的原生工作 |
+| Browser | 90 秒 | 5 分钟内最多 3 个 | 不可见、native owner 存在、可重建且未受保护，覆盖全部导航位置，受 `browser.automaticMemoryRelease` 控制。见[闲置回收覆盖全部导航位置](../design/behavior/browser-workface.md#browser-工作面-1) |
 
-- 隐藏时长从 Region 隐藏时起算；Terminal 与 Monaco 的导航上下文重新变为当前时也重新计时，Browser 回到导航位置不重置计时。切到另一个 Workspace／Topic 只改变投影：Terminal 与 Monaco 在非当前导航上下文中不计时，切回来不会因为计时器到点而卸载 TerminalView／attachment、制造 replay gap。
-- 选择函数分别是 `selectColdParkedTerminalRegions`（常量 `TERMINAL_COLD_PARK_DELAY_MS`、`TERMINAL_HOT_RETAIN_MS`、`TERMINAL_HOT_RETAIN_LIMIT`）与 `selectSurfaceMemoryReleases`；下一个截止时刻由 `nextTerminalColdParkDelayMs` 与 `nextSurfaceMemoryDeadlineMs` 计算。
-- 超过热保留时长的候选一律可释放；热保留期内的候选按最近隐藏、最近激活排序，超出数量上限的部分可释放。这样即使只有一个隐藏项目，它也不会永远持有 xterm。
-- 资源测量进行时不冷停，测量结束后有 30 秒冷却期；工作面重新可见时冷却期清除。两个协调器（[terminal-cold-parking-coordinator.tsx](../../apps/desktop/src/renderer/src/lib/terminal-cold-parking-coordinator.tsx)、[surface-memory-budget-coordinator.tsx](../../apps/desktop/src/renderer/src/lib/surface-memory-budget-coordinator.tsx)）按下一个截止时刻唤醒，不轮询全部隐藏工作面。
-- Monaco 与 Browser 各自独立计额，一个大 Browser 页面不会占用 Monaco 的热保留名额；Terminal 不使用 Monaco／Browser 的策略模块。
+- 隐藏时长从 Region 隐藏时起算。Monaco 回到当前导航上下文时重新计时，Browser 继续原计时。
+- 符合释放资格且超过热保留时长的资源可以释放。热保留期内按最近隐藏、最近激活排序，超出数量上限的资源也可以释放。
+- 资源测量暂停释放，结束后有 30 秒冷却期，工作面重新可见时清除冷却期。[SurfaceMemoryBudgetCoordinator](../../apps/desktop/src/renderer/src/lib/surface-memory-budget-coordinator.tsx) 只在下一个截止时刻唤醒。
 
 ## 5. Attachment 回放、历史只读与尺寸同步
 
