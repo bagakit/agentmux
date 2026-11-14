@@ -145,7 +145,7 @@ it('shows creator unlimited access and each guest used, total and remaining allo
   const creatorRow = chat().querySelector<HTMLElement>('[data-mote-chat-person="original-creator"]')!
   expect(creatorRow.textContent).toContain('Creator · unlimited'); expect(creatorRow.textContent).not.toContain('Edit allowance')
   expect(row().querySelector('[data-entity-kind="person"]')).not.toBeNull()
-  await ready(() => expect(row().textContent).toContain('Profile update unavailable'))
+  await ready(() => expect(row().querySelector('.connector-entity__profile-note[role="status"]')?.textContent).toBeTruthy())
   await copyConnectorIdentity(row(), 'Copy person name', 'Previously observed person')
   await copyConnectorIdentity(row(), 'Copy open_id', guest.userId)
   await copyConnectorIdentity(creatorRow, 'Copy open_id', creator.userId)
