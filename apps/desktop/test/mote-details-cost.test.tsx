@@ -6,7 +6,7 @@ import { beforeEach, afterEach, expect, it, vi } from 'vitest'
 import type { ContinuousProgressLoop, FileReadParams, FileReadResult } from '@agentmux/core'
 import { DesktopClientUiProvider } from '../src/renderer/src/components/DesktopClientUiProvider'
 import { createClientUiRoot } from './helpers/client-ui-render'
-import { moteTopics, defaultAgent, neighborAgent, scratchWorkspace, seedMoteWorkface } from './fixtures/mote-workface'
+import { moteDirectoryListing, moteTopics, defaultAgent, neighborAgent, scratchWorkspace, seedMoteWorkface } from './fixtures/mote-workface'
 import { PMO_TEAMS_TOPIC_ID, scratchTopicDirectoryName } from '@agentmux/host/mote-model'
 import { SurfaceToolDock } from '../src/renderer/src/components/SurfaceToolDock'
 import { GoalContinuationControl } from '../src/renderer/src/components/GoalContinuationControl'
@@ -39,6 +39,7 @@ beforeEach(() => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   seedMoteWorkface(); useAppStore.setState({ mainSurface: 'workbench', activeWorkspaceId: scratchWorkspace.id })
   vi.spyOn(api.files, 'readDirectory').mockResolvedValue([entry])
+  vi.spyOn(api.files, 'listPublic').mockImplementation(async params => moteDirectoryListing(params, rootPath, [entry]))
   vi.spyOn(api.files, 'readPublic').mockImplementation(async params => material(params, params.path === 'SOUL.md' ? soul : params.path === 'BEHAVIOR.md' ? behavior.DEFAULT_MOTE_BEHAVIOR : '# Saved idea'))
   vi.spyOn(api.demands, 'list').mockResolvedValue([])
   vi.spyOn(api.continuousProgress, 'goals').mockResolvedValue([])
@@ -80,7 +81,7 @@ it('Profile keeps the saved topic context on demand and opens its original file 
 })
 
 it('confirmed empty Profile actions use the original Behavior dialog and Ideas tab', async () => {
-  vi.mocked(api.files.readDirectory).mockResolvedValue([])
+  vi.mocked(api.files.listPublic).mockImplementation(async params => moteDirectoryListing(params, rootPath, []))
   await mount()
   await click('Choose how we work together.')
   expect(document.querySelector('.mote-behavior-dialog')).not.toBeNull()
@@ -101,7 +102,8 @@ it('hidden Surface Files consumer defers automatic reads and changed revisions',
   expect(reads).toBe(0)
   expect(vi.mocked(api.files.readDirectory).mock.calls.length - reads).toBe(0)
   await act(async () => root.render(<SurfaceToolDock workspace={scratchWorkspace} visible />))
-  expect(vi.mocked(api.files.readDirectory).mock.calls.filter(([workspace, path]) => workspace === scratchWorkspace.id && path === rootPath)).toHaveLength(2) // Original FileExplorer and Mote notes each own one directory projection.
+  expect(vi.mocked(api.files.readDirectory).mock.calls.filter(([workspace, path]) => workspace === scratchWorkspace.id && path === rootPath)).toHaveLength(1)
+  expect(api.files.listPublic).toHaveBeenCalledTimes(1) // Mote notes read their own exact directory independently.
   expect(container.querySelectorAll('[role="treeitem"]').length).toBeGreaterThan(0)
 })
 
@@ -166,7 +168,7 @@ it('hidden Profile retains original chooser, question, expanded Goal and minutes
   expect(container.querySelector('[aria-label="Mote discussion for the goal"]')?.textContent).toContain('Hidden current name 5')
   expect(vi.mocked(api.demands.list).mock.calls.length).toBe(reads); expect(vi.mocked(api.continuousProgress.goals).mock.calls.length).toBe(inspections)
   expect(files.mock.calls.length).toBe(before + 1)
-  expect(vi.mocked(api.files.readDirectory).mock.calls.length).toBe(2)
+  expect(api.files.listPublic).toHaveBeenCalledTimes(2)
 })
 
 it('same-scope pending SOUL and goal inspection finish normally through hide without duplicate delivery', async () => {
@@ -186,13 +188,16 @@ it('same-scope pending SOUL and goal inspection finish normally through hide wit
 })
 
 it('selected Ideas note pauses hidden revisions, preserves last confirmed content and retries actual failure', async () => {
-  await mount(); await click('Ideas'); await click('idea')
+  await renderDetails(); await click('Ideas'); await click('idea')
   expect(container.textContent).toContain('Saved idea')
   await renderDetails(false); const before = vi.mocked(api.files.readPublic).mock.calls.length
+  const directoryReads = vi.mocked(api.files.listPublic).mock.calls.length
   vi.mocked(api.files.readPublic).mockImplementation(async params => material(params, '# Latest same note'))
   await revision(2); expect(vi.mocked(api.files.readPublic).mock.calls.length).toBe(before)
+  expect(api.files.listPublic).toHaveBeenCalledTimes(directoryReads)
   await renderDetails(); expect(container.textContent).toContain('Latest same note')
   expect(vi.mocked(api.files.readPublic).mock.calls.length).toBe(before + 1)
+  expect(api.files.listPublic).toHaveBeenCalledTimes(directoryReads + 1)
   vi.mocked(api.files.readPublic).mockRejectedValueOnce(new Error('Original note temporarily unavailable'))
   await revision(3)
   expect(container.textContent).toContain('Original note temporarily unavailable'); expect(container.textContent).toContain('Latest same note'); expect(container.textContent).toContain('Last confirmed saved content')

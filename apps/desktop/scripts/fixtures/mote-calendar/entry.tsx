@@ -66,6 +66,7 @@ const goal: Demand = { id: 'mote-workspace-experiment', title: '把第一个小�
   alignment: { revision: 1, confirmedAt: now, summary: '先做一个可验证的结果，再决定下一步。', criteria: [{ id: 'sources', text: '保留原始证据和仍需确认的问题。' }], openQuestions: [] } }
 const calls: { method: string; params: unknown }[] = [], opened: string[] = []
 let mode = 'populated', lostCreate = false, listUnknown = false, noteUnknown = false, generation = 0
+let ideasDirectoryUnknown = scenario === 'ideas'
 const policies = { gap: 'skip' as const, fold: 'earlier' as const, monthEnd: 'clamp' as const, overdue: 'latest' as const }
 const calendar = { kind: 'daily' as const, time: (new Date(_batchFixtureEpoch(0, 32400)).toISOString().slice(11, 16)), timezone: 'Asia/Shanghai', policies }
 const make = (id: string, index: number, prompt: string, due: number, rest: Partial<ContinuousProgressLoop> = {}): ContinuousProgressLoop => ({ ...targets[index]!,
@@ -186,6 +187,15 @@ if (discussionFilesProof) for (let index = 0; index < 48; index++)
 const revision = async (content: string) => 'sha256:' + [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(content)))].map(byte => byte.toString(16).padStart(2, '0')).join('')
 api.files.readDirectory = async (_workspace, directory) => [...new Set(Object.keys(files).filter(file => file.startsWith(directory + '/')).map(file => file.slice(directory.length + 1).split('/')[0]!))]
   .map(name => ({ path: directory + '/' + name, name, isDirectory: !Object.hasOwn(files, directory + '/' + name), isSymlink: false, ignored: false, mtimeMs: now }))
+api.files.listPublic = async params => {
+  calls.push({ method: 'file.list', params: clone(params) })
+  if (params.zoneId !== zoneId || params.spaceId !== spaceId || params.path !== '.' || params.mode !== 'directory' ||
+      params.expectedResource.hostId !== workspace.hostId || params.expectedResource.workspaceId !== workspace.id || params.expectedResource.workspacePath !== workspace.path)
+    throw new Error('Expected the exact Club Ideas directory')
+  const resource = { ...params.expectedResource, zoneId, zonePath: topic.directoryPath, path: rootPath }
+  if (ideasDirectoryUnknown) return { resource, result: { status: 'unknown', code: 'FILE_LIST_UNCONFIRMED', message: 'The original folder is temporarily unavailable.' } }
+  return { resource, result: { status: 'directory-listed', entries: await api.files.readDirectory(workspace.id, rootPath), complete: true, partialReason: null } }
+}
 api.files.read = async (_workspace, file) => ({ status: 'read', document: { path: file, content: files[file] ?? '', revision: await revision(files[file] ?? '') } })
 api.files.readPublic = async params => {
   const file = rootPath + '/' + params.path
@@ -236,6 +246,7 @@ function Scene() {
     theme: (appearance: 'light' | 'dark') => updateThemeSelection({ appAppearance: appearance }),
     scenario: (next: 'populated' | 'empty' | 'unavailable') => { mode = next; records = next === 'empty' ? [] : sceneRecords(); listUnknown = next === 'unavailable'; setEpoch(value => value + 1) },
     loseCreateReceipt: () => { lostCreate = true },
+    allowIdeasDirectory: () => { ideasDirectoryUnknown = false },
     noteReadFailure: (failed: boolean) => { noteUnknown = failed; useAppStore.setState(state => ({ workspaceFileRevisions: { ...state.workspaceFileRevisions, [workspace.id]: (state.workspaceFileRevisions[workspace.id] ?? 0) + 1 } })) },
     name: (title: string) => { topic.title = title; useAppStore.setState(state => ({ scratchTopicSnapshots: { ...state.scratchTopicSnapshots,
       [workspace.id]: { ...state.scratchTopicSnapshots[workspace.id]!, topics: [{ ...topic }] } } })) },

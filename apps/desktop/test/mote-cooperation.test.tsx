@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createMoteApp, moteClick, settleMoteApp, type MoteAppFixture } from './fixtures/mote-app'
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
-import { defaultAgent, defaultTab, customMoteId, customTab, scratchWorkspace, moteTopics } from './fixtures/mote-workface'
+import { defaultAgent, defaultTab, customMoteId, customTab, scratchWorkspace, moteDirectoryListing, moteTopics } from './fixtures/mote-workface'
 import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, scratchTopicDirectoryName } from '@agentmux/host/mote-model'
 import { documentKey } from '../src/renderer/src/lib/workbench-tabs'
 import { openMoteDiscussionDraft } from '../src/renderer/src/lib/mote-materials-actions'
@@ -25,6 +25,7 @@ beforeEach(() => {
   vi.spyOn(api.files, 'read').mockImplementation(async (_workspace, requested) => ({ status: 'read', document: { path: requested, content: requested === path ? disk : soulDisk, revision: requested === path ? diskRevision : soulRevision } }))
   vi.spyOn(api.files, 'write').mockImplementation(async (_workspace, input) => { if (input.path === path) disk = input.content; else soulDisk = input.content; diskRevision = 'sha256:' + 'b'.repeat(64); return { status: 'written', revision: diskRevision } })
   vi.spyOn(api.files, 'readDirectory').mockResolvedValue([]); vi.spyOn(api.files, 'observe').mockResolvedValue(); vi.spyOn(api.files, 'unobserve').mockResolvedValue()
+  vi.spyOn(api.files, 'listPublic').mockImplementation(async params => moteDirectoryListing(params, rootPath, []))
 })
 afterEach(async () => { await app.dispose() })
 const details = () => app.container.querySelector<HTMLElement>('[data-mote-details]')!
@@ -352,8 +353,10 @@ it('does not fall back to an old style when the new behavior file is damaged', a
 })
 
 it('review counter: the original behavior system file is not a recent idea', async () => {
-  vi.mocked(api.files.readDirectory).mockResolvedValue([{ name: 'BEHAVIOR.md', path, isDirectory: false, mtimeMs: 1000 }] as never)
-  await app.mount(); await settleMoteApp()
+  vi.mocked(api.files.listPublic).mockImplementation(async params => moteDirectoryListing(params, rootPath, [
+    { name: 'BEHAVIOR.md', path, isDirectory: false, isSymlink: false, mtimeMs: 1000 }
+  ]))
+  await app.mount(); await moteClick(button('Profile'))
   expect(details().querySelector('.mote-details__recent')!.textContent).not.toContain('BEHAVIOR')
   expect(details().querySelector('.mote-details__recent')!.textContent).toContain('0')
 })
@@ -367,16 +370,17 @@ it('review counter: confirmed custom-only Markdown remains visible in Profile wi
 })
 
 it('keeps ordinary user notes in both Profile and Ideas while excluding the behavior system file', async () => {
-  vi.mocked(api.files.readDirectory).mockResolvedValue([
-    { name: 'BEHAVIOR.md', path, isDirectory: false, mtimeMs: 1000 },
-    { name: 'experiment.md', path: rootPath + '/experiment.md', isDirectory: false, mtimeMs: 2000 }
-  ] as never)
-  await app.mount(); await settleMoteApp()
+  vi.mocked(api.files.listPublic).mockImplementation(async params => moteDirectoryListing(params, rootPath, [
+    { name: 'BEHAVIOR.md', path, isDirectory: false, isSymlink: false, mtimeMs: 1000 },
+    { name: 'experiment.md', path: rootPath + '/experiment.md', isDirectory: false, isSymlink: false, mtimeMs: 2000 }
+  ]))
+  await app.mount(); await moteClick(button('Profile'))
   expect(details().querySelector('.mote-details__recent')!.textContent).toContain('experiment')
   expect(details().querySelector('.mote-details__recent')!.textContent).not.toContain('BEHAVIOR')
   await moteClick(action('View ideas and saved materials'))
-  expect(details().querySelector('.mote-details__notes')!.textContent).toContain('experiment')
-  expect(details().querySelector('.mote-details__notes')!.textContent).not.toContain('BEHAVIOR')
+  const notes = details().querySelector('.mote-ideas__library .mote-details__notes')!
+  expect(notes.textContent).toContain('experiment')
+  expect(notes.textContent).not.toContain('BEHAVIOR')
 })
 it('shows a saved partial preference without inventing its missing axes or MBTI code', async () => {
   disk = '---\nversion: 1\npreferences:\n  engagement: I\n---\nKeep these partial notes.'

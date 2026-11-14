@@ -6,10 +6,11 @@ import type { Demand } from '@agentmux/demand'
 import { createMoteApp, moteClick, settleMoteApp, type MoteAppFixture } from './fixtures/mote-app'
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
-import { defaultAgent, defaultTab, customMoteId, customTab, neighborTab, scratchWorkspace } from './fixtures/mote-workface'
+import { defaultAgent, defaultTab, customMoteId, customTab, neighborTab, scratchWorkspace, moteDirectoryListing, moteTopics } from './fixtures/mote-workface'
 import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, scratchTopicDirectoryName } from '@agentmux/host/mote-model'
 import { documentKey } from '../src/renderer/src/lib/workbench-tabs'
 import { useLauncherState } from '../src/renderer/src/lib/launcher-state'
+import { directoryIdentity, homeZoneId } from '../src/shared/space-addresses'
 vi.mock('../src/renderer/src/components/EditorPane', () => ({ EditorPane: () => createElement('div', { 'data-original-editor': true }) }))
 let app: MoteAppFixture, initialIdeaContext: boolean
 const root = scratchTopicDirectoryName(PMO_TEAMS_TOPIC_ID), path = root + '/saved-direction.md', revision = 'sha256:' + 'f'.repeat(64)
@@ -29,7 +30,13 @@ async function ideas() { await moteClick(panel().querySelector<HTMLButtonElement
 beforeEach(() => {
   initialIdeaContext = false; app = createMoteApp(); useAppStore.setState({ toolsOpen: true, explorerCollapsed: { [SCRATCH_WORKSPACE_ID]: false } })
   useLauncherState.setState({ drafts: {}, persistenceIssue: null })
-  vi.spyOn(api.files, 'readDirectory').mockResolvedValue([{ path, name: 'saved-direction.md', isDirectory: false, isSymlink: false, ignored: false }])
+  const entry = { path, name: 'saved-direction.md', isDirectory: false, isSymlink: false, ignored: false }
+  vi.spyOn(api.files, 'readDirectory').mockResolvedValue([entry])
+  vi.spyOn(api.files, 'listPublic').mockImplementation(async params => {
+    const topic = moteTopics.find(value => params.zoneId === homeZoneId(directoryIdentity(scratchWorkspace.hostId, value.directoryPath)))!
+    const directory = scratchTopicDirectoryName(topic.id)
+    return moteDirectoryListing(params, directory, directory === root ? [entry] : [])
+  })
   vi.spyOn(api.files, 'observe').mockResolvedValue(); vi.spyOn(api.files, 'unobserve').mockResolvedValue()
 })
 afterEach(async () => { await app.dispose() })

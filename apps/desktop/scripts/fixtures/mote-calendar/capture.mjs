@@ -8,7 +8,7 @@ import { runProbeProcess } from '../../probe-process.mjs'
 import { radixOverlayAliases } from '../../../../../packages/client-ui/scripts/radix-overlay-aliases.ts'
 import { bundleIdentityRuntime } from '../../../../../packages/identity/scripts/runtime-bundle.mjs'
 
-const scenarios = { workspace: 'renderer-main.cjs', 'companion-navigation': 'renderer-navigation.cjs', 'discussion-files': 'renderer-discussion-files.cjs', 'calendar-density': 'renderer-density.cjs', 'floating-navigation': '../mote-surface-repair/context-main.cjs' }
+const scenarios = { workspace: 'renderer-main.cjs', ideas: 'renderer-main.cjs', 'companion-navigation': 'renderer-navigation.cjs', 'discussion-files': 'renderer-discussion-files.cjs', 'calendar-density': 'renderer-density.cjs', 'floating-navigation': '../mote-surface-repair/context-main.cjs' }
 const scenario = process.argv.length === 2 ? 'workspace' : process.argv.length === 3 && process.argv[2].startsWith('--scenario=') ? process.argv[2].slice('--scenario='.length) : null
 assert.ok(Object.hasOwn(scenarios, scenario), 'Unknown Mote capture scene: ' + scenario)
 const rendererRunner = scenarios[scenario]
@@ -112,7 +112,7 @@ try {
   receipt.engine = { executable, sha256: sha(await fs.readFile(executable)), version: require('electron/package.json').version,
     override: process.env.ELECTRON_OVERRIDE_DIST_PATH ?? null }
   const logs = []
-  receipt.process = await runProbeProcess(executable, [path.join(fixture, rendererRunner), path.join(compiled, 'index.html'), directory, ...(scenario === 'floating-navigation' ? ['--calendar-navigation'] : [])],
+  receipt.process = await runProbeProcess(executable, [path.join(fixture, rendererRunner), path.join(compiled, 'index.html'), directory, ...(scenario === 'floating-navigation' ? ['--calendar-navigation'] : scenario === 'ideas' ? ['--ideas'] : [])],
     { cwd: root, env, timeoutMs: 120_000, onLine: line => logs.push(line) })
   await fs.writeFile(path.join(directory, 'renderer.log'), logs.join('\n') + '\n')
   receipt.renderer = JSON.parse(await fs.readFile(path.join(directory, 'renderer-result.json'), 'utf8'))

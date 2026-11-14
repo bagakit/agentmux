@@ -1,5 +1,6 @@
 import { fixturePath as _hygiene_fixturePath } from "../../scripts/lib/fixture-values.mjs"
 import { createWorkspaceLayout } from '@agentmux/layout'
+import type { FileDirectoryEntry, FileListParams, FileListResult } from '@agentmux/core/files'
 import type { AppConfig, ScratchTopicSnapshot, SessionSnapshot } from '../../src/shared/contracts'
 import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, scratchTopicDirectoryName } from '@agentmux/host/mote-model'
 import { createWorkbenchTab } from '../../src/renderer/src/lib/workbench-tabs'
@@ -27,6 +28,12 @@ export function moteTopic(id: string, title: string, soul: boolean): ScratchTopi
 }
 export const moteTopics = [moteTopic(PMO_TEAMS_TOPIC_ID, 'Mote', true), moteTopic(customMoteId, 'Analyst with a long persistent name', true),
   moteTopic(quietMoteId, 'Quiet collaborator', true), moteTopic(ordinaryTopicId, 'Ordinary Topic', false)]
+export function moteDirectoryListing(params: FileListParams, rootPath: string, entries: FileDirectoryEntry[], complete = true): FileListResult {
+  return {
+    resource: { ...params.expectedResource, zoneId: params.zoneId, zonePath: params.expectedResource.workspacePath + '/' + rootPath, path: rootPath },
+    result: { status: 'directory-listed', entries, complete, partialReason: complete ? null : 'limit' }
+  }
+}
 export function moteAgent(id: string, topicId: string | null, state: 'working' | 'waiting' = 'working'): Extract<SessionSnapshot, { kind: 'agent' }> {
   return { id, kind: 'agent', providerId: 'fixture', executorId: 'fixture', hostId: 'local',
     workspacePath: topicId ? _hygiene_fixturePath("topics/") + scratchTopicDirectoryName(topicId) : _hygiene_fixturePath("project"), label: id,

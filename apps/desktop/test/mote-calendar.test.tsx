@@ -4,6 +4,7 @@ import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createHash } from 'node:crypto'
 import type { ContinuousProgressLoop } from '@agentmux/core'
+import type { FileListParams, FileListResult } from '@agentmux/core/files'
 import type { ScheduleHistoryEntry } from '@agentmux/core/schedule-rpc'
 import type { FutureProgressInputOwner } from '@agentmux/host/continuous-progress-loop-manager'
 import { DateTime } from 'luxon'
@@ -19,9 +20,11 @@ import { useAppStore } from '../src/renderer/src/store'
 import { useLauncherState } from '../src/renderer/src/lib/launcher-state'
 import { composerDOM } from './helpers/composer-dom-fixture'
 import { createScheduleRpcFixture } from './helpers/schedule-rpc-fixture'
-import { seedMoteWorkface, defaultAgent, neighborAgent, defaultTab, neighborTab, scratchWorkspace, moteTopics } from './fixtures/mote-workface'
+import { seedMoteWorkface, defaultAgent, neighborAgent, defaultTab, neighborTab, scratchWorkspace, moteDirectoryListing, moteTopics } from './fixtures/mote-workface'
 import { scratchTopicDirectoryName } from '@agentmux/host/mote-model'
 import type { MoteWorkfaceScope } from '../src/renderer/src/lib/mote-workface'
+import { directoryIdentity, homeZoneId } from '../src/shared/space-addresses'
+import { readWorkspaceDirectory } from '../src/renderer/src/lib/source-files-discovery'
 
 const dom = composerDOM()
 const now = _batchFixtureEpoch(20748, 0, 36000000)
@@ -29,6 +32,7 @@ const target = { hostId: defaultAgent.hostId, providerId: defaultAgent.providerI
 const topic = { ...moteTopics[0]!, physicalDirectoryPath: defaultAgent.workspacePath, confirmedDirectoryPaths: [defaultAgent.workspacePath] }
 const scope: MoteWorkfaceScope = { workspace: scratchWorkspace, topic, rootPath: scratchTopicDirectoryName(topic.id) }
 const reference = { displayWorkspaceId: scratchWorkspace.id, groupId: 'mote-group', tabId: defaultTab.id, regionId: 'default-region' }
+const ideaEntry = (rootPath: string, name: string) => ({ name, path: rootPath + '/' + name, isDirectory: false, isSymlink: false, mtimeMs: now })
 const saved = (id: string, patch: Partial<ContinuousProgressLoop> = {}): ContinuousProgressLoop => ({ ...target, loopId: id, afterMs: 90000, intervalMs: 1000,
   nextCheckAt: now + 90000, prompt: 'Original countdown ' + id, status: 'active', revision: 1, creationOperationId: 'created-' + id, futureIntentId: 'future-' + id, ...patch })
 let fixture: Awaited<ReturnType<typeof createScheduleRpcFixture>> | undefined
@@ -385,7 +389,7 @@ describe('Mote calendar original schedule consumer', () => {
   })
   it('the actual details Calendar mode suspends knowledge reads and preserves the form across mode changes', async () => {
     await owner([saved('countdown')])
-    const tree = vi.spyOn(api.files, 'readDirectory').mockResolvedValue([])
+    const tree = vi.spyOn(api.files, 'listPublic').mockImplementation(async params => moteDirectoryListing(params, scope.rootPath, []))
     vi.spyOn(api.files, 'observe').mockResolvedValue(undefined); vi.spyOn(api.files, 'unobserve').mockResolvedValue(undefined)
     const read = vi.spyOn(api.files, 'read').mockResolvedValue({ status: 'deleted' })
     await dom.render(<MoteDetailsPanel scope={scope} reference={reference} onOpenPath={async () => {}} />)
@@ -397,6 +401,60 @@ describe('Mote calendar original schedule consumer', () => {
     await button('Profile'); await button('Calendar')
     expect(dom.container.querySelector<HTMLTextAreaElement>('.mote-calendar textarea')!.value).toBe('My calendar draft')
     expect(useAppStore.getState().agentComposerDrafts[defaultAgent.id]).toBe('Default unsent')
+  })
+  it('lists the exact Club Ideas directory alongside an unresolved Scratch Files selection and retries the same directory', async () => {
+    const spaceId = directoryIdentity(scratchWorkspace.hostId, topic.directoryPath), zoneId = homeZoneId(spaceId)
+    const originalSelection = { workspace: scratchWorkspace, target: { hostId: scratchWorkspace.hostId,
+      reference: { runtimeId: 'other-runtime', spaceId: 'other-space' } },
+      selection: { kind: 'directory' as const, path: scratchWorkspace.path + '/other-source' } }
+    const held = { selections: { [scratchWorkspace.id]: originalSelection }, pending: {}, creations: {}, folderRequests: {} }
+    useAppStore.setState({ sourceFilesInputs: held })
+    await expect(readWorkspaceDirectory(scratchWorkspace.id, scope.rootPath, useAppStore.getState)).rejects.toThrow('Source directory is unconfirmed')
+    const read = vi.spyOn(api.files, 'listPublic')
+      .mockImplementationOnce(async params => moteDirectoryListing(params, scope.rootPath, [ideaEntry(scope.rootPath, 'confirmed-thought.md')], false))
+      .mockResolvedValueOnce({ resource: null, result: { status: 'unknown', code: 'FILE_LIST_UNCONFIRMED', message: 'Original folder temporarily unavailable' } })
+      .mockImplementationOnce(async params => moteDirectoryListing(params, scope.rootPath, []))
+    const drafts = useAppStore.getState().agentComposerDrafts
+    await dom.render(<MoteDetailsPanel scope={scope} reference={reference} onOpenPath={async () => {}} />)
+    await button('Ideas')
+    const ideas = dom.container.querySelector<HTMLElement>('.mote-details__ideas')!
+    expect(ideas.querySelector('.mote-details__notes')?.textContent).toContain('confirmed-thought')
+    expect(ideas.querySelector('.mote-ideas__heading small')).toBeNull()
+    expect(ideas.textContent).toContain('partial list')
+    await dom.click('.mote-details__ideas .mote-ideas__service button')
+    expect(ideas.querySelector('.mote-details__notes')?.textContent).toContain('confirmed-thought')
+    expect(ideas.querySelector('.mote-ideas__heading small')).toBeNull()
+    expect(ideas.textContent).toContain('Original folder temporarily unavailable')
+    await dom.click('.mote-details__ideas .mote-ideas__service button')
+    expect(ideas.querySelector('.mote-ideas__heading small')?.textContent).toBe('0')
+    expect(ideas.querySelector('.mote-details__notes')?.textContent).toBe('')
+    expect(ideas.textContent).toContain('No notes yet')
+    expect(read.mock.calls).toEqual(Array.from({ length: 3 }, () => [{
+      spaceId, zoneId, path: '.', mode: 'directory',
+      expectedResource: { hostId: scratchWorkspace.hostId, workspaceId: scratchWorkspace.id, workspacePath: scratchWorkspace.path }
+    }]))
+    expect(useAppStore.getState().sourceFilesInputs).toBe(held)
+    expect(useAppStore.getState().agentComposerDrafts).toBe(drafts)
+  })
+  it('does not show a delayed Ideas listing in a different Club on the same Scratch workspace', async () => {
+    const otherTopic = moteTopics[1]!, otherRoot = scratchTopicDirectoryName(otherTopic.id)
+    const otherScope = { workspace: scope.workspace, topic: otherTopic, rootPath: otherRoot }
+    let finish!: () => void
+    const read = vi.spyOn(api.files, 'listPublic')
+      .mockImplementationOnce(params => new Promise<FileListResult>(resolve => {
+        finish = () => resolve(moteDirectoryListing(params, scope.rootPath, [ideaEntry(scope.rootPath, 'old-club-note.md')]))
+      }))
+      .mockImplementationOnce(async params => moteDirectoryListing(params, otherRoot, [ideaEntry(otherRoot, 'current-club-note.md')]))
+    const mountDetails = (nextScope: MoteWorkfaceScope) => dom.render(<MoteDetailsPanel scope={nextScope} onOpenPath={async () => {}} />)
+    await mountDetails(scope); await button('Ideas')
+    await mountDetails(otherScope)
+    const notes = () => dom.container.querySelector('.mote-details__ideas .mote-details__notes')?.textContent
+    expect(notes()).toContain('current-club-note')
+    await act(async () => finish())
+    expect(notes()).toContain('current-club-note')
+    expect(notes()).not.toContain('old-club-note')
+    expect(read.mock.calls.map(([params]: [FileListParams]) => params.zoneId)).toEqual([topic, otherTopic]
+      .map(item => homeZoneId(directoryIdentity(scratchWorkspace.hostId, item.directoryPath))))
   })
   it('a newly visible list replaces same-version cached delivery facts from before it was hidden', async () => {
     await owner([saved('countdown', { lastTickAt: now, lastOutcome: 'unknown', status: 'paused' })])
@@ -412,7 +470,7 @@ describe('Mote calendar original schedule consumer', () => {
   })
   it('Ideas keeps an edited frozen arrangement and its unknown operation reachable across Calendar and remount', async () => {
     await owner([])
-    vi.spyOn(api.files, 'readDirectory').mockResolvedValue([])
+    vi.spyOn(api.files, 'listPublic').mockImplementation(async params => moteDirectoryListing(params, scope.rootPath, []))
     vi.spyOn(api.files, 'observe').mockResolvedValue(undefined); vi.spyOn(api.files, 'unobserve').mockResolvedValue(undefined)
     vi.spyOn(api.files, 'read').mockResolvedValue({ status: 'deleted' })
     const sources = vi.spyOn(api.files, 'readPublic').mockImplementation(async params => ({ resource: { ...params.expectedResource, zoneId: params.zoneId,
