@@ -8,6 +8,7 @@
 | --- | --- | --- |
 | Run、生命周期、ordered bytes、Replay、Gap、Attachment | ctxmux | 原 Runtime 的持久记录与事务 |
 | AgentSession、Provider-native 身份、权限、已接收输入与语义恢复 | Core | 原语义对象及原操作的持久 Store |
+| 初始 raw Terminal 创建 admission 与既有 recovery 意图 | Core 原 Terminal recovery owner | 私有原 preparation、Runtime 与同 key 耐久 admission；Native Run 事实仍归 ctxmux，行为沿[Session 恢复](session-recovery.md#重启后的-tabregion-与-session-恢复) |
 | Space、Zone、Tab、Group、Region、拓扑与绑定 | Core Spatial | 与前端无关的原空间图 |
 | Desktop 草稿、待发送意图、未保存编辑内容、选择与界面偏好 | Desktop 宿主 | 本地持久文件或数据库；Renderer 负责编辑、投影与保存请求 |
 | 可从上述原事实重新构造的索引、DOM 与渲染缓存 | 对应消费者 | 可丢弃缓存，不承诺作为唯一恢复来源 |
@@ -21,6 +22,8 @@ Agent 卡片[异步操作反馈](session-recovery.md#agent-卡片的异步操作
 已关闭或删除 AgentMux 记录后，独立本机输入仍须可发现、复制；准确关联、未知旧 key 与删除范围沿[《已关闭 Session 的 AgentMux 记录》](session-recovery.md#已关闭-session-的-agentmux-记录)，不另建历史 Store 或将副本搬入 Core。
 
 电子书阅读位置属于原 durable Region 及准确 Host／Workspace／文件资源上的 Desktop 展示偏好，由既有 Desktop 用户状态 owner 按视图独立持久化；Core 继续持有空间身份、布局与绑定。保存阅读进度不能遍历无关 Session、重写完整空间图或重新编码无关草稿。资源变化须隔开迟到写入；偏好读写失败保留健康 File 与当前内存位置，并提供准确恢复入口。
+
+初始 Terminal 的 admission marker 与可替换成员由同一原 owner 保存；冷进程不能因成员缺失重建派发资格。未收口 opaque preparation 保持私有，交出引用后的成员可薄化，原 key 与目标摘要继续保留；不复制到空间图、Renderer 或公共结果，不在输入、输出或普通布局保存扫描历史创建。失败的保存确认与已取得的 Native ACK 分别保管；冷读不能恢复上一个 writer 的目录同步确认。
 
 ## 保存合同
 
