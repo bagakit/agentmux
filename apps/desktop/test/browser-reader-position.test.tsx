@@ -105,6 +105,7 @@ it('uses the exact Pane for a Portal comment without treating the invoker as the
   const panel = document.querySelector<HTMLElement>('[aria-label="Message Browser operator"]')!
   const editor = panel.querySelector('textarea')!
   expect(panel.dataset.compactReader).toBe('true')
+  expect(panel.style.width).toBe('344px')
   expect(panel.style.maxHeight).toBe('264px')
   expect(layout.calls.at(-1)?.reference).toMatchObject({ contextElement: pane })
   expect(layout.calls.at(-1)?.placement).toBe('top-end')
@@ -163,6 +164,6 @@ it('observes an independent Pane resize and rejects late size and position write
   await act(async () => { replacement.apply(); replacement.complete(8, 180) })
   expect(surface.style.maxHeight).toBe('132px')
   await act(async () => { pendingOldOwner.apply(100, 100); pendingOldOwner.complete(77, 777) })
-  expect(surface.style.maxHeight).toBe('132px'); expect(surface.style.width).toBe('360px')
+  expect(surface.style.maxHeight).toBe('132px'); expect(surface.style.width).toBe('344px')
   expect(surface.style.left).toBe('8px'); expect(surface.style.top).toBe('180px')
 })

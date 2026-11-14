@@ -176,7 +176,8 @@ describe('selected step evidence in the production component', () => {
         step: { ...step(identity.sequence), method: 'extractStructured', label: 'extractStructured', status: 'completed' }
       })))
       expect(host.querySelector('section.browser-step-evidence')?.getAttribute('aria-label')).toBe('Evidence for step 1: extractStructured')
-      expect(host.querySelector('.browser-step-evidence > header')?.textContent).toBe('completed')
+      expect(host.querySelector('.browser-step-evidence > header strong')?.textContent).toBe('Recorded fields')
+      expect(host.querySelector('.browser-step-evidence > header span')?.textContent).toBe('completed')
       expect(host.querySelector('.browser-step-evidence__time')?.textContent).not.toContain('Fields')
       expect(host.querySelector('.browser-structured-fields__summary')?.textContent).toContain('Partial')
       const source = [...host.querySelectorAll('details')].find(details => details.querySelector('summary')?.textContent === 'Source')!

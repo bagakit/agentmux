@@ -146,7 +146,8 @@ it('projects actual Main waiting next to the completed Journal action before ope
     expect(progress.getAttribute('data-run-version')).toBe('1')
     const versionSelect = editor.querySelector<HTMLSelectElement>('[aria-label="Task asset version"]')!
     expect(versionSelect.value).toBe('1')
-    expect(progress.textContent).toContain('Review profile · v1')
+    expect(progress.querySelector('.browser-task-asset__run-title strong')?.textContent).toBe('Review profile')
+    expect(progress.querySelector('.browser-task-asset__run-title small')?.textContent).toBe('v1')
     expect(progress.textContent).not.toContain('Review profile updated')
     await act(async () => { versionSelect.value = '2'; versionSelect.dispatchEvent(new Event('change', { bubbles: true })) })
     expect(versionSelect.value).toBe('2')
