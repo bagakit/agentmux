@@ -48,7 +48,7 @@ vi.mock('../src/main/native-overlay-windows.js', () => ({ NativeOverlayWindows: 
 } }))
 vi.mock('../src/main/agent-notifier.js', () => ({ createAgentNotifier: () => ({ dispose() {} }) }))
 
-import { AgentMuxMemoryAgentSessionStore, AgentMuxClient, connectAgentMuxRpc, type AgentMuxRpcClient } from '@agentmux/core'
+import { AgentMuxMemoryAgentSessionStore, AgentMuxFileAgentSessionStore, AgentMuxClient, connectAgentMuxRpc, type AgentMuxRpcClient } from '@agentmux/core'
 import { registerIpc } from '../src/main/ipc.js'
 import { RuntimeController } from '../src/main/runtime-controller.js'
 import { desktopBusinessSocketPath } from '../src/main/desktop-host.js'
@@ -84,7 +84,7 @@ export async function oneCli(...args: string[]) {
   const c=cli(...args);await until(()=>expect(c.code).not.toBeUndefined())
   expect(c.code, c.stderr).toBe(0);const frames=c.frames();expect(frames).toHaveLength(1);return frames[0]
 }
-export async function nativeMain(options: { beforeRegister?(directory: string): Promise<void> } = {}) {
+export async function nativeMain(options: { beforeRegister?(directory: string): Promise<void>; fileSessionStore?: true } = {}) {
   const owned = await toolkitRuntime(), directory = owned.directory
   fixture.directory = directory
   fixture.handlers.clear();fixture.ipc.listeners.clear()
@@ -98,8 +98,9 @@ export async function nativeMain(options: { beforeRegister?(directory: string): 
   await mkdir(join(directory,'work'))
   vi.spyOn(assets,'performanceLaunch').mockReturnValue({ runner:process.execPath, cli:process.env.AGENTMUX_TOOLKIT_CLI!,
     script:process.env.AGENTMUX_TOOLKIT_ASSET ?? resolve('apps/desktop/resources/toolkit/performance.mjs'),cwd:join(directory,'work'),env:{ELECTRON_RUN_AS_NODE:'1'} })
+  const sessionStore = () => options.fileSessionStore ? new AgentMuxFileAgentSessionStore(join(directory, 'agent-sessions.json')) : new AgentMuxMemoryAgentSessionStore()
   let sampler=new ProcessResourceSampler()
-  let runtime=new RuntimeController(new AgentMuxMemoryAgentSessionStore(), localRuntimeConnector,undefined,sampler)
+  let runtime=new RuntimeController(sessionStore(), localRuntimeConnector,undefined,sampler)
   let store=new ConfigStore(join(directory,'config.json'));await store.save(structuredClone(DEFAULT_CONFIG));let config=await store.get()
   const makeSender=()=>new class extends EventEmitter {
     readonly id=71;readonly mainFrame={framesInSubtree:[]};readonly events: {channel:string;value:any}[]=[]
@@ -173,7 +174,7 @@ export async function nativeMain(options: { beforeRegister?(directory: string): 
   const restart=async()=>{
     await rpc!.dispose();await dispose!();detachRenderer();await runtime.dispose();sampler.dispose()
     fixture.handlers.clear();fixture.ipc.listeners.clear()
-    sampler=new ProcessResourceSampler();runtime=new RuntimeController(new AgentMuxMemoryAgentSessionStore(), localRuntimeConnector,undefined,sampler)
+    sampler=new ProcessResourceSampler();runtime=new RuntimeController(sessionStore(), localRuntimeConnector,undefined,sampler)
     // Reopen the actual durable stores and same private Native. Never recreate defaults or the daemon.
     store=new ConfigStore(join(directory,'config.json'));config=await store.get();sender=makeSender();detachRenderer=runtime.attach(sender as any)
     dispose=await registerIpc({ workbenchUserState: testWorkbenchUserState(), appDocumentSources: testAppDocumentSources(sender),initialConfig:config,window:{setBackgroundColor:vi.fn(),id:7,isDestroyed:()=>false,webContents:sender} as any,runtime,configStore:store,workbenchWindows:{setNativeOwner:()=>()=>{}} as any,

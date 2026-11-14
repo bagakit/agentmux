@@ -39,6 +39,16 @@ const edits = {
     file: 'apps/desktop/src/renderer/src/components/toolkit/TuiToolkitResult.tsx',
     before: 'return () => { ++refreshGeneration.current }',
     after: 'return () => { ++refreshGeneration.current; void api.toolkit.stop(definition.id, execution!.executionId) }'
+  },
+  'end-runs-command': {
+    file: 'apps/desktop/src/renderer/src/components/toolkit/TuiToolkitResult.tsx',
+    before: "else if (operation === 'end' && unconfirmedLaunch && canEnd) await api.toolkit.stop(definition.id, unconfirmedLaunch.executionId, { cancelPendingLaunch: true })",
+    after: "else if (operation === 'end' && unconfirmedLaunch && canEnd) await api.toolkit.run(definition.id)"
+  },
+  'ignore-released-launch-baseline': {
+    file: 'apps/desktop/src/renderer/src/components/toolkit/TuiToolkitResult.tsx',
+    before: 'expectedLatestExecutionId: snapshot.releasedLaunch?.executionId ?? snapshot.latestConfirmed?.executionId ?? null',
+    after: 'expectedLatestExecutionId: snapshot.latestConfirmed?.executionId ?? null'
   }
 } as const
 const mutation = process.env.AGENTMUX_TUI_UI_MUTATION

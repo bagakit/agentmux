@@ -34,7 +34,7 @@ it('the production IPC evaluate bridge preserves its original captured request i
   try {
     const value = await f.handlers.get('toolkit:evaluate')!(f.event, 'display-tool', input)
     expect(value).toEqual({ operation: 'toolkit.evaluate', snapshot: f.snapshot })
-    expect(f.execute).toHaveBeenCalledWith(expect.objectContaining({ operation: 'toolkit.evaluate', toolId: 'display-tool', input }), expect.any(AbortSignal))
+    expect(f.execute).toHaveBeenCalledWith(expect.objectContaining({ operation: 'toolkit.evaluate', toolId: 'display-tool', input }), expect.any(AbortSignal), undefined)
   } finally { f.close() }
 })
 it('the production IPC leaves omitted display input with its original execution owner', async () => {

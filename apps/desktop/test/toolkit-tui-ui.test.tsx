@@ -167,6 +167,60 @@ describe('TUI toolkit product presentation', () => {
     expect(run).toHaveBeenCalledWith(value.toolId, { invocationId: expect.stringMatching(/^[1-9A-HJ-NP-Za-km-z]{12}$/u),
       expectedRevision: value.definition.revision, expectedLatestExecutionId: null })
   })
+  it('lets the user end a dispatched launch and then start separately', async () => {
+    const original = running()
+    const admission = { ...original.admission!, run: null, state: 'unknown' as const, reason: 'Core has no confirmed Run.' }
+    const pending: ToolkitScriptSnapshot = { ...original, admission, state: 'unknown', pendingLaunch: 'dispatched' }
+    const settled: ToolkitScriptSnapshot = { ...original, admission: null, sequence: 2, state: 'stopped',
+      latestConfirmed: { ...admission, state: 'stopped', endedAt: fixtureEpoch(2), exitCode: null } }
+    observe(pending)
+    const stop = vi.spyOn(api.toolkit, 'stop').mockRejectedValueOnce(new Error('Retirement receipt unavailable.')).mockResolvedValueOnce(settled)
+    const run = vi.spyOn(api.toolkit, 'run').mockResolvedValue(pending)
+    await dom.render(<UserToolkitResult definition={pending.definition} active close={vi.fn()} />)
+    const action = (label: string) => [...dom.container.querySelectorAll('button')].find(button => button.textContent === label)
+    expect(action('Continue original request')).toBeUndefined()
+    expect(action('Run saved command')).toBeUndefined()
+    await act(async () => action('Check launch status')!.click())
+    expect(api.toolkit.get).toHaveBeenCalledWith(pending.toolId)
+    expect(stop).not.toHaveBeenCalled()
+    await act(async () => action('End pending launch')!.click())
+    expect(stop).toHaveBeenLastCalledWith(pending.toolId, admission.executionId, { cancelPendingLaunch: true })
+    expect(dom.container.textContent).toContain('Retirement receipt unavailable.')
+    expect(action('Run saved command')).toBeUndefined()
+    vi.mocked(api.toolkit.get).mockResolvedValue(settled)
+    await act(async () => action('End pending launch')!.click())
+    expect(action('End pending launch')).toBeUndefined()
+    expect(run).not.toHaveBeenCalled()
+    await act(async () => action('Run saved command')!.click())
+    expect(run).toHaveBeenCalledWith(pending.toolId, { invocationId: expect.any(String),
+      expectedRevision: pending.definition.revision, expectedLatestExecutionId: admission.executionId })
+  })
+  it('retains an unconfirmed original launch and requires a separate user start if retirement is unavailable', async () => {
+    const original = running()
+    const admission = { ...original.admission!, run: null, state: 'unknown' as const, reason: 'Core has no confirmed Run.' }
+    const pending: ToolkitScriptSnapshot = { ...original, admission, state: 'unknown', pendingLaunch: 'retirement-unavailable' }
+    const released: ToolkitScriptSnapshot = { ...original, admission: null, sequence: 2, state: 'idle', releasedLaunch: admission,
+      latestConfirmed: { ...original.admission!, executionId: 'previous-execution', state: 'succeeded', endedAt: fixtureEpoch(1), exitCode: 0 } }
+    observe(pending)
+    const stop = vi.spyOn(api.toolkit, 'stop').mockResolvedValueOnce(released)
+    const run = vi.spyOn(api.toolkit, 'run').mockResolvedValue(pending)
+    const refresh = vi.spyOn(api.sessions, 'refresh')
+    await dom.render(<UserToolkitResult definition={pending.definition} active close={vi.fn()} />)
+    const action = (label: string) => [...dom.container.querySelectorAll('button')].find(button => button.textContent === label)
+    expect(dom.container.textContent).toContain('The original command may already have run.')
+    expect(action('End pending launch')).toBeUndefined()
+    expect(action('Run saved command')).toBeUndefined()
+    expect(stop).not.toHaveBeenCalled(); expect(run).not.toHaveBeenCalled()
+    vi.mocked(api.toolkit.get).mockResolvedValue(released)
+    await act(async () => action('Allow a new launch')!.click())
+    expect(stop).toHaveBeenCalledWith(pending.toolId, admission.executionId, { releasePendingLaunch: true })
+    expect(dom.container.textContent).toContain('The previous launch result is still unconfirmed.')
+    expect(refresh).not.toHaveBeenCalled(); expect(run).not.toHaveBeenCalled()
+    await act(async () => action('Run saved command')!.click())
+    expect(run).toHaveBeenCalledWith(pending.toolId, { invocationId: expect.any(String),
+      expectedRevision: pending.definition.revision, expectedLatestExecutionId: admission.executionId })
+    expect(terminal).not.toHaveBeenCalled()
+  })
   it('keeps an exact Stop action reachable from settings after hiding the tool', async () => {
     const value = { ...running(), definition: { ...definition(), enabled: false } }
     observe(value)

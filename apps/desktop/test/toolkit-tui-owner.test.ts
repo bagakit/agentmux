@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { fixturePath } from '../scripts/lib/fixture-values.mjs'
 import { fixtureEpoch } from '../../../test/fixture-values.mjs'
 import { randomUUID } from 'node:crypto'
-import type { AgentMuxClientEvent, AgentMuxRun, AgentMuxTerminalCreateInput, AgentMuxPreparedTerminal } from '@agentmux/core'
+import type { AgentMuxClientEvent, AgentMuxRun, AgentMuxTerminalCreateInput, AgentMuxPreparedTerminal, TerminalCreationInspection } from '@agentmux/core'
 import { parseToolkitSnapshot, type ToolkitRunInput, type ToolkitScriptSnapshot, type ToolkitInlineToolConfiguration } from '@agentmux/core/control'
 import { DEFAULT_CONFIG } from '../src/main/config-store.js'
 import { ConfigOwner } from '../src/main/config-owner.js'
@@ -17,6 +17,12 @@ const definition: ToolkitInlineToolConfiguration = { id: 'interactive-tool', rev
   icon: 'terminal', enabled: true, statusBar: 'icon', workspacePath: fixturePath('tmp'),
   script: 'printf "%s\\n" "$1"; read answer; printf "%s\\n" "$answer"', args: ['ready'], actions: [] }
 const flush = async () => { for (let index = 0; index < 8; index++) await new Promise(resolve => setImmediate(resolve)) }
+const runtime = { runtimeId: 'fixture-runtime', instanceId: 'fixture-daemon', buildIdentity: 'fixture-build', protocolVersion: 1 }
+const launchReceipt = (prepared: AgentMuxPreparedTerminal, run: AgentMuxRun | null, phase: 'dispatched' | 'published' = 'published'): TerminalCreationInspection => ({
+  hostId: 'local', operationId: prepared.createOperationId, known: !!run || phase === 'dispatched',
+  admission: run || phase === 'dispatched' ? { phase, runtime, workspacePath: prepared.workspacePath, run,
+    observation: { availability: run ? 'retained' : 'not-observed', runtime }, diskDurability: 'confirmed' } : null
+})
 function fixture(tools: ToolkitInlineToolConfiguration[] = [definition], env: Record<string, string> = {}, bundled: ToolkitInlineToolConfiguration[] = []) {
   let config = { ...structuredClone(DEFAULT_CONFIG), toolkit: { tools: structuredClone(tools) } }
   const receipts = new Map<string, unknown>(), runs = new Map<string, AgentMuxRun>(), creates = new Map<string, string>()
@@ -66,8 +72,9 @@ function fixture(tools: ToolkitInlineToolConfiguration[] = [definition], env: Re
     prepare: (current, next) => prepareToolkitConfig(current, next, id => custom.guardDelete(id)),
     save: async next => structuredClone(next), publish: saved => { config = saved as typeof config; custom.configurationChanged() } })
   const openRunPort = vi.fn(async () => port)
-  const inspectTuiCreation = vi.fn(async (_prepared: AgentMuxPreparedTerminal): Promise<AgentMuxRun | null> => null)
-  const makeOwner = () => new CustomToolkitOwner({ config: owner, receipts: storage, openRunPort, inspectTuiCreation,
+  const inspectTuiCreation = vi.fn(async (prepared: AgentMuxPreparedTerminal) => launchReceipt(prepared, null))
+  const retireTuiCreation = vi.fn(async (prepared: AgentMuxPreparedTerminal, _runtimeId: string): Promise<TerminalCreationInspection> => launchReceipt(prepared, null, 'dispatched'))
+  const makeOwner = () => new CustomToolkitOwner({ config: owner, receipts: storage, openRunPort, inspectTuiCreation, retireTuiCreation,
     runner: process.execPath, env, bundled: () => bundled, now: () => fixtureEpoch(0, 0, 2) })
   custom = makeOwner()
   async function snapshot(id = definition.id): Promise<ToolkitScriptSnapshot> {
@@ -80,7 +87,7 @@ function fixture(tools: ToolkitInlineToolConfiguration[] = [definition], env: Re
     return { invocationId: randomUUID(), expectedRevision: snapshot.definition.revision,
       expectedLatestExecutionId: snapshot.admission?.executionId ?? snapshot.latestConfirmed?.executionId ?? null }
   }
-  return { owner, storage, receipts, runs, listeners, port, openRunPort, inspectTuiCreation, create, prepare, createPrepared, shell, snapshot, input, emit,
+  return { owner, storage, receipts, runs, listeners, port, openRunPort, inspectTuiCreation, retireTuiCreation, create, prepare, createPrepared, shell, snapshot, input, emit,
     get custom() { return custom }, get config() { return config },
     reopen: async () => { await custom.dispose(); custom = makeOwner(); return custom },
     edit: async (change: Partial<ToolkitInlineToolConfiguration>) => {
@@ -182,7 +189,7 @@ describe('Toolkit TUI lifecycle on the existing admission owner', () => {
     expect(f.receipts.get(definition.id)).toMatchObject({ admission: { state: 'unknown', reason: 'Original start receipt was lost' } })
     const originalRun = [...f.runs.values()][0]!
     const snapshot = { state: 'running', admission: { executionId: original.executionId, invocationId: original.invocationId, run: { hostId: 'local', runId: originalRun.runId } } }
-    f.inspectTuiCreation.mockResolvedValue(originalRun)
+    f.inspectTuiCreation.mockImplementation(async prepared => launchReceipt(prepared, originalRun))
     if (reader === 'owner restart') {
       await f.reopen()
       await f.custom.loadConfigured()
@@ -206,7 +213,7 @@ describe('Toolkit TUI lifecycle on the existing admission owner', () => {
     const retained = await f.snapshot(), original = retained.admission!, run = [...f.runs.values()][0]!
     await f.reopen()
     f.inspectTuiCreation.mockRejectedValueOnce(new Error('Storage currently unavailable'))
-      .mockResolvedValueOnce({ ...run, workspacePath: fixturePath('another-directory') })
+      .mockImplementationOnce(async prepared => launchReceipt(prepared, { ...run, workspacePath: fixturePath('another-directory') }))
     const unavailable = await f.snapshot()
     expect(unavailable).toMatchObject({ state: 'unknown', reason: 'Original launch error Receipt check: Storage currently unavailable', admission: { executionId: original.executionId, run: null } })
     const foreign = await f.snapshot()
@@ -225,12 +232,34 @@ describe('Toolkit TUI lifecycle on the existing admission owner', () => {
     const retained = (await f.snapshot()).admission!
     const run = [...f.runs.values()][0]!
     await f.reopen()
-    f.inspectTuiCreation.mockResolvedValue({ ...run, state: 'exited', exitCode: 0 })
+    f.inspectTuiCreation.mockImplementation(async prepared => launchReceipt(prepared, { ...run, state: 'exited', exitCode: 0 }))
     await f.custom.loadConfigured()
     expect(await f.snapshot()).toMatchObject({ state: 'succeeded', admission: null,
       latestConfirmed: { executionId: retained.executionId, invocationId: retained.invocationId, run: { runId: run.runId }, exitCode: 0 } })
     expect(f.createPrepared).toHaveBeenCalledOnce()
     expect(f.openRunPort).toHaveBeenCalledOnce()
+    await f.custom.dispose()
+  })
+
+  it('keeps a confirmed cancelled launch manual after the enabled startup owner fully reloads', async () => {
+    const f = fixture([{ ...definition, autoStart: true }])
+    f.create.mockRejectedValueOnce(new Error('Original no-Run launch is unconfirmed'))
+    f.inspectTuiCreation.mockImplementation(async prepared => launchReceipt(prepared, null, 'dispatched'))
+    f.retireTuiCreation.mockImplementationOnce(async prepared => {
+      const receipt = launchReceipt(prepared, null, 'dispatched')
+      return { ...receipt, admission: { ...receipt.admission!, phase: 'retired', retirement: {
+        phase: 'observed', request: { operationId: prepared.createOperationId, runtimeId: runtime.runtimeId, dispatchRuntime: runtime },
+        native: { outcome: 'retired', runtime }, diskDurability: 'confirmed'
+      } } }
+    })
+    await f.custom.loadConfigured()
+    const original = (await f.snapshot()).admission!
+    await f.custom.changePendingLaunch(definition.id, original.executionId, 'cancel', new AbortController().signal)
+    await f.reopen()
+    await f.custom.loadConfigured()
+    expect(f.createPrepared).toHaveBeenCalledOnce()
+    expect(await f.snapshot()).toMatchObject({ state: 'stopped', admission: null, latestConfirmed: {
+      executionId: original.executionId, cancelledPendingLaunch: true, reason: original.reason } })
     await f.custom.dispose()
   })
 
@@ -255,7 +284,7 @@ describe('Toolkit TUI lifecycle on the existing admission owner', () => {
     f.create.mockImplementationOnce(async (...args) => { await create(...args); throw new Error('Original launch reply lost') })
     await f.custom.loadConfigured()
     const original = (await f.snapshot()).admission!, run = [...f.runs.values()][0]!
-    let found!: (run: AgentMuxRun | null) => void
+    let found!: (receipt: TerminalCreationInspection) => void
     f.inspectTuiCreation.mockClear().mockReturnValueOnce(new Promise(resolve => { found = resolve }))
     const check = f.snapshot()
     await vi.waitFor(() => expect(f.inspectTuiCreation).toHaveBeenCalledOnce())
@@ -266,7 +295,7 @@ describe('Toolkit TUI lifecycle on the existing admission owner', () => {
     await flush()
     expect(f.inspectTuiCreation).toHaveBeenCalledOnce()
     expect(f.createPrepared).toHaveBeenCalledOnce()
-    found(run)
+    found(launchReceipt(f.createPrepared.mock.calls[0]![0], run))
     const [inspected, lease, continued] = await Promise.all([check, reader, continueOriginal])
     expect(inspected.admission?.run?.runId).toBe(run.runId)
     expect(continued).toMatchObject({ admission: { run: { runId: run.runId } } })
