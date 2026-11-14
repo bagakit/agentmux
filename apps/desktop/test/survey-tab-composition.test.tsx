@@ -1883,3 +1883,169 @@ it('[survey-page-menu] background sole page closes its own Browser through Main 
   expect(source().regions[page.regionId]).toBe(original.regions[page.regionId])
   expect(useAppStore.getState().surveyPageReferences).toEqual([page])
 })
+
+// T007 ordinary exact-page order: the original reference owner, not a new topology.
+async function pageOrderFixture() {
+  await dragPagePair()
+  const old = vi.mocked(HTMLElement.prototype.getBoundingClientRect).getMockImplementation()!
+  vi.mocked(HTMLElement.prototype.getBoundingClientRect).mockImplementation(function(this: HTMLElement) {
+    const wrapper = this.closest<HTMLElement>('[data-survey-page-order]')
+    if (wrapper) {
+      const rows = [...document.querySelectorAll('[data-survey-page-order]')]
+      return new DOMRect(10, 80 + rows.indexOf(wrapper) * 44, 230, 36)
+    }
+    return old.call(this)
+  })
+  return { first: { regionId: 'composition-page', browserId: 'composition-page' }, second: { regionId: 'target-page', browserId: 'target-page' },
+    grip: () => document.querySelector<HTMLElement>('[data-survey-page-region-id="composition-page"] .survey-drag-handle')!,
+    secondRow: () => document.querySelector<HTMLElement>('[data-survey-page-order="target-page"]')! }
+}
+
+it('[page-order] filtered page slots preserve hidden, pinned and unavailable originals', async () => {
+  const { reorderSurveyPages } = await import('../src/renderer/src/lib/survey-page-order')
+  const a = { regionId: 'visible-a', browserId: 'browser-a' }, b = { regionId: 'visible-b', browserId: 'browser-b' }
+  const hidden = { regionId: 'other-profile', browserId: 'hidden-browser' }, retained = { regionId: 'unavailable', browserId: 'original-browser' }
+  const base = [hidden, a, retained, b]
+  expect(reorderSurveyPages(base, [a, b], a, b)).toEqual([hidden, b, retained, a])
+  expect(reorderSurveyPages(base, [a, b], a, a)).toBe(base)
+  expect(reorderSurveyPages(base, [a, b], a, retained)).toBe(base)
+})
+
+it('[page-order] actual PointerSensor grip reorders once through the public owner and keeps the same Browser input and graph', async () => {
+  const f = await pageOrderFixture(), before = useAppStore.getState(), graph = (await core.read())!.graph
+  const input = document.querySelector<HTMLInputElement>('.global-survey-surface [data-workbench-region-id="composition-page"] [aria-label="Browser address"]')!
+  expect(input).not.toBeNull()
+  await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, 'Unsubmitted same original address'); input.dispatchEvent(new Event('input', { bubbles: true })) }); input.setSelectionRange(3, 12)
+  const requests = vi.spyOn(useAppStore.getState(), 'executeControl'), close = vi.spyOn(api.browser, 'close'), navigate = vi.spyOn(api.browser, 'navigate')
+  const rect = f.secondRow().getBoundingClientRect()
+  await dragPointer(f.grip(), { x: rect.left + 35, y: rect.top + 20 })
+  await vi.waitFor(() => expect(useAppStore.getState().surveyPageReferences).toEqual([f.second, f.first]))
+  expect(requests.mock.calls.filter(([request]) => request.operation === 'space.survey-list' && request.collection?.pageReferences)).toHaveLength(1)
+  expect(useAppStore.getState().surveyZoneSelection).toEqual(before.surveyZoneSelection)
+  expect(useAppStore.getState().tabs).toEqual(before.tabs); expect((await core.read())!.graph).toEqual(graph)
+  expect(document.querySelector('.global-survey-surface [data-workbench-region-id="composition-page"] [aria-label="Browser address"]')).toBe(input)
+  expect(input.value).toBe('Unsubmitted same original address'); expect([input.selectionStart, input.selectionEnd]).toEqual([3, 12])
+  expect(close).not.toHaveBeenCalled(); expect(navigate).not.toHaveBeenCalled()
+  await prepareRendererUpdate()
+  expect(JSON.parse(localStorage.getItem(WORKBENCH_USER_STATE_KEY)!).state.surveyPageReferences).toEqual([f.second, f.first])
+})
+
+it('[page-order] original KeyboardSensor reorders; Escape, same row and invalid release never save', async () => {
+  const f = await pageOrderFixture(), requests = vi.spyOn(useAppStore.getState(), 'executeControl')
+  const key = async (value: string, code = value) => { await act(async () => f.grip().dispatchEvent(new KeyboardEvent('keydown', { key: value, code, bubbles: true }))); await new Promise(resolve => setTimeout(resolve, 30)) }
+  await act(async () => f.grip().focus()); await key(' ', 'Space'); await key('ArrowDown'); await key('Escape')
+  await key(' ', 'Space'); await key(' ', 'Space')
+  expect(useAppStore.getState().surveyPageReferences).toEqual([f.first, f.second]); expect(requests).not.toHaveBeenCalled()
+  await dragPointer(f.grip(), { x: 1200, y: 1200 })
+  expect(requests).not.toHaveBeenCalled()
+  await act(async () => f.grip().focus()); await key(' ', 'Space'); await key('ArrowDown'); await key(' ', 'Space')
+  await vi.waitFor(() => expect(useAppStore.getState().surveyPageReferences).toEqual([f.second, f.first]))
+  expect(requests.mock.calls.filter(([request]) => request.operation === 'space.survey-list' && request.collection?.pageReferences)).toHaveLength(1)
+})
+
+it('[page-order] the same ordered owner rejects stale order, preserves unread references and reports an unknown save without rolling back later preferences', async () => {
+  const f = await pageOrderFixture(), state = useAppStore.getState(), originalPages = state.surveyPageReferences
+  const change = (pages: typeof originalPages, expected: typeof originalPages) => useAppStore.getState().executeControl({ schemaVersion: 5, requestId: 'page-order-original', operation: 'space.survey-list', collection: { pageReferences: pages, expectedPageReferences: expected } })
+  const retained = { regionId: 'missing-original-region', browserId: 'missing-original-browser' }
+  useAppStore.setState({ surveyPageReferences: [f.first, retained, f.second] })
+  const report = await change([f.second, retained, f.first], [f.first, retained, f.second])
+  expect(report.operation).toBe('space.survey-list'); if (report.operation !== 'space.survey-list') throw Error('Wrong ordered owner')
+  expect(report.changed).toBe(true); expect(report.outcome).toBe('changed'); expect(report.pageReferences).toEqual([f.second, retained, f.first])
+  const stale = await change([f.first, retained, f.second], [f.first, retained, f.second])
+  expect(stale.operation === 'space.survey-list' && stale.outcome).toBe('refused')
+  expect(useAppStore.getState().surveyPageReferences).toEqual([f.second, retained, f.first])
+  const raw = [f.second, { unread: 'original bytes' }, retained, f.first]
+  useAppStore.setState({ surveyPageReadRecovery: { source: raw, issue: 'Original source unread' } })
+  const unread = await change([f.first, retained, f.second], [f.second, retained, f.first])
+  expect(unread.operation === 'space.survey-list' && unread.outcome).toBe('unknown')
+  expect(useAppStore.getState().surveyPageReadRecovery?.source).toBe(raw)
+  useAppStore.setState({ surveyPageReadRecovery: null })
+  let release!: () => void
+  vi.mocked(api.ui.requestStorageFlush).mockImplementationOnce(() => new Promise<void>(resolve => { release = resolve }))
+  const pending = change([f.first, retained, f.second], [f.second, retained, f.first])
+  await vi.waitFor(() => expect(release).toBeDefined())
+  await change([f.second, f.first, retained], [f.first, retained, f.second])
+  release(); await pending
+  expect(useAppStore.getState().surveyPageReferences).toEqual([f.second, f.first, retained])
+  await prepareRendererUpdate()
+  vi.mocked(api.ui.requestStorageFlush).mockRejectedValue(Error('Original order save ACK unknown'))
+  const unknown = await change([f.first, retained, f.second], [f.second, f.first, retained])
+  expect(unknown.operation === 'space.survey-list' && unknown.outcome).toBe('partial')
+  expect(useAppStore.getState().surveyPageReferences).toEqual([f.first, retained, f.second])
+})
+
+it('[page-order] actual Source CLI changes and reads exact order, refuses a stale same-members request, and a second process reads original Main file', async () => {
+  const f = await pageOrderFixture(), cli = await prepareSourceCoreCli(), socketDirectory = await mkdtemp('/tmp/apgo-')
+  const socketPath = join(socketDirectory, 'control.sock'), server = new AgentMuxControlServer({ socketPath, execute: request => useAppStore.getState().executeControl(request) })
+  const env = privateEnvironment({ AGENTMUX_RUNTIME_DIRECTORY: socketDirectory, AGENTMUX_STATE_DIRECTORY: join(socketDirectory, 'state'), AGENTMUX_RPC_ENDPOINT: 'unix:' + socketPath })
+  const command = (input?: object, expected = 0) => new Promise<any>((resolve, reject) => {
+    const child = spawn(process.execPath, [cli.cliPath, 'space', 'survey-list', ...(input ? ['--input', '-'] : [])], { env, stdio: ['pipe', 'pipe', 'pipe'] })
+    let stdout = '', stderr = ''; child.stdout.on('data', part => { stdout += part }); child.stderr.on('data', part => { stderr += part })
+    child.once('error', reject); child.once('close', code => { try { expect(code, stderr + stdout).toBe(expected); resolve(objectCliReceipt(JSON.parse(stdout)).result) } catch (error) { reject(error) } }); child.stdin.end(input ? JSON.stringify(input) : '')
+  })
+  try {
+    await server.start()
+    const guide = await new Promise<string>((resolve, reject) => {
+      const child = spawn(process.execPath, [cli.cliPath, 'space', '--skill'], { env, stdio: ['ignore', 'pipe', 'pipe'] })
+      let stdout = '', stderr = ''; child.stdout.on('data', part => { stdout += part }); child.stderr.on('data', part => { stderr += part })
+      child.once('error', reject); child.once('close', code => code === 0 ? resolve(stdout) : reject(Error(stderr)))
+    })
+    expect(guide).toContain('Page arrays are ordered: reordering the same members is a change')
+    expect((await command()).pageReferences).toEqual([f.first, f.second])
+    const changed = await command({ collection: { pageReferences: [f.second, f.first], expectedPageReferences: [f.first, f.second] } })
+    expect(changed.changed).toBe(true); expect(changed.outcome).toBe('changed'); expect((await command()).pageReferences).toEqual([f.second, f.first])
+    const stale = await command({ collection: { pageReferences: [f.first, f.second], expectedPageReferences: [f.first, f.second] } }, 1)
+    expect(stale.outcome).toBe('refused'); expect(stale.pageReferences).toEqual([f.second, f.first])
+    await prepareRendererUpdate()
+    const userPath = join(directory, 'ordered-user.json'), user = new WorkbenchUserStateStore(userPath)
+    await user.write(JSON.stringify({ state: {}, version: 1 }))
+    const document = createWorkbenchUserDocument({ readWorkbenchState: () => user.read(), importWorkbenchState: raw => user.importIfAbsent(raw), writeWorkbenchState: raw => user.write(raw) }, () => localStorage)
+    await document.hydrate(); await document.persistent.checkpoint(WORKBENCH_USER_STATE_KEY, JSON.parse(localStorage.getItem(WORKBENCH_USER_STATE_KEY)!))
+    const saved = JSON.parse((await user.read())!); expect(saved.state.surveyPageReferences).toEqual([f.second, f.first])
+    const reader = await new Promise<string>((resolve, reject) => {
+      const child = spawn(process.execPath, ['-e', 'process.stdout.write(JSON.stringify({pid:process.pid,record:JSON.parse(require("node:fs").readFileSync(process.argv[1],"utf8"))}))', userPath], { env, stdio: ['ignore', 'pipe', 'pipe'] })
+      let output = ''; child.stdout.on('data', part => { output += part }); child.once('error', reject)
+      child.once('close', code => code === 0 ? resolve(output) : reject(Error('Original file readback failed')))
+    })
+    const actual = JSON.parse(reader)
+    expect(actual.pid).not.toBe(process.pid); expect(actual.record.state.surveyPageReferences).toEqual([f.second, f.first])
+  } finally { await server.stop(); await cli.cleanup(); await rm(socketDirectory, { recursive: true, force: true }) }
+}, 60_000)
+
+it('[page-order] actual Profile-filtered list reorders only its visible slots and can reorder a retained reference without a Native owner', async () => {
+  const f = await pageOrderFixture(), state = useAppStore.getState(), firstTab = state.tabs['composition-tab']!, secondTab = state.tabs['target-tab']!
+  const hidden = { regionId: 'other-profile-page', browserId: 'other-profile-browser' }, retained = { regionId: 'retained-order-region', browserId: 'retained-order-browser' }
+  const hiddenNative = await api.browser.create(hidden.browserId, 'https://other.example.test/', resource.id)
+  const hiddenTab = createWorkbenchTab('hidden-order-tab', { ...hiddenNative, kind: 'browser', workspaceId: resource.id, browserId: hidden.browserId, regionId: hidden.regionId, url: 'https://other.example.test/', title: 'Other Profile page', mode: 'normal', profileId: 'profile-b' })
+  const first = firstTab.regions[f.first.regionId]!, second = secondTab.regions[f.second.regionId]!
+  if (first.kind !== 'browser' || second.kind !== 'browser') throw Error('Original Browser fixture required')
+  await act(async () => useAppStore.setState({ tabs: { ...state.tabs,
+    [firstTab.id]: { ...firstTab, regions: { ...firstTab.regions, [first.regionId]: { ...first, profileId: 'profile-a', mode: 'normal' } } },
+    [secondTab.id]: { ...secondTab, regions: { ...secondTab.regions, [second.regionId]: { ...second, profileId: 'profile-a', mode: 'normal' } } },
+    [hiddenTab.id]: hiddenTab }, layouts: { ...state.layouts, [resource.id]: addTabOccurrence(state.layouts[resource.id]!, 'source-group', hiddenTab.id)! },
+    surveyPageReferences: [f.first, hidden, f.second, retained], surveyProfileView: { kind: 'profile', profileId: 'profile-a' } }))
+  await checkpointSpatialWorkbench()
+  await vi.waitFor(() => expect(document.querySelector('[data-survey-page-region-id="other-profile-page"]')).toBeNull())
+  const rect = f.secondRow().getBoundingClientRect()
+  await dragPointer(f.grip(), { x: rect.left + 30, y: rect.top + 20 })
+  await vi.waitFor(() => expect(useAppStore.getState().surveyPageReferences).toEqual([f.second, hidden, f.first, retained]))
+  const handle = document.querySelector<HTMLElement>('[data-survey-page-region-id="retained-order-region"] .survey-drag-handle')!
+  expect(handle).not.toBeNull()
+  const close = vi.spyOn(api.browser, 'close'), navigate = vi.spyOn(api.browser, 'navigate')
+  const target = f.secondRow().getBoundingClientRect()
+  await dragPointer(handle, { x: target.left + 30, y: target.top + 15 })
+  await vi.waitFor(() => expect(useAppStore.getState().surveyPageReferences).toEqual([retained, hidden, f.second, f.first]))
+  expect(close).not.toHaveBeenCalled(); expect(navigate).not.toHaveBeenCalled()
+})
+
+it('[page-order] repeated exact page admission preserves the user order while still saving through the original owner', async () => {
+  const f = await pageOrderFixture(), originalPages = [f.second, f.first]
+  useAppStore.setState({ surveyPageReferences: originalPages })
+  const before = useAppStore.getState(), graph = (await core.read())!.graph
+  const report = await before.setSurveyPageCollected(f.second, true)
+  expect(report.outcome).toBe('unchanged'); expect(report.changed).toBe(false)
+  expect(report.pageReferences).toEqual(originalPages); expect(report.save?.clientStateWritten).toBe(true)
+  expect(useAppStore.getState().surveyPageReferences).toEqual(originalPages)
+  expect(useAppStore.getState().surveyZoneSelection).toEqual(before.surveyZoneSelection)
+  expect((await core.read())!.graph).toEqual(graph)
+})
