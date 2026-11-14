@@ -1,9 +1,8 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
-import { Terminal, type ILink, type ILinkProvider } from '@xterm/xterm'
-import { WebLinksAddon } from '@xterm/addon-web-links'
+import { afterEach, describe, expect, it } from 'vitest'
+import { Terminal } from '@xterm/xterm'
 import { Unicode11Addon } from '@xterm/addon-unicode11'
 import { formatAmuxObjectLink, parseAmuxObjectLink } from '@agentmux/core/sharing'
-import { TERMINAL_LINK_URL_REGEX } from '../src/renderer/src/lib/terminal-http-link'
+import { terminalLinksAtRow } from '../src/renderer/src/lib/terminal-link-range'
 
 const terminals: Terminal[] = []
 afterEach(() => { for (const terminal of terminals.splice(0)) terminal.dispose() })
@@ -13,21 +12,11 @@ async function links(text: string, cols = 80, row = 1) {
   terminal.loadAddon(new Unicode11Addon()); terminal.unicode.activeVersion = '11'
   terminals.push(terminal)
   await new Promise<void>(resolve => terminal.write(text, resolve))
-  let provider: ILinkProvider | undefined
-  const activate = vi.fn()
-  // Published addon and real parser/cells; only capture its public registration.
-  const addon = new WebLinksAddon(activate, { urlRegex: TERMINAL_LINK_URL_REGEX })
-  addon.activate({ buffer: terminal.buffer, cols, registerLinkProvider(value: ILinkProvider) {
-    provider = value
-    return { dispose() {} }
-  } } as Terminal)
-  let result: ILink[] | undefined
-  provider!.provideLinks(row, value => { result = value })
-  addon.dispose()
-  return { terminal, activate, result: result ?? [] }
+  return { result: terminalLinksAtRow(terminal, row, { workspaceRoot: '' }).flatMap(({ range, target }) =>
+    target.kind === 'object' || target.kind === 'http' ? [{ range, text: target.url }] : []) }
 }
 
-describe('published xterm bare object-link provider', () => {
+describe('bare object links in published xterm cells', () => {
   it('recognizes each original object kind and keeps its encoded identity intact', async () => {
     const targets = [
       { kind: 'agent', agentSessionId: 'original/SID 中文' },
@@ -49,14 +38,11 @@ describe('published xterm bare object-link provider', () => {
   it('uses actual Unicode and soft-wrap cell ranges from either row', async () => {
     const uri = 'amux://agent/original%20SID'
     for (const row of [1, 2, 3]) {
-      const { result, activate } = await links(`😀 e\u0301 ${uri}`, 12, row)
+      const { result } = await links(`😀 e\u0301 ${uri}`, 12, row)
       expect(result).toHaveLength(1)
       expect(result[0]).toMatchObject({ text: uri, range: {
         start: { x: 6, y: 1 }, end: { x: (5 + uri.length - 1) % 12 + 1, y: Math.floor((5 + uri.length - 1) / 12) + 1 }
       } })
-      const click = {} as MouseEvent
-      result[0]!.activate(click, result[0]!.text)
-      expect(activate).toHaveBeenCalledExactlyOnceWith(click, uri)
     }
   })
 

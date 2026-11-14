@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { Terminal } from '@xterm/xterm'
-import { WebLinksAddon } from '@xterm/addon-web-links'
+import { terminalLinksAtRow } from '../src/renderer/src/lib/terminal-link-range'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { subscribeTerminalInput } from '../../../packages/client-ui/src/terminal/input'
 
@@ -31,7 +31,10 @@ async function open(provider: 'bare' | 'osc8', encoding: 'sgr' | 'legacy') {
   const terminal = new Terminal({ cols: 80, rows: 24, allowProposedApi: true,
     linkHandler: { activate, hover } })
   releases.push(() => terminal.dispose())
-  if (provider === 'bare') terminal.loadAddon(new WebLinksAddon(activate, { hover }))
+  if (provider === 'bare') terminal.registerLinkProvider({
+    provideLinks: (row, callback) => callback(terminalLinksAtRow(terminal, row, { workspaceRoot: '' })
+      .flatMap(({ target, range }) => target.kind === 'http' ? [{ range, text: target.url, activate, hover }] : []))
+  })
   const host = document.createElement('div'); document.body.append(host); terminal.open(host)
   const link = provider === 'bare' ? url : `\x1b]8;;${url}\x07declared link\x1b]8;;\x07`
   await new Promise<void>(resolve => terminal.write(`\x1b[?1000h${encoding === 'sgr' ? '\x1b[?1006h' : ''}${link}\r\nplain control`, resolve))

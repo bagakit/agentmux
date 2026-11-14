@@ -2,7 +2,7 @@ import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-valu
 import { afterEach, describe, expect, it } from 'vitest'
 import { Terminal } from '@xterm/xterm'
 import { Unicode11Addon } from '@xterm/addon-unicode11'
-import { terminalPathLinkAtBufferCell, terminalPathLinksInBuffer } from '../src/renderer/src/lib/terminal-link-range'
+import { terminalLinkAtCell, terminalLinksAtRow, terminalPathLinkAtBufferCell, terminalPathLinksInBuffer } from '../src/renderer/src/lib/terminal-link-range'
 
 const terminals: Terminal[] = []
 async function parsed(text: string, cols = 80, rows = 8) {
@@ -86,5 +86,58 @@ describe('published xterm buffer to file-link cell ranges', () => {
       expect(cells).toBeGreaterThan(0); expect(cells).toBeLessThanOrEqual(4096)
       expect(lines).toBeLessThanOrEqual(34)
     }
+  })
+})
+
+
+describe('terminal links use complete original targets', () => {
+  const root = '/home/source/repo'
+  const osc = (uri: string, label: string) => '\x1b]8;;' + uri + '\x07' + label + '\x1b]8;;\x07'
+
+  it('recovers a one-cell OSC link at the end of a row, including adjacent declarations', async () => {
+    const file = 'file:///home/source/repo/src/%E4%B8%AD%20%3A42'
+    const terminal = await parsed(osc('https://example.test/first', 'A') + osc(file, 'B'))
+    const links = terminalLinksAtRow(terminal, 1, { workspaceRoot: root })
+    expect(links.map(link => link.range)).toEqual([
+      { start: { x: 1, y: 1 }, end: { x: 1, y: 1 } },
+      { start: { x: 2, y: 1 }, end: { x: 2, y: 1 } }
+    ])
+    expect(terminalLinkAtCell(links, 2, 1)).toEqual({
+      kind: 'file', file: { index: 0, length: file.length, path: 'src/中 :42' }
+    })
+  })
+
+  it('uses identical complete Unicode and quoted targets from each row of a wrapped token', async () => {
+    const terminal = await parsed('"src/(区)/[id]/cafe\u0301 🖼️ 预览.ts":12:3', 13)
+    const scope = { workspaceRoot: root }
+    const expected = terminalLinksAtRow(terminal, 1, scope)
+    expect(expected).toHaveLength(1)
+    expect(expected[0]).toMatchObject({ target: { kind: 'file', file: {
+      path: 'src/(区)/[id]/cafe\u0301 🖼️ 预览.ts', line: 12, column: 3
+    } } })
+    expect(expected[0]!.range.start).toEqual({ x: 1, y: 1 })
+    expect(expected[0]!.range.end.y).toBeGreaterThan(1)
+    for (let row = 2; row <= expected[0]!.range.end.y; row++) expect(terminalLinksAtRow(terminal, row, scope)).toEqual(expected)
+  })
+
+  it('never uses a file-shaped label or URL query as a substitute for the target', async () => {
+    const terminal = await parsed(osc('https://example.test/original', 'src/wrong.ts') +
+      ' https://example.test/?src=nested/wrong.ts file:///home/source/repo/src/right.ts', 80)
+    const links = [1, 2].flatMap(row => terminalLinksAtRow(terminal, row, { workspaceRoot: root }))
+    const paths = links.flatMap(({ target }) => target.kind === 'file' ? [target.file.path] : [])
+    expect(paths).toContain('src/right.ts')
+    expect(paths.every(path => path === 'src/right.ts')).toBe(true)
+  })
+
+  it('uses the confirmed local home and never invents it for another host', async () => {
+    const terminal = await parsed('~/repo/src/预览.ts')
+    expect(terminalLinksAtRow(terminal, 1, { workspaceRoot: root })).toEqual([])
+    expect(terminalLinksAtRow(terminal, 1, { workspaceRoot: root, homeDir: '/home/source' })[0])
+      .toMatchObject({ target: { kind: 'file', file: { path: 'src/预览.ts' } } })
+  })
+
+  it('refuses a clipped URL on every hovered row instead of opening a shorter address', async () => {
+    const terminal = await parsed('https://example.test/' + 'x'.repeat(4000) + '/right', 60, 100)
+    for (const row of [1, 2, 31, 66]) expect(terminalLinksAtRow(terminal, row, { workspaceRoot: root })).toEqual([])
   })
 })

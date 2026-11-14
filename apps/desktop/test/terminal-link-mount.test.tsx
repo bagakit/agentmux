@@ -20,6 +20,7 @@ const renderer = vi.hoisted(() => {
     selection = ''
     cellLines: IBufferLine[] = []
     nullCell!: IBufferCell
+    _core?: { _oscLinkService: { getLinkData(id: number): { uri: string } | undefined } }
     provider?: ILinkProvider
     selectionChanged = () => {}
     scrolled = () => {}
@@ -51,17 +52,9 @@ const renderer = vi.hoisted(() => {
     resize() {}
     paste() {}
   }
-  class WebLinksAddon {
-    static instances: WebLinksAddon[] = []
-    constructor(public activate: (event: MouseEvent, uri: string) => void,
-      public callbacks: { hover: (event: MouseEvent, uri: string) => void; leave: () => void }) {
-      WebLinksAddon.instances.push(this)
-    }
-  }
-  return { Terminal, WebLinksAddon, disposable }
+  return { Terminal, disposable }
 })
 vi.mock('@xterm/xterm', () => ({ Terminal: renderer.Terminal }))
-vi.mock('@xterm/addon-web-links', () => ({ WebLinksAddon: renderer.WebLinksAddon }))
 vi.mock('@xterm/addon-fit', () => ({ FitAddon: class { fit() {}; proposeDimensions() { return { cols: 80, rows: 24 } } } }))
 vi.mock('@xterm/addon-search', () => ({ SearchAddon: class { onDidChangeResults = renderer.disposable } }))
 vi.mock('@xterm/addon-webgl', () => ({ WebglAddon: class { onContextLoss = renderer.disposable; dispose() {} } }))
@@ -98,7 +91,6 @@ let root: Root
 let element: HTMLElement
 let host: HTMLElement
 let terminal: InstanceType<typeof renderer.Terminal>
-let web: InstanceType<typeof renderer.WebLinksAddon>
 let openHttp: ReturnType<typeof vi.fn>
 let openFile: ReturnType<typeof vi.fn>
 let reportError: ReturnType<typeof vi.fn>
@@ -114,11 +106,19 @@ async function installCells(text: string, cols = 80) {
   if (vi.isFakeTimers()) await vi.advanceTimersByTimeAsync(1)
   await written
   terminal.cols = cols; terminal.nullCell = parsed.buffer.active.getNullCell()
+  const native = (parsed as unknown as { _core: NonNullable<typeof terminal._core> })._core
+  const declared = new Map<number, { uri: string }>()
   terminal.cellLines = Array.from({ length: parsed.buffer.active.length }, (_, y) => {
     const row = parsed.buffer.active.getLine(y)!, cells = Array.from({ length: row.length }, (_, x) => row.getCell(x)!)
+    for (const cell of cells) {
+      const id = (cell as { extended?: { urlId?: number } }).extended?.urlId
+      const value = id ? native._oscLinkService.getLinkData(id) : undefined
+      if (id && value) declared.set(id, value)
+    }
     const content = row.translateToString(false)
     return { isWrapped: row.isWrapped, length: row.length, getCell: (x: number) => cells[x], translateToString: (trim = false) => trim ? content.trimEnd() : content }
   })
+  terminal._core = { _oscLinkService: { getLinkData: id => declared.get(id) } }
   parsed.dispose()
 }
 
@@ -126,7 +126,7 @@ beforeEach(async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   vi.useFakeTimers()
   vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue('Macintosh')
-  renderer.Terminal.instances = []; renderer.WebLinksAddon.instances = []
+  renderer.Terminal.instances = []
   vi.spyOn(api.sessions, 'attach').mockResolvedValue({
     attachmentId: 'private-attachment', session,
     terminal: { type: 'unavailable', reason: 'source_gap' }, replay: [], resizeRevision: 0,
@@ -168,8 +168,7 @@ beforeEach(async () => {
   document.body.append(element, host); root = createRoot(element)
   await act(async () => { root.render(<TerminalView session={session} themeId="graphite" interactiveResize={false} linkOrigin={origin} autoFocus={false} />) })
   expect(renderer.Terminal.instances).toHaveLength(1)
-  expect(renderer.WebLinksAddon.instances).toHaveLength(1)
-  terminal = renderer.Terminal.instances[0]!; web = renderer.WebLinksAddon.instances[0]!
+  terminal = renderer.Terminal.instances[0]!
   await installCells('src/example.ts:3')
   expect(terminal.options.linkHandler?.activate).toBeTypeOf('function')
   expect(element.querySelector('.terminal-view__xterm--hydrating')).toBeNull()
@@ -192,6 +191,28 @@ async function fileLink(path = 'src/example.ts:3'): Promise<ILink> {
   terminal.provider!.provideLinks(1, (result) => { links = result })
   expect(links).toHaveLength(1)
   return links![0]!
+}
+
+// Project a single bare URI through the provider registered by TerminalView.
+// Only this small test fixture fabricates cells; the buffer/range tests use xterm.
+function bareLink(uri: string): ILink {
+  const previous = terminal.cellLines
+  terminal.cellLines = [{ length: uri.length, isWrapped: false, getCell: (column: number) => ({
+    getWidth: () => 1, getChars: () => uri[column] ?? ''
+  }) }] as IBufferLine[]
+  let found: ILink[] | undefined
+  try { terminal.provider!.provideLinks(1, links => { found = links }) }
+  finally { terminal.cellLines = previous }
+  expect(found).toHaveLength(1)
+  return found![0]!
+}
+
+const web = {
+  activate: (event: MouseEvent, uri: string) => bareLink(uri).activate(event, uri),
+  callbacks: {
+    hover: (event: MouseEvent, uri: string) => bareLink(uri).hover?.(event, uri),
+    leave: () => bareLink('https://example.test/path').leave?.(new MouseEvent('mouseleave'), 'https://example.test/path')
+  }
 }
 
 describe('mounted Terminal object-link activation', () => {
@@ -520,7 +541,6 @@ describe('mounted Terminal link exits', () => {
       root.render(render(focus))
     })
     terminal = renderer.Terminal.instances.at(-1)!
-    web = renderer.WebLinksAddon.instances.at(-1)!
     const mounted = [...renderer.Terminal.instances]
     vi.mocked(api.sessions.attach).mockClear(); vi.mocked(api.sessions.detach).mockClear()
     await act(async () => root.render(render(mote)))
@@ -542,7 +562,6 @@ describe('mounted Terminal link exits', () => {
     </WorkbenchPresentationContext.Provider>
     await act(async () => root.render(render({ ...presentation, reference: undefined })))
     terminal = renderer.Terminal.instances.at(-1)!
-    web = renderer.WebLinksAddon.instances.at(-1)!
     const mounted = [...renderer.Terminal.instances]
     const resource = useAppStore.getState().config!.workspaces[0]!
     await act(async () => {
@@ -644,6 +663,41 @@ describe('mounted Terminal link exits', () => {
     expect(open).toHaveBeenCalledWith({ ...origin, sessionId: session.id }, expect.objectContaining({ kind: 'session' }),
       'src/example.ts', { line: 3 }, destination, 'focus', expect.objectContaining({ surface: 'focus' }))
   })
+  it.each(['bare', 'osc8'] as const)('opens and reveals the original %s file URI without borrowing its label', async representation => {
+    const path = 'src/发布文件 :42.mp4'
+    const uri = 'file://' + session.workspacePath + '/src/' + encodeURIComponent('发布文件 :42.mp4')
+    const text = representation === 'bare' ? '详见' + uri + '。' : '\x1b]8;;' + uri + '\x07链接\x1b]8;;\x07'
+    const x = representation === 'bare' ? 14 : 1
+    const reveal = vi.spyOn(api.files, 'reveal').mockResolvedValue(undefined)
+    const file = await fileLink(text)
+    expect(file.text).toBe(path)
+    await act(async () => { file.activate(pointer(0, x, 5), file.text) })
+    expect(openFile).toHaveBeenCalledOnce()
+    expect(openFile.mock.calls[0]?.slice(0, 4)).toEqual([path, origin.tabGroupId, undefined, origin.workspaceId])
+    expect(openHttp).not.toHaveBeenCalled()
+
+    await act(async () => {
+      pointer(2, x, 5)
+      element.querySelector('.terminal-view__xterm')!.dispatchEvent(new MouseEvent('contextmenu',
+        { button: 2, clientX: x, clientY: 5, bubbles: true, cancelable: true }))
+    })
+    const action = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')]
+      .find(item => item.textContent?.includes('Reveal in Finder'))
+    expect(action).toBeDefined()
+    await act(async () => { action!.click() })
+    expect(reveal).toHaveBeenCalledExactlyOnceWith(origin.workspaceId, path)
+    expect(openFile).toHaveBeenCalledOnce()
+  })
+
+  it('opens the enclosed dotted directory and Chinese video filename shown in the terminal report', async () => {
+    const path = '.artifacts/promo-v4-promotion/AgentMux-v4-经典Mote晋升版.mp4'
+    const file = await fileLink('产物（' + path + '）')
+    expect(file.text).toBe(path)
+    await act(async () => { file.activate(pointer(0, 20, 5), file.text) })
+    expect(openFile.mock.calls[0]?.slice(0, 4)).toEqual([path, origin.tabGroupId, undefined, origin.workspaceId])
+    expect(openHttp).not.toHaveBeenCalled()
+  })
+
   it('file primary retains editor/system seam, while right-button and drag do not open', async () => {
     const file = await fileLink()
     await act(async () => { file.activate(pointer(2), file.text) })
@@ -747,7 +801,7 @@ describe('mounted passive link readout', () => {
     expect(oldTerminal.write).toHaveBeenCalledOnce(); expect(completeOldWrite).toBeTypeOf('function')
     await act(async () => { root.render(<TerminalView key="replacement-owner" session={session} themeId="graphite" interactiveResize={false} linkOrigin={origin} autoFocus={false} />) })
     expect(oldTerminal.dispose).toHaveBeenCalledOnce(); expect(renderer.Terminal.instances).toHaveLength(2)
-    terminal = renderer.Terminal.instances[1]!; web = renderer.WebLinksAddon.instances[1]!
+    terminal = renderer.Terminal.instances[1]!
     await installCells('new owner')
     await act(async () => { web.callbacks.hover(new MouseEvent('mousemove', { clientX: 50, clientY: 80 }), 'https://example.test/new'); vi.advanceTimersByTime(500) })
     const readout = element.querySelector<HTMLElement>('[role="tooltip"]')!

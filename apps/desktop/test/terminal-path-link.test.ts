@@ -63,11 +63,9 @@ describe('detectTerminalPathLinks — real tool output', () => {
   })
 
   it('detects the quoted path in a python traceback frame', () => {
-    // Python writes `File "path", line N` — the `, line N` form is not a `:N` suffix, so the path is
-    // detected via its slashes and opens at the top (line is not advertised for this shape).
     const link = onlyLink('  File "app/routes/home.py", line 12, in handler')
     expect(link.path).toBe('app/routes/home.py')
-    expect(link.line).toBeUndefined()
+    expect(link.line).toBe(12)
   })
 
   it('detects an absolute path within the workspace root and relativizes it', () => {
@@ -264,4 +262,47 @@ describe('resolveWorkspaceRelativePath', () => {
     expect(resolveWorkspaceRelativePath(_hygiene_fixturePath("other/root/x.ts"), ROOT)).toBeNull()
     expect(resolveWorkspaceRelativePath('~/x.ts', ROOT)).toBeNull()
   })
+})
+
+
+describe('complete path syntax before Workspace normalization', () => {
+  it.each([
+    ['src/经典.ts', 'src/经典.ts'],
+    ['src/(foo)/[id]/page.tsx', 'src/(foo)/[id]/page.tsx'],
+    ['"src/my file.ts":12:3', 'src/my file.ts'],
+    ['src/my\\ file.ts:12:3', 'src/my file.ts'],
+    ['src/a//b.ts:12', 'src/a/b.ts'],
+    ['src/cafe\u0301.ts:4', 'src/cafe\u0301.ts'],
+    ['src/🚀.ts:4', 'src/🚀.ts'],
+  ])('keeps the exact file represented by %s', (value, expected) => {
+    expect(detectTerminalPathLinks(value, ROOT)).toHaveLength(1)
+    expect(detectTerminalPathLinks(value, ROOT)[0]?.path).toBe(expected)
+  })
+  it.each(['https://example.test/a?src=nested/file.ts', 'file:///home/a/%E5%90%8D/file.ts',
+    'C:\\repo\\src\\test.ts:2', 'C:/repo/src/test.ts:2', 'src/a/../../../outside.ts', 'src/x.ts:0:0', 'src/x.ts:-1', 'src/x.ts:4:8:10',
+    'src/x.ts:9007199254740992', 'src/[/fake.ts'])('does not create a substitute path from %s', value => {
+    expect(detectTerminalPathLinks(value, ROOT)).toEqual([])
+  })
+  it('keeps all exact paths on a bounded terminal line and accepts deep file paths', () => {
+    const paths = Array.from({ length: 10 }, (_, n) => 'src/nested-' + n + '/file.ts')
+    paths.push('src/' + 'nested-dir/'.repeat(26) + 'leaf.ts')
+    expect(detectTerminalPathLinks(paths.join(' '), ROOT).map(({ path }) => path)).toEqual(paths)
+  })
+  it('starts after adjoining CJK prose when an explicit prefix disambiguates the file', () => {
+    const text = '详见./src/test.ts:7，中文目录/src/test.ts 和 "目录./src/test.ts"'
+    expect(detectTerminalPathLinks(text, ROOT)).toEqual([
+      { index: 2, length: 15, path: 'src/test.ts', line: 7 },
+      { index: 18, length: 16, path: '中文目录/src/test.ts' },
+      { index: 37, length: 17, path: '目录./src/test.ts' },
+    ])
+    expect(detectTerminalPathLinks('详见~/src/test.ts', ROOT, ROOT)).toEqual([
+      { index: 2, length: 13, path: 'src/test.ts' },
+    ])
+    expect(detectTerminalPathLinks('详见../src/test.ts', ROOT)).toEqual([])
+  })
+  it.each([['src/x.ts(12,3)', 12, 3], ['src/x.ts#L42', 42, undefined]])(
+    'retains a recognized coordinate suffix in %s', (value, line, column) => {
+      expect(detectTerminalPathLinks(value, ROOT)[0]).toMatchObject({ path: 'src/x.ts', line })
+      expect(detectTerminalPathLinks(value, ROOT)[0]?.column).toBe(column)
+    })
 })

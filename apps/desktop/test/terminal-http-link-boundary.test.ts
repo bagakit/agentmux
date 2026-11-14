@@ -1,11 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import { TERMINAL_HTTP_URL_REGEX } from '../src/renderer/src/lib/terminal-http-link.js'
+import { terminalUriTokens } from '@agentmux/client-ui/terminal-path-link'
+import { terminalHttpLinkText } from '../src/renderer/src/lib/terminal-http-link.js'
 
 function match(text: string): { value: string; index: number } | null {
-  const result = text.match(TERMINAL_HTTP_URL_REGEX)
-  return result?.[0] === undefined || result.index === undefined
-    ? null
-    : { value: result[0], index: result.index }
+  const token = terminalUriTokens(text)[0]
+  if (!token) return null
+  const value = terminalHttpLinkText(token.text)
+  return value ? { value, index: token.index } : null
 }
 
 describe('bare terminal HTTP link boundaries', () => {
@@ -35,4 +36,16 @@ describe('bare terminal HTTP link boundaries', () => {
   it('does not create a partial link from a literal CJK-only URL suffix', () => {
     expect(match('https://例子.测试/文档')).toBeNull()
   })
+  it('keeps an IDN authority and mixed case scheme with an unambiguous path', () => {
+    expect(match('说明见HtTpS://例子.test/demo。')).toEqual({
+      value: 'HtTpS://例子.test/demo',
+      index: 3
+    })
+  })
+
+  it('excludes supplementary-plane Han prose and preserves balanced URL punctuation', () => {
+    expect(match('(https://example.test/a(b)[c]𠮷。')).toMatchObject({ value: 'https://example.test/a(b)[c]' })
+    expect(match('https://example.test/~')).toMatchObject({ value: 'https://example.test/~' })
+  })
+
 })
