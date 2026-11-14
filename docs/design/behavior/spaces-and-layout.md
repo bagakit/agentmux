@@ -47,6 +47,16 @@ flowchart LR
 
 图中的关系须沿[实体与展示绑定](#zonetabsregions-的实体与展示绑定)和[Tab Group 布局](#tabtab-group-与-region)解释；它不是严格单父目录树。Project／Workspace 提供原 Host 的资源来源，见[Project 与 Workspace](#project-与-workspace)，不替代 Space 身份或按展示位置改写 cwd。
 
+### 跨节点 Space 的业务状态
+
+同一个 Space 被多台机器的 App／CLI 加载时，成员关系、工作面业务拓扑、原 Session 引用和各自 owner 的运行状态来自同一明确的 Core authority。挂载保留原 Space 身份及其准确来源 Runtime／route，不在每个客户端复制一份可独立改写的空间图；同名路径、Git 关联和局部 Host ID 不证明是同一 Space。Space authority 负责自己的业务图，Session／Run 继续归原执行 Core／Native，查看者不是新的业务 owner。目标实现和现有能力边界见[Remote 的级联与工作模式](remote-management.md#级联路径与工作模式)。
+
+各端的挂载选择、窗口布局、DOM 焦点和私有未发送草稿沿各自原 owner 保留，共享业务状态不覆盖它们。Core 持有的稳定空间实体、业务拓扑与绑定继续受原合同约束，不因跨端查看转成 Renderer 私有事实；窗口的展示分组、分割比例和选择由各端自己的持久呈现 owner 保存，不随源 Space 的业务更新覆盖另一窗口。新工作由明确 Space authority 协调其业务放置及准确 Agent 端；已存在的分端绑定仍沿原 Coordinator 的 route／Runtime／冻结意图，不因项目位于另一设备就搬库、重算绑定或更换原恢复入口。
+
+客户端只订阅已加载、相关的 Space 与 Session，读取同一来源的版本化快照及后续变化；历史、PTY Replay 和资源详情向原 owner 按需获取。隐藏／卸载只释放本客户端相应 UI reader，不断开执行 helper 或其他消费者。网络延迟与缺测保留最后确认事实、原成员和重读入口，不以不可达清空 Space。源 owner 上的写入沿原权限和原子 CAS，冲突保留两边修改；过滤的 Space 快照不是整图写入，不能覆盖无关 Space。工作量随相关状态和实际消费者增长，不因全网所有 Session 放大。
+
+打开、挂载、卸载和导航不迁移项目、Space authority 或 Agent，不复制文件或重启 Run。真正跨机器迁移是另一个显式事务，须保原身份、数据与恢复引用；本节不授权自动迁移或把已有客户端私有状态静默提升为远端权威。
+
 ### 统一概念与空间寻址
 
 本节是产品文档、公开控制协议与 CLI 的唯一概念词典。空间寻址描述实体与展示位置；产品入口和树上的组织视角消费这些身份，不能从名称、当前 Session 或执行目录重新定义对象。源码旧字段的当前含义只作来源证据，不反过来改变产品定义。

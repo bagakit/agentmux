@@ -16,6 +16,14 @@ Core 状态目录中的 `spatial-state.json` 保存同一空间图；`AGENTMUX_S
 
 [`defaultAgentMuxSpatialStatePath` / `AgentMuxSpatialStateStore`](../../packages/core/src/spatial-state.ts) 负责路径、读取、revision 提交、锁与订阅；原子写入沿 [`durableWriteFile`](../../packages/core/src/durable-write.ts)。
 
+### 原权威 Space 的公共业务投影
+
+Core 的 `space.snapshot`／`space.watch` 以准确 `{runtimeId,spaceId}` 读取同一原文件 owner，SDK 的 `readSpaceSnapshot`／`observeSpace` 与 CLI 消费同一公共订阅端口。快照 begin／part／complete 和后续实体 delta 复用已有 Hosted 分帧、取消与背压；累计 Space 不受单个传输值预算限制，单条实体仍沿原 Hosted 编码／在途内存边界，失败只结束本次读取并保留源文档；源图 revision 是原 CAS 版本，重新连接明确给全范围快照及 cursor gap，不承诺持久事件日志。来源 Runtime 或 reader instance 不符只拒本次观察，不把原 Run 判为终局。
+
+共享范围只含空间业务实体、成员、原 Session／Run 引用和 Zone–Space 绑定；不传显示 Workspace／Group、分割比例、选择、DOM 焦点、私有草稿或不透明 client resources。原 Core 文档的这些已有数据继续保全，公开业务订阅不接管本机窗口持久化。`space.apply` 的显式范围编辑由服务端合入当前原图，沿同一 CAS／持久写入，不能把过滤投影当整图覆盖；原名称和创建关联仍由既有 mutation owner 维护。
+
+[`space-authority.ts`](../../packages/core/src/space-authority.ts) 定义业务投影、实体索引、delta 和范围编辑；[`space-authority-owner.ts`](../../packages/core/src/space-authority-owner.ts) 只持临时订阅读者与有界的最新待发送状态；[`space-authority-stream.ts`](../../packages/core/src/space-authority-stream.ts) 持分帧组合与 SDK 读者。每个 owner 只借一份原文件观察，按实际受影响 Space 投影并共享给相关读者。原整图文件的解码／CAS 写入仍随该文件规模增长；它没有变成全网 Store，未因网络过滤就宣称所有生产端成本按单 Space 缩减。客户端挂载和真正多跳执行是另外的实际消费，不由这组公共端口的存在代签。
+
 ## 实体图与 Desktop 投影
 
 ### 保存什么

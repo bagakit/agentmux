@@ -19,6 +19,38 @@ A Project is a repository or directory resource, not a Space. A Zone may hold a 
 a plain directory or a Topic/Mote workface. One Session may have several display positions;
 use IDs verbatim and never infer identity from a name, cwd or the first display position.
 
+For a shared business Space, keep its original {runtimeId,spaceId} and select an
+already authorized RPC endpoint to that authority. Host labels, a current local route,
+and an identical Space ID on another Runtime are not replacements.
+
+<!-- amux:generated command:space.snapshot -->
+<!-- amux:generated command:space.watch -->
+<!-- amux:generated command:space.apply -->
+
+Snapshot prints one complete decoded business projection and exits. Watch first returns
+that same scoped snapshot with any explicit resnapshot gap, then ordered entity deltas.
+The SDK equivalents are readSpaceSnapshot and observeSpace over the original public
+subscription port. Their begin/part/complete transport reuses the existing framed carrier;
+cumulative Space size is not a single RPC-frame or whole-observation value limit.
+A revision is this source graph's CAS revision, so unrelated writes may advance it.
+A cursor is not a retained event-history promise: reconnect starts an explicit snapshot.
+
+The shared scope contains only Space/Zone/Tab/Region membership, original Session/Run
+references and Zone–Space bindings. Host references retain that source Runtime's namespace;
+do not use its local string as this client's local machine. Session references do not
+prove a Run is currently healthy or grant input permission. Window groups, ratios,
+selection, focus, opaque client resources and unsent drafts remain with their original
+owners and are neither overwritten nor uploaded by this business projection.
+
+Apply accepts exact business upserts, an optional complete binding list for this one
+Space, and explicit removal IDs at --revision. It merges into the original source graph;
+a filtered snapshot is not a replacement graph. Unrelated Spaces and existing window
+records are retained. Name changes and creation associations keep their existing mutation
+owners; opening/creating Agents still uses the original agent.open authority. Keep both
+edits on conflict, and after an unknown write read the same source without automatically
+repeating it. Unavailable observations retain the last confirmed Space and original
+identities; cancelling a reader does not stop a Session, Run or execution helper.
+
 space mv refuses a Region whose Tab has several display occurrences
 (SPACE_MOVE_MULTIPLE_OCCURRENCES_UNSUPPORTED) and keeps every reference and the healthy Agent;
 remove a display binding separately. space unbind of the last display reference never closes
