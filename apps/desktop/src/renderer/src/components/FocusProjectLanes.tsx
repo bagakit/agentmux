@@ -25,6 +25,7 @@ import { TopicCategoryDialog } from './TopicCategoryDialog'
 import { SpaceIconPicker } from './SpaceIconPicker'
 import { FocusZoneLayoutToggle } from './FocusZoneLayoutToggle'
 import { FocusProjectPreferences, type FocusDiscussionSlot } from './FocusProjectPreferences'
+import { FocusProjectActions } from './FocusProjectActions'
 import { focusZoneContainerKey, focusZonePresentation } from '../../../shared/focus-zone-presentation'
 import { focusProjectPreference, focusProjectTint, moveFocusProject, type FocusProjectPreference } from '../../../shared/focus-project-preferences'
 import { saveFocusPreferences } from '../lib/focus-preferences'
@@ -227,7 +228,7 @@ export function FocusProjectLanes({ lanes, selectedProjectKey, currentLaneId, re
               {first.recovery ? <span className="focus-project-lanes__recovery">{first.recovery === 'removed' ? 'Worktree removed' : 'Workspace unregistered'}</span> : null}</> : null}
             <FocusProjectActivity at={activityAt} now={now} />
             {resourceMenus ? <><FocusZoneLayoutToggle containerKey={containerKey} name={name} presentation={mode} defaultPresentation={focusZonePresentation(null, 'project', undefined)} />
-              <FocusProjectPreferences active={visible} projectKey={key} name={name} discussion={renderDiscussion ? state => renderDiscussion(scanLanes[0]!, state) : undefined} /></> : null}
+              <FocusProjectPreferences active={visible} projectKey={key} name={name} actions={resource ? <FocusProjectActions project={resource} /> : undefined} discussion={renderDiscussion ? state => renderDiscussion(scanLanes[0]!, state) : undefined} /></> : null}
           </header>
         return <div key={frame.key} className={frame.project ? 'focus-project-frame' : undefined} data-project-group-key={frame.project ? key : undefined}
           data-focus-current={frame.project && currentProject || undefined} data-focus-zone-presentation={resourceMenus || frame.project ? mode : undefined} data-focus-container-key={containerKey ?? undefined}

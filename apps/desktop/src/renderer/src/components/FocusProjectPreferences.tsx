@@ -11,8 +11,8 @@ import { DocumentOverlayPortal } from './WindowOverlayHost'
 
 /** Draft stays at its exact original project on a failed save; no workspace or runtime writes. */
 export type FocusDiscussionSlot = { active: boolean; container: HTMLElement | null }
-export function FocusProjectPreferences({ projectKey, name, discussion, active = true }: {
-  active?: boolean; projectKey?: string; name: string; discussion?: ((state: FocusDiscussionSlot) => ReactNode) | undefined
+export function FocusProjectPreferences({ projectKey, name, actions, discussion, active = true }: {
+  active?: boolean; projectKey?: string; name: string; actions?: ReactNode; discussion?: ((state: FocusDiscussionSlot) => ReactNode) | undefined
 }) {
   const projects = useAppStore(state => state.config?.focus?.projects)
   const saved = focusProjectPreference(projectKey ?? '', projects ?? [])
@@ -86,6 +86,7 @@ export function FocusProjectPreferences({ projectKey, name, discussion, active =
       onEscapeKeyDown={() => { escape.current = true }} onCloseAutoFocus={event => { event.preventDefault(); if (escape.current) trigger.current?.focus({ preventScroll: true }); escape.current = false }}>
       <div className="focus-project-preferences__header"><Popover.Title asChild><strong className="focus-project-preferences__name">{name}</strong></Popover.Title>
         {projectKey ? <label className="focus-project-preferences__pin"><input type="checkbox" aria-label="Pin project" checked={draft.pinned} onChange={event => edit({ ...draft, pinned: event.target.checked })} />Pin</label> : null}</div>
+      {actions}
       {projectKey ? <><label className="focus-project-preferences__note"><span>Note</span><input aria-label="Project note" value={draft.note} placeholder="A familiar reminder" onChange={event => edit({ ...draft, note: event.target.value })} /></label>
       <div role="group" aria-label="Project background color" className="focus-project-preferences__color-row"><span>Color</span><div className="focus-project-preferences__colors">{FOCUS_PROJECT_COLORS.map(color => <button type="button" key={color} aria-label={`Project color · ${color}`} title={color} aria-pressed={draft.color === color}
         style={{ background: `color-mix(in srgb, ${focusProjectTint(color)} 26%, var(--surface-1))` }} onClick={() => edit({ ...draft, color })}>{draft.color === color ? <SemanticIcon name="status.selected" size={13} /> : null}</button>)}</div></div></> : null}
