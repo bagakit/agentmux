@@ -12,6 +12,8 @@ import type { DemandAlignment, DemandAlignmentProposal, DemandGrounding, DemandG
 import { AgentMuxError, type AgentMuxControlFailure, type AgentMuxErrorData } from './errors.js'
 export { AgentMuxError, parseAgentMuxErrorData, type AgentMuxErrorData } from './errors.js'
 import type { AgentExecutorId, AgentProviderId, AgentExecutableObservation } from './types.js'
+import type { AgentMuxExecutorAvailability } from './executor-contract.js'
+export { isAgentMuxExecutorAvailability, type AgentMuxExecutorAvailability } from './executor-contract.js'
 import type { WorkbenchLayoutPreset } from './workbench-layout-preset.js'
 import type { AgentPromptCondition } from './agent-prompt-condition.js'
 import type { AgentMuxBrowserCompletion } from './browser-completion-facts.js'
@@ -256,30 +258,8 @@ export type AgentMuxControlActiveAgent = {
   updatedAt: number
 }
 
-/**
- * 发现某个 Executor 在一台目标 Host 上的可用性——**四态，唯一一处拼写。**
- *
- * 这四态是四件不同的事，任何两态折成一态都是缺陷：
- *   - `unknown`：还没查（或正在查）。不是「没有」，只是此刻没有结论。
- *   - `check-failed`：未能取得结论，例如没有候选路径，或读取/权限检查失败。保留检查的原始原因。
- *   - `missing`：候选均明确不可用，未取得普通可执行文件；不等于所有路径都不存在。
- *   - `available`：至少一个候选是普通文件且通过可执行权限检查。
- *
- * 为什么是元组而不是纯 union：与 {@link AGENTMUX_CONTROL_ERROR_CODES} 同源——线上校验（control-host
- * parseExecutors）需要一个能**在运行时拿在手里**的成员集合来判合法性，纯 union 在运行时无迹可寻。
- * 成员判定 {@link isAgentMuxExecutorAvailability} 派生自这一个元组，不另写第二份手抄。元组本身不导出
- * （没有任何外部消费者需要这份运行时值——线上校验只需那个谓词），只导出派生的类型与谓词。
- */
-const AGENTMUX_EXECUTOR_AVAILABILITIES = ['unknown', 'check-failed', 'missing', 'available'] as const
-export type AgentMuxExecutorAvailability = typeof AGENTMUX_EXECUTOR_AVAILABILITIES[number]
-
 /** One observed executable fact. A failed check carries its actual cause. */
 export type AgentMuxExecutorProbeResult = AgentExecutableObservation
-
-/** 入站的这个值是不是一个合法可用性档位。成员集合派生自 {@link AGENTMUX_EXECUTOR_AVAILABILITIES}。 */
-export function isAgentMuxExecutorAvailability(value: unknown): value is AgentMuxExecutorAvailability {
-  return (AGENTMUX_EXECUTOR_AVAILABILITIES as readonly unknown[]).includes(value)
-}
 
 export type AgentMuxSelfAnchor = { kind: 'self' }
 export type AgentMuxRegionAnchor = AgentMuxSelfAnchor | { kind: 'region'; regionId: string }

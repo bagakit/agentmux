@@ -1,6 +1,8 @@
 import { AgentMuxError } from './errors.js'
 import { rpcRecord, rpcString } from './rpc-data.js'
 import { SPACE_MEMBER_INVOCATIONS } from './space-member.js'
+import { parseHostExecutorInventory, type AgentMuxHostExecutorInventory } from './executor-contract.js'
+import type { AgentMuxSpaceAgentTarget } from './space-control.js'
 
 /** Semantic pins survive an owner restart; transport instance fences do not. */
 export type HostRouteIdentity = { runtimeId: string; publicKey: string; fingerprint: string }
@@ -14,6 +16,11 @@ export type HostRouteActor = { source: HostRouteIdentity; kind: 'user' | 'device
 export type HostRouteEdge = { edgeId: string; label: string; kind: 'ssh'; runtimeId?: string }
 export type HostRouteEdges = { identity: HostRouteIdentity; actor: HostRouteActor; edges: HostRouteEdge[]; observedAt: number }
 export type HostRouteEdgeInspection = { identity: HostRouteIdentity; actor: HostRouteActor; edge: HostRouteEdge; target: HostRouteIdentity; observedAt: number }
+export type HostRouteAgentTarget = AgentMuxSpaceAgentTarget & { adoptedRoute: AdoptedHostRoute }
+export type HostRouteChoice = { id: string; agentTarget: HostRouteAgentTarget }
+export type HostRouteChoices = { identity: HostRouteIdentity; actor: HostRouteActor; routes: HostRouteChoice[]; observedAt: number }
+export type HostRouteExecutorRead = { agentTarget: HostRouteAgentTarget; executorId?: string; refresh?: boolean }
+export type HostRouteExecutors = { routeId: string; agentTarget: HostRouteAgentTarget; inventory: AgentMuxHostExecutorInventory; observation: HostRouteObservation }
 
 /** Only the real split-execution/Space consumers, not the Hosted SDK as a whole. */
 export const HOST_ROUTE_INVOCATIONS = [
@@ -24,7 +31,7 @@ export const HOST_ROUTE_INVOCATIONS = [
   ...SPACE_MEMBER_INVOCATIONS.filter(method => !['readAgentSession', 'runtimeSubject', 'attachTerminal', 'readRunReplay', 'releaseRunAttachment'].includes(method)),
 ] as const
 export const HOST_ROUTE_CALLS = [
-  'route.edges', 'route.edge.inspect',
+  'route.edges', 'route.edge.inspect', 'route.choices', 'route.executors',
   'runtime.owner.identity', 'runtime.bootstrap', 'runtime.invoke', 'runtime.release-consumer',
   'agent.open', 'space.ls', 'space.inspect', 'space.apply',
   'space.member.call',
@@ -82,11 +89,13 @@ export type HostRouteObservationScope = { kind: 'observation'; targetRuntimeId: 
 /** A safe projection of one exact current-viewer call, not a creator's input grant. */
 export type HostRouteMemberOperation = { kind: 'space-member'; runtimeId: string; spaceId: string; regionId: string; targetRuntimeId: string; agentSessionId: string; runId: string; method: string; paramsDigest: string }
 export type HostRouteMemberScope = { kind: 'member-control'; operation: HostRouteMemberOperation; createOperationId: string }
-export type HostRouteOperation = HostRouteExecutionScope | HostRouteSpatialOperation | HostRouteReadOperation | HostRouteMemberOperation
+export type HostRouteExecutorOperation = { kind: 'executor-reader'; routeId: string; adoptedRoute: AdoptedHostRoute; targetRuntimeId: string; executorId?: string; refresh: boolean }
+export type HostRouteInventoryScope = { kind: 'executor-inventory'; operation: HostRouteExecutorOperation }
+export type HostRouteOperation = HostRouteExecutionScope | HostRouteSpatialOperation | HostRouteReadOperation | HostRouteMemberOperation | HostRouteExecutorOperation
 export type HostRouteExecutionAuthorization = {
   schema: 'agentmux.host-route-execution.v1'; purpose: 'host-route-execution'
   coordinator: HostRouteIdentity; actor: HostRouteActor
-  scope: HostRouteExecutionScope | HostRoutePreparationScope | HostRouteObservationScope | HostRouteMemberScope
+  scope: HostRouteExecutionScope | HostRoutePreparationScope | HostRouteObservationScope | HostRouteMemberScope | HostRouteInventoryScope
   /** The original signed A parent. It cannot contain another derived child. */
   parent?: HostRouteEnvelope
   signature: string
@@ -103,6 +112,7 @@ export type HostRouteObservation = {
 export const HOST_ROUTE_METHODS = {
   'route.identity': 'short', 'route.inspect': 'short', 'route.configure': 'long',
   'route.edges': 'short', 'route.edge.inspect': 'long',
+  'route.choices': 'short', 'route.executors': 'long',
   'route.call': 'long', 'route.receive': 'long', 'route.watch': 'long', 'route.receive-watch': 'long',
 } as const
 export type HostRouteParams = {
@@ -110,6 +120,8 @@ export type HostRouteParams = {
   'route.inspect': Record<string, never>
   'route.edges': Record<string, never>
   'route.edge.inspect': { edgeId: string }
+  'route.choices': Record<string, never>
+  'route.executors': HostRouteExecutorRead
   'route.configure': { expectedRevision: string; operationId: string; configuration: HostRouteConfiguration }
   'route.call': { routeId: string; adoptedRoute: AdoptedHostRoute; requestId: string; call: HostRouteCall }
   'route.watch': { routeId: string; adoptedRoute: AdoptedHostRoute; requestId: string; call: HostRouteCall }
@@ -121,6 +133,8 @@ export type HostRouteResults = {
   'route.inspect': HostRouteSettings
   'route.edges': HostRouteEdges
   'route.edge.inspect': HostRouteEdgeInspection
+  'route.choices': HostRouteChoices
+  'route.executors': HostRouteExecutors
   'route.configure': { settings: HostRouteSettings; diskDurability: 'confirmed' }
   'route.call': { value: unknown; observation: HostRouteObservation }
   'route.receive': { value: unknown; observation: HostRouteObservation }
@@ -189,6 +203,14 @@ export function parseHostRouteConfiguration(value: unknown): HostRouteConfigurat
 }
 export function parseHostRouteOperation(value: unknown): HostRouteOperation {
   const kind = rpcRecord(value).kind
+  if (kind === 'executor-reader') {
+    const p = rpcRecord(value, ['kind','routeId','adoptedRoute','targetRuntimeId','executorId','refresh'])
+    if (typeof p.refresh !== 'boolean') invalid('The original executor read needs its exact refresh intent.')
+    const operation = hostRouteExecutorOperation({ agentTarget: { hostId: p.routeId, runtimeId: p.targetRuntimeId, adoptedRoute: p.adoptedRoute }, refresh: p.refresh,
+      ...(p.executorId === undefined ? {} : { executorId: p.executorId }) })
+    if (p.targetRuntimeId !== operation.targetRuntimeId) invalid('The executor read names another adopted target.')
+    return operation
+  }
   if (kind === 'space-member') {
     const fields = ['runtimeId','spaceId','regionId','targetRuntimeId','agentSessionId','runId','method','paramsDigest'] as const
     const p = rpcRecord(value, ['kind',...fields])
@@ -224,7 +246,11 @@ export function parseHostRouteExecutionAuthorization(value: unknown): HostRouteE
   const p = rpcRecord(value, ['schema','purpose','coordinator','actor','scope','parent','signature'])
   if (p.schema !== 'agentmux.host-route-execution.v1' || p.purpose !== 'host-route-execution') invalid('This signature has another execution purpose.')
   let scope: HostRouteExecutionAuthorization['scope']
-  if (rpcRecord(p.scope).kind === 'member-control') {
+  if (rpcRecord(p.scope).kind === 'executor-inventory') {
+    const s = rpcRecord(p.scope, ['kind','operation']), operation = parseHostRouteOperation(s.operation)
+    if (operation.kind !== 'executor-reader') invalid('An inventory child needs the exact original executor read.')
+    scope = { kind: 'executor-inventory', operation: operation as HostRouteExecutorOperation }
+  } else if (rpcRecord(p.scope).kind === 'member-control') {
     const s = rpcRecord(p.scope, ['kind','operation','createOperationId']), operation = parseHostRouteOperation(s.operation)
     if (operation.kind !== 'space-member') invalid('A member control needs its exact original member operation.')
     scope = { kind: 'member-control', operation: operation as HostRouteMemberOperation, createOperationId: originalString(s.createOperationId, 'Original member creation operation') }
@@ -239,7 +265,7 @@ export function parseHostRouteExecutionAuthorization(value: unknown): HostRouteE
     const s = rpcRecord(p.scope, ['kind','targetRuntimeId','createOperationId','executorId'])
     scope = { kind: 'preparation', targetRuntimeId: rpcString(s.targetRuntimeId, 'Original target Runtime'), createOperationId: originalString(s.createOperationId, 'Original CID'), executorId: originalString(s.executorId, 'Original Executor') }
   } else scope = parseHostRouteOperation(p.scope) as HostRouteExecutionScope
-  if (scope.kind !== 'execution' && scope.kind !== 'preparation' && scope.kind !== 'observation' && scope.kind !== 'member-control') invalid('This execution authorization has another scope.')
+  if (scope.kind !== 'execution' && scope.kind !== 'preparation' && scope.kind !== 'observation' && scope.kind !== 'member-control' && scope.kind !== 'executor-inventory') invalid('This execution authorization has another scope.')
   return { schema: 'agentmux.host-route-execution.v1', purpose: 'host-route-execution', coordinator: parseHostRouteIdentity(p.coordinator), actor: parseHostRouteActor(p.actor), scope,
     ...(p.parent === undefined ? {} : { parent: parseHostRouteEnvelope(p.parent, true) }), signature: rpcString(p.signature, 'Original coordinator signature') }
 }
@@ -267,7 +293,13 @@ export function parseHostRouteEnvelope(value: unknown, parent = false): HostRout
 }
 
 export function parseHostRouteParams<M extends keyof HostRouteParams>(method: M, value: unknown): HostRouteParams[M] {
-  if (method === 'route.identity' || method === 'route.inspect' || method === 'route.edges') return rpcRecord(value, []) as HostRouteParams[M]
+  if (method === 'route.identity' || method === 'route.inspect' || method === 'route.edges' || method === 'route.choices') return rpcRecord(value, []) as HostRouteParams[M]
+  if (method === 'route.executors') {
+    const p = rpcRecord(value, ['agentTarget','executorId','refresh'])
+    if (p.refresh !== undefined && typeof p.refresh !== 'boolean') invalid('Executor refresh must be boolean.')
+    return { agentTarget: parseHostRouteAgentTarget(p.agentTarget),
+      ...(p.executorId === undefined ? {} : { executorId: rpcString(p.executorId, 'Original Executor') }), refresh: p.refresh ?? false } as HostRouteParams[M]
+  }
   if (method === 'route.edge.inspect') {
     const p = rpcRecord(value, ['edgeId'])
     return { edgeId: rpcString(p.edgeId, 'Exact saved edge') } as HostRouteParams[M]
@@ -290,6 +322,23 @@ export function parseHostRouteObservation(value: unknown): HostRouteObservation 
 }
 export function parseHostRouteResult(method: keyof HostRouteParams, value: unknown): unknown {
   if (method === 'route.identity') return parseHostRouteIdentity(value)
+  if (method === 'route.choices') {
+    const p = rpcRecord(value, ['identity','actor','routes','observedAt']), identity = parseHostRouteIdentity(p.identity)
+    if (typeof p.observedAt !== 'number' || !Number.isFinite(p.observedAt)) invalid('The original route choice time is invalid.')
+    const routes = list(p.routes, 'Saved route choices').map(value => {
+      const r = rpcRecord(value, ['id','agentTarget']), id = rpcString(r.id, 'Original saved route'), agentTarget = parseHostRouteAgentTarget(r.agentTarget, id)
+      if (JSON.stringify(agentTarget.adoptedRoute.source) !== JSON.stringify(identity)) invalid('The route choice belongs to another source Core.')
+      return { id, agentTarget }
+    })
+    if (new Set(routes.map(r => r.id)).size !== routes.length) invalid('Original route choice IDs must be unique.')
+    return { identity, actor: parseHostRouteActor(p.actor), routes, observedAt: p.observedAt }
+  }
+  if (method === 'route.executors') {
+    const p = rpcRecord(value, ['routeId','agentTarget','inventory','observation']), routeId = rpcString(p.routeId, 'Original saved route')
+    const agentTarget = parseHostRouteAgentTarget(p.agentTarget, routeId), inventory = parseHostExecutorInventory(p.inventory), observation = parseHostRouteObservation(p.observation)
+    if (inventory.runtimeId !== agentTarget.runtimeId || JSON.stringify(agentTarget.adoptedRoute) !== JSON.stringify(observation.route)) invalid('The executor inventory belongs to another adopted target or route.')
+    return { routeId, agentTarget, inventory, observation }
+  }
   if (method === 'route.edges' || method === 'route.edge.inspect') {
     const p = rpcRecord(value, method === 'route.edges' ? ['identity', 'actor', 'edges', 'observedAt'] : ['identity', 'actor', 'edge', 'target', 'observedAt'])
     if (typeof p.observedAt !== 'number' || !Number.isFinite(p.observedAt)) invalid('The edge observation time is invalid.')
@@ -311,6 +360,20 @@ export function parseHostRouteResult(method: keyof HostRouteParams, value: unkno
   }
   const p = rpcRecord(value, ['value', 'observation'])
   return { value: p.value, observation: parseHostRouteObservation(p.observation) }
+}
+
+/** A typed original read parent. This contains no creation/input authority. */
+export function hostRouteExecutorOperation(value: unknown): HostRouteExecutorOperation {
+  const input = parseHostRouteParams('route.executors', value)
+  return { kind: 'executor-reader', routeId: input.agentTarget.hostId, adoptedRoute: input.agentTarget.adoptedRoute,
+    targetRuntimeId: input.agentTarget.runtimeId, refresh: input.refresh ?? false,
+    ...(input.executorId === undefined ? {} : { executorId: input.executorId }) }
+}
+export function parseHostRouteAgentTarget(value: unknown, expectedRouteId?: string): HostRouteAgentTarget {
+  const p = rpcRecord(value, ['hostId','runtimeId','adoptedRoute']), adoptedRoute = parseAdoptedHostRoute(p.adoptedRoute)
+  const hostId = rpcString(p.hostId, 'Original saved route')
+  if (expectedRouteId !== undefined && hostId !== expectedRouteId || p.runtimeId !== adoptedRoute.hops.at(-1)!.target.runtimeId) invalid('The Agent target does not match this original route choice.')
+  return { hostId, runtimeId: p.runtimeId as string, adoptedRoute }
 }
 
 export function parseHostRouteEdge(value: unknown): HostRouteEdge {

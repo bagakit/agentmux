@@ -16,6 +16,8 @@ export type AgentMuxSpaceDestination = AgentMuxSpaceSelector & {
     | { kind: 'worktree'; projectId: string; sourceWorkspaceId?: string; path: string; branch: string; createBranch: boolean }
     | { kind: 'directory'; projectId: string; sourceWorkspaceId?: string; path: string }
 }
+/** Source-Core execution carrier plus semantic target; an adopted route is never a saved Host. */
+export type AgentMuxSpaceAgentTarget = { hostId: string; runtimeId: string; adoptedRoute?: import('./host-route.js').AdoptedHostRoute }
 export type AgentMuxSpaceAddress = {
   spaceId: string | null
   zoneId: string | null
@@ -333,7 +335,7 @@ export type AgentMuxSpaceControlRequest = Base & (
   | { operation: 'space.ls'; target: AgentMuxSpaceSelector; presentation?: boolean }
   | { operation: 'space.inspect'; presentation?: boolean; target: AgentMuxSpaceSelector | { requestId: string } }
   | { operation: 'agent.open'; content:
-      | { kind: 'new-agent'; executorId: string; agentTarget?: { hostId: string; runtimeId: string; adoptedRoute?: import('./host-route.js').AdoptedHostRoute }; executionWorkspaceId?: string; toolWorkspaceId?: string; nativeResumeSource?: import('./types.js').AgentNativeResumeSource; prompt?: string }
+      | { kind: 'new-agent'; executorId: string; agentTarget?: AgentMuxSpaceAgentTarget; executionWorkspaceId?: string; toolWorkspaceId?: string; nativeResumeSource?: import('./types.js').AgentNativeResumeSource; prompt?: string }
       | { kind: 'fork-agent'; source: import('./agent-fork.js').AgentMuxAgentForkSource; prompt?: string }
       /** A public request only: the Core service expands it into new-agent or fork-agent content before admission. */
       | { kind: 'derived-action'; actionId: string; source: { agentSessionId: string }; executorId?: string }

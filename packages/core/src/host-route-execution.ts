@@ -10,6 +10,7 @@ import { assertSpaceMemberCall, parseSpaceMemberParams } from './space-member-co
 import type { SpaceMemberParams } from './space-member.js'
 import type { AgentExecutionOpenInput } from './agent-execution-coordinator.js'
 import type { HostRouteCall, HostRouteExecutionScope, HostRouteOperation, HostRouteExecutionAuthorization, HostRouteStatement, HostRouteMemberOperation } from './host-route.js'
+import { hostRouteExecutorOperation } from './host-route.js'
 
 function deny(): never { throw new AgentMuxError('This child does not belong to the original authorized creation and exact target.', 'HOST_ROUTE_DERIVATION_MISMATCH') }
 export const executionCreationId = (bindingId: string, role: string) => createHash('sha256').update(JSON.stringify([bindingId, role])).digest('hex')
@@ -27,6 +28,7 @@ export function memberRouteOperation(input: SpaceMemberParams[keyof SpaceMemberP
 }
 /** Project only the original schema owner's parsed selectors, never the input text. */
 export function hostRouteOperation(call: HostRouteCall): HostRouteOperation | undefined {
+  if (call.method === 'route.executors') return hostRouteExecutorOperation(call.params)
   if (call.method === 'space.member.call' || call.method === 'space.member.watch') return memberRouteOperation(parseSpaceMemberParams(call.method, call.params))
   if (call.method === 'agent.execution.create') return executionRouteScope(parseAgentExecutionCreate(call.params))
   if (call.method === 'space.sessions.watch' || call.method === 'space.snapshot' || call.method === 'space.watch') {
@@ -48,12 +50,17 @@ export function hostRouteOperation(call: HostRouteCall): HostRouteOperation | un
 }
 export function assertExecutionParent(authorization: HostRouteExecutionAuthorization): void {
   const { parent, actor, coordinator, scope } = authorization
+  if (scope.kind === 'executor-inventory' && !isDeepStrictEqual(scope.operation.adoptedRoute.source, coordinator)) deny()
   if (scope.kind === 'member-control' && scope.operation.runtimeId !== coordinator.runtimeId) deny()
   if (!parent) { if (!isDeepStrictEqual(actor.source, coordinator)) deny(); return }
   const root = parent.statement
   if (root.authorization || !isDeepStrictEqual(root.actor, actor) || !isDeepStrictEqual(root.route.hops.at(-1)!.target, coordinator) || parent.endorsements.length !== root.route.hops.length) deny()
   const operation = root.operation
   if (!operation) deny()
+  if (scope.kind === 'executor-inventory') {
+    if (!isDeepStrictEqual(operation, scope.operation)) deny()
+    return
+  }
   if (scope.kind === 'member-control') {
     if (!isDeepStrictEqual(operation, scope.operation)) deny()
     return
@@ -80,6 +87,19 @@ export function assertExecutionChild(statement: HostRouteStatement, call: HostRo
   assertExecutionParent(authorization)
   if (!isDeepStrictEqual(statement.actor, authorization.actor) || !isDeepStrictEqual(statement.route.source, authorization.coordinator)) deny()
   const scope = authorization.scope, destination = statement.route.hops.at(-1)!.target.runtimeId
+  if (scope.kind === 'executor-inventory') {
+    const operation = scope.operation
+    if (stream || destination !== operation.targetRuntimeId || !isDeepStrictEqual(statement.route, operation.adoptedRoute)) deny()
+    if (call.method === 'runtime.owner.identity') {
+      if (rpcRecord(call.params, ['expectedRuntimeId']).expectedRuntimeId !== operation.targetRuntimeId) deny()
+      return
+    }
+    if (call.method !== 'runtime.invoke') deny()
+    const invocation = rpcRecord(decodeHostedValue(call.params.invocation), ['method','args'])
+    if (invocation.method !== 'listHostExecutors' || !Array.isArray(invocation.args) || invocation.args.length !== 1 ||
+        !isDeepStrictEqual(invocation.args[0], { refresh: operation.refresh, ...(operation.executorId === undefined ? {} : { executorId: operation.executorId }) })) deny()
+    return
+  }
   if (scope.kind === 'member-control') {
     const operation = scope.operation
     if (destination !== operation.targetRuntimeId) deny()

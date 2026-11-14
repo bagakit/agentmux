@@ -10,8 +10,7 @@ import { AgentMuxError } from './errors.js'
 import { rpcRecord, rpcString } from './rpc-business-codec.js'
 import type { AgentMuxCreationTrust, AgentMuxCreationAuthorityIdentity } from './agent-creation-admission.js'
 import { parseAgentMuxCreationTrust, parseAgentMuxCreationTrustInput, type AgentMuxCreationTrustInput } from './agent-creation-admission.js'
-import type { AgentMuxHostExecutorInventory, AgentMuxHostExecutorConfiguration, AgentMuxHostExecutorConfigureInput, AgentMuxHostExecutorDescriptor } from './executor-contract.js'
-import { isAgentMuxExecutorAvailability } from './control.js'
+import { parseHostExecutorDescriptor, parseHostExecutorInventory, type AgentMuxHostExecutorInventory, type AgentMuxHostExecutorConfiguration, type AgentMuxHostExecutorConfigureInput } from './executor-contract.js'
 
 export const AGENTMUX_RPC_HOST_SETTINGS_METHODS = {
   'settings.hosts.home': 'long',
@@ -108,25 +107,10 @@ export function parseHostSettingsResult<M extends HostSettingsMethod>(method: M,
   if (method === 'settings.executors.discover' || method === 'settings.executors.register') {
     const p = rpcRecord(value, method === 'settings.executors.discover' ? ['routeHostId', 'runtimeId', 'executors'] : ['routeHostId', 'runtimeId', 'executor'], 'CONTROL_PROTOCOL_ERROR')
     if (p.routeHostId !== input.hostId || typeof p.runtimeId !== 'string' || !p.runtimeId || /[\0\r\n]/u.test(p.runtimeId)) fail()
-    const descriptor = (value: unknown): AgentMuxHostExecutorDescriptor => {
-      const d = rpcRecord(value, ['executorId', 'label', 'providerId', 'command', 'source', 'configRevision', 'availability', 'executable', 'cause'], 'CONTROL_PROTOCOL_ERROR')
-      for (const key of ['executorId', 'label', 'providerId', 'command', 'configRevision']) if (typeof d[key] !== 'string' || !d[key] || /[\0\r\n]/u.test(d[key])) fail()
-      if (!['registered', 'provider-default'].includes(d.source as string) || !isAgentMuxExecutorAvailability(d.availability)) fail()
-      if (d.executable !== undefined && (typeof d.executable !== 'string' || !d.executable.startsWith('/') || /[\0\r\n]/u.test(d.executable))) fail()
-      if (d.availability === 'available' && (!d.executable || d.cause !== undefined) || d.availability === 'check-failed' && d.cause === undefined) fail()
-      if (d.cause !== undefined) {
-        const cause = rpcRecord(d.cause, ['code', 'message'], 'CONTROL_PROTOCOL_ERROR')
-        if (typeof cause.code !== 'string' || !cause.code || typeof cause.message !== 'string') fail()
-      }
-      return d as AgentMuxHostExecutorDescriptor
-    }
     if (method === 'settings.executors.discover') {
-      if (!Array.isArray(p.executors)) fail()
-      const executors = (p.executors as unknown[]).map(descriptor)
-      if (new Set(executors.map(item => item.executorId)).size !== executors.length) fail()
-      return { routeHostId: input.hostId, runtimeId: p.runtimeId, executors } as HostSettingsResultMap[M]
+      return { routeHostId: input.hostId, ...parseHostExecutorInventory({ runtimeId: p.runtimeId, executors: p.executors }) } as HostSettingsResultMap[M]
     }
-    const executor = descriptor(p.executor)
+    const executor = parseHostExecutorDescriptor(p.executor)
     if (executor.executorId !== (input as HostSettingsParameterMap['settings.executors.register']).executorId) fail()
     return { routeHostId: input.hostId, runtimeId: p.runtimeId, executor } as HostSettingsResultMap[M]
   }

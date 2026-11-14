@@ -4,17 +4,20 @@ import { isDeepStrictEqual } from 'node:util'
 import { AgentMuxError } from './errors.js'
 import { durableWriteFile } from './durable-write.js'
 import { agentCreationIntentDigest as digest, verifyHostRouteEnvelope, verifyHostRouteExecutionAuthorization, type AgentMuxCreationAuthority } from './agent-creation-authority.js'
-import { parseHostRouteConfiguration, parseHostRouteCall, parseHostRouteEnvelope, parseHostRouteEdge, hostRouteScope,
+import { parseHostRouteConfiguration, parseHostRouteCall, parseHostRouteEnvelope, parseHostRouteEdge, hostRouteScope, hostRouteExecutorOperation,
   type AdoptedHostRoute, type HostRouteActor, type HostRouteCall, type HostRouteEnvelope, type HostRouteSettings,
-  type HostRouteObservationScope, type HostRouteExecutionAuthorization, type HostRouteStatement, type HostRouteParams, type HostRouteObservation, type HostRouteIdentity, type HostRouteStreamInitial, type HostRouteConfiguration, type HostRouteEdge, type HostRouteEdges, type HostRouteEdgeInspection } from './host-route.js'
+  type HostRouteObservationScope, type HostRouteExecutionAuthorization, type HostRouteStatement, type HostRouteParams, type HostRouteObservation, type HostRouteIdentity, type HostRouteStreamInitial, type HostRouteConfiguration, type HostRouteEdge, type HostRouteEdges, type HostRouteEdgeInspection,
+  type HostRouteChoices, type HostRouteExecutors, type HostRouteAgentTarget, type HostRouteDefinition } from './host-route.js'
 import { hostRouteOperation, executionRouteScope, memberRouteOperation, assertExecutionChild } from './host-route-execution.js'
 import { parseSpaceMemberParams } from './space-member-codec.js'
 import type { SpaceMemberParams } from './space-member.js'
 import type { AgentExecutionOpenInput } from './agent-execution-coordinator.js'
 import { rpcRecord, rpcString } from './rpc-data.js'
-import type { AgentInputCallContext } from './agent-input-wait.js'
+import { decodeHostedValue, parseHostedRuntimeOwnerIdentity } from './hosted-value.js'
+import { parseHostExecutorInventory } from './executor-contract.js'
+import { mintObjectId } from './object-id.js'
 import { validateAgentPromptInputKey } from './agent-prompt-condition.js'
-import { decodeHostedValue } from './hosted-value.js'
+import type { AgentInputCallContext } from './agent-input-wait.js'
 import type { AgentMuxRpcCallContext, AgentMuxRpcServiceSubscription } from './public-rpc-service.js'
 import type { AgentMuxRpcMethod, AgentMuxRpcParams, AgentMuxRpcResult, AgentMuxRpcStreamMethod, AgentMuxRpcStreamEvent } from './public-rpc.js'
 
@@ -124,6 +127,38 @@ export class HostRouteGateway {
     const source = await this.discovery(context), edges = await this.savedEdges()
     await context.assertCurrent?.(); context.signal?.throwIfAborted()
     return { ...source, edges, observedAt: Date.now() }
+  }
+  private agentTarget(definition: HostRouteDefinition): HostRouteAgentTarget {
+    return { hostId: definition.id, runtimeId: definition.route.hops.at(-1)!.target.runtimeId, adoptedRoute: structuredClone(definition.route) }
+  }
+  async choices(context: AgentMuxRpcCallContext): Promise<HostRouteChoices> {
+    const source = await this.discovery(context), state = await this.state()
+    await context.assertCurrent?.(); context.signal?.throwIfAborted()
+    return { ...source, routes: state.routes.map(definition => ({ id: definition.id, agentTarget: this.agentTarget(definition) })), observedAt: Date.now() }
+  }
+  /** Current-viewer inventory only. Creation and Provider qualification retain their original owners. */
+  async executors(input: HostRouteParams['route.executors'], context: AgentMuxRpcCallContext): Promise<HostRouteExecutors> {
+    const operation = hostRouteExecutorOperation(input)
+    const current = async () => {
+      await context.assertCurrent?.(); context.signal?.throwIfAborted()
+      if (!isDeepStrictEqual(await this.configuredRoute(operation.routeId), operation.adoptedRoute)) denied('This exact saved route changed. Retain the selection; no other Host or route was used.', 'HOST_ROUTE_CHANGED')
+    }
+    await current()
+    const authorization = await this.options.authority.attestHostRouteExecution({ schema: 'agentmux.host-route-execution.v1', purpose: 'host-route-execution',
+      ...await this.origin(context), scope: { kind: 'executor-inventory', operation } })
+    const call = async (method: 'runtime.owner.identity' | 'runtime.invoke', params: Record<string, unknown>) => {
+      await current()
+      return await this.call({ routeId: operation.routeId, adoptedRoute: operation.adoptedRoute, requestId: mintObjectId(), call: { method, params } }, context, false, { authorization })
+    }
+    const identity = await call('runtime.owner.identity', { expectedRuntimeId: operation.targetRuntimeId })
+    const owner = parseHostedRuntimeOwnerIdentity(rpcRecord(identity.value).owner)
+    if (owner.runtimeId !== operation.targetRuntimeId) denied('The executor read reached another semantic Runtime.', 'HOST_ROUTE_TARGET_MISMATCH')
+    const result = await call('runtime.invoke', { consumerId: mintObjectId(), fence: { runtimeId: owner.runtimeId, ownerInstanceId: owner.ownerInstanceId },
+      invocation: { method: 'listHostExecutors', args: [{ refresh: operation.refresh, ...(operation.executorId === undefined ? {} : { executorId: operation.executorId }) }] } })
+    const inventory = parseHostExecutorInventory(decodeHostedValue(rpcRecord(result.value).value))
+    if (inventory.runtimeId !== operation.targetRuntimeId) denied('The executor inventory names another original Runtime.', 'HOST_ROUTE_TARGET_MISMATCH')
+    await current()
+    return { routeId: operation.routeId, agentTarget: this.agentTarget({ id: operation.routeId, route: operation.adoptedRoute }), inventory, observation: result.observation }
   }
   async inspectEdge(input: HostRouteParams['route.edge.inspect'], context: AgentMuxRpcCallContext): Promise<HostRouteEdgeInspection> {
     const source = await this.discovery(context)

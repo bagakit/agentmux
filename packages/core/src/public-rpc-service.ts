@@ -832,6 +832,8 @@ export class AgentMuxRpcService {
       const input = parseHostRouteParams(method as keyof typeof HOST_ROUTE_METHODS, params)
       if (method === 'route.identity') return await routes.identity() as AgentMuxRpcResult<M>
       if (method === 'route.edges') return await routes.edges(context) as AgentMuxRpcResult<M>
+      if (method === 'route.choices') return await routes.choices(context) as AgentMuxRpcResult<M>
+      if (method === 'route.executors') return await routes.executors(parseHostRouteParams('route.executors', params), context) as AgentMuxRpcResult<M>
       if (method === 'route.edge.inspect') return await routes.inspectEdge(input as import('./host-route.js').HostRouteParams['route.edge.inspect'], context) as AgentMuxRpcResult<M>
       if (method === 'route.inspect' || method === 'route.configure') {
         if (context.caller || context.routeDelegation || !context.principal) throw new AgentMuxError('Route policy requires its actual original user/device.', 'CONTROL_PERMISSION_DENIED')
