@@ -36,6 +36,13 @@ are cumulative counters; interval rates require two compatible samples. OS free 
 not Linux available RAM. Core-process RSS is not all Agents or the whole App. Missing
 sources remain unavailable; no synthetic network speed or fabricated history is supplied.
 
+filesystemIo reports this Core process's cumulative readOperations/writeOperations,
+not bytes or Agent child-process work. Its scope is filesystem on Unix and process-io
+on Windows; these are operation counts, not disk/network bandwidth. Interval ops/s
+requires matching Runtime, Core instance, PID and scope plus two successful samples.
+A missing field on an older source or an unavailable metric is not a measured zero;
+other successful measurements remain usable.
+
 node files list/read take --input JSON and the exact returned root reference plus a
 literal relative path. Denied descendants and links outside the published root are not
 shared. Refresh publication after a stale root or policy. List offset/nextOffset and

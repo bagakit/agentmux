@@ -240,6 +240,10 @@ Session 的工作、等待、权限请求、未知等状态沿[Core 语义与 Pr
 
 Service status 的首层面向当前准确 Host 的服务观察，区分服务进程与整机公开资源。本服务的 Core CPU／RSS／heap／uptime 只消费原 serving Core 的结构化测量；Native Run、Attachment 与 retained output 沿原 Runtime 口径，运行 Run 数不冒称 Agent 数，输出 payload 不冒充磁盘 I/O。已获原 owner 读取资格的 Desktop 可沿准确 Host／Runtime 的既有私有 owner 入口读取；这不修改 Node 的 Share，也不把普通发布访问者提升为 owner。公开资源被 withheld 时明确未共享；旧 Core 或来源缺失只使该读数未知，原 Session 与其它成功来源仍可用。
 
+Agent 观察以原 Core 的 Session 记录为口径：Saved 是当前持久且未退役的原记录，Retired 是未被原 recordDeletion 事实删除的退役记录；Running saved 是同源 Native 当前 running Run 与这些记录的准确当前 Run 绑定交集。它不包含 Terminal、helper、退役 Run 或尚未确认持久化的创建，不表示 Provider 的工作／等待状态。Saved／Retired 与 Running 分别保留自己的观察时刻，不宣称跨 owner 原子快照或瞬时比例。计数在原 Store 聚合，Native 只提供原薄列表；不为监控导入历史、逐 Session hydrate、探测 Provider 或新增事实 Store。原 Native、记录计数与运行交集是独立读取，一项待定或失败不拖住另一已完成来源的交付。
+
+Core I/O 消费原进程 resourceUsage 的累计读／写操作次数。Unix 的文件系统操作与 Windows 的进程 I/O 口径具名，均不冒充字节、磁盘或网络带宽及子进程工作；Native stream 是另一对象。区间速率只在同 Runtime／owner instance／PID／计数口径的两次成功样本间按真实 elapsed 派生，首点、缺测、回退和换代断开，不填零。原 Node private owner／public Share 与准确 Host 观察沿各自既有资格，新增缺失字段只使相应指标未知，不拿走旧来源能力。
+
 本管理台复用当前展开 Host 的顺序读取循环，不因缩放、图布局或节点渲染扫描无关 Session。展开、当前页且文档可见才读，折叠或隐藏取消自己的观察；图表故障不阻断读数与健康工作。近期曲线仅保留本次可见读取所得的有界内存样本，明确窗口、来源、单位与断点；缺测不填零、不平滑跨断线、不重复标旧值为新。长期历史、告警与可用性统计仍须独立采集及留存合同，网络吞吐、温度与逐跳延迟无真实来源时不画图凑数。
 
 ## 连接配置与测试

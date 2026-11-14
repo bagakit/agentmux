@@ -111,6 +111,21 @@ settings authority. Tailcat does not install a remote Core or expand the Linux S
 
 ## Current remote communication
 
+settings hosts agent-resources --host HOST --kind records independently reads
+Saved/current and Retired original Core records, even when Native is unavailable.
+Use --kind running for the exact current saved-binding intersection with one Native
+running inventory. Add --expected-runtime RUNTIME to pin either read to its original
+Core. Each response carries kind, owner, measurement and its own source time; running
+also identifies the Native inventory instance/time. These reads are not an atomic
+cross-owner cut or an instantaneous Running/Saved ratio. Terminal/helper Runs,
+retired Runs, deleted-record tombstones and unacknowledged creations are not these
+Agent counts; counts do not mean Provider working/waiting status. The original
+settings hosts inspect stays Native-only and does not wait for the Store. Missing
+old-Core methods, unreadable Store or Native failure affect only the requested
+measurement. No read imports/initializes the Store, hydrates history or changes a
+Session. A full visible service refresh may use two independent thin Native
+inventories, never per-Run status or a background global sampler.
+
 settings hosts inspect --host HOST also reports the observing service's original
 Host Runtime RPC carrier, when available. It is not the saved preference or the
 remote listener's state. SSH-first with Tailcat backup can currently use SSH or
