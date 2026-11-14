@@ -23,6 +23,8 @@ it('renders a captured image in the Session draft, enlarges it, restores it and 
   vi.spyOn(api.ui, 'captureScreenshot').mockResolvedValue(path)
   const read = vi.spyOn(api.ui, 'readPastedImage').mockResolvedValue(image)
   const send = vi.spyOn(useAppStore.getState(), 'send').mockResolvedValue(true)
+  const originalSession = useAppStore.getState().sessions.find(session => session.id === 'agent-1')
+  expect(originalSession?.control).toMatchObject({ hostId: 'local', agentSessionId: 'agent-1', run: { runId: 'run-agent-1' } })
   await dom.render(<AgentSessionComposer sessionId="agent-1" />)
   await dom.click('.composer-tool--mode')
   await dom.click('[aria-label="Capture a screen region"]')
@@ -37,7 +39,8 @@ it('renders a captured image in the Session draft, enlarges it, restores it and 
   await vi.waitFor(() => expect(thumbnail()?.src).toBe(dataUrl))
   expect(dom.draft()).toBe(draft)
   await dom.click('.composer-send')
-  expect(send).toHaveBeenCalledExactlyOnceWith('agent-1', draft, expect.any(Function), 'manual')
+  expect(send).toHaveBeenCalledExactlyOnceWith('agent-1', draft, expect.any(Function), 'manual', undefined,
+    expect.objectContaining({ inputImages: [], originalSession }))
 })
 
 it('pasted image bytes resolve to the same preview and durable reference', async () => {
@@ -82,13 +85,16 @@ it('round-trips multiple image nodes, supports deletion/undo, and preserves surr
 })
 
 it('uses the same image editor for Launcher screenshots', async () => {
-  vi.spyOn(api.ui, 'captureScreenshot').mockResolvedValue(path)
+  vi.spyOn(useAppStore.getState(), 'prewarmTerminal').mockResolvedValue(undefined)
+  vi.spyOn(useAppStore.getState(), 'releaseWarmTerminal').mockResolvedValue(undefined)
+  const capture = vi.spyOn(api.ui, 'captureScreenshot').mockResolvedValue(path)
   vi.spyOn(api.ui, 'readPastedImage').mockResolvedValue(image)
   useAppStore.setState({ tabs: { launcher: createWorkbenchTab('launcher', { regionId: 'region', kind: 'launcher', workspaceId: 'workspace' }) },
     activeWorkspaceId: 'workspace', agentComposerDrafts: { region: 'Launch draft' } })
-  await dom.render(<NewTabSurface tabGroupId="group" tabId="launcher" regionId="region" visible={false} />)
+  await dom.render(<NewTabSurface tabGroupId="group" tabId="launcher" regionId="region" visible />)
   await dom.click('[aria-label="Capture a screen region"]')
   await vi.waitFor(() => expect(thumbnail()?.src).toBe(dataUrl))
+  expect(capture).toHaveBeenCalledExactlyOnceWith(undefined, undefined)
   expect(dom.container.querySelector('.tiptap')?.getAttribute('aria-label')).toBe('Agent prompt')
   expect(dom.draft('region')).toBe(`Launch draft @${path} `)
   const launch = vi.spyOn(useAppStore.getState(), 'launchAgent').mockResolvedValue(undefined)
