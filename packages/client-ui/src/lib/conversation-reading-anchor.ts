@@ -1,4 +1,4 @@
-type ReadingAnchor = { kind: 'record' | 'group' | 'segment'; id: string; offset: number }
+type ReadingAnchor = { kind: 'record' | 'group' | 'segment' | 'layout'; id: string; offset: number }
 /** Prefer a visible selected original; endpoint checks never scan the reading window. */
 export function selectedConversationReadingNode(root: HTMLElement, selector: string,
   visible: (node: HTMLElement) => boolean, candidates: () => Iterable<Element>): HTMLElement | null {
@@ -27,7 +27,7 @@ export function selectedConversationReadingNode(root: HTMLElement, selector: str
 export function conversationReadingAnchor(viewport: HTMLElement, observedScope?: HTMLElement | null, nativeOnly = false, visibleShells?: Iterable<Element>): ReadingAnchor | null {
   const bounds = viewport.getBoundingClientRect()
   if (bounds.height <= 0) return null
-  const selector = nativeOnly ? '[data-native-record-id], [data-conversation-process-key]' : '[data-segment-key], [data-native-record-id], [data-conversation-process-key]'
+  const selector = nativeOnly ? '[data-native-record-id], [data-conversation-process-key]' : '[data-segment-key], [data-native-record-id], [data-conversation-process-key], [data-conversation-layout-key]:not([data-conversation-process-key])'
   const selected = selectedConversationReadingNode(viewport, selector, row => anchorFromRows([row], bounds) !== null,
     () => visibleShells ?? (observedScope ?? viewport).querySelectorAll<HTMLElement>(selector))
   const selectedAnchor = selected && anchorFromRows([selected], bounds)
@@ -53,6 +53,7 @@ function anchorFromRows(rows: Iterable<HTMLElement>, bounds: DOMRect): ReadingAn
     if (rect.height <= 0 || rect.bottom <= bounds.top || rect.top >= bounds.bottom) continue
     if (row.dataset.segmentKey) return { kind: 'segment', id: row.dataset.segmentKey, offset: rect.top - bounds.top }
     if (row.dataset.nativeRecordId) return { kind: 'record', id: row.dataset.nativeRecordId, offset: rect.top - bounds.top }
+    if (row.dataset.conversationLayoutKey && !row.dataset.conversationProcessKey) return { kind: 'layout', id: row.dataset.conversationLayoutKey, offset: rect.top - bounds.top }
     const head = row.querySelector<HTMLElement>('.wf-card--observation > .wf-observation__header > .wf-head[aria-expanded="false"]')
     const headRect = head?.getBoundingClientRect(), id = head?.closest<HTMLElement>('.wf-card--observation')?.dataset.observationId
     if (id && headRect && headRect.height > 0 && headRect.bottom > bounds.top && headRect.top < bounds.bottom)
@@ -65,6 +66,8 @@ export function restoreConversationAnchor(viewport: HTMLElement, anchor: Reading
   const id = CSS.escape(anchor.id)
   const row = anchor.kind === 'segment'
     ? viewport.querySelector<HTMLElement>(`[data-segment-key='${id}']`)
+    : anchor.kind === 'layout'
+    ? viewport.querySelector<HTMLElement>(`[data-conversation-layout-key='${id}']`)
     : anchor.kind === 'record'
     ? viewport.querySelector<HTMLElement>(`[data-native-record-id='${id}']`)
     : viewport.querySelector<HTMLElement>(`[data-observation-id='${id}']`)

@@ -200,7 +200,7 @@ export function MoteWorkThreads({ page, issue, loading, visible, readWork, membe
     setExpanded(previous => { const next = new Set(previous); if (next.has(id)) { next.delete(id); if (selected === id) setSelected(null) } else { next.add(id); setSelected(id) } return next })
   }
   let previousDay = ''
-  return <section ref={viewport.ref} className="mote-conversation mote-threads" data-mote-threads={identity || undefined} data-detail={open ? 'open' : undefined} data-layout={wide ? 'split' : 'stack'}>
+  return <section ref={viewport.ref} className="mote-conversation mote-threads" data-mote-threads={identity || undefined} data-view={view} data-detail={open ? 'open' : undefined} data-layout={wide ? 'split' : 'stack'}>
     <header className="mote-threads__toolbar">
       {members || privateChats ? <div className="mote-threads__views" role="tablist" aria-label="Threads 内容">
         <button type="button" role="tab" aria-selected={view === 'work'} onClick={() => setView('work')}>工作<span>{events.length}</span></button>
