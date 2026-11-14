@@ -17,8 +17,9 @@ const ROUTE_LABELS: Readonly<Record<RouteMode, string>> = { system: 'System', di
  * pasted line, and the Don't proxy list under More. Apply is the only way to change it: Main applies the
  * route to the Profile's session before saving, so a route that cannot be applied leaves the old one in use.
  */
-export function ProfileNetworkRoute({ profile, openBrowsers, run, baselineRefresh = 0 }: {
+export function ProfileNetworkRoute({ profile, proxy, openBrowsers, run, baselineRefresh = 0 }: {
   profile: BrowserProfileSummary
+  proxy?: import('@agentmux/core/control').BrowserProxyAsset | undefined
   baselineRefresh?: number
   /** How many of this Profile's Browsers are open now; they reconnect through the new route. */
   openBrowsers: number
@@ -44,6 +45,8 @@ export function ProfileNetworkRoute({ profile, openBrowsers, run, baselineRefres
   return (
     <section className="browser-profile-editor__section" aria-label="Network">
       <h4>Network</h4>
+      {profile.proxyBinding ? <p className="browser-profile-editor__quiet">Proxy library · {proxy?.label ?? 'Original asset unavailable'}{proxy && proxy.revision !== profile.proxyBinding.revision ? ' · A different asset version is available' : ''}. Editing this route removes that binding.</p> : null}
+      <p className="browser-profile-editor__quiet" role="status">{profile.networkApplication?.status === 'applied' ? 'Native route configuration confirmed.' : profile.networkApplication?.status === 'pending' ? 'Native route configuration is pending.' : 'Native route configuration is unconfirmed.'} Exit and protocol checks are separate.</p>
       <div className="browser-profile-editor__route-modes" role="radiogroup" aria-label="Network route">
         {(Object.keys(ROUTE_LABELS) as RouteMode[]).map(option => (
           <button key={option} type="button" role="radio" aria-checked={mode === option} onClick={() => { beginEdit(); setMode(option) }}>{ROUTE_LABELS[option]}</button>

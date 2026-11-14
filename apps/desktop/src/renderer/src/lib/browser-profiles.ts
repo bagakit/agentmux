@@ -9,6 +9,7 @@ import { presentError } from '@agentmux/client-ui/error-presentation'
  * so a late reply can never replace a newer list. Components never copy it.
  */
 export type BrowserProfilesState = {
+  proxies?: import('@agentmux/core/control').BrowserProxyAsset[]
   revision: number | null
   sequence: number | null
   /** Last list Main confirmed; kept while a later read fails. */
@@ -32,7 +33,7 @@ export function createBrowserProfilesStore(port: Pick<typeof api.browser, 'readP
   const accept = (list: BrowserProfileList): void => {
     if (!list || !Number.isSafeInteger(list.revision) || !Number.isSafeInteger(list.sequence) || !Array.isArray(list.profiles) || !Array.isArray(list.folders) || !Array.isArray(list.views)) throw new Error('Main returned an unreadable Browser Profile list.')
     if (state.sequence !== null && list.sequence < state.sequence) return
-    set({ revision: list.revision, sequence: list.sequence, profiles: list.profiles, folders: list.folders, views: list.views, error: null, reading: state.reading })
+    set({ ...(list.proxies ? { proxies: list.proxies } : state.proxies ? { proxies: state.proxies } : {}), revision: list.revision, sequence: list.sequence, profiles: list.profiles, folders: list.folders, views: list.views, error: null, reading: state.reading })
   }
   // Concurrent consumers and retries share one Main read.
   const read = (): Promise<void> => reading ??= (async () => {

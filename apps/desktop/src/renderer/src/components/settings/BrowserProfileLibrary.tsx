@@ -1,3 +1,4 @@
+import { BrowserProxyLibrary } from './BrowserProxyLibrary'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { parseBrowserProfileQuery, queryBrowserProfiles, type BrowserProfileQuery, type BrowserProfileBulkAction, type BrowserProfileBulkItemResult } from '@agentmux/core/control'
 import { presentError } from '@agentmux/client-ui/error-presentation'
@@ -12,6 +13,8 @@ export function BrowserProfileLibrary({ list, active, selectedId, onSelect, focu
   list: BrowserProfilesState; active: boolean; selectedId: string | null; onSelect: (id: string) => void
   focusRequest: { id: string | null } | null; assignment: ReadonlyMap<string, number>; openCounts: ReadonlyMap<string, number>; detailLine: (profile: BrowserProfileSummary) => string
 }) {
+  const [proxyId, setProxyId] = useState('')
+  const proxies = list.proxies ?? []
   const profiles = list.profiles ?? [], folders = list.folders ?? [], views = list.views ?? []
   const [query, setQuery] = useState<BrowserProfileQuery>({})
   const [viewId, setViewId] = useState(''), [viewRevision, setViewRevision] = useState<number | null>(null), [label, setLabel] = useState('')
@@ -75,6 +78,12 @@ export function BrowserProfileLibrary({ list, active, selectedId, onSelect, focu
     const action: BrowserProfileBulkAction = kind === 'pin' ? { kind, pinned: !unpin } : kind === 'move' ? { kind, folderId: value || null } : { kind, tag: value }
     void run(async () => { setResults(await api.browser.bulkUpdateProfiles(items, action)) })
   }
+  const assignProxy = () => {
+    const proxy = proxies.find(item => item.id === proxyId)
+    if (!proxy) return
+    const items = [...selected].map(profileId => ({ profileId, expectedRevision: profiles.find(profile => profile.id === profileId)?.revision ?? 'unavailable' }))
+    void run(async () => { setResults(await api.browser.assignProxy(proxy.id, proxy.revision, items)) })
+  }
   return <div className="browser-profile-library">
     <div className="browser-profile-library__views">
       <label>View<select aria-label="Saved Profile view" value={viewId} onChange={event => applyView(event.target.value)}><option value="">All Profiles</option>{views.map(view => <option key={view.id} value={view.id}>{view.label}</option>)}</select></label>
@@ -108,8 +117,10 @@ export function BrowserProfileLibrary({ list, active, selectedId, onSelect, focu
       <label>Bulk change<select aria-label="Bulk Profile action" value={kind} disabled={busy} onChange={event => { setKind(event.target.value as BrowserProfileBulkAction['kind']); setValue('') }}><option value="pin">Pin</option><option value="move">Move to folder</option><option value="add-tag">Add tag</option><option value="remove-tag">Remove tag</option></select></label>
       {kind === 'pin' ? <label><input type="checkbox" checked={unpin} onChange={event => setUnpin(event.target.checked)} />Unpin instead</label> : kind === 'move' ? <label>Destination<select aria-label="Bulk destination folder" value={value} onChange={event => setValue(event.target.value)}><option value="">Unfiled</option>{folders.map(folder => <option key={folder.id} value={folder.id}>{folder.label}</option>)}</select></label> : <label>Tag<input aria-label="Bulk tag name" value={value} onChange={event => setValue(event.target.value)} /></label>}
       <button className="small-button" disabled={busy || ((kind === 'add-tag' || kind === 'remove-tag') && !value.trim())} onClick={bulk}>{busy ? 'Applying…' : `Apply to ${selected.size} selected`}</button>
+      {proxies.length ? <details><summary>Assign a proxy</summary><label>Saved proxy<select aria-label="Proxy for selected Profiles" value={proxyId} onChange={event => setProxyId(event.target.value)}><option value="">Choose a proxy</option>{proxies.map(proxy => <option key={proxy.id} value={proxy.id}>{proxy.label}</option>)}</select></label><p className="settings-hint">The selected Profiles reconnect. Existing sign-ins remain scoped to their saved server.</p><button className="small-button" disabled={busy || !proxies.some(proxy => proxy.id === proxyId)} onClick={assignProxy}>Assign to {selected.size} selected</button></details> : null}
     </section> : null}
     {error ? <p role="status" className="browser-profiles-settings__service">{error}</p> : null}
     {results ? <section aria-label="Bulk Profile results" className="browser-profile-library__results" role="status"><strong>{results.filter(item => item.outcome === 'updated').length} updated · {results.filter(item => item.outcome === 'failed').length} failed</strong><details><summary>Individual results</summary><ul>{results.map(item => <li key={item.profileId}><strong>{profiles.find(profile => profile.id === item.profileId)?.label ?? 'Unavailable Profile'}</strong> <code>{item.profileId}</code> — {item.outcome === 'updated' ? 'Updated' : `${item.message} (${item.code})`}</li>)}</ul></details></section> : null}
+    <BrowserProxyLibrary assets={list.proxies} active={active} />
   </div>
 }
