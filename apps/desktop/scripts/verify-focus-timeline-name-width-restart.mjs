@@ -18,7 +18,8 @@ const repositoryRoot = resolve(import.meta.dirname, '../../..'), desktopRoot = j
 const require = createRequire(join(desktopRoot, 'package.json')), ts = require('typescript')
 const exec = promisify(execFile)
 const rulerJoin = process.argv.includes('--ruler-join'), collectionLayoutJoin = process.argv.includes('--collection-layout-join')
-assert.ok(!(rulerJoin && collectionLayoutJoin), 'Choose one bounded restart join mode')
+const projectRoutesJoin = process.argv.includes('--project-routes-join'), workfaceJoin = collectionLayoutJoin || projectRoutesJoin
+assert.ok([rulerJoin, collectionLayoutJoin, projectRoutesJoin].filter(Boolean).length <= 1, 'Choose one bounded restart join mode')
 const core = await import(pathToFileURL(join(repositoryRoot, 'packages/core/dist/index.js')))
 const { connectAgentMuxRpc } = await import(pathToFileURL(join(repositoryRoot, 'packages/core/dist/public-rpc-client.js')).href)
 const { macosHostServiceAddress, macosHostServiceRegistration, inspectMacosHostProcess } = await import(pathToFileURL(join(repositoryRoot, 'apps/host/dist/macos-service.js')).href)
@@ -39,10 +40,13 @@ const digest = bytes => createHash('sha256').update(bytes).digest('hex'), delay 
 const children = new Set(), connections = new Set(), diagnosticSockets = new Set(), deadline = Date.now() + 140_000
 const workspaceId = 'width-workspace', groupId = 'width-group', tabId = 'width-tab', agentRegionId = 'width-agent', fileRegionId = 'width-file'
 const draft = 'Keep the original width restart draft'
+const projectPreferences = [{ key: JSON.stringify(['local', workspaceId]), pinned: true, note: 'Original retained work', color: 'blue', collapsed: false },
+  { key: JSON.stringify(['remote-proof', workspaceId]), pinned: true, note: 'Separate Host reference retained', color: 'violet', collapsed: null }]
+const serializedProjects = JSON.stringify(projectPreferences)
 const joinPreferences = { mode: 'uniform', timeZone: 'America/New_York', intervalMinutes: 90, phaseMinutes: 1425 }
-const receipt = { schema: 'agentmux.focus-timeline-name-width-restart.v1', passed: false, processes: [], controls: [], cleanup: {},
+const receipt = { schema: projectRoutesJoin ? 'agentmux.focus-stable-routes-restart.v1' : 'agentmux.focus-timeline-name-width-restart.v1', passed: false, processes: [], controls: [], cleanup: {},
   privateRuntime: true, userRuntimeTouched: false,
-  mode: collectionLayoutJoin ? 'collection-layout-join' : rulerJoin ? 'ruler-join' : 'name-width',
+  mode: projectRoutesJoin ? 'project-routes-join' : collectionLayoutJoin ? 'collection-layout-join' : rulerJoin ? 'ruler-join' : 'name-width',
   boundary: 'Existing ordinary production Main/preload/Renderer, public Core Provider and real private PTY. Controlled first-hydrate Focus timestamps are visit inputs, not execution duration. Repository CLI fixture, not vendor Writer or user installation. First process receives one initial seed; second receives none. No HOME environment reassignment, package, build or user Runtime.' }
 let client, session, originalRun, hostProcess, hostBirth, hostRpc, failure, interruption, stage = 'prepare'
 const abort = signal => {
@@ -69,7 +73,7 @@ async function files(directory, prefix) {
 }
 async function binding() {
   const names = ['package.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', 'apps/desktop/package.json', 'apps/host/package.json',
-    'apps/desktop/scripts/verify-focus-timeline-name-width-restart.mjs', 'apps/desktop/scripts/probe-process.mjs',
+    'apps/desktop/scripts/verify-focus-timeline-name-width-restart.mjs', ...(projectRoutesJoin ? ['apps/desktop/scripts/verify-focus-stable-routes-restart.mjs'] : []), 'apps/desktop/scripts/probe-process.mjs',
     'apps/desktop/scripts/fixtures/settings-cli/desktop.mjs', 'packages/core/test/fixtures/fake-codex-cli.mjs', 'packages/core/bin/amux',
     ...await files(join(desktopRoot, 'resources/toolkit'), 'apps/desktop/resources/toolkit'),
     ...await files(join(desktopRoot, 'src'), 'apps/desktop/src'), ...await files(join(desktopRoot, 'out'), 'apps/desktop/out'),
@@ -200,6 +204,7 @@ async function captureLaunchFailure(cdp, label) {
     const shape=n=>n?{tag:n.tagName,className:n.className,hidden:n.hidden,inert:n.inert,ariaHidden:n.getAttribute('aria-hidden'),rects:n.getClientRects().length,display:getComputedStyle(n).display,visibility:getComputedStyle(n).visibility,attributes:Object.fromEntries([...n.attributes].map(a=>[a.name,a.value]))}:null;
     return {readyState:document.readyState,href:location.href,xterms:[...document.querySelectorAll('.xterm')].map(n=>({element:shape(n),region:shape(n.closest('[data-workbench-region-id]'))})),regions:[...document.querySelectorAll('[data-workbench-region-id]')].map(shape),focus:[...document.querySelectorAll('.global-focus-surface')].map(shape),focusViews:[...document.querySelectorAll('[data-desktop-focus-view]')].map(shape),workbench:localStorage.getItem('agentmux-workbench-v1'),bodyText:document.body.innerText.slice(0,50000),html:document.documentElement.outerHTML.slice(0,300000)}
   })()`)
+  if (projectRoutesJoin) state.workbench = await cdp.evaluate('window.agentmux.ui.readWorkbenchState()')
   try { state.runtimeSnapshot = await cdp.evaluate('window.agentmux.sessions.snapshot()') } catch (error) { state.runtimeSnapshotFailure = error.message }
   await writeFile(join(output, file), JSON.stringify(state, null, 2) + '\n')
   const screenshot = label + '-launch-failure.png', image = await cdp.call('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false, fromSurface: true })
@@ -258,8 +263,8 @@ async function launch(label, seed) {
   await waitFor(`${label} ready`, async () => { alive(); try { return JSON.parse(await readFile(readyFile, 'utf8')) } catch (error) { if (error.code !== 'ENOENT') throw error; return null } })
   if (seed) await copyFile(reportFile, join(output, label + '-seed-report.json'))
   try {
-  await waitFor(`${label} original workface and ${collectionLayoutJoin ? 'Collection presentation' : 'visible name handle'}`, () => cdp.evaluate(
-    collectionLayoutJoin
+  await waitFor(`${label} original workface and ${workfaceJoin ? 'Focus workface presentation' : 'visible name handle'}`, () => cdp.evaluate(
+    workfaceJoin
       ? `Boolean(document.querySelector('[data-workbench-region-id="${agentRegionId}"] .xterm')&&document.querySelector('.global-focus-surface[data-focus-topic-presentation]')?.getClientRects().length)`
       : `Boolean(document.querySelector('[data-workbench-region-id="${agentRegionId}"] .xterm')&&document.querySelector('[aria-label="Resize timeline names"]')?.getClientRects().length)`))
   } catch (error) {
@@ -270,8 +275,8 @@ async function launch(label, seed) {
   return { child, main, cdp, controlBridgeId, controlBridgeOwner, diagnostics: [mainDiagnostics, rendererDiagnostics], seedReport: seed ? JSON.parse(await readFile(reportFile, 'utf8')) : null }
 }
 async function surface(probe) {
-  if (collectionLayoutJoin) {
-    const value = await probe.cdp.evaluate(`(() => { const saved=JSON.parse(localStorage.getItem('agentmux-workbench-v1')).state;return{selection:saved.workbenchSpaceSelection,focus:saved.agentFocus,draft:saved.agentComposerDrafts[${JSON.stringify(session.agentSessionId)}],topicPresentation:document.querySelector('.global-focus-surface')?.dataset.focusTopicPresentation,regions:[...document.querySelectorAll('[data-workbench-region-id]')].filter(n=>n.getClientRects().length&&getComputedStyle(n).visibility==='visible').map(n=>n.dataset.workbenchRegionId).sort()}})()`)
+  if (workfaceJoin) {
+    const value = projectRoutesJoin ? await probe.cdp.evaluate(`(async()=>{const raw=await window.agentmux.ui.readWorkbenchState();if(!raw)throw Error('Original Main user-state document is unavailable');const saved=JSON.parse(raw).state,config=await window.agentmux.config.get(),row=[...document.querySelectorAll('.focus-project-lanes__row[data-project-key]')].find(n=>n.dataset.projectKey===JSON.stringify(['local',${JSON.stringify(workspaceId)}]));return{selection:saved.workbenchSpaceSelection,focus:saved.agentFocus,draft:saved.agentComposerDrafts[${JSON.stringify(session.agentSessionId)}],projectPreferences:JSON.stringify(config.focus?.projects??[]),projectRow:row?{pinned:row.dataset.pinned,color:row.dataset.focusProjectColor,note:row.querySelector('[data-focus-project-note]')?.textContent,text:row.textContent}:null,regions:[...document.querySelectorAll('[data-workbench-region-id]')].filter(n=>n.getClientRects().length&&getComputedStyle(n).visibility==='visible').map(n=>n.dataset.workbenchRegionId).sort()}})()`) : await probe.cdp.evaluate(`(() => { const saved=JSON.parse(localStorage.getItem('agentmux-workbench-v1')).state;return{selection:saved.workbenchSpaceSelection,focus:saved.agentFocus,draft:saved.agentComposerDrafts[${JSON.stringify(session.agentSessionId)}],topicPresentation:document.querySelector('.global-focus-surface')?.dataset.focusTopicPresentation,regions:[...document.querySelectorAll('[data-workbench-region-id]')].filter(n=>n.getClientRects().length&&getComputedStyle(n).visibility==='visible').map(n=>n.dataset.workbenchRegionId).sort()}})()`)
     const spatial = await new core.AgentMuxSpatialStateStore().read()
     assert.ok(spatial?.graph?.tabs.some(tab => tab.tabId === tabId), 'Original Tab must exist in the actual Core durable workface')
     assert.ok(spatial.graph.layouts[workspaceId] && spatial.graph.tabLayouts[tabId], 'Original Group and split layout must be nonempty')
@@ -293,10 +298,11 @@ function originalWorkfaceScope(graph) {
     tab, regions, layout: graph.layouts[choice.workspaceId], tabLayout: graph.tabLayouts[choice.tabId], titleRegionId: tabResource.titleRegionId,
     regionResources: Object.fromEntries(regions.map(region => [region.regionId, graph.resources[`region:${region.regionId}`]])) }
 }
-async function collectionCommand(args, operation) {
+async function collectionCommand(args, operation, expectedOk = true) {
   const cli = join(repositoryRoot, 'packages/core/bin/amux'), endpoint = `unix:${join(runtimeDirectory, 'control.sock')}`
   const captured = { args: ['--endpoint', endpoint, ...args], operation, startedAt: Date.now() }
-  receipt.collectionCli ??= []; receipt.collectionCli.push(captured)
+  const key = projectRoutesJoin ? 'projectCli' : 'collectionCli'
+  receipt[key] ??= []; receipt[key].push(captured)
   let result
   try {
     const execution = exec(process.execPath, [cli, ...captured.args], { cwd: repositoryRoot, timeout: 10_000,
@@ -306,11 +312,11 @@ async function collectionCommand(args, operation) {
   } catch (error) { result = { code: error.code ?? null, signal: error.signal ?? null, stdout: error.stdout ?? '', stderr: error.stderr ?? '' } }
   Object.assign(captured, result, { elapsedMs: Date.now() - captured.startedAt })
   // Preserve an unknown write exactly. Never retry it or open a second service.
-  assert.equal(result.code, 0, JSON.stringify(captured))
-  const payload = JSON.parse(result.stdout)
+  assert.equal(result.code, expectedOk ? 0 : 1, JSON.stringify(captured))
+  const payload = JSON.parse(expectedOk ? result.stdout : result.stderr)
   captured.receipt = payload
-  assert.equal(payload.ok, true); assert.equal(payload.operation, operation)
-  return payload.result
+  assert.equal(payload.ok, expectedOk); assert.equal(payload.operation, operation)
+  return expectedOk ? payload.result : payload
 }
 async function durableCollectionPreference(expected, checkpoint) {
   const path = join(userData, 'agentmux.config.json'), bytes = await readFile(path), config = JSON.parse(bytes)
@@ -318,6 +324,30 @@ async function durableCollectionPreference(expected, checkpoint) {
   const file = `collection-config-${checkpoint}.json`
   await writeFile(join(output, file), bytes, { flag: 'wx', mode: 0o600 })
   return { file, sha256: digest(bytes), value: config.focus.topicPresentation }
+}
+async function durableProjectPreference(checkpoint) {
+  const bytes = await readFile(join(userData, 'agentmux.config.json')), config = JSON.parse(bytes)
+  assert.deepEqual(config.focus?.projects, projectPreferences)
+  const file = `project-config-${checkpoint}.json`; await writeFile(join(output, file), bytes, { flag: 'wx', mode: 0o600 })
+  return { file, sha256: digest(bytes), value: config.focus.projects }
+}
+const projectRendered = value => value.projectPreferences === serializedProjects && value.projectRow?.pinned === 'true' && value.projectRow?.color === 'blue' && value.projectRow?.note === projectPreferences[0].note
+async function setProjectPreferences(probe) {
+  stage = 'project-cli-discovery'
+  const found = await collectionCommand(['settings', 'inspect', 'focus.projects'], 'settings.inspect')
+  assert.deepEqual(found.entries, [{ key: 'focus.projects', kind: 'string', value: '[]', default: '[]' }])
+  stage = 'project-cli-invalid-input'
+  const invalidOperation = randomUUID(), rejected = await collectionCommand(['settings', 'set', 'focus.projects', JSON.stringify([...projectPreferences, projectPreferences[0]]), '--operation-id', invalidOperation], 'settings.set', false)
+  assert.ok(rejected.error?.message)
+  assert.equal((await collectionCommand(['settings', 'inspect', 'focus.projects'], 'settings.inspect')).entries[0].value, '[]')
+  receipt.invalidInput = { operationId: invalidOperation, rejected, originalPreferenceRetained: true }
+  stage = 'project-cli-single-write'
+  const operationId = randomUUID(); receipt.projectOperation = { operationId, key: 'focus.projects', value: serializedProjects }
+  const saved = await collectionCommand(['settings', 'set', 'focus.projects', serializedProjects, '--operation-id', operationId], 'settings.set')
+  assert.equal(saved.entry.key, 'focus.projects'); assert.equal(saved.entry.value, serializedProjects)
+  stage = 'project-renderer-consumption'
+  const edited = await waitFor('actual Focus consumes the public project preference', async()=>{ const value=await surface(probe); return projectRendered(value) ? value : null })
+  receipt.projectConfigAfterSave = await durableProjectPreference('after-save'); return edited
 }
 async function setCollectionPresentation(probe) {
   stage = 'collection-cli-discovery'
@@ -403,11 +433,19 @@ async function adjust(probe, width) {
   return waitFor('width commits on release', async () => { const value = await surface(probe); return value.width === width ? value : null })
 }
 async function normalQuit(probe) {
+  await probe.cdp.call('Debugger.disable')
   for (const socket of probe.diagnostics ?? []) { socket.close(); diagnosticSockets.delete(socket) }
   let replyError
   try { await probe.main.evaluate(`process.getBuiltinModule('module').createRequire(${JSON.stringify(join(desktopRoot, 'package.json'))})('electron').app.quit()`) } catch (error) { replyError = error.message }
-  probe.cdp.close(); probe.main.close()
-  await waitFor('ordinary Desktop exit', () => probe.child.exitCode !== null || probe.child.signalCode !== null)
+  probe.main.close()
+  try { await waitFor('ordinary Desktop exit', () => probe.child.exitCode !== null || probe.child.signalCode !== null) }
+  catch (error) {
+    if (projectRoutesJoin) {
+      const observations = await Promise.allSettled([captureLaunchFailure(probe.cdp, 'quit-unconfirmed'), run(), collectionCommand(['app', 'inspect'], 'app.inspect')])
+      receipt.quitFailureObservation = Object.fromEntries(observations.map((value,index)=>[['renderer','originalRun','app'][index],value.status==='fulfilled'?value.value??{captured:true}:{unavailable:value.reason.message}]))
+    }
+    throw error
+  } finally { probe.cdp.close() }
   assert.equal(probe.child.exitCode, 0); assert.equal(probe.child.signalCode, null); children.delete(probe.child)
   return { pid: probe.child.pid, exitCode: probe.child.exitCode, signal: probe.child.signalCode, inspectorReplyError: replyError ?? null }
 }
@@ -455,8 +493,8 @@ try {
   await startPrivateSemanticHost()
   stage = 'first-seeded-launch'
   const first = await launch('first', seed), before = await surface(first)
-  if (collectionLayoutJoin) {
-    assert.equal(before.topicPresentation, 'cards'); assert.ok(before.regions.includes(agentRegionId)); assert.ok(before.regions.includes(fileRegionId))
+  if (workfaceJoin) {
+    assert.equal(projectRoutesJoin ? before.projectPreferences : before.topicPresentation, projectRoutesJoin ? '[]' : 'cards'); assert.ok(before.regions.includes(agentRegionId)); assert.ok(before.regions.includes(fileRegionId))
     assert.deepEqual(before.selection, receipt.originalSelection)
     assert.ok(before.workbench.regions.some(region => region.regionId === agentRegionId && region.agentSessionId === session.agentSessionId))
     receipt.workfaceGraphs = { before: await hostArtifact('first-before-core-graph.json', before.workbench) }
@@ -472,39 +510,42 @@ try {
   stage = 'first-original-run-input-ready'
   await waitFor('first original Run is input ready', async () => { const value = await inspectRegion(first); return value.terminalView?.liveReady && value.terminalView.acceptsInput ? value : null })
   const widthRunBefore = await run()
-  const originalTerminal = await actualTerminal(first), edited = collectionLayoutJoin ? await setCollectionPresentation(first) : await adjust(first, 244), laterTerminal = await actualTerminal(first)
+  const originalTerminal = await actualTerminal(first), edited = projectRoutesJoin ? await setProjectPreferences(first) : collectionLayoutJoin ? await setCollectionPresentation(first) : await adjust(first, 244), laterTerminal = await actualTerminal(first)
   const same = await first.cdp.call('Runtime.callFunctionOn', { objectId: originalTerminal, arguments: [{ objectId: laterTerminal }], functionDeclaration: 'function(current){return this===current}', returnByValue: true })
   assert.equal(same.exceptionDetails, undefined); assert.equal(same.result.value, true); receipt.sameProcessXtermPreserved = true
-  if (collectionLayoutJoin) {
+  if (workfaceJoin) {
     receipt.workfaceGraphs.edited = await hostArtifact('first-after-core-graph.json', edited.workbench)
     assert.deepEqual(originalWorkfaceScope(edited.workbench), originalWorkfaceScope(before.workbench))
   } else assert.deepEqual(edited.workbench, before.workbench)
   assert.deepEqual(edited.focus, before.focus); assert.equal(edited.draft, draft)
-  if (collectionLayoutJoin) assert.deepEqual(edited.selection, before.selection)
-  if (collectionLayoutJoin) { assert.equal(edited.topicPresentation, 'sections'); assert.deepEqual(edited.regions, before.regions) }
+  if (workfaceJoin) assert.deepEqual(edited.selection, before.selection)
+  if (workfaceJoin) { assert.equal(projectRoutesJoin ? edited.projectPreferences : edited.topicPresentation, projectRoutesJoin ? serializedProjects : 'sections'); assert.deepEqual(edited.regions, before.regions) }
   else assert.equal(edited.height, before.height)
   if(rulerJoin){assert.deepEqual(edited.ruler,joinPreferences);assert.equal(edited.hours,6);await joinChange(first,'[aria-label=\"Focus window size\"]','4');await waitFor('first returns actual local4h',async()=>{const value=await surface(first);return value.hours===4?value:null});await joinShot(first,'ordinary-first-prefs-width')}
   const widthRunAfter = await run()
   assert.equal(widthRunAfter.acceptedInputBytes, widthRunBefore.acceptedInputBytes, 'Presentation changes never submit the draft')
-  receipt[collectionLayoutJoin ? 'collectionInputBoundary' : 'widthInputBoundary'] = { beforeByte: widthRunBefore.acceptedInputBytes, afterByte: widthRunAfter.acceptedInputBytes, permitsOriginalAttachProtocol: true }
+  receipt[projectRoutesJoin ? 'projectInputBoundary' : collectionLayoutJoin ? 'collectionInputBoundary' : 'widthInputBoundary'] = { beforeByte: widthRunBefore.acceptedInputBytes, afterByte: widthRunAfter.acceptedInputBytes, permitsOriginalAttachProtocol: true }
   stage = 'first-normal-quit'
   receipt.processes.push({ pid: first.child.pid, seedWrites: 1, before, after: edited, exit: await normalQuit(first) })
   const preservedAfterQuit = await run(); stage = 'second-launch-without-seed'
-  const second = await launch('second'), restored = await surface(second)
+  const second = await launch('second'), restored = projectRoutesJoin ? await waitFor('original project preferences render after restart', async()=>{const value=await surface(second);return projectRendered(value)?value:null}) : await surface(second)
   const secondProcess = { pid: second.child.pid, seedWrites: 0, before: restored }
   receipt.processes.push(secondProcess)
   receipt.originalRunAfterQuit = preservedAfterQuit
   await writeFile(join(output, 'second-process-restored-checkpoint.json'), JSON.stringify(receipt, null, 2) + '\n')
-  if (collectionLayoutJoin) {
+  if (workfaceJoin) {
     receipt.workfaceGraphs.restored = await hostArtifact('second-restored-core-graph.json', restored.workbench)
     assert.deepEqual(originalWorkfaceScope(restored.workbench), originalWorkfaceScope(edited.workbench))
   } else assert.deepEqual(restored.workbench, edited.workbench)
   assert.deepEqual(restored.focus, edited.focus); assert.equal(restored.draft, draft)
-  if (collectionLayoutJoin) assert.deepEqual(restored.selection, before.selection)
-  if (collectionLayoutJoin) {
+  if (workfaceJoin) assert.deepEqual(restored.selection, before.selection)
+  if (workfaceJoin) {
     stage = 'collection-preference-and-workface-restored'
-    assert.equal(restored.topicPresentation, 'sections'); assert.deepEqual(restored.regions, before.regions)
-    receipt.collectionConfigAfterRestart = await durableCollectionPreference('sections', 'after-restart'); receipt.collectionPreferencesRestored = true
+    assert.equal(projectRoutesJoin ? restored.projectPreferences : restored.topicPresentation, projectRoutesJoin ? serializedProjects : 'sections'); assert.deepEqual(restored.regions, before.regions)
+    if (projectRoutesJoin) {
+      receipt.projectConfigAfterRestart = await durableProjectPreference('after-restart'); receipt.projectPreferencesRestored = true
+      assert.equal(restored.projectRow?.pinned, 'true'); assert.equal(restored.projectRow?.color, 'blue'); assert.ok(restored.projectRow?.text.includes(projectPreferences[0].note))
+    } else { receipt.collectionConfigAfterRestart = await durableCollectionPreference('sections', 'after-restart'); receipt.collectionPreferencesRestored = true }
   } else { assert.equal(restored.width, 244); assert.equal(restored.renderedWidth, 244); assert.equal(restored.height, before.height); assert.deepEqual(restored.tracks, edited.tracks) }
   if(rulerJoin){assert.deepEqual(restored.ruler,joinPreferences);assert.equal(restored.mode,'uniform');assert.equal(restored.zone,joinPreferences.timeZone);assert.equal(restored.hours,4);receipt.rulerPreferencesRestored=true;receipt.hoursBoundary={firstEdited:6,firstBeforeQuit:4,second:restored.hours,changedHourDurable:false};await joinShot(second,'ordinary-second-restored-prefs-width')}
   stage = 'restored-original-run-input-ready'
@@ -522,7 +563,7 @@ try {
   receipt.runs = [{ before: { runId: originalRun.runId, pid: originalRun.pid }, after: { runId: after.runId, pid: after.pid }, ack: { passed: true, beforeByte: ackBefore.acceptedInputBytes, afterByte: after.acceptedInputBytes, appliedByteRange: ack.appliedByteRange } }]
   secondProcess.exit = await normalQuit(second); assert.notEqual(receipt.processes[0].pid, receipt.processes[1].pid)
   receipt.originalRunAfterQuit = preservedAfterQuit
-  if (collectionLayoutJoin) { receipt.originalWorkfacePreserved = true; receipt.fullCatalogMayGainIndependentResources = true }
+  if (workfaceJoin) { receipt.originalWorkfacePreserved = true; receipt.fullCatalogMayGainIndependentResources = true }
   else { receipt.widthRestored = true; receipt.workbenchPreserved = true }
   const freshRpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: join(runtimeDirectory, 'control.sock') } })
   const freshVerifier = await core.connectHostedAgentMux({ rpc: freshRpc, expectedStorePath: join(userData, 'agent-sessions.json') })
@@ -546,6 +587,12 @@ finally {
     catch (error) { if (error.code !== 'ENOENT') throw error; receipt.ordinaryHostLog = { unavailable: 'ENOENT' } }
   })
   for (const connection of connections) { await attempt(async () => { await connection.call('Debugger.resume').catch(() => {}); connection.close() }) }
+  // Stop private App observers first: a live App may reconnect after its borrowed Host stops.
+  for (const child of [...children]) await attempt(async () => {
+    if (child === hostProcess || child.exitCode !== null || child.signalCode !== null) return
+    const owned = await inspectMacosHostProcess(child.pid); assert.ok(owned && owned.ppid === process.pid)
+    child.kill('SIGTERM'); await waitFor('original private App cleanup', () => child.exitCode !== null || child.signalCode !== null, 5000); children.delete(child)
+  })
   await attempt(async () => { if (client) { try { if (session) await client.stopAgent(session.agentSessionId, session.run) } finally { await client.dispose() } } })
   await attempt(async () => { await hostRpc?.dispose() })
   await attempt(async () => {
