@@ -37,7 +37,7 @@ it('restores the original native document before first load, preserving drafts a
   expect(await source.restoreMissing!(prepared)).toBe('restored')
   // A cold original owner has no ephemeral capture or prepare Maps.
   expect(await new WorkbenchUserStateStore(store.path).recoverySource().restoreMissing!(prepared)).toBe('same')
-  expect(await store.read()).toBe(await readFile(prepared.file, 'utf8'))
+  expect(JSON.parse((await store.read())!)).toEqual(JSON.parse(await readFile(prepared.file, 'utf8')))
   expect(await source.restoreMissing!(prepared)).toBe('same')
   await store.write(JSON.stringify({ version: 1, state: { agentComposerDrafts: { region: 'Newer authored input' } } }))
   expect(await source.restoreMissing!(prepared)).toBe('conflict')
@@ -52,11 +52,12 @@ it('retains an open document and a later admitted writer instead of publishing o
   expect(await store.read()).toBeNull()
   await expect(store.recoverySource().restoreMissing!(result.members[0]!)).rejects.toMatchObject({ code: 'DESKTOP_DOCUMENT_ALREADY_OPEN' })
   await expect(readFile(store.path)).rejects.toMatchObject({ code: 'ENOENT' })
-  const value = JSON.stringify({ version: 1, state: { agentComposerDrafts: { region: 'New pending author image' } } })
+  const state = { agentComposerDrafts: { region: 'New pending author image' } }
+  const value = JSON.stringify({ version: 1, state, inputQueueDelta: { changes: [] } })
   const saving = store.writeFromRenderer({}, { value, writeRevision: 1 }, () => true)
   expect(await store.recoverySource().restoreMissing!(result.members[0]!)).toBe('conflict')
   await expect(saving).resolves.toMatchObject({ diskDurability: 'confirmed' })
-  expect(await store.read()).toBe(value)
+  expect(JSON.parse((await store.read())!).state.agentComposerDrafts).toEqual(state.agentComposerDrafts)
 })
 
 it('returns exact unavailable pending launch selectors and refuses substituted or unprotected source members', async () => {
@@ -154,5 +155,45 @@ it('the original Main restore port is consumed by a second real Host process thr
     expect(JSON.parse((await store.read())!).state.agentSteerQueues.original[0].awaitingExplicitSend).toBe(true)
     expect(await readdir(join(root, 'exports'))).toEqual([])
     expect(await readFile(original.file, 'utf8')).toBe(document())
+  } finally { await server.stop(); exports.dispose() }
+}, 40_000)
+
+it('the original Main restores a SQLite cut including cold archive rows through the real Host', async () => {
+  const root = await fixture(), store = new WorkbenchUserStateStore(join(root, 'user.json')), socket = join(root, 'desktop.sock')
+  const raw = JSON.parse(document())
+  const archived = {
+    operationId: 'retained-archived', text: 'Independent original archive', archived: true, enqueuedAt: 2,
+    directInputControl: { kind: 'agent', hostId: 'local', agentSessionId: 'original', run: { runId: 'original-run' } },
+    directInputBinding: { expectedRun: { runId: 'original-run' } },
+    inputReceipt: { status: 'terminal-confirmed', persistence: 'confirmed', key: {
+      kind: 'prompt', agentSessionId: 'original', submissionId: 'retained-archived', expectedRun: { runId: 'original-run' }
+    } }
+  }
+  raw.state.agentSteerQueues.original.push(archived)
+  await store.write(JSON.stringify(raw))
+  const output = join(root, 'capture'); await mkdir(output)
+  const cut = await store.recoverySource().capture(output)
+  expect(cut.gaps).toEqual([])
+  expect(cut.members).toMatchObject([{ id: 'document', target: store.databasePath, kind: 'file' }])
+  const selected = cut.members[0]!, original = await readFile(selected.file)
+  const member = { ...selected, id: 'desktop.user-state/document', sha256: recoveryDigest(original), operationId: 'original-sqlite-restore' }
+  await unlink(store.databasePath)
+  const cold = new WorkbenchUserStateStore(store.path)
+  const exports = new DesktopStorageRecoveryExports(join(root, 'exports'), () => [cold.recoverySource()])
+  const server = new AgentMuxControlServer({ socketPath: socket, storageRecoveryExports: exports })
+  try {
+    await server.start()
+    const child = await runDesktopStorageHostProbe(root, socket, [member])
+    expect(child.code, child.stderr).toBe(0)
+    const proof = JSON.parse(child.stdout)
+    expect(proof.pid).not.toBe(process.pid)
+    expect(proof.outcomes).toEqual(['restored'])
+    expect(JSON.parse((await cold.read())!).state).toMatchObject({
+      agentComposerDrafts: raw.state.agentComposerDrafts,
+      agentSteerQueues: { original: [{ operationId: 'original-input', runId: 'original-run', awaitingExplicitSend: true }] }
+    })
+    expect((await cold.readInputArchive({ ownerKey: 'original', operationId: archived.operationId })).entries)
+      .toEqual([{ ownerKey: 'original', entry: { ...archived, awaitingExplicitSend: true } }])
+    expect(await readFile(selected.file)).toEqual(original)
   } finally { await server.stop(); exports.dispose() }
 }, 40_000)

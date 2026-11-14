@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { WorkbenchUserStateStore } from '../src/main/workbench-user-state'
@@ -14,10 +14,10 @@ async function fixture(fragments: Record<string, unknown> = { launcher: null }) 
   const root = await mkdtemp(join(tmpdir(), 'amux-user-document-review-')); roots.push(root)
   const owner = new WorkbenchUserStateStore(join(root, 'workbench-user-state.json'))
   await owner.write(JSON.stringify({ state: { draft: 'Original' }, version: 1, desktopFragments: fragments }))
-  return { owner, saved: async () => JSON.parse(await readFile(owner.path, 'utf8')) }
+  return { owner, saved: async () => JSON.parse((await owner.read())!) }
 }
 
-it('hydrates the original native projection without re-encoding it and keeps fragments through a checkpoint', async () => {
+it('hydrates the original native projection and keeps independent fragments through one checkpoint', async () => {
   const marker = 'Original large workface draft'
   const draft = marker + '正文内容'.repeat(4096)
   const launcher = JSON.stringify({ state: { drafts: { original: { prompt: 'Separate launcher input' } } }, version: 0 })
@@ -44,7 +44,10 @@ it('hydrates the original native projection without re-encoding it and keeps fra
   const checkpoint = measured()
   parse.mockRestore(); stringify.mockRestore()
 
-  expect({ read, checkpoint }).toEqual({ read: { decoded: 1, encoded: 0 }, checkpoint: { decoded: 1, encoded: 1 } })
+  // This test runs both process boundaries in one JS realm. Hydration decodes
+  // the native draft row and the wire document; saving encodes one wire
+  // request and the changed draft row, without another Renderer pass.
+  expect({ read, checkpoint }).toEqual({ read: { decoded: 2, encoded: 1 }, checkpoint: { decoded: 1, encoded: 2 } })
   expect(restored).toEqual({ state, version: 1 })
   expect(readFromOwner).toHaveBeenCalledTimes(1)
   expect(writesDuringRead).toBe(0)

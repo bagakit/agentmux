@@ -37,6 +37,12 @@ if (mode === '--owner') {
   suite('native-owner', 'apps/desktop/test/vitest.workbench-user-state.config.mts')
   suite('mutant-diagnostic-gate', 'apps/desktop/test/vitest.workbench-user-state.config.mts', {
     env: { AGENTMUX_USER_OWNER_MUTATION: 'await-diagnostic' }, test: 'stalled historical diagnostic', failure: 'stalled historical diagnostic' })
+  for (const [mutation, proof] of Object.entries({
+    'split-input-transaction': 'rolls back the draft',
+    'hydrate-cold-input': 'cuts eligible old archived bodies',
+    'reuse-stale-database-receipt': 'unchanged receipt metadata'
+  })) suite('mutant-' + mutation, 'apps/desktop/test/vitest.workbench-user-state.config.mts', {
+    env: { AGENTMUX_USER_OWNER_MUTATION: mutation }, test: proof, failure: proof })
   suite('native-consumers', 'apps/desktop/test/vitest.workbench-user-storage.config.mts')
   suite('native-ipc', 'apps/desktop/test/vitest.workbench-user-ipc.config.mts')
   suite('batch-regression', 'apps/desktop/test/vitest.draft-persistence.config.mts')

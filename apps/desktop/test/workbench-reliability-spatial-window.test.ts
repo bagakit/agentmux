@@ -65,7 +65,7 @@ it('independent checkpoints save real user data while an original spatial peer h
   const spatial = new Promise<void>(resolve => { release = resolve }), main = vi.fn(async () => {})
   const checkpoint = runIndependentCheckpoints([() => spatial, () => user.write(JSON.stringify({ version: 1, state: { agentComposerDrafts: { original: 'authored' } } })).then(() => {}), main])
   await vi.waitFor(() => expect(main).toHaveBeenCalledOnce())
-  await vi.waitFor(async () => expect(await readFile(user.path, 'utf8')).toContain('authored'))
+  await vi.waitFor(async () => expect(await user.read()).toContain('authored'))
   release(); await checkpoint
 })
 

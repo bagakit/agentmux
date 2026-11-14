@@ -107,19 +107,19 @@ it('storage inspection reports pending current user input before its native ACK 
 })
 
 it('storage inspection does not let missing or externally replaced native bytes borrow a prior ACK', async () => {
-  const f = await fixture(), original = await readFile(f.user.path, 'utf8')
-  await unlink(f.user.path)
+  const f = await fixture(), original = await readFile(f.user.databasePath)
+  await unlink(f.user.databasePath)
   const missing = await f.inspect()
-  expect(missing.main.storage?.userState?.availability).toBe('missing')
+  expect(missing.main.storage?.userState?.availability).toBe('unconfirmed')
   expect(() => requireOutgoingWorkbenchStorage(missing)).toThrow('existing interface and Runs were kept')
-  const replaced = JSON.stringify({ state: { agentComposerDrafts: { 'original-region': 'PRIVATE external replacement' } }, version: 1 })
-  await writeFile(f.user.path, replaced)
+  const replaced = Buffer.from(original)
+  await writeFile(f.user.databasePath, replaced)
   const different = await f.inspect()
   expect(different.main.storage?.userState?.lastConfirmedWrite?.contentDigest).not.toBe(different.main.storage?.userState?.contentDigest)
   expect(() => requireOutgoingWorkbenchStorage(different)).toThrow('existing interface and Runs were kept')
-  expect(await readFile(f.user.path, 'utf8')).toBe(replaced)
+  expect(await readFile(f.user.databasePath)).toEqual(replaced)
   expect(f.api.sessions.stop).not.toHaveBeenCalled()
-  await writeFile(f.user.path, original)
+  await writeFile(f.user.databasePath, original)
 })
 
 it('storage inspection refuses a missing current Core file even when the Renderer still retains its graph', async () => {
@@ -134,18 +134,18 @@ it('storage inspection refuses a missing current Core file even when the Rendere
 })
 
 it('storage inspection retains healthy workfaces and bounded failure metadata when the original file cannot be read', async () => {
-  const f = await fixture(), original = await readFile(f.user.path, 'utf8'), corrupt = '{PRIVATE truncated original input'
+  const f = await fixture(), original = await readFile(f.user.databasePath), corrupt = '{PRIVATE truncated original input'
   try {
-    await writeFile(f.user.path, corrupt)
+    await writeFile(f.user.databasePath, corrupt)
     const observed = await f.inspect()
     expect(observed.main.storage?.userState).toMatchObject({ availability: 'unconfirmed', diskDurability: 'unconfirmed',
-      lastFailure: { operation: 'read', code: 'WORKBENCH_USER_STATE_INVALID' } })
+      lastFailure: { operation: 'read', code: 'ERR_SQLITE_ERROR' } })
     expect(JSON.stringify(observed)).not.toContain('PRIVATE')
     expect(observed.workbench.tabs[0]?.regions[0]).toMatchObject({ processState: 'running', control: { run: { runId: 'original-run' } } })
     expect(() => requireOutgoingWorkbenchStorage(observed)).toThrow('existing interface and Runs were kept')
-    expect(await readFile(f.user.path, 'utf8')).toBe(corrupt)
+    expect(await readFile(f.user.databasePath, 'utf8')).toBe(corrupt)
     expect(f.api.sessions.stop).not.toHaveBeenCalled()
-  } finally { await writeFile(f.user.path, original); await f.user.flushDiagnostics() }
+  } finally { await writeFile(f.user.databasePath, original); await f.user.flushDiagnostics() }
 })
 
 it('storage inspection does not call an equal current graph aligned while its original write remains in flight', async () => {

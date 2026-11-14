@@ -4,6 +4,7 @@ import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-valu
 import { bridge, control, owningBridge } from './helpers/first-execution-ipc-bridge'
 import { mkdtemp, readFile, rm, unlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import { DatabaseSync } from 'node:sqlite'
 import { afterAll, afterEach, beforeAll, expect, it, vi } from 'vitest'
 import { AgentMuxError } from '@agentmux/core'
 import { unwrapSessionInputWriteResult } from '../src/shared/session-input-result'
@@ -23,23 +24,30 @@ import { workspaceProjectId } from '../src/renderer/src/lib/workspace-projects'
 import { desktopSpatialGraph } from '../src/renderer/src/lib/desktop-spatial-state'
 import { AgentMuxControlServer as RealStorageControlServer } from '../../../packages/core/src/public-rpc-server'
 import { runDesktopStorageHostProbe } from './helpers/storage-recovery-host-probe'
+import { createWorkbenchUserDocument, WORKBENCH_USER_STATE_KEY } from '../src/renderer/src/lib/workbench-user-storage'
 
 const initialRendererState = useAppStore.getState()
+const workbenchDelta = (draft: string) => JSON.stringify({ state: { agentComposerDrafts: { original: draft } },
+  version: 1, inputQueueDelta: { changes: [] } })
+const savedWorkbenchDraft = async () => JSON.parse((await bridge.api!.ui.readWorkbenchState())!).state.agentComposerDrafts.original
 
 it('the registered Main source export is consumed by a second real Host adapter process and releases only its copies', async () => {
   const f = await owningBridge(), directory = await mkdtemp('/tmp/amux-real-host-source-'), socket = join(directory, 'desktop.sock')
   const server = new RealStorageControlServer({ socketPath: socket, ...(bridge.storageRecoveryExports ? { storageRecoveryExports: bridge.storageRecoveryExports } : {}) })
-  const original = JSON.stringify({ version: 1, state: { agentComposerDrafts: { 'original-region': 'Original private unsent input' } } })
+  const original = 'Original private unsent input'
   try {
-    await bridge.api!.ui.writeWorkbenchState(original)
+    await bridge.api!.ui.writeWorkbenchState(workbenchDelta(original))
     await server.start()
     const child = await runDesktopStorageHostProbe(directory, socket)
     expect(child.code, child.stderr).toBe(0)
     const result = JSON.parse(child.stdout)
     expect(result.pid).not.toBe(process.pid)
-    expect(result.result.members).toContainEqual(expect.objectContaining({ id: 'desktop.user-state/document', target: f.workbenchUserState.path }))
-    expect(result.bodies).toContain(original)
-    expect(await f.workbenchUserState.read()).toBe(original)
+    const member = result.result.members.find((item: { id: string }) => item.id === 'desktop.user-state/document')
+    expect(member).toMatchObject({ target: f.workbenchUserState.databasePath })
+    const copy = new DatabaseSync(member.file, { readOnly: true })
+    try { expect(copy.prepare("SELECT body FROM document_rows WHERE scope = 'agentComposerDrafts' AND name = 'original'").get()?.body)
+      .toBe(JSON.stringify(original)) } finally { copy.close() }
+    expect(await savedWorkbenchDraft()).toBe(original)
     const { readdir } = await import('node:fs/promises')
     expect(await readdir(f.workbenchUserState.path + '.recovery-exports')).toEqual([])
     expect(f.client.ensureAgentContinuity).not.toHaveBeenCalled()
@@ -68,46 +76,98 @@ it('actual preload/registered IPC/Main pass one stable intent to Core continuity
 
 it('actual native save bridge requires a matching writer ACK and rejects a missing file despite Chromium directories', async () => {
   const { flush, workbenchUserState, dispose } = await owningBridge()
-  const original = JSON.stringify({ state: { agentComposerDrafts: { original: 'Exact original native input' } }, version: 1 })
+  const original = 'Exact original native input'
   try {
     await expect(bridge.api!.ui.requestStorageFlush()).rejects.toThrow('no matching writer acknowledgement')
-    expect(await bridge.api!.ui.writeWorkbenchState(original)).toMatchObject({ diskDurability: 'confirmed' })
+    expect(await bridge.api!.ui.writeWorkbenchState(workbenchDelta(original))).toMatchObject({ diskDurability: 'confirmed' })
     await expect(bridge.api!.ui.requestStorageFlush()).resolves.toBeUndefined()
-    expect(await readFile(workbenchUserState.path, 'utf8')).toBe(original)
-    await unlink(workbenchUserState.path)
-    await expect(bridge.api!.ui.requestStorageFlush()).rejects.toThrow('no matching writer acknowledgement')
-    await bridge.api!.ui.writeWorkbenchState(original)
-    await expect(bridge.api!.ui.requestStorageFlush()).resolves.toBeUndefined()
+    expect(await savedWorkbenchDraft()).toBe(original)
+    await unlink(workbenchUserState.databasePath)
+    await expect(bridge.api!.ui.requestStorageFlush()).rejects.toThrow('original Desktop database')
+    await expect(bridge.api!.ui.writeWorkbenchState(workbenchDelta(original))).rejects.toThrow('original Desktop database')
+    await expect(readFile(workbenchUserState.databasePath)).rejects.toMatchObject({ code: 'ENOENT' })
     expect(flush).not.toHaveBeenCalled()
   } finally { await dispose() }
 })
 
+it.each([1, 1600])('actual native save bridge retains the original cold input with %d archived records', async count => {
+  const f = await owningBridge()
+  const ownerKey = 'original-queue', operationId = 'confirmed-input', run = { runId: 'original-run' }
+  const key = { kind: 'prompt', agentSessionId: ownerKey, submissionId: operationId, expectedRun: run }
+  const completed = {
+    operationId, text: 'Original archived input', status: 'deferred', archived: true,
+    directInputControl: { kind: 'agent', hostId: 'local', agentSessionId: ownerKey, run },
+    directInputBinding: { expectedRun: run, admissionIntent: { kind: 'manual-actor' } },
+    inputReceipt: { key, persistence: 'confirmed', status: 'terminal-confirmed' },
+  }
+  const unresolved = { ...completed, operationId: 'unknown-input', text: 'Original unresolved input',
+    inputReceipt: { key: { ...key, submissionId: 'unknown-input' }, persistence: 'observed', status: 'unknown' } }
+  const archived = [completed, ...Array.from({ length: count - 1 }, (_, index) => {
+    const operationId = `archived-input-${index}`
+    return { ...completed, operationId, text: 'Archived historical text '.repeat(200),
+      inputReceipt: { ...completed.inputReceipt, key: { ...key, submissionId: operationId } } }
+  })]
+  try {
+    const legacyEnvelope = { version: 1, state: { agentComposerDrafts: { original: 'Unsent draft' },
+      agentSteerQueues: { [ownerKey]: [...archived, unresolved] } } }
+    await writeFile(f.workbenchUserState.path, JSON.stringify(legacyEnvelope))
+    const saved = JSON.parse((await bridge.api!.ui.readWorkbenchState())!)
+    expect(saved.state.agentSteerQueues[ownerKey]).toEqual([unresolved])
+    expect(saved.state.agentComposerDrafts).toEqual(legacyEnvelope.state.agentComposerDrafts)
+    const query = { ownerKey, operationId }
+    await expect(bridge.api!.ui.readWorkbenchInputArchive(query)).resolves.toEqual({
+      entries: [{ ownerKey, entry: completed }], nextCursor: null,
+    })
+    await expect(bridge.api!.ui.readWorkbenchInputArchive({ operationId })).rejects.toMatchObject({
+      code: 'WORKBENCH_INPUT_ARCHIVE_QUERY_INVALID',
+    })
+    const document = createWorkbenchUserDocument(bridge.api!.ui, () => window.localStorage)
+    const hydrated = await document.persistent.storage.getItem(WORKBENCH_USER_STATE_KEY)
+    expect(hydrated).toMatchObject({ state: saved.state })
+    await document.persistent.checkpoint(WORKBENCH_USER_STATE_KEY, {
+      state: { ...saved.state, agentComposerDrafts: { original: 'Edited draft' } }, version: 1,
+    })
+    const writes = bridge.invoke.mock.calls.filter(([channel]) => channel === 'ui:writeWorkbenchState')
+    expect(writes).toHaveLength(1)
+    const sent = writes[0]![1] as { value: string }
+    const expected = { version: 1, state: { agentComposerDrafts: { original: 'Edited draft' } }, inputQueueDelta: { changes: [] } }
+    expect(JSON.parse(sent.value)).toEqual(expected)
+    expect(Buffer.byteLength(sent.value)).toBe(Buffer.byteLength(JSON.stringify(expected)))
+    await expect(bridge.api!.ui.requestStorageFlush()).resolves.toBeUndefined()
+    await expect(bridge.api!.ui.readWorkbenchInputArchive({ ownerKey: 'another-queue', operationId })).resolves.toEqual({
+      entries: [], nextCursor: null,
+    })
+    await expect(bridge.api!.ui.readWorkbenchInputArchive(query)).resolves.toEqual({
+      entries: [{ ownerKey, entry: completed }], nextCursor: null,
+    })
+    const current = JSON.parse((await bridge.api!.ui.readWorkbenchState())!)
+    expect(current.state.agentComposerDrafts).toEqual({ original: 'Edited draft' })
+    expect(current.state.agentSteerQueues[ownerKey]).toEqual([unresolved])
+  } finally { await f.dispose() }
+}, 30_000)
+
 it('actual native save bridge validates each new document only once', async () => {
-  const { workbenchUserState, dispose } = await owningBridge()
-  const document = (draft: string) => JSON.stringify({ state: { agentComposerDrafts: { original: draft } }, version: 1 })
-  const original = document('Original input'), edited = document('Edited input')
+  const { dispose } = await owningBridge()
+  const original = workbenchDelta('Original input'), edited = workbenchDelta('Edited input')
   const parse = vi.spyOn(JSON, 'parse')
   try {
     await expect(bridge.api!.ui.writeWorkbenchState(original)).resolves.toMatchObject({ diskDurability: 'confirmed' })
     await expect(bridge.api!.ui.writeWorkbenchState(edited)).resolves.toMatchObject({ diskDurability: 'confirmed' })
     const parsed = parse.mock.calls.map(([input]) => input).filter(input => input === original || input === edited)
     expect(parsed).toEqual([original, edited])
-    expect(await readFile(workbenchUserState.path, 'utf8')).toBe(edited)
+    expect(await savedWorkbenchDraft()).toBe('Edited input')
   } finally { parse.mockRestore(); await dispose() }
 })
 
-it('actual native save bridge protects a same-length document with a changed invalid envelope', async () => {
+it('actual native save bridge protects a same-length corrupted database', async () => {
   const { workbenchUserState, dispose } = await owningBridge()
-  const original = JSON.stringify({ state: { agentComposerDrafts: { original: 'Durable input' } }, version: 1 })
-  const damaged = original.replace('"state"', '"other"')
-  const edited = original.replace('Durable input', 'Edited input')
   try {
-    const receipt = await bridge.api!.ui.writeWorkbenchState(original)
-    expect(damaged).not.toBe(original)
-    expect(Buffer.byteLength(damaged)).toBe(receipt.sizeBytes)
-    await writeFile(workbenchUserState.path, damaged)
-    await expect(bridge.api!.ui.writeWorkbenchState(edited)).rejects.toMatchObject({ code: 'WORKBENCH_USER_STATE_INVALID' })
-    expect(await readFile(workbenchUserState.path, 'utf8')).toBe(damaged)
+    const receipt = await bridge.api!.ui.writeWorkbenchState(workbenchDelta('Durable input'))
+    const damaged = await readFile(workbenchUserState.databasePath)
+    damaged[0] = 0
+    await writeFile(workbenchUserState.databasePath, damaged)
+    await expect(bridge.api!.ui.writeWorkbenchState(workbenchDelta('Edited input'))).rejects.toThrow()
+    expect(await readFile(workbenchUserState.databasePath)).toEqual(damaged)
     expect(workbenchUserState.observe()).toMatchObject({ availability: 'unconfirmed', diskDurability: 'unconfirmed', lastConfirmedWrite: receipt })
     await workbenchUserState.flushDiagnostics()
   } finally { await dispose() }
@@ -116,17 +176,22 @@ it('actual native save bridge protects a same-length document with a changed inv
 it('a readable native document or replacement cannot manufacture the original writer ACK', async () => {
   const { workbenchUserState, dispose } = await owningBridge()
   const original = JSON.stringify({ state: { agentComposerDrafts: { original: 'Readable original' } }, version: 1 })
-  const replaced = JSON.stringify({ state: { agentComposerDrafts: { original: 'Externally replaced input' } }, version: 1 })
   try {
     await writeFile(workbenchUserState.path, original)
     await expect(bridge.api!.ui.requestStorageFlush()).rejects.toThrow('no matching writer acknowledgement')
-    const receipt = await bridge.api!.ui.writeWorkbenchState(original)
-    await writeFile(workbenchUserState.path, replaced)
+    expect(await savedWorkbenchDraft()).toBe('Readable original')
+    const receipt = await bridge.api!.ui.writeWorkbenchState(workbenchDelta('Readable original'))
+    const database = new DatabaseSync(workbenchUserState.databasePath)
+    try {
+      database.prepare("UPDATE document_rows SET body=? WHERE scope='agentComposerDrafts' AND name='original'")
+        .run(JSON.stringify('Externally replaced input'))
+    } finally { database.close() }
     await expect(bridge.api!.ui.requestStorageFlush()).rejects.toThrow('no matching writer acknowledgement')
-    expect(await bridge.api!.ui.readWorkbenchState()).toBe(replaced)
+    expect(await savedWorkbenchDraft()).toBe('Externally replaced input')
     expect(workbenchUserState.observe().lastConfirmedWrite).toEqual(receipt)
-    await bridge.api!.ui.writeWorkbenchState(replaced)
-    await expect(bridge.api!.ui.requestStorageFlush()).resolves.toBeUndefined()
+    await expect(bridge.api!.ui.writeWorkbenchState(workbenchDelta('Attempted overwrite')))
+      .rejects.toMatchObject({ code: 'WORKBENCH_USER_DATABASE_CHANGED' })
+    expect(await savedWorkbenchDraft()).toBe('Externally replaced input')
   } finally { await dispose() }
 })
 
@@ -137,7 +202,7 @@ it('registered native storage handlers reject foreign contents or frames before 
   const original = JSON.stringify({ state: { agentComposerDrafts: { original: 'Foreign request' } }, version: 1 })
   try {
     for (const event of [{ sender: {}, senderFrame: sender.mainFrame }, { sender, senderFrame: { ...sender.mainFrame } }]) {
-      for (const channel of ['ui:readWorkbenchState', 'ui:importWorkbenchState', 'ui:writeWorkbenchState', 'ui:requestStorageFlush']) {
+      for (const channel of ['ui:readWorkbenchState', 'ui:readWorkbenchInputArchive', 'ui:importWorkbenchState', 'ui:writeWorkbenchState', 'ui:requestStorageFlush']) {
         const handler = bridge.handlers.get(channel)
         expect(handler).toBeTypeOf('function')
         expect(() => handler!(event, original)).toThrow('Untrusted application main document sender')
@@ -160,14 +225,13 @@ it('private save revisions fence a late old request through actual preload and r
     if (channel === 'ui:writeWorkbenchState' && first) { first = false; entered(); await delayed }
     return invoke(channel, ...values)
   })
-  const old = JSON.stringify({ state: { agentComposerDrafts: { original: 'old' } }, version: 1 })
-  const latest = JSON.stringify({ state: { agentComposerDrafts: { original: 'latest' } }, version: 1 })
+  const old = workbenchDelta('old'), latest = workbenchDelta('latest')
   try {
     const pending = bridge.api!.ui.writeWorkbenchState(old)
     const refused = expect(pending).rejects.toMatchObject({ code: 'WORKBENCH_USER_STATE_SUPERSEDED' })
     await ready; await bridge.api!.ui.writeWorkbenchState(latest)
     release(); await refused
-    expect(await readFile(f.workbenchUserState.path, 'utf8')).toBe(latest)
+    expect(await savedWorkbenchDraft()).toBe('latest')
   } finally { release(); await f.dispose() }
 })
 
