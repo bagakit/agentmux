@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Switch, TextInput } from '@agentmux/client-ui/input'
 import type { HostRuntimeObservation } from '@agentmux/core'
 import type { LocalHostConfig, TailcatListenerConfig } from '@agentmux/host/host-configuration'
@@ -6,6 +6,7 @@ import type { HostConfig } from '../../../../shared/contracts'
 import { configValuesEqual } from '../../../../shared/config-edit'
 import { api } from '../../lib/api'
 import { copyTextToClipboard } from '../../lib/clipboard-copy'
+import { useContentCopyAction } from '@agentmux/client-ui/use-content-copy-action'
 import { TailcatKeyPreparation } from './TailcatKeyPreparation'
 import { TailcatSetupFlow } from './TailcatSetupFlow'
 
@@ -33,8 +34,6 @@ export function HostTailcatListenerFields({ host, committed, active, onChange, a
   const saved = committed !== undefined && configValuesEqual(host, committed)
   const [revision, setRevision] = useState(0)
   const [read, setRead] = useState<{ target: string; value?: Listener; error?: string; busy?: boolean }>({ target })
-  const [copied, setCopied] = useState(false)
-  const [copyError, setCopyError] = useState<string>()
   useEffect(() => {
     if (!active || !saved) return
     const controller = new AbortController()
@@ -52,6 +51,8 @@ export function HostTailcatListenerFields({ host, committed, active, onChange, a
   const current = read.target === target ? read : undefined
   const listener = current?.value
   const address = listener?.state === 'listening' ? listener.address : undefined
+  const copyIdentity = useMemo(() => ({}), [target, address])
+  const copy = useContentCopyAction(copyIdentity, copyTextToClipboard, active && saved)
   return <div className="host-tailcat-listener" data-tailcat-listener>
     <TailcatSetupFlow role="server" peerName="The other Mac" />
     <TailcatKeyPreparation active={active} host={host} role="server" keyFile={configuration.keyFile} saveLabel={saveLabel} onPrepared={(result, mayFocus) => {
@@ -78,10 +79,8 @@ export function HostTailcatListenerFields({ host, committed, active, onChange, a
       <button type="button" className="small-button" disabled={!saved || current?.busy === true} onClick={() => setRevision(value => value + 1)}>Refresh status</button></div>
     {saved && listener?.detail ? <p className="host-check-detail">{listener.detail}</p> : null}
     {saved && address ? <div className="host-tailcat-address"><label><span>Private Tailcat address</span><TextInput aria-label="Private Tailcat address" type="password" autoComplete="off" value={address} readOnly /></label>
-      <button type="button" className="small-button" onClick={() => {
-        setCopyError(undefined)
-        void copyTextToClipboard(address, () => setCopyError('Address copy failed. Select the private field and copy it again.')).then(ok => setCopied(ok))
-      }}>{copied ? 'Copied' : 'Copy address'}</button></div> : null}
-    {copyError ? <p role="alert" className="host-check-detail">{copyError}</p> : null}
+      <button type="button" className="small-button" aria-disabled={copy.state === 'copying' || undefined}
+        onClick={() => { void copy.copy(address) }}><span role="status">{copy.state === 'copied' ? 'Copied' : 'Copy address'}</span></button></div> : null}
+    {copy.state === 'failed' ? <p role="alert" className="host-check-detail">Address copy failed. Select the private field and copy it again.</p> : null}
   </div>
 }

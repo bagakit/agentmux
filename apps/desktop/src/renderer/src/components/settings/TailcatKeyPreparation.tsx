@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { TextInput } from '@agentmux/client-ui/input'
 import type { TailcatKeyPreparation as PreparedKey, TailcatKeyRole } from '@agentmux/core'
 import { api } from '../../lib/api'
 import { copyTextToClipboard } from '../../lib/clipboard-copy'
+import { useContentCopyAction } from '@agentmux/client-ui/use-content-copy-action'
 import type { HostConfig } from '../../../../shared/contracts'
 import { TailcatSetupHelp } from './TailcatSetupHelp'
 import { tailcatPreparationFailure } from '../../lib/tailcat-preparation-failure'
@@ -17,12 +18,11 @@ export function TailcatKeyPreparation({ host, role, keyFile, onPrepared, saveLab
   active?: boolean
 }) {
   const [state, setState] = useState<{ busy?: boolean; result?: PreparedKey; error?: ReturnType<typeof tailcatPreparationFailure>; keptDraft?: boolean }>({})
-  const [copied, setCopied] = useState(false), [copyError, setCopyError] = useState<string>()
   const live = useRef(true)
   useEffect(() => { live.current = true; return () => { live.current = false } }, [])
   const prepare = async () => {
     const apply = onPrepared, originalFocus = document.activeElement
-    setState({ busy: true }); setCopied(false); setCopyError(undefined)
+    setState({ busy: true })
     try {
       const result = await api.hosts.prepareTailcatKey({ role, ...(keyFile ? { key: keyFile } : {}) })
       if (!live.current) return
@@ -34,6 +34,8 @@ export function TailcatKeyPreparation({ host, role, keyFile, onPrepared, saveLab
   }
   const result = state.result
   const code = result?.role === 'client' && result.key === keyFile ? result.publicKey : undefined
+  const copyIdentity = useMemo(() => ({}), [host.id, result, code])
+  const copy = useContentCopyAction(copyIdentity, copyTextToClipboard, active)
   return <div className="host-tailcat-preparation" data-tailcat-prepare={role}>
     <div className="host-tailcat-preparation__action">
       <button type="button" className="small-button" disabled={state.busy === true} onClick={() => void prepare()}>
@@ -47,10 +49,9 @@ export function TailcatKeyPreparation({ host, role, keyFile, onPrepared, saveLab
     </p> : null}
     {code ? <div className="host-tailcat-address"><label><span>This Mac’s connection code <small>public key</small></span>
       <TextInput aria-label="This Mac’s connection code" value={code} readOnly spellCheck={false} /></label>
-      <button type="button" className="small-button" onClick={() => { setCopyError(undefined)
-        void copyTextToClipboard(code, () => setCopyError('Copy failed. Select the public code and copy it again.')).then(ok => { if (live.current) setCopied(ok) })
-      }}>{copied ? 'Copied code' : 'Copy code'}</button></div> : null}
-    {copyError ? <p role="alert" className="host-check-detail">{copyError}</p> : null}
+      <button type="button" className="small-button" aria-disabled={copy.state === 'copying' || undefined}
+        onClick={() => { void copy.copy(code) }}><span role="status">{copy.state === 'copied' ? 'Copied code' : 'Copy code'}</span></button></div> : null}
+    {copy.state === 'failed' ? <p role="alert" className="host-check-detail">Copy failed. Select the public code and copy it again.</p> : null}
     <TailcatSetupHelp active={active} host={host} role={role} failure={state.error ? { step: 'prepare-key', code: state.error.code } : undefined} />
   </div>
 }

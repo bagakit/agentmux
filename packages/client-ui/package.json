@@ -621,6 +621,11 @@
       "browser": "./src/lib/conversation-speaker.ts",
       "import": "./dist/lib/conversation-speaker.js"
     },
+    "./use-content-copy-action": {
+      "types": "./src/lib/use-content-copy-action.ts",
+      "browser": "./src/lib/use-content-copy-action.ts",
+      "import": "./dist/lib/use-content-copy-action.js"
+    },
     "./conversation-time": {
       "types": "./src/lib/conversation-time.ts",
       "browser": "./src/lib/conversation-time.ts",

@@ -116,6 +116,7 @@ export const workspaceSources = {
     'conversation-send-receipts',
     'conversation-sources',
     'conversation-speaker',
+    'use-content-copy-action',
     'conversation-time',
     'conversation-tool-diff',
     'conversation-trace-disclosure',
