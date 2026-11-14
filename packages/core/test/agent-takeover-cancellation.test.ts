@@ -9,6 +9,7 @@ import { createTakeoverOwnerFixture } from './helpers/takeover-owner.js'
 import { hostedTestClient } from './helpers/hosted-runtime-port.js'
 import { AgentMuxClient } from '../src/client.js'
 import { AgentMuxMemoryAgentSessionStore } from '../src/agent-session-store.js'
+import { parseAgentTakeoverCancellationResult } from '../src/agent-takeover-cancellation.js'
 const cleanup: Array<() => unknown | Promise<unknown>> = []
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); vi.restoreAllMocks() })
 it('cancels a complete original public takeover before admission and keeps its source workface', async () => {
@@ -40,6 +41,45 @@ function originalRequest(f: Awaited<ReturnType<typeof createTakeoverOwnerFixture
   return { operationId, content: { kind: 'takeover-agent' as const, executorId: 'codex', source: { hostId: 'local', agentSessionId: f.source.agentSessionId, organization: { runtimeId: f.owner.runtimeId, spaceId: f.a.spaceId } } },
     destination: { spaceId: f.b.spaceId, zoneId: f.b.zoneId, newTab: true as const, displayWorkspaceId: 'project-a', groupId: 'original-group' }, focus: false }
 }
+it('public cancellation admission inspection separates an absent control from a confirmed original spatial admission without writing', async () => {
+  const f = await createTakeoverOwnerFixture(cleanup), request = originalRequest(f, 'admission-observation')
+  const input = { expectedRuntimeId: f.owner.runtimeId, operationId: 'admission-observation-cancel', request }
+  const before = await f.spatial.read()
+  const absent = await f.rpc.call('agent.takeover.cancel.inspect', input)
+  expect(absent).toMatchObject({ cancellationAdmission: 'not-observed', outcome: 'unconfirmed', diskDurability: 'unconfirmed' })
+  expect(await f.spatial.read()).toEqual(before)
+  expect(await f.rpc.call('agent.takeover.cancel', input)).toMatchObject({ cancellationAdmission: 'observed', outcome: 'cancelled' })
+  const admitted = await f.spatial.read()
+  expect(await f.rpc.call('agent.takeover.cancel.inspect', input)).toMatchObject({ cancellationAdmission: 'observed', outcome: 'cancelled', diskDurability: 'unconfirmed' })
+  expect(await f.spatial.read()).toEqual(admitted)
+  expect(f.started).toHaveLength(0); expect(await f.client.readAgentSession(f.source.agentSessionId)).toEqual(f.source)
+  vi.spyOn(f.spatial, 'read').mockRejectedValueOnce(Error('The original spatial read is unavailable.'))
+  await expect(f.rpc.call('agent.takeover.cancel.inspect', input)).rejects.toThrow('spatial read is unavailable')
+})
+it('public cancellation admission remains observed when the healthy original execution has no cancellation acknowledgement', async () => {
+  const f = await createTakeoverOwnerFixture(cleanup), request = originalRequest(f, 'admission-execution-gap')
+  const created = await f.rpc.call('agent.open', request), agentSessionId = created.agent!.agentSessionId
+  const input = { expectedRuntimeId: f.owner.runtimeId, operationId: 'admission-execution-gap-cancel', request }
+  const stop = vi.spyOn(f.client, 'stopAgent')
+  vi.spyOn(f.client, 'cancelAgentCreation').mockRejectedValueOnce(Error('The original execution acknowledgement is unavailable.'))
+  expect(await f.rpc.call('agent.takeover.cancel', input)).toMatchObject({ cancellationAdmission: 'observed', outcome: 'unconfirmed', diskDurability: 'unconfirmed' })
+  expect(await f.store.readCreationCancellation(request.operationId)).toBeNull()
+  const admitted = await f.spatial.read()
+  expect(await f.rpc.call('agent.takeover.cancel.inspect', input)).toMatchObject({ cancellationAdmission: 'observed', outcome: 'unconfirmed', diskDurability: 'unconfirmed' })
+  expect(await f.spatial.read()).toEqual(admitted)
+  await expect(f.rpc.call('agent.takeover.cancel.inspect', { ...input, request: { ...request, destination: { ...request.destination, groupId: 'another-group' } } })).rejects.toMatchObject({ code: 'SPACE_REQUEST_CONFLICT' })
+  expect(stop).not.toHaveBeenCalled(); expect(f.started).toHaveLength(1)
+  expect((await f.client.readAgentSession(agentSessionId))?.run).toEqual({ runId: created.agent!.runId })
+})
+it('public cancellation admission codec keeps older missing observations unknown and rejects inconsistent new facts', async () => {
+  const f = await createTakeoverOwnerFixture(cleanup), request = originalRequest(f, 'admission-codec')
+  const input = { expectedRuntimeId: f.owner.runtimeId, operationId: 'admission-codec-cancel', request }
+  const result = await f.rpc.call('agent.takeover.cancel', input)
+  const { cancellationAdmission: _observation, ...legacy } = result
+  expect(parseAgentTakeoverCancellationResult(legacy, input).cancellationAdmission).toBeUndefined()
+  for (const cancellationAdmission of [null, 'unknown', [], ['observed'], 'not-observed'])
+    expect(() => parseAgentTakeoverCancellationResult({ ...result, cancellationAdmission }, input)).toThrow(expect.objectContaining({ code: 'CONTROL_PROTOCOL_ERROR' }))
+})
 it.each(['existing', 'retired', 'closed', 'prepared'] as const)('Hosted cancellation rejects an unrelated CID paired with an %s Session before writing or consuming its facts', async state => {
   const f = await createTakeoverOwnerFixture(cleanup), request = originalRequest(f, 'paired-original')
   const reached = deferred(), release = deferred()
@@ -339,10 +379,12 @@ it('the real source CLI discovers and consumes the same cancellation and readbac
   const guide=await runSourceObjectCli(['agent','--skill'],env,'',15000,loader)
   expect(guide.code,guide.stderr).toBe(0);expect(guide.stdout).toContain('agent takeover cancel inspect --input FILE|-')
   const invoke=async(args:string[])=>await runSourceObjectCli(['--endpoint','unix:'+f.endpointPath,...args,'--input','-'],env,JSON.stringify(input),15000,loader)
+  const absent=await invoke(['agent','takeover','cancel','inspect'])
+  expect(absent.code,absent.stderr+absent.stdout).toBe(0);expect(JSON.parse(absent.stdout).result).toMatchObject({cancellationAdmission:'not-observed',outcome:'unconfirmed'})
   const cancelled=await invoke(['agent','takeover','cancel'])
-  expect(cancelled.code,cancelled.stderr+cancelled.stdout).toBe(0);expect(JSON.parse(cancelled.stdout).result).toMatchObject({outcome:'cancelled',operationId:input.operationId})
+  expect(cancelled.code,cancelled.stderr+cancelled.stdout).toBe(0);expect(JSON.parse(cancelled.stdout).result).toMatchObject({cancellationAdmission:'observed',outcome:'cancelled',operationId:input.operationId})
   const checked=await invoke(['agent','takeover','cancel','inspect'])
-  expect(checked.code,checked.stderr+checked.stdout).toBe(0);expect(JSON.parse(checked.stdout).result).toMatchObject({outcome:'cancelled',diskDurability:'unconfirmed'})
+  expect(checked.code,checked.stderr+checked.stdout).toBe(0);expect(JSON.parse(checked.stdout).result).toMatchObject({cancellationAdmission:'observed',outcome:'cancelled',diskDurability:'unconfirmed'})
   expect(f.started).toHaveLength(0)
 })
 

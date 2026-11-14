@@ -1,5 +1,9 @@
 import { createHash } from 'node:crypto'
 const variants = {
+  'forget-cancellation-admission': {path:'apps/host/src/takeover-cancellation.ts',edits:[
+    ["    cancellationAdmission: 'observed' as const,\n", '']]},
+  'forget-cancellation-absence': {path:'apps/host/src/takeover-cancellation.ts',edits:[
+    ["...base, cancellationAdmission: 'not-observed', outcome: 'unconfirmed'", "...base, cancellationAdmission: undefined, outcome: 'unconfirmed'"]]},
   'count-spatial-as-execution-ack': {path:'apps/host/src/takeover-cancellation.ts',edits:[
     ["initialInput: 'unknown', diskDurability: 'unconfirmed',", "initialInput: 'unknown', diskDurability: base.diskDurability,"]]},
   'check-cancellation-on-observation': {path:'packages/core/src/client.ts',edits:[
