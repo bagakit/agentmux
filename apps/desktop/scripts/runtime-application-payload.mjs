@@ -65,7 +65,7 @@ export async function inspectRuntimeApplicationPayload(repositoryRoot) {
     main: demandManifest.main, exports: demandManifest.exports, bin: demandManifest.bin })
   await dependencies(demand, demandTarget)
   for (const name of ['@agentmux/git', '@agentmux/capsule', '@agentmux/identity', '@bufbuild/protobuf', '@noble/hashes', 'react', 'react-dom', 'fflate',
-    'parse5', 'tldts', 'luxon', 'zod', 'ws', 'yaml']) await dependency(desktop, name, join('node_modules', ...name.split('/')))
+    'parse5', '@xmldom/xmldom', 'tldts', 'luxon', 'zod', 'ws', 'yaml']) await dependency(desktop, name, join('node_modules', ...name.split('/')))
   for (const name of ['fs-native-extensions', '@larksuiteoapi/node-sdk', '@discordjs/ws', '@discordjs/rest', 'discord-api-types']) {
     await dependency(connectors, name, join('node_modules', ...name.split('/')))
   }
