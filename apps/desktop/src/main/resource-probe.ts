@@ -607,6 +607,16 @@ export async function runDesktopResourceProbe(options: {
 }): Promise<boolean> {
   const reportPath = process.env.AGENTMUX_DESKTOP_RESOURCE_REPORT
   if (!reportPath) return false
+  const representativeFixture = process.env.AGENTMUX_DESKTOP_RESOURCE_WORKFACE
+  if (representativeFixture) {
+    const { measureRepresentativeWorkface } = await import('./representative-resource-probe.js')
+    const representative = await measureRepresentativeWorkface(options.window, options.runtime, representativeFixture)
+    await writeFile(reportPath, `${JSON.stringify({
+      schema: 'agentmux.desktop-representative-resources.v1', measuredAt: new Date().toISOString(),
+      mainPid: process.pid, identity: resourceIdentity(), representative
+    }, null, 2)}\n`, { mode: 0o600 })
+    return true
+  }
   let terminalControl: SessionControl | null = null
   const activeTerminalControls = new Set<SessionControl>()
   let reportEvidence: Record<string, unknown> | null = null

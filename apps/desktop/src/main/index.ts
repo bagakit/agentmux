@@ -336,7 +336,7 @@ function startPrimaryInstance(): void {
       rendererUpdates?.dispose()
       const probeQuery = process.env.AGENTMUX_DESKTOP_FILE_EDITING_REPORT
         ? { 'agentmux-file-editing-report': '1' }
-        : process.env.AGENTMUX_DESKTOP_RESOURCE_REPORT
+        : process.env.AGENTMUX_DESKTOP_RESOURCE_REPORT && !process.env.AGENTMUX_DESKTOP_RESOURCE_WORKFACE
           ? { 'agentmux-resource-probe': '1' }
           : undefined
       const loadPackagedRenderer = async (file: string) => {
