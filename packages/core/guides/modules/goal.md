@@ -90,6 +90,13 @@ a missing read is not proof of non-submission. The qualified receipt retains its
 reference and Run instead of a synthetic local Session ID. Input acknowledgement
 is separate from current Run health, Goal completion and human acceptance.
 
+For an existing original input, an explicit `access.coordinator` selects its independent
+current Runtime reader. Check reads its frozen key, body, note and API source even
+when the Source is unreadable; it never submits or rejoins. A denied or mismatched
+Coordinator read does not switch to another channel. Without that selector, Check
+uses the original Source read strategy. Start and explicit continuation still
+require their original Source admission and current input authority.
+
 ## File evidence
 
 Grounding checks accept original reference strings and exact file evidence. A string
