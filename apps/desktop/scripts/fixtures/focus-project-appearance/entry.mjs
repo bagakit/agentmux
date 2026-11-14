@@ -13,6 +13,7 @@ import { desktopSpatialGraph } from '../../../src/renderer/src/lib/desktop-spati
 import { createFocusContextIdentitySelector } from '../../../src/renderer/src/lib/focus-context-identity'
 import { createFocusProjectionSelector } from '../../../src/renderer/src/lib/focus-context'
 import { workbenchSelectionCatalog } from '../../../src/renderer/src/lib/desktop-focus-navigation'
+import { prepareTakeoverRecipients } from './takeover-recipients-data.mjs'
 
 // Reuse the maintained actual App/preview setup. Only original image transport
 // is routed to this private Main's real projectAppearance recognition owner.
@@ -89,7 +90,10 @@ useAppStore.setState({ config: { ...before.config, workspaces: [root, beta, ...b
   tabs, layouts, sessions: [...before.sessions, ...sessions], agentNames: { ...before.agentNames, ...names } })
 // Admit the arranged workface through the original restore owner, as the actual
 // component tests do. Missing directory observations are not confirmed projects.
-const arranged = useAppStore.getState()
+const arrangedBefore = useAppStore.getState()
+const topics = Object.values(arrangedBefore.scratchTopicSnapshots).flatMap(snapshot => snapshot.topics)
+const takeoverRecipients = new URL(window.location.href).searchParams.get('fixtureMode') === '--takeover-recipients' ? prepareTakeoverRecipients(arrangedBefore, topics) : null
+const arranged = takeoverRecipients?.arranged ?? arrangedBefore
 await save(arranged.config, await api.config.get())
 api.sessions.snapshot = async () => ({ sessions: arranged.sessions, timelines: arranged.timelines, recoveryCandidates: [] })
 api.demands.list = async () => []
@@ -100,8 +104,9 @@ api.sessions.snapshot = async () => ({ sessions: [], timelines: {}, recoveryCand
 await api.spatial.commit({ expectedRevision: saved?.revision ?? 0, graph: desktopSpatialGraph(useAppStore.getState(), []) })
 const dispose = await useAppStore.getInitialState().initialize()
 const started = await api.spatial.read()
-await api.spatial.commit({ expectedRevision: started.revision, graph: desktopSpatialGraph(arranged, Object.values(arranged.scratchTopicSnapshots).flatMap(snapshot => snapshot.topics)) })
+await api.spatial.commit({ expectedRevision: started.revision, graph: takeoverRecipients?.graph ?? desktopSpatialGraph(arranged, topics) })
 await new Promise(resolve => setTimeout(resolve, 0))
+if (takeoverRecipients && !takeoverRecipients.accepted(agentRegionLocationBindings())) throw Error('The actual Desktop renderer did not accept the arranged original Core bindings')
 dispose()
 api.sessions.snapshot = snapshot
 useAppStore.setState(arranged, true)
@@ -147,4 +152,21 @@ window.appearanceProof = {
   async finishUnknown() { pending.get('unknown-image')?.({ kind: 'directory', icon: null }) },
   facts() { const state = useAppStore.getState(); return { mainSurface: state.mainSurface, focusView: state.focusView, organizationPreferences: state.config.focus?.zonePresentations ?? [], calls: [...calls], groups: [...document.querySelectorAll('[data-project-group-key]')].map(group => ({ key: group.dataset.projectGroupKey,
     entries: group.querySelectorAll('.focus-project-preferences__trigger').length, branches: group.querySelectorAll('[data-lane-id]').length, zones: new Set([...group.querySelectorAll('[data-focus-zone-id]')].map(element => element.dataset.focusZoneId)).size, watermarks: group.querySelectorAll('[data-project-watermark]').length })) } }
+}
+if (takeoverRecipients) {
+  const requests = { openAgent: 0, takeovers: 0, creation: 0 }
+  const observe = (owner, key) => {
+    const original = owner[key]
+    owner[key] = (...args) => { requests[key]++; return original.call(owner, ...args) }
+  }
+  observe(api.spatial, 'openAgent')
+  observe(api.sessions, 'takeovers')
+  observe(api.sessions, 'creation')
+  window.appearanceProof.takeoverRecipients = () => ({
+    accepted: takeoverRecipients.accepted(agentRegionLocationBindings()),
+    targets: takeoverRecipients.targets.map(({ sourceId, name, initialPrompt, address }) => ({ sourceId, name, initialPrompt, address })),
+    requests: { ...requests },
+    draft: useAppStore.getState().agentComposerDrafts['alpha-working'],
+    selection: useAppStore.getState().workbenchSpaceSelection
+  })
 }

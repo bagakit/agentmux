@@ -7,5 +7,5 @@ productInputs.push('apps/desktop/src/main/project-appearance.ts', 'apps/desktop/
   renderer+'styles/context-menu.css', 'packages/client-ui/src/styles/composer-editor.css',
   'packages/core/src/focus-control.ts', 'packages/core/src/focus-task-guidance.ts', 'packages/core/src/agent-input-submit.ts')
 export const captureInputs = ['apps/desktop/scripts/capture-focus-project-appearance.mjs',
-  ...['entry.mjs','main.cjs','reading-scene.cjs','organization-scene.cjs','discussion-scene.cjs','compact-discussion-scene.cjs','group-organization-scene.cjs','selection-settings-scene.cjs','neutral-surface-scene.cjs','saved-history-scene.cjs','inputs.mjs'].map(file => 'apps/desktop/scripts/fixtures/focus-project-appearance/' + file),
+  ...['entry.mjs','main.cjs','reading-scene.cjs','organization-scene.cjs','discussion-scene.cjs','compact-discussion-scene.cjs','group-organization-scene.cjs','selection-settings-scene.cjs','neutral-surface-scene.cjs','saved-history-scene.cjs','takeover-recipients-data.mjs','takeover-recipients-scene.cjs','inputs.mjs'].map(file => 'apps/desktop/scripts/fixtures/focus-project-appearance/' + file),
   'apps/desktop/scripts/fixtures/focus-composable-filters/entry.mjs', 'apps/desktop/resources/icon.png']

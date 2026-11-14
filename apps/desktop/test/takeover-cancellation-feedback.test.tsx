@@ -520,6 +520,54 @@ it('a legacy record opens and folds its exact read-only reference without a busi
   preserved(before)
 })
 
+it('an exact creation returned by Check replaces the missing-request explanation', async () => {
+  const { coreRequest, ...legacySource } = operation.takeoverSource
+  const result = await f.rpc.call('agent.open', coreRequest!)
+  expect(result.operationId).toBe(operation.operationId)
+  expect(result.agent?.agentSessionId).toBeTruthy()
+  expect(result.outcome).toMatch(/^(opened|partial)$/u)
+  operation = { ...operation, takeoverSource: legacySource }
+  useAppStore.setState({ agentOperations: { [agentOperationKey(operation)]: operation } })
+  const before = useAppStore.getState(), starts = f.started.length
+  const inspect = vi.spyOn(before, 'executeControl').mockImplementationOnce(async request => {
+    const response = await f.rpc.call('space.inspect', { target: { operationId: operation.operationId } })
+    if (!response.request?.report) throw Error('Missing original Core receipt')
+    const { operationId, ...report } = response.request.report
+    expect(request).toMatchObject({ operation: 'space.inspect', target: { requestId: operation.operationId } })
+    return { operation: 'space.inspect', catalog: response.catalog, request: { requestId: operationId, known: true,
+      report: { ...report, requestId: operationId } } }
+  })
+  await render()
+  const popup = await openDetails()
+  await press('检查结果')
+  await vi.waitFor(() => expect(popup.textContent).toContain('接手 Agent 已创建'))
+  expect(popup.textContent).not.toContain('旧记录缺少完整请求')
+  expect(inspect).toHaveBeenCalledTimes(1)
+  expect(f.started).toHaveLength(starts)
+  expect(inputCalls).toEqual([])
+  preserved(before)
+})
+
+it('keeps the earlier confirmed closure readable when reopening a saved Takeover result', async () => {
+  const result = await f.rpc.call('agent.open', operation.takeoverSource.coreRequest!)
+  const created = result.agent!
+  f.inner.kernel.prepareStop = async (runId: string, operationKey: string) => ({ daemonInstance: 'fixture-runtime', operationKey, runId })
+  f.inner.kernel.remove = async () => {}
+  await f.client.stopAgent(created.agentSessionId, { runId: created.runId! }, { operationId: 'retire-confirmed-recipient' })
+  const { request } = await f.rpc.call('space.inspect', { target: { operationId: operation.operationId } })
+  expect(request?.report?.outcome).toBe('retired')
+  await act(async () => settleAgentCreation(operation, { ...request!.report!, requestId: request!.report!.operationId }))
+  const restored = restoredAgentOperations(persistedAgentOperations(useAppStore.getState().agentOperations))
+  useAppStore.setState({ agentOperations: restored })
+  const before = useAppStore.getState()
+  expect(current().phase).toBe('unconfirmed')
+  await render()
+  const popup = await openDetails()
+  expect(popup.textContent).toContain('接手 Agent 已创建，后来关闭了')
+  expect(inputCalls).toEqual([])
+  preserved(before)
+})
+
 it('two actual feedback projections share one cancellation while preserving the original draft focus', async () => {
   let release!: () => void
   const barrier = new Promise<void>(resolve => { release = resolve })

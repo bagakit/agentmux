@@ -17,12 +17,13 @@ const selectionSettings = process.argv[4] === '--selection-settings' || combined
 const containerOrder = process.argv[4] === '--container-order', compactDiscussion = process.argv[4] === '--group-compact'
 const groupDiscussion = process.argv[4] === '--group-discussion' || compactDiscussion
 const savedInProject = process.argv[4] === '--saved-in-project'
-assert.ok(process.argv[2] === '--evidence' && process.argv[3] && (process.argv.length === 4 || process.argv.length === 5 && (containerOrder || groupDiscussion || neutralSurfaces || groupOrganization || selectionSettings || savedInProject)), 'Use --evidence <private evidence directory> [--container-order|--group-discussion|--group-compact|--neutral-surfaces|--group-organization|--selection-settings|--focus-preferences|--saved-in-project]')
+const takeoverRecipients = process.argv[4] === '--takeover-recipients'
+assert.ok(process.argv[2] === '--evidence' && process.argv[3] && (process.argv.length === 4 || process.argv.length === 5 && (containerOrder || groupDiscussion || neutralSurfaces || groupOrganization || selectionSettings || savedInProject || takeoverRecipients)), 'Use --evidence <private evidence directory> [--container-order|--group-discussion|--group-compact|--neutral-surfaces|--group-organization|--selection-settings|--focus-preferences|--saved-in-project|--takeover-recipients]')
 const evidence = resolve(process.argv[3]); await mkdir(evidence, { recursive: true })
 const privateRoot = await mkdtemp(join(tmpdir(), 'amux-project-appearance-')), fixture = join(desktop, 'scripts/fixtures/focus-project-appearance')
 const require = createRequire(join(desktop, 'package.json')), { build } = browserSourceBuild(createRequire(require.resolve('vite/package.json'))('esbuild'))
 const hash = bytes => createHash('sha256').update(bytes).digest('hex'), inputs = new Map(), transformations = [], aliases = [], logs = []
-const receipt = { schema: 'agentmux.focus-project-appearance-capture.v1', capturedPass: false, captureOnly: true, aestheticReview: 'not-performed', mode: savedInProject ? 'saved-in-project' : combinedPreferences ? 'focus-preferences' : selectionSettings ? 'selection-settings' : groupOrganization ? 'group-organization' : neutralSurfaces ? 'neutral-surfaces' : compactDiscussion ? 'group-compact' : groupDiscussion ? 'group-discussion' : containerOrder ? 'container-order' : 'appearance', userAppRunRuntimeControlled: false,
+const receipt = { schema: 'agentmux.focus-project-appearance-capture.v1', capturedPass: false, captureOnly: true, aestheticReview: 'not-performed', mode: takeoverRecipients ? 'takeover-recipients' : savedInProject ? 'saved-in-project' : combinedPreferences ? 'focus-preferences' : selectionSettings ? 'selection-settings' : groupOrganization ? 'group-organization' : neutralSurfaces ? 'neutral-surfaces' : compactDiscussion ? 'group-compact' : groupDiscussion ? 'group-discussion' : containerOrder ? 'container-order' : 'appearance', userAppRunRuntimeControlled: false,
   boundary: 'Private Electron Renderer with actual App, GlobalFocusSurface, FocusFilters, Store and Workbench; maintained typed preview API. Only PTY/Agent and unused Monaco painting leaves isolated. No live Runtime, native Run proof, installation, user navigation or restart.' }
 try {
   assert.ok(!process.env.AGENTMUX_FOCUS_APPEARANCE_STYLE_MUTANT || ['oversized-menu', 'unbounded-menu', 'search-overflow', 'wrapped-footer', 'starved-search', 'preferences-scale', 'selected-frame'].includes(process.env.AGENTMUX_FOCUS_APPEARANCE_STYLE_MUTANT), 'Known actual style inverse')
@@ -124,7 +125,16 @@ try {
   for (const input of captureInputs) { const path = join(root, input); inputs.set(path, hash(await readFile(path))) }
   inputs.set(join(desktop, 'src/main/project-appearance.ts'), hash(await readFile(join(desktop, 'src/main/project-appearance.ts'))))
   await build({ entryPoints: [join(desktop, 'src/main/project-appearance.ts')], outfile: join(privateRoot, 'project-appearance.cjs'), bundle: true, platform: 'node', format: 'cjs', plugins: [workspaceSource], logLevel: 'silent' })
-  const out = join(privateRoot, 'out'); await mkdir(out)
+  const out = takeoverRecipients ? join(privateRoot, 'renderer', 'out') : join(privateRoot, 'out')
+  await mkdir(out, { recursive: true })
+  if (takeoverRecipients) {
+    // Keep the Vite-relative URL working with this private, unmodified bundle.
+    const resource = 'src/assets/agent-icons/gemini.png'
+    const source = join(root, 'packages/client-ui', resource), bytes = await readFile(source)
+    await mkdir(join(privateRoot, 'src/assets/agent-icons'), { recursive: true })
+    await writeFile(join(privateRoot, resource), bytes)
+    inputs.set(source, hash(bytes))
+  }
   const renderer = join(out, 'app.js'), buildResult = await build({ entryPoints: [join(fixture, 'entry.mjs')], outfile: renderer, bundle: true, platform: 'browser', format: 'esm', target: 'es2022', jsx: 'automatic', metafile: true,
     plugins: [workspaceSource], conditions: ['browser', 'import', 'production', 'default'], logLevel: 'silent', define: { __AGENTMUX_WEB_PREVIEW__: 'true', 'process.env.NODE_ENV': '"production"' }, loader: { '.png': 'file', '.avif': 'file', '.webp': 'file', '.gif': 'file', '.svg': 'file', '.woff2': 'file', '.woff': 'file', '.ttf': 'file' } })
   receipt.metafile = buildResult.metafile; receipt.aliases = aliases; receipt.inputs = Object.fromEntries([...inputs].map(([path, sha]) => [relative(root, path), sha])); receipt.transformations = transformations
@@ -135,18 +145,35 @@ try {
   receipt.process = await runProbeProcess(require('electron'), [join(fixture, 'main.cjs'), html, privateRoot, evidence, ...process.argv.slice(4)], { temporaryRoot: privateRoot, cwd: root, env, timeoutMs: 60000, onLine: line => logs.push(line) })
   receipt.actual = JSON.parse(await readFile(join(evidence, 'actual.json'), 'utf8')); assert.equal(receipt.process.exitCode, 0, receipt.actual.failure?.message); assert.equal(receipt.actual.passed, true)
   receipt.frames = await Promise.all(receipt.actual.frames.map(async frame => ({ ...frame, sha256: hash(await readFile(join(evidence, frame.file))) })))
-  assert.ok(receipt.frames.length >= (savedInProject ? 11 : combinedPreferences ? 14 : selectionSettings || groupOrganization ? 7 : neutralSurfaces ? process.env.AGENTMUX_FOCUS_APPEARANCE_STYLE_MUTANT === 'selected-frame' ? 1 : 4 : compactDiscussion ? 6 : groupDiscussion ? 8 : containerOrder ? 8 : 10), 'Actual complete App frames cover the selected bounded scenario')
+  assert.ok(receipt.frames.length >= (takeoverRecipients ? 14 : savedInProject ? 11 : combinedPreferences ? 14 : selectionSettings || groupOrganization ? 7 : neutralSurfaces ? process.env.AGENTMUX_FOCUS_APPEARANCE_STYLE_MUTANT === 'selected-frame' ? 1 : 4 : compactDiscussion ? 6 : groupDiscussion ? 8 : containerOrder ? 8 : 10), 'Actual complete App frames cover the selected bounded scenario')
   receipt.sourceAfter = Object.fromEntries(await Promise.all([...inputs.keys()].map(async path => {
     try { return [relative(root, path), hash(await readFile(path))] }
     catch (error) { if (error.code === 'ENOENT') return [relative(root, path), null]; throw error }
   })))
   receipt.affectedInputs = [...productInputs, ...captureInputs]
+  if (takeoverRecipients) receipt.affectedInputs.push(
+    'apps/desktop/src/renderer/src/components/AgentOperationFeedback.tsx',
+    'apps/desktop/src/renderer/src/components/FocusContextRow.tsx',
+    'apps/desktop/src/renderer/src/components/FocusTakeoverRecipients.tsx',
+    'apps/desktop/src/renderer/src/components/QuickSwitcher.tsx',
+    'apps/desktop/src/renderer/src/lib/focus-takeover-recipients.ts',
+    'apps/desktop/src/renderer/src/lib/desktop-agent-presentation.ts',
+    'apps/desktop/src/renderer/src/lib/session-presentation.ts',
+    'apps/desktop/src/renderer/src/styles/focus-takeover-recipients.css',
+    'apps/desktop/src/renderer/src/styles/agent-operation-feedback.css',
+    'packages/client-ui/src/components/AvatarGroup.tsx',
+    'packages/client-ui/src/styles/avatar-group.css',
+    'packages/client-ui/src/assets/agent-icons/gemini.png',
+  )
   for (const path of receipt.affectedInputs) {
     assert.equal(typeof receipt.inputs[path], 'string', 'Actual loaded affected input ' + path)
     assert.equal(receipt.sourceAfter[path], receipt.inputs[path], 'Affected source stable during capture ' + path)
   }
   receipt.peripheralCaptureDrift = Object.entries(receipt.inputs).filter(([path, sha]) => !receipt.affectedInputs.includes(path) && receipt.sourceAfter[path] !== sha)
     .map(([path, before]) => ({ path, before, after: receipt.sourceAfter[path], gate: 'Peripheral provenance; outside shared affected input scope.' }))
+  if (takeoverRecipients) await writeFile(join(evidence, 'review.md'), '# Focus takeover destinations\n\n' +
+    'Open each complete Electron screenshot in [the capture receipt](receipt.json).\n\n' +
+    receipt.frames.map(frame => `- [${frame.file}](${frame.file}) · ${frame.label}`).join('\n') + '\n')
   receipt.capturedPass = true
 } catch (error) { receipt.failure = { name: error.name, message: error.message, stack: error.stack, ...(error.errors ? { errors: error.errors } : {}) }; process.exitCode = 1 }
 finally {

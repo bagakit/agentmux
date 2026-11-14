@@ -23,6 +23,7 @@ const mutations: Record<string, [string, string, string]> = {
   'owner-failure-hidden': ['AgentOperationFeedback.tsx', '未能确认原工作区。', '未能准备取消请求。'],
   'check-erases-owner-failure': ['AgentOperationFeedback.tsx', 'function check() {\n    setChecking(true)', 'function check() {\n    setCancelIssue(null)\n    setChecking(true)'],
   'legacy-record-clutters-card': ['AgentOperationFeedback.tsx', 'Boolean(takeover && !hasRequest && !cancellation &&', 'Boolean(false && takeover && !hasRequest && !cancellation &&'],
+  'legacy-check-hides-result': ['AgentOperationFeedback.tsx', ': recordedCreation ? recordedCreation.initialPrompt', ': false && recordedCreation ? recordedCreation!.initialPrompt'],
   'inspection-renames': ['session-takeover.ts', 'return takeoverReport(result.request.report)', 'return nameTakeover(source, takeoverReport(result.request.report))'],
   'continuation-replaces-control': ['session-takeover-cancellation.ts', 'const cancellation: TakeoverCancellation = held.cancellation ??', 'const cancellation: TakeoverCancellation =']
 }
