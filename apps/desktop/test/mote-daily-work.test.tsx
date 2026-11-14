@@ -92,11 +92,14 @@ describe('original Mote Goal composition and current-work caller', () => {
     expect(moteGoalSummary({ ...record, grounding: { alignmentRevision: 1, submissionId: 's', acceptedAt: null, summary: 'Some results remain unknown.', checks: [{ criterionId: 'c', outcome: 'unknown', evidence: [], note: '' }] } })).toEqual({ next: 'Results need checking', detail: 'Some results remain unknown.' })
   })
   it('consumes real Profile rows, expands the original Goal control and preserves Composer inputs', async () => {
+    const originalRead = api.goals.execute
+    vi.spyOn(api.goals, 'execute').mockImplementation(async request => request.operation === 'demand.show'
+      ? { operation: 'demand.show', demand: null, goalContinuations: [] } : await originalRead(request))
     const before = useAppStore.getState().agentComposerDrafts, panel = await profile()
     expect([...panel.querySelectorAll('[data-mote-goal]')].map(item => item.getAttribute('data-mote-goal')).sort()).toEqual(['neighbor', 'ours'])
     await moteClick(panel.querySelector('[data-mote-goal="ours"] .mote-current-work__copy')!)
     expect(panel.querySelector('[aria-label="Goal continuous progress"]')).not.toBeNull()
-    expect(panel.querySelector('.goals-supervisor-guide')?.textContent).toContain('Choose Supervisor')
+    expect(panel.querySelector('.goals-supervisor-identity')?.textContent).toContain('Choose Supervisor')
     expect(panel.querySelector('.goals-continuation__start')).toBeNull()
     expect(useAppStore.getState().agentComposerDrafts).toBe(before); expect(app.launch).not.toHaveBeenCalled(); expect(app.send).not.toHaveBeenCalled()
   })

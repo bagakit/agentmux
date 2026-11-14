@@ -1,5 +1,4 @@
 // @vitest-environment happy-dom
-import { chooseField } from './helpers/selection-field'
 import { act, Profiler } from 'react'
 import type { Root } from 'react-dom/client'
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest'
@@ -23,7 +22,10 @@ beforeEach(() => {
   useAppStore.setState(state => ({ demands: { [goal.id]: goal }, sessions: [...state.sessions,
     ...Array.from({ length: 80 }, (_, index) => moteAgent('unrelated-' + index, null))] }))
   vi.spyOn(api.demands, 'list').mockResolvedValue([])
-  vi.spyOn(api.continuousProgress, 'goals').mockResolvedValue([])
+  const originalRead = api.goals.execute
+  vi.spyOn(api.goals, 'execute').mockImplementation(async request => request.operation === 'demand.show' ? { operation: 'demand.show', demand: null,
+    goalContinuations: [{ hostId: defaultAgent.control.hostId, agentSessionId: defaultAgent.control.agentSessionId, providerId: defaultAgent.providerId,
+      workspacePath: defaultAgent.workspacePath, loopId: 'original-stopped-loop', intervalMs: 60_000, prompt: 'Original saved loop', nextCheckAt: 1, status: 'stopped' }] } : await originalRead(request))
   container = document.createElement('div'); document.body.append(container); root = createClientUiRoot(container); renders = 0
 })
 afterEach(async () => { await act(async () => root.unmount()); container.remove(); useAppStore.setState(original, true); vi.restoreAllMocks() })
@@ -31,7 +33,7 @@ async function mount(expand = false) {
   await act(async () => root.render(<Profiler id="current-work" onRender={() => { renders += 1 }}><MoteCurrentWork scope={scope} reference={null} /></Profiler>))
   expect(container.querySelector('[data-mote-goal="original-goal"]')).not.toBeNull()
   if (expand) await act(async () => container.querySelector<HTMLButtonElement>('.mote-current-work__copy')!.click())
-  if (expand) expect(container.querySelector('[aria-label="Goal continuation Agent"]')).not.toBeNull()
+  if (expand) expect(container.querySelector('.goals-continuation__original-agent strong')).not.toBeNull()
   renders = 0
 }
 async function update(id: string, patch: Partial<typeof defaultAgent>) {
@@ -62,11 +64,11 @@ describe('original Mote Current work and expanded Goal consumer cost', () => {
     await update(defaultAgent.id, { updatedAt: 10 })
     expect(renders).toBe(0); expect(context).not.toHaveBeenCalled()
     await update(defaultAgent.id, { label: 'Original member renamed' })
-    await chooseField(container.querySelector<HTMLElement>('[aria-label="Goal continuation Agent"]')!, defaultAgent.id)
-    expect(container.querySelector('[aria-label="Goal continuation Agent"]')!.textContent).toContain('Original member renamed')
+    expect(container.querySelector('.goals-continuation__original-agent strong')!.textContent).toContain('Original member renamed')
     expect(renders).toBeGreaterThan(0); expect(context).not.toHaveBeenCalled()
     await update(defaultAgent.id, { control: { ...defaultAgent.control, agentSessionId: 'wrong-original-agent' } })
-    expect(container.querySelector('[aria-label="Goal continuation Agent"]')!.textContent).toContain('not in current options')
+    expect(container.querySelector('.goals-continuation__original-agent strong')!.textContent).toBe(`Session ${defaultAgent.id} · Host local`)
+    expect(container.querySelector('.goals-continuation__original-agent strong')!.getAttribute('title')).toBe(`${defaultAgent.id}\nHost local`)
     await act(async () => useAppStore.setState(state => ({ sessions: state.sessions.filter(session => session.id !== neighborAgent.id) })))
     expect(container.textContent).toContain('1 linked discussion not loaded. Original references retained.')
     expect(container.querySelector('[data-mote-goal="original-goal"]')).not.toBeNull()
