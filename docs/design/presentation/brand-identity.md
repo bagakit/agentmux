@@ -48,6 +48,7 @@ Survey 与 Recall 的对象符号延续 Space／Focus 同族的石墨金属、Mi
 ## IP 形象
 
 - **龙**是品牌主体，出现在 App 图标和大图里。
+- **通用 Agent** 用规整圆角的小方脸，与 Mote 共用实心剪影和双眼留白的角色语言；不加嘴线、天线或耳片。对象、工具入口、Space 装饰与对话角色的默认图形及内置主题保持同族，在 12–16px 和深浅主题中清楚可辨；保持静止，不以表情表达状态。Mote 保留自己的非对称轮廓；人的图形、Provider 标志及用户已保存头像和主题自定义继续由原 owner 决定。
 - **Mote** 是持久的伙伴人格。它的默认身份图形与装饰徽标归[《Mote 默认身份与装饰徽标》](shared-rules.md#mote-默认身份与装饰徽标)，随主题着色。
 - **Mote 头像系列**是 Mote 自己的多元宇宙：同一个 Mote 的多种美术方向，加上低多边形伙伴（龙、狼、鸮、豹）；随包系列位于 `apps/desktop/resources/avatar-series/`。头像归 Mote 头像的 owner，按[头像行为合同](../behavior/motes-and-coordination.md#mote-头像与主-mote)保存，不并入五境，也不随 App 图标切换。
 
