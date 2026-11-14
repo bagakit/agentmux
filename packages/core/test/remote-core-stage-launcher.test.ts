@@ -1,7 +1,7 @@
 import { fixturePath } from './helpers/fixture-values.js'
 import { spawn, execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { chmod, mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, readdir, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
@@ -52,15 +52,24 @@ it('stages the same artifact twice without changing manifest files and executes 
     files.push({ path, sha256: sha(Buffer.from(text)), mode })
   }
   const archivePath = join(root, 'artifact.tar.gz')
-  await exec('tar', ['-czf', archivePath, '-C', artifact, '.'])
-  const archive = await readFile(archivePath), digest = 'a'.repeat(64)
-  const input = { stateDirectory, node, digest, operationId: 'first', archive: archive.toString('base64'),
-    archiveDigest: sha(archive), files }
+  const digest = 'a'.repeat(64), directoryModule = 'dist/directory-write.js'
+  const archiveInput = async (source: string) => {
+    const target = join(artifact, directoryModule)
+    await writeFile(target, source); await chmod(target, 0o644)
+    await exec('tar', ['-czf', archivePath, '-C', artifact, '.'])
+    const archive = await readFile(archivePath)
+    return { stateDirectory, node, archive: archive.toString('base64'), archiveDigest: sha(archive),
+      files: [...files, { path: directoryModule, sha256: sha(Buffer.from(source)), mode: 0o644 }] }
+  }
+  const rejected = await archiveInput('export function assertDirectoryWriteSupport() { throw Error("Native fixture unavailable") }\n')
+  await expect(stage({ ...rejected, digest: 'b'.repeat(64), operationId: 'bad' })).rejects.toThrow('Native fixture unavailable')
+  expect(await readdir(join(stateDirectory, 'core-releases'))).toEqual([])
+  const input = { ...(await archiveInput('export function assertDirectoryWriteSupport() {}\n')), digest, operationId: 'first' }
   const first = await stage(input)
   const expectedRoot = join(stateDirectory, 'core-releases', digest)
   expect(first).toEqual({ releaseDirectory: expectedRoot, remoteCommand: join(expectedRoot, 'launcher', 'amux'), digest })
   const deploymentBefore = await readFile(join(expectedRoot, 'deployment.json'))
-  const manifestBefore = await Promise.all(files.map(async file => ({ ...file, bytes: await readFile(join(expectedRoot, file.path)) })))
+  const manifestBefore = await Promise.all(input.files.map(async file => ({ ...file, bytes: await readFile(join(expectedRoot, file.path)) })))
   const second = await stage({ ...input, operationId: 'second' })
   expect(second).toEqual(first)
   expect(await readFile(join(expectedRoot, 'deployment.json'))).toEqual(deploymentBefore)

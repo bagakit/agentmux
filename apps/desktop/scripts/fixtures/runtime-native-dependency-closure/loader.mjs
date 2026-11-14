@@ -36,7 +36,8 @@ export async function load(url, context, nextLoad) {
   }
   if (path === app && mutation === 'isolated-roots') replace('await copyDependencies(roots)',
     'for (const root of roots) await copyDependencies([root])')
-  if (path === app && mutation === 'merge-distribution-scopes') replace('await copyDependencies(coreRoots)', 'roots.push(...coreRoots)')
+  if (path === app && mutation === 'merge-distribution-scopes') replace('await copyDependencies(coreRoots, {', 'roots.push(...coreRoots); void ({')
+  if (path === app && mutation === 'omit-portable-target') replace("additionalTarget: { os: 'linux', cpu: 'x64' }, ", '')
   const binding = { path, originalSHA256: sha(original), transformedSHA256: sha(source) }
   const instrumented = `import{appendFileSync as __closureEvidence}from'node:fs';\n__closureEvidence(process.env.AGENTMUX_CLOSURE_LOADED,${JSON.stringify(JSON.stringify({ stage: 'evaluated', ...binding }) + '\n')});\n` + source
   appendFileSync(process.env.AGENTMUX_CLOSURE_LOADED, JSON.stringify({ stage: 'returned', ...binding, evaluatedCodeSHA256: sha(instrumented) }) + '\n')

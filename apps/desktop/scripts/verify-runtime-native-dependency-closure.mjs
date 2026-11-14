@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { createRequire } from 'node:module'
-import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -76,7 +76,11 @@ async function materializeAppCore(source, temporary) {
   const resources = join(temporary, 'app'), selected = payload.copies.filter(value => value.target.startsWith(prefix + '/'))
   assert.ok(selected.length > 10, 'The real App Core payload must select actual dependency files')
   await copyRuntimeFiles(selected, resources)
-  for (const item of payload.generated.filter(value => value.target === prefix + '/package.json')) await put(join(resources, item.target), item.contents)
+  for (const item of payload.generated.filter(value => value.target.startsWith(prefix + '/'))) {
+    const target = join(resources, item.target)
+    await put(target, item.contents)
+    if (item.mode !== undefined) await chmod(target, item.mode)
+  }
   for (const item of payload.links.filter(value => value.target.startsWith(prefix + '/node_modules/'))) {
     const target = join(resources, item.target); await mkdir(dirname(target), { recursive: true }); await symlink(item.link, target)
   }
@@ -96,6 +100,11 @@ async function runCase(kind, temporary) {
     const { createPortableCoreArtifact } = await import(pathToFileURL(join(repository, 'packages/core/dist/portable-core-artifact.js')).href)
     const artifact = await createPortableCoreArtifact(join(temporary, 'artifact'), core)
     assert.ok(artifact.files.length > 100, 'The actual portable artifact must collect a nonempty assembled Core')
+    const linuxKoffi = artifact.files.find(file => file.path.endsWith('/@koromix/koffi-linux-x64/linux_x64/koffi.node'))
+    assert.ok(linuxKoffi, 'The App must supply the Linux x64 Koffi binary to its portable artifact')
+    const binary = await readFile(join(temporary, 'artifact/core', linuxKoffi.path))
+    assert.equal(binary.readUInt32BE(0), 0x7f454c46, 'The portable Linux binary must be ELF')
+    assert.equal(binary.readUInt16LE(18), 62, 'The portable Linux binary must be x64')
     const consumed = await consume('artifact-host-js', join(temporary, 'artifact/core'), join(temporary, 'work'))
     return { case: kind, passed: true, artifact: { digest: artifact.digest, files: artifact.files.length,
       nativeTarget: 'linux-x64', nativeTargetExecuted: false, hostJsOnly: true }, consumed }
@@ -167,14 +176,14 @@ if (process.argv[2] === '--case') {
   const bindings = async () => Object.fromEntries(await Promise.all(sources.map(async path => [path, sha(await readFile(join(repository, path)))])))
   const receipt = { schema: 'agentmux.runtime-native-dependency-closure-proof.v1', passed: false, inputs: await bindings(),
     platform: process.platform, arch: process.arch, cases: [], mutations: [], userRuntimeTouched: false,
-    targetBoundary: 'This gate consumes the current host installed graph. All installed optional packages are preserved without os/cpu filtering; absent optional packages remain absent. It neither prepares nor qualifies another target graph, especially Linux from a Darwin installation.' }
+    targetBoundary: 'The copied App Core keeps the host graph and supplies the locked Linux x64 native to its portable artifact. This Darwin gate executes the host graph only; remote staging qualifies the Linux native with the target Node.' }
   const runs = [
     ['app-native', null], ['portable-native', null], ['app-portable-core', null], ['graph', null], ['app-react', null], ['cycle-app', null], ['cycle-portable', null],
     ['cycle-alias-app', null], ['cycle-alias-portable', null],
     ['app-native', 'omit-optionals'], ['graph', 'omit-peers'], ['graph', 'flatten-peer-context'],
     ['graph', 'omit-required'], ['portable-native', 'portable-skips-dependencies'], ['cycle-portable', 'no-back-edge'],
     ['cycle-alias-portable', 'allow-unrepresentable-peer'], ['graph', 'unplanned-slots'], ['app-react', 'isolated-roots'],
-    ['app-portable-core', 'merge-distribution-scopes']
+    ['app-portable-core', 'merge-distribution-scopes'], ['app-portable-core', 'omit-portable-target']
   ]
   try {
     for (const [kind, mutation] of runs) {
@@ -214,7 +223,7 @@ if (process.argv[2] === '--case') {
         catch (error) { receipt.cleanedPrivateRoots = false; receipt.retainedPrivateRoot = temporary; throw error }
       }
     }
-    assert.equal(receipt.cases.length, 9); assert.equal(receipt.mutations.length, 10)
+    assert.equal(receipt.cases.length, 9); assert.equal(receipt.mutations.length, 11)
     assert.deepEqual(await bindings(), receipt.inputs, 'Reviewed source and compiled Core leaves must not change during the gate')
     receipt.passed = true
   } finally {

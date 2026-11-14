@@ -113,5 +113,14 @@ test('target materialize copies matching optional files and leaves foreign nativ
     })
     assert.equal(JSON.parse(await readFile(join(selected, 'node_modules/@native/linux-x64/package.json'), 'utf8')).name, '@native/linux-x64')
     await assert.rejects(readFile(join(selected, 'node_modules/@native/darwin-arm64/package.json')), { code: 'ENOENT' })
+
+    const portable = join(root, 'app-core')
+    await visitRuntimePackageClosure([{ sourceDirectory: core, target: portable }], copy, {
+      additionalTarget: { os: 'linux', cpu: 'x64' },
+      lockfilePath: lockfile,
+      materializeOptionalPackage: async name => name === '@native/linux-x64' ? linux : null
+    })
+    assert.equal(JSON.parse(await readFile(join(portable, 'node_modules/@native/darwin-arm64/package.json'), 'utf8')).name, '@native/darwin-arm64')
+    assert.equal(JSON.parse(await readFile(join(portable, 'node_modules/@native/linux-x64/package.json'), 'utf8')).name, '@native/linux-x64')
   } finally { await rm(root, { recursive: true, force: true }) }
 })
