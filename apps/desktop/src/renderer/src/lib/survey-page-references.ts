@@ -1,6 +1,6 @@
 import { parseSurveyPageReferences, parseSurveyPageSelection, type AgentMuxSurveyPageReference as Page, type AgentMuxSurveyPageSelection, type AgentMuxSpaceCatalog } from '@agentmux/core/control'
 import { selectSpatialCatalog } from '@agentmux/core/spatial-graph'
-import { sameWorkbenchProjectionSelection, type WorkbenchProjection, type WorkbenchProjectionSelection } from './workbench-projection'
+import { sameWorkbenchProjectionSelection, workbenchCatalogMembership, type WorkbenchProjection, type WorkbenchProjectionSelection } from './workbench-projection'
 import { findWorkbenchRegion, type WorkbenchTab } from './workbench-tabs'
 import { persistedSurveyZoneSelection, restoredSurveyZoneSelection, type SurveyZoneSelection } from './survey-workface'
 
@@ -57,10 +57,8 @@ export function restoredSurveySelection(value: unknown): SurveySelection | null 
   return restoredSurveyZoneSelection(value)
 }
 
-type SurveyCatalogScope = {
+type SurveyCatalogScope = Pick<ReturnType<typeof workbenchCatalogMembership>, 'tabsByZone' | 'zonesById'> & {
   regionsById: Map<string, Pick<AgentMuxSpaceCatalog['regions'][number], 'tabId' | 'kind'>[]>
-  tabsByZone: Map<string, string[]>
-  zoneIds: Set<string>
   occurrencesByRegion: Map<string, WorkbenchProjectionSelection[]>
   projectionCatalogs: Map<string, AgentMuxSpaceCatalog>
 }
@@ -71,16 +69,10 @@ export function surveyCatalogScope(catalog: AgentMuxSpaceCatalog): SurveyCatalog
   const known = catalogScopes.get(catalog)
   if (known) return known
   const regionsById: SurveyCatalogScope['regionsById'] = new Map()
-  const tabsByZone = new Map<string, string[]>()
   for (const region of catalog.regions) {
     const members = regionsById.get(region.regionId) ?? []
     members.push({ tabId: region.tabId, kind: region.kind })
     regionsById.set(region.regionId, members)
-  }
-  for (const tab of catalog.tabs) if (tab.zoneId !== null) {
-    const members = tabsByZone.get(tab.zoneId) ?? []
-    members.push(tab.tabId)
-    tabsByZone.set(tab.zoneId, members)
   }
   const occurrencesByRegion = new Map<string, WorkbenchProjectionSelection[]>(), seen = new Set<string>()
   for (const location of catalog.locations) {
@@ -93,7 +85,8 @@ export function surveyCatalogScope(catalog: AgentMuxSpaceCatalog): SurveyCatalog
     members.push(reference)
     occurrencesByRegion.set(reference.regionId, members)
   }
-  const scope = { regionsById, tabsByZone, occurrencesByRegion, zoneIds: new Set(catalog.zones.map(zone => zone.zoneId)),
+  const { tabsByZone, zonesById } = workbenchCatalogMembership(catalog)
+  const scope = { regionsById, tabsByZone, occurrencesByRegion, zonesById,
     projectionCatalogs: new Map<string, AgentMuxSpaceCatalog>() }
   catalogScopes.set(catalog, scope)
   return scope

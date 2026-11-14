@@ -12,7 +12,7 @@ import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { useStore } from 'zustand'
 import type { SurveyBrowserPreparation } from '../lib/survey-browser-creation'
-import { isSurveyPage, surveyPageOwner, type SurveyPageSelection } from '../lib/survey-page-references'
+import { isSurveyPage, surveyCatalogScope, surveyPageOwner, type SurveyPageSelection } from '../lib/survey-page-references'
 import { scratchTopicsForWorkspace } from '../lib/scratch-topic-snapshots'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { surveyBrowserControl, surveyInitialZoneSelection, surveySelectReference, surveySelectedBrowser, surveyZoneItems, type ResolvedSurveyZoneSelection } from '../lib/survey-workface'
@@ -39,7 +39,7 @@ import { BrowserStartPage } from './BrowserStartPage'
 import { resolveBrowserStartPage } from '../../../shared/browser-start-page'
 import { SurveyPanelChoices } from './SurveyPanelChoices'
 import { groupIds, regionIds } from '@agentmux/layout'
-import { resolveWorkbenchZone, sameWorkbenchProjectionSelection } from '../lib/workbench-projection'
+import { resolveWorkbenchZone, sameWorkbenchProjectionSelection, workbenchCatalogMembership } from '../lib/workbench-projection'
 import { SelectorPresence, type SelectorPresenceAgent } from './SelectorList'
 import { SurveyItemOptions, SurveyItemContextMenu, type SurveyItemOptionsProps } from './SurveyItemOptions'
 import { TopicKnowledgeCapture } from './TopicKnowledgeEditor'
@@ -77,6 +77,7 @@ const ThemeActionOpenExternalIcon = semanticIconComponent('action.open-external'
 const ThemeActionCollectSourcesIcon = semanticIconComponent('action.collect-sources')
 const ThemeStatusLoadingIcon = semanticIconComponent('status.loading')
 const ThemeActionCloseIcon = semanticIconComponent('action.close')
+const emptyZoneTabs: ReadonlyMap<string, readonly string[]> = new Map()
 
 
 export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible = true, controlsCoverPage = false, unconfirmedBrowserRegionIds, catalog, projection, selection, pageSelection = null, viewTargets, onSelectReference }: {
@@ -137,21 +138,16 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
   const layouts = useStore(store, state => state.layouts)
   const sessions = useStore(store, state => state.sessions)
   const resourceWorkspaces = useMemo(() => new Map(config?.workspaces.map(workspace => [workspace.id, workspace]) ?? []), [config?.workspaces])
-  const currentZone = useMemo(() => selection ? catalog?.zones.find(zone => zone.zoneId === selection.zoneId) : undefined, [catalog, selection?.zoneId])
+  const membership = catalog && workbenchCatalogMembership(catalog)
+  const tabsByZone = membership?.tabsByZone ?? emptyZoneTabs
+  const currentZone = selection ? membership?.zonesById.get(selection.zoneId) : undefined
   const resourceWorkspaceId = currentZone?.workspaceId ?? (pageSelection
     ? surveyPageOwner(tabs, pageSelection, catalog)?.tab.workspaceId ?? null
     : !selection ? SCRATCH_WORKSPACE_ID : null)
   const workspace = resourceWorkspaceId ? resourceWorkspaces.get(resourceWorkspaceId) : undefined
   const items = useMemo(() => catalog ? surveyZoneItems(catalog, collected) : [], [catalog, collected])
-  const tabsByZone = useMemo(() => {
-    const result = new Map<string, string[]>()
-    for (const tab of catalog?.tabs ?? []) if (tab.zoneId) {
-      const members = result.get(tab.zoneId) ?? []; members.push(tab.tabId); result.set(tab.zoneId, members)
-    }
-    return result
-  }, [catalog])
-  const currentPanel = selection?.active && currentZone && catalog?.tabs.some(tab => tab.tabId === selection.active!.tabId && tab.zoneId === currentZone.zoneId)
-    && catalog.regions.some(region => region.regionId === selection.active!.regionId && region.tabId === selection.active!.tabId) ? selection.active : null
+  const currentPanel = selection?.active && currentZone && catalog && tabsByZone.get(currentZone.zoneId)?.includes(selection.active.tabId)
+    && surveyCatalogScope(catalog).regionsById.get(selection.active.regionId)?.some(region => region.tabId === selection.active!.tabId) ? selection.active : null
   const currentBrowser = surveySelectedBrowser(tabs, selection)
   const [query, setQuery] = useState('')
   const [opening, setOpening] = useState(false)
@@ -189,7 +185,7 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
   function captureContent(reference: SurveyContentReference): SurveyCompositionSource[] | null {
     if (!catalog) return null
     const state = useAppStore.getState()
-    const inputs = reference.kind === 'research' ? catalog.tabs.filter(tab => tab.zoneId === reference.zoneId).map(tab => ({ kind: 'tab' as const, tabId: tab.tabId })) : [reference]
+    const inputs = reference.kind === 'research' ? (tabsByZone.get(reference.zoneId) ?? []).map(tabId => ({ kind: 'tab' as const, tabId })) : [reference]
     const sources = inputs.map(input => captureSurveyCompositionSource(state, catalog, input))
     return sources.length && sources.every(source => source !== null) ? sources : null
   }
@@ -489,7 +485,7 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
 
   function itemReferences(zoneId: string) {
     const original = itemProjection(zoneId), state = useAppStore.getState()
-    const members = new Set(catalog?.tabs.filter(tab => tab.zoneId === zoneId).map(tab => tab.tabId))
+    const members = new Set(tabsByZone.get(zoneId))
     const layout = original?.composition
     return (layout ? groupIds(layout.root).flatMap(id => layout.groups.filter(group => group.id === id)) : []).flatMap(group => group.tabOrder.filter(id => members.has(id)).flatMap(tabId => {
       const tab = state.tabs[tabId]
@@ -662,8 +658,8 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
 
   function itemOptionsFor(zone: AgentMuxZoneFact | undefined, activityDetails = zone ? activity(zone).details : null): SurveyItemOptionsProps {
     const bindings = zone ? catalog?.bindings.filter(binding => binding.zoneId === zone.zoneId) ?? [] : []
-    const members = zone ? catalog?.tabs.filter(tab => tab.zoneId === zone.zoneId) ?? [] : []
-    const moveTabId = zone?.zoneId === selection?.zoneId ? selection?.active?.tabId : members.length === 1 ? members[0]!.tabId : undefined
+    const members = zone ? tabsByZone.get(zone.zoneId) ?? [] : []
+    const moveTabId = zone?.zoneId === selection?.zoneId ? selection?.active?.tabId : members.length === 1 ? members[0] : undefined
     return {
       onSelectContent: () => { if (sidebarCollapsed) setSidebarCollapsed(false); setSelectingContent(true) },
       visible: visible && !controlsCoverPage, title: zone ? itemTitle(zone) : selection ? 'Retained exploration' : 'New exploration',
@@ -701,7 +697,7 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
     ? surveyPageOwner(tabs, pageSelection, catalog) : null
   const pageHeaderOwner = pageSelection ? currentPageOwner ?? surveyPageOwner(tabs, pageSelection, catalog) : null
   const currentPageZoneId = currentPageOwner ? catalog?.tabs.find(tab => tab.tabId === currentPageOwner.tab.id)?.zoneId : null
-  const itemTitles = new Map([...Object.keys(collected).filter(zoneId => !catalog?.zones.some(zone => zone.zoneId === zoneId)).map(zoneId => [zoneId, 'Retained exploration'] as const), ...[...displayedItems.values()].map(zone => [zone.zoneId, itemTitle(zone)] as const)].filter(([zoneId]) => profileReferences.zoneIds.has(zoneId)))
+  const itemTitles = new Map([...Object.keys(collected).filter(zoneId => !membership?.zonesById.has(zoneId)).map(zoneId => [zoneId, 'Retained exploration'] as const), ...[...displayedItems.values()].map(zone => [zone.zoneId, itemTitle(zone)] as const)].filter(([zoneId]) => profileReferences.zoneIds.has(zoneId)))
   const pinnedZoneIds = pinReferences.flatMap(reference => reference.kind === 'zone' && itemTitles.has(reference.zoneId) ? [reference.zoneId] : [])
   const pinnedPages = profileReferences.pages.filter(page => pinnedKeys.has(surveyPinKey({ kind: 'page', ...page })))
   const ordinaryPages = profileReferences.pages.filter(page => !pinnedKeys.has(surveyPinKey({ kind: 'page', ...page })))

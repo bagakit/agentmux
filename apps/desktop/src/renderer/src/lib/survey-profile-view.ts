@@ -27,10 +27,11 @@ export function surveySelectionProfileMatch(view: SurveyProfileView, selection: 
     const owner = surveyPageOwner(tabs, selection)
     return owner ? browserMatch(view, owner.surface, defaultProfileId) : 'unknown'
   }
-  const originals = catalog?.tabs.filter(tab => tab.zoneId === selection.zoneId) ?? []
-  if (!catalog?.zones.some(zone => zone.zoneId === selection.zoneId)) return 'unknown'
-  const matches = originals.flatMap(tab => tabs[tab.tabId]
-    ? Object.values(tabs[tab.tabId]!.regions).filter(surface => surface.kind === 'browser').map(surface => browserMatch(view, surface, defaultProfileId))
+  const scope = catalog && surveyCatalogScope(catalog)
+  if (!scope?.zonesById.has(selection.zoneId)) return 'unknown'
+  const originals = scope.tabsByZone.get(selection.zoneId) ?? []
+  const matches = originals.flatMap(tabId => tabs[tabId]
+    ? Object.values(tabs[tabId]!.regions).filter(surface => surface.kind === 'browser').map(surface => browserMatch(view, surface, defaultProfileId))
     : ['unknown' as const])
   if (matches.includes('match')) return 'match'
   if (matches.includes('unknown')) return 'unknown'
@@ -61,7 +62,7 @@ export function surveyProfileReferences(view: SurveyProfileView, pages: readonly
       return !surface || surface.kind !== 'browser' || surface.browserId !== page.browserId || browserMatch(view, surface, defaultProfileId) !== 'other'
     }),
     zoneIds: new Set(zoneIds.filter(zoneId => {
-      if (!scope.zoneIds.has(zoneId)) return true
+      if (!scope.zonesById.has(zoneId)) return true
       const matches = zoneMatches.get(zoneId) ?? []
       return !matches.length || matches.some(match => match !== 'other')
     }))

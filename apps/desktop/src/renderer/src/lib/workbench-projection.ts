@@ -28,6 +28,33 @@ export const WorkbenchProjectionContext = createContext<(WorkbenchProjection & {
   placementConfirmed?: boolean
 }) | null>(null)
 
+type WorkbenchCatalogMembership = {
+  zonesById: ReadonlyMap<string, AgentMuxSpaceCatalog['zones'][number]>
+  tabsById: ReadonlyMap<string, AgentMuxSpaceCatalog['tabs'][number]>
+  tabsByZone: ReadonlyMap<string, readonly string[]>
+}
+const catalogMemberships = new WeakMap<AgentMuxSpaceCatalog, WorkbenchCatalogMembership>()
+
+/** Shared facts for one immutable Catalog. Layout, page state and selections are read separately. */
+export function workbenchCatalogMembership(catalog: AgentMuxSpaceCatalog): WorkbenchCatalogMembership {
+  const known = catalogMemberships.get(catalog)
+  if (known) return known
+  const zonesById = new Map<string, AgentMuxSpaceCatalog['zones'][number]>()
+  const tabsById = new Map<string, AgentMuxSpaceCatalog['tabs'][number]>()
+  const tabsByZone = new Map<string, string[]>()
+  for (const zone of catalog.zones) if (!zonesById.has(zone.zoneId)) zonesById.set(zone.zoneId, zone)
+  for (const tab of catalog.tabs) {
+    tabsById.set(tab.tabId, tab)
+    if (tab.zoneId === null) continue
+    const members = tabsByZone.get(tab.zoneId)
+    if (members) members.push(tab.tabId)
+    else tabsByZone.set(tab.zoneId, [tab.tabId])
+  }
+  const membership = { zonesById, tabsById, tabsByZone }
+  catalogMemberships.set(catalog, membership)
+  return membership
+}
+
 export function workbenchProjectionMatches(scope: WorkbenchProjection, location: AgentMuxSpaceLocation): boolean {
   return scope.entity.kind === 'zone' ? location.zoneId === scope.entity.zoneId
     : scope.entity.kind === 'tab' ? location.tabId === scope.entity.tabId : location.regionId === scope.entity.regionId
@@ -35,17 +62,18 @@ export function workbenchProjectionMatches(scope: WorkbenchProjection, location:
 export function workbenchProjectionTabIds(scope: WorkbenchProjection): ReadonlySet<string> {
   const entity = scope.entity
   switch (entity.kind) {
-    case 'zone': return new Set(scope.catalog.tabs.filter(tab => tab.zoneId === entity.zoneId).map(tab => tab.tabId))
-    case 'tab': return new Set(scope.catalog.tabs.filter(tab => tab.tabId === entity.tabId).map(tab => tab.tabId))
+    case 'zone': return new Set(workbenchCatalogMembership(scope.catalog).tabsByZone.get(entity.zoneId))
+    case 'tab': return new Set(workbenchCatalogMembership(scope.catalog).tabsById.has(entity.tabId) ? [entity.tabId] : [])
     case 'region': return new Set(scope.catalog.regions.filter(region => region.regionId === entity.regionId).map(region => region.tabId))
   }
 }
 export function workbenchProjectionZone(scope: WorkbenchProjection) {
   const entity = scope.entity
-  if (entity.kind === 'zone') return scope.catalog.zones.find(zone => zone.zoneId === entity.zoneId)
+  const { zonesById } = workbenchCatalogMembership(scope.catalog)
+  if (entity.kind === 'zone') return zonesById.get(entity.zoneId)
   const tabId = entity.kind === 'tab' ? entity.tabId : scope.catalog.regions.find(region => region.regionId === entity.regionId)?.tabId
   const zoneId = scope.catalog.tabs.find(tab => tab.tabId === tabId)?.zoneId
-  return scope.catalog.zones.find(zone => zone.zoneId === zoneId)
+  return zoneId === undefined || zoneId === null ? undefined : zonesById.get(zoneId)
 }
 export function workbenchProjectionTabReference(scope: WorkbenchProjection, groupId: string, tab: WorkbenchTab, regionId?: string): WorkbenchProjectionSelection {
   const held = scope.selection.find(reference => reference.displayWorkspaceId === scope.displayWorkspaceId && reference.groupId === groupId && reference.tabId === tab.id)
@@ -97,13 +125,18 @@ export function projectWorkbenchProjection(layout: WorkspaceLayout | undefined, 
   const issues: string[] = []
   const memberIds = workbenchProjectionTabIds(scope)
   const automaticZoneSelection = scope.entity.kind === 'zone' && scope.selectionMode === undefined
-  const entityKnown = scope.entity.kind === 'zone' ? Boolean(workbenchProjectionZone(scope)) : memberIds.size > 0
+  const zone = scope.entity.kind === 'zone' ? workbenchProjectionZone(scope) : undefined
+  const entityKnown = scope.entity.kind === 'zone' ? Boolean(zone) : memberIds.size > 0
   if (!entityKnown || !layout) return { layout: null, issues: ['The original item or its layout is still restoring. Its exact reference is kept.'], unsupportedTabIds: new Set(), selection: [] }
-  const members = new Map(scope.catalog.tabs.filter(tab => memberIds.has(tab.tabId)).map(tab => [tab.tabId, tab]))
+  const { tabsById } = workbenchCatalogMembership(scope.catalog)
+  const members = new Map<string, AgentMuxSpaceCatalog['tabs'][number]>()
+  for (const id of memberIds) {
+    const tab = tabsById.get(id)
+    if (tab) members.set(id, tab)
+  }
   // Zero authoritative members is an empty Zone; missing loaded content is not.
   if (scope.entity.kind === 'zone' && members.size === 0 && scope.selection.length === 0) {
-    const zone = workbenchProjectionZone(scope)!
-    if (zone.kind === 'unknown') return { layout: null, issues: [zone.issue ?? 'The original Zone resource is still unconfirmed. Its reference is kept.'], unsupportedTabIds: new Set(), selection: [] }
+    if (zone?.kind === 'unknown') return { layout: null, issues: [zone.issue ?? 'The original Zone resource is still unconfirmed. Its reference is kept.'], unsupportedTabIds: new Set(), selection: [] }
     return { layout: createWorkspaceLayout(layout.activeGroupId), issues: [], unsupportedTabIds: new Set(), selection: [] }
   }
   const placements = new Map<string, Set<string>>()
@@ -184,9 +217,10 @@ export function workbenchZoneUnplacedGroupId(zoneId: string): string { return `z
 /** Load a Zone from its resource composition; display aliases never select its content. */
 export function resolveWorkbenchZone(zoneId: string, catalog: AgentMuxSpaceCatalog, layouts: Readonly<Record<string, WorkspaceLayout>>,
   tabs: Readonly<Record<string, WorkbenchTab>>, presentationId: string, preferences: readonly Pick<WorkbenchProjectionSelection, 'tabId' | 'regionId'>[], onSelect: WorkbenchProjection['onSelect']): WorkbenchProjection | null {
-  const zone = catalog.zones.find(zone => zone.zoneId === zoneId)
+  const { zonesById, tabsByZone } = workbenchCatalogMembership(catalog)
+  const zone = zonesById.get(zoneId)
   if (!zone) return null
-  const members = new Set(catalog.tabs.filter(tab => tab.zoneId === zoneId && tabs[tab.tabId]).map(tab => tab.tabId))
+  const members = new Set(tabsByZone.get(zoneId)?.filter(tabId => tabs[tabId]))
   const original = layouts[zone.workspaceId]
   const groups = new Set(original ? groupIds(original.root) : [])
   const placed = new Set(original?.groups.flatMap(group => groups.has(group.id) ? group.tabOrder : []) ?? [])
