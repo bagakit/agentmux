@@ -891,7 +891,7 @@ export class ContinuousProgressLoopManager {
       const previous = this.targetChecks.get(target)
       const run = async () => {
         if (previous) {
-          try { await awaitUntilCancelled(() => previous.catch(() => {}), controller.signal) }
+          try { await awaitUntilCancelled(() => previous, controller.signal) }
           catch { return }
         }
         if (!controller.signal.aborted) await this.runLoop(selected.loopId, checkAt, now, controller)
@@ -899,10 +899,13 @@ export class ContinuousProgressLoopManager {
       // Publish the active check before any provider or persistence callback runs.
       const checking = Promise.resolve().then(run).finally(() => {
         if (this.checks.get(selected.loopId) === checking) this.checks.delete(selected.loopId)
-        if (this.targetChecks.get(target) === checking) this.targetChecks.delete(target)
         if (this.activeDeliveries.get(selected.loopId) === controller) this.activeDeliveries.delete(selected.loopId)
       })
-      this.checks.set(selected.loopId, checking); this.targetChecks.set(target, checking)
+      // A cancelled waiter can finish before its predecessor releases the target.
+      const tail = Promise.allSettled(previous ? [previous, checking] : [checking]).then(() => {
+        if (this.targetChecks.get(target) === tail) this.targetChecks.delete(target)
+      })
+      this.checks.set(selected.loopId, checking); this.targetChecks.set(target, tail)
       return checking
     })
     // An exact target owns its failure; unrelated due objects still finish their work.
