@@ -248,3 +248,17 @@ it('a delayed region capture waits for its countdown and a cancelled countdown c
   await expect(f.owner.capture(false, 'selection', { delaySeconds: 3 })).rejects.toThrow('unavailable in this host')
   expect(countdown).toHaveBeenCalledTimes(2)
 })
+
+it('keeps the original destination receipts when a long-image Copy has an unknown clipboard outcome', async () => {
+  const f = await fixture()
+  f.native.writeClipboardImage.mockRejectedValueOnce(Object.assign(new Error('disconnected'), { code: 'operation_unknown' }))
+  f.edit.mockImplementationOnce(async (_image, _attach, complete) => {
+    await expect(complete(image)).rejects.toThrow('original write remains unknown')
+    await expect(complete(image)).rejects.toThrow('original write remains unknown')
+  })
+  const capture = new ScreenCapture({ ...f, native: () => f.native, sequence: async () => image })
+  const path = await capture.capture(true, 'scroll')
+  expect(path).toBeTruthy()
+  expect(await readFile(path!)).toEqual(bytes)
+  expect(f.native.writeClipboardImage).toHaveBeenCalledTimes(1)
+})

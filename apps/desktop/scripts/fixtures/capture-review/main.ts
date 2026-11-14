@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict'
-import { app, BrowserWindow } from 'electron'
+import { app, BrowserWindow, dialog } from 'electron'
 import { createHash } from 'node:crypto'
 import { mkdir, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { CaptureSequenceOwner } from '../../../src/main/capture-sequence'
 import { ScreenCapture } from '../../../src/main/screen-capture'
+import { inspectGif, writeGifMetadata } from '../../../src/shared/gif-metadata'
 import type { BrowserPng } from '../../../src/shared/contracts'
 const out = process.env.CAPTURE_REVIEW_OUT!
 app.setPath('userData', join(import.meta.dirname, 'user-data'))
@@ -37,7 +38,7 @@ async function run() {
     native: () => ({ captureScreenshot: async () => {
       const image = replacing ? replacement : samples++ === 0 ? initial : next
       return { state: 'captured' as const, screenshot: { format:'png' as const, data:image.dataUrl.split(',')[1]!, width:image.width,height:image.height,scale } }
-    } }), select: async () => { selections++; if (selections === 1) return null; replacing = true; return selection() } })
+    } }), select: async () => { selections++; if (selections === 1) return null; if (selections === 2) return { ...selection(), image: { ...replacement, byteLength: 0 } }; replacing = true; return selection() } })
   let delivered: BrowserPng | undefined
   const capture = new ScreenCapture({home:join(out,'home'),appActive:()=>true,native:()=>({captureScreenshot:async()=>{throw Error('Wrong source')},writeClipboardImage:async()=>{}}),
     present:async session=>{await session.complete(initial,region,'fixture');return {state:'completed'}},sequence:(mode,input)=>owner.edit(mode,{...input,startImmediately:true}),edit:async image=>{delivered=image},reportIssue:error=>{throw error}})
@@ -55,7 +56,7 @@ async function run() {
   assert.equal(await js(window,"document.querySelector('.capture-review__secondary button').classList.contains('primary-button')"),false)
   const expectedHeight = initial.height + 120*scale
   assert.equal(await js(window,"document.querySelector('.capture-review__canvas img').naturalHeight"),expectedHeight)
-  for (const theme of ['dark','light']) for(const size of [[860,650],[440,430]]) {
+  for (const theme of ['dark','light']) for(const size of [[860,650],[440,430]] as const) {
     window.setContentSize(size[0],size[1]); await js(window,`window.setCaptureFixtureTheme('${theme}');new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))`)
     assert.equal(await js(window,"document.documentElement.scrollWidth>innerWidth||document.querySelector('.capture-review__confirm').getBoundingClientRect().bottom>innerHeight"),false,'Confirm is visible without scrolling the window')
     const name=`review-${theme}-${size[0]}.png`;await writeFile(join(out,name),(await window.webContents.capturePage()).toPNG());result.screenshots.push(name)
@@ -69,6 +70,16 @@ async function run() {
   await click(window,'Retake'); await ready(window)
   assert.equal(selections,1);assert.equal(await js(window,"document.querySelector('.capture-review__canvas img').src"),before,'cancelled new selection preserves original result')
   await click(window,'Close review');await until('UI close offers choice',()=>js(window,"!!document.querySelector('[role=alertdialog]')"));await click(window,'Continue review')
+  await click(window,'Retake')
+  await until('failed replacement restores original review', () => js(window, "!!document.querySelector('.capture-sequence__issue')&&!document.querySelector('.capture-review__confirm').disabled"))
+  assert.equal(window.isVisible(), true)
+  assert.equal(await js(window,"document.querySelector('.capture-review__canvas img').src"), before)
+  assert.deepEqual(await js(window,'window.captureSequence.load()'), original)
+  await click(window,'Capture next')
+  await until('original source still accepts a manual frame', () => js(window, 'window.captureSequence.load().then(s=>s.frames.length===3)'))
+  await ready(window)
+  await click(window,'Undo last frame')
+  await ready(window)
   const previousReviewId=window.id
   await click(window,'Retake')
   window=await until('fresh capture window',()=>BrowserWindow.getAllWindows().find(w=>w!==source&&w.id!==previousReviewId&&w.webContents.getURL().includes('screenshot-editor/index.html')))
@@ -84,10 +95,33 @@ async function run() {
   await until('confirmed window closes',()=>window.isDestroyed())
   // The existing public owner returns exactly the artifact confirmed by the same review.
   const actor={actor:{kind:'user' as const,id:'review-fixture'}};const id={hostId:'local',operationId:'review-public'}
-  await owner.call('capture.sequence.open',{...id,mode:'scroll'},actor)
+  const beforeOpen = selections
+  const calls = Array.from({ length: 4 }, () => owner.call('capture.sequence.open', { ...id, mode: 'scroll' }, actor))
+  await Promise.all(calls)
+  assert.equal(selections, beforeOpen + 1, 'simultaneous public opens admit one selector for the original operation')
+  await assert.rejects(owner.call('capture.sequence.open', { ...id, mode: 'scroll' }, { actor: { ...actor.actor, id: 'other' } }), /another actor/)
   window=await until('public review window',()=>BrowserWindow.getAllWindows().find(w=>w!==source&&w.webContents.getURL().includes('screenshot-editor/index.html')));await ready(window);const publicPreview=await js(window,"document.querySelector('.capture-review__canvas img').src");await click(window,'Confirm')
   await until('public complete',async()=>(await owner.call('capture.sequence.inspect',id,actor)).state==='completed')
   const read=await owner.call('capture.sequence.read',id,actor);assert.ok(read.artifact!.data===publicPreview.split(',')[1],'the public owner returns exactly its confirmed preview artifact')
+  const gifId = { hostId: 'local', operationId: 'review-public-gif' }
+  await owner.call('capture.sequence.open', { ...gifId, mode: 'gif' }, actor)
+  const gifWindow = await until('GIF editor', () => BrowserWindow.getAllWindows().find(w => w !== source && w.webContents.getURL().includes('screenshot-editor/index.html')))
+  await until('GIF controls loaded', () => js(gifWindow, "!!document.querySelector('.capture-sequence--gif')"))
+  const plain = Buffer.from('R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==', 'base64')
+  const meta = inspectGif(plain)
+  const annotated = writeGifMetadata(plain, { schema: 'agentmux.gif.v1', width: 1, height: 1, delays: meta.delays, keyframes: [{ frameIndex: 0, note: 'reviewed' }] })
+  let suggested: string | undefined
+  dialog.showSaveDialog = (async (_window, options) => {
+    suggested = options.defaultPath
+    return { canceled: false, filePath: join(out, 'chosen.gif') }
+  }) as typeof dialog.showSaveDialog
+  await js(gifWindow, `window.captureSequence.saveGif(${JSON.stringify(gifId.operationId)},${JSON.stringify([...annotated])})`)
+  assert.match(suggested!, /\.gif$/)
+  await click(gifWindow, 'Close')
+  await until('GIF closed', () => gifWindow.isDestroyed())
+  const saved = await owner.call('capture.sequence.read', gifId, actor)
+  assert.equal(saved.state, 'completed')
+  assert.deepEqual(Buffer.from(saved.artifact!.data, 'base64'), Buffer.from(annotated), 'closing the saved GIF preserves its exact published bytes and notes')
   const discard=owner.edit('scroll',{image:initial,source:region})
   window=await until('discard review',()=>BrowserWindow.getAllWindows().find(w=>w!==source&&w.webContents.getURL().includes('screenshot-editor/index.html')));await ready(window);window.close();await wait(50)
   assert.equal(window.isDestroyed(),false);await click(window,'Discard');assert.equal(await discard,null,'discard is explicit and never delivers an image')
