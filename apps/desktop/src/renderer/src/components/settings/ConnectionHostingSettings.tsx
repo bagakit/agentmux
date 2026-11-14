@@ -15,7 +15,7 @@ import { ExternalConnectionsSettings } from './ExternalConnectionsSettings'
 const HostIcon = semanticIconComponent('object.host')
 
 /** An explicit route on the existing configured Hosts, separate from Agent execution. */
-export function ConnectionHostingSettings(props: { active: boolean; platform: { adapterId: string; title: string }; channel?: 'lark' | 'discord'; onClose?: (() => void) | undefined; navigationRequest?: SettingsNavigationRequest | undefined }) {
+export function ConnectionHostingSettings(props: { active: boolean; platform: { adapterId: string; title: string }; channel?: string; onClose?: (() => void) | undefined; navigationRequest?: SettingsNavigationRequest | undefined }) {
   const channel = props.channel ?? 'lark', hosts = useAppStore(state => state.config?.hosts)
   const intents = useAppStore(state => state.manualConnectionIntents)
   const origin = props.navigationRequest?.channelOrigin ?? props.navigationRequest?.moteLarkOrigin

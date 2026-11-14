@@ -10,7 +10,8 @@
   "exports": {
     ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" },
     "./adapters/feishu": { "types": "./dist/adapters/feishu/index.d.ts", "import": "./dist/adapters/feishu/index.js" },
-    "./adapters/discord": { "types": "./dist/adapters/discord/index.d.ts", "import": "./dist/adapters/discord/index.js" }
+    "./adapters/discord": { "types": "./dist/adapters/discord/index.d.ts", "import": "./dist/adapters/discord/index.js" },
+    "./adapters/telegram": { "types": "./dist/adapters/telegram/index.d.ts", "import": "./dist/adapters/telegram/index.js" }
   },
   "files": ["dist", "README.md"],
   "scripts": { "build": "tsc -p tsconfig.json", "typecheck": "tsc --noEmit -p tsconfig.json", "test": "vitest run" },

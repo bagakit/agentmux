@@ -14,7 +14,7 @@ export type ManualConnectionDraft = {
 }
 /** UI request continuation only. No secret or owner receipt is retained here. */
 export type ManualConnectionIntent = {
-  channel: 'lark' | 'discord'
+  channel: string
   target: ConnectionHostingTarget | null
   draft: ManualConnectionDraft
   /** An empty credentialRef means the original credential operation remains unconfirmed. */
@@ -26,11 +26,11 @@ const record = (value: unknown): value is Record<string, unknown> => !!value && 
 const id = (value: unknown): value is string => typeof value === 'string' && /^[A-Za-z0-9][A-Za-z0-9._:-]*$/u.test(value)
 const text = (value: unknown): value is string => typeof value === 'string' && !/[\0\r\n]/u.test(value)
 const targetId = (value: unknown): value is string => text(value) && !!value.trim()
-export function restoredManualConnectionSelections(value: unknown): Partial<Record<'lark' | 'discord', ConnectionHostingTarget | null>> {
-  const result: Partial<Record<'lark' | 'discord', ConnectionHostingTarget | null>> = {}
+export function restoredManualConnectionSelections(value: unknown): Partial<Record<string, ConnectionHostingTarget | null>> {
+  const result: Partial<Record<string, ConnectionHostingTarget | null>> = {}
   if (!record(value)) return result
-  for (const channel of ['lark','discord'] as const) {
-    const target = value[channel]
+  for (const [channel, target] of Object.entries(value)) {
+    if (!id(channel)) continue
     if (target === null) result[channel] = null
     else if (record(target) && targetId(target.hostId) && targetId(target.runtimeId)) result[channel] = { hostId: target.hostId, runtimeId: target.runtimeId }
   }
@@ -40,7 +40,7 @@ export function restoredManualConnectionIntents(value: unknown): Record<string, 
   const result: Record<string, ManualConnectionIntent> = {}
   if (!record(value)) return result
   for (const [key, raw] of Object.entries(value)) {
-    if (!record(raw) || raw.channel !== 'lark' && raw.channel !== 'discord') continue
+    if (!record(raw) || !id(raw.channel)) continue
     const t = raw.target, d = raw.draft
     if (t !== null && (!record(t) || !targetId(t.hostId) || !targetId(t.runtimeId))) continue
     const target = t === null ? null : { hostId: t.hostId as string, runtimeId: t.runtimeId as string }

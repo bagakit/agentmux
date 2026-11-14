@@ -8,6 +8,8 @@ import { createDiscordMetadataCache } from './adapters/discord/metadata.js'
 import { createFeishuChannelProfiles } from './adapters/feishu/channel-profile.js'
 import { FEISHU_API_DESCRIPTION, validateFeishuApiRequest } from './adapters/feishu/api.js'
 import { DISCORD_API_DESCRIPTION, validateDiscordApiRequest } from './adapters/discord/api.js'
+import { TELEGRAM_PUBLICATION, prepareTelegramPublication, telegramRateLimitScopes } from './adapters/telegram/publication.js'
+import { TELEGRAM_API_DESCRIPTION, validateTelegramApiRequest } from './adapters/telegram/api.js'
 
 /** Built-in leaves stay unloaded until an explicit adapter operation or receiver consumes them. */
 export function createBuiltinConnectionAdapters(): readonly ConnectionAdapter[] {
@@ -135,5 +137,30 @@ export function createBuiltinConnectionAdapters(): readonly ConnectionAdapter[] 
       refreshConversation: async (...input) => (await discord()).channelProfiles.refreshConversation!(...input)
     }
   }
-  return [adapter, discordAdapter]
+  let telegramOwner: import('./adapters/telegram/index.js').TelegramAdapter | undefined
+  let telegramLoading: Promise<import('./adapters/telegram/index.js').TelegramAdapter> | undefined
+  let telegramClosed = false
+  const telegram = () => telegramLoading ??= import('./adapters/telegram/index.js').then(({ TelegramAdapter }) => {
+    telegramOwner = new TelegramAdapter()
+    if (telegramClosed) telegramOwner.close()
+    return telegramOwner
+  }).catch(() => {
+    telegramLoading = undefined
+    throw new AgentMuxError('The connection adapter is unavailable. Existing Agents are retained.', 'CONNECTION_ADAPTER_UNAVAILABLE')
+  })
+  const telegramAdapter: ConnectionAdapter = {
+    adapterId: TELEGRAM_PUBLICATION.adapterId,
+    releaseConnection: id => telegramOwner?.releaseConnection(id),
+    close: () => { telegramClosed = true; telegramOwner?.close() },
+    test: async (...input) => (await telegram()).test(...input),
+    api: { description: TELEGRAM_API_DESCRIPTION, validate: validateTelegramApiRequest, request: async (...input) => (await telegram()).api.request(...input) },
+    profile: { get: async (...input) => (await telegram()).profile.get(...input) },
+    ingress: { adapterId: TELEGRAM_PUBLICATION.adapterId, verify: async (...input) => (await telegram()).verify(...input), qualifyReply: async (...input) => (await telegram()).qualifyReply(...input) },
+    transport: { start: async input => (await telegram()).transport.start(input) },
+    publication: { ...TELEGRAM_PUBLICATION, supportedRenderVersions: [TELEGRAM_PUBLICATION.renderVersion], prepare: prepareTelegramPublication, rateLimitScopes: telegramRateLimitScopes,
+      dispatch: async (...input) => (await telegram()).publication.dispatch(...input) },
+    roomDiscovery: { list: async (...input) => (await telegram()).roomDiscovery.list(...input), search: async (...input) => (await telegram()).roomDiscovery.search(...input),
+      get: async (...input) => (await telegram()).roomDiscovery.get(...input), members: async (...input) => (await telegram()).roomDiscovery.members(...input), createLink: async (...input) => (await telegram()).roomDiscovery.createLink(...input) }
+  }
+  return [adapter, discordAdapter, telegramAdapter]
 }

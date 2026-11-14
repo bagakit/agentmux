@@ -26,6 +26,8 @@ export type VerifiedIngressMessage = {
   replyToMessageId?: string
   /** No text projection exists; retain the complete raw event and refuse only this input. */
   unsupportedContent?: true
+  /** The receiver has not confirmed its native initial stream boundary. This is an admission observation, not an immutable message fact. */
+  sourceBoundaryUnconfirmed?: true
 }
 /** One retained message with its native addressing facts, for owner-private projections. */
 export type IngressApplicationMessage = { sequence: number; record: ConnectionIngressMessage; selection: VerifiedIngressMessage['selection']; replyToMessageId: string | null }
@@ -95,8 +97,14 @@ function verified(value: VerifiedIngressEvent): VerifiedIngressEvent {
   if (value.kind !== undefined || typeof value.body !== 'string' || !['mention', 'reply', 'message'].includes(value.selection)) fail('INVALID_CONNECTION_INGRESS')
   if (value.conversationKind !== undefined && !['direct', 'group'].includes(value.conversationKind)) fail('INVALID_CONNECTION_INGRESS')
   if (value.unsupportedContent !== undefined && value.unsupportedContent !== true) fail('INVALID_CONNECTION_INGRESS')
+  if (value.sourceBoundaryUnconfirmed !== undefined && value.sourceBoundaryUnconfirmed !== true) fail('INVALID_CONNECTION_INGRESS')
   return { eventId: text(value.eventId), messageId: text(value.messageId), externalConversationId: text(value.externalConversationId), actor: parseConnectionActor(value.actor), body: value.body, selection: value.selection, ...(value.conversationKind === undefined ? {} : { conversationKind: value.conversationKind }),
-    ...(value.replyToMessageId === undefined ? {} : { replyToMessageId: text(value.replyToMessageId) }), ...(value.unsupportedContent ? { unsupportedContent: true } : {}) }
+    ...(value.replyToMessageId === undefined ? {} : { replyToMessageId: text(value.replyToMessageId) }), ...(value.unsupportedContent ? { unsupportedContent: true } : {}), ...(value.sourceBoundaryUnconfirmed ? { sourceBoundaryUnconfirmed: true } : {}) }
+}
+function nativeEventFacts(event: VerifiedIngressEvent) {
+  if (event.kind === 'action') return event
+  const { sourceBoundaryUnconfirmed: _observation, ...facts } = event
+  return facts
 }
 
 /** Durable transport admission only. The original Core queue owns all Agent input and delivery facts. */
@@ -213,7 +221,7 @@ export class DurableIngressHost implements ConnectionIngressPort {
       this.assertService(input.connectionId)
       const current = this.options.connections.readConfiguration(input.connectionId)
       if (!current?.config.enabled || current.revision !== connection.revision) fail('INGRESS_CONNECTION_REVISED')
-      const { appId } = current.config.application, domain = connectionApplicationScope(current.config.application), encoded = JSON.stringify(event)
+      const { appId } = current.config.application, domain = connectionApplicationScope(current.config.application), encoded = JSON.stringify(nativeEventFacts(event))
       const originalEvent = this.database.prepare('SELECT ingress_id,event_json,raw_payload FROM connection_ingress_event WHERE domain=? AND app_id=? AND event_id=?').get(domain, appId, event.eventId)
       if (originalEvent) {
         if (String(originalEvent.event_json) !== encoded || event.kind === 'action' && String(originalEvent.raw_payload) !== input.raw) fail('INGRESS_EVENT_CONFLICT')
@@ -230,13 +238,13 @@ export class DurableIngressHost implements ConnectionIngressPort {
       }
       const originalMessage = this.database.prepare('SELECT ingress_id,event_json FROM connection_ingress_message WHERE domain=? AND app_id=? AND message_id=?').get(domain, appId, event.messageId)
       // A platform message may be redelivered under another event, but cannot replace its original body or author.
-      const messageFacts = ({ eventId: _eventId, ...facts }: VerifiedIngressMessage) => facts
+      const messageFacts = ({ eventId: _eventId, sourceBoundaryUnconfirmed: _observation, ...facts }: VerifiedIngressMessage) => facts
       if (originalMessage && !equal(messageFacts(JSON.parse(String(originalMessage.event_json))), messageFacts(event))) fail('INGRESS_MESSAGE_CONFLICT')
       const ingress = originalMessage ? this.read(String(originalMessage.ingress_id))! : parseConnectionIngressRecord({
         ingressId: mintObjectId(), receivedAt: Date.now(), connectionId: input.connectionId, application: current.config.application,
         eventId: event.eventId, externalMessageId: event.messageId, externalConversationId: event.externalConversationId, actor: event.actor, body: event.body, ...(event.conversationKind === undefined ? {} : { conversationKind: event.conversationKind }),
-        ...(event.conversationKind === 'group' ? { group: { target: this.freezeGroup(current.config.application, event.externalConversationId) } } : {}),
-        ...(event.unsupportedContent ? { state: 'refused', code: 'INGRESS_CONTENT_UNSUPPORTED' } : { state: 'received' })
+        ...(event.conversationKind === 'group' ? { group: { target: event.sourceBoundaryUnconfirmed ? null : this.freezeGroup(current.config.application, event.externalConversationId) } } : {}),
+        ...(event.sourceBoundaryUnconfirmed ? { state: 'refused', code: 'INGRESS_SOURCE_BOUNDARY_UNCONFIRMED' } : event.unsupportedContent ? { state: 'refused', code: 'INGRESS_CONTENT_UNSUPPORTED' } : { state: 'received' })
       })
       if (!originalMessage) this.database.prepare('INSERT INTO connection_ingress_message (sequence,ingress_id,domain,app_id,message_id,connection_id,event_json,record_json) VALUES (?,?,?,?,?,?,?,?)').run(this.nextSequence(), ingress.ingressId, domain, appId, event.messageId, input.connectionId, encoded, JSON.stringify(ingress))
       this.database.prepare('INSERT INTO connection_ingress_event (domain,app_id,event_id,ingress_id,event_json,raw_payload) VALUES (?,?,?,?,?,?)').run(domain, appId, event.eventId, ingress.ingressId, encoded, input.raw)

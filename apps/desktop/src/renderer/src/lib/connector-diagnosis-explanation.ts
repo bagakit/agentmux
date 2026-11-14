@@ -35,6 +35,7 @@ export function connectorIntakeExplanation(row: ConnectionDiagnosisIntake): Conn
   if (row.coreObservation === 'unavailable') return { title: 'Original input receipt unreadable', detail: 'This input receipt could not be read. The original received event is kept.' }
   if (row.inputOperationId) return originalInputExplanation(row.coreStatus, row.waiting)
   if (row.state === 'refused') {
+    if (row.code === 'INGRESS_SOURCE_BOUNDARY_UNCONFIRMED') return { title: 'Initial message boundary was not confirmed', detail: 'The original event is kept. It was not sent to the Agent or shared because the receiver had not confirmed its starting point. Later messages can continue independently.' }
     const title = row.code === 'INGRESS_CONTENT_UNSUPPORTED' ? 'This message content is unsupported' : row.code === 'INGRESS_QUESTION_ANSWER_INVALID' ? 'Original question answers did not validate' :
       row.code === 'INGRESS_ACTOR_NOT_AUTHORIZED' ? 'This sender was not authorized when received' : row.code === 'INGRESS_ACTION_UNSUPPORTED' ? 'This group action is unsupported' : 'Original request was refused'
     return { title, detail: 'No Agent input was recorded for this event. ' + (row.code ? 'Its recorded reason is available in the original details.' : missingCause(row.codeRecorded)) }

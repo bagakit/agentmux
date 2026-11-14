@@ -29,6 +29,7 @@ export function connectorGroupDiagnostics(snapshot: CheckedGroupDiagnosis | unde
 
 /** A past refusal describes that one event, never current access or the whole link. */
 function incomingRefusal(code: string | null): { title: string; detail: string; action: ConnectorProblemAction } {
+  if (code === 'INGRESS_SOURCE_BOUNDARY_UNCONFIRMED') return { title: 'Initial message boundary was not confirmed', detail: 'This message was kept outside Agent input and sharing while the receiver established its starting point. Later messages have independent results.', action: { kind: 'incoming', label: 'View message details' } }
   if (code === 'INGRESS_CONTENT_UNSUPPORTED') return { title: 'Message type not supported', detail: 'This message was not sent to the Agent. Try a text message. Other messages and replies can still be delivered.', action: { kind: 'incoming', label: 'View message details' } }
   if (code === 'INGRESS_QUESTION_ANSWER_INVALID') return { title: 'Check the question answers', detail: 'These answers were not sent. Complete each question in the original card before submitting. Other messages and replies are unaffected.', action: { kind: 'incoming', label: 'View event details' } }
   if (code === 'INGRESS_ACTION_UNSUPPORTED') return { title: 'Action not supported', detail: 'This group action was not sent to the Agent. It does not stop ordinary messages or replies.', action: { kind: 'incoming', label: 'View event details' } }
