@@ -11,6 +11,9 @@ The Browser owner holds exact page identities, capabilities and operation receip
 Reuse the Browser already confirmed for this task. Read its actual target/capabilities before
 acting; labels do not establish website state, permission or completion. Keep the original
 page, user input and unknown operation identity; do not bypass refusal or human control.
+Target `ready` describes an operable resource, not page-load completion. Read the optional
+`navigation` observation in targets or `pageInfo()` to distinguish the requested address
+from the native document and its original navigation error; see browser targets help.
 
 [Browser target choice](../shared/browser-target-choice.md "amux:include")
 
