@@ -311,3 +311,30 @@ it('an existing dedicated discussion is retained while a new plan request goes o
   expect(binding()).toEqual(original); expect(fixture.core.start.mock.calls.length).toBe(starts)
   expect((await fixture.host.demands.get('discovery'))!.delegations ?? []).toEqual([])
 })
+
+it('a late planning receipt never republishes an older Goal over a newer owner read', async () => {
+  // An unopened Goal has no delegation read cut. Its real public write/refresh chain
+  // must protect newer facts even without a mounted observer later healing a rollback.
+  await useAppStore.getState().createDemand({ id: 'discovery', title: 'Original Goal', description: originalDescription,
+    supervisorSessionId: fixture.primary.agentSessionId, assigneeSessionIds: [fixture.primary.agentSessionId], sessionIds: [], status: 'in_progress' })
+  await useAppStore.getState().updateDemand('discovery', { alignment: proposal })
+  await nativeState('working')
+  expect(useAppStore.getState().demands.discovery!.delegationReadCut).toBeUndefined()
+  const held = fixture.host.once('demand.discuss', { kind: 'hold-receipt' })
+  const pending = useAppStore.getState().requestDemandPmoTask('discovery', 'plan')
+  await held.committed
+  await fixture.host.demands.update('discovery', { title: 'Newer authoritative Goal' })
+  await act(async () => useAppStore.getState().refreshDemand('discovery'))
+  const current = useAppStore.getState().demands.discovery!
+  expect(current.title).toBe('Newer authoritative Goal'); expect(current.delegationReadCut).toBeUndefined()
+  const published: Array<{ title: string; at: number }> = []
+  const release = useAppStore.subscribe(state => { const goal = state.demands.discovery; if (goal) published.push({ title: goal.title, at: goal.updatedAt }) })
+  try {
+    await act(async () => { held.release(); await pending; await fixture.host.settle() })
+    expect(published.length).toBeGreaterThan(0)
+    expect(published.every(goal => goal.at >= current.updatedAt && goal.title === current.title)).toBe(true)
+    expect((await fixture.host.demands.get('discovery'))!.title).toBe(current.title)
+    expect(fixture.host.executed('demand.discuss')).toHaveLength(1)
+  } finally { release() }
+})
+

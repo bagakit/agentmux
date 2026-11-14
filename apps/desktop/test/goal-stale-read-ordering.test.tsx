@@ -34,3 +34,27 @@ it('keeps a published confirmation when an older public Goal read returns later'
   expect(useAppStore.getState().demands.goal?.alignment?.confirmedAt).toBe(confirmed.alignment!.confirmedAt)
   expect(useAppStore.getState().demands.goal?.updatedAt).toBe(confirmed.updatedAt)
 })
+
+it('a late Goal write receipt never republishes an older Goal over a newer owner read', async () => {
+  await host.demands.create({ id: 'goal', title: 'Original title', status: 'in_progress', sessionIds: [] })
+  await act(async () => useAppStore.getState().refreshDemand('goal'))
+  const held = host.once('demand.update', { kind: 'hold-receipt' })
+  const write = useAppStore.getState().updateDemand('goal', { title: 'First committed title' })
+  await held.committed
+  const newer = await host.demands.update('goal', { title: 'Newer authoritative title' })
+  await act(async () => useAppStore.getState().refreshDemand('goal'))
+  const current = useAppStore.getState().demands.goal!
+  expect(current.title).toBe('Newer authoritative title')
+  expect(current.delegationReadCut).toBeUndefined()
+  const published: Array<{ title: string; at: number }> = []
+  const release = useAppStore.subscribe(state => { const goal = state.demands.goal; if (goal) published.push({ title: goal.title, at: goal.updatedAt }) })
+  try {
+    await act(async () => { held.release(); await write; await host.settle() })
+    expect(published.length).toBeGreaterThan(0)
+    expect(published.every(goal => goal.at >= newer.demand.updatedAt && goal.title === 'Newer authoritative title')).toBe(true)
+    expect(useAppStore.getState().demands.goal?.updatedAt).toBe(newer.demand.updatedAt)
+    expect(host.executed('demand.update')).toHaveLength(1)
+    expect((await host.demands.get('goal'))!.title).toBe('Newer authoritative title')
+  } finally { release() }
+})
+
