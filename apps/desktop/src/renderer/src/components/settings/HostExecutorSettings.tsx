@@ -221,6 +221,12 @@ export function HostExecutorSettings({ config, active, requestedHostId, requeste
             {hook?.error ? <p>{hook.error}</p> : null}
             {hook?.result?.inspection.targets.map(target => <div key={target.path}>
               <code>{target.path}</code>
+              {target.expectedRevision ? <dl className="settings-executor-identity">
+                <div><dt>Observed config revision</dt><dd>{target.observedRevision
+                  ? <code title={target.observedRevision}>{target.observedRevision.slice(0, 12)}</code>
+                  : target.status === 'not_present' ? 'Not present' : 'Unconfirmed'}</dd></div>
+                <div><dt>Expected config revision</dt><dd><code title={target.expectedRevision}>{target.expectedRevision.slice(0, 12)}</code></dd></div>
+              </dl> : null}
               {target.legacyDeclarations ? <p>{target.legacyDeclarations} older {target.legacyDeclarations === 1 ? 'declaration' : 'declarations'}{target.missingLegacyEntrypoints ? ` · ${target.missingLegacyEntrypoints} with a missing executable or runner` : ''}</p> : null}
             </div>)}
             {hook?.result?.inspection.action ? <p>{hook.result.inspection.action}</p> : null}

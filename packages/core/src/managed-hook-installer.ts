@@ -48,6 +48,7 @@ export type AgentManagedHookInspection = {
   code: string
   action: string | null
   targets: Array<{ path: string; status: 'current' | 'not_present' | 'partial' | 'error'; code?: string;
+    expectedRevision?: string; observedRevision?: string;
     legacyDeclarations?: number; missingLegacyEntrypoints?: number }>
 }
 
@@ -257,6 +258,7 @@ export class AgentManagedHookInstaller {
     try {
       validatePlan(plan)
       for (const mutation of plan.mutations) {
+        const expectedRevision = hash(mutation.content)
         try {
           const target = await readManagedHookTarget(mutation.path)
           const content = target ? new TextDecoder('utf-8', { ignoreBOM: true }).decode(target.content) : undefined
@@ -275,11 +277,13 @@ export class AgentManagedHookInstaller {
             if (await isMissing(executable) || await isMissing(runner)) missingLegacyEntrypoints++
           }
           const legacyDeclarations = legacy.length
-          targets.push({ path: mutation.path, status: legacyDeclarations ? 'partial' : facts.current ? 'current' : facts.present ? 'partial' : 'not_present',
+          targets.push({ path: mutation.path, expectedRevision,
+            status: legacyDeclarations ? 'partial' : facts.current ? 'current' : facts.present ? 'partial' : 'not_present',
+            ...(facts.current ? { observedRevision: expectedRevision } : {}),
             ...(legacyDeclarations ? { legacyDeclarations, code: 'MANAGED_HOOK_LEGACY_CARRIER' } : {}),
             ...(missingLegacyEntrypoints ? { missingLegacyEntrypoints } : {}) })
         } catch (error) {
-          targets.push({ path: mutation.path, status: 'error', code: inspectionErrorCode(error) })
+          targets.push({ path: mutation.path, expectedRevision, status: 'error', code: inspectionErrorCode(error) })
         }
       }
     } catch (error) {
