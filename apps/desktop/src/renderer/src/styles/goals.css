@@ -144,8 +144,6 @@
 .goals-row--compact .goals-row__copy > strong { font-size: var(--fs-body); -webkit-line-clamp: 2; }
 .goals-row--compact .goals-row__next { font-size: var(--fs-meta); }
 .goals-empty { margin: 0; padding: var(--sp-6) var(--sp-6); color: var(--text-3); font-size: var(--fs-body); }
-.goals-empty > strong { display: block; color: var(--text-2); font-size: var(--fs-prose); font-weight: 550; }
-.goals-empty > p { margin: var(--sp-3) 0 var(--sp-5); line-height: 1.6; text-wrap: pretty; }
 .goals-empty__start { display: flex; align-items: center; gap: var(--sp-6); max-width: 640px; padding: var(--sp-5) 0; }
 .goals-empty__start img { flex: none; width: 168px; height: auto; aspect-ratio: 3 / 2; object-fit: contain; pointer-events: none; }
 .goals-empty__start strong { display: block; color: var(--text); font: 600 var(--fs-title)/1.4 var(--font-sans); }

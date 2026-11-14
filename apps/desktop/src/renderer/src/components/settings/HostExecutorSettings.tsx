@@ -61,7 +61,10 @@ export function HostExecutorSettings({ config, active, requestedHostId }: { conf
   const acceptedHost = accepted && accepted.receipt.routeHostId === hostId && configValuesEqual(registrationTarget(accepted.host), registrationTarget(host))
   const acceptedTarget = acceptedHost && accepted.receipt.executor.executorId === executorId
   // This panel always reads the Core registry, including on the receiving local Host.
-  const descriptors = hostExecutorInventoryMatches(inventory, host) ? inventory.result?.executors ?? [] : []
+  const observed = hostExecutorInventoryMatches(inventory, host) ? inventory : undefined
+  const descriptors = observed?.result?.executors ?? []
+  const queryText = query.toLowerCase()
+  const visibleDescriptors = descriptors.filter(item => `${item.label} ${item.executorId} ${item.command}`.toLowerCase().includes(queryText))
   const selectedExecutor = descriptors.find(item => item.executorId === selected)
   const checking = inventory?.state === 'checking'
   useEffect(() => {
@@ -135,7 +138,7 @@ export function HostExecutorSettings({ config, active, requestedHostId }: { conf
       </div>
     </section> : <div className="settings-resource-split">
       <SettingsResourceLibrary label="Host Executors" selectedId={selected} query={query} onQuery={setQuery} onSelect={setSelected} focusRequest={null}
-        items={descriptors.filter(item => `${item.label} ${item.executorId} ${item.command}`.toLowerCase().includes(query.toLowerCase())).map(item => ({ id: item.executorId, name: item.label,
+        items={visibleDescriptors.length === 0 && observed?.state !== 'ready' ? null : visibleDescriptors.map(item => ({ id: item.executorId, name: item.label,
           detail: `${agentProviderLabel(item.providerId)} · ${item.executorId}`,
           mark: <AgentAvatar executorId={item.executorId} providerId={item.providerId} label={item.label} size={22} />,
           status: <span>{inventory?.state === 'error' ? 'Check failed' : item.availability === 'available' ? 'Available' : item.availability === 'missing' ? missingExecutableLabel(item.cause) : item.availability === 'check-failed' ? 'Check failed' : 'Not checked'}</span>

@@ -1,3 +1,4 @@
+import { SurfaceState } from '../SurfaceState'
 import { useEffect, useRef, useState } from 'react'
 import { mintObjectId } from '@agentmux/core/object-id'
 import { presentError } from '@agentmux/client-ui/error-presentation'
@@ -10,7 +11,8 @@ import { browserProfiles } from '../../lib/browser-profiles'
 export function BrowserProfileTrash({ active, folders, onBack, onRestored }: {
   active: boolean; folders: readonly BrowserProfileFolder[]; onBack(): void; onRestored(id: string, label: string): void
 }) {
-  const [list, setList] = useState<BrowserProfileTrashList | null>(null)
+  const [archive, setArchive] = useState<{ status: 'reading' | 'ready' | 'failed'; list: BrowserProfileTrashList | null }>({ status: 'reading', list: null })
+  const { list } = archive
   const [error, setError] = useState<{ source: 'read' | 'restore' | 'purge'; message: string } | null>(null)
   const [busy, setBusy] = useState<Record<string, boolean>>({})
   const [confirm, setConfirm] = useState<{ entry: BrowserProfileTrashList['entries'][number]; purgeId: string; deleteAfter?: number; uncertain?: string } | null>(null)
@@ -26,8 +28,19 @@ export function BrowserProfileTrash({ active, folders, onBack, onRestored }: {
     let current = true, sequence = 0
     const read = async () => {
       const attempt = ++sequence
-      try { const result = await api.browser.readProfileTrash(); if (current && attempt === sequence) { setList(result); setError(previous => previous?.source === 'read' ? null : previous) } }
-      catch (cause) { if (current && attempt === sequence) setError(previous => previous?.source !== 'read' && previous ? previous : { source: 'read', message: presentError(cause) }) }
+      setArchive(previous => ({ ...previous, status: 'reading' }))
+      try {
+        const result = await api.browser.readProfileTrash()
+        if (current && attempt === sequence) {
+          setArchive({ status: 'ready', list: result })
+          setError(previous => previous?.source === 'read' ? null : previous)
+        }
+      } catch (cause) {
+        if (current && attempt === sequence) {
+          setArchive(previous => ({ ...previous, status: 'failed' }))
+          setError(previous => previous?.source !== 'read' && previous ? previous : { source: 'read', message: presentError(cause) })
+        }
+      }
     }
     void read()
     const release = api.browser.onProfilesChanged(() => { void read() })
@@ -89,8 +102,8 @@ export function BrowserProfileTrash({ active, folders, onBack, onRestored }: {
     <header><Button type="button" onClick={onBack}>All Profiles</Button><h3>Recycled Profiles</h3></header>
     <p>Original sign-ins, site data and saved settings stay with each Profile. Restore brings back the same identity. Recycling does not free disk space or create a separate backup.</p>
     {error && !(error.source === 'purge' && confirm?.uncertain) ? <p className="browser-profiles-settings__service" role="status">Couldn’t confirm this action. {error.message} <button type="button" disabled={false} onClick={() => { setError(null); setRetry(value => value + 1) }}>Retry</button></p> : null}
-    {!list ? <p role="status">{error ? 'The last confirmed data is kept.' : 'Reading recycled Profiles…'}</p> : null}
-    {list?.entries.length === 0 ? <p>No recycled Profiles.</p> : null}
+    {!list?.entries.length && archive.status !== 'ready' ? <p role="status">{archive.status === 'failed' ? 'The last confirmed data is kept.' : 'Reading recycled Profiles…'}</p> : null}
+    {archive.status === 'ready' && list?.entries.length === 0 ? <SurfaceState layout="inline" title="No recycled Profiles." /> : null}
     {completed ? <aside className="browser-profiles-settings__service" role="status"><strong>Profile data and saved settings removed</strong><p>Credential cleanup: {completed.credentialCleanup ?? 'unknown'}. Site permission cleanup: {completed.permissionCleanup ?? 'unknown'}.</p><small>Action {completed.purgeId}</small>{completed.warning ? <p>{completed.warning}</p> : null}</aside> : null}
     {list?.entries.map(entry => <article className="browser-profile-trash__entry" key={entry.id}>
       <div><h4>{entry.profile.label}</h4><p>Recycled <time dateTime={new Date(entry.archivedAt).toISOString()}>{new Date(entry.archivedAt).toLocaleString()}</time></p><small>Profile {entry.profile.id}</small></div>

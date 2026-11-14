@@ -11,6 +11,7 @@ import { useAppStore } from '../store'
 import { GoalResponsibilitySummary } from './GoalResponsibilitySummary'
 import { GoalPlanRing } from './GoalPlanGraph'
 import { GoalAgentGroup } from './GoalAgentGroup'
+import { SurfaceState } from './SurfaceState'
 import goalsArtUrl from '@agentmux/client-ui/brand/illustrations/concepts/goals-companions.png'
 
 const ThemeStatusSelectedIcon = semanticIconComponent('status.selected')
@@ -70,8 +71,16 @@ export function GoalsCollectionBody({ view, groups, columns, visibleStatuses, ha
 }) {
   const occupied = visibleStatuses.filter(status => columns[status].length > 0)
   const empty = visibleStatuses.filter(status => columns[status].length === 0)
-  return !hasMatches ? <div className="goals-empty">{hasGoals ? <><strong>No goals match this view.</strong><p>{query.trim() ? `No match for “${query.trim()}”${filterCount ? ' with the current filters' : ''}.` : 'The current filters hide these goals.'}</p>{query.trim() || filterCount ? <Button type="button" onClick={onClearConditions}>Clear search & filters</Button> : <Button type="button" onClick={onShowFinished}>Show finished</Button>}</> : hideStart ? null : <div className="goals-empty__start"><img src={goalsArtUrl} alt="" aria-hidden="true" draggable={false} onError={event => { event.currentTarget.hidden = true }} /><div><strong>No goals yet</strong><p>Start from a common action above, or create a goal and shape it with the agent in its own discussion.</p></div></div>}</div>
-    : view === 'list' ? <div className="goals-list">{groups.map(group => <section key={group.stage} className="goals-group" data-goal-group={group.stage} aria-labelledby={`goals-group-${group.stage}`}><h2 id={`goals-group-${group.stage}`} className="goals-group__heading"><GoalStageMark stage={group.stage} size={11} /><span>{GOAL_GROUP_LABELS[group.stage]}</span><span className="goals-group__count">{group.goals.length}</span></h2>{group.goals.map(renderRow)}</section>)}</div>
+  if (!hasMatches) {
+    if (hasGoals) return <SurfaceState layout="inline" className="goals-empty" title="No goals match this view."
+      description={query.trim() ? `No match for “${query.trim()}”${filterCount ? ' with the current filters' : ''}.` : 'The current filters hide these goals.'}
+      actions={query.trim() || filterCount ? <Button type="button" onClick={onClearConditions}>Clear search & filters</Button> : <Button type="button" onClick={onShowFinished}>Show finished</Button>} />
+    return <div className="goals-empty">{hideStart ? null : <div className="goals-empty__start">
+      <img src={goalsArtUrl} alt="" aria-hidden="true" draggable={false} onError={event => { event.currentTarget.hidden = true }} />
+      <div><strong>No goals yet</strong><p>Start from a common action above, or create a goal and shape it with the agent in its own discussion.</p></div>
+    </div>}</div>
+  }
+  return view === 'list' ? <div className="goals-list">{groups.map(group => <section key={group.stage} className="goals-group" data-goal-group={group.stage} aria-labelledby={`goals-group-${group.stage}`}><h2 id={`goals-group-${group.stage}`} className="goals-group__heading"><GoalStageMark stage={group.stage} size={11} /><span>{GOAL_GROUP_LABELS[group.stage]}</span><span className="goals-group__count">{group.goals.length}</span></h2>{group.goals.map(renderRow)}</section>)}</div>
       : <div className="goals-board" aria-label="Goals by work status">
         {empty.length ? <div className="goals-board__empty-states" aria-label="Empty work statuses"><span>Empty</span>{empty.map(status => <span key={status} data-empty-status={status}>{DEMAND_STATUS_LABELS[status]} <strong>0</strong></span>)}</div> : null}
         <div className="goals-board__lanes">{occupied.map(status => <section className="goals-board-column" key={status} data-status={status} aria-label={`${DEMAND_STATUS_LABELS[status]} goals`}>

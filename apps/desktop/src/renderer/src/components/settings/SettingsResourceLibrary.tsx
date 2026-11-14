@@ -1,4 +1,5 @@
 import { SearchInput } from '@agentmux/client-ui/input'
+import { SurfaceState } from '../SurfaceState'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 
@@ -8,11 +9,12 @@ const ScrollForwardIcon = semanticIconComponent('navigation.disclosure')
 
 
 type ResourceRow = { id: string; name: string; detail: string; mark: ReactNode; status?: ReactNode }
+const NO_ROWS: ResourceRow[] = []
 
 /** A compact selector only. Drafts and resource operations stay in the owning pane. */
-export function SettingsResourceLibrary({ label, items, selectedId, onSelect, query = '', onQuery, focusRequest, layout = 'list', followFocus = false, selection }: {
+export function SettingsResourceLibrary({ label, items: projection, selectedId, onSelect, query = '', onQuery, focusRequest, layout = 'list', followFocus = false, selection }: {
   label: string
-  items: ResourceRow[]
+  items: ResourceRow[] | null
   selectedId: string | null
   onSelect: (id: string) => void
   query?: string
@@ -24,6 +26,7 @@ export function SettingsResourceLibrary({ label, items, selectedId, onSelect, qu
   /** In explicit selection mode row activation toggles exact IDs and keeps the editor target. */
   selection?: { ids: ReadonlySet<string>; onToggle: (id: string) => void }
 }) {
+  const items = projection ?? NO_ROWS
   const list = useRef<HTMLDivElement>(null)
   const search = useRef<HTMLInputElement>(null)
   const [focusedId, setFocusedId] = useState(selectedId)
@@ -95,8 +98,9 @@ export function SettingsResourceLibrary({ label, items, selectedId, onSelect, qu
           <span className="settings-resource-row__text"><strong>{item.name}</strong><small>{item.detail}</small></span>
           <span className="settings-resource-row__status">{item.status}{(selection ? selection.ids.has(item.id) : selectedId === item.id) ? <ThemeStatusSelectedIcon size={13} aria-hidden="true" /> : null}</span>
         </button>)}
-        {items.length === 0 ? <p className="settings-resource-empty" role="status">{query.trim() ? `No ${label.toLowerCase()} match “${query}”.` : `No ${label.toLowerCase()} yet.`}</p> : null}
       </div>
+      {projection?.length === 0 ? <SurfaceState layout="inline" className="settings-resource-empty" role="status"
+        title={query.trim() ? `No ${label.toLowerCase()} match “${query}”.` : `No ${label.toLowerCase()} yet.`} /> : null}
       {scrollable ? <button type="button" className="icon-button settings-resource-scroll" aria-label={`More ${label.toLowerCase()}`} disabled={!overflow.next} onClick={() => scrollPage(1)}><ScrollForwardIcon size={13} /></button> : null}
       </div>
     </aside>
