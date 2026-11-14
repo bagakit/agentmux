@@ -141,12 +141,17 @@ export type AgentProviderPromptExecutionContext = {
 /** Initialization diagnostics narrow only saved startup delivery. They never grant input. */
 export type AgentProviderInputInitialization = {
   state: 'pending' | 'unknown'
-  reason: 'directory-trust' | 'authentication' | 'native-input-unconfirmed' | 'inspection-unavailable'
+  reason: 'directory-trust' | 'authentication' | 'onboarding' | 'permission' | 'hook-trust' | 'upgrade' | 'native-input-unconfirmed' | 'inspection-unavailable'
+  source: 'native-protocol' | 'native-configuration' | 'unavailable'
+  /** A configuration prerequisite never claims a live native request. */
+  scope: 'prerequisite' | 'request' | 'unknown'
 }
 export type AgentProviderInputInitializationContext = AgentProviderPromptExecutionContext & {
   agentSessionId: string
   run: Readonly<import('./types.js').AgentMuxRunRef>
   purpose: 'initial-input' | 'resumed-input' | 'conversation-start'
+  /** Environment observed on this exact original Run process, never current Host defaults. */
+  env: Readonly<Record<string, string | undefined>>
 }
 
 /** Read-only native body acknowledgement; it does not observe terminal presentation. */

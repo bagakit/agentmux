@@ -27,24 +27,24 @@ function inspectionArgs(original: readonly string[]): readonly string[] | undefi
 export async function readGrokInputInitialization(context: AgentProviderInputInitializationContext): Promise<AgentProviderInputInitialization> {
   const args = inspectionArgs(context.args)
   const home = process.platform === 'win32' ? 'USERPROFILE' : 'HOME'
-  // Historical overrides are not an effective environment snapshot. Never fill
-  // missing native roots from the observing Core after restart/reconfiguration.
-  if (!context.command || !isAbsolute(context.command) || context.processId === undefined || !args ||
-      !context.env?.[home] || !context.env.GROK_HOME) return { state: 'unknown', reason: 'inspection-unavailable' }
+  // Core supplies the original process environment. An unset optional root belongs
+  // to the native CLI; never fill it from the observing Host after reconfiguration.
+  if (!context.command || !isAbsolute(context.command) && !context.command.includes('/') && !context.env?.PATH || context.processId === undefined || !args ||
+      !context.env?.[home]) return { state: 'unknown', reason: 'inspection-unavailable', source: 'unavailable', scope: 'unknown' }
   try {
     const env = Object.fromEntries(Object.entries(context.env).filter((entry): entry is [string, string] => entry[1] !== undefined))
     const { stdout } = await execute(context.command, [...args, 'inspect', '--json'], {
       cwd: context.workspacePath, env, ...(context.signal ? { signal: context.signal } : {}), maxBuffer: 1024 * 1024
     })
     const value: unknown = JSON.parse(stdout)
-    if (!value || typeof value !== 'object' || Array.isArray(value)) return { state: 'unknown', reason: 'inspection-unavailable' }
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return { state: 'unknown', reason: 'inspection-unavailable', source: 'unavailable', scope: 'unknown' }
     const observed = value as Record<string, unknown>
     if (typeof observed.cwd !== 'string' || typeof observed.projectTrusted !== 'boolean' ||
-        observed.cwd !== context.workspacePath && await realpath(observed.cwd) !== await realpath(context.workspacePath)) return { state: 'unknown', reason: 'inspection-unavailable' }
-    return observed.projectTrusted === false ? { state: 'pending', reason: 'directory-trust' }
-      : { state: 'unknown', reason: 'native-input-unconfirmed' }
+        observed.cwd !== context.workspacePath && await realpath(observed.cwd) !== await realpath(context.workspacePath)) return { state: 'unknown', reason: 'inspection-unavailable', source: 'unavailable', scope: 'unknown' }
+    return observed.projectTrusted === false ? { state: 'pending', reason: 'directory-trust', source: 'native-protocol', scope: 'prerequisite' }
+      : { state: 'unknown', reason: 'native-input-unconfirmed', source: 'unavailable', scope: 'unknown' }
   } catch {
     context.signal?.throwIfAborted()
-    return { state: 'unknown', reason: 'inspection-unavailable' }
+    return { state: 'unknown', reason: 'inspection-unavailable', source: 'unavailable', scope: 'unknown' }
   }
 }

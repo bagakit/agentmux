@@ -43,6 +43,7 @@ export async function runCodexManaged(plan: CodexManagedRunPlan): Promise<number
   let initializationPending: Promise<void> | undefined, nativeRequested = false, nativeSessionId: string | undefined
   let nativeRuntimeSessionId: string | undefined, initialFrontendPending: Promise<void> | undefined
   let initialFrontendDispatched = false, initialFrontendWake = false
+  let initializationBlocker: AgentTerminalInitialization['blocker']
   let initializationStep: NonNullable<AgentTerminalInitialization['failure']>['step'] = 'connection'
   // Preserve the complete preparation diagnostic stream on this original Run, with backpressure.
   // Exact known credentials are masked even when the native process splits their bytes.
@@ -180,6 +181,7 @@ export async function runCodexManaged(plan: CodexManagedRunPlan): Promise<number
       if (nativeRequested || !live()) return Promise.resolve()
       const pending = (async () => {
         try {
+          initializationBlocker = undefined
           initializationStep = 'connection'
           setInitialization({ lifecycleOperationId, phase: 'preparing', native: { state: plan.resume ? 'unknown' : 'not-created' } })
           const address = await locateEndpoint()
@@ -189,6 +191,8 @@ export async function runCodexManaged(plan: CodexManagedRunPlan): Promise<number
           // Read-only preflight may be retried before any native creation request exists.
           initializationStep = 'preflight'
           const account = await nativeConnection.request('account/read', { refreshToken: false }, { retainPending: true })
+          if (account?.requiresOpenaiAuth === true && account.account === null) initializationBlocker = {
+            state: 'pending', reason: 'authentication', source: 'native-protocol', scope: 'prerequisite' }
           if (typeof account?.requiresOpenaiAuth !== 'boolean' || account.requiresOpenaiAuth && !account.account) {
             throw new ManagedNativeLaunchError('The native account preflight did not confirm its required authentication.')
           }
@@ -231,7 +235,7 @@ export async function runCodexManaged(plan: CodexManagedRunPlan): Promise<number
           if (!nativeRequested) { nativeConnection?.dispose(); nativeConnection = undefined }
           setInitialization({ lifecycleOperationId, phase: nativeSessionId ? 'ready' : nativeRequested ? 'unknown' : 'failed',
             native: nativeSessionId ? { state: 'confirmed', sessionId: nativeSessionId } : { state: nativeRequested || plan.resume ? 'unknown' : 'not-created' },
-            failure: failure(error) })
+            failure: failure(error), ...(initializationBlocker ? { blocker: initializationBlocker } : {}) })
         }
       })()
       initializationPending = pending

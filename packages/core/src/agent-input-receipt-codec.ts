@@ -1,3 +1,4 @@
+import { parseInputInitialization } from './agent-initialization.js'
 import { parseAgentInputHandoff } from './agent-input-handoff.js'
 import { AgentMuxError } from './errors.js'
 import { dequal } from 'dequal'
@@ -34,7 +35,7 @@ export function parseAgentInputSubmissionReceipt(value: unknown): AgentInputSubm
   }
   if (control.retry !== undefined && validateAgentInputRetry(key, control.retry).previousWaitGeneration >= ref.waitGeneration) wireFail()
   if (control.waiting !== undefined) {
-    const waiting = wireRecord(control.waiting, ['phase', 'reason', 'wake', 'failure', 'mechanism', 'observation'])
+    const waiting = wireRecord(control.waiting, ['phase', 'reason', 'wake', 'failure', 'mechanism', 'observation', 'initialization'])
     if (waiting.phase === 'runtime') { if (waiting.reason !== 'runtime-unavailable' || waiting.wake !== 'runtime-restored') wireFail() }
     else if (waiting.phase === 'session') { if (!['session-resume-needed', 'native-session-starting'].includes(String(waiting.reason)) || waiting.wake !== 'session-restored' ||
       waiting.reason === 'native-session-starting' && waiting.failure !== undefined) wireFail() }
@@ -43,6 +44,10 @@ export function parseAgentInputSubmissionReceipt(value: unknown): AgentInputSubm
     else if (waiting.phase === 'input-environment') { if (!['original-input-unconfirmed', 'original-target-changed'].includes(String(waiting.reason)) || waiting.wake !== 'explicit-rejoin' || waiting.failure === undefined) wireFail() }
     else if (waiting.phase === 'service') { if (waiting.reason !== 'observation-failed' || !['explicit-rejoin', 'session-restored'].includes(String(waiting.wake)) || waiting.failure === undefined) wireFail() }
     else { if (waiting.phase !== 'native-environment' || !['original-environment-unconfirmed', 'original-target-changed'].includes(String(waiting.reason)) || waiting.wake !== 'explicit-rejoin') wireFail() }
+    if (waiting.initialization !== undefined) {
+      if (waiting.reason !== 'native-session-starting' && waiting.phase !== 'service') wireFail()
+      parseInputInitialization(waiting.initialization)
+    }
     if (waiting.failure !== undefined) parseDeliveryFailure(waiting.failure)
     if (waiting.mechanism !== undefined) wireMember(waiting.mechanism, ['unconfirmed', 'unavailable'])
     if (waiting.observation !== undefined) {

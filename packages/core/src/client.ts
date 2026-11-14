@@ -1,3 +1,4 @@
+import { parseInputInitialization } from './agent-initialization.js'
 import { invalidateSubagentSource, agentHasActiveSubagents, agentSubagentActivityUnconfirmed, subagentScopeMatches } from './agent-subagent-state.js'
 import { NativeCreationAdmission } from './native-creation-admission.js'
 import { parseTerminalCreationRetire, parseTerminalCreationInspect, type TerminalCreationInspect, type TerminalCreationInspection } from './terminal-creation.js'
@@ -7360,7 +7361,6 @@ export class AgentMuxClient {
   private nativeSessionStarting(session: AgentMuxAgentSession, intent: AgentInputJournalIntent['admissionIntent']): boolean {
     if (intent.kind === 'manual-actor' || intent.kind === 'native-conversation') return false
     const provider = this.providers.get(session.providerId)
-    if (provider.prepareNativeInput && session.nativeHandle?.kind === 'provider') return false
     const frontend = this.terminalFrontendWatches.get(session.agentSessionId)?.frontend
     if (frontend && sameRun(frontend.run, session.run) && frontend.initialization?.phase === 'ready') return false
     // A later failed history observation cannot revoke this Run's confirmed start.
@@ -7383,9 +7383,9 @@ export class AgentMuxClient {
     signal?: AbortSignal): Promise<import('./agent-input-wait.js').AgentInputWaitReason | null> {
     if (!this.nativeSessionStarting(session, intent)) return null
     const provider = this.providers.get(session.providerId)
-    if (!provider.readInputInitialization) return { phase: 'session', reason: 'native-session-starting', wake: 'session-restored' }
     const diagnostic = new AbortController()
-    const observationSignal = signal ? AbortSignal.any([signal, diagnostic.signal]) : diagnostic.signal
+    const timeout = AbortSignal.timeout(5_000)
+    const observationSignal = AbortSignal.any([diagnostic.signal, timeout, ...(signal ? [signal] : [])])
     const unsubscribe = this.publisher.onSessionEvent(session.agentSessionId, event => {
       if (event.type === 'agent-session' && (!sameRun(event.session.run, session.run) ||
           !this.nativeSessionStarting(event.session, intent))) diagnostic.abort(new AgentMuxError(
@@ -7394,15 +7394,21 @@ export class AgentMuxClient {
     let observed: import('./agent-provider.js').AgentProviderInputInitialization
     try {
       observed = await observePromptInput(observationSignal, async () => {
-        const native = await this.providerNativeContext(session, run, true)
+        const frontend = this.terminalFrontendWatches.get(session.agentSessionId)?.frontend
+        if (frontend?.run.runId === session.run.runId && frontend.initialization?.blocker) return structuredClone(frontend.initialization.blocker)
+        if (!provider.readInputInitialization) return { state: 'unknown' as const, reason: 'native-input-unconfirmed' as const, source: 'unavailable' as const, scope: 'unknown' as const }
+        const native = { ...this.providerLaunch(session, run), workspacePath: session.workspacePath,
+          ...(session.nativeHandle ? { nativeHandle: session.nativeHandle } : {}) }
+        const env = await this.kernel.readRunEnvironment(run.runId, observationSignal)
+        if (!env) throw new AgentMuxError('The original process environment is unconfirmed.', 'AGENT_INITIALIZATION_ENVIRONMENT_UNCONFIRMED')
         observationSignal.throwIfAborted()
-        return await provider.readInputInitialization!({ ...native, workspacePath: session.workspacePath,
+        return await provider.readInputInitialization!({ ...native, env, workspacePath: session.workspacePath,
           agentSessionId: session.agentSessionId, run: { ...session.run }, purpose, ...(run.pid === null ? {} : { processId: run.pid }),
           ...(session.nativeHandle ? { nativeHandle: session.nativeHandle } : {}), signal: observationSignal })
       })
     } catch {
       signal?.throwIfAborted()
-      observed = { state: 'unknown', reason: 'inspection-unavailable' }
+      observed = { state: 'unknown', reason: 'inspection-unavailable', source: 'unavailable', scope: 'unknown' }
     } finally { unsubscribe() }
     signal?.throwIfAborted()
     const current = await this.registry.refresh(session.agentSessionId, session.run), live = await this.kernel.status(run.runId)
@@ -7410,12 +7416,16 @@ export class AgentMuxClient {
     if (!sameRun(current.run, session.run) || live.pid !== run.pid || live.state.type !== 'running') throw new AgentMuxError(
       'The original initialization Run changed. Its saved input and operation are retained.', 'STALE_AGENT_SESSION')
     if (!this.nativeSessionStarting(current, intent)) return null
-    // This is the existing durable wait/inspection surface, not another readiness store.
+    // This diagnosis belongs to the original wait; it cannot grant input readiness.
+    const initialization = parseInputInitialization({ ...observed, providerId: session.providerId, run: { ...session.run }, purpose, observedAt: Date.now(),
+      ...(session.nativeHandle?.kind === 'provider' ? { nativeSessionId: session.nativeHandle.sessionId } : {}) })
+    if (observed.state === 'pending' || observed.reason === 'native-input-unconfirmed') return { phase: 'session', reason: 'native-session-starting',
+      wake: 'session-restored', initialization }
     const failure = deliveryFailure(new AgentMuxError(
       `The original native initialization is ${observed.state} (${observed.reason}). Keep this input and operation. Handle any required trust or login in the original terminal; this original input rechecks when native start is confirmed. Ordinary terminal input remains available.`,
       'AGENT_INITIAL_INPUT_UNCONFIRMED'))
     return { phase: 'service', reason: 'observation-failed', wake: 'session-restored', failure,
-      observation: { phase: 'native-initialization' } }
+      observation: { phase: 'native-initialization' }, initialization }
   }
 
   private activateHookBinding(runId: string, binding: AgentHookBinding): void {
@@ -10949,7 +10959,7 @@ export class AgentMuxClient {
       : { command: invocation.program ?? this.providers.get(session.providerId).executable, args: invocation.args }
   }
 
-  private async providerNativeContext(session: AgentMuxAgentSession, run: CtxmuxAdapterRun, requireOriginalSource = false): Promise<AgentProviderPromptExecutionContext> {
+  private async providerNativeContext(session: AgentMuxAgentSession, run: CtxmuxAdapterRun): Promise<AgentProviderPromptExecutionContext> {
     const stored = await this.store.readMetadata(session.agentSessionId)
     if (!stored || !sameRun(stored.run, session.run)) throw new AgentMuxError('Original initialization source changed.', 'STALE_AGENT_SESSION')
     let env: Readonly<Record<string, string | undefined>> | undefined
@@ -10966,8 +10976,8 @@ export class AgentMuxClient {
         env = original.config.env
       } else if (stored.creation?.executorInvocationDigest) {
         env = (await this.sessionExecutorOptions<AgentSessionHistoryPageOptions>(stored, {}, stored.agentSessionId)).env
-      } else if (requireOriginalSource) throw new AgentMuxError('Original creation environment is unconfirmed.', 'AGENT_CONTINUITY_EXECUTOR_UNCONFIRMED')
-    } else if (requireOriginalSource) throw new AgentMuxError('Original resume environment is unconfirmed.', 'AGENT_CONTINUITY_EXECUTOR_UNCONFIRMED')
+      }
+    }
     return { ...this.providerLaunch(session, run), ...(env ? { env } : {}), workspacePath: session.workspacePath,
       ...(session.hostId === 'local' && run.pid !== null ? { processId: run.pid } : {}),
       ...(session.nativeHandle ? { nativeHandle: session.nativeHandle } : {}),

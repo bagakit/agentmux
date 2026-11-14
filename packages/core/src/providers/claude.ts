@@ -7,6 +7,7 @@ import { readClaudeSessionHistoryPage, readClaudeSessionHistoryRecord, readClaud
 import { discoverClaudeNativeSession } from './claude-native-session.js'
 import { prepareClaudeNativeInput } from './claude-native-input.js'
 import { prepareClaudeOwnedWorkspaceTrust } from './claude-workspace-trust.js'
+import { readClaudeInputInitialization } from './claude-input-initialization.js'
 import {
   CLAUDE_ASKED_TOOL_END_EVENT,
   CLAUDE_CHILD_ACTIVITY_EVENT,
@@ -213,6 +214,7 @@ export function createClaudeProvider(defineAgentProvider: ProviderFactory): Agen
     prepareExecutionHelper: prepareClaudeExecutionHelper,
     planManagedHooks: () => createClaudeManagedHookPlan(),
     prepareOwnedWorkspaceTrust: prepareClaudeOwnedWorkspaceTrust,
+    readInputInitialization: readClaudeInputInitialization,
     readSessionHistoryPage: readClaudeSessionHistoryPage,
     readSessionHistoryRecord: readClaudeSessionHistoryRecord,
     readConversationChanges: readClaudeConversationChanges,

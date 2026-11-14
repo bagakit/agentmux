@@ -1,3 +1,4 @@
+import { parseProviderInputInitialization } from './agent-initialization.js'
 import { AgentMuxError } from './errors.js'
 import type { AgentMuxRunRef } from './types.js'
 
@@ -6,6 +7,7 @@ export type AgentTerminalInitialization = {
   lifecycleOperationId: string
   phase: 'preparing' | 'creating' | 'ready' | 'failed' | 'unknown'
   native: { state: 'not-created' } | { state: 'confirmed'; sessionId: string } | { state: 'unknown' }
+  blocker?: import('./agent-provider.js').AgentProviderInputInitialization
   failure?: { step: 'connection' | 'preflight' | 'native-session' | 'frontend'; code?: string | number; message: string }
 }
 export type AgentTerminalFrontendRecoveryRequest = {
@@ -43,8 +45,9 @@ export function parseTerminalFrontendObservation(value: unknown): AgentTerminalF
   if (p.initialization !== undefined) {
     const initialization = p.initialization as AgentTerminalInitialization, native = initialization?.native
     const failure = initialization?.failure
+    if (initialization?.blocker !== undefined) parseProviderInputInitialization(initialization.blocker)
     if (!initialization || typeof initialization !== 'object' || Array.isArray(initialization) ||
-      Object.keys(initialization).some(key => !['lifecycleOperationId', 'phase', 'native', 'failure'].includes(key)) ||
+      Object.keys(initialization).some(key => !['lifecycleOperationId', 'phase', 'native', 'failure', 'blocker'].includes(key)) ||
       !id(initialization.lifecycleOperationId) || !['preparing', 'creating', 'ready', 'failed', 'unknown'].includes(initialization.phase) ||
       !native || typeof native !== 'object' || Array.isArray(native) ||
       Object.keys(native).some(key => !['state', 'sessionId'].includes(key)) ||
