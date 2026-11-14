@@ -1,4 +1,5 @@
 const assert = require('node:assert/strict')
+const { readGoalEdgeGeometry, assertGoalEdgeGeometry } = require('./edge-geometry.cjs')
 
 /** New IA evidence, kept separate from the historical goal-space matrix. */
 module.exports = async ({ evaluate, size, pointer, click, capture, waitFor, paint, result, scope, insert }) => {
@@ -14,8 +15,8 @@ module.exports = async ({ evaluate, size, pointer, click, capture, waitFor, pain
   result.matrix = { key, scenes: settingsOnly ? [] : matrix, settings: !key && !goalsOnly }
   const query = selector => `document.querySelector(${JSON.stringify(selector)})`
   async function anchors(phase) {
-    const facts = await evaluate(`(()=>{const canvas=document.querySelector('.goal-plan__canvas');return {scrollTop:canvas.scrollTop,scrollLeft:canvas.scrollLeft,visible:getComputedStyle(document.querySelector('.goal-plan__edges')).display!=='none',edges:[...document.querySelectorAll('[data-goal-plan-edge]')].map(path=>{const [from,to]=path.dataset.goalPlanEdge.split('>'),node=id=>[...document.querySelectorAll('[data-goal-plan-node]')].find(e=>e.dataset.goalPlanNode===id),a=node(from),b=node(to),ar=a.getBoundingClientRect(),br=b.getBoundingClientRect(),matrix=path.getScreenCTM(),point=p=>new DOMPoint(p.x,p.y).matrixTransform(matrix),s=point(path.getPointAtLength(0)),e=point(path.getPointAtLength(path.getTotalLength()));return{from,to,error:Math.max(Math.abs(s.x-ar.right),Math.abs(s.y-ar.top-ar.height/2),Math.abs(e.x-br.left),Math.abs(e.y-br.top-br.height/2))}})}})()`)
-    if (facts.visible) assert.ok(facts.edges.length > 0 && facts.edges.every(edge => edge.error < 2), `Actual edge anchors after ${phase}`)
+    const facts = await readGoalEdgeGeometry(evaluate)
+    if (facts.visible) assertGoalEdgeGeometry(facts)
     result.observations.push({ scene: 'hierarchy-edges', phase, ...facts })
     return facts
   }

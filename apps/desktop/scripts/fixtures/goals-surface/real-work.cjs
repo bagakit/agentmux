@@ -1,5 +1,6 @@
 const { app, BrowserWindow } = require('electron')
 const assert = require('node:assert/strict')
+const { readGoalEdgeGeometry, assertGoalEdgeGeometry } = require('./edge-geometry.cjs')
 const fs = require('node:fs/promises')
 const path = require('node:path')
 const crypto = require('node:crypto')
@@ -168,9 +169,9 @@ async function captureMatrix() {
   assert.equal(result.frames.length, selected.length)
 }
 async function graphAnchors(phase) {
-  const facts = await evaluate(`(()=>{const canvas=document.querySelector('.goal-plan__canvas');return {scrollTop:canvas.scrollTop,edges:[...document.querySelectorAll('[data-goal-plan-edge]')].map(path=>{const [from,to]=path.dataset.goalPlanEdge.split('>'),node=id=>[...document.querySelectorAll('[data-goal-plan-node]')].find(e=>e.dataset.goalPlanNode===id),a=node(from),b=node(to),ar=a.getBoundingClientRect(),br=b.getBoundingClientRect(),matrix=path.getScreenCTM(),point=p=>new DOMPoint(p.x,p.y).matrixTransform(matrix),s=point(path.getPointAtLength(0)),e=point(path.getPointAtLength(path.getTotalLength()));return {from,to,error:Math.max(Math.abs(s.x-ar.right),Math.abs(s.y-(ar.top+ar.height/2)),Math.abs(e.x-br.left),Math.abs(e.y-(br.top+br.height/2)))}})}})()`)
+  const facts = await readGoalEdgeGeometry(evaluate)
   assert.ok(facts.scrollTop > 0, 'Actual nonzero canvas scroll, not the initial frame')
-  assert.ok(facts.edges.length > 0); for (const edge of facts.edges) assert.ok(edge.error < 2, 'Rendered dependency endpoints follow their actual original task cards')
+  assertGoalEdgeGeometry(facts)
   result.observations.push({ scene: 'saved-plan-edge-anchors', phase, facts })
 }
 

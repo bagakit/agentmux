@@ -1,4 +1,5 @@
 const assert = require('node:assert/strict')
+const { readGoalEdgeGeometry, assertGoalEdgeGeometry } = require('./edge-geometry.cjs')
 
 /** A bounded first-screen matrix. Only a real saved plan supplies Task/progress facts. */
 module.exports = async ({ evaluate, size, pointer, click, capture, waitFor, paint, result, settings = true, layout = true, widePlanOnly = false }) => {
@@ -26,9 +27,9 @@ module.exports = async ({ evaluate, size, pointer, click, capture, waitFor, pain
       assert.deepEqual(facts.nodes.map(node=>node.state), ['done','ready','working','review','changes','unknown','waiting'])
       assert.equal(facts.progress, 'Revision 2')
       if (width === 2048) {
-        const anchors = await evaluate(`(()=>[...document.querySelectorAll('[data-goal-plan-edge]')].map(path=>{const [from,to]=path.dataset.goalPlanEdge.split('>'),node=id=>[...document.querySelectorAll('[data-goal-plan-node]')].find(e=>e.dataset.goalPlanNode===id),a=node(from),b=node(to),ar=a.getBoundingClientRect(),br=b.getBoundingClientRect(),matrix=path.getScreenCTM(),start=path.getPointAtLength(0),end=path.getPointAtLength(path.getTotalLength()),point=p=>new DOMPoint(p.x,p.y).matrixTransform(matrix),s=point(start),e=point(end);return{from,to,start:{x:s.x,y:s.y},end:{x:e.x,y:e.y},expectedStart:{x:ar.right,y:ar.top+ar.height/2},expectedEnd:{x:br.left,y:br.top+br.height/2},error:Math.max(Math.abs(s.x-ar.right),Math.abs(s.y-ar.top-ar.height/2),Math.abs(e.x-br.left),Math.abs(e.y-br.top-br.height/2))}}))()`)
-        assert.ok(anchors.length>0 && anchors.every(edge=>edge.error<2), 'Actual SVG endpoints stay attached to the real rendered task cards')
-        result.observations.push({scene:'goal-space-edge-anchors',width,theme,anchors})
+        const geometry = await readGoalEdgeGeometry(evaluate)
+        assertGoalEdgeGeometry(geometry)
+        result.observations.push({scene:'goal-space-edge-anchors',width,theme,anchors:geometry.edges})
       }
     } else {
       assert.deepEqual([facts.nodes.length, facts.edges, facts.progress, facts.progressBars], [1,0,null,0], 'The original Goal is the only node, with no invented dependency or progress')
