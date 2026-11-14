@@ -8009,7 +8009,6 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         set({ goalReadingEntry: { goalId: request.target.goalId, runtimeId: request.target.runtimeId, namespace: request.target.namespace!,
           ...(request.target.section ? { section: request.target.section } : {}), phase: 'pending', token: goalReadingToken } })
       }
-      let topics: ScratchTopicSnapshot[] = []
       try {
         if (request.target.kind === 'goal' && request.target.runtimeId !== undefined) try {
           const read = await api.goals.execute({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: mintObjectId(), operation: 'demand.show', demandId: request.target.goalId })
@@ -8018,10 +8017,9 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
               recovery: 'Keep the exact original link and current workface. Read that original Goal source; another store with the same Goal ID is not a replacement.' })
           sourceGoal = read.demand
         } catch (error) { sourceFailure = error }
-        if ((request.target.kind === 'space' || request.target.kind === 'mote') && get().config?.workspaces.some(workspace => workspace.id === SCRATCH_WORKSPACE_ID)) topics = await api.scratch.listTopics(SCRATCH_WORKSPACE_ID) }
-      catch (error) { issues.push({ step: 'discovery', code: 'SPACE_DISCOVERY_UNCONFIRMED', message: presentError(error),
-        recovery: 'Existing placement is kept. Inspect the client or retry discovery when its directory owner is available.' }) }
-      finally { stopObservingNavigation(); signal?.removeEventListener('abort', stopObservingNavigation) }
+      } finally { stopObservingNavigation(); signal?.removeEventListener('abort', stopObservingNavigation) }
+      const currentFacts = get()
+      const topics = scratchTopicsForConfig(currentFacts.config, currentFacts.scratchTopicSnapshots) ?? []
       const catalog = spatialCatalog(get(), topics)
       const before = captureDesktopInput(get().tabs)
       const beforeSelection = desktopSelection(get(), catalog)
