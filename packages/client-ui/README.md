@@ -216,6 +216,8 @@ Spread the callback attributes from `FormRow` onto one native control. The label
 
 Use `SearchInput` from `@agentmux/client-ui/input` for a controlled query. Give the field and the clear button their own accessible labels. Clearing emits an empty value and returns focus to the same native input. The caller applies the query to its records and owns any requests or results. [Field example](examples/fields.tsx).
 
+Use `NativeSelect` from the same entry when the host wants the platform's option interaction and form value. Pass the normal select props and native option children. Use `SelectionField` for a searchable popup, rich option labels or choices that need to explain a missing value.
+
 Use `Switch` from `@agentmux/client-ui/input` for an on/off setting. It keeps the native checkbox ref, form value, keyboard activation and disabled state. Use `FormRow` for a visible label and optional help. The shared input stylesheet draws the track and thumb, respects writing direction and reduced motion, and supports forced colors.
 
 `src/input/` is the shared native field module: import `TextInput`, `Textarea` and `InputGroup` from `@agentmux/client-ui/input`, plus `@agentmux/client-ui/input/styles.css` when not using the full stylesheet. Each component forwards native props and React 19 refs; callers keep labels, values, validation and actions. `InputGroup` is the field container with one focus boundary, not an extra wrapper or form-state provider. Surface classes keep their own geometry.
