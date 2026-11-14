@@ -5,6 +5,8 @@ import { createHash } from 'node:crypto'
 import assert from 'node:assert/strict'
 import source from './vitest.mote-context.config.mts'
 const mutations: Record<string, [string, string, string]> = {
+  'source-skills-exclusion': ['apps/desktop/src/renderer/src/components/AgentSessionComposer.tsx', 'loadSkills={completion.loadSkills}', 'loadSkills={source ? async () => { throw new Error("Original Skills excluded by the old Source branch") } : completion.loadSkills}'],
+  'wrong-skills-route': ['apps/desktop/src/renderer/src/lib/use-composer-candidates.tsx', 'originalSkills ? await originalSkills() : sessionId ? await api.ui.listAgentSkills(sessionId)', 'originalSkills ? await api.ui.listAgentSkills("same-original-sid") : sessionId ? await api.ui.listAgentSkills(sessionId)'],
   'source-history-exclusion': ['apps/desktop/src/renderer/src/components/AgentSessionComposer.tsx', '...(source?.inputReading ? { originalReading: source.inputReading } : {})', '...{}'],
   'wrong-history-route': ['apps/desktop/src/renderer/src/lib/use-composer-input-history.tsx', "(originalReading ? originalReading.readHistory(input, signal) : api.sessions.readHistory(reference, input, { signal }))", "api.sessions.readHistory({ hostId: 'local', agentSessionId: sid }, input, { signal })"],
   'late-history-authority': ['packages/core/src/space-member-runtime.ts', 'const result = await originalPort.call(method, params, callContext)\n      await assertCurrent()', 'const result = await originalPort.call(method, params, callContext)'],

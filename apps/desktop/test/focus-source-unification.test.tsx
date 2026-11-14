@@ -4,7 +4,7 @@ import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { afterEach, expect, it, vi } from 'vitest'
 import { tmpdir } from 'node:os'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 vi.mock('electron', () => ({ app: { getPath: () => tmpdir() } }))
 // Native terminal/PTY painting is the only product leaf replaced in this scene.
@@ -66,9 +66,11 @@ function MainFocusFixture({ navigate, regionOnly = false }: { navigate: (id: str
 /** Real original Core/Space and scoped Unix→Main→IPC→Preload→Renderer.
  * Native process state is the existing source fixture leaf. No unified hook,
  * Context, lane, card, filter, menu or preview implementation is mocked. */
-async function fixture(options: { foreign?: boolean; unavailable?: boolean; nativeUnavailable?: boolean; metadataUnknown?: boolean; sourceOnly?: boolean; legacyNoAdmission?: boolean; multiple?: boolean; missing?: boolean; unconfirmed?: boolean; staleRun?: boolean; unobservedRun?: boolean; largeHistory?: boolean; historyImage?: boolean } = {}) {
+async function fixture(options: { foreign?: boolean; unavailable?: boolean; nativeUnavailable?: boolean; metadataUnknown?: boolean; sourceOnly?: boolean; legacyNoAdmission?: boolean; multiple?: boolean; missing?: boolean; unconfirmed?: boolean; staleRun?: boolean; unobservedRun?: boolean; largeHistory?: boolean; historyImage?: boolean; originalSkills?: boolean } = {}) {
   const privateCleanup: Array<() => unknown | Promise<unknown>> = []
-  const original = await createSpaceSessionsFixture(privateCleanup)
+  const placementPath = options.originalSkills ? await mkdtemp(join(tmpdir(), 'amx-composer-skills-')) : '/b/project'
+  if (options.originalSkills) privateCleanup.push(() => rm(placementPath, { recursive: true, force: true }))
+  const original = await createSpaceSessionsFixture(privateCleanup, placementPath)
   const privateRoots = new Set([original.b.root, original.d.root])
   // A cancelled public Reader can finish its final physical IO just after its
   // logical release. Retry removal only for this scene's known private roots.
@@ -92,15 +94,22 @@ async function fixture(options: { foreign?: boolean; unavailable?: boolean; nati
   cleanup.push(async () => { await Promise.allSettled(physicalReads) })
 
   const owner = options.foreign ? original.d : original.b, creationId = 'original-source-creation', now = Date.now()
+  const executionWorkspacePath = options.originalSkills ? options.foreign ? join(owner.root, 'skills-workspace') : placementPath : options.foreign ? '/runtime-d/home' : '/b/project'
+  if (options.originalSkills) {
+    const provider = owner.core.providers.get('codex'), skillRoot = 'private-composer-skills-' + owner.owner.runtimeId
+    owner.core.providers.replace({ ...provider, catalog: { ...provider.catalog, composer: { commands: provider.catalog.composer?.commands ?? [], skillRoots: [skillRoot] } } })
+    await mkdir(join(executionWorkspacePath, skillRoot, 'original-skill'), { recursive: true })
+    await writeFile(join(executionWorkspacePath, skillRoot, 'original-skill', 'SKILL.md'), '---\nname: Original workspace skill\ndescription: Exact original owner\n---\nOriginal skill body\n')
+  }
   const before = await owner.put(SID)
   const transcriptPath = join(owner.root, 'original-native.jsonl')
   const originalInput = '原远端自己的输入，不是同 SID 本机输入。' + (options.largeHistory ? '这是原始长正文。'.repeat(12000) + '原始长正文末尾' : '')
   const originalParts = [{ type: 'input_text', text: originalInput }, ...(options.historyImage ? [{ type: 'input_image', image_url: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+i8egAAAAASUVORK5CYII=' }] : [])]
-  await writeFile(transcriptPath, [{ type: 'session_meta', payload: { id: 'original-native-history', cwd: options.foreign ? '/runtime-d/home' : '/b/project' } }, { type: 'response_item', timestamp: new Date(now - 2000).toISOString(), payload: { type: 'message', id: 'original-native-prompt', role: 'user', content: originalParts } }, { type: 'response_item', timestamp: new Date(now - 1000).toISOString(), payload: { type: 'message', id: 'original-native-response', role: 'assistant', content: [{ type: 'output_text', text: foreignRecap }] } }].map(value => JSON.stringify(value)).join('\n')+'\n')
-  const session: AgentMuxStoredAgentSession = { ...before, updatedAt: now, workspacePath: options.foreign ? '/runtime-d/home' : '/b/project',
+  await writeFile(transcriptPath, [{ type: 'session_meta', payload: { id: 'original-native-history', cwd: executionWorkspacePath } }, { type: 'response_item', timestamp: new Date(now - 2000).toISOString(), payload: { type: 'message', id: 'original-native-prompt', role: 'user', content: originalParts } }, { type: 'response_item', timestamp: new Date(now - 1000).toISOString(), payload: { type: 'message', id: 'original-native-response', role: 'assistant', content: [{ type: 'output_text', text: foreignRecap }] } }].map(value => JSON.stringify(value)).join('\n')+'\n')
+  const session: AgentMuxStoredAgentSession = { ...before, updatedAt: now, workspacePath: executionWorkspacePath,
     creation: { createOperationId: creationId, initialPrompt: 'unknown' }, nativeHandle: { kind: 'provider', providerId: 'codex', sessionId: 'original-native-history', transcriptPath }, semanticStatus: { state: 'working', source: 'native-hook', observedAt: now, stateEnteredAt: now } }
   await (owner.core as unknown as { registry: { put(value: AgentMuxStoredAgentSession, expected: AgentMuxStoredAgentSession['run']): Promise<void> } }).registry.put(session, before.run)
-  const admitted = await original.admit(options.foreign ? 'D-in-B' : 'local', owner.owner.runtimeId, SID, creationId)
+  const admitted = await original.admit(options.foreign ? 'D-in-B' : 'local', owner.owner.runtimeId, SID, creationId, undefined, executionWorkspacePath)
   let readMode: 'missing' | 'pending' | 'observed' = options.missing ? 'missing' : 'observed'
   let checkGate: Promise<void> | undefined, releaseCheck: (() => void) | undefined
   const store = Reflect.get(owner.core, 'store') as AgentMuxAgentSessionStore, originalRead = store.readMetadata.bind(store)
@@ -119,7 +128,7 @@ async function fixture(options: { foreign?: boolean; unavailable?: boolean; nati
 
   const config = structuredClone(DEFAULT_CONFIG)
   config.hosts = [{ id: 'local', kind: 'local', label: 'Original local owner' }, { id: 'source-route', kind: 'ssh', label: 'Original source route', hostname: 'source.invalid' }]
-  config.workspaces = [{ id: 'original-b-project', kind: 'folder', hostId: 'local', path: '/b/project', name: 'Ordinary analysis project' }]
+  config.workspaces = [{ id: 'original-b-project', kind: 'folder', hostId: 'local', path: placementPath, name: 'Ordinary analysis project' }]
   const main = spaceMountTransport(cleanup, [
     { id: 'local', carrier: { forwardRpc: original.b.rpc.call.bind(original.b.rpc), subscribeRpc: original.b.rpc.subscribe.bind(original.b.rpc) } },
     { id: 'source-route', carrier: { forwardRpc: original.b.rpc.call.bind(original.b.rpc), subscribeRpc: original.b.rpc.subscribe.bind(original.b.rpc) } }
@@ -894,13 +903,35 @@ it('the original Source input history rejects a removed admission after the orig
       tabs: snapshot.scope.tabs.filter(tab => tab.tabId === f.admitted.address.tabId).map(tab => ({ ...tab, regionIds: tab.regionIds.filter(id => id !== target.target.regionId) })),
       remove: { regions: [target.target.regionId] }
     } })
-    expect((await f.b.spatial.read()).graph.regions.some(region => region.regionId === target.target.regionId)).toBe(false)
+    expect((await f.b.spatial.read())!.graph.regions.some(region => region.regionId === target.target.regionId)).toBe(false)
   } finally { release() }
   const result = await reading
   expect(result.page).toBeUndefined()
   expect(result.error).toMatchObject({ code: 'SPACE_MEMBER_ADMISSION_UNCONFIRMED' })
   expect(useAppStore.getState().agentComposerDrafts[owner]).toBe(draft)
   expect((await f.d.core.readAgentSession(SID))!.run).toEqual(f.session.run)
+})
+
+it.each([true, false])('the original Source Skills menu inserts an exact original skill without Native control (foreign: %s)', async foreign => {
+  const f = await fixture({ foreign, sourceOnly: true, metadataUnknown: true, nativeUnavailable: true, originalSkills: true })
+  await f.settle(1)
+  const taskName = foreign ? '真正远端的独立任务' : localName
+  await vi.waitFor(() => expect(cardWith(taskName)).toBeDefined())
+  const namesake = vi.spyOn(api.ui, 'listAgentSkills').mockResolvedValue([{ name: 'Wrong observer skill', description: 'same SID local', path: '/observer/SKILL.md', source: 'project' }])
+  await act(async () => cardWith(taskName).click())
+  const workface = () => dom.container.querySelector<HTMLElement>('.global-session-workspace [aria-label="Original member workface"]')!
+  await vi.waitFor(() => expect(workface()).not.toBeNull())
+  await act(async () => workface().querySelector<HTMLButtonElement>('[aria-label="Show the message tool row"]')?.click())
+  await vi.waitFor(() => expect(workface()?.querySelector('[aria-label="Choose a skill"]')).not.toBeNull())
+  const button = workface().querySelector<HTMLButtonElement>('[aria-label="Choose a skill"]')!
+  await act(async () => button.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0, pointerType: 'mouse' })))
+  const skill = () => [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(node => node.textContent?.includes('Original workspace skill'))
+  await vi.waitFor(() => expect(skill(), document.body.textContent?.slice(-3000)).toBeDefined(), { timeout: 10000 })
+  await act(async () => skill()!.click())
+  const ownerKey = originalSourceInputOwnerKey(f.owner.owner.runtimeId, SID)
+  await vi.waitFor(() => expect(useAppStore.getState().agentComposerDrafts[ownerKey]).toContain('Original workspace skill'))
+  expect(namesake).not.toHaveBeenCalled()
+  expect((await f.owner.core.readAgentSession(SID))!.run).toEqual(f.session.run)
 })
 
 it('the original Source input history is consumable by the actual public member CLI and refuses another Runtime', async () => {

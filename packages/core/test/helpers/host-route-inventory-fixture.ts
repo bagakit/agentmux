@@ -15,7 +15,7 @@ import { rpcOwnerFixture } from './public-rpc-owner.js'
 export const hostRouteInventoryPrincipal = { kind: 'user' as const, id: 'local-user:' + (process.getuid?.() ?? 'current') }
 const principal = hostRouteInventoryPrincipal
 
-export async function createHostRouteInventoryFixture(cleanups: (() => Promise<void>)[], sourceB?: Pick<AgentMuxControlServerOptions, 'spatialState' | 'spatialAgentControl' | 'hostedRuntime'>) {
+export async function createHostRouteInventoryFixture(cleanups: (() => Promise<void>)[], sourceB?: Pick<AgentMuxControlServerOptions, 'spatialState' | 'spatialAgentControl' | 'hostedRuntime' | 'coreClients'>) {
   const original = await rpcOwnerFixture(), collision = await rpcOwnerFixture(); cleanups.push(original.close, collision.close)
   for (const [owner, runtimeId] of [[original, 'runtime-D'], [collision, 'runtime-C']] as const) {
     Object.assign(owner.client, { hostExecutorOwner: new AgentMuxHostExecutorOwner({ path: join(owner.root, 'executors.json'), runtimeId,
@@ -50,9 +50,9 @@ export async function createHostRouteInventoryFixture(cleanups: (() => Promise<v
         return server.callRpc(method, params, context)
       }, subscribe: (method, params, emit, context) => server.subscribeRpc(method, params, emit, context) })
     server = new AgentMuxControlServer({ hostRoutes: gateway,
-      ...(name === 'B' ? sourceB : {}),
       ...(name === 'D' ? { hostedRuntime: () => hosted } : {}),
-      coreClients: () => name === 'B' ? [{ hostId: 'collision', client: collision.client }] : name === 'A' ? original.coreClients() : []
+      coreClients: () => name === 'B' ? [{ hostId: 'collision', client: collision.client }] : name === 'A' || name === 'D' ? original.coreClients() : [],
+      ...(name === 'B' ? sourceB : {})
     }, join(original.root, name + '.sock'))
     await server.start()
     const rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: server.path } })
