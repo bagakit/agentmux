@@ -4,7 +4,9 @@ import { relative, resolve } from 'node:path'
 import { defineConfig } from 'vitest/config'
 const root = resolve(import.meta.dirname, '../../..')
 const mutation = process.env.CAPTURE_STARTUP_MUTATION ? JSON.parse(process.env.CAPTURE_STARTUP_MUTATION) : null
-const sources = ['apps/desktop/src/main/capture-surface.ts', 'apps/desktop/src/main/ipc.ts']
+const sources = ['apps/desktop/src/main/capture-surface.ts', 'apps/desktop/src/main/ipc.ts', 'apps/desktop/src/main/global-screenshot.ts',
+  'apps/desktop/src/main/screen-capture.ts', 'apps/desktop/src/main/screenshot-shortcut.ts', 'apps/desktop/src/shared/capture-surface.ts',
+  'apps/desktop/src/preload/capture-surface.ts', 'apps/desktop/src/renderer/screenshot-editor/CaptureSurfaceView.tsx', 'apps/desktop/src/renderer/screenshot-editor/entry.tsx']
 const hash = (text: string) => createHash('sha256').update(text).digest('hex')
 export default defineConfig({
   define: { __AGENTMUX_WEB_PREVIEW__: 'true' },
@@ -21,5 +23,5 @@ export default defineConfig({
     appendFileSync(process.env.CAPTURE_STARTUP_LOADED!, JSON.stringify({ file, original: hash(original), consumed: hash(consumed), mutation: mutated ? mutation.id : null }) + '\n')
     return id.includes('?raw') ? 'export default ' + JSON.stringify(consumed) : consumed
   } }],
-  test: { include: ['apps/desktop/test/capture-surface.test.ts', 'apps/desktop/test/capture-startup-preload.test.ts', 'apps/desktop/test/capture-surface-view.test.tsx', 'apps/desktop/test/screenshot-shortcut-wiring.test.ts'], environment: 'node', passWithNoTests: false, maxWorkers: 1, fileParallelism: false }
+  test: { include: ['apps/desktop/test/capture-surface.test.ts', 'apps/desktop/test/capture-startup-preload.test.ts', 'apps/desktop/test/capture-surface-view.test.tsx', 'apps/desktop/test/screenshot-shortcut-wiring.test.ts', 'apps/desktop/test/screenshot-shortcut-global.test.ts'], environment: 'node', passWithNoTests: false, maxWorkers: 1, fileParallelism: false }
 })

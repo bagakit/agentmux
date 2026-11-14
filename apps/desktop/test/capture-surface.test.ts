@@ -157,8 +157,8 @@ it('shows the selected first frame before the deferred exposure settles, then de
   excluded.resolve(first)
   await vi.advanceTimersByTimeAsync(0)
   expect(captureDisplays.mock.calls).toEqual([[{ includeHostWindows: false }], [{ includeHostWindows: true }]])
-  const loaded = await earlyLoad
   expect(received, 'the selected frame releases load while its alternate is pending').toBe(true)
+  const loaded = await earlyLoad
   expect(loaded).toMatchObject({ background: 'excluded', revision: 1,
     backgrounds: { excluded: { status: 'ready', capturedAt: first.capturedAt }, included: { status: 'pending' } } })
   for (const overlay of electron.windows) {
