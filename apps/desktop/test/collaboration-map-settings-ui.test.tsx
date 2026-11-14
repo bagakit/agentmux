@@ -9,12 +9,13 @@ import { api } from '../src/renderer/src/lib/api'
 import { applyConfigEdit } from '../src/shared/config-edit'
 import { focusSettingsModule } from '../src/renderer/src/components/settings/modules/focus'
 import { DEFAULT_FOCUS_MAP_PREFERENCES } from '../src/shared/focus-map-preferences'
+import { chooseField } from './helpers/selection-field'
 
 const dom = composerDOM()
 async function select(label: string, value: string) {
-  const node = dom.container.querySelector<HTMLSelectElement>(`select[aria-label="${label}"]`)!
+  const node = dom.container.querySelector<HTMLButtonElement>(`[aria-label="${label}"].selection-field`)!
   expect(node).not.toBeNull()
-  await act(async () => { node.value = value; node.dispatchEvent(new Event('change', { bubbles: true })) })
+  await chooseField(node, value)
 }
 async function number(label: string, value: string) {
   const node = dom.container.querySelector<HTMLInputElement>(`input[aria-label="${label}"]`)!
@@ -46,15 +47,15 @@ it('edits complete Map drafts with production preview geometry, keeps invalid in
   expect(dom.container.querySelectorAll('.focus-map-settings__levels details')).toHaveLength(4)
   expect(dom.container.querySelector('[aria-label="Level 1 start zoom"]')).toBeNull()
   // The farthest form is named for what it draws, while its stored value stays the public enum.
-  const firstForm = dom.container.querySelector<HTMLSelectElement>('select[aria-label="Level 1 form"]')!
-  expect(firstForm.value).toBe('point'); expect(firstForm.selectedOptions[0]!.textContent).toBe('Icon')
+  const firstForm = dom.container.querySelector<HTMLButtonElement>('[aria-label="Level 1 form"]')!
+  expect(firstForm.dataset.value).toBe('point'); expect(firstForm.textContent).toContain('Icon')
   expect(dom.container.querySelector('.focus-map-settings__levels details summary')?.textContent).toContain('Icon · Identity')
   expect(dom.container.querySelector('.focus-map-preview__canvas')?.getAttribute('data-levels')).toBe('4')
   await select('Level 4 information', 'identity')
   expect(dom.container.querySelector('[role="alert"]')?.textContent).toContain('Level 4')
   expect((dom.container.querySelector('[data-settings-save-bar] button') as HTMLButtonElement).disabled).toBe(true)
   expect(dom.container.querySelector('.focus-map-preview [role="status"]')?.textContent).toContain('last valid')
-  expect(dom.container.querySelector<HTMLSelectElement>('[aria-label="Level 4 information"]')!.value).toBe('identity')
+  expect(dom.container.querySelector<HTMLButtonElement>('[aria-label="Level 4 information"]')!.dataset.value).toBe('identity')
   await select('Level 4 information', 'summary')
   await number('Level 4 start zoom', '40')
   expect(dom.container.querySelector('[role="alert"]')?.textContent).toContain('Level 4')
@@ -96,7 +97,7 @@ it('opens the original Focus Map field without search and preserves the visited 
   await select('LOD levels', '4')
   await dom.render(<SettingsPanel initialSection="focus" navigationRequest={{ ...request }} onClose={close} />)
   expect(dom.container.querySelector('[data-settings-field="map"]')).toBe(target)
-  expect(dom.container.querySelector<HTMLSelectElement>('[aria-label="LOD levels"]')!.value).toBe('4')
+  expect(dom.container.querySelector<HTMLButtonElement>('[aria-label="LOD levels"]')!.dataset.value).toBe('4')
   expect(document.activeElement).toBe(target)
   expect(resolveFocusPreferences(undefined).map.levels).toHaveLength(3)
 })
