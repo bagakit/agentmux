@@ -19,8 +19,9 @@ not trigger automatic replay. No private args/environment are returned.
 
 For managed Hooks, read runtimeId and configRevision from settings executors discover
 --host HOST --executor EXECUTOR --refresh false. Then use settings executors hooks-inspect
---host HOST --runtime RUNTIME --executor EXECUTOR --config-revision REV --workspace PATH.
-PATH is an absolute directory on the target Host. The check is read-only. A legacy direct
+--host HOST --runtime RUNTIME --executor EXECUTOR --config-revision REV.
+Supply --workspace PATH when the native configuration depends on the working directory
+or to check loading in that directory. PATH is absolute on the target Host. The check is read-only. A legacy direct
 runner can still be declared alongside the current Hook. Use hooks-update with the same
 flags as a transport-approved user to write the managed configuration and inspect it again.
 The update result and remaining issues are separate. Old callbacks whose original dependency
