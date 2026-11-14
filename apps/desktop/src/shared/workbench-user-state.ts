@@ -90,9 +90,19 @@ export function workbenchInputArchiveEligible(value: unknown): boolean {
   const control = record(entry.directInputControl), binding = record(entry.directInputBinding)
   const receipt = record(entry.inputReceipt), key = record(receipt?.key)
   const runId = record(control?.run)?.runId
+  const ref = record(receipt?.ref), wait = record(receipt?.control), waitRef = record(wait?.ref)
+  const matchesRoute = (value: unknown) => {
+    const target = record(value)
+    return target?.kind === 'prompt' && target.agentSessionId === control?.agentSessionId &&
+      target.submissionId === entry.operationId && target.attemptId === key?.attemptId && record(target.expectedRun)?.runId === runId
+  }
   return control?.kind === 'agent' && inputKey(control.hostId) && inputKey(control.agentSessionId) && inputKey(runId) &&
-    record(binding?.expectedRun)?.runId === runId && key?.kind === 'prompt' && key.agentSessionId === control.agentSessionId &&
-    key.submissionId === entry.operationId && record(key.expectedRun)?.runId === runId && receipt?.persistence === 'confirmed' &&
+    record(binding?.expectedRun)?.runId === runId && matchesRoute(key) && matchesRoute(ref?.key) && matchesRoute(waitRef?.key) &&
+    typeof ref?.waitGeneration === 'number' && Number.isSafeInteger(ref.waitGeneration) && ref.waitGeneration >= 1 &&
+    ref.waitGeneration === waitRef?.waitGeneration &&
+    (wait?.state === 'dispatch-authorized' || wait?.state === 'enabled' || wait?.state === 'stopped-before-dispatch') &&
+    (receipt?.observation === 'closed' || receipt?.observation === 'owned' || receipt?.observation === 'rejoin-needed') &&
+    receipt.persistence === 'confirmed' &&
     (receipt.status === 'admitted' || receipt.status === 'terminal-confirmed' || receipt.status === 'launch-carried')
 }
 
