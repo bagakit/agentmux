@@ -29,7 +29,7 @@ async function childSource(directory: string) {
         'export const app = { getPath: () => process.argv[2], getAppPath: () => process.argv[2] };', loader: 'js' }))
       builder.onResolve({ filter: /^@agentmux\// }, args => {
         const [, name] = /^@agentmux\/([^/]+)/u.exec(args.path)!
-        const base = join(root, 'packages', name!)
+        const base = join(root, name === 'host' ? 'apps' : 'packages', name!)
         const manifest = JSON.parse(readFileSync(join(base, 'package.json'), 'utf8'))
         const key = args.path === `@agentmux/${name}` ? '.' : '.' + args.path.slice(`@agentmux/${name}`.length)
         const pattern = Object.keys(manifest.exports).filter(value => value.includes('*') &&

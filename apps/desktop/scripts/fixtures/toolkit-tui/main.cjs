@@ -64,8 +64,8 @@ app.whenReady().then(async () => {
     ipcMain.handle('proof:tui:seed', async (_event, preview) => {
       if (seeded && customizationScene) return { workspaceId: 'tui-work' }
       assert.equal(seeded, false)
-      await owner.update(() => ({ ...preview, appearance: { ...preview.appearance, appAppearance: 'dark', terminalTheme: 'graphite' },
-        workspaces: [{ id: 'tui-work', hostId: 'local', name: directoryScene ? 'Toolkit directory' : 'TUI Toolkit', path: work, kind: 'folder' }],
+      await owner.update(current => ({ ...preview, appearance: { ...preview.appearance, appAppearance: 'dark', terminalTheme: 'graphite' },
+        workspaces: [...current.workspaces, { id: 'tui-work', hostId: 'local', name: directoryScene ? 'Toolkit directory' : 'TUI Toolkit', path: work, kind: 'folder' }],
         toolkit: { performance: { enabled: false, statusBar: 'icon' }, mobileConnection: { enabled: false, statusBar: 'icon' }, tools: [] } }))
       runtime.commit(await runtime.prepare({ ...owner.current, hosts: owner.current.hosts.filter(host => host.kind === 'local') }))
       for (const [index, id] of ids.entries()) { await toolkit.execute({ operation: 'toolkit.add', toolId: id, value: {

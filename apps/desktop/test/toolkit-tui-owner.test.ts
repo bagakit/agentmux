@@ -17,7 +17,7 @@ const definition: ToolkitInlineToolConfiguration = { id: 'interactive-tool', rev
   icon: 'terminal', enabled: true, statusBar: 'icon', workspacePath: fixturePath('tmp'),
   script: 'printf "%s\\n" "$1"; read answer; printf "%s\\n" "$answer"', args: ['ready'], actions: [] }
 const flush = async () => { for (let index = 0; index < 8; index++) await new Promise(resolve => setImmediate(resolve)) }
-function fixture(tools: ToolkitInlineToolConfiguration[] = [definition], env: Record<string, string> = {}) {
+function fixture(tools: ToolkitInlineToolConfiguration[] = [definition], env: Record<string, string> = {}, bundled: ToolkitInlineToolConfiguration[] = []) {
   let config = { ...structuredClone(DEFAULT_CONFIG), toolkit: { tools: structuredClone(tools) } }
   const receipts = new Map<string, unknown>(), runs = new Map<string, AgentMuxRun>(), creates = new Map<string, string>()
   const listeners = new Map<string, Set<(event: AgentMuxClientEvent) => void>>()
@@ -67,7 +67,7 @@ function fixture(tools: ToolkitInlineToolConfiguration[] = [definition], env: Re
     save: async next => structuredClone(next), publish: saved => { config = saved as typeof config; custom.configurationChanged() } })
   const openRunPort = vi.fn(async () => port)
   const makeOwner = () => new CustomToolkitOwner({ config: owner, receipts: storage, openRunPort,
-    runner: process.execPath, env, now: () => fixtureEpoch(0, 0, 2) })
+    runner: process.execPath, env, bundled: () => bundled, now: () => fixtureEpoch(0, 0, 2) })
   custom = makeOwner()
   async function snapshot(id = definition.id): Promise<ToolkitScriptSnapshot> {
     const value = await custom.get(id)
@@ -93,6 +93,44 @@ function fixture(tools: ToolkitInlineToolConfiguration[] = [definition], env: Re
 }
 
 describe('Toolkit TUI lifecycle on the existing admission owner', () => {
+  it('does not automatically execute an enabled bundled tool', async () => {
+    const f = fixture([], {}, [definition])
+    await f.custom.loadConfigured()
+    expect(f.create).not.toHaveBeenCalled()
+    expect(await f.snapshot()).toMatchObject({ state: 'idle' })
+    await f.custom.dispose()
+  })
+  it('honors an unchecked startup choice and starts once when selected', async () => {
+    const f = fixture([{ ...definition, autoStart: false }])
+    await f.custom.loadConfigured()
+    expect(f.create).not.toHaveBeenCalled()
+    expect(await f.snapshot()).toMatchObject({ state: 'idle', definition: { autoStart: false } })
+    await f.edit({ autoStart: true })
+    expect(f.create).toHaveBeenCalledOnce()
+    await f.edit({ script: 'printf changed' })
+    await f.custom.loadConfigured()
+    expect(f.create).toHaveBeenCalledOnce()
+    await f.custom.dispose()
+  })
+
+  it('starts a new execution at owner startup after the original Run was interrupted', async () => {
+    const f = fixture()
+    await f.custom.loadConfigured()
+    const original = (await f.snapshot()).admission!
+    await f.reopen()
+    const run = f.runs.get(original.run!.runId)!
+    f.runs.set(run.runId, { ...run, state: 'interrupted', exitReason: 'daemon_restart' })
+    await f.custom.loadConfigured()
+    const restored = await f.snapshot()
+    expect(restored.state).toBe('running')
+    expect(restored.admission!.executionId).not.toBe(original.executionId)
+    expect(restored.admission!.run).not.toEqual(original.run)
+    expect(restored.latestConfirmed).toMatchObject({ executionId: original.executionId, run: original.run, state: 'failed' })
+    expect(f.create).toHaveBeenCalledTimes(2)
+    await f.custom.loadConfigured()
+    expect(f.create).toHaveBeenCalledTimes(2)
+    await f.custom.dispose()
+  })
   it.each(['', ' \n\t '])('captures the Host default shell before creating a blank TUI %j', async script => {
     const args = ['-i', 'literal argument'], command = fixturePath('shell with spaces')
     const f = fixture([{ ...definition, script, args }])
@@ -271,8 +309,8 @@ describe('Toolkit TUI lifecycle on the existing admission owner', () => {
     const original = (await f.snapshot()).admission!, run = f.runs.get(original.run!.runId)!
     f.runs.set(run.runId, { ...run, state: 'exited', exitCode: 0, exitReason: 'user-stopped' })
     await f.reopen(); await f.custom.loadConfigured()
-    expect(await f.snapshot()).toMatchObject({ admission: null, latestConfirmed: { state: 'stopped', run: original.run } })
-    expect(f.create).toHaveBeenCalledOnce()
+    expect(await f.snapshot()).toMatchObject({ state: 'running', latestConfirmed: { state: 'stopped', run: original.run } })
+    expect(f.create).toHaveBeenCalledTimes(2)
     await f.custom.dispose()
   })
 
@@ -422,8 +460,8 @@ describe('Toolkit TUI lifecycle on the existing admission owner', () => {
     reader.dispose(); await f.custom.dispose()
   })
 
-  it('isolates a failed tool load and does not start ordinary scripts', async () => {
-    const ordinary = { ...definition, id: 'ordinary', mode: 'script' as const, script: 'console.log("ordinary")' }
+  it('isolates a failed tool load and leaves unchecked ordinary scripts idle', async () => {
+    const ordinary = { ...definition, id: 'ordinary', autoStart: false, mode: 'script' as const, script: 'console.log("ordinary")' }
     const another = { ...definition, id: 'another' }
     const f = fixture([definition, ordinary, another])
     f.storage.read.mockImplementation(async id => { if (id === definition.id) throw new Error('receipt unavailable'); return null })

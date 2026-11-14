@@ -57,8 +57,12 @@ module.exports = async function captureWorkingDirectory({ win, read, until, wait
   await until('!!document.querySelector(".toolkit-directory__preview code")')
   assert.equal(await read('document.querySelector(".toolkit-directory__preview code").textContent'), home + '/.agentmux')
   await revealField(); await frame('directory-default-wide')
+  await read(`document.querySelector('[aria-label="Run at startup"]').closest('label').scrollIntoView({block:'center'})`)
+  await settle(); await frame('autostart-inline-wide')
   win.setSize(720, 940)
   await until('innerWidth <= 720'); await revealField(); await frame('directory-default-narrow')
+  await read(`document.querySelector('[aria-label="Run at startup"]').closest('label').scrollIntoView({block:'center'})`)
+  await settle(); await frame('autostart-inline-narrow')
   await saveAndRead(home + '/.agentmux', 'inline-default')
 
   await fill(field, 'projects/reports')

@@ -8,7 +8,7 @@ import owning from '../scripts/fixtures/toolkit-custom/vitest.config.mts'
 const owner = 'apps/desktop/src/main/toolkit-custom-owner.ts'
 const changes: Record<string, [string, string, string]> = {
   'raw-ownership': ['apps/desktop/src/main/runtime-controller.ts', "if (output === 'raw') this.toolkitRuns.set", 'if (true) this.toolkitRuns.set'],
-  'repeat-load': [owner, 'const added = [...enabled].filter(id => !this.enabledTuis.has(id))', 'const added = [...enabled]'],
+  'repeat-load': [owner, 'const added = [...enabled].filter(id => !this.autoStartingTools.has(id))', 'const added = [...enabled]'],
   'runner-environment': [owner, '      delete env.ELECTRON_RUN_AS_NODE\n', ''],
   'missing-intent': [owner, 'if (retained && !intent) throw new AgentMuxError', 'if (false) throw new AgentMuxError'],
   'dispose-stop': [owner, '// The durable Run outlives this host owner; closing its observer is not Stop.', 'await execution.port?.stop(ref(execution))'],

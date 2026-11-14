@@ -63,8 +63,8 @@ export async function capturePerformancePanel({ root, evidence, captureScope = '
       assert.ok(oldestOutput>newestSource,'Current Core dist must be rebuilt before the Native TUI capture')
     }
     const aliases=new Map()
-    for(const name of ['core','demand','layout','identity','relay','client-ui','diagnostic-evidence']){
-      const dir=path.join(root,'packages',name),pkg=JSON.parse(await bind(path.join(dir,'package.json')))
+    for(const name of ['core','demand','layout','identity','relay','client-ui','diagnostic-evidence','host','browser']){
+      const dir=path.join(root,name==='host'?'apps':'packages',name),pkg=JSON.parse(await bind(path.join(dir,'package.json')))
       for(const [key,value]of Object.entries(pkg.exports)){
         const target=typeof value==='string'?value:value.browser??value.import
         aliases.set('@agentmux/'+name+(key==='.'?'':key.slice(1)),path.join(dir,target.replace('./dist/src/','./src/').replace('./dist/','./src/').replace(/\.js$/u,'.ts')))

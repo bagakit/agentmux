@@ -8,6 +8,6 @@ const receipt = await captureTuiToolkit({ root: resolve(import.meta.dirname, '..
 assert.equal(receipt.completed, true, JSON.stringify(receipt.failure))
 assert.equal(receipt.sourceCurrentReadbackExact, true)
 assert.equal(receipt.actualTerminalView, false)
-assert.equal(receipt.frames.length, 6)
+assert.equal(receipt.frames.length, 8)
 assert.deepEqual(receipt.remainingPrivateProcesses, [])
 console.log(JSON.stringify({ completed: true, frames: receipt.frames, sourceIdentity: receipt.sourceIdentity, boundary: receipt.boundary }))

@@ -4,7 +4,7 @@ import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-valu
 // @vitest-environment happy-dom
 import { act, useState } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { ToolkitScriptSnapshot, ToolkitToolDefinition } from '@agentmux/core/control'
+import type { ToolkitScriptSnapshot, ToolkitToolDefinition, ToolkitToolConfiguration } from '@agentmux/core/control'
 import { isObjectId } from '@agentmux/core/object-id'
 import { ToolkitPopover } from '../src/renderer/src/components/performance/PerformancePopover'
 import { useToolkitScriptObservation } from '../src/renderer/src/components/toolkit/use-toolkit-script-observation'
@@ -22,6 +22,22 @@ const snapshot=(id:string,sequence=1): ToolkitScriptSnapshot => ({schema:'agentm
 beforeEach(()=> { vi.stubGlobal('ResizeObserver',class { observe() {} disconnect() {} unobserve() {} }); vi.stubGlobal('requestAnimationFrame',(f:FrameRequestCallback)=>setTimeout(()=>f(1),0)); vi.stubGlobal('cancelAnimationFrame',clearTimeout) })
 
 describe('Toolkit visible reader and shared selection',()=> {
+  it.each(['script', 'tui', 'package'] as const)('saves the visible %s startup checkbox through the original draft writer', async kind => {
+    const saved: ToolkitToolConfiguration = kind === 'package'
+      ? { kind: 'package', id: 'startup-option', revision: 'original', packagePath: '/tmp/extension', workspacePath: '/tmp', args: [], enabled: true, statusBar: 'icon' }
+      : { ...definition('startup-option'), mode: kind }
+    vi.spyOn(api.toolkit, 'list').mockResolvedValue([])
+    const update = vi.fn(async (_id, changes) => ({ ...saved, ...changes, revision: 'updated' }))
+    await dom.render(<ToolkitSettingsPane tools={[saved]} toolId={saved.id} active performance={{ enabled: false, statusBar: 'icon' }} writer={{ add: vi.fn(), update }} onSave={vi.fn()} onRemoveTool={vi.fn()} onRunTool={vi.fn()} />)
+    const checkbox = dom.container.querySelector<HTMLInputElement>('[aria-label="Run at startup"]')!
+    expect(checkbox).not.toBeNull(); expect(checkbox.checked).toBe(true)
+    await act(async () => checkbox.click())
+    expect(checkbox.checked).toBe(false)
+    const save = dom.container.querySelector<HTMLButtonElement>('.toolkit-editor__footer .primary-button')!
+    expect(save.disabled).toBe(false)
+    await act(async () => save.click())
+    expect(update).toHaveBeenCalledWith(saved.id, { autoStart: false }, { autoStart: true })
+  })
   it('releases the old selected reader before subscribing the new one, and close only releases its own read',async()=> {
     const calls:string[]=[],publish=new Map<string,(value:ToolkitScriptSnapshot)=>void>()
     const observe=vi.fn((id:string,read:(value:ToolkitScriptSnapshot)=>void)=>{

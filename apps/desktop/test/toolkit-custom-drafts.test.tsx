@@ -20,6 +20,18 @@ function Consumer({ tools }: { tools: ToolkitToolDefinition[] }) {
   return <div>{Object.entries(drafts.entries).map(([id,entry]) => <output key={id} data-tool={id}>{entry.value.name} · {toolkitDraftDirty(entry) ? 'Unsaved' : 'Saved'} · {entry.state}</output>)}</div>
 }
 describe('single-resource Toolkit authored drafts in an actual mounted consumer', () => {
+  it('keeps the default startup choice clean and saves an unchecked choice with its original baseline', async () => {
+    const original = tool('a')
+    await dom.render(<Consumer tools={[original]} />)
+    expect(drafts.entries.a!.value.autoStart).toBe(true)
+    expect(toolkitDraftDirty(drafts.entries.a!)).toBe(false)
+    await act(async () => { drafts.edit('a', { autoStart: false }) })
+    const update = vi.fn(async () => ({ ...original, autoStart: false, revision: 'startup-off' }))
+    await act(async () => { await drafts.save('a', { add: vi.fn(), update }) })
+    expect(update).toHaveBeenCalledWith('a', { autoStart: false }, { autoStart: true })
+    expect(drafts.entries.a!.value.autoStart).toBe(false)
+    expect(toolkitDraftDirty(drafts.entries.a!)).toBe(false)
+  })
   it('serializes an explicit mode in both directions and retains an outside name edit', async () => {
     const original = tool('a')
     await dom.render(<Consumer tools={[original]} />)
