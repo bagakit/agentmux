@@ -286,6 +286,7 @@ it('a failed metadata reader cannot remove a healthy original business member or
   const source = await createSpaceSessionsFixture(cleanup), sid = 'retained-original-member'
   await source.d.put(sid); await source.admit('D-in-B', 'runtime-d', sid, 'retained-original-member-operation')
   const f = spaceMountTransport(cleanup, [{ id: 'saved-b', carrier: { forwardRpc: source.b.rpc.call.bind(source.b.rpc), subscribeRpc: source.b.rpc.subscribe.bind(source.b.rpc) } }])
+  vi.spyOn(api.spaceMounts, 'call').mockImplementation(f.api.call)
   vi.spyOn(api.spaceMounts, 'watch').mockImplementation(f.api.watch)
   vi.spyOn(api.spaceMounts, 'sessions').mockRejectedValue(new Error('Original scoped metadata source unavailable'))
   const snapshot = await f.api.call('snapshot', { hostId: 'saved-b', reference: source.reference }), zone = snapshot.scope.zones[0]!
@@ -297,7 +298,9 @@ it('a failed metadata reader cannot remove a healthy original business member or
   expect(dom.container.textContent).toContain(sid)
   expect(dom.container.textContent).toContain('Original scoped metadata source unavailable')
   const stage = dom.container.querySelector<HTMLElement>('[data-source-region] .full-page-loading')!
-  expect(stage.textContent).toContain('Session connection unconfirmed')
+  await vi.waitFor(() => expect(stage.dataset.loadingPhase).toBe('parked'))
+  expect(stage.textContent).toContain('Agent creation unconfirmed')
+  expect(stage.textContent).toContain('retained-original-member-operation')
   expect(stage.dataset.loadingPhase).toBe('parked')
   expect(stage.getAttribute('aria-busy')).toBe('false')
   expect(useAppStore.getState().sessions).toBe(originalSessions)
