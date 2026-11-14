@@ -5,11 +5,8 @@
  * lazily when the click opens it (and a miss surfaces as a visible error), never here.
  *
  * Detection is deliberately conservative: underlining ordinary prose is worse than missing a path.
- * The crux acceptance rule — a core must contain a `/`, or carry a `:line` suffix AND at least one
- * letter — drops bare dotted words (`e.g.`, `foo.bar`, `1.2.3`, `README`) and every all-digit token
- * a `:n` would otherwise promote (clock-formatted numeric tokens, `1.2.3:4` versions), while still catching
- * `README.md:3:1` and every real relative/absolute path. See the module test for the full
- * accept/reject corpus.
+ * A core can contain a `/`, carry a line suffix and at least one letter, or be a filename delimited
+ * by parentheses. Unwrapped dotted words and numeric versions remain ordinary text.
  */
 
 /** A detected path link within one line, already resolved to a canonical workspace-relative path. */
@@ -61,6 +58,7 @@ export function terminalUriTokens(text: string): { index: number; text: string }
 }
 
 const NAME = String.raw`[\p{L}\p{M}\p{N}\p{Pc}\p{Pd}\p{Extended_Pictographic}\u200c\u200d.@+%~]`
+const PARENTHESIZED_FILENAME = new RegExp(String.raw`^\((` + NAME + String.raw`+\.\p{L}[\p{L}\p{N}]+)\)$`, 'u')
 const SEGMENT = String.raw`(?:` + NAME + String.raw`|\\[ \t]|\(` + NAME + String.raw`+\)|\[` + NAME + String.raw`+\])+`
 const LOCATION = String.raw`(?::-?\d+(?::-?\d+)?|\(-?\d+,-?\d+\)|#L-?\d+(?::-?\d+)?)`
 const INLINE_EXPLICIT_PREFIX = /^[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}\p{Script=Bopomofo}]+(?=(?:\.\.?|~)\/)/u
@@ -91,13 +89,15 @@ export function detectTerminalPathLinks(
     const prose = bareToken?.match(INLINE_EXPLICIT_PREFIX)?.[0].length ?? 0
     const visibleName = bareToken?.slice(prose)
     const bareName = location ? visibleName : visibleName?.replace(/\.+$/, '')
-    const name = quoted ? quoted.slice(1, -1).replace(/\\(["'\\])/g, '$1') : bareName?.replace(/\\([ \t])/g, '$1')
+    const parenthesized = bareName && !at && !location ? PARENTHESIZED_FILENAME.exec(bareName)?.[1] : undefined
+    const name = quoted ? quoted.slice(1, -1).replace(/\\(["'\\])/g, '$1')
+      : parenthesized ?? bareName?.replace(/\\([ \t])/g, '$1')
     if (!name || name.startsWith('~') && !name.startsWith('~/') ||
         /[\p{Cc}\\]/u.test(name)) continue
     const coordinates = location === undefined ? undefined : terminalFileLocation(location)
-    if (coordinates === null || !name.includes('/') && (!coordinates || !/\p{L}/u.test(name))) continue
-    const index = match.index + at + prose
-    const length = match[0].length - at - ((bareToken?.length ?? 0) - (bareName?.length ?? 0))
+    if (coordinates === null || !parenthesized && !name.includes('/') && (!coordinates || !/\p{L}/u.test(name))) continue
+    const index = match.index + at + prose + (parenthesized ? 1 : 0)
+    const length = parenthesized?.length ?? match[0].length - at - ((bareToken?.length ?? 0) - (bareName?.length ?? 0))
     while (reserved[reservation] && reserved[reservation]!.index + reserved[reservation]!.text.length <= index) reservation++
     const occupied = reserved[reservation]
     if (occupied && occupied.index < index + length) continue
