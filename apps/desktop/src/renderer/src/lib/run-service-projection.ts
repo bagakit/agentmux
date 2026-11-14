@@ -112,12 +112,14 @@ export function createRunServiceProjection() {
 
 export const runServiceProjection = createRunServiceProjection()
 
-export function useRunService(session: SessionSnapshot | undefined): AgentMuxNativeService | null {
+export type RunServiceProjection = ReturnType<typeof createRunServiceProjection>
+
+export function useRunService(session: SessionSnapshot | undefined, projection: RunServiceProjection = runServiceProjection): AgentMuxNativeService | null {
   const key = session ? targetKey(session) : null
-  const reader = useMemo(() => runServiceProjection.reader(session), [key])
+  const reader = useMemo(() => projection.reader(session), [key, projection])
   useSyncExternalStore(reader.subscribe, reader.snapshot)
-  useEffect(() => { if (session) runServiceProjection.observeSnapshot(session) }, [key, session?.nativeService])
-  return session ? runServiceProjection.read(session) : null
+  useEffect(() => { if (session) projection.observeSnapshot(session) }, [key, session?.nativeService, projection])
+  return session ? projection.read(session) : null
 }
 
 export function useRunServiceHealthChanges(): void {

@@ -5,6 +5,7 @@ import { rendererPerformance } from '../lib/renderer-performance'
 import { clientIncidentDispatcher, createClientIncidentRecorder } from '../lib/client-incident-recorder'
 import { createTerminalInteractionObservation } from '../lib/terminal-interaction-observation'
 import { observeTerminalAttachment } from '../lib/terminal-attachment-observation'
+import type { TerminalSessionSource } from '../lib/terminal-session-source'
 import { tabSwitchObservation } from '../lib/tab-switch-observation'
 import { useWorkbenchBrowserPresentation, type WorkbenchPresentation } from '../lib/workbench-presentation'
 import { subscribeTerminalInput } from '@agentmux/client-ui/terminal/input'
@@ -28,6 +29,7 @@ import { useWorkbenchDocument } from '../lib/workbench-document'
 import { copyTextToClipboard } from '../lib/clipboard-copy'
 import { workspaceRootForPath } from '../lib/workbench-tabs'
 import { dismissOpenDestinationRequest, type OpenHttpLinkOrigin } from '../lib/open-destination'
+import { parseAmuxObjectLink } from '@agentmux/core/sharing'
 import { parseHttpLinkUrl } from '@agentmux/client-ui/link-url'
 import { useAppStore, currentCoreSpatialGraph } from '../store'
 import { useShallow } from 'zustand/react/shallow'
@@ -44,7 +46,7 @@ import { terminalPathLinksInBuffer } from '../lib/terminal-link-range'
 import { terminalContextPathAtBufferCell } from '../lib/terminal-context-path'
 import { terminalLinkReadoutOverlapsText } from '../lib/terminal-link-readout'
 import { openTerminalFileLink, terminalFileMenuActions } from '../lib/terminal-file-action'
-import { createSessionProjectFileContextSelector, sessionFileResourcePath } from '../lib/session-project-file-context'
+import { createSessionProjectFileContextSelector, sessionFileResourcePath, type SessionProjectFileContext } from '../lib/session-project-file-context'
 import { openSessionFileLink } from '../lib/session-link-opening'
 import { sameWorkbenchProjectionSelection } from '../lib/workbench-projection'
 import { resolveFocusLinkDestination } from '../../../shared/focus-preferences'
@@ -194,6 +196,8 @@ function outputForSession(event: RuntimeEvent, session: SessionSnapshot) {
   return { ...core, ...core.evidence.outputByteRange }
 }
 
+const UNCONFIRMED_SOURCE_FILES: SessionProjectFileContext = { kind: 'unconfirmed', workspaceRoot: '', homeDir: '', issue: 'File navigation for this original source is not confirmed.' }
+
 type TerminalViewProps = {
   session: SessionSnapshot
   themeId: TerminalThemeId
@@ -211,6 +215,8 @@ type TerminalViewProps = {
   readOnly?: boolean
   linkOrigin?: OpenHttpLinkOrigin
   onObservationRefresh?(refresh: (() => Promise<void>) | null): void
+  /** Explicit source uses its own reader and never observer-local Session/file/recovery state. */
+  sessionSource?: TerminalSessionSource
   onRefreshSession?(control: SessionSnapshot['control']): Promise<SessionSnapshot>
 }
 
@@ -260,16 +266,19 @@ function TerminalViewOwner({
   readOnly = false,
   linkOrigin,
   onObservationRefresh,
-  onRefreshSession
+  onRefreshSession,
+  sessionSource
 }: Omit<TerminalViewProps, 'session'> & { session: TerminalSessionFacts }) {
+  const sessions = sessionSource?.sessions ?? api.sessions
+  const services = sessionSource?.services ?? runServiceProjection
   const refreshSessionRef = useRef(onRefreshSession)
-  refreshSessionRef.current = onRefreshSession
+  refreshSessionRef.current = sessionSource ? control => sessionSource.refresh(control) : onRefreshSession
   const autoFocusRef = useRef(autoFocus)
   autoFocusRef.current = autoFocus
   const readOnlyRef = useRef(readOnly)
   readOnlyRef.current = readOnly
-  const nativeService = useRunService(session)
-  const connectionWarnings = useAppStore(useShallow(state => (state.runtimeEndpointWarnings ?? [])
+  const nativeService = useRunService(session, services)
+  const connectionWarnings = useAppStore(useShallow(state => (sessionSource ? [] : state.runtimeEndpointWarnings ?? [])
     .filter(warning => warning.hostId === session.control.hostId && warning.observationOrigin !== undefined)))
   const observationAvailable = connectionWarnings.length === 0
   const hostDocument = useWorkbenchDocument()
@@ -280,11 +289,11 @@ function TerminalViewOwner({
   const switchReaderRef = useRef<(() => RendererTabSwitchTerminal | null) | null>(null)
   const presentation = useWorkbenchBrowserPresentation()
   const reference = presentation.reference
-  const displayOrigin: OpenHttpLinkOrigin | undefined = linkOrigin && reference ? { ...linkOrigin,
+  const displayOrigin: OpenHttpLinkOrigin | undefined = sessionSource ? undefined : linkOrigin && reference ? { ...linkOrigin,
     workspaceId: reference.displayWorkspaceId, tabGroupId: reference.groupId, tabId: reference.tabId } : linkOrigin
-  const switchTarget = useMemo(() => reference && linkOrigin?.regionId ? { ...reference,
+  const switchTarget = useMemo(() => !sessionSource && reference && linkOrigin?.regionId ? { ...reference,
     regionId: linkOrigin?.regionId, presentationId: presentation.projection?.presentationId ?? presentation.surface ?? 'space' } : null,
-  [reference?.displayWorkspaceId, reference?.groupId, reference?.tabId, linkOrigin?.regionId, presentation.projection?.presentationId, presentation.surface])
+  [sessionSource, reference?.displayWorkspaceId, reference?.groupId, reference?.tabId, linkOrigin?.regionId, presentation.projection?.presentationId, presentation.surface])
   useLayoutEffect(() => {
     if (switchTarget) return tabSwitchObservation.registerTerminal(switchTarget, () => switchReaderRef.current?.() ?? null)
   }, [switchTarget, session.id, session.control.run.runId])
@@ -305,7 +314,7 @@ function TerminalViewOwner({
   /** linkOrigin is a prop; the attach effect only re-runs on runId/session, so read it fresh
    * through a ref when the modifier fast-path opens a link from inside the effect closure. */
   const linkOriginRef = useRef(linkOrigin)
-  linkOriginRef.current = linkOrigin
+  linkOriginRef.current = sessionSource ? undefined : linkOrigin
   const displayOriginRef = useRef(displayOrigin)
   displayOriginRef.current = displayOrigin
   const presentationRef = useRef(presentation)
@@ -421,24 +430,24 @@ function TerminalViewOwner({
   const reportError = useAppStore((state) => state.reportError)
   const terminalConfig = useAppStore((state) => state.config)
   const workspaceIsLocal = useMemo(() =>
-    terminalConfig?.workspaces.find((workspace) => workspace.id === linkOrigin?.workspaceId)?.hostId === 'local',
-  [terminalConfig, linkOrigin?.workspaceId])
+    !sessionSource && terminalConfig?.workspaces.find((workspace) => workspace.id === linkOrigin?.workspaceId)?.hostId === 'local',
+  [terminalConfig, linkOrigin?.workspaceId, sessionSource])
   const workspaceIsLocalRef = useRef(workspaceIsLocal)
   workspaceIsLocalRef.current = workspaceIsLocal
   const regionCaretFocus = useAppStore((state) =>
-    regionCaretFocusTargets(state.regionCaretFocus, linkOrigin?.regionId) ? state.regionCaretFocus : null)
+    !sessionSource && regionCaretFocusTargets(state.regionCaretFocus, linkOrigin?.regionId) ? state.regionCaretFocus : null)
   const clearRegionCaretFocus = useAppStore((state) => state.clearRegionCaretFocus)
-  const selectFileContext = useMemo(() => createSessionProjectFileContextSelector(session.id,
+  const selectFileContext = useMemo(() => sessionSource ? () => UNCONFIRMED_SOURCE_FILES : createSessionProjectFileContextSelector(session.id,
     { ...displayOrigin, workspaceId: displayOrigin?.workspaceId ?? '', sessionId: session.id }, currentCoreSpatialGraph),
-  [session.id, displayOrigin?.workspaceId, displayOrigin?.tabGroupId, displayOrigin?.tabId, displayOrigin?.regionId])
+  [sessionSource, session.id, displayOrigin?.workspaceId, displayOrigin?.tabGroupId, displayOrigin?.tabId, displayOrigin?.regionId])
   const fileContext = useAppStore(selectFileContext)
   const fileContextRef = useRef(fileContext)
   fileContextRef.current = fileContext
   // Parse against the original physical directory, then translate to the File owner's
   // logical address. Conversation and Terminal share the same confirmed directory facts.
-  const activeWorkspaceRoot = useMemo(() => fileContext.pathPrefix ? fileContext.workspaceRoot
+  const activeWorkspaceRoot = useMemo(() => sessionSource ? session.workspacePath : fileContext.pathPrefix ? fileContext.workspaceRoot
     : workspaceRootForPath(terminalConfig ?? null, session) ?? '',
-  [fileContext.pathPrefix, fileContext.workspaceRoot, terminalConfig, session.kind, session.hostId, session.workspacePath])
+  [sessionSource, fileContext.pathPrefix, fileContext.workspaceRoot, terminalConfig, session.kind, session.hostId, session.workspacePath])
   const activeWorkspaceRootRef = useRef(activeWorkspaceRoot)
   activeWorkspaceRootRef.current = activeWorkspaceRoot
   const isMac = isMacPlatform()
@@ -481,6 +490,7 @@ function TerminalViewOwner({
   }, [searchOpen])
 
   function consumeCaretFocus(): void {
+    if (sessionSource) return
     const request = useAppStore.getState().regionCaretFocus
     if (!regionCaretFocusTargets(request, linkOriginRef.current?.regionId)) return
     if (!visibleRef.current) return
@@ -714,6 +724,14 @@ function TerminalViewOwner({
       if (/^amux:/iu.test(uri)) {
         // Alt+primary belongs to xterm's TUI mouse passthrough, not local navigation.
         if (origin?.altKey || event.altKey) return
+        if (sessionSource) {
+          let qualified = false
+          try { const target = parseAmuxObjectLink(uri); qualified = target.kind === 'host' && target.runtimeId !== undefined && target.resource !== undefined } catch { /* Unqualified source identities stay with their original source. */ }
+          if (!qualified) {
+            reportError(new Error('This link belongs to the original source. Copy its address; navigation from this view is not confirmed.'))
+            return
+          }
+        }
         void api.ui.openObjectLink(uri).catch(reportError)
         return
       }
@@ -721,6 +739,16 @@ function TerminalViewOwner({
       if (!url) {
         reportError(new Error('This terminal link uses an unsupported protocol. Copy its original address to open it in the appropriate application.'))
         return
+      }
+      if (sessionSource) {
+        // WHATWG URL normalizes equivalent numeric IP spellings before this source check.
+        const host = new URL(url).hostname.toLowerCase().replace(/\.$/, '')
+        const loopback = host === 'localhost' || host.endsWith('.localhost') || host === '[::1]' ||
+          /^127\.\d+\.\d+\.\d+$/.test(host) || /^\[::ffff:7f[0-9a-f]{2}:[0-9a-f]{1,4}\]$/.test(host)
+        if (loopback) {
+          reportError(new Error('This address refers to the original Agent device. Copy the address or open it on that device; opening it on this device is unconfirmed.'))
+          return
+        }
       }
       if (!displayOriginRef.current) {
         void api.ui.openExternal(url).catch(reportError)
@@ -1295,7 +1323,7 @@ function TerminalViewOwner({
         // 这次几何没到 PTY，synchronizer 不许把它记成 PTY 的当前尺寸，否则恢复运行后
         // 同一几何被相同-key 短路吞掉，网格永久停在退出前（见 viewport-sync 的 resize 合同）。
         if (!canControlRunRef.current || attachmentId === null) return false
-        const applied = await api.sessions.resize(attachmentId, cols, rows)
+        const applied = await sessions.resize(attachmentId, cols, rows)
         if (!applied) return false
         return { cols: applied.cols, rows: applied.rows }
       },
@@ -1364,7 +1392,7 @@ function TerminalViewOwner({
         const recovered = await recoverTerminalRetainedOutput({
           cursor,
           throughByte,
-          read: (afterByte) => observeRead(boundedTerminalHistoryRead(api.sessions.replay(attachmentId!, afterByte)), observationLifetime.signal),
+          read: (afterByte) => observeRead(boundedTerminalHistoryRead(sessions.replay(attachmentId!, afterByte)), observationLifetime.signal),
           write: writeHistoricalOutput
         })
         if (disposed) return
@@ -1704,7 +1732,9 @@ function TerminalViewOwner({
         endByte: output.endByte
       })
     }
-    const disposeEvents = api.sessions.onEvent(accept, session.control)
+    let disposeEvents = () => {}
+    try { disposeEvents = sessions.onEvent(event => { if (sessionSource) services.apply(event); accept(event) }, session.control) }
+    catch (error) { reportError(error) }
     const resize = new (root.ownerDocument.defaultView!.ResizeObserver)(() => {
       clearLinkPreview()
       viewport.observeViewport()
@@ -1735,7 +1765,7 @@ function TerminalViewOwner({
           const observation = rendererPerformance.beginInputRequest(source === 'user' ? 'user' : 'protocol', startedAt, {
             hostId: session.control.hostId, sessionId: session.control.kind === 'agent' ? session.control.agentSessionId : null, runId: session.control.run.runId })
           let request: Promise<void>
-          try { request = api.sessions.write(session.control, data, source, observation.parent) }
+          try { request = sessions.write(session.control, data, source, observation.parent) }
           catch (error) { observation.fail(); throw error }
           observation.observe(request)
           if (source === 'user') interaction.observeWriteRequest(request, startedAt)
@@ -1752,7 +1782,7 @@ function TerminalViewOwner({
             const observation = rendererPerformance.beginInputRequest('paste', startedAt, {
               hostId: session.control.hostId, sessionId: session.control.kind === 'agent' ? session.control.agentSessionId : null, runId: session.control.run.runId })
             let request: Promise<void>
-            try { request = api.sessions.paste(session.control, text, terminalData, observation.parent) }
+            try { request = sessions.paste(session.control, text, terminalData, observation.parent) }
             catch (error) { observation.fail(); throw error }
             observation.observe(request)
             void request.catch(reportError)
@@ -1885,10 +1915,10 @@ function TerminalViewOwner({
         }
         observationPending = refresh
         const result = await observeTerminalAttachment(refresh
-          ? api.sessions.refreshAttachment(session.control, attachmentId, cursor)
-          : api.sessions.attach(session.control, 0), observationLifetime.signal, attachmentId)
+          ? sessions.refreshAttachment(session.control, attachmentId, cursor)
+          : sessions.attach(session.control, 0), observationLifetime.signal, attachmentId, id => sessions.detach(id))
         if (disposed) {
-          if (attachmentId === null) await api.sessions.detach(result.attachmentId)
+          if (attachmentId === null) await sessions.detach(result.attachmentId)
           return
         }
         attachmentId = result.attachmentId
@@ -1989,7 +2019,7 @@ function TerminalViewOwner({
             initialFailureOccurrence = failureOccurrence ?? initialFailureOccurrence
           }
           const vanishedAgentRun = session.kind === 'agent' && isVanishedAgentRunError(error)
-          if (!refresh && vanishedAgentRun && recoverVanishedRunRef.current !== session.control.run.runId) {
+          if (!sessionSource && !refresh && vanishedAgentRun && recoverVanishedRunRef.current !== session.control.run.runId) {
             // The durable Agent Session is still the owner. Ask the store to perform the
             // Core continuity decision; when it produces a new Run, this component's existing
             // run-id dependency reattaches the same terminal without a second xterm surface.
@@ -2093,7 +2123,7 @@ function TerminalViewOwner({
       cleanup(() => input.dispose())
       cleanup(() => resize.disconnect())
       cleanup(() => {
-        if (attachmentId !== null) void api.sessions.detach(attachmentId).catch((error) => {
+        if (attachmentId !== null) void sessions.detach(attachmentId).catch((error) => {
           console.warn('[terminal] Attachment release was not acknowledged', error)
         })
       })
@@ -2104,12 +2134,12 @@ function TerminalViewOwner({
       cleanup(() => resourceOwners.release())
       if (disposalFailure) throw disposalFailure.error
     }
-  }, [session.control.run.runId, session.id])
+  }, [session.control.run.runId, session.id, sessionSource])
 
   // Address changes replace only the observation callback, never the terminal/attachment.
   useEffect(() => {
     const regionId = linkOrigin?.regionId
-    if (!regionId) return
+    if (!regionId || sessionSource) return
     return registerTerminalViewObservation({
       regionId,
       sessionId: session.id,
@@ -2118,7 +2148,7 @@ function TerminalViewOwner({
       readOverlapTop: popup => inputGeometryRef.current?.readOverlapTop(popup),
       subscribe: onChange => inputGeometryRef.current?.subscribe(onChange) ?? (() => {})
     })
-  }, [linkOrigin?.regionId, session.id, session.control.run.runId])
+  }, [linkOrigin?.regionId, session.id, session.control.run.runId, sessionSource])
 
   async function redrawCurrentScreen(): Promise<boolean> {
     const viewport = viewportRef.current
@@ -2290,7 +2320,7 @@ function TerminalViewOwner({
     (session.kind === 'agent' ? serviceNoticeToRender(classifyServiceNotice(agentSessionServiceOutcome(session), observationAvailable)) : null)
   const hookIngressNotice = serviceNoticeToRender(classifyServiceNotice(hookIngressServiceOutcome(session), observationAvailable))
   const hookDeliveryNotice = serviceNoticeToRender(classifyServiceNotice(hookDeliveryServiceOutcome(session), observationAvailable))
-  const connectionObservations = terminalConnectionNotices(session, connectionWarnings, nativeService, runServiceProjection.evidence(session))
+  const connectionObservations = terminalConnectionNotices(session, connectionWarnings, nativeService, services.evidence(session))
   const attachmentNotice = attachmentFailure ? { kind: 'indeterminate' as const, notice: {
     step: attachmentFailure.step,
     mode: `${attachmentFailure.message} The original Run was last observed ${session.processState}. This read does not determine current Run availability or input delivery. Your Session, history and draft are kept.`,
