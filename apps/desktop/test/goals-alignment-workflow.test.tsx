@@ -54,6 +54,14 @@ async function save(alignment?: DemandAlignmentProposal, confirmed = false, grou
 function button(label: string) { const action = ['Clarify goal', 'Discuss changes'].includes(label) ? '[data-goal-grill]' : label === 'Ask agent to check work' ? '[data-goal-grounding]' : null; const node = (action ? container.querySelector<HTMLButtonElement>(action) : null) ?? [...container.querySelectorAll<HTMLButtonElement>('button')].find(node => node.textContent?.trim() === label || node.getAttribute('aria-label') === label); expect(node, label).toBeDefined(); return node! }
 async function click(label: string, waitForTransport = true) { const target = button(label); await act(async () => { target.click(); if (waitForTransport) await host.settle() }); if (waitForTransport) await eventually(() => expect(target.isConnected && target.disabled).toBe(false)) }
 async function eventually(assertion: () => unknown | Promise<unknown>) { await vi.waitFor(async () => { await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)) }); await assertion() }) }
+async function openReportedEvidence() {
+  const report = container.querySelector<HTMLElement>('.goal-review--report')!
+  await act(async () => report.querySelector<HTMLElement>('.goal-review__disclosure > summary')!.click())
+  const evidence = [...report.querySelectorAll<HTMLElement>('.goal-review__evidence > summary')]
+  expect(evidence.length).toBeGreaterThan(0)
+  await act(async () => { for (const item of evidence) item.click() })
+  await eventually(() => expect(report.querySelectorAll('.goals-evidence')).toHaveLength(evidence.length))
+}
 // The Goals list groups rows by whose turn it is; read this Goal's own row, never whichever row is first.
 function intentReading() { return container.querySelector('.goals-intent__reading')?.textContent }
 function next() { return container.querySelector('[data-demand-id="goal"] .goals-row__next')?.textContent }
@@ -164,6 +172,7 @@ describe('mounted Goals → actual Renderer store → durable Demand owner', () 
     await writeFile(owner.storePath, JSON.stringify(snapshot)); await useAppStore.getState().refreshDemand('goal'); await mount()
     expect(container.querySelector('[data-goal-result-summary]')?.textContent).toBe(report().summary)
     expect([...container.querySelectorAll('[data-goal-outcome]')].map(node => node.getAttribute('data-goal-outcome'))).toEqual(['met', 'met'])
+    await openReportedEvidence()
     expect([...container.querySelectorAll('.goals-evidence code')].map(node => node.getAttribute('title'))).toEqual(report().checks.flatMap(check => check.evidence))
     expect(container.querySelector('.goals-grounding')?.textContent).toContain('Define the goal and success criteria before accepting this report.')
     expect(container.querySelector('[data-goal-accept], [data-goal-accept-gaps]')).toBeNull()
@@ -384,6 +393,7 @@ describe('mounted Goals → actual Renderer store → durable Demand owner', () 
     const read = vi.spyOn(api.files, 'read'), publicRead = vi.spyOn(api.files, 'readPublic')
     const copy = vi.spyOn(api.ui, 'writeClipboardText').mockResolvedValue(undefined)
     await mount()
+    await openReportedEvidence()
     expect(container.querySelectorAll('.goals-evidence__open')).toHaveLength(0)
     expect(container.textContent).toContain('Original reference · File source not recorded')
     await click('Copy evidence location artifacts/restart.log:12')

@@ -74,6 +74,18 @@ const checks = () => [...body().querySelectorAll<HTMLElement>('[data-goal-criter
 const evidence = () => [...body().querySelectorAll<HTMLElement>('.goals-evidence code')]
 const action = (selector: string) => body().querySelector<HTMLButtonElement>(selector)!
 async function click(node: HTMLElement) { await act(async () => { node.click(); await host.settle() }); await vi.waitFor(() => expect(body().querySelector('button:disabled')?.textContent).not.toBe('Saving…')) }
+async function expandReport(report = body().querySelector<HTMLElement>('.goal-review--report')!) {
+  const details = report.querySelector<HTMLDetailsElement>('.goal-review__disclosure')!
+  if (!details.open) await click(details.querySelector('summary')!)
+  expect(details.open).toBe(true)
+  return details
+}
+async function expandEvidence(section: HTMLElement) {
+  for (const details of section.querySelectorAll<HTMLDetailsElement>('.goal-review__evidence')) {
+    await click(details.querySelector('summary')!)
+    await vi.waitFor(() => expect(details.querySelector('.goals-evidence')).not.toBeNull())
+  }
+}
 const current = () => useAppStore.getState().demands['review-reading']!
 async function retainedExtraCheck(check: DemandGroundingProposal['checks'][number]) {
   // The public writer correctly rejects unknown criterion IDs. Reading an existing
@@ -86,6 +98,10 @@ async function retainedExtraCheck(check: DemandGroundingProposal['checks'][numbe
 
 it('the actual workspace reads each current criterion, reported check and original evidence exactly once', async () => {
   await seed({ confirmed: true, grounding: report() }); await mount()
+  expect(disclosure().open, 'The original report opens as a summary, without its evidence list').toBe(false)
+  expect(evidence()).toHaveLength(0)
+  expect(body().querySelector('.goal-review__counts')?.textContent).toContain('2 reported met')
+  await expandEvidence(await expandReport())
   expect(criteria().map(node => node.textContent)).toEqual(proposal.criteria.map(item => item.text))
   expect(checks().map(node => node.dataset.goalCriterionId)).toEqual(['tabs', 'draft'])
   expect(evidence().map(node => node.title)).toEqual(report().checks.flatMap(item => item.evidence))
@@ -97,6 +113,10 @@ it('the actual workspace reads each current criterion, reported check and origin
 
 it('keeps unconfirmed current standards before Confirm and retains the same evidence tree after the real confirmation receipt', async () => {
   await seed({ grounding: report() }); await mount()
+  const read = [...body().querySelectorAll('button')].find(button => button.textContent === 'Read success criteria')!
+  await click(read)
+  expect(disclosure().open).toBe(true)
+  await expandEvidence(disclosure())
   const confirm = action('[data-goal-confirm]'), held = body().querySelector('.goals-evidence')
   for (const criterion of criteria()) expect(criterion.compareDocumentPosition(confirm) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   expect(action('[data-goal-accept]')).toBeNull()
@@ -116,6 +136,7 @@ it('keeps current criteria once and preserves the previous revision report, outc
   expect(body().querySelectorAll('[data-goal-outcome="stale"]')).toHaveLength(3)
   const previous = body().querySelector<HTMLDetailsElement>('.goals-previous-report')!
   expect(previous).not.toBeNull()
+  await expandEvidence(await expandReport())
   expect(previous.querySelector('summary')?.textContent).toContain('v1')
   expect(previous.querySelectorAll('[data-goal-criterion-id]')).toHaveLength(3)
   expect(previous.textContent).toContain('Earlier scope remains unknown.')
@@ -131,6 +152,7 @@ it('shows additional checks, missing current checks, unknown results and absent 
   ] } })
   await retainedExtraCheck({ criterionId: 'extra', outcome: 'met', evidence: ['artifacts/extra.log:3'], note: 'Additional report retained.' })
   await mount()
+  await expandEvidence(await expandReport())
   expect(checks().map(node => node.dataset.goalOutcome)).toEqual(['unknown', 'missing', 'met'])
   expect(body().textContent).toContain('No evidence provided.')
   expect(body().textContent).toContain('Missing check')
@@ -144,6 +166,7 @@ it('keeps a durable report without a definition readable through the public relo
   await seed({ confirmed: true, grounding: report() })
   const snapshot = await host.demands.snapshot(); delete snapshot.demands[0]!.alignment
   await writeFile(host.demands.storePath, JSON.stringify(snapshot)); await useAppStore.getState().refreshDemand('review-reading'); await mount()
+  await expandEvidence(await expandReport())
   expect(criteria()).toHaveLength(0); expect(checks()).toHaveLength(2); expect(evidence()).toHaveLength(2)
   expect(body().textContent).toContain('Define the goal and success criteria before accepting this report.')
   expect(action('[data-goal-accept]')).toBeNull()
@@ -176,6 +199,7 @@ it.each(['absent', 'unconfirmed', 'confirmed'] as const)('keeps Done with %s def
 
 it('keeps evidence nodes, the original editor and its draft while the native reading disclosure closes and reopens', async () => {
   await seed({ confirmed: true, grounding: report() }); await mount()
+  await expandEvidence(await expandReport())
   await act(async () => editGoalDraft('review-reading', 'description', 'Unsent original review draft.  '))
   const editor = body().querySelector('[aria-label="Goal description"]'), held = body().querySelector('.goals-evidence'), panel = disclosure(), summary = panel.querySelector<HTMLElement>('summary')!
   expect(editor).toBeTruthy(); summary.focus()

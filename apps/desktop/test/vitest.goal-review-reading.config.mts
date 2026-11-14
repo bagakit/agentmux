@@ -9,7 +9,8 @@ const mutations = {
   'duplicate-current': ['const currentReport = Boolean(alignment && grounding && !stale)', 'const currentReport = false'],
   'discard-extra': ['const extraChecks = grounding?.checks.filter(check => !criterionIds.has(check.criterionId)) ?? []', 'const extraChecks = []'],
   'compact-lost': ["const compactAgreement = Boolean(alignment?.confirmedAt && !confirmIssue && !grounding && demand.status !== 'done' && !failure)", 'const compactAgreement = false'],
-  'old-report-lost': ['{stale ? <details className="goals-previous-report">', '{false ? <details className="goals-previous-report">'],
+  'old-report-lost': ['{grounding && !currentReport ? report :', '{grounding && !currentReport && !stale ? report :'],
+  'expand-report-automatically': ['<details className={`goal-review__disclosure${stale', '<details open className={`goal-review__disclosure${stale'],
   'done-hidden': ["demand.status !== 'done' && !failure)", '!failure)'],
   'recovery-hidden': ['{failure ? <div className="goals-service" role="status" data-goal-acknowledgement-failure>', '{false ? <div className="goals-service" role="status" data-goal-acknowledgement-failure>'],
   'continued-actions-hidden': ['      </div></details>\n      {compactAgreement ? noResults : null}', '      {compactAgreement ? noResults : null}\n      </div></details>']

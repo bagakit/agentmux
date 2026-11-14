@@ -242,6 +242,14 @@ describe('Goal plan graph', () => {
     expect(dom.container.querySelector('.goals-detail')).not.toBeNull()
     expect(graph()).not.toBeNull()
     expect(graph()!.querySelectorAll('[data-goal-plan-node]')).toHaveLength(1)
+    const path = [...graph()!.querySelectorAll('.goal-plan__columns > li')].map(item => item.getAttribute('data-goal-plan-boundary') ?? 'work')
+    expect(path, 'The original single work node keeps both workflow boundaries').toEqual(['start', 'work', 'finish'])
+    expect(graph()!.querySelector('[data-goal-finish-state="Pending"]')).not.toBeNull()
+    const timeline = graph()!.querySelector('[aria-label="Execution timeline"]')!
+    expect(timeline, 'The original Goal keeps its timeline even without any time facts').not.toBeNull()
+    expect(timeline.querySelector('.goal-execution-time__axis')?.textContent).toContain('No schedule or execution times')
+    expect(timeline.querySelector('[data-goal-time-row="node:goal"] .goal-execution-time__track--empty')).not.toBeNull()
+    expect(timeline.querySelector('time, [data-goal-observed-activity], [data-goal-planned-period]')).toBeNull()
     expect(dom.container.querySelector('.goals-detail__main')!.firstElementChild?.contains(graph())).toBe(true)
     const origin = graph()!.querySelector('[data-goal-plan-origin="goal"]')!
     expect(origin).not.toBeNull()
@@ -262,6 +270,20 @@ describe('Goal plan graph', () => {
     const back = [...graph()!.querySelectorAll('button')].find(button => button.textContent === 'Back to node')!
     await act(async () => back.click())
     expect(document.activeElement).toBe(open)
+  })
+
+  it('draws only original plan dates and derives Finish from the Goal close and acceptance', async () => {
+    const report = { submissionId: 'original-report', alignmentRevision: 1, summary: 'Original checks', acceptedAt: 12,
+      checks: [{ criterionId: 'api', outcome: 'gap' as const, note: 'A retained gap', evidence: ['checks/api.log'] }] }
+    seed(goal({ status: 'done', plannedStartAt: 100, targetAt: 200, grounding: report }))
+    await dom.render(<GlobalBoardSurface />)
+    expect(graph()!.querySelector('[data-goal-finish-state="Closed with gaps"]')).not.toBeNull()
+    expect(graph()!.querySelector('[data-goal-planned-period]')?.textContent).toBe('Planned')
+    expect(graph()!.querySelector('[data-goal-observed-activity]')).toBeNull()
+    await act(async () => seed(goal({ status: 'done', targetAt: 200, grounding: { ...report, acceptedAt: null } })))
+    expect(graph()!.querySelector('[data-goal-finish-state="Unverified"]')).not.toBeNull()
+    expect(graph()!.querySelector('[data-goal-planned-period]')).toBeNull()
+    expect(graph()!.querySelector('[data-goal-time-event="Target date"]')).not.toBeNull()
   })
 
   it('uses the same canvas when the owner saves a split and keeps an old Done Goal unverified', async () => {
