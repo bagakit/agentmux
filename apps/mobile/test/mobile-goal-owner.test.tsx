@@ -36,10 +36,13 @@ const mounts: { root: Root; element: HTMLDivElement }[] = []
 const scratch = { id: SCRATCH_WORKSPACE_ID, name: 'Main Mote', hostId: 'local', path: fixturePath("private-topic-fixture"), kind: 'scratch' as const }
 const config = { ...baseline.config, version: 9, hosts: [{ id: 'local', kind: 'local', label: 'Private' }], workspaces: [scratch], executors: {} } as any
 const proposal = { summary: 'Read real current proposal', criteria: [{ id: 'c', text: 'Original criterion' }], openQuestions: [] }
-const goalViewport = { matches: false, listeners: new Set<() => void>(), addEventListener(_type: string, listener: () => void) { this.listeners.add(listener) }, removeEventListener(_type: string, listener: () => void) { this.listeners.delete(listener) } }
-async function goalWidth(width: number) { await act(async () => { goalViewport.matches = width >= 760; for (const listener of goalViewport.listeners) listener() }) }
+const originalGoalWidth = Object.getOwnPropertyDescriptor(window, 'innerWidth')
+async function goalWidth(width: number) { await act(async () => {
+  Object.defineProperty(window, 'innerWidth', { configurable: true, value: width })
+  window.dispatchEvent(new Event('resize'))
+  await new Promise<void>(resolve => window.requestAnimationFrame(() => resolve()))
+}) }
 beforeEach(async () => {
-  goalViewport.matches = false; vi.spyOn(window, 'matchMedia').mockReturnValue(goalViewport as unknown as MediaQueryList)
   localStorage.clear(); await getDeviceWorkface().replaceBackup(emptyDeviceWorkface())
   directory = await mkdtemp(join(tmpdir(), 'mgoal-')); discussions.clear(); discussionUnavailable = false; directoryProjects = []
   const configurationPath = join(directory, 'configuration.json')
@@ -75,6 +78,7 @@ beforeEach(async () => {
 })
 afterEach(async () => {
   for (const view of mounts.splice(0)) { await act(async () => view.root.unmount()); view.element.remove() }
+  if (originalGoalWidth) Object.defineProperty(window, 'innerWidth', originalGoalWidth); else Reflect.deleteProperty(window, 'innerWidth')
   await Promise.allSettled([...inFlight]); await hostGoals.dispose(); vi.restoreAllMocks(); useAppStore.setState(baseline, true); await rm(directory, { recursive: true, force: true })
 })
 async function mount(initialContext?: import('../src/recovery/presentation-route').MobileGoalsContext, mobileApp = false) {
@@ -206,7 +210,7 @@ it('responsive Goals actual App keeps its selected owner, original editor and un
     expect(view.element.querySelector('article:not([hidden]) [aria-label="目标正文草稿"]'), 'width must keep the same original editor node').toBe(editor)
     expect(editor.value).toBe('原目标未保存正文保持'); expect(editor.selectionStart).toBe(2); expect(editor.selectionEnd).toBe(6)
     expect(document.activeElement).toBe(editor); expect(pane.scrollTop).toBe(93)
-    expect(list!.hidden).toBe(width < 760)
+    expect(list!.hidden).toBe(width < 600)
     expect(createForm.hidden, 'width never reopens or focuses the retained creation form').toBe(true)
     expect(device.exportBackup()).toBe(original)
   }
@@ -852,8 +856,13 @@ it('mobile brand art appears only on the visible Goal directory and current prop
   list.mockRejectedValue(new Error('Original list is unknown'))
   await view.click('刷新目标'); await view.wait('Original list is unknown')
   expect(view.element.querySelector('.mobile-goals-start--empty')).toBeNull()
+  const retainedArt = view.element.querySelector<HTMLImageElement>('.mobile-goals-start__art')!
+  const goalHost = retainedArt.closest<HTMLElement>('.mobile-goals-host')!
+  expect(goalHost.hidden).toBe(false)
   await openPrimary(view.element, 'Focus')
-  expect(view.element.querySelector('.mobile-goals-start__art'), 'hidden directories do not retain an image request').toBeNull()
+  expect(view.element.querySelector('.mobile-goals-start__art'), 'the original Goal workface retains its brand node').toBe(retainedArt)
+  expect(goalHost.hidden, 'the exact Goal host is no longer presented after choosing Focus').toBe(true)
+  expect(retainedArt.closest('[hidden]')).toBe(goalHost)
   expect(view.element.querySelector('.mobile-goal-discussion-heading img')).toBeNull()
   expect(view.sdk!.submit).not.toHaveBeenCalled()
 }, 30000)

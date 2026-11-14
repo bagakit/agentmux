@@ -10,8 +10,7 @@ import { createBrowserPlatform } from '../src/platform/browser'
 import { emptyDeviceWorkface, getDeviceWorkface } from '../src/recovery/device-workface'
 import { button, click, editor, fixture, mount, mounted, paste } from './conversation-fixture'
 
-const listeners = new Set<() => void>()
-const media = { matches: true, addEventListener: (_: string, listener: () => void) => listeners.add(listener), removeEventListener: (_: string, listener: () => void) => listeners.delete(listener) }
+let viewportWidth = 1024
 const connection = { state: 'connected' as const, message: 'Original Host' }
 const rootPath = fixturePath('responsive-original')
 const originalFile = 'plan.txt'
@@ -20,7 +19,11 @@ const resource = { hostId: 'host-original', workspaceId: 'resource-original', wo
 const readParams = { zoneId: resource.zoneId, path: 'plan.txt', expectedResource: { hostId: resource.hostId, workspaceId: resource.workspaceId, workspacePath: resource.workspacePath } }
 const shown = (node: Element) => !node.closest('[hidden]')
 async function wait(check: () => void) { await vi.waitFor(async () => { await act(async () => {}); check() }, { timeout: 4000, interval: 10 }) }
-async function resize(wide: boolean) { await act(async () => { media.matches = wide; for (const listener of listeners) listener() }) }
+async function resize(wide: boolean) { await act(async () => {
+  viewportWidth = wide ? 1024 : 390
+  window.dispatchEvent(new Event('resize'))
+  await new Promise<void>(resolve => window.requestAnimationFrame(() => resolve()))
+}) }
 
 function setup(size = 2) {
   const f = fixture()
@@ -63,7 +66,7 @@ async function chooseFile(element: HTMLElement) {
   await click(file!)
   await wait(() => expect(element.querySelector('.mobile-region-content')?.textContent).toContain(originalBody))
 }
-beforeEach(async () => { media.matches = true; listeners.clear(); vi.stubGlobal('matchMedia', () => media); window.history.replaceState(null, ''); localStorage.clear(); await getDeviceWorkface().replaceBackup(emptyDeviceWorkface()) })
+beforeEach(async () => { viewportWidth = 1024; vi.spyOn(window, 'innerWidth', 'get').mockImplementation(() => viewportWidth); window.dispatchEvent(new Event('resize')); window.history.replaceState(null, ''); localStorage.clear(); await getDeviceWorkface().replaceBackup(emptyDeviceWorkface()) })
 afterEach(async () => {
   for (const view of mounted.splice(0)) { await act(async () => view.root.unmount()); view.element.remove() }
   await act(async () => vi.dynamicImportSettled())

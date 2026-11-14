@@ -14,7 +14,7 @@ vi.mock('../src/navigation/defer-mobile-surface', async original => {
   } }
 })
 it('wide directory module loading and failure stay reachable in the actual fixed sidebar, preserving the original editor', async () => {
-  vi.stubGlobal('matchMedia', () => ({ matches: true, addEventListener() {}, removeEventListener() {} }))
+  vi.stubGlobal('innerWidth', 1024); vi.stubGlobal('innerHeight', 768)
   vi.spyOn(console, 'error').mockImplementation(() => {})
   const owner = getDeviceWorkface(), f = fixture()
   localStorage.clear(); await owner.replaceBackup(emptyDeviceWorkface()); await owner.updateNavigation({ selectedSessionId: 'session-original', hostUrl: '', panel: 'conversation' })

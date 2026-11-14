@@ -1,6 +1,6 @@
-import { appendFileSync, readFileSync } from 'node:fs'
+import { appendFileSync, readFileSync, realpathSync } from 'node:fs'
 import { createHash } from 'node:crypto'
-import { relative, resolve } from 'node:path'
+import { dirname, relative, resolve } from 'node:path'
 import base from '../vitest.config'
 
 const root = resolve(import.meta.dirname, '../../..'), mutation = process.env.RESPONSIVE_GOALS_MUTATION, trace = process.env.RESPONSIVE_GOALS_LOADED
@@ -15,6 +15,7 @@ const variant = mutation ? variants[mutation as keyof typeof variants] : undefin
 const files = new Set([owner, 'apps/mobile/src/goals/MobileGoalDraftEditor.tsx', 'apps/mobile/src/goals/useGoalDraft.ts', 'apps/mobile/src/MobileApp.tsx', 'apps/mobile/test/mobile-goal-owner.test.tsx'])
 const sha = (value: string) => createHash('sha256').update(value).digest('hex')
 export default { ...base, root: resolve(root, 'apps/mobile'), cacheDir: resolve(root, '.tmp/mobile-all-surfaces/goals/vitest', mutation ?? 'baseline'),
+  server: { fs: { allow: [root, dirname(realpathSync(resolve(root, 'node_modules')))] } },
   plugins: [...base.plugins ?? [], { name: 'actual-responsive-goal-consumers', enforce: 'pre' as const, transform(original: string, id: string) {
     const file = relative(root, id.split('?')[0]!)
     if (!files.has(file)) return

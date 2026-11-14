@@ -44,6 +44,15 @@
     "apps/mobile/src/recovery/device-workface.ts",
     "apps/mobile/src/navigation/defer-mobile-surface.tsx",
     "apps/desktop/src/main/scratch-topics.ts",
-    "apps/desktop/src/main/workspace-files.ts"
+    "apps/desktop/src/main/workspace-files.ts",
+    "apps/mobile/src/navigation/current-workface.ts",
+    "apps/mobile/src/layout/workface-presentation.ts",
+    "apps/mobile/src/layout/MobileWorkfaceFrame.tsx",
+    "apps/mobile/src/layout/use-mobile-workface-layout.ts",
+    "apps/mobile/src/platform/native/device.ts",
+    "apps/mobile/src/layout/workface.css",
+    "apps/mobile/src/topics/source-reader.css",
+    "apps/mobile/src/topics/topics.css",
+    "apps/mobile/src/mobile.css"
   ]
 }

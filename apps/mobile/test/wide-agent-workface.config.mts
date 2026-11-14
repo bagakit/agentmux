@@ -1,6 +1,6 @@
-import { appendFileSync } from 'node:fs'
+import { appendFileSync, realpathSync } from 'node:fs'
 import { createHash } from 'node:crypto'
-import { relative, resolve } from 'node:path'
+import { dirname, relative, resolve } from 'node:path'
 import base from '../vitest.config'
 const root = resolve(import.meta.dirname, '../../..'), variant = process.env.WIDE_WORKFACE_MUTATION, trace = process.env.WIDE_WORKFACE_LOADED
 const mutations: Record<string, { before: string; after: string; target: string }> = {
@@ -10,9 +10,10 @@ const mutations: Record<string, { before: string; after: string; target: string 
 }
 if (variant && !mutations[variant]) throw Error('Unknown wide workface mutation: ' + variant)
 const mutation = variant ? mutations[variant] : undefined
-const owners = new Set(['apps/mobile/src/MobileApp.tsx', 'apps/mobile/src/navigation/defer-mobile-surface.tsx', 'apps/mobile/test/wide-agent-directory-load.test.tsx', 'apps/mobile/src/navigation/MobileSpatialNavigation.tsx', 'apps/mobile/src/navigation/MobileAgentRow.tsx', 'apps/mobile/src/navigation/use-wide-agent-workface.ts', 'apps/mobile/src/conversation/MobileConversationSurface.tsx', 'apps/mobile/test/wide-agent-workface.test.tsx', 'apps/mobile/test/mobile-hidden-directory-cost.test.tsx'])
+const owners = new Set(['apps/mobile/src/MobileApp.tsx', 'apps/mobile/src/navigation/defer-mobile-surface.tsx', 'apps/mobile/test/wide-agent-directory-load.test.tsx', 'apps/mobile/src/navigation/MobileSpatialNavigation.tsx', 'apps/mobile/src/navigation/MobileAgentRow.tsx', 'apps/mobile/src/layout/use-mobile-workface-layout.ts', 'apps/mobile/src/layout/workface-presentation.ts', 'apps/mobile/src/platform/native/device.ts', 'apps/mobile/src/conversation/MobileConversationSurface.tsx', 'apps/mobile/test/wide-agent-workface.test.tsx', 'apps/mobile/test/mobile-hidden-directory-cost.test.tsx'])
 const sha = (source: string) => createHash('sha256').update(source).digest('hex')
 export default { ...base, root: resolve(root, 'apps/mobile'), cacheDir: resolve(root, '.tmp/mobile-wide-agent-workface/vitest', variant ?? 'baseline'),
+  server: { fs: { allow: [root, dirname(realpathSync(resolve(root, 'node_modules')))] } },
   plugins: [...base.plugins ?? [], { name: 'evaluated-wide-workface', enforce: 'pre' as const, transform(source: string, id: string) {
     const file = relative(root, id.split('?')[0]!)
     if (!owners.has(file)) return

@@ -56,7 +56,7 @@ async function surface(f: Awaited<ReturnType<typeof ownerFixture>>) {
     await act(async () => root.render(<div className="mobile-topics-host"><TopicsTestSurface rpc={f.rpc} client={f.client} connected visible={visible} wide={wide}
       onController={value => { navigation = value }} onIntent={opened}
       onProjection={route => { context(route.context); reference(route.knowledge) }} renderWorkface={workface} openSource={opened}
-      /><div className="mobile-topics-source-slot" hidden={!sourceActive}><MobileTopicSource source={f.source} rpc={f.rpc} visible={visible && sourceActive} onBack={() => {}} openScope={() => {}} /></div></div>))
+      /><div className="mobile-topics-source-slot" hidden={!sourceActive}><MobileTopicSource source={f.source} rpc={f.rpc} presentation={{ presented: visible && sourceActive, observed: visible && sourceActive }} onBack={() => {}} openScope={() => {}} /></div></div>))
   }
   await render()
   await waitFor(() => expect(element.querySelector(`[data-topic-category="${f.category.categoryId}"]`)).not.toBeNull())
@@ -157,8 +157,8 @@ it('withdraws the actual in-flight knowledge read while its Source owns the read
 
 it('actual App leaves original Source A only for explicit knowledge B or discussion navigation, keeping original draft and no business dispatch', async () => {
   const f = await ownerFixture(), sdk = conversationFixture()
-  const viewport = { matches: true, addEventListener() {}, removeEventListener() {} }
-  vi.stubGlobal('matchMedia', () => viewport)
+  vi.spyOn(window, 'innerWidth', 'get').mockReturnValue(1024)
+  window.dispatchEvent(new Event('resize'))
   sdk.client.runtimeOwnerIdentity = f.client.runtimeOwnerIdentity!
   sdk.client.forwardRpc = (async (method, input) => method === 'goal.ls' ? { goals: [], unavailable: [] } : f.rpc(method, input)) as TopicsRpc
   await getDeviceWorkface().updatePresentation({ selectedSessionId: 'session-original', hostUrl: f.scope.origin, panel: 'conversation' }, {

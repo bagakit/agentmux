@@ -12,15 +12,13 @@ vi.mock('../src/topics/MobileTopicsSurface', async () => {
   directory.imports += 1
   throw new Error('Controlled directory module is unavailable; original source remains independent.')
 })
-const listeners = new Set<() => void>()
-const media = { matches: false, addEventListener: (_: string, listener: () => void) => listeners.add(listener), removeEventListener: (_: string, listener: () => void) => listeners.delete(listener) }
 afterEach(async () => {
   for (const view of mounted.splice(0)) { await act(async () => view.root.unmount()); view.element.remove() }
   document.body.replaceChildren(); vi.restoreAllMocks(); vi.unstubAllGlobals(); localStorage.clear(); window.history.replaceState(null, '')
 })
 
 it('cold compact Source reads independently of Topics and stays readable when the wide directory module fails', async () => {
-  vi.stubGlobal('matchMedia', vi.fn(() => media))
+  vi.stubGlobal('innerWidth', 390); vi.stubGlobal('innerHeight', 844)
   const owner = getDeviceWorkface(), f = fixture()
   await owner.replaceBackup(emptyDeviceWorkface())
   const path = fixturePath('responsive-source-loading')
@@ -46,7 +44,7 @@ it('cold compact Source reads independently of Topics and stays readable when th
   await vi.waitFor(async () => { await act(async () => {}); expect(owner.snapshot().record.presentation?.topics?.sources[0]?.content?.kind).toBe('file') })
   expect(directory.imports, 'Cold compact Source must not import the Topics directory').toBe(0)
   const reader = view.element.querySelector('.mobile-topic-source-reader')!, bytes = JSON.stringify(owner.snapshot().record)
-  await act(async () => { media.matches = true; for (const listener of listeners) listener() })
+  await act(async () => { vi.stubGlobal('innerWidth', 951); window.dispatchEvent(new Event('resize')) })
   await vi.waitFor(async () => { await act(async () => {}); expect(view.element.querySelector('.mobile-topics-directory-host')?.textContent).toContain('Topics暂时无法打开') })
   expect(directory.imports).toBe(1)
   expect(view.element.querySelector('.mobile-topic-source-reader')).toBe(reader)

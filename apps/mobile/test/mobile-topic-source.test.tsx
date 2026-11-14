@@ -8,15 +8,15 @@ import type { TopicsRpc } from '../src/topics/MobileTopicKnowledge'
 
 ;(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 const mounted: { root: Root; element: HTMLDivElement }[] = []
-async function mount(props: Parameters<typeof MobileTopicSource>[0]) {
+async function mount(props: Omit<Parameters<typeof MobileTopicSource>[0], 'presentation'> & Partial<Pick<Parameters<typeof MobileTopicSource>[0], 'presentation'>>) {
   const element = document.createElement('div'); document.body.append(element)
   const root = createRoot(element); mounted.push({ root, element })
-  await act(async () => root.render(<MobileTopicSource {...props} />))
-  return { element, render: async (next: Parameters<typeof MobileTopicSource>[0]) => { await act(async () => root.render(<MobileTopicSource {...next} />)) } }
+  await act(async () => root.render(<MobileTopicSource {...props} presentation={props.presentation ?? { presented: true, observed: true }} />))
+  return { element, render: async (next: Omit<Parameters<typeof MobileTopicSource>[0], 'presentation'> & Partial<Pick<Parameters<typeof MobileTopicSource>[0], 'presentation'>>) => { await act(async () => root.render(<MobileTopicSource {...next} presentation={next.presentation ?? { presented: true, observed: true }} />)) } }
 }
 afterEach(async () => { for (const { root, element } of mounted.splice(0)) { await act(async () => root.unmount()); element.remove() } })
 async function click(element: HTMLElement, text: string) {
-  const found = [...element.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === text)
+  const found = [...element.querySelectorAll<HTMLButtonElement>('button')].find(button => !button.closest('[hidden]') && (button.textContent === text || button.getAttribute('aria-label') === text))
   expect(found, text).toBeDefined(); await act(async () => found!.click())
 }
 const workspace = { workspaceId: 'workspace-id-not-a-title', hostId: 'original-host', name: '原配置项目', projectId: 'project', path: fixturePath("projects/original"), kind: 'folder', repoPath: null, branch: null }
@@ -38,6 +38,35 @@ describe('original knowledge source read', () => {
     expect(element.textContent).toContain('项目根'); expect(element.textContent).not.toContain(workspace.workspaceId)
     await click(element, '打开工作面'); expect(openScope).toHaveBeenCalledWith({ zoneId: zone.zoneId, path: 'docs/a.md', workspace, directoryPath: zone.directoryPath })
     await click(element, '返回知识'); expect(back).toHaveBeenCalledOnce()
+  })
+  it('keeps the presented original reader and scroll node while observation is paused, rejecting its late response', async () => {
+    let hold = false, release!: () => void
+    const { rpc, call } = fixture(method => method === 'app.snapshot' ? { workspaces: [workspace], unavailable: [] }
+      : method === 'space.ls' ? { catalog: { zones: [zone] } } : hold ? new Promise(resolve => { release = () => resolve({ ...originalRead, result: { status: 'read', document: { ...originalRead.result.document, content: '# Late paused body' } } }) }) : originalRead)
+    const props = { source, rpc, onBack: vi.fn(), openScope: vi.fn(), onReferenceChange: vi.fn() }
+    const view = await mount(props)
+    const reader = view.element.querySelector<HTMLElement>('.mobile-topic-source-reader')!, article = reader.querySelector('article')!
+    reader.scrollTop = 83
+    hold = true; await click(view.element, '刷新文件')
+    expect(release).toBeTypeOf('function')
+    const reports = props.onReferenceChange.mock.calls.length
+    await view.render({ ...props, presentation: { presented: true, observed: false } })
+    await act(async () => release())
+    expect(reader.hidden, 'An inactive observation must not hide the presented Source.').toBe(false)
+    expect(view.element.querySelector('.mobile-topic-source-reader')).toBe(reader)
+    expect(reader.querySelector('article')).toBe(article)
+    expect(reader.querySelector('article h1')?.textContent).toBe('原文件正文')
+    expect(reader.scrollTop).toBe(83); expect(props.onReferenceChange).toHaveBeenCalledTimes(reports)
+    const requests = call.mock.calls.length
+    await view.render({ ...props, presentation: { presented: true, observed: false } })
+    expect(call).toHaveBeenCalledTimes(requests)
+    hold = false
+    await view.render({ ...props, presentation: { presented: true, observed: true } })
+    expect(view.element.querySelector('.mobile-topic-source-reader')).toBe(reader)
+    expect(reader.querySelector('article')).toBe(article)
+    expect(reader.querySelector('article h1')?.textContent).toBe('原文件正文')
+    expect(call.mock.calls.filter(([method]) => method === 'file.read')).toHaveLength(3)
+    expect(call.mock.calls.some(([method]) => method === 'file.write')).toBe(false)
   })
   it('does not pick the first of multiple exact scopes or read from a different Host or path sibling', async () => {
     const nested = { ...zone, zoneId: 'nested-zone', directoryPath: fixturePath("projects/original/docs") }

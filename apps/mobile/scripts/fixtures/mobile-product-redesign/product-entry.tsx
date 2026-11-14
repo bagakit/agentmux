@@ -31,6 +31,7 @@ const composerFresh = composerFixture && localStorage.getItem('mobile-product-fi
 let composerRuntimeKnown = !composerFresh
 let releaseComposerReads: (() => void) | null = null
 const composerReads = composerFresh ? new Promise<void>(resolve => { releaseComposerReads = resolve }) : Promise.resolve()
+const densityWorkfacesFixture = new URLSearchParams(location.search).get('density-workfaces') === '1'
 const restoreResponsiveWorkface = responsiveFixture && localStorage.getItem('mobile-product-fixture-initialized') === 'true'
 const calls: Call[] = []
 const record = (method: string, params: unknown = {}) => calls.push({ sequence: calls.length + 1, observedAt: Date.now(), method, params: structuredClone(params) })
@@ -106,6 +107,31 @@ const goal: AgentMuxRpcGoal = { id: 'goal-original', title: '把两个想法变�
     checks: [{ criterionId: 'criterion-original', outcome: 'met', note: '已整理步骤、比较依据与需要你决定的地方。', evidence: ['原资料/实验建议.md'] }] } }
 let brandGoalScene = 'nonempty', rejectBrandGoalRead: (() => void) | null = null
 const brandOriginalGoal = structuredClone(goal)
+const densityTitles = ['梳理原始研究资料', '核对本周实验目标', '整理用户反馈证据', '比较两个实现方案', '记录待确认的问题', '准备第一轮小实验', '校准协作任务边界', '归档已验证的结果', '补齐关键反例材料', '检查工作面恢复路径', '汇总跨项目观察', '复核最终交付依据']
+const densityGoals: AgentMuxRpcGoal[] = densityWorkfacesFixture ? densityTitles.map((title, index) => ({
+  id: `density-goal-${String(index + 1).padStart(2, '0')}`, title, description: '保留原始依据，核对可验证的下一步。',
+  status: (['in_progress', 'todo', 'done'] as const)[index % 3]!, priority: 'normal', projectId: 'density-project', projectName: '密度对照项目',
+  sessionIds: [], source: 'session', activityLog: [], createdAt: 1, updatedAt: 1,
+})) : []
+if (densityWorkfacesFixture) {
+  // Controlled public scope, never opened on disk; identical in both worktrees.
+  const workspacePath = '/density-fixture/project'
+  sessions.splice(0, sessions.length, ...densityTitles.map((_, index) => ({ ...original(`density-agent-${String(index + 1).padStart(2, '0')}`), workspacePath })))
+  const project = { key: 'density-project', projectId: 'density-project', hostId: 'host-original', name: '密度对照项目', spaceId: 'density-space' }
+  const row = catalog.agentPresentation![0]!
+  catalog.agentPresentation!.splice(0, catalog.agentPresentation!.length, ...sessions.map((session, index) => ({ ...row,
+    agentSessionId: session.agentSessionId, name: densityTitles[index]!, project: project.name, projectGroup: project,
+    group: 'working', state: 'working', stateMark: 'working', stateLabel: '执行中', detail: '正在核对原始材料',
+    recap: { text: '保留依据，核对下一步。', source: 'native-hook' }, lastActivityAt: 1,
+  })))
+  catalog.spaces.splice(0, catalog.spaces.length, { spaceId: project.spaceId, kind: 'folder', name: project.name, hostId: 'host-original', directoryPath: workspacePath, projectId: null })
+  catalog.zones.splice(0, catalog.zones.length, { zoneId: 'density-zone', workspaceId: 'density-workspace', kind: 'directory', hostId: 'host-original', directoryPath: workspacePath, branch: null })
+  catalog.tabs.splice(0, catalog.tabs.length, ...sessions.map((session, index) => ({ tabId: `density-tab-${index + 1}`, zoneId: 'density-zone', workspaceId: 'density-workspace', name: densityTitles[index]!, regionIds: [`density-region-${index + 1}`] })))
+  catalog.regions.splice(0, catalog.regions.length, ...sessions.map((session, index) => ({ tabId: `density-tab-${index + 1}`, regionId: `density-region-${index + 1}`, kind: 'agent', agentSessionId: session.agentSessionId, runId: session.run.runId, execution: { hostId: session.hostId!, cwd: session.workspacePath } })))
+  catalog.bindings.splice(0, catalog.bindings.length, { spaceId: project.spaceId, zoneId: 'density-zone' })
+  catalog.locations.splice(0, catalog.locations.length, ...sessions.map((_, index) => ({ spaceId: project.spaceId, zoneId: 'density-zone', workspaceId: 'density-workspace', displayWorkspaceId: 'density-display', groupId: 'density-group', tabId: `density-tab-${index + 1}`, regionId: `density-region-${index + 1}` })))
+  catalog.appearance.splice(0); catalog.motePresentation!.splice(0)
+}
 let connected = location.hash !== '#fixture-offline', unknownNext = false, promptReadFails = false, appearanceRevision = 0
 let holdFileUpload = false
 let releaseFileUpload: (() => void) | null = null
@@ -346,9 +372,9 @@ const client = {
     }
     if (method === 'goal.ls') {
       if (brandGoalScene === 'pending') await new Promise<never>((_resolve, reject) => { rejectBrandGoalRead = () => reject(Error('原目标目录读取尚未确认，已读内容和草稿保留。')) })
-      return { goals: brandGoalScene === 'empty' ? [] : [goal] }
+      return { goals: densityWorkfacesFixture ? densityGoals : brandGoalScene === 'empty' ? [] : [goal] }
     }
-    if (method === 'goal.inspect') return { goal, goalContinuations: [] }
+    if (method === 'goal.inspect') return { goal: densityWorkfacesFixture ? densityGoals.find(value => value.id === params.goalId) ?? null : goal, goalContinuations: [] }
     if (method === 'goal.decisions') return { decisions: [] }
     if (method === 'file.read') {
       if (responsiveWorkfaces && params.zoneId === 'zone-resources') {
@@ -375,8 +401,8 @@ const client = {
   }
 } as unknown as AgentMuxHostedClient
 if (!localStorage.getItem('mobile-product-fixture-initialized')) {
-  localStorage.setItem('agentmux-mobile-home', 'mote')
-  if (responsiveFixture || composerFixture) {
+  localStorage.setItem('agentmux-mobile-home', densityWorkfacesFixture ? 'focus' : 'mote')
+  if (responsiveFixture || densityWorkfacesFixture || composerFixture) {
     await getDeviceWorkface().replaceBackup(emptyDeviceWorkface())
     await getDeviceWorkface().confirmHost({ origin: 'http://127.0.0.1', hostId: 'relay-original' })
   } else getDeviceWorkface().confirmHost({ origin: 'http://127.0.0.1', hostId: 'relay-original' })
@@ -683,6 +709,7 @@ function Scene() {
     releaseFileUpload: () => { releaseFileUpload?.() },
     appearanceReady: () => Boolean(appearanceSubscriber),
     facts: () => ({ calls, dialogue: moteDialogueCapture?.facts(), record: getDeviceWorkface().snapshot().record, directoryComparisons, directoryFacts: catalog.regions.length + catalog.locations.length + catalog.spaces.length,
+      densityFixture: densityWorkfacesFixture ? { goals: densityGoals, sessions, catalog } : null,
       directoryScope: { sessions: sessions.length, regions: catalog.regions.length, locations: catalog.locations.length, spaces: catalog.spaces.length, motes: catalog.spaces.filter(owner => owner.kind === 'mote').length },
       menuAgentName, expectedReply: ordinaryReply, auxiliaryRecords: auxiliaryDensityScene ? auxiliaryDensityTimeline(main) : null, copiedTexts, joinedNotice, controlledCopy: agentMenuScene || joinedNotice !== null, controlledSdk: true, physicalPhone: false,
       intendedOccurrence: catalog.locations.find(location => location.regionId === 'region-mote'), sessionIds: sessions.map(session => ({ sessionId: session.agentSessionId, runId: session.run.runId })) })

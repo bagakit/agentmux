@@ -24,7 +24,7 @@ await mkdir(base, { recursive: true })
 const mutations = ['sticky-source', 'forget-scope', 'metadata-navigates', 'late-save-body', 'null-origin', 'old-source-frame']
 async function validate(receipt) {
   assert.equal(receipt.passed, true); assert.deepEqual(receipt.inputs, inputs); assert.deepEqual(receipt.dependencies, dependencies)
-  assert.equal(receipt.runs.length, mutations.length + 2)
+  assert.deepEqual(receipt.runs.map(run => run.label), ['baseline', ...mutations, 'restored'])
   for (const run of receipt.runs) {
     const report = await readFile(resolve(root, run.report)), trace = await readFile(resolve(root, run.trace))
     assert.equal(hash(report), run.reportSHA256); assert.equal(hash(trace), run.traceSHA256)
@@ -37,7 +37,10 @@ async function validate(receipt) {
     if (mutations.includes(run.label)) {
       assert.equal(run.exitCode, 1); assert.equal(data.numFailedTestSuites, 1); assert.equal(data.numFailedTests, 1); assert.equal(executed.length, 1)
       assert.ok(executed[0].failureMessages.some(message => message.includes('AssertionError')), 'A business assertion bears the failure')
-      assert.ok(rows.some(row => row.originalSHA256 !== row.consumedSHA256), 'The mutation was evaluated')
+      const owner = run.label === 'late-save-body' ? 'apps/mobile/src/topics/MobileTopicKnowledge.tsx' : 'apps/mobile/src/topics/topics-navigation.ts'
+      assert.ok(rows.some(row => row.file === owner && row.mutation === run.label
+        && /^[a-f0-9]{64}$/.test(row.originalSHA256) && /^[a-f0-9]{64}$/.test(row.consumedSHA256)
+        && row.originalSHA256 === inputs[owner] && row.originalSHA256 !== row.consumedSHA256), 'The exact mutation was evaluated')
     } else {
       assert.equal(run.exitCode, 0); assert.equal(data.numFailedTests, 0); assert.ok(executed.length >= 52, 'Nonempty original and new consumers')
       assert.ok(executed.every(test => test.status === 'passed'))
@@ -75,7 +78,11 @@ try {
     console.log(label + ': ' + executed.length + ' executed, ' + data.numFailedTests + ' failed')
   }
   for (const [file, digest] of Object.entries(inputs)) assert.equal(hash(await readFile(resolve(root, file))), digest, 'Source stable: ' + file)
-  receipt.passed = true; await validate(receipt)
+  await validate({ ...receipt, passed: true })
+  receipt.passed = true
+} catch (error) {
+  receipt.error = { name: error.name, message: error.message }
+  throw error
 } finally {
   await writeFile(resolve(directory, 'receipt.json'), JSON.stringify(receipt, null, 2) + '\n')
 }

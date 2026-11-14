@@ -13,17 +13,25 @@ import { WorkspaceFiles } from '../../desktop/src/main/workspace-files'
 import { MobileTopicSource, type MobileTopicSourceProps } from '../src/topics/MobileTopicSource'
 import { parseMobileTopicSourceContentReference, type MobileTopicSourceContentReference } from '../src/topics/source-reference'
 import type { TopicsRpc } from '../src/topics/MobileTopicKnowledge'
-import { mount, mounted } from './conversation-fixture'
+import { mount as mountConversation, mounted } from './conversation-fixture'
+import { MobileHeaderMenuContext } from '../src/navigation/MobileHeaderMenu'
 
+const openMenu = vi.fn()
+const menu = <button type="button" aria-label="原手机菜单" onClick={openMenu} />
+async function mount(node: ReactNode) {
+  const wrap = (value: ReactNode) => <MobileHeaderMenuContext.Provider value={menu}>{value}</MobileHeaderMenuContext.Provider>
+  const view = await mountConversation(wrap(node))
+  return { ...view, render: async (value: ReactNode) => view.render(wrap(value)) }
+}
 const roots: string[] = [], originalFiles: WorkspaceFiles[] = []
 afterEach(async () => {
   for (const item of mounted.splice(0)) { await act(async () => item.root.unmount()); item.element.remove() }
   for (const files of originalFiles.splice(0)) await files.dispose()
   for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true })
-  localStorage.clear(); vi.restoreAllMocks()
+  localStorage.clear(); vi.restoreAllMocks(); openMenu.mockClear()
 })
 async function click(element: HTMLElement, text: string) {
-  const button = [...element.querySelectorAll<HTMLButtonElement>('button')].find(button => !button.closest('[hidden]') && button.textContent === text)
+  const button = [...element.querySelectorAll<HTMLButtonElement>('button')].find(button => !button.closest('[hidden]') && (button.textContent === text || button.getAttribute('aria-label') === text))
   expect(button, `Visible original action ${text}`).toBeDefined()
   await act(async () => button!.click())
 }
@@ -101,7 +109,7 @@ describe('source content references without saved bodies or substituted resource
       return children
     }
     const rpc = vi.fn(() => new Promise(() => {})) as unknown as TopicsRpc
-    await mount(<FirstCommit><MobileTopicSource source={source} rpc={rpc} initialReference={savedFile()}
+    await mount(<FirstCommit><MobileTopicSource presentation={{ presented: true, observed: true }} source={source} rpc={rpc} initialReference={savedFile()}
       onBack={vi.fn()} openScope={vi.fn()} onBackChange={value => { back = value }} onReferenceChange={changes} /></FirstCommit>)
     expect(observed).toEqual([true])
     expect(changes).toHaveBeenCalledOnce()
@@ -120,7 +128,7 @@ describe('source content references without saved bodies or substituted resource
     let record: MobileTopicSourceContentReference | undefined
     const props = { ...callbacks(), source: original, rpc: call as unknown as TopicsRpc,
       onReferenceChange: (value: MobileTopicSourceContentReference) => { record = parseMobileTopicSourceContentReference(value, original) } }
-    const first = await mount(<MobileTopicSource {...props} />)
+    const first = await mount(<MobileTopicSource presentation={{ presented: true, observed: true }} {...props} />)
     await waitFor(() => expect(first.element.textContent).toContain('second.md'))
     await click(first.element, 'second.md')
     await waitFor(() => expect(first.element.querySelector('article h1')?.textContent).toBe('准确第二文件'))
@@ -130,7 +138,7 @@ describe('source content references without saved bodies or substituted resource
     expect(JSON.stringify(record)).not.toContain('原 owner 的非空正文')
     await unmount(first.element)
     const before = call.mock.calls.length
-    const reopened = await mount(<MobileTopicSource {...props} initialReference={record} />)
+    const reopened = await mount(<MobileTopicSource presentation={{ presented: true, observed: true }} {...props} initialReference={record} />)
     await waitFor(() => expect(reopened.element.querySelector('article h1')?.textContent).toBe('准确第二文件'))
     expect(call.mock.calls.slice(before).filter(([method]) => method === 'file.read').map(([, params]) => params.path)).toEqual(['docs', 'docs/second.md'])
     const reads = call.mock.calls.length
@@ -150,7 +158,7 @@ describe('source content references without saved bodies or substituted resource
           : params.path === 'docs' ? { resource: filePin('docs').resource, result: { status: 'directory' } } : originalRead(params.path)
     })
     const props = { ...callbacks(), source, rpc: call as unknown as TopicsRpc, initialReference: savedFile() }
-    const view = await mount(<MobileTopicSource {...props} />)
+    const view = await mount(<MobileTopicSource presentation={{ presented: true, observed: true }} {...props} />)
     expect(props.onReferenceChange).not.toHaveBeenCalled()
     expect(view.element.querySelector('header h1')?.textContent).toBe('second.md')
     expect(view.element.textContent).toContain('来源范围还没重新确认')
@@ -165,7 +173,7 @@ describe('source content references without saved bodies or substituted resource
       ? { ...originalRead(params.path, '# 不能冒充的另一正文'), resource: { ...filePin(params.path).resource, zonePath: fixturePath("different"), logicalDirectory: '' } }
       : Promise.reject(new Error(`Unexpected ${method}`)))
     const props = { ...callbacks(), source, rpc, initialReference: savedFile() }
-    const view = await mount(<MobileTopicSource {...props} />)
+    const view = await mount(<MobileTopicSource presentation={{ presented: true, observed: true }} {...props} />)
     expect(view.element.textContent).toContain('来源文件位置已变化')
     expect(view.element.textContent).not.toContain('不能冒充的另一正文')
     expect(props.onReferenceChange).not.toHaveBeenCalled()
@@ -186,15 +194,29 @@ describe('source content references without saved bodies or substituted resource
     let record: MobileTopicSourceContentReference | undefined
     const props = { ...callbacks(), source: original, rpc: call as unknown as TopicsRpc,
       onReferenceChange: (value: MobileTopicSourceContentReference) => { record = parseMobileTopicSourceContentReference(value, original) } }
-    const first = await mount(<MobileTopicSource {...props} />)
+    const first = await mount(<MobileTopicSource presentation={{ presented: true, observed: true }} {...props} />)
     await click(first.element, '第二页second.note.md')
     await waitFor(() => expect(first.element.querySelector('[data-note-id]')?.getAttribute('data-note-id')).toBe(noteId))
+    const childHeader = [...first.element.querySelectorAll<HTMLElement>('.mobile-source-header')].find(value => !value.closest('[hidden]'))!
+    expect(childHeader.querySelector('[aria-label="原手机菜单"]')).not.toBeNull()
+    expect(childHeader.querySelector('[aria-label="返回笔记本"]')).not.toBeNull()
     await click(first.element, '编辑原笔记')
     const editor = first.element.querySelector<HTMLElement>('[contenteditable="true"]') as HTMLElement & { editor: { commands: { insertContent(text: string): void } } }
     await act(async () => editor.editor.commands.insertContent('明确写入的原未知稿'))
     await click(first.element, '保存原笔记')
     await waitFor(() => expect(first.element.textContent).toContain('保存回执未知'))
     await act(async () => editor.editor.commands.insertContent('后来未发送稿'))
+    const reader = first.element.querySelector<HTMLElement>('.mobile-topic-source-reader')!
+    reader.scrollTop = 67
+    const pausedRequests = call.mock.calls.length
+    await first.render(<MobileTopicSource {...props} presentation={{ presented: true, observed: false }} />)
+    expect(first.element.querySelector('[contenteditable="true"]')).toBe(editor)
+    expect(editor.closest('[hidden]'), 'Notebook content remains presented below an inactive overlay.').toBeNull()
+    expect(reader.scrollTop).toBe(67); expect(call).toHaveBeenCalledTimes(pausedRequests)
+    await first.render(<MobileTopicSource {...props} presentation={{ presented: true, observed: true }} />)
+    await waitFor(() => expect(first.element.querySelector('[data-note-id]')?.getAttribute('data-note-id')).toBe(noteId))
+    expect(first.element.querySelector('[contenteditable="true"]')).toBe(editor)
+    expect(call.mock.calls.filter(([method]) => method === 'file.write')).toHaveLength(1)
     const persisted = [...Array(localStorage.length)].map((_, i) => localStorage.key(i)!).find(key => key.startsWith('agentmux-mobile-note-draft:'))!
     const draft = JSON.parse(localStorage.getItem(persisted)!)
     expect(draft.attempt.phase).toBe('unknown'); expect(draft.attempt.content).toContain('明确写入的原未知稿')
@@ -203,7 +225,7 @@ describe('source content references without saved bodies or substituted resource
     if (!record || record.kind !== 'notebook') throw new Error('The original Source must save its Notebook Note reference')
     await unmount(first.element)
     const before = call.mock.calls.length
-    const reopened = await mount(<MobileTopicSource {...props} initialReference={record} />)
+    const reopened = await mount(<MobileTopicSource presentation={{ presented: true, observed: true }} {...props} initialReference={record} />)
     await waitFor(() => expect(reopened.element.querySelector('[data-note-id]')?.getAttribute('data-note-id')).toBe(noteId))
     const newEditor = reopened.element.querySelector<HTMLElement>('[contenteditable="true"]')!
     expect(newEditor).not.toBe(editor); expect(newEditor.textContent).toContain('后来未发送稿')
@@ -224,9 +246,13 @@ describe('source content references without saved bodies or substituted resource
       { noteId: 'first-note', title: '第一页', resource: { ...expectedResource, path: 'first.note.md' } },
       { noteId: 'second-note', title: '第二页', resource: { ...expectedResource, path: 'wrong/second.note.md' }, workface: { zoneId: zone.zoneId, workspaceId: workspace.workspaceId } }] }))
     const props = { ...callbacks(), source: original, rpc: call as unknown as TopicsRpc, initialReference: saved }
-    const view = await mount(<MobileTopicSource {...props} />)
+    const view = await mount(<MobileTopicSource presentation={{ presented: true, observed: true }} {...props} />)
     expect(view.element.querySelector('[aria-label="笔记页待核实"]')?.textContent).toContain('文件位置还没确认或已变化')
     expect(call).toHaveBeenCalledExactlyOnceWith('notebook.inspect', { notebookId: original.notebookId })
+    const pending = view.element.querySelector('[aria-label="笔记页待核实"]')!
+    expect(pending.querySelector('.mobile-source-header [aria-label="原手机菜单"]')).not.toBeNull()
+    expect(pending.querySelector('.mobile-source-header [aria-label="返回笔记本"]')).not.toBeNull()
+    await click(view.element, '原手机菜单'); expect(openMenu).toHaveBeenCalledOnce()
     expect(props.onReferenceChange).not.toHaveBeenCalled(); expect(view.element.querySelector('[data-note-id]')).toBeNull()
   })
 
@@ -235,14 +261,14 @@ describe('source content references without saved bodies or substituted resource
     const { rpc, call } = scopeRpc((method, params) => method === 'file.read' && params.path === 'docs'
       ? new Promise(done => { resolve = done }) : method === 'file.read' && ++laterReads > 1
         ? new Promise(done => { resolveLater = done }) : originalRead(params.path, '# 后来的准确正文'))
-    const cb = callbacks(), props: MobileTopicSourceProps = { ...cb, source, rpc, initialReference: savedFile(), visible: false }
-    const view = await mount(<MobileTopicSource {...props} />)
+    const cb = callbacks(), props: MobileTopicSourceProps = { ...cb, source, rpc, initialReference: savedFile(), presentation: { presented: false, observed: false } }
+    const view = await mount(<MobileTopicSource presentation={{ presented: true, observed: true }} {...props} />)
     expect(call).not.toHaveBeenCalled(); expect(props.onReferenceChange).not.toHaveBeenCalled()
-    await view.render(<MobileTopicSource {...props} visible />)
+    await view.render(<MobileTopicSource {...props} presentation={{ presented: true, observed: true }} />)
     await waitFor(() => expect(resolve).toBeTypeOf('function'))
     const next = { ...source, path: fixturePath("original/later.md") }
     const { initialReference: _previousReference, ...laterProps } = props
-    await view.render(<MobileTopicSource {...laterProps} source={next} visible />)
+    await view.render(<MobileTopicSource {...laterProps} source={next} presentation={{ presented: true, observed: true }} />)
     await act(async () => resolve(originalRead('docs', '# 已过时正文')))
     expect(view.element.querySelector('article h1')?.textContent).toBe('后来的准确正文')
     expect(JSON.stringify(cb.onReferenceChange.mock.calls)).not.toContain('docs/second.md')

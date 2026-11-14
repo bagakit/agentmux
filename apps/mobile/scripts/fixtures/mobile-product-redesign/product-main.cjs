@@ -16,7 +16,7 @@ app.whenReady().then(async () => {
   win.setContentSize(390, 844)
   result.environment.versions = process.versions
   win.webContents.on('console-message', event => { if (event.level === 'error') result.errors.push(event.message) })
-  if (mode === 'responsive-primary-workfaces') await win.loadURL(html)
+  if (['responsive-primary-workfaces', 'density-workfaces'].includes(mode)) await win.loadURL(html)
   else await win.loadFile(html, ['mote-composer', 'mote-notice-join', 'mote-dialogue', 'mote-main-setup', 'mote-main-retention', 'mote-discussion-restore', 'mote-start'].includes(mode) ? { query: { [['mote-main-setup','mote-main-retention','mote-discussion-restore','mote-start'].includes(mode) ? 'mote-dialogue' : mode]: '1' } } : undefined)
   win.webContents.debugger.attach('1.3')
   await win.webContents.debugger.sendCommand('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 1 })
@@ -88,6 +88,9 @@ app.whenReady().then(async () => {
     await button('日常协作', '.mobile-mote-agents')
     await until('!!document.querySelector(".mobile-conversation-panel:not([hidden]) [contenteditable=true]")')
     assert.equal(await read('mobileProductScene.facts().record.selectedSessionId'), 'session-mote')
+  }
+  if (mode === 'density-workfaces') {
+    await require('./density-workfaces.cjs')({ read, until, resize, button, capture, result }); result.passed = true; return
   }
   if (mode === 'responsive-primary-workfaces') {
     await require('./responsive-primary-workfaces.cjs')({ win, read, until, resize, tap, button, capture, result, evidence, phase, openGoal }); result.passed = true; return

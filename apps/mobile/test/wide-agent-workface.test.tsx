@@ -11,9 +11,8 @@ vi.mock('../src/navigation/MobileAgentRow', async original => {
   const actual = await original<typeof import('../src/navigation/MobileAgentRow')>()
   return { ...actual, MobileAgentRow: (props: Parameters<typeof actual.MobileAgentRow>[0]) => { counter.rows += 1; return <actual.MobileAgentRow {...props} /> } }
 })
-const viewport = { matches: false, listeners: new Set<() => void>(), addEventListener(_type: string, fn: () => void) { this.listeners.add(fn) }, removeEventListener(_type: string, fn: () => void) { this.listeners.delete(fn) } }
 const connected = { state: 'connected' as const, message: '原 Host' }
-async function width(value: number) { await act(async () => { viewport.matches = value >= 760; for (const listener of viewport.listeners) listener() }) }
+async function width(value: number) { await act(async () => { vi.stubGlobal('innerWidth', value); window.dispatchEvent(new Event('resize')); await new Promise(resolve => requestAnimationFrame(resolve)) }) }
 async function ready(check: () => void) { await vi.waitFor(async () => { await act(async () => {}); check() }, { timeout: 4000, interval: 10 }) }
 function setup(size = 20, projectHost = 'host-original') {
   const f = fixture(), catalog = { spaces: [], zones: [], tabs: [], regions: [{ tabId: 'original-tab', regionId: 'original-region', kind: 'agent', agentSessionId: 'session-original', execution: { hostId: 'host-original', cwd: f.sessions.get('session-original')!.workspacePath } }], locations: [], bindings: [], agentPresentation: Array.from({ length: size }, (_, index) => ({
@@ -23,7 +22,7 @@ function setup(size = 20, projectHost = 'host-original') {
     if (method === 'space.ls') return { catalog }
     if (method === 'goal.ls') return { goals: [] }
     if (method === 'topic.category.ls') return { categories: [], unavailable: [] }
-    if (method === 'app.snapshot') return { agents: [] }
+    if (method === 'app.snapshot') return { agents: [], projects: [], workspaces: [], unavailable: [] }
     throw new Error('Unconfigured read: ' + method)
   })
   return f
@@ -34,7 +33,7 @@ async function open(f: ReturnType<typeof setup>) {
   await ready(() => expect(view.element.textContent).toContain('原生回答'))
   return view
 }
-beforeEach(async () => { vi.stubGlobal('matchMedia', () => viewport); viewport.matches = false; localStorage.clear(); await getDeviceWorkface().replaceBackup(emptyDeviceWorkface()) })
+beforeEach(async () => { vi.stubGlobal('innerWidth', 390); vi.stubGlobal('innerHeight', 844); localStorage.clear(); await getDeviceWorkface().replaceBackup(emptyDeviceWorkface()) })
 afterEach(async () => { for (const view of mounted.splice(0)) { await act(async () => view.root.unmount()); view.element.remove() }; vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
 it('wide sidebar shows the original Focus beside the current Agent without selecting another subject', async () => {
