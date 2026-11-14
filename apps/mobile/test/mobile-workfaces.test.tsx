@@ -80,7 +80,7 @@ it('actual Root Goals header and Back consume the current primary without poppin
   await click(view.element.querySelector('.mobile-navigation')!, 'Goals')
   await click(view.element, view.goal.title)
   await wait(() => expect(visible(view.element, 'article[aria-label="目标详情"]')?.textContent).toContain(view.goal.description))
-  expect(visible(view.element, '.mobile-goals header h1')?.textContent).toBe('Goals')
+  expect(visible(view.element, '.mobile-goals header h1')?.textContent).toBe(view.goal.title)
   expect(visible(view.element, '.mobile-topic-source-reader')).toBeNull()
   expect(view.rpc).toHaveBeenCalledWith('goal.inspect', { goalId: view.goal.id })
   await act(async () => { window.history.back(); await new Promise(resolve => setTimeout(resolve, 0)) })
