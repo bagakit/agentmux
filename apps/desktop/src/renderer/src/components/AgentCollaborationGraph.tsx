@@ -1,6 +1,7 @@
 import { createContext, useContext, type RefObject, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, memo, useCallback, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { BaseEdge, EdgeLabelRenderer, ReactFlow, ViewportPortal, useReactFlow, useStore, type Node, type NodeHandle, type NodeProps, type ReactFlowInstance } from '@xyflow/react'
 import { SemanticIcon } from '@agentmux/client-ui/icons'
+import { IconButton } from '@agentmux/client-ui/components/IconButton'
 import type { FocusContext } from '../lib/focus-context'
 import { collaborationSubjectKey, type CollaborationAgent, type CollaborationArea, type CollaborationRelation } from '../lib/agent-collaboration'
 import { collaborationConnections, collaborationConnectionStrength, collaborationAreaNode, collaborationAgentNode } from '../lib/collaboration-presentation'
@@ -99,7 +100,7 @@ function CollaborationLayoutNotice({ issues, onRetry }: { issues: ReadonlyMap<st
     {collapsed ? <button type="button" className="collaboration-canvas__issue-chip" aria-expanded={false} aria-label={summary} title={summary} onClick={() => setCollapsed(false)}><SemanticIcon name="status.warning" size={12} /><span>{count}</span></button> : <>
       <span>{summary}</span>
       <span className="collaboration-canvas__issue-actions"><button type="button" onClick={onRetry}>Retry layout</button>
-        <button type="button" className="icon-button" aria-label="Collapse layout notice" aria-expanded title="Collapse" onClick={() => setCollapsed(true)}><SemanticIcon name="action.collapse" size={12} /></button></span>
+        <IconButton type="button" aria-label="Collapse layout notice" aria-expanded title="Collapse" onClick={() => setCollapsed(true)}><SemanticIcon name="action.collapse" size={12} /></IconButton></span>
       <details><summary>Details</summary>{[...issues].map(([id, message]) => <p key={id}>{message}</p>)}</details>
     </>}
   </div>
@@ -408,13 +409,13 @@ export function AgentCollaborationGraph({ agents, areas, relations, pulses, sele
     </ReactFlow>
     {context ? <button ref={contextControl} type="button" className="collaboration-map__locate" title="Locate original context" onClick={context.onLocate}><SemanticIcon name="action.locate" size={14} /><span>{context.name}</span></button> : null}
     <div ref={hud} className="collaboration-canvas__hud">{layout.issues.size ? <CollaborationLayoutNotice issues={layout.issues} onRetry={layout.retry} /> : null}<div className="collaboration-canvas__controls" aria-label="Graph viewport">
-      {settings ? <button type="button" className="icon-button" aria-label="Map settings" title="Boundary and zoom levels" onClick={() => settings.open('focus', undefined, 'map')}><SemanticIcon name="object.settings" size={14} /></button> : null}
+      {settings ? <IconButton type="button" aria-label="Map settings" title="Boundary and zoom levels" onClick={() => settings.open('focus', undefined, 'map')}><SemanticIcon name="object.settings" size={14} /></IconButton> : null}
       <button type="button" className="collaboration-canvas__motion" aria-label="Map animations" aria-pressed={motion.enabled} aria-busy={motion.saving || undefined} disabled={motion.saving} title={`Map animations: ${motion.enabled ? 'on' : 'off'}${motion.preference === 'system' ? ' · Following system' : ''}. Messages continue updating.`} onClick={() => void motion.setEnabled(!motion.enabled)}><span className="collaboration-canvas__motion-switch" aria-hidden="true" /><span>Motion</span><strong>{motion.enabled ? 'On' : 'Off'}</strong></button>
       <span className="collaboration-canvas__divider" aria-hidden="true" />
       <button type="button" className="icon-button" aria-label="Zoom out" onClick={() => { layout.settle(); ++gestures.current; animateCamera(duration => flow.current?.zoomOut({ duration })) }}><SemanticIcon name="action.zoom-out" size={14} /></button>
       <button type="button" className="icon-button" aria-label="Zoom in" onClick={() => { layout.settle(); ++gestures.current; animateCamera(duration => flow.current?.zoomIn({ duration })) }}><SemanticIcon name="action.zoom-in" size={14} /></button>
-      <button type="button" className="icon-button collaboration-canvas__arrange" aria-label="Arrange map" title="Reorganize using current activity and observed relationships. Positions stay fixed between structural changes and explicit arrangement." onClick={() => { slotSizes.current.clear(); setSlotRevision(value => value + 1); layout.arrange() }}><SemanticIcon name="object.topology" size={14} /><span>Arrange</span></button>
-      <button type="button" className="icon-button" aria-label="Overview" title="Show the whole map" onClick={() => { layout.settle(); ++gestures.current; animateCamera(duration => flow.current?.fitView({ padding: .1, maxZoom: 1, includeHiddenNodes: true, duration })) }}><SemanticIcon name="layout.expand" size={14} /></button>
+      <IconButton type="button" className="collaboration-canvas__arrange" aria-label="Arrange map" title="Reorganize using current activity and observed relationships. Positions stay fixed between structural changes and explicit arrangement." onClick={() => { slotSizes.current.clear(); setSlotRevision(value => value + 1); layout.arrange() }}><SemanticIcon name="object.topology" size={14} /><span>Arrange</span></IconButton>
+      <IconButton type="button" aria-label="Overview" title="Show the whole map" onClick={() => { layout.settle(); ++gestures.current; animateCamera(duration => flow.current?.fitView({ padding: .1, maxZoom: 1, includeHiddenNodes: true, duration })) }}><SemanticIcon name="layout.expand" size={14} /></IconButton>
     </div>
     {motion.issue ? <p className="collaboration-canvas__motion-issue" role="status">{motion.issue}</p> : null}
     <div className="collaboration-canvas__legend" aria-label="Map legend"><div aria-label="Agent states">{(['active', 'idle', 'closed', 'unknown'] as const).map(tier => <span key={tier}><i className="collaboration-node-key" data-tier={tier} aria-hidden="true"><ResolvedAgentAvatar label="" size={11} tintMark={false} /></i>{TIER_LABELS[tier]}</span>)}</div><div aria-label="Recency"><span><i className="collaboration-recency-key" aria-hidden="true">{([14, 11, 9] as const).map(size => <ResolvedAgentAvatar key={size} label="" size={size} tintMark={false} />)}</i>Recent → older</span></div><div aria-label="Relation legend">{Object.entries(COLLABORATION_LABELS).map(([kind, label]) => <span key={kind}><CollaborationRelationKey kind={kind as CollaborationRelation['kind']} />{label}</span>)}</div></div></div>

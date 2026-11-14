@@ -1,4 +1,5 @@
 import type { AgentDisplayState } from '@agentmux/core'
+import { Button } from '@agentmux/client-ui/components/Button'
 import type { ComposerShortcut } from '../../../shared/contracts'
 
 /** Presentation only. The mounted Session composer owns the existing typed submit/queue path. */
@@ -14,13 +15,13 @@ export function AgentStatusPromptActions({ prompts, state, disabled, disabledRea
   return <section className="agent-status-prompts" role="group" aria-label={`Prompts for ${state}`}>
     <h3>User prompts</h3>
     {disabledReason ? <p className="agent-status-prompts__reason">{disabledReason}</p> : null}
-    {visible.map((prompt) => <button key={prompt.id} type="button"
-      className="small-button agent-status-prompts__button" disabled={disabled}
+    {visible.map((prompt) => <Button key={prompt.id} type="button"
+      className="agent-status-prompts__button" disabled={disabled}
       aria-label={`Send ${prompt.label}`} title={prompt.body}
       onFocus={(event) => event.currentTarget.scrollIntoView({ block: 'nearest', inline: 'nearest' })}
       onClick={() => onSelect(prompt)}>
       <span className="agent-status-prompts__copy"><span className="agent-status-prompts__label">{prompt.label}</span><small>{prompt.body}</small></span>
       <span className="agent-status-prompts__intent">Send</span>
-    </button>)}
+    </Button>)}
   </section>
 }

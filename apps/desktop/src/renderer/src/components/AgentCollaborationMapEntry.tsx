@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useState, type ComponentProps } from 'react'
+import { Button } from '@agentmux/client-ui/components/Button'
 import type { AgentCollaborationMap as LoadedAgentCollaborationMap } from './AgentCollaborationMap'
 import { FullPageLoadingSurface } from './FullPageLoadingSurface'
 import { desktopPresentationCommitted } from '../lib/desktop-presentation'
@@ -28,7 +29,7 @@ export function AgentCollaborationMap(props: ComponentProps<typeof LoadedAgentCo
     <FullPageLoadingSurface scope="region" phase={failed ? 'failed' : 'loading'} eyebrow="Focus map"
       title={failed ? 'Could not open the map' : 'Opening map'}
       detail={failed ? 'The map view could not be loaded. Continue in List.' : 'Preparing the collaboration view.'}
-      actions={<button type="button" className="small-button" onClick={() => useAppStore.getState().setFocusView('list')}>Back to List</button>}
+      actions={<Button type="button" onClick={() => useAppStore.getState().setFocusView('list')}>Back to List</Button>}
       {...(failed ? { details: { summary: 'Load details', content: entry.error instanceof Error ? entry.error.message : String(entry.error) } } : {})} />
   </section>
 }

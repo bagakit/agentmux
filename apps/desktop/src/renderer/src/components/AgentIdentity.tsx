@@ -1,6 +1,7 @@
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { agentEvidenceStale } from '@agentmux/core/agent-status'
+import { Button } from '@agentmux/client-ui/components/Button'
 import type { AgentAvatarAppearance, ComposerShortcut, SessionSnapshot } from '../../../shared/contracts'
 import { describeAgentDisplayState } from '../../../shared/agent-state-presentation'
 import { AgentAvatar } from './AgentAvatar'
@@ -38,16 +39,16 @@ function AgentStateFace({ session, executorLabel, prompts, disabled, inputAction
   return <div ref={face} className="agent-state-face">
     <div className="agent-state-face__summary">
       <strong>{meaning.label}</strong>
-      {review && reviewReady ? <button type="button" className="small-button" aria-label="Back to Agent status" onClick={(event) => { transferFocus.current = document.activeElement === event.currentTarget; setReview(false) }}><ThemeNavigationBackIcon size={12} /><span>Back to Agent status</span></button>
+      {review && reviewReady ? <Button type="button" aria-label="Back to Agent status" onClick={(event) => { transferFocus.current = document.activeElement === event.currentTarget; setReview(false) }}><ThemeNavigationBackIcon size={12} /><span>Back to Agent status</span></Button>
         : <p>{inputAction}</p>}
     </div>
     <div className="agent-state-face__body">
       {review && reviewReady ? resultReview?.(() => close()) : <>
         <AgentStatusPromptActions prompts={prompts} state={session.status.state} disabled={disabled}
           disabledReason={disabled ? inputAction : undefined} onSelect={(prompt) => { if (onSelect(prompt)) close(true) }} />
-        {reviewReady ? <button type="button" className="agent-state-face__review small-button" onClick={(event) => { transferFocus.current = document.activeElement === event.currentTarget; setReview(true) }}>
+        {reviewReady ? <Button type="button" className="agent-state-face__review" onClick={(event) => { transferFocus.current = document.activeElement === event.currentTarget; setReview(true) }}>
           <span>Review result</span><ThemeNavigationDisclosureIcon size={13} aria-hidden="true" />
-        </button> : null}
+        </Button> : null}
         <details className="agent-state-face__facts"><summary>State details</summary>
           <p>{meaning.description}</p>
           <dl><dt>Process</dt><dd>{session.processState}</dd>

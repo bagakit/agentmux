@@ -1,3 +1,5 @@
+import { IconButton } from '@agentmux/client-ui/components/IconButton'
+import { Button } from '@agentmux/client-ui/components/Button'
 import { usePathDisplay } from '../hooks/usePathDisplay'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
@@ -301,7 +303,7 @@ export function AttentionRequestPanel({
       <aside ref={panelRef} className="attention-request-panel" aria-label="Attention request" tabIndex={-1} onKeyDown={handleKeyDown}>
         <header className="attention-request-panel__header">
           <div><span>{confirmed ? 'Session closed' : 'Needs you'}</span><strong>{confirmed ? failedClose.label : 'Session unavailable'}</strong></div>
-          <button ref={closeButtonRef} type="button" className="icon-button" aria-label="Close request" title="Close request" onClick={close}><ThemeActionCloseIcon size={14} /></button>
+          <IconButton ref={closeButtonRef} type="button" aria-label="Close request" title="Close request" onClick={close}><ThemeActionCloseIcon size={14} /></IconButton>
         </header>
         <div className="attention-request-panel__empty" role="status">{confirmed ? 'Core confirmed that this failed Session was closed. Your other work remains open.' : 'The Session is not currently available. Its close has not been confirmed. Return to Agents and try again.'}</div>
       </aside>
@@ -332,8 +334,8 @@ export function AttentionRequestPanel({
       <header className="attention-request-panel__header">
         <div><span>{failed ? failureTitle : request ? 'Needs you' : 'No current request'}</span><strong>{session.label}</strong><small title={displayPath(session.workspacePath, session.hostId)}>{displayPath(session.workspacePath, session.hostId)}</small></div>
         <div className="attention-request-panel__actions">
-          <button type="button" className="small-button" onClick={() => selectSession(session.id)}>Open Session</button>
-          <button ref={closeButtonRef} type="button" className="icon-button" aria-label="Close request" title="Close request" onClick={close}><ThemeActionCloseIcon size={14} /></button>
+          <Button type="button" onClick={() => selectSession(session.id)}>Open Session</Button>
+          <IconButton ref={closeButtonRef} type="button" aria-label="Close request" title="Close request" onClick={close}><ThemeActionCloseIcon size={14} /></IconButton>
         </div>
       </header>
       {actionError ? <div className="attention-request-panel__error" role="alert" aria-live="polite">{actionError}</div> : null}
@@ -350,7 +352,7 @@ export function AttentionRequestPanel({
               : canCloseFailure(session) ? 'Core reports that this process exited. You can close this failed Session.'
                 : session.processState === 'running' ? 'The Run is still alive. Open the Session to inspect the error; its input remains available.'
                   : 'The process state is not confirmed as exited. The Session and its work surface are kept.'}</div>
-          {canCloseFailure(session) ? <button type="button" className="small-button attention-request-panel__next" disabled={failedClose?.phase === 'requesting'} onClick={() => void closeFailedSession()}>{failedClose?.phase === 'requesting' ? 'Closing…' : failedClose?.phase === 'unconfirmed' ? 'Retry closing failed Session' : 'Close failed Session'}</button> : null}
+          {canCloseFailure(session) ? <Button type="button" className="attention-request-panel__next" disabled={failedClose?.phase === 'requesting'} onClick={() => void closeFailedSession()}>{failedClose?.phase === 'requesting' ? 'Closing…' : failedClose?.phase === 'unconfirmed' ? 'Retry closing failed Session' : 'Close failed Session'}</Button> : null}
           {session.processState === 'running' ? requestCard : null}
         </>
       ) : caughtUp ? (
@@ -364,7 +366,7 @@ export function AttentionRequestPanel({
       ) : (
         <div className="attention-request-panel__empty" role="status">This Session needs attention, but Core has not exposed a typed request. Open the Session to inspect it.</div>
       )}
-      {caughtUp ? <button type="button" className="small-button attention-request-panel__next" onClick={close}><ThemeNavigationForwardIcon size={12} /> Return to Agents</button> : null}
+      {caughtUp ? <Button type="button" className="attention-request-panel__next" onClick={close}><ThemeNavigationForwardIcon size={12} /> Return to Agents</Button> : null}
     </aside>
   )
 }

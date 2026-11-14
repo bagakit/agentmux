@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { presentError } from '@agentmux/client-ui/error-presentation'
+import { Button } from '@agentmux/client-ui/components/Button'
 import { ServiceNoticeDisclosure } from './ServiceNoticeDisclosure'
 import { ServiceWindowNotice } from './ServiceWindowNotice'
 import type { RenderableServiceNotice } from '../lib/service-window-notice'
@@ -31,7 +32,7 @@ export function TerminalReplayGapNotice({ scope, visible = true, canRedraw, onRe
     <ServiceWindowNotice notice={TERMINAL_GAP_NOTICE} />
     {requested ? <p role="status">Screen redraw requested. Missing history remains unavailable.</p> : null}
     {error ? <p role="status">{error}</p> : null}
-    {canRedraw ? <button type="button" className="small-button" disabled={redrawing}
+    {canRedraw ? <Button type="button" disabled={redrawing}
       title="Redraw current screen; missing history cannot be restored"
       aria-label="Redraw current terminal screen" onClick={() => {
         setRedrawing(true); setError('')
@@ -43,7 +44,7 @@ export function TerminalReplayGapNotice({ scope, visible = true, canRedraw, onRe
       }}>
       {redrawing ? <ThemeStatusLoadingIcon animation="spin" size={12} /> : <ThemeActionRefreshIcon size={12} />}
       {redrawing ? 'Requesting…' : 'Redraw'}
-    </button> : null}
+    </Button> : null}
   </div>
   if (embedded) return content
   return <ServiceNoticeDisclosure scope={scope} visible={visible}

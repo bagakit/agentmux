@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
+import { Button } from '@agentmux/client-ui/components/Button'
 import { useAppStore } from '../store'
 import { api } from '../lib/api'
 import { createFirstPromptSelector, sessionPresentationById } from '../lib/session-presentation'
@@ -23,12 +24,12 @@ function AgentLinkDetails({ uri, agentSessionId }: AgentLinkReference) {
     </dl>
     <p>Current details for the linked Agent.</p>
     <code>{uri}</code>
-    <button type="button" className="small-button" onClick={() => {
+    <Button type="button" onClick={() => {
       void copyTextToClipboard(uri, useAppStore.getState().reportError).then(ok => setCopied(ok ? 'link' : null))
-    }}>{copied === 'link' ? 'Link copied' : 'Copy Agent Link'}</button>
-    <button type="button" className="small-button" onClick={() => {
+    }}>{copied === 'link' ? 'Link copied' : 'Copy Agent Link'}</Button>
+    <Button type="button" onClick={() => {
       void copyTextToClipboard(agentSessionId, useAppStore.getState().reportError).then(ok => setCopied(ok ? 'id' : null))
-    }}>{copied === 'id' ? 'ID copied' : 'Copy ID'}</button>
+    }}>{copied === 'id' ? 'ID copied' : 'Copy ID'}</Button>
   </div>
 }
 

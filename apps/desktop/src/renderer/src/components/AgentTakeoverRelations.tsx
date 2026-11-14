@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { AgentMuxAgentCreationFact, AgentMuxAgentCreationInspection } from '@agentmux/core'
 import type { AgentTakeoverPage, AgentTakeoverProvenance, AgentTakeoverQuery } from '@agentmux/core/agent-takeover'
+import { Button } from '@agentmux/client-ui/components/Button'
 import type { SessionHistoryReference, SessionSnapshot } from '../../../shared/contracts'
 import type { FocusContextAccess } from '../lib/focus-context-access'
 import { api } from '../lib/api'
@@ -121,9 +122,9 @@ export function AgentTakeoverRelations({ subject, access, sourceRuntimeId: origi
       <p className="agent-information-takeovers__reference"><code>{record.agent.agentSessionId}</code></p>
       {direction === 'incoming' ? value.source.agentSessionId ? <>
         <p>Original Agent <code>{value.source.agentSessionId}</code></p>
-        <button type="button" className="small-button" onClick={() => void locate(value.source.runtimeId, value.source.agentSessionId!)}>Locate source Agent</button>
+        <Button type="button" onClick={() => void locate(value.source.runtimeId, value.source.agentSessionId!)}>Locate source Agent</Button>
       </> : <p>Original Provider conversation <code>{value.source.nativeSource?.nativeHandle.providerId} / {value.source.nativeSource?.nativeHandle.sessionId}</code> · No AgentMux Session was recorded.</p>
-        : record.phase === 'active' && record.agent.runtimeId ? <button type="button" className="small-button" onClick={() => void locate(record.agent.runtimeId!, record.agent.agentSessionId)}>Locate created Agent</button> : null}
+        : record.phase === 'active' && record.agent.runtimeId ? <Button type="button" onClick={() => void locate(record.agent.runtimeId!, record.agent.agentSessionId)}>Locate created Agent</Button> : null}
       {record.issue ? <p role="status">{record.issue}</p> : null}
       {value.source.organizationIssue && value.source.organizationIssue !== record.issue ? <p role="status">{value.source.organizationIssue}</p> : null}
       <ExactTakeover value={value} operationId={record.requestId} />
@@ -134,7 +135,7 @@ export function AgentTakeoverRelations({ subject, access, sourceRuntimeId: origi
     {held?.incoming?.records.length ? <ul>{held.incoming.records.map(record => relationship(record, 'incoming'))}</ul>
       : held?.incoming ? <p>No incoming Takeovers are recorded in this owner’s returned records.</p> : null}
     {held?.incomingIssue ? <p role="status">Incoming Takeovers unavailable. {held.incoming ? 'Previously read records are retained. ' : ''}{held.incomingIssue}</p> : null}
-    {held?.incoming?.nextCursor ? <button type="button" className="small-button" disabled={held.pending} onClick={() => void older('incoming')}>More sources</button> : null}
+    {held?.incoming?.nextCursor ? <Button type="button" disabled={held.pending} onClick={() => void older('incoming')}>More sources</Button> : null}
     <details><summary>Original creation metadata</summary>
       {creationMetadata.retired ? <p>The receiving Agent was created, then closed.</p> : null}
       {takeover ? <>
@@ -152,8 +153,8 @@ export function AgentTakeoverRelations({ subject, access, sourceRuntimeId: origi
       : held?.outgoing ? <p>No recorded destinations in this owner’s returned records.</p> : null}
     {held?.pending ? <p role="status">Reading recorded Takeovers…</p> : null}
     {held?.issue ? <p role="status">Takeover destinations unavailable. {held.outgoing ? 'Previously read records are retained. ' : ''}{held.issue}</p> : null}
-    {held?.outgoing?.nextCursor ? <button type="button" className="small-button" disabled={held.pending} onClick={() => void older('outgoing')}>More destinations</button> : null}
-    <button type="button" className="small-button" disabled={held?.pending} onClick={() => setRevision(value => value + 1)}>Refresh Takeover records</button>
+    {held?.outgoing?.nextCursor ? <Button type="button" disabled={held.pending} onClick={() => void older('outgoing')}>More destinations</Button> : null}
+    <Button type="button" disabled={held?.pending} onClick={() => setRevision(value => value + 1)}>Refresh Takeover records</Button>
     <details><summary>Reading scope · recorded here</summary>
       <p className="focus-context-hover__coverage">This view reads recorded Takeovers from one admission owner. It does not describe all history or current membership.</p>
       {held?.query ? <p className="focus-context-hover__coverage">Admission owner <code>{held.query.expectedRuntimeId}</code></p> : null}

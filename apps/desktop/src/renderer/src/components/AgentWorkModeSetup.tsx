@@ -1,4 +1,5 @@
 import { useContext, useEffect, useId, useRef, useState, type RefObject } from 'react'
+import { Button } from '@agentmux/client-ui/components/Button'
 import type { AppConfig } from '../../../shared/contracts'
 import { isScratchWorkspaceId } from '../../../shared/contracts'
 import { configValuesEqual } from '../../../shared/config-edit'
@@ -203,15 +204,15 @@ function LegacyAgentWorkModeSetup({ config, active, initialSelection, initialMod
         onValueChange={id => { invalidate(); setStartupId(id) }} />
       <p className="agent-work-setup__note">Native settings and Skills load here. Files and commands use the working folder.</p>
       {fixedProject ? hostLinks : null}
-      {onChooseSource ? <div className="agent-work-setup__utility-actions"><button type="button" className="small-button agent-work-setup__source-routes" onClick={onChooseSource}>Choose through the project device and its saved routes</button></div> : null}
+      {onChooseSource ? <div className="agent-work-setup__utility-actions"><Button type="button" className="agent-work-setup__source-routes" onClick={onChooseSource}>Choose through the project device and its saved routes</Button></div> : null}
       </div>
     </details>
     {!fixedProject ? hostLinks : null}
     {error ? <p className="agent-work-setup__error" role="status">{error}</p> : null}
     </div>
     <footer className="agent-work-setup__actions"><span>{preparationNote ?? (fixedProject ? 'Applies to this Launcher. Launch starts the task.' : initialSelection?.resourceWorkspaceId && project && project.id !== initialSelection.resourceWorkspaceId ? 'A different project opens its own Launcher. Original drafts stay with their project.' : 'Preparing this arrangement starts no Agent.')}</span><div>
-      {onCancel ? <button type="button" className="small-button" onClick={onCancel}>Cancel</button> : null}
-      <button type="button" className="primary-button" disabled={disabled || pending || !active || !projectHost || !agentHost || Boolean(unavailableProject)} onClick={() => void prepare()}>{pending ? 'Preparing…' : actionLabel}</button>
+      {onCancel ? <Button type="button" onClick={onCancel}>Cancel</Button> : null}
+      <Button type="button" variant="primary" disabled={disabled || pending || !active || !projectHost || !agentHost || Boolean(unavailableProject)} onClick={() => void prepare()}>{pending ? 'Preparing…' : actionLabel}</Button>
     </div></footer>
   </div>
 }

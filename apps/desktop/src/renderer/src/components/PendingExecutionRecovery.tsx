@@ -1,5 +1,6 @@
 import { useContext, useEffect, useRef, useState, type ComponentProps } from 'react'
 import type { AgentExecutionInspection } from '@agentmux/core'
+import { Button } from '@agentmux/client-ui/components/Button'
 import type { AgentExecutionRecoveryReference } from '../../../shared/contracts'
 import { api } from '../lib/api'
 import { reduceLegacyExecutionReference, type PendingAgentLaunch } from '../lib/session-state'
@@ -107,13 +108,13 @@ export function PendingExecutionRecovery({ target, origin, ...surface }: Compone
     {feedback?.key === key ? <span className="session-connecting__status">{feedback.message}</span> : null}
   </>
   const actions = <>
-    <button type="button" className="small-button" disabled={busy === latest.current} onClick={() => void continueOriginal()}>{busy === latest.current ? 'Continuing original request…' : 'Continue original request'}</button>
-    <button type="button" className="small-button" onClick={() => void refresh()}>Refresh original status</button>
+    <Button type="button" disabled={busy === latest.current} onClick={() => void continueOriginal()}>{busy === latest.current ? 'Continuing original request…' : 'Continue original request'}</Button>
+    <Button type="button" onClick={() => void refresh()}>Refresh original status</Button>
     <details className="surface-state__details"><summary>{target.failure ? 'Environment and previous step' : 'Original request details'}</summary>
       {target.failure ? <p>{target.failure.role} · {target.failure.stage} · {failureHost?.label ?? target.failure.hostId}</p> : null}
       <dl><dt>Original Coordinator</dt><dd>{target.coordinator.hostId} · {target.coordinator.runtimeId}</dd><dt>Binding</dt><dd>{target.reference.bindingId}</dd></dl>
-      {failureHost?.kind === 'ssh' ? <button type="button" className="small-button" onClick={() => void checkUpdate()}>Check Core update</button> : null}
-      {failureHost && navigation ? <button type="button" className="small-button" onClick={() => navigation.openHost(failureHost.id)}>Open this Host</button> : null}
+      {failureHost?.kind === 'ssh' ? <Button type="button" onClick={() => void checkUpdate()}>Check Core update</Button> : null}
+      {failureHost && navigation ? <Button type="button" onClick={() => navigation.openHost(failureHost.id)}>Open this Host</Button> : null}
       {advice?.key === key ? <p role="status">{advice.message}</p> : null}
     </details>
     <details className="surface-state__details"><summary>Other recovery options</summary>{surface.actions}</details>

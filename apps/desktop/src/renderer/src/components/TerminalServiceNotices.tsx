@@ -1,3 +1,4 @@
+import { Button } from '@agentmux/client-ui/components/Button'
 import type { SessionControl } from '../../../shared/contracts'
 import { TerminalStorageDetails } from './TerminalStorageDetails'
 import type { ReactNode } from 'react'
@@ -43,8 +44,8 @@ export function TerminalServiceNotices({ scope, visible = true, available = true
   return <ServiceNoticeDisclosure scope={scope} visible={visible} available={available} notices={notices}
     className="terminal-service-window"
     title={notices.length === 1 ? (continuation ? 'Terminal state unconfirmed' : notices[0]!.notice.notice.step) : 'Terminal service notices'}
-    actions={onRefreshObservation && notices.length ? <button type="button" className="small-button" disabled={refreshingObservation}
-      onClick={onRefreshObservation}>{refreshingObservation ? 'Refreshing observation…' : 'Refresh observation'}</button> : null}>
+    actions={onRefreshObservation && notices.length ? <Button type="button" disabled={refreshingObservation}
+      onClick={onRefreshObservation}>{refreshingObservation ? 'Refreshing observation…' : 'Refresh observation'}</Button> : null}>
     <ServiceWindowNotice notice={attachment ?? null} />
     <ServiceWindowNotice notice={writeObservation ?? null} />
     <ServiceWindowNotice notice={sessionRefresh ?? null} />

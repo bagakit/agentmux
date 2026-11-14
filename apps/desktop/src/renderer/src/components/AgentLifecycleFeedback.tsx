@@ -1,3 +1,4 @@
+import { Button } from '@agentmux/client-ui/components/Button'
 import { lifecycleNotification, useAppStore } from '../store'
 import { agentLifecycleFailureNotice, lifecycleFeedbackOwnerKey, type AgentLifecycleFeedbackOwner } from '../lib/agent-lifecycle-feedback'
 import { ServiceWindowNotice } from './ServiceWindowNotice'
@@ -28,8 +29,8 @@ export function AgentLifecycleFeedback({ owner, retry, busy = false, refreshObse
       restore: current.failure.step === 'launch' ? 'Review details; retry Start agent with the preserved draft.'
         : 'Review details; retry Resume for this same Session.' } } : {})}
       actions={current ? <>
-        {refreshObservation ? <button type="button" className="small-button" disabled={busy} onClick={refreshObservation}>Refresh observation</button> : null}
-        <button type="button" className="small-button" disabled={busy} onClick={retry}>Retry {current.failure.step === 'launch' ? 'Start agent' : 'Resume'}</button>
+        {refreshObservation ? <Button type="button" disabled={busy} onClick={refreshObservation}>Refresh observation</Button> : null}
+        <Button type="button" disabled={busy} onClick={retry}>Retry {current.failure.step === 'launch' ? 'Start agent' : 'Resume'}</Button>
       </> : null} />
   </div>
 }

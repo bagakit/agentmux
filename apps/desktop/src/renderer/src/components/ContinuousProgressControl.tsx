@@ -1,4 +1,5 @@
 import { mintObjectId } from '@agentmux/core/object-id'
+import { Button } from '@agentmux/client-ui/components/Button'
 import { usePathDisplay } from '../hooks/usePathDisplay'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { continuousProgressRequestDigest, isAgentSchedule, type ContinuousProgressLoop } from '@agentmux/core/continuous-progress-scheduler'
@@ -358,11 +359,11 @@ export function ContinuousProgressControl({ session, original, targetName, onSta
         {loop ? <p className="continuous-progress-control__help">Applies to future checks. {loop.status === 'paused' ? 'Stays paused.' : 'Stays active.'}</p> : null}
         {[...new Set([saveNotice, persistenceIssue, error, observationError].filter(Boolean))].map(notice => <p key={notice} className="continuous-progress-control__notice" role="status">{notice}</p>)}
         {pendingUpdate && !busy ? <p className="continuous-progress-control__help">Previous save is unconfirmed. Retry saves its original values; your newer draft is kept.</p> : null}
-        {pendingUpdate ? <button type="button" className="small-button" disabled={busy} onClick={() => void reviewLatest()}>Review latest settings</button> : null}
+        {pendingUpdate ? <Button type="button" disabled={busy} onClick={() => void reviewLatest()}>Review latest settings</Button> : null}
         {previousUpdates?.length ? <details className="continuous-progress-control__details" onToggle={event => event.stopPropagation()}><summary>Previous unconfirmed saves</summary>
           {previousUpdates.map(request => <div key={request.operationId} className="continuous-progress-control__detail-body"><code>{request.operationId}</code><p>{request.notDispatched ? 'Not dispatched. ' : ''}{request.intervalMs / 60_000} minutes</p><p className="continuous-progress-control__prompt">{request.prompt}</p></div>)}
         </details> : null}
-        {conflict ? <button type="button" className="small-button" onClick={() => void reviewLatest()}>Review latest settings</button>
+        {conflict ? <Button type="button" onClick={() => void reviewLatest()}>Review latest settings</Button>
           : pendingRequest ? null : <button ref={submitButton} type="submit" className="automation-button automation-button--primary automation-submit" disabled={busy || (!pendingUpdate && (!prompt.trim() || (!loop && bindSource && (!sourceRoot.trim() || !sourceId.trim() || !readerPath.trim()))))}>{busy ? 'Saving…' : pendingUpdate ? 'Retry save' : loop ? 'Save changes' : 'Enable continuous progress'}</button>}
       </form>
   return <div className="continuous-progress-control" data-progress-state={status}>
@@ -371,8 +372,8 @@ export function ContinuousProgressControl({ session, original, targetName, onSta
       <button ref={requestAction} type="button" className="automation-button automation-button--primary" disabled={busy}
         onClick={() => void (pendingRequest.dispatch === 'prepared' ? returnToEditing() : checkOriginalRequest())}>{pendingRequest.dispatch === 'prepared' ? 'Keep request and edit' : 'Check original request'}</button>
       {pendingRequest.dispatch !== 'prepared' ? <>
-        <button type="button" className="small-button" disabled={busy} onClick={() => void returnToEditing()}>Keep unknown request and edit</button>
-        <button type="button" className="small-button" disabled={busy} onClick={() => void checkOriginalRequest(true)}>Return to original loop</button>
+        <Button type="button" disabled={busy} onClick={() => void returnToEditing()}>Keep unknown request and edit</Button>
+        <Button type="button" disabled={busy} onClick={() => void checkOriginalRequest(true)}>Return to original loop</Button>
       </> : null}
       <details><summary>Original request</summary><pre className="continuous-progress-control__prompt">{JSON.stringify(pendingRequest.input, null, 2)}</pre></details>
       {saveNotice ? <p>{saveNotice}</p> : null}

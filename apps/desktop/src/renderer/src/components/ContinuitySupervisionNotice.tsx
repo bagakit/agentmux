@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { Button } from '@agentmux/client-ui/components/Button'
 import type { SessionSnapshot } from '../../../shared/contracts'
 import { useAppStore } from '../store'
 import { continuityControlKey, continuityControlRequests } from '../lib/continuity-control-intent'
@@ -42,12 +43,12 @@ export function ContinuitySupervisionNotice({ session, readOnly = false }: { ses
       title={title} notices={[{ id: 'continuity-supervision', occurrence: root?.operationId ?? pending[0]?.operationId ?? key,
         cause: JSON.stringify([supervision?.phase, supervision?.activeAttemptOperationId, supervision?.attemptCount, supervision?.attemptLimit, supervision?.nextAttemptAt, original, feedback]), notice }]}
       actions={readOnly ? undefined : <div className="continuity-supervision__actions" aria-busy={Object.values(busy).some(Boolean)}>
-        {pending.map(item => <button key={item.operationId} type="button" className="small-button" data-continuity-control={item.operationId}
-          disabled={!item.intent} onClick={() => void perform('reconcile', item.operationId)}>Check original {item.intent?.request.action ?? ''} control</button>)}
+        {pending.map(item => <Button key={item.operationId} type="button" data-continuity-control={item.operationId}
+          disabled={!item.intent} onClick={() => void perform('reconcile', item.operationId)}>Check original {item.intent?.request.action ?? ''} control</Button>)}
         {projection?.canContinue && !pending.some(item => !item.intent || !item.intent.rejection && item.intent.request.action === 'continue' && item.intent.request.intentOperationId === root?.operationId) ? <label>Additional attempts <input aria-label="Additional recovery attempts" inputMode="numeric" value={budget} aria-invalid={!validBudget} onChange={event => setBudget(event.target.value)} />
-          <button type="button" className="small-button" disabled={!validBudget} onClick={() => void perform('continue')}>Continue recovery</button></label> : null}
-        {projection?.canCancel ? <button type="button" className="small-button" onClick={() => void perform('cancel')}>Cancel automatic recovery</button> : null}
-        <button type="button" className="small-button" onClick={() => void perform('read')}>Re-read original</button>
+          <Button type="button" disabled={!validBudget} onClick={() => void perform('continue')}>Continue recovery</Button></label> : null}
+        {projection?.canCancel ? <Button type="button" onClick={() => void perform('cancel')}>Cancel automatic recovery</Button> : null}
+        <Button type="button" onClick={() => void perform('read')}>Re-read original</Button>
       </div>}>
       <ServiceWindowNotice notice={notice} />
       {projection ? <div className="continuity-supervision__record">

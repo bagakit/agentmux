@@ -2,6 +2,7 @@ import type { AgentMuxRunStorageObservation } from '@agentmux/core'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useEffect, useRef, useState } from 'react'
 import { presentError } from '@agentmux/client-ui/error-presentation'
+import { Button } from '@agentmux/client-ui/components/Button'
 import type { SessionControl } from '../../../shared/contracts'
 import { api } from '../lib/api'
 
@@ -59,11 +60,11 @@ export function TerminalStorageDetails({ control, scope, visible = true, continu
   const persistence = storage?.persistence
   const lag = persistence ? Math.max(0, persistence.offeredByte - persistence.confirmedByte) : null
   return <section className="terminal-storage-details" aria-label="Terminal storage facts">
-    <header><strong><ThemeFileDatabaseIcon size={13} />Storage</strong><button type="button" className="small-button"
+    <header><strong><ThemeFileDatabaseIcon size={13} />Storage</strong><Button type="button"
       disabled={checking || !visible} onPointerDown={event => event.preventDefault()} onClick={() => void checkStorage()}>
       {checking ? <ThemeStatusLoadingIcon size={12} animation="spin" /> : <ThemeActionRefreshIcon size={12} />}
       {checking ? 'Checking storage…' : observation ? 'Refresh storage' : 'Check storage'}
-    </button></header>
+    </Button></header>
     {!observation && !error ? <p>Read this Run’s storage facts on demand. This check leaves terminal input unchanged.</p> : null}
     {error ? <p role="status" className="terminal-storage-details__failure">Storage check did not complete: {error} Your original terminal is kept; retry this same Run.</p> : null}
     {observation ? <>

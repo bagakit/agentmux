@@ -1,4 +1,5 @@
 import { isImeOwnedKeyboardEvent } from '@agentmux/client-ui/ime-keyboard-event'
+import { IconButton } from '@agentmux/client-ui/components/IconButton'
 import { useWorkbenchDocument } from '../lib/workbench-document'
 import { createContext, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from 'react'
 import { createPortal } from 'react-dom'
@@ -343,8 +344,8 @@ export function AgentAvatar({ label, onOpen, providerId, state, appearance, coun
       onKeyDown={(event) => { if (event.key === 'Escape' && !isImeOwnedKeyboardEvent(event)) { closeToTrigger(); event.stopPropagation() } }}
       onPointerDown={() => { if (actionDisclosure) pinned.current = true }}
       onClick={(event) => event.stopPropagation()}>
-      {disclosure ? disclosure.content : <><header><strong>{name}</strong><span className="agent-identity-popover__controls">{navigation && resolvedExecutorId ? <button type="button" className="icon-button" aria-label={`Edit ${executor?.label ?? name} executor`} title="Executor settings"
-        onClick={() => { closeNow(); navigation.open('agents', resolvedExecutorId) }}><ThemeObjectSettingsIcon size={13} /></button> : null}{actionDisclosure ? <button type="button" className="icon-button" aria-label="Close Agent status" onClick={closeToTrigger}><ThemeActionCloseIcon size={13} /></button> : null}</span></header>
+      {disclosure ? disclosure.content : <><header><strong>{name}</strong><span className="agent-identity-popover__controls">{navigation && resolvedExecutorId ? <IconButton type="button" aria-label={`Edit ${executor?.label ?? name} executor`} title="Executor settings"
+        onClick={() => { closeNow(); navigation.open('agents', resolvedExecutorId) }}><ThemeObjectSettingsIcon size={13} /></IconButton> : null}{actionDisclosure ? <button type="button" className="icon-button" aria-label="Close Agent status" onClick={closeToTrigger}><ThemeActionCloseIcon size={13} /></button> : null}</span></header>
       {actionDisclosure ? actionDisclosure({ close: closeNow }) : <><dl><dt>Provider</dt><dd>{agentProviderLabel(provider ?? '')}</dd>
         {resolvedExecutorId ? <><dt>Executor</dt><dd>{executor?.label ?? resolvedExecutorId} · {resolvedExecutorId}</dd></> : null}
         {statusLabel ? <><dt>Status</dt><dd>{statusLabel}</dd></> : null}</dl>

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import type { AgentPromotionReceipt, AgentPromotionTarget } from '@agentmux/core/agent-promotion'
+import { Button } from '@agentmux/client-ui/components/Button'
 import { api } from '../lib/api'
 
 /** Accepted association operations retain their own promise; new work uses shared Takeover. */
@@ -27,7 +28,7 @@ export function AgentPromotionRecovery({ target }: { target: AgentPromotionTarge
     <summary>{receipt?.state === 'complete' ? 'Earlier Promotion completed' : 'Earlier Promotion result'}</summary>
     {receipt ? <><p>{receipt.title} · <code>{receipt.operationId}</code></p><p>{receipt.state === 'complete' ? 'Its original result is retained. This is separate from the new Takeover.' : 'This already accepted operation keeps its original destination and input.'}</p>
       {receipt.unavailable.map((item, index) => <p key={index}>{item.message}</p>)}
-      {receipt.state === 'partial' ? <button type="button" className="small-button" disabled={busy} onClick={() => { void continueOriginal() }}>Continue accepted Promotion</button> : null}</> : null}
+      {receipt.state === 'partial' ? <Button type="button" disabled={busy} onClick={() => { void continueOriginal() }}>Continue accepted Promotion</Button> : null}</> : null}
     {issue ? <p role="status">{issue}</p> : null}
   </details>
 }

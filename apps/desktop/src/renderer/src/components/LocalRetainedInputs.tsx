@@ -1,5 +1,6 @@
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import * as Dialog from '@agentmux/client-ui/components/Modal'
+import { Button } from '@agentmux/client-ui/components/Button'
 import { DocumentOverlayPortal } from './WindowOverlayHost'
 import { useMemo, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
@@ -23,8 +24,8 @@ function LocalInput({ input }: { input: LocalRetainedInput }) {
         <div><dt>Association</dt><dd>{input.target ? `${input.target.hostId} / ${input.target.agentSessionId}` : 'Unknown · original key kept'}</dd></div>
       </dl>
       <textarea aria-label="Original saved input" readOnly value={body} rows={Math.min(8, Math.max(3, body.split('\n').length))} />
-      <button type="button" className="small-button" onClick={() => void copyTextToClipboard(body,
-        error => useAppStore.getState().reportError(error, { kind: 'indeterminate', summary: 'Copying the original saved input was not confirmed. Its content and state are kept; retry copying.' })).then(setCopied)}>{copied ? 'Copied' : 'Copy saved input'}</button>
+      <Button type="button" onClick={() => void copyTextToClipboard(body,
+        error => useAppStore.getState().reportError(error, { kind: 'indeterminate', summary: 'Copying the original saved input was not confirmed. Its content and state are kept; retry copying.' })).then(setCopied)}>{copied ? 'Copied' : 'Copy saved input'}</Button>
     </> : null}
   </details>
 }
@@ -40,7 +41,7 @@ export function LocalRetainedInputs({ target }: { target?: LocalInputTarget }) {
     {!target ? <p className="muted">Old entries without a confirmed binding keep their original key and remain available here.</p> : null}
     {inputs.slice(0, limit).map((input, index) => <LocalInput key={JSON.stringify([input.kind, input.key, input.entry?.operationId, index])} input={input} />)}
     {!inputs.length ? <p>{target ? 'No exactly associated local inputs are listed. Unassociated entries remain in Focus → Drafts & queue.' : 'No saved drafts or queue entries are listed in this client.'}</p> : null}
-    {inputs.length > limit ? <button type="button" className="small-button" onClick={() => setLimit(value => value + 30)}>Show more ({inputs.length - limit})</button> : null}
+    {inputs.length > limit ? <Button type="button" onClick={() => setLimit(value => value + 30)}>Show more ({inputs.length - limit})</Button> : null}
   </div>
 }
 
@@ -51,7 +52,7 @@ export function LocalRetainedInputsPanel() {
     <DocumentOverlayPortal component={Dialog.Portal}>
       <Dialog.Overlay className="confirmation-dialog__overlay dialog-scrim" />
       <Dialog.Content className="dialog-surface session-record-dialog focus-local-inputs" onPointerDownCapture={event => event.stopPropagation()}>
-        <header><Dialog.Title>Saved drafts &amp; queue</Dialog.Title><Dialog.Close asChild><button type="button" className="small-button">Close</button></Dialog.Close></header>
+        <header><Dialog.Title>Saved drafts &amp; queue</Dialog.Title><Dialog.Close asChild><Button type="button">Close</Button></Dialog.Close></header>
         <Dialog.Description>Saved drafts and retained queue entries in this client.</Dialog.Description>
         {open ? <LocalRetainedInputs /> : null}
       </Dialog.Content>

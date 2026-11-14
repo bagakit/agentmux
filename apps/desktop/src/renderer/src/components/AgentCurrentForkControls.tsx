@@ -3,6 +3,7 @@ import { useContext, useEffect, useRef, useState, type ReactNode } from 'react'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { AgentMuxSpaceMutationReport } from '@agentmux/core/control'
 import { presentError } from '@agentmux/client-ui/error-presentation'
+import { Button } from '@agentmux/client-ui/components/Button'
 import { useAppStore } from '../store'
 import { type OpenDestination, type OpenHttpLinkOrigin } from '../lib/open-destination'
 import { CURRENT_FORK_DESTINATIONS, currentForkRequest, currentForkSourceMatches, currentForkUnavailableReason,
@@ -223,7 +224,7 @@ export function AgentCurrentForkControls({ reason, readOnly, unsettled, state, d
         : state.review.placement === 'session' ? <>
           <SelectionField label="Fork destination" value={destinationKey} onValueChange={setDestinationKey} options={[{ value: '', label: 'Choose an existing destination' }, ...state.destinations ?? []]} />
           {!state.destinations?.length ? <span>No existing destination is confirmed. Keep this Agent and choose an available Space first.</span> : null}
-          <button type="button" className="small-button" disabled={!selectedDestination} onClick={() => select('tab', selectedDestination, submitted)}>Fork in new Tab</button>
+          <Button type="button" disabled={!selectedDestination} onClick={() => select('tab', selectedDestination, submitted)}>Fork in new Tab</Button>
         </> : <OpenDestinationBar canSplit allowedDestinations={CURRENT_FORK_DESTINATIONS}
           accessibleContext="Choose where to fork the current conversation" onSelect={destination => select(destination, undefined, submitted)} />}
       <button type="button" className="agent-current-fork__cancel" disabled={state.busy} onClick={cancelReview}><ThemeActionCancelIcon size={13} />Cancel fork</button>

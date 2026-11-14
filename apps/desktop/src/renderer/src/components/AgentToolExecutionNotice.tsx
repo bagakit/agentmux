@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { AgentExecutionInspection } from '@agentmux/core'
+import { Button } from '@agentmux/client-ui/components/Button'
 import type { SessionSnapshot } from '../../../shared/contracts'
 import { api } from '../lib/api'
 import { useAppStore } from '../store'
@@ -93,8 +94,8 @@ export function AgentToolExecutionNotice({ session, visible, presentation = 'dis
     step: 'Original tool connection could not be rejoined', mode: recovery.error,
     restore: 'The original binding and pending operations are retained. Check the named cause before reconnecting again.'
   } } })
-  const actions = <><button type="button" className="small-button" onClick={() => void refresh()}>Refresh observation</button>
-    {connectionUnconfirmed || recovery.pending || recovery.error ? <button type="button" className="small-button" disabled={recovery.pending} onClick={() => void rejoin()}>{recovery.pending ? 'Reconnecting…' : 'Reconnect original tools'}</button> : null}</>
+  const actions = <><Button type="button" onClick={() => void refresh()}>Refresh observation</Button>
+    {connectionUnconfirmed || recovery.pending || recovery.error ? <Button type="button" disabled={recovery.pending} onClick={() => void rejoin()}>{recovery.pending ? 'Reconnecting…' : 'Reconnect original tools'}</Button> : null}</>
   const recoveryDetails = connectionUnconfirmed ? <p className="tool-execution-recovery-scope">Reconnect to the same Agent and tools. Pending tool work may continue, without sending your prompt again.</p> : null
   const connectionTitle = current.error || !inspection ? 'Unconfirmed' : inspection.state === 'connected' ? 'Connected' : 'Unavailable'
   const unresolved = inspection?.diagnostics?.some(item => item.scope === 'operation')
