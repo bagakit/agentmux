@@ -210,8 +210,14 @@ async function run(): Promise<void> {
   host.setAlwaysOnTop(true, 'screen-saver')
   host.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true })
   pin.showInactive(); minimized.show(); minimized.minimize(); host.show(); app.focus({ steal: true }); host.focus()
-  await until('real host visibility, minimization and focus', () => host!.isVisible() && host!.isFocused() && pin!.isVisible()
-    && !hidden!.isVisible() && minimized!.isMinimized() && app.isActive())
+  let lastFocusAttempt = 0
+  await until('real host visibility, minimization and focus', () => {
+    const now = performance.now()
+    if (now - lastFocusAttempt >= 250) {
+      host!.moveTop(); app.focus({ steal: true }); host!.focus(); lastFocusAttempt = now
+    }
+    return host!.isVisible() && host!.isFocused() && pin!.isVisible() && !hidden!.isVisible() && minimized!.isMinimized() && app.isActive()
+  })
   await painted(host)
   check('the real workbench and pin are visible with exact prior opacity', exactHostOpacity())
 
