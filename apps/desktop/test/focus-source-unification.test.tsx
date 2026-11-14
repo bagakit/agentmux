@@ -715,7 +715,7 @@ it.each([false, true])('the selected original workface reads its real conversati
     ['Check again', 'Check original status', 'Refresh member observation'].includes(button.textContent ?? ''))
   await vi.waitFor(() => expect(refresh()).toBeDefined())
   await act(async () => refresh()!.click())
-  await vi.waitFor(() => expect(f.member.mock.calls.some(([target]) => target.target.expectedRun.runId === f.session.run.runId)).toBe(true))
+  await vi.waitFor(() => expect(f.member.mock.calls.some(([target]) => 'expectedRun' in target.target && target.target.expectedRun.runId === f.session.run.runId)).toBe(true))
   await vi.waitFor(() => expect(reading()).toBe(body))
   await act(async () => useAppStore.getState().setMainSurface('board'))
   await act(async () => useAppStore.getState().setMainSurface('agents'))

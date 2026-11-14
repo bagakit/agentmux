@@ -42,7 +42,7 @@ it.each([false, true])('original member mail reads only its Runtime-qualified pa
   const participant = { hostId: 'local', participantSessionId: 'recipient', participantRuntimeId: runtimeId }
   const call = (method: string, params: object) => f.rpc.call('space.member.call', { target, call: { method, params } } as never)
   expect((await selected.owner.client.listMessages({ participantSessionId: 'recipient', participantRuntimeId: runtimeId, direction: 'outgoing' })).messages.map(value => value.envelope.messageId)).toEqual(['local-legacy', 'original-mail'])
-  const page = await call('message.ls', { ...participant, direction: 'outgoing' }) as { messages: Array<{ envelope: { messageId: string } }> }
+  const page = await call('message.ls', { ...participant, direction: 'outgoing' }) as unknown as { messages: Array<{ envelope: { messageId: string } }> }
   expect(page.messages.map(value => value.envelope.messageId)).toEqual(['local-legacy', 'original-mail'])
   for (const messageId of ['original-mail', 'local-legacy']) {
     expect(await call('message.read', { ...participant, messageId })).toMatchObject({ message: { envelope: { messageId, body: 'Original body ' + messageId } } })
@@ -57,7 +57,7 @@ it.each([false, true])('original member mail reads only its Runtime-qualified pa
     }
   await expect(call('message.dispatch.read', { ...participant, sourceMessageId: 'namesake-mirror' })).rejects.toMatchObject({ code: 'DISPATCH_PARTICIPANT_MISMATCH' })
   await expect(selected.owner.client.readDispatch({ participantSessionId: 'recipient', participantRuntimeId: runtimeId, sourceMessageId: 'namesake-mirror' })).rejects.toMatchObject({ code: 'DISPATCH_PARTICIPANT_MISMATCH' })
-  const dispatches = await call('message.dispatch.ls', participant) as { dispatches: Array<{ sourceMessageId: string }> }
+  const dispatches = await call('message.dispatch.ls', participant) as unknown as { dispatches: Array<{ sourceMessageId: string }> }
   expect(dispatches.dispatches.map(value => value.sourceMessageId).sort()).toEqual(['local-legacy', 'original-mail'])
   const originalRpc = foreign ? f.d.rpc : f.b.rpc
   const managed = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: f.original.root + (foreign ? '/D.sock' : '/B.sock') },
