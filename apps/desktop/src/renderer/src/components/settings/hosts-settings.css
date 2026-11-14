@@ -50,9 +50,9 @@
 .remote-management[data-remote-wide='false'] .remote-overview__facts { padding: var(--sp-4); border: 1px solid var(--line-soft); border-radius: var(--radius); background: var(--surface-1); }
 
 .host-transport-field { display: grid; gap: var(--sp-2); margin-top: var(--sp-4); }
-.host-transport-field > span, .host-tailcat-address > label > span { color: var(--text-3); font-size: var(--fs-meta); }
+.host-transport-field > span, .host-tailcat-address > label { color: var(--text-3); font-size: var(--fs-meta); }
 .host-connection-fields > [data-tailcat-client] { margin-top: var(--sp-4); }
-.host-transport-field .selection-field { width: 100%; min-height: 32px; padding: 5px 9px; border: 1px solid var(--line-soft); border-radius: 6px; color: var(--text); background: var(--surface-0); font: inherit; font-size: var(--fs-body); }
+.host-transport-field .selection-field { width: 100%; }
 .host-tailcat-listener { display: grid; gap: 12px; min-width: 0; }
 .host-local-incoming { display: grid; gap: 18px; padding: 22px 0; border-top: 1px solid var(--line-soft); min-width: 0; }
 .host-local-incoming[hidden] { display: none; }
@@ -64,11 +64,12 @@
 .host-tailcat-toggle > span { display: grid; gap: 3px; }
 .host-tailcat-toggle strong { font-size: var(--fs-body); font-weight: 550; }
 .host-tailcat-toggle small { color: var(--text-3); font-size: 11px; line-height: 1.4; }
-.host-tailcat-listener textarea { width: 100%; box-sizing: border-box; resize: vertical; min-height: 64px; padding: 7px 9px; border: 1px solid var(--line-soft); border-radius: 6px; color: var(--text); background: var(--surface-0); font: inherit; overflow-wrap: anywhere; }
-.host-tailcat-status, .host-tailcat-address { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.host-tailcat-listener textarea { overflow-wrap: anywhere; }
+.host-tailcat-status { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .host-tailcat-status > span { flex: 1 1 180px; color: var(--text-3); font-size: 11px; overflow-wrap: anywhere; }
-.host-tailcat-address > label { display: grid; gap: 6px; flex: 1 1 200px; min-width: 0; }
-.host-tailcat-address > button { align-self: end; }
+.host-tailcat-address { display: grid; gap: var(--sp-2); min-width: 0; }
+.host-tailcat-address__field { align-items: center; padding-inline-end: var(--sp-2); }
+.host-tailcat-address__field > button { flex: none; }
 
 .remote-local-address-detail { display: grid; gap: var(--sp-2); white-space: normal; }
 .remote-local-address-list { display: grid; gap: var(--sp-2); margin: 0; }

@@ -1,4 +1,4 @@
-import { TextInput } from '@agentmux/client-ui/input'
+import { SearchInput, TextInput } from '@agentmux/client-ui/input'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { memo, useEffect, useRef, useState } from 'react'
 import { presentError } from '@agentmux/client-ui/error-presentation'
@@ -18,7 +18,6 @@ import { AgentExecutorPicker } from '../AgentExecutorPicker'
 const ThemeActionCreateFolderIcon = semanticIconComponent('action.create-folder')
 const ThemeStatusLoadingIcon = semanticIconComponent('status.loading')
 const ThemeObjectFolderOpenIcon = semanticIconComponent('object.folder-open')
-const ThemeActionSearchIcon = semanticIconComponent('action.search')
 const ThemeObjectBranchIcon = semanticIconComponent('object.branch')
 
 
@@ -176,8 +175,8 @@ export const HostProjectsPane = memo(function HostProjectsPane({ config, hostId,
         onClick={() => void openRegistered(progress.workspace!)}>Open registered folder</Button> : null}
     </div> : null}
     {projects.length > 0 ? <>
-      <label className="settings-resource-search"><ThemeActionSearchIcon size={14} aria-hidden="true" /><TextInput type="search" aria-label={`Find a project on ${host?.label ?? hostId}`}
-        placeholder="Find a project or worktree…" value={query} onChange={event => setQuery(event.target.value)} /></label>
+      <SearchInput className="settings-resource-search" aria-label={`Find a project on ${host?.label ?? hostId}`}
+        clearLabel="Clear project filter" placeholder="Find a project or worktree…" value={query} onValueChange={setQuery} />
       <div className="host-projects__list">{matches.map(project => <section key={project.id} className="host-projects__project" data-project-id={project.id}>
         <header><ThemeObjectFolderOpenIcon size={15} aria-hidden="true" /><strong>{project.name}</strong>
           <small>{project.workspaces.filter(workspace => workspace.kind === 'worktree').length} worktrees</small></header>

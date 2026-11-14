@@ -3,7 +3,7 @@ import type { ApplicationAccessConfiguration, ApplicationAccessEndpoint, Applica
   ApplicationAccessOperation, ApplicationAccessPlan, ApplicationAccessProfile } from '@agentmux/core'
 import { mintObjectId } from '@agentmux/core/object-id'
 import { APPLICATION_ACCESS_NOT_APPLIED_CODES, APPLICATION_ACCESS_SCHEMA } from '@agentmux/core/application-access'
-import { TextInput } from '@agentmux/client-ui/input'
+import { NativeSelect, Textarea, TextInput } from '@agentmux/client-ui/input'
 import { Button } from '@agentmux/client-ui/components/Button'
 import type { HostConfig } from '../../../../shared/contracts'
 import { configValuesEqual } from '../../../../shared/config-edit'
@@ -165,7 +165,7 @@ export function HostApplicationAccessPanel({ host, committed, hosts, active }: {
         <label><span>Name</span><TextInput required value={draft.label} onChange={event => setDraft({ ...draft, label: event.target.value })} /></label>
         <label><span>Application ID</span><TextInput required value={draft.applicationId} onChange={event => setDraft({ ...draft, applicationId: event.target.value })} /></label>
         <label className="application-access__full"><span>Expected application account</span><TextInput required value={draft.accountId} onChange={event => setDraft({ ...draft, accountId: event.target.value })} /></label>
-        <label className="application-access__full"><span>Scopes <small>one per line</small></span><textarea required rows={3} value={draft.scopesText} onChange={event => setDraft({ ...draft, scopesText: event.target.value })} /></label>
+        <label className="application-access__full"><span>Scopes <small>one per line</small></span><Textarea required rows={3} value={draft.scopesText} onChange={event => setDraft({ ...draft, scopesText: event.target.value })} /></label>
       </div>
       <div className="application-access__endpoints">{(['source', 'target'] as const).map(side => <EndpointEditor key={side} title={side === 'source' ? 'Source' : 'Target'}
         value={draft[side]} hosts={hosts}
@@ -244,10 +244,10 @@ function EndpointEditor({ title, value, hosts, onChange }: {
     } catch (failure) { setError(message(failure)) } finally { setReading(false) }
   }
   return <fieldset className="application-access__endpoint"><legend>{title}</legend>
-    <label><span>Environment</span><select aria-label={`${title} environment`} value={value.hostId} onChange={event => {
+    <label><span>Environment</span><NativeSelect aria-label={`${title} environment`} value={value.hostId} onChange={event => {
       const host = hosts.find(item => item.id === event.target.value)
       if (host) { onChange({ ...value, hostId: host.id, runtimeId: host.kind === 'ssh' ? host.runtimeId ?? '' : '' }); setError(null) }
-    }}>{!selected ? <option value={value.hostId}>{value.hostId} · unavailable</option> : null}{hosts.map(host => <option key={host.id} value={host.id}>{host.label}</option>)}</select></label>
+    }}>{!selected ? <option value={value.hostId}>{value.hostId} · unavailable</option> : null}{hosts.map(host => <option key={host.id} value={host.id}>{host.label}</option>)}</NativeSelect></label>
     <label><span>OS account</span><TextInput required aria-label={`${title} OS account`} value={value.osAccount} onChange={event => onChange({ ...value, osAccount: event.target.value })} /></label>
     <label><span>Runtime ID</span><TextInput required aria-label={`${title} Runtime ID`} value={value.runtimeId} onChange={event => onChange({ ...value, runtimeId: event.target.value })} /></label>
     <Button type="button" disabled={reading || !selected} onClick={() => void identify()}>{reading ? 'Reading identity…' : 'Read environment identity'}</Button>

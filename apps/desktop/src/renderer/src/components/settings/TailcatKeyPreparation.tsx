@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { TextInput } from '@agentmux/client-ui/input'
+import { useEffect, useId, useMemo, useRef, useState } from 'react'
+import { InputGroup, TextInput } from '@agentmux/client-ui/input'
 import type { TailcatKeyPreparation as PreparedKey, TailcatKeyRole } from '@agentmux/core'
 import { api } from '../../lib/api'
 import { copyTextToClipboard } from '../../lib/clipboard-copy'
@@ -19,6 +19,7 @@ export function TailcatKeyPreparation({ host, role, keyFile, onPrepared, saveLab
 }) {
   const [state, setState] = useState<{ busy?: boolean; result?: PreparedKey; error?: ReturnType<typeof tailcatPreparationFailure>; keptDraft?: boolean }>({})
   const live = useRef(true)
+  const codeField = useId()
   useEffect(() => { live.current = true; return () => { live.current = false } }, [])
   const prepare = async () => {
     const apply = onPrepared, originalFocus = document.activeElement
@@ -47,10 +48,14 @@ export function TailcatKeyPreparation({ host, role, keyFile, onPrepared, saveLab
       <p>Your connection draft is kept.</p>{state.error.code ? <details><summary>Error details</summary><code>{state.error.code}</code></details> : null}</div> : result ? <p role="status" className="host-tailcat-preparation__receipt">
       {result.created ? 'Created' : 'Reusing'} key <code>{result.key}</code>.{state.keptDraft ? ' Your later draft edits were kept.' : role === 'server' ? ` Add the connection code below, then ${saveLabel}.` : ' Copy this code to the other Mac’s allowed clients.'}
     </p> : null}
-    {code ? <div className="host-tailcat-address"><label><span>This Mac’s connection code <small>public key</small></span>
-      <TextInput aria-label="This Mac’s connection code" value={code} readOnly spellCheck={false} /></label>
-      <button type="button" className="small-button" aria-disabled={copy.state === 'copying' || undefined}
-        onClick={() => { void copy.copy(code) }}><span role="status">{copy.state === 'copied' ? 'Copied code' : 'Copy code'}</span></button></div> : null}
+    {code ? <div className="host-tailcat-address">
+      <label htmlFor={codeField}>This Mac’s connection code <small>public key</small></label>
+      <InputGroup className="host-tailcat-address__field">
+        <TextInput id={codeField} aria-label="This Mac’s connection code" value={code} readOnly spellCheck={false} />
+        <button type="button" className="small-button" aria-disabled={copy.state === 'copying' || undefined}
+          onClick={() => { void copy.copy(code) }}><span role="status">{copy.state === 'copied' ? 'Copied code' : 'Copy code'}</span></button>
+      </InputGroup>
+    </div> : null}
     {copy.state === 'failed' ? <p role="alert" className="host-check-detail">Copy failed. Select the public code and copy it again.</p> : null}
     <TailcatSetupHelp active={active} host={host} role={role} failure={state.error ? { step: 'prepare-key', code: state.error.code } : undefined} />
   </div>

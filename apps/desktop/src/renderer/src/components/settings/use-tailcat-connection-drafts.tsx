@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Button } from '@agentmux/client-ui/components/Button'
+import { TextInput } from '@agentmux/client-ui/input'
 import type { HostConfig } from '../../../../shared/contracts'
 import { configValuesEqual } from '../../../../shared/config-edit'
 import { useAppStore, setAuthoredWorkbench } from '../../store'
@@ -81,7 +82,7 @@ export function useTailcatConnectionDrafts(saved: Record<string, HostConfig>, sc
       return <details key={id+index}><summary>Retained edit · {entry?.value.label ?? id}</summary>
         {entry ? <>{entry.value.tailcat ? <p>Original key: <code>{entry.value.tailcat.keyFile}</code></p> : null}
           {entry.value.kind === 'ssh' ? entry.value.tailcat
-            ? <label>Private destination<input type="password" readOnly value={entry.value.tailcat.address} /></label>
+            ? <label>Private destination<TextInput type="password" autoComplete="off" readOnly value={entry.value.tailcat.address} /></label>
             : <p>Original SSH Host: <code>{entry.value.hostname}</code></p>
             : <pre>{entry.allowedText ?? entry.value.tailcat?.allowedClients.join('\n') ?? ''}</pre>}</> : <p>The original record is kept without rewriting it.</p>}
         <Button type="button" onClick={() => {

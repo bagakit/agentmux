@@ -1,6 +1,6 @@
 import { missingExecutableLabel } from '../../lib/executor-detection'
 import { ExecutorLaunchPreview } from './ExecutorLaunchPreview'
-import { ComposerTextarea, TextInput } from '@agentmux/client-ui/input'
+import { ComposerTextarea, NativeSelect, Switch, TextInput } from '@agentmux/client-ui/input'
 import { useEffect, useRef, useState } from 'react'
 import type { AgentMuxRpcResult } from '@agentmux/core'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
@@ -163,9 +163,9 @@ export function HostExecutorSettings({ config, active, requestedHostId, requeste
   }
   return <div className="settings-pane-stack settings-host-executors" aria-label="Host executors">
     <div className="settings-pane-toolbar">
-      <label className="settings-compact-field"><span>Run on</span><select aria-label="Executor Host" value={hostId} disabled={saving} onChange={event => { setHostId(event.target.value); setProviderFilter(undefined); setSelected(null); setQuery(''); setError(null) }}>
+      <label className="settings-compact-field"><span>Run on</span><NativeSelect aria-label="Executor Host" value={hostId} disabled={saving} onChange={event => { setHostId(event.target.value); setProviderFilter(undefined); setSelected(null); setQuery(''); setError(null) }}>
         {config.hosts.map(item => <option key={item.id} value={item.id}>{item.label}</option>)}
-      </select></label>
+      </NativeSelect></label>
       <span className="settings-resource-count">{descriptors.length} configurations</span>
       <button className="icon-button" aria-label="Refresh Host executors" disabled={checking} onClick={() => void refresh()}>{checking ? <ThemeStatusLoadingIcon size={14} animation="spin" /> : <ThemeActionRefreshIcon size={14} />}</button>
       <button className="small-button" disabled={saving || !host} onClick={() => setAdding(true)}><ThemeActionRegisterCommandIcon size={13} />Register command</button>
@@ -182,7 +182,7 @@ export function HostExecutorSettings({ config, active, requestedHostId, requeste
       <div className="agent-settings-fields">
         <label><span>Executor ID</span><TextInput aria-label="Host Executor ID" value={executorId} onChange={event => update({ executorId: event.target.value })} /></label>
         <label><span>Name</span><TextInput aria-label="Host Executor name" value={label} onChange={event => update({ label: event.target.value })} /></label>
-        <label><span>Provider</span><select aria-label="Host Executor Provider" value={providerId} onChange={event => update({ providerId: event.target.value })}>{providers.map(provider => <option key={provider.id} value={provider.id}>{provider.label}</option>)}</select></label>
+        <label><span>Provider</span><NativeSelect aria-label="Host Executor Provider" value={providerId} onChange={event => update({ providerId: event.target.value })}>{providers.map(provider => <option key={provider.id} value={provider.id}>{provider.label}</option>)}</NativeSelect></label>
         <label><span>Executable on this Host</span><TextInput aria-label="Host Executor command" placeholder="executable name or absolute path" value={command} onChange={event => update({ command: event.target.value })} /></label>
         <p className="settings-group-note">One executable name or path on this Host, without arguments or shell quotes. Paths may contain spaces.</p>
         <label><span>Arguments <small>shell-style quoting</small></span><ComposerTextarea aria-label="Host Executor arguments" value={args} onValueChange={args => update({ args })} /></label>
@@ -190,7 +190,7 @@ export function HostExecutorSettings({ config, active, requestedHostId, requeste
         <label><span>Environment JSON</span><ComposerTextarea aria-label="Host Executor environment" value={env} onValueChange={env => update({ env })} /></label>
       </div>
       <div className="settings-host-executor-actions">
-      <label className="agent-guide-toggle"><input type="checkbox" checked={guide} onChange={event => update({ guide: event.target.checked })} /><span>Inject AgentMux guide</span></label>
+      <label className="agent-guide-toggle"><Switch checked={guide} onChange={event => update({ guide: event.target.checked })} /><span>Inject AgentMux guide</span></label>
       <button className="primary-button" disabled={saving} onClick={() => void register()}>{saving ? 'Saving…' : 'Register command'}</button>
       </div>
     </section> : <div className="settings-resource-split">
@@ -210,10 +210,10 @@ export function HostExecutorSettings({ config, active, requestedHostId, requeste
             {hook?.result?.canUpdate ? <button className="small-button" type="button" disabled={Boolean(hook.pending) || Boolean(hook.error) || hook.result.update.status === 'unconfirmed'} onClick={() => void maintainHook(true)}>Update configuration</button> : null}
           </div>
           {needsWorkspace || workspacePath ? <label className="settings-compact-field"><span>Workspace</span>{workspaces.length > 0
-            ? <select aria-label="Hook workspace" value={workspacePath} onChange={event => chooseWorkspace(event.target.value)}>
+            ? <NativeSelect aria-label="Hook workspace" value={workspacePath} onChange={event => chooseWorkspace(event.target.value)}>
               <option value="">Choose a workspace</option>
               {workspaces.map(workspace => <option key={workspace.id} value={workspace.path}>{workspace.name}</option>)}
-            </select>
+            </NativeSelect>
             : <TextInput aria-label="Hook workspace" placeholder="Absolute path on this Host" value={workspacePath} onChange={event => chooseWorkspace(event.target.value)} />}
           </label> : null}
           <div className="settings-executor-hooks__result" role="status">

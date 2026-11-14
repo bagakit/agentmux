@@ -4,7 +4,7 @@ import { Button } from '@agentmux/client-ui/components/Button'
 import { HostTailcatClientFields } from './HostTailcatClientFields'
 import { LocalIncomingConnections } from './LocalIncomingConnections'
 import { hostConnectionSummary } from '../../lib/host-transport'
-import { TextInput } from '@agentmux/client-ui/input'
+import { SearchInput, TextInput } from '@agentmux/client-ui/input'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { HostIcon } from '../HostBadge'
 import { useContext, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
@@ -37,7 +37,6 @@ import './hosts-settings.css'
 
 const ThemeObjectTopologyIcon = semanticIconComponent('object.topology')
 const ThemeLayoutListIcon = semanticIconComponent('object.list')
-const ThemeActionSearchIcon = semanticIconComponent('action.search')
 const ThemeActionCreateHostIcon = semanticIconComponent('action.create-host')
 const ThemeStatusLoadingIcon = semanticIconComponent('status.loading')
 const ThemeStatusCompletedIcon = semanticIconComponent('status.completed')
@@ -278,7 +277,8 @@ export function HostSettingsPane({ config, onSave, active, onClose, navigationRe
       <div className="settings-pane-toolbar remote-management__toolbar">
         {view === 'editor' && <Button type="button" className="settings-resource-back" onClick={backToLibrary}><ThemeNavigationBackIcon size={14} /> All hosts</Button>}
         <div className="remote-management__scope"><strong>{hosts.length}</strong><span>{hosts.length === 1 ? 'host' : 'hosts'}</span><small>{hosts.filter(host => host.kind === 'ssh').length} remote</small></div>
-        {showTopology ? <label className="settings-resource-search remote-management__search"><ThemeActionSearchIcon size={14} aria-hidden="true" /><TextInput type="search" aria-label="Filter hosts" placeholder="Find a host or project…" value={filter.query} onChange={event => filterHosts(event.target.value)} /></label> : null}
+        {showTopology ? <SearchInput className="settings-resource-search remote-management__search" aria-label="Filter hosts"
+          clearLabel="Clear host filter" placeholder="Find a host or project…" value={filter.query} onValueChange={filterHosts} /> : null}
         {wide ? <div className="remote-management__modes" aria-label="Host view">
           <button type="button" aria-label="Topology" aria-pressed={showTopology} onClick={() => setMode('topology')}><ThemeObjectTopologyIcon size={14} /><span>Topology</span></button>
           <button type="button" aria-label="List" aria-pressed={!showTopology} onClick={() => setMode('list')}><ThemeLayoutListIcon size={14} /><span>List</span></button>

@@ -1,9 +1,8 @@
-import { TextInput } from '@agentmux/client-ui/input'
+import { SearchInput } from '@agentmux/client-ui/input'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { useHostConnectionTooltip } from '../HostConnectionTooltip'
 
-const ThemeActionSearchIcon = semanticIconComponent('action.search')
 const ThemeNavigationDisclosureIcon = semanticIconComponent('navigation.disclosure')
 const ThemeActionAdjustIcon = semanticIconComponent('action.adjust')
 const ThemeObjectFolderOpenIcon = semanticIconComponent('object.folder-open')
@@ -55,9 +54,8 @@ export function HostConnectionLibrary({ items, selectedId, panel, onSelect, quer
   }, [focusRequest, expanded, panel])
 
   return <aside className="settings-resource-library settings-host-library">
-    <label className="settings-resource-search"><ThemeActionSearchIcon size={14} aria-hidden="true" />
-      <TextInput ref={search} type="search" aria-label="Filter hosts" placeholder="Find a host…" value={query} onChange={(event) => onQuery(event.target.value)} />
-    </label>
+    <SearchInput className="settings-resource-search" ref={search} aria-label="Filter hosts" placeholder="Find a host…"
+      clearLabel="Clear host filter" value={query} onValueChange={onQuery} />
     <div ref={list} className="settings-resource-library__list" aria-label="Hosts">
       {items.map((item) => <details key={item.id} className="settings-host-branch" data-host-disclosure={item.id}
         data-current-host={selectedId === item.id} open={expanded[item.id] ?? false} onToggle={(event) => {

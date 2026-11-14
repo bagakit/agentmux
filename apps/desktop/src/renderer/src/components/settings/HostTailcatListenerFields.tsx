@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { Switch, TextInput } from '@agentmux/client-ui/input'
+import { useEffect, useId, useMemo, useRef, useState } from 'react'
+import { InputGroup, Switch, Textarea, TextInput } from '@agentmux/client-ui/input'
 import type { HostRuntimeObservation } from '@agentmux/core'
 import type { LocalHostConfig, TailcatListenerConfig } from '@agentmux/host/host-configuration'
 import type { HostConfig } from '../../../../shared/contracts'
@@ -26,6 +26,7 @@ export function HostTailcatListenerFields({ host, committed, active, onChange, a
   const latest = useRef(configuration); latest.current = configuration
   const visible = useRef(active); visible.current = active
   const allowedInput = useRef<HTMLTextAreaElement>(null)
+  const addressField = useId()
   const [clientText, setClientText] = useState({ text: configuration.allowedClients.join('\n'), keys: configuration.allowedClients })
   const retainedKeys = allowedClientsText?.split('\n').map(key => key.trim()).filter(Boolean)
   const allowedText = retainedKeys && configValuesEqual(retainedKeys, configuration.allowedClients) ? allowedClientsText!
@@ -66,7 +67,7 @@ export function HostTailcatListenerFields({ host, committed, active, onChange, a
         onChange={event => onChange({ ...configuration, keyFile: event.target.value })} placeholder="agentmux-server" /></label>
     </div></details>
     <div className="host-edit-grid">
-      <label className="host-edit-grid__wide"><span>Allowed client public keys <small>one per line</small></span><textarea ref={allowedInput} aria-label="Tailcat allowed clients" value={allowedText} rows={3} spellCheck={false}
+      <label className="host-edit-grid__wide"><span>Allowed client public keys <small>one per line</small></span><Textarea ref={allowedInput} aria-label="Tailcat allowed clients" value={allowedText} rows={3} spellCheck={false}
         onChange={event => {
           const text = event.target.value, keys = text.split('\n').map(key => key.trim()).filter(Boolean)
           setClientText({ text, keys }); onAllowedClientsTextChange?.(text); onChange({ ...configuration, allowedClients: keys })
@@ -78,9 +79,14 @@ export function HostTailcatListenerFields({ host, committed, active, onChange, a
     <div className="host-tailcat-status"><span role="status">{!saved ? `${saveLabel} to apply these changes.` : current?.error ?? (listener ? `Tailcat listener · ${listener.state}` : current?.busy ? 'Reading listener status…' : 'Tailcat listener status unknown')}</span>
       <button type="button" className="small-button" disabled={!saved || current?.busy === true} onClick={() => setRevision(value => value + 1)}>Refresh status</button></div>
     {saved && listener?.detail ? <p className="host-check-detail">{listener.detail}</p> : null}
-    {saved && address ? <div className="host-tailcat-address"><label><span>Private Tailcat address</span><TextInput aria-label="Private Tailcat address" type="password" autoComplete="off" value={address} readOnly /></label>
-      <button type="button" className="small-button" aria-disabled={copy.state === 'copying' || undefined}
-        onClick={() => { void copy.copy(address) }}><span role="status">{copy.state === 'copied' ? 'Copied' : 'Copy address'}</span></button></div> : null}
+    {saved && address ? <div className="host-tailcat-address">
+      <label htmlFor={addressField}>Private Tailcat address</label>
+      <InputGroup className="host-tailcat-address__field">
+        <TextInput id={addressField} aria-label="Private Tailcat address" type="password" autoComplete="off" value={address} readOnly />
+        <button type="button" className="small-button" aria-disabled={copy.state === 'copying' || undefined}
+          onClick={() => { void copy.copy(address) }}><span role="status">{copy.state === 'copied' ? 'Copied' : 'Copy address'}</span></button>
+      </InputGroup>
+    </div> : null}
     {copy.state === 'failed' ? <p role="alert" className="host-check-detail">Address copy failed. Select the private field and copy it again.</p> : null}
   </div>
 }
