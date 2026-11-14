@@ -14,9 +14,9 @@ const ThemeActionCloseIcon = semanticIconComponent('action.close')
 export interface SelectionOption { value: string; label: string; disabled?: boolean; icon?: ReactNode; description?: string }
 
 /** Controlled presentation only. The caller owns options, saved identity and domain actions. */
-export function SelectionField({ id, label, value, options, onValueChange, disabled = false, className = '', menuClassName = '', menuBoundary, triggerLabel, searchable, open: controlledOpen, onOpenChange, footer, labelledBy, describedBy, missingOptionLabel = 'Not in current options', missingOptionDescription }: {
+export function SelectionField({ id, label, value, options, onValueChange, disabled = false, className = '', menuClassName = '', menuBoundary, menuContainer, triggerLabel, searchable, open: controlledOpen, onOpenChange, footer, labelledBy, describedBy, missingOptionLabel = 'Not in current options', missingOptionDescription }: {
   id?: string | undefined; label: string; value: string; options: readonly SelectionOption[]
-  onValueChange(value: string): void; disabled?: boolean; className?: string; menuClassName?: string; menuBoundary?: HTMLElement | null; triggerLabel?: string | undefined; searchable?: boolean
+  onValueChange(value: string): void; disabled?: boolean; className?: string; menuClassName?: string; menuBoundary?: HTMLElement | null; menuContainer?: HTMLElement | null; triggerLabel?: string | undefined; searchable?: boolean
   open?: boolean; onOpenChange?(open: boolean): void; footer?: ReactNode
   labelledBy?: string | undefined; describedBy?: string | undefined
   /** Caller-owned meaning for a value absent from options; never inferred as a saved or unavailable identity. */
@@ -59,7 +59,7 @@ export function SelectionField({ id, label, value, options, onValueChange, disab
         <span className="selection-field__choice">{selected?.icon ? <span className="selection-field__icon" inert aria-hidden="true">{selected.icon}</span> : null}<span>{triggerLabel ?? currentLabel}</span></span><span id={descriptionId} hidden>{currentTitle}</span><ThemeNavigationDownIcon size={13} aria-hidden="true" />
       </button>
     </Menu.Trigger>
-    <DocumentOverlayPortal component={Menu.Portal}>
+    <DocumentOverlayPortal component={Menu.Portal} container={menuContainer ?? undefined}>
       <div className="window-overlay-host__entry" data-overlay-layer="popover"><Menu.Content ref={menu} onEscapeKeyDown={event => { if (isImeOwnedKeyboardEvent(event)) event.preventDefault() }} onKeyDown={event => {
         if (canSearch && event.target !== search.current && !isImeOwnedKeyboardEvent(event) && event.key === 'Tab') {
           event.preventDefault()
