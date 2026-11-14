@@ -14,11 +14,11 @@ import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 // Caller qualification with controlled leaf props and history I/O. Store, hook and projector are real.
 // Shared body/axis rendering is covered by conversation-native-user-messages.integration.test.tsx;
 // this suite does not claim a Provider writer, physical geometry or a live Run.
-type ActivityBoundary = { conversationReading?: { reference: import('../src/shared/contracts').SessionHistoryReference; enabled: boolean; nativeSourceFacts?: import('../src/shared/agent-native-source').AgentNativeSourceFacts; opened?: boolean; onClose?: () => void }; sessionId?: string; userMessages?: readonly AgentSessionUserMessage[]; items: readonly unknown[]; describeSpeaker?: DescribeSpeaker; readingNotice?: ReactNode; readingAction?: ReactNode; displayState?: string }
+type ActivityBoundary = { conversationReading?: { reference: import('../src/shared/contracts').SessionHistoryReference; enabled: boolean; nativeSourceFacts?: import('../src/shared/agent-native-source').AgentNativeSourceFacts; opened?: boolean; onClose?: () => void }; sessionId?: string; userMessages?: readonly AgentSessionUserMessage[]; items?: readonly unknown[]; describeSpeaker?: DescribeSpeaker; readingNotice?: ReactNode; readingAction?: ReactNode; displayState?: string }
 const captured = vi.hoisted(() => ({ activities: [] as ActivityBoundary[], terminalSessions: [] as SessionSnapshot[] }))
 vi.mock('../src/renderer/src/components/ActivityView', () => ({ ActivityView: (props: ActivityBoundary) => {
   captured.activities.push(props)
-  return <div data-leaf="activity" data-session={props.sessionId ?? 'absent'}>{props.readingNotice}{props.readingAction}{props.items.map((item:any)=><p key={item.id}>{item.content}</p>)}{props.conversationReading?.opened ? <nav data-leaf="reading"><button type="button" onClick={props.conversationReading.onClose}>Return</button></nav> : null}{props.userMessages?.map(item => <span key={item.id} data-record-id={item.id}>{item.content}</span>)}</div>
+  return <div data-leaf="activity" data-session={props.sessionId ?? 'absent'}>{props.readingNotice}{props.readingAction}{(props.items ?? []).map((item:any)=><p key={item.id}>{item.content}</p>)}{props.conversationReading?.opened ? <nav data-leaf="reading"><button type="button" onClick={props.conversationReading.onClose}>Return</button></nav> : null}{props.userMessages?.map(item => <span key={item.id} data-record-id={item.id}>{item.content}</span>)}</div>
 } }))
 vi.mock('../src/renderer/src/components/TerminalView', () => ({ TerminalView: ({session}: {session: SessionSnapshot}) => { captured.terminalSessions.push(session);return <div data-leaf="terminal" /> } }))
 
@@ -47,6 +47,7 @@ afterEach(async()=>{try { await act(async()=>root.unmount()) } finally { contain
 
 import { DEFAULT_AGENT_CONTINUITY_POLICY } from '@agentmux/core'
 import { fixtureEpoch as _historyFixtureEpoch } from '../../../test/fixture-values.mjs'
+import { pendingResumeCause } from '../../../packages/core/test/helpers/resume-cause-fixture'
 
 function retained(kind:'pending'|'starting'='pending',reason='active-manual'):Extract<SessionSnapshot,{kind:'agent'}>{const original=agent('a');return {...original,processState:'interrupted',status:{state:'exited',source:'run-process',observedAt:_historyFixtureEpoch(0, 0, 2)},continuity:{operationId:'original-restore',agentSessionId:'a',trigger:'startup',policy:{...DEFAULT_AGENT_CONTINUITY_POLICY},previousRun:original.control.run,admittedAt:_historyFixtureEpoch(0, 0, 2),observedAt:_historyFixtureEpoch(0, 0, 2),rechecks:0,kind,reason,evidence:{kind:'run-ended',state:'interrupted',observedAt:_historyFixtureEpoch(0, 0, 2)}}}}
 async function history(){const button=[...container.querySelectorAll<HTMLButtonElement>('button')].find(button=>button.textContent==='History');expect(button).toBeDefined();await act(async()=>button!.click());await flush()}
@@ -55,6 +56,60 @@ function notice(){const node=container.querySelector('.activity-feed__read-notic
 function unchanged(session:SessionSnapshot){expect(useAppStore.getState().sessions).toEqual([session]);expect(useAppStore.getState().agentComposerDrafts.a).toBe('UNSENT_REAL_STORE_DRAFT')}
 
 describe('actual SessionPane restoration presentation',()=>{
+ it('shows the exact private durable Core/public resume cause in the actual original workface', async () => {
+  const f = await pendingResumeCause(), sid = f.decoded.session.agentSessionId
+  const original = { ...agent(sid, f.decoded.session.run.runId), processState: 'interrupted' as const }
+  seed(original)
+  useAppStore.getState().applyEvent({ type: 'core', hostId: 'local', event: { type: 'agent-session', session: f.decoded.session } })
+  const recover = vi.spyOn(useAppStore.getState(), 'recoverSession').mockResolvedValue(undefined)
+  await render(pane(sid))
+  expect(container.textContent).toContain('Recovery is not confirmed')
+  expect(container.textContent).toContain('AGENT_RESUME_ORIGINAL_RUN_UNCONFIRMED')
+  expect(container.textContent).toContain(f.saved.continuity!.error!)
+  expect(useAppStore.getState().agentComposerDrafts[sid]).toBe('UNSENT_REAL_STORE_DRAFT')
+  expect(useAppStore.getState().sessions[0]!.control.run).toEqual(f.previous.run)
+  expect([...container.querySelectorAll('button')].some(button => button.textContent?.includes('Continue original'))).toBe(true)
+  expect(recover).not.toHaveBeenCalled()
+  expect(f.reader.start).not.toHaveBeenCalled(); expect(f.reader.inputCount()).toBe(0)
+ })
+ it('keeps the same confirmed running Run usable while retaining its older pending cause for diagnostics', async () => {
+  const original = retained('pending', 'operation-unconfirmed')
+  original.continuity!.error = 'Original recovery observation was unconfirmed.'
+  seed(original); await render(pane('a'))
+  expect(container.textContent).toContain(original.continuity!.error)
+  // Typed Core/Runtime process projection; no PID, text or timeout qualification.
+  const running = { ...original, processState: 'running' as const, status: agent('a').status }
+  await act(async () => useAppStore.setState({ sessions: [running] })); await flush()
+  expect(container.querySelector('[data-loading-scope="region"]')).toBeNull()
+  expect(container.querySelector('.activity-feed__read-notice')).toBeNull()
+  expect(container.textContent).not.toContain('Original recovery observation was unconfirmed.')
+  expect(container.querySelector('[data-leaf="composer"]')?.getAttribute('data-disabled')).toBe('false')
+  expect(useAppStore.getState().sessions[0]).toEqual(running)
+  expect(useAppStore.getState().agentComposerDrafts.a).toBe('UNSENT_REAL_STORE_DRAFT')
+  await act(async () => useAppStore.getState().setViewMode('a', 'terminal')); await flush()
+  expect(container.querySelector('[data-leaf="terminal"]')).not.toBeNull()
+  expect(captured.terminalSessions.at(-1)?.control).toEqual(original.control)
+ })
+ it('keeps a legacy original error without inventing a code and does not attribute it to a different Session or Run', async () => {
+  const original = retained('pending', 'operation-unconfirmed')
+  original.continuity!.error = 'Original owner remains unconfirmed.'
+  seed(original); await render(pane('a'))
+  expect(container.textContent).toContain(original.continuity!.error)
+  expect(container.textContent).not.toContain('AGENT_RESUME_')
+  for (const operation of [{ ...original.continuity!, agentSessionId: 'another-session' },
+    { ...original.continuity!, previousRun: { runId: 'another-run' } }]) {
+    await act(async () => useAppStore.setState({ sessions: [{ ...original, continuity: operation }] })); await flush()
+    expect(container.textContent).not.toContain('Original owner remains unconfirmed.')
+    expect(useAppStore.getState().agentComposerDrafts.a).toBe('UNSENT_REAL_STORE_DRAFT')
+  }
+  const live = { ...agent('a', 'healthy-new-run'), continuity: original.continuity }
+  await act(async () => useAppStore.setState({ sessions: [live] })); await flush()
+  expect(container.querySelector('[data-loading-scope="region"]')).toBeNull()
+  expect(container.textContent).not.toContain('Original owner remains unconfirmed.')
+  expect(container.querySelector('[data-leaf="composer"]')).not.toBeNull()
+  expect(useAppStore.getState().agentComposerDrafts.a).toBe('UNSENT_REAL_STORE_DRAFT')
+ })
+
  it('keeps unknown frontend observation off the connected terminal and rechecks the same Session without Resume or input',async()=>{
   const original=agent('a');original.terminalFrontend={run:original.control.run,frontendId:'original-frontend',state:'unknown',backendState:'unknown',source:'managed-process',observedAt:_historyFixtureEpoch(0, 0, 100),message:'Original frontend control observation unavailable'}
   seed(original,'terminal')
