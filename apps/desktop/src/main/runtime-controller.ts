@@ -2479,10 +2479,11 @@ export class RuntimeController {
   private async assertConfigurable(nextSignatures: ReadonlyMap<string, string>, launcherHostIds: ReadonlySet<string>): Promise<void> {
     for (const [hostId, host] of this.hosts) {
       if (nextSignatures.get(hostId) === this.hostSignatures.get(hostId) || launcherHostIds.has(hostId)) continue
-      // A never-bound SSH draft has no adopted Runtime to detach. Removing its
-      // unused route must not require installing/connecting that remote Core.
-      // Any retained identity or Session still belongs to the original path below.
-      if (!nextSignatures.has(hostId) && host.config.kind === 'ssh' && !host.config.runtimeId &&
+      // This local connection draft has no saved binding, adopted Runtime or
+      // Session projection. Correcting or removing it must not require the old
+      // route to connect first; this says nothing about other work on the remote.
+      // Adopted identity, Sessions and original quiescence remain protected.
+      if (host.config.kind === 'ssh' && !host.config.runtimeId &&
           runtimeOwner(host.client) === null && host.client.agentSessions().length === 0) continue
       await host.client.connect()
       const runs = await host.client.listRuns()
