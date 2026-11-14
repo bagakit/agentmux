@@ -866,7 +866,8 @@ function WorkbenchRegionContent({
     if (
       !closeRegionRequest ||
       closeRegionRequest.tabId !== tab.id ||
-      closeRegionRequest.workspaceId !== tab.workspaceId ||
+      closeRegionRequest.workspaceId !== (browserPresentation.reference?.displayWorkspaceId ?? tab.workspaceId) ||
+      closeRegionRequest.groupId !== undefined && closeRegionRequest.groupId !== groupId ||
       closeRegionRequest.regionId !== node.regionId
     ) return
     clearCloseRegionRequest(closeRegionRequest.nonce)

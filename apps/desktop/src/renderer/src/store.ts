@@ -1186,7 +1186,7 @@ export type AppState = GitReadingActions & {
   // 只活在承载它的 WorkbenchRegionNode 里，与鼠标点这一格的 X 是同一个决定出口。键盘层够不着那份状态，
   // 于是窗口监听只投意图，命中的那一格读到就跑自己既有的确认流，跑完清掉。裸调 closeRegion 会静默弃掉
   // 未存改动——鼠标点 X 不会那样。
-  closeRegionRequest: { workspaceId: string; tabId: string; regionId: string; nonce: number } | null
+  closeRegionRequest: { workspaceId: string; groupId?: string; tabId: string; regionId: string; nonce: number } | null
   // 「把打字光标（DOM caret）搬进这一格」的一次性意图，按 regionId 定位——同 closeRegionRequest 的
   // consume-and-clear 套路。存在的理由：键盘方向导航搬焦点时只改 activeRegionId（绿环），而看不见的
   // DOM 焦点仍停在上一格的 xterm/Monaco 上，敲的字全进了上一格。承载被点名那格的表面（TerminalView /
@@ -1603,7 +1603,7 @@ export type AppState = GitReadingActions & {
   requestCloseTab(workspaceId: string, tabGroupId: string, tabId: string): void
   clearCloseTabRequest(nonce: number): void
   // 键盘关某一格的入口：只投意图，含未保存确认的真正关闭由承载该格的组件消费。见 closeRegionRequest 注释。
-  requestCloseRegion(workspaceId: string, tabId: string, regionId: string): void
+  requestCloseRegion(workspaceId: string, tabId: string, regionId: string, groupId?: string): void
   clearCloseRegionRequest(nonce: number): void
   updateRegionSplitRatio(workspaceId: string, tabId: string, nodePath: string, ratio: number): void
   updateSplitRatio(workspaceId: string, nodePath: string, ratio: number): void
@@ -9176,11 +9176,12 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     // 只清掉自己消费的那一条：若清的瞬间已被更晚一次按键覆盖成新 nonce，别把新意图也抹掉。
     set((state) => (state.closeTabRequest?.nonce === nonce ? { closeTabRequest: null } : state))
   },
-  requestCloseRegion(workspaceId, tabId, regionId) {
+  requestCloseRegion(workspaceId, tabId, regionId, groupId) {
     // 只投意图，不在这里关：真正的关闭（含未保存确认）在承载该格的组件里，与鼠标点这一格的 X 同一条路。
     // nonce 让「连按两次 Cmd+W 关同一格」也能各触发一次——同一 regionId 重复投递不会因对象相等被 selector 忽略。
     set((state) => ({
       closeRegionRequest: {
+        ...(groupId ? { groupId } : {}),
         workspaceId,
         tabId,
         regionId,

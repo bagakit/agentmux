@@ -15,6 +15,7 @@ export type FocusContextAccess = {
   issue?: string
   select(location?: FocusContextAccess['locations'][number]): void
   open(location?: FocusContextAccess['locations'][number]): void
+  close?(location?: FocusContextAccess['locations'][number]): void
   isCurrent?(): boolean
   refresh(): void
   rename?(name: string | null, expectedRevision: number): Promise<boolean>
