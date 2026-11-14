@@ -22,6 +22,9 @@ import { BrowserAddressInput, type BrowserAddressInputHandle } from './BrowserAd
 import { BrowserToolsPanel } from './BrowserToolsPanel'
 import { SurveyZoneItem, type SurveyItemNameDraft } from './SurveyZoneItem'
 import { SurveyTabColumn } from './SurveyTabColumn'
+import { SurveyPageItem } from './SurveyPageItem'
+import { surveyCompositionDestinations, type SurveyCompositionDestinationIntent } from '../lib/survey-composition-destinations'
+import type { SurveyContentReference, SurveyCompositionDropTarget, SurveyCompositionSelectionControl } from '../lib/survey-composition-drag'
 import { SurveyItemList } from './SurveyItemList'
 import { useSurveyListOrganization } from '../hooks/useSurveyListOrganization'
 import { BrowserStartPage } from './BrowserStartPage'
@@ -48,6 +51,8 @@ import { useBrowserProfiles, browserProfiles } from '../lib/browser-profiles'
 import { surveyProfileReferences } from '../lib/survey-profile-view'
 import { SurveyProfilePicker } from './SurveyProfilePicker'
 import { SurveyMoveTabsDialog } from './SurveyMoveTabsDialog'
+import { SurveyCompositionResultDialog } from './SurveyCompositionResultDialog'
+import { isSurveyCompositionRecovery } from '../lib/survey-composition-recovery'
 import { captureSurveyCompositionSource, type SurveyCompositionSource } from '../lib/survey-tab-composition'
 
 const ThemeStatusUnknownIcon = semanticIconComponent('status.unknown')
@@ -159,6 +164,81 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
   const [recallCapture, setRecallCapture] = useState<RecallCaptureTarget | null>(null)
   const [locationChoice, setLocationChoice] = useState<{ kind: 'note' | 'agent' | 'browser' | 'tab'; zoneId: string; choices: WorkbenchProjectionSelection[] } | { kind: 'close'; zoneId: string; subject: string; choices: WorkbenchProjectionSelection[] } | null>(null)
   const [movingSources, setMovingSources] = useState<SurveyCompositionSource[] | null>(null)
+  const [movingIntent, setMovingIntent] = useState<{ intent: SurveyCompositionDestinationIntent; requestId: string } | null>(null)
+  const [selectingContent, setSelectingContent] = useState(false)
+  const [selectedSources, setSelectedSources] = useState<SurveyCompositionSource[]>([])
+  const pendingCompositions = useAppStore(state => state.surveyCompositionRecoveries)
+  const [reviewingComposition, setReviewingComposition] = useState<string | null>(null)
+  const unresolvedCompositions = pendingCompositions.filter(isSurveyCompositionRecovery)
+  const reviewingOperation = unresolvedCompositions.find(operation => operation.requestId === reviewingComposition)
+  const compositionBusy = useRef(false)
+  const compositionDrag = useRef<{ requestId: string; reservedZoneId: string; sources: SurveyCompositionSource[] } | null>(null)
+  const zonesForComposition = useMemo(() => new Map(catalog?.zones.map(zone => [zone.zoneId, zone]) ?? []), [catalog])
+  function captureContent(reference: SurveyContentReference): SurveyCompositionSource[] | null {
+    if (!catalog) return null
+    const state = useAppStore.getState()
+    const inputs = reference.kind === 'research' ? catalog.tabs.filter(tab => tab.zoneId === reference.zoneId).map(tab => ({ kind: 'tab' as const, tabId: tab.tabId })) : [reference]
+    const sources = inputs.map(input => captureSurveyCompositionSource(state, catalog, input))
+    return sources.length && sources.every(source => source !== null) ? sources : null
+  }
+  const sourceKey = (source: SurveyCompositionSource) => source.kind === 'tab' ? JSON.stringify(['tab', source.tab.id]) : JSON.stringify(['page', source.regionId, source.browserId])
+  function selectionFor(reference: SurveyContentReference): SurveyCompositionSelectionControl | undefined {
+    if (!selectingContent) return undefined
+    const matches = (source: SurveyCompositionSource) => reference.kind === 'research' ? source.zoneId === reference.zoneId
+      : reference.kind === 'tab' ? source.kind === 'tab' && source.tab.id === reference.tabId
+        : source.kind === 'page' && source.regionId === reference.regionId && source.browserId === reference.browserId
+    const checked = reference.kind === 'research' ? (tabsByZone.get(reference.zoneId) ?? []).length > 0 &&
+      (tabsByZone.get(reference.zoneId) ?? []).every(id => selectedSources.some(source => source.kind === 'tab' && source.tab.id === id)) : selectedSources.some(matches)
+    const overlap = selectedSources.some(source => matches(source) || reference.kind === 'tab' && source.tab.id === reference.tabId)
+    return { checked, partial: !checked && overlap, toggle(value) {
+      if (!value) { setSelectedSources(current => current.filter(source => !matches(source))); return }
+      const sources = captureContent(reference)
+      if (!sources) { setError('This original selection changed. Existing content is kept; select its current exact page or Tab again.'); return }
+      setSelectedSources(current => [...current.filter(original => !sources.some(source => source.tab.id === original.tab.id &&
+        (source.kind === 'tab' || original.kind === 'tab' || source.regionId === original.regionId))), ...sources])
+    } }
+  }
+  function startComposition(reference: SurveyContentReference) {
+    const captured = !compositionBusy.current && captureContent(reference)
+    const selected = captured && captured.every(source => selectedSources.some(original => sourceKey(original) === sourceKey(source)))
+    const sources = captured ? selected ? selectedSources : captured : null
+    compositionDrag.current = sources ? { sources, requestId: mintObjectId(), reservedZoneId: mintObjectId() } : null
+    return sources ? `${sources.length} ${sources.every(source => source.kind === 'page') ? sources.length === 1 ? 'page' : 'pages' : sources.every(source => source.kind === 'tab') ? sources.length === 1 ? 'Tab' : 'Tabs' : 'items'}` : null
+  }
+  function canCompose(target: SurveyCompositionDropTarget): boolean {
+    const held = compositionDrag.current
+    if (!held || !catalog || !visible || controlsCoverPage) return false
+    if (target.kind === 'research') {
+      const zone = zonesForComposition.get(target.zoneId), resource = zone && resourceWorkspaces.get(zone.workspaceId)
+      return Boolean(zone && resource && !held.sources.every(source => source.zoneId === target.zoneId))
+    }
+    const owner = surveyPageOwner(tabs, target, catalog)
+    return Boolean(owner && resourceWorkspaces.get(owner.surface.workspaceId) && !held.sources.some(source =>
+      source.kind === 'page' ? source.regionId === target.regionId : source.tab.id === owner.tab.id))
+  }
+  function dropComposition(target: SurveyCompositionDropTarget | null) {
+    const held = compositionDrag.current
+    if (!held || !target || !canCompose(target) || !catalog) { compositionDrag.current = null; return }
+    compositionDrag.current = null
+    let sources = held.sources
+    const intent: SurveyCompositionDestinationIntent = target.kind === 'research' ? { kind: 'existing', zoneId: target.zoneId }
+      : { kind: 'new-research', zoneId: held.reservedZoneId, anchor: target }
+    if (target.kind === 'page') {
+      const page = captureSurveyCompositionSource(useAppStore.getState(), catalog, target)
+      if (!page) { setError('The original target page changed. Its content and this selection are kept; choose that same page again.'); return }
+      sources = [...sources, page]
+    }
+    const destinations = surveyCompositionDestinations(useAppStore.getState(), catalog, sources, intent)
+    if (destinations.length !== 1) {
+      setMovingIntent({ intent, requestId: held.requestId }); setMovingSources(sources); return
+    }
+    compositionBusy.current = true
+    void useAppStore.getState().composeSurveyTabs({ requestId: held.requestId, sources, target: destinations[0]!.target }).then(result => {
+      if (result.outcome === 'unknown' || result.outcome === 'partial') setReviewingComposition(result.requestId)
+      else if (result.issue) setError(result.issue)
+      if (result.outcome === 'moved') setSelectedSources(current => current.filter(source => !sources.includes(source)))
+    }).finally(() => { compositionBusy.current = false }).catch(cause => setError(presentError(cause)))
+  }
   const tabClose = useWorkbenchTabsClose()
   const [toolsVisited, setToolsVisited] = useState(toolsOpen)
   const surfaceRef = useRef<HTMLElement>(null)
@@ -516,6 +596,7 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
     const members = zone ? catalog?.tabs.filter(tab => tab.zoneId === zone.zoneId) ?? [] : []
     const moveTabId = zone?.zoneId === selection?.zoneId ? selection?.active?.tabId : members.length === 1 ? members[0]!.tabId : undefined
     return {
+      onSelectContent: () => { if (sidebarCollapsed) setSidebarCollapsed(false); setSelectingContent(true) },
       visible: visible && !controlsCoverPage, title: zone ? itemTitle(zone) : selection ? 'Retained exploration' : 'New exploration',
       zone: zone ?? null, workspace: zone ? resourceWorkspaces.get(zone.workspaceId) ?? null : null,
       collected: !!zone && collected[zone.zoneId] === true,
@@ -546,7 +627,30 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
   const defaultProfileId = profiles.profiles?.find(profile => profile.isDefault)?.id
   const profileReferences = useMemo(() => surveyProfileReferences(profileView, pageReferences, Object.keys(collected), tabs, defaultProfileId, catalog),
     [profileView, pageReferences, collected, tabs, defaultProfileId, catalog])
+  const currentPageOwner = pageSelection && !pageReferences.some(page => page.regionId === pageSelection.regionId && page.browserId === pageSelection.browserId)
+    ? surveyPageOwner(tabs, pageSelection, catalog) : null
+  const currentPageZoneId = currentPageOwner ? catalog?.tabs.find(tab => tab.tabId === currentPageOwner.tab.id)?.zoneId : null
   const itemTitles = new Map([...Object.keys(collected).filter(zoneId => !catalog?.zones.some(zone => zone.zoneId === zoneId)).map(zoneId => [zoneId, 'Retained exploration'] as const), ...[...displayedItems.values()].map(zone => [zone.zoneId, itemTitle(zone)] as const)].filter(([zoneId]) => profileReferences.zoneIds.has(zoneId)))
+  const savedPageItems = profileReferences.pages.length ? <div aria-label="Saved Survey pages">{profileReferences.pages.map(page => {
+          const owner = surveyPageOwner(tabs, page, catalog), browser = owner?.surface.kind === 'browser' ? owner.surface : null
+          return <SurveyPageItem selection={selectionFor({ kind: 'page', ...page })} key={JSON.stringify(page)} page={page} browser={browser} enabled={visible && !controlsCoverPage}
+            selected={pageSelection?.regionId === page.regionId && pageSelection.browserId === page.browserId} onSelect={() => setSelection({ kind: 'page', ...page })}
+            actions={<SurveyItemOptions {...itemOptionsFor(undefined, browser ? <span>{browser.url}</span> : <span>Original Browser unconfirmed; its exact reference is retained.</span>)}
+              rowAction compact title={browser?.title || 'Retained page'} workspace={browser ? resourceWorkspaces.get(browser.workspaceId) ?? null : null}
+              onMovePage={() => { const source = catalog && captureSurveyCompositionSource(useAppStore.getState(), catalog, { kind: 'page', ...page }); if (source) setMovingSources([source]); else setError('The original page changed. Its reference is kept; inspect that same Browser before moving it.') }}
+              onRemovePageReference={() => void removePageReference(page)} />} />
+        })}</div> : null
+  const selectionControls = selectingContent ? <div className="survey-composition-toolbar" role="group" aria-label="Select content to combine">
+    {selectingContent ? <><span role="status">{selectedSources.length} selected</span><Menu.Root modal={false}>
+      <Menu.Trigger asChild><button type="button" disabled={!selectedSources.length} aria-label="Actions for selected content">Actions</button></Menu.Trigger>
+      <DocumentOverlayPortal component={Menu.Portal}><Menu.Content className="tab-context-menu" align="start" sideOffset={4}>
+        <Menu.Item className="tab-context-menu__item" onSelect={() => { setMovingIntent(null); setMovingSources([...selectedSources]) }}>Move selected to research…</Menu.Item>
+        <Menu.Item className="tab-context-menu__item" onSelect={() => { setMovingIntent({ intent: { kind: 'new-research', zoneId: mintObjectId() }, requestId: mintObjectId() }); setMovingSources([...selectedSources]) }}>New research from selected…</Menu.Item>
+      </Menu.Content></DocumentOverlayPortal></Menu.Root>
+      <button type="button" aria-label="Cancel content selection" onClick={() => { setSelectingContent(false); setSelectedSources([]) }}>Cancel</button>
+    </> : null}
+  </div> : null
+
   const windowControlsInset = isMacPlatform() ? <span className="survey-window-controls-inset" aria-hidden="true" /> : undefined
 
   return <section ref={surfaceRef} className="global-survey-surface" data-sidebar-collapsed={sidebarCollapsed} data-native-window-controls={isMacPlatform()}
@@ -566,33 +670,12 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
             Read original page references again
           </button>
         </p> : null}
-        {profileReferences.pages.length > 0 ? <div aria-label="Saved Survey pages">
-          {profileReferences.pages.map(page => {
-            const owner = surveyPageOwner(tabs, page, catalog)
-            const browser = owner?.surface.kind === 'browser' ? owner.surface : null
-            return <div className="survey-item-row" key={JSON.stringify(page)}
-              data-survey-page-region-id={page.regionId} data-survey-page-browser-id={page.browserId}
-              data-selected={pageSelection?.regionId === page.regionId && pageSelection.browserId === page.browserId}>
-              <button type="button" className="survey-item" aria-label={`Show survey page: ${browser?.title || 'Retained page'}`} onClick={() => setSelection({ kind: 'page', ...page })}>
-                <span className="survey-item-glyph" aria-hidden="true"><span className="survey-page-favicon"><ThemeObjectBrowserIcon size={16} />{browser?.faviconDataUrl ? <img key={browser.faviconDataUrl} src={browser.faviconDataUrl} alt="" onError={event => { event.currentTarget.hidden = true }} /> : null}</span></span><strong>{browser?.title || 'Retained page'}</strong>
-              </button>
-              <div className="survey-item-shortcuts">
-                <SurveyItemOptions {...itemOptionsFor(undefined, browser ? <span>{browser.url}</span> : <span>Original Browser unconfirmed; its exact reference is retained.</span>)}
-                  rowAction compact title={browser?.title || 'Retained page'} workspace={browser ? resourceWorkspaces.get(browser.workspaceId) ?? null : null}
-                  onMovePage={() => {
-                    const source = catalog && captureSurveyCompositionSource(useAppStore.getState(), catalog, { kind: 'page', ...page })
-                    if (source) setMovingSources([source])
-                    else setError('The original page changed. Its reference is kept; inspect that same Browser before moving it.')
-                  }} onRemovePageReference={() => void removePageReference(page)} />
-              </div>
-              {!owner ? <span role="status" className="survey-relation-notice">
-                The original Browser is unconfirmed. Its exact reference is kept.
-              </span> : null}
-            </div>
-          })}
-        </div> : null}
         <SurveyItemContextMenu returnFocus={() => contextOrigin.current} {...itemOptionsFor(contextZone)} grouping={contextZone ? list.groupingFor(contextZone.zoneId, contextOrganization.current) : undefined}>
-        <SurveyItemList model={list} titles={itemTitles} selectedZoneId={selection?.zoneId} visible={visible && !controlsCoverPage} renderItem={(zoneId, dragHandle) => {
+        {pendingCompositions.length > 0 ? <div className="survey-composition-recovery" role="status">
+          {unresolvedCompositions.map(operation => <button key={operation.requestId} type="button" onClick={() => setReviewingComposition(operation.requestId)}>Review combination · {operation.sources.length} {operation.sources.every(source => source.kind === 'page') ? 'pages' : 'items'}</button>)}
+          {pendingCompositions.length > unresolvedCompositions.length ? <details><summary>A saved combination record could not be read</summary><p>The original record is kept. Other content and combinations remain available.</p><pre>{JSON.stringify(pendingCompositions.filter(entry => !isSurveyCompositionRecovery(entry)), null, 2)}</pre></details> : null}
+        </div> : null}
+        <SurveyItemList leading={<>{selectionControls}{savedPageItems}</>} composition={{ start: startComposition, canDrop: canCompose, drop: dropComposition }} model={list} titles={itemTitles} selectedZoneId={selection?.zoneId ?? currentPageZoneId ?? undefined} visible={visible && !controlsCoverPage} renderItem={(zoneId, dragHandle, compositionEnabled) => {
           const zone = displayedItems.get(zoneId)
           if (!zone) return <div className="survey-item-row" data-survey-zone-id={zoneId} data-selected={selection?.zoneId === zoneId}>
             {dragHandle}<button type="button" className="survey-item" aria-label="Show retained survey item" onClick={() => chooseZone(zoneId)}><ThemeStatusUnknownIcon size={14} /><strong>Retained exploration</strong></button>
@@ -601,9 +684,9 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
             const status = activity(zone)
             const itemTabs = [...new Set(itemReferences(zone.zoneId).map(reference => reference.tabId))]
             const itemOptions = itemOptionsFor(zone, status.details)
-            return <SurveyZoneItem dragHandle={dragHandle} key={zone.zoneId} zone={zone} title={itemTitle(zone)} glyph={itemGlyph(zone)} selected={selection?.zoneId === zone.zoneId}
-              showTitle={sidebarCollapsed || itemTabs.length < 2 || Boolean(explorationNames[zone.zoneId]?.trim())}
-              tabColumns={itemTabs.length > 1 ? <div className="survey-item-tabs" aria-label={`Tabs in ${itemTitle(zone)}`}>{itemTabs.map(tabId => <SurveyTabColumn key={tabId} tab={tabs[tabId]!} unconfirmedBrowserRegionIds={unconfirmedBrowserRegionIds} selected={selection?.zoneId === zone.zoneId && selection.active?.tabId === tabId} onSelect={() => chooseTab(zone.zoneId, tabId)} onClose={title => closeItemTab(zone.zoneId, tabId, title)} />)}</div> : null}
+            return <SurveyZoneItem selection={selectionFor({ kind: 'research', zoneId: zone.zoneId })} compositionEnabled={compositionEnabled} dragHandle={dragHandle} key={zone.zoneId} zone={zone} title={itemTitle(zone)} glyph={itemGlyph(zone)} selected={selection?.zoneId === zone.zoneId || currentPageZoneId === zone.zoneId}
+              showTitle={selectingContent || sidebarCollapsed || itemTabs.length < 2 || Boolean(explorationNames[zone.zoneId]?.trim())}
+              tabColumns={itemTabs.length > 1 ? <div className="survey-item-tabs" aria-label={`Tabs in ${itemTitle(zone)}`}>{itemTabs.map(tabId => <SurveyTabColumn selection={selectionFor({ kind: 'tab', tabId })} compositionEnabled={compositionEnabled} key={tabId} tab={tabs[tabId]!} unconfirmedBrowserRegionIds={unconfirmedBrowserRegionIds} selected={selection?.zoneId === zone.zoneId && selection.active?.tabId === tabId || currentPageOwner?.tab.id === tabId} onSelect={() => chooseTab(zone.zoneId, tabId)} onClose={title => closeItemTab(zone.zoneId, tabId, title)} />)}</div> : null}
               onCloseSingleTab={itemTabs.length === 1 ? () => closeItemTab(zone.zoneId, itemTabs[0]!, itemTitle(zone)) : undefined}
               options={<SurveyItemOptions {...itemOptions} rowAction compact />}
               onContextMenu={button => { contextOrigin.current = button; contextOrganization.current = list.stored; setContextZoneId(zone.zoneId) }} activity={status.summary} activityDescription={status.description} editing={renamingZoneId === zone.zoneId} nameDraft={itemNameDraft.current?.zoneId === zone.zoneId ? itemNameDraft.current : undefined} onEdit={editing => editItemName(zone, editing)}
@@ -614,7 +697,8 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
       {locationChoice ? <SurveyPanelChoices mode="button" open visible={visible && !controlsCoverPage} choices={locationChoice.choices} facts={useAppStore.getState()}
         onOpenChange={open => { if (!open) setLocationChoice(null) }} onSelect={reference => locationChoice.kind === 'close' ? closeItemTab(locationChoice.zoneId, reference.tabId, locationChoice.subject, reference) : locationChoice.kind === 'note' ? newItemNote(locationChoice.zoneId, reference) : void newItemTab(locationChoice.zoneId, locationChoice.kind, reference)} /> : null}
       {tabClose.dialog}
-      {movingSources ? <SurveyMoveTabsDialog sources={movingSources} catalog={catalog} visible={visible && !controlsCoverPage} onClose={() => setMovingSources(null)} /> : null}
+      {reviewingOperation ? <SurveyCompositionResultDialog key={reviewingOperation.requestId} operation={reviewingOperation} visible={visible && !controlsCoverPage} onClose={() => setReviewingComposition(null)} /> : null}
+      {movingSources ? <SurveyMoveTabsDialog onUnconfirmed={setReviewingComposition} onMoved={() => setSelectedSources(current => current.filter(source => !movingSources.includes(source)))} {...(movingIntent ?? {})} sources={movingSources} catalog={catalog} visible={visible && !controlsCoverPage} onClose={() => { setMovingSources(null); setMovingIntent(null) }} /> : null}
       <div className="survey-sidebar-actions"><button type="button" className="survey-new-page" aria-label="New webpage" title="New browser" disabled={opening} onClick={() => void openBrowser('about:blank', true)}><ThemeActionCreateBrowserIcon size={16} /><span>New browser</span></button>
         <Menu.Root modal={false} open={visible && !controlsCoverPage && createMenuOpen} onOpenChange={setCreateMenuOpen}>
           <Menu.Trigger asChild><button type="button" className="survey-icon-button" aria-label="New browser options" title="New browser options" disabled={opening}><ThemeNavigationDisclosureIcon size={12} /></button></Menu.Trigger>

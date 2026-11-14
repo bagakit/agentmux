@@ -46,6 +46,7 @@ export type SurveyItemOptionsProps = {
   onNewAgent?: () => void
   onNewBrowser?: () => void
   onNewTab?: () => void
+  onSelectContent?: () => void
   onMoveTab?: () => void
   onMovePage?: () => void
   onRemovePageReference?: () => void
@@ -98,7 +99,7 @@ export function SurveyItemContextMenu({ children, returnFocus, ...props }: Surve
   </ContextMenu.Root>
 }
 
-function SurveyItemMenuItems({ primitives: M, run = action => action(), title, zone, workspace, collected, relatedSpaces, relatedSpacesUnconfirmed = false, activityDetails, onRename, onCollectedChange, onManageBrowsers, onOpenWorkspace, onSaveToTopic, currentPanelAvailable = false, onDeleteNotebook, onNewNote, onNewAgent, onNewBrowser, onNewTab, onMoveTab, onMovePage, onRemovePageReference, onClose, grouping }: SurveyItemOptionsProps & { primitives: typeof Menu | typeof ContextMenu; run?: (action: () => void) => void }) {
+function SurveyItemMenuItems({ primitives: M, run = action => action(), title, zone, workspace, collected, relatedSpaces, relatedSpacesUnconfirmed = false, activityDetails, onRename, onCollectedChange, onManageBrowsers, onOpenWorkspace, onSaveToTopic, currentPanelAvailable = false, onDeleteNotebook, onNewNote, onNewAgent, onNewBrowser, onNewTab, onSelectContent, onMoveTab, onMovePage, onRemovePageReference, onClose, grouping }: SurveyItemOptionsProps & { primitives: typeof Menu | typeof ContextMenu; run?: (action: () => void) => void }) {
   const displayPath = usePathDisplay()
   return <>
       <M.Label className="survey-topic-menu__label">{title}</M.Label>
@@ -110,6 +111,7 @@ function SurveyItemMenuItems({ primitives: M, run = action => action(), title, z
       {zone && onRename ? <M.Item className="tab-context-menu__item" onSelect={() => run(onRename)}><ThemeActionEditIcon size={14} /><span>Rename exploration</span></M.Item> : null}
       {onMoveTab ? <M.Item className="tab-context-menu__item" onSelect={() => run(onMoveTab)}><ThemeNavigationSpaceIcon size={14} /><span>Move Tab to research…</span></M.Item> : null}
       {onMovePage ? <M.Item className="tab-context-menu__item" onSelect={() => run(onMovePage)}><ThemeNavigationSpaceIcon size={14} /><span>Move page to research…</span></M.Item> : null}
+      {onSelectContent ? <M.Item className="tab-context-menu__item" onSelect={() => run(onSelectContent)}><ThemeNavigationSpaceIcon size={14} /><span>Select content to combine…</span></M.Item> : null}
       {onRemovePageReference ? <M.Item className="tab-context-menu__item" onSelect={() => run(onRemovePageReference)}><ThemeActionRemoveIcon size={14} /><span>Remove page from Survey</span></M.Item> : null}
       {zone && onClose ? <M.Item className="tab-context-menu__item" onSelect={() => run(onClose)}><ThemeActionCloseIcon size={14} /><span>Close in Survey</span></M.Item> : null}
       {grouping ? <M.Sub><M.SubTrigger className="tab-context-menu__item"><span className="survey-topic-menu__indicator" /><span>Move to group</span><ThemeNavigationDisclosureIcon size={12} /></M.SubTrigger>

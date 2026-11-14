@@ -1,3 +1,6 @@
+import { SurveyCompositionCheckbox } from './SurveyCompositionCheckbox'
+import type { SurveyCompositionSelectionControl } from '../lib/survey-composition-drag'
+import { surveyContentKey, useSurveyContentDrag } from '../lib/survey-composition-drag'
 import * as ContextMenu from '@radix-ui/react-context-menu'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { TextInput } from '@agentmux/client-ui/input'
@@ -13,7 +16,9 @@ const ThemeActionCloseIcon = semanticIconComponent('action.close')
 export type SurveyItemNameDraft = { value: string; focusOnMount: boolean; revision: { revision: number }; selection: { start: number; end: number; direction: 'forward' | 'backward' | 'none' } | null }
 
 /** Both navigation and shortcuts address this row’s original Zone. */
-export function SurveyZoneItem({ zone, title, glyph, selected, activity, activityDescription, editing = false, showTitle = true, tabColumns, options, dragHandle, nameDraft, onRename, onEdit, onSelect, onCloseSingleTab, onContextMenu }: {
+export function SurveyZoneItem({ zone, title, glyph, selected, activity, activityDescription, editing = false, showTitle = true, tabColumns, options, dragHandle, nameDraft, onRename, onEdit, onSelect, onCloseSingleTab, onContextMenu, compositionEnabled = false, selection }: {
+  selection?: SurveyCompositionSelectionControl | undefined
+  compositionEnabled?: boolean
   zone: AgentMuxZoneFact
   title: string
   glyph: ReactNode
@@ -32,6 +37,7 @@ export function SurveyZoneItem({ zone, title, glyph, selected, activity, activit
   onContextMenu?(button: HTMLElement): void
   onSelect(zoneId: string): void
 }) {
+  const reference = { kind: 'research' as const, zoneId: zone.zoneId }, drag = useSurveyContentDrag(reference, compositionEnabled && !editing, { title, icon: glyph })
   const localDraft = useRef({ value: title, revision: { revision: 0 } })
   const draft = nameDraft ?? localDraft.current
   const [, redraw] = useState(0)
@@ -39,7 +45,7 @@ export function SurveyZoneItem({ zone, title, glyph, selected, activity, activit
   const saving = useRef(false), editGeneration = useRef(0)
   useEffect(() => { ++editGeneration.current; if (editing && !nameDraft) { setDraft(title); draft.revision = { revision: currentDisplayNameRevision('zone', zone.zoneId) } } return () => { ++editGeneration.current; if (!nameDraft) draft.revision = { revision: 0 } } }, [editing, zone.zoneId, nameDraft])
   const beginEdit = () => { ++editGeneration.current; setDraft(title); onEdit?.(true) }
-  const item = <button type="button" className="survey-item" aria-label={`Show survey item: ${title}`}
+  const item = <button ref={drag.setNodeRef} {...drag.attributes} {...drag.listeners} data-survey-content-key={surveyContentKey(reference)} type="button" className="survey-item" aria-label={`Show survey item: ${title}`}
       aria-current={selected ? 'true' : undefined} aria-description={activityDescription} title={activityDescription ? `${title}\n${activityDescription}` : title} onClick={() => onSelect(zone.zoneId)} onDoubleClick={beginEdit} onKeyDown={event => {
         if (onContextMenu && (event.key === 'ContextMenu' || event.key === 'F10' && event.shiftKey)) {
           event.preventDefault()
@@ -47,14 +53,15 @@ export function SurveyZoneItem({ zone, title, glyph, selected, activity, activit
           event.currentTarget.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2, clientX: rect.left, clientY: rect.bottom }))
           return
         }
-        if (event.key === 'F2' && onRename) { event.preventDefault(); beginEdit() }
+        if (event.key === 'F2' && onRename) { event.preventDefault(); beginEdit(); return }
+        drag.listeners?.onKeyDown?.(event)
       }}>
       <span className="survey-item-glyph" aria-hidden="true">{glyph}</span>
       <strong>{title}</strong>
       <span className="survey-item-meta"><span className="survey-item-activity" aria-label={`Activity in ${title}`}>{activity}</span></span>
     </button>
   const compact = !showTitle && Boolean(tabColumns) && !editing
-  const row = <div className="survey-item-row" data-survey-zone-id={zone.zoneId} data-selected={selected} data-headerless={compact} data-multi-tab={Boolean(tabColumns)}
+  const row = <div className="survey-item-row" data-survey-zone-id={zone.zoneId} data-selected={selected} data-headerless={compact} data-selectable={Boolean(selection) || undefined} data-multi-tab={Boolean(tabColumns)} data-content-dragging={drag.isDragging || undefined}
     role={compact ? 'group' : undefined} aria-label={compact ? title : undefined}
     onClick={event => { if (compact && event.target === event.currentTarget) onSelect(zone.zoneId) }} onKeyDown={event => {
       if (!compact) return
@@ -65,7 +72,7 @@ export function SurveyZoneItem({ zone, title, glyph, selected, activity, activit
         target.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2, clientX: rect.left, clientY: rect.bottom }))
       }
     }}>
-    {!editing ? dragHandle : null}
+    {selection ? <SurveyCompositionCheckbox selection={selection} label={`Select all Tabs in ${title}`} /> : !editing ? dragHandle : null}
     {editing ? <form className="survey-item-name" onSubmit={async event => { event.preventDefault(); if (saving.current) return; saving.current = true; const generation = editGeneration.current, baseline = draft.revision; try { if (await onRename?.(draft.value, baseline.revision) && draft.revision === baseline) { ++baseline.revision; if (generation === editGeneration.current) { ++editGeneration.current; onEdit?.(false) } } } finally { saving.current = false } }}>
       <TextInput autoFocus={nameDraft?.focusOnMount ?? true} aria-label="Exploration name" value={draft.value} placeholder="Name this exploration" onChange={event => { ++editGeneration.current; setDraft(event.target.value) }} onFocus={event => {
           if (nameDraft) nameDraft.focusOnMount = true

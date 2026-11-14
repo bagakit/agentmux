@@ -466,8 +466,15 @@ export function sameWorkbenchSurfaceOwner(
   left: WorkbenchSurface | undefined,
   right: WorkbenchSurface
 ): boolean {
-  const sessions = new Map<string, SessionSnapshot>()
-  return sameSurfaceOwner(left, surfaceOwner(right, sessions), sessions)
+  return sameWorkbenchSurfaceOwnerReference(left, workbenchSurfaceOwner(right))
+}
+
+/** Frozen operation identities, without copying content or topology into a recovery intent. */
+export function workbenchSurfaceOwner(surface: WorkbenchSurface): WorkbenchViewCloseSurfaceOwner {
+  return surfaceOwner(surface, new Map<string, SessionSnapshot>())
+}
+export function sameWorkbenchSurfaceOwnerReference(surface: WorkbenchSurface | undefined, owner: WorkbenchViewCloseSurfaceOwner): boolean {
+  return sameSurfaceOwner(surface, owner, new Map<string, SessionSnapshot>())
 }
 
 function surfaceOwner(

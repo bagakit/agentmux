@@ -1,12 +1,13 @@
 import * as Menu from '@radix-ui/react-dropdown-menu'
-import { DndContext, KeyboardSensor, PointerSensor, closestCenter, pointerWithin, useDndContext, useDroppable, useSensor, useSensors, type DragEndEvent, type DragStartEvent, type KeyboardCoordinateGetter } from '@dnd-kit/core'
+import { DndContext, DragOverlay, KeyboardSensor, PointerSensor, closestCenter, pointerWithin, useDndContext, useDroppable, useSensor, useSensors, type DragEndEvent, type DragStartEvent, type KeyboardCoordinateGetter } from '@dnd-kit/core'
 import { SortableContext, arrayMove, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable'
-import { CSS } from '@dnd-kit/utilities'
+import { getEventCoordinates, CSS } from '@dnd-kit/utilities'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { TextInput } from '@agentmux/client-ui/input'
 import type { AgentMuxSurveyOrganization } from '@agentmux/core/control'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { DocumentOverlayPortal } from './WindowOverlayHost'
+import type { SurveyContentDrag, SurveyPageDrop, SurveyContentReference, SurveyCompositionDropTarget } from '../lib/survey-composition-drag'
 import { moveSurveyListItem, type SurveyListOrganizationModel } from '../hooks/useSurveyListOrganization'
 
 const DragIcon = semanticIconComponent('action.drag')
@@ -20,7 +21,7 @@ const itemKey = (id: string) => `survey-item:${id}`
 const groupKey = (id: string) => `survey-group:${id}`
 const ungroupedKey = 'survey-ungrouped'
 
-type Target = { kind: 'item'; zoneId: string; groupId: string | null } | { kind: 'group'; groupId: string } | { kind: 'ungrouped' }
+type Target = { kind: 'item'; zoneId: string; groupId: string | null; index: number } | { kind: 'group'; groupId: string } | { kind: 'ungrouped' }
 
 /** A container is a destination only across containers; ordering uses an exact row. */
 function acceptsContainer(from: Target | undefined, groupId: string | null): boolean {
@@ -29,15 +30,35 @@ function acceptsContainer(from: Target | undefined, groupId: string | null): boo
 }
 
 /** List organization alone owns drag behavior; each original row retains its existing content/actions. */
-export function SurveyItemList({ model, titles, renderItem, visible, selectedZoneId }: {
+export function SurveyItemList({ model, titles, renderItem, visible, selectedZoneId, leading, composition }: {
+  leading?: ReactNode
+  composition?: { start(reference: SurveyContentReference): string | null; canDrop(target: SurveyCompositionDropTarget): boolean; drop(target: SurveyCompositionDropTarget | null): void }
   model: SurveyListOrganizationModel
   titles: ReadonlyMap<string, string>
-  renderItem(zoneId: string, dragHandle: ReactNode): ReactNode
+  renderItem(zoneId: string, dragHandle: ReactNode, compositionEnabled: boolean): ReactNode
   visible: boolean
   selectedZoneId?: string | undefined
 }) {
   const keyboardCoordinates: KeyboardCoordinateGetter = (event, args) => {
+    const contentDrag = args.context.active?.data.current?.kind === 'content'
     const groupDrag = args.context.active?.data.current?.kind === 'group'
+    if (contentDrag) {
+      const direction = event.code, current = args.context.collisionRect
+      if (!current || !['ArrowDown', 'ArrowUp', 'ArrowLeft', 'ArrowRight'].includes(direction)) return
+      event.preventDefault()
+      const candidates = args.context.droppableContainers.getEnabled().flatMap(container => {
+        const data = container.data.current as Target | SurveyPageDrop | undefined
+        const target = data?.kind === 'item' ? { kind: 'research' as const, zoneId: data.zoneId } : data?.kind === 'page-target' ? data.reference : null
+        const rect = args.context.droppableRects.get(container.id)
+        if (!rect || !target || !composition?.canDrop(target)) return []
+        const valid = direction === 'ArrowDown' ? rect.top > current.top : direction === 'ArrowUp' ? rect.top < current.top
+          : direction === 'ArrowRight' ? rect.left > current.left : rect.left < current.left
+        return valid ? [rect] : []
+      })
+      candidates.sort((a, b) => Math.hypot(a.left - current.left, a.top - current.top) - Math.hypot(b.left - current.left, b.top - current.top))
+      const target = candidates[0]
+      return target ? { x: target.left + (target.width - current.width) / 2, y: target.top + (target.height - current.height) / 2 } : undefined
+    }
     const rects = new Map([...args.context.droppableRects].filter(([id]) => {
       const data = args.context.droppableContainers.get(id)?.data.current as Target | undefined
       if (!data) return false
@@ -52,12 +73,27 @@ export function SurveyItemList({ model, titles, renderItem, visible, selectedZon
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
     useSensor(KeyboardSensor, { coordinateGetter: keyboardCoordinates }))
   const held = useRef<{ expected: AgentMuxSurveyOrganization; editable: AgentMuxSurveyOrganization } | null>(null)
+  const contentLabel = useRef<string | null>(null)
+  const contentPresentation = useRef<SurveyContentDrag['presentation']>(undefined)
+  const previewBounds = useRef<{ left: number; right: number; width: number } | null>(null)
   const [dragging, setDragging] = useState(false)
-  useEffect(() => { if (!visible) { held.current = null; setDragging(false) } }, [visible])
+  useEffect(() => { if (!visible) { held.current = null; setDragging(false); composition?.drop(null) } }, [visible])
   const ids = (values: string[]) => values.filter(id => titles.has(id))
-  function start(_event: DragStartEvent) { held.current = { expected: model.stored, editable: model.editable }; setDragging(true) }
+  function start(event: DragStartEvent) {
+    if (event.active.data.current?.kind === 'content') { held.current = null; contentPresentation.current = (event.active.data.current as SurveyContentDrag).presentation; contentLabel.current = composition?.start((event.active.data.current as SurveyContentDrag).reference) ?? null }
+    else { contentLabel.current = null; held.current = { expected: model.stored, editable: model.editable } }
+    const origin = event.activatorEvent.target
+    const bounds = origin instanceof Element ? origin.closest('.survey-navigation')?.getBoundingClientRect() : null
+    previewBounds.current = bounds?.width ? bounds : null
+    setDragging(true)
+  }
   function end({ active, over }: DragEndEvent) {
     const baseline = held.current; held.current = null; setDragging(false)
+    if (active.data.current?.kind === 'content') {
+      const target = over?.data.current
+      composition?.drop(target?.kind === 'item' ? { kind: 'research', zoneId: target.zoneId } : target?.kind === 'page-target' ? target.reference : null)
+      return
+    }
     if (!baseline || !over || active.id === over.id) return
     const from = active.data.current as Target, to = over.data.current as Target
     if (from.kind === 'group') {
@@ -85,25 +121,55 @@ export function SurveyItemList({ model, titles, renderItem, visible, selectedZon
     }
   }
   const rows = (values: string[], groupId: string | null, enabled = visible) => <SortableContext items={ids(values).map(itemKey)} strategy={verticalListSortingStrategy}>
-    {ids(values).map(zoneId => <SortableItem key={zoneId} zoneId={zoneId} groupId={groupId} title={titles.get(zoneId)!} visible={enabled} render={renderItem} />)}
+    {ids(values).map((zoneId, index) => <SortableItem index={index} key={zoneId} zoneId={zoneId} groupId={groupId} title={titles.get(zoneId)!} visible={enabled} render={renderItem} />)}
   </SortableContext>
   return <div className="survey-page-list" data-dragging={dragging || undefined}>
-    <DndContext sensors={sensors} onDragStart={start} onDragEnd={end} onDragCancel={() => { held.current = null; setDragging(false) }}
-      accessibility={{ screenReaderInstructions: { draggable: 'Press Space to pick up. Use arrow keys to move. Press Space to drop, or Escape to cancel.' } }}
+    <DndContext sensors={sensors} onDragStart={start} onDragEnd={end} onDragCancel={() => { held.current = null; setDragging(false); composition?.drop(null) }}
+      accessibility={{ screenReaderInstructions: { draggable: 'Press Space to pick up. Use arrow keys to choose a destination. Press Space to drop, or Escape to cancel.' },
+        announcements: {
+          onDragStart: ({ active }) => active.data.current?.kind === 'content' ? `Picked up ${contentLabel.current ?? 'original content'}. Move over a research, or another page to combine.` : 'Picked up for reordering.',
+          onDragOver: ({ active, over }) => active.data.current?.kind === 'content' ? !over ? 'No merge target. Content stays in place.' : over.data.current?.kind === 'page-target' ? 'Combine into a new research.' : 'Move into this research.' : over ? 'Reorder at this position.' : 'No insertion target.',
+          onDragEnd: ({ active, over }) => active.data.current?.kind === 'content' ? over ? 'Drop requested. Check the research or choose its exact destination.' : 'Canceled. Content stays in place.' : 'Reordering gesture ended.',
+          onDragCancel: () => 'Canceled. Content stays in place.'
+        } }}
       collisionDetection={args => {
+        const content = args.active.data.current?.kind === 'content'
         const groupsOnly = args.active.data.current?.kind === 'group'
-        const droppableContainers = args.droppableContainers.filter(container => groupsOnly ? container.data.current?.kind === 'group' : !args.pointerCoordinates || container.id !== args.active.id)
+        const droppableContainers = args.droppableContainers.filter(container => {
+          const data = container.data.current
+          if (content) return Boolean(composition && (data?.kind === 'item' ? composition.canDrop({ kind: 'research', zoneId: data.zoneId })
+            : data?.kind === 'page-target' && composition.canDrop(data.reference)))
+          if (data?.kind === 'page-target') return false
+          return groupsOnly ? data?.kind === 'group' : !args.pointerCoordinates || container.id !== args.active.id
+        })
         const candidates = { ...args, droppableContainers }
         const pointer = pointerWithin(candidates)
+        if (content) {
+          const initial = args.active.rect.current.initial
+          if (!args.pointerCoordinates && initial && args.collisionRect.left === initial.left && args.collisionRect.top === initial.top) return []
+          return pointer.length ? pointer : args.pointerCoordinates ? [] : closestCenter(candidates)
+        }
         const items = pointer.filter(hit => droppableContainers.find(container => container.id === hit.id)?.data.current?.kind === 'item')
         return items.length ? items : pointer.length ? pointer : args.pointerCoordinates ? [] : closestCenter(candidates)
       }}>
+      {leading}
       <Ungrouped hasGroups={model.effective.groups.length > 0}>{rows(model.effective.ungrouped, null)}</Ungrouped>
       <SortableContext items={model.effective.groups.map(group => groupKey(group.groupId))} strategy={verticalListSortingStrategy}>
         {model.effective.groups.map(group => <SurveyListGroup key={group.groupId} group={group} model={model} visible={visible} selected={group.zoneIds.includes(selectedZoneId ?? '')}>
           {rows(group.zoneIds, group.groupId, visible && !group.collapsed)}
         </SurveyListGroup>)}
       </SortableContext>
+      {contentLabel.current ? <DragOverlay dropAnimation={null} modifiers={[({ transform, activeNodeRect, activatorEvent }) => {
+        const point = activatorEvent && getEventCoordinates(activatorEvent)
+        if (!activeNodeRect) return transform
+        const bounds = previewBounds.current, width = bounds ? Math.min(188, bounds.width - 12) : 188
+        const desiredLeft = activeNodeRect.left + transform.x + 8
+        const left = bounds ? Math.max(bounds.left + 6, Math.min(desiredLeft, bounds.right - width - 6)) : desiredLeft
+        return { ...transform, x: left - activeNodeRect.left, y: transform.y + (point ? point.y - activeNodeRect.top + 14 : activeNodeRect.height + 8) }
+      }]}>{dragging && contentLabel.current ? <div className="survey-composition-preview" style={previewBounds.current ? { maxWidth: Math.min(188, previewBounds.current.width - 12) } : undefined}>
+        {contentPresentation.current?.icon ? <span className="survey-composition-preview__icon" aria-hidden="true">{contentPresentation.current.icon}</span> : null}
+        <span><strong>{contentPresentation.current?.title ?? contentLabel.current}</strong>{contentPresentation.current?.title ? <small>{contentLabel.current}</small> : null}</span>
+      </div> : null}</DragOverlay> : null}
     </DndContext>
     {model.error ? <p className="survey-relation-notice" role="alert">{model.error}</p> : null}
   </div>
@@ -117,10 +183,16 @@ function Ungrouped({ children, hasGroups }: { children: ReactNode; hasGroups: bo
   </div>
 }
 
-function SortableItem({ zoneId, groupId, title, visible, render }: { zoneId: string; groupId: string | null; title: string; visible: boolean; render(id: string, handle: ReactNode): ReactNode }) {
-  const { setNodeRef, attributes, listeners, transform, transition, isDragging } = useSortable({ id: itemKey(zoneId), data: { kind: 'item', zoneId, groupId } satisfies Target, disabled: !visible })
-  return <div ref={setNodeRef} className="survey-list-item" data-dragging={isDragging || undefined} style={{ transform: CSS.Transform.toString(transform), transition }}>
-    {render(zoneId, <button type="button" className="survey-drag-handle" {...attributes} {...listeners} aria-label={`Move survey item: ${title}`} title="Drag to move"><DragIcon size={12} /></button>)}
+function SortableItem({ zoneId, groupId, title, visible, render, index }: { index: number; zoneId: string; groupId: string | null; title: string; visible: boolean; render(id: string, handle: ReactNode, compositionEnabled: boolean): ReactNode }) {
+  const { setNodeRef, attributes, listeners, transform, transition, isDragging, isOver } = useSortable({ id: itemKey(zoneId), data: { kind: 'item', zoneId, groupId, index } satisfies Target, disabled: !visible })
+  const { active, over } = useDndContext(), content = active?.data.current?.kind === 'content'
+  const from = active?.data.current as Target | undefined
+  const sortingOver = from?.kind === 'item' && over?.id === itemKey(zoneId)
+  const edge = sortingOver ? from.groupId === groupId ? from.index < index ? 'after' : 'before'
+    : active?.rect.current.translated && active.rect.current.translated.top > over.rect.top + over.rect.height / 2 ? 'after' : 'before' : undefined
+  return <div ref={setNodeRef} data-sort-edge={edge} data-compose-over={content && isOver || undefined} className="survey-list-item" data-dragging={isDragging || undefined} style={{ transform: CSS.Transform.toString(transform), transition }}>
+    {render(zoneId, <button type="button" className="survey-drag-handle" {...attributes} {...listeners} aria-label={`Move survey item: ${title}`} title="Drag to reorder"><DragIcon size={12} /></button>, visible)}
+    {content && isOver ? <span className="survey-compose-cue" aria-hidden="true">Move into research</span> : null}
   </div>
 }
 

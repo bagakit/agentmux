@@ -337,3 +337,40 @@
 .survey-profile-picker { flex: none; min-width: 0; padding: var(--sp-2) var(--sp-1) var(--sp-3); }
 .survey-profile-picker p { margin: var(--sp-2) 0 0; color: var(--text-3); font-size: var(--fs-meta); line-height: 1.5; }
 .survey-profile-collapsed { display: grid; place-items: center; width: 28px; height: 30px; padding: 0; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-2); cursor: pointer; }
+
+/* Composition is a whole target; organization sorting keeps its original separate handle. */
+.survey-list-item { position: relative; }
+.survey-list-item[data-compose-over="true"], .survey-item-row[data-compose-over="true"] { border-radius: var(--radius-sm); background: color-mix(in srgb, var(--focus-line) 9%, transparent); box-shadow: inset 0 0 0 1px var(--focus-line); }
+.survey-compose-cue { position: absolute; z-index: 5; left: 32px; right: 34px; top: 18px; overflow: hidden; color: var(--text-2); font-size: 10px; line-height: 12px; text-overflow: ellipsis; white-space: nowrap; pointer-events: none; }
+.survey-item-row[data-compose-over="true"] > .survey-item > strong, .survey-list-item[data-compose-over="true"] > .survey-item-row > .survey-item > strong, .survey-list-item[data-compose-over="true"] > .survey-item-row[data-headerless="true"] .survey-tab-cell:first-child .survey-tab-label { transform: translateY(-5px); }
+
+[data-content-dragging="true"] { opacity: .55; }
+
+.survey-composition-toolbar { display: flex; align-items: center; justify-content: flex-end; gap: 6px; min-height: 28px; padding: 0 3px 4px; color: var(--text-3); font-size: var(--fs-meta); }
+.survey-composition-toolbar > span { margin-right: auto; }
+.survey-composition-toolbar button { border: 0; border-radius: var(--radius-sm); padding: 4px 6px; background: transparent; color: var(--text-2); cursor: pointer; font: inherit; }
+.survey-composition-toolbar button:hover { color: var(--text); background: var(--wash-2); }
+.survey-composition-toolbar button:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.survey-composition-toolbar button:disabled { opacity: .5; cursor: default; }
+.survey-composition-checkbox { position: absolute; z-index: 2; left: 3px; top: 4px; display: grid; place-items: center; width: 24px; height: 24px; }
+.survey-composition-checkbox input { width: 14px; height: 14px; margin: 0; accent-color: var(--focus-line); cursor: pointer; }
+.survey-composition-checkbox input:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.global-survey-surface .survey-item-row[data-selectable="true"] > .survey-item, .survey-tab-cell[data-selectable="true"] > .survey-tab-column { padding-left: 30px; }
+.survey-item-row[data-selectable="true"] > .survey-item-tabs { margin-left: 12px; }
+.survey-composition-preview { display: inline-flex; align-items: center; gap: 8px; max-width: 188px; padding: 6px 9px; border: 1px solid var(--survey-edge); border-radius: var(--radius-sm); background: var(--surface-2); color: var(--text); box-shadow: 0 4px 14px #0002; font-size: var(--fs-body); pointer-events: none; }
+.survey-composition-preview > span:last-child { min-width: 0; }
+.survey-composition-preview strong { display: block; max-width: 145px; overflow: hidden; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
+.survey-composition-preview small { display: block; margin-top: 1px; color: var(--text-3); font-size: var(--fs-meta); }
+.survey-composition-preview__icon { flex: none; display: grid; place-items: center; }
+
+
+.survey-list-item[data-sort-edge]::after { content: ''; position: absolute; z-index: 5; left: 8px; right: 4px; height: 2px; border-radius: 1px; background: var(--focus-line); pointer-events: none; }
+.survey-list-item[data-sort-edge="before"]::after { top: -2px; }
+.survey-list-item[data-sort-edge="after"]::after { bottom: -2px; }
+
+.survey-composition-recovery { display: grid; gap: 4px; padding: 4px; color: var(--text-2); font-size: var(--fs-meta); }
+.survey-composition-recovery > button { border: 1px solid var(--survey-edge); border-radius: var(--radius-sm); padding: 6px 8px; background: var(--wash-1); color: inherit; text-align: left; font: inherit; cursor: pointer; }
+.survey-composition-recovery pre { max-height: 140px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
+
+.survey-composition-details dd { margin: 2px 0 8px; overflow-wrap: anywhere; }
+.survey-composition-details dt { margin-top: 6px; color: var(--text-3); }

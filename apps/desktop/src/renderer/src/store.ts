@@ -107,6 +107,7 @@ import type { AgentMuxDisplayLabel, AgentMuxNameTarget, AgentMuxDisplayLabelResu
 import { displayLabel, nameTargetKey } from '@agentmux/core/spatial-graph'
 import { createSurveyBrowser } from './lib/survey-browser-creation'
 import { planSurveyTabComposition, reconcileResearchCompositionSelection, type SurveyCompositionRequest, type SurveyCompositionReport } from './lib/survey-tab-composition'
+import { retainSurveyComposition, surveyCompositionTargetConfirmed, restoreSurveyCompositionRecoveries, changeSurveyCompositionRecovery, isSurveyCompositionRecovery, type SurveyCompositionRecovery, type SurveyCompositionReview } from './lib/survey-composition-recovery'
 import { readSurveyProfileView, surveySelectionProfileMatch, type SurveyProfileView, type SurveyProfileViewRecovery } from './lib/survey-profile-view'
 import { switchBrowserProfileForSurvey, repairSurveyProfileAdmission, type SurveyProfileBindingReceipt } from './lib/survey-profile-binding'
 import { openSystemUrlInSurvey } from './lib/survey-system-url'
@@ -1221,6 +1222,8 @@ export type AppState = GitReadingActions & {
   setSurveyToolsOpen(open: boolean): void
   createSurveyBrowser(input: Parameters<typeof createSurveyBrowser>[1]): ReturnType<typeof createSurveyBrowser>
   composeSurveyTabs(request: SurveyCompositionRequest): Promise<SurveyCompositionReport>
+  surveyCompositionRecoveries: unknown[]
+  reviewSurveyComposition(requestId: string, repairReferences?: boolean): Promise<SurveyCompositionReview>
   /** Open an http(s) URL as a new Survey Browser through the same owner as system links; the current workface is kept. */
   openUrlInSurvey(url: string): Promise<SystemPageOutcome>
   /** Durable global Board Demand records. Session links remain explicit and are derived only for the selected Demand. */
@@ -4050,6 +4053,7 @@ type PersistedAppState = {
   surveyZoneSelection?: SurveySelection | null
   surveyProfileView?: unknown
   surveyPageReferences?: unknown
+  surveyCompositionRecoveries?: unknown
   surveyCollectedZones?: Record<string, true>
   surveyOrganization?: import('@agentmux/core/control').AgentMuxSurveyOrganization
   surveyExplorationNames?: Record<string, string>
@@ -4102,6 +4106,7 @@ export type RestoredUiState = Pick<
   | 'surveyPageReadRecovery'
   | 'surveyPinReadRecovery'
   | 'surveyPageReferences'
+  | 'surveyCompositionRecoveries'
   | 'surveyCollectedZones'
   | 'surveyOrganization'
   | 'surveyExplorationNames'
@@ -4203,6 +4208,7 @@ export function restorePersistedUiState(
     | 'surveyZoneSelection'
   | 'surveyProfileView'
   | 'surveyPageReferences'
+  | 'surveyCompositionRecoveries'
   | 'surveyCollectedZones'
   | 'surveyOrganization'
     | 'surveyExplorationNames'
@@ -4251,6 +4257,7 @@ export function restorePersistedUiState(
     surveyProfileView: surveyView.view,
     surveyProfileViewReadRecovery: surveyView.recovery,
     surveyPageReferences: surveyPages.references,
+    surveyCompositionRecoveries: restoreSurveyCompositionRecoveries(persisted.surveyCompositionRecoveries),
     surveyPageReadRecovery: surveyPages.recovery,
     surveyCollectedZones: restoredSurveyCollection(persisted.surveyCollectedZones),
     surveyOrganization: restoreSurveyOrganization(persisted.surveyOrganization),
@@ -4358,6 +4365,7 @@ function selectPersistedInputs(state: AppState, coreSpatialReady: boolean) {
     surveyZoneSelection: state.surveyZoneSelection,
     surveyProfileView: state.surveyProfileViewReadRecovery ? state.surveyProfileViewReadRecovery.source : state.surveyProfileView,
     surveyPageReferences: state.surveyPageReadRecovery ? state.surveyPageReadRecovery.source : state.surveyPageReferences,
+    surveyCompositionRecoveries: state.surveyCompositionRecoveries,
     surveyCollectedZones: state.surveyCollectedZones,
     surveyOrganization: state.surveyOrganization,
     surveyExplorationNames: state.surveyExplorationNames,
@@ -4749,6 +4757,19 @@ async function requestWorkbenchStorageFlush(includeSpatial = true, includeFileVi
     throw error
   }
 }
+/** Same original list owner after a composition or an explicit repair; never submits topology. */
+async function saveSurveyCompositionReferences(get: () => AppState, set: (next: Partial<AppState>) => void, retained: SurveyCompositionRecovery) {
+  const current = get(), catalog = spatialCatalog(current, scratchTopicsForConfig(current.config, current.scratchTopicSnapshots) ?? [])
+  const movedPages = new Set(retained.sources.flatMap(source => source.owners.flatMap(owner => owner.kind === 'browser' ? [JSON.stringify([owner.regionId, owner.browserId])] : [])))
+  const sourceZoneIds = new Set(retained.sources.map(source => source.zoneId))
+  const zoneIds = [...new Set([...surveyCollectedZoneIds(current.surveyCollectedZones).filter(zoneId =>
+    !sourceZoneIds.has(zoneId) || zoneId === retained.target.zoneId || catalog.tabs.some(tab => tab.zoneId === zoneId)), retained.target.zoneId])]
+  const pages = current.surveyPageReferences.filter(page => !movedPages.has(JSON.stringify([page.regionId, page.browserId])))
+  return executeSurveyList({ get, set, hasZone: confirmedSurveyZones(current), hasPage: page => Boolean(surveyPageOwner(get().tabs, page)),
+    save: () => saveWorkbenchSelection(false, false) }, { schemaVersion: 5, requestId: retained.requestId, operation: 'space.survey-list',
+    collection: { zoneIds, expectedZoneIds: surveyCollectedZoneIds(current.surveyCollectedZones), pageReferences: pages, expectedPageReferences: current.surveyPageReferences } })
+}
+
 async function saveWorkbenchSelection(layoutApplied: boolean, includeSpatial = true): Promise<AgentMuxSpatialSave> {
   let clientStateWritten = false, storageFlushRequested = false, reason: string | null = null
   try {
@@ -5673,6 +5694,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     }
   },
   surveyPageReferences: [],
+  surveyCompositionRecoveries: [],
   surveyCollectedZones: {},
   surveyOrganization: restoreSurveyOrganization(undefined),
   async setSurveyOrganization(organization, expected) {
@@ -5755,42 +5777,84 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   async composeSurveyTabs(request) {
     let committed: import('@agentmux/core/spatial-graph').AgentMuxSpatialState | null = null
     let tabIds: string[] = []
+    let submitted = false
+    let retained: SurveyCompositionRecovery | undefined
     try {
       // Finish prior user edits first. This complete multi-source intent must not be split by per-key rebase.
       await checkpointSpatialWorkbench()
       const owner = coreSpatialPersistence
       if (!owner) throw new Error('The original spatial owner is unavailable. Existing work is kept; reconnect its storage and retry this move.')
       await owner.refresh()
-      const original = owner.current
+      let original = owner.current
       if (owner !== coreSpatialPersistence || !original) throw new Error('The original spatial owner changed. Existing work is kept; reconnect its storage and retry this move.')
       const state = get(), topics = scratchTopicsForConfig(state.config, state.scratchTopicSnapshots) ?? []
-      const plan = planSurveyTabComposition(state, topics, original.graph, request)
+      let plan = planSurveyTabComposition(state, topics, original.graph, request)
+      tabIds = plan.tabIds
+      retained = retainSurveyComposition(request, { requestId: request.requestId, targetZoneId: request.target.zoneId, outcome: 'unknown', tabIds,
+        issue: 'This original composition has no confirmed completion. Read its current target; never replay it automatically.' })
+      set(state => ({ surveyCompositionRecoveries: changeSurveyCompositionRecovery(state.surveyCompositionRecoveries, request.requestId, retained!) }))
+      const intentSave = await saveWorkbenchSelection(false, false)
+      if (!intentSave.clientStateWritten) throw new Error('This move’s original request could not be saved. Its content is kept; restore Workbench storage before submitting this same move.')
+      // Saving the intent can yield to later user work. Prepare that same complete request
+      // against the original owner's current graph before its first (and only) composition CAS.
+      await checkpointSpatialWorkbench()
+      await owner.refresh()
+      original = owner.current
+      if (owner !== coreSpatialPersistence || !original) throw new Error('The original spatial owner changed while saving this request. The current work is kept.')
+      const ready = get()
+      plan = planSurveyTabComposition(ready, scratchTopicsForConfig(ready.config, ready.scratchTopicSnapshots) ?? [], original.graph, request)
       tabIds = plan.tabIds
       // Exactly one CAS; failure or an unknown ACK never retries the move against another source graph.
+      submitted = true
       committed = await api.spatial.commit({ expectedRevision: original.revision, graph: plan.graph })
       await owner.refresh()
-      const current = get(), catalog = spatialCatalog(current, scratchTopicsForConfig(current.config, current.scratchTopicSnapshots) ?? [])
-      const movedPages = new Set(request.sources.flatMap(source => Object.values(source.tab.regions)
-        .filter(region => region.kind === 'browser' && (source.kind === 'tab' || region.regionId === source.regionId))
-        .map(region => JSON.stringify([region.regionId, (region as Extract<WorkbenchSurface, { kind: 'browser' }>).browserId]))))
-      const zoneIds = [...new Set([...surveyCollectedZoneIds(current.surveyCollectedZones).filter(zoneId =>
-        !plan.sourceZoneIds.includes(zoneId) || zoneId === request.target.zoneId || catalog.tabs.some(tab => tab.zoneId === zoneId) ||
-        committed!.graph.tabs.some(tab => tab.zoneId === zoneId)), request.target.zoneId])]
-      const pages = current.surveyPageReferences.filter(page => !movedPages.has(JSON.stringify([page.regionId, page.browserId])))
-      const saved = await executeSurveyList({ get, set, hasZone: confirmedSurveyZones(current), hasPage: page => Boolean(surveyPageOwner(get().tabs, page)),
-        save: () => saveWorkbenchSelection(false, false) }, { schemaVersion: 5, requestId: request.requestId, operation: 'space.survey-list',
-        collection: { zoneIds, expectedZoneIds: surveyCollectedZoneIds(current.surveyCollectedZones), pageReferences: pages, expectedPageReferences: current.surveyPageReferences } })
-      return { requestId: request.requestId, outcome: saved.issues.length ? 'partial' : 'moved', tabIds,
+      const saved = await saveSurveyCompositionReferences(get, set, retained!)
+      const report: SurveyCompositionReport = { requestId: request.requestId, targetZoneId: request.target.zoneId, outcome: saved.issues.length ? 'partial' : 'moved', tabIds,
         ...(saved.issues.length ? { issue: 'The original composition is committed. Repair only its Survey references: ' + saved.issues.map(issue => issue.message + ' ' + issue.recovery).join(' ') } : {}),
         ...(saved.save ? { save: saved.save } : {}) }
+      if (!saved.issues.length) {
+        set(state => ({ surveyCompositionRecoveries: changeSurveyCompositionRecovery(state.surveyCompositionRecoveries, request.requestId) }))
+        await saveWorkbenchSelection(false, false)
+      } else {
+        retained = { ...retained!, report }
+        set(state => ({ surveyCompositionRecoveries: changeSurveyCompositionRecovery(state.surveyCompositionRecoveries, request.requestId, retained!) }))
+        await saveWorkbenchSelection(false, false)
+      }
+      return report
     } catch (error) {
       const code = (error as { code?: string } | null)?.code
-      const refused = !committed && (code === 'SPACE_COMPOSITION_CHANGED' || code?.startsWith('SPACE_COMPOSITION_') || code === 'SPATIAL_STATE_CONFLICT')
+      const refused = !submitted || !committed && code === 'SPATIAL_STATE_CONFLICT'
       const issue = `[${request.requestId}] ${committed ? 'The original composition is committed, but its display or Survey reference save is unconfirmed. Inspect these original Tabs and repair only their references; do not move them again. '
         : refused ? 'This move was not applied. ' : 'This original move has no confirmed result. Inspect its same source and target in space state before another request; do not replay it automatically. '}${presentError(error)}`
+      const report: SurveyCompositionReport = { requestId: request.requestId, targetZoneId: request.target.zoneId, outcome: committed ? 'partial' : refused ? 'refused' : 'unknown', tabIds, issue }
+      if (retained) {
+        set(state => ({ surveyCompositionRecoveries: changeSurveyCompositionRecovery(state.surveyCompositionRecoveries, request.requestId,
+          refused ? undefined : { ...retained!, report }) }))
+        await saveWorkbenchSelection(false, false)
+      }
       get().reportError(new Error(issue), { kind: 'indeterminate' })
-      return { requestId: request.requestId, outcome: committed ? 'partial' : refused ? 'refused' : 'unknown', tabIds, issue }
+      return report
     }
+  },
+  async reviewSurveyComposition(requestId, repairReferences = false) {
+    const retained = get().surveyCompositionRecoveries.find(entry => isSurveyCompositionRecovery(entry) && entry.requestId === requestId)
+    if (!isSurveyCompositionRecovery(retained)) return { targetConfirmed: false, referencesRepaired: false, issue: 'This original operation record is unavailable. Its current content and other requests are kept.' }
+    try {
+      const owner = coreSpatialPersistence
+      if (!owner) throw new Error('The original spatial owner is unavailable.')
+      await owner.refresh()
+      const current = owner.current
+      if (owner !== coreSpatialPersistence || !current || !surveyCompositionTargetConfirmed(retained, current.graph)) return {
+        targetConfirmed: false, referencesRepaired: false, issue: 'The selected original content is not confirmed together at this exact target. The earlier result remains unconfirmed; no move or reference repair was replayed.' }
+      if (!repairReferences) return { targetConfirmed: true, referencesRepaired: false,
+        issue: 'These exact original Regions are currently in this target research. This read does not confirm the earlier acknowledgement. You can repair only their Survey references.' }
+      const saved = await saveSurveyCompositionReferences(get, set, retained)
+      if (saved.issues.length) return { targetConfirmed: true, referencesRepaired: false, issue: saved.issues.map(issue => issue.message).join(' ') }
+      set(state => ({ surveyCompositionRecoveries: changeSurveyCompositionRecovery(state.surveyCompositionRecoveries, requestId) }))
+      const cleared = await saveWorkbenchSelection(false, false)
+      return { targetConfirmed: true, referencesRepaired: true, issue: 'The current Survey references are repaired. The original acknowledgement is still unconfirmed.' + (cleared.reason ? ' ' + cleared.reason : '') }
+    } catch (cause) { return { targetConfirmed: false, referencesRepaired: false,
+      issue: 'The current target could not be checked. The original operation and content are kept. ' + presentError(cause) } }
   },
   openUrlInSurvey(url): Promise<SystemPageOutcome> {
     if (!isSystemWebUrl(url)) return Promise.reject(new Error('Only web links (http or https) open in Survey.'))

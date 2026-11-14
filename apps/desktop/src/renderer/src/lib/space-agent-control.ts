@@ -186,21 +186,31 @@ export function zoneContext(state: SpatialWorkbench, topics: readonly ScratchTop
   return failure('SPACE_CONTEXT_UNKNOWN', 'The original Zone resource context cannot currently be confirmed. Its entity and bindings are retained.')
 }
 
+/** Pure creation on the original Zone owner; callers choose when its complete graph is committed. */
+export function planSpatialZone(state: SpatialWorkbench, topics: readonly ScratchTopicSnapshot[],
+  input: { zoneId: string; workspaceId: string; spaceIds: readonly string[] }): { zone: AgentMuxZoneFact; spaceZoneBindings: SpaceZoneBindings } {
+  const workspace = state.config?.workspaces.find(workspace => workspace.id === input.workspaceId)
+  if (!workspace) failure('SPACE_RESOURCE_UNKNOWN', 'Choose an existing resource Workspace before creating a Zone.')
+  const catalog = spatialCatalog(state, topics)
+  if (catalog.zones.some(zone => zone.zoneId === input.zoneId) || state.originalSpatialGraph?.zones.some(zone => zone.zoneId === input.zoneId) || state.spaceZoneBindings[input.zoneId])
+    failure('SPACE_TARGET_CHANGED', 'The reserved Zone identity is already held. Existing content is kept; choose a new creation intent.')
+  for (const spaceId of input.spaceIds) if (!catalog.spaces.some(space => space.spaceId === spaceId)) failure('SPACE_TARGET_UNKNOWN', 'The exact initial Space is not known.')
+  const spaceId = directoryIdentity(workspace.hostId, workspace.repoPath ?? workspace.path)
+  const spaceZoneBindings = { ...state.spaceZoneBindings, [input.zoneId]: {
+    workspaceId: workspace.id, spaceId, relations: { [spaceId]: false, ...Object.fromEntries(input.spaceIds.map(id => [id, true])) }
+  } }
+  const zone = spatialCatalog({ ...state, spaceZoneBindings }, topics).zones.find(zone => zone.zoneId === input.zoneId)!
+  return { zone, spaceZoneBindings }
+}
+
 export async function createSpatialZone(ports: Pick<SpatialControlPorts, 'get' | 'patch' | 'topics' | 'save' | 'notice'>,
   input: { workspaceId: string; spaceIds: readonly string[] }): Promise<{ zone: AgentMuxZoneFact; save: AgentMuxSpatialSave; issues: AgentMuxSpatialIssue[] }> {
   const notices: AgentMuxSpatialIssue[] = []
   let topics: readonly ScratchTopicSnapshot[] = []
   try { topics = await ports.topics() } catch (error) { const notice = issue('discovery', 'SPACE_DISCOVERY_UNCONFIRMED', error); notices.push(notice); ports.notice(notice) }
-  const workspace = ports.get().config?.workspaces.find(workspace => workspace.id === input.workspaceId)
-  if (!workspace) failure('SPACE_RESOURCE_UNKNOWN', 'Choose an existing resource Workspace before creating a Zone.')
-  const catalog = spatialCatalog(ports.get(), topics)
-  for (const spaceId of input.spaceIds) if (!catalog.spaces.some(space => space.spaceId === spaceId)) failure('SPACE_TARGET_UNKNOWN', 'The exact initial Space is not known.')
-  const spaceId = directoryIdentity(workspace.hostId, workspace.repoPath ?? workspace.path)
-  const zoneId = mintObjectId()
-  ports.patch({ spaceZoneBindings: { ...ports.get().spaceZoneBindings, [zoneId]: {
-    workspaceId: workspace.id, spaceId, relations: { [spaceId]: false, ...Object.fromEntries(input.spaceIds.map(id => [id, true])) }
-  } } })
-  const zone = spatialCatalog(ports.get(), topics).zones.find(zone => zone.zoneId === zoneId)!
+  const plan = planSpatialZone(ports.get(), topics, { ...input, zoneId: mintObjectId() })
+  ports.patch({ spaceZoneBindings: plan.spaceZoneBindings })
+  const zone = plan.zone
   let saved: AgentMuxSpatialSave
   try { saved = await ports.save(true) }
   catch (error) { saved = { ...unsaved(true), reason: error instanceof Error ? error.message : String(error) } }

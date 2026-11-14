@@ -5,7 +5,7 @@ import { addTabOccurrence, groupIds, regionIds, type WorkspaceLayout } from '@ag
 import { mintObjectId } from '@agentmux/core/object-id'
 import type { AppState } from '../store'
 import type { ScratchTopicSnapshot } from '../../../shared/contracts'
-import { spatialCatalog, zoneContext } from './space-agent-control'
+import { spatialCatalog, zoneContext, planSpatialZone } from './space-agent-control'
 import { desktopSpatialGraph } from './desktop-spatial-state'
 import { sameSpatialValue } from './spatial-merge'
 import { findWorkbenchRegion, type WorkbenchTab } from './workbench-tabs'
@@ -19,10 +19,11 @@ export type SurveyCompositionSource = {
   tab: WorkbenchTab
   zoneId: string | null
 } & ({ kind: 'tab' } | { kind: 'page'; regionId: string; browserId: string; promotedTabId: string })
+export type SurveyCompositionTarget = { kind: 'existing' | 'new-research'; zoneId: string; workspaceId: string; displayWorkspaceId: string; groupId: string }
 export type SurveyCompositionRequest = {
   requestId: string
   sources: readonly SurveyCompositionSource[]
-  target: { zoneId: string; workspaceId: string; displayWorkspaceId: string; groupId: string }
+  target: SurveyCompositionTarget
 }
 export type SurveyCompositionPlan = {
   graph: AgentMuxSpatialGraph
@@ -33,6 +34,7 @@ export type SurveyCompositionPlan = {
 export type SurveyCompositionReport = {
   requestId: string
   outcome: 'moved' | 'partial' | 'refused' | 'unknown'
+  targetZoneId: string
   tabIds: readonly string[]
   issue?: string
   save?: import('@agentmux/core/control').AgentMuxSpatialSave
@@ -83,11 +85,17 @@ export function planSurveyTabComposition(state: AppState, topics: readonly Scrat
   request: SurveyCompositionRequest): SurveyCompositionPlan {
   // A full-graph CAS must start from the same authoritative revision the client has actually consumed.
   if (!sameSpatialValue(desktopSpatialGraph(state, topics, base), base)) changed('The displayed workface has not consumed the original Core graph.')
-  const catalog = spatialCatalog(state, topics), target = catalog.zones.find(zone => zone.zoneId === request.target.zoneId)
+  let planningState = state
+  if (request.target.kind === 'new-research') {
+    const creation = planSpatialZone({ ...state, originalSpatialGraph: base }, topics,
+      { zoneId: request.target.zoneId, workspaceId: request.target.workspaceId, spaceIds: [] })
+    planningState = { ...state, spaceZoneBindings: creation.spaceZoneBindings }
+  }
+  const catalog = spatialCatalog(planningState, topics), target = catalog.zones.find(zone => zone.zoneId === request.target.zoneId)
   const destination = state.layouts[request.target.displayWorkspaceId]
   if (!target || target.workspaceId !== request.target.workspaceId || !destination || !groupIds(destination.root).includes(request.target.groupId) ||
     !destination.groups.some(group => group.id === request.target.groupId)) changed('The exact destination Zone or display Group changed.')
-  const context = zoneContext(state, topics, target)
+  const context = zoneContext(planningState, topics, target)
   const targetTopicId = catalog.spaces.find(space => space.spaceId === context)?.topicId
   const held = new Set<string>(), wholeTabs = new Set(request.sources.filter(source => source.kind === 'tab').map(source => source.tab.id))
   if (!request.sources.length) changed('No original content was selected.')
@@ -124,7 +132,7 @@ export function planSurveyTabComposition(state: AppState, topics: readonly Scrat
       layouts[displayId] = keepDisplaySelection(original, next)
     }
   }
-  const prepared = desktopSpatialGraph({ ...state, tabs, layouts }, topics, base)
+  const prepared = desktopSpatialGraph({ ...planningState, tabs, layouts }, topics, base)
   const composed = composeSpatialTabs(prepared, { target: request.target, tabs: tabIds.map(tabId => {
     const tab = prepared.tabs.find(tab => tab.tabId === tabId)!
     return { tabId, zoneId: tab.zoneId, regionIds: tab.regionIds }
@@ -139,7 +147,7 @@ export function planSurveyTabComposition(state: AppState, topics: readonly Scrat
     layouts[request.target.displayWorkspaceId] = next
   }
   for (const [displayId, layout] of Object.entries(layouts)) layouts[displayId] = keepDisplaySelection(state.layouts[displayId], layout)
-  const nextState = { ...state, tabs, layouts }
+  const nextState = { ...planningState, tabs, layouts }
   for (const owner of state.config?.workspaces ?? []) {
     const owned = scratchTopicsForWorkspace(state.scratchTopicSnapshots, owner) ?? []
     for (const topic of owned) {

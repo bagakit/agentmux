@@ -1,3 +1,6 @@
+import { SurveyCompositionCheckbox } from './SurveyCompositionCheckbox'
+import type { SurveyCompositionSelectionControl } from '../lib/survey-composition-drag'
+import { surveyContentKey, useSurveyContentDrag } from '../lib/survey-composition-drag'
 import { workReferenceHostId } from '../lib/agent-work-mode'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { documentKey, titleWorkbenchSurface, workbenchSurfaces, type WorkbenchTab } from '../lib/workbench-tabs'
@@ -16,7 +19,8 @@ const FileIcon = semanticIconComponent('file.text')
 const CloseIcon = semanticIconComponent('action.close')
 
 /** The same Tab naming owner as the workbench, scoped to this Tab's Sessions. */
-export function SurveyTabColumn({ tab, selected, onSelect, onClose, unconfirmedBrowserRegionIds }: { tab: WorkbenchTab; selected: boolean; onSelect(): void; onClose(title: string): void; unconfirmedBrowserRegionIds?: ReadonlySet<string> | undefined }) {
+export function SurveyTabColumn({ tab, selected, onSelect, onClose, unconfirmedBrowserRegionIds, compositionEnabled = false, selection }: { tab: WorkbenchTab; selected: boolean; onSelect(): void; onClose(title: string): void; unconfirmedBrowserRegionIds?: ReadonlySet<string> | undefined; compositionEnabled?: boolean; selection?: SurveyCompositionSelectionControl | undefined }) {
+  const reference = { kind: 'tab' as const, tabId: tab.id }
   const sessions = useWorkbenchTabSessions(tab)
   const metadata = useWorkbenchTabNameMetadata(tab)
   const names = useWorkbenchTabRecord('agentNames', tab)
@@ -28,10 +32,11 @@ export function SurveyTabColumn({ tab, selected, onSelect, onClose, unconfirmedB
   const title = workbenchTabDisplayName(tab, sessions, names, timelines, metadata, noteName)
   const marks = workbenchTabMarks(tab, tabMarkAgentFactsFor(sessions, config?.executors, config?.appearance.agentAvatars, config ? workReferenceHostId(config.hosts) : null))
   const Icon = surface.kind === 'file' ? document && parseNoteFile(document).status === 'valid' ? NoteIcon : FileIcon : BrowserIcon
+  const drag = useSurveyContentDrag(reference, compositionEnabled, { title, icon: <span className="survey-page-favicon"><Icon size={14} />{surface.kind === 'browser' && surface.faviconDataUrl ? <img src={surface.faviconDataUrl} alt="" /> : null}</span> })
   const customPrimary = surface.kind === 'browser' || surface.kind === 'file'
   const unknown = workbenchSurfaces(tab).some(region => region.kind === 'browser' && surveyBrowserControl(region, Boolean(unconfirmedBrowserRegionIds?.has(region.regionId))) === 'unknown')
   const status = unknown ? 'Page status unconfirmed · open this Tab to check' : undefined
-  return <div className="survey-tab-cell"><button type="button" className="survey-tab-column" data-survey-tab-id={tab.id} aria-label={`Show survey tab: ${title}`}
+  return <div className="survey-tab-cell" data-selectable={Boolean(selection) || undefined} data-content-dragging={drag.isDragging || undefined}>{selection ? <SurveyCompositionCheckbox selection={selection} label={`Select complete Tab: ${title}`} /> : null}<button ref={drag.setNodeRef} {...drag.attributes} {...drag.listeners} data-survey-content-key={surveyContentKey(reference)} type="button" className="survey-tab-column" data-survey-tab-id={tab.id} aria-label={`Show survey tab: ${title}`}
     aria-current={selected ? 'true' : undefined} aria-description={status} title={status ? `${title}\n${status}` : title} onClick={onSelect}>
     <span className="survey-tab-column__marks" aria-hidden="true">
       {customPrimary ? <span className="survey-page-favicon"><Icon size={16} />{surface.kind === 'browser' && surface.faviconDataUrl
