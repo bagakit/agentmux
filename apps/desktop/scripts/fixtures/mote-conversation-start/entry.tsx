@@ -71,6 +71,7 @@ Object.assign(window, { moteStartCapture: { ready: true, facts: original.facts, 
   history(value: boolean) { history = value; unknown = false; bound = false; seed() },
   unknown() { unknown = true; seed() }, bound() { bound = true; unknown = false; seed() },
   releaseReading() { const release = releaseReading; reading = null; releaseReading = null; release?.() },
+  bindReading() { bound = true; unknown = false; const release = releaseReading; reading = null; releaseReading = null; release?.() },
   longName() { original.longNames() },
   rolloverMember() {
     bound = true; unknown = false; history = false; seed()

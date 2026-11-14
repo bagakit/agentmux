@@ -1,11 +1,12 @@
 // @vitest-environment happy-dom
-import { act, useContext, type ReactNode } from 'react'
+import { act, useContext, type ReactNode, type ComponentProps } from 'react'
 import { createRoot } from 'react-dom/client'
 import { appendFile, mkdir, readFile, writeFile } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
 import { dirname } from 'node:path'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createMoteConversationStartFixture } from '../../host/test/helpers/mote-conversation-start-fixture'
+import { scratchTopicLogicalPath, scratchTopicDirectoryName } from '@agentmux/host/mote-model'
 import { ScratchTopics } from '../../host/src/mote-resources'
 import { moteQuickBaseline } from '../../../packages/core/src/mote-preferences'
 import { moteMainBaseline } from '../../../packages/core/src/spatial-agent-open-contract'
@@ -13,7 +14,9 @@ import { agentPromptSubmissionOutcome } from '../../../packages/core/src/agent-i
 import type { MoteDialogueLink } from '../../../packages/core/src/mote-dialogue'
 import type { ConversationChangesInput } from '../../../packages/core/src/conversation-changes'
 import { nativeHistoryFixture, jsonl } from '../../../packages/core/test/fixtures/native-history-session'
-import { MoteConversationStart } from '../src/renderer/src/components/MoteConversationStart'
+import { MoteConversationStart as StartSource } from '../src/renderer/src/components/MoteConversationStart'
+import { DesktopMoteComposerHost } from '../src/renderer/src/components/MoteComposer'
+import { ComposerSurface } from '@agentmux/client-ui/components/ComposerHost'
 import { moteConversationHistoryRows } from '@agentmux/client-ui/components/MoteConversationStart'
 import { MoteMainActions } from '../src/renderer/src/components/MoteMainActions'
 import * as originalMainActions from '../src/renderer/src/lib/mote-main-action'
@@ -35,7 +38,19 @@ import { moteAgent, seedMoteWorkface } from './fixtures/mote-workface'
 import { MoteWorkfaceContext, type MoteRolloverStart, type MoteWorkfaceScope } from '../src/renderer/src/lib/mote-workface'
 
 vi.mock('electron', () => ({ app: { isPackaged: false }, nativeImage: {} }))
+// The real welcome is a Source of the same Host used by the Mote workface, never an alternate editor.
+function MoteConversationStart(props: ComponentProps<typeof StartSource>) {
+  return <DesktopMoteComposerHost scope={props.scope} sourceKey="welcome" active={props.active}>
+    <StartSource {...props} /><ComposerSurface />
+  </DesktopMoteComposerHost>
+}
+
 type Source = Extract<MoteDialogueLink, { kind: 'main' }>
+async function topicAt(workspace: Parameters<ScratchTopics['readForDirectory']>[0], directory: string) {
+  const topics = new ScratchTopics(), fact = await topics.readForDirectory(workspace, directory)
+  return fact ? topics.read(workspace, fact.id) : null
+}
+
 const closes: Array<() => unknown | Promise<unknown>> = []
 beforeEach(async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
@@ -62,13 +77,13 @@ async function click(element: HTMLElement, label: string) {
   expect(button, label).toBeDefined(); await act(async () => button!.click())
 }
 
-async function originalWelcome(providerId: 'codex' | 'claude' = 'codex') {
+async function originalWelcome(providerId: 'codex' | 'claude' = 'claude') {
   const f = await createMoteConversationStartFixture({ providerId }); closes.push(f.close)
   const workspace = { ...f.target.expectedResource, id: f.target.expectedResource.workspaceId, hostId: f.target.expectedResource.hostId,
     path: f.target.expectedResource.workspacePath, name: 'Original scratch', kind: 'folder' as const }
-  const topic = await new ScratchTopics().readForDirectory(workspace, dirname(f.path))
+  const topic = await topicAt(workspace, dirname(f.path))
   if (!topic) throw Error('The real Host Mote directory must be discoverable')
-  const scope: MoteWorkfaceScope = { workspace, topic, rootPath: topic.directoryPath! }
+  const scope: MoteWorkfaceScope = { workspace, topic, rootPath: scratchTopicLogicalPath(workspace, topic) ?? scratchTopicDirectoryName(topic.id) }
   const state = useAppStore.getState()
   useAppStore.setState({ config: { ...state.config!, workspaces: [workspace], executors: { saved: { label: 'Saved', providerId, command: providerId, args: [], env: {}, injectAgentMuxGuide: false } } },
     spaceZoneBindings: { [f.target.zoneId]: { spaceId: f.target.spaceId, workspaceId: workspace.id, topicId: topic.id, contentKind: 'mote' } },
@@ -101,7 +116,8 @@ it('actual Desktop welcome submits the original draft through helper and real Ho
   expect(request.content).toEqual({ kind: 'new-agent', executorId: 'saved' })
   expect(request.moteMain?.deferredInput?.prompt).toBe(query)
   expect(JSON.stringify(f.h.started)).not.toContain(query)
-  const accepted = await result.value
+  await result.value
+  const accepted = await f.settledSetup(request.operationId!)
   expect(accepted.binding).toBe('confirmed')
   expect(agentPromptSubmissionOutcome(accepted.deferredInput?.record ?? null)).toBe('terminal-confirmed')
   expect(useLauncherState.getState().drafts[f.key]?.prompt).toBe('')
@@ -139,7 +155,7 @@ async function originalAutomatic() {
   expect(native.currentActivity?.state).toBe('idle')
   const session = { ...moteAgent(reference.sessionId, null, 'waiting'), providerId: 'claude', executorId: 'saved', workspacePath: native.workspacePath,
     control: { kind: 'agent' as const, hostId: reference.hostId, agentSessionId: reference.sessionId, run: native.run } }
-  const topic = await new ScratchTopics().readForDirectory(f.scope.workspace, dirname(f.path))
+  const topic = await topicAt(f.scope.workspace, dirname(f.path))
   expect(topic).not.toBeNull()
   const projected = desktopWorkbenchFromSpatial((await f.spatial.read())!.graph)
   const operationId = 'actual_ui_auto_query', prompt = 'Carry this original new Query to the next bound Main'
@@ -581,7 +597,7 @@ it('a closed historical occurrence still opens its exact original Core Session r
   await f.spatial.commit({ expectedRevision: state.revision, graph, allowEntityRemoval: true })
   const projected = desktopWorkbenchFromSpatial((await f.spatial.read())!.graph)
   expect(projected.tabs[old.tabId]).toBeUndefined()
-  const topic = (await new ScratchTopics().readForDirectory(f.scope.workspace, dirname(f.path)))!
+  const topic = (await topicAt(f.scope.workspace, dirname(f.path)))!
   const sessions = [old, b.reference!].map(reference => {
     const native = f.h.client.agentSession(reference.sessionId)
     return { ...moteAgent(reference.sessionId, null, 'waiting'), providerId: 'claude', executorId: 'saved', workspacePath: native.workspacePath,
@@ -704,3 +720,38 @@ it('hidden shared periods do not read, and a cancelled opening retries when the 
   await wait(() => expect(view.element.textContent).toContain('period-b-one'))
   expect(f.changes.mock.calls.length).toBeGreaterThan(1)
 })
+
+it('new logical Main B uses the conversation producer and waits in the original public Core instead of entering native startup', async () => {
+  const f = await originalWelcome('codex')
+  await f.start('original_main_before_query_b'); await f.setup('original_main_before_query_b')
+  const main = (await f.rpc.call('space.mote.dialogue.read', { target: f.target })).main
+  const reference = main.current!, native = (await f.h.client.readAgentSession(reference.sessionId))!
+  const topic = (await topicAt(f.scope.workspace, dirname(f.path)))!
+  const projected = desktopWorkbenchFromSpatial((await f.spatial.read())!.graph)
+  const session = { ...moteAgent(reference.sessionId, null, 'waiting'), providerId: 'codex', executorId: 'saved', workspacePath: native.workspacePath,
+    control: { kind: 'agent' as const, hostId: reference.hostId, agentSessionId: reference.sessionId, run: native.run } }
+  useAppStore.setState({ tabs: projected.tabs as never, layouts: projected.layouts, sessions: [session],
+    scratchTopicSnapshots: { [f.scope.workspace.id]: { scope: scratchTopicsScope(f.scope.workspace), revision: 0, topics: [topic], error: null, reading: false } },
+    agentComposerDrafts: { [session.id]: 'Independent Session draft stays separate' }, agentSteerQueues: {}, agentSteerInFlight: {} })
+  useLauncherState.getState().setDraft(f.key, 'prompt', 'New logical Main Query B before startup')
+  const controller = Object.create(RuntimeController.prototype) as RuntimeController
+  Object.assign(controller, { trackHostOperation: (_host: unknown, call: () => unknown) => call(),
+    callOriginalCore: (_host: unknown, method: string, input: unknown) => f.rpc.call(method as never, input as never) })
+  vi.spyOn(api.sessions, 'inspectInput').mockImplementation(async (_control, key) => (await f.rpc.call('agent.input.inspect', { key })).input ?? null)
+  const submit = vi.spyOn(api.sessions, 'submitPrompt').mockImplementation(async (control, text, id, condition, choice, human, note, channel) =>
+    unwrapSessionInputWriteResult(await sessionInputWriteResult(() => controller.submitPrompt(control, text, id, condition, undefined, choice, human, note, channel))))
+  const view = await mounted(<MoteWorkface workspaceId={f.scope.workspace.id} topicId={topic.id} reference={reference} floating visible recoverOnOpen={false}>
+    <AgentSessionComposer sessionId={session.id} visible /></MoteWorkface>)
+  await wait(() => expect(view.element.querySelector<HTMLButtonElement>('.mote-composer-surface [aria-label=Send]')?.disabled, JSON.stringify({ text: view.element.textContent, drafts: useLauncherState.getState().drafts, key: f.key })).toBe(false))
+  await act(async () => view.element.querySelector<HTMLButtonElement>('.mote-composer-surface [aria-label=Send]')!.click()); await wait(() => expect(submit, JSON.stringify({ text: view.element.textContent, queue: useAppStore.getState().agentSteerQueues, drafts: useLauncherState.getState().drafts })).toHaveBeenCalledOnce())
+  const operationId = submit.mock.calls[0]![2]
+  await vi.waitFor(async () => expect((await f.rpc.call('space.mote.dialogue.input.inspect', { target: f.target, operationId })).input?.control.waiting)
+    .toMatchObject({ phase: 'session', reason: 'native-session-starting', wake: 'session-restored' }))
+  const retained = await f.rpc.call('space.mote.dialogue.input.inspect', { target: f.target, operationId })
+  expect(retained.route!.key).toMatchObject({ agentSessionId: native.agentSessionId, expectedRun: native.run, submissionId: operationId })
+  expect(retained.record).toBeNull()
+  expect(submit.mock.calls[0]![3]).toEqual({ expectedRun: native.run, admissionIntent: { kind: 'session-conversation' } })
+  expect(f.h.inner.kernel.input).not.toHaveBeenCalled(); expect(f.h.rawInput).not.toHaveBeenCalled()
+  expect(useAppStore.getState().agentComposerDrafts[session.id]).toBe('Independent Session draft stays separate')
+  expect(f.h.started).toHaveLength(1); expect(f.h.inner.kernel.stop).not.toHaveBeenCalled()
+}, 45_000)

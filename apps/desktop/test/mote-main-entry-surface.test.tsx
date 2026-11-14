@@ -1,13 +1,16 @@
 // @vitest-environment happy-dom
-import { act, type ReactNode } from 'react'
+import { act, type ReactNode, type ComponentProps } from 'react'
 import { createRoot } from 'react-dom/client'
 import { dirname } from 'node:path'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createMoteConversationStartFixture } from '../../host/test/helpers/mote-conversation-start-fixture'
+import { scratchTopicLogicalPath, scratchTopicDirectoryName } from '@agentmux/host/mote-model'
 import { ScratchTopics } from '../../host/src/mote-resources'
 import { MoteWorkface } from '../src/renderer/src/components/MoteWorkface'
 import { MoteMainActions } from '../src/renderer/src/components/MoteMainActions'
-import { MoteConversationStart } from '../src/renderer/src/components/MoteConversationStart'
+import { MoteConversationStart as StartSource } from '../src/renderer/src/components/MoteConversationStart'
+import { DesktopMoteComposerHost } from '../src/renderer/src/components/MoteComposer'
+import { ComposerSurface } from '@agentmux/client-ui/components/ComposerHost'
 import { DesktopClientUiProvider } from '../src/renderer/src/components/DesktopClientUiProvider'
 import { MoteDialogueViewProvider } from '../src/renderer/src/lib/mote-dialogue-view'
 import { readMoteMainAction } from '../src/renderer/src/lib/mote-main-action'
@@ -18,6 +21,17 @@ import type { MoteWorkfaceScope } from '../src/renderer/src/lib/mote-workface'
 import { useAppStore } from '../src/renderer/src/store'
 import { api } from '../src/renderer/src/lib/api'
 import { moteAgent, seedMoteWorkface } from './fixtures/mote-workface'
+
+function MoteConversationStart(props: ComponentProps<typeof StartSource>) {
+  return <DesktopMoteComposerHost scope={props.scope} sourceKey="welcome" active={props.active}>
+    <StartSource {...props} /><ComposerSurface />
+  </DesktopMoteComposerHost>
+}
+
+async function topicAt(workspace: Parameters<ScratchTopics['readForDirectory']>[0], directory: string) {
+  const topics = new ScratchTopics(), fact = await topics.readForDirectory(workspace, directory)
+  return fact ? topics.read(workspace, fact.id) : null
+}
 
 const closes: Array<() => unknown | Promise<unknown>> = []
 beforeEach(async () => {
@@ -47,9 +61,9 @@ async function boundMote(dialogueRead?: (input: Parameters<typeof api.moteDialog
   const f = await createMoteConversationStartFixture({ providerId: 'claude' }); closes.push(f.close)
   const workspace = { ...f.target.expectedResource, id: f.target.expectedResource.workspaceId, hostId: f.target.expectedResource.hostId,
     path: f.target.expectedResource.workspacePath, name: 'Original scratch', kind: 'folder' as const }
-  const topic = await new ScratchTopics().readForDirectory(workspace, dirname(f.path))
+  const topic = await topicAt(workspace, dirname(f.path))
   if (!topic) throw Error('The real Host Mote directory must be discoverable')
-  const scope: MoteWorkfaceScope = { workspace, topic, rootPath: topic.directoryPath! }
+  const scope: MoteWorkfaceScope = { workspace, topic, rootPath: scratchTopicLogicalPath(workspace, topic) ?? scratchTopicDirectoryName(topic.id) }
   const state = useAppStore.getState()
   useAppStore.setState({ config: { ...state.config!, workspaces: [workspace], executors: { saved: { label: 'Saved', providerId: 'claude', command: 'claude', args: [], env: {}, injectAgentMuxGuide: false } } },
     spaceZoneBindings: { [f.target.zoneId]: { spaceId: f.target.spaceId, workspaceId: workspace.id, topicId: topic.id, contentKind: 'mote' } },
@@ -69,7 +83,7 @@ async function boundMote(dialogueRead?: (input: Parameters<typeof api.moteDialog
   const projected = desktopWorkbenchFromSpatial((await f.spatial.read())!.graph)
   const session = { ...moteAgent(current.sessionId, null, 'waiting'), providerId: 'claude', executorId: 'saved', workspacePath: idle.session!.workspacePath,
     control: { kind: 'agent' as const, hostId: current.hostId, agentSessionId: current.sessionId, run: idle.session!.run } }
-  const fresh = await new ScratchTopics().readForDirectory(workspace, dirname(f.path))
+  const fresh = await topicAt(workspace, dirname(f.path))
   useAppStore.setState({ tabs: projected.tabs as never, layouts: projected.layouts, sessions: [session],
     scratchTopicSnapshots: { [workspace.id]: { scope: scratchTopicsScope(workspace), revision: 0, topics: [fresh!], error: null, reading: false } } })
   const key = 'mote-main-start:' + JSON.stringify([workspace.hostId, workspace.id, workspace.path, topic.id, scope.rootPath])
@@ -94,7 +108,7 @@ it('cold start shows the Mote at once while its Main is read, and a message sent
   expect(scene.querySelector('.mote-start-history__skeleton')?.getAttribute('aria-label')).toContain('正在读取原对话历史')
   expect(buttonIn(element, '对话选项')).toBeUndefined()
   // The draft is the Mote's own: typing in its Composer writes the Mote draft; sending only holds it on this device.
-  const editor = scene.querySelector<HTMLElement>('[contenteditable=true]')!
+  const editor = element.querySelector<HTMLElement>('.mote-composer-surface [contenteditable=true]')!
   await act(async () => {
     editor.textContent = '读取中写下的问题'
     editor.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: '读取中写下的问题' }))
