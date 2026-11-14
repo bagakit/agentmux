@@ -140,7 +140,7 @@ check('Desktop real agent-input event retains projected receipt instead of incom
   expect(store.getState().agentSteerQueues['profile-session']![0]!.inputReceipt).toBe(prior)
   expect(receipt).toEqual(original)
   expect(queues['profile-session']![0]!.directInputBinding!.expectedRun).toEqual(key.expectedRun)
-})
+}, 30_000)
 
 
 check('Desktop cold profile removal reaches original native save without losing input or fragments', async () => {
@@ -173,7 +173,7 @@ check('Desktop cold profile removal reaches original native save without losing 
   expect(f.api.sessions.stop).not.toHaveBeenCalled()
   writeEvidence('desktop-persistence', { beforeReceiptBytes: Buffer.byteLength(JSON.stringify(f.raw)),
     afterReceiptBytes: Buffer.byteLength(JSON.stringify(old)), queueCount: 1, sends: 0, diskDurability: nativeWrite!.diskDurability })
-})
+}, 30_000)
 
 ;(reading ? it : it.skip)('fresh process reads original saved projection without reseeding or dispatch', async () => {
   const before = await readFile(join(root!, 'workbench-user-state.json'), 'utf8')

@@ -23,7 +23,7 @@ it('groups real Session controls and interrupts only the current reply', async (
   expect(group.querySelector('.composer-agent-identity .agent-avatar')).not.toBeNull()
   expect(dom.container.querySelector('.composer__toolbar > div:last-child')?.contains(group)).toBe(true)
   const button = group.querySelector<HTMLButtonElement>('[aria-label="Interrupt the current turn"]')!
-  expect(button.querySelector('.lucide-square')).not.toBeNull()
+  expect(button.querySelector('[data-semantic-icon="action.stop"]')).not.toBeNull()
   expect(button.title).toContain('keep this session')
   const identity = group.querySelector('.composer-agent-identity')!
   const mailbox = group.querySelector('.composer__mailbox')!

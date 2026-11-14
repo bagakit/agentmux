@@ -20,17 +20,36 @@ import { fileURLToPath } from 'node:url'
 const STYLES_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'src', 'renderer', 'src', 'styles')
 const require = createRequire(import.meta.url)
 
+function componentStyleImports(): string[] {
+  const sourceRoot = join(STYLES_DIR, '..'), files: string[] = [], imports = new Set<string>()
+  const visit = (directory: string) => {
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      const path = join(directory, entry.name)
+      if (entry.isDirectory()) { if (path !== STYLES_DIR) visit(path); continue }
+      if (!entry.isFile() || !/\.[cm]?[jt]sx?$/.test(entry.name)) continue
+      files.push(path)
+    }
+  }
+  visit(sourceRoot)
+  for (const file of files) for (const match of readFileSync(file, 'utf8').matchAll(/import\s+['"]([^'"]+\.css)['"]/g)) {
+    const specifier = match[1]!, resolved = specifier.startsWith('.') ? join(dirname(file), specifier) : specifier
+    if (resolved !== join(STYLES_DIR, 'index.css')) imports.add(resolved)
+  }
+  return [...imports].sort()
+}
+
 function importOrder(): string[] {
   const index = readFileSync(join(STYLES_DIR, 'index.css'), 'utf8')
   const order = [...index.matchAll(/@import\s+'([^']+\.css)'/g)].map((match) => match[1]!)
   if (order.length === 0) throw new Error('index.css 里没有 @import——样式入口变了，这个读取器要跟着改')
   const present = readdirSync(STYLES_DIR).filter((name) => name.endsWith('.css') && name !== 'index.css')
-  const reachable = new Set<string>()
+  const componentOrder = componentStyleImports(), reachable = new Set<string>(componentOrder)
   importedStyles(join(STYLES_DIR, 'index.css'), [], file => reachable.add(file))
   const missing = present.filter((name) => !reachable.has(join(STYLES_DIR, name)))
   // 一个不在入口导入图中的样式文件是死文件：它的规则永远不生效，而契约测试会照常扫描它并放行。
   if (missing.length > 0) throw new Error(`这些样式文件不在 index.css 导入图中：${missing.join(', ')}`)
-  return order
+  // main.tsx first loads the component graph, then the shared entry. Match that cascade here.
+  return [...componentOrder, ...order]
 }
 
 function stylesheetPath(specifier: string, from = STYLES_DIR): string {
