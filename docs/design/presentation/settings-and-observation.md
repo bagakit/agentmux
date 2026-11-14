@@ -54,7 +54,7 @@ Browser Profiles 沿 Agents／Hosts 的资源库与单对象编辑构图：左�
 - **身份色不是状态色。** Profile 色相只取避开 red、amber、green、blue 语义弧的身份色，饱和度与明度固定在身份带内，深浅主题都成立；默认按整张 Profile 列表分配：按创建先后，未选色的 Profile 依次取当前用得最少的色相（并列取 id 派生的那一个），前六个 Profile 因此互不撞色，同一张列表每次画出同样的颜色；人可改选或回到 Automatic。任何失败、阻断或运行状态都用文字表达，不给标识染色。
 - **同一标识贯穿所有入口。** 设置库行、编辑页头、Browser 工具栏 chip 与切换菜单绘制同一个标识元素；Browser tools 只保留标识摘要与「Manage Browser Profiles」入口，不另设第二个编辑器。
 - **In use 与阻断原因先于动作。** In use 分开列出已打开与尚未加载的已保存 Browser，每行可直接回到那个 Browser；页头的主动作「Open Browser」在当前 Space 用这个 Profile 新开一页。默认 Profile 或仍被使用的 Profile 在更多菜单中直接禁用「Delete Profile…」并写明原因，可删时在编辑区就地确认并点名删除范围，确认块打开即聚焦 Cancel，Escape 关闭。新建直接进入为新 Profile 命名；导入在菜单中列出本机可用来源。
-- **回收确认先于离开列表。** 完整归档确认前保留原 Profile 与数据；回收已确认与原件待清理分别显示，后者不倒写归档结果。恢复、保留期与永久删除用不同动作和准确范围，写入或读取失败保留原对象与就近恢复入口。
+- **回收确认先于离开列表。** 原 owner 确认完整记录与原位完整分区转为归档持有前，保留原活动 Profile 与数据；回收已确认不显示为已释放磁盘或独立备份完成。恢复、保留期与永久删除使用不同动作和准确范围；占用或读写未知保留原对象、当前运行能力与就近恢复入口。数据与身份合同只见[Profile 管理、环境与指纹编辑](../behavior/browser-workface.md#profile-管理环境与指纹编辑)。
 - **Agents 是一个开关。** 编辑区的 Agents 一节只有「Let agents use Browsers in this Profile」，沿原 owner 的准确 Profile 编辑版本就地提交；开关下一行说明当前实际效果：Agent 可用这个 Profile 的登录态操作、此处拒绝 Agent 但人仍可运行自己的步骤，或总开关已关、此刻没有 Agent 使用任何 Profile。控件复用 Settings › Browser 总开关的同一种开关，看得出它收窄的正是那个总开关。
 - **出口检查只在人要求时发一次。** 编辑区「Exit check」写出这个 Profile 的路线（跟随系统、直连或代理服务器）；Settings › Browser 填了 https 检查地址后才提供 Check，否则给去设置的入口。Check 经这个 Profile 自己的 session 在其路线生效后发一次请求，一行写出到达的地址（仅当返回体只是一个 IP）、HTTP 状态与耗时；失败写明未知及原因，可重试，不阻断页面，不留历史，也不推测国家或时区。
 - **站点数据按站点清理。** 「Sites with sign-ins」在人点开时才读取，只列站点名与 Cookie 数；每行「Clear…」在行内确认、聚焦 Cancel、Escape 取消，清完说明已从该站点登出并提示重新加载其已打开页面，失败保留该行与原因。
