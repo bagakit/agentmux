@@ -186,6 +186,56 @@ it('explains unsupported Mote dual execution while retaining normal launch, all 
 })
 
 
+it('the Source/Legacy focus handoff yields to a newer user focus', async () => {
+  await mount()
+  await dom.click('[aria-label="Agent location"]')
+  const frames: FrameRequestCallback[] = []
+  const raf = vi.spyOn(window, 'requestAnimationFrame').mockImplementation(callback => { frames.push(callback); return frames.length })
+  const cancel = vi.spyOn(window, 'cancelAnimationFrame').mockImplementation(() => {})
+  try {
+    const custom = [...editor().querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Choose a custom startup directory')!
+    await act(async () => custom.click())
+    const cancelButton = [...editor().querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Cancel')!
+    await act(async () => cancelButton.focus())
+    expect(document.activeElement).toBe(cancelButton)
+    await act(async () => { for (const callback of frames.splice(0)) callback(0) })
+    expect(document.activeElement).toBe(cancelButton)
+  } finally {
+    raf.mockRestore(); cancel.mockRestore()
+  }
+})
+
+it('the anchored editor keeps progressive details in its scrolling body and only submit actions in its fixed footer', async () => {
+  const f = await mount()
+  await dom.click('[aria-label="Agent location"]')
+  const dialog = editor(), setup = dialog.querySelector<HTMLElement>('.agent-work-setup')!
+  expect(setup.dataset.presentation).toBe('anchored-editor')
+  const body = setup.querySelector<HTMLElement>(':scope > .agent-work-setup__body')!
+  expect(body).not.toBeNull()
+  const actions = setup.querySelector<HTMLElement>(':scope > .agent-work-setup__actions')!
+  expect(actions.parentElement).toBe(setup)
+  expect(body.contains(actions)).toBe(false)
+
+  const anchor = setup.querySelector<HTMLElement>('.agent-work-project-anchor')!
+  expect(anchor.tagName).toBe('DETAILS')
+  expect(anchor.querySelector('summary')?.textContent).not.toContain(f.project.path)
+  expect(anchor.querySelector('.agent-work-project-anchor__path')?.textContent).toBe(f.project.path)
+
+  const custom = [...setup.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Choose a custom startup directory')!
+  expect(custom.classList.contains('small-button')).toBe(true)
+  expect(custom.closest('details.agent-work-startup')).not.toBeNull()
+  expect(body.contains(custom)).toBe(true)
+  expect(Boolean(custom.compareDocumentPosition(actions) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true)
+
+  const refresh = setup.querySelector<HTMLButtonElement>('[aria-label="Refresh Agent device choices"]')!
+  expect(refresh).not.toBeNull()
+  expect(refresh.closest('.agent-work-device-choice')).not.toBeNull()
+  expect(actions.contains(refresh)).toBe(false)
+  expect(actions.querySelectorAll('.primary-button')).toHaveLength(1)
+  expect(dialog.querySelector('[aria-label="Close Agent device editor"]')).not.toBeNull()
+  await vi.waitFor(() => expect(document.activeElement?.getAttribute('aria-label')).toBe('Agent runs on'))
+})
+
 it.each([false, true])('keeps the project read-only and offers one Agent device choice without remote preparation, remote=%s', async reverse => {
   const f = await mount(reverse), launch = vi.spyOn(api.sessions, 'launchAgent'), home = vi.mocked(api.hosts.home), add = vi.spyOn(api.workspaces, 'add')
   const discover = vi.mocked(api.executors.discover); discover.mockClear()
@@ -239,7 +289,7 @@ it('an explicit device choice uses its home and returning to this device follows
 })
 it('the start page keeps the exact Space project label while arrangement selectors stay inside the editor', async () => {
   const f = await mount()
-  expect(dom.container.querySelector('.launcher-environment button, .launcher-environment select')).toBeNull()
+  expect(dom.container.querySelector('.launcher-environment select, .launcher-environment [aria-label="Agent runs on"]')).toBeNull()
   expect(dom.container.querySelector('.launcher-execution-advanced, [aria-label="Files and tools"], [aria-label="Agent startup directory"]')).toBeNull()
   const label = dom.container.querySelector<HTMLElement>('.launcher-environment__device')!
   expect(label.dataset.hostId).toBe('local'); expect(label.getAttribute('aria-label')).toBe('Device: ' + composerConfig.hosts[0]!.label)

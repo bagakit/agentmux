@@ -25,6 +25,13 @@ const mutations = {
   position: null,
   'tooltip-width': ['components/agent-work-mode.css', 'min-width: 0; max-width: 100%; gap: 10px;', 'min-width: 720px; max-width: none; gap: 10px;'],
   'region-boundary': ['components/LauncherAgentDevice.tsx', "anchor.closest<HTMLElement>('[data-workbench-region-id]') ?? ('clippingAncestors' as const)", "'clippingAncestors' as const"],
+  'dialog-root-scroll': ['components/agent-work-mode.css', 'display: flex; flex-direction: column; width: min(400px', 'display: block; width: min(400px'],
+  'dialog-body-height': ['components/agent-work-mode.css', 'min-height: 0; overflow-y: auto;', 'min-height: 240px; overflow-y: visible;'],
+  'dialog-footer-order': ['components/AgentWorkModeSetup.tsx', "onChooseCustom={anchored ? () => setSourceSelection(false) : undefined} onOpenHost={props.onOpenHost ?? (settings ? id => settings.openHost(id) : undefined)} />\n    {!anchored ? <button className=\"agent-work-text-action\"", "onChooseCustom={undefined} onOpenHost={props.onOpenHost ?? (settings ? id => settings.openHost(id) : undefined)} />\n    {anchored ? <button className=\"small-button agent-work-setup__custom-startup\""],
+  'dialog-path-disclosure': ['components/AgentWorkProjectAnchor.tsx', '<code className="agent-work-project-anchor__path">{project.path}</code>', '<code className="agent-work-project-anchor__path">{project.path.slice(0, 24)}</code>'],
+  'dialog-menu-boundary': ['components/LauncherAgentDevice.tsx', "menuBoundary={anchor?.closest<HTMLElement>('[data-workbench-region-id]') ?? null}", 'menuBoundary={null}'],
+  'dialog-device-tail': ['components/SourceAgentTargetSetup.tsx', "...(choices?.hosts.filter(host => host.kind !== 'local').map(host =>", "...(choices?.hosts.filter(host => host.kind !== 'local').slice(0, -1).map(host =>"],
+  'dialog-device-scroll': ['components/SelectionField.tsx', '<div className="selection-field__results">', '<div className="selection-field__results" style={{ overflow: \'hidden\' }}>'],
   'footer-nowrap': null,
   'pointer-focus-tooltip': ['components/WorkbenchNameTooltip.tsx', "const show = () => { if (parent.matches(':focus-visible')) current.current.showFor(parent) }", 'const show = () => { current.current.showFor(parent) }'],
   'tooltip-anchor-overlap': ['components/WorkbenchNameTooltip.tsx', 'shift({ padding: 8 }), size({ padding: 8,', 'shift({ padding: 8, crossAxis: true }), size({ padding: 8,']

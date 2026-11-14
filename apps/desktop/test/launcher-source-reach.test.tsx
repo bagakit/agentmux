@@ -1,5 +1,7 @@
 // @vitest-environment happy-dom
 import { act } from 'react'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { afterEach, expect, it, vi } from 'vitest'
 vi.mock('../src/renderer/src/components/TerminalView', () => ({ TerminalView: () => <div data-original-terminal /> }))
 import { SourceAgentTargetSetup } from '../src/renderer/src/components/SourceAgentTargetSetup'
@@ -79,6 +81,52 @@ async function fixture() {
   })
   return { ...f, a, b, config, project, coordinator, home, calls, inventory }
 }
+
+it('the default Source presentation keeps its expanded project card and footer Refresh for shared consumers', async () => {
+  const f = await fixture(), selected = vi.fn()
+  await initializeSpatialControlFixture()
+  await dom.render(<SourceAgentTargetSetup config={f.config} active fixedResourceWorkspaceId={f.project.id} actionLabel="Apply" onApply={selected} />)
+  await vi.waitFor(async () => { await tick(); expect(button('Apply').disabled).toBe(false) })
+  const setup = dom.container.querySelector<HTMLElement>('.agent-work-setup')!
+  expect(setup.dataset.presentation).toBeUndefined()
+  expect(setup.querySelector('.agent-work-project-anchor')?.tagName).toBe('DIV')
+  expect(setup.querySelector('.agent-work-project-anchor')?.textContent).toContain(f.project.path)
+  expect(button('Refresh').closest('.agent-work-setup__actions')).not.toBeNull()
+  expect(setup.querySelector('[aria-label="Refresh Agent device choices"]')).toBeNull()
+  const summary = [...setup.querySelectorAll('summary')].find(item => item.textContent === 'Launch compatibility')!
+  await act(async () => summary.click())
+  expect(summary.matches('.agent-work-setup__body > details > summary')).toBe(true)
+  expect(readFileSync(resolve('apps/desktop/src/renderer/src/components/agent-work-mode.css'), 'utf8')).toContain('.agent-work-setup__body > details > summary')
+})
+
+it('Reach recovery follows externalAssociation rather than ordinaryLaunch', async () => {
+  const f = await fixture(), selected = vi.fn(), openHost = vi.fn()
+  await initializeSpatialControlFixture()
+  const sourceCalls = api.spaceMounts.call.bind(api.spaceMounts)
+  vi.spyOn(api.spaceMounts, 'call').mockImplementation((method, input, signal) => method === 'describe'
+    ? Promise.resolve({ source: { runtimeId: f.b.identity.runtimeId, ownerInstanceId: f.b.identity.ownerInstanceId }, contracts: { ordinaryLaunch: { revision: 1, destination: 'source-zone-background' }, externalAssociation: null } }) as never
+    : sourceCalls(method, input, signal))
+  await dom.render(<SourceAgentTargetSetup config={f.config} active fixedResourceWorkspaceId={f.project.id} actionLabel="Apply" presentation="anchored-editor" onChooseCustom={() => {}} onOpenHost={openHost} onApply={selected} />)
+  await choose('independent-coordinator')
+  await vi.waitFor(async () => { await tick(); expect(dom.container.textContent).toContain('Update AgentMux Core') })
+  const recovery = button(`Open ${f.config.hosts.find(host => host.id === f.b.id)!.label} to update Core`)
+  expect(recovery).not.toBeUndefined()
+  expect(recovery.closest('.agent-work-startup')).toBeNull()
+})
+
+it('a healthy Reach does not inherit an ordinaryLaunch Core update requirement', async () => {
+  const f = await fixture(), selected = vi.fn(), openHost = vi.fn()
+  await initializeSpatialControlFixture()
+  const sourceCalls = api.spaceMounts.call.bind(api.spaceMounts)
+  vi.spyOn(api.spaceMounts, 'call').mockImplementation((method, input, signal) => method === 'describe'
+    ? Promise.resolve({ source: { runtimeId: f.b.identity.runtimeId, ownerInstanceId: f.b.identity.ownerInstanceId }, contracts: { ordinaryLaunch: null, externalAssociation: 1 } }) as never
+    : sourceCalls(method, input, signal))
+  await dom.render(<SourceAgentTargetSetup config={f.config} active fixedResourceWorkspaceId={f.project.id} actionLabel="Apply" presentation="anchored-editor" onChooseCustom={() => {}} onOpenHost={openHost} onApply={selected} />)
+  await choose('independent-coordinator')
+  await vi.waitFor(async () => { await tick(); expect(button('Apply').disabled).toBe(false) })
+  expect(dom.container.textContent).not.toContain('Update AgentMux Core')
+  expect(button('Project device settings').closest('.agent-work-startup')).not.toBeNull()
+})
 
 it('a pending A identity read cannot block B project-device preparation after the explicit choice returns to B', async () => {
   const f = await fixture(), selected = vi.fn(), never = new Promise<never>(() => {})

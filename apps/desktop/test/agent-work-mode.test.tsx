@@ -1,5 +1,7 @@
 // @vitest-environment happy-dom
 import { act } from 'react'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { expect, it, vi } from 'vitest'
 import { agentWorkPlacement, workReferenceHostId } from '../src/renderer/src/lib/agent-work-mode'
 import { AgentWorkModeBadge } from '../src/renderer/src/components/AgentWorkModeBadge'
@@ -192,6 +194,21 @@ it('the actual Agent header keeps one relation identity while Terminal retains i
   await dom.render(<AgentRegionHeader {...properties} sessionKind="terminal" />)
   expect(dom.container.querySelector('.agent-work-mode-badge')).toBeNull()
   expect(dom.container.querySelectorAll('.agent-region-header__execution')).toHaveLength(1)
+})
+
+it('default startup details retain block flow while only the anchored variant owns grid gaps', async () => {
+  await dom.render(<AgentWorkModeSetup config={{ hosts, workspaces: [] }} active initialMode="remote-agent" actionLabel="Prepare" onApply={vi.fn()} />)
+  const details = dom.container.querySelector<HTMLDetailsElement>('details.agent-work-startup')!
+  details.open = true
+  expect(details.querySelector(':scope > .agent-work-setup__details-body')).not.toBeNull()
+  expect(dom.container.querySelector('.agent-work-setup')?.getAttribute('data-presentation')).toBeNull()
+  const css = readFileSync(resolve('apps/desktop/src/renderer/src/components/agent-work-mode.css'), 'utf8')
+  const base = css.match(/\.agent-work-startup\[open\] > \.agent-work-setup__details-body \{([^}]+)\}/)?.[1]
+  const anchored = css.match(/\.agent-work-setup\[data-presentation='anchored-editor'\] \.agent-work-setup__details-body \{([^}]+)\}/)?.[1]
+  expect(base).toContain('display: block')
+  expect(base).not.toContain('gap: 10px')
+  expect(anchored).toContain('display: grid')
+  expect(anchored).toContain('gap: 10px')
 })
 
 it('the real shared selector names each family and places its Agent and Project in the stated location', async () => {

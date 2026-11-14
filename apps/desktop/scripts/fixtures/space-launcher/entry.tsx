@@ -8,7 +8,7 @@ mountThemeRuntime(window, { appAppearance: 'dark' })
 await import('../launcher-launchpad/entry')
 Object.assign(window, {
   spaceLauncher: {
-    sourceArrangement(long = false, workflow = false, failure = false) {
+    sourceArrangement(long = false, workflow = false, failure = false, many = false) {
       const state = useAppStore.getState(), project = state.config!.workspaces[0]!
       const path = long ? '/workspace/' + 'original-project-directory/'.repeat(8) + 'agentmux' : project.path
       const original = { ...project, path }
@@ -21,7 +21,8 @@ Object.assign(window, {
         if (method === 'hostChoices') return { runtimeId: sourceRuntime, hosts: [
           { hostId: 'local', label: 'Project device', kind: 'local', runtimeId: sourceRuntime },
           { hostId: agentHost, label: long ? 'Remote engineering device with a complete readable identity' : 'Remote engineering device', kind: 'ssh', runtimeId: agentRuntime },
-          { hostId: 'other-remote', label: 'Another configured Agent device', kind: 'ssh', runtimeId: 'other-runtime' }] }
+          { hostId: 'other-remote', label: 'Another configured Agent device', kind: 'ssh', runtimeId: 'other-runtime' },
+          ...(many ? Array.from({ length: 10 }, (_, index) => ({ hostId: `remote-device-${index}`, label: `Remote engineering device ${index} with a complete readable identity`, kind: 'ssh' as const, runtimeId: `remote-runtime-${index}` })) : [])] }
         if (method === 'routeChoices') return { runtimeId: sourceRuntime, routes: [] }
         if (method === 'describe' && failure) throw Error('The selected project device could not confirm launch support. The original Agent selection and complete task remain available for review.')
         if (method === 'describe') return { source: { runtimeId: sourceRuntime, ownerInstanceId: 'fixture-source-owner' }, contracts: { ordinaryLaunch: { revision: 1, destination: 'source-zone-background' }, externalAssociation: null } }
@@ -54,6 +55,13 @@ Object.assign(window, {
       })
     },
     theme: (appAppearance: 'dark' | 'light') => updateThemeSelection({ appAppearance }),
+    holdRegistration() {
+      const original = api.spaceMounts.call
+      api.spaceMounts.call = (async (method: string, input: any, signal?: AbortSignal) => {
+        if (method === 'register') return new Promise(() => {})
+        return original(method, input, signal)
+      }) as typeof api.spaceMounts.call
+    },
     clearPrompt: () => useAppStore.getState().setAgentComposerDraft('launchpad-input', ''),
     async failAvailability() {
       api.executors.detect = async () => { throw new Error('Controlled Host observation failed; the original command remains configured.') }
