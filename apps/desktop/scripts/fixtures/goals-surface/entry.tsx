@@ -9,6 +9,7 @@ import { projectLinksPreview } from './project-links'
 import { mainMotePreview } from './main-mote'
 import { goalPlanPreview } from './plan'
 import { goalSpacePreview } from './space'
+import { goalHierarchyPreview } from './hierarchy'
 import { useAppStore, retainGoalFiniteStartIntent, checkpointSpatialWorkbench } from '../../../src/renderer/src/store'
 import { api } from '../../../src/renderer/src/lib/api'
 import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
@@ -207,4 +208,5 @@ Object.assign(window, { goalsProjectLinks: projectLinksPreview(initial, mode => 
 Object.assign(window, { goalsMainMote: mainMotePreview(initial, () => root?.render(<App key="main-mote" />)) })
 
 const planPreview = goalPlanPreview(seed, () => root?.render(<App key="goal-plan" />))
-Object.assign(window, { goalsPlan: planPreview, goalsSpace: goalSpacePreview(seed, planPreview, () => root?.render(<App key="goal-space" />)) })
+const spacePreview = goalSpacePreview(seed, planPreview, () => root?.render(<App key="goal-space" />))
+Object.assign(window, { goalsPlan: planPreview, goalsSpace: spacePreview, goalsHierarchy: goalHierarchyPreview(spacePreview, () => root?.render(<App key="goal-hierarchy" />)) })
