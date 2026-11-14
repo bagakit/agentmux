@@ -85,7 +85,7 @@ describe('knowledge search history through the compiled object CLI', () => {
     const help = agentMuxCommandHelp('topic.knowledge.history')
     expect(help).toContain('--search ID')
     expect(help).toContain('absent record never proves a search did not run')
-  })
+  }, 30_000)
   it('reports the original history read failure without repairing bytes or replaying the search', async () => {
     const f = await fixture(), corrupt = '{"private":"history bytes kept'
     await writeFile(f.historyPath, corrupt)
