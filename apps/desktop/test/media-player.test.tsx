@@ -810,6 +810,45 @@ describe('mounted player', () => {
       } finally { delete (document as { visibilityState?: unknown }).visibilityState }
     })
 
+    it('a main decoder failure releases its preview before the File status read settles', async () => {
+      let finish!: (value: { state: 'deleted' }) => void
+      const readStatus = vi.fn(() => new Promise<{ state: 'deleted' }>(resolve => { finish = resolve }))
+      await render(<MediaPlayer readStatus={readStatus} lease={lease()} name="clip.mp4" onRetry={() => {}} />)
+      const main = media()
+      await engine(main, { paused: true, duration: 600 }); layout()
+      await point(500); await stay()
+      const preview = decoder()
+      await preview.ready(); await preview.seeked()
+      expect(frameShown()).toBe(true)
+      define(main, { error: { code: 4 } })
+      await act(async () => { main.dispatchEvent(new Event('error')) })
+      expect(readStatus).toHaveBeenCalledExactlyOnceWith(lease().id)
+      expect(decoderElement()).toBeNull()
+      expect(preview.element.hasAttribute('src')).toBe(false); expect(loaded()).toContain(preview.element)
+      expect(media()).toBe(main); expect(main.getAttribute('src')).toBe(lease().url)
+      expect(container.querySelector('[role="alert"]')).toBeNull()
+      await point(560); await stay()
+      expect(decoderElement()).toBeNull()
+      await act(async () => { finish({ state: 'deleted' }) })
+      expect(container.querySelector('[role="alert"]')!.textContent).toContain('File was deleted')
+    })
+
+    it('an aborted main load does not revoke a ready preview or invent a playback failure', async () => {
+      const readStatus = vi.fn(async () => ({ state: 'active' as const }))
+      await render(<MediaPlayer readStatus={readStatus} lease={lease()} name="clip.mp4" onRetry={() => {}} />)
+      await engine(media(), { paused: true, duration: 600 }); layout()
+      await point(500); await stay()
+      const preview = decoder()
+      await preview.ready(); await preview.seeked()
+      define(media(), { error: { code: 1 } })
+      await act(async () => { media().dispatchEvent(new Event('error')) })
+      expect(readStatus).toHaveBeenCalledExactlyOnceWith(lease().id)
+      expect(decoderElement()).toBe(preview.element)
+      expect(preview.element.getAttribute('src')).toBe(lease().url)
+      expect(frameShown()).toBe(true)
+      expect(container.querySelector('[role="alert"]')).toBeNull()
+    })
+
     it('main playback failing drops the decoder as the failure shows', async () => {
       vi.spyOn(api.files, 'mediaStreamStatus').mockResolvedValue({ state: 'active' })
       await render(<MediaPlayer readStatus={api.files.mediaStreamStatus} lease={lease()} name="clip.mp4" onRetry={() => {}} />)
