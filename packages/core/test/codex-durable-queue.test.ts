@@ -8,6 +8,9 @@ import { prepareCodexNativeInput } from '../src/providers/codex-native-input.js'
 import { createNativeInputCorrelation } from '../src/native-input-correlation.js'
 import type { NativeProcessFile } from '../src/agent-native-process.js'
 import { runProcess } from '../src/process-runner.js'
+import { rpcOwnerFixture } from './helpers/public-rpc-owner.js'
+import { AgentMuxRpcService } from '../src/public-rpc-service.js'
+import { AgentMuxFileAgentSessionStore } from '../src/agent-session-store.js'
 
 const os = vi.hoisted(() => ({ original: undefined as any, binary: undefined as any, stores: [] as NativeProcessFile[],
   ownerStateAbsent: false, helperStateAbsent: false, stateReadOnly: false,
@@ -49,7 +52,7 @@ async function fixture() {
   for (const name of ['queue_1.sqlite', 'state_5.sqlite']) await writeFile(join(root, name), 'private protocol fixture')
   os.stores = await Promise.all(['queue_1.sqlite', 'state_5.sqlite'].map(name => file(join(root, name))))
   os.binary = await file(executable); os.original = { id: source.nativeSessionId, file: await file(path), childSessionIds: [] }
-  const configuration: Record<string, unknown> = { thread: source.nativeSessionId, path, trace }
+  const configuration: Record<string, unknown> = { thread: source.nativeSessionId, path, trace, version: 'codex-cli 0.167.0' }
   const update = async (change: Record<string, unknown>) => { Object.assign(configuration, change); await writeFile(control, JSON.stringify(configuration)) }
   await update({}); vi.stubEnv('AGENTMUX_QUEUE_FIXTURE', control)
   const context = { processId: 700001, workspacePath: root, signal: new AbortController().signal,
@@ -72,6 +75,65 @@ it('uses the exact OS native binary and shared storage for a wrapper-owned Run w
   expect(calls.every(row => ['initialize', 'initialized', 'thread/read', 'thread/queue/add'].includes(row.method))).toBe(true)
   expect(prepared.plan.actorId).not.toContain(f.root)
 })
+
+it.each(['0.163.0', '0.165.0', '0.166.0', '0.167.0'])('qualifies only the verified %s executable with the original frozen protocol', async version => {
+  const f = await fixture(); await f.update({ version: 'codex-cli ' + version })
+  const result = await f.prepare().then(prepared => ({ prepared }), error => ({ error }))
+  expect(result, 'The qualified original executable must retain its queue capability').toHaveProperty('prepared')
+  if (!('prepared' in result)) throw new Error('The qualified original queue is missing')
+  const prepared = result.prepared
+  expect(prepared.plan).toMatchObject({ protocolId: 'codex-durable-queue-0.163', operation: 'queue-idle' })
+  await expect(prepared.send('Same qualified wire', { ...prepared.plan, clientCorrelation: correlation })).resolves.toMatchObject({ outcome: 'admitted' })
+  expect((await f.readTrace()).filter(row => row.method === 'thread/queue/add')).toHaveLength(1)
+})
+
+it.each(['codex-cli 0.168.0', 'codex-cli 0.167.1', 'other-cli 0.167.0', ''])('refuses the unqualified exact executable version %j before opening a helper', async version => {
+  const f = await fixture(); await f.update({ version })
+  await expect(f.prepare()).rejects.toMatchObject({ code: 'AGENT_NATIVE_INPUT_UNAVAILABLE' })
+  await expect(f.readTrace()).rejects.toMatchObject({ code: 'ENOENT' })
+})
+
+it.each(['lost-ack', 'partial-ack', 'wire', 'correlation', 'reject', 'unqualified'] as const)(
+  'Core future input and public inspection preserve the original %s queue result and healthy terminal without replay', async failure => {
+    const h = await rpcOwnerFixture(['recipient']); closes.push(h.close)
+    const f = await fixture(); await f.update({ version: failure === 'unqualified' ? 'codex-cli 0.168.0' : 'codex-cli 0.167.0', failure })
+    const original = (await h.store.readMetadata('recipient'))!
+    await h.store.compareAndSwapMetadata(original, { ...original, workspacePath: f.root, nativeHandle: f.context.nativeHandle,
+      semanticStatus: { state: 'done', source: 'native-hook', observedAt: Date.now() }, updatedAt: Date.now() })
+    await h.inner.registry.load('local')
+    h.inner.kernel.status = vi.fn(async (id: string) => ({ ...h.run(id), pid: 700001, workspacePath: f.root }))
+    const rpc = new AgentMuxRpcService({ coreClients: h.coreClients }), principal = { principal: { kind: 'user' as const, id: 'private-test-user' } }
+    const prompt = 'Original future input 原文', operationId = 'original-queue-' + failure
+    await h.client.saveAgentFuturePromptIntent({ agentSessionId: 'recipient', intentId: 'original-future', operationId: 'save-future', prompt, active: true })
+    const packet = { operationId, agentSessionId: 'recipient', prompt, expectedRun: original.run, afterSubmissionId: null,
+      expectedFutureIntent: { intentId: 'original-future', occurrenceAt: 1000 }, expectedInputByte: 0 }
+    const failureReceipt = await h.client.submitAgentPrompt(packet).then(() => undefined, error => error)
+    const key = { kind: 'prompt' as const, agentSessionId: 'recipient', expectedRun: original.run, submissionId: operationId }
+    const status = failure === 'reject' ? 'not-applied' : 'unknown'
+    if (failure === 'unqualified') {
+      expect(failureReceipt).toMatchObject({ code: 'AGENT_NATIVE_INPUT_UNAVAILABLE', controlFailure: { disposition: 'not_applied', confirmedInputBytes: 0 } })
+      expect(await h.client.inspectAgentPromptSubmission(key)).toBeNull()
+      expect(await h.client.readAgentFuturePromptIntent('recipient', 'original-future')).not.toHaveProperty('lastOccurrenceAt')
+      await expect(f.readTrace()).rejects.toMatchObject({ code: 'ENOENT' })
+    } else {
+      await expect.poll(async () => (await h.client.inspectAgentPromptSubmission(key))?.admission?.native?.outcome).toBe(status)
+      const saved = await h.client.inspectAgentPromptSubmission(key)
+      expect(saved?.admission).toMatchObject({ transport: 'native', acknowledged: false,
+        native: { outcome: status, plan: { protocolId: 'codex-durable-queue-0.163', operation: 'queue-idle', clientCorrelation: expect.any(String) } } })
+      expect(await new AgentMuxFileAgentSessionStore(h.store.path).readPromptAdmission('recipient', original.run, operationId)).toEqual(saved)
+      await h.client.submitAgentPrompt(packet).catch(() => {})
+      expect(await h.client.inspectAgentPromptSubmission(key)).toEqual(saved)
+      expect((await f.readTrace()).filter(row => row.method === 'thread/queue/add')).toHaveLength(1)
+    }
+    const inspected: any = await rpc.call('agent.input.inspect', { key }, principal)
+    if (failure === 'unqualified') expect(inspected.record).toBeNull()
+    else expect(inspected.record).toEqual(await h.client.inspectAgentPromptSubmission(key))
+    expect(h.inner.kernel.input).not.toHaveBeenCalled()
+    expect(h.inner.kernel.stop).not.toHaveBeenCalled()
+    await h.client.writeTerminalBytes(original.run, 'x')
+    expect(h.rawInput).toHaveBeenCalledWith(original.run.runId, 'x')
+    expect((await h.client.statusAgent('recipient')).run).toMatchObject({ state: 'running', pid: 700001 })
+  })
 
 it('keeps the selected target for preparation and admission while unrelated main candidates remain open', async () => {
   const f = await fixture(); os.multi = true

@@ -36,12 +36,17 @@ it.runIf(process.platform === 'darwin').each(['wrapper', 'direct'] as const)('pu
   const h = await rpcOwnerFixture(['sender', 'recipient']), root = h.root, home = join(root, 'native-home'), helper = join(root, 'native-process-proof')
   const command = process.env.AGENTMUX_TEST_CODEX_BINARY ?? 'codex'
   const nativeVersion = await runner.runProcess(command, ['--version'], { timeoutMs: 3000 })
-  expect(nativeVersion.stdout.trim()).toBe('codex-cli 0.166.0')
+  expect(nativeVersion).toMatchObject({ exitCode: 0, stderr: '' })
+  expect(nativeVersion.stdout.trim()).toBe('codex-cli 0.167.0')
   const compiled = await runner.runProcess('cc', ['-Wall', '-Wextra', '-Werror', fileURLToPath(new URL('../native/native-socket-peer.c', import.meta.url)), '-lproc', '-o', helper], { timeoutMs: 10_000 })
   expect(compiled).toMatchObject({ exitCode: 0, stderr: '' })
   const originalRunProcess = runner.runProcess
-  vi.spyOn(runner, 'runProcess').mockImplementation((command, args, options) =>
-    originalRunProcess(command.endsWith('/native-socket-peer-darwin') ? helper : command, args, options))
+  const queueVersions: string[] = []
+  vi.spyOn(runner, 'runProcess').mockImplementation(async (command, args, options) => {
+    const result = await originalRunProcess(command.endsWith('/native-socket-peer-darwin') ? helper : command, args, options)
+    if (args.length === 1 && args[0] === '--version') queueVersions.push(result.stdout.trim())
+    return result
+  })
   // Inject only an observation gap. Native files and descriptors remain untouched.
   const observeFiles = nativeProcess.nativeProcessFiles
   let omittedMetadata = 0
@@ -121,6 +126,8 @@ it.runIf(process.platform === 'darwin').each(['wrapper', 'direct'] as const)('pu
     expect(h.inner.kernel.input).not.toHaveBeenCalled(); expect(h.inner.kernel.stop).not.toHaveBeenCalled()
     expect(calls.filter(method => method === 'turn/start')).toHaveLength(1)
     expect(calls).not.toContain('thread/resume')
+    expect(queueVersions.length).toBeGreaterThan(0)
+    expect([...new Set(queueVersions)]).toEqual(['codex-cli 0.167.0'])
   } finally {
     await recipient?.dispose(); await sender?.dispose(); await server?.stop(); await h.client.dispose()
     child.stdin.end()
@@ -130,7 +137,7 @@ it.runIf(process.platform === 'darwin').each(['wrapper', 'direct'] as const)('pu
     await new Promise<void>(resolve => endpoint.close(() => resolve()))
     // All original process handles have closed before the private namespace goes away.
     expect(ended).toBe(true)
-    await rm(root, { recursive: true })
+    await rm(root, { recursive: true, maxRetries: 20, retryDelay: 100 })
   }
 }, 60_000)
 
@@ -144,13 +151,17 @@ it.runIf(process.platform === 'darwin')('actual ctxmux Run and source Core survi
     fileURLToPath(new URL('../native/native-socket-peer.c', import.meta.url)), '-lproc', '-o', helper], { timeoutMs: 10_000 })
   expect(compiled).toMatchObject({ exitCode: 0, stderr: '' })
   const originalRunProcess = runner.runProcess
-  vi.spyOn(runner, 'runProcess').mockImplementation((command, args, options) =>
-    originalRunProcess(command.endsWith('/native-socket-peer-darwin') ? helper : command, args, options))
+  const queueVersions: string[] = []
+  vi.spyOn(runner, 'runProcess').mockImplementation(async (command, args, options) => {
+    const result = await originalRunProcess(command.endsWith('/native-socket-peer-darwin') ? helper : command, args, options)
+    if (args.length === 1 && args[0] === '--version') queueVersions.push(result.stdout.trim())
+    return result
+  })
   const inputs: string[] = [], { endpoint, sockets } = await offlineEndpoint(join(root, 'sender-home'), inputs)
   const config = await readFile(join(root, 'sender-home', 'config.toml'))
   await writeFile(join(root, 'recipient-home', 'config.toml'), config)
   const builtin = new AgentProviderRegistry().get('codex'), worker = fileURLToPath(new URL('./fixtures/codex-queue-native-worker.mjs', import.meta.url))
-  const provider = { ...builtin, planManagedHooks: () => null,
+  const provider = { ...builtin,
     buildLaunch: (context: Parameters<typeof builtin.buildLaunch>[0]) => {
       const id = context.args[0]; if (!id) throw new Error('Private fixture identity is missing')
       return { command: process.execPath, args: [worker, root, id, join(root, id + '-home')], env: { ...context.env } }
@@ -243,6 +254,8 @@ it.runIf(process.platform === 'darwin')('actual ctxmux Run and source Core survi
     expect(JSON.parse(events.stdout).result.events.some((event: any) => event.kind === 'a2a-notification-result')).toBe(true)
     expect((await client.statusAgent('recipient')).run.acceptedInputBytes).toBe(original.run.acceptedInputBytes)
     expect((await new AgentMuxFileAgentSessionStore(storePath).readMetadata('recipient'))?.nativeActor).toBeUndefined()
+    expect(queueVersions.length).toBeGreaterThan(0)
+    expect([...new Set(queueVersions)]).toEqual(['codex-cli 0.167.0'])
   } catch (error) { errors.push(error) }
   finally {
     await sender?.dispose(); await server?.stop()
@@ -258,7 +271,7 @@ it.runIf(process.platform === 'darwin')('actual ctxmux Run and source Core survi
     } catch (error) { errors.push(error) }
     for (const socket of sockets) socket.destroy()
     await new Promise<void>(resolve => endpoint.close(() => resolve()))
-    if (!errors.length) await rm(root, { recursive: true })
+    if (!errors.length) await rm(root, { recursive: true, maxRetries: 20, retryDelay: 100 })
   }
   if (errors.length) throw new AggregateError(errors, 'Actual private native Runtime proof or original cleanup failed:\n' +
     errors.map(error => error instanceof Error ? error.stack ?? error.message : String(error)).join('\n'))
