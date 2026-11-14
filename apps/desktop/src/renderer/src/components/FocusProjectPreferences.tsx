@@ -19,17 +19,17 @@ export function FocusProjectPreferences({ projectKey, name, discussion, active =
   const subject = projectKey ? 'Project' : 'Container'
   const [open, setOpen] = useState(false), [draft, setDraft] = useState(saved)
   const effectiveOpen = open && active
-  useEffect(() => { if (!active && open) begin(false) }, [active, open])
   const baseline = useRef<readonly FocusProjectPreference[]>([])
   const [pending, setPending] = useState(false), [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
-  const generation = useRef(0), draftVersion = useRef(0), inFlight = useRef(false)
+  const generation = useRef(0), draftVersion = useRef(0), inFlight = useRef(false), resumeDraft = useRef(false)
   const [discussionVisited, setDiscussionVisited] = useState(false)
   const [discussionHost, setDiscussionHost] = useState<HTMLDivElement | null>(null)
   const trigger = useRef<HTMLButtonElement>(null), escape = useRef(false)
   const panel = useRef<HTMLDivElement>(null)
   const [panelElement, setPanelElement] = useState<HTMLDivElement | null>(null)
   const attachPanel = useCallback((element: HTMLDivElement | null) => { panel.current = element; setPanelElement(element) }, [])
+  useEffect(() => { if (!active && open) { resumeDraft.current = true; begin(false) } }, [active, open])
   useLayoutEffect(() => {
     const anchor = trigger.current, content = panel.current
     if (!effectiveOpen || !anchor || !content) return
@@ -43,7 +43,11 @@ export function FocusProjectPreferences({ projectKey, name, discussion, active =
   }, [effectiveOpen, panelElement])
   function begin(next: boolean) {
     ++generation.current
-    if (next) { setDiscussionVisited(true); baseline.current = projects ?? []; setDraft(saved); setError(null); setNotice(null); draftVersion.current = 0 }
+    if (next) {
+      setDiscussionVisited(true)
+      if (!resumeDraft.current) { baseline.current = projects ?? []; setDraft(saved); setError(null); setNotice(null); draftVersion.current = 0 }
+      resumeDraft.current = false
+    }
     setOpen(next)
   }
   function edit(next: FocusProjectPreference) { ++draftVersion.current; setDraft(next) }
