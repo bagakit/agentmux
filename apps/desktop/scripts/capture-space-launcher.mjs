@@ -10,6 +10,7 @@ import { runProbeProcess } from './probe-process.mjs'
 const repository = resolve(import.meta.dirname, '../../..')
 const fixture = join(import.meta.dirname, 'fixtures/space-launcher')
 const evidence = resolve(process.argv[2] ?? join(repository, '.tmp/space-launcher'))
+const executionRelation = process.argv.includes('--execution-relation')
 const require = createRequire(join(repository, 'apps/desktop/package.json'))
 const { build } = await import(require.resolve('vite'))
 const temporaryRoot = await mkdtemp(join(tmpdir(), 'amux-space-launcher-'))
@@ -19,7 +20,8 @@ const sources = {}, styles = {}
 const mutation = process.env.LAUNCHER_AFFORDANCE_MUTATION
 const mutations = {
   overflow: ['components/AgentExecutorPicker.tsx', 'const after = catalog.scrollTop + catalog.clientHeight < catalog.scrollHeight - 1', 'const after = false'],
-  position: null
+  position: null,
+  'tooltip-width': ['components/agent-work-mode.css', 'min-width: 0; max-width: 100%; gap: 10px;', 'min-width: 720px; max-width: none; gap: 10px;']
 }
 assert(!mutation || Object.hasOwn(mutations, mutation), 'Unknown Launcher affordance mutation')
 const mutationHits = []
@@ -68,8 +70,9 @@ try {
   }
   const main = join(temporaryRoot, 'main.cjs')
   await writeFile(main, await readFile(join(fixture, 'main.cjs')))
+  await writeFile(join(temporaryRoot, 'execution-relation.cjs'), await readFile(join(fixture, 'execution-relation.cjs')))
   const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('AGENTMUX_') && !key.startsWith('CTXMUX_') && key !== 'ELECTRON_RUN_AS_NODE'))
-  const result = await runProbeProcess(require('electron'), [main, join(temporaryRoot, 'renderer/index.html'), join(temporaryRoot, 'profile'), evidence],
+  const result = await runProbeProcess(require('electron'), [main, join(temporaryRoot, 'renderer/index.html'), join(temporaryRoot, 'profile'), evidence, executionRelation ? 'execution-relation' : 'default'],
     { cwd: repository, temporaryRoot, env, timeoutMs: 60000, onLine: line => process.stderr.write(line.slice(0, 300) + '\n') })
   const ui = JSON.parse(await readFile(join(evidence, 'ui-receipt.json'), 'utf8'))
   Object.assign(receipt, { sources, styles, ui, exitCode: result.exitCode })

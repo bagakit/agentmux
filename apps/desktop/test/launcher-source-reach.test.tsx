@@ -22,11 +22,43 @@ const dom = composerDOM(), cleanup: Array<() => unknown | Promise<unknown>> = []
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); vi.restoreAllMocks() })
 const button = (label: string) => [...document.querySelectorAll<HTMLButtonElement>('button')].find(item => item.textContent?.trim() === label)!
 const tick = async () => { await act(async () => {}) }
+
+it('a planned foreign Agent keeps its identity separate from the project and never borrows a viewer same-name Host or invents a connected route', async () => {
+  const project = { ...composerConfig.workspaces[0]!, name: 'Original project' }
+  const hosts = [...composerConfig.hosts, { id: 'foreign-alias', kind: 'ssh' as const, label: 'WRONG VIEWER HOST', hostname: 'wrong.invalid' }]
+  await dom.render(<LauncherAgentDevice hosts={hosts} workspace={project} agentWorkspace={undefined} explicitAgentWorkspaceId={undefined} disabled={false} active
+    sourceExecution={{ project, target: { hostId: project.hostId, reference: { runtimeId: 'project-runtime', spaceId: 'original-space' }, workspaceId: project.id, zoneId: 'zone' },
+      agentTarget: { hostId: 'foreign-alias', runtimeId: 'agent-runtime' } }} onSelect={() => true} onPreparingChange={() => {}} />)
+  const trigger = dom.container.querySelector<HTMLButtonElement>('[aria-label="Agent location"]')!
+  expect(trigger.querySelector('[data-execution-relation]')?.getAttribute('data-execution-relation')).toBe('unconfirmed')
+  await act(async () => trigger.focus())
+  await vi.waitFor(() => expect(document.querySelector('[role="tooltip"]')).not.toBeNull())
+  const detail = document.querySelector('[role="tooltip"]')!
+  expect(detail.textContent).toContain('Next launch arrangement')
+  expect(detail.querySelectorAll('.agent-work-detail__end strong')[1]?.textContent).toBe('foreign-alias')
+  expect(detail.textContent).not.toContain('WRONG VIEWER HOST')
+  expect(detail.textContent).not.toContain('project device’s selection')
+  expect(detail.textContent).toContain('Resolved by the project device at launch')
+  expect(detail.textContent).toContain('Execution path unconfirmed')
+  expect(detail.textContent).toContain('project-runtime'); expect(detail.textContent).toContain('agent-runtime')
+})
 async function choose(value: string) {
   await act(async () => dom.container.querySelector('[aria-label="Agent runs on"]')!.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0, pointerType: 'mouse' })))
   const option = [...document.querySelectorAll<HTMLElement>('[role="menuitemradio"]')].find(item => item.dataset.value === value)!
   expect(option).toBeDefined(); await act(async () => option.click())
 }
+
+it('the same-runtime Source arrangement keeps the already confirmed project startup directory', async () => {
+  const project = composerConfig.workspaces[0]!
+  await dom.render(<LauncherAgentDevice hosts={composerConfig.hosts} workspace={project} agentWorkspace={undefined} explicitAgentWorkspaceId={undefined} disabled={false} active
+    sourceExecution={{ project, target: { hostId: project.hostId, reference: { runtimeId: 'same-runtime', spaceId: 'space' }, workspaceId: project.id, zoneId: 'zone' },
+      agentTarget: { hostId: 'local', runtimeId: 'same-runtime' } }} onSelect={() => true} onPreparingChange={() => {}} />)
+  await act(async () => dom.container.querySelector<HTMLButtonElement>('[aria-label="Agent location"]')!.focus())
+  await vi.waitFor(() => expect(document.querySelector('[role="tooltip"]')).not.toBeNull())
+  const agent = document.querySelectorAll('.agent-work-detail__end')[1]!
+  expect(agent.querySelector('code')?.textContent).toBe(project.path)
+  expect(agent.textContent).not.toContain('Resolved by')
+})
 async function fixture() {
   const f = await spaceMountFixture(cleanup), b = f.cores[1]!, a = f.cores[0]!
   const project = { id: 'original-project-in-A', hostId: b.id, path: b.workspace.path, name: 'Original project', kind: 'folder' as const }

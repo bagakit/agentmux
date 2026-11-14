@@ -1,6 +1,6 @@
 const { app, BrowserWindow } = require('electron')
 const assert = require('node:assert/strict'), fs = require('node:fs/promises'), path = require('node:path')
-const [html, profile, output] = process.argv.slice(2)
+const [html, profile, output, suite] = process.argv.slice(2)
 app.setPath('userData', profile)
 app.disableHardwareAcceleration()
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms))
@@ -55,6 +55,16 @@ app.whenReady().then(async () => {
     await wait('Boolean(window.spaceLauncher && document.querySelector(".launch-surface"))')
     await evaluate('launchpad.motes()'); await evaluate('spaceLauncher.clearPrompt()'); await paint()
     const original = await evaluate('launchpad.facts()')
+    if (suite === 'execution-relation') {
+      const scrollTooltip = async deltaY => {
+        const point = await evaluate(`(()=>{const r=document.querySelector('[role="tooltip"] .agent-work-detail').closest('[role="tooltip"]').getBoundingClientRect();return{x:r.left+r.width/2,y:r.top+r.height/2}})()`)
+        await window.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type: 'mouseWheel', ...point, deltaX: 0, deltaY })
+        await paint()
+      }
+      await require('./execution-relation.cjs')({ evaluate, wait, paint, viewport, click, escape, frame, scrollTooltip, receipt })
+      receipt.passed = true
+      return
+    }
     for (const [name, width, height, theme] of [['wide-dark',1180,850,'dark'],['wide-light',1180,850,'light'],['narrow-dark',460,760,'dark'],['short-dark',840,430,'dark']]) {
       await viewport(width,height); await evaluate(`launchpad.scene({theme:${JSON.stringify(theme)}});spaceLauncher.theme(${JSON.stringify(theme)})`); await paint(); await evaluate('document.querySelector(".launch-surface").scrollTop = 0'); await paint()
       const geometry = await evaluate(`(()=>{const s=document.querySelector('.launch-surface'),c=s.querySelector('.launcher-composer'),b=s.querySelector('.launcher-launch-button');return{width:s.clientWidth,scrollWidth:s.scrollWidth,composer:c.getBoundingClientRect().toJSON(),body:s.querySelector('.surface-state__body').getBoundingClientRect().toJSON(),live:c.closest('[role="status"],[aria-live]')!==null,button:b.getBoundingClientRect().toJSON(),choices:s.querySelectorAll('.agent-pick[data-executor-id]').length}})()`)
