@@ -20,7 +20,7 @@ import { useAppStore } from '../store'
 import { FOCUS_TIMELINE_HEIGHT_MAX, FOCUS_TIMELINE_HEIGHT_MIN } from '../lib/focus-timeline-height'
 import { FOCUS_TIMELINE_NAME_WIDTH_DEFAULT, FOCUS_TIMELINE_NAME_WIDTH_MIN, FOCUS_TIMELINE_NAME_WIDTH_MAX } from '../lib/focus-timeline-name-width'
 import { useSidebarResize } from '../hooks/useSidebarResize'
-import { AgentAvatar } from './AgentAvatar'
+import { AgentAvatar, ResolvedAgentAvatar } from './AgentAvatar'
 import { ConversationSpeakerAvatar } from './ConversationSpeakerAvatar'
 import { ConversationMessageAvatar } from './ConversationMessageAvatar'
 import { useChannelActorProfiles, channelProfileKey } from '../lib/use-channel-actor-profiles'
@@ -76,18 +76,19 @@ function focusSpeakerMetadata(ids: readonly string[]) {
 
 // Subscribe only to the canonical authors in this mounted input surface. Session
 // output/status and other senders cannot re-render it or start avatar reads.
-function useFocusSpeakerResolver(messages: readonly ConversationRecord[], visible: boolean): FocusDescribeSpeaker {
-  const external = useMemo(() => messages.flatMap(message => message.author?.kind === 'external' ? [message.author] : []), [messages])
+function useFocusSpeakerResolver(messages: readonly ConversationRecord[], visible: boolean, originalSource = false): FocusDescribeSpeaker {
+  const external = useMemo(() => (originalSource ? [] : messages).flatMap(message => message.author?.kind === 'external' ? [message.author] : []), [messages, originalSource])
   const owner = useMemo(() => {
     const records = messages.filter(message => message.author?.kind === 'external'), first = records[0]
     return first?.executionHostId && first.sourceHostId && records.every(record => record.executionHostId === first.executionHostId && record.sourceHostId === first.sourceHostId)
       ? { hostId: first.executionHostId, sourceHostId: first.sourceHostId } : undefined
   }, [messages])
   const profiles = useChannelActorProfiles(external, owner, visible)
-  const ids = useMemo(() => [...new Set(messages.flatMap(message => message.speaker?.role === 'agent' ? [message.speaker.id] : []))], [messages])
+  const ids = useMemo(() => [...new Set((originalSource ? [] : messages).flatMap(message => message.speaker?.role === 'agent' ? [message.speaker.id] : []))], [messages, originalSource])
   const selectFacts = useMemo(() => {
     let previous: unknown[] = [], result: unknown[] = []
     return (state: ReturnType<typeof useAppStore.getState>) => {
+      if (originalSource) return []
       const sessions = sessionPresentationById(state.sessions)
       const inputs = [state.config, state.scratchTopicSnapshots, state.spaceObjectIcons, ...ids.flatMap(id => {
         const session = sessions.get(id)
@@ -105,10 +106,10 @@ function useFocusSpeakerResolver(messages: readonly ConversationRecord[], visibl
       })
       return result
     }
-  }, [ids])
+  }, [ids, originalSource])
   const facts = useAppStore(useShallow(selectFacts))
   return useMemo(() => {
-    const metadataById = focusSpeakerMetadata(ids)
+    const metadataById = ids.length ? focusSpeakerMetadata(ids) : new Map<string, ReturnType<typeof currentConversationSpeakerMetadata>>()
     const original = createSpeakerResolver({ lookupExternal: author => profiles.get(channelProfileKey(author)), lookupAgent: id => {
       const metadata = metadataById.get(id)
       return metadata ? { ...metadata, readDetails: () => {
@@ -131,6 +132,7 @@ type LatestInputs = { messages: readonly ConversationRecord[]; loading: boolean;
 const EMPTY_LATEST_INPUTS: LatestInputs = { messages: [], loading: false, error: null, observationError: null, windowFrozen: false, windowIncomplete: false, refresh: async () => {} }
 type NativeWindow = {
   scope: string; reference: SessionHistoryReference | undefined
+  port?: typeof api.conversation; runtimeId?: string | null | undefined; presentationReference?: SessionHistoryReference | undefined
   frame?: ConversationWindowSnapshot | undefined
   page: AgentSessionHistoryPage | null; timeline: AgentTimelineSnapshot | undefined; messages: readonly ConversationRecord[]
   work: FocusWorkFacts | null; loading: boolean; error: string | null; capturedError: string | null; rotated: boolean; read: boolean
@@ -143,11 +145,11 @@ type ReadingWindow = { partitions: ReadonlyMap<string, NativeWindow>; trimmed: b
 const EMPTY_READING_WINDOW: ReadingWindow = { partitions: EMPTY_READING_PARTITIONS, trimmed: false, nativeCount: 0, capturedCount: 0, workCount: 0, sourceCount: 0, readerCount: 0, bytes: 0 }
 
 /** Each admitted Context keeps one original public view. Inactive leaves park it without reads. */
-const FocusInputSource = memo(function FocusInputSource({ reference, scope, active, historical, pinned, onChange }: {
-  reference: SessionHistoryReference; scope: string; active: boolean; historical: boolean; pinned: ConversationRecord | undefined; onChange(part: NativeWindow): void
+const FocusInputSource = memo(function FocusInputSource({ reference, port, runtimeId, presentationReference, scope, active, historical, pinned, onChange }: {
+  reference: SessionHistoryReference; port: typeof api.conversation; runtimeId?: string | null | undefined; presentationReference?: SessionHistoryReference | undefined; scope: string; active: boolean; historical: boolean; pinned: ConversationRecord | undefined; onChange(part: NativeWindow): void
 }) {
   const previous = useRef<readonly ConversationRecord[]>([])
-  const view = useConversationView(api.conversation, reference, active, { identity: scope,
+  const view = useConversationView(port, reference, active, { identity: scope,
     diagnostics: desktopConversationDiagnostics('focus-preview'), beforeCommit: frame => {
     if (!pinned || !previous.current.some(record => record.id === pinned.id)) return true
     return projectConversationWindow(frame).records.some(record => record.id === pinned.id && record.event?.revision === pinned.event?.revision)
@@ -163,7 +165,7 @@ const FocusInputSource = memo(function FocusInputSource({ reference, scope, acti
     requestedEarlier.current = true; void view.earlier()
   }, [active, historical, view.snapshot, view.loading, view.earlier])
   useLayoutEffect(() => {
-    onChange({ ...EMPTY_NATIVE_WINDOW, reference, scope, frame: view.snapshot ?? undefined,
+    onChange({ ...EMPTY_NATIVE_WINDOW, reference, port, runtimeId, presentationReference, scope, frame: view.snapshot ?? undefined,
       page: projection?.historyPage ?? null, timeline: projection?.captured, messages,
       loading: view.loading, error: view.error ? presentError(view.error) : null,
       capturedError: view.observationError ? presentError(view.observationError) : view.held ? 'The pinned original frame is retained. Close its preview to accept newer records.' : null,
@@ -172,12 +174,12 @@ const FocusInputSource = memo(function FocusInputSource({ reference, scope, acti
       earlier: view.earlier, newer: view.newer, refresh: view.refresh,
       latest: { messages, loading: view.loading, error: view.error, observationError: view.observationError,
         windowFrozen: view.historical, windowIncomplete: Boolean(view.snapshot?.window.outside.older), refresh: view.refresh } })
-  }, [reference, scope, projection, messages, view.snapshot, view.loading, view.error, view.observationError, view.historical, view.held, onChange])
+  }, [reference, port, runtimeId, presentationReference, scope, projection, messages, view.snapshot, view.loading, view.error, view.observationError, view.historical, view.held, onChange])
   return null
 })
 
 /** Presentation retention of whole accepted frames, never a private native/captured merge. */
-function useFocusInputWindow(control: SessionHistoryReference | undefined, scope: string, enabled: boolean, historical: boolean, pinned: ConversationRecord | undefined) {
+function useFocusInputWindow(control: SessionHistoryReference | undefined, port: typeof api.conversation | undefined, runtimeId: string | null | undefined, presentationReference: SessionHistoryReference | undefined, scope: string, enabled: boolean, historical: boolean, pinned: ConversationRecord | undefined) {
   const [window, setWindow] = useState<ReadingWindow>(EMPTY_READING_WINDOW)
   const windowRef = useRef(window); windowRef.current = window
   const pin = useRef(pinned); pin.current = pinned
@@ -217,14 +219,14 @@ function useFocusInputWindow(control: SessionHistoryReference | undefined, scope
     windowRef.current = result; setWindow(result)
   }, [])
   useEffect(() => {
-    if (!enabled || !control || windowRef.current.partitions.has(scope)) return
-    const old = [...windowRef.current.partitions].filter(([, part]) => part.reference?.hostId === control.hostId && part.reference.agentSessionId === control.agentSessionId && !part.work)
+    if (!enabled || !control || !port || windowRef.current.partitions.has(scope)) return
+    const old = [...windowRef.current.partitions].filter(([, part]) => part.port === port && part.runtimeId === runtimeId && part.reference?.hostId === control.hostId && part.reference.agentSessionId === control.agentSessionId && !part.work)
     for (const [key] of old) {
       const partitions = new Map(windowRef.current.partitions); partitions.delete(key)
       windowRef.current = { ...windowRef.current, partitions }
     }
-    admit({ ...EMPTY_NATIVE_WINDOW, reference: control, scope })
-  }, [control?.hostId, control?.agentSessionId, scope, enabled, admit])
+    admit({ ...EMPTY_NATIVE_WINDOW, reference: control, port, runtimeId, presentationReference, scope })
+  }, [control?.hostId, control?.agentSessionId, port, runtimeId, presentationReference, scope, enabled, admit])
   const observeWork = useCallback((reference: SessionHistoryReference, items: readonly AgentTimelineItem[], identity: AgentFocusHistoryIdentity | undefined) => {
     if (!active.current || !items.length) return
     const workScope = JSON.stringify(['work', reference.hostId, reference.agentSessionId])
@@ -236,8 +238,8 @@ function useFocusInputWindow(control: SessionHistoryReference | undefined, scope
     admit({ ...before, work: { items: merged, identities, trimmed: before.work?.trimmed ?? false, error: before.work?.error ?? null } })
   }, [admit])
   const current = window.partitions.get(scope) ?? EMPTY_NATIVE_WINDOW
-  const readers = [...window.partitions].flatMap(([key, part]) => part.reference && !part.work ? [<FocusInputSource key={key}
-    reference={part.reference} scope={key} active={enabled && key === scope} historical={key === scope && historical} pinned={pinned} onChange={admit} />] : [])
+  const readers = [...window.partitions].flatMap(([key, part]) => part.reference && part.port && !part.work ? [<FocusInputSource key={key}
+    reference={part.reference} port={part.port} runtimeId={part.runtimeId} presentationReference={part.presentationReference} scope={key} active={enabled && key === scope} historical={key === scope && historical} pinned={pinned} onChange={admit} />] : [])
   return { ...current, window, readers, observeWork, continueReading: () => void current.earlier?.(), refresh: () => void current.refresh?.() }
 }
 
@@ -268,22 +270,29 @@ const FocusTimeTrack = memo(function FocusTimeTrack({ track, selected, nativeMes
   const { clock, dateClock } = time
   const { current: context, segments, identity, sessionId } = track
   const gutter = useRef<HTMLSpanElement>(null)
-  const session = useAppStore(state => observing ? sessionPresentationById(state.sessions).get(sessionId) : undefined)
-  const userName = useAppStore(state => state.agentNames[sessionId])
+  const originalSource = !!context?.access
+  const localSession = useAppStore(useShallow(state => {
+    const own = !originalSource && observing ? sessionPresentationById(state.sessions).get(sessionId) : undefined
+    // Ordered output bytes are not a timeline identity, activity or name input.
+    return own ? { ...own, latestOutputBytes: 0 } : undefined
+  }))
+  const session = context?.access ? context.access.session : localSession
+  const userName = useAppStore(state => originalSource ? undefined : state.agentNames[sessionId])
   // A track observes only its own canonical timeline; unrelated output never scans its messages.
-  const timeline = useAppStore(state => state.timelines[sessionId])
+  const localTimeline = useAppStore(state => originalSource ? undefined : state.timelines[sessionId])
+  const timeline = context?.access ? context.access.timeline : localTimeline
   const resyncTimeline = useAppStore(state => state.resyncTimeline)
   const requestedHistory = useRef<string | null>(null)
   const sessionHostId = session?.kind === 'agent' ? session.control.hostId : undefined
   useEffect(() => {
     if (timeline) { requestedHistory.current = null; return }
-    if (!observing || context?.kind !== 'agent' || sessionHostId !== context.hostId) return
+    if (originalSource || !observing || context?.kind !== 'agent' || sessionHostId !== context.hostId) return
     const key = JSON.stringify([context.hostId, sessionId])
     if (requestedHistory.current === key) return
     requestedHistory.current = key
     void resyncTimeline(sessionId, { observationOnly: true })
-  }, [observing, context?.kind, context?.hostId, sessionHostId, sessionId, timeline, resyncTimeline])
-  const name = agentDisplayName({ userName,
+  }, [originalSource, observing, context?.kind, context?.hostId, sessionHostId, sessionId, timeline, resyncTimeline])
+  const name = context?.access ? context.name : agentDisplayName({ userName,
     firstPrompt: session?.kind === 'agent' ? firstPromptFromTimeline(timeline) : undefined,
     fallbackLabel: session?.kind === 'agent' ? session.label : context?.name ?? identity?.name ?? sessionId,
     providerLabel: agentProviderLabel(context?.providerId ?? identity?.providerId ?? '') })
@@ -294,7 +303,7 @@ const FocusTimeTrack = memo(function FocusTimeTrack({ track, selected, nativeMes
     (!recordedMessageTracks?.has(item.id) || recordedMessageTracks.get(item.id) === track.key) && item.recordedAt !== undefined && Number.isFinite(item.recordedAt)
     && item.recordedAt >= window.start && item.recordedAt <= window.end && item.recordedAt <= observedNow) }, [captured, nativeMessages, recordedMessageTracks, track.key, window, now])
   const messageGroups = useMemo(() => focusMessageMarkers(messages, window, scaleWidth), [messages, window, scaleWidth])
-  const describeMessageSpeaker = useFocusSpeakerResolver(messages, observing)
+  const describeMessageSpeaker = useFocusSpeakerResolver(messages, observing, originalSource)
   const position = focusTimePosition(now, window)
   const liveNow = context?.processState === 'running' && position >= 0 && position <= 100
   const activitySemantic = session?.kind === 'agent' ? observeAgentSession(session, now).semantic : context?.activitySemantic
@@ -302,7 +311,8 @@ const FocusTimeTrack = memo(function FocusTimeTrack({ track, selected, nativeMes
   const currentStateLabel = activitySemantic === 'unknown' ? 'Activity unknown' : activitySemantic === 'unsupported' ? 'Activity not reported' : context?.stateLabel
   const working = context?.kind === 'agent' && context.processState === 'running' && context.state === 'working' && semanticActive
   const workSelector = useMemo(() => createFocusWorkSelector(sessionId), [sessionId])
-  const ownWorkItems = useAppStore(workSelector)
+  const localWorkItems = useAppStore(originalSource ? () => EMPTY_FOCUS_WORK_ITEMS : workSelector)
+  const ownWorkItems = useMemo(() => originalSource ? timeline?.items.filter(item => !!item.activityState) ?? EMPTY_FOCUS_WORK_ITEMS : localWorkItems, [originalSource, timeline, localWorkItems])
   const retainedHere = retainedWork
   const workItems = retainedHere?.items ?? (context ? ownWorkItems : EMPTY_FOCUS_WORK_ITEMS)
   const semantic = session?.kind === 'agent' ? session.semanticStatus : undefined
@@ -382,11 +392,11 @@ const FocusTimeTrack = memo(function FocusTimeTrack({ track, selected, nativeMes
   })
   return <div className="recent-focus__track" data-focus-timeline-id={sessionId} data-focus-current={selected || undefined} data-history-only={!context ? 'true' : undefined}>
     <span ref={gutter} className="recent-focus__gutter" title={`${name} · ${identity?.workspacePath ? displayPath(identity.workspacePath, identity.hostId) : context?.workspacePath ? displayPath(context.workspacePath, context.hostId) : 'Historical identity not recorded'}${path ? ` · ${path}` : ''}`}>
-      <AgentAvatar sessionId={observing && context?.kind === 'agent' ? sessionId : undefined} executorId={context?.executorId} visible={observing} label={name} providerId={context?.providerId ?? identity?.providerId ?? undefined} state={context?.state} size={14} disclosure={disclosure}
+      {originalSource ? <button type="button" className="icon-button" aria-label={disclosure.label} title={name} onClick={() => context && onSelect(context.id)}><ResolvedAgentAvatar label={name} providerId={context?.providerId ?? undefined} state={context?.state} executorId={context?.executorId} size={14} /></button> : <AgentAvatar sessionId={observing && context?.kind === 'agent' ? sessionId : undefined} executorId={context?.executorId} visible={observing} label={name} providerId={context?.providerId ?? identity?.providerId ?? undefined} state={context?.state} size={14} disclosure={disclosure}
         onOpen={context ? () => onSelect(context.id) : segments.length ? () => {
           const anchor = gutter.current?.querySelector<HTMLElement>('.agent-avatar')
           if (anchor) onInspect(segments[0]!, anchor)
-        } : undefined} />
+        } : undefined} />}
       <span>{name}{observedName ? <small>Observed as {observedName}</small> : path ? <small>{path}</small> : null}</span>{!context ? <ThemeObjectHistoryIcon size={10} aria-label={segments.length ? 'Retained focus observation' : 'Retained input records'} /> : null}{selected ? <span className="recent-focus__current" aria-label="Current Context"><ThemeActionLocateIcon size={10} aria-hidden="true" /></span> : null}</span>
     <div className="recent-focus__lane" style={{ '--timeline-marker-size': `${TIMELINE_MARKER_SIZE}px`, '--timeline-marker-height': `${TIMELINE_MARKER_HEIGHT}px` } as React.CSSProperties}>
       {position >= 0 && position <= 100 ? <span className="recent-focus__playhead" data-now={now} style={{ left: `${position}%` }} aria-hidden="true" /> : null}
@@ -748,16 +758,19 @@ export const RecentFocusTimeline = memo(function RecentFocusTimeline({ entries, 
   const [sourceLimit, setSourceLimit] = useState(30)
   const observations = useMemo(() => observeFocusInputTracks(entries), [entries])
   const inputSources = useMemo(() => {
-    const available = new Map(contexts.filter(context => context.kind === 'agent').map(context => [context.id, {
-      id: context.id, name: context.name, workspaceName: context.workspaceName,
-      reference: { hostId: context.hostId, agentSessionId: context.id } satisfies SessionHistoryReference,
-      workspacePath: context.workspacePath, details: `Session: ${context.id}\nCurrent workspace: ${displayPath(context.workspacePath, context.hostId)}`
-    }]))
+    const available = new Map(contexts.filter(context => context.kind === 'agent').flatMap(context => {
+      const reference = context.access ? context.access.conversationReference : { hostId: context.hostId, agentSessionId: context.id }
+      const port = context.access ? context.access.conversationPort : api.conversation
+      if (!reference || !port) return [] // An unconfirmed original target never selects the local reader.
+      return [[context.id, { id: context.id, name: context.name, workspaceName: context.workspaceName, reference, port,
+        runtimeId: context.access?.identity.runtimeId, presentationReference: { hostId: context.hostId, agentSessionId: context.id },
+        workspacePath: context.workspacePath, details: `Session: ${reference.agentSessionId}\nCurrent workspace: ${displayPath(context.workspacePath, context.hostId)}` as string }] as const]
+    }))
     for (const source of catalogue.sources) if (!available.has(source.agentSessionId)) {
       const observation = resolveFocusInputTrack(observations, source).identity
       available.set(source.agentSessionId, { id: source.agentSessionId, name: observation?.name ?? `${source.history ? agentProviderLabel(source.history.providerId) : 'Provider not recorded'} · ${source.agentSessionId.length <= 12 ? source.agentSessionId : `${source.agentSessionId.slice(0, 8)}…${source.agentSessionId.slice(-4)}`}`,
         workspaceName: `${observation?.project ? `${observation.project.name} (observed Context)` : 'Project not recorded'} · ${source.state === 'retired' ? 'Archived' : 'Stored source'}`,
-        reference: { hostId: source.hostId, agentSessionId: source.agentSessionId }, workspacePath: source.history?.workspacePath ?? '', details: `Session: ${source.agentSessionId}\nObserved Context project: ${observation?.project?.name ?? 'Not recorded or conflicting'}\nMessage-time project: Not recorded\nProvider: ${source.history ? agentProviderLabel(source.history.providerId) : 'Provider not recorded'}\nStored source workspace: ${source.history?.workspacePath ? displayPath(source.history.workspacePath, source.hostId) : 'Not recorded'}` })
+        reference: { hostId: source.hostId, agentSessionId: source.agentSessionId }, port: api.conversation, runtimeId: undefined, presentationReference: { hostId: source.hostId, agentSessionId: source.agentSessionId }, workspacePath: source.history?.workspacePath ?? '', details: `Session: ${source.agentSessionId}\nObserved Context project: ${observation?.project?.name ?? 'Not recorded or conflicting'}\nMessage-time project: Not recorded\nProvider: ${source.history ? agentProviderLabel(source.history.providerId) : 'Provider not recorded'}\nStored source workspace: ${source.history?.workspacePath ? displayPath(source.history.workspacePath, source.hostId) : 'Not recorded'}` })
     }
     return [...available.values()]
   }, [contexts, observations, catalogue.sources, displayPath])
@@ -765,18 +778,19 @@ export const RecentFocusTimeline = memo(function RecentFocusTimeline({ entries, 
   const inputContext = contexts.find(context => context.id === inputContextId && context.kind === 'agent')
   const inputSource = inputSources.find(source => source.id === inputContextId)
   const inputControl = useAppStore(state => {
-    const session = state.sessions.find(item => item.id === inputContext?.id)
+    const session = inputContext?.access ? inputContext.access.session : state.sessions.find(item => item.id === inputContext?.id)
     return session?.kind === 'agent' ? session.control : undefined
   })
-  const inputTimeline = useAppStore(state => inputContext ? state.timelines[inputContext.id] : undefined)
+  const inputTimeline = useAppStore(state => inputContext?.access ? inputContext.access.timeline : inputContext ? state.timelines[inputContext.id] : undefined)
   const inputReference = inputSource?.reference
   const observedFocusSession = useRef(currentSessionId)
   useEffect(() => {
     cancelPreviewIntent()
-    const selected = currentSessionId ? sessionPresentationById(useAppStore.getState().sessions).get(currentSessionId) : undefined
+    const context = contexts.find(item => item.id === currentSessionId)
+    const selected = context?.access ? context.access.session : currentSessionId ? sessionPresentationById(useAppStore.getState().sessions).get(currentSessionId) : undefined
     const inspected = previewRef.current
     // An explicit return must retain the original body and any unavailable diagnosis.
-    const returningToOriginal = inspected?.interactive && inspected.message?.agentSessionId === currentSessionId &&
+    const returningToOriginal = inspected?.interactive && inspected.message?.agentSessionId === (context?.access?.conversationReference?.agentSessionId ?? currentSessionId) &&
       selected?.kind === 'agent' && inspected.message.executionHostId === selected.control.hostId
     if (currentSessionId !== null && observedFocusSession.current !== currentSessionId && !returningToOriginal) { setPreview(null); setReaderOpen(false) }
     else setPreview(current => current?.interactive ? current : null)
@@ -790,11 +804,11 @@ export const RecentFocusTimeline = memo(function RecentFocusTimeline({ entries, 
   const readingEnabled = mode !== 'collapsed' && documentVisible && !!inputReference
   const historical = earlier || readonlyReading
   // The viewport filters a bounded snapshot; it is not another reading intent.
-  const readingScope = JSON.stringify([inputReference?.hostId, inputReference?.agentSessionId, inputControl?.run.runId])
-  const nativeWindow = useFocusInputWindow(inputReference, readingScope, mode !== 'collapsed' && documentVisible, historical, preview?.message)
+  const readingScope = JSON.stringify([inputSource?.id, inputSource?.runtimeId, inputReference?.hostId, inputReference?.agentSessionId, inputControl?.run.runId])
+  const nativeWindow = useFocusInputWindow(inputReference, inputSource?.port, inputSource?.runtimeId, inputSource?.presentationReference, readingScope, mode !== 'collapsed' && documentVisible, historical, preview?.message)
   const latest = nativeWindow.latest ?? EMPTY_LATEST_INPUTS
   const readSources = useMemo(() => [...nativeWindow.window.partitions.values()].filter(part => part.reference && (part.page || part.timeline || part.work)).map(part => ({
-    reference: part.reference!, messages: part.messages, conversationRead: !!(part.page || part.timeline), work: part.work, capturedError: part.capturedError
+    reference: part.presentationReference ?? part.reference!, originalReference: part.reference!, messages: part.messages, conversationRead: !!(part.page || part.timeline), work: part.work, capturedError: part.capturedError
   })), [nativeWindow.window.partitions])
   const readMessagesByReference = useMemo(() => {
     const result = new Map<string, readonly ConversationRecord[]>()
@@ -807,12 +821,12 @@ export const RecentFocusTimeline = memo(function RecentFocusTimeline({ entries, 
     return result
   }, [readSources])
   const projected = useMemo(() => inputReference ? historical
-    ? readMessagesByReference.get(JSON.stringify([inputReference.hostId, inputReference.agentSessionId])) ?? []
+    ? readMessagesByReference.get(JSON.stringify([inputSource?.presentationReference.hostId, inputSource?.presentationReference.agentSessionId])) ?? []
     : latest.messages : [], [inputReference?.hostId, inputReference?.agentSessionId, inputControl, readingEnabled, historical, readMessagesByReference, inputTimeline, latest.messages])
   const inputMessages = useMemo(() => projected.filter(item => item.agentSessionId === inputReference?.agentSessionId), [projected, inputReference?.agentSessionId])
   const messagesByReference = useMemo(() => {
     const result = new Map(readMessagesByReference)
-    if (inputReference && !historical) result.set(JSON.stringify([inputReference.hostId, inputReference.agentSessionId]), inputMessages)
+    if (inputReference && !historical) result.set(JSON.stringify([inputSource?.presentationReference.hostId, inputSource?.presentationReference.agentSessionId]), inputMessages)
     return result
   }, [readMessagesByReference, inputReference?.hostId, inputReference?.agentSessionId, historical, inputMessages])
 
@@ -992,14 +1006,15 @@ export const RecentFocusTimeline = memo(function RecentFocusTimeline({ entries, 
   const position = focusTimePosition(now, range)
   const previewRecordStart = preview?.records ? Math.min(...preview.records.map(record => record.recordedAt!)) : undefined
   const previewRecordEnd = preview?.records ? Math.max(...preview.records.map(record => record.recordedAt!)) : undefined
-  const previewContext = preview?.message ? contexts.find(context => context.id === preview.message!.agentSessionId && context.hostId === preview.message!.executionHostId) : inputContext
-  const previewSource = preview?.message ? inputSources.find(source => source.id === preview.message!.agentSessionId && source.reference.hostId === preview.message!.executionHostId) : inputSource
+  const previewPartition = preview?.message ? [...nativeWindow.window.partitions.values()].find(part => part.messages.includes(preview.message!)) : undefined
+  const previewContext = preview?.message ? contexts.find(context => context.id === (previewPartition?.presentationReference?.agentSessionId ?? preview.message!.agentSessionId) && context.hostId === (previewPartition?.presentationReference?.hostId ?? preview.message!.executionHostId)) : inputContext
+  const previewSource = preview?.message ? inputSources.find(source => source.id === previewContext?.id) : inputSource
   const previewSpeaker = preview?.message ? preview.message.speaker : undefined
   const senderId = previewSpeaker?.role === 'agent' ? previewSpeaker.id : undefined
-  const sender = senderId ? contexts.find(context => context.id === senderId && context.kind === 'agent') : undefined
+  const sender = senderId && !previewContext?.access ? contexts.find(context => context.id === senderId && context.kind === 'agent') : undefined
   const senderLane = sender ? lanesByContext.get(focusContextIdentityKey(sender.hostId, sender.id)) : undefined
   const previewMessages = useMemo(() => preview?.message ? [...inputMessages, preview.message] : inputMessages, [inputMessages, preview?.message])
-  const describePreviewSpeaker = useFocusSpeakerResolver(previewMessages, documentVisible && Boolean(preview && !preview.event))
+  const describePreviewSpeaker = useFocusSpeakerResolver(previewMessages, documentVisible && Boolean(preview && !preview.event), !!previewContext?.access)
   const inspectWindow = (next: number | null) => { setAnchor(next); setObservation(null); setDateDraft(null); setDateError(null); setDateChoice(null) }
   const inspectDate = (value: string) => {
     setDateDraft(value); setDateChoice(null)
@@ -1019,7 +1034,7 @@ export const RecentFocusTimeline = memo(function RecentFocusTimeline({ entries, 
     : 'Native history has not been read for this window. Coverage unknown.'
     : latest.windowIncomplete ? 'Some latest conversation records are outside this bounded window. Read earlier records to inspect available history; refresh the source to read latest records.'
       : 'Latest conversation view. Earlier coverage is unknown; read earlier records to inspect the native snapshot.'
-  const inputObservationNotice = historical ? null : latest.windowFrozen
+  const inputObservationNotice = inputContext?.access && !inputSource ? inputContext.access.issue ?? 'The original conversation target is unconfirmed. Its task and workface are retained.' : historical ? null : latest.windowFrozen
     ? 'Automatic updates are paused. The current reading window is kept. Read latest records to open a new window.'
     : latest.observationError ? `Automatic updates unavailable: ${presentError(latest.observationError)} Existing records are kept.` : null
   return <section ref={timelineRef} style={{ height: mode === 'collapsed' ? 28 : height, '--focus-name-width': `${nameWidth}px` } as CSSProperties} className="recent-focus" aria-label="Recent Focus" data-mode={mode} data-ruler-mode={ruler.mode} data-time-zone={time.zone} data-read-source-count={nativeWindow.window.sourceCount} data-mounted-reader-count={nativeWindow.window.readerCount} data-native-record-count={nativeWindow.window.nativeCount} data-captured-record-count={nativeWindow.window.capturedCount} data-work-record-count={nativeWindow.window.workCount} data-read-bytes={nativeWindow.window.bytes} data-reading-trimmed={nativeWindow.window.trimmed || undefined} data-window-start={range.start} data-window-end={range.end}>
@@ -1086,7 +1101,7 @@ export const RecentFocusTimeline = memo(function RecentFocusTimeline({ entries, 
         coverage: `${preview.records.length} records ${previewRecordStart === previewRecordEnd ? `at ${time.detailed(previewRecordStart!)}` : `from ${time.detailed(previewRecordStart!)} through ${time.detailed(previewRecordEnd!)}`}. Original source order; select a record to read it.`, error: null,
         onMessage: (message: ConversationRecord) => setPreview(current => current ? { ...current, message } : current)
       } } : readerOpen ? { reader: {
-        contexts: inputSources.slice(0, sourceLimit), contextId: inputReference?.agentSessionId ?? null, messages: inputMessages,
+        contexts: inputSources.slice(0, sourceLimit), contextId: inputSource?.id ?? null, messages: inputMessages,
         sourceCoverage: catalogue.loading ? 'Discovering retained conversation sources…' : `${Math.min(sourceLimit, inputSources.length)} of ${inputSources.length} sources listed. ${nativeWindow.window.sourceCount} sources read in this window${nativeWindow.window.trimmed ? ' · Older read records or sources were released to keep this window bounded' : ''}. Sources not yet read are not evidence of no records.`,
         sourceError: catalogue.error, onRefreshSources: catalogue.refresh,
         onMoreSources: sourceLimit < inputSources.length ? () => setSourceLimit(value => Math.min(inputSources.length, value + 30)) : undefined,
@@ -1098,7 +1113,7 @@ export const RecentFocusTimeline = memo(function RecentFocusTimeline({ entries, 
         onMessage: (message: ConversationRecord) => setPreview(current => current ? { ...current, message } : current),
         onContinue: () => { if (!historical) setEarlier(true); else nativeWindow.continueReading() },
         onRefresh: () => {
-          if (inputContext && !inputTimeline) void useAppStore.getState().resyncTimeline(inputContext.id, { observationOnly: true })
+          if (inputContext && !inputContext.access && !inputTimeline) void useAppStore.getState().resyncTimeline(inputContext.id, { observationOnly: true })
           if (historical) nativeWindow.refresh(); else void latest.refresh()
         }
       } } : {})} /> : null}

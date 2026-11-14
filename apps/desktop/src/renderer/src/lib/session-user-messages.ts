@@ -1,17 +1,18 @@
 import { useCallback, useEffect, useMemo, useRef } from 'react'
 import { useConversationView } from '@agentmux/client-ui/use-conversation-view'
-import type { AgentSessionControl } from '../../../shared/contracts'
+import type { AgentSessionControl, SessionHistoryReference } from '../../../shared/contracts'
 import { api } from './api'
 import { desktopConversationDiagnostics } from './conversation-diagnostic-options'
 
 export type AgentSessionControlInput = AgentSessionControl
-export function useSessionUserMessages(control?: AgentSessionControlInput, options?: { enabled?: boolean; initialInputs?: number }) {
-  const enabled = (options?.enabled ?? true) && Boolean(control), target = options?.initialInputs ?? 0
-  const key = control ? JSON.stringify([control.hostId, control.agentSessionId, control.run.runId]) : ''
+export function useSessionUserMessages(control?: AgentSessionControlInput, options?: { enabled?: boolean; initialInputs?: number; reading?: { reference: SessionHistoryReference; port: typeof api.conversation; identity: string } }) {
+  const reference = options?.reading?.reference ?? control
+  const enabled = (options?.enabled ?? true) && Boolean(reference), target = options?.initialInputs ?? 0
+  const key = options?.reading?.identity ?? (control ? JSON.stringify([control.hostId, control.agentSessionId, control.run.runId]) : '')
   const initial = useRef({ key, batches: 1, settled: target === 0 })
   if (initial.current.key !== key) initial.current = { key, batches: 1, settled: target === 0 }
   const demand = initial.current
-  const view = useConversationView(api.conversation, control, enabled, { ...(control ? { identity: control.run.runId } : {}),
+  const view = useConversationView(options?.reading?.port ?? api.conversation, reference, enabled, { ...(key ? { identity: key } : {}),
     diagnostics: desktopConversationDiagnostics('input-summary', control?.run.runId) })
   const page = view.reading?.historyPage ?? null
   const messages = useMemo(() => view.reading?.inputs ?? [], [view.reading])

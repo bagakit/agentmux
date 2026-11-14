@@ -35,7 +35,11 @@ const AgentIcon = semanticIconComponent('object.agent')
 
 
 /** The original card carries both its presentation address and canonical execution control. */
-export function FocusContextMenu({ open, context, children, onOpenChange, onRename, onRestoreFocus }: {
+export function FocusContextMenu(props: Parameters<typeof LocalFocusContextMenu>[0]) {
+  return props.context.access ? <SourceFocusContextMenu {...props} /> : <LocalFocusContextMenu {...props} />
+}
+
+function LocalFocusContextMenu({ open, context, children, onOpenChange, onRename, onRestoreFocus }: {
   open: boolean; context: FocusContext; children: ReactNode; onOpenChange(open: boolean): void; onRename(): void; onRestoreFocus(): void
 }) {
   const active = useWorkbenchPresentationActive()
@@ -171,4 +175,32 @@ export function FocusContextMenu({ open, context, children, onOpenChange, onRena
   </ContextMenu.Root>{promotion.feedback}{active ? <>{promotion.dialog}{restart.dialog}{stop.dialog}{connector.dialog}{reading?.mode === 'history' ? <AgentSessionReadingSurface source={reading.source} label={reading.label} returnTrigger={origin.current} onClose={() => setReading(null)} /> : null}
     {reading?.mode === 'learn' ? <FocusWorkspaceStage><SessionLearningSurface source={reading.source} label={reading.label} active returnTrigger={origin.current as HTMLButtonElement | null} onClose={() => setReading(null)} /></FocusWorkspaceStage> : null}
     {takeover ? <FocusWorkspaceStage><SessionTakeoverSurface source={takeover} active returnTrigger={origin.current as HTMLButtonElement | null} onClose={() => setTakeover(null)} /></FocusWorkspaceStage> : null}</> : null}</>
+}
+
+
+/** The common menu body consumes source-qualified capabilities; no local Session lookup. */
+function SourceFocusContextMenu({ context, children, open, onOpenChange, onRename, onRestoreFocus }: Parameters<typeof LocalFocusContextMenu>[0]) {
+  const access = context.access!, active = useWorkbenchPresentationActive()
+  const [reading, setReading] = useState(false)
+  const trigger = useRef<HTMLElement | null>(null), actionOwnsFocus = useRef(false)
+  return <><ContextMenu.Root modal={false} open={active && open} onOpenChange={onOpenChange}>
+    <ContextMenu.Trigger asChild onContextMenu={event => { trigger.current = event.currentTarget }}>{children}</ContextMenu.Trigger>
+    {open ? <DocumentOverlayPortal component={ContextMenu.Portal}><ContextMenu.Content className="tab-context-menu focus-context-menu" collisionPadding={8} onCloseAutoFocus={event => {
+      const activeElement = document.activeElement, closing = event.target
+      const laterFocus = activeElement instanceof HTMLElement && activeElement !== document.body && closing instanceof HTMLElement && !closing.contains(activeElement)
+      if (!active || actionOwnsFocus.current || laterFocus) { event.preventDefault(); actionOwnsFocus.current = false }
+      else onRestoreFocus()
+    }}>
+      <WorkbenchMenuScope.Provider value={ContextMenu}><WorkbenchMenuSubmit.Provider value={() => onOpenChange(false)}>
+        <AgentMenuContent name={context.name} executorLabel={context.providerId ?? 'Executor unknown'} sessionId={access.identity.agentSessionId}
+          executionHost={executionHostProjection(access.identity.runtimeId, context.workspacePath)}
+          links={<ContextMenu.Item className="tab-context-menu__item" onSelect={() => { void copyTextToClipboard(JSON.stringify(access.identity), error => useAppStore.getState().reportError(error)) }}>Copy Agent identity</ContextMenu.Item>}
+          onHistory={access.conversationPort && access.conversationReference ? () => setReading(true) : undefined}
+          onRefreshObservation={access.refresh}
+          extensions={{ workspace: <ContextMenu.Item className="tab-context-menu__item" onSelect={() => access.open()}>View in Space</ContextMenu.Item>,
+            identityActions: access.rename && access.nameRevision !== undefined ? <ContextMenu.Item className="tab-context-menu__item" onSelect={() => { actionOwnsFocus.current = true; onRename() }}><ThemeActionEditIcon size={14} /><span>Rename Agent</span></ContextMenu.Item> : undefined,
+            context: access.issue ? <ContextMenu.Label className="tab-context-menu__label">{access.issue}</ContextMenu.Label> : undefined }} />
+      </WorkbenchMenuSubmit.Provider></WorkbenchMenuScope.Provider>
+    </ContextMenu.Content></DocumentOverlayPortal> : null}
+  </ContextMenu.Root>{active && reading && access.conversationPort && access.conversationReference ? <AgentSessionReadingSurface source={access.conversationReference} port={access.conversationPort} label={context.name} returnTrigger={trigger.current} onClose={() => setReading(false)} /> : null}</>
 }

@@ -26,7 +26,12 @@ function cancelIntent(token?: object) {
 }
 function publish(next: readonly AgentInformationPreview[]) { current = next; for (const listener of listeners) listener() }
 function original(request: Opening) {
+  if (request.context.access) return undefined
   return useAppStore.getState().sessions.find(session => session.id === request.context.id && session.hostId === request.context.hostId && session.control.run.runId === request.context.runId)
+}
+function sourceBookmarkMatches(bookmark: AgentBookmark | undefined, context: FocusContext) {
+  return Boolean(bookmark && context.access && bookmark.sourceRuntimeId !== undefined && bookmark.sourceRuntimeId === context.access.identity.runtimeId &&
+    bookmark.agentSessionId === context.access.identity.agentSessionId && bookmark.presentationId === context.id)
 }
 function restoredContext(bookmark: AgentBookmark): FocusContext {
   return { id: bookmark.presentationId, hostId: bookmark.hostId, name: bookmark.label, workspaceName: bookmark.workspaceName, workspaceId: '', workspacePath: '', workspace: undefined,
@@ -38,7 +43,14 @@ function restoredContext(bookmark: AgentBookmark): FocusContext {
 /** Idempotent promotion shared by explicit Pin and the first deliberate drag. */
 function pinReading(request: AgentInformationPreview, bounds?: AgentBookmarkBounds): AgentBookmark | undefined {
   if (request.pinned) return request.bookmark
+  const access = request.context.access
   const session = request.session
+  if (access) {
+    const key = agentBookmarks.pin({ hostId: request.context.hostId, sourceRuntimeId: access.identity.runtimeId, agentSessionId: access.identity.agentSessionId, presentationId: request.context.id, label: request.context.name, workspaceName: request.context.workspaceName, excerpt: request.context.recap?.reading?.text ?? request.context.recap?.text, bounds: bounds ?? { x: 32, y: 72, width: 460, height: 600 } })
+    const bookmark = agentBookmarks.get().bookmarks.find(item => item.key === key)
+    publish(current.map(item => item === request ? { ...item, pinned: true, bookmark } : item))
+    return bookmark
+  }
   if (session?.kind !== 'agent') { publish(current.map(item => item === request ? { ...item, pinned: true } : item)); return }
   const key = agentBookmarks.pin({ hostId: session.control.hostId, agentSessionId: session.control.agentSessionId, presentationId: session.id, label: request.context.name,
     workspaceName: request.context.workspaceName, excerpt: request.context.recap?.reading?.text ?? request.context.recap?.text,
@@ -57,7 +69,7 @@ export const agentInformationPreview = {
   show(request: Opening): boolean {
     cancelIntent()
     const session = original(request)
-    const existing = session?.kind === 'agent' ? current.find(item => item.bookmark?.hostId === session.control.hostId && item.bookmark.agentSessionId === session.control.agentSessionId) : undefined
+    const existing = request.context.access ? current.find(item => sourceBookmarkMatches(item.bookmark, request.context)) : session?.kind === 'agent' ? current.find(item => item.bookmark?.hostId === session.control.hostId && item.bookmark.agentSessionId === session.control.agentSessionId) : undefined
     if (existing) {
       agentBookmarks.bringToFront(existing.bookmark!.key)
       if (request.enterReading) publish(current.map(item => item.token === existing.token ? { ...item, focusReading: {} } : item))
@@ -69,6 +81,13 @@ export const agentInformationPreview = {
     return true
   },
   noteContent(token: object, context: FocusContext) {
+    if (context.access) {
+      const access = context.access
+      const matches = (item: AgentInformationPreview) => sourceBookmarkMatches(item.bookmark, context)
+      for (const item of current) if (matches(item)) agentBookmarks.updateSnapshot(item.bookmark!.key, { label: context.name, workspaceName: context.workspaceName, excerpt: context.recap?.reading?.text ?? context.recap?.text })
+      if (current.some(matches)) publish(current.map(item => matches(item) ? { ...item, context, openWorkface: () => access.select(),
+        contentChanged: item.contentChanged || (item.context.recap?.reading?.text ?? item.context.recap?.text) !== (context.recap?.reading?.text ?? context.recap?.text) } : item))
+    }
     // Transient text is held from intent. Bookmarks derive live facts independently of origin rows.
     const request = current.find(item => item.token === token)
     if (!request?.pinned || request.bookmark || request.contentChanged) return
@@ -93,9 +112,12 @@ export const agentInformationPreview = {
   },
   ensurePinned(token: object, bounds: AgentBookmarkBounds) {
     const request = current.find(item => item.token === token)
-    if (!request || request.session?.kind !== 'agent') return
+    if (!request) return
     const session = request.session
-    const existed = agentBookmarks.get().bookmarks.some(item => item.hostId === session.control.hostId && item.agentSessionId === session.control.agentSessionId)
+    if (!request.context.access && session?.kind !== 'agent') return
+    const existed = agentBookmarks.get().bookmarks.some(item => request.context.access
+      ? sourceBookmarkMatches(item, request.context)
+      : session?.kind === 'agent' && item.sourceRuntimeId === undefined && item.hostId === session.control.hostId && item.agentSessionId === session.control.agentSessionId)
     const bookmark = pinReading(request, bounds)
     if (!bookmark) return
     return { key: bookmark.key, created: !existed, cancel: () => {

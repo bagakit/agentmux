@@ -67,6 +67,7 @@ export function deriveFocusProjectLanes(rows: readonly FocusContext[], config: P
     const configured = workspacesById.get(resource?.id ?? row.workspaceId)
     const closeout = configured?.closeout ?? resource?.closeout
     const identity = identities?.get(focusContextIdentityKey(row.hostId, row.id))
+    const sourceResources = identity?.resources ?? []
     const displayed = new Map<string, AppConfig['workspaces'][number]>()
     if (identities && !row.topicId && !closeout) for (const occurrence of identity?.locations.occurrences ?? []) {
       const candidate = workspacesById.get(occurrence.display.workspaceId)
@@ -74,14 +75,15 @@ export function deriveFocusProjectLanes(rows: readonly FocusContext[], config: P
       if (candidate && candidate.hostId === occurrence.display.hostId && !candidate.closeout) displayed.set(candidate.id, candidate)
     }
     const closeoutDisplay = closeout ? workspacesById.get(closeout.targetWorkspaceId) : undefined
+    const knownPlacements = [...new Map([...displayed.values(), ...sourceResources].map(value => [JSON.stringify([value.hostId, value.id, value.path]), value])).values()]
     const placements = closeoutDisplay && closeoutDisplay.hostId === row.hostId ? [closeoutDisplay]
-      : identities && !row.topicId ? displayed.size ? [...displayed.values()] : [undefined] : [resource]
+      : identities && !row.topicId ? knownPlacements.length ? knownPlacements : [row.access ? resource : undefined] : [resource]
     for (const display of placements) {
       // Focus groups current presentation, while the Context retains its original
       // execution path. A completed closeout must not revive its former branch from
       // retained Git observations after the source resource is withdrawn.
-      const located = Boolean(identities && !row.topicId)
-      const gathered = Boolean(display && (closeout || located))
+      const located = Boolean(identities && !row.topicId && !row.access && sourceResources.length === 0)
+      const gathered = Boolean(display && (closeout || located || sourceResources.length))
       const workspace = gathered ? display : located ? undefined : resource
       const displayPath = gathered ? workspace!.path : located ? '' : row.workspacePath
       const projectHostId = workspace?.hostId ?? row.hostId

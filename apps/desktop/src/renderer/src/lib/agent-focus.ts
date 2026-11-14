@@ -8,6 +8,8 @@ export const MAX_EXECUTION_FOCUS_HISTORY_BYTES = 512 * 1024
 
 /** Display facts observed at this focus event, never live control or a second Session record. */
 export type AgentFocusHistoryIdentity = {
+  /** Original source identity of a scoped presentation; never a configured Host alias. */
+  source?: { runtimeId: string | null; agentSessionId: string }
   name: string
   kind: SessionSnapshot['kind']
   providerId: string | null
@@ -141,6 +143,7 @@ function restoreHistoryIdentity(candidate: unknown): AgentFocusHistoryIdentity |
     ? value.project as Record<string, unknown> : undefined
   return {
     name: value.name, kind: value.kind, providerId: value.providerId,
+    ...(value.source && typeof value.source === 'object' && 'runtimeId' in value.source && 'agentSessionId' in value.source && (value.source.runtimeId === null || typeof value.source.runtimeId === 'string') && typeof value.source.agentSessionId === 'string' ? { source: { runtimeId: value.source.runtimeId, agentSessionId: value.source.agentSessionId } } : {}),
     hostId: value.hostId, workspacePath: value.workspacePath,
     ...(project && typeof project.id === 'string' && typeof project.name === 'string'
       ? { project: { id: project.id, name: project.name } } : {}),
@@ -229,6 +232,8 @@ export function executionFocusContextText(
 ): string {
   const byId = new Map(sessions.map((session) => [session.id, session]))
   const entries = executionFocusHistory(context).flatMap((entry) => {
+    const source = entry.identity?.source
+    if (source) return [`- ${context.execution.sessionId === entry.sessionId ? '[current] ' : ''}${entry.identity!.name} (${source.agentSessionId}) · ${entry.identity!.workspacePath} · Original Runtime: ${source.runtimeId ?? 'unconfirmed'} · Current activity unobserved`]
     const session = byId.get(entry.sessionId)
     return session ? [`- ${context.execution.sessionId === session.id ? '[current] ' : ''}${labelForSession(session)} (${session.id}) · ${session.workspacePath} · ${session.status.state}`] : []
   })

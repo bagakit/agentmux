@@ -27,7 +27,7 @@ const goals = createFocusGoalLinksSelector()
 export function useAgentBookmarkReading(opening: AgentInformationPreview, visible: boolean): AgentInformationPreview {
   const bookmark = opening.bookmark
   const session = useAppStore(state => {
-    if (!bookmark || !visible) return undefined
+    if (!bookmark || bookmark.sourceRuntimeId !== undefined || !visible) return undefined
     const candidates = subjectSessions(state.sessions, bookmark.hostId, bookmark.agentSessionId)
     return candidates?.find(item => item.id === bookmark.presentationId) ?? candidates?.[0]
   })
@@ -44,7 +44,7 @@ export function useAgentBookmarkReading(opening: AgentInformationPreview, visibl
     if (bookmark && session && visible) agentBookmarks.updateSnapshot(bookmark.key, { label: context.name, workspaceName: context.workspaceName,
       excerpt: context.recap?.reading?.text ?? context.recap?.text })
   }, [bookmark?.key, visible, Boolean(session), context.name, context.workspaceName, context.recap?.reading?.text, context.recap?.text])
-  return useMemo(() => !bookmark ? opening : { ...opening, context: observedContext, session, control: session?.control,
+  return useMemo(() => !bookmark || bookmark.sourceRuntimeId !== undefined ? opening : { ...opening, context: observedContext, session, control: session?.control,
     sourceKey: session ? nativeBindingKey(session) : undefined, goalLinks: links,
     openWorkface() { if (session) useAppStore.getState().selectSession(session.id) } }, [opening, bookmark, observedContext, session, links])
 }

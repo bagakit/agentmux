@@ -502,7 +502,8 @@ import {
   focusPmo,
   restoreAgentFocus,
   sanitizeAgentFocus,
-  type AgentFocusContext
+  type AgentFocusContext,
+  type AgentFocusHistoryIdentity
 } from './lib/agent-focus'
 import {
   createBatchedPersistentStorage,
@@ -1282,7 +1283,7 @@ export type AppState = GitReadingActions & {
   setFocusTimelineHeight(height: number): void
   focusTimelineRuler: FocusRulerPreferences
   setFocusTimelineRuler(preferences: FocusRulerPreferences): void
-  focusExecutionSession(id: string | null, reference?: WorkbenchProjectionSelection, options?: { navigate: boolean }): boolean
+  focusExecutionSession(id: string | null, reference?: WorkbenchProjectionSelection, options?: { navigate: boolean; identity?: AgentFocusHistoryIdentity }): boolean
   conversationRevealIntent: ConversationRevealIntent | null
   revealConversationItem(itemRef: ConversationItemRef, routeHostId?: string): Promise<MailboxMessageNavigationResult>
   selectMainRegion(reference: WorkbenchProjectionSelection, expected?: AgentMuxDesktopSpaceSelection | null): boolean
@@ -9140,7 +9141,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     const state = get()
     if (id && reference && !confirmedFocusReference(state, id, reference)) return false
     const agentFocus = id !== null && !state.sessions.some(session => session.id === id)
-      ? focusExecution(state.agentFocus, id) : focusSessionContext(state, id, undefined, reference)
+      ? focusExecution(state.agentFocus, id, Date.now(), options?.identity) : focusSessionContext(state, id, undefined, reference)
     set({ agentFocus })
     if (!id || options?.navigate === false) return true
     const original = sessionPresentationById(state.sessions).get(id)

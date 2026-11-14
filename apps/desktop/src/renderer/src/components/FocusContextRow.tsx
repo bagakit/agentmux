@@ -36,7 +36,7 @@ export const FocusContextRow = memo(function FocusContextRow({ context, identity
     saving.current = true
     const generation = editGeneration.current, baseline = expectedNameRevision.current
     try {
-      if (await useAppStore.getState().renameAgent(context.id, draft.trim() || null, baseline.revision) && expectedNameRevision.current === baseline) {
+      if ((context.access ? await context.access.rename?.(draft.trim() || null, baseline.revision) : await useAppStore.getState().renameAgent(context.id, draft.trim() || null, baseline.revision)) && expectedNameRevision.current === baseline) {
         ++baseline.revision
         if (generation === editGeneration.current) { ++editGeneration.current; setDraft(null) }
       }
@@ -63,6 +63,6 @@ export const FocusContextRow = memo(function FocusContextRow({ context, identity
   const card = <button ref={hover.anchor} type="button" className={className} data-session-id={context.id} data-state={context.state} data-bucket={context.bucket} data-activity={context.activitySemantic} aria-pressed={selected} aria-label={`${topic ? `Topic · ${topic.name} · ` : ''}${context.name} · ${context.stateLabel} · ${description}`} aria-description={context.originAddress} aria-describedby={hover.describedBy} {...hover.triggerEvents} onClick={() => { hover.close(); onSelect(context.id) }} onContextMenu={hover.close}>
     <AgentContextContent context={context} identity={hover.position} presentation="card" disclosure={disclosure} topic={topic} headingAccessory={goalLinks ? <span className="focus-goal__space" aria-hidden="true"><FocusGoalMark links={goalLinks} /></span> : undefined} />
   </button>
-  const main = context.kind === 'agent' ? <FocusContextMenu open={active && menuOpen} context={context} onOpenChange={setMenuOpen} onRestoreFocus={hover.suppressRestoredFocus} onRename={() => { hover.close(); ++editGeneration.current; expectedNameRevision.current = { revision: currentDisplayNameRevision('agent-session', context.id) }; setDraft(context.name) }}>{card}</FocusContextMenu> : card
-  return <><div className="focus-context-card">{main}{context.kind === 'agent' && context.control ? <AgentOperationFeedback subject={{ hostId: context.control.hostId, agentSessionId: context.control.agentSessionId }} /> : null}{goalLinks ? <FocusGoalLinks links={goalLinks} onOpenChange={goalDisclosure} /> : null}</div></>
+  const main = context.kind === 'agent' ? <FocusContextMenu open={active && menuOpen} context={context} onOpenChange={setMenuOpen} onRestoreFocus={hover.suppressRestoredFocus} onRename={() => { hover.close(); ++editGeneration.current; expectedNameRevision.current = { revision: context.access ? context.access.nameRevision ?? 0 : currentDisplayNameRevision('agent-session', context.id) }; setDraft(context.name) }}>{card}</FocusContextMenu> : card
+  return <><div className="focus-context-card">{main}{context.kind === 'agent' && !context.access && context.control ? <AgentOperationFeedback subject={{ hostId: context.control.hostId, agentSessionId: context.control.agentSessionId }} /> : null}{goalLinks ? <FocusGoalLinks links={goalLinks} onOpenChange={goalDisclosure} /> : null}</div></>
 })

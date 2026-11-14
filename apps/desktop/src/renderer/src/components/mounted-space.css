@@ -34,14 +34,6 @@
 .host-original-spaces code { font-size:11px; overflow-wrap:anywhere; }
 .host-original-spaces__retained { display:grid; gap:8px; padding-top:12px; border-top:1px solid var(--line-soft); font-size:12px; }
 .host-original-spaces__retained pre { white-space:pre-wrap; overflow-wrap:anywhere; }
-.mounted-space-focus { display:grid; gap:12px; padding:12px; }
-.mounted-space-focus__source { border:1px solid var(--line-soft); border-radius:8px; overflow:hidden; }
-.mounted-space-focus__source > header { padding:12px; display:flex; flex-wrap:wrap; align-items:center; gap:8px; font-size:13px; }
-.mounted-space-focus__source small { font-size:11px; color:var(--text-3); overflow-wrap:anywhere; }
-.mounted-space-focus__source ul { padding:0; margin:0; list-style:none; }
-.mounted-space-focus__member { display:grid; gap:6px; text-align:left; width:100%; padding:12px; border:0; border-top:1px solid var(--line-soft); background:var(--surface-0); color:var(--text); font:inherit; font-size:12px; }
-.mounted-space-focus__member:hover { background:var(--surface-1); }
-.mounted-space-focus__member:focus-visible { outline:2px solid var(--focus-line); outline-offset:-3px; }
 .mounted-space-navigation { display:grid; gap:4px; padding:8px 0; }
 .mounted-space-navigation h3 { margin:0; padding:4px 10px; color:var(--text-3); font-size:11px; font-weight:500; }
 .mounted-space-navigation .project-rail-row { min-width:0; width:100%; gap:8px; }
@@ -66,7 +58,6 @@
 .mounted-space-new-work > .mounted-space-launcher { border-top:0; padding-top:0; }
 .mounted-space-new-work textarea { width:100%; min-height:90px; padding:10px; font:inherit; color:var(--text); background:var(--surface-1); border:1px solid var(--line-soft); border-radius:6px; }
 
-.mounted-space-focus__member > strong { display:flex; align-items:center; gap:8px; }
 
 .mounted-space-agent { min-width:0; display:flex; flex-direction:column; gap:8px; }
 .mounted-space-agent__terminal { position:relative; min-width:0; height:340px; min-height:220px; }
@@ -77,26 +68,3 @@
 .mounted-space-agent__inputs p { margin:0; line-height:1.6; }
 .mounted-space-agent__inputs pre { margin:0; max-height:240px; overflow:auto; white-space:pre-wrap; overflow-wrap:anywhere; }
 .mounted-space-agent__inputs button { justify-self:start; }
-
-/* Source membership shares Focus card language without entering the local Session store. */
-.mounted-space-focus .mounted-space-focus__source { border:0; border-radius:0; }
-.mounted-space-focus .mounted-space-focus__source > header { padding:4px 0 10px; font-size:12px; }
-.mounted-space-focus .mounted-space-focus__source > header > strong { overflow-wrap:anywhere; }
-.mounted-space-focus__agents { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,280px),1fr)); gap:8px; }
-.mounted-space-focus__agents > li { min-width:0; border:1px solid var(--line-soft); border-radius:6px; background:var(--surface-0); }
-.mounted-space-focus .mounted-space-focus__member { border:0; border-radius:6px; padding:10px; min-width:0; }
-.mounted-space-focus .focus-context__identity { display:flex; align-items:center; flex-wrap:wrap; gap:6px; }
-.mounted-space-focus .focus-context__identity strong { flex:1 1 140px; min-width:0; overflow-wrap:anywhere; }
-.mounted-space-focus .focus-context__state { display:inline-flex; align-items:center; gap:4px; }
-.mounted-space-focus .mounted-space-focus__member .focus-context__state small { position:static; width:auto; height:auto; overflow:visible; clip-path:none; white-space:normal; }
-.mounted-space-focus .focus-context__copy { display:grid; gap:6px; min-width:0; }
-.mounted-space-focus .focus-context__detail { color:var(--text-3); font-size:11px; overflow-wrap:anywhere; }
-.mounted-space-focus__identity { padding:0 10px 8px; font-size:11px; color:var(--text-3); }
-.mounted-space-focus__identity summary, .mounted-space-focus__resources summary { cursor:pointer; padding:5px 0; }
-.mounted-space-focus__identity[open] { display:block; }
-.mounted-space-focus__identity small { display:block; margin-top:4px; }
-.mounted-space-focus__resources { margin-top:8px; font-size:12px; color:var(--text-3); }
-.mounted-space-focus__resource { display:flex; gap:12px; align-items:baseline; justify-content:space-between; width:100%; padding:7px 8px; border:0; border-radius:4px; background:transparent; color:var(--text); text-align:left; font:inherit; }
-.mounted-space-focus__resource strong { min-width:0; overflow-wrap:anywhere; font-weight:500; }
-.mounted-space-focus__resource:hover { background:var(--surface-1); }
-.mounted-space-focus__resource:focus-visible { outline:2px solid var(--focus-line); outline-offset:-2px; }

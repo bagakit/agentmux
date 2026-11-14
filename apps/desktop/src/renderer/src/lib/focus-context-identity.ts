@@ -19,6 +19,8 @@ export type FocusContextOccurrence = {
   display: { workspaceId: string; hostId: string | null; groupId: string; tabId: string; regionId: string }
 }
 export type FocusContextIdentity = {
+  /** Original business resources, independently of private display occurrences. */
+  resources?: readonly AppConfig['workspaces'][number][]
   tabs: readonly WorkbenchTabDetail[]; occurrenceCount: number
   locations: { status: 'confirmed' | 'unconfirmed'; occurrences: readonly FocusContextOccurrence[] }
 }

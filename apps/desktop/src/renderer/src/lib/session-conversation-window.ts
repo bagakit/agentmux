@@ -10,6 +10,7 @@ import { desktopConversationDiagnostics } from './conversation-diagnostic-option
 import type { ReadingDiagnosticReason } from '@agentmux/core/reading-diagnostic'
 
 export type ConversationReading = {
+  port?: typeof api.conversation
   reference: SessionHistoryReference
   /** A live Run fences the window; a retired Session needs no invented Run. */
   identity: string
@@ -51,7 +52,7 @@ export function useSessionConversationWindow(reading: ConversationReading | unde
   const acceptedBinding = useRef({ key, bindingKey })
   const coverageDemand = useRef({ key, duration: coverageDuration, remaining: 2 })
   const protectionReason = useRef<ReadingDiagnosticReason>('unknown')
-  const view = useConversationView(api.conversation, reading?.reference, reading?.enabled === true, {
+  const view = useConversationView(reading?.port ?? api.conversation, reading?.reference, reading?.enabled === true, {
     ...(reading ? { identity: reading.identity } : {}),
     diagnostics: desktopConversationDiagnostics('conversation-pane', reading?.consumer?.runId),
     heldReason: () => protectionReason.current,

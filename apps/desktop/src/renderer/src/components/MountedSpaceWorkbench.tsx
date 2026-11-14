@@ -81,7 +81,7 @@ function MountedSpaceRegionView({ member, draft, onDraft, session, sessionError,
     {original.kind === 'launcher' && target && mountKey ? <MountedSpaceLauncher target={target} project={member.zone} slot={{ kind: 'region', tabId: member.tab.tabId, regionId: member.region.regionId }} mountKey={mountKey} active={!!active} draft={draft ?? ''} /> : null}
   </section>
 }
-export const MountedSpaceWorkbench = memo(function MountedSpaceWorkbench({ mountKey, visible }: { mountKey: string; visible: boolean }) {
+export const MountedSpaceWorkbench = memo(function MountedSpaceWorkbench({ mountKey, visible, projection }: { mountKey: string; visible: boolean; projection?: { tabId: string; regionId: string; regionOnly: boolean } }) {
   const [newWork, setNewWork] = useState(false)
   const inputs = useAppStore(state => state.mountedSpaceInputs), observation = useAppStore(state => state.mountedSpaceObservations[mountKey]), hosts = useAppStore(state => state.config?.hosts)
   const sessionObservation = useAppStore(state => state.mountedSpaceSessions[mountKey])
@@ -139,15 +139,19 @@ export const MountedSpaceWorkbench = memo(function MountedSpaceWorkbench({ mount
     }}>{[renderGroup(node.first, path ? `${path}.first` : 'first'), renderGroup(node.second, path ? `${path}.second` : 'second')]}</MountedRegionSplit>
   }
   return <section className="mounted-space-workbench" hidden={!visible} data-mounted-space={mountKey}>
-    <header className="mounted-space-heading"><div><FolderIcon size={17} aria-hidden="true" /><strong>{snapshot?.scope.space?.name ?? 'Mounted Space'}</strong><small>Via {carrier?.label ?? target?.hostId ?? 'unconfirmed route'}</small></div>
+    {!projection ? <header className="mounted-space-heading"><div><FolderIcon size={17} aria-hidden="true" /><strong>{snapshot?.scope.space?.name ?? 'Mounted Space'}</strong><small>Via {carrier?.label ?? target?.hostId ?? 'unconfirmed route'}</small></div>
       <div><button type="button" className="small-button" aria-expanded={newWork} onClick={() => setNewWork(value => !value)}>New work</button><button type="button" className="small-button" onClick={refresh}><RefreshIcon size={12} />Refresh source</button>
-        <button type="button" className="small-button" onClick={() => useAppStore.getState().selectSpaceMount(null)}>Return to local workface</button></div></header>
+        <button type="button" className="small-button" onClick={() => useAppStore.getState().selectSpaceMount(null)}>Return to local workface</button></div></header> : null}
     {newWork && target ? <div className="mounted-space-new-work"><MountedSpaceLauncher target={target}
       project={snapshot?.scope.zones.find(zone => zone.zoneId === target.zoneId && zone.workspaceId === target.workspaceId)} slot={{ kind: 'new-work', zoneId: target.zoneId }}
       mountKey={mountKey} active={visible} /></div> : null}
     {issue || observation?.error ? <p className="mounted-space-issue" role="status">{issue ?? observation?.error} {snapshot ? `Last confirmed source revision ${snapshot.revision} is kept.` : 'The original source reference is kept.'}</p> : null}
     {missing ? <p className="mounted-space-issue" role="status">The original Space is not currently present at its source. Its last confirmed members and private input are kept.</p> : null}
-    {snapshot || currentView ? <>
+    {projection && currentView ? (() => {
+      const group = [...groups.values()].find(group => group.tabOrder.includes(projection.tabId)), layout = currentView.tabLayouts[projection.tabId]
+      return group && layout ? <div className="mounted-space-regions">{renderRegion(projection.regionOnly ? { type: 'leaf', regionId: projection.regionId } : layout.root, projection.tabId, group.id)}</div>
+        : <SurfaceState title="Original workface retained" description="Its exact Tab and Region are not currently observed. Refresh the original project to check its locations." />
+    })() : snapshot || currentView ? <>
       {!entry && target ? <div className="mounted-space-regions">{members.map(member => <MountedSpaceRegionView key={member.key} visible={visible} target={target} member={member} session={sessions.get(member.key)} sessionError={sessionObservation?.error} />)}</div> : currentView ? <div className="mounted-space-composition">{renderGroup(currentView.composition.root)}</div>
         : <WorkbenchEmptyState heading={snapshot?.scope.space ? 'No original member is selected' : 'The original Space is not currently present'} description="The exact source reference and private view are retained." action={null} />}
     </> : <SurfaceState title={observation?.reading ? 'Reading the original Space…' : 'Original Space observation unavailable'} description="Your original workface and this source reference are retained. Refresh its source to try the same reader again." />}

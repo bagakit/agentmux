@@ -11,7 +11,7 @@ import { api } from '../lib/api'
 type Reading = { text: string; truncated: boolean }
 type ImagePart = Extract<AgentSessionUserMessage['contentParts'][number], { kind: 'resource' }>
 type NativeSource = Extract<AgentSessionUserMessage['source'], { kind: 'native' }>
-type MediaProps = { active: boolean; control?: AgentSessionControl | undefined; sourceKey?: string | undefined; input?: AgentSessionUserMessage | undefined }
+type MediaProps = { active: boolean; localImages?: boolean; control?: AgentSessionControl | undefined; sourceKey?: string | undefined; input?: AgentSessionUserMessage | undefined }
 const readPastedImage = (path: string) => api.ui.readPastedImage(path)
 
 /** The original record and canonical control own native bytes; display names never select a file. */
@@ -31,24 +31,24 @@ function RecordedImage({ active, control, sourceKey, input, part, partIndex }: M
 }
 
 /** Original text remains complete; the explicit image ports do not enable navigation or execution. */
-export function AgentReadingBody({ reading, active, control, sourceKey, input }: MediaProps & { reading: Reading }) {
+export function AgentReadingBody({ reading, active, control, sourceKey, input, localImages = true }: MediaProps & { reading: Reading }) {
   const literal = reading.truncated || reading.text.length > 8000
   const literalImages = useMemo(() => literal ? markdownImageReferences(reading.text, undefined, false, () => false) : [], [literal, reading.text])
   return <div className="focus-context-hover__prose" data-reading-format={reading.truncated ? 'excerpt' : literal ? 'plain' : 'markdown'}>
-    {literal ? <><p>{reading.text}</p>{literalImages.map(reference => <ConversationImage key={reference.path} active={active} interactive={false}
-      text={reference.text} path={reference.path} readImage={readPastedImage} />)}</>
-      : <AgentMarkdown content={reading.text} readOnly readOnlyImages readPastedImage={readPastedImage} visible={active} />}
+    {literal ? <><p>{reading.text}</p>{literalImages.map(reference => localImages ? <ConversationImage key={reference.path} active={active} interactive={false}
+      text={reference.text} path={reference.path} readImage={readPastedImage} /> : <span key={reference.path} className="focus-context-hover__coverage">{reference.text} · Original image source unavailable</span>)}</>
+      : <AgentMarkdown content={reading.text} readOnly readOnlyImages {...(localImages ? { readPastedImage } : {})} visible={active} />}
     {input?.contentParts.map((part, partIndex) => part.kind === 'resource' && part.resourceType === 'image'
       ? <RecordedImage key={partIndex} active={active} control={control} sourceKey={sourceKey} input={input} part={part} partIndex={partIndex} /> : null)}
   </div>
 }
 
 /** A single original thumbnail supports recall without making every input a full rich body. */
-export function AgentReadingThumbnail({ reading, active, control, sourceKey, input }: MediaProps & { reading: Reading }) {
+export function AgentReadingThumbnail({ reading, active, control, sourceKey, input, localImages = true }: MediaProps & { reading: Reading }) {
   const first = useMemo(() => markdownImageReferences(reading.text, reading.text.length <= 8000 ? parseAgentMarkdown(reading.text) : undefined, false, () => false, { readOnlyImages: true })[0], [reading.text])
   const index = input?.contentParts.findIndex(part => part.kind === 'resource' && part.resourceType === 'image') ?? -1
   const part = input?.contentParts[index]
   if (input && part?.kind === 'resource') return <span className="agent-input-recall__thumbnail"><RecordedImage active={active} control={control} sourceKey={sourceKey} input={input} part={part} partIndex={index} /></span>
-  return first ? <span className="agent-input-recall__thumbnail"><ConversationImage active={active} interactive={false}
+  return first && localImages ? <span className="agent-input-recall__thumbnail"><ConversationImage active={active} interactive={false}
     text={first.text} path={first.path} readImage={readPastedImage} /></span> : null
 }

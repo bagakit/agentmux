@@ -22,7 +22,10 @@ function inputReading(reader: ReturnType<typeof useSessionUserMessages>, limit: 
 export function AgentInputRecap({ request, enabled, available, follow = false }: { request: PreviewRequest; enabled: boolean; available: boolean; follow?: boolean }) {
   const [limit] = useState(() => resolveFocusRecentInputs(useAppStore.getState().config?.focus?.recentInputs))
   const [paused, setPaused] = useState(false), [frozen, setFrozen] = useState<InputReading | null>(null)
-  const reader = useSessionUserMessages(request.control, { enabled: enabled && !paused, initialInputs: limit })
+  const access = request.context.access
+  const reference = access?.conversationReference, port = access?.conversationPort
+  const reader = useSessionUserMessages(request.control, { enabled: enabled && !paused && (!access || Boolean(reference && port)), initialInputs: limit,
+    ...(access && reference && port ? { reading: { reference, port, identity: JSON.stringify([access.identity.runtimeId, access.identity.agentSessionId, request.context.runId]) } } : {}) })
   const region = useRef<HTMLElement>(null), held = useRef<InputReading | null>(null)
   const reflow = useRef<{ container: HTMLElement; anchor: ReturnType<typeof captureReadingAnchor> } | null>(null)
   const current = inputReading(reader, limit)
@@ -78,7 +81,7 @@ export function AgentInputRecap({ request, enabled, available, follow = false }:
   const ordered = snapshot.messages.every(message => message.recordedAt !== undefined && Number.isFinite(message.recordedAt))
   // Missing times retain the public source order; they cannot establish a cross-source chronology.
   const messages = snapshot.messages.slice(-limit)
-  const notice = !request.control || snapshot.error || snapshot.observationError ? 'Recent message reading unavailable'
+  const notice = !(request.control || reference && port) || snapshot.error || snapshot.observationError ? 'Recent message reading unavailable'
     : snapshot.sourceChanged ? 'Message source changed' : snapshot.windowFrozen ? 'Reading window paused'
       : snapshot.windowIncomplete && !snapshot.hasMore ? 'Reading window incomplete' : null
   return <section ref={region} className="focus-context-hover__inputs agent-input-recall" aria-label="Recent user messages"
@@ -91,7 +94,7 @@ export function AgentInputRecap({ request, enabled, available, follow = false }:
       const meta = inputPresentation(message)
       return <li key={message.id} data-hover-input-id={message.id} data-input-author={message.author.kind}>
         <AgentInputEntry presentation={meta} expanded={inspected?.message.id === message.id} controls={request.id + '-input'} onOpen={anchor => openInput(message, anchor)}>
-          <AgentReadingThumbnail reading={meta.reading} active={enabled && !inspected} control={request.control} sourceKey={request.sourceKey} input={message} />
+          <AgentReadingThumbnail reading={meta.reading} active={enabled && !inspected} control={request.control} sourceKey={request.sourceKey} localImages={!request.context.access} input={message} />
         </AgentInputEntry>
       </li>
     })}</ol> : <p className="focus-context-hover__coverage">{snapshot.loading ? enabled ? 'Loading recent messages…' : 'Reading paused' : notice ? 'Recorded inputs unavailable' : snapshot.hasMore ? 'No inputs in this range' : 'No inputs in the current reading window'}</p>}
@@ -119,7 +122,7 @@ function OriginalInput({ inspected, request, active, onClose }: { inspected: Ins
       <div><strong>{meta.author}</strong><time dateTime={meta.date?.toISOString()} title={meta.provenance}>{meta.time}</time></div>
       <small>Original input</small></header>
     <div ref={body} data-agent-input-reading className="agent-input-recall__original-body" tabIndex={0} aria-label="Original input text and images">
-      <AgentReadingBody reading={meta.reading} active={active} control={request.control} sourceKey={request.sourceKey} input={inspected.message} />
+      <AgentReadingBody reading={meta.reading} active={active} control={request.control} sourceKey={request.sourceKey} localImages={!request.context.access} input={inspected.message} />
     </div>
   </div>
 }

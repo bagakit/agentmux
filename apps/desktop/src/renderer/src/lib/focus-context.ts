@@ -1,5 +1,5 @@
 import { COLLECTED_REPLY_TITLE } from '@agentmux/client-ui/conversation-sources'
-import { projectConversationSummary } from '@agentmux/core/conversation'
+import { type AgentConversationRecord, projectConversationSummary } from '@agentmux/core/conversation'
 import { scratchTopicsForConfig } from './scratch-topic-snapshots'
 import type { AgentTimelineItem, AgentTimelineSnapshot } from '@agentmux/core'
 import { isAgentActivityStatusSource } from '@agentmux/core/agent-status'
@@ -23,6 +23,7 @@ import type { AgentObservation } from '@agentmux/core/agent-status'
 export const FOCUS_BUCKETS = ['attention', 'working', 'results', 'idle'] as const
 export type FocusBucket = typeof FOCUS_BUCKETS[number]
 export type FocusContext = {
+  access?: import('./focus-context-access').FocusContextAccess
   toolExecution?: Extract<SessionSnapshot, { kind: 'agent' }>['toolExecution'] | undefined
   workPlacement?: AgentWorkPlacement | undefined
   resourceUnobserved?: boolean | undefined
@@ -120,7 +121,8 @@ export function focusBucketForSession(session: SessionSnapshot, hasCurrentResult
 export function focusNeutralGroupSummary(rows: readonly FocusContext[]): { label: string; detail: string } {
   let idle = 0, unknown = 0, recovery = 0
   for (const row of rows) {
-    if (row.processState !== 'running') recovery++
+    if (row.runUnobserved) unknown++
+    else if (row.processState !== 'running') recovery++
     else if (row.activitySemantic === 'unknown' || row.activitySemantic === 'unsupported' || row.activitySemantic === undefined && row.state === 'running') unknown++
     else idle++
   }
@@ -144,6 +146,7 @@ function sameTimelineStamp(before: FocusTimelineStamp | undefined, timeline: Age
 }
 type FocusConversationFacts = FocusTimelineStamp & {
   recap: LauncherRecap | null
+  firstPrompt?: string
   latest: { detail: string; text: string; currentResult: boolean; matchesRecap: boolean } | null
 }
 function sameConversationFacts(facts: FocusConversationFacts, timeline: AgentTimelineSnapshot | undefined): boolean {
@@ -162,16 +165,32 @@ function focusConversationFacts(timeline: AgentTimelineSnapshot | undefined, pre
   const items = timeline?.items ?? []
   const latest = [...items].reverse().find(item => item.kind !== 'lifecycle')
   const records = timeline ? projectConversationSummary({ agentSessionId: timeline.agentSessionId, timeline }) : []
-  const latestRecord = records.filter(record => record.role === 'message' || record.role === 'observation').at(-1)
-  const recap = items.length ? launcherTimelineRecap(records) : null
-  const text = latestRecord?.content ? clampStep(latestRecord.content.replace(/\s+/g, ' ').trim(), 'head', 140) : ''
-  const label = latestRecord?.role === 'observation' ? COLLECTED_REPLY_TITLE : latestRecord?.author?.kind === 'agent' ? 'Response' : 'Prompt'
-  const facts: FocusConversationFacts = { items: timeline?.items, stream: timeline?.stream, revision: timeline?.revision, sourceHostId: timeline?.sourceHostId, agentSessionId: timeline?.agentSessionId, streamEpoch: timeline?.stream?.epoch, recap,
-    latest: latestRecord?.content ? { detail: `${label} · ${text}`, text,
-      currentResult: Boolean((latestRecord.role === 'observation' || latestRecord.role === 'message' && latestRecord.author?.kind === 'agent') && latestRecord.rawId === latest?.id && latestRecord.original.kind === 'captured' && latestRecord.original.item.status === 'complete' && latestRecord.content.trim()),
-      matchesRecap: Boolean(recap && latestRecord.content.trim() && (recap.source === 'Last reply observation' ? latestRecord.role === 'observation' : latestRecord.role === 'message' && (recap.source === 'Last assistant message') === (latestRecord.author?.kind === 'agent'))) } : null }
+  const facts: FocusConversationFacts = { items: timeline?.items, stream: timeline?.stream, revision: timeline?.revision, sourceHostId: timeline?.sourceHostId, agentSessionId: timeline?.agentSessionId, streamEpoch: timeline?.stream?.epoch,
+    ...focusRecordFacts(records, latest?.id) }
   if (timeline) conversationFactsByTimeline.set(timeline, facts)
   return facts
+}
+type FocusRecordFacts = Pick<FocusConversationFacts, 'recap' | 'latest' | 'firstPrompt'>
+const conversationFactsByRecords = new WeakMap<object, { latestId: string | undefined; facts: FocusRecordFacts }>()
+/** Original records from either public reading path share one summary/result rule. */
+function focusRecordFacts(records: readonly Pick<AgentConversationRecord, 'role' | 'author' | 'content' | 'kind' | 'rawId' | 'original'>[], latestId?: string): FocusRecordFacts {
+  const held = conversationFactsByRecords.get(records)
+  if (held && held.latestId === latestId) return held.facts
+  const latestRecord = records.filter(record => record.role === 'message' || record.role === 'observation').at(-1)
+  const recap = launcherTimelineRecap(records)
+  const text = latestRecord?.content ? clampStep(latestRecord.content.replace(/\s+/g, ' ').trim(), 'head', 140) : ''
+  const label = latestRecord?.role === 'observation' ? COLLECTED_REPLY_TITLE : latestRecord?.author?.kind === 'agent' ? 'Response' : 'Prompt'
+  const prompt = records.find(record => record.original.kind === 'captured' && record.original.item.kind === 'user_message' || record.kind === 'user-message')
+  const facts: FocusRecordFacts = { recap, ...(prompt?.content ? { firstPrompt: prompt.content } : {}), latest: latestRecord?.content ? { detail: `${label} · ${text}`, text,
+    currentResult: Boolean((latestRecord.role === 'observation' || latestRecord.role === 'message' && latestRecord.author?.kind === 'agent') &&
+      (latestId === undefined || latestRecord.rawId === latestId) && latestRecord.original.kind === 'captured' && latestRecord.original.item.status === 'complete' && latestRecord.content.trim()),
+    matchesRecap: Boolean(recap && latestRecord.content.trim() && (recap.source === 'Last reply observation' ? latestRecord.role === 'observation' : latestRecord.role === 'message' && (recap.source === 'Last assistant message') === (latestRecord.author?.kind === 'agent'))) } : null }
+  conversationFactsByRecords.set(records, { latestId, facts })
+  return facts
+}
+export function agentContextForConversation(session: SessionSnapshot, records: readonly AgentConversationRecord[], userName: string | undefined, workspace: WorkspaceRecord | undefined, topicId: string | null): FocusContext {
+  const conversation: FocusConversationFacts = { ...focusTimelineStamp(undefined), ...focusRecordFacts(records) }
+  return agentContextWithConversation(session, undefined, userName, workspace, topicId, conversation)
 }
 /** Read-only Agent facts shared by Focus and the scoped Space directory. No eligibility policy or IO. */
 export function agentContextForSession(session: SessionSnapshot, timeline: AgentTimelineSnapshot | undefined, userName: string | undefined, workspace: WorkspaceRecord | undefined, topicId: string | null): FocusContext {
@@ -188,7 +207,7 @@ function agentContextWithConversation(session: SessionSnapshot, timeline: AgentT
   const activityExplanation = observation ? activityObservationPresentation(observation, state !== 'disconnected') : null
   const presentation = agentPresentationState(session, observation, Boolean(result))
   const stateLabel = presentation.stateLabel
-  const name = session.kind === 'agent' ? agentDisplayName({ userName, firstPrompt: firstPromptFromTimeline(timeline), fallbackLabel: session.label, providerLabel: session.providerId }) : userName ?? session.label
+  const name = session.kind === 'agent' ? agentDisplayName({ userName, firstPrompt: conversation?.firstPrompt ?? firstPromptFromTimeline(timeline), fallbackLabel: session.label, providerLabel: session.providerId }) : userName ?? session.label
   const lastActivityAt = focusLastTaskActivityAt(items, focusActivityEntryTime(session), now)
   const stateEnteredAt = session.kind === 'agent' && session.currentActivity ? undefined : agentStateEnteredAt(session, now)
   let detail = 'No activity details observed', detailIsMessage = false

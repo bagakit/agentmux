@@ -24,13 +24,13 @@ function AgentSessionActionSurface({ title, description, returnTrigger, onClose,
   </Dialog.Root>
 }
 
-export function AgentSessionReadingSurface({ source, label, returnTrigger, onClose }: {
-  source: SessionHistoryReference; label: string; returnTrigger?: HTMLElement | null | undefined; onClose(): void
+export function AgentSessionReadingSurface({ source, label, returnTrigger, onClose, port }: {
+  source: SessionHistoryReference; port?: typeof api.conversation; label: string; returnTrigger?: HTMLElement | null | undefined; onClose(): void
 }) {
   const readResource = useCallback((input: Parameters<typeof api.sessions.historyResource>[1]) => api.sessions.historyResource(source, input), [source.hostId, source.agentSessionId])
   return <AgentSessionActionSurface title="Conversation history" description={`${label} · ${source.hostId}`} returnTrigger={returnTrigger} onClose={onClose}>
     <ActivityView sessionId={source.agentSessionId} executionHostId={source.hostId} capability="complete-events"
-      conversationReading={{ reference: source, identity: JSON.stringify([source.hostId, source.agentSessionId]), enabled: true, opened: true, readCaptured: true }}
-      readPastedImage={path => api.ui.readPastedImage(path)} readHistoryResource={readResource} />
+      conversationReading={{ reference: source, identity: JSON.stringify([source.hostId, source.agentSessionId]), enabled: true, opened: true, readCaptured: true, ...(port ? { port } : {}) }}
+      {...(port ? {} : { readPastedImage: (path: string) => api.ui.readPastedImage(path), readHistoryResource: readResource })} />
   </AgentSessionActionSurface>
 }

@@ -5,6 +5,8 @@ export type AgentBookmarkBounds = { x: number; y: number; width: number; height:
 export type AgentBookmark = {
   key: string
   hostId: string
+  /** An original source Runtime, independent of configured Host routes. */
+  sourceRuntimeId?: string | null
   agentSessionId: string
   /** A display hint only. Current control and Run must be resolved by the live consumer. */
   presentationId: string
@@ -35,10 +37,11 @@ function boundedSnapshot(input: AgentBookmarkSnapshot): AgentBookmarkSnapshot {
 }
 function bookmark(input: BookmarkInput): AgentBookmark | null {
   if (!identity(input.hostId) || !identity(input.agentSessionId) || !identity(input.presentationId) ||
+    input.sourceRuntimeId !== undefined && input.sourceRuntimeId !== null && !identity(input.sourceRuntimeId) ||
     typeof input.label !== 'string' || typeof input.workspaceName !== 'string' ||
     input.excerpt !== undefined && typeof input.excerpt !== 'string' ||
     input.excerptTruncated !== undefined && typeof input.excerptTruncated !== 'boolean' || !finiteBounds(input.bounds)) return null
-  return { key: agentBookmarkKey(input.hostId, input.agentSessionId), hostId: input.hostId, agentSessionId: input.agentSessionId,
+  return { key: agentBookmarkKey(input.hostId, input.agentSessionId), hostId: input.hostId, ...(input.sourceRuntimeId === undefined ? {} : { sourceRuntimeId: input.sourceRuntimeId }), agentSessionId: input.agentSessionId,
     presentationId: input.presentationId, ...boundedSnapshot(input),
     bounds: { x: input.bounds.x, y: input.bounds.y, width: input.bounds.width, height: input.bounds.height } }
 }
