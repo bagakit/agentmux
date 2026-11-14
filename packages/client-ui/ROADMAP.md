@@ -1,40 +1,62 @@
 # Roadmap
 
-The goal is an independently usable design system for software where people work with Agents. A team should be able to install a control in its own app. A team using a different UI toolkit should be able to read a pattern, implement it and pass the same behavioral cases.
+The goal is an independently usable design system for software where people work with Agents. A React team can install a field or menu in its own app. A team using another toolkit can implement a documented Agent task and check its implementation against the same cases. The [README](README.md) describes the current private package. The entries and boundaries below are the planned migration.
 
-The [README](README.md) describes the current package. The milestones below describe the intended order of work and the evidence needed to call each outcome ready. The package is currently private and has a workspace dependency on AgentMux Core.
+## Target architecture
 
-## 1. Make everyday controls dependable
-
-Start with a keyboard-operated action menu, selected icon buttons, and save feedback in a compact editor. These small controls test three different obligations.
-
-| Interaction | What a person should experience | How to check it |
+| Layer | What it owns | What can depend on it |
 | --- | --- | --- |
-| Choose a mode | A keyboard user can open the menu, move between modes, select once and return to the trigger on cancel. A pointer user can inspect the menu while preserving the editor's caret. | Check the actual focused element and count host calls. Moving focus issues zero mode changes. A current-mode mark requires an observation of that mode. Searchable command fields also exercise text entry and IME. |
-| Toggle an icon action | Its selected state is recognizable at rest, with the pointer away. Keyboard focus is visible on either state. | Compare selected, unselected and focused states in supported themes and reduced motion. Verify the accessible pressed state and a visible cue beyond color. |
-| Save a draft | The adjacent action stays under the pointer while feedback changes. Failure leaves the original draft available. | With an unchanged set of actions at a fixed width, sample their hit areas throughout the update. Exercise long translations, narrow widths, rapid re-entry and reduced motion. Verify exactly one request for one activation. |
+| Foundations | Theme tokens, type and spacing scales, semantic icons, motion meanings, reduced-motion and focus styling. Build on the existing `theme`, `icons` and style entries. | Every visual layer. A host supplies its theme and density. |
+| Controls and interaction behavior | Native input and action semantics, selection, keyboard navigation, overlay focus, toolbar movement and viewport-local scroll observations. Start from `input` and named component entries. | Composed controls, patterns and hosts can use these directly. A basic control can be rendered and type-checked with React and the DOM. |
+| Composed controls | A field with a label and error, an edit footer, an action menu, a searchable choice list, a disclosure and inline feedback. Each answers one reusable UI question and exposes values, events or slots. | Patterns and hosts. Each composition reuses the lower-level focus, input and styling owners. |
+| Agent interaction patterns | The facts, user intent, result and counterexamples for a complete task. Each has a portable description, cases and, when shared rendering is justified, small React parts. | Any host. An adapter supplies the original subject, observations and operations. |
+| Host adapters and optional domain entries | Store selection, routes, persistence, resource access, protocol mapping and native window behavior belong to consumers. Heavy document and terminal capabilities have direct opt-in entries. | The host assembles the UI. An integration used by several hosts can live in one downstream adapter. |
 
-A maintainer delivers each control through its normal product entry with a small runnable state example. The host continues to own the draft, the available actions and any save or mode-setting result.
+Imports flow from the host towards patterns, composed controls and primitives. The package's public types follow the same direction. A menu needs a document, a portal and a way to return focus. It should type-check in an app that has never heard of an Agent session. A receipt view receives a result supplied by its host. Its contents cannot grant permission or confirm execution.
 
-## 2. Prove one Agent pattern across three hosts
+Keep the existing public entry working while migrating its consumers as one change. Keep `theme`, `icons`, `input`, named `components/*` and the advertised stylesheet entries discoverable. Keep internal helpers private by default. Inventory consumers of existing wildcard exports before narrowing them. Use a named `patterns/<task>` entry once a pattern has a reusable implementation and a real caller. Its portable contract belongs in `docs/patterns/`. Simple controls can remain single files. Introduce a separate distribution boundary when a neutral consumer otherwise has to install or type-check a private integration.
 
-Start [Find an Agent's work](docs/patterns/agent-work-location.md) alongside the first control. It asks who is working, where execution and project resources live, and which open view a person can enter. Desktop may use a details popover, Mobile a sheet, and an outside app its own navigation list.
+## Controls to extract, strengthen and adopt
 
-Use the same cases on all three. Cover a confirmed empty list, an incomplete observation, multiple views with identical names, two routes to one view, a target that changes and a late result for an earlier Agent. The host supplies identities, observations and navigation. It revalidates the chosen location. The library can share the summary and chooser after these implementations reveal the necessary props. Completion requires reaching the chosen view in each host while preserving the original work when the choice fails or is cancelled.
+Names in code formatting are existing entries or components. Descriptions of new parts below are target behaviors.
 
-## 3. Extend the families and the pattern catalog
+| Family | Starting point and intended change | Where to prove adoption |
+| --- | --- | --- |
+| Shared motion and focus styling | Apply semantic motion tokens to press feedback, menu and disclosure transitions, and changes of status. A rapid reversal follows the latest input. The resting state communicates the result when motion is reduced. | Change selection during a transition, close a menu while its contents are entering, and complete an action with reduced motion. Check the final focus, hit area, visible state and idle work. |
+| Actions and toolbars | Strengthen `Button` and `IconButton`. A pressed tool is recognizable with the pointer away. Keyboard focus remains distinct. The hit area of a neighboring action stays put when a busy label changes. Share toolbar key handling where callers need the same behavior. | A toggle toolbar, a touch toolbar and an editor or settings action group. Check keyboard, touch, long labels, themes, interrupted feedback and reduced motion. |
+| Fields and compact editing | Keep `TextInput`, `Textarea`, `InputGroup`, `FormRow`, `ComposerTextarea` and `ComposerEditFooter`. Share the association of label, help and inline error, plus the existing compact editor layout. Callers own values, anchors and submission. | A settings field, a queued edit and an anchored comment. Check accessible names and errors, composition, undo, cancel and the original draft after failure. |
+| Overlays, menus and choice | Narrow the environment used by `Modal` and `HoverDropdownMenu`. Give action menus arrow-key opening and navigation. A value selector marks its observed value. A searchable command list keeps a real input and handles composition. Inspect existing `ComposerToolMenu` consumers individually. | Keyboard and pointer in the originating document, a second window, and a touch surface. Arrowing over an action makes zero host calls. Enter invokes it once. Escape restores the appropriate focus. |
+| Reading and disclosure | Build on per-viewport reading scroll markers, activity follow behavior and `ConversationDisclosure`. Share the explicit return-to-latest action and reader intent where they match. A collapsed or hidden view releases its presentation work. | An activity feed and a streaming conversation with older pages, a selected passage and expanded details. Validate the terminal separately on its own output path. |
+| Status, errors and recovery | Reuse disclosure and action controls for a short status, its original detail and any permitted next action. Derive visible labels from host observations. Reserve live announcements for meaningful changes. | A failed or pending send and a recorded operation. Exercise unknown, rejected, retryable and confirmed results, including late updates. |
+| Local navigation and specialist views | Audit tabs, segments, lists, avatars, Note and terminal consumers for the eligible controls above. Keep native pickers, window layouts, gestures, rich editing and terminal I/O with the owner of that behavior. | For each retained local implementation name the concrete platform behavior or domain obligation it protects. |
 
-| Family | Next consumer and observable outcome |
+## Patterns to promote
+
+| Pattern | Public parts and ownership | Cases that must agree across hosts |
+| --- | --- | --- |
+| **Find an Agent's work** | Location summary, distinguishable choices and a selection intent carrying the exact subject and location. The host owns the execution host, resource project, display bindings and revalidation. The [written pattern](docs/patterns/agent-work-location.md) already exists. | Zero, one, many, unknown, aliased routes, a rebound target, a late result and cancel. The same cases run on desktop, mobile and an independent host with its own data. |
+| **Edit or annotate in place** | Controlled draft, composition-safe field, actions and inline result. The caller owns the anchored selection or queue item, draft lifetime and destination. | Two simultaneous drafts, composition followed by Enter, cancel, stale selection, conflict and add-to-draft. The untouched draft and original target remain available. |
+| **Read while work continues** | One follow or history-reading intent per viewport, a stable passage anchor and an explicit return to latest. The transport owns ordered output and gaps. | Append at the end, append while reading above, prepend history, expand a detail, leave and return. The reader keeps the same passage until choosing to follow again. |
+| **Request an action and read its receipt** | An intent with the original operation reference, a status summary and optional details. The host distinguishes a request, a saved response, unknown delivery, confirmed completion and failure. | Repeat activation, a late result for another operation, rejection, explicit retry and genuine completion. The UI can always explain what the available evidence confirms. |
+
+## Priority and dependencies
+
+| Order | Why it comes here | First deliverable and exit condition |
+| --- | --- | --- |
+| **P0 · Unblock input and protect ongoing work** | A broken keyboard path prevents a task. Lost drafts, misdirected actions or disrupted live reading can invalidate the user's work. | Deliver the action menu through a real touch client and verify its keyboard path and existing desktop behavior. Begin matched input and streaming measurements on the current implementation. A reproduced identity, draft or active-reading regression takes priority immediately. |
+| **P1 · Fix repeated feedback and prove the first patterns** | Pressed and busy states recur across many controls. The first location pattern exposes whether an independent consumer can actually use our data and focus interfaces. | Deliver static pressed and stable busy states, field feedback, narrow overlay services and the first location consumer. Exercise the remaining location hosts against the same cases. Independent slices can proceed together. |
+| **P2 · Migrate the families and integrate measured improvements** | Repeated composition and multiple owners become clear once a reference consumer works. The streaming baseline identifies which work is expensive. | Adopt the relevant shared controls in every eligible entry, including secondary readers, toolbars and mobile variants. Deliver the editing, reading and receipt patterns in their real paths. Remove superseded owners once their consumers have moved. |
+| **P3 · Qualify the standalone release candidate** | A clean external build exposes dependency, packaging and documentation mistakes hidden by a workspace. | Install the actual archive in a clean app with declared dependencies. Verify JS, types, CSS, neutral-host interaction and each supported Node subpath. Review compatibility, migration and asset provenance. Public distribution requires a separate release decision. |
+
+Start the neutral host with the first pattern. Run the packed version when the distribution boundary is ready. These priorities order work on the library. Accurate identity and receipts, draft preservation and usable live input apply at every priority. An implementing team can start an independent slice as soon as it has its real inputs.
+
+## What an improvement must demonstrate
+
+| Dimension | Evidence to collect before and after |
 | --- | --- |
-| Inputs and editing | Queued edits and annotations retain composition, undo, selection, focus and the caller's draft. Labels, hints and errors remain available at narrow widths and with a screen reader. |
-| Reading and scrolling | In a conversation and an activity stream, new output follows a reader at the end. While someone reads history, appending content or prepending an older page keeps the passage in view. Verify the terminal separately in a live session. |
-| Overlays and feedback | Actions, selectable values and searchable commands have the keyboard behavior their roles promise. Closing an overlay gives focus to the right element in the originating document. |
-| Agent actions and receipts | The UI distinguishes a request, a saved response, an unconfirmed result and confirmed completion. A delayed receipt updates only its original operation. |
+| Interaction and motion | Trace the intended action, focus, selected value, accessible feedback and final target for keyboard, pointer, touch and IME as applicable. Check rest, rapid reversal and reduced motion. For a fixed-width action group with the same actions, target at most one CSS pixel of adjacent hit-area displacement during busy feedback. Test intentional responsive reflow separately. |
+| Performance | Use the same host, device, build settings, visible content and input sequence. Record input-to-visible-feedback p95, scroll frame times, first readable passage, completed content and anchor offset. Grow unrelated retained views while keeping visible work fixed and count additional commits, observers and timers. Repeat the baseline to establish variation. To deliver the performance goal, improve at least one measured bottleneck in a frequent workflow beyond that variation. Check subsequent input and reading to rule out deferring the same cost. Preserve existing low-cost paths. |
+| Maintainability | Trace one real behavior change from the public entry to its consumers. One owner should implement the change. Callers with the same semantics inherit it without parallel style patches or handlers. A new consumer can find the import, styles, example and supported states in the package alone. |
+| Code quality and complexity | Compare the decisions a maintainer must make for the same task. Remove duplicate state, branch-on-host logic and adapters that only rename fields. Keep identity checks, draft ownership and native behavior with their proper owners. Exercise a neutral type consumer and a real product caller. A reduction in files or lines alone cannot establish a simpler change. |
 
-Grow from the existing input, component, style and theme entries. Group files when a change has the same owner and callers. Measure both the runtime imports and the declaration dependencies a consumer sees. A basic field should load without a terminal, rich editor or Agent runtime. Give overlays a narrow interface for document, portal and focus services so an independent host can type-check a menu without domain-specific types. Document a platform variation alongside its common behavior.
-
-## 4. Qualify independent distribution
-
-Build a release candidate and install its packed artifact into a clean React host outside the workspace. Verify the documented JS, types, styles and theme requirements. Drive the location pattern with that host's own data. Publish the supported environments, examples, behavior changes and migration instructions. Resolve licensing and asset provenance before public distribution. The [maintainer guide](CONTRIBUTING.md) owns the verification and release procedure.
-
-Revisit a milestone when its public outcome or adoption evidence changes. Per-change tasks, dates, measurements and review logs belong to the implementing project. An independent implementation passing the same cases is evidence of portability. External adoption is a separate result to report when it happens.
+For each migration, record the eligible consumers and classify each as migrated, already compliant or a justified specialist case. Exercise the normal entry, deliberately break the behavior to check the test, then remove the obsolete handler, style or export after its last consumer moves. An unexamined caller keeps its family open. Independent visual review covers changes to visible behavior. The [maintainer guide](CONTRIBUTING.md) owns release and compatibility practice.

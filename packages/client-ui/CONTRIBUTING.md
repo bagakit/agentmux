@@ -21,7 +21,7 @@ Keep the dependency direction visible in both code and types. The application im
 ## Describe the change
 
 - **For a control**, document its import and styles, a minimal example, meaningful states and the value or event the host receives. Show states that can coexist, such as selected with visible keyboard focus, or a failed save with an editable draft.
-- **For a pattern**, name the task in the user's words. Describe what the host knows, what remains unknown, who acts, how a result gets confirmed, and what happens if the subject changes. Give concrete input, action and expected outcome cases that another team can run. Link reference consumers and distinguish a written contract, an exported implementation and verified hosts. [Find an Agent's work](docs/patterns/agent-work-location.md) is the first example.
+- **For a pattern**, name the task in the user's words. Describe what the host knows, what remains unknown, who acts, how a result gets confirmed, and what happens if the subject changes. Give concrete input, action and expected outcome cases that another team can run. Keep portable examples in the package. Each host links back from its own integration notes and records the cases it verified. [Find an Agent's work](docs/patterns/agent-work-location.md) is the first example.
 - **For a public entry**, document its React, CSS, DOM, Node and host requirements as applicable. Prefer a named entry a reader can try directly. Keep portable control types usable without an application's stores. Keep Note codecs, terminal machinery and domain adapters reachable by the consumers that need them.
 
 ## Verify the experience

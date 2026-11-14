@@ -10,7 +10,7 @@ The package is private to the AgentMux workspace. The React entries use React an
 | --- | --- |
 | Use a button, text field or compact editor | [Native actions](#native-actions) and [Inputs](#inputs) cover the import, stylesheet and who owns the value. |
 | Apply a pattern in another interface | [Find an Agent's work](docs/patterns/agent-work-location.md) gives the question, required inputs, actions and observable results. It includes cases a host can run with its own data. |
-| Understand what the library aims to support next | The [roadmap](ROADMAP.md) explains the milestones for controls, Agent patterns and independent distribution. |
+| Plan a component or pattern migration | Start with the [target architecture](ROADMAP.md#target-architecture), [control families](ROADMAP.md#controls-to-extract-strengthen-and-adopt), [pattern catalog](ROADMAP.md#patterns-to-promote) and [priorities](ROADMAP.md#priority-and-dependencies). |
 | Add a control, propose a pattern or change a public behavior | The [maintainer guide](CONTRIBUTING.md) covers ownership, evidence and compatibility. |
 
 For example, a host can label a field and submit its current value. The host supplies its theme tokens and owns the draft.
