@@ -53,6 +53,8 @@ export async function cancelOriginalTakeover(options: { spatial: AgentMuxSpatial
       diskDurability: acknowledged && result.diskDurability === 'confirmed' ? 'confirmed' : 'unconfirmed',
       agent: result.outcome === 'created' ? { agentSessionId: record.agentSessionId, run: result.run, hostId: record.execution.hostId, runtimeId: record.execution.runtimeId! } : null }
   } catch (cause) {
-    return { ...base, outcome: 'unconfirmed', agent: null, initialInput: 'unknown', issue: cause instanceof Error ? cause.message : String(cause) }
+    // The spatial record alone does not acknowledge the original execution write.
+    return { ...base, outcome: 'unconfirmed', agent: null, initialInput: 'unknown', diskDurability: 'unconfirmed',
+      issue: cause instanceof Error ? cause.message : String(cause) }
   }
 }
