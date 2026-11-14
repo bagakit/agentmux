@@ -73,7 +73,15 @@ app.whenReady().then(async () => {
       await until(indicator + '.getAnimations().length===0')
       const aligned = `Math.abs(${indicator}.getBoundingClientRect().left-document.activeElement.getBoundingClientRect().left)<1`
       assert.equal(await read(aligned), true, 'The indicator settles at the selected radio')
-      return { activePanel: 'decisions', focusedRadio: 'roomy', indicatorAligned: true }
+      const position = 'document.querySelector(\'nav[aria-label="Reading position"]\')'
+      const marker = `${position}.querySelector('.selection-indicator')`
+      const target = `${position}.querySelector('[aria-current=location]')`
+      await until(`${marker}.dataset.selectionMotion==='true'`)
+      await tap('nav[aria-label="Reading position"] button[aria-current="false"]')
+      await until(`${target}.textContent==='Original decisions' && ${marker}.getAnimations().length===0`)
+      assert.equal(await read(`['left','top','width','height'].every(key => Math.abs(${marker}.getBoundingClientRect()[key]-${target}.getBoundingClientRect()[key])<1)`), true)
+      assert.equal(await read(`document.activeElement===${target}`), true)
+      return { activePanel: 'decisions', focusedRadio: 'roomy', indicatorAligned: true, readingPositionAligned: true }
     },
     async overlays() {
       await read('document.querySelector("[aria-haspopup=dialog]").focus()')
