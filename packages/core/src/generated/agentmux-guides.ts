@@ -210,6 +210,7 @@ export type GuideSlots = {
   "shared/mote-supervision": never
   "shared/note-editing": never
   "shared/runtime": "goal-skill-entry" | "self-context-verb"
+  "shared/session-naming": never
   "shared/spatial": never
   "shared/spatial-terms": never
 }
