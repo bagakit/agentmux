@@ -6,12 +6,13 @@
 
 [文档导航](../README.md) · [文档事实与维护规范](../guides/document-truth-and-maintenance.md) · [视觉与密度合同](agentmux-surface-density.md)
 
-手机的连接、导航、对象身份、提醒与网页更新行为见[手机版 Relay 连接](behavior/public-control.md#手机版-relay-连接)；手机界面呈现见[手机客户端的呈现](presentation/mobile-client.md)。手机复用哪些专题及其差异见 [Mobile 对齐索引](agentmux-mobile-alignment.md)。
+手机的导航、对象、对话、附件、终端阅读与网页更新行为见[手机客户端](behavior/mobile-client.md)；设备接入、Relay 连接与授权见[手机版 Relay 连接](behavior/public-control.md#手机版-relay-连接)；手机界面呈现见[手机客户端的呈现](presentation/mobile-client.md)。手机复用哪些专题及其差异见 [Mobile 对齐索引](agentmux-mobile-alignment.md)。
 
 ## 按主题阅读
 
 | 读者问题 | 唯一正文 |
 | --- | --- |
+| 多层注意力的分层依据、边界与验证（不定义新约束） | [多层注意力](multi-layer-attention.md) |
 | 全局原则、保护边界及文档归属 | [共同原则、设计事实与 Owner](behavior/shared-rules.md) |
 | Mote／Work／Know 产品分组、空间模型及 Space 入口、实体寻址与导航布局 | [空间、导航与工作面](behavior/spaces-and-layout.md#空间模型) |
 | Launcher 的环境、工具开合、草稿、Mote 创建委托与 Resume | [Launcher 工作起点](behavior/workface-launcher.md) |
@@ -30,8 +31,9 @@
 | 对话视图目标、当前与历史阅读、消息／过程／资源、答复及产品验收 | [对话视图 PRD](behavior/conversation-mode.md) |
 | Composer、Message Tools、草稿、队列、邮箱与持续推进 | [输入与邮箱](behavior/conversation-input.md) |
 | 交互模式与外部群聊的共同语义、状态与投递边界 | [共同对话协议与外部交流入口](behavior/conversation-mode.md#共同对话协议与外部交流入口) |
+| 外部聊天平台的绑定身份、群入口与成员访问、双向交付、托管 Host 与凭据 | [外部对话渠道与群聊连接](behavior/conversation-channels.md) |
 | Provider 能力、语义身份、注入上下文、命名与输入环境 | [Provider、身份与输入能力](behavior/agent-capabilities-and-messaging.md) |
-| A2A 发现、广播、双向事件、spawn、协作图、消息投递与协作责任 | [A2A 协作与可观测性](behavior/a2a-collaboration.md) |
+| A2A 发现、广播、双向事件、spawn、消息投递与协作责任 | [A2A 协作与可观测性](behavior/a2a-collaboration.md) |
 | amux 可读信封、业务标记、内容分享与对象链接的格式 | [amux 格式协议](../specs/amux-protocol.md) |
 | ordered bytes、连续历史阅读、几何和相关成本 | [Terminal、历史与成本](behavior/terminal-reading.md) |
 | 协议、导航、自动化、控制交接与批准 | [Browser 工作面](behavior/browser-workface.md) |
@@ -44,9 +46,8 @@
 | 跨模块诊断接入、证据关联、历史/采样边界与错误码 | [Diagnostic Evidence 设计](diagnostic-evidence.md) |
 | 对象优先 CLI、公共服务、自操作和跨客户端合同 | [公共控制与跨客户端接入](behavior/public-control.md) |
 | Topics CUI 的准确目标、内容修订、转分类与承接回执 | [Topics 知识库的公共接入](behavior/public-control.md#topics-知识库的公共接入) |
+| 约束背后的当前源码机制（不是设计合同） | [终端交互分层](../architecture/terminal-interaction-layers.md) · [Terminal 外观](../architecture/terminal-appearance.md) · [对话阅读链](../architecture/conversation.md#desktop-阅读链) · [Note 编辑](../architecture/note-editing.md) · [文件与 Git](../architecture/files-and-git.md) · [原生层机制](../architecture/native-desktop.md)；其余见[文档导航](../README.md#按改动定位规则) |
 
 ## 更新与保全
 
-新约束原位合入所属专题，同一事实只定义一次，其他正文链接到 owner。入口只维护主题导航，不按日期、Task 或聊天轮次追加完整需求。
-
-修改时同步受影响引用，保留原要求的权限、恢复、健康 Run、工作面、相关成本及交付责任；纯文档证据不替代产品行为验收。过程资料只留本机，其 Git 与留存边界见 [过程目录](../process-directories.md)。
+新约束原位合入所属专题，同一事实只定义一次，其他正文链接到 owner。入口只维护主题导航，不按日期、Task 或聊天轮次追加完整需求。修改步骤与检查见[完成一次文档修改](../guides/document-truth-and-maintenance.md#完成一次文档修改)，过程资料的留存边界见[过程目录](../process-directories.md)。
