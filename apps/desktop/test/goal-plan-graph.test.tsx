@@ -171,6 +171,33 @@ describe('Goal plan graph', () => {
     expect(highlighted()).toEqual(['ui'])
   })
 
+  it('keeps an automatic report below the graph, then moves its mounted reader to the selected narrow card', async () => {
+    seed(goal({ plan: plan(nodes), delegations: [reported('api')] }))
+    await dom.render(<GlobalBoardSurface />)
+    const canvas = graph()!.querySelector<HTMLElement>('.goal-plan__canvas')!
+    const task = canvas.querySelector<HTMLButtonElement>('[data-goal-plan-node="api"] .goal-plan-node__head')!
+    const reader = graph()!.querySelector<HTMLElement>('.goal-plan__reading')!
+    const form = reader.querySelector<HTMLDetailsElement>('.goal-delivery__form')!
+    const timeline = graph()!.querySelector('[aria-label="Execution timeline"]')!
+    expect(task.getAttribute('aria-label')).toBe('Node api')
+    expect(document.getElementById(task.getAttribute('aria-describedby')!)).toBe(task.querySelector('.goal-plan-node__metadata'))
+    expect(reader.closest('.goal-plan__reader-dock')).not.toBeNull()
+    expect(reader.compareDocumentPosition(timeline) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    form.open = true
+    canvas.style.setProperty('--goal-plan-inline-reading', '1')
+    await act(async () => task.querySelector<HTMLElement>('.goal-plan-node__who')!.click())
+    const slot = task.closest('li')!.nextElementSibling!
+    expect(slot.getAttribute('data-goal-reader-for')).toBe('api')
+    expect(slot.querySelector('.goal-plan__reading')).toBe(reader)
+    expect(form.open).toBe(true)
+    expect(graph()!.querySelectorAll('.goal-plan__reading')).toHaveLength(1)
+    expect(document.activeElement).toBe(reader.querySelector('h3'))
+    const back = [...reader.querySelectorAll('button')].find(button => button.textContent === 'Back to node')!
+    await act(async () => back.click())
+    expect(document.activeElement).toBe(task)
+    expect(graph()!.querySelector('.goal-plan-node__reader-slot')).toBeNull()
+  })
+
   it('opens a node in place with its check, thread, report and review evidence', async () => {
     seed(goal({ plan: plan(nodes, [pass('api')]), delegations: [reported('api')] }))
     await dom.render(<GlobalBoardSurface />)
@@ -286,7 +313,8 @@ describe('Goal plan graph', () => {
     expect(graph()!.querySelector('h2')!.textContent).toContain('Execution plan')
     expect(graph()!.querySelector('[data-goal-plan-request]')).not.toBeNull()
     const open = origin.querySelector<HTMLButtonElement>('button')!
-    expect(open.textContent).toBe(record.title)
+    expect(open.getAttribute('aria-label')).toBe(record.title)
+    expect(open.querySelector('.goal-plan-node__who')).not.toBeNull()
     await act(async () => open.click())
     const reading = graph()!.querySelector('[data-goal-plan-detail="goal"]')!
     expect(reading.textContent).toContain(alignment ? alignment.summary : 'Keep the same goal and original words.')
@@ -489,7 +517,7 @@ describe('plan graph navigation and list progress', () => {
 
   it('draws a dependency as a smooth left-to-right curve between its anchors', () => {
     expect(goalPlanEdgePath({ x: 10, y: 20 }, { x: 110, y: 60 })).toBe('M 10 20 C 60 20, 60 60, 110 60')
-    expect(goalPlanEdgePath({ x: 0, y: 0 }, { x: 20, y: 0 })).toBe('M 0 0 C 24 0, -4 0, 20 0')
+    expect(goalPlanEdgePath({ x: 0, y: 0 }, { x: 20, y: 0 })).toBe('M 0 0 C 10 0, 10 0, 20 0')
   })
 })
 
