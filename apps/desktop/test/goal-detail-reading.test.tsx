@@ -25,7 +25,7 @@ const button = (text: string) => [...dom.container.querySelectorAll<HTMLButtonEl
 const selected = () => goalOutlineTrigger(dom.container).getAttribute('aria-label')
 
 /** These measured positions stand in for layout only; the original scroll consumer and editors are mounted. */
-function measure(positions = { overview: 900, plan: 200, activity: 1800 }, total = 2400) {
+function measure(positions = { plan: 200, overview: 900, results: 1120, execution: 1450, activity: 1800 }, total = 2400) {
   const detail = dom.container.querySelector<HTMLElement>('.goals-detail')!
   vi.spyOn(detail, 'getBoundingClientRect').mockImplementation(() => ({ top: 20, bottom: 620, height: 600 } as DOMRect))
   Object.defineProperty(detail, 'clientHeight', { configurable: true, value: 600 })
@@ -54,7 +54,7 @@ it('the mounted workspace tracks explicit reading and manual scroll without repl
   expect(detail.querySelectorAll('[data-goal-outline-trigger]')).toHaveLength(1)
   const menu = await openGoalMenu(trigger)
   expect([...menu.querySelectorAll('[data-goal-destination]')].map(item => item.textContent?.trim()))
-    .toEqual(['Execution plan', 'Goal brief', 'Activity'])
+    .toEqual(['Execution plan', 'Goal brief', 'Criteria & results', 'Execution records', 'Activity'])
   expect(menu.querySelector('[aria-current="location"]')?.getAttribute('data-goal-destination')).toBe('plan')
   await pressGoalMenuKey(menu, 'Escape')
   await vi.waitFor(() => expect(document.activeElement).toBe(trigger))
@@ -66,6 +66,13 @@ it('the mounted workspace tracks explicit reading and manual scroll without repl
   expect(document.activeElement, 'choosing Goal brief focuses the original brief').toBe(detail.querySelector('[data-goal-reading-section="overview"]'))
   expect(detail.scrollTop).toBe(848)
   expect(goalOutlineTrigger(detail)).toBe(trigger)
+  for (const [id, label] of [['results', 'Criteria & results'], ['execution', 'Execution records']] as const) {
+    await chooseGoalSection(detail, id)
+    expect(document.activeElement).toBe(detail.querySelector(`[data-goal-reading-section="${id}"]`))
+    expect(selected()).toBe('Jump to section: ' + label)
+  }
+  expect([...detail.querySelector('.goals-detail__main')!.children].map(section => (section as HTMLElement).dataset.goalReadingSection))
+    .toEqual(['plan', 'overview', 'results', 'execution', 'activity'])
   await scroll(detail, 1800)
   expect(selected()).toBe('Jump to section: Activity')
   await scroll(detail, 1000)
@@ -75,7 +82,7 @@ it('the mounted workspace tracks explicit reading and manual scroll without repl
   expect(dom.container.querySelector('[aria-label="Goal description"]')).toBe(editor)
   expect(dom.container.querySelector('[data-goal-reading-section="plan"]')).toBe(plan)
   expect(useAppStore.getState().goalEditDrafts[goal.id]?.description?.value).toBe('Keep the unsaved original draft.  ')
-  expect(dom.container.querySelectorAll('[data-goal-reading-section]')).toHaveLength(3)
+  expect(dom.container.querySelectorAll('[data-goal-reading-section]')).toHaveLength(5)
 })
 
 it('uses the keyboard to move among document sections and read the chosen destination', async () => {
@@ -95,7 +102,7 @@ it('uses the keyboard to move among document sections and read the chosen destin
 
 it('keeps a chosen plan current when brief and plan share a row and marks a visible Activity at the document end', async () => {
   await mount()
-  const detail = measure({ overview: 200, plan: 200, activity: 1050 }, 1400)
+  const detail = measure({ plan: 200, overview: 200, results: 520, execution: 750, activity: 1050 }, 1400)
   await chooseGoalSection(detail, 'plan')
   await scroll(detail, 200)
   expect(selected()).toBe('Jump to section: Execution plan')

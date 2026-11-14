@@ -9,7 +9,7 @@ const mutation = process.env.GOAL_DETAIL_READING_MUTATION || null
 const mutations = {
   'manual-reading': ["detail.addEventListener('scroll', scheduleReadingSection, { passive: true })", "detail.addEventListener('unused-scroll', scheduleReadingSection, { passive: true })"],
   'selected-reading': ["aria-current={here ? 'location' : undefined}", 'aria-current={undefined}'],
-  'wrong-destination': ["id === 'overview' ? overviewRef.current : activityRef.current", "id === 'overview' ? planRef.current : activityRef.current"],
+  'wrong-destination': ["readingTargets[id].current", "id === 'overview' ? planRef.current : readingTargets[id].current"],
   'properties-disclosure': ['<details className="goals-detail__properties"', '<details open className="goals-detail__properties"']
 } as const
 const mutationOwner = mutation === 'selected-reading' ? outline : owner
@@ -19,7 +19,7 @@ const sha = (source: string) => createHash('sha256').update(source).digest('hex'
 const segments: Record<string, [string, string]> = {
   'apps/desktop/src/renderer/src/components/GlobalBoardSurface.tsx': ['{selectedDemand ? <GoalDetail', '/> : selectedDemandId'],
   'apps/desktop/src/renderer/src/components/GoalWorkArea.tsx': ['    <GoalDelegationWork', 'onRevealResults={onRevealResults} />'],
-  'apps/desktop/src/renderer/src/components/GoalDelegationWork.tsx': ['const recordNodes = embedded ?', 'className="goal-work-area__overview">{overview}</div>']
+  'apps/desktop/src/renderer/src/components/GoalDelegationWork.tsx': ['const recordNodes = embedded ?', '    ...records.filter(record => record.key === focusedKey)']
 }
 const full = [owner, outline, 'apps/desktop/src/renderer/src/components/GoalProperties.tsx', 'apps/desktop/src/renderer/src/lib/goal-edit-drafts.ts', 'apps/desktop/src/renderer/src/styles/goal-reading.css']
 export default { ...original, plugins: [...original.plugins ?? [], {

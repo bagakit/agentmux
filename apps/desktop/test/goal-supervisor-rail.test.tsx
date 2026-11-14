@@ -60,7 +60,7 @@ describe('Goal Supervisor reading rail', () => {
       { ...common, phase: 'report-review', alert: 'manager-review', nextOwner: { kind: 'manager', agentSessionId: 'supervisor', action: 'Collect the original report' } }
     ] }, delegationObservationIssue: 'The original observation is unavailable.' }))
     expect(container.querySelectorAll('[data-goal-supervisor-next]')).toHaveLength(1)
-    expect(container.querySelector('[data-goal-supervisor-next]')?.textContent).toBe('Next · SupervisorCollect the original report')
+    expect(container.querySelector('[data-goal-supervisor-next]')?.textContent).toBe('Supervisor’s next stepCollect the original report')
     expect(container.textContent).not.toContain('Keep the original work')
     expect([...container.querySelectorAll('[role="status"]')].map(element => element.textContent)).toEqual(['Supervisor observation unconfirmed', 'The original observation is unavailable.'])
     const source = container.querySelector<HTMLDetailsElement>('[data-goal-supervisor-source]')!

@@ -70,8 +70,8 @@ describe('Goal plan graph', () => {
     expect(outline.querySelector('[data-goal-destination="activity"]')).toBeNull()
     await pressGoalMenuKey(outline, 'Escape')
     expect(main.querySelector('.goal-collaboration')).toBeNull()
-    const overview = main.querySelector('.goal-work-area__overview')!
-    expect(overview.firstElementChild).toBe(main.querySelector('[aria-label="Goal brief"]'))
+    const overview = main.querySelector('[aria-label="Goal brief"]')!
+    expect(overview.parentElement).toBe(main)
     expect(Boolean(graph()!.compareDocumentPosition(overview) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true)
     const intent = main.querySelector('.goals-detail__brief .goals-intent__reading')!
     expect(intent.textContent).toContain('Original intent')
