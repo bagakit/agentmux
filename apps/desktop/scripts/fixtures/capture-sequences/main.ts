@@ -162,10 +162,10 @@ async function run() {
       if (startRecovery) console.log('start-recovery: stop')
       await click('Stop scrolling capture')
       await until('review with retained frames', async () => (await evaluate("window.captureSequence.load()")).state === 'review')
-      await until('review actions settled', async () => await evaluate("document.body.textContent.includes('Start scrolling capture') && !document.querySelector('button.primary-button').disabled"))
+      await until('review actions settled', async () => await evaluate("document.body.textContent.includes('Confirm') && !document.querySelector('button.primary-button').disabled"))
       if (startRecovery) console.log('start-recovery: resume')
       const samplesBeforeResume = sampleCount
-      await click('Start scrolling capture')
+      await evaluate('window.captureSequence.load().then(s=>window.captureSequence.start(s.requestId,2))')
       await until('resumed native sample', () => sampleCount > samplesBeforeResume)
       const resumed = await evaluate("window.captureSequence.load()")
       assert.equal(resumed.frames.length, 2, 'resume preserves the confirmed long image')
@@ -177,9 +177,9 @@ async function run() {
         const snapshot = await evaluate("window.captureSequence.load()")
         return snapshot.state === 'review' && snapshot.issue === 'Native fixture capture failed'
       })
-      await until('native failure review actions settled', async () => await evaluate("document.body.textContent.includes('Start scrolling capture') && !document.querySelector('button.primary-button').disabled"))
+      await until('native failure review actions settled', async () => await evaluate("document.body.textContent.includes('Confirm') && !document.querySelector('button.primary-button').disabled"))
       if (startRecovery) console.log('start-recovery: edit-long-image')
-      await click('Edit long image'); await closed
+      await click('Confirm'); await closed
       assert.equal(delivered.height, initial.height + 85 * source.scale)
       const actual = nativeImage.createFromBuffer(Buffer.from(delivered.dataUrl.split(',')[1], 'base64')).toBitmap()
       const first = nativeImage.createFromBuffer(Buffer.from(baseline.image.dataUrl.split(',')[1], 'base64')).toBitmap()
@@ -228,7 +228,7 @@ async function run() {
       }
       await click('Stop scrolling capture')
       await until('only review and original source remain', () => BrowserWindow.getAllWindows().length === (sourceWindow ? 2 : 1))
-      await until('automatic capture returned to review', async () => await evaluate("document.body.textContent.includes('Start scrolling capture') && !!document.querySelector('button.primary-button') && !document.querySelector('button.primary-button').disabled"))
+      await until('automatic capture returned to review', async () => await evaluate("document.body.textContent.includes('Confirm') && !!document.querySelector('button.primary-button') && !document.querySelector('button.primary-button').disabled"))
       assert.ok(window.getContentBounds().width > compact.width, 'stop restores review in the same window')
       const snapshot = await evaluate("window.captureSequence.load()")
       if (interaction) assert.ok(snapshot.frames.length >= 2, 'real wheel progress is retained'); else assert.equal(snapshot.frames.length, 2, 'a stopped automatic sequence retains only its actual changed frames')
@@ -237,7 +237,7 @@ async function run() {
         await evaluate('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))')
         const file = `scroll-auto-review-${theme}-${width}.png`; await writeFile(join(out, file), (await window.webContents.capturePage()).toPNG()); result.screenshots.push(file)
       }
-      await click('Edit long image'); await closed
+      await click('Confirm'); await closed
       assert.equal(delivered.height, initial.height + (interaction ? await sourceWindow!.webContents.executeJavaScript('document.scrollingElement.scrollTop') : 85) * source.scale, 'automatic deduplication and the actual joined pixels reach the original editor consumer')
       result.observations.push({ automatic: true, exactBackground: true, nativeSamples: sampleCount, acceptedFrames: snapshot.frames.length, outputHeight: delivered.height })
       result.passed = true; return
@@ -258,7 +258,7 @@ async function run() {
       await evaluate('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))')
       const file = `scroll-review-${theme}-${width}.png`; await writeFile(join(out, file), (await window.webContents.capturePage()).toPNG()); result.screenshots.push(file)
     }
-    await click('Edit long image'); await closed
+    await click('Confirm'); await closed
     assert.equal(delivered.width, initial.width); assert.equal(delivered.height, 430 * source.scale, 'two real overlaps append exactly 170 new rows')
     if (!live && !recorded) {
     const actual = nativeImage.createFromBuffer(Buffer.from(delivered.dataUrl.split(',')[1], 'base64')).toBitmap()
