@@ -8,7 +8,10 @@ import original from '../../../vitest.config'
 const root = resolve(import.meta.dirname, '../../..')
 const changes = {
   'unknown-live': ['packages/editor-extensions/src/engines/media-player.ts', "if (!window) return 'unknown'", "if (!window) return 'at-live'"],
-  'pointer-speed': ['packages/editor-extensions/src/ui/MediaPlayer.tsx', 'direction: 1, wrap: true', 'direction: 1, wrap: false']
+  'pointer-speed': ['packages/editor-extensions/src/ui/MediaPlayer.tsx', 'direction: 1, wrap: true', 'direction: 1, wrap: false'],
+  'seek-every-request': ['packages/editor-extensions/src/engines/media-player.ts', 'if (open && flight === null) {', 'if (open) {'],
+  'seek-oldest-waiting': ['packages/editor-extensions/src/engines/media-player.ts', "next = time\n      return 'queued'", "next ??= time\n      return 'queued'"],
+  'seek-landing-keeps-waiting': ['packages/editor-extensions/src/engines/media-player.ts', 'next = null\n      if (time === flight', 'if (time === flight']
 } as const
 
 export default defineConfig({ ...original,

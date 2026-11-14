@@ -7,7 +7,7 @@ vi.mock('../src/renderer/src/monaco', () => ({}))
 vi.mock('monaco-editor', () => ({}))
 import { MediaPlayer, type MediaLease } from '@agentmux/editor-extensions/ui/MediaPlayer'
 import { api } from '../src/renderer/src/lib/api'
-import { classifyStream, describeMediaFailure, liveEdgeState, resolveMediaKey, seekableWindow, type MediaKeyEvent } from '@agentmux/editor-extensions/engines/media-player'
+import { classifyStream, createSeekQueue, describeMediaFailure, liveEdgeState, resolveMediaKey, seekableWindow, type MediaKeyEvent } from '@agentmux/editor-extensions/engines/media-player'
 import { readStyleSheet, stripCssComments } from './helpers/styles'
 
 function ranges(...pairs: [number, number][]): TimeRanges {
@@ -31,6 +31,55 @@ describe('stream classification and live edge', () => {
     expect(liveEdgeState(0, null)).toBe('unknown')
     expect(seekableWindow(ranges())).toBeNull()
     expect(seekableWindow(ranges([0, 10], [20, 60]))).toEqual({ start: 20, end: 60 })
+  })
+})
+
+describe('timeline seeks that follow a pointer', () => {
+  it('keeps one seek in flight and sends only the newest time once it lands', () => {
+    const sent: number[] = [], queue = createSeekQueue(time => sent.push(time))
+    expect(queue.request(10)).toBe('sent')
+    for (const time of [20, 30, 40]) expect(queue.request(time)).toBe('queued')
+    expect(sent).toEqual([10])
+    queue.settle()
+    expect(sent).toEqual([10, 40])
+    queue.settle()
+    expect(sent).toEqual([10, 40])
+  })
+  it('never sends the time the element rests on or is already seeking to', () => {
+    const sent: number[] = [], queue = createSeekQueue(time => sent.push(time))
+    queue.request(5)
+    expect(queue.request(5)).toBe('in-flight')
+    queue.settle()
+    expect(queue.request(5)).toBe('resting')
+    queue.request(8); queue.request(9)
+    expect(queue.request(8)).toBe('in-flight')
+    queue.settle()
+    expect(sent).toEqual([5, 8])
+  })
+  it('holds the newest time until the element can seek, and a reset forgets every time', () => {
+    const sent: number[] = [], queue = createSeekQueue(time => sent.push(time), false)
+    expect(queue.request(1)).toBe('queued')
+    queue.request(2)
+    expect(sent).toEqual([])
+    queue.open()
+    expect(sent).toEqual([2])
+    queue.reset(false); queue.settle(); queue.request(3)
+    expect(sent).toEqual([2])
+    queue.open(); queue.settle()
+    expect(sent).toEqual([2, 3])
+    queue.reset(true)
+    expect(queue.request(3)).toBe('sent')
+    expect(sent).toEqual([2, 3, 3])
+  })
+  it('a landing supersedes the seek in flight at once and drops the waiting time', () => {
+    const sent: number[] = [], queue = createSeekQueue(time => sent.push(time))
+    queue.request(10); queue.request(20); queue.land(30)
+    expect(sent).toEqual([10, 30])
+    queue.settle(); queue.land(30)
+    expect(sent).toEqual([10, 30])
+    // Landing where the element is already seeking still drops the older time waiting behind it.
+    queue.request(40); queue.request(50); queue.land(40); queue.settle()
+    expect(sent).toEqual([10, 30, 40])
   })
 })
 
