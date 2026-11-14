@@ -120,7 +120,7 @@ export function projectNativeBrowserOpening(state: BrowserProjectionState, event
     const location = resolution.location, original = state.tabs[location.tabId]!
     const workspaceId = eventWorkspaceId ?? sourceWorkspaceId
     if (workspaceId && original.workspaceId === workspaceId) {
-      const next = addWorkbenchRegion(original, location.regionId, 'right', { ...event.browser,
+      const next = addWorkbenchRegion(original, location.regionId, event.opening?.splitDirection ?? 'right', { ...event.browser,
         kind: 'browser', browserId: event.browser.id, workspaceId, regionId: event.browser.id })
       if (next !== original) return { state: { ...state, tabs: { ...state.tabs, [original.id]: {
         ...next, layout: { ...next.layout, activeRegionId: original.layout.activeRegionId }

@@ -76,6 +76,7 @@ import { validateBrowserOperatorAvatarPng } from './browser-operator-avatar.js'
 import { DEFAULT_BROWSER_AGENT_CONTROL, type BrowserAgentControlPreferences } from '../shared/browser-agent-control.js'
 import { installTextEditContextMenu } from './text-edit-context-menu.js'
 import type { BrowserMenuCommands, BrowserMenuDestination } from './browser-page-context-menu.js'
+import type { BrowserPageMenuPresentation } from './browser-page-menu-presentation.js'
 import { getDesktopNativeUiOwner } from './native-desktop-owner.js'
 import { BrowserCdpSession, DESKTOP_BROWSER_DIALOG_TYPES } from './browser-cdp-session.js'
 import { BrowserCertificateDecision, type BrowserCertificateAnswer } from './browser-certificates.js'
@@ -558,6 +559,7 @@ export class BrowserViewManager {
   /** Page CSS px → `Input.*` coordinates under the emulation applyViewport actually applied; absent means 1. */
   private readonly viewportScales = new WeakMap<WebContents, { input: number; fit: number }>()
   private readonly pendingFinds = new WeakMap<WebContents, () => void>()
+  pageMenus?: BrowserPageMenuPresentation
   /** Optional App appearance projection; the receiver rechecks the original native document. */
   capsuleDocumentReady: ((browserId: string) => void) | undefined
   /** Current password-free issue from the sole Profile proxy-auth owner. */
@@ -2070,6 +2072,7 @@ export class BrowserViewManager {
     if (ownsPrivateStorage) opening.ownsPrivateStorage = true
     opening.opening = { context: returnContext, destination: destination.destination,
       foreground: destination.destination !== 'tab' || profileId !== undefined,
+      ...(destination.splitDirection === undefined ? {} : { splitDirection: destination.splitDirection }),
       ...(profileId !== undefined ? { collectInSurvey: true } : {}) }
     opening.projectionPending = true
     this.publishNativeChildOpening(child)
@@ -5100,6 +5103,7 @@ export class BrowserViewManager {
     installTextEditContextMenu(contents, () => this.windowForView(view), {
       isCurrent: () => this.nativeOwner(entry.id)?.view === view && !this.agentOwnsInput(entry),
       origin: () => view.getBounds(),
+      presentPageMenu: (window, at, items, isCurrent, finish) => this.pageMenus?.show(window, contents, at, items, isCurrent, finish),
       pageCommands: hit => this.contextMenuCommands(entry, view, hit, address => {
         const revision = ++addressCopyRevision, navigationId = entry.navigationId
         const update = (copied: boolean) => {

@@ -254,6 +254,8 @@ import { createAgentNotifier } from './agent-notifier.js'
 import { ExternalBrowserBridge } from './browser-external-bridge.js'
 import { ExternalBrowserOwner } from './browser-external-owner.js'
 import { BrowserViewManager } from './browser-view-manager.js'
+import { BrowserPageMenuPresentation } from './browser-page-menu-presentation.js'
+import { BROWSER_PAGE_MENU_CHANNEL, type BrowserPageMenuChoice } from '../shared/browser-page-menu.js'
 import { browserColdDescriptor, coldBrowserTargets } from './browser-cold-descriptor.js'
 import { createBrowserProfileUsage } from './browser-profile-usage.js'
 import { createBrowserProfileSiteData } from './browser-profile-site-data.js'
@@ -628,6 +630,9 @@ export async function registerIpc(args: {
   new BrowserDownloads(join(app.getPath('userData'), 'browser-downloads'), files, id => workspace(config, id)),
   browserUploads, () => resolveBrowserAgentControl(configOwner.current.browser.agentControl), browserRecoveryPreviews,
   {}, browserAgentAuthority(args.runtime), () => configOwner.current.browser.newPagePlacement)
+  const pageMenus = new BrowserPageMenuPresentation(window => args.workbenchWindows.documentForWindow(window),
+    event => { if (!contents.isDestroyed()) contents.send(BROWSER_PAGE_MENU_CHANNEL, event) })
+  browsers.pageMenus = pageMenus
   browsers.onPageAppearance = (scope, requestedUrl, appearance) => browserInputHistory.decorate(scope, requestedUrl, appearance)
   browsers.sitePermissions = new BrowserSitePermissions(join(app.getPath('userData'), 'browser-site-permissions.json'), id => browsers.refreshSitePermissions(id))
   browserProfiles.cleanupPurgedIdentity = async profileId => {
@@ -2243,6 +2248,7 @@ export async function registerIpc(args: {
   })
   handle('sessions:inspectStop', async (session: AgentSessionControl, operationId: string) =>
     await sessionObservationResult(() => args.runtime.inspectSessionStop(session, operationId)))
+  handle('browser:choosePageMenu', (id: string, input: BrowserPageMenuChoice) => pageMenus.choose(id, input))
   handle('browser:forgetAppLinkScheme', async (scheme: string, expected: AppLinkSchemeChoice) => {
     if (!APP_LINK_SCHEME_CHOICES.includes(expected)) {
       throw Object.assign(new Error('The displayed app-link choice is required.'), { code: 'INVALID_SETTING_VALUE' })

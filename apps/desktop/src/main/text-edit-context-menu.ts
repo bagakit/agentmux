@@ -1,11 +1,12 @@
 import { mintCapabilityToken } from '@agentmux/core/object-id'
-import { Menu, webContents, type BrowserWindow, type ContextMenuParams, type MenuItemConstructorOptions, type WebContents, type WebFrameMain } from 'electron'
-import { browserPageMenu, type BrowserMenuAction, type BrowserMenuCommands } from './browser-page-context-menu.js'
+import { Menu, webContents, type BrowserWindow, type ContextMenuParams, type WebContents, type WebFrameMain } from 'electron'
+import { browserPageMenu, type BrowserMenuAction, type BrowserMenuCommands, type BrowserPageMenuTemplate } from './browser-page-context-menu.js'
 
 type MenuOwner = {
   isCurrent(): boolean
   origin?(): { x: number; y: number }
   pageCommands?(hit: ContextMenuParams): BrowserMenuCommands
+  presentPageMenu?(window: BrowserWindow, at: { x: number; y: number }, items: BrowserPageMenuTemplate[], isCurrent: () => boolean, finish: () => void): (() => void) | undefined
   onPageActionError?(error: unknown): void
 }
 
@@ -69,9 +70,9 @@ export function installTextEditContextMenu(contents: WebContents, host: BrowserW
     const ancestors: Array<{ frame: WebFrameMain; token: string }> = []
     for (let current: WebFrameMain | null = frame; current; current = current.parent) ancestors.push({ frame: current, token: current.frameToken })
     const key = `__agentmuxTextEdit_${mintCapabilityToken()}`
-    let ended = false, chosen = false, menu: Menu | undefined
+    let ended = false, chosen = false, menu: Menu | undefined, releasePresentation: (() => void) | undefined
     const cleanup: Array<() => void> = []
-    const currentFrame = () => focused(window) && ancestors.every((original, index) =>
+    const currentFrame = () => (releasePresentation ? live(window) && window.isFocused() : focused(window)) && ancestors.every((original, index) =>
       !original.frame.isDestroyed() && !original.frame.detached && original.frame.frameToken === original.token && original.frame.parent === (ancestors[index + 1]?.frame ?? null))
     const current = () => currentFrame() && contents.focusedFrame === frame
     let captureStarted = false
@@ -80,6 +81,7 @@ export function installTextEditContextMenu(contents: WebContents, host: BrowserW
       ended = true
       for (const remove of cleanup) remove()
       if (pending === finish) pending = undefined
+      releasePresentation?.()
       if (menu) { try { menu.closePopup(window) } catch { /* Only this menu is being released. */ } }
       if (captureStarted && !frame.isDestroyed() && !frame.detached) void frame.executeJavaScript(`globalThis[${JSON.stringify(key)}]?.dispose()`).catch(() => {})
     }
@@ -117,11 +119,13 @@ export function installTextEditContextMenu(contents: WebContents, host: BrowserW
     }
     try {
       const runPageAction = (action: BrowserMenuAction) => {
-        if (chosen || ended || !currentFrame() || !commands?.isCurrent()) { finish(); return }
+        if (chosen || ended || !currentFrame() || !commands?.isCurrent()) { finish(); return false }
         chosen = true
+        if (releasePresentation) contents.focus()
         finish()
         try { void Promise.resolve(action()).catch(error => owner.onPageActionError?.(error)) }
         catch (error) { owner.onPageActionError?.(error) }
+        return true
       }
       const items = commands ? browserPageMenu(contents, params, commands, runPageAction) : []
       if (actions.length > 0) {
@@ -132,12 +136,14 @@ export function installTextEditContextMenu(contents: WebContents, host: BrowserW
         if (captured && current()) {
           if (items.length > 0) items.push({ type: 'separator' })
           items.push(...actions.map(item => ({ label: item.label, enabled: item.enabled, click: () => {
-            if (chosen || ended || !item.enabled) return
+            if (chosen || ended || !item.enabled) return false
+            if (!currentFrame() || commands && !commands.isCurrent()) { finish(); return false }
             chosen = true
+            if (releasePresentation) contents.focus()
             void (async () => {
               try {
                 const sameTarget = await evaluate(`globalThis[${JSON.stringify(key)}]?.check() === true`)
-                if (!sameTarget || ended || !current() || commands && !commands.isCurrent()) { finish(); notice(); return }
+                if (!sameTarget || ended || !focused(window) || !current() || commands && !commands.isCurrent()) { finish(); notice(); return }
                 item.run()
                 finish()
               } catch { finish(); notice() }
@@ -153,9 +159,17 @@ export function installTextEditContextMenu(contents: WebContents, host: BrowserW
         if (items.length) items.push({ type: 'separator' })
         items.push({ label: 'Inspect', click: () => runPageAction(commands.inspect) })
       }
-      menu = Menu.buildFromTemplate(items)
       const origin = owner.origin?.() ?? { x: 0, y: 0 }
-      menu.popup({ window, frame, x: Math.round(origin.x + params.x), y: Math.round(origin.y + params.y),
+      const at = { x: Math.round(origin.x + params.x), y: Math.round(origin.y + params.y) }
+      // Editable fields keep their native menu and input responder throughout.
+      if (commands && !params.isEditable) releasePresentation = owner.presentPageMenu?.(window, at, items, () => currentFrame() && commands.isCurrent(), finish)
+      if (releasePresentation) {
+        window.on('blur', finish)
+        cleanup.push(() => window.removeListener('blur', finish))
+        return
+      }
+      menu = Menu.buildFromTemplate(items)
+      menu.popup({ window, frame, ...at,
         callback: () => { if (!chosen) finish() } })
     } catch { finish(); notice() }
   }

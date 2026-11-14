@@ -1555,6 +1555,7 @@ export type BrowserNativeOpening = {
   collectInSurvey?: true
   context: import('./workbench-windows').WorkbenchReturnContext | null
   destination: import('./browser-new-page-placement').BrowserNewPageDestination
+  splitDirection?: import('@agentmux/layout').SplitDirection
 }
 
 export type BrowserPresentationOccurrence = {
@@ -2193,6 +2194,8 @@ export type AgentMuxDesktopApi = {
   }
   toolkit: ToolkitDesktopApi
   browser: {
+    onPageMenu(listener: (event: import('./browser-page-menu').BrowserPageMenuEvent) => void): () => void
+    choosePageMenu(id: string, choice: import('./browser-page-menu').BrowserPageMenuChoice): Promise<boolean>
     /** Historical appearance only; never acquires or restores a native page. */
     getRecoveryPreview(id: string): Promise<import('./browser-recovery-preview').BrowserRecoveryPreviewReadResult>
     /** Last-seen icons with the address they were seen at; absent Browsers have none or are unconfirmed. */

@@ -1,10 +1,16 @@
 import type { ContextMenuParams, MenuItemConstructorOptions, WebContents } from 'electron'
+import type { SplitDirection } from '@agentmux/layout'
 import type { BrowserNewPageDestination } from '../shared/browser-new-page-placement.js'
 import { classifyBrowserTarget } from './browser-app-link.js'
 
-export type BrowserMenuDestination = { destination: BrowserNewPageDestination; profileId?: string; private?: true }
+export type BrowserMenuDestination = { destination: BrowserNewPageDestination; profileId?: string; private?: true; splitDirection?: SplitDirection }
 type Action = () => void | Promise<unknown>
-type Item = { label: string; enabled?: boolean; run: Action } | { label: string; submenu: Item[] }
+type Item = { label: string; enabled?: boolean; run: Action; split?: (direction: SplitDirection) => Action } | { label: string; submenu: Item[] }
+export type BrowserPageMenuTemplate = Omit<MenuItemConstructorOptions, 'submenu' | 'click'> & {
+  submenu?: BrowserPageMenuTemplate[]
+  click?: () => boolean | void
+  chooseSplit?: (direction: SplitDirection) => boolean | void
+}
 
 export type BrowserMenuCommands = {
   isCurrent(): boolean
@@ -25,7 +31,7 @@ export type BrowserMenuCommands = {
 }
 
 export function browserPageMenu(contents: WebContents, hit: ContextMenuParams, owner: BrowserMenuCommands,
-  run: (action: Action) => void): MenuItemConstructorOptions[] {
+  run: (action: Action) => boolean | void): BrowserPageMenuTemplate[] {
   const groups: Item[][] = []
   const { linkURL, srcURL, pageURL, frameURL, mediaType, selectionText, isEditable } = hit
   const openInTab = (address: string) => owner.open(address, { destination: 'tab' })
@@ -37,7 +43,8 @@ export function browserPageMenu(contents: WebContents, hit: ContextMenuParams, o
     groups.push([
       ...(openable ? [
         { label: 'Open Link in New Tab', run: openInTab(linkURL) },
-        { label: 'Open Link in Split', run: owner.open(linkURL, { destination: 'region' }) },
+        { label: 'Open Link in Split', run: owner.open(linkURL, { destination: 'region' }),
+          split: (direction: SplitDirection) => owner.open(linkURL, { destination: 'region', splitDirection: direction }) },
         { label: 'Open Link in New Window', run: owner.open(linkURL, { destination: 'window' }) },
         ...(isWebAddress(linkURL) ? [{ label: 'Open Link in Private Window', run: owner.open(linkURL, { destination: 'window', private: true }) }] : []),
         { label: 'Open Link Here', run: owner.follow(linkURL) }
@@ -81,11 +88,13 @@ export function browserPageMenu(contents: WebContents, hit: ContextMenuParams, o
       ] : [])
     ])
   }
-  function template(item: Item): MenuItemConstructorOptions {
+  function template(item: Item): BrowserPageMenuTemplate {
     if ('submenu' in item) return { label: item.label, submenu: item.submenu.map(template) }
-    return { label: item.label, enabled: item.enabled ?? true, click: () => { if (item.enabled !== false) run(item.run) } }
+    const split = item.split
+    return { label: item.label, enabled: item.enabled ?? true, click: () => item.enabled !== false && run(item.run),
+      ...(split ? { chooseSplit: (direction: SplitDirection) => item.enabled !== false && run(split(direction)) } : {}) }
   }
-  return groups.filter(group => group.length > 0).flatMap((group, index): MenuItemConstructorOptions[] => [
+  return groups.filter(group => group.length > 0).flatMap((group, index): BrowserPageMenuTemplate[] => [
     ...(index ? [{ type: 'separator' as const }] : []), ...group.map(template)
   ])
 }

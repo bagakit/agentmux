@@ -1360,6 +1360,8 @@ const mockApi: AgentMuxDesktopApi = {
   },
   browser: {
     getRecoveryPreview: async () => ({ status: 'unavailable', warning: 'Historical Browser previews require the Desktop host.' }),
+    onPageMenu: () => () => {},
+    choosePageMenu: async () => false,
     getLastSeenFavicons: async () => ({}),
     listRetainedUploads: async () => { throw new Error('Selected-file snapshots require the Desktop Main owner.') },
     setOperatorAvatar: async () => false,

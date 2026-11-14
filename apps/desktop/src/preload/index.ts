@@ -1,4 +1,5 @@
 import { createPreloadSourceFiles } from './source-files'
+import { BROWSER_PAGE_MENU_CHANNEL, type BrowserPageMenuEvent } from '../shared/browser-page-menu'
 import { unwrapIpcResult } from '../shared/ipc-result'
 import { createPreloadHostRoutes } from './host-routes'
 import { createPreloadSpaceMount } from './space-mount'
@@ -833,6 +834,12 @@ const api: AgentMuxPreloadApi = {
     }
   },
   browser: {
+    onPageMenu(listener: (event: BrowserPageMenuEvent) => void) {
+      const wrapped = (_event: Electron.IpcRendererEvent, value: BrowserPageMenuEvent): void => listener(value)
+      ipcRenderer.on(BROWSER_PAGE_MENU_CHANNEL, wrapped)
+      return () => ipcRenderer.off(BROWSER_PAGE_MENU_CHANNEL, wrapped)
+    },
+    choosePageMenu: (id, choice) => ipcRenderer.invoke('browser:choosePageMenu', id, choice),
     getRecoveryPreview: id => ipcRenderer.invoke('browser:getRecoveryPreview', id),
     getLastSeenFavicons: ids => ipcRenderer.invoke('browser:getLastSeenFavicons', ids),
     captureInputContext: browserId => ipcRenderer.invoke('browser:captureInputContext', browserId),

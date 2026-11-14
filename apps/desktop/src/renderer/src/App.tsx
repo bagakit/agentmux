@@ -29,6 +29,7 @@ import { DocumentationOverlay } from './components/documentation/DocumentationOv
 import { WindowOverlayHost } from './components/WindowOverlayHost'
 import { AgentInformationPreviewHost } from './components/AgentInformationPreview'
 import { QuickSwitcher } from './components/QuickSwitcher'
+import { BrowserPageContextMenuHost } from './components/BrowserPageContextMenuHost'
 import { isEditableChordTarget, windowShortcutHandlers } from './lib/workbench-shortcuts'
 import { surfaceOwnsChord } from './lib/surface-chord-owners'
 import { routeWindowShortcut } from './lib/shortcut-registry'
@@ -110,7 +111,7 @@ function useStableWorkbenchViewTargets(current: WorkbenchViewTargets): Workbench
   return next
 }
 
-export function App() { return <SpaceSourceReaders><AppBody /></SpaceSourceReaders> }
+export function App() { return <SpaceSourceReaders><AppBody /><BrowserPageContextMenuHost /></SpaceSourceReaders> }
 
 function AppBody() {
   useEffect(() => observeNotebookLibrary(), [])
