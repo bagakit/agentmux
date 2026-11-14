@@ -1,5 +1,6 @@
 import { useMemo } from 'react'
 import type { MotePresenceReading } from '@agentmux/core/mote-preferences'
+import { Button } from '@agentmux/client-ui/components/Button'
 import type { MoteWorkfaceScope } from '../lib/mote-workface'
 import { topicSpaceIconTarget } from '../lib/space-object-appearance'
 import { useAppStore } from '../store'
@@ -43,7 +44,7 @@ export function MoteHeartbeatStatus({ scope, reading, reports, onOpenPath, loadi
     <p className="mote-heartbeat__purpose">Keeps an eye on your goals, work and unfinished commitments.</p>
     {report ? <p className="mote-heartbeat__report-summary"><span>Agent report</span>{report.report.summary}</p> : null}
     {guidance ? <p className="mote-heartbeat__guidance-status">{!unavailable && guidance.adoptedRevision === guidance.availableRevision ? 'Current work cycle adopted' : 'Work cycle adoption not confirmed'}</p> : null}
-    <div className="mote-heartbeat__actions">{actions}<button type="button" className="small-button" disabled={loading} onClick={onRefresh}>{loading ? 'Reading…' : 'Refresh actual schedule'}</button></div>
+    <div className="mote-heartbeat__actions">{actions}<Button type="button" disabled={loading} onClick={onRefresh}>{loading ? 'Reading…' : 'Refresh actual schedule'}</Button></div>
     {controls && !controlsAfterStatus ? <div className="mote-heartbeat__controls">{controls}</div> : null}
     <div className="mote-heartbeat__reading" role="status">
       {schedule?.status === 'paused' ? <p>{moteHeartbeatPresentation(reading, false).detail}</p> : null}
@@ -59,7 +60,7 @@ export function MoteHeartbeatStatus({ scope, reading, reports, onOpenPath, loadi
     {ref ? <details className="mote-heartbeat__report"><summary>{report ? 'Report and saved Ideas' : 'Work report not confirmed'}</summary>
       {report ? <><p className="mote-heartbeat__attribution">Reported by this Mote’s Agent · separate from input completion</p>
         {report.report.actions.map((action, index) => action.kind === 'idea' ? <div className="mote-heartbeat__idea" key={index}><span>{action.path}</span><small>{report.ideaEvidence.find(item => item.actionIndex === index)?.status === 'committed-note' ? 'Note commit confirmed' : report.ideaEvidence.find(item => item.actionIndex === index)?.status === 'observed-file' ? 'File revision observed' : 'Saved revision unconfirmed'}</small>
-          {onOpenPath && resourceTarget && action.resource.hostId === resourceTarget.expectedResource.hostId && action.resource.workspaceId === resourceTarget.expectedResource.workspaceId && action.resource.workspacePath === resourceTarget.expectedResource.workspacePath && action.resource.zoneId === resourceTarget.zoneId ? <button type="button" className="small-button" onClick={() => void onOpenPath(scope.rootPath + '/' + action.path)}>Open Idea</button> : null}</div> : null)}
+          {onOpenPath && resourceTarget && action.resource.hostId === resourceTarget.expectedResource.hostId && action.resource.workspaceId === resourceTarget.expectedResource.workspaceId && action.resource.workspacePath === resourceTarget.expectedResource.workspacePath && action.resource.zoneId === resourceTarget.zoneId ? <Button type="button" onClick={() => void onOpenPath(scope.rootPath + '/' + action.path)}>Open Idea</Button> : null}</div> : null)}
         <p>{report.report.inspected.some(item => item.sourceStatus === 'unconfirmed') ? 'Some declared sources remain unconfirmed.' : 'The report describes the Agent’s stated reading scope.'}</p></>
         : <p>{reports?.issue ?? (reports?.page?.next ? 'This bounded report page does not confirm a report for this input. Earlier reports remain in the original history.' : 'No report for this exact input was confirmed in this read. This does not mean nothing changed.')}</p>}
       {native === 'unsupported' ? <p>Your Agent can keep working in the original conversation. This Provider does not link terminal input to its exact execution result.</p> : input?.returnedIdle && native === 'unknown' ? <p>The original input returned idle. That alone does not confirm that it was processed or that work is complete.</p> : null}

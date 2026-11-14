@@ -4,6 +4,7 @@ import { useLayoutEffect, useId, useRef, useState, type ReactNode } from 'react'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { MOTE_SOUL_PATH } from '@agentmux/host/mote-model'
+import { Button } from '@agentmux/client-ui/components/Button'
 import type { MoteWorkfaceScope } from '../lib/mote-workface'
 import type { WorkbenchProjectionSelection } from '../lib/workbench-projection'
 import { MOTE_BEHAVIOR_AXES, deriveMoteBehaviorCode, moteBehaviorRules, MOTE_BEHAVIOR_PATH, type MoteBehaviorDraft, type MoteBehaviorPreferences } from '../lib/mote-behavior'
@@ -161,12 +162,12 @@ export function MoteBehaviorDialog({ scope, reference, onOpenPath, onClose, retu
             </div> : null}
             {saved?.legacySoul && !issue ? <p className="mote-details__hint">Your original preferences are kept. Save to move them into BEHAVIOR.md.</p> : null}
             {loading ? <p role="status" className="mote-details__hint">Reading saved settings…</p> : null}
-            {issue ? <div role="status" className="mote-details__issue">{issue}<button type="button" className="small-button" onClick={() => setAttempt(value => value + 1)}>Reread settings</button></div> : null}
+            {issue ? <div role="status" className="mote-details__issue">{issue}<Button type="button" onClick={() => setAttempt(value => value + 1)}>Reread settings</Button></div> : null}
           </div>
         </div>
         <footer className="mote-behavior-footer"><p>Saved settings apply to new discussions. Current conversations keep their context.</p><div>
-          <button type="button" className="small-button" onClick={onClose}>Cancel</button>
-          <button type="button" className="primary-button" disabled={busy} onClick={() => void save()}>{busy ? 'Saving…' : 'Save'}</button>
+          <Button type="button" onClick={onClose}>Cancel</Button>
+          <Button type="button" variant="primary" disabled={busy} onClick={() => void save()}>{busy ? 'Saving…' : 'Save'}</Button>
         </div></footer>
       </Dialog.Content>
     </DocumentOverlayPortal>

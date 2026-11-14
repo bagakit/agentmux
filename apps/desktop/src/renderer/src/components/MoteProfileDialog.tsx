@@ -3,6 +3,7 @@ import * as Dialog from '@agentmux/client-ui/components/Modal'
 import { TextInput } from '@agentmux/client-ui/input'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { SCRATCH_TOPIC_TITLE_MAX_LENGTH } from '@agentmux/host/mote-model'
+import { Button } from '@agentmux/client-ui/components/Button'
 import { readMoteMaterial, saveMoteFile } from '../lib/mote-cooperation'
 import { confirmedMoteReference, emptyMoteDestination, openMoteMaterialAt } from '../lib/mote-materials-actions'
 import { useLauncherState, type MoteProfileDraft } from '../lib/launcher-state'
@@ -108,13 +109,13 @@ export function MoteProfileDialog({ scope, reference, onOpenPath, onClose, retur
             onChange={event => { if (latest.current) update({ ...latest.current, body: event.target.value }) }} /></label>
           <p className="mote-details__hint">Describe its role, shared context and working notes. Markdown is welcome.</p>
           {loading ? <p role="status" className="mote-details__hint">Reading saved profile…</p> : null}
-          {issue ? <div role="status" className="mote-details__issue">{issue} <button type="button" className="small-button" onClick={() => setAttempt(value => value + 1)}>Reread</button>
-            <button type="button" className="small-button" onClick={() => void useSaved()}>Discard draft & reload</button>
-            <button type="button" className="small-button" onClick={() => void onOpenPath(path).then(opened => { if (opened) onClose() }).catch(cause => setIssue(presentError(cause)))}>Open original file</button></div> : null}
+          {issue ? <div role="status" className="mote-details__issue">{issue} <Button type="button" onClick={() => setAttempt(value => value + 1)}>Reread</Button>
+            <Button type="button" onClick={() => void useSaved()}>Discard draft & reload</Button>
+            <Button type="button" onClick={() => void onOpenPath(path).then(opened => { if (opened) onClose() }).catch(cause => setIssue(presentError(cause)))}>Open original file</Button></div> : null}
           {persistenceIssue ? <p role="status" className="mote-details__issue">{persistenceIssue}</p> : null}
         </div>
-        <footer className="mote-quick-mode-dialog__footer"><span>Your draft is kept when you close.</span><button type="button" className="small-button" onClick={onClose}>Cancel</button>
-          <button type="submit" className="primary-button" disabled={loading || busy || !draft}>{busy ? 'Saving…' : 'Save profile'}</button></footer>
+        <footer className="mote-quick-mode-dialog__footer"><span>Your draft is kept when you close.</span><Button type="button" onClick={onClose}>Cancel</Button>
+          <Button type="submit" variant="primary" disabled={loading || busy || !draft}>{busy ? 'Saving…' : 'Save profile'}</Button></footer>
       </form>
     </Dialog.Content>
   </DocumentOverlayPortal></Dialog.Root>

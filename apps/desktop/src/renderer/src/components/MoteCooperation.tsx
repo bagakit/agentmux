@@ -1,3 +1,4 @@
+import { Button } from '@agentmux/client-ui/components/Button'
 import { useMoteDialogueView } from '../lib/mote-dialogue-view'
 import * as Dialog from '@agentmux/client-ui/components/Modal'
 import { autoUpdate, computePosition, flip, offset, shift, size } from '@floating-ui/dom'
@@ -253,8 +254,8 @@ export function MoteCooperation({ scope, active, reference, onSelect, actions, p
         row: <span className="mote-conversation-browser__row" data-mote-member={member.agentSessionId} data-member-host={hostId ?? ''}>
           {observed ? <ResolvedAgentAvatar label={observed.label} providerId={observed.providerId} state={observed.status.state} size={22} /> : <Team size={20} />}
           <span><strong>{name}</strong><small>{isPrimary(member) ? '最后确认的主 Agent' : '成员'} · {detail}</small></span></span>,
-        actions: member.locations.length === 1 ? <button type="button" className="small-button" onClick={() => open(member.locations[0]!)}>在工作区打开</button>
-          : <details className="mote-conversation-browser__locations"><summary>原工作位置</summary>{member.locations.map((location, index) => <button type="button" key={JSON.stringify(location)} className="small-button" onClick={() => open(location)}>位置 {index + 1}</button>)}{!member.locations.length ? <span>原位置未确认</span> : null}</details>,
+        actions: member.locations.length === 1 ? <Button type="button" onClick={() => open(member.locations[0]!)}>在工作区打开</Button>
+          : <details className="mote-conversation-browser__locations"><summary>原工作位置</summary>{member.locations.map((location, index) => <Button type="button" key={JSON.stringify(location)} onClick={() => open(location)}>位置 {index + 1}</Button>)}{!member.locations.length ? <span>原位置未确认</span> : null}</details>,
         conversation: (visible: boolean) => hostId ? <MoteSessionConversation hostId={hostId} agentSessionId={observed?.control.agentSessionId ?? member.agentSessionId} identity={'mote-member:' + member.key} active={visible} />
           : <p className="mote-cooperation__issue" role="status">原会话的执行 Host 尚未确认。原引用与工作位置保留，可在原工作区继续。</p> }
     })

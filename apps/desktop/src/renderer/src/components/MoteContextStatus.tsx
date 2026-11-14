@@ -1,3 +1,4 @@
+import { Button } from '@agentmux/client-ui/components/Button'
 import type { WorkbenchProjectionSelection } from '../lib/workbench-projection'
 import type { MoteWorkbenchProjectionResult } from '../lib/mote-workbench-projection'
 import type { ServiceNoticeItem } from '../lib/use-service-notices'
@@ -47,12 +48,12 @@ export function MoteContextStatus({ scope, visible, failures, pending, identityI
               <dt>记录时间</dt><dd>{new Date(failure.observedAt).toISOString()}</dd>
               {failure.target.reference ? <><dt>原位置</dt><dd>{JSON.stringify(failure.target.reference)}</dd></> : null}</dl>
           </details>
-          <button type="button" className="small-button" aria-label={steps[failure.step] + '：重试'} data-mote-context-retry={failure.step} disabled={pending(failure)}
-            onClick={() => onRetry(failure)}>{pending(failure) ? '正在重试…' : '重试这一步'}</button>
+          <Button type="button" aria-label={steps[failure.step] + '：重试'} data-mote-context-retry={failure.step} disabled={pending(failure)}
+            onClick={() => onRetry(failure)}>{pending(failure) ? '正在重试…' : '重试这一步'}</Button>
         </> : null}
         {item.id === 'discussion-location' ? <div className="mote-context-status__locations">
-          {projection?.choices.map((reference, index) => <button type="button" className="small-button"
-            key={JSON.stringify(reference)} onClick={() => onSelect(reference)}>{locationName(reference, index)}</button>)}
+          {projection?.choices.map((reference, index) => <Button type="button"
+            key={JSON.stringify(reference)} onClick={() => onSelect(reference)}>{locationName(reference, index)}</Button>)}
         </div> : null}
       </section> })}
     </ServiceNoticeDisclosure>

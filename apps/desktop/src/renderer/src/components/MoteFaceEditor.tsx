@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
+import { Button } from '@agentmux/client-ui/components/Button'
 import { MOTE_FACE_PARTS, type MoteFace as MoteFaceChoice } from '../../../shared/mote-avatars'
 import { MoteFace } from '@agentmux/client-ui/components/MoteFace'
 import { MoteIdentityMotion } from './MoteIdentityMotion'
@@ -145,7 +146,7 @@ export function MoteFaceEditor({ face, automatic = false, disabled, onChange, vi
             <strong>{automatic ? 'Automatic companion' : `Face · ${face.palette}`}</strong>
             <small>{automatic ? 'Default Mote' : '2D Face'}</small>
           </span>
-          <button type="button" disabled={disabled} aria-label="Shuffle face" className="small-button mote-avatar-stage__shuffle" onClick={shuffle}>Shuffle</button>
+          <Button type="button" disabled={disabled} aria-label="Shuffle face" className="mote-avatar-stage__shuffle" onClick={shuffle}>Shuffle</Button>
         </div>
         <div className="mote-avatar-stage__sizes" aria-label="Actual face sizes">
           <div className="mote-avatar-stage__chip">

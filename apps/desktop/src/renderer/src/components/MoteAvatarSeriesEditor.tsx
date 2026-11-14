@@ -4,6 +4,7 @@ import { MOTE_FACE_PARTS, type MoteFace as Face } from '@agentmux/core/mote-face
 import type { MoteAvatarSeriesCatalog, MoteAvatarSeriesChoice, MoteAvatarSeriesDefinition, MoteAvatarSeriesLocator,
   MoteAvatarSeriesParameters, MoteAvatarSeriesPrepared, MoteAvatarSeriesSource } from '@agentmux/core/mote-avatar-series'
 import { presentError } from '@agentmux/client-ui/error-presentation'
+import { Button } from '@agentmux/client-ui/components/Button'
 import { api } from '../lib/api'
 import type { SeriesGlbRenderer } from '../lib/mote-avatar-series-renderer'
 import { MoteFace } from '@agentmux/client-ui/components/MoteFace'
@@ -285,7 +286,7 @@ export function MoteAvatarSeriesEditor({ targetKey, visible, disabled, initialCh
           selectionIntent.current++
           if (!await loadCatalog({ origin: 'user', seriesId: created.seriesId })) throw new Error('The created folder is kept. Refresh its original source to browse it; your current avatar and draft remain available.')
         }} />
-      <button type="button" className="small-button mote-series__refresh" aria-label="Refresh avatar series" disabled={disabled || catalogLoading} onClick={() => void loadCatalog()}><ThemeActionRefreshIcon size={12} />Refresh</button>
+      <Button type="button" className="mote-series__refresh" aria-label="Refresh avatar series" disabled={disabled || catalogLoading} onClick={() => void loadCatalog()}><ThemeActionRefreshIcon size={12} />Refresh</Button>
       </div>
       {catalogLoading ? <p className="mote-series__status" role="status">Loading series…</p> : null}
       {selected ? <div className="mote-series__entries" role="group" aria-label="Series appearances">{entries.map(entry => {
@@ -328,8 +329,8 @@ export function MoteAvatarSeriesEditor({ targetKey, visible, disabled, initialCh
           </> : png ? <img src={png} alt="Your saved series avatar" /> : <div className="mote-series__empty"><ThemeObjectProfileIcon size={30} /><span>Choose a character</span></div>}
         </div>
         <div className="mote-series__preview-note"><span>{preparing ? 'Preparing source…' : rendering ? 'Preparing preview…' : parameters?.kind === 'glb' ? 'Drag to turn' : parameters?.kind === 'image' ? 'Drag to position' : savedImageConfirmed && !prepared ? 'Saved avatar' : 'Your draft'}</span>
-          {parameters && prepared ? <button type="button" className="small-button" disabled={controlsDisabled} aria-label="Reset series adjustments"
-            onClick={() => changeParameters(initialChoice && locatorKey(initialChoice.source) === locatorKey(prepared.source) && initialChoice.source.revision === prepared.source.revision ? structuredClone(initialChoice.parameters) : initialParameters(prepared.definition))}><ThemeActionResetOptionsIcon size={12} />Reset</button> : null}</div>
+          {parameters && prepared ? <Button type="button" disabled={controlsDisabled} aria-label="Reset series adjustments"
+            onClick={() => changeParameters(initialChoice && locatorKey(initialChoice.source) === locatorKey(prepared.source) && initialChoice.source.revision === prepared.source.revision ? structuredClone(initialChoice.parameters) : initialParameters(prepared.definition))}><ThemeActionResetOptionsIcon size={12} />Reset</Button> : null}</div>
         <div className="mote-series__sizes" aria-label="Actual avatar sizes">{[24, 34, 48, 104].map(size => <figure key={size}>
           <div className="mote-series__size-slot">{png ? <img src={png} alt={`${size} pixel avatar`} width={size} height={size} /> : <span style={{ width: size, height: size }} />}</div><figcaption>{size} px</figcaption>
         </figure>)}</div>
@@ -362,7 +363,7 @@ export function MoteAvatarSeriesEditor({ targetKey, visible, disabled, initialCh
     </div>
     {issue || partial ? <div className="mote-series__notice">
       <div><span role="status">{issue ? issue.scope === 'catalog' ? 'Series unavailable. Other avatar styles are ready.' : issue.scope === 'source' && savedImageConfirmed && !prepared ? 'Editing source unavailable. Saved avatar kept.' : 'Preview unavailable. Your current draft is kept.' : 'Some sources are unavailable.'}</span>
-        {issue ? <button type="button" className="small-button" disabled={disabled || preparing || catalogLoading} onClick={retry}>Retry</button> : null}</div>
+        {issue ? <Button type="button" disabled={disabled || preparing || catalogLoading} onClick={retry}>Retry</Button> : null}</div>
       <details><summary>Details</summary>{issue ? <p>{issue.detail}</p> : null}
         {[...(catalog?.issues ?? []), ...(prepared?.issues ?? [])].map((value, index) => <p key={index}>{value.message} {value.recovery}</p>)}
         {catalog?.roots.map(root => <p key={root.origin}>{root.path} · {root.state}</p>)}

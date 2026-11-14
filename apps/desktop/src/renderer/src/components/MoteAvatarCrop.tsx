@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type RefObject } from 'react'
+import { Button } from '@agentmux/client-ui/components/Button'
 import { MOTE_AVATAR_EDGE } from '../../../shared/mote-avatars'
 import type { MoteAvatarSeriesParameters } from '@agentmux/core/mote-avatar-series'
 import { MoteIdentityMotion } from './MoteIdentityMotion'
@@ -82,8 +83,8 @@ export function MoteAvatarCrop({ source, silhouetteId, initialParameters, visibl
     <div className="mote-avatar-crop__controls">
       <label className="mote-avatar-crop__zoom">Zoom<input aria-label="Avatar zoom" type="range" min="1" max="3" step="0.05" value={zoom}
         disabled={disabled} onChange={event => setZoom(Number(event.currentTarget.value))} /></label>
-      <button type="button" disabled={disabled} aria-label="Reset zoom" className="small-button mote-avatar-crop__reset"
-        onClick={() => { setZoom(1); setOffset({ x: 0, y: 0 }) }}>{Math.round(zoom * 100)}%</button>
+      <Button type="button" disabled={disabled} aria-label="Reset zoom" className="mote-avatar-crop__reset"
+        onClick={() => { setZoom(1); setOffset({ x: 0, y: 0 }) }}>{Math.round(zoom * 100)}%</Button>
     </div>
   </div>
 }

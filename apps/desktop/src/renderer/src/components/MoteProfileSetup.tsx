@@ -1,3 +1,4 @@
+import { Button } from '@agentmux/client-ui/components/Button'
 import { ConnectorAccountSummary } from './ConnectorEntityIdentity'
 import type { ConnectionHostingTarget } from '../../../shared/contracts'
 import { useEffect, useRef, useState } from 'react'
@@ -209,7 +210,7 @@ export function MoteProfileSetup({ operation, hostingTarget, automatic, onOperat
       </div></section> : null}
       {publicationIssue ? <p role="status" className="mote-details__hint" data-publication-unavailable>{publicationIssue}</p> : null}
       <div className="mote-bot-actions mote-profile-actions" aria-busy={busy}>
-        {!reading.view?.operation && !operation.setup ? <button type="button" className="primary-button" disabled={busy} onClick={() => void perform(undefined, true)}>Continue original request</button> : null}
+        {!reading.view?.operation && !operation.setup ? <Button type="button" variant="primary" disabled={busy} onClick={() => void perform(undefined, true)}>Continue original request</Button> : null}
         {actions.filter(action => action.kind !== 'continue' || !driving).map(action => <button type="button" key={action.kind} className={action.kind === 'renew' || action.kind === 'refresh-publication-checks' ? 'small-button' : 'primary-button'} data-mote-profile-action={action.kind} disabled={busy} onClick={() => void advance(action)}>{action.kind === 'refresh-publication-checks' || action.kind === 'renew' ? <RefreshIcon size={14} /> : null}<span>{label(action)}</span></button>)}
         <button type="button" className="small-button mote-profile-actions__inspect" aria-busy={manualPending > 0} onClick={() => void inspect(true)}>{manualPending > 0 ? <LoadingIcon size={14} animation="spin" /> : <RefreshIcon size={14} />}<span>View saved progress</span></button>
       </div>

@@ -1,3 +1,4 @@
+import { Button } from '@agentmux/client-ui/components/Button'
 import { ConnectorAccountSummary } from './ConnectorEntityIdentity'
 import type { ConnectionHostingTarget } from '../../../shared/contracts'
 import { useEffect, useRef, useState } from 'react'
@@ -226,7 +227,7 @@ export function MoteBotSetup({
     : initialProgress?.state === 'attention' ? 'Your next action is shown below.'
     : completedCreation ? 'Published and saved for this Mote.' : primaryEnrollmentAction?.kind === 'confirm-account' ? 'Your confirmation is needed to continue.' : 'Continue from the saved result below.'
   if (profileTask && operation?.setupOperationId) return <section className="mote-bot-setup" aria-label="Mote bot profile">
-    <button type="button" className="small-button" onClick={() => { newDraft(); onCurrent() }}>Back to bot profile</button>
+    <Button type="button" onClick={() => { newDraft(); onCurrent() }}>Back to bot profile</Button>
     <MoteProfileSetup active={setup.active} readOnOpen={setup.readPrivate} key={operation.operationId} operation={operation} hostingTarget={operation.hostingTarget} automatic={setup.driving} onOperation={setup.acceptOperation} />
     {setupFeedback}
   </section>
@@ -286,19 +287,19 @@ export function MoteBotSetup({
                 other Motes and groups sharing this application.
               </p>
               <div className="mote-bot-actions">
-                <button
+                <Button
                   type="button"
-                  className="primary-button"
+                  variant="primary"
                   disabled={!setup.profile}
                   onClick={() => void setup.sync(record, avatar && !!setup.profile?.image)}
                 >
                   Sync Mote profile
-                </button>
-                <button type="button" className="small-button" onClick={onChoose}>
+                </Button>
+                <Button type="button" onClick={onChoose}>
                   Change bot
-                </button>
+                </Button>
               </div>
-              <details className="mote-bot-replacement"><summary>Create a replacement identity</summary><p className="mote-details__hint">Create another bot using this Mote’s name and avatar. The current identity stays until the new one is saved; existing groups keep their bot.</p><button type="button" className="small-button" data-mote-identity-replace onClick={() => { setReplacing(true); setSeparate(true); setAvatar(true); newDraft() }}>Prepare replacement</button></details>
+              <details className="mote-bot-replacement"><summary>Create a replacement identity</summary><p className="mote-details__hint">Create another bot using this Mote’s name and avatar. The current identity stays until the new one is saved; existing groups keep their bot.</p><Button type="button" data-mote-identity-replace onClick={() => { setReplacing(true); setSeparate(true); setAvatar(true); newDraft() }}>Prepare replacement</Button></details>
             </>
           ) : (
             <>
@@ -326,17 +327,17 @@ export function MoteBotSetup({
               ) : null}
               <div className="mote-bot-actions">
                 {resumeId && !separate ? (
-                  <button
+                  <Button
                     type="button"
-                    className="primary-button"
+                    variant="primary"
                     onClick={() => void setup.check(resumeId)}
                   >
                     Resume original setup
-                  </button>
+                  </Button>
                 ) : (
-                  <button
+                  <Button
                     type="button"
-                    className="primary-button"
+                    variant="primary"
                     data-mote-bot-create
                     disabled={!setup.profile?.image || !capability || nameSource === 'manual' && !manualName?.trim()}
                     onClick={() => {
@@ -345,11 +346,11 @@ export function MoteBotSetup({
                     }}
                   >
                     Sign in & continue
-                  </button>
+                  </Button>
                 )}
-                <button type="button" className="small-button" onClick={onChoose}>
+                <Button type="button" onClick={onChoose}>
                   Choose existing bot
-                </button>
+                </Button>
               </div>
               {!capability ? (
                 <p className="mote-details__hint">
@@ -365,9 +366,8 @@ export function MoteBotSetup({
         </>
       ) : (
         <>
-          <button
+          <Button
             type="button"
-            className="small-button"
             onClick={() => {
               setSeparate(false)
               setReplacing(false)
@@ -376,14 +376,14 @@ export function MoteBotSetup({
             }}
           >
             Back to bot profile
-          </button>
+          </Button>
           <header className="bot-task-heading">
             <span className="bot-task-eyebrow">{operation?.snapshot.name ?? 'Bot setup'}{enrollmentPlatform ? ` · ${enrollmentPlatform}` : ''}</span>
             <h3>{taskTitle}</h3>
             {completedCreation ? <p>Created, configured and published. To start a conversation, create or connect a group from your Agent’s menu.</p> : primaryEnrollmentAction?.kind === 'confirm-account' ? <p>Choose the account and enterprise that will own this bot.</p> : primaryEnrollmentAction?.kind === 'renew-authentication' ? <p>{enrollment?.authentication?.stage === 'expired' ? 'This code has expired. Get a new code to continue the same setup.' : 'Sign-in could not be confirmed. Get a new code to continue the same setup.'}</p> : null}
           </header>
           {completedCreation && operation ? <div className="mote-bot-profile bot-task-complete-profile">{originalImage ? <img width={48} height={48} src={originalImage} alt="Avatar chosen for this bot" /> : null}<div><strong>{operation.snapshot.name}</strong><span>Message delivery is checked when you connect a group.</span></div></div> : null}
-          {publishedWithoutChoice ? <div className="mote-bot-next"><p>{operation.defaultLink.state === 'conflict' ? 'This Mote’s bot choice changed while setup was running.' : 'This bot is published, but its saved choice for this Mote is not confirmed.'} Choose the saved bot to use for new conversations.</p><button type="button" className="primary-button" onClick={onChoose}>Choose a saved bot</button></div> : null}
+          {publishedWithoutChoice ? <div className="mote-bot-next"><p>{operation.defaultLink.state === 'conflict' ? 'This Mote’s bot choice changed while setup was running.' : 'This bot is published, but its saved choice for this Mote is not confirmed.'} Choose the saved bot to use for new conversations.</p><Button type="button" variant="primary" onClick={onChoose}>Choose a saved bot</Button></div> : null}
           {challenge ? <div className="mote-bot-confirmation" data-mote-bot-code><BotSignInPrompt url={challenge.qrPayload} title={enrollmentPlatform ? `Sign in to ${enrollmentPlatform}` : 'Sign in to the bot platform'} platform={enrollmentPlatform || 'the bot platform'} scanned={enrollment?.authentication?.stage === 'scanned'} /></div> : null}
           {setup.enrollmentView?.account ? <ConnectorAccountSummary identityKey={JSON.stringify([setup.hostingTarget, enrollment?.operationId])} account={setup.enrollmentView.account} label="Account and enterprise for this bot" /> : null}
           <div className="bot-task-activity" role="status" data-bot-task-reading={setup.checking || undefined} aria-busy={working}>
@@ -419,7 +419,7 @@ export function MoteBotSetup({
               {savedConnection && !enrollment?.initialPublication && onContinue && setup.hostingTarget ? <div className="mote-bot-next">
                 <strong>Identity saved. Connect your bot.</strong>
                 <p>Continue with this bot’s saved sign-in to review message settings and publish it.</p>
-                <button type="button" className="primary-button" data-mote-bot-continue onClick={() => onContinue(savedConnection, { kind: 'enrollment', operationId: enrollment!.operationId, expectedRevision: enrollment!.revision }, setup.hostingTarget!)}>Continue bot setup</button>
+                <Button type="button" variant="primary" data-mote-bot-continue onClick={() => onContinue(savedConnection, { kind: 'enrollment', operationId: enrollment!.operationId, expectedRevision: enrollment!.revision }, setup.hostingTarget!)}>Continue bot setup</Button>
               </div> : null}
               {enrollment?.configured && enrollment.initialPublication && !completedCreation ? <InitialBotSetupResult progress={initialProgress ?? null} /> : null}
               {operation.profile ? (
@@ -482,18 +482,18 @@ export function MoteBotSetup({
               {!setup.checking ? <p role="status">{!setup.hostingTarget ? 'The original bot hosting owner is unconfirmed. The original request is kept without contacting another Host.' : raw ? 'The result is not confirmed. Your original request is retained.' : 'The original request could not be read. Its identifier is kept; no new setup was started.'}</p> : null}
               {!raw ? <code>{setup.selectedId}</code> : null}
               {setup.hostingTarget ? (
-                <button
+                <Button
                   type="button"
-                  className="primary-button"
+                  variant="primary"
                   onClick={() => void setup.check(setup.selectedId!)}
                 >
                   Check original result
-                </button>
+                </Button>
               ) : null}
               {raw?.hostingTarget && raw.phase === 'not-dispatched' && !raw.inspectOnly ? (
-                <button type="button" className="small-button" onClick={() => void setup.send(raw)}>
+                <Button type="button" onClick={() => void setup.send(raw)}>
                   Continue this request
-                </button>
+                </Button>
               ) : null}
             </>
           )}
@@ -509,9 +509,8 @@ export function MoteBotSetup({
           <p className="mote-details__hint">
             A separate setup may create another bot. All previous requests remain available.
           </p>
-          <button
+          <Button
             type="button"
-            className="small-button"
             onClick={() => {
               newDraft()
               setSeparate(true)
@@ -519,7 +518,7 @@ export function MoteBotSetup({
             }}
           >
             Start a separate setup
-          </button>
+          </Button>
         </details>
       ) : null}
       {!selected ? setupFeedback : null}
@@ -527,9 +526,8 @@ export function MoteBotSetup({
         <details className="mote-bot-history">
           <summary>Previous bot operations</summary>
           {history.map((item) => (
-            <button
+            <Button
               type="button"
-              className="small-button"
               key={item.id}
               data-mote-bot-operation={item.id}
               onClick={() => {
@@ -538,16 +536,15 @@ export function MoteBotSetup({
               }}
             >
               {item.name} · {item.action === 'create' ? 'Creation' : 'Profile update'}
-            </button>
+            </Button>
           ))}
           {setup.next ? (
-            <button
+            <Button
               type="button"
-              className="small-button"
               onClick={() => void setup.list(setup.next!)}
             >
               Load earlier operations
-            </button>
+            </Button>
           ) : null}
         </details>
       ) : null}

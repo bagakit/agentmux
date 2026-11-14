@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import type { MoteAvatarSeriesCatalog, MoteAvatarSeriesDefinition, MoteAvatarSeriesLocator, MoteAvatarSeriesSource } from '@agentmux/core/mote-avatar-series'
+import { Button } from '@agentmux/client-ui/components/Button'
 import { api } from '../lib/api'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { MoteSilhouetteArt, isMoteArticulatedId, type MoteArticulatedId } from './MoteSilhouetteArt'
@@ -124,6 +125,6 @@ export function MoteAvatarImageGallery({ visible, disabled, selectedImage, selec
       </div>
     </> : null}
     {loading ? <p className="space-icon-picker__description" role="status">Reading Mote images…</p> : null}
-    {issue ? <p className="space-icon-picker__description" role="status">{issue} <button type="button" className="small-button" disabled={disabled} onClick={() => { loaded.current = false; void readCatalog() }}>Retry images</button></p> : null}
+    {issue ? <p className="space-icon-picker__description" role="status">{issue} <Button type="button" disabled={disabled} onClick={() => { loaded.current = false; void readCatalog() }}>Retry images</Button></p> : null}
   </section>
 }

@@ -1,3 +1,4 @@
+import { Button } from '@agentmux/client-ui/components/Button'
 import type { ConnectionHostingTarget } from '../../../shared/contracts'
 import { mintObjectId } from '@agentmux/core/object-id'
 import { useWorkbenchDocument } from '../lib/workbench-document'
@@ -162,7 +163,7 @@ function MoteConnectionPanelBody({ active = true, hostingTarget, target, topicId
   useEffect(() => { if ((pending || issue || savedBotIssue) && identityOptions.current) identityOptions.current.open = true }, [pending, issue, savedBotIssue])
   return <div className="mote-connection-panel" data-mote-identity-panel={topicId}>
         <div className="mote-connection-dialog__body">
-          {current && savedBotIssue ? <section className="mote-bot-saved-issue" aria-label="Saved bot needs attention"><strong>Saved bot · {current.application.domain}</strong><code>{current.application.appId}</code><p role="status">{savedBotIssue}</p><button type="button" className="small-button" onClick={choose}>Review saved bot</button></section> : null}
+          {current && savedBotIssue ? <section className="mote-bot-saved-issue" aria-label="Saved bot needs attention"><strong>Saved bot · {current.application.domain}</strong><code>{current.application.appId}</code><p role="status">{savedBotIssue}</p><Button type="button" onClick={choose}>Review saved bot</Button></section> : null}
           <MoteBotSetup active={active} hostingTarget={snapshot?.hostingTarget ?? hostingTarget} target={target} topicId={topicId} record={currentChoice?.record ?? null} hasSavedBot={!!current} onChoose={choose} onCurrent={() => void refresh()}
             createOnOpen={createOnOpen} onCreateIntentConsumed={onCreateIntentConsumed} onContinue={onContinueSetup ?? (settings ? (record, source, hostingTarget) => {
               onSaved?.()
@@ -180,23 +181,23 @@ function MoteConnectionPanelBody({ active = true, hostingTarget, target, topicId
           {issue ? <p role="status" className="mote-details__issue">{issue}</p> : null}
           {pending ? <p className="mote-details__hint">The previous save is still unconfirmed. Reading the current choice does not confirm that save.</p> : null}
           <div className="mote-connection-dialog__secondary">
-            <button type="button" className="small-button" onClick={() => void refresh()} disabled={loading}>Check current choice</button>
-            {pending && reviewed && !busy ? <button type="button" className="small-button" onClick={() => { setAttempt(null); setNewChoice(true); edited.current = true }}>Use current revision for a new choice</button> : null}
-            {!inSettings && settings && currentChoice?.record ? <button type="button" className="small-button" onClick={() => {
+            <Button type="button" onClick={() => void refresh()} disabled={loading}>Check current choice</Button>
+            {pending && reviewed && !busy ? <Button type="button" onClick={() => { setAttempt(null); setNewChoice(true); edited.current = true }}>Use current revision for a new choice</Button> : null}
+            {!inSettings && settings && currentChoice?.record ? <Button type="button" onClick={() => {
               const { connectionId, adapterId, application } = currentChoice.record!.config
               if (!settings.channelPresentation(application, adapterId)) { setIssue('The original connector settings are not confirmed. Your saved identity is kept.'); return }
               onSaved?.(); settings.openMoteConnection({ target, topicId, moteName, hostingTarget: snapshot?.hostingTarget ?? hostingTarget ?? null, connection: { connectionId, adapterId, application } })
-            }}>Manage bot</button> : null}
+            }}>Manage bot</Button> : null}
             {!inSettings && settings && !currentChoice?.record ? <SelectionField label="Manage connector" value="" options={[{ value: '', label: 'Manage a connector…' }, ...settings.channelEntries.map(entry => ({ value: entry.section, label: entry.title, icon: <entry.icon size={14} /> }))]} onValueChange={value => { const entry = settings.channelEntries.find(entry => entry.section === value); if (entry) { onSaved?.(); settings.openMoteConnection({ target, topicId, moteName, hostingTarget: snapshot?.hostingTarget ?? hostingTarget ?? null, section: entry.section }) } }} /> : null}
           </div>
           {originalSaves.length ? <details className="mote-connection-dialog__requests"><summary>Retained save requests</summary>
             {originalSaves.map(({ input, phase, hostingTarget }) => <p key={input.operationId}><code>{input.operationId}</code><br />{input.values.connection?.application.appId ?? 'Remove default bot'} · {phase === 'not-dispatched' ? 'Not sent' : 'Result unconfirmed'} · {hostingTarget ? `Bot hosting: ${hostingTarget.hostId}` : 'Original bot hosting owner unconfirmed'}</p>)}
           </details> : null}
           </details>
-          {current ? <div className="mote-identity-management"><div className="mote-bot-actions">{currentChoice?.record && onManageConnection ? <button type="button" className="small-button" onClick={() => onManageConnection(currentChoice.record!, snapshot!.hostingTarget)}>Manage bot application</button> : null}<button type="button" className="small-button" data-mote-identity-unbind disabled={busy || pending || snapshot?.saved.status !== 'ready'} onClick={() => void save('')}>Unbind identity</button></div><p className="mote-details__hint">Unbinding removes this Mote’s default identity. The bot and existing groups are kept.</p></div> : null}
+          {current ? <div className="mote-identity-management"><div className="mote-bot-actions">{currentChoice?.record && onManageConnection ? <Button type="button" onClick={() => onManageConnection(currentChoice.record!, snapshot!.hostingTarget)}>Manage bot application</Button> : null}<Button type="button" data-mote-identity-unbind disabled={busy || pending || snapshot?.saved.status !== 'ready'} onClick={() => void save('')}>Unbind identity</Button></div><p className="mote-details__hint">Unbinding removes this Mote’s default identity. The bot and existing groups are kept.</p></div> : null}
         </div>
         {choosing || pending || attempt ? <footer className="mote-connection-dialog__footer">
-          <button type="button" className="primary-button" onClick={() => void save()} disabled={busy || pending || !snapshot || snapshot.saved.status !== 'ready'}>{busy ? 'Saving choice…' : 'Use this bot'}</button>
+          <Button type="button" variant="primary" onClick={() => void save()} disabled={busy || pending || !snapshot || snapshot.saved.status !== 'ready'}>{busy ? 'Saving choice…' : 'Use this bot'}</Button>
         </footer> : null}
   </div>
 }

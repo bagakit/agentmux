@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { MoteAvatarSeriesCreateResult } from '@agentmux/core/mote-avatar-series'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { presentError } from '@agentmux/client-ui/error-presentation'
+import { Button } from '@agentmux/client-ui/components/Button'
 import { api } from '../lib/api'
 import { DocumentOverlayPortal } from './WindowOverlayHost'
 
@@ -64,8 +65,8 @@ export function MoteAvatarSeriesCreateDialog({ disabled, rootPath, onUse }: {
   }
   const location = created?.path ?? (rootPath ? rootPath.replace(/[/\\]$/u, '') + '/' + seriesId : '~/.agentmux/avatars/' + seriesId)
   return <Dialog.Root open={open} onOpenChange={changeOpen}>
-    <Dialog.Trigger asChild><button type="button" className="small-button mote-series__add" disabled={disabled}
-      aria-label="Add avatar series" title="Add your own series"><AddIcon size={15} /></button></Dialog.Trigger>
+    <Dialog.Trigger asChild><Button type="button" className="mote-series__add" disabled={disabled}
+      aria-label="Add avatar series" title="Add your own series"><AddIcon size={15} /></Button></Dialog.Trigger>
     <DocumentOverlayPortal component={Dialog.Portal}>
       <Dialog.Overlay className="dialog-scrim" />
       <Dialog.Content asChild onEscapeKeyDown={event => event.stopPropagation()}>
@@ -77,8 +78,8 @@ export function MoteAvatarSeriesCreateDialog({ disabled, rootPath, onUse }: {
         {created ? <div className="mote-series-create__ready">
           <div className="mote-series-create__folder"><FolderIcon size={21} /><div><strong>{created.title}</strong><span>An image, an editable face, and a short README.</span></div></div>
           <code className="mote-series-create__path">{created.path}</code>
-          <div className="mote-series-create__folder-actions"><button type="button" className="small-button" disabled={busy !== null} onClick={() => void reveal()}><FolderIcon size={14} />Open folder</button>
-            <button type="button" className="small-button" disabled={busy !== null} onClick={() => void copy()}><CopyIcon size={14} />{copied ? 'Copied' : 'Copy path'}</button></div>
+          <div className="mote-series-create__folder-actions"><Button type="button" disabled={busy !== null} onClick={() => void reveal()}><FolderIcon size={14} />Open folder</Button>
+            <Button type="button" disabled={busy !== null} onClick={() => void copy()}><CopyIcon size={14} />{copied ? 'Copied' : 'Copy path'}</Button></div>
         </div> : <>
           <ol className="mote-series-create__steps">
             <li><strong>One folder, one series</strong><span>Give your collection a name. We can create its folder and a working example.</span></li>
@@ -94,9 +95,9 @@ export function MoteAvatarSeriesCreateDialog({ disabled, rootPath, onUse }: {
           </details>
         </>}
         {issue ? <div className="mote-series-create__issue"><p role="alert">{issue.action}</p><details><summary>Details</summary><p>{issue.detail}</p></details></div> : null}
-        <footer><Dialog.Close asChild><button type="button" className="small-button">{created ? 'Close' : 'Cancel'}</button></Dialog.Close>
-          {created ? <button type="button" className="primary-button" disabled={busy !== null} onClick={() => void chooseSeries()}>{busy === 'use' ? 'Refreshing…' : 'Use series'}</button>
-            : <button type="submit" className="primary-button" disabled={disabled || busy === 'create' || !title.trim() || !seriesId}>{busy === 'create' ? 'Creating…' : 'Create starter series'}</button>}</footer>
+        <footer><Dialog.Close asChild><Button type="button">{created ? 'Close' : 'Cancel'}</Button></Dialog.Close>
+          {created ? <Button type="button" variant="primary" disabled={busy !== null} onClick={() => void chooseSeries()}>{busy === 'use' ? 'Refreshing…' : 'Use series'}</Button>
+            : <Button type="submit" variant="primary" disabled={disabled || busy === 'create' || !title.trim() || !seriesId}>{busy === 'create' ? 'Creating…' : 'Create starter series'}</Button>}</footer>
         </form>
       </Dialog.Content>
     </DocumentOverlayPortal>
