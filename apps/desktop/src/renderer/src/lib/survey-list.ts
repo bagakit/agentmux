@@ -47,7 +47,7 @@ type State = {
 }
 type Ports = {
   get(): State
-  set(state: Partial<Omit<State, 'surveyPageReadRecovery'>>): void
+  set(state: Partial<Omit<State, 'surveyPageReadRecovery'>> & Pick<State, 'surveyPageReferences'>): void
   hasZone(zoneId: string): boolean
   hasPage(reference: Page): boolean
   save(): Promise<AgentMuxSpatialSave>
