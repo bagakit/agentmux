@@ -11,6 +11,7 @@ import { COMPOSER_PROMPT_STATES } from '../../../../shared/composer-shortcut-lib
 import { configValuesEqual } from '../../../../shared/config-edit'
 import { SettingsSaveBar } from './SettingsSaveBar'
 import { ComposerTextarea, NativeSelect, SearchInput, TextInput } from '@agentmux/client-ui/input'
+import { isImeOwnedKeyboardEvent } from '@agentmux/client-ui/ime-keyboard-event'
 import { agentProviderLabel } from '@agentmux/client-ui/components/AgentProviderIcon'
 import { promptProblems, useGoalsPrompts } from './GoalsPromptDrafts'
 import { LiquidSelectionSurface } from '../LiquidSelectionSurface'
@@ -54,15 +55,19 @@ export function ShortcutSettingsPane({ config, active, onOpenGoals }: {
   const [query, setQuery] = useState('')
   const [scope, setScope] = useState<PromptScope>({ kind: 'all' })
   const [usageOpen, setUsageOpen] = useState<Record<string, boolean>>({})
+  const [expanded, setExpanded] = useState(false)
   const [view, setView] = useState<'library' | 'editor'>('library')
   const [recentDelete, setRecentDelete] = useState<{ prompt: ComposerShortcut } | null>(null)
   const nameInput = useRef<HTMLInputElement>(null)
+  const instructionInput = useRef<HTMLTextAreaElement>(null)
+  const saveButton = useRef<HTMLButtonElement>(null)
   const searchInput = useRef<HTMLInputElement>(null)
   const library = useRef<HTMLDivElement>(null)
   const focusNewName = useRef(false)
   const focusCommonBody = useRef(false), promptEditor = useRef<HTMLElement>(null)
   const focusBack = useRef(false)
   const descriptionId = useId()
+  const instructionId = `${descriptionId}-instruction`
   const prompt = selectedId !== null && Object.hasOwn(resource.value, selectedId) ? resource.value[selectedId] : undefined
   const { command, keywords } = resolveComposerInputConfig(config.messageToolCompletion)
   const keyword = prompt?.keyword.trim() || 'keyword'
@@ -229,7 +234,30 @@ export function ShortcutSettingsPane({ config, active, onOpenGoals }: {
           {!visible.some((candidate) => candidate.id === prompt.id) ? <p className="prompt-editor__filtered" role="status">This prompt is outside your search or scope. <Button type="button" onClick={showInLibrary}>Show in library</Button></p> : null}
           <div className="prompt-editor__fields">
             <label className="prompt-editor__name"><span>Name</span><TextInput ref={nameInput} value={prompt.label} onChange={(event) => update(prompt.id, { label: event.target.value })} placeholder="Explain simply" /></label>
-            <label className="prompt-editor__instruction"><span>Prompt</span><ComposerTextarea variant="compact" aria-invalid={errors.some((error) => error.field === 'Prompt')} aria-describedby={`${descriptionId}-body`} value={prompt.body} onValueChange={(value) => update(prompt.id, { body: value })} placeholder="Explain what changed in plain words, then name the next useful step." /><small id={`${descriptionId}-body`} className={errors.some((error) => error.field === 'Prompt') ? 'settings-inline-error' : ''}>{errors.find((error) => error.field === 'Prompt')?.message ?? 'Your instruction, exactly as it will be used.'}</small></label>
+            <div className="prompt-editor__instruction">
+              <div className="prompt-editor__instruction-heading">
+                <label htmlFor={instructionId}><span>Prompt</span></label>
+                <Button type="button" className="prompt-editor__room" aria-controls={instructionId} aria-expanded={expanded}
+                  onMouseDown={event => {
+                    if (event.button === 0 && document.activeElement === instructionInput.current) event.preventDefault()
+                  }}
+                  onClick={() => setExpanded(value => !value)}>{expanded ? 'Less space' : 'More space'}</Button>
+              </div>
+              <ComposerTextarea variant="compact" expanded={expanded} ref={instructionInput} id={instructionId}
+                aria-invalid={errors.some((error) => error.field === 'Prompt')} aria-describedby={`${descriptionId}-body`}
+                aria-keyshortcuts="Meta+Enter Control+Enter" value={prompt.body}
+                onValueChange={value => update(prompt.id, { body: value })}
+                onKeyDown={event => {
+                  if (event.key !== 'Enter' || event.metaKey === event.ctrlKey || event.altKey || event.shiftKey || isImeOwnedKeyboardEvent(event)) return
+                  event.preventDefault()
+                  event.stopPropagation()
+                  if (!event.repeat) saveButton.current?.click()
+                }}
+                placeholder="Explain what changed in plain words, then name the next useful step." />
+              <small id={`${descriptionId}-body`} className={errors.some((error) => error.field === 'Prompt') ? 'settings-inline-error' : ''}>
+                {errors.find((error) => error.field === 'Prompt')?.message ?? 'Your instruction, exactly as it will be used.'}
+              </small>
+            </div>
             <div className="prompt-editor__reach">
               <label><span>Keyword</span><TextInput aria-describedby={`${descriptionId}-keyword`} aria-invalid={errors.some((error) => error.field === 'Keyword')} value={prompt.keyword} onChange={(event) => update(prompt.id, { keyword: event.target.value })} placeholder="eli5" /><small id={`${descriptionId}-keyword`} className={errors.some((error) => error.field === 'Keyword') ? 'settings-inline-error' : ''}>{errors.find((error) => error.field === 'Keyword')?.message ?? usageDescription}</small></label>
               <label><span>Provider scope</span><NativeSelect aria-label="Prompt Provider scope" aria-describedby={`${descriptionId}-provider`} value={prompt.providerId ?? ''} onChange={(event) => bindProvider(prompt.id, event.target.value)}><option value="">Every Agent</option>{BUILT_IN_AGENT_PROVIDER_IDS.map((id) => <option key={id} value={id}>{agentProviderLabel(id)}</option>)}{prompt.providerId && !BUILT_IN_AGENT_PROVIDER_IDS.some((id) => id === prompt.providerId) ? <option value={prompt.providerId}>{agentProviderLabel(prompt.providerId)}</option> : null}</NativeSelect><small id={`${descriptionId}-provider`}>Shared, or available to one Provider.</small></label>
@@ -276,7 +304,7 @@ export function ShortcutSettingsPane({ config, active, onOpenGoals }: {
       {recentDelete ? <div className="prompt-pending-delete" role="status"><span>Recently removed “{promptName(recentDelete.prompt)}”.</span><Button type="button" onClick={undoDelete}>Undo</Button></div> : null}
       <footer className="prompt-save-footer">
         <p className="prompt-save-summary" role="status">Saves the whole prompt library.{resource.dirty ? <> {changedCount} changed{deletedCount ? ` · ${deletedCount} pending ${deletedCount === 1 ? 'deletion' : 'deletions'}` : ''}.</> : null}{directory.dirty ? ' Also saves Goals common actions.' : null}</p>
-        <SettingsSaveBar save={saveState} dirty={resource.dirty || directory.dirty} resolution={owner.promptsResolution} blocked={problems.length ? `${problems.length === 1 ? 'one prompt needs' : `${problems.length} prompts need`} attention.` : undefined} label="Save prompts" onSave={() => void save()} />
+        <SettingsSaveBar save={saveState} dirty={resource.dirty || directory.dirty} resolution={owner.promptsResolution} blocked={problems.length ? `${problems.length === 1 ? 'one prompt needs' : `${problems.length} prompts need`} attention.` : undefined} label="Save prompts" saveButtonRef={saveButton} shortcut="Meta+Enter Control+Enter" onSave={() => void save()} />
       </footer>
     </div>
   )

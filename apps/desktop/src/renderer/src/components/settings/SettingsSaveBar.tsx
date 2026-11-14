@@ -1,7 +1,7 @@
 import { ActionFeedback } from '@agentmux/client-ui/components/ActionFeedback'
 import { Button } from '@agentmux/client-ui/components/Button'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
-import { useRef, useState } from 'react'
+import { useRef, useState, type Ref } from 'react'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 
 const ThemeStatusLoadingIcon = semanticIconComponent('status.loading')
@@ -48,13 +48,15 @@ export function useSettingsSave() {
 /** A draft that can resolve a same-field conflict in place. */
 export type SettingsConflictResolution = { useSaved(): void; keepMine(): void }
 
-export function SettingsSaveBar({ save, dirty, label = 'Save changes', scopeLabel, onSave, blocked, resolution }: {
+export function SettingsSaveBar({ save, dirty, label = 'Save changes', scopeLabel, onSave, blocked, resolution, saveButtonRef, shortcut }: {
   save: Pick<ReturnType<typeof useSettingsSave>, 'state' | 'error' | 'saving'> & Partial<Pick<ReturnType<typeof useSettingsSave>, 'conflict' | 'resolve'>>
   dirty: boolean
   label?: string
   scopeLabel?: string
   onSave: () => void
   blocked?: string | undefined
+  saveButtonRef?: Ref<HTMLButtonElement>
+  shortcut?: string
   /** Present when the draft can adopt the saved value or keep itself over it after a conflict. */
   resolution?: SettingsConflictResolution | undefined
 }) {
@@ -66,7 +68,7 @@ export function SettingsSaveBar({ save, dirty, label = 'Save changes', scopeLabe
       <ActionFeedback bounded className="settings-save-feedback" role={save.error ? 'alert' : 'status'} tabIndex={save.error ? 0 : undefined}>
         {save.error ? save.error : save.saving ? <><ThemeStatusLoadingIcon animation="spin" size={13} /> {scopeLabel ? `Saving ${scopeLabel}…` : 'Saving changes…'}</> : reason ? `Can’t save yet — ${reason}` : dirty ? scopeLabel ? `${scopeLabel}: unsaved changes` : 'Unsaved changes' : save.state === 'saved' ? <><ThemeStatusSavedIcon size={13} /> {scopeLabel ? `${scopeLabel} saved` : 'Changes saved'}</> : scopeLabel ? `${scopeLabel} saved` : 'All changes saved'}
       </ActionFeedback>
-      <Button variant="primary" aria-busy={save.saving} disabled={save.saving || !dirty || Boolean(reason)} onClick={onSave}>{label}</Button>
+      <Button ref={saveButtonRef} variant="primary" aria-keyshortcuts={shortcut} aria-busy={save.saving} disabled={save.saving || !dirty || Boolean(reason)} onClick={onSave}>{label}</Button>
       {resolvable ? <span className="settings-conflict-actions">
         <Button data-settings-conflict-action="use-saved" onClick={() => choose(item => item.useSaved())}>Use saved</Button>
         <Button data-settings-conflict-action="keep-mine" onClick={() => choose(item => item.keepMine())}>Keep mine</Button>

@@ -22,7 +22,7 @@
 .settings-page[hidden] { display: none; }
 .settings-page :where(.ui-input, .selection-field) { font-size: var(--fs-body); }
 .settings-page :where(.ui-input-group, .selection-field, :is(input, select).ui-input:not(.ui-input-group > .ui-input)) { min-block-size: 32px; max-inline-size: 100%; }
-.settings-page :where(.ui-input--compact-editor) { max-block-size: min(42vh, 18lh); }
+.settings-page :where(.ui-input--compact-editor:not([data-expanded="true"])) { max-block-size: min(42vh, 18lh); }
 .settings-page :where(.ui-input-group > .ui-input) { flex: 1; }
 @media (max-width: 560px), (pointer: coarse) {
   .settings-page :where(.ui-input-group, .selection-field, :is(input, select).ui-input:not(.ui-input-group > .ui-input)) { min-block-size: 44px; }

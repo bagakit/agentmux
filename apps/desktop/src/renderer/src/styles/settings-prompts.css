@@ -36,12 +36,15 @@
 .prompt-editor__status[data-prompt-status='unsaved'] { color: var(--amber-text); }
 .prompt-editor__status[data-prompt-status='invalid'] { color: var(--red-text); }
 .prompt-editor__name input { font: 600 var(--fs-title)/1.4 var(--font-sans); }
-.prompt-editor__instruction > span { font-weight: 550; }
+.prompt-editor__instruction > span,
+.prompt-editor__instruction-heading label { color: var(--text-2); font-size: var(--fs-meta); font-weight: 550; }
+.prompt-editor__instruction-heading { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); }
+.prompt-editor__instruction-heading .prompt-editor__room { color: var(--text-2); }
 .prompt-editor__instruction > small:not(.settings-inline-error), .prompt-editor__reach small:not(.settings-inline-error) { color: var(--text-3); }
 .prompt-editor__instruction textarea { font-size: var(--fs-prose); }
 .prompt-editor__fields { padding: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-5); background: var(--surface-0); border-top: 0; }
 .prompt-editor__fields label { min-width: 0; }
-.prompt-editor__fields > label { display: grid; gap: var(--sp-2); }
+.prompt-editor__fields > :is(label, .prompt-editor__instruction) { display: grid; gap: var(--sp-2); }
 .prompt-editor__fields > label > span, .prompt-editor__reach label > span { color: var(--text-2); font-size: var(--fs-meta); }
 .prompt-editor__fields label small { font-size: var(--fs-meta); line-height: 1.5; }
 .prompt-editor__reach { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--sp-5); }
