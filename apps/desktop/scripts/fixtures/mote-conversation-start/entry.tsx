@@ -17,7 +17,7 @@ const identity = { hostId: workspace.hostId, moteId: topic.id }, revision = 'sha
 const resource = { ...target.expectedResource, zoneId, zonePath: topic.directoryPath, path: scratchTopicDirectoryName(topic.id) + '/MOTE.md' }
 const executorId = Object.keys(state.config!.executors)[0]!
 const native = await api.conversation.readAgentConversation({ hostId: reference.hostId, agentSessionId: reference.sessionId })
-let unknown = false, history = true, bound = false, observations = 0
+let unknown = false, history = true, bound = false, observations = 0, setup = false
 const decision: MoteMainRolloverDecision = { target, reference, expectedRoleRevision: 'old-role', policyRevision: revision,
   policy: { kind: 'idle', idleMs: 45 * 60000 }, activity: { inputKey: { kind: 'prompt', agentSessionId: reference.sessionId,
     expectedRun: { runId: 'original-mote-primary-run' }, submissionId: 'prior-human-query' }, run: { runId: 'original-mote-primary-run' }, sourceId: 'private-native-idle', sequence: 1, idleSince: captureAt - 3_600_000 },
@@ -41,7 +41,7 @@ const links = (): MoteDialogueLink[] => !history ? [] : periods.map((value, inde
   operationId: value.id + '-source', associatedAt: captureAt, roleRevision: value.roleRevision, reference, range: 'whole-session', period: value,
   file: { resource, revision } } as MoteDialogueLink)).map(source => bounded && source.kind === 'main' && source.period?.id === 'period-recent'
     ? { ...source, roleRevision: bounded.link.roleRevision, reference: bounded.link.reference, period: bounded.link.period } : source).reverse()
-const defaults = () => ({ executorId, conversationRollover: { kind: 'idle' as const, idleMs: 45 * 60000 }, ...(bound ? { conversation: reference, conversationRevision: 'original-main-role' } : {}) })
+const defaults = () => ({ ...(!setup ? { executorId } : {}), conversationRollover: { kind: 'idle' as const, idleMs: 45 * 60000 }, ...(bound ? { conversation: reference, conversationRevision: 'original-main-role' } : {}) })
 // A controlled slow read: while it is held the workface shows its reading state, and releasing it continues the same read.
 let reading: Promise<void> | null = null, releaseReading: (() => void) | null = null
 // The reading scene holds the very first read: a cached page would skip the reading state entirely.
@@ -56,7 +56,7 @@ api.moteDialogue.read = async input => {
 }
 api.motePreferences.read = async input => ({ target: input.target, kind: 'quick', status: 'ready',
   source: { resource, result: { status: 'read', document: { path: resource.path, content: serializeMoteQuickMode('', defaults()), revision } } },
-  defaults: defaults(), choices: { executors: [{ id: executorId, name: '日常搭档', providerId: 'codex' }], conversations: [], destinations: [] },
+  defaults: defaults(), choices: { executors: [{ id: setup ? 'original-host-executor' : executorId, name: setup ? 'cck3' : '日常搭档', providerId: 'codex' }], conversations: [], destinations: [] },
   main: true, maintenance: { status: 'unbound', schedule: null, issue: null }, issue: null }) as any
 function seed() {
   observations++
@@ -67,6 +67,7 @@ function seed() {
 }
 seed()
 Object.assign(window, { moteStartCapture: { ready: true, facts: original.facts, theme: original.theme,
+  setup() { setup = true; history = false; unknown = false; bound = false; seed() },
   history(value: boolean) { history = value; unknown = false; bound = false; seed() },
   unknown() { unknown = true; seed() }, bound() { bound = true; unknown = false; seed() },
   releaseReading() { const release = releaseReading; reading = null; releaseReading = null; release?.() },

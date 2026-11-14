@@ -14,7 +14,7 @@ import {createHostContent} from '../../src/content-owner.js'
 import {createHostMoteMainReader,createHostMoteDialogue} from '../../src/mote-dialogue.js'
 import {HostMoteQuickPreferences} from '../../src/mote-quick-preferences.js'
 import {createHostSpatialAgentControl} from '../../src/spatial-agent-control.js'
-import {ScratchTopics} from '../../src/mote-resources.js'
+import {ScratchTopics,readConfiguredExecutorChoices} from '../../src/mote-resources.js'
 import {directoryIdentity,homeZoneId,serializeMoteQuickMode} from '../../src/mote-model.js'
 export async function createMoteConversationStartFixture(input:{providerId?:'codex'|'claude';extraClients?:import('../../../../packages/core/src/public-rpc-service.js').AgentMuxRpcCoreClient[]}={}){
  const closes:Array<()=>unknown|Promise<unknown>>=[]
@@ -45,7 +45,7 @@ export async function createMoteConversationStartFixture(input:{providerId?:'cod
  const configurationPath=join(h.root,'configuration.json');await writeFile(configurationPath,JSON.stringify({workspaces:[workspace],executors:{saved:{label:'Saved',providerId,command:providerId,args:[],env:{},injectAgentMuxGuide:false}}}))
  const content=createHostContent({configurationPath,spatial}),main=createHostMoteMainReader({configurationPath,spatial,files:content.files!}),store=new MoteDialogueStore(join(h.root,'dialogue.sqlite'))
  const dialogue=createHostMoteDialogue({main,spatial,store,clientForHost:()=>h.client})
- const quick=new HostMoteQuickPreferences({main,files:content.files!,prepareMainSource:dialogue.prepareMainSource,recordMainSource:dialogue.recordMainSource,catalog:async()=>spatialCatalog((await spatial.read())!.graph),executors:async()=>[{id:'saved',name:'Saved',providerId}]})
+ const quick=new HostMoteQuickPreferences({main,files:content.files!,prepareMainSource:dialogue.prepareMainSource,recordMainSource:dialogue.recordMainSource,catalog:async()=>spatialCatalog((await spatial.read())!.graph),executors:()=>readConfiguredExecutorChoices(configurationPath)})
  const createSpatial=createHostSpatialAgentControl({configurationPath,spatial,runtime:()=>({client:h.client}) as never})
  const startedNativeRuns=new Set<string>()
  const creator:typeof createSpatial=async(request,context)=>{

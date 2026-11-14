@@ -26,6 +26,27 @@ app.whenReady().then(async () => {
       assert.ok(dom.rect?.width > 0); const file = name + '.png'
       await fs.writeFile(path.join(evidence, file), (await win.webContents.capturePage()).toPNG()); result.images.push(file); result.operations.push({ name, dom, facts })
     }
+    if (process.argv.includes('--executor-setup-only')) {
+      await read('window.moteStartCapture.setup()')
+      await until(`${panel}.querySelector('.mote-start__notice button')?.textContent==='配置 Agent'`, 'Missing Executor has an adjacent setup action')
+      await click('.mote-start .tiptap'); await win.webContents.insertText('先帮我把这个问题想清楚，配置后再发。')
+      await capture('24-executor-setup-draft-wide')
+      win.setContentSize(640, 720); await read('window.moteStartCapture.theme(true)'); await settle()
+      await capture('25-executor-setup-draft-narrow')
+      await click(`js:[...${panel}.querySelectorAll('button')].find(node=>node.textContent==='配置 Agent')`)
+      await until('document.querySelector(".mote-quick-mode-dialog")?.textContent.includes("Saved settings loaded")', 'Original preferences loaded in actual Quick dialog')
+      await click('[aria-label="Executor for new chat"]')
+      await until('document.querySelector("[data-value=original-host-executor]")', 'Choices from original preferences rather than client config')
+      await capture('26-executor-source-choice-narrow', 'document.querySelector(".mote-quick-mode-dialog")')
+      await click('[data-value="original-host-executor"]')
+      win.setContentSize(1180, 850); await read('window.moteStartCapture.theme(false)'); await settle()
+      await capture('27-executor-setup-settings-wide', 'document.querySelector(".mote-quick-mode-dialog")')
+      await click('[aria-label="Close quick mode"]')
+      await until('!document.querySelector(".mote-quick-mode-dialog")', 'Return from setup preserves original message')
+      assert.ok(await read('document.querySelector(".mote-start .tiptap").innerText.includes("配置后再发")'))
+      result.initial = before; result.final = await read('window.moteStartCapture.facts()')
+      assert.deepEqual(result.final.identities, before.identities); result.passed = true; return
+    }
     if (process.argv.includes('--main-menu-only')) {
       await read('window.moteStartCapture.bound()')
       await until(`${panel}.querySelector('.mote-main-actions__trigger') && ${panel}.querySelector('.mote-workface__original:not([hidden]) .tiptap')`, 'Original current Main and its menu')
