@@ -190,10 +190,14 @@ the upgrade saves a copy of the Native state and restarts Native on the candidat
 running Runs listed in nativeReplacement end, while Sessions, history and the Runtime ID
 are kept and ended Runs continue through Session recovery. expected pins those Runs; a Run
 started after the check refuses the upgrade before anything stops. Tell the person which
-Runs end before they confirm. In Desktop the person reviews the exact target and maintenance
-effect, then explicitly confirms that same candidate. Cancelling review does not upgrade.
-A changed candidate or target must be checked and reviewed again, not silently substituted
-after confirmation.
+Runs end before they confirm. Desktop shows one Core maintenance summary for the
+exact Host. An explicit Update Core action applies an eligible Core-only candidate
+and its pinned expected facts without another review screen. A Native replacement
+still requires a separate review of its ending Runs and explicit confirmation;
+cancelling that review does not upgrade. An unavailable observation does not mean
+Core is missing or authorize a first install. A changed candidate or target must
+be checked and explicitly selected again, not silently substituted after the
+original action.
 
 Upgrade and reconnect require the original transport-approved user/device, without
 a managed Agent caller; command parameters cannot supply that identity. Read-only
