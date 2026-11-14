@@ -82,6 +82,7 @@ export function DerivedActionsSettingsPane({ config, active, onSave }: {
     try { parseAgentDerivedActionFields({ label: draft.label, base: draft.base, instruction: draft.instruction, ...(draft.executorId ? { executorId: draft.executorId } : {}) }); return [] }
     catch (error) { return [[draft.id, error instanceof Error ? error.message : String(error)] as const] }
   }))
+  const activeProblem = custom ? problems.get(custom.id) : undefined
   const hiddenDirty = visibility.dirty
   const dirty = resource.dirty || hiddenDirty
   const deleted = Object.keys(resource.expected).filter(id => !Object.hasOwn(resource.value, id)).length
@@ -177,10 +178,11 @@ export function DerivedActionsSettingsPane({ config, active, onSave }: {
         <section className="derived-actions__block" aria-label="Menu placement"><h4>In the Agent menu</h4>{preview(official.id)}</section>
         {official.id === 'take-over' ? <div className="derived-actions__actions"><Button type="button" onClick={() => add({ label: 'Take over with a note', base: 'new-agent', instruction: 'Continue the original work. Before you start, ' })}>
           <DerivedIcon size={13} /> Start your own from this</Button><small>Keeps the full original context; you add the instruction.</small></div> : null}
-      </section> : custom ? <section className="prompt-settings-card prompt-editor derived-actions__editor" aria-label={`Edit ${nameOf(custom)}`} data-derived-editor={custom.id}>
-        <div className="prompt-editor__heading">{back}
-          {problems.has(custom.id) ? <span className="prompt-editor__status" data-prompt-status="invalid">Needs attention</span> : null}</div>
+      </section> : custom ? <section className="prompt-settings-card prompt-editor derived-actions__editor" aria-label={`Edit ${nameOf(custom)}`}
+        aria-describedby={activeProblem ? `${describedBy}-problem` : undefined} data-derived-editor={custom.id}>
+        <div className="prompt-editor__heading">{back}</div>
         <div className="prompt-editor__fields">
+          {activeProblem ? <p id={`${describedBy}-problem`} className="settings-inline-error" role="status">{activeProblem}</p> : null}
           {identity(DerivedIcon, 'Yours', <label className="prompt-editor__name derived-actions__name"><span>Name in the menu</span><TextInput ref={nameInput} value={custom.label} maxLength={AGENT_DERIVED_ACTION_LIMITS.label} placeholder="Review this work" onChange={event => update(custom.id, { label: event.target.value })} /></label>)}
           <fieldset className="derived-actions__base"><legend>Starts from</legend><div className="derived-actions__bases" role="radiogroup" aria-label="Starts from">{BASES.map(base => {
             const BaseIcon = base.value === 'fork' ? ForkIcon : TakeOverIcon
@@ -193,8 +195,8 @@ export function DerivedActionsSettingsPane({ config, active, onSave }: {
           <label className="prompt-editor__instruction"><span>Instruction</span>
             <ComposerTextarea variant="compact" value={custom.instruction} aria-describedby={`${describedBy}-instruction`} placeholder="Review the changes and list concrete bugs. Do not edit files."
               onValueChange={value => update(custom.id, { instruction: value })} />
-            <small id={`${describedBy}-instruction`} className={problems.has(custom.id) ? 'settings-inline-error' : ''}>{problems.get(custom.id) ?? (custom.base === 'fork'
-              ? 'Sent first to the forked conversation, exactly as written.' : 'The new Agent also gets the original Session, its records and how to read them. The original keeps running.')}</small></label>
+            <small id={`${describedBy}-instruction`}>{custom.base === 'fork'
+              ? 'Sent first to the forked conversation, exactly as written.' : 'The new Agent also gets the original Session, its records and how to read them. The original keeps running.'}</small></label>
           {custom.base === 'new-agent' ? <div className="derived-actions__agent"><span aria-hidden="true">Default Agent</span><AgentExecutorPicker presentation="field" label="Default Agent" unsetLabel="Ask each time"
             executors={executors} selected={custom.executorId ?? null} onSelect={id => update(custom.id, id ? { executorId: id } : { executorId: '' })} />
             <small>Listed first when you start the action. You still choose before anything starts.</small></div> : null}
