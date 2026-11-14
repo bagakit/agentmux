@@ -8,10 +8,10 @@ import { connectAgentMuxRpc } from '../../../packages/core/src/public-rpc-client
 import { AgentMuxError } from '../../../packages/core/src/errors.js'
 import type { RpcForwardingAuthority } from '../../../packages/core/src/rpc-forwarding.js'
 import { RuntimeController } from '../src/main/runtime-controller.js'
-import { connectDesktopAgentMuxHost, callOriginalDesktopHost, subscribeOriginalDesktopHost } from '../src/main/desktop-host.js'
+import { connectDesktopAgentMuxHost, configuredDesktopAgentMuxHost, callOriginalDesktopHost, subscribeOriginalDesktopHost } from '../src/main/desktop-host.js'
 import type { AppConfig, SessionControl } from '../src/shared/contracts.js'
 
-const platform = vi.hoisted(() => ({ probes: 0, start: undefined as undefined | (() => Promise<unknown>) }))
+const platform = vi.hoisted(() => ({ probes: 0, start: undefined as undefined | (() => Promise<unknown>), reload: vi.fn() }))
 vi.mock('electron', () => ({ app: { getAppMetrics: () => [] }, nativeImage: {} }))
 vi.mock('@agentmux/core', async original => {
   const core = await original<typeof import('@agentmux/core')>()
@@ -22,11 +22,11 @@ vi.mock('@agentmux/core', async original => {
 // The platform launcher is the boundary of this private consumer. No launchctl,
 // production socket or real Agent process is used by the test.
 vi.mock('@agentmux/host/macos-service', () => ({ macosHostService: (value: unknown) => value,
-  ensureMacosHostService: async () => await platform.start!() }))
+  ensureMacosHostService: async () => await platform.start!(), reloadReplacedMacosHost: platform.reload }))
 const cleanup: Array<() => void | Promise<void>> = []
 afterEach(async () => {
   for (const close of cleanup.splice(0).reverse()) await close()
-  platform.probes = 0; platform.start = undefined; vi.restoreAllMocks(); vi.unstubAllEnvs()
+  platform.probes = 0; platform.start = undefined; platform.reload.mockReset(); vi.restoreAllMocks(); vi.unstubAllEnvs()
 })
 const deferred = () => {
   let resolve!: () => void, reject!: (error: Error) => void
@@ -62,6 +62,25 @@ async function desktop(f: Awaited<ReturnType<typeof fixture>>) {
   const agent: SessionControl = { kind: 'agent', hostId: 'local', agentSessionId: 'original', run: { runId: 'run-original' } }
   return { client, controller, terminal, agent }
 }
+
+it.each(['installed', 'development', 'mounted'])('only an installed Desktop prepares the existing Host before its first control read (%s)', async location => {
+  const f = await fixture()
+  await f.server.start()
+  const executable = location === 'mounted' ? '/Volumes/AgentMux/AgentMux.app/Contents/MacOS/AgentMux' : '/Applications/AgentMux.app/Contents/MacOS/AgentMux'
+  const previous = Object.getOwnPropertyDescriptor(process, 'execPath')!
+  Object.defineProperty(process, 'execPath', { ...previous, value: executable })
+  cleanup.push(() => { Object.defineProperty(process, 'execPath', previous) })
+  const connect = configuredDesktopAgentMuxHost(join(f.root, 'config.json'), join(f.root, 'connectors'), location !== 'development')
+  const client = await connect({ id: 'local', kind: 'local', label: 'Local' }, f.store)
+  cleanup.push(() => client.dispose())
+  await callOriginalDesktopHost(client, 'runtime.owner.identity', {}, {})
+  await callOriginalDesktopHost(client, 'runtime.owner.identity', {}, {})
+  if (location !== 'installed') {
+    expect(platform.reload).not.toHaveBeenCalled()
+  } else {
+    expect(platform.reload).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ executable, storePath: f.store.path, socketPath: f.socketPath }))
+  }
+})
 
 it('prepares the real Desktop channel once for cold startup and all warm input and reader consumers', async () => {
   const f = await fixture(), launch = vi.fn(async () => { await f.server.start(); return {} })

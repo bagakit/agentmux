@@ -6,7 +6,7 @@ import preparation from './vitest.hosted-input-preparation.config.mts'
 
 const root = resolve(import.meta.dirname, '../../..')
 const mutation = process.env.AGENTMUX_CHANNEL_MUTATION
-if (mutation && !['per-request', 'no-preparation'].includes(mutation)) throw Error('Unknown channel preparation mutation')
+if (mutation && !['per-request', 'no-preparation', 'skip-installed-host-reload'].includes(mutation)) throw Error('Unknown channel preparation mutation')
 export default defineConfig({
   resolve: preparation.resolve, cacheDir: '.cache/desktop-host-channel',
   plugins: [{ name: 'actual-channel-preparation-source', enforce: 'pre', transform(source, id) {
@@ -16,7 +16,9 @@ export default defineConfig({
     const replacement = mutation === 'per-request' && path.endsWith('/desktop-host.ts')
       ? ['call: rpc.call.bind(rpc),', 'call: async (method, params, options) => { await ensureHost(store.path, socketPath, configuration); return await rpc.call(method, params, options) },']
       : mutation === 'no-preparation' && path.endsWith('/public-rpc-client.ts')
-        ? ['await this.prepareUnix(lifetime.signal)', 'await Promise.resolve()'] : undefined
+        ? ['await this.prepareUnix(lifetime.signal)', 'await Promise.resolve()']
+        : mutation === 'skip-installed-host-reload' && path.endsWith('/desktop-host.ts')
+          ? ['if (installed) {', 'if (false && installed) {'] : undefined
     if (replacement) {
       if (source.split(replacement[0]!).length !== 2) throw Error('Expected one production channel preparation mutation')
       code = source.replace(replacement[0]!, replacement[1]!)
