@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { afterAll, beforeAll, afterEach, describe, expect, it, vi } from 'vitest'
-import { AgentExecutionCoordinator, AgentExecutionBindingService, type AgentExecutionHostPort, type AgentExecutionOpenInput } from '../src/agent-execution-coordinator.js'
+import { AgentExecutionCoordinator, AgentExecutionBindingService, type AgentExecutionHostPort, type AgentExecutionOpenInput, type AgentExecutionInspection } from '../src/agent-execution-coordinator.js'
 import type { AgentMuxClientEvent, AgentMuxRunInputOperation, AgentMuxAgentSession } from '../src/types.js'
 
 let io: Awaited<ReturnType<typeof messageJournalIo>>
@@ -527,4 +527,53 @@ it('does not send the original initial input again when explicit continuation ad
   expect(continued.session.run).toEqual(first.session.run)
   expect(f.frontend.api.writeTerminal.mock.calls.filter(([target]) => (target as { runId: string }).runId === first.session.run.runId)).toHaveLength(0)
   expect(f.frontend.api.createHostAgentWithDelivery).toHaveBeenLastCalledWith(expect.objectContaining({ ...input.agent }))
+})
+
+it('Core binding readers coalesce only related facts and cancellation preserves helpers and frozen intent', async () => {
+  const f = await fixture(), service = new AgentExecutionBindingService(f.root, { resolveHost: f.resolveHost })
+  cleanups.push(() => service.dispose())
+  await service.create(f.input)
+  const entered = gate(), held = gate(), values: AgentExecutionInspection[] = []
+  const reader = await service.watch(f.input.bindingId, async value => { values.push(value!); if (values.length === 1) { entered.release(); await held.promise } })
+  expect(reader.initial).toMatchObject({ bindingId: f.input.bindingId, inspection: { continuation: { createOperationId: f.input.agent.createOperationId } } })
+  const unrelated = vi.fn(), other = await service.watch('unrelated-binding', unrelated); other.start(); reader.start()
+  f.executor.addOutput({ type: 'diagnostic', generation: 'original-generation', code: 'ORIGINAL_UNKNOWN_0' }); await entered.promise
+  for (let i = 1; i <= 12; i++) {
+    f.executor.addOutput({ type: 'diagnostic', generation: 'original-generation', code: `ORIGINAL_UNKNOWN_${i}` })
+    await vi.waitFor(async () => expect((await service.inspect(f.input.bindingId))?.diagnostics?.at(-1)?.code).toBe(`ORIGINAL_UNKNOWN_${i}`))
+  }
+  expect(values).toHaveLength(1); expect(unrelated).not.toHaveBeenCalled()
+  held.release(); await vi.waitFor(() => expect(values).toHaveLength(2))
+  expect(values[1]!.diagnostics?.at(-1)?.code).toBe('ORIGINAL_UNKNOWN_12')
+  await reader.dispose(); await other.dispose()
+  expect(f.frontend.listeners.size).toBe(1); expect(f.executor.listeners.size).toBe(1)
+  expect(f.read().input).toEqual(f.input)
+  expect(f.frontend.api.createHostAgentWithDelivery).toHaveBeenCalledOnce()
+  expect(f.frontend.api.createPreparedTerminal).toHaveBeenCalledOnce(); expect(f.executor.api.createPreparedTerminal).toHaveBeenCalledOnce()
+})
+
+it('one rejecting binding consumer cannot close Core or interrupt a different reader', async () => {
+  const f = await fixture(), service = new AgentExecutionBindingService(f.root, { resolveHost: f.resolveHost }); cleanups.push(() => service.dispose())
+  await service.create(f.input)
+  const failed = vi.fn(), good = vi.fn()
+  const broken = await service.watch(f.input.bindingId, () => { throw Error('private reader gone') }, { onError: failed })
+  const healthy = await service.watch(f.input.bindingId, good); broken.start(); healthy.start()
+  f.executor.addOutput({ type: 'diagnostic', generation: 'original-generation', code: 'ORIGINAL_UNKNOWN' })
+  await vi.waitFor(() => { expect(failed).toHaveBeenCalledOnce(); expect(good).toHaveBeenCalledOnce() })
+  f.executor.addOutput({ type: 'diagnostic', generation: 'original-generation', code: 'SECOND_UNKNOWN' })
+  await vi.waitFor(() => expect(good).toHaveBeenCalledTimes(2))
+  expect(f.frontend.listeners.size).toBe(1); expect(f.read().input).toEqual(f.input)
+  await healthy.dispose()
+})
+it('aborting a binding watch releases only that reader while other readers and helper input remain available', async () => {
+  const f = await fixture(), service = new AgentExecutionBindingService(f.root, { resolveHost: f.resolveHost }); cleanups.push(() => service.dispose())
+  await service.create(f.input)
+  const abort = new AbortController(), closed = vi.fn(), healthy = vi.fn()
+  const cancelled = await service.watch(f.input.bindingId, closed, { signal: abort.signal }), retained = await service.watch(f.input.bindingId, healthy)
+  cancelled.start(); retained.start(); abort.abort()
+  f.executor.addOutput({ type: 'diagnostic', generation: 'original-generation', code: 'AFTER_READER_CANCEL' })
+  await vi.waitFor(() => expect(healthy).toHaveBeenCalledOnce())
+  expect(closed).not.toHaveBeenCalled(); expect(f.frontend.listeners.size).toBe(1); expect(f.executor.listeners.size).toBe(1)
+  expect((await service.inspect(f.input.bindingId))?.continuation?.createOperationId).toBe(f.input.agent.createOperationId)
+  await retained.dispose()
 })

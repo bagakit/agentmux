@@ -3,6 +3,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { AgentMuxRpcService } from '../src/public-rpc-service.js'
+import { AgentMuxControlServer } from '../src/public-rpc-server.js'
+import { connectAgentMuxRpc } from '../src/public-rpc-client.js'
 import { parseAgentExecutionCreate, parseAgentExecutionBinding, parseAgentExecutionInspection } from '../src/public-rpc-agent-execution.js'
 import { parseRpcNativeResult } from '../src/rpc-native-codec.js'
 import { AGENTMUX_CLI_COMMANDS, parseAgentMuxCliInvocation } from '../src/agentmux-cli-commands.js'
@@ -38,13 +40,13 @@ describe('public execution binding owner', () => {
   it('calls exactly the original coordinator methods, preserves authored input, and awaits lazy inspection', async () => {
     const f = fixture()
     expect(await f.service.call('agent.execution.create', input, context)).toEqual({ session, execution: inspection })
-    expect(f.owner.create).toHaveBeenCalledExactlyOnceWith(input)
+    expect(f.owner.create).toHaveBeenCalledExactlyOnceWith(input, context)
     expect(await f.service.call('agent.execution.continue', original, context)).toEqual({ session, execution: inspection })
-    expect(f.owner.continueOriginal).toHaveBeenCalledExactlyOnceWith(original)
+    expect(f.owner.continueOriginal).toHaveBeenCalledExactlyOnceWith(original, context)
     expect(await f.service.call('agent.execution.binding', key, context)).toEqual(inspection)
-    expect(f.owner.inspect).toHaveBeenCalledExactlyOnceWith(input.bindingId)
+    expect(f.owner.inspect).toHaveBeenCalledExactlyOnceWith(input.bindingId, undefined, context)
     expect(await f.service.call('agent.execution.rejoin', key, context)).toEqual(inspection)
-    expect(f.owner.rejoin).toHaveBeenCalledExactlyOnceWith(input.bindingId)
+    expect(f.owner.rejoin).toHaveBeenCalledExactlyOnceWith(input.bindingId, context)
     expect(f.coreClients).not.toHaveBeenCalled()
     expect(f.owner.create.mock.calls[0]![0]).not.toBe(input)
     expect(parseAgentExecutionCreate(input)).toEqual(input)
@@ -185,4 +187,49 @@ it('parses continuation CLI as exact original identity and rejects any replaceme
   }
   for (const changed of [{ ...original, agentSessionId: 'another' }, { ...original, createOperationId: 'another' }])
     expect(() => parseRpcNativeResult('agent.execution.continue', { session, execution: inspection }, changed)).toThrow()
+})
+
+it('binding watch denies anonymous/managed readers before owner access and parses exact CLI stream input', async () => {
+  const f = fixture(), watch = vi.fn()
+  const service = new AgentMuxRpcService({ executionBindings: { ...f.owner, watch } })
+  for (const caller of [{}, { ...context, caller: { agentSessionId: 'managed-agent', capability: 'capability' } }]) {
+    await expect(service.subscribe('agent.execution.watch', key, vi.fn(), caller)).rejects.toMatchObject({ code: 'CONTROL_PERMISSION_DENIED' })
+  }
+  expect(watch).not.toHaveBeenCalled()
+  const root = await mkdtemp(join(tmpdir(), 'amux-watch-cli-')); cleanups.push(() => rm(root, { recursive: true, force: true }))
+  const path = join(root, 'input.json'); await writeFile(path, JSON.stringify(key))
+  const invocation = await parseAgentMuxCliInvocation(['agent', 'execution', 'watch', '--input', path])
+  expect(agentMuxModuleSkill('agent')).toContain('amux agent execution watch')
+  expect(agentMuxCommandHelp('agent.execution.watch')).toContain('user/device')
+  expect(invocation.command.method).toBe('agent.execution.watch'); expect(invocation.command.stream).toBe(true); expect(invocation.params).toEqual(key)
+  expect(() => parseRpcNativeResult('agent.execution.watch', { bindingId: 'other', inspection }, key)).toThrow()
+  expect(() => parseRpcNativeResult('agent.execution.watch', { bindingId: input.bindingId, inspection: { ...inspection, bindingId: 'other' } }, key)).toThrow()
+})
+
+it.each(['revoked', 'aborted', 'runtime'] as const)('does not disclose a delayed watch opening after its reader becomes %s', async kind => {
+  const f = fixture(); let release!: () => void, entered!: () => void
+  const ready = new Promise<void>(done => { entered = done }), held = new Promise<void>(done => { release = done })
+  const dispose = vi.fn(), start = vi.fn(), events = vi.fn(), abort = new AbortController(); let revoked = false
+  const watch = vi.fn(async () => { entered(); await held; return { initial: { bindingId: input.bindingId, inspection }, dispose, start } })
+  const service = new AgentMuxRpcService({ executionBindings: { ...f.owner, watch },
+    hostedRuntime: () => ({ assertFence: () => { if (revoked && kind === 'runtime') throw Error('original Runtime changed') } }) as never })
+  const opening = service.subscribe('agent.execution.watch', key, events, { ...context, signal: abort.signal, runtimeFence: { runtimeId: 'original-runtime', ownerInstanceId: 'original-owner' },
+    assertCurrent: () => { if (revoked && kind === 'revoked') throw Error('revoked original authority') } })
+  const settled = opening.then(async value => { await value.dispose(); return { initial: value.initial } }, error => ({ error }))
+  await ready; if (kind === 'aborted') abort.abort(); else revoked = true
+  release(); const outcome = await settled
+  expect(outcome).toHaveProperty('error')
+  expect(dispose).toHaveBeenCalledOnce(); expect(start).not.toHaveBeenCalled(); expect(events).not.toHaveBeenCalled()
+})
+it('SDK watch retains per-request managed credentials on the actual Unix transport instead of gaining local user authority', async () => {
+  const f = fixture(), watch = vi.fn(async () => ({ initial: { bindingId: input.bindingId, inspection }, start: vi.fn(), dispose: vi.fn() }))
+  const root = await mkdtemp(join(tmpdir(), 'amux-binding-wire-')); cleanups.push(() => rm(root, { recursive: true, force: true }))
+  const server = new AgentMuxControlServer({ socketPath: join(root, 'core.sock'), executionBindings: { ...f.owner, watch } }); await server.start(); cleanups.push(() => server.stop())
+  const rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: server.path } }); cleanups.push(() => rpc.dispose())
+  const managed = await rpc.subscribe('agent.execution.watch', key, { credentials: { agentSessionId: 'managed-original', capability: 'original-capability' }, onInitial: () => {}, onEvent: () => {} }).then(async reader => { await reader.dispose(); return { allowed: true } }, error => ({ error }))
+  expect(managed).toHaveProperty('error'); expect('error' in managed && managed.error).toMatchObject({ code: 'CONTROL_PERMISSION_DENIED' })
+  expect(watch).not.toHaveBeenCalled()
+  const initial = vi.fn(), reader = await rpc.subscribe('agent.execution.watch', key, { onInitial: initial, onEvent: () => {} })
+  expect(initial).toHaveBeenCalledExactlyOnceWith({ bindingId: input.bindingId, inspection }); expect(watch).toHaveBeenCalledOnce()
+  await reader.dispose()
 })
