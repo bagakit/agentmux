@@ -11,7 +11,7 @@ import { SpaceObjectIcon } from './SpaceObjectIcon'
 import { BrandIcon } from './BrandIcon'
 import { topicSpaceIconTarget } from '../lib/space-object-appearance'
 import { useAppStore } from '../store'
-import { useLauncherState } from '../lib/launcher-state'
+import { checkpointLauncherState, useLauncherState } from '../lib/launcher-state'
 import { useMoteDialogueView } from '../lib/mote-dialogue-view'
 import { readMoteMainAction, type MoteMainActionResult } from '../lib/mote-main-action'
 import type { MoteWorkfaceScope, MoteRolloverStart } from '../lib/mote-workface'
@@ -22,9 +22,10 @@ import { moteEntryDraftKey, type MoteHeldEntryInput } from '../lib/mote-entry-ho
 /** The first message's stage from the original setup receipt alone; no result yet is still sending. */
 function desktopFirstMessageStage(result: MoteMainActionResult | null, busy: boolean, operationId: string): MoteFirstMessageStage {
   const query = result?.record?.moteMain?.deferredInput
-  if (!result || query?.operationId !== operationId) return busy ? 'sending' : 'unconfirmed'
+  if (!result) return busy ? 'sending' : 'unconfirmed'
+  if (query?.operationId !== operationId) return 'unconfirmed'
   const outcome = agentPromptSubmissionOutcome(result.deferredInput?.record ?? null)
-  return outcome === 'admitted' || outcome === 'terminal-confirmed' ? 'delivered' : busy ? 'sending' : 'unconfirmed'
+  return outcome === 'admitted' || outcome === 'terminal-confirmed' ? 'delivered' : 'unconfirmed'
 }
 
 /** The welcome uses the existing durable Launcher draft and original Main setup admission. */
@@ -44,7 +45,7 @@ export function MoteConversationStart({ scope, active, mode, onConfigure, onOpen
   const source = useRef({ key, active }); source.current = { key, active }
   const lifetime = useRef({})
   useEffect(() => { lifetime.current = {}; return () => { lifetime.current = {} } }, [key, active])
-  const submission = useRef<{ operationId: string; prompt: string; revision: number; lifetime: object } | null>(null)
+  const submission = useRef<{ operationId: string; prompt: string; revision: number; lifetime: object; released?: boolean; landed?: boolean } | null>(null)
   const automaticSettling = useRef<string | null>(null), automaticRevision = useRef(edits.current)
   const rows = moteConversationHistoryRows(dialogue?.page?.links ?? [], dialogue?.page?.main.roleRevision)
   // Only the history rows' own Sessions are read, so an unrelated Session update does not redraw the welcome.
@@ -58,21 +59,38 @@ export function MoteConversationStart({ scope, active, mode, onConfigure, onOpen
   const history = rows.map((row, index) => ({ ...row, item: { ...row.item, ...(labels[index] ? { title: labels[index]! } : {}) } }))
   // The person's message as sent, shown in place while its Main is created; the frozen first message, not a queue.
   const [sent, setSent] = useState<{ operationId: string; prompt: string; key: string } | null>(null)
+  async function releaseDraft(query: { operationId: string; prompt: string }) {
+    const original = submission.current
+    if (!original || original.operationId !== query.operationId || original.prompt !== query.prompt || source.current.key !== key ||
+      edits.current !== original.revision || original.lifetime !== lifetime.current || useLauncherState.getState().drafts[key]?.prompt !== original.prompt) return
+    // The existing creation reference now durably holds this caller's text; later
+    // draft edits have their own custody and must never be cleared by its receipt.
+    if (!useLauncherState.getState().setDraft(key, 'prompt', '')) return
+    original.released = true
+    try { await checkpointLauncherState() }
+    catch {
+      if (useLauncherState.getState().drafts[key]?.prompt === '') useLauncherState.getState().setDraft(key, 'prompt', original.prompt)
+      original.released = false
+      setNotice('原问题已保留，输入框的保存尚未确认。')
+    }
+  }
   // A remounted view can inspect an old admission, but may never clear this view's new draft from it.
   async function confirmed(result: MoteMainActionResult, query: { operationId: string; prompt: string }, mayNavigate: () => boolean) {
     const original = submission.current, canonical = result.record?.moteMain?.deferredInput
     const outcome = agentPromptSubmissionOutcome(result.deferredInput?.record ?? null)
     const current = () => source.current.key === key && source.current.active && edits.current === original?.revision && original?.lifetime === lifetime.current
-    if (!original || query.operationId !== original.operationId || canonical?.operationId !== original.operationId || canonical.prompt !== original.prompt ||
+    if (!original || original.landed || query.operationId !== original.operationId || canonical?.operationId !== original.operationId || canonical.prompt !== original.prompt ||
       query.prompt !== original.prompt || !['admitted', 'terminal-confirmed'].includes(outcome) || !current() ||
-      useLauncherState.getState().drafts[key]?.prompt !== original.prompt || !result.reference) return
-    const saved = useLauncherState.getState().setDraft(key, 'prompt', '')
+      useLauncherState.getState().drafts[key]?.prompt !== (original.released ? '' : original.prompt) || !result.reference) return
+    const saved = original.released || useLauncherState.getState().setDraft(key, 'prompt', '')
     if (!saved || useLauncherState.getState().persistenceIssue) {
       if (current() && !useLauncherState.getState().drafts[key]?.prompt) useLauncherState.getState().setDraft(key, 'prompt', original.prompt)
       setNotice('原消息已确认投递；草稿保存尚未确认，原文保留。'); return
     }
     const fresh = await readMoteMainAction(scope).catch(() => null)
-    if (current() && mayNavigate() && fresh && JSON.stringify(fresh.dialogue.main.current) === JSON.stringify(result.reference)) onOpenMain(result.reference)
+    if (current() && !original.landed && mayNavigate() && fresh && JSON.stringify(fresh.dialogue.main.current) === JSON.stringify(result.reference)) {
+      original.landed = true; onOpenMain(result.reference)
+    }
   }
   async function confirmAutomatic(result: MoteMainActionResult, mayNavigate: () => boolean) {
     if (!automatic || automaticSettling.current === automatic.query.operationId || !result.reference) return
@@ -90,13 +108,12 @@ export function MoteConversationStart({ scope, active, mode, onConfigure, onOpen
   }
   return <MoteMainActions scope={scope} active={active} onConfigure={onConfigure} onRefresh={dialogue?.refresh}
     onResult={(result, mayNavigate) => { void confirmAutomatic(result, mayNavigate); if (submission.current) void confirmed(result, submission.current, mayNavigate) }}
-    onQueryResult={(result, query, mayNavigate) => { void confirmed(result, query, mayNavigate) }}
     renderStart={state => <><AutomaticStart automatic={automatic} state={state} active={active} />
       <HeldStart held={held} state={state} active={active && !automatic && mode === 'start' && !persistenceIssue} onStart={query => {
         // The held text becomes this welcome's ordinary first message: back in the draft, then the same submit, confirm and clear.
         onHeldSettled?.(query.operationId)
         submission.current = { ...query, revision: edits.current, lifetime: lifetime.current }; setSent({ ...query, key })
-        void state.submit(query)
+        void state.submit(query, undefined, releaseDraft)
       }} />
       <StartScene name={scope.topic.title} active={active}
       mode={state.reading && !state.reading.issue ? mode : 'unconfirmed'}
@@ -104,32 +121,36 @@ export function MoteConversationStart({ scope, active, mode, onConfigure, onOpen
         avatarWorkspaceId={scope.workspace.id} avatarTopicId={scope.topic.id} visible={active} />}
       brand={<BrandIcon size={128} />}
       drafting={Boolean(draft.trim())}
-      pending={sent && sent.key === key ? <MoteFirstMessage messageId={'mote-first:' + sent.operationId} prompt={sent.prompt} name={scope.topic.title}
-        stage={desktopFirstMessageStage(state.result, state.busy, sent.operationId)}
-        action={{ label: '核对', disabled: state.busy, onClick: () => {
+      pending={(() => {
+        const pending = sent?.key === key ? sent : state.retainedInput ? { ...state.retainedInput, key } : null
+        return pending ? <MoteFirstMessage messageId={'mote-first:' + pending.operationId} prompt={pending.prompt} name={scope.topic.title}
+        showPrompt={draft !== pending.prompt} stage={desktopFirstMessageStage(state.result, state.busy, pending.operationId)}
+        action={{ label: '核对', disabled: Boolean(state.checking), onClick: () => {
           // Check the creation request itself, never the first message's own id; with none known yet, reread.
-          const request = state.pending[0] ?? state.result?.operationId
+          const request = state.retainedInput?.creationOperationId ?? state.pending[0] ?? state.result?.operationId ?? state.reading?.operationId
           if (request) state.inspect(request); else state.refresh()
-        } }} /> : undefined}
+        } }} /> : undefined
+      })()}
       actions={<button type="button" className="mote-start__settings" onClick={event => onConfigure(event.currentTarget)} aria-label="Mote 快捷配置">设置</button>}
       composer={<AgentComposer value={draft} disabled={false} active={active} placeholder="写下你想聊的事…"
         onChange={value => { edits.current++; useLauncherState.getState().setDraft(key, 'prompt', value) }}
         {...(state.ready && !state.busy && active && !persistenceIssue && !automatic && (mode === 'new' || !state.reading?.dialogue.main.current) ? { onSubmit: () => {
           const query = { operationId: mintObjectId(), prompt: draft, revision: edits.current, lifetime: lifetime.current }
           submission.current = query; setSent({ operationId: query.operationId, prompt: query.prompt, key })
-          void state.submit({ operationId: query.operationId, prompt: query.prompt })
+          void state.submit({ operationId: query.operationId, prompt: query.prompt }, undefined, releaseDraft)
         } } : {})} />}
       notice={<>{state.issue && <p role="status">{state.issue}
         {state.reading?.preferences.status === 'ready' && !state.reading.executor && (mode === 'new' || !state.reading.dialogue.main.current)
           ? <> <button type="button" className="small-button" onClick={event => onConfigure(event.currentTarget)}>配置 Agent</button></> : null}
       </p>}{notice && <p role="status">{notice}</p>}{persistenceIssue && <p role="status">{persistenceIssue}</p>}
-        {automatic && <div role="status">正在按此 Mote 的空闲策略承接原输入。<details><summary>本次输入</summary><p>{automatic.query.prompt}</p></details></div>}
+        {automatic && <div role="status">{automatic.decision.policy.kind === 'executor-change' ? '正在用新选择的 Executor 承接本次输入。' : '正在按此 Mote 的空闲策略承接原输入。'}<details><summary>本次输入</summary><p>{automatic.query.prompt}</p></details></div>}
         {mode !== 'new' && state.reading?.dialogue.main.current && <p role="status">已有当前主对话，这里不会另建主 Agent；草稿保留，可从「对话选项」返回当前主对话。</p>}
         {state.busy && !(sent && sent.key === key) && <p role="status">正在接通这次对话…</p>}
         <details><summary>{state.pending.length ? '原开始请求待核对' : '对话选项'}</summary>
           <button type="button" onClick={event => onConfigure(event.currentTarget)}>快捷配置</button><button type="button" disabled={state.busy} onClick={state.refresh}>重新核对</button>
+          {state.retainedInput ? <button type="button" disabled={state.restoringInput} onClick={() => { void state.restoreInput?.().then(saved => { if (saved) setSent(null) }) }}>移回草稿</button> : null}
           {state.reading?.dialogue.main.current && <button type="button" onClick={() => onOpenMain(state.reading!.dialogue.main.current!)}>返回当前主对话</button>}
-          {state.pending.map(id => <div key={id}><button type="button" disabled={state.busy} onClick={() => state.inspect(id)}>核对原开始请求</button><button type="button" disabled={state.busy} onClick={() => state.advance(id)}>继续原开始请求</button><code>{id}</code></div>)}
+          {state.pending.map(id => <div key={id}><button type="button" disabled={state.checking} onClick={() => state.inspect(id)}>核对原开始请求</button><button type="button" disabled={state.busy} onClick={() => state.advance(id)}>继续原开始请求</button><code>{id}</code></div>)}
           {state.result && <p>{state.result.issue ?? '原请求已保留，绑定和消息投递分别核对。'} <code>{state.result.operationId}</code></p>}
         </details></>}
       history={<MoteConversationHistory items={history.map(row => row.item)} reading={Boolean(dialogue?.loading)} onOpen={item => {

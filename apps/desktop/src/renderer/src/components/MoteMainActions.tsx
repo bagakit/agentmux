@@ -8,7 +8,7 @@ import type { MoteWorkfaceScope } from '../lib/mote-workface'
 import { useMoteDialogueView } from '../lib/mote-dialogue-view'
 import { moteConnectionTarget } from '../lib/mote-connection-default'
 import { createMoteMain, continueMoteMainAction, inspectMoteMainAction, readMoteMainAction,
-  type MoteMainActionReading, type MoteMainActionResult } from '../lib/mote-main-action'
+  moveMoteMainFirstInputToDraft, originalMainCreationRetainsInput, type MoteMainActionReading, type MoteMainActionResult } from '../lib/mote-main-action'
 import { useAppStore } from '../store'
 import { DocumentOverlayPortal } from './WindowOverlayHost'
 
@@ -16,7 +16,11 @@ const STAGE: Record<string, string> = { confirmed: '已确认', unconfirmed: '�
 
 /** Explicit Main actions. Reading/hover never creates; the original owners retain every operation. */
 export type MoteStartActions = { reading: MoteMainActionReading | null; result: MoteMainActionResult | null; issue: string | null; busy: boolean
-  ready: boolean; pending: string[]; submit(query: MoteMainDeferredInput, rollover?: MoteMainRolloverDecision): Promise<void>; inspect(id: string): void; advance(id: string): void; refresh(): void }
+  checking?: boolean; ready: boolean; pending: string[];
+  retainedInput?: { operationId: string; prompt: string; creationOperationId: string } | undefined;
+  restoringInput?: boolean; restoreInput?(): Promise<boolean>;
+  submit(query: MoteMainDeferredInput, rollover?: MoteMainRolloverDecision, onRetained?: (query: MoteMainDeferredInput) => void | Promise<void>): Promise<void>;
+  inspect(id: string): void; advance(id: string): void; refresh(): void }
 export function MoteMainActions({ scope, active, entryToken, onConfigure, onCreated, onRefresh, onOpenWorkspace, onOpenCreated, presentation, renderStart, onQueryResult, onStartNew, onResult }: {
   scope: MoteWorkfaceScope; active: boolean; presentation?: 'menu' | 'setup' | undefined; entryToken?: string | undefined
   onConfigure(invoker?: HTMLElement | null): void; onCreated?(reference: MoteDefaultConversation): void; onOpenCreated?: ((reference: MoteDefaultConversation) => void) | undefined; onRefresh?: (() => void) | undefined; onOpenWorkspace?: (() => void) | undefined
@@ -27,7 +31,10 @@ export function MoteMainActions({ scope, active, entryToken, onConfigure, onCrea
   const model = useMoteDialogueView()
   const [reading, setReading] = useState<MoteMainActionReading | null>(null), [result, setResult] = useState<MoteMainActionResult | null>(null)
   const [issue, setIssue] = useState<string | null>(null), [busy, setBusy] = useState(false), [generation, setGeneration] = useState(0)
+  const [checking, setChecking] = useState(false), inspection = useRef(false)
+  const [restoringInput, setRestoringInput] = useState(false), restoring = useRef(false)
   const identity = JSON.stringify(moteConnectionTarget(scope, useAppStore.getState().spaceZoneBindings))
+  const retained = useAppStore(state => state.moteMainCreationReferences[identity])
   const lifetime = useRef({}), flight = useRef(false)
   const current = model?.page?.main.current ?? reading?.dialogue.main.current
   const settingsVersion = scope.topic.quickMode?.status === 'saved' ? scope.topic.quickMode.version : scope.topic.quickMode?.status
@@ -46,12 +53,8 @@ export function MoteMainActions({ scope, active, entryToken, onConfigure, onCrea
     void readMoteMainAction(scope).then(async source => {
       if (lifetime.current !== token) return
       setReading(source); setIssue(source.issue)
-      const retained = useAppStore.getState().moteMainCreationReferences[identity]
-      if (retained || source.pendingOperationId || source.pendingStarts.length === 1) {
-        const prior = await inspectMoteMainAction(scope, source.pendingOperationId ?? (source.pendingStarts.length === 1 ? source.pendingStarts[0]! : retained!.operationId))
-        if (lifetime.current === token) { setResult(prior); onResult?.(prior, () => lifetime.current === token) }
-        return
-      }
+      const prior = source.previousCreation
+      if (prior) { setResult(prior); setIssue(prior.issue ?? source.issue); onResult?.(prior, () => lifetime.current === token) }
     }).catch(cause => { if (lifetime.current === token) setIssue(presentError(cause)) })
     return () => { if (lifetime.current === token) lifetime.current = {} }
   }, [identity, active, generation, entryToken])
@@ -96,11 +99,34 @@ export function MoteMainActions({ scope, active, entryToken, onConfigure, onCrea
     // The flight is over whichever view lifetime is current: a remount during it must not keep busy forever.
     finally { flight.current = false; setBusy(false) }
   }
+  // Read the frozen original operation even while a creation/setup reply is pending.
+  // This read never advances that mutation or clears its single-flight guard.
+  async function inspectOriginal(id: string) {
+    if (inspection.current || !active) return
+    inspection.current = true; setChecking(true)
+    const token = lifetime.current
+    try {
+      const value = await inspectMoteMainAction(scope, id)
+      if (lifetime.current !== token) return
+      setResult(value); setIssue(value.issue)
+      onResult?.(value, () => lifetime.current === token)
+    } catch (cause) { if (lifetime.current === token) setIssue(presentError(cause)) }
+    finally { inspection.current = false; setChecking(false) }
+  }
+  async function restoreInput() {
+    if (!retained?.deferredInput || restoring.current) return false
+    const token = lifetime.current
+    restoring.current = true; setRestoringInput(true)
+    try { await moveMoteMainFirstInputToDraft(scope, retained); return true }
+    catch (cause) { if (lifetime.current === token) setIssue(presentError(cause)); return false }
+    finally { restoring.current = false; setRestoringInput(false) }
+  }
   if (!active) return null
   const pending = [...new Set([...(reading?.pendingStarts ?? []), ...(reading?.pendingOperationId ? [reading.pendingOperationId] : []), ...(result?.binding === 'unconfirmed' ? [result.operationId] : [])])]
-  if (renderStart) return renderStart({ reading, result, issue, busy, pending, ready: Boolean(reading && !reading.issue && !pending.length),
-    submit: async (query, rollover) => { if (reading) await run(() => createMoteMain(scope, reading, query, rollover), undefined, false, query) },
-    inspect: id => { void run(() => inspectMoteMainAction(scope, id)) }, advance: id => { void run(() => continueMoteMainAction(scope, id)) }, refresh: () => setGeneration(value => value + 1) })
+  const retainedInput = retained?.deferredInput && !originalMainCreationRetainsInput(retained, result) ? { ...retained.deferredInput, creationOperationId: retained.operationId } : undefined
+  if (renderStart) return renderStart({ reading, result, issue, busy, checking, pending, retainedInput, restoringInput, restoreInput, ready: Boolean(reading && !reading.issue && !pending.length),
+    submit: async (query, rollover, retained) => { if (reading) await run(() => createMoteMain(scope, reading, query, rollover, retained), undefined, false, query) },
+    inspect: id => { void inspectOriginal(id) }, advance: id => { void run(() => continueMoteMainAction(scope, id)) }, refresh: () => setGeneration(value => value + 1) })
   const queryOutcome = result?.deferredInput?.input?.status === 'not-applied' ? 'not-applied' : agentPromptSubmissionOutcome(result?.deferredInput?.record ?? null)
   const queryPending = Boolean(result?.record?.moteMain?.deferredInput && !['admitted','terminal-confirmed','not-applied'].includes(queryOutcome))
   const menu = Boolean(current) || presentation === 'menu'
@@ -114,20 +140,22 @@ export function MoteMainActions({ scope, active, entryToken, onConfigure, onCrea
   </>
   const status = <>
     {issue ? <p role="status" className="mote-details__issue">{issue}</p> : null}
+    {retainedInput ? <details><summary>本设备保留的问题</summary><p>{retainedInput.prompt}</p><p>原问题保留在本设备，可移回草稿。</p>
+      <button type="button" className="small-button" disabled={restoringInput} onClick={() => { void restoreInput() }}>移回草稿</button></details> : null}
     {result ? <details><summary>原主 Agent 请求 · {queryPending ? '首条消息待核对' : result.binding === 'confirmed' ? '绑定已确认' : '待核对'}</summary>
       <p>创建：{STAGE[result.creation]} · 原来源：{STAGE[result.source]} · 主角色绑定：{STAGE[result.binding]}</p>
       <code>{result.operationId}</code>
       {result.reference ? <p>{result.reference.hostId} / {result.reference.sessionId}</p> : null}
       {result.creation === 'confirmed' && result.binding !== 'confirmed' && result.reference && onOpenCreated ? <button type="button" className="small-button"
         onClick={() => { setMenuOpen(false); onOpenCreated(result.reference!) }}>打开已创建的 Agent</button> : null}
-      <button type="button" className="small-button" disabled={busy} onClick={() => void run(() => inspectMoteMainAction(scope, result.operationId))}>核对原请求</button>
+      <button type="button" className="small-button" disabled={checking} onClick={() => void inspectOriginal(result.operationId)}>核对原请求</button>
       {result.record?.moteMain?.deferredInput ? <details><summary>原首条消息</summary><p>{result.record.moteMain.deferredInput.prompt}</p>
         <p>{queryOutcome === 'not-applied' ? '首条消息未投递，原文保留。' : queryPending ? '首条消息尚未确认，不重复发送。' : '首条消息已确认接收。'}</p></details> : null}
       {(result.binding === 'unconfirmed' || queryPending) && result.creation === 'confirmed' ? <button type="button" className="small-button" disabled={busy}
         onClick={() => void run(() => continueMoteMainAction(scope, result.operationId), undefined, true)}>继续原开始请求</button> : null}
     </details> : null}
     {pending.length > 1 ? <details><summary>待核对的开始请求 · {pending.length}</summary>{pending.map(id => <div key={id}><code>{id}</code>
-      <button type="button" disabled={busy} onClick={() => void run(() => inspectMoteMainAction(scope, id))}>核对原请求</button>
+      <button type="button" disabled={checking} onClick={() => void inspectOriginal(id)}>核对原请求</button>
       <button type="button" disabled={busy} onClick={() => void run(() => continueMoteMainAction(scope, id))}>继续原请求</button></div>)}</details> : null}
   </>
   return <div className="mote-main-actions" data-presentation={presentation ?? (current ? 'menu' : 'setup')} aria-label="主 Agent 操作" aria-busy={busy}>
