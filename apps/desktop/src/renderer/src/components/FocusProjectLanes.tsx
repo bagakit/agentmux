@@ -177,7 +177,7 @@ export function FocusProjectLanes({ lanes, selectedProjectKey, currentLaneId, re
         const revealed = frame.lanes.some(lane => revealedLaneIds?.has(lane.id))
         const currentProject = frame.lanes.some(lane => lane.id === currentLaneId)
         const activityAt = Math.max(0, ...frame.lanes.map(lane => lane.lastActivityAt ?? 0)) || null
-        const title = <button type="button" className="focus-project-lanes__axis" data-focus-project-scope-control aria-current={currentProject ? 'location' : undefined} aria-pressed={selectedProjectKey === key} title={resource ? displayPath(resource.path, resource.hostId) : name} onClick={() => onSelect(key)}>
+        const title = <button type="button" className="focus-project-lanes__axis" data-focus-project-scope-control aria-current={currentProject ? 'location' : undefined} aria-pressed={selectedProjectKey === key} title={[resource ? displayPath(resource.path, resource.hostId) : name, ...(frame.lanes.length === 1 ? [first.summary, origins?.get(first.id)?.label, ...(origins?.get(first.id)?.locations ?? []), ...(origins?.get(first.id)?.addresses ?? [])] : [])].filter(Boolean).join('\n')} onClick={() => onSelect(key)}>
           {resource && resourceMenus ? <ProjectIcon workspaceId={resource.id} name={name} visible={visible} backdrop /> : <CollectionIcon size={15} />}
           <span className="focus-project-lanes__label"><strong>{name}</strong></span>
           <HostBadge context="Host" compact host={hostIdentityProjection(first.hostId, hosts?.find(host => host.id === first.hostId))} />
