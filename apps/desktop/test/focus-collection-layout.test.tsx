@@ -380,3 +380,78 @@ it('keeps the original Collection mode draft while portaled editing defers a con
   await act(async () => cancel.click()); await act(async () => { later.focus(); later.dispatchEvent(new PointerEvent('pointerup', { bubbles: true })) }); await settle()
   expect(laneFor('a1')).not.toBe(research); expect(laneFor('a1').textContent).toContain('Engineering')
 })
+
+async function independentContainerScene() {
+  const at = Date.now() - 20_000, firstProject = composerConfig.workspaces[0]!
+  const secondProject = { ...firstProject, id: 'second-project', name: 'Second project', path: fixturePath('second-project') }
+  const checkout = { ...firstProject, id: 'project-checkout', path: fixturePath('project-checkout'), repoPath: firstProject.path, branch: 'review' }
+  config = { ...config, workspaces: [scratchWorkspace, firstProject, secondProject, checkout], focus: { recentActivityHours: 48 } }
+  const originalB = source(topicBy('b')).zoneId
+  bindings[originalB] = { ...bindings[originalB]!, relations: { [categories[1]!.spaceId]: true } }
+  const sessions = [agent('hot-topic', topicBy('a'), at + 4000), agent('project', null, at + 3000),
+    { ...agent('second-project', null, at + 2000), workspacePath: secondProject.path },
+    { ...agent('checkout', null, at + 1000), workspacePath: checkout.path }, agent('cold-topic', topicBy('b'), at)]
+  const tabs = Object.fromEntries(sessions.map(session => {
+    const value = session.id === 'hot-topic' ? topicBy('a') : session.id === 'cold-topic' ? topicBy('b') : null
+    const workspace = value ? scratchWorkspace : session.id === 'second-project' ? secondProject : session.id === 'checkout' ? checkout : firstProject
+    const tab = { ...createWorkbenchTab('tab-' + session.id, { kind: 'agent', phase: 'attached', regionId: 'region-' + session.id,
+      workspaceId: workspace.id, sessionId: session.id }), ...(value ? { topicId: value.id, space: source(value) } : {}) }
+    return [tab.id, tab]
+  }))
+  useAppStore.setState({ config, sessions, tabs, spaceZoneBindings: bindings,
+    layouts: Object.fromEntries(config.workspaces.map(workspace => [workspace.id, createWorkspaceLayout('group-' + workspace.id,
+      Object.values(tabs).filter(tab => tab.workspaceId === workspace.id).map(tab => tab.id))])),
+    agentNames: Object.fromEntries(sessions.map(session => [session.id, session.label])),
+    agentComposerDrafts: { 'hot-topic': 'Original Topic draft', project: 'Original project draft' },
+    agentFocus: { execution: { sessionId: null, history: [] }, pmo: { sessionId: null } } })
+  vi.mocked(api.spatial.read).mockResolvedValue({ schemaVersion: 1, revision: 1, graph: desktopSpatialGraph(useAppStore.getState(), topics) })
+  await initializeSpatialControlFixture(topics)
+  await render()
+  return { at, firstProject, before: useAppStore.getState() }
+}
+function containerOrder() {
+  return [...host.querySelectorAll<HTMLElement>('.focus-project-lanes__rows > div')].map(frame => {
+    const row = frame.querySelector<HTMLElement>('[data-lane-id]')!
+    return row.dataset.focusSource === 'collection' ? row.querySelector('.focus-project-lanes__collection strong')!.textContent : row.dataset.projectId
+  })
+}
+async function arrange() {
+  const control = host.querySelector<HTMLButtonElement>('[aria-label="Arrange projects by recent activity"]')!
+  expect(control).not.toBeNull()
+  await act(async () => control.click())
+}
+
+it('actual Global activity order keeps cold sibling Collections behind active Projects and changes routes only on Arrange', async () => {
+  const { firstProject, before } = await independentContainerScene()
+  const expected = ['Research', firstProject.id, 'second-project', 'Engineering']
+  expect(containerOrder(), JSON.stringify({ order: containerOrder(), lanes: readCollectionLanes().lanes.map(lane => ({name:lane.name, projectId:lane.projectId, refs:lane.contextRefs})) })).toEqual(expected)
+  expect(laneFor('checkout')).toBe(laneFor('project'))
+  const bodies = new Map(['hot-topic', 'cold-topic', 'project', 'second-project', 'checkout'].map(id => [id, card(id)]))
+  expect([...bodies.values()].every(Boolean)).toBe(true)
+  const newer = Date.now() - 1
+  await act(async () => useAppStore.setState(state => ({ sessions: state.sessions.map(session => session.id === 'cold-topic' && session.kind === 'agent'
+    ? { ...session, semanticStatus: { ...session.semanticStatus!, stateEnteredAt: newer } } : session) })))
+  expect(containerOrder()).toEqual(expected)
+  expect(laneFor('cold-topic').querySelector('time')?.dateTime).toBe(new Date(newer).toISOString())
+  await render(null, false); await render(null, true)
+  expect(containerOrder()).toEqual(expected)
+  await arrange()
+  expect(containerOrder()).toEqual(['Engineering', 'Research', firstProject.id, 'second-project'])
+  for (const [id, body] of bodies) expect(card(id)).toBe(body)
+  for (const field of ['tabs', 'layouts', 'agentComposerDrafts', 'agentFocus'] as const) expect(useAppStore.getState()[field]).toBe(before[field])
+  expect(useAppStore.getState().sessions.map(session => session.control)).toEqual(before.sessions.map(session => session.control))
+})
+
+it('actual Global pins keep their authored Project order without lending that rank to Topics in the same workspace', async () => {
+  const { firstProject, before } = await independentContainerScene()
+  const pin = (id: string) => ({ key: focusProjectKey('local', id), pinned: true, note: '', color: 'default' as const, collapsed: null })
+  // A retained preference for the Topic storage Project must not promote its Collections.
+  await act(async () => useAppStore.setState(state => ({ config: { ...state.config!, focus: { ...state.config!.focus!,
+    projects: [pin(scratchWorkspace.id), pin('second-project'), pin(firstProject.id)] } } })))
+  expect(containerOrder(), JSON.stringify(containerOrder())).toEqual(['second-project', firstProject.id, 'Research', 'Engineering'])
+  await arrange()
+  expect(containerOrder()).toEqual(['second-project', firstProject.id, 'Research', 'Engineering'])
+  expect(laneFor('checkout')).toBe(laneFor('project'))
+  expect(useAppStore.getState().agentComposerDrafts).toBe(before.agentComposerDrafts)
+  expect(useAppStore.getState().sessions).toBe(before.sessions)
+})
