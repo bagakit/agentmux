@@ -4,7 +4,7 @@ import { join, resolve } from 'node:path'
 import { spawn } from 'node:child_process'
 import { createRequire } from 'node:module'
 const { build } = createRequire(resolve('packages/core/package.json'))('esbuild')
-import { newNoteDocument, serializeNoteDocument } from '../src/shared/note-document.js'
+import { newNoteDocument, serializeNoteDocument } from '@agentmux/client-ui/note/note-document'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { AgentMuxControlServer, connectAgentMuxRpc, type ExecutionHost } from '@agentmux/core'
 import { AgentMuxNotebookStore, AgentMuxNotesStorage, type NotebookWrite } from '@agentmux/core/notebook-store'

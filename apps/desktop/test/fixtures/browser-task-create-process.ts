@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises'
 import { BrowserTaskAssets, BrowserTaskAssetFileStore } from '../../src/main/browser-task-assets.js'
 import { BrowserDemonstrationRecorder, BrowserDemonstrationFileStore } from '../../src/main/browser-demonstration-recorder.js'
-import type { BrowserTaskCreateInput } from '../../src/shared/browser-task-creation.js'
+import type { BrowserTaskCreateInput } from '@agentmux/core/control'
 import { AgentMuxSpatialStateStore } from '@agentmux/core/spatial-state'
 
 const [mode, assetPath, recordingPath, inputPath] = process.argv.slice(2)

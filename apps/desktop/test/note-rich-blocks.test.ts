@@ -12,7 +12,7 @@ import { noteContentExtensions, noteContentSchema, noteIdentityExtensions } from
 import { indexNoteReferences, prepareNoteWikiLinks, noteSemanticText } from '@agentmux/client-ui/note/note-wikilinks'
 import { noteKnowledge, projectNoteBlocks } from '@agentmux/client-ui/note/note-knowledge'
 import { deriveNoteCorpus } from '@agentmux/client-ui/note/note-corpus'
-import { readNoteDocument, serializeNoteDocument, type NoteDocument } from '../src/shared/note-document'
+import { readNoteDocument, serializeNoteDocument, type NoteDocument } from '@agentmux/client-ui/note/note-document'
 import { NoteFileWriter } from '@agentmux/host/note-file-writer'
 import { WorkspaceFiles } from '../src/main/workspace-files'
 import { FileReadOwner } from '@agentmux/host/file-read-owner'

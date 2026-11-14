@@ -13,7 +13,7 @@ import type { NoteFileTarget } from '../src/renderer/src/lib/file-document-consu
 import { projectNoteLinks } from '../src/renderer/src/lib/note-graph-references'
 import { WorkspaceFiles } from '../src/main/workspace-files'
 import { NotebookObservationOwner } from '@agentmux/host/notebook-observation-owner'
-import { newNoteDocument, serializeNoteDocument } from '../src/shared/note-document'
+import { newNoteDocument, serializeNoteDocument } from '@agentmux/client-ui/note/note-document'
 import { composerDOM } from './helpers/composer-dom-fixture'
 import { installNoteCanvasGeometry } from './helpers/note-canvas-dom'
 import { noteSummaryCases, noteSummaryContent } from './helpers/note-summary-fixture'

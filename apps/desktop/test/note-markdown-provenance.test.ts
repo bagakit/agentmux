@@ -13,7 +13,7 @@ import { AgentMuxRpcService } from '../../../packages/core/src/public-rpc-servic
 import { AgentMuxControlServer } from '../../../packages/core/src/public-rpc-server'
 import { objectCliEnvironment, runCompiledObjectCli } from '../../../packages/core/test/helpers/object-cli-rpc'
 import { parseFileReadResult, fileUploadRevision } from '../../../packages/core/src/public-rpc-files'
-import { newNoteDocument, serializeNoteDocument, readNoteDocument } from '../src/shared/note-document'
+import { newNoteDocument, serializeNoteDocument, readNoteDocument } from '@agentmux/client-ui/note/note-document'
 import { parseNoteFile, noteKnowledge } from '@agentmux/client-ui/note/note-knowledge'
 import { parseNoteContentObservation } from '../../../packages/core/src/notebook-observation'
 import { reduceDocumentRead, type FileWorkbenchState } from '../src/renderer/src/lib/file-workbench-state'

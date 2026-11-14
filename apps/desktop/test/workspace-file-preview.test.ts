@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { LocalExecutionHost, type ExecutionHost } from '@agentmux/core'
 import { WorkspaceFiles } from '../src/main/workspace-files'
 import type { WorkspaceRecord } from '../src/shared/contracts'
-import { WORKSPACE_FILE_MAX_BYTES, WORKSPACE_FILE_MAX_READ_BYTES } from '../src/shared/workspace-file-bytes'
+import { WORKSPACE_FILE_MAX_BYTES, WORKSPACE_FILE_MAX_READ_BYTES } from '@agentmux/host/workspace-file-bytes'
 import { workspaceFilePreviewFormat } from '@agentmux/editor-extensions/catalog'
 
 const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADElEQVR42mNk+M/wHwAF/gL+3fVbWQAAAABJRU5ErkJggg==', 'base64')

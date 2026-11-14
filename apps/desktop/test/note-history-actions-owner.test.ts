@@ -11,7 +11,7 @@ import { FileReadOwner } from '@agentmux/host/file-read-owner'
 import { WorkspaceFiles } from '../src/main/workspace-files'
 import { NoteTitleFileWriter } from '@agentmux/host/note-title-file-writer'
 import { NoteFileWriter } from '@agentmux/host/note-file-writer'
-import { newNoteDocument, serializeNoteDocument, readNoteDocument } from '../src/shared/note-document'
+import { newNoteDocument, serializeNoteDocument, readNoteDocument } from '@agentmux/client-ui/note/note-document'
 import type { WorkspaceFileWriteResult, WorkspaceRecord } from '../src/shared/contracts'
 const clean: Array<() => unknown | Promise<unknown>> = []
 const person = { kind: 'user' as const, id: 'original-person' }, agent = { kind: 'agent' as const, id: 'original-agent' }

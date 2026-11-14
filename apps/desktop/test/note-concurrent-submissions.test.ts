@@ -15,7 +15,7 @@ import { NoteFileWriter } from '@agentmux/host/note-file-writer'
 import { FileReadOwner } from '@agentmux/host/file-read-owner'
 import { NotesStorageOwner } from '../src/main/notes-storage-owner'
 import { ConfigOwner } from '../src/main/config-owner'
-import { newNoteDocument, serializeNoteDocument, readNoteDocument } from '../src/shared/note-document'
+import { newNoteDocument, serializeNoteDocument, readNoteDocument } from '@agentmux/client-ui/note/note-document'
 import type { AppConfig, WorkspaceFileWriteInput, WorkspaceRecord } from '../src/shared/contracts'
 const close: Array<() => Promise<unknown> | unknown> = []
 const person = { kind: 'user' as const, id: 'original-person' }, agent = { kind: 'agent' as const, id: 'original-agent' }

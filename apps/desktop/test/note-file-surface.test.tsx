@@ -19,7 +19,7 @@ import { createWorkbenchTab, addWorkbenchRegion, documentKey, fileTabId, type Fi
 import { WorkbenchPresentationContext } from '../src/renderer/src/lib/workbench-presentation'
 import { spatialCatalog } from '../src/renderer/src/lib/space-agent-control'
 import { directoryIdentity, homeZoneId } from '../src/shared/space-addresses'
-import { NOTE_SCHEMA, readNoteDocument, newNoteDocument } from '../src/shared/note-document'
+import { NOTE_SCHEMA, readNoteDocument, newNoteDocument } from '@agentmux/client-ui/note/note-document'
 import { composerConfig, composerDOM, composerSession } from './helpers/composer-dom-fixture'
 import * as noteKnowledgeModule from '../src/renderer/src/lib/note-knowledge'
 import * as noteDocumentModule from '@agentmux/client-ui/note/note-document'

@@ -237,7 +237,7 @@ async function startNotebookWithPage() {
 
 
 import type { Editor } from '@tiptap/core'
-import { NOTE_SCHEMA } from '../src/shared/note-document'
+import { NOTE_SCHEMA } from '@agentmux/client-ui/note/note-document'
 
 async function withActualNotes(run: (owner: AgentMuxNotebookStore, files: WorkspaceFiles, notesWorkspace: typeof scratchWorkspace) => Promise<void>) {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'amx-recall-views-')))

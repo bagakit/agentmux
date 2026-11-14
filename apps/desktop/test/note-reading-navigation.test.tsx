@@ -21,7 +21,7 @@ import { createWorkbenchTab, documentKey } from '../src/renderer/src/lib/workben
 import { useNotebookLibrary } from '../src/renderer/src/lib/notebook-library'
 import { spatialCatalog } from '../src/renderer/src/lib/space-agent-control'
 import { directoryIdentity, homeZoneId } from '../src/shared/space-addresses'
-import { newNoteDocument } from '../src/shared/note-document'
+import { newNoteDocument } from '@agentmux/client-ui/note/note-document'
 import type { WorkbenchProjectionSelection as Reference } from '../src/renderer/src/lib/workbench-projection'
 import type { NoteFileTarget } from '../src/renderer/src/lib/file-document-consumers'
 import { composerConfig, composerDOM } from './helpers/composer-dom-fixture'

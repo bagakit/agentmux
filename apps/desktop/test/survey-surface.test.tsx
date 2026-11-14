@@ -287,7 +287,7 @@ it.each(['native-child', 'agent-region', 'whole-tab', 'two-regions'] as const)('
 it('[icon-role] Survey Note identity follows object.note while ordinary files and the original selection stay independent', async () => {
   const { GRAPHITE_THEME, previewTheme } = await import('@agentmux/client-ui/theme')
   const { semanticIconHref } = await import('@agentmux/client-ui/icons')
-  const { NOTE_FILE_EXTENSION } = await import('../src/shared/note-format')
+  const { NOTE_FILE_EXTENSION } = await import('@agentmux/client-ui/note/note-format')
   const textWorkspace = { ...otherWorkspace, id: 'text-role-workspace', path: _hygiene_fixturePath('text-role-project') }
   const noteTab = createWorkbenchTab('note-role-tab', { kind: 'file', regionId: 'note-role-region', workspaceId: otherWorkspace.id, path: `original${NOTE_FILE_EXTENSION}` })
   const textTab = createWorkbenchTab('text-role-tab', { kind: 'file', regionId: 'text-role-region', workspaceId: textWorkspace.id, path: 'original.md' })

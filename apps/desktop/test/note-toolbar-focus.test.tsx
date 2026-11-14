@@ -3,7 +3,7 @@ import { act } from 'react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createClientUiRoot } from './helpers/client-ui-render'
 import { NoteBlockEditor } from '../src/renderer/src/components/NoteBlockEditor'
-import { NOTE_SCHEMA, type NoteDocument } from '../src/shared/note-document'
+import { NOTE_SCHEMA, type NoteDocument } from '@agentmux/client-ui/note/note-document'
 import { noteKnowledge } from '../src/renderer/src/lib/note-knowledge'
 
 const note: NoteDocument = { schema: NOTE_SCHEMA, noteId: 'original-note', content: { type: 'doc', content: [

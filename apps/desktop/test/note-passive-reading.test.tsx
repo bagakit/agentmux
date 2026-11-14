@@ -19,7 +19,7 @@ import { moteWorkbenchProjection } from '../src/renderer/src/lib/mote-workbench-
 import { pinPmoTeamsTopicFloating, pmoTeamsTopicFloatingViewTargets, usePmoTeamsTopicFloatingState } from '../src/renderer/src/lib/pmo-teams-topic-floating'
 import { spatialCatalog } from '../src/renderer/src/lib/space-agent-control'
 import { scratchTopicsScope } from '../src/renderer/src/lib/scratch-topic-snapshots'
-import { newNoteDocument, serializeNoteDocument } from '../src/shared/note-document'
+import { newNoteDocument, serializeNoteDocument } from '@agentmux/client-ui/note/note-document'
 import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, scratchTopicDirectoryName } from '@agentmux/host/mote-model'
 import { PmoTeamsTopicEntry } from '../src/renderer/src/components/PmoTeamsTopicEntry'
 import { PmoTeamsTopicFloatingPanel } from '../src/renderer/src/components/PmoTeamsTopicFloatingPanel'

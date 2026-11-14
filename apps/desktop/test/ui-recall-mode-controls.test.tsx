@@ -7,7 +7,7 @@ import { applyNotebookChange, emptyNotebookState, type NotebookState } from '@ag
 import { NotebookObservationOwner } from '@agentmux/host/notebook-observation-owner'
 import { NOTES_WORKSPACE_ID } from '@agentmux/host/notes-library'
 import { serializeNoteDocument } from '@agentmux/client-ui/note/note-document'
-import { NOTE_SCHEMA } from '../src/shared/note-document'
+import { NOTE_SCHEMA } from '@agentmux/client-ui/note/note-document'
 import { composerConfig, composerDOM, composerSession } from './helpers/composer-dom-fixture'
 import { installNoteCanvasGeometry } from './helpers/note-canvas-dom'
 import { fixturePath } from '../scripts/lib/fixture-values.mjs'

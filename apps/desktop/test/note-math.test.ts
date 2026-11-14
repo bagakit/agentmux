@@ -11,7 +11,7 @@ import { noteContentExtensions, noteIdentityExtensions } from '@agentmux/client-
 import { noteWikiInputExtension } from '@agentmux/client-ui/note/note-wiki-input'
 import { indexNoteReferences, prepareNoteWikiLinks, noteSemanticText } from '@agentmux/client-ui/note/note-wikilinks'
 import { noteKnowledge, parseNoteFile } from '@agentmux/client-ui/note/note-knowledge'
-import { readNoteDocument, serializeNoteDocument, newNoteDocument, type NoteDocument } from '../src/shared/note-document'
+import { readNoteDocument, serializeNoteDocument, newNoteDocument, type NoteDocument } from '@agentmux/client-ui/note/note-document'
 import { NoteFileWriter } from '@agentmux/host/note-file-writer'
 import { WorkspaceFiles } from '../src/main/workspace-files'
 import { FileReadOwner } from '@agentmux/host/file-read-owner'

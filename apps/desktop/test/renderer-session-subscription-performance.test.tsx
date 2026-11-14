@@ -10,7 +10,7 @@ const counters = vi.hoisted(() => ({ workspace: 0, avatar: 0 }))
 vi.mock('../src/renderer/src/components/WorkspaceWorkbench.js', () => ({
   WorkspaceWorkbench: () => { counters.workspace += 1; return <output data-workspace-probe /> }
 }))
-vi.mock('../src/renderer/src/components/AgentProviderIcon.js', () => ({
+vi.mock('@agentmux/client-ui/components/AgentProviderIcon', () => ({
   AgentProviderIcon: () => { counters.avatar += 1; return <span data-provider-icon /> },
   agentProviderLabel: (id: string) => id
 }))

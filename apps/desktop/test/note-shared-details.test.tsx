@@ -10,7 +10,7 @@ import { noteSharedRelations } from '../src/renderer/src/lib/note-shared-relatio
 import { readNoteShareClipboard, stageNoteShare } from '../src/renderer/src/lib/note-share-staging'
 import type { NoteFileTarget } from '../src/renderer/src/lib/file-document-consumers'
 import type { useNoteCanvasObservation } from '../src/renderer/src/lib/use-note-canvas-observation'
-import { newNoteDocument, readNoteDocument, serializeNoteDocument, type NoteInclude } from '../src/shared/note-document'
+import { newNoteDocument, readNoteDocument, serializeNoteDocument, type NoteInclude } from '@agentmux/client-ui/note/note-document'
 import { parseNotebookGraphSnapshot, type NotebookGraphSnapshot } from '../src/shared/notebook-observation'
 import { composerDOM } from './helpers/composer-dom-fixture'
 import { installNoteCanvasGeometry } from './helpers/note-canvas-dom'

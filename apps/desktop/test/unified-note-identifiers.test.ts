@@ -8,7 +8,7 @@ import { AgentMuxRpcService } from '@agentmux/core'
 import { NoteFileWriter } from '@agentmux/host/note-file-writer'
 import { WorkspaceFiles } from '../src/main/workspace-files'
 import { FileReadOwner } from '@agentmux/host/file-read-owner'
-import { newNoteDocument, readNoteDocument, serializeNoteDocument } from '../src/shared/note-document'
+import { newNoteDocument, readNoteDocument, serializeNoteDocument } from '@agentmux/client-ui/note/note-document'
 import type { WorkspaceRecord } from '../src/shared/contracts'
 
 it('mints missing block and wiki occurrence IDs through the actual public file consumer and preserves original persisted Note addresses', async () => {

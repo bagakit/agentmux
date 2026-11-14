@@ -12,7 +12,7 @@ import { NotesStorageOwner } from '../src/main/notes-storage-owner'
 import { ConfigOwner } from '../src/main/config-owner'
 import { NoteFileWriter } from '@agentmux/host/note-file-writer'
 import { WorkspaceFiles } from '../src/main/workspace-files'
-import { newNoteDocument, serializeNoteDocument } from '../src/shared/note-document'
+import { newNoteDocument, serializeNoteDocument } from '@agentmux/client-ui/note/note-document'
 import type { AppConfig, WorkspaceRecord, WorkspaceFileWriteResult } from '../src/shared/contracts'
 
 const cleanup: Array<() => unknown | Promise<unknown>> = []

@@ -53,7 +53,7 @@ import { FileReadOwner } from '@agentmux/host/file-read-owner'
 import { WorkspaceFiles } from '../src/main/workspace-files'
 import { registerIpc } from '../src/main/ipc'
 import { DEFAULT_CONFIG } from '../src/main/config-store'
-import { newNoteDocument, serializeNoteDocument } from '../src/shared/note-document'
+import { newNoteDocument, serializeNoteDocument } from '@agentmux/client-ui/note/note-document'
 
 let dispose: (() => Promise<void>) | undefined
 let api: typeof import('../src/renderer/src/lib/api')['api']

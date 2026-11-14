@@ -12,7 +12,7 @@ import { useNotebookLibrary } from '../src/renderer/src/lib/notebook-library'
 import * as noteKnowledgeModule from '../src/renderer/src/lib/note-knowledge'
 import { useAppStore } from '../src/renderer/src/store'
 import { api } from '../src/renderer/src/lib/api'
-import { newNoteDocument, serializeNoteDocument, type NoteDocument } from '../src/shared/note-document'
+import { newNoteDocument, serializeNoteDocument, type NoteDocument } from '@agentmux/client-ui/note/note-document'
 import type { FileDocument } from '../src/shared/contracts'
 import { composerConfig, composerDOM } from './helpers/composer-dom-fixture'
 import { fixtureEpoch as _historyFixtureEpoch } from '../../../test/fixture-values.mjs'
@@ -23,7 +23,7 @@ vi.hoisted(() => { Object.defineProperty(window, 'matchMedia', { configurable: t
 vi.mock('../src/renderer/src/monaco', () => ({}))
 vi.mock('../src/renderer/src/components/NoteBlockEditor', async () => {
   const { useEffect, useState } = await import('react')
-  const { serializeNoteDocument } = await import('../src/shared/note-document')
+  const { serializeNoteDocument } = await import('@agentmux/client-ui/note/note-document')
   return { NoteBlockEditor({ note, onChange }: { note: NoteDocument; onChange(raw: string, before: string): void }) {
     const [value, setValue] = useState(() => note.content.content?.[0]?.content?.[0]?.text ?? '')
     useEffect(() => { ++mounts.rich; return () => { ++mounts.richDisposed } }, [])

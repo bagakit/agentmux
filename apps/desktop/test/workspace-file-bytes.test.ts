@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { LocalExecutionHost } from '@agentmux/core'
 import { WorkspaceFiles } from '../src/main/workspace-files.js'
-import { WORKSPACE_FILE_MAX_BYTES, WORKSPACE_FILE_MAX_READ_BYTES } from '../src/shared/workspace-file-bytes.js'
+import { WORKSPACE_FILE_MAX_BYTES, WORKSPACE_FILE_MAX_READ_BYTES } from '@agentmux/host/workspace-file-bytes'
 import type { WorkspaceRecord } from '../src/shared/contracts.js'
 
 const race = vi.hoisted(() => ({ beforeInput: null as null | (() => Promise<void>), beforePublish: false }))

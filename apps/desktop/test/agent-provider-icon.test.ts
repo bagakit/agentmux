@@ -2,7 +2,7 @@ import { BUILT_IN_AGENT_PROVIDER_IDS } from '@agentmux/core/provider-id'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
-import { AgentProviderIcon, agentProviderLabel } from '../src/renderer/src/components/AgentProviderIcon.js'
+import { AgentProviderIcon, agentProviderLabel } from '@agentmux/client-ui/components/AgentProviderIcon'
 
 describe('AgentProviderIcon', () => {
   it('每个内置 Provider 都画出自己的品牌标记，无一落到 Bot 兜底', () => {

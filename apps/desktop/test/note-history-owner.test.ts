@@ -13,7 +13,7 @@ import { objectCliEnvironment, runCompiledObjectCli } from '../../../packages/co
 import { WorkspaceFiles } from '../src/main/workspace-files'
 import { NoteFileWriter } from '@agentmux/host/note-file-writer'
 import { FileReadOwner } from '@agentmux/host/file-read-owner'
-import { newNoteDocument, serializeNoteDocument } from '../src/shared/note-document'
+import { newNoteDocument, serializeNoteDocument } from '@agentmux/client-ui/note/note-document'
 import { buildNoteFileLibraryRecovery } from './helpers/note-file-library-recovery-build.mjs'
 import type { WorkspaceRecord } from '../src/shared/contracts'
 

@@ -10,7 +10,7 @@ import { createSourceFile, isImportDeclaration, isNamedImports, ScriptTarget } f
 import { createWorkspaceLayout } from '@agentmux/layout'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { iconShapes, semanticIconHref } from '@agentmux/client-ui/icons'
-import { MoteIcon } from '../src/renderer/src/components/MoteIcon'
+import { MoteIcon } from '@agentmux/client-ui/components/MoteIcon'
 import { SpaceTopicsTree } from '../src/renderer/src/components/SpaceTopicsTree'
 import { SpaceCreateMenu } from '../src/renderer/src/components/SpaceCreateMenu'
 import { AgentAvatar } from '../src/renderer/src/components/AgentAvatar'

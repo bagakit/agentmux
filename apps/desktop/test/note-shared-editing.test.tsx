@@ -25,7 +25,7 @@ import { afterNoteComposition } from '../src/renderer/src/lib/note-live-merge'
 import { useNotebookLibrary } from '../src/renderer/src/lib/notebook-library'
 import { createWorkbenchTab, documentKey, type FileWorkbenchSurface } from '../src/renderer/src/lib/workbench-tabs'
 import { directoryIdentity, homeZoneId, workspaceZoneId } from '../src/shared/space-addresses'
-import { newNoteDocument, readNoteDocument, serializeNoteDocument } from '../src/shared/note-document'
+import { newNoteDocument, readNoteDocument, serializeNoteDocument } from '@agentmux/client-ui/note/note-document'
 import { composerConfig, composerDOM } from './helpers/composer-dom-fixture'
 import { NoteSnapshotTestWorker } from './note-snapshot-test-worker'
 const dom = composerDOM(), cleanups: Array<() => Promise<unknown>> = []

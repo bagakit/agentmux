@@ -25,7 +25,7 @@ import { resolveWorkbenchZone, workbenchProjectionSlotId } from '../src/renderer
 import { surveyResolvedZoneSelection } from '../src/renderer/src/lib/survey-workface'
 import { createWorkbenchTab, documentKey } from '../src/renderer/src/lib/workbench-tabs'
 import { directoryIdentity, homeZoneId } from '../src/shared/space-addresses'
-import { newNoteDocument } from '../src/shared/note-document'
+import { newNoteDocument } from '@agentmux/client-ui/note/note-document'
 import { WorkspaceFiles } from '../src/main/workspace-files'
 import { NoteFileWriter } from '@agentmux/host/note-file-writer'
 import { NotebookObservationOwner } from '@agentmux/host/notebook-observation-owner'

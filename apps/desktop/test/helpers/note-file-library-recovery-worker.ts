@@ -14,7 +14,7 @@ import { FileReadOwner } from '@agentmux/host/file-read-owner'
 import { NotesStorageOwner } from '../../src/main/notes-storage-owner'
 import { ConfigOwner } from '../../src/main/config-owner'
 import { NotebookObservationOwner } from '@agentmux/host/notebook-observation-owner'
-import { newNoteDocument, readNoteDocument, serializeNoteDocument } from '../../src/shared/note-document'
+import { newNoteDocument, readNoteDocument, serializeNoteDocument } from '@agentmux/client-ui/note/note-document'
 import type { AppConfig, WorkspaceFileWriteInput, WorkspaceRecord } from '../../src/shared/contracts'
 import { CONFIG_VERSION } from '../../src/shared/contracts'
 

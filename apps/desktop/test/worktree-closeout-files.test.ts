@@ -10,7 +10,7 @@ import { NoteFileWriter } from '@agentmux/host/note-file-writer'
 import { WorkspaceFiles } from '../src/main/workspace-files'
 import { closeWorktreeGraph } from '../src/shared/worktree-closeout'
 import { directoryIdentity, workspaceZoneId } from '../src/shared/space-addresses'
-import { newNoteDocument, serializeNoteDocument } from '../src/shared/note-document'
+import { newNoteDocument, serializeNoteDocument } from '@agentmux/client-ui/note/note-document'
 import type { WorkspaceRecord } from '../src/shared/contracts'
 
 const disposals: Array<() => Promise<unknown> | unknown> = []

@@ -12,7 +12,7 @@ import { NoteLinksPanel } from '../src/renderer/src/components/NoteLinksPanel'
 import { noteSharedRelations, noteUseContext } from '../src/renderer/src/lib/note-shared-relations'
 import { noteKnowledge } from '@agentmux/client-ui/note/note-knowledge'
 import { api } from '../src/renderer/src/lib/api'
-import { newNoteDocument, serializeNoteDocument } from '../src/shared/note-document'
+import { newNoteDocument, serializeNoteDocument } from '@agentmux/client-ui/note/note-document'
 import { composerDOM } from './helpers/composer-dom-fixture'
 import { installNoteCanvasGeometry } from './helpers/note-canvas-dom'
 

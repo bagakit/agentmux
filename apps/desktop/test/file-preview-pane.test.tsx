@@ -16,7 +16,7 @@ import { createWorkbenchTab, documentKey, fileTabId, initialWorkbenchRegionId, t
 import { createWorkspaceLayout } from '@agentmux/layout'
 import { composerConfig } from './helpers/composer-dom-fixture'
 import { WorkbenchPresentationContext } from '../src/renderer/src/lib/workbench-presentation'
-import { newNoteDocument, serializeNoteDocument } from '../src/shared/note-document'
+import { newNoteDocument, serializeNoteDocument } from '@agentmux/client-ui/note/note-document'
 
 const initial = useAppStore.getState()
 let root: Root, container: HTMLDivElement

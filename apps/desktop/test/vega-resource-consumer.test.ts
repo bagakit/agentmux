@@ -12,7 +12,7 @@ import { runProcess } from '../../../packages/core/src/process-runner'
 import { WorkspaceFiles } from '../src/main/workspace-files'
 import { FilePreviewResources } from '../src/main/file-preview-resources'
 import type { WorkspaceRecord } from '../src/shared/contracts'
-import { WORKSPACE_FILE_MAX_BYTES } from '../src/shared/workspace-file-bytes'
+import { WORKSPACE_FILE_MAX_BYTES } from '@agentmux/host/workspace-file-bytes'
 import { previewVisibility } from './helpers/preview-visibility'
 
 const bridge = vi.hoisted(() => ({

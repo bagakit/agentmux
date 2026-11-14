@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { type NoteDocument, newNoteDocument, readNoteDocument, serializeNoteDocument, NOTE_SCHEMA } from '../src/shared/note-document'
+import { type NoteDocument, newNoteDocument, readNoteDocument, serializeNoteDocument, NOTE_SCHEMA } from '@agentmux/client-ui/note/note-document'
 import { readLegacyNoteDocument } from '@agentmux/client-ui/note/note-legacy-document'
 import { parseNoteWikiQuery } from '@agentmux/core/note-links'
 describe('canonical Note content schema', () => {

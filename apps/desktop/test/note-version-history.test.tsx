@@ -9,7 +9,7 @@ import { NoteVersionHistory } from '../src/renderer/src/components/NoteVersionHi
 import { useAppStore } from '../src/renderer/src/store'
 import { api } from '../src/renderer/src/lib/api'
 import { createWorkbenchTab, documentKey } from '../src/renderer/src/lib/workbench-tabs'
-import { newNoteDocument, serializeNoteDocument } from '../src/shared/note-document'
+import { newNoteDocument, serializeNoteDocument } from '@agentmux/client-ui/note/note-document'
 import { composerConfig, composerDOM } from './helpers/composer-dom-fixture'
 vi.mock('../src/renderer/src/monaco', () => ({}))
 vi.hoisted(() => { Object.defineProperty(window, 'matchMedia', { configurable: true, value: () => ({ matches: false, addEventListener() {}, removeEventListener() {} }) }) })

@@ -15,7 +15,7 @@ import { WorkbenchPresentationContext } from '../src/renderer/src/lib/workbench-
 import { api } from '../src/renderer/src/lib/api'
 import { observeNotebookLibrary, useNotebookLibrary } from '../src/renderer/src/lib/notebook-library'
 import { useAppStore } from '../src/renderer/src/store'
-import { newNoteDocument, readNoteDocument } from '../src/shared/note-document'
+import { newNoteDocument, readNoteDocument } from '@agentmux/client-ui/note/note-document'
 import { noteKnowledge } from '../src/renderer/src/lib/note-knowledge'
 import { composerDOM } from './helpers/composer-dom-fixture'
 import { NoteTitleFileWriter } from '@agentmux/host/note-title-file-writer'

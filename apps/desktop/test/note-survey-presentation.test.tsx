@@ -26,7 +26,7 @@ import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
 import { useLauncherState } from '../src/renderer/src/lib/launcher-state'
 import { createWorkbenchTab, fileTabId } from '../src/renderer/src/lib/workbench-tabs'
-import { newNoteDocument } from '../src/shared/note-document'
+import { newNoteDocument } from '@agentmux/client-ui/note/note-document'
 import { spatialCatalog } from '../src/renderer/src/lib/space-agent-control'
 import { composerConfig, composerDOM, composerSession } from './helpers/composer-dom-fixture'
 const dom = composerDOM(), session = composerSession()

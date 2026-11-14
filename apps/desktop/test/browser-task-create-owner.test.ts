@@ -12,7 +12,7 @@ import { WORKBENCH_USER_STATE_KEY } from '../src/renderer/src/lib/workbench-user
 import { AgentMuxSpatialStateStore } from '@agentmux/core/spatial-state'
 import { createWorkspaceLayout } from '@agentmux/layout'
 import { desktopWorkbenchFromSpatial } from '../src/renderer/src/lib/desktop-spatial-state.js'
-import { browserTaskCreateInput, type BrowserTaskCreateInput } from '../src/shared/browser-task-creation.js'
+import { browserTaskCreateInput, type BrowserTaskCreateInput } from '@agentmux/core/control'
 import type { BrowserTaskAssetDocument } from '../src/shared/browser-task-assets.js'
 import type { BrowserDemonstrationDraft } from '../src/shared/browser-demonstration.js'
 import { submitBrowserTaskCreation, inspectBrowserTaskCreation, type BrowserTaskCreationPorts } from '../src/renderer/src/lib/browser-task-creation.js'

@@ -3,7 +3,7 @@ import { act } from 'react'
 import { createRoot } from 'react-dom/client'
 import { expect, it, vi } from 'vitest'
 import type { Editor } from '@tiptap/core'
-import { readNoteDocument } from '../src/shared/note-document'
+import { readNoteDocument } from '@agentmux/client-ui/note/note-document'
 import { NoteFileView } from '../src/renderer/src/components/NoteFileView'
 import { noteKnowledge } from '../src/renderer/src/lib/note-knowledge'
 

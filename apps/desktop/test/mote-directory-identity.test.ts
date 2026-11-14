@@ -9,7 +9,7 @@ import { objectCliEnvironment } from '../../../packages/core/test/helpers/object
 import { afterEach, expect, it, vi } from 'vitest'
 import { ScratchTopics } from '../src/main/scratch-topics'
 import { WorkspaceFiles } from '../src/main/workspace-files'
-import { scratchDirectoryIdentity, scratchIdentityContext } from '../src/main/scratch-topic-directories'
+import { scratchDirectoryIdentity, scratchIdentityContext } from '@agentmux/host/mote-resources'
 import { directoryIdentityRecord, normalizeDirectoryIdentity, moteDirectoryName, SCRATCH_DIRECTORY_IDENTITY_PATH, SCRATCH_DIRECTORY_IDENTITY_PENDING_PATH } from '../src/main/scratch-directory-identity.mjs'
 import { observeClientRpcSnapshot } from '@agentmux/host/snapshot-observation'
 import { originalTopicAddress, directoryIdentity, homeZoneId, spatialSources } from '../src/shared/space-addresses'

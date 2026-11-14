@@ -4,7 +4,7 @@ import { AgentMuxControlServer, connectAgentMuxRpc, type MoteConnectionCreate } 
 import { AgentMuxSpatialStateStore, spatialCatalog } from '@agentmux/core/spatial-state'
 import { createConnectionServices } from '../../../../packages/connectors/src/connection-services.js'
 import { MoteConnectionOperations } from '@agentmux/connectors'
-import { MoteConnectionTargetOwner } from '../../src/main/mote-connection-target.js'
+import { MoteConnectionTargetOwner } from '@agentmux/host/mote-connection-target'
 import { MoteConnectionPreferences } from '@agentmux/host/mote-connection-preferences'
 import { ScratchTopics } from '../../src/main/scratch-topics.js'
 import { FileReadOwner } from '@agentmux/host/file-read-owner'

@@ -7,7 +7,7 @@ import { useNotebookLibrary } from '../src/renderer/src/lib/notebook-library'
 import { useAppStore } from '../src/renderer/src/store'
 import { documentKey } from '../src/renderer/src/lib/workbench-tabs'
 import { api } from '../src/renderer/src/lib/api'
-import { newNoteDocument, serializeNoteDocument, type NoteDocument } from '../src/shared/note-document'
+import { newNoteDocument, serializeNoteDocument, type NoteDocument } from '@agentmux/client-ui/note/note-document'
 import { composerConfig, composerDOM } from './helpers/composer-dom-fixture'
 import { fixtureEpoch as _historyFixtureEpoch } from '../../../test/fixture-values.mjs'
 

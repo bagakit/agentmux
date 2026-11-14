@@ -9,7 +9,7 @@ import { useLauncherState, type LauncherSection, type LauncherSectionMode } from
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { useAppStore } from '../src/renderer/src/store'
 import { api } from '../src/renderer/src/lib/api'
-import { readNoteDocument } from '../src/shared/note-document'
+import { readNoteDocument } from '@agentmux/client-ui/note/note-document'
 import { composerConfig, composerDOM } from './helpers/composer-dom-fixture'
 
 const dom = composerDOM(), initialLauncher = useLauncherState.getState()

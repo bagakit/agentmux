@@ -1,6 +1,6 @@
 import { serializeNoteDocument } from '@agentmux/client-ui/note/note-document'
 import { fixturePath as _hygiene_fixturePath } from "../../../scripts/lib/fixture-values.mjs"
-import { NOTE_SCHEMA, newNoteDocument, readNoteDocument, type NoteDocument, type NoteBlockReference } from '../../../src/shared/note-document'
+import { NOTE_SCHEMA, newNoteDocument, readNoteDocument, type NoteDocument, type NoteBlockReference } from '@agentmux/client-ui/note/note-document'
 import type { WorkspaceFileWriteInput, WorkspaceFileWriteResult } from '../../../src/shared/contracts'
 import type { NoteCreationReceipt } from '../../../src/renderer/src/lib/note-creation'
 const note: NoteDocument = {schema:NOTE_SCHEMA,noteId:'note-a',content:{type:'doc',content:[{type:'paragraph',attrs:{blockId:'block-a'},content:[{type:'text',text:'A block'}]}]}}

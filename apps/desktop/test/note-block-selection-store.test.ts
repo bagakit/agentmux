@@ -3,7 +3,7 @@ import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-valu
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createWorkspaceLayout } from '@agentmux/layout'
 import type { AppConfig } from '../src/shared/contracts'
-import { newNoteDocument } from '../src/shared/note-document'
+import { newNoteDocument } from '@agentmux/client-ui/note/note-document'
 import { noteBlockSelectionKey, type NoteBlockPresentation } from '../src/renderer/src/lib/note-block-selection'
 import { workbenchHomePresentationReferences } from '../src/renderer/src/lib/workbench-presentation'
 import { createWorkbenchTab, documentKey } from '../src/renderer/src/lib/workbench-tabs'

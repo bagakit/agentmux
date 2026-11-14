@@ -8,7 +8,7 @@ import { LocalExecutionHost, type ExecutionHost } from '@agentmux/core'
 import { HtmlFilePreviews } from '../src/main/html-file-previews.js'
 import { WorkspaceFiles } from '../src/main/workspace-files.js'
 import type { WorkspaceRecord } from '../src/shared/contracts.js'
-import { WORKSPACE_FILE_MAX_BYTES } from '../src/shared/workspace-file-bytes.js'
+import { WORKSPACE_FILE_MAX_BYTES } from '@agentmux/host/workspace-file-bytes'
 
 const roots: string[] = []
 const owners: HtmlFilePreviews[] = []

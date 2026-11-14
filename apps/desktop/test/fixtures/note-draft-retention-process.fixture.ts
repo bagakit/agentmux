@@ -3,7 +3,7 @@ import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { expect, it } from 'vitest'
 import { createBatchedPersistentStorage, createWriteFencedStorage } from '../../src/renderer/src/lib/persisted-ui-writer'
-import { readNoteDocument } from '../../src/shared/note-document'
+import { readNoteDocument } from '@agentmux/client-ui/note/note-document'
 import { boundary, digest, groupId, noteRetentionFixture, restoreRetentionState, sources, store, unrelatedTabId, workspaceId } from './note-draft-retention'
 
 it('runs one isolated persistence process against the original Store', async () => {

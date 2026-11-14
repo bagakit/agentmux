@@ -1,6 +1,6 @@
 import { serializeNoteDocument } from '@agentmux/client-ui/note/note-document'
 import type { ComponentProps } from 'react'
-import { NOTE_SCHEMA, type NoteDocument } from '../../../src/shared/note-document'
+import { NOTE_SCHEMA, type NoteDocument } from '@agentmux/client-ui/note/note-document'
 import { NoteBlockEditor } from '../../../src/renderer/src/components/NoteBlockEditor'
 import { NoteFileView } from '../../../src/renderer/src/components/NoteFileView'
 import { NoteFileSurfaceView } from '../../../src/renderer/src/components/NoteFileSurfaceView'

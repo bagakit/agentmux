@@ -14,7 +14,7 @@ import { type JSONContent } from '@tiptap/core'
 import { noteContentSchema } from '@agentmux/client-ui/note/note-content-schema'
 import { indexNoteReferences, prepareNoteWikiLinks } from '@agentmux/client-ui/note/note-wikilinks'
 import { deriveNoteCorpus } from '@agentmux/client-ui/note/note-corpus'
-import { readNoteDocument, serializeNoteDocument, type NoteDocument } from '../src/shared/note-document'
+import { readNoteDocument, serializeNoteDocument, type NoteDocument } from '@agentmux/client-ui/note/note-document'
 const header = '---\nschema: agentmux.note.md.v1\nnote-id: raw-note\n---\n\n'
 function read(body: string) {
   const result = readNoteDocument(header + body)

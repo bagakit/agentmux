@@ -12,7 +12,7 @@ vi.mock('../../src/renderer/src/lib/api', () => ({ api: apiBoundary }))
 
 import { WorkspaceFiles } from '../../src/main/workspace-files'
 import type { AppConfig } from '../../src/shared/contracts'
-import { newNoteDocument, readNoteDocument, serializeNoteDocument } from '../../src/shared/note-document'
+import { newNoteDocument, readNoteDocument, serializeNoteDocument } from '@agentmux/client-ui/note/note-document'
 import { useAppStore } from '../../src/renderer/src/store'
 import { useNotebookLibrary } from '../../src/renderer/src/lib/notebook-library'
 import { createWorkbenchTab, documentKey } from '../../src/renderer/src/lib/workbench-tabs'

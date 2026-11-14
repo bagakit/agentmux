@@ -14,7 +14,7 @@ import { createWorkspaceLayout } from '@agentmux/layout'
 import { api } from '../src/renderer/src/lib/api'
 import { readPmoTeamsTopicFloatingState, requestPmoTeamsTopicFloatingClose, usePmoTeamsTopicFloatingState } from '../src/renderer/src/lib/pmo-teams-topic-floating'
 import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '@agentmux/host/mote-model'
-import { readNoteDocument } from '../src/shared/note-document'
+import { readNoteDocument } from '@agentmux/client-ui/note/note-document'
 import { composerConfig, composerDOM, composerSession } from './helpers/composer-dom-fixture'
 const dom = composerDOM(), initial = useLauncherState.getState()
 beforeEach(async () => { await act(async () => { useLauncherState.setState({ sections: { workspace: { agents: 'expanded' } }, drafts: {}, executors: {}, persistenceIssue: null }); requestPmoTeamsTopicFloatingClose() }) })

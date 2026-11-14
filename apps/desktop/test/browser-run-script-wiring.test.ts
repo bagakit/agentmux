@@ -1,6 +1,6 @@
 import { fixtureEpoch as _tailFixtureEpoch } from "../../../test/fixture-values.mjs"
 import { spawn } from 'node:child_process'
-import { browserTaskCreateInput } from '../src/shared/browser-task-creation.js'
+import { browserTaskCreateInput } from '@agentmux/core/control'
 import { DatabaseSync } from 'node:sqlite'
 import { describe, expect, it, vi } from 'vitest'
 import { BROWSER_OPERATION_FEEDBACK_WORLD_ID } from '../src/main/browser-operation-feedback.js'

@@ -14,7 +14,7 @@ import { ComposerCompletionEditor } from '@agentmux/client-ui/components/Compose
 import { InlineComposer } from '@agentmux/client-ui/components/InlineComposer'
 import { WorkbenchDocumentContext } from '../src/renderer/src/lib/workbench-document'
 import { NoteBlockEditor } from '../src/renderer/src/components/NoteBlockEditor'
-import { newNoteDocument, readNoteDocument } from '../src/shared/note-document'
+import { newNoteDocument, readNoteDocument } from '@agentmux/client-ui/note/note-document'
 import { noteKnowledge } from '../src/renderer/src/lib/note-knowledge'
 import { SelectionField } from '../src/renderer/src/components/SelectionField'
 import * as HoverMenu from '../src/renderer/src/components/HoverDropdownMenu'

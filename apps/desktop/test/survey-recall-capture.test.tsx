@@ -11,7 +11,7 @@ import { useNotebookLibrary } from '../src/renderer/src/lib/notebook-library'
 import { saveSurveyToRecall, type SurveyRecallCapture as CaptureTarget } from '../src/renderer/src/lib/survey-recall-capture'
 import { SurveyRecallCapture } from '../src/renderer/src/components/SurveyRecallCapture'
 import { NOTES_WORKSPACE_ID } from '@agentmux/host/notes-library'
-import { newNoteDocument } from '../src/shared/note-document'
+import { newNoteDocument } from '@agentmux/client-ui/note/note-document'
 
 const dom = composerDOM()
 const notes = { id: NOTES_WORKSPACE_ID, name: 'Recall', hostId: 'local', path: _hygiene_fixturePath("home/notes"), kind: 'folder' as const }

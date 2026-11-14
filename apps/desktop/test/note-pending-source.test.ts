@@ -1,10 +1,10 @@
 // @vitest-environment happy-dom
 import { afterEach, expect, it } from 'vitest'
 import { Editor, type JSONContent } from '@tiptap/core'
-import { noteContentExtensions, closeHistory } from '../src/shared/note-content-schema'
+import { noteContentExtensions, closeHistory } from '@agentmux/client-ui/note/note-content-schema'
 import { observeNotePendingSource, notePendingSourceDecorations, retainNoteDraftEditor, stageNoteShare, copyNoteBlock, clearPendingNoteShares } from '../src/renderer/src/lib/note-share-staging'
 import { useAppStore } from '../src/renderer/src/store'
-import { serializeNoteDocument } from '../src/shared/note-document'
+import { serializeNoteDocument } from '@agentmux/client-ui/note/note-document'
 import { composerConfig } from './helpers/composer-dom-fixture'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'

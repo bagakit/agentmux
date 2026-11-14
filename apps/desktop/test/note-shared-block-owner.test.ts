@@ -19,7 +19,7 @@ import { NoteSharedFileDeleteOwner } from '@agentmux/host/note-shared-file-delet
 import { noteShareRange, noteShareSiblingRange } from '@agentmux/client-ui/note/note-share-range'
 import { NoteSharedBlockOwner } from '@agentmux/host/note-shared-block-owner'
 import { noteKnowledge, resolveNoteBlock } from '@agentmux/client-ui/note/note-knowledge'
-import { newNoteDocument, readNoteDocument, serializeNoteDocument } from '../src/shared/note-document'
+import { newNoteDocument, readNoteDocument, serializeNoteDocument } from '@agentmux/client-ui/note/note-document'
 import type { WorkspaceRecord } from '../src/shared/contracts'
 const dispose: (() => Promise<unknown>)[] = []
 const author = { kind: 'agent' as const, id: 'original-research-agent' }, person = { kind: 'user' as const, id: 'local-person' }
@@ -303,7 +303,7 @@ it('continues an explicitly requested interrupted save through compiled CLI whil
   expect(writes.mock.calls.map(([, input]) => input.path).sort()).toEqual(['destination.note.md', 'source.note.md'])
 })
 
-async function removal(f: Awaited<ReturnType<typeof fixture>>, referenceIds = ['paste-reference'], extra?: (note: import('../src/shared/note-document').NoteDocument) => void) {
+async function removal(f: Awaited<ReturnType<typeof fixture>>, referenceIds = ['paste-reference'], extra?: (note: import('@agentmux/client-ui/note/note-document').NoteDocument) => void) {
   const baseContent = await readFile(join(f.directory, f.destination.path), 'utf8'), parsed = readNoteDocument(baseContent)
   if (parsed.status !== 'valid') throw Error('Fixture destination must parse')
   const remove = (node: typeof parsed.note.content) => { if (node.content) node.content = node.content.filter(child => !(child.type === 'noteInclude' && referenceIds.includes(String(child.attrs?.referenceId)))); node.content?.forEach(remove) }
@@ -605,7 +605,7 @@ it('rejects self-inclusion anywhere inside the selected heading section before c
 it('limits heading ranges to their own sibling container and stops at equal or higher levels', () => {
   const heading = (blockId: string, level: number) => ({ type: 'heading', attrs: { blockId, level } })
   const parent = { type: 'blockquote', content: [heading('local-heading', 2), { type: 'paragraph' }, heading('lower-heading', 3), { type: 'paragraph' }, heading('higher-heading', 1), { type: 'paragraph' }] }
-  const content: import('../src/shared/note-document').NoteDocument['content'] = { type: 'doc', content: [parent, { type: 'paragraph', attrs: { blockId: 'outside' } }] }
+  const content: import('@agentmux/client-ui/note/note-document').NoteDocument['content'] = { type: 'doc', content: [parent, { type: 'paragraph', attrs: { blockId: 'outside' } }] }
   expect(noteShareSiblingRange(parent, 0)).toEqual(parent.content.slice(0, 4))
   expect(noteShareRange(content, 'local-heading')).toMatchObject({ parent, index: 0, count: 4 })
   expect(noteShareSiblingRange(parent, 2)).toEqual(parent.content.slice(2, 4))
