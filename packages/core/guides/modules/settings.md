@@ -120,9 +120,13 @@ In Desktop, the person opens a device's home workface from its device name in Sp
 without a manual project setup step; an existing registered home directory reuses its
 original workface. Opening does not start an Agent or change another Session's cwd.
 For explicit CLI registration, use the returned path unchanged with the existing
-settings workspaces register input {hostId,path,name?}. Registration only records an
+settings workspaces register input {hostId,path,name?,expectedHost?}. Registration only records an
 existing directory; it creates no Git worktree and starts no Agent. A directory is not required
 to be a Git repository. Registration, navigation and Agent creation have separate receipts.
+When expectedHost is supplied, Main requires the committed Host at the registration transaction
+to equal that reviewed connection; a same-ID replacement rejects only this registration and
+preserves the original input. Without the optional snapshot, registration retains the ordinary
+current committed-Host semantics.
 
 ## Node management
 
