@@ -71,7 +71,7 @@ export function TopicDirectorySettingsPane({ config, onClose, promotion = false 
     {promotion ? <PromotionSettings config={config} /> : <TopicInitialViewSettings config={config} />}
     {promotion ? <section className="settings-group" data-settings-field="agent-promotion">
       <header><span>Agent → Mote Thread</span></header>
-      <p className="settings-workflows__note">An Agent can join an existing Club as a Thread. Creating a new Club is a separate team-level choice. The Agent’s menu shows its available actions and original operation results.</p>
+      <p className="settings-workflows__note">Choose an existing Club for a new Agent to take over the original work as a Thread; creating a new Club is a separate team-level choice.</p>
     </section> : null}
     <section className="settings-group" data-settings-field="topic-directory">
       <header><span>{promotion ? 'Topic → Mote Club' : 'Topic directory'}</span></header>
@@ -99,8 +99,8 @@ export function TopicDirectorySettingsPane({ config, onClose, promotion = false 
       </div>
     </section> : null}
     {promotion ? <section className="settings-group" data-settings-field="agent-transfer">
-      <header><span>Move a Thread between Clubs</span></header>
-      <p className="settings-workflows__note">Club membership and execution are separate. A move keeps the original Agent, conversation and working directory; tasks and Goal responsibilities retain their original sources.</p>
+      <header><span>Continue work through Takeover</span></header>
+      <p className="settings-workflows__note">Promotion (Project → Club), Handson (Club → Project) and transfers between Projects or Clubs use the same Takeover at the new location. A new Agent continues the work; the original location, membership and Main remain.</p>
     </section> : null}
   </div>
 }

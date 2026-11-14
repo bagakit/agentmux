@@ -20,9 +20,9 @@ export const topicSettingsModule = {
 
 export const motePromotionSettingsModule = {
   id: 'mote-promotion', archetype: 'preference', group: 'mote', title: 'Promotion', icon: PromotionIcon,
-  description: 'Topic to Club, Agent to Thread, and moves between Clubs.',
-  keywords: 'mote club clubs thread promotion promote agent topic transfer allow enable growth 晋升 转岗 允许 开关 伙伴 成长',
-  searchTargets: [{ id: 'promotion.enabled', title: 'Allow promotion', keywords: 'allow enable disable agent topic 允许 晋升 开关' }, { id: 'agent-promotion', title: 'Agent → Mote Thread', keywords: 'agent thread club 对话 伙伴 空间', kind: 'info' }, { id: 'agent-transfer', title: 'Move a Thread between Clubs', keywords: 'transfer move club thread 转岗 调岗', kind: 'info' }, { id: 'mote-configuration', title: 'Club Profile and Quick mode', keywords: 'club personality appearance main agent executor recovery connection 配置 人格 外观 连接', kind: 'action' }],
+  description: 'Topic to Club, Agent to Thread, and Takeover across Projects and Clubs.',
+  keywords: 'mote club clubs thread promotion promote agent topic transfer takeover handson project allow enable growth 晋升 转岗 允许 开关 伙伴 成长',
+  searchTargets: [{ id: 'promotion.enabled', title: 'Allow promotion', keywords: 'allow enable disable agent topic 允许 晋升 开关' }, { id: 'agent-promotion', title: 'Agent → Mote Thread', keywords: 'agent thread club 对话 伙伴 空间', kind: 'info' }, { id: 'agent-transfer', title: 'Continue work through Takeover', keywords: 'transfer takeover handson project club thread 转岗 调岗 承接', kind: 'info' }, { id: 'mote-configuration', title: 'Club Profile and Quick mode', keywords: 'club personality appearance main agent executor recovery connection 配置 人格 外观 连接', kind: 'action' }],
   savedSummary: config => config.promotion?.enabled === false ? 'Promotion is off' : 'Topic → Club · Agent → Thread',
   Pane({ config, onClose }) { return <TopicDirectorySettingsPane config={config} onClose={onClose} promotion /> }
 } as const satisfies SettingsModule
