@@ -32,6 +32,7 @@ it('the actual SettingsPanel opens a continuous Mesh homepage with saved connect
   expect(dom.container.querySelector('[data-mesh-home-view]')?.getAttribute('data-mesh-home-view')).toBe('paths')
   expect([...dom.container.querySelectorAll('.settings-nav-children button')].map(button => button.textContent)).toEqual(['Gateways', 'Machines', 'Device connections'])
   const map = dom.container.querySelector('[aria-label="Saved connection map"]')!
+  expect(map).not.toBeNull()
   expect(map.closest('[hidden]')).toBeNull()
   expect([...map.querySelectorAll('[data-host-node]')].map(node => node.getAttribute('data-host-node'))).toEqual(['selected-farm', 'neighbor-farm'])
   expect(map.textContent).toContain('Saved route')
