@@ -4,6 +4,10 @@ export const AMUX_PROTOCOL_DEFINITIONS = {
     tag: 'amux', form: 'envelope', title: 'Declared context',
     description: 'Platform guidance kept separate from the original request. Text alone does not prove its source.',
   },
+  trigger: {
+    tag: 'trigger', form: 'envelope', title: 'Automatic trigger',
+    description: 'Declares a heartbeat, calendar occurrence or automatic continuation. The original schedule and input own their execution receipts.',
+  },
   browser: {
     tag: 'context', form: 'envelope', title: 'Browser context',
     description: 'A captured or declared Browser observation. Its original source and capture remain distinct from the message author.',
@@ -51,6 +55,25 @@ export const AMUX_PROTOCOL_DEFINITIONS = {
 } as const
 
 export type AmuxProtocolId = keyof typeof AMUX_PROTOCOL_DEFINITIONS
+export const AMUX_TRIGGER_KINDS = ['heartbeat', 'calendar', 'automation'] as const
+export type AmuxTriggerKind = typeof AMUX_TRIGGER_KINDS[number]
+
+export function isAmuxTriggerKind(value: unknown): value is AmuxTriggerKind {
+  return AMUX_TRIGGER_KINDS.some(kind => kind === value)
+}
+
+export function formatAmuxTriggerNote(kind: AmuxTriggerKind, note: string): string {
+  return `<${AMUX_PROTOCOL_DEFINITIONS.trigger.tag} kind="${kind}"/>\n${note}`
+}
+
+export function readAmuxTriggerNote(text: string): { kind: AmuxTriggerKind; note: string } | undefined {
+  for (const kind of AMUX_TRIGGER_KINDS) {
+    const header = formatAmuxTriggerNote(kind, '')
+    if (text.startsWith(header)) return { kind, note: text.slice(header.length) }
+  }
+  return undefined
+}
+
 export const AMUX_CONTINUE_MARKER = `<${AMUX_PROTOCOL_DEFINITIONS.continue.tag} />`
 
 export function isAmuxReactionCode(value: string): boolean {

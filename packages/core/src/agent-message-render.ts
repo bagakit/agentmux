@@ -8,11 +8,11 @@ import type { ConnectionActor } from './connections-contract.js'
 import { composeOutboundMessage } from './agent-outbound-message.js'
 import { AGENTMUX_A2A_REMINDER } from './agent-messaging-guidance.js'
 import { browserInputContextJson, parseBrowserInputContext, type BrowserInputContext } from './browser-input-context.js'
-import { AMUX_PROTOCOL_DEFINITIONS, AMUX_CONTINUE_MARKER, formatAmuxReactionMarker, isAmuxReactionCode, type AmuxProtocolDeclaration, type AmuxProtocolId } from './amux-protocol-definition.js'
+import { AMUX_PROTOCOL_DEFINITIONS, AMUX_CONTINUE_MARKER, AMUX_TRIGGER_KINDS, formatAmuxTriggerNote, readAmuxTriggerNote, type AmuxTriggerKind, formatAmuxReactionMarker, isAmuxReactionCode, type AmuxProtocolDeclaration, type AmuxProtocolId } from './amux-protocol-definition.js'
 import { formatAmuxSharing, formatAmuxObjectLink } from './sharing.js'
 import { formatCapsuleAnswer, parseCapsuleAnswer } from './capsule-answer.js'
 
-export { AMUX_PROTOCOL_DEFINITIONS, type AmuxProtocolDeclaration, type AmuxProtocolId } from './amux-protocol-definition.js'
+export { AMUX_PROTOCOL_DEFINITIONS, type AmuxTriggerKind, type AmuxProtocolDeclaration, type AmuxProtocolId } from './amux-protocol-definition.js'
 
 /**
  * Source plus unchanged authored body. Core authorizes identity before delivery;
@@ -53,6 +53,7 @@ export function renderAgentMuxMessageEnvelope(envelope: Pick<AgentMuxMessageEnve
 }
 
 type AgentMuxMessageReading = {
+  declaredTrigger?: AmuxTriggerKind
   protocol?: AmuxProtocolDeclaration
   reminder?: { raw: string; text: string }
   /** Complete input-leading declarations, preserved as original source spans. */
@@ -207,12 +208,19 @@ function parseDeclaredContexts(text: string): AgentMuxMessagePrefix | null {
     const raw = text.slice(start, end)
     if (/<!|<\?/u.test(raw)) return null
     let inputContext: BrowserInputContext | undefined
+    let declaredTrigger: AmuxTriggerKind | undefined
     try {
       const document = new DOMParser({ onError: onWarningStopParsing }).parseFromString(raw, 'text/xml')
       const root = document.documentElement
       if (!root || root.tagName !== 'amux' || root.attributes.length !== 0 || Array.from(document.childNodes).some(node => node !== root)) return null
       const children = Array.from(root.childNodes)
-      if (children.some(node => node.nodeType !== 3)) {
+      const trigger = readAmuxTriggerNote(raw.slice('<amux>\n'.length))
+      if (trigger && children.length === 3 && children[1]?.nodeName === AMUX_PROTOCOL_DEFINITIONS.trigger.tag) {
+        // Match the producer's complete encoding. Guidance remains escaped text and the body stays opaque.
+        const note = (children[2]?.textContent ?? '').slice(1, -1)
+        if (composeOutboundMessage({ amux: formatAmuxTriggerNote(trigger.kind, note) }) !== raw) return null
+        declaredTrigger = trigger.kind
+      } else if (children.some(node => node.nodeType !== 3)) {
         const match = /^<amux>\n<context kind="browser" version="1">\n([^\r\n]+)\n<\/context>\n<\/amux>$/u.exec(raw)
         if (!match) return null
         inputContext = parseBrowserInputContext(JSON.parse(match[1]!))
@@ -224,7 +232,7 @@ function parseDeclaredContexts(text: string): AgentMuxMessagePrefix | null {
     declaredContexts.push({ raw, ...(inputContext ? { inputContext } : {}) })
     // A context container ends its producer boundary. The following user body
     // is opaque, even when it starts with another complete envelope example.
-    if (inputContext) return { kind: 'content', sourceLabel: '', declaredAgentSessionId: null, declaredContexts, body: text.slice(end) }
+    if (inputContext || declaredTrigger) return { ...(declaredTrigger ? { declaredTrigger } : {}), kind: 'content', sourceLabel: '', declaredAgentSessionId: null, declaredContexts, body: text.slice(end) }
     // Newline separators join declarations; the next line's indentation is authored tail.
     const next = end + (/^(?:\r?\n)*/u.exec(text.slice(end))?.[0].length ?? 0)
     // A partly authored or unknown second declaration keeps the entire input readable.
@@ -244,7 +252,7 @@ export function parseAgentMuxMessagePrefix(text: string): AgentMuxMessagePrefix 
   const contexts = parseDeclaredContexts(text)
   if (!contexts) return null
   if (contexts.kind === 'references' || contexts.declaredMessageId !== undefined) return contexts
-  if (contexts.declaredContexts?.some(context => context.inputContext)) return contexts
+  if (contexts.declaredTrigger || contexts.declaredContexts?.some(context => context.inputContext)) return contexts
   // Only newline separators join a following declaration; indentation remains authored text.
   const sender = parseSenderPrefix(contexts.body.replace(/^(?:\r?\n)*/u, ''))
   return sender ? { ...sender, ...(contexts.declaredContexts ? { declaredContexts: contexts.declaredContexts } : {}) } : contexts
@@ -410,6 +418,7 @@ export type AgentMuxProtocolCatalogEntry = {
 const sampleReference = { senderSessionId: 'SID', messageId: 'MID' }
 const protocolExamples = {
   context: () => [{ label: 'Guidance and original request', wire: composeOutboundMessage({ amux: 'Platform guidance.', user: 'Original request.' }) }],
+  trigger: () => AMUX_TRIGGER_KINDS.map(kind => ({ label: kind, wire: composeOutboundMessage({ amux: formatAmuxTriggerNote(kind, 'Original platform guidance.'), user: 'Original instruction.' }) })),
   browser: () => [{ label: 'Declared page observation', wire: composeOutboundMessage({ inputContext: {
     kind: 'browser', version: 1, capturedAt: 0, browser: { hostId: 'local', browserId: 'BID', navigationId: null },
     page: { url: 'https://example.org/', title: 'Example page' }

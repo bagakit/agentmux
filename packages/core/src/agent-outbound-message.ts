@@ -1,12 +1,14 @@
 import { guideSharedRuntime } from './generated/agentmux-guides.js'
 import { guideText } from './guide-text.js'
 import { AGENTMUX_GOAL_SKILL_ENTRY } from './goal-role-guidance.js'
-import { AMUX_PROTOCOL_DEFINITIONS } from './amux-protocol-definition.js'
+import { AMUX_PROTOCOL_DEFINITIONS, readAmuxTriggerNote } from './amux-protocol-definition.js'
 import { DOMImplementation, XMLSerializer } from '@xmldom/xmldom'
 import { AGENTMUX_SELF_CONTEXT_VERB } from './agent-self-context.js'
 import { AGENTMUX_AGENT_MESSAGING_ENTRY, AGENTMUX_SESSION_NAMING_ENTRY } from './agent-messaging-guidance.js'
 import { browserInputContextJson, type BrowserInputContext } from './browser-input-context.js'
 import { agentLaunchContextExceedsBudget } from './agent-prompt-budget.js'
+
+export { formatAmuxTriggerNote, readAmuxTriggerNote, type AmuxTriggerKind } from './amux-protocol-definition.js'
 
 /** Ordered optional platform context. Omission must retain its source/recovery instructions. */
 export type AgentMuxOptionalContext = { text: string; omittedText: string }
@@ -52,8 +54,14 @@ const PLATFORM_TASK_REQUESTED = 'An explicit AgentMux task follows. Begin that t
 function amuxEnvelope(text: string): string {
   const document = new DOMImplementation().createDocument(null, AMUX_PROTOCOL_DEFINITIONS.context.tag, null)
   const envelope = document.documentElement!
-  // Platform text remains text even when a rule or note contains XML-looking syntax.
-  envelope.appendChild(document.createTextNode(`\n${text}\n`))
+  const trigger = readAmuxTriggerNote(text)
+  if (trigger) {
+    const declaration = document.createElement(AMUX_PROTOCOL_DEFINITIONS.trigger.tag)
+    declaration.setAttribute('kind', trigger.kind)
+    envelope.appendChild(document.createTextNode('\n'))
+    envelope.appendChild(declaration)
+  }
+  envelope.appendChild(document.createTextNode(`\n${trigger ? trigger.note : text}\n`))
   return new XMLSerializer().serializeToString(envelope).replace(/\r/g, '&#13;')
 }
 
