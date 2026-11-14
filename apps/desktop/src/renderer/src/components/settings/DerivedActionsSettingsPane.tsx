@@ -14,6 +14,7 @@ import { LiquidSelectionSurface } from '../LiquidSelectionSurface'
 import { SettingsSaveBar, useSettingsSave } from './SettingsSaveBar'
 import { useResourceDrafts } from './use-resource-drafts'
 import { useSettingDraftRecord } from './use-setting-draft'
+import { useSettingsLibraryView } from './use-settings-library-view'
 import '../../styles/settings-prompts.css'
 import './settings-derived-actions.css'
 
@@ -70,7 +71,8 @@ export function DerivedActionsSettingsPane({ config, active, onSave }: {
   const hidden = { value: visibility.value.hidden, expected: visibility.expected.hidden }
   const drafts = Object.values(resource.value)
   const [selected, setSelected] = useState<string>(() => AGENT_BUILT_IN_DERIVED_ACTIONS[0].id)
-  const [view, setView] = useState<'library' | 'editor'>('library')
+  const { view, host, editor, rememberFocus, openEditor, returnToLibrary } = useSettingsLibraryView(active)
+  const library = useRef<HTMLElement>(null)
   const nameInput = useRef<HTMLInputElement>(null)
   const focusName = useRef(false)
   const describedBy = useId()
@@ -93,7 +95,11 @@ export function DerivedActionsSettingsPane({ config, active, onSave }: {
   }, [official, custom])
   useEffect(() => { if (focusName.current) { nameInput.current?.focus(); focusName.current = false } }, [selected])
 
-  function open(id: string) { setSelected(id); setView('editor') }
+  function open(id: string, fromRow = false) { setSelected(id); openEditor(fromRow) }
+  function showLibrary(id: string) {
+    returnToLibrary(() => Array.from(library.current?.querySelectorAll<HTMLButtonElement>('[data-derived-action-id]') ?? [])
+      .find(row => row.dataset.derivedActionId === id) ?? null)
+  }
   function add(start?: Pick<Draft, 'label' | 'base' | 'instruction'>) {
     const label = start?.label ?? ''
     const id = newId(label || 'action', new Set([...Object.keys(resource.value), ...Object.keys(resource.expected)]))
@@ -111,7 +117,9 @@ export function DerivedActionsSettingsPane({ config, active, onSave }: {
   }
   function remove(id: string) {
     resource.setValue(current => { const next = { ...current }; delete next[id]; return next })
-    setView('library')
+    const first = AGENT_BUILT_IN_DERIVED_ACTIONS[0].id
+    setSelected(first)
+    showLibrary(first)
   }
   function toggle(id: AgentBuiltInDerivedActionId) {
     const current = visibility.value.hidden
@@ -130,7 +138,7 @@ export function DerivedActionsSettingsPane({ config, active, onSave }: {
   const changedCount = drafts.filter(draft => !configValuesEqual(draft, Object.hasOwn(resource.expected, draft.id) ? resource.expected[draft.id] : undefined)).length + (hiddenDirty ? 1 : 0)
   const row = (id: string, name: string, detail: string, Icon: typeof DerivedIcon, extra?: { hidden?: boolean; status?: 'invalid' | 'hidden' | 'unsaved' }) =>
     <button type="button" className="prompt-library__item derived-actions__item" key={id} data-derived-action-id={id} aria-pressed={selected === id}
-      data-hidden={extra?.hidden || undefined} onClick={() => open(id)}>
+      data-hidden={extra?.hidden || undefined} onClick={() => open(id, true)}>
       <span className="prompt-library__name"><span className="derived-actions__glyph" aria-hidden="true"><Icon size={13} /></span><strong>{name}</strong>
         {extra?.status ? <span className="derived-actions__badge" data-status={extra.status}>{extra.status === 'invalid' ? 'Check' : extra.status === 'hidden' ? 'Hidden' : 'Unsaved'}</span> : null}
         {selected === id ? <SelectedIcon size={13} aria-label="Selected action" /> : null}</span>
@@ -147,15 +155,15 @@ export function DerivedActionsSettingsPane({ config, active, onSave }: {
     <span className="derived-actions__tile" aria-hidden="true"><Icon size={18} /></span>
     <div>{title}<span className="derived-actions__tag">{tag}</span></div>
   </div>
-  const back = <Button type="button" className="prompt-editor__back" onClick={() => setView('library')}><BackIcon size={13} /> Back to actions</Button>
+  const back = <Button type="button" className="prompt-editor__back" onClick={() => showLibrary(selected)}><BackIcon size={13} /> Back to actions</Button>
 
-  return <div className="settings-pane-stack prompt-workbench derived-actions" data-view={view}>
+  return <div ref={host} className="settings-pane-stack prompt-workbench derived-actions" data-view={view}>
     <div className="settings-pane-toolbar prompt-workbench__toolbar">
       <span className="settings-resource-count">{AGENT_BUILT_IN_DERIVED_ACTIONS.length - hidden.value.length + drafts.length} in the Agent menu</span>
       <Button type="button" onClick={() => add()} disabled={drafts.length >= AGENT_DERIVED_ACTION_LIMITS.actions}><AddIcon size={13} /> Add action</Button>
     </div>
     <div className="prompt-workbench__body">
-      <section className="prompt-library" aria-label="Derived actions">
+      <section ref={library} className="prompt-library" aria-label="Derived actions" onFocusCapture={() => rememberFocus('library')}>
         <div className="prompt-library__items">
           <LiquidSelectionSurface selected={selected} active={active} targetAttribute="data-derived-action-id" />
           <p className="derived-actions__section">Official <span>{AGENT_BUILT_IN_DERIVED_ACTIONS.length}</span></p>
@@ -168,7 +176,7 @@ export function DerivedActionsSettingsPane({ config, active, onSave }: {
             <div>{STARTING_POINTS.map(start => <button type="button" key={start.label} className="derived-actions__start" onClick={() => add(start)}><DerivedIcon size={13} /><span>{start.label}</span></button>)}</div></div> : null}
         </div>
       </section>
-      {official ? <section className="prompt-settings-card prompt-editor derived-actions__editor" aria-label={`${official.label} options`} data-derived-editor={official.id}>
+      {official ? <section ref={editor} tabIndex={-1} onFocusCapture={() => rememberFocus('editor')} className="prompt-settings-card prompt-editor derived-actions__editor" aria-label={`${official.label} options`} data-derived-editor={official.id}>
         <div className="prompt-editor__heading">{back}</div>
         {identity(OFFICIAL_ICONS[official.id], 'Official', <h3 className="derived-actions__title">{official.label}</h3>)}
         <p className="derived-actions__lead">{official.description}</p>
@@ -178,7 +186,7 @@ export function DerivedActionsSettingsPane({ config, active, onSave }: {
         <section className="derived-actions__block" aria-label="Menu placement"><h4>In the Agent menu</h4>{preview(official.id)}</section>
         {official.id === 'take-over' ? <div className="derived-actions__actions"><Button type="button" onClick={() => add({ label: 'Take over with a note', base: 'new-agent', instruction: 'Continue the original work. Before you start, ' })}>
           <DerivedIcon size={13} /> Start your own from this</Button><small>Keeps the full original context; you add the instruction.</small></div> : null}
-      </section> : custom ? <section className="prompt-settings-card prompt-editor derived-actions__editor" aria-label={`Edit ${nameOf(custom)}`}
+      </section> : custom ? <section ref={editor} tabIndex={-1} onFocusCapture={() => rememberFocus('editor')} className="prompt-settings-card prompt-editor derived-actions__editor" aria-label={`Edit ${nameOf(custom)}`}
         aria-describedby={activeProblem ? `${describedBy}-problem` : undefined} data-derived-editor={custom.id}>
         <div className="prompt-editor__heading">{back}</div>
         <div className="prompt-editor__fields">

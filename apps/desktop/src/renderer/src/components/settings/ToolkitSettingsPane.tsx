@@ -2,6 +2,7 @@ import { mintObjectId } from '@agentmux/core/object-id'
 import { SearchInput } from '@agentmux/client-ui/input'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useSettingsLibraryView } from './use-settings-library-view'
 import { DEFAULT_TOOLKIT_WORKSPACE_PATH, type ToolkitToolConfiguration, type ToolkitConfigurationFields, type ToolkitToolFields } from '@agentmux/core/control'
 import { Button } from '@agentmux/client-ui/components/Button'
 import { DEFAULT_MOBILE_CONNECTION_PREFERENCES, MOBILE_CONNECTION_TOOL_ID, type MobileConnectionPreferences, type PerformancePreferences } from '../../../../shared/toolkit-preferences'
@@ -54,14 +55,11 @@ export function ToolkitSettingsPane({ performance, mobileConnection = DEFAULT_MO
   const metadata = useToolkitPackages(tools, active)
   const [selectedId, setSelectedId] = useState<string | null>(toolId ?? tools[0]?.id ?? null)
   const [query, setQuery] = useState('')
-  const [view, setView] = useState<'library' | 'editor'>(toolId ? 'editor' : 'library')
-  const [narrow, setNarrow] = useState(false)
-  const host = useRef<HTMLDivElement>(null)
-  const library = useRef<HTMLDivElement>(null)
+  const { view, narrow, host, editor, rememberFocus, openEditor, returnToLibrary } = useSettingsLibraryView(active, toolId ? 'editor' : 'library')
+  const library = useRef<HTMLElement>(null)
   const nameInput = useRef<HTMLInputElement>(null)
   const searchInput = useRef<HTMLInputElement>(null)
   const focusNewName = useRef(false)
-  const focusBack = useRef(false)
   const entries = Object.entries(resource.entries)
   const selected = selectedId !== null && Object.hasOwn(resource.entries, selectedId) ? resource.entries[selectedId] : undefined
   const normalized = query.trim().toLowerCase()
@@ -69,15 +67,7 @@ export function ToolkitSettingsPane({ performance, mobileConnection = DEFAULT_MO
   const visible = entries.filter(([id,entry]) => `${identityFor(id, entry).name} ${entry.value.workspacePath} ${'kind' in entry.value ? entry.value.packagePath : ''}`.toLowerCase().includes(normalized))
   const showMobileConnection = !normalized || '手机连接 phone mobile connection device official built-in 手机 设备 在线 授权'.includes(normalized)
   const showPerformance = !normalized || 'performance official built-in resource use'.includes(normalized)
-  useLayoutEffect(() => {
-    const node = host.current
-    if (!node || !active) return
-    const update = () => { const width = node.getBoundingClientRect().width; setNarrow(width > 0 && width <= 660) }
-    update()
-    const observer = new ResizeObserver(update); observer.observe(node)
-    return () => observer.disconnect()
-  }, [active])
-  useEffect(() => { if (toolId) { setSelectedId(toolId); setView('editor'); setQuery('') } }, [toolId, navigationRequest])
+  useEffect(() => { if (toolId) { setSelectedId(toolId); openEditor(); setQuery('') } }, [toolId, navigationRequest])
   useEffect(() => {
     if (toolId === selectedId) return
     if (selectedId !== null && selectedId !== 'performance' && selectedId !== MOBILE_CONNECTION_TOOL_ID && !Object.hasOwn(resource.entries, selectedId)) setSelectedId(null)
@@ -86,12 +76,7 @@ export function ToolkitSettingsPane({ performance, mobileConnection = DEFAULT_MO
     if (!focusNewName.current || !nameInput.current) return
     nameInput.current.focus(); focusNewName.current = false
   }, [selectedId])
-  useLayoutEffect(() => {
-    if (!focusBack.current || view !== 'library') return
-    const row = Array.from(library.current?.querySelectorAll<HTMLButtonElement>('[data-tool-id]') ?? []).find(item => item.dataset.toolId === selectedId)
-    ;(row ?? searchInput.current)?.focus(); focusBack.current = false
-  }, [selectedId, view])
-  function open(id: string) { setSelectedId(id); setView('editor') }
+  function open(id: string, fromRow = false) { setSelectedId(id); openEditor(fromRow) }
   function add(startingPoint?: Partial<ToolkitToolFields>) {
     if (entries.length >= 128) return
     const id = mintObjectId()
@@ -104,39 +89,46 @@ export function ToolkitSettingsPane({ performance, mobileConnection = DEFAULT_MO
     resource.add(id, { kind: 'package', packagePath: '', enabled: true, statusBar: 'icon', workspacePath: DEFAULT_TOOLKIT_WORKSPACE_PATH, args: [] })
     focusNewName.current = true; setQuery(''); open(id)
   }
-  function back() { focusBack.current = true; setView('library') }
+  function showLibrary(id: string | null) {
+    returnToLibrary(() => Array.from(library.current?.querySelectorAll<HTMLButtonElement>('[data-tool-id]') ?? [])
+      .find(item => item.dataset.toolId === id) ?? searchInput.current)
+  }
+  function back() { showLibrary(selectedId) }
   async function remove() {
     if (!selected || selectedId === null || selected.saving) return false
     if (selected.expected) await onRemoveTool(selectedId, toolkitFields(selected.expected))
-    resource.forget(selectedId); palettes.forget(selectedId); setSelectedId(entries.find(([id]) => id !== selectedId)?.[0] ?? null); focusBack.current = true; setView('library'); return true
+    resource.forget(selectedId); palettes.forget(selectedId)
+    const nextId = entries.find(([id]) => id !== selectedId)?.[0] ?? null
+    setSelectedId(nextId); showLibrary(nextId)
+    return true
   }
   return <div ref={host} className="settings-pane-stack toolkit-workbench" data-view={view} data-creation-empty={!entries.length && selectedId === null}>
-    <header className="settings-pane-toolbar toolkit-workbench__toolbar">
+    <header className="settings-pane-toolbar toolkit-workbench__toolbar" onFocusCapture={() => rememberFocus('library')}>
       <p className="toolkit-workbench__intro">{entries.length} custom {entries.length === 1 ? 'tool' : 'tools'}</p>
       <Button type="button" disabled={entries.length >= 128} onClick={install}><ThemeActionInstallPackageIcon size={13} /> Install package</Button>
       <Button type="button" variant="primary" className="toolkit-workbench__create" disabled={entries.length >= 128} onClick={() => add()}><ThemeActionCreateToolIcon size={13} /> New custom tool</Button>
     </header>
     {metadata.error ? <p className="settings-inline-error" role="status">Package files could not be read: {metadata.error} Your configuration and drafts are kept. <Button type="button" onClick={() => void metadata.refresh()}>Refresh files</Button></p> : null}
     <div className="toolkit-workbench__body">
-      <section className="toolkit-library" aria-label="Toolkit Library">
+      <section ref={library} className="toolkit-library" aria-label="Toolkit Library" onFocusCapture={() => rememberFocus('library')}>
         <SearchInput className="toolkit-library__search" ref={searchInput} aria-label="Search tools" clearLabel="Clear tool search"
             placeholder="Find a tool…" value={query} onValueChange={setQuery} />
-        <div ref={library} className="toolkit-library__items">
+        <div className="toolkit-library__items">
           <LiquidSelectionSurface selected={selectedId} active={active && (!narrow || view === 'library')} targetAttribute="data-tool-id" />
           <p className="toolkit-library__group">Custom</p>
           {visible.map(([id,entry]) => {
             const identity = identityFor(id, entry), path = 'kind' in entry.value ? entry.value.packagePath : entry.value.workspacePath
             const directory = shortDirectory(path), fact = entry.expected ? packageFact(entry.expected, metadata.packages) : undefined
-            return <button type="button" className="toolkit-library__item" key={id} data-tool-id={id} aria-pressed={selectedId === id} onClick={() => open(id)}>
+            return <button type="button" className="toolkit-library__item" key={id} data-tool-id={id} aria-pressed={selectedId === id} onClick={() => open(id, true)}>
             <ToolkitIcon icon={identity.icon} size={17} /><span><strong>{identity.name}</strong><small>{'kind' in entry.value ? 'Custom · local package' : entry.value.mode === 'tui' ? 'Custom · TUI' : 'Custom · script'} · {entry.saving || palettes.forTool(id).state === 'saving' ? 'Saving…' : toolkitDraftDirty(entry) || palettes.dirty(id) ? 'Unsaved' : 'Saved'}{entry.value.enabled ? '' : ' · Hidden'}{fact?.availability === 'unavailable' ? ' · Source unavailable' : ''}</small><code title={path}>{path ? <><span className="toolkit-library__parent">{directory.parent}</span><span className="toolkit-library__directory">{directory.name}</span></> : 'Choose a local directory'}</code></span>{selectedId === id ? <ThemeStatusSelectedIcon className="toolkit-library__selected" size={12} aria-label="Selected tool" /> : null}
           </button>})}
           {!visible.length ? <p className="settings-resource-empty">{entries.length ? 'No matching custom tools. Your drafts are kept.' : 'No custom tools yet.'}</p> : null}
           {showPerformance || showMobileConnection ? <p className="toolkit-library__group">Built-in</p> : null}
-          {showPerformance ? <><button type="button" className="toolkit-library__item" data-tool-id="performance" aria-pressed={selectedId === 'performance'} onClick={() => open('performance')}><ThemeObjectPerformanceIcon size={17} /><span><strong>Performance</strong><small>Official · read-only script</small></span><ThemeStatusLockedIcon className="toolkit-library__official" size={12} aria-label="Official tool" /></button></> : null}
-          {showMobileConnection ? <button type="button" className="toolkit-library__item" data-tool-id={MOBILE_CONNECTION_TOOL_ID} aria-pressed={selectedId === MOBILE_CONNECTION_TOOL_ID} onClick={() => open(MOBILE_CONNECTION_TOOL_ID)}><ThemeObjectPhoneIcon size={17} /><span><strong>Mobile connection</strong><small>Official · Connections and devices</small></span><ThemeStatusLockedIcon className="toolkit-library__official" size={12} aria-label="Official tool" /></button> : null}
+          {showPerformance ? <><button type="button" className="toolkit-library__item" data-tool-id="performance" aria-pressed={selectedId === 'performance'} onClick={() => open('performance', true)}><ThemeObjectPerformanceIcon size={17} /><span><strong>Performance</strong><small>Official · read-only script</small></span><ThemeStatusLockedIcon className="toolkit-library__official" size={12} aria-label="Official tool" /></button></> : null}
+          {showMobileConnection ? <button type="button" className="toolkit-library__item" data-tool-id={MOBILE_CONNECTION_TOOL_ID} aria-pressed={selectedId === MOBILE_CONNECTION_TOOL_ID} onClick={() => open(MOBILE_CONNECTION_TOOL_ID, true)}><ThemeObjectPhoneIcon size={17} /><span><strong>Mobile connection</strong><small>Official · Connections and devices</small></span><ThemeStatusLockedIcon className="toolkit-library__official" size={12} aria-label="Official tool" /></button> : null}
         </div>
       </section>
-      <div className="toolkit-workbench__detail">
+      <section ref={editor} className="toolkit-workbench__detail" aria-label="Tool details" tabIndex={-1} onFocusCapture={() => rememberFocus('editor')}>
         <div hidden={selectedId !== 'performance'} inert={selectedId !== 'performance'}><Button type="button" className="toolkit-editor__back" onClick={back}><ThemeNavigationBackIcon size={13} /> Back to tools</Button><BuiltinPerformanceSettings performance={performance} active={active && selectedId === 'performance' && (!narrow || view === 'editor')} onSave={onSave} /></div>
         <div hidden={selectedId !== MOBILE_CONNECTION_TOOL_ID} inert={selectedId !== MOBILE_CONNECTION_TOOL_ID}><Button type="button" className="toolkit-editor__back" onClick={back}><ThemeNavigationBackIcon size={13} /> Back to tools</Button><BuiltinMobileConnectionSettings preferences={mobileConnection} active={active && selectedId === MOBILE_CONNECTION_TOOL_ID && (!narrow || view === 'editor')} onSave={async (value, expected) => { if (!onSaveMobileConnection) throw new Error('Mobile connection preferences have not loaded. Your draft is kept.'); await onSaveMobileConnection(value, expected) }} /></div>
         {selectedId === 'performance' || selectedId === MOBILE_CONNECTION_TOOL_ID ? null : selected && selectedId !== null ? isPackageDraft(selected) ? <ToolkitPackageEditor key={selectedId} id={selectedId} entry={selected} fact={selected.expected ? packageFact(selected.expected, metadata.packages) : undefined} active={active && (!narrow || view === 'editor')} pathInput={nameInput} save={resource.saveFor(selectedId)} onEdit={patch => resource.edit(selectedId, patch)} onSave={() => void resource.save(selectedId, writer)} onRemove={remove} onRun={() => onRunTool(selectedId)} onBack={back} onRefresh={metadata.refresh} /> : isInlineDraft(selected) ? <ToolkitToolEditor key={selectedId} id={selectedId} entry={selected} active={active && (!narrow || view === 'editor')} nameInput={nameInput} save={resource.saveFor(selectedId)} palette={palettes.forTool(selectedId)} onEdit={patch => resource.edit(selectedId, patch)} onSave={() => { const id = selectedId; void (async () => { if (toolkitDraftDirty(selected) && !await resource.save(id, writer)) return; await palettes.save(id) })() }} onRemove={remove} onRun={definition => onRunTool(definition.id)} onBack={back} /> : null : toolId && toolId === selectedId ? <section className="toolkit-workbench__empty"><ThemeObjectToolsIcon size={28} /><h3>This saved tool is unavailable.</h3><p>The requested tool is not in the current configuration. No other tool has been substituted.</p></section> : <section className="settings-starting-points" aria-label="Tool starting points">
@@ -154,7 +146,7 @@ export function ToolkitSettingsPane({ performance, mobileConnection = DEFAULT_MO
             <Button type="button" disabled={entries.length >= 128} onClick={install}><ThemeActionInstallPackageIcon size={13} /> Choose a local package</Button>
           </div>
         </section>}
-      </div>
+      </section>
     </div>
   </div>
 }
