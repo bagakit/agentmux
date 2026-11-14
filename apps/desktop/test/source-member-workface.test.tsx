@@ -44,7 +44,6 @@ vi.mock('@xterm/addon-fit', () => ({ FitAddon: class {
   fit() { this.terminal?.resize(paint.grid.cols, paint.grid.rows) }; proposeDimensions() { return paint.grid }
 } }))
 vi.mock('@xterm/addon-search', () => ({ SearchAddon: class { activate() {} dispose() {} onDidChangeResults() { return { dispose() {} } } } }))
-vi.mock('@xterm/addon-web-links', () => ({ WebLinksAddon: class { activate() {} dispose() {} } }))
 vi.mock('@xterm/addon-webgl', () => ({ WebglAddon: class { activate() {} dispose() {} onContextLoss() { return { dispose() {} } } } }))
 vi.mock('../src/renderer/src/components/TerminalContextMenu', () => ({ TerminalContextMenu: ({ children }: { children: ReactNode }) => children }))
 vi.mock('react-resizable-panels', async () => {

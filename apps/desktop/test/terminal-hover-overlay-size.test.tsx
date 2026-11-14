@@ -71,7 +71,6 @@ vi.mock('@xterm/addon-search', () => ({ SearchAddon: class {
   dispose() {}
   onDidChangeResults() { return { dispose() {} } }
 } }))
-vi.mock('@xterm/addon-web-links', () => ({ WebLinksAddon: class { activate() {} dispose() {} } }))
 vi.mock('@xterm/addon-webgl', () => ({ WebglAddon: class {
   constructor() { fixture.webglCreated += 1 }
   activate() {}

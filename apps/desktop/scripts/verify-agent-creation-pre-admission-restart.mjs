@@ -136,11 +136,11 @@ if (!process.argv.includes('--run')) {
           if (found) return { path: found }
           return null
         })
-        plugin.onResolve({ filter: /^(electron|@xterm\/xterm|@xterm\/addon-(fit|search|web-links|webgl))$/ }, args => ({ path: args.path, namespace: 'node-boundary' }))
+        plugin.onResolve({ filter: /^(electron|@xterm\/xterm|@xterm\/addon-(fit|search|webgl))$/ }, args => ({ path: args.path, namespace: 'node-boundary' }))
         plugin.onLoad({ filter: /.*/, namespace: 'node-boundary' }, args => ({ loader: 'js', contents: args.path === 'electron'
           ? 'export const app={getAppMetrics:()=>[]};export const nativeImage={createFromBuffer:()=>{throw new Error("No native image decoding in Node proof")}}'
           : args.path === '@xterm/xterm' ? `import actual from ${JSON.stringify(xterm)};export class Terminal extends actual.Terminal{constructor(options){super(options);globalThis.__preAdmissionRestartTerminals.push(this)}}`
-          : `export class ${({ fit: 'FitAddon', search: 'SearchAddon', 'web-links': 'WebLinksAddon', webgl: 'WebglAddon' })[args.path.split('addon-')[1]]}{activate(){}dispose(){}fit(){}proposeDimensions(){return {cols:80,rows:24}}onDidChangeResults(){return {dispose(){}}}onContextLoss(){return {dispose(){}}}}` }))
+          : `export class ${({ fit: 'FitAddon', search: 'SearchAddon', webgl: 'WebglAddon' })[args.path.split('addon-')[1]]}{activate(){}dispose(){}fit(){}proposeDimensions(){return {cols:80,rows:24}}onDidChangeResults(){return {dispose(){}}}onContextLoss(){return {dispose(){}}}}` }))
         plugin.onResolve({ filter: /^[^./]/ }, async args => {
           if (isBuiltin(args.path) || alias[args.path] || args.pluginData?.resolving) return null
           const found = await plugin.resolve(args.path, { kind: args.kind, resolveDir: args.resolveDir || join(base, 'apps/desktop'), importer: args.importer, pluginData: { resolving: true } })

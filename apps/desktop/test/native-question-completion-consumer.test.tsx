@@ -44,7 +44,6 @@ vi.mock('@xterm/addon-fit', () => ({ FitAddon: class {
 vi.mock('@xterm/addon-search', () => ({ SearchAddon: class {
   activate() {} dispose() {} onDidChangeResults() { return { dispose() {} } }
 } }))
-vi.mock('@xterm/addon-web-links', () => ({ WebLinksAddon: class { activate() {} dispose() {} } }))
 vi.mock('@xterm/addon-webgl', () => ({ WebglAddon: class {
   activate() {} dispose() {} onContextLoss() { return { dispose() {} } }
 } }))

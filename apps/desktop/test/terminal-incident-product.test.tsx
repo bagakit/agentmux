@@ -59,7 +59,6 @@ vi.mock('@xterm/xterm', async () => {
 })
 vi.mock('@xterm/addon-fit', () => ({ FitAddon: class { activate() {} dispose() {} fit() {} proposeDimensions() { return { cols: 80, rows: 24 } } } }))
 vi.mock('@xterm/addon-search', () => ({ SearchAddon: class { activate() {} dispose() {} onDidChangeResults() { return { dispose() {} } } } }))
-vi.mock('@xterm/addon-web-links', () => ({ WebLinksAddon: class { activate() {} dispose() {} } }))
 vi.mock('@xterm/addon-webgl', () => ({ WebglAddon: class { activate() {} dispose() {
   const fault = fixture.gpuReleaseFault
   if (fault?.addon) { fault.addon = false; throw fault.second }
