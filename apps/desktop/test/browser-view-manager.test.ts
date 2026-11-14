@@ -254,6 +254,112 @@ function browserManager(window: ReturnType<typeof fakeWindow>['window'], recover
   ), appLinkHost(), undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, recoveryPreviews, {}, agents)
 }
 
+describe('Browser public navigation observation', () => {
+  it('rejects a foreign committed epoch in actual targets wire and retains unknown adapter capability', async () => {
+    const f = fakeWindow(), manager = browserManager(f.window)
+    const directory = mkdtempSync(join(tmpdir(), 'amx-browser-navigation-wire-')); privateLedgerRoots.push(directory)
+    await manager.create('original', 'https://document.example.test/original', 'workspace-a')
+    const original = manager.target('original')!
+    let packet: unknown = original
+    const socketPath = join(directory, 'control.sock')
+    const server = new AgentMuxControlServer({ socketPath, coreClients: () => [], async execute(request) {
+      if (request.operation !== 'browser.targets') throw new Error('Unexpected isolated wire request')
+      return { operation: request.operation, targets: [packet], coverage: 'complete' } as never
+    } })
+    await server.start()
+    const rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: socketPath } })
+    try {
+      packet = { ...original, navigation: { ...original.navigation, committedNavigationId: 'another-navigation-epoch' } }
+      await expect(rpc.call('browser.targets', {})).rejects.toMatchObject({ code: 'CONTROL_PROTOCOL_ERROR' })
+      expect(manager.target('original')).toEqual(original)
+      packet = { ...original, navigation: { ...original.navigation, futureObservation: 'unrecognized read-only fact' } }
+      expect((await rpc.call('browser.targets', {})).targets[0]).toEqual(original)
+      const { navigation: _unknown, profile: _profile, ...withoutObservation } = original
+      packet = { ...withoutObservation, id: 'external-without-navigation-observer', source: 'external' }
+      const external = (await rpc.call('browser.targets', {})).targets[0]!
+      expect(external.navigation).toBeUndefined(); expect(external.status).toBe('ready')
+      expect(external.capabilities).toEqual(original.capabilities)
+      expect(manager.target('original')).toEqual(original)
+      expect(f.children[0]!.webContents.isDestroyed()).toBe(false)
+    } finally { await rpc.dispose(); await server.stop(); manager.dispose() }
+  })
+
+  it.each(['main-frame-event', 'provisional-rejection'] as const)('keeps original navigation facts through RPC CLI and pageInfo after %s', async trigger => {
+    const f = fakeWindow(), manager = browserManager(f.window)
+    const directory = mkdtempSync(join(tmpdir(), 'amx-browser-navigation-')); privateLedgerRoots.push(directory)
+    const id = 'original-browser', originalUrl = 'https://document.example.test/original', requestedUrl = 'https://request.example.test/failed'
+    await manager.create(id, originalUrl, 'workspace-a')
+    const before = manager.target(id)!, view = f.children[0]!, contents = view.webContents
+    contents.emit('dom-ready')
+    expect(before.navigation).toMatchObject({ documentUrl: originalUrl, navigationId: before.navigationId,
+      committedNavigationId: before.navigationId, loading: false })
+    const originalLoad = contents.loadURLImpl
+    const issue = trigger === 'main-frame-event' ? 'Opaque native reason (-105)' : 'Opaque provisional rejection'
+    contents.loadURLImpl = async url => {
+      if (trigger === 'provisional-rejection') throw new Error(issue)
+      contents.loading = true
+      contents.emitDetails('did-start-navigation', { url, isMainFrame: true, isSameDocument: false })
+      contents.emit('did-start-loading')
+      // Chromium may keep reporting the previous document while this exact
+      // main-frame request fails. No page text or URL regex supplies the fact.
+      contents.loading = false
+      contents.emit('did-fail-load', -105, 'Opaque native reason', url, true)
+      contents.emit('did-stop-loading')
+      throw new Error(issue)
+    }
+    await manager.navigate(id, requestedUrl)
+    await vi.waitFor(() => expect(f.sent.findLast(event => event.type === 'updated')?.browser.error).toBe(issue))
+    const failed = manager.target(id)!, expected = {
+      requestedUrl, documentUrl: originalUrl, navigationId: failed.navigationId,
+      committedNavigationId: trigger === 'main-frame-event' ? null : before.navigationId, loading: false, error: issue
+    }
+    expect(failed.status).toBe('ready'); expect(failed.capabilities).toEqual(before.capabilities)
+    expect(failed.navigation, 'Main must expose the original requested URL and issue independently of the old native document').toEqual(expected)
+    expect(contents.isDestroyed()).toBe(false); expect(manager.targets().map(target => target.id)).toEqual([id])
+    expect(f.sent.some(event => event.type === 'closed' || event.type === 'unavailable')).toBe(false)
+
+    const socketPath = join(directory, 'control.sock')
+    const server = new AgentMuxControlServer({ socketPath, coreClients: () => [], async execute(request) {
+      if (request.operation === 'browser.targets') return { operation: request.operation, targets: manager.targets(), coverage: 'complete' }
+      if (request.operation === 'browser.run') return { operation: request.operation,
+        ...await manager.runScript(request.browserId, request.code, { id: 'isolated-observer', name: 'Isolated observer' }, undefined, request.operationId) }
+      throw new Error('Unexpected isolated Browser request')
+    } })
+    await server.start()
+    const rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: socketPath } })
+    try {
+      const decoded = await rpc.call('browser.targets', {})
+      expect(decoded.targets[0]!.navigation, 'Core wire codec must preserve original navigation facts').toEqual(expected)
+      const cli = await runCompiledObjectCli(['--endpoint', `unix://${socketPath}`, 'browser', 'targets'], objectCliEnvironment(directory))
+      expect(cli.code, cli.stderr).toBe(0)
+      expect(JSON.parse(cli.stdout).result.targets[0].navigation, 'Actual public CLI must retain the original navigation observation').toEqual(expected)
+      let attached = false
+      Object.assign(contents, { debugger: {
+        attach() { attached = true }, detach() { attached = false }, isAttached: () => attached, on() {}, off() {},
+        sendCommand: async (method: string) => method === 'Runtime.evaluate'
+          ? { result: { value: { readyState: 'complete', origin: 'null' } } } : {}
+      } })
+      const report = await rpc.call('browser.run', { browserId: id,
+        code: 'return { page: await pageInfo(), native: await js("({readyState:document.readyState,origin:location.origin})") }',
+        operationId: 'navigation-observation-' + trigger })
+      expect(report.outcome.kind).toBe('completed')
+      expect(report.result).toEqual({ page: { url: originalUrl, title: contents.getTitle(), navigationId: failed.navigationId, navigation: expected },
+        native: { readyState: 'complete', origin: 'null' } })
+      expect(manager.target(id)!.navigation).toEqual(expected)
+      // A subsequent confirmed commit advances these exact facts, without
+      // fabricating a last-successful ledger or replacing the Browser identity.
+      contents.loadURLImpl = originalLoad
+      manager.takeControl(id)
+      await manager.navigate(id, 'https://document.example.test/next')
+      await vi.waitFor(() => expect(manager.target(id)!.navigation?.error).toBeNull())
+      const committed = manager.target(id)!
+      expect(committed.navigation).toEqual({ requestedUrl: 'https://document.example.test/next', documentUrl: 'https://document.example.test/next',
+        navigationId: committed.navigationId, committedNavigationId: committed.navigationId, loading: false, error: null })
+      expect(contents.isDestroyed()).toBe(false)
+    } finally { await rpc.dispose(); await server.stop(); manager.dispose() }
+  })
+})
+
 describe('Browser native page closure', () => {
   it('closes only the original ordinary page after accepted native close and destruction', async () => {
     const f = fakeWindow(), manager = browserManager(f.window)
