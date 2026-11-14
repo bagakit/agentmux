@@ -173,7 +173,7 @@
 .browser-profile-library ul { padding-left: var(--sp-4); margin: var(--sp-1) 0; }
 .browser-profile-library code { font-size: var(--fs-meta); color: var(--text-3); }
 .settings-resource-library[aria-multiselectable='true'] .settings-resource-row { cursor: pointer; }
-@container settings-resource (max-width: 720px) {
+@container settings-resource (width < 720px) {
   .settings-browser-profiles[data-resource-view='editor'] .browser-profile-library { display: none; }
   .settings-browser-profiles[data-resource-view='library'] .browser-profile-library { flex: 1; }
 }
@@ -195,3 +195,8 @@
 .browser-profile-trash__cleanup button, .browser-profile-trash .browser-profile-editor__confirm button { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
 .browser-profile-trash .browser-profile-editor__confirm { display: grid; gap: var(--sp-3); }
 .browser-profile-trash .browser-profile-editor__confirm > div { display: flex; flex-wrap: wrap; gap: var(--sp-3); }
+
+.browser-profile-editor__advanced { border-top: 1px solid var(--line-soft); padding-top: var(--sp-5); }
+.browser-profile-editor__advanced > summary { cursor: pointer; color: var(--text-2); font-size: var(--fs-body); font-weight: 600; }
+.browser-profile-editor__advanced > summary:focus-visible { outline: 2px solid var(--focus-line); outline-offset: 3px; border-radius: var(--radius-sm); }
+.browser-profile-editor__advanced[open] { display: grid; gap: var(--sp-4); }

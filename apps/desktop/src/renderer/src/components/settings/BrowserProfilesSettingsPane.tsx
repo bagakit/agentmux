@@ -332,11 +332,13 @@ function ProfileEditor({ active, assignment, profile, revision, uses, busy, run,
         </div>
       </RovingFocus.Root> : null}
 
+      <p className="browser-profile-editor__quiet">Keep website sign-ins and site data together. Open this Profile to continue in the same environment.</p>
+
       {noting ? <textarea className="browser-profile-editor__notes" aria-label="Notes" autoFocus rows={2} maxLength={2000} value={notes}
           onChange={event => setNotes(event.target.value)} onBlur={event => { if (!(event.relatedTarget instanceof Element && event.relatedTarget.closest('.browser-profile-editor__error'))) void finishNotes() }}
           onKeyDown={event => { if (event.key === 'Escape') { event.stopPropagation(); setNotes(profile.notes ?? ''); setNoting(false) } }} />
         : <button type="button" className="browser-profile-editor__note" data-empty={profile.notes ? undefined : ''} onClick={() => { notesRevision.current = profile.revision; setNoting(true) }}>
-          {profile.notes || 'Add a note'}
+          {profile.notes || 'What is this environment for?'}
         </button>}
 
       {error ? <p className="browser-profile-editor__error" role="alert">{error}{errorCode === 'BROWSER_PROFILE_REVISION_CONFLICT' ? <> <button type="button" onMouseDown={event => event.preventDefault()} onClick={() => void (async () => {
@@ -344,16 +346,6 @@ function ProfileEditor({ active, assignment, profile, revision, uses, busy, run,
         const current = browserProfiles.get().profiles?.find(value => value.id === profile.id)
         if (current) { nameRevision.current = current.revision; notesRevision.current = current.revision; setBaselineRefresh(value => value + 1) }
       })()}>Reload</button></> : null}</p> : null}
-
-      <section className="browser-profile-editor__section" aria-label="Observed activity">
-        <h4>Observed activity</h4>
-        <p className="browser-profile-editor__quiet">Last observed use: {profile.activity
-          ? <time dateTime={Number.isFinite(new Date(profile.activity.lastUsedAt).getTime()) ? new Date(profile.activity.lastUsedAt).toISOString() : undefined}>{new Date(profile.activity.lastUsedAt).toLocaleString()}</time> : 'Unknown'}</p>
-        <p className="browser-profile-editor__quiet">Observed Browser time: {profile.activity
-          ? profile.activity.observedRunMs < 1000 ? 'Less than a second confirmed' : `${Math.floor(profile.activity.observedRunMs / 1000)} s confirmed` : 'Unknown'}</p>
-        <p className="browser-profile-editor__quiet">Overlapping pages count once. Earlier or interrupted use is unknown.
-          {profile.activity?.state === 'unknown' ? ' The last native observation was interrupted; its confirmed time is kept.' : ''}</p>
-      </section>
 
       <BrowserProfileOrganization profile={profile} folders={folders} revision={revision} busy={busy !== null} run={run} onEdit={commit} />
 
@@ -371,19 +363,6 @@ function ProfileEditor({ active, assignment, profile, revision, uses, busy, run,
         </label>
       </section>
 
-      <ProfileEnvironmentEditor profile={profile} />
-      <BrowserProfileExtensions profile={profile} />
-      <BrowserProfileBookmarks profile={profile} active={active} />
-      <BrowserProfileCookieFiles profile={profile} active={active} />
-
-      {/* The editor is already keyed by Profile, so each section starts fresh per Profile without a key of its own. */}
-      <ProfileNetworkRoute profile={profile} proxy={proxies.find(proxy => proxy.id === profile.proxyBinding?.proxyId)} baselineRefresh={baselineRefresh} openBrowsers={open.length} run={run} />
-      {profile.network?.mode === 'proxy' ? <ProfileProxySignIn profile={profile} /> : null}
-
-      {/* A reading belongs to the route and check address that produced it, including late results. */}
-      <ProfileExitCheck key={JSON.stringify([profile.network ?? null, exitCheckUrl])} profile={profile} address={exitCheckUrl} />
-      <ProfileNetworkDiagnostics profile={profile} />
-
       <section className="browser-profile-editor__section" aria-label="In use">
         <h4>In use</h4>
         {uses.length ? <ul className="browser-profile-editor__uses">
@@ -396,6 +375,34 @@ function ProfileEditor({ active, assignment, profile, revision, uses, busy, run,
       </section>
 
       <ProfileSites profile={profile} />
+      <BrowserProfileBookmarks profile={profile} active={active} />
+      <BrowserProfileExtensions profile={profile} />
+      <BrowserProfileCookieFiles profile={profile} active={active} />
+
+      <details className="browser-profile-editor__advanced">
+        <summary>Network and device settings</summary>
+        <p className="browser-profile-editor__quiet">Optional settings for this environment. Existing settings stay in effect when this section is closed.</p>
+        <ProfileEnvironmentEditor profile={profile} />
+
+        {/* The editor is already keyed by Profile, so each section starts fresh per Profile without a key of its own. */}
+        <ProfileNetworkRoute profile={profile} proxy={proxies.find(proxy => proxy.id === profile.proxyBinding?.proxyId)} baselineRefresh={baselineRefresh} openBrowsers={open.length} run={run} />
+        {profile.network?.mode === 'proxy' ? <ProfileProxySignIn profile={profile} /> : null}
+
+        {/* A reading belongs to the route and check address that produced it, including late results. */}
+        <ProfileExitCheck key={JSON.stringify([profile.network ?? null, exitCheckUrl])} profile={profile} address={exitCheckUrl} />
+        <ProfileNetworkDiagnostics profile={profile} />
+
+      </details>
+
+      <section className="browser-profile-editor__section" aria-label="Observed activity">
+        <h4>Observed activity</h4>
+        <p className="browser-profile-editor__quiet">Last observed use: {profile.activity
+          ? <time dateTime={Number.isFinite(new Date(profile.activity.lastUsedAt).getTime()) ? new Date(profile.activity.lastUsedAt).toISOString() : undefined}>{new Date(profile.activity.lastUsedAt).toLocaleString()}</time> : 'Unknown'}</p>
+        <p className="browser-profile-editor__quiet">Observed Browser time: {profile.activity
+          ? profile.activity.observedRunMs < 1000 ? 'Less than a second confirmed' : `${Math.floor(profile.activity.observedRunMs / 1000)} s confirmed` : 'Unknown'}</p>
+        <p className="browser-profile-editor__quiet">Overlapping pages count once. Earlier or interrupted use is unknown.
+          {profile.activity?.state === 'unknown' ? ' The last native observation was interrupted; its confirmed time is kept.' : ''}</p>
+      </section>
 
       {profile.source ? <section className="browser-profile-editor__section" aria-label="Imported">
         <h4>Imported</h4>
