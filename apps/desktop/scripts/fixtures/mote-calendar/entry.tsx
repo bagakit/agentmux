@@ -127,7 +127,8 @@ api.schedule.history = async params => {
   const previous = densityProof && record.loopId === 'group-watch'
   const at = previous ? nine(now - day) + 40 * 60_000 : record.lastOccurrenceAt
   const entries = at === undefined || at < params.from || at >= params.to ? [] : [{
-    operationId: 'original-fixture-receipt-' + record.loopId, occurrenceAt: at,
+    operationId: 'original-fixture-receipt-' + record.loopId, occurrenceAt: at, runId: 'original-calendar-run',
+    recap: { text: previous ? 'Group watch\nReview the open commitments and record what changed.' : record.prompt, truncated: false },
     delivery: previous ? 'native-admitted' : 'terminal-confirmed',
     nativeResult: previous ? { state: 'completed', observedAt: at + 1_000 } : { state: 'unsupported' }
   }]

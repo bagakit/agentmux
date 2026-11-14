@@ -15,7 +15,7 @@ export async function verifyMoteCalendar() {
   const directory = await mkdtemp(join(parent, 'renderer-proof-'))
   const config = join(root, 'apps/desktop/scripts/fixtures/mote-calendar/vitest.config.mts')
   const component = name => 'apps/desktop/src/renderer/src/components/' + name + '.tsx'
-  const paths = [...['MoteCalendar', 'MoteCalendarTimes', 'MoteScheduleHistory', 'MoteDetailsPanel', 'MoteIdeaControls', 'CalendarScheduleControl', 'ScheduleArrangementRow', 'ScheduleCreateForm', 'ScheduleOperationNotice', 'ContinuousProgressControl', 'SessionMailbox'].map(component),
+  const paths = [...['MoteCalendar', 'MoteCalendarTimes', 'MoteCalendarEvents', 'MoteDetailsPanel', 'MoteIdeaControls', 'CalendarScheduleControl', 'ScheduleArrangementRow', 'ScheduleCreateForm', 'ScheduleOperationNotice', 'ContinuousProgressControl', 'SessionMailbox'].map(component),
     ...['schedule-controller', 'schedule-clock', 'schedule-draft', 'launcher-state', 'api'].map(name => 'apps/desktop/src/renderer/src/lib/' + name + '.ts'),
     ...['mote-calendar', 'agent'].map(name => 'apps/desktop/src/renderer/src/styles/' + name + '.css'), 'apps/desktop/src/preload/index.ts', 'apps/desktop/src/shared/contracts.ts',
     ...['mote-calendar', 'calendar-schedule-control', 'continuous-progress-panel', 'mote-ideas'].map(name => 'apps/desktop/test/' + name + '.test.tsx'),
@@ -53,7 +53,7 @@ export async function verifyMoteCalendar() {
   }
   const runs = [await test('baseline')], mutations = []
   const changes = [
-    { file: component('MoteScheduleHistory'), name: 'hidden-recorded-history', from: 'if (active && !hasPage) void Promise.resolve().then(() => { if (current) void read(firstPage) })', to: '', filter: 'keeps an earlier completed receipt visible' },
+    { file: component('MoteCalendarEvents'), name: 'omit-original-events', from: 'timeline.push({ at: receipt.occurrenceAt, saved, receipt })', to: '', filter: 'keeps an earlier completed event with its frozen recap' },
     { file: component('MoteCalendar'), name: 'countdown-visibility', from: "source.records.filter(record => record.status !== 'stopped')", to: "source.records.filter(record => !!record.calendar && record.status !== 'stopped')", filter: 'actual Mote Renderer list and original control' },
     { file: component('MoteCalendar'), name: 'ended-input-hidden', from: 'projectScheduleOccurrences(source.records,', to: 'projectScheduleOccurrences(records,', filter: 'date and hour keep confirmed ended input' },
     { file: component('MoteCalendar'), name: 'cancelled-input-presented', from: ".filter(item => item.kind === 'last-accepted' || byId.get(item.scheduleId)?.record.status !== 'stopped')", to: '', filter: 'date and hour keep confirmed ended input' },

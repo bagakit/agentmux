@@ -26,8 +26,9 @@ const updated = { intentId: 'published-guidance', operationId: 'schedule-adopt',
 const unpublished = { ...updated, intentId: 'unpublished-guidance', operationId: 'prepared-adoption' }
 
 function frozen(definition: typeof base): AgentFuturePromptIntent {
-  return { operationId: definition.operationId, active: false, continuitySource: source, prompt: 'private schedule prompt',
-    message: { userContent: 'private schedule prompt', systemContext: 'private definition ' + definition.operationId } }
+  const prompt = definition.intentId === base.intentId ? 'Original daily review' : 'Updated daily review'
+  return { operationId: definition.operationId, active: false, continuitySource: source, prompt,
+    message: { userContent: prompt, systemContext: 'private definition ' + definition.operationId } }
 }
 
 async function fixture(kind: 'memory' | 'file') {
@@ -104,10 +105,10 @@ it.each(['memory', 'file'] as const)('%s Host schedule history reads earlier inp
   releases.push(() => rpc.dispose())
   const first = await rpc.call('schedule.history', scope)
   expect(first).toEqual({ scheduleId: scope.scheduleId, from: scope.from, to: scope.to, executionScope: 'connected-host',
-    coverage: 'recorded-inputs', entries: [{ operationId: 'current-run-input', occurrenceAt: 120_000, delivery: 'terminal-confirmed', nativeResult: { state: 'unsupported' } }],
+    coverage: 'recorded-inputs', entries: [{ operationId: 'current-run-input', occurrenceAt: 120_000, runId: 'continuation-run', recap: { text: 'Updated daily review', truncated: false }, delivery: 'terminal-confirmed', nativeResult: { state: 'unsupported' } }],
     nextCursor: expect.any(String) })
   const previous = await rpc.call('schedule.history', { ...scope, cursor: first.nextCursor! })
-  expect(previous).toMatchObject({ entries: [{ operationId: 'previous-run-input', occurrenceAt: scope.from, delivery: 'terminal-confirmed' }], nextCursor: null })
+  expect(previous).toMatchObject({ entries: [{ operationId: 'previous-run-input', occurrenceAt: scope.from, runId: 'selected-session-run', recap: { text: 'Original daily review', truncated: false }, delivery: 'terminal-confirmed' }], nextCursor: null })
   for (const invalidScope of [{ ...scope, from: scope.from + 1 }, { ...scope, to: scope.to + 1 }])
     await expect(rpc.call('schedule.history', { ...invalidScope, cursor: first.nextCursor! })).rejects.toMatchObject({ code: 'INVALID_CONTROL_REQUEST' })
   await expect(rpc.call('schedule.history', { ...scope, scheduleId: 'another-schedule' })).rejects.toMatchObject({ code: 'UNKNOWN_SCHEDULE' })
