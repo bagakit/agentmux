@@ -1,5 +1,6 @@
 import { fixtureClock as _hygiene_fixtureClock, fixtureIso as _hygiene_fixtureIso, fixtureTime as _hygiene_fixtureTime } from "../scripts/lib/fixture-values.mjs"
 // @vitest-environment happy-dom
+import { chooseField } from './helpers/selection-field'
 import { act, createElement } from 'react'
 import { type Root } from 'react-dom/client'
 import { createClientUiRoot as createRoot } from './helpers/client-ui-render'
@@ -110,7 +111,7 @@ it('lets the actual shared dialog choose all three modes, minute limits, offset 
   const input = document.querySelector<HTMLInputElement>('[aria-label="Time ruler interval in minutes"]')!
   expect(input.value).toBe('120')
   const phase = document.querySelector<HTMLInputElement>('[aria-label="Time ruler clock offset"]')!; expect(phase.value).toBe(_hygiene_fixtureClock(23, 0))
-  await act(async () => { const zone = document.querySelector<HTMLSelectElement>('[aria-label="Focus timeline time zone"]')!; zone.value = 'America/New_York'; zone.dispatchEvent(new Event('change', { bubbles: true })) })
+  await act(async () => { const zone = document.querySelector<HTMLButtonElement>('[aria-label="Focus timeline time zone"]')!; await chooseField(zone, 'America/New_York') })
   const apply = [...document.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Apply')!; expect(apply).toBeDefined()
   await act(async () => apply.click())
   expect(change.mock.calls).toEqual([[prefs('America/New_York', { mode: 'uniform' })]])
@@ -290,8 +291,8 @@ it('joins real name-width gestures, eleven window presets and three settings mod
     await h.click('Focus timeline settings')
     await act(async () => document.querySelector<HTMLInputElement>(`[name="focus-ruler-mode"][value="${mode}"]`)!.click())
     await act(async () => {
-      const input = document.querySelector<HTMLSelectElement>('[aria-label="Focus timeline time zone"]')!
-      input.value = zone; input.dispatchEvent(new Event('change', { bubbles: true }))
+      const input = document.querySelector<HTMLButtonElement>('[aria-label="Focus timeline time zone"]')!
+      await chooseField(input, zone)
     })
     await act(async () => [...document.querySelectorAll<HTMLButtonElement>('button')].find(node => node.textContent === 'Apply')!.click())
     expect(useAppStore.getState().focusTimelineRuler).toEqual(prefs(zone, { mode }))
