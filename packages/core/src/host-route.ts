@@ -1,6 +1,6 @@
 import { AgentMuxError } from './errors.js'
 import { rpcRecord, rpcString } from './rpc-data.js'
-import { SPACE_MEMBER_INVOCATIONS } from './space-member.js'
+import { SPACE_MEMBER_INVOCATIONS, parseSpaceMemberAdmission, type SpaceMemberAdmission } from './space-member.js'
 import { parseHostExecutorInventory, type AgentMuxHostExecutorInventory } from './executor-contract.js'
 import type { AgentMuxSpaceAgentTarget } from './space-control.js'
 
@@ -89,7 +89,7 @@ export type HostRouteSpatialOperation = {
 export type HostRouteReadOperation = { kind: 'space-reader'; runtimeId: string; spaceId: string } | { kind: 'creation-reader'; createOperationId: string }
 export type HostRouteObservationScope = { kind: 'observation'; targetRuntimeId: string; agentSessionIds: string[]; source: HostRouteReadOperation }
 /** A safe projection of one exact current-viewer call, not a creator's input grant. */
-export type HostRouteMemberOperation = { kind: 'space-member'; runtimeId: string; spaceId: string; regionId: string; targetRuntimeId: string; agentSessionId: string; runId: string; method: string; paramsDigest: string }
+export type HostRouteMemberOperation = { kind: 'space-member'; runtimeId: string; spaceId: string; regionId: string; targetRuntimeId: string; agentSessionId: string; runId: string; method: string; paramsDigest: string; expectedAdmission?: SpaceMemberAdmission }
 export type HostRouteMemberScope = { kind: 'member-control'; operation: HostRouteMemberOperation; createOperationId: string }
 export type HostRouteExecutorOperation = { kind: 'executor-reader'; routeId: string; adoptedRoute: AdoptedHostRoute; targetRuntimeId: string; executorId?: string; refresh: boolean }
 export type HostRouteInventoryScope = { kind: 'executor-inventory'; operation: HostRouteExecutorOperation }
@@ -215,8 +215,9 @@ export function parseHostRouteOperation(value: unknown): HostRouteOperation {
   }
   if (kind === 'space-member') {
     const fields = ['runtimeId','spaceId','regionId','targetRuntimeId','agentSessionId','runId','method','paramsDigest'] as const
-    const p = rpcRecord(value, ['kind',...fields])
-    return { kind, ...Object.fromEntries(fields.map(key => [key, originalString(p[key], `Original member ${key}`)])) } as HostRouteMemberOperation
+    const p = rpcRecord(value, ['kind',...fields,'expectedAdmission'])
+    return { kind, ...Object.fromEntries(fields.map(key => [key, originalString(p[key], `Original member ${key}`)])),
+      ...(p.expectedAdmission === undefined ? {} : { expectedAdmission: parseSpaceMemberAdmission(p.expectedAdmission) }) } as HostRouteMemberOperation
   }
   if (kind === 'space-reader') {
     const p = rpcRecord(value, ['kind','runtimeId','spaceId'])

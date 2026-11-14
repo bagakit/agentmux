@@ -17,7 +17,7 @@ import { decodeHostedValue, parseHostedRuntimeOwnerIdentity } from './hosted-val
 import { parseHostExecutorInventory } from './executor-contract.js'
 import { mintObjectId } from './object-id.js'
 import { validateAgentPromptInputKey } from './agent-prompt-condition.js'
-import type { AgentInputCallContext } from './agent-input-wait.js'
+import { validateAgentInputWaitRef, type AgentInputCallContext } from './agent-input-wait.js'
 import type { AgentMuxRpcCallContext, AgentMuxRpcServiceSubscription } from './public-rpc-service.js'
 import type { AgentMuxRpcMethod, AgentMuxRpcParams, AgentMuxRpcResult, AgentMuxRpcStreamMethod, AgentMuxRpcStreamEvent } from './public-rpc.js'
 
@@ -378,7 +378,9 @@ export class HostRouteGateway {
       verified.set(token, { envelope: value.envelope, actor: value.envelope.statement.actor, call: value.call, stream: false, assertCurrent: value.authority.current })
       const invocation = value.call.method === 'runtime.invoke' ? rpcRecord(decodeHostedValue(rpcRecord(value.call.params).invocation)) : undefined
       const prompt = invocation?.method === 'submitAgentPrompt' && Array.isArray(invocation.args) ? rpcRecord(invocation.args[0]) : undefined
-      const inputKey = prompt ? validateAgentPromptInputKey({ kind: 'prompt', agentSessionId: prompt.agentSessionId, expectedRun: prompt.expectedRun, submissionId: prompt.operationId }) : undefined
+      const rejoin = invocation?.method === 'rejoinAgentInputWaiting' && Array.isArray(invocation.args) ? rpcRecord(invocation.args[0]) : undefined
+      const inputKey = prompt ? validateAgentPromptInputKey({ kind: 'prompt', agentSessionId: prompt.agentSessionId, expectedRun: prompt.expectedRun, submissionId: prompt.operationId })
+        : rejoin ? validateAgentInputWaitRef(rejoin.ref).key : undefined
       const retain: AgentInputCallContext['retainAcceptedInputAuthority'] = inputKey ? async key => {
         if (!isDeepStrictEqual(key, inputKey)) denied('This accepted input differs from the original routed Session, Run or operation.', 'HOST_ROUTE_TARGET_MISMATCH')
         return await value.authority.retainForInput()

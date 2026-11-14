@@ -3,13 +3,15 @@ import { rpcRecord, rpcString } from './rpc-data.js'
 import { parseSpaceAuthorityRef } from './space-authority.js'
 import { decodeHostedValue } from './hosted-value.js'
 import { AGENTMUX_HOSTED_RPC_FIELDS } from './hosted-client-contract.js'
-import { SPACE_MEMBER_CALLS, SPACE_MEMBER_STREAMS, SPACE_MEMBER_INVOCATIONS, type SpaceMemberTarget, type SpaceMemberParams } from './space-member.js'
+import { SPACE_MEMBER_CALLS, SPACE_MEMBER_STREAMS, SPACE_MEMBER_INVOCATIONS, parseSpaceMemberAdmission, type SpaceMemberTarget, type SpaceMemberParams } from './space-member.js'
+import { validateAgentInputWaitRef } from './agent-input-wait.js'
 
 function mismatch(): never { throw new AgentMuxError('This operation does not identify the original Space member and Run. Its Session and other controls are retained.', 'SPACE_MEMBER_TARGET_MISMATCH') }
 export function parseSpaceMemberTarget(value: unknown): SpaceMemberTarget {
-  const p = rpcRecord(value, ['reference', 'regionId', 'runtimeId', 'agentSessionId', 'expectedRun']), run = rpcRecord(p.expectedRun, ['runId'])
+  const p = rpcRecord(value, ['reference', 'regionId', 'runtimeId', 'agentSessionId', 'expectedRun', 'expectedAdmission']), run = rpcRecord(p.expectedRun, ['runId'])
   return { reference: parseSpaceAuthorityRef(p.reference), regionId: rpcString(p.regionId, 'Original Region'), runtimeId: rpcString(p.runtimeId, 'Original execution Runtime'),
-    agentSessionId: rpcString(p.agentSessionId, 'Original Agent Session'), expectedRun: { runId: rpcString(run.runId, 'Original Run') } }
+    agentSessionId: rpcString(p.agentSessionId, 'Original Agent Session'), expectedRun: { runId: rpcString(run.runId, 'Original Run') },
+    ...(p.expectedAdmission === undefined ? {} : { expectedAdmission: parseSpaceMemberAdmission(p.expectedAdmission) }) }
 }
 /** A finite target check shared with the routed receiver; full argument semantics
  * and effects still belong to the original Hosted/Provider/Native methods. */
@@ -35,6 +37,12 @@ export function assertSpaceMemberCall(target: SpaceMemberTarget, call: { method:
   const invocation = rpcRecord(decodeHostedValue(p.invocation), ['method', 'args'])
   if (!(SPACE_MEMBER_INVOCATIONS as readonly unknown[]).includes(invocation.method) || !Array.isArray(invocation.args)) throw new AgentMuxError('This invocation is outside the original Space member controls.', 'CONTROL_PERMISSION_DENIED')
   const [first] = invocation.args
+  if (invocation.method === 'rejoinAgentInputWaiting') {
+    if (invocation.args.length !== 1) throw new AgentMuxError('Member rejoin accepts only its original waiting reference.', 'INVALID_CONTROL_REQUEST')
+    const input = rpcRecord(first, ['ref']), ref = validateAgentInputWaitRef(input.ref)
+    if (ref.key.kind !== 'prompt' || ref.key.agentSessionId !== target.agentSessionId) mismatch()
+    run(ref.key.expectedRun); return
+  }
   if (['readAgentSession', 'runtimeSubject', 'inspectAgentInput', 'inspectAgentPromptSubmission', 'inspectAgentInteractionOperation'].includes(String(invocation.method)) && invocation.args.length !== 1) throw new AgentMuxError(
     'This member read accepts one original selector. A caller cannot supply a known Runtime fact or another caller identity.', 'INVALID_CONTROL_REQUEST')
   if (invocation.method === 'readAgentSession') { if (first !== target.agentSessionId) mismatch(); return }

@@ -30,7 +30,8 @@ export function executionRouteScope(input: AgentExecutionOpenInput, includeLaunc
 export function memberRouteOperation(input: SpaceMemberParams[keyof SpaceMemberParams]): HostRouteMemberOperation {
   const { target, call } = input
   return { kind: 'space-member', runtimeId: target.reference.runtimeId, spaceId: target.reference.spaceId, regionId: target.regionId,
-    targetRuntimeId: target.runtimeId, agentSessionId: target.agentSessionId, runId: target.expectedRun.runId, method: call.method, paramsDigest: digest(call.params) }
+    targetRuntimeId: target.runtimeId, agentSessionId: target.agentSessionId, runId: target.expectedRun.runId, method: call.method, paramsDigest: digest(call.params),
+    ...(target.expectedAdmission ? { expectedAdmission: target.expectedAdmission } : {}) }
 }
 /** Project only the original schema owner's parsed selectors, never the input text. */
 export function hostRouteOperation(call: HostRouteCall): HostRouteOperation | undefined {
@@ -111,7 +112,8 @@ export function assertExecutionChild(statement: HostRouteStatement, call: HostRo
     const operation = scope.operation
     if (destination !== operation.targetRuntimeId) deny()
     const target = { reference: { runtimeId: operation.runtimeId, spaceId: operation.spaceId }, regionId: operation.regionId,
-      runtimeId: operation.targetRuntimeId, agentSessionId: operation.agentSessionId, expectedRun: { runId: operation.runId } }
+      runtimeId: operation.targetRuntimeId, agentSessionId: operation.agentSessionId, expectedRun: { runId: operation.runId },
+      ...(operation.expectedAdmission ? { expectedAdmission: operation.expectedAdmission } : {}) }
     assertSpaceMemberCall(target, call, stream)
     // Exact metadata is the original action's target check. It cannot submit
     // input, read another SID or turn a snapshot parent into an input grant.

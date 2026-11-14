@@ -13,6 +13,7 @@ export type SpaceMemberClient = Pick<AgentMuxHostedClient, 'connect' | 'dispose'
   'submitAgentPrompt' | 'inspectAgentInteractionOperation' | 'inspectAgentInput' | 'inspectAgentPromptSubmission'> & {
     /** Original exact-SID full metadata and Provider declarations, without an event lease prerequisite. */
     metadata(): Promise<import('./hosted-client-contract.js').AgentMuxHostedBootstrap>
+    rejoinAgentInputWaiting(input: { ref: import('./agent-input-wait.js').AgentInputWaitRef }): ReturnType<AgentMuxHostedClient['rejoinAgentInputWaiting']>
     runtimeSubject(target: Extract<import('./runtime.js').AgentMuxRuntimeSubjectTarget, { kind: 'agent-session' }>): ReturnType<AgentMuxHostedClient['runtimeSubject']>
   }
 

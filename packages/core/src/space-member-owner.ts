@@ -10,6 +10,14 @@ export async function resolveSpaceMember(store: AgentMuxSpatialStateStore, targe
   const source = await store.readSpaceAgentRegion({ spaceId: target.reference.spaceId, regionId: target.regionId })
   if (!source) throw new AgentMuxError('The original Space document is unavailable. Its member and input are retained.', 'SPACE_MEMBER_UNAVAILABLE')
   const member = source.member
+  const pin = target.expectedAdmission
+  if (pin && (pin.kind === 'association'
+    ? member?.region.association?.operationId !== pin.operationId
+    : member?.region.creationOperationId !== pin.operationId || member.admission?.requestId !== pin.operationId ||
+      member.admission.agentSessionId !== target.agentSessionId || member.admission.address.spaceId !== target.reference.spaceId ||
+      member.admission.address.regionId !== target.regionId || member.admission.address.tabId !== member.region.tabId ||
+      member.admission.address.zoneId !== member.zone.zoneId)) throw new AgentMuxError(
+    'The original member creation or association changed. Keep its original operation and controls; no same-SID target was substituted.', 'SPACE_MEMBER_ADMISSION_UNCONFIRMED')
   if (member?.region.association) {
     const original = member.association
     if (!original || original.requestId !== member.region.association.operationId || original.reference.runtimeId !== target.runtimeId ||
