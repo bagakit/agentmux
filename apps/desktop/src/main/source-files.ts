@@ -34,8 +34,12 @@ export async function resolveSourceFiles(rpc: Pick<AgentMuxRpcClient, 'call' | '
   const snapshot = await readSpaceSnapshot(rpc, mount.reference, context)
   const zone = snapshot.scope.zones.find(value => value.zoneId === mount.zoneId && value.workspaceId === mount.workspaceId)
   if (!zone || !zone.hostId || !zone.directoryPath) return unconfirmed('SPACE_RESOURCE_CHANGED', 'The original Source Zone resource is unconfirmed. Existing work is retained.')
+  const resources = await rpc.call('app.snapshot', { include: ['workspaces'] }, context)
+  const workspaces = resources.workspaces.filter(value => value.workspaceId === mount.workspaceId && value.hostId === zone.hostId)
+  if (workspaces.length !== 1) return unconfirmed('SPACE_RESOURCE_CHANGED', 'Choose the exact original Source Workspace. Existing work is retained.')
+  const workspace = workspaces[0]!
   const observed = await rpc.call('file.stat', { zoneId: zone.zoneId, spaceId: mount.reference.spaceId, path: '.',
-    expectedResource: { hostId: zone.hostId, workspaceId: mount.workspaceId, workspacePath: zone.directoryPath } }, context)
+    expectedResource: { hostId: workspace.hostId, workspaceId: mount.workspaceId, workspacePath: workspace.path } }, context)
   if (!observed.resource || observed.result.status !== 'observed') return unconfirmed(
     observed.result.status === 'observed' ? 'CONTROL_UNAVAILABLE' : observed.result.code,
     observed.result.status === 'observed' ? 'The original Source Files resource is unconfirmed.' : observed.result.message)

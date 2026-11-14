@@ -2761,11 +2761,12 @@ export class RuntimeController {
   async watchSourceFiles(target: SpaceMountSourceTarget, params: import('@agentmux/core').AgentMuxRpcStreamParams<'file.mutation.watch'>,
     handlers: AgentMuxRpcSubscriptionOptions<'file.mutation.watch'>): Promise<AgentMuxRpcSubscription> {
     const original = structuredClone(params), source = await this.sourceFilesControl(target, handlers.signal)
-    let reader: AgentMuxRpcSubscription | undefined, ended = false
+    let reader: AgentMuxRpcSubscription | undefined, ended = false, endError: Error | undefined, disposing: Promise<void> | undefined
+    const dispose = () => reader ? disposing ??= reader.dispose() : Promise.resolve()
     const end = (error?: Error) => {
       if (ended) return
-      ended = true
-      void reader?.dispose().catch(() => {})
+      ended = true; endError = error
+      void dispose().catch(() => {})
       handlers.onEnd?.(error)
     }
     const current = () => {
@@ -2778,8 +2779,11 @@ export class RuntimeController {
         onInitial: value => { if (current()) handlers.onInitial(value) },
         onEvent: value => { if (current()) handlers.onEvent(value) },
         ...(handlers.onFrame ? { onFrame: frame => { if (current()) handlers.onFrame!(frame) } } : {}), onEnd: end })
-      if (!current()) { await reader.dispose(); throw new AgentMuxError('The original Source reader ended before opening completed.', 'RUNTIME_OWNER_MISMATCH') }
-      return { subscriptionId: reader.subscriptionId, dispose: async () => { ended = true; await reader!.dispose() } }
+      if (!current()) {
+        await dispose(); handlers.signal?.throwIfAborted()
+        throw endError ?? new AgentMuxError('The original Source reader ended before opening completed.', 'CONTROL_UNAVAILABLE')
+      }
+      return { subscriptionId: reader.subscriptionId, dispose: async () => { ended = true; await dispose() } }
     } catch (error) { end(error as Error); throw error }
   }
   async inspectFolderSpace(hostId: string, registration: import('@agentmux/core/space-folder').FolderSpaceRegistration, signal?: AbortSignal) {
