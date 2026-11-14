@@ -285,6 +285,8 @@ Desktop 与 Mobile 共用 [`CapturedProcessRecord`](../../packages/client-ui/src
 
 [`useHostedConversation`](../../apps/mobile/src/conversation/use-hosted-conversation.ts) 把 Hosted Session 交给同一个 `useConversationView`；[`MobileConversationSurface`](../../apps/mobile/src/conversation/MobileConversationSurface.tsx) 以完整窗口驱动 `ConversationView`。Mobile 的连接、草稿、未确认操作与活动状态保留在各自 owner；历史窗口中存在 Question 时，才挂载同来源的当前答案读取需求。保留页的资源继续使用其 client、Session 与 Host，连接或 Session 改变后不接受旧结果。
 
+手机连接显式采用 [Hosted Session 摘要投影](system-ownership.md#当前接入边界)。[`useMobilePromptController`](../../apps/mobile/src/conversation/use-mobile-prompt-controller.ts) 继续一条保留的未知消息时，先以摘要中的原 submission 身份确认是否需要正文，再通过既有 `readAgentSession` 读取准确 Session；读取失败保留未知、原请求与编辑草稿。Core 的冻结 wire 和手机保存的用户正文分属各自 owner，手机不重建冻结 wire，也不把两种文本的差异当成输入资格。Agent 恢复继续由 [`recoverMobileAgent`](../../apps/mobile/src/conversation/mobile-agent-recovery.ts) 精确检查原 Session 与 continuity operation，不以摘要缺少正文推断恢复成功或失效。
+
 Hosted Client 已通过所选连接绑定 semantic Host，读取中的 `hostId: 'local'` 是接收方的 route-local namespace，不表示手机或 Desktop 所在的机器：
 
 - [Core `readAgentSessionHistory`](../../packages/core/src/client.ts) 先按 Session descriptor 取得执行 Host，再把响应路由映射回 `local`。

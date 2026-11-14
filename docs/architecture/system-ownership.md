@@ -136,4 +136,6 @@ Runtime 语义服务由 Core 的 [Headless owner](../../packages/core/src/headle
 
 [`connectHostedAgentMux`](../../packages/core/src/hosted-client.ts) 是公共 RPC 的唯一类型化 Runtime client；[`connectSshAgentMux`](../../packages/core/src/runtime-client.ts) 只负责组合系统 SSH 传输与同一 Hosted client。Desktop 的 [Host connector](../../apps/desktop/src/main/desktop-host.ts) 连接语义 owner；原生工作面、文件格式工具与 Git 继续归 Desktop，可移植内容消费同一 Host owner。客户端的最后观察、durable Runtime 身份、当前 owner 进程代次与 ctxmux 身份分别保留；缓存不成为授权或当前运行事实。
 
+Hosted consumer 可为 `runtime.bootstrap` 与 `runtime.events` 选择 `sessions: 'summary'`，缺省仍为完整 Session。[`AgentMuxHostedAgentSessionSummary`](../../packages/core/src/hosted-session-summary.ts) 明确排除冻结的 prompt intent 正文，保留原 submission／operation、输入阶段和 UTF-8 正文字节数；SDK 的摘要缓存与事件持续采用同一投影，精确的 `readAgentSession` 始终返回完整 Session，且不把正文重新填入摘要缓存。这只改变该 consumer 的传输投影，不改持久 Session 或其他 consumer。参数、类型和字段的准确合同归 [Hosted contract](../../packages/core/src/hosted-client-contract.ts)，投影与序列化由同一 Hosted service 持有。
+
 SSH 公共服务连接与远端 shell／文件能力是不同能力。[`SshExecutionHost`](../../packages/core/src/execution-host.ts) 不持有 Agent 生命周期；Core 远程管理连接的是远端 AgentMux owner，由它消费当地 ctxmux。此实现不声称 ctxmux 具有独立 Remote Runtime 协议。源码、编译、安装包和当前连接能力仍分别核对；来源不可用保持未知，恢复行为唯一见[联邦 Runtime 与远端恢复边界](../design/behavior/session-recovery.md#联邦-runtime-与远端恢复边界)。
